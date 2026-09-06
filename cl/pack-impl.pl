@@ -30,7 +30,7 @@ use warnings;
 #   # 3. Reassemble (body, blank line, blank line, appendix):
 #   { cat /tmp/pack-body.lisp; echo; echo; cat /tmp/pack-appendix.lisp; } > cl/pcl-pack.lisp
 #   # 4. Verify: paren depth must be 0, and counts must not drop:
-#   perl sweep-perl-tests.pl --jobs 1 perl-tests/pack.t   # expect pass=5638 fail=87 (2026-06-25)
+#   perl tools/sweep-perl-tests.pl --jobs 1 perl-tests/pack.t   # expect pass=5638 fail=87 (2026-06-25)
 #
 # WHY there is an appendix: the four float routines (pl-_pack_float32/64,
 # pl-_unpack_float32/64) do IEEE-754 bit twiddling via sb-kernel:* that cannot

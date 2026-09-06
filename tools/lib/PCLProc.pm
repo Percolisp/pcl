@@ -6,7 +6,7 @@
 package PCLProc;
 # The ONE place a PCL runner isolates a child in its own SESSION and reaps
 # what that child leaves behind (task #387 family 6, extracted s413 from the
-# byte-identical copies in sweep-perl-tests.pl and tools/run-perl-suite.pl —
+# byte-identical copies in tools/sweep-perl-tests.pl and tools/run-perl-suite.pl —
 # the #366/#367 fixes had to land in BOTH, and a drift here is a runner that
 # kills differently).
 #

@@ -113,7 +113,7 @@
 ;;; underlying assertion still runs — nothing is weakened (CLAUDE.md principle 5).
 (defvar *current-test-file* nil
   "Basename (e.g. \"tr.t\") of the perl-tests file being run; set per-file by the
-   sweep / runt so the skip-registry can be consulted.")
+   sweep / tools/runt so the skip-registry can be consulted.")
 (defvar *skip-registry* (make-hash-table :test 'equal)
   "basename string -> list of (scanner category reason raw-pattern) entries.")
 
@@ -260,7 +260,7 @@
 ;;; published a TAP stream with no plan line AND no done_testing — one no
 ;;; harness can judge.  That is the #202 family ("a claim that cannot be
 ;;; evaluated must say so"), and it hid from our own measurements only because
-;;; sweep-perl-tests.pl counts rows itself instead of reading the plan.
+;;; tools/sweep-perl-tests.pl counts rows itself instead of reading the plan.
 ;;; Task #275.
 ;;;
 ;;; The export list is consumed and ignored: PCL exports the whole TAP API

@@ -99,7 +99,7 @@ assignment `() = f()` counting idiom) first; likely needs a
 
 ### "Fully passing" files may be false positives — crash-before-failure masking
 
-**What's broken:** `sweep-perl-tests.pl` counts a file as "fully passing" if
+**What's broken:** `tools/sweep-perl-tests.pl` counts a file as "fully passing" if
 all tests it *runs* pass.  If the transpiled CL crashes (e.g. unbound variable)
 before reaching a group of tests, those tests never execute and are never counted
 as failures.  When the underlying crash is later fixed, the previously-hidden

@@ -2,9 +2,10 @@
 
 ## The Core Problem
 
-PCL runs SBCL as a subprocess. `run-perl-test.pl` uses backticks to capture all SBCL
-output — so if SBCL hangs, the backtick never returns. If SBCL crashes (exit before EOF),
-the backtick returns with whatever was written so far.
+PCL runs SBCL as a subprocess. `tools/runt` redirects all SBCL output into
+`/tmp/<name>.out` and prints it only after the run — so while SBCL hangs you see nothing
+(it is killed at `RUNT_TIMEOUT`, 300 s by default; `RUNT_TIMEOUT=0` disables it). If SBCL
+crashes (exits before EOF), you get whatever was written so far.
 
 Both look similar from the outside: "only N tests pass, then nothing."
 
@@ -14,7 +15,7 @@ Both look similar from the outside: "only N tests pass, then nothing."
 
 ```bash
 # Run with explicit timeout. If it returns quickly → crash. If it times out → hang.
-timeout 10 perl run-perl-test.pl perl-tests/foo.t 2>&1 | tail -3
+timeout 10 tools/runt foo 2>&1 | tail -3
 ```
 
 - Returns in <10s with partial output → **crash** (SBCL exited)
@@ -48,10 +49,10 @@ SBCL crashes silently (no error message) when:
 echo 'print "hello\n";' | ./pl2cl | sbcl --load cl/pcl-runtime.lisp --load cl/pcl-test.lisp --script /dev/stdin
 ```
 
-### Run SBCL directly (not via run-perl-test.pl) to see SBCL's own error output
+### Run SBCL directly (not via tools/runt) to see SBCL's own error output
 
 ```bash
-# run-perl-test.pl swallows stderr. Run manually:
+# tools/runt filters SBCL's own noise out of what it prints. Run manually:
 cd perl-tests
 perl ../pl2cl foo.t > /tmp/foo.lisp 2>/dev/null
 sbcl --load ../cl/pcl-runtime.lisp \
@@ -171,17 +172,17 @@ echo 'print "ok\n";' | ./pl2cl | sbcl --script /dev/stdin
 prove -j8 Pl/t/ 2>&1 | tail -3
 
 # 3. Run the specific Perl test you were fixing
-timeout 60 perl run-perl-test.pl perl-tests/foo.t 2>&1 | tail -3
+timeout 60 tools/runt foo 2>&1 | tail -3
 
 # 4. Check previously-passing files that might be affected
 # (run a few related ones, not the full sweep)
-for t in perl-tests/sprintf.t perl-tests/closure.t perl-tests/my.t; do
-  result=$(timeout 30 perl run-perl-test.pl $t 2>&1 | grep "Passed:")
-  echo "$t: $result"
+for t in sprintf closure my; do
+  result=$(timeout 30 tools/runt $t 2>&1 | grep -c '^not ok')
+  echo "$t: $result not-ok"
 done
 
 # 5. Full sweep only when confident
-timeout 600 perl sweep-perl-tests.pl 2>&1 | tail -5
+timeout 600 perl tools/sweep-perl-tests.pl 2>&1 | tail -5
 ```
 
 **Do step 4 before step 5.** A regression caught in step 4 (30 seconds) saves
@@ -192,7 +193,7 @@ rerunning the full sweep (10 minutes).
 ## Common PCL-Specific Pitfalls
 
 ### Working directory
-`run-perl-test.pl` `chdir`s to `perl-tests/` before running SBCL. When running SBCL
+`tools/runt` `chdir`s to `perl-tests/` before running SBCL. When running SBCL
 manually, do the same: `cd perl-tests` or set `*default-pathname-defaults*`.
 
 ### FASL cache
@@ -210,7 +211,8 @@ arg appears in two code paths (gen_funcall AND gen_progn both check @-sigil). Al
 check the generated CL after a codegen change to look for double-wrapping.
 
 ### `format t` vs `format *error-output*`
-Both get swallowed by `run-perl-test.pl`'s backtick. Run SBCL directly to see all output.
+Both land in `/tmp/<name>.out` (`tools/runt` merges stderr into it) and are printed only
+after the run. Run SBCL directly to see them live.
 
 ---
 
@@ -218,13 +220,13 @@ Both get swallowed by `run-perl-test.pl`'s backtick. Run SBCL directly to see al
 
 **Not urgently**, but these improvements would help:
 
-1. **Show SBCL stderr separately**: Add `2>/dev/null` to suppress compiler noise but
-   capture condition errors separately. Currently both go to backtick.
+1. **Show SBCL stderr separately**: suppress compiler noise but capture condition errors
+   separately. Currently both are merged into `/tmp/<name>.out`.
 
-2. **Timeout per-test**: Add `alarm(30)` around SBCL invocation in `run-perl-test.pl`
-   to detect hangs automatically rather than waiting forever.
+2. **Timeout per-test**: DONE — `tools/runt` runs SBCL under `timeout $RUNT_TIMEOUT`
+   (300 s default, `0` disables) and says `=== TIMEOUT ===` when it fires.
 
-3. **Run SBCL directly mode**: A `--debug` flag that skips backtick capture and lets
+3. **Run SBCL directly mode**: A `--debug` flag that skips the capture and lets
    SBCL output go directly to terminal — useful when investigating crashes.
 
 The current runner is fine for normal use; it just makes hang/crash debugging harder

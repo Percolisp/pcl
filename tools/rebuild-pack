@@ -20,7 +20,7 @@
 # The procedure (and why the appendix exists) is documented at the top of
 # cl/pack-impl.pl; this script is that procedure, so there is no excuse to
 # hand-run it wrong.  Verify afterwards with:
-#   perl sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t
+#   perl tools/sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t
 # and compare against the blessed baseline with tools/sweep-diff.pl (expect
 # 0 new failures; s316: 5635 pass / 90 fail).
 #
@@ -95,5 +95,5 @@ sbcl --script tools/check-parens.lisp "$tmp/new.lisp"
 cp "$tmp/new.lisp" "$out"
 echo "rebuild-pack: wrote $out ($(sed -n 1p "$out"))"
 if [ "$out" = "$target" ]; then
-  echo "rebuild-pack: now run  perl sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t"
+  echo "rebuild-pack: now run  perl tools/sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t"
 fi

@@ -100,7 +100,7 @@ passes for real and the stale-detector flags the entry for removal.
 
 ### Adding an entry — the curation loop
 
-1. `./runt <file>` → see `not ok` lines and `# skip` lines.
+1. `tools/runt <file>` → see `not ok` lines and `# skip` lines.
 2. For a genuinely not-supported failure: add one `(regex category reason)` line under the
    file's `register-skips`, with a regex narrow enough to match *only* the failing tests.
 3. Re-run. If you see `# REGISTRY-STALE` warnings, your regex is too broad (it matched a
@@ -109,7 +109,7 @@ passes for real and the stale-detector flags the entry for removal.
 
 ### Wiring
 
-`runt` and `sweep-perl-tests.pl` both `--load cl/skip-registry.lisp` and
+`tools/runt` and `tools/sweep-perl-tests.pl` both `--load cl/skip-registry.lisp` and
 `--eval "(setf pcl::*current-test-file* \"<name>.t\")"` before loading the transpiled
 file. In the `Pl/t/` gate the registry is inert (`*current-test-file*` is nil), and those
 tests use real Perl `Test::More` anyway, so this never affects the gate.
@@ -147,7 +147,7 @@ So the full taxonomy is **four buckets**:
 A *minority* of crashes are genuinely not-supported features that abort during
 compile/run (e.g. `(?{code})` regex won't compile; Tie::Array hang). For those:
 
-- **Coarse, available today:** the file-level `@SKIP` list in `sweep-perl-tests.pl`
+- **Coarse, available today:** the file-level `@SKIP` list in `tools/sweep-perl-tests.pl`
   (heredoc.t, list.t) — only right when the *whole* file is unsupported.
 - **Better, deferred:** a per-statement `handler-case` wrapper emitted for transpiled test
   files, turning an abort into a single `not ok`/skip and letting the file *continue*
@@ -161,8 +161,8 @@ compile/run (e.g. `(?{code})` regex won't compile; Tie::Array hang). For those:
 |------|------|
 | `cl/skip-registry.lisp` | the registry data (`register-skips` per file) |
 | `cl/pcl-test.lisp` | registry: `*current-test-file*`, `*skip-registry*`, `register-skips`, `%skip-registry-lookup`, `*test-skipped*`, hook in `test-ok`. Failure log: `*test-log-stream*`, `%test-log-stream`, `%test-log-failure`, `%test-log-clean` |
-| `runt` | loads the registry + sets `*current-test-file*` for single-file runs; inherits `PCL_TEST_LOG_DIR` if exported |
-| `sweep-perl-tests.pl` | same wiring; 3-column Pass/Fail/Skip reporting; auto-sets `PCL_TEST_LOG_DIR=.faillog` (cleared each run) |
+| `tools/runt` | loads the registry + sets `*current-test-file*` for single-file runs; inherits `PCL_TEST_LOG_DIR` if exported |
+| `tools/sweep-perl-tests.pl` | same wiring; 3-column Pass/Fail/Skip reporting; auto-sets `PCL_TEST_LOG_DIR=.faillog` (cleared each run) |
 | `tools/sweep-diff.pl` | regression watchdog over the failure log (summary / diff / save) |
 | `baselines/fail-baseline.tsv` | committed known-fail baseline (560 keys) for `sweep-diff diff` |
 | `.faillog/*.fails.tsv` | generated per-file failure DB (gitignored) |
@@ -191,8 +191,8 @@ var unset there is **zero overhead** (the stream is never opened) — normal run
 `Pl/t` gate are unaffected. Only failures are logged, so a full-sweep DB is ~854 lines.
 
 - The **sweep sets it automatically** to `$project_root/.faillog` (cleared each run;
-  gitignored) and prints the path. So a plain `perl sweep-perl-tests.pl` always produces
-  the DB. `runt` inherits any `PCL_TEST_LOG_DIR` you export.
+  gitignored) and prints the path. So a plain `perl tools/sweep-perl-tests.pl` always produces
+  the DB. `tools/runt` inherits any `PCL_TEST_LOG_DIR` you export.
 - This removes the slowest step of the old loop — inspecting got/expected meant re-running
   SBCL from inside `perl-tests/` and grepping. Now: `grep <desc> .faillog/<file>.fails.tsv`.
 - Impl: `*test-log-stream*`, `%test-log-stream`, `%test-log-failure`, `%test-log-clean` in
@@ -207,7 +207,7 @@ the full sweep and eyeball ~900 lines to confirm no regression" step (e.g. after
 session-216 preprocessing change) with "2 tests changed: both newly passing."
 
 ```sh
-perl sweep-perl-tests.pl --jobs 8                       # writes .faillog/*, THEN runs the gate itself
+perl tools/sweep-perl-tests.pl --jobs 8                 # writes .faillog/*, THEN runs the gate itself
 tools/sweep-diff.pl .faillog                            # summary: per-file fail counts
 tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog # NEW + FIXED + LOST + DROPS + SHORTFALL
 tools/sweep-diff.pl save-status .faillog baselines/pass-baseline.tsv    # re-bless the PASS baseline
@@ -274,7 +274,7 @@ cannot tell which — so it stays neutral. **The sweep refines it by SBCL exit c
 - **PARTIAL** (clean exit) = reached EOF but **under-counted** (tests dropped/skipped
   throughout, NOT a crash at N+1) → `INCOMPLETE: ran N of M, last test N (<desc>)`.
 
-`sweep-perl-tests.pl` leads the CRASH/PARTIAL snippet with this and records it in
+`tools/sweep-perl-tests.pl` leads the CRASH/PARTIAL snippet with this and records it in
 `<faillog>/_status.tsv` column 6. So one sweep maps every aborting file —
 `grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,2,6`. (caller.t exposed the
 distinction: it's PARTIAL/EOF/under-counted, not a crash at test 66.)

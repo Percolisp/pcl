@@ -97,7 +97,7 @@
 #
 # How the generated CL is LOADED (task #467): with pcl::p-load-with-recovery,
 # one top-level form at a time, continuing past an uncaught die in a single
-# form — the SAME load sweep-perl-tests.pl uses.  Both measurement runners
+# form — the SAME load tools/sweep-perl-tests.pl uses.  Both measurement runners
 # must agree on this: with a plain `--load` here, one dying form ended the
 # file, so the same compiler change cost the sweep 1 row and this runner 94
 # (s432).  A recovered form is COUNTED and PRINTED (`aborted-forms:N` in the
@@ -769,7 +769,7 @@ sub run_one {
     # --server eval process); SIGKILL 10s after the TERM guarantees reaping.
     # RECOVERY LOAD, not `--load` (task #467): evaluate the generated file one
     # top-level form at a time and continue past an uncaught die in any single
-    # form, exactly as sweep-perl-tests.pl does.  The two runners used to
+    # form, exactly as tools/sweep-perl-tests.pl does.  The two runners used to
     # DISAGREE on this axis, and the disagreement is not visible in either
     # report: measured s432, the SAME compiler change cost the sweep ONE row
     # (the form that died) and cost this runner 94 (op/method.t 96 -> 44,
@@ -1756,7 +1756,7 @@ sub record_result {
 }
 
 # Per-file SESSION isolation (task #367) + orphaned-transpiler reaping live in
-# tools/lib/PCLProc.pm — ONE copy shared with sweep-perl-tests.pl (s413, #387
+# tools/lib/PCLProc.pm — ONE copy shared with tools/sweep-perl-tests.pl (s413, #387
 # family 6); the long notes on WHY the session is the handle are there.
 
 sub emit_report {

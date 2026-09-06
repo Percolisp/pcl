@@ -38,7 +38,7 @@
 # file itself RUNS; what is here is the extra context (the verification bar,
 # the pitfalls) that does not fit on a diagnostic line:
 #   cl/pcl-pack.lisp   tools/rebuild-pack
-#                      then  perl sweep-perl-tests.pl --jobs 1 --timeout 380 \
+#                      then  perl tools/sweep-perl-tests.pl --jobs 1 --timeout 380 \
 #                              perl-tests/pack.t   &&  tools/sweep-diff.pl
 #   cl/pcl-mro.lisp    ./pl2cl --extension lib/mro.pm > cl/pcl-mro.lisp
 #                      (pl2cl exits 0 with EMPTY output on a compile error —

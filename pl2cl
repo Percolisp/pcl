@@ -134,7 +134,7 @@ sub parse_source {
   my %opts = @args[1 .. $#args];
   # `lenient_ppi` never had a v2 implementation — it only ever worked by
   # routing to v1, whose parser truncates at the first unparseable line.  The
-  # flag stays ACCEPTED (runpcl/runt/sweep all pass it) and inert; what it
+  # flag stays ACCEPTED (runpcl / tools/runt / the sweep all pass it) and inert; what it
   # used to paper over now dies naming the file, from Parser2's PPI check.
   delete $opts{lenient_ppi};
   my %known = (eval_mode => 1, eval_pkg => 1, eval_captures => 1, eval_features => 1);

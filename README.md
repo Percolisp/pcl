@@ -247,7 +247,7 @@ breakdowns.  All were taken on 2026-09-04.
 | measurement | result | reproduce |
 |---|---|---|
 | PCL's own regression suite | **195 files, 6,729 assertions, all passing** | `tools/prove-core` |
-| perl's test suite, extracted (108 files from perl 5.40's `t/`) | **18,581 pass / 649 fail (96.6 %)**; 58 files pass completely | `perl sweep-perl-tests.pl --jobs 8` |
+| perl's test suite, extracted (108 files from perl 5.40's `t/`) | **18,581 pass / 649 fail (96.6 %)**; 58 files pass completely | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's whole `t/` tree, run in place (528 files) | 92 files identical to perl; 108 differ for a registered, explained reason; 275 differ and are the bug queue; the rest do not compile, time out or produce no test output | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | a board of 14 pure-Perl CPAN distributions, 183 test files | **78 files pass, 54 pass partially, 51 fail** (2,140 assertions pass / 342 fail) | `tools/cpan-scoreboard.pl` |
 | statements the compiler cannot translate, over all of the above | **62 statements in 19 files**, each with a filed cause | `tools/drop-census.pl` |

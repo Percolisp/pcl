@@ -173,7 +173,7 @@ Updated 2026-06-02 (session 230). **`local $#a = N` fixed + TAP `$TODO` harness 
 `local $#a` (PPI `ArrayIndex`) was silently dropped by `_process_local_declaration`; now
 emits the plain length-set (Perl does NOT restore on scope exit — RT #7411 — so neither do
 we). **local.t 315/316 pass.** Separately, the harness now honors Test::More `$TODO`
-(`cl/pcl-test.lisp` `%current-todo` reads `main::$TODO`; `sweep-perl-tests.pl` counts
+(`cl/pcl-test.lisp` `%current-todo` reads `main::$TODO`; `tools/sweep-perl-tests.pl` counts
 `# TODO` as non-fail like prove) — failing-TODO tests across 18 files no longer count as
 failures. **Full sweep 17802 pass / 750 fail (was 757), 69 fully passing** (+1 blocks.t),
 baseline 423 keys, only bop.t+eval.t crash. **Catalog STILL stale**: chop.t & range.t now
@@ -226,7 +226,7 @@ mass crashes; pass total slumped to ~7993). **Root cause:** the failure-log writ
 chdir, the relative `.faillog/` dir didn't exist in the new cwd → unhandled file error killed
 the whole file. It only surfaced for files whose failing test was GC-nondeterministic
 (e.g. array.t 83 "freed array") — hence the "flakiness" memory noted since s216. **Fix:**
-(1) `sweep-perl-tests.pl` absolutizes `$log_dir` (relative → `$project_root/$log_dir`);
+(1) `tools/sweep-perl-tests.pl` absolutizes `$log_dir` (relative → `$project_root/$log_dir`);
 (2) `%test-log-stream` now `ensure-directories-exist` + `ignore-errors` (a diagnostic
 side-channel must never crash a run). **Clean sweep now: 16849 pass / 770 fail / 11881 skip,
 63 fully passing** (this is the honest registry-era counter; the old 28604 scored skips as
@@ -347,7 +347,7 @@ Three distinct bug classes:
 **MOSTLY RESOLVED.** The large clusters below were fixed between sessions 202–215
 (pack Inf/NaN error messages, eval-block arithmetic-signal trapping, parse-perl-number
 overflow). Only **6 failures remain** as of session 216 — re-triage these individually
-(run `./runt infnan` and read the `not ok` lines) before assuming the historical
+(run `tools/runt infnan` and read the `not ok` lines) before assuming the historical
 breakdown still applies. The breakdown below is retained for reference only.
 
 - **`sprintf("%a", Inf)` case** (tests 21, 25, ~2 total): Returns `'inf'` instead of

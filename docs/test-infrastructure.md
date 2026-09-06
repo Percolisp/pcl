@@ -8,8 +8,8 @@ PCL has two test layers:
   Run with `prove -j8 Pl/t/`.  Each file spawns one SBCL process.
 
 - **`perl-tests/`** — the Perl op-test suite ported from Perl's own `t/op/`
-  directory.  Run with `perl sweep-perl-tests.pl --jobs 8` from the project
-  root.  Each file spawns one SBCL process via `run-perl-test.pl`.
+  directory.  Run with `perl tools/sweep-perl-tests.pl --jobs 8` from the project
+  root.  Each file spawns one SBCL process.
 
 ---
 
@@ -174,10 +174,10 @@ prove -j8 Pl/t/
 prove -v Pl/t/sort-01.t
 
 # Perl op-test suite sweep (parallel)
-perl sweep-perl-tests.pl --jobs 8
+perl tools/sweep-perl-tests.pl --jobs 8
 
 # Single perl-test file
-perl run-perl-test.pl perl-tests/sort.t
+tools/runt sort
 ```
 
 The sweep script passes `*pcl-skip-cache* t` to SBCL so module caching is
@@ -201,7 +201,7 @@ is PRINTED on `*error-output*`, never swallowed.
 
 Why it is a rule and not a preference: the two runners disagreed on exactly
 this axis until s434, and **the disagreement is invisible in either report**.
-`sweep-perl-tests.pl` had recovery; `tools/run-perl-suite.pl` used `--load`.
+`tools/sweep-perl-tests.pl` had recovery; `tools/run-perl-suite.pl` used `--load`.
 Measured s432, the *same* compiler change (#456 half (a): a called
 forward-declaration stub dies instead of answering nil) cost
 
@@ -279,7 +279,7 @@ an emitted program), so it is deduplicated per statement, a ruled Track-A
 refusal is not logged (the file is refused, loudly, in every mode) and an
 eval-string drop is not either (it DIES at transpile, #363, and emits nothing).
 
-`sweep-perl-tests.pl` sets it **around the SBCL run only**, never around the
+`tools/sweep-perl-tests.pl` sets it **around the SBCL run only**, never around the
 file's own transpile — otherwise the file's own drops would be counted twice —
 and reports two numbers, because either alone lies:
 

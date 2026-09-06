@@ -6,7 +6,7 @@ is the *procedure* to follow.
 
 ## 0. One-time orientation each session
 ```sh
-perl sweep-perl-tests.pl --jobs 8            # writes .faillog/*.fails.tsv (Pass/Fail/Skip)
+perl tools/sweep-perl-tests.pl --jobs 8      # writes .faillog/*.fails.tsv (Pass/Fail/Skip)
 tools/sweep-diff.pl .faillog                 # per-file fail counts (where to work)
 tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # what changed since baseline
 ```
@@ -15,12 +15,12 @@ the **Fully-passing** count — if it drops, find the regression before anything
 
 ## 1. Debug ONE file (the inner loop)
 ```sh
-PCL_TEST_LOG_DIR=/tmp/fl ./runt <file>       # or just `./runt <file>` then read .faillog
+PCL_TEST_LOG_DIR=/tmp/fl tools/runt <file>   # or just `tools/runt <file>` then read .faillog
 cat .faillog/<file>.fails.tsv                # file⇥num⇥description⇥got⇥expected
 ```
 For **each** failing line, read `got` vs `expected` and route it with the decision tree (§2).
 The got/expected column usually tells you the cause without opening anything else. If you
-need the generated CL: `./clt <file>` (no SBCL) or `./runpcl` for a snippet.
+need the generated CL: `tools/clt <file>` (no SBCL) or `./runpcl` for a snippet.
 
 ## 2. Decision tree: FIX the bug, or REGISTER it as not-supported?
 
@@ -59,11 +59,11 @@ Edit `cl/skip-registry.lisp` — add one line under the file's `register-skips` 
   in the faillog) use the **integer test number** instead.
 - **Categories**: `:principle9 :error-msg :warning-emit :read-only :utf8 :destroy-gc
   :lvalue :alias :tie`.
-- **Keep regexes narrow.** Re-run `./runt <file>` and check for `# REGISTRY-STALE` lines —
+- **Keep regexes narrow.** Re-run `tools/runt <file>` and check for `# REGISTRY-STALE` lines —
   a stale flag means the pattern matched a *passing* test (over-broad); narrow it. (Seen
   twice: tr.t `RT #130198` → split into `eval:`/`warn: cho(p|mp)\(@a`; chop.t
   `chomp @a when` → `chomp @a when.*eq 0 and` to exclude the passing `eq 7` sibling.)
-- Verify: `./runt <file>` shows the target tests as `# skip`, `fail` drops, `stale: 0`.
+- Verify: `tools/runt <file>` shows the target tests as `# skip`, `fail` drops, `stale: 0`.
 
 ## 4. Crashes / PARTIAL — never auto-skipped
 The registry hooks per-assertion (`test-ok`); a crash/abort never reaches it. So:
@@ -78,7 +78,7 @@ The registry hooks per-assertion (`test-ok`); a crash/abort never reaches it. So
     under-counted* — tests were dropped/skipped across the file (not a single abort at N+1).
     Diff the emitted TAP numbers against the source to find where PCL skipped a test/block.
 - A **whole-file crash from a not-supported feature** (e.g. `(?{code})`, Tie::Array hang):
-  use the file-level `@SKIP` list in `sweep-perl-tests.pl` (coarse), or implement the
+  use the file-level `@SKIP` list in `tools/sweep-perl-tests.pl` (coarse), or implement the
   deferred per-statement `handler-case` wrapper (`docs/test-skip-registry.md` §3.1).
 
 ## 4a. A failure that never ran: the DROPS bucket (task #343, s402)
@@ -179,14 +179,14 @@ concat.t, …). Per file:
    (Perl's `t/op/<file>.t`), or `git log -p` the file for the `SKIP` edits.
 2. **Revert** each inline skip back to the original upstream assertion (file becomes
    byte-identical to upstream → diffable).
-3. `./runt <file>` → the reverted tests now fail. Triage each via §2 and **register** the
+3. `tools/runt <file>` → the reverted tests now fail. Triage each via §2 and **register** the
    genuinely not-supported ones in `cl/skip-registry.lisp`; **fix** any that are real bugs.
 4. Verify `fail` count and `stale: 0`; confirm the file's Fully-passing status is unchanged.
 Do a few files, then a full sweep + `sweep-diff diff` to confirm no net regression.
 
 ## 6. After intended changes: re-bless the baseline
 ```sh
-perl sweep-perl-tests.pl --jobs 8
+perl tools/sweep-perl-tests.pl --jobs 8
 tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # review NEW (must be empty) + FIXED
 ```
 **Do NOT run `sweep-diff.pl save` over `baselines/fail-baseline.tsv`.**  Since

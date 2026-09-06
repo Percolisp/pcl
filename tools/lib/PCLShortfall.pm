@@ -67,7 +67,7 @@ sub shortfall_header {
 #
 #   <key> <TAB> <rows never produced> <TAB> <cause>
 #
-# key = perl-tests/<name>  (sweep-perl-tests.pl:      planned - (pass+fail); skips count)
+# key = perl-tests/<name>  (tools/sweep-perl-tests.pl: planned - (pass+fail); skips count)
 #     = t/<rel>            (tools/run-perl-suite.pl:  perl's rows - PCL's rows)
 #
 # THE RULE, the drop census's: a row leaves BY EDIT when the shortfall is

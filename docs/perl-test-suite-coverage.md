@@ -88,7 +88,7 @@ Specific files: `threads.t`, `threads-dirh.t`, `lock.t`, `taint.t`, `utftaint.t`
 ## Recommended workflow for adding a new file
 
 1. Copy `t/op/foo.t` → `perl-tests/foo.t`
-2. Run `perl sweep-perl-tests.pl --jobs 1 perl-tests/foo.t` to see baseline failures
-3. Inspect `/tmp/foo.lisp` (via `./clt foo`) for patterns
+2. Run `perl tools/sweep-perl-tests.pl --jobs 1 perl-tests/foo.t` to see baseline failures
+3. Inspect `/tmp/foo.lisp` (via `tools/clt foo`) for patterns
 4. Write focused `Pl/t/foo-01.t` for the failing cases
 5. Fix, verify sweep improves, commit

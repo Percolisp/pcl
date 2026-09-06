@@ -36,7 +36,8 @@ my %groups;   # error-type => [ [file, test#, message], ... ]
 
 for my $file (sort @files) {
     next unless -f $file;
-    my $out = `perl run-perl-test.pl $file 2>&1`;
+    (my $name = $file) =~ s{.*/|\.t$}{}g;
+    my $out = `tools/runt $name 2>&1`;
     # Extract "not ok N - description" lines
     my @failures = ($out =~ /^not ok \d+ - (.+)/mg);
     # Extract first SBCL crash message
@@ -86,7 +87,7 @@ Files sorted by failure count ascending (from current sweep output).  These are 
 fastest wins — one or two fixes away from a fully-passing file:
 
 ```
-perl sweep-perl-tests.pl --jobs 8 2>&1 | \
+perl tools/sweep-perl-tests.pl --jobs 8 2>&1 | \
     grep -E '^\S+\.t\s' | \
     awk '$3 > 0' | \
     sort -k3 -n | head -20
@@ -122,13 +123,13 @@ If the file is characterized, the root cause is already known.  Skip to step 4.
 
 ### Step 2 — Get the failing test numbers
 ```
-perl run-perl-test.pl perl-tests/file.t 2>&1 | grep "^not ok"
+tools/runt file 2>&1 | grep "^not ok"
 ```
 Note the test numbers.  Look at the test source to understand what they test.
 
 ### Step 3 — Get the first error
 ```
-perl run-perl-test.pl perl-tests/file.t 2>&1 | head -40
+tools/runt file 2>&1 | head -40
 ```
 Look for:
 - `Unhandled UNDEFINED-FUNCTION` → what function?  Add it to the runtime.
@@ -166,7 +167,7 @@ This gives you:
 ```bash
 prove -v Pl/t/file-01.t            # must pass
 prove -j8 Pl/t/                    # full suite, must still be all green
-perl sweep-perl-tests.pl --jobs 8 perl-tests/file.t   # check improvement
+perl tools/sweep-perl-tests.pl --jobs 8 perl-tests/file.t   # check improvement
 ```
 
 ---
@@ -246,7 +247,7 @@ no docs because they send you down already-investigated paths.
 | Picking a file with 100+ failures as first target | One fix rarely helps all 100; you spend a session on one file | Start with near-misses (≤5 failures) |
 | Fixing the sweep output before understanding root cause | You might fix a symptom, not the cause; same error recurs in a different form | Always read the actual SBCL error first |
 | Commenting out failing tests | Hides bugs, masks regressions | Only comment out when root cause is a documented not-supported feature, after discussion |
-| Running full sweep after every one-line fix | Sweep takes 3+ min; wastes time | Use `perl sweep-perl-tests.pl --jobs 1 perl-tests/target.t` for spot checks; full sweep at session end |
+| Running full sweep after every one-line fix | Sweep takes 3+ min; wastes time | Use `perl tools/sweep-perl-tests.pl --jobs 1 perl-tests/target.t` for spot checks; full sweep at session end |
 | Investigating a file that's already characterized | Wastes time re-discovering known causes | Always check `test-failures-categorized.md` first |
 | Writing Pl/t/ test after the fix | Doesn't catch regressions in that session; future fix may reintroduce the bug | Write the test first, before touching any code |
 

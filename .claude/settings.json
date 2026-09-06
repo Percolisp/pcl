@@ -2,14 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(sed:*)",
-      "Bash(./clt:*)",
+      "Bash(tools/clt:*)",
       "Bash(emacs:*)",
       "Bash(.claude/hooks/fmtlisp:*)",
       "Bash(perl .claude/hooks/split-lisp.pl:*)",
       "Bash(grep:*)",
       "Bash(perl:*)",
       "Bash(prove:*)",
-      "Bash(perl sweep-perl-tests.pl:*)",
+      "Bash(perl tools/sweep-perl-tests.pl:*)",
       "Bash(./pl2cl:*)",
       "Bash(sbcl:*)",
       "Bash(cat:*)",

@@ -289,7 +289,7 @@ plus the targeted files the change names.
 | `cl/**` runtime | YES (invisible to corpus-diff) | the dirs the change touches (op/, io/, re/ …) | rule-12 read of the touched dispatch + `tools/ir-inventory.pl` regenerated if an export moved (`Pl/t/ir-inventory-01.t` gates it) + `tools/ir-host-leak.pl` if a macro's expansion changed |
 | `lib/**` shim | YES | the files that `use` the module (`grep -a`) | — |
 | harness: `perl-tests/t/test.pl`, `cl/pcl-test.lisp`, `cl/skip-registry.lisp` | YES | **`--all --quick`** (both populations reach it) | baselines edited ROW BY ROW |
-| runners: `sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file-by-file | same | `PCL_SHOW_SBCL=1` before/after diff |
+| runners: `tools/sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file-by-file | same | `PCL_SHOW_SBCL=1` before/after diff |
 | `docs/**`, `tools/t/**`, memory | nothing beyond the gate | no | — |
 
 Companion: **`--quick` is the default form** (#345: skips the #326 hang
@@ -347,7 +347,7 @@ INSTALLATION process must regenerate them on the target machine — or make
 the preamble relocatable first (task #217, user note s335).
 `cl/pcl-pack.lisp` is `cl/pack-impl.pl` (pack/unpack, written in
 Perl) transpiled by PCL plus a hand-written appendix: run
-**`tools/rebuild-pack`**, then `perl sweep-perl-tests.pl --jobs 1
+**`tools/rebuild-pack`**, then `perl tools/sweep-perl-tests.pl --jobs 1
 --timeout 380 perl-tests/pack.t` and `tools/sweep-diff.pl` (expect 0 new;
 s316b: 5635 pass / 90 fail).  It was found at gen v2-30 against a v2-71
 compiler — 40 generations of drift, which made every pack.t run a test of
@@ -490,7 +490,7 @@ func => -12         # 1 param before list
 - **All passing**
 - **Runtime: ~2:30 with `tools/prove-core`** (~5+ min with plain `prove -j8`;
   each test file spawns a new SBCL process)
-- **The full sweep RUNS ITS OWN GATE (s330, #204)**: `perl sweep-perl-tests.pl
+- **The full sweep RUNS ITS OWN GATE (s330, #204)**: `perl tools/sweep-perl-tests.pl
   --jobs 8` with no file arguments ends by running `tools/sweep-diff.pl diff
   baselines/fail-baseline.tsv .faillog` and **exits with that verdict** (`--no-gate`
   opts out; a sweep of named files stays informational).  The diff now has a
@@ -958,7 +958,7 @@ targeted tests. Benefits:
 - Easier diagnosis — smaller test cases isolate whether the issue is codegen or runtime
 
 **Pattern:**
-1. Run `perl sweep-perl-tests.pl --jobs 1 perl-tests/foo.t` to see the failure count
+1. Run `perl tools/sweep-perl-tests.pl --jobs 1 perl-tests/foo.t` to see the failure count
 2. Inspect the generated CL (`./pl2cl < perl-tests/foo.t > /tmp/foo.lisp`) for wrong output
 3. Write `Pl/t/foo-01.t` with:
    - Transpilation tests (`like($cl, qr/expected-pattern/, 'desc')`) for codegen bugs

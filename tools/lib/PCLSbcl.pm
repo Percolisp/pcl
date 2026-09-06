@@ -8,7 +8,7 @@ package PCLSbcl;
 #
 # WHY THIS EXISTS (task #344, found by #324 in s399).  The runners that start
 # SBCL to run transpiled code — the gate (Pl/t/PCLCore.pm), the sweep
-# (sweep-perl-tests.pl), the companion suite (tools/run-perl-suite.pl),
+# (tools/sweep-perl-tests.pl), the companion suite (tools/run-perl-suite.pl),
 # ./runpcl, tools/pclperl-for-tests and (since s439) ./pcl — each used to
 # hand-write its own option string.  They must
 # agree about everything that changes what PCL *is* while a test runs (stack
