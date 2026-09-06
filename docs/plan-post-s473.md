@@ -30,6 +30,8 @@ successor.
 ## 2. The queue (launch order; two slots)
 | # | label | what | gen | after |
 |---|---|---|---|---|
+| 0a | **s473t1** | TRIAGE (USER, 2026-09-06 "soon"): the 13 PARTIAL files that stop early UNEXPLAINED — one cause per file, fix fillers, file the rest (`s473/s473t1`) | if a fix | a slot, FIRST after the in-flight pair |
+| 0b | **s473t2** | TRIAGE (USER, "soon"): the 105 blessed failure keys with no cause (pack.t's 47 EXCLUDED — USER: skip pack.t) + the 60 bug-notes without a task — cluster, probe, attribute, fix ≤1h clusters (`s473/s473t2`) | if a fix | a slot, right after s473t1 |
 | 1 | **BU** | perf round 29: the top of §A.4.3 ease-weighted, at most four levers (`s470/s470bu`) | v2-860 | now (BT merged) |
 | 2 | **BZ** | #1302 + #1304 install layout + installer tests, podman legs (`s470/s470bz`) | none | BY merged |
 | 3 | **#1262** | `docs/caching.md` for users — Sonnet, `model: "sonnet"` (`s470/s1262`) | none | BY merged |
@@ -46,7 +48,7 @@ successor.
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range).  Next free after these: **1431** (#1429 tiearray $NEGATIVE_INDICES, #1430 range double-FETCH filed s473).
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460**.  Next free after these: **1461**.
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script
