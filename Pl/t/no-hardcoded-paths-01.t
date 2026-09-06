@@ -48,9 +48,10 @@ my $root = "$RealBin/../..";
 my $HOME_PATH = qr{/(?:home|Users)/[A-Za-z0-9._-]+/};
 
 # The scope of the invariant: the compiler, the runtime, the shipped module
-# shims, the tools, and the runners at the repo root.
+# shims, the tools (which since s471b hold runt / clt / sweep-perl-tests.pl),
+# and the runners at the repo root.
 my @DIRS  = qw(Pl tools cl lib);
-my @FILES = qw(pl2cl runpcl runt clt sweep-perl-tests.pl);
+my @FILES = qw(pl2cl runpcl);
 
 my (@offenders, @artifacts, $scanned);
 

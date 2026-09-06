@@ -6,7 +6,7 @@
 
 # clt — compile a single perl-tests/*.t file to CL, save as /tmp/<name>.lisp.
 #
-# Usage:  ./clt loopctl          # or: ./clt loopctl.t
+# Usage:  tools/clt loopctl          # or: tools/clt loopctl.t
 #
 # Generates /tmp/<name>.lisp  (transpiled CL code)
 # Prints the lisp file path to stderr, content to stdout.
@@ -19,7 +19,7 @@ use Cwd qw(abs_path);
 my $name = shift or die "Usage: $0 <test-name>\n";
 $name =~ s/\.t$//;
 
-my $root  = abs_path(dirname($0));
+my $root  = dirname(abs_path(dirname($0)));   # the script lives in <root>/tools/
 my $lisp  = "/tmp/$name.lisp";
 my $tests = "$root/perl-tests";
 

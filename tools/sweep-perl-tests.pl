@@ -6,7 +6,7 @@
 
 #
 # Parallel sweep of all Perl test files.
-# Usage: ./sweep-perl-tests.pl [--jobs N] [--timeout N] [--no-retry] [file.t ...]
+# Usage: perl tools/sweep-perl-tests.pl [--jobs N] [--timeout N] [--no-retry] [file.t ...]
 #
 # TIMEOUT RETRY (task #176).  A file that TIMEOUTs contributes NOTHING: no
 # pass rows, no fail rows, no baseline rows — so it is invisible to
@@ -27,10 +27,10 @@ use strict;
 use warnings;
 use File::Basename;
 use File::Temp qw(tempfile tempdir);
-use Cwd qw(abs_path getcwd);
+use Cwd qw(getcwd);
 use POSIX qw(:sys_wait_h _exit);
 use FindBin;
-use lib "$FindBin::RealBin/tools/lib";
+use lib "$FindBin::RealBin/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
 use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + reaping (#367)
 
@@ -56,7 +56,7 @@ while (@ARGV) {
 }
 my $full_sweep = @test_files ? 0 : 1;   # no file arguments = the whole corpus
 
-my $project_root = abs_path(dirname($0));
+my $project_root = dirname($FindBin::RealBin);   # the script lives in <root>/tools/
 my $pl2cl      = "$project_root/pl2cl";
 my $runtime    = "$project_root/cl/pcl-runtime.lisp";
 my $testlib    = "$project_root/cl/pcl-test.lisp";
