@@ -102,6 +102,18 @@ accumulated provenance.  Guards `Pl/t/per-run-init-01.t` (14, new) and
 extraction; `Pl/t/fileio-01.t`'s three transpile-SHAPE rows now assert the
 `p-scalar-ctx` wrap (s377: the edit STRENGTHENS the claim).
 
+**A `baselines/*.tsv` is BINARY, and one out-of-band edit of its header
+comment re-encoded 25 rows it never meant to touch.**  `re/charset.t`'s
+descriptions carry raw Latin-1 bytes (the `«` `»` perl prints in them) and
+`op/lex.t` row 37 carries more, so the file is not valid UTF-8; read through any
+decoding layer, each of those bytes comes back as U+FFFD.  The rows still LOOK
+right — `git diff` shows them removed and re-added, text-identical — but the
+description IS the companion runner's JOIN KEY, so a re-encoded row stops
+pairing with the run and resurfaces as a NEW row.  Restored byte for byte from
+`main`; the four edit scripts were already `:raw`, and the new guard
+`scratch/s470bx/check-baseline-bytes.pl` asserts that every base line not named
+by an `--allow` row key is still present unchanged.
+
 Filed: **#1290** (`\FUNC(...)` does not spread over the returned LIST — `my @r =
 \stat($Curdir)` is 1 ref where perl gives 13; PRE-EXISTING) and **#1291**
 (#1044's rule (a): a `()`-prototype sub or `use constant` in a GLOB slot is

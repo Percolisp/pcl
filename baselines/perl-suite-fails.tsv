@@ -4591,7 +4591,7 @@ op/lex.t	50	ok	not ok [PCL #49]	Using nested extra paired delimiters works
 op/lex.t	42	ok	not ok [PCL #41]	Using paired delimiter both fore/aft fails as expected
 op/lex.t	48	ok	not ok [PCL #47]	Using terminating paired delimiter fore, opening aft fails as expected outside scope of extra delims
 op/lex.t	52	ok	not ok [PCL #51]	Using too few closing delims in nesting fails as expected
-op/lex.t	37	ok	not ok [PCL #36]	Various tests of string delims ï¿½/ï¿½ returned without error
+op/lex.t	37	ok	not ok [PCL #36]	Various tests of string delims «/» returned without error
 op/lex.t	28	ok	not ok [PCL #27]	[perl \#126482] Assert failure when mentioning a constant twice in a row
 op/lex.t	32	ok	not ok [PCL #31]	[perl \#128996] - use of PL_op after op is freed
 op/lex.t	33	ok	not ok [PCL #32]	[perl \#128997] - buffer read overflow
@@ -7666,8 +7666,8 @@ re/charset.t	660	ok	not ok	my $a = "\x{16b}\t"; utf8::upgrade($a); $a =~ qr/ (?a
 re/charset.t	691	ok	not ok	my $a = "\x{16b}\x{16b}"; utf8::upgrade($a); $a =~ qr/ (?a: \x{16b} \B \x{16b} ) /x; "\x{16b}" is non-ASCII, which is a \W under /a
 re/charset.t	692	ok	not ok	my $a = "\x{16b}\x{16b}"; utf8::upgrade($a); $a =~ qr/ (?a: \x{16b} \B \x{16b} ) /x; "\x{16b}" is non-ASCII, which is a \W under /a
 re/charset.t	688	ok	not ok	my $a = "\x{16b}\x{2029}"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; "\x{2029}" is not a \w
-re/charset.t	680	ok	not ok	my $a = "\x{16b}ï¿½"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; "ï¿½" is not a \w
-re/charset.t	684	ok	not ok	my $a = "\x{16b}ï¿½"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; "ï¿½" is not a \w
+re/charset.t	680	ok	not ok	my $a = "\x{16b}…"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; "…" is not a \w
+re/charset.t	684	ok	not ok	my $a = "\x{16b} "; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; " " is not a \w
 re/charset.t	764	ok	not ok	my $a = "\x{2029}" x 10; utf8::upgrade($a); $a =~ qr/ (?a: [_\S]{10} ) /x; "\x{2029}" is non-ASCII, which is a \S under /a
 re/charset.t	760	ok	not ok	my $a = "\x{2029}" x 10; utf8::upgrade($a); $a =~ qr/ (?a: \S{10} ) /x; "\x{2029}" is non-ASCII, which is a \S under /a
 re/charset.t	763	ok	not ok	my $a = "\x{2029}"; utf8::upgrade($a); $a =~ qr/ (?a: [_\S] ) /x; "\x{2029}" is non-ASCII, which is a \S under /a
@@ -7769,28 +7769,28 @@ re/charset.t	454	ok	not ok	my $a = "}" x 10; $a =~ qr/ (?a: [_[:punct:]]{10} ) /
 re/charset.t	453	ok	not ok	my $a = "}"; $a =~ qr/ (?a: [_[:punct:]] ) /x; "}" is a [:punct:] under /a
 re/charset.t	378	ok	not ok	my $a = "~" x 10; $a =~ qr/ (?a: [_[:punct:]]{10} ) /x; "~" is a [:punct:] under /a
 re/charset.t	377	ok	not ok	my $a = "~"; $a =~ qr/ (?a: [_[:punct:]] ) /x; "~" is a [:punct:] under /a
-re/charset.t	364	ok	not ok	my $a = "ï¿½" x 10; $a =~ qr/ (?a: [_[:^space:]]{10} ) /x; "ï¿½" is non-ASCII, which is a [:^space:] under /a
-re/charset.t	56	ok	not ok	my $a = "ï¿½" x 10; $a =~ qr/ (?a: [_\S]{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	52	ok	not ok	my $a = "ï¿½" x 10; $a =~ qr/ (?a: \S{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	748	ok	not ok	my $a = "ï¿½" x 10; utf8::upgrade($a); $a =~ qr/ (?a: [_\S]{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	744	ok	not ok	my $a = "ï¿½" x 10; utf8::upgrade($a); $a =~ qr/ (?a: \S{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	363	ok	not ok	my $a = "ï¿½"; $a =~ qr/ (?a: [_[:^space:]] ) /x; "ï¿½" is non-ASCII, which is a [:^space:] under /a
-re/charset.t	55	ok	not ok	my $a = "ï¿½"; $a =~ qr/ (?a: [_\S] ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	51	ok	not ok	my $a = "ï¿½"; $a =~ qr/ (?a: \S ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	747	ok	not ok	my $a = "ï¿½"; utf8::upgrade($a); $a =~ qr/ (?a: [_\S] ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	743	ok	not ok	my $a = "ï¿½"; utf8::upgrade($a); $a =~ qr/ (?a: \S ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	679	ok	not ok	my $a = "ï¿½\x{16b}"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; "ï¿½" is not a \w
-re/charset.t	368	ok	not ok	my $a = "ï¿½" x 10; $a =~ qr/ (?a: [_[:^space:]]{10} ) /x; "ï¿½" is non-ASCII, which is a [:^space:] under /a
-re/charset.t	64	ok	not ok	my $a = "ï¿½" x 10; $a =~ qr/ (?a: [_\S]{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	60	ok	not ok	my $a = "ï¿½" x 10; $a =~ qr/ (?a: \S{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	756	ok	not ok	my $a = "ï¿½" x 10; utf8::upgrade($a); $a =~ qr/ (?a: [_\S]{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	752	ok	not ok	my $a = "ï¿½" x 10; utf8::upgrade($a); $a =~ qr/ (?a: \S{10} ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	367	ok	not ok	my $a = "ï¿½"; $a =~ qr/ (?a: [_[:^space:]] ) /x; "ï¿½" is non-ASCII, which is a [:^space:] under /a
-re/charset.t	63	ok	not ok	my $a = "ï¿½"; $a =~ qr/ (?a: [_\S] ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	59	ok	not ok	my $a = "ï¿½"; $a =~ qr/ (?a: \S ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	755	ok	not ok	my $a = "ï¿½"; utf8::upgrade($a); $a =~ qr/ (?a: [_\S] ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	751	ok	not ok	my $a = "ï¿½"; utf8::upgrade($a); $a =~ qr/ (?a: \S ) /x; "ï¿½" is non-ASCII, which is a \S under /a
-re/charset.t	683	ok	not ok	my $a = "ï¿½\x{16b}"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; "ï¿½" is not a \w
+re/charset.t	364	ok	not ok	my $a = "…" x 10; $a =~ qr/ (?a: [_[:^space:]]{10} ) /x; "…" is non-ASCII, which is a [:^space:] under /a
+re/charset.t	56	ok	not ok	my $a = "…" x 10; $a =~ qr/ (?a: [_\S]{10} ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	52	ok	not ok	my $a = "…" x 10; $a =~ qr/ (?a: \S{10} ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	748	ok	not ok	my $a = "…" x 10; utf8::upgrade($a); $a =~ qr/ (?a: [_\S]{10} ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	744	ok	not ok	my $a = "…" x 10; utf8::upgrade($a); $a =~ qr/ (?a: \S{10} ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	363	ok	not ok	my $a = "…"; $a =~ qr/ (?a: [_[:^space:]] ) /x; "…" is non-ASCII, which is a [:^space:] under /a
+re/charset.t	55	ok	not ok	my $a = "…"; $a =~ qr/ (?a: [_\S] ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	51	ok	not ok	my $a = "…"; $a =~ qr/ (?a: \S ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	747	ok	not ok	my $a = "…"; utf8::upgrade($a); $a =~ qr/ (?a: [_\S] ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	743	ok	not ok	my $a = "…"; utf8::upgrade($a); $a =~ qr/ (?a: \S ) /x; "…" is non-ASCII, which is a \S under /a
+re/charset.t	679	ok	not ok	my $a = "…\x{16b}"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; "…" is not a \w
+re/charset.t	368	ok	not ok	my $a = " " x 10; $a =~ qr/ (?a: [_[:^space:]]{10} ) /x; " " is non-ASCII, which is a [:^space:] under /a
+re/charset.t	64	ok	not ok	my $a = " " x 10; $a =~ qr/ (?a: [_\S]{10} ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	60	ok	not ok	my $a = " " x 10; $a =~ qr/ (?a: \S{10} ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	756	ok	not ok	my $a = " " x 10; utf8::upgrade($a); $a =~ qr/ (?a: [_\S]{10} ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	752	ok	not ok	my $a = " " x 10; utf8::upgrade($a); $a =~ qr/ (?a: \S{10} ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	367	ok	not ok	my $a = " "; $a =~ qr/ (?a: [_[:^space:]] ) /x; " " is non-ASCII, which is a [:^space:] under /a
+re/charset.t	63	ok	not ok	my $a = " "; $a =~ qr/ (?a: [_\S] ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	59	ok	not ok	my $a = " "; $a =~ qr/ (?a: \S ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	755	ok	not ok	my $a = " "; utf8::upgrade($a); $a =~ qr/ (?a: [_\S] ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	751	ok	not ok	my $a = " "; utf8::upgrade($a); $a =~ qr/ (?a: \S ) /x; " " is non-ASCII, which is a \S under /a
+re/charset.t	683	ok	not ok	my $a = " \x{16b}"; utf8::upgrade($a); $a =~ qr/ (?a: . \B . ) /x; "\x{16b}" is non-ASCII, which is a \W under /a; " " is not a \w
 re/fold_grind_8.t	0	ok*	(no TAP)	*summary*
 re/fold_grind_a.t	0	ok*	(no TAP)	*summary*
 re/fold_grind_aa.t	0	ok*	(no TAP)	*summary*
