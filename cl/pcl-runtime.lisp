@@ -18159,15 +18159,64 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl $ARGV - current filename of the <> diamond operator (\"-\" for STDIN)")
 
 ;; Cache configuration
-(defparameter *pcl-cache-dir*
-  (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
-  "Directory for cached compiled modules")
+(defun %p-default-cache-dir ()
+  "THE root of every per-user cache PCL writes — the cached module transpiles
+   under modules/, the saved cores under core/, the transpiler's prototype
+   memo under proto/, the XS artifacts under xs/.  $PCL_CACHE_DIR when it is
+   set and non-empty, else <home>/.pcl-cache/, where <home> is $HOME (which is
+   what USER-HOMEDIR-PATHNAME reads, falling back to the passwd entry).
+
+   A FUNCTION, called at process START and never at load time (task #1303).
+   The value used to be a DEFPARAMETER INITFORM, i.e. evaluated when the
+   runtime LOADS — which for the normal path is when a saved core is BUILT.
+   So $PCL_CACHE_DIR was a lie for the module cache (proto/, core/ and
+   `pcl --clear-cache` read it on the Perl side and honoured it), and, worse
+   for an install, a system-wide pcl.core built by root would have sent every
+   user's module cache to /root/.pcl-cache.  Same reason as the four other
+   *INIT-HOOKS* entries in this file ($$, the FP modes, the std handles,
+   PCL_RAW_ELEMS): THE DECISION IS PER PROCESS.
+
+   THE PERL SIDE SPELLS THIS THE SAME WAY, in ONE place — PCLPaths::cache_root
+   (tools/lib/PCLPaths.pm), which `pcl`, tools/lib/PCLSbcl.pm and
+   Pl/ProtoCache.pm all call.  The two spellings are checked against each
+   other by Pl/t/module-fasl-cache-01.t."
+  (let ((env (sb-posix:getenv "PCL_CACHE_DIR")))
+    (if (and env (plusp (length env)))
+        (pathname (concatenate 'string (string-right-trim "/" env) "/"))
+        (merge-pathnames ".pcl-cache/" (user-homedir-pathname)))))
+
+(defparameter *pcl-cache-dir* (%p-default-cache-dir)
+  "Root of the per-user cache; see %P-DEFAULT-CACHE-DIR.  Every cache path is
+   derived from it AT CALL TIME, never resolved at load time.")
+(push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
+      sb-ext:*init-hooks*)
 (defparameter *pcl-cache-generation* "v2-840"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
-(defparameter *pcl-cache-max-age* (* 7 24 60 60)
-  "Max cache age in seconds (default: 1 week)")
+(defparameter *pcl-cache-max-age* (* 30 24 60 60)
+  "How long an UNUSED cache entry is kept, in seconds (default: 30 days).
+
+   LAST USE, not age.  Validity is the dependency manifest and nothing else
+   (P-CACHE-VALID-P, ir-spec §9.2b); this is disk hygiene, so what it must
+   measure is whether anything still reaches the entry.  P-LOAD-MODULE-CACHED
+   TOUCHES an entry it uses, so a module you load every day is never pruned
+   however old its transpile is, and a module you stopped using disappears a
+   month later.  Before #1300 the value was 7 days and the WRITE date, which
+   deleted a correct, in-use cache once a week.")
+
+(defparameter *pcl-cache-touch-interval* (* 24 60 60)
+  "Do not re-stamp an entry whose mtime is younger than this (1 day): the
+   point of the touch is to keep the entry out of the 30-day prune, so one
+   stamp a day is as good as one per load and costs one utime(2) instead of
+   one per module per run.")
+
+(defparameter *pcl-cache-prune-interval* (* 24 60 60)
+  "How often the prune actually scans (1 day), claimed through a `.last-prune`
+   stamp in the cache root.  P-CLEANUP-OLD-CACHE is called on every cache MISS,
+   and a cold run has one miss per module, so an unconditional scan of
+   modules/ + proto/ (~1200 files here) would be paid dozens of times for one
+   run's worth of hygiene.")
 (defparameter *pcl-skip-cache* nil
   "When true, bypass cache (set by --no-cache or PCL_NO_CACHE)")
 (defparameter *pcl-cache-fasl* t
@@ -18415,16 +18464,108 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 ;;; --- Cache Management ---
 
+;;; ── THE CACHE DIRECTORY IS PRIVATE (task #1300, F8) ────────────────────
+;;; A cached module is a FASL — compiled code this process loads and RUNS.
+;;; So PCL creates the directory it lives in with mode 0700, and refuses one
+;;; that somebody else could write to rather than loading out of it.
+;;;
+;;; THE ROOT IS THE GATE, and only the root is checked: with `<cache>` at 0700
+;;; no other user can traverse into it, whatever the modes inside say.  What a
+;;; mode check cannot see is said out loud in ir-spec §9.2b — a cache root
+;;; inside a world-writable directory with no sticky bit can be RENAMED away
+;;; by another user, and no permission on the root itself prevents that.
+;;;
+;;; The Perl side spells the same two questions in PCLPaths::cache_dir_problem
+;;; and creates its directories `make_path(..., {mode => 0700})`.
+
+(defun %p-ensure-dir-0700 (dir)
+  "Create DIR if it is missing, with mode 0700 — and only then: an EXISTING
+   directory's permissions are the user's business, and changing them behind
+   their back is the surprise this code exists to avoid.  Returns DIR."
+  (unless (probe-file dir)
+    (ensure-directories-exist dir)
+    (ignore-errors (sb-posix:chmod (sb-ext:native-namestring dir) #o700)))
+  dir)
+
+(defun %p-cache-dir-problem (dir)
+  "NIL when DIR is a safe place to keep compiled code, else the reason as a
+   string NAMING THE VALUE (rule 12).  A directory that does not exist is not
+   a problem — we create it, 0700."
+  (let ((st (ignore-errors (sb-posix:stat (sb-ext:native-namestring dir)))))
+    (cond ((null st) nil)
+          ((/= (sb-posix:stat-uid st) (sb-posix:geteuid))
+           (format nil "it is owned by uid ~D, not by you (uid ~D)"
+                   (sb-posix:stat-uid st) (sb-posix:geteuid)))
+          ((plusp (logand (sb-posix:stat-mode st) #o022))
+           (format nil "it is group- or world-writable (mode ~4,'0O)"
+                   (logand (sb-posix:stat-mode st) #o7777))))))
+
+(defvar *p-cache-dir-checked* nil
+  "The safety check is two stat(2) questions; ask them once per process.")
+
+(defun %p-check-cache-dir ()
+  "Refuse an unsafe cache root LOUDLY — a P-DIE, so it is perl-shaped and
+   `eval`-trappable like any other PCL error.  The flag is set only after a
+   CLEAN answer, so a program that traps the die and loads another module is
+   refused again rather than quietly served from the unsafe directory."
+  (unless *p-cache-dir-checked*
+    (let ((problem (%p-cache-dir-problem *pcl-cache-dir*))
+          (dir (namestring *pcl-cache-dir*)))
+      (when problem
+        (p-die (format nil "PCL: refusing to use the cache directory ~A: ~A. ~
+                            A cached module is compiled code, so PCL keeps its ~
+                            cache private. Fix it with: chmod 700 ~A -- or set ~
+                            PCL_CACHE_DIR to a directory you own"
+                       dir problem dir))))
+    (setf *p-cache-dir-checked* t)))
+
 (defun p-ensure-cache-dir ()
-  "Create cache directory if it doesn't exist."
-  (ensure-directories-exist *pcl-cache-dir*))
+  "Create the cache root if it is missing (0700) and refuse an unsafe one."
+  (%p-ensure-dir-0700 *pcl-cache-dir*)
+  (%p-check-cache-dir)
+  *pcl-cache-dir*)
 
 (defun p-module-cache-dir ()
   "Where the cached module transpiles live: <cache>/modules/, created on
-   demand.  Derived from *PCL-CACHE-DIR* at CALL time — a path resolved while
-   the runtime loads would be baked into the saved core, i.e. the core
-   builder's answer rather than this run's."
-  (ensure-directories-exist (merge-pathnames "modules/" *pcl-cache-dir*)))
+   demand, 0700.  Derived from *PCL-CACHE-DIR* at CALL time — a path resolved
+   while the runtime loads would be baked into the saved core, i.e. the core
+   builder's answer rather than this run's (task #1303)."
+  (%p-ensure-dir-0700 (merge-pathnames "modules/" *pcl-cache-dir*)))
+
+(defun %p-dir-list-line (var default-text)
+  "How VAR resolved, for `pcl --cache-info`: unset (with what that means), the
+   `*` wildcard, or the raw value beside the absolute directories it became."
+  (let ((raw (sb-posix:getenv var))
+        (parsed (%p-dir-list var)))
+    ;; ASCII only: this is PROGRAM OUTPUT, and a PCL handle carries octets
+    ;; unless a layer says otherwise (#1115), so a dash out of Latin-1 would
+    ;; reach the terminal as `?`.  (The docstrings above are source text and
+    ;; may say what they like.)
+    (cond ((or (null raw) (zerop (length raw)))
+           (format nil "unset -- ~A" default-text))
+          ((eq parsed :all) "* -- every directory")
+          (t (format nil "~A -> ~{~A~^, ~}" raw parsed)))))
+
+(defun p-cache-info ()
+  "Print what the RUNTIME resolves about the cache, for `pcl --cache-info`.
+   The compile policy is two directory lists realpath'd at CALL time, and this
+   is the process that does it — asking here rather than re-deriving on the
+   Perl side is what keeps ONE resolver (rule 11).  The cache directory is
+   printed too, deliberately beside `pcl`'s own answer: if the two disagree,
+   that IS the bug the user is chasing."
+  (format t "cache directory: ~A~%" (namestring *pcl-cache-dir*))
+  (let ((problem (%p-cache-dir-problem *pcl-cache-dir*)))
+    (when problem (format t "  UNSAFE: ~A~%" problem)))
+  (format t "PCL_COMPILE_DIRS: ~A~%"
+          (%p-dir-list-line "PCL_COMPILE_DIRS"
+                            "perl's installed library directories and PCL's own lib/"))
+  (format t "PCL_NO_COMPILE_DIRS: ~A~%"
+          (if (sb-posix:getenv "PCL_NO_FASL_CACHE")
+              "* -- every directory (PCL_NO_FASL_CACHE=1, the kept alias)"
+              (%p-dir-list-line "PCL_NO_COMPILE_DIRS" "nothing is excluded")))
+  (format t "cache generation: ~A~%" *pcl-cache-generation*)
+  (finish-output)
+  nil)
 
 (defun p-compute-cache-path (source-path &optional lisp-p)
   "Compute cache path for a source file: hash of the absolute path and the
@@ -18611,17 +18752,6 @@ buffer's fill-pointer; everything else falls back to file-length."
     (return-from p-cache-valid-p nil))
   (and (> (file-write-date cache-path) (file-write-date source-path))
        (p-cm-valid-p (%p-cache-manifest source-path))))
-
-(defun p-cleanup-old-cache ()
-  "PRUNE module cache files older than max age — disk hygiene, not validity:
-   since #1261 an entry's validity is its dependency manifest, and
-   P-CACHE-VALID-P no longer asks how old the file is.  The prune still reads
-   the WRITE date, so an entry that keeps being HIT is eventually deleted and
-   rebuilt; making it touch-on-hit is a follow-up, not a correctness question."
-  (let ((cutoff (- (get-universal-time) *pcl-cache-max-age*)))
-    (dolist (file (directory (merge-pathnames "*.*" (p-module-cache-dir))))
-      (when (< (file-write-date file) cutoff)
-        (ignore-errors (delete-file file))))))
 
 ;;; --- Module Transpilation ---
 
@@ -18848,8 +18978,119 @@ buffer's fill-pointer; everything else falls back to file-length."
       (ignore-errors (delete-file fasl-path))
       nil)))
 
+;;; ── PRUNE BY LAST USE (task #1300, F2; #682 folds in) ─────────────────
+;;; Validity is the dependency manifest and nothing else (P-CACHE-VALID-P).
+;;; What is left for this code is DISK HYGIENE, and the honest question there
+;;; is "does anything still reach this entry", not "how old is it": pruning by
+;;; WRITE date deleted a correct, daily-used cache once a week and rebuilt it.
+;;; So an entry that is USED is stamped (%P-NOTE-CACHE-USE, at most once a day
+;;; per entry) and the prune drops what has not been reached for 30 days.
+;;;
+;;; TWO directories, one prune (rule 11): <cache>/modules/ (written here, read
+;;; here) and <cache>/proto/ (written by Pl/ProtoCache.pm, read by it — task
+;;; #682: its entries become UNREACHABLE the moment the compiler stamp or the
+;;; generation changes, and nothing ever removed them).  Unlinking a file a
+;;; reader has already opened is safe on Linux — the reader's fd survives —
+;;; and both writers publish through temp + rename(2), so a half-written entry
+;;; is never visible either.
+
+(defvar *p-touched-cache-entries* (make-hash-table :test 'equal)
+  "Source paths whose cache entry this process has already stamped.")
+
+(defun %p-utime-now (path)
+  "Set PATH's access and modification times to now; nil when it cannot be."
+  (ignore-errors (sb-posix:utime (sb-ext:native-namestring path)) t))
+
+(defun %p-note-cache-use (source-path)
+  "Stamp the cache ENTRY for SOURCE-PATH as used NOW — the .lisp, its .deps
+   manifest and this runtime's fasl together.
+
+   AS A UNIT, because the prune reads each file's own mtime: stamping only one
+   member would let the prune delete the others out from under a live entry
+   (losing the manifest alone makes the entry INVALID, i.e. a needless
+   re-transpile).  Fasls built by ANOTHER runtime identity are deliberately
+   left alone — they are unreachable, and ageing out is exactly what should
+   happen to them.
+
+   Skipped when the entry is younger than *PCL-CACHE-TOUCH-INTERVAL*, and at
+   most once per source per process, so a run pays at most one utime(2) per
+   module and usually none."
+  (let ((key (namestring source-path)))
+    (unless (gethash key *p-touched-cache-entries*)
+      (setf (gethash key *p-touched-cache-entries*) t)
+      (let ((lisp (p-compute-cache-path source-path t))
+            (cutoff (- (get-universal-time) *pcl-cache-touch-interval*)))
+        (when (and lisp (probe-file lisp)
+                   (< (file-write-date lisp) cutoff))
+          (dolist (f (list lisp
+                           (%p-manifest-path source-path)
+                           (p-compute-cache-path source-path nil)))
+            (when (and f (probe-file f)) (%p-utime-now f)))))))
+  nil)
+
+(defvar *p-cache-pruned-this-run* nil
+  "The prune runs at most once per process, whatever the stamp says.")
+
+(defun %p-claim-prune ()
+  "True when THIS process should do the scan: once per process, and once a day
+   across processes.  The claim is the `.last-prune` stamp in the cache root,
+   rewritten through temp + rename(2) — so when eight gate workers miss at the
+   same moment, they all see an old stamp, all rename, and the scan is done a
+   few times over rather than by nobody.  (Concurrent pruning is safe; the
+   stamp is there to stop the scan happening on EVERY miss.)"
+  (cond (*p-cache-pruned-this-run* nil)
+        (t (setf *p-cache-pruned-this-run* t)
+           (let ((stamp (merge-pathnames ".last-prune" *pcl-cache-dir*)))
+             (cond ((and (probe-file stamp)
+                         (< (- (get-universal-time) (file-write-date stamp))
+                            *pcl-cache-prune-interval*))
+                    nil)
+                   (t (ignore-errors (%p-write-cache-file stamp "pcl") t)))))))
+
+(defun %p-prune-dir (dir cutoff)
+  "Delete every file directly under DIR whose mtime is older than CUTOFF."
+  (dolist (file (ignore-errors (directory (merge-pathnames "*.*" dir))))
+    (when (ignore-errors (< (file-write-date file) cutoff))
+      (ignore-errors (delete-file file)))))
+
+(defun p-cleanup-old-cache ()
+  "Drop cache entries nothing has reached for *PCL-CACHE-MAX-AGE* — the module
+   entries under <cache>/modules/ and the transpiler's prototype memo under
+   <cache>/proto/.  Called on every cache MISS; the actual scan happens at most
+   once a day (see %P-CLAIM-PRUNE)."
+  (when (%p-claim-prune)
+    (let ((cutoff (- (get-universal-time) *pcl-cache-max-age*)))
+      (%p-prune-dir (p-module-cache-dir) cutoff)
+      (%p-prune-dir (merge-pathnames "proto/" *pcl-cache-dir*) cutoff))))
+(defun %p-load-module-uncached (source-path)
+  "Load SOURCE-PATH with NO cache at all — *PCL-SKIP-CACHE*, which is what
+   `pcl --no-cache`, `pl2cl --no-cache` and ./runpcl set.
+
+   Transpile, write the text to a temp file OUTSIDE the cache, load that,
+   delete it.  Before task #1300 this path skipped the cache for READING and
+   wrote the .lisp and its manifest anyway — so `--no-cache`, the one flag for
+   \"is it the cache?\", repopulated the very thing the question is about.
+   The load still comes from a real FILE, deliberately: a stream load would
+   leave *LOAD-PATHNAME* nil, which is a second difference nobody asked for.
+   TMPDIR is honoured, as everywhere else in this runtime."
+  (let* ((code (or (p-transpile-file source-path)
+                   (error "Failed to transpile ~A" source-path)))
+         (template (format nil "~A/pcl-nocache-XXXXXX"
+                           (or (sb-posix:getenv "TMPDIR") "/tmp"))))
+    (multiple-value-bind (fd path) (sb-posix:mkstemp template)
+      (sb-posix:close fd)
+      (unwind-protect
+           (progn (with-open-file (out path :direction :output
+                                       :if-exists :supersede)
+                    (write-string code out))
+                  (handler-bind ((warning #'muffle-warning)) (load path))
+                  t)
+        (ignore-errors (delete-file path))))))
+
 (defun p-load-module-cached (source-path)
   "Load a Perl module with caching. Returns t on success."
+  (when *pcl-skip-cache*
+    (return-from p-load-module-cached (%p-load-module-uncached source-path)))
   (p-ensure-cache-dir)
   ;; A loaded module sets *pcl-current-package* via its own `package` statements;
   ;; rebind here so those changes don't leak into the caller's notion of the
@@ -18871,24 +19112,29 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (and fasl-path
                (p-cache-valid-p source-path fasl-path)
                (%p-load-module-fasl fasl-path))
+      (%p-note-cache-use source-path)
       (%p-fasl-note "PCL: module ~A -> FASL HIT (~,3Fs)~%"
                     (file-namestring (truename source-path))
                     (%p-secs-since %start))
       (return-from p-load-module-cached t))
     ;; 2. The text: transpile it when it is missing, older than the source, or
     ;;    a dependency it read has changed.  The transpile writes the manifest
-    ;;    sidecar, so the memo of the OLD one has to go.
-    (unless (p-cache-valid-p source-path lisp-path)
-      (let ((lisp-code (p-transpile-file source-path deps-path)))
-        (unless lisp-code
-          (error "Failed to transpile ~A" source-path))
-        (%p-write-cache-file lisp-path lisp-code)
-        (%p-forget-cache-manifest source-path)
-        (setf fasl-path (when (%p-fasl-cache-enabled-p
-                               source-path
-                               (p-cm-class (%p-cache-manifest source-path)))
-                          (p-compute-cache-path source-path nil)))
-        (p-cleanup-old-cache)))
+    ;;    sidecar, so the memo of the OLD one has to go.  When it IS valid the
+    ;;    entry is used as it stands, which is what the prune counts as a use
+    ;;    (%p-note-cache-use; the other USE is the fasl hit above — a fresh
+    ;;    transpile needs no stamp, its files are new).
+    (if (p-cache-valid-p source-path lisp-path)
+        (%p-note-cache-use source-path)
+        (let ((lisp-code (p-transpile-file source-path deps-path)))
+          (unless lisp-code
+            (error "Failed to transpile ~A" source-path))
+          (%p-write-cache-file lisp-path lisp-code)
+          (%p-forget-cache-manifest source-path)
+          (setf fasl-path (when (%p-fasl-cache-enabled-p
+                                 source-path
+                                 (p-cm-class (%p-cache-manifest source-path)))
+                            (p-compute-cache-path source-path nil)))
+          (p-cleanup-old-cache)))
     ;; 3. Build the fasl from that text and run THE FASL, so the module
     ;;    executes once here too; on any failure, run the text.
     (%p-fasl-note "PCL: module ~A -> ~:[TEXT~;fasl-build~] (~,3Fs to here)~%"

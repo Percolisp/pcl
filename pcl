@@ -37,6 +37,7 @@ use File::Temp qw(tempfile);
 use FindBin;
 use lib "$FindBin::RealBin/tools/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344; cached core s439)
+use PCLPaths ();  # the ONE Perl-side reading of $PCL_CACHE_DIR (task #1303)
 
 my $ROOT    = dirname(abs_path($0));
 my $PL2CL   = "$ROOT/pl2cl";
@@ -44,6 +45,7 @@ my $RUNTIME = "$ROOT/cl/pcl-runtime.lisp";
 
 # ---- options -------------------------------------------------------------
 my ($inline, $check_only, $make_core, $clear_cache, $verbose, $want_help);
+my ($cache_info, $want_version, $no_cache);
 my (@inc_dirs, @use_mods, $warnings_flag);
 
 GetOptions(
@@ -53,18 +55,23 @@ GetOptions(
   'c'           => \$check_only,      # syntax-check only
   'w'           => \$warnings_flag,   # accepted; PCL warning behaviour is fixed (no-op)
   'clear-cache' => \$clear_cache,
+  'cache-info'  => \$cache_info,
+  'no-cache'    => \$no_cache,        # forwarded to pl2cl; there is no second mechanism
   'make-core'   => \$make_core,
+  'version'     => \$want_version,
   'v|verbose'   => \$verbose,
   'h|help'      => \$want_help,
 ) or die usage();
 
 print(usage()), exit 0 if $want_help;
 
-my $cache_dir = $ENV{PCL_CACHE_DIR} // "$ENV{HOME}/.pcl-cache";
+my $cache_dir = PCLPaths::cache_root();
 
 # ---- one-shot maintenance actions (no script needed) ---------------------
-if ($clear_cache) { clear_cache(); exit 0 }
-if ($make_core)   { make_core();   exit 0 }
+if ($want_version) { print version_info(); exit 0 }
+if ($clear_cache)  { clear_cache(); exit 0 }
+if ($cache_info)   { cache_info();  exit 0 }
+if ($make_core)    { make_core();   exit 0 }
 
 # ---- figure out the source + the script's own @ARGV ----------------------
 my $source = (!defined $inline && @ARGV) ? shift(@ARGV) : undef;
@@ -151,7 +158,11 @@ sub transpile {
   }
 
   say STDERR "pcl: transpiling $src_path" if $verbose;
-  my $rc = run('perl', @inc_args, $PL2CL, $src_path, { stdout => $tmp });
+  # --no-cache is pl2cl's own flag (it emits `(setf pcl::*pcl-skip-cache* t)`
+  # into the preamble); forwarding it is the whole implementation — a second
+  # mechanism here would be a second answer to the same question (rule 11).
+  my $rc = run('perl', @inc_args, $PL2CL, ($no_cache ? '--no-cache' : ()),
+               $src_path, { stdout => $tmp });
   unlink @cleanup;
 
   if ($rc != 0) {
@@ -228,6 +239,138 @@ sub clear_cache {
   say "pcl: cleared $n cached module file(s) from $cache_dir, $p prototype entr(y|ies) from "
     . Pl::ProtoCache::cache_dir() . " and $k runtime core file(s) from "
     . PCLSbcl::core_cache_dir();
+}
+
+# ---- pcl --version -------------------------------------------------------
+
+# Four numbers, because "which PCL is this" has four answers that can disagree:
+# the release, the cache GENERATION (which decides whether a cached module
+# transpile is reused), the SBCL that will run the code, and the PPI that will
+# parse it.  A bug report needs all four.
+sub version_info {
+  return join("\n",
+    "pcl (PCL) " . pcl_version(),
+    "cache generation: " . cache_generation(),
+    sbcl_version(),
+    "PPI " . ppi_version()) . "\n";
+}
+
+# An INSTALLED tree carries a VERSION file written by tools/install-pcl; a
+# checkout answers `git describe`.  Neither: say so plainly — a guessed
+# version is worse than none in a bug report.
+sub pcl_version {
+  if (open my $fh, '<', "$ROOT/VERSION") {
+    my $v = <$fh>; close $fh;
+    chomp $v if defined $v;
+    return $v if defined $v && length $v;
+  }
+  if (-d "$ROOT/.git" || -f "$ROOT/.git") {
+    my $v = qx{git -C \Q$ROOT\E describe --tags --always 2>/dev/null};
+    chomp $v if defined $v;
+    return "$v (git checkout)" if defined $v && length $v;
+  }
+  return "unknown (no VERSION file, and not a git checkout)";
+}
+
+# THE generation string lives in cl/pcl-runtime.lisp and has exactly one
+# reader, Pl::ProtoCache::generation (task #560) — never copied.
+sub cache_generation {
+  require lib; lib->import("$ROOT");
+  require Pl::ProtoCache;
+  return Pl::ProtoCache::generation();
+}
+
+sub sbcl_version {
+  my $v = qx{sbcl --version 2>/dev/null};
+  chomp $v if defined $v;
+  return (defined $v && length $v) ? $v : "SBCL (not on PATH)";
+}
+
+sub ppi_version {
+  my $v = eval { require PPI; $PPI::VERSION };
+  return defined $v ? $v : "(not installed)";
+}
+
+# ---- pcl --cache-info ----------------------------------------------------
+
+# The one diagnostic for "PCL did not notice my change": where the cache is,
+# what is in it, which core this run would use, and the compile policy in
+# force.  The last of those is resolved by the RUNTIME (two directory lists,
+# realpath'd at call time), so this asks the runtime rather than re-deriving
+# it — one resolver, rule 11.  Measured cost of that question: ~0.2 s with a
+# saved core, which is the price of any `pcl` run.
+sub cache_info {
+  my $src = PCLPaths::cache_root_source() eq 'env'
+          ? 'from $PCL_CACHE_DIR' : 'default: $HOME/.pcl-cache';
+  say "Cache directory: $cache_dir  ($src)";
+  if (my $problem = PCLPaths::cache_dir_problem($cache_dir)) {
+    say "  UNSAFE: $problem -- PCL refuses to use it.  chmod 700 $cache_dir";
+  }
+  print_kinds();
+  say core_line();
+  say "Compile policy (as the runtime resolves it):";
+  print runtime_cache_info();
+}
+
+# Size and count per kind.  modules/ is broken down by extension because the
+# three files of an entry answer different questions: the .lisp is the
+# transpile, the .deps its dependency manifest (what makes it valid), the
+# .fasl the compiled form, and a .failed marker means a compile that did not
+# work and is not retried for an hour.
+sub print_kinds {
+  for my $kind (qw(modules proto core xs)) {
+    my @f = grep { -f $_ } glob("\Q$cache_dir\E/$kind/*");
+    my $bytes = 0; $bytes += -s $_ for @f;
+    if (!@f) { say sprintf("  %-9s (empty)", "$kind/"); next }
+    my $extra = '';
+    if ($kind eq 'modules') {
+      my %n;
+      for my $f (@f) { $n{$1}++ if $f =~ /\.(lisp|fasl|deps|failed)$/ }
+      $extra = sprintf("  %d transpiles, %d fasls, %d manifests, %d failed",
+                       map { $n{$_} // 0 } qw(lisp fasl deps failed));
+    }
+    say sprintf("  %-9s %5d files, %9s%s", "$kind/", scalar(@f),
+                human_bytes($bytes), $extra);
+  }
+  return 1;
+}
+
+sub human_bytes {
+  my ($b) = @_;
+  return "$b B" if $b < 1024;
+  my @u = qw(KB MB GB);
+  my $n = $b / 1024;
+  for my $u (@u) {
+    return sprintf("%.1f %s", $n, $u) if $n < 1024 || $u eq 'GB';
+    $n /= 1024;
+  }
+}
+
+# Which core this run would use, and why — asked of PCLSbcl, the ONE builder
+# of an SBCL command line, rather than re-deriving its five-step order here.
+sub core_line {
+  my @cmd = PCLSbcl::sbcl_prefix(runtime => $RUNTIME, core => $ENV{PCL_CORE});
+  my ($core) = map { $cmd[$_ + 1] } grep { $cmd[$_] eq '--core' } 0 .. $#cmd - 1;
+  return "Core for this run: none -- the runtime is loaded from source"
+       . ($ENV{PCL_NO_CORE} ? " (PCL_NO_CORE=1)" : " (no core could be built)")
+    unless defined $core;
+  my $why = $ENV{PCL_CORE} && $core eq $ENV{PCL_CORE} ? "named by \$PCL_CORE"
+          : index($core, "$cache_dir/core/") == 0     ? "the cached core, built on first use"
+          :                                             "the installed core, built by tools/install-pcl";
+  return "Core for this run: $core\n  ($why)";
+}
+
+# The compile policy, printed by the runtime that resolves it.
+sub runtime_cache_info {
+  my @cmd = ('sbcl', PCLSbcl::sbcl_prefix(runtime => $RUNTIME, core => $ENV{PCL_CORE}),
+             '--eval', '(pcl::p-cache-info)');
+  my $out = qx{@{[ join ' ', map { quotemeta } @cmd ]} 2>/dev/null};
+  # In source mode the runtime announces itself as it loads; that is the
+  # loader talking, not the answer.
+  $out =~ s/^(?:PCL Runtime loaded|;.*)\n//gm if defined $out;
+  return "  (could not ask the runtime)\n" unless defined $out && $out =~ /\S/;
+  $out =~ s/^/  /gm;
+  return $out;
 }
 
 # ---- small utilities -----------------------------------------------------
@@ -307,28 +450,58 @@ Options:
   -c             syntax-check only: transpile, print "syntax OK", exit
   -w             accepted for compatibility (PCL's warning behaviour is fixed)
   -v, --verbose  print the underlying sbcl command pcl runs
+  --version      print the PCL, cache-generation, SBCL and PPI versions
   -h, --help     this message
 
-Startup cache:
-  --make-core    Build the cached runtime core now, then exit.  A core is a memory
-                 image of SBCL with the PCL runtime already compiled in; running
-                 from one cuts startup from ~1 s to ~0.1 s.  Every run builds and
-                 uses one BY DEFAULT (first use compiles; the core is named by a
-                 hash of the runtime + the SBCL version, so an edit or an upgrade
-                 makes a new one) — this flag only does the build early.
-  --clear-cache  Remove the cached compiled modules (the .fasl/.lisp files pcl
-                 makes for `use`/`require`d modules) and the cached runtime
-                 cores, then exit.  The next run rebuilds what it needs.
+Caches:
+  PCL caches two things, both purely for speed and neither able to change a
+  result: a saved SBCL core with the PCL runtime compiled in (startup ~1 s ->
+  ~0.1 s), and, per module you `use`, its transpiled Common Lisp plus a
+  compiled fasl.  A cached module is re-transpiled when its own file changes,
+  and also when any module whose prototypes or exports its parse read changes.
+  Everything lives under PCL_CACHE_DIR (below), in a directory PCL creates
+  with mode 0700 -- a cached module is code, so PCL refuses to load out of a
+  directory anybody else could write to.
+
+  --cache-info   Print where the cache is, what is in it, which core this run
+                 would use, and the compile policy in effect.  The one
+                 diagnostic for "PCL did not notice my change".
+  --no-cache     This run reads and writes no module cache -- the one-flag
+                 answer to "is it the cache?".
+  --make-core    Build the cached runtime core now, then exit.  Every run
+                 builds and uses one BY DEFAULT (the first use compiles it;
+                 the core is named by a hash of the runtime + the SBCL
+                 version, so an edit or an upgrade simply makes a new one) --
+                 this flag only does the build early.
+  --clear-cache  Remove everything PCL made under PCL_CACHE_DIR -- the cached
+                 modules (.lisp / .fasl / .deps), the transpiler's prototype
+                 facts and the saved cores -- then exit.  The next run
+                 rebuilds what it needs.  XS artifacts are NOT a cache and are
+                 left alone: they are installed by tools/pcl-xs-install and
+                 removed by its --clean.
 
 Notes:
   * Every run transpiles your script fresh; there is no way yet to compile a
     script to a .fasl and run that directly (planned — see Phase 6 of
     docs/pcl-rollout-plan.md). Only `use`/`require`d modules are cached today.
-  * --make-core / --clear-cache only affect speed, never results.
+  * --make-core / --clear-cache / --no-cache only affect speed, never results.
 
 Environment:
-  PCL_CACHE_DIR  where the core and module cache live (default ~/.pcl-cache)
-  PCL_CORE       use THIS saved core instead of the cached one
-  PCL_NO_CORE=1  never build or use the cached core (an installed core still counts)
+  PCL_CACHE_DIR         The root of every per-user cache: the compiled modules,
+                        the prototype facts, the saved cores and the XS
+                        artifacts (default ~/.pcl-cache).
+  PCL_COMPILE_DIRS      Colon-separated directories, PERL5LIB syntax: a module
+                        whose source lies under one of them is compiled to
+                        native code and cached.  `*` = every directory.  UNSET
+                        = perl's installed library directories plus PCL's own
+                        lib/ -- so a module you are EDITING is cached as text,
+                        never as an opaque fasl.
+  PCL_NO_COMPILE_DIRS   Same syntax; a module under one of these is NEVER
+                        compiled.  Wins over PCL_COMPILE_DIRS on any match;
+                        `*` = compile nothing.  (PCL_NO_FASL_CACHE=1 is the
+                        kept alias of exactly that.)
+  PCL_CORE=path         Use THIS saved core instead of the cached one.
+  PCL_NO_CORE=1         Never build or use the cached core (an installed core
+                        still counts).
 USAGE
 }

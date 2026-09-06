@@ -123,9 +123,23 @@ END {
   }
 }
 
+# <cache>/proto, where <cache> is PCLPaths::cache_root() — the ONE Perl-side
+# reading of $PCL_CACHE_DIR (task #1303).  PCLPaths lives in tools/lib, which a
+# plain `use Pl::ProtoCache` does not put on @INC, so the directory is derived
+# from $PL_DIR exactly the way the generation string's runtime path is (one
+# level up from Pl/, a shape an INSTALLED tree keeps), and the require is done
+# once, lazily.
+# (The root itself is NOT memoised: a test may set $PCL_CACHE_DIR around one
+# call, and a memo would answer the previous process-wide value.)
+my $PATHS_LOADED;
 sub cache_dir {
-  my $root = $ENV{PCL_CACHE_DIR} // (($ENV{HOME} // '.') . '/.pcl-cache');
-  return "$root/proto";
+  if (!$PATHS_LOADED) {
+    my $toolslib = dirname($PL_DIR) . '/tools/lib';
+    local @INC = (@INC, $toolslib);
+    require PCLPaths;
+    $PATHS_LOADED = 1;
+  }
+  return PCLPaths::cache_root() . "/proto";
 }
 
 # THE generation string, read from the runtime's `*pcl-cache-generation*` —
@@ -358,8 +372,12 @@ sub _atomic_write {
   my ($file, $bytes) = @_;
   my $dir = cache_dir();
   if (!-d $dir) {
+    # The ROOT first: created 0700, and an unsafe one is refused loudly there
+    # (task #1300, F8 — a cache holds compiled code).  Then this kind's
+    # subdirectory, with the same mode.
+    PCLPaths::ensure_cache_root();
     require File::Path;
-    eval { File::Path::make_path($dir) };
+    eval { File::Path::make_path($dir, { mode => 0700 }) };
     return unless -d $dir;
   }
   my $tmp = "$file.$$." . int(rand 1_000_000);

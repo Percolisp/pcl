@@ -159,8 +159,12 @@ sub sbcl_prefix_str {
 # announced.  PCL_SHOW_SBCL=1 shows which core a runner spawns, as always.
 our $CORE_KEY_VERSION = 1;    # bump when the key's ingredients change
 
+# <cache>/core, where <cache> is PCLPaths::cache_root() — the ONE Perl-side
+# reading of $PCL_CACHE_DIR (task #1303).  PCLPaths sits in this directory, so
+# whatever @INC entry found this file finds it too.
 sub core_cache_dir {
-    return ($ENV{PCL_CACHE_DIR} // "$ENV{HOME}/.pcl-cache") . "/core";
+    require PCLPaths;
+    return PCLPaths::cache_root() . "/core";
 }
 
 my %CORE_FOR;          # abs runtime path -> core path (or '' = none), per process
@@ -169,6 +173,13 @@ my $SBCL_IDENTITY;     # `sbcl --version`, per process
 sub cached_core {
     my ($runtime, %opt) = @_;
     return undef unless defined $runtime && -f $runtime;
+    # A saved core, like a fasl, is CODE: create the cache root 0700 and refuse
+    # an unsafe one before either building a core there or loading one from it
+    # (task #1300, F8).  Deliberately NOT inside an eval — the whole point of
+    # the refusal is that it is loud, and swallowing it here would turn it into
+    # a silent fall-back to source mode.
+    require PCLPaths;
+    PCLPaths::ensure_cache_root();
     my $abs = abs_path($runtime) // return undef;
     return $CORE_FOR{$abs} || undef if exists $CORE_FOR{$abs} && !$opt{force};
     my $ident = _sbcl_identity();
@@ -202,7 +213,7 @@ sub _sbclrc_stamp {
 
 sub _build_cached_core {
     my ($runtime, $dir, $pathkey, $core, $force) = @_;
-    eval { make_path($dir) unless -d $dir; 1 } or return undef;
+    eval { make_path($dir, { mode => 0700 }) unless -d $dir; 1 } or return undef;
     my $failed = "$core.failed";
     if (!$force && -f $failed && (time - (stat $failed)[9]) < 3600) { return undef }
     open my $lk, '>>', "$dir/pcl-$pathkey.lock" or return undef;

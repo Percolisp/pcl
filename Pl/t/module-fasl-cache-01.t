@@ -34,10 +34,14 @@ use FindBin qw($RealBin);
 my $root = File::Spec->rel2abs("$RealBin/../..");
 my $pcl  = "$root/pcl";
 
+use lib "$RealBin/../../tools/lib";
+use PCLPaths ();   # cache_root — the ONE Perl-side reading of $PCL_CACHE_DIR
+use PCLSbcl ();    # cached_core — the saved core the #1303 rows run through
+
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 42;
+plan tests => 49;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -56,6 +60,8 @@ sub write_mod {
 #                 module, which of the three paths the load took)
 #   compile => S  the PCL_COMPILE_DIRS value for the run
 #   nocomp  => S  the PCL_NO_COMPILE_DIRS value for the run
+#   env     => H  any further environment for the child (the #1303 rows set
+#                 PCL_CACHE_DIR and PCL_CORE this way)
 #
 # EVERY FASL-PATH ROW PASSES compile => '*' (task #1261).  These fixtures live
 # in a tempdir, and since #1261 the DEFAULT is to compile only modules under
@@ -79,7 +85,15 @@ sub run_pcl {
     local $ENV{PCL_NO_COMPILE_DIRS} = $opt{nocomp};
     delete $ENV{PCL_NO_COMPILE_DIRS} unless defined $opt{nocomp};
     local $ENV{PERL5LIB} = $dir;
+    my %saved;
+    for my $k (sort keys %{ $opt{env} || {} }) {
+        $saved{$k} = $ENV{$k};
+        $ENV{$k} = $opt{env}{$k};
+    }
     my $out = `$pcl -I '$dir' -E '$code' 2>&1`;
+    for my $k (sort keys %saved) {
+        if (defined $saved{$k}) { $ENV{$k} = $saved{$k} } else { delete $ENV{$k} }
+    }
     $out =~ s/^;.*\n//gm;
     $out =~ s/^PCL Runtime loaded\n//gm;
     $out =~ s/^PCL: module .*\n//gm unless $opt{debug};
@@ -203,7 +217,7 @@ PM
 # runtime's macro expansions baked in and only this SBCL can load it.  A
 # cached fasl for another runtime must be unreachable, not merely stale.
 # (Under <cache>/modules/ since #1261, beside <cache>/core/ and <cache>/proto/.)
-my $cache = ($ENV{HOME} // '') . '/.pcl-cache/modules';
+my $cache = PCLPaths::cache_root() . '/modules';
 {
     my @fasls = glob("$cache/*-*.fasl");
     ok(scalar(@fasls) > 0,
@@ -347,4 +361,58 @@ sub _slurp {
     like(run_pcl($local, debug => 1, compile => "/no/such/dir:$dir"),
          qr/^PCL: module GuardBoot\.pm -> (?:FASL HIT|fasl-build)/m,
          'a nonexistent entry in the list is ignored, not fatal');
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# WHERE THE CACHE LIVES — $PCL_CACHE_DIR is a PROCESS-START fact (task #1303).
+#
+# It reached proto/, core/ and `pcl --clear-cache` (all Perl-side) and NOT the
+# module cache, because the runtime's *pcl-cache-dir* was a DEFPARAMETER
+# INITFORM: evaluated when the runtime loads, which on the normal path is when
+# a saved CORE is built.  So the variable was a lie for the biggest cache, and
+# an installed core built by another user would have sent every user's modules
+# to the BUILDER's home.  The fix is %p-default-cache-dir called from an
+# sb-ext:*init-hooks* entry, the same shape $$, the FP modes, the standard
+# handles and PCL_RAW_ELEMS already use.
+#
+# THE SECOND BLOCK IS THE ONE THAT MATTERS: it runs through a saved core built
+# while a DIFFERENT cache directory was in force (the ambient one — this box's
+# ~/.pcl-cache, or whatever $PCL_CACHE_DIR the gate itself ran under), which is
+# the installed-core shape no source-mode rehearsal reproduces.
+write_mod('CacheHome', <<'PM');
+package CacheHome;
+sub v { 42 }
+1;
+PM
+{
+    my $alt = tempdir(CLEANUP => 1);
+    is(run_pcl('use CacheHome; print CacheHome::v();',
+               compile => '*', env => { PCL_CACHE_DIR => $alt }),
+       '42', 'a module loads with PCL_CACHE_DIR pointing at a fresh directory');
+    ok(scalar(glob("$alt/modules/*.lisp")),
+       '... its transpile is written UNDER PCL_CACHE_DIR');
+    ok(scalar(glob("$alt/modules/*.fasl")),
+       '... and so is its fasl');
+    ok(scalar(glob("$alt/modules/*.deps")),
+       '... and so is its dependency manifest');
+    # NOT a file COUNT of the default cache: it is shared with every other
+    # gate file running in parallel (and with any other PCL on this box), so a
+    # count is a race.  The precise question is whether THIS module reached it,
+    # and the manifest answers it by name — the fixture lives in a tempdir, so
+    # only this run could have written a manifest naming that path.
+    my @leaked = grep { _slurp($_) =~ m{^source\t\S+\t\Q$dir\E/CacheHome\.pm$}m }
+                 glob("$cache/*.deps");
+    is(scalar(@leaked), 0,
+       '... and NOTHING about it was written to the default cache directory');
+
+    # Through a SAVED CORE, which is how PCL normally starts.  The core was
+    # built under the ambient cache directory; this run names another one.
+    my $core = PCLSbcl::cached_core("$root/cl/pcl-runtime.lisp");
+    ok($core && -f $core, 'a saved core is available for the init-hook row');
+    my $alt2 = tempdir(CLEANUP => 1);
+    run_pcl('use CacheHome; print CacheHome::v();',
+            compile => '*', env => { PCL_CACHE_DIR => $alt2,
+                                     ($core ? (PCL_CORE => $core) : ()) });
+    ok(scalar(glob("$alt2/modules/*.lisp")),
+       'a SAVED CORE writes the module cache where THIS run says, not where it was built');
 }

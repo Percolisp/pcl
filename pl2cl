@@ -196,9 +196,55 @@ my $manifest_mode = 0;  # Print the per-program manifest as JSON, not the CL
 my $facts_mode = 0;     # Annotate the emission with every Kind-A/B licence
 my $sexp_mode = 0;      # Print the lowered tree as PORTABLE S-expressions
 my $deps_file;          # Write the dependency manifest sidecar here (#1261)
+my $want_help = 0;      # --help; without it GetOptions answered "Unknown option: help"
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
+# ONE usage text, printed by --help (exit 0) and by a run with no source at
+# all (exit 1) — they used to be one text and one absence.
+sub usage_text {
+  return <<'USAGE';
+Usage: pl2cl [options] <file.pl>
+   or: pl2cl '$x = 1;'
+   or: echo '$x = 1;' | pl2cl
+
+Transpiles Perl to Common Lisp on stdout.  `pcl` is the everyday command --
+it runs the result; this is the compiler behind it.
+
+Modes:
+  (default)       Transpile to stdout
+  --bundle        Compile to single .fasl with runtime + all dependencies
+  --executable    Create standalone executable (bonus feature!)
+
+Options:
+  -h, --help      This message
+  -o, --output    Output file (default: <input>.fasl or <input>)
+  --no-cache      Disable module caching for the run of the emitted program
+                  (also: PCL_NO_CACHE=1, and `pcl --no-cache`, which
+                  forwards this flag)
+  --cache-lisp    Cache .lisp instead of .fasl (for debugging)
+  --module        Emit a module: no program preamble (this is what the
+                  runtime spawns when a `use` misses the cache)
+  --extension     Build a checked-in cl/*.lisp artifact: no program
+                  preamble (it loads INTO a program that has one)
+  --manifest      Print the program's IR manifest as JSON instead of
+                  the CL: uses / needs / facts (docs/ir-spec.md 10b)
+  --emit-sexp     Print the lowered tree as portable S-expressions instead
+                  of the CL (docs/ir-spec.md 12b)
+  --facts         Annotate the emission with every optimization licence
+                  that held: (p-fact (NAME) FORM)
+  --deps FILE     Write the dependency manifest sidecar to FILE: every
+                  module whose prototypes/exports this parse read, with
+                  a content hash (the runtime's cache validity, #1261)
+
+Environment:
+  PCL_OPT         switch named optimizations off, e.g. PCL_OPT=none
+  PCL_CACHE_DIR   root of the per-user caches (see `pcl --help`)
+  PCL_MEM_CAP_MB  address-space cap for this compiler process (default 4096)
+USAGE
+}
+
 GetOptions(
+  'h|help'       => \$want_help,
   'no-cache'     => \$no_cache,
   'cache-lisp'   => \$cache_lisp,
   'module'       => \$is_module,
@@ -214,7 +260,9 @@ GetOptions(
   "emit-sexp"    => \$sexp_mode,     # print the data form INSTEAD of the CL
   "deps=s"       => \$deps_file,     # write the dependency manifest sidecar
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
-) or die "Usage: pl2cl [options] <file.pl>\n";
+) or die usage_text();
+
+if ($want_help) { print usage_text(); exit 0 }
 
 # THE PER-PROGRAM MANIFEST (task #1171; docs/plan-speed-and-ir-s470.md Part B
 # item B2, grammar in docs/ir-spec.md §10b).  `--manifest` prints JSON saying
@@ -661,26 +709,7 @@ elsif (!-t STDIN) {
   print $output;
 }
 else {
-  say "Usage: pl2cl [options] <file.pl>";
-  say "   or: pl2cl '\$x = 1;'";
-  say "   or: echo '\$x = 1;' | pl2cl";
-  say "";
-  say "Modes:";
-  say "  (default)       Transpile to stdout";
-  say "  --bundle        Compile to single .fasl with runtime + all dependencies";
-  say "  --executable    Create standalone executable (bonus feature!)";
-  say "";
-  say "Options:";
-  say "  -o, --output    Output file (default: <input>.fasl or <input>)";
-  say "  --no-cache      Disable module caching (also: PCL_NO_CACHE=1)";
-  say "  --cache-lisp    Cache .lisp instead of .fasl (for debugging)";
-  say "  --extension     Build a checked-in cl/*.lisp artifact: no program";
-  say "                  preamble (it loads INTO a program that has one)";
-  say "  --manifest      Print the program's IR manifest as JSON instead of";
-  say "                  the CL: uses / needs / facts (docs/ir-spec.md 10b)";
-  say "  --deps FILE     Write the dependency manifest sidecar to FILE: every";
-  say "                  module whose prototypes/exports this parse read, with";
-  say "                  a content hash (the runtime's cache validity, #1261)";
+  print usage_text();
   exit 1;
 }
 

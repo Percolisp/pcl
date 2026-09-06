@@ -65,6 +65,14 @@ usage: $0 [--prefix DIR] [--no-core] [--force] [--dry-run] [--quiet]
                  install and shadow a core module)
   --dry-run      print the steps, change nothing
   --quiet        only warnings and errors
+
+Caches.  The SBCL core is compiled HERE, at install time, into
+<prefix>/lib/pcl/pcl.core -- the same model perl uses for its own library,
+and the reason no user's first program pays for it.  The per-module cache is
+per USER and is built on first use, under \$PCL_CACHE_DIR (default
+~/.pcl-cache, created with mode 0700); nothing under the install prefix is
+written at run time.  `pcl --cache-info` says where a given user's cache is
+and what is in it, and `pcl --clear-cache` empties it.
 USAGE
     exit 0;
 }
@@ -161,6 +169,22 @@ sub copy_tree {
     copy($src, $dst) or die "copy $src -> $dst: $!\n";
     my $mode = (stat $src)[2] & 07777;
     chmod $mode, $dst;
+}
+
+# The version, written down ONCE — here, where a checkout is still in reach.
+# An installed tree has no .git and no CHANGELOG, so without this file
+# `pcl --version` can only say "unknown", and a bug report loses the one
+# number that says which PCL is running (task #1300).
+sub write_version_file {
+    return if $opt{'dry-run'};
+    my $v = qx{git -C \Q$root\E describe --tags --always --dirty 2>/dev/null};
+    chomp $v if defined $v;
+    $v = "unknown (installed from a tree with no git history)"
+        unless defined $v && length $v;
+    open my $fh, '>', "$libdir/VERSION" or die "write $libdir/VERSION: $!\n";
+    say {$fh} $v;
+    close $fh;
+    say_info("VERSION $v");
 }
 
 # ------------------------------------------------------------------- wrappers
@@ -285,6 +309,7 @@ if (-d $libdir && !$opt{'dry-run'}) {
 say_step($opt{'dry-run'} ? "would copy the runtime tree to $libdir" : "copying the runtime tree to $libdir");
 say_info($_) for @TREE;
 copy_tree("$root/$_", "$libdir/$_") for @TREE;
+write_version_file();
 
 say_step($opt{'dry-run'} ? "would write wrappers in $bindir" : "writing wrappers in $bindir");
 make_path($bindir) unless -d $bindir || $opt{'dry-run'};
