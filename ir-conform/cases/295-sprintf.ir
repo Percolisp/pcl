@@ -1,8 +1,0 @@
-(|p-data-form| 1 "295-sprintf.pl" "program" "v2-830")
-(|p-bucket| 0 |:decls| |:compile|)
-(|p-declare-sub| |pl-f|)
-(|p-bucket| 0 |:defs| |:compile|)
-(|p-sub| |pl-f| (|&rest| |%_args|) (|:returns| |:num| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| (|:nonlocal_exit.eval_block| |:nonlocal_exit.return|)) (|p-args-body| (|block| |nil| (|p-void-ctx| (|p-eval-block| (|p-return| 5)) (|p-caller-ctx| 9)))))
-(|p-bucket| 0 |:run| |:run|)
-(|p-let| ((|$curr_test| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$curr_test| 56) (|p-| (|p-scalar-ctx| (|p-eval-block| (|p-print| (|p-string-concat| "ok " |$curr_test| "\n")) (|p-die| |:loc| "295-sprintf.pl line 11" (|p-sprintf| "ok %d\n" (|p-+| |$curr_test| 2))) 1)) (|p-printf| (|p-string-concat| "ok %d\n" |$@|) (|p-+| |$curr_test| 1))) (|p-print| "after: [" (|p-if| (|p-defined| |$@|) |$@| "undef") "]\n") (|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| "a" "b" "c" "d")) (|p-let| ((|@b| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@b| (|p-eval| |@a| (|list| (|cons| "$curr_test" |$curr_test|) (|cons| "@a" |@a|) (|cons| "@b" |@b|)))) (|p-print| (|p-string-concat| "b=" (|p-join| |$"| |@b|) " err=[" |$@| "]\n")) (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|p-| (|p-scalar-ctx| (|p-eval-block| 42)) 7)) (|p-print| (|p-string-concat| "r=" |$r| "\n")) (|p-let| ((|$s| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$s| (|p-| (|p-scalar-ctx| (|p-eval-block| (|p-die| |:loc| "295-sprintf.pl line 19" "boom\n") 1)) "caught")) (|p-print| (|p-string-concat| "s=" |$s| "\n")) (|p-print| "f=" (|pl-f|) "\n"))))))
-(|p-data-form-end| 3 5)

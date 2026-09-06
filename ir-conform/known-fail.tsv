@@ -13,7 +13,7 @@
 #
 # case<TAB>task<TAB>cause
 010-array	1248	Internals::SvREADONLY(@a,1) leaves scalar(@a) returning the ELEMENTS, not the count (perl B2, PCL B12)
-022-array	1249	\(@b, 9) does not distribute over the array's elements: perl 3 refs, PCL 2
+022-refs	1249	\(@b, 9) does not distribute over the array's elements: perl 3 refs, PCL 2
 033-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line
 034-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line
 045-autoviv	1241	an RVALUE nested subscript does not autovivify the intermediate ($h{a}{b} read leaves %h empty)
@@ -23,10 +23,10 @@
 055-autoviv	1241	a three-level rvalue read autovivifies neither level
 059-autoviv	1241	$h{a}{b} &&= 5 does not autovivify the intermediate
 060-autoviv	1241	a plain nested read does not autovivify the intermediate
-077-coercion	1242	*_{ARRAY} after `undef *_` still reports a slot (residue of #1020)
-078-coercion	1242	`undef *_` inside a sub leaves *_{ARRAY} defined
-092-hash	1242	*a{ARRAY} / *h{HASH} still report present after `undef *a` / `undef *h`
-094-hash	1242	the ARRAY and HASH slots survive `undef *GLOB` in the introspection form
+077-typeglob	1242	*_{ARRAY} after `undef *_` still reports a slot (residue of #1020)
+078-typeglob	1242	`undef *_` inside a sub leaves *_{ARRAY} defined
+092-typeglob	1242	*a{ARRAY} / *h{HASH} still report present after `undef *a` / `undef *h`
+094-typeglob	1242	the ARRAY and HASH slots survive `undef *GLOB` in the introspection form
 120-io	1247	an UNCAUGHT die exits 1 (SBCL) where perl exits $! (2 here)
 122-io	1247	a failed sysread on a directory handle leaves $! at 0; perl sets EISDIR (21)
 123-io	1247	a failed readline on a directory handle leaves $! at 2; perl sets EISDIR (21)
@@ -43,26 +43,26 @@
 173-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0`
 186-loops-exits	1244	`next` from a called sub dies where perl runs the loop's `continue` block
 187-loops-exits	1244	`last` from a called sub in a bare block with `continue` dies
-201-misc	1240	`Illegal division by zero` carries `(eval 0) line 0`
+201-exception	1240	`Illegal division by zero` carries `(eval 0) line 0`
 213-oo	1249	a trailing BAREWORD statement is emitted as a CALL; perl treats it as a string constant
 237-refs	1249	`$#{'main::ga'}` (symbolic last-index) answers 7, perl answers 2
 238-refs	1249	`$#{'main::ga'}` (symbolic last-index) answers 7, perl answers 2
 239-refs	1249	a trailing BAREWORD statement is emitted as a CALL; perl treats it as a string constant
-243-regex	1249	utf8::is_utf8 on a byte string answers 1; perl answers 0
-245-regex	1248	scalar(@a) after Internals::SvREADONLY returns the elements
-246-regex	1240	the runtime-raised errors in the table carry `(eval 0) line 0`
-251-regex	1248	`%` with an Inf operand answers NaN; perl answers 5 / Inf / -Inf
-252-regex	1248	`%` with an Inf operand answers NaN; perl answers 5 / Inf / -Inf
-253-regex	1249	`exists $string->{k}` must die under `use strict refs`; PCL answers ''
-258-regex	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line
+243-string	1249	utf8::is_utf8 on a byte string answers 1; perl answers 0
+245-array	1248	scalar(@a) after Internals::SvREADONLY returns the elements
+246-exception	1240	the runtime-raised errors in the table carry `(eval 0) line 0`
+251-numeric	1248	`%` with an Inf operand answers NaN; perl answers 5 / Inf / -Inf
+252-numeric	1248	`%` with an Inf operand answers NaN; perl answers 5 / Inf / -Inf
+253-string	1249	`exists $string->{k}` must die under `use strict refs`; PCL answers ''
+258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line
 272-sort	1249	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies
-276-sort	1248	2**63 stringifies as an exact integer; perl prints %.15g (9.22337203685478e+18)
-282-sort	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0`
-288-sort	1244	the loop-control-from-a-sub matrix: the coderef row dies where perl exits the loop
-295-sprintf	1249	`eval @array` calls ARRAY; perl evaluates the array in scalar context ("4")
-299-sprintf	1246	`close($fh)` after a failed open returns undef; perl returns ''
-308-sprintf	1246	a failed `open($a[0], ...)` does not autovivify the array element's handle
-309-sprintf	1246	a failed `open($h{k}, ...)` does not autovivify the hash element's handle
+276-numeric	1248	2**63 stringifies as an exact integer; perl prints %.15g (9.22337203685478e+18)
+282-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0`
+288-loops-exits	1244	the loop-control-from-a-sub matrix: the coderef row dies where perl exits the loop
+295-string-eval	1249	`eval @array` calls ARRAY; perl evaluates the array in scalar context ("4")
+299-io	1246	`close($fh)` after a failed open returns undef; perl returns ''
+308-io	1246	a failed `open($a[0], ...)` does not autovivify the array element's handle
+309-io	1246	a failed `open($h{k}, ...)` does not autovivify the hash element's handle
 329-string-eval	1244	`eval q{last}` inside a loop does not reach the loop
 335-string-eval	1245	printf "%-8s" of a RAW double raised by p-eval: SBCL type-error (crash)
 337-string-eval	1245	printf "%-8s" of a RAW double raised by p-eval: SBCL type-error (crash)

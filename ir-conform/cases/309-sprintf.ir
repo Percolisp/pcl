@@ -1,4 +1,0 @@
-(|p-data-form| 1 "309-sprintf.pl" "program" "v2-830")
-(|p-bucket| 0 |:run| |:run|)
-(|p-let| ((|%h| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-let| ((|$ok| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$ok| (|p-if| (|p-open| (|p-gethash| |%h| "k") "<" "/nonexistent-x-1271") 1 0)) (|p-printf| "ok=%s defined=%s\n" |$ok| (|p-if| (|p-defined| (|p-gethash| |%h| "k")) 1 0))))
-(|p-data-form-end| 1 2)

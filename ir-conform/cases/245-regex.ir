@@ -1,4 +1,0 @@
-(|p-data-form| 1 "245-regex.pl" "program" "v2-830")
-(|p-bucket| 0 |:run| |:run|)
-(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| 1 2)) (|p-void-ctx| (|Internals::pl-SvREADONLY| |@a| 1)) (|p-let| ((|$ok| |:str| (|%pcl-to-string-strict| (|p-scalar-ctx| (|p-eval-block| (|p-push| |@a| 3) 1)) "$ok"))) (|p-print| "ok=" (|p-if| |$ok| 1 0) " err=" (|p-if| (|p-scalar-ctx| (|p-=~| |$@| (|p-regex| |:pat| "read-only" |:flags| "" |:tier| |:native|))) "ro" (|p-string-concat| "other:" |$@|)) " n=" (|p-list-ctx| (|p-scalar| |@a|)) "\n")))
-(|p-data-form-end| 1 1)

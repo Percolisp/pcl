@@ -9,7 +9,7 @@ Written s470bt (Part B item B7 of `docs/plan-speed-and-ir-s470.md`); everything
 asserted about perl's semantics comes from `docs/ir-spec.md` or a probe.
 
 **The acceptance bar is the same for every backend**: `tools/ir-conform
---backend ./my-backend` — 347 small programs with perl 5.40.3's stdout and exit
+--backend ./my-backend` — 345 small programs with perl 5.40.3's stdout and exit
 code recorded beside each (`ir-conform/README.md`).  A C backend is done when
 it answers every case the way real perl does.
 
@@ -223,7 +223,7 @@ a PCRE2 path on either target, and the announce layer.
 ## 7. Acceptance
 
 ```sh
-tools/ir-conform --backend ./my-backend        # 347 cases, perl as the oracle
+tools/ir-conform --backend ./my-backend        # 345 cases, perl as the oracle
 tools/ir-conform --backend ./my-backend 1xx    # one slice (substring filter)
 ```
 
@@ -234,5 +234,5 @@ buffering-dependent, so comparing merged streams would bless a flake.
 
 Slice the corpus by `pl2cl --manifest`'s `NEEDS` to get the subset a partial
 backend owes: that is what the manifest is for.  PCL's own CL target scores
-289 of 347 with 58 known bugs (`ir-conform/known-fail.tsv`, each with its task)
-— the honest ceiling to measure against, not 347.
+287 of 345 with 58 known bugs (`ir-conform/known-fail.tsv`, each with its task)
+— the honest ceiling to measure against, not 345.

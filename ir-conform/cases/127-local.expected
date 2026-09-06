@@ -1,3 +1,0 @@
-#!ir-conform/expected v1 exit=0 bytes=96
-emit-base p-let=0     p-sub=0    p-raw-params=0
-emit-new  p-let=0     p-sub=0    p-raw-params=0

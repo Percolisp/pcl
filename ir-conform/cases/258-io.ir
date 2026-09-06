@@ -1,0 +1,4 @@
+(|p-data-form| 1 "258-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$in| |:box| (|p-cl-text| "(make-p-box nil)")) (|$out| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-pipe| |$in| |$out|) (|p-binmode| |$out|) (|p-binmode| |$in| ":utf8") (|p-syswrite| |$out| "...\n") (|p-let| ((|$line| |:str-buffer| (|%pcl-str-buffer| "ascii"))) (|%pcl-str-append| |$line| (|p-readline| |$in|)) (|p-print| (|p-string-concat| "got=[" |$line| "]\n")) (|p-let| ((|$in2| |:box| (|p-cl-text| "(make-p-box nil)")) (|$out2| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-pipe| |$in2| |$out2|) (|p-binmode| |$out2| ":utf8") (|p-binmode| |$in2|) (|p-syswrite| |$out2| "abc\n") (|p-let| ((|$l2| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$l2| (|p-readline| |$in2|)) (|p-print| (|p-string-concat| "got2=[" |$l2| "]")) (|p-if| (|p-!| (|p-scalar-ctx| (|p-=~| |$l2| (|p-regex| |:pat| "\\n\\z" |:flags| "" |:tier| |:native|)))) (|p-print| "\n"))))))
+(|p-data-form-end| 1 5)

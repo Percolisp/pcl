@@ -2,19 +2,19 @@
 
 Append new entries at the top. One section per session.
 
-## Session 470bt (Opus agent, 2026-09-06) — Part B items B6 + B7: the IR CONFORMANCE CORPUS (347 cases, perl as the oracle) and the two target notes rewritten as tables over the generated inventory
+## Session 470bt (Opus agent, 2026-09-06) — Part B items B6 + B7: the IR CONFORMANCE CORPUS (345 cases, perl as the oracle) and the two target notes rewritten as tables over the generated inventory
 
 **B6 — `tools/ir-conform` and `ir-conform/cases/`.**  `tools/pcl-conform` decides
 whether PCL is a finished XS *host* by running pclxs's corpus against it; this
 is the same sentence one level up — **a BACKEND for PCL's IR is done when it
-answers every case the way real perl does**.  347 small Perl programs, each
-named by the semantics it pins (`NNN-<topic>.pl`, 22 topics), each with perl
+answers every case the way real perl does**.  345 small Perl programs, each
+named by the semantics it pins (`NNN-<topic>.pl`, 23 topics), each with perl
 5.40.3's stdout and exit code recorded beside it (`.expected`) and the
 DATA-form IR next to that (`.ir`, `pl2cl --emit-sexp`, ir-spec §12b).
 
 *Where they came from.*  Every `p*.pl` a review session left behind under
 `~/pcl-agent-scratch/{s469,s470}`: 752 candidate files → 731 distinct bodies →
-347 that survived vetting.  A candidate was kept only if it is self-contained
+347 that survived vetting; two were then dropped as harvest artifacts (measurement scripts that glob a directory which does not exist, so their loop body never runs and their output pins nothing) and twenty were re-topiced by hand out of the divergence triage, leaving 345.  A candidate was kept only if it is self-contained
 (no `%ENV`, no `time`/`rand`/`$$`, no non-core module, no absolute path,
 creates no files), produces stdout, and **repeats itself when run twice under
 two DIFFERENT file names** — which is how path dependence is caught rather
@@ -36,8 +36,8 @@ JS or C backend author runs, with nothing PCL-specific in it (smoke-tested with
 a stand-in backend).  Also `--record`, `--list`, `--sample N`, `--jobs N`,
 `--strict`.
 
-*Measured* (box loaded, two sibling agents, load ~5): **PCL leg 289 pass / 0
-fail / 58 known / 0 stale, 65 s at `--jobs 2`**; **perl leg 347/347, 19 s**.
+*Measured* (box loaded, two sibling agents, load ~5): **PCL leg 287 pass / 0
+fail / 58 known / 0 stale, 65 s at `--jobs 2`**; **perl leg 345/345, 19 s**.
 
 *The 58 are PCL bugs the corpus found*, and that was the expected shape: a
 harvest of review probes is dense in exactly the places PCL is still wrong.
@@ -63,7 +63,7 @@ directory handle, and an uncaught die exits 1 where perl exits `$!` (3);
 `scalar(@a)` return the elements (5); **#1249** seven singletons (8).  Two more
 map to owners that already exist: 138-local → #221, 345-tie → #155.
 
-*Gate row* `Pl/t/ir-conform-01.t`, 8 rows, **6.3 s**: the structural invariants
+*Gate row* `Pl/t/ir-conform-01.t`, 8 rows, **6-9 s**: the structural invariants
 over the WHOLE corpus (every case has an oracle, every oracle's header matches
 its body, every `.rules` line names a known normalisation, every known-fail row
 names a live case and a task) plus an evenly spaced **20-case sample**.  The

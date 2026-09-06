@@ -24,6 +24,14 @@ The cases were harvested from the probe files review sessions left behind —
 each one was written to answer a real question about perl's behaviour, which
 is why the corpus is dense in the places that are actually hard.
 
+**The `<topic>` half of a name is a coarse label, not a promise.** It comes
+from a first-match classification over the case body (the ordered rule list is
+in the harvest script), so a case that mentions `sort` while pinning something
+about numbers is filed under `sort`. The ones inspected by hand — every case
+in `known-fail.tsv` — carry a checked label; the rest carry the classifier's.
+A case's real content is its file, and `tools/ir-conform --list` prints the
+label beside the name so a wrong one is visible.
+
 ## How to measure your backend
 
 ```sh
@@ -70,7 +78,7 @@ A case with no `.expected` **dies** rather than being skipped (CLAUDE.md rule
 
 ## known-fail.tsv
 
-PCL's own target passes 289 of 347 cases. The other 58 are PCL bugs the corpus
+PCL's own target passes 287 of 345 cases. The other 58 are PCL bugs the corpus
 found, listed in `known-fail.tsv` with the task that owns each. Such a case
 still runs; it prints `known` and does not fail the run. An **unlisted**
 failure fails the run like a regression, and a listed case that starts
@@ -86,6 +94,6 @@ by re-blessing a run.
 `Pl/t/ir-conform-01.t` is the gate row: the corpus's structural invariants
 (every case has an oracle, every oracle's header matches its body, every
 `.rules` line names a known normalisation, every known-fail row names a live
-case and a task) plus an evenly spaced **20-case sample**, ~6 s. The full
+case and a task) plus an evenly spaced **20-case sample**, ~6-9 s. The full
 corpus (~65 s at `--jobs 2`) is a WHAT-TO-RUN-WHEN entry: run it after a
 `cl/` runtime change or a `Pl/` emission change.

@@ -1,4 +1,0 @@
-(|p-data-form| 1 "201-misc.pl" "program" "v2-830")
-(|p-bucket| 0 |:run| |:run|)
-(|p-let| ((|$x| |:scalar| 1)) (|p-let| ((|$y| |:scalar| 0)) (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|p-scalar-ctx| (|p-eval-block| (|p-/| |$x| |$y|)))) (|p-print| (|p-string-concat| "err=[" |$@| "]\n")))))
-(|p-data-form-end| 1 1)

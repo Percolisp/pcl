@@ -1,4 +1,0 @@
-(|p-data-form| 1 "308-sprintf.pl" "program" "v2-830")
-(|p-bucket| 0 |:run| |:run|)
-(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-let| ((|$ok| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$ok| (|p-if| (|p-open| (|p-aref| |@a| 0) "<" "/nonexistent-x-1271") 1 0)) (|p-printf| "ok=%s defined=%s\n" |$ok| (|p-if| (|p-defined| (|p-aref| |@a| 0)) 1 0))))
-(|p-data-form-end| 1 2)

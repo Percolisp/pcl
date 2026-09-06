@@ -300,7 +300,7 @@ own.  Everything it taught is now DERIVABLE, because the IR describes itself:
 | what does THIS program need of me? | `pl2cl --manifest` — `USES` / `NEEDS` / `FACTS` per program (ir-spec §10b); `p-sub`'s `:needs` scopes it per sub |
 | which variable is a plain `let` and which is a cell? | the IR says so: `p-let`'s CLASS and facts tail, `p-raw-params`' parameter classes (ir-spec §2b.2a, §5.1) |
 | how do I parse it without a CL reader? | `pl2cl --emit-sexp` — the DATA form, five reader rules, a working reader in Perl and JS (ir-spec §12b) |
-| am I right? | `tools/ir-conform --backend ./my-backend` — 347 cases with perl 5.40.3 as the oracle (`ir-conform/README.md`) |
+| am I right? | `tools/ir-conform --backend ./my-backend` — 345 cases with perl 5.40.3 as the oracle (`ir-conform/README.md`) |
 
 The four probe walkthroughs are in git history if the narrative helps:
 `git show 981480f4~1:docs/js-target-plan.md`.  The JS on the right of every
@@ -504,7 +504,7 @@ its measurement:
 | `#x` `#o` `#b` `#NNr` are NUMBERS | 400+ of them in `perl-tests/pack.t` |
 | a control character is never raw in a literal | it is `(p-esc "…")` with the §12b escape alphabet — so a line-oriented consumer is correct, and `p-esc` is the same unescape routine the data form's reader needs |
 
-**Acceptance.**  `tools/ir-conform --backend ./my-backend` (347 cases, perl
+**Acceptance.**  `tools/ir-conform --backend ./my-backend` (345 cases, perl
 5.40.3 as the oracle, `ir-conform/README.md`).  Milestone M0's own bar is the
 subset of cases whose manifest `NEEDS` is within what M0 implements — the
 manifest is there precisely so that subset is computed, not guessed.
@@ -567,9 +567,9 @@ manifest is there precisely so that subset is computed, not guessed.
 
 Since s470bt every milestone's acceptance is the SAME corpus, sliced by what
 the milestone implements: `tools/ir-conform --backend ./my-backend` over the
-cases whose `pl2cl --manifest` `NEEDS` fits inside it (347 cases, perl 5.40.3
+cases whose `pl2cl --manifest` `NEEDS` fits inside it (345 cases, perl 5.40.3
 as the oracle — `ir-conform/README.md`).  The slice is computed from the
-manifest, never guessed, and the CL target's own score on it (289 pass, 58
+manifest, never guessed, and the CL target's own score on it (287 pass, 58
 known bugs) is the honest ceiling to measure against.
 
 * **M0 (the sketch §6 spike):** reader + walker + `pcl-rt.mjs` covering

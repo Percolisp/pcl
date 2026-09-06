@@ -1,8 +1,0 @@
-(|p-data-form| 1 "282-sort.pl" "program" "v2-830")
-(|p-bucket| 0 |:decls| |:compile|)
-(|p-declare-sub| |pl-f|)
-(|p-bucket| 0 |:defs| |:compile|)
-(|p-sub| |pl-f| (|&rest| |%_args|) (|:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|%p-dyn-loop-exit| |:last|))))
-(|p-bucket| 0 |:run| |:run|)
-(|p-let| ((|@x| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@x| (|p-list-ctx| (|p-eval-block| (|p-sort| (|p-sort-cmp| (|$a| |$b|) (|p-scalar-ctx| (|pl-f|) (|p-<=>| |$a| |$b|))) (|vector| 3 1 2))))) (|p-print| (|p-string-concat| "err=" |$@|)))
-(|p-data-form-end| 3 1)

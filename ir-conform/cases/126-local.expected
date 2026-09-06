@@ -1,3 +1,0 @@
-#!ir-conform/expected v1 exit=0 bytes=170
-emit-base fact-tokens=0     p-sub-with-plist=0     p-raw-params-classed=0    p-let=0
-emit-new  fact-tokens=0     p-sub-with-plist=0     p-raw-params-classed=0    p-let=0
