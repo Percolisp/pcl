@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 126;
+plan tests => 127;
 
 sub run_cl {
     my ($code) = @_;
@@ -171,6 +171,25 @@ test_cl('List::Util first/reduce block form parses and respects list context',
     . ' my $r = reduce { $a + $b } 1,2,3,4;'
     . ' print "[$f][$r]\n";',
     "[3][10]\n");
+
+# …and the block is called with NO ARGUMENTS: perl sets `$_` and passes nothing
+# (probed on 5.40.3 — scalar(@_) is 0 for first/any/all/none/notall alike).
+# The shim passed the element as an argument too, which is invisible in the
+# `{ BLOCK }` form and fatal in the `\&NAME` form: a callback that starts
+# `my $n = shift` then sees the ELEMENT where perl gives undef.  That is
+# Scalar-List-Utils t/first.t's "from active sub" row, whose `rec` recursed
+# forever on the argument and took the whole file down with it (s470bw, #1286).
+test_cl('a List::Util block/callback is called with no arguments, only $_',
+    'use List::Util qw(first any all none notall);'
+    . ' my @n; my $v;'
+    . ' $v = first  { push @n, scalar(@_); 1 } 7;'
+    . ' $v = any    { push @n, scalar(@_); 1 } 7;'
+    . ' $v = all    { push @n, scalar(@_); 1 } 7;'
+    . ' $v = none   { push @n, scalar(@_); 0 } 7;'
+    . ' $v = notall { push @n, scalar(@_); 0 } 7;'
+    . ' sub cb { my $n = shift; return defined($n) ? "ARG" : "none" }'
+    . ' print join(",", @n), "|", first(\&cb, 5), "\n";',
+    "0,0,0,0,0|5\n");
 
 # A 'my @arr'/'my %hash' captured by a closure is renamed to a let-bound LEXICAL
 # (@a__lex__N) so the closure sees per-instance state.  Bug (session 244): the

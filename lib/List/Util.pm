@@ -111,7 +111,7 @@ sub first (&@) {
     my $code = shift;
     _need_code($code, "first");
     for (@_) {
-        return $_ if $code->($_);
+        return $_ if $code->();
     }
     return undef;
 }
@@ -120,7 +120,7 @@ sub any (&@) {
     my $code = shift;
     _need_code($code, "any");
     for (@_) {
-        return 1 if $code->($_);
+        return 1 if $code->();
     }
     return '';
 }
@@ -129,7 +129,7 @@ sub all (&@) {
     my $code = shift;
     _need_code($code, "all");
     for (@_) {
-        return '' unless $code->($_);
+        return '' unless $code->();
     }
     return 1;
 }
@@ -138,7 +138,7 @@ sub none (&@) {
     my $code = shift;
     _need_code($code, "none");
     for (@_) {
-        return '' if $code->($_);
+        return '' if $code->();
     }
     return 1;
 }
@@ -147,7 +147,7 @@ sub notall (&@) {
     my $code = shift;
     _need_code($code, "notall");
     for (@_) {
-        return 1 unless $code->($_);
+        return 1 unless $code->();
     }
     return '';
 }
