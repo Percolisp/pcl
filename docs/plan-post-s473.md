@@ -38,7 +38,7 @@ successor.
 | 3 | **#1262** | `docs/caching.md` for users — Sonnet, `model: "sonnet"` (`s470/s1262`) | none | BY merged |
 | 4 | **s473a** | the `local` family: #1243(a)(b)(c) = #1192 + #1260, #1190 — 7 corpus rows | v2-870 | a slot |
 | 5 | **s473b** | the nested-element family: #1241 = #1150 (read vivifies), #1151, #1152, #1010 — 7 rows; bench-gated | v2-880 | a slot |
-| 6 | **s473p** | perf round 30: #1187 (the non-simple operand in the regex scan), #1200 (string evals on disk), the single-array foreach lever | v2-890 | BU merged |
+| 6 | **s473p** | perf round 30 — **REORDERED s474 (USER)**: member 1 = the **#71 PCRE2 engine SPIKE** (measurement + stop rule + portability record; #1187 only if cl-ppcre stays), then #1200, then the single-array foreach lever | v2-890 | **NEXT free slot** (BU merged; USER "Good") |
 | 7 | **s473c** | #1240 die LOCATION — sized first (register vs cold-branch constant), shipped by the ≤1 %/≤3 % rule — 8 rows | v2-900 | s473b merged (both touch the accessor emission) |
 | 8 | **s473d** | numeric representation: the CRASH pair #1245 + #1230, #1248(a)=#1191, #1248(b), #1012, #1248(c) — 10 rows | v2-910 | a slot |
 | 9 | **s473e** | loop control: #1244(a)=#1161, (b), (c), #1164 — 4 rows | v2-920 | a slot |
@@ -64,6 +64,7 @@ s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431�
   regression: re-run alone, cite the task.  Until BY lands, every gate on this box may lose a
   file to it.
 - The perf line's next rounds are ordered by §A.4.1/§A.4.3, not by A.2's guesses (s470bn's
+- **s474 (USER): ONE regex engine at run time, never two; the #71 spike BEFORE #1187; and a platform-touching change (an engine, a foreign library, an installer step) ships only with the install matrix green WITH it plus a macOS leg — "we are not writing software for our laptop".**  Rulings in DECIDED §s474.
   finding); the correctness line's metric is the corpus's known-fail count plus the sweep and
   companion totals.
 
