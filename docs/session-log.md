@@ -2,6 +2,119 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bt (Opus agent, 2026-09-06) — Part B items B6 + B7: the IR CONFORMANCE CORPUS (347 cases, perl as the oracle) and the two target notes rewritten as tables over the generated inventory
+
+**B6 — `tools/ir-conform` and `ir-conform/cases/`.**  `tools/pcl-conform` decides
+whether PCL is a finished XS *host* by running pclxs's corpus against it; this
+is the same sentence one level up — **a BACKEND for PCL's IR is done when it
+answers every case the way real perl does**.  347 small Perl programs, each
+named by the semantics it pins (`NNN-<topic>.pl`, 22 topics), each with perl
+5.40.3's stdout and exit code recorded beside it (`.expected`) and the
+DATA-form IR next to that (`.ir`, `pl2cl --emit-sexp`, ir-spec §12b).
+
+*Where they came from.*  Every `p*.pl` a review session left behind under
+`~/pcl-agent-scratch/{s469,s470}`: 752 candidate files → 731 distinct bodies →
+347 that survived vetting.  A candidate was kept only if it is self-contained
+(no `%ENV`, no `time`/`rand`/`$$`, no non-core module, no absolute path,
+creates no files), produces stdout, and **repeats itself when run twice under
+two DIFFERENT file names** — which is how path dependence is caught rather
+than blessed.  The 384 rejects are counted by reason in the harvest logs.
+
+*What is compared, and what is not.*  **stdout and the exit code.**  stderr is
+never the oracle: the interleaving of the two streams depends on buffering, so
+a merged compare would bless a flake; a case that wants to pin a diagnostic
+prints it to stdout itself.  A case whose output still carries something that
+is not the semantics is **normalised** by one of three named, closed
+projections (`.rules`: `die-location`, `hex-address`, `sort-lines` — each
+implementable in any language) or **rejected**.  Rule 12: a case with no
+`.expected` DIES rather than being skipped.
+
+*Three ways to run it.*  No arguments = PCL's own CL target, which is the proof
+the corpus is sound.  `--oracle` = perl again, the corpus's self-test.
+`--backend CMD` = `CMD <case>.ir` per case in a fresh cwd — the measurement a
+JS or C backend author runs, with nothing PCL-specific in it (smoke-tested with
+a stand-in backend).  Also `--record`, `--list`, `--sample N`, `--jobs N`,
+`--strict`.
+
+*Measured* (box loaded, two sibling agents, load ~5): **PCL leg 289 pass / 0
+fail / 58 known / 0 stale, 65 s at `--jobs 2`**; **perl leg 347/347, 19 s**.
+
+*The 58 are PCL bugs the corpus found*, and that was the expected shape: a
+harvest of review probes is dense in exactly the places PCL is still wrong.
+`ir-conform/known-fail.tsv` lists each with the task that owns it — the case
+still RUNS and prints `known`; an UNLISTED failure fails the run like a
+regression, and a listed case that starts PASSING is reported STALE and fails
+the run, so a fix cannot land without its row leaving the file (the skip
+registry's stale-detector).  Ten tasks filed, each with a minimal probe vs
+perl 5.40.3: **#1240** every runtime-raised die carries `at (eval 0) line 0.`
+where perl names the file and line (10 cases; an explicit `die "msg"` already
+gets it right — the emitted `p-die` carries `:loc`); **#1241** an RVALUE nested
+subscript does not autovivify the intermediate (7; #1058 fixed the `++`
+spelling); **#1242** `*a{ARRAY}` still present after `undef *a` (4; #1020
+residue); **#1243** `local($X) = LIST` assigns the COUNT, `local` in a call's
+argument list is never restored, `local ${'sym'}` never sets (4); **#1244**
+loop control from a called sub dies when the loop has a `continue` block, and
+`eval q{last}` never reaches the loop (5; #1022 residue); **#1245** a CRASH —
+`printf "%-8s"` of a raw double raised by `p-eval` reaches an SBCL type-error
+inside `sprintf-apply-width` (5); **#1246** a failed `open($a[0], …)` does not
+autovivify (3; #1271 residue); **#1247** no `$!` after a failed read on a
+directory handle, and an uncaught die exits 1 where perl exits `$!` (3);
+**#1248** `%` with Inf is NaN, `2**63` stringifies exactly, `SvREADONLY` makes
+`scalar(@a)` return the elements (5); **#1249** seven singletons (8).  Two more
+map to owners that already exist: 138-local → #221, 345-tie → #155.
+
+*Gate row* `Pl/t/ir-conform-01.t`, 8 rows, **6.3 s**: the structural invariants
+over the WHOLE corpus (every case has an oracle, every oracle's header matches
+its body, every `.rules` line names a known normalisation, every known-fail row
+names a live case and a task) plus an evenly spaced **20-case sample**.  The
+full corpus is a WHAT-TO-RUN-WHEN entry — after a `cl/` runtime change or a
+`Pl/` emission change — not a gate row: wall time is the metric.
+
+The corpus `.pl` files are ours, so `ir-conform` joins `PCLLicense`'s `@ROOTS`
+and they carry the tag; `.expected` / `.ir` / `.rules` are data with no code
+extension, so the scan never reaches them.  The `.ir` snapshots are refreshed
+by `--record-ir` and deliberately **not** gated against the generation stamp:
+they would churn on every emission change and gate nothing the behaviour
+comparison does not already gate.
+
+**B7 — the target notes as tables.**  `docs/js-target-plan.md` Part II §II.0–
+§II.7 rewritten (684 → 580 lines).  It used to be four worked probe programs
+with their captured IR beside hand-written JS — ~250 lines of example keyed to
+one commit's emission, going stale on its own.  Everything it taught is now
+DERIVABLE, and the rewrite says where from, in one table: the op inventory
+(§10a, generated), the §11b kernel (measured), `pl2cl --manifest` (§10b), the
+declaration classes (§2b.2a), the data form (§12b) and the conformance corpus.
+The new §II.2 is one row per **B1 inventory family** (54 families, 698 names)
+with the JS rendering; §II.1 gains the **§B.3 facts table** with a JS column
+per fact and a ✓/✗ saying which PCL proves today; §II.3 carries the §11b kernel
+groups; §II.7 the five reader rules.  §II.8's open items are untouched (settled
+design); §II.9's acceptance is re-pointed at the corpus, sliced by each
+milestone's `NEEDS`.  The probe walkthroughs stay readable in history
+(`git show 981480f4~1:docs/js-target-plan.md`).
+
+**`docs/c-target-notes.md` is new**, the same tables with a C column.  Its
+findings, rather than its prose: **GC is the one decision the IR cannot make
+for you** — perl-style refcounting is the recommendation (it keeps `DESTROY`
+timing identical to perl, which is observable, and it is what pclxs's ABI
+expects), with the class facts keeping most values out of refcounted cells,
+which is exactly where perl's own cost is; **`setjmp` only where `:needs` says
+so** (the fact is already on `p-sub`, and `setjmp` defeats register allocation
+across a call, so this is the biggest C-side cost avoided); **closure
+conversion is a direct read of the capture manifest** (`:captured` /
+`:spanning` say which cells escape — heap-allocate those and nothing else);
+**PCRE2 with JIT, compiled once at load from the structured literal**, where
+`:tier` is not a routing decision as it is in JS but the REFUSAL boundary.
+Two rows C gets for free that JavaScript does not — `tagbody`/`go` is `goto`,
+and `int64_t` IS perl's IV, so the IV/NV split needs no BigInt escape and the
+range proof becomes a speed lever rather than a correctness one — and two it
+does not: strings (the codepoint/byte duality has to be built) and the unwind
+path.
+
+**Bars.**  Gate `PCLXS_DIR=~/pclxs tools/prove-core` green;
+`tools/corpus-diff.pl cd34df72` **emission identical across 111 files**,
+silent drops 5 unchanged, shapes 6 identical.  No emission change, no
+generation bump, no sweep, no companion.
+
 ## Session 471b (Opus agent, 2026-09-06) — #1301: `runt`, `clt` and the sweep move into `tools/`; `run-perl-test.pl` is deleted; the moved sweep spawns SBCL byte-identically
 
 **The USER's ruling (s471, DECIDED §s471) executed.**  `runt`, `clt` and

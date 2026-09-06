@@ -288,330 +288,226 @@ before spending effort on the two hard problems above.
 
 ## Part II — normative mapping specification (for the implementing session)
 
-Everything in this part is keyed to REAL IR captured from HEAD (`e43ef48`,
-gen v2-405) by transpiling four probe programs; re-capture them before
-implementing — the IR vocabulary is stable but individual emissions move.
-The JS on the right-hand side is normative in SHAPE, not in letter: runtime
-entry-point names may differ, the division of labor may not.
+**Rewritten s470bt as TABLES over the generated inventory.**  Part II used to
+be four worked probe programs with their captured IR beside hand-written JS —
+about 250 lines of example, keyed to one commit's emission, going stale on its
+own.  Everything it taught is now DERIVABLE, because the IR describes itself:
+
+| the question Part II used to answer by example | where the answer lives now |
+|---|---|
+| which ops exist, and what does each promise? | `docs/ir-op-inventory.md` — GENERATED from the runtime's export list plus each op's `Contract:` docstring tail; `docs/ir-op-inventory.tsv` is the machine form (ir-spec §10a) |
+| which non-`p-*` host forms must I implement? | ir-spec §11b — MEASURED (`tools/ir-host-leak.pl`), 100 names, with a JS and a C column per group |
+| what does THIS program need of me? | `pl2cl --manifest` — `USES` / `NEEDS` / `FACTS` per program (ir-spec §10b); `p-sub`'s `:needs` scopes it per sub |
+| which variable is a plain `let` and which is a cell? | the IR says so: `p-let`'s CLASS and facts tail, `p-raw-params`' parameter classes (ir-spec §2b.2a, §5.1) |
+| how do I parse it without a CL reader? | `pl2cl --emit-sexp` — the DATA form, five reader rules, a working reader in Perl and JS (ir-spec §12b) |
+| am I right? | `tools/ir-conform --backend ./my-backend` — 347 cases with perl 5.40.3 as the oracle (`ir-conform/README.md`) |
+
+The four probe walkthroughs are in git history if the narrative helps:
+`git show 981480f4~1:docs/js-target-plan.md`.  The JS on the right of every
+table below is normative in SHAPE, not in letter: runtime entry-point names
+may differ, the division of labour may not.
 
 ### II.0 Architecture and inputs
 
-* Backend = an S-expression reader + one tree walker over the emitted CL,
-  exactly as sketch §1.  It consumes `pl2cl`'s OUTPUT; it never sees Perl.
-  `Pl/**` is reused byte-for-byte.
-* Runtime = one ES module (`pcl-rt.mjs`), Node-first.  Browser concerns are
-  out of scope until M3+ (sketch §3–§5).
-* The walker must implement the **closed vocabulary** of ir-spec §10 and DIE
-  on any head it does not know (CLAUDE.md rule 12 — a missing case never
-  falls through).  The emitted preamble (`@INC` pushes,
-  `*pcl-pl2cl-path*`) is recognized and largely *discarded* (Node has its
-  own resolution story; see II.7).
-* **Do not re-derive front-end facts** (sketch §2, §2b): the `__lex__N` /
-  `__state__N` renames, capture analysis, my-shadowing, the sub/eval
-  partition and the PCL_OPT raw-slot verdicts all arrive already applied.
-  A raw (unboxed) variable in the IR compiles to a plain `let`; a celled
-  one to a Box.  The backend adds NO scoping analysis of its own.
+| input | what it is | contract |
+|---|---|---|
+| the emitted program | `pl2cl --emit-sexp FILE` — one top-level form per line, 7-bit, every symbol pipe-quoted | ir-spec §12b |
+| the op vocabulary | 698 `p-*` / `%p-*` names in 54 families | ir-spec §10, §10a; `docs/ir-op-inventory.md` |
+| the host vocabulary | 100 CL kernel names (68 constructs + the ignorable/syntax sets) | ir-spec §11b |
+| what the program demands | `pl2cl --manifest` JSON: `uses`, `needs`, `facts`, `depends` | ir-spec §10b |
+| what the compiler PROVED | `pl2cl --facts` wraps each licensed form in `(p-fact (NAME …) FORM)`; declaration classes are on `p-let` / `p-raw-params` / `p-sub` unconditionally | ir-spec §12c, §2b.2a |
+| the oracle | `ir-conform/cases/*.expected` — perl 5.40.3's stdout and exit code | `ir-conform/README.md` |
 
-### II.1 Value model
+Three rules the walker lives by:
+
+* **DIE on an unknown head** (CLAUDE.md rule 12).  The vocabulary is closed
+  and generated; a head that is not in it is a PCL change the backend has not
+  caught up with, never something to skip.
+* **Do not re-derive front-end facts.**  The `__lex__N` / `__state__N`
+  renames, capture analysis, my-shadowing, the sub/eval partition and the
+  `PCL_OPT` verdicts all arrive already applied.  The backend adds NO scoping
+  analysis of its own.
+* **Refuse loudly, per sub.**  `p-sub`'s `:needs` lists the obligation classes
+  a sub actually uses, so a partial backend compiles every sub it can and
+  emits the ir-spec §9.3b refusal shape for the rest — the same shape the CL
+  target uses.
+
+Backend = an S-expression reader + one tree walker.  Runtime = one ES module
+(`pcl-rt.mjs`), Node-first; browser concerns are out of scope until M3+.
+
+### II.1 Value model — and the FACTS that decide it
 
 | Perl / IR concept | JS representation (decided) |
 |---|---|
-| undef | JS `undefined`.  `exists` vs `defined` is carried by `Map.has` vs the stored value. |
-| scalar value | raw JS `string` / `number` (BigInt in corners, II.10); never auto-wrapped. |
-| scalar CELL (`make-p-box`) | `class Box { v }` — one mutable slot.  Later magic (tie hooks) attaches here. |
-| array (`make-array :adjustable :fill-pointer`) | `class PArray` over a JS array.  Elements stored RAW; `cell(i)` promotes element *i* to a Box in place (the CL runtime's `p-aref-box` policy, ir-spec §2.2) and reads unwrap transparently.  Implements negative indices, auto-extension, `$#a`, splice, holes-as-undef. |
-| hash (`make-hash-table :test 'equal`) | `class PHash` over a `Map` (string keys); same element-cell promotion for `\$h{k}`. |
-| reference (`p-backslash`) | `class PRef { target, kind }` — `kind` feeds `ref()`.  Identity IS the reference; `\@a` twice yields two PRefs to one PArray (perl's `\@a == \@a` string-equality holds via target identity when stringifying). |
-| bless | a `blessedInto` (package-name string) field on the REFERENT (PArray/PHash/Box), not on the PRef — perl blesses the referent. |
-| code ref | the JS closure itself, with a properties object (name, prototype string) under a well-known `Symbol`. |
-| glob / filehandle | deferred to the IO milestone; the IR's handle objects map onto a `PHandle` wrapping Node fds. |
+| undef | JS `undefined`.  `exists` vs `defined` is `Map.has` vs the stored value |
+| scalar value | raw JS `string` / `number` (BigInt in corners, II.8 item 1); never auto-wrapped |
+| scalar CELL (`make-p-box`) | `class Box { v }` — one mutable slot; tie/magic hooks attach here |
+| array (`make-array :adjustable :fill-pointer`) | `class PArray` over a JS array.  Elements stored RAW; `cell(i)` promotes element *i* to a Box in place (ir-spec §2.2) and reads unwrap transparently.  Negative indices, auto-extension, `$#a`, splice, holes-as-undef |
+| hash (`make-hash-table :test 'equal`) | `class PHash` over a `Map` (string keys); same element-cell promotion for `\$h{k}` |
+| reference (`p-backslash`) | `class PRef { target, kind }`; `kind` feeds `ref()`.  Identity IS the reference — `\@a` twice yields two PRefs to one PArray |
+| bless | a `blessedInto` (package-name string) on the REFERENT, not on the PRef — perl blesses the referent |
+| code ref | the JS closure, with a properties object (name, prototype string) under a well-known `Symbol` |
+| glob / filehandle | a `PHandle` wrapping a Node fd; deferred to the IO milestone |
 
-### II.2 Variable classes — the worked examples
+**The facts, and what each buys in JS** (`docs/plan-speed-and-ir-s470.md` §B.3
+is the source; ✓ = PCL proves it today, ✗ = it would be new work in PCL).  A
+backend that ignores every row still produces a CORRECT program — these decide
+only how fast it is.
 
-Captured IR is abbreviated (preamble and some nesting elided); the JS shows
-the intended lowering shape.
+| fact, and where it is on the node | ✓ | what JS does with it |
+|---|---|---|
+| scalar class (`p-let` `:class` — `:box :scalar :num :str :str-buffer :array :hash`) | ✓ | a plain `let` number or string instead of a `{v}` cell: V8's fast path, no allocation |
+| numeric RANGE (fits int32 / int53 / int64) | ✗ | `x\|0` int32 arithmetic, or doubles with no BigInt guard; without it every `+` must check for the NV escape |
+| array facts: escapes / written-in-region | ✓ | a plain `Array` used in place — `push` is `arr.push`, no alias cells, `for…of` over values |
+| element HOMOGENEITY (all-fixnum / all-double / all-string) | ✗ | `Int32Array` / `Float64Array`, or a PACKED_SMI-shaped array |
+| `foreach-raw` (loop variable read-only) | ✓ | `for (const x of arr)` — no alias object per iteration |
+| hash key class (constant string / small int) | ✓ partly | a plain object with a stable hidden class for constant-key hashes; `Map` for dynamic ones |
+| sub facts (`p-sub` plist: `:returns`, `:insensitive`, no `goto`/`caller`/string-eval/`local`) | ✓ | a plain function with positional parameters and a plain `return`: no wantarray argument, no frame object |
+| parameter class (`p-raw-params`) | ✓ | positional parameters — no `arguments`, no `@_` aliasing |
+| capture manifest (`:captured` / `:spanning`, `:why`) | ✓ | closures are native; the manifest says which `let`s must live in the closure scope rather than the loop body |
+| call-site facts (callee statically known, static context) | partly | a direct call instead of a dispatch; a consistently shaped blessed hash lets V8's inline caches do the method memoisation PCL does by hand |
+| `tail-return` | ✓ | a plain `return` — no exception object for a non-local exit |
+| `str-buffer` | ✓ | V8 ropes make `+=` cheap already; the fact confirms no aliasing observer |
+| regex TIER per literal + parsed flags | ✓ (`:tier`, ir-spec §10-tier) | native `RegExp` for `:native`, the PCRE2 fallback for `:pcre`, the loud refusal for `:refused` — II.8 item 3 |
+| dynamic-scope use per sub (`:needs`) | ✓ | no save/restore stack in a sub that never `local`s; magic globals as module-level `let`s |
+| exception use per sub (`:needs`) | ✓ | no `try` frame where nothing can throw |
+| phase facts (`BEGIN`/`INIT`/`END` present) | ✓ | run in order; no phase machinery when absent |
 
-> **The classes this section reverse-engineers from the emitted SHAPE are now
-> PRINTED** (task #1035; `docs/ir-spec.md` §2b.2a + §5.1).  A `my` binding is
-> `(p-let ((NAME CLASS INIT . FACTS)) …)` with CLASS from a closed set
-> (`:box :scalar :num :str :str-buffer :array :hash`) and FACTS carrying the
-> rename manifest (`:perl "$x" :why :FAMILY`) and closure capture
-> (`:captured t` — this section's heap-vs-stack question, answered);
-> a parameter is `(NAME CLASS)` on `p-raw-params`; and a sub carries a facts
-> plist (`:returns`, `:wantarray-insensitive`, `:writes-args`, `:string-eval`,
-> `:captures`, `:prototype`).  Read the class where the name is BOUND rather
-> than inferring it from which initform the compiler chose; the shape reading
-> below still works and is what a consumer that drops the vocabulary falls
-> back to.
+### II.2 The op inventory, family by family
 
-#### (a) `our`, file `my`, `state`, `local` — probe `ir1.pl`
+54 families, 698 names (`docs/ir-op-inventory.md`; the per-op arity, context
+sensitivity, coercions, magic, dies/dynamic/phase columns and the family's
+ir-spec §10 rule are all there).  This table says only what the JS side of
+each family looks like, and which milestone owes it.
 
-```perl
-our $g = 1;
-my $x = 2;
-sub bump { state $n = 0; $n++; return $n }
-sub show { print "g=$g x=$x\n" }
-sub localize { local $g = 99; show(); }
-```
+| family (count) | JS |
+|---|---|
+| numeric (9), numeric-compare (8), math (8) | `rt.*` one-for-one.  Numify per ir-spec §3.1, return a raw number; `/` yields a double when inexact, `%` follows perl's sign rules, shifts truncate and clamp.  Compares return `1`/`""`, not booleans |
+| string (27), string-compare (7) | `rt.*`; stringify per §3.2, return a raw string.  `$_`-defaults arrive explicit in the tree |
+| bitwise (14), bit-string (2) | ONE mode decision per op (`%p-bitwise-operand-kind`): numeric iff an operand carries a number, else byte-by-byte on the stringified operands.  Overload hook first |
+| logical (8) | `&&` / `||` / `??` — they return the OPERAND, exactly as JS does |
+| increment (4), compound-assignment (35) | read-modify-write on the box or the slot; the `-raw` twins are a plain `x = NEW` with the identical NEW form.  `&&=`/`||=`/`//=` short-circuit and store the RHS unchanged.  `p-++` on a pure-alpha string is perl's magic string increment |
+| assignment (11) | store per §2.2.  A list assignment used as a VALUE is two-faced: scalar/void yields the element COUNT, list context yields the LHS lvalues |
+| elements (22), slice-delete (4) | `PArray`/`PHash` accessors.  Reads unbox scalars and keep reference boxes; writes autovivify the intermediate refs; an EMPTY slice answers undef in scalar and the empty list in list context |
+| aggregate-builtin (27) | `push`/`pop`/`shift`/`splice`/`keys`/`values`/`each`/`sort`/`grep`/`map` on `PArray`/`PHash`.  `p-sort`'s default is STRING order and its comparator sees the `$a`/`$b` pair (M2); `%p-push1` and `%p-sort-classic` are sugar — expand them back and nothing is lost |
+| box (24), reference (21), refaliasing (7) | `Box` / `PRef` construction and deref; refaliasing (`\$x = \$y`) rebinds the CELL, so it must go through the cell, never the value |
+| declaration (3) | `p-let` / `p-raw-params` / `p-sub`'s facts — the compiler's VERDICTS.  A backend may DROP all three vocabularies and still be correct; II.1's fact table is what it gives up |
+| context-frame (9) | names for `let`/`lambda` shapes: implement the expansion, nothing else.  The wantarray value is the frame's, ir-spec §4 |
+| control-flow (26) | see II.3 |
+| exception (12) | `PerlDie` objects; `p-eval-block` is `try`/`catch` with `$@` set per §6.3 |
+| dynamic-scope (18) | `local`: slot swap + `try`/`finally`.  Only needed in subs whose `:needs` says so |
+| regex (5), compiled-regex (2) | II.8 item 3's three tiers.  A `qr` is an OBJECT with its own flags and identity that stringifies as `(?^flags:SOURCE)`; a pattern that is exactly one interpolated qr IS that qr |
+| range (8) | `p-foreach-range` is a counting `for`; the list form materialises |
+| io (24), file-ops (19), directory-io (4), capture-io (3), filetest (29), socket (15) | `PHandle` over Node's fs/net.  Bareword handles are SYMBOLS (ir-spec §7.5); `p-open` boxes its handle argument; `p-close` on a pipe reaps and sets `$?`.  The filetest family shares ONE operand resolution and the `_` cache (§10c).  M3+ |
+| command-capture (1), process (11), env (3), time (6), user-db (11) | Node `child_process`, `process.env`, `Date`, the passwd/group lookups.  Command capture is wantarray-sensitive: scalar = the whole stdout, list = split into `$/` records |
+| oo (6), package-tracking (5), typeglob (12), introspection (15) | the package registry, the C3 MRO walk (§7.3), `ref`/`can`/`isa`/`caller`.  `p-caller` reports the package; file/line are stubs today (a divergence the backend inherits, #1240's neighbourhood) |
+| module-system (6), phase (8) | `use`/`require`/`%INC` and the section model — II.5 |
+| sub-definition (5), signature (4), call (1) | II.4 |
+| overload (6) | the operator-overload hook the numeric/string/bitwise families consult FIRST |
+| tie (8) | hooks on the cell.  Not in M0–M2 (and `tie %h` is not implemented on the CL target either — #155) |
+| magic-global (136) | `$_`, `$0`, `@ARGV`, `%ENV`, `$@`, `$!`, the match state, the caret variables.  ir-spec §8 says which are read-only, which are set by which op, and which are per-package.  Most are module-level `let`s; the match-state ones are written by the regex family |
+| pack (2), extension (1), runtime-config (1), ir-literal (2), misc-builtin (3) | `p-esc` and `p-literal-string` are the string-escape decoder II.7 needs anyway; `pack`/`unpack` is a port of the transpiled `cl/pcl-pack` artifact, which compiles through this backend for free |
+| tap (27) | Test::More's assertions.  Needed to run the perl test suites, not to run programs |
+| UNCLASSIFIED (3) | the inventory says which; a backend treats them like any unknown head — DIE |
 
-IR (the load-bearing forms):
+### II.3 Statement and control flow — the §11b kernel
 
-```lisp
-(p-defcell $g (make-p-box nil))            ; our — package cell
-(p-defcell $x (make-p-box nil))            ; file lexical, captured by subs → promoted cell
-(p-defcell $n__state__0 (make-p-box nil))  ; state cell, renamed by the front-end
-(p-defcell $n__state__0__init nil)
-(p-sub pl-bump (&rest %_args)
-  (p-args-body (block nil (p-void-ctx
-    (unless $n__state__0__init (box-set $n__state__0 0) (setf $n__state__0__init t))
-    (p-post++ $n__state__0)
-    (p-return $n__state__0)))))
-(p-sub pl-localize (&rest %_args)
-  (p-args-body (block nil (p-void-ctx
-    (p-local-cell $g (p-box-for-local 99)
-      (p-caller-ctx (pl-show)))))))
-```
-
-JS lowering:
-
-```js
-const P = rt.pkg("main");
-const $g = P.sv("g");                    // p-defcell $g → the package's named cell (a Box)
-const $x = new rt.Box();                 // promoted file lexical: module-level Box, plain identifier
-const $n__state__0 = new rt.Box();       // state: module-level cell + init flag, verbatim
-let  $n__state__0__init = false;
-
-P.sub("bump", rt.mkSub((args) => {
-  if (!$n__state__0__init) { $n__state__0.v = 0; $n__state__0__init = true; }
-  rt.postInc($n__state__0);
-  return rt.retScalar($n__state__0);
-}));
-
-P.sub("localize", rt.mkSub((args) => {
-  return rt.localCell(P, "g", rt.boxForLocal(99), () =>   // try/finally inside
-    rt.callerCtx(() => P.call("show")));
-}));
-```
-
-Decisions fixed here:
-
-* **`p-defcell` = define-once** (Direction-D semantics): `P.sv(name)`
-  creates on first use, returns the existing Box after — same contract as
-  the CL `p-defcell` guard.
-* **`local` localizes the CELL IN THE SLOT, not the value**: `p-local-cell`
-  installs a FRESH Box (`p-box-for-local`) into the package slot and
-  restores the old Box in `finally` — so a reference taken before the
-  `local` keeps seeing the old value, exactly perl.  Consequence: compiled
-  code may cache `P.sv("g")` **only across a region where no `local` of
-  that name can intervene**; the safe default is that *package*-variable
-  access in sub bodies goes through the slot lookup (`P.sv("g")` each
-  time), and only promoted file lexicals get the cached-const treatment.
-  (Measure before optimizing; this is the JS twin of the CL symbol-value
-  read.)
-* Exceptions unwind through `finally`, so `local` + `die` is correct for
-  free — the sketch §2 claim, now concrete.
-
-#### (b) Arrays, hashes, references — probe `ir2.pl`
-
-```perl
-my @a = (1,2,3);  my %h = (k => 'v');
-my $ar = \@a;     my $hr = { x => 1 };
-push @a, 4;
-print "$a[0] $h{k} $$ar[1] $hr->{x} ", scalar(@a), "\n";
-my $sr = \$a[0];  $$sr = 10;
-```
-
-IR:
-
-```lisp
-(let ((@a (make-array 0 :adjustable t :fill-pointer 0)))
-  (p-array-= @a (vector 1 2 3))
-  ... (p-my-= $ar (p-backslash @a))
-  ... (p-my-= $hr (make-p-box (p-hash "x" 1)))
-  (p-push @a 4)
-  (p-print (p-string-concat (p-aref @a 0) " " (p-gethash %h "k") " "
-                            (p-aref-deref $ar 1) " " (p-gethash-deref $hr "x") " ")
-           (p-list-ctx (p-scalar @a)) "\n")
-  ... (p-my-= $sr (p-backslash (p-aref-box @a 0)))
-  (p-setf (p-cast-$ $sr) 10))
-```
-
-JS:
-
-```js
-const a = new rt.PArray();               // block-scoped my → plain let/const of the container
-rt.arrayAssign(a, [1, 2, 3]);            // p-array-= : clear + fill, returns the list
-const h = new rt.PHash();
-rt.hashAssign(h, ["k", "v"]);
-const $ar = new rt.Box(rt.ref(a));       // p-backslash @a → PRef{target:a, kind:"ARRAY"}
-const $hr = new rt.Box(rt.hashRef(["x", 1]));   // anon {} → new PHash wrapped in a PRef
-a.push(4);
-rt.print(rt.concat(a.get(0), " ", h.get("k"), " ",
-                   rt.arefDeref($ar, 1), " ", rt.hgetDeref($hr, "x"), " "),
-         rt.listCtx(() => a.scalar()), "\n");
-const $sr = new rt.Box(rt.ref(a.cell(0)));      // p-aref-box: promote element 0 to a Box
-rt.derefSet($sr, 10);                            // (p-setf (p-cast-$ ...)) — writes through PRef→Box
-```
-
-Decisions fixed here:
-
-* `p-aref-box` is the SINGLE mechanism behind `\$a[0]`, foreach aliasing
-  and `local $a[0]`: element promotion, one policy, inherited from ir-spec
-  §2.2 — do not invent a second one.
-* Dereference ops (`p-aref-deref`, `p-gethash-deref`, `p-cast-$`) are
-  runtime calls that unwrap PRef (and vivify where the IR says so); they
-  never become raw JS property access, because the coercion/vivification
-  rules live in them.
-
-#### (c) foreach, fresh bindings, aliasing, closures — probe `ir3.pl`
-
-```perl
-foreach my $i (1..3) { push @subs, sub { return $i * 10 } }
-$_ *= 2 for @l;
-```
-
-IR:
-
-```lisp
-(p-foreach-range ($i 1 3) :my t
-  (p-push @subs
-    (lambda (&rest %_args)
-      (let ((@_ (p-flatten-args %_args))
-            (*pcl-current-package* "main")
-            (*pcl-caller-wantarray* *wantarray*))
-        (catch :p-return (block nil (p-return (p-* $i 10))))))))
-(p-foreach ($_ @l) (p-*= $_ 2))
-```
-
-JS:
-
-```js
-for (let i = 1; i <= 3; i++) {           // p-foreach-range … :my t
-  const $i = new rt.Box(i);              // FRESH Box per iteration — JS per-iteration let
-  subs.push(rt.mkSub((args) => rt.retScalar(rt.mul($i.v, 10))));
-}
-for (const $_ of l.aliasCells())         // p-foreach over an array ALIASES elements
-  rt.mulAssign($_, 2);                   // writes through the element Box into the array
-```
-
-Decisions fixed here:
-
-* `:my t` = fresh cell per iteration; without it the loop reuses one cell
-  (perl's non-`my` foreach variable).  The walker reads the flag, nothing
-  else.
-* Aliasing foreach iterates `aliasCells()` — element-Box promotion again
-  (one mechanism, II.2b).
-* `mkSub` is the ONE sub prologue: flatten args into `@_`, push the
-  package/frame, capture the caller's context (`*pcl-caller-wantarray*` →
-  a frame field), install the `:p-return` boundary.  In JS a plain
-  `return` covers most `p-return`s; a `ReturnSignal` throw + try/catch in
-  `mkSub` covers returns from inside nested constructs.  Emit the cheap
-  form when the walker can see the return is tail-positioned.
-
-#### (d) Context, wantarray, eval/die — probe `ir4.pl`
-
-```perl
-sub ctx { return wantarray ? "list" : "scalar" }
-my @r = ctx(); my $s = ctx();
-print "@r $s\n";
-my $n = eval { die "oops\n"; 1 };
-print "err=$@" if !defined $n;
-```
-
-IR:
-
-```lisp
-(p-sub pl-ctx (&rest %_args)
-  (p-args-body (block nil (p-return (p-if (p-wantarray) "list" "scalar")))))
-(p-array-= @r (p-list-ctx (pl-ctx)))
-(p-my-= $s (p-scalar-ctx (pl-ctx)))
-(p-my-= $n (p-scalar-ctx (p-eval-block (p-die :loc "- line 4" "oops\n") 1)))
-(p-if (p-! (p-defined $n)) (p-print (p-string-concat "err=" $@)))
-```
-
-JS:
-
-```js
-P.sub("ctx", rt.mkSub((args) =>
-  rt.retScalar(rt.wantarray() ? "list" : "scalar")));
-
-rt.arrayAssign(r, rt.listCtx(() => P.call("ctx")));
-rt.myAssign($s, rt.scalarCtx(() => P.call("ctx")));
-rt.myAssign($n, rt.scalarCtx(() =>
-  rt.evalBlock(() => { rt.die("oops\n", "- line 4"); return 1; })));
-if (rt.truthy(!rt.defined($n.v)))
-  rt.print(rt.concat("err=", rt.sv("@").v));   // $@ is just the package cell "@"
-```
-
-Decisions fixed here:
-
-* **Context is an explicit stack in `rt`** (`rt.CTX`): `listCtx`/
-  `scalarCtx`/`voidCtx` push, run the thunk, pop in `finally`;
-  `callerCtx` re-pushes the current frame's captured caller context
-  (the `p-caller-ctx` form).  `wantarray()` reads the frame field
-  `mkSub` captured.  This is the sketch §2 "context stack or hidden
-  argument" question ANSWERED: stack in the runtime, captured into the
-  frame at sub entry — the exact JS image of the CL dynamic pair
-  `*wantarray*` / `*pcl-caller-wantarray*`.
-* `rt.die` throws `class PerlDie { msg, loc }`; `evalBlock` catches
-  **everything** (perl's eval traps runtime errors too), stringifies
-  non-PerlDie conditions into `$@` perl-shaped, sets `$@`, returns
-  `undefined`; clears `$@` on success.  Magic globals (`$@`, `$_`, `$"`,
-  `$\`, `$0`, `%ENV`, `@ARGV`) are ordinary cells in the registry — the IR
-  already spells them as variables (`$@`, `|$"|`).
-
-### II.3 Statement & control-flow heads
+The IR's own heads:
 
 | IR head | JS |
 |---|---|
-| `p-if` / `p-while` / `p-until` | native `if`/`while` with `rt.truthy` on the condition |
-| `p-foreach`, `p-foreach-range` | II.2c |
+| `p-if` / `p-while` / `p-until` | native `if` / `while`, with `rt.truthy` on the condition |
 | `p-for` (C-style) | native `for` |
-| `last`/`next` + labels | labeled `break`/`continue` (IR restricts the shapes; sketch §2) |
-| `redo` | loop-body-in-inner-loop transform (only consumer of it) |
-| `p-return` | `return` (tail) / `ReturnSignal` (nested), II.2c |
-| `p-local-cell` | II.2a — slot swap + try/finally |
-| `p-try` (perl 5.34 try/catch/finally) | native try/catch/finally + PerlDie |
-| `p-eval-block`, `p-eval` (string) | II.2d; string eval = compiler-as-subprocess on Node (sketch §3) |
-| op families (`p-+`, `p-string-concat`, `p-post++`, `p-*=`, …) | `rt.*` calls one-for-one; the ir-spec §10 family rules (which operand is a cell, which coerces) port UNCHANGED |
+| `p-foreach`, `p-foreach-range`, `p-foreach-raw` | `for…of`; `-raw` needs no per-iteration alias object |
+| `last` / `next` + labels | labelled `break` / `continue` where the exit is lexical; a tagged throw where it is not (perl lets a CALLED SUB exit its caller's loop) |
+| `redo` | loop-body-in-inner-loop; the only consumer of that transform |
+| `p-return` | `return` in tail position (the `tail-return` fact says when), a `ReturnSignal` throw otherwise |
+| `p-local-cell` | slot swap + `try`/`finally` |
+| `p-try` | native `try`/`catch`/`finally` + `PerlDie` |
+| `p-eval-block` | `try`/`catch`, `$@` per §6.3 |
+| `p-eval` (string) | the compiler as a subprocess on Node — II.8 item 4 |
+
+And the host forms underneath them (ir-spec §11b, which carries the same table
+with a C column):
+
+| kernel group | JS |
+|---|---|
+| `progn` `prog1` `prog2` `let` `let*` | a block; `prog1` needs a temp; `let*` is sequential `let`s |
+| `lambda` `function` `funcall` `apply` | a closure; `apply` is `f(...args)` |
+| `multiple-value-bind` `values` `multiple-value-list` `nth-value` | return a small array and destructure |
+| `setq` `setf` `psetf` `incf` `decf` `push` `pop` | assignment and its place setters — the emitter uses `setf` only on `aref`, `gethash`, `p-aref`, `p-gethash` and a variable.  CL `push`/`pop` are at the FRONT |
+| `if` `when` `unless` `cond` `case` `ecase` `typecase` | `if` chains — every one is an EXPRESSION in CL, so a statement target needs a temp or a ternary; `ecase`'s missing arm must throw |
+| `and` `or` `not` `null` | `&&` / `||` / `!` — they return the OPERAND; CL `nil` is **not** perl's false (§2.1) |
+| `block` `return-from` | a labelled block with `break LABEL` when lexical, a tagged throw otherwise |
+| `catch` `throw` | `throw {tag, value}`, re-thrown when the tag does not match.  The tag is a VALUE compared with `eq`, not a static label |
+| `tagbody` `go` | `while (true) switch (pc)` — `go` can jump BACKWARD, which `continue` cannot express |
+| `unwind-protect` | `try { … } finally { … }` |
+| `list` `cons` `car` `cdr` `append` | cons cells — the runtime's own list arguments (a capture alist, a facts plist), never a perl array |
+| `vector` `make-array` `vector-push-extend` `aref` `elt` `length` | `Array`; `:adjustable t :fill-pointer 0` is `[]` and `vector-push-extend` is `push` |
+| `make-hash-table` `gethash` | `Map` (the test is `equal` — structural string equality) |
+| `declare` `declaim` `locally` and their hints | dropped; ir-spec §11 |
+
+**What is not in the kernel yet.**  §11b's closing table lists the bare CL
+functions still reaching the output through a v1 seam — 31 distinct symbols
+over the 111-file corpus at s470bo (`-` `+` `*` `1+` `rem` `truncate` `logior`
+… `format` `intern`), owned by #1175/#1176.  A backend either implements them
+or refuses the files that contain them; `tools/ir-host-leak.pl` says which
+files those are.
 
 ### II.4 Subs, packages, dispatch
 
-* `(p-sub pl-NAME …)` → `P.sub("NAME", rt.mkSub(...))`; `p-declare-sub` →
-  `P.declareSub("NAME")` (forward-decl so barewords resolve).  The `pl-`
-  prefix and all CL symbol discipline (pipe-quoting, `:invert`, read-time
-  `in-package`) **disappear**: the registry key is the plain Perl name —
-  the sketch's promise that the #418/#498 bug class does not exist here.
-* `p-defpackage`/`in-package` → `const P = rt.pkg("Name")` scoping the
-  emitted section; a mid-block `package` switch (which the CL target must
-  emit qualified names for) is just a different registry handle.
-* Method calls: the IR dispatches by string name through C3 MRO in the
-  runtime (`p-method-call`); the JS runtime ports the MRO walk, and the
-  transpiled `pcl-mro` artifact compiles through this backend for free
-  (sketch §3's dividend).
+| IR | JS |
+|---|---|
+| `(p-sub pl-NAME LAMBDA-LIST …)` | `P.sub("NAME", rt.mkSub(...))`.  The `pl-` prefix and ALL CL symbol discipline — pipe-quoting, `:invert`, read-time `in-package` — disappear: the registry key is the plain Perl name, which is why the #418 symbol-mangling bug class does not exist on this target |
+| `p-declare-sub` | `P.declareSub("NAME")` — the forward declaration barewords resolve against |
+| `p-raw-params` | positional JS parameters, one per class in the list |
+| the `p-sub` facts plist | II.1's fact table; `:needs` decides which frames the body gets |
+| `p-defpackage` / `in-package` | `const P = rt.pkg("Name")` scoping the section.  The current package is a RUN-TIME value (§7.1): a module-level `currentPackage` with save/restore |
+| `p-method-call` | dispatch by string name through the C3 MRO walk (§7.3).  The transpiled `cl/pcl-mro` artifact compiles through this backend for free |
+| `p-call-of-undefined-sub` | the AUTOLOAD-then-die decision, at the CALL where perl makes it (ir-spec §5.4) |
 
 ### II.5 Phases
 
-`p-run-compile-phase-blocks` and the section model arrive in emit order;
-in JS, "load the module" IS the compile phase, so BEGIN ordering is just
-statement order (sketch §3).  The walker keeps the section boundaries as
-comments for debuggability, nothing more.
+`p-run-compile-phase-blocks` and the `p-bucket` section markers arrive in
+EMIT order, and that order is the execution order: every section's
+compile-phase buckets first, then every section's run bucket (ir-spec §12b,
+§9).  In JS, "load the module" IS the compile phase, so BEGIN ordering is
+statement order.  The walker keeps the section boundaries as comments.
 
-### II.6 What the runtime module must contain for M0–M1
+### II.6 What the runtime module must contain, per milestone
 
-Boxes, PArray/PHash + element-cell promotion, PRef, the coercion tables
-(ir-spec §3: to-number, to-string, truthiness — port the TABLE, not an
-approximation), op families for scalars/strings/arrays, context stack +
-mkSub, die/evalBlock, print to stdout, the package registry.  Explicitly
-NOT in M0–M1: regex, IO beyond print, string eval, tie/overload, sort's
-`$a`/`$b` pair (M2), formats (never — not-supported).
+| milestone | the runtime owes |
+|---|---|
+| M0 | `Box`, `PArray`/`PHash` with element-cell promotion, `PRef`, the ir-spec §3 coercion TABLES (port the table, not an approximation), the scalar/string op families, the context stack + `mkSub`, `die`/`evalBlock`, `print`, the package registry |
+| M1 | the aggregate builtins, `sort` with the `$a`/`$b` pair, `local`, references and refaliasing |
+| M2 | II.8's numbers and strings notes implemented; regex tier 1 |
+| M3 | module loading (`p-use` of the `lib/` shims, pre-transpiled), file IO, `%INC` |
+| never | formats (not-supported on the CL target too) |
 
-### II.7 The preamble
+### II.7 The preamble, and the five reader rules
 
-The CL preamble (`@INC` pushes with build-machine paths, `*pcl-pl2cl-path*`)
-is recognized by the walker and REPLACED by the JS runtime's own init
-(argv/env binding, `@INC` from env).  Do not translate it literally — the
-paths are the #217 problem, and a JS target must not inherit it.
+The CL preamble (`@INC` pushes with build-machine paths, `*pcl-pl2cl-path*`,
+`p-defpackage`, the forward `defvar`s) is environment bootstrap, not program
+(ir-spec §11).  The walker RECOGNISES it and replaces it with the JS runtime's
+own init (argv/env binding, `@INC` from the environment).  Do not translate it
+literally — those paths are #217, and a JS target must not inherit them.
+
+A backend that consumes `--emit-sexp` needs none of the CL reader's rules; one
+that parses the CL TEXT needs exactly five, and ir-spec §11b states each with
+its measurement:
+
+| rule | why it bites |
+|---|---|
+| `\|…\|` is verbatim | that is how `\|$"\|`, `\|@,\|` and every non-ASCII name is spelled; outside the bars a token is NFKC-normalised and case-INVERTED |
+| an EMPTY `\|\|` contributes nothing | `p-\|\|` and `p-` are the SAME symbol, named `P-`, and it is perl's `\|\|` |
+| `#\c` is a character | `#\Newline`-style names run to the next delimiter |
+| `#x` `#o` `#b` `#NNr` are NUMBERS | 400+ of them in `perl-tests/pack.t` |
+| a control character is never raw in a literal | it is `(p-esc "…")` with the §12b escape alphabet — so a line-oriented consumer is correct, and `p-esc` is the same unescape routine the data form's reader needs |
+
+**Acceptance.**  `tools/ir-conform --backend ./my-backend` (347 cases, perl
+5.40.3 as the oracle, `ir-conform/README.md`).  Milestone M0's own bar is the
+subset of cases whose manifest `NEEDS` is within what M0 implements — the
+manifest is there precisely so that subset is computed, not guessed.
 
 ### II.8 Open design items (each needs its own note before its milestone)
 
@@ -669,12 +565,19 @@ paths are the #217 problem, and a JS target must not inherit it.
 
 ### II.9 Milestones and acceptance
 
+Since s470bt every milestone's acceptance is the SAME corpus, sliced by what
+the milestone implements: `tools/ir-conform --backend ./my-backend` over the
+cases whose `pl2cl --manifest` `NEEDS` fits inside it (347 cases, perl 5.40.3
+as the oracle — `ir-conform/README.md`).  The slice is computed from the
+manifest, never guessed, and the CL target's own score on it (289 pass, 58
+known bugs) is the honest ceiling to measure against.
+
 * **M0 (the sketch §6 spike):** reader + walker + `pcl-rt.mjs` covering
   the heads used by `Pl/t/transpile-test-01.t`'s programs; no IO beyond
-  print, no regex, no eval.  Acceptance: byte-compare node vs perl on
-  those programs — the project's standard oracle discipline.
-* **M1:** the four probe programs of II.2 + the remaining
-  `transpile-test-*` corpora; `use`-free only.
+  print, no regex, no eval.  Acceptance: the ir-conform cases whose `NEEDS`
+  is empty of regex, IO, string-eval and phases.
+* **M1:** the remaining `transpile-test-*` corpora and the ir-conform
+  `context` / `coercion` / `refs` / `array` / `hash` topics; `use`-free only.
 * **M2:** numbers + strings notes implemented; the non-regex, non-IO rows
   of a first perl-tests file (e.g. the aassign/list slices).
 * **M3:** module loading (`p-use` of `lib/` shims via pre-transpiled JS),
