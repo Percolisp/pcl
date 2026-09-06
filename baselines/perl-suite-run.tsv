@@ -1,4 +1,17 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s470bx (2026-09-06, Opus) -- TWO rows spliced by hand, `--jobs 1`, and the
+#   SAME three files measured on a `git archive fcf076f1` extraction so that
+#   "ours" is a measurement:
+#     op/stat_errors.t  510/128 -> 532/106.  OURS: task #1043 (stat/lstat
+#       answer their CONTEXT), so the file's 22 `result of stat|lstat <arg>`
+#       rows now get perl's &PL_sv_no -- the empty string -- instead of the
+#       13-element vector.  Base extraction reads 510/128; the #366 serial
+#       re-run agrees with the parallel one ("REAL MOVE").
+#     op/stat.t  sig TEXT only, 0/0 unchanged.  PRE-EXISTING: the base
+#       extraction prints the same "Undefined subroutine
+#       &main::is_linux_container called" where the blessed row still said
+#       "The function main::pl-is_linux_container is undefined."  The file
+#       still produces zero rows (#1232) either way.
 # s470bv (2026-09-06, Opus) -- FIFTY-ONE ROWS SPLICED BY HAND, every one
 #   measured on THIS tree with `--jobs 1` and re-run ALONE by the #366 serial
 #   pass (all 40 re-run files: "REAL MOVE, both runs agree").  The batch's own
@@ -1648,8 +1661,8 @@ op/srand.t	10	0	8	2	DIFF		0
 op/sselect.t	23	0	17	6	DIFF		0
 op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
-op/stat.t	108	3	0	0	DIFF	aborted-forms:1: The function main::pl-is_linux_container is undefined.	0
-op/stat_errors.t	638	0	510	128	DIFF		0
+op/stat.t	108	3	0	0	DIFF	aborted-forms:1: Undefined subroutine &main::is_linux_container called	0
+op/stat_errors.t	638	0	532	106	DIFF		0
 op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
