@@ -39,7 +39,7 @@ use PCLSbcl ();   # sbcl_prefix — the %p-mtime contract row asks the runtime i
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 46;
+plan tests => 50;
 
 my $dir = tempdir(CLEANUP => 1);       # where the fixture modules live
 
@@ -296,4 +296,43 @@ write_mod('Racy', "package Racy;\nsub v { 42 }\n1;\n");
        'a .lisp whose .deps has vanished is a MISS and a clean load');
     ok(scalar(glob("$rcache/modules/*.deps")),
        '... and the manifest is written again');
+}
+
+# AN IN-FLIGHT TEMP IS NOT OURS TO TOUCH — not even to stat (#1338, second
+# round of evidence).  The file the race was measured on was a WRITER'S TEMP:
+# `<key>-<hex>-<pid>.fasl`, listed by one process's prune and renamed away by
+# another before the stat.  It hits `prove -j8` itself, not only two agents:
+# eighteen write-date signatures in one gate, all on temps.  So the prune skips
+# what %P-CACHE-TEMP-P recognises — the one shape %P-CACHE-TEMP-PATH makes, and
+# the shape BOTH writers now publish through (rule 11).  The cost is stated in
+# the docstring: a temp whose writer crashed is never pruned.
+{
+    my $tcache = tempdir(CLEANUP => 1);
+    my %env = (PCL_CACHE_DIR => $tcache);
+    write_mod('TempA', "package TempA;\nsub v { 7 }\n1;\n");
+    write_mod('TempB', "package TempB;\nsub v { 8 }\n1;\n");
+
+    is(run_pcl('use TempA; print TempA::v();', %env), '7',
+       'the temp-skip rows run in a cache directory of their own');
+
+    # One temp-shaped file and one ordinary file, both 40 days old — older
+    # than anything the prune keeps.  The ordinary one is the control: it says
+    # the prune really ran.
+    my $past = time - 40 * 24 * 3600;
+    my $temp = "$tcache/modules/DEADBEEFDEADBEEF-ABCDEF012345-tmp4242.fasl";
+    my $junk = "$tcache/modules/DEADBEEFDEADBEEE-ABCDEF012345.fasl";
+    for my $p ($temp, $junk) {
+        open my $fh, '>', $p or die "write $p: $!";
+        print $fh "x";
+        close $fh;
+        utime($past, $past, $p);
+    }
+    unlink "$tcache/.last-prune";
+
+    is(run_pcl('use TempB; print TempB::v();', %env), '8',
+       'a second module misses, which is when the prune runs');
+    ok(-e $temp,
+       'an in-flight temp is left alone by the prune even when its mtime is old');
+    ok(!-e $junk,
+       '... while an ordinary entry of the same age is pruned (so it DID run)');
 }

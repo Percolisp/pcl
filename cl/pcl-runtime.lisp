@@ -18885,6 +18885,39 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; failed to build.  A failed build leaves a marker so the next run does not
 ;;; pay for the same failure, the way a failed core build does.
 
+(defun %p-cache-temp-path (path)
+  "The IN-FLIGHT TEMP a cache writer publishes PATH through: the same file
+   with `-tmp<pid>` appended to its name.
+
+   THE ONE CONSTRUCTION (rule 11).  Both writers call it — the text through
+   rename(2) below, the fasl through COMPILE-FILE's :output-file — and
+   %P-CACHE-TEMP-P recognises exactly what it makes, which is what lets the
+   prune leave another process's half-written file alone (task #1338).  The
+   `tmp` is not decoration: an entry's own name is uppercase hex, so nothing a
+   writer publishes can be mistaken for a temp and nothing a writer is holding
+   can be mistaken for an entry."
+  (make-pathname :defaults path
+                 :name (format nil "~A-tmp~A" (pathname-name path)
+                               (sb-posix:getpid))))
+
+(defun %p-cache-temp-p (path)
+  "True when PATH is a writer's in-flight temp — the shape %P-CACHE-TEMP-PATH
+   makes.  The prune SKIPS these: the file belongs to the process that is
+   writing it, and it is about to be renamed away (that is exactly the file
+   #1338 caught the old prune stat-ing: a `<key>-<hex>-<pid>.fasl` that was
+   gone one call later).
+
+   The cost, said plainly: a temp whose writer CRASHED is then never pruned —
+   one small file per crash.  The alternative is to stat and delete a file
+   another process owns, which is the window this whole section exists to
+   close."
+  (let* ((name (or (pathname-name path) ""))
+         (at (search "-tmp" name :from-end t)))
+    (and at
+         (let ((rest (subseq name (+ at 4))))
+           (and (plusp (length rest))
+                (every #'digit-char-p rest))))))
+
 (defun %p-write-cache-file (path text)
   "Write TEXT to PATH through a PID-unique temp + rename(2).
    Never in place: :supersede truncates and writes the REAL file (measured
@@ -18892,9 +18925,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    `load` a HALF-WRITTEN module and die — the cold-cache sweep race of task
    #215.  rename(2) is atomic within a filesystem: the last writer wins and
    the file is always consistent."
-  (let ((temp (make-pathname :defaults path
-                             :name (format nil "~A-~A" (pathname-name path)
-                                           (sb-posix:getpid)))))
+  (let ((temp (%p-cache-temp-path path)))
     (with-open-file (out temp :direction :output :if-exists :supersede)
       (write-string text out))
     (rename-file temp path)
@@ -18950,9 +18981,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    fasl carries every effect once, at ITS load."
   (when (%p-fasl-build-refused-p fasl-path)
     (return-from %p-build-module-fasl nil))
-  (let ((temp (make-pathname :defaults fasl-path
-                             :name (format nil "~A-~A" (pathname-name fasl-path)
-                                           (sb-posix:getpid)))))
+  (let ((temp (%p-cache-temp-path fasl-path)))
     (handler-case
         (multiple-value-bind (out warnings-p failure-p)
             (let ((*pcl-fasl-build* t)
@@ -19085,11 +19114,14 @@ buffer's fill-pointer; everything else falls back to file-length."
   (dolist (file (ignore-errors (directory (merge-pathnames "*.*" dir))))
     ;; The listing is a SNAPSHOT of a shared directory: a sibling process can
     ;; delete or replace any of these before this loop reaches it, and two
-    ;; prunes racing over the same old entry is the ordinary case.  Both the
-    ;; stat and the unlink therefore SKIP what is already gone (task #1338).
-    (let ((date (%p-mtime file)))
-      (when (and date (< date cutoff))
-        (ignore-errors (delete-file file))))))
+    ;; prunes racing over the same old entry is the ordinary case.  So an
+    ;; in-flight temp is not ours to touch AT ALL (%P-CACHE-TEMP-P — the file
+    ;; #1338 was measured on), and for everything else both the stat and the
+    ;; unlink skip what has already gone (task #1338).
+    (unless (%p-cache-temp-p file)
+      (let ((date (%p-mtime file)))
+        (when (and date (< date cutoff))
+          (ignore-errors (delete-file file)))))))
 
 (defun p-cleanup-old-cache ()
   "Drop cache entries nothing has reached for *PCL-CACHE-MAX-AGE* — the module
