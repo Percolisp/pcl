@@ -2,6 +2,91 @@
 
 Append new entries at the top. One section per session.
 
+## Session 471a (Opus agent, 2026-09-06) — #1273: ONE resolution of an array subscript (t/run/fresh_perl.t 0/0 → 60/31, a 59-row regression closed); then #1271, a failed `open` autovivifies its lexical
+
+**#1273 — the store path was handing -1 straight to `AREF`, and the reason is a
+copied idiom.** `tools/run-perl-suite.pl --jobs 1 run/fresh_perl.t` had produced
+**no TAP at all** since `9d43ccf2` (s470bk, #1057): the file died at LOAD with
+SBCL's `Invalid index -1 for (vector t 1)`, uncatchable in Perl terms, and 59
+rows that used to pass simply were not there. The negative-subscript rebase
+`(if (< i 0) (+ len i) i)` was spelled BY HAND in seven array accessors
+(`p-aref`, `(setf p-aref)`, `p-aref-box`, `p-aref-argbox`, `p-delete-array`,
+`p-exists-array`, `p-alias-array-slot`) and ABSENT from three store-side ones
+(`p-autoviv-aref-for-hash`, `p-autoviv-aref-for-array`, `p-array-set`), which
+truncated the index and handed it to `%p-extend-to` + `AREF`. That was latent
+until #1057 routed a compound assign's CONTAINER through the chain walker, after
+which `$prgs[-1][0] .= $_` (fresh_perl.t:29) reached `AREF` with -1. **Rule 11:
+one inlined `%p-array-index` is now the only resolution of an array subscript
+against its container, and all TEN accessors call it** — the read and write
+halves can no longer disagree about what -1 means.
+
+**Rule 12 came with it: a still-negative result is not a no-op.** A subscript
+before the START of the array is perl's fatal on every lvalue use, and PCL used
+to DROP the write and carry on, so the program read the old value back — the
+#138 silent-wrong one level down. `%p-non-creatable-index` (perl's
+`Modification of non-creatable array value attempted, subscript -N`, the text
+`p-alias-array-slot` already carried a private copy of) now fires from the five
+write accessors. **Which sites die is MEASURED, 19 one-file probes vs perl
+5.40.3**: assignment, `.=`, `+=`, `++`, `||=`, `$a[-4]{k}=1`, `\$a[-4]`, `chop`,
+`$r->[-4]=9`, a foreach alias, a sub-argument alias and a write to an EMPTY
+array all die; a read, a SLICE read, `exists` and `delete` are quiet — so
+`p-aref`/`p-delete-array`/`p-exists-array` take the helper and NOT the fatal.
+The death is trappable: `eval { $a[-4] = 9 }` leaves `$@` matching
+`/^Modification of non-creatable/` and the program running.
+
+**The number, and the one row above it.** run/fresh_perl.t **0/0 DIFF → 60/31
+XDIFF**, SHORTFALL 91 → 0. That is ONE better than the `3016011e` bless of
+59/32, and the extra row is the same mechanism: the file's `sub NewShell` is
+`my($m2) = $#Shells++; $Shells[$m2]{HOST} = $Host`, i.e. `$Shells[-1]{HOST}` on
+a 1-element array. Two more rows moved elsewhere, both edited by hand with their
+cause: `perl-tests/array.t` test 82 (`eval '$a[-1] = 0'`) left
+`cl/skip-registry.lisp` — **the stale-detector flagged it in the very run that
+fixed it**, and its principle-9 reason was wrong as well as stale (`$a[-1] = 0`
+is VALID Perl that dies at RUN time, not invalid Perl to wave past) — and
+`t/op/array.t` 170/25 → 171/24, the same row in perl's own suite.
+
+**#1271 (the filler) — perl creates the handle BEFORE it opens, so a FAILED
+`open(my $fh, …)` still leaves a glob.** `defined($fh)` was 1 in perl and 0 in
+PCL, which sends the widespread `close $fh if defined $fh` and `if ($fh)`
+idioms down the opposite branch, silently. **Measuring first turned a design
+question into five lines**: `Symbol::gensym` + a failed open ALREADY answered
+exactly like perl in PCL, so only the autovivification was missing.
+`%p-autoviv-failed-handle` builds the glob ref through `p-backslash`'s typeglob
+arm — the one construction that sets `is-ref`, which is what makes `ref($fh)`
+answer GLOB rather than `""` — and `%p-open-impl`'s failure arm calls it beside
+the `%pcl-save-errno` it already did. Only an UNDEF box vivifies (a string is
+perl's symbolic-filehandle spelling and keeps its value; a glob is already the
+handle; a bareword is not a box). 24 probes: **11 of 12 J-rows and 10 of 12
+K-rows now identical to perl, up from 5 and 7** — including the RETRY, `open`
+into the same variable after a failure.
+
+**Bars.** Gate **213 files / 7347 tests**, only the 13 standing pclxs xs rows.
+`corpus-diff.pl ed302e13` IDENTICAL over 111 (runtime-only; no generation bump).
+Full sweep `--jobs 4` **GATE clean, 0 new / 0 fixed / 0 LOST**, drops 5 =
+census, TOTAL passing 18646 → **18647** (the array.t row, edited into
+`baselines/pass-baseline.tsv` by hand). `tools/ir-host-leak.pl` **31 leaks on
+this tree and on an `ed302e13` extraction — none added**. Companion: the six
+named files before/after (only `op/array.t` moved, +1/-1, this fix) and the
+whole `io/` dir for the `cl/` change — **its two differences were both measured
+PRE-EXISTING on an `ed302e13` extraction**: `io/perlio_fail.t` reads 11/4 on
+BOTH trees against a blessed 6/9 (a stale row, spliced, five rows out of
+`perl-suite-fails.tsv` by EDIT), and `io/pvbm.t` is the documented flapper
+(20/8 blessed, 23/5 base, 22/6 here — left alone; re-blessing a flapper only
+moves which run looks wrong). Guards `Pl/t/autoviv-02.t` 5 → 8 and
+`Pl/t/io-layers-01.t` 36 → 38, both INVERSE-VERIFIED on a `git archive
+ed302e13` extraction.
+
+**Filed:** #1305 (an array.t registration stale on BOTH trees — one pattern,
+two rows, one of them passing), #1306 (the `@_`-alias spelling of the
+non-creatable fatal still does not fire: `p-aref-argbox` is the LAZY accessor
+and also serves slice reads, where perl IS quiet), #1307 (`close` on a
+never-opened handle: perl's defined `""` vs PCL's undef — the #403/#416
+family), #1308 (a SUCCESSFUL `open my $fh` leaves `ref($fh)` = `""`; the
+success path box-sets the raw stream, so PCL currently gives a FAILED open a
+more perl-shaped handle than a successful one), #1309 (`open($a[0], …)`
+succeeds and `<$a[0]>` reads nothing — the array-element place never receives
+the handle, and the hash-element spelling works).
+
 ## Session 471 (Fable, 2026-09-06) — restart after the shutdown: bv-resume + bw (#1261) launched; the USER's cache-surface / root-scripts / install-layout asks RULED (`docs/plan-cache-and-install-s471.md`, DECIDED §s471); installer tests designed
 
 - **State at restart**: main `9ee95f2` (gen v2-830), CI green on it.  Two agents launched 07:50 (the USER's cap): **s470bv-resume** in its existing worktree from `~/pcl-agent-scratch/s470/s470bv/RESUME.md` (rebase onto 9ee95f2 FIRST so one sweep covers the combined tree; Parts 2–3 splices under three rulings: drop the stale `mro/*` + op/print.t registrations WITH cause; bisect the two Group-B LOSSES; gains spliced as WHEN + one pointer task) and **s470bw = #1261** in a new worktree.
