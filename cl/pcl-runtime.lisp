@@ -14205,6 +14205,37 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ((p-box-p fh) (box-set fh stream))
     (t            (setf (gethash fh *p-filehandles*) stream))))
 
+;;; THE LEXICAL IS AUTOVIVIFIED BEFORE THE OPEN IS ATTEMPTED (task #1271).
+;;; perl creates the handle first and opens into it, so a FAILED
+;;; `open(my $fh, "<", $missing)` still leaves $fh holding a fresh, CLOSED
+;;; glob.  Probed 5.40.3: `defined($fh)` is 1, `ref($fh)` is GLOB, `$fh` is
+;;; TRUE, a copy `my $g = $fh` is the same handle — while `close`, `fileno`,
+;;; `print {$fh}` and `<$fh>` all answer the closed-handle way.  PCL wrote the
+;;; variable only on success, so `defined $fh` was 0 and the widespread
+;;; `close $fh if defined $fh` / `if ($fh)` idioms took the wrong branch with
+;;; no warning and no die.
+(defvar *p-anon-fh-seq* 0
+  "Counter for autovivified anonymous filehandle globs (#1271).  The NAME
+   carries the uniqueness because %p-resolve-fh's typeglob fallback compares
+   symbol NAMES across packages, so two anonymous globs must not share one.")
+
+(defun %p-autoviv-failed-handle (fh)
+  "Give FH a fresh closed handle after an open that failed — see the note above.
+   ONLY an undef box autovivifies.  A box already holding a value is one of
+   perl's other two spellings and perl leaves it alone (probed): a handle NAME
+   string is the symbolic-filehandle case, and an existing glob (Symbol::gensym,
+   \\*FH, IO::Handle) is already the handle.  A bareword FH is a symbol, not a
+   box, and has nothing to autovivify into."
+  (when (and (p-box-p fh)
+             (let ((v (p-box-value fh)))
+               (or (null v) (eq v *p-undef*))))
+    ;; p-backslash's typeglob arm is the ONE construction of a glob REF —
+    ;; is-ref set, which is what makes ref($fh) answer GLOB rather than "".
+    (box-set fh (p-backslash
+                 (p-make-typeglob "Symbol"
+                                  (format nil "__PCL_ANONFH_~D"
+                                          (incf *p-anon-fh-seq*)))))))
+
 (defun %p-fresh-adjustable-string (&optional (init ""))
   (let ((buf (make-array (length init) :element-type 'character
                          :adjustable t :fill-pointer 0)))
@@ -14780,7 +14811,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ;; autovivifying a lexical handle.  (An undef/empty box is the modern
         ;; `open my $fh, ...` autoviv.)
         (%p-install-fh fh stream)
-        (%pcl-save-errno))  ; capture C errno (ENOENT etc.) before SBCL overwrites it
+        (progn
+          (%pcl-save-errno)          ; C errno (ENOENT etc.) before SBCL overwrites it
+          (%p-autoviv-failed-handle fh)))
     (if stream t nil)))
 
 (defmacro p-open (fh mode &optional filename)

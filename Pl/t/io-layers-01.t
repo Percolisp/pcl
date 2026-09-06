@@ -382,4 +382,49 @@ my \$ok = open(my \$fh, '<:nosuch', '$data') ? 1 : 0;
 printf "open=%d enoent=%d\\n", \$ok, (((\$! + 0) == 2) ? 1 : 0);
 PL
 
+# ── #1271 (s471a): perl AUTOVIVIFIES the lexical BEFORE it attempts the open,
+# so a FAILED `open(my $fh, …)` still leaves $fh holding a fresh CLOSED glob.
+# PCL wrote the variable only on success, so `defined $fh` was 0 where perl
+# says 1 — a SILENT divergence that sends `close $fh if defined $fh` and
+# `if ($fh)` down the wrong branch.  Every value below is the live perl
+# 5.40.3 answer, and the last two lines are the ones that prove the handle is
+# a real one and not a placeholder: the closed-handle answers are perl's, and
+# a SECOND open into the same variable still opens and reads.
+is(run_cl(<<'PL'), "open=0 defined=1 true=1 ref=GLOB\ncopy=1 same=1\nfileno=undef read=undef print=undef\nreopen=1 got=1\n", q{#1271 a failed open autovivifies a closed glob, reusable by a second open});
+my $fh;
+my $ok = open($fh, '<', '/nonexistent-pcl-1271') ? 1 : 0;
+printf "open=%d defined=%d true=%d ref=%s\n", $ok, (defined $fh ? 1:0), ($fh ? 1:0), ref($fh);
+my $copy = $fh;
+printf "copy=%d same=%d\n", (defined $copy ?1:0), ("$copy" eq "$fh" ? 1:0);
+printf "fileno=%s read=%s print=%s\n",
+  (defined fileno($fh) ? fileno($fh) : 'undef'),
+  (defined(my $l = <$fh>) ? 'line' : 'undef'),
+  (defined(my $p = print {$fh} 'x') ? $p : 'undef');
+my $ok2 = open($fh, '<', '/etc/hostname') ? 1 : 0;
+my $got = <$fh>;
+printf "reopen=%d got=%d\n", $ok2, (defined $got ? 1:0);
+close $fh;
+PL
+
+# ── #1271, THE NEGATIVES — only an UNDEF scalar autovivifies.  A scalar that
+# already holds a value is perl's SYMBOLIC-filehandle spelling and keeps its
+# string; a bareword handle is not a scalar at all; a SUCCESSFUL open is
+# untouched by this; and two failed opens must produce two DISTINCT handles
+# (they are separate globs, so the anonymous names cannot collide in the
+# handle table).  All four probed 5.40.3.
+is(run_cl(<<'PL'), "preset open=0 val=preset\nbareword open=0\ngood open=1 defined=1\ndistinct=1\n", q{#1271 only an undef scalar autovivifies, and two failures give two handles});
+my $pre = 'preset';
+my $o1 = open($pre, '<', '/nonexistent-pcl-1271') ? 1 : 0;
+printf "preset open=%d val=%s\n", $o1, $pre;
+my $o2 = open(NOPEFH, '<', '/nonexistent-pcl-1271') ? 1 : 0;
+printf "bareword open=%d\n", $o2;
+my $ok3 = open(my $good, '<', '/etc/hostname') ? 1 : 0;
+printf "good open=%d defined=%d\n", $ok3, (defined $good ? 1:0);
+close $good;
+my $a; my $b;
+open($a, '<', '/nonexistent-pcl-1271');
+open($b, '<', '/nonexistent-pcl-1271');
+printf "distinct=%d\n", ("$a" ne "$b" ? 1 : 0);
+PL
+
 done_testing();
