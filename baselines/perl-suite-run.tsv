@@ -2,6 +2,14 @@
 # s470bx (2026-09-06, Opus) -- TWO rows spliced by hand, `--jobs 1`, and the
 #   SAME three files measured on a `git archive fcf076f1` extraction so that
 #   "ours" is a measurement:
+#     op/stat_errors.t  510/128 -> 532/106 -> 636/2, in TWO steps within this
+#       session: #1043 first (22 rows), then #1231 + #1044 (104 more).  The
+#       second step is "a BAREWORD in an EXPR handle slot is a handle NAME":
+#       this file's arguments are barewords reached through `eval "$op $arg"`,
+#       and inside a fragment there is no `open` to teach the old file-wide
+#       handle registry, so every one compiled to a CALL and died in the eval.
+#       Two rows remain (`error from -T \*_`, `error from -B \*_`).  Detail of
+#       the first step follows.
 #     op/stat_errors.t  510/128 -> 532/106.  OURS: task #1043 (stat/lstat
 #       answer their CONTEXT), so the file's 22 `result of stat|lstat <arg>`
 #       rows now get perl's &PL_sv_no -- the empty string -- instead of the
@@ -1662,7 +1670,7 @@ op/sselect.t	23	0	17	6	DIFF		0
 op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	0	0	DIFF	aborted-forms:1: Undefined subroutine &main::is_linux_container called	0
-op/stat_errors.t	638	0	532	106	DIFF		0
+op/stat_errors.t	638	0	636	2	DIFF		0
 op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0

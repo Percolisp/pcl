@@ -56,6 +56,17 @@
 #   parallel and serial agreeing (#366 re-run: "REAL MOVE"); measured on a
 #   `git archive fcf076f1` extraction as 510/128, which is what makes the
 #   mover THIS change and not an inherited one.
+#   THEN A HUNDRED AND FOUR MORE, same file, one cause: tasks #1231 + #1044,
+#   a BAREWORD in an EXPR handle slot is a handle NAME.  This file's arguments
+#   are barewords (NEVEROPENED, SCALARFILE, CLOSEDFILE, CLOSEDDIR, _) reached
+#   through `eval "$op $arg"`, and inside a fragment there is no `open` to
+#   teach the old file-wide handle registry, so every one compiled to a CALL
+#   and DIED inside the eval -- `is $res, undef` passed by accident and
+#   `is 0+$err, EBADF` could not, because the die never touched $!.  Verdict
+#   532/106 -> 636/2, parallel and serial agreeing.  EXACTLY TWO rows remain,
+#   `error from -T \*_` and `error from -B \*_`, a different question (the
+#   -T/-B glob-ref-to-`_` operand); they are the two kept here, taken from the
+#   run's own .suitelog rather than assumed.
 # s470bi (task #1022 half (a), RULED by Fable in s470 and blessed with its
 #   cost VISIBLE): a bare `last`/`next`/`redo` whose loop is not lexically in
 #   the sub now DIES at its own site, trappably, instead of doing nothing
@@ -18579,109 +18590,5 @@ op/filetest.t	299	ok	not ok [PCL #297]	string overload is called for -t on IO
 op/filetest.t	33	ok	not ok	warning for -l $handle
 op/filetest_t.t	0	ok*	(no TAP)	*summary*
 op/stat.t	0	ok*	(no TAP)	*summary*
-op/stat_errors.t	608	ok	not ok	error from -A CLOSEDDIR
-op/stat_errors.t	604	ok	not ok	error from -A CLOSEDFILE
-op/stat_errors.t	596	ok	not ok	error from -A NEVEROPENED
-op/stat_errors.t	600	ok	not ok	error from -A SCALARFILE
-op/stat_errors.t	564	ok	not ok	error from -B CLOSEDDIR
-op/stat_errors.t	560	ok	not ok	error from -B CLOSEDFILE
-op/stat_errors.t	552	ok	not ok	error from -B NEVEROPENED
-op/stat_errors.t	556	ok	not ok	error from -B SCALARFILE
 op/stat_errors.t	570	ok	not ok	error from -B \*_
-op/stat_errors.t	630	ok	not ok	error from -C CLOSEDDIR
-op/stat_errors.t	626	ok	not ok	error from -C CLOSEDFILE
-op/stat_errors.t	618	ok	not ok	error from -C NEVEROPENED
-op/stat_errors.t	622	ok	not ok	error from -C SCALARFILE
-op/stat_errors.t	586	ok	not ok	error from -M CLOSEDDIR
-op/stat_errors.t	582	ok	not ok	error from -M CLOSEDFILE
-op/stat_errors.t	574	ok	not ok	error from -M NEVEROPENED
-op/stat_errors.t	578	ok	not ok	error from -M SCALARFILE
-op/stat_errors.t	212	ok	not ok	error from -O CLOSEDDIR
-op/stat_errors.t	208	ok	not ok	error from -O CLOSEDFILE
-op/stat_errors.t	200	ok	not ok	error from -O NEVEROPENED
-op/stat_errors.t	204	ok	not ok	error from -O SCALARFILE
-op/stat_errors.t	146	ok	not ok	error from -R CLOSEDDIR
-op/stat_errors.t	142	ok	not ok	error from -R CLOSEDFILE
-op/stat_errors.t	134	ok	not ok	error from -R NEVEROPENED
-op/stat_errors.t	138	ok	not ok	error from -R SCALARFILE
-op/stat_errors.t	388	ok	not ok	error from -S CLOSEDDIR
-op/stat_errors.t	384	ok	not ok	error from -S CLOSEDFILE
-op/stat_errors.t	376	ok	not ok	error from -S NEVEROPENED
-op/stat_errors.t	380	ok	not ok	error from -S SCALARFILE
-op/stat_errors.t	542	ok	not ok	error from -T CLOSEDDIR
-op/stat_errors.t	538	ok	not ok	error from -T CLOSEDFILE
-op/stat_errors.t	530	ok	not ok	error from -T NEVEROPENED
-op/stat_errors.t	534	ok	not ok	error from -T SCALARFILE
 op/stat_errors.t	548	ok	not ok	error from -T \*_
-op/stat_errors.t	168	ok	not ok	error from -W CLOSEDDIR
-op/stat_errors.t	164	ok	not ok	error from -W CLOSEDFILE
-op/stat_errors.t	156	ok	not ok	error from -W NEVEROPENED
-op/stat_errors.t	160	ok	not ok	error from -W SCALARFILE
-op/stat_errors.t	190	ok	not ok	error from -X CLOSEDDIR
-op/stat_errors.t	186	ok	not ok	error from -X CLOSEDFILE
-op/stat_errors.t	178	ok	not ok	error from -X NEVEROPENED
-op/stat_errors.t	182	ok	not ok	error from -X SCALARFILE
-op/stat_errors.t	410	ok	not ok	error from -b CLOSEDDIR
-op/stat_errors.t	406	ok	not ok	error from -b CLOSEDFILE
-op/stat_errors.t	398	ok	not ok	error from -b NEVEROPENED
-op/stat_errors.t	402	ok	not ok	error from -b SCALARFILE
-op/stat_errors.t	432	ok	not ok	error from -c CLOSEDDIR
-op/stat_errors.t	428	ok	not ok	error from -c CLOSEDFILE
-op/stat_errors.t	420	ok	not ok	error from -c NEVEROPENED
-op/stat_errors.t	424	ok	not ok	error from -c SCALARFILE
-op/stat_errors.t	322	ok	not ok	error from -d CLOSEDDIR
-op/stat_errors.t	318	ok	not ok	error from -d CLOSEDFILE
-op/stat_errors.t	310	ok	not ok	error from -d NEVEROPENED
-op/stat_errors.t	314	ok	not ok	error from -d SCALARFILE
-op/stat_errors.t	234	ok	not ok	error from -e CLOSEDDIR
-op/stat_errors.t	230	ok	not ok	error from -e CLOSEDFILE
-op/stat_errors.t	222	ok	not ok	error from -e NEVEROPENED
-op/stat_errors.t	226	ok	not ok	error from -e SCALARFILE
-op/stat_errors.t	300	ok	not ok	error from -f CLOSEDDIR
-op/stat_errors.t	296	ok	not ok	error from -f CLOSEDFILE
-op/stat_errors.t	288	ok	not ok	error from -f NEVEROPENED
-op/stat_errors.t	292	ok	not ok	error from -f SCALARFILE
-op/stat_errors.t	498	ok	not ok	error from -g CLOSEDDIR
-op/stat_errors.t	494	ok	not ok	error from -g CLOSEDFILE
-op/stat_errors.t	486	ok	not ok	error from -g NEVEROPENED
-op/stat_errors.t	490	ok	not ok	error from -g SCALARFILE
-op/stat_errors.t	520	ok	not ok	error from -k CLOSEDDIR
-op/stat_errors.t	516	ok	not ok	error from -k CLOSEDFILE
-op/stat_errors.t	508	ok	not ok	error from -k NEVEROPENED
-op/stat_errors.t	512	ok	not ok	error from -k SCALARFILE
-op/stat_errors.t	344	ok	not ok	error from -l CLOSEDDIR
-op/stat_errors.t	340	ok	not ok	error from -l CLOSEDFILE
-op/stat_errors.t	332	ok	not ok	error from -l NEVEROPENED
-op/stat_errors.t	336	ok	not ok	error from -l SCALARFILE
-op/stat_errors.t	124	ok	not ok	error from -o CLOSEDDIR
-op/stat_errors.t	120	ok	not ok	error from -o CLOSEDFILE
-op/stat_errors.t	112	ok	not ok	error from -o NEVEROPENED
-op/stat_errors.t	116	ok	not ok	error from -o SCALARFILE
-op/stat_errors.t	366	ok	not ok	error from -p CLOSEDDIR
-op/stat_errors.t	362	ok	not ok	error from -p CLOSEDFILE
-op/stat_errors.t	354	ok	not ok	error from -p NEVEROPENED
-op/stat_errors.t	358	ok	not ok	error from -p SCALARFILE
-op/stat_errors.t	58	ok	not ok	error from -r CLOSEDDIR
-op/stat_errors.t	54	ok	not ok	error from -r CLOSEDFILE
-op/stat_errors.t	46	ok	not ok	error from -r NEVEROPENED
-op/stat_errors.t	50	ok	not ok	error from -r SCALARFILE
-op/stat_errors.t	278	ok	not ok	error from -s CLOSEDDIR
-op/stat_errors.t	274	ok	not ok	error from -s CLOSEDFILE
-op/stat_errors.t	266	ok	not ok	error from -s NEVEROPENED
-op/stat_errors.t	270	ok	not ok	error from -s SCALARFILE
-op/stat_errors.t	476	ok	not ok	error from -u CLOSEDDIR
-op/stat_errors.t	472	ok	not ok	error from -u CLOSEDFILE
-op/stat_errors.t	464	ok	not ok	error from -u NEVEROPENED
-op/stat_errors.t	468	ok	not ok	error from -u SCALARFILE
-op/stat_errors.t	80	ok	not ok	error from -w CLOSEDDIR
-op/stat_errors.t	76	ok	not ok	error from -w CLOSEDFILE
-op/stat_errors.t	68	ok	not ok	error from -w NEVEROPENED
-op/stat_errors.t	72	ok	not ok	error from -w SCALARFILE
-op/stat_errors.t	102	ok	not ok	error from -x CLOSEDDIR
-op/stat_errors.t	98	ok	not ok	error from -x CLOSEDFILE
-op/stat_errors.t	90	ok	not ok	error from -x NEVEROPENED
-op/stat_errors.t	94	ok	not ok	error from -x SCALARFILE
-op/stat_errors.t	256	ok	not ok	error from -z CLOSEDDIR
-op/stat_errors.t	252	ok	not ok	error from -z CLOSEDFILE
-op/stat_errors.t	244	ok	not ok	error from -z NEVEROPENED
-op/stat_errors.t	248	ok	not ok	error from -z SCALARFILE
