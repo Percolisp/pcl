@@ -2,6 +2,14 @@
 
 Append new entries at the top. One section per session.
 
+## Session 471 (Fable, 2026-09-06) — restart after the shutdown: bv-resume + bw (#1261) launched; the USER's cache-surface / root-scripts / install-layout asks RULED (`docs/plan-cache-and-install-s471.md`, DECIDED §s471); installer tests designed
+
+- **State at restart**: main `9ee95f2` (gen v2-830), CI green on it.  Two agents launched 07:50 (the USER's cap): **s470bv-resume** in its existing worktree from `~/pcl-agent-scratch/s470/s470bv/RESUME.md` (rebase onto 9ee95f2 FIRST so one sweep covers the combined tree; Parts 2–3 splices under three rulings: drop the stale `mro/*` + op/print.t registrations WITH cause; bisect the two Group-B LOSSES; gains spliced as WHEN + one pointer task) and **s470bw = #1261** in a new worktree.
+- **The USER's three asks** answered from probes (plan doc §0–§4): the compile policy is two DIRECTORY LISTS (`PCL_COMPILE_DIRS` / `PCL_NO_COMPILE_DIRS`, `*` = all; the default list is `*p-core-inc-dirs*`) — sent to bw at 07:55, replacing its brief's `PCL_FASL_CACHE` word; `--clear-cache` stays one flag; NEW `--cache-info` / `--no-cache` / `--version` / `pl2cl --help` (#1300); `runt`/`clt`/`sweep-perl-tests.pl` move to `tools/`, dead `run-perl-test.pl` deleted (#1301); the install keeps the perl shape it already has, closing the gaps: `pcl` is NOT installed today, five root spellings → one `PCLPaths::root()`, PATH hint, `--uninstall` (#1302).
+- **Findings**: **#1303** — the runtime ignores `PCL_CACHE_DIR` for the MODULE cache (probed: proto/ moved, the module `.lisp` did not; `*pcl-cache-dir*` is a defparameter initform, so a saved core bakes the BUILDER's home in — a root-built install would send every user to `/root/.pcl-cache`); the 7-day age clause re-transpiles every module weekly (out of validity, told bw); the cache dir is umask-created (a fasl is code → 0700 + refuse unsafe); `pl2cl --help` does not exist.
+- **Installer tests** (USER ask; plan §5): Layer A in `tools/t/install-pcl.t` (real-core install reused; fresh-HOME / `PCL_CACHE_DIR` rows = #1303's shape; `--force`, `--uninstall`, PATH hint, `PCL_ROOT`) inside #1302; Layer B `tools/t/install-container.t` (#1304) with the CI recipe split into deps + verify halves; **podman recommended** over Docker (rootless; the matrix runs only on push and only as root).
+- Records: plan doc + DECIDED §s471 committed `3028b64` + this batch; tasks #1300–#1304 filed; memory STATE line updated.
+
 ## Session 470bs (Opus agent, 2026-09-05 + merge legs 2026-09-06) — the FILETEST / STAT family gets ONE operand resolver: the overload (#1031), the string-is-a-path rule (#1049), the handle KINDS (#1048), perl's errno (#1033) and what `_` remembers (#1047)
 
 `stat`, `lstat` and the 27 filetests take THE SAME operand and perl reads it

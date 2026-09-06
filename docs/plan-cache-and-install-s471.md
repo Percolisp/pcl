@@ -181,3 +181,73 @@ expects the runtime under itself" is not an obstacle — that is perl's own mode
   against BX is the USER's call.  Recommendation: BY → #1301 → BX → BZ — the
   cache shipped this week and its knobs are what a first user meets; BZ after BY
   because it needs #1303.
+
+## 5. Installer TESTS (USER ask, 2026-09-06: "can you add tests for the installer? should I install Docker?")
+
+### 5.1 What exists
+- `tools/t/install-pcl.t` (15 rows, NOT in the gate; CI runs it after a real
+  install): dry run changes nothing; the PPI floor refuses loudly and installs
+  nothing; a `--no-core` install; the tree carries no `Pl/t`; the installed
+  `pl2cl` and `runpcl` run a two-line fixture.  It runs under the DEV home, so
+  the per-user cache it exercises is this box's.
+- `.github/workflows/install-matrix.yml` + `tools/install-matrix/install-and-verify.sh`:
+  four images (ubuntu 22.04 / 24.04, debian 12 / 13) × pinned SBCL, the whole
+  recipe from apt to `prove tools/t/install-pcl.t` — **as ROOT, on push only**.
+- `.github/workflows/ci.yml`: the real install (with the core) on the runner
+  user, then the installer test.
+
+Holes: the installed CORE is built only in CI; `pcl` is not installed at all
+(F3); nothing runs from another cwd, through a symlinked bin dir, under a fresh
+HOME, or as a DIFFERENT user than the one who built the core (the #1303 shape);
+`--force`, the PATH hint and (once they exist) `--uninstall` / `PCL_ROOT` are
+untested.
+
+### 5.2 Layer A — extend `tools/t/install-pcl.t` (no container; part of #1302)
+ONE real install WITH the core, reused by every row (a core build is ~20 s; the
+file is not in the gate, so ~1 min is acceptable), the `--no-core` install kept
+for the fast rows.  Rows:
+1. `<prefix>/lib/pcl/pcl.core` exists and `PCL_SHOW_SBCL=1 <prefix>/bin/runpcl`
+   names it (PCLSbcl resolution step 3, the installed core).
+2. the installed `pcl -e` runs (after #1302 (a)).
+3. the same program from a different cwd, and through a SYMLINKED bin dir.
+4. fresh HOME: `HOME=<tmp>` → the installed tools create `<tmp>/.pcl-cache` and
+   touch nothing under the dev home; `PCL_CACHE_DIR=<tmp2>` → the module `.lisp`
+   and `.fasl` land under `<tmp2>` — **fails today (#1303)**: the installed core
+   was built under the dev HOME, so this row IS the "built by A, run under B"
+   case without a second user.
+5. `--force` replaces an existing tree and a shim that no longer exists does not
+   survive (the flag's documented reason).
+6. `--uninstall`: wrappers and `lib/pcl` gone, the cache untouched (after #1302 (d)).
+7. the PATH hint: printed when `$bindir` is not on PATH, absent when it is.
+8. `PCL_ROOT` pointing at a directory without `cl/pcl-runtime.lisp` dies naming
+   both candidates; pointing at the install root works (after #1302 (b)).
+Inverse-verify rows 4 and 8 on a `git archive` extraction of main.
+
+### 5.3 Layer B — `tools/t/install-container.t` (#1304; skips without a runtime)
+A local container test, `podman` preferred, `docker` accepted (the script probes
+`podman` then `docker`; `plan skip_all` when neither is present, so it is safe to
+write before the runtime is installed).  Split the CI recipe into a
+dependency half (`tools/install-matrix/deps.sh`: apt, cpanm PPI, the pinned
+SBCL, Quicklisp + cl-ppcre) and a verify half (`verify.sh`, from `tools/install-pcl`
+on) so CI and the local test share ONE recipe (rule 11); build the base image
+once, tagged by a hash of `deps.sh` + the SBCL version (iterations then cost
+~30 s, not the 2–3 min download).  Legs:
+- (a) the verify half as root = what the matrix does — one local run before a
+  push instead of a push per attempt;
+- (b) a NON-ROOT user (`useradd`), install to `$HOME/.local`, the PATH line;
+- (c) the SHARED install: root installs to `/opt/pcl`, the user runs
+  `/opt/pcl/bin/pcl -e 'use List::Util qw(sum); print sum(1..3)'` with an
+  EMPTY home — the module cache must appear in the USER's home (#1303: fails
+  today) and the run must print 6;
+- (d) `pcl --cache-info` under (c) reports the user's cache dir and the default
+  compile list (after #1300).
+Minutes, never in the gate; run by the installer tasks and before a tag.
+
+### 5.4 Docker or podman? (RULED: podman, rootless; Docker acceptable)
+Yes, install one: the matrix runs only on push, only as root, and a push per
+attempt is the wrong loop for installer work; leg (c) is the shape #1303 breaks
+and no non-container rehearsal reproduces "another user's home".  **podman**
+over Docker: rootless and daemonless (no `docker` group = root-equivalent
+membership on a dev box), same CLI (`alias docker=podman` works), in Ubuntu
+26.04's apt (`sudo apt install podman`, 5.7).  The test uses whichever is
+present.  Cost: minutes to install, a few hundred MB per base image.

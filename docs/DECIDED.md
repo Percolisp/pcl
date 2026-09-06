@@ -20,6 +20,8 @@ not-supported.md → only then probe.*
 - **`runt`, `clt`, `sweep-perl-tests.pl` MOVE to `tools/`; `run-perl-test.pl` (dead, 0 code refs) is DELETED; the root keeps `pcl`, `pl2cl`, `runpcl`, `xs-pin`** — #1301, after bv + bw merge; the moved sweep must spawn byte-identically.
 - **The install keeps the perl shape it already has** (`<prefix>/bin/` sh wrappers → `<prefix>/lib/pcl/` tree + `pcl.core`); gaps: `pcl` is NOT installed today (F3), five root-resolution spellings → ONE `PCLPaths::root()` with `$PCL_ROOT` override + a runtime-present check, PATH line printed only when missing (never rc edits), `--uninstall`, per-user module cache needs #1303 — #1302 (BZ), after #1300.
 - Order recommended: BY #1300 → #1301 → BX → BZ #1302; #1262 (docs/caching.md, Sonnet) after #1300.
+- **Installer TESTS (USER ask)**: Layer A extends `tools/t/install-pcl.t` (a real install WITH the core reused by every row; fresh-HOME + `PCL_CACHE_DIR` rows = the #1303 shape, failing today; `--force`, `--uninstall`, PATH hint, `PCL_ROOT`) inside #1302; Layer B = `tools/t/install-container.t` (#1304): root / non-root / SHARED-install legs on a stock image, the CI recipe SPLIT into deps + verify halves so both share one (rule 11); skips without a runtime.  Plan §5.
+- **Container runtime RULED: podman (rootless, daemonless) over Docker; Docker acceptable** — the matrix runs only on push and only as root; leg (c) (core built by root under /opt, run by a user with an empty home) is the #1303 shape no local rehearsal reproduces.
 
 ## s470bn (2026-09-05, Opus) — round 27 PERF: four levers ship, and the yardstick's biggest number is the MODULE LOAD, not codegen
 
