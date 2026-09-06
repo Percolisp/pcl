@@ -34,11 +34,12 @@ my $pl2cl = "$root/pl2cl";
 
 use lib "$RealBin/../../tools/lib";
 use PCLPaths ();
+use PCLSbcl ();   # sbcl_prefix — the %p-mtime contract row asks the runtime itself
 
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 37;
+plan tests => 46;
 
 my $dir = tempdir(CLEANUP => 1);       # where the fixture modules live
 
@@ -226,4 +227,73 @@ sub run_pcl {
     my $help = `$pl2cl --help 2>&1`;
     is($? >> 8, 0, 'pl2cl --help exits 0 (it answered "Unknown option: help")');
     like($help, qr/--no-cache/, '... and documents its options');
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# THE SHARED CACHE IS RACY BY DESIGN — a READER never dies over it (#1338).
+#
+# <cache>/ belongs to the USER, not to a process: two worktrees, two CI jobs
+# and the eight workers of a `prove -j8` all write it.  So a file this side
+# lists, stats or stamps can be gone before the next call — a `directory`
+# listing is a snapshot, and two prunes reaching the same 30-day-old entry is
+# enough.  MEASURED (#1338): `(file-write-date file)` sat OUTSIDE the prune's
+# ignore-errors, a sibling process replaced `modules/<key>.deps` inside the
+# window, and the resulting SB-INT:SIMPLE-FILE-ERROR escaped
+# P-CLEANUP-OLD-CACHE through P-LOAD-MODULE-CACHED and killed the unrelated
+# program that was loading Sub::Quote (Pl/t/moo-01.t 0/15; 15/15 re-run alone).
+#
+# WHAT THESE ROWS CAN AND CANNOT CHECK.  The window itself cannot be staged
+# from outside the process — an ENOENT that arrives BETWEEN two calls needs a
+# scheduler, not a fixture (a dangling symlink does not do it either: SBCL's
+# FILE-WRITE-DATE answers the LINK's own date, probed).  So the rows check the
+# INVARIANT that makes the window harmless: every mtime the cache side reads
+# goes through %P-MTIME, which answers NIL instead of signalling, and NIL is a
+# SKIP (hygiene) or a MISS (validity).  Effect-only hygiene, so SKIP is the
+# ruling and not rule 12's die (the s329 boundary).
+{
+    open my $rfh, '<', "$root/cl/pcl-runtime.lisp" or die $!;
+    my $rt = do { local $/; <$rfh> };
+    close $rfh;
+    my @reads = ($rt =~ /\(file-write-date /g);
+    is(scalar(@reads), 1,
+       'the runtime reads a file mtime in exactly ONE place (#1338)');
+    like($rt, qr/\(defun \%p-mtime \(path\)(?:(?!\n\(defun )[\s\S])*\(file-write-date /,
+         '... and that place is %p-mtime, whose answer for a vanished file is NIL');
+
+    # The helper's contract, asked of the runtime itself.
+    my @prefix = PCLSbcl::sbcl_prefix(runtime => "$root/cl/pcl-runtime.lisp",
+                                      env_core => 1);
+    my $probe = q{(let ((gone (pcl::%p-mtime "/pcl-no-such-file-1338")) }
+              . q{(here (pcl::%p-mtime "} . "$root/cl/pcl-runtime.lisp" . q{"))) }
+              . q{(format t "~:[nil~;date~]/~:[nil~;date~]~%" gone here))};
+    my $out = `sbcl @prefix --eval '$probe' 2>&1`;
+    like($out, qr{^nil/date$}m,
+         '%p-mtime: NIL for a file that is not there, a date for one that is');
+}
+
+# The two HALF ENTRIES the race leaves behind are a MISS and a clean load, not
+# an error.  PCL_NO_FASL_CACHE=1 keeps the question on the TEXT entry: with a
+# fasl present, deleting the .lisp alone is answered by the fasl and the row
+# would test nothing.
+write_mod('Racy', "package Racy;\nsub v { 42 }\n1;\n");
+{
+    my $rcache = tempdir(CLEANUP => 1);
+    my %env = (PCL_CACHE_DIR => $rcache, PCL_NO_FASL_CACHE => 1);
+
+    is(run_pcl('use Racy; print Racy::v();', %env), '42',
+       'the text entry is written (the fixture for the two half-entry rows)');
+    my ($lisp) = glob("$rcache/modules/*.lisp");
+    my ($deps) = glob("$rcache/modules/*.deps");
+    ok($lisp && $deps, '... both halves of the entry are there');
+
+    unlink $lisp;
+    is(run_pcl('use Racy; print Racy::v();', %env), '42',
+       'a .deps whose .lisp has vanished is a MISS and a clean load');
+    ok(scalar(glob("$rcache/modules/*.lisp")), '... and the entry is rebuilt');
+
+    unlink glob("$rcache/modules/*.deps");
+    is(run_pcl('use Racy; print Racy::v();', %env), '42',
+       'a .lisp whose .deps has vanished is a MISS and a clean load');
+    ok(scalar(glob("$rcache/modules/*.deps")),
+       '... and the manifest is written again');
 }

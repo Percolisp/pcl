@@ -18643,6 +18643,24 @@ buffer's fill-pointer; everything else falls back to file-length."
    load (once for the fasl, once for the .lisp), and the class is asked again;
    the dependency files are hashed for the first of those only.")
 
+(defun %p-mtime (path)
+  "PATH's write date, or NIL when it cannot be read — it vanished, or it was
+   never there.
+
+   THE ONE READ OF AN mtime ON THE SHARED CACHE (task #1338).  <cache>/ is
+   shared by every PCL process of the user — two worktrees, two CI jobs, the
+   eight workers of a `prove -j8` — so any file this side lists, stats or
+   stamps can be deleted or replaced by a sibling between one call and the
+   next: a `directory` listing is a snapshot, and two prunes reaching the same
+   30-day-old entry is enough.  A vanished file is simply not ours: the caller
+   SKIPS it (hygiene) or treats the entry as a MISS (validity).  It is never a
+   reason to kill the program that happened to be loading a module — measured,
+   an unhandled SB-INT:SIMPLE-FILE-ERROR out of P-CLEANUP-OLD-CACHE inside
+   P-LOAD-MODULE-CACHED took Pl/t/moo-01.t to 0/15 while two sibling trees
+   wrote this cache.  Effect-only hygiene, so SKIP is the ruling and not a die
+   (rule 12's s329 boundary)."
+  (ignore-errors (file-write-date path)))
+
 (defun %p-file-md5 (path)
   "MD5 hex of PATH's bytes, or NIL when it cannot be read.  The digest the
    transpiler's Digest::MD5 wrote into the manifest."
@@ -18748,10 +18766,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    still PRUNES by age; that is disk hygiene, not validity."
   (when *pcl-skip-cache*
     (return-from p-cache-valid-p nil))
-  (when (not (probe-file cache-path))
-    (return-from p-cache-valid-p nil))
-  (and (> (file-write-date cache-path) (file-write-date source-path))
-       (p-cm-valid-p (%p-cache-manifest source-path))))
+  ;; %P-MTIME, not PROBE-FILE + FILE-WRITE-DATE: the cache is shared, so the
+  ;; entry can go between the two calls, and a MISS is the right answer to a
+  ;; file that is not there — never an error (task #1338).
+  (let ((cached (%p-mtime cache-path))
+        (source (%p-mtime source-path)))
+    (and cached source (> cached source)
+         (p-cm-valid-p (%p-cache-manifest source-path)))))
 
 ;;; --- Module Transpilation ---
 
@@ -18888,9 +18909,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    core's .failed marker (tools/lib/PCLSbcl.pm): long enough that a run does
    not re-pay a doomed compile, short enough that a fixed module recovers on
    its own."
-  (let ((marker (%p-fasl-failed-marker fasl-path)))
-    (and (probe-file marker)
-         (< (- (get-universal-time) (file-write-date marker)) 3600))))
+  (let* ((marker (%p-fasl-failed-marker fasl-path))
+         (date (%p-mtime marker)))   ; the shared cache again: it may be gone
+    (and date (< (- (get-universal-time) date) 3600))))
 
 (defun %p-secs-since (start)
   "Seconds of wall clock since START, a GET-INTERNAL-REAL-TIME reading."
@@ -18976,6 +18997,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     (sb-fasl::invalid-fasl (e)
       (%p-note-fasl-failure fasl-path e)
       (ignore-errors (delete-file fasl-path))
+      nil)
+    ;; ... and the same answer when the file itself has GONE between the
+    ;; validity check and this LOAD — a sibling process pruning the shared
+    ;; cache (task #1338).  Narrow deliberately: only when the fasl is no
+    ;; longer there, so a file error raised BY the module's own top-level code
+    ;; still propagates and cannot be re-run from the text.
+    (file-error (e)
+      (when (probe-file fasl-path) (error e))
+      (%p-note-fasl-failure fasl-path e)
       nil)))
 
 ;;; ── PRUNE BY LAST USE (task #1300, F2; #682 folds in) ─────────────────
@@ -19018,14 +19048,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((key (namestring source-path)))
     (unless (gethash key *p-touched-cache-entries*)
       (setf (gethash key *p-touched-cache-entries*) t)
-      (let ((lisp (p-compute-cache-path source-path t))
-            (cutoff (- (get-universal-time) *pcl-cache-touch-interval*)))
-        (when (and lisp (probe-file lisp)
-                   (< (file-write-date lisp) cutoff))
+      (let* ((lisp (p-compute-cache-path source-path t))
+             (date (and lisp (%p-mtime lisp)))
+             (cutoff (- (get-universal-time) *pcl-cache-touch-interval*)))
+        (when (and date (< date cutoff))
           (dolist (f (list lisp
                            (%p-manifest-path source-path)
                            (p-compute-cache-path source-path nil)))
-            (when (and f (probe-file f)) (%p-utime-now f)))))))
+            ;; %P-UTIME-NOW already answers NIL for a file that is gone; no
+            ;; PROBE-FILE first, which would only widen the window (#1338).
+            (when f (%p-utime-now f)))))))
   nil)
 
 (defvar *p-cache-pruned-this-run* nil
@@ -19040,9 +19072,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    stamp is there to stop the scan happening on EVERY miss.)"
   (cond (*p-cache-pruned-this-run* nil)
         (t (setf *p-cache-pruned-this-run* t)
-           (let ((stamp (merge-pathnames ".last-prune" *pcl-cache-dir*)))
-             (cond ((and (probe-file stamp)
-                         (< (- (get-universal-time) (file-write-date stamp))
+           (let* ((stamp (merge-pathnames ".last-prune" *pcl-cache-dir*))
+                  (date (%p-mtime stamp)))
+             (cond ((and date
+                         (< (- (get-universal-time) date)
                             *pcl-cache-prune-interval*))
                     nil)
                    (t (ignore-errors (%p-write-cache-file stamp "pcl") t)))))))
@@ -19050,8 +19083,13 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-prune-dir (dir cutoff)
   "Delete every file directly under DIR whose mtime is older than CUTOFF."
   (dolist (file (ignore-errors (directory (merge-pathnames "*.*" dir))))
-    (when (ignore-errors (< (file-write-date file) cutoff))
-      (ignore-errors (delete-file file)))))
+    ;; The listing is a SNAPSHOT of a shared directory: a sibling process can
+    ;; delete or replace any of these before this loop reaches it, and two
+    ;; prunes racing over the same old entry is the ordinary case.  Both the
+    ;; stat and the unlink therefore SKIP what is already gone (task #1338).
+    (let ((date (%p-mtime file)))
+      (when (and date (< date cutoff))
+        (ignore-errors (delete-file file))))))
 
 (defun p-cleanup-old-cache ()
   "Drop cache entries nothing has reached for *PCL-CACHE-MAX-AGE* — the module
