@@ -8,7 +8,7 @@ Perl is compiled into a Common Lisp, [SBCL](https://www.sbcl.org/). A
 runtime library supplies what perl does behind the scenes: context,
 coercion, `local`, `tie`, `use overload`, string `eval`, etc.
 
-PCL is written in Perl The compiled program only use a Perl process
+PCL is written in Perl. The compiled program only use a Perl process
 with PCL to handle `eval` strings at run time.
 
 Why?
