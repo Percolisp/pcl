@@ -237,6 +237,38 @@ taken: it needs the live-array semantics checked (a `push` during a
 single-array loop DOES extend the iteration today, which the run deliberately
 does not).
 
+**ROUND 29's VERDICT ON THIS TABLE (s470bu, 2026-09-06).**  The two levers
+round 29 shipped are NOT table entries — they were found by reading the RAW
+profiles the table was summarised from, and both sit UNDER the rows the table
+already blames.  Recorded here per entry:
+
+* rank 12 `pcl::do-regex-match` (4.5 % of textproc) and rank 14
+  `pcl::set-match-vars` (3.6 %) — the entries this round set out to take —
+  were NOT taken.  What the graph under them showed instead: the *construction*
+  of the op, not the per-match protocol.  `%p-regex-op` consed `(list flags
+  raw)` and did an `equal` gethash on it on every evaluation (gethash/equal
+  16.8 % of a `regexg` profile, `sxhash-recurse` 6.8 %), and
+  `perl-regex-to-ppcre` was **33.1 % of json-rt's whole run**, reached from
+  `do-regex-subst`.  Both are now once-per-SITE / once-per-OP: **#1250**
+  (`%p-op-once`) and **#1251** (`%p-subst-compiled`).  The two ranked entries
+  survive and stay open — they are now a larger share of a much smaller row.
+* rank 2 `search` / rank 3 `vector-hairy-data-vector-ref` / ranks 5, 6, 8, 9
+  (one cl-ppcre scan) — UNTOUCHED, still #1187 / #71's.  Round 29 removed the
+  work AROUND the scan, so the scan's share of json-rt and textproc is now
+  higher, and the case for #1187's one-coercion measurement is stronger, not
+  weaker.
+* rank 7 (JSON::PP's own cached-module lambda, 6.9 % of json-rt) — untouched,
+  and now the biggest PCL-emitted entry in that row.
+
+**AND THE MEASUREMENT LESSON THE ROUND PAID FOR.**  `regexg` — the row this
+table's regex entries come from — is ONE m// scanning a 200 000-char string,
+so a per-EVALUATION cost is amortised over the scan and nearly invisible in it:
+the same #1251 lever reads **-43.5 %** on many short s/// (`subste`) and
+**-5.4 %** on the same two s/// over a 900-char subject (`substg`).  A regex
+row that scales the SUBJECT measures cl-ppcre; a row that scales the CALL
+COUNT measures PCL.  `tools/bench-exec.pl` now carries both (`regexg` and the
+new `subste`), and a future regex lever should be sized against the second.
+
 **None of the four round-27 levers appears in this table**, which is the
 expected outcome and worth stating: `symref-const`, the bulk fill,
 `numeric-slot` and `foreach-arrays` each removed the whole of a microbench

@@ -2,6 +2,30 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bu (Opus agent, 2026-09-06) — perf round 29: a regex/subst/tr LITERAL is built once per SITE (#1250), and the s/// op carries its COMPILED record (#1251) — json-rt HALVED
+
+Two runtime levers, both chosen from the RAW `sb-sprof` profiles behind §A.4's ranked table rather than from the table's own summary rows (ranks 12 `do-regex-match` and 14 `set-match-vars` point at the per-match protocol; what the profiles showed was bigger and cheaper).
+
+**#1250 — a regex/subst/tr LITERAL builds its op ONCE per call site.**  `(p-regex :pat "." :flags "g")` expanded to `(%p-regex-op "." "g")`, which CONSES `(list flags raw)` and does an `equal` gethash on it on every evaluation; `%p-subst-parts` and `%p-tr-parts` additionally built a fresh op struct per evaluation.  `%p-op-once` puts the whole construction in a cell of the emitting site's own (`(load-time-value (cons nil nil) nil)`, the #1180 `p-symref-site` shape), LAZY so `%pcl-strip-regex-code-blocks`' stderr announcement and `parse-regex-modifiers`' rejection stay at first EXECUTION and not at LOAD.  It fires only when every ingredient is a compile-time string (a plain literal or a `(p-esc "…")` payload); `p-qr` deliberately does NOT (two evaluations of `qr/a/` are distinct references in perl, ir-spec §10), and a CLOSURE replacement keeps its fresh op because it may capture lexicals.
+
+**#1251 — the s/// op carries its compiled form.**  `do-regex-subst` re-ran `perl-regex-to-ppcre` (SIX `cl-ppcre:regex-replace-all` passes over the pattern text), the replacement translation, seven `member` walks of the modifier list, an `append`ed options list and a FORMATted scanner-cache key on EVERY evaluation.  `perl-regex-to-ppcre` alone was **33.1 %** of the `json-rt` macro row.  m// has had a compiled slot since #680; s/// now has `%p-subst-compiled`, building `#(pattern replacement scanner eval-p global-p non-destructive-p reg-names closers)` once.  The record is a pure function of the op's three data slots and nothing writes those after the op is built, so THE OP IS THE CACHE — no invalidation rule to get wrong.  **The slot holds a CONS, not the record**, so a per-SITE cell can BE that cons: an s/// with a closure replacement must build a fresh op per evaluation, and without a shared holder every interpolated replacement and every /e — JSON::PP's hot ones included — would get nothing from the cache.  `%p-op-site` is handed to `%p-subst-parts` whenever the `p-subst` macro proved the PATTERN and FLAGS constant.  The record is built inside `do-regex-subst`'s `handler-case` and stored only on success, so a bad pattern still warns and answers 0 where it did.
+
+**MEASURED** (`tools/bench-exec.pl` `BENCH_RT_B=<main's runtime>`: one transpile, two cores, interleaved best-of-5, startup subtracted; A = this branch, B = main `31473881`.  Quiet box, load 1.99 — a loaded run at load 5.4 agreed within 2 points on every row):
+
+| bench | perl(s) | pclA(s) | pclB(s) | B/A | A/perl |
+|---|---:|---:|---:|---:|---:|
+| json-rt | 0.8892 | 1.6064 | 3.2013 | **+99.3 %** | 1.81x (was 3.60x) |
+| subste | 0.0882 | 0.3980 | 0.6433 | +61.6 % | 4.51x |
+| regexg | 0.5640 | 1.1602 | 1.5295 | +31.8 % | 2.06x |
+| textproc | 0.7719 | 2.8516 | 3.7141 | +30.2 % | 3.69x |
+| intloop+= / strcat / sortstr / moo-objs | — | — | — | −1.9 / −1.0 / +1.2 / +0.5 % | controls = the spread |
+
+Isolating #1251 from #1250 (`scratch/s470bu/ab-rt.pl`, one program against two runtimes, B = this branch's own HEAD~1): `subste` **−43.5 %**, `substg` −5.4 %.  That gap IS the finding: s/// on a LONG subject amortises the per-call cost over the scan, so the lever is felt on MANY s/// over SHORT subjects — the shape CPAN code actually has (escaping, trimming, per-field cleanup; JSON::PP's encoder is exactly this).  `tools/bench-exec.pl` gains that row, `subste`.  #1250's own hand-replaced ceiling, taken before any code was written, was −20.8 % on `regexg` and it collects −21.4 %.
+
+**RUNTIME-ONLY.**  `%p-op-once` and `%p-op-site` are inserted by the runtime's own macros and never named in emitted text, so `pl2cl`'s output does not change: `tools/corpus-diff.pl 31473881` IDENTICAL across 111 files (silent drops 5, unchanged), `tools/emission-ab.pl --shapes --list lib/**/*.pm` 27/27 SAME / 0 DIFF / 0 RCDIFF.  No `PCL_OPT` name (neither is a licensed emission), no generation bump, no artifact regeneration — the #1181 / #1203–#1205 precedent.
+
+**BARS.**  Gate `PCLXS_DIR=~/pclxs tools/prove-core` 216 files / 7478 rows, FAIL = exactly the 13 standing pclxs xs rows (xs-01 5, xs-02 4, xs-03 4).  Full sweep `--jobs 4`: **GATE clean** — 0 new / 0 fixed / 0 LOST after the serial re-run, TOTAL passing 18649 = baseline (+0), drops 5 = census, shortfall +0 (the parallel pass's single `length.t` loss was load noise and the serial verdict replaces it).  `tools/ir-conform --jobs 2` 289 pass / 0 fail / 56 known / 0 stale.  `tools/ir-host-leak.pl` unchanged (it reads the same corpus emission, which is byte-identical).  `tools/tag-license --check` clean.  Companion `--jobs 1` over the regex-heavy files, BEFORE = a `git archive 31473881` extraction: re/regexp.t, re/subst.t, re/substT.t, re/subst_amp.t, re/pat.t, op/tr.t, op/split.t, op/quotemeta.t — **every row identical**; the one status flip (re/regexp.t TIMEOUT → DIFF at the SAME 797/108 counts) did not reproduce serially on either tree, so it was load noise and nothing was spliced.  Guard `Pl/t/perf-levers-03.t` grows 11 → 18 rows and is INVERSE-verified on the extraction: rows 1/2/5/7/10/12/13/14/15 fail there, while the six NEGATIVES and the three RUN rows pass — which is the design, since the RUN rows assert semantics the levers must not change (34 shapes against perl 5.40.3 across them).
+
 ## Session 470by (Opus agent, 2026-09-06 + resume) — #1300: the CACHE SURFACE — the cache directory becomes a PROCESS fact (#1303), the prune reads LAST USE (#682 folds in), the directory is 0700, and `--cache-info` / `--no-cache` / `--version` / `pl2cl --help` exist
 
 **A / #1303 — where the cache is, is a fact about the PROCESS, not about the
