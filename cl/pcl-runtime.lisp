@@ -16041,19 +16041,34 @@ buffer's fill-pointer; everything else falls back to file-length."
     (setf *pcl-stat-cache-ok* (and st t))
     st))
 
+(defun %p-stat-answer (st)
+  "What `stat`/`lstat` hand back once the stat has run — the ONE reading of
+   their context, since the two ops differ only in which syscall filled ST.
+
+   In LIST context the 13-element list (empty on failure); in scalar or void
+   context the SUCCESS FLAG, because perl's pp_stat pushes &PL_sv_yes or
+   &PL_sv_no there.  &PL_sv_no is the empty STRING, not undef, so
+   `defined(scalar stat \"/no/such\")` is TRUE (probed 5.40.3) — and `my $ok =
+   stat $f` is 1, where PCL used to store the 13-element vector as an ARRAY
+   REF and `$ok == 1` became an address comparison (task #1043).  `stat` and
+   `lstat` are in ExprToCL's %WANTARRAY_SENSITIVE, so every call site binds
+   *wantarray* to its own static context and the enclosing sub's cannot leak."
+  (if (eq *wantarray* t)
+      (and st (%p-stat-vector st))
+      (if st 1 "")))
+
 (defun %p-stat-impl (file-or-fh)
   "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
-   size atime mtime ctime blksize blocks).  Follows symlinks.  nil on failure."
+   size atime mtime ctime blksize blocks) in LIST context, 1 or \"\" in scalar
+   context (see %p-stat-answer).  Follows symlinks."
   (multiple-value-bind (kind val) (%p-stat-operand file-or-fh "stat")
-    (let ((st (%p-stat-buf kind val nil)))
-      (and st (%p-stat-vector st)))))
+    (%p-stat-answer (%p-stat-buf kind val nil))))
 
 (defun %p-lstat-impl (file)
   "Perl lstat — like stat but does NOT follow a symlink (reports the link).
    Unlike `-l' it DOES accept a filehandle (probed: `lstat FH' answers 1)."
   (multiple-value-bind (kind val) (%p-stat-operand file "lstat")
-    (let ((st (%p-stat-buf kind val t)))
-      (and st (%p-stat-vector st)))))
+    (%p-stat-answer (%p-stat-buf kind val t))))
 
 ;;; ============================================================
 ;;; File Test Operators (-e, -d, -f, -r, -w, -x, -s, -z, …)
@@ -18036,7 +18051,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-830"
+(defparameter *pcl-cache-generation* "v2-840"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

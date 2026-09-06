@@ -243,16 +243,23 @@ test_codegen('truncate($file, 0)',
 diag "";
 diag "-------- stat/lstat functions:";
 
+# The `p-scalar-ctx` wrap is REQUIRED, not decoration: `stat`/`lstat` answer
+# the 13-element list in LIST context and perl's &PL_sv_yes / &PL_sv_no — 1 or
+# the empty STRING — in scalar context, so they are in ExprToCL's
+# %WANTARRAY_SENSITIVE and every call site must bind *wantarray* to its own
+# static context.  Without the bind the ENCLOSING sub's context leaks in and
+# `my $ok = stat $f` inside a list-context sub gets the vector back (#1043).
+# These are statements in VOID context, which takes the same scalar branch.
 test_codegen('stat($file)',
-            '(p-stat $file)',
+            '(p-scalar-ctx (p-stat $file))',
             'stat file');
 
 test_codegen('stat($fh)',
-            '(p-stat $fh)',
+            '(p-scalar-ctx (p-stat $fh))',
             'stat filehandle');
 
 test_codegen('lstat($file)',
-            '(p-lstat $file)',
+            '(p-scalar-ctx (p-lstat $file))',
             'lstat file');
 
 

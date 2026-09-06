@@ -26,6 +26,14 @@
 # Row 13–16 are the OTHER exclusion: `_` is the runtime's stat-cache
 # VARIABLE, not a handle named "_".
 #
+# Rows 72-85 are task #1043, the family's OTHER context question: `stat` and
+# `lstat` answer the 13-element list in LIST context and perl's &PL_sv_yes /
+# &PL_sv_no — 1 or the empty STRING — in scalar and void context.  PCL handed
+# the vector back in every context, so `my $ok = stat $f` stored an ARRAY REF
+# and `$ok == 1` was an address comparison; the failure answer was undef where
+# perl's is a DEFINED "".  Truthiness agreed either way, which is why the sweep
+# and the companion were clean with the bug in place.
+#
 # Every expectation is the OUTPUT OF THE SAME PROGRAM under perl 5.40.3
 # (scratch/guard-fh-prog.pl), not a hand-derivation.  Two SBCL launches, one
 # per emission path — a Pl/t file's cost is its wall time, not its row count.
@@ -47,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 143;
+plan tests => 171;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -223,6 +231,32 @@ print "70=", ($@ ? "die" : "no"), "\n";
 # symlink named "1" in the cwd, reading the value answers the opposite.
 lstat($tmp);
 print "71=", ((-l -e _) ? 1 : 0), "\n";
+# --- s470bx: stat/lstat answer their CONTEXT (task #1043) ------------------
+# perl's pp_stat pushes the 13-element list in list context and &PL_sv_yes /
+# &PL_sv_no in scalar context — 1 or the empty STRING, so a FAILED scalar stat
+# is DEFINED.  PCL used to hand the 13-element vector back in every context,
+# which `my $ok = stat $f` stored as an ARRAY REF.
+my $sc1 = stat($tmp);      print "72=", (defined $sc1 ? $sc1 : "UNDEF"), "\n";
+my $sc2 = stat("/no/such/zz-xyq");
+print "73=", (!defined $sc2 ? "UNDEF" : ($sc2 eq '' ? "EMPTY" : $sc2)), "\n";
+print "74=", (defined($sc2) ? "defined" : "undef"), "\n";
+print "75=", ($sc1 == 1 ? "one" : "NOT-ONE"), "\n";
+my $sc3 = lstat($tmp);     print "76=", (defined $sc3 ? $sc3 : "UNDEF"), "\n";
+print "77=", scalar(stat($tmp)), "\n";
+print "78=", (stat($tmp) ? "true" : "false"), "\n";
+# LIST context is untouched, in both spellings
+my @sl = stat($tmp);       print "79=", scalar(@sl), "\n";
+my ($sdev) = stat($tmp);   print "80=", ($sdev > 0 ? "pos" : "BAD"), "\n";
+print "81=", scalar(() = stat($tmp)), "\n";
+# a sub whose LAST expression is `stat' inherits the CALLER's context
+sub st_tail { return stat($tmp) }
+my @stl = st_tail();       print "82=", scalar(@stl), "\n";
+my $sts  = st_tail();      print "83=", (defined $sts ? $sts : "UNDEF"), "\n";
+# `_' in scalar context answers the flag too, and a VOID stat still fills it
+stat($tmp);
+print "84=", scalar(stat(_)), "\n";
+stat($tmp);
+print "85=", (-e _ ? 1 : 0), "\n";
 close(FH);
 unlink $tmp;
 PERL
@@ -304,6 +338,22 @@ my %EXPECT = (
     '70' => 'no',   # … and only when there was a buffer: a -T that can open
                     #   nothing performs no stat at all
     '71' => '0',    # the stacked spelling (t/op/filetest.t:125)
+    # --- #1043: stat/lstat answer their CONTEXT --------------------------
+    '72' => '1',    # scalar-context stat SUCCEEDS -> &PL_sv_yes, which is 1
+    '73' => 'EMPTY',#   … and FAILS to &PL_sv_no, the empty STRING
+    '74' => 'defined', # so `defined(scalar stat "/no/such")' is TRUE
+    '75' => 'one',  # `my $ok = stat $f' is the NUMBER 1, not an ARRAY ref
+    '76' => '1',    # lstat answers its context the same way
+    '77' => '1',    # the explicit scalar() spelling
+    '78' => 'true', # truthiness agreed even before the fix — it is the VALUE
+                    #   that was wrong, which is why nothing caught this
+    '79' => '13',   # LIST context is UNTOUCHED: still the 13 elements …
+    '80' => 'pos',  #   … in the right order
+    '81' => '13',   # … including the `scalar(() = …)' count idiom
+    '82' => '13',   # a tail-position `return stat' INHERITS the caller's
+    '83' => '1',    #   context — list from list, the flag from scalar
+    '84' => '1',    # `stat _' takes the same context branch
+    '85' => '1',    # and a VOID-context stat still fills the `_' cache
 );
 
 my $n = 0;

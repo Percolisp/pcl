@@ -193,7 +193,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # funcalls — they apply the same wrapper in gen_readline_form / gen_glob_form.)
 my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
   reverse localtime gmtime caller unpack each splice readdir
-  getprotobyname getprotobynumber readpipe
+  getprotobyname getprotobynumber readpipe stat lstat
 );
 
 # Only exceptions that need different CL names than p-<perl-op>
