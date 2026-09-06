@@ -502,6 +502,13 @@ sub report {
     mode        => $o{mode},
     generation  => $o{generation},
     manifest_version => $VERSION,
+    # WHAT THIS TRANSPILE READ (task #1261).  The same ONE dependency walk the
+    # runtime's cache sidecar is written from (Pl::ProtoCache's frames): every
+    # module or file whose prototypes/exports decided how this program parses.
+    # A backend author reads it as "these files are part of my input"; the
+    # runtime reads the sidecar form of it to decide whether a cached
+    # transpile is still valid.
+    depends     => ($o{depends} || []),
     # The v1-text chunks the head census could only REGEX, not walk.  Nonzero
     # means `uses` is approximate for those chunks and says so out loud.
     text_scanned => $ACC->{TEXT_CHUNKS},

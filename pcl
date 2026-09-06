@@ -210,9 +210,14 @@ sub make_core {
 }
 
 sub clear_cache {
-  # Remove cached compiled modules (.fasl/.lisp) AND the cached runtime cores;
-  # the next run rebuilds the core it needs.
-  my @files = (glob("\Q$cache_dir\E/*.fasl"), glob("\Q$cache_dir\E/*.lisp"));
+  # Remove cached compiled modules AND the cached runtime cores; the next run
+  # rebuilds what it needs.  A module entry is three files under modules/ —
+  # the transpiled .lisp, its compiled .fasl, and since task #1261 the .deps
+  # DEPENDENCY MANIFEST that decides whether the other two are still valid.
+  # (The flat `$cache_dir/*.lisp|*.fasl` glob is kept for entries written
+  # before #1261 moved them into modules/.)
+  my @files = (glob("\Q$cache_dir\E/modules/*"),
+               glob("\Q$cache_dir\E/*.fasl"), glob("\Q$cache_dir\E/*.lisp"));
   my $n = @files ? unlink(@files) : 0;
   my $k = PCLSbcl::clear_cached_cores();
   # …and the transpile-time prototype facts (task #560), which live under the

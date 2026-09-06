@@ -54,6 +54,12 @@
 ;;; Load sb-bsd-sockets for socket builtins (socket/bind/connect/accept/…)
 (require :sb-bsd-sockets)
 
+;;; Load sb-md5 for the module cache's DEPENDENCY MANIFEST (task #1261): a
+;;; cached module transpile encodes the prototypes and exports of the modules
+;;; it read, so its validity is a CONTENT question about those files, and the
+;;; transpiler (Digest::MD5, core) and this side must compute the same digest.
+(require :sb-md5)
+
 ;;; --- :invert spike (case-sensitivity experiment) -----------------------
 ;;; All third-party libs (cl-ppcre, asdf, sb-posix) are loaded ABOVE under the
 ;;; standard :upcase readtable.  From here on, read PCL's own runtime AND all
@@ -18051,8 +18057,107 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Content key of this runtime + this SBCL; the third ingredient of a cached
    module FASL's name (see the commentary above).  NIL disables fasl caching.")
 
-(defun %p-fasl-cache-enabled-p ()
-  "True when a cached module may be compiled to, and loaded from, a FASL.
+;;; ── WHICH MODULES ARE COMPILED TO NATIVE CODE (task #1261 half 2) ──────
+;;; The dependency manifest makes a stale dependent impossible for BOTH cache
+;;; layers, so this is a belt, not the correctness fix: it decides how much
+;;; COMPILED state a module gets to leave behind on disk.  A module resolved
+;;; from perl's installed library directories (or PCL's own lib/) changes only
+;;; on a reinstall; a module reached through `use lib`, `-I`, PERL5LIB, `.` or
+;;; the program's own directory is very likely being EDITED, and a fasl is the
+;;; most opaque artifact PCL writes.
+;;;
+;;; The knob is TWO DIRECTORY LISTS in PERL5LIB syntax, not a policy word:
+;;;
+;;;   PCL_COMPILE_DIRS      a module whose SOURCE lies under one of these is
+;;;                         compiled and cached.  `*` = every directory.
+;;;                         UNSET = perl's installed library directories plus
+;;;                         PCL's own lib/, which is the module's trust CLASS
+;;;                         as its manifest records it.
+;;;   PCL_NO_COMPILE_DIRS   a module under one of these is NEVER compiled (it
+;;;                         still gets the transpile cache and the manifest
+;;;                         check, and loads from the cached TEXT).  Wins over
+;;;                         PCL_COMPILE_DIRS on any match; `*` = compile
+;;;                         nothing, which is what PCL_NO_FASL_CACHE=1 means.
+;;;
+;;; WHY THE DEFAULT IS NOT *P-CORE-INC-DIRS*: that list is pl2cl's own @INC as
+;;; the preamble found it, so it carries PERL5LIB and -I entries (measured:
+;;; `PERL5LIB=/tmp ./pl2cl prog.pl` puts /tmp in it) — exactly the directories
+;;; a developer edits in.  The installed set is derived instead from %Config's
+;;; six library keys plus PCL's lib/, by ONE classifier on the transpiler side
+;;; (Pl::ProtoCache::trust_class), whose answer arrives here in the manifest.
+
+(defvar *p-dir-list-cache* (make-hash-table :test 'equal)
+  "environment variable name -> (raw-value . parsed), so the realpath work is
+   done once per RUN.  Keyed by the raw value as well as the name, because a
+   defparameter's initform is evaluated when the saved CORE is built: anything
+   resolved at load time would be the core builder's answer, not this run's.")
+
+(defun %p-normalize-dir (spec)
+  "One PCL_COMPILE_DIRS entry as an absolute path with no trailing slash: `~`
+   expanded, a relative entry taken against the current directory, realpath'd
+   when it exists.  A listed directory that does not exist is NOT an error —
+   perl's @INC tolerates the same — it simply never matches."
+  (let* ((expanded (if (and (plusp (length spec)) (char= (char spec 0) #\~))
+                       (concatenate 'string
+                                    (namestring (user-homedir-pathname))
+                                    (subseq spec (if (and (> (length spec) 1)
+                                                          (char= (char spec 1) #\/))
+                                                     2 1)))
+                       spec))
+         (real (ignore-errors
+                 (sb-ext:native-namestring
+                  (truename (merge-pathnames
+                             (concatenate 'string expanded "/")
+                             (truename *default-pathname-defaults*)))))))
+    (string-right-trim "/" (or real expanded))))
+
+(defun %p-dir-list (var)
+  "The directories named by environment variable VAR, colon-separated as
+   PERL5LIB is.  :ALL for `*`; NIL when the variable is unset or empty."
+  (let ((raw (sb-posix:getenv var)))
+    (cond ((or (null raw) (zerop (length raw))) nil)
+          ((string= raw "*") :all)
+          (t (let ((hit (gethash var *p-dir-list-cache*)))
+               (if (and hit (string= (car hit) raw))
+                   (cdr hit)
+                   (let ((parsed (mapcar #'%p-normalize-dir
+                                         (remove "" (%p-split-fields
+                                                     raw #\: most-positive-fixnum)
+                                                 :test #'string=))))
+                     (setf (gethash var *p-dir-list-cache*) (cons raw parsed))
+                     parsed)))))))
+
+(defun %p-under-dirs-p (path dirs)
+  "True when PATH lies under one of DIRS (:ALL matches everything).  The match
+   is on whole path COMPONENTS, so /usr/lib2 does not match /usr/lib."
+  (cond ((eq dirs :all) t)
+        ((null dirs) nil)
+        (t (let ((p (or (ignore-errors
+                          (sb-ext:native-namestring (truename path)))
+                        (namestring path))))
+             (some (lambda (d)
+                     (and (plusp (length d))
+                          (or (string= p d)
+                              (and (> (length p) (length d))
+                                   (string= d p :end2 (length d))
+                                   (char= (char p (length d)) #\/)))))
+                   dirs)))))
+
+(defun %p-compile-module-p (source-path class)
+  "Is the module at SOURCE-PATH compiled to native code and cached?  CLASS is
+   its trust class from the dependency manifest (:installed or :local).
+   PCL_NO_COMPILE_DIRS wins on any match; PCL_COMPILE_DIRS decides when set;
+   unset, the answer is the trust class.  PCL_NO_FASL_CACHE=1 is kept as the
+   alias of PCL_NO_COMPILE_DIRS=* it has always meant."
+  (cond ((sb-posix:getenv "PCL_NO_FASL_CACHE") nil)
+        ((%p-under-dirs-p source-path (%p-dir-list "PCL_NO_COMPILE_DIRS")) nil)
+        ((sb-posix:getenv "PCL_COMPILE_DIRS")
+         (%p-under-dirs-p source-path (%p-dir-list "PCL_COMPILE_DIRS")))
+        (t (eq class :installed))))
+
+(defun %p-fasl-cache-enabled-p (source-path &optional (class :local))
+  "True when the cached module at SOURCE-PATH, of trust class CLASS, may be
+   compiled to and loaded from a FASL.
 
    NOT while *PCL-FASL-BUILD* is true: that is a nested load, reached from a
    `use` running in the compile pass of ANOTHER module's fasl build, and
@@ -18064,7 +18169,7 @@ buffer's fill-pointer; everything else falls back to file-length."
        *pcl-runtime-identity*
        (not *pcl-skip-cache*)
        (not *pcl-fasl-build*)
-       (not (sb-posix:getenv "PCL_NO_FASL_CACHE"))))
+       (%p-compile-module-p source-path class)))
 (defparameter *pcl-pl2cl-path* nil
   "Path to pl2cl script (set at load time)")
 
@@ -18141,6 +18246,13 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Create cache directory if it doesn't exist."
   (ensure-directories-exist *pcl-cache-dir*))
 
+(defun p-module-cache-dir ()
+  "Where the cached module transpiles live: <cache>/modules/, created on
+   demand.  Derived from *PCL-CACHE-DIR* at CALL time — a path resolved while
+   the runtime loads would be baked into the saved core, i.e. the core
+   builder's answer rather than this run's."
+  (ensure-directories-exist (merge-pathnames "modules/" *pcl-cache-dir*)))
+
 (defun p-compute-cache-path (source-path &optional lisp-p)
   "Compute cache path for a source file: hash of the absolute path and the
    cache GENERATION (*pcl-cache-generation*).
@@ -18153,42 +18265,200 @@ buffer's fill-pointer; everything else falls back to file-length."
    *PCL-RUNTIME-IDENTITY* as a fourth component — a fasl has this runtime's
    macro expansions baked in and only this SBCL can load it, so it must not
    share a name with one built by another (see that variable's commentary).
-   Returns NIL for a fasl when the identity is unknown."
+   Returns NIL for a fasl when the identity is unknown.
+   The entries live in <cache>/modules/, beside the cores in <cache>/core/ and
+   the transpiler's prototype memo in <cache>/proto/ — moved there with the
+   dependency manifest (task #1261), when every pre-manifest entry was invalid
+   anyway and the move therefore cost nothing.  The directory is derived from
+   *PCL-CACHE-DIR* HERE, at call time, never at load time."
   (let* ((abs-path (namestring (truename source-path)))
          (hash (sxhash (concatenate 'string abs-path "|" *pcl-cache-generation*
                                     "|" "v2")))
-         (stem (format nil "~16,'0X" (logand hash #xFFFFFFFFFFFFFFFF))))
-    (p-ensure-cache-dir)
-    (cond (lisp-p (merge-pathnames (concatenate 'string stem ".lisp")
-                                   *pcl-cache-dir*))
+         (stem (format nil "~16,'0X" (logand hash #xFFFFFFFFFFFFFFFF)))
+         (dir (p-module-cache-dir)))
+    (cond (lisp-p (merge-pathnames (concatenate 'string stem ".lisp") dir))
           (*pcl-runtime-identity*
            (merge-pathnames (format nil "~A-~A.fasl" stem *pcl-runtime-identity*)
-                            *pcl-cache-dir*)))))
+                            dir)))))
+
+;;; ── THE DEPENDENCY MANIFEST (task #1261) ───────────────────────────────
+;;; A module A's TRANSPILE reads the prototypes and exports of every module it
+;;; `use`s: a `(&@)` makes a trailing block a code ref, an empty prototype
+;;; makes a bareword a term, and a bareword before a comma is a CALL only for
+;;; a known exported sub.  So A's cached CL encodes facts about B — and until
+;;; this task nothing about B was in A's key or in its validity check, which
+;;; is A's own path, the generation and A's own mtime.  Editing B left A's
+;;; cached parse silently stale (measured: `blk { 42 }` kept passing a code
+;;; ref after B's `(&@)` was removed, and a dropped export made the cached
+;;; emission call a sub that no longer exists).
+;;;
+;;; `pl2cl --module --deps FILE` writes, beside the cached .lisp, the list of
+;;; every dependency that transpile READ, each with an MD5 of its CONTENT —
+;;; not an mtime, because a `git checkout` restores an old mtime and a stale
+;;; dependent is exactly the silent-wrong this project refuses.  This side
+;;; re-hashes them at load.  TRANSITIVITY IS FREE: B is validated when B
+;;; itself loads, so A's manifest need only name what A read directly plus
+;;; whatever its prototype walk merged.
+;;;
+;;; A cache entry with NO manifest is INVALID (re-transpiled once), which is
+;;; also what an entry written before this task looks like.  A manifest that
+;;; does not parse is INVALID too, never trusted (rule 12).
+;;;
+;;; WHAT IT DOES NOT COVER, said out loud rather than assumed: a dependency
+;;; that MOVES — a new `-I` shadowing a shim, so the same name now resolves to
+;;; a different file — is not detected here, because this side cannot re-run
+;;; the transpiler's `_find_module_file` with the transpiler's inc_paths.  The
+;;; transpiler's own prototype cache (Pl/ProtoCache.pm) does re-resolve; the
+;;; remedy at this layer is `pcl --clear-cache`.
+
+(defstruct (p-cache-manifest (:conc-name p-cm-))
+  "A cache entry's dependency manifest: the module's trust CLASS (:installed
+   or :local — see %p-compile-module-p) and the (path . md5) pairs its transpile
+   read.  VALID-P is the verdict, computed once per source per run."
+  (class :local)
+  (deps nil)
+  (valid-p nil))
+
+(defvar *p-file-hash-cache* (make-hash-table :test 'equal)
+  "path -> MD5 hex of its content, for THIS run.  A dependency shared by
+   several modules is read once; a file cannot change under a running program
+   in any way perl would notice either (perl reads a module once).")
+
+(defvar *p-cache-manifest-cache* (make-hash-table :test 'equal)
+  "source path -> P-CACHE-MANIFEST.  p-cache-valid-p is asked twice per module
+   load (once for the fasl, once for the .lisp), and the class is asked again;
+   the dependency files are hashed for the first of those only.")
+
+(defun %p-file-md5 (path)
+  "MD5 hex of PATH's bytes, or NIL when it cannot be read.  The digest the
+   transpiler's Digest::MD5 wrote into the manifest."
+  (or (gethash path *p-file-hash-cache*)
+      (let ((digest (ignore-errors (sb-md5:md5sum-file path))))
+        (when digest
+          (setf (gethash path *p-file-hash-cache*)
+                (string-downcase (format nil "~{~2,'0X~}" (coerce digest 'list))))))))
+
+(defun %p-manifest-path (source-path)
+  "The manifest sidecar beside SOURCE-PATH's cached .lisp: same stem, .deps."
+  (let ((lisp-path (p-compute-cache-path source-path t)))
+    (make-pathname :defaults lisp-path :type "deps")))
+
+(defun %p-split-fields (line sep n)
+  "LINE split on SEP into at most N fields; the Nth takes the REST of the
+   line.  The cap is what lets the manifest put the PATH last (a path may
+   contain anything but a newline, a tab included); PCL_COMPILE_DIRS asks for
+   the same split on `:` with no cap."
+  (let ((out '()) (start 0) (count 1))
+    (loop while (< count n)
+          for at = (position sep line :start start)
+          while at
+          do (push (subseq line start at) out)
+          (setf start (1+ at))
+          (incf count))
+    (push (subseq line start) out)
+    (nreverse out)))
+
+(defun %p-parse-manifest-line (line manifest)
+  "Fold one manifest line into MANIFEST.  T when the line is understood; NIL
+   when it is not, which makes the whole entry invalid — an unknown key is
+   either corruption or a writer from another version, and trusting either is
+   how a stale entry survives (rule 12)."
+  (let ((len (length line)))
+    (when (or (zerop len) (char= (char line 0) #\#))
+      (return-from %p-parse-manifest-line t))
+    (let* ((tab (position #\Tab line))
+           (key (subseq line 0 (or tab len))))
+      (cond ((string= key "gen") t)
+            ;; a name the transpile could not resolve: a fact it used, but not
+            ;; one this side can re-check (see the section commentary).
+            ((string= key "missing") t)
+            ((string= key "source")
+             (let ((f (%p-split-fields line #\Tab 3)))
+               (when (= (length f) 3)
+                 (setf (p-cm-class manifest)
+                       (if (string= (second f) "installed") :installed :local))
+                 t)))
+            ((string= key "dep")
+             ;; dep kind name class sha PATH
+             (let ((f (%p-split-fields line #\Tab 6)))
+               (when (= (length f) 6)
+                 (push (cons (sixth f) (fifth f)) (p-cm-deps manifest))
+                 t)))
+            (t nil)))))
+
+(defun %p-read-manifest (source-path)
+  "Read and VERIFY SOURCE-PATH's manifest sidecar.  Returns a
+   P-CACHE-MANIFEST whose VALID-P says whether the cache entry may be used:
+   the file must exist, parse, and every dependency it names must still hash
+   to what the transpile read."
+  (let ((manifest (make-p-cache-manifest))
+        (path (%p-manifest-path source-path)))
+    (unless (probe-file path)
+      (return-from %p-read-manifest manifest))
+    (let ((ok (ignore-errors
+                (with-open-file (in path :direction :input
+                                    :external-format :latin-1)
+                  (loop for line = (read-line in nil nil)
+                        while line
+                        always (%p-parse-manifest-line line manifest))))))
+      (when ok
+        (setf (p-cm-valid-p manifest)
+              (every (lambda (dep)
+                       (let ((now (%p-file-md5 (car dep))))
+                         (and now (string= now (cdr dep)))))
+                     (p-cm-deps manifest)))))
+    manifest))
+
+(defun %p-cache-manifest (source-path)
+  "SOURCE-PATH's manifest, read once per run."
+  (let ((key (namestring source-path)))
+    (or (gethash key *p-cache-manifest-cache*)
+        (setf (gethash key *p-cache-manifest-cache*)
+              (%p-read-manifest source-path)))))
+
+(defun %p-forget-cache-manifest (source-path)
+  "Drop the memo after a re-transpile has written a new sidecar."
+  (remhash (namestring source-path) *p-cache-manifest-cache*))
 
 (defun p-cache-valid-p (source-path cache-path)
-  "Check if cached file is valid: exists, newer than source, not expired."
+  "Check if a cached file is valid: it exists, it is newer than the source,
+   and every module whose prototypes/exports its transpile read still hashes
+   to what was read (the dependency manifest, task #1261).  THE ONE validity
+   predicate: both the .lisp and the fasl go through it.
+
+   NO AGE CLAUSE.  Until #1261 an entry also expired after
+   *PCL-CACHE-MAX-AGE*, which was a stand-in for the staleness this predicate
+   could not see; now that a dependency change invalidates the entry directly,
+   an age limit would only re-transpile a correct cache once a week — and it
+   would make \"an untouched module is a HIT\" untestable.  P-CLEANUP-OLD-CACHE
+   still PRUNES by age; that is disk hygiene, not validity."
   (when *pcl-skip-cache*
     (return-from p-cache-valid-p nil))
   (when (not (probe-file cache-path))
     (return-from p-cache-valid-p nil))
-  (let* ((source-mtime (file-write-date source-path))
-         (cache-mtime (file-write-date cache-path))
-         (cache-age (- (get-universal-time) cache-mtime)))
-    (and (> cache-mtime source-mtime)
-         (< cache-age *pcl-cache-max-age*))))
+  (and (> (file-write-date cache-path) (file-write-date source-path))
+       (p-cm-valid-p (%p-cache-manifest source-path))))
 
 (defun p-cleanup-old-cache ()
-  "Remove cache files older than max age."
+  "PRUNE module cache files older than max age — disk hygiene, not validity:
+   since #1261 an entry's validity is its dependency manifest, and
+   P-CACHE-VALID-P no longer asks how old the file is.  The prune still reads
+   the WRITE date, so an entry that keeps being HIT is eventually deleted and
+   rebuilt; making it touch-on-hit is a follow-up, not a correctness question."
   (let ((cutoff (- (get-universal-time) *pcl-cache-max-age*)))
-    (dolist (file (directory (merge-pathnames "*.*" *pcl-cache-dir*)))
+    (dolist (file (directory (merge-pathnames "*.*" (p-module-cache-dir))))
       (when (< (file-write-date file) cutoff)
         (ignore-errors (delete-file file))))))
 
 ;;; --- Module Transpilation ---
 
-(defun p-transpile-file (source-path)
+(defun p-transpile-file (source-path &optional deps-path)
   "Transpile a Perl file to Common Lisp code by calling pl2cl.
    Uses --module flag to skip preamble (for dynamic module loading).
+   DEPS-PATH, when given, is where pl2cl writes this transpile's DEPENDENCY
+   MANIFEST — the modules whose prototypes and exports it read, with a content
+   hash each (task #1261).  pl2cl writes it BEFORE the emission reaches us, so
+   the sidecar is already in place when the .lisp becomes valid.
    Returns the transpiled code as a string, or nil on failure."
   (unless *pcl-pl2cl-path*
     (error "pl2cl path not set - cannot transpile ~A" source-path))
@@ -18197,9 +18467,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     (with-output-to-string (s output)
       (let ((proc (sb-ext:run-program
                    "perl"
-                   (list (namestring *pcl-pl2cl-path*)
-                         "--module"  ; Skip preamble for module loading
-                         (namestring source-path))
+                   (append
+                    (list (namestring *pcl-pl2cl-path*)
+                          "--module")  ; Skip preamble for module loading
+                    (when deps-path (list "--deps" (namestring deps-path)))
+                    (list (namestring source-path)))
                    :output s
                    :error *error-output*
                    :wait t
@@ -18413,9 +18685,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let* ((%start (get-internal-real-time))
          (*pcl-current-package* *pcl-current-package*)
          (lisp-path (p-compute-cache-path source-path t))
-         (fasl-path (when (%p-fasl-cache-enabled-p)
+         (deps-path (%p-manifest-path source-path))
+         ;; The trust class comes from the manifest the last transpile wrote;
+         ;; with no manifest the entry is invalid anyway, and :local is the
+         ;; conservative answer for the cold path (step 3 re-reads it).
+         (fasl-path (when (%p-fasl-cache-enabled-p
+                           source-path
+                           (p-cm-class (%p-cache-manifest source-path)))
                       (p-compute-cache-path source-path nil))))
-    ;; 1. A fasl for THIS runtime, newer than the source: one load and done.
+    ;; 1. A fasl for THIS runtime, newer than the source, whose dependencies
+    ;;    all still hash as read: one load and done.
     (when (and fasl-path
                (p-cache-valid-p source-path fasl-path)
                (%p-load-module-fasl fasl-path))
@@ -18423,12 +18702,19 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (file-namestring (truename source-path))
                     (%p-secs-since %start))
       (return-from p-load-module-cached t))
-    ;; 2. The text: transpile it when it is missing or older than the source.
+    ;; 2. The text: transpile it when it is missing, older than the source, or
+    ;;    a dependency it read has changed.  The transpile writes the manifest
+    ;;    sidecar, so the memo of the OLD one has to go.
     (unless (p-cache-valid-p source-path lisp-path)
-      (let ((lisp-code (p-transpile-file source-path)))
+      (let ((lisp-code (p-transpile-file source-path deps-path)))
         (unless lisp-code
           (error "Failed to transpile ~A" source-path))
         (%p-write-cache-file lisp-path lisp-code)
+        (%p-forget-cache-manifest source-path)
+        (setf fasl-path (when (%p-fasl-cache-enabled-p
+                               source-path
+                               (p-cm-class (%p-cache-manifest source-path)))
+                          (p-compute-cache-path source-path nil)))
         (p-cleanup-old-cache)))
     ;; 3. Build the fasl from that text and run THE FASL, so the module
     ;;    executes once here too; on any failure, run the text.

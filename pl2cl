@@ -125,6 +125,11 @@ require Pl::Parser2;
 # PCL_V2_AUDIT_KEEP) went with it: with one pipeline there is no route to
 # count.  History: docs/v1-live-share-audit.md, docs/v2-endgame-plan.md §5a.)
 
+# What the last parse_source consulted — the outermost dependency walk frame
+# (task #1261).  Read by --deps (the runtime's cache sidecar) and --manifest
+# (`depends`); undef before the first transpile.
+our $LAST_WALK;
+
 # The ONE parser entry.  Anything v2 cannot lower dies here, and
 # the die IS the answer — there is no second compiler to retry on.  Modes are
 # whitelisted rather than ignored, so an unknown mode is a loud error instead
@@ -146,7 +151,19 @@ sub parse_source {
   # dependency bookkeeping would be recorded against a dead walk.  Start each
   # source from an empty stack (task #560).
   Pl::ProtoCache::reset_walks();
-  return pipeline_marker(v2 => Pl::Parser2->$method($args[0], %opts));
+  # THE DEPENDENCY MANIFEST (task #1261).  One OUTERMOST walk frame around the
+  # whole transpile, so the frames that already record what each nested
+  # prototype walk resolved also report to a frame that stands for THIS source.
+  # `end_walk` then hands back the transitive list of every module and file
+  # whose prototypes/exports this transpile read — the ONE dependency walk
+  # (rule 11), which `--deps` writes beside the cached emission and
+  # `--manifest` publishes as `depends`.
+  Pl::ProtoCache::begin_walk();
+  my $out = eval { Pl::Parser2->$method($args[0], %opts) };
+  my $err = $@;
+  $LAST_WALK = Pl::ProtoCache::end_walk();
+  die $err if $err;
+  return pipeline_marker(v2 => $out);
 }
 
 # T0.1 pipeline marker (docs/v2-transfer-plan.md): every transpile carries one
@@ -178,6 +195,7 @@ my $server_mode = 0;    # Persistent transpiler server mode
 my $manifest_mode = 0;  # Print the per-program manifest as JSON, not the CL
 my $facts_mode = 0;     # Annotate the emission with every Kind-A/B licence
 my $sexp_mode = 0;      # Print the lowered tree as PORTABLE S-expressions
+my $deps_file;          # Write the dependency manifest sidecar here (#1261)
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
 GetOptions(
@@ -194,6 +212,7 @@ GetOptions(
   "manifest"     => \$manifest_mode, # print the JSON manifest INSTEAD of the CL
   "facts"        => \$facts_mode,    # wrap licensed forms in (p-fact (NAME) FORM)
   "emit-sexp"    => \$sexp_mode,     # print the data form INSTEAD of the CL
+  "deps=s"       => \$deps_file,     # write the dependency manifest sidecar
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or die "Usage: pl2cl [options] <file.pl>\n";
 
@@ -560,6 +579,9 @@ sub print_manifest {
     mode       => ($is_module ? 'module' : $is_extension ? 'extension'
                               : defined $eval_pkg ? 'eval' : 'program'),
     generation => cache_generation(),
+    # `depends` comes from the SAME walk the cache sidecar is written from
+    # (task #1261) — one walk, two consumers.
+    depends    => Pl::ProtoCache::depends_records($LAST_WALK),
   );
   binmode(STDOUT, ':raw');
   print JSON::PP->new->utf8->canonical->pretty->encode($m);
@@ -570,6 +592,14 @@ if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
   my $output = parse_source('parse_file', $source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
+
+  # THE DEPENDENCY MANIFEST SIDECAR (task #1261).  Written BEFORE the emission
+  # reaches the caller, because the runtime writes the cached .lisp from what
+  # it reads on stdout: the sidecar must already be there when the .lisp
+  # becomes valid, or the very next run would see a manifest-less entry and
+  # re-transpile.  A manifest is only ever written when asked for.
+  Pl::ProtoCache::write_deps_file($deps_file, $source_file, $LAST_WALK)
+    if defined $deps_file;
 
   if ($manifest_mode) { print_manifest($source_file); exit 0 }
   if ($sexp_mode)     { print_sexp($source_file);     exit 0 }
@@ -648,6 +678,9 @@ else {
   say "                  preamble (it loads INTO a program that has one)";
   say "  --manifest      Print the program's IR manifest as JSON instead of";
   say "                  the CL: uses / needs / facts (docs/ir-spec.md 10b)";
+  say "  --deps FILE     Write the dependency manifest sidecar to FILE: every";
+  say "                  module whose prototypes/exports this parse read, with";
+  say "                  a content hash (the runtime's cache validity, #1261)";
   exit 1;
 }
 

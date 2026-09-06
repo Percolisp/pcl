@@ -210,4 +210,42 @@ PL
             . "  or the inventory is stale (tools/ir-inventory.pl)");
 }
 
+# ── `depends`: what this transpile READ (task #1261) ─────────────────────
+# The same ONE dependency walk the runtime's cache sidecar is written from
+# (Pl::ProtoCache's frames), published here so a backend author can see which
+# files are part of the input.  A module whose prototypes and exports decide
+# how the program parses must appear; one the walk never consulted must not.
+{
+  my $dep = write_pl('MDep.pm', <<'PM');
+package MDep;
+use Exporter 'import';
+our @EXPORT = qw(mdep);
+sub mdep (&@) { return 1 }
+1;
+PM
+  my $p = write_pl('depends.pl', <<'PL');
+use lib "TMPDIR";
+use MDep;
+print mdep { 1 } 2;
+PL
+  # `use lib` is what puts the fixture on the transpiler's search path.
+  my $src = do { open my $fh, '<', $p or die; local $/; <$fh> };
+  $src =~ s/TMPDIR/$tmp/;
+  open my $fh, '>', $p or die; print {$fh} $src; close $fh;
+
+  my $m = manifest($p);
+  is(ref $m->{depends}, 'ARRAY', 'the manifest carries a `depends` list');
+  my ($row) = grep { $_->{name} eq 'MDep' } @{ $m->{depends} };
+  ok($row, 'the module whose prototypes the parse read is in `depends`')
+    or diag("depends: " . join(', ', map { $_->{name} } @{ $m->{depends} }));
+  SKIP: {
+    skip 'MDep not resolved', 3 unless $row;
+    is($row->{kind}, 'mod', '... as a module dependency');
+    is($row->{path}, "$tmp/MDep.pm", '... naming the file it resolved to');
+    like($row->{sha}, qr/^[0-9a-f]{32}$/, '... with a content hash, not an mtime');
+  }
+  is($row && $row->{class}, 'local',
+     'a module under a `use lib` directory is trust class `local`');
+}
+
 done_testing();

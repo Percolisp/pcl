@@ -26,7 +26,7 @@ design ruling; `sNNN` names an internal working session.
 * [6. Control flow](#6-control-flow) — [conditionals](#61-conditionals) · [loops](#62-loops-and-loop-control) · [exceptions](#63-exceptions-die--eval----) · [goto](#64-goto)
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
-* [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
+* [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
 * [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
@@ -2629,6 +2629,77 @@ part of the promise: a single line, first line of the file, matching
 too — it is the marker that tells a generated artifact apart from a
 hand-written source file, which is the difference between "this path is a
 bug" and "this path is a build-machine artifact of the emitter".
+
+### 9.2b A cached module entry, and what makes it valid (normative, s470bw)
+
+**A cache entry is three files under `~/.pcl-cache/modules/`, named by one
+key: `sxhash(<the module's absolute path> | <generation> | "v2")`.**
+
+| file | what it is |
+|---|---|
+| `<key>.lisp` | the module transpiled — `pl2cl --module`'s output |
+| `<key>.deps` | its **dependency manifest**: what that transpile READ |
+| `<key>-<runtime-identity>.fasl` | that text compiled, for one runtime + one SBCL (§#1188; the identity is a content hash of `cl/pcl-runtime.lisp` plus the SBCL identity, so a fasl built by another runtime is *unreachable*, not merely stale) |
+
+**Validity is ONE predicate** (`p-cache-valid-p`), and both the `.lisp` and
+the fasl go through it. An entry is valid when, and only when:
+
+1. the file exists and is newer than the module's own source; **and**
+2. its manifest exists, parses, and **every dependency it names still hashes
+   to what the transpile read**.
+
+Nothing else. In particular there is **no age limit**: an age clause was a
+stand-in for the staleness rule 2 now states directly, and keeping it would
+re-transpile a correct cache once a week. (`p-cleanup-old-cache` still prunes
+by write date — disk hygiene, not validity.)
+
+**Why a dependency belongs in the key at all.** A module A's *parse* consumes
+facts about the modules it `use`s: a `(&@)` prototype makes a trailing block a
+code ref, an empty prototype makes a bareword a TERM, and a bareword is a CALL
+only for a known exported sub. So A's emitted CL encodes B's prototypes and
+exports, and editing B must re-transpile A — as perl, which re-parses A on
+every run, does for free. Transitivity is free here too: B is validated when B
+itself loads.
+
+**The manifest's form** — one record per line, TAB-separated, PATH LAST
+(a path may contain anything but a newline, a tab included):
+
+```
+# pcl-deps 1
+gen<TAB>v2-830
+source<TAB>installed|local<TAB>/abs/path/A.pm
+dep<TAB>mod|file<TAB>NAME<TAB>installed|local<TAB><md5-hex><TAB>/abs/path/B.pm
+missing<TAB>mod<TAB>NAME
+```
+
+The hash is **content** (MD5), never an mtime: a `git checkout` restores an
+old mtime, and a stale dependent is the silent-wrong class this project
+refuses. A `missing` line records a name the transpile could *not* resolve —
+a fact it used, kept for the record and for `pl2cl --manifest`'s `depends`,
+but not re-checkable at load. **An entry with no manifest, or one that does
+not parse, is INVALID** (re-transpiled once) — never trusted; that is also
+what every entry written before this section looked like. What is *not*
+covered, said plainly: a dependency that MOVES (a new `-I` shadowing a shim,
+so the same name resolves to a different file) is not detected, because the
+runtime cannot re-run the transpiler's `_find_module_file` with the
+transpiler's search path; the transpiler's own prototype cache
+(`Pl/ProtoCache.pm`) does re-resolve, and the remedy at this layer is
+`pcl --clear-cache`.
+
+**Which entries get a fasl** is a separate, purely-performance question —
+two directory lists in `PERL5LIB` syntax, read at run time:
+
+| variable | meaning |
+|---|---|
+| `PCL_COMPILE_DIRS` | modules under these directories are compiled to native code and cached; `*` = all. **Unset** = perl's installed library directories (%Config's six `*libexp` keys) plus PCL's own `lib/` — the `source` line's trust class |
+| `PCL_NO_COMPILE_DIRS` | modules under these are NEVER compiled; **wins** on any match; `*` = compile nothing |
+| `PCL_NO_FASL_CACHE=1` | the kept alias of `PCL_NO_COMPILE_DIRS='*'` |
+
+A module that is not compiled still gets the `.lisp` cache and the manifest
+check; it loads from the cached text. The default exists because a module
+under `use lib`/`-I`/`PERL5LIB`/`.` is very likely being edited, and a fasl is
+the most opaque artifact PCL writes — but it is a belt: correctness is rule 2
+above, for both cache layers alike.
 
 ### 9.3 The drop form: a statement the compiler could not lower (normative, s435)
 

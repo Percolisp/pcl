@@ -37,7 +37,7 @@ my $pcl  = "$root/pcl";
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 42;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -50,15 +50,35 @@ sub write_mod {
     return $path;
 }
 
-# Run CODE under `pcl` with $dir on @INC.  %opt: text => 1 forces the
-# pre-#1188 source path; debug => 1 keeps the PCL_FASL_DEBUG trace lines
-# (which name, per module, which of the three paths the load took).
+# Run CODE under `pcl` with $dir on @INC.  %opt:
+#   text    => 1  forces the pre-#1188 source path (PCL_NO_FASL_CACHE=1)
+#   debug   => 1  keeps the PCL_FASL_DEBUG trace lines (which name, per
+#                 module, which of the three paths the load took)
+#   compile => S  the PCL_COMPILE_DIRS value for the run
+#   nocomp  => S  the PCL_NO_COMPILE_DIRS value for the run
+#
+# EVERY FASL-PATH ROW PASSES compile => '*' (task #1261).  These fixtures live
+# in a tempdir, and since #1261 the DEFAULT is to compile only modules under
+# perl's installed library directories or PCL's own lib/ — so without the
+# override the "fasl build" and "fasl hit" passes below would both take the
+# TEXT path and stop testing what they say.  The default itself is asserted by
+# its own rows further down.
+#
+# PERL5LIB carries $dir too: `pcl -I` reaches the PROGRAM's transpile, but the
+# runtime spawns `pl2cl --module` for each module with no -I, so a module's
+# own `use` would not resolve at transpile time and the dependency rows would
+# have nothing to depend on.  (That gap is task #1284.)
 sub run_pcl {
     my ($code, %opt) = @_;
     local $ENV{PCL_NO_FASL_CACHE} = $opt{text} ? 1 : undef;
     delete $ENV{PCL_NO_FASL_CACHE} unless $opt{text};
     local $ENV{PCL_FASL_DEBUG} = $opt{debug} ? 1 : undef;
     delete $ENV{PCL_FASL_DEBUG} unless $opt{debug};
+    local $ENV{PCL_COMPILE_DIRS} = $opt{compile};
+    delete $ENV{PCL_COMPILE_DIRS} unless defined $opt{compile};
+    local $ENV{PCL_NO_COMPILE_DIRS} = $opt{nocomp};
+    delete $ENV{PCL_NO_COMPILE_DIRS} unless defined $opt{nocomp};
+    local $ENV{PERL5LIB} = $dir;
     my $out = `$pcl -I '$dir' -E '$code' 2>&1`;
     $out =~ s/^;.*\n//gm;
     $out =~ s/^PCL Runtime loaded\n//gm;
@@ -136,8 +156,8 @@ for my $case (
     ['User: a module that uses another loads',      'use User; print User::show();',          'dep7'],
 ) {
     my ($name, $code, $want) = @$case;
-    is(run_pcl($code), $want, "$name (fasl build pass)");
-    is(run_pcl($code), $want, "$name (fasl hit)");
+    is(run_pcl($code, compile => '*'), $want, "$name (fasl build pass)");
+    is(run_pcl($code, compile => '*'), $want, "$name (fasl hit)");
     is(run_pcl($code, text => 1), $want, "$name (text path, pre-#1188)");
 }
 
@@ -146,7 +166,8 @@ for my $case (
 # perf change dies unnoticed.  PCL_FASL_DEBUG is the ONE place the cache says
 # anything, and it names the path per module.
 {
-    my $trace = run_pcl('use GuardBoot; print GuardBoot->greet;', debug => 1);
+    my $trace = run_pcl('use GuardBoot; print GuardBoot->greet;',
+                        debug => 1, compile => '*');
     like($trace, qr/^PCL: module GuardBoot\.pm -> FASL HIT/m,
          'a warm run loads the module from its FASL');
     unlike($trace, qr/^PCL: module GuardBoot\.pm -> TEXT/m,
@@ -181,9 +202,149 @@ PM
 # The fasl NAME carries this runtime's identity, because a fasl has this
 # runtime's macro expansions baked in and only this SBCL can load it.  A
 # cached fasl for another runtime must be unreachable, not merely stale.
+# (Under <cache>/modules/ since #1261, beside <cache>/core/ and <cache>/proto/.)
+my $cache = ($ENV{HOME} // '') . '/.pcl-cache/modules';
 {
-    my $home = $ENV{HOME} // '';
-    my @fasls = glob("$home/.pcl-cache/*-*.fasl");
+    my @fasls = glob("$cache/*-*.fasl");
     ok(scalar(@fasls) > 0,
        'a cached module fasl is named <text-key>-<runtime-identity>.fasl');
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# THE DEPENDENCY MANIFEST (task #1261)
+#
+# A module A's TRANSPILE reads the prototypes and exports of the modules it
+# `use`s — a `(&@)` makes a trailing block a code ref, an empty prototype
+# makes a bareword a TERM, and a bareword is a CALL only for a known exported
+# sub.  So A's cached CL encodes facts about B, and before #1261 nothing about
+# B was in A's key or its validity check.  Measured on the base tree, both
+# cache paths: editing B left A's cached parse in force — the prototype case
+# SILENTLY (a code ref still passed where perl now passes a hash ref) and the
+# export case as a CRASH ("Undefined subroutine &A2::zap called").
+#
+# perl is the oracle for every row here, and perl re-parses A on every run.
+{
+    # B2 carries two PARSE facts about itself: `zap`'s EMPTY prototype (which
+    # makes a bareword a TERM, so `zap + 1` is zap()+1) and its EXPORT list (a
+    # bareword is a CALL only for a known sub, so an unexported `tag` is the
+    # STRING "tag").  Every expectation below is perl 5.40.3's, probed.
+    my $b2_full = <<'PM';
+package B2;
+use Exporter 'import';
+our @EXPORT = qw(zap tag);
+sub zap () { return 7 + (@_ ? 100 : 0) }
+sub tag { "TAG" }
+1;
+PM
+    # Prototype dropped: `zap + 1` is now zap(+1), and zap sees an argument.
+    (my $b2_noproto = $b2_full) =~ s/sub zap \(\)/sub zap/;
+    # `tag` no longer exported: the bareword is the string.
+    (my $b2_noexport = $b2_full) =~ s/qw\(zap tag\)/qw(zap)/;
+
+    write_mod('A3', <<'PM');
+package A3;
+use B2;
+sub go  { return zap + 1 }
+sub go2 { return join("|", tag, 1) }
+1;
+PM
+
+    my $prog = 'use A3; print A3::go(), " ", A3::go2();';
+
+    for my $mode (['fasl', compile => '*'], ['text', text => 1]) {
+        my ($label, @opt) = @$mode;
+        write_mod('B2', $b2_full);
+        # A3 is NOT rewritten between the passes: its own mtime must stay put,
+        # or its own key would invalidate the entry and hide the hole.
+        is(run_pcl($prog, @opt), '8 TAG|1', "A3 reads B2's prototype and export ($label)");
+
+        write_mod('B2', $b2_noproto);
+        is(run_pcl($prog, @opt), '107 TAG|1',
+           "dropping B2's PROTOTYPE re-transpiles A3 ($label)");
+
+        write_mod('B2', $b2_noexport);
+        is(run_pcl($prog, @opt), '8 tag|1',
+           "dropping B2's EXPORT re-transpiles A3 ($label)");
+    }
+
+    # NO SPURIOUS MISS: with nothing edited, the very next run is a HIT.  A
+    # manifest that re-hashed to a different answer, or a check that failed
+    # open, would show up here as an endless re-transpile.
+    write_mod('B2', $b2_full);
+    run_pcl($prog, compile => '*');
+    my $warm = run_pcl($prog, debug => 1, compile => '*');
+    like($warm, qr/^PCL: module A3\.pm -> FASL HIT/m,
+         'an untouched module and an untouched dependency are a HIT');
+
+    # THE SIDECAR exists, and it names the dependency it read.
+    my @deps = grep { my $t = _slurp($_); $t =~ m{^source\t\S+\t\Q$dir\E/A3\.pm$}m }
+               glob("$cache/*.deps");
+    is(scalar(@deps), 1, "A3's cache entry has exactly one dependency manifest");
+    like(_slurp($deps[0]), qr{^dep\tmod\tB2\t\w+\t[0-9a-f]{32}\t\Q$dir\E/B2\.pm$}m,
+         '... naming B2 with its content hash');
+
+    # A MISSING MANIFEST IS AN INVALID ENTRY — never a trusted one.  That is
+    # also what every entry written before #1261 looks like.
+    unlink $deps[0];
+    is(run_pcl($prog, compile => '*'), '8 TAG|1',
+       'a cache entry with no manifest still answers correctly');
+    ok(scalar(grep { my $t = _slurp($_); $t =~ m{^source\t\S+\t\Q$dir\E/A3\.pm$}m }
+              glob("$cache/*.deps")),
+       '... by re-transpiling, which writes the manifest again');
+}
+
+sub _slurp {
+    my ($p) = @_;
+    open my $fh, '<', $p or return '';
+    my $t = do { local $/; <$fh> };
+    close $fh;
+    return $t // '';
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# WHICH MODULES ARE COMPILED TO NATIVE CODE — two directory lists (#1261).
+#
+# PCL_COMPILE_DIRS names the directories whose modules are compiled and
+# cached (`*` = all); unset means perl's installed library directories plus
+# PCL's own lib/.  PCL_NO_COMPILE_DIRS names directories that are NEVER
+# compiled and WINS on any match.  A module that is not compiled still gets
+# the transpile cache and the manifest check; it loads from the cached text.
+{
+    my $local = 'use GuardBoot; print GuardBoot->greet;';
+    my $inst  = 'use Carp; print 1;';
+
+    my $t = run_pcl($local, debug => 1);
+    like($t, qr/^PCL: module GuardBoot\.pm -> TEXT/m,
+         'DEFAULT: a module reached through -I / use lib is NOT compiled');
+    my $ti = run_pcl($inst, debug => 1);
+    like($ti, qr/^PCL: module Carp\.pm -> (?:FASL HIT|fasl-build)/m,
+         'DEFAULT: a module from an installed library directory IS compiled');
+
+    like(run_pcl($local, debug => 1, compile => '*'),
+         qr/^PCL: module GuardBoot\.pm -> (?:FASL HIT|fasl-build)/m,
+         "PCL_COMPILE_DIRS='*' compiles the local module too");
+
+    like(run_pcl($local, debug => 1, compile => $dir),
+         qr/^PCL: module GuardBoot\.pm -> (?:FASL HIT|fasl-build)/m,
+         'a local directory LISTED in PCL_COMPILE_DIRS is compiled');
+    like(run_pcl($inst, debug => 1, compile => $dir),
+         qr/^PCL: module Carp\.pm -> TEXT/m,
+         '... and the list REPLACES the installed default (Carp is not)');
+
+    like(run_pcl($local, debug => 1, nocomp => '*'),
+         qr/^PCL: module GuardBoot\.pm -> TEXT/m,
+         "PCL_NO_COMPILE_DIRS='*' compiles nothing (local)");
+    like(run_pcl($inst, debug => 1, nocomp => '*'),
+         qr/^PCL: module Carp\.pm -> TEXT/m,
+         "... and nothing installed either");
+
+    like(run_pcl($local, debug => 1, compile => '*', nocomp => $dir),
+         qr/^PCL: module GuardBoot\.pm -> TEXT/m,
+         'PCL_NO_COMPILE_DIRS wins over PCL_COMPILE_DIRS on a match');
+
+    # A listed directory that does not exist is not an error — perl's @INC
+    # tolerates the same — it simply never matches.
+    like(run_pcl($local, debug => 1, compile => "/no/such/dir:$dir"),
+         qr/^PCL: module GuardBoot\.pm -> (?:FASL HIT|fasl-build)/m,
+         'a nonexistent entry in the list is ignored, not fatal');
 }

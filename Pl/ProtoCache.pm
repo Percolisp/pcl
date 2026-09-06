@@ -388,4 +388,161 @@ sub clear {
   return @f ? unlink(@f) : 0;
 }
 
+# ============================================================================
+# THE PER-ENTRY DEPENDENCY MANIFEST (task #1261)
+# ============================================================================
+#
+# The walk above answers "what did this module's facts depend on" for the
+# PROTOTYPE cache.  The RUNTIME's module cache (~/.pcl-cache/<hash>.lisp and,
+# since #1188, the fasl beside it) asks the SAME question about the EMISSION,
+# and until this task it did not ask it at all: A's cached CL encodes B's
+# prototypes and exports, but the key was A's own path + the generation and
+# the validity check was A's own mtime.  Editing B left A's cached parse
+# silently stale (measured s470bw: `blk { 42 }` kept passing a code ref after
+# the `(&@)` was removed, and a dropped export made the cached emission call a
+# sub that no longer exists).
+#
+# There is exactly ONE dependency walk (rule 11): the frames above.  pl2cl
+# brackets a whole transpile in one outermost frame, so `end_walk` hands back
+# the transitive list of every module and file whose prototypes/exports the
+# transpile READ.  This section turns that list into the sidecar the runtime
+# re-checks at load, and into `pl2cl --manifest`'s `depends`.
+#
+# THE HASH IS CONTENT, NOT MTIME.  A `git checkout` restores an old mtime, and
+# a stale dependent is exactly the silent-wrong this project refuses; MD5 is
+# core on the Perl side (Digest::MD5) and a contrib on the Lisp side (sb-md5),
+# so both ends compute the same string.
+#
+# WHAT IS NOT COVERED, and is named here rather than assumed: a dependency
+# that MOVES (a new `-I` shadowing a shim) is not detected by the runtime,
+# which cannot re-run `_find_module_file` with the transpiler's inc_paths.
+# The prototype cache above does re-resolve, so the transpiler's own layer is
+# covered; the runtime's remedy for a moved dependency is `pcl --clear-cache`.
+
+sub file_sha {
+  my ($path) = @_;
+  return undef unless defined $path && length $path;
+  open my $fh, '<:raw', $path or return undef;
+  my $ctx = Digest::MD5->new;
+  eval { $ctx->addfile($fh); 1 } or do { close $fh; return undef };
+  close $fh;
+  return $ctx->hexdigest;
+}
+
+# The directories perl itself installs libraries into, plus PCL's own lib/.
+# DERIVED from %Config, never written down (the rule tools/lib/PCLPaths.pm
+# states for every path outside the checkout).
+my @INSTALLED_DIRS;
+sub installed_dirs {
+  return @INSTALLED_DIRS if @INSTALLED_DIRS;
+  require Config;
+  my @d;
+  for my $k (qw(privlibexp archlibexp sitelibexp sitearchexp
+                vendorlibexp vendorarchexp)) {
+    my $v = $Config::Config{$k};
+    push @d, $v if defined $v && length $v;
+  }
+  # PCL's own shims ship WITH PCL: they are as installed as perl's own lib.
+  push @d, dirname($PL_DIR) . '/lib';
+  my %seen;
+  @INSTALLED_DIRS = grep { length $_ && !$seen{$_}++ }
+                    map { Cwd::abs_path($_) // $_ } @d;
+  return @INSTALLED_DIRS;
+}
+
+=head2 trust_class($path)
+
+C<installed> when C<$path> lies under one of perl's installed library
+directories or PCL's own C<lib/>; C<local> otherwise — anything reached
+through C<use lib>, C<-I>, C<PERL5LIB>, C<.> or the program's own directory.
+The runtime reads this to decide whether a module may be cached as a FASL
+(C<PCL_FASL_CACHE>, task #1261 half 2).
+
+=cut
+
+sub trust_class {
+  my ($path) = @_;
+  return 'local' unless defined $path && length $path;
+  my $abs = Cwd::abs_path($path) // $path;
+  for my $d (installed_dirs()) {
+    return 'installed' if $abs eq $d || index($abs, "$d/") == 0;
+  }
+  return 'local';
+}
+
+=head2 depends_records($frame)
+
+The dependency records for a finished walk (what C<end_walk> returned): one
+entry per module or file the transpile read prototypes or exports from, as
+C<< { kind, name, path, sha, class } >>.  C<path> and C<sha> are undef for a
+name that did not resolve — a fact the walk used, kept for the record and for
+C<pl2cl --manifest>, but not checkable by the runtime (see the note above).
+
+=cut
+
+sub depends_records {
+  my ($frame) = @_;
+  my @out;
+  for my $d (@{ ($frame && $frame->{deps}) || [] }) {
+    my ($kind, $name, $path) = @$d;
+    push @out, { kind  => $kind,
+                 name  => $name,
+                 path  => $path,
+                 sha   => file_sha($path),
+                 class => trust_class($path) };
+  }
+  return \@out;
+}
+
+=head2 write_deps_file($file, $source, $frame)
+
+Write the sidecar the runtime's C<p-cache-valid-p> reads, beside the cached
+C<.lisp>.  The format is one record per line, TAB-separated, PATH LAST (a path
+may contain anything but a newline):
+
+  # pcl-deps 1
+  gen<TAB>v2-830
+  source<TAB>installed<TAB>/abs/Foo.pm
+  dep<TAB>mod<TAB>Bar<TAB>installed<TAB><md5><TAB>/abs/Bar.pm
+  missing<TAB>mod<TAB>Nope
+
+Returns 1 on success.  Never fatal: a sidecar that cannot be written simply
+leaves the cache entry INVALID on the next run, which costs a re-transpile and
+is never wrong.
+
+=cut
+
+sub write_deps_file {
+  my ($file, $source, $frame) = @_;
+  return 0 unless defined $file && length $file;
+  my $abs = Cwd::abs_path($source) // $source;
+  my @lines = ("# pcl-deps 1",
+               join("\t", 'gen', generation()),
+               join("\t", 'source', trust_class($abs), $abs));
+  for my $d (@{ depends_records($frame) }) {
+    if (defined $d->{path} && defined $d->{sha}) {
+      push @lines, join("\t", 'dep', $d->{kind}, $d->{name},
+                              $d->{class}, $d->{sha}, $d->{path});
+    }
+    else {
+      push @lines, join("\t", 'missing', $d->{kind}, $d->{name});
+    }
+  }
+  return _atomic_write_any($file, join("\n", @lines) . "\n");
+}
+
+# temp + rename, like _atomic_write above, but to an arbitrary directory (the
+# runtime's module-cache dir, not the proto dir).  A reader must never see a
+# half-written manifest: prove -j8 and the census run many transpiles at once.
+sub _atomic_write_any {
+  my ($file, $bytes) = @_;
+  my $tmp = "$file.$$." . int(rand 1_000_000);
+  open my $o, '>:raw', $tmp or return 0;
+  my $ok = print {$o} $bytes;
+  $ok &&= close $o;
+  if (!$ok) { unlink $tmp; return 0 }
+  rename($tmp, $file) or do { unlink $tmp; return 0 };
+  return 1;
+}
+
 1;
