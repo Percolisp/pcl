@@ -11,6 +11,14 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s473 (2026-09-06, Fable) — the s472 restart: BT + BX-phase-1 merged, the s473 queue and its briefs (plan `docs/plan-post-s473.md`); the shared-cache prune RACE #1338; a baseline `.tsv` is BINARY
+
+- **USER (2026-09-06): "Just keep starting new subjobs for the tasks and plan for them"** — the queue is `docs/plan-post-s473.md` §2 (BU → BZ → #1262 → s473a…s473p), briefs written for all of them under `~/pcl-agent-scratch/s473/`, two slots, successors launched on a MERGE-READY.
+- **#1338 (NEW, race): `p-cleanup-old-cache`'s `file-write-date` sits outside its `ignore-errors`, so a module-cache entry a sibling process replaces between the `directory` listing and the stat kills the UNRELATED program loading a module.**  Two Fable gates lost rows to it in one hour (moo-01.t 0/15; module-prototype-scan-01.t 2 rows) and both were green alone; the second time the vanished file was a WRITER'S TEMP fasl (`<key>-<hex>-<pid>.fasl`), so it hits `prove -j8`'s own siblings, not only parallel agents.  Rule: SKIP (effect-only hygiene, s329), never die; temp-shaped names are never pruned; a vanished or partial `.deps` is a MISS.  Absorbed by BY (#1300) under the s366 filler rule.
+- **A baseline `.tsv` is BINARY — edited through `:raw` handles only.**  s470bx's row-removal script went through a UTF-8 layer and rewrote 25 unrelated rows' Latin-1 bytes (`ab`/`bb`, the « » in perl's own test descriptions) as U+FFFD; the descriptions are JOIN KEYS.  Fable's merge read now includes `git diff main -- baselines/*.tsv | grep -a '^[-+]' | cut -f1 | sort | uniq -c` (a file losing and gaining the same count is the signature) and a byte `cmp` of the untouched rows; the agent restored them (`21f6622c`).
+- **A MERGE-READY sha is gated in a throwaway detached worktree when the agent keeps working in its own** (BX phase 2 continued while phase 1 was gated).
+- Merged this session: BT (`637fc58e`, the corpus) and BX phase 1 (`21f6622c`, gen v2-840).  Fable gates: BT 214/7383, BX 215/7451 — each FAIL = the 13 xs rows + the #1338 race rows (green alone); corpus-diff IDENTICAL over 111 both times.
+
 ## s471 (2026-09-06, Fable) — the CACHE SURFACE, the root scripts and the install layout RULED (USER asks); plan `docs/plan-cache-and-install-s471.md`
 - **The compile policy is two DIRECTORY LISTS, not a class word**: `PCL_COMPILE_DIRS` (default = perl's installed lib dirs + PCL `lib/` = `*p-core-inc-dirs*`; `*` = all) and `PCL_NO_COMPILE_DIRS` (wins; `*` = none); `PCL_NO_FASL_CACHE=1` stays as the alias.  The s470bw brief's `PCL_FASL_CACHE=installed|all|none` is NOT shipped (told bw 07:55).
 - **Validity = the #1261 manifest only; the 7-day age clause leaves `p-cache-valid-p`** (it re-transpiled every module weekly); the prune becomes last-use / touch-on-hit / 30 days incl. `proto/` (#682) — #1300.

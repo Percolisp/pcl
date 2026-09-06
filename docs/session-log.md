@@ -2,6 +2,10 @@
 
 Append new entries at the top. One section per session.
 
+## Session 473 (Fable, 2026-09-06, evening) — the s472 restart: BT + BX phase 1 merged, #1338 found, the s473 queue planned
+
+Restarted the three agents the shutdown stopped (recipe `PAUSE-s473.md`): BT owed only a gate — Fable ran it (214/7383, one file lost to the #1338 race, 15/15 alone), rebased it onto the USER's README fix and merged `637fc58e`; BX and BY resumed as fresh Opus agents in their own worktrees.  BX phase 1 (five green commits + records) merged as `21f6622c` after one review fix: its baseline edit had re-encoded 25 unrelated rows (a `.tsv` is BINARY — DECIDED §s473).  The USER asked for a continuous pipeline ("keep starting new subjobs for the tasks and plan for them"): `docs/plan-post-s473.md` is the queue, with eight new briefs (the `local` family, the nested-element family, die location sized first, numeric representation incl. the #1245/#1230 crash, loop control, product bugs #1060/#1284/#1119, #1249's singletons + the typeglob sizing, perf round 30) beside BU/BZ/#1262.  Owed companion `--all --quick` started on main.  Runtime size measured for the USER: 25,427 lines, 12,899 of code without blanks/comments/docstrings, 1,095 definitions.
+
 ## Session 470bx (Opus agent, 2026-09-06) — the s470bs residue: `$^T` and `rand` are per RUN (#1042/#1236), `stat`/`lstat` answer their CONTEXT (#1043), and a BAREWORD in an EXPR handle slot is a handle NAME (#1231/#1044)
 
 Four tasks, four commits plus two companion-leg commits, on main `fcf076f1`.
