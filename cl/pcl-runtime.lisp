@@ -23960,6 +23960,40 @@ buffer's fill-pointer; everything else falls back to file-length."
    that `s///xx` reaches the engine as `/x` (unchanged here, not fixed here)."
   (loop for c across (or flags "") collect (intern (string-upcase (string c)) :keyword)))
 
+(defun %p-literal-op-text (form)
+  "The STRING a regex-literal keyword's FORM denotes AT MACROEXPANSION TIME, or
+   NIL when the form is a run-time value.  Exactly two shapes reach these
+   macros from the emitter carrying a compile-time string: a string literal,
+   and `(p-esc \"…\")`, the IR's escaped-payload wrapper — which p-esc itself
+   decodes at macroexpansion, so reading it here is the same reading, not a
+   second one.  Anything else — an interpolated `(p-string-concat …)`, a
+   variable, a hash element — is a value only the RUN has (task #1250)."
+  (cond ((stringp form) form)
+        ((and (consp form) (eq (first form) 'p-esc)
+              (null (cddr form)) (stringp (second form)))
+         (%p-esc-decode (second form)))
+        (t nil)))
+
+(defmacro %p-op-once (form)
+  "FORM, evaluated at most ONCE for the call SITE this macro expands at, and
+   remembered in a cell of the site's own (task #1250).  The regex-literal
+   macros wrap their op constructor in this when every ingredient is a
+   compile-time string: `m/o/g` in a loop then builds its op once instead of
+   consing a fresh `(list flags pattern)` key and doing an EQUAL gethash on it
+   per iteration (16.8 % of the `regexg` row), and `s///` / `tr///` stop
+   allocating a fresh op struct per evaluation.
+
+   LAZY, not `load-time-value` of the constructor itself: the constructor can
+   ANNOUNCE (%pcl-strip-regex-code-blocks) and the announcement must stay tied
+   to the first EXECUTION of the site, not to loading the file it sits in.
+
+   FOR A PORT: a pure per-site MEMO with no semantics of its own — a backend
+   may ignore it and evaluate FORM every time.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  (let ((site (gensym "SITE")))
+    `(let ((,site (load-time-value (cons nil nil) nil)))
+       (or (car ,site) (setf (car ,site) ,form)))))
+
 (defun %p-regex-op (raw flags)
   "The match op for pattern text RAW with modifier letters FLAGS, memoized in
    *p-regex-op-cache* on the (flags raw) pair — the key p-regex-from-parts
@@ -23981,7 +24015,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   (multiple-value-bind (pat flags tier)
       (%p-regex-keyword-args 'p-regex args '(:pat :flags :tier))
     (declare (ignore tier))
-    `(%p-regex-op ,pat ,(or flags ""))))
+    (let* ((f (or flags ""))
+           (call `(%p-regex-op ,pat ,f)))
+      (if (and (%p-literal-op-text pat) (stringp f))
+          `(%p-op-once ,call)
+          call))))
 
 (defun %p-qr-parts (raw flags)
   "A fresh Regexp OBJECT for qr// — never memoized: two evaluations of `qr/a/`
@@ -24018,7 +24056,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   (multiple-value-bind (pat rep flags tier)
       (%p-regex-keyword-args 'p-subst args '(:pat :rep :flags :tier))
     (declare (ignore tier))
-    `(%p-subst-parts ,pat ,rep ,(or flags ""))))
+    (let* ((f (or flags ""))
+           (call `(%p-subst-parts ,pat ,rep ,f)))
+      ;; An absent :rep is `nil', which is as constant as a literal string; a
+      ;; `(lambda …)' replacement is NOT — it may close over lexicals, so its
+      ;; op stays fresh per evaluation (task #1250).
+      (if (and (%p-literal-op-text pat)
+               (or (null rep) (%p-literal-op-text rep))
+               (stringp f))
+          `(%p-op-once ,call)
+          call))))
 
 (defun %p-subst-parts (pattern replacement flags)
   "Create a substitution operation s///."
@@ -24034,7 +24081,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (multiple-value-bind (from to flags)
       (%p-regex-keyword-args 'p-tr args '(:from :to :flags))
-    `(%p-tr-parts ,from ,to ,(or flags ""))))
+    (let* ((f (or flags ""))
+           (call `(%p-tr-parts ,from ,to ,f)))
+      (if (and (or (null from) (%p-literal-op-text from))
+               (or (null to) (%p-literal-op-text to))
+               (stringp f))
+          `(%p-op-once ,call)
+          call))))
 
 (defun %p-tr-parts (from to flags)
   "Create a transliteration operation tr///."
