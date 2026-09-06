@@ -1,4 +1,13 @@
 # taken-at: 5323d9e 2026-08-15
+# s470bx (task #1237, edited ROW BY ROW): readline.t PARTIAL 23/7 -> 25/5
+#   (TOTAL 18647 -> 18649).  TWO rows, 12 `readline( DIRECTORY )` and 13
+#   `readline( DIRECTORY ) slurp mode`: a read from a DIRECTORY handle now
+#   sets $! as perl does (EISDIR for sysread/read/readline/slurp, EBADF for
+#   getc, untouched for eof) and getc/eof no longer die on SBCL's
+#   simple-stream-error.  Both rows also leave baselines/fail-baseline.tsv
+#   by edit; the file's five remaining fails and its early stop at test 32
+#   are unchanged.  MEASURED --jobs 1 on this tree and on a `git archive
+#   fcf076f1` extraction (23/7 there).
 # s470bq (rule 12 in _parse_regex_content, edited ROW BY ROW): eval.t PARTIAL
 #   128/32 -> 129/31 (TOTAL 18644 -> 18645).  ONE row, test 6
 #   `like($@, qr/Search/)` for `eval '$foo = /'`.  Splitting the pattern from
@@ -405,7 +414,7 @@ qq.t	OK	30	0	30
 qr.t	OK	23	14	37
 quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
-readline.t	PARTIAL	23	7	36
+readline.t	PARTIAL	25	5	36
 recurse.t	OK	27	1	28
 # s428 (#411 elided-arrow call): ref.t 191 -> 192 EDITED BY HAND — `(sub{})[0]()` (line 674) no longer DROPS.
 # s446j (#517): ref.t 192 -> 193 EDITED BY HAND — `ref(\&{""})` is CODE, as perl says

@@ -14998,8 +14998,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; (`close TRY; ...; eof()`), so guard peek-char against a closed stream to
     ;; avoid an sb-int:closed-stream-error abort.
     (if (and stream (open-stream-p stream))
-        (let ((ch (peek-char nil stream nil :eof)))
-          (if (eq ch :eof) t nil))
+        (handler-case
+            (let ((ch (peek-char nil stream nil :eof)))
+              (if (eq ch :eof) t nil))
+          ;; A perl-level die passing through is the caller's (rule 11 — the
+          ;; same re-raise %p-read-impl and %p-getc-impl do).
+          (p-exception (e) (error e))
+          ;; A read that FAILS reads as EOF too, and for the same reason a
+          ;; closed handle does: perl answers TRUE for a handle it cannot read
+          ;; from.  `eof` on a DIRECTORY handle is the case that costs — the
+          ;; peek-char reached SBCL's unhandled simple-stream-error and KILLED
+          ;; THE PROGRAM, where perl answers 1 (task #1237, the third entry of
+          ;; the family after getc).  `$!` is left alone: perl's eof does not
+          ;; report the directory (probed 5.40.3 with $! cleared after the
+          ;; open — errno 0), which is why this is not a %p-read-fail call.
+          (error () t))
         t)))
 
 (defmacro p-eof (&rest args)
@@ -15274,6 +15287,40 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl binmode — bareword filehandle is auto-quoted."
   `(%p-binmode-impl (%p-fh-arg ,fh) ,@args))
 
+(defun %p-read-fail (stream &optional (errno sb-posix:eisdir))
+  "A READ from STREAM failed at the OS level.  perl answers undef (or an empty
+   record) AND sets `$!`; PCL used to answer only the first half, so `$!` kept
+   whatever the previous operation had left.
+
+   THE ONE ERRNO PCL CAN NAME EXACTLY IS EISDIR, and it is the one that costs
+   rows.  On Linux `open F, '.'` SUCCEEDS — O_RDONLY on a directory is legal —
+   and every read from the handle then fails with EISDIR; probed 5.40.3,
+   `sysread`, `read`, `readline` and a list-context slurp all answer undef with
+   `$! == 21`, for a lexical handle and a bareword alike (task #1237).
+
+   The descriptor is fstat-ed HERE, on the FAILURE path, so a successful read
+   pays nothing and there is no per-handle flag to keep in step with reopens
+   and dups.  Re-reading the C `errno` instead is what s470bs ruled out: an
+   allocation between the failing call and the read can clobber it.  Any other
+   read failure leaves `$!` alone — which is what PCL did for every one of
+   them before — rather than inventing a number perl does not report.
+
+   ERRNO is what THIS entry reports for that directory, because they do not
+   all agree: sysread, read, readline and a list-context slurp say EISDIR,
+   and `getc` says EBADF — measured with `$!` cleared AFTER the open, since
+   perl's own open leaves ENOTTY/EBADF behind from its isatty probe and a
+   sloppy probe reads that instead.  perl's getc takes its \"handle is not
+   open for reading\" exit, which is a SETERRNO(EBADF); the caller names its
+   own answer rather than this helper guessing one for it.
+
+   Always returns NIL, so a caller can end with `(%p-read-fail s)`."
+  (let ((fd (and stream (%p-fd-of-stream stream))))
+    (when fd
+      (let ((st (ignore-errors (sb-posix:fstat fd))))
+        (when (and st (sb-posix:s-isdir (sb-posix:stat-mode st)))
+          (%p-io-errno-fail errno)))))
+  nil)
+
 (defun %p-read-impl (fh buf len &optional offset)
   "Perl read(FH, BUF, LEN [, OFFSET]) — read up to LEN chars from FH into the
    lvalue BUF, returning the number of chars actually read (0 at EOF, undef on
@@ -15309,7 +15356,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (box-set buf data)))
           got)
       (p-exception (e) (error e))
-      (error () *p-undef*))))
+      (error () (%p-read-fail (p-get-stream fh)) *p-undef*))))
 
 (defmacro p-read (fh &rest args)
   "Perl read — bareword filehandle is auto-quoted."
@@ -16500,11 +16547,27 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-fcntl-impl (%p-fh-arg ,fh) ,func ,arg))
 
 (defun %p-getc-impl (&optional fh)
-  "Perl getc - read single character"
+  "Perl getc - read single character.
+
+   A FAILING read must not escape: `getc` on a directory handle used to reach
+   SBCL's unhandled `simple-stream-error` and KILL THE PROGRAM, where perl
+   answers undef and carries on (task #1237).  Its siblings %p-read-impl and
+   %p-read-record already caught; this one never had a handler at all.
+
+   EBADF, not EISDIR: perl's getc is the one entry of the family that does not
+   report the directory — measured with `$!` cleared after the open, so it is
+   getc's own answer and not open's isatty leftover.  It takes its \"handle is
+   not open for reading\" exit, whose SETERRNO is EBADF."
   (let ((stream (if fh (p-get-stream fh) *standard-input*)))
     (when stream
-      (let ((ch (read-char stream nil nil)))
-        (if ch (string ch) nil)))))
+      (handler-case
+          (let ((ch (read-char stream nil nil)))
+            (if ch (string ch) nil))
+        ;; A perl-level die passing through (a tied handle, an overload) is
+        ;; the caller's, not a read failure — %p-read-impl re-raises it the
+        ;; same way (rule 11).
+        (p-exception (e) (error e))
+        (error () (%p-read-fail stream sb-posix:ebadf))))))
 
 (defmacro p-getc (&rest args)
   "Perl getc — bareword filehandle is auto-quoted."
@@ -16590,9 +16653,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                                     :start1 (- (length result) sep-len)))
                  do (loop-finish))
            (if (zerop (length result)) nil (coerce result 'string)))))
-    ;; Any stream error (e.g. reading from a directory) → return nil like Perl
-    (stream-error () nil)
-    (error () nil)))
+    ;; Any stream error (e.g. reading from a directory) → nil like perl, AND
+    ;; `$!` set the way perl sets it: %p-read-fail names EISDIR for a
+    ;; directory handle and leaves $! alone for anything else (task #1237).
+    (stream-error () (%p-read-fail stream))
+    (error () (%p-read-fail stream))))
 
 (defun %p-readline-impl (&optional fh)
   "Perl readline / diamond operator <FH> — one record from a FILEHANDLE.

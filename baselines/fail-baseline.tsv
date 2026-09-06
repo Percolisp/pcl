@@ -23,6 +23,15 @@
 #   c1 af c1 af c1 b0 c1 b3; 027ba9c wrote 16 (c3 81 c2 af ...) because STDOUT
 #   was a UTF-8 handle and re-encoded each character; HEAD writes the 8.  The
 #   file is 2+1/3 -> 3+0/3 (both numbers MEASURED on 027ba9c and on 361f377).
+# s470bx (Opus, 2026-09-06): readline.t 12 `readline( DIRECTORY )` and 13
+#   `readline( DIRECTORY ) slurp mode` LEAVE BY EDIT -- they PASS.  Cause
+#   #1237: a read from a DIRECTORY handle now sets $! the way perl does
+#   (EISDIR for sysread/read/readline/slurp, EBADF for getc, untouched for
+#   eof), and the two entries that had NO handler -- getc and eof -- no longer
+#   kill the program on SBCL's simple-stream-error.  MEASURED on this tree with
+#   `sweep-perl-tests.pl --jobs 1 perl-tests/readline.t`: 23+7 -> 25+5, same
+#   five remaining rows (26-30, the autovivify / PL_last_in_gv pair) and the
+#   same early stop at test 32 of 36.  No --bless-fails: no other file could move.
 aassign.t	180	RT #130132 scalar derefffed 1	'3'	'2'	UNEXPLAINED
 aassign.t	181	RT #130132 scalar derefffed 2	'1'	'3'	UNEXPLAINED
 aassign.t	182	RT #130132 scalar undef 1	undef	'2'	UNEXPLAINED
@@ -502,5 +511,3 @@ sort.t	174	Match vars do not leak from one plain sort sub to the next	'WinLeakag
 sort.t	175	Match vars do not leak from one $$ sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 sub.t	24	goto &xsub when @_ does not exist	'ARRAY(0xb)'	undef	#1117 (was #1020, FIXED s470bi: undef *GLOB cleared nothing.  perl REMOVES the ARRAY slot, PCL empties it, so *_{ARRAY} is still a ref)
 bop.t	465	|= doesn't break string overload	'0'	'z'	#972 (DECIDED s463f: the three prerequisites of #960(a))
-readline.t	12	readline( DIRECTORY )			#1237 (s470bs-merge: these two rows used to SKIP because `$err` was 0.  #1033 makes the BEGIN block's `-d 't'` leave ENOENT behind, as perl does, so `$err` is 2 and the SKIP no longer fires — the rows now RUN and fail honestly on the OTHER half, which is that sysread/readline on a directory sets no errno where perl sets EISDIR.  Measured serially on both trees: 23/5/4 -> 23/7/2)
-readline.t	13	readline( DIRECTORY ) slurp mode			#1237 (see the row above: an exposed SKIP, not a regression)

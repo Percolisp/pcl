@@ -159,4 +159,58 @@ PERL
     like($result, qr/gn:42 gs:forty-two/, 'dualvar: survives @_');
 }
 
+diag q{-------- $! after a READ from a DIRECTORY handle (task #1237):};
+
+# On Linux `open F, '.'` SUCCEEDS -- O_RDONLY on a directory is legal -- and
+# every READ from the handle then fails.  perl answers undef (or an empty
+# record) AND sets $!; PCL answered only the first half, so $! kept whatever
+# the previous operation had left, and two entries had no handler at all and
+# KILLED THE PROGRAM (`getc` reached SBCL's simple-stream-error, `eof` reached
+# it through peek-char).  Every expectation below is the output of the SAME
+# program under perl -- run here, not written down, because the errnos differ
+# per entry (EISDIR for the readers, EBADF for getc, untouched for eof) and a
+# hand-copied table would be a second source (rule 11).
+{
+    my $prog = <<'PERL';
+# A FRESH handle per row: perl's PerlIO remembers the error on a handle, so a
+# second read of the same handle would measure the layer's memory.
+sub dirfh { my $fh; open($fh, '.') or die "open dir: $!"; return $fh }
+sub row {
+    my ($name, $code) = @_;
+    my $h = dirfh();
+    $! = 0;                      # AFTER the open: perl's own open leaves
+    my $v = $code->($h);         # ENOTTY behind from its isatty() probe
+    printf "%-9s = %-6s errno=%s\n", $name, (defined $v ? $v : "UNDEF"), $!+0;
+    close $h;
+}
+row('sysread',  sub { my $b; sysread $_[0], $b, 1 });
+row('read',     sub { my $b; read $_[0], $b, 1 });
+row('readline', sub { my $l = readline($_[0]); defined $l ? "DEF" : undef });
+row('getc',     sub { getc $_[0] });
+row('slurp',    sub { my $h = $_[0]; my @a = <$h>; scalar(@a) });
+row('eof',      sub { eof($_[0]) });
+# A REGULAR file must be untouched by all of this.
+{ open(my $g, '<', '/etc/passwd') or die; my $b;
+  my $n = sysread $g, $b, 4;
+  printf "%-9s = %-6s errno=%s\n", 'file', (defined $n ? $n : "UNDEF"), $!+0;
+  close $g }
+print "END\n";
+PERL
+
+    my ($pfh, $pfile) = tempfile(SUFFIX => '.pl');
+    print $pfh $prog;
+    close $pfh;
+    my @want = split /\n/, scalar(`perl "$pfile" 2>&1`);
+    my @got  = split /\n/, scalar(`./runpcl "$pfile" 2>&1`);
+    unlink $pfile;
+
+    is(scalar(@got), scalar(@want),
+       "read from a directory handle: the program RUNS to the end (#1237)");
+    for my $i (0 .. $#want) {
+        my ($label) = $want[$i] =~ /\A(\S+)/;
+        $label = "line " . ($i + 1) unless defined $label;
+        is($got[$i], $want[$i], "directory handle: $label answers as perl does");
+    }
+}
+
 done_testing();
