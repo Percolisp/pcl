@@ -2,6 +2,82 @@
 
 Append new entries at the top. One section per session.
 
+## Session 473t2 (Opus agent, 2026-09-07) — the triage of the blessed sweep failures nobody had explained: 152 causeless keys get a cause, 15 tasks filed, no code changed
+
+**The question.** `baselines/fail-baseline.tsv` has a cause column, and on 152 of
+its 479 keys that column said nothing — the sweep's own runner prints the count
+(`CAUSES: N of 468 blessed row(s) have no cause`), so the hole was measurable
+and had never been closed.  This session closed it.  The line now reads **0**.
+
+**What the USER's pack.t instruction meant here.**  47 of the 152 are `pack.t`
+rows and the USER parked pack/unpack on 2026-09-06 ("Skip working more with
+pack.t").  They read `PARKED: pack/unpack (USER 2026-09-06)` and were not
+probed — no source read, no reproducer, nothing.  That is the whole of the
+pack.t work in this session, deliberately.
+
+**Method, copied from `docs/blessed-fails-review-s464.md`.**  Per file, largest
+first: read the file's failing rows, cluster them by the assertion's
+got/expected SHAPE, find the mechanism in the test SOURCE (s464's own
+correction: a cluster's mechanism never comes from its description), probe ONE
+representative per cluster against perl 5.40.3 with `./runpcl`, and attribute
+to a task, a `docs/not-supported.md` section, or a CATALOG note.  Thirteen probe
+files; every cluster in the record has one.
+
+**Two clusters had owners all along.**  `bless.t 105` is **#408**, whose own
+description names `perl-tests/bless.t:179`.  `multideref.t 24/27/30/33` are
+**#1190**, the local-element family — and the probe is worth keeping: `local
+$h{k}` and `local $b[1]` restore correctly, `local $a[3]{foo}[1]{c}` does not,
+because the nested accessor hands back a detached box and the restore writes
+where nobody reads.  Neither attribution had ever been written into the row,
+which is exactly the failure mode s464 was about.
+
+**The finding that generalises: the read-only-scalar family is bigger than its
+entry says.**  `docs/not-supported.md`'s "A LITERAL in a `foreach` list is
+writable" carries the general rationale — a read-only scalar has nowhere to
+carry the flag in PCL's box model — and three unrelated-looking clusters turn
+out to be that one fact.  The sharpest is `scalar.t 34/36/40`: perl refuses
+`open(F, '>', \43)` with EACCES, PCL accepts it AND TRUNCATES the literal, so
+the read that follows gets nothing.  A missing flag became a silently clobbered
+value.
+
+**Fifteen tasks, #1446–#1460**, each with its probe and the number of rows
+behind it.  The ones worth naming: **#1446** an in-memory `\$scalar` handle
+binds a STRING and not the SV, so tie FETCH never fires and the SBCL print form
+of the tie proxy (`#<p-tie-proxy {…}>`) reaches the program's own output;
+**#1451** `local` in a non-leading expression position emits `(pl-local …)`, a
+call to a function that does not exist (the leading spellings all work);
+**#1452** list assignment does not resolve its LHS lvalues before assigning —
+`($sref, $$sref) = (2, 3)` is `2/3` in perl and `3/1` in PCL — which is s464
+review §4c item 1, now probed and owned; **#1450** `@DB::args` is never
+populated by `caller()`.
+
+**Two instrument lessons.**  (1) A blessed row with an EMPTY description stands
+for ALL of its file's unnamed failing rows, because `sweep-diff.pl` keys on
+`file\tdescription` (#1041) — `eval.t 99` and `ref.t 194` are each one key over
+six to eight real assertions, so #1460 holds the shapes rather than pretending
+one cause.  (2) `tools/runt` is not the sweep: it runs children under the REAL
+perl, so `split.t 32` passes there and fails in the sweep, and `ref.t` produces
+108 rows there against 211 in the sweep.  Read TAP with runt; never decide a
+verdict with it.
+
+**Four rows were kept although they pass when measured alone** — `magic.t
+184/185/186/201`.  They failed in the blessed `--jobs 4` run and pass under
+`--jobs 1`; the four `%ENV` store shapes they test all agree with perl in
+isolation.  They stay in the file with that cause (#1458 (c), which says to
+measure `%ENV = ()` against the child environment first), because removing them
+by edit would make the next full sweep report them NEW.
+
+**Bars.**  Gate 216 files / 7517 rows, FAIL = only the 13 pclxs xs rows.  Full
+sweep `--jobs 4`: **GATE clean, TOTAL passing 18649 (+0), 0 new / 0 fixed /
+0 LOST, drops 5 = census**.  No code changed — baselines and docs only — so no
+generation bump, no corpus-diff, no artifacts, no guards.
+
+**Not done, said plainly.**  The brief's secondary ask — a task per cluster for
+the ~60 rows whose cause is a CATALOG note — was not executed: the 15 assigned
+task IDs were all consumed by the causeless-row clusters, and 1461+ is the
+plan's next free range for another brief.  The cluster list, ready to file in
+one pass, is in `docs/DECIDED.md` §s473t2's last bullet.
+
 ## Session s473t1 (Opus agent, 2026-09-07) — the 13 files that stop early: one cause each, written down; two fixes and a restored stub recover 71 rows
 
 The USER's triage brief.  15 of 108 perl-tests files are PARTIAL and
