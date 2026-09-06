@@ -20,12 +20,12 @@ Why?
   Perl's operator names.
 * **PCL is a compiler toolkit with a documented IR.** Most of the work
   is done for compiling Perl to other environments!  The compiler
-  makes an intermediate representation (IR), which is documented in
-  [specified](docs/ir-spec.md). It saves facts about variables (if it
-  always is a number, if a reference is never take, if it is only read
-  in its loop, etc). It gives information about context, coercion,
-  calling convention, non-local exits and so on.  Also see the
-  [architecture](docs/v2-target-architecture.md).
+  makes an intermediate representation (IR), which is documented
+  [here](docs/ir-spec.md). It saves facts about variables (if it
+  always is a number, if a reference is never taken, if it is only
+  read in one loop, etc). It gives information about context,
+  coercion, calling convention, non-local exits and so on.  Also see
+  the [architecture](docs/v2-target-architecture.md).
 
 **Maturity: early.** First tag v0.1.0, August 2026.  Pure-Perl code
 works well, including most CPAN modules written in Perl.  XS modules
@@ -320,17 +320,16 @@ runs, so it needs both.
   else beyond core modules.  Distributions package an older PPI (Ubuntu
   24.04 has 1.277) and the installer refuses it, because PCL's handling of
   PPI's token stream is tied to 1.291.
-* **SBCL 2.5.2 or later.**  The runtime uses some of SBCL's internal APIs,
-  so older versions do not work. Debian 12, Ubuntu 22.04 and Ubuntu
-  24.04 all ship an older one, but a binary from
-  [sbcl.org](https://www.sbcl.org/platform-table.html) installs without
-  root.  Which one depends on your glibc: the current 2.6.0 binary needs
-  glibc 2.38, which Ubuntu 24.04 and Debian 13 have; Ubuntu 22.04 and
-  Debian 12 do not, and need the 2.5.2 binary.  Both combinations are
-  installed and tested by the
-  [install matrix](.github/workflows/install-matrix.yml).
+* **SBCL 2.5.2 or later.** Debian 12, Ubuntu 22.04 and Ubuntu 24.04
+  all ship with an older version, but a binary from
+  [sbcl.org](https://www.sbcl.org/platform-table.html) installs
+  without root.  Which one to install depends on your glibc: the
+  current 2.6.0 binary needs glibc 2.38, which Ubuntu 24.04 and Debian
+  13 have; Ubuntu 22.04 and Debian 12 do not, and need the 2.5.2
+  binary.  Both combinations are installed and tested by the [install
+  matrix](.github/workflows/install-matrix.yml).
 
-  | distribution | SBCL binary |
+  | distribution | Install SBCL binary |
   |---|---|
   | Ubuntu 22.04, Debian 12 | 2.5.2 |
   | Ubuntu 24.04, Debian 13 and newer | 2.6.0 (current) |
@@ -343,13 +342,14 @@ skips `~/.sbclrc`, so SBCL never sees the Quicklisp-installed cl-ppcre.
 
 ## How it works
 
-For readers who know Perl but not compilers or Lisp, the pieces are these.
+An introduction assuming no compiler background at all.
 
-**The compiler** (`Pl/`, about 42,000 lines of Perl) reads your source with
-[PPI](https://metacpan.org/pod/PPI), the CPAN Perl parser, builds a tree of
-statements and expressions, works out for every variable how it is used
-(is a reference ever taken? is it captured by a closure? is it only ever a
-number?), and writes out one Lisp form per Perl statement.
+**The compiler** (`Pl/`) reads your source with
+[PPI](https://metacpan.org/pod/PPI), the CPAN Perl parser, builds a
+tree of statements and expressions, works out for every variable how
+it is used (is a reference ever taken? is it captured by a closure? is
+it only ever a number?), and writes out one Lisp form per Perl
+statement.
 
 ```
 Perl source → PPI → Pl::Parser2 (statements) → Pl::CLForm → Common Lisp text
@@ -359,15 +359,16 @@ Perl source → PPI → Pl::Parser2 (statements) → Pl::CLForm → Common Lisp 
 ```
 
 **The runtime** ([`cl/pcl-runtime.lisp`](cl/pcl-runtime.lisp), about
-22,000 lines of Common Lisp) is a library of the Perl operations that
-cannot be decided at compile time: what `+` does to `"3 apples"`, how
-`local` restores a value on scope exit, how a method call finds its target,
-how `sort` calls its comparator.  The compiled program is mostly calls into
-this library, and it is where Perl's semantics are pinned down.  Common Lisp
-already provides the underpinnings Perl needs — dynamic typing, closures,
-dynamic binding for `local`, non-local exits for `die`/`last`/`return`,
-garbage collection — so the runtime uses those directly instead of
-rebuilding them.
+13,000 lines of Common Lisp, not counting blank lines, comments and
+docstrings) is a library of the Perl operations: what `+` does to `3`
+(or `"3 apples"`), how
+`local` restores a value on scope exit, how a method call finds its
+target, how `sort` calls its comparator.  The compiled program is
+mostly calls into this library, and it is where Perl's semantics are
+pinned down.  Common Lisp already provides the underpinnings Perl
+needs — dynamic typing, closures, dynamic binding for `local`,
+non-local exits for `die`/`last`/`return`, garbage collection — so the
+runtime uses those directly instead of rebuilding them.
 
 **Scalars are boxes, unless proved otherwise.**  A Perl scalar can be
 aliased (by `foreach`), referenced (`\$x`), localized or tied, so by
