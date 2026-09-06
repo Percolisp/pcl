@@ -2701,6 +2701,42 @@ under `use lib`/`-I`/`PERL5LIB`/`.` is very likely being edited, and a fasl is
 the most opaque artifact PCL writes — but it is a belt: correctness is rule 2
 above, for both cache layers alike.
 
+**Where the cache is, is a fact about the PROCESS, not about the build**
+(task #1303). `PCL_CACHE_DIR` names the root of every per-user cache —
+`modules/`, `proto/`, `core/`, `xs/` — and defaults to `<home>/.pcl-cache`.
+It is read **at process start** (an `sb-ext:*init-hooks*` entry, joining `$$`,
+the FP modes, the standard handles and `PCL_RAW_ELEMS`), and every cache path
+is derived from it *at call time*. It must never be resolved while the runtime
+loads: that is when a saved core is *built*, so the answer would be the core
+builder's, and a system-wide `pcl.core` built by one user would send every
+other user's modules into the builder's home. The Perl side spells the same
+rule once, in `PCLPaths::cache_root`, which `pcl`, `tools/lib/PCLSbcl.pm` and
+`Pl/ProtoCache.pm` all call.
+
+**An entry is kept while it is USED, not while it is young.** Validity is rule
+2 above and nothing else; the age rule is disk hygiene. A cache entry that is
+*used* — a fasl hit, or a `.lisp` taken as it stands — is re-stamped
+(`utime(2)`, at most once a day per entry, and the `.lisp`, the `.deps` and
+this runtime's `.fasl` **together**, because the prune reads each file's own
+mtime and half an entry is not an entry). Entries nothing has reached for
+`*pcl-cache-max-age*` (30 days) are deleted, in `<cache>/modules/` **and** in
+`<cache>/proto/` — the transpiler's prototype memo, whose entries become
+unreachable the moment the compiler stamp changes. The scan is claimed once a
+day through a `.last-prune` marker in the cache root, because it is invoked on
+every cache *miss* and a cold run has one miss per module. Pruning is safe
+against readers: unlinking a file an open reader holds is harmless on Linux,
+and every entry is published temp-file + `rename(2)`.
+
+**The cache directory is created `0700`, and an unsafe one is refused.** A
+cached module is a fasl — compiled code the process loads and runs — so a
+directory owned by another uid, or writable by group or other, is refused with
+a perl-shaped, `eval`-trappable error naming the directory, the mode found and
+the fix (`chmod 700 DIR`), rather than used. Only the *root* is checked: at
+`0700` no other user can traverse into it, whatever the modes inside say.
+What a mode check cannot see, said plainly: a cache root inside a
+world-writable directory **without** the sticky bit can be renamed away by
+another user, and no permission on the root itself prevents that.
+
 ### 9.3 The drop form: a statement the compiler could not lower (normative, s435)
 
 Where a statement of the source program could not be lowered, the emitter puts

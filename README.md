@@ -105,16 +105,34 @@ deliberately unsupported dies in the same way, with a message naming the
 entry in [`docs/not-supported.md`](docs/not-supported.md).  The compiler
 never substitutes a guess for a statement it cannot translate.
 
-**Caches and switches.**  Compiled modules and the runtime cache live in
-`~/.pcl-cache/` (`PCL_CACHE_DIR` moves it; `pcl --clear-cache` empties it).
-The runtime cache is keyed on a hash of the runtime's source, and a cached
-module is checked against its file's modification time, so neither goes
-stale.
+**Caches.**  PCL caches two things, both purely for speed: a saved SBCL
+core with the PCL runtime already compiled in (startup ~1 s → ~0.1 s), and,
+for each module you `use`, its transpiled Common Lisp plus a compiled
+`.fasl`.  Both live under `~/.pcl-cache/`, which `PCL_CACHE_DIR` moves and
+`pcl --clear-cache` empties.  A cached module is code, so the directory is
+created `0700` and PCL refuses to load out of one anybody else could write
+to.
+
+**When a cached thing is stale.**  The core's *file name* is a hash of the
+runtime's source plus the SBCL version, so editing either produces a
+different core rather than a stale one.  A cached module is re-transpiled
+when its own file changes — and also when any module whose prototypes or
+exports its parse read changes, which is what `perl` gets for free by
+re-parsing everything on every run.  Entries nothing has used for 30 days
+are removed.  If PCL ever seems not to notice a change, `pcl --cache-info`
+says where the cache is and what is in it, and `pcl --no-cache` runs once
+without it.
+
+**The knobs.**  `PCL_COMPILE_DIRS` and `PCL_NO_COMPILE_DIRS` (colon-separated
+directories, `PERL5LIB` syntax) say which modules are compiled to native
+code; by default that is perl's installed library directories and PCL's own
+`lib/`, so a module you are *editing* is cached as readable text.
 `PCL_OPT=none` turns off every speed optimization and compiles the fully
-generic form; the output must behave identically, and the test suite
-checks that it does.  Your own script is compiled on every run, so a large
-one pays a pause before its first line: a one-liner starts in under a
-quarter of a second, a thousand-line script takes a few seconds.
+generic form; the output must behave identically, and the test suite checks
+that it does.  Your own script is compiled on every run, so a large one pays
+a pause before its first line: a one-liner starts in under a quarter of a
+second, a thousand-line script takes a few seconds.  The full list is in
+[`docs/caching.md`](docs/caching.md) and in `pcl --help`.
 
 ## An example
 
