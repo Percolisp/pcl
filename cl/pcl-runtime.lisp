@@ -15011,6 +15011,42 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;; Helper used by filehandle macros: if FH-FORM is a plain symbol (no sigil)
 ;; it is a bareword filehandle — quote it.  Otherwise pass through as-is.
 ;; Also handles (pl-NAME) forms where codegen wrapped the bareword in a funcall.
+(defun %p-fh-call-name (fn-sym)
+  "The PERL name a generated `(pl-NAME)` call form denotes, or NIL when the
+   symbol is not one.  The two %pcl-invert-case hops are the same dance the
+   (pl-NAME) arm below already did inline: the reader applied :invert to the
+   emitted token, so un-invert to recover the text, strip the pl- prefix, and
+   the caller inverts again when it needs a symbol back."
+  (let ((name (symbol-name fn-sym)))
+    (and (> (length name) 3)
+         (string-equal (subseq name 0 3) "PL-")
+         (subseq (%pcl-invert-case name) 3))))
+
+(defun %p-expr-slot-defers-to-sub (fn-sym)
+  "For an EXPR handle slot (`stat`, `lstat`, the 26 filetests): does this
+   `(pl-NAME)` call form denote a sub that is really there?
+
+   perl decides the whole question at COMPILE TIME — a declared sub in one of
+   these slots is CALLED, anything else is a filehandle NAME — and PExpr's
+   `_expr_slot_bareword_operand` answers it there for ordinary source.  It
+   CANNOT answer inside a string eval: the fragment is transpiled without the
+   enclosing program's sub table, so every bareword looks unplaceable and
+   `eval \"-e SPATH\"` would read a declared sub as an unopened handle.
+
+   This macro, though, expands INSIDE the eval, in the image where `pl-SPATH`
+   either exists or does not — which is the closest PCL gets to perl's own
+   question.  ALL-CAPS is required as well, so a genuinely mistyped sub name
+   keeps failing LOUDLY as an undefined function rather than silently as
+   EBADF (#266's asymmetry; a lower-case bareword here is accepted residue).
+   Task #1231."
+  (or (fboundp fn-sym)
+      (let ((name (%p-fh-call-name fn-sym)))
+        (or (null name)
+            (not (every (lambda (c) (or (upper-case-p c) (digit-char-p c)
+                                        (char= c #\_) (char= c #\:)))
+                        name))
+            (not (upper-case-p (char name 0)))))))
+
 (defmacro %p-fh-arg (fh-form &optional (call-form-is-a-handle t))
   ;; A CONTEXT WRAP around the argument is peeled first (%p-strip-ctx): a
   ;; scalar-context user-sub call is emitted wrapped, and the (pl-NAME) arm
@@ -15019,15 +15055,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;; which the #281 context macros would have silently defeated (probed: the
   ;; bareword then CALLS pl-NAME, an undefined function).
   ;;
-  ;; CALL-FORM-IS-A-HANDLE NIL turns the (pl-NAME) arm — and with it the
-  ;; strip, which exists only to expose that arm — OFF.  That is the READ-slot
-  ;; reading, and it is perl's: in a `stat` / filetest operand a DECLARED sub
-  ;; is CALLED, so `sub SPATH {"/etc/passwd"} -e SPATH` is TRUE and
-  ;; `use constant CPATH => …; -e CPATH` reads the constant (probed 5.40.3,
-  ;; scratch/p13-const-handle-slot.pl).  The filetest emitter already gets
-  ;; that right — it emits `(p--e (pl-SPATH))` — so turning that call back
-  ;; into a handle NAME would be a new silent wrong.  The `open` family keeps
-  ;; the arm ON: there the first argument is a GLOB slot, not a read slot.
+  ;; CALL-FORM-IS-A-HANDLE has THREE values, one per slot kind (#1044's
+  ;; three-rule model, probed 5.40.3 with the warning TEXT as discriminator):
+  ;;
+  ;;   T           a GLOB slot — the `open` family, tell/eof/fileno/close/
+  ;;               binmode/seek.  The bareword is ALWAYS the handle, even when
+  ;;               a sub of that name is declared (`sub FILE1 () {42};
+  ;;               tell FILE1` is -1, the unopened handle named "42").
+  ;;   NIL         never a handle: the arm, and with it the strip that exists
+  ;;               only to expose it, are OFF.
+  ;;   :EXPR-SLOT  an EXPRESSION slot — `stat`, `lstat` and the 26 filetests.
+  ;;               A DECLARED sub is CALLED there (`sub SPATH {"/etc/passwd"}
+  ;;               -e SPATH` is TRUE, `use constant CPATH => …; -e CPATH`
+  ;;               reads the constant), and anything else is a handle NAME.
+  ;;               PExpr answers that at COMPILE time for ordinary source; the
+  ;;               arm here is the STRING-EVAL horizon, where the fragment was
+  ;;               transpiled without the enclosing program's sub table — see
+  ;;               %p-expr-slot-defers-to-sub.
   (let ((fh-form (if call-form-is-a-handle (%p-strip-ctx fh-form) fh-form)))
     (cond
       ;; Bare symbol without sigil — bareword filehandle: quote it.
@@ -15045,9 +15089,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             (listp fh-form)
             (= (length fh-form) 1)
             (symbolp (car fh-form))
-            (let ((name (symbol-name (car fh-form))))
-              (and (> (length name) 3)
-                   (string-equal (subseq name 0 3) "PL-"))))
+            (%p-fh-call-name (car fh-form))
+            (or (not (eq call-form-is-a-handle :expr-slot))
+                (not (%p-expr-slot-defers-to-sub (car fh-form)))))
        ;; Recover the bareword FH name and intern the SAME symbol the direct
        ;; bareword path produces.  A direct bareword `X` becomes
        ;; (intern (%pcl-invert-case "X")) — the reader applies :invert.  Here we
@@ -16294,16 +16338,18 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; So the public name becomes a macro and the body keeps its name with a
 ;;; `%`…`-impl` spelling, exactly as `p--t` / `%p--t-impl` already do.
 ;;;
-;;; The (pl-NAME) arm is OFF here — see `%p-fh-arg`'s own note for why (a
-;;; declared sub in a READ slot is CALLED by perl, and the filetest emitter
-;;; already emits the call).
+;;; These are EXPR slots, so `%p-fh-arg` is asked in its `:expr-slot` mode: a
+;;; declared sub is CALLED (the filetest emitter already emits the call for
+;;; ordinary source), and a `(pl-NAME)` form whose NAME is not really a sub
+;;; here is the handle NAME — which is what a string eval needs, since its
+;;; fragment is transpiled without the program's sub table (#1231).
 (defmacro %define-fh-slot-op (name impl)
   "Define NAME as the macro form of IMPL: one operand, which may be a bareword
    filehandle NAME rather than a path or a lexical handle."
   `(defmacro ,name (arg)
      ,(format nil "Perl ~(~A~) — a bareword filehandle in the operand slot is a NAME, not a variable (#1032).  Body: ~(~A~)."
               (symbol-name name) (symbol-name impl))
-     (list ',impl (list '%p-fh-arg arg nil))))
+     (list ',impl (list '%p-fh-arg arg :expr-slot))))
 
 (%define-fh-slot-op p-stat  %p-stat-impl)
 (%define-fh-slot-op p-lstat %p-lstat-impl)

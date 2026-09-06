@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 171;
+plan tests => 197;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -257,6 +257,43 @@ stat($tmp);
 print "84=", scalar(stat(_)), "\n";
 stat($tmp);
 print "85=", (-e _ ? 1 : 0), "\n";
+# --- s470bx: the bareword in an EXPR slot is a HANDLE NAME (#1231 / #1044) --
+# perl's rule for `stat`, `lstat` and the 26 filetests: a DECLARED sub is
+# CALLED, anything else is a filehandle NAME.  The discriminator used to be
+# "is this bareword a handle REGISTERED IN THIS FILE", so an ALL-CAPS name
+# that appears in NO other slot compiled to a call and DIED.  EACH of
+# ZZFTONLY, ZZSTONLY, ZZMONLY and ZZEVAL is used ONCE, in ONE slot, on
+# purpose: the old discriminator was FILE-WIDE, so a name that appears in any
+# handle slot ANYWHERE in the program was already read correctly everywhere
+# else — a guard that reuses one name passes on the broken tree too (measured:
+# a first draft used one name for all three rows and 4 of them went green
+# against fcf076f1).
+$! = 0; my $u1 = -e ZZFTONLY;
+print "86=", (defined $u1 ? $u1 : "UNDEF"), "\n";
+print "87=", ($!+0), "\n";
+$! = 0; my @u2 = stat ZZSTONLY;
+print "88=", scalar(@u2), " ", ($!+0), "\n";
+$! = 0; my $u3 = -M ZZMONLY;
+print "89=", (defined $u3 ? "DEF" : "UNDEF"), " ", ($!+0), "\n";
+# … and the other face: a DECLARED sub in the PAREN-LESS `stat` slot is
+# CALLED, where every GLOB-slot builtin (tell/eof/close/…) keeps the handle.
+$! = 0; my @u4 = stat SPATH;   print "90=", scalar(@u4), "\n";
+$! = 0; my @u5 = stat CPATH;   print "91=", scalar(@u5), "\n";
+$! = 0; my @u6 = stat(SPATH);  print "92=", scalar(@u6), "\n";
+$! = 0; my @u7 = lstat SPATH;  print "93=", scalar(@u7), "\n";
+# THE STRING-EVAL HORIZON.  The fragment is compiled without the program's sub
+# table, so the compiler cannot answer and defers to the runtime, which knows
+# whether `pl-SPATH` is really there.  Both answers must survive that.
+$! = 0; my $e1 = eval "-e SPATH";
+print "94=", ($@ ? "DIE" : (defined $e1 ? $e1 : "UNDEF")), "\n";
+$! = 0; my $e2 = eval "-e ZZEVAL";
+print "95=", ($@ ? "DIE" : (defined $e2 ? $e2 : "UNDEF")), " ", ($!+0), "\n";
+$! = 0; my $e3 = eval "scalar(() = stat SPATH)";
+print "96=", ($@ ? "DIE" : $e3), "\n";
+$! = 0; my $e4 = eval "scalar(() = stat ZZEVAL)";
+print "97=", ($@ ? "DIE" : $e4), " ", ($!+0), "\n";
+$! = 0; my $e5 = eval "-e CPATH";
+print "98=", ($@ ? "DIE" : (defined $e5 ? $e5 : "UNDEF")), "\n";
 close(FH);
 unlink $tmp;
 PERL
@@ -354,6 +391,20 @@ my %EXPECT = (
     '83' => '1',    #   context — list from list, the flag from scalar
     '84' => '1',    # `stat _' takes the same context branch
     '85' => '1',    # and a VOID-context stat still fills the `_' cache
+    # --- #1231 / #1044: a bareword in an EXPR slot is a HANDLE NAME --------
+    '86' => 'UNDEF',# an ALL-CAPS name in NO other slot: perl reads it as an
+    '87' => '9',    #   unopened handle (EBADF), where PCL used to CALL it
+    '88' => '0 9',  #   … same for `stat', paren-less
+    '89' => 'UNDEF 9', # … and for the $^T-relative tests
+    '90' => '13',   # THE OTHER FACE: a DECLARED sub in the paren-less `stat'
+    '91' => '13',   #   slot is CALLED — as is a `use constant' — because
+    '92' => '13',   #   these are EXPR slots.  A GLOB slot (tell/eof/close)
+    '93' => '13',   #   does the opposite and keeps the handle (#1044).
+    '94' => '1',    # THE STRING-EVAL HORIZON: the fragment is compiled with
+    '95' => 'UNDEF 9', #   no sub table, so the compiler defers and the
+    '96' => '13',   #   runtime — which knows whether pl-SPATH is really
+    '97' => '0 9',  #   there — decides.  Both answers survive it …
+    '98' => '1',    #   … including a `use constant'.
 );
 
 my $n = 0;

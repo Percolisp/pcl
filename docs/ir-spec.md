@@ -2997,6 +2997,28 @@ NAME and a bareword is EBADF); `-t` keeps the handle-NAME reading of a string
 EBADF); and a `()`-prototype sub or declared sub in the slot is CALLED,
 because these are EXPR slots, not glob slots (§7.5).
 
+**A BAREWORD is a handle NAME unless a sub of that name is declared** (tasks
+#1231, #1044).  That is the whole of perl's rule for these slots, and it is
+decided at COMPILE time: `sub SPATH {…} -e SPATH` and `stat SPATH` call the
+sub, `use constant CPATH => …` is read, and any other bareword — `-e NOPE`
+with nothing of that name anywhere — is the unopened handle NOPE, EBADF.  It
+does not matter whether some other statement in the program opened a handle
+of that name; perl asks about the *sub*, not about a handle registry.  The
+GLOB slots (`open`, `tell`, `eof`, `fileno`, `close`, `binmode`, `seek`) do
+the OPPOSITE: there the bareword is always the handle, even when a sub of the
+name is declared (`sub FILE1 () {42}; tell FILE1` is -1, the unopened handle
+named "42").  A backend compiling a STRING EVAL cannot ask the compile-time
+question — the fragment has no sub table — and must defer it to whatever
+stands in for "is this name a sub here" at eval time; PCL tests `fboundp` on
+the emitted call form.
+
+**`stat` and `lstat` answer their CONTEXT** (task #1043).  In LIST context the
+13-element list (empty on failure); in scalar and void context perl's
+`&PL_sv_yes` / `&PL_sv_no` — 1 on success and the **empty string**, not undef,
+on failure, so `defined(scalar stat "/no/such")` is TRUE.  The filetests are
+not in this rule: each answers its own scalar value (`-s` a size, the rest a
+boolean; see #403 on the defined-`""` false).
+
 **`$!` is part of the answer.** EBADF and ENOENT are different facts and every
 member of the family sets one of them: EBADF for a handle that is not open,
 ENOENT for a missing path — *including a path containing a NUL byte*, which

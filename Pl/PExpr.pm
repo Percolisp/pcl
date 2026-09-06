@@ -5823,23 +5823,9 @@ sub _read_star_slot_bareword {
   return if !$proto || !$proto->{is_proto} || !@{$proto->{params}};
   return if ($proto->{params}[0]{proto_type} // '') ne '*';
 
-  # The bareword arrives either as a plain Word — which happens when the name
-  # is ALREADY a registered handle, so `handle_subcalls` left it alone — or
-  # wrapped in a zero-param funcall (exactly one child, the name), the usual
-  # classification of a bareword the compiler cannot place.
-  my $first = $self->get_a_node($c_ids->[0]);
-  my ($name_id, $name_node, $from_funcall);
-  if (ref($first) eq 'PPI::Token::Word') {
-    ($name_id, $name_node, $from_funcall) = ($c_ids->[0], $first, 0);
-  } elsif ($self->is_internal_node_type($first) && $first->{type} eq 'funcall') {
-    my $kids = $self->get_node_children($c_ids->[0]);
-    return if @$kids != 1;
-    my $n = $self->get_a_node($kids->[0]);
-    return if ref($n) ne 'PPI::Token::Word';
-    ($name_id, $name_node, $from_funcall) = ($kids->[0], $n, 1);
-  } else {
-    return;
-  }
+  my ($name_id, $name_node, $from_funcall)
+      = $self->_bareword_slot_word($c_ids->[0]);
+  return if !defined $name_id;
 
   my $name = $name_node->content;
   # ALL-CAPS is asked of the NAME, not of the qualifier (#491) — the same
@@ -5858,6 +5844,15 @@ sub _read_star_slot_bareword {
     my $str = PPI::Token::Quote::Single->new("'$name'");
     $c_ids->[0] = $self->make_node($str);
   } elsif ($from_funcall) {
+    # An EXPR slot — `stat` and `lstat`, the two members of this table whose
+    # bareword slot is an expression — CALLS a declared sub, where every other
+    # builtin here keeps the handle: `sub SPATH {"/etc/passwd"} stat SPATH` is
+    # 13 elements while `sub FILE1 () {42} tell FILE1` is -1, the unopened
+    # handle named "42" (probed 5.40.3 with the warning TEXT as the
+    # discriminator — #1044's three-rule model).  The FACT is the table's
+    # `expr_slot` flag; this consumes it generically.
+    return if $proto->{expr_slot}
+           && $self->_expr_slot_keeps_call($name, $name_node);
     # A builtin handle slot, and the word was classified as a CALL: unwrap it
     # to the bareword the runtime's `%p-fh-arg` quotes, and register the name.
     # An arg that is ALREADY a Word needs neither — and must not be
@@ -5868,6 +5863,84 @@ sub _read_star_slot_bareword {
     $c_ids->[0] = $name_id;
     $self->environment->add_filehandle($name);
   }
+}
+
+# THE two shapes a BAREWORD argument arrives in, unwrapped once: a plain Word
+# — which happens when the name is ALREADY a registered handle, so
+# `handle_subcalls` left it alone — or a zero-param funcall with exactly one
+# child, the usual classification of a bareword the compiler cannot place.
+# Returns (name-id, Word node, came-from-a-funcall) or the empty list.
+#
+# Two slots ask: the `*`-slot post-process above, and the filetest operand
+# below.  They are the same two shapes for the same reason, so they share one
+# unwrap rather than carrying two copies of it (CLAUDE.md rule 11).
+sub _bareword_slot_word {
+  my ($self, $id) = @_;
+  my $first = $self->get_a_node($id);
+  return ($id, $first, 0) if ref($first) eq 'PPI::Token::Word';
+  return () if !$self->is_internal_node_type($first)
+            || ($first->{type} // '') ne 'funcall';
+  my $kids = $self->get_node_children($id);
+  return () if @$kids != 1;
+  my $n = $self->get_a_node($kids->[0]);
+  return () if ref($n) ne 'PPI::Token::Word';
+  return ($kids->[0], $n, 1);
+}
+
+# THE reading of a BAREWORD in a FILETEST's operand slot, which is the other
+# face of the `expr_slot` rule above: perl CALLS a declared sub there and
+# treats anything else as a FILEHANDLE NAME (`-e NOPE` with nothing named NOPE
+# is EBADF and warns "-e on unopened filehandle NOPE"; `sub SPATH {…} -e SPATH`
+# calls the sub).  `stat`/`lstat` reach that answer through the `*`-prototype
+# post-process because they are FUNCALLS; a filetest is an OPERATOR with no
+# prototype record, so its operand asks here — the same unwrap, the same
+# classifier, no second name test.
+#
+# WHAT IT REPLACES: the discriminator used to be "is this bareword a handle
+# REGISTERED IN THIS FILE", so `-e NOPE` compiled to a CALL and died unless
+# some other statement in the same file had already put NOPE in a handle slot.
+# Inside a string eval there is no such statement, which is why
+# `t/op/stat_errors.t` — 29 ops x 11 arguments, every argument a bareword,
+# every call an `eval "$op $arg"` — could never reach the runtime at all
+# (task #1231).
+#
+# The gate stays `fh_bareword_shape` (ALL-CAPS) although perl answers HANDLE
+# for a bareword of ANY case here (probed: `-e nope` is EBADF too, even under
+# `use strict`).  #266's asymmetry is the reason: PCL's compile-time name
+# knowledge is INCOMPLETE, and an absence of knowledge must keep answering
+# CALL, which fails loudly, rather than a handle name, which fails silently
+# as EBADF.  A lower-case bareword here is the accepted residue.
+#
+# The value is the operand id to use — the caller's own when nothing applies.
+sub _expr_slot_bareword_operand {
+  my ($self, $operand_id) = @_;
+  my ($name_id, $name_node, $from_funcall)
+      = $self->_bareword_slot_word($operand_id);
+  return $operand_id if !defined $name_id || !$from_funcall;
+  my $name = $name_node->content;
+  return $operand_id if !Pl::Environment::fh_bareword_shape($name);
+  return $operand_id if $self->_expr_slot_keeps_call($name, $name_node);
+  return $name_id;
+}
+
+# THE expr-slot question, asked once by both faces of the rule (the filetest
+# operand above and `_read_star_slot_bareword`'s `stat`/`lstat` half): does a
+# bareword in one of these slots STAY a call?
+#
+# Yes when a sub of that name is callable at this point — perl's own rule.
+#
+# And yes in EVAL-STRING mode whatever the name looks like, because there the
+# compiler's answer is not authoritative: the fragment is transpiled without
+# the enclosing program's sub table, so every bareword looks unplaceable and
+# reading them all as handle names would turn `eval "-e SPATH"` — a DECLARED
+# sub — into an unopened handle.  The call form survives to `%p-fh-arg`'s
+# `:expr-slot` arm instead, which expands INSIDE the eval, in the image where
+# `pl-SPATH` either exists or does not.  ONE rule, asked at whichever moment
+# can answer it.
+sub _expr_slot_keeps_call {
+  my ($self, $name, $name_node) = @_;
+  return 1 if $self->has_parser && $self->parser->eval_mode;
+  return $self->_bareword_callable_here($name, $name_node) eq 'yes' ? 1 : 0;
 }
 
 sub _bareword_subscript_autoquotes {
@@ -6023,6 +6096,11 @@ sub _prefix_op_node {
 sub _filetest_prefix_node {
   my ($self, $op_tok, $op_name, $post, $operand_id) = @_;
   return undef unless ($op_name // '') =~ /^-[A-Za-z]$/;
+
+  # A bareword operand is a FILEHANDLE NAME unless a sub of that name is
+  # callable here — the EXPR-slot rule `stat`/`lstat` get from the `*`
+  # prototype (task #1231; see `_expr_slot_bareword_operand`).
+  $operand_id = $self->_expr_slot_bareword_operand($operand_id);
 
   # Innermost filetest of a run: ordinary node, but marked so an enclosing
   # filetest knows to chain onto it rather than consume its value.

@@ -108,8 +108,18 @@ sub _builtin_prototypes {
         'sysseek'   => { params => [{proto_type => '*'}], is_proto => 1 },
         'fileno'    => { params => [{proto_type => '*'}], is_proto => 1 },
         'getc'      => { params => [{proto_type => '*'}], is_proto => 1 },
-        'stat'      => { params => [{proto_type => '*'}], is_proto => 1 },
-        'lstat'     => { params => [{proto_type => '*'}], is_proto => 1 },
+        # `expr_slot`: this builtin's bareword slot is an EXPRESSION, so perl
+        # CALLS a declared sub there — `sub SPATH {"/etc/passwd"} stat SPATH`
+        # is 13 elements, while `sub FILE1 () {42} tell FILE1` is -1, the
+        # unopened handle NAMED "42".  Probed 5.40.3 with the warning text as
+        # the discriminator (task #1044; the three-rule model is in that task
+        # and in docs/ir-spec.md §10c).  `stat` and `lstat` are the only two
+        # here; the 26 filetests obey the same rule but are OPERATORS, so
+        # PExpr's `_expr_slot_bareword_operand` answers for them.
+        'stat'      => { params => [{proto_type => '*'}], is_proto => 1,
+                         expr_slot => 1 },
+        'lstat'     => { params => [{proto_type => '*'}], is_proto => 1,
+                         expr_slot => 1 },
         # Directory operations
         'opendir'   => { params => [{proto_type => '*'}], is_proto => 1 },
         'readdir'   => { params => [{proto_type => '*'}], is_proto => 1 },
