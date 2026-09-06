@@ -4204,9 +4204,41 @@
 (defconstant +p-drand48-mask+ (ash 1 48))
 (defvar *p-drand48-state* (logior (ash 0 16) #x330e)
   "48-bit drand48 state; seeded by p-srand, advanced by p-rand.")
+(defvar *p-drand48-seeded* nil
+  "NIL until the sequence has been seeded — by an explicit srand, or lazily by
+   the FIRST rand.  This is perl's PL_srand_called: pp_rand seeds from entropy
+   on first use when srand was never called, which is why two runs of
+   `perl -e 'print rand'` differ while PCL's used to print the same number
+   every time (task #1236).  A defvar initform cannot supply it — every run
+   would get the same literal — and neither can an init hook, which would seed
+   BEFORE the program and erase the first-use boundary srand's own return value
+   documents.  A saved core (USER s439b) is the one thing that could arrive
+   here already true, so the boot hook below puts it back.")
+(push (lambda () (setf *p-drand48-seeded* nil)) sb-ext:*init-hooks*)
+
+(defun %p-drand48-entropy-seed ()
+  "The seed perl picks for an argument-less `srand`: unpredictable, and
+   different in two processes started within the same second — so the wall
+   clock alone will not do, and the pid and the run-time counter carry the
+   sub-second part."
+  (logand (logxor (get-universal-time)
+                  (ash (sb-posix:getpid) 13)
+                  (get-internal-real-time))
+          #xffffffff))
+
+(defun %p-drand48-set-seed (s)
+  "Install perl's drand48 seed X = (s<<16)|0x330E and mark the sequence seeded.
+   The ONE writer of the state outside the draw itself — p-srand and the
+   lazy first-use seeding both go through here (CLAUDE.md rule 11)."
+  (setf *p-drand48-state* (logior (ash (logand s #xffffffff) 16) #x330e)
+        *p-drand48-seeded* t)
+  s)
 
 (defun %p-drand48 ()
-  "One drand48 draw in [0,1)."
+  "One drand48 draw in [0,1).  Seeds from entropy on first use when the program
+   never called srand — perl's PL_srand_called rule (task #1236)."
+  (unless *p-drand48-seeded*
+    (%p-drand48-set-seed (%p-drand48-entropy-seed)))
   (setf *p-drand48-state*
         (mod (+ (* +p-drand48-mult+ *p-drand48-state*) +p-drand48-add+)
              +p-drand48-mask+))
@@ -4225,10 +4257,11 @@
 (defun p-srand (&optional seed)
   "Perl srand - seed the RNG, returning the seed.
    Previously a no-op that DISCARDED the seed, so `srand($n); rand` was not
-   reproducible at all (op/rand.t t262/t263)."
-  (let ((s (if seed (%pcl-to-integer (to-number seed)) (get-universal-time))))
-    (setf *p-drand48-state* (logior (ash (logand s #xffffffff) 16) #x330e))
-    s))
+   reproducible at all (op/rand.t t262/t263).  With no argument perl picks an
+   entropy seed and RETURNS it, which is what makes the seed reproducible on
+   demand — the wall clock alone was not enough (task #1236)."
+  (%p-drand48-set-seed
+   (if seed (%pcl-to-integer (to-number seed)) (%p-drand48-entropy-seed))))
 
 (defun %to-number-raw (val)
   "Convert a raw non-number, non-box value to number (Perl semantics)."
@@ -16164,10 +16197,13 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p--file-age (file op accessor)
   "Days between program start ($^T) and the ACCESSOR time of FILE (-M/-A/-C).
-   $^T is referenced via symbol-value: its defvar appears later in this file."
+   $^T is referenced via symbol-value: its defvar appears later in this file.
+   It is a p-box (assignable, and refreshed per RUN), so the value is unboxed."
   (%p--stat-test file op
                  (lambda (st)
-                   (/ (- (symbol-value '|$^T|) (funcall accessor st)) 86400.0d0))))
+                   (/ (- (to-number (unbox (symbol-value '|$^T|)))
+                         (funcall accessor st))
+                      86400.0d0))))
 
 (defun %p--M-impl (file)
   "Perl -M: script start time minus file modification time, in days"
@@ -17270,10 +17306,21 @@ buffer's fill-pointer; everything else falls back to file-length."
   (- (get-universal-time) +unix-epoch-offset+))
 
 ;;; $^T (BASETIME) - the time the program started, as Unix seconds.  Used by the
-;;; -M/-A/-C file-test operators (file age relative to program start).  Set once
-;;; at load time, like Perl sets it at interpreter startup.
-(defvar |$^T| (- (get-universal-time) +unix-epoch-offset+)
+;;; -M/-A/-C file-test operators (file age relative to program start).
+;;;
+;;; A p-box, like $$ and $0, for the two reasons those are: perl lets a program
+;;; ASSIGN $^T (it is how a script re-bases -M against something other than its
+;;; own start), and p-scalar-= on a bare integer is a silent no-op -- the $0 bug
+;;; of task #512, in a second place.  And the value is PER RUN, not per image:
+;;; an initform is evaluated when the runtime is LOADED, which a saved core
+;;; (USER s439b) then freezes, so every program run from that core inherited the
+;;; core's BUILD moment as its start time and -M/-A/-C came out negative.
+;;; Refreshed from sb-ext:*init-hooks* at image boot, exactly as $$ refreshes
+;;; the pid (task #1042).
+(defvar |$^T| (make-p-box (- (get-universal-time) +unix-epoch-offset+))
   "Perl $^T - program start time (seconds since Unix epoch)")
+(push (lambda () (box-set |$^T| (- (get-universal-time) +unix-epoch-offset+)))
+      sb-ext:*init-hooks*)
 
 (defun p-times (&key wantarray)
   "Perl times - return process times (user, system, child-user, child-system).
