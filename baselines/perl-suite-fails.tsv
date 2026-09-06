@@ -1898,11 +1898,6 @@ io/open.t	152	ok	not ok	warn on embedded nul
 io/open.t	154	ok	not ok	warn on embedded nul
 io/openpid.t	5	ok	not ok	message from first process
 io/openpid.t	7	ok	not ok	message from second process
-io/perlio_fail.t	3	ok	not ok	All punctuation fails binmode
-io/perlio_fail.t	9	ok	not ok	All punctuation fails open
-io/perlio_fail.t	6	ok	not ok	Bad package fails binmode
-io/perlio_fail.t	12	ok	not ok	Bad package fails open
-io/perlio_fail.t	10	ok	not ok	Got errno
 io/perlio_fail.t	5	ok	not ok	Got warning
 io/perlio_fail.t	8	ok	not ok	Got warning
 io/perlio_fail.t	11	ok	not ok	Got warning
@@ -2079,7 +2074,6 @@ op/anonsub.t	9	ok	(missing)	undef &anon giving it a freed GV
 op/array.t	83	ok	not ok	$a: $\# on freed array is undef
 op/array.t	85	ok	not ok	$a: msg
 op/array.t	84	ok	not ok	$a: number of warnings
-op/array.t	82	ok	not ok	$a[-1] = 0
 op/array.t	131	ok	not ok	@_ alias to nonexistent neg index within array
 op/array.t	109	ok	not ok	[at t/op/array.t line 358]
 op/array.t	111	ok	not ok	[at t/op/array.t line 365]

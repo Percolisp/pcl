@@ -1381,7 +1381,7 @@ io/open.t	188	0	154	34	DIFF		0
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
-io/perlio_fail.t	15	0	6	9	DIFF		0
+io/perlio_fail.t	15	0	11	4	DIFF	s471a: 6/9 -> 11/4, PRE-EXISTING and MEASURED, not this batch -- a `git archive ed302e13` extraction of main gives the SAME 11/4 with the same five fixed rows (serial re-run agrees on both trees), so the blessed row was stale, not moved.  The five rows left baselines/perl-suite-fails.tsv by EDIT in the same commit; the four `Got warning` rows still fail (PCL emits no warnings-gated diagnostic, #221).	0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	9	1	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 io/pipe.t	27	0	18	14	DIFF		0
@@ -1480,7 +1480,7 @@ op/anonsub.t	14	1	1	5	DIFF		0
 op/append.t	13	0	13	0	OK		0
 op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.	0
 op/arith2.t	9	0	9	0	OK		0
-op/array.t	195	0	170	25	DIFF	s457ai boxed-aggregates phase 3: p-exists-array stopped reading "is a box" as "exists" -- test 127 (&PL_sv_undef elem) passes honestly and left the skip registry	0
+op/array.t	195	0	171	24	DIFF	s471a: 170/25 -> 171/24 = #1273 -- `eval '$a[-1] = 0'` now dies perl's `Modification of non-creatable array value attempted, subscript -1` (%p-non-creatable-index), so test 82's `like $@` matches.  ONE row, measured --jobs 1 and re-run ALONE by the #366 serial pass (both 171/24); the row left baselines/perl-suite-fails.tsv by EDIT.  s457ai boxed-aggregates phase 3: p-exists-array stopped reading "is a box" as "exists" -- test 127 (&PL_sv_undef elem) passes honestly and left the skip registry	0
 op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.	0
 op/attrhand.t	4	0	0	0	DIFF	aborted-forms:1: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle	0
 op/attrproto.t	48	0	17	31	DIFF		0
