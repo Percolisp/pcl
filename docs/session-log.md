@@ -2,6 +2,111 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bx (Opus agent, 2026-09-06) — the s470bs residue: `$^T` and `rand` are per RUN (#1042/#1236), `stat`/`lstat` answer their CONTEXT (#1043), and a BAREWORD in an EXPR handle slot is a handle NAME (#1231/#1044)
+
+Four tasks, four commits plus two companion-leg commits, on main `fcf076f1`.
+
+**#1042 + #1236 — the per-RUN initialisations a saved core froze.**  `|$^T|`
+came from a `defvar` INITFORM, and since s439b the image is a SAVED CORE, so
+every program inherited the core's BUILD moment: `-M $0` was negative and the
+offset IS the core's age (17 s measured here, 184 s and 2831 s in #1042's own
+report).  Fixed the way `$$` already was — a p-box refreshed from
+`sb-ext:*init-hooks*` at boot, with `%p--file-age` unboxing it.  The BOX half
+is a second bug the task did not name: perl lets a program ASSIGN `$^T`, and
+`p-scalar-=` on a bare integer is a SILENT NO-OP, so `$^T = 12345; print $^T`
+printed the real time — the `$0` bug of #512 in a second variable, which is
+why the hook and the box are ONE change.  #1236 is the same audit's other
+member with the OPPOSITE failure: `rand` was never seeded, so two runs printed
+the same number.  perl seeds from entropy on FIRST USE (`PL_srand_called` in
+pp_rand), so PCL does too — a `*p-drand48-seeded*` flag, **not** an init hook,
+which would seed before the program and erase the first-use boundary that
+`srand`'s own return value documents.  `%p-drand48-set-seed` is now the ONE
+writer of the state (`p-srand` routes through it, rule 11), and the entropy
+seed carries the pid and the run-time counter because the wall clock alone
+gives two processes started in the same second the same seed.  Guard: NEW
+`Pl/t/per-run-init-01.t`, 14 rows, every expectation the output of the SAME
+program under perl; 4 fail on a `fcf076f1` extraction.
+
+**#1043 — `stat`/`lstat` answer their CONTEXT.**  perl gives the 13-element
+list in list context and `&PL_sv_yes`/`&PL_sv_no` otherwise; the failure
+answer is the empty STRING, not undef, so `defined(scalar stat "/no/such")` is
+TRUE.  PCL handed the vector back everywhere, so `my $ok = stat $f` stored an
+ARRAY REF.  **Truthiness agreed either way** — a non-empty list and 1 are both
+true — which is exactly why the sweep and the companion had been clean with
+the bug in place.  Two edits: `%WANTARRAY_SENSITIVE` gains the pair (so a call
+site binds its own STATIC context and the enclosing sub's cannot leak in, while
+a tail-position `return stat $f` keeps INHERIT_CTX and answers the CALLER, which
+is perl's rule), and `%p-stat-answer` is the ONE reading of the context for both
+ops.  24 probe rows over every context byte-identical to perl 5.40.3; TWELVE of
+them differ on the base tree.  t/op/stat_errors.t 510/128 → **532/106**.  This
+is the session's only emission change: generation **v2-840**, three artifacts
+regenerated.
+
+**#1231 + #1044 — one predicate seen from two sides.**  perl's rule for an
+EXPR handle slot (`stat`, `lstat`, the 26 filetests): a DECLARED sub is CALLED,
+anything else is a FILEHANDLE NAME.  PCL asked a different question — "is this
+bareword a handle REGISTERED IN THIS FILE" — so `-e NOPE` compiled to a CALL
+and DIED unless some other statement in the same file happened to put NOPE in a
+handle slot.  The FACT is one flag, `expr_slot => 1` on `stat`/`lstat` in
+`Pl::Environment::_builtin_prototypes`; the two consumers are
+`_read_star_slot_bareword`'s builtin half (#1044) and
+`PExpr::_expr_slot_bareword_operand` (#1231 — a filetest is an OPERATOR and has
+no prototype record), sharing `_bareword_slot_word` and `_expr_slot_keeps_call`.
+The GLOB slots (open, tell, eof, fileno, close, binmode, seek) keep the opposite
+rule, untouched.  t/op/stat_errors.t 532/106 → **636/2** (104 rows, 0 new); the
+two that remain are the `-T`/`-B \*_` glob-ref operand, a different question.
+
+**The string-eval horizon is where a compile-time rule has to stop**, and it is
+where the first attempt broke `eval "-e SPATH"`: the fragment is transpiled
+without the enclosing program's sub table, so every bareword looks unplaceable
+and answering "handle name" for all of them turns a DECLARED sub into an
+unopened handle.  The compiler now DEFERS in eval mode and `%p-fh-arg` gains a
+third mode `:expr-slot` whose `(pl-NAME)` arm fires only when NAME is not
+`fboundp` — the macro expands INSIDE the eval, in the image where `pl-SPATH`
+either exists or does not.  One rule, asked at whichever moment can answer it.
+Caught by a probe, not by any suite.
+
+**A guard that reuses one bareword passes on the broken tree.**  The old
+discriminator was FILE-WIDE, so a name appearing in ANY handle slot anywhere in
+the program was already read correctly everywhere else: a first draft of the
+#1231 rows used one name for `-e`, `stat` and `-M` and FOUR went green against
+`fcf076f1`.  Each of ZZFTONLY / ZZSTONLY / ZZMONLY is now used ONCE, in ONE slot.
+
+Accepted residue: a LOWER-CASE bareword in an EXPR slot stays a CALL, though
+perl reads it as a handle name too (probed: `-e nope` is EBADF even under `use
+strict`).  #266's asymmetry — PCL's compile-time name knowledge is incomplete,
+so an absence of knowledge must fail LOUDLY.
+
+**Bars.**  Gate after every commit; on the final tree, rebased onto main `637fc58e`,
+**215 files / 7451 rows** with FAIL = only the 13 standing pclxs xs rows —
+`use-require-01.t`'s two rows died in the shared-cache prune race **#1338**
+(`p-cleanup-old-cache` stats a cache key a sibling process has just replaced)
+and are **70/70 alone**; the per-commit gates on the pre-rebase tree read
+7361 / 7389 / 7415.  `corpus-diff.pl` emission IDENTICAL across 111 files,
+SILENT-DROP 5 unchanged — twice against `fcf076f1` and once against
+`637fc58e` on the rebased tree.  `emission-ab.pl --ref fcf076f1
+--shapes` over lib (22) + perl's own t/ (605) + cpan-tests (402) = 1035 files:
+SAME 1030 / DIFF 5 / RCDIFF 0, and every diff is exactly `(p-stat X)` →
+`(p-scalar-ctx (p-stat X))`.  `ir-host-leak` 31 leaked symbols over 111,
+byte-identical to the base.  **gate-SET scan over BOTH populations (638 files
+each) vs a `fcf076f1` extraction: IDENTICAL** — mandatory because #1231 widens
+what the classifier accepts.  Full sweep `--jobs 4`, twice: GATE clean, 0 new /
+0 fixed, drops 5 = census, **TOTAL passing 18647 (+0)**.  Companion `--jobs 1`:
+op/time.t 72/0 and op/magic.t 176/31 = the blessed snapshot; op/stat_errors.t
+510/128 → 532/106 → 636/2 with the base extraction reading 510/128 at ROW DIFF
+0/0/0/0, which is what makes the movers ours; op/filetest.t 369/65 and io/fs.t
+59/2 unchanged.  126 rows left `baselines/perl-suite-fails.tsv` BY HAND with
+their cause — never `--bless-fails`, which rewrites the header and drops the
+accumulated provenance.  Guards `Pl/t/per-run-init-01.t` (14, new) and
+`Pl/t/bareword-fh-slot-01.t` 143 → 197 rows, all inverse-verified on the base
+extraction; `Pl/t/fileio-01.t`'s three transpile-SHAPE rows now assert the
+`p-scalar-ctx` wrap (s377: the edit STRENGTHENS the claim).
+
+Filed: **#1290** (`\FUNC(...)` does not spread over the returned LIST — `my @r =
+\stat($Curdir)` is 1 ref where perl gives 13; PRE-EXISTING) and **#1291**
+(#1044's rule (a): a `()`-prototype sub or `use constant` in a GLOB slot is
+INLINED by perl before the slot sees it — `close(CPATH)` closes nothing here).
+
 ## Session 470bt (Opus agent, 2026-09-06) — Part B items B6 + B7: the IR CONFORMANCE CORPUS (345 cases, perl as the oracle) and the two target notes rewritten as tables over the generated inventory
 
 **B6 — `tools/ir-conform` and `ir-conform/cases/`.**  `tools/pcl-conform` decides
