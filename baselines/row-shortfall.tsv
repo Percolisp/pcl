@@ -62,12 +62,18 @@
 #     LOWERED: t/mro/next_method.t 4 -> 1, t/mro/next_method_utf8.t 4 -> 1,
 #       t/op/utfhash.t 8 -> 2, t/re/charset.t 2777 -> 2776, t/uni/method.t 13 -> 1.
 #     ADDED: t/mro/method_caching.t 3 (its 36 perl rows against 33 PCL rows --
-#       the mro registration covers it) and **t/run/fresh_perl.t 91**, which is
-#       the whole file: since 9d43ccf2 (s470bk #1057) it dies at load with
-#       `Invalid index -N for (vector t N)` and produces NO TAP at all.  That is
-#       task #1273 and it is a REGRESSION, not a blessing.
+#       the mro registration covers it) and **t/run/fresh_perl.t 91**, which was
+#       the whole file: since 9d43ccf2 (s470bk #1057) it died at load with
+#       `Invalid index -N for (vector t N)` and produced NO TAP at all.  That was
+#       task #1273 and it was a REGRESSION, not a blessing.
+# s471a (2026-09-06): **#1273 is FIXED and t/run/fresh_perl.t's row is GONE** --
+#   the file is back to 60/31 (one row better than the 59/32 it was blessed at)
+#   and its shortfall is 0.  perl-tests/array.t 10 -> 9 in the same fix: the
+#   registered skip for `$a[-1] = 0` went stale and the row asserts now.  This
+#   is what the instrument is FOR: a 59-row loss that no other bucket could see,
+#   found, bisected and closed from this file's row alone.
 perl-tests/aassign.t	1	UNEXPLAINED
-perl-tests/array.t	10	UNEXPLAINED
+perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
 perl-tests/bop.t	1	UNEXPLAINED
 perl-tests/caller.t	48	UNEXPLAINED

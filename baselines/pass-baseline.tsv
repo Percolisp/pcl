@@ -288,7 +288,7 @@ append.t	OK	13	0	13
 args.t	OK	22	1	23
 arith.t	OK	183	0	183
 arith2.t	OK	9	0	9
-array.t	OK	170	15	195
+array.t	OK	171	15	195
 assignwarn.t	OK	96	20	116
 auto.t	OK	47	0	47
 bless.t	OK	106	1	106
