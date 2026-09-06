@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 8;
 
 sub run_cl {
     my ($code) = @_;
@@ -134,3 +134,68 @@ my %l; $l{a}{b} .= "\x01"; $l{a}{b} |.= "x"; print $l{a}{b}, "\n";
 my @m; $m[0]{z} = "\xff"; $m[0]{z} ^.= "\x0f"; printf "%vd\n", $m[0]{z};
 PL
 
+# ── 6. #1273 (s471a): a NEGATIVE subscript on the CONTAINER of a nested
+# element.  Every row here died at LOAD with SBCL's "Invalid index -1 for
+# (vector t N)" — uncatchable in Perl terms — because the negative-subscript
+# rebase `(if (< i 0) (+ len i) i)` was a COPIED idiom that three store-side
+# accessors never got (p-autoviv-aref-for-hash, p-autoviv-aref-for-array,
+# p-array-set): they truncated the index and handed it straight to AREF.
+# Latent until #1057 routed a compound assign's container through the chain
+# walker.  All ten array accessors now resolve through ONE %p-array-index.
+#
+# THE LAST ROW IS t/run/fresh_perl.t's `sub NewShell` verbatim
+# (`my($m2) = $#Shells++; $Shells[$m2]{HOST} = $Host`) — the file died at
+# load on it and produced NO TAP AT ALL, a 59-row coverage loss.
+is(run_cl(<<'PL'), "zx\n8\n4z\nzy\n9 2\nbeach 1\n", '#1273 a negative subscript on a nested element container');
+my @a = (1,2,{k=>"z"}); $a[-1]{k} .= "x";   print $a[-1]{k}, "\n";
+my @b = (1,2,[3,4]);    $b[-1][0] += 5;      print $b[-1][0], "\n";
+my @c = ([1,2],[3,4]);  $c[-1][-1] .= "z";   print $c[-1][-1], "\n";
+my $r = [1,2,{k=>"z"}]; $r->[-1]{k} .= "y";  print $r->[-1]{k}, "\n";
+my @d = ({k=>1},{k=>2}); $d[-1]{k} = 9;      print $d[-1]{k}, " ", scalar(@d), "\n";
+my @e; $#e++; $e[-1]{HOST} = "beach";        print $e[0]{HOST}, " ", scalar(@e), "\n";
+PL
+
+# ── 7. #1273: the negative-subscript paths #1057 did NOT route — a FLAT
+# element compound assign, ++, ||=, plain =, a variable index, and the READ
+# side.  They worked before and must keep working: the fix moved them onto
+# the shared helper, so a regression here is the helper disagreeing with the
+# idiom it replaced.  The last two rows are the two quiet answers perl gives
+# for a BELOW-start subscript (probed): a read is undef, `exists` is false,
+# `delete` is a no-op — none of them is the fatal that row 8 asserts.
+is(run_cl(<<'PL'), "1 2 3x\n1 2 4\n1 2 3\n1 2 9\n1 2 3x\n1 4 1\nu0\n1 2 3\n", '#1273 the negative-subscript paths that already worked still do');
+my @a = (1,2,3); $a[-1] .= "x";  print "@a\n";
+my @b = (1,2,3); $b[-1]++;       print "@b\n";
+my @c = (1,2,3); $c[-1] ||= 7;   print "@c\n";
+my @d = (1,2,3); $d[-1] = 9;     print "@d\n";
+my @e = (1,2,3); my $i = -1; $e[$i] .= "x"; print "@e\n";
+my %h = (k => [1,2]); $h{k}[-1] *= 2; print "@{$h{k}} $#{$h{k}}\n";
+my @f = (1,2,3); print((defined $f[-4] ? "d" : "u"), (exists $f[-4] ? 1 : 0), "\n");
+my @g = (1,2,3); delete $g[-4]; print "@g\n";
+PL
+
+# ── 8. #1273 / CLAUDE.md rule 12: a subscript that lands BEFORE the start of
+# the array is perl's fatal on every LVALUE use — assignment, a coercing
+# compound assign, ++, an autovivifying `{k}`, `\$a[-4]`, a write to an EMPTY
+# array, and the deref spelling.  PCL used to DROP the write and carry on, so
+# the program read the old value back: the #138 silent-wrong one level down.
+# The message is perl's leading text (it names the subscript AS WRITTEN), so
+# `$@ =~ /^Modification of non-creatable/` — which real code greps — matches,
+# and the last row is the one that proves it is a TRAPPABLE perl death and
+# not a host abort: the program survives the eval with @a untouched.
+is(run_cl(<<'PL'), "die -4\ndie -4\ndie -4\ndie -4\ndie -4\ndie -4\ndie -1\ndie -4\nsurvived 1 2 3\n", '#1273 a below-start subscript is perl fatal on every lvalue use');
+for my $t (
+  sub { my @a = (1,2,3); $a[-4] = 9 },
+  sub { my @a = (1,2,3); $a[-4] .= "x" },
+  sub { my @a = (1,2,3); $a[-4] += 1 },
+  sub { my @a = (1,2,3); $a[-4]++ },
+  sub { my @a = (1,2,3); $a[-4]{k} = 1 },
+  sub { my @a = (1,2,3); my $x = \$a[-4]; $$x = 1 },
+  sub { my @a; $a[-1] = 5 },
+  sub { my $r = [1,2,3]; $r->[-4] = 9 },
+) {
+  if (eval { $t->(); 1 }) { print "NO-DIE\n" }
+  elsif ($@ =~ /^Modification of non-creatable array value attempted, subscript (-\d+)/) { print "die $1\n" }
+  else { print "OTHER: $@" }
+}
+my @a = (1,2,3); eval { $a[-4] = 9 }; print "survived @a\n";
+PL

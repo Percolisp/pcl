@@ -2527,7 +2527,6 @@ run/fresh_perl.t	package X;
 run/fresh_perl.t	package X;
 run/fresh_perl.t	package X;
 run/fresh_perl.t	package p;
-run/fresh_perl.t	sub NewShell
 run/fresh_perl.t	sub f { my $a = 1; my $b = 2; my $c = 3; my $d = 4...
 run/fresh_perl.t	sub testme { my $a = "test"; { local $a = "new tes...
 run/fresh_perl.t	{

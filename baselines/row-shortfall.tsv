@@ -286,7 +286,6 @@ t/re/uniprops07.t	29260	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops08.t	30492	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/run/fresh_perl.t	91	#1273 — the file dies at LOAD since 9d43ccf2 (s470bk #1057), `Invalid index -N for (vector t N)`, and produces no TAP at all; 59 of these rows used to PASS
 t/run/locale.t	44	UNEXPLAINED
 t/run/runenv.t	106	UNEXPLAINED
 t/run/runenv_hashseed.t	269	UNEXPLAINED

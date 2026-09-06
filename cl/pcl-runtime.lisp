@@ -4258,6 +4258,60 @@
     (t (%to-number-raw val))))
 (declaim (notinline to-number))
 
+;;; ---------------------------------------------------------------------------
+;;; THE ARRAY SUBSCRIPT (task #1273)
+;;; ---------------------------------------------------------------------------
+;;; Two facts, spelled ONCE each because they used to be copied idioms and the
+;;; copies disagreed: what a NEGATIVE subscript means, and what a subscript
+;;; that lands before the start of the array means on a WRITE.
+
+(declaim (inline %p-array-index))
+(defun %p-array-index (a idx)
+  "Resolve a Perl array subscript IDX against the container A: a negative
+   subscript counts back from the end (`$a[-1]` is the last element), a
+   non-negative one is itself.  A is already unboxed.
+
+   THE ONE PLACE.  Every array accessor resolves here — the read `p-aref`, the
+   writer `(setf p-aref)`, the eager lvalue `p-aref-box`, the @_ alias
+   `p-aref-argbox`, `p-array-set`, `p-delete-array`, `p-exists-array`,
+   `p-alias-array-slot` and the two autovivifying element walkers
+   `p-autoviv-aref-for-hash` / `p-autoviv-aref-for-array` — so the read and the
+   write halves cannot disagree about what -1 means.
+
+   THEY DID DISAGREE (#1273).  The rebase was a copied `(if (< i 0) (+ len i) i)`
+   that the three store-side functions never got: they did `(truncate (to-number
+   idx))` and handed the result straight to %p-extend-to and AREF.  That was
+   latent until #1057 routed a compound assign's CONTAINER through the chain
+   walker, after which `$prgs[-1][0] .= $_` reached AREF with -1 and died
+   `Invalid index -1 for (vector t N)` — an SBCL error, uncatchable in Perl
+   terms, which killed t/run/fresh_perl.t at LOAD and cost 59 passing rows.
+
+   The result may still be negative — a subscript before the start of the
+   array.  Each caller decides what that means, and the two answers are perl's
+   (probed 5.40.3): undef for a READ, a slice read, `exists` and `delete`;
+   %p-non-creatable-index for every LVALUE use."
+  (let ((i (truncate (to-number idx))))
+    (if (< i 0)
+        (+ (cond ((vectorp a) (length a))
+                 ((listp a) (length a))
+                 (t 0))
+           i)
+        i)))
+
+(defun %p-non-creatable-index (idx)
+  "Perl's fatal for an LVALUE use of a subscript that reaches before the start
+   of the array: `$a[-4]` on a three-element @a.  IDX is the subscript AS
+   WRITTEN (perl names the original, not the rebased one).
+
+   Probed 5.40.3: `$a[-4] = 9`, `$a[-4]++`, `$a[-4] ||= 7`, `\\$a[-4]`,
+   `chop $a[-4]`, `$a[-4]{k} = 1`, `$r->[-4] = 9`, a foreach alias and a
+   sub-argument alias all die with this; a plain read, a slice read, `exists`
+   and `delete` all answer quietly.  PCL used to DROP the write and carry on,
+   so the program read the old value back — CLAUDE.md rule 12, and the #138
+   silent-wrong one level down."
+  (error "Modification of non-creatable array value attempted, subscript ~D"
+         (truncate (to-number idx))))
+
 ;;; ============================================================
 ;;; String Operators
 ;;; ============================================================
@@ -7523,12 +7577,11 @@ per element."
   "`\\$a[i] = REF` — make the slot hold the referent box itself.  See
    p-alias-hash-slot for why the container goes through the cast."
   (let* ((a (p-cast-@ arr))
-         (box (p-alias-scalar-target ref))
-         (i (truncate (to-number idx))))
+         (box (p-alias-scalar-target ref)))
     (unless (and (vectorp a) (not (stringp a)))
       (error "Not an ARRAY reference"))
-    (let ((n (if (< i 0) (+ (length a) i) i)))
-      (when (< n 0) (error "Modification of non-creatable array value attempted"))
+    (let ((n (%p-array-index a idx)))
+      (when (< n 0) (%p-non-creatable-index idx))
       (loop while (>= n (length a)) do (vector-push-extend nil a))
       (setf (aref a n) box))))
 
@@ -9579,11 +9632,10 @@ per element."
     (when (stringp a)
       (return-from p-aref
         (if (find #\Nul a) *p-undef* (p-aref (p-ensure-arrayref arr) idx))))
-    (let* ((i (truncate (to-number idx)))
-           (len (cond ((vectorp a) (length a))
+    (let* ((len (cond ((vectorp a) (length a))
                       ((listp a) (length a))
                       (t 0)))
-           (actual-idx (if (< i 0) (+ len i) i)))
+           (actual-idx (%p-array-index a idx)))
       (cond
         ((and (vectorp a) (>= actual-idx 0) (< actual-idx len))
          (p-aref-unbox-elem (aref a actual-idx)))
@@ -9658,22 +9710,24 @@ per element."
         (setf (p-aref (p-ensure-arrayref arr) idx) value)))
     a)
   (let* ((a (unbox arr))
-         (i (truncate (to-number idx)))
-         (len (if (vectorp a) (length a) 0))
-         (actual-idx (if (< i 0) (+ len i) i)))
-    (if (and (vectorp a) (>= actual-idx 0))
-        (progn
-          ;; Auto-extend array if needed (Perl autovivification): holes, and
-          ;; never past the end of a read-only array — perl allows `$ro[0] = 9`
-          ;; (in bounds) and dies on `$ro[5] = 9` (task #159).
-          (%p-extend-to a actual-idx)
-          ;; THE WRITE RULE — %p-aref-store, shared with the fast arm above.
-          (%p-aref-store a actual-idx value))
-        ;; Not a writable array.  A wrong-kind referent ($hashref->[0] = …) is
-        ;; perl's fatal — the write used to be silently dropped.  Anything else
-        ;; (nil/undef container, negative index past the front) keeps the old
-        ;; no-op.  Tested only when the fast path above already failed.
-        (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY")))))
+         (actual-idx (%p-array-index a idx)))
+    (cond
+      ((and (vectorp a) (>= actual-idx 0))
+       ;; Auto-extend array if needed (Perl autovivification): holes, and
+       ;; never past the end of a read-only array — perl allows `$ro[0] = 9`
+       ;; (in bounds) and dies on `$ro[5] = 9` (task #159).
+       (%p-extend-to a actual-idx)
+       ;; THE WRITE RULE — %p-aref-store, shared with the fast arm above.
+       (%p-aref-store a actual-idx value))
+      ;; A subscript before the START of a real array is perl's fatal on a
+      ;; WRITE (#1273) — the store had nowhere to land and used to be dropped
+      ;; silently, so the program read the old value back.
+      ((and (vectorp a) (not (stringp a))) (%p-non-creatable-index idx))
+      ;; Not a writable array.  A wrong-kind referent ($hashref->[0] = …) is
+      ;; perl's fatal — the write used to be silently dropped.  Anything else
+      ;; (nil/undef container) keeps the old no-op.  Tested only when the fast
+      ;; path above already failed.
+      (t (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))))))
 
 (defun p-aref-box (arr idx)
   "Get the BOX at array index (for l-value operations like chop, ++).
@@ -9689,9 +9743,7 @@ per element."
       (if (p-box-p arr)
           (setf a (p-ensure-arrayref arr))
           (return-from p-aref-box (make-p-box *p-undef*))))
-    (let* ((i (truncate (to-number idx)))
-           (len (if (vectorp a) (length a) 0))
-           (actual-idx (if (< i 0) (+ len i) i)))
+    (let ((actual-idx (%p-array-index a idx)))
       (when (and (vectorp a) (>= actual-idx 0))
         ;; Auto-extend array if needed (intermediate slots are nil = non-existent)
         (%p-extend-to a actual-idx)
@@ -9699,7 +9751,11 @@ per element."
         ;; a hole (nil) promotes to a box of nil here, which is this accessor's
         ;; EAGER contract (p-aref-argbox is the lazy one, for read-only uses).
         (return-from p-aref-box (%p-elem-cell a actual-idx)))
-      ;; Out of bounds or not a vector
+      ;; Before the start of a REAL array: perl's fatal on this EAGER lvalue
+      ;; accessor — `$a[-4]++`, `\$a[-4]`, `chop $a[-4]` all die (#1273).
+      ;; A non-vector container keeps the detached undef box.
+      (when (and (vectorp a) (not (stringp a))) (%p-non-creatable-index idx))
+      ;; Not a vector
       (make-p-box *p-undef*))))
 
 (declaim (ftype function p-aslice))
@@ -9877,9 +9933,8 @@ why p-aref-box (the eager lvalue accessor) is wrong here."
   (let ((a (unbox arr)))
     (if (not (and (vectorp a) (not (stringp a))))
         (make-p-box *p-undef*)
-        (let* ((i (truncate (to-number idx)))
-               (len (length a))
-               (actual-idx (if (< i 0) (+ len i) i)))
+        (let* ((len (length a))
+               (actual-idx (%p-array-index a idx)))
           (cond
             ((< actual-idx 0) (make-p-box *p-undef*))
             ((and (< actual-idx len) (aref a actual-idx))
@@ -10769,7 +10824,12 @@ which is one of #1140's escape spellings (probed)."
   "Get array element, autovivifying to empty hash if missing.
    Handles boxes in array elements."
   (let* ((a (unbox arr))
-         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
+         ;; %p-array-index, not a raw truncate: a NEGATIVE subscript rebases
+         ;; against the length here exactly as it does on the read path, and
+         ;; one before the start is perl's lvalue fatal (#1273).  This walker
+         ;; is reached by `$a[-1]{k} .= "x"` and by `$a[-1]{k} = 1`.
+         (i (%p-array-index a idx)))
+    (when (< i 0) (%p-non-creatable-index idx))
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (%p-extend-to a i)
     (let* ((stored (aref a i))
@@ -10786,7 +10846,10 @@ which is one of #1140's escape spellings (probed)."
   "Get array element, autovivifying to empty array if missing.
    Handles boxes in array elements."
   (let* ((a (unbox arr))
-         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
+         ;; See p-autoviv-aref-for-hash: the same negative-subscript rule
+         ;; (#1273).  This walker is the one `$prgs[-1][0] .= $_` reaches.
+         (i (%p-array-index a idx)))
+    (when (< i 0) (%p-non-creatable-index idx))
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (%p-extend-to a i)
     (let* ((stored (aref a i))
@@ -10803,7 +10866,8 @@ which is one of #1140's escape spellings (probed)."
   "Set array element, extending array if needed.
    Stores values in boxes for l-value semantics."
   (let* ((a (unbox arr))
-         (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
+         (i (%p-array-index a idx)))       ; negative subscripts rebase (#1273)
+    (when (< i 0) (%p-non-creatable-index idx))
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (%p-extend-to a i)
     ;; Get or create box at this index
@@ -11317,9 +11381,10 @@ which is one of #1140's escape spellings (probed)."
    Trims trailing nil slots (Perl shrinks array when last element deleted).
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((a (%p-designator-array arr))
-         (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
-         (actual-idx (if (< i 0) (+ len i) i))
+         ;; A below-start subscript is NOT this accessor's fatal: perl's
+         ;; `delete $a[-4]` is quiet (#1273, probed).
+         (actual-idx (%p-array-index a idx))
          (old-val (if (and (>= actual-idx 0) (< actual-idx len))
                       (p-aref-unbox-elem (aref a actual-idx))
                       *p-undef*)))
@@ -11345,9 +11410,10 @@ which is one of #1140's escape spellings (probed)."
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (p-bool
    (let* ((a (%p-designator-array arr))
-          (i (truncate (to-number idx)))
           (len (if (vectorp a) (length a) 0))
-          (actual-idx (if (< i 0) (+ len i) i)))
+          ;; Quiet on a below-start subscript — perl's `exists $a[-4]` is
+          ;; false, not fatal (#1273, probed).
+          (actual-idx (%p-array-index a idx)))
      (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
      (and (vectorp a) (>= actual-idx 0) (< actual-idx len)
           (aref a actual-idx)
