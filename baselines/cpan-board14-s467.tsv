@@ -1,3 +1,26 @@
+# cpan-board14 — the 14-dist CPAN board, the blessed state.  Taken s467
+# (d00bb576, 2026-09-04); FOUR rows edited BY HAND in s470bw (2026-09-06),
+# each with the cause the bisect measured — never re-blessed from a run.
+#
+#   Role-Tiny-2.002004-0  extend.t       PARTIAL 2 2 0  -> PASS 4 0 0
+#     cause 0d1b5c18 (s470bk, #1058: a write through an undef nested element
+#     vivifies the container it was handed) — extend.t does
+#     $apply_steps{$to}{$role}{before}++.  Bisected: 2/2 at 37d78687, 4/0 at
+#     0d1b5c18.
+#   Try-Tiny-0.32-0       when.t         FAIL 0 0 2  -> PASS 1 0 0
+#   Try-Tiny-0.32-0       given_when.t   FAIL 0 0 2  -> FAIL 0 0 0
+#     cause 0cbe7831 (s466bc, #1037: a RULED REFUSAL is a STATEMENT-level
+#     event).  rc 2 is run-dist-t.pl's TRANSPILE-FAIL exit: the given/when
+#     refusal used to fail the WHOLE file, so neither produced any TAP.  It
+#     now refuses per statement and the files transpile.  Bisected:
+#     TRANSPILE-FAIL at 0e0b0b9c, TRANSPILE-OK at 0cbe7831.
+#   Scalar-List-Utils-1.70-0 first.t     PARTIAL 12 1 0 -> PARTIAL 23 1 0
+#     cause #1286 (s470bw): a List::Util block/callback is called with NO
+#     arguments, as perl does; the \&NAME form used to recurse forever.
+#
+# Re-measured s470bw on a COLD cache and again WARM: the two runs are
+# byte-identical (0 differing rows), so the module cache introduces no
+# divergence.  Columns: dist, t-file, status, ok, notok, rc.
 Algorithm-Diff-1.201-0	base.t	PARTIAL	32	3	0
 Algorithm-Diff-1.201-0	oo.t	PARTIAL	102	20	0
 Capture-Tiny-0.50-0	00-report-prereqs.t	PASS	1	0	0
@@ -86,7 +109,7 @@ Role-Tiny-2.002004-0	concrete-methods.t	FAIL	0	0	0
 Role-Tiny-2.002004-0	create-hook.t	PASS	2	0	0
 Role-Tiny-2.002004-0	does.t	PASS	14	0	0
 Role-Tiny-2.002004-0	extend-role-tiny.t	FAIL	0	0	0
-Role-Tiny-2.002004-0	extend.t	PARTIAL	2	2	0
+Role-Tiny-2.002004-0	extend.t	PASS	4	0	0
 Role-Tiny-2.002004-0	load-module.t	PARTIAL	1	5	0
 Role-Tiny-2.002004-0	make-role.t	PASS	7	0	0
 Role-Tiny-2.002004-0	method-conflicts.t	PASS	4	0	0
@@ -112,7 +135,7 @@ Scalar-List-Utils-1.70-0	any-all.t	PASS	12	0	0
 Scalar-List-Utils-1.70-0	blessed.t	PASS	12	0	0
 Scalar-List-Utils-1.70-0	dualvar.t	FAIL	0	0	0
 Scalar-List-Utils-1.70-0	exotic_names.t	FAIL	0	0	0
-Scalar-List-Utils-1.70-0	first.t	PARTIAL	12	1	0
+Scalar-List-Utils-1.70-0	first.t	PARTIAL	23	1	0
 Scalar-List-Utils-1.70-0	getmagic-once.t	PARTIAL	2	4	0
 Scalar-List-Utils-1.70-0	head-tail.t	PARTIAL	40	2	0
 Scalar-List-Utils-1.70-0	isvstring.t	PASS	3	0	0
@@ -175,9 +198,9 @@ Try-Tiny-0.32-0	basic.t	PASS	25	0	0
 Try-Tiny-0.32-0	context.t	PASS	25	0	0
 Try-Tiny-0.32-0	erroneous_usage.t	PARTIAL	7	1	0
 Try-Tiny-0.32-0	finally.t	PARTIAL	29	1	0
-Try-Tiny-0.32-0	given_when.t	FAIL	0	0	2
+Try-Tiny-0.32-0	given_when.t	FAIL	0	0	0
 Try-Tiny-0.32-0	global_destruction_forked.t	PASS	3	0	0
 Try-Tiny-0.32-0	global_destruction_load.t	FAIL	0	0	0
 Try-Tiny-0.32-0	named.t	FAIL	0	3	0
-Try-Tiny-0.32-0	when.t	FAIL	0	0	2
+Try-Tiny-0.32-0	when.t	PASS	1	0	0
 Try-Tiny-0.32-0	zzz-check-breaks.t	PASS	2	0	0

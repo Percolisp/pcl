@@ -236,6 +236,48 @@ because the child inherits the environment), and **#1285**, a declared sub with
 no prototype followed by a block — perl builds an anonymous hash, PCL passes
 the block's value, the other half of #478.
 
+**The owed bars, taken on the rebase onto main `d65f4a7c` (2026-09-06).**  The
+`lib/` commit made a full sweep and the CPAN board non-optional, and neither
+had been run since it landed.  Rebase: conflicts in `docs/DECIDED.md` and
+`docs/session-log.md` only, both resolved keeping both sides; `cl/pcl-runtime.lisp`
+and `docs/ir-spec.md` auto-merged and the runtime is paren-balanced; generation
+stays main's `v2-830` (no emission change).  Gate **213 files / 7374 rows** —
+main's 7347 plus this batch's 27 guard rows (module-fasl-cache-01.t +20,
+manifest-01.t +6, misc-fixes-02.t +1) — with only the 13 pclxs xs rows failing.
+`tools/corpus-diff.pl d65f4a7c` IDENTICAL over 111, silent drops 5 unchanged.
+Full sweep `--jobs 4`: **GATE clean, TOTAL passing 18647 = baseline (+0)**, 0 new
+/ 0 fixed / 0 LOST, drops 5 = census, shortfall +0, 61 files fully passing; its
+4 UNSTABLE and 15 unverified rows are the same crash-file noise the pre-rebase
+run measured byte-for-byte on a `9ee95f2` extraction.  Companion `--jobs 1` over
+the files the `lib/List/Util.pm` change can reach — `op/aassign.t` and `op/lc.t`
+(the only two files in the companion population that `use List::Util`;
+`porting/corelist.t` is the third user and `porting/` is not in the scanned dir
+set) — plus the module-load family `op/do.t op/inccode.t op/incfilter.t
+op/require_errors.t`: all six **identical to their `baselines/perl-suite-run.tsv`
+snapshot**, ROW DIFF 0 NEW / 0 FIXED / 0 UNVERIFIED / 0 LOST, 0 drops.
+(`op/require.t` does not exist in perl's t/ — the earlier leg's name was a slip;
+the real file is `comp/require.t`, which is quick-capped and blessed as
+multi-step volatile, so it produces no comparable verdict and was not run.)
+
+**The CPAN board: COLD and WARM are byte-identical (0 differing rows), so the
+module cache introduces no divergence — the pair the brief asked to read with
+care shows no cache bug, on either layer.**  Against the blessed
+`baselines/cpan-board14-s467.tsv` exactly four rows differ, and each was
+**bisected to a commit before being edited in** — "pre-existing" is WHEN, not
+WHY.  `Scalar-List-Utils first.t` PARTIAL 12/1 → **23/1** is this batch's own
+#1286.  The other three are main's: `Try-Tiny when.t` FAIL 0/0 rc 2 → **PASS
+1/0** and `Try-Tiny given_when.t` rc 2 → **rc 0** are both `0cbe7831` (s466bc,
+**#1037**, "a RULED REFUSAL is a STATEMENT-level event") — rc 2 is
+`run-dist-t.pl`'s TRANSPILE-FAIL exit, and the `given`/`when` refusal used to
+fail the WHOLE file, so neither produced any TAP; it now refuses per statement
+and both files transpile (TRANSPILE-FAIL at `0e0b0b9c`, TRANSPILE-OK at
+`0cbe7831`, measured on `git archive` extractions).  `Role-Tiny extend.t`
+PARTIAL 2/2 → **PASS 4/0** is `0d1b5c18` (s470bk, **#1058**, "a write through an
+undef nested element vivifies the container it was handed") — extend.t's whole
+subject is `$apply_steps{$to}{$role}{before}++` (2/2 at `37d78687`, 4/0 at
+`0d1b5c18`).  All four rows edited BY HAND into the blessed board with a header
+block naming each cause; the file was never re-blessed from a run.
+
 ## Session 471a (Opus agent, 2026-09-06) — #1273: ONE resolution of an array subscript (t/run/fresh_perl.t 0/0 → 60/31, a 59-row regression closed); then #1271, a failed `open` autovivifies its lexical
 
 **#1273 — the store path was handing -1 straight to `AREF`, and the reason is a
