@@ -1,0 +1,4 @@
+(|p-data-form| 1 "265-sort.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|make-p-box| (|p-hash|))) (|p-foreach-range| (|$n| 1 3) |:my| |t| (|p-let| ((|$k| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$k| (|p-.| "k" |$n|)) (|p-setf| (|p-gethash-deref| |$r| |$k|) (|p-*| |$n| 10)))) (|p-let| ((|$s| |:scalar| 0)) (|p-foreach-range| (|$n| 1 3) |:my| |t| (|p-let| ((|$k| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$k| (|p-.| "k" |$n|)) (|p-incf-raw| |$s| (|p-gethash-deref| |$r| |$k|)))) (|p-print| (|p-string-concat| "P1 " |$s| " ") (|p-list-ctx| (|p-join| "," (|p-list-ctx| (|p-map| (|lambda| (|$_|) (|p-string-concat| |$_| "=" (|p-gethash-deref| |$r| |$_|))) (|p-list-ctx| (|%p-sort-classic| |:default| (|p-list-ctx| (|p-keys| (|p-cast-%| |$r|))))))))) "\n")))
+(|p-data-form-end| 1 3)

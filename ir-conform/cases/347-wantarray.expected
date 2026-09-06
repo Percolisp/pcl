@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=60
+arr: 7 8 9
+lst: 7 8 9
+anon: 7 8 9
+sca: 3
+ctx: L S
+ctx2: L S

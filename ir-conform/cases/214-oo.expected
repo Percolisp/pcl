@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=42
+ISA_D=[Diamond_B Diamond_C]
+hello=A
+isa=1

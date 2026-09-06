@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=144
+slots: SCALAR=def ARRAY=undef HASH=undef CODE=undef
+scalar: cleared
+array:  cleared
+hash:   cleared
+code:   cleared
+slots after read: ARRAY=def

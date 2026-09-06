@@ -1,0 +1,4 @@
+(|p-data-form| 1 "247-regex.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@c| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@c| (|p-list-ctx| (|p-list-ctx| (|p-=~| "abc" (|p-regex| |:pat| "(z)(y)" |:flags| "" |:tier| |:native|))))) (|p-print| (|p-list-ctx| (|p-scalar| |@c|)) "\n") (|p-let| ((|$q| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$q| (|pcl::p-qr| |:pat| "ab" |:flags| "" |:tier| |:native|)) (|p-let| ((|$x| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$x| "ab") (|p-let| ((|$re| |:scalar| (|p-.| "a" "b"))) (|p-let| ((|$m| |:str| (|%pcl-to-string-strict| (|p-scalar-ctx| (|p-=~| |$x| (|pcl::p-regex-from-parts| |:pat| |$re| |:flags| "" |:tier| |:dynamic|))) "$m"))) (|p-print| (|p-string-concat| |$q| " " |$m| "\n")))))))
+(|p-data-form-end| 1 3)

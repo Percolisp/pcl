@@ -1,0 +1,8 @@
+(|p-data-form| 1 "015-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-add1|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-add1| (|&rest| |%_args|) (|:returns| |:num| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|p-+| (|p-aref| |@_| 0) 1))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$s| |:scalar| 0)) (|p-foreach-range-raw| (|$k| 1 200000) |:my| |t| (|p-foreach-range-raw| (|$j| 1 3) |:my| |t| (|p-incf-raw| |$s| (|pl-add1| |$j|)))) (|p-print| (|p-string-concat| "s=" |$s| "\n")))
+(|p-data-form-end| 3 0)

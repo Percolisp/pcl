@@ -1,0 +1,4 @@
+(|p-data-form| 1 "328-string-eval.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$src| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$src| "# a curly quote \u00E2\u0080\u0099 in a comment\n$main::v = 42;\n$main::len = length(\"\u00E2\u0080\u0099\");\n1;\n") (|p-or| (|p-eval| |$src| (|list| (|cons| "$src" |$src|))) (|p-die| |:loc| "328-string-eval.pl line 14" (|p-string-concat| "eval: " |$@|))) (|p-print| (|p-string-concat| "eval: v=" |main::$v| " len=" |main::$len| "\n")))
+(|p-data-form-end| 1 1)

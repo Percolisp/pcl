@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=0 bytes=13
+a=1 2 3x #=2

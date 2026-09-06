@@ -1,0 +1,8 @@
+(|p-data-form| 1 "124-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-o|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-o| (|&rest| |%_args|) (|:returns| |:str| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| (|:io|)) (|p-args-body| (|block| |nil| (|p-void-ctx| (|p-let| ((|$ok| |:str| (|%pcl-to-string-strict| (|p-open| |$h| "<" "/nonexistent-x-1271") "$ok"))) (|p-caller-ctx| (|p-tail-value| (|p-.| (|p-.| (|p-if| (|p-defined| |$h|) 1 0) ":") (|p-if| |$ok| 1 0)))))))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-print| (|pl-o|) "\n")
+(|p-data-form-end| 3 0)

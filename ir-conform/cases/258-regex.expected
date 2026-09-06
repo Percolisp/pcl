@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=255 bytes=16
+got=[ascii...
+]

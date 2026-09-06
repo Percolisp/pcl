@@ -1,0 +1,4 @@
+(|p-data-form| 1 "142-local.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|%h| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-void-ctx| (|p-eval-block| (|p-cl-text-wrap| ";; local $h{\"a\"}{\"b\"} = 5\n(p-local-hash-elem-init %h \"a\" 5" 1 (|p-print| (|p-string-concat| "in: " (|p-gethash| (|p-gethash| |%h| "a") "b") "\n"))))))
+(|p-data-form-end| 1 2)

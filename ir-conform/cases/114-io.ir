@@ -1,0 +1,7 @@
+(|p-data-form| 1 "114-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| ";; PPI::Statement::Data \u00E2\u0080\u0094 register DATA filehandle")
+(|p-cl-text| "(p-install-data-handle 'DATA (p-esc \"alpha\\\\nbeta\\\\n\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$l| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-while| (|progn| (|p-my-=| |$l| (|p-scalar-ctx| (|p-readline| (|quote| |DATA|)))) (|p-defined| |$l|)) (|p-chomp| |$l|) (|p-print| (|p-string-concat| "[" |$l| "]\n"))))
+(|p-data-form-end| 3 3)

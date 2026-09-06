@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=0 bytes=41
+handler calls: 1
+second handler calls: 1

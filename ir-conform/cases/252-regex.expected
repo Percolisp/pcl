@@ -1,0 +1,12 @@
+#!ir-conform/expected v1 exit=0 bytes=307
+5 % inf      => [5] err=[]
+-5 % inf     => [Inf] err=[]
+5 % -inf     => [-Inf] err=[]
+-5 % -inf    => [-5] err=[]
+inf % inf    => [NaN] err=[]
+-inf % 5     => [NaN] err=[]
+5 % 3.7      => [2] err=[]
+5.9 % 3      => [2] err=[]
+-5.9 % 3     => [1] err=[]
+5 % 2**64    => [5] err=[]
+5 % 1e30     => [5] err=[]

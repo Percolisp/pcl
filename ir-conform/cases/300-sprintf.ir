@@ -1,0 +1,4 @@
+(|p-data-form| 1 "300-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-open| |$fh| "<" "/nonexistent-x-1271") (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|p-print| |:fh $fh| "x")) (|p-printf| "print=[%s]\n" (|p-if| (|p-defined| |$r|) |$r| "undef"))))
+(|p-data-form-end| 1 2)

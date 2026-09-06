@@ -1,0 +1,10 @@
+#!ir-conform/expected v1 exit=0 bytes=160
+plain: same
+my-only: same
+subst-runtime-pat: same
+re-eval-pragma: same
+re-eval+subst: different
+ee: different
+e-only: same
+str-eval: different
+block-eval: same

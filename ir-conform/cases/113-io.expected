@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=138
++> ok=1 wrote=1 read=[hello]
++< ok=1 wrote=1 read=[hello]
+> ok=1 wrote=1 read=[hello]
+< ok=1 wrote=1 read=[]
+>> ok=1 wrote=1 read=[hello]

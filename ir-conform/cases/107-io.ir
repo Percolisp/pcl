@@ -1,0 +1,4 @@
+(|p-data-form| 1 "107-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$data| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$data| "a\nb\n") (|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-or| (|p-open| |$fh| "<" (|p-backslash| |$data|)) (|p-die| |:loc| "107-io.pl line 9")) (|p-let| ((|@l| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@l| (|p-list-ctx| (|p-readline| |$fh|))) (|p-print| (|p-list-ctx| (|p-scalar| |@l|)) "\n"))))
+(|p-data-form-end| 1 3)

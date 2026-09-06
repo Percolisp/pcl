@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=103
+split-direct: b,a
+keys2: a,b
+grep: 3! 1! 2!
+reverse: 3! 1! 2!
+assign-copy: 3 1 2
+join: 1,2,3 src=3 1 2

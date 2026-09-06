@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=126
+exists non-ref     => []
+exists undef       => []
+exists ref present => [1]
+exists ref absent  => []
+exists hash absent => []

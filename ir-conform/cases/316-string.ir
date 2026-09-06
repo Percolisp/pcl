@@ -1,0 +1,4 @@
+(|p-data-form| 1 "316-string.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$x| |:scalar| (|p-%| (|p-length| "abc") -10))) (|p-let| ((|$y| |:scalar| (|p-*| (|p-int| (|p-/| 3 -10)) -10))) (|p-print| (|p-string-concat| |$x| " " |$y| "\n"))))
+(|p-data-form-end| 1 0)

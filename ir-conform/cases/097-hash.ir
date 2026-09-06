@@ -1,0 +1,4 @@
+(|p-data-form| 1 "097-hash.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|let| ((|*package*| |*package*|)) (|block| |nil| (|tagbody| |:redo| (|p-let| ((|%h| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-post++| (|p-aref-box| (|p-gethash-box| |%h| "a") 0)) (|p-print| "17 h-a++   val=" (|p-if| (|p-defined| (|p-aref| (|p-gethash| |%h| "a") 0)) (|p-aref| (|p-gethash| |%h| "a") 0) "U") "\n")) |:next|)))
+(|p-data-form-end| 1 1)

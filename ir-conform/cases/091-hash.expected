@@ -1,0 +1,5 @@
+#!ir-conform/expected v1 exit=0 bytes=64
+scalar: cleared
+array:  cleared
+hash:   cleared
+code:   cleared

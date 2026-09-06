@@ -1,0 +1,7 @@
+(|p-data-form| 1 "113-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"strict\"))")
+(|p-cl-text| "(p-eval-always (p-note-inc \"warnings\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-foreach-raw| (|$m| (|vector| "+>" "+<" ">" "<" ">>")) |:my| |t| (|p-let| ((|$ok| |:str| (|%pcl-to-string-strict| (|p-open| |$fh| |$m| (|p-undef|)) "$ok"))) (|p-if| |$ok| (|progn| (|p-let| ((|$w| |:str| (|%pcl-to-string-strict| (|p-| (|p-scalar-ctx| (|p-eval-block| (|p-print| |:fh $fh| "hello\n") 1)) 0) "$w"))) (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| 0) (|p-let| ((|$line| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$line| "") (|p-if| |$w| (|progn| (|p-void-ctx| (|p-eval-block| (|p-seek| |$fh| 0 0) (|p-my-=| |$line| (|p-//| (|p-scalar-ctx| (|p-readline| |$fh|)) "")) (|p-my-=| |$r| 1) 1)))) (|p-chomp| |$line|) (|p-print| (|p-string-concat| |$m| " ok=1 wrote=" |$w| " read=[" |$line| "]\n")) (|p-close| |$fh|))))) (|progn| (|p-print| (|p-string-concat| |$m| " ok=0 err=" (|p-errno-string|) "\n"))))))
+(|p-data-form-end| 3 4)

@@ -1,0 +1,5 @@
+#!ir-conform/expected v1 exit=0 bytes=30
+ee: 1
+ee2: XAb
+ee3: 10
+ee4: 7

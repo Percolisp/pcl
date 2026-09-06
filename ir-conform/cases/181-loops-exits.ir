@@ -1,0 +1,8 @@
+(|p-data-form| 1 "181-loops-exits.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-f|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-f| (|&rest| |%_args|) (|:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| (|:nonlocal_exit.loop_control|)) (|p-args-body| (|block| |nil| (|p-last| |OUT|))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$ok| |:scalar| 0)) (|let| ((|*package*| |*package*|)) (|block| |OUT| (|catch| (|p-cl-text| "(pcl::%pcl-loop-tag \"LAST\" 'OUT)") (|block| |nil| (|catch| (|p-cl-text| "(pcl::%pcl-loop-tag \"NEXT\" 'OUT)") (|tagbody| |:redo| (|catch| (|p-cl-text| "(pcl::%pcl-loop-tag \"REDO\" 'OUT)") (|progn| (|setf| |$ok| 1) (|pl-f|) (|setf| |$ok| 0) (|p-cl-text| "(go :next)"))) (|p-cl-text| "(go :redo)") |:next|)))))) (|p-print| (|p-string-concat| "ok=" |$ok| "\n")))
+(|p-data-form-end| 3 5)

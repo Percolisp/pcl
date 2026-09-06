@@ -1,0 +1,4 @@
+(|p-data-form| 1 "196-loops-exits.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$s| |:scalar| 0)) (|p-foreach-range-raw| (|$i| 1 5) |:my| |t| (|p-if| (|p-==| |$i| 2) (|p-next|)) (|p-if| (|p-==| |$i| 4) (|p-last|)) (|p-incf-raw| |$s| |$i|)) (|p-print| (|p-string-concat| "s=" |$s| "\n")) (|p-let| ((|$t| |:scalar| 0)) (|p-let| ((|$j| |:scalar| 0)) (|p-for| () ((|p-<| |$j| 5)) ((|p-incf-raw| |$j| |:numeric|)) (|p-if| (|p-==| |$j| 1) (|p-next|)) (|p-incf-raw| |$t| |$j|))) (|p-print| (|p-string-concat| "t=" |$t| "\n")) (|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| 1 2 3)) (|p-let| ((|$u| |:scalar| 0)) (|p-foreach-raw| (|$x| |@a|) |:my| |t| (|p-incf-raw| |$u| |$x|)) (|p-print| (|p-string-concat| "u=" |$u| "\n")) (|p-let| ((|$k| |:scalar| 0)) (|p-while| (|p-<| |$k| 3) (|p-incf-raw| |$k| |:numeric|)) (|p-print| (|p-string-concat| "k=" |$k| "\n")))))))
+(|p-data-form-end| 1 1)

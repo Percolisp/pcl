@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=0 bytes=27
+11 ref     outer=1 inner=1

@@ -1,0 +1,9 @@
+#!ir-conform/expected v1 exit=0 bytes=160
+aliased-plain: 4 2 3
+aliased-named: 3! 1! 2!
+ident: same
+num: U,1,2,3,nan,10abc
+nan: 1,2,3,NaN
+nan-desc: 3,NaN,2,1
+str: ,10,9,B,a,b|b,a,B,9,10,
+stable: y,w,x,z

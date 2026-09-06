@@ -1,0 +1,4 @@
+(|p-data-form| 1 "320-string.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$s| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$s| "\u263B") (|p-void-ctx| (|utf8::pl-encode| |$s|)) (|p-print| "len=" (|p-list-ctx| (|p-length| |$s|)) "\n") (|p-let| ((|$t| |:scalar| "abc")) (|p-print| "overlong-print:") (|p-print| "\n")))
+(|p-data-form-end| 1 1)

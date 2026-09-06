@@ -1,0 +1,4 @@
+(|p-data-form| 1 "241-refs.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|%h| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-scalar-ctx| (|p-hash-=| |%h| (|vector| "k" (|make-p-box| (|p-array-init| 1 2))))) (|p-*=| (|p-aref| (|p-gethash| |%h| "k") -1) 2) (|p-print| (|p-string-concat| "h=" (|p-join| |$"| (|p-cast-@| (|p-gethash| |%h| "k"))) " #=" (|p-array-last-index| (|p-gethash| |%h| "k")) "\n")))
+(|p-data-form-end| 1 1)

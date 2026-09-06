@@ -1,0 +1,4 @@
+(|p-data-form| 1 "281-sort.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@fa| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@fa| (|vector| 1 2 3)) (|p-foreach| (|$x| |@fa|) |:my| |t| (|setf| (|p-aref| |@fa| 0) 99) (|p-print| (|p-string-concat| "plain:" |$x| "\n")) (|p-last|)) (|p-let| ((|@fs| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@fs| (|vector| 3 1 2)) (|p-foreach| (|$x| (|p-list-ctx| (|p-sort| (|p-sort-cmp| (|$a| |$b|) (|p-scalar-ctx| (|p-<=>| |$a| |$b|))) |@fs|))) |:my| |t| (|setf| (|p-aref| |@fs| 1) 99) (|p-print| (|p-string-concat| "sorted:" |$x| "\n")) (|p-last|))))
+(|p-data-form-end| 1 2)

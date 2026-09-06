@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=0 bytes=109
+caught: Modification of non-creatable array value attempted, subscript -4 at FILE line N
+still here, a=1 2 3

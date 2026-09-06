@@ -1,0 +1,4 @@
+(|p-data-form| 1 "013-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|let| ((|*package*| |*package*|)) (|block| |nil| (|tagbody| |:redo| (|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-post++| (|p-gethash-box| (|p-aref-box| |@a| 0) "k")) (|p-print| "13 a-h++   val=" (|p-if| (|p-defined| (|p-gethash| (|p-aref| |@a| 0) "k")) (|p-gethash| (|p-aref| |@a| 0) "k") "U") " outer=" (|p-if| (|p-defined| (|p-aref| |@a| 0)) 1 0) "\n")) |:next|)))
+(|p-data-form-end| 1 1)

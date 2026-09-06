@@ -1,0 +1,5 @@
+#!ir-conform/expected v1 exit=0 bytes=56
+AoMut:M(15)
+AoMut:M(15) c=M(15)
+AoMut:M(-5)
+AoPlus:P(6)

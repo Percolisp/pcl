@@ -1,0 +1,4 @@
+(|p-data-form| 1 "002-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@out| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-let| ((|$x| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$x| 1) (|p-let| ((|@m| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@m| (|p-list-ctx| (|p-map| (|lambda| (|$_|) (|p-let| ((|$x__shadow__0| |:scalar| (|p-*| |$_| 2) |:perl| "$x" |:why| |:seam-shadow|)) (|p-+| |$x__shadow__0| 1))) (|vector| 1 2 3)))) (|p-push| |@out| (|p-string-concat| (|p-join| |$"| |@m|)) |$x|) (|p-print| (|p-list-ctx| (|p-join| "|" |@out|)) "\n"))))
+(|p-data-form-end| 1 3)

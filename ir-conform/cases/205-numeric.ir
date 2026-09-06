@@ -1,0 +1,4 @@
+(|p-data-form| 1 "205-numeric.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$x| |:scalar| 2)) (|p-*=-raw| |$x| 3 |:numeric|) (|p-print| (|p-string-concat| |$x| "\n")))
+(|p-data-form-end| 1 0)

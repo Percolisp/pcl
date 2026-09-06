@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=106
+ok 1 - ascii to ascii = [ascii...
+]
+ok 2 - ascii to utf8 len=10
+ok 3 - utf8 to ascii = [ascii...
+]
+done 3

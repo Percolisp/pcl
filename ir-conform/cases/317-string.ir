@@ -1,0 +1,4 @@
+(|p-data-form| 1 "317-string.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$s| |:scalar| (|p-literal-string| 55296 65535))) (|p-print| (|p-list-ctx| (|p-length| |$s|)) "\n"))
+(|p-data-form-end| 1 0)

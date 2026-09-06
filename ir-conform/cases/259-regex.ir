@@ -1,0 +1,4 @@
+(|p-data-form| 1 "259-regex.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:box| (|p-cl-text| "(make-p-box nil)") |:captured| |t|)) (|p-my-=| |$n| 0) (|p-setf| (|p-gethash| |%SIG| "__WARN__") (|lambda| (|&rest| |%_args|) (|let| ((|@_| (|p-flatten-args| |%_args|)) (|*pcl-current-package*| "main") (|*pcl-caller-wantarray*| |*wantarray*|)) (|p-sub-frame| (|block| |nil| (|p-void-ctx| (|p-post++| |$n|) (|p-if| (|p->| |$n| 5) (|p-die| |:loc| "259-regex.pl line 11" (|p-string-concat| "RUNAWAY at " |$n| "\n"))) (|p-if| (|p-scalar-ctx| (|p-=~| (|p-aref| |@_| 0) (|p-regex| |:pat| "^nothing" |:flags| "" |:tier| |:native|))) (|p-return|)) (|p-caller-ctx| (|p-print| "H: \u2019\n")))))))) (|p-print| "W: \u2019\n") (|p-print| (|p-string-concat| "handler calls: " |$n| "\n")))
+(|p-data-form-end| 1 1)

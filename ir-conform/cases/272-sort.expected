@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=255 bytes=18
+split-direct: b,a

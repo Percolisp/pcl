@@ -1,0 +1,10 @@
+#!ir-conform/expected v1 exit=0 bytes=143
+isa: A|B|A,B|A,B ok A
+openundef: n=1 fh=def
+myq: 1 3
+div: perl-text
+mod: perl-text
+exists: def=1 [] 1
+substr: undef
+aexists: def=1
+data: line1

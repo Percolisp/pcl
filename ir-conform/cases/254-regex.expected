@@ -1,0 +1,10 @@
+#!ir-conform/expected v1 exit=0 bytes=436
+5 % 0.5      => undef err=[Illegal modulus zero]
+5 % 0.9      => undef err=[Illegal modulus zero]
+5 / 0.5      => [10] err=[]
+1 / -0.0     => undef err=[Illegal division by zero]
+1 % -0.0     => undef err=[Illegal modulus zero]
+1 / "abc"    => undef err=[Illegal division by zero]
+1 / undef    => undef err=[Illegal division by zero]
+1 % undef    => undef err=[Illegal modulus zero]
+1 / ""       => undef err=[Illegal division by zero]

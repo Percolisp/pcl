@@ -1,0 +1,8 @@
+(|p-data-form| 1 "005-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-f|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-f| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|p-aref| |@_| 0))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| 1 2 4 8)) (|p-let| ((|$t1| |:scalar| 0)) (|p-let| ((|$i| |:num| (|%pcl-to-number-strict| (|p-scalar-ctx| (|pl-f| 4)) "$i"))) (|p-for| () ((|p-pre--| |$i|)) () (|p-incf-raw| |$t1| (|p-aref| |@a| |$i|)))) (|p-let| ((|$t2| |:scalar| 0)) (|p-let| ((|$j| |:num| (|%pcl-to-number-strict| (|p-scalar-ctx| (|pl-f| 3)) "$j"))) (|p-for| () ((|p-post--| |$j|)) () (|p-incf-raw| |$t2| (|p-aref| |@a| |$j|)))) (|p-let| ((|$k| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$k| (|p-scalar-ctx| (|pl-f| 4))) (|p-let| ((|$t3| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$t3| 0) (|p-cl-text| ";; $t3 += $a[$k - 1] while -- $k\n(p-while (p-pre-- $k) (p-incf $t3 (p-aref @a (p-- $k 1))))") (|p-let| ((|$t4| |:scalar| 0)) (|p-let| ((|$m| |:num| (|%pcl-to-number-strict| (|p-scalar-ctx| (|pl-f| 0)) "$m"))) (|p-for| () ((|p-<| |$m| 4)) ((|p-incf-raw| |$m|)) (|p-incf-raw| |$t4| (|p-aref| |@a| |$m|)))) (|p-print| (|p-string-concat| |$t1| " " |$t2| " " |$t3| " " |$t4| "\n"))))))))
+(|p-data-form-end| 3 4)

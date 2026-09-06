@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=0 bytes=60
+open=1 binmode=1 sysread=0 err=21
+open2=1 err2=21 defined=0

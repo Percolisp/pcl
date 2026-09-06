@@ -1,0 +1,12 @@
+#!ir-conform/expected v1 exit=0 bytes=154
+L1=[alpha]
+L2=[beta]
+L3=[]
+L4=[# comment]
+L5=[>%6. 6s<    >''<          >%6. 6s INVALID<]
+L6=[gamma]
+L7=[delta]
+L8=[epsilon]
+L9=[zeta]
+L10=[eta]
+count=10

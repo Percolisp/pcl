@@ -1,0 +1,5 @@
+#!ir-conform/expected v1 exit=2 bytes=71
+1 before: no
+2 do ret=U v=
+3 INC{./t.pl}=ABSENT
+4 keys matching t.pl: 

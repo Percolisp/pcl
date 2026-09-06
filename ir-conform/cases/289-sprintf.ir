@@ -1,0 +1,7 @@
+(|p-data-form| 1 "289-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"feature\"))")
+(|p-cl-text| "(p-eval-always (p-note-inc \"warnings\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|%k| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-setf| (|p-gethash| (|p-gethash| |%k| "a") "b") "\u00FF") (|p-str-bit-and=| (|p-gethash| (|p-gethash| |%k| "a") "b") "x") (|p-print| (|p-gethash| (|p-gethash| |%k| "a") "b") "\n") (|p-let| ((|%l| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-.=| (|p-gethash| (|p-gethash| |%l| "a") "b") "\u0001") (|p-str-bit-or=| (|p-gethash| (|p-gethash| |%l| "a") "b") "x") (|p-print| (|p-gethash| (|p-gethash| |%l| "a") "b") "\n") (|p-let| ((|@m| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-setf| (|p-gethash| (|p-aref| |@m| 0) "z") "\u00FF") (|p-str-bit-xor=| (|p-gethash| (|p-aref| |@m| 0) "z") "\u000F") (|p-printf| "%vd\n" (|p-gethash| (|p-aref| |@m| 0) "z")))))
+(|p-data-form-end| 3 5)

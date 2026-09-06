@@ -1,0 +1,9 @@
+#!ir-conform/expected v1 exit=0 bytes=118
+topic:4 2 3
+namedwrite:b! a!
+ident:same
+values:2!,1!
+grep:3! 1! 2!
+reverse:3! 1! 2!
+readonly:3 1 2|1 2 3
+keysread:A B

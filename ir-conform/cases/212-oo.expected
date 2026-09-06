@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=31
+ISA=[Foo]
+isa_foo=1
+isa_nore=0

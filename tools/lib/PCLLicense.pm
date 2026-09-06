@@ -36,7 +36,12 @@ our @TAG_LINES = (
 our $SPDX = $TAG_LINES[3];
 
 # Roots scanned (relative to the checkout), and root-level extras.
-our @ROOTS  = qw(Pl cl lib tools examples .claude/hooks);
+# ir-conform/ holds the IR conformance corpus (s470bt): the `.pl` cases are
+# OURS — small programs written here to pin one semantic each — so they carry
+# the tag like any other code file.  Their `.expected` oracles, `.ir`
+# snapshots and `.rules` files are DATA and have no code extension, so the
+# scan below never reaches them.
+our @ROOTS  = qw(Pl cl lib tools examples ir-conform .claude/hooks);
 our @EXTRAS = qw(docs/ppi-bug-report.t);
 
 # Named exclusions => reason.  Every one must EXIST (the gate checks) so an

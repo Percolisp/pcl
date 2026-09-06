@@ -1,0 +1,7 @@
+(|p-data-form| 1 "019-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-scalar-=| |$_| "top")
+(|p-setf| |$\|| 1)
+(|p-array-=| |@ARGV| (|vector|))
+(|p-print| (|p-string-concat| |$_| "\n"))
+(|p-data-form-end| 4 0)

@@ -1,0 +1,8 @@
+(|p-data-form| 1 "339-string-eval.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-id|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-id| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|p-tail-value| (|p-aref| |@_| 0)))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$q| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$q| (|p-eval| "1/3" (|list| (|cons| "$q" |$q|)))) (|p-printf| "01 [%-8s]\n" |$q|) (|p-let| ((|$w| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$w| |$q|) (|p-printf| "02 [%-8s]\n" |$w|) (|p-printf| "03 [%-8s]\n" (|p-string-concat| |$q|)) (|p-printf| "04 [%-8s]\n" (|p-+| |$q| 0)) (|p-printf| "05 [%-8s]\n" (|p-void-ctx| (|pl-id| |$q|)))))
+(|p-data-form-end| 3 2)

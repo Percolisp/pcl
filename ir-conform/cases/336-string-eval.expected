@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=49
+SCALAR
+val=0.333333333333333
+[0.333333333333333]

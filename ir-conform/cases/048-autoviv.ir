@@ -1,0 +1,4 @@
+(|p-data-form| 1 "048-autoviv.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|let| ((|*package*| |*package*|)) (|block| |nil| (|tagbody| |:redo| (|p-let| ((|%h| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|p-backslash| (|p-gethash-box| (|p-gethash-box| |%h| "a") "b"))) (|p-print| "11 ref     outer=" (|p-if| (|p-exists| |%h| "a") 1 0) " inner=" (|p-if| (|p-&&| (|p-exists| |%h| "a") (|p-exists| (|p-cl-text| "(p-gethash %h \"a\")") "b")) 1 0) "\n"))) |:next|)))
+(|p-data-form-end| 1 3)

@@ -1,0 +1,8 @@
+(|p-data-form| 1 "121-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"strict\"))")
+(|p-cl-text| "(p-eval-always (p-note-inc \"warnings\"))")
+(|p-cl-text| "(p-eval-always (p-note-inc \"warnings\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-or| (|p-open| |$fh| "<:utf8" (|p-backslash| "\u00C1\u00AF\u00C1\u00AF\u00C1\u00B0\u00C1\u00B3")) (|p-die| |:loc| "121-io.pl line 15" "Could not open\n")) (|p-let| ((|$s| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-or| (|p-read| |$fh| |$s| 10) (|p-die| |:loc| "121-io.pl line 16" "Could not read\n")) (|p-print| |$s|)))
+(|p-data-form-end| 4 5)

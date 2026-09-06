@@ -1,0 +1,9 @@
+#!ir-conform/expected v1 exit=0 bytes=201
+pre:  defined&c=1 exists&c=1 defined&d=0 exists&d=1
+scalar: cleared
+array:  cleared
+hash:   cleared
+code:   cleared
+exists&c=0 exists&d=0
+slots: SCALAR=def ARRAY=def HASH=def CODE=undef
+after push: 42

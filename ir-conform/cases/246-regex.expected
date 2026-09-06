@@ -1,0 +1,13 @@
+#!ir-conform/expected v1 exit=0 bytes=511
+5 % 0              => undef | err=Illegal modulus zero at FILE line N
+substr oob         => undef | err=-
+sprintf bad conv   => [%q] | err=-
+aref on string     => undef | err=-
+gethash on str     => undef | err=-
+delete on str      => undef | err=-
+exists on str      => [] | err=-
+oct bad            => [0] | err=-
+chr -1             => [�] | err=-
+1/0                => undef | err=Illegal division by zero at FILE line N
+2**0.5             => [1.4142135623731] | err=-
+-"foo"             => [-foo] | err=-

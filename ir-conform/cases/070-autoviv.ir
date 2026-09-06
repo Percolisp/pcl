@@ -1,0 +1,4 @@
+(|p-data-form| 1 "070-autoviv.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| 1 2 3)) (|p-print| "exists=" (|p-if| (|p-exists-array| |@a| -4) 1 0) "\n"))
+(|p-data-form-end| 1 1)

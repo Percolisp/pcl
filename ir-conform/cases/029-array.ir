@@ -1,0 +1,4 @@
+(|p-data-form| 1 "029-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| 1 2 3)) (|p-let| ((|$i| |:scalar| -1)) (|p-.=| (|p-aref| |@a| |$i|) "x") (|p-print| (|p-string-concat| "a=" (|p-join| |$"| |@a|) " #=" (|p-array-last-index| |@a|) "\n"))))
+(|p-data-form-end| 1 1)

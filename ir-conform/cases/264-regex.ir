@@ -1,0 +1,4 @@
+(|p-data-form| 1 "264-regex.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-open| |$fh| "<" "/nonexistent-x-1271") (|p-printf| "str=[%s]\n" (|p-if| (|p-defined| |$fh|) (|p-if| (|p-scalar-ctx| (|p-=~| |$fh| (|p-regex| |:pat| "^GLOB" |:flags| "" |:tier| |:native|))) "GLOBish" (|p-string-concat| "other:" |$fh|)) "undef")))
+(|p-data-form-end| 1 1)

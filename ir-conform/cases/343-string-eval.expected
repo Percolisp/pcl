@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=83
+A
+r=[0.333333333333333]
+no-width [0.333333333333333]
+C
+width [0.333333333333333]
+B

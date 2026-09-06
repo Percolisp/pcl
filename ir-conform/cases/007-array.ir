@@ -1,0 +1,4 @@
+(|p-data-form| 1 "007-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:scalar| 3)) (|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|p-..| 1 500)) (|p-let| ((|@b| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@b| (|p-..| 501 1000)) (|p-let| ((|$s| |:scalar| 0)) (|p-foreach-range-raw| (|$_| 1 |$n|) (|p-foreach-raw| (|$x| (|vector| |@a| |@b|)) |:arrays| |t| |:my| |t| (|p-incf-raw| |$s| |$x|))) (|p-print| (|p-string-concat| |$s| "\n"))))))
+(|p-data-form-end| 1 2)

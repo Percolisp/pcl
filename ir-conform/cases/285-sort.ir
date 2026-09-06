@@ -1,0 +1,8 @@
+(|p-data-form| 1 "285-sort.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-ins|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-ins| (|&rest| |%_args|) (|:returns| |:num| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-raw-params| ((|$x| |:scalar|)) (|block| |nil| (|p-tail-value| (|p-+| |$x| 1)))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-foreach-range-raw| (|$i| 1 5) |:my| |t| (|%p-push1| |@a| (|p-*| |$i| 2))) (|p-let| ((|@s| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@s| (|p-list-ctx| (|%p-sort-classic| |:num-asc| (|vector| 3 1 2)))) (|p-let| ((|%h| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|setf| (|p-gethash| |%h| "k") 1) (|p-let| ((|$n| |:scalar| 0)) (|p-incf-raw| |$n| 2 |:numeric|) (|p-incf-raw| |$n| |:numeric|) (|p-print| (|pl-ins| 1) "\n") (|p-let| ((|@b| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@b| (|vector| 7 8)) (|p-let| ((|$t| |:scalar| 0)) (|p-foreach-raw| (|$x| |@b|) |:my| |t| (|p-incf-raw| |$t| |$x|)) (|p-print| (|p-string-concat| |$t| " " (|p-join| |$"| |@s|) " " (|p-gethash| |%h| "k") "\n")) (|p-print| (|p-cast-$| "main::n" (|p-symref-site|)) "\n")))))))
+(|p-data-form-end| 3 4)

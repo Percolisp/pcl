@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=0 bytes=33
+P10 6 1:sub1=1,2:sub2=2,3:sub3=3

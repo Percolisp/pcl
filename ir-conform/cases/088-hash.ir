@@ -1,0 +1,8 @@
+(|p-data-form| 1 "088-hash.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-add1|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-add1| (|&rest| |%_args|) (|:returns| |:num| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-raw-params| ((|$x| |:scalar|)) (|block| |nil| (|p-tail-value| (|p-+| |$x| 1)))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$n| (|p-gethash| |%ENV| "N")) (|p-let| ((|$s| |:scalar| 0)) (|p-foreach-range-raw| (|$i| 1 |$n|) |:my| |t| (|p-incf-raw| |$s| (|pl-add1| |$i|))) (|p-print| (|p-string-concat| |$s| "\n"))))
+(|p-data-form-end| 3 1)

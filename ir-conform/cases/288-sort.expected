@@ -1,0 +1,12 @@
+#!ir-conform/expected v1 exit=255 bytes=144
+last-for: 1
+next-for: 
+redo-for: 1 1 2
+last-while: 1
+next-cfor: 5
+chain: 1
+coderef: 1 ok
+method: 1 ok
+noloop: perl-text
+dowhile: 1 died
+bare: 1

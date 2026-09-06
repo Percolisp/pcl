@@ -1,0 +1,6 @@
+(|p-data-form| 1 "199-misc.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-defcell $h (make-p-box nil))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$b__excl__0| |:str| (|%pcl-to-string-strict| |$h| "$b__excl__0") |:perl| "$b" |:why| |:exception-global|)) (|p-print| (|p-string-concat| |$b__excl__0| "\n")))
+(|p-data-form-end| 2 1)

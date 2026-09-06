@@ -1,0 +1,8 @@
+(|p-data-form| 1 "072-closures.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-named|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-named| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|p-void-ctx| (|p-let| ((|$x| |:scalar| 1 |:captured| |t|)) (|p-let| ((|$c| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$c| (|lambda| (|&rest| |%_args|) (|let| ((|@_| (|p-flatten-args| |%_args|)) (|*pcl-current-package*| "main") (|*pcl-caller-wantarray*| |*wantarray*|)) (|p-sub-frame| (|block| |nil| (|p-+| |$x| 1)))))) (|p-caller-ctx| (|p-tail-value| (|p-funcall-ref| |$c|)))))))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@out| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|let| ((|*package*| |*package*|)) (|block| |nil| (|tagbody| |:redo| (|p-let| ((|$a__excl__0| |:scalar| 7 |:perl| "$a" |:why| |:exception-global|)) (|p-let| ((|$b__excl__1| |:scalar| 8 |:perl| "$b" |:why| |:exception-global|)) (|%p-push1| |@out| (|p-+| |$a__excl__0| |$b__excl__1|)))) |:next|))) (|p-push| |@out| (|p-list-ctx| (|pl-named|))) (|p-print| (|p-list-ctx| (|p-join| "," |@out|)) "\n"))
+(|p-data-form-end| 3 2)

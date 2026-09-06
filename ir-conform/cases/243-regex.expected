@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=133
+before: flag=0 len=3
+upgr:   flag=1 len=3
+decode: r=1 len=1 ord0=8217
+bad:    r=0 len=1 ord0=233
+wide:   has>255=1
+narrow: has>255=0

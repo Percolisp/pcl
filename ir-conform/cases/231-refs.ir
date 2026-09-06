@@ -1,0 +1,4 @@
+(|p-data-form| 1 "231-refs.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$ar| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$ar| (|make-p-box| (|p-array-init| 10 20 30 40))) (|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| 10 20 30 40)) (|p-let| ((|$s| |:str-buffer| (|%pcl-str-buffer| ""))) (|p-foreach-range-raw| (|$n| 2 3) |:my| |t| (|p-let| ((|$i| |:scalar| (|p-.| |$n| "abc"))) (|%pcl-str-append| |$s| (|p-string-concat| "[" (|p-aref-deref| |$ar| |$i|) "/" (|p-aref| |@a| |$i|) "]")))) (|p-print| (|p-string-concat| "P9 " |$s| "\n")))))
+(|p-data-form-end| 1 2)

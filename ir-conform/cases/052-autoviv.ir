@@ -1,0 +1,4 @@
+(|p-data-form| 1 "052-autoviv.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|let| ((|*package*| |*package*|)) (|block| |nil| (|tagbody| |:redo| (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-post++| (|p-gethash-box| (|p-gethash-deref-box| |$r| "p") "q")) (|p-print| "19 ref++   val=" (|p-if| (|p-defined| (|p-gethash| (|p-gethash-deref| |$r| "p") "q")) (|p-gethash| (|p-gethash-deref| |$r| "p") "q") "U") " root=" (|p-if| (|p-defined| |$r|) 1 0) "\n")) |:next|)))
+(|p-data-form-end| 1 1)

@@ -1,0 +1,4 @@
+(|p-data-form| 1 "310-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-open| |$fh| "<" "/nonexistent-x-1271") (|p-let| ((|$fh2| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$fh2| |$fh|) (|p-printf| "copy defined=%s same=%s\n" (|p-if| (|p-defined| |$fh2|) 1 0) (|p-if| (|p-&&| (|p-&&| (|p-defined| |$fh|) (|p-defined| |$fh2|)) (|p-str-eq| (|p-string-concat| |$fh|) (|p-string-concat| |$fh2|))) 1 0))))
+(|p-data-form-end| 1 2)

@@ -1,0 +1,4 @@
+(|p-data-form| 1 "322-string.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$s| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$s| "\u2080x") (|p-void-ctx| (|utf8::pl-encode| |$s|)) (|p-print| (|p-list-ctx| (|p-length| |$s|)) "\n") (|p-let| ((|$t| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$t| |$s|) (|p-void-ctx| (|utf8::pl-decode| |$t|)) (|p-print| (|p-list-ctx| (|p-length| |$t|)) "\n")))
+(|p-data-form-end| 1 2)

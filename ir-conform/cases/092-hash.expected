@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=105
+arr slot: undef
+hsh slot: undef
+sca slot: present
+after use: 42 / z,1 / 7
+code: cleared
+code slot: undef

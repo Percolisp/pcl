@@ -1,0 +1,4 @@
+(|p-data-form| 1 "306-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-open| |$fh| "<" "/nonexistent-x-1271") (|p-let| ((|$n| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$n| 0) (|p-let| ((|$l| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-cl-text| ";; $n++ while defined(my $l = <$fh>)\n(p-while (p-defined (p-my-= $l (p-scalar-ctx (p-readline $fh)))) (p-post++ $n))") (|p-printf| "lines=%s\n" |$n|))))
+(|p-data-form-end| 1 4)

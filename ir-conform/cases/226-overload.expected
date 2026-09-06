@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=36
+1:P(15)
+2:P(5)
+3:162
+4:P(10)
+5:P(6)

@@ -1,0 +1,4 @@
+(|p-data-form| 1 "329-string-eval.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$n| 0) (|p-foreach-range| (|$i| 1 3) |:my| |t| (|p-post++| |$n|) (|p-eval| "last" (|list| (|cons| "$i" |$i|) (|cons| "$n" |$n|))) (|p-incf| |$n| 100)) (|p-print| (|p-string-concat| "n=" |$n| " err=" |$@| "\n")))
+(|p-data-form-end| 1 1)

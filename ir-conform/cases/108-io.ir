@@ -1,0 +1,4 @@
+(|p-data-form| 1 "108-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-let| ((|$ok| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$ok| (|p-open| |$fh| "+>" (|p-undef|))) (|p-print| "ok=" (|p-if| |$ok| 1 0) "\n")))
+(|p-data-form-end| 1 2)

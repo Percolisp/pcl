@@ -1,0 +1,4 @@
+(|p-data-form| 1 "183-loops-exits.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@s| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-foreach-range-raw| (|$i| 1 3) |:my| |t| (|let| ((|*package*| |*package*|)) (|block| |L| (|catch| (|p-cl-text| "(pcl::%pcl-loop-tag \"LAST\" 'L)") (|block| |nil| (|catch| (|p-cl-text| "(pcl::%pcl-loop-tag \"NEXT\" 'L)") (|tagbody| |:redo| (|catch| (|p-cl-text| "(pcl::%pcl-loop-tag \"REDO\" 'L)") (|progn| (|%p-push1| |@s| |$i|) (|p-last|) (|%p-push1| |@s| "X") (|p-cl-text| "(go :next)"))) (|p-cl-text| "(go :redo)") |:next|)))))) (|%p-push1| |@s| (|p-string-concat| "after" |$i|))) (|p-print| (|p-string-concat| (|p-join| |$"| |@s|) "\n")))
+(|p-data-form-end| 1 6)

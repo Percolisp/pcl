@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=0 bytes=24
+19 ref++   val=1 root=1

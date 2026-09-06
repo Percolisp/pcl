@@ -1,0 +1,4 @@
+(|p-data-form| 1 "315-string.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:scalar| 1)) (|p-foreach-range| (|$i| 1 4000000) |:my| |t| (|p-*=-raw| |$n| 3 |:numeric|) (|p-%=-raw| |$n| 1000003 |:numeric|)) (|p-let| ((|$s| |:str-buffer| (|%pcl-str-buffer| ""))) (|p-foreach-range| (|$i| 1 400000) |:my| |t| (|%pcl-str-append| |$s| "ab")) (|p-print| (|p-string-concat| "check " |$n| " ") (|p-list-ctx| (|p-length| |$s|)) "\n")))
+(|p-data-form-end| 1 0)

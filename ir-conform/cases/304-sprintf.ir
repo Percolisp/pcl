@@ -1,0 +1,4 @@
+(|p-data-form| 1 "304-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-open| |$fh| "<" "/nonexistent-x-1271") (|p-printf| "reftype=[%s]\n" (|p-ref| (|p-backslash| |$fh|))))
+(|p-data-form-end| 1 1)

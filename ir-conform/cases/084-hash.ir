@@ -1,0 +1,4 @@
+(|p-data-form| 1 "084-hash.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$n| (|p-gethash| |%ENV| "N")) (|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|p-..| 1 1000)) (|p-let| ((|$s| |:scalar| 0)) (|p-foreach-range-raw| (|$_| 1 |$n|) (|p-foreach-raw| (|$x| |@a|) |:my| |t| (|p-incf-raw| |$s| |$x|))) (|p-print| (|p-string-concat| |$s| "\n")))))
+(|p-data-form-end| 1 2)

@@ -1,0 +1,5 @@
+#!ir-conform/expected v1 exit=0 bytes=60
+remnant-ok: 1
+result-ok: 1
+hi-remnant-ok: 1
+hi-result-ok: 1

@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=57
+str-eval: different
+ee: different
+re-eval+pat: different

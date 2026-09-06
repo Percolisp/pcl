@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=42
+n:  7 8 9 / 3
+r:  7 8 9 / 3
+b:  7 8 9 / 3

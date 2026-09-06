@@ -1,0 +1,8 @@
+(|p-data-form| 1 "307-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| ";; use Symbol ()")
+(|p-cl-text| "(p-eval-always")
+(|p-cl-text| "  (p-use \"Symbol\" :do-import nil))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$g| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$g| (|p-scalar-ctx| (|Symbol::pl-gensym|))) (|p-let| ((|$ok| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$ok| (|p-if| (|p-open| |$g| "<" "/nonexistent-x-1271") 1 0)) (|p-printf| "ok=%s defined=%s ref=[%s]\n" |$ok| (|p-if| (|p-defined| |$g|) 1 0) (|p-ref| |$g|))))
+(|p-data-form-end| 4 5)

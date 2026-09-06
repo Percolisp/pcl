@@ -1,0 +1,6 @@
+(|p-data-form| 1 "321-string.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"utf8\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$s| |:scalar| "h\u00E9llo")) (|p-print| (|p-list-ctx| (|p-substr| |$s| 1 1)) "\n"))
+(|p-data-form-end| 2 1)

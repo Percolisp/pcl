@@ -1,0 +1,6 @@
+(|p-data-form| 1 "012-array.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"utf8\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@Ｘ| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-push| |@Ｘ| 1) (|p-print| (|p-list-ctx| (|p-scalar| |@Ｘ|)) "\n"))
+(|p-data-form-end| 2 2)

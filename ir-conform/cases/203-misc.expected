@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=16
+one
+two
+heredoc

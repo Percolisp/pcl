@@ -1,0 +1,8 @@
+(|p-data-form| 1 "079-context.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-fib|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-fib| (|&rest| |%_args|) (|:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-raw-params| ((|$n| |:scalar|)) (|block| |nil| (|p-void-ctx| (|p-let| ((|$a__excl__0| |:num| (|%pcl-to-number-strict| 0 "$a__excl__0") |:perl| "$a" |:why| |:exception-global|)) (|p-let| ((|$b__excl__1| |:box| (|p-cl-text| "(make-p-box nil)") |:perl| "$b" |:why| |:exception-global|)) (|p-my-=| |$b__excl__1| 1) (|p-foreach-range-raw| (|$i| 2 |$n|) |:my| |t| (|p-let| ((|$c| |:scalar| (|p-+| |$a__excl__0| |$b__excl__1|))) (|setf| |$a__excl__0| (|%pcl-to-number-strict| |$b__excl__1| "$a__excl__0")) (|p-my-=| |$b__excl__1| |$c|))) (|p-caller-ctx| (|p-tail-value| |$b__excl__1|))))))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-print| (|pl-fib| 30) "\n")
+(|p-data-form-end| 3 1)

@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=0 bytes=89
+err=1 viv=0 err_text=[Can't use an undefined value as an ARRAY reference at FILE line N]

@@ -1,0 +1,4 @@
+(|p-data-form| 1 "267-sort.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|make-p-box| (|p-hash|))) (|p-let| ((|%h| |:hash| (|p-cl-text| "(make-hash-table :test 'equal)"))) (|p-foreach-range-raw| (|$n| 1 2) |:my| |t| (|p-let| ((|$k| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-if| (|p-==| |$n| 2) (|p-my-=| |$k| "x")) (|p-setf| (|p-gethash-deref| |$r| |$k|) (|p-string-concat| "r" |$n|)) (|setf| (|p-gethash| |%h| |$k|) (|p-string-concat| "h" |$n|)))) (|p-print| "P5 " (|p-list-ctx| (|p-join| "|" (|p-list-ctx| (|p-map| (|lambda| (|$_|) (|p-string-concat| "<" |$_| ">=" (|p-gethash-deref| |$r| |$_|) "/" (|p-gethash| |%h| |$_|))) (|p-list-ctx| (|%p-sort-classic| |:default| (|p-list-ctx| (|p-keys| (|p-cast-%| |$r|))))))))) "\n")))
+(|p-data-form-end| 1 3)

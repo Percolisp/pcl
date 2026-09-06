@@ -1,0 +1,8 @@
+(|p-data-form| 1 "086-hash.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-fibret|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-fibret| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| ()) (|p-raw-params| ((|$m| |:scalar|)) (|block| |nil| (|p-tail-value| (|p-if| (|p-<| |$m| 2) |$m| (|p-+| (|p-scalar-ctx| (|pl-fibret| (|p--| |$m| 1))) (|p-scalar-ctx| (|pl-fibret| (|p--| |$m| 2)))))))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$n| (|p-gethash| |%ENV| "N")) (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| 0) (|p-cl-text| ";; $r=fibret(27) for 1..$n\n(p-foreach ($_ (p-.. 1 $n)) (p-my-= $r (p-scalar-ctx (pl-fibret 27))))") (|p-print| (|p-string-concat| |$r| "\n"))))
+(|p-data-form-end| 3 3)

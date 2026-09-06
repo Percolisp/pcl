@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=81
+fr-plain-w: 99
+fr-plain-aassign: 2
+fr-keys: 1
+fr-plain-next: 2
+fr-plain-next: 99

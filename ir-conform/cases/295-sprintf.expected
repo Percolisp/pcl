@@ -1,0 +1,10 @@
+#!ir-conform/expected v1 exit=0 bytes=63
+ok 56
+ok 57
+ok 58
+after: [ok 58
+]
+b=4 err=[]
+r=42
+s=caught
+f=9

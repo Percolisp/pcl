@@ -1,0 +1,4 @@
+(|p-data-form| 1 "069-autoviv.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| (|make-p-box| (|p-array-init| 1 2)) (|make-p-box| (|p-array-init| 3 4)))) (|p-.=| (|p-aref| (|p-aref| |@a| -1) -1) "z") (|p-print| (|p-string-concat| "v=" (|p-aref| (|p-aref| |@a| -1) -1) " #=" (|p-array-last-index| |@a|) "\n")))
+(|p-data-form-end| 1 1)

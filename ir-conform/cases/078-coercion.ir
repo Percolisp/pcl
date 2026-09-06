@@ -1,0 +1,8 @@
+(|p-data-form| 1 "078-coercion.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-f|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-f| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|p-void-ctx| (|p-undef| (|p-make-typeglob| "main" "_")) (|p-caller-ctx| (|p-tail-value| (|p-if| (|p-defined| (|p-glob-slot| (|p-make-typeglob| "main" "_") "ARRAY")) "def" "undef")))))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-print| "in-sub *_{ARRAY} after undef: " (|p-list-ctx| (|pl-f| 1 2 3)) "\n")
+(|p-data-form-end| 3 0)

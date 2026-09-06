@@ -1,0 +1,5 @@
+#!ir-conform/expected v1 exit=0 bytes=97
+outer-of-inner-eval: different
+ee-in-nested: different
+plain-nested: same
+named-sub-inside: same

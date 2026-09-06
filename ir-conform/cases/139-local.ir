@@ -1,0 +1,4 @@
+(|p-data-form| 1 "139-local.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@x| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-void-ctx| (|p-eval-block| (|p-array-deref-=| (|p-cast-@| (|progn| 1 (|p-scalar-ctx| (|pl-local| (|p-aref-argbox| (|p-aref-argbox| |@x| 0) 0))))) 1))) (|p-printf| "err=%d viv=%d err_text=[%s]\n" (|p-if| (|p-scalar-ctx| (|p-=~| |$@| (|p-regex| |:pat| "undefined value as an ARRAY reference" |:flags| "" |:tier| |:native|))) 1 0) (|p-if| (|p-defined| (|p-aref| (|p-aref| |@x| 0) 0)) 1 0) (|p-=~| |$@| (|p-subst| |:pat| "\\n.*" |:rep| "" |:flags| "rs" |:tier| |:native|))))
+(|p-data-form-end| 1 1)

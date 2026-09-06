@@ -1,0 +1,8 @@
+(|p-data-form| 1 "227-refs.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-f|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-f| (|&rest| |%_args|) (|:returns| |:num| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| 9)))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$x| |:num| (|%pcl-to-number-strict| (|p-scalar-ctx| (|funcall| (|lambda| () (|progn| (|p-let| ((|$a__excl__0| |:scalar| 1 |:perl| "$a" |:why| |:exception-global|)) (|p-+| |$a__excl__0| 2)))))) "$x"))) (|p-let| ((|$ref| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$ref| (|p-backslash-sub| (|quote| |pl-f|))) (|p-let| ((|$z| |:num| (|%pcl-to-number-strict| (|p-scalar-ctx| (|p-do| (|p-funcall-ref| |$ref| |@_|))) "$z"))) (|p-print| (|p-+| |$x| |$z|)))))
+(|p-data-form-end| 3 1)

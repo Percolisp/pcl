@@ -1,0 +1,4 @@
+(|p-data-form| 1 "292-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$s| |:scalar| "abc")) (|p-printf| "d(10,2)=%d d(10)=%d d(-10,2)=%d d(3)=%d v(3)=[%s] v(1,-1)=[%s]\n" (|p-if| (|p-defined| (|p-substr| |$s| 10 2)) 1 0) (|p-if| (|p-defined| (|p-substr| |$s| 10)) 1 0) (|p-if| (|p-defined| (|p-substr| |$s| -10 2)) 1 0) (|p-if| (|p-defined| (|p-substr| |$s| 3)) 1 0) (|p-substr| |$s| 3) (|p-substr| |$s| 1 -1)))
+(|p-data-form-end| 1 0)

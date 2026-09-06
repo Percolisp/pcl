@@ -1,0 +1,8 @@
+(|p-data-form| 1 "173-loops-exits.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-f|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-f| (|&rest| |%_args|) (|:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|%p-dyn-loop-exit| |:last|))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$g| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$g| 0) (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|p-scalar-ctx| (|p-eval-block| (|p-cl-text| ";; do { f() } while ($g++ < 2)\n(p-do-while (p-< (p-post++ $g) 2) (p-void-ctx (funcall (lambda () (progn (pl-f))))))") 1))) (|p-print| "r=" (|p-if| (|p-defined| |$r|) |$r| "undef") (|p-string-concat| " err=" |$@|))))
+(|p-data-form-end| 3 3)

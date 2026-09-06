@@ -1,0 +1,9 @@
+#!ir-conform/expected v1 exit=0 bytes=172
+sub yes   => 1 def=1
+sub no    => [] def=1
+ary in    => 1 def=1
+ary out   => [] def=1
+aryref out=> [] def=1
+coderef   => 1 def=1
+env no    => [] def=1
+env yes   => 1 def=1

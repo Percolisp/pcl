@@ -1,0 +1,429 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# ir-conform — the IR CONFORMANCE corpus (docs/plan-speed-and-ir-s470.md B6).
+#
+# pclxs defines "a host is done" as "the conformance suite passes against it"
+# (tools/pcl-conform).  This is the same idea one level up: **a BACKEND for
+# PCL's IR is done when it answers every case the way real perl does.**
+#
+#   ir-conform/cases/NNN-<topic>.pl        a small program, named by the
+#                                          semantics it pins
+#   ir-conform/cases/NNN-<topic>.expected  perl's answer, recorded by --record
+#   ir-conform/cases/NNN-<topic>.ir        the emitted IR, DATA form
+#                                          (pl2cl --emit-sexp, ir-spec §12b)
+#   ir-conform/cases/NNN-<topic>.rules     optional normalisations (below)
+#
+# Three ways to run it:
+#
+#   tools/ir-conform                 PCL's own CL target over every case.
+#                                    This is the proof the CORPUS is sound —
+#                                    if PCL disagrees with perl here, the
+#                                    corpus found a PCL bug (file it; never
+#                                    edit the case to make it pass).
+#   tools/ir-conform --oracle        perl over every case: the corpus's own
+#                                    self-test (did anything drift?).
+#   tools/ir-conform --backend CMD   YOUR backend over every case: CMD is run
+#                                    as `CMD <case>.ir`, and must print the
+#                                    program's stdout on its stdout and exit
+#                                    with the program's exit code.  This is
+#                                    the measurement a JS or C backend author
+#                                    runs; nothing in it is PCL-specific.
+#
+# WHAT IS COMPARED, and what is not.  The oracle is the program's **stdout**
+# and its **exit code**.  stderr is NOT compared: the interleaving of the two
+# streams depends on buffering, so a merged compare would bless a flake.  A
+# case that wants to pin a diagnostic prints it to stdout itself (a
+# $SIG{__WARN__} handler, or `print` in the eval's error branch).
+#
+# NORMALISATION (`.rules`).  A case whose perl output carries something that
+# is not the semantics — a file path in a die message, a heap address, hash
+# order — is either NORMALISED by a named projection or REJECTED from the
+# corpus.  It is never blessed flaky.  The projections are named and closed,
+# so a backend author implements the same three in any language:
+#
+#   normalise die-location   ` at <path> line <n>[.]`  ->  ` at FILE line N`
+#   normalise hex-address    `0x` + 4 or more hex digits -> `0xADDR`
+#   normalise sort-lines     the output's lines, sorted (hash order)
+#
+# Rule 12: a case with no `.expected` DIES naming the case — a corpus row that
+# cannot be evaluated is never quietly skipped.
+#
+#   tools/ir-conform --record            record .expected (perl) and .ir (pl2cl)
+#   tools/ir-conform --record-expected   just the oracle
+#   tools/ir-conform --record-ir         just the IR snapshots
+#   tools/ir-conform --list              name, topic, rules, one row per case
+#   tools/ir-conform --sample N          every (count/N)th case — the gate row
+#   tools/ir-conform --jobs N            N workers (default 1)
+#   tools/ir-conform -v                  print each failure's diff
+#   tools/ir-conform 042 regex           substring filters on the case name
+#
+# The `.ir` files are a SNAPSHOT, refreshed by --record-ir; they are not
+# gated against the generation stamp (they would churn on every emission
+# change and gate nothing a behaviour comparison does not already gate).
+#
+# KNOWN FAILURES (`ir-conform/known-fail.tsv`).  A corpus harvested from the
+# probe files reviews leave behind is dense in exactly the places PCL is still
+# wrong — that is what makes it worth having.  Each such case is listed there
+# with its OWNING TASK and its cause: it still runs, it prints KNOWN, and it
+# does not fail the run.  An UNLISTED failure fails the run like a regression;
+# a listed case that starts PASSING is reported STALE and fails the run, so a
+# fix cannot land without the row leaving the file (the skip registry's
+# stale-detector, docs/test-skip-registry.md).  `--strict` treats every known
+# failure as a failure, which is the number to watch shrink.
+
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Basename qw(dirname basename);
+use File::Temp qw(tempdir);
+use File::Path qw(make_path);
+
+my $ROOT  = abs_path(dirname(abs_path($0)) . '/..');
+my $CASES = "$ROOT/ir-conform/cases";
+require "$ROOT/tools/lib/PCLSbcl.pm";
+
+my $EXPECT_MAGIC = '#!ir-conform/expected v1';
+my $TIMEOUT      = 30;
+
+# ---------------------------------------------------------------- options
+my ($record, $rec_exp, $rec_ir, $backend, $oracle, $list, $sample, $verbose, $strict);
+my $jobs = 1;
+my @filters;
+while (@ARGV) {
+  my $a = shift @ARGV;
+  if    ($a eq '--strict')          { $strict = 1 }
+  elsif ($a eq '--record')          { $record = 1 }
+  elsif ($a eq '--record-expected') { $rec_exp = 1 }
+  elsif ($a eq '--record-ir')       { $rec_ir = 1 }
+  elsif ($a eq '--backend')         { $backend = shift @ARGV;
+                                      # each case runs in a fresh temp cwd, so
+                                      # a command spelled relative to the
+                                      # INVOCATION directory has to be
+                                      # resolved here or it is "not found"
+                                      # (exit 127) for every case
+                                      if ($backend =~ /^(\S+)(.*)$/ && -e $1) {
+                                        $backend = abs_path($1) . $2;
+                                      } }
+  elsif ($a eq '--oracle')          { $oracle = 1 }
+  elsif ($a eq '--list')            { $list = 1 }
+  elsif ($a eq '--sample')          { $sample = shift @ARGV }
+  elsif ($a eq '--jobs')            { $jobs = shift @ARGV }
+  elsif ($a eq '-v' || $a eq '--verbose') { $verbose = 1 }
+  elsif ($a eq '-h' || $a eq '--help')    { usage(); exit 0 }
+  elsif ($a =~ /^-/) { die "ir-conform: unknown option $a (try --help)\n" }
+  else { push @filters, $a }
+}
+$rec_exp = $rec_ir = 1 if $record;
+die "ir-conform: --jobs must be a positive integer\n" if $jobs !~ /^[1-9][0-9]*$/;
+
+sub usage {
+  print <<"END";
+usage: tools/ir-conform [options] [FILTER...]
+  (no options)        run PCL's own CL target over the corpus
+  --oracle            run perl over the corpus (the corpus's self-test)
+  --backend CMD       run `CMD <case>.ir` over the corpus
+  --record            record .expected (perl) and .ir (pl2cl --emit-sexp)
+  --record-expected   record just .expected
+  --record-ir         record just .ir
+  --list              list the cases
+  --sample N          use an evenly spaced sample of N cases
+  --jobs N            N workers (default 1)
+  --strict            count the ir-conform/known-fail.tsv cases as failures
+  -v                  show each failure's diff
+FILTER is a substring of the case name; several are OR-ed.
+END
+}
+
+# ---------------------------------------------------------------- the corpus
+die "ir-conform: no corpus at $CASES\n" if ! -d $CASES;
+opendir my $dh, $CASES or die "ir-conform: opendir $CASES: $!\n";
+my @cases = sort map { s/\.pl$//r } grep { /\.pl$/ } readdir $dh;
+closedir $dh;
+die "ir-conform: the corpus is empty ($CASES)\n" if ! @cases;
+if (@filters) {
+  my @keep = grep { my $c = $_; grep { index($c, $_) >= 0 } @filters } @cases;
+  die "ir-conform: no case matches @filters\n" if ! @keep;
+  @cases = @keep;
+}
+if (defined $sample) {
+  die "ir-conform: --sample takes a positive integer\n" if $sample !~ /^[1-9][0-9]*$/;
+  if ($sample < @cases) {
+    my $n = scalar @cases;
+    my @k = map { $cases[int($_ * $n / $sample)] } 0 .. $sample - 1;
+    my %u; @cases = grep { !$u{$_}++ } @k;
+  }
+}
+
+if ($list) {
+  for my $c (@cases) {
+    my ($topic) = $c =~ /^\d+-(.+)$/;
+    my @r = rules_for($c);
+    printf "%-28s %-12s %s\n", $c, $topic // '?', (@r ? join(',', @r) : '-');
+  }
+  printf "%d cases\n", scalar @cases;
+  exit 0;
+}
+
+# ------------------------------------------------------- the known failures
+# Read once.  A row is `case<TAB>task<TAB>cause`; the file's header explains
+# the contract.  Only PCL's own target consults it -- an external backend's
+# failures are ITS business, and perl's oracle leg must be clean by
+# construction.
+my %KNOWN;
+{
+  my $f = "$ROOT/ir-conform/known-fail.tsv";
+  if (-f $f) {
+    open my $fh, '<', $f or die "ir-conform: $f: $!\n";
+    while (my $l = <$fh>) {
+      next if $l =~ /^\s*(?:#|$)/;
+      chomp $l;
+      my ($case, $task, $cause) = split /\t/, $l, 3;
+      die "ir-conform: $f: cannot parse: $l\n" if !defined $cause;
+      die "ir-conform: $f: $case is listed twice\n" if $KNOWN{$case};
+      $KNOWN{$case} = { task => $task, cause => $cause };
+    }
+    close $fh;
+  }
+}
+
+# ---------------------------------------------------------------- rules
+sub rules_for {
+  my ($case) = @_;
+  my $f = "$CASES/$case.rules";
+  return () if ! -f $f;
+  open my $fh, '<', $f or die "ir-conform: $f: $!\n";
+  my @r;
+  while (my $l = <$fh>) {
+    next if $l =~ /^\s*(?:#|$)/;
+    if ($l =~ /^\s*normalise\s+(\S+)\s*$/) {
+      my $n = $1;
+      die "ir-conform: $case.rules: unknown normalisation '$n' "
+        . "(known: die-location hex-address sort-lines)\n"
+        if $n !~ /^(?:die-location|hex-address|sort-lines)$/;
+      push @r, $n;
+    }
+    else { die "ir-conform: $case.rules: cannot parse: $l" }
+  }
+  close $fh;
+  return @r;
+}
+
+sub normalise {
+  my ($text, @rules) = @_;
+  for my $r (@rules) {
+    if    ($r eq 'die-location') { $text =~ s/ at \S+ line \d+\.?/ at FILE line N/g }
+    elsif ($r eq 'hex-address')  { $text =~ s/0x[0-9a-fA-F]{4,}/0xADDR/g }
+    elsif ($r eq 'sort-lines')   { $text = join '', sort map { "$_\n" } split /\n/, $text }
+    else { die "ir-conform: no such normalisation: $r\n" }   # rule 12
+  }
+  return $text;
+}
+
+# ---------------------------------------------------------------- .expected
+sub read_expected {
+  my ($case) = @_;
+  my $f = "$CASES/$case.expected";
+  # Rule 12: a claim that cannot be evaluated says so and dies; it is never
+  # counted as a pass and never skipped in silence.
+  die "ir-conform: $case has no .expected — run tools/ir-conform --record\n"
+    if ! -f $f;
+  open my $fh, '<:raw', $f or die "ir-conform: $f: $!\n";
+  my $head = <$fh>;
+  die "ir-conform: $f: not an ir-conform oracle (first line is not '$EXPECT_MAGIC …')\n"
+    if !defined $head || index($head, $EXPECT_MAGIC) != 0;
+  my ($exit) = $head =~ /\bexit=(\d+)/;
+  my ($len)  = $head =~ /\bbytes=(\d+)/;
+  die "ir-conform: $f: header has no exit= / bytes=\n" if !defined $exit || !defined $len;
+  my $out = do { local $/; <$fh> } // '';
+  close $fh;
+  die "ir-conform: $f: header says bytes=$len, file holds " . length($out) . "\n"
+    if length($out) != $len;
+  return ($exit, $out);
+}
+
+sub write_expected {
+  my ($case, $exit, $out) = @_;
+  open my $fh, '>:raw', "$CASES/$case.expected" or die $!;
+  printf $fh "%s exit=%d bytes=%d\n", $EXPECT_MAGIC, $exit, length($out);
+  print $fh $out;
+  close $fh;
+}
+
+# ---------------------------------------------------------------- the legs
+# Each leg returns (exit, stdout).  stderr is never compared (see the header).
+sub run_perl {
+  my ($case) = @_;
+  my $dir = tempdir(CLEANUP => 1);
+  my $out = qx{cd '$dir' && timeout $TIMEOUT perl '$CASES/$case.pl' 2>/dev/null};
+  return ($? >> 8, $out // '');
+}
+
+my $SBCL;
+sub sbcl_prefix_once {
+  $SBCL //= PCLSbcl::sbcl_prefix_str(runtime => "$ROOT/cl/pcl-runtime.lisp",
+                                     env_core => 1, quote => 0);
+  return $SBCL;
+}
+
+sub run_pcl {
+  my ($case) = @_;
+  my $dir = tempdir(CLEANUP => 1);
+  my $lisp = "$dir/case.lisp";
+  my $rc = system("perl -I'$ROOT' '$ROOT/pl2cl' --no-cache --lenient-ppi "
+                . "'$CASES/$case.pl' > '$lisp' 2>'$dir/tr.err'");
+  if ($rc != 0) {
+    my $e = slurp("$dir/tr.err");
+    return (-1, "TRANSPILE FAILED\n$e");
+  }
+  my $cmd = sbcl_prefix_once()
+          . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load '$lisp'";
+  my $out = qx{cd '$dir' && timeout $TIMEOUT $cmd 2>/dev/null};
+  return ($? >> 8, $out // '');
+}
+
+sub run_backend {
+  my ($case) = @_;
+  my $ir = "$CASES/$case.ir";
+  die "ir-conform: $case has no .ir — run tools/ir-conform --record-ir\n" if ! -f $ir;
+  my $dir = tempdir(CLEANUP => 1);
+  my $out = qx{cd '$dir' && timeout $TIMEOUT $backend '$ir' 2>/dev/null};
+  return ($? >> 8, $out // '');
+}
+
+sub slurp { my ($p) = @_; open my $f, '<:raw', $p or return ''; local $/; my $t = <$f> // ''; close $f; $t }
+
+# ---------------------------------------------------------------- record
+if ($rec_exp || $rec_ir) {
+  my ($n, $unstable) = (0, 0);
+  for my $case (@cases) {
+    if ($rec_exp) {
+      # recorded TWICE, under the case's own name; a case whose perl answer is
+      # not reproducible is a corpus bug, not something to bless.
+      my ($e1, $o1) = run_perl($case);
+      my ($e2, $o2) = run_perl($case);
+      my @r = rules_for($case);
+      if ($e1 != $e2 || normalise($o1, @r) ne normalise($o2, @r)) {
+        print "UNSTABLE  $case  (perl does not repeat itself; add a .rules "
+            . "normalisation or drop the case)\n";
+        $unstable++;
+        next;
+      }
+      write_expected($case, $e1, normalise($o1, @r));
+    }
+    if ($rec_ir) {
+      # run from the cases dir so the data form's provenance line carries the
+      # BASENAME, not this machine's path.
+      my $ir = qx{cd '$CASES' && perl -I'$ROOT' '$ROOT/pl2cl' --emit-sexp '$case.pl' 2>/dev/null};
+      if ($? != 0 || !length($ir)) {
+        print "NO-IR     $case  (pl2cl --emit-sexp failed)\n";
+      }
+      else {
+        open my $fh, '>:raw', "$CASES/$case.ir" or die $!;
+        print $fh $ir; close $fh;
+      }
+    }
+    $n++;
+  }
+  printf "recorded %d case%s%s\n", $n, ($n == 1 ? '' : 's'),
+         ($unstable ? "   ($unstable UNSTABLE, not recorded)" : '');
+  exit($unstable ? 1 : 0);
+}
+
+# ---------------------------------------------------------------- compare
+my $leg = $backend ? 'backend' : $oracle ? 'perl' : 'pcl';
+my $runner = $backend ? \&run_backend : $oracle ? \&run_perl : \&run_pcl;
+printf "ir-conform: %d case%s, target = %s%s\n",
+       scalar @cases, (@cases == 1 ? '' : 's'), $leg,
+       ($backend ? " ($backend)" : '');
+
+# Returns one of 'ok' / 'fail' / 'known' / 'stale', plus the explanation.
+sub check_one {
+  my ($case) = @_;
+  my ($want_exit, $want_out) = read_expected($case);
+  my @r = rules_for($case);
+  my ($got_exit, $got_out) = $runner->($case);
+  $got_out = normalise($got_out, @r);
+  # The known-fail table describes PCL's own target only.
+  my $known = ($leg eq 'pcl' && !$strict) ? $KNOWN{$case} : undef;
+  if ($got_exit == $want_exit && $got_out eq $want_out) {
+    return ('stale', "  the known-fail row (#$known->{task}) says this case "
+                   . "fails, and it PASSES — drop the row\n")
+      if $known;
+    return ('ok', '');
+  }
+  return ('known', "  #$known->{task}: $known->{cause}\n") if $known;
+  my $why = '';
+  $why .= "  exit: want $want_exit, got $got_exit\n" if $got_exit != $want_exit;
+  if ($got_out ne $want_out) {
+    $why .= "  stdout differs:\n";
+    my @w = split /\n/, $want_out;
+    my @g = split /\n/, $got_out;
+    for my $i (0 .. ($#w > $#g ? $#w : $#g)) {
+      my ($a, $b) = ($w[$i], $g[$i]);
+      next if defined $a && defined $b && $a eq $b;
+      $why .= sprintf("    line %d  want: %s\n            got:  %s\n",
+                      $i + 1, defined $a ? $a : '<none>', defined $b ? $b : '<none>');
+      last if $i > 12;
+    }
+  }
+  return ('fail', $why);
+}
+
+my %LABEL = (ok => 'ok   ', fail => 'FAIL ', known => 'known', stale => 'STALE');
+my (@fail, @stale, %count);
+sub record {
+  my ($case, $verdict, $why) = @_;
+  $count{$verdict}++;
+  print "$LABEL{$verdict} $case\n";
+  print $why if $verbose && length $why;
+  push @fail,  [$case, $why] if $verdict eq 'fail';
+  push @stale, [$case, $why] if $verdict eq 'stale';
+}
+
+if ($jobs > 1) {
+  # a tiny fork pool; each child writes one result to its own file
+  my $dir = tempdir(CLEANUP => 1);
+  my @queue = @cases;
+  my %kid;
+  while (@queue || %kid) {
+    while (@queue && keys(%kid) < $jobs) {
+      my $case = shift @queue;
+      my $pid = fork();
+      die "ir-conform: fork: $!\n" if ! defined $pid;
+      if (!$pid) {
+        my ($verdict, $why) = check_one($case);
+        open my $fh, '>:raw', "$dir/$case.res" or exit 1;
+        print $fh "$verdict\n$why"; close $fh;
+        exit 0;
+      }
+      $kid{$pid} = $case;
+    }
+    my $pid = wait();
+    last if $pid < 0;
+    my $case = delete $kid{$pid};
+    my $res = slurp("$dir/$case.res");
+    my ($verdict, $why) = split /\n/, $res, 2;
+    # rule 12: a worker that produced no verdict is not a pass
+    die "ir-conform: $case: the worker produced no verdict\n"
+      if !defined $verdict || !$LABEL{$verdict};
+    record($case, $verdict, $why // '');
+  }
+}
+else {
+  record($_, check_one($_)) for @cases;
+}
+
+print "\n";
+if (!$verbose) {
+  if (@fail)  { print "failures:\n";      print "  $_->[0]\n" for @fail }
+  if (@stale) { print "STALE known-fail rows (they PASS — drop them):\n";
+                print "  $_->[0]\n" for @stale }
+}
+printf "TOTAL: %d pass, %d fail, %d known, %d stale (of %d)\n",
+       $count{ok} // 0, $count{fail} // 0, $count{known} // 0,
+       $count{stale} // 0, scalar @cases;
+exit((@fail || @stale) ? 1 : 0);

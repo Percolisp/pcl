@@ -1,0 +1,4 @@
+(|p-data-form| 1 "336-string-eval.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$q| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$q| (|p-eval| "1/3" (|list| (|cons| "$q" |$q|)))) (|p-print| (|p-list-ctx| (|p-ref| (|p-backslash| |$q|))) "\n") (|p-print| (|p-string-concat| "val=" |$q| "\n")) (|p-printf| "[%-8s]\n" |$q|))
+(|p-data-form-end| 1 1)

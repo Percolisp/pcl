@@ -1,0 +1,4 @@
+(|p-data-form| 1 "076-closures.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:scalar| 0)) (|p-foreach-range-raw| (|$i| 1 3) |:dyn| |t| |:my| |t| (|p-incf-raw| |$n| |:numeric|) (|p-let| ((|$c| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$c| (|lambda| (|&rest| |%_args|) (|let| ((|@_| (|p-flatten-args| |%_args|)) (|*pcl-current-package*| "main") (|*pcl-caller-wantarray*| |*wantarray*|)) (|p-sub-frame| (|block| |nil| (|%p-dyn-loop-exit| |:last|)))))) (|p-void-ctx| (|p-funcall-ref| |$c|)) (|p-incf-raw| |$n| 100 |:numeric|))) (|p-print| (|p-string-concat| "n=" |$n| "\n")))
+(|p-data-form-end| 1 1)

@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=85
+usersub: bb aa
+usersub-local: ok
+keys: a,b
+values: 2!,1!
+map: 3 1 2
+split-var: b! a!

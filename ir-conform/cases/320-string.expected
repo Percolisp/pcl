@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=0 bytes=22
+len=3
+overlong-print:

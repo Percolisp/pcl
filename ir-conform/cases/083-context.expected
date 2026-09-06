@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=75
+first  nargs=0
+any    nargs=0
+all    nargs=0
+none   nargs=0
+notall nargs=0

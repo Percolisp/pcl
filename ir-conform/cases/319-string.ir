@@ -1,0 +1,6 @@
+(|p-data-form| 1 "319-string.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"warnings\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$utf| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$utf| (|p-.| (|p-chr| 2147483649) (|p-chr| 2147483648))) (|p-let| ((|$result| |:str| (|%pcl-to-string-strict| (|p-chop| |$utf|) "$result"))) (|p-print| "remnant-ok: " (|p-if| (|p-str-eq| |$utf| (|p-chr| 2147483649)) 1 0) "\n") (|p-print| "result-ok: " (|p-if| (|p-str-eq| |$result| (|p-chr| 2147483648)) 1 0) "\n") (|p-my-=| |$utf| (|p-.| (|p-chr| 9223372036854775807) (|p-chr| 9223372036854775806))) (|setf| |$result| (|%pcl-to-string-strict| (|p-chop| |$utf|) "$result")) (|p-print| "hi-remnant-ok: " (|p-if| (|p-str-eq| |$utf| (|p-chr| 9223372036854775807)) 1 0) "\n") (|p-print| "hi-result-ok: " (|p-if| (|p-str-eq| |$result| (|p-chr| 9223372036854775806)) 1 0) "\n")))
+(|p-data-form-end| 2 2)

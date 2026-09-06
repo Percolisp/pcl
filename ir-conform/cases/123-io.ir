@@ -1,0 +1,4 @@
+(|p-data-form| 1 "123-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$d| |:str| (|%pcl-to-string-strict| (|p--d| "t") "$d"))) (|p-print| "d=" (|p-if| |$d| 1 0) " errno-after-filetest=" (|p-+| (|p-errno-string|) 0) "\n") (|p-and| (|p-and| (|p-open| |F| ".") (|p-binmode| |F|)) (|p-sysread| |F| |$_| 1)) (|p-let| ((|$err| |:scalar| (|p-+| (|p-errno-string|) 0))) (|p-print| (|p-string-concat| "err=" |$err| "\n")) (|p-close| |F|)))
+(|p-data-form-end| 1 0)

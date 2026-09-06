@@ -1,0 +1,8 @@
+(|p-data-form| 1 "080-context.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-t|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-t| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| (|:io|)) (|p-args-body| (|block| |nil| (|p-void-ctx| (|p-let| ((|$x| |:box| (|p-cl-text| "(make-p-box nil)")) (|@c| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-scalar-ctx| (|p-list-=| (|vector| |$x| |@c|) |@_|)) (|p-foreach-raw| (|$r| |@c|) |:my| |t| (|p-print| |$r|)))))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-void-ctx| (|pl-t| 1 2 3))
+(|p-data-form-end| 3 2)

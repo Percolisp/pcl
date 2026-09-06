@@ -1,0 +1,4 @@
+(|p-data-form| 1 "067-autoviv.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|make-p-box| (|p-array-init| 1 2 (|make-p-box| (|p-hash| "k" "z"))))) (|p-.=| (|p-gethash| (|p-aref-deref| |$r| -1) "k") "y") (|p-print| (|p-string-concat| "k=" (|p-gethash| (|p-aref-deref| |$r| -1) "k") " #=" (|p-array-last-index| |$r|) "\n")))
+(|p-data-form-end| 1 1)

@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=0 bytes=49
+P12 5/5 keysmatch
+P12b ,42,HASH(0xADDR),O7,plain

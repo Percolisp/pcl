@@ -1,0 +1,8 @@
+(|p-data-form| 1 "198-misc.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-inner|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-inner| (|&rest| |%_args|) (|:returns| |:num| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| 1)))
+(|p-bucket| 0 |:run| |:run|)
+(|p-print| (|p-list-ctx| (|Foo::pl-inner|)) "\n")
+(|p-data-form-end| 3 0)

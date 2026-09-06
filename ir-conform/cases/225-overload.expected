@@ -1,0 +1,8 @@
+#!ir-conform/expected v1 exit=0 bytes=63
+AB
+T
+7 7 7.5
+3.0000 1.0000 0.0000
+2.7183 0.0000 0.7854
+TFT
+1||

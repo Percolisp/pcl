@@ -1,0 +1,4 @@
+(|p-data-form| 1 "257-regex.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:scalar| 3)) (|p-print| (|p-string-concat| "fib: " |$n| "\n")) (|p-let| ((|$s| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$s| "a\tb") (|p-if| (|p-scalar-ctx| (|p-=~| |$s| (|p-regex| |:pat| "(\\w+)\\s+" |:flags| "" |:tier| |:native|))) (|progn| (|p-print| (|p-string-concat| "m=" |$1| "\n")))) (|p-=~| |$s| (|p-subst| |:pat| "a" |:rep| "X" |:flags| "g" |:tier| |:native|)) (|p-=~| |$s| (|p-tr| |:from| "b" |:to| "Y" |:flags| "")) (|p-let| ((|$re| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$re| (|pcl::p-qr| |:pat| "ab+c" |:flags| "i" |:tier| |:native|)) (|p-print| (|p-string-concat| |$s| "|" |$re| "\n")) (|p-let| ((|$p| |:scalar| "dyn")) (|p-if| (|p-scalar-ctx| (|p-=~| "dyn" (|pcl::p-regex-from-parts| |:pat| |$p| |:flags| "" |:tier| |:dynamic|))) (|p-print| "yes\n")) (|p-print| "heredoc line1\nline2\n")))))
+(|p-data-form-end| 1 2)

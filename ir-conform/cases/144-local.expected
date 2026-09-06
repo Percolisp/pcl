@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=79
+A: died def=0 x0=viv
+B-in: 5
+B: ok after=undef y0=viv
+C: ok def=1
+D: ok w0=viv

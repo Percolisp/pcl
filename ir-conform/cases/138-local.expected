@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=341
++> ok=1 print=1 seek=1 defined=1 read=[hello] warns=[]
++< ok=1 print=1 seek=1 defined=1 read=[hello] warns=[]
+> ok=1 print=1 seek=1 defined=1 read=[hello] warns=[Filehandle $fh opened only for output]
+< ok=1 print=0 seek=1 defined=0 read=[] warns=[Filehandle $fh opened only for input]
+>> ok=1 print=1 seek=1 defined=1 read=[hello] warns=[]

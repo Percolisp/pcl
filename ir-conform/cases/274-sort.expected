@@ -1,0 +1,6 @@
+#!ir-conform/expected v1 exit=0 bytes=76
+sub-values: 2,1
+sub-array: 3 1 2
+return-sort: 3 1 2
+push: 3 1 2
+anon: 3 1 2

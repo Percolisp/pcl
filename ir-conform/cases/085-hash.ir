@@ -1,0 +1,8 @@
+(|p-data-form| 1 "085-hash.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-gcd|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-gcd| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| (|:nonlocal_exit.return|)) (|p-raw-params| ((|$x| |:scalar|) (|$y| |:scalar|)) (|block| |nil| (|p-void-ctx| (|p-if| (|p->| |$x| |$y|) (|p-return| (|pl-gcd| (|p--| |$x| |$y|) |$y|))) (|p-if| (|p-<| |$x| |$y|) (|p-return| (|pl-gcd| |$x| (|p--| |$y| |$x|)))) (|p-caller-ctx| |$x|)))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$n| (|p-gethash| |%ENV| "N")) (|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| 0) (|p-cl-text| ";; $r += gcd($_ % 97 + 1, 89) for 1 .. $n\n(p-foreach ($_ (p-.. 1 $n)) (p-incf $r (p-void-ctx (pl-gcd (p-+ (p-% $_ 97) 1) 89))))") (|p-print| (|p-string-concat| |$r| "\n"))))
+(|p-data-form-end| 3 3)

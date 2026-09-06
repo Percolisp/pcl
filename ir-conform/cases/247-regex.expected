@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=0 bytes=12
+0
+(?^:ab) 1

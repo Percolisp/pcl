@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=52
+P15a R0P0;R1P1;R2P2;R3P3;
+P15b 140
+P15c keysmatch 4

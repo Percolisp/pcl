@@ -1,0 +1,8 @@
+(|p-data-form| 1 "075-closures.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-foo|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-foo| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| ()) (|p-raw-params| ((|$b__excl__0| |:scalar| |:perl| "$b" |:why| |:exception-global|)) (|block| |nil| (|p-funcall-ref| |$b__excl__0|))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$n| |:scalar| 0)) (|let| ((|*package*| |*package*|)) (|p-dyn-once| (|block| |nil| (|tagbody| |:redo| (|p-incf-raw| |$n| |:numeric|) (|p-void-ctx| (|pl-foo| (|lambda| (|&rest| |%_args|) (|let| ((|@_| (|p-flatten-args| |%_args|)) (|*pcl-current-package*| "main") (|*pcl-caller-wantarray*| |*wantarray*|)) (|p-sub-frame| (|block| |nil| (|%p-dyn-loop-exit| |:next|))))))) (|p-incf-raw| |$n| 100 |:numeric|) |:next|)))) (|p-print| (|p-string-concat| "n=" |$n| "\n")))
+(|p-data-form-end| 3 0)

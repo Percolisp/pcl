@@ -1,0 +1,13 @@
+#!ir-conform/expected v1 exit=0 bytes=220
+asc:1 2 3 desc:3 2 1 cmpa:1 2 3 cmpd:3 2 1 def:1 2 3
+keys:aa bb cc
+join:1|2|3
+anon:3 2 1
+ret:1,2,3
+mixnum:abc,U,3x,9,10
+mixstr:U,10,3x,9,abc
+nan:1,2,3,NaN nand:3,NaN,2,1
+stable:b d a c
+eqkeys:1,1,2,2
+ab:UU
+srcsame:3 1 2

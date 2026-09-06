@@ -1,0 +1,4 @@
+#!ir-conform/expected v1 exit=0 bytes=33
+plain=1
+paren=1
+take[call-arg]=1

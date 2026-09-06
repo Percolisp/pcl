@@ -1,0 +1,7 @@
+(|p-data-form| 1 "127-local.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"strict\"))")
+(|p-cl-text| "(p-eval-always (p-note-inc \"warnings\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-foreach-raw| (|$dir| (|vector| "emit-base" "emit-new")) |:my| |t| (|p-let| ((|$plet| |:box| (|p-cl-text| "(make-p-box nil)")) (|$psub| |:box| (|p-cl-text| "(make-p-box nil)")) (|$praw| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-scalar-ctx| (|p-list-=| (|vector| |$plet| |$psub| |$praw|) (|vector| 0 0 0))) (|p-foreach-raw| (|$f| (|p-list-ctx| (|p-glob| (|p-string-concat| "scratch/s469bg/" |$dir| "/*.lisp")))) |:my| |t| (|p-let| ((|$fh| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-or| (|p-open| |$fh| "<:raw" |$f|) (|p-next|)) (|p-cl-text-wrap| ";; local $/\n(let (($/ (make-p-box nil)))" 1 (|p-let| ((|$s| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$s| (|p-scalar-ctx| (|p-readline| |$fh|))) (|p-void-ctx| (|p-incf| |$plet| (|p-list-=| (|vector|) (|p-list-ctx| (|p-=~| |$s| (|p-regex| |:pat| "\\(p-let[\\s(]" |:flags| "g" |:tier| |:native|)))))) (|p-void-ctx| (|p-incf| |$psub| (|p-list-=| (|vector|) (|p-list-ctx| (|p-=~| |$s| (|p-regex| |:pat| "\\(p-sub[\\s(]" |:flags| "g" |:tier| |:native|)))))) (|p-void-ctx| (|p-incf| |$praw| (|p-list-=| (|vector|) (|p-list-ctx| (|p-=~| |$s| (|p-regex| |:pat| "\\(p-raw-params[\\s(]" |:flags| "g" |:tier| |:native|)))))))))) (|p-printf| "%-9s p-let=%-5d p-sub=%-4d p-raw-params=%d\n" |$dir| |$plet| |$psub| |$praw|)))
+(|p-data-form-end| 3 8)

@@ -1,0 +1,7 @@
+(|p-data-form| 1 "293-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-printf| "[%-8s]\n" (|p-/| 1 3))
+(|p-printf| "[%8s]\n" (|p-/| 1 3))
+(|p-printf| "[%s]\n" (|p-/| 1 3))
+(|p-let| ((|$x| |:scalar| (|p-/| 1 3))) (|p-printf| "[%-8s]\n" |$x|))
+(|p-data-form-end| 4 0)

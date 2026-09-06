@@ -1,0 +1,4 @@
+(|p-data-form| 1 "233-refs.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-let| ((|$s| |:scalar| (|p-string-concat| "x" (|p-join| |$"| (|p-cast-@| (|make-p-box| (|p-array-init| (|%p-push1| |@a| 99))))) "y\n"))) (|%p-push1| |@a| 1) (|p-print| (|p-string-concat| |$s| (|p-join| |$"| |@a|) "\n"))))
+(|p-data-form-end| 1 1)

@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=0 bytes=33
+01 ++      val=1 outer=1 inner=1

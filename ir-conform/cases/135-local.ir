@@ -1,0 +1,7 @@
+(|p-data-form| 1 "135-local.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-note-inc \"warnings\"))")
+(|p-cl-text| "(p-eval-always (p-note-inc \"strict\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|let| ((|*package*| |*package*|)) (|block| |nil| (|tagbody| |:redo| (|p-let| ((|@x| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-void-ctx| (|p-eval-block| (|p-array-deref-=| (|p-cast-@| (|progn| 1 (|p-scalar-ctx| (|pl-local| (|p-aref-argbox| (|p-aref-argbox| |@x| 0) 0))))) 1))) (|p-print| "done\n")) |:next|)))
+(|p-data-form-end| 3 3)

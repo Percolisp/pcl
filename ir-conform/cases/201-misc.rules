@@ -1,0 +1,2 @@
+# normalisations the oracle needs; see tools/ir-conform
+normalise die-location

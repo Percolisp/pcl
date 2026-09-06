@@ -1,0 +1,8 @@
+(|p-data-form| 1 "291-sprintf.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-have|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-have| (|&rest| |%_args|) (|:returns| |:num| |:wantarray-insensitive| |t| |:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| 1)))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@a| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-array-=| |@a| (|vector| 1 2)) (|p-let| ((|$ar| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$ar| (|make-p-box| (|p-array-init| 1 2))) (|p-printf| "sub yes   => %s def=%d\n" (|p-sub-exists| "main" "have") (|p-if| (|p-defined| (|p-sub-exists| "main" "have")) 1 0)) (|p-printf| "sub no    => [%s] def=%d\n" (|p-sub-exists| "main" "nope") (|p-if| (|p-defined| (|p-sub-exists| "main" "nope")) 1 0)) (|p-printf| "ary in    => %s def=%d\n" (|p-exists-array| |@a| 0) (|p-if| (|p-defined| (|p-exists-array| |@a| 0)) 1 0)) (|p-printf| "ary out   => [%s] def=%d\n" (|p-exists-array| |@a| 9) (|p-if| (|p-defined| (|p-exists-array| |@a| 9)) 1 0)) (|p-printf| "aryref out=> [%s] def=%d\n" (|p-exists-array| (|unbox| |$ar|) 9) (|p-if| (|p-defined| (|p-exists-array| (|unbox| |$ar|) 9)) 1 0)) (|p-let| ((|$cr| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$cr| (|p-backslash-sub| (|quote| |pl-have|))) (|p-printf| "coderef   => %s def=%d\n" (|p-coderef-exists-p| |$cr|) (|p-if| (|p-defined| (|p-coderef-exists-p| |$cr|)) 1 0)) (|p-printf| "env no    => [%s] def=%d\n" (|p-exists| |%ENV| "NO_SUCH_VAR_XYZ") (|p-if| (|p-defined| (|p-exists| |%ENV| "NO_SUCH_VAR_XYZ")) 1 0)) (|p-printf| "env yes   => %s def=%d\n" (|p-exists| |%ENV| "PATH") (|p-if| (|p-defined| (|p-exists| |%ENV| "PATH")) 1 0)))))
+(|p-data-form-end| 3 3)

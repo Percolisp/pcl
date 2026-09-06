@@ -1,0 +1,3 @@
+#!ir-conform/expected v1 exit=0 bytes=34
+d=0 errno-after-filetest=2
+err=21

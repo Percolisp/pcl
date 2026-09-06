@@ -1,0 +1,7 @@
+#!ir-conform/expected v1 exit=0 bytes=50
+fib: 3
+m=a
+X	Y|(?^i:ab+c)
+yes
+heredoc line1
+line2

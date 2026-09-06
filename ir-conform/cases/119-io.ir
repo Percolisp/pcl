@@ -1,0 +1,7 @@
+(|p-data-form| 1 "119-io.pl" "program" "v2-830")
+(|p-bucket| 0 |:captured| |:compile|)
+(|p-cl-text| "(p-eval-always (p-use-open (vector \":std\" \":utf8\")))")
+(|p-cl-text| "(p-eval-always (p-note-inc \"open\"))")
+(|p-bucket| 0 |:run| |:run|)
+(|p-print| "hi\n")
+(|p-data-form-end| 3 2)

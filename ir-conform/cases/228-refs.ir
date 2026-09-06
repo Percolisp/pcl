@@ -1,0 +1,8 @@
+(|p-data-form| 1 "228-refs.pl" "program" "v2-830")
+(|p-bucket| 0 |:decls| |:compile|)
+(|p-declare-sub| |pl-g|)
+(|p-bucket| 0 |:defs| |:compile|)
+(|p-sub| |pl-g| (|&rest| |%_args|) (|:writes-args| |nil| |:needs| ()) (|p-args-body| (|block| |nil| (|p-aref| |@_| 0))))
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|$r| |:box| (|p-cl-text| "(make-p-box nil)"))) (|p-my-=| |$r| (|make-p-box| (|p-hash|))) (|p-let| ((|$t| |:scalar| 0)) (|p-foreach-range-raw| (|$n| 1 3) |:my| |t| (|p-let| ((|$k| |:str| (|%pcl-to-string-strict| (|p-scalar-ctx| (|pl-g| |$n|)) "$k"))) (|p-incf-raw| |$t| (|p-gethash-deref| |$r| |$k|)))) (|p-print| (|p-string-concat| |$t| "\n"))))
+(|p-data-form-end| 3 1)

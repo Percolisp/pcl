@@ -1,0 +1,5 @@
+#!ir-conform/expected v1 exit=0 bytes=117
+copy: x=7 y-after-copy=1 2 s1=S1
+codecopy: s1=B2
+clearcopy: z=cleared created=no
+undef-of-nothing: created=no arr=no

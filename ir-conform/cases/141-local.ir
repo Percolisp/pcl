@@ -1,0 +1,4 @@
+(|p-data-form| 1 "141-local.pl" "program" "v2-830")
+(|p-bucket| 0 |:run| |:run|)
+(|p-let| ((|@y| |:array| (|p-cl-text| "(make-array 0 :adjustable t :fill-pointer 0)"))) (|p-void-ctx| (|p-eval-block| (|p-cl-text-wrap| ";; local $y[0][0] = 5\n(p-local-array-elem-init @y 0 5" 1 (|p-print| (|p-string-concat| "B-in: " (|p-aref| (|p-aref| |@y| 0) 0) "\n"))))) (|p-print| "after=" (|p-if| (|p-defined| (|p-aref| (|p-aref| |@y| 0) 0)) "def" "undef") " y0=" (|p-if| (|p-defined| (|p-aref| |@y| 0)) "viv" "undef") "\n"))
+(|p-data-form-end| 1 2)

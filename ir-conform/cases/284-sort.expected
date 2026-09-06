@@ -1,0 +1,2 @@
+#!ir-conform/expected v1 exit=0 bytes=37
+[u][u][5][5]()(3,4)(3,4){}{j,k}{j,k}
