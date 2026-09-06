@@ -110,6 +110,132 @@ drops 5 unchanged, 6 shape files identical; `tools/tag-license --check` exit 0;
 `tools/rebuild-pack --help` exit 0.  No generation bump — nothing under `Pl/` or
 `cl/` changed but comments.
 
+## Session 470bw (Opus agent, 2026-09-06) — #1261: a cached module transpile is only valid while its DEPENDENCIES still hash as read
+
+The USER's question after #1188 — "aren't cached compiled Perl modules
+sensitive to changes in modules they load?" — has a yes for an answer, and the
+hole predates the fasl cache.  A module A's *parse* consumes facts about the
+modules it `use`s: a `(&@)` prototype makes a trailing block a code ref, an
+empty prototype makes a bareword a TERM, and a bareword is a CALL only for a
+known exported sub.  So A's emitted CL encodes B's prototypes and exports —
+while A's cache key was A's own absolute path plus the generation, and its
+validity check was A's own mtime.  Nothing about B anywhere.
+
+**Reproduced before anything was written**, on both cache layers, editing B
+only (A's mtime never moves):
+
+| B edited | perl | PCL, base tree, `.lisp` cache and fasl alike |
+|---|---|---|
+| — | `CODE:1 ZAP\|1` | `CODE:1 ZAP\|1` |
+| `(&@)` prototype dropped | `HASH:1 ZAP\|1` | `CODE:1 ZAP\|1` — **silently stale** |
+| export dropped | `CODE:1 zap\|1` | **crash**: `Undefined subroutine &A2::zap called` |
+
+perl re-parses A on every run, so perl is the oracle throughout.  A second
+probe settled the layer below: `Pl::ProtoCache`, the transpiler's own on-disk
+memo of a module's parse facts, is *not* a second hole of the same shape — it
+already records every dependency its walk resolved and re-resolves and re-stats
+each one, so transpiling A twice across a B edit gives one `lambda` and then
+none.  What it lacked was a consumer on the runtime side.
+
+**Half 1 — the dependency manifest.**  There is exactly one dependency walk in
+the compiler and it is ProtoCache's frames (#560), so the fix brackets it one
+level higher: `pl2cl` wraps a whole transpile in one *outermost*
+`begin_walk`/`end_walk`, and the frames that already report each nested
+prototype walk now report to a frame standing for this source.  `end_walk` is
+then the transitive list of every module and file whose facts the transpile
+read.  `pl2cl --deps FILE` writes it beside the cached emission as
+`<key>.deps`; `p-cache-valid-p` — the one validity predicate, used for both the
+`.lisp` and the fasl — re-hashes each entry at load.  The same list is
+`pl2cl --manifest`'s new `depends`: one walk, two consumers.
+
+The hash is *content* (MD5), never an mtime, because a `git checkout` restores
+an old mtime and a stale dependent is exactly the silent-wrong this project
+refuses; Digest::MD5 is core on one side and `sb-md5` a contrib on the other,
+so both ends compute the same string.  It costs nothing measurable: `use
+JSON::PP`, which has nine dependencies, reads 0.999 s warm with the check
+against 1.118 s on the base tree without it.  A missing or unparseable
+manifest makes the entry invalid rather than trusted (rule 12) — which is also
+what every entry written before this session looks like.  Transitivity is
+free, because B is validated when B itself loads.
+
+The seven-day age clause came *out* of `p-cache-valid-p` in the same change: it
+was a stand-in for the staleness the manifest now states directly, and leaving
+it would both re-transpile a correct cache weekly and make "an untouched module
+is a HIT" untestable.  `p-cleanup-old-cache` still prunes by write date; that
+is disk hygiene, not validity.
+
+**Half 2 — which entries are compiled to native code**, ruled by Fable mid-session
+as two directory lists in `PERL5LIB` syntax rather than a policy word:
+`PCL_COMPILE_DIRS` (`*` = all; unset = perl's installed library directories
+plus PCL's own `lib/`) and `PCL_NO_COMPILE_DIRS`, which wins on any match
+(`*` = compile nothing).  `PCL_NO_FASL_CACHE=1` is kept as the alias of the
+latter's `*`.  A module that is not compiled still gets the `.lisp` cache and
+the manifest check and loads from its text — correctness is Half 1; this is a
+belt, because a module reached through `use lib`/`-I`/`PERL5LIB` is very likely
+being edited and a fasl is the most opaque artifact PCL writes.
+
+The default's directory list is *not* `*p-core-inc-dirs*`, and that is a
+measurement rather than a preference: that list is pl2cl's own `@INC` as the
+preamble found it, so `PERL5LIB=/tmp ./pl2cl prog.pl` puts `/tmp` in it —
+exactly the directories a developer edits in.  The installed set comes from
+`%Config`'s six `*libexp` keys plus PCL's `lib/`, computed by one classifier on
+the transpiler side, whose verdict reaches the runtime in the manifest's
+`source` line.  Module entries also moved to `<cache>/modules/`, beside
+`<cache>/core/` and `<cache>/proto/` — free at this moment and never again,
+since every pre-manifest entry was invalid anyway.
+
+**A guard can be weakened by a default, not only by an edit.**  #1188's five
+ordering cases run each fixture through "the fasl build pass" and "the fasl
+hit", and those fixtures live in a tempdir: under the new default both passes
+would have taken the TEXT path, and all fifteen rows would have kept passing
+while testing nothing.  Every fasl-path row now passes `PCL_COMPILE_DIRS='*'`
+explicitly, and the default is asserted by rows of its own.
+
+Bars: gate 213 files / 7359 rows (only the 13 pclxs xs rows; +26 guard rows
+over main's 7333); `corpus-diff.pl 9ee95f2` emission identical across 111 files
+with silent drops 5 unchanged; `emission-ab --shapes` over `lib/` 28 SAME / 0
+DIFF / 0 RCDIFF; `ir-host-leak.pl` 31 symbols over 111 files, the standing
+number.  The full sweep (`--jobs 4`) is GATE clean at TOTAL passing 18646
+(+0), drops 5 = census, shortfall +0 — and its four UNSTABLE plus fifteen
+unverified rows reproduce byte for byte on a `git archive 9ee95f2` extraction,
+so they are pre-existing crash-file noise measured rather than asserted.  The
+companion legs (`op/require.t op/do.t op/inccode.t op/incfilter.t
+op/require_errors.t`, `--jobs 1`) are identical file for file to the same run
+on that extraction, ROW DIFF 0 NEW / 0 FIXED / 0 UNVERIFIED / 0 LOST.
+`Pl/t/module-fasl-cache-01.t` 22 → 42 rows and `Pl/t/manifest-01.t` 47 → 53,
+inverse-verified on the extraction: twelve rows fail there, exactly the new
+behaviour.  `docs/ir-spec.md` §9.2b states the cache entry, its key, its
+validity rule, the manifest's form and the two directory lists — the one place
+#1262's user page cites.
+
+**One bug the board pair found, and fixed here — #1286.**  Reading the cold
+and warm board runs against the blessed s467 state turned up one dist that
+differed from the base tree: `Scalar-List-Utils t/first.t`, `PARTIAL 12 1` on
+`9ee95f2` and a 120-second timeout on this tree.  Bisected hunk by hunk against
+the extraction: the flip follows #1261's compile-dirs hunks *even in a probe
+that never calls the new code*, and a hundred inert defuns of the same size do
+not reproduce it — so the trigger was an image knife-edge in SBCL's
+disabled-debugger backtrace print, which on one tree finishes and exits and on
+the other re-exhausts the binding stack and loops.
+
+The *cause*, in both directions, was underneath: `lib/List/Util.pm` called its
+block as `$code->($_)`, passing the element as an argument.  perl sets `$_` and
+passes nothing — probed, `scalar(@_)` is 0 for first, any, all, none and
+notall alike.  That is invisible in the `{ BLOCK }` form and fatal in the
+`\&NAME` form, and first.t has exactly that shape: `sub rec { my $n = shift;
+if (!defined($n)) { return 1 } … $v = first \&rec, 1,2 }` saw the element where
+perl gives undef and recursed forever.  With the shim fixed the file scores 23
+of 24 rows instead of 12, and the knife-edge goes with the recursion.  Guard:
+`Pl/t/misc-fixes-02.t` 126 → 127.
+
+Two further findings filed from the probes, both pre-existing: **#1284**, `pcl -I DIR`
+does not reach a *module's* own transpile (the runtime spawns `perl pl2cl
+--module` with no `-I`, so a module's own `use` does not resolve at transpile
+time and its dependency's parse facts are silently lost; `PERL5LIB` works only
+because the child inherits the environment), and **#1285**, a declared sub with
+no prototype followed by a block — perl builds an anonymous hash, PCL passes
+the block's value, the other half of #478.
+
 ## Session 471a (Opus agent, 2026-09-06) — #1273: ONE resolution of an array subscript (t/run/fresh_perl.t 0/0 → 60/31, a 59-row regression closed); then #1271, a failed `open` autovivifies its lexical
 
 **#1273 — the store path was handing -1 straight to `AREF`, and the reason is a
