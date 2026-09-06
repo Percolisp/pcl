@@ -1595,7 +1595,7 @@ op/isa.t	14	0	14	0	OK		0
 op/join.t	43	0	41	2	DIFF		0
 op/kill0.t	9	0	6	3	DIFF		0
 op/kvaslice.t	38	0	23	15	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
-op/kvhslice.t	39	0	19	19	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
+op/kvhslice.t	39	0	21	18	DIFF	s473t1 #1024: a lone BAREWORD key in a kv-slice was compiled as a SUB CALL (_kv_slice_node never called _parse_subscript_ix), so rows 157/158 died and the `eval` at line 53 took its assertion with it.  +2 pass, -1 fail, +1 row.  Was: s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
 op/lc.t	2716	0	2685	31	DIFF		0
 op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
 op/length.t	49	0	35	12	DIFF		0
@@ -1614,7 +1614,7 @@ op/magic-27839.t	2	0	2	0	OK		0
 op/magic.t	207	1	176	31	DIFF		0
 op/method.t	163	0	103	22	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
 op/mkdir.t	17	0	17	0	OK		0
-op/multideref.t	65	0	41	11	DIFF	s470bv: BISECTED over 19d42836..614c6af (8 steps) to 0d1b5c18 = s470bk #1058.  The two rows are "RT #130727 array not autovivified" and its part 2 -- an ACCEPTED DIVERGENCE (DECIDED s470, not-supported.md "local on hash/array elements and typeglobs", cl/skip-registry.lisp) that used to pass by ACCIDENT.  No task | aborted-forms:1: invalid number of arguments: N	0
+op/multideref.t	65	0	53	12	DIFF	s473t1 #1431: `exists +(EXPR)->[..]{..}` lowered to a ONE-argument (p-exists VALUE) and the raw CL arity error aborted the file's whole top-level form at test 52, so 13 rows never ran (exists: general, the six delete:*, the six !exists:*).  12 of the 13 now PASS; `delete: const indices` fails on the pre-existing `local`-not-restored rows above it (not-supported.md '`local` on hash/array elements and typeglobs').  Was: s470bv: BISECTED over 19d42836..614c6af (8 steps) to 0d1b5c18 = s470bk #1058.  The two rows are "RT #130727 array not autovivified" and its part 2 -- an ACCEPTED DIVERGENCE (DECIDED s470, not-supported.md "local on hash/array elements and typeglobs", cl/skip-registry.lisp) that used to pass by ACCIDENT.  No task | aborted-forms:1: invalid number of arguments: N	0
 op/my.t	59	0	52	7	DIFF		0
 op/my_stash.t	9	0	4	3	DIFF	aborted-forms:2: The function Foo::pl-runperl is undefined.	0
 op/mydef.t	2	0	0	2	DIFF		0

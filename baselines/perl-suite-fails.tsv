@@ -173,6 +173,18 @@
 #   run/runenv_randseed.t -1, op/tiearray.t +15: the causes are in
 #   baselines/perl-suite-run.tsv column 7 (tasks #1429, #1430, #1236, #1043, the
 #   s470bs filetest operand resolver) and DECIDED §s473.
+# s473t1 (2026-09-07): SIXTEEN rows LEFT BY EDIT -- they PASS.
+#   op/multideref.t 13 (exists: general, the six delete:*, the six !exists:*,
+#     plus *summary*) -- task #1431: `exists +($r//0)->[$i]{$k}` emitted a
+#     ONE-argument (p-exists VALUE) because _elem_container_key did not see
+#     through the unary `+`, and the raw CL "invalid number of arguments: 1"
+#     aborted the file's whole top-level form at test 52.  The 13 rows never
+#     RAN; 12 pass now and `delete: const indices` fails on the pre-existing
+#     `local`-not-restored rows above it (it stays in the fail baseline).
+#   op/kvhslice.t 3 (lines 157/158 + *summary*) -- task #1024: a lone BAREWORD
+#     key in a kv-slice was compiled as a SUB CALL.
+#   Both measured `tools/run-perl-suite.pl --jobs 1`, parallel and serial
+#   (#366) agreeing: multideref 41/11 -> 53/12, kvhslice 19/19 -> 21/18.
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -4477,9 +4489,6 @@ op/kvaslice.t	25	ok	not ok	local dies
 op/kvaslice.t	27	ok	not ok	not allowed as result of lvalue sub
 op/kvaslice.t	36	ok	not ok	values %array[ix] forbidden
 op/kvaslice.t	28	ok	not ok	warning in scalar context
-op/kvhslice.t	0	(none)	renumbered	*summary*
-op/kvhslice.t	29	ok	not ok [PCL #28]	[at t/op/kvhslice.t line 157]
-op/kvhslice.t	30	ok	not ok [PCL #29]	[at t/op/kvhslice.t line 158]
 op/kvhslice.t	10	ok	not ok	[at t/op/kvhslice.t line 50]
 op/kvhslice.t	12	ok	not ok	[at t/op/kvhslice.t line 55]
 op/kvhslice.t	13	ok	(missing)	[at t/op/kvhslice.t line 56]
@@ -4788,25 +4797,12 @@ op/method.t	141	ok	(missing)	undefining the typeglob does change object resoluti
 op/method.t	148	ok	(missing)	undefining the typeglob does change object resolution
 op/method.t	154	ok	(missing)	undefining the typeglob does change object resolution
 op/method.t	142	ok	(missing)	undefining the typeglob does change object resolution in aliased classes
-op/multideref.t	46	ok	(missing)	!exists: const indices
-op/multideref.t	50	ok	(missing)	!exists: deref lexical indices
-op/multideref.t	48	ok	(missing)	!exists: deref pkg indices
-op/multideref.t	51	ok	(missing)	!exists: general
-op/multideref.t	49	ok	(missing)	!exists: lexical indices
-op/multideref.t	47	ok	(missing)	!exists: pkg indices
-op/multideref.t	0	(none)	renumbered	*summary*
 op/multideref.t	60	ok	not ok [PCL #47]	RT \#130727 array not autovivified
 op/multideref.t	59	ok	not ok [PCL #46]	RT \#130727 error
 op/multideref.t	62	ok	not ok [PCL #49]	RT \#130727 part 2: array not autovivified
 op/multideref.t	61	ok	not ok [PCL #48]	RT \#130727 part 2: error
 op/multideref.t	65	ok	not ok [PCL #52]	RT \#134045 assertion on the OP_SCALAR
 op/multideref.t	40	ok	(missing)	delete: const indices
-op/multideref.t	44	ok	(missing)	delete: deref lexical indices
-op/multideref.t	42	ok	(missing)	delete: deref pkg indices
-op/multideref.t	45	ok	(missing)	delete: general
-op/multideref.t	43	ok	(missing)	delete: lexical indices
-op/multideref.t	41	ok	(missing)	delete: pkg indices
-op/multideref.t	39	ok	(missing)	exists: general
 op/multideref.t	24	ok	not ok	local const indices 3
 op/multideref.t	33	ok	not ok	local general 3
 op/multideref.t	30	ok	not ok	local lexical indices 3

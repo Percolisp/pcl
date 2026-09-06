@@ -2,6 +2,71 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473t1 (Opus agent, 2026-09-07) — the 13 files that stop early: one cause each, written down; two fixes and a restored stub recover 71 rows
+
+The USER's triage brief.  15 of 108 perl-tests files are PARTIAL and
+`baselines/row-shortfall.tsv` said UNEXPLAINED for 13 of them (431 rows never
+produced).  **They were unexplained because the sweep strips the answer**: it
+folds stderr into stdout and then deletes every `^;` line, which is exactly
+where `p-load-with-recovery` announces `; PCL recovery: top-level form
+aborted (recovered): <error>`.  `scratch/s473t1/triage.pl` reruns a file
+through the sweep's own recipe with stderr KEPT, and beside it the SAME file
+under real perl 5.40.3 (run from the perl build root so `require "./test.pl"`
+finds perl's test.pl, not PCL's stub), so "which rows did perl produce that
+PCL never did" is a join, not a guess.  Two more instruments: `anchor-diff.pl`
+(named rows as anchors — perl labels an unnamed row `[at FILE line N]` and PCL
+labels it with nothing, so an LCS over descriptions cannot align them) and
+`formmap.lisp` (top-level FORM boundaries by SBCL's own reader — the emitter
+writes some NESTED forms at column 0, so a textual `^(` scan answers the
+blast-radius question wrongly, and that is the whole of method.t's finding).
+
+**Three fixes.**  **#1024** — `_kv_slice_node` was a THIRD copy of the
+subscript path: it called `parse()` directly instead of
+`_parse_subscript_ix`, so no kv-slice spelling ever got the lone-bareword
+autoquote and `%h{i}` compiled the key as a SUB CALL.  One argument routed
+through the existing predicate; nine spellings now agree with perl, kvhslice.t
+38 → 39 rows.  **#1431** — `+EXPR` is perl's pure disambiguator and MEANS
+EXPR, but `_elem_container_key` (the ONE reading of container-and-key, shared
+by exists / delete / pos) INSPECTS the argument node and saw the prefix_op
+wrapper, so `exists +($r//0)->[$i]{$k}` emitted a one-argument `(p-exists
+VALUE)` and died with a raw CL arity error; `_thru_unary_plus` repeats the
+emitter's own two steps at one point, multideref.t 52 → 65 rows.  **#1432** —
+`perl-tests/t/op/caller.pl` was a 4-line PCL stub where perl ships 175 lines
+and 47 assertions, on a premise that is false (caller.t defines
+`hint_fetch`/`hint_exists` itself, in plain perl, over `(caller $n)[10]`);
+because the stub returns 1, `do './op/caller.pl' or die $@` never fired and
+the hole looked like success.  Restored: caller.t 65 → 112 rows, +11 passing.
+
+**The other ten are explained, not fixed**, each with its cause in the
+shortfall row: substr.t 44 rows = two lvalue-sub drops (#930); method.t 35 =
+ONE indirect-object drop dying inside the `p-let` that binds the file-level
+`my $obj`, a form spanning source lines 66–199 (**#1433** — "its own top-level
+form" can be the whole file); ref.t 3 and postfixderef.t 4 = DESTROY never
+fires; magic.t 3 = `tie @array` (#155); readline.t 4 = `PerlIO::get_layers`
+(#139); length.t 2 = `pass()` inside `$SIG{__WARN__}` (#221); tr.t 2 = the
+ruled 64,000-char form refusal; yadayada.t 1 = `local *STDOUT` does not detach
+the handle, so a print GLUES itself to the next TAP line (**#1437**); bop.t 1
+and 6 of eval.t's 9 = STALE PLANS left by old PCL edits (**#1438**, verified
+against real perl); eval.t loses ZERO rows.  Filed besides those: **#1434**
+(`*glob->method` dies), **#1435** (`DESTROY {}` without a leading `sub`),
+**#1436** (a bareword invocant of a postfix deref is called as a sub),
+**#1439** (`skip_if_miniperl` skips unconditionally though `is_miniperl` is 0
+— measured per file: +5 pass in magic.t, +3 in ref.t, **−25 produced rows** in
+method.t, so it is a per-call-site job), **#1440** (a kv-array slice reports
+the normalized integer where perl echoes the index expression).
+
+Bars, all re-measured on the tree REBASED onto main `48d2c384` (BU's perf
+round 29 and BY's cache surface landed under this session): gate **217/7541**,
+Result FAIL = only the 13 pclxs xs rows; full sweep `--jobs 4` **GATE clean**,
+TOTAL passing 18674 (+0 against the edited baseline), drops census 5 = current
+5, shortfall +0; corpus-diff over 111 files — `multideref.t` the ONLY
+difference; emission-ab SAME over lib/**.pm (25), cpan-tests/**.pm (93) and
+perl's own t/**.t (604) except `t/op/multideref.t`, RCDIFF 0; ir-host-leak 31
+on both trees; the three artifacts regenerate BYTE-IDENTICAL after the rebase
+(#1250/#1251 do not reach them), generation **v2-960**.  Companion op/ leg:
+0 NEW ROW, 16 FIXED ROW, 0 LOST, confirmation run 0/0/0/0.  Guards:
+`Pl/t/kvaslice-01.t` 13 → 16, `Pl/t/delete-01.t` 12 → 14, `Pl/t/tap-assert-01.t`
+21 → 22, all inverse-verified on a `git archive 31473881` extraction.
 ## Session 470bu (Opus agent, 2026-09-06) — perf round 29: a regex/subst/tr LITERAL is built once per SITE (#1250), and the s/// op carries its COMPILED record (#1251) — json-rt HALVED
 
 Two runtime levers, both chosen from the RAW `sb-sprof` profiles behind §A.4's ranked table rather than from the table's own summary rows (ranks 12 `do-regex-match` and 14 `set-match-vars` point at the per-match protocol; what the profiles showed was bigger and cheaper).

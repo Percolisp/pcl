@@ -145,6 +145,14 @@ caller.t	16	subroutine name in an eval {}	undef	'(eval)'	#233 (caller() fidelity
 caller.t	43	value from (caller 0)[9] (bitmask) works in ${^WARNING_BITS}	''	'1'	#221 (NS:Warnings-gated diagnostics are absent)
 caller.t	25	warnings match caller (all)			#221 (NS:Warnings-gated diagnostics are absent)
 caller.t	24	warnings match caller (no bits)			#221 (NS:Warnings-gated diagnostics are absent)
+caller.t	83		undef	'54'	s473t1 #1432: perl-tests/t/op/caller.pl restored from perl 5.40.3 (it was a 4-line stub) -- these rows RUN now.  One cause: PCL's `caller EXPR` in list context returns FOUR elements where perl returns eleven, and element 10 (the compile-time %^H hints hash the shared file reads through hint_fetch) is absent.  not-supported.md 'Lexical compile-time hints ($^H / %^H scoping)' + '`caller()` filename and line number [DEFERRED]'
+caller.t	86	Can do IVs	undef	'-42'	s473t1 #1432: see the `caller.t` blank-description row above -- caller() has four elements, not eleven, and no %^H hints hash
+caller.t	87	Can do UVs	undef	> '42'	s473t1 #1432: see the `caller.t` blank-description row above -- caller() has four elements, not eleven, and no %^H hints hash
+caller.t	85	Can do Unicode	undef	'Ā'	s473t1 #1432: see the `caller.t` blank-description row above -- caller() has four elements, not eleven, and no %^H hints hash
+caller.t	84	Can do embedded 0 bytes	undef	'FIP FOP FIDDIT FAP'	s473t1 #1432: see the `caller.t` blank-description row above -- caller() has four elements, not eleven, and no %^H hints hash
+caller.t	97	Keys with the same hash value don't clash	undef	'c'	s473t1 #1432: see the `caller.t` blank-description row above -- caller() has four elements, not eleven, and no %^H hints hash
+caller.t	91	Octect sequences and UTF-8 are distinct	undef	'4'	s473t1 #1432: see the `caller.t` blank-description row above -- caller() has four elements, not eleven, and no %^H hints hash
+caller.t	89	UTF-8 or not, it's the same	undef	'2'	s473t1 #1432: see the `caller.t` blank-description row above -- caller() has four elements, not eleven, and no %^H hints hash
 closure.t	264	RT #1028	'1'	'12'	UNEXPLAINED
 closure.t	265	RT #10085	'1'	'12'	UNEXPLAINED
 closure.t	270		'0'	'1'	UNEXPLAINED
@@ -261,6 +269,7 @@ multideref.t	30	local lexical indices 3	'23'	'15'	UNEXPLAINED
 multideref.t	27	local pkg indices 3	'21'	'15'	UNEXPLAINED
 multideref.t	3	no strict refs, exist	''	'13'	UNEXPLAINED
 multideref.t	1	strict refs	''	Can't use string	UNEXPLAINED
+multideref.t	40	delete: const indices	'25'	'15'	s473t1 #1431: multideref.t:131 `delete $a[3]{foo}[1]{c}`, expected 15.  It never RAN before (the `exists +(...)` arity crash aborted the file's whole top-level form at test 52) and now runs and fails with '25' -- a CONSEQUENCE of the four blessed rows above it (`local const/pkg/lexical/general indices 3`, all `got '19'/'21'/'23'/'25' expected '15'`): the element is never RESTORED at scope exit, so it still holds the last `local ... = 25` when delete reads it.  not-supported.md '`local` on hash/array elements and typeglobs'
 or.t	10	|| propagates lvaluish context to its lhs	'1'	'2'	#165
 or.t	9	|| propagates lvaluish context to its rhs	''	'1'	#165
 pack.t	14611		'Ã¾b '	'þb '	UNEXPLAINED
@@ -503,6 +512,7 @@ kvhslice.t	9	last element in scalar context	'6'	'E'	#1023 (kv-slice in scalar co
 kvhslice.t	11		'0'	'2'	#1023 (kv-slice in scalar context yields the count)
 kvhslice.t	28		undef	'a'	#1024 (bareword key in a kv-slice is not autoquoted)
 kvhslice.t	29		undef	'A'	#1024 (bareword key in a kv-slice is not autoquoted)
+kvhslice.t	11	correct value	'2'	'I'	s473t1 #1024: the row is `eval 'is( scalar %h{i}, "I", "correct value")'` (kvhslice.t:53).  It never RAN before -- the bareword kv-slice key was compiled as a sub call and the eval died -- and now runs and fails on task #1023: `%h{...}` in SCALAR context yields the element COUNT, not the last VALUE (got '2', expected 'I'), which reproduces with no eval at all
 sort.t	26	redefinition should not take effect during the sort			UNEXPLAINED (review §1c: does NOT reproduce in isolation — an in-file interaction)
 sort.t	162	overload compare called once	'0'	'1'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	163	overload sort result	' '	'1 2'	#1021 (sort default comparator ignores an overloaded cmp)

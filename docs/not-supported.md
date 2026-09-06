@@ -648,7 +648,12 @@ ways vs perl 5.40.3, task #381).
   the file.  The whole drop census carries
   exactly two such rows — `perl-tests/ref.t:334` (`$foo = doit $object
   "FOO";`) and `perl-tests/method.t:72` (`is((method $obj "a","b","c"), …)`)
-  plus their `t/op/` twins.  Its twin mis-read is **#381**: `WORD BAREWORD`
+  plus their `t/op/` twins.  **The two cost very different amounts, measured
+  s473t1: ref.t's drop is its OWN top-level form and costs 0 test rows (the
+  next `main::is` runs and fails); method.t's sits inside the `p-let` that
+  binds the file-level `my $obj` at line 66, which spans source lines 66–199,
+  so ONE drop takes 35 assertions with it** — the file's whole 124-of-163
+  stop.  Task #1433.  Its twin mis-read is **#381**: `WORD BAREWORD`
   where WORD is a declared sub and BAREWORD is not (`print h F;` with
   `sub F::h` and `our sub h`) — perl resolves `F->h`, PCL emits
   `(pl-h (pl-F))` and dies *undefined function pl-F* (loud, but a
@@ -1112,7 +1117,11 @@ spelling that decides bytes-vs-characters (`:raw`, `:bytes`, `:utf8`,
 * `:crlf` line-ending translation (a no-op on Unix, which is where PCL runs);
 * stacking as HISTORY — `binmode(, ':raw')` after `:encoding(UTF-8)` gives
   bytes, which is perl's answer, but there is no stack to pop TO;
-* `PerlIO::get_layers` introspection (task #139, which needs a design call);
+* `PerlIO::get_layers` introspection (task #139, which needs a design call).
+  **Costed s473t1: `perl-tests/readline.t`'s last 4 rows.**  Its final `SKIP:`
+  block calls `PerlIO::get_layers($fh)` before its four assertions, and the
+  undefined sub aborts the whole top-level form — the file stops at 32 of 36
+  and its shortfall was UNEXPLAINED for that reason;
 * an `:encoding(NAME)` SBCL has no codec for DIES naming the encoding (rule 12)
   rather than decoding as something else.  Measured over perl's `t/`,
   `perl-tests/`, `lib/` and the CPAN board, the only such name is `cp1047`
@@ -1546,6 +1555,15 @@ normal subs.  No maintained CPAN module in scope requires custom lvalue subs.
 **Affected tests:** `perl-tests/aassign.t` (a few tests use user `: lvalue` subs).
 The `\substr`/`\pos`/`\vec` lvalue-ref rows in `perl-tests/ref.t` now pass.
 
+**`perl-tests/substr.t`: 44 rows, counted s473t1.**  Two drops — `bar = "XXX"`
+(line 697, after `sub bar: lvalue { substr $krunch, 0 }`) and `ta_tindex() = 23`
+(line 900) — each die at run time and take the REST OF THEIR TOP-LEVEL FORM
+with them: 40 rows and 4 rows.  That is the whole of the file's 353-of-397
+shortfall bar its two registered skips.  Read "its own top-level form" above
+with task #1433 beside it: the form can be very large (`perl-tests/method.t`
+loses 35 assertions to one drop, because a file-level `my` makes the enclosing
+`p-let` span the rest of the file).
+
 ---
 
 ## `prototype()` — returns only registered prototypes (attribute / Sub::Util)
@@ -1697,6 +1715,16 @@ still running (e.g. `Scope::Guard`, `File::Temp`) is out of scope for now.
 **Affected tests:** `perl-tests/ref.t` (tests 63–64), `perl-tests/grep.t` (tests 69–76),
 `perl-tests/bless.t` (a few object-lifetime tests).  Do not attempt to fix these —
 the only real fix is a GC finalizer integration.
+
+**The rows are MISSING, not failing, when the assertion is inside the
+destructor — costed s473t1.**  `perl-tests/ref.t`'s whole 3-row hole is this:
+the `is`/`isnt` pair at lines 310/313 lives inside `DESTROY {…}` (fired in
+perl when the last reference is overwritten at line 304), and line 440's
+`like` lives inside a `$SIG{__DIE__}` handler that only fires because
+`DESTROY { $_[0] = 'foo' }` runs.  `perl-tests/postfixderef.t` loses 4 the
+same way (Shemp / Larry / Curly / Moe, printed by four `*::DESTROY` subs at
+scope exit).  Probed: with `sub DESTROY` and a last-reference overwrite, perl
+prints the destructor's line and PCL prints nothing.
 
 ---
 
@@ -2042,6 +2070,15 @@ FILEHANDLE tie — `tie *FH, 'Class'` prints
 `PCL: tie: a non-lvalue (class Class) is not implemented — the container is left untied (task #155)`
 and `print FH …` goes to the untied handle (probed s467).  Only a SCALAR tie is
 implemented.
+
+**Costed s473t1: `perl-tests/magic.t`'s whole 3-row hole.**  The file ties a
+LEXICAL array purely to compute test numbers for five sub-process rows —
+`sub FETCH { $next_test + pop } tie my @tn, __PACKAGE__;` — so with the tie
+ignored `$tn[4]` interpolates EMPTY and the child programs print `ok ` and
+`not ok ` with no number.  Two such lines reach the harness and match no TAP
+row regex; the other three rows are never printed at all.  `curr_test()` is
+then advanced by 5 regardless, so the numbering resumes correctly and nothing
+else in the file notices.
 
 ## Sparse arrays (holes), element aliasing, and SV identity
 
@@ -2808,6 +2845,13 @@ run:
 
 **Owner:** task #221.  A row failing for this reason is a registration, not a
 regression — and it stops being one the day #221 lands.
+
+**A row can be MISSING for this reason, not merely failing (s473t1).**  When
+the assertion is INSIDE the handler — `local $SIG{__WARN__} = sub { pass("…") }`
+— no warning means no row at all, which the sweep sees as shortfall, not as a
+failure.  `perl-tests/length.t` is exactly that: its whole 2-row hole is the
+two `pass()` calls at lines 184 and 191 (`'print length undef' warned` and
+`[perl #106726] no crash with length @lexical warning`).
 
 ---
 

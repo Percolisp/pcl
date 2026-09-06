@@ -77,8 +77,8 @@
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
-perl-tests/bop.t	1	UNEXPLAINED
-perl-tests/caller.t	48	UNEXPLAINED
+perl-tests/bop.t	1	s473t1: STALE PLAN, not a lost row -- `plan tests => 510` but session 245 commented out the `pack "P"` block and left the count, so the file holds 509 assertions.  REAL PERL 5.40.3 runs 509 too ("Looks like you planned 510 tests but ran 509").  PCL produces all 509.  Task #1438.
+perl-tests/caller.t	1	s473t1 (#1432 FIXED, was 48): perl-tests/t/op/caller.pl -- perl's 175-line file shared with ext/XS-APItest, `do`ne by caller.t:336 for 47 of its rows -- had been replaced by a 4-line stub (6b8e524c) whose premise was false (caller.t defines hint_fetch/hint_exists itself at 141-152).  `do` returned 1 having run nothing, so the hole looked like success.  Restored from perl 5.40.3: the file produces all 112 rows.  The 1 left is the file's own `# TODO` row 50 (RT #7165).
 perl-tests/chdir.t	19	UNEXPLAINED
 perl-tests/chop.t	4	UNEXPLAINED
 perl-tests/chr.t	4	UNEXPLAINED
@@ -87,30 +87,30 @@ perl-tests/crypt.t	1	UNEXPLAINED
 perl-tests/do.t	5	UNEXPLAINED
 perl-tests/dor.t	2	UNEXPLAINED
 perl-tests/each.t	14	UNEXPLAINED
-perl-tests/eval.t	9	UNEXPLAINED
+perl-tests/eval.t	9	s473t1: ZERO rows lost vs perl.  6 = STALE PLAN (plan(tests => 169); the `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}` block is commented out, real perl runs 163 -- task #1438) + 2 registered skips + 1 UNNUMBERED TAP line (eval.t:48 `print try 'print "ok $curr_test\n";'` with an empty variable -- real perl emits the same bare `ok ` and neither counter can count it).
 perl-tests/exp.t	1	UNEXPLAINED
 perl-tests/for.t	1	UNEXPLAINED
 perl-tests/grep.t	6	UNEXPLAINED
 perl-tests/hexfp.t	4	UNEXPLAINED
 perl-tests/infnan.t	6	UNEXPLAINED
 perl-tests/join.t	2	UNEXPLAINED
-perl-tests/kvhslice.t	16	UNEXPLAINED
+perl-tests/kvhslice.t	15	s473t1 (#1024 FIXED, was 16): a lone BAREWORD key in a kv-slice was compiled as a sub call (_kv_slice_node was a third copy of the subscript path and never called _parse_subscript_ix), so `eval 'is( scalar %h{i}, "I", "correct value")'` died and its row never ran.  The file is now OK 39/39.  All 15 remaining are registered skips (warning-emit / principle9 / lvalue).
 perl-tests/lc.t	2577	UNEXPLAINED
-perl-tests/length.t	11	UNEXPLAINED
+perl-tests/length.t	11	s473t1: 2 lost + 9 registered skips.  Both lost rows are `pass()` calls INSIDE `local $SIG{__WARN__}` (lines 184 and 191: `'print length undef' warned`, `[perl #106726] no crash with length @lexical warning`) -- PCL emits no warnings-gated diagnostic, so the handler never fires and the row is never produced.  not-supported.md 'Warnings-gated diagnostics are absent', owner #221.
 perl-tests/lex.t	8	UNEXPLAINED
 perl-tests/local.t	6	UNEXPLAINED
 perl-tests/loopctl.t	3	UNEXPLAINED
-perl-tests/magic.t	19	UNEXPLAINED
-perl-tests/method.t	65	UNEXPLAINED
-perl-tests/multideref.t	15	s470 (Fable): 13 UNEXPLAINED + 2 registered skips (rows 47/49, the RT #130727 quirk, cl/skip-registry.lisp; not-supported.md `local` section) -- they were ACCIDENTAL passes before s470bk's #1058
+perl-tests/magic.t	19	s473t1: 3 lost + 16 registered skips.  The 3 are `tie my @tn, __PACKAGE__` with `sub FETCH { $next_test + pop }` (magic.t:126) -- an ARRAY tie is not implemented (not-supported.md '`tie` on an ARRAY or HASH', task #155), so `$tn[4]`/`$tn[5]` interpolate EMPTY: two child programs print `ok `/`not ok ` with no number (uncountable) and three more rows are never printed.  curr_test() is advanced by 5 regardless, so nothing else in the file shifts.
+perl-tests/method.t	65	s473t1: 35 + 26 + 2 + 1 + 1.  35 = the ONE indirect-object drop at line 72 (`is((method $obj "a","b","c"), ...)`, not-supported.md 'Indirect object syntax with a SCALAR invocant', USER s425) dying inside the top-level `p-let` that binds the file-level `my $obj` at line 66 -- that form spans source lines 66-199 (SBCL-reader-verified), so one drop takes 35 assertions: task #1433.  26 = `skip_if_miniperl('file handles as methods requires loading IO::File', 26)`, which PCL skips unconditionally (task #1439 -- and running them costs 25 MORE rows, measured).  2 = STALE PLAN (plan 163, real perl runs 161; task #1438).  1 = `*glob->method` dies (#1434).  1 = `DESTROY` without a leading `sub` (#1435).
+perl-tests/multideref.t	2	s473t1 (#1431 FIXED, was 15): `exists +($r//0)->[$i]{$k}[$j+$z]{$k2}` (line 125) lowered to a ONE-argument (p-exists VALUE) because _elem_container_key did not see through the unary `+`, and the raw CL "invalid number of arguments: 1" aborted the file's single big top-level form at test 52 -- 13 rows.  The file is now OK 65/65.  The 2 left are the registered skips (rows 47/49, the RT #130727 quirk, cl/skip-registry.lisp; not-supported.md `local` section) -- they were ACCIDENTAL passes before s470bk's #1058.
 perl-tests/not.t	4	UNEXPLAINED
 perl-tests/or.t	1	UNEXPLAINED
 perl-tests/pack.t	8997	UNEXPLAINED
-perl-tests/postfixderef.t	7	UNEXPLAINED
+perl-tests/postfixderef.t	7	s473t1: 4 + 3.  4 = the Shemp/Larry/Curly/Moe rows, printed by four `*::DESTROY` subs at scope exit -- not-supported.md '`DESTROY` called by garbage collector'.  3 = `"@{[foo->@*]}"` and its two siblings (lines 345-347): a BAREWORD invocant of a postfix deref is a symbolic reference under `no strict refs`, PCL compiles it as a sub call and three top-level forms abort with "Undefined subroutine &main::foo called" -- task #1436 (the direct `foo->@*` fails too, so it is not an interpolation bug).
 perl-tests/quotemeta.t	20	UNEXPLAINED
 perl-tests/range.t	4	UNEXPLAINED
-perl-tests/readline.t	6	UNEXPLAINED (was blessed to #1237 at the s470bs merge, but the six unproduced rows were never #1237's: #1237 is FIXED s470bx -- rows 12/13 `readline( DIRECTORY )` now PASS, 23/7 -> 25/5 -- and the file still stops after test 32 of 36, so the four rows of the `skip_without_dynamic_extension("IO", 4)` block plus two below test 32 are still never produced)
-perl-tests/ref.t	34	UNEXPLAINED
+perl-tests/readline.t	6	s473t1: 4 + 2 registered skips.  The 4 are the file's last `SKIP:` block (lines 292-305): it calls `PerlIO::get_layers($fh)` before its four assertions and the undefined sub aborts the whole top-level form.  not-supported.md 'PerlIO layer stacks and `PerlIO::get_layers`', task #139.  (Supersedes the s470bx note: #1237 IS fixed -- rows 12/13 pass -- and this is why the file still stops at test 32 of 36.)
+perl-tests/ref.t	34	s473t1: 3 lost + 31 registered skips.  All 3 are DESTROY: the `is`/`isnt` pair at lines 310/313 lives inside `DESTROY {...}` (perl fires it when line 304 overwrites the last reference) and line 440's `like` fires only because `DESTROY { $_[0] = 'foo' }` runs.  not-supported.md '`DESTROY` called by garbage collector'.  The line-335 indirect-object drop costs 0 ROWS -- it is its own top-level form, and the `main::is` after it runs and fails (a blessed baseline row).
 perl-tests/reset.t	23	UNEXPLAINED
 perl-tests/scalar.t	12	UNEXPLAINED
 perl-tests/signatures.t	1	UNEXPLAINED
@@ -120,11 +120,11 @@ perl-tests/sprintf.t	2	UNEXPLAINED
 perl-tests/sprintf2.t	36	UNEXPLAINED
 perl-tests/state.t	78	not-supported.md §`given`/`when` — one `given` block at line 350, inside a foreach at file scope; the refusal is STATEMENT-level since s466 (#1037) so the file runs to it, and the tail of the enclosing top-level form goes with the die (ir-spec §9.3; sizing = #1055).  Was NOT MEASURED (-1) while the refusal killed the transpile.
 perl-tests/sub.t	9	UNEXPLAINED
-perl-tests/substr.t	46	UNEXPLAINED
-perl-tests/tr.t	75	UNEXPLAINED
+perl-tests/substr.t	46	s473t1: 44 lost + 2 skips.  TWO lvalue-sub drops, each dying at run time and taking the rest of its top-level form: line 697 `bar = "XXX"` (after `sub bar: lvalue { substr $krunch, 0 }`) costs 40 rows, line 900 `ta_tindex() = 23` costs 4.  not-supported.md 'Lvalue subroutines', task #930 (USER-deferred).
+perl-tests/tr.t	75	s473t1: 2 lost + 73 registered skips.  The 2 are `RT #132608 len=0x12000` and its count row: tr.t:494 builds a 73,801-char string eval, over the 64,000-char single-top-level-form limit, and the ruled F6 refusal (`PCL: unsupported: a single generated top-level form of 73801 chars exceeds the 64000-char limit`) aborts that form.  Ruled s346/s356; already accounted for in fail-baseline as tr.t 241 -> 239.
 perl-tests/undef.t	4	UNEXPLAINED
 perl-tests/vec.t	2	UNEXPLAINED
-perl-tests/yadayada.t	1	UNEXPLAINED
+perl-tests/yadayada.t	1	s473t1: not a lost ASSERTION -- a lost VERDICT LINE.  The file's last loop runs each program inside `eval qq { {local *STDOUT; ...; $line;} pass $mess; 1 }`; `local *STDOUT` does not detach the handle in PCL (task #1437), so `print 'D' ... 'A'` writes DEFGHIJKLMNOPQRSTUVWXYZ to real stdout and the next line comes out as `DEFGHIJKLMNOPQRSTUVWXYZok 32 - ...`, matching no TAP row regex.  The assertion PASSED.
 t/base/lex.t	120	UNEXPLAINED
 t/class/accessor.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
 t/class/class.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
@@ -208,7 +208,7 @@ t/op/inccode-tie.t	89	UNEXPLAINED
 t/op/inccode.t	48	UNEXPLAINED
 t/op/incfilter.t	153	UNEXPLAINED
 t/op/index.t	308	UNEXPLAINED
-t/op/kvhslice.t	1	UNEXPLAINED
+t/op/kvhslice.t	0	s473t1 #1024 FIXED (was 1): a lone BAREWORD key in a kv-slice was compiled as a sub call, so the assertion inside `eval '… %h{i} …'` never ran
 t/op/length.t	2	UNEXPLAINED
 t/op/lex.t	1	UNEXPLAINED
 t/op/lexsub.t	15	UNEXPLAINED
@@ -217,7 +217,7 @@ t/op/lock.t	5	UNEXPLAINED
 t/op/lvref.t	201	UNEXPLAINED
 t/op/magic.t	1	UNEXPLAINED
 t/op/method.t	38	UNEXPLAINED
-t/op/multideref.t	13	UNEXPLAINED
+t/op/multideref.t	0	s473t1 #1431 FIXED (was 13): the `exists +(EXPR)->…` arity crash aborted the file's top-level form at test 52; it produces all 65 rows now
 t/op/my_stash.t	2	UNEXPLAINED
 t/op/numconvert.t	1446	UNEXPLAINED
 t/op/numify_chkflags.t	14	UNEXPLAINED

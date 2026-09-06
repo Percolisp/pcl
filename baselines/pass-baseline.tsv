@@ -1,4 +1,18 @@
 # taken-at: 5323d9e 2026-08-15
+# s473t1 (2026-09-07, the 13 early-stop triage, edited ROW BY ROW): THREE files
+#   leave PARTIAL, TOTAL 18649 -> 18674 (+25).
+#   caller.t   PARTIAL 15+49/112 -> OK 26+85/112 (+11 pass).  #1432:
+#     perl-tests/t/op/caller.pl was a 4-line stub where perl ships 175 lines and
+#     47 assertions, and `do FILE` returned 1 having run nothing, so the hole
+#     looked like success.  Restored from perl 5.40.3.  The 36 new failing rows
+#     have ONE cause and are in fail-baseline.tsv with it.
+#   kvhslice.t PARTIAL 19+4/39 -> OK 21+3/39 (+2 pass, -1 fail).  #1024: a lone
+#     BAREWORD key in a kv-slice was compiled as a sub call, so the `eval` at
+#     kvhslice.t:53 died and its row never ran; two more rows (the file's own
+#     28/29) start passing.  The now-produced row 11 fails on #1023.
+#   multideref.t PARTIAL 41+9/65 -> OK 53+10/65 (+12 pass, +1 fail).  #1431:
+#     `exists +(EXPR)->[..]{..}` emitted a one-argument p-exists and the raw CL
+#     arity error aborted the file's single top-level form at test 52.
 # s470bx (task #1237, edited ROW BY ROW): readline.t PARTIAL 23/7 -> 25/5
 #   (TOTAL 18647 -> 18649).  TWO rows, 12 `readline( DIRECTORY )` and 13
 #   `readline( DIRECTORY ) slurp mode`: a read from a DIRECTORY handle now
@@ -304,7 +318,7 @@ bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
 bop.t	PARTIAL	480	29	510
-caller.t	PARTIAL	15	49	112
+caller.t	OK	26	85	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
 chop.t	OK	144	0	148
@@ -349,7 +363,7 @@ int.t	OK	19	0	19
 isa.t	OK	14	0	14
 join.t	OK	41	0	43
 kvaslice.t	OK	17	0	17
-kvhslice.t	PARTIAL	19	4	39
+kvhslice.t	OK	21	3	39
 lc.t	OK	82	0	2659
 length.t	PARTIAL	35	3	49
 lex.t	OK	45	0	53
@@ -393,7 +407,7 @@ min_local.t	OK	10	0	10
 # s470 (Fable): multideref.t 43 -> 41 EDITED BY HAND — rows 47/49 (RT #130727 array not autovivified) were
 #   ACCIDENTAL passes (PCL never died there, nothing vivified); s470bk's #1058 write-vivification makes them
 #   honest; the corner is an accepted perl quirk registered in cl/skip-registry.lisp (not-supported.md, `local` section).
-multideref.t	PARTIAL	41	9	65
+multideref.t	OK	53	10	65
 my.t	OK	52	0	52
 negate.t	OK	47	0	47
 not.t	OK	20	0	24
