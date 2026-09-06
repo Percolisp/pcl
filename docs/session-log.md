@@ -2,6 +2,114 @@
 
 Append new entries at the top. One section per session.
 
+## Session 471b (Opus agent, 2026-09-06) — #1301: `runt`, `clt` and the sweep move into `tools/`; `run-perl-test.pl` is deleted; the moved sweep spawns SBCL byte-identically
+
+**The USER's ruling (s471, DECIDED §s471) executed.**  `runt`, `clt` and
+`sweep-perl-tests.pl` are now `tools/runt`, `tools/clt`,
+`tools/sweep-perl-tests.pl`; `run-perl-test.pl` — dead, zero code references,
+superseded by `tools/runt` long ago — is DELETED.  The repo root keeps exactly
+the four entry points the ruling names: `pcl`, `pl2cl`, `runpcl`, `xs-pin`.
+
+**Each moved script derives its root one level up in its OWN idiom**, deliberately
+not through a shared helper — `PCLPaths::root()` is #1302's, and inventing a
+second root resolver here is the very thing #1302 exists to remove:
+
+* `tools/runt`, `tools/clt`: `dirname(abs_path(dirname($0)))`
+* `tools/sweep-perl-tests.pl`: `use lib "$FindBin::RealBin/lib"` (was
+  `"$FindBin::RealBin/tools/lib"`) and `$project_root = dirname($FindBin::RealBin)`.
+  `abs_path` left the `use Cwd` import with it — line 59 was its only user.
+
+The moved sweep differs from the old one in exactly four lines (usage comment,
+the `Cwd` import, the `use lib` path, the root derivation); `git diff --summary
+d65f4a7c HEAD` is one line, the deletion.
+
+**THE BYTE-IDENTICAL BAR, three legs, ZERO differences** (the RUNNERS row of the
+WHAT-TO-RUN table).  `PCL_SHOW_SBCL=1 … --jobs 1 perl-tests/loopctl.t`, here and
+on a `git archive d65f4a7c` extraction: (a) with the cached core, (b) the control
+— the OLD runner run twice, (c) `PCL_NO_CORE=1`, where no core is involved at all
+and only the tree root needs normalising.  Three things are normalised and they
+are each *derived from the root or from the run*, never from the runner: the tree
+root; the cached core's PATHKEY, which IS `sha1(abs runtime path)[0,8]`
+(`PCLSbcl::cached_core`) — its SOURCE hash `9108d969a545` matched on both sides,
+which is the actual claim; and `File::Temp`'s per-run directory, which leg (b)
+shows the same runner varying from itself.
+
+`tools/runt loopctl` vs `./runt loopctl`: **stdout — what runt actually prints —
+is BYTE-IDENTICAL RAW, 3348 bytes**; `/tmp/loopctl.lisp` is byte-identical after
+the five root strings its preamble embeds by design (task #217); stderr likewise;
+`/tmp/loopctl.out` is byte-identical after stripping SBCL's own `{HEXADDR}`
+object addresses — which the SAME runner on the SAME tree varies from itself run
+to run (measured: 6 lines, identical after stripping).
+
+**Everything the sweep writes still lands at the PROJECT root, proven not read.**
+`$log_dir = $ENV{PCL_TEST_LOG_DIR} || "$project_root/.faillog"`, and a relative
+`PCL_TEST_LOG_DIR` is absolutised against `$project_root`.  After a one-file run
+`.faillog/` is at the repo root, there is no `tools/.faillog` — and it is still
+the repo root when the sweep is invoked with `cwd=/tmp`.
+
+**THE FULL SWEEP, and then the OLD runner once on the extraction.**  `perl
+tools/sweep-perl-tests.pl --jobs 4`: **GATE clean, 0 new / 0 fixed, drops census
+5 / current 5 (+0), shortfall 12274 (+0), TOTAL passing 18647 (+0)** = the
+`baselines/pass-baseline.tsv` header exactly; 4 UNSTABLE and 15 unverified, both
+crash-file noise.  The old runner then ran alone on the extraction, `--jobs 4`,
+and **the two `.faillog/_status.tsv` are BYTE-IDENTICAL after normalising the tree
+root — 4233 bytes, 108 files, zero differences in any column including the note
+text.**  No contention flake, so no serial re-run was owed.
+
+**The gate found the one real bug, and it was mine, not the move's.**  The
+reference rewrite wrote each file as `<path>.new` and renamed it into place — safe
+for content and silently wrong for MODE, because the new file is created at
+`0666 & ~umask`.  `pl2cl`, `tools/rebuild-pack`, `tools/run-perl-suite.pl` and
+`tools/sweep-diff.pl` all went `100755 -> 100644`; the gate's first row said
+`sh: 1: ./pl2cl: Permission denied`.  Restored and amended into the same commit.
+**`git diff --summary <base> HEAD | grep mode` is the cheap check after any
+scripted file rewrite** — `git diff` alone shows no content change for it.
+
+**The reference sweep's SCOPE was ruled, not guessed** (Fable, this session):
+only LIVING documents change spelling.  Dated past-session plan docs
+(`docs/plan-*-sNNN.md` and the `*-plan.md` family), `docs/history/`,
+`docs/session-log.md`, `docs/DECIDED.md` and the `baselines/*.tsv` header notes
+KEEP their old spellings — they record what was run at the time, and re-spelling
+them falsifies a measurement's provenance.  The same reason keeps CLAUDE.md's
+compressed-history bullet 2i (`runpcl/runt blank-line strip fixed`) while its four
+LIVE paths move.  Counts, measured against `d65f4a7c`: **16 new spellings in 11 code/config
+files**; **54 in 13 live docs**, plus **14 `run-perl-test.pl` mentions replaced**.  Code/config: `cl/pack-impl.pl`, `tools/rebuild-pack` (×2),
+`Pl/t/artifact-staleness-01.t` and the two `.claude/settings.json` permission
+strings are runnable commands; `pl2cl`, `cl/pcl-test.lisp` (×2),
+`tools/run-perl-suite.pl` (×3), `tools/lib/PCLSbcl.pm`, `tools/lib/PCLProc.pm`,
+`tools/lib/PCLShortfall.pm`, `tools/sweep-diff.pl` are comments naming the runner.
+
+**One doc needed more than a re-spelling.**  `docs/debugging-hangs-crashes.md` was
+written around `run-perl-test.pl`, the script this task deletes, and its successor
+`tools/runt` differs exactly where the doc made claims: runt redirects SBCL's
+output into `/tmp/<name>.out` instead of a backtick, MERGES stderr into that file
+rather than swallowing it, and already HAS the per-test timeout the doc's own
+wishlist asked for (`RUNT_TIMEOUT`, 300 s default, `0` disables).  Those sentences
+are corrected, not just re-pathed — a how-to naming a deleted script and
+describing behaviour the live script does not have is worse than a stale path.
+Same for `docs/test-infrastructure.md` ("one SBCL process via `run-perl-test.pl`" —
+the sweep never used it) and the three `docs/bug-finding-strategy.md` recipes
+(runt takes a NAME, so the harvest loop basenames its glob).
+
+**Two comments deliberately keep the bare basenames**, because they name files
+INSIDE `tools/` and read correctly there: `tools/dup-census.pl:98` and
+`Pl/t/no-hardcoded-paths-01.t:51`.  That test's `@FILES` is now `qw(pl2cl runpcl)`
+— the three moved scripts are reached through `@DIRS`' `tools`, which `File::Find`
+recurses, so the scanned COUNT is unchanged and its `$scanned > 100` and
+`artifacts == 3` rows are untouched.  `tools/dup-census.pl` gains `runt clt` in its
+suffix-less `tools/` list and deliberately does NOT list `sweep-perl-tests.pl`,
+which `glob("$ROOT/tools/*.pl")` already matches and `default_files` does not
+deduplicate (verified: 65 files, no duplicate, no root leftover).
+`tools/install-pcl` is unaffected — its `@TREE` is `pl2cl runpcl Pl lib cl
+tools/lib`, so it never shipped any of the three.
+
+Bars: gate `PCLXS_DIR=~/pclxs tools/prove-core` **213 files / 7347 tests**, the
+only failures the 13 standing pclxs xs rows (xs-01 5, xs-02 4, xs-03 4);
+`tools/corpus-diff.pl d65f4a7c` **emission identical across 111 files**, silent
+drops 5 unchanged, 6 shape files identical; `tools/tag-license --check` exit 0;
+`tools/rebuild-pack --help` exit 0.  No generation bump — nothing under `Pl/` or
+`cl/` changed but comments.
+
 ## Session 471a (Opus agent, 2026-09-06) — #1273: ONE resolution of an array subscript (t/run/fresh_perl.t 0/0 → 60/31, a 59-row regression closed); then #1271, a failed `open` autovivifies its lexical
 
 **#1273 — the store path was handing -1 straight to `AREF`, and the reason is a
