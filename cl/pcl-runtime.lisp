@@ -19072,20 +19072,36 @@ buffer's fill-pointer; everything else falls back to file-length."
    \"is it the cache?\", repopulated the very thing the question is about.
    The load still comes from a real FILE, deliberately: a stream load would
    leave *LOAD-PATHNAME* nil, which is a second difference nobody asked for.
-   TMPDIR is honoured, as everywhere else in this runtime."
-  (let* ((code (or (p-transpile-file source-path)
+   TMPDIR is honoured, as everywhere else in this runtime.
+
+   *PCL-CURRENT-PACKAGE* IS REBOUND HERE FOR THE SAME REASON P-LOAD-MODULE-
+   CACHED REBINDS IT, and leaving it out was measured, not imagined: a loaded
+   module sets the variable through its own `package` statements, and without
+   the rebinding that leaks into the CALLER's notion of the current package.
+   The whole perl-tests sweep runs with *PCL-SKIP-CACHE*, so the omission cost
+   sub.t 2 rows and hexfp.t 7 — every one of them an unqualified name that
+   then resolved in the wrong package and came back undef."
+  (let* ((*pcl-current-package* *pcl-current-package*)
+         (code (or (p-transpile-file source-path)
                    (error "Failed to transpile ~A" source-path)))
          (template (format nil "~A/pcl-nocache-XXXXXX"
                            (or (sb-posix:getenv "TMPDIR") "/tmp"))))
     (multiple-value-bind (fd path) (sb-posix:mkstemp template)
       (sb-posix:close fd)
-      (unwind-protect
-           (progn (with-open-file (out path :direction :output
-                                       :if-exists :supersede)
-                    (write-string code out))
-                  (handler-bind ((warning #'muffle-warning)) (load path))
-                  t)
-        (ignore-errors (delete-file path))))))
+      ;; mkstemp's template must end in XXXXXX, so the unique name it hands
+      ;; back has no type; give it .lisp before loading.  LOAD on a typeless
+      ;; pathname looks for <name>.fasl and <name>.lisp FIRST and would prefer
+      ;; either if it existed — a preference nothing here wants.
+      (let ((lisp (concatenate 'string path ".lisp")))
+        (unwind-protect
+             (progn (sb-posix:rename path lisp)
+                    (with-open-file (out lisp :direction :output
+                                         :if-exists :supersede)
+                      (write-string code out))
+                    (handler-bind ((warning #'muffle-warning)) (load lisp))
+                    t)
+          (ignore-errors (delete-file lisp))
+          (ignore-errors (delete-file path)))))))
 
 (defun p-load-module-cached (source-path)
   "Load a Perl module with caching. Returns t on success."
