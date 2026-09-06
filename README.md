@@ -2,40 +2,35 @@
 
 [![CI](https://github.com/Percolisp/pcl/actions/workflows/ci.yml/badge.svg)](https://github.com/Percolisp/pcl/actions/workflows/ci.yml)
 
-PCL compiles a Perl 5 program, with the modules it uses, into Common Lisp.
-[SBCL](https://www.sbcl.org/) then compiles that into machine code and
-runs it.  A runtime library written in Lisp supplies what perl does behind
-the scenes: context, coercion, `local`, `tie`, `use overload`, string
-`eval`, etc.
+PCL is an execution environment for Perl.
 
-perl runs the compiler.  The compiled program does not need it, except to
-`eval` a string at run time.
+Perl is compiled into a Common Lisp, [SBCL](https://www.sbcl.org/). A
+runtime library supplies what perl does behind the scenes: context,
+coercion, `local`, `tie`, `use overload`, string `eval`, etc.
+
+PCL is written in Perl The compiled program only use a Perl process
+with PCL to handle `eval` strings at run time.
 
 Why?
 
-* **Speed, where it can be proved safe.**  A variable nobody takes a
-  reference to becomes a machine integer instead of a Perl scalar.  Loops,
-  recursion and integer math run two to four times faster than under perl.
-  Other things are slower; the [numbers](#speed) show both.
+* **Speed.** A variable becomes a machine integer or string instead of
+  a Perl scalar (unless a reference to it is taken). Some operations
+  are slower (at least for now), see [numbers](#speed) for an overview.
 * **Output you can read.**  The Lisp keeps your variable names, sigils and
   Perl's operator names.
-* **A compiler toolkit with a documented IR, not a one-off translator.**
-  The front end proves facts about every variable (never referenced, always
-  a number, only read in its loop) and lowers the program to an
-  intermediate representation whose meaning is [specified](docs/ir-spec.md):
-  context, coercion, calling convention, non-local exits.  The proofs are
-  written onto the declarations, so the output says why a variable became a
-  raw integer.  Each speed transform is a named pass licensed by those
-  facts; `PCL_OPT=none` emits the plain form, which must run identically.
-  The IR can be read by other tools or aimed at another target; the
-  [architecture](docs/v2-target-architecture.md) is written down.  Garbage
-  collection, closures, `local` and non-local exits come from Lisp, not
-  hand-written C: about 65,000 lines of Perl and Lisp in all.
+* **PCL is a compiler toolkit with a documented IR.** Most of the work
+  is done for compiling Perl to other environments!  The compiler
+  makes an intermediate representation (IR), which is documented in
+  [specified](docs/ir-spec.md). It saves facts about variables (if it
+  always is a number, if a reference is never take, if it is only read
+  in its loop, etc). It gives information about context, coercion,
+  calling convention, non-local exits and so on.  Also see the
+  [architecture](docs/v2-target-architecture.md).
 
-**Maturity: early.**  First tag v0.1.0, August 2026.  Pure-Perl code works
-well, including most CPAN modules written in Perl.  XS modules, the ones
-with a C part, do not work at all.  Read [What works](#what-works) before
-depending on it.
+**Maturity: early.** First tag v0.1.0, August 2026.  Pure-Perl code
+works well, including most CPAN modules written in Perl.  XS modules
+are being looked at, hopefully that will work out too.  See [What
+works](#what-works).
 
 ## Quick start
 
@@ -121,7 +116,7 @@ checks that it does.  Your own script is compiled on every run, so a large
 one pays a pause before its first line: a one-liner starts in under a
 quarter of a second, a thousand-line script takes a few seconds.
 
-## A worked example
+## An example
 
 This program uses the things a typical script uses: a package with
 signatures, a hash, `sort`, list utilities, `eval` in both forms, and a
@@ -213,7 +208,7 @@ enclosing lexicals; objects with `@ISA`, C3 method resolution, `SUPER::`,
 `AUTOLOAD` and `use overload`; `tie` on scalars; filehandles, pipes,
 `open` in its many forms, `fork`, `system`, `%ENV`, `%SIG` handlers.
 
-**What does not work**, in rough order of how often it matters:
+**What does not work**, in rough order of importance:
 
 * **XS modules.**  Anything with compiled C fails to load: `DBI`,
   `JSON::XS`, `Moose`, and core modules such as `Storable`.  That rules
@@ -326,8 +321,8 @@ runs, so it needs both.
   24.04 has 1.277) and the installer refuses it, because PCL's handling of
   PPI's token stream is tied to 1.291.
 * **SBCL 2.5.2 or later.**  The runtime uses some of SBCL's internal APIs,
-  so older versions do not work, and Debian 12, Ubuntu 22.04 and Ubuntu
-  24.04 all ship an older one.  A binary from
+  so older versions do not work. Debian 12, Ubuntu 22.04 and Ubuntu
+  24.04 all ship an older one, but a binary from
   [sbcl.org](https://www.sbcl.org/platform-table.html) installs without
   root.  Which one depends on your glibc: the current 2.6.0 binary needs
   glibc 2.38, which Ubuntu 24.04 and Debian 13 have; Ubuntu 22.04 and
