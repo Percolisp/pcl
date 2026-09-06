@@ -304,11 +304,12 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
 ;;   - the `map +(LIST)` unary-plus parse bug (tests 118, 121) — a real fixable PExpr
 ;;     bug (the `+(` map disambiguator collapses the list), not not-supported.
 (register-skips "array.t"
-                ;; $a[-1]=0 on an empty array must die "Modification of non-creatable
-                ;; array value attempted" — error detection of an invalid index.
-                ("\\$a\\[-1\\] = 0"
-                 :principle9
-                 "$a[-1]=0 on an empty array must die 'Modification of non-creatable array value attempted, subscript -1' — error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
+                ;; ("$a[-1] = 0" …) DROPPED s471a: passes since %p-non-creatable-index
+                ;; (#1273); the stale-detector flagged it in the very run that fixed it.
+                ;; Its REASON was wrong as well as stale — `$a[-1] = 0` on an empty array
+                ;; is VALID Perl that dies at RUN time, not invalid Perl for principle 9
+                ;; to wave past.  The @_-alias spelling of the same death stays below:
+                ;; the LAZY accessor p-aref-argbox still hands back a detached box (#1306).
                 ;; Writing through an @_ alias to a non-creatable negative index must
                 ;; die. (The 'reading alias ...' siblings legitimately pass.)
                 ("error when setting alias to (negative index past beginning|-1 elem of empty array)"

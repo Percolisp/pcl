@@ -2085,9 +2085,14 @@ does not rely on.
 **Affected tests:** `perl-tests/array.t` — `&PL_sv_undef` exists/identity, `undef
 preserves identity`, `@_ alias to nonexistent elem`, and the holes-through-subs
 position rows (registered in `cl/skip-registry.lisp`; the two `lazy element
-creation` rows were DROPPED s316e — they pass under defelem-lite).  Also covers the non-creatable
-negative-index error-detection cases (`$a[-1] = 0`), which fall under "Error
-compatibility for invalid Perl input".
+creation` rows were DROPPED s316e — they pass under defelem-lite).  The
+non-creatable negative-index case `$a[-1] = 0` is **no longer covered here**: it
+left the registry in s471a because PCL now dies perl's `Modification of
+non-creatable array value attempted, subscript -N` on every lvalue use of a
+below-start subscript (#1273).  It was never "invalid Perl" either — it is valid
+Perl that dies at run time.  The `@_`-alias spelling of the same death (`error
+when setting alias to …`) IS still registered, because the lazy `@_` accessor
+`p-aref-argbox` hands back a detached box instead of the fatal (#1306).
 
 **NOT covered here (still fix targets):** arylen magic (`\$#array`, freed-array length,
 `arylen_p`) and the `map +(LIST)` unary-plus parse bug — see `docs/sweep-bug-catalog.md`.
