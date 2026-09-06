@@ -118,6 +118,48 @@ pairing with the run and resurfaces as a NEW row.  Restored byte for byte from
 `scratch/s470bx/check-baseline-bytes.pl` asserts that every base line not named
 by an `--allow` row key is still present unchanged.
 
+**#1237 — a read from a DIRECTORY handle answers as perl does, and two entries
+of the family stopped killing the program.**  On Linux `open F, '.'` succeeds and
+every read from the handle then fails; perl answers undef (or an empty record)
+AND sets `$!`, while PCL answered only the first half, so `$!` kept whatever the
+previous operation had left.  ONE helper, `%p-read-fail`, fstats the descriptor
+**on the failure path** — nothing is paid on the happy path, there is no
+per-handle flag to keep in step with dups and reopens, and it is not a re-read
+of the C errno, which an allocation between the failing call and the read can
+clobber (s470bs had ruled that out).  The entries do not agree, and the
+difference was measured with `$!` cleared AFTER the open (perl's own open leaves
+ENOTTY behind from its isatty probe): sysread, read, readline and a
+list-context slurp report EISDIR; `getc` reports EBADF; `eof` reports nothing
+and answers 1.
+
+**`getc` and `eof` had no handler at all** — `read-char` and `peek-char` reached
+SBCL's unhandled `simple-stream-error` and took the whole program with them.
+The base tree dies at probe row 5 and prints nothing after it, which is how
+`eof` was found: only once `getc` survived did the next row get to run.  For
+`eof` the right answer is perl's own rule — a read it cannot perform reads as
+EOF, exactly as its closed-handle branch already said — so it answers 1 and
+deliberately does NOT touch `$!`.  Both new handlers re-raise `p-exception` the
+way `%p-read-impl` does: a perl-level die passing through is the caller's.
+
+perl-tests/readline.t 23/7 → **25/5**; the two `readline( DIRECTORY )` rows,
+blessed on this bug by s470bs, leave `baselines/fail-baseline.tsv` by edit and
+`pass-baseline.tsv` moves with them (TOTAL 18647 → 18649, +2, the sweep GATE
+clean with 0 new / 0 fixed and drops 5 = census).  The companion population
+moves the same way and back onto a snapshot it had silently fallen behind:
+`t/op/readline.t` C 23/9 on the base extraction against a blessed 25/7, and
+25/7 here with ROW DIFF 0/0/0/0.  `baselines/row-shortfall.tsv`'s cause for
+that file was corrected while passing: its six unproduced rows were never
+#1237's — they are the file's early stop at test 32.  Guard: `Pl/t/errno-01.t`
++9 rows whose every expectation is the output of the SAME program under perl,
+run in the test rather than written down, because the errnos differ per entry;
+all 9 fail on the `fcf076f1` extraction.  Gate 215 files / **7460** rows.
+
+Filed: **#1292** — a `<...>` glob whose interpolation yields three or more
+pieces emits an n-ary call to the BINARY `p-.`, so `</etc/$h*>` dies at LOAD
+with `invalid number of arguments: 3` and the program never starts.  Two pieces
+work, which is why the common `<$dir/*>` spelling hid it; pre-existing at
+`fcf076f1`.
+
 Filed: **#1290** (`\FUNC(...)` does not spread over the returned LIST — `my @r =
 \stat($Curdir)` is 1 ref where perl gives 13; PRE-EXISTING) and **#1291**
 (#1044's rule (a): a `()`-prototype sub or `use constant` in a GLOB slot is
