@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 22;
 
 sub run_cl {
     my ($code) = @_;
@@ -331,3 +331,28 @@ ok(1);
 ]|
 ok 1
 EXPECT
+
+# ── s473t1 / task #1432: a perl-tests/t/ SHARED HELPER must not be a stub ────
+#
+# The same family as the rows above — a harness file that silently removes
+# assertions.  `perl-tests/t/op/caller.pl` is perl's own file, `do`ne by
+# perl-tests/caller.t for 47 of its 112 rows.  It had been replaced by a
+# 4-line stub ("Stub: XS hint_fetch/hint_exists not available in PCL", commit
+# 6b8e524c) on a premise that is false: caller.t DEFINES hint_fetch and
+# hint_exists itself, in plain perl, over `(caller $n)[10]`.  The loss was
+# invisible: caller.t sat PARTIAL 65/112 and the sweep's shortfall said
+# UNEXPLAINED, because a `do FILE` that returns 1 having run nothing looks
+# exactly like success.  Restored from perl 5.40.3 — the file produces all
+# 112 rows now.  Two independent conjuncts: it is perl's file (its own first
+# line), and it actually carries the shared assertions (a stub carries none).
+{
+  my $helper = "$project_root/perl-tests/t/op/caller.pl";
+  open my $hfh, '<:raw', $helper or die "$helper: $!";
+  my $text = do { local $/; <$hfh> };
+  close $hfh;
+  my $asserts = () = $text =~ /^\s*(?:is|ok|isnt)\(/gm;
+  my $is_perls = $text =~ /^# tests shared between/;
+  ok($is_perls && $asserts >= 40,
+     "perl-tests/t/op/caller.pl is perl's shared helper, not a stub"
+     . " (perls=" . ($is_perls ? 1 : 0) . " asserts=$asserts)");
+}
