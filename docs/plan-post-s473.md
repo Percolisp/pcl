@@ -17,6 +17,7 @@ successor.
 - main `21f6622c` (gen v2-840) = s470bt (B6 `tools/ir-conform` + the 345-case corpus + B7) and
   s470bx phase 1 (#1042 #1236 #1043 #1231 #1044) merged this session; CI green through `2e39cc67`.
 - MERGED after this plan was written: **BX phase 2** (#1237 — the read family's errnos; corpus rows 122-io + 123-io left known-fail at the merge).  In flight: **BU** (perf round 29, `agent-a4ae344882cebc0bc`); **BY** (#1300 #1303 #682 + the
+- **s474 (2026-09-06 night, Fable): BY MERGED `0d783d24`** (#1300 #1303 #682 #1338 — the cache surface; `PCL_CACHE_DIR` is a process fact, LAST-USE prune with a daily stamp, 0700 root refused loudly, `pcl --version/--cache-info/--no-cache`, ONE `%p-mtime`; gate 216/7517 xs-only with ZERO write-date signatures = #1338 closed) and **BU MERGED `8a879a57`** (perf round 29: #1250 per-SITE regex/subst/tr op, #1251 the s/// compiled record — json-rt +99 %, subste +62 %, regexg +32 %, textproc +30 %, runtime-only, no gen bump).  In flight: **s473t1** (`agent-af5e2bdefd8089352`) + **s473t2** (`agent-a66c9ca1780b383d5`) — the two slots (t1 was the USER's one-off third while BY/BU finished).
   absorbed **#1338**, `agent-a5d566deb35707e17`).
 - Part B of plan-speed-and-ir-s470 is COMPLETE (B1–B7).  Part A continues by rounds.
 - The ir-conform corpus's 58 known fails are the correctness worklist's new metric
@@ -30,9 +31,9 @@ successor.
 ## 2. The queue (launch order; two slots)
 | # | label | what | gen | after |
 |---|---|---|---|---|
-| 0a | **s473t1** | TRIAGE (USER, 2026-09-06 "soon"): the 13 PARTIAL files that stop early UNEXPLAINED — one cause per file, fix fillers, file the rest (`s473/s473t1`) | if a fix | a slot, FIRST after the in-flight pair |
-| 0b | **s473t2** | TRIAGE (USER, "soon"): the 105 blessed failure keys with no cause (pack.t's 47 EXCLUDED — USER: skip pack.t) + the 60 bug-notes without a task — cluster, probe, attribute, fix ≤1h clusters (`s473/s473t2`) | if a fix | a slot, right after s473t1 |
-| 1 | **BU** | perf round 29: the top of §A.4.3 ease-weighted, at most four levers (`s470/s470bu`) | v2-860 | now (BT merged) |
+| 0a | **s473t1** (IN FLIGHT s474, gen v2-960) | TRIAGE (USER, 2026-09-06 "soon"): the 13 PARTIAL files that stop early UNEXPLAINED — one cause per file, fix fillers, file the rest (`s473/s473t1`) | if a fix | a slot, FIRST after the in-flight pair |
+| 0b | **s473t2** (IN FLIGHT s474, gen v2-970) | TRIAGE (USER, "soon"): the 105 blessed failure keys with no cause (pack.t's 47 EXCLUDED — USER: skip pack.t) + the 60 bug-notes without a task — cluster, probe, attribute, fix ≤1h clusters (`s473/s473t2`) | if a fix | a slot, right after s473t1 |
+| 1 | **BU** | perf round 29 — **MERGED s474 `8a879a57`** (#1250 + #1251; two levers, round closed early: put things LIVE) | none (runtime-only) | done |
 | 2 | **BZ** | #1302 + #1304 install layout + installer tests, podman legs (`s470/s470bz`) | none | BY merged |
 | 3 | **#1262** | `docs/caching.md` for users — Sonnet, `model: "sonnet"` (`s470/s1262`) | none | BY merged |
 | 4 | **s473a** | the `local` family: #1243(a)(b)(c) = #1192 + #1260, #1190 — 7 corpus rows | v2-870 | a slot |
