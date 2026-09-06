@@ -1308,12 +1308,14 @@ but for the 13 pclxs rows, full sweep **GATE clean, TOTAL passing 18646 (+0)**
 SHORTFALL +0, `ir-host-leak` 31 = 31 with byte-identical sets, and the
 companion legs op/eval.t 131/37, op/do.t 66/7, op/require_errors.t 5/68,
 op/require_37033.t 5/1, op/require_override.t 7/3 all exactly their snapshot.
-**One row is left UNATTRIBUTED and is said so rather than guessed**:
+**One row is left MEASURED rather than guessed**:
 `comp/require.t` reads 911/836 against a snapshot of 910/837 — the one file
 where BP's fasl cache and this batch's emission meet (a module cached as a
 fasl of this emission).  Its attribution run on a `424cabc` extraction was cut
-off by the machine shutdown, so no verdict is claimed; the recipe is the first
-thing in `scratch/s470bq/STOP.md`.
+off by the shutdown notice but finished in the background, and it reads
+**911/836 on BOTH trees** — the snapshot row is stale and belongs to BP/BS,
+whose own records left their `perl-suite-run.tsv` rows unspliced.  Not this
+batch's, so not spliced here.  **Nothing is owed.**
 
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
