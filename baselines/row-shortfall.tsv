@@ -51,6 +51,21 @@
 #   perl-tests/ref.t   36 -> 34.  Cause #1221: ref.t:577 `utf8::encode
 #     $name_utf8` in the symbolic-reference block, 193+16/245 -> 195+16/245.
 #     The file stays PARTIAL at the same last row (242, RT #78288).
+# s470bv 2026-09-06 (Opus, edited ROW BY ROW; nothing re-blessed -- a
+#   --bless-shortfall would have regenerated the header and lost these notes).
+#   TWENTY-SEVEN rows, all measured on the s470bv tree with `--jobs 1` and
+#   confirmed by the #366 serial re-run.  They are the shortfall half of the
+#   51-row perl-suite-run.tsv splice; the causes are in that file per row.
+#     DELETED (shortfall now 0): t/io/perlio.t 26, t/io/perlio_open.t 10,
+#       t/op/chop.t 48, t/opbasic/cmp.t 1202, and the sixteen mro/basic_0[1235]_*
+#       rows (3/3/3/3/4/4/4/4/3/3/3/3/1/1/1/1).
+#     LOWERED: t/mro/next_method.t 4 -> 1, t/mro/next_method_utf8.t 4 -> 1,
+#       t/op/utfhash.t 8 -> 2, t/re/charset.t 2777 -> 2776, t/uni/method.t 13 -> 1.
+#     ADDED: t/mro/method_caching.t 3 (its 36 perl rows against 33 PCL rows --
+#       the mro registration covers it) and **t/run/fresh_perl.t 91**, which is
+#       the whole file: since 9d43ccf2 (s470bk #1057) it dies at load with
+#       `Invalid index -N for (vector t N)` and produces NO TAP at all.  That is
+#       task #1273 and it is a REGRESSION, not a blessing.
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	10	UNEXPLAINED
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -128,8 +143,6 @@ t/io/dup.t	19	UNEXPLAINED
 t/io/fflush.t	3	UNEXPLAINED
 t/io/layers.t	55	UNEXPLAINED
 t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
-t/io/perlio.t	26	UNEXPLAINED
-t/io/perlio_open.t	10	UNEXPLAINED
 t/io/scalar_ungetc.t	17	UNEXPLAINED
 t/io/sem.t	22	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
 t/io/semctl.t	2	UNEXPLAINED
@@ -139,33 +152,18 @@ t/io/socketpair.t	8	UNEXPLAINED
 t/io/tell.t	10	UNEXPLAINED
 t/io/utf8.t	35	UNEXPLAINED
 t/mro/basic.t	9	XDIFF: not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
-t/mro/basic_01_c3.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_01_c3_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_01_dfs.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_01_dfs_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_02_c3.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_02_c3_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_02_dfs.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_02_dfs_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_03_c3.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_03_c3_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_03_dfs.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_03_dfs_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_05_c3.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_05_c3_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_05_dfs.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/basic_05_dfs_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/basic_utf8.t	9	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/complex_c3.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/complex_c3_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/method_caching.t	3	XDIFF: not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)
 t/mro/next_NEXT.t	3	XDIFF: not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
 t/mro/next_NEXT_utf8.t	3	XDIFF: not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 t/mro/next_goto.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/next_goto_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/next_inanon.t	2	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/next_inanon_utf8.t	2	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/next_method.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
-t/mro/next_method_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_method.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_method_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/next_skip.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/next_skip_utf8.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/pkg_gen.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
@@ -175,7 +173,6 @@ t/op/attrhand.t	4	UNEXPLAINED
 t/op/attrs.t	14	UNEXPLAINED
 t/op/bless.t	1	UNEXPLAINED
 t/op/bop.t	13	UNEXPLAINED
-t/op/chop.t	48	UNEXPLAINED
 t/op/coreamp.t	723	UNEXPLAINED — MIXED, not measured per row.  The `CORE::given` refusal is one cause (statement-level since s466, #1037, which is why the file produces 55 rows at all instead of none), but the file also aborts FIFTEEN forms, the first on `Undefined subroutine &File::Spec::Functions` (#1073), and its 46 failing rows are the &CORE:: sub family.  Attribution of the 723 is an audit job, so the row stays in the queue on purpose.
 t/op/coresubs.t	1109	UNEXPLAINED
 t/op/current_sub.t	11	XDIFF: not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-s...
@@ -243,14 +240,13 @@ t/op/tiehandle.t	23	UNEXPLAINED
 t/op/tr.t	2	UNEXPLAINED
 t/op/try.t	2	UNEXPLAINED
 t/op/undef.t	51	UNEXPLAINED
-t/op/utfhash.t	8	UNEXPLAINED
+t/op/utfhash.t	2	UNEXPLAINED
 t/op/write.t	505	not-supported.md §`format` / `write` report formatting — the file aborts at `Undefined subroutine &main::formline`.  Was 595 rows; #1032 (`p-write` takes a bareword handle) moved the abort later and produced 90 more (s468be).
 t/op/yadayada.t	1	UNEXPLAINED
-t/opbasic/cmp.t	1202	UNEXPLAINED
 t/opbasic/magic_phase.t	2	UNEXPLAINED
 t/re/alpha_assertions.t	421	UNEXPLAINED
 t/re/anyof.t	1187	UNEXPLAINED
-t/re/charset.t	2777	UNEXPLAINED
+t/re/charset.t	2776	UNEXPLAINED
 t/re/fold_grind_8.t	213	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/fold_grind_a.t	31	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/fold_grind_aa.t	103	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
@@ -290,6 +286,7 @@ t/re/uniprops07.t	29260	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops08.t	30492	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/run/fresh_perl.t	91	#1273 — the file dies at LOAD since 9d43ccf2 (s470bk #1057), `Invalid index -N for (vector t N)`, and produces no TAP at all; 59 of these rows used to PASS
 t/run/locale.t	44	UNEXPLAINED
 t/run/runenv.t	106	UNEXPLAINED
 t/run/runenv_hashseed.t	269	UNEXPLAINED
@@ -304,7 +301,7 @@ t/uni/fold.t	18072	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER
 t/uni/gv.t	118	UNEXPLAINED
 t/uni/labels.t	2	UNEXPLAINED
 t/uni/lower.t	11720	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/uni/method.t	13	UNEXPLAINED
+t/uni/method.t	1	UNEXPLAINED
 t/uni/overload.t	1	UNEXPLAINED
 t/uni/title.t	5936	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/universal.t	10	UNEXPLAINED

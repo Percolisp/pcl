@@ -10,6 +10,83 @@ Append new entries at the top. One section per session.
 - **Installer tests** (USER ask; plan §5): Layer A in `tools/t/install-pcl.t` (real-core install reused; fresh-HOME / `PCL_CACHE_DIR` rows = #1303's shape; `--force`, `--uninstall`, PATH hint, `PCL_ROOT`) inside #1302; Layer B `tools/t/install-container.t` (#1304) with the CI recipe split into deps + verify halves; **podman recommended** over Docker (rootless; the matrix runs only on push and only as root).
 - Records: plan doc + DECIDED §s471 committed `3028b64` + this batch; tasks #1300–#1304 filed; memory STATE line updated.
 
+## Session 470bv (Opus agent, 2026-09-06) — #1224: a PerlIO layer name's leading colon is OPTIONAL (op/read.t 1852/264 → 2116/0); and the companion snapshot brought honest, 51 rows with a measured cause each
+
+Two halves, and the second one is the larger.
+
+**#1224.** `binmode FH, "utf8"` did not decode. perl's `PerlIO_parse_layers`
+accepts a layer NAME with or without the leading colon, treats `:` AND
+whitespace as separators, skips an empty name, and FAILS the whole call
+(`undef`, `$! = ENOENT`) on an unknown one, applying nothing. PCL's
+`%p-split-layers` split on `:` alone, so a colon-less string produced no layer
+at all and the handle stayed a byte handle — invisible until #1115 made bytes
+the default, because before that PCL decoded everything anyway.
+
+The fix is at the ONE place a layer string is split (rule 11): `%p-split-layers`
+rewritten to perl's grammar, `%p-split-open-mode` splitting on the SIGIL run and
+returning the first unknown layer, `%p-binmode-impl` and `%p-open-impl` failing
+as perl does, and `p-use-open`'s word classifier losing its colon test. Eighteen
+`binmode` spellings, thirteen `open` modes and the combined lists were probed
+against perl 5.40.3 first; the table is in `docs/ir-spec.md` §7.7 and in task
+#1224. **t/op/read.t 1852/264 DIFF → 2116/0 OK.** Guard `Pl/t/io-layers-01.t`
+27 → 36 rows, inverse-verified on a `424cabc` extraction (7 of the 9 new rows
+fail there).
+
+The same grammar has a SECOND reader, in the compiler: `_use_open_layers` in
+`Pl/Parser.pm` keeps only words matching `/^:/`, so `use open IO => "utf8"` is
+silently dropped and the pragma has no effect on its scope. That is a `Pl/`
+change with its own bars (generation bump, artifacts, corpus-diff, emission-ab)
+and was filed as **#1270** rather than smuggled into a runtime commit.
+
+**The companion snapshot.** `baselines/perl-suite-run.tsv` had 51 rows that no
+longer matched what PCL does — none of them this batch's. Each was re-measured
+on this tree with `--jobs 1`, re-run ALONE by the #366 serial pass (every one
+"REAL MOVE, both runs agree"), and then attributed by MEASUREMENT, not by date:
+each file was run again at `614c6af` (before the day's batches) and the movers
+again at `a3d6d8e`, `b25afbc`, `d59e58c` and `48d8e39` in a temp worktree. That
+puts sixteen files on #1115 or #1221 — and shows op/ref.t is two steps, the last
+of which is s470bs's #1048.
+
+The two LOSSES were bisected. `op/multideref.t` 43/9 → 41/11 is `0d1b5c18`
+(#1058); its two rows are the RT #130727 corner already ruled an ACCEPTED
+DIVERGENCE in DECIDED §s470, so they were accidental passes and nothing is owed.
+`run/fresh_perl.t` 59/32 → **0/0** is `9d43ccf2` (#1057): the file dies at load
+with `Invalid index -N for (vector t N)` and produces no TAP at all. That is a
+59-row coverage loss and a real regression — **#1273**.
+
+The 25 `mro/*` files were reading STALE, which turned out to be two different
+conditions with two different repairs: four of them (plus op/print.t) now match
+perl exactly and had their registrations DROPPED; the other 21 had only SOME
+rows stop diverging, so the registration stays and the ROWS were re-blessed —
+41 rows, every one read first, all of them `got the right MRO` / `can(method)
+resolved itself` / `method dispatch` assertions that the reason covers. Dropping
+the registration there would have pushed explained rows into UNEXPLAINED.
+The mro cause is NOT the mro provider: `lib/mro.pm` has not changed since s401c
+and every `cl/pcl-mro.lisp` commit is an artifact regeneration.
+
+Two instrument lessons. First, a raw `.suitelog/*.fails.tsv` is not written in
+the row baseline's alphabet: perl interpolates `$0` into unnamed-test
+descriptions and the runner passes an absolute path, so the log says
+`[at /home/.../t/op/magic.t line 213]` where the baseline says
+`[at t/op/magic.t line 213]`. The difference is the key projection
+(`PclTapAlign::rowkey_desc`), not drift — diff the projections, never the raw
+files. Second, `--bless-fails` and `--bless-shortfall` regenerate their file's
+header and would have dropped every provenance note; both files were edited row
+by row instead, and every one of the 11 NEW rows was read and explained before
+it was written.
+
+One of those NEW rows is a finding a count can never show: `op/magic.t` reads
+176/31 at every commit tested, but at `b25afbc` one row started passing and
+another started failing — `$0 = <wide string>` must store the UTF-8 OCTETS and
+PCL keeps the wide string (**#1275**).
+
+Bars: rebase onto main `9ee95f2` clean (and a final rebase onto `f3abf773`, two
+docs-only commits, with the gate re-run there identical); gate 213 files / 7342 rows with only the
+13 pclxs xs rows failing; full perl-tests sweep `--jobs 4` TOTAL 18646 = baseline
+(+0), GATE clean, drops 5 = census; `tools/ir-host-leak.pl` 31 leaks here and 31
+on a `9ee95f2` extraction. No generation bump — the change is `cl/` only.
+Filed: #1270–#1276.
+
 ## Session 470bs (Opus agent, 2026-09-05 + merge legs 2026-09-06) — the FILETEST / STAT family gets ONE operand resolver: the overload (#1031), the string-is-a-path rule (#1049), the handle KINDS (#1048), perl's errno (#1033) and what `_` remembers (#1047)
 
 `stat`, `lstat` and the 27 filetests take THE SAME operand and perl reads it

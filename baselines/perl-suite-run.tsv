@@ -1,4 +1,37 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s470bv (2026-09-06, Opus) -- FIFTY-ONE ROWS SPLICED BY HAND, every one
+#   measured on THIS tree with `--jobs 1` and re-run ALONE by the #366 serial
+#   pass (all 40 re-run files: "REAL MOVE, both runs agree").  The batch's own
+#   change (#1224) moves ONE file, op/read.t, and the snapshot ALREADY said
+#   2116/0 -- so it is a RESTORE and is NOT in this list.  Every row here is
+#   an OLDER move the snapshot had not been told about; each carries its cause
+#   in the sig column.  Three groups, and the difference between them is
+#   MEASURED, not assumed (each file was also run at 614c6af, and the movers
+#   again at a3d6d8e / b25afbc / d59e58c / 48d8e39, in a temp worktree):
+#     GROUP A, 16 files -- moved between 614c6af and 424cabc, i.e. inside the
+#       s470br/bp/bs batches merged this session.  #1115 owns comp/utf.t,
+#       op/print.t, op/warn.t, re/bigfuzzy_not_utf8.t, re/charset.t and
+#       run/switchC.t's -3; #1221 owns op/chop.t, op/index.t,
+#       op/postfixderef.t, op/utf8magic.t, op/utftaint.t, opbasic/cmp.t,
+#       re/reg_60508.t, uni/parser.t, uni/method.t and run/switchC.t's +1;
+#       op/ref.t is TWO steps (#1221 then s470bs #1048).
+#     GROUP B, 35 files -- ALREADY stale at 614c6af, so older than today.
+#       Two of them are LOSSES and were BISECTED: op/multideref.t 43/9 -> 41/11
+#       to 0d1b5c18 (#1058, the RT #130727 ACCEPTED DIVERGENCE -- those rows
+#       used to pass by accident) and run/fresh_perl.t 59/32 -> 0/0 to
+#       9d43ccf2 (#1057), a real 59-row COVERAGE LOSS, task #1273.  The other
+#       33 are GAINS and are spliced WITHOUT a bisect; the attribution debt is
+#       countable in task #1276, never inferred.
+#     The 25 mro/* files were reading STALE (a registration whose rows no
+#       longer diverge).  FOUR of them (basic_04_c3 +utf8, vulcan_c3 +utf8)
+#       now match perl exactly and their registrations were DROPPED, together
+#       with op/print.t's; the other 21 keep the registration and had their
+#       ROWS re-blessed (--bless-rows on those 21 files only, 41 rows removed,
+#       every one read first).
+#   NOT SPLICED, deliberately: io/pvbm.t (20/8 snapshot, 23/5 at 614c6af,
+#     22/6 here -- the known batch-contention flake, recorded seven times since
+#     s437), io/open.t (154/34 in five measurements = the snapshot) and
+#     op/eval.t (131/37, already spliced by s470bq).
 # s470bs-merge (2026-09-06) -- TWO ROWS SPLICED BY HAND, the s470bs batch's
 #   OWED companion legs.  The stat/filetest family got ONE operand resolver
 #   (#1031 the `-X`/`""` overload, #1049 a string is a PATH, #1048 the handle
@@ -1312,7 +1345,7 @@ comp/opsubs.t	36	0	32	4	DIFF		0
 comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)	0
 comp/package_block.t	7	0	0	7	DIFF		0
-comp/parser.t	191	0	50	48	DIFF	undef-fn:main::pl-FOO; aborted-forms:1: PCL: statement not supported at parser.t line N: "${; =pod =cut }"; -- Bug. Fell through. 	5
+comp/parser.t	191	0	51	47	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: PCL: statement not supported at parser.t line N: "${; =pod =cut }"; -- Bug. Fell through.	5
 comp/parser_run.t	70	0	33	37	DIFF	unbound:$00	0
 comp/proto.t	216	0	47	14	DIFF	aborted-forms:1: Undefined subroutine &main::N called at (eval N) line N. 	0
 comp/redef.t	20	0	1	19	DIFF		0
@@ -1321,7 +1354,7 @@ comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0
 comp/term.t	23	0	23	0	OK		0
 comp/uproto.t	32	0	13	21	DIFF		0
 comp/use.t	87	0	42	45	DIFF	undef-fn:main::pl-true	0
-comp/utf.t	4216	0	12	4204	DIFF		0
+comp/utf.t	4216	0	24	4192	DIFF	s470bv: #1115 (already 24/4192 at a3d6d8e, 12/4204 at 614c6af)	0
 io/argv.t	52	1	27	26	DIFF		0
 io/binmode.t	9	0	9	0	OK		0
 io/bom.t	3	0	1	2	DIFF		0
@@ -1347,10 +1380,10 @@ io/nargv.t	7	0	11	2	DIFF		0
 io/open.t	188	0	154	34	DIFF		0
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
-io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
+io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 io/perlio_fail.t	15	0	6	9	DIFF		0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
-io/perlio_open.t	10	0	0	0	DIFF	aborted-forms:3: Execution of a form compiled with errors. Form: (p-open	0
+io/perlio_open.t	10	0	9	1	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 io/pipe.t	27	0	18	14	DIFF		0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	20	8	DIFF	s457ai: NOT a mover -- measured IDENTICAL on a 0237940 base tree; the snapshot row was stale (the known pvbm flapper, DECIDED s437/s438)	0
@@ -1367,26 +1400,26 @@ io/tell.t	36	0	26	0	DIFF	aborted-forms:1: The path #P"/tmp/nKNTIilTqW/t/>/tmp/pc
 io/through.t	942	0	942	0	OK		0
 io/utf8.t	62	0	23	4	DIFF	aborted-forms:1: The function bytes::pl-length is undefined.	0
 mro/basic.t	66	0	35	22	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ISACLEAR'  | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions	0
-mro/basic_01_c3.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_01_c3_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_01_dfs.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_01_dfs_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_02_c3.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "C_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_02_c3_utf8.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "ƈ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_02_dfs.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "C_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_02_dfs_utf8.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "ƈ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_03_c3.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "O_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_03_c3_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "ᴼ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_03_dfs.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "O_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_03_dfs_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "ᴼ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_04_c3.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_04_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_01_c3.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_01_c3_utf8.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_01_dfs.t	4	0	3	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_01_dfs_utf8.t	4	0	3	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_c3.t	10	0	6	4	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_c3_utf8.t	10	0	6	4	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_dfs.t	10	0	7	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_dfs_utf8.t	10	0	7	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_c3.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_c3_utf8.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_dfs.t	4	0	3	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_dfs_utf8.t	4	0	3	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_04_c3.t	1	0	1	0	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The file now MATCHES perl, so its registration was DROPPED from baselines/perl-suite-expected.tsv	0
+mro/basic_04_c3_utf8.t	1	0	1	0	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The file now MATCHES perl, so its registration was DROPPED from baselines/perl-suite-expected.tsv	0
 mro/basic_04_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/basic_04_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_05_c3.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_05_c3_utf8.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::ᕘ found from Ｄiᚪၚd_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_05_dfs.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/basic_05_dfs_utf8.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::ᕘ found from Ｄiᚪၚd_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_c3.t	2	0	1	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_c3_utf8.t	2	0	1	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_dfs.t	2	0	1	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_dfs_utf8.t	2	0	1	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/basic_utf8.t	53	0	26	18	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ᛁ앛ଌᛠ'  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/c3_with_overload.t	7	0	7	0	OK		0
 mro/c3_with_overload_utf8.t	7	0	7	0	OK		0
@@ -1408,7 +1441,7 @@ mro/isa_dfs.t	34	0	21	13	XDIFF	not-supported.md §mro — DFS ordering spec test
 mro/isa_dfs_utf8.t	34	0	21	13	XDIFF	not-supported.md §mro — DFS ordering spec tests (C3-only by design, utf8)	0
 mro/isarev.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally)	0
 mro/isarev_utf8.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally, utf8)	0
-mro/method_caching.t	36	0	21	15	XDIFF	not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)	0
+mro/method_caching.t	36	0	24	9	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | aborted-forms:1: Can't locate object method "foo" via package "MCTest::Derived" at - line N.  | not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)	0
 mro/method_caching_utf8.t	28	0	21	7	XDIFF	not-supported.md §mro — perl method-cache semantics (utf8)	0
 mro/next_NEXT.t	4	0	1	0	XDIFF	aborted-forms:3: Can't locate object method "next::method" via package "Fuz" at - line N.  | not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)	0
 mro/next_NEXT_utf8.t	4	0	1	0	XDIFF	aborted-forms:3: Can't locate object method "next::method" via package "Fᶽ" at - line N.  | not-supported.md §mro — next::method family (Tier 3, deferred, utf8)	0
@@ -1420,10 +1453,10 @@ mro/next_inanon.t	2	0	0	0	XDIFF	aborted-forms:2: Can't locate object method "met
 mro/next_inanon_utf8.t	2	0	0	0	XDIFF	aborted-forms:2: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/next_ineval.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/next_ineval_utf8.t	1	0	0	1	DIFF	NOT fully registered: 1 unregistered diverging row(s): method resolved inside eval{} | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/next_method.t	5	0	0	1	XDIFF	aborted-forms:4: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/next_method_utf8.t	5	0	0	1	XDIFF	aborted-forms:4: Can't locate object method "헬ฬ" via package "Diӑmond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/next_skip.t	10	0	0	2	XDIFF	aborted-forms:8: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/next_skip_utf8.t	10	0	0	2	XDIFF	aborted-forms:8: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_method.t	5	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | aborted-forms:1: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_method_utf8.t	5	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | aborted-forms:1: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_skip.t	10	0	1	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | aborted-forms:8: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_skip_utf8.t	10	0	1	1	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | aborted-forms:8: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/overload_c3.t	7	0	7	0	OK		0
 mro/overload_c3_utf8.t	7	0	7	0	OK		0
 mro/overload_dfs.t	7	0	7	0	OK		0
@@ -1435,8 +1468,8 @@ mro/recursion_c3.t	8	0	8	0	OK		0
 mro/recursion_c3_utf8.t	8	0	8	0	OK		0
 mro/recursion_dfs.t	8	0	8	0	OK		0
 mro/recursion_dfs_utf8.t	8	0	8	0	OK		0
-mro/vulcan_c3.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/vulcan_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/vulcan_c3.t	1	0	1	0	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The file now MATCHES perl, so its registration was DROPPED from baselines/perl-suite-expected.tsv	0
+mro/vulcan_c3_utf8.t	1	0	1	0	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The file now MATCHES perl, so its registration was DROPPED from baselines/perl-suite-expected.tsv	0
 mro/vulcan_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/vulcan_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 op/64bitint.t	425	0	425	0	OK		0
@@ -1462,7 +1495,7 @@ op/caller.t	111	1	28	84	DIFF		0
 op/catch.t	12	0	10	2	DIFF		0
 op/chars.t	34	0	34	0	OK		0
 op/chdir.t	44	0	42	2	FIXTURE	Task #172 (s319): the shadow t/ SYMLINKS op/, and getcwd(3) returns the PHYSICAL path, so the test's `"$Cwd/op"` can never equal the post-chdir cwd. perl runs in the real tree, PCL in the shadow. Probed identical in both: bare chdir() honouring HOME *and* LOGDIR, delete $ENV{}, cwd() tracking a chdir, rel2abs(curdir), and chdir-into-a-symlink resolving to the physical path. Nothing in PCL is wrong; the two sides run in different trees.	0
-op/chop.t	148	0	96	4	DIFF		0
+op/chop.t	148	0	144	4	DIFF	s470bv: #1221 (b25afbc; 96/4 at a3d6d8e, 144/4 at b25afbc)	0
 op/chr.t	45	0	38	7	XDIFF	not-supported.md §Unicode semantics differences — ALL 7 failing rows (38/7 vs perl 45/0) are two blessed subsections. t10-13 are the `### use bytes` block (t/op/chr.t lines 28-31: under the pragma `chr(-1)` must be the single byte "\xFF"; PCL has no byte view, so it keeps "\x{FFFD}"). t40-42 are `### Code points above U+10FFFF` (lines 80-82: chr(0x110000)/0x1FFFFF/0x200000 in perl's extended UTF-8) — measured s319/s320: SBCL's char-code-limit is 1114112, so a CL string physically cannot hold them and (code-char #x110000) yields no character. Blessed in fable-answers-s318.md §11; task #173.	0
 op/closure.t	281	1	277	5	DIFF		0
 op/cmpchain.t	1750	0	1521	229	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.	0
@@ -1489,7 +1522,7 @@ op/die_unwind.t	13	0	8	5	DIFF		0
 op/do.t	71	0	66	7	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §DESTROY called by garbage collector — ALL 7 failing rows (66/7 vs perl 71/0) are two blessed categories, established row-by-row s321 after the TAP re-alignment (task #177) showed the old number-join had blamed two rows that PASS. (a) perl t63-t66 + PCL's 2 EXTRA rows: one `foreach my $mode (qw(subname("arg") subname() $subref("arg") $subref()))` loop asserting `$@ =~ /\Asyntax error/`. `do SUBNAME(LIST)` was VALID Perl before 5.20 and meant call-the-sub; PCL keeps that historical semantics, so the assertions fail AND each test's `fail()` guard fires (those are the 2 PCL-only rows — the same divergence, not a second defect). Ruled no-fix in fable-answers-s318.md §4, task #158 :principle9. (b) perl t68 "RT 124248": `f(do { 1; !!(my $x = bless []) })` requires the blessed temp to be DESTROYed at do-block exit (FREETMPS) before f() runs — refcount-deterministic destruction, which PCL does not have; same family as op/args.t t23. NB t67 (delete-helem copied) and t70 ($@ false on do dir) PASS — probed s321 — and t71 ($! is EISDIR on do dir) was FIXED s321 (p-do now carries the OS errno into $!).	0
 op/dor.t	34	0	31	3	DIFF		0
 op/dump.t	0	0	0	0	NOTAP		0
-op/each.t	65	0	35	12	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
+op/each.t	65	0	37	10	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: Can't locate loadable object for module this module in @INC	0
 op/each_array.t	65	0	65	0	OK		0
 op/eval.t	169	0	131	37	DIFF	undef-fn:main::pl-ARRAY	0
 op/evalbytes.t	9	0	5	4	DIFF		0
@@ -1509,7 +1542,7 @@ op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
 op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
 op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
 op/glob.t	18	0	14	4	DIFF		0
-op/gmagic.t	78	0	30	3	DIFF	aborted-forms:5: Can't call method init on an undefined value	0
+op/gmagic.t	78	0	31	2	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:5: Can't call method init on an undefined value	0
 op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is undefined.	0
 op/grent.t	3	0	3	0	OK		0
@@ -1527,7 +1560,7 @@ op/inc.t	93	0	62	13	DIFF		0
 op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
 op/inccode.t	89	0	13	28	DIFF	aborted-forms:4: The value #<function (lambda (&rest %_args) :in	0
 op/incfilter.t	153	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Filter::Util::Call in @INC	0
-op/index.t	415	0	94	13	DIFF	aborted-forms:1: The function main::pl-formline is undefined.	0
+op/index.t	415	0	104	3	DIFF	s470bv: #1221 (b25afbc; 94/13 at a3d6d8e) | aborted-forms:1: Undefined subroutine &main::formline called	0
 op/index_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/infnan.t	1112	0	1106	6	DIFF		0
 op/int.t	19	0	19	0	OK		0
@@ -1554,7 +1587,7 @@ op/magic-27839.t	2	0	2	0	OK		0
 op/magic.t	207	1	176	31	DIFF		0
 op/method.t	163	0	103	22	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
 op/mkdir.t	17	0	17	0	OK		0
-op/multideref.t	65	0	43	9	DIFF	aborted-forms:1: invalid number of arguments: N	0
+op/multideref.t	65	0	41	11	DIFF	s470bv: BISECTED over 19d42836..614c6af (8 steps) to 0d1b5c18 = s470bk #1058.  The two rows are "RT #130727 array not autovivified" and its part 2 -- an ACCEPTED DIVERGENCE (DECIDED s470, not-supported.md "local on hash/array elements and typeglobs", cl/skip-registry.lisp) that used to pass by ACCIDENT.  No task | aborted-forms:1: invalid number of arguments: N	0
 op/my.t	59	0	52	7	DIFF		0
 op/my_stash.t	9	0	4	3	DIFF	aborted-forms:2: The function Foo::pl-runperl is undefined.	0
 op/mydef.t	2	0	0	2	DIFF		0
@@ -1571,9 +1604,9 @@ op/override.t	36	0	3	17	DIFF	aborted-forms:2: Failed to transpile /home/bernt/pe
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
 op/packagev.t	307	0	198	109	DIFF		0
 op/pos.t	33	0	15	15	DIFF		0
-op/postfixderef.t	128	0	100	21	DIFF	aborted-forms:3: Undefined subroutine &main::foo called	0
+op/postfixderef.t	128	0	102	19	DIFF	s470bv: #1221 (b25afbc; 100/21 at a3d6d8e) | aborted-forms:3: Undefined subroutine &main::foo called	0
 op/pow.t	268	0	268	0	OK		0
-op/print.t	3	0	2	1	XDIFF	not-supported.md §Unicode semantics differences — t3 is the ONLY failing row (2/1 vs perl 3/0): reading MALFORMED (overlong) UTF-8 through a `<:utf8` in-memory handle and printing it must pass the bytes through unchanged. Probe s319: PCL emits c3 81 c2 af … where perl emits c1 af …, i.e. it holds the scalar as CHARACTERS and re-encodes on output — no per-scalar UTF-8/byte flag (CL strings are always Unicode). NB the open itself was ALSO broken until s319 (task #171, `<:utf8` was rejected outright); this row is what remains after that fix.	0
+op/print.t	3	0	3	0	OK	s470bv: #1115 (3/0 at a3d6d8e, 2/1 at 614c6af); its XDIFF registration DROPPED -- the divergence is gone	0
 op/protowarn.t	12	0	4	8	DIFF		0
 op/push.t	32	0	32	0	OK		0
 op/pwent.t	2	0	2	0	OK		0
@@ -1585,7 +1618,7 @@ op/read.t	2116	0	2116	0	OK		0
 op/readdir.t	16	0	13	3	DIFF		0
 op/readline.t	35	1	25	7	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
 op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.	0
-op/ref.t	257	0	199	43	DIFF	aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
+op/ref.t	257	0	202	40	DIFF	s470bv: TWO steps, both measured: #1221 (b25afbc) 199/43 -> 201/41, then s470bs #1048 (row "IO slot of the temporary glob is set correctly") -> 202/40 at 424cabc | aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
 op/require_37033.t	10	0	5	1	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linu	0
@@ -1627,14 +1660,14 @@ op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support th
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/switch.t	197	0	2	0	XDIFF	aborted-forms:55: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at switch.t li | not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL refuses the file as perl does (task #371, Option B phase 2 Track A)	0
-op/symbolcache.t	8	0	4	3	DIFF	aborted-forms:1: The function main::pl-removed is undefined.	0
+op/symbolcache.t	8	0	6	1	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: Undefined subroutine &main::removed called	0
 op/sysio.t	45	0	45	0	OK		0
 op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/threads-dirh.t	0	0	0	1	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support threads ; reaped 4 orphan(s)	0
 op/tie.t	94	1	0	0	DIFF		0
 op/tie_fetch_count.t	343	0	76	65	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N	0
-op/tiearray.t	75	0	36	39	DIFF		0
+op/tiearray.t	75	0	40	35	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 op/tiehandle.t	67	0	12	32	DIFF		0
 op/tiehash.t	27	0	20	7	DIFF		0
 op/time.t	72	0	72	0	OK		0
@@ -1649,27 +1682,27 @@ op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
 op/utf8cache.t	16	0	16	0	OK		0
 op/utf8decode.t	710	0	620	90	DIFF		0
-op/utf8magic.t	6	0	2	4	DIFF		0
-op/utfhash.t	99	0	91	0	DIFF		0
-op/utftaint.t	0	0	72	17	NOTAP		0
+op/utf8magic.t	6	0	4	2	DIFF	s470bv: #1221 (b25afbc; 2/4 at a3d6d8e)	0
+op/utfhash.t	99	0	97	0	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
+op/utftaint.t	0	0	80	9	NOTAP	s470bv: #1221 (b25afbc; 72/17 at a3d6d8e).  NOTAP: perl itself produces no TAP here	0
 op/vec.t	78	0	74	4	DIFF		0
 op/ver.t	54	0	47	7	XDIFF	undef-fn:main::pl-gethostbyaddr | not-supported.md §use bytes / §use vN default warnings / §Control-character glob names — tests 21/23/25 (bytes view), 52 (Mordor), 54 (vN warnings); test 51 is the OPEN defelem arg-aliasing gap (task #131), a fix target	0
 op/waitpid.t	1	0	1	0	OK		0
 op/wantarray.t	28	0	27	1	DIFF		0
-op/warn.t	32	1	19	14	DIFF		0
+op/warn.t	32	1	20	13	DIFF	s470bv: #1115 (already 20/13 at a3d6d8e)	0
 op/while.t	26	0	20	6	DIFF		0
 op/write.t	636	0	99	32	DIFF	aborted-forms:13: Undefined subroutine &main::formline called	1
 op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A	0
 opbasic/arith.t	183	0	183	0	OK		0
-opbasic/cmp.t	13280	0	12078	0	DIFF		0
+opbasic/cmp.t	13280	0	13280	0	OK	s470bv: #1221 (b25afbc; 12078/0 at a3d6d8e): 1202 rows that were never produced now run and PASS -- the file is OK	0
 opbasic/concat.t	254	0	249	5	DIFF		0
 opbasic/magic_phase.t	7	0	0	5	DIFF		0
 opbasic/qq.t	30	0	30	0	OK		0
 re/alpha_assertions.t	2279	0	1784	74	DIFF	aborted-forms:2: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (	0
 re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 re/begin-once.t	2	0	1	1	DIFF		0
-re/bigfuzzy_not_utf8.t	1	0	0	1	DIFF		0
-re/charset.t	8328	0	2776	2775	DIFF		0
+re/bigfuzzy_not_utf8.t	1	0	1	0	OK	s470bv: #1115 (already 1/0 OK at a3d6d8e)	0
+re/charset.t	8328	0	2776	2776	DIFF	s470bv: #1115 (already at a3d6d8e): one MORE row is PRODUCED and fails; the passing count is unchanged	0
 re/fold_grind_8.t	213	0	0	0	DIFF		0
 re/fold_grind_T.t	0	0	0	0	NOTAP		0
 re/fold_grind_a.t	31	0	0	0	DIFF		0
@@ -1699,7 +1732,7 @@ re/qr.t	4	0	3	1	DIFF		0
 re/qr_gc.t	2	0	0	2	DIFF		0
 re/qrstack.t	1	0	1	0	OK		0
 re/recompile.t	48	0	0	48	DIFF		0
-re/reg_60508.t	1	0	0	1	DIFF		0
+re/reg_60508.t	1	0	1	0	OK	s470bv: #1221 (b25afbc; 0/1 at a3d6d8e)	0
 re/reg_email.t	13	0	0	0	DIFF		0
 re/reg_email_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/reg_eval.t	8	0	1	7	DIFF	NOT fully registered: 1 unregistered diverging row(s): RT \#129199: | not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t	0
@@ -1748,7 +1781,7 @@ re/user_prop_race_thr.t	0	0	0	3	NOTAP	aborted-forms:1: This Perl not built to su
 run/cloexec.t	22	0	16	6	DIFF		0
 run/dtrace.t	0	0	0	0	NOTAP		0
 run/exit.t	17	0	14	3	DIFF		0
-run/fresh_perl.t	91	0	59	32	XDIFF	s469bf: 57/34 -> 59/32 = #1032 (BISECTED: 57/34 at 1fed80b, 59/32 at 0e7c5e3) -- the `open(H,...)` and `write REMITOUT` rows now pass and left perl-suite-expected-rows.tsv; the file's old `unbound:H` sig went with them. | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
+run/fresh_perl.t	91	0	0	0	DIFF	s470bv: BISECTED over 3016011e..614c6af (4 steps) to 9d43ccf2 = s470bk #1057.  The file now dies at load ("Invalid index -N for (vector t N)") and produces NOTHING: a 59-row COVERAGE LOSS and a real regression -- task #1273.  Its XDIFF registration is KEPT (the reason still stands for the rows it used to fail) | aborted-forms:1: Invalid index -N for (vector t N), should be a non-negative integer below N. | NOT fully registered: 1 unregistered diverging row(s): *summary* | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1756,7 +1789,7 @@ run/runenv_hashseed.t	278	0	9	0	DIFF	aborted-forms:1: Undefined subroutine &main
 run/runenv_randseed.t	9	0	2	7	DIFF		0
 run/script.t	3	0	3	0	OK		0
 run/switch0.t	1	0	0	1	DIFF		0
-run/switchC.t	15	0	4	11	DIFF		0
+run/switchC.t	15	0	3	12	DIFF	s470bv: #1115 -3 / +1 and #1221 +1, both bisected: rows 3/5/6 (-CI,-Co,-Ci) passed only because PCL decoded EVERYTHING by default, i.e. -C was permanently on by accident; row 8 started passing because bytes is right without the switch; row 4 (-CE) passes since #1221 makes utf8::encode real.  PCL implements -C nowhere -- task #1272	0
 run/switchDx.t	0	0	0	0	NOTAP		0
 run/switchF.t	2	0	0	1	DIFF		0
 run/switchF1.t	5	0	5	0	OK		0
@@ -1785,11 +1818,11 @@ uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with er
 uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0
 uni/lower.t	11720	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
-uni/method.t	62	0	28	21	DIFF	aborted-forms:2: Can't locate object method "nÃ¨w" via package "Føø::Bær" at - line N. 	0
+uni/method.t	62	0	31	30	DIFF	s470bv: #1221 (b25afbc; 28/21 at a3d6d8e): a GAIN wearing a loss numbers -- utf8::decode was a stub, so the file ABORTED and 13 perl rows (39-51) were never produced.  They are produced now, four pass, the rest fail honestly.  No row went from a genuine ok to not ok.  Residual: task #1274 | aborted-forms:1: Undefined subroutine &main::クラス called	0
 uni/opcroak.t	5	0	0	5	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
 uni/overload.t	191	2	184	8	DIFF	aborted-forms:1: Undefined subroutine &main::todo_skip called	0
 uni/package.t	18	0	8	10	DIFF		0
-uni/parser.t	58	0	28	30	DIFF		0
+uni/parser.t	58	0	32	26	DIFF	s470bv: #1221 (b25afbc; 28/30 at a3d6d8e)	0
 uni/readline.t	7	0	6	1	DIFF		0
 uni/select.t	3	2	1	4	DIFF		0
 uni/sprintf.t	52	0	49	3	DIFF		0

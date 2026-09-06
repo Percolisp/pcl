@@ -123,76 +123,40 @@ mro/basic.t	local *ISA = []
 mro/basic.t	undef %package:: updates subclasses
 mro/basic_01_c3.t	... can(method) resolved itself as expected
 mro/basic_01_c3.t	... can(method) resolved itself as expected
-mro/basic_01_c3.t	... got the right MRO for Diamond_D
 mro/basic_01_c3.t	... method resolved itself as expected
 mro/basic_01_c3_utf8.t	... can(method) resolved itself as expected
 mro/basic_01_c3_utf8.t	... can(method) resolved itself as expected
-mro/basic_01_c3_utf8.t	... got the right MRO for Ｄiᚪၚd_D
 mro/basic_01_c3_utf8.t	... method resolved itself as expected
-mro/basic_01_dfs.t	... can(method) resolved itself as expected
-mro/basic_01_dfs.t	... can(method) resolved itself as expected
 mro/basic_01_dfs.t	... got the right MRO for Diamond_D
-mro/basic_01_dfs.t	... method resolved itself as expected
-mro/basic_01_dfs_utf8.t	... can(method) resolved itself as expected
-mro/basic_01_dfs_utf8.t	... can(method) resolved itself as expected
 mro/basic_01_dfs_utf8.t	... got the right MRO for Ｄiᚪၚd_D
-mro/basic_01_dfs_utf8.t	... method resolved itself as expected
 mro/basic_02_c3.t	... can got the expected method output
 mro/basic_02_c3.t	... can got the expected method output
 mro/basic_02_c3.t	... got the expected method output
 mro/basic_02_c3.t	... got the expected method output
-mro/basic_02_c3.t	... got the right MRO for Test::A
-mro/basic_02_c3.t	... got the right MRO for Test::B
-mro/basic_02_c3.t	... got the right MRO for Test::C
 mro/basic_02_c3_utf8.t	... can got the expected method output
 mro/basic_02_c3_utf8.t	... can got the expected method output
 mro/basic_02_c3_utf8.t	... got the expected method output
 mro/basic_02_c3_utf8.t	... got the expected method output
-mro/basic_02_c3_utf8.t	... got the right MRO for 텟ţ::ƈ
-mro/basic_02_c3_utf8.t	... got the right MRO for 텟ţ::ଅ
-mro/basic_02_c3_utf8.t	... got the right MRO for 텟ţ::ᛒ
-mro/basic_02_dfs.t	... can got the expected method output
-mro/basic_02_dfs.t	... can got the expected method output
-mro/basic_02_dfs.t	... got the expected method output
-mro/basic_02_dfs.t	... got the expected method output
 mro/basic_02_dfs.t	... got the right MRO for Test::A
 mro/basic_02_dfs.t	... got the right MRO for Test::B
 mro/basic_02_dfs.t	... got the right MRO for Test::C
-mro/basic_02_dfs_utf8.t	... can got the expected method output
-mro/basic_02_dfs_utf8.t	... can got the expected method output
-mro/basic_02_dfs_utf8.t	... got the expected method output
-mro/basic_02_dfs_utf8.t	... got the expected method output
 mro/basic_02_dfs_utf8.t	... got the right MRO for 텟ţ::ƈ
 mro/basic_02_dfs_utf8.t	... got the right MRO for 텟ţ::ଅ
 mro/basic_02_dfs_utf8.t	... got the right MRO for 텟ţ::ᛒ
-mro/basic_03_c3.t	... got the right MRO for Test::A
 mro/basic_03_c3.t	... got the right method dispatch
 mro/basic_03_c3.t	... got the right method dispatch
 mro/basic_03_c3.t	... got the right method dispatch
-mro/basic_03_c3_utf8.t	... got the right MRO for 텟ţ::ଅ
 mro/basic_03_c3_utf8.t	... got the right method dispatch
 mro/basic_03_c3_utf8.t	... got the right method dispatch
 mro/basic_03_c3_utf8.t	... got the right method dispatch
 mro/basic_03_dfs.t	... got the right MRO for Test::A
-mro/basic_03_dfs.t	... got the right method dispatch
-mro/basic_03_dfs.t	... got the right method dispatch
-mro/basic_03_dfs.t	... got the right method dispatch
 mro/basic_03_dfs_utf8.t	... got the right MRO for 텟ţ::ଅ
-mro/basic_03_dfs_utf8.t	... got the right method dispatch
-mro/basic_03_dfs_utf8.t	... got the right method dispatch
-mro/basic_03_dfs_utf8.t	... got the right method dispatch
-mro/basic_04_c3.t	... got the right MRO for t::lib::F
-mro/basic_04_c3_utf8.t	... got the right MRO for Ƭ::ŁiƁ::Ḟ
 mro/basic_04_dfs.t	... got the right MRO for t::lib::F
 mro/basic_04_dfs_utf8.t	... got the right MRO for Ƭ::ŁiƁ::Ḟ
-mro/basic_05_c3.t	... got the right MRO for Diamond_D
 mro/basic_05_c3.t	... got the right next::method dispatch path
-mro/basic_05_c3_utf8.t	... got the right MRO for Ｄiᚪၚd_D
 mro/basic_05_c3_utf8.t	... got the right next::method dispatch path
 mro/basic_05_dfs.t	... got the right MRO for Diamond_D
-mro/basic_05_dfs.t	... got the right next::method dispatch path
 mro/basic_05_dfs_utf8.t	... got the right MRO for Ｄiᚪၚd_D
-mro/basic_05_dfs_utf8.t	... got the right next::method dispatch path
 mro/basic_utf8.t	*summary*
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 103]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 132]
@@ -322,16 +286,13 @@ mro/isarev_utf8.t	replacing nested stashes updates isarev entries
 mro/isarev_utf8.t	single deletion from isarev
 mro/isarev_utf8.t	subclasses and subsubclasses are added to isarev
 mro/isarev_utf8.t	subclasses of the deleted alias become part of its isarev
-mro/method_caching.t	[at t/mro/method_caching.t line 49]
 mro/method_caching.t	[at t/mro/method_caching.t line 51]
 mro/method_caching.t	[at t/mro/method_caching.t line 52]
-mro/method_caching.t	[at t/mro/method_caching.t line 54]
 mro/method_caching.t	[at t/mro/method_caching.t line 57]
 mro/method_caching.t	[at t/mro/method_caching.t line 59]
 mro/method_caching.t	[at t/mro/method_caching.t line 61]
 mro/method_caching.t	[at t/mro/method_caching.t line 63]
 mro/method_caching.t	[at t/mro/method_caching.t line 66]
-mro/method_caching.t	[at t/mro/method_caching.t line 68]
 mro/method_caching.t	redef sub through glob alias via local cv-to-glob assign
 mro/method_caching.t	redef sub through glob alias via localisation unwinding
 mro/method_caching.t	redefining sub through glob alias via cv-to-glob assign
@@ -364,12 +325,10 @@ mro/next_ineval.t	method resolved inside eval{}
 mro/next_ineval_utf8.t	*summary*
 mro/next_method.t	... can(method) resolved itself as expected
 mro/next_method.t	... can(method) resolved itself as expected
-mro/next_method.t	... got the right MRO for Diamond_D
 mro/next_method.t	... method foo resolved itself as expected
 mro/next_method.t	... method resolved itself as expected
 mro/next_method_utf8.t	... can(method) resolved itself as expected
 mro/next_method_utf8.t	... can(method) resolved itself as expected
-mro/next_method_utf8.t	... got the right MRO for Diӑmond_D
 mro/next_method_utf8.t	... method fಓ resolved itself as expected
 mro/next_method_utf8.t	... method resolved itself as expected
 mro/next_skip.t	*summary*
@@ -378,7 +337,6 @@ mro/next_skip.t	... called D method dispatched to , different method correctly
 mro/next_skip.t	... can re-dispatch figured out correctly
 mro/next_skip.t	... cannot re-dispatch figured out correctly
 mro/next_skip.t	... cannot re-dispatch to a method which is not there
-mro/next_skip.t	... got the right MRO for Diamond_D
 mro/next_skip.t	... quietly failed redispatch from D
 mro/next_skip.t	... redispatched D to C when it exists
 mro/next_skip.t	... skipped B & C and went to A correctly
@@ -389,7 +347,6 @@ mro/next_skip_utf8.t	... called D method dispatched to , different method correc
 mro/next_skip_utf8.t	... can re-dispatch figured out correctly
 mro/next_skip_utf8.t	... cannot re-dispatch figured out correctly
 mro/next_skip_utf8.t	... cannot re-dispatch to a method which is not there
-mro/next_skip_utf8.t	... got the right MRO for Ｄiᚪၚd_D
 mro/next_skip_utf8.t	... quietly failed redispatch from D
 mro/next_skip_utf8.t	... redispatched D to C when it exists
 mro/next_skip_utf8.t	... skipped B & C and went to A correctly
@@ -500,8 +457,6 @@ mro/package_aliases.t	the deleted stash is gone completely when freed
 mro/package_aliases_utf8.t	*rows-unstable*
 mro/pkg_gen.t	*summary*
 mro/pkg_gen_utf8.t	*summary*
-mro/vulcan_c3.t	... got the right MRO for the Vulcan Dylan Example
-mro/vulcan_c3_utf8.t	... got the right MRO for the ቩᓪ찬 Dylan Example
 mro/vulcan_dfs.t	... got the right MRO for the Vulcan Dylan Example
 mro/vulcan_dfs_utf8.t	... got the right MRO for the ቩᓪ찬 Dylan Example
 op/args.t	delete $_[0] : outside block
@@ -871,7 +826,6 @@ op/numify.t	numifying '0b101' trigger a warning
 op/numify.t	numifying '0x123' trigger a warning
 op/numify.t	numifying '1x123' trigger a warning
 op/numify.t	numifying 'abc' trigger a warning
-op/print.t	print doesn't launder utf8 overlongs
 op/signatures.t	($a) interpreted as protoype when not enabled
 op/signatures.t	($a) not signature when not enabled
 op/signatures.t	ADJUST does not swallow trailing comma

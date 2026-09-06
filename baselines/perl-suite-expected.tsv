@@ -29,6 +29,22 @@
 # can end up accusing rows that pass.  Descriptions survive renumbering; the
 # skip-registry keys on them for the same reason.  Number-only is acceptable
 # for genuinely unnamed tests, same fallback as the skip-registry.
+# s470bv (2026-09-06, Opus): FIVE REGISTRATIONS DROPPED because their file now
+#   MATCHES perl exactly -- the runner reads them STALE ("expected-divergence
+#   row now PASSES -- remove it from baselines/perl-suite-expected.tsv") and a
+#   registration whose divergence is gone is a claim about nothing.  Each was
+#   measured on this tree (`--jobs 1`, parallel and serial agreeing):
+#     op/print.t            2/1 -> 3/0.  Cause #1115 (a handle carries OCTETS
+#       unless a layer says so): the `<:utf8` in-memory read no longer re-encodes,
+#       so "print doesn't launder utf8 overlongs" passes.  Measured 3/0 at
+#       a3d6d8e already, 2/1 at 614c6af.
+#     mro/basic_04_c3.t / _utf8.t, mro/vulcan_c3.t / _utf8.t   0/1 -> 1/0.
+#       STALE ALREADY at 614c6af (older than the s470 batches; NOT bisected --
+#       see the pointer task).  Their single registered row
+#       ("... got the right MRO for ...") passes.
+#   The 21 OTHER mro/* files stay registered: only SOME of their rows stopped
+#   diverging, so the registration reason still explains the rest and their
+#   ROWS were re-blessed (--bless-rows on those 21 files only).
 mro/basic_01_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_c3_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_01_dfs.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
@@ -41,8 +57,6 @@ mro/basic_03_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::metho
 mro/basic_03_c3_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_03_dfs.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_03_dfs_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_04_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_04_c3_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_04_dfs.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_04_dfs_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_05_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
@@ -66,8 +80,6 @@ mro/next_method.t	not-supported.md §mro — C3-only, no mro:: API / next::metho
 mro/next_method_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/next_skip.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/next_skip_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/vulcan_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/vulcan_c3_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/vulcan_dfs.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/vulcan_dfs_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 re/opt.t	not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
@@ -138,7 +150,6 @@ op/cond.t	not-supported.md §pathological-nesting — 20k-deep ternary eval: qua
 op/args.t	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.
 op/crypt.t	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).
 op/cmpchain.t	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.
-op/print.t	not-supported.md §Unicode semantics differences — t3 is the ONLY failing row (2/1 vs perl 3/0): reading MALFORMED (overlong) UTF-8 through a `<:utf8` in-memory handle and printing it must pass the bytes through unchanged. Probe s319: PCL emits c3 81 c2 af … where perl emits c1 af …, i.e. it holds the scalar as CHARACTERS and re-encodes on output — no per-scalar UTF-8/byte flag (CL strings are always Unicode). NB the open itself was ALSO broken until s319 (task #171, `<:utf8` was rejected outright); this row is what remains after that fix.
 op/exists_sub.t	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.
 re/reg_eval.t	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t
 re/pat_re_eval.t	not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
