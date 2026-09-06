@@ -3519,8 +3519,40 @@ sub qualified_var_to_cl {
 # reference to a different variable (ac6fdc1).  exists/delete were guarded
 # then; tied/pos and the kv_slice_a_acc swap were not, and this unification
 # is what fixes them (task #397).
+
+# `+EXPR` is perl's pure disambiguator and MEANS EXPR — gen_prefix_op_form's
+# `+` arm already passes the operand through unchanged, unwrapping a
+# single-child tree_val on the way.  But every site that INSPECTS the argument
+# NODE (exists / delete / pos, through _elem_container_key below) saw the
+# prefix_op wrapper instead of the element and declined, so
+# `exists +($r//0)->[$i]{$k}` lowered to a ONE-argument `(p-exists VALUE)` and
+# died with a raw CL "invalid number of arguments: 1" (s473t1;
+# perl-tests/multideref.t:125 and the 12 rows after it).  Same two steps as the
+# emitter, in the emitter's order, so the node this returns is exactly the one
+# the `+` arm would have generated.
+sub _thru_unary_plus {
+  my ($self, $id) = @_;
+  for (;;) {
+    my $n = $self->expr_o->get_a_node($id);
+    last unless $self->expr_o->is_internal_node_type($n);
+    last unless ($n->{type} // '') eq 'prefix_op';
+    my $kids = $self->expr_o->get_node_children($id);
+    last unless $kids && @$kids == 2;
+    my $op = $self->expr_o->get_a_node($kids->[0]);
+    last unless ref($op) && $op->can('content') && $op->content() eq '+';
+    $id = $kids->[1];
+    my $on = $self->expr_o->get_a_node($id);
+    next unless $self->expr_o->is_internal_node_type($on)
+             && ($on->{type} // '') eq 'tree_val';
+    my $tv = $self->expr_o->get_node_children($id);
+    $id = $tv->[0] if $tv && @$tv == 1;
+  }
+  return $id;
+}
+
 sub _elem_container_key {
   my ($self, $arg_id) = @_;
+  $arg_id = $self->_thru_unary_plus($arg_id);
   my $node = $self->expr_o->get_a_node($arg_id);
   return () unless $self->expr_o->is_internal_node_type($node);
   my $kind = $node->{type} // '';

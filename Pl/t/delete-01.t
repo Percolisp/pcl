@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 14;
 
 sub run_cl {
     my ($code) = @_;
@@ -136,3 +136,31 @@ test_cl('delete %arr[i,j] trims array if last elements removed',
      delete %foo[6,7];
      print scalar(@foo), "\n";',
     "6\n");
+
+# ── s473t1 / task #1431: `exists`/`delete`/`pos` must see through unary `+` ──
+#
+# `+EXPR` is perl's pure disambiguator and MEANS EXPR.  gen_prefix_op_form's
+# `+` arm already passed the operand through unchanged, but _elem_container_key
+# — the ONE reading of "which container, which key", shared by exists, delete
+# and pos — INSPECTS the argument node, saw the prefix_op wrapper and declined.
+# `exists +($r//0)->[$i]{$k}` then lowered to a ONE-argument `(p-exists VALUE)`
+# and died with a raw CL "invalid number of arguments: 1", taking the rest of
+# its top-level form with it (perl-tests/multideref.t stopped at 52 of 65).
+test_cl('exists through a unary plus, at every chain depth',
+    'my $r = [ { k => [ { c => 15 } ] } ];
+     my ($i,$k,$j,$c,$z) = (0,"k",0,"c",0);
+     print( (exists +($r)->[$i]                      ? 1 : 0),
+            (exists +($r)->[$i]{$k}                  ? 1 : 0),
+            (exists +($r // 0)->[$i]{$k}[$j]{$c}     ? 1 : 0),
+            (exists +($r // 0)->[$i]{$k}[$j+$z]{$c}  ? 1 : 0),
+            (exists +($r // 0)->[$i]{$k}[$j]{"nope"} ? 1 : 0),
+            "\n");',
+    "11110\n");
+
+test_cl('delete through a unary plus removes the element',
+    'my $r = [ { k => [ { c => 15, d => 16 } ] } ];
+     my ($i,$k,$j) = (0,"k",0);
+     my $v = delete +($r // 0)->[$i]{$k}[$j]{c};
+     print $v, ":", (exists $r->[0]{k}[0]{c} ? "still" : "gone"),
+           ":", $r->[0]{k}[0]{d}, "\n";',
+    "15:gone:16\n");

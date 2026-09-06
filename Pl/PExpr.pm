@@ -6054,7 +6054,15 @@ sub _kv_slice_node {
   my ($self, $type, $base_id, $term) = @_;
   my ($node, $id) = $self->make_node_insert($type);
   my @ix    = $term->children();
-  my $ix_id = $self->parse(\@ix);
+  # The lone-bareword subscript rule is POSITIONAL in perl and knows nothing
+  # about the sigil: `%h{i}` autoquotes the key exactly as `$h{i}` does, and
+  # `%a[i]` evaluates it exactly as `$a[i]` does.  This site used to call
+  # parse() directly -- the third copy of the subscript path, and the one that
+  # never got the autoquote -- so every kv-slice spelling (`%h{k}`, `%$r{k}`,
+  # `%{$r}{k}`, `$r->%{k}`, `delete %h{k}`) compiled the key as a SUB CALL
+  # (s473t1: perl-tests/kvhslice.t:53 `scalar %h{i}`).  The access kind is
+  # already in $type, which is what is_arr_braces computed at the call site.
+  my $ix_id = $self->_parse_subscript_ix(\@ix, $type eq 'kv_slice_a_acc' ? 1 : 0);
   $self->add_child_to_node($id, $base_id);
   $self->add_child_flattening($id, $ix_id, 'progn');
   return $node;

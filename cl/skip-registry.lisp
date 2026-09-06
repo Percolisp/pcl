@@ -641,12 +641,22 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
 ;;     these rows: the divergence reproduces with no eval at all.
 ;;   28 / 29 — a BAREWORD key inside `%h{...}` is not autoquoted and is called
 ;;     as a sub (task #1024); `$h{i}`, `@h{i}` and `%h{'i'}` are all correct.
+;;     FIXED s473t1 (#1024 CLOSED): _kv_slice_node was a third copy of the
+;;     subscript path and called parse() directly instead of
+;;     _parse_subscript_ix.  Those two rows (now 29 / 30) PASS, and row 11
+;;     `correct value` -- an assertion inside `eval '...%h{i}...'` that never
+;;     ran because the eval died -- now runs and fails on #1023.
 (register-skips "kvhslice.t"
                 (10 :warning-emit
                     "`%h{...}` in scalar context must warn '%h{...} in scalar context better written as $h{...}' -- PCL emits no warnings-gated diagnostic. not-supported.md: 'Warnings-gated diagnostics are absent'.")
                 (12 :warning-emit
                     "same warning for the single-key spelling. not-supported.md: 'Warnings-gated diagnostics are absent'.")
-                (21 :lvalue
+                ;; s473t1: 21 -> 22.  The file has TWO rows described "correct
+                ;; hash", so this one can only be keyed by NUMBER, and #1024
+                ;; (the bareword kv-slice key) made row 11 exist, shifting every
+                ;; row below it by one.  The registry's own stale detector is
+                ;; what said so: "kvhslice.t test 21 now passes".
+                (22 :lvalue
                     "`sub foo:lvalue { %h{qw(a b)} }; $_++ foreach foo()` must write through to %h -- user-defined lvalue subs are not implemented. not-supported.md: 'Lvalue subroutines'.")
                 ("^local dies$"
                  :principle9

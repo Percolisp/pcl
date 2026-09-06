@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -136,3 +136,51 @@ test_cl('exists chained hash-ref access',
      print exists($r->{x}{y}) ? "yes" : "no", "\n";
      print exists($r->{x}{z}) ? "yes" : "no", "\n";',
     "yes\nno\n");
+
+# ── s473t1 / task #1024: a LONE BAREWORD subscript in a KV SLICE ────────────
+#
+# _kv_slice_node was a THIRD copy of the subscript path: it called
+# PExpr::parse() directly instead of _parse_subscript_ix, so the lone-bareword
+# autoquote never ran for ANY kv-slice spelling and `%h{i}` compiled the key as
+# a SUB CALL — "Undefined subroutine &main::i", an unhandled condition that
+# took the program down (perl-tests/kvhslice.t:53's assertion never ran).
+# `$h{i}` and `@h{i}` were always right; this is the sibling-copy family
+# CLAUDE.md rule 11 names.  All spellings below are probed against perl 5.40.3.
+test_cl('lone bareword key: every kv-hash-slice spelling',
+    'no strict "refs";
+     our %h = (i => "I", j => "J");
+     our $hr = \%h;
+     print join(",", %h{i}),      "|",
+           join(",", %h{i,j}),    "|",
+           join(",", %$hr{i}),    "|",
+           join(",", %{$hr}{i}),  "|",
+           join(",", $hr->%{i}),  "|",
+           join(",", delete %h{j}), "\n";',
+    "i,I|i,I,j,J|i,I|i,I|i,I|j,J\n");
+
+# The rule is POSITIONAL and sigil-blind: a hash subscript ALWAYS autoquotes a
+# lone bareword (even when a sub of that name exists — you need `%h{k()}` to
+# call it), an ARRAY subscript evaluates it when it is a known callable.  That
+# asymmetry is _bareword_subscript_autoquotes', shared with $h{…}/$a[…]; these
+# rows assert the kv slices now inherit it rather than carrying a second rule.
+test_cl('declared sub as a kv-slice key: hash quotes, array calls',
+    'no strict "subs";
+     sub k { 2 }
+     our @a = (10,20,30);
+     our %h = (k => "K");
+     print join(",", %a[k]), "|", $a[k], "|",
+           join(",", %h{k}), "|", $h{k}, "\n";',
+    "2,30|30|k,K|K\n");
+
+# An UNKNOWN bareword in an array subscript is the string "zzz" -> index 0.
+# Only the VALUE half is asserted: the KEY half is a separate, pre-existing
+# divergence (task #1440 -- perl echoes the index EXPRESSION, `%a[-1]` keying
+# -1 and `%a[1.7]` keying 1.7, where p-kv-aslice reports the normalized
+# integer).  Before this fix the statement DIED ("Undefined subroutine
+# &main::zzz"), so the row that matters here is that it produces a value at all.
+test_cl('unknown bareword in a kv-ARRAY slice reads element 0, does not die',
+    'no strict "subs";
+     our @a = (10,20,30);
+     my @kv = %a[zzz];
+     print scalar(@kv), ":", $kv[1], ":", $a[zzz], "\n";',
+    "2:10:10\n");
