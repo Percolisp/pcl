@@ -11,6 +11,16 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s471 (2026-09-06, Fable) — the CACHE SURFACE, the root scripts and the install layout RULED (USER asks); plan `docs/plan-cache-and-install-s471.md`
+- **The compile policy is two DIRECTORY LISTS, not a class word**: `PCL_COMPILE_DIRS` (default = perl's installed lib dirs + PCL `lib/` = `*p-core-inc-dirs*`; `*` = all) and `PCL_NO_COMPILE_DIRS` (wins; `*` = none); `PCL_NO_FASL_CACHE=1` stays as the alias.  The s470bw brief's `PCL_FASL_CACHE=installed|all|none` is NOT shipped (told bw 07:55).
+- **Validity = the #1261 manifest only; the 7-day age clause leaves `p-cache-valid-p`** (it re-transpiled every module weekly); the prune becomes last-use / touch-on-hit / 30 days incl. `proto/` (#682) — #1300.
+- **`pcl --clear-cache` stays ONE flag** (no sub-selection; XS artifacts are not a cache — `pcl-xs-install --clean`); NEW `pcl --cache-info`, `pcl --no-cache`, `pcl --version`, `pl2cl --help` — #1300.
+- **BUG #1303 (probed)**: `PCL_CACHE_DIR` is ignored by the MODULE cache — `*pcl-cache-dir*` is a defparameter initform, evaluated at core-build time from the BUILDER's home; proto/ + core/ + `--clear-cache` honour it.  A root-built installed core would send every user to `/root/.pcl-cache`.  Fix = init hook at process start.
+- **The cache dir is created 0700 and an unsafe one is refused loudly** (a fasl is code) — #1300.
+- **`runt`, `clt`, `sweep-perl-tests.pl` MOVE to `tools/`; `run-perl-test.pl` (dead, 0 code refs) is DELETED; the root keeps `pcl`, `pl2cl`, `runpcl`, `xs-pin`** — #1301, after bv + bw merge; the moved sweep must spawn byte-identically.
+- **The install keeps the perl shape it already has** (`<prefix>/bin/` sh wrappers → `<prefix>/lib/pcl/` tree + `pcl.core`); gaps: `pcl` is NOT installed today (F3), five root-resolution spellings → ONE `PCLPaths::root()` with `$PCL_ROOT` override + a runtime-present check, PATH line printed only when missing (never rc edits), `--uninstall`, per-user module cache needs #1303 — #1302 (BZ), after #1300.
+- Order recommended: BY #1300 → #1301 → BX → BZ #1302; #1262 (docs/caching.md, Sonnet) after #1300.
+
 ## s470bn (2026-09-05, Opus) — round 27 PERF: four levers ship, and the yardstick's biggest number is the MODULE LOAD, not codegen
 
 - **`symref-const` (Kind-A, #1180, `d8c1a0d`)**: a symbolic dereference whose operand is a compile-time STRING carries a PER-SITE cache cell `(p-symref-site)` and resolves its SYMBOL once.  **-60.1 %** of the `symref` loop (hand-replaced ceiling -87.1 %, control +0.2 %).  The site may cache the SYMBOL and nothing else — `local $main::g` installs a FRESH box, `%p-symref-array` replaces a non-vector binding — which is exactly what #812's name memo may cache, for the same reasons.  An UNQUALIFIED name records the package it resolved under (ONE site can see four, through string eval); an explicit `::` records T.  The form's HEAD does not change, so p-setf's place tables and the four ++/-- macros need no new name.
