@@ -79,7 +79,7 @@ family, a new invalidation rule, or a foreign library.  Impact: a guess until th
 | 8 | typed key sort | **M** | narrow | after adoption (#2): a merge sort specialised for all-fixnum / all-string key vectors | yes: the generic `stable-sort` |
 | 9 | `strcat` residue | measure | narrow | profile first (`sb-sprof` over the row); no design until the profile names it | no |
 | 10 | per-CLASS method + overload-handler cache (#582) | **L** | wide for OO code | blocked on the `@ISA`-write invalidation rule — a Fable design | yes: #73 measured the lookup share |
-| 11 | PCRE2 regex backend (#71, + #196 hangs, #477 quadratic `pos`) | **L** | wide for text code, and a PARITY lever | sb-alien binding; the JS target's tier design reuses the classification | yes: the engine itself |  **s474 (USER): the SPIKE is round 30's member 1 (before #1187); ONE engine, never both; bind `libpcre2-32` (zero-copy pinned subjects, offsets = char indexes); ships only with the OS matrix + a macOS leg green.** |
+| 11 | PCRE2 regex backend (#71, + #196 hangs, #477 quadratic `pos`) | **L** | wide for text code, and a PARITY lever | sb-alien binding; the JS target's tier design reuses the classification | yes: the engine itself |  **s474 (USER): the SPIKE is brief s473q — approved 2026-09-07, NOT high priority, AFTER round 30 (s473p) and the remaining S/M levers; before #1187, which stays HELD; ONE engine, never both; bind `libpcre2-32` (zero-copy pinned subjects, offsets = char indexes); ships only with the OS matrix + a macOS leg green.** |
 | — | `pack`/`unpack` (#74, the extension load) | — | — | **PARKED (USER) until the XS decision** | yes, but not ours to fix yet |
 
 ### A.3 The rounds (each round = ONE perf agent + the correctness agents)

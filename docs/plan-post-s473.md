@@ -38,18 +38,19 @@ successor.
 | 3 | **#1262** | `docs/caching.md` for users — Sonnet, `model: "sonnet"` (`s470/s1262`) | none | BY merged |
 | 4 | **s473a** | the `local` family: #1243(a)(b)(c) = #1192 + #1260, #1190 — 7 corpus rows | v2-870 | a slot |
 | 5 | **s473b** | the nested-element family: #1241 = #1150 (read vivifies), #1151, #1152, #1010 — 7 rows; bench-gated | v2-880 | a slot |
-| 6 | **s473p** | perf round 30 — **REORDERED s474 (USER)**: member 1 = the **#71 PCRE2 engine SPIKE** (measurement + stop rule + portability record; #1187 only if cl-ppcre stays), then #1200, then the single-array foreach lever | v2-890 | **NEXT free slot** (BU merged; USER "Good") |
+| 6 | **s473p** | perf round 30 (USER 2026-09-07 "other speed tests first"): #1200, the single-array foreach lever, #995+#1056 loop-body box reuse, #1182 storage adoption — #1187 HELD | v2-890 | BU merged; the next perf slot |
 | 7 | **s473c** | #1240 die LOCATION — sized first (register vs cold-branch constant), shipped by the ≤1 %/≤3 % rule — 8 rows | v2-900 | s473b merged (both touch the accessor emission) |
 | 8 | **s473d** | numeric representation: the CRASH pair #1245 + #1230, #1248(a)=#1191, #1248(b), #1012, #1248(c) — 10 rows | v2-910 | a slot |
 | 9 | **s473e** | loop control: #1244(a)=#1161, (b), (c), #1164 — 4 rows | v2-920 | a slot |
 | 10 | **s473i** | product bugs: #1060 `--executable`, #1284 `-I` to the module transpile, #1119 content-keyed module cache | v2-930 | BZ + s473p merged (cache + `pcl` regions) |
 | 11 | **s473h** | #1249's seven singletons (+ #1290), and #1242/#1117 SIZED (not designed) | v2-940 | a slot |
 | 12 | **s473f** | the handle family: #1309 #1246 #1307 #1308 (representation measured first) #1233 #1220 #1074 #1247(b) — 4 rows | v2-950 | a slot |
+| 13 | **s473q** | THE REGEX ENGINE SPIKE #71 (PCRE2 via sb-alien: measurement + binding stop rule + portability record; USER: approved, NOT high priority) | v2-980 (only if member 2 ships) | AFTER s473p and one more non-engine perf round (the remaining S/M levers) |
 | — | Fable designs | #1117 typeglob slots (from s473h's sizing); #582 `@ISA`-write invalidation (USER: box magic?); #71 PCRE2 (from s473p's measurement); #1202 extension fasl (USER-parked with pack) | | |
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460**.  Next free after these: **1461**.
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470**.  Next free after these: **1471**.
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script
@@ -64,7 +65,7 @@ s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431�
   regression: re-run alone, cite the task.  Until BY lands, every gate on this box may lose a
   file to it.
 - The perf line's next rounds are ordered by §A.4.1/§A.4.3, not by A.2's guesses (s470bn's
-- **s474 (USER): ONE regex engine at run time, never two; the #71 spike BEFORE #1187; and a platform-touching change (an engine, a foreign library, an installer step) ships only with the install matrix green WITH it plus a macOS leg — "we are not writing software for our laptop".**  Rulings in DECIDED §s474.
+- **s474 (USER): ONE regex engine at run time, never two; the #71 spike BEFORE #1187; approved 2026-09-07 ("Make it so") but NOT high priority — "do other speed tests first" (s473q after s473p + one more perf round); and a platform-touching change (an engine, a foreign library, an installer step) ships only with the install matrix green WITH it plus a macOS leg — "we are not writing software for our laptop".**  Rulings in DECIDED §s474.
   finding); the correctness line's metric is the corpus's known-fail count plus the sweep and
   companion totals.
 
