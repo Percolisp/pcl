@@ -222,6 +222,14 @@ my @benches = (
   #   run under PCL (task #1186), so the row wraps by hand.
   ['textproc',  "$HN use strict; use warnings; my \@src = map { \"line \$_: the quick brown fox jumps over the lazy dog, number \$_, tag=t\" . (\$_ % 17) } 1 .. 2000; my \$blob = join(\"\\n\", \@src); my \$s = 0; for (1 .. \$n) { my \$out = ''; for my \$l (split /\\n/, \$blob) { next unless \$l =~ /tag=t(\\d+)/; my \$tag = \$1; my \$up = uc(substr(\$l, 0, 20)); \$out .= \"\$up|\$tag;\"; \$s++ while \$l =~ /o/g; } \$s += length(\$out); my \$para = join(' ', \@src[0 .. 19]); my (\$col, \$wrapped) = (0, ''); for my \$w (split /\\s+/, \$para) { if (\$col + length(\$w) > 40) { \$wrapped .= \"\\n \"; \$col = 2 } \$wrapped .= \"\$w \"; \$col += length(\$w) + 1; } \$s += length(\$wrapped); } print \"\$s\\n\";", 400, 0],
   ['regexg',    "$HN my \$x = 'a' x 200000; my \$c = 0; for (1..\$n) { \$c = 0; while (\$x =~ /./g) { \$c++ } } print \"\$c\\n\";", 30, 0],
+  # `subste` — MANY s/// on SHORT subjects, one of them with an interpolated
+  # (/e) replacement.  `regexg` above measures ONE match op scanning a huge
+  # string, so its per-CALL cost is invisible; this row is the opposite and is
+  # the shape CPAN code actually has (escaping, trimming, per-field cleanup —
+  # JSON::PP's encoder is exactly this).  It is the row task #1251 was sized
+  # against: before it, every one of these evaluations re-ran the perl->ppcre
+  # pattern translation and rebuilt the scanner-cache key.
+  ['subste',    "$HN my \@w = map { \"field-\$_ value\" } 1..20; my \$c = 0; for (1..\$n) { for my \$s (\@w) { my \$u = \$s; \$u =~ s/([aeiou])/uc(\$1)/ge; \$u =~ s/\\s+/_/g; \$c += length(\$u) } } print \"\$c\\n\";", 3000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------

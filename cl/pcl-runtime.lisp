@@ -23689,7 +23689,20 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Substitution operation s///"
   pattern
   replacement
-  modifiers)
+  modifiers
+  ;; The compiled form, filled on first use by %p-subst-compiled and never
+  ;; invalidated: it is a pure function of the three slots above, which nothing
+  ;; writes after the op is built.  m//'s p-regex-match has the same slot for
+  ;; the same reason (task #680); s/// went without one until task #1251, and
+  ;; paid a full perl->ppcre pattern translation per EVALUATION for it.
+  ;;
+  ;; The slot holds a CONS whose car is the record, never the record
+  ;; itself, so a per-SITE cell can BE that cons (see %p-subst-compiled).
+  ;; It defaults to a fresh cons so an op built by make-p-subst-op directly
+  ;; still has a holder to fill: a nil here would make the first
+  ;; %p-subst-compiled call die in (setf (car nil) ...) instead of simply
+  ;; not sharing.
+  (%compiled (cons nil nil)))
 
 (defstruct p-tr-op
   "Transliteration operation tr///"
@@ -23974,6 +23987,15 @@ buffer's fill-pointer; everything else falls back to file-length."
          (%p-esc-decode (second form)))
         (t nil)))
 
+(defmacro %p-op-site ()
+  "One fresh mutable cell per EMITTED SITE, evaluated when the site's code is
+   loaded — `p-symref-site`'s cell (task #1180) with a cons instead of a
+   vector.  Its `car` is whatever that site memoizes: the op itself under
+   `%p-op-once`, or an s///'s COMPILED record when the op has to stay fresh
+   because its replacement is a closure (task #1251).
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  '(load-time-value (cons nil nil) nil))
+
 (defmacro %p-op-once (form)
   "FORM, evaluated at most ONCE for the call SITE this macro expands at, and
    remembered in a cell of the site's own (task #1250).  The regex-literal
@@ -23991,7 +24013,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    may ignore it and evaluate FORM every time.
    Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
   (let ((site (gensym "SITE")))
-    `(let ((,site (load-time-value (cons nil nil) nil)))
+    `(let ((,site (%p-op-site)))
        (or (car ,site) (setf (car ,site) ,form)))))
 
 (defun %p-regex-op (raw flags)
@@ -24057,23 +24079,41 @@ buffer's fill-pointer; everything else falls back to file-length."
       (%p-regex-keyword-args 'p-subst args '(:pat :rep :flags :tier))
     (declare (ignore tier))
     (let* ((f (or flags ""))
-           (call `(%p-subst-parts ,pat ,rep ,f)))
-      ;; An absent :rep is `nil', which is as constant as a literal string; a
-      ;; `(lambda …)' replacement is NOT — it may close over lexicals, so its
-      ;; op stays fresh per evaluation (task #1250).
-      (if (and (%p-literal-op-text pat)
-               (or (null rep) (%p-literal-op-text rep))
-               (stringp f))
-          `(%p-op-once ,call)
-          call))))
+           (call `(%p-subst-parts ,pat ,rep ,f))
+           (const-pat (and (%p-literal-op-text pat) (stringp f))))
+      (cond
+        ;; An absent :rep is `nil', which is as constant as a literal string:
+        ;; the whole op is then a constant and lives in the site (task #1250).
+        ((and const-pat (or (null rep) (%p-literal-op-text rep)))
+         `(%p-op-once ,call))
+        ;; A `(lambda …)' replacement may close over lexicals, so the OP must
+        ;; be fresh — but its COMPILED record cannot depend on the closure (a
+        ;; functionp replacement is always eval-p), so the site carries that
+        ;; instead (task #1251).  This is the shape of every interpolated
+        ;; replacement and every s///e.
+        ((and const-pat (consp rep) (eq (first rep) 'lambda))
+         `(%p-subst-parts ,pat ,rep ,f (%p-op-site)))
+        (t call)))))
 
-(defun %p-subst-parts (pattern replacement flags)
-  "Create a substitution operation s///."
+(defun %p-subst-parts (pattern replacement flags &optional site)
+  "Create a substitution operation s///.
+
+   SITE, when given, is the per-call-site cell `%p-op-site' makes, and it is
+   where the op's COMPILED record lives (task #1251).  The p-subst macro passes
+   one when it proved the PATTERN and FLAGS constant but the replacement is a
+   `(lambda …)' — an interpolated replacement or /e, which must build a fresh
+   op per evaluation because the closure may capture lexicals.  The record does
+   not depend on the closure (a functionp replacement is always eval-p, so it
+   has no translated replacement of its own), so every evaluation of that site
+   shares one translation and one scanner.  Without a site the op gets a holder
+   of its own and the record dies with it, which is what a run-time pattern has
+   to do."
   (make-p-subst-op :pattern (to-string pattern)
                    :replacement (if (functionp replacement)
                                     replacement
                                     (to-string replacement))
-                   :modifiers (%p-flag-keywords flags)))
+                   :modifiers (%p-flag-keywords flags)
+                   :%compiled (or site (cons nil nil))))
 
 (defmacro p-tr (&rest args)
   "A tr/// (y///) literal: (p-tr :from SET :to SET :flags LETTERS).  No `:tier`
@@ -24869,6 +24909,51 @@ buffer's fill-pointer; everything else falls back to file-length."
               (p-box-sv-ok string-box) nil
               (p-box-nv-ok string-box) nil))))
 
+(defun %p-subst-compiled (op)
+  "The compiled form of substitution op OP: the simple-vector
+   #(pattern replacement scanner eval-p global-p non-destructive-p reg-names
+   closers), computed ONCE and cached in the struct's %compiled slot.
+
+   This is m//'s %p-regex-compiled (task #680) for s/// (task #1251), and it
+   was the larger of the two by far.  do-regex-subst used to re-run
+   `perl-regex-to-ppcre' — SIX cl-ppcre:regex-replace-all passes over the
+   pattern text — on EVERY evaluation, then re-translate the replacement, walk
+   the modifier list seven times, cons an options list and FORMAT the
+   scanner-cache key out of the whole pattern.  Measured with sb-sprof over
+   the `json-rt' macro row: perl-regex-to-ppcre alone was 33.1 % of the run.
+
+   The record is a pure function of the op's three data slots, and nothing
+   writes those after the op is built — so the op IS the cache, with no
+   invalidation rule to get wrong.
+
+   THE SLOT HOLDS A CONS, not the record, so a per-SITE cell can be that cons:
+   an s/// whose replacement is a CLOSURE must build a fresh op per evaluation
+   (the closure may capture lexicals), and without a shared holder such a site
+   — which is every interpolated replacement and every /e, JSON::PP's hot ones
+   included — would re-translate on every call and get nothing from this cache
+   at all.  %p-subst-parts puts the site's cons here when the p-subst macro
+   proved the pattern and flags constant, and a fresh cons otherwise."
+  (let ((holder (p-subst-op-%compiled op)))
+    (or (car holder)
+        (let* ((pattern (perl-regex-to-ppcre (p-subst-op-pattern op)))
+               (raw-replacement (p-subst-op-replacement op))
+               (modifiers (p-subst-op-modifiers op))
+               (eval-p (and (or (member :e modifiers) (functionp raw-replacement)) t))
+               (replacement (unless eval-p
+                              (perl-to-ppcre-replacement (if (stringp raw-replacement)
+                                                             raw-replacement ""))))
+               (options (append (when (member :i modifiers) '(:case-insensitive-mode t))
+                                (when (member :s modifiers) '(:single-line-mode t))
+                                (when (member :m modifiers) '(:multi-line-mode t))
+                                (when (member :x modifiers) '(:extended-mode t)))))
+          (multiple-value-bind (scanner reg-names closers)
+              (%pcl-create-scanner pattern options)
+            (setf (car holder)
+                  (vector pattern replacement scanner eval-p
+                          (and (member :g modifiers) t)
+                          (and (member :r modifiers) t)
+                          reg-names closers)))))))
+
 (defun do-regex-subst (string-box op)
   "Perform substitution on boxed string, return count of replacements.
    Also sets capture groups $1, $2, ... from the match."
@@ -24876,103 +24961,98 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; overload and tie FETCH, so an overloaded object substitutes against
   ;; its overloaded string as perl does, never its raw print form (#119).
   (let* ((str (to-string string-box))
-         (pattern (perl-regex-to-ppcre (p-subst-op-pattern op)))
-         (raw-replacement (p-subst-op-replacement op))
-         (modifiers (p-subst-op-modifiers op))
-         (eval-p (or (member :e modifiers) (functionp raw-replacement)))
-         (replacement (unless eval-p
-                        (perl-to-ppcre-replacement (if (stringp raw-replacement)
-                                                       raw-replacement ""))))
-         (global-p (member :g modifiers))
-         (non-destructive-p (member :r modifiers))
-         (case-insensitive (member :i modifiers))
-         (single-line (member :s modifiers))
-         (multi-line (member :m modifiers))
-         (extended (member :x modifiers)))
+         (raw-replacement (p-subst-op-replacement op)))
     (handler-case
-        (let* ((options (append (when case-insensitive '(:case-insensitive-mode t))
-                                (when single-line '(:single-line-mode t))
-                                (when multi-line '(:multi-line-mode t))
-                                (when extended '(:extended-mode t)))))
-          (multiple-value-bind (scanner reg-names closers)
-              (%pcl-create-scanner pattern options)
-            (let* ((count 0)
-                   (result nil))
-              (if eval-p
-                  ;; s///e (and an interpolated replacement, which is compiled to
-                  ;; the same lambda): call it per match with the match state in
-                  ;; place.  cl-ppcre's NON-simple call form hands over the
-                  ;; OFFSETS, which is what the match variables are made of —
-                  ;; :simple-calls t gave only the matched strings, so this arm
-                  ;; had its own hand-rolled $1..$9 + %+/%- block and could set
-                  ;; nothing else: `$\`` / `$'` / `$+` / `$^N` / `@-` / `@+` were
-                  ;; all EMPTY inside an s/// replacement (task #520), while the
-                  ;; m// path beside it had been calling the shared setters all
-                  ;; along.  One pair of calls now, the same two the m// path
-                  ;; makes (rule 11) — and they cover $10..$20 and @{^CAPTURE}
-                  ;; too, which the copy never did.
-                  (let ((rep-fn (lambda (target start end match-start match-end
-                                         reg-starts reg-ends)
-                                  (declare (ignore start end))
-                                  (incf count)
-                                  (clear-capture-groups)
-                                  (set-capture-groups target reg-starts reg-ends reg-names)
-                                  (set-match-vars target match-start match-end
-                                                  reg-starts reg-ends closers)
-                                  (to-string (funcall raw-replacement)))))
-                    (setf result (if global-p
-                                     (cl-ppcre:regex-replace-all scanner str rep-fn)
-                                     (cl-ppcre:regex-replace scanner str rep-fn))))
-                  ;; Normal s///: string replacement
-                  (progn
-                    ;; First, set capture groups from the match
-                    (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                        (cl-ppcre:scan scanner str)
-                      (when match-start
-                        (clear-capture-groups)
-                        (set-capture-groups str reg-starts reg-ends reg-names)
-                        (set-match-vars str match-start match-end reg-starts reg-ends
-                                        closers)))
-                    ;; Perform the substitution
-                    (setf result (if global-p
-                                     (cl-ppcre:regex-replace-all scanner str replacement)
-                                     (cl-ppcre:regex-replace scanner str replacement)))
-                    ;; Count replacements
-                    (when (stringp result)
-                      (if global-p
-                          (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
-                          (when (cl-ppcre:scan scanner str)
-                            (setf count 1))))))
-              ;; /r: return modified copy, leave original unchanged
-              (if non-destructive-p
-                  (make-p-box (if (stringp result) result str))
-                  ;; Normal: update the boxed string in place, return count.
-                  ;; ONLY on a match: perl leaves the variable untouched when
-                  ;; nothing matched -- writing the (stringified) original
-                  ;; back would replace a blessed object held in the variable
-                  ;; with its own print form (concat2.t 3: `$path =~ s|/\z||`
-                  ;; on an overloaded object must leave the object alone).
-                  (progn
-                    (when (and (stringp result) (plusp count))
-                      (if (p-box-p string-box)
-                          (%p-write-match-target string-box result)
-                          ;; No box to write to, and the guard above says a
-                          ;; write IS needed — which is exactly where perl
-                          ;; croaks (task #911, #873's third slot).  It used to
-                          ;; warn and carry on, so `$1 =~ s/b/z/` silently did
-                          ;; nothing where perl dies.  The `(plusp count)`
-                          ;; guard is what keeps `s/zzz/q/` (no match) legal,
-                          ;; which perl also allows — perl decides this at RUN
-                          ;; time and a compile-time refusal was tried in s460ap
-                          ;; and reverted for moving four blessed tr.t rows.
-                          (%p-readonly-modification)))
-                    ;; perl returns the COUNT on a match and PL_sv_no on a miss
-                    ;; -- the dualvar ("" , 0), so `print "<$n>"` shows <> and
-                    ;; not <0> (task #416).  "" is false and numifies to 0, so
-                    ;; every arithmetic and boolean consumer is unchanged; only
-                    ;; a STRING consumer could see the difference, and there
-                    ;; perl's answer is the empty string.
-                    (if (plusp count) count ""))))))
+        ;; INSIDE the handler-case, because building the record is where the
+        ;; pattern reaches cl-ppcre: a bad pattern must warn and answer 0 here,
+        ;; exactly as it did when the scanner was built per call.  A record is
+        ;; only stored on success, so a retry re-signals rather than caching a
+        ;; half-built one.
+        (let* ((c (%p-subst-compiled op))
+               (replacement       (svref c 1))
+               (scanner           (svref c 2))
+               (eval-p            (svref c 3))
+               (global-p          (svref c 4))
+               (non-destructive-p (svref c 5))
+               (reg-names         (svref c 6))
+               (closers           (svref c 7))
+               (count 0)
+               (result nil))
+          (if eval-p
+              ;; s///e (and an interpolated replacement, which is compiled to
+              ;; the same lambda): call it per match with the match state in
+              ;; place.  cl-ppcre's NON-simple call form hands over the
+              ;; OFFSETS, which is what the match variables are made of —
+              ;; :simple-calls t gave only the matched strings, so this arm
+              ;; had its own hand-rolled $1..$9 + %+/%- block and could set
+              ;; nothing else: `$\`` / `$'` / `$+` / `$^N` / `@-` / `@+` were
+              ;; all EMPTY inside an s/// replacement (task #520), while the
+              ;; m// path beside it had been calling the shared setters all
+              ;; along.  One pair of calls now, the same two the m// path
+              ;; makes (rule 11) — and they cover $10..$20 and @{^CAPTURE}
+              ;; too, which the copy never did.
+              (let ((rep-fn (lambda (target start end match-start match-end
+                                     reg-starts reg-ends)
+                              (declare (ignore start end))
+                              (incf count)
+                              (clear-capture-groups)
+                              (set-capture-groups target reg-starts reg-ends reg-names)
+                              (set-match-vars target match-start match-end
+                                              reg-starts reg-ends closers)
+                              (to-string (funcall raw-replacement)))))
+                (setf result (if global-p
+                                 (cl-ppcre:regex-replace-all scanner str rep-fn)
+                                 (cl-ppcre:regex-replace scanner str rep-fn))))
+              ;; Normal s///: string replacement
+              (progn
+                ;; First, set capture groups from the match
+                (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                    (cl-ppcre:scan scanner str)
+                  (when match-start
+                    (clear-capture-groups)
+                    (set-capture-groups str reg-starts reg-ends reg-names)
+                    (set-match-vars str match-start match-end reg-starts reg-ends
+                                    closers)))
+                ;; Perform the substitution
+                (setf result (if global-p
+                                 (cl-ppcre:regex-replace-all scanner str replacement)
+                                 (cl-ppcre:regex-replace scanner str replacement)))
+                ;; Count replacements
+                (when (stringp result)
+                  (if global-p
+                      (setf count (length (cl-ppcre:all-matches-as-strings scanner str)))
+                      (when (cl-ppcre:scan scanner str)
+                        (setf count 1))))))
+          ;; /r: return modified copy, leave original unchanged
+          (if non-destructive-p
+              (make-p-box (if (stringp result) result str))
+              ;; Normal: update the boxed string in place, return count.
+              ;; ONLY on a match: perl leaves the variable untouched when
+              ;; nothing matched -- writing the (stringified) original
+              ;; back would replace a blessed object held in the variable
+              ;; with its own print form (concat2.t 3: `$path =~ s|/\z||`
+              ;; on an overloaded object must leave the object alone).
+              (progn
+                (when (and (stringp result) (plusp count))
+                  (if (p-box-p string-box)
+                      (%p-write-match-target string-box result)
+                      ;; No box to write to, and the guard above says a
+                      ;; write IS needed — which is exactly where perl
+                      ;; croaks (task #911, #873's third slot).  It used to
+                      ;; warn and carry on, so `$1 =~ s/b/z/` silently did
+                      ;; nothing where perl dies.  The `(plusp count)`
+                      ;; guard is what keeps `s/zzz/q/` (no match) legal,
+                      ;; which perl also allows — perl decides this at RUN
+                      ;; time and a compile-time refusal was tried in s460ap
+                      ;; and reverted for moving four blessed tr.t rows.
+                      (%p-readonly-modification)))
+                ;; perl returns the COUNT on a match and PL_sv_no on a miss
+                ;; -- the dualvar ("" , 0), so `print "<$n>"` shows <> and
+                ;; not <0> (task #416).  "" is false and numifies to 0, so
+                ;; every arithmetic and boolean consumer is unchanged; only
+                ;; a STRING consumer could see the difference, and there
+                ;; perl's answer is the empty string.
+                (if (plusp count) count ""))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error in s///: ~A" e)
         0))))

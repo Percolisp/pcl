@@ -46,7 +46,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 11;
+plan tests => 18;
 
 # ── the two instruments (same as perf-levers-02.t) ──────────────────────────
 
@@ -109,13 +109,63 @@ sub run_pl {
          '#1250: a literal s/// pattern AND replacement build the op once per site');
     unlike($l[5], qr/%p-op-once/i,
            '#1250 NEGATIVE: a CLOSURE replacement (s///e, interpolation) stays fresh');
+    like($l[5], qr/%p-subst-parts "a" \(lambda.*%p-op-site/i,
+         '#1251: ... but a CONSTANT pattern behind that closure still gets a site '
+         . 'for its compiled record');
     unlike($l[6], qr/%p-op-once/i,
            '#1250 NEGATIVE: an interpolated s/// pattern stays fresh');
+    unlike($l[6], qr/%p-op-site/i,
+           '#1251 NEGATIVE: ... and a run-time pattern gets no site either');
     like($l[7], qr/%p-op-once.*%p-tr-parts/i,
          '#1250: a literal tr/// builds its op once per site');
     unlike($l[8], qr/%p-op-once/i,
            '#1250 NEGATIVE: qr// is a fresh object per evaluation (perl identity)');
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1251 — the s/// op carries its compiled form
+# ─────────────────────────────────────────────────────────────────────────────
+{
+    my ($fh, $file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $fh <<'LISP';
+(in-package :pcl)
+;; The record is built on FIRST use and the SAME object comes back after —
+;; which is the whole lever: without it every evaluation re-ran
+;; perl-regex-to-ppcre (six cl-ppcre passes over the pattern).
+(let ((op (%p-subst-parts "(a)+[[:digit:]]" "X" "gi")))
+  (format t "before=~A~%" (if (car (p-subst-op-%compiled op)) "SET" "NIL"))
+  (let ((c1 (%p-subst-compiled op))
+        (c2 (%p-subst-compiled op)))
+    (format t "after=~A same=~A~%"
+            (if (car (p-subst-op-%compiled op)) "SET" "NIL")
+            (if (eq c1 c2) "YES" "NO"))
+    (format t "pat=~A rep=~A eval=~A global=~A r=~A~%"
+            (svref c1 0) (svref c1 1)
+            (if (svref c1 3) "Y" "N") (if (svref c1 4) "Y" "N")
+            (if (svref c1 5) "Y" "N"))))
+;; An /e op has NO translated replacement: the thunk runs per match.
+(let ((c (%p-subst-compiled (%p-subst-parts "x" (lambda () 1) "r"))))
+  (format t "e-rep=~A e-eval=~A e-r=~A~%"
+          (svref c 1) (if (svref c 3) "Y" "N") (if (svref c 5) "Y" "N")))
+LISP
+    close $fh;
+    my $out = `sbcl @sbcl_rt --load $file 2>&1`;
+    $out =~ s/^;.*\n//gm;
+    $out =~ s/^(?:PCL Runtime loaded).*\n//gm;
+    my @l = grep { /=/ } split /\n/, $out;
+    like($l[0] // '', qr/before=NIL/,
+         '#1251: a fresh s/// op has no compiled record');
+    like($l[1] // '', qr/after=SET same=YES/,
+         '#1251: the record is built once and the same object comes back');
+    # The pattern is the TRANSLATED one — [[:digit:]] is a POSIX class
+    # cl-ppcre does not know, so seeing 0-9 here proves the translation
+    # happened and was kept rather than redone per call.
+    like($l[2] // '', qr/pat=\(a\)\+\[0-9\] rep=X eval=N global=Y r=N/,
+         '#1251: it carries the TRANSLATED pattern, the replacement and the modifier booleans');
+    like($l[3] // '', qr/e-rep=(?i:nil) e-eval=Y e-r=Y/,
+         '#1251 NEGATIVE: a closure replacement has no translated replacement');
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # THE RUN ROWS — perl 5.40.3's own answers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -206,4 +256,56 @@ sub f { my $s = shift; $s =~ s/\d//g; return $s }
 print "sub:", f("a1b2"), "-", f("a3b4"), "\n";
 PL
     is($got, $want, '#1250 RUN: same pattern text under different flags, and a site inside a sub');
+}
+
+# The s/// shapes a CACHED COMPILED RECORD could get wrong: the modifier
+# booleans (/x /i /m /s /g /r), a translated POSIX class and \x{}, \Q..\E, a
+# named capture used in the replacement, a backreference, the count/"" dualvar,
+# one op used on two different subjects, a run-time pattern at a site that must
+# not cache, and tr///cs.  perl 5.40.3's own answers (scratch/s470bu/probe2c.pl).
+{
+    my $want = <<'OUT';
+1: X n
+2: x AB
+2: x AB
+3: a,M S
+4: atc
+4: ogd
+5: a-b-c
+5b: 01/2020
+6: baa k=1 z=[]
+7: x0x0 2
+7: 000 3
+8: Abc abc
+8: AAc aac
+9: a#b#
+10: a.b
+11: ab|cd
+13: .b
+13: a.
+15: aabxb 2
+15: aabxb 2
+OUT
+    my $got = run_pl(<<'PL');
+use strict; use warnings;
+my $a = "a b"; (my $b = $a) =~ s/a \s b/X/x; print "1: $b ", ($a =~ s/a \s b/Y/ ? "m" : "n"), "\n";
+for my $i (1..2) { my $s = "AB"; my $t = "AB"; $s =~ s/ab/x/i; $t =~ s/ab/y/; print "2: $s $t\n" }
+my $ml = "a\nb";
+(my $c1 = $ml) =~ s/^b$/M/m; (my $c2 = $ml) =~ s/a.b/S/s;
+print "3: ", ($c1 =~ tr/\n/,/r), " ", $c2, "\n";
+for my $w ("cat", "dog") { my $s = $w; $s =~ s/(\w)(\w+)/$2$1/; print "4: $s\n" }
+my $q = "a.b.c"; $q =~ s/\Q.\E/-/g; print "5: $q\n";
+my $n = "2020-01"; $n =~ s/(?<y>\d{4})-(?<m>\d\d)/$+{m}\/$+{y}/; print "5b: $n\n";
+my $t6 = "aaa"; my $k6 = ($t6 =~ s/a/b/); my $z6 = ($t6 =~ s/zzz/q/);
+print "6: $t6 k=$k6 z=[$z6]\n";
+for my $s ("xoxo", "ooo") { my $u = $s; my $c = ($u =~ s/o/0/g); print "7: $u $c\n" }
+for my $s ("abc", "aac") { print "8: ", ($s =~ s/a/A/gr), " $s\n" }
+my $p9 = "a1b2"; $p9 =~ s/[[:digit:]]/#/g; print "9: $p9\n";
+my $p10 = "a\x{41}b"; $p10 =~ s/\x{41}/./; print "10: $p10\n";
+sub strip { my $s = shift; $s =~ s/\s+//g; return $s }
+print "11: ", strip(" a b "), "|", strip("c d"), "\n";
+for my $pat ("a", "b") { my $s = "ab"; $s =~ s/$pat/./; print "13: $s\n" }
+for my $i (1..2) { my $s = "aabxxb"; my $c = ($s =~ tr/ab//cs); print "15: $s $c\n" }
+PL
+    is($got, $want, '#1251 RUN: 19 s///-and-tr/// shapes match perl 5.40.3');
 }
