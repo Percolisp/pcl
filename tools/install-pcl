@@ -16,22 +16,32 @@
 # WHAT GETS INSTALLED
 #
 #   $PREFIX/lib/pcl/        the tree the runners need, in its REPO-RELATIVE
-#                           shape: pl2cl, runpcl, Pl/, lib/, cl/, tools/lib/.
-#                           The layout is not cosmetic — pl2cl finds Pl:: with
-#                           dirname(abs_path($0)) and runpcl finds tools/lib
-#                           with FindBin::RealBin, so the relative arrangement
-#                           IS the lookup mechanism.
+#                           shape: pcl, pl2cl, runpcl, Pl/, lib/, cl/,
+#                           tools/lib/.  The layout is not cosmetic — every
+#                           script finds the tree beside its own REAL path
+#                           (PCLPaths::root, task #1302), so the relative
+#                           arrangement IS the lookup mechanism.
 #   $PREFIX/lib/pcl/pcl.core   the saved core, built here from the INSTALLED
 #                           runtime (so it can never reflect a different one).
-#   $PREFIX/bin/pl2cl       wrapper scripts that exec the real ones.  Not
-#   $PREFIX/bin/runpcl      symlinks: runpcl takes its root from dirname($0),
-#                           which a symlink would answer with $PREFIX/bin.
+#   $PREFIX/lib/pcl/VERSION the release this tree is, written here because an
+#                           installed tree has no .git and no CHANGELOG; it is
+#                           what `pcl --version` reads.
+#   $PREFIX/bin/pcl         wrapper scripts that exec the real ones.  Not
+#   $PREFIX/bin/pl2cl       symlinks: each script takes its root from its own
+#   $PREFIX/bin/runpcl      real path, which a symlink here would answer with
+#                           $PREFIX/bin.
+#
+# What is NOT installed: the development runners (tools/runt, tools/clt,
+# tools/sweep-perl-tests.pl, tools/run-perl-suite.pl), the gate (Pl/t), the
+# corpora and the docs.  An installation is the three commands and what they
+# need to run.
 #
 # Usage:
 #   tools/install-pcl                     # into $HOME/.local
 #   tools/install-pcl --prefix /opt/pcl
 #   tools/install-pcl --no-core           # skip the core build (slower runs)
 #   tools/install-pcl --dry-run           # print what it would do
+#   tools/install-pcl --uninstall         # remove what it installed
 #
 # The install FAILS, loudly and before copying anything, when a dependency is
 # missing or too old, and it fails after copying when the smoke test does not
@@ -47,15 +57,25 @@ use File::Spec;
 use File::Copy qw(copy);
 use Cwd qw(abs_path);
 use Getopt::Long;
+use lib dirname(abs_path($0)) . '/lib';
+use PCLPaths ();   # the ONE root resolver (task #1302)
 
-my $root = abs_path(dirname(dirname(abs_path($0))));   # the checkout
+# The tree this installer is PART OF is what it installs, so the derivation is
+# root_of (the tree that owns this script) and never root() — an installer
+# whose SOURCE could be redirected by an environment variable would copy a
+# different PCL than the checkout the operator typed the command in.  The
+# `use lib` above is the bootstrap that finds tools/lib.
+my $root = PCLPaths::root_of($0)
+    or die "install-pcl: cannot find the PCL tree this script belongs to "
+         . "(no cl/pcl-runtime.lisp beside or above " . abs_path($0) . ").\n";
 
 my %opt = (prefix => $ENV{PREFIX} // "$ENV{HOME}/.local", core => 1);
-GetOptions(\%opt, 'prefix=s', 'core!', 'dry-run', 'force', 'quiet', 'help')
-    or die "usage: $0 [--prefix DIR] [--no-core] [--force] [--dry-run]\n";
+GetOptions(\%opt, 'prefix=s', 'core!', 'dry-run', 'force', 'uninstall', 'quiet', 'help')
+    or die "usage: $0 [--prefix DIR] [--no-core] [--force] [--dry-run] [--uninstall]\n";
 if ($opt{help}) {
     print <<"USAGE";
 usage: $0 [--prefix DIR] [--no-core] [--force] [--dry-run] [--quiet]
+       $0 --uninstall [--prefix DIR] [--dry-run]
 
   --prefix DIR   install root (default: \$HOME/.local, or \$PREFIX)
   --no-core      do not build the saved SBCL core (runs stay correct, but
@@ -63,8 +83,16 @@ usage: $0 [--prefix DIR] [--no-core] [--force] [--dry-run] [--quiet]
   --force        REPLACE an existing installed tree (it is removed first, so
                  a shim that no longer exists cannot survive into the new
                  install and shadow a core module)
+  --uninstall    remove <prefix>/lib/pcl and the wrappers this script wrote
+                 (pcl, pl2cl, runpcl).  It refuses when <prefix>/lib/pcl is
+                 not a PCL install, and it never touches a per-user cache --
+                 `pcl --clear-cache` is what empties that.
   --dry-run      print the steps, change nothing
   --quiet        only warnings and errors
+
+Installs pcl, pl2cl and runpcl into <prefix>/bin as small sh wrappers, and the
+runtime tree they need into <prefix>/lib/pcl.  Development runners, the test
+gate and the corpora are NOT installed.
 
 Caches.  The SBCL core is compiled HERE, at install time, into
 <prefix>/lib/pcl/pcl.core -- the same model perl uses for its own library,
@@ -73,6 +101,15 @@ per USER and is built on first use, under \$PCL_CACHE_DIR (default
 ~/.pcl-cache, created with mode 0700); nothing under the install prefix is
 written at run time.  `pcl --cache-info` says where a given user's cache is
 and what is in it, and `pcl --clear-cache` empties it.
+
+Environment.
+  PREFIX          the default for --prefix
+  PCL_ROOT        overrides where an INSTALLED script looks for its tree.  It
+                  is a debugging and packaging escape hatch, not something an
+                  ordinary install needs: every command finds its tree beside
+                  its own real path.  (This script ignores it deliberately --
+                  what it installs is the tree it is part of.)
+  PCL_CACHE_DIR   where each user's caches go (default ~/.pcl-cache)
 USAGE
     exit 0;
 }
@@ -80,6 +117,12 @@ USAGE
 my $prefix  = abs_path_maybe($opt{prefix});
 my $libdir  = "$prefix/lib/pcl";
 my $bindir  = "$prefix/bin";
+
+# The three commands an installation IS.  One list: @TREE copies them, the
+# wrapper loop writes them, --uninstall removes them, and the smoke test runs
+# them.  A fourth command added here is installed, wrapped, removed and tested
+# by construction.
+my @COMMANDS = qw(pcl pl2cl runpcl);
 
 sub say_step { say "==> $_[0]" unless $opt{quiet} }
 sub say_info { say "    $_[0]"  unless $opt{quiet} }
@@ -148,7 +191,7 @@ sub module_version {
 
 # The runtime subset, in repo-relative form.  Everything else in the checkout
 # (Pl/t, perl-tests, docs, the other tools) is development material.
-my @TREE = qw(pl2cl runpcl Pl lib cl tools/lib);
+my @TREE = (@COMMANDS, qw(Pl lib cl tools/lib));
 
 sub copy_tree {
     my ($src, $dst) = @_;
@@ -174,17 +217,41 @@ sub copy_tree {
 # The version, written down ONCE — here, where a checkout is still in reach.
 # An installed tree has no .git and no CHANGELOG, so without this file
 # `pcl --version` can only say "unknown", and a bug report loses the one
-# number that says which PCL is running (task #1300).
+# number that says which PCL is running (task #1300).  There is exactly one
+# reader (pcl's pcl_version) and exactly one writer, this.
+#
+# Two sources, in order: `git describe --tags`, and — when the tree being
+# installed is itself a tarball or an archive extraction with no .git, which
+# is how the container test and a release tarball reach this code —
+# CHANGELOG.md's top heading.  Never a guess: a wrong version in a bug report
+# is worse than none, so the last resort says plainly that it does not know.
 sub write_version_file {
     return if $opt{'dry-run'};
     my $v = qx{git -C \Q$root\E describe --tags --always --dirty 2>/dev/null};
     chomp $v if defined $v;
+    $v = changelog_version() unless defined $v && length $v;
     $v = "unknown (installed from a tree with no git history)"
         unless defined $v && length $v;
     open my $fh, '>', "$libdir/VERSION" or die "write $libdir/VERSION: $!\n";
     say {$fh} $v;
     close $fh;
     say_info("VERSION $v");
+}
+
+# CHANGELOG.md's first `## ` heading, which is the release this tree claims to
+# be (the file's own convention: `## Unreleased` while a tag is pending, `##
+# v0.1.0 — ...` once one is cut).  Marked as its source, because "0.1.0" read
+# from a changelog and "v0.1.0-428-gb5e9f845" read from git answer the same
+# question with different precision and a bug report needs to know which.
+sub changelog_version {
+    open my $fh, '<', "$root/CHANGELOG.md" or return undef;
+    while (my $line = <$fh>) {
+        next unless $line =~ /^##\s+(\S.*?)\s*$/;
+        close $fh;
+        return "$1 (from CHANGELOG.md; the installed tree had no git history)";
+    }
+    close $fh;
+    return undef;
 }
 
 # ------------------------------------------------------------------- wrappers
@@ -194,15 +261,24 @@ sub write_wrapper {
     my $path = "$bindir/$name";
     return if $opt{'dry-run'};
     open my $fh, '>', $path or die "write $path: $!\n";
-    print $fh <<"SH";
+    print $fh wrapper_text($name);
+    close $fh;
+    chmod 0755, $path;
+}
+
+# ONE spelling of a wrapper: write_wrapper writes it and --uninstall
+# recognises it.  Recognition is what makes the uninstall safe — it removes a
+# file in <prefix>/bin only when that file is the one this script wrote for
+# THIS libdir, never a `pcl` somebody else put there.
+sub wrapper_text {
+    my ($name) = @_;
+    return <<"SH";
 #!/bin/sh
 # PCL $name — installed by tools/install-pcl.  Execs the real script, which
 # finds Pl/, lib/, cl/ and tools/lib/ relative to ITSELF; a symlink here would
-# make runpcl resolve its root to this bin directory instead.
+# make it resolve its root to this bin directory instead.
 exec "$libdir/$name" "\$\@"
 SH
-    close $fh;
-    chmod 0755, $path;
 }
 
 # --------------------------------------------------------------- the core build
@@ -259,8 +335,12 @@ sub check_artifacts {
 # ------------------------------------------------------------------ smoke test
 
 # The install is not finished until the INSTALLED tools transpile and run a
-# program.  Two of them, because they exercise different halves: pl2cl alone
-# (does the tree resolve?) and runpcl (does the core/runtime load and run?).
+# program.  All three of them, because they exercise different halves: pl2cl
+# alone (does the tree resolve?), runpcl (does the core/runtime load and
+# run?), and pcl — the everyday command, and the one a user actually types, so
+# an install where only the other two work is an install that is broken for
+# everybody.  `pcl -e` also goes through a path neither of the others does:
+# inline code, with no file to take a directory from.
 sub smoke {
     my $tmp = File::Spec->tmpdir . "/pcl-install-smoke.$$.pl";
     open my $fh, '>', $tmp or die "write $tmp: $!\n";
@@ -275,14 +355,94 @@ sub smoke {
     }
 
     my $out = qx{$bindir/runpcl $tmp 2>&1};
-    unlink $tmp;
     unless ($? == 0 && $out eq "PCL WORKS\n") {
+        unlink $tmp;
         die "install-pcl: SMOKE TEST FAILED — the installed runpcl ran the "
           . "program but printed:\n$out\nexpected: PCL WORKS\n";
     }
+
+    my $ran = qx{$bindir/pcl $tmp 2>&1};
+    unless ($? == 0 && $ran eq "PCL WORKS\n") {
+        unlink $tmp;
+        die "install-pcl: SMOKE TEST FAILED — the installed pcl ran the "
+          . "program but printed:\n$ran\nexpected: PCL WORKS\n";
+    }
+    unlink $tmp;
+
+    my $inline = qx{$bindir/pcl -e 'print "PCL WORKS\\n"' 2>&1};
+    unless ($? == 0 && $inline eq "PCL WORKS\n") {
+        die "install-pcl: SMOKE TEST FAILED — the installed `pcl -e` printed:\n"
+          . "$inline\nexpected: PCL WORKS\n";
+    }
+}
+
+# ------------------------------------------------------------------ the PATH
+#
+# Printed ONLY when $bindir is not already on $PATH, and it is the exact line
+# to paste — "add it to your PATH" is advice, `export PATH=...` is the answer.
+# No rc file is edited, ever: a program that writes to a shell's startup file
+# is a program the user has to audit.
+sub path_hint {
+    my @path = grep { length } split /:/, ($ENV{PATH} // '');
+    my $want = $bindir;
+    $want =~ s{/+\z}{};
+    for my $p (@path) {
+        $p =~ s{/+\z}{};
+        return if $p eq $want;
+    }
+    say_step("$bindir is not on your PATH");
+    say_info(qq{add it with:  export PATH="$bindir:\$PATH"});
+    say_info("(put that line in your shell's startup file; install-pcl does not edit one)");
+}
+
+# -------------------------------------------------------------- --uninstall
+#
+# Removes what this script wrote and nothing else: the tree at <prefix>/lib/pcl
+# and, in <prefix>/bin, exactly the wrapper files whose content is the one
+# write_wrapper produces for THIS libdir.  A per-user cache is not part of an
+# installation (it lives under $PCL_CACHE_DIR, one per user, and other PCLs may
+# share it), so it is left alone and said to be left alone.
+sub do_uninstall {
+    unless (-f "$libdir/cl/pcl-runtime.lisp") {
+        die "install-pcl: $libdir is not a PCL installation "
+          . (-d $libdir ? "(no cl/pcl-runtime.lisp in it)" : "(it does not exist)")
+          . " — refusing to remove anything.\n";
+    }
+
+    say_step($opt{'dry-run'} ? "would remove the installed tree $libdir"
+                             : "removing the installed tree $libdir");
+    remove_tree($libdir) unless $opt{'dry-run'};
+
+    for my $name (@COMMANDS) {
+        my $path = "$bindir/$name";
+        next unless -f $path;
+        my $have = do { open my $fh, '<', $path or next; local $/; <$fh> };
+        if (defined $have && $have eq wrapper_text($name)) {
+            say_info($opt{'dry-run'} ? "would remove $path" : "removed $path");
+            unlink $path unless $opt{'dry-run'};
+        }
+        else {
+            say_info("left $path alone — it is not the wrapper this script wrote");
+        }
+    }
+
+    # <prefix>/lib may now be empty; leave it.  Removing directories the
+    # installer did not create is how an uninstall takes something with it.
+    say_step("done");
+    say_info("the per-user compiled-module cache is untouched "
+           . "(it is not part of an installation) — `pcl --clear-cache` empties it");
 }
 
 # ------------------------------------------------------------------------ main
+
+# --uninstall comes first and asks for nothing: removing an installation must
+# not depend on PPI, Moo or SBCL still being present — the usual reason to
+# uninstall is that something about the machine changed.
+if ($opt{uninstall}) {
+    say_step("PCL uninstall: $prefix");
+    do_uninstall();
+    exit 0;
+}
 
 say_step("PCL install: $root -> $prefix");
 say_step("checking dependencies");
@@ -312,8 +472,9 @@ copy_tree("$root/$_", "$libdir/$_") for @TREE;
 write_version_file();
 
 say_step($opt{'dry-run'} ? "would write wrappers in $bindir" : "writing wrappers in $bindir");
+say_info(join ' ', @COMMANDS);
 make_path($bindir) unless -d $bindir || $opt{'dry-run'};
-write_wrapper($_) for qw(pl2cl runpcl);
+write_wrapper($_) for @COMMANDS;
 
 if ($opt{core}) {
     say_step($opt{'dry-run'} ? "would build the saved core" : "compiling the runtime into $libdir/pcl.core");
@@ -331,4 +492,4 @@ unless ($opt{'dry-run'}) {
 }
 
 say_step("done");
-say_info("add $bindir to PATH if it is not there already") unless $opt{quiet};
+path_hint() unless $opt{quiet};

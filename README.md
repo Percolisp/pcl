@@ -62,6 +62,14 @@ To put the commands on your `PATH`, install a copy:
 tools/install-pcl --prefix ~/.local     # copies the tree, builds the cache, self-tests
 ```
 
+That installs `pcl`, `pl2cl` and `runpcl` into `~/.local/bin` (it prints the
+`export PATH=...` line to paste if that directory is not on your `PATH` yet,
+and never edits a startup file for you).  `tools/install-pcl --uninstall
+--prefix ~/.local` removes them again; your compiled-module cache is separate
+from an installation and stays — `pcl --clear-cache` is what empties that.
+`PCL_ROOT` overrides where an installed command looks for its runtime tree, if
+you ever repackage the layout.
+
 ## Using PCL
 
 `pcl` is the everyday command.  It works like `perl` for the things most
