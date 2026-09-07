@@ -77,6 +77,16 @@ first: the bench row, and a per-array "every element is a box" fact.
 **#813 and #924 were closed without re-measuring**, on their existing ruled
 declines.
 
+**#1141 and #1142, the two facts fillers, closed by MEASUREMENT — and one of
+them is not a filler.**  #1141`s three named shapes already emit the fast form
+(`(p-array-= @a (vector …))`, direct call args, multiple values), and a scan of
+65 files finds **exactly ONE all-scalar LIST_CTX `p-flatten-args` site** out of
+182 — 131 of which are the `@_` construction.  #1142 is the opposite: it looked
+for lost `local-push` sites and not for lost `p-foreach-raw` RUNS, and one
+read-only `grep { $_ > 0 } @a` anywhere in a file costs `for my $x (@a)`
+**30.6 %** (0.2872 → 0.1992 s) at EVERY site, because #1409 made a single bare
+array take the `:arrays t` run.  PROMOTED with its design and left open.
+
 Bars, both commits: gate **220 files / 7658 rows** (only the 13 pclxs xs
 rows); full sweep `--jobs 4` twice, GATE clean, **TOTAL passing 18674 (+0)**,
 0 new / 0 fixed / 0 LOST, drops 5 = census; ir-conform 289/0/56/0 twice;
