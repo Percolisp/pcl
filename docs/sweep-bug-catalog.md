@@ -337,8 +337,10 @@ Three distinct bug classes:
 
 - **`ref hash keys at compile`** (test 3): `ref hash keys are not stringified during
   compilation` — compile-time constant folding check.
+  -> task **#155** / `docs/not-supported.md` "`tie` on an ARRAY or HASH" (s473t3: PCL announces `tie: a HASH ... is not implemented`).
 
 - **`magic keys`** (test 493): hash magic keys not implemented.
+  -> task **#155** / `docs/not-supported.md` "`tie` on an ARRAY or HASH" (s473t3: same announcement; the blessed row is `hash.t 13`).
 
 ---
 
@@ -397,6 +399,7 @@ breakdown still applies. The breakdown below is retained for reference only.
   objects, 147–152/441/442), `%n` family (271–273/341), `%.0hf` size-modifier
   rejection (227), `%.0g` float edges (231–237), reordered positional+vector
   (482/540/543/546).
+  -> s473t3 attribution of the blessed rows: `%vd` version objects = **#1471**; `%.0hf` (227) = **#1472**; `%.0g` float edges (235/237) = **#1475** (negative zero loses its sign; `%#.0g` drops the alternate form); "reordered positional+vector" splits into **#1473** (540/550, a positional `N$` with the `v` flag is unparsed) and **#1474** (157/165, the `+` flag is applied per vector ELEMENT).
 
 - **Reordered positional width/precision** ✅ **FIXED (session 216)**: `%*N$` / `%.*N$`
   drew their value from positional arg N but were emitted literally. New helper
@@ -412,12 +415,14 @@ breakdown still applies. The breakdown below is retained for reference only.
   principle 9; revisit only if the harness's `%REDUNDANT`/`%INVALID` accounting can be
   matched cheaply. NB the harness encodes the *expected warnings* in the data columns,
   so these are not pure "ignore invalid input" cases.
+  -> task **#1472** (s473t3; the four blessed rows are three shapes -- `%.0hf` honoured not rejected, `%v#x` formatted not verbatim, and no `Missing argument` for an out-of-range POSITIONAL index).  Row 550 is NOT this note -- it is **#1473**; rows 157/165 are **#1474**.
 
 - **`version->new` / `version::qv` objects in `%vd`/`%vx`** (~15t): `sprintf "%vd",
   version->new("1.2")` should print `1.2` using the version object's release components.
   PCL stringifies the object char-by-char (`49.46.50`). Needs real `version` object
   support (the `%v` flag reads each *character ordinal* of the stringification; a version
   object must expose its v-string form). Fix area: `sprintf-vector` + `version` in `lib/`.
+  -> task **#1471** (s473t3; `version::qv` does not exist at all, and the plain-string `%vd` control is correct).
 
 - **`%n`** (~3t): stores the running char count back into an argument (and the magic/utf8
   variants). Not implemented; discouraged in modern Perl. Leave unless a CPAN dep needs it.
@@ -436,6 +441,7 @@ breakdown still applies. The breakdown below is retained for reference only.
 - **Remaining 28**: subnormal/denormal `%a` last-hexdigit rounding (`0x0p+0` for tiny
   denormals, ~17t), `%n` (2t), `.=`-on-array-elem (1657), "Numeric format result too large"
   (1673), and a few float-precision edges. Niche float-internals + error detection.
+  -> tasks **#1476** (the SIGNIFICAND of a subnormal is wrong, not merely rounded) and **#1477** (a normal double at an exact tie rounds half-away where perl rounds half-to-even); 1673 is `docs/not-supported.md` "Error message text and format".  s473t3.
 
 ### sprintf2.t (HISTORICAL: 102 failures, 1576/1678 passing — session 216, was 171)
 
@@ -471,6 +477,7 @@ breakdown still applies. The breakdown below is retained for reference only.
 
 - **Croak for large numeric format** (tests 1673–1678, 6 failures): `sprintf("%7000000000E", 1)`
   should die "Integer overflow in format string". Error message format mismatch.
+  -> `docs/not-supported.md` **"Error message text and format"** (s473t3: PCL dies correctly, with `Integer overflow in format string` instead of `Numeric format result too large`).
 
 ---
 
@@ -523,10 +530,12 @@ backed by not-supported.md §"Sparse arrays (holes), element aliasing, and SV id
   - **freed-array (83–88, 100):** the GC-hard corner, as predicted. The magic cell holds a
     *strong* ref to the vector so it never dies → reads stale index, not `undef`. Needs
     `sb-ext:make-weak-pointer` + GC nondeterminism (same family as DESTROY-via-GC). Leave.
+    -> task **#1478** (s473t3; the prediction is confirmed by a standalone reproducer).
   - **symbolic-ref length (109–114):** `$#{@array}`/`$#{$x}`/`$4[8]` (#37350) — a different
     feature (symbolic ref → glob), not arylen write-through.
   - **126** (`arylen_p` magic vs `@ISA` element magic), **172** (arylen aliased in foreach):
     separate magic-interaction sub-problems.
+    -> **126 is task #1479** and is NOT an arylen problem at all (s473t3: `pling peen` is indirect-object syntax with a LOWERCASE class name; the arylen half of the test works).  **172 is task #1480** (a foreach alias to `scalar $#array` does not write through).
 - **BONUS still open:** the generalized `p-magic-cell` (getter/setter closures) now EXISTS and
   is proven — it can back `\substr`/`\pos`/`\vec` and lvalue `substr` (the `:lvalue` skips in
   ref.t 68–73 / substr.t 313–397 / state.t) by emitting analogous magic-cell refs. Next spike.
@@ -570,6 +579,7 @@ backed by not-supported.md §"Sparse arrays (holes), element aliasing, and SV id
   `p-box-p inner2`; recursive-`p-ref` restructure) were reverted after the sweep flagged
   qr.t/index.t/split.t regressions — do not retry those shapes.
 - **vstring refs** (tests 64–65): `ref(\v1)` should be "VSTRING".
+  -> task **#1495** (s473t3: `ref` DOES answer VSTRING today; the blessed `ref.t 67` row does not reproduce and its recorded got value is stale).
 - **`&{""}` call** (test 21): `ref eval {\&{""}}` should return "CODE". PCL raises error.
 - **PVBM ref-type** (tests 178–182), **list-slice deref** (test 177), **sub-ref CL-lambda
   stringification** (tests 171–172), **`-e` vs `-` eval filename** (tests 189–191).
@@ -630,6 +640,7 @@ call returns a box-wrapped struct instead of the value/REF). Clusters below stil
 - **`SUPER` inside moved package** (tests 77–78): `$obj->Bminor::SUPER::test(...)` fails.
 - **DESTROY/AUTOLOAD interaction** (tests 100, 103, 114–115): documented (GC doesn't call DESTROY).
 - **`UNIVERSAL::AUTOLOAD`** (tests 97–99): `$AUTOLOAD` scoping across packages.
+  -> task **#1485** (s473t3: the handler is never reached at all, so scoping never arises).  method.t 103 is task **#1486** (`*Pkg::AUTOLOAD = sub` written from another package installs nothing); 104/115/116 are `docs/not-supported.md` "`DESTROY` called by garbage collector".
 - **Error message format** (tests 116–118): `"new{}"` in error message.
 - **Method call on typeglob** (tests 128–131): `*glob->method`.
 
@@ -661,10 +672,12 @@ failures; see the later do.t entry.)
   these are the hashref-element `delete local` rows at source lines 247–266.)
 - **`local $_` with filetest/match** (tests 255–264): `local $_` interactions with
   filetest operators and pattern matching on default `$_`.
+  -> task **#1483** (s473t3: there is no `local` in the three blessed rows -- `chop`, a bare `-X` and a PLAIN assignment do not fire a tied `$_`'s FETCH/STORE; the match spelling PASSES).
 - **package-name reported unqualified** (tests 237, 240): got `'foo'`, expected
   `'main::foo'` — a qualified-name lookup gap (not yet investigated).
 - **`local *{$pkg}{method}`** (tests 271–278): temporarily replacing a method via stash
   slot — not supported.
+  -> task **#1484** (s473t3; the `local *glob = sub` spelling works, the stash-slot and stash-slice spellings install nothing, silently).
 
 ---
 
@@ -711,8 +724,10 @@ failures; see the later do.t entry.)
 - **Scalar aliasing after bless** (test 6): `my $b1 = $b; bless $b, 'Pie'` — `$b1` should also be Pie. Scalar assignment copies in PCL, can't share identity.
 
 - **PVLV deref `${qr//}`** (tests 11, 12, 16, 24, 25, 27, 31, 32, 37): `${qr//}` should return a magical PVLV that stringifies to the pattern. Complex. Not supported.
+  -> tasks **#1487** (`$$qr = VALUE` replaces the object instead of writing through) and **#1488** (`ref \$x` on the dereferenced value is SCALAR, not REGEXP -- it stringifies and matches correctly).  s473t3.
 
 - **Stringification of blessed qr// objects** (tests 14, 18): `"$qr"` should match `Foo=REGEXP(0x...)`. Not supported.
+  -> measured in task **#1487**'s probe: `bless $qr, "Pie"; "$qr"` is `(?^:Good)` in perl and `Pie=(?^:Good)` in PCL.  s473t3.
 
 - **DESTROY via GC** (test 36): documented not-supported.
 
@@ -749,6 +764,7 @@ target" sentence above had gone stale before this session.
   `""` overload fires. `length($obj)` where `""` returns undef → 0; returns "hello" → 5.
 - **`length(undef)` on a tied scalar** (test 34): tie FETCH returns `''` not `undef`
   (`undef $u` on a `Tie::StdScalar`). Tie semantics, not the plain-undef path (which works).
+  -> task **#1482** (s473t3: MEASURED WRONG -- the value path is right in PCL; `cl/pcl-test.lisp`'s `test-undef-p` reads `p-box-value` RAW and never runs the tie FETCH, so the HARNESS calls it defined).
 - **Missing "uninitialized" warnings** (tests 36, 42): when the `""` overload returns undef,
   Perl warns "Use of uninitialized value". PCL under-emits uninit warnings generally (a
   cross-cutting feature); not emitted here. Adding it risks breaking test 202 (warning count).
@@ -797,9 +813,11 @@ History retained for reference only:
 
 - **`<>` autovivification** (tests 26–27): `<>` and `readline` should not autovivify
   a scalar when the filehandle doesn't exist.
+  -> task **#1489** (s473t3).
 
 - **`tell()` after GV unglobbed** (tests 28–30): `tell()` should return -1 after the
   last typeglob pointing to a filehandle is destroyed. PCL returns 0.
+  -> task **#1490** (s473t3; `tell(*foom)` on an open handle that has been read from is ALSO wrong, in the other direction).
 
 - **Error message on unopened FH** (test 32): `readline()` on unopened FH — error
   message format `"readline() on unopened filehandle y"` not matching.
@@ -847,6 +865,7 @@ case (principle 9). not-supported.md: "DESTROY called by garbage collector".
   lvalue yields N element-slots where **N = the count of the inner RHS** (3 here), so the
   outer `= 1..10` fills only 3 → `@a = (1,2,3)`. PCL treats the inner result as a whole-array
   lvalue and assigns all of `1..10`. Niche double-list-assignment lvalue semantics.
+  -> task **#1492** (s473t3).
 
 - **`/e` re-eval count** (tests 153, 155): `split(/(?{ $n++ })/, ...)` — regex code blocks
   `(?{...})` are not-supported (CL-PPCRE has no mid-match Perl callback); see not-supported.md.
@@ -870,7 +889,9 @@ case (principle 9). not-supported.md: "DESTROY called by garbage collector".
   - Tests 258–305 (RT #130198, ~30 tests): `chop(tr/a/a/)` / `chomp(...)` should die
     "Can't modify transliteration (tr///) in chop" — error detection of invalid lvalue.
   - Tests 223–224: non-modifying tr/// on a scalar ref (shouldn't stringify the ref).
+    -> task **#1493** (s473t3).  NOT principle 9: this is a silent write to a live variable.
   - Test 257: `tr// of \N{name}` for upper-Latin1 — named char escape in tr.
+    -> task **#1494** (s473t3): `\N{NAME}` is not implemented ANYWHERE -- a double-quoted string, an `s///` replacement and a regex all lose it silently.  `tr.t 307` (`\N{}`) is `docs/not-supported.md` "Error compatibility for invalid Perl input".
 
 ---
 
@@ -887,6 +908,7 @@ See `memory/project_wantarray_followup.md`.
   `Pl/t/list-scalar-context-01.t` (+2).
 - Remaining: 63–68 (`do subname(arg)` vs `do subname("arg")` syntax distinction), 70
   (RT 124248), 73 (EISDIR on `do dir`).
+  -> 63/65 are `docs/not-supported.md` **"Error compatibility for invalid Perl input"** (perl raises a syntax error; PCL CALLS the sub) and 70 is **"`DESTROY` called by garbage collector"**.  s473t3.
 - NOTE: a separate pre-existing parser-precedence bug exists — `return (X) x N` (no
   comma, single paren) parses as `(return X) x N` instead of `return((X) x N)`. The
   comma-list form do.t needs works; this degenerate form is left as-is.
@@ -916,6 +938,7 @@ targets remain here.
 - **`local @_`** ✅ FIXED (session 207, tests 12, 15, 18): `_find_symbols_and_undefs_in_list` now handles `PPI::Token::Magic` (`@_` is Magic not Symbol). Single array local with init emits var as default return value.
 
 - **`delete $_[0]`** (test 23): `delete $_[0]` outside a block should set element to undef.
+  -> `docs/not-supported.md` **"`DESTROY` called by garbage collector"** (s473t3: the row asserts `$flag` after the block, i.e. that `X::DESTROY` ran).
 
 ---
 
@@ -991,6 +1014,7 @@ Both failures need **`use overload`** support (operator overloading), not plain 
 - **`\delete $h{key}` address equality** (tests 26, 54): `\(values %a)` == `\$a{bar}` ==
   `\delete $a{bar}` — all three should give the same address. PCL's delete returns a
   copy, not the same slot.
+  -> task **#1481** (s473t3; `\(values %h)` and `\$h{k}` DO share identity in PCL -- only the `delete` return value loses it).
 - **DESTROY on deleted element** (test 56): GC-based DESTROY — documented not-supported.
 
 ---
@@ -1049,6 +1073,7 @@ Both failures need **`use overload`** support (operator overloading), not plain 
 - **Void context through `||`** (test 11): `sub f { $false || context(shift) }; f('V')` —
   should see void context at `||` RHS. PCL propagates scalar context instead.
   Do NOT fix — wantarray regression area. See `docs/wantarray-context.md`.
+  -> `docs/not-supported.md` **"Context propagation into string eval"**, which names this very row (s473t3: MEASURED WRONG -- the `||` block passes; row 11 is `eval $qcontext` in VOID context, which PCL reports as scalar).  The DO-NOT-FIX note stands.
 
 ---
 
