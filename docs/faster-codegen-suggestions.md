@@ -489,6 +489,31 @@ not cause it, and the gap is either older or is this machine.  **Settling it
 needs a quiet box, and it is a ten-minute job there**: task **#986** has the
 numbers and the bisection recipe.
 
+**SETTLED (s473r, round 31) — #986 IS CLOSED, and the answer is "intended".**
+It is not this machine: a `git archive f49a34df` extraction (s458ak, the tree
+§0.2d was measured on) hits §0.2d's numbers to the fourth decimal on this box
+in a quiet window (`intloop+=` 0.0175 against the record 0.0174, `cfor`
+0.0253, `intloop=` 0.0175), with perl flat across both trees — so the record
+REPRODUCES and today's tree is +17.7 % / +5.1 % / +2.3 % against it.  The
+cause is `bfa170d9` (round 18, task **#900**): `p-incf-raw`'s body became
+`%compound-arith-form`'s guarded form, i.e. perl's `+=`/`++` overload
+dispatch, which PCL had been skipping.  The row's EMISSION is byte-identical
+between the two trees, which is what localises it without any timing, and the
+guard is worth **15.1 %** of `intloop+=` by hand-replacement
+(`(p-incf-raw $s $_)` against `… :numeric`, one core, interleaved,
+best-of-7).  DECIDED §s470 already ruled the correctness fix stays; the
+guard-free path for a slot the emitter can prove is task **#1516**.  The
+remaining few % — `cfor`'s 5.1 %, `intloop=`'s 2.3 % — is the CORE BEING
+RE-LAID-OUT: a runtime built from the base plus two NEVER-CALLED functions of
+the same size moves `cfor` −3.6 % and `intloop+=` −5.6 %, which is the cheap
+discriminator to build before attributing anything in that band.
+
+**AND TWO ROWS MOVED IN ROUND 31 that this table predates** (#1514, runtime
+only): `collatz` 0.5305 → 0.4005 s, and the new `arith` / `useint` pair
+0.1109 → 0.0515 and 0.1262 → 0.0300 — `int()`, `/` and `%`, not `+`, which
+hand-replacement shows was already open-coded (+0.8 %).  See the plan's
+§A.4 ROUND 31 verdict.
+
 **What the board says as a whole.**  The counting, recursion, foreach and
 whole-array-copy shapes beat perl, several of them by 3×.  Everything still
 behind perl is behind for a *named* reason with an owner: an oracle that
