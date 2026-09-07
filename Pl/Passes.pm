@@ -81,6 +81,11 @@ our %KIND_A = (
   'foreach-arrays' => "Pl::Parser::_foreach_bare_arrays + Parser2 foreach (tasks #1184, #1409): a `for my \$x (\@a)` or `(\@a, \@b)` that already qualifies for the read-only arm AND whose list is nothing but BARE named arrays iterates each array IN TURN over its element-storage SIMPLE vector (`:arrays t`, %p-make-array-run / %p-run-elt-raw) instead of flattening them into a temporary first -- the flattening is 88 % of the `feread2` bench row, and for the SINGLE-array list (#1409) there is no flattening at all: %p-flatten-for-list hands the live adjustable vector back and every access is then a HAIRY data-vector-ref, which is why one array read 0.47x of perl where two read 0.28x.  No new fact: the licence is `foreach-raw`'s own two conjuncts plus the list SHAPE",
   'numeric-slot'   => "VarAnnotator `numonly' + Parser2's raw compound-assign lowering (task #1183): a raw slot every one of whose writes stores a compile-time NUMBER (directly, or through a numeric compound op with a literal delta) can never hold a blessed box, so its `+=`/`-=`/`*=`/`%=`/`++`/`--` carry `:numeric` and the raw twin drops %compound-arith-form's overload guard -- whose cost is the BRANCH, not the tests (-62.5 % on a 4e6 `*=`/`%=` loop)",
   'symref-const'   => "ExprToCL sigil casts (task #1180): a symbolic dereference whose operand is a compile-time STRING -- `\${\"main::g\"}`, `\@{\"Pkg::ISA\"}`, `%{\"Pkg::H\"}` -- passes the cast a PER-SITE cache cell ((p-symref-site)), so the symbol the name denotes is resolved once for the site instead of through #812's name memo (a string sxhash + an `equal` gethash + a list walk + an O(n) NUL scan) on every access",
+  # THE ONE Kind-A gate that is CORRECTNESS, not speed — and, for exactly that
+  # reason, the one that is DEFAULT OFF (%DEFAULT_OFF below): shipping it on
+  # is a speed decision that its own measurement did not authorise.  Turn it
+  # on with `PCL_OPT=line-track`.
+  'line-track'     => "Parser2 _lower_block + cl/pcl-runtime.lisp's location register: every statement writes its LINE to *p-src-line* (and every sub body its FILE to *p-src-file*), so a die raised BY THE RUNTIME reports `at FILE line N.` as perl does instead of the placeholder `(eval 0) line 0.`",
   'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 
@@ -143,13 +148,36 @@ sub check_env {
     . "  known: " . join(' ', names()) . "\n" if @unknown;
 }
 
+# Names that are OFF unless PCL_OPT names them (`PCL_OPT=line-track`), the
+# reverse of every other entry.  A name lands here when the emission is
+# implemented, measured and guarded but its DEFAULT is not this session's call
+# to make.  `line-track` (task #1240) is the first: it costs ~0.25 ns per
+# statement — nothing on the macro rows (json-rt -0.5 %, moo-objs +0.2 %,
+# textproc -1.2 %) and +4…6 % on the counting-loop microbench rows, which is
+# above the ≤3 % bar the s473 brief set for shipping it on by default.
+#
+# THE FLIP IS ONE LINE: move the name out of here and into %NOT_OFF_BY_NONE
+# below (a correctness mechanism belongs in the general form, so `none` must
+# not switch it off), then re-run the gate, the sweep and tools/ir-conform and
+# take the 8 `1240` rows out of ir-conform/known-fail.tsv.
+our %DEFAULT_OFF = ('line-track' => 1);
+
+# Names `none` does NOT switch off.  `PCL_OPT=none` means "the general-form
+# compiler" — the emission a reader should be able to predict from the source —
+# and a CORRECTNESS mechanism is part of that form, not an optimization of it.
+# Keep this set at one or two entries: a growing exemption list would make
+# `none` mean nothing.
+our %NOT_OFF_BY_NONE = ();
+
 sub enabled {
   my ($name) = @_;
   die "Pl::Passes::enabled: '$name' is not a registered optimization\n"
     unless $KIND_A{$name} || exists $PASS_INDEX{$name};
   check_env();
   return 1 if $on{$name};
-  return 0 if $off{$name} || $all_off;
+  return 0 if $off{$name};
+  return 0 if $DEFAULT_OFF{$name};
+  return 0 if $all_off && !$NOT_OFF_BY_NONE{$name};
   return 1;
 }
 

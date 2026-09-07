@@ -1953,8 +1953,9 @@ post-body form.
 ### 6.3 Exceptions: `die` / `eval { }` / `$@`
 
 `die` signals a `p-exception` carrying either a string or an arbitrary
-Perl value (object exceptions). **PCL does not append " at FILE line N."**
-to string messages (documented divergence).
+Perl value (object exceptions).  A string message that does not already end in
+a newline gets perl's `" at FILE line N."` tail; where that FILE and N come
+from is §6.3b.
 
 `eval { body }` compiles to `p-eval-block`:
 1. installs its own `:p-return` catch (Perl: `return` inside `eval{}`
@@ -1999,6 +2000,62 @@ it has no return frame and no copy, so `\do { $x }` *is* `\$x`.
 The Perl value of a caught condition (object payload, or message text with
 perl's " at … line …" tail) is `%p-caught-perl-value`, shared by `p-eval-block`
 and `p-try` — the two places a program can see a caught error.
+
+### 6.3b Where a die's `at FILE line N` comes from (normative, s473c, task #1240)
+
+Two kinds of die, two sources, and a backend needs both.
+
+**An EXPLICIT `die`/`warn` carries its location as a constant.**  The emitter
+knows the statement's file and line, so it puts them in the call:
+
+```lisp
+(p-die :loc "prog.pl line 12" "boom")
+```
+
+The `:loc` keyword is the marker (a user argument is never the keyword `:loc`),
+and the value is already-formatted text.  A message ending in a newline
+suppresses the tail, exactly as perl does.
+
+**A die raised BY THE RUNTIME has no such constant** — `Illegal division by
+zero` is signalled inside the division, `Can't "last" outside a loop block`
+inside the loop-control raiser, `Undefined subroutine &main::f called` inside
+the call path — and perl answers it from `PL_curcop`, the *currently executing
+statement*.  PCL's equivalent is two REGISTERS that the emission writes:
+
+| form | writes | emitted at |
+|---|---|---|
+| `(p-line N)` | the current LINE | the head of **every** lowered statement |
+| `(p-file "PATH")` | the current FILE | the head of a file's run bucket and of **every sub body** |
+
+and one operator that scopes them:
+
+```lisp
+(p-loc-save FORM…)      ; restore the pair iff FORM… returns NORMALLY
+```
+
+**The restore is on the normal exit only, and that is the contract**: a die
+must leave the registers AT THE DIE SITE, because the catcher is what reports
+them; the catcher restores once it has read them.  Five constructs are
+location scopes, and they are exactly the places execution can enter another
+file or another statement's frame: a sub frame (`p-sub-frame` — so `my $z =
+f() / 0;` reports the *caller's* line, not f's last one), `eval {}`
+(`p-eval-block`), `try` (`p-try`), a string `eval` (`p-eval`), and a module
+load (`p-load-module-cached`).
+
+A string eval has no file: perl calls it `(eval N)` and numbers lines within
+the eval'd text.  `p-eval` sets the file register to that on the way in and the
+emitted text's own `(p-line …)` forms supply the line.
+
+**A backend implementing this IR needs a per-statement line write, a
+per-file/per-sub-body file write, and a save/restore at those five scopes.**
+Nothing else reads the registers; they are diagnostic state, never a value.
+The store must be cheap — PCL's is a write to a global (not a dynamically
+bound variable) and the file is an interned index rather than a string, both
+for measured reasons recorded in `cl/pcl-runtime.lisp`'s register header — and
+the emission is switchable: `PCL_OPT=line-track` turns it on (it is currently
+DEFAULT OFF, see `Pl/Passes.pm`).  With it off, no location is recorded and a
+caught runtime die reports the placeholder `at (eval 0) line 0.`, which is
+what every PCL release before this said.
 
 ### 6.4 goto
 

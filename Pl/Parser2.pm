@@ -1932,6 +1932,10 @@ sub parse {
     my @runtime = $self->_lower_block(\@top,
         Pl::VarAnnotator->analyze(\@top, undef, $self->_cur_sub_info, $self),
         $self->eval_mode ? 'inherit' : undef);
+    # The FILE half of the location register (task #1240): once per section's
+    # run bucket, because the file changes only across a sub call (p-sub-frame
+    # saves and restores it) or a file load.  See _lower_block's header.
+    unshift @runtime, $self->_p_file_form if @runtime;
     # Named subs found nested inside blocks during lowering (package-global
     # in Perl) hoist into the same decl/def buckets as top-level subs.
     push @decls, @{ $self->{_hoisted_decls} };
@@ -8235,13 +8239,19 @@ sub _lower_body_regime {
   # Kind-A gate.  `local`, so a nested sub body lowered inside this one
   # records its OWN tail and restores this one on the way out.
   local $self->{_body_tail_stmt} = @live ? refaddr($live[-1]) : undef;
+  # The FILE half of the location register (task #1240): a sub BODY is one of
+  # the two places the source file can change under execution (the other is a
+  # file load, which the runtime handles), because the sub may be called from
+  # any file.  p-sub-frame restores the caller's on the way out, so this is
+  # perl's save-and-set of PL_curcop's file.
+  my @file = $self->_p_file_form;
   if (@live == 0
       || (@live == 1 && !$live[0]->isa('PPI::Statement::Compound'))) {
-    return $self->_lower_block($stmts, $vi, 'inherit');
+    return (@file, $self->_lower_block($stmts, $vi, 'inherit'));
   }
   local $self->environment->{wa_void_active} = 1;
-  return Pl::CLForm::ctx_bind(':void',
-          $self->_lower_block($stmts, $vi, 'inherit'));
+  return (@file, Pl::CLForm::ctx_bind(':void',
+          $self->_lower_block($stmts, $vi, 'inherit')));
 }
 
 # Register a `my`-declared name: for the fallback machinery's my-vs-package
@@ -8430,7 +8440,48 @@ sub _leading_shift_params {
 # 'inherit' (its tail is the sub's return value, so a tail call must see the
 # CALLER's *wantarray*); everything else leaves it undef → statement position
 # is void.  Threaded through `my`-let nesting and tail if/unless branches.
+# ── THE STATEMENT LOCATION REGISTER (task #1240, Kind-A gate `line-track`) ──
+# perl's PL_curcop: every statement records its line, and a die raised by the
+# RUNTIME (`Illegal division by zero`, `Can't "last" outside a loop block`)
+# reads it.  This is the ONE emission site, because _lower_block handles
+# exactly one statement per recursion — $s[0] — and delegates the rest to
+# itself, so one `(p-line N)` per level IS one per statement, on every path
+# (a `my` that nests the remainder in a p-let, a compound, a bare block).
+#
+# The FILE is not written here: it changes only across a sub call or a file
+# load, and writing a STRING to a global costs SBCL's gencgc card mark (4
+# extra instructions), so it is written once per sub body and per file run
+# bucket and restored by p-sub-frame.  See cl/pcl-runtime.lisp's register
+# header for both measurements.
+#
+# The form is emitted only when the statement produced code: a `use` that
+# lowers to nothing must not leave a bare (p-line N) behind.
 sub _lower_block {
+  my ($self, $stmts, $vi, $tail_ctx) = @_;
+  my @forms = $self->_lower_block_1($stmts, $vi, $tail_ctx);
+  return @forms unless @forms && Pl::Passes::enabled('line-track');
+  my ($first) = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
+  my $line = $first && $first->can('line_number') ? $first->line_number : undef;
+  return @forms unless $line;
+  return (['p-line', $line], @forms);
+}
+
+# `(p-file "…")` for THIS compilation's source, or () when the gate is off.
+# The path is the one Pl::Environment already carries for die's :loc, so the
+# two agree by construction.
+sub _p_file_form {
+  my ($self) = @_;
+  return () unless Pl::Passes::enabled('line-track');
+  # EVAL MODE has no file: perl calls it `(eval N)`, and the runtime's p-eval
+  # sets that (a negative file id) around the whole evaluation.  Emitting a
+  # (p-file "-") here would overwrite it with the placeholder.
+  return () if $self->eval_mode;
+  my $file = ($self->environment && $self->environment->source_file) || '-';
+  $file =~ s/(["\\])/\\$1/g;      # same escaping as die's :loc (ExprToCL)
+  return (['p-file', "\"$file\""]);
+}
+
+sub _lower_block_1 {
   # One recursion level PER STATEMENT (each `my` nests the block remainder):
   # a few hundred top-level statements is normal, not runaway recursion.
   no warnings 'recursion';

@@ -133,6 +133,7 @@ my %FAMILY_META = (
     . "attached to the form it permitted (`pl2cl --facts`, "
     . "docs/plan-speed-and-ir-s470.md \x{a7}B.3)" },
   # --- families §10 has no row for -------------------------------------
+  'source-location'  => { note => "perl's PL_curcop, as two registers the emission writes: `p-line` per statement, `p-file` per file run bucket and per sub body, `p-loc-save` scoping them at a sub frame, an eval, a try and a module load — ir-spec §6.3b (task #1240)" },
   'box'              => { note => 'the box/undef/coercion primitives — ir-spec §2.1, §2.2, §3' },
   'math'             => { note => 'the transcendental builtins — no §10 row; each dispatches `use overload` since #1005' },
   'range'            => { note => 'the range and flip-flop operators — ir-spec §3.4' },
@@ -311,6 +312,9 @@ my %FAMILY;
                           p-declare-sub)],
   'declaration' => [qw(p-let p-raw-params p-sub)],
   'ir-literal' => [qw(p-esc p-fact)],
+  'source-location' => [qw(p-line p-file p-loc-save *p-src-line*
+                           *p-src-file-id* *p-src-files* %p-loc-string
+                           %p-file-id)],
   );
   for my $fam (sort keys %by_family) {
     exists $FAMILY_META{$fam} or die "ir-inventory.pl: family '$fam' has no "
@@ -665,6 +669,7 @@ my %SPEC10_RULE = (
   'context-frame' => 'names, not operations: each expands to exactly the `let`/`lambda` shape it replaced, so a translator implements the expansion and nothing else',
   'declaration' => 'names carrying the compiler\'s own VERDICTS — a binding\'s class, a parameter\'s class, a sub\'s proven facts.  Every one expands to exactly the form it replaced, and every set is CLOSED.  A translator may drop all three vocabularies and still produce a correct program',
   'ir-literal' => 'TRANSPARENT macros.  `p-esc` expands to the string literal its escaped payload denotes — the alphabet is the data form\'s (§12b), so a translator implements ONE string-unescape for both; `p-fact` expands to its second argument, the licence list being an annotation `pl2cl --facts` writes for a consumer and this target never reads',
+  'source-location' => 'DIAGNOSTIC STATE, never a value: the line a die reports when it carries no location of its own (§6.3b).  `p-line` writes the current statement\'s line, `p-file` the current file, and `p-loc-save` restores the pair on a NORMAL return only — a die must leave them at the die site for its catcher to read.  A translator that does not want perl\'s `at FILE line N.` may drop all of it',
 );
 
 {

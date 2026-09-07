@@ -190,6 +190,9 @@
    #:p-continue #:p-break
    ;; I/O
    #:p-print #:p-say #:p-warn #:p-die
+   ;; The statement location register (task #1240) — perl's PL_curcop
+   #:p-line #:p-file #:p-loc-save #:*p-src-line* #:*p-src-file-id* #:*p-src-files*
+   #:%p-loc-string #:%p-file-id
    ;; do BLOCK
    #:p-do
    ;; Exception handling
@@ -10899,8 +10902,15 @@ create the key on a read-only call, which perl does not."
    Pl/Parser.pm's v1 seam) in place of the bare (catch :p-return …).
    Task #930 (`:lvalue` subs) will emit a frame that OMITS the copy: an lvalue
    sub returns the PLACE, which is exactly what the bare catch already yields —
-   this macro is the switch, and #930 is not implemented here."
-  `(%p-leavesub (catch :p-return ,@body)))
+   this macro is the switch, and #930 is not implemented here.
+
+   IT IS ALSO PERL'S SAVE OF PL_curcop (task #1240).  A sub's body sets the
+   location registers to ITS file and lines; on a normal return the caller's
+   statement is running again, so the caller's location must be back —
+   otherwise `my $z = f() / 0;` would report f's last line.  A `return` is a
+   normal return here (the catch is inside), so it restores too.  A DIE does
+   NOT, deliberately: the catcher must see the die site."
+  `(p-loc-save (%p-leavesub (catch :p-return ,@body))))
 
 (defun p-cloned-sub (f)
   "Return a code ref that CALLS F but is a DISTINCT OBJECT from every other
@@ -13469,6 +13479,97 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (%p-out-string s *error-output* nil)
            (force-output *error-output*)))))))
 
+;;; ============================================================
+;;; THE STATEMENT LOCATION REGISTER (task #1240) — perl's PL_curcop
+;;; ============================================================
+;;; Perl's every statement sets PL_curcop, and a die reads it: that is how
+;;; `1/0` says `Illegal division by zero at p.pl line 4.` while the die site
+;;; itself (pp_divide, deep in the interpreter) knows nothing about the
+;;; program's text.  PCL's equivalent is two REGISTERS the emission writes:
+;;;
+;;;   *p-src-line*     a fixnum, written by (p-line N) at the head of EVERY
+;;;                    lowered statement (Pl/Passes.pm Kind-A gate `line-track`)
+;;;   *p-src-file-id*  an INDEX into *p-src-files*, written by (p-file "…") at
+;;;                    the head of a FILE's run bucket and of every sub BODY,
+;;;                    and saved and restored by p-sub-frame — the file changes
+;;;                    only across a sub call or a file load, so it needs no
+;;;                    per-statement store
+;;;
+;;; THREE MEASUREMENTS SHAPE THIS (s473c sizing; the numbers are in task #1240):
+;;;   * a SPECIAL costs 6 instructions per write (TLS index load, bound check,
+;;;     store) = +13.6 % on the tightest counting loop, where an
+;;;     `sb-ext:defglobal` costs 2 (`MOV RSI,[RIP-x]` / `MOV [RSI+1],const`)
+;;;     = ~+5 % there and ~0 % on any statement above ~10 ns.  So: defglobals,
+;;;     which also means nothing may `let`-bind them — nothing does;
+;;;   * writing a STRING to a global pays SBCL's gencgc CARD MARK (4 extra
+;;;     instructions and a second cache line touched), which is why the file
+;;;     is a fixnum id interned once per emitted (p-file …) through
+;;;     load-time-value, and never a string store;
+;;;   * the cost is LINEAR in the number of stores (0/1/2/4 stores per
+;;;     iteration of a 3.7 ns loop body read +0 / +6.7 / +12.8 / +19.7 %), so
+;;;     it is a real ~0.25 ns per statement and not an alignment artefact.
+(sb-ext:defglobal *p-src-line* 0)
+(sb-ext:defglobal *p-src-file-id* 0)
+(sb-ext:defglobal *p-src-files*
+    (make-array 4 :adjustable t :fill-pointer 0 :initial-element "-"))
+(declaim (type fixnum *p-src-line* *p-src-file-id*))
+
+(defun %p-file-id (path)
+  "Intern PATH in the source-file table and return its index.  Called ONCE per
+   emitted (p-file …) — through load-time-value — so that every register write
+   after that is a fixnum."
+  (or (position path *p-src-files* :test #'equal)
+      (vector-push-extend path *p-src-files*)))
+
+(defmacro p-line (n)
+  "Set the current statement's LINE (task #1240).  One store; see the header
+   above for why this is a defglobal and not a special."
+  `(setq *p-src-line* ,n))
+
+(defmacro p-file (path)
+  "Set the current source FILE (task #1240).  Emitted at a file's run bucket
+   and at every sub body's head; p-sub-frame restores the caller's on return."
+  `(setq *p-src-file-id* (load-time-value (%p-file-id ,path) t)))
+
+(defun %p-loc-string ()
+  "Perl's `FILE line N' for the statement currently executing — the text that
+   goes after ` at ' in a die that carries no location of its own — or NIL
+   when NO statement location has been recorded.
+
+   NIL is not a fallback, it is a fact: with the `line-track` emission off no
+   (p-line …) has ever run, so the registers hold nothing and every caller
+   keeps the answer it gave before this register existed.  A recorded line is
+   always >= 1 (PPI line numbers are 1-based)."
+  (and (plusp *p-src-line*)
+       (format nil "~A line ~D" (%p-src-file-name) *p-src-line*)))
+
+(defun %p-src-file-name ()
+  "The name the current file id denotes.  A NEGATIVE id is perl's `(eval N)`:
+   a string eval has no file, and giving it an entry in the table would grow
+   that table once per eval EXECUTION (an eval in a loop is unbounded), so the
+   eval's sequence number rides in the id itself.  It is a fixnum either way,
+   which is what lets p-loc-save save and restore it for nothing."
+  (cond ((minusp *p-src-file-id*) (format nil "(eval ~D)" (- *p-src-file-id*)))
+        ((< *p-src-file-id* (fill-pointer *p-src-files*))
+         (aref *p-src-files* *p-src-file-id*))
+        (t "-")))
+
+(defmacro p-loc-save (&body body)
+  "Run BODY and restore the location registers if it returns NORMALLY.
+   The NON-local exits are deliberate: a die must leave the registers AT THE
+   DIE SITE, because that is what the catcher reports; the catcher
+   (p-eval-block / p-try) restores them itself once it has read them.
+
+   The restore is GUARDED by a comparison so that a program compiled without
+   `line-track` — where both registers stay 0 forever — pays two reads and two
+   compares per sub call and performs no write at all."
+  (let ((f (gensym "F")) (l (gensym "L")))
+    `(let ((,f *p-src-file-id*) (,l *p-src-line*))
+       (declare (type fixnum ,f ,l))
+       (multiple-value-prog1 (progn ,@body)
+         (unless (and (= ,l *p-src-line*) (= ,f *p-src-file-id*))
+           (setq *p-src-file-id* ,f *p-src-line* ,l))))))
+
 ;;; Exception condition for object-based die
 ;;; When Perl dies with a blessed reference, we preserve it in $@
 (define-condition p-exception (error)
@@ -13521,29 +13622,41 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (error 'p-exception :object (car args))
         ;; String exception
         (let ((msg (apply #'p-string-concat args)))
-          (cond
-            ;; No location marker.  "~A", never (error msg): the message is
-            ;; DATA, and `(error msg)` would make it a format CONTROL string.
-            ;; Every perl die message can carry a `~` -- the drop form (s435)
-            ;; embeds arbitrary user SOURCE TEXT, so `f() = ($x =~ /b/)` fed
-            ;; `~ ` to the format engine and raised an untrappable
-            ;; sb-format:format-error that killed the whole file instead of
-            ;; setting $@.  The other branches below were already "~A"; this
-            ;; one was the last one that was not.  It is latent for the
-            ;; runtime's own callers too -- several build their message from
-            ;; user data (a method name, a module name) via an inner
-            ;; (format nil ...), and a `~` in THAT data lands here the same way.
-            ((null loc) (error "~A" msg))
-            ;; Message ends in newline: Perl does NOT append a location.
-            ((and (> (length msg) 0)
-                  (char= (char msg (1- (length msg))) #\Newline))
-             (error "~A" msg))
-            ;; Empty die message: Perl uses "Died".
-            ((string= msg "") (error "Died at ~A.~%" loc))
-            (t (error "~A at ~A.~%" msg loc)))))))
+          ;; "~A", never (error msg): the message is DATA, and `(error msg)`
+          ;; would make it a format CONTROL string.  Every perl die message can
+          ;; carry a `~` -- the drop form (s435) embeds arbitrary user SOURCE
+          ;; TEXT, so `f() = ($x =~ /b/)` fed `~ ` to the format engine and
+          ;; raised an untrappable sb-format:format-error that killed the whole
+          ;; file instead of setting $@.  It is latent for the runtime's own
+          ;; callers too -- several build their message from user data (a method
+          ;; name, a module name) via an inner (format nil ...), and a `~` in
+          ;; THAT data lands here the same way.
+          ;;
+          ;; LOC is the explicit ` at FILE line N` codegen attaches to a user
+          ;; `die`; when there is none this is an INTERNAL runtime die
+          ;; (`Illegal division by zero`, `Can't "last" outside a loop block`,
+          ;; …) and perl gives it the location of the statement that was
+          ;; running — which is what the location register holds (task #1240).
+          ;; Before that register existed such a die printed with NO location
+          ;; when uncaught and with the placeholder `(eval 0) line 0.` when
+          ;; caught.  The newline test comes FIRST because it applies to both:
+          ;; a message ending in "\n" never gets a location, whichever it is.
+          (let ((where (or loc (%p-loc-string))))
+            (cond
+              ;; Message ends in newline: Perl does NOT append a location.
+              ((and (> (length msg) 0)
+                    (char= (char msg (1- (length msg))) #\Newline))
+               (error "~A" msg))
+              ;; No location recorded — the pre-#1240 answer, kept BYTE for
+              ;; byte (the empty message included), so a program compiled
+              ;; without `line-track` behaves exactly as it did.
+              ((null where) (error "~A" msg))
+              ;; Empty die message: Perl uses "Died".
+              ((string= msg "") (error "Died at ~A.~%" where))
+              (t (error "~A at ~A.~%" msg where))))))))
 
 ;;; Forward declarations for p-do (both defined later in this file)
-(declaim (ftype function p-eval))
+(declaim (ftype function p-eval %p-eval-1))
 (defvar @INC) ; forward declaration; value set in Module System section below
 
 (defun %p-literal-path (name &optional as-directory)
@@ -13757,7 +13870,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    perl's feature pragmas are lexical and a string eval inherits them, but this
    text is compiled on its own, so the site has to say.  They reach PPI's lexer
    as its initial feature state, and they are part of the cache key.
-   Binds *pcl-caller-wantarray* so wantarray() in the eval'd code reflects context."
+   Binds *pcl-caller-wantarray* so wantarray() in the eval'd code reflects context.
+
+   THE LOCATION (task #1240): perl gives a die inside a string eval the file
+   `(eval N)` and the line WITHIN the eval'd text, so this is a location scope
+   like a sub body — the registers are set on the way in (a NEGATIVE file id
+   is `(eval N)`; the emitted text's own (p-line …) supplies the line) and
+   restored on the way out by p-loc-save.  N counts eval EXECUTIONS, which is
+   what perl counts (it compiles per execution); PCL caches the transpile, so
+   the number is perl's counting of a thing PCL does not repeat."
+  (p-loc-save
+   (setq *p-src-file-id* (- (incf *p-eval-counter*)))
+   (%p-eval-1 string lex-alist features)))
+
+(defun %p-eval-1 (string lex-alist features)
+  "p-eval's body; see it for the contract."
   (let ((*pcl-caller-wantarray* *wantarray*)
         (*p-eval-lex-alist* lex-alist)
         (|$^S| 1)
@@ -13765,7 +13892,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; eval undef / eval "" -> nil (undef), $@ = ""
     (when (string= s "")
       (box-set $@ "")
-      (return-from p-eval nil))
+      (return-from %p-eval-1 nil))
     ;; Use the Perl-level current package (e.g. "Foo" inside `package Foo {}`),
     ;; not (package-name *package*): the eval'd code must transpile __PACKAGE__
     ;; and bareword qualifiers relative to the caller's PERL package, and the
@@ -13847,14 +13974,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (error (e)
           ;; Perl appends " at (eval N) line M." to die/runtime-error messages
           ;; thrown inside string eval when they don't already end in a newline.
-          ;; PCL doesn't track the in-eval line, so it uses line 1 (correct for
-          ;; the common single-line eval string).
+          ;; With `line-track` on, %p-loc-string HAS the line (the emitted text
+          ;; sets it per statement) and the negative file id makes it print
+          ;; `(eval N)`; without it, line 1 is still the right guess for the
+          ;; single-line eval string this used to assume (task #1240).
           (let ((msg (format nil "~A" e)))
             (box-set $@ (if (and (> (length msg) 0)
                                  (char= (char msg (1- (length msg))) #\Newline))
                             msg
-                            (format nil "~A at (eval ~D) line 1.~%"
-                                    msg (incf *p-eval-counter*)))))
+                            (format nil "~A at ~A.~%" msg
+                                    (or (%p-loc-string)
+                                        (format nil "(eval ~D) line 1"
+                                                *p-eval-counter*))))))
           nil)))))
 
 (defun parse-number (s)
@@ -13879,7 +14010,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (if (and (> (length msg) 0)
                  (char= (char msg (1- (length msg))) #\Newline))
             msg
-            (format nil "~A at (eval 0) line 0.~%" msg)))))
+            ;; The location register (task #1240): the statement that was
+            ;; executing when the condition was signalled.  `(eval 0) line 0'
+            ;; is what this said before the register existed — a placeholder no
+            ;; perl program ever prints, although real programs match on this
+            ;; text (`$@ =~ /at \Q$0\E line (\d+)/`) — and it is still the
+            ;; answer when the `line-track` emission is off and no location was
+            ;; ever recorded.
+            (format nil "~A at ~A.~%" msg
+                    (or (%p-loc-string) "(eval 0) line 0"))))))
 
 ;;; p-eval-block: Execute code catching errors (Perl's eval { })
 ;;; Sets $@ to error message on failure, empty string on success.
@@ -13901,12 +14040,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; and so did `\eval { $x }`, `eval { @l }`, `eval { %h }` and an @_-writing
   ;; callee (8 probe rows).  `do { }` is NOT a frame and must not get this —
   ;; `\do { $x }` IS `\$x` in perl (probed); it has no catch here to hang it on.
-  `(handler-case
-       (prog1 (%p-leavesub (let ((|$^S| 1)) (catch :p-return ,@body)))
-         (box-set $@ ""))
-     (error (e)
-       (box-set $@ (%p-caught-perl-value e))
-       nil)))
+  ;;
+  ;; p-loc-save (task #1240): an eval is where a die STOPS, so it is where the
+  ;; location registers go back to the enclosing statement's — the catcher has
+  ;; read the die site by then (%p-caught-perl-value runs inside the branch,
+  ;; the restore after it).  Without this, everything after a caught die would
+  ;; report the file the die came from.
+  `(p-loc-save
+    (handler-case
+        (prog1 (%p-leavesub (let ((|$^S| 1)) (catch :p-return ,@body)))
+          (box-set $@ ""))
+      (error (e)
+        (box-set $@ (%p-caught-perl-value e))
+        nil))))
 
 (defmacro p-try (try-form catch-clause &optional finally-form)
   "Perl's `try BLOCK catch (VAR) BLOCK [finally BLOCK]` (feature 'try', 5.34).
@@ -13937,13 +14083,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              (,caught nil)
              (,err nil))
          (unwind-protect
-              (let ((,val (handler-case
-                              (progn (box-set $@ "")
-                                     (let ((|$^S| 1)) ,try-form))
-                            (error (e)
-                              (setf ,caught t
-                                    ,err (%p-caught-perl-value e))
-                              nil))))
+              ;; p-loc-save (task #1240), for the same reason as p-eval-block's:
+              ;; the catch clause and everything after it run at the TRY's own
+              ;; location, not at the die site the handler has just read.
+              (let ((,val (p-loc-save
+                           (handler-case
+                               (progn (box-set $@ "")
+                                      (let ((|$^S| 1)) ,try-form))
+                             (error (e)
+                               (setf ,caught t
+                                     ,err (%p-caught-perl-value e))
+                               nil)))))
                 (if ,caught
                     (let ((,var (make-p-box nil)))
                       (box-set ,var ,err)
@@ -19993,9 +20143,19 @@ buffer's fill-pointer; everything else falls back to file-length."
           (ignore-errors (delete-file path)))))))
 
 (defun p-load-module-cached (source-path)
-  "Load a Perl module with caching. Returns t on success."
+  "Load a Perl module with caching. Returns t on success.
+
+   THE LOCATION REGISTERS ARE SCOPED TO THE LOAD (task #1240): the module's
+   own run bucket sets *p-src-file-id* to the module file, so without this the
+   caller would keep reporting the module's file after the require returned.
+   p-loc-save restores on a NORMAL return only -- a die during the load must
+   still name the module."
+  (p-loc-save (%p-load-module-cached-1 source-path)))
+
+(defun %p-load-module-cached-1 (source-path)
+  "p-load-module-cached's body; see it for the contract."
   (when *pcl-skip-cache*
-    (return-from p-load-module-cached (%p-load-module-uncached source-path)))
+    (return-from %p-load-module-cached-1 (%p-load-module-uncached source-path)))
   (p-ensure-cache-dir)
   ;; A loaded module sets *pcl-current-package* via its own `package` statements;
   ;; rebind here so those changes don't leak into the caller's notion of the
@@ -20021,7 +20181,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (%p-fasl-note "PCL: module ~A -> FASL HIT (~,3Fs)~%"
                     (file-namestring (truename source-path))
                     (%p-secs-since %start))
-      (return-from p-load-module-cached t))
+      (return-from %p-load-module-cached-1 t))
     ;; 2. The text: transpile it when it is missing, older than the source, or
     ;;    a dependency it read has changed.  The transpile writes the manifest
     ;;    sidecar, so the memo of the OLD one has to go.  When it IS valid the

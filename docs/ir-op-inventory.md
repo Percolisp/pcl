@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **701**
-* families: **19** with an ir-spec §10 rule, **35** without one
-* with a machine-readable `Contract:` tail: **69** of 701
+* names exported: **709**
+* families: **19** with an ir-spec §10 rule, **36** without one
+* with a machine-readable `Contract:` tail: **69** of 709
 * UNCLASSIFIED (no family rule matches): **3**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -1001,6 +1001,21 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-shutdown` | macro | `(fh how)` | — | — | — | — | — | — | — |
 | `p-socket` | macro | `(fh domain type protocol)` | — | — | — | — | — | — | — |
 | `p-socketpair` | macro | `(fh1 fh2 domain type protocol)` | — | — | — | — | — | — | — |
+
+## source-location (8)
+
+*No ir-spec §10 row.*  perl's PL_curcop, as two registers the emission writes: `p-line` per statement, `p-file` per file run bucket and per sub body, `p-loc-save` scoping them at a sub frame, an eval, a try and a module load — ir-spec §6.3b (task #1240)
+
+| name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
+|---|---|---|---|---|---|---|---|---|---|
+| `%p-file-id` | function | `(path)` | — | — | — | — | — | — | — |
+| `%p-loc-string` | function | `nil` | — | — | — | — | — | — | — |
+| `*p-src-file-id*` | global | `` | — | — | — | — | — | — | — |
+| `*p-src-files*` | global | `` | — | — | — | — | — | — | — |
+| `*p-src-line*` | global | `` | — | — | — | — | — | — | — |
+| `p-file` | macro | `(path)` | — | — | — | — | — | — | — |
+| `p-line` | macro | `(n)` | — | — | — | — | — | — | — |
+| `p-loc-save` | macro | `(&body body)` | — | — | — | — | — | — | — |
 
 ## sub-definition (5)
 
