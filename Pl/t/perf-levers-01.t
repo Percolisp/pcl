@@ -42,7 +42,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 54;
+plan tests => 66;
 
 sub write_pl {
     my ($src) = @_;
@@ -411,6 +411,76 @@ PERL
     my $want_fa = "15 15 0 8 15 12 515 12 15 105 111 1 2 99 225 10 20 30 40 7 15 5\n";
     is(run_with($fa, undef), $want_fa, 'foreach-arrays: fourteen loop shapes are perl 5.40.3\'s answers');
     is(run_with($fa, '-foreach-arrays'), $want_fa, '-foreach-arrays: the same answers');
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# foreach-arrays, the SINGLE-array run — task #1409
+# ─────────────────────────────────────────────────────────────────────────────
+# #1184 required two arrays because the flattening it removed only exists for a
+# multi-element list: `%p-flatten-for-list` hands a lone bare lexical `@a`
+# straight back.  It hands back the LIVE adjustable vector, though, so every
+# element access is a hairy data-vector-ref and the bound is re-read per
+# iteration — which is why `feread` (one array) read 0.47x of perl where
+# `feread2` (two) read 0.28x over the same 1000 elements.
+#
+# The one semantic difference is the re-read bound: `for (@a) { push @a, … }`
+# iterates the new elements in perl (n1 below, probed 5.40.3) and the run's
+# snapshot would not.  Every negative here writes or escapes the array, so the
+# #1140 facts the licence already asks decline it — nothing new is proved.
+{
+    my $fa1 = write_pl(<<'PERL');
+use strict; use warnings;
+sub s1  { my @a=(1,2,3); my $s=0; for my $x (@a) { $s+=$x } return $s }
+sub s2  { my @e=(); my $s=0; for my $x (@e) { $s+=$x } return "$s" }
+sub s3  { my @a=(1,2,3,4); my $s=0; OUT: for my $x (@a) { next OUT if $x==2; last OUT if $x==4; $s+=$x } return $s }
+sub s4  { my @a=(1,2,3); my $s=0; my $r=0; for my $x (@a) { $r++; if ($x==3 && $r<5) { redo } $s+=$x } return "$s $r" }
+sub s5  { my @a=(1,2); my $s=0; for my $x (@a) { $s+=$x } continue { $s+=100 } return $s }
+sub s6  { my @a; $a[0]='a'; $a[3]='d'; my $o=''; for my $x (@a) { $o .= defined $x ? "$x," : "u," } return $o }
+sub s7  { my @a=([1,2],[3]); my $s=0; for my $r (@a) { $s += scalar @$r } return $s }
+sub s8  { my @a=(1,2,3); my $s=0; for my $x (@a) { for my $y (@a) { $s+=$x*$y } } return $s }
+sub n1  { my @a=(1,2); my $n=0; my $o=''; for my $x (@a) { $o.="$x,"; $n++; push @a, $x+10 if $n<4 } return $o }
+sub n2  { my @a=(1..5); my $o=''; for my $x (@a) { $o.="$x,"; pop @a } return $o }
+sub n3  { my @a=(1..5); my $o=''; for my $x (@a) { $o.="$x,"; splice(@a,1,1) if @a>2 } return $o }
+sub n4  { my @a=(1..4); my $o=''; for my $x (@a) { $o.="$x,"; $a[3]=99 } return $o }
+sub n5  { my @a=(1..5); my $o=''; for my $x (@a) { $o.="$x,"; $#a=2 } return $o }
+sub n6  { my @a=(1,2,3); my $r=\@a; my $o=''; for my $x (@a) { $o.="$x,"; push @$r, 9 if @a<5 } return $o }
+sub n7  { my @a=(1,2,3); my $o=''; my $add=sub { push @a, 9 if @a<5 }; for my $x (@a) { $o.="$x,"; $add->() } return $o }
+sub n8  { my @a=(1,2,3); for my $x (@a) { $x*=10 } return "@a" }
+sub n9  { my @a=(1,2,3); my $s=0; for my $x (@a[0,1]) { $s+=$x } return $s }
+sub n10 { my @a=(1,2,3); my $r=\@a; my $s=0; for my $x (@$r) { $s+=$x } return $s }
+print join(' ', s1(),s2(),s3(),s4(),s5(),s6(),s7(),s8(),
+                n1(),n2(),n3(),n4(),n5(),n6(),n7(),n8(),n9(),n10()), "\n";
+PERL
+    my $one = transpile_with($fa1, undef);
+    my $runs1 = () = ($one =~ /\(p-foreach-raw \(\$\w+ \(vector \@\w+\)\)\s+(?::label\s+\S+\s+)?:arrays\s+t\b/g);
+    is($runs1, 9, 'foreach-arrays #1409: nine licensed single-array loops take the run (s1-s8, s8 nesting two)')
+      or diag("runs=$runs1");
+    like($one, qr/\(p-foreach-raw \(\$x \(vector \@a\)\)\s+:label\s+OUT\s+:arrays\s+t/,
+         '#1409: a LABELLED single-array loop keeps its label and takes the run');
+    like($one, qr/\(p-foreach-raw \(\$x \(vector \@e\)\)\s+:arrays\s+t/,
+         '#1409: an EMPTY array still takes the run');
+    # NEGATIVES — the writes.  Each revokes the read-only arm as well, so the
+    # head is the BOXED p-foreach: that is the licence, not a missing emission.
+    like($one, qr/\(p-foreach \(\$x \@a\)\s*:my\s+t\s.{0,220}?%p-push1 \@a/s,
+         '#1409 NEGATIVE: a push into the source array declines the run AND the raw arm (#1140 written_in)');
+    my $negs = () = ($one =~ /\(p-foreach \(\$x \@a\)/g);
+    is($negs, 8, '#1409 NEGATIVE: all eight write/escape shapes (n1-n8) decline to the boxed foreach')
+      or diag("negs=$negs");
+    like($one, qr/\(p-foreach-raw \(\$x \(p-aslice \@a 0 1\)\)/,
+         '#1409 NEGATIVE: a lone SLICE is read-only but not a bare array — no run');
+    like($one, qr/\(p-foreach-raw \(\$x \(p-cast-\@ \$r\)\)/,
+         '#1409 NEGATIVE: a lone DEREF is read-only but not a bare array — no run');
+    # NEGATIVE — the switch.
+    unlike(transpile_with($fa1, '-foreach-arrays'), qr/:arrays/,
+           '-foreach-arrays: no single-array run either');
+    unlike(transpile_with($fa1, 'none'), qr/:arrays/, 'PCL_OPT=none: no run');
+    # RUNTIME: perl 5.40.3's own answers, unchanged by the switch.  n1 is the
+    # row that says a push during the loop still extends the iteration.
+    my $want1 = "6 0 4 6 5 203 a,u,u,d, 3 36 1,2,11,12,21, 1,2,3, 1,3,5, 1,2,3,99, 1,2,3, 1,2,3,9,9, 1,2,3,9,9, 10 20 30 3 6\n";
+    is(run_with($fa1, undef), $want1,
+       '#1409: eighteen single-array loop shapes are perl 5.40.3\'s answers');
+    is(run_with($fa1, '-foreach-arrays'), $want1, '-foreach-arrays: the same answers');
+    is(run_with($fa1, 'none'), $want1, 'PCL_OPT=none: the same answers');
 }
 
 # The registry's own contract: the name is known, and a typo still dies.

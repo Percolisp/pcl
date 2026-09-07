@@ -81,7 +81,8 @@ like($def, qr/\(p-let \(\(\$n :scalar 0\)\)/,          'default: raw let slot');
 like($def, qr/p-foreach-range-raw/,           'default: counting loop, raw var');
 like($def, qr/%pcl-str-append/,               'default: str-buffer append');
 like($def, qr/%pcl-to-number-strict/,         'default: raw-numeric freeze');
-like($def, qr/\(p-foreach-raw \(\$x \@a\)/,   'default: read-only foreach-LIST takes the raw arm');
+like($def, qr/\(p-foreach-raw \(\$x \(vector \@a\)\)\s+:arrays\s+t\b/s,
+                                              'default: read-only foreach-LIST takes the raw arm (and, since #1409, the single-array run)');
 
 my $none = transpile_with('none');
 like($none,   qr/\(p-let \(\(\$n :box \(make-p-box nil\)\)\)/, 'none: the slot is a box');

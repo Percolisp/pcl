@@ -90,8 +90,12 @@ sub run_cl {
 
 # ══ SHAPE — the arm FIRES on a proven read-only loop ════════════════════════
 
+# Since #1409 a lone bare `@a` also takes the `foreach-arrays` RUN, so the
+# list reads `(vector @a)` with `:arrays t` — the arm this file is about is the
+# `p-foreach-raw` head, and naming the whole current form is stronger than
+# loosening the pattern to accept either.
 like(emitted('sub h { my @a=(1,2,3); my $s=0; for my $x (@a) { $s += $x } $s } print h(), "\n";'),
-     qr/\(p-foreach-raw \(\$x \@a\)/,
+     qr/\(p-foreach-raw \(\$x \(vector \@a\)\)\s+:arrays\s+t\b/s,
      'control: a read-only foreach over an array takes the arm');
 
 like(emitted('sub h { my $s=0; for my $x (1,2,3) { $s += $x } $s } print h(), "\n";'),
@@ -103,7 +107,7 @@ like(emitted('sub h { my %g=(a=>1); my $s=0; for my $x (values %g) { $s += $x } 
      'values %h read-only takes the arm');
 
 like(emitted('sub h { my @a=(1,2); my $s=0; L: for my $x (@a) { next L if $x==1; $s+=$x } $s } print h(), "\n";'),
-     qr/\(p-foreach-raw \(\$x \@a\)\s+:label\s+L\b/s,
+     qr/\(p-foreach-raw \(\$x \(vector \@a\)\)\s+:label\s+L\s+:arrays\s+t\b/s,
      'a LABELLED read-only loop takes the arm and keeps its label');
 
 # ══ SHAPE — the arm is REFUSED ══════════════════════════════════════════════

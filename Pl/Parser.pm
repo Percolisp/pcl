@@ -7688,8 +7688,27 @@ sub _foreach_scalar_elements {
 }
 
 # `for my $x (@a, @b)` — the ORDERED array names when the foreach list is
-# nothing but BARE named arrays, two or more of them (task #1184, the Kind-A
-# `foreach-arrays` emission); the empty list otherwise.
+# nothing but BARE named arrays (task #1184, the Kind-A `foreach-arrays`
+# emission); the empty list otherwise.
+#
+# ONE ARRAY COUNTS (task #1409).  #1184 required two, because the flattening
+# it removed only exists for a multi-element list: `%p-flatten-for-list` hands
+# a single bare lexical `@a` STRAIGHT BACK, so there was nothing to save.  The
+# measurement said otherwise — `feread` (one array) read 0.47x of perl while
+# `feread2` (two) read 0.28x over the same 1000 elements, i.e. the two-array
+# loop was FASTER than the one-array loop.  The live array is an adjustable
+# vector with a fill pointer, so every element access is a HAIRY
+# data-vector-ref and the bound is re-read per iteration; the run indexes each
+# source's element-storage SIMPLE vector with `svref` against a snapshotted
+# total.  Same licence, one fewer element in the list.
+#
+# THE ONE SEMANTIC DIFFERENCE, and why the licence already covers it: the live
+# path re-reads `(length vec)` per iteration, so `for (@a) { push @a, … }`
+# iterates the new elements (perl does too — probed 5.40.3), and the run does
+# not.  `push`/`pop`/`shift`/`unshift`/`splice`/`$#a =`/a whole assignment in
+# the loop body are all `written_in` for the #1140 array facts, and `escapes`
+# covers every path a callee or a closure could take, so the caller's existing
+# conjunct declines exactly those loops.  Nothing new is proved here.
 #
 # STRICTLY bare: one `PPI::Token::Symbol` per element, sigil `@`, a plain
 # word name, and NO subscript after it.  `@a[1,2]` is a slice, `@$r` is a
@@ -7700,7 +7719,7 @@ sub _foreach_scalar_elements {
 sub _foreach_bare_arrays {
   my ($list_parts) = @_;
   my @elems = _foreach_split_elements($list_parts);
-  return () unless @elems >= 2;
+  return () unless @elems >= 1;
   my @names;
   for my $e (@elems) {
     return () unless @$e == 1;

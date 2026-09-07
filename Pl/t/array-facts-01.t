@@ -190,8 +190,12 @@ unlike(emitted('our @a; push @a, 1; print scalar(@a), "\n";'),
 
 # ══ SHAPE — the foreach-raw conjunct ═══════════════════════════════════════
 
+# Since #1409 a lone bare `@a` also takes the `foreach-arrays` RUN, so an
+# unwritten array's list reads `(vector @a)` with `:arrays t`.  The conjunct
+# these rows are about is the same one either way — naming the whole current
+# form is stronger than loosening the pattern to accept both.
 like(emitted('my @a=(1,2); for my $x (@a) { print $x } print "\n";'),
-     qr/\(p-foreach-raw \(\$x \@a\)/,
+     qr/\(p-foreach-raw \(\$x \(vector \@a\)\)\s+:arrays\s+t\b/s,
      'control: a read-only loop over an UNWRITTEN array keeps the raw arm');
 
 unlike(emitted('my @a=(1,2); for my $x (@a) { $a[0] = 9; print $x } print "\n";'),
@@ -207,7 +211,7 @@ unlike(emitted('my @a=(1,2); for my $x (@a) { print $x } continue { $a[0]=9 } pr
        'demoted: a write in the CONTINUE block counts (it runs during the loop)');
 
 like(emitted('my @a=(1,2); for my $x (@a) { print $x } $a[0] = 9; print "\n";'),
-     qr/\(p-foreach-raw \(\$x \@a\)/,
+     qr/\(p-foreach-raw \(\$x \(vector \@a\)\)\s+:arrays\s+t\b/s,
      'NOT demoted: a write AFTER the loop is not in the body region');
 
 unlike(emitted('my @a=(3,1); for my $x (sort { $a <=> $b } @a) { $a[1]=9; print $x; last } print "\n";'),
