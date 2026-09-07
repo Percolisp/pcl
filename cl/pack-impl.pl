@@ -293,9 +293,15 @@ sub _unpack_read_int {
         }
     }
     if ($signed) {
-        # In Perl, 2**64 is a float and loses precision, but pack-impl.pl is transpiled to CL
-        # where (expt 2 64) is exact. The general formula works for all sizes in CL.
-        my $max = 2 ** ($nbytes * 8);
+        # $max MUST be an exact integer: $v is exact, and a floating-point
+        # $max drags the subtraction into floating point -- unpack("q",
+        # pack("q",-1)) then answers 0 instead of -1.  `2 ** ($nbytes*8)' is
+        # NOT that: perl's pp_pow computes a power-of-2 base by repeated
+        # squaring in DOUBLES and returns an NV (so `2**64' is an NV in perl
+        # AND, since s473d, here).  Repeated multiplication keeps the exact
+        # integer this file has always relied on.
+        my $max = 1;
+        $max *= 256 for 1 .. $nbytes;
         $v -= $max if $v >= $max / 2;
     }
     return $v;
@@ -1185,7 +1191,11 @@ sub p_unpack {
             _unpack_tmpl($cs_tmpl, $s, \$si, sub { $checksum += $_[0] }, 0, 0, 1);
         }
         # Use floor-division modulo: works for negative integers and float checksums.
-        my $mod = 2 ** $checksum_width;
+        # $mod is built by multiplication, not `2 ** $checksum_width`, for the
+        # same reason as _unpack_read_int's $max: perl's ** on a power-of-2
+        # base returns an NV, and %64C* of an exact checksum must stay exact.
+        my $mod = 1;
+        $mod *= 2 for 1 .. $checksum_width;
         my $q = int($checksum / $mod);
         $q-- if $q * $mod > $checksum;
         push @result, $checksum - $q * $mod;

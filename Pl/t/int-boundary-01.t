@@ -25,6 +25,15 @@
 #
 # Row 1 additionally pins the section HEADING, because three baselines and
 # docs/difftest-fuzzer.md cite it by name.
+#
+# s473d NARROWED the table by three rows.  `**` was absorbed into this section
+# by s473a as "the same mechanism seen from a different side", and it is NOT:
+# perl returns an NV from `**` for results that fit an IV comfortably (`2**52`
+# is 4.5035996273705e+15, `6**24` is 4.73838133832162e+18), because pp_pow
+# computes a power-of-2 base in doubles by choice and gives up on integers at
+# `exponent * bitlength(base) > 64` — a per-op branch rule, not a boundary.
+# It is implemented now (#1248(b), ir-spec §3.6), so D1, D8 and D9 AGREE with
+# perl and say so; the boundary itself is untouched and D2–D7 still diverge.
 
 use v5.30;
 use strict;
@@ -112,14 +121,19 @@ sub line_is {
     is($got{$key} // "(missing: $out)", $want, $name);
 }
 
-my $POW6 = '39402006196394479199463117884618153312446490372007876911'
-         . '560089010528390154342399181505217109422728930545305988890625';
+# The DECIMAL EXPANSION of the double pow(~0, 6) — not the exact 116-digit
+# integer, which is what `**` used to answer here.  Since s473d `**` follows
+# pp_pow (docs/ir-spec.md §3.6) and hands back an NV like perl's, so D1 AGREES
+# with perl; what still diverges is the CONVERSION, %u, which perl clamps to
+# UV_MAX and PCL renders in full.
+my $POW6_NV = '39402006196394479212279040100143613805079739270465446667'
+            . '948293404245721771497210611414266254884915640806627990306816';
 
-# ── the nine divergences (perl values in the comments) ───────────────────────
+# ── the divergences that remain (perl values in the comments) ────────────────
 
-line_is('D1', $POW6,
-        '~0 ** 6 is the exact integer          [perl: 3.94020061963945e+115]');
-line_is('D2', $POW6,
+line_is('D1', '3.94020061963945e+115',
+        '~0 ** 6 AGREES with perl since s473d (#1248(b): ** is an NV)');
+line_is('D2', $POW6_NV,
         'sprintf "%u" does not clamp to UV_MAX [perl: 18446744073709551615]');
 line_is('D3', '295147905179352825840',
         'use integer does not wrap on *        [perl: -16]');
@@ -131,10 +145,11 @@ line_is('D6', '9223372036854775808',
         'use integer does not wrap on +        [perl: -9223372036854775808]');
 line_is('D7', '18446744073709551615',
         'sprintf "%d" does not reinterpret     [perl: -1]');
-line_is('D8', '18446744073709551616',
-        '2 ** 64 is exact                      [perl: 1.84467440737096e+19]');
-line_is('D9', '9223372036854775808',
-        'use integer; 2 ** 63 is exact         [perl: 9.22337203685478e+18]');
+line_is('D8', '1.84467440737096e+19',
+        '2 ** 64 AGREES with perl since s473d (#1248(b))');
+line_is('D9', '9.22337203685478e+18',
+        'use integer; 2 ** 63 AGREES with perl since s473d — the pragma does '
+        . 'not integerize ** in perl either');
 
 # ── the neighbours that AGREE — the divergence is narrow, not pervasive ──────
 

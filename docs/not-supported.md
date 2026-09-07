@@ -89,7 +89,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Sparse arrays (holes), element aliasing, and SV identity](#sparse-arrays-holes-element-aliasing-and-sv-identity)
 * [Writing to `$a`/`$b` inside a sort comparator](#writing-to-ab-inside-a-sort-comparator)
 * [Integers are unbounded: PCL has no 64-bit boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary) — no overflow to NV, no `use integer` wrap, no `%u`/`%d` clamp
-* [`**` returns an exact integer where Perl returns a float (NV)](#-returns-an-exact-integer-where-perl-returns-a-float-nv) — pointer into the section above
+* [`**` returns an exact integer where Perl returns a float (NV)](#-returns-an-exact-integer-where-perl-returns-a-float-nv) — **FIXED s473d (#1248(b))**; heading kept as a pointer for older citations
 * [`use integer` — large shift / overflow edge cases](#use-integer--large-shift--overflow-edge-cases) — pointer into the section above
 * [Hex floating-point literals (`0x1.8p+1`)](#hex-floating-point-literals-0x18p1)
 
@@ -2286,12 +2286,18 @@ split /,/, $s` → perl `[1]`, PCL `[3]`.  Logged as a deliberate divergence.
 
 ## Integers are unbounded: PCL has no 64-bit boundary  *(by design — USER 2026-09-07; revisit pointer: task #1513)*
 
-**This section absorbs two older ones**, both of which are the same mechanism
-seen from a different side: [`**` returns an exact
-integer](#-returns-an-exact-integer-where-perl-returns-a-float-nv) and [`use
-integer` — large shift / overflow edge
-cases](#use-integer--large-shift--overflow-edge-cases).  Those headings are
-kept as pointers so older citations still resolve.
+**This section absorbs one older one**: [`use integer` — large shift /
+overflow edge cases](#use-integer--large-shift--overflow-edge-cases).  That
+heading is kept as a pointer so older citations still resolve.
+
+**It used to absorb a second, [`**` returns an exact
+integer](#-returns-an-exact-integer-where-perl-returns-a-float-nv), and that
+was WRONG — measured, s473d.**  perl returns an NV from `**` for results that
+fit an IV (`2**52` is `4.5035996273705e+15`, `6**24` is
+`4.73838133832162e+18`), so the `**` divergence was never this boundary; it
+was pp_pow's own branch rule, and it is now implemented (`docs/ir-spec.md`
+§3.6, task #1248(b)).  Nothing else in this section moved: the three faces
+below are unchanged.
 
 **Perl behaviour:** a perl scalar's numeric slots are an IV (signed 64-bit), a
 UV (unsigned 64-bit) and an NV (a C double).  Every integer operation that
@@ -2310,22 +2316,23 @@ integer` never wraps, and `%u`/`%d` never clamp.  Measured on perl 5.40.3 vs
 
 | expression | perl 5.40.3 | PCL |
 |---|---|---|
-| `$uv ** 6` | `3.94020061963945e+115` | the exact 116-digit integer `39402006196394…890625` |
-| `sprintf "%u", $uv ** 6` | `18446744073709551615` (clamped to UV_MAX) | the same 116-digit integer (no clamp) |
+| `sprintf "%u", $uv ** 6` | `18446744073709551615` (clamped to UV_MAX) | `394020061963944792122790401001436138050797392704654466679482934042457217714972106114142662548849156408066279903 06816` — the NV's exact decimal, no clamp |
 | `do { use integer; $uv * 16 }` | `-16` (C wraparound) | `295147905179352825840` |
 | `$uv * 16` | `2.95147905179353e+20` (NV) | `295147905179352825840` |
 | `$uv + 1` | `1.84467440737096e+19` (NV) | `18446744073709551616` |
 | `do { use integer; $iv + 1 }` | `-9223372036854775808` | `9223372036854775808` |
 | `sprintf "%d", $uv` | `-1` (reinterpreted as IV) | `18446744073709551615` |
-| `2 ** 64` | `1.84467440737096e+19` | `18446744073709551616` |
-| `do { use integer; 2 ** 63 }` | `9.22337203685478e+18` | `9223372036854775808` |
 
 and the neighbouring cases that **agree**, which is what makes the divergence
 narrow rather than pervasive: `$iv + 1` *outside* `use integer` is
 `9223372036854775808` on both sides (perl's IV overflows into a UV, which is
 still exact); `-3 % 5` is `2` on both and `-3` on both under `use integer`
 (truncating division is implemented); `~0 - 3 != ~0` on both; `~0` itself
-prints `18446744073709551615` on both.
+prints `18446744073709551615` on both; and **since s473d the three `**` rows
+this table used to carry agree too** — `$uv ** 6` is `3.94020061963945e+115`,
+`2 ** 64` is `1.84467440737096e+19`, `do { use integer; 2 ** 63 }` is
+`9.22337203685478e+18` on both sides (#1248(b); `use integer` does not
+integerize `**` in perl either).
 
 **Three more faces of the same model, found by the round-31 perf probes and
 owned by task #1515** (`int()`, and division past `2**53` — the boundary shows
@@ -2375,8 +2382,10 @@ my $u = 1; $u = $u * 31 + 7 for 1 .. 40;
 ```
 
 **Rationale:** the exactness is load-bearing for PCL's own transpiled code —
-`cl/pack-impl.pl` needs an exact `2**($nbytes*8)` and `2**$checksum_width`,
-and `lib/Math/BigInt/Calc.pm` builds its masks with `2**$AND_BITS` — and the
+`cl/pack-impl.pl` needs an exact `2**($nbytes*8)` and `2**$checksum_width`
+(since s473d it builds both by repeated multiplication instead, because `**`
+now follows perl and returns an NV), and `lib/Math/BigInt/Calc.pm` builds its
+masks with `2**$AND_BITS` — and the
 survey that preceded this ruling found **no** dependency on wraparound in the
 field: 22 modules across perl's core `lib/` and the on-disk CPAN dists use
 `use integer` (B::Deparse, Locale::Maketext, Math::BigInt::Calc, Pod::Simple
@@ -2425,18 +2434,25 @@ that one mechanism, and the large-shift corners are the same C-ABI detail.
 
 ---
 
-## `**` returns an exact integer where Perl returns a float (NV)
+## `**` returns an exact integer where Perl returns a float (NV)  *(FIXED s473d — task #1248(b))*
 
-**See [Integers are unbounded: PCL has no 64-bit
-boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary)** — this heading
-is kept so older citations resolve (`docs/difftest-fuzzer.md` cites it by
-name).  `**` returning an exact integer is that section's first row: perl's
-`**` is C `pow()` and therefore always an NV, so it prints through `%.15g` and
-loses precision above `2**53`, while PCL's `p-**` returns an exact bignum for
-non-negative integer operands within ~1000 bits.  `2**53`, `2**53 + 1` and
-`2 ** 3 ** 4` print `9007199254740992`, `9007199254740993` and
-`2417851639229258349412352` where perl prints `9.00719925474099e+15` twice and
-`2.41785163922926e+24`.
+**NOT a divergence any more.**  This heading is kept so older citations
+resolve (`docs/difftest-fuzzer.md` cites it by name).  `p-**` now implements
+`pp_pow`'s own branch rule — `docs/ir-spec.md` §3.6 — so `2**53` prints
+`9.00719925474099e+15`, `2**63` prints `9.22337203685478e+18` and `7**19`
+prints the exact `11398895185373143`, all as perl does.
+
+**AND IT WAS NEVER THE 64-BIT BOUNDARY**, which is what makes fixing it
+compatible with the ruling in [Integers are unbounded: PCL has no 64-bit
+boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary).  The
+discriminating measurement: perl returns an NV from `**` for results that fit
+an IV comfortably — `2**52` is `4.5035996273705e+15`, `6**24` is
+`4.73838133832162e+18`, `5**27` is `7.45058059692383e+18` — because pp_pow
+computes a power-of-2 base in doubles by choice and gives up on integers when
+`exponent * bitlength(base) > 64`, not when the result leaves the 64-bit
+range.  It is a per-op branch rule, and implementing it needs no IV/UV
+distinction anywhere else: `~0 * 16`, `~0 + 1` and `sprintf "%u"` are
+unchanged and still diverge.
 
 ---
 

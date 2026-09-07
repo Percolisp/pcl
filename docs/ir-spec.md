@@ -1090,6 +1090,34 @@ on the two MAGNITUDES with the signs put back at the end:
 result.  A host whose remainder rounds the quotient into a float first (CL's
 `REM` does) computes something else — `1e30 % 1e20` is 19884624838656, not 0.
 
+### 3.6 `**` returns a FLOAT unless perl is sure of an integer (normative, s473d)
+
+`pp_pow` uses integer arithmetic only where the result provably fits, and
+which branch fired is **visible in the answer's spelling** (§3.2's `%.15g`):
+
+* both operands integers and the exponent non-negative, and the base's
+  magnitude is a **power of 2** (0 and 1 count): repeated squaring in
+  **doubles** — perl does this deliberately, because powers of two are exact
+  in a double and `2**N` is the shape programmers watch.  So `2**10` is the
+  float 1024, and `2**52` prints `4.5035996273705e+15`, `2**63`
+  `9.22337203685478e+18`, `2**64` `1.84467440737096e+19`.
+* both integers, exponent non-negative, any other base: **integer**
+  arithmetic while `exponent * bitlength(|base|) <= 64`.  `7**19` (57) is the
+  exact 11398895185373143; `3**40` (80) and `4**31` (93) are floats.
+* everything else — a negative exponent, a non-integer operand, an infinity,
+  a NaN: C's `pow`.
+
+`pow`'s edges are C's, and a host must not substitute its own: a **finite
+negative** base with a **finite non-integer** exponent is **NaN** (CL's `expt`
+answers a complex number, which is not a Perl value), a **zero** base with a
+negative exponent is `+Inf` (not a division-by-zero error), and an **infinite**
+base keeps C's answers — `(-Inf)**2.5` is `Inf`, not NaN.
+
+**Consequence for a host with exact bignums:** an exact `2**64` is not perl.
+PCL's own `pack` implementation depended on the exact value and had to build
+it by repeated multiplication instead (`unpack("q", pack("q", -1))` answered 0
+once `**` became faithful).
+
 ## 4. Context (scalar / list / void)
 
 The dynamic variable `*wantarray*` carries the calling context:

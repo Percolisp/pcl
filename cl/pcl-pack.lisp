@@ -701,7 +701,10 @@
                         (p-if (p-< (p-+ $si $k) $slen) (p-ord (p-substr $s (p-+ $si $k) 1)) 0)))))))
             (p-if $signed
               (progn
-                (p-let (($max :scalar (p-** 2 (p-* $nbytes 8))))
+                (p-let (($max :box (make-p-box nil)))
+                  (p-my-= $max 1)
+                  ;; $max *= 256 for 1 .. $nbytes
+(p-foreach ($_ (p-.. 1 $nbytes)) (p-*= $max 256))
                   (p-if (p->= $v (p-/ $max 2)) (p-decf $v $max)))))
             (p-caller-ctx (p-tail-value $v))))))))
 
@@ -874,7 +877,7 @@
                                         (p-if (p-> $nrep 63)
                                           (progn
                                             (p-warn :loc
-                                              "cl/pack-impl.pl line 372"
+                                              "cl/pack-impl.pl line 378"
                                               "Field too wide in 'u' format in pack")
                                             (setf $line_len
                                               (%pcl-to-number-strict 63 "$line_len")))
@@ -1042,7 +1045,7 @@
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
           (p-if (p-> $depth $MAX_GROUP_DEPTH)
             (p-die :loc
-              "cl/pack-impl.pl line 413"
+              "cl/pack-impl.pl line 419"
               (p-esc "Too deeply nested ()-groups in pack\\n")))
           (p-let
             (($nargs :num (%pcl-to-number-strict (p-scalar (p-cast-@ $args_ref)) "$nargs")))
@@ -1105,7 +1108,7 @@
                                                 (p-=~ $c
                                                   (p-regex :pat "\\d" :flags "" :tier :native))))
                                             (p-die :loc
-                                              "cl/pack-impl.pl line 440"
+                                              "cl/pack-impl.pl line 446"
                                               (p-esc
                                                 "'/' does not take a repeat count in pack\\n"))))
                                         :next)))
@@ -1522,7 +1525,7 @@
                                                     :flags ""
                                                     :tier :native)))
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 557"
+                                                "cl/pack-impl.pl line 563"
                                                 (p-esc "()-group starts with a count in pack\\n"))))))
                                       (p-if $star
                                         (progn
@@ -1650,7 +1653,7 @@
                                   (p-str-eq $ch "D"))
                                 (progn
                                   (p-die :loc
-                                    "cl/pack-impl.pl line 619"
+                                    "cl/pack-impl.pl line 625"
                                     (p-string-concat "Invalid type '"
                                       $ch
                                       (p-esc "' in pack\\n")))))
@@ -1682,11 +1685,11 @@
                                               (p-my-= $nv (p-+ $v 0))
                                               (p-if (p-!= $nv $nv)
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 632"
+                                                  "cl/pack-impl.pl line 638"
                                                   (p-esc "Cannot pack NaN in pack\\n")))
                                               (p-if (p-&& (p-!= $nv 0) (p-== $nv (p-* $nv 2)))
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 633"
+                                                  "cl/pack-impl.pl line 639"
                                                   (p-.
                                                     (p-. "Cannot pack "
                                                       (p-if (p-< $nv 0) "-Inf" "Inf"))
@@ -1777,11 +1780,11 @@
                                             (p-my-= $nv (p-+ $v 0))
                                             (p-if (p-!= $nv $nv)
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 670"
+                                                "cl/pack-impl.pl line 676"
                                                 (p-esc "Cannot pack NaN in pack\\n")))
                                             (p-if (p-&& (p-!= $nv 0) (p-== $nv (p-* $nv 2)))
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 671"
+                                                "cl/pack-impl.pl line 677"
                                                 (p-.
                                                   (p-. "Cannot pack "
                                                     (p-if (p-< $nv 0) "-Inf" "Inf"))
@@ -1807,11 +1810,11 @@
                                             (p-my-= $nv (p-+ $v 0))
                                             (p-if (p-!= $nv $nv)
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 680"
+                                                "cl/pack-impl.pl line 686"
                                                 (p-esc "Cannot pack NaN in pack\\n")))
                                             (p-if (p-&& (p-!= $nv 0) (p-== $nv (p-* $nv 2)))
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 681"
+                                                "cl/pack-impl.pl line 687"
                                                 (p-.
                                                   (p-. "Cannot pack "
                                                     (p-if (p-< $nv 0) "-Inf" "Inf"))
@@ -1838,24 +1841,24 @@
                                               (p-my-= $v (p-+ $raw 0))
                                               (p-if (p-!= $v $v)
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 691"
+                                                  "cl/pack-impl.pl line 697"
                                                   (p-esc "Cannot compress NaN in pack\\n")))
                                               (p-if (p-&& (p-< $v 0) (p-== $v (p-* $v 2)))
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 692"
+                                                  "cl/pack-impl.pl line 698"
                                                   (p-esc "Cannot compress -Inf in pack\\n")))
                                               (p-if (p-< $v 0)
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 693"
+                                                  "cl/pack-impl.pl line 699"
                                                   (p-esc
                                                     "Cannot compress negative numbers in pack\\n")))
                                               (p-if (p-&& (p-!= $v 0) (p-== $v (p-* $v 2)))
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 694"
+                                                  "cl/pack-impl.pl line 700"
                                                   (p-esc "Cannot compress Inf in pack\\n")))
                                               (p-if (p-!= $v (p-int $v))
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 695"
+                                                  "cl/pack-impl.pl line 701"
                                                   (p-esc
                                                     "Can only compress unsigned integers in pack\\n")))
                                               (p-if
@@ -1867,7 +1870,7 @@
                                                         :tier :native)))
                                                   (p->= $v (p-** 2 64)))
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 701"
+                                                  "cl/pack-impl.pl line 707"
                                                   (p-esc
                                                     "Can only compress unsigned integers in pack\\n")))
                                               (p-my-= $v (p-int $v))
@@ -1891,10 +1894,10 @@
                                     (p-next)))
                                 (p-if (p-str-eq $ch "/")
                                   (p-die :loc
-                                    "cl/pack-impl.pl line 713"
+                                    "cl/pack-impl.pl line 719"
                                     (p-esc "Invalid type '/' in pack\\n")))
                                 (p-die :loc
-                                  "cl/pack-impl.pl line 714"
+                                  "cl/pack-impl.pl line 720"
                                   (p-string-concat "Invalid type '" $ch (p-esc "' in pack\\n")))))))))))))))))))
 
 (p-sub pl-_pack_check_brackets
@@ -1917,7 +1920,7 @@
                     (p-if (p-str-eq $c "]") (progn (p-post++ $n_close)))))))
             (p-if (p-> $n_open $n_close)
               (p-die :loc
-                "cl/pack-impl.pl line 727"
+                "cl/pack-impl.pl line 733"
                 (p-esc "No group ending character ']' found in template\\n")))
             (p-if (p-! (p-> $n_open 0)) (p-return))
             (p-let ((@stk :array (make-array 0 :adjustable t :fill-pointer 0)))
@@ -1936,7 +1939,7 @@
                           (progn
                             (p-if (p-|| (p-! @stk) (p-str-ne (p-aref @stk -1) "["))
                               (p-die :loc
-                                "cl/pack-impl.pl line 736"
+                                "cl/pack-impl.pl line 742"
                                 (p-esc "Mismatched brackets in template\\n")))
                             (p-pop @stk))
                           (p-if (p-str-eq $c ")")
@@ -2321,7 +2324,7 @@
                                           (p-while $more
                                             (p-if (p->= (p-cast-$ $si_ref) $slen)
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 878"
+                                                "cl/pack-impl.pl line 884"
                                                 (p-esc
                                                   "Unterminated compressed integer in unpack\\n")))
                                             (p-let
@@ -2365,7 +2368,7 @@
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
           (p-if (p-> $depth $MAX_GROUP_DEPTH)
             (p-die :loc
-              "cl/pack-impl.pl line 894"
+              "cl/pack-impl.pl line 900"
               (p-esc "Too deeply nested ()-groups in unpack\\n")))
           (p-let (($slen :box (make-p-box nil)))
             (p-my-= $slen (p-length $s))
@@ -2418,7 +2421,7 @@
                                   (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
                                   (p-if (p->= $ti $tlen)
                                     (p-die :loc
-                                      "cl/pack-impl.pl line 918"
+                                      "cl/pack-impl.pl line 924"
                                       (p-esc "Code missing after '/' in unpack\\n")))
                                   (let ((*package* *package*))
                                     (block nil
@@ -2431,7 +2434,7 @@
                                                 (p-=~ $c
                                                   (p-regex :pat "\\d" :flags "" :tier :native))))
                                             (p-die :loc
-                                              "cl/pack-impl.pl line 922"
+                                              "cl/pack-impl.pl line 928"
                                               (p-esc
                                                 "'/' does not take a repeat count in unpack\\n"))))
                                         :next)))
@@ -2451,7 +2454,7 @@
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen)
                                               (progn (p-if (p-! (p-> $depth 0)) (p-last))
                                                 (p-die :loc
-                                                  "cl/pack-impl.pl line 930"
+                                                  "cl/pack-impl.pl line 936"
                                                   (p-esc
                                                     "length/code after end of string in unpack\\n"))))
                                             (p-my-= $slash_n
@@ -2468,7 +2471,7 @@
                                               (p-while $more
                                                 (p-if (p->= (p-cast-$ $si_ref) $slen)
                                                   (p-die :loc
-                                                    "cl/pack-impl.pl line 937"
+                                                    "cl/pack-impl.pl line 943"
                                                     (p-esc
                                                       "Unterminated compressed integer in unpack\\n")))
                                                 (p-let
@@ -2583,7 +2586,7 @@
                                                               (p-> (p-+ (p-cast-$ $si_ref) $dnb)
                                                                 $slen)
                                                               (p-die :loc
-                                                                "cl/pack-impl.pl line 974"
+                                                                "cl/pack-impl.pl line 980"
                                                                 (p-esc
                                                                   "length/code after end of string in unpack\\n")))
                                                             (p-my-= $slash_n
@@ -2754,7 +2757,7 @@
                                                     :flags ""
                                                     :tier :native)))
                                               (p-die :loc
-                                                "cl/pack-impl.pl line 1027"
+                                                "cl/pack-impl.pl line 1033"
                                                 (p-esc
                                                   "()-group starts with a count in unpack\\n"))))))
                                       (p-if $all
@@ -2832,7 +2835,7 @@
                                   (p-str-eq $ch "D"))
                                 (progn
                                   (p-die :loc
-                                    "cl/pack-impl.pl line 1070"
+                                    "cl/pack-impl.pl line 1076"
                                     (p-string-concat "Invalid type '"
                                       $ch
                                       (p-esc "' in unpack\\n")))))
@@ -2948,10 +2951,10 @@
                                     (p-next)))
                                 (p-if (p-str-eq $ch "/")
                                   (p-die :loc
-                                    "cl/pack-impl.pl line 1129"
+                                    "cl/pack-impl.pl line 1135"
                                     (p-esc "'/' must follow a numeric type in unpack\\n")))
                                 (p-die :loc
-                                  "cl/pack-impl.pl line 1130"
+                                  "cl/pack-impl.pl line 1136"
                                   (p-string-concat "Invalid type '"
                                     $ch
                                     (p-esc "' in unpack\\n")))))))))))))))))))
@@ -3074,7 +3077,10 @@
                                 0
                                 0
                                 1)))
-                          (p-let (($mod :scalar (p-** 2 $checksum_width)))
+                          (p-let (($mod :box (make-p-box nil)))
+                            (p-my-= $mod 1)
+                            ;; $mod *= 2 for 1 .. $checksum_width
+(p-foreach ($_ (p-.. 1 $checksum_width)) (p-*= $mod 2))
                             (p-let (($q :box (make-p-box nil)))
                               (p-my-= $q (p-int (p-/ $checksum $mod)))
                               (p-if (p-> (p-* $q $mod) $checksum) (p-post-- $q))

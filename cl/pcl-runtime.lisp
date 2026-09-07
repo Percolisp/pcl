@@ -4264,25 +4264,86 @@
       (%p-%-slow a b)))
 (declaim (notinline p-%))
 
+(defun %p-pow-square (base power)
+  "perl's repeated-squaring loop for pp_pow's POWER-OF-2 base, in DOUBLES and
+   spelled exactly as pp_pow spells it, so the overflow point and the answer's
+   NV-ness are perl's.  BASE already carries the sign."
+  (let ((result 1.0d0)
+        (b base)
+        (p power))
+    (when (oddp p) (setf result (* result b)))
+    (dotimes (i (integer-length power))    ; exactly perl's `while (power >>= 1)'
+      (setf p (ash p -1))
+      (when (zerop p) (return))
+      (setf b (* b b))
+      (when (oddp p) (setf result (* result b))))
+    result))
+
+(defun %p-pow-int (baseuv power base-neg)
+  "pp_pow's INTEGER branch, once both operands are integers and POWER >= 0.
+   Two sub-branches, and WHICH ONE FIRES IS VISIBLE IN THE ANSWER'S SPELLING:
+
+   * a POWER-OF-2 base (0 and 1 count — perl's test is `!(b & (b-1))') is
+     computed by repeated squaring in DOUBLES, so the answer is an NV.  perl
+     does that deliberately: powers of 2 are exact in a double and `2**N' is
+     the shape programmers notice.  It is why `2**10' is 1024 but `2**52'
+     PRINTS as 4.5035996273705e+15 rather than 4503599627370496, and why
+     `2**63' is 9.22337203685478e+18.
+   * any other base uses integer arithmetic, but ONLY where the result
+     provably fits a UV: `power * bitlength(base) <= 64'.  `7**19' is 57 and
+     answers the exact 11398895185373143; `3**40' is 80 and falls through.
+     The bound also makes the exponentiation cheap — power <= 32 here — where
+     perl's own `power * highbit' can WRAP for a huge power.
+
+   NIL means `float it': neither sub-branch applies."
+  (cond
+    ((zerop (logand baseuv (1- baseuv)))
+     (let ((d (%pcl-nv baseuv)))
+       (%p-pow-square (if base-neg (- d) d) power)))
+    ((<= (* power (integer-length baseuv)) 64)
+     (let ((r (expt baseuv power)))
+       (if (or (not base-neg) (evenp power)) r (- r))))
+    (t nil)))
+
+(defun %p-pow-float (na nb)
+  "pp_pow's pow() path — C's pow, whose edges CL's EXPT does NOT share:
+   a FINITE NEGATIVE base with a FINITE NON-INTEGER exponent is NaN in C,
+   where EXPT answers a COMPLEX number, which is not a Perl value at all
+   (`(-8)**(1/3)' printed #C(1.0000000000000002 1.7320508075688772) here
+   against perl's NaN); and a ZERO base with a NEGATIVE exponent is +Inf in
+   C, where SBCL SIGNALS, because :divide-by-zero is the one trap the runtime
+   leaves armed (for perl's fatal `1/0').  An infinite base keeps C's own
+   answers — `(-inf)**2.5' is Inf, not NaN."
+  (let* ((dl (%pcl-nv na))
+         (dr (%pcl-nv nb))
+         (dl-finite (and (not (%pcl-nan-p dl)) (not (sb-ext:float-infinity-p dl))))
+         (dr-finite (and (not (%pcl-nan-p dr)) (not (sb-ext:float-infinity-p dr)))))
+    (cond
+      ((and dl-finite (zerop dl) (not (%pcl-nan-p dr)) (minusp dr))
+       sb-ext:double-float-positive-infinity)
+      ((and dl-finite (minusp dl) dr-finite (/= dr (ffloor dr)))
+       (sb-kernel:make-double-float #x7FF80000 0))
+      (t (handler-case (expt dl dr)
+           (floating-point-overflow ()
+             (if (and (minusp dl) dr-finite (oddp (truncate dr)))
+                 sb-ext:double-float-negative-infinity
+                 sb-ext:double-float-positive-infinity)))))))
+
 (defun p-** (a b)
-  "Perl exponentiation with use overload '**' dispatch
+  "Perl exponentiation with use overload '**' dispatch.
+
+   pp_pow's shape, faithfully: perl uses integer arithmetic only where it is
+   SURE, and everything else comes back as an NV — which is why `2**63' is
+   9.22337203685478e+18 and not the exact 9223372036854775808 (#1248(b)).
+   The three regimes are in %p-pow-int and %p-pow-float; a negative exponent
+   goes straight to pow().
    Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (%with-binary-overload ("**" a b)
-                         ;; No overload: numeric path with Inf-on-overflow
                          (let ((na (to-number a))
                                (nb (to-number b)))
-                           ;; Return exact bignum when both args are non-negative integers AND the
-                           ;; result fits in ~1000 bits.  This matters for pack/unpack: 2**64 as
-                           ;; double loses precision.  Guard prevents 9**(9**9) from hanging SBCL.
-                           (when (and (integerp na) (integerp nb) (>= nb 0)
-                                      (<= (* nb (max 1 (integer-length na))) 1000))
-                             (return-from p-** (expt na nb)))
-                           (handler-case
-                               (expt (coerce na 'double-float) (coerce nb 'double-float))
-                             (floating-point-overflow ()
-                               (if (and (realp na) (minusp na) (integerp nb) (oddp (truncate nb)))
-                                   sb-ext:double-float-negative-infinity
-                                   sb-ext:double-float-positive-infinity))))))
+                           (or (and (integerp na) (integerp nb) (>= nb 0)
+                                    (%p-pow-int (abs na) nb (minusp na)))
+                               (%p-pow-float na nb)))))
 
 ;;; int() SPLITS ON THE TWO SHAPES A LOOP ACTUALLY REACHES (task #1514, s473r).
 ;;; p-int used to be one FULL CALL with to-number's typecase in front of the

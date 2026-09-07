@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 7;
 
 sub run_cl {
     my ($code) = @_;
@@ -222,4 +222,104 @@ PL
 inf%0.5=NaN
 1e19%3.7=1
 5%18446744073709551615=5
+OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# C — #1248(b).  pp_pow uses integer arithmetic only where it is SURE, and
+# WHICH branch fired is visible in the answer's spelling.  A POWER-OF-2 base is
+# computed by repeated squaring in DOUBLES (perl's own choice), so `2**52`
+# prints as 4.5035996273705e+15 and `2**63` as 9.22337203685478e+18; any other
+# base uses integers only while `power * bitlength(base) <= 64`, which is why
+# `7**19` is the exact 11398895185373143 and `3**40` is not.  PCL used to
+# answer an exact bignum for every non-negative integer pair.
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('#1248(b) ** returns an NV wherever perl is not sure of an integer',
+        <<'PL', <<'OUT');
+no warnings;
+for my $e ('2**10','2**31','2**32','2**52','2**53','2**62','2**63','2**64',
+           '(-2)**63','3**40','10**15','10**16','10**20','7**19','(-7)**19',
+           '(-7)**20','16**16','6**24','5**27','2**300','(-2)**301','4**31',
+           '2**0.5','2**-1','0**0','2**1024','9**9**9','1.5**2') {
+  print "$e = ", eval($e), "\n";
+}
+my $b = 2**63;
+print "int ", int($b), " ; cmp ", ($b == 9223372036854775808 ? 1 : 0), "\n";
+my %h = ( (2**63) => 1 ); print "key ", join(",", keys %h), "\n";
+my $p = 2; my $q = 63; print "rt ", $p**$q, "\n";
+PL
+2**10 = 1024
+2**31 = 2147483648
+2**32 = 4294967296
+2**52 = 4.5035996273705e+15
+2**53 = 9.00719925474099e+15
+2**62 = 4.61168601842739e+18
+2**63 = 9.22337203685478e+18
+2**64 = 1.84467440737096e+19
+(-2)**63 = -9.22337203685478e+18
+3**40 = 1.21576654590569e+19
+10**15 = 1000000000000000
+10**16 = 10000000000000000
+10**20 = 1e+20
+7**19 = 11398895185373143
+(-7)**19 = -11398895185373143
+(-7)**20 = 79792266297612001
+16**16 = 1.84467440737096e+19
+6**24 = 4.73838133832162e+18
+5**27 = 7.45058059692383e+18
+2**300 = 2.03703597633449e+90
+(-2)**301 = -4.07407195266897e+90
+4**31 = 4.61168601842739e+18
+2**0.5 = 1.4142135623731
+2**-1 = 0.5
+0**0 = 1
+2**1024 = Inf
+9**9**9 = Inf
+1.5**2 = 2.25
+int 9223372036854775808 ; cmp 1
+key 9.22337203685478e+18
+rt 9.22337203685478e+18
+OUT
+
+# C2 — the pow() path's IEEE edges, which are C's and not CL's: a finite
+# negative base with a finite non-integer exponent is NaN (CL's EXPT answers a
+# COMPLEX number, which is not a Perl value at all), and a zero base with a
+# negative exponent is +Inf (SBCL SIGNALS there, because :divide-by-zero is the
+# one trap the runtime leaves armed).  An INFINITE base keeps C's answers.
+test_cl('#1248(b) inverse: pow()`s IEEE edges are C`s, not CL`s',
+        <<'PL', <<'OUT');
+no warnings;
+my $inf = 9**9**9; my $nan = $inf - $inf; my $ninf = -$inf;
+my @c = (['(-8)**(1/3)',sub{(-8)**(1/3)}], ['(-2)**0.5',sub{(-2)**0.5}],
+         ['(-2.5)**3',sub{(-2.5)**3}],     ['0**-1',sub{0**-1}],
+         ['0**-2.5',sub{0**-2.5}],         ['0**$ninf',sub{0**$ninf}],
+         ['0**$inf',sub{0**$inf}],         ['1**$nan',sub{1**$nan}],
+         ['$nan**0',sub{$nan**0}],         ['2**$nan',sub{2**$nan}],
+         ['2**$inf',sub{2**$inf}],         ['2**$ninf',sub{2**$ninf}],
+         ['(-1)**$inf',sub{(-1)**$inf}],   ['$inf**-2',sub{$inf**-2}],
+         ['(-$inf)**3',sub{(-$inf)**3}],   ['(-$inf)**2.5',sub{(-$inf)**2.5}],
+         ['(-2)**-3',sub{(-2)**-3}],       ['0**5',sub{0**5}]);
+for my $e (@c) {
+  my ($n,$f) = @$e; my $v = eval { $f->() };
+  if (!defined $v) { my $x = $@; $x =~ s/ at .* line \d+\.?\s*$//s; $v = "DIE:$x" }
+  print "$n=$v\n";
+}
+PL
+(-8)**(1/3)=NaN
+(-2)**0.5=NaN
+(-2.5)**3=-15.625
+0**-1=Inf
+0**-2.5=Inf
+0**$ninf=Inf
+0**$inf=0
+1**$nan=1
+$nan**0=1
+2**$nan=NaN
+2**$inf=Inf
+2**$ninf=0
+(-1)**$inf=1
+$inf**-2=0
+(-$inf)**3=-Inf
+(-$inf)**2.5=Inf
+(-2)**-3=-0.125
+0**5=0
 OUT

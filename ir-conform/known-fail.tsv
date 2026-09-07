@@ -50,7 +50,6 @@
 253-string	1249	`exists $string->{k}` must die under `use strict refs`; PCL answers ''
 258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line
 272-sort	1249	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies
-276-numeric	1248	2**63 stringifies as an exact integer; perl prints %.15g (9.22337203685478e+18)
 282-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0`
 288-loops-exits	1244	the loop-control-from-a-sub matrix: the coderef row dies where perl exits the loop
 295-string-eval	1249	`eval @array` calls ARRAY; perl evaluates the array in scalar context ("4")
