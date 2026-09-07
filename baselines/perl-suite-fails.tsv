@@ -185,6 +185,16 @@
 #     key in a kv-slice was compiled as a SUB CALL.
 #   Both measured `tools/run-perl-suite.pl --jobs 1`, parallel and serial
 #   (#366) agreeing: multideref 41/11 -> 53/12, kvhslice 19/19 -> 21/18.
+# s473b 2026-09-07 (task #1241/#1456): ONE row swapped in op/multideref.t, by
+#   EDIT, counts unchanged (53/12 before and after, measured --jobs 1 on both
+#   trees).  `no strict refs, exist` LEFT this file -- it PASSES now, because
+#   an intermediate slot holding a defined STRING is a SYMBOLIC REFERENCE
+#   again instead of being CLOBBERED by a fresh hash (#1456 closed).
+#   `strict refs, not exist` JOINED it: with the write now landing in
+#   %strict_refs::foo as perl does under `no strict`, the row that asserts the
+#   key is ABSENT under `use strict refs` fails honestly -- PCL models no
+#   strict-refs hint at all (docs/not-supported.md "use strict refs is not
+#   enforced").  The same trade appears in baselines/fail-baseline.tsv.
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -4807,8 +4817,8 @@ op/multideref.t	24	ok	not ok	local const indices 3
 op/multideref.t	33	ok	not ok	local general 3
 op/multideref.t	30	ok	not ok	local lexical indices 3
 op/multideref.t	27	ok	not ok	local pkg indices 3
-op/multideref.t	3	ok	not ok	no strict refs, exist
 op/multideref.t	1	ok	not ok	strict refs
+op/multideref.t	2	ok	not ok	strict refs, not exist
 op/my.t	58	ok	not ok	RT \#133543: my() in false conditional: 0 && my $z1;
 op/my.t	59	ok	not ok	RT \#133543: my() in false conditional: 0 && my (%z2);
 op/my.t	53	ok	not ok	RT \#133543: my() in false conditional: my $x1 if 0;

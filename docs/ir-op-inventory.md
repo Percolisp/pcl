@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **698**
+* names exported: **700**
 * families: **19** with an ir-spec §10 rule, **35** without one
-* with a machine-readable `Contract:` tail: **69** of 698
+* with a machine-readable `Contract:` tail: **69** of 700
 * UNCLASSIFIED (no family rule matches): **3**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -191,7 +191,7 @@ ir-spec §10 row **declarations** — names carrying the compiler's own VERDICTS
 | `p-raw-params` | macro | `((&rest params) &body body)` | — | — | — | — | — | — | — |
 | `p-sub` | macro | `(name params facts &body body)` | — | — | — | — | — | — | — |
 
-## elements (22)
+## elements (24)
 
 ir-spec §10 row **elements** — reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value
 
@@ -219,6 +219,8 @@ ir-spec §10 row **elements** — reads unbox scalars, keep reference boxes (§2
 | `p-kv-hslice` | function | `(hash &rest keys)` | insensitive | str | none | yes | no | no | none |
 | `p-list-scalar` | function | `(val)` | — | — | — | — | — | — | — |
 | `p-slice-result` | function | `(val)` | — | — | — | — | — | — | — |
+| `p-viv-array-container` | macro | `(form)` | — | — | — | — | — | — | — |
+| `p-viv-container` | macro | `(form)` | — | — | — | — | — | — | — |
 
 ## increment (4)
 

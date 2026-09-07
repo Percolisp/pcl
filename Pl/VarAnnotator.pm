@@ -172,6 +172,14 @@ my %ACCESS_NODE = (h_acc          => 'strkey', a_acc          => 'num',
                    slice_h_acc    => 'strkey', slice_a_acc    => 'num',
                    kv_slice_h_acc => 'strkey', kv_slice_a_acc => 'num');
 
+# The four ELEMENT access types (no slices) — the shapes whose CONTAINER
+# ExprToCL::_viv_container_form marks `p-viv-container` (task #1241), so that
+# a READ through them vivifies exactly as a write does.  Kept beside
+# %ACCESS_NODE, whose keys it is a subset of, so the two readings stay
+# visibly in step: if the emitter ever widens to the slice spellings this
+# table widens with it, or a raw slot is left holding a vivification.
+my %VIV_CONTAINER_NODE = map { $_ => 1 } qw(h_acc a_acc h_ref_acc a_ref_acc);
+
 # Builtin funcall arg licensing: name => 'str-all' (every non-filehandle arg
 # is a stringify use: print/say/join) or [per-position class] (undef slots =
 # opaque).  Args of every OTHER callee are opaque — the value escapes.
@@ -1426,6 +1434,18 @@ sub _tw_walk {
       # deref and slice spellings stringify/numify their subscripts exactly
       # as the plain ones do, and %ACCESS_NODE is the one table that knows
       # both the shape and the class.
+      # #1241: the CONTAINER of a subscript is DEREFERENCED, and perl
+      # vivifies an undef dereference target on a READ exactly as on a write.
+      # When the base is itself an ELEMENT access, ExprToCL marks it
+      # `p-viv-container`, so `my $v = $a[0]{k}` CREATES element 0 — a write
+      # to @a, and the array verdicts have to see it.  The same marker the
+      # write side asks (rule 11), in its read-vivify mode: scalars are NOT
+      # boxed here (the emitted root vivification assigns through the place).
+      if (@$kids
+          && $VIV_CONTAINER_NODE{
+               ($xo->is_internal_node_type($xo->get_a_node($kids->[0])) // '') }) {
+        _tw_mark_lvalue($ctx, $xo, $kids->[0], 'write-deref-viv', 1);
+      }
       _tw_walk($ctx, $xo, $kids->[0], 0, undef, 1) if @$kids;
       my $key_uctx = $ACCESS_NODE{$t};
       _tw_walk($ctx, $xo, $_, 0, $key_uctx, 1) for @$kids[1 .. $#$kids];
@@ -1688,8 +1708,18 @@ sub _has_block_arg {
 #   any other root (a funcall, a paren list, `++($x = 5)`, a plain $x, $$r,
 #     substr($x,…))  → the whole subtree, with the caller's own reason.
 # Marks only; the caller walks the subtree for reads exactly as before.
+#
+# READ-VIVIFY MODE (task #1241), the caller passes $viv_only: the position is
+# a CONTAINER being dereferenced on a read.  Only the ARRAY bookkeeping is
+# wanted — `$a[0]{k}` READ vivifies element 0, which writes @a — and NO scalar
+# is boxed, because the emitted code no longer needs a box to vivify a chain
+# root: `p-viv-ensure-hashref` assigns through the PLACE, so a raw slot works
+# (cl/pcl-runtime.lisp).  Marking scalars here instead cost Text::CSV_PP its
+# three raw parameters and +97 % on an accessor loop, measured s473b — and it
+# would have marked far too much anyway: `$se->facets->{a}{b}` writes nothing
+# lexical, the vivification lands in the value the method returned.
 sub _tw_mark_lvalue {
-  my ($ctx, $xo, $id, $event) = @_;
+  my ($ctx, $xo, $id, $event, $viv_only) = @_;
   return if !defined $id;
   my $n = $xo->get_a_node($id);
   my $t = $xo->is_internal_node_type($n) // '';
@@ -1720,6 +1750,7 @@ sub _tw_mark_lvalue {
     }
     return;
   }
+  return if $viv_only;                 # array roots already handled above
   _tw_mark($ctx, $xo, $id, $descended ? 'write-deref-viv' : $event);
 }
 

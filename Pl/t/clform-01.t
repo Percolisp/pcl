@@ -343,7 +343,12 @@ like($ac, qr/\(setf \(p-aref \@a 1\) 5\)/, 'lvalue array access → p-aref targe
 like($ac, qr/\(setf \(p-gethash %h "y"\) 6\)/, 'lvalue hash access → p-gethash target');
 like($ac, qr/\(p-gethash %h\s+\(p-join\s+\|\$;\|\s+\(vector "p" "q"\)\)\)/,
      'multi-key $h{a,b} → (p-join |$;| (vector …))');
-like($ac, qr/\(p-aref \(p-aref-deref \$ref 0\) 1\)/,
+# The intermediate level carries `p-viv-array-container` since #1241 (s473b):
+# a subscript's CONTAINER is dereferenced, and perl vivifies an undef deref
+# target on a READ as on a write.  The point this row makes is unchanged and
+# now stronger — the container is still a nested FORM, not text, and it is the
+# marker that says what that form's value is for.
+like($ac, qr/\(p-aref \(p-viv-array-container \(p-aref-deref \$ref 0\)\) 1\)/,
      'nested container stays structural');
 
 # --- converted: ref-access + slice family form handlers (E2.1) --------------

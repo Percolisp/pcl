@@ -941,9 +941,13 @@ my @kv = delete %y[1..2];   print "delkv:@kv | ", scalar(@y), "\n";
     my $cl = transpile('package Pkg; our @a = ({k=>"x"}); our $i = 1; our $k = "k";'
                        . ' my $p = pos($a[$i]{$k}); my $t = tied($a[$i]{$k});'
                        . ' my $e = exists($a[$i]{$k});');
-    like($cl, qr/\(p-pos\s+\(p-gethash-box\s+\(p-aref\s+\@a\s+Pkg::\$i\)/,
+    # The container also carries #1241's `p-viv-container` marker now: the
+    # container of a subscript is DEREFERENCED, and perl vivifies an undef
+    # deref target for pos/tied exactly as for a plain read.  The index inside
+    # it is what these rows are about, and it is still `Pkg::$i`.
+    like($cl, qr/\(p-pos\s+\(p-gethash-box\s+\(p-viv-container\s+\(p-aref\s+\@a\s+Pkg::\$i\)/,
          '#397: pos() keeps a nested package-qualified index as $i (was Pkg::%i)');
-    like($cl, qr/\(p-tied\s+\(p-gethash-box\s+\(p-aref\s+\@a\s+Pkg::\$i\)/,
+    like($cl, qr/\(p-tied\s+\(p-gethash-box\s+\(p-viv-container\s+\(p-aref\s+\@a\s+Pkg::\$i\)/,
          '#397: tied() keeps it too — the same guard exists/delete always had');
     unlike($cl, qr/Pkg::%i/,
            '#397: no arm mis-sigils the index of a nested access');

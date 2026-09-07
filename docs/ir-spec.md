@@ -1031,6 +1031,49 @@ these rules (every one probed on perl 5.40.3):
   code, not an interpolation bug).  Residue: the `@{ EXPR }` arm unescapes
   the block text and the `${ EXPR }` arm does not (#444).
 
+### 3.2c Autovivification — which levels of a subscript chain get created (normative, s473b)
+
+**perl vivifies whenever an undefined value is DEREFERENCED, on a READ as on
+a write.**  It is not a property of assignment; the CPAN `autovivification`
+pragma exists precisely because a pure read creates structure.  The rule in
+one sentence: *every level of a subscript chain except the LAST is a
+dereference and vivifies; the last level creates nothing unless it is itself
+an lvalue.*
+
+    my %h; my $v = $h{a}{b};        # perl: keys %h == 1, ref($h{a}) eq "HASH"
+    my %h; my $e = exists $h{a}{b}; # the same — exists does not exempt it
+    my %h; my $v = $h{a};           # creates NOTHING
+    my $r; my $v = $r->{p}{q};      # $r becomes a HASH ref
+
+The kind of the created aggregate is decided by the NEXT subscript's sigil:
+`$h{a}{b}` makes `$h{a}` a HASH ref, `$h{a}[0]` an ARRAY ref.  A level whose
+slot already holds something DEFINED is *not* a vivification site: a
+reference is used, a STRING is a symbolic reference to the package variable
+it names (PCL never enforces `strict refs`; see `docs/not-supported.md`), and
+a referent of the wrong kind is perl's fatal.
+
+**How the IR says it.**  The runtime cannot decide this — `$h{a}` and
+`$h{a}{b}` lower the inner access identically, and what differs is that the
+result is dereferenced, a fact only the compiler has.  So the emitter MARKS
+the container:
+
+    $h{a}{b}   ->  (p-gethash (p-viv-container       (p-gethash %h "a")) "b")
+    $h{a}[0]   ->  (p-aref    (p-viv-array-container (p-gethash %h "a")) 0)
+
+`p-viv-container` / `p-viv-array-container` read as *"this form's value is
+about to be used as a HASH (resp. ARRAY) container; if the place it names
+holds undef, create the aggregate there first"*.  They are compile-time
+markers with **no run-time cost**: PCL expands them through the same chain
+walker `p-setf` uses, into the `p-autoviv-*` accessor family.  A translator
+may implement them as one vivifying accessor instead.  They appear on lvalue
+chains too, where they are redundant but harmless — one shape for reads and
+writes.
+
+The ROOT of a chain rooted in a scalar (`$r->{p}{q}`) vivifies through its
+PLACE, so a backend that unboxes read-only locals must still be able to
+assign to one.  NOT modelled: a SINGLE-level deref (`$r->{b}`) does not yet
+vivify `$r` (task #1350).
+
 ### 3.3 `p-true-p` (truthiness)
 
 False: the number 0 (but **NaN is true**), the strings `""` and `"0"`,
@@ -3018,7 +3061,7 @@ function's docstring states its Perl contract. The families:
 | assignment | `p-my-=` (boxed lexical) `p-scalar-=` (package) `setf` (raw slot) `p-array-= p-hash-= p-list-=` | store per §2.2; **a list assignment used as a VALUE is two-faced (task #721): scalar/void yields the number of elements the RHS produced, LIST context yields the LHS *lvalues* after the assignment** — every slot the LHS consumed, including the ones an `undef` placeholder or an element/`x`-repeat target took, and `()` therefore yields nothing while `(undef) = (10,20,30)` yields `10`. A named scalar target contributes its BOX (writable: `$_++ foreach ($x,$y) = (…)`); a slot with no nameable box contributes the value that landed in it. Because the answer is context-dependent, a DECLARATION whose assignment is a block's tail value must be lowered in the caller's context, never frozen to scalar. All forms return the assigned target/value per Perl |
 | compound assignment | `p-incf p-decf p-*= p-/= p-%= p-**= p-.= p-str-x= p-bit-and= p-bit-or= p-bit-xor= p-<<= p->>= p-str-bit-and= p-str-bit-or= p-str-bit-xor=` (any place) · `-raw` twins of each (raw slot, §2.2) · `p-and-assign p-or-assign p-//=` (no raw twin) | read-modify-write; boxed macros store back via box-set/setf per place shape, `-raw` twins are `(setf slot NEW)` with the identical NEW form; `&&=`/`||=`/`//=` short-circuit and store the RHS unchanged |
 | increment | `p-pre++ p-pre-- p-post++ p-post--` (the name says the FIXITY, not the operator's own spelling — there are no `p-++`-style names; verified emitted, s470bm) · on raw slots `p-incf-raw`/`p-decf-raw` (statement-root only; tail postfix wraps in `prog1` for the old value) | numeric ±1 on the box/slot; `p-pre++` on a pure-alpha string does Perl string increment (`"az"→"ba"`) — a raw slot only takes root incdec when every write is numeric-valued (A-num), so the raw twins are never asked to do the magical form |
-| elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice` | reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value |
+| elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice`, `p-viv-container p-viv-array-container` (the intermediate-level markers) | reads unbox scalars, keep reference boxes (§2.3–2.4); **every level of a chain but the last vivifies, on a READ as on a write** — §3.2c, and the marker is how the emitter says which levels those are; `p-delete` returns the removed value |
 | slice delete | `p-delete-hash-slice p-delete-array-slice p-delete-kv-hash-slice p-delete-kv-array-slice` | every one flattens its key/index arguments alike (`%p-flatten-slice-args`: a range or interpolated list contributes its elements, a STRING is one key — task #394), and every one answers **nil for an EMPTY slice** — undef in scalar context, the empty list in list context, per [perl #29127].  The emptiness test comes BEFORE the read-only check: perl allows `delete @ro[()]` on a read-only array and dies only on a real index (probed, s414) |
 | array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""`.  `p-sort` also has a *sugar* form with no comparator, `(%p-sort-classic MODE ARGS…)` — §5.4; expand it back to `p-sort` and nothing is lost.  `(%p-push1 @a X)` is the same sugar for `push`: exactly `(p-push @a X)` for a single SCALAR X on a non-escaping `my @a` (§2.3a), value = the new length; rewrite it back to `p-push` and nothing is lost |
 | regex | `p-=~ p-!~` with `(p-regex :pat "…" :flags "…" :tier T)`, `(p-subst :pat … :rep … :flags … :tier T)`, `(p-tr :from … :to … :flags …)` — the STRUCTURED literal (task #1211; the pre-s470bq spelling was one string with perl delimiters inside, `(p-regex "/pat/flags")`) | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split`.  **A FAILED `m//` answers by context and by NOTHING else (tasks #962/#459):** scalar/void gives perl's defined-false `""` (never `undef`, never `0` — the `$&`-family rule of #416), and LIST context gives **the EMPTY LIST**, whatever the pattern — a capture-less miss is not a one-element false value.  The empty list is a zero-length VECTOR, never raw `nil`: only `%p-flatten-list` reads raw `nil` as "no elements", while `p-array-fill` keeps it as an array HOLE and `p-flatten-args` spreads it as ONE argument, so `f(/nomatch/, "d")` handed the callee two arguments where perl hands one and every later argument shifted.  (The runtime builds that vector with `%p-empty-list`, which is INTERNAL and is never emitted — measured s470bm over 111 + 592 files, so a translator sees the value and never the form) |

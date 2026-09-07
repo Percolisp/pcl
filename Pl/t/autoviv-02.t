@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 12;
 
 sub run_cl {
     my ($code) = @_;
@@ -222,4 +222,86 @@ my %f; $f{a}{b} = 1; my $r6 = \$f{a}{b}; $f{a}{b} = undef;   print((defined $$r6
 my %g; $g{a}{b} = 1; for my $v ($g{a}{b}) { $g{a}{b} = 7; print $v, "\n"; }
 my %h; $h{a} = 1; my $r7 = \$h{a}; $h{a} = 2;                print $$r7, "\n";
 my %i; $i{a}[0] = 1; my $r8 = \$i{a}[0]; $i{a}[0] = 2;       print $$r8, "\n";
+PL
+
+# ── 10. #1241 (= #1150, s473b): the READ path vivifies every INTERMEDIATE.
+# perl autovivifies whenever an undefined value is DEREFERENCED — on a pure
+# read exactly as on a write; that is the gotcha the CPAN `autovivification`
+# pragma exists to switch off.  PCL vivified NONE of them, so a program that
+# tested `exists $h{a}` after reading `$h{a}{b}` saw a different hash: every
+# row below printed a 0 where perl prints 1 (the ir-conform corpus pinned
+# seven of them, cases 045/046/047/054/055/059/060-autoviv, now dropped from
+# known-fail.tsv).  Row 7 CRASHED outright — `delete $f{a}{b}` handed :UNDEF
+# to SBCL's GETHASH.  The vivified slot is a REFERENCE, so `ref` answers
+# HASH/ARRAY per the NEXT subscript's sigil, which is what rows 1/5/9-11/14
+# check.  Every expectation is the live perl 5.40.3 answer (probed s473b).
+is(run_cl(<<'PL'), "11HASH\n01\n01\n110\n1HASH1\n1U\n1\n1\n1ARRAY\n1HASH\n1ARRAY\n1\n1\n1ARRAY\n", '#1241 a nested READ vivifies every intermediate');
+my %a; my $v1 = $a{a}{b};        print scalar(keys %a), (exists $a{a} ?1:0), ref($a{a}), "\n";
+my %b; my $e = exists $b{a}{b};  print(($e?1:0), scalar(keys %b), "\n");
+my %c; my $d = defined $c{a}{b}; print(($d?1:0), scalar(keys %c), "\n");
+my %d; my $v2 = $d{a}{b}{c};     print scalar(keys %d), scalar(keys %{$d{a}}), (exists $d{a}{b}{c} ?1:0), "\n";
+my $r; my $v3 = $r->{p}{q};      print((defined $r ?1:0), ref($r), scalar(keys %$r), "\n");
+my %e; $e{a}{b} &&= 5;           print((exists $e{a} ?1:0), (defined $e{a}{b} ? $e{a}{b} : "U"), "\n");
+my %f; delete $f{a}{b};          print((exists $f{a} ?1:0), "\n");
+my %g; if ($g{a}{b}) { }         print((exists $g{a} ?1:0), "\n");
+my %h; my $v4 = $h{a}[0];        print scalar(keys %h), ref($h{a}), "\n";
+my @i; my $v5 = $i[0]{k};        print scalar(@i), ref($i[0]), "\n";
+my @j; my $v6 = $j[0][1];        print scalar(@j), ref($j[0]), "\n";
+my %k; my $v7 = ${$k{a}}{b};     print((exists $k{a} ?1:0), "\n");
+my %l; my $kk = "a"; my $v8 = $l{$kk}{b}; print((exists $l{a} ?1:0), "\n");
+my $m; my $v9 = $m->[0][1];      print((defined $m ?1:0), ref($m), "\n");
+PL
+
+# ── 11. #1241, THE NEGATIVES — the direction that would over-create.  Only
+# an INTERMEDIATE dereference vivifies: the LAST level of a chain creates
+# nothing, and a FLAT element access is all last level.  Making a read
+# vivify unconditionally would put keys in %h that perl never puts there,
+# so these rows are the other half of the acceptance and they must keep
+# printing 0.  Row 7 is the three-level `exists`: perl creates levels 1 and
+# 2 and not the key itself (1,1,0).
+is(run_cl(<<'PL'), "0\n0\n0\n0\n1\n0\n110\n0\n0\n", '#1241 the last level and a flat access create nothing');
+my %a; my $v1 = $a{a};            print scalar(keys %a), "\n";
+my %b; my $e = exists $b{a};      print scalar(keys %b), "\n";
+my %c; my $d = defined $c{a};     print scalar(keys %c), "\n";
+my %d; my $v2 = $d{a} // 1;       print scalar(keys %d), "\n";
+my %e; $e{a}{b} = 1; my $v3 = $e{a}{zz}; print scalar(keys %{$e{a}}), "\n";
+my @f; my $v4 = $f[0];            print scalar(@f), "\n";
+my %g; my $v5 = exists $g{a}{b}{c}; print scalar(keys %g), scalar(keys %{$g{a}}), scalar(keys %{$g{a}{b}}), "\n";
+my %h; my @k = keys %h;           print scalar(keys %h), "\n";
+my %i; my $v6 = $i{a}{b};         print((exists $i{a}{b} ?1:0), "\n");
+PL
+
+# ── 12. #1456 (closed by #1241's fix): an intermediate slot holding a DEFINED
+# non-reference is NOT a vivification site.  It is a SYMBOLIC REFERENCE —
+# `$h{a} = "zz"; $h{a}{b} = 1` writes `$zz{b}` — and PCL used to CLOBBER the
+# string with a fresh hash instead, which is neither of perl's two answers
+# (under `use strict refs` perl dies; PCL models no strict hint, see
+# docs/not-supported.md).  The four autoviv accessors now route a defined
+# slot through `p-ensure-hashref`/`p-ensure-arrayref`, the SAME pair
+# `$ref->{k}` has always used, so the twins cannot disagree again (rule 11).
+# Rows 4-6: a READ-ONLY literal list in container position — the vivifying
+# accessor reads the slot BEFORE extending, so `("a","b",{q=>7})[2]{q}` is 7
+# and not "Modification of a read-only value"; and a list-slice container is
+# normalized by the one helper p-aref-deref's own read uses.
+# Rows 7-8: the chain ROOT may be a RAW (unboxed) slot — a `my ($self) = @_`
+# the body only READS — and it still vivifies, through its PLACE.  That is
+# what keeps the accessor shape fast: boxing such roots instead cost +97 % on
+# this very loop (bench-emission-ab, s473b).
+is(run_cl(<<'PL'), "zz 1\nww U 0\nyy 5\n7\ndeep\n5\n1U\nHASH1\n", '#1456 a defined non-ref intermediate is a symbolic ref, not a clobber');
+no strict 'refs'; no warnings;
+our %zz; my %h; $h{a} = "zz"; $h{a}{b} = 1;
+print "$h{a} ", (defined $zz{b} ? $zz{b} : "U"), "\n";
+our %ww; my %g; $g{a} = "ww"; my $v = $g{a}{c};
+print "$g{a} ", (defined $v ? $v : "U"), " ", (exists $ww{c} ?1:0), "\n";
+our @yy; my @a; $a[0] = "yy"; $a[0][2] = 5;
+print "$a[0] ", (defined $yy[2] ? $yy[2] : "U"), "\n";
+sub f { return ({k=>"v", j=>{d=>"deep"}}, {k=>"w"}) }
+print (("a","b",{q=>7})[2]{q}); print "\n";
+print( (f())[0]{j}{d} ); print "\n";
+print( ([{x=>5}])[0][0]{x} ); print "\n";
+sub get { my ($self, $k) = @_; return $self->{opt}{$k} }
+my $o = { opt => { a => 1 } };
+print get($o, "a"), (defined get($o, "zz") ? "D" : "U"), "\n";
+sub viv { my ($s) = @_; my $x = $s->{p}{q}; return ref($s) . (exists $s->{p} ? 1 : 0) }
+my $u; print viv($u), "\n";
 PL

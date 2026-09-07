@@ -170,6 +170,8 @@
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-argbox #:p-gethash-argbox #:p-aref-deref #:p-aref-deref-box #:p-gethash #:p-gethash-box #:p-gethash-deref #:p-gethash-deref-box
    #:p-ensure-hashref #:p-ensure-arrayref
+   ;; the intermediate-level markers of a subscript chain (task #1241) — emitted
+   #:p-viv-container #:p-viv-array-container
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
@@ -8283,6 +8285,21 @@ per element."
     (t `(box-set ,place ,value))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-viv-marker-p (form)
+    "True for an emitted `p-viv-container' / `p-viv-array-container' form."
+    (and (consp form)
+         (member (car form) '(p-viv-container p-viv-array-container))
+         t))
+
+  (defun %p-unviv (form)
+    "FORM with an emitted `p-viv-container' / `p-viv-array-container' marker
+     peeled off (task #1241).  The marker says only \"this form's value is
+     dereferenced\"; it names the SAME PLACE as the form inside it, so every
+     compile-time reading of a place — the chain walker, the nested-element
+     test — must look through it or the marker would silently change which
+     store discipline a compound assignment gets."
+    (if (%p-viv-marker-p form) (cadr form) form))
+
   ;; Forward-declare so expand-autoviv can call expand-autoviv-for-array (mutually recursive)
   (declaim (ftype (function (t) t) expand-autoviv-for-array))
   (defun expand-autoviv (form)
@@ -8290,6 +8307,10 @@ per element."
      The result of this form must be a hash table (inner yields hash).
      Handles p-gethash, p-aref, p-gethash-deref, p-aref-deref chains."
     (cond
+      ;; An emitted p-viv-container marker names the SAME place as the form
+      ;; inside it (task #1241) — peel it and walk that, so a chain the
+      ;; emitter already marked expands once, not twice.
+      ((%p-viv-marker-p form) (expand-autoviv (%p-unviv form)))
       ;; (p-gethash inner key) - autovivify intermediate, this slot yields hash
       ((and (listp form) (eq (car form) 'p-gethash))
        (let ((inner (cadr form))
@@ -8304,12 +8325,12 @@ per element."
       ((and (listp form) (eq (car form) 'p-gethash-deref))
        (let ((ref (cadr form))
              (key (caddr form)))
-         `(p-autoviv-gethash (p-ensure-hashref ,ref) ,key)))
+         `(p-autoviv-gethash (p-viv-ensure-hashref ,ref) ,key)))
       ;; (p-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields hash
       ((and (listp form) (eq (car form) 'p-aref-deref))
        (let ((ref (cadr form))
              (idx (caddr form)))
-         `(p-autoviv-aref-for-hash (p-ensure-arrayref ,ref) ,idx)))
+         `(p-autoviv-aref-for-hash (p-viv-ensure-arrayref ,ref) ,idx)))
       ;; Base case: form is a plain hash container
       (t form)))
 
@@ -8317,6 +8338,8 @@ per element."
     "Compile-time helper: the result of this form must be an array.
      Handles p-gethash, p-aref, p-gethash-deref, p-aref-deref chains."
     (cond
+      ;; The marker peels here too — see expand-autoviv (task #1241).
+      ((%p-viv-marker-p form) (expand-autoviv-for-array (%p-unviv form)))
       ;; (p-gethash inner key) - this slot yields array
       ((and (listp form) (eq (car form) 'p-gethash))
        (let ((inner (cadr form))
@@ -8331,14 +8354,91 @@ per element."
       ((and (listp form) (eq (car form) 'p-gethash-deref))
        (let ((ref (cadr form))
              (key (caddr form)))
-         `(p-autoviv-gethash-for-array (p-ensure-hashref ,ref) ,key)))
+         `(p-autoviv-gethash-for-array (p-viv-ensure-hashref ,ref) ,key)))
       ;; (p-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields array
       ((and (listp form) (eq (car form) 'p-aref-deref))
        (let ((ref (cadr form))
              (idx (caddr form)))
-         `(p-autoviv-aref-for-array (p-ensure-arrayref ,ref) ,idx)))
+         `(p-autoviv-aref-for-array (p-viv-ensure-arrayref ,ref) ,idx)))
       ;; Base case: form is a plain array container
       (t form))))
+
+;;; ── THE CONTAINER OF A SUBSCRIPT VIVIFIES (task #1241, s473b) ──────────────
+;;; perl autovivifies whenever an UNDEFINED VALUE IS DEREFERENCED — on a pure
+;;; READ exactly as on a write (that is what the CPAN `autovivification` pragma
+;;; exists to switch off).  `my %h; my $v = $h{a}{b};` leaves perl with one key
+;;; and PCL, before this, with none, so a program that walks `keys %h` after
+;;; probing `$h{$k}{x}` saw a different hash.
+;;;
+;;; The RUNTIME cannot decide it: `$h{a}` and `$h{a}{b}` lower the inner access
+;;; identically, and what differs is that in the second the RESULT IS
+;;; DEREFERENCED — a fact only the emitter has.  So the emitter marks the
+;;; container:
+;;;
+;;;     $h{a}{b}   ->  (p-gethash (p-viv-container (p-gethash %h "a")) "b")
+;;;     $h{a}[0]   ->  (p-aref (p-viv-array-container (p-gethash %h "a")) 0)
+;;;
+;;; and these two macros are the marker.  They expand through the SAME
+;;; compile-time walker `p-setf` reaches (expand-autoviv / -for-array, rule
+;;; 11), so the read and the write of one chain vivify by one piece of code and
+;;; cannot drift; the expansion is a function call, so the marker costs
+;;; NOTHING at run time.  Only the LAST level stays a plain read — that is the
+;;; level perl does not create (`my $v = $h{a}` creates nothing).
+;;;
+;;; A TRANSLATOR reads them as one rule: "the value of FORM is about to be used
+;;; as a HASH (resp. ARRAY) container; if the place it names is undef, create
+;;; the aggregate there first."  docs/ir-spec.md §3.2c.
+(defmacro p-viv-container (form)
+  "FORM's value is used as a HASH container: every undef level of it vivifies."
+  (expand-autoviv form))
+
+(defmacro p-viv-array-container (form)
+  "FORM's value is used as an ARRAY container: every undef level of it vivifies."
+  (expand-autoviv-for-array form))
+
+;;; ── VIVIFYING A CHAIN ROOT THAT MAY BE A RAW SLOT (task #1241) ─────────────
+;;; `expand-autoviv` turns a deref-rooted chain into
+;;;     (p-autoviv-gethash (p-ensure-hashref $r) "p")
+;;; and `p-ensure-hashref` vivifies by writing INTO $r's box.  Since #1241 that
+;;; happens on a READ as well, and a read-only `$r` is exactly the shape the
+;;; raw-slot verdict leaves UNBOXED (docs/boxed-aggregates-design-s455.md): the
+;;; `my ($self,$k) = @_;` parameter of an accessor.  Boxing those again so the
+;;; write-back has somewhere to go cost **+97 %** on a `$self->{opt}{$k}`
+;;; accessor loop (bench-emission-ab, s473b), so the root is vivified THROUGH
+;;; ITS PLACE instead: a raw lexical slot is still a CL place, and SETF reaches
+;;; it.  That is also why no VarAnnotator veto is needed for a read chain's
+;;; scalar root — the emitted code does not require a box.
+;;;
+;;; The dispatch costs one type test on the warm path.  A p-box root (a boxed
+;;; lexical, a global cell, a symbol-macro) takes `p-ensure-hashref` exactly as
+;;; before — and so does a RAW slot that already HOLDS a reference, because a
+;;; reference VALUE is itself a p-box (`(make-p-box hash)`).  The SETF arm is
+;;; reached only by a raw slot holding undef, the one case that had nowhere to
+;;; write.  A non-symbol root (a funcall, an element read, an already-expanded
+;;; chain) is not a place we may assign to, and keeps the plain call.
+(defmacro %p-viv-root (place ensure-fn make-agg)
+  (if (symbolp place)
+      (let ((v (gensym "ROOT")) (a (gensym "AGG")))
+        `(let ((,v ,place))
+           (if (p-box-p ,v)
+               (,ensure-fn ,v)
+               (let ((h (unbox ,v)))
+                 (if (or (null h) (eq h *p-undef*))
+                     (let ((,a ,make-agg))
+                       (setf ,place (make-p-box ,a))
+                       ,a)
+                     (,ensure-fn ,v))))))
+      `(,ensure-fn ,place)))
+
+(defmacro p-viv-ensure-hashref (place)
+  "p-ensure-hashref for a chain ROOT: vivifies through PLACE when PLACE is a
+   raw lexical slot holding undef, and through the box otherwise."
+  `(%p-viv-root ,place p-ensure-hashref (make-hash-table :test 'equal)))
+
+(defmacro p-viv-ensure-arrayref (place)
+  "p-ensure-arrayref for a chain ROOT — the array twin of p-viv-ensure-hashref."
+  `(%p-viv-root ,place p-ensure-arrayref
+                (make-array 0 :adjustable t :fill-pointer 0)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-accessor-place-p (place)
@@ -8372,10 +8472,15 @@ per element."
      inner read's :UNDEF and died with an SBCL type error.  The deref-rooted
      spellings are NOT in this test because their writers already vivify
      ((setf p-gethash-deref) is `(setf (p-gethash (p-ensure-hashref ref) …))`),
-     and neither are p-$ / p-cast-$, which are scalars, not containers."
+     and neither are p-$ / p-cast-$, which are scalars, not containers.
+
+     The container is read through %p-unviv: since #1241 the emitter marks a
+     dereferenced container `p-viv-container', and the marker names the same
+     place, so without the peel `$h{a}{b} .= …` would stop reading as nested
+     and quietly go back to the double-evaluating store."
     (and (consp place)
          (member (car place) '(p-gethash p-aref))
-         (%p-accessor-place-p (cadr place))))
+         (%p-accessor-place-p (%p-unviv (cadr place)))))
 
   (defun %p-vivified-elem-form (place fn)
     "Bind PLACE's CONTAINER and KEY to temps — the container through the
@@ -10154,40 +10259,51 @@ per element."
       (make-p-box *p-undef*))))
 
 (declaim (ftype function p-aslice))
+(defun %p-listslice-array (arr)
+  "The array a `(LIST_EXPR)[i]` subscript should index, given the raw value in
+   container position.  TWO normalisations of the list-slice codegen shape, and
+   they live here because more than one consumer needs them (rule 11; before
+   task #1241 they were inline in p-aref-deref and `p-ensure-arrayref` — the
+   entry the vivifying chain walker uses — did neither, so `(f())[1]{k}` handed
+   the walker the 1-element WRAPPER and died extending a read-only literal):
+
+   1. Unwrap the `(vector RESULT_VECTOR)` pattern.  gen_progn in LIST_CTX wraps
+      a single list-returning expression in `(vector …)`, making a simple
+      1-element vector holding the function's result (itself a vector).  Peel
+      it so the subscript sees the actual list.  Safe: a boxed array ref is a
+      p-box, not a raw vector, and strings are excluded.
+   2. Flatten Perl @array variables embedded in a literal list-slice vector —
+      `(vector @foo @bar)[0..5]` — so slicing sees the elements, not the
+      sub-arrays.
+   Anything else (a real perl array, which has a fill pointer; a box; a string;
+   undef) is returned unchanged."
+  (when (and (vectorp arr)
+             (not (array-has-fill-pointer-p arr))
+             (= (length arr) 1)
+             (let ((inner (aref arr 0)))
+               (and (vectorp inner)
+                    (not (stringp inner)))))
+    (setf arr (aref arr 0)))
+  (when (and (vectorp arr)
+             (not (array-has-fill-pointer-p arr))
+             (some (lambda (e)
+                     (and (vectorp e)
+                          (not (stringp e))
+                          (array-has-fill-pointer-p e)))
+                   arr))
+    (let ((flat (make-array 0 :adjustable t :fill-pointer 0)))
+      (loop for e across arr do
+            (if (and (vectorp e) (not (stringp e)) (array-has-fill-pointer-p e))
+                (loop for item across e do (vector-push-extend item flat))
+                (vector-push-extend e flat)))
+      (setf arr flat)))
+  arr)
+
 (defun p-aref-deref (ref idx)
   "Perl array ref access $ref->[idx] - unbox the reference first.
    When idx is a vector (range result), returns a slice instead of a single element.
    When ref is a string, treat as symbolic reference to @name."
-  (let ((arr (unbox ref)))
-    ;; Unwrap the (vector RESULT_VECTOR) codegen pattern for (LIST_EXPR)[idx].
-    ;; gen_progn in LIST_CTX wraps a single list-returning expression in (vector ...),
-    ;; creating a simple 1-element vector containing the function result (also a vector).
-    ;; Peel that wrapper so p-aslice sees the actual list, not a 1-element wrapper.
-    ;; Safe: boxed array refs are p-boxes (not raw vectors), strings are excluded.
-    (when (and (vectorp arr)
-               (not (array-has-fill-pointer-p arr))
-               (= (length arr) 1)
-               (let ((inner (aref arr 0)))
-                 (and (vectorp inner)
-                      (not (stringp inner)))))
-      (setf arr (aref arr 0)))
-    ;; Flatten Perl @array variables embedded in a literal list-slice vector.
-    ;; (vector @foo @bar)[0..5] generates (p-aref-deref (vector @foo @bar) ...)
-    ;; where each @arr is an adjustable fill-pointer vector. Flatten them so
-    ;; slicing sees the elements, not the sub-arrays.
-    (when (and (vectorp arr)
-               (not (array-has-fill-pointer-p arr))
-               (some (lambda (e)
-                       (and (vectorp e)
-                            (not (stringp e))
-                            (array-has-fill-pointer-p e)))
-                     arr))
-      (let ((flat (make-array 0 :adjustable t :fill-pointer 0)))
-        (loop for e across arr do
-              (if (and (vectorp e) (not (stringp e)) (array-has-fill-pointer-p e))
-                  (loop for item across e do (vector-push-extend item flat))
-                  (vector-push-extend e flat)))
-        (setf arr flat)))
+  (let ((arr (%p-listslice-array (unbox ref))))
     (cond
       ;; Symbolic reference: string used as array name (no strict refs)
       ((stringp arr)
@@ -11173,7 +11289,12 @@ which is one of #1140's escape spellings (probed)."
       ;; ONE resolver — %p-symref-array, the same one @{"name"} goes through
       ;; (p-cast-@); this was a second copy of it.
       ((stringp a) (%p-symref-array a))
-      ((vectorp a) a)
+      ;; A RAW vector in container position can be the list-slice codegen shape
+      ;; — `(f())[1]{k}` reaches here through expand-autoviv's p-aref-deref arm
+      ;; — so it takes the same normalisation p-aref-deref's own read does
+      ;; (%p-listslice-array, task #1241).  A real perl array has a fill
+      ;; pointer and is returned unchanged.
+      ((vectorp a) (%p-listslice-array a))
       ;; Wrong kind of referent ($hashref->[0] = …): perl's fatal.
       ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
       ;; A ref to a plain SCALAR used as an array ($$scalarref[0], @$scalarref).
@@ -11182,38 +11303,62 @@ which is one of #1140's escape spellings (probed)."
       ((%p-scalar-referent-p ref) (%p-not-a-ref "ARRAY"))
       (t a))))
 
+;;; ── AN INTERMEDIATE LEVEL OF A SUBSCRIPT CHAIN (tasks #1241 / #1151) ───────
+;;; The four functions below are what `expand-autoviv` builds for every level
+;;; of a chain except the last, and since s473b they are reached on the READ
+;;; path too (`p-viv-container`), because perl vivifies an undef DEREFERENCE
+;;; whether the chain is being read or written.
+;;;
+;;; Each has THREE arms and the order is the semantics:
+;;;   1. the slot already holds the aggregate the next level needs — return it
+;;;      (the warm path; it must stay one lookup and no allocation);
+;;;   2. the slot is ABSENT or holds undef — create the aggregate and store it
+;;;      as a REFERENCE (make-p-box); this is the vivification;
+;;;   3. the slot holds something DEFINED that is not that aggregate — NOT a
+;;;      vivification site.  perl either resolves it (a string is a symbolic
+;;;      reference) or dies ("Not a HASH reference"), and `p-ensure-hashref` /
+;;;      `p-ensure-arrayref` are the ONE place that decision is written down —
+;;;      the same pair `$ref->{k}` goes through.  Before s473b arm 3 did not
+;;;      exist: a defined non-container was CLOBBERED by arm 2, so
+;;;      `$h{a} = "zz"; $h{a}{b} = 1` replaced the string with a fresh hash
+;;;      where perl writes `$zz{b}` (probed).  Routing the two through one
+;;;      resolver is why they cannot disagree again (rule 11).
 (defun p-autoviv-gethash (hash key)
-  "Get hash value, autovivifying to empty hash if missing or :UNDEF.
+  "The slot at KEY of hash HASH, as a HASH — vivified when absent or undef.
    Handles boxes in hash values."
   (let* ((h (unbox hash))
          (k (to-string key)))
     (multiple-value-bind (stored found) (gethash k h)
       ;; Unbox if stored value is a box
       (let ((val (unbox stored)))
-        (if (and found (hash-table-p val))
-            val
-            ;; Autovivify: create new hash, store it as a hash REFERENCE
-            ;; (make-p-box) — a hash element that holds a nested hash holds a
-            ;; ref, not a bare %hash.  Storing the raw table makes a later
-            ;; scalar copy ($x = $h{a}) collapse to the key-count.
-            (let ((new-hash (make-hash-table :test 'equal)))
-              (setf (gethash k h) (make-p-box new-hash))
-              new-hash))))))
+        (cond
+          ((hash-table-p val) val)
+          ((or (not found) (null val) (eq val *p-undef*))
+           ;; Autovivify: create new hash, store it as a hash REFERENCE
+           ;; (make-p-box) — a hash element that holds a nested hash holds a
+           ;; ref, not a bare %hash.  Storing the raw table makes a later
+           ;; scalar copy ($x = $h{a}) collapse to the key-count.
+           (let ((new-hash (make-hash-table :test 'equal)))
+             (setf (gethash k h) (make-p-box new-hash))
+             new-hash))
+          (t (p-ensure-hashref (%p-hash-elem-cell h k))))))))
 
 (defun p-autoviv-gethash-for-array (hash key)
-  "Get hash value, autovivifying to empty array if missing.
+  "The slot at KEY of hash HASH, as an ARRAY — vivified when absent or undef.
    Handles boxes in hash values."
   (let* ((h (unbox hash))
          (k (to-string key)))
     (multiple-value-bind (stored found) (gethash k h)
       ;; Unbox if stored value is a box
       (let ((val (unbox stored)))
-        (if (and found (vectorp val))
-            val
-            ;; Autovivify: create new array, store it as an array REFERENCE.
-            (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-              (setf (gethash k h) (make-p-box new-arr))
-              new-arr))))))
+        (cond
+          ((and (vectorp val) (not (stringp val))) val)
+          ((or (not found) (null val) (eq val *p-undef*))
+           ;; Autovivify: create new array, store it as an array REFERENCE.
+           (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+             (setf (gethash k h) (make-p-box new-arr))
+             new-arr))
+          (t (p-ensure-arrayref (%p-hash-elem-cell h k))))))))
 
 (defun p-autoviv-aref-for-hash (arr idx)
   "Get array element, autovivifying to empty hash if missing.
@@ -11225,17 +11370,27 @@ which is one of #1140's escape spellings (probed)."
          ;; is reached by `$a[-1]{k} .= "x"` and by `$a[-1]{k} = 1`.
          (i (%p-array-index a idx)))
     (when (< i 0) (%p-non-creatable-index idx))
+    ;; READ FIRST (task #1241).  An in-bounds slot that ALREADY holds the
+    ;; aggregate needs no write at all — and since a chain's intermediate
+    ;; levels reach this on a READ, the container can be a READ-ONLY literal
+    ;; list (`("a","b",{q=>7})[2]{q}`), where extending first died where perl
+    ;; simply reads.  The extend/vivify path below is unchanged.
+    (when (< i (length a))
+      (let ((val (unbox (aref a i))))
+        (when (hash-table-p val) (return-from p-autoviv-aref-for-hash val))))
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (%p-extend-to a i)
     (let* ((stored (aref a i))
            ;; Unbox if element is a box
            (val (unbox stored)))
-      (if (hash-table-p val)
-          val
-          ;; Autovivify: create new hash, store it as a hash REFERENCE.
-          (let ((new-hash (make-hash-table :test 'equal)))
-            (setf (aref a i) (make-p-box new-hash))
-            new-hash)))))
+      (cond
+        ((hash-table-p val) val)
+        ((or (null val) (eq val *p-undef*))
+         ;; Autovivify: create new hash, store it as a hash REFERENCE.
+         (let ((new-hash (make-hash-table :test 'equal)))
+           (setf (aref a i) (make-p-box new-hash))
+           new-hash))
+        (t (p-ensure-hashref (%p-elem-cell a i)))))))
 
 (defun p-autoviv-aref-for-array (arr idx)
   "Get array element, autovivifying to empty array if missing.
@@ -11245,17 +11400,25 @@ which is one of #1140's escape spellings (probed)."
          ;; (#1273).  This walker is the one `$prgs[-1][0] .= $_` reaches.
          (i (%p-array-index a idx)))
     (when (< i 0) (%p-non-creatable-index idx))
+    ;; READ FIRST — see p-autoviv-aref-for-hash (task #1241, read-only literal
+    ;; list containers).
+    (when (< i (length a))
+      (let ((val (unbox (aref a i))))
+        (when (and (vectorp val) (not (stringp val)))
+          (return-from p-autoviv-aref-for-array val))))
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
     (%p-extend-to a i)
     (let* ((stored (aref a i))
            ;; Unbox if element is a box
            (val (unbox stored)))
-      (if (vectorp val)
-          val
-          ;; Autovivify: create new array, store it as an array REFERENCE.
-          (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
-            (setf (aref a i) (make-p-box new-arr))
-            new-arr)))))
+      (cond
+        ((and (vectorp val) (not (stringp val))) val)
+        ((or (null val) (eq val *p-undef*))
+         ;; Autovivify: create new array, store it as an array REFERENCE.
+         (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
+           (setf (aref a i) (make-p-box new-arr))
+           new-arr))
+        (t (p-ensure-arrayref (%p-elem-cell a i)))))))
 
 (defun p-array-set (arr idx value)
   "Set array element, extending array if needed.
@@ -18563,7 +18726,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1020"
+(defparameter *pcl-cache-generation* "v2-1030"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

@@ -277,28 +277,39 @@ test_codegen('$hash{$key} = $val',
 diag "";
 diag "-------- Chained array/hash references:";
 
+# THE INTERMEDIATE LEVELS CARRY `p-viv-container` / `p-viv-array-container`
+# (task #1241, s473b).  perl vivifies whenever an undefined value is
+# DEREFERENCED — on a pure read as on a write — so `my $v = $ref->{a}{b}`
+# creates `$ref->{a}` (probed: `exists` says 1, `ref` says HASH), while the
+# LAST level creates nothing.  The runtime cannot see that difference: the
+# inner access lowers identically either way and only the emitter knows the
+# result is dereferenced, so the emitter marks the container and the runtime's
+# existing chain walker (expand-autoviv, the one `p-setf` reaches) expands the
+# marker at compile time — zero run-time cost.  These expectations therefore
+# gained exactly one wrapper per INTERMEDIATE level and nothing else; the
+# emission of every other shape in this file is byte-identical.
 test_codegen('$ref->[0][1]',
-             '(p-aref (p-aref-deref $ref 0) 1)',
+             '(p-aref (p-viv-array-container (p-aref-deref $ref 0)) 1)',
              'Chained array refs');
 
 test_codegen('$ref->{a}{b}',
-             '(p-gethash (p-gethash-deref $ref "a") "b")',
+             '(p-gethash (p-viv-container (p-gethash-deref $ref "a")) "b")',
              'Chained hash refs');
 
 test_codegen('$ref->[0]{key}',
-             '(p-gethash (p-aref-deref $ref 0) "key")',
+             '(p-gethash (p-viv-container (p-aref-deref $ref 0)) "key")',
              'Array ref then hash access');
 
 test_codegen('$ref->{key}[0]',
-             '(p-aref (p-gethash-deref $ref "key") 0)',
+             '(p-aref (p-viv-array-container (p-gethash-deref $ref "key")) 0)',
              'Hash ref then array access');
 
 test_codegen('$data->[0][1][2]',
-             '(p-aref (p-aref (p-aref-deref $data 0) 1) 2)',
+             '(p-aref (p-viv-array-container (p-aref (p-viv-array-container (p-aref-deref $data 0)) 1)) 2)',
              'Triple nested array refs');
 
 test_codegen('$config->{db}{host}{port}',
-             '(p-gethash (p-gethash (p-gethash-deref $config "db") "host") "port")',
+             '(p-gethash (p-viv-container (p-gethash (p-viv-container (p-gethash-deref $config "db")) "host")) "port")',
              'Triple nested hash refs');
 
 
@@ -314,12 +325,14 @@ test_codegen('$ref->{key} = "value"',
              '(p-setf (p-gethash-deref $ref "key") "value")',
              'Assign to hash ref element');
 
+# An lvalue chain carries the marker too: `p-setf`'s own walker peels it
+# (%p-unviv) and expands the same chain, so read and write emit one shape.
 test_codegen('$data->[0][1] = $x',
-             '(p-setf (p-aref (p-aref-deref $data 0) 1) $x)',
+             '(p-setf (p-aref (p-viv-array-container (p-aref-deref $data 0)) 1) $x)',
              'Assign to nested array ref');
 
 test_codegen('$cfg->{a}{b} = 100',
-             '(p-setf (p-gethash (p-gethash-deref $cfg "a") "b") 100)',
+             '(p-setf (p-gethash (p-viv-container (p-gethash-deref $cfg "a")) "b") 100)',
              'Assign to nested hash ref');
 
 

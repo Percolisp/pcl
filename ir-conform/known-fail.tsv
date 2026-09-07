@@ -15,13 +15,6 @@
 022-refs	1249	\(@b, 9) does not distribute over the array's elements: perl 3 refs, PCL 2
 033-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line
 034-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line
-045-autoviv	1241	an RVALUE nested subscript does not autovivify the intermediate ($h{a}{b} read leaves %h empty)
-046-autoviv	1241	exists $h{a}{b} does not autovivify the intermediate
-047-autoviv	1241	defined $h{a}{b} does not autovivify the intermediate
-054-autoviv	1241	$r->{p}{q} read does not autovivify the root scalar
-055-autoviv	1241	a three-level rvalue read autovivifies neither level
-059-autoviv	1241	$h{a}{b} &&= 5 does not autovivify the intermediate
-060-autoviv	1241	a plain nested read does not autovivify the intermediate
 077-typeglob	1242	*_{ARRAY} after `undef *_` still reports a slot (residue of #1020)
 078-typeglob	1242	`undef *_` inside a sub leaves *_{ARRAY} defined
 092-typeglob	1242	*a{ARRAY} / *h{HASH} still report present after `undef *a` / `undef *h`

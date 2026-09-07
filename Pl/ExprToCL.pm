@@ -1866,6 +1866,37 @@ sub _elem_accessor {
   return "$base-box";
 }
 
+# ── THE CONTAINER OF A SUBSCRIPT IS DEREFERENCED (task #1241) ───────────────
+# perl autovivifies whenever an undefined value is DEREFERENCED, on a pure
+# READ as on a write: `my %h; my $v = $h{a}{b};` leaves perl with one key.
+# Only the LAST level is lvalue-only — `my $v = $h{a}` creates nothing — so
+# the rule is about the CONTAINER, and it is the same rule for a read, an
+# `exists`, a `defined` and a `delete` (all four probed vs perl 5.40.3).
+#
+# The runtime cannot decide this: `$h{a}` and `$h{a}{b}` lower the inner
+# access identically and only the emitter knows the result is dereferenced
+# (task #1150).  So the emitter MARKS the container with `p-viv-container` /
+# `p-viv-array-container`, which the runtime's existing chain walker
+# (expand-autoviv, the one `p-setf` already reaches) expands at compile time —
+# no second walker here, and no run-time cost.
+#
+# The mark is placed from the AST node kind, not by inspecting the generated
+# form: a container that IS a subscripted place is exactly the four element
+# node types, and that test does not have to know how each of them lowers.
+my %ELEM_ACCESS_NODE = map { $_ => 1 } qw(a_acc h_acc a_ref_acc h_ref_acc);
+
+sub _viv_container_form {
+  my ($self, $kid_id, $form, $want) = @_;
+  # In LVALUE context the whole chain is a place: `p-setf` runs the same
+  # walker over it and the container is already the `-box` accessor, which
+  # this walker does not (and must not) rewrite.
+  return $form if $self->lvalue_context;
+  my $node = $self->expr_o->get_a_node($kid_id);
+  return $form unless $self->expr_o->is_internal_node_type($node);
+  return $form unless $ELEM_ACCESS_NODE{ $node->{type} // '' };
+  return [$want eq q(%) ? 'p-viv-container' : 'p-viv-array-container', $form];
+}
+
 # True when the arg node itself IS a named-container element access — the
 # only shape 'argbox' applies to.  Gating per-arg keeps the context from
 # leaking into arbitrary subtrees (a `~$_` method arg once flipped from
@@ -3417,6 +3448,10 @@ sub gen_array_access_form {
       $arr = $renames->{$arr} if $renames && exists $renames->{$arr};
     }
   }
+  else {
+    # `$h{a}[0]` / `$a[0][1]` — the container is a subscripted PLACE.
+    $arr = $self->_viv_container_form($kids->[0], $arr, q(@));
+  }
   my $func = $self->_elem_accessor('p-aref');
   return [$func, $arr, $idx];
 }
@@ -3611,6 +3646,13 @@ sub _elem_container_key {
     $container = $self->_slice_container_form($kids->[0], $container,
                    $kind =~ /_a_acc$/ ? 'p-cast-@' : 'p-cast-%')
       if $is_slice;
+    # `exists $h{a}{b}` / `delete $h{a}{b}`: the container is dereferenced,
+    # so it vivifies exactly as it does in a plain read (#1241; perl creates
+    # $h{a} for both, probed).  `delete` did not merely under-create — the
+    # undef container reached SBCL's GETHASH and the program ABORTED.
+    $container = $self->_viv_container_form($kids->[0], $container,
+                   $kind =~ /^h_/ ? q(%) : q(@))
+      if !$is_slice;
   }
   my @keys = map { $self->gen_node_form($kids->[$_]) }
              ($is_slice ? (1 .. $#$kids) : (1));
@@ -3765,6 +3807,10 @@ sub gen_hash_access_form {
       $hash = $renames->{$hash} if $renames && exists $renames->{$hash};
     }
   }
+  else {
+    # `$h{a}{b}` — the container is a subscripted PLACE and is dereferenced.
+    $hash = $self->_viv_container_form($kids->[0], $hash, q(%));
+  }
   my $func = $self->_elem_accessor('p-gethash');
   return [$func, $hash, $key];
 }
@@ -3805,6 +3851,12 @@ sub gen_array_ref_access_form {
   my $ref = $paren_scalar_base
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
+  # `${ $h{k} }[0]` / `$a[0]->[1]`: the REF operand is a subscripted place and
+  # is dereferenced, so it vivifies (#1241).  A plain `$r` base is NOT an
+  # element node and keeps today's answer — the single-level deref root is
+  # task #1350.
+  $ref = $self->_viv_container_form($kids->[0], $ref, q(@))
+    if !$paren_scalar_base;
   my $idx = $self->gen_node_form($kids->[1]);
   my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
   return [$func, $ref, $idx];
@@ -3815,9 +3867,14 @@ sub gen_array_ref_access_form {
 sub gen_hash_ref_access_form {
   my ($self, $node, $node_id, $kids) = @_;
   # The base is NOT an lvalue here — see gen_array_ref_access_form (#753).
-  my $ref = $self->_is_paren_scalar_base($kids->[0])
+  my $paren_scalar_base = $self->_is_paren_scalar_base($kids->[0]);
+  my $ref = $paren_scalar_base
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
+  # See gen_array_ref_access_form: `${ $h{k} }{b}` dereferences an element
+  # place, so the element vivifies (#1241).
+  $ref = $self->_viv_container_form($kids->[0], $ref, q(%))
+    if !$paren_scalar_base;
   my $key = $self->_hash_key_form($kids->[1]);
   my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
   return [$func, $ref, $key];

@@ -157,6 +157,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [A single generated top-level form above 64k characters](#a-single-generated-top-level-form-above-64k-characters)
 * [Pathological expression nesting depth (≥ ~10k) — DEFERRED](#pathological-expression-nesting-depth--10k--deferred--revisit-after-release-1)
 * [Lexical compile-time hints (`$^H` / `%^H` scoping)](#lexical-compile-time-hints-h--h-scoping)
+* [`use strict 'refs'` is not enforced — every dereference is the `no strict` one](#use-strict-refs-is-not-enforced--every-dereference-is-the-no-strict-one)
 * [Source filters (`Filter::Util::Call`, `Filter::Simple`, …)](#source-filters-filterutilcall-filtersimple-use-switch-)
 
 ### Errors, warnings and diagnostics
@@ -3327,3 +3328,33 @@ half (b) and restores half (a)'s trappable
 exit site — the two halves must agree, since with no frame there is nothing to
 throw to.  It is the one Kind-A gate whose OFF arm is not semantics-preserving,
 and it says so in the registry.
+
+## `use strict 'refs'` is not enforced — every dereference is the `no strict` one
+
+**Perl behaviour:** under `use strict 'refs'` (which `use strict` turns on), a
+dereference of a plain STRING is a compile-scope fatal — `Can't use string
+("foo") as a HASH ref while "strict refs" in use`.  Under `no strict 'refs'`
+the same expression is a SYMBOLIC reference: it names the package variable
+that string spells, so `my @a = ('foo'); $a[0]{k} = 13;` inside `package P`
+writes `$P::foo{k}`.
+
+**PCL behaviour:** always the second one.  PCL tracks no `strict` state (it is
+a lexical compile-time hint, the same gap as `$^H`/`%^H` above), and every
+site that resolves a string in reference position — `p-ensure-hashref`,
+`p-ensure-arrayref`, `p-cast-%`, `p-cast-@`, `p-cast-$` — goes to the package
+variable.  So the `no strict 'refs'` half of a program is RIGHT and the
+`use strict 'refs'` half does not die.
+
+**Why it is now visible where it was not (s473b, task #1241):** before, the
+intermediate level of a chain whose slot held a defined non-reference was
+CLOBBERED — `$a[0]{k} = 13` replaced the string `'foo'` with a fresh hash,
+which is neither of perl's two answers, and the resulting `%P::foo` stayed
+empty.  The clobber is gone (the two entry paths now share
+`p-ensure-hashref`), so the no-strict answer is right and the strict answer is
+honestly wrong instead of quietly wrong.  `perl-tests/multideref.t` records
+exactly that trade: `no strict refs, exist` moved from fail to pass and
+`strict refs, not exist` from pass to fail, TOTAL unchanged.
+
+**What would lift it:** a `strict`-hints model, the same shape task #221
+sketches for warnings — one compiled-per-lexical-scope boolean the reference
+resolvers consult, plus perl's message text.  Not scheduled.
