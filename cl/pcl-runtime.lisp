@@ -641,12 +641,63 @@
 ;;; in handler-bind to suppress SBCL's "package at variance" warnings that fire
 ;;; when p-sub's compile-time shadow calls have already added symbols to the
 ;;; shadow list before defpackage re-evaluates at load time.
+(defun %p-package-ready-p (name)
+  "True when the package NAME already exists AND already uses both CL and PCL
+   — i.e. when the bare `(p-defpackage :NAME)` form would change nothing.
+
+   NOT just `find-package` (task #1189, s473r).  Every runtime `make-package`
+   site passes `(:use :cl :pcl)`, so a package PCL made is always ready; but a
+   perl `package` statement can name something that exists for another reason
+   (`package CL;`, `package SB-EXT;`), and skipping the defpackage for one of
+   those would leave generated code in it unable to see a single `p-…` symbol.
+   Asking about the use-list instead of the mere existence makes the guard say
+   exactly what it means, at the cost of walking a two-element list on a path
+   that used to walk every package in the image.
+
+   `sb-impl::package-%use-list` and not `package-use-list`: the standard
+   accessor COPIES the list (two calls return non-EQ lists), and this runs on
+   every package-preamble form of every program and every string eval.  The
+   internal one is the live list; PCL is an SBCL runtime and reads SBCL
+   internals in a dozen other places, but this one is named here because it is
+   a PERFORMANCE choice, not a capability one."
+  (let ((p (find-package name)))
+    (and p
+         (let ((u (sb-impl::package-%use-list p)))
+           (and (member (find-package "CL")  u :test #'eq)
+                (member (find-package "PCL") u :test #'eq)
+                t)))))
+
 (defmacro p-defpackage (name &rest options)
   "Create/update a Perl package. Defaults to (:use :cl :pcl) when no options given.
-   Also ensures @ISA is declared in the package (all Perl packages have @ISA)."
+   Also ensures @ISA is declared in the package (all Perl packages have @ISA).
+
+   RE-EXECUTION IS NOT FREE, and it happens constantly (task #1189, s473r).
+   Every emitted program — including the one a STRING EVAL produces — opens
+   with the package preamble for each package it mentions, so a program whose
+   modules generate code at run time re-runs this for a package that already
+   exists.  Measured on the `moo-objs` bench row: **12 `defpackage` executions
+   per loop iteration** (10 of them `Method::Generate::Accessor::_Generated`,
+   Moo's Sub::Quote eval package), and CL's `defpackage` on an EXISTING
+   package is O(all packages) under a system mutex —
+   `update-package-with-variance` -> `package-implements-list` ->
+   `list-all-packages`, which was 8.7 % TOTAL of that row's loop samples with
+   its callers above it accounting for 12.1 % and 14.8 %.
+
+   So the `defpackage` form runs only when the package is ABSENT.  With
+   OPTIONS it always runs: options are an UPDATE (exports, shadows,
+   use-list), and skipping one would silently drop it — pl2cl emits none
+   today (every emitted call is the bare `(p-defpackage :NAME)`) and the
+   runtime's own four calls are bare too, but the arm must not lie about what
+   it does.  The @ISA half below is OUTSIDE the guard and runs every time, as
+   it always has: it is the idempotent `unless boundp` this macro's contract
+   is really about."
   `(eval-when (:compile-toplevel :load-toplevel :execute)
-     (handler-bind ((warning #'muffle-warning))
-       (defpackage ,name ,@(or options '((:use :cl :pcl)))))
+     ,(if options
+          `(handler-bind ((warning #'muffle-warning))
+             (defpackage ,name ,@options))
+          `(unless (%p-package-ready-p ,(string name))
+             (handler-bind ((warning #'muffle-warning))
+               (defpackage ,name (:use :cl :pcl)))))
      (let* ((pkg (find-package ,(string name)))
             (isa-sym (when pkg (intern "@isa" pkg))))
        (when (and isa-sym (not (boundp isa-sym)))

@@ -48,7 +48,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 45;
+plan tests => 59;
 
 sub run_pl {
     my ($src) = @_;
@@ -214,3 +214,84 @@ my @ui_rows = (
 is($got{$_->[0]}, $_->[1], "use integer: $_->[2]") for @ui_rows;
 is($got{'nui-mod'}, '2',
    'use integer is SCOPED: outside the block, -7 % 3 is perl\'s 2 again');
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE PACKAGE-PREAMBLE GUARD (task #1189) — `p-defpackage` runs CL's
+# `defpackage` only when the package is not already there with `(:use :cl
+# :pcl)`.  Every emitted program, INCLUDING the one a string eval produces,
+# opens with the preamble for each package it mentions, so a program whose
+# modules generate code at run time re-runs it: `moo-objs` does it 12 times
+# per loop iteration, and `defpackage` on an existing package walks every
+# package in the image under a system mutex.
+# ─────────────────────────────────────────────────────────────────────────────
+my ($pfh, $pfile) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+print $pfh <<'LISP';
+(format t "ready-fn ~a~%" (and (fboundp 'pcl::%p-package-ready-p) t))
+(format t "guarded ~a~%"
+        (and (search "package-ready-p"
+                     (string-downcase
+                      (with-output-to-string (s)
+                        (write (macroexpand-1 (quote (pcl::p-defpackage :some-new-pkg)))
+                               :stream s))))
+             t))
+(pcl::p-defpackage :s473r-made)
+(format t "ready-pcl ~a~%" (pcl::%p-package-ready-p "S473R-MADE"))
+(format t "ready-absent ~a~%" (pcl::%p-package-ready-p "NO-SUCH-PACKAGE-XYZ"))
+(make-package "S473R-BARE" :use '())
+(format t "ready-bare ~a~%" (pcl::%p-package-ready-p "S473R-BARE"))
+LISP
+close $pfh;
+my $pk = `sbcl @sbcl_rt --load $pfile 2>&1`;
+like($pk, qr/^ready-fn T$/mi,
+     '%p-package-ready-p exists (the guard the preamble consults)');
+like($pk, qr/^guarded T$/mi,
+     'p-defpackage expands to the guarded form, not a bare defpackage');
+like($pk, qr/^ready-pcl T$/mi,
+     'a package p-defpackage just made answers READY: its preamble re-run is a no-op');
+like($pk, qr/^ready-absent NIL$/mi,
+     'NEGATIVE: an absent package is NOT ready — the defpackage must run');
+like($pk, qr/^ready-bare NIL$/mi,
+     'NEGATIVE: a package that exists WITHOUT :use pcl is NOT ready (a perl '
+   . '`package` naming an existing CL package must still get the use-list)');
+
+# The perl-level answers: re-opened packages, string evals into an existing
+# package, an @ISA set inside an eval, and repeated evals into one package —
+# perl 5.40.3's own output (scratch/s473r/probe-pkg.pl in the s473r worktree).
+my $pkg = run_pl(<<'PERL');
+package Foo;
+our @ISA = ();
+sub hi { "hi-" . __PACKAGE__ }
+package main;
+print "a ", Foo::hi(), "\n";
+my $ok = eval 'package Foo; sub bye { "bye-" . __PACKAGE__ } 1';
+print "b ", ($ok ? "evalok" : "evalfail:$@"), "\n";
+print "c ", Foo::bye(), "\n";
+package Foo;
+sub again { "again" }
+package main;
+print "d ", Foo::again(), "\n";
+print "e ", scalar(@Foo::ISA), "\n";
+package Base; sub new { bless {}, shift } sub who { "base" }
+package main;
+eval 'package Kid; our @ISA = ("Base"); sub who { "kid" } 1' or print "evalerr $@\n";
+my $k = Kid->new;
+print "f ", $k->who, "\n";
+print "g ", Base->new->who, "\n";
+eval 'package Late; sub x { 42 } 1' or print "evalerr2 $@\n";
+print "h ", Late::x(), "\n";
+for my $i (1..3) { eval "package Rep; sub s$i { $i } 1" or die $@ }
+print "i ", Rep::s1() + Rep::s2() + Rep::s3(), "\n";
+PERL
+my %pg = map { /^(\S+) (.*)$/ ? ($1 => $2) : () } split /\n/, $pkg;
+my @pkg_rows = (
+    ['a', 'hi-Foo',  'a package defined once still answers its own name'],
+    ['b', 'evalok',  'a string eval that RE-OPENS an existing package compiles'],
+    ['c', 'bye-Foo', 'the sub it defined is callable, in the right package'],
+    ['d', 'again',   'a second `package Foo;` section in the file still adds subs'],
+    ['e', '0',       '@ISA survives the re-run (it is ensured OUTSIDE the guard)'],
+    ['f', 'kid',     'a class whose @ISA is set INSIDE an eval dispatches to itself'],
+    ['g', 'base',    '…and its parent still answers for its own instances'],
+    ['h', '42',      'a package that exists ONLY inside a string eval is created'],
+    ['i', '6',       'three evals into ONE package — the moo-objs shape — all land'],
+);
+is($pg{$_->[0]}, $_->[1], "package preamble: $_->[2]") for @pkg_rows;
