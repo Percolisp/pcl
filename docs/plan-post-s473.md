@@ -47,11 +47,12 @@ successor.
 | 12 | **s473f** | the handle family: #1309 #1246 #1307 #1308 (representation measured first) #1233 #1220 #1074 #1247(b) — 4 rows | v2-950 | a slot |
 | 13 | **s473q** | THE REGEX ENGINE SPIKE #71 (PCRE2 via sb-alien: measurement + binding stop rule + portability record; USER: approved, NOT high priority) | v2-980 (only if member 2 ships) | AFTER s473p and one more non-engine perf round (the remaining S/M levers) |
 | 0c | **s473t3** | FILLER: the 79 blessed rows whose only cause is a `CATALOG` note get TASKS (one perl-probed reproducer per cluster, ~25 clusters; ≤2 one-hour fixes may ship) — `s473/s473t3/prompt.md`; brief WRITTEN s474b, launches on the next free slot | v2-1000 only if a fix ships | a slot |
+| 0d | **#1501** (label s473t4; brief NOT yet written — Fable writes it when the s473a–f rounds have consumed #1431–#1460, USER 2026-09-07 "after those bugs are fixed") | the companion suite gets the sweep's two triage checks: one cause per early-stopping file (188 files produce fewer rows than perl) + a CAUSE column on `baselines/perl-suite-fails.tsv` (18,340 rows / 265 files, none attributed); first brief = the cluster census + per-directory split; re/ after s473q | if a fix | after s473a…f; re/ after s473q |
 | — | Fable designs | #1117 typeglob slots (from s473h's sizing); #582 `@ISA`-write invalidation (USER: box magic?); #71 PCRE2 (from s473p's measurement); #1202 extension fasl (USER-parked with pack) | | |
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470, s473t3 1471–1500**.  Next free after these: **1501**.
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470, s473t3 1471–1500, #1501 = the companion triage (s473t4)**.  Next free after these: **1502**.
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script
