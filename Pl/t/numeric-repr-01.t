@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 5;
 
 sub run_cl {
     my ($code) = @_;
@@ -152,3 +152,74 @@ PL
 done
 OUT
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B — #1248(a) / #1191.  pp_modulo's regime is chosen by the RIGHT operand.
+# The whole 9x7 sign/magnitude matrix was probed against perl 5.40.3 and is
+# byte-equal; these rows are the ones that were WRONG before (every infinite
+# operand answered NaN, and a finite right operand at or above 2**64 answered
+# an exact integer where perl answers an NV).
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('#1191 % with an infinite or out-of-UV-range right operand',
+        <<'PL', <<'OUT');
+no warnings;
+my $inf = 9**9**9;
+print "1 ", join(" ", 5 % $inf, -5 % $inf, 5 % -$inf, -5 % -$inf), "\n";
+print "2 ", join(" ", 0 % $inf, 0 % -$inf, 5.7 % $inf, -5.7 % -$inf), "\n";
+print "3 ", join(" ", $inf % 5, -$inf % 5, $inf % $inf, ($inf-$inf) % 5), "\n";
+print "4 ", join(" ", 5 % ($inf-$inf), 5 % 1e30, -5 % 1e30, 5 % -1e30), "\n";
+print "5 ", join(" ", -5 % 1e20, 1e30 % 1e20, -1e30 % 1e20, 1e30 % 3), "\n";
+print "6 ", join(" ", 5 % 18446744073709551616, -5 % 18446744073709551616), "\n";
+my $x = -5; $x %= $inf; my $y = 5; $y %= -$inf;
+print "7 $x $y\n";
+PL
+1 5 Inf -Inf -5
+2 0 0 5.7 -5.7
+3 NaN NaN NaN NaN
+4 NaN 5 1e+30 -1e+30
+5 1e+20 19884624838656 9.99999801153752e+19 1
+6 5 1.84467440737096e+19
+7 Inf -Inf
+OUT
+
+# B2 — the shapes that must NOT change, plus pp_modulo's round-to-nearest
+# quirk.  A right operand that still fits a UV keeps the integer regime (so
+# `5 % 0.5` DIES on the TRUNCATED right), and when only the LEFT is out of
+# range perl rounds BOTH magnitudes to nearest before the fmod: `1e30 % 3.7`
+# is 0 because the modulus becomes 4, and `1e30 % 0.25` dies because 0.25
+# rounds to 0.  An exact integer right and a float right are NOT the same
+# operand here (`1e30 % 3` is 1, `1e30 % 3.7` is 0).
+test_cl('#1191 inverse: the UV regime and pp_modulo round-to-nearest',
+        <<'PL', <<'OUT');
+no warnings;
+my $inf = 9**9**9;
+my @c = (['5%3',sub{5%3}], ['-5%3',sub{-5%3}], ['5%-3',sub{5%-3}],
+         ['-5%-3',sub{-5%-3}], ['5%3.7',sub{5%3.7}], ['5.9%3',sub{5.9%3}],
+         ['5%0',sub{5%0}], ['5%0.5',sub{5%0.5}], ['"7abc"%3',sub{"7abc"%3}],
+         ['1e30%3.7',sub{1e30%3.7}], ['1e30%3',sub{1e30%3}],
+         ['1e30%0.5',sub{1e30%0.5}], ['1e30%0.25',sub{1e30%0.25}],
+         ['inf%0.5',sub{$inf%0.5}], ['1e19%3.7',sub{1e19%3.7}],
+         ['5%18446744073709551615',sub{5%18446744073709551615}]);
+for my $e (@c) {
+  my ($n,$f) = @$e; my $v = eval { $f->() };
+  if (!defined $v) { my $x = $@; $x =~ s/ at .* line \d+\.?\s*$//s; $v = "DIE:$x" }
+  print "$n=$v\n";
+}
+PL
+5%3=2
+-5%3=1
+5%-3=-1
+-5%-3=-2
+5%3.7=2
+5.9%3=2
+5%0=DIE:Illegal modulus zero
+5%0.5=DIE:Illegal modulus zero
+"7abc"%3=1
+1e30%3.7=0
+1e30%3=1
+1e30%0.5=0
+1e30%0.25=DIE:Illegal modulus zero
+inf%0.5=NaN
+1e19%3.7=1
+5%18446744073709551615=5
+OUT

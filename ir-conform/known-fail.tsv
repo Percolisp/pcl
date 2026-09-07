@@ -47,8 +47,6 @@
 243-string	1249	utf8::is_utf8 on a byte string answers 1; perl answers 0
 245-array	1248	scalar(@a) after Internals::SvREADONLY returns the elements
 246-exception	1240	the runtime-raised errors in the table carry `(eval 0) line 0`
-251-numeric	1248	`%` with an Inf operand answers NaN; perl answers 5 / Inf / -Inf
-252-numeric	1248	`%` with an Inf operand answers NaN; perl answers 5 / Inf / -Inf
 253-string	1249	`exists $string->{k}` must die under `use strict refs`; PCL answers ''
 258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line
 272-sort	1249	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies

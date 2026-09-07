@@ -4132,24 +4132,119 @@
       (%p-/-slow a b)))
 (declaim (notinline p-/))
 
+(defconstant +p-uv-max-p1+ 18446744073709551616  ; 2**64, perl's UV_MAX_P1
+  "perl's UV_MAX_P1 — the magnitude at which pp_modulo stops using integers.")
+
+(defun %pcl-nv (v)
+  "V as a double, the way perl's SvNV reads it.  A magnitude beyond the double
+   range becomes an INFINITY rather than signalling: SBCL's COERCE refuses a
+   bignum that will not fit even with the overflow trap masked, and PCL's
+   numifier does hand back exact bignums (a 401-digit string numifies to the
+   integer here where perl's atof says Inf)."
+  (if (floatp v)
+      (coerce v 'double-float)
+      (handler-case (coerce v 'double-float)
+        (error () (if (minusp v)
+                      sb-ext:double-float-negative-infinity
+                      sb-ext:double-float-positive-infinity)))))
+
+(defun %pcl-fmod (x y)
+  "C's fmod(X, Y) for NON-NEGATIVE doubles X and Y (either may be an infinity
+   or a NaN): X - trunc(X/Y)*Y, computed EXACTLY.
+
+   CL's own REM is NOT fmod — it rounds the quotient into a float first, so
+   `(rem 1d30 1d20)' is 0.0d0 and `(rem 5d0 inf)' is a NaN.  Rationals make it
+   exact for finite operands, and fmod's result is always representable, so
+   coercing back cannot round.  The IEEE edges are C's: a NaN operand or an
+   infinite X gives NaN, and a finite X modulo an infinite Y is X."
+  (cond
+    ((or (%pcl-nan-p x) (%pcl-nan-p y)) (sb-kernel:make-double-float #x7FF80000 0))
+    ((sb-ext:float-infinity-p x) (sb-kernel:make-double-float #x7FF80000 0))
+    ((sb-ext:float-infinity-p y) x)
+    ((zerop y) (sb-kernel:make-double-float #x7FF80000 0))
+    (t (coerce (mod (rational x) (rational y)) 'double-float))))
+
+(defun %p-nv-round (d)
+  "perl's `Perl_floor(x + 0.5)' — the round-to-nearest pp_modulo applies to
+   BOTH magnitudes when it promotes a too-large left operand onto the NV path.
+   An infinity and a NaN are their own answer."
+  (if (or (%pcl-nan-p d) (sb-ext:float-infinity-p d)) d (ffloor (+ d 0.5d0))))
+
+(defun %p-modulo-nv (dleft dright left-neg right-neg)
+  "pp_modulo's NV path, on the two non-negative MAGNITUDES.  DANS is their
+   fmod; when the signs differ it becomes |right| - dans (perl's own two
+   lines); a negative right negates the whole.  The answer is an NV, which is
+   why `-1e30 % 1e20' prints 9.99999801153752e+19 and not the exact integer
+   99999980115375161344."
+  (when (and (not (%pcl-nan-p dright)) (zerop dright))
+    (p-die "Illegal modulus zero"))
+  (let ((dans (%pcl-fmod dleft dright)))
+    (when (and (not (eq left-neg right-neg)) (not (zerop dans)))
+      (setf dans (- dright dans)))
+    (if right-neg (- dans) dans)))
+
+(defun %p-modulo-integer (aleft aright left-neg right-neg)
+  "pp_modulo's UV path, given the two non-negative MAGNITUDES.  perl computes
+   `left % right' on unsigned values and then puts the sign back in two steps
+   (`ans = right - ans' when the signs differ, then negate for a negative
+   right); CL's MOD on the SIGNED operands is that same function — its result
+   carries the DIVISOR's sign — which is why this is one line."
+  (when (zerop aright) (p-die "Illegal modulus zero"))
+  (mod (if left-neg (- aleft) aleft) (if right-neg (- aright) aright)))
+
+(defun %p-modulo-uv (aleft aright left-neg right-neg dright)
+  "pp_modulo once |right| is known to be in UV range.  ARIGHT is U_V(|right|),
+   already truncated; DRIGHT is the right operand's NV when perl still has one
+   (it does not when the right arrived as an integer), else NIL.
+
+   When |left| is in UV range too, both truncate and the answer is an integer.
+   When it is NOT, perl promotes to the NV path and ROUNDS BOTH magnitudes to
+   nearest — `Perl_floor(x + 0.5)', a genuine perl quirk with visible
+   consequences: `1e30 % 3.7' is 0 because the modulus becomes 4 rather than
+   3, `1e30 % 0.5' is 0 because it becomes 1, and `1e30 % 0.25' DIES because
+   0.25 rounds to 0.  `inf % 0.5' is NaN by the same route."
+  (if (and (integerp aleft) (< aleft +p-uv-max-p1+))
+      (%p-modulo-integer aleft aright left-neg right-neg)
+      (let ((dl (%pcl-nv aleft)))
+        (if (or (%pcl-nan-p dl) (>= dl +p-uv-max-p1+))
+            (%p-modulo-nv (%p-nv-round dl)
+                          (if dright (%p-nv-round dright) (%pcl-nv aright))
+                          left-neg right-neg)
+            (%p-modulo-integer (truncate dl) aright left-neg right-neg)))))
+
 (defun %p-modulo (a b)
   "perl's `%` on two operands NEITHER of which is overloaded — the one body
    `p-%`'s slow path and `%=`'s inline form both use, so the two cannot drift
    (before this, `$x %= 0` raised a raw CL error while `$x % 0` answered NaN).
 
-   pp_modulo truncates both operands to integers, so the fatal is on the
-   TRUNCATED right operand: `5 % 0.5` dies in perl.  The NaN arm is perl's for
-   a NaN operand and for an infinite LEFT one; that it also fires for an
-   infinite RIGHT one is a measured divergence (`5 % inf` is 5 in perl) and is
-   task #1191, deliberately left alone here."
-  (let ((na (to-number a)) (nb (to-number b)))
-    (cond
-      ((or (%pcl-nan-p na) (%pcl-nan-p nb)
-           (and (floatp na) (sb-ext:float-infinity-p na))
-           (and (floatp nb) (sb-ext:float-infinity-p nb)))
-       (sb-kernel:make-double-float #x7FF80000 0))
-      ((zerop (truncate nb)) (p-die "Illegal modulus zero"))
-      (t (mod (truncate na) (truncate nb))))))
+   pp_modulo's shape, faithfully (perl 5.40 pp.c): THE RIGHT OPERAND DECIDES
+   THE REGIME.  While |right| fits a UV both operands TRUNCATE to integers and
+   the answer is an integer carrying the RIGHT operand's sign, which is why
+   `5 % 3.7' is 2 and `5 % 0.5' DIES.  When |right| does NOT fit — an
+   infinity, a NaN, or a magnitude at or above 2**64 — perl truncates NOTHING
+   and computes on the magnitudes as NVs: `5 % inf' is 5, `-5 % inf' is Inf
+   (inf - 5), `5 % -inf' is -Inf, `-5 % -inf' is -5, `5.7 % inf' is 5.7 (not
+   5), and `-5 % 1e20' is 1e+20 rather than the exact 99999999999999999995.
+   Only an infinite or NaN LEFT operand gives NaN; PCL used to answer NaN for
+   every one of the nine sign combinations (#1191, #1248(a); measured as a 9x7
+   matrix vs perl 5.40.3, plus the `%=' twin and the round-to-nearest quirk in
+   %p-modulo-uv).
+
+   AN EXACT INTEGER IS PERL'S IV/UV, A FLOAT IS ITS NV, and the two are not
+   interchangeable here: `1e30 % 3' is 1 while `1e30 % 3.7' is 0, because only
+   the NV spelling keeps a value for pp_modulo's rounding step to see."
+  (let* ((na (to-number a))
+         (nb (to-number b))
+         (left-neg  (and (not (%pcl-nan-p na)) (minusp na)))
+         (right-neg (and (not (%pcl-nan-p nb)) (minusp nb)))
+         (aleft  (if left-neg  (- na) na))
+         (aright (if right-neg (- nb) nb)))
+    (if (and (integerp aright) (< aright +p-uv-max-p1+))
+        (%p-modulo-uv aleft aright left-neg right-neg nil)
+        (let ((dright (%pcl-nv aright)))
+          (if (or (%pcl-nan-p dright) (>= dright +p-uv-max-p1+))
+              (%p-modulo-nv (%pcl-nv aleft) dright left-neg right-neg)
+              (%p-modulo-uv aleft (truncate dright) left-neg right-neg dright))))))
 
 (defun %p-%-slow (a b)
   "Perl modulo slow path with use overload '%' dispatch"
@@ -4157,9 +4252,14 @@
 
 (declaim (inline p-%))
 (defun p-% (a b)
-  "Perl modulo with integer fast path + use overload dispatch
+  "Perl modulo with fixnum fast path + use overload dispatch.
+
+   The fast path is FIXNUMS, not INTEGERP: a bignum operand is outside perl's
+   UV range, where pp_modulo stops doing integer arithmetic (`-5 % 2**64' is
+   the NV 1.84467440737096e+19, not the exact 18446744073709551611), so it
+   must reach %p-modulo.  A fixnum is below 2**62 and can never be that case.
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
-  (if (and (integerp a) (integerp b) (not (eql b 0)))
+  (if (and (typep a 'fixnum) (typep b 'fixnum) (not (eql b 0)))
       (mod a b)
       (%p-%-slow a b)))
 (declaim (notinline p-%))

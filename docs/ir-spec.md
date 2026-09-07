@@ -1058,6 +1058,38 @@ never is.
   `nomethod` answers a conversion too, with the conversion's own name as
   the fourth argument. One reading: `%p-conversion-handler`.
 
+### 3.5 `%` has TWO regimes, and the RIGHT operand picks one (normative, s473d)
+
+perl's `pp_modulo` is not "truncate both, then take the remainder"; the
+truncation is only one of its two regimes, and a backend that implements the
+other one wrongly is wrong on ordinary programs (`5 % $inf` is 5).  The rule,
+on the two MAGNITUDES with the signs put back at the end:
+
+* **UV regime** — `|right| < 2**64`.  Both operands truncate toward zero to
+  integers, and the answer is an integer carrying the RIGHT operand's sign.
+  So `5 % 3.7` is 2, `-5 % 3` is 1, `5 % -3` is -1, and `5 % 0.5` **dies**
+  "Illegal modulus zero" — the fatal is on the TRUNCATED right operand.
+* **NV regime** — `|right|` is an infinity, a NaN, or at least `2**64`.
+  Nothing truncates: `dans = fmod(|left|, |right|)`, then
+  `dans = |right| - dans` when the operand signs DIFFER and `dans` is
+  non-zero, then negate when the right is negative.  **The answer is a
+  float.**  So `5 % inf` is 5, `-5 % inf` is `Inf`, `5 % -inf` is `-Inf`,
+  `-5 % -inf` is -5, `5.7 % inf` is 5.7 (not 5), and `-5 % 1e20` prints
+  `1e+20` rather than the exact integer 99999999999999999995.  Only an
+  infinite or NaN LEFT operand — or a NaN right one — gives NaN.
+* **The promotion, with its rounding.**  When `|right|` fits but `|left|`
+  does not, perl promotes to the NV regime and **rounds BOTH magnitudes to
+  nearest** (`floor(x + 0.5)`) first.  That is a real quirk with visible
+  answers: `1e30 % 3.7` is 0 (the modulus becomes 4), `1e30 % 0.5` is 0 (it
+  becomes 1), `1e30 % 0.25` **dies** (it becomes 0), and `inf % 0.5` is NaN.
+  An exact integer right operand keeps no float for the rounding to see, so
+  `1e30 % 3` is 1 while `1e30 % 3.7` is 0 — in this op an IV and an NV of
+  the same value are NOT interchangeable.
+
+`fmod` here is C's, i.e. exact: `x - trunc(x/y)*y` with no rounding of the
+result.  A host whose remainder rounds the quotient into a float first (CL's
+`REM` does) computes something else — `1e30 % 1e20` is 19884624838656, not 0.
+
 ## 4. Context (scalar / list / void)
 
 The dynamic variable `*wantarray*` carries the calling context:
@@ -2910,7 +2942,7 @@ function's docstring states its Perl contract. The families:
 
 | family | members (representative) | rule |
 |---|---|---|
-| numeric ops | `p-+ p-- p-* p-/ p-% p-** p-<< p->>` | numify operands (§3.1), return raw number; overload hook first; `/` yields a double when inexact; `%` follows Perl sign rules; the shifts truncate to integer (Inf→0) and clamp a shift count ≥ the word size to 0 |
+| numeric ops | `p-+ p-- p-* p-/ p-% p-** p-<< p->>` | numify operands (§3.1), return raw number; overload hook first; `/` yields a double when inexact; `%` follows Perl sign rules and the two regimes of §3.5; the shifts truncate to integer (Inf→0) and clamp a shift count ≥ the word size to 0 |
 | bitwise (**mode-dispatched**) | `p-bit-and p-bit-or p-bit-xor p-bit-not` (perl's `& \| ^ ~`; the runtime has no `p-&`-style names — verified emitted, s470bm) · always-string twins `p-str-bit-and p-str-bit-or p-str-bit-xor p-str-bit-not` (`&. \|. ^. ~.`) | overload hook first; then ONE mode decision (`%p-bitwise-operand-kind`): the op is NUMERIC iff an operand carries a number, else it STRINGIFIES both operands and operates byte by byte (`&` truncates to the shorter, `\|`/`^` pad with NUL). A reference, glob, `qr//`, blessed object or undef carries neither a number nor a string body and therefore goes to the STRING side — `undef \| "abc"` is `"abc"`, `[1] \| ("\0" x 13)` is `"ARRAY(0x…)"`. **Unary `~` differs on one state and only one**: a REFERENCE goes to its numeric side (the complemented address), because perl's `pp_complement` takes the string branch only for an SV that has a PV. A bit-STRING op whose operands hold a code point above 0xFF is FATAL, with perl's wording. PCL's stand-in for perl's per-SV "used as a number" flag is `looks-like-number`, so a numeric-LOOKING string still takes the numeric side (`"12" & "10"`; task #1040) |
 | numeric compare | `p-== p-!= p-< p-> p-<= p->= p-<=>` | numify; return `1`/`""` (`<=>` −1/0/1; NaN comparisons → `""`/undef) |
 | string ops | `p-. p-string-concat p-str-x p-lc p-uc p-lcfirst p-ucfirst p-length p-substr p-index p-rindex p-reverse p-sprintf p-join` | stringify operands (§3.2), return raw string; Perl's `$_`-default forms arrive with `$_` already explicit in the tree (§8).  Perl's `x` is TWO ops, by what it repeats: `p-str-x` for a string, `p-list-x` for a parenthesised list (which belongs to the array/hash builtins) |
@@ -3029,7 +3061,9 @@ keys must be present — a partial tail would read as defaults, and *absent mean
 **The tail states the op's PERL contract — what a backend must implement.**
 Where PCL's current implementation diverges from it, the divergence is a filed
 bug, not a weaker contract: `p-%` carries `dies=yes` because perl dies
-"Illegal modulus zero", and the fact that PCL answers NaN today is task #1173.
+"Illegal modulus zero" (it does now — that it once answered NaN was task
+#1173, and the sibling divergence for an infinite operand was #1191/#1248(a),
+both closed; see §3.5).
 
 An op with no tail prints `UNCLASSIFIED` in every contract column.  That is the
 campaign's remaining work and the generator counts it per run (55 of 682 at
