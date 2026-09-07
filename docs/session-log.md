@@ -15,7 +15,7 @@ Append new entries at the top. One section per session.
 
 **The sweep's state, answered:** 108 files, 18,674 passing, 61 fully passing, 489 blessed keys = 678 assertions (243 a task / 79 catalog → now tasks / 22 prose / 98 not-supported / 47 pack.t parked); rows never produced 12,213 (pack.t 8,997, lc.t 2,577).  Rates from the task store: ~40 bug-shaped tasks closed per week against 40–100 filed; backlog ~400.  Unicode/regex = 96 % of the companion's missing ROWS (ten case-folding/charset files are 80 % of the running-files hole) but 12–14 % of the sweep's failures and none of the board's.
 
-**Next session:** USER's word on resuming s473p + s1061 (same worktrees, fresh Opus agents reading STOP.md — held as possibly covered by "no new subjobs"); then merge in order; then the staged queue (#1262 Sonnet → #1513 doc filler → s473a …).  Next free task ID **1515**.  Restart recipe: `~/pcl-agent-scratch/s470/PAUSE-s474.md` (top entry).
+**Next session:** resume s473p + s1061 as usual (USER 10:50: the "no new subjobs" note was temporary for the session end — same worktrees, fresh Opus agents reading STOP.md); merge in order; then the staged queue (#1262 Sonnet → #1513 doc filler → s473a …).  Next free task ID **1515**.  Restart recipe: `~/pcl-agent-scratch/s470/PAUSE-s474.md` (top entry).
 
 ## Session s473t3 (Opus agent, 2026-09-07) — the last 79 blessed rows whose only cause was a catalogue NOTE now name a task or a section; six of the notes were measured WRONG
 
