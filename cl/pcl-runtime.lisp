@@ -1615,7 +1615,7 @@
           ;; Build a dualvar box so $!+0 gives the integer and $! in string context gives the message
           (let ((box (%make-p-box :value msg)))
             (setf (p-box-sv box) msg (p-box-sv-ok box) t)
-            (setf (p-box-nv box) (float errno) (p-box-nv-ok box) t)
+            (setf (p-box-nv box) (float errno) (p-box-nv-ok box) :dual)
             box)))))
 
 (defun (setf p-errno-string) (val)
@@ -1829,8 +1829,20 @@
 (defstruct (p-box (:constructor %make-p-box))
   "Perl scalar value with lazy caching (like Perl's SV).
    - value: the authoritative value
-   - nv/nv-ok: cached numeric value and validity flag
-   - sv/sv-ok: cached string value and validity flag
+   - nv/nv-ok: cached numeric value and validity flag.  NV-OK IS THREE-VALUED:
+     NIL = no cached numeric; T = the cache is DERIVED from `value'; :DUAL = the
+     numeric half was set INDEPENDENTLY of the string half, i.e. this box is a
+     genuine dualvar ($!, Scalar::Util::dualvar).  Only p-errno-string,
+     p-dualvar and the two dualvar copiers write :DUAL, and %pcl-dualvar-p is
+     the ONE reading of it -- \"is this a dualvar\" is a fact of the
+     representation, never an inference from comparing the two caches (a
+     float's %.15g string does not round-trip to its own double, so the
+     inference false-positived on every warm float and poisoned the SV cache:
+     tasks #1230/#1245).  Every truthy value means \"nv is valid\", so plain
+     (p-box-nv-ok b) tests are unaffected by the marker.
+   - sv/sv-ok: cached string value and validity flag.  INVARIANT: when SV-OK is
+     true, SV IS A STRING.  %p-dualvar-copy is the only writer that ever had to
+     be told so, and it now dies rather than store a non-string (rule 12).
    - class: blessed class name
    - is-ref: t when this box was created by p-backslash (a reference wrapper, not a
      variable box). Used by box-set to avoid double-boxing when a reference variable
@@ -1860,7 +1872,7 @@
         (s (to-string (unbox str))))
     (let ((box (%make-p-box :value s)))
       (setf (p-box-sv box) s (p-box-sv-ok box) t)
-      (setf (p-box-nv box) n (p-box-nv-ok box) t)
+      (setf (p-box-nv box) n (p-box-nv-ok box) :dual)
       box)))
 
 ;;; ============================================================
@@ -2886,11 +2898,14 @@
     ;; Dualvar preservation: if source box has a pre-cached NV alongside a string
     ;; value (like Perl's $! errno dualvar), copy that NV to the destination.
     ;; Without this, $saved = $! would lose the numeric errno value.
+    ;; The FLAG travels with the halves — copying a dualvar yields a dualvar
+    ;; (perl: isdual($x = $!) is true), copying a merely cache-warm string
+    ;; yields a cache-warm string.
     (when (and (p-box-p value)
                (p-box-nv-ok value)
                (stringp v))
       (setf (p-box-nv box) (p-box-nv value)
-            (p-box-nv-ok box) t))
+            (p-box-nv-ok box) (p-box-nv-ok value)))
     box))
 
 (defun %pcl-nan-canonical-p (s)
@@ -4727,15 +4742,23 @@
 ;;; fatal where perl just runs.
 
 (defun %pcl-dualvar-p (v)
-  "True when V is a box carrying a GENUINE dualvar: both caches valid and the
-   numeric side is NOT what numifying the string side would give ($!-family).
-   Ordinary cache-warm boxes have consistent caches and return NIL.  Shared
-   definition for Scalar::Util::isdual and the strict raw-slot coercers."
+  "True when V is a box carrying a GENUINE dualvar: its numeric half was set
+   INDEPENDENTLY of its string half ($!, Scalar::Util::dualvar).  That is a
+   fact of the REPRESENTATION -- the :DUAL marker on NV-OK, written only by
+   p-errno-string, p-dualvar and the two dualvar copiers -- and this is its one
+   reading.  Shared definition for Scalar::Util::isdual, the strict raw-slot
+   coercers, the sub-frame copy and the raw-element storage rule.
+
+   IT USED TO BE AN INFERENCE (\"both caches valid and numifying the string
+   does not give the numeric\") and that was wrong in both directions: perl's
+   %.15g rendering of a double does not round-trip to the same double, so every
+   warm float looked like a dualvar (and %p-dualvar-copy then wrote the box's
+   RAW value into the string cache -- a whole-program crash in
+   sprintf-apply-width, #1230/#1245), while a real dualvar whose halves happen
+   to agree numerically (dualvar(0,\"abc\"), dualvar(5,\"5abc\")) looked
+   ordinary."
   (and (p-box-p v)
-       (p-box-sv-ok v)
-       (p-box-nv-ok v)
-       (let ((n (ignore-errors (to-number (p-box-sv v)))))
-         (and n (/= (p-box-nv v) n)))))
+       (eq (p-box-nv-ok v) :dual)))
 
 (declaim (inline %pcl-raw-freeze-unsafe-p))
 (defun %pcl-raw-freeze-unsafe-p (v)
@@ -6155,10 +6178,19 @@
 
 (defun %p-dualvar-copy (item)
   "Fresh box copying a genuine dualvar ITEM, keeping both its numeric and string
-   halves (a bare make-p-box around its string value would drop the numeric)."
-  (let ((s (p-box-value item))
+   halves (a bare make-p-box around its string value would drop the numeric)
+   AND its :DUAL marker, so the copy is still a dualvar to %pcl-dualvar-p.
+
+   The string half is ITEM'S SV CACHE, not its raw value: they coincide for a
+   dualvar built by p-dualvar / p-errno-string, and the raw value was what put
+   a DOUBLE into a slot every to-string reads (#1230).  The box invariant is
+   `sv-ok implies sv is a string', and this is the one writer that ever broke
+   it, so it DIES naming the value rather than store one (rule 12)."
+  (let ((s (p-box-sv item))
         (nb (make-p-box (p-box-value item))))
-    (setf (p-box-nv nb) (p-box-nv item) (p-box-nv-ok nb) t
+    (unless (stringp s)
+      (error "PCL internal: dualvar box's string cache is not a string: ~S" s))
+    (setf (p-box-nv nb) (p-box-nv item) (p-box-nv-ok nb) :dual
           (p-box-sv nb) s (p-box-sv-ok nb) t)
     nb))
 
@@ -6365,7 +6397,7 @@ per element."
           ;; with no cached numeric half (so not a dualvar, which needs both).
           ;; This is the overwhelmingly common element and it reaches the same
           ;; `(make-p-box inner)` as the final arm; before, it walked eight type
-          ;; tests plus a call to %p-dualvar-box-p to get there.  It pays for
+          ;; tests plus a call to %pcl-dualvar-p to get there.  It pays for
           ;; itself now that a slice / `values` hands out BOXES rather than raw
           ;; scalars (#818) and this walk therefore runs where it used to be
           ;; skipped by the outer p-box-p test.
@@ -6402,7 +6434,7 @@ per element."
                (p-regex-match-p inner))
            (%p-vpush (make-p-box inner) arr))
           ;; Dualvar ($!/Scalar::Util::dualvar): copy keeping both halves.
-          ((%p-dualvar-box-p item)
+          ((%pcl-dualvar-p item)
            (%p-vpush (%p-dualvar-copy item) arr))
           ;; Plain scalar box: copy into new box
           (t (%p-vpush (make-p-box inner) arr))))
@@ -6436,7 +6468,7 @@ per element."
     ((and (p-box-p v) (p-box-is-ref v))
      (make-p-box v))
     ;; Dualvar ($!/Scalar::Util::dualvar): keep both numeric and string halves.
-    ((%p-dualvar-box-p v)
+    ((%pcl-dualvar-p v)
      (%p-dualvar-copy v))
     (t
      (let ((b (make-p-box (unbox v))))
@@ -6966,18 +6998,6 @@ per element."
 ;; Flatten a Perl-style value (vector/list/hash/scalar) to a flat vector
 ;; for use in list-assignment RHS. Hash tables expand to key-value pairs;
 ;; nested vectors are flattened (like p-array-= does).
-(defun %p-dualvar-box-p (box)
-  "True when BOX is a genuine dualvar: an explicit numeric value (nv-ok) sitting
-   alongside a STRING primary value whose own numification differs from that
-   numeric (e.g. $! errno, Scalar::Util::dualvar).  Such a box must stay intact
-   when an array/hash/list would otherwise unbox it to a single scalar value —
-   unboxing to the string drops the numeric half, and vice-versa.  A plain
-   numified string ('5' carrying a cached nv of 5.0) is NOT a dualvar."
-  (and (p-box-p box)
-       (p-box-nv-ok box)
-       (stringp (p-box-value box))
-       (/= (p-box-nv box) (parse-perl-number (p-box-value box)))))
-
 (defun %p-container-snapshot (item inner)
   "A FRESH box holding INNER with ITEM's CONTAINER flags — the snapshot for an
    RHS element whose payload cannot be reduced to a bare value because facts
@@ -6991,7 +7011,9 @@ per element."
                          :class (p-box-class item)
                          :is-ref (p-box-is-ref item))))
     (when (p-box-nv-ok item)
-      (setf (p-box-nv nb) (p-box-nv item) (p-box-nv-ok nb) t))
+      ;; the FLAG travels: a dualvar's snapshot is still a dualvar (:dual),
+      ;; a merely cache-warm box's is still merely cache-warm (t).
+      (setf (p-box-nv nb) (p-box-nv item) (p-box-nv-ok nb) (p-box-nv-ok item)))
     (when (p-box-sv-ok item)
       (setf (p-box-sv nb) (p-box-sv item) (p-box-sv-ok nb) t))
     nb))
@@ -7038,7 +7060,7 @@ per element."
                (and (vectorp inner) (not (stringp inner)))  ; array ref
                (hash-table-p inner)                          ; hash ref
                (p-typeglob-p inner)
-               (%p-dualvar-box-p item))                      ; $!/dualvar
+               (%pcl-dualvar-p item))                      ; $!/dualvar
            (if (and keep-container (not (p-box-is-ref item)))
                item
                (%p-container-snapshot item inner)))
@@ -9718,7 +9740,7 @@ per element."
    RAW SLOT FAST ARM (s458ak): since the boxed-aggregates flip a slot most
    often holds a bare number or string, and for those the general walk below
    provably ends at its last arm — a number/string is not a vector-that-is-not-
-   a-string, not a hash table, not a function, not a box, and %p-dualvar-box-p
+   a-string, not a hash table, not a function, not a box, and %pcl-dualvar-p
    and p-typeglob-p both answer NIL for a non-box — so it returns V, which IS
    ELEM.  Answering that up front skips two full calls per element read
    (measured 3.1 % of the `arrhash` row)."
@@ -9739,7 +9761,7 @@ per element."
                 ;; hand back a bare glob (#423).  A glob VALUE element has no
                 ;; flag and unboxes as before.
                 (and (p-typeglob-p v) (p-box-p elem) (p-box-is-ref elem))
-                (%p-dualvar-box-p elem))               ; $!/dualvar: keep both halves
+                (%pcl-dualvar-p elem))               ; $!/dualvar: keep both halves
             elem   ; reference or dualvar: return the box so both halves survive
             v))))  ; scalar: return unboxed value
 
@@ -9757,7 +9779,7 @@ per element."
 
    RAW SLOT FAST ARM (s458ak), the twin of p-aref-unbox-elem's: a bare number
    or string reaches the general walk's last arm and comes back unchanged —
-   it is not a box (so neither the class test nor %p-dualvar-box-p can fire),
+   it is not a box (so neither the class test nor %pcl-dualvar-p can fire),
    not a hash table, and not a non-string vector."
   (when (or (numberp elem) (stringp elem))
     (return-from %p-hash-unbox-elem elem))
@@ -9769,7 +9791,7 @@ per element."
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
                 (and (vectorp v) (not (stringp v)))       ; array-ref
-                (%p-dualvar-box-p elem))                  ; $!/dualvar: keep both halves
+                (%pcl-dualvar-p elem))                  ; $!/dualvar: keep both halves
             elem   ; keep box: box-set would convert these to count/length
             v))))
 

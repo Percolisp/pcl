@@ -60,9 +60,4 @@
 308-io	1246	a failed `open($a[0], ...)` does not autovivify the array element's handle
 309-io	1246	a failed `open($h{k}, ...)` does not autovivify the hash element's handle
 329-string-eval	1244	`eval q{last}` inside a loop does not reach the loop
-335-string-eval	1245	printf "%-8s" of a RAW double raised by p-eval: SBCL type-error (crash)
-337-string-eval	1245	printf "%-8s" of a RAW double raised by p-eval: SBCL type-error (crash)
-338-string-eval	1245	printf "%-8s" of a RAW double raised by p-eval: SBCL type-error (crash)
-342-string-eval	1245	printf "%-8s" of a RAW double raised by p-eval: SBCL type-error (crash)
-343-string-eval	1245	printf "%-8s" of a RAW double raised by p-eval: SBCL type-error (crash)
 345-tie	155	`tie %h` is not implemented — the container is left untied (the runtime announces it)

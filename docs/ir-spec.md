@@ -935,6 +935,34 @@ integers print exactly; floats print in Perl's `%.15g`-equivalent shortest
 form (`0.5` not `0.5d0`; integral floats print without `.0`); references →
 `"TYPE(0xADDR)"`; blessed references → `"Class=TYPE(0xADDR)"`.
 
+### 3.2a A dualvar is a FACT of the representation, never an inference (normative, s473d)
+
+A **dualvar** is a scalar whose numeric and string halves were set
+INDEPENDENTLY — `Scalar::Util::dualvar(N, S)` and `$!`.  Both halves survive
+every copy: a sub-frame exit (§5.3), an array/hash store, an assignment.
+
+In PCL's box that fact is CARRIED, not derived: `p-box`'s `nv-ok` slot is
+three-valued — `nil` (no cached numeric), `t` (the numeric cache is DERIVED
+from the box's own value), `:dual` (the numeric half is independent).  Only
+the dualvar constructors and the two dualvar copiers write `:dual`, and
+`%pcl-dualvar-p` is the one reading of it.  A backend needs the same
+distinction under whatever name; **it must not reconstruct it by comparing
+the two caches**, because that comparison is wrong in both directions:
+
+* a warm float is not a dualvar, but perl's `%.15g` rendering of a double
+  does not round-trip to the same double (`0.333333333333333` parses back to
+  a value one ULP-family away from `1/3`), so every stringified float looks
+  independent;
+* `dualvar(0, "abc")` and `dualvar(5, "5abc")` ARE dualvars, and their halves
+  agree numerically, so they look ordinary.
+
+The companion invariant: **when a box's string cache is valid, it holds a
+STRING.**  The one writer that could break it (the dualvar copier, which used
+to copy the box's raw VALUE into the string slot) dies naming the value rather
+than store one — the reader side, `to-string`, promises a string to every
+consumer, and a double reaching `sprintf`'s width padding killed whole
+programs (#1230/#1245).
+
 ### 3.2b Interpolation extent — which text belongs to a `$`/`@` reference inside a dq string, regex or heredoc (normative, s426)
 
 ONE reader decides it — `Pl/InterpScan.pm` (`scan_one`), consumed by the
