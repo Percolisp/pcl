@@ -59,7 +59,7 @@ successor.
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470, s473t3 1471–1500, #1501 = the companion triage (s473t4), #1502–#1504 = the board work, s1061 1505–1512, #1513–#1514 filed s474b, s473r 1515–1524 (used 1515–1518; s473r bumped NO gen — v2-1030 is free for s473b), #1525 filed by s1061, #1526 filed s475; s473a used 1339–1341**.  Next free after these: **1527** (#1526 = the element-access predicate filler, filed s475).
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470, s473t3 1471–1500, #1501 = the companion triage (s473t4), #1502–#1504 = the board work, s1061 1505–1512, #1513–#1514 filed s474b, s473r 1515–1524 (used 1515–1518; s473r bumped NO gen — v2-1030 is free for s473b), #1525 filed by s1061, #1526 filed s475; s473a used 1339–1341; #1527 filed s476**.  Next free after these: **1528** (#1526 = the element-access predicate filler, filed s475; #1527 = USER ask s476: the `methret` + `moo-objs` rows join the README speed table at its next quiet-box refresh, so method-call speed stays visible — a visibility edit riding the board commit).
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script
