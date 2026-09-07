@@ -87,7 +87,7 @@ read-only `grep { $_ > 0 } @a` anywhere in a file costs `for my $x (@a)`
 **30.6 %** (0.2872 → 0.1992 s) at EVERY site, because #1409 made a single bare
 array take the `:arrays t` run.  PROMOTED with its design and left open.
 
-Bars, both commits: gate **220 files / 7658 rows** (only the 13 pclxs xs
+Bars, both commits: gate **220 files / 7662 rows** (on the rebased tree; 7658 before main`s own +4) (only the 13 pclxs xs
 rows); full sweep `--jobs 4` twice, GATE clean, **TOTAL passing 18674 (+0)**,
 0 new / 0 fixed / 0 LOST, drops 5 = census; ir-conform 289/0/56/0 twice;
 ir-host-leak's symbol set identical to the base both times; companion
