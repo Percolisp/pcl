@@ -89,7 +89,7 @@ perl-tests/dor.t	2	UNEXPLAINED
 perl-tests/each.t	14	UNEXPLAINED
 perl-tests/eval.t	9	s473t1: ZERO rows lost vs perl.  6 = STALE PLAN (plan(tests => 169); the `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}` block is commented out, real perl runs 163 -- task #1438) + 2 registered skips + 1 UNNUMBERED TAP line (eval.t:48 `print try 'print "ok $curr_test\n";'` with an empty variable -- real perl emits the same bare `ok ` and neither counter can count it).
 perl-tests/exp.t	1	UNEXPLAINED
-perl-tests/for.t	1	UNEXPLAINED
+perl-tests/for.t	2	s473b (#1010): the SECOND row is for.t:563, perls OWN `TODO: { local $TODO = "RT #2166: foreach spuriously autovivifies"; my %h; foreach (@h{q(a),q(b)}) {}; is keys(%h), 0 }` -- perl FAILS it (that is why it is TODO), and since #1010 PCL fails it too, so the row is `not ok # TODO`: neither a pass nor a fail, hence a shortfall.  It counted as a PASS before only because PCL diverged from perl here.  Fixing it would mean UN-fixing #1010
 perl-tests/grep.t	6	UNEXPLAINED
 perl-tests/hexfp.t	4	UNEXPLAINED
 perl-tests/infnan.t	6	UNEXPLAINED

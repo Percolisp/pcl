@@ -1,4 +1,14 @@
 # taken-at: 5323d9e 2026-08-15
+# s473b (2026-09-07, #1010, edited ROW BY ROW): for.t OK 131 -> 130 (-1).
+#   for.t:559-564 is perl's OWN `TODO: { local $TODO = "RT #2166: foreach
+#   spuriously autovivifies"; my %h; foreach (@h{a,b}) {}; is keys(%h), 0 }`.
+#   perl FAILS that assertion -- that is WHY perl marks it TODO -- and PCL
+#   passed it only because PCL did not vivify a slice in an aliasing consumer.
+#   #1010 fixed that, so PCL now answers as perl does and the row is
+#   `not ok 104 # TODO`: an EXPECTED failure, neither pass nor fail, which is
+#   why it also moves row-shortfall.tsv perl-tests/for.t 1 -> 2.  Re-passing it
+#   would mean UN-fixing #1010; the whole file is otherwise unchanged (TAP
+#   diffed row by row against the 782bc37e extraction: this is the ONLY line).
 # s473t1 (2026-09-07, the 13 early-stop triage, edited ROW BY ROW): THREE files
 #   leave PARTIAL, TOTAL 18649 -> 18674 (+25).
 #   caller.t   PARTIAL 15+49/112 -> OK 26+85/112 (+11 pass).  #1432:
@@ -350,7 +360,7 @@ eval.t	PARTIAL	129	31	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14
-for.t	OK	131	0	132
+for.t	OK	130	0	132
 grent.t	OK	3	0	3
 grep.t	OK	71	0	77
 hash.t	OK	7	7	14
