@@ -206,14 +206,33 @@ PCL_OPT=-raw-numeric,-str-buffer ./runpcl x.pl   # named ones off (PCL_NO_RAW_VE
 
 # INSTALL PCL onto a machine (task #277, release phase 1).  The runtime and its
 # saved core are COMPILED AT INSTALL — the XS model, never at first use.
-# Copies the runtime tree (pl2cl, runpcl, Pl/, lib/, cl/, tools/lib/) in its
-# repo-RELATIVE shape (the lookups depend on it), writes bin/ wrappers, builds
-# <root>/pcl.core, and refuses to finish unless the INSTALLED tools transpile
-# and run a program.  PCLSbcl picks the installed core up automatically; a
-# checkout has none, so development runners are unaffected.
+# Copies the runtime tree (pcl, pl2cl, runpcl, Pl/, lib/, cl/, tools/lib/) in
+# its repo-RELATIVE shape (the lookups depend on it), writes bin/ wrappers,
+# builds <root>/pcl.core, writes <root>/VERSION (what `pcl --version` reads on
+# an installed tree), and refuses to finish unless the INSTALLED tools
+# transpile and run a program.  PCLSbcl picks the installed core up
+# automatically; a checkout has none, so development runners are unaffected.
+# EVERY script finds its tree through the ONE resolver PCLPaths::root (#1302):
+# $PCL_ROOT when set, else the caller's own real directory or its parent,
+# VERIFIED by cl/pcl-runtime.lisp being there — guard Pl/t/pcl-root-01.t.
 tools/install-pcl --prefix ~/.local      # default prefix is $HOME/.local
 tools/install-pcl --no-core --dry-run    # what it would do; no core build
+tools/install-pcl --uninstall --prefix ~/.local   # removes the tree + its wrappers
 prove tools/t/install-pcl.t              # its end-to-end test (not in the gate)
+
+# THE INSTALLER IN A CONTAINER (task #1304): the same recipe the CI install
+# matrix runs, locally, plus the two shapes the matrix cannot reach — a
+# NON-ROOT user installing into $HOME/.local, and a SHARED install under
+# /opt/pcl whose users each get their own module cache.  Run it before a tag
+# and after any change to tools/install-pcl or tools/install-matrix/*.  It
+# probes `podman` then `docker` and plan-skips cleanly when neither answers,
+# so CI runners without a socket are fine.  The base image (ubuntu:24.04 +
+# tools/install-matrix/deps.sh) is tagged by a hash of deps.sh + SBCL_VERSION
+# and REUSED, so the first run pays the download and later ones do not.  The
+# repo enters as a `git archive HEAD` extraction bind-mounted read-only —
+# uncommitted work is NOT what it tests, and it says so.
+prove tools/t/install-container.t        # minutes; never in the gate
+PCL_INSTALL_CONTAINER_SKIP=1 prove tools/t/install-container.t   # skip it
 
 # XS: build a distribution for PCL and put it where XSLoader::load looks.
 # Compile happens HERE, at install time, like perl — not at first use.
