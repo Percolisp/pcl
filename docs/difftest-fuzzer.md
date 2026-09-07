@@ -47,7 +47,8 @@ RESULT: 1060 valid snippets, 1056 match, 4 MISMATCH in 2 clusters
 ```
 
 - the three `**` rows are one cause: perl's `**` is always an NV, PCL's is an
-  exact bignum — not-supported.md §`**` returns an exact integer, user-parked.
+  exact bignum — not-supported.md §Integers are unbounded: PCL has no 64-bit boundary
+  (the folded home of the old §`**` returns an exact integer heading), user-parked.
 - `() = split` is the implicit LHS-arity `LIMIT` — not-supported.md §`split`
   implicit LHS-arity limit.  (`() = @list` counts 3 on both sides; only a
   *directly assigned* `split` differs.)

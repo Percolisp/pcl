@@ -107,8 +107,8 @@ blocks.t	15	UNITCHECK{die} should exit	'begin end Died at - line 1.'	\Abegin\nDi
 bop.t	144		'0'	'1'	NS:`use bytes` - byte view of upgraded strings
 bop.t	158	    and turns off the UTF-8 flag			NS:`use bytes` - byte view of upgraded strings
 bop.t	463	correct error	''	no method found	#972 (DECIDED s463f: the three prerequisites of #960(a))
-bop.t	481	neg UV (sic) left shift  = 0xFF..E	'-2'	'18446744073709551614'	NS:`use integer` - large shift / overflow edge cases + CATALOG bop.t "Large shift"
-bop.t	482	neg UV (sic) right shift = 0x7F..F	'-1'	'9223372036854775807'	NS:`use integer` - large shift / overflow edge cases + CATALOG bop.t "Large shift"
+bop.t	481	neg UV (sic) left shift  = 0xFF..E	'-2'	'18446744073709551614'	NS:Integers are unbounded: PCL has no 64-bit boundary (folds the old `use integer` - large shift entry, s473a) + CATALOG bop.t "Large shift"
+bop.t	482	neg UV (sic) right shift = 0x7F..F	'-1'	'9223372036854775807'	NS:Integers are unbounded: PCL has no 64-bit boundary (folds the old `use integer` - large shift entry, s473a) + CATALOG bop.t "Large shift"
 bop.t	227	no duplicate warnings	'0'	'10'	#221 (NS:Warnings-gated diagnostics are absent)
 bop.t	27	str var & const str	'0'	'# '	#1028 (bitwise ops numify a ref/glob/qr//object/undef operand)
 bop.t	28	str var & const str again	'0'	'# '	#1028 (bitwise ops numify a ref/glob/qr//object/undef operand)

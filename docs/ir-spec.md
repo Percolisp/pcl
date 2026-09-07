@@ -579,9 +579,22 @@ with the value. The *identity* of an object is the underlying
 hash/array/referent — two references to it share blessing.
 
 Strings are host Unicode strings (character, not byte, semantics — see
-`docs/not-supported.md` §Unicode for divergences). Numbers are host
-integers (arbitrary precision) and IEEE doubles; `*read-default-float-format*`
-is double-float, i.e. every float literal in the output is a double.
+`docs/not-supported.md` §Unicode for divergences).
+
+**The numeric model (normative, s473a).**  A number in the IR is either a
+host **integer of arbitrary precision** or an IEEE **double**;
+`*read-default-float-format*` is double-float, i.e. every float literal in
+the output is a double.  There is **no IV/UV distinction and no 64-bit
+boundary**: an integer operation whose result leaves perl's 64-bit range
+stays an exact integer instead of promoting to a double, a `use integer`
+region truncates division but never wraps, and `%u`/`%d` in `p-sprintf`
+never clamp or reinterpret at UV_MAX/IV_MIN.  A consumer that must
+reproduce perl's boundary has to add all three at once — promote at the
+operator, wrap the region, clamp the conversion — and give PCL's own
+exact-power callers (`cl/pack-impl.pl`, `lib/Math/BigInt/Calc.pm`) a
+separate integer-power helper.  The divergence is deliberate, USER-ruled
+2026-09-07: `docs/not-supported.md` §Integers are unbounded: PCL has no
+64-bit boundary (revisit pointer, task #1513).
 
 ## 2b. Declarations, scoping, and the rename families
 

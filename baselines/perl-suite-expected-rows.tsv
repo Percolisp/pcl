@@ -815,6 +815,7 @@ op/not.t	!0 returns the same value each time [perl \#114838]
 op/not.t	!1 returns the same value each time [perl \#114838]
 op/not.t	not 0 is read-only
 op/not.t	not 1 is read-only
+op/numconvert.t	*summary*
 op/numify.t	numifying '+ inf' trigger a warning
 op/numify.t	numifying '++4' trigger a warning
 op/numify.t	numifying '+-inf' trigger a warning
