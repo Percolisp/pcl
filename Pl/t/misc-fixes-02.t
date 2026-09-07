@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 127;
+plan tests => 129;
 
 sub run_cl {
     my ($code) = @_;
@@ -1281,3 +1281,34 @@ test_cl('#982 the small-fixnum table boundary',
      print join("|", sort { $a <=> $b } keys %g), "\n";',
     "0|1|1021|1022|1023|1024|1025|4095|4096|-1|-1023|-1024\n"
   . "-1024|-1023|-1|0|1|1021|1022|1023|1024|1025|4095|4096\n");
+
+# ---------------------------------------------------------------------------
+# #1505 (s1061): `import Foo::Bar;` emitted a BARE package designator.
+#
+# The "import PACKAGE" sugar lowers to (funcall (intern "PL-IMPORT" :PKG)), and
+# that :PKG was interpolated raw — so a MULTI-SEGMENT name produced
+# `:threads::shared`, which is not a CL token ("too many colons in threads")
+# and made the WHOLE emitted file unreadable, losing every row of it.
+# Pl::Parser::_cl_pkg_designator is the single source of truth for that
+# spelling (every in-package / p-defpackage / runtime package reference already
+# goes through it); this site was the one that bypassed it.
+# Found by bisecting the CPAN board's Scalar-List-Utils t/dualvar.t row
+# (PARTIAL 14/2 -> FAIL 0/0): the file always carried the bad token, and s436's
+# phase model (b95ad912) merely moved the BEGIN that holds it ahead of the 16
+# rows that used to run before the reader reached it.
+my $import_pkg_pl = <<'PL';
+package My::Mod;
+sub import { print "imported\n" }
+package main;
+BEGIN {
+  $INC{'My/Mod.pm'} = 1;
+  require My::Mod; import My::Mod;
+}
+print "after\n";
+PL
+
+like(transpile_to_cl($import_pkg_pl), qr/\(intern "PL-IMPORT" :\|My::Mod\|\)/,
+     '#1505 a multi-segment package designator is pipe-quoted');
+
+test_cl('#1505 `import Foo::Bar` in a BEGIN: the file reads and the import runs',
+        $import_pkg_pl, "imported\nafter\n");

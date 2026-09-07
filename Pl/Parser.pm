@@ -2441,8 +2441,15 @@ sub _process_expression_statement {
       && ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'import'
       && ref($parts[1]) eq 'PPI::Token::Word') {
     my $pkg = $parts[1]->content;
+    # The package designator goes through the ONE spelling rule
+    # (_cl_pkg_designator / Pl::CLForm::cl_pkg), like every other emitted
+    # package reference: `import threads::shared` used to emit the bare
+    # `:threads::shared`, which is not a CL token ("too many colons") and made
+    # the WHOLE emitted file unreadable — Scalar-List-Utils t/dualvar.t lost
+    # all 16 of its rows to it (#1505).
+    my $pkg_desig = $self->_cl_pkg_designator($pkg);
     $self->_emit(";; $perl_code");
-    $self->_emit("(funcall (intern \"PL-IMPORT\" :$pkg))");
+    $self->_emit("(funcall (intern \"PL-IMPORT\" $pkg_desig))");
     $self->_emit("");
     return;
   }
