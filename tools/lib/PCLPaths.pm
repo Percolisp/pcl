@@ -21,12 +21,17 @@ package PCLPaths;
 #   reading of $PCL_CACHE_DIR (task #1303): `pcl`, tools/lib/PCLSbcl.pm and
 #   Pl/ProtoCache.pm had three copies of the expression and the runtime had a
 #   fourth that was evaluated at CORE-BUILD time, i.e. the wrong process.
+#
+#   root — the PCL tree a running script belongs to.  THE one derivation
+#   (task #1302): there were FIVE spellings, and they agreed only because
+#   every caller happened to sit at the checkout root or one level under it.
 use strict;
 use warnings;
 use Config;
+use Cwd ();
 use File::Basename qw(dirname);
 use Exporter 'import';
-our @EXPORT_OK = qw(perl_suite_t cache_root);
+our @EXPORT_OK = qw(perl_suite_t cache_root root root_of);
 
 # The t/ directory of the perl BUILD tree matching the running perl.
 #   1. $PCL_PERL_SUITE_T                      — explicit, always wins
@@ -42,6 +47,96 @@ sub perl_suite_t {
     for my $c (@cand) { return $c if -d $c }
     die "PCLPaths: cannot find the t/ tree of perl $v (tried: @cand).\n"
       . "Set PCL_PERL_SUITE_T to the t/ directory of a perl-$v build tree.\n";
+}
+
+# ----------------------------------------------------------------- the root
+#
+# THE one answer to "which PCL tree am I part of" (task #1302, F5).  Before
+# this there were five spellings — `dirname(abs_path($0))` in `pcl`, a
+# `$script_dir` in `pl2cl`, `$FindBin::RealBin` in `runpcl` / the sweep /
+# `pclperl-for-tests`, `dirname(abs_path(dirname($0)))` in `tools/runt` and
+# `tools/clt`, and a regex on the runtime's path in PCLSbcl — which agreed
+# only because every caller happens to sit at the checkout root or one level
+# under it.  An INSTALLED tree (<prefix>/lib/pcl, reached through a wrapper in
+# <prefix>/bin, possibly through a symlinked bin directory) is exactly where
+# that accident stops being free.
+#
+# THE BOOTSTRAP, said out loud because it cannot be removed: a script cannot
+# ask this function anything until it has FOUND this file, which lives in the
+# tree it is asking about.  So one line per script stays — `use lib
+# "$FindBin::RealBin/tools/lib"`, or "$RealBin/lib" for a script in tools/.
+# What must not happen is a SECOND rule growing beside it: the bootstrap finds
+# tools/lib, root() answers every later question, and Pl/t/pcl-root-01.t
+# asserts the two agree for every caller.  (`pl2cl` is the one caller that
+# loads this file BY PATH rather than through @INC: its own @INC is emitted
+# into every program preamble as *p-core-inc-dirs*, so a `use lib` there would
+# change the compiler's output.)
+#
+# THE RULE, in order:
+#   1. $PCL_ROOT when set and non-empty — explicit ALWAYS wins, the same rule
+#      perl_suite_t follows.  Set but unverifiable is a DIE, never a quiet
+#      fall-back to the derived answer: an override that is silently ignored
+#      is how a run measures a tree the operator did not mean.
+#   2. otherwise the directory of the CALLER's real path (abs_path, so a
+#      symlinked bin/ entry resolves to the tree), then its PARENT — exactly
+#      two candidates, because PCL ships scripts at two depths (<root>/pcl and
+#      <root>/tools/runt).  Not a walk to /: that would answer with whatever
+#      checkout happens to be above, which is worse than dying.
+#   3. a candidate is the root only if cl/pcl-runtime.lisp is THERE.
+#   4. nothing verified: die naming every candidate tried (rule 12).
+
+sub _is_root { my ($d) = @_; return defined $d && length $d && -f "$d/cl/pcl-runtime.lisp" }
+
+# The two candidates for a caller whose real path is HINT (its $0, its
+# $FindBin::RealBin, or any file in the tree): the directory it is in, and
+# that directory's parent.
+sub _root_candidates {
+    my ($hint) = @_;
+    return () unless defined $hint && length $hint;
+    my $abs = Cwd::abs_path($hint);
+    return () unless defined $abs && length $abs;
+    my $dir = -d $abs ? $abs : dirname($abs);
+    my $up  = dirname($dir);
+    return $dir eq $up ? ($dir) : ($dir, $up);
+}
+
+# The root that OWNS a given path, or undef — the derivation only, never
+# $PCL_ROOT.  This is a different question from root(): PCLSbcl asks it about
+# a runtime file it was handed ("which install does THIS runtime belong to",
+# whose answer is where the installed pcl.core would be), and an environment
+# override naming some other tree must not answer it.  undef is a real answer
+# here — "no PCL tree above this path" means "no installed core", which is
+# what a checkout looks like — so this one does not die.
+sub root_of {
+    my ($path) = @_;
+    for my $c (_root_candidates($path)) { return $c if _is_root($c) }
+    return undef;
+}
+
+# The root of the tree the CALLER belongs to, or a die naming what was tried.
+sub root {
+    my ($hint) = @_;
+    my @tried;
+    my $env = $ENV{PCL_ROOT};
+    if (defined $env && length $env) {
+        my $r = _trim_slashes($env);
+        return $r if _is_root($r);
+        push @tried, "$r  (\$PCL_ROOT)";
+    }
+    else {
+        for my $c (_root_candidates($hint)) {
+            return $c if _is_root($c);
+            push @tried, "$c  (derived from " . (defined $hint ? $hint : '(nothing)') . ")";
+        }
+    }
+    # An unusable $PCL_ROOT reports what the derivation WOULD have said, so the
+    # two candidates are on the screen side by side.
+    push @tried, map { "$_  (would have been derived from " . (defined $hint ? $hint : '(nothing)') . ")" }
+                 _root_candidates($hint)
+        if defined $env && length $env;
+    die "PCLPaths: cannot find the PCL tree (no cl/pcl-runtime.lisp in any candidate).\n"
+      . join('', map { "    tried: $_\n" } @tried)
+      . "Set PCL_ROOT to the root of a PCL checkout or installation.\n";
 }
 
 # ---------------------------------------------------------------- cache root

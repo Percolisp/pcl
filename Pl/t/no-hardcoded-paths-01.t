@@ -51,7 +51,10 @@ my $HOME_PATH = qr{/(?:home|Users)/[A-Za-z0-9._-]+/};
 # shims, the tools (which since s471b hold runt / clt / sweep-perl-tests.pl),
 # and the runners at the repo root.
 my @DIRS  = qw(Pl tools cl lib);
-my @FILES = qw(pl2cl runpcl);
+# `pcl` joined the list in s470bz: it is not only a runner, it is one of the
+# three commands tools/install-pcl puts on a user's PATH (task #1302 (a)), so
+# it runs on machines that are not this one by definition.
+my @FILES = qw(pcl pl2cl runpcl);
 
 my (@offenders, @artifacts, $scanned);
 

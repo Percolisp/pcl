@@ -39,7 +39,10 @@ use lib "$FindBin::RealBin/tools/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344; cached core s439)
 use PCLPaths ();  # the ONE Perl-side reading of $PCL_CACHE_DIR (task #1303)
 
-my $ROOT    = dirname(abs_path($0));
+# The ONE root resolver (task #1302).  $FindBin::RealBin above is the
+# BOOTSTRAP — it finds tools/lib so that this line can run; every later path
+# derivation goes through root(), which also honours $PCL_ROOT.
+my $ROOT    = PCLPaths::root($0);
 my $PL2CL   = "$ROOT/pl2cl";
 my $RUNTIME = "$ROOT/cl/pcl-runtime.lisp";
 

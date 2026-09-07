@@ -20,8 +20,11 @@ use File::Temp qw(tempfile);
 use FindBin;
 use lib "$FindBin::RealBin/tools/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
+use PCLPaths ();  # the ONE root resolver (task #1302)
 
-my $root = abs_path(dirname($0));
+# $FindBin::RealBin above is the BOOTSTRAP (it finds tools/lib); the root
+# itself comes from the one resolver, which also honours $PCL_ROOT.
+my $root = PCLPaths::root($0);
 my $lisp = "/tmp/runpcl_$$.lisp";
 
 # Get input: file arg or stdin

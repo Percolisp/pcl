@@ -99,6 +99,28 @@ binmode(STDERR, ":utf8");
 
 # Find Pl::Parser relative to this script, not cwd
 use lib dirname(abs_path($0));
+
+# The ONE root resolver (task #1302).  tools/lib joins @INC only for the
+# duration of the require -- the same shape Pl/ProtoCache.pm's cache_dir uses,
+# and for the same reason twice over:
+#   * this script's @INC is EMITTED into every program preamble
+#     (*p-core-inc-dirs*, so that code replacing @INC still resolves core
+#     modules), so a permanent `use lib "<root>/tools/lib"` here would change
+#     the compiler's OUTPUT;
+#   * `local @INC` keeps %INC keyed "PCLPaths.pm", so the `require PCLPaths`
+#     in Pl/ProtoCache.pm and tools/lib/PCLSbcl.pm finds it already loaded.
+#     Requiring it by ABSOLUTE PATH instead keys %INC on the path, the sibling
+#     requires read the file a SECOND time, and every sub is redefined -- ten
+#     warnings on the stderr of EVERY transpile, which broke five gate files
+#     (measured, s470bz).
+# The `use lib` above is the bootstrap that finds the tree; $ROOT is what every
+# later derivation in this file uses, and it honours $PCL_ROOT.
+BEGIN {
+  local @INC = (@INC, dirname(abs_path($0)) . '/tools/lib');
+  require PCLPaths;
+}
+my $ROOT = PCLPaths::root($0);
+
 use Pl::Parser;
 use Pl::CLForm ();   # build_eval_preamble's designator rule (cl_pkg) — rule 11
 use Pl::ProtoCache ();  # the ONE reader of *pcl-cache-generation* (task #560)
@@ -353,7 +375,7 @@ sub build_preamble {
   push @lines, "(vector-push-extend \".\" pcl::\@INC)";
 
   # Add PCL's lib/ directory (for our stub modules like Config.pm)
-  my $pcl_lib = dirname($script_path) . "/lib";
+  my $pcl_lib = "$ROOT/lib";
   if (-d $pcl_lib) {
     push @lines, "(vector-push-extend \"$pcl_lib\" pcl::\@INC)";
   }
@@ -491,8 +513,7 @@ sub _run_server {
 
 # Get runtime content for bundling
 sub get_runtime_content {
-  my $script_dir = dirname(abs_path($0));
-  my $runtime_path = "$script_dir/cl/pcl-runtime.lisp";
+  my $runtime_path = "$ROOT/cl/pcl-runtime.lisp";
 
   open my $fh, '<', $runtime_path
     or die "Cannot read runtime: $runtime_path: $!";

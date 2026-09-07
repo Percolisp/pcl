@@ -32,6 +32,7 @@ use POSIX qw(:sys_wait_h _exit);
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
+use PCLPaths ();  # the ONE root resolver (task #1302)
 use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + reaping (#367)
 
 my $JOBS    = 8;
@@ -56,7 +57,9 @@ while (@ARGV) {
 }
 my $full_sweep = @test_files ? 0 : 1;   # no file arguments = the whole corpus
 
-my $project_root = dirname($FindBin::RealBin);   # the script lives in <root>/tools/
+# `use lib "$FindBin::RealBin/lib"` above is the BOOTSTRAP; the root itself
+# comes from the one resolver (task #1302), which also honours $PCL_ROOT.
+my $project_root = PCLPaths::root($FindBin::RealBin);
 my $pl2cl      = "$project_root/pl2cl";
 my $runtime    = "$project_root/cl/pcl-runtime.lisp";
 my $testlib    = "$project_root/cl/pcl-test.lisp";

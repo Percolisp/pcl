@@ -32,9 +32,15 @@ use warnings;
 use File::Temp qw(tempdir);
 use FindBin qw($RealBin);
 use lib "$RealBin/../Pl/t";
+use lib "$RealBin/lib";
 use PCLCore;
+use PCLPaths ();   # the ONE root resolver (task #1302)
 
-my $root    = "$RealBin/..";
+# The two `use lib` lines above are the BOOTSTRAP; the root itself comes from
+# the one resolver, which also honours $PCL_ROOT.  It answers with the
+# CANONICAL path, where this used to spell it "$RealBin/.." — the same
+# directory, and the one every other runner names.
+my $root    = PCLPaths::root($RealBin);
 my $pl2cl   = "$root/pl2cl";
 my $runtime = "$root/cl/pcl-runtime.lisp";
 

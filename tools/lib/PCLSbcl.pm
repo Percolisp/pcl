@@ -92,14 +92,20 @@ sub sbcl_prefix {
 }
 
 # <root>/pcl.core for an INSTALLED tree, whose shape is <root>/cl/<runtime>.
-# The `/cl/` in the pattern is deliberate: matching on "two directories up"
-# would make the answer depend on whatever happens to sit beside an arbitrary
-# caller's runtime path, which is exactly the kind of accidental coupling the
-# one-command-line-builder exists to prevent.
+# The root comes from PCLPaths::root_of — the ONE root derivation (task
+# #1302), which was a fifth hand-written spelling here (a `(.*)/cl/[^/]+`
+# regex).  root_of asks the question this call means: "which PCL tree owns
+# THIS runtime file", verified by cl/pcl-runtime.lisp actually being there,
+# and deliberately NOT consulting $PCL_ROOT — an override naming some other
+# tree must not decide where a handed-in runtime's core lives.  undef is a
+# real answer: it is what a checkout (no pcl.core) looks like.
 sub _installed_core {
     my ($runtime) = @_;
-    return undef unless defined $runtime && $runtime =~ m{\A(.*)/cl/[^/]+\z};
-    my $core = "$1/pcl.core";
+    return undef unless defined $runtime && length $runtime;
+    require PCLPaths;
+    my $root = PCLPaths::root_of($runtime);
+    return undef unless defined $root;
+    my $core = "$root/pcl.core";
     return (-f $core && _fresh($core, $runtime)) ? $core : undef;
 }
 

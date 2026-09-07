@@ -15,11 +15,16 @@ use strict;
 use warnings;
 use File::Basename qw(dirname);
 use Cwd qw(abs_path);
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+use PCLPaths ();   # the ONE root resolver (task #1302)
 
 my $name = shift or die "Usage: $0 <test-name>\n";
 $name =~ s/\.t$//;
 
-my $root  = dirname(abs_path(dirname($0)));   # the script lives in <root>/tools/
+# `use lib "$RealBin/lib"` is the BOOTSTRAP (this script lives in <root>/tools/);
+# the root itself comes from the one resolver, which also honours $PCL_ROOT.
+my $root  = PCLPaths::root($RealBin);
 my $lisp  = "/tmp/$name.lisp";
 my $tests = "$root/perl-tests";
 
