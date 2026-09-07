@@ -2,6 +2,92 @@
 
 Append new entries at the top. One section per session.
 
+## Session 473r (Opus agent, 2026-09-07) — perf round 31: `int()`/`/` stop paying for a call and a ratio, and the package preamble stops re-running (moo-objs 54× perl → 29.6×); #986 solved, three levers closed with numbers
+
+**Two levers shipped, both RUNTIME-ONLY** (no emission change, no generation
+bump, corpus untouched), and **four members closed with measurements instead
+of code**.
+
+**#1514 — where the 68 ns go, and it is not `+`.**  The task's hypothesis was
+that a raw-numeric slot's arithmetic misses a fixnum fast path.  Hand-
+replacement of one form at a time in the emitted `.lisp` (ab-lisp.pl, one
+core, interleaved, best-of-5, 3e6 iterations of `$s = ($s*3 + int($i/7)) %
+1000003`, base 50 ns/iteration) says otherwise: replacing `p-+`/`p-*` with CL
+`+`/`*` moves the row **+0.8 %** — they were already open-coded.  The 50 ns
+was in the three ops no bench row contained: `p-int` −19.6 %, `p-/` −15.7 %,
+`p-%` −6.7 %, and the `int($i/7)` PAIR −50.4 %.  Two fixes: `p-int` becomes a
+typecase whose INTEGER and DOUBLE-FLOAT arms are inline at the call site
+(it was one full call with `to-number`'s typecase in front), and
+`%p-divide-numbers` stops building a RATIO — inside `(signed-byte 53)` both
+operands are exactly representable, so one `truncate` plus an IEEE divide
+gives the identical double, bit for bit (verified over 14 007 pairs); outside
+it the old exact-rational body stands in `%p-divide-general`.  **arith 0.1109
+→ 0.0515 s, useint 0.1262 → 0.0300 s, collatz 0.5305 → 0.4005 s**, A/perl
+0.28× / 0.26× / 0.18×.  New bench rows `arith` and `useint`.
+**#1514 half (a) is CLOSED BY THAT MEASUREMENT**: `use integer` was 1.5×
+SLOWER than the same loop without the pragma and is now 1.7× FASTER, so the
+`int-region-raw` emission it proposed is not needed at all — the pragma's
+pessimisation was p-int's CALL cost, not the wrapping.
+
+**#1189 — the moo-objs breakdown, and the biggest ratio in the yardstick
+comes down by a third.**  The instrument is the honest one the task named:
+profile at N and 2N with Moo pre-loaded and SUBTRACT per function, so the
+module load and the 16 % that is SBCL compiling both cancel.  The table is not
+object work: `list-all-packages` under a system mutex 14.8 %,
+`call-with-ensure-class-context` 24.4 % TOTAL, `update-package-with-variance`
+14.8 %, and the program's own subs 1.5 %.  **Counted, not inferred** — with
+`sb-int:encapsulate` on the four entry points at two N: **12 `defpackage` and
+12 `ensure-class` per loop iteration**, ten of each for
+`Method::Generate::Accessor::_Generated`, Moo's Sub::Quote eval package.  The
+cause is that every emitted program opens with the package preamble for the
+packages it mentions — and the program a STRING EVAL produces is an emitted
+program.  `p-defpackage` now runs CL's `defpackage` only when
+`%p-package-ready-p` says the package is not already there **with `(:use :cl
+:pcl)`** — the use-list and not mere existence, because a perl `package CL;`
+names something that exists for another reason and must still get its
+use-list.  **moo-objs 1.9986 → 1.2193 s (B/A +63.9 %), 38.15× perl → 29.59×**,
+methret +3.1 % and json-rt −0.7 % as controls.  The other half of the same
+preamble — the literal `(defclass plc-x () ())` pl2cl writes, ~35 % of what is
+left — is **#1518**, an emission change with its guard design written down.
+
+**#986 SOLVED, and the answer is that the cost is intended.**  The record
+reproduces: a `git archive f49a34df` extraction (s458ak, the tree §0.2d was
+measured on) hits §0.2d's numbers to the fourth decimal on this box in a quiet
+window, so machine state is dead by REPRODUCTION.  Today's tree is +17.7 % on
+`intloop+=` against it.  The task's `BENCH_RT_B` recipe cannot see the cause
+(today's emission does not run on that runtime at all), but the EMISSION for
+that row is byte-identical between the two trees, which puts the whole move in
+`p-incf-raw` — and `git log -S %compound-arith-form` answers `bfa170d9`
+(round 18, #900): perl's `+=`/`++` overload dispatch.  Sized load-robustly by
+hand-replacement: **the guard is 15.1 %** of the row, against 17.7 % observed.
+The remainder, like `cfor`'s 5.1 %, is CORE LAYOUT — a runtime built from
+bfa11c72 plus two NEVER-CALLED functions of the same size moves `cfor` −3.6 %
+and `intloop+=` −5.6 %, which is the cheap discriminator this round found and
+recommends.  DECIDED §s470 already ruled the fix stays; the residue is
+**#1516** (widen `numonly` to admit a raw loop variable).
+
+**#883's open arm re-measured and closed: its bench row is gone.**  `feread2`
+no longer reaches the flattener at all (`for my $x (@a, @b)` takes the
+`foreach-arrays` run since #1184/#1409; `grep -c p-flatten-args` on its
+emission is 0).  On the shape that does still reach it — `f(@a)`, which has no
+bench row — the cost is **8.5 ns per element** (PCL 0.17 s for 20 M elements
+against perl's 0.02 s total, since perl aliases and copies nothing), about
+half what the task recorded.  **#1517** carries the two things a fix needs
+first: the bench row, and a per-array "every element is a box" fact.
+**#813 and #924 were closed without re-measuring**, on their existing ruled
+declines.
+
+Bars, both commits: gate **220 files / 7658 rows** (only the 13 pclxs xs
+rows); full sweep `--jobs 4` twice, GATE clean, **TOTAL passing 18674 (+0)**,
+0 new / 0 fixed / 0 LOST, drops 5 = census; ir-conform 289/0/56/0 twice;
+ir-host-leak's symbol set identical to the base both times; companion
+`--jobs 1` over op/method.t op/universal.t comp/package.t comp/package_block.t
+op/eval.t op/int.t op/sub.t op/for.t op/array.t op/hash.t op/inc.t — every
+file EQUAL to its `baselines/perl-suite-run.tsv` row, ROW DIFF 0/0/0/0.
+`docs/ir-op-inventory.tsv` regenerated (p-defpackage's docstring moved; the
+gate row is what said so).  Guard `Pl/t/perf-levers-04.t`, 59 rows / 0.6 s,
+inverse-verified — 8 fail on a bfa11c72 extraction.  Filed #1515, #1516,
+#1517, #1518.
 ## Session s1061 (Opus agent, 2026-09-07) — the CPAN board's nine down-movers, each bisected to its commit; two of them were compiler bugs and are fixed
 
 **#1061 closed.**  The board is not a gate, so nothing bisects it; the nine

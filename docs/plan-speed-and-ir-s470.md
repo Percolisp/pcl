@@ -331,6 +331,51 @@ two were sized and their numbers close or retarget them.  Per entry:
   leftover noise.  Absolute interleaved times are the honest instrument for
   anything that moves a constant — and absolute seconds are the metric (§A.0).
 
+**ROUND 31's VERDICT (s473r, 2026-09-07).**  Two levers shipped, both
+RUNTIME-ONLY (no emission change, no generation bump); four members closed
+with measurements instead of code.  Per entry:
+
+* **A.4.1's `use Moo` constant is not where Moo's cost is — the LOOP is, and
+  it was the package preamble.**  `moo-objs` **1.9986 → 1.2193 s, 54× perl
+  (round 27) / 38.15× (this measurement) → 29.59×**, from one runtime guard.
+  #1189's instrument is the honest shape this section asked for: profile at N
+  and 2N with the module pre-`p-use`d and SUBTRACT per function, so the load
+  AND the 16 % compile share both cancel.  Its table is not object work —
+  `list-all-packages` under a system mutex 14.8 %, `update-package-with-
+  variance` 14.8 %, `call-with-ensure-class-context` 24.4 % TOTAL, the
+  program's own subs 1.5 % — and the cause, COUNTED with `sb-int:encapsulate`
+  at two N, is **12 `defpackage` and 12 `ensure-class` per iteration**, ten of
+  each for Moo's Sub::Quote eval package.  Every emitted program opens with
+  the package preamble, and **the program a string eval produces is an emitted
+  program**.  `p-defpackage` now skips CL's `defpackage` when the package is
+  already there with `(:use :cl :pcl)`.  The other half (`defclass`, written
+  literally by pl2cl, ~35 % of what is left) is **#1518**.
+* **Ranked-table entries #1 (`list-all-packages`), #4 (`%member-eq`), #10
+  (`sb-pcl` BRAID / `shared-initialize` / `update-ctors`) and #13
+  (`package-implements-list`) all belonged to #1189, and the package half of
+  them is now GONE.**  What is left of #10 is the `defclass` half.  Rank #11
+  (`%sxhash-string`, 4.0 %) survives and is NOT hash-key stringification in
+  this row — it is reached from the eval cache's key.
+* **A.2 row 7 (sub-call frame trimming) is NOT sized, and moo-objs is the
+  wrong row for it**: the call protocol does not appear in that row's loop
+  profile before or after the lever.  Row 7 needs `methret` or `subret`.
+* **A NEW ROW PAIR, `arith` and `useint`** (#1514), because every standing
+  microbench measured `+` alone and `+` was already free: hand-replacement
+  says `p-+`/`p-*` → CL `+`/`*` moves the row **+0.8 %**, while `int()` is
+  19.6 %, `/` 15.7 % and `%` 6.7 % of a 50 ns iteration.  Both ops fixed in
+  the runtime: **arith 0.1109 → 0.0515 s, useint 0.1262 → 0.0300 s, collatz
+  0.5305 → 0.4005 s**.  `use integer` was 1.5× SLOWER than the plain loop and
+  is now 1.7× FASTER, which CLOSES #1514's emission half unbuilt.
+* **§0.2f's drift (#986) is SOLVED and is not a lever**: `bfa170d9` (round
+  18, #900) — perl's `+=`/`++` overload dispatch — worth **15.1 %** of
+  `intloop+=` by hand-replacement, against 17.7 % observed against a rebuilt
+  s458ak tree; the balance is core layout.  The residue is **#1516**.
+* **THE MEASUREMENT LESSON THIS ROUND ADDS.**  A few % on the tightest rows is
+  the core being RE-LAID-OUT, and the discriminator is cheap: build the base
+  runtime plus two NEVER-CALLED functions of the size of your change and A/B
+  that.  It reads `cfor` −3.6 % and `intloop+=` −5.6 % — the same band the
+  change under test was accused of.
+
 ---
 
 ## Part B — The IR as a contract: what a JavaScript or C backend would need to know
