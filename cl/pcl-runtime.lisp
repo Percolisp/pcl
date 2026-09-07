@@ -24034,25 +24034,96 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; "::" names the root stash, so "::Foo::Bar" is "Foo::Bar".  p-method-call
 ;;; used to spell this inline; the stash resolver below must agree with it or
 ;;; the two would answer different packages for the same object.
+;;; Written with LENGTH and CHAR= rather than the two literal (string= c "…")
+;;; tests it used to spell: `string=` on an undeclared operand compiles to the
+;;; generic SB-KERNEL:STRING=*, which sb-sprof measured at 6.5 % of a
+;;; monomorphic method loop and 9.2 % counting this function's own frame
+;;; (s473s) -- for two comparisons against a 0- and a 2-character constant.
+;;; The tests below are the same three cases in the same order.
 (defun %pcl-normalize-class-name (c)
-  (cond
-    ((string= c "")   "main")
-    ((string= c "::") "main::")
-    ((and (>= (length c) 2) (char= (char c 0) #\:) (char= (char c 1) #\:))
-     (subseq c 2))
-    (t c)))
+  (let ((s (if (stringp c) c (string c))))
+    (declare (type string s))
+    (let ((n (length s)))
+      (cond
+        ((zerop n) "main")
+        ((and (>= n 2) (char= (char s 0) #\:) (char= (char s 1) #\:))
+         (if (= n 2) "main::" (subseq s 2)))
+        (t s)))))
 
-(defun %pcl-own-method (class-name sub-name)
-  "The function a plain (unqualified) method call resolves to when CLASS-NAME's
+;;; THE OWN-CLASS METHOD CACHE (s473s; the own-class half of task #582).
+;;;
+;;; WHAT IT CACHES.  Only an own-class HIT: the pair (class name, method name)
+;;; that %PCL-OWN-METHOD-SYMBOL below already resolved inside the class's own
+;;; package.  An own MISS is never stored, so a method defined LATER can never
+;;; be masked by the cache, and the inherited half of #582 — which needs the
+;;; @ISA-write invalidation marker and is still blocked on it — is untouched:
+;;; an own miss falls through to exactly the walks it does today.
+;;;
+;;; WHY IT NEEDS NO GENERATION COUNTER.  The value stored is the SYMBOL, not
+;;; the function.  Every path in this runtime that (re)defines a Perl sub —
+;;; `p-sub`, a glob assignment (`*Foo::bar = sub {…}` / `= \&baz`), a
+;;; string-eval'd sub, `local *Foo::bar` and its restore — writes through
+;;; `(setf (symbol-function …))` / `(setf (fdefinition …))` on THAT SAME
+;;; symbol, so a cached entry answers with the new definition for free; and
+;;; every path that REMOVES one (`undef &Foo::bar`, `local *Foo::bar` with no
+;;; saved value) calls `fmakunbound` on it, which the `fboundp` test below
+;;; sees, declining to the slow path.  Nothing here uninterns a symbol or
+;;; changes its home package, which are the only two events that could make a
+;;; stored symbol answer for a name it no longer spells.  A stale method cache
+;;; silently dispatches the WRONG method, so the design is deliberately one
+;;; that cannot go stale rather than one that is invalidated correctly.
+;;;
+;;; KEYS ARE CONTENT (equal), not identity.  A Perl string can be a
+;;; fill-pointer buffer the `str-buffer` transform appends to in place, so an
+;;; EQ table keyed on the class/method strings could hand back an entry for a
+;;; name the key no longer spells; content lookup cannot, and the stored key is
+;;; copied by %PCL-MEMO-KEY exactly as *PCL-STASH-TABLE* and
+;;; *PCL-CL-SUB-NAME-TABLE* copy theirs.  Measured: EQ and EQUAL keys are
+;;; indistinguishable on the monomorphic loop (-23.5 % vs -23.2 %, s473s), so
+;;; identity buys nothing to pay that risk with.
+;;;
+;;; GROWTH.  The two sibling memo tables are bounded by distinct NAMES; this
+;;; one is bounded by distinct (class, method) PAIRS, so it alone carries a
+;;; valve: past 1024 classes the whole cache is dropped and refills.  Dropping
+;;; is always safe — the fallback is the resolution path itself.
+(defvar *pcl-own-method-cache* (make-hash-table :test 'equal))
+
+;;; Keyed on the class name AS THE INVOCANT SPELLS IT (before the root-stash
+;;; normalisation) and on the method name as the call site spells it, so a hit
+;;; answers before %PCL-NORMALIZE-CLASS-NAME, the `pl-NAME` build and the
+;;; colon scan.  A class reachable under two spellings (`Foo`, `::Foo`) simply
+;;; gets two entries: each spelling normalises the same way every time, so both
+;;; are correct.
+(defun %pcl-own-method-cached (raw-class method-name)
+  "The own-class method function for RAW-CLASS/METHOD-NAME if the pair is
+   cached AND still fbound, else NIL — see the cache's comment above."
+  (let ((tbl (gethash raw-class *pcl-own-method-cache*)))
+    (when tbl
+      (let ((sym (gethash method-name tbl)))
+        (when (and sym (fboundp sym)) (symbol-function sym))))))
+
+(defun %pcl-own-method-cache-put (raw-class method-name sym)
+  (let ((tbl (gethash raw-class *pcl-own-method-cache*)))
+    (unless tbl
+      (when (>= (hash-table-count *pcl-own-method-cache*) 1024)
+        (clrhash *pcl-own-method-cache*))
+      (setf tbl (setf (gethash (%pcl-memo-key raw-class) *pcl-own-method-cache*)
+                      (make-hash-table :test 'equal))))
+    (setf (gethash (%pcl-memo-key method-name) tbl) sym)))
+
+(defun %pcl-own-method-symbol (class-name sub-name)
+  "The SYMBOL a plain (unqualified) method call resolves to when CLASS-NAME's
    own package defines SUB-NAME — the monomorphic case, and the answer BOTH
    slow paths would reach anyway: the CLOS MRO and the @ISA walk each start at
    the class itself, so a method local to the class always wins there too.
    CLASS-NAME is already root-stash-normalized by the caller, and the `local to
-   this package` test is the walks' own (eq (symbol-package …) pkg)."
+   this package` test is the walks' own (eq (symbol-package …) pkg).
+   The SYMBOL, not its function: that is what makes the cache above immune to
+   redefinition — see its comment."
   (let* ((pkg (%pcl-find-package class-name))
          (sym (and pkg (find-symbol sub-name pkg))))
     (when (and sym (eq (symbol-package sym) pkg) (fboundp sym))
-      (symbol-function sym))))
+      sym)))
 
 (defun %pcl-no-op-import-result ()
   "The value of a `->import` / `->unimport` that resolves to NO method.  Perl
@@ -24103,14 +24174,17 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; Perl treats "" as "main" and "::" as "main::" in package/method
          ;; contexts, and a leading "::" names the root stash — the one reading
          ;; of that is %pcl-normalize-class-name, shared with the stash resolver.
-         (class-name (%pcl-normalize-class-name (or raw-class "")))
+         ;; These three are filled in AFTER the cached fast path below, which
+         ;; is exactly what it is for: a cached own-class hit answers without
+         ;; the normalisation, the `pl-NAME` build or the colon scan.
+         (class-name nil)
          ;; The `pl-NAME` symbol name this method is looked up under, built ONCE
          ;; (#73/M2, s446m): it used to be rebuilt — two fresh strings each —
          ;; for every class the MRO / @ISA / UNIVERSAL walks visited.
-         (sub-name (%pcl-cl-sub-name method-name))
+         (sub-name nil)
          ;; Asked ONCE: a qualified spelling (SUPER::/PKG::/CORE::) is answered
          ;; below, and only an unqualified name can take the fast path.
-         (colon-pos (position #\: method-name))
+         (colon-pos nil)
          ;; T once the fast path has looked SUB-NAME up in the class's own
          ;; package and not found it — so the inheritance walk below can start
          ;; at the PARENTS instead of asking the same package again.  Cleared
@@ -24119,6 +24193,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; to-string always answers a string; saying so lets the scans above and
     ;; below compile to string code instead of generic sequence calls.
     (declare (type string method-name))
+    ;; CACHED FAST PATH (s473s): the own-class pair this invocant/method has
+    ;; already resolved once.  Placed before the three bindings above are
+    ;; filled in, because skipping THEM is most of what it saves.
+    (when raw-class
+      (let ((f (%pcl-own-method-cached raw-class method-name)))
+        (when f (return-from p-method-call (apply f resolved-obj args)))))
+    (setf class-name (%pcl-normalize-class-name (or raw-class ""))
+          sub-name   (%pcl-cl-sub-name method-name)
+          colon-pos  (position #\: method-name))
     ;; FAST PATH (#73): a plain method name defined in the invocant's OWN class
     ;; package — the monomorphic case, and the same function both slow paths
     ;; would reach (each starts its walk at the class itself).  It shares this
@@ -24126,9 +24209,12 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; FIND-SYMBOL; everything else (SUPER::, qualified names, inheritance,
     ;; UNIVERSAL, AUTOLOAD, the diagnostics) stays below.
     (when (and raw-class (null colon-pos))
-      (let ((own (%pcl-own-method class-name sub-name)))
+      (let ((own (%pcl-own-method-symbol class-name sub-name)))
         (if own
-            (return-from p-method-call (apply own resolved-obj args))
+            (progn
+              (%pcl-own-method-cache-put raw-class method-name own)
+              (return-from p-method-call
+                (apply (symbol-function own) resolved-obj args)))
             (setf own-missed t))))
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
