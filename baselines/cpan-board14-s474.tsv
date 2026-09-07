@@ -1,6 +1,8 @@
 # cpan-board14 — the 14-dist CPAN board, the blessed state.  Taken s1061
-# (2026-09-07) on bd01f012, the tree that ends at s1061's last commit.
-# 183 files, 79 PASS / 54 PARTIAL / 50 FAIL, 2190 ok / 346 not-ok.
+# (2026-09-07) on `45331bc9`, s1061 rebased onto s473p's merge `bfa11c72`
+# (only a records commit sits above it).  183 files, 79 PASS / 54 PARTIAL /
+# 50 FAIL, 2190 ok / 346 not-ok.  The same run taken BEFORE that rebase, on
+# `bd01f012`, is byte-identical row for row — perf round 30 moved no board row.
 #
 # Columns: dist, t-file, status, ok, notok, rc.  Real perl 5.40.3 was run
 # beside every file named below; its verdict is quoted with each cause.

@@ -2,6 +2,88 @@
 
 Append new entries at the top. One section per session.
 
+## Session s1061 (Opus agent, 2026-09-07) — the CPAN board's nine down-movers, each bisected to its commit; two of them were compiler bugs and are fixed
+
+**#1061 closed.**  The board is not a gate, so nothing bisects it; the nine
+files that moved DOWN between the s378 and s467 snapshots had no cause.  They
+have one each now — a commit and a round, not "pre-existing".
+
+**The range in the task was wrong, and finding that out was the first job.**
+`baselines/cpan-board14-s378.tsv` was MEASURED at `5d941618` (2026-08-09,
+s378); `23e30051`, the sha the task named, is only where s440 moved the file
+from `docs/` to `baselines/`.  The real range is 568 commits, not 238, and it
+contains the announce→DIE flip — which the shorter range would have hidden
+behind its own baseline.  Bisecting with the wrong range would have produced
+nine confident wrong answers.
+
+**A fresh board on main `dfa65afa`, before either fix, was byte-identical to
+the blessed snapshot**: 183 rows, 80 PASS / 53 PARTIAL / 50 FAIL, 2154 ok /
+340 not-ok, zero movers since s467 across rounds 24–29, s473t1/t2 and BZ.  So
+the nine were the whole job.  (STATUS.md still carried the RAW s467 numbers,
+before s470bw's four hand-edits; it is refreshed.)
+
+**The commits.**  Role-Tiny `role-long-package-name.t` → `e79f0a63` (s407a,
+#362): making code refs numify to their address is CORRECT, and it stopped
+Role::Tiny's numeric comparison of two code refs from accidentally installing
+`does`/`DOES` into every composed class — which was the only thing putting a
+SUB in a stash PCL can see, since `%{"Pkg::"}` lists subs and nothing else
+(#1510).  Try-Tiny `given_when.t` → `048b6871` (s415b): the ruled given/when
+refusal; the one `ok` it lost was an accidental pass, undef compared with
+undef.  The four Capture-Tiny files → `f702da31` (s435, the flip): seven
+pre-existing drops that used to be silent `nil`, all one gap — Capture::Tiny
+builds its prototypes with `eval "sub $sub(&;@) {…}"`, so the module
+prototype scan finds no literal and `capture { … }` never parses as a
+block-form call (#1509).  Scalar-List-Utils `dualvar.t`, `max.t`, `min.t`,
+`product.t` → `b95ad912` (s436, the phase model).  Algorithm-Diff `oo.t` →
+`b1847eb7` (s411d).  Data-Dump `dump.t` → `a46aa3f0` (s404f).
+Class-Method-Modifiers `140-lvalue.t` → `551202b3` (s464a, #964).
+Text-Balanced `05_extmul.t` is the one NOT bisected, and #1512 says why: its
+verdict is not stable enough to bisect on a shared box (two runs of the same
+tree read 16/14 and 0/0), and each step costs 150–600 s because the file
+itself needs ~150 s where perl needs 0.2.
+
+**The phase model is the board's biggest single mover, and in every case it
+EXPOSED rather than broke.**  `dualvar.t` has always emitted an unreadable
+token — `(intern "PL-IMPORT" :threads::shared)`, "too many colons" — inside
+the BEGIN on line 72; before the phase model that BEGIN was read after the 16
+assertions above it had already run.  `max/min/product` gained a working
+`Foo->new`, so rows 6–7 run for the first time and fail on a `use overload`
+that is still a RUN-phase statement where perl's `use` is a BEGIN (#1507).
+
+**Two fixes shipped.**  #1505: the `import PACKAGE` sugar interpolated its
+package designator raw, so a multi-segment name emitted `:Foo::Bar` and the
+whole emitted file stopped reading; `_cl_pkg_designator` is the single source
+of truth for that spelling and this one site bypassed it.  #1508: the `=~`
+write-target gate listed only the named-container element kinds, so
+`$ref->{k} =~ s///` wrote to a value — invisible until #911 made that perl's
+read-only death, at which point core Math::BigInt's `$x->{sign} =~ tr/+-/-+/`
+killed every program that negated a big integer.  #960 had fixed the same
+four-kind omission at `pos()`; the family is worth a scan.
+
+**The fixes moved four board rows, and one of them moved DOWN in label while
+going UP in rows.**  The final snapshot `baselines/cpan-board14-s474.tsv` (183
+rows, 79 PASS / 54 PARTIAL / 50 FAIL, 2190 ok / 346 not-ok) differs from s467
+in exactly four Scalar-List-Utils files, all reaching their Math::BigInt
+section for the first time: max 5/2 → 8/2, min 5/2 → 20/2, product 12/1 →
+23/4, and sum PASS 8/0 → PARTIAL 15/3 — which is 18 of 18 planned rows run
+where 8 used to be, the "zero not-ok" rule having called the truncated run a
+PASS.  Six new failures, two causes, both pre-existing: #1507 for three of
+them, and #1525 (new) for the other three — `scalar(EXPR)` on a hash
+reference returns the raw hash table, so an overloaded object reaching a
+function argument as `(p-scalar (p-+ …))` loses its `""` handler and
+`my $c = scalar($href)` stores the key count.
+
+**Bars.** Gate **219 files / 7,603 rows**, only the 13 pclxs xs rows failing.  Sweep
+`--jobs 4` **GATE clean, TOTAL passing 18674 = baseline (+0)**, 0 new / 0 fixed, drops 5 = census, shortfall +0, CAUSES 0.  corpus-diff vs `bfa11c72` IDENTICAL over 111 files
+after both fixes; emission A/B over lib + the 14-dist board (251 files) 250
+SAME with the one DIFF being #1505's own line; over Math::BigInt the only
+change is `p-gethash-deref` → `p-gethash-deref-box`; on the final tree
+`--shapes --list lib/**/*.pm` reads 27 SAME / 0 DIFF / 0 RCDIFF.  Generation v2-1010,
+artifacts regenerated on the tree rebased onto s473p's merge (they come back
+byte-identical).  The board was re-run on that same tree and is byte-identical
+to the run taken before the rebase — perf round 30 moved no board row.  Filed
+#1506, #1507, #1509, #1510, #1511, #1512, #1525.
+
 ## Session 474b (Fable, 2026-09-07 07:27 → ~10:40) — the two slots relaunched after the reboot; BZ + s473t3 merged; the sweep's honest state answered; the board order, the 64-bit boundary and `use integer` ruled; both running agents killed by the rate limit, resumable
 
 **Merged + pushed:** **BZ = s470bz `dfa65afa`** (#1302 ONE root resolver `PCLPaths::root` + `pcl` installed + `--uninstall` + PATH hint + VERSION file; #1304 the podman container installer test, 4 legs; filed #1325 #1326 **#1327** — a saved core memoises the core BUILDER's `asdf:*user-cache*`; Fable gate 218/7569 xs-only, 0 write-date) and **s473t3 `99db107d`** (the 79 blessed rows whose only cause was a CATALOG note → 25 tasks #1471–#1495 / #155 / NS sections; six catalog notes measured WRONG about their own rows; Fable sweep GATE clean TOTAL 18674 (+0) CAUSES 0 of 478).  CI green through `dfa65afa` incl. the install matrix.
