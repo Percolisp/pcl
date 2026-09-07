@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 129;
+plan tests => 131;
 
 sub run_cl {
     my ($code) = @_;
@@ -1312,3 +1312,39 @@ like(transpile_to_cl($import_pkg_pl), qr/\(intern "PL-IMPORT" :\|My::Mod\|\)/,
 
 test_cl('#1505 `import Foo::Bar` in a BEGIN: the file reads and the import runs',
         $import_pkg_pl, "imported\nafter\n");
+
+# ---------------------------------------------------------------------------
+# #1508 (s1061): `$ref->{k} =~ s///` / `=~ tr///` wrote to a VALUE, not a place.
+#
+# The `=~` write-target gate (Pl/ExprToCL.pm) asked `_is_elem_arg`, which
+# answers for the `argbox` path and therefore lists only the NAMED-container
+# element kinds a_acc / h_acc.  The DEREF pair (`$r->{k}`, `$r->[i]`, and the
+# `$$r{k}` / `${$r}{k}` spellings of the same access) never got
+# lvalue_context, so the target lowered to `p-gethash-deref` instead of
+# `p-gethash-deref-box` and the substitution had nowhere to land.  #960 found
+# and fixed exactly this omission at `pos()`; this is the `=~` site.
+#
+# Since #911 (s461ar `bfa170d9`) made a non-writable target perl's read-only
+# DEATH instead of a silent no-op, the shape stopped being quiet: core
+# Math::BigInt writes `$x->{sign} =~ tr/+-/-+/` six times, so every negation
+# killed the program.  It cost the CPAN board Scalar-List-Utils max.t 7/3 ->
+# 5/2 (and min.t, product.t, sum.t with it).
+test_cl('#1508 `$ref->{k} =~ tr///` writes through the element',
+    'my $u = { sign => "+" };  $u->{sign} =~ tr/+-/-+/;
+     my $o = bless { sign => "+" }, "Cls"; $o->{sign} =~ tr/+-/-+/;
+     my $e = [ "abc" ];        $e->[0]    =~ s/b/X/;
+     my $f = { k => "abc" };   $$f{k}     =~ s/b/Y/;
+     my $d = { in => { k => "abc" } }; $d->{in}{k} =~ tr/a-c/A-C/;
+     print "$u->{sign}|$o->{sign}|$e->[0]|$$f{k}|$d->{in}{k}\n";',
+    "-|-|aXc|aYc|ABC\n");
+
+# The inverse: a read-only match, an /r substitution and an INDEX
+# subexpression must be exactly what they were — the gate widened, the
+# lvalue context must not leak.
+test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alone',
+    'my $r = { k => "abc" };
+     my $m = $r->{k} =~ /b/ ? "y" : "n";
+     my $q = { k => "abc" };  my $c = $q->{k} =~ s/b/X/r;
+     my %idx = (i => 1); my @a = ("p", "q"); $a[$idx{i}] =~ s/q/Q/;
+     print "$m|$r->{k}|$c|$q->{k}|@a|$idx{i}\n";',
+    "y|abc|aXc|abc|p Q|1\n");

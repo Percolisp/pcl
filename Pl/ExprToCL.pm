@@ -1385,8 +1385,12 @@ sub gen_binary_op_form {
 
   # `$a[0] =~ s///` and `$h{k} =~ tr///` WRITE their target, so the target has
   # to be the element's BOX — the same lvalue_context the mutating builtins
-  # already use, gated the same way (`_is_elem_arg`: only when the LHS itself
-  # IS an element access, so an index subexpression is untouched).  Without it
+  # already use, gated the same way (`_is_elem_lvalue_target`: only when the
+  # LHS itself IS an element access, so an index subexpression is untouched.
+  # ALL FOUR element kinds — the DEREF pair `$r->{k}` / `$r->[i]` was missing
+  # until #1508, so `$x->{sign} =~ tr/+-/-+/` — core Math::BigInt's own
+  # spelling, six times — ran against a value and, since #911 made the
+  # non-writable target perl's read-only DEATH, killed the program).  Without it
   # the substitution ran against a COPY and did NOTHING: silent for an array
   # element, a "Cannot modify non-boxed value" warning for a hash element.
   # Found while building #189 — it is also what kept lib/File/Basename.pm on
@@ -1403,7 +1407,7 @@ sub gen_binary_op_form {
     my $writes = ($op eq '=~' || $op eq '!~')
               && _rhs_writes_match_target($self, $kids->[1]);
     my $saved_lv = $self->lvalue_context;
-    $self->lvalue_context(1) if $writes && $self->_is_elem_arg($kids->[0]);
+    $self->lvalue_context(1) if $writes && $self->_is_elem_lvalue_target($kids->[0]);
     my $l = $self->gen_node_form($kids->[0]);
     $self->lvalue_context($saved_lv);
     if ($writes && $MAGIC_LVALUE_BASE{ _place_head($l) }) {
@@ -1871,6 +1875,23 @@ sub _is_elem_arg {
   my $an = $self->expr_o->get_a_node($kid_id);
   return $self->expr_o->is_internal_node_type($an)
       && ($an->{type} eq 'a_acc' || $an->{type} eq 'h_acc');
+}
+
+# The same question for an LVALUE TARGET (`$x =~ s///` / `=~ tr///`), where
+# ALL FOUR element kinds count — the DEREF pair included, because
+# `p-gethash-deref` / `p-aref-deref` have `-box` forms under lvalue_context
+# exactly as the named-container pair does.  It is a SECOND predicate on
+# purpose: `_is_elem_arg` above answers for the `argbox` path, and there are
+# no `-deref-argbox` heads to answer with, so widening that one would emit a
+# name the runtime does not export.  #960 found and fixed this same omission
+# at `pos()`; this is the `=~` site (#1508).
+sub _is_elem_lvalue_target {
+  my ($self, $kid_id) = @_;
+  my $an = $self->expr_o->get_a_node($kid_id);
+  return 0 unless $self->expr_o->is_internal_node_type($an);
+  my $t = $an->{type} // '';
+  return ($t eq 'a_acc' || $t eq 'h_acc'
+       || $t eq 'a_ref_acc' || $t eq 'h_ref_acc') ? 1 : 0;
 }
 
 # A CLASS-NAME argument position (bless's 2nd arg, tie's 2nd arg): a bareword
