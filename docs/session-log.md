@@ -84,6 +84,65 @@ byte-identical).  The board was re-run on that same tree and is byte-identical
 to the run taken before the rebase — perf round 30 moved no board row.  Filed
 #1506, #1507, #1509, #1510, #1511, #1512, #1525.
 
+## Session 1262 (Sonnet agent, 2026-09-07) — `docs/caching.md` written for USERS (task #1262 closed): the saved core, the module cache's #1261 dependency-manifest validity, the NEW string-eval disk cache (#1200, s473p), the still-uncached extension load (#1202), dated timing tables, the knobs, and the multi-user/install caveats (#1119, #1327)
+
+Docs-only, no code changes, no generation bump.  `docs/caching.md` (~235
+lines) covers the seven items task #1262 named, each with its mechanism
+and record: §1 the saved core (`~/.pcl-cache/core/`, content-keyed,
+`tools/lib/PCLSbcl.pm`; the installed `<prefix>/lib/pcl/pcl.core` is a
+DIFFERENT thing, built at install time, #1302); §2 the module cache
+(`modules/`, three files per entry, `docs/ir-spec.md` §9.2b) — validity is
+the `.deps` content manifest since #1261, confirmed by hand (edited a
+dependency `B2.pm` without touching the dependent `A3.pm`; the answer
+changed to match perl's new parse on the very next run, `A3`'s mtime
+unmoved), the compile policy is the two `PCL_COMPILE_DIRS`/
+`PCL_NO_COMPILE_DIRS` lists (s471), the cache dir is a process fact
+(`PCL_CACHE_DIR`, #1303), the prune is last-use/30-day (#682, s470by), and
+the 0700 refusal's exact text is quoted from `%p-check-cache-dir`; §3 the
+string-eval disk cache — **not in the original task text**, added per the
+s475 launch note because #1200 shipped (s473p, 2026-09-07) after #1262 was
+filed: `<cache>/evals/`, keyed on p-eval's own in-process key (text,
+package, capture names, features) plus the generation, same `.deps`
+validity as §2, a failing eval caches nothing; **found and filed as a gap:
+`pcl --cache-info` does not list `evals/` among the directories it reports
+(`pcl` script's `print_kinds` iterates only `modules proto core xs`) —
+task #1335**; §4 the three checked-in artifacts (pack/mro/warnings) are
+NOT cached at all — `p-load-extension` plain-`load`s the `.lisp` source
+every run (confirmed by reading the function), `pack("N",1)` costs ~8.3 s
+for it, open as #1202; §5 a dated measured-numbers table assembled from
+s470bn/s470bp/s470bw/s473p, showing the three module-load fixes stacking
+(`use JSON::PP` cold 13.4 s pre-#1188 → 1.43 s warm with fasl caching →
+0.41 s with the eval disk cache on top); §6 the env-var and flag tables
+(mirrors `docs/plan-cache-and-install-s471.md` §1.1 plus the four commands
+and the `PCL_NO_FASL_CACHE` alias); §7 per-HOME/per-worktree caching, the
+open #1119 caveat (module cache keyed on a hand-maintained generation
+string, not content — two PCL versions sharing one HOME can cross-read
+cached entries) and the s470bz-filed #1327 caveat (a saved core memoises
+its BUILDER's ASDF cache dir; a shared install's other users can't do ASDF
+work from it) named in one sentence each, per the launch note's bar.
+
+**Every fact traceable** (STOP.md's claim→source table, one bullet per
+section): code read directly (`cl/pcl-runtime.lisp`'s "THE STRING-EVAL
+DISK CACHE" section, `%p-check-cache-dir`, `p-load-extension`,
+`PCLPaths.pm`, the `pcl`/`pl2cl`/`tools/install-pcl` `--help` texts run
+live) plus `docs/ir-spec.md` §9.2/§9.2b (normative), `docs/DECIDED.md`
+§s470by/§s470bw/§s470bp/§s471/§s473p/§s470bz, and `Pl/t/eval-cache-01.t` +
+`Pl/t/module-fasl-cache-01.t` read for their fixture shapes (then
+reproduced by hand, not just read).  **Three probes run and pasted into
+STOP.md**: `pcl --cache-info` (confirms the `evals/` omission — 1004 files
+present, unlisted); `PCL_CACHE_DIR=<tmp> pcl -e 'use Text::ParseWords;
+print 1'` then `ls <tmp>/modules` (two `.deps`/`.lisp` pairs, one with a
+`.fasl`, manifests match §9.2b's format exactly); the module-fasl-cache-01.t
+dependency-edit shape run by hand in a fresh tempdir/cache (A3 reads
+B2's prototype: `8 TAG|1`; after removing B2's empty `sub zap ()`
+prototype, WITHOUT touching A3.pm, the very next run answers `107 TAG|1`
+— re-transpiled, not stale).  README already linked the page (an earlier
+session's edit); `docs/STATUS.md` gained one new link in its "Compile
+happens at run start" sharp edge.  Filed **#1335** (the `evals/` cache-info
+gap) in the #1262 task's 1335–1337 range; #1336/#1337 left unused.  HEAD
+`<TBD-fill-at-commit>`; `git log --oneline main..HEAD` = 1 commit (docs
+only).
+
 ## Session 474b (Fable, 2026-09-07 07:27 → ~10:40) — the two slots relaunched after the reboot; BZ + s473t3 merged; the sweep's honest state answered; the board order, the 64-bit boundary and `use integer` ruled; both running agents killed by the rate limit, resumable
 
 **Merged + pushed:** **BZ = s470bz `dfa65afa`** (#1302 ONE root resolver `PCLPaths::root` + `pcl` installed + `--uninstall` + PATH hint + VERSION file; #1304 the podman container installer test, 4 legs; filed #1325 #1326 **#1327** — a saved core memoises the core BUILDER's `asdf:*user-cache*`; Fable gate 218/7569 xs-only, 0 write-date) and **s473t3 `99db107d`** (the 79 blessed rows whose only cause was a CATALOG note → 25 tasks #1471–#1495 / #155 / NS sections; six catalog notes measured WRONG about their own rows; Fable sweep GATE clean TOTAL 18674 (+0) CAUSES 0 of 478).  CI green through `dfa65afa` incl. the install matrix.

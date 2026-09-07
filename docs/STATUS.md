@@ -71,7 +71,9 @@ observable difference is.  The big items:
 * **Compile happens at run start.**  A large program pays a transpile and
   SBCL-compile cost on every run (about five seconds for 800 statements);
   module transpiles are cached (`~/.pcl-cache`), as is the runtime itself
-  (a saved SBCL core, keyed on the runtime's source).
+  (a saved SBCL core, keyed on the runtime's source).  See
+  [`caching.md`](caching.md) for what is cached, where, and how to clear
+  or disable it.
 * **Signatures are read as signatures whenever the feature could be on.**
   A `sub f ($x)` before the pragma is an old-style prototype in perl; PCL
   follows the pragma's region rules but see `not-supported.md`
