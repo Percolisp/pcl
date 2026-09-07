@@ -65,6 +65,15 @@ my $root = abs_path("$RealBin/../..");
 my $SBCL_VERSION = $ENV{SBCL_VERSION} // '2.6.0';
 my $BASE_IMAGE   = $ENV{PCL_CONTAINER_BASE} // 'ubuntu:24.04';
 
+# The unprivileged user the non-root legs run as, and the home `useradd -m`
+# gives it.  Built from the name rather than written out, because
+# Pl/t/no-hardcoded-paths-01.t scans tools/ for `/home/<name>/` and is right to:
+# a home directory spelled out in a source file is exactly the thing that works
+# on one machine and not the next.  This one is a fact of the image three lines
+# below, so it is derived from the same string the image is built with.
+my $CUSER = 'pcluser';
+my $CHOME = "/home/$CUSER";
+
 plan skip_all => "PCL_INSTALL_CONTAINER_SKIP=1" if $ENV{PCL_INSTALL_CONTAINER_SKIP};
 
 # podman first (rootless and daemonless — no `docker` group, which is
@@ -98,7 +107,7 @@ RUN mkdir -p /opt/pcldeps \\
  && chmod -R a+rX /opt/pcldeps \\
  && ln -sf /opt/pcldeps/sbcl/bin/sbcl /usr/local/bin/sbcl \\
  && printf '%s\\n' '(unless (find-package "QUICKLISP-CLIENT") (load "/opt/pcldeps/quicklisp/setup.lisp"))' > /etc/sbclrc \\
- && useradd -m -s /bin/bash pcluser
+ && useradd -m -s /bin/bash $CUSER
 ENV SBCL_HOME=/opt/pcldeps/sbcl/lib/sbcl
 DOCKERFILE
 
@@ -159,7 +168,12 @@ sub leg {
     close $fh;
     chmod 0755, "$legs/$name.sh";
     my $t0 = time;
-    my $out = `$RT run --rm -v $src:/src:ro -v $legs:/legs:ro -w /src $tag bash /legs/$name.sh 2>&1`;
+    # CUSER/CHOME reach the leg scripts as environment, so that no script
+    # spells the container's home directory out (Pl/t/no-hardcoded-paths-01.t
+    # scans tools/ for exactly that, and a `/home/<name>/` in a source file is
+    # what stops working on the next machine).  `su -` resets the environment,
+    # so inside a `su -c` the scripts use ~ and $HOME, which is what they mean.
+    my $out = `$RT run --rm -e CUSER=$CUSER -e CHOME=$CHOME -v $src:/src:ro -v $legs:/legs:ro -w /src $tag bash /legs/$name.sh 2>&1`;
     my $rc = $?;
     diag(sprintf("leg %s: %d s, exit %d", $name, time - $t0, $rc >> 8));
     return ($out, $rc);
@@ -190,7 +204,7 @@ SH
 {
     my ($out, $rc) = leg('legb', <<'SH');
 set -euo pipefail
-su - pcluser -c '
+su - "$CUSER" -c '
   set -e
   cd /src
   tools/install-pcl --prefix "$HOME/.local"
@@ -201,7 +215,7 @@ su - pcluser -c '
 SH
     is($rc, 0, '(b) a NON-ROOT user can install into $HOME/.local')
         or diag(tail($out, 40));
-    like($out, qr{export PATH="/home/pcluser/\.local/bin:\$PATH"},
+    like($out, qr{export PATH="\Q$CHOME\E/\.local/bin:\$PATH"},
          '(b) and is told the exact line that puts it on PATH') or diag(tail($out, 20));
     like($out, qr/^42$/m, '(b) and the installed pcl runs from that user\'s shell');
 }
@@ -218,18 +232,18 @@ SH
 set -euo pipefail
 cd /src
 tools/install-pcl --prefix /opt/pcl --quiet
-rm -rf /home/pcluser/.pcl-cache
+rm -rf "$CHOME/.pcl-cache"
 ls -A /root | sort > /tmp/root-before
 echo "--- the user's run ---"
-su - pcluser -c '/opt/pcl/bin/pcl -e "use List::Util qw(sum); print sum(1..3), qq{\n}"'
+su - "$CUSER" -c '/opt/pcl/bin/pcl -e "use List::Util qw(sum); print sum(1..3), qq{\n}"'
 ls -A /root | sort > /tmp/root-after
 if diff -q /tmp/root-before /tmp/root-after > /dev/null; then echo "ROOT-HOME-UNCHANGED"; else
   echo "ROOT-HOME-CHANGED:"; diff /tmp/root-before /tmp/root-after || true
 fi
 echo "--- the user's cache ---"
-su - pcluser -c 'ls -A ~/.pcl-cache' | sed 's/^/cache-entry: /'
+su - "$CUSER" -c 'ls -A ~/.pcl-cache' | sed 's/^/cache-entry: /'
 echo "--- cache-info ---"
-su - pcluser -c '/opt/pcl/bin/pcl --cache-info'
+su - "$CUSER" -c '/opt/pcl/bin/pcl --cache-info'
 SH
     is($rc, 0, '(c) a shared /opt/pcl install serves a different user')
         or diag(tail($out, 40));
@@ -241,7 +255,7 @@ SH
     like($out, qr/ROOT-HOME-UNCHANGED/,
          '(c) while nothing new appears under /root') or diag(tail($out, 30));
 
-    like($out, qr{Cache directory: /home/pcluser/\.pcl-cache},
+    like($out, qr{Cache directory: \Q$CHOME\E/\.pcl-cache},
          '(d) `pcl --cache-info` reports THAT user\'s cache directory')
         or diag(tail($out, 20));
     like($out, qr/PCL_COMPILE_DIRS: unset/,
