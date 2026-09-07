@@ -8461,26 +8461,33 @@ per element."
                  '(p-gethash p-aref p-gethash-deref p-aref-deref
                    p-$ p-cast-$))))
 
-  (defun %p-nested-elem-place-p (place)
-    "True for an ELEMENT place — (p-gethash C K) / (p-aref C I) — whose
-     CONTAINER subform is itself an access chain, i.e. `$h{a}{b}` and friends
-     rather than `$h{k}`.
+  (defun %p-elem-place-p (place)
+    "True for an ELEMENT place — (p-gethash C K) / (p-aref C I) — whatever its
+     container is: `$h{k}` and `$a[i]` as well as `$h{a}{b}`.
 
-     WHY THE TWO ARE DIFFERENT (task #1057): the setf WRITER of p-gethash /
-     p-aref does not vivify its container — it cannot, it is handed a VALUE —
-     so `(setf (p-gethash (p-gethash %h \"a\") \"b\") …)` gave GETHASH the
-     inner read's :UNDEF and died with an SBCL type error.  The deref-rooted
-     spellings are NOT in this test because their writers already vivify
-     ((setf p-gethash-deref) is `(setf (p-gethash (p-ensure-hashref ref) …))`),
-     and neither are p-$ / p-cast-$, which are scalars, not containers.
+     WHY IT COVERS BOTH (task #1152).  A compound assignment over an element
+     is built as a read-modify-write, and if the SYNTACTIC place appears twice
+     its container and its KEY are evaluated twice: `$h{k()} .= \"q\"` called
+     k() twice where perl calls it once, and one program gave two answers,
+     because #1057 had bound temps for the NESTED spelling only.  The temps
+     are right for every element place, so the predicate stopped asking about
+     the container.
 
-     The container is read through %p-unviv: since #1241 the emitter marks a
-     dereferenced container `p-viv-container', and the marker names the same
-     place, so without the peel `$h{a}{b} .= …` would stop reading as nested
-     and quietly go back to the double-evaluating store."
+     Task #1057's narrower question is still answered, by the same code: the
+     setf WRITER of p-gethash / p-aref does not vivify its container — it
+     cannot, it is handed a VALUE — so `(setf (p-gethash (p-gethash %h \"a\")
+     \"b\") …)` gave GETHASH the inner read's :UNDEF and died.  The container
+     goes through the chain walker in %p-vivified-elem-form, which is the
+     IDENTITY on a non-chain container, so widening the test costs a flat
+     place nothing but the two bindings.
+
+     Still NOT here: the deref spellings (their writers already vivify —
+     `(setf p-gethash-deref)` is `(setf (p-gethash (p-ensure-hashref ref) …))`
+     — and their double evaluation is task #1351), and p-$ / p-cast-$, which
+     are scalars, not containers."
     (and (consp place)
          (member (car place) '(p-gethash p-aref))
-         (%p-accessor-place-p (%p-unviv (cadr place)))))
+         t))
 
   (defun %p-vivified-elem-form (place fn)
     "Bind PLACE's CONTAINER and KEY to temps — the container through the
@@ -8503,7 +8510,17 @@ per element."
                          (expand-autoviv (cadr place))
                          (expand-autoviv-for-array (cadr place))))
              (,key ,(caddr place)))
-         ,(funcall fn (list acc cont key))))))
+         ,(funcall fn (list acc cont key)))))
+
+  (defun %p-elem-place-form (place fn)
+    "Call FN with a place whose container and key are evaluated ONCE: for an
+     ELEMENT place that is %p-vivified-elem-form's rebound place, and for
+     anything else PLACE itself.  The seam the short-circuit assigns share
+     with %store-back-form (task #1152), so `$h{k()} ||= 1` and
+     `$h{k()} .= \"q\"` cannot disagree about how often k() runs."
+    (if (%p-elem-place-p place)
+        (%p-vivified-elem-form place fn)
+        (funcall fn place))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %store-back-form (place build)
@@ -8516,15 +8533,17 @@ per element."
      growing the result exponentially).  For accessor places ($h{k}/$a[i]/derefs)
      SETF is used on the syntactic place form.
 
-     A NESTED element place is the third case (task #1057): its container must
-     VIVIFY before the store, so it goes through %p-vivified-elem-form and the
-     read and the write share the rebound place.  This is the ONE place the
-     whole compound family reaches, so `.=` `+=` `*=` `%=` `**=` `x=` `/=` `&=`
-     `|=` `^=` `<<=` `>>=` and `-=` are all fixed by it — they used to hand
-     :UNDEF to SBCL's GETHASH and die, while `++`, `=` and `||=` worked because
-     they take other lowering paths."
+     An ELEMENT place is the third case: its container and its KEY are bound
+     to temps once, so they are evaluated ONCE for the read and the write
+     together, and the container goes through the chain walker so a nested one
+     VIVIFIES.  This is the ONE place the whole compound family reaches, so
+     `.=` `+=` `*=` `%=` `**=` `x=` `/=` `&=` `|=` `^=` `<<=` `>>=` and `-=`
+     are all fixed by it — the NESTED spelling used to hand :UNDEF to SBCL's
+     GETHASH and die (task #1057), and the FLAT one used to evaluate its key
+     twice (`$h{k()} .= \"q\"` called k() twice where perl calls it once, task
+     #1152)."
     (cond
-      ((%p-nested-elem-place-p place)
+      ((%p-elem-place-p place)
        (%p-vivified-elem-form place (lambda (p) `(setf ,p ,(funcall build p)))))
       ((%p-accessor-place-p place)
        `(setf ,place ,(funcall build place)))
@@ -9173,32 +9192,44 @@ per element."
 ;;; intermediate containers autovivified — exactly what p-setf already does for
 ;;; every place shape.  We read the place once (plain rvalue read, which never
 ;;; autovivifies) to test the condition; the RHS is evaluated only on the branch
-;;; that stores, matching Perl's short-circuit semantics.  (Subscript subforms
-;;; in `place` are evaluated twice — once for the read, once in p-setf — which is
-;;; harmless for the variable/constant subscripts that occur in practice.)
+;;; that stores, matching Perl's short-circuit semantics.
+;;;
+;;; AN ELEMENT PLACE'S CONTAINER AND KEY ARE BOUND ONCE (task #1152, s473b),
+;;; through %p-elem-place-form — the same seam %store-back-form uses, so
+;;; `$h{k()} ||= 1` and `$h{k()} .= "q"` cannot disagree about how often k()
+;;; runs.  The comment that used to stand here said the double evaluation was
+;;; "harmless for the variable/constant subscripts that occur in practice";
+;;; it was not — `$h{k()} ||= 7` called k() twice where perl calls it once,
+;;; probed.  A non-element place still expands as before.
 (defmacro p-and-assign (place value)
   "Perl &&= (and-assign) - assigns value only if place is true."
-  (let ((cur (gensym "CUR")))
-    `(let ((,cur ,place))
-       (if (p-true-p ,cur)
-           (p-setf ,place ,value)
-           ,cur))))
+  (%p-elem-place-form place
+                      (lambda (p)
+                        (let ((cur (gensym "CUR")))
+                          `(let ((,cur ,p))
+                             (if (p-true-p ,cur)
+                                 (p-setf ,p ,value)
+                                 ,cur))))))
 
 (defmacro p-or-assign (place value)
   "Perl ||= (or-assign) - assigns value only if place is false."
-  (let ((cur (gensym "CUR")))
-    `(let ((,cur ,place))
-       (if (p-true-p ,cur)
-           ,cur
-           (p-setf ,place ,value)))))
+  (%p-elem-place-form place
+                      (lambda (p)
+                        (let ((cur (gensym "CUR")))
+                          `(let ((,cur ,p))
+                             (if (p-true-p ,cur)
+                                 ,cur
+                                 (p-setf ,p ,value)))))))
 
 (defmacro p-//= (place value)
   "Perl //= (defined-or-assign) - assigns value only if place is undef."
-  (let ((cur (gensym "CUR")))
-    `(let ((,cur ,place))
-       (if (%pcl-definedp ,cur)
-           ,cur
-           (p-setf ,place ,value)))))
+  (%p-elem-place-form place
+                      (lambda (p)
+                        (let ((cur (gensym "CUR")))
+                          `(let ((,cur ,p))
+                             (if (%pcl-definedp ,cur)
+                                 ,cur
+                                 (p-setf ,p ,value)))))))
 
 ;;; ============================================================
 ;;; Numeric Comparison

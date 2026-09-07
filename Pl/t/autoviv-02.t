@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 sub run_cl {
     my ($code) = @_;
@@ -304,4 +304,43 @@ my $o = { opt => { a => 1 } };
 print get($o, "a"), (defined get($o, "zz") ? "D" : "U"), "\n";
 sub viv { my ($s) = @_; my $x = $s->{p}{q}; return ref($s) . (exists $s->{p} ? 1 : 0) }
 my $u; print viv($u), "\n";
+PL
+
+# ── 13. #1152 (s473b): a compound assignment over a FLAT element evaluated its
+# container and its KEY TWICE.  `%store-back-form` builds the read-modify-write
+# as `(setf PLACE (op PLACE VALUE))`, so the syntactic place appears twice —
+# and #1057 had bound temps for the NESTED spelling only, which left one
+# program giving two answers: `$h{a}{k()} .= 1` called k() once and
+# `$h{k()} .= 1` twice, where perl calls it once in both.  ONE predicate now
+# answers "is this an element place" instead of "is this a NESTED element
+# place", so the temps bind for the whole family; the container still goes
+# through the chain walker, which is the IDENTITY on a flat container, so
+# #1057's vivification is unchanged (row 3).
+#
+# The SHORT-CIRCUIT assigns are in the same family and were in it (rows 4, 5,
+# 10): `p-or-assign`/`p-//=`/`p-and-assign` read the place and then hand the
+# SYNTACTIC place to `p-setf`, and the comment above them used to call that
+# "harmless for the variable/constant subscripts that occur in practice" — it
+# was not.  They share the seam now.
+#
+# The last four rows are the properties the temps must not break: the alias
+# rule (a write goes THROUGH the slot's box, #1151/#1057), for the flat, the
+# array, the short-circuit-then-coerce and the nested spellings.
+# Every expectation is the live perl 5.40.3 answer (probed s473b).
+is(run_cl(<<'PL'), "1q\n13\n11\n17\n18\n10\n1[]\n1y\n1U\npq\n6\nx!\nnm\n", '#1152 an element compound assign evaluates its container and key ONCE');
+my $n = 0; sub k { $n++; return "kk" }
+my $m = 0; sub i { $m++; return 1 }
+my %a; $a{a} = "z"; $a{k()} .= "q";   print "$n$a{kk}\n"; $n = 0;
+my @b = (1,2,3); $b[i()] += 1;        print "$m$b[1]\n"; $m = 0;
+my %c; $c{a}{k()} .= "1";             print "$n$c{a}{kk}\n"; $n = 0;
+my %f; $f{k()} ||= 7;                 print "$n$f{kk}\n"; $n = 0;
+my %g; $g{k()} //= 8;                 print "$n$g{kk}\n"; $n = 0;
+my %h; $h{a} = 2; $h{k()} *= 3;       print "$n", (defined $h{kk} ? $h{kk} : "U"), "\n"; $n = 0;
+my %i2; $i2{k()} x= 2;                print $n, "[", (defined $i2{kk} ? $i2{kk} : "U"), "]\n"; $n = 0;
+my @j; $j[i()] .= "y";                print "$m", (defined $j[1] ? $j[1] : "U"), "\n"; $m = 0;
+my %p; $p{a} = 3; $p{k()} &&= 9;      print "$n", (defined $p{kk} ? $p{kk} : "U"), "\n"; $n = 0;
+my %l; $l{a} = "p"; my $al = \$l{a}; $l{a} .= "q"; print "$$al\n";
+my @o = (1,2); my $a2 = \$o[0]; $o[0] += 5; print "$$a2\n";
+my %q; $q{a} = "x"; my $a3 = \$q{a}; $q{a} ||= "z"; $q{a} .= "!"; print "$$a3\n";
+my %r; $r{a}{b} = "n"; my $a4 = \$r{a}{b}; $r{a}{b} .= "m"; print "$$a4\n";
 PL
