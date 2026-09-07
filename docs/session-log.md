@@ -82,15 +82,15 @@ routing the macros through the vivifying accessors — what the task headline
 still says — would not fix it, because the wrong element is chosen before any
 accessor runs.
 
-**Bars.**  Gate 221 files / 7637 rows, only the 13 standing pclxs xs rows
-failing.  `corpus-diff.pl 41ca2496` IDENTICAL over 111 files after every
-member — both `local` fixes are invisible to the corpus and change only the
+**Bars.**  Gate (final, on the rebased tree) 222 files / 7696 rows, only the 13 standing pclxs xs rows
+failing.  `corpus-diff.pl` IDENTICAL over 111 files after every member, against
+41ca2496 and again against the rebase target `89566d77` — both `local` fixes are invisible to the corpus and change only the
 shapes they fix.  Full sweep `--jobs 4`: GATE clean, TOTAL passing 18674 (+0),
 drops 5 = census, 0 new / 0 fixed, 4 UNSTABLE above the abort points of three
 already-PARTIAL files.  Companion `--jobs 1` `op/local.t op/multideref.t
 op/gv.t op/localref.t` on this tree AND on a `git archive 41ca2496`
 extraction: byte-identical, all four equal to their blessed snapshot rows.
-`ir-conform` 290 pass / 0 fail / 54 known / 0 stale, with `145-local` and
+`ir-conform` 291 pass / 0 fail / 54 known / 0 stale, with `145-local` and
 `133-local` leaving `known-fail.tsv` BY EDIT.  `emission-ab --shapes` over
 `lib/**/*.pm`: 12 SAME, 1 DIFF (IO/Handle.pm, the fixed shape), RCDIFF 0.
 `ir-host-leak` identical to the base.  Generation **v2-1020**, the three
