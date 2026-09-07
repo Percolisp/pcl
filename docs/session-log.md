@@ -23,7 +23,7 @@ Round 30's brief named four levers, ease-weighted.  Two shipped, two were sized
 and their numbers close or retarget them; every sizing is written into its task
 so it is not re-derived.
 
-**#1200 — a string eval's transpile is paid once EVER (`ae9e1c72`).**  `p-eval`
+**#1200 — a string eval's transpile is paid once EVER (`59f2214b`).**  `p-eval`
 has always cached its emission per PROCESS, keyed by the perl text, the caller's
 perl package, the capture NAMES (#296-B1) and the features in force (#364).
 That key is now also a DISK key, plus `*pcl-cache-generation*` — the ingredient a
@@ -43,7 +43,7 @@ quarter is **#1410**, blocked on a real problem (`load` cannot return the last
 form's value, and wrapping it destroys top-level-ness); the three shapes
 considered are written down there.
 
-**#1409 — the lever round 27 handed over for free (`4b2eb95e`).**  `feread`
+**#1409 — the lever round 27 handed over for free (`688a7ab4`).**  `feread`
 (one array) read 0.47× of perl while `feread2` (two) read 0.28×, because
 #1184's run required TWO arrays: a one-element list has no flattening to
 remove, so it kept the LIVE adjustable vector, whose every access is a hairy
@@ -55,7 +55,7 @@ that was already there — every such write is `written_in` for the #1140 array
 facts.  Three `Pl/t` guards asserted the pre-#1409 spelling and were repaired
 in the same commit, which is the s416 rule and the gate is what found them.
 
-**#995 and #1182 — sized, with the numbers (`c55b7571` ships what #1182's
+**#995 and #1182 — sized, with the numbers (`39e1a656` ships what #1182's
 sizing found).**  #995's `"k" . NUM` arm is worth **1.5 %** (27.0 ns against
 27.4): `%p-.-slow`'s profile share is `concatenate 'string`, not the overload
 dispatch — do not retry it.  Its other residue is real and now sized: `$h{$k}++`
@@ -80,11 +80,38 @@ produced no verdict at all (pre-existing on b5e9f845).
 
 Bars: gate 218 files / 7571 rows (only the 13 pclxs xs rows); corpus-diff 1 of
 111; emission A/B over 1007 files 966 SAME / 41 DIFF / 0 RCDIFF, all one family;
-full sweep GATE clean with TOTAL passing 18674 (+0) three times over; companion
+full sweep GATE clean with TOTAL passing 18674 (+0) three times over — the third
+ran to completion on the records tree and reads 0 new / 0 fixed / 0 LOST, drops
+5 = census, `CAUSES: 0 of 478`, 108 files, pack.t OK 5636/89; companion
 `--jobs 1` over nine files, every one equal to its snapshot row; ir-conform
 289/0/56/0; generation v2-990.  Records: DECIDED §s473p,
 `docs/plan-speed-and-ir-s470.md` §A.4.3's round-30 verdict, ir-spec §6.2's
 `:arrays` paragraph, tasks #1200/#1409/#995/#1182 and the new #1410.
+
+**The round was cut by the session rate limit before its last step and resumed
+the next session** (fresh agent, same worktree).  What the resume did and
+nothing else: the task DONE texts (#1200 closed, #1182's retarget and #995's
+two-residue verdict written into the tasks themselves), the rebase onto main
+(`ee02b69f`, then `dec62837`), and the bars re-run there.  **What main had
+gained since the tree the sweep ran on is BZ's installer work (`pcl`, `pl2cl`,
+`runpcl`, `tools/` including the sweep runner, two `Pl/t` files), s473t3's
+baseline and catalogue edits, and docs — and not one `Pl/*.pm`, `cl/` or
+`lib/` line**, so the sweep could not move and was not re-run (the
+WHAT-TO-RUN-WHEN table's first row); main's own sweep through BZ's NEW runner
+reads the same TOTAL 18674 (Fable, at s473t3's merge), which is the two runner
+versions agreeing on the number.  The bars on the rebased tree: gate **219
+files / 7599 rows**, the 13 pclxs xs rows only (the +1 file / +28 rows over the
+round's own 218/7571 are main's new `Pl/t/pcl-root-01.t`); corpus-diff vs
+`ee02b69f` unchanged at 1 of 111 (`split.t`) with silent drops 5; emission A/B
+over lib + shapes 28 files 25 SAME / 3 DIFF / 0 RCDIFF, each of the three
+(`Config.pm`, `English.pm`, `Try/Tiny.pm`) one single-array `foreach` taking
+the `:arrays t` run; ir-host-leak's 31-symbol set identical; `tag-license
+--check` clean; no file-mode change against main.  One bug filed on the way,
+**#1411**: `tools/emission-ab.pl --out` with a RELATIVE path puts side A's ref
+worktree around the output path, so side A writes nothing and every pair reads
+DIFF with an empty `rc A=` — loud, but loud in the wrong direction, and one
+line (`rel2abs` the option, as the script already does for its inputs) fixes
+it.
 
 ## Session s473t3 (Opus agent, 2026-09-07) — the last 79 blessed rows whose only cause was a catalogue NOTE now name a task or a section; six of the notes were measured WRONG
 
