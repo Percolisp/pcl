@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -104,9 +104,9 @@ PL
 # THE LAST ROW IS THE ALIAS, and it is why the fix binds the vivified
 # container and stores through the ORDINARY `(setf (p-gethash …))` write rule
 # rather than routing the whole place through `p-setf`: p-setf's nested arm
-# REPLACES the slot (raw `(setf (gethash …))`), which would answer "x" here.
-# perl answers "xy" — probed.  (A plain nested `=` still loses that alias in
-# PCL: #1151, pre-existing and filed, not made worse here.)
+# used to REPLACE the slot (raw `(setf (gethash …))`), which would answer "x"
+# here.  perl answers "xy" — probed.  (That raw store was #1151; row 9 below
+# is its guard, and p-setf's nested arm now writes through the box too.)
 is(run_cl(<<'PL'), "x\n1\n0\n[]\n0\n-3\n3\n0\n0\nx\nx\nx\nxy\n", '#1057 compound assigns over a nested element');
 my %a; $a{a}{b} .= "x";   print $a{a}{b}, "\n";
 my %b; $b{a}{b} += 1;     print $b{a}{b}, "\n";
@@ -198,4 +198,28 @@ for my $t (
   else { print "OTHER: $@" }
 }
 my @a = (1,2,3); eval { $a[-4] = 9 }; print "survived @a\n";
+PL
+
+# ── 9. #1151 (s473b): a plain `=` to a NESTED element must WRITE THROUGH the
+# slot's box, not replace it.  `p-setf`'s nested arm expanded to a raw
+# `(setf (gethash (to-string KEY) H) VAL)` — the ONE element-write entry path
+# in the runtime that did not go through the write rule
+# (docs/boxed-aggregates-design-s455.md §4.1) — so every alias taken before
+# the assignment went stale: rows 1–5 printed the OLD value, row 6 kept
+# reporting the overwritten undef as defined, row 7's foreach alias froze.
+# Its array twin `p-autoviv-aref-set` already stored through `p-array-set`,
+# which writes the box through; that disagreement is what identified this as
+# a bug (rule 11).  Rows 8–9 are the two spellings that were already right
+# and must stay so: the FLAT element, and the array-shaped nested slot.
+# Every expectation is the live perl 5.40.3 answer (probed s473b).
+is(run_cl(<<'PL'), "2\n2\n2\n2\n9 1\n01\n7\n2\n2\n", '#1151 a plain = to a nested element writes through the slot box');
+my %a; $a{a}{b} = 1; my $r1 = \$a{a}{b}; $a{a}{b} = 2;       print $$r1, "\n";
+my %b; $b{a}{b}{c} = 1; my $r2 = \$b{a}{b}{c}; $b{a}{b}{c} = 2; print $$r2, "\n";
+my @c; $c[0]{k} = 1; my $r3 = \$c[0]{k}; $c[0]{k} = 2;       print $$r3, "\n";
+my $d = {}; $d->{a}{b} = 1; my $r4 = \$d->{a}{b}; $d->{a}{b} = 2; print $$r4, "\n";
+my %e; $e{1}{2} = 1; my $r5 = \$e{1}{2}; $e{1}{2} = 9;       print $$r5, " ", scalar(keys %{$e{1}}), "\n";
+my %f; $f{a}{b} = 1; my $r6 = \$f{a}{b}; $f{a}{b} = undef;   print((defined $$r6 ? 1 : 0), (exists $f{a}{b} ? 1 : 0), "\n");
+my %g; $g{a}{b} = 1; for my $v ($g{a}{b}) { $g{a}{b} = 7; print $v, "\n"; }
+my %h; $h{a} = 1; my $r7 = \$h{a}; $h{a} = 2;                print $$r7, "\n";
+my %i; $i{a}[0] = 1; my $r8 = \$i{a}[0]; $i{a}[0] = 2;       print $$r8, "\n";
 PL

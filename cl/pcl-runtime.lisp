@@ -11275,12 +11275,24 @@ which is one of #1140's escape spellings (probed)."
 (defmacro p-autoviv-set (inner-hash-form outer-key value)
   "Set value with autovivification for nested hash access.
    inner-hash-form is (p-gethash hash inner-key) or deeper.
-   Expands to code that ensures intermediate hashes exist."
+   Expands to code that ensures intermediate hashes exist.
+
+   THE STORE IS (setf p-gethash), i.e. %p-gethash-store — the ONE hash element
+   write rule (docs/boxed-aggregates-design-s455.md §4.1: an existing slot BOX
+   is written through, because it may be someone's live alias).  This used to
+   be a raw (setf (gethash (to-string KEY) H) VAL), the single entry path in
+   the runtime that replaced the slot instead of writing through it, so
+   `$h{a}{b} = 1; $r = \\$h{a}{b}; $h{a}{b} = 2` left $$r at 1 (task #1151).
+   Its array twin p-autoviv-aref-set already went through p-array-set, which
+   is the same rule for arrays — the disagreement between the twins is what
+   identified this as a bug rather than a policy.  (setf p-gethash) applies
+   to-string to the key itself, so the coercion the raw form spelled out is
+   not lost."
   (let ((val-var (gensym "VAL"))
         (hash-var (gensym "HASH")))
     `(let ((,val-var ,value)
            (,hash-var ,(expand-autoviv inner-hash-form)))
-       (setf (gethash (to-string ,outer-key) ,hash-var) ,val-var))))
+       (setf (p-gethash ,hash-var ,outer-key) ,val-var))))
 
 (defmacro p-autoviv-aref-set (hash-chain idx value)
   "Set array element in a hash chain with autovivification.
