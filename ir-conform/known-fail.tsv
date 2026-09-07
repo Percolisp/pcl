@@ -36,7 +36,6 @@
 141-local	1190	`local $y[0][0] = 5` reads empty and never vivifies $y[0]
 142-local	1190	`local $h{a}{b} = 5` reads empty inside the scope
 144-local	1190	the four `local` nested-element spellings, one row each
-145-local	1243	`local($H) = @_` is a LIST assignment in perl; PCL assigns a scalar (the count)
 172-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0`
 173-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0`
 186-loops-exits	1244	`next` from a called sub dies where perl runs the loop's `continue` block

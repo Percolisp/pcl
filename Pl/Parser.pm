@@ -4102,6 +4102,16 @@ sub _process_local_declaration {
   } @$parts;
 
   # ── Pre-unwrap: local(*foo) — single symbol in parens. Unwrap before typeglob check.
+  # NOTE (s473a): the parens are DISCARDED here, and perl reads list-vs-scalar
+  # assignment off exactly them — `local($a[1]) = (7,8)` stores 7 where
+  # `local $a[1] = (7,8)` stores 8, and the RHS runs in LIST context.  The
+  # SUBSCRIPTED spelling therefore still assigns in scalar context: task #1339,
+  # which carries the measurement that stopped it being fixed here (routing a
+  # parenthesised single element through the slice/list path costs the
+  # p-local-*-elem-init fast path — 0.93 s → 1.14 s on a 3e6-iteration
+  # `local($h{k}) = $v` loop, and 1.27 s through `p-list-=`).  The
+  # UNSUBSCRIPTED spelling is fixed, from $paren_lhs further down, off @$parts,
+  # which this unwrap does not touch (#1243 (a)).
   if (@non_ws >= 1 && ref($non_ws[0]) eq 'PPI::Structure::List') {
     my @flat;
     for my $child ($non_ws[0]->children) {
@@ -4232,34 +4242,12 @@ sub _process_local_declaration {
     return;
   }
 
-  # ── Unwrap local(ELEM) parens form: local($a[N]) / local($h{key}) / local(@a[N,M])
-  # PPI gives Structure::List when parens are used; unwrap it so the handler below fires.
-  if (@non_ws >= 1 && ref($non_ws[0]) eq 'PPI::Structure::List') {
-    my @flat;
-    for my $child ($non_ws[0]->children) {
-      my $cr = ref($child);
-      next if $cr eq 'PPI::Token::Whitespace';
-      next if $cr eq 'PPI::Token::Structure';   # skip '(' and ')'
-      if ($cr =~ /^PPI::Statement/) {
-        for my $gc ($child->children) {
-          next if ref($gc) eq 'PPI::Token::Whitespace';
-          push @flat, $gc;
-        }
-      } else {
-        push @flat, $child;
-      }
-    }
-    if (@flat == 2
-        && ref($flat[0]) eq 'PPI::Token::Symbol'
-        && ref($flat[1]) eq 'PPI::Structure::Subscript') {
-      splice(@non_ws, 0, 1, @flat);
-    }
-    elsif (@flat == 1
-           && ref($flat[0]) eq 'PPI::Token::Symbol') {
-      # local(*foo), local($scalar), etc. — single symbol in parens
-      splice(@non_ws, 0, 1, @flat);
-    }
-  }
+  # (A SECOND copy of the paren unwrap stood here and was DEAD: both of its
+  # arms — Symbol+Subscript and a lone Symbol — are strict subsets of the
+  # pre-unwrap above, which has already spliced the Structure::List away by the
+  # time control reaches this point, so `ref($non_ws[0]) eq
+  # 'PPI::Structure::List'` could never hold again.  Measured while fixing
+  # #1243 (a): the paren flag added to THIS copy never fired.  Deleted s473a.)
 
   # ── Handle local $hash{key}, local @arr[N], local @hash{@keys}, local @arr[N,M]
   # PPI gives: Symbol("$hash") + Structure::Subscript("{key}").  Also the
@@ -4533,6 +4521,14 @@ sub _process_local_declaration {
   # `local($SIG{__WARN__},$^W) = (sub {…}, 1)` never installed its handler).
   my @items;
   my $init_idx = -1;
+  # Did the LHS arrive in PARENTHESES?  perl reads list-vs-scalar assignment
+  # off that alone, exactly as it does for `my`: `local $x = @_` is a SCALAR
+  # assignment (the count) and `local($x) = @_` is a LIST assignment (the
+  # first element).  The `my` half already gets this right through
+  # Pl::PExpr::extract_declarations, which KEEPS the Structure::List as ONE
+  # LHS unit so the ordinary list-assignment machinery sees it; this path
+  # builds its own @items, so it has to record the same fact (#1243 (a)).
+  my $paren_lhs = 0;
 
   # A target shape with no lowering makes the classifier die (rule 12); here it
   # becomes the statement's DROP, never an escaping die — see
@@ -4547,6 +4543,7 @@ sub _process_local_declaration {
       }
       elsif ($ref eq 'PPI::Structure::List') {
         # Undef-aware, so local(undef, $a, undef, $b) keeps its skip markers.
+        $paren_lhs = 1;
         push @items, $self->_local_list_items($p, $stmt);
       }
       elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
@@ -4586,7 +4583,27 @@ sub _process_local_declaration {
   # `local $x = V` shortcut below cannot serve it — route it through the LIST
   # assignment path, which writes through `place` (the same `(p-cast-% "…")`
   # form every read of the name now uses).
-  my $solo_binding = (@items == 1 && ($items[0]{kind} // '') ne 'deref');
+  # …and a parenthesised LHS makes the assignment a LIST assignment (#1243 (a)):
+  # `local($x) = @_` used to take the scalar branch below and store the ARGUMENT
+  # COUNT in $x — the classic pre-`my` idiom, so the bug was wherever old code
+  # uses it.  Only a SCALAR target has a scalar context for the parens to
+  # change, though: an array or hash lvalue imposes list context on its own, so
+  # `local(@a) = X` and `local @a = X` mean the same thing in perl and the solo
+  # branch below is already right for them.  Keeping those on the solo path is
+  # not merely churn-avoidance — it is what keeps `local (@bim) = local(@bee) =
+  # LIST` (perl-tests/min_local.t:18) working, because the INNER `local`'s own
+  # binding is recovered by that branch's `(p-array-= VAR RHS)` special case
+  # and the list path has no such reading.
+  my $solo_list_ctx_anyway = 0;
+  if (@items == 1 && ($items[0]{kind} // '') eq 'var') {
+    # The same sigil reading the solo branch itself uses — the two must agree.
+    my $v = $items[0]{cl};
+    my ($sg) = ($v =~ m{::([%\@\$])}) ? ($1) : (substr($v, 0, 1));
+    $solo_list_ctx_anyway = ($sg eq '@' || $sg eq '%');
+  }
+  my $solo_binding = (@items == 1
+                      && !($paren_lhs && !$solo_list_ctx_anyway)
+                      && ($items[0]{kind} // '') ne 'deref');
 
   $self->_emit(";; $perl_code");
 
