@@ -324,18 +324,31 @@ never with fresh boxes — `exists $a[$i]` on the new slots must stay false
 (s295; a port that models holes as "slot absent" gets this for free). An array
 in numeric/scalar position coerces to its length.
 
-**Read-only arrays (s337, task #159):** the ONE case where the storage is not
-adjustable.  `Internals::SvREADONLY(@a, 1)` replaces the variable's storage
-with a **simple vector** — same element boxes, no fill pointer, not adjustable
-— because perl's read-only AV is precisely a *fixed-size* array whose elements
-remain writable.  The predicate is therefore the storage itself
-(`%p-array-readonly-p` = a non-string vector with no fill pointer), and every
-size-changing entry point (push/unshift/pop/shift/splice/delete, whole-array
-assignment, `undef @a`, the out-of-bounds extend inside element writes, and
-growth via `$#a`) checks it and raises perl's `Modification of a read-only
-value attempted`.  A port that has no equivalent of "fixed-size vector" needs
-an explicit per-array flag consulted at those same points; nothing else in this
-spec changes.
+**Read-only arrays (s337, task #159; storage corrected s473d, task #1248(c)):**
+the ONE case where the storage has no fill pointer.  `Internals::SvREADONLY(@a,
+1)` replaces the variable's storage with an **adjustable vector that has no
+fill pointer** — same element boxes — because perl's read-only AV is precisely
+a *fixed-size* array whose elements remain writable.
+
+Two properties of the storage answer two different questions, and a port must
+keep them apart:
+
+| question | property | asked by |
+|---|---|---|
+| is this value an array variable's storage (rather than a string, a hash, a reference, or a list temporary)? | it is a non-string vector **that is adjustable** | every scalar-context collapse: `scalar(@a)`, `0+@a`, `my $n = @a`, `scalar(@$r)`, `@a x 3`, list-repeat flattening |
+| … and is it WRITABLE? | it **has a fill pointer** (`%p-array-readonly-p` is the negation) | every size-changing entry point |
+
+The read-only storage was a plain *simple* vector until s473d, which answered
+NO to both, so a read-only array stopped being recognised as an array at all
+and `scalar(@a)` yielded the vector itself.  A port that folds the two
+questions into one representation test will reproduce that bug.
+
+Every size-changing entry point (push/unshift/pop/shift/splice/delete,
+whole-array assignment, `undef @a`, the out-of-bounds extend inside element
+writes, and growth via `$#a`) checks the fill pointer and raises perl's
+`Modification of a read-only value attempted`.  A port that has no equivalent
+of "fixed-size vector" needs an explicit per-array flag consulted at those same
+points; nothing else in this spec changes.
 
 **Hole aliasing (defelem, s316e):** when a hole slot is *aliased* — by a
 foreach/grep/map `$_` binding or by spreading the array into `@_` — the

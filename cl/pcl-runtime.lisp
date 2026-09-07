@@ -2055,17 +2055,33 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Read-only arrays — Internals::SvREADONLY(@a, 1)   (task #159)
 ;;; ---------------------------------------------------------------------------
-;;; A read-only array is stored as a SIMPLE vector: the same element boxes as
-;;; before (so in-bounds element writes — `$a[0] = 9`, a foreach alias write —
-;;; still land, exactly as in perl, where a read-only AV is FIXED SIZE but its
-;;; elements are not read-only), but with no fill pointer and not adjustable.
-;;; Every size-changing operation therefore fails BY CONSTRUCTION; the checks
-;;; below exist only to replace SBCL's message with perl's, and to catch the
-;;; few cases perl kills that a simple vector would otherwise tolerate (unshift
-;;; with an empty list, a no-op splice).  Reading costs nothing — LENGTH and
-;;; AREF work on either storage — which is why this representation was chosen
-;;; over a per-array flag consulted on the push hot path (fable-answers-s318
-;;; §2 option (b)).
+;;; A read-only array is stored as an ADJUSTABLE vector WITH NO FILL POINTER:
+;;; the same element boxes as before (so in-bounds element writes — `$a[0] = 9`,
+;;; a foreach alias write — still land, exactly as in perl, where a read-only AV
+;;; is FIXED SIZE but its elements are not read-only).  Every size-changing
+;;; operation fails BY CONSTRUCTION, because every one of them goes through the
+;;; fill pointer; the checks below exist only to replace SBCL's message with
+;;; perl's, and to catch the few cases perl kills that fixed storage would
+;;; otherwise tolerate (unshift with an empty list, a no-op splice).  Reading
+;;; costs nothing — LENGTH and AREF work on either storage — which is why this
+;;; representation was chosen over a per-array flag consulted on the push hot
+;;; path (fable-answers-s318 §2 option (b)).
+;;;
+;;; THE TWO PROPERTIES ARE NOT INTERCHANGEABLE, and reading them as one cost a
+;;; whole family of wrong answers (#1248(c)).  Across the runtime:
+;;;   * ADJUSTABLE-ARRAY-P is the test for "this value IS an array variable's
+;;;     storage", as opposed to a string, a hash, a box (an array REFERENCE) or
+;;;     one of the simple vectors that carry LIST temporaries (a `p-..` range,
+;;;     a `(vector …)` argument run).  Sixteen sites ask it, and every one of
+;;;     them means "is it an array" — "@a in scalar context is its element
+;;;     count" above all;
+;;;   * ARRAY-HAS-FILL-POINTER-P is the test for "… and it is WRITABLE"
+;;;     (%P-ARRAY-READONLY-P is its negation).
+;;; The read-only storage used to be a plain simple vector, which answered NO
+;;; to BOTH — so `scalar(@a)`, `0+@a`, `my $n = @a`, `"n=" . @a` and
+;;; `scalar(@$r)` stopped seeing an array at all and returned the vector
+;;; itself, which printed as its elements or as ARRAY(0x1).  A read-only array
+;;; is still an array; only its size is frozen.
 (declaim (inline %p-array-readonly-p))
 (defun %p-array-readonly-p (a)
   "True when A is an array whose STORAGE is read-only, i.e. fixed size.
@@ -2309,12 +2325,14 @@
 
 (defun %p-array-set-readonly (a flag)
   "Return the storage @A must have for perl's SvREADONLY flag FLAG.
-   Read-only: a simple vector over the SAME element boxes.  Writable: a fresh
-   adjustable vector with a fill pointer.  A is returned unchanged when it
-   already has the requested storage, and announced-and-returned when it is not
-   an array at all.  The caller (the Internals::SvREADONLY macro) stores the
-   result back into the variable's cell — which is why the macro needs the
-   variable, not its value."
+   Read-only: an ADJUSTABLE vector with NO FILL POINTER over the SAME element
+   boxes — adjustable so that every `is this an array` test still says yes,
+   and fill-pointerless so that every size change fails (task #1248(c)).
+   Writable: a fresh adjustable vector with a fill pointer.  A is returned
+   unchanged when it already has the requested storage, and
+   announced-and-returned when it is not an array at all.  The caller (the
+   Internals::SvREADONLY macro) stores the result back into the variable's
+   cell — which is why the macro needs the variable, not its value."
   (cond
     ((not (and (vectorp a) (not (stringp a))))
      (%p-announce-unsupported "Internals::SvREADONLY"
@@ -2324,7 +2342,7 @@
     ((p-true-p (unbox flag))
      (if (%p-array-readonly-p a)
          a
-         (let ((ro (make-array (length a))))
+         (let ((ro (make-array (length a) :adjustable t)))
            (replace ro a)
            ro)))
     (t
@@ -6816,10 +6834,14 @@ per element."
    element-storage shape %P-VEC-DATA defines — a DISPLACED array included,
    where replacing the data would silently break the displacement — and does
    nothing at all for a non-adjustable one, which is what the callers' own
-   guard did.  SB-KERNEL-specific, like %P-VEC-DATA's %ARRAY-DATA beside it."
-  (cond ((not (adjustable-array-p place)) place)
+   guard did — nor for a FILL-POINTERLESS one, which since #1248(c) is how a
+   READ-ONLY array is stored: it is adjustable (it is an array) and ADJUST-ARRAY
+   would silently resize it, where perl's answer is a fatal.  Every caller
+   reaches this behind %P-CHECK-ARRAY-WRITABLE, so that is belt, not braces.
+   SB-KERNEL-specific, like %P-VEC-DATA's %ARRAY-DATA beside it."
+  (cond ((not (and (adjustable-array-p place) (array-has-fill-pointer-p place)))
+         place)
         ((and (sb-kernel:array-header-p place)
-              (array-has-fill-pointer-p place)
               (not (sb-kernel::%array-displaced-p place)))
          (sb-kernel:set-array-header place (make-array n) n
                                      (fill-pointer place) 0 (list n) nil t)

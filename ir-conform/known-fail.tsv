@@ -12,7 +12,6 @@
 # Rows leave this file BY EDIT, with the fix, one at a time.
 #
 # case<TAB>task<TAB>cause
-010-array	1248	Internals::SvREADONLY(@a,1) leaves scalar(@a) returning the ELEMENTS, not the count (perl B2, PCL B12)
 022-refs	1249	\(@b, 9) does not distribute over the array's elements: perl 3 refs, PCL 2
 033-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line
 034-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line
@@ -45,7 +44,6 @@
 238-refs	1249	`$#{'main::ga'}` (symbolic last-index) answers 7, perl answers 2
 239-refs	1249	a trailing BAREWORD statement is emitted as a CALL; perl treats it as a string constant
 243-string	1249	utf8::is_utf8 on a byte string answers 1; perl answers 0
-245-array	1248	scalar(@a) after Internals::SvREADONLY returns the elements
 246-exception	1240	the runtime-raised errors in the table carry `(eval 0) line 0`
 253-string	1249	`exists $string->{k}` must die under `use strict refs`; PCL answers ''
 258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line

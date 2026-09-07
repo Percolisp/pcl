@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 11;
 
 sub run_cl {
     my ($code) = @_;
@@ -447,4 +447,114 @@ lit-dot   1e+15
 lit-int   1000000000000000
 iv*iv     1000000000000000
 nv*iv-e16 1e+16
+OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# E — #1248(c).  A read-only array is still an ARRAY.  Its storage used to be a
+# plain SIMPLE vector, and sixteen sites across the runtime ask
+# ADJUSTABLE-ARRAY-P to mean "is this value an array variable's storage" (as
+# opposed to a string, a hash, a box holding an array REFERENCE, or one of the
+# simple vectors that carry LIST temporaries — a `p-..` range, a `(vector …)`
+# argument run).  A simple vector answered NO to that question as well as to
+# "is it writable", so `scalar(@a)`, `0+@a`, `my $n = @a` and `scalar(@$r)`
+# stopped collapsing to the element count and yielded the vector itself, which
+# printed as ARRAY(0x1) or as its own elements.  The storage is now an
+# ADJUSTABLE vector with NO FILL POINTER: adjustable answers the first
+# question, the missing fill pointer answers the second and is what makes every
+# size change fail.
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('#1248(c) a read-only array answers every scalar-context question as an array',
+        <<'PL', <<'OUT');
+no warnings;
+sub ro { my @a = @_; Internals::SvREADONLY(@a,1); return \@a }
+my @a=(1,2,3); Internals::SvREADONLY(@a,1);
+print "scalar   ", scalar(@a), "\n";
+print "numify   ", 0+@a, "\n";
+my $n = @a;      print "assign   $n\n";
+my $m; $m = @a;  print "assign2  $m\n";
+print "lastidx  ", $#a, "\n";
+print "bool     ", (@a ? "true" : "false"), "\n";
+print "interp   @a\n";
+print "join     ", join(",",@a), "\n";
+print "elem     ", $a[1], "\n";
+print "cmpnum   ", (@a == 3 ? "y" : "n"), "\n";
+print "sprintf  ", sprintf("%d/%s", scalar(@a), scalar(@a)), "\n";
+my $r = \@a;
+print "ref-sc   ", scalar(@$r), "\n";
+print "ref-num  ", 0+@$r, "\n";
+print "ref-last ", $#$r, "\n";
+print "sub-sc   ", sub { @a }->(), "\n";
+print "fresh    ", scalar(@{ ro(5,6,7,8) }), "\n";
+my @c = @a;      print "copy     ", scalar(@c), "\n";
+print "grep     ", scalar(grep { $_ > 1 } @a), "\n";
+print "sort     ", join("",sort { $b <=> $a } @a), "\n";
+print "slice    ", join(",", @a[0,2]), "\n";
+print "keys     ", join(",", keys @a), "\n";
+PL
+scalar   3
+numify   3
+assign   3
+assign2  3
+lastidx  2
+bool     true
+interp   1 2 3
+join     1,2,3
+elem     2
+cmpnum   y
+sprintf  3/3
+ref-sc   3
+ref-num  3
+ref-last 2
+sub-sc   123
+fresh    4
+copy     3
+grep     2
+sort     321
+slice    1,3
+keys     0,1,2
+OUT
+
+# E2 — the INVERSE: making the array an array again must not make it writable.
+# Every size change still dies with perl's own text, an in-bounds ELEMENT write
+# still lands (perl freezes the AV, not its elements), the flag getter still
+# answers 1/"", and clearing the flag gives back a growable array.
+test_cl('#1248(c) inverse: read-only still means fixed SIZE, and only the size',
+        <<'PL', <<'OUT');
+no warnings;
+sub d { my ($n,$c) = @_; my $r = eval { $c->(); 1 };
+        my $e = $@; $e =~ s/ at .*//s; $e =~ s/\n.*//s;
+        print "$n ", ($r ? "lived" : $e), "\n" }
+my @a=(1,2,3);
+print "before   ", Internals::SvREADONLY(@a), " ", scalar(@a), "\n";
+Internals::SvREADONLY(@a,1);
+print "flag     ", Internals::SvREADONLY(@a), "\n";
+d("push    ", sub { push @a, 4 });
+d("pop     ", sub { pop @a });
+d("shift   ", sub { shift @a });
+d("unshift ", sub { unshift @a, 0 });
+d("splice  ", sub { splice(@a,0,1) });
+d("assign  ", sub { @a = (7,8) });
+d("clear   ", sub { @a = () });
+d("undef   ", sub { undef @a });
+d("elemwr  ", sub { $a[1] = 9 });
+print "after    ", join(",",@a), " n=", scalar(@a), "\n";
+Internals::SvREADONLY(@a,0);
+print "flagoff  ", Internals::SvREADONLY(@a), "\n";
+push @a, 4;
+print "grown    ", join(",",@a), " n=", scalar(@a), "\n";
+PL
+before    3
+flag     1
+push     Modification of a read-only value attempted
+pop      Modification of a read-only value attempted
+shift    Modification of a read-only value attempted
+unshift  Modification of a read-only value attempted
+splice   Modification of a read-only value attempted
+assign   Modification of a read-only value attempted
+clear    Modification of a read-only value attempted
+undef    Modification of a read-only value attempted
+elemwr   lived
+after    1,9,3 n=3
+flagoff  
+grown    1,9,3,4 n=4
 OUT
