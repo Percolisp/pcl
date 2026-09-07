@@ -2,6 +2,90 @@
 
 Append new entries at the top. One section per session.
 
+## Session s470bz (Opus agent, 2026-09-07) — the install layout: one root resolver, `pcl` actually installed, `--uninstall`, and the installer tested in a container
+
+**#1302 + #1304, three commits, no emission change** (`corpus-diff b5e9f845`
+IDENTICAL across 111 files, silent drops 5, run twice; no generation bump).
+
+**(b) FIVE ROOT SPELLINGS BECOME ONE.**  "Which PCL tree am I part of" was
+answered by hand in five places — `dirname(abs_path($0))` in `pcl`, a
+`$script_dir` in `pl2cl`, `$FindBin::RealBin` in `runpcl` / the sweep /
+`tools/pclperl-for-tests`, `dirname(abs_path(dirname($0)))` in `tools/runt` and
+`tools/clt`, and a `(.*)/cl/[^/]+` regex on the runtime path in
+`PCLSbcl::_installed_core` — and they agreed only because every caller happens
+to sit at the checkout root or one level under it.  `PCLPaths::root($hint)`:
+`$PCL_ROOT` when set (explicit always wins, and an unusable one DIES rather
+than falling back silently), else the caller's own real directory and then its
+parent — exactly two candidates, because PCL ships scripts at two depths and a
+walk to `/` would answer with whatever checkout sits above — each VERIFIED by
+`cl/pcl-runtime.lisp` being there, and a die naming every candidate tried
+(rule 12).  `PCLPaths::root_of($path)` is the same derivation without the
+environment override, which is the question `_installed_core` actually asks.
+
+**THE BOOTSTRAP IS NAMED, NOT REMOVED.**  A script cannot ask `root()` anything
+until it has found `tools/lib`, which lives in the tree it is asking about, so
+one `use lib` per script stays forever.  The hazard was never that line but a
+SECOND RULE growing beside it, so `Pl/t/pcl-root-01.t` (28 rows, 230 ms) writes
+out every caller's old spelling and demands it equal `root()`'s answer, and then
+runs all seven scripts with `$PCL_ROOT` at a directory that is not a PCL tree
+and demands the resolver's own message — a caller still deriving its own root
+would simply carry on and pass.
+
+**THE GATE CAUGHT THE ONE REAL MISTAKE, AND IT WAS A `%INC` KEY.**  `pl2cl`
+cannot say `use lib "<root>/tools/lib"`, because its own `@INC` is EMITTED into
+every program preamble (`*p-core-inc-dirs*`) and a permanent entry would change
+the compiler's output.  The first attempt required the file by ABSOLUTE PATH
+instead — which keys `%INC` on the path, so the sibling `require PCLPaths` in
+`Pl/ProtoCache.pm` and `tools/lib/PCLSbcl.pm` read it a second time and
+redefined every sub: ten warnings on the stderr of EVERY transpile, and five
+gate files failed on that noise alone (`cache-surface-01`, `feature-pragma-01`,
+`fileio-02`, `module-fasl-cache-01`, `pcl-dash-m-01`).  The fix is `local @INC`
++ `require PCLPaths`, which is the shape `Pl/ProtoCache.pm::cache_dir` already
+used — the sibling was there to be copied.
+
+**(a)(c)(d)(f)(g) — an installation is three commands, and it can be undone.**
+`pcl` is installed: the README has called it "the everyday command" since
+v0.1.0 while the installer copied `pl2cl` and `runpcl` only, so every install
+so far was broken for the command a user types.  `@COMMANDS` is now ONE list
+that the tree copy, the wrapper loop, the smoke test and `--uninstall` all
+read.  The PATH hint prints the exact `export PATH="<bindir>:$PATH"` line and
+only when it is needed, and edits no rc file.  `--uninstall` removes
+`<prefix>/lib/pcl` and exactly the wrappers this script wrote (recognised by
+CONTENT, so a `pcl` somebody else put there is left alone), refuses naming the
+directory when there is no PCL install, asks for no dependencies at all, and
+says the per-user cache is untouched.  `pcl --version` on an installed tree
+gains a second source: `git describe`, else CHANGELOG.md's top heading, which
+is what a tarball or an archive extraction has.  The installer's own root comes
+from `root_of` and deliberately not `root()` — an installer whose SOURCE could
+be redirected by an environment variable would copy a different PCL than the
+checkout the operator typed the command in.
+
+**#1304, and it found a bug on its first run.**  `tools/install-matrix/install-and-verify.sh`
+splits into `deps.sh` + `verify.sh` and becomes the two in sequence, so
+`.github/workflows/install-matrix.yml` is untouched; the split is what lets
+`tools/t/install-container.t` bake the dependency half into an image once (44 s)
+and re-run the verify half in seconds.  Four legs: the matrix's own recipe as
+root, a NON-ROOT user installing into `$HOME/.local`, and a SHARED `/opt/pcl`
+install whose other user gets their own module cache and whose `pcl --cache-info`
+names it.  Leg (c) failed the first time with `Can't create directory
+/root/.cache` — **a saved PCL core memoises `asdf:*user-cache*` as the
+BUILDER's home** (task **#1327**, reproduced on the dev box with no container:
+`xdg-cache-home` is read at call time and is right, `*user-cache*` is the core
+builder's), so any ASDF work in another user's process targets a directory it
+cannot write.  That is the #1303 family one layer out.
+
+Bars: gate **218 files / 7569 tests**, only the 13 standing pclxs xs rows;
+`corpus-diff b5e9f845` IDENTICAL over 111 with silent drops 5; `PCL_SHOW_SBCL`
+byte-identical against a `git archive b5e9f845` extraction for `runpcl` and the
+sweep on both the cached-core and the `PCL_NO_CORE` leg; full sweep `--jobs 4`
+GATE clean, **TOTAL passing 18674 (+0)**, 0 new / 0 fixed, drops 5 = census,
+shortfall 12213 (+0), CAUSES 0 — and its `_status.tsv` compared FILE BY FILE
+against the OLD runner run on that extraction.  `tools/t/install-pcl.t` 15 → 57
+rows, 21.7 s, 23 of them failing on the extraction; `tools/t/install-container.t`
+17 rows, 87 s cold / 47 s warm.  Filed **#1325** (`PCLProc.pm:58` prints two
+warning lines on the stderr of every sweep), **#1326** (three more root
+derivations inside `Pl/ProtoCache.pm`, behind one bootstrap), **#1327**.
+
 ## Session 474 (Fable, 2026-09-06 22:40 → 2026-09-07 ~02:30) — four batches LIVE (BY, BU, s473t1, s473t2), the regex-engine question ruled, nothing in flight at the end
 
 - **Restart after a box reboot**: BY and BU (both STOPPED by s473's end) resumed with fresh Opus agents in their SAME worktrees; s473t1 launched as the USER's one-off THIRD slot ("also start the subjob which checks the sweep results"); s473t2 took BY's slot on its merge.  Every merge = Fable's own gate (or, for a baselines-only batch, the full sweep) in the agent's worktree, the hunks read, `--ff-only`, push, scratch archived under `~/pcl-agent-scratch/`, worktree removed.
