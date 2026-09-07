@@ -935,6 +935,32 @@ integers print exactly; floats print in Perl's `%.15g`-equivalent shortest
 form (`0.5` not `0.5d0`; integral floats print without `.0`); references →
 `"TYPE(0xADDR)"`; blessed references → `"Class=TYPE(0xADDR)"`.
 
+**`%.15g`'s style switch is the exponent of the ROUNDED value, and it must be
+computed exactly** (normative, s473d).  C uses the exponential style when the
+decimal exponent X of the value *after rounding to 15 significant digits* is
+`< -4` or `>= 15`.  Two traps, both of which cost PCL a divergence (#1012):
+
+* deriving X from a logarithm is wrong AT the powers of ten — `log10(1e15)` in
+  double is 14.999999999999998, so `1e15` printed `1000000000000000` where
+  perl prints `1e+15`.  Correct the log's answer against exact powers of ten
+  (one comparison), or compute the digits directly.
+* the ROUNDING is part of the rule: `999999999999999.9` rounds to `1e15` and
+  therefore prints `1e+15`, while `999999999999999.0` prints its own digits;
+  at the other end `9.999999999999999e-5` rounds to `1e-4` and prints
+  `0.0001`.  A host's `~E`-style formatter may not renormalise a mantissa that
+  rounds up to 10 (SBCL's does not — it gave `10e+14`), so build the mantissa
+  from the exponent you computed.
+
+The same reading serves `sprintf "%g"` with its own precision.
+
+**The residue a host without an IV/NV distinction keeps:** perl holds an
+integral *arithmetic* result as an IV and prints its digits, while the same
+value written as a float literal is an NV and goes through `%.15g` — `1e14*10`
+is `1000000000000000` and `1e15` is `1e+15`.  PCL has one representation for
+both and prints both as `1e+15`; its pure-integer arithmetic stays exact, so
+`1000000*1000000000` still prints its digits.  Task #1369,
+`not-supported.md` §"Integers are unbounded".
+
 ### 3.2a A dualvar is a FACT of the representation, never an inference (normative, s473d)
 
 A **dualvar** is a scalar whose numeric and string halves were set

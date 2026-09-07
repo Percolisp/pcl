@@ -3580,6 +3580,49 @@
       (svref (the simple-vector *p-small-fixnum-strings*) n)
       (%p-fixnum-string-digits n)))
 
+(defun %p-decimal-exponent (a prec)
+  "The decimal exponent C's `%.<PREC>g' — and therefore perl's `%.15g'
+   stringification — branches on: the exponent of the positive real A after it
+   has been ROUNDED TO PREC SIGNIFICANT DIGITS, computed exactly.
+
+   BOTH halves are load-bearing, and each has a divergence behind it.
+
+   * The obvious `(floor (log a 10d0))' is wrong AT the powers of ten:
+     `(log 1d15 10.0d0)' is 14.999999999999998, so FLOOR gave 14, the test
+     `(< 14 15)' passed, and 1e15 printed 1000000000000000 where perl prints
+     1e+15 (#1012).  The log is only a starting point here; the two loops
+     correct it against exact rational powers of ten and run at most once.
+   * The ROUNDING is not decoration: C chooses the style from the exponent of
+     the CONVERTED value, so 999999999999999.9 rounds up to 1e15 and perl
+     prints `1e+15' while 999999999999999.0 prints its own digits, and
+     9.999999999999999e-5 prints `0.0001' rather than an exponential form."
+  (let* ((r (rational a))
+         (e (floor (log a 10.0d0))))
+    (loop while (< r (expt 10 e)) do (decf e))
+    (loop while (>= r (expt 10 (1+ e))) do (incf e))
+    (if (>= (round r (expt 10 (- e (1- prec)))) (expt 10 prec)) (1+ e) e)))
+
+(defun %p-exponential-15 (v exp10)
+  "perl's `%.15g' EXPONENTIAL form for the non-zero float V, whose exact
+   decimal exponent is EXP10: 15 significant digits, trailing zeros stripped,
+   `e+NN' with at least two exponent digits.
+
+   The mantissa is rounded in RATIONALS rather than by `~,14E', because SBCL's
+   ~E does NOT renormalise a mantissa that rounds up to 10: it renders
+   999999999999999.9 as `10.00000000000000d+14', which cleaned up to `10e+14'
+   where perl prints `1e+15'.  The old code carried a comment claiming ~E
+   bumped the exponent; it does not, and nothing noticed because such values
+   used to take the fixed branch (#1012).  EXP10 already accounts for that
+   carry — see %p-decimal-exponent — so the rounding here yields exactly 15
+   digits."
+  (let* ((digits (round (abs (rational v)) (expt 10 (- exp10 14))))
+         (s (write-to-string digits))
+         (tail (string-right-trim "0" (subseq s 1)))
+         (mant (if (string= tail "") (subseq s 0 1)
+                   (concatenate 'string (subseq s 0 1) "." tail))))
+    (format nil "~:[~;-~]~Ae~:[+~;-~]~2,'0D"
+            (minusp v) mant (minusp exp10) (abs exp10))))
+
 (defun stringify-value (v)
   "Convert a raw value to string"
   (cond
@@ -3600,7 +3643,7 @@
        (t
         ;; Perl's %.15g: use fixed notation when -4 <= exp < 15, else exponential
         (let* ((abs-v (abs v))
-               (exp10 (floor (log abs-v (coerce 10 (type-of v))))))
+               (exp10 (%p-decimal-exponent abs-v 15)))
           (if (and (>= exp10 -4) (< exp10 15))
               ;; Fixed notation, %.15g: 15 significant digits total, so the
               ;; number of fraction digits is (15 - 1 - exp10).  Without an
@@ -3610,30 +3653,7 @@
                      (s (format nil "~,VF" digits v))
                      (c (string-right-trim "." (string-right-trim "0" s))))
                 (if (or (string= c "") (string= c "-")) "0" c))
-              ;; Exponential notation, %.15g: mantissa to 15 significant
-              ;; digits (14 after the point).  ~,14E rounds correctly and
-              ;; bumps the exponent when the mantissa rounds up to 10
-              ;; (9.999999999999999e15 -> 1e+16), matching Perl.
-              (let* ((s (format nil "~,14E" v))
-                     ;; Clean up CL exponent notation to Perl format
-                     ;; SBCL outputs "1.5d-8" for double, "1.5e-8" for single
-                     (s (substitute #\e #\d s :count 1))
-                     ;; Split at 'e' and clean mantissa
-                     (e-pos (position #\e s)))
-                (if e-pos
-                    (let* ((mantissa (subseq s 0 e-pos))
-                           (exponent-str (subseq s (1+ e-pos)))
-                           (exp-val (parse-integer exponent-str))
-                           (clean-m (string-right-trim "." (string-right-trim "0" mantissa)))
-                           ;; Perl format: e+NN or e-NN (always sign, at least 2 digits)
-                           (exp-sign (if (minusp exp-val) "-" "+"))
-                           (exp-abs (abs exp-val))
-                           (exp-str (if (< exp-abs 10)
-                                        (format nil "0~D" exp-abs)
-                                        (write-to-string exp-abs))))
-                      (format nil "~Ae~A~A" clean-m exp-sign exp-str))
-                    ;; Fallback: just strip trailing zeros and dot
-                    (string-right-trim "." (string-right-trim "0" s)))))))))
+              (%p-exponential-15 v exp10))))))
     ((numberp v) (write-to-string v))
     ;; A box in a RAW slot: the same reference box-sv would print, so it must
     ;; print the same word and the same (referent) address — #163.
@@ -5627,16 +5647,13 @@
    Strip trailing zeros unless alt-form."
   (let* ((prec (if (and precision (zerop precision)) 1 (or precision 6)))
          (abs-num (abs num))
-         (rat-num (rational abs-num))
-         (exp10 (if (zerop abs-num) 0 (floor (log (coerce abs-num 'double-float) 10.0d0)))))
-    (declare (ignore rat-num))
-    ;; Adjust exp10 for rounding using rational arithmetic
-    (when (not (zerop abs-num))
-      (let ((test-mant (/ (rational abs-num) (expt 10 exp10))))
-        (when (>= test-mant 10)
-          (incf exp10))
-        (when (< test-mant 1)
-          (decf exp10))))
+         ;; C picks the style from the exponent of the CONVERTED value, i.e.
+         ;; after rounding to PREC significant digits — the same reading
+         ;; stringify-value's %.15g needs, so it is the same function (#1012).
+         ;; This site used to correct the log's answer for the mantissa RANGE
+         ;; but not for the rounding CARRY, so `%g` of 999999.9 printed
+         ;; 1000000 where perl prints 1e+06.
+         (exp10 (if (zerop abs-num) 0 (%p-decimal-exponent abs-num prec))))
     (if (or (< exp10 -4) (>= exp10 prec))
         ;; Use %e with (prec-1) precision
         (let ((s (sprintf-format-float-e num (max 0 (1- prec)) upper-case-p)))

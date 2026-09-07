@@ -2344,6 +2344,26 @@ up wherever an exact integer meets a place perl has already left for an NV):
 | `printf "%s", 9007199254740992/2` | `4.5035996273705e+15` | `4503599627370496` |
 | `printf "%.17g", 9007199254740993/7` | `1286742750677284.5` | `1286742750677284.8` |
 
+**A fourth face, and it is the mirror of those three (task #1369, s473d).**
+perl holds an *integral arithmetic result* as an IV and prints its digits,
+while the *same value written as a float literal* is an NV and goes through
+`%.15g`.  PCL has one representation for both:
+
+| expression | perl 5.40.3 | PCL |
+|---|---|---|
+| `1e15` | `1e+15` | `1e+15` (agrees) |
+| `1e14 * 10` | `1000000000000000` (IV) | `1e+15` |
+| `-1 * 1e15` | `-1000000000000000` (IV) | `-1e+15` |
+| `1e15 + 1` | `1000000000000001` (IV) | `1e+15` |
+| `1e15 * 10` | `10000000000000000` (IV) | `1e+16` |
+| `1000000 * 1000000000` | `1000000000000000` | `1000000000000000` (agrees) |
+
+It is UNIFORM: the `1e15 * 10` row already read that way before s473d, which
+fixed `%.15g` itself (#1012) and thereby extended the same residue one decade
+down instead of leaving a decade-shaped special case.  Pure-INTEGER arithmetic
+still produces an exact integer here and prints its digits, which is what
+keeps it narrow.  Guard rows: `Pl/t/numeric-repr-01.t` D2.
+
 The third is the one worth reading twice: **PCL is the more accurate side.**
 perl converts both operands to NVs *before* dividing, so `2**53 + 1` becomes
 `2**53` and the quotient is already wrong; PCL builds the exact rational and

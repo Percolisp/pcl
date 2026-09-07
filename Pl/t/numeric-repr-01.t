@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -322,4 +322,129 @@ $inf**-2=0
 (-$inf)**2.5=Inf
 (-2)**-3=-0.125
 0**5=0
+OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# D — #1012.  perl's %.15g switches to exponential when the decimal exponent
+# of the value ROUNDED TO 15 SIGNIFICANT DIGITS reaches 15 (or falls below
+# -4).  PCL derived that exponent from a LOG, and `log(1e15, 10.0d0)` is
+# 14.999999999999998, so 1e15 printed 1000000000000000; it also never applied
+# the rounding, so 999999999999999.9 (which rounds up to 1e15) and
+# 9.999999999999999e-5 (which rounds up to 1e-4) took the wrong branch.  The
+# exponential branch had a second latent bug the fix exposed: SBCL's `~,14E`
+# does NOT renormalise a mantissa that rounds up to 10, so the first value
+# printed `10e+14`.
+#
+# The last row is the SIBLING: sprintf's own `%g` picked its style the same
+# way and had the same missing carry, so `%g` of 999999.9 printed 1000000
+# where perl prints 1e+06.  ONE reading of the rule now serves both.
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('#1012 the %.15g style switch is the ROUNDED exponent, computed exactly',
+        <<'PL', <<'OUT');
+no warnings;
+my @v = (
+ 1e15, 1e14, 1e16, 1e13, 1e21, 1e-5, 1e-4, 1e-3, 0.1+0.2, 1/3,
+ 999999999999999.9, 999999999999999.0, 1000000000000001.0,
+ 123456789012345, 1234567890123456, 12345678901234567,
+ 9.999999999999999e14, 9.99999999999999e14, 9.9999999999999e14,
+ 1.0000000000000001e15, 1e15 + 0.5,
+ 9.999999999999999e-5, 9.99999999999999e-5, 9.9999999999999e-5,
+ 1.0000000000000001e-4, 0.0001, 0.00009999,
+ 1e300, 1e-300, 5e-324, 1.7976931348623157e308,
+ 0.5, 2.5, 1024, 4503599627370496, 9007199254740992,
+ 1e17, 1e20, 3.14159265358979, 2.718281828459045,
+ 1e15/7, 1e-15, 1e-16, 100000000000000.5, 99999999999999.98,
+ 1e100, 1.5e-10, 1e-323, 2.2250738585072014e-308, sqrt(1e30),
+);
+for my $x (@v) { print "[$x]\n" }
+printf "pf %s %s %s\n", 1e15, 1e14, 1e16;
+my %h = (1e15 => 'a'); print "key ", join(",", keys %h), "\n";
+print "cat ", 1e15 . "", "\n";
+printf "g %g %G %g %g %.3g %.15g\n", 1e15, 999999.9, 999999.4, 1e-5, 999999.9, 1e15;
+PL
+[1e+15]
+[100000000000000]
+[1e+16]
+[10000000000000]
+[1e+21]
+[1e-05]
+[0.0001]
+[0.001]
+[0.3]
+[0.333333333333333]
+[1e+15]
+[999999999999999]
+[1e+15]
+[123456789012345]
+[1234567890123456]
+[12345678901234567]
+[1e+15]
+[999999999999999]
+[999999999999990]
+[1e+15]
+[1e+15]
+[0.0001]
+[9.99999999999999e-05]
+[9.9999999999999e-05]
+[0.0001]
+[0.0001]
+[9.999e-05]
+[1e+300]
+[1e-300]
+[4.94065645841247e-324]
+[1.79769313486232e+308]
+[0.5]
+[2.5]
+[1024]
+[4503599627370496]
+[9007199254740992]
+[1e+17]
+[1e+20]
+[3.14159265358979]
+[2.71828182845905]
+[142857142857143]
+[1e-15]
+[1e-16]
+[100000000000000]
+[100000000000000]
+[1e+100]
+[1.5e-10]
+[9.88131291682493e-324]
+[2.2250738585072e-308]
+[1e+15]
+pf 1e+15 100000000000000 1e+16
+key 1e+15
+cat 1e+15
+g 1e+15 1E+06 999999 1e-05 1e+06 1e+15
+OUT
+
+# D2 — the RESIDUE, asserted so it is countable rather than a surprise.  perl
+# holds an integral arithmetic result as an IV and prints its digits, while
+# the SAME value written as a float literal is an NV and prints through
+# %.15g; PCL has one representation for both, so `1e14 * 10` and `1e15` are
+# the same double here and print alike.  That divergence is the "Integers are
+# unbounded / no IV-NV distinction" family (#1369), it is UNIFORM after this
+# fix (it already applied above 1e16 — `1e15 * 10` is 1e+16 here and
+# 10000000000000000 in perl) and PCL's pure-INTEGER arithmetic still agrees,
+# which is what keeps it narrow.
+test_cl('#1012 residue: an IV-valued arithmetic result has no NV/IV flag here',
+        <<'PL', <<'OUT');
+no warnings;
+printf "lit-nv    %s\n", 1e15;                 # perl 1e+15
+printf "nv*iv     %s\n", 1e14 * 10;            # perl 1000000000000000 (IV)
+printf "iv*nv     %s\n", -1 * 1e15;            # perl -1000000000000000 (IV)
+printf "nv+iv     %s\n", 1e15 + 1;             # perl 1000000000000001 (IV)
+printf "lit-dot   %s\n", 1000000000000000.0;   # perl 1e+15
+printf "lit-int   %s\n", 1000000000000000;     # perl 1000000000000000
+printf "iv*iv     %s\n", 1000000 * 1000000000; # perl 1000000000000000
+printf "nv*iv-e16 %s\n", 1e15 * 10;            # perl 10000000000000000 (IV)
+PL
+lit-nv    1e+15
+nv*iv     1e+15
+iv*nv     -1e+15
+nv+iv     1e+15
+lit-dot   1e+15
+lit-int   1000000000000000
+iv*iv     1000000000000000
+nv*iv-e16 1e+16
 OUT
