@@ -238,6 +238,106 @@ happens at run start" sharp edge.  Filed **#1335** (the `evals/` cache-info
 gap) in the #1262 task's 1335–1337 range; #1336/#1337 left unused.  One
 docs-only commit on top of main `ff5dbac3`.
 
+## Session s473a (Opus agent, 2026-09-07) — the 64-bit integer boundary is DOCUMENTED (#1513), and two of the four `local` divergences are fixed; the other two stop with their measurements
+
+**Three commits, each with its own gate.**  Member 0 is the USER-ruled
+documentation job; members 1 and 3 are `local` semantics; members 2 and 4 are
+recorded, not attempted, because each needs a mechanism that does not exist
+yet — the brief's own rule.
+
+**#1513 CLOSED — "PCL has no 64-bit integer boundary" is now ONE
+`docs/not-supported.md` section** that absorbs the two older entries which were
+the same mechanism seen from different sides (`**` returns an exact integer;
+`use integer` large shift / overflow).  Both headings stay as pointers, because
+rows cite them BY NAME: `baselines/fail-baseline.tsv` 110/111 (bop.t 481/482)
+and `docs/difftest-fuzzer.md:50` were re-pointed in the same commit.
+`t/op/numconvert.t` is registered as an expected divergence — it SKIPS ITSELF
+on its own preamble, so all 1446 rows are one skip — DIFF → XDIFF with counts
+unchanged, the #366 serial re-run agreeing, spliced by hand.  `docs/ir-spec.md`
+§2.6 says the numeric model normatively.  Guard `Pl/t/int-boundary-01.t`
+asserts CURRENT behaviour ON PURPOSE (inverse verification is N/A and the
+header says so): if the boundary is ever implemented, its 19 rows fail and that
+is the signal to move the section, the registration and the spec paragraph
+together.
+
+**Two corrections to the task's own probe lines, both precedence**: `~0 ** 6`
+is `~(0**6)` = `~0`, and `use integer; ~0 * 16` is `-16` on BOTH sides (PCL's
+`~` under the pragma is already perl's).  The real divergences need the value
+in a variable first — which is how numconvert.t's preamble writes them.
+
+**And one finding the task did not have: the explicit-mask rule has a LIMIT.**
+Masking every step is byte-identical to perl (the pure-Perl digest idiom,
+3685539155 over the pangram), but a mask applied AFTER an already-overflowed
+intermediate diverges — `0xffffffff & (~0 * 16)` is 4294967295 in perl, whose
+NV clamps to UV_MAX on the way into `&`, and 4294967280 in PCL.  Probing the
+rule instead of restating it is what found it.
+
+**#1243 (a): `local($x) = LIST` is a LIST assignment.**  `sub f { local($H) =
+@_ }` stored the argument COUNT.  perl reads list-vs-scalar off the PARENTHESES
+alone, exactly as it does for `my` — and the `my` half is right because
+`extract_declarations` KEEPS the Structure::List as one LHS unit, while
+`local`'s path built its own target list and forgot them.  Two targets already
+worked, which is why the one-target spelling — the classic pre-`my` idiom —
+went unnoticed.
+
+**The flip is narrowed to SCALAR targets, and that is not churn-avoidance.**
+An array or hash lvalue imposes list context on its own, so `local(@a) = X` and
+`local @a = X` mean the same thing; keeping them on the solo path is what
+preserves `local (@bim) = local(@bee) = LIST` (min_local.t:18), whose inner
+`local` is recovered by that branch's `(p-array-= VAR RHS)` special case.  The
+first, wider version broke it — measured, not reasoned.
+
+**A provably DEAD second copy of the paren unwrap was deleted**: both arms are
+strict subsets of the pre-unwrap 130 lines above, which has already spliced the
+list away.  It was found because a flag added to it never fired.
+
+**#1260 / #1243 (c): a symbolic `local` ASSIGNS its initializer.**  The
+symbolic-deref branch emitted the save/restore macro and `return`ed — before it
+ever looked at the `=` — so `local ${'main::g'} = 9` localized and then dropped
+the assignment, silently, on every sigil.  The place now comes from
+`Pl::ExprToCL::_cast_form`, the one constructor every symbolic place goes
+through, and the writer from the same three-way pick the `@items` solo-`deref`
+path makes.  Three orderings are perl's and each was probed: the RHS runs
+BEFORE the localization, a COMPUTED name runs ONCE (the first version ran it
+twice), and a statement modifier gates all three of RHS, save/restore and
+assignment with the condition itself bound once.  Fourteen shapes
+byte-identical to perl.
+
+**Members 2 and 4 stop, with more written down than they arrived with.**
+#1192 (`local` in expression position) now carries the probed fact that perl
+restores at the end of the enclosing BLOCK rather than the statement, the TWO
+PPI shapes that make one fix insufficient (a nested `Statement::Variable` whose
+`local` is already stripped, and a bare `local` Word that becomes
+`(pl-local …)` and dies), the three hazards a hoisting pre-pass must handle —
+above all that a `local` inside a nested `Structure::Block` belongs to THAT
+scope — and its acceptance list.  #1190 gains two facts its text did not have:
+the hash twin does not merely read empty, it DIES on a `gethash` of the number
+5, and the RT #130727 corner is UNCHANGED by this session's fixes, exactly as
+registered.  Its blocker is confirmed: #1150 is designed, not built, and
+routing the macros through the vivifying accessors — what the task headline
+still says — would not fix it, because the wrong element is chosen before any
+accessor runs.
+
+**Bars.**  Gate 221 files / 7637 rows, only the 13 standing pclxs xs rows
+failing.  `corpus-diff.pl 41ca2496` IDENTICAL over 111 files after every
+member — both `local` fixes are invisible to the corpus and change only the
+shapes they fix.  Full sweep `--jobs 4`: GATE clean, TOTAL passing 18674 (+0),
+drops 5 = census, 0 new / 0 fixed, 4 UNSTABLE above the abort points of three
+already-PARTIAL files.  Companion `--jobs 1` `op/local.t op/multideref.t
+op/gv.t op/localref.t` on this tree AND on a `git archive 41ca2496`
+extraction: byte-identical, all four equal to their blessed snapshot rows.
+`ir-conform` 290 pass / 0 fail / 54 known / 0 stale, with `145-local` and
+`133-local` leaving `known-fail.tsv` BY EDIT.  `emission-ab --shapes` over
+`lib/**/*.pm`: 12 SAME, 1 DIFF (IO/Handle.pm, the fixed shape), RCDIFF 0.
+`ir-host-leak` identical to the base.  Generation **v2-1020**, the three
+artifacts regenerated.
+
+**Filed:** #1339 (the subscripted `local($a[1]) = (7,8)`, with the benchmark
+that stopped it — 0.93 s → 1.14 s), #1340 (a `local` of a magic scalar name is
+invisible to `Pl::Manifest`, with the corpus-diff churn that stopped it),
+#1341 (the subscripted symbolic deref, wrong twice over).  Each carries the
+measurement, so none of them has to be re-derived.
+
 ## Session 474b (Fable, 2026-09-07 07:27 → ~10:40) — the two slots relaunched after the reboot; BZ + s473t3 merged; the sweep's honest state answered; the board order, the 64-bit boundary and `use integer` ruled; both running agents killed by the rate limit, resumable
 
 **Merged + pushed:** **BZ = s470bz `dfa65afa`** (#1302 ONE root resolver `PCLPaths::root` + `pcl` installed + `--uninstall` + PATH hint + VERSION file; #1304 the podman container installer test, 4 legs; filed #1325 #1326 **#1327** — a saved core memoises the core BUILDER's `asdf:*user-cache*`; Fable gate 218/7569 xs-only, 0 write-date) and **s473t3 `99db107d`** (the 79 blessed rows whose only cause was a CATALOG note → 25 tasks #1471–#1495 / #155 / NS sections; six catalog notes measured WRONG about their own rows; Fable sweep GATE clean TOTAL 18674 (+0) CAUSES 0 of 478).  CI green through `dfa65afa` incl. the install matrix.
