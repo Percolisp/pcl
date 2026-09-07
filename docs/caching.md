@@ -16,7 +16,7 @@ extension files pack/mro/warnings, which are recompiled every run (§4).
 
 ## 1. The saved runtime core
 
-Every `pcl`/`pl2cl`/`runpcl` invocation needs PCL's ~13,000-line runtime
+Every `pcl`/`pl2cl`/`runpcl` invocation needs PCL's ~26,000-line runtime
 (`cl/pcl-runtime.lisp`) loaded into SBCL. Loading it from source costs
 about a second; PCL instead loads a pre-built SBCL image (a "core") with
 the runtime already compiled in, dropping that to about 0.1 s.
