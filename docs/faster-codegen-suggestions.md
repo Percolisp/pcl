@@ -1118,7 +1118,26 @@ code and the highest-value OO change.
     spelling too.  The measured plumbing share is now small: a scalar m//g
     step is ~2.4× perl, i.e. inside the engine gap — the next lever on regex
     IS the PCRE2 FFI below, not more PCL plumbing.
-  - **FUTURE ITEM — PCRE2 via `sb-alien` (not CFFI).** Investigated 2026-07-19.
+  - **PARKED — PCRE2 (USER 2026-09-07, s476, after the s473q spike: "Sad, but good
+    review.  Please park PCRE2").**  The spike (`docs/pcre2-spike-s473q.md`, task
+    #71) bound `libpcre2-32` through `sb-alien` (zero-copy pinned subjects, offsets =
+    char indexes — the marshalling budgeted below does not exist on the 32-bit
+    path) and swapped ONE runtime function; the stop rule kept cl-ppcre: without
+    PCRE2's JIT it LOSES the many-tiny-matches row `subste` 1.188× (control spread
+    0.6 %), with JIT it wins `subste` 0.972× / `textproc` 0.880× / `json-rt` 0.915×
+    and still loses the long-scan row `regexg` 1.134×.  **The strong case is PARITY,
+    not speed: +311 / −7 rows of perl's own `re_tests` and PCRE2 answers the 18 rows
+    where cl-ppcre HANGS (#196).**  The blocker is portability: the four
+    install-matrix images ship PCRE2 10.39 / 10.42 / 10.42 / 10.46 against gains
+    measured on 10.46, and CI has no macOS leg.  **A POSSIBLE FUTURE, re-opened only
+    by one of:** (a) every supported image supplies PCRE2 ≥ 10.46 from its own
+    repositories (ubuntu:22.04 and debian:12 leave the matrix, or the matrix moves);
+    (b) a decision to BUILD/VENDOR PCRE2 at install time on every platform incl. a
+    macOS CI leg; (c) #1528's census showing the 311 misses are mostly the ENGINE's
+    (a translator-owned majority is fixed without any library).  Until then
+    cl-ppcre is the ONE engine, its levers are #1461 (hashed BMH) and the parity
+    fixes #1528 files, and the regex `not-supported.md` entries that name #71 stay.
+  - **FUTURE ITEM — PCRE2 via `sb-alien` (not CFFI).** Investigated 2026-07-19.  **(The 2026-07-19 sizing; SUPERSEDED by the spike — kept as the record.)**
     Feasibility is good; it's scoped as a separate, well-contained project.
     Findings: `libpcre2-8/16/32.so.0` are already present on the dev box (no
     `-dev` headers needed — FFI declares its own signatures, the `.so` links at
