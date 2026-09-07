@@ -52,6 +52,40 @@ Compiled codes are cached in the op's `%compiled` slot exactly as today and free
 by `sb-ext:finalize` (one finalizer per `pcre2_code`; SBCL runs finalizers off the
 GC, so the cost is one weak-pointer entry per pattern, not per match).
 
+### 1a. What "JIT" means here, and what it costs a port (Fable, s476 — the USER asked)
+
+Nothing to do with Java, and nothing to do with Common Lisp.  **JIT is a PCRE2
+feature.**  PCRE2 is a C library; `pcre2_compile` turns a pattern into a compact
+BYTECODE, and the ordinary `pcre2_match` is an INTERPRETER of that bytecode — a C
+loop with a large `switch`, one dispatch per matching step, with its own
+backtracking stack.  `pcre2_jit_compile` (optional; built on the small embedded
+code generator *sljit*) translates that bytecode into native machine code for the
+specific pattern, once, and later `pcre2_match` calls run the machine code
+directly.  On the many-tiny-matches shape the per-step dispatch IS the cost, which
+is why JIT was worth ~1.6× at engine level (§3, "The engine on its own") and why
+it flipped `subste` from a loss to a small win.  It costs ~4.8 µs per pattern at
+compile time (§3 (d)) — about what cl-ppcre's own compile costs.
+
+Where SBCL sits: SBCL is an ahead-of-time NATIVE compiler, so everything cl-ppcre
+builds is machine code already — but cl-ppcre compiles a regex not to bytecode but
+to a tree of small CLOSURES, one per pattern node, each calling the next.  That is
+native code paying an indirect call per node per step, which places it between
+PCRE2's interpreter and PCRE2's JIT on the tiny-match shape — and ahead of both on
+the long `/./g` scan, where its dot closure is trivial to re-enter while every
+PCRE2 `/g` step is a fresh `pcre2_match` paying full setup (27 vs 57 ns per step,
+§3).
+
+**Why it matters to a port**: the brief's binding list did not include
+`pcre2_jit_compile_32`; the spike bound it as ONE extra to learn whether the
+verdict depended on it, and it did — *the speed case exists only with JIT*.  JIT is
+also one more PORTABILITY variable on top of §5: a distribution can build PCRE2
+without it (`pcre2_config` `PCRE2_CONFIG_JIT` answers 0 and `pcre2_jit_compile`
+returns an error — a port must check at install time, like the version), sljit
+supports the common CPUs but not every one, and executable memory is a permission
+topic on macOS (the hardened runtime / `MAP_JIT` rules).  An engine port that
+needs JIT for its speed case therefore needs the JIT leg in the install matrix and
+the macOS leg, not only the library.
+
 ## 2. The two measurement bugs the spike paid for — both are portability facts
 
 ### 2a. `PCRE2_NO_UTF_CHECK` is a MATCH option, not a compile option
