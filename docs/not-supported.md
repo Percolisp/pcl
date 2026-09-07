@@ -2327,6 +2327,22 @@ still exact); `-3 % 5` is `2` on both and `-3` on both under `use integer`
 (truncating division is implemented); `~0 - 3 != ~0` on both; `~0` itself
 prints `18446744073709551615` on both.
 
+**Three more faces of the same model, found by the round-31 perf probes and
+owned by task #1515** (`int()`, and division past `2**53` — the boundary shows
+up wherever an exact integer meets a place perl has already left for an NV):
+
+| expression | perl 5.40.3 | PCL |
+|---|---|---|
+| `printf "%s", int(1e20)` | `1e+20` | `100000000000000000000` |
+| `printf "%s", 9007199254740992/2` | `4.5035996273705e+15` | `4503599627370496` |
+| `printf "%.17g", 9007199254740993/7` | `1286742750677284.5` | `1286742750677284.8` |
+
+The third is the one worth reading twice: **PCL is the more accurate side.**
+perl converts both operands to NVs *before* dividing, so `2**53 + 1` becomes
+`2**53` and the quotient is already wrong; PCL builds the exact rational and
+rounds once.  Guard row `div-o53` in `Pl/t/perf-levers-04.t` asserts PCL's
+answer and names #1515.
+
 **The explicit-mask rule, and its limit.**  Code that masks its own
 accumulator — the pure-Perl digest idiom — behaves identically, because every
 intermediate stays inside the boundary and PCL's unbounded integers reproduce
