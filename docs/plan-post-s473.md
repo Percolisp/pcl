@@ -31,14 +31,14 @@ successor.
 ## 2. The queue (launch order; two slots)
 | # | label | what | gen | after |
 |---|---|---|---|---|
-| 0a | **s473t1** (IN FLIGHT s474, gen v2-960) | TRIAGE (USER, 2026-09-06 "soon"): the 13 PARTIAL files that stop early UNEXPLAINED — one cause per file, fix fillers, file the rest (`s473/s473t1`) | if a fix | a slot, FIRST after the in-flight pair |
-| 0b | **s473t2** (IN FLIGHT s474, gen v2-970) | TRIAGE (USER, "soon"): the 105 blessed failure keys with no cause (pack.t's 47 EXCLUDED — USER: skip pack.t) + the 60 bug-notes without a task — cluster, probe, attribute, fix ≤1h clusters (`s473/s473t2`) | if a fix | a slot, right after s473t1 |
+| 0a | **s473t1** — **MERGED s474 `9e938813`** (gen v2-960; three compiler fixes, five baselines edited row by row, #1431–#1445) | TRIAGE (USER, 2026-09-06 "soon"): the 13 PARTIAL files that stop early UNEXPLAINED — one cause per file, fix fillers, file the rest (`s473/s473t1`) | if a fix | a slot, FIRST after the in-flight pair |
+| 0b | **s473t2** — **MERGED s474 `278d5eb8`** (baselines+docs only; 152 causeless rows attributed, #1446–#1460; CAUSES 0) | TRIAGE (USER, "soon"): the 105 blessed failure keys with no cause (pack.t's 47 EXCLUDED — USER: skip pack.t) + the 60 bug-notes without a task — cluster, probe, attribute, fix ≤1h clusters (`s473/s473t2`) | if a fix | a slot, right after s473t1 |
 | 1 | **BU** | perf round 29 — **MERGED s474 `8a879a57`** (#1250 + #1251; two levers, round closed early: put things LIVE) | none (runtime-only) | done |
-| 2 | **BZ** | #1302 + #1304 install layout + installer tests, podman legs (`s470/s470bz`) | none | BY merged |
+| 2 | **BZ** (IN FLIGHT s474b, launched 2026-09-07 07:30, worktree `agent-a18594e226bec1266`) | #1302 + #1304 install layout + installer tests, podman legs (`s470/s470bz`) | none | BY merged |
 | 3 | **#1262** | `docs/caching.md` for users — Sonnet, `model: "sonnet"` (`s470/s1262`) | none | BY merged |
 | 4 | **s473a** | the `local` family: #1243(a)(b)(c) = #1192 + #1260, #1190 — 7 corpus rows | v2-870 | a slot |
 | 5 | **s473b** | the nested-element family: #1241 = #1150 (read vivifies), #1151, #1152, #1010 — 7 rows; bench-gated | v2-880 | a slot |
-| 6 | **s473p** | perf round 30 (USER 2026-09-07 "other speed tests first"): #1200, the single-array foreach lever, #995+#1056 loop-body box reuse, #1182 storage adoption — #1187 HELD | v2-890 | BU merged; the next perf slot |
+| 6 | **s473p** (IN FLIGHT s474b, launched 2026-09-07 07:30, worktree `agent-a6e3db270b8612200`, gen **v2-990**) | perf round 30 (USER 2026-09-07 "other speed tests first"): #1200, the single-array foreach lever, #995+#1056 loop-body box reuse, #1182 storage adoption — #1187 HELD | v2-890 | BU merged; the next perf slot |
 | 7 | **s473c** | #1240 die LOCATION — sized first (register vs cold-branch constant), shipped by the ≤1 %/≤3 % rule — 8 rows | v2-900 | s473b merged (both touch the accessor emission) |
 | 8 | **s473d** | numeric representation: the CRASH pair #1245 + #1230, #1248(a)=#1191, #1248(b), #1012, #1248(c) — 10 rows | v2-910 | a slot |
 | 9 | **s473e** | loop control: #1244(a)=#1161, (b), (c), #1164 — 4 rows | v2-920 | a slot |
@@ -46,11 +46,12 @@ successor.
 | 11 | **s473h** | #1249's seven singletons (+ #1290), and #1242/#1117 SIZED (not designed) | v2-940 | a slot |
 | 12 | **s473f** | the handle family: #1309 #1246 #1307 #1308 (representation measured first) #1233 #1220 #1074 #1247(b) — 4 rows | v2-950 | a slot |
 | 13 | **s473q** | THE REGEX ENGINE SPIKE #71 (PCRE2 via sb-alien: measurement + binding stop rule + portability record; USER: approved, NOT high priority) | v2-980 (only if member 2 ships) | AFTER s473p and one more non-engine perf round (the remaining S/M levers) |
+| 0c | **s473t3** | FILLER: the 79 blessed rows whose only cause is a `CATALOG` note get TASKS (one perl-probed reproducer per cluster, ~25 clusters; ≤2 one-hour fixes may ship) — `s473/s473t3/prompt.md`; brief WRITTEN s474b, launches on the next free slot | v2-1000 only if a fix ships | a slot |
 | — | Fable designs | #1117 typeglob slots (from s473h's sizing); #582 `@ISA`-write invalidation (USER: box magic?); #71 PCRE2 (from s473p's measurement); #1202 extension fasl (USER-parked with pack) | | |
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470**.  Next free after these: **1471**.
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470, s473t3 1471–1500**.  Next free after these: **1501**.
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script
