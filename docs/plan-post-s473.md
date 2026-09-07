@@ -38,7 +38,7 @@ successor.
 | 3 | **#1262** | `docs/caching.md` for users — Sonnet, `model: "sonnet"` (`s470/s1262`) | none | BY merged |
 | 4 | **s473a** | the `local` family: #1243(a)(b)(c) = #1192 + #1260, #1190 — 7 corpus rows | v2-870 | a slot |
 | 5 | **s473b** | the nested-element family: #1241 = #1150 (read vivifies), #1151, #1152, #1010 — 7 rows; bench-gated | v2-880 | a slot |
-| 6 | **s473p** (IN FLIGHT s474b, launched 2026-09-07 07:30, worktree `agent-a6e3db270b8612200`, gen **v2-990**) | perf round 30 (USER 2026-09-07 "other speed tests first"): #1200, the single-array foreach lever, #995+#1056 loop-body box reuse, #1182 storage adoption — #1187 HELD | v2-890 | BU merged; the next perf slot |
+| 6 | **s473p** — **MERGED s475 `bfa11c72`** (gen v2-990; #1200 the string-eval DISK cache: `use JSON::PP; print 1` 1.13 → 0.41 s; #1409 ONE bare array is a foreach run: feread 0.47× → 0.30×; #1182 → `%p-array-grow-discarding`: listcopy +27 %, slices +20 %; #1411 filed; #995 open with one sized lever) | perf round 30 (USER 2026-09-07 "other speed tests first"): #1200, the single-array foreach lever, #995+#1056 loop-body box reuse, #1182 storage adoption — #1187 HELD | v2-890 | BU merged; the next perf slot |
 | 7 | **s473c** | #1240 die LOCATION — sized first (register vs cold-branch constant), shipped by the ≤1 %/≤3 % rule — 8 rows | v2-900 | s473b merged (both touch the accessor emission) |
 | 8 | **s473d** | numeric representation: the CRASH pair #1245 + #1230, #1248(a)=#1191, #1248(b), #1012, #1248(c) — 10 rows | v2-910 | a slot |
 | 9 | **s473e** | loop control: #1244(a)=#1161, (b), (c), #1164 — 4 rows | v2-920 | a slot |
