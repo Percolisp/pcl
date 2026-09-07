@@ -172,6 +172,8 @@
    #:p-ensure-hashref #:p-ensure-arrayref
    ;; the intermediate-level markers of a subscript chain (task #1241) — emitted
    #:p-viv-container #:p-viv-array-container
+   ;; the aliasing-slice marker (task #1010) — emitted on a user sub's slice argument
+   #:p-viv-slice
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
@@ -7050,7 +7052,71 @@ per element."
      consumer that COPIES may drop the aliasing — see %p-aslice-copy."
     (when (and (consp form) (member (car form) '(p-aslice p-hslice)))
       (cons (if (eq (car form) 'p-aslice) '%p-aslice-copy '%p-hslice-copy)
-            (cdr form)))))
+            (cdr form))))
+
+  (defun %p-aliasing-slice-form (form)
+    "FORM rewritten to the VIVIFYING slice read when it IS an rvalue slice, and
+     NIL otherwise (task #1010) — the twin of %p-copying-slice-form above, and
+     the other half of one rule.
+
+     perl creates a slice's missing element AT THE MOMENT AN ALIAS TO IT IS
+     TAKEN: `sub f {} my %h=(a=>1); f(@h{'a','zz'}); exists $h{zz}` is 1, and
+     so are the foreach, the map/grep block and the `\\(…)` spellings, while a
+     consumer that merely COPIES the values (a list assignment, join, sort,
+     push, an interpolation, scalar context) creates nothing — every shape
+     probed against perl 5.40.3, scratch/s473b/probe/m1010b.pl.  Only the
+     CONSUMER knows which it is, exactly as in #1205, so the rewrite is made
+     where the consumer is visible: p-foreach / p-foreach-raw (macros), the
+     p-map / p-grep / p-refgen-list compiler macros, and the emitter's
+     `p-viv-slice' marker on a slice in a USER SUB's argument list — the one
+     site with no runtime form to look at.  A consumer this rule misses keeps
+     the aliasing read it has today, i.e. the status quo, never a wrong value."
+    (when (and (consp form) (member (car form) '(p-aslice p-hslice)))
+      (cons (if (eq (car form) 'p-aslice) '%p-aslice-viv '%p-hslice-viv)
+            (cdr form))))
+
+  (defun %p-marked-slice-form (form)
+    "FORM with the SLICE that the emitter's `p-viv-slice' marker names
+     rewritten to its vivifying read, or NIL when there is none.  The marker is
+     placed on the ARGUMENT, and the emitter may have wrapped the slice in a
+     value form before it: a `($)' prototype imposes scalar context, so
+     `opt @r[0,1]' arrives as `(p-list-scalar (p-aslice @r 0 1))'.  perl
+     vivifies there too, and vivifies EVERY key of the slice, not just the one
+     the scalar read keeps — `sub sc ($) {} my %h; sc(@h{\"zz\",\"yy\"})' creates
+     both (probed 5.40.3).  The wrappers descended into are a CLOSED, named
+     set; any other head keeps today's read (a miss is the status quo)."
+    (or (%p-aliasing-slice-form form)
+        (and (consp form) (null (cddr form))
+             (member (car form) '(p-list-scalar p-list-ctx p-scalar-ctx
+                                  p-void-ctx p-caller-ctx))
+             (let ((inner (%p-marked-slice-form (cadr form))))
+               (and inner (list (car form) inner))))))
+
+  (defun %p-aliasing-slice-list-form (form)
+    "FORM — a foreach's LIST — with every SLICE in it rewritten to its
+     vivifying read, or NIL when there is none.  TWO shapes, because the
+     emitter builds a one-item list as the item itself and a longer one as
+     `(p-flatten-args (list …))': without the second, `for (@h{x}, @g{y})'
+     vivified neither, which is a rule that answers differently for the same
+     program written two ways."
+    (or (%p-aliasing-slice-form form)
+        (and (consp form) (eq (car form) 'p-flatten-args) (null (cddr form))
+             (consp (cadr form)) (eq (car (cadr form)) 'list)
+             (let ((new (%p-aliasing-slice-args (cdr (cadr form)))))
+               (and new (list 'p-flatten-args (cons 'list new)))))))
+
+  (defun %p-aliasing-slice-args (items)
+    "ITEMS with every SLICE rewritten to its vivifying read, or NIL when none
+     of them is one — the shared body of the p-map / p-grep compiler macros
+     and of %p-aliasing-slice-list-form."
+    (let ((any nil)
+          (new nil))
+      (setf new (mapcar (lambda (i)
+                          (let ((v (%p-aliasing-slice-form i)))
+                            (cond (v (setf any t) v)
+                                  (t i))))
+                        items))
+      (and any new))))
 
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
@@ -8395,6 +8461,26 @@ per element."
 (defmacro p-viv-array-container (form)
   "FORM's value is used as an ARRAY container: every undef level of it vivifies."
   (expand-autoviv-for-array form))
+
+;;; ── THE ALIASING-SLICE MARKER (task #1010) ────────────────────────────────
+;;; The consumer decides whether a slice's missing slots are created (see
+;;; %p-aliasing-slice-form), and four of the five consumers are macros the
+;;; runtime owns.  The fifth is a USER SUB CALL: `f(@h{'a','zz'})` lowers to a
+;;; plain CL call `(pl-f (p-hslice %h "a" "zz"))`, and a function cannot see
+;;; its argument's FORM — so the EMITTER marks it, exactly as it marks a
+;;; dereferenced container (#1241):
+;;;
+;;;     f(@h{'a','zz'})  ->  (pl-f (p-viv-slice (p-hslice %h "a" "zz")))
+;;;
+;;; The marker expands at COMPILE time through the one rewrite rule, so it
+;;; costs nothing at run time, and it is the identity on anything that is not
+;;; a slice.  A translator reads it as: "the elements of this slice are about
+;;; to be ALIASED; create the ones that are missing."  docs/ir-spec.md §3.2d.
+(defmacro p-viv-slice (form)
+  "FORM (a SLICE) is consumed by something that ALIASES its elements — perl's
+   lvalue-context slice, which creates a missing key/index.  Identity on any
+   other form."
+  (or (%p-marked-slice-form form) form))
 
 ;;; ── VIVIFYING A CHAIN ROOT THAT MAY BE A RAW SLOT (task #1241) ─────────────
 ;;; `expand-autoviv` turns a deref-rooted chain into
@@ -11658,6 +11744,44 @@ which is one of #1140's escape spellings (probed)."
       (dotimes (i n result)
         (setf (svref result i) (p-gethash hash (svref flat i)))))))
 
+;;; ── A SLICE IN AN ALIASING CONSUMER VIVIFIES ITS MISSING SLOTS (task #1010) ─
+;;; The other half of #1205's rule.  perl's slice is a list of LVALUES, and its
+;;; pp_hslice / pp_aslice CREATE the element when the op is in lvalue context —
+;;; which is what a consumer that ALIASES the elements puts it in: the @_ of a
+;;; sub call, a foreach, a map/grep block (they alias $_), `\(…)`.  A consumer
+;;; that COPIES (list assignment, join, sort, push, interpolation, scalar
+;;; context) does not, and reads through %p-aslice-copy / p-aslice as before.
+;;;
+;;; So the two readers below are the EAGER siblings of p-aslice / p-hslice, and
+;;; they ask the runtime's existing eager element accessors (p-aref-box /
+;;; p-gethash-box) exactly as the copying pair asks p-aref / p-gethash — rule
+;;; 11: `@a[3]` in an aliasing consumer and `$a[3]` in one vivify by ONE piece
+;;; of code, so they cannot drift.  That also inherits their edge answers: an
+;;; array grows to the index (`f(@a[0,3])` leaves 4 elements in perl too), a
+;;; deref-rooted container is vivified into an aggregate (`for (@$r{'a'})`
+;;; makes $r a hash ref, probed), a %ENV-style marker container keeps a
+;;; detached box, and a negative index before the start of a real array dies
+;;; perl's death.
+(defun %p-aslice-viv (arr &rest indices)
+  "@arr[LIST] read by a consumer that ALIASES its elements: the slot cells,
+   with a MISSING index created (the array grows), which is what perl does at
+   the moment the alias is taken.  See the commentary above.
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
+  (multiple-value-bind (flat n) (%p-flatten-slice-args indices)
+    (let ((result (make-array n :adjustable t :fill-pointer 0)))
+      (dotimes (i n result)
+        (%p-vpush (p-aref-box arr (svref flat i)) result)))))
+
+(defun %p-hslice-viv (hash &rest keys)
+  "@hash{LIST} read by a consumer that ALIASES its elements — the twin of
+   %p-aslice-viv.  A missing key is CREATED with an undef box, which is
+   p-gethash-box's own answer and the reason this asks it.
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
+  (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
+    (let ((result (make-array n :adjustable t :fill-pointer 0)))
+      (dotimes (i n result)
+        (%p-vpush (p-gethash-box hash (svref flat i)) result)))))
+
 (defun p-kv-hslice (hash &rest keys)
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
    Handles individual keys, lists, and vectors (from range operator).
@@ -12704,6 +12828,14 @@ binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
 slot as it stands).  Everything else — the flatten, the tagbody, the label
 catch, the package-cell localization — is one body, so the two loops cannot
 drift apart the way two copies would."
+  ;; A foreach ALIASES each element to the loop variable, so a SLICE in the
+  ;; list vivifies its missing slots at the moment the list is built — perl's
+  ;; own rule, and the element spelling `for ($h{zz}) {}` already had it (the
+  ;; emitter gives a single element its eager `-box' accessor).  One rewrite
+  ;; rule, five consumers: %p-aliasing-slice-form (task #1010).  Both loops
+  ;; take it: the read-only (raw) verdict is about the loop VARIABLE, and perl
+  ;; vivifies even when the body never touches it (probed, empty body).
+  (setf list (or (%p-aliasing-slice-list-form list) list))
   (multiple-value-bind (label continue-form body myp dynp arraysp)
       (parse-loop-keys body-and-keys)
     ;; A `continue` block sits INSIDE the per-iteration binding here (it reads
@@ -20376,6 +20508,16 @@ buffer's fill-pointer; everything else falls back to file-length."
           do (vector-push-extend slot result))
     result))
 
+;;; map and grep ALIAS $_ to each element (that is why `map { $_ .= "!" } @a`
+;;; writes through), so a SLICE among their items vivifies its missing slots,
+;;; as perl does.  A COMPILER MACRO is how a function sees its arguments'
+;;; FORMS; it declines by returning the whole form, so any call it cannot read
+;;; — an `apply', a funcall through a code ref — keeps today's aliasing read.
+;;; One rewrite rule for all five consumers: %p-aliasing-slice-form (#1010).
+(define-compiler-macro p-grep (&whole form fn &rest items)
+  (let ((new (%p-aliasing-slice-args items)))
+    (if new `(p-grep ,fn ,@new) form)))
+
 (defun p-map (fn &rest items)
   "Perl map - fn receives item as $_ parameter.
    Runs block in list context; flattens per-iteration vectors into result.
@@ -20394,6 +20536,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                  ((null r) nil)
                  (t (vector-push-extend (%p-map-copy-scalar r) result)))))
     result))
+
+(define-compiler-macro p-map (&whole form fn &rest items)
+  (let ((new (%p-aliasing-slice-args items)))
+    (if new `(p-map ,fn ,@new) form)))
 
 (defun %p-glob-code (glob)
   "The CODE slot of typeglob GLOB, unboxed, or NIL."
@@ -21131,6 +21277,13 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((x (gensym "PCL-VA-")) (v (gensym "PCL-VS-")))
     `(let ((,v ,src))
        (loop for ,x across ,v do (vector-push-extend ,x ,dest)))))
+
+;;; `\(@h{'a','zz'})` takes a REFERENCE to each element, which is the loudest
+;;; alias there is, so its missing slots vivify (perl, probed).  Compiler
+;;; macro for the same reason as p-map's: p-refgen-list is a function.
+(define-compiler-macro p-refgen-list (&whole form val)
+  (let ((new (%p-aliasing-slice-form val)))
+    (if new `(p-refgen-list ,new) form)))
 
 (defun p-refgen-list (val)
   "Perl \\(LIST) — distribute reference generation over list elements.

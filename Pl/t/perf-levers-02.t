@@ -223,8 +223,14 @@ PERL
     # writes through).  Both of these must keep the alias-building call.
     unlike($l[2], qr/%p-aslice-copy/,
            '#1205 NEGATIVE: a foreach over a slice keeps the aliases');
-    like($l[2], qr/\(p-aslice \@a 1 2\)/,
-         '#1205 NEGATIVE: ... the alias-building call is still the one it walks');
+    # ... and since #1010 (s473b) the alias-building call it walks is the
+    # VIVIFYING one: a foreach ALIASES each element to the loop variable, so
+    # perl creates the missing slots when the list is built (`my @a=(1); for
+    # (@a[0,3]) {}` leaves four elements — probed 5.40.3, guard
+    # Pl/t/autoviv-02.t row 14).  #1205's own claim is the row above and is
+    # unchanged: a foreach must never get the COPYING read.
+    like($l[2], qr/\(%p-aslice-viv \@a 1 2\)/,
+         '#1010: ... the alias-building call it walks VIVIFIES (was p-aslice)');
     unlike($l[3], qr/%p-aslice-copy/,
            '#1205 NEGATIVE: a slice that is merely printed keeps the generic path');
 }

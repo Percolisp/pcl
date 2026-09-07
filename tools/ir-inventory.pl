@@ -214,7 +214,7 @@ my %FAMILY;
                     p-gethash-deref p-gethash-deref-box p-aslice p-hslice
                     p-kv-hslice p-kv-aslice p-exists p-exists-array p-delete
                     p-delete-array p-ensure-hashref p-ensure-arrayref
-                    p-viv-container p-viv-array-container
+                    p-viv-container p-viv-array-container p-viv-slice
                     p-list-scalar p-slice-result)],
   'slice-delete' => [qw(p-delete-hash-slice p-delete-kv-hash-slice
                         p-delete-array-slice p-delete-kv-array-slice)],

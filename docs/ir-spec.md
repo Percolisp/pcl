@@ -1074,6 +1074,52 @@ PLACE, so a backend that unboxes read-only locals must still be able to
 assign to one.  NOT modelled: a SINGLE-level deref (`$r->{b}`) does not yet
 vivify `$r` (task #1350).
 
+### 3.2d A SLICE vivifies when its consumer ALIASES its elements (normative, s473b)
+
+A slice is a list of **lvalues**, and perl creates a missing element at the
+moment an alias to one is taken — never when the values are merely copied.
+The discriminator is therefore the CONSUMER, not the slice:
+
+    sub f {}
+    my %h=(a=>1); f(@h{'a','zz'});       # perl: exists $h{zz} — created
+    my %h=(a=>1); for (@h{'a','zz'}){}   # created (so does `for my $v (…)`)
+    my %h=(a=>1); map {…} @h{'a','zz'};  # created (map/grep alias $_)
+    my %h=(a=>1); my @r = \(@h{'a','zz'});  # created
+    my @a=(1);    f(@a[0,3]);            # the ARRAY grows to 4 elements
+    my %h=(a=>1); my @v = @h{'a','zz'};  # creates NOTHING (a copy)
+    my %h=(a=>1); join(",", @h{'a','zz'});  # nothing; so do sort, push,
+                                            # "@h{…}", %h{…}, `my $n = @h{…}`
+
+A `($)` prototype does not change the answer: the argument is still aliased
+into `@_`, and perl vivifies EVERY key of the slice there, not only the one
+the scalar read keeps.  The single-ELEMENT spellings answer differently and
+that asymmetry is perl's: `for ($h{zz}){}`, `\$h{zz}` and `map {…} $h{zz}`
+vivify, while `f($h{zz})` does NOT — a sub argument that is one element is
+perl's lazy *defelem*, created only if the callee writes to it.
+
+**How the IR says it.**  Four of the five aliasing consumers are runtime
+forms that can see the slice as a FORM — `p-foreach` / `p-foreach-raw`, and
+the `p-map` / `p-grep` / `p-refgen-list` compiler macros — so PCL rewrites
+`p-aslice` / `p-hslice` there into the vivifying readers `%p-aslice-viv` /
+`%p-hslice-viv` (which ask the eager element accessors `p-aref-box` /
+`p-gethash-box`, so a slice and a single element vivify by one piece of
+code).  The fifth is a user sub or method CALL, where the argument is an
+ordinary function argument and no form is visible to the callee, so the
+emitter marks it:
+
+    f(@h{'a','zz'})  ->  (pl-f (p-viv-slice (p-hslice %h "a" "zz")))
+
+`p-viv-slice` reads as *"the elements of this slice are about to be ALIASED;
+create the ones that are missing"*.  Like the `p-viv-container` markers it is
+a compile-time rewrite with no run-time cost, it is the IDENTITY on anything
+that is not a slice, and it descends through the value wrappers the emitter
+may have put in between (`p-list-scalar` for a `($)` prototype, the context
+binds).  A backend may implement it as one vivifying slice reader.  A
+consumer this rule does not reach keeps the plain aliasing read, which is
+the status quo, never a wrong value.  NOT modelled: a deref-rooted slice
+whose root is an unboxed read-only local (`my $r; for (@$r{'a'})`) does not
+vivify the ROOT (task #1352, the §3.2c root question over again).
+
 ### 3.3 `p-true-p` (truthiness)
 
 False: the number 0 (but **NaN is true**), the strings `""` and `"0"`,
@@ -3061,7 +3107,7 @@ function's docstring states its Perl contract. The families:
 | assignment | `p-my-=` (boxed lexical) `p-scalar-=` (package) `setf` (raw slot) `p-array-= p-hash-= p-list-=` | store per §2.2; **a list assignment used as a VALUE is two-faced (task #721): scalar/void yields the number of elements the RHS produced, LIST context yields the LHS *lvalues* after the assignment** — every slot the LHS consumed, including the ones an `undef` placeholder or an element/`x`-repeat target took, and `()` therefore yields nothing while `(undef) = (10,20,30)` yields `10`. A named scalar target contributes its BOX (writable: `$_++ foreach ($x,$y) = (…)`); a slot with no nameable box contributes the value that landed in it. Because the answer is context-dependent, a DECLARATION whose assignment is a block's tail value must be lowered in the caller's context, never frozen to scalar. All forms return the assigned target/value per Perl |
 | compound assignment | `p-incf p-decf p-*= p-/= p-%= p-**= p-.= p-str-x= p-bit-and= p-bit-or= p-bit-xor= p-<<= p->>= p-str-bit-and= p-str-bit-or= p-str-bit-xor=` (any place) · `-raw` twins of each (raw slot, §2.2) · `p-and-assign p-or-assign p-//=` (no raw twin) | read-modify-write; boxed macros store back via box-set/setf per place shape, `-raw` twins are `(setf slot NEW)` with the identical NEW form; `&&=`/`||=`/`//=` short-circuit and store the RHS unchanged |
 | increment | `p-pre++ p-pre-- p-post++ p-post--` (the name says the FIXITY, not the operator's own spelling — there are no `p-++`-style names; verified emitted, s470bm) · on raw slots `p-incf-raw`/`p-decf-raw` (statement-root only; tail postfix wraps in `prog1` for the old value) | numeric ±1 on the box/slot; `p-pre++` on a pure-alpha string does Perl string increment (`"az"→"ba"`) — a raw slot only takes root incdec when every write is numeric-valued (A-num), so the raw twins are never asked to do the magical form |
-| elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice`, `p-viv-container p-viv-array-container` (the intermediate-level markers) | reads unbox scalars, keep reference boxes (§2.3–2.4); **every level of a chain but the last vivifies, on a READ as on a write** — §3.2c, and the marker is how the emitter says which levels those are; `p-delete` returns the removed value |
+| elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice`, `p-viv-container p-viv-array-container` (the intermediate-level markers) `p-viv-slice` (the aliased-slice marker) | reads unbox scalars, keep reference boxes (§2.3–2.4); **every level of a chain but the last vivifies, on a READ as on a write** — §3.2c, and the marker is how the emitter says which levels those are; **a slice vivifies its missing slots when its consumer ALIASES them** — §3.2d; `p-delete` returns the removed value |
 | slice delete | `p-delete-hash-slice p-delete-array-slice p-delete-kv-hash-slice p-delete-kv-array-slice` | every one flattens its key/index arguments alike (`%p-flatten-slice-args`: a range or interpolated list contributes its elements, a STRING is one key — task #394), and every one answers **nil for an EMPTY slice** — undef in scalar context, the empty list in list context, per [perl #29127].  The emptiness test comes BEFORE the read-only check: perl allows `delete @ro[()]` on a read-only array and dies only on a real index (probed, s414) |
 | array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""`.  `p-sort` also has a *sugar* form with no comparator, `(%p-sort-classic MODE ARGS…)` — §5.4; expand it back to `p-sort` and nothing is lost.  `(%p-push1 @a X)` is the same sugar for `push`: exactly `(p-push @a X)` for a single SCALAR X on a non-escaping `my @a` (§2.3a), value = the new length; rewrite it back to `p-push` and nothing is lost |
 | regex | `p-=~ p-!~` with `(p-regex :pat "…" :flags "…" :tier T)`, `(p-subst :pat … :rep … :flags … :tier T)`, `(p-tr :from … :to … :flags …)` — the STRUCTURED literal (task #1211; the pre-s470bq spelling was one string with perl delimiters inside, `(p-regex "/pat/flags")`) | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split`.  **A FAILED `m//` answers by context and by NOTHING else (tasks #962/#459):** scalar/void gives perl's defined-false `""` (never `undef`, never `0` — the `$&`-family rule of #416), and LIST context gives **the EMPTY LIST**, whatever the pattern — a capture-less miss is not a one-element false value.  The empty list is a zero-length VECTOR, never raw `nil`: only `%p-flatten-list` reads raw `nil` as "no elements", while `p-array-fill` keeps it as an array HOLE and `p-flatten-args` spreads it as ONE argument, so `f(/nomatch/, "d")` handed the callee two arguments where perl hands one and every later argument shifted.  (The runtime builds that vector with `%p-empty-list`, which is INTERNAL and is never emitted — measured s470bm over 111 + 592 files, so a translator sees the value and never the form) |

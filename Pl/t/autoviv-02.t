@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -343,4 +343,71 @@ my %l; $l{a} = "p"; my $al = \$l{a}; $l{a} .= "q"; print "$$al\n";
 my @o = (1,2); my $a2 = \$o[0]; $o[0] += 5; print "$$a2\n";
 my %q; $q{a} = "x"; my $a3 = \$q{a}; $q{a} ||= "z"; $q{a} .= "!"; print "$$a3\n";
 my %r; $r{a}{b} = "n"; my $a4 = \$r{a}{b}; $r{a}{b} .= "m"; print "$$a4\n";
+PL
+
+# ── 14. #1010 (s473b): a SLICE consumed by something that ALIASES its elements
+# vivifies the missing ones, as perl does — and a slice consumed by something
+# that COPIES still creates nothing (row 15).  perl's slice is a list of
+# LVALUES: pp_hslice/pp_aslice CREATE the element when the op is in lvalue
+# context, which is what the @_ of a sub or method call, a foreach, a map/grep
+# block (they alias $_) and `\(…)` put it in.  PCL had the rule for a single
+# ELEMENT already — `for ($h{zz}) {}` emits the eager `-box' accessor and
+# `f($h{zz})` the LAZY `-argbox' one, which is perl's own asymmetry — but the
+# slice emitters never consulted it, so every one of these read without
+# creating.  ONE rewrite rule now (%p-aliasing-slice-form), five consumers:
+# the two foreach macros, the p-map / p-grep / p-refgen-list compiler macros,
+# and the emitter's `p-viv-slice' marker on a user sub's slice argument (a
+# called function cannot see its argument's form).
+#
+# Every expectation is the live perl 5.40.3 answer (scratch/s473b/probe/
+# m1010b.pl, probed row by row).  The array rows say `scalar(@a)`: perl grows
+# the array to the index, which is the same fact as creating a hash key.
+is(run_cl(<<'PL'), "1\n1\n1\n1\n1W\n1\n1\n1\n4\n4\n4\n4\n1\n1\n11\nV\n11\n8\n", '#1010 a slice in an ALIASING consumer vivifies its missing slots');
+package C; sub new { bless {}, shift } sub m1 { return scalar(@_) }
+package main;
+sub s1 { return scalar(@_) }
+sub s2 { $_[0] = "W"; return 1 }
+sub sc ($) { return $_[0] }
+{ my %h=(a=>1); my $x = s1(@h{'a','zz'});        print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); for (@h{'a','zz'}) { }           print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); for my $v (@h{'a','zz'}) { }     print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my @r = \(@h{'a','zz'});         print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my $x = s2(@h{'zz','a'});        print +(exists $h{zz}?1:0), $h{zz}, "\n"; }
+{ my %h=(a=>1); my @m = map { $_ } @h{'a','zz'}; print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my @g = grep { 1 } @h{'a','zz'}; print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my @k=('zz'); for (@h{@k}) { }   print +(exists $h{zz}?1:0), "\n"; }
+{ my @a=(1); my $x = s1(@a[0,3]);                print scalar(@a), "\n"; }
+{ my @a=(1); for (@a[0,3]) { }                   print scalar(@a), "\n"; }
+{ my @a=(1); my @m = map { $_ } @a[0,3];         print scalar(@a), "\n"; }
+{ my @a=(1); my @r = \(@a[0,3]);                 print scalar(@a), "\n"; }
+{ my %h=(a=>1); my $o = C->new; my $x = $o->m1(@h{'a','zz'}); print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my $x = s1(@h{'zz'});            print +(exists $h{zz}?1:0), "\n"; }
+{ my %h; my %g=(a=>1); for (@h{'x'}, @g{'y'}) { } print +(exists $h{x}?1:0), (exists $g{y}?1:0), "\n"; }
+{ my %h=(a=>1); for (@h{'a','zz'}) { $_ = "V" }  print $h{zz}, "\n"; }
+# A `($)` PROTOTYPE imposes scalar context on the argument, and perl vivifies
+# there too — EVERY key of the slice, not just the one the scalar read keeps
+# (probed).  The emitter wraps the slice in `(p-list-scalar …)` before the
+# marker sees it, which is why the marker descends through a closed set of
+# value wrappers instead of only matching a bare slice.
+{ my %h=(a=>1); my $x = sc(@h{'zz','yy'});       print +(exists $h{zz}?1:0), (exists $h{yy}?1:0), "\n"; }
+{ my @r=(3,4); my $x = sc(@r[5,7]);              print scalar(@r), "\n"; }
+PL
+
+# ── 15. #1010's NEGATIVES: a consumer that COPIES the values creates nothing,
+# and that is what stops the rule from being "a slice always vivifies".  These
+# all passed BEFORE the fix and are the ones it must not move; the two-slice
+# foreach in row 14 is why the foreach rewrite has to reach INSIDE the
+# emitter's `(p-flatten-args (list …))' list — with only the single-slice
+# shape handled, one program answered differently written two ways.
+is(run_cl(<<'PL'), "0\n0\n0\n0\n0\n0\n0\n0\n1\n0\n", '#1010 NEGATIVE: a slice in a COPYING consumer creates nothing');
+{ my %h=(a=>1); my @v = @h{'a','zz'};            print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my $c = () = @h{'a','zz'};       print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my $j = join(",", @h{'a','zz'}); print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my @s = sort @h{'a','zz'};       print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my @k2; push @k2, @h{'a','zz'};  print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my $s = "@h{'a','zz'}";          print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my %kv = %h{'zz'};               print +(exists $h{zz}?1:0), "\n"; }
+{ my %h=(a=>1); my ($p,$q) = @h{'a','zz'};       print +(exists $h{zz}?1:0), "\n"; }
+{ my @a=(1); my @c = @a[0,3];                    print scalar(@a), "\n"; }
+{ my %h=(a=>1); my $n = @h{'a','zz'};            print +(exists $h{zz}?1:0), "\n"; }
 PL

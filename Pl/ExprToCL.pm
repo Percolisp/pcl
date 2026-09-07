@@ -1908,6 +1908,29 @@ sub _is_elem_arg {
       && ($an->{type} eq 'a_acc' || $an->{type} eq 'h_acc');
 }
 
+# A SLICE argument of a USER SUB is in perl's LVALUE context: its elements are
+# aliased into @_, and perl CREATES the missing ones AT THE CALL — `sub f {}
+# my %h=(a=>1); f(@h{'a','zz'}); exists $h{zz}` is 1, and the array spelling
+# `f(@a[0,3])` grows @a to four elements (probed 5.40.3).  It is the SAME
+# family as `_is_elem_arg` above and the OPPOSITE answer, which is why they are
+# two predicates and not one: a single ELEMENT argument is perl's LAZY defelem
+# (`f($h{zz})` creates nothing — that is what the `-argbox` accessor is).
+#
+# A called function cannot see its argument's FORM, so the emitter MARKS the
+# slice and the runtime's one rewrite rule (%p-aliasing-slice-form) expands the
+# marker at compile time — the same shape as #1241's `p-viv-container`, and the
+# fifth consumer of that rule; the other four are runtime macros.  BUILTINS are
+# never marked: they take copies (`join(",", @h{…})`, `push @k, @h{…}`, `sort`,
+# an interpolation create nothing in perl, probed).  Task #1010.
+sub _alias_slice_arg {
+  my ($self, $kid_id, $form) = @_;
+  my $an = $self->expr_o->get_a_node($kid_id);
+  return $form unless $self->expr_o->is_internal_node_type($an);
+  my $t = $an->{type} // '';
+  return ($t eq 'slice_a_acc' || $t eq 'slice_h_acc')
+       ? ['p-viv-slice', $form] : $form;
+}
+
 # The same question for an LVALUE TARGET (`$x =~ s///` / `=~ tr///`), where
 # ALL FOUR element kinds count — the DEREF pair included, because
 # `p-gethash-deref` / `p-aref-deref` have `-box` forms under lvalue_context
@@ -2605,6 +2628,10 @@ sub gen_funcall_form {
            && $self->_is_elem_arg($kids->[$i])) { $self->lvalue_context('argbox') }
     my $arg = defined $dup_src ? $dup_src : $self->gen_node_form($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
+    # A SLICE argument of a USER SUB vivifies its missing slots (task #1010) —
+    # the aliasing half of the question `_is_elem_arg` answers for elements.
+    $arg = $self->_alias_slice_arg($kids->[$i], $arg)
+      if index($cl_func, 'pl-') >= 0;
 
     # Write slot 3 of the #873 family, and the one perl makes CONDITIONAL:
     # `open $1, …` on a DEFINED capture is an ordinary symbolic filehandle
@@ -3090,7 +3117,8 @@ sub gen_methodcall_form {
   my @args = map {
     $self->lvalue_context(
       $self->_is_elem_arg($kids->[$_]) ? 'argbox' : $saved_lvalue_mc);
-    $self->gen_node_form($kids->[$_]);
+    # a SLICE argument vivifies instead — task #1010, the other half
+    $self->_alias_slice_arg($kids->[$_], $self->gen_node_form($kids->[$_]));
   } 2 .. $#$kids;
   $self->lvalue_context($saved_lvalue_mc);
 
@@ -3138,7 +3166,8 @@ sub gen_ref_funcall_form {
   my @args = map {
     $self->lvalue_context(
       $self->_is_elem_arg($kids->[$_]) ? 'argbox' : $saved_lvalue);
-    $self->gen_node_form($kids->[$_]);
+    # a SLICE argument vivifies instead — task #1010, the other half
+    $self->_alias_slice_arg($kids->[$_], $self->gen_node_form($kids->[$_]));
   } 1 .. $#$kids;
   $self->lvalue_context($saved_lvalue);
   my $call = ['p-funcall-ref', $ref, @args];
