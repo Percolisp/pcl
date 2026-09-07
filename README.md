@@ -283,66 +283,58 @@ These are microbenchmarks: each isolates one Perl feature so that a
 difference has one cause.  They are not a promise about whole programs.
 Ratio is PCL time / perl time, best of five runs, process startup
 subtracted; below 1.00× means PCL is faster.  The table is the board of
-2026-09-04, taken on a quiet machine (§0.2i of the linked page); the rows
-that moved since are listed after it.
+2026-09-07, taken on a quiet machine (§0.2k of the linked page).
 
 | benchmark | what it measures | PCL / perl |
 |---|---|---:|
-| cfor | C-style `for` loop summing integers | 0.26× |
-| collatz | `while` loop with integer arithmetic | 0.26× |
-| intloop= | `for (1..$n) { $s = $s + $_ }` | 0.29× |
-| fib(27) | recursion | 0.29× |
-| intloop+= | `for (1..$n) { $s += $_ }` | 0.35× |
-| feread | read-only `foreach` over a 1000-element array | 0.47× |
-| gcdrec | recursion with modulo | 0.52× |
-| arrhash | one array element and one hash element, read and written | 0.60× |
-| listcopy | `my @copy = @src`, 50 elements | 0.94× |
-| feread2 | `foreach` over two arrays at once | 1.32× |
-| symref | symbolic references, `${'main::g'}` | 1.37× |
-| arrfill | `@a = (1..20, $_)` on every iteration | 1.46× |
-| sliceasgn | assignment to array and hash slices | 1.99× |
-| strcat | `$s .= 'x'`, twenty million times | 2.14× |
-| regexg | `while ($x =~ /./g)` over a 200 kB string | 2.18× |
-| slices | reading `@a[1..5]` and `@h{@k}` | 2.60× |
-| ovlsub | `use overload` arithmetic and stringification on objects | 3.46× |
-| packunpk | `pack` followed by `unpack` | 858× |
-| pack | `pack` with two templates | 1174× |
+| collatz | `while` loop with integer arithmetic | 0.18× |
+| cfor | C-style `for` loop summing integers | 0.22× |
+| useint | `$s = ($s * 3 + $i / 7) % 1000003` under `use integer` | 0.26× |
+| intloop= | `for (1..$n) { $s = $s + $_ }` | 0.28× |
+| feread | read-only `foreach` over a 1000-element array | 0.29× |
+| arith | `$s = ($s * 3 + int($i / 7)) % 1000003` | 0.29× |
+| fib(27) | recursion | 0.30× |
+| feread2 | `foreach` over two arrays at once | 0.30× |
+| intloop+= | `for (1..$n) { $s += $_ }` | 0.31× |
+| listcopy | `my @copy = @src`, 50 elements | 0.36× |
+| symref | symbolic references, `${'main::g'}` | 0.38× |
+| gcdrec | recursion with modulo | 0.50× |
+| arrfill | `@a = (1..20, $_)` on every iteration | 0.59× |
+| arrhash | one array element and one hash element, read and written | 0.63× |
+| sliceasgn | assignment to array and hash slices | 1.13× |
+| slices | reading `@a[1..5]` and `@h{@k}` | 1.65× |
+| regexg | `while ($x =~ /./g)` over a 200 kB string | 1.98× |
+| strcat | `$s .= 'x'`, twenty million times | 2.16× |
+| ovlsub | `use overload` arithmetic and stringification on objects | 3.58× |
+| pack | `pack` with two templates | 995× |
+| packunpk | `pack` followed by `unpack` | 1107× |
 
-**Numeric loops and recursion beat perl by two to four times.**  When the
+**Numeric loops and recursion beat perl by three to five times.**  When the
 compiler can prove a variable holds a machine integer for its whole life —
 nothing takes a reference to it, nothing assigns a string to it, no string
 `eval` can reach it — the generated code uses native arithmetic instead of
 perl's generic scalar.  The same proof lets a read-only `foreach` bind
 array slots directly instead of copying each element.
 
-**Aggregate traffic is mixed.**  Reading and writing single array or hash
-elements is faster than perl, and copying a whole array is at parity.
-Building an array element by element and moving several elements at once
-through slices is slower: PCL's generic hash table and its per-element
+**Aggregate traffic now mostly beats perl.**  Reading and writing single
+array or hash elements, copying a whole array, filling one from a range and
+a read-only `foreach` over one or several arrays are all faster than perl:
+the compiler proves which arrays are never written or aliased inside a loop
+and binds their storage directly.  Moving several elements at once through
+slices is still slower (reading 1.65×, writing 1.13×): PCL's per-element
 checks cost more than perl's flat C arrays on bulk work.
 
-**Dynamic features are slower, because nothing can be proved about them
-ahead of time.**  Symbolic references and overloaded operators resolve a
-name at run time and call a Perl sub per operation, and perl's C
-implementation of that path is still faster than PCL's.  `m//g` in a loop
-runs a regex engine written in Lisp ([cl-ppcre](https://edicl.github.io/cl-ppcre/))
-instead of perl's hand-tuned C one.
+**Overloading and regex matching are slower, because nothing can be proved
+about them ahead of time.**  An overloaded operator calls a Perl sub per
+operation, and perl's C implementation of that path is still faster than
+PCL's.  `m//g` in a loop runs a regex engine written in Lisp
+([cl-ppcre](https://edicl.github.io/cl-ppcre/)) instead of perl's hand-tuned
+C one.  Symbolic references used to be in this group; a constant name is now
+resolved once per site, and they beat perl.
 
 **`pack`/`unpack` is hundreds of times slower and is a known open item, not
 a representative number.**  PCL's `pack` is itself Perl, compiled by PCL and
 kept as a correctness oracle; a native fast path is planned.
-
-**Since that board (rounds 29–31, 2026-09-06/07)** — each number is the
-round's own interleaved A/B on the row it changed, not a re-run of the
-whole table: a read-only `foreach` over one array went from 0.47× to
-**0.30×** (measured); `collatz`'s PCL time fell 26 %, `listcopy`'s 27 %,
-`slices`' 20 %, `regexg`'s 24 %; a `use integer` loop that used to run
-1.5× *slower* than the same loop without the pragma now runs 1.7× *faster*
-(−76 %); and two whole-program numbers moved: `use JSON::PP; print 1` waits
-**0.41 s** before its first statement instead of 1.13 s (13.4 s before the
-module cache existed), and constructing Moo objects went from 54× to 29.6×
-perl's time.  The per-row figures, with the derived ratios marked as such,
-are in §0.2j of the linked page.
 
 The full table over time, and the measurements behind each optimization,
 are in [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).

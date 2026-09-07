@@ -12,7 +12,7 @@ Perl (`v2-endgame-plan.md` §6 holds the acceptance criteria and sequencing).
 
 ## Where this stands (2026-08-25)
 
-> **The current measured board is [§0.2i](#02i-the-board-on-a-quiet-box-s467-2026-09-04-main-bc9aa4a-gen-v2-611) (2026-09-04, quiet box): ten of nineteen rows beat perl, `arrhash` 0.60×, `slices` 2.60×, `symref` 1.37×.**  The table below is the 2026-08-25 reading and is kept as the record of what each tier delivered.  **The rows that moved since — rounds 29–31 (regex ops once per site, the single-array foreach run, `int()`/`/`, the package preamble; `use JSON::PP` load 0.41 s) — are [§0.2j](#02j-rounds-2931-movers-2026-09-07); the next quiet-box board supersedes its derived ratios.**
+> **The current measured board is [§0.2k](#02k-the-board-on-a-quiet-box-s475-2026-09-07-main-047cc249-gen-v2-1020) (2026-09-07, quiet box: fourteen of the nineteen original rows beat perl, `listcopy` 0.36×, `symref` 0.38×, `slices` 1.65×); §0.2i (2026-09-04, quiet box): ten of nineteen rows beat perl, `arrhash` 0.60×, `slices` 2.60×, `symref` 1.37×.**  The table below is the 2026-08-25 reading and is kept as the record of what each tier delivered.  **The rows that moved since — rounds 29–31 (regex ops once per site, the single-array foreach run, `int()`/`/`, the package preamble; `use JSON::PP` load 0.41 s) — are [§0.2j](#02j-rounds-2931-movers-2026-09-07); the next quiet-box board supersedes its derived ratios.**
 
 Every shipped transform is a **named, switchable emission** in the
 optimization registry [`Pl/Passes.pm`](../Pl/Passes.pm) (`PCL_OPT`):
@@ -55,7 +55,7 @@ counting loop), [`ir-spec.md`](ir-spec.md) §2.2 (the box/raw invariant).
 
 ## Contents
 
-* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.2a the two load-suspect rows on a quiet box + the `symref` bisection](#02a-the-two-load-suspect-rows-re-measured-on-a-quiet-box-s456af) · [§0.2b after #758–#761 — both intloop rows beat perl](#02b-after-the-verdict-coverage-work-s456af-758761) · [§0.2c after the boxed-aggregates flip](#02c-after-the-boxed-aggregates-flip-s457ai-phases-03-task-816) · [§0.2d after the accessor-dispatch work](#02d-after-the-accessor-dispatch-work-s458ak-phase-4s-runtime-half) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved) · [§0.2j rounds 29–31 movers](#02j-rounds-2931-movers-2026-09-07)
+* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.2a the two load-suspect rows on a quiet box + the `symref` bisection](#02a-the-two-load-suspect-rows-re-measured-on-a-quiet-box-s456af) · [§0.2b after #758–#761 — both intloop rows beat perl](#02b-after-the-verdict-coverage-work-s456af-758761) · [§0.2c after the boxed-aggregates flip](#02c-after-the-boxed-aggregates-flip-s457ai-phases-03-task-816) · [§0.2d after the accessor-dispatch work](#02d-after-the-accessor-dispatch-work-s458ak-phase-4s-runtime-half) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved) · [§0.2k the board on a quiet box, 2026-09-07](#02k-the-board-on-a-quiet-box-s475-2026-09-07-main-047cc249-gen-v2-1020) · [§0.2j rounds 29–31 movers](#02j-rounds-2931-movers-2026-09-07)
 * **Verdict coverage** — [§13 the s453 review](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761) · [§13.1 all four shipped, s456af](#131-all-four-shipped-s456af-round-13--and-what-they-cost)
 * **Per category** — [§1 loops](#1-loops) · [§2 arithmetic](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling) · [§3 boxed accumulator](#3-boxed-accumulator--raw-slot-is-13-the-intloop-tax) · [§4 strings](#4-strings--fill-pointer-buffer-is-2400-the-single-biggest-win) · [§5 aggregates](#5-aggregates--the-value-box-is-not-the-cost-keys--lookups-are) · [§6 calls and recursion](#6-function-calls--recursion--already-winning-keep-it) · [§7 objects and dispatch](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) · [§8 I/O, regex, pack](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants)
 * **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort) · [§13 s453 verdict-coverage review, #758–#761](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761)
@@ -670,6 +670,80 @@ is inside that table's recorded spread except `slices`, which is the two
 round-22 changes landing as predicted.  The `pack` ratio rose because
 *perl* ran faster on this machine today; PCL's own time is unchanged.
 **Ten of nineteen rows beat perl**, the same ten as §0.2f.
+
+### 0.2k The board on a QUIET box (s475, 2026-09-07, main `047cc249`, gen v2-1020)
+
+Taken for the README refresh the USER asked for, right after the session's
+last merge: nothing else running (1-min load 0.46 at the start, 1.15 at the
+end), one `perl tools/bench-exec.pl` at the default best-of-5, four minutes.
+The first full table since §0.2i (2026-09-04) and the first with rounds
+27–31 in the tree: #1180 `symref-const`, the round-27 bulk fill and
+`numeric-slot`, `foreach-arrays` (#1184, #1409), the round-28 aggregate
+family, #1250/#1251 (regex ops once per site), #1200 (the eval disk cache —
+not in these rows, they subtract startup), #1182 (`%p-array-grow-discarding`),
+#1514 (`int()`, `/`), #1189 (the package preamble).  All 34 rows, incl. the
+three macro rows and the two new arithmetic rows:
+
+```
+bench          perl(s)     pcl(s)  pcl/perl   §0.2i    note
+intloop+=        0.0647     0.0202     0.31x   0.35x  
+intloop=         0.0640     0.0178     0.28x   0.29x  
+cfor             0.1183     0.0256     0.22x   0.26x  
+arith            0.1482     0.0430     0.29x   (new)  
+useint           0.0965     0.0247     0.26x   (new)  
+arrhash          0.1285     0.0808     0.63x   0.60x  
+arrhash-k        0.0570     0.0592     1.04x   (new)  
+fib(27)x         1.4492     0.4294     0.30x   0.29x  
+gcdrec           0.1867     0.0941     0.50x   0.52x  
+fibret           1.4516     0.4324     0.30x   (new)  
+gcdret           0.1866     0.0852     0.46x   (new)  
+subret           0.2016     0.0833     0.41x   (new)  
+methret          0.0883     0.1336     1.51x   (new)  
+collatz          1.9257     0.3514     0.18x   0.26x  
+strcat           0.2915     0.6288     2.16x   2.14x  
+pack             0.0037     3.6440   995.37x   1174x  
+packunpk         0.0033     3.6053  1107.34x   858x   
+arrfill          0.0478     0.0282     0.59x   1.46x  
+slices           0.0681     0.1124     1.65x   2.60x  
+sliceasgn        0.0261     0.0296     1.13x   1.99x  
+listcopy         0.5058     0.1811     0.36x   0.94x  
+pushloc          0.1014     0.0282     0.28x   (new)  
+sortnum          0.0246     0.0689     2.80x   (new)  
+sortstr          0.0674     0.1124     1.67x   (new)  
+feread           0.4223     0.1220     0.29x   0.47x  
+feread2          0.4259     0.1295     0.30x   1.32x  
+feread3          0.4095     0.1198     0.29x   (new)  
+ovlsub           0.0388     0.1392     3.58x   3.46x  
+symref           0.0222     0.0084     0.38x   1.37x  
+json-rt          0.8764     1.5881     1.81x   (new)  
+moo-objs         0.0395     1.1629    29.45x   (new)  
+textproc         0.4338     1.9873     4.58x   (new)  
+regexg           0.3662     0.7265     1.98x   2.18x  
+subste           0.0572     0.2528     4.42x   (new)  
+```
+
+**What it says against §0.2j's derived figures — the board is the measure,
+the derivations were not.**  Where a lever's own A/B was the only number,
+the derived ratio was right within noise for `feread` (0.30 → 0.29 measured)
+and `collatz` (0.19 → 0.18), but `listcopy` came in at **0.36×**, not the
+derived 0.69× — #1182's −27 % was measured under load beside a sibling's
+sweep, and the quiet box shows the lever is worth far more — and `slices`
+at 1.65× (derived 2.1×) likewise; `regexg` at 1.98× is less than the derived
+1.65× (round 29's +32 % was taken at a different N).  Two rows §0.2j did not
+list moved because rounds 27–28 landed after §0.2i too: `symref` 1.37× →
+**0.38×** (#1180 `symref-const`: a constant name resolves once per site) and
+`arrfill` 1.46× → **0.59×** (the round-27 bulk fill), with `sliceasgn`
+1.99× → 1.13× from the round-28 aggregate family.  **Fourteen of the
+nineteen §0.2i rows now beat perl** (ten did then); the five that do not are
+`sliceasgn`, `slices`, `regexg`, `strcat`, `ovlsub` and the two `pack` rows.
+Of the rows added since: `arith`/`useint` 0.29×/0.26× (#1514 — the pragma
+is now the FASTER of the two), `pushloc` 0.28×, `subret` 0.41×, `arrhash-k`
+1.04×, `methret` 1.51×, `sortnum` 2.80×, `sortstr` 1.67×, `subste` 4.42×;
+the macro rows `json-rt` 1.81×, `textproc` 4.58×, `moo-objs` 29.45×.
+
+This table supersedes §0.2j's derived ratios; §0.2j stays as the record of
+which lever moved which row.  Raw output: the s475 scratch
+(`bench-board-s475.txt`).
 
 ### 0.2j Rounds 29–31 movers (2026-09-07)
 
