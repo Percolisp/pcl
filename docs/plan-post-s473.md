@@ -36,7 +36,7 @@ successor.
 | 1 | **BU** | perf round 29 — **MERGED s474 `8a879a57`** (#1250 + #1251; two levers, round closed early: put things LIVE) | none (runtime-only) | done |
 | 2 | **BZ** (IN FLIGHT s474b, launched 2026-09-07 07:30, worktree `agent-a18594e226bec1266`) | #1302 + #1304 install layout + installer tests, podman legs (`s470/s470bz`) | none | BY merged |
 | 3 | **#1262** | `docs/caching.md` for users — Sonnet, `model: "sonnet"` (`s470/s1262`) | none | BY merged |
-| 4 | **s473a** | the `local` family: #1243(a)(b)(c) = #1192 + #1260, #1190 — 7 corpus rows | v2-870 | a slot |
+| 4 | **s473a** — **MERGED s475 `bb057f33`** (gen v2-1020; member 0 = #1513 CLOSED: the 64-bit boundary DOCUMENTED, numconvert.t registered XDIFF, guard int-boundary-01.t; #1243(a) `local($x) = LIST` is a LIST assignment, narrowed to scalar targets; #1260 a symbolic `local` assigns its initializer; #1192 + #1190 NOT attempted, each now carries a measured design (#1190 blocked on #1150 = s473b's #1241); filed #1339–#1341) | the `local` family: #1243(a)(b)(c) = #1192 + #1260, #1190 — 7 corpus rows | v2-870 | a slot |
 | 5 | **s473b** | the nested-element family: #1241 = #1150 (read vivifies), #1151, #1152, #1010 — 7 rows; bench-gated | v2-880 | a slot |
 | 6 | **s473p** — **MERGED s475 `bfa11c72`** (gen v2-990; #1200 the string-eval DISK cache: `use JSON::PP; print 1` 1.13 → 0.41 s; #1409 ONE bare array is a foreach run: feread 0.47× → 0.30×; #1182 → `%p-array-grow-discarding`: listcopy +27 %, slices +20 %; #1411 filed; #995 open with one sized lever) | perf round 30 (USER 2026-09-07 "other speed tests first"): #1200, the single-array foreach lever, #995+#1056 loop-body box reuse, #1182 storage adoption — #1187 HELD | v2-890 | BU merged; the next perf slot |
 | 7 | **s473c** | #1240 die LOCATION — sized first (register vs cold-branch constant), shipped by the ≤1 %/≤3 % rule — 8 rows | v2-900 | s473b merged (both touch the accessor emission) |
@@ -59,7 +59,7 @@ successor.
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470, s473t3 1471–1500, #1501 = the companion triage (s473t4), #1502–#1504 = the board work, s1061 1505–1512, #1513–#1514 filed s474b, s473r 1515–1524 (used 1515–1518; s473r bumped NO gen — v2-1030 is free for s473b), #1525 filed by s1061, #1526 filed s475**.  Next free after these: **1527** (#1526 = the element-access predicate filler, filed s475).
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **s473t1 1431–1445, s473t2 1446–1460, s473q 1461–1470, s473t3 1471–1500, #1501 = the companion triage (s473t4), #1502–#1504 = the board work, s1061 1505–1512, #1513–#1514 filed s474b, s473r 1515–1524 (used 1515–1518; s473r bumped NO gen — v2-1030 is free for s473b), #1525 filed by s1061, #1526 filed s475; s473a used 1339–1341**.  Next free after these: **1527** (#1526 = the element-access predicate filler, filed s475).
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script
