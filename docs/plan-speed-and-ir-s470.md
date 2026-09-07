@@ -277,6 +277,60 @@ The rounds after this one should be ordered by A.4.1 and A.4.3, not by A.2's
 guesses — and A.2's own ease-weighted order stands only for the rows the
 profile does not contradict.
 
+**ROUND 30's VERDICT (s473p, 2026-09-07).**  Two of the four members shipped,
+two were sized and their numbers close or retarget them.  Per entry:
+
+* **§A.4.1's `use JSON::PP` row — the biggest number in the yardstick — is
+  1.129 s → 0.409 s (0.36×), and `eval "1"` 0.304 → 0.172 s, `use Moo` 0.343 →
+  0.201 s**, against a byte-identical startup control (0.170 → 0.169).
+  **#1200**, the string-eval DISK cache: the emission is kept under
+  `<cache>/evals/` on p-eval's OWN key plus the generation, validated by the
+  #1261 manifest, so the `pl2cl --server` round trip is paid once ever.  The
+  population that made it worth it: `use JSON::PP` runs **80** string evals
+  (the task guessed ~20), the same 80 keys in the same order every run.  The
+  measurement that chose the design: transpile ~16 ms, read+eval 5.00 ms,
+  compile-file 10.00 ms, fasl load 0.05 ms — so the transpile is three quarters
+  of an eval and the only quarter a cache can take with no semantic question.
+  json-rt's ABSOLUTE time follows: N=100 2.619 → 1.954 s (−25 %), N=200 4.208 →
+  3.533 s, per-iteration slope unchanged.  **The fasl quarter is task #1410**,
+  blocked on getting the last form's VALUE out of a `load` (three shapes
+  considered and written down there; do not re-derive them).
+* **"AND ONE LEVER THE SCALING CONTROL HANDED OVER FOR FREE" — TAKEN.**
+  `feread` **0.47× → 0.30×, −36 %** over two A/B rounds, eleven control rows
+  inside the noise band.  **#1409**: `_foreach_bare_arrays`' `>= 2` becomes
+  `>= 1`; #1184 required two arrays only because a one-element list has no
+  flattening to remove, and the live adjustable vector it hands back instead is
+  the cost.  The live-array question this paragraph raised is answered by the
+  licence that was already there: `push`/`pop`/`shift`/`unshift`/`splice`/`$#a
+  =`/a whole assignment are all `written_in` for the #1140 facts, so exactly
+  the loops that would notice the snapshot decline it.  Same registry name.
+* **#995's two residues, MEASURED, and the numbers close one and size the
+  other.**  Its box-per-iteration is already gone (s468bd).  The `"k" . NUM`
+  arm is worth **1.5 %** — 27.0 ns against 27.4 ns, best-of-5 over 5 M calls —
+  because `%p-.-slow`'s 23.7 % self is `concatenate 'string`, not the overload
+  dispatch; a `simple-string` make+replace spelling is SLOWER still.  Do not
+  retry it.  The single-probe raw update for `$h{$k}++` IS real — **43.5 ns →
+  25.5 ns, −41 %**, ≈17.6 % of `arrhash-k`, just under this round's 20 % bar —
+  and #995 now carries its licence (the box in the slot is the runtime signal
+  that something aliases the element).
+* **#1182 RETARGETED, and its win taken without the fact.**  `listcopy` is
+  `my @c = @src`, an EXISTING array whose values perl copies — adoption needs a
+  FRESH producer, so the row the task was sized against cannot take it, and the
+  shapes that can have no bench row.  What the sizing found instead: the cost
+  is `adjust-array`, whose job is to PRESERVE contents a whole-array assignment
+  is about to overwrite.  Installing a fresh element vector through
+  `sb-kernel:set-array-header` gets essentially all of adoption's win with no
+  freshness fact at all (5 elements 110 → 50 ms, 50 elements 15 → 9 ms, 2 000
+  elements unchanged — full adoption is 42/8/5, i.e. SLOWER at the top end).
+  Shipped as `%p-array-grow-discarding`: **listcopy +27…+29 %, slices
+  +20…+21 %** on the interleaved runtime A/B.
+* **A MEASUREMENT TRAP, recorded because it cost this round an hour.**
+  `tools/bench-exec.pl`'s `t(N) − t(0)` CANCELS the constant term, so a lever
+  that shrinks the module load makes `moo-objs` and `json-rt` read as
+  REGRESSIONS: t(0) falls, the difference grows, and what is reported is the
+  leftover noise.  Absolute interleaved times are the honest instrument for
+  anything that moves a constant — and absolute seconds are the metric (§A.0).
+
 ---
 
 ## Part B — The IR as a contract: what a JavaScript or C backend would need to know

@@ -1577,6 +1577,24 @@ perl `99` as well (probed).  An array with no verdict — a package array, `@_`,
 a lexical declared in an enclosing region — does not constrain the loop, which
 is the family's stated boundary, not a claim about it.
 
+**`:arrays t` — the RUN (tasks #1184, #1409).**  A `p-foreach-raw` whose list
+is a `(vector @a …)` of nothing but bare named arrays may carry `:arrays t`,
+which says: iterate the named arrays IN TURN, taking each source's element
+storage as it stands at loop entry, with **no flattened temporary and no
+re-reading of any source's length**.  One array counts (#1409); the list is a
+`vector` form either way, so a translator reads the key, not the arity.
+
+The snapshot is the only observable difference from the general form, and it
+is licensed rather than assumed: PCL emits the key only when `foreach-raw`'s
+own two conjuncts hold for every array in the list (above), i.e. none of them
+escapes and none is written in the loop body — so nothing can change a
+source's length or contents while the loop runs.  Without that licence the
+general path re-reads the live array's length per iteration, which is what
+makes `for (@a) { push @a, … }` iterate the new elements as perl's does.  A
+translator that cannot snapshot may ignore the key and iterate the sources
+live: the licence guarantees the two agree.  Switchable as the Kind-A gate
+`foreach-arrays`.
+
 **Loop variable: lexical or localized.**  Perl's `foreach $pkgvar (…)`
 implicitly *localizes* the package variable — the loop variable is aliased to
 each element for the body's dynamic extent, so a sub called from the body sees

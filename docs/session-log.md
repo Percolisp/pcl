@@ -17,6 +17,75 @@ Append new entries at the top. One section per session.
 
 **Next session:** resume s473p + s1061 as usual (USER 10:50: the "no new subjobs" note was temporary for the session end — same worktrees, fresh Opus agents reading STOP.md); merge in order; then the staged queue (#1262 Sonnet → #1513 doc filler → s473a …).  Next free task ID **1515**.  Restart recipe: `~/pcl-agent-scratch/s470/PAUSE-s474.md` (top entry).
 
+## Session 473p (Opus agent, 2026-09-07) — perf round 30: the string-eval DISK cache (#1200) takes `use JSON::PP` from 1.13 s to 0.41 s, one bare array becomes a foreach RUN (#1409), and #1182 turns out to be about the GROWTH
+
+Round 30's brief named four levers, ease-weighted.  Two shipped, two were sized
+and their numbers close or retarget them; every sizing is written into its task
+so it is not re-derived.
+
+**#1200 — a string eval's transpile is paid once EVER (`ae9e1c72`).**  `p-eval`
+has always cached its emission per PROCESS, keyed by the perl text, the caller's
+perl package, the capture NAMES (#296-B1) and the features in force (#364).
+That key is now also a DISK key, plus `*pcl-cache-generation*` — the ingredient a
+module's cache path carries — so the `pl2cl --server` round trip is paid once
+ever rather than once per run.  The population is why it matters: `use JSON::PP`
+runs **80** string evals, the same 80 keys in the same order every run, and
+generate-the-accessors-with-eval is Class::Accessor's, Moo/Sub::Quote's, Moose's
+and Type::Tiny's idiom too.  Measured, interleaved against b5e9f845 on a quiet
+box with startup as a byte-identical control (0.170 → 0.169): `use JSON::PP;
+print 1` **1.129 → 0.409 s**, `eval "1"` 0.304 → 0.172, `use Moo` 0.343 → 0.201;
+json-rt's absolute time N=100 2.619 → 1.954 s (−25 %) with its per-iteration
+slope unchanged.  Validity is the module cache's minus the clause an eval has no
+subject for: no source file, so what remains is the #1261 dependency manifest,
+which `pl2cl --server` now writes through a new deps-path request line BEFORE it
+answers — a `.lisp` whose `.deps` is missing or stale is a MISS.  The FASL
+quarter is **#1410**, blocked on a real problem (`load` cannot return the last
+form's value, and wrapping it destroys top-level-ness); the three shapes
+considered are written down there.
+
+**#1409 — the lever round 27 handed over for free (`4b2eb95e`).**  `feread`
+(one array) read 0.47× of perl while `feread2` (two) read 0.28×, because
+#1184's run required TWO arrays: a one-element list has no flattening to
+remove, so it kept the LIVE adjustable vector, whose every access is a hairy
+data-vector-ref.  `_foreach_bare_arrays`' `>= 2` becomes `>= 1` and nothing
+else: **0.47× → 0.30×, −36 %** over two A/B rounds with eleven control rows in
+the noise band.  The live-array question (a `push` during the loop extends the
+iteration in perl, and the run's snapshot would not) is answered by the licence
+that was already there — every such write is `written_in` for the #1140 array
+facts.  Three `Pl/t` guards asserted the pre-#1409 spelling and were repaired
+in the same commit, which is the s416 rule and the gate is what found them.
+
+**#995 and #1182 — sized, with the numbers (`c55b7571` ships what #1182's
+sizing found).**  #995's `"k" . NUM` arm is worth **1.5 %** (27.0 ns against
+27.4): `%p-.-slow`'s profile share is `concatenate 'string`, not the overload
+dispatch — do not retry it.  Its other residue is real and now sized: `$h{$k}++`
+43.5 ns against a single-probe raw update's 25.5 ns (−41 %, ≈17.6 % of
+arrhash-k, under this round's bar).  #1182 was retargeted by its own sizing: the
+row it was measured against, `listcopy`, is `my @c = @src` — an EXISTING array
+whose values perl copies — so it cannot take adoption at all, and the shapes
+that can have no bench row.  What the sizing found instead needs no freshness
+fact: the cost is `adjust-array`, which PRESERVES contents a whole-array
+assignment is about to overwrite.  A fresh element vector installed through
+`sb-kernel:set-array-header` gets essentially all of adoption's win —
+**listcopy +27…+29 %, slices +20…+21 %** on the interleaved runtime A/B.
+
+**And a measurement trap worth the hour it cost.**  `tools/bench-exec.pl`'s
+`t(N) − t(0)` cancels the constant term, so a lever that shrinks the module load
+reads as a REGRESSION: t(0) falls, the difference grows, and the report is the
+leftover noise.  Absolute interleaved times are the honest instrument for
+anything that moves a constant.  Also fixed, one line: `tools/ir-conform` put
+nothing on `@INC` before `require`ing PCLSbcl, so its `require PCLPaths` killed
+every worker and a tool the cadence table makes mandatory after a `cl/` change
+produced no verdict at all (pre-existing on b5e9f845).
+
+Bars: gate 218 files / 7571 rows (only the 13 pclxs xs rows); corpus-diff 1 of
+111; emission A/B over 1007 files 966 SAME / 41 DIFF / 0 RCDIFF, all one family;
+full sweep GATE clean with TOTAL passing 18674 (+0) three times over; companion
+`--jobs 1` over nine files, every one equal to its snapshot row; ir-conform
+289/0/56/0; generation v2-990.  Records: DECIDED §s473p,
+`docs/plan-speed-and-ir-s470.md` §A.4.3's round-30 verdict, ir-spec §6.2's
+`:arrays` paragraph, tasks #1200/#1409/#995/#1182 and the new #1410.
+
 ## Session s473t3 (Opus agent, 2026-09-07) — the last 79 blessed rows whose only cause was a catalogue NOTE now name a task or a section; six of the notes were measured WRONG
 
 - **THE TARGET, counted on the tree: 79 rows** in `baselines/fail-baseline.tsv` whose column 6 STARTED with `CATALOG` (s473t2 could attribute the causeless rows but ran out of IDs before these).  Population (B) — 10 rows where `CATALOG …` is a courtesy SUFFIX after a `#NNNN` or `NS:` — is byte-identical to main.  **Population (A) 79 → 0**; UNEXPLAINED 0; the 79 rows differ from main in column 6 ONLY (verified field by field through `:raw`, not by eyeballing a diff), no row added, removed, re-blessed or re-ordered.  The old note is kept as a suffix (`#1478 CATALOG array.t "freed-array length (GC-hard)"`) so the s464 reader still finds the prose.
