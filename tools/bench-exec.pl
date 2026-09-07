@@ -69,6 +69,17 @@ my @benches = (
   ['intloop+=', "$HN my \$s=0; for (1..\$n) { \$s += \$_ } print \"\$s\\n\";",            5_000_000, 0],
   ['intloop=',  "$HN my \$s=0; for (1..\$n) { \$s = \$s + \$_ } print \"\$s\\n\";",        5_000_000, 0],
   ['cfor',      "$HN my \$s=0; for (my \$i=0; \$i<\$n; \$i++) { \$s = \$s + \$i } print \"\$s\\n\";", 5_000_000, 0],
+  # ---- THE ARITHMETIC-OP ROWS (task #1514, s473r) -------------------------
+  # `arith` carries #1514's own loop: three binary ops, an int() and a `%` in
+  # one statement over a raw-numeric slot.  It exists because intloop/cfor
+  # measure `+` alone, and `+`/`*` were ALREADY open-coded at their call sites
+  # (hand-replacement: replacing p-+/p-* with CL + and * moves the row 0.8 %) —
+  # so the standing rows were blind to int(), `/` and `%`, which is where that
+  # loop's time actually was.  `useint` is the SAME arithmetic under `use
+  # integer`, the pragma that wraps every operand in p-int; the bar is that it
+  # is not SLOWER than `arith` (it was 1.5x slower when #1514 was filed).
+  ['arith',     "$HN my \$s=0; for my \$i (1..\$n) { \$s = (\$s * 3 + int(\$i / 7)) % 1000003 } print \"\$s\\n\";", 3_000_000, 0],
+  ['useint',    "use integer; $HN my \$s=0; for my \$i (1..\$n) { \$s = (\$s * 3 + \$i / 7) % 1000003 } print \"\$s\\n\";", 3_000_000, 0],
   ['arrhash',   "$HN my (\@a,\%h,\$s); for (1..\$n) { \$h{x}=\$_; \$a[3]=\$_+1; \$s=\$s+\$h{x}+\$a[3] } print \"\$s\\n\";", 2_000_000, 0],
   # A COMPUTED hash key: `my $k = …; $h{$k}++` in a loop (task #995).  The
   # arrhash row above uses a LITERAL key, so it cannot see the shape this row

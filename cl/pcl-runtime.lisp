@@ -4019,15 +4019,38 @@
 ;;; (5.40.3): `/` tests the NUMBER, so `5 / 0.5` is 10 and `1 / -0.0` dies;
 ;;; `%` tests the TRUNCATED number, so `5 % 0.5` and `5 % 0.9` BOTH die.
 
+(defun %p-divide-general (na nb)
+  "`/` for a pair %p-divide-numbers' inline arm declines: a float operand, or an
+   integer too large to be exact in a double.  Not inlined — it is the cold
+   half, and every p-/ call site carries the inline half's code."
+  (let ((r (/ na nb)))
+    (if (typep r 'ratio) (coerce r 'double-float) r)))
+
 (declaim (inline %p-divide-numbers))
 (defun %p-divide-numbers (na nb)
   "perl's `/` on two numbers: pp_divide's fatal on a zero divisor, then the
    quotient.  CL integer/integer gives a ratio where perl gives a float, so an
    exact ratio is coerced — `(typep r 'ratio)` and not `rationalp`, which is
-   true for integers too and would try to float a bignum quotient."
+   true for integers too and would try to float a bignum quotient.
+
+   TWO INTEGERS THAT FIT A DOUBLE EXACTLY SKIP THE RATIO (task #1514, s473r).
+   `(/ 8 7)` builds a RATIO — a gcd and a heap allocation — and the coerce that
+   follows divides all over again: 20-25 ns per division, measured, against
+   6-11 ns for one `truncate` plus an IEEE divide.  Inside `(signed-byte 53)`
+   both operands are EXACTLY representable as double-floats, so the IEEE
+   quotient is the correctly-rounded value of the exact rational a/b — the same
+   double `(coerce (/ a b) 'double-float)` produces, bit for bit (verified over
+   14 007 pairs).  Outside that range the old path stands, because a bignum
+   rounded BEFORE the division can differ from the exact quotient rounded
+   after; the exact-division arm is kept in both, since PCL answers an INTEGER
+   for `10/5` and perl's pp_divide does the same."
   (when (zerop nb) (p-die "Illegal division by zero"))
-  (let ((r (/ na nb)))
-    (if (typep r 'ratio) (coerce r 'double-float) r)))
+  (if (and (typep na '(signed-byte 53)) (typep nb '(signed-byte 53)))
+      (multiple-value-bind (q r) (truncate na nb)
+        (if (eql r 0)
+            q
+            (/ (coerce na 'double-float) (coerce nb 'double-float))))
+      (%p-divide-general na nb)))
 
 (defun %p-/-slow (a b)
   "Perl division slow path: use overload dispatch, then coercion."
@@ -4095,15 +4118,35 @@
                                    sb-ext:double-float-negative-infinity
                                    sb-ext:double-float-positive-infinity))))))
 
-(defun p-int (val)
-  "Perl int - truncate toward zero. NaN and Inf return unchanged (Perl 5.36+).
-   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
+;;; int() SPLITS ON THE TWO SHAPES A LOOP ACTUALLY REACHES (task #1514, s473r).
+;;; p-int used to be one FULL CALL with to-number's typecase in front of the
+;;; float test -- 9.8 ns of the 50 ns `$s = ($s*3 + int($i/7)) % 1000003'
+;;; iteration, measured by hand-replacement.  It is also the operand wrapper
+;;; `use integer' emits on EVERY operand, so its call cost is paid twice per
+;;; binary op under the pragma.  An INTEGER is already its own int(); a
+;;; DOUBLE-FLOAT is one nan/inf test and a truncate.  Everything else -- a box,
+;;; a string, a single-float, a ratio -- keeps the old body, one call away.
+(defun %p-int-slow (val)
+  "int() for a value that is neither an INTEGER nor a DOUBLE-FLOAT: a box, a
+   string, a single-float, a ratio.  The pre-#1514 p-int body, unchanged."
   (let ((n (to-number val)))
     (if (floatp n)
         (if (or (%pcl-nan-p n) (sb-ext:float-infinity-p n))
             n
             (truncate n))
         (truncate n))))
+
+(declaim (inline p-int))
+(defun p-int (val)
+  "Perl int - truncate toward zero. NaN and Inf return unchanged (Perl 5.36+).
+   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
+  (typecase val
+    (integer val)
+    (double-float (if (or (%pcl-nan-p val) (sb-ext:float-infinity-p val))
+                      val
+                      (truncate val)))
+    (t (%p-int-slow val))))
+(declaim (notinline p-int))
 
 ;;; THE MATH FAMILY DISPATCHES `use overload' (task #1005, s470bk).  These six
 ;;; keys perl overloads were the ones PCL never asked about: `abs $x' answered
@@ -26217,7 +26260,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; notinline to keep this file's per-process load cheap — see file top),
 ;;; and raise the optimize policy so user call sites open-code the
 ;;; numberp/stringp fast paths as native ops.
-(declaim (inline p-+ p-- p-* p-/ p-%
+(declaim (inline p-+ p-- p-* p-/ p-% p-int
                  p-== p-!= p-< p-> p-<= p->= p-<=>
                  p-. p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge
                  p-str-cmp
