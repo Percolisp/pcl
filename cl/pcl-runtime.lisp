@@ -6485,15 +6485,53 @@ per element."
         (dotimes (i n (values sd n))
           (unless (%p-bulk-elem-p (svref sd i)) (return nil)))))))
 
+(defun %p-array-grow-discarding (place n)
+  "Give PLACE room for N elements by installing a FRESH element vector, and
+   return PLACE.  The old contents are DISCARDED, so this is only for a caller
+   that is about to write every slot — which is what makes it cheaper than
+   ADJUST-ARRAY: that one must PRESERVE them, and is a general, out-of-line
+   operation whose cost is most of a whole-array assignment at the sizes real
+   programs use.
+
+   MEASURED (task #1409's sizing of #1182, SBCL 2.6.0.debian, one core,
+   best-of-5, a fresh `my @c` filled from a source vector):
+       elements      ADJUST-ARRAY      here
+              5        110 ms           50 ms
+             50         15 ms            9 ms
+           2000          4 ms            4 ms
+   — the header work is per CALL and does not shrink with the array, and at
+   2 000 the copy dominates, so nothing regresses at the top end.
+
+   The header fields are exactly the ones ADJUST-ARRAY would have set, probed
+   field by field against it: ARRAY-DIMENSION, ARRAY-TOTAL-SIZE, the fill
+   pointer, ADJUSTABLE-ARRAY-P, ARRAY-HEADER-P, ARRAY-DISPLACEMENT,
+   %P-VEC-DATA's answer, EQUALP after the fill, and growth by
+   VECTOR-PUSH-EXTEND / %P-VPUSH afterwards.
+
+   DECLINES to ADJUST-ARRAY for anything that is not the plain
+   element-storage shape %P-VEC-DATA defines — a DISPLACED array included,
+   where replacing the data would silently break the displacement — and does
+   nothing at all for a non-adjustable one, which is what the callers' own
+   guard did.  SB-KERNEL-specific, like %P-VEC-DATA's %ARRAY-DATA beside it."
+  (cond ((not (adjustable-array-p place)) place)
+        ((and (sb-kernel:array-header-p place)
+              (array-has-fill-pointer-p place)
+              (not (sb-kernel::%array-displaced-p place)))
+         (sb-kernel:set-array-header place (make-array n) n
+                                     (fill-pointer place) 0 (list n) nil t)
+         place)
+        (t (adjust-array place n) place)))
+
 (defun %p-array-bulk-fill (place sd n)
   "Refill PLACE from the first N slots of SD in one block.  SD may BE PLACE's
    own data vector (`@a = @a'): N was taken before the fill pointer moved, and
    REPLACE over identical ranges is the identity, so the self-assignment needs
-   no snapshot here."
+   no snapshot here — and the growth below cannot fire in that case either,
+   since N is then at most PLACE's own capacity."
   (remhash place *array-iterators*)          ; perl: assigning resets each()
   (setf (fill-pointer place) 0)
-  (when (and (> n (array-dimension place 0)) (adjustable-array-p place))
-    (adjust-array place n))
+  (when (> n (array-dimension place 0))
+    (%p-array-grow-discarding place n))
   (let ((dd (%p-vec-data place)))
     (if (and dd (>= (length dd) n))
         (progn (replace dd sd :end1 n :end2 n)
@@ -6641,11 +6679,13 @@ per element."
     ;; ADJUSTABLE-ARRAY-P is not defensive noise: `adjust-array` on a
     ;; non-adjustable array returns a FRESH array and leaves the original
     ;; alone, so calling it unguarded would silently drop the whole assignment
-    ;; if PLACE were ever a plain fill-pointer vector.
+    ;; if PLACE were ever a plain fill-pointer vector.  %P-ARRAY-GROW-DISCARDING
+    ;; keeps that guard and adds the reason it can be cheaper here: the fill
+    ;; pointer is already 0 and %P-ARRAY-ADD-ITEMS writes every slot, so the
+    ;; old contents are not wanted (task #1409's sizing of #1182).
     (let ((want (%p-fill-lower-bound snap)))
-      (when (and (> want (array-dimension place 0))
-                 (adjustable-array-p place))
-        (adjust-array place want)))
+      (when (> want (array-dimension place 0))
+        (%p-array-grow-discarding place want)))
     ;; Perl: assigning to an array resets the each() iterator
     (remhash place *array-iterators*)
     (%p-array-add-items snap place)

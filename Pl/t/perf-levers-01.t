@@ -42,7 +42,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 66;
+plan tests => 68;
 
 sub write_pl {
     my ($src) = @_;
@@ -270,6 +270,67 @@ PERL
 OUT
     is(run_with($bulk, undef), $want_bulk,
        'bulk fill: seventeen array-assignment shapes are perl 5.40.3\'s answers');
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# the array-assignment GROWTH — task #1409's sizing of #1182 (runtime only)
+# ─────────────────────────────────────────────────────────────────────────────
+# `@x = LIST` sets the fill pointer to 0 and then writes every slot, so when it
+# has to make room the old element storage is not wanted at all: PCL installs a
+# FRESH element vector through sb-kernel:set-array-header rather than paying
+# ADJUST-ARRAY, whose job is to PRESERVE contents.  (Measured: listcopy -21 %,
+# slices -17 %, every other row inside the noise band.)
+#
+# What a header swap could break that a copy cannot is IDENTITY and CAPACITY,
+# so that is what these rows ask: a reference taken BEFORE the fill must see
+# the new contents through the SAME array object (g1), a push after a fill that
+# sized the storage exactly must still grow it (g2, g3), repeated fills up and
+# down must not leak the old storage's length (g4), and the aliasing paths —
+# foreach, slices, each, the non-bulk slow path — must all read the new vector
+# (g5-g10).  Every answer is perl 5.40.3's, in both element-storage modes.
+{
+    my $grow = write_pl(<<'PERL');
+use strict; use warnings;
+my @a = (1,2); my $r = \@a; @a = (1..100);
+print "g1:", scalar(@$r), " ", $$r[99], " ", ($r == \@a ? "same" : "DIFF"), "\n";
+my @b; @b = (1..5); push @b, 6, 7;
+print "g2:@b ", scalar(@b), "\n";
+my %h; $h{k} = \my @c; @c = (1..30); push @{$h{k}}, 31;
+print "g3:", scalar(@{$h{k}}), " ", $h{k}[29], "\n";
+my @d;
+for my $n (3, 40, 2, 500, 1) { @d = (1..$n) }
+print "g4:", scalar(@d), " @d\n";
+my @e = (1..2000); my $s = 0; $s += $_ for @e;
+print "g5:$s ", scalar(@e), "\n";
+my @f; @f = (1..4); $_ *= 2 for @f;
+print "g6:@f\n";
+my @g; @g = (1..6); @g[1,2] = (20,30); $g[5] = 60;
+print "g7:@g\n";
+my @i = (1,2,3); my ($k1) = each @i; @i = (7,8,9,10);
+my ($k2, $v2) = each @i; print "g8:$k2 $v2 ", scalar(@i), "\n";
+my $o = bless {}, 'K'; my @j; @j = ($o, (1..20));
+print "g9:", scalar(@j), " ", ref($j[0]), " ", $j[20], "\n";
+my @l; @l = (1..8); @l = @l; print "g10:@l\n";
+PERL
+    my $want_grow = <<'OUT';
+g1:100 100 same
+g2:1 2 3 4 5 6 7 7
+g3:31 30
+g4:1 1
+g5:2001000 2000
+g6:2 4 6 8
+g7:1 20 30 4 5 60
+g8:0 7 4
+g9:21 K 20
+g10:1 2 3 4 5 6 7 8
+OUT
+    is(run_with($grow, undef), $want_grow,
+       'array growth: ten identity/capacity shapes are perl 5.40.3\'s answers');
+    {
+        local $ENV{PCL_RAW_ELEMS} = 0;
+        is(run_with($grow, undef), $want_grow,
+           'array growth: the same answers in the all-boxed element mode');
+    }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
