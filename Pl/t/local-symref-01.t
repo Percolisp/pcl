@@ -54,7 +54,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 8;
+plan tests => 9;
 
 # ── scalar: local ${aa} / ${"aa"} / ${$x} / $$x all localize $aa ──
 {
@@ -144,4 +144,53 @@ print $@ =~ /Can't localize through a reference/ ? "ok2\n" : "no2\n";
 {
         my $cl = Pl::Parser2->parse_code('%aa=(); { local %$x; }');
     like($cl, qr/p-local-deref-hash/, 'local %$x emits p-local-deref-hash');
+}
+
+# ── #1260 / #1243 (c): the INITIALIZER of a symbolic `local` ─────────────────
+# `local ${'main::g'} = 9` used to localize and then DROP the assignment: this
+# branch returned before it ever looked at the `=`, so the read inside the
+# scope saw undef where perl sees 9 — silently, on every sigil.  The whole
+# family in one program; every line is perl 5.40.3, probed s473a
+# (scratch/s473a/probes/m3guard.pl), and q1-q9 + q13 all differ on the
+# 41ca2496 extraction.  The SUBSCRIPTED spelling `local ${main::gh}{a} = 7`
+# is NOT covered and is still wrong twice over (it localizes the scalar
+# $main::gh and drops the init) — task #1341.
+{
+    my $out = run_pl(q{
+$g = 1; @ga = (1,2,3); %gh = (a=>1); $c = 1; $evals = 0;
+{ local ${'main::g'} = 9;  print "q1=$g\n"; } print "r1=$g\n";
+{ local ${"main::g"} = 8;  print "q2=$g\n"; } print "r2=$g\n";
+{ local ${'g'} = 7;        print "q3=$g\n"; } print "r3=$g\n";
+{ local @{'main::ga'} = (4,5); print "q4=@ga\n"; } print "r4=@ga\n";
+{ local %{'main::gh'} = (b=>2); print "q5=", join(",", map {"$_=$gh{$_}"} sort keys %gh), "\n"; }
+print "r5=", join(",", map {"$_=$gh{$_}"} sort keys %gh), "\n";
+$n = 'main::g'; $an = 'main::ga';
+{ local ${$n} = 6; print "q6=$g\n"; } print "r6=$g\n";
+{ local $$n = 5;   print "q7=$g\n"; } print "r7=$g\n";
+{ local @{$an} = (7,8); print "q8=@ga\n"; } print "r8=@ga\n";
+{ local ${'main::g'} = ${'main::g'} + 1; print "q9=$g\n"; } print "r9=$g\n";
+{ local ${'main::g'} = 5 if $c;  print "q10=$g\n"; } print "r10=$g\n";
+{ local ${'main::g'} = 5 if !$c; print "q11=$g\n"; } print "r11=$g\n";
+sub side { $evals++; return 4 }
+{ local ${'main::g'} = side() if !$c; print "q12=$g evals=$evals\n"; }
+sub nm { $evals++; return 'main::g' }
+{ local ${ nm() } = 3; print "q13=$g evals=$evals\n"; } print "r13=$g evals=$evals\n";
+{ local ${'main::g'}; print "q14=", (defined $g ? $g : "undef"), "\n"; } print "r14=$g\n";
+});
+    is($out, join("", map {; "$_\n" }
+                  'q1=9',  'r1=1',
+                  'q2=8',  'r2=1',
+                  'q3=7',  'r3=1',
+                  'q4=4 5', 'r4=1 2 3',
+                  'q5=b=2', 'r5=a=1',
+                  'q6=6',  'r6=1',
+                  'q7=5',  'r7=1',
+                  'q8=7 8', 'r8=1 2 3',
+                  'q9=2',  'r9=1',           # the RHS reads the OLD value
+                  'q10=5', 'r10=1',          # a TRUE statement modifier
+                  'q11=1', 'r11=1',          # a FALSE one localizes nothing
+                  'q12=1 evals=0',           # …and never evaluates the RHS
+                  'q13=3 evals=1', 'r13=1 evals=1',  # the NAME runs once
+                  'q14=undef', 'r14=1'),    # bare: no init, still restored
+       'a symbolic local ASSIGNS its initializer, on every sigil (#1260)');
 }

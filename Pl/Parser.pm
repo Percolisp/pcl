@@ -4479,11 +4479,97 @@ sub _process_local_declaration {
     # conditional.  p-local-maybe is that spelling (task #541): the localizer
     # runs, or the body runs bare.
     my $dtest = $lmod ne '' ? $self->_local_cond_test($lmod, $lcond, $stmt) : undef;
+
+    # An INITIALIZER — `local ${'main::g'} = 9` (task #1260 / #1243 (c)).  The
+    # deref macros save and restore but take NO value, and this branch used to
+    # `return` before the `=`, so the assignment simply vanished: the read
+    # inside the scope saw undef where perl sees 9, silently, on every sigil.
+    # The value is assigned INSIDE the open, through the very form a plain
+    # `${'main::g'} = 9` uses — the place is the LHS parsed as an ordinary
+    # expression and the writer is the same three-way pick the @items
+    # solo-`deref` path makes (task #700), so there is ONE reading of how a
+    # symbolic place is written.
+    #
+    # Only when the `=` follows the deref DIRECTLY.  `local ${'main::gh'}{a} =
+    # 7` reaches this branch too and is a different target — an element of the
+    # deref'd hash — which it already localizes wrongly (it localizes the
+    # SCALAR $main::gh) and whose init it already drops: #1341, deliberately
+    # left exactly as it was.
+    my ($init_cl, $place_cl, $ctmp, $name_tmp);
+    if (@non_ws >= 4
+        && ref($non_ws[2]) eq 'PPI::Token::Operator'
+        && $non_ws[2]->content eq '=') {
+      # perl evaluates the RHS BEFORE localizing (`local ${'g'} = ${'g'} + 1`
+      # reads the OLD value), so it is bound OUTSIDE the open below.
+      my $rhs_ctx = ($sigil eq '$') ? 0 : 1;
+      $init_cl = $self->_parse_expression([@non_ws[3 .. $#non_ws]], $stmt,
+                                          $rhs_ctx) // 'nil';
+      $init_cl = "(let ((*wantarray* t)) $init_cl)" if $rhs_ctx;
+      # The PLACE is built by the one constructor every symbolic place goes
+      # through, `Pl::ExprToCL::_cast_form` — the same call
+      # _foreign_runtime_container makes — so the `symref-const` licence (a
+      # compile-time literal name gets the per-site memo, a computed one does
+      # not) is decided in one place and cannot drift from the read side.
+      # A COMPUTED name is bound to a temporary first: the macro below already
+      # evaluates it, and perl evaluates it ONCE (`local ${ nm() } = 5` calls
+      # nm once — probed).  A literal needs no temporary and keeps its memo.
+      my $name_operand = $ref_cl;
+      if ($ref_cl !~ /\A"[^"\\\x00-\x1f]*"\z/) {
+        $self->{_local_counter} //= 0;
+        $name_tmp = "pcl-local-name-" . $self->{_local_counter}++;
+        $name_operand = $name_tmp;
+      }
+      my %cast = ('$' => 'p-cast-$', '@' => 'p-cast-@', '%' => 'p-cast-%');
+      $place_cl = Pl::CLForm::to_flat(
+        Pl::ExprToCL::_cast_form($cast{$sigil}, $name_operand));
+      $place_cl =~ s/^\s+|\s+$//gs;
+      # A modifier gates the RHS, the save/restore AND the assignment, and the
+      # condition must run exactly ONCE (three sites read it here).
+      if (defined $dtest) {
+        $self->{_local_counter} //= 0;
+        $ctmp = "pcl-local-cond-" . $self->{_local_counter}++;
+      }
+    }
+
     $self->_emit(";; $perl_code");
-    $self->_emit($self->_local_open_form("$macro $ref_cl", $dtest));
-    $self->indent_level($self->indent_level + 1);
-    $self->{_local_let_depth} //= 0;
-    $self->{_local_let_depth}++;
+    if (defined $init_cl) {
+      $self->{_local_counter} //= 0;
+      $self->{_local_let_depth} //= 0;
+      my $tmp = "pcl-local-init-" . $self->{_local_counter}++;
+      if (defined $ctmp) {
+        $self->_emit("(let (($ctmp $dtest))");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth}++;
+        $dtest = $ctmp;
+      }
+      # Under a false modifier perl never reaches the statement, so the RHS
+      # never runs — but the temporary is still BOUND, because the assignment
+      # below sits inside the (conditional) open and must read a bound name.
+      my $tmp_init = defined $dtest ? "(if $dtest $init_cl nil)" : $init_cl;
+      if (defined $name_tmp) {
+        $self->_emit("(let (($name_tmp $ref_cl))");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth}++;
+        $ref_cl = $name_tmp;
+      }
+      $self->_emit("(let (($tmp $tmp_init))");
+      $self->indent_level($self->indent_level + 1);
+      $self->{_local_let_depth}++;
+      $self->_emit($self->_local_open_form("$macro $ref_cl", $dtest));
+      $self->indent_level($self->indent_level + 1);
+      $self->{_local_let_depth}++;
+      my $fn = $sigil eq '@' ? 'p-array-deref-='
+             : $sigil eq '%' ? 'p-hash-deref-='
+             :                 'p-setf';
+      my $assign = "($fn $place_cl $tmp)";
+      $self->_emit(defined $dtest ? "(when $dtest $assign)" : $assign);
+    }
+    else {
+      $self->_emit($self->_local_open_form("$macro $ref_cl", $dtest));
+      $self->indent_level($self->indent_level + 1);
+      $self->{_local_let_depth} //= 0;
+      $self->{_local_let_depth}++;
+    }
     $self->_emit("");
     return;
   }

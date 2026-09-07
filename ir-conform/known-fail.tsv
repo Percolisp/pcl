@@ -28,7 +28,6 @@
 092-typeglob	1242	*a{ARRAY} / *h{HASH} still report present after `undef *a` / `undef *h`
 094-typeglob	1242	the ARRAY and HASH slots survive `undef *GLOB` in the introspection form
 120-io	1247	an UNCAUGHT die exits 1 (SBCL) where perl exits $! (2 here)
-133-local	1243	`local ${'main::g'} = 9` (the symbolic spelling) does not set the value
 136-local	1243	`local $g` inside a call's argument list is never restored
 137-local	1243	`local $g` inside a call's argument list is never restored
 138-local	221	warnings-gated diagnostics are absent ("Filehandle $fh opened only for output")
