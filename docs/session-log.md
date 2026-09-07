@@ -139,9 +139,8 @@ prototype, WITHOUT touching A3.pm, the very next run answers `107 TAG|1`
 — re-transpiled, not stale).  README already linked the page (an earlier
 session's edit); `docs/STATUS.md` gained one new link in its "Compile
 happens at run start" sharp edge.  Filed **#1335** (the `evals/` cache-info
-gap) in the #1262 task's 1335–1337 range; #1336/#1337 left unused.  HEAD
-`<TBD-fill-at-commit>`; `git log --oneline main..HEAD` = 1 commit (docs
-only).
+gap) in the #1262 task's 1335–1337 range; #1336/#1337 left unused.  One
+docs-only commit on top of main `ff5dbac3`.
 
 ## Session 474b (Fable, 2026-09-07 07:27 → ~10:40) — the two slots relaunched after the reboot; BZ + s473t3 merged; the sweep's honest state answered; the board order, the 64-bit boundary and `use integer` ruled; both running agents killed by the rate limit, resumable
 
