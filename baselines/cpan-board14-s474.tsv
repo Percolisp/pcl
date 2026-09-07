@@ -1,0 +1,326 @@
+# cpan-board14 — the 14-dist CPAN board, the blessed state.  Taken s1061
+# (2026-09-07) on bd01f012, the tree that ends at s1061's last commit.
+# 183 files, 79 PASS / 54 PARTIAL / 50 FAIL, 2190 ok / 346 not-ok.
+#
+# Columns: dist, t-file, status, ok, notok, rc.  Real perl 5.40.3 was run
+# beside every file named below; its verdict is quoted with each cause.
+#
+# ===========================================================================
+# DELTA s467 -> s474: EXACTLY FOUR ROWS MOVED, all Scalar-List-Utils, and all
+# four are s1061's own #1508 (`$ref->{k} =~ tr///` stopped dying) letting the
+# files reach their Math::BigInt section.  Every other one of the 183 rows is
+# byte-identical to `baselines/cpan-board14-s467.tsv` as that file now stands
+# (80 PASS / 53 PARTIAL / 50 FAIL, 2154 / 340) — `cmp` of the two row bodies
+# with these four lines removed is silent.  ZERO rows moved between s467 and
+# s1061's first commit: a board taken on main `dfa65afa` before either fix was
+# byte-identical to s467 across rounds 24-29, s473t1/t2 and BZ.
+#
+#   max.t      PARTIAL 5/2  -> PARTIAL 8/2    +3 rows run, no new failure
+#   min.t      PARTIAL 5/2  -> PARTIAL 20/2  +15 rows run, no new failure
+#   product.t  PARTIAL 12/1 -> PARTIAL 23/4  +14 rows run, +3 failures
+#   sum.t      PASS    8/0  -> PARTIAL 15/3  +10 rows run, +3 failures
+#
+# `sum.t` PASS -> PARTIAL IS NOT A REGRESSION.  The file plans 18 rows; it
+# used to die after 8 and the "zero not-ok" rule called that a PASS.  It now
+# runs all 18 and 15 of them pass.  A label that reads worse while the ok
+# count rises is the board's known blind spot (#1502).
+#
+# The six new failures are TWO causes, both PRE-EXISTING and both invisible
+# until the rows ran:
+#   * product.t 13 ("overload", got 6 expected 8) and min.t/max.t 6-7
+#     ("overload", got `Foo=SCALAR(0x1)` expected `1`) — task #1507, `use
+#     overload` is a RUN-phase statement where perl's `use` is a BEGIN, and
+#     these files declare the overloaded class in a block at the END.
+#   * sum.t 9-11 and product.t 14-16 (got the right number, expected
+#     `HASH(0x4)`) — task **#1525**, NEW: `scalar(EXPR)` on a HASH REFERENCE
+#     returns the RAW hash table.  `is($v, $v1 + $v2, 'bigint')` lowers the
+#     argument as `(p-scalar (p-+ …))`, so Math::BigInt's result reaches `is`
+#     unboxed and its `""` overload is never found.  `p-scalar`'s ARRAY arm
+#     was repaired for exactly this and the HASH arm was not.
+# perl 5.40.3 on the four files: 10/0, 22/0, 27/0, 18/0.
+# ===========================================================================
+#
+# ===========================================================================
+# TASK #1061: THE NINE DOWN-MOVERS OF s378 -> s467, EACH BISECTED TO ITS
+# COMMIT.  "Pre-existing" is WHEN, not WHY (DECIDED s421), so every one has a
+# commit and a round, not a shrug.
+#
+# FIRST, THE RANGE #1061 NAMED WAS WRONG, and it matters: the previous
+# snapshot `baselines/cpan-board14-s378.tsv` was MEASURED at `5d941618`
+# (2026-08-09, s378).  `23e30051` is only where s440 MOVED the file from
+# docs/ to baselines/.  The real range is `5d941618..d00bb576` — 568 commits,
+# not 238 — and it CONTAINS the announce->DIE flip, which the shorter range
+# would have hidden behind its own baseline.
+#
+#   Role-Tiny            role-long-package-name.t  PASS 7/0    -> FAIL 0/0
+#     cause `e79f0a63` (s407a, #362: a raw code ref numifies to its ADDRESS).
+#     A CORRECT fix unmasking a DEFERRED non-support.  Role::Tiny's
+#     _install_does line 477 compares two code refs NUMERICALLY; while every
+#     code ref numified alike, that test was false and `does`/`DOES` were
+#     installed into every composed class, which put SUB entries in its stash.
+#     PCL's `%{"Pkg::"}` lists ONLY subs, so once the comparison became right
+#     the composed class holds nothing but `@ISA` and `_load_module` tries to
+#     `require Foo__WITH__R/AAAA…pm`.  Task #1510; perl 7/0.
+#
+#   Try-Tiny             given_when.t              PARTIAL 1/1 -> FAIL 0/0
+#     cause `048b6871` (s415b, #371 Track A: five families REFUSE instead of
+#     dropping).  EXPECTED — given/when is deliberately not supported
+#     (removed in perl 5.42), and the whole file body is inside the `given`
+#     block.  Its one remaining `ok` at s378 was an ACCIDENTAL pass: the block
+#     was dropped silently, so `is($topic, $error)` compared undef with undef.
+#     perl 2/0.  (Its sibling when.t was the same event and came BACK to PASS
+#     at `0cbe7831` — s466bc, #1037, already recorded in the s467 header.)
+#
+#   Capture-Tiny  09-preserve-exit-code.t  PARTIAL 1/1  -> FAIL 0/0
+#                 17-pass-results.t        PARTIAL 1/11 -> FAIL 0/0
+#                 19-relayering.t          PARTIAL 3/2  -> FAIL 0/0
+#                 25-cap-fork.t            PARTIAL 1/2  -> FAIL 0/0
+#     cause `f702da31` (s435, Q2, THE FLIP: a dropped statement DIES when
+#     reached).  EXPECTED, and the four are ONE gap: Capture::Tiny builds its
+#     prototypes with `eval "sub $sub(&;@) {…}"`, so PCL's module prototype
+#     SCAN finds no literal and `capture { … }` is not a block-form call — it
+#     drops.  The s378 tree emits the identical seven drops as silent `nil`;
+#     the flip made them a die, and the loss unit is the enclosing top-level
+#     form (#1433), which in these files is everything after `my $Builder`.
+#     Task #1509; perl 2/12/5/4.  NB: the board dists' own `t/` files are in
+#     NO drop-census population, so these seven drops are counted nowhere.
+#
+#   Scalar-List-Utils    dualvar.t                 PARTIAL 14/2 -> FAIL 0/0
+#     cause `b95ad912` (s436, Q3, THE PHASE MODEL).  The file has ALWAYS
+#     emitted an unreadable token — `(intern "PL-IMPORT" :threads::shared)`,
+#     "too many colons" — inside the BEGIN on line 72; until the phase model
+#     that BEGIN was read AFTER the 16 assertions on lines 11-70, which had
+#     therefore already run.  s1061 FIXED the token (#1505, the package
+#     designator now goes through `_cl_pkg_designator`), and the file reads;
+#     it still yields 0 rows because its BEGIN then reaches
+#     `import constant HAVE_THREADS => 0`, the same sugar WITH AN ARGUMENT
+#     LIST, which is not handled — task #1506.  perl 41/0.
+#
+#   Scalar-List-Utils    max.t     PASS 5/0  -> PARTIAL 5/2  (s474: 8/2)
+#                        min.t     PASS 5/0  -> PARTIAL 5/2  (s474: 20/2)
+#                        product.t PASS 12/0 -> PARTIAL 12/1 (s474: 23/4)
+#     cause `b95ad912` (s436, the phase model) — all three bisected
+#     separately, all three land on it.  MORE COVERAGE: the class these files
+#     use is declared in a block at the END of the file, so before the phase
+#     model `Foo->new` did not resolve and the rows never ran; now they run
+#     and fail, because `use overload` is still a RUN-phase statement where
+#     perl's `use` is a BEGIN — the handlers are installed after the code that
+#     needs them.  Task #1507; perl 10/22/27 rows, all passing.
+#     A SECOND transition follows on max.t (7 ok/3 not-ok -> 5/2) at
+#     `bfa170d9` (s461ar, #900 + #911): `$x->{sign} =~ tr/+-/-+/`, core
+#     Math::BigInt's own spelling, started dying "Modification of a read-only
+#     value attempted".  s1061 FIXED that (#1508) — which is what moved these
+#     three rows plus sum.t at s474, see the DELTA block above.
+#
+#   Algorithm-Diff       oo.t      PASS 59/0 -> PARTIAL 102/20
+#     cause `b1847eb7` (s411d, Phase A4, ONE DIALECT).  MORE COVERAGE: 43 more
+#     rows RUN.  The 20 failures are the hunk iterator (`$d->Items(1)` after
+#     `$d->Next()`), and the file then dies at row 122 of 969.  Task #1511;
+#     perl 969/0.
+#
+#   Data-Dump            dump.t    PASS 31/0 -> PARTIAL 34/2
+#     cause `a46aa3f0` (s404f, #354 + #351: two PPI operator-vs-term mis-lexes
+#     that ate whole statements, repaired).  MORE COVERAGE: three more
+#     statements survive.  Both failures are one divergence — `bless \$sv,
+#     "foo"` marks the REFERENT blessed, not the reference.  Task #1511;
+#     perl 38/0.
+#
+#   Class-Method-Modifiers 140-lvalue.t  PARTIAL 6/3 -> PARTIAL 2/7
+#     cause `551202b3` (s464a, #964: an ordinary sub returns a COPY, perl's
+#     pp_leavesub).  EXPECTED: the file is entirely about `:lvalue` subs,
+#     which are USER-DEFERRED (#930), and its four lost rows were passing on
+#     the aliasing bug #964 removed — PCL used to hand back the callee's own
+#     cell, so an assignment to a method call landed somewhere.  perl 7/2 (it
+#     TODO-fails two rows itself).
+#
+#   Text-Balanced        05_extmul.t  PARTIAL 63/33 -> FAIL 0/0 rc 124
+#     TWO faults in one row.  The rc 124 is the board's 120 s timeout: the
+#     file needs ~150 s under PCL (perl: 0.2 s), so it is reported as FAIL
+#     with no rows at all.  Given 400 s it completes — and produces 30 rows
+#     where s378 produced 96 and perl produces 96.  Task #1512; the bisect is
+#     NOT done (see the task: the verdict is not stable enough to bisect on a
+#     shared box, and each step costs 150-600 s).
+# ===========================================================================
+Algorithm-Diff-1.201-0	base.t	PARTIAL	32	3	0
+Algorithm-Diff-1.201-0	oo.t	PARTIAL	102	20	0
+Capture-Tiny-0.50-0	00-report-prereqs.t	PASS	1	0	0
+Capture-Tiny-0.50-0	01-Capture-Tiny.t	PASS	18	0	0
+Capture-Tiny-0.50-0	02-capture.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	03-tee.t	PASS	11	0	0
+Capture-Tiny-0.50-0	06-stdout-closed.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	07-stderr-closed.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	08-stdin-closed.t	PASS	1	0	0
+Capture-Tiny-0.50-0	09-preserve-exit-code.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	10-stdout-string.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	11-stderr-string.t	PASS	2	0	0
+Capture-Tiny-0.50-0	12-stdin-string.t	PASS	2	0	0
+Capture-Tiny-0.50-0	13-stdout-tied.t	FAIL	0	1	0
+Capture-Tiny-0.50-0	14-stderr-tied.t	FAIL	0	1	0
+Capture-Tiny-0.50-0	15-stdin-tied.t	FAIL	0	1	0
+Capture-Tiny-0.50-0	16-catch-errors.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	17-pass-results.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	18-custom-capture.t	PASS	2	0	0
+Capture-Tiny-0.50-0	19-relayering.t	FAIL	0	0	0
+Capture-Tiny-0.50-0	20-stdout-badtie.t	FAIL	0	1	0
+Capture-Tiny-0.50-0	21-stderr-badtie.t	FAIL	0	1	0
+Capture-Tiny-0.50-0	22-stdin-badtie.t	FAIL	0	1	0
+Capture-Tiny-0.50-0	23-all-tied.t	FAIL	0	3	0
+Capture-Tiny-0.50-0	24-all-badtied.t	FAIL	0	3	0
+Capture-Tiny-0.50-0	25-cap-fork.t	FAIL	0	0	0
+Class-Inspector-1.36-0	00_diag.t	PASS	1	0	0
+Class-Inspector-1.36-0	01_use.t	PASS	3	0	0
+Class-Inspector-1.36-0	class_inspector.t	PARTIAL	55	1	0
+Class-Inspector-1.36-0	class_inspector__devel_hide.t	FAIL	0	0	0
+Class-Inspector-1.36-0	class_inspector__inc_to_local.t	PARTIAL	1	1	0
+Class-Inspector-1.36-0	class_inspector_functions.t	PASS	24	0	0
+Class-Method-Modifiers-2.15-0	00-report-prereqs.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	000-load.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	001-error.t	PASS	4	0	0
+Class-Method-Modifiers-2.15-0	002-cache.t	FAIL	0	0	0
+Class-Method-Modifiers-2.15-0	003-basic.t	FAIL	0	0	0
+Class-Method-Modifiers-2.15-0	004-around.t	PASS	3	0	0
+Class-Method-Modifiers-2.15-0	005-return.t	PASS	3	0	0
+Class-Method-Modifiers-2.15-0	010-before-args.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	011-after-args.t	PASS	2	0	0
+Class-Method-Modifiers-2.15-0	012-around-args.t	PASS	3	0	0
+Class-Method-Modifiers-2.15-0	020-multiple-inheritance.t	PASS	18	0	0
+Class-Method-Modifiers-2.15-0	030-multiple-before.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	031-multiple-after.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	032-multiple-around.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	034-multiple-everything.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	035-multiple-everything-twice.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	040-twice-orig.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	041-modify-parent.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	051-undef-list-ctxt.t	PASS	6	0	0
+Class-Method-Modifiers-2.15-0	060-caller.t	PARTIAL	4	1	0
+Class-Method-Modifiers-2.15-0	070-modify-multiple-at-once.t	PASS	4	0	0
+Class-Method-Modifiers-2.15-0	080-multiple-modifiers.t	PASS	2	0	0
+Class-Method-Modifiers-2.15-0	081-sub-and-modifier.t	FAIL	0	0	0
+Class-Method-Modifiers-2.15-0	090-diamond.t	PASS	1	0	0
+Class-Method-Modifiers-2.15-0	100-class-mop-method-modifiers.t	PARTIAL	1	2	0
+Class-Method-Modifiers-2.15-0	110-namespace-clean.t	FAIL	0	0	0
+Class-Method-Modifiers-2.15-0	120-fresh.t	FAIL	0	0	0
+Class-Method-Modifiers-2.15-0	130-clean-underscore.t	PASS	6	0	0
+Class-Method-Modifiers-2.15-0	140-lvalue.t	PARTIAL	2	7	0
+Data-Dump-1.25-0	dd.t	FAIL	0	0	0
+Data-Dump-1.25-0	dollar-one.t	PASS	6	0	0
+Data-Dump-1.25-0	dump.t	PARTIAL	34	2	0
+Data-Dump-1.25-0	eval.t	PASS	1	0	0
+Data-Dump-1.25-0	filtered.t	PARTIAL	40	1	0
+Data-Dump-1.25-0	glob.t	FAIL	0	0	0
+Data-Dump-1.25-0	hash.t	PASS	9	0	0
+Data-Dump-1.25-0	quote-unicode.t	PARTIAL	7	1	0
+Data-Dump-1.25-0	quote.t	PASS	16	0	0
+Data-Dump-1.25-0	ref.t	PARTIAL	1	1	0
+Data-Dump-1.25-0	regexp.t	FAIL	0	1	0
+Data-Dump-1.25-0	scalar-obj.t	PARTIAL	2	1	0
+Data-Dump-1.25-0	scalar.t	FAIL	0	3	0
+Data-Dump-1.25-0	tied.t	PARTIAL	2	2	0
+Data-Dump-1.25-0	vstring.t	PASS	9	0	0
+File-Which-1.27-0	00_diag.t	PASS	1	0	0
+File-Which-1.27-0	01_use.t	PASS	1	0	0
+File-Which-1.27-0	file_which.t	PARTIAL	13	6	0
+Mojo-DOM58-3.002-0	00-report-prereqs.t	PASS	1	0	0
+Mojo-DOM58-3.002-0	collection.t	FAIL	0	0	0
+Mojo-DOM58-3.002-0	dom.t	FAIL	0	0	0
+Mojo-DOM58-3.002-0	entities.t	FAIL	0	0	0
+Mojo-DOM58-3.002-0	roles.t	FAIL	0	0	0
+Role-Tiny-2.002004-0	concrete-methods.t	FAIL	0	0	0
+Role-Tiny-2.002004-0	create-hook.t	PASS	2	0	0
+Role-Tiny-2.002004-0	does.t	PASS	14	0	0
+Role-Tiny-2.002004-0	extend-role-tiny.t	FAIL	0	0	0
+Role-Tiny-2.002004-0	extend.t	PASS	4	0	0
+Role-Tiny-2.002004-0	load-module.t	PARTIAL	1	5	0
+Role-Tiny-2.002004-0	make-role.t	PASS	7	0	0
+Role-Tiny-2.002004-0	method-conflicts.t	PASS	4	0	0
+Role-Tiny-2.002004-0	namespace-clean.t	FAIL	0	0	0
+Role-Tiny-2.002004-0	overload.t	PARTIAL	2	13	0
+Role-Tiny-2.002004-0	proto.t	FAIL	0	0	0
+Role-Tiny-2.002004-0	role-basic-basic.t	PASS	2	0	0
+Role-Tiny-2.002004-0	role-basic-bugs.t	PARTIAL	14	1	0
+Role-Tiny-2.002004-0	role-basic-composition.t	PASS	3	0	0
+Role-Tiny-2.002004-0	role-basic-exceptions.t	PASS	4	0	0
+Role-Tiny-2.002004-0	role-duplication.t	PARTIAL	1	1	0
+Role-Tiny-2.002004-0	role-long-package-name.t	FAIL	0	0	0
+Role-Tiny-2.002004-0	role-tiny-composition.t	PASS	2	0	0
+Role-Tiny-2.002004-0	role-tiny-with.t	PARTIAL	5	1	0
+Role-Tiny-2.002004-0	role-tiny.t	PASS	22	0	0
+Role-Tiny-2.002004-0	role-with-inheritance.t	PASS	4	0	0
+Role-Tiny-2.002004-0	stub.t	PARTIAL	2	2	0
+Role-Tiny-2.002004-0	subclass.t	PASS	5	0	0
+Safe-Isa-1.000010-0	safe_does.t	PASS	6	0	0
+Safe-Isa-1.000010-0	safe_isa.t	PASS	8	0	0
+Scalar-List-Utils-1.70-0	00version.t	PASS	4	0	0
+Scalar-List-Utils-1.70-0	any-all.t	PASS	12	0	0
+Scalar-List-Utils-1.70-0	blessed.t	PASS	12	0	0
+Scalar-List-Utils-1.70-0	dualvar.t	FAIL	0	0	0
+Scalar-List-Utils-1.70-0	exotic_names.t	FAIL	0	0	0
+Scalar-List-Utils-1.70-0	first.t	PARTIAL	23	1	0
+Scalar-List-Utils-1.70-0	getmagic-once.t	PARTIAL	2	4	0
+Scalar-List-Utils-1.70-0	head-tail.t	PARTIAL	40	2	0
+Scalar-List-Utils-1.70-0	isvstring.t	PASS	3	0	0
+Scalar-List-Utils-1.70-0	lln.t	PARTIAL	18	1	0
+Scalar-List-Utils-1.70-0	max.t	PARTIAL	8	2	0
+Scalar-List-Utils-1.70-0	maxstr.t	PASS	5	0	0
+Scalar-List-Utils-1.70-0	mesh.t	PASS	8	0	0
+Scalar-List-Utils-1.70-0	min.t	PARTIAL	20	2	0
+Scalar-List-Utils-1.70-0	minstr.t	PASS	5	0	0
+Scalar-List-Utils-1.70-0	openhan.t	PARTIAL	16	5	0
+Scalar-List-Utils-1.70-0	pair.t	PARTIAL	14	5	0
+Scalar-List-Utils-1.70-0	product.t	PARTIAL	23	4	0
+Scalar-List-Utils-1.70-0	prototype.t	PARTIAL	9	4	0
+Scalar-List-Utils-1.70-0	readonly.t	PARTIAL	7	4	0
+Scalar-List-Utils-1.70-0	reduce.t	PARTIAL	30	3	0
+Scalar-List-Utils-1.70-0	reductions.t	PARTIAL	5	2	0
+Scalar-List-Utils-1.70-0	refaddr.t	PARTIAL	23	9	0
+Scalar-List-Utils-1.70-0	reftype.t	PARTIAL	26	4	0
+Scalar-List-Utils-1.70-0	rt-96343.t	PASS	2	0	0
+Scalar-List-Utils-1.70-0	sample.t	PARTIAL	7	2	0
+Scalar-List-Utils-1.70-0	scalarutil-proto.t	PARTIAL	4	9	0
+Scalar-List-Utils-1.70-0	shuffle.t	PASS	7	0	0
+Scalar-List-Utils-1.70-0	stack-corruption.t	PASS	1	0	0
+Scalar-List-Utils-1.70-0	subname.t	FAIL	0	0	0
+Scalar-List-Utils-1.70-0	sum.t	PARTIAL	15	3	0
+Scalar-List-Utils-1.70-0	sum0.t	PASS	3	0	0
+Scalar-List-Utils-1.70-0	tainted.t	PARTIAL	2	3	0
+Scalar-List-Utils-1.70-0	undefined-block.t	PASS	18	0	0
+Scalar-List-Utils-1.70-0	uniq.t	PARTIAL	27	4	0
+Scalar-List-Utils-1.70-0	uniqnum.t	PARTIAL	15	5	0
+Scalar-List-Utils-1.70-0	weak.t	PARTIAL	13	6	0
+Scalar-List-Utils-1.70-0	zip.t	PASS	8	0	0
+Sort-Versions-1.62-0	versions.t	PASS	96	0	0
+Sub-Uplevel-0.2800-0	00-report-prereqs.t	PASS	1	0	0
+Sub-Uplevel-0.2800-0	01_die_check.t	FAIL	0	1	0
+Sub-Uplevel-0.2800-0	02_uplevel.t	PARTIAL	9	14	0
+Sub-Uplevel-0.2800-0	03_nested_uplevels.t	PARTIAL	1	103	0
+Sub-Uplevel-0.2800-0	04_honor_later_override.t	PARTIAL	5	2	0
+Sub-Uplevel-0.2800-0	05_honor_prior_override.t	PARTIAL	6	4	0
+Sub-Uplevel-0.2800-0	06_db_args.t	PARTIAL	2	1	0
+Sub-Uplevel-0.2800-0	07_uplevel_too_high.t	PARTIAL	3	2	0
+Sub-Uplevel-0.2800-0	08_exporter.t	FAIL	0	1	0
+Sub-Uplevel-0.2800-0	09_emptylist.t	PARTIAL	2	1	0
+Text-Balanced-2.07-0	01_compile.t	PASS	1	0	0
+Text-Balanced-2.07-0	02_extbrk.t	PASS	18	0	0
+Text-Balanced-2.07-0	03_extcbk.t	PASS	103	0	0
+Text-Balanced-2.07-0	04_extdel.t	PASS	90	0	0
+Text-Balanced-2.07-0	05_extmul.t	FAIL	0	0	124
+Text-Balanced-2.07-0	06_extqlk.t	PARTIAL	228	8	0
+Text-Balanced-2.07-0	07_exttag.t	PARTIAL	88	16	0
+Text-Balanced-2.07-0	08_extvar.t	PASS	365	0	0
+Text-Balanced-2.07-0	09_gentag.t	PARTIAL	65	16	0
+Text-Balanced-2.07-0	94_changes.t	FAIL	0	0	0
+Text-Balanced-2.07-0	95_critic.t	FAIL	0	0	0
+Text-Balanced-2.07-0	96_pmv.t	FAIL	0	0	0
+Text-Balanced-2.07-0	97_pod.t	FAIL	0	0	0
+Text-Balanced-2.07-0	98_pod_coverage.t	FAIL	0	0	0
+Try-Tiny-0.32-0	00-report-prereqs.t	PASS	1	0	0
+Try-Tiny-0.32-0	basic.t	PASS	25	0	0
+Try-Tiny-0.32-0	context.t	PASS	25	0	0
+Try-Tiny-0.32-0	erroneous_usage.t	PARTIAL	7	1	0
+Try-Tiny-0.32-0	finally.t	PARTIAL	29	1	0
+Try-Tiny-0.32-0	given_when.t	FAIL	0	0	0
+Try-Tiny-0.32-0	global_destruction_forked.t	PASS	3	0	0
+Try-Tiny-0.32-0	global_destruction_load.t	FAIL	0	0	0
+Try-Tiny-0.32-0	named.t	FAIL	0	3	0
+Try-Tiny-0.32-0	when.t	PASS	1	0	0
+Try-Tiny-0.32-0	zzz-check-breaks.t	PASS	2	0	0

@@ -10,6 +10,51 @@ Status legend: ✅ works · 🟡 partial · ❌ blocked · 🔧 fixed-this-sessi
 
 ---
 
+## CPAN board14 2026-09-07 (s1061, gen v2-1010) — the nine down-movers attributed, two compiler bugs fixed
+
+Task **#1061**: between the s378 and s467 board snapshots nine files moved
+DOWN with no cause recorded.  Each one is now bisected to a commit; the table
+and the per-file reasoning live in the header of
+`baselines/cpan-board14-s474.tsv`, and the closing text in the task.  One
+file, Text-Balanced `05_extmul.t`, is explicitly NOT bisected and #1512 says
+why.
+
+Snapshot: **183 files, 79 PASS / 54 PARTIAL / 50 FAIL, 2,190 ok / 346 not-ok**
+(s467 read 80 / 53 / 50 and 2,154 / 340).  A board taken on main `dfa65afa`,
+before this session's fixes, was byte-identical to s467 — the board had not
+drifted at all over rounds 24–29.
+
+| dist | file | move | cause |
+|---|---|---|---|
+| Role-Tiny | role-long-package-name.t | PASS 7/0 → FAIL 0/0 | `e79f0a63` (s407a, #362) — code refs numify to their address, which stopped Role::Tiny installing `does`/`DOES` into every composed class; PCL's `%{"Pkg::"}` lists only SUBS, so the class then looks empty (#1510) |
+| Try-Tiny | given_when.t | PARTIAL 1/1 → FAIL 0/0 | `048b6871` (s415b) — the ruled given/when refusal; the lost `ok` was undef == undef |
+| Capture-Tiny | 09/17/19/25 | PARTIAL → FAIL 0/0 | `f702da31` (s435, the flip) — Capture::Tiny installs its `(&;@)` prototypes from a STRING EVAL, so `capture { … }` never parses as a block-form call and drops (#1509) |
+| Scalar-List-Utils | dualvar.t | PARTIAL 14/2 → FAIL 0/0 | `b95ad912` (s436, the phase model) moved an always-unreadable BEGIN ahead of the rows; **fixed** (#1505), now blocked on `import constant …` (#1506) |
+| Scalar-List-Utils | max/min/product/sum.t | see snapshot | `b95ad912` gave them a working `Foo->new`, so more rows run and fail on run-phase `use overload` (#1507); the second transition on max.t is `bfa170d9` (#911), **fixed** (#1508) |
+| Algorithm-Diff | oo.t | PASS 59/0 → PARTIAL 102/20 | `b1847eb7` (s411d) — 43 more rows RUN; the hunk iterator answers the wrong items (#1511) |
+| Data-Dump | dump.t | PASS 31/0 → PARTIAL 34/2 | `a46aa3f0` (s404f) — three more statements survive; `bless \$sv, "foo"` marks the REFERENT blessed (#1511) |
+| Class-Method-Modifiers | 140-lvalue.t | PARTIAL 6/3 → 2/7 | `551202b3` (s464a, #964) — `:lvalue` is USER-deferred (#930); the lost rows passed on the aliasing bug #964 removed |
+| Text-Balanced | 05_extmul.t | PARTIAL 63/33 → FAIL 0/0 rc124 | not bisected (#1512): ~150 s under PCL against a 120 s board timeout, and only 30 of 96 rows when given 400 s |
+
+**Two general PCL bugs came out of it**, both the valuable kind:
+
+1. **`import Foo::Bar;` emitted a bare CL package designator** (`:Foo::Bar`),
+   which is not a token — the reader stopped there and everything after it in
+   the emitted file was lost.  A single-segment name happened to survive.
+   (`Pl/Parser.pm`, #1505.)
+2. **`$ref->{k} =~ s///` / `=~ tr///` wrote to a value, not a place.**  The
+   `=~` write-target gate listed only the named-container element kinds, so
+   the deref pair never got lvalue context.  Silent until #911 made it perl's
+   read-only death; core Math::BigInt writes `$x->{sign} =~ tr/+-/-+/` six
+   times, so every negation of a big integer killed the program.
+   (`Pl/ExprToCL.pm`, #1508.)
+
+And one found in the delta the fixes produced: **`scalar(EXPR)` on a hash
+reference returns the raw hash table** — an overloaded object loses its `""`
+handler and `my $c = scalar($href)` stores the key count (#1525).
+
+---
+
 ## CPAN suite scoreboard 2026-08-02 (s322, gen v2-92) — RE-RUN: zero drift, and a finer baseline
 
 Re-run of the s316p baseline dists after 9 sessions of compiler work, most
