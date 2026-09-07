@@ -282,7 +282,9 @@ passing fails the run.  The numbers can only move honestly.
 These are microbenchmarks: each isolates one Perl feature so that a
 difference has one cause.  They are not a promise about whole programs.
 Ratio is PCL time / perl time, best of five runs, process startup
-subtracted; below 1.00× means PCL is faster.
+subtracted; below 1.00× means PCL is faster.  The table is the board of
+2026-09-04, taken on a quiet machine (§0.2i of the linked page); the rows
+that moved since are listed after it.
 
 | benchmark | what it measures | PCL / perl |
 |---|---|---:|
@@ -329,6 +331,18 @@ instead of perl's hand-tuned C one.
 **`pack`/`unpack` is hundreds of times slower and is a known open item, not
 a representative number.**  PCL's `pack` is itself Perl, compiled by PCL and
 kept as a correctness oracle; a native fast path is planned.
+
+**Since that board (rounds 29–31, 2026-09-06/07)** — each number is the
+round's own interleaved A/B on the row it changed, not a re-run of the
+whole table: a read-only `foreach` over one array went from 0.47× to
+**0.30×** (measured); `collatz`'s PCL time fell 26 %, `listcopy`'s 27 %,
+`slices`' 20 %, `regexg`'s 24 %; a `use integer` loop that used to run
+1.5× *slower* than the same loop without the pragma now runs 1.7× *faster*
+(−76 %); and two whole-program numbers moved: `use JSON::PP; print 1` waits
+**0.41 s** before its first statement instead of 1.13 s (13.4 s before the
+module cache existed), and constructing Moo objects went from 54× to 29.6×
+perl's time.  The per-row figures, with the derived ratios marked as such,
+are in §0.2j of the linked page.
 
 The full table over time, and the measurements behind each optimization,
 are in [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).

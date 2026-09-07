@@ -12,7 +12,7 @@ Perl (`v2-endgame-plan.md` §6 holds the acceptance criteria and sequencing).
 
 ## Where this stands (2026-08-25)
 
-> **The current measured board is [§0.2i](#02i-the-board-on-a-quiet-box-s467-2026-09-04-main-bc9aa4a-gen-v2-611) (2026-09-04, quiet box): ten of nineteen rows beat perl, `arrhash` 0.60×, `slices` 2.60×, `symref` 1.37×.**  The table below is the 2026-08-25 reading and is kept as the record of what each tier delivered.
+> **The current measured board is [§0.2i](#02i-the-board-on-a-quiet-box-s467-2026-09-04-main-bc9aa4a-gen-v2-611) (2026-09-04, quiet box): ten of nineteen rows beat perl, `arrhash` 0.60×, `slices` 2.60×, `symref` 1.37×.**  The table below is the 2026-08-25 reading and is kept as the record of what each tier delivered.  **The rows that moved since — rounds 29–31 (regex ops once per site, the single-array foreach run, `int()`/`/`, the package preamble; `use JSON::PP` load 0.41 s) — are [§0.2j](#02j-rounds-2931-movers-2026-09-07); the next quiet-box board supersedes its derived ratios.**
 
 Every shipped transform is a **named, switchable emission** in the
 optimization registry [`Pl/Passes.pm`](../Pl/Passes.pm) (`PCL_OPT`):
@@ -55,7 +55,7 @@ counting loop), [`ir-spec.md`](ir-spec.md) §2.2 (the box/raw invariant).
 
 ## Contents
 
-* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.2a the two load-suspect rows on a quiet box + the `symref` bisection](#02a-the-two-load-suspect-rows-re-measured-on-a-quiet-box-s456af) · [§0.2b after #758–#761 — both intloop rows beat perl](#02b-after-the-verdict-coverage-work-s456af-758761) · [§0.2c after the boxed-aggregates flip](#02c-after-the-boxed-aggregates-flip-s457ai-phases-03-task-816) · [§0.2d after the accessor-dispatch work](#02d-after-the-accessor-dispatch-work-s458ak-phase-4s-runtime-half) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
+* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.2a the two load-suspect rows on a quiet box + the `symref` bisection](#02a-the-two-load-suspect-rows-re-measured-on-a-quiet-box-s456af) · [§0.2b after #758–#761 — both intloop rows beat perl](#02b-after-the-verdict-coverage-work-s456af-758761) · [§0.2c after the boxed-aggregates flip](#02c-after-the-boxed-aggregates-flip-s457ai-phases-03-task-816) · [§0.2d after the accessor-dispatch work](#02d-after-the-accessor-dispatch-work-s458ak-phase-4s-runtime-half) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved) · [§0.2j rounds 29–31 movers](#02j-rounds-2931-movers-2026-09-07)
 * **Verdict coverage** — [§13 the s453 review](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761) · [§13.1 all four shipped, s456af](#131-all-four-shipped-s456af-round-13--and-what-they-cost)
 * **Per category** — [§1 loops](#1-loops) · [§2 arithmetic](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling) · [§3 boxed accumulator](#3-boxed-accumulator--raw-slot-is-13-the-intloop-tax) · [§4 strings](#4-strings--fill-pointer-buffer-is-2400-the-single-biggest-win) · [§5 aggregates](#5-aggregates--the-value-box-is-not-the-cost-keys--lookups-are) · [§6 calls and recursion](#6-function-calls--recursion--already-winning-keep-it) · [§7 objects and dispatch](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) · [§8 I/O, regex, pack](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants)
 * **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort) · [§13 s453 verdict-coverage review, #758–#761](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761)
@@ -670,6 +670,58 @@ is inside that table's recorded spread except `slices`, which is the two
 round-22 changes landing as predicted.  The `pack` ratio rose because
 *perl* ran faster on this machine today; PCL's own time is unchanged.
 **Ten of nineteen rows beat perl**, the same ten as §0.2f.
+
+### 0.2j Rounds 29–31 movers (2026-09-07)
+
+**Not a re-run of the board.**  Each line is the round's own interleaved A/B
+(two `.lisp` files on ONE core, best-of-K, a byte-identical control pair timed
+in the same window, `uptime` printed beside it — the §0.5 method) on the row
+the lever changed; the rounds' control rows stayed inside §0.2i's recorded
+spread.  A ratio marked *derived* is §0.2i's ratio scaled by the measured
+change in PCL's own time, i.e. it assumes perl's column did not move; the
+next quiet-box board (the §0.2i recipe) supersedes every derived figure.
+Tree at the last lever: main `5d59e447`, generation v2-1010.
+
+```
+row        §0.2i     now           PCL time                     round  lever
+regexg     2.18x     ~1.65x drv    -24 % (speedup +32 %)        29     #1250 a regex/subst/tr LITERAL builds its op once per SITE
+subste     (new)     --            -43.5 %                      29     #1251 s/// keeps its compiled record (many short s///)
+feread     0.47x     0.30x MEAS    0.1938 -> 0.1230 s (-36 %)   30     #1409 ONE bare array is a foreach RUN (svref over the store)
+listcopy   0.94x     ~0.69x drv    -27 %                        30     #1182 growth installs a FRESH store (%p-array-grow-discarding)
+slices     2.60x     ~2.1x  drv    -20 %                        30     #1182 same
+collatz    0.26x     ~0.19x drv    0.5457 -> 0.3902 s (-26 %)   31     #1514 int() inline; `/` without a RATIO inside 2**53
+arith      (new)     --            0.0999 -> 0.0455 s (-53 %)   31     #1514 `$s = ($s*3 + int($i/7)) % 1000003` -- the loop the task was filed on
+useint     (new)     --            0.1182 -> 0.0270 s (-76 %)   31     #1514 the same under `use integer`: was 1.5x SLOWER than `arith`, now 1.7x faster
+```
+
+`+`/`*` were already open-coded: replacing `p-+`/`p-*` by CL `+`/`*` in the
+emitted `arith` loop moved it 0.8 % (s473r hand-replacement) — the 68 ns the
+#1514 filing attributed to "op dispatch" were `int()`, `/` and `%`.
+
+**Whole-program constants** (plan-speed-and-ir-s470.md §A.4.1: one program,
+wall clock, nothing subtracted — what a user waits for):
+
+```
+program                        s470bn (2026-09-05)   #1188 fasl cache    #1200 eval disk cache (round 30)
+use JSON::PP; print 1  (warm)  6.44 s                1.43 s              0.41 s        (cold, no cache at all: 13.42 s)
+use Moo; print 1       (warm)  3.50 s                0.343 s             0.201 s
+eval "1"; print 1              0.292 s               0.304 s             0.172 s
+```
+
+```
+macro row     before      after         round  cause
+moo-objs      54x perl    29.6x perl    31     #1189 the emitted package preamble re-ran `defpackage` on an EXISTING package
+                                               (12x per iteration: Moo's Sub::Quote eval package); 2.00 -> 1.22 s
+json-rt       --          +99 % faster  29     #1250/#1251 (the regex op built once per site; s/// compiled record)
+textproc      --          +30 % faster  29     same
+```
+
+Records: DECIDED §s470bu (round 29), §s473p (round 30), §s473r (round 31);
+the ROUND 29/30/31 verdict paragraphs under plan-speed-and-ir-s470.md §A.4.3.
+Open on the perf line: #1516 (the `+=` overload guard, 15 % of `intloop+=`),
+#1517 (the flattener's 8.5 ns/element), #1518 (the preamble's `defclass`
+half), #1142 (a read-only `grep` costs the raw foreach run 30 %), #71 (the
+regex engine — brief s473q).
 
 
 ---
