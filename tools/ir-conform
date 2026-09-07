@@ -84,6 +84,12 @@ use File::Path qw(make_path);
 
 my $ROOT  = abs_path(dirname(abs_path($0)) . '/..');
 my $CASES = "$ROOT/ir-conform/cases";
+# tools/lib on @INC, not just the one file: PCLSbcl `require PCLPaths` at
+# cached_core time, and a bare `require "<path>"` puts nothing on @INC — so
+# without this every worker died "Can't locate PCLPaths.pm" and the run
+# produced no verdict at all (s473p; pre-existing since PCLSbcl grew that
+# require).  Only PERL5LIB=tools/lib made the tool runnable by hand.
+unshift @INC, "$ROOT/tools/lib";
 require "$ROOT/tools/lib/PCLSbcl.pm";
 
 my $EXPECT_MAGIC = '#!ir-conform/expected v1';

@@ -12982,7 +12982,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 
 ;;; Forward declaration for p-eval (p-transpile-string defined later in Module System section)
-(declaim (ftype function p-transpile-string))
+(declaim (ftype function p-transpile-string %p-eval-cl-text))
 
 ;;; p-eval: Perl eval(STRING) — full string eval via runtime transpilation.
 ;;;
@@ -13097,9 +13097,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (cached    (gethash cache-key *p-eval-string-cache*)))
       (handler-case
           (let* ((cl-text  (or cached
-                               (let ((r (p-transpile-string s pkg-name
-                                                            cap-names
-                                                            feat-names)))
+                               ;; …and, one level down, the same key on DISK
+                               ;; (task #1200): the accessor-generating evals
+                               ;; of a module load are the same text on every
+                               ;; run, so the transpile is paid once ever
+                               ;; rather than once per run.
+                               (let ((r (%p-eval-cl-text s pkg-name
+                                                         cap-names
+                                                         feat-names)))
                                  (setf (gethash cache-key
                                                 *p-eval-string-cache*) r)
                                  r)))
@@ -18718,15 +18723,20 @@ buffer's fill-pointer; everything else falls back to file-length."
                  t)))
             (t nil)))))
 
-(defun %p-read-manifest (source-path)
-  "Read and VERIFY SOURCE-PATH's manifest sidecar.  Returns a
-   P-CACHE-MANIFEST whose VALID-P says whether the cache entry may be used:
-   the file must exist, parse, and every dependency it names must still hash
-   to what the transpile read."
-  (let ((manifest (make-p-cache-manifest))
-        (path (%p-manifest-path source-path)))
+(defun %p-manifest-at (path)
+  "Read and VERIFY the manifest sidecar AT PATH.  Returns a P-CACHE-MANIFEST
+   whose VALID-P says whether the cache entry beside it may be used: the file
+   must exist, parse, and every dependency it names must still hash to what
+   the transpile read.
+
+   THE ONE MANIFEST READER (rule 11).  Two cache layers publish one: a
+   module's transpile, keyed by its source path (%P-READ-MANIFEST below), and
+   a string eval's, keyed by the hash of its own text (task #1200) — an eval
+   has no source FILE, so it cannot go through the path derivation, but the
+   verdict it needs is the same one, byte for byte."
+  (let ((manifest (make-p-cache-manifest)))
     (unless (probe-file path)
-      (return-from %p-read-manifest manifest))
+      (return-from %p-manifest-at manifest))
     (let ((ok (ignore-errors
                 (with-open-file (in path :direction :input
                                     :external-format :latin-1)
@@ -18740,6 +18750,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                          (and now (string= now (cdr dep)))))
                      (p-cm-deps manifest)))))
     manifest))
+
+(defun %p-read-manifest (source-path)
+  "SOURCE-PATH's manifest sidecar, read and verified."
+  (%p-manifest-at (%p-manifest-path source-path)))
 
 (defun %p-cache-manifest (source-path)
   "SOURCE-PATH's manifest, read once per run."
@@ -18825,7 +18839,8 @@ buffer's fill-pointer; everything else falls back to file-length."
            :external-format :utf-8)))
   *p-transpiler-process*)
 
-(defun p-transpile-string (perl-code pkg-name &optional capture-names features)
+(defun p-transpile-string (perl-code pkg-name &optional capture-names features
+                                                deps-path)
   "Transpile a Perl string to CL code via the persistent pl2cl server.
    CAPTURE-NAMES are the caller's in-scope lexical names (the keys of the
    eval's capture alist).  The compiler needs them for the ONE question whose
@@ -18835,17 +18850,24 @@ buffer's fill-pointer; everything else falls back to file-length."
    through p-eval-lex-lookup and is unaffected by this list.
    FEATURES are the perl features in effect at the eval site (#364), which
    decide how the TEXT lexes — `try`/`signatures` today.
+   DEPS-PATH, when given, is where this transpile's DEPENDENCY MANIFEST goes
+   (task #1200) — the sidecar that decides whether the eval disk cache's entry
+   beside it is still valid.  The server writes it BEFORE answering, so the
+   sidecar is already in place when the .lisp is published; the same rule the
+   file path states in P-TRANSPILE-FILE.
    Returns the CL text string, or signals an error on failure."
   (let* ((proc     (p-ensure-transpiler))
          (in       (sb-ext:process-input  proc))
          (out      (sb-ext:process-output proc))
          (code-len (length perl-code)))
-    ;; Send request: pkg\n captures\n features\n char-count\n perl-code
+    ;; Send request: pkg\n captures\n features\n deps-path\n char-count\n code
     (write-string pkg-name in)
     (write-char #\Newline in)
     (write-string (format nil "~{~A~^ ~}" capture-names) in)
     (write-char #\Newline in)
     (write-string (format nil "~{~A~^ ~}" features) in)
+    (write-char #\Newline in)
+    (write-string (or deps-path "") in)
     (write-char #\Newline in)
     (write-string (princ-to-string code-len) in)
     (write-char #\Newline in)
@@ -18930,6 +18952,101 @@ buffer's fill-pointer; everything else falls back to file-length."
       (write-string text out))
     (rename-file temp path)
     path))
+
+;;; ── THE STRING-EVAL DISK CACHE (task #1200) ────────────────────────────
+;;; `eval "…"` transpiles its text by handing it to a `pl2cl --server`
+;;; subprocess and then READ+EVALs the CL that comes back.  P-EVAL has always
+;;; kept the result in a per-PROCESS hash, so the same text evaluated twice in
+;;; one run is transpiled once — but generate-the-accessors-with-eval is the
+;;; standard pure-Perl idiom (JSON::PP, Class::Accessor, Moo/Sub::Quote,
+;;; Moose, Type::Tiny), and those evals are the SAME TEXT ON EVERY RUN.
+;;; Measured (s473p): `use JSON::PP; print 1` runs 80 string evals, the same
+;;; 80 keys in the same order run after run, ~16 ms of transpile each.
+;;;
+;;; So the per-process hash gets a DISK layer with exactly the same key.  The
+;;; key is not new: p-eval's cache-key already carries everything that decides
+;;; the emission — the perl TEXT, the caller's perl package, the capture NAMES
+;;; (#296-B1: an exception-partition name the alist carries compiles as the
+;;; captured lexical) and the features in force (#364) — and the disk adds the
+;;; one ingredient a process does not need, *PCL-CACHE-GENERATION*, which
+;;; stands for the compiler that produced the text exactly as it does in a
+;;; module's cache path.
+;;;
+;;; VALIDITY is the module cache's, minus the clause an eval has no subject
+;;; for.  A module's entry is invalidated by its source file's mtime and by
+;;; the dependency manifest (#1261); an eval has no source file, so what
+;;; remains is the manifest — and it is needed, because an eval whose text
+;;; `use`s a module reads that module's prototypes and exports the same way a
+;;; module's transpile reads its dependencies'.  `pl2cl --server` therefore
+;;; writes the sidecar (the request's deps-path line), BEFORE it answers, and
+;;; a `.lisp` whose `.deps` is missing or stale is a MISS — P-CM-VALID-P
+;;; defaults to NIL, which is what makes "deps first, .lisp second" the whole
+;;; publication rule.
+;;;
+;;; It is a CACHE: every failure here falls back to transpiling, and
+;;; *PCL-SKIP-CACHE* (--no-cache / PCL_NO_CACHE) turns it off with the module
+;;; cache, one switch for both.
+
+(declaim (ftype function %p-utime-now p-cleanup-old-cache))
+
+(defun %p-eval-cache-dir ()
+  "Where cached string-eval transpiles live: <cache>/evals/, created on
+   demand, 0700 — beside <cache>/modules/, and derived from *PCL-CACHE-DIR*
+   at CALL time for the same reason (task #1303)."
+  (%p-ensure-dir-0700 (merge-pathnames "evals/" *pcl-cache-dir*)))
+
+(defun %p-eval-cache-stem (text pkg-name cap-names feat-names)
+  "The cache stem for one string eval: MD5 hex over EXACTLY the inputs
+   p-eval's in-process key carries, plus *PCL-CACHE-GENERATION*.
+   MD5 and not SXHASH (which P-COMPUTE-CACHE-PATH uses for a module's PATH):
+   one run reaches dozens of module paths and can reach thousands of distinct
+   eval texts, and a collision here would run one eval's code for another's."
+  (let ((material (format nil "~A~C~A~C~{~A ~}~C~{~A ~}~C~A"
+                          *pcl-cache-generation* #\Nul pkg-name #\Nul
+                          feat-names #\Nul cap-names #\Nul text)))
+    (string-downcase
+     (format nil "~{~2,'0X~}"
+             (coerce (sb-md5:md5sum-string material :external-format :utf-8)
+                     'list)))))
+
+(defun %p-eval-cache-read (lisp-path deps-path)
+  "The cached CL text for a string eval, or NIL when there is no valid entry.
+   A HIT stamps the pair, so the 30-day prune measures LAST USE here exactly
+   as it does for a module (%P-TOUCH-CACHE-ENTRY's rule, one utime(2) per
+   entry per day at most)."
+  (when (p-cm-valid-p (%p-manifest-at deps-path))
+    (let ((text (ignore-errors
+                  (with-open-file (in lisp-path :direction :input)
+                    (let ((buf (make-string (file-length in))))
+                      (subseq buf 0 (read-sequence buf in)))))))
+      (when text
+        (let ((date (%p-mtime lisp-path))
+              (cutoff (- (get-universal-time) *pcl-cache-touch-interval*)))
+          (when (and date (< date cutoff))
+            (%p-utime-now lisp-path)
+            (%p-utime-now deps-path))))
+      text)))
+
+(defun %p-eval-cl-text (text pkg-name cap-names feat-names)
+  "The CL text for one string eval — from the disk cache when a valid entry is
+   there, else transpiled and written there.  See the section commentary."
+  (let ((stem (and (not *pcl-skip-cache*)
+                   (ignore-errors
+                     (%p-eval-cache-dir)
+                     (%p-eval-cache-stem text pkg-name cap-names feat-names)))))
+    (if (null stem)
+        (p-transpile-string text pkg-name cap-names feat-names)
+        (let* ((dir (%p-eval-cache-dir))
+               (lisp-path (merge-pathnames (concatenate 'string stem ".lisp") dir))
+               (deps-path (merge-pathnames (concatenate 'string stem ".deps") dir)))
+          (or (%p-eval-cache-read lisp-path deps-path)
+              (let ((cl (p-transpile-string text pkg-name cap-names feat-names
+                                            (namestring deps-path))))
+                (ignore-errors (%p-write-cache-file lisp-path cl))
+                ;; Same trigger as the module miss: the prune scans at most
+                ;; once a day, and this directory is the one that grows.
+                (ignore-errors (p-cleanup-old-cache))
+                cl))))))
 
 (defun %p-fasl-failed-marker (fasl-path)
   (make-pathname :defaults fasl-path
@@ -19125,12 +19242,20 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-cleanup-old-cache ()
   "Drop cache entries nothing has reached for *PCL-CACHE-MAX-AGE* — the module
-   entries under <cache>/modules/ and the transpiler's prototype memo under
+   entries under <cache>/modules/, the string-eval entries under
+   <cache>/evals/ (task #1200) and the transpiler's prototype memo under
    <cache>/proto/.  Called on every cache MISS; the actual scan happens at most
-   once a day (see %P-CLAIM-PRUNE)."
+   once a day (see %P-CLAIM-PRUNE).
+
+   THE EVAL DIRECTORY IS THE ONE THAT CAN GROW WITHOUT BOUND: a run reaches a
+   fixed set of modules but can build an eval string per loop iteration, so
+   entries nothing will ever ask for again are the NORMAL case there and the
+   prune is what keeps the directory finite.  Measured (s473p): three
+   eval-heavy perl-tests files alone reach 652 distinct eval keys."
   (when (%p-claim-prune)
     (let ((cutoff (- (get-universal-time) *pcl-cache-max-age*)))
       (%p-prune-dir (p-module-cache-dir) cutoff)
+      (%p-prune-dir (%p-eval-cache-dir) cutoff)
       (%p-prune-dir (merge-pathnames "proto/" *pcl-cache-dir*) cutoff))))
 (defun %p-load-module-uncached (source-path)
   "Load SOURCE-PATH with NO cache at all — *PCL-SKIP-CACHE*, which is what

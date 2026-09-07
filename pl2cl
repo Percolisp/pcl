@@ -431,9 +431,16 @@ sub build_eval_preamble {
 sub _run_server {
   # Persistent transpiler server: read requests from stdin, write CL to stdout.
   # Character-based protocol (UTF-8 on both sides, lengths = char counts):
-  #   Request:  "<pkg>\n<captures>\n<features>\n<char-count>\n<perl-code: exactly char-count chars>"
+  #   Request:  "<pkg>\n<captures>\n<features>\n<deps-path>\n<char-count>\n<perl-code: exactly char-count chars>"
   #   Response: "ok\n<char-count>\n<cl-code: exactly char-count chars>"
   #          or "err\n<char-count>\n<error: exactly char-count chars>"
+  # <deps-path>, when non-empty, is where this transpile's DEPENDENCY MANIFEST
+  # goes (task #1200): the runtime's string-eval disk cache keeps the emitted
+  # CL beside a `.deps` sidecar and validates it with exactly the reader the
+  # module cache uses (#1261), so an eval whose text `use`s a module is
+  # re-transpiled when that module changes.  Written BEFORE the response, for
+  # the same reason the file path writes it before the emission reaches the
+  # caller: the sidecar must already be there when the .lisp becomes valid.
   # <captures> is the space-separated list of the caller's in-scope lexical
   # names (the eval capture alist's keys), possibly empty.  Only ONE decision
   # reads it — #296-B1, "is this exception-partition name the caller's `my $a`
@@ -478,6 +485,10 @@ sub _run_server {
     chomp $feat_str;
     my @feats = split ' ', $feat_str;
 
+    my $deps_path = <STDIN>;
+    last unless defined $deps_path;
+    chomp $deps_path;
+
     my $len_str = <STDIN>;
     last unless defined $len_str;
     chomp $len_str;
@@ -496,6 +507,13 @@ sub _run_server {
       $output =~ s/\(in-package :pcl\)/$preamble/;
       $output
     };
+
+    # The sidecar, before the response (see the protocol note above).  The
+    # "source" this manifest names is the cache entry itself: an eval has no
+    # source file, and the only lines the runtime reads back are the `dep`
+    # ones.
+    Pl::ProtoCache::write_deps_file($deps_path, $deps_path, $LAST_WALK)
+      if length $deps_path && !$@;
 
     my ($status, $body);
     if ($@) {
