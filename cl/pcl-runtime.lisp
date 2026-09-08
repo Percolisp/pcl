@@ -6544,6 +6544,101 @@
   (or (eq h '%ENV-MARKER%) (eq h '%INC-MARKER%)))
 
 ;;; ------------------------------------------------------------
+;;; $ENV{_PCL_RUNTIME_} — THE ONE HONEST "AM I RUNNING UNDER PCL?" SIGNAL
+;;; (USER ask s476, task #1529; docs/ir-spec.md §9, README).
+;;;
+;;; There is no other signal: `$^V`/`$]` answer 5.30.0 on purpose
+;;; (compatibility), `$^X` DELIBERATELY points at real perl so that a spawned
+;;; subprocess runs perl, and `$^O` is the OS.  So a test file, a module or a
+;;; script that must behave differently under PCL has nothing to ask.
+;;;
+;;; THE ENTRY IS SYNTHETIC, AND THAT IS THE WHOLE DESIGN.  It is NOT put into
+;;; the process environment with setenv, because `$^X` is real perl: a
+;;; `system($^X, …)` / backtick / piped-open / exec child that INHERITED the
+;;; variable would believe it runs under PCL — a silent wrong of the worst
+;;; kind.  So it lives at the %ENV READ layer: present in `$ENV{…}`, `exists`,
+;;; `keys`, `each` and every `%ENV` copy, absent from `sb-ext:posix-environ`
+;;; and hence from every child and from `system("env")`.  A PCL child sets its
+;;; own, because its own runtime does this.
+;;;
+;;; RULE 12: a CLOSED SET OF ONE.  There is no table and no second synthetic
+;;; key; if a second one is ever wanted, it becomes a table here and every
+;;; accessor keeps asking the same predicate.
+;;;
+;;; THE ACCESSORS ARE SEVERAL, so they share ONE predicate and ONE value
+;;; (rule 11): p-gethash, p-keys, p-values, %p-exists-p, p-delete and the
+;;; `local $ENV{…}` helpers.  %p-marker-pairs and `each` are covered for free
+;;; — they are built on p-keys + p-gethash.
+;;;
+;;; A REAL ENVIRONMENT VARIABLE OF THE SAME NAME ALWAYS WINS, which is what
+;;; makes assignment ordinary: `$ENV{_PCL_RUNTIME_} = "x"` takes the normal
+;;; setenv path, and the synthetic entry then stops applying (so the value
+;;; reads back, and a child does inherit what the program explicitly exported).
+(defparameter +p-runtime-env-key+ "_PCL_RUNTIME_"
+  "The one synthetic %ENV key.  Leading and trailing underscores mark it as an
+   OUTPUT set by the runtime, distinct from the PCL_* INPUT knobs (PCL_OPT,
+   PCL_CACHE_DIR, PCL_NO_CORE …).")
+
+(defvar *p-runtime-env-hidden* nil
+  "True once the program has DELETEd $ENV{_PCL_RUNTIME_} (or replaced %ENV
+   wholesale, or localised the key).  A deleted synthetic key stays deleted for
+   the process, exactly as a deleted real one does.")
+
+(defvar *p-pcl-version-cache* nil
+  "Memo for %p-pcl-version — computed at most once per process, and only if
+   something actually reads the variable.")
+
+(defun %p-version-from-git (root)
+  "`git describe` in ROOT, or NIL — the checkout half of `pcl --version`'s
+   pcl_version().  Never spawned for an installed tree (that has a VERSION
+   file), and never spawned at all unless a program reads the variable."
+  (handler-case
+      (let ((out (with-output-to-string (s)
+                   (sb-ext:run-program "git"
+                                       (list "-C" (namestring root)
+                                             "describe" "--tags" "--always")
+                                       :search t :output s :error nil))))
+        (let ((v (string-trim '(#\Space #\Tab #\Newline #\Return) out)))
+          (when (plusp (length v)) (concatenate 'string v " (git checkout)"))))
+    (error () nil)))
+
+(defun %p-pcl-version ()
+  "PCL's version, the string `pcl --version`'s first line carries.
+   SAME SOURCE, not a second one: an INSTALLED tree carries a VERSION file
+   written by tools/install-pcl, and a checkout answers `git describe` — which
+   is exactly what the `pcl` script's pcl_version() reads.  Neither: say so
+   plainly, because a guessed version is worse than none."
+  (or *p-pcl-version-cache*
+      (setf *p-pcl-version-cache*
+            (let ((root (when *pcl-runtime-directory*
+                          (merge-pathnames "../" *pcl-runtime-directory*))))
+              (or (when root
+                    (handler-case
+                        (with-open-file (f (merge-pathnames "VERSION" root)
+                                           :if-does-not-exist nil)
+                          (when f
+                            (let ((l (read-line f nil nil)))
+                              (when (and l (plusp (length l)))
+                                (string-trim '(#\Space #\Tab #\Return) l)))))
+                      (error () nil)))
+                  (when root (%p-version-from-git root))
+                  "unknown")))))
+
+(defun %p-runtime-env-synthetic-p (key)
+  "THE predicate every %ENV accessor asks: does the synthetic
+   $ENV{_PCL_RUNTIME_} entry apply to KEY right now?  False once the program
+   deleted it, and false when a REAL environment variable of that name exists
+   (the real one wins — see the header)."
+  (and (string= key +p-runtime-env-key+)
+       (not *p-runtime-env-hidden*)
+       (null (sb-posix:getenv +p-runtime-env-key+))))
+
+(defun %p-runtime-env-in-keys-p ()
+  "The key-set half of the same question: should `keys %ENV` / `values %ENV`
+   append the synthetic entry?  Same predicate, asked without a key."
+  (%p-runtime-env-synthetic-p +p-runtime-env-key+))
+
+;;; ------------------------------------------------------------
 ;;; THE ELEMENT-STORAGE VECTOR (s458ak).
 ;;;
 ;;; Every Perl array PCL builds is `(make-array n :adjustable t
@@ -7274,7 +7369,12 @@ per element."
                           (to-string (aref flat (1+ i)))
                           ""))))
       ;; %ENV = (...): clear the process environment, then set the pairs.
+      ;; The SYNTHETIC $ENV{_PCL_RUNTIME_} is cleared with it (task #1529) —
+      ;; it is an entry of %ENV, and a wholesale replacement removes every
+      ;; entry the new list does not name.  If the list DOES name it, the
+      ;; setenv loop below makes it a real variable, which wins anyway.
       ((eq place '%ENV-MARKER%)
+       (setf *p-runtime-env-hidden* t)
        (dolist (entry (sb-ext:posix-environ))
          (let ((eq-pos (position #\= entry)))
            (when eq-pos
@@ -11325,7 +11425,10 @@ which is one of #1140's escape spellings (probed)."
     ;; Check for special markers
     (cond
       ((eq h '%ENV-MARKER%)
-       (or (sb-posix:getenv k) *p-undef*))
+       (or (sb-posix:getenv k)
+           ;; $ENV{_PCL_RUNTIME_}: the synthetic entry (task #1529).
+           (and (%p-runtime-env-synthetic-p k) (%p-pcl-version))
+           *p-undef*))
       ((eq h '%INC-MARKER%)
        (multiple-value-bind (val found) (gethash k *p-inc-table*)
          (if found val *p-undef*)))
@@ -12064,9 +12167,14 @@ which is one of #1140's escape spellings (probed)."
     ((eq (unbox collection) '%ENV-MARKER%)
      (remhash '%ENV-MARKER% *hash-iterators*)
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
-       (dolist (entry (sb-ext:posix-environ) result)
+       (dolist (entry (sb-ext:posix-environ))
          (let ((p (position #\= entry)))
-           (when p (vector-push-extend (subseq entry 0 p) result))))))
+           (when p (vector-push-extend (subseq entry 0 p) result))))
+       ;; $ENV{_PCL_RUNTIME_}: the synthetic entry (task #1529).  `each` and
+       ;; %p-marker-pairs — and so every `%ENV` copy — are built on this walk.
+       (when (%p-runtime-env-in-keys-p)
+         (vector-push-extend +p-runtime-env-key+ result))
+       result))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
@@ -12108,9 +12216,14 @@ which is one of #1140's escape spellings (probed)."
     ;; %ENV special hash: values from the process environment.
     ((eq (unbox collection) '%ENV-MARKER%)
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
-       (dolist (entry (sb-ext:posix-environ) result)
+       (dolist (entry (sb-ext:posix-environ))
          (let ((p (position #\= entry)))
-           (when p (vector-push-extend (subseq entry (1+ p)) result))))))
+           (when p (vector-push-extend (subseq entry (1+ p)) result))))
+       ;; The synthetic entry, in the SAME position p-keys puts its key —
+       ;; both walks are `posix-environ` in order, then this (task #1529).
+       (when (%p-runtime-env-in-keys-p)
+         (vector-push-extend (%p-pcl-version) result))
+       result))
     ;; Neither
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
@@ -12146,7 +12259,9 @@ which is one of #1140's escape spellings (probed)."
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (cond
-      ((eq h '%ENV-MARKER%) (not (null (sb-posix:getenv k))))
+      ((eq h '%ENV-MARKER%) (or (not (null (sb-posix:getenv k)))
+                                ;; the synthetic entry (task #1529)
+                                (%p-runtime-env-synthetic-p k)))
       ((eq h '%INC-MARKER%) (nth-value 1 (gethash k *p-inc-table*)))
       ;; Non-hash container (e.g. undef intermediate in `exists $h{a}{b}` where
       ;; $h{a} doesn't exist): Perl autovivifies $h{a} and the result is false.
@@ -12173,7 +12288,12 @@ which is one of #1140's escape spellings (probed)."
         (k (to-string key)))
     (cond
       ((eq h '%ENV-MARKER%)
-       (let ((old (sb-posix:getenv k)))
+       (let ((old (or (sb-posix:getenv k)
+                      ;; deleting the synthetic entry hides it for the rest of
+                      ;; the process, exactly as a deleted real key stays
+                      ;; deleted (task #1529)
+                      (and (%p-runtime-env-synthetic-p k) (%p-pcl-version)))))
+         (when (string= k +p-runtime-env-key+) (setf *p-runtime-env-hidden* t))
          (sb-posix:unsetenv k)
          (or old *p-undef*)))
       ((eq h '%INC-MARKER%)
@@ -23440,9 +23560,14 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-lhe-save (hv kv)
   "Save hash[key] for local. Returns saved state vector."
   (if (eq hv '%ENV-MARKER%)
-      (let ((old (sb-posix:getenv kv)))
+      (let ((old (sb-posix:getenv kv))
+            (syn *p-runtime-env-hidden*))
+        ;; `local $ENV{_PCL_RUNTIME_}` must hide the SYNTHETIC entry too, or
+        ;; the localised key would still read (task #1529); the flag is saved
+        ;; and restored beside the real value.
+        (when (string= kv +p-runtime-env-key+) (setf *p-runtime-env-hidden* t))
         (sb-posix:unsetenv kv)
-        (vector :env old))
+        (vector :env old syn))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
         ;; Install fresh undef box so body assignments don't clobber saved box.
         (setf (gethash kv hv) (make-p-box nil))
@@ -23452,6 +23577,8 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Restore hash[key] after local exits."
   (if (eq (aref saved 0) :env)
       (let ((old (aref saved 1)))
+        (when (string= kv +p-runtime-env-key+)
+          (setf *p-runtime-env-hidden* (aref saved 2)))
         (if old (sb-posix:setenv kv old 1) (sb-posix:unsetenv kv)))
       (let ((old-ex (aref saved 1)) (old-bx (aref saved 2)))
         (if old-ex (setf (gethash kv hv) old-bx) (remhash kv hv)))))
@@ -23464,10 +23591,14 @@ buffer's fill-pointer; everything else falls back to file-length."
    = {} then $self->{captures}{$k} = ...)."
   (if (eq hv '%ENV-MARKER%)
       (let* ((old (sb-posix:getenv kv))
+             (syn *p-runtime-env-hidden*)
              (s (if (or (null init-val) (eq init-val *p-undef*))
                     nil (to-string init-val))))
+        ;; See %p-lhe-save: the synthetic entry is hidden for the local's
+        ;; extent (a REAL value assigned here wins over it anyway).
+        (when (string= kv +p-runtime-env-key+) (setf *p-runtime-env-hidden* t))
         (if s (sb-posix:setenv kv s 1) (sb-posix:unsetenv kv))
-        (vector :env old))
+        (vector :env old syn))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
         (let ((bx (make-p-box nil)))
           (box-set bx init-val)
@@ -23957,6 +24088,12 @@ buffer's fill-pointer; everything else falls back to file-length."
        (if (p-box-p val) val (length v)))
       ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count
       ((and (hash-table-p v) (not (p-box-p val))) (%p-hash-user-count v))
+      ;; …and the MARKER *is* the hash for %ENV / %INC (task #736), so it needs
+      ;; the same arm: without it the symbol fell to the catch-all below and
+      ;; `scalar(%ENV)` printed HASH(0x1) where perl prints the key count
+      ;; (task #1392, s473h — pre-existing, found while wiring #1529).  p-keys
+      ;; is the ONE walk of those two, so the count cannot disagree with `keys`.
+      ((and (%p-hash-marker-p v) (not (p-box-p val))) (length (p-keys v)))
       ;; An undef result is the scalar undef: return the *p-undef* sentinel, not
       ;; raw nil.  scalar(EXPR) ALWAYS produces a single scalar, so e.g.
       ;; `scalar(eval { die })` must contribute exactly one undef element to a

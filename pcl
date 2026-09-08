@@ -506,5 +506,16 @@ Environment:
   PCL_CORE=path         Use THIS saved core instead of the cached one.
   PCL_NO_CORE=1         Never build or use the cached core (an installed core
                         still counts).
+
+  _PCL_RUNTIME_         SET BY PCL, not read by it -- the one honest signal
+                        that Perl code is running under PCL.  Its value is the
+                        version `pcl --version` prints, so
+                        `if ($ENV{_PCL_RUNTIME_}) {...}` is the test and
+                        `print "PCL $ENV{_PCL_RUNTIME_}"` says which.
+                        It is SYNTHETIC -- present in %ENV, exists, keys, each
+                        and every %ENV copy, and absent from the real
+                        environment -- so a CHILD PROCESS DOES NOT INHERIT IT
+                        ($^X is real perl; a perl child that saw it would
+                        believe it runs under PCL).  A PCL child sets its own.
 USAGE
 }

@@ -142,6 +142,26 @@ a pause before its first line: a one-liner starts in under a quarter of a
 second, a thousand-line script takes a few seconds.  The full list is in
 [`docs/caching.md`](docs/caching.md) and in `pcl --help`.
 
+**Detecting PCL from Perl code.**  `$ENV{_PCL_RUNTIME_}` is true in every PCL
+process, and its value is the version `pcl --version` prints:
+
+```perl
+if ($ENV{_PCL_RUNTIME_}) { ... }              # running under PCL
+print "PCL $ENV{_PCL_RUNTIME_}\n";            # e.g. PCL 0.1.0
+```
+
+Nothing else answers the question honestly: `$^V` and `$]` report 5.30.0 on
+purpose (compatibility), `$^X` deliberately points at *real perl* so that a
+subprocess you spawn runs perl, and `$^O` is the operating system.
+
+The variable is **synthetic** — it is in `%ENV`, in `exists`, in `keys`, in
+`each` and in every `%ENV` copy, but it is *not* in the process environment,
+so **a child process does not inherit it**.  That is deliberate: since `$^X`
+is real perl, a perl child that saw the variable would believe it runs under
+PCL.  A PCL child sets its own.  Assigning to it is an ordinary `%ENV` write
+(which does export it, as perl's `%ENV` always does), and deleting it removes
+it for the rest of the process.
+
 ## An example
 
 This program uses the things a typical script uses: a package with
