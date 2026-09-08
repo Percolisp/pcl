@@ -19681,12 +19681,109 @@ buffer's fill-pointer; everything else falls back to file-length."
               "* -- every directory (PCL_NO_FASL_CACHE=1, the kept alias)"
               (%p-dir-list-line "PCL_NO_COMPILE_DIRS" "nothing is excluded")))
   (format t "cache generation: ~A~%" *pcl-cache-generation*)
+  ;; The key's other two components (task #1119): what identifies the COMPILER
+  ;; that writes an entry, and the runtime+SBCL a fasl was built for.  Printed
+  ;; because "why is my cache not shared / why did it all re-transpile" is
+  ;; exactly what --cache-info is asked.
+  (format t "compiler root: ~A~%"
+          (let ((r (%p-compiler-root))) (if r (namestring r) "unknown")))
+  (format t "compiler stamp: ~A~%" (p-compiler-stamp))
+  (format t "runtime identity: ~A~%"
+          (or *pcl-runtime-identity* "unknown -- module fasls are disabled"))
   (finish-output)
   nil)
 
+;;; ── WHICH COMPILER WROTE THIS ENTRY (task #1119) ───────────────────────
+;;; *pcl-cache-generation* says what a SESSION INTENDED; it does not identify
+;;; the compiler.  Two consequences, both measured in one session (s470bi) and
+;;; both costing a whole gate run:
+;;;   * two worktrees carrying the same hand-written string SHARE the cache —
+;;;     a gate row died calling `%p-sort-classic`, a function that existed
+;;;     only in the SIBLING's tree;
+;;;   * a stopped session's entries outlive its compiler — resuming the same
+;;;     worktree on a newer base at the same string loaded entries written
+;;;     before a facts-plist change and died at `p-sub: unknown fact key`.
+;;;
+;;; So the key carries a FINGERPRINT OF THE COMPILER, and the rule is the one
+;;; the tree already uses for the same question: Pl::ProtoCache::_compiler_stamp
+;;; (task #560) keys its prototype memo on the Pl/ directory's ABSOLUTE PATH
+;;; plus every Pl/**.pm's mtime+size, and its POD says why — "this is also what
+;;; keeps two worktrees that happen to share a generation string from reading
+;;; each other's entries".  Two caches, one rule, so they move together.
+;;;
+;;; WHY STAT AND NOT CONTENT, measured here rather than assumed: an MD5 over
+;;; the 2.24 MB of Pl/**.pm + pl2cl costs 14.7 ms, the stat stamp 1.5 ms, and
+;;; it is paid once per process that loads a module.  What content would catch
+;;; and this does not is a compiler file whose SIZE and MTIME are both
+;;; unchanged while its bytes differ — `git checkout` does not produce that (it
+;;; stamps every file it writes with the current time), and the #1261 argument
+;;; against mtimes is about a DEPENDENCY, a file the user edits and git
+;;; restores, not about the PCL tree itself.
+;;;
+;;; It is computed at FIRST USE and memoised for the process, never while the
+;;; runtime loads: on the normal path that is when a saved CORE is built, and
+;;; the Pl/ tree can be edited afterwards — the #1303 rule, and the reason an
+;;; init hook clears the memo when an image starts.
+
+(defvar *p-compiler-stamp* nil
+  "Memo of %p-compute-compiler-stamp for THIS process.  Cleared at image
+   start, because a saved core must not carry the builder's answer.")
+
+(push (lambda () (setf *p-compiler-stamp* nil)) sb-ext:*init-hooks*)
+
+(defun %p-compiler-root ()
+  "The PCL tree whose compiler this program will spawn: pl2cl's own directory
+   when the preamble named one, else the tree the runtime was loaded from
+   (the runtime lives in <root>/cl/).  NIL when neither is known."
+  (or (and *pcl-pl2cl-path*
+           (make-pathname :name nil :type nil :version nil
+                          :defaults (pathname *pcl-pl2cl-path*)))
+      (and *pcl-runtime-directory*
+           (ignore-errors (truename (merge-pathnames "../"
+                                                     *pcl-runtime-directory*))))))
+
+(defun %p-compiler-files (root)
+  "The compiler's files, sorted: every Pl/**.pm one directory deep — the same
+   set Pl::ProtoCache::_compiler_stamp walks — plus pl2cl itself, which this
+   runtime SPAWNS and which ProtoCache (running inside it) cannot see."
+  (let ((pl (merge-pathnames "Pl/" root)))
+    (append (sort (append (ignore-errors (directory (merge-pathnames "*.pm" pl)))
+                          (ignore-errors (directory (merge-pathnames "*/*.pm" pl))))
+                  #'string< :key #'namestring)
+            (list (merge-pathnames "pl2cl" root)))))
+
+(defun %p-compute-compiler-stamp ()
+  "A fingerprint of the compiler that will write cache entries in this run:
+   its ROOT PATH plus each file's mtime and size.  When the root is unknown
+   the path component alone is the answer — that is the pre-#1119 behaviour
+   (path + generation), never something weaker."
+  (let ((root (%p-compiler-root)))
+    (if (null root)
+        "no-compiler-root"
+        (let ((acc (make-string-output-stream)))
+          (write-string (namestring root) acc)
+          (dolist (f (%p-compiler-files root))
+            (let ((s (ignore-errors (sb-posix:stat (namestring f)))))
+              (format acc "~C~A:~D:~D" #\Nul (namestring f)
+                      (if s (sb-posix:stat-mtime s) 0)
+                      (if s (sb-posix:stat-size s) 0))))
+          (subseq (format nil "~{~2,'0X~}"
+                          (coerce (sb-md5:md5sum-string
+                                   (get-output-stream-string acc))
+                                  'list))
+                  0 16)))))
+
+(defun p-compiler-stamp ()
+  "This process's compiler fingerprint, computed once (see the commentary)."
+  (or *p-compiler-stamp*
+      (setf *p-compiler-stamp* (%p-compute-compiler-stamp))))
+
 (defun p-compute-cache-path (source-path &optional lisp-p)
-  "Compute cache path for a source file: hash of the absolute path and the
-   cache GENERATION (*pcl-cache-generation*).
+  "Compute cache path for a source file: hash of the absolute path, the cache
+   GENERATION (*pcl-cache-generation*) and the COMPILER FINGERPRINT
+   (p-compiler-stamp, task #1119 — see the commentary above; the generation
+   stays as the human-readable stamp it always was, and is no longer alone in
+   deciding that two trees may share an entry).
    The key used to carry a third component, the EFFECTIVE pipeline, so that
    toggling the PCL_V1 escape hatch could not reuse the other pipeline's
    cached transpiles.  E4.1 step 2 (#242) removed the second pipeline; the
@@ -19704,7 +19801,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    *PCL-CACHE-DIR* HERE, at call time, never at load time."
   (let* ((abs-path (namestring (truename source-path)))
          (hash (sxhash (concatenate 'string abs-path "|" *pcl-cache-generation*
-                                    "|" "v2")))
+                                    "|" "v2" "|" (p-compiler-stamp))))
          (stem (format nil "~16,'0X" (logand hash #xFFFFFFFFFFFFFFFF)))
          (dir (p-module-cache-dir)))
     (cond (lisp-p (merge-pathnames (concatenate 'string stem ".lisp") dir))

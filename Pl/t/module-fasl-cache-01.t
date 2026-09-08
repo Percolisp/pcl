@@ -41,7 +41,7 @@ use PCLSbcl ();    # cached_core — the saved core the #1303 rows run through
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 55;
+plan tests => 59;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -511,4 +511,64 @@ sub _write_at {
     print $fh $body;
     close $fh;
     return $path;
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# WHICH COMPILER WROTE THIS ENTRY (task #1119, s473i).
+#
+# The key used to be the module's path + *pcl-cache-generation*, and that
+# string says what a SESSION INTENDED, not which compiler ran.  Two worktrees
+# on the same string SHARED the cache (a gate row died calling a function that
+# existed only in the sibling's tree), and a stopped session's entries outlived
+# its own compiler.  The key now carries a fingerprint of the compiler — its
+# root PATH plus every Pl/**.pm's mtime and size, the rule
+# Pl::ProtoCache::_compiler_stamp already uses for its own memo.
+#
+# Asked of the runtime directly, with two FAKE compiler trees, because that is
+# the only way to have two "compilers" in one gate row: a real second checkout
+# is minutes of setup and this file's whole point is the cache, not git.
+{
+    my $t1 = tempdir(CLEANUP => 1);
+    my $t2 = tempdir(CLEANUP => 1);
+    for my $t ($t1, $t2) {
+        mkdir "$t/Pl" or die "mkdir $t/Pl: $!";
+        _write_at("$t/pl2cl", "#!/usr/bin/perl\n1;\n");
+        _write_at("$t/Pl/Fake.pm", "package Fake; 1;\n");
+    }
+    my $src = write_mod('StampSrc', "package StampSrc;\nsub v { 1 }\n1;\n");
+
+    my @prefix = PCLSbcl::sbcl_prefix(runtime => "$root/cl/pcl-runtime.lisp",
+                                      env_core => 1);
+    # ONE FRESH PROCESS PER ANSWER, deliberately: the stamp is memoised for the
+    # process, and clearing the memo by hand would make these rows depend on a
+    # variable that does not exist on the base they are inverse-verified
+    # against — they would error there instead of DISAGREEING there, which is
+    # the whole point of a guard.  Four starts off the saved core, ~0.3 s each.
+    #
+    # NO APOSTROPHE anywhere in the form: it goes through `sbcl --eval '...'`,
+    # and a Lisp quote would end the shell's own string (measured —
+    # `(concatenate 'string ...)` made sh answer "Syntax error").
+    my $key = sub {
+        my ($p2c) = @_;
+        my $probe = qq{(progn (setf pcl::*pcl-pl2cl-path* "$p2c") }
+                  . qq{(format t "KEY ~A~%" }
+                  . qq{(namestring (pcl::p-compute-cache-path "$src" t))))};
+        my $out = `sbcl @prefix --eval '$probe' 2>&1`;
+        return $out =~ /^KEY (\S+)$/m ? $1 : '';
+    };
+
+    my $k1 = $key->("$t1/pl2cl");
+    my $k2 = $key->("$t2/pl2cl");
+    my $k3 = $key->("$t1/pl2cl");
+    my $then = time + 100;
+    utime($then, $then, "$t1/Pl/Fake.pm") or die "utime: $!";
+    my $k4 = $key->("$t1/pl2cl");
+
+    ok(length $k1, 'the runtime answers with a cache path for a compiler tree');
+    isnt($k1, $k2,
+         'two compiler trees with the SAME generation get DIFFERENT keys (#1119)');
+    is($k1, $k3,
+       '... while the same tree, untouched, keeps its key (the cache still works)');
+    isnt($k1, $k4,
+         '... and editing a Pl/*.pm changes it, without touching the generation');
 }
