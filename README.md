@@ -283,31 +283,33 @@ These are microbenchmarks: each isolates one Perl feature so that a
 difference has one cause.  They are not a promise about whole programs.
 Ratio is PCL time / perl time, best of five runs, process startup
 subtracted; below 1.00× means PCL is faster.  The table is the board of
-2026-09-07, taken on a quiet machine (§0.2k of the linked page).
+2026-09-08, taken on a quiet machine (§0.2m of the linked page).
 
 | benchmark | what it measures | PCL / perl |
 |---|---|---:|
 | collatz | `while` loop with integer arithmetic | 0.18× |
-| cfor | C-style `for` loop summing integers | 0.22× |
-| useint | `$s = ($s * 3 + $i / 7) % 1000003` under `use integer` | 0.26× |
-| intloop= | `for (1..$n) { $s = $s + $_ }` | 0.28× |
+| cfor | C-style `for` loop summing integers | 0.24× |
+| arith | `$s = ($s * 3 + int($i / 7)) % 1000003` | 0.25× |
+| useint | `$s = ($s * 3 + $i / 7) % 1000003` under `use integer` | 0.25× |
 | feread | read-only `foreach` over a 1000-element array | 0.29× |
-| arith | `$s = ($s * 3 + int($i / 7)) % 1000003` | 0.29× |
-| fib(27) | recursion | 0.30× |
+| intloop= | `for (1..$n) { $s = $s + $_ }` | 0.29× |
+| fib(27) | recursion | 0.29× |
 | feread2 | `foreach` over two arrays at once | 0.30× |
-| intloop+= | `for (1..$n) { $s += $_ }` | 0.31× |
-| listcopy | `my @copy = @src`, 50 elements | 0.36× |
-| symref | symbolic references, `${'main::g'}` | 0.38× |
-| gcdrec | recursion with modulo | 0.50× |
-| arrfill | `@a = (1..20, $_)` on every iteration | 0.59× |
+| intloop+= | `for (1..$n) { $s += $_ }` | 0.32× |
+| listcopy | `my @copy = @src`, 50 elements | 0.34× |
+| symref | symbolic references, `${'main::g'}` | 0.41× |
+| gcdrec | recursion with modulo | 0.52× |
+| arrfill | `@a = (1..20, $_)` on every iteration | 0.60× |
 | arrhash | one array element and one hash element, read and written | 0.63× |
-| sliceasgn | assignment to array and hash slices | 1.13× |
-| slices | reading `@a[1..5]` and `@h{@k}` | 1.65× |
-| regexg | `while ($x =~ /./g)` over a 200 kB string | 1.98× |
+| methret | a method call on a blessed hash, `$o->bump` | 1.06× |
+| sliceasgn | assignment to array and hash slices | 1.14× |
+| slices | reading `@a[1..5]` and `@h{@k}` | 1.64× |
+| regexg | `while ($x =~ /./g)` over a 200 kB string | 2.07× |
 | strcat | `$s .= 'x'`, twenty million times | 2.16× |
-| ovlsub | `use overload` arithmetic and stringification on objects | 3.58× |
-| pack | `pack` with two templates | 995× |
-| packunpk | `pack` followed by `unpack` | 1107× |
+| ovlsub | `use overload` arithmetic and stringification on objects | 3.33× |
+| moo-objs | Moo objects: constructor, accessors, a method building another object | 32.3× |
+| pack | `pack` with two templates | 1095× |
+| packunpk | `pack` followed by `unpack` | 1015× |
 
 **Numeric loops and recursion beat perl by three to five times.**  When the
 compiler can prove a variable holds a machine integer for its whole life —
@@ -321,13 +323,16 @@ array or hash elements, copying a whole array, filling one from a range and
 a read-only `foreach` over one or several arrays are all faster than perl:
 the compiler proves which arrays are never written or aliased inside a loop
 and binds their storage directly.  Moving several elements at once through
-slices is still slower (reading 1.65×, writing 1.13×): PCL's per-element
+slices is still slower (reading 1.64×, writing 1.14×): PCL's per-element
 checks cost more than perl's flat C arrays on bulk work.
 
-**Overloading and regex matching are slower, because nothing can be proved
-about them ahead of time.**  An overloaded operator calls a Perl sub per
-operation, and perl's C implementation of that path is still faster than
-PCL's.  `m//g` in a loop runs a regex engine written in Lisp
+**Method calls are level with perl; overloading and regex matching are
+slower, because nothing can be proved about them ahead of time.**  A plain
+method call on a blessed hash caches its target per class and now costs
+within a few percent of perl's; a Moo workload is dominated by loading and
+compiling the code Moo builds with string `eval`, which is where its 32× goes.
+An overloaded operator calls a Perl sub per operation, and perl's C
+implementation of that path is still faster than PCL's.  `m//g` in a loop runs a regex engine written in Lisp
 ([cl-ppcre](https://edicl.github.io/cl-ppcre/)) instead of perl's hand-tuned
 C one.  Symbolic references used to be in this group; a constant name is now
 resolved once per site, and they beat perl.

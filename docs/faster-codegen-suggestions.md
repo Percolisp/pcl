@@ -671,6 +671,93 @@ round-22 changes landing as predicted.  The `pack` ratio rose because
 *perl* ran faster on this machine today; PCL's own time is unchanged.
 **Ten of nineteen rows beat perl**, the same ten as §0.2f.
 
+### 0.2m The board on a QUIET box (s479, 2026-09-08, main `a9f2a264`, gen v2-1080)
+
+Taken for the README refresh (#1527: the method-call rows join the
+front-page table), at the start of s479 while the two execution agents were
+still in their reading phase: 1-min load 0.86 at the start, 1.20 at the end
+(§0.2k ran at 0.46 → 1.15), one `perl tools/bench-exec.pl` at the default
+best-of-5, four minutes.  The first table with round 32 (s473s: the own-class
+method cache, `p-defclass`, the hashed-BMH literal-prefix scan) and the
+s473b/c/d/e correctness batches in the tree.  All 34 rows:
+
+```
+bench          perl(s)     pcl(s)  pcl/perl
+----------- ---------- ---------- ---------
+intloop+=       0.0647     0.0207     0.32x
+intloop=        0.0644     0.0189     0.29x
+cfor            0.1053     0.0258     0.24x
+arith           0.1465     0.0369     0.25x
+useint          0.0961     0.0240     0.25x
+arrhash         0.1293     0.0811     0.63x
+arrhash-k       0.0557     0.0662     1.19x
+fib(27)x        1.4443     0.4168     0.29x
+gcdrec          0.1908     0.0993     0.52x
+fibret          1.4460     0.4198     0.29x
+gcdret          0.1888     0.0867     0.46x
+subret          0.2024     0.0822     0.41x
+methret         0.0884     0.0937     1.06x
+collatz         1.9412     0.3435     0.18x
+strcat          0.2932     0.6322     2.16x
+pack            0.0035     3.8032  1094.78x
+packunpk        0.0038     3.8136  1014.55x
+arrfill         0.0479     0.0285     0.60x
+slices          0.0689     0.1131     1.64x
+sliceasgn       0.0258     0.0293     1.14x
+listcopy        0.5095     0.1714     0.34x
+pushloc         0.1024     0.0286     0.28x
+sortnum         0.0251     0.0668     2.66x
+sortstr         0.0690     0.1107     1.60x
+feread          0.4211     0.1217     0.29x
+feread2         0.4120     0.1247     0.30x
+feread3         0.4265     0.1185     0.28x
+ovlsub          0.0395     0.1315     3.33x
+symref          0.0222     0.0092     0.41x
+json-rt         0.8756     1.5407     1.76x
+moo-objs        0.0394     1.2727    32.29x
+textproc        0.4374     1.4406     3.29x
+regexg          0.3711     0.7679     2.07x
+subste          0.0551     0.2565     4.65x
+```
+
+**Against §0.2k.**  The two levers round 32 shipped read as predicted:
+`methret` 1.51× → **1.06×** (0.1336 → 0.0937 s, #582's own-class half) and
+`textproc` 4.58× → **3.29×** (1.9873 → 1.4406 s, #1461).  Every other row is
+inside its spread except three that moved the WRONG way, and all three were
+run down before this table was written, because a board taken beside two
+agents is exactly the shape that hides a regression:
+
+* `arrhash-k` 1.04× → 1.19× (0.0592 → 0.0662 s; re-timed 0.0662 / 0.0702 /
+  0.0679) and `regexg` 1.98× → 2.07× (0.7265 → 0.7679 s; re-timed 0.7668 /
+  0.7684, perl's column unchanged).  A runtime A/B (`BENCH_RT_B`: one
+  emission, two cores, interleaved) against the runtimes of 047cc249 (§0.2k),
+  post-s473d, post-s473b, post-s473c, post-s473s and every `cl/` commit of
+  s473s and s473e put the step for BOTH rows on `72bb6d22` (s473e member 4,
+  #1164): every earlier runtime 5–10 % faster on arrhash-k, that one −0.5 %.
+  Its whole runtime change is one `let` of `*p-dyn-loop-frames*` inside
+  `p-sort`, which neither row calls, and `sb-walker:macroexpand-all` of the
+  arrhash-k loop is byte-identical under the post-s473s and HEAD runtimes.
+  **The discriminator was a PADDING-ONLY runtime — HEAD plus one unused
+  `defun` inserted before `p-sort`, A/B'd against HEAD**: arrhash-k −11.6 /
+  −9.8 / −11.7 % for a defun of 8 / 40 / 200 list elements, regexg −0.1 /
+  −1.6 / −12.5 %.  A semantically empty change moves both rows by as much as
+  the "regression", in the faster direction: it is CODE PLACEMENT (SBCL's
+  function alignment downstream of the changed function), the effect s473c
+  met when one store read +5.5 % on `intloop=` and 0 % on `intloop+=`.  The
+  rows stand as measured; nothing is owed on them.
+* `moo-objs` 29.45× → 32.29× (1.1629 → 1.2727 s).  It cannot be runtime-A/B'd
+  before s473s (the emission needs the new macros); post-s473s vs HEAD reads
+  −0.3 %.  Alternating the whole tree twice — HEAD 1.2483 / 1.1739 s, a
+  worktree at 047cc249 1.1599 / 1.1904 s — overlaps, so the board reading was
+  the load (the row is compile-dominated, #1189).
+
+**The rule this leaves (DECIDED §s479): a bench row's noise floor includes
+code PLACEMENT, and it is measured with a padding-only runtime before a
+±10 % move is attributed to a commit.**  A runtime bisect always finds a
+"culprit" — the first commit whose function sizes shift the hot loop — and
+that culprit's diff is the tell: when it touches nothing the row calls, run
+the pad probe.  Raw output: `~/pcl-agent-scratch/s479/bench-*-s479.txt`.
+
 ### 0.2l Round 32 movers (2026-09-08) — the method-call round
 
 **Not a re-run of the board.**  Each line is the round's own interleaved A/B

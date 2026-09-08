@@ -2,6 +2,12 @@
 
 Append new entries at the top. One section per session.
 
+## Session 479 (Fable, 2026-09-08 evening) — s473i + s473h launched; three briefs drafted; the README speed table refreshed from a quiet-box board whose three wrong-way movers turned out to be CODE PLACEMENT
+
+Restart per the s478 recipe: main `a9f2a264`, CI green on it (public API), box fresh-booted.  s473i and s473h launched 17:52 into the two slots (pinned Opus, fresh worktrees).  While they read, three briefs were written from the measured backlogs: s473v (perf round 33 — the four text rows hold ~4 s of the board's PCL time; the match record extends #477's lazy `$&` to every derived match variable; `pos` becomes one accessor pair over the 13 direct `*p-match-pos*` sites; `strcat`'s 31 ns per one-char append is `%pcl-str-append`'s `replace` onto a non-simple target; sortnum/sortstr are a per-SORT constant to be measured by intercept/slope), s473w (#1502, the USER-ordered board work, with the s1061 clusters that are ≤ 1 h) and s473t4 (#1501, the companion's two triage checks, launching after s473f per the USER).
+
+The board (`docs/faster-codegen-suggestions.md` §0.2m) was taken at load 0.86–1.20 and confirmed round 32 (methret 1.51× → 1.06×, textproc 4.58× → 3.29×) but read three rows the wrong way: arrhash-k +12 %, regexg +6 %, moo-objs +9 %.  Re-timed three times each (consistent), then a runtime A/B against nine earlier runtimes put the step for both micro rows on `72bb6d22`, whose only runtime change is a `let` inside `p-sort` — a function neither row calls — and whose expansion of the arrhash-k loop is byte-identical.  A padding-only runtime (one unused defun before `p-sort`) moved the same rows 10–12 % on its own: the "regression" is SBCL code placement, the effect s473c met on `intloop=`.  moo-objs alternated between the two whole trees overlaps.  Rule recorded in DECIDED §s479: measure a row's placement floor with the pad probe before attributing a ±10 % move; check a bisect's culprit against its diff before believing it.  README refreshed (#1527 DONE): 23 rows, the two method-call rows in sorted position.
+
 ## Session s473s (Opus agent, 2026-09-08) — perf round 32, the method-call round: the own-class method cache (methret −27.5 %), `p-defclass` shipped with its prize measured away, and literal-prefix scanning on a hashed BMH table (textproc −24.5 %)
 
 **Member 1, the measurement.**  `sb-sprof` `:cpu` over the `methret` row at
