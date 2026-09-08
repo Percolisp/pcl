@@ -45,5 +45,4 @@
 299-io	1246	`close($fh)` after a failed open returns undef; perl returns ''
 308-io	1246	a failed `open($a[0], ...)` does not autovivify the array element's handle
 309-io	1246	a failed `open($h{k}, ...)` does not autovivify the hash element's handle
-329-string-eval	1244	`eval q{last}` inside a loop does not reach the loop
 345-tie	155	`tie %h` is not implemented — the container is left untied (the runtime announces it)

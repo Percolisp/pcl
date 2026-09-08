@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 37;
+plan tests => 44;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run; stderr
 # is kept, because some of these rows are about what lands on it.  $OPT is an
@@ -183,12 +183,12 @@ print "n=$n\n";
 PERL
    'a map BLOCK is transparent: the exit reaches the enclosing loop');
 
-like(run_cl(<<'PERL'), qr/^err=Can't "last" outside a loop block/m,
+is(run_cl(<<'PERL'), "n=1 err=\n",
 my $n = 0;
 for my $i (1..3) { $n++; eval q{last}; $n += 100 }
-print "err=$@";
+print "n=$n err=$@\n";
 PERL
-     'a `last` in a STRING EVAL is a DIFFERENT compilation unit, so the loop takes no frame and the exit DIES with perl\'s text — trapped by the eval, but never silent (perl exits the loop: n=1; the divergence is the #1162 residue)');
+   'a `last` in a STRING EVAL reaches the loop (task #1244 (b), s473e): the eval\'s text is another compilation unit, so the loop is framed on the SPELLING — this row used to assert the #1162 residue, `Can\'t "last" outside a loop block` in $@ with n=303');
 
 # ---- 5. what is NOT a loop — LOUD, with perl\'s own text -------------------
 like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
@@ -412,3 +412,59 @@ PERL
 like(transpile('sub f { last } my $n = 0; for my $i (1..3) { f() } continue { $n++ } print "$n\n";'),
      qr/:dyn\s+t/,
      'emission: a foreach WITH a continue block now carries `:dyn t` — the licence used to be stripped by the continue block (`@dyn = () if @cont`)');
+
+# ---- 10. A STRING EVAL IS TRANSPARENT TO LOOP CONTROL (task #1244 (b)) -----
+#
+# perl compiles an eval'd string as its own unit, and a `last` in it still acts
+# on the innermost DYNAMICALLY enclosing loop — the loop around the eval.  This
+# compiler cannot read that text, so the only sound licence is "a string eval
+# MAY exit": a loop whose body string-evals, or calls a sub in this unit that
+# does, is framed.  Nothing had to change in the eval CATCHER — it is a
+# `handler-case`, and a `throw` is not a condition, so the loop-control throw
+# was already passing through it; the loop simply had no frame to reach.
+#
+# `eval BLOCK` needs no licence of its own: its `last` is either lexical (and
+# always worked) or a call this unit follows by name.
+
+is(run_cl(<<'PERL'), "n=3 err=[]\n",
+my $n = 0;
+for my $i (1..3) { $n++; eval q{next}; $n += 100 }
+print "n=$n err=[$@]\n";
+PERL
+   '... and `eval q{next}` re-tests the loop, so all three iterations run');
+
+is(run_cl(<<'PERL'), "p=1 err=[]\n",
+sub f { last }
+my $p = 0;
+for my $i (1..3) { $p++; eval q{ f() }; $p += 100 }
+print "p=$p err=[$@]\n";
+PERL
+   'a sub CALLED from the eval\'d text exits the loop too');
+
+is(run_cl(<<'PERL'), "m=1 err=[]\n",
+my $m = 0;
+for my $i (1..3) { $m++; eval { last }; $m += 100 }
+print "m=$m err=[$@]\n";
+PERL
+   'inverse: `eval BLOCK` + `last` was already right (a lexical exit through the handler-case)');
+
+is(run_cl(<<'PERL'), "r=303 err=[boom\n]\n",
+my $r = 0;
+for my $i (1..3) { $r++; eval q{ die "boom\n" }; $r += 100 }
+print "r=$r err=[$@]\n";
+PERL
+   'inverse: an ordinary die inside a string eval is still CAUGHT — only loop control passes through');
+
+like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
+eval q{last};
+print "err=[$@]\n";
+PERL
+     'inverse: `eval q{last}` with NO loop anywhere dies inside the eval, and $@ carries perl\'s own text');
+
+like(transpile('my $n = 0; for my $i (1..3) { eval q{last}; $n++ } print "$n\n";'),
+     qr/:dyn\s+t/,
+     'emission: a loop whose body string-evals carries `:dyn t`');
+
+unlike(transpile('my $n = 0; for my $i (1..3) { eval { $n++ } } print "$n\n";'),
+       qr/:dyn/,
+       'emission: a loop whose body only `eval BLOCK`s carries NO frame — the widening is keyed on the STRING spelling, not on the word');

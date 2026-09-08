@@ -5543,17 +5543,17 @@ sub _mark_dynamic_loop_exits {
 # measurement, and it is why the licence is a reachability question and not
 # "does the body call anything".
 #
-# Seed: a sub whose block contains a MARKED exit token.  Step: a sub that
-# names a sub already in the set.  Both readings are deliberately GENEROUS —
-# a nested sub's site counts for its enclosing sub, and any mention of a
-# declared name counts as a call — because being wrong that way costs one
-# catch per loop entry, never a missing frame.
+# Seed: a sub whose block contains a MARKED exit token, or a STRING EVAL
+# (#1244 (b) — its text is another unit and perl lets a `last` in it out).
+# Step: a sub that names a sub already in the set.  All three readings are
+# deliberately GENEROUS — a nested sub's site counts for its enclosing sub, and
+# any mention of a declared name counts as a call — because being wrong that
+# way costs one catch per loop entry, never a missing frame.
 #
 # WHAT IT CANNOT SEE, and this is the ruled residue: a dynamic exit reached
-# through an INDIRECT call (`$code->()`, `&$code`, a method, `goto &NAME`) or
-# from ANOTHER compilation unit (a `use`d module, a string eval) meets no
-# frame, so the site takes the perl-shaped `Can't "last" outside a loop block`
-# die — LOUD, and `docs/not-supported.md` names it.
+# from ANOTHER compilation unit (a `use`d module) meets no frame, so the site
+# takes the perl-shaped `Can't "last" outside a loop block` die — LOUD, and
+# `docs/not-supported.md` names it.
 sub _may_dyn_exit_set {
   my ($doc) = @_;
   my %body;
@@ -5570,7 +5570,8 @@ sub _may_dyn_exit_set {
   my (%set, %names);
   for my $n (keys %body) {
     my @w = @{ $body{$n}->find('PPI::Token::Word') || [] };
-    $set{$n} = 1 if grep { defined $_->{_pcl_dyn_loop_exit} } @w;
+    $set{$n} = 1 if grep { defined $_->{_pcl_dyn_loop_exit}
+                           || Pl::PExpr::TokenUtils::is_string_eval_word($_) } @w;
     $names{$n} = { map  { $_->content => 1 }
                    grep { exists $body{ $_->content } } @w };
   }

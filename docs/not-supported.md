@@ -3273,41 +3273,41 @@ exit reached that way dies:
 
 - an **indirect call**: a coderef out of a data structure (`$h{cb}->()`), a
   computed method name (`$o->$m`), `&$code`, `goto &$code`;
-- a sub from **another compilation unit**: a `use`d module, a `require`d file;
-- a **string eval** (`eval q{last}`) — its code is compiled separately, so the
-  loop around the eval takes no frame.  This is the one shape a working PCL
-  program is most likely to meet, and it is the one probe that moved when the
-  licence narrowed: the die lands in `$@` like any other die, and the loop then
-  runs on, so `for my $i (1..3) { $n++; eval q{last}; $n += 100 }` is `n=1` in
-  perl and `n=303` in PCL with `$@` set to
-  `Can't "last" outside a loop block`.  Guarded in `Pl/t/loop-exit-01.t`.
+- a sub from **another compilation unit**: a `use`d module, a `require`d file.
 
-The reason is measured, not stylistic: the frame's `catch` costs about 4.8 MB
-of SBCL **compile** IR, and `t/op/loopctl.t` — 89 loops in one 64 KB top-level
-form — went from 244.6 MB to 691.2 MB of compile-time consing and past the
-default 1 GB heap, producing no rows at all, when every loop with a call was
-framed.  Under the reachability licence that file carries **one** frame and the
-whole `perl-tests` corpus carries one.  Task #1162 has the full measurement,
-including what does NOT help (the frame's shape, `notinline`,
+A **string eval** used to be on that list and is not any more (#1244 (b), s473e).
+Its text is compiled as its own unit, so the compiler cannot see whether it
+performs an exit — and perl says it can, so the only sound answer is "it may":
+a loop whose body contains a string `eval`, or calls a sub in this unit that
+does, is framed.  `for my $i (1..3) { $n++; eval q{last}; $n += 100 }` is `n=1`
+with `$@` empty, as in perl.  `eval BLOCK` needs nothing: its `last` is either
+lexical or a call this unit already follows by name.  MEASURED: this takes the
+`perl-tests` corpus from 1 frame to 167, and the eight frame-heaviest files
+(eval.t 24, cmpchain.t 24, tr.t 13, sprintf2.t 10, kvhslice.t 10, signatures.t
+9, closure.t 7, bop.t 8) produce **exactly** the rows they produced before —
+5138 passing / 170 failing either way, same partial-stop points.
+
+The reason the licence is narrow at all is measured, not stylistic: the frame's
+`catch` costs about 4.8 MB of SBCL **compile** IR, and `t/op/loopctl.t` — 89
+loops in one 64 KB top-level form — went from 244.6 MB to 691.2 MB of
+compile-time consing and past the default 1 GB heap, producing no rows at all,
+when every loop with a call was framed.  Under the reachability licence that
+file carries **one** frame.  Task #1162 has the full measurement, including what
+does NOT help (the frame's shape, `notinline`,
 `(optimize (compilation-speed 3))`).
 
 The name test is textual, so a word that merely COLLIDES with a MAY-DYN-EXIT
 sub name (a hash key, a method of the same name) costs a frame — never a
 missing one.
 
-**A `continue` block on a `foreach` or a bare block declines the frame**
-(#1161).  The frame re-enters the loop at the point a lexical `next` would
-have reached, and a `foreach`'s continue block lives INSIDE the per-iteration
-binding (it reads the loop variable) while a bare block's sits after the
-tagbody — neither is a re-entry point the driver can reach.  So
-
-```perl
-sub f { next }
-for my $i (1..3) { f() } continue { $n += 1000 }   # perl runs the continue
-```
-
-dies instead of running the continue block.  `while`/`until` do NOT decline:
-their continue block is at the driver's own level, so a caught `next` runs it.
+A **`continue` block** used to make a `foreach` or a bare block decline the
+frame; it does not any more (#1161, s473e).  On a framed loop the continue
+block becomes a per-iteration CLOSURE called from the driver's re-entry point
+(`%p-foreach-continue-thunk`), and a bare block hands its continue to
+`p-dyn-once` — so a caught `next` runs it and a caught `last` skips it, as in
+perl.  A closure and not a saved value, because the body may write the loop
+variable and that write must reach the continue block even when the compiler
+proved the variable unboxable.
 
 **User code reached through MAGIC** — an overloaded operator, a tie handler,
 `DESTROY`, a `%SIG` handler — carries no name either, and here PCL and perl

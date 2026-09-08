@@ -370,12 +370,18 @@ sub heredoc_is_command {
 # shape of t/op/rt119311.t — or names one of the set's subs, which is the
 # direct-call reading: `f()`, `f $x`, `&f`.
 #
+# A STRING EVAL counts too (task #1244 (b)).  Its text is compiled as its own
+# unit, so this compiler cannot see whether it performs a loop exit — and perl
+# says it can: `for (1..3) { eval q{last} }` exits the loop on the first
+# iteration, with `$@` empty (probed).  The text is not knowable at compile
+# time, so the only sound answer is "it may", which costs a frame on a loop
+# whose body string-evals and nothing anywhere else.
+#
 # WHAT IT DELIBERATELY DOES NOT SEE, and this is the ruled residue that
-# `docs/not-supported.md` names: an exit reached through an INDIRECT call
-# (`$code->()`, `&$code`, a method, `goto &NAME`) or from ANOTHER compilation
-# unit (a `use`d module, a string eval).  Such an exit meets no frame and
-# takes the perl-shaped `Can't "last" outside a loop block` die at its own
-# site — LOUD, never a silently un-taken exit.
+# `docs/not-supported.md` names: an exit reached from ANOTHER compilation unit
+# (a `use`d module).  Such an exit meets no frame and takes the perl-shaped
+# `Can't "last" outside a loop block` die at its own site — LOUD, never a
+# silently un-taken exit.
 sub may_dyn_exit {
   my ($elems, $set) = @_;
   return 0 unless ref $set;
@@ -387,9 +393,29 @@ sub may_dyn_exit {
       # a marked exit site sitting in a nested sub inside this run
       return 1 if defined $t->{_pcl_dyn_loop_exit};
       return 1 if $have_names && $set->{ $t->content };
+      return 1 if is_string_eval_word($t);
     }
   }
   return 0;
+}
+
+# Is this Word a STRING `eval` — the one spelling whose body is compiled as a
+# separate unit, so its loop-control statements cannot be seen from here?
+# `eval BLOCK` is not one: its `last` is either lexical (and already right) or
+# a call this unit can follow by name.  The two negatives are the cheap
+# bareword ones — a method name and a fat-comma key.
+sub is_string_eval_word {
+  my ($t) = @_;
+  return 0 unless ref($t) && Scalar::Util::blessed($t)
+               && $t->isa('PPI::Token::Word') && $t->content eq 'eval';
+  my $prev = $t->sprevious_sibling;
+  return 0 if $prev && $prev->isa('PPI::Token::Operator')
+              && ($prev->content eq '->' || $prev->content eq '&');
+  return 0 if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+  my $nx = $t->snext_sibling;
+  return 0 if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+  return 0 if $nx && $nx->isa('PPI::Structure::Block');
+  return 1;
 }
 
 # Does site A sit at or before site B?  1 / 0, or undef when the two are not
