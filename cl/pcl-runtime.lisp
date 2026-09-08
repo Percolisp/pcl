@@ -10512,12 +10512,17 @@ per element."
 
 (defun p-array-last-index (arr)
   "Perl $#arr - last index. Accepts raw vectors (@arr) or boxed array refs ($aref).
-   Handles both single-boxed (old autovivified) and double-boxed (p-backslash) refs."
+   Handles both single-boxed (old autovivified) and double-boxed (p-backslash) refs.
+   A STRING is a SYMBOLIC ref — `$#{'main::ga'}` — and goes through the one
+   resolver @{\"name\"} uses (task #1249(2)).  It cannot be left to the vectorp
+   arm: a CL string IS a vector, so the name's LENGTH was the answer (7 for
+   'main::ga' where perl says 2)."
   (let* ((v (unbox arr))
          (v (if (p-box-p v) (unbox v) v)))
-    (if (vectorp v)
-        (1- (length v))
-        -1)))
+    (cond
+      ((and (vectorp v) (not (stringp v))) (1- (length v)))
+      ((stringp v) (1- (length (%p-symref-array v))))
+      (t -1))))
 
 (defun p-set-array-length (arr new-last-index)
   "Set array length by setting $#array. Perl semantics:
@@ -10539,6 +10544,10 @@ per element."
                (let ((v (unbox inner)))
                  (if (and v (vectorp v) (not (stringp v))) v inner)))
               ((and inner (vectorp inner) (not (stringp inner))) inner)
+              ;; Symbolic ref — `$#{'main::ga'} = 1` — through the one resolver
+              ;; @{"name"} uses (task #1249(2)); the raw string reached
+              ;; %p-extend-to / (setf fill-pointer) and died on a CL string.
+              ((stringp inner) (%p-symref-array inner))
               (t arr)))
          (nli (truncate (to-number new-last-index)))
          (new-len (1+ nli))

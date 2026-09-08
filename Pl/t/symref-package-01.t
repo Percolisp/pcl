@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 18;
 
 sub write_pl {
     my ($code) = @_;
@@ -370,4 +370,33 @@ ${"foo::ENV"}{Z} = 1;
 print "2=", (exists $ENV{Z} ? "leaked" : "clean"), "\n";
 print "3=", (exists $ENV{PCL701C} ? "alive" : "DESTROYED"), "\n";
 print "4=", scalar(keys %{"foo::ENV"}), "\n";
+PL
+
+# ---- $#{'name'} — the symbolic LAST-INDEX (task #1249(2), s473h) ---------
+# A CL string IS a vector, so p-array-last-index's vectorp arm answered the
+# NAME's length (7 for 'main::ga') where perl says 2.  Both the read and the
+# write go through the one resolver @{"name"} uses (%p-symref-array).
+
+both_agree('#1249(2) $#{"main::ga"} reads the array\'s last index', <<'PL');
+no strict 'refs';
+our @ga = (1,2,3);
+my $n = 'main::ga';
+print "1=", $#{'main::ga'}, "\n";
+print "2=", $#{'ga'}, "\n";
+print "3=", $#{$n}, "\n";
+PL
+
+both_agree('#1249(2) $#{"main::gb"} = N resizes the array', <<'PL');
+no strict 'refs';
+our @gb = (1,2,3,4);
+$#{'main::gb'} = 1;
+print "1=", scalar(@gb), " @gb\n";
+$#{'main::gb'} = 3;
+print "2=", scalar(@gb), " ", (defined $gb[3] ? "def" : "undef"), "\n";
+PL
+
+both_agree('#1249(2) $#{"never::declared"} is -1', <<'PL');
+no strict 'refs';
+print "1=", $#{'main::never_declared_gz'}, "\n";
+print "2=", scalar(@{'main::never_declared_gz'}), "\n";
 PL

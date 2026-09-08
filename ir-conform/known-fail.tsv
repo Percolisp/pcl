@@ -31,8 +31,6 @@
 173-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 201-exception	1240	`Illegal division by zero` carries `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 213-oo	1249	a trailing BAREWORD statement is emitted as a CALL; perl treats it as a string constant
-237-refs	1249	`$#{'main::ga'}` (symbolic last-index) answers 7, perl answers 2
-238-refs	1249	`$#{'main::ga'}` (symbolic last-index) answers 7, perl answers 2
 239-refs	1249	a trailing BAREWORD statement is emitted as a CALL; perl treats it as a string constant
 243-string	1249	utf8::is_utf8 on a byte string answers 1; perl answers 0
 246-exception	1240	the runtime-raised errors in the table carry `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
