@@ -415,14 +415,30 @@ diverge from Perl in several respects:
 > code puts `use utf8` at the top and treats the whole file as UTF-8, so this
 > never bites in practice.
 
-- **The per-scalar UTF-8 flag** (`utf8::is_utf8`): Perl has an internal UTF-8
-  flag per scalar, and `utf8::is_utf8` reports it.  CL strings are always
-  Unicode; the flag does not exist, so `utf8::is_utf8` always answers **1**.
+- **The per-scalar UTF-8 flag** (`utf8::is_utf8`, task **#1389**): Perl has an
+  internal UTF-8 flag per scalar, and `utf8::is_utf8` reports it.  CL strings
+  are always Unicode; the flag does not exist, so `utf8::is_utf8` always
+  answers **1**.
   That is the ONE remaining divergence of the seven read shapes #1115 probed
   against perl 5.40.3 — every `length` and every `ord` now agrees.
   `utf8::upgrade` likewise has no representation to change; it answers perl's
   OCTET COUNT so a program that uses the return value gets a number of the
   right shape, but a subsequent `is_utf8` still says 1 either way.
+
+  > **RULED s473h**, after a 15-shape probe matrix vs perl 5.40.3 (the matrix
+  > is in task #1389).  perl's flag means "this SV is in the UPGRADED
+  > (character) form"; in PCL **every** string is in that form, so `1` is the
+  > honest answer for PCL's model and `0` would claim a downgraded
+  > representation that does not exist.  The two cheaper rules were measured
+  > and both rejected: "1 iff the string holds a character > 0xFF" gets 14 of
+  > 15 shapes right but misses `utf8::upgrade` — the one shape the corpus case
+  > pins — and would newly answer 0 after a `decode` of pure-ASCII octets,
+  > where perl says 1; a flag set by `utf8::upgrade` would need a box slot and
+  > would still be lost across `my $c = $s`, where perl's SV flag survives (the
+  > s335 no-new-box-slot ruling, same shape as #154).  Reopening it takes a
+  > string representation with a byte form — a data-model change, not an
+  > `is_utf8` fix.  `ir-conform/known-fail.tsv` row `243-string` is owned by
+  > #1389.
 
   > **Fixed in s470br (#1221): `utf8::encode`, `utf8::decode` and
   > `utf8::downgrade` really transform the string.**  They used to be no-op
