@@ -18,6 +18,18 @@ use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/../..";
 use Pl::Parser2;
+use lib "$FindBin::Bin";
+use PCLCore;
+
+# The sbcl command line comes from the ONE builder every runner shares
+# (tools/lib/PCLSbcl.pm via PCLCore::sbcl_prefix, task #344): the saved core
+# with the runtime already compiled in, and the 512 MB control stack.  This
+# file used to spell `sbcl --noinform --non-interactive --load
+# cl/pcl-runtime.lisp` itself, which recompiles the whole runtime on EVERY row
+# -- 2.89 CPU-s a row against 0.007 s from the core (measured s473u, #1544) --
+# and ran on the default 2 MB stack, which is exactly the drift #344 exists to
+# stop.
+my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 
 my $fib = <<'EOF';
 sub fib { my ($n) = @_; my $a = 0; my $b = 1; for my $i (2..$n) { my $c = $a + $b; $a = $b; $b = $c; } return $b; }
@@ -636,7 +648,7 @@ SKIP: {
     close $fh;
     # Set the pl2cl path so `p-eval` (string eval) can spawn the transpiler.
     my $p2c = "$root/pl2cl";
-    my $got = `sbcl --control-stack-size 512 --noinform --non-interactive --load "$root/cl/pcl-runtime.lisp" --eval "(setf pcl::*pcl-skip-cache* t)" --eval "(setf pcl::*pcl-pl2cl-path* #P\\"$p2c\\")" --load "$tmp" 2>/dev/null`;
+    my $got = `sbcl @sbcl_rt --eval "(setf pcl::*pcl-skip-cache* t)" --eval "(setf pcl::*pcl-pl2cl-path* #P\\"$p2c\\")" --load "$tmp" 2>/dev/null`;
     unlink $tmp;
     return $got;
   };

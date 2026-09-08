@@ -22,6 +22,19 @@ use Encode qw(encode_utf8 decode_utf8);
 
 use lib ".";
 use Pl::Parser2;
+use FindBin;
+use lib "$FindBin::Bin";
+use PCLCore;
+
+# The sbcl command line comes from the ONE builder every runner shares
+# (tools/lib/PCLSbcl.pm via PCLCore::sbcl_prefix, task #344): the saved core
+# with the runtime already compiled in, and the 512 MB control stack.  This
+# file used to spell `sbcl --noinform --non-interactive --load
+# cl/pcl-runtime.lisp` itself, which recompiles the whole runtime on EVERY row
+# -- 2.89 CPU-s a row against 0.007 s from the core (measured s473u, #1544) --
+# and ran on the default 2 MB stack, which is exactly the drift #344 exists to
+# stop.
+my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 
 sub run_bytes {
     # CODE is a *byte* string (as PCL reads a source file); transpile + run.
@@ -31,7 +44,7 @@ sub run_bytes {
     binmode($fh, ':encoding(utf-8)');   # pl2cl binmodes its output to utf8 too
     print $fh $cl_code;
     close $fh;
-    my $output = `sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load "$filename" 2>&1`;
+    my $output = `sbcl @sbcl_rt --load "$filename" 2>&1`;
     unlink $filename;
     $output =~ s/^;.*\n//gm;
     $output =~ s/PCL Runtime loaded\n?//g;
@@ -62,7 +75,7 @@ sub run_bytes_octets {
     binmode($fh, ':encoding(utf-8)');
     print $fh $cl_code;
     close $fh;
-    my $output = `sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load "$filename" 2>&1`;
+    my $output = `sbcl @sbcl_rt --load "$filename" 2>&1`;
     unlink $filename;
     $output =~ s/^;.*\n//gm;
     $output =~ s/PCL Runtime loaded\n?//g;
