@@ -510,6 +510,29 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   one the arrow's base gets — has to be pushed down as the group lowers:
   the LAST child only, which is the comma operator's value; the earlier
   ones are still evaluated, for their effects.
+- **`${ EXPR }` on an ARRAY or HASH referent is FATAL** (normative, s473h /
+  #1249(1)): perl dies `Not a SCALAR reference`, and so does PCL.  The
+  discriminator is the REFERENT (`%p-ref-referent`, the same rule `ref()` and
+  the stringifiers use), never the unboxed value — after one unbox a `\@a` and
+  a `\$aref` read back out of a container are the same shape, which is why the
+  ARRAY/HASH question is decidable and the SCALAR one is not (#154).  A CODE
+  referent is DELIBERATELY excluded: PCL's model collapses a
+  scalar-ref-to-coderef, so a raw function legitimately reaches this site
+  (`${$h{'$name'}}`, Sub::Quote's shape).  Example: `my @a=(1,2); my $r=\@a;
+  ${$r}` dies; `my $rr=\$r; ${$rr}` is the ARRAY ref.
+- **`eval EXPR` evaluates its operand in SCALAR context** (normative, s473h /
+  #1249(4)), like every other named unary: `my @b = eval @a` is `eval("4")`
+  for a four-element `@a`, and `eval %h` the key count — never the aggregate's
+  stringification.
+- **A BAREWORD standing alone as a whole STATEMENT is a STRING CONSTANT, not a
+  call**, wherever the name is not callable at that point (normative, s473h /
+  #1249(7)): perl decides at compile time under `no strict subs`, so `PERL;`
+  as a file's last statement is a no-op and `sub f { FOO }` returns `"FOO"`.
+  PCL's compile-time callable set is INCOMPLETE, so the emission asks the
+  IMAGE — `(p-bareword-value "NAME")` calls the sub if one exists at that name
+  and otherwise answers the string.  Both outcomes are perl's; a translator
+  whose name knowledge IS complete may fold it at compile time.
+
 - **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
   object** (normative, task #423). Perl distinguishes a glob *value*
   (`$g = *foo`, which turns the SV into a GV: `ref($g)` is `""`, `"$g"` is

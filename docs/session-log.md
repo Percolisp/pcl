@@ -2,6 +2,80 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473h (Opus agent, 2026-09-08) — #1249's seven singletons: four shipped, three measured and filed; the range double-FETCH (#1430); `$ENV{_PCL_RUNTIME_}` (#1529); #1429 turned out to be #155; #1242/#1117 sized
+
+**The four that shipped.**  `${$aryref}` read the array where perl dies "Not a
+SCALAR reference" (#1249(1)); the fix is the REFERENT rule, not the type sniff
+#154 ruled impossible — after one unbox, `\@a` and a `\$aref` read back out of
+a container leave the same shape, but `%p-ref-referent` (already the
+discriminator for `ref()` and the stringifiers) tells the array itself from
+the scalar box that holds the array ref.  CODE stays excluded: PCL collapses a
+scalar-ref-to-coderef, and the first attempt — a `%p-wrong-referent-p "SCALAR"`
+arm — failed all 15 rows of `moo-01.t`, exactly as the code comment warned.
+`$#{'main::ga'}` answered 7 because a CL string IS a vector, so
+`p-array-last-index`'s `vectorp` arm returned the NAME's length; both halves
+now go through `%p-symref-array` (#1249(2)).  `eval @a` is `eval("4")` — the
+element COUNT — and `%p-eval-1` stringified the raw vector as `ARRAY(0x…)`;
+`p-scalar` is the one scalar-context coercion (#1249(4), eval.t 129 → 131).
+And a BAREWORD ALONE AS A STATEMENT is perl's string constant: `PERL;` at the
+end of a file is a no-op in perl and killed the whole run in PCL (#1249(7)).
+
+**What the bareword fix's measurement forced.**  #266's three-valued
+asymmetry applies at this new site — `yes` keeps the call, `not-yet` (declared
+BELOW in this file, so the compiler KNOWS perl does not call) emits the string,
+`no` asks the IMAGE, because PCL's callable set is incomplete: `p-bareword-value`
+calls the sub if one exists at that name and otherwise answers perl's string,
+and Test::More's bare `pass`/`fail`/`done_testing` (four perl-tests files, 48
+cpan-tests files) are exactly that case and still call.  Two guards came out of
+corpus-diff and nothing else: `study;` and `reset;` are perl BUILTINS that
+Config's arity table does not carry, so the classifier answers `no` for them —
+the first version turned 11 sites in study.t and reset.t into the STRING, a
+silent wrong — and the emitter's own `%RUNTIME_NAMES` is what settles that, so
+the compiler cannot disagree with itself about `p-` vs `pl-`; and the rewrite
+happens IN the lowered form, replacing only the `(pl-NAME)` node, because the
+first version dropped the `p-void-ctx` wrap.
+
+**The three that were measured and filed instead.**  `utf8::is_utf8` (#1389):
+15 shapes, LENGTH agrees everywhere, and both cheaper rules fail — "1 iff a
+char > 0xFF" gets 14 of 15 but misses `utf8::upgrade`, the one shape the corpus
+case pins, and a flag set by upgrade needs a box slot and is still lost across
+`my $c = $s`.  Every PCL string is in perl's upgraded form, so 1 is the honest
+answer.  `exists $string->{k}` (#1390): nine spellings diverge together under
+`use strict`, because PCL enforces no strict at all — fixing `exists` alone
+would be one arm of nine and would have to invent the state the other eight
+need.  The read-only literal alias (#1391): 18 shapes, perl dies in 8, and the
+property is per ELEMENT, propagating through sort/reverse/grep but not map; a
+literal in a foreach list is a RAW value in the emitted `(vector "a" "b")`, so
+"a flag on literal boxes" does not exist, and raw-vs-boxed cannot stand in for
+literal-vs-variable because a real array's slots are raw too and must keep
+being promoted.
+
+**#1430 and #1529.**  The range operator FETCHed a tied operand twice on the
+STRING arm only: `%p-array-fill-range` classified the range and then called
+`p-..`, which classified AGAIN — and classification unboxes, which for a tied
+scalar is a FETCH.  One builder `%p-range-string-vector` now serves both arms
+(companion op/tie_fetch_count.t 129/12 → 131/10, 0 NEW ROW).  `$ENV{_PCL_RUNTIME_}`
+answers the USER's s476 ask: true in every PCL process, carrying `pcl --version`'s
+string from the same source, and SYNTHETIC at the %ENV read layer so a
+real-perl child does not inherit it — `$^X` is real perl, and a perl child that
+saw the key would believe it runs under PCL.  Fifteen shapes probed, including
+both children.  Wiring it exposed #1392: `scalar(%ENV)` answered `HASH(0x1)`
+because `p-scalar` had no arm for the marker that IS the hash.
+
+**#1429 was not what it said, and #1242/#1117 is sized.**  #1429's premise —
+"the runtime never reads `$NEGATIVE_INDICES`" — is true and is not the cause:
+`tie @array` is not implemented at all (`%p-warn-aggregate-tie`, the ruled
+#155), so there is no FETCH/STORE to hand a negative index to and no normaliser
+for the proposed fix to live in.  Nineteen shapes probed; the only three that
+AGREE are the three involving no tie, and op/tiearray.t's 20 missing rows are
+#155's cost.  For #1117 the three owed numbers: 145 package aggregates and
+1 207 cell-expansion sites over 40 emitted files; a hand-built vivify-on-read
+symbol macro costs 1.03–1.05× on a loop of nothing but per-element aggregate
+access and **0 on the foreach shape**, which expands the cell once and then
+iterates the vector (the first bench measured no difference at all and had to
+be rewritten); and the only NON-TEST consumer of `*a{ARRAY}`/`*a{HASH}` in any
+population is Carp.pm, which uses it as a GUARD with a second
+contents-testing conjunct — which is why nothing has broken.
 ## Session 479 (Fable, 2026-09-08 evening) — s473i + s473h launched; three briefs drafted; the README speed table refreshed from a quiet-box board whose three wrong-way movers turned out to be CODE PLACEMENT
 
 Restart per the s478 recipe: main `a9f2a264`, CI green on it (public API), box fresh-booted.  s473i and s473h launched 17:52 into the two slots (pinned Opus, fresh worktrees).  While they read, three briefs were written from the measured backlogs: s473v (perf round 33 — the four text rows hold ~4 s of the board's PCL time; the match record extends #477's lazy `$&` to every derived match variable; `pos` becomes one accessor pair over the 13 direct `*p-match-pos*` sites; `strcat`'s 31 ns per one-char append is `%pcl-str-append`'s `replace` onto a non-simple target; sortnum/sortstr are a per-SORT constant to be measured by intercept/slope), s473w (#1502, the USER-ordered board work, with the s1061 clusters that are ≤ 1 h) and s473t4 (#1501, the companion's two triage checks, launching after s473f per the USER).
