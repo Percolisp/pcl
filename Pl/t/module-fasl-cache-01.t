@@ -41,7 +41,7 @@ use PCLSbcl ();    # cached_core — the saved core the #1303 rows run through
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 49;
+plan tests => 55;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -70,10 +70,13 @@ sub write_mod {
 # TEXT path and stop testing what they say.  The default itself is asserted by
 # its own rows further down.
 #
-# PERL5LIB carries $dir too: `pcl -I` reaches the PROGRAM's transpile, but the
-# runtime spawns `pl2cl --module` for each module with no -I, so a module's
-# own `use` would not resolve at transpile time and the dependency rows would
-# have nothing to depend on.  (That gap is task #1284.)
+# NO PERL5LIB (task #1284, fixed s473i).  This helper used to set PERL5LIB=$dir
+# as well, because `pcl -I` reached the PROGRAM's transpile while the runtime
+# spawned `pl2cl --module` with no -I at all — so a module's own `use` did not
+# resolve at transpile time and the dependency rows had nothing to depend on.
+# PERL5LIB worked only because the child inherits the environment.  The module
+# transpile now gets this program's own @INC as -I, so `-I $dir` alone is the
+# whole story, and these rows exercise the real path.
 sub run_pcl {
     my ($code, %opt) = @_;
     local $ENV{PCL_NO_FASL_CACHE} = $opt{text} ? 1 : undef;
@@ -84,7 +87,8 @@ sub run_pcl {
     delete $ENV{PCL_COMPILE_DIRS} unless defined $opt{compile};
     local $ENV{PCL_NO_COMPILE_DIRS} = $opt{nocomp};
     delete $ENV{PCL_NO_COMPILE_DIRS} unless defined $opt{nocomp};
-    local $ENV{PERL5LIB} = $dir;
+    local $ENV{PERL5LIB};
+    delete $ENV{PERL5LIB};
     my %saved;
     for my $k (sort keys %{ $opt{env} || {} }) {
         $saved{$k} = $ENV{$k};
@@ -415,4 +419,96 @@ PM
                                      ($core ? (PCL_CORE => $core) : ()) });
     ok(scalar(glob("$alt2/modules/*.lisp")),
        'a SAVED CORE writes the module cache where THIS run says, not where it was built');
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# THE MODULE TRANSPILE SEARCHES THIS PROGRAM'S @INC (task #1284, s473i).
+#
+# A module A's transpile reads the prototypes and exports of every module it
+# `use`s.  The runtime spawns `pl2cl --module` for it, and that child used to
+# get NO `-I` at all — so `pcl -I DIR prog.pl` reached the PROGRAM's transpile
+# and not A's: a dependency B beside A in DIR did not resolve,
+# `_extract_module_prototypes` returned undef, and every parse fact B carries
+# was SILENTLY missing.  Measured: with B's `sub blk (&)` unseen, `blk { 42 }`
+# passed the block's VALUE where perl passes a CODE ref.
+#
+# The oracle is perl on the same fixtures.  These rows deliberately do NOT set
+# PERL5LIB — that was the workaround this task removes (see run_pcl's comment),
+# and with it set they would pass either way.
+write_mod('IncB', <<'PM');
+package IncB;
+use Exporter 'import';
+our @EXPORT = qw(blk);
+sub blk (&) { my ($c) = @_; return ref($c) eq 'CODE' ? "CODE:" . $c->() : "VAL:$c" }
+1;
+PM
+write_mod('IncA', <<'PM');
+package IncA;
+use IncB;
+sub go { return blk { 42 } }
+1;
+PM
+{
+    my $code   = 'use IncA; print IncA::go();';
+    my $oracle = `perl -I '$dir' -e '$code' 2>&1`;
+    is($oracle, 'CODE:42',
+       'perl passes a code ref for a (&) prototype declared in a dependency');
+    is(run_pcl($code, compile => '*'), $oracle,
+       'a module transpile resolves its OWN dependency through the program -I');
+    is(run_pcl($code, text => 1), $oracle, '... on the text path too');
+}
+
+# AND A NAME THAT DID NOT RESOLVE IS A DEPENDENCY.  With the search path now
+# shared, "B was not findable" is a fact the runtime can re-check, so a cache
+# entry written while B was missing must not be served once B appears.  The
+# manifest has always recorded `missing<TAB>mod<TAB>NAME`; until this task it
+# was parsed and IGNORED.
+{
+    my $only_a = tempdir(CLEANUP => 1);   # SplitA alone
+    my $with_b = tempdir(CLEANUP => 1);   # SplitB, added on the second run
+    my $cdir   = tempdir(CLEANUP => 1);   # a cache of this block's own
+
+    _write_at("$only_a/SplitA.pm", <<'PM');
+package SplitA;
+use SplitB;
+sub go { return blk2 { 7 } }
+1;
+PM
+    _write_at("$with_b/SplitB.pm", <<'PM');
+package SplitB;
+use Exporter 'import';
+our @EXPORT = qw(blk2);
+sub blk2 (&) { my ($c) = @_; return ref($c) eq 'CODE' ? "CODE:" . $c->() : "VAL:$c" }
+1;
+PM
+
+    my $prog = 'use SplitA; print SplitA::go();';
+    my $env  = "PCL_CACHE_DIR='$cdir' PCL_COMPILE_DIRS='*'";
+
+    # Pass 1: SplitB is not on the path at all, so SplitA is transpiled with it
+    # unresolved and the entry records `missing mod SplitB`.  The program then
+    # dies at SplitA's own `use SplitB` — expected, and not what is measured
+    # here; the CACHE ENTRY is.
+    `$env $pcl -I '$only_a' -E '$prog' 2>&1`;
+    my $recorded = grep { _slurp($_) =~ /^missing\tmod\tSplitB$/m }
+                   glob("$cdir/modules/*.deps");
+    ok($recorded, 'a dependency that did not resolve is recorded in the manifest');
+
+    # Pass 2: SplitB's directory joins the path, against the SAME cache.
+    my $out = `$env $pcl -I '$only_a' -I '$with_b' -E '$prog' 2>&1`;
+    $out =~ s/^;.*\n//gm;
+    $out =~ s/^PCL Runtime loaded\n//gm;
+    my $oracle = `perl -I '$only_a' -I '$with_b' -e '$prog' 2>&1`;
+    is($oracle, 'CODE:7',
+       'perl resolves the dependency once its directory joins the path');
+    is($out, $oracle,
+       'a cache entry written while a dependency was MISSING is not served once it resolves');
+}
+
+sub _write_at {
+    my ($path, $body) = @_;
+    open my $fh, '>', $path or die "write $path: $!";
+    print $fh $body;
+    close $fh;
+    return $path;
 }

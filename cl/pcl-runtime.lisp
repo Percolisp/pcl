@@ -19307,7 +19307,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1120"
+(defparameter *pcl-cache-generation* "v2-1140"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -19735,19 +19735,31 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; also what an entry written before this task looks like.  A manifest that
 ;;; does not parse is INVALID too, never trusted (rule 12).
 ;;;
-;;; WHAT IT DOES NOT COVER, said out loud rather than assumed: a dependency
-;;; that MOVES — a new `-I` shadowing a shim, so the same name now resolves to
-;;; a different file — is not detected here, because this side cannot re-run
-;;; the transpiler's `_find_module_file` with the transpiler's inc_paths.  The
-;;; transpiler's own prototype cache (Pl/ProtoCache.pm) does re-resolve; the
-;;; remedy at this layer is `pcl --clear-cache`.
+;;; A NAME THAT DID NOT RESOLVE IS ALSO A DEPENDENCY (task #1284).  The
+;;; sidecar has always carried `missing<TAB>kind<TAB>name` for a `use` the
+;;; transpile could not find, and this side used to accept and ignore it,
+;;; because it could not re-run the transpiler's `_find_module_file` with the
+;;; transpiler's inc_paths.  It can now: the module transpile searches THIS
+;;; program's @INC (%p-transpile-inc-args), so p-find-module-in-inc asks the
+;;; same question, over a superset of the child's list.  A `missing` name that
+;;; resolves NOW invalidates the entry — see %p-missing-resolves-p for the
+;;; measurement.
+;;;
+;;; WHAT IT STILL DOES NOT COVER, said out loud rather than assumed: a
+;;; dependency that MOVES — a new `-I` shadowing a shim, so the same name now
+;;; resolves to a DIFFERENT file — is not detected here; only "did not resolve,
+;;; now does" is.  The transpiler's own prototype cache (Pl/ProtoCache.pm)
+;;; re-resolves every recorded name and does catch a move; the remedy at this
+;;; layer is `pcl --clear-cache`.
 
 (defstruct (p-cache-manifest (:conc-name p-cm-))
   "A cache entry's dependency manifest: the module's trust CLASS (:installed
-   or :local — see %p-compile-module-p) and the (path . md5) pairs its transpile
-   read.  VALID-P is the verdict, computed once per source per run."
+   or :local — see %p-compile-module-p), the (path . md5) pairs its transpile
+   read, and the (kind . name) pairs it could NOT resolve.  VALID-P is the
+   verdict, computed once per source per run."
   (class :local)
   (deps nil)
+  (missing nil)
   (valid-p nil))
 
 (defvar *p-file-hash-cache* (make-hash-table :test 'equal)
@@ -19807,6 +19819,30 @@ buffer's fill-pointer; everything else falls back to file-length."
     (push (subseq line start) out)
     (nreverse out)))
 
+(defun %p-missing-resolves-p (entry)
+  "True when a name the transpile could NOT resolve resolves NOW — which makes
+   the cache entry beside the manifest STALE (task #1284).
+
+   `_extract_module_prototypes` returning undef is a FACT the emission encodes:
+   with the dependency unresolved a `(&)` prototype is not known, so a trailing
+   block is passed by VALUE and not as a code ref.  Put the dependency's
+   directory on the search path and that emission is wrong — measured, run 1
+   with only A's directory cached `missing mod B2`, run 2 added B2's directory
+   and the stale entry printed VAL:42 where perl prints CODE:42.
+
+   The search is p-find-module-in-inc — the ONE resolver (rule 11), and since
+   #1284 a SUPERSET of the child transpile's inc_paths, so this errs only
+   towards a needless re-transpile and never towards a stale parse.
+
+   A kind other than `mod` is not silently accepted: it counts as \"it might
+   resolve now\", which invalidates the entry.  Today `file` records an
+   absolute path and Pl::ProtoCache::note_dep writes nothing when its stat
+   fails, so no `missing file` record is produced at all."
+  (let ((kind (car entry)) (name (cdr entry)))
+    (if (string= kind "mod")
+        (and (p-find-module-in-inc (p-module-to-path name)) t)
+        t)))
+
 (defun %p-parse-manifest-line (line manifest)
   "Fold one manifest line into MANIFEST.  T when the line is understood; NIL
    when it is not, which makes the whole entry invalid — an unknown key is
@@ -19818,9 +19854,14 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let* ((tab (position #\Tab line))
            (key (subseq line 0 (or tab len))))
       (cond ((string= key "gen") t)
-            ;; a name the transpile could not resolve: a fact it used, but not
-            ;; one this side can re-check (see the section commentary).
-            ((string= key "missing") t)
+            ;; A name the transpile could NOT resolve — a fact it used, and
+            ;; since #1284 one this side CAN re-check, because the module
+            ;; transpile now searches this program's own @INC.
+            ((string= key "missing")
+             (let ((f (%p-split-fields line #\Tab 3)))
+               (when (= (length f) 3)
+                 (push (cons (second f) (third f)) (p-cm-missing manifest))
+                 t)))
             ((string= key "source")
              (let ((f (%p-split-fields line #\Tab 3)))
                (when (= (length f) 3)
@@ -19857,10 +19898,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                         always (%p-parse-manifest-line line manifest))))))
       (when ok
         (setf (p-cm-valid-p manifest)
-              (every (lambda (dep)
-                       (let ((now (%p-file-md5 (car dep))))
-                         (and now (string= now (cdr dep)))))
-                     (p-cm-deps manifest)))))
+              (and (every (lambda (dep)
+                            (let ((now (%p-file-md5 (car dep))))
+                              (and now (string= now (cdr dep)))))
+                          (p-cm-deps manifest))
+                   (notany #'%p-missing-resolves-p (p-cm-missing manifest))))))
     manifest))
 
 (defun %p-read-manifest (source-path)
@@ -19902,6 +19944,61 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 ;;; --- Module Transpilation ---
 
+(defun %p-shim-lib-dir ()
+  "PCL's own lib/ — the shim library beside the runtime's cl/ — as a TRUENAME,
+   or NIL when it cannot be resolved."
+  (when *pcl-runtime-directory*
+    (ignore-errors (truename (merge-pathnames "../lib/"
+                                              *pcl-runtime-directory*)))))
+
+(defun %p-shim-lib-dir-p (dir)
+  "True when DIR names PCL's shim lib/.
+
+   IT MUST NOT REACH A CHILD PERL'S @INC.  That directory holds SHIMS —
+   Errno.pm, Config.pm, POSIX.pm, Carp.pm — which PCL transpiles but real perl
+   cannot load, so putting it on the child's search path kills pl2cl outright
+   (measured while building #1284: `panic: Can't use %! because Errno does not
+   define _tie_it`).  Nothing is lost by dropping it: Pl::Parser's inc_paths
+   already BEGINS with the shim lib/, so a shim still wins module RESOLUTION.
+
+   Compared as TRUENAMES, because @INC holds `<root>/lib` while the derivation
+   here spells it `<root>/cl/../lib/` — string= says no to the same directory.
+   *p-core-inc-dirs* is NOT the test: it is pl2cl's whole @INC, so under
+   `pcl -I DIR` it CONTAINS DIR, and filtering on it would drop exactly the
+   directory #1284 is about (measured: the fix looked inert)."
+  (let ((shim (%p-shim-lib-dir)))
+    (and shim
+         (let ((d (ignore-errors (truename (%p-literal-path dir t)))))
+           (and d (equal d shim))))))
+
+(defun %p-transpile-inc-args ()
+  "The `-I` arguments for a module transpile: THIS program's own @INC entries.
+
+   ONE SEARCH PATH (task #1284).  A module A's transpile reads the prototypes
+   and exports of every module it `use`s, and it finds them with the child
+   perl's own @INC.  With no `-I` at all that child saw only the ambient one,
+   so `pcl -I DIR prog.pl` reached the PROGRAM's transpile and not A's: a
+   dependency B sitting beside A in DIR did not resolve, `_extract_module_
+   prototypes` returned undef, and every parse fact B carries was SILENTLY
+   missing (measured: `blk { 42 }` under a `(&)` prototype passed the block's
+   VALUE where perl passes a code ref).  PERL5LIB worked only because the
+   child inherits the environment.
+
+   So the transpile-time search path is the one this program will LOAD from,
+   minus PCL's own shim lib/ (%p-shim-lib-dir-p says why).  This is the same
+   `-I` mechanism `pcl` uses for the PROGRAM's transpile, given the same kind
+   of directory.
+
+   An @INC entry that is not a string or pathname (perl allows a code ref or
+   an object hook there) has no `-I` spelling and is skipped: the child simply
+   does not see it, exactly as it did not before."
+  (loop for dir across @INC
+        for d = (unbox dir)
+        for s = (cond ((stringp d) d)
+                      ((pathnamep d) (namestring d)))
+        when (and s (plusp (length s)) (not (%p-shim-lib-dir-p s)))
+        append (list "-I" s)))
+
 (defun p-transpile-file (source-path &optional deps-path)
   "Transpile a Perl file to Common Lisp code by calling pl2cl.
    Uses --module flag to skip preamble (for dynamic module loading).
@@ -19918,6 +20015,9 @@ buffer's fill-pointer; everything else falls back to file-length."
       (let ((proc (sb-ext:run-program
                    "perl"
                    (append
+                    ;; -I BEFORE the script: perl's own switches must precede
+                    ;; the program name, and they are the point of #1284.
+                    (%p-transpile-inc-args)
                     (list (namestring *pcl-pl2cl-path*)
                           "--module")  ; Skip preamble for module loading
                     (when deps-path (list "--deps" (namestring deps-path)))

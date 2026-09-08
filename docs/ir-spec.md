@@ -3024,8 +3024,9 @@ key: `sxhash(<the module's absolute path> | <generation> | "v2")`.**
 the fasl go through it. An entry is valid when, and only when:
 
 1. the file exists and is newer than the module's own source; **and**
-2. its manifest exists, parses, and **every dependency it names still hashes
-   to what the transpile read**.
+2. its manifest exists, parses, **every dependency it names still hashes to
+   what the transpile read**, and **no name it recorded as unresolved
+   resolves now** (s473i, task #1284).
 
 Nothing else. In particular there is **no age limit**: an age clause was a
 stand-in for the staleness rule 2 now states directly, and keeping it would
@@ -3053,17 +3054,29 @@ missing<TAB>mod<TAB>NAME
 
 The hash is **content** (MD5), never an mtime: a `git checkout` restores an
 old mtime, and a stale dependent is the silent-wrong class this project
-refuses. A `missing` line records a name the transpile could *not* resolve —
-a fact it used, kept for the record and for `pl2cl --manifest`'s `depends`,
-but not re-checkable at load. **An entry with no manifest, or one that does
-not parse, is INVALID** (re-transpiled once) — never trusted; that is also
-what every entry written before this section looked like. What is *not*
-covered, said plainly: a dependency that MOVES (a new `-I` shadowing a shim,
-so the same name resolves to a different file) is not detected, because the
-runtime cannot re-run the transpiler's `_find_module_file` with the
-transpiler's search path; the transpiler's own prototype cache
-(`Pl/ProtoCache.pm`) does re-resolve, and the remedy at this layer is
-`pcl --clear-cache`.
+refuses. A `missing` line records a name the transpile could *not* resolve.
+**That is a fact the emission encodes** — with `B` unresolved, `B`'s `(&)`
+prototype is unknown, so `blk { 42 }` passes the block by VALUE where perl
+passes a code ref — and since s473i it is **re-checked at load**: if the name
+resolves now, the entry is INVALID. **An entry with no manifest, or one that
+does not parse, is INVALID** (re-transpiled once) — never trusted; that is
+also what every entry written before this section looked like.
+
+**The module transpile searches THIS program's `@INC`** (s473i, task #1284):
+the runtime passes its own `@INC` entries to the child as `-I`, minus PCL's
+shim `lib/` — that directory holds `Errno.pm`, `Config.pm`, `POSIX.pm` and
+friends, which PCL transpiles but real perl cannot load, so putting it on a
+child perl's search path kills `pl2cl` outright. `Pl::Parser`'s `inc_paths`
+already begins with the shim `lib/`, so a shim still wins resolution. Before
+this, the child saw only its ambient `@INC`, and `pcl -I DIR prog.pl` reached
+the program's transpile but not a module's — every parse fact a dependency in
+`DIR` carries was silently missing.
+
+What is *not* covered, said plainly: a dependency that MOVES (a new `-I`
+shadowing a shim, so the same name resolves to a *different* file) is not
+detected — only "did not resolve, now does" is. The transpiler's own prototype
+cache (`Pl/ProtoCache.pm`) re-resolves every recorded name and does catch a
+move; the remedy at this layer is `pcl --clear-cache`.
 
 **Which entries get a fasl** is a separate, purely-performance question —
 two directory lists in `PERL5LIB` syntax, read at run time:
