@@ -39,7 +39,6 @@
 272-sort	1249	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies
 282-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 288-loops-exits	1247	stdout MATCHES perl exactly since s473e (#1244 closed); the residue is the EXIT CODE of the final uncaught die -- SBCL exits 1 where perl exits 255, the same cause as 120-io
-295-string-eval	1249	`eval @array` calls ARRAY; perl evaluates the array in scalar context ("4")
 299-io	1246	`close($fh)` after a failed open returns undef; perl returns ''
 308-io	1246	a failed `open($a[0], ...)` does not autovivify the array element's handle
 309-io	1246	a failed `open($h{k}, ...)` does not autovivify the hash element's handle

@@ -14015,7 +14015,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((*pcl-caller-wantarray* *wantarray*)
         (*p-eval-lex-alist* lex-alist)
         (|$^S| 1)
-        (s (to-string (unbox string))))
+        ;; eval's operand is an EXPR in SCALAR context (task #1249(4)): perl's
+        ;; `eval @a` is `eval("4")`, the element COUNT, and `eval %h` the key
+        ;; count.  Plain `unbox` handed the raw vector to to-string, which
+        ;; stringified it as ARRAY(0x…) and the eval died "Undefined subroutine
+        ;; &main::ARRAY".  p-scalar is the one scalar-context coercion — it is
+        ;; the identity on a string, a number and a reference, so nothing else
+        ;; moves.
+        (s (to-string (p-scalar string))))
     ;; eval undef / eval "" -> nil (undef), $@ = ""
     (when (string= s "")
       (box-set $@ "")

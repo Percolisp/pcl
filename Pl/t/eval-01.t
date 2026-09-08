@@ -14,7 +14,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 47;
+use Test::More tests => 51;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -162,8 +162,8 @@ sub run_pl {
 }
 
 SKIP: {
-    skip "pl2cl not found", 32 unless -x $pl2cl;
-    skip "sbcl not found",  32 unless `which sbcl 2>/dev/null`;
+    skip "pl2cl not found", 36 unless -x $pl2cl;
+    skip "sbcl not found",  36 unless `which sbcl 2>/dev/null`;
 
     # Test 1: basic arithmetic
     {
@@ -487,4 +487,25 @@ SKIP: {
     my (undef, $err, $rc) = PCLCore::transpile_raw(qq{$pl2cl --no-cache $pl_file});
     like($err, qr/PCL: statement dropped at \S+ line \d+/,
          'in FILE mode the same statement still ANNOUNCES and does not die');
+
+# ── eval's operand is an EXPR in SCALAR context (task #1249(4), s473h) ──────
+# `eval @a` is `eval("4")` — the element COUNT.  PCL stringified the raw
+# vector as ARRAY(0x…) and the eval died "Undefined subroutine &main::ARRAY".
+{
+    my $out = run_pl(q{my @a = qw(a b c d); my @b = eval @a;}
+                   . q{print "b=@b err=[$@]\n";});
+    like($out, qr/^b=4 err=\[\]/m, 'eval @array evaluates the array in scalar context (the count)');
+
+    $out = run_pl(q{my @a = ("2+3"); my $l = eval @a;}
+                . q{print "l=", (defined $l ? $l : "undef"), "\n";});
+    like($out, qr/^l=1$/m, 'a ONE-element array is still its count, not its element');
+
+    $out = run_pl(q{my %h = (a=>1,b=>2); my $r = eval %h;}
+                . q{print "r=", (defined $r ? $r : "undef"), " err=[$@]\n";});
+    like($out, qr/^r=2 err=\[\]/m, 'eval %hash is the key count (perl 5.26+ scalar %h)');
+
+    $out = run_pl(q{my $r = eval "3+4"; print "r=$r\n";});
+    like($out, qr/^r=7$/m, 'a plain string operand is unchanged by the scalar-context coercion');
+}
+
 }
