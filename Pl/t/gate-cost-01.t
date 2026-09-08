@@ -375,7 +375,7 @@ PL
     open my $fh, '<', $pl2cl or die "cannot read $pl2cl: $!";
     my $src = do { local $/; <$fh> };
     close $fh;
-    my ($opts) = $src =~ /\nsub _parse_options \{\nGetOptions\((.*?)\n\) or die/s;
+    my ($opts) = $src =~ /\nsub _parse_options \{\nGetOptions\((.*?)\n\) or (?:die|do \{)/s;
     my @value_opts;
     if (defined $opts) {
         for my $l (split /\n/, $opts) {

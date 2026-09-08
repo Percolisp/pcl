@@ -90,13 +90,7 @@ jobs:
         run: tools/ci-step prove tools/t/install-pcl.t
 
       - name: Test gate (prove, fresh saved core)
-        run: PCL_NO_SERVER=1 tools/ci-step tools/prove-core
-        # PCL_NO_SERVER=1 is a DISCRIMINATOR (Fable, s478, 2026-09-08), not a
-        # setting: CI went red at the s473u merge (bd1e4144: the per-test-process
-        # transpile server + 25 gate files moved onto the saved core) while the
-        # local gate is green warm AND cold-cache.  Green here = the server is the
-        # CI-only cause; still red = lever A or something else.  Remove once the
-        # cause is found (the local gate keeps exercising the server either way).
+        run: tools/ci-step tools/prove-core
 
       - name: Emission diff vs PR base (corpus-diff)
         if: github.event_name == 'pull_request'

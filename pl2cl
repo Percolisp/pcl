@@ -558,7 +558,18 @@ GetOptions(
   "emit-sexp"    => \$sexp_mode,     # print the data form INSTEAD of the CL
   "deps=s"       => \$deps_file,     # write the dependency manifest sidecar
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
-) or die usage_text();
+) or do {
+  # An EXPLICIT exit code, not `die`: perl's exit status for an uncaught die is
+  # "$! if nonzero, else $?>>8 if nonzero, else 255", i.e. whatever errno the
+  # option parser happened to leave behind -- 255 on perl 5.40, ENOENT (2) on
+  # 5.38's Getopt::Long -- so two paths that both die can exit DIFFERENTLY
+  # on one perl and identically on another.  CI (perl 5.38) read 2 from a
+  # spawned pl2cl and 255 from the transpile server's child for the same
+  # unknown option (Pl/t/gate-cost-01.t row 16, s478).  A usage error is exit
+  # 2 everywhere, on purpose.
+  print STDERR usage_text();
+  exit 2;
+};
 
 if ($want_help) { print usage_text(); exit 0 }
 
@@ -1120,8 +1131,10 @@ sub _xserve {
     # A freshly spawned pl2cl starts with $! and $? clear; this child inherited
     # whatever the server's socket work left in them, and perl's exit code for
     # an uncaught die is "$! if nonzero, else $?>>8 if nonzero, else 255" — so
-    # without this a `die usage_text()` exits 25 (ENOTTY from accept) where a
-    # spawn exits 255.  Measured: Pl/t/gate-cost-01.t's unknown-option row.
+    # without this an uncaught die here exited 25 (ENOTTY from accept).  Even
+    # with it, a die's exit code is errno NOISE in BOTH paths (perl-defined, and
+    # perl-version-dependent: s478's CI red), so no row asserts it exactly; the
+    # one failure a row compares, the usage error, is an explicit `exit 2`.
     ($!, $?) = (0, 0);
     ($xserver_mode, $xsock, $xowner) = (0, undef, undef);
     _parse_options();
