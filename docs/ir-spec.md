@@ -2308,16 +2308,16 @@ var ⇒ plain lexical binding, no localization at all).
   through the `%pcl-cl-sub-name` registry (case-preserving).
 - **The proxy class is emitted as `(p-defclass plc-NAME (PARENTS) ())`**
   (s473s, task #1518), which defines the class only when it is not already
-  there with exactly those direct superclasses. The guard is normative, not
-  an optimisation detail a consumer may skip: a program's preamble names
-  every package it mentions, and a string `eval` produces a program with its
-  own preamble, so a module that generates code at run time re-opens classes
-  that already exist (12 per `moo-objs` bench iteration). Parents are
-  compared by NAME, so a not-yet-defined parent gives the same answer before
-  and after it arrives; an empty parent list compares against the host's
-  root object class; SLOTS must be empty — a form carrying them is a shape
-  the readiness test cannot answer, and dies (CLAUDE.md rule 12). A backend
-  implements it as "define this class unless it is already this class".
+  there with exactly those direct superclasses. A backend implements it as
+  "define this class unless it is already this class". Parents are compared
+  by NAME, so a not-yet-defined parent gives the same answer before and after
+  it arrives; an empty parent list compares against the host's root object
+  class; SLOTS must be empty — a form carrying them is a shape the readiness
+  test cannot answer, and dies (CLAUDE.md rule 12). The guard is cheap
+  insurance, not a measured win: the preamble a string `eval`'s program
+  carries declares its PACKAGE and not its class, so on both measured
+  populations the test never hits (`moo-objs`: 20 class forms, N-independent,
+  zero hits, against 12 PACKAGE hits per iteration).
 
   ```lisp
   (p-defclass plc-dog (plc-animal) ())   ; a no-op when plc-dog already has

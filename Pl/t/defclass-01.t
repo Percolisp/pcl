@@ -8,12 +8,15 @@
 # a Perl package's MRO (task #1518, the other half of #1189's finding; the
 # `p-defpackage` guard shipped in s473r is the precedent).
 #
-# Every emitted program opens with a preamble per package it mentions, and the
-# program a STRING EVAL produces is an emitted program — so a module that
-# generates code at run time re-ran `ensure-class` for a class that already
-# existed (12 per `moo-objs` loop iteration, ~35 % of that row's samples).
 # `p-defclass` skips the `defclass` when the class is already there IN THAT
-# EXACT SHAPE.
+# EXACT SHAPE.  It was filed (#1518) expecting the `p-defpackage` half's prize
+# — "12 `ensure-class` per `moo-objs` iteration" — and s473s MEASURED that
+# claim false: the preamble a string `eval`'s program carries declares its
+# PACKAGE and not its class, so `moo-objs` runs 12 package-readiness tests per
+# iteration and exactly 20 class ones IN TOTAL, N-independent, none of them a
+# hit.  The change is kept for the emission (no bare host `defclass` in the
+# IR) and for correctness if a path ever does re-open one.  These rows are
+# therefore about the GUARD BEING RIGHT, not about it being fast.
 #
 # The word EXACT is the whole safety argument, and it is why this file exists:
 # a guard keyed on mere EXISTENCE would freeze a package's parents at whatever

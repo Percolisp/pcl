@@ -737,22 +737,36 @@
   "The CLOS class that carries a Perl package's MRO, defined ONLY when it is
    not already there in that exact shape.
 
-   The other half of #1189's finding (task #1518), and the same argument as
-   `p-defpackage`'s: every emitted program opens with a preamble for each
-   package it mentions, and the program a STRING EVAL produces is an emitted
-   program — so a module that generates code at run time re-runs `ensure-class`
-   for a class that already exists.  Measured on the `moo-objs` bench row:
-   12 `ensure-class` executions per loop iteration (10 of them Moo's
-   Sub::Quote eval package), and CL's `defclass` on an EXISTING class is not
-   cheap — sb-pcl's braid update, `update-ctors`, `shared-initialize` and two
-   mutexes, together ~35 % of that row's loop samples after the defpackage
-   half shipped.
+   THE PRIZE IT WAS FILED FOR IS NOT THERE, and that is measured, not
+   suspected (s473s).  Task #1518 read #1189's finding as "12 `ensure-class`
+   executions per `moo-objs` loop iteration", by analogy with the
+   `p-defpackage` half s473r shipped.  Counting both readiness tests on the
+   same program says otherwise: at N=500 and N=2000 `moo-objs` runs
+   `%p-package-ready-p` 6096 and 24096 times (12 per iteration, exactly
+   #1189's figure) but `%p-class-ready-p` **20 times, N-INDEPENDENT, with ZERO
+   hits**.  The preamble a STRING EVAL's program carries declares its PACKAGE
+   and not its class, so the re-opening this guard is for never happens on
+   either population; `moo-objs` reads +2.3 % across the change, which is
+   noise by construction (the bench's exec metric subtracts load, where all 20
+   of those `defclass` forms run).
+
+   It is kept for what it does deliver: the emitted file no longer writes a
+   bare host `defclass` (ir-spec §11b — the IR stays in its own vocabulary),
+   and a class re-opened by any future emission path is free instead of
+   expensive.  Do not re-derive the speed claim; it was measured and it is
+   zero.
+
+   WHY THE PARENTS ARE PART OF THE TEST.  A program can name one package twice
+   with a DIFFERENT @ISA, so a guard keyed on mere existence would freeze the
+   first one's parents and dispatch to the wrong class, silently.  Comparison
+   is by class NAME, which is the same before and after a forward-referenced
+   parent arrives.
 
    SLOTS must be empty.  The readiness test above is about the class's
    IDENTITY and its parents; it says nothing about slot definitions, so a
    form carrying them would be silently skipped when only its slots changed
    (rule 12 — a case this cannot answer says so instead of guessing).  pl2cl
-   emits `()` at all six of its `defclass` sites."
+   emits `()` at all seven of its class sites."
   (when slots
     (error "p-defclass: slots are not part of the readiness test: ~S" slots))
   `(eval-when (:compile-toplevel :load-toplevel :execute)
