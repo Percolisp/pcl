@@ -3889,6 +3889,7 @@ sub handle_subcalls {
 
     # Add implicit $_ if function defaults to it
     $self->add_implicit_default_param($func_name, $top_id);
+    $self->collapse_extra_unary_params($func_name, $top_id);
 
     # So it is marked as finished.
     $e->[$i]    = $top_node;
@@ -4047,6 +4048,7 @@ sub handle_subcalls {
         my $node_id = $self->make_node($now);
         $self->add_child_to_node($top_id, $node_id);
         $self->add_implicit_default_param($sub_name, $top_id);
+        $self->collapse_extra_unary_params($sub_name, $top_id);
         $e->[$i] = $self->make_subtree_item($top_id, 'funcall');
         next;
       }
@@ -4111,6 +4113,7 @@ sub handle_subcalls {
           # elsewhere built `(p-backtick)` with no argument at all — an arity
           # error where perl reads $_ (t/op/exec.t:141, task #734).
           $self->add_implicit_default_param($sub_name, $top_id);
+          $self->collapse_extra_unary_params($sub_name, $top_id);
           $e->[$i] = $self->make_subtree_item($top_id, 'funcall');
           next;
         }
@@ -4596,6 +4599,7 @@ sub handle_subcalls {
 
     # Add implicit $_ if function defaults to it
     $self->add_implicit_default_param($sub_name, $top_id);
+    $self->collapse_extra_unary_params($sub_name, $top_id);
 
     $e->[$i]    = $top_node; # $self->make_subtree_item($node_id, 'funcall');
 
@@ -4658,6 +4662,52 @@ sub add_implicit_default_param {
     my $var_id = $self->make_node($var_token);
     $self->add_child_to_node($node_id, $var_id);
   }
+}
+
+# THE MIRROR of add_implicit_default_param, called from the same four sites:
+# too FEW parameters get the `$_` default above; too MANY are the COMMA
+# OPERATOR (task #1393, s473h).
+#
+# `eval (1,2,3)` is VALID perl and answers 3 — a builtin whose whole param
+# spec is the named-unary one (0 / 1 / "$_ default") reads a parenthesised
+# list as ONE comma EXPRESSION, whose value is its last operand and whose
+# earlier operands are still evaluated.  PCL split it into three ARGUMENTS, so
+# `p-eval`'s `lex-alist` parameter received the number 2 and the run died with
+# an SBCL type error.
+#
+# The collapse REUSES the node type the doubly-parenthesised spelling
+# `eval((1,2,3))` already produces — `progn` — so there is one comma-group
+# lowering rather than two (rule 11), and the no-paren spelling `eval 1,2,3`
+# (perl: 1, the list operator's first element) is untouched because its extra
+# terms never became this funcall's children.
+#
+# perl REFUSES the same shape for most members of the family (`length("a","b")`
+# is "Too many arguments for length"), which is INVALID input PCL does not have
+# to reject (CLAUDE.md rule 9); answering perl's comma-operator value there is
+# strictly better than the SBCL arity crash it replaces.
+sub collapse_extra_unary_params {
+  my $self      = shift;
+  my $func_name = shift;
+  my $node_id   = shift;
+
+  return unless defined $func_name;
+  $func_name =~ s/^CORE:://;
+
+  my $param_spec = $self->known_no_of_params->{$func_name};
+  return unless defined $param_spec;
+  my @specs = ref($param_spec) eq 'ARRAY' ? @$param_spec : ($param_spec);
+  # The named-unary spec and nothing else: 0 args, 1 arg, or "$_ by default".
+  # A list operator (-1), a "@_ default" (-3) or a "1 before a list" (-12)
+  # legitimately has many children and must not be touched.
+  return if grep { $_ != 0 && $_ != 1 && $_ != -2 } @specs;
+  return unless grep { $_ == 1 } @specs;
+
+  my $kids = $self->node_tree->children_ids($node_id);
+  return unless @$kids > 2;            # [name, param] is already one argument
+
+  my (undef, $group_id) = $self->make_node_insert('progn');
+  $self->add_child_to_node($group_id, $_) for @$kids[1 .. $#$kids];
+  splice @$kids, 1, scalar(@$kids) - 1, $group_id;
 }
 
 # Return the maximum fixed number of arguments for a user-defined old-style
@@ -5272,10 +5322,17 @@ sub child_context {
       # `join(",", "a", readpipe(f()), "b")` calls f in SCALAR context even
       # though readpipe itself is in list context there — t/op/exec.t's
       # "readpipe argument context in list context" row asserts exactly that.
+      # `eval` and `evalbytes` are members of this family too (task #1249(4)):
+      # perl imposes SCALAR CONTEXT on the operand of `eval EXPR`, so a CALL
+      # in that slot runs with wantarray FALSE — `sub two { ("3+4","x") }
+      # eval two()` evaluates the string "x", not the list.  Only the EXPR
+      # form reaches here: `eval BLOCK` lowers to `p-eval-block`, a different
+      # node, and keeps the caller's context as perl does.
       if ($func_name && $func_name =~ /^(length|uc|lc|ucfirst|lcfirst|fc
                                          |ord|chr|hex|oct|quotemeta
                                          |abs|int|sqrt|sin|cos|exp|log
-                                         |defined|ref|readpipe)$/x) {
+                                         |defined|ref|readpipe
+                                         |eval|evalbytes)$/x) {
         return SCALAR_CTX
             if $child_index >= 1;
       }

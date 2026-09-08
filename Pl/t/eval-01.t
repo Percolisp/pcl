@@ -14,7 +14,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 51;
+use Test::More tests => 57;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -162,8 +162,8 @@ sub run_pl {
 }
 
 SKIP: {
-    skip "pl2cl not found", 36 unless -x $pl2cl;
-    skip "sbcl not found",  36 unless `which sbcl 2>/dev/null`;
+    skip "pl2cl not found", 42 unless -x $pl2cl;
+    skip "sbcl not found",  42 unless `which sbcl 2>/dev/null`;
 
     # Test 1: basic arithmetic
     {
@@ -506,6 +506,40 @@ SKIP: {
 
     $out = run_pl(q{my $r = eval "3+4"; print "r=$r\n";});
     like($out, qr/^r=7$/m, 'a plain string operand is unchanged by the scalar-context coercion');
+}
+
+
+# ── eval's operand gets scalar CONTEXT, not a scalar-valued coercion ────────
+# (task #1249(4), Fable review of s473h).  The first fix coerced the operand's
+# VALUE with p-scalar, which is right for an array variable (an ARRAY in scalar
+# context IS its count) and wrong for anything else: perl runs a CALL in that
+# slot with wantarray FALSE, so `sub two { ("3+4","x") } eval two()` evaluates
+# the string "x", not the list's count.  `eval` and `evalbytes` therefore join
+# the scalar-argument named-unary family in PExpr::child_context, and p-scalar
+# stays as the second half (p-scalar-ctx of a bare array read still yields the
+# vector).  `eval BLOCK` is a different node (p-eval-block) and keeps the
+# caller's context, as perl does.  Every expectation is the live perl answer.
+{
+    my $out = run_pl(q{sub two { return ("3+4", "x") } my @r = eval two();}
+                   . q{print "[@r]\n";});
+    like($out, qr/^\[x\]$/m, 'eval CALL(): the call runs in SCALAR context, so eval sees "x"');
+
+    $out = run_pl(q{sub one { return "3+4" } my @o = eval one();}
+                . q{print "[@o]\n";});
+    like($out, qr/^\[7\]$/m, '…and a one-element return is still evaluated');
+
+    $out = run_pl(q{my @a=(1,2,3,4); my @b = eval @a; print "[@b]\n";});
+    like($out, qr/^\[4\]$/m, 'eval @array is still the COUNT (an array in scalar context)');
+
+    $out = run_pl(q{my @c = eval (1,2,3); print "[@c]\n";});
+    like($out, qr/^\[3\]$/m, 'eval (1,2,3) is the comma operator: eval("3")');
+
+    $out = run_pl(q{sub wa { return wantarray ? "LIST" : "5+5" } my @f = eval wa();}
+                . q{print "[@f]\n";});
+    like($out, qr/^\[10\]$/m, 'the callee SEES wantarray false');
+
+    $out = run_pl(q{my @r = eval { (1,2,3) }; print "[@r]\n";});
+    like($out, qr/^\[1 2 3\]$/m, 'eval BLOCK keeps the caller LIST context (the negative)');
 }
 
 }
