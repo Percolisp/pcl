@@ -39,7 +39,7 @@ use PCLSbcl ();   # sbcl_prefix — the %p-mtime contract row asks the runtime i
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 50;
+plan tests => 52;
 
 my $dir = tempdir(CLEANUP => 1);       # where the fixture modules live
 
@@ -227,6 +227,17 @@ sub run_pcl {
     my $help = `$pl2cl --help 2>&1`;
     is($? >> 8, 0, 'pl2cl --help exits 0 (it answered "Unknown option: help")');
     like($help, qr/--no-cache/, '... and documents its options');
+
+    # #1060: --executable used to be advertised as a "bonus feature" while it
+    # ran the program at BUILD time and produced a binary that did nothing.
+    # The behaviour is fixed and tested end to end in tools/t/executable-01.t
+    # (not in this gate -- it writes 49 MB images); what belongs HERE is that
+    # the help text says what the flag now does AND names the half that is
+    # still not embedded, so no doc claims more than the flag delivers.
+    like($help, qr/--executable\s+Save a standalone binary that RUNS the program/,
+         '... says --executable produces a binary that RUNS the program');
+    like($help, qr/single-binary-plan\.md/,
+         '... and points at the plan for the closure it does not embed yet');
 }
 
 # ─────────────────────────────────────────────────────────────────────────

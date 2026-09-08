@@ -24,7 +24,7 @@ backtrace) and exiting 255, END blocks running.
 
 | piece | state |
 |---|---|
-| `pl2cl --bundle` / `--executable` | EXIST but primitive.  `--bundle` concatenates the runtime **source** + the main file's transpile — it does **not** bundle the `use`-closure (the comment in `do_bundle` says so; modules still resolve at run time through `@INC` + a perl subprocess).  `--executable`'s saved `:toplevel` only exits: the program's top-level statements run during the build's `load`, so **the binary re-runs nothing** — it is a demo, not a product. |
+| `pl2cl --bundle` / `--executable` | **Step 2 DONE (s473i, task #1060)**; the table row below records what it was.  `--executable` now saves an image whose `:toplevel` RUNS the program: `cl/pcl-build-exe.lisp` splits the emitted file at its single `(p-run-compile-phase-blocks)`, EVALs the compile phase into the build image (which also gives step 3's `use`-closure preload for free) and compiles the run phase into thunks.  `--bundle` no longer `--load`s the bundle before `compile-file`ing it, so it too stops running the program at build.  What is left of steps 3–5: run-time `require` and the extensions still read this tree.  *Was: `--bundle` concatenates the runtime **source** + the main file's transpile — it does **not** bundle the `use`-closure; `--executable`'s saved `:toplevel` only exits, so **the binary re-runs nothing** — a demo, not a product.* |
 | `tools/install-pcl` | Installs the whole tree + saved core.  Right model (compile at install), wrong artifact (a tree, not one file). |
 | Saved cores (`~/.pcl-cache/core/`, s439) | The mechanics of `save-lisp-and-die` are proven and content-keyed.  Reusable as-is. |
 | `pcl` driver | Phase 1 (transpile-and-run) only; caching tiers are Phase 6, unbuilt. |
@@ -139,13 +139,22 @@ some other machine, so `--exe` ends with a **portability report**:
 1. **#217 relocatable preamble** — prerequisite, also fixes the installed
    artifacts' baked paths.  Acceptance: a transpile on machine A runs from
    a moved tree on machine B.
-2. **`--build-mode` split + perl-shaped toplevel** — binary of a
-   no-modules script runs its program at run time, `die` prints message
-   only, exit 255; END blocks run.  Acceptance probes: exit codes, @ARGV,
-   %ENV, die/eval, END — byte-compared vs perl.
-3. **`use`-closure preload** (static scan + build-time load + registry).
-   Acceptance: a script using `List::Util` + a local `lib/` module runs
-   with `@INC` emptied.
+2. **DONE (s473i, #1060).  Split + perl-shaped toplevel.**  It needed no
+   `--build-mode` emission after all: the emission ALREADY hoists every
+   section's compile phase above the single `(p-run-compile-phase-blocks)`
+   (Parser2.pm:2044–2135, the #456(b)/#469 phase model), so the split is a
+   READ of the emitted file, not a second way to emit it —
+   `cl/pcl-build-exe.lisp`.  Measured vs perl on the probes this step
+   named: exit codes, `@ARGV`, `%ENV`, `$0`, uncaught `die` (message only,
+   255), END blocks — stdout byte-identical.  BEGIN runs at BUILD time,
+   which is what "build = perl's compile phase" means and the one visible
+   difference from `perl prog.pl`.  Guard `tools/t/executable-01.t` (24
+   rows, ~8 s, not in the gate).
+3. **`use`-closure preload** — the *load* half fell out of step 2 (a `use`
+   is compile-phase, so the module is in the image; probed with
+   `List::Util`).  What remains is the STATIC SCAN + registry that makes
+   `@INC` unnecessary at run time.  Acceptance unchanged: a script using
+   `List::Util` + a local `lib/` module runs with `@INC` emptied.
 4. **`require` embedding + `--with-module`** (the blob table).
    Acceptance: literal `require`, conditional `require`, `eval "use Foo"`
    with `--with-module Foo` — all on a PATH without perl.

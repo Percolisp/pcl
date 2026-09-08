@@ -19,8 +19,9 @@
 # hash of the runtime source + the SBCL version, so an edit or an upgrade
 # simply produces a new one (tools/lib/PCLSbcl.pm, the ONE SBCL command
 # builder every PCL runner shares).  --make-core only forces that build early.
-# (Compiling/running a script as a standalone .fasl is not supported yet —
-# Phase 6.) See `pcl --help` for the user-facing summary.
+# (`pcl` itself transpiles the script fresh every run; compiling a script ONCE
+# into a .fasl or a binary is `pl2cl --bundle` / `pl2cl --executable`, and
+# `pcl`'s own caching tiers are still Phase 6.)  See `pcl --help`.
 #
 # Phase 1 of docs/pcl-rollout-plan.md: Tier-0 "transpile-and-run" only — the main
 # script is transpiled fresh on every run (no main-script FASL). The module cache
@@ -484,9 +485,14 @@ Caches:
                  removed by its --clean.
 
 Notes:
-  * Every run transpiles your script fresh; there is no way yet to compile a
-    script to a .fasl and run that directly (planned — see Phase 6 of
-    docs/pcl-rollout-plan.md). Only `use`/`require`d modules are cached today.
+  * Every run of `pcl` transpiles your script fresh; only `use`/`require`d
+    modules are cached (caching the script itself is Phase 6 of
+    docs/pcl-rollout-plan.md).  To compile a script ONCE, use the compiler
+    directly: `pl2cl --executable -o prog prog.pl` saves a binary that runs
+    the program, and `pl2cl --bundle -o prog.fasl prog.pl` a .fasl that runs
+    it when loaded.  Neither embeds the module closure yet, so both still
+    read this PCL tree at run time for a `require` that misses the cache and
+    for the pack/mro/warnings extensions (docs/single-binary-plan.md).
   * --make-core / --clear-cache / --no-cache only affect speed, never results.
 
 Environment:

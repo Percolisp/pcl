@@ -456,10 +456,12 @@ about a tenth of a second plus the time to compile your script.
   test populations goes to zero (57 today); the queue of small correctness
   fixes found by perl's `t/` tree and the CPAN board; a measured speed story
   for whole programs rather than microbenchmarks.
-* **After that:** compiling a script once to a standalone binary (the
-  runtime can already be saved as an image; the flag that exists today is
-  not yet correct), wider XS support through pclxs, and the generated code as
-  a documented target for other tools.
+* **After that:** finishing the standalone binary — `pl2cl --executable`
+  already saves an image that runs the program (its compile phase, `use`d
+  modules included, happens at build time, as perl's does), but the module
+  closure and the pack/mro/warnings extensions are not embedded yet, so the
+  binary still reads this tree for them.  Then wider XS support through
+  pclxs, and the generated code as a documented target for other tools.
 * **Planned, not rejected:** live symbol-table hashes (`%Foo::`), full
   `caller()` fidelity, perl 5.38 classes, `defer` blocks, `tie` on
   aggregates, `format`, indirect object syntax with a scalar invocant, and a

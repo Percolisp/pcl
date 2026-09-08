@@ -5,6 +5,18 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-08: `pl2cl --executable` produces a binary that RUNS the program
+  (#1060).  It used to run the program during the BUILD and save an image
+  that exited 0 having done nothing — and a program containing `exit` killed
+  the builder, so no binary was written at all.  The emitted CL is now split
+  at its compile/run phase boundary: definitions, `use`d modules and BEGIN
+  are evaluated into the image at build (perl's compile phase), and the
+  run-time statements become compiled thunks the image's entry point calls,
+  with `@ARGV`, `%ENV`, `$0`, exit codes, uncaught `die` (message only, 255)
+  and END blocks all the running process's.  `--bundle` no longer runs the
+  program at build either.  Neither embeds the module closure or the
+  pack/mro/warnings extensions yet, so a binary is standalone only on a
+  machine that has this PCL tree (`docs/single-binary-plan.md` steps 3–5).
 - 2026-09-04: README rewritten as an introduction for Perl programmers;
   `docs/STATUS.md`, this file and the benchmark board re-measured on the
   same day.  Two bugs found while checking its claims are filed, not fixed:

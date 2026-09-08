@@ -501,8 +501,17 @@ it runs the result; this is the compiler behind it.
 
 Modes:
   (default)       Transpile to stdout
-  --bundle        Compile to single .fasl with runtime + all dependencies
-  --executable    Create standalone executable (bonus feature!)
+  --bundle        Compile runtime + program to one .fasl; loading it runs
+                  the program (`sbcl --load out.fasl`)
+  --executable    Save a standalone binary that RUNS the program when
+                  started.  The program's compile phase (subs, packages,
+                  `use`d modules, BEGIN) happens at BUILD time, as perl's
+                  does; @ARGV, %ENV, $0, exit codes, die and END blocks are
+                  the running process's.  NOT yet embedded (they are read
+                  from this tree at run time, so the binary is standalone
+                  only on a machine that has it): a run-time `require` of a
+                  module not already loaded, and the pack/mro/warnings
+                  extensions.  docs/single-binary-plan.md, task #756.
 
 Options:
   -h, --help      This message
@@ -831,6 +840,67 @@ sub get_runtime_content {
   return $content;
 }
 
+# How the two build modes start SBCL — through tools/lib/PCLSbcl.pm like every
+# other PCL runner ("a runner chooses WHAT to load, never HOW SBCL starts"), so
+# the runtime a bundle or a binary carries is the same one `pcl` runs, from the
+# same cached core.
+#
+# tools/lib joins @INC for the duration only: this script's @INC is EMITTED
+# into every program preamble (*p-core-inc-dirs*), so a permanent `use lib`
+# would change the compiler's OUTPUT — the same reason the PCLPaths bootstrap
+# at the top of this file does it that way.
+sub build_sbcl_prefix {
+  local @INC = (@INC, "$ROOT/tools/lib");
+  require PCLSbcl;
+  return PCLSbcl::sbcl_prefix(runtime => "$ROOT/cl/pcl-runtime.lisp",
+                              core    => $ENV{PCL_CORE});
+}
+
+# --executable: turn the emitted program into a standalone SBCL image whose
+# entry point RUNS the program (task #1060).
+#
+# The old shape `load`ed the emitted file into the build image and saved an
+# image whose :toplevel only exited — so the program ran at BUILD time and the
+# binary did nothing (and with an `exit` anywhere in the program, the program's
+# exit killed the builder and no binary was written at all).  cl/pcl-build-exe.lisp
+# does the split: the compile phase is EVALuated here, the run phase becomes
+# compiled thunks the saved :toplevel calls.  See that file's header.
+sub do_executable {
+  my ($source_file, $lisp_file, $output_file) = @_;
+
+  my @prefix = build_sbcl_prefix();
+
+  my $builder = "$ROOT/cl/pcl-build-exe.lisp";
+  -f $builder or die "pl2cl: missing $builder\n";
+
+  # A path reaches the builder as a CL STRING literal, escaped by the tree's
+  # own datum escaper (rule 11) — never as #P"…", whose reader parses the name
+  # as a wild pathname (#755's rule, applied to the build's own arguments).
+  my $qlisp = Pl::ExprToCL::cl_string_datum($lisp_file);
+  my $qout  = Pl::ExprToCL::cl_string_datum($output_file);
+  my $qsrc  = Pl::ExprToCL::cl_string_datum($source_file);
+
+  say STDERR "  Creating executable...";
+  my @cmd = ('sbcl', @prefix,
+             '--eval', '(let ((*load-verbose* nil) (*load-print* nil)'
+                     . ' (*compile-verbose* nil) (*compile-print* nil))'
+                     . ' (handler-bind ((warning (function muffle-warning)))'
+                     . ' (load ' . Pl::ExprToCL::cl_string_datum($builder) . ')))',
+             '--eval', "(pcl::%p-exe-build $qlisp $qout :source $qsrc)");
+  say STDERR "pl2cl: exec @cmd" if $ENV{PCL_SHOW_SBCL};
+  system(@cmd);
+
+  # save-lisp-and-die ends the builder, so a 0 exit is the only success.
+  if ($? == 0 && -f $output_file) {
+    say STDERR "  Created: $output_file";
+    unlink $lisp_file;   # kept on failure — it is what a build bug is read from
+  } else {
+    die "Failed to create executable (sbcl exit code: $?);"
+      . " the emitted CL is left in $lisp_file\n";
+  }
+  return;
+}
+
 # Bundle mode: compile main file + all dependencies into single output
 sub do_bundle {
   my ($source_file, $output_file, $executable) = @_;
@@ -859,10 +929,15 @@ sub do_bundle {
   open my $out, '>', $lisp_file
     or die "Cannot write $lisp_file: $!";
 
-  # 1. Runtime first
-  print $out ";; === PCL Runtime ===\n";
-  print $out get_runtime_content();
-  print $out "\n\n";
+  # 1. Runtime first — for --executable it is NOT concatenated: that build
+  #    starts from the same saved core every other PCL runner uses (PCLSbcl),
+  #    so the binary's runtime is byte-for-byte the one `pcl` runs, and the
+  #    build does not recompile 20k lines of CL per executable.
+  if (!$executable) {
+    print $out ";; === PCL Runtime ===\n";
+    print $out get_runtime_content();
+    print $out "\n\n";
+  }
 
   # 2. Transpiled code (includes all dependencies via 'use')
   print $out ";; === Transpiled: $source_file ===\n";
@@ -874,38 +949,19 @@ sub do_bundle {
   say STDERR "  Written: $lisp_file";
 
   if ($executable) {
-    # Create standalone executable
-    # NOTE: one --eval = ONE expression for SBCL, hence the progn.
-    my $save_code = qq{
-      (progn
-      (load "$lisp_file")
-      (sb-ext:save-lisp-and-die "$output_file"
-        :toplevel (lambda ()
-                    (handler-case
-                      (sb-ext:exit :code 0)
-                      (error (e)
-                        (format *error-output* "Error: ~A~%" e)
-                        (sb-ext:exit :code 1))))
-        :executable t))
-    };
-
-    say STDERR "  Creating executable...";
-    system('sbcl', '--noinform', '--non-interactive',
-           '--eval', $save_code);
-
-    if ($? == 0) {
-      say STDERR "  Created: $output_file";
-      # Clean up intermediate file
-      unlink $lisp_file;
-    } else {
-      die "Failed to create executable (sbcl exit code: $?)\n";
-    }
+    do_executable($source_file, $lisp_file, $output_file);
   } else {
-    # Compile to FASL - load the file first (which loads ASDF/cl-ppcre), then compile
+    # Compile to FASL.  It used to `--load` the bundle first "which loads
+    # ASDF/cl-ppcre" — and loading the bundle RUNS THE PROGRAM (task #1060's
+    # other half: the marker file a probe wrote existed after the BUILD).  The
+    # image needs the runtime for cl-ppcre and the :invert readtable, not the
+    # program, so it starts from the runtime/core prefix and compile-file never
+    # evaluates the program's top-level forms.
     say STDERR "  Compiling to FASL...";
-    system('sbcl', '--noinform', '--non-interactive',
-           '--load', $lisp_file,
-           '--eval', qq{(compile-file "$lisp_file" :output-file "$output_file")},
+    my $qlisp = Pl::ExprToCL::cl_string_datum($lisp_file);
+    my $qout  = Pl::ExprToCL::cl_string_datum($output_file);
+    system('sbcl', build_sbcl_prefix(),
+           '--eval', "(compile-file $qlisp :output-file $qout)",
            '--eval', '(sb-ext:exit)');
 
     if ($? == 0) {
