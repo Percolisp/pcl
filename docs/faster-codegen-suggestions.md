@@ -12,7 +12,7 @@ Perl (`v2-endgame-plan.md` §6 holds the acceptance criteria and sequencing).
 
 ## Where this stands (2026-08-25)
 
-> **The current measured board is [§0.2k](#02k-the-board-on-a-quiet-box-s475-2026-09-07-main-047cc249-gen-v2-1020) (2026-09-07, quiet box: fourteen of the nineteen original rows beat perl, `listcopy` 0.36×, `symref` 0.38×, `slices` 1.65×); §0.2i (2026-09-04, quiet box): ten of nineteen rows beat perl, `arrhash` 0.60×, `slices` 2.60×, `symref` 1.37×.**  The table below is the 2026-08-25 reading and is kept as the record of what each tier delivered.  **The rows that moved since — rounds 29–31 (regex ops once per site, the single-array foreach run, `int()`/`/`, the package preamble; `use JSON::PP` load 0.41 s) — are [§0.2j](#02j-rounds-2931-movers-2026-09-07); the next quiet-box board supersedes its derived ratios.**
+> **The current measured board is [§0.2k](#02k-the-board-on-a-quiet-box-s475-2026-09-07-main-047cc249-gen-v2-1020) (2026-09-07, quiet box: fourteen of the nineteen original rows beat perl, `listcopy` 0.36×, `symref` 0.38×, `slices` 1.65×); §0.2i (2026-09-04, quiet box): ten of nineteen rows beat perl, `arrhash` 0.60×, `slices` 2.60×, `symref` 1.37×.**  The table below is the 2026-08-25 reading and is kept as the record of what each tier delivered.  **Round 32 (the method-call round) is [§0.2l](#02l-round-32-movers-2026-09-08); the rows that moved before it — rounds 29–31 (regex ops once per site, the single-array foreach run, `int()`/`/`, the package preamble; `use JSON::PP` load 0.41 s) — are [§0.2j](#02j-rounds-2931-movers-2026-09-07); the next quiet-box board supersedes its derived ratios.**
 
 Every shipped transform is a **named, switchable emission** in the
 optimization registry [`Pl/Passes.pm`](../Pl/Passes.pm) (`PCL_OPT`):
@@ -670,6 +670,57 @@ is inside that table's recorded spread except `slices`, which is the two
 round-22 changes landing as predicted.  The `pack` ratio rose because
 *perl* ran faster on this machine today; PCL's own time is unchanged.
 **Ten of nineteen rows beat perl**, the same ten as §0.2f.
+
+### 0.2l Round 32 movers (2026-09-08) — the method-call round
+
+**Not a re-run of the board.**  Each line is the round's own interleaved A/B
+(one transpiled program, N runtimes on their own cores, all series round-robin
+in ONE window, best-of-K, **column 2 a byte-identical COPY of column 1 as the
+control**, `uptime` printed beside every number — the §0.5 method).  The box
+was shared with a sibling agent's gate for part of the round; where the
+control column moved more than ~2 % the row was re-measured and the second
+reading is the one quoted.  Tree: main `c709804a`, generation v2-1060.
+
+```
+row        change      control   lever
+methret    -27.5 %     +1.4 %    #582 own-class half — p-method-call caches
+                                 (class, method) -> the SYMBOL
+ovlsub      -5.8 %     -0.2 %    same
+json-rt     -4.8 %     -1.4 %    same
+methinh      0.0 %     +0.4 %    same — pure INHERITED dispatch pays the failed
+                                 probe and gains nothing; it must not regress
+textproc   -24.5 %     +2.9 %    #1461 — literal-prefix scanning is BMH with a
+                                 256-way HASHED skip table
+json-rt     -1.4 %     +0.1 %    #1461
+subste      -0.3 %     +1.9 %    #1461
+regexg      +5.9 %     +1.1 %    #1461 — no literal prefix, so nothing to gain
+moo-objs    +2.3 %     n/a       #1518 p-defclass — NOISE, and zero by
+                                 construction: the guard never fires (see below)
+```
+
+**#1518 is a measured ZERO, recorded so it is not re-derived.**  The task
+predicted ~35 % of `moo-objs` from re-run `ensure-class` calls, by analogy
+with the `p-defpackage` half (#1189).  Counting both readiness predicates on
+the same program says the analogy was false: `moo-objs` runs
+`%p-package-ready-p` 6096 times at N=500 and 24096 at N=2000 (12 per
+iteration, #1189's own figure) and `%p-class-ready-p` **20 times, at every N,
+with zero hits**.  The preamble a string eval's program carries declares its
+PACKAGE and not its class.  `p-defclass` is kept for the IR (the emitted file
+no longer writes a bare host `defclass`), not for a number.
+
+**#1461's memory result is the reason it is the hashed table and not the
+flag.**  Twenty literal-prefix scanners: 14.8 MB → **184.8 MB** with
+cl-ppcre's dense skip table (8.5 MB each), 14.8 MB → **14.9 MB** with the
+256-way one.  `Pl/t/bmh-scan-01.t` asserts the second, so a regression to the
+first cannot pass silently.
+
+**And three of #1461s four rows CANNOT move**, which is how the `regexg`
+reading is settled without arguing about noise: counting the BMH matchers each
+row builds says `textproc` builds exactly ONE (its `tag=t` literal prefix) and
+`regexg`, `json-rt` and `subste` build ZERO.  A row that builds none runs the
+same code either way -- the DENSE column reads +3.9 % on `regexg` for the same
+reason -- and every row reports one extra, the install self-tests own probe
+scanner.  Peak RSS on `textproc`: base 99.9 MB, hashed 98.2 MB, dense 106.6 MB.
 
 ### 0.2k The board on a QUIET box (s475, 2026-09-07, main `047cc249`, gen v2-1020)
 

@@ -2,6 +2,97 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473s (Opus agent, 2026-09-08) — perf round 32, the method-call round: the own-class method cache (methret −27.5 %), `p-defclass` shipped with its prize measured away, and literal-prefix scanning on a hashed BMH table (textproc −24.5 %)
+
+**Member 1, the measurement.**  `sb-sprof` `:cpu` over the `methret` row at
+N=20 M (2970 samples) put 58.7 % of the time in `p-method-call`'s PROLOGUE,
+36.2 % in the callee and 4.0 % in the loop, and inside the prologue the LOOKUP
+dominates: `%pcl-own-method` 23.0 % of the whole program, `FIND-SYMBOL` alone
+16.6 %, `%pcl-normalize-class-name` 9.2 %.  Allocation is not the
+differentiator — `methret` and `subret` both cons 48.0 bytes per iteration — so
+the pre-approved fixed-arity `p-method-call-N` lever was ruled out before a
+line of it was written.
+
+**Member 2, the own-class method cache (#582's own half).**  `p-method-call`
+now probes a two-level table (class name as the invocant spells it → method
+name as the call site spells it → the SYMBOL) before normalisation, the
+`pl-NAME` build and the colon scan.  It needs no generation counter, which is
+exactly what blocked #582: the value is the SYMBOL, so every path that
+(re)defines a Perl sub stores into its `symbol-function` and a cached entry
+answers with the new definition for free, while every path that removes one
+calls `fmakunbound`, which the entry's own `fboundp` test sees.  An own MISS is
+never stored, so a method defined later cannot be masked and the inherited half
+is untouched.  `methret` **−27.5 %**, `ovlsub` −5.8 %, `json-rt` −4.8 %,
+`methinh` (pure inherited dispatch, which pays the failed probe and gains
+nothing) 0.0 %.  Guard `Pl/t/method-cache-01.t` walks the invalidation family
+row by row; one row is an annotated canary for **#1530**, filed here: `undef
+&Foo::bar` removes the sub in PCL so the next call inherits, where perl leaves
+a bodyless CV and dies.
+
+**Member 3, `p-defclass` — and the premise that was not there.**  The seven
+emission sites now write `(p-defclass NAME (PARENTS) ())`, which expands to the
+`defclass` only when the class is not already there with exactly those direct
+superclasses; comparing PARENTS rather than mere existence is the safety
+argument, since a program can name one package twice with a different `@ISA`.
+But task #1518 had read #1189's finding as "12 `ensure-class` per `moo-objs`
+iteration", and a quiet-box A/B said **+2.3 %** — no win.  Counting both
+readiness predicates on the same program settled it: `moo-objs` runs
+`%p-package-ready-p` 6096 times at N=500 and 24096 at N=2000 (12 per iteration,
+#1189's own figure) and `%p-class-ready-p` **20 times, N-independent, with zero
+hits**; the preamble a string eval's program carries declares its PACKAGE and
+not its class.  The +2.3 % is noise by construction — the bench's exec metric
+subtracts load, where all 20 of those forms run.  The change was kept for what
+it does deliver (the emitted file no longer writes a bare host `defclass`) and
+the three places that carried the false claim now carry the measurement
+instead.  Guard `Pl/t/defclass-01.t`; generation v2-1030 → **v2-1060**.
+
+**Member 4, #1461 — literal-prefix scanning.**  Shape (A) of the s476 ruling:
+PCL supplies `cl-ppcre::create-bmh-matcher` rather than merely setting
+`*use-bmh-matchers*`, because cl-ppcre's own BMH skip table is a dense array of
+1,114,112 fixnums — 8.5 MB per literal pattern, and the limit cannot be lowered
+without silently removing Unicode from character classes.  The replacement uses
+a 256-way table keyed on the low 8 bits of a character's code, each bucket the
+MINIMUM skip over its colliders, which is safe because BMH only ever
+UNDER-skips.  `textproc` **1.9047 → 1.4381 s (−24.5 %, i.e. +32.5 % faster)**
+against a +2.9 % control, clearing the ruling's +30 % bar, and the hashed and
+dense columns are indistinguishable (1.4381 vs 1.4378), so the 2 KB table costs
+nothing against the 8.5 MB one.  Twenty literal-prefix scanners take the heap
+14.8 → 14.9 MB where dense takes it to 184.8; peak RSS on `textproc` is 99.9 →
+**98.2** MB (dense 106.6).  `regexg` read +5.9 % beside a +1.1 % control, which
+counting settles rather than argument: `textproc` builds exactly one BMH
+matcher and `regexg`, `json-rt` and `subste` build none, so those three run
+identical code either way.  The redefinition is pinned by a lambda-list
+assertion AND by a self-test that the call still reaches the fdefinition —
+without the second, a future inlined cl-ppcre would leave the flag on and
+allocate the dense table invisibly.  Guard `Pl/t/bmh-scan-01.t`.
+
+**Member 5 (#1516) was not taken** — a full emission boat for a lever its own
+filing sized below the round's bar; it stays open.
+
+**The bars, and the one failure that was not ours.**  Full sweep `--jobs 4`:
+GATE clean, 0 new / 0 fixed, TOTAL passing **18673 (+0)**, drops census 5 =
+current 5.  `corpus-diff` vs `4dee376f`: SILENT DROPS 5 unchanged, 36 of 111
+files differ and all 36 are the one expected shape (gen stamp +
+`defclass` → `p-defclass`), 0 unexplained; the SHAPES population 5 of 6, same
+shape.  `emission-ab` over the 1029-file wide list: SAME 711, DIFF 318,
+**RCDIFF 0**, and 318 of 318 DIFF pairs are that same shape with 0 residue;
+the lib population files=28 SAME=1 DIFF=27 RCDIFF=0.  `ir-host-leak` 31
+distinct over 111 files on this tree AND on main — unchanged, as predicted
+(the bare `defclass` was allowlisted in `%KERNEL`, so losing it moves no
+count).  `ir-conform --jobs 2`: 308 pass, 0 fail, 37 known, 0 stale.
+Companion `--jobs 1` over op/method, op/universal, the three mro/ files and
+re/regexp, re/pat, re/subst: every C_ok/C_notok equals its
+`baselines/perl-suite-run.tsv` row except `re/regexp.t`, which read 797/108
+against a 795/110 snapshot — and reads **797/108 on the main extraction too**,
+so the snapshot row is stale for a file the registry calls a #326 hang with a
+500-row-capped row baseline; nothing spliced.  The FULL GATE (227 files, 7742
+tests) failed the 13 standing pclxs xs rows plus ONE: `Pl/t/fileio-02.t` row
+15, whose captured output carried `Deep recursion on subroutine
+"Pl::Parser2::_lower_block_1"`.  That is s473c's split crossing perl's
+depth-100 warning on core `Fcntl.pm`, visible only on a COLD module cache —
+which a generation bump is exactly what produces.  Reproduced on a clean main
+extraction and filed as **#1531**; it passes on a warm cache on both trees.
+
 ## Session 478 (Fable, 2026-09-08 ~08:05 → ) — the restart after the shutdown: s473c + s473s resumed in their worktrees, s473c reviewed and MERGED (#1240 the location register, DEFAULT OFF), s473u (the gate-speed tooling) launched into the freed slot; #1554 + #1555 filed
 
 * **Restart (USER: "Please continue the jobs").**  Main `c709804a`, CI green through it, box freshly booted.  Both stopped worktrees were as the pause file said (s473c: 2 commits, clean; s473s: 1 commit + member 3 `p-defclass` uncommitted at gen v2-1060).  A resume brief per worktree (`s473/s473c/prompt.resume2.md`, `s473/s473s/prompt.resume2.md`), both launched ~08:12 as fresh pinned-Opus agents in the SAME worktrees.

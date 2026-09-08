@@ -32,8 +32,10 @@
 #     the heap directly (20 literal-prefix patterns: 8.5 MB each would be
 #     170 MB).
 #
-# Inverse guard: on a tree without the change rows 1-3 fail (the flag is NIL,
-# there is no %pcl-create-bmh-matcher, and nothing counts matchers).
+# Inverse guard: on a tree without the change rows 1-3 and 5 fail (the flag is
+# NIL, there is no %pcl-create-bmh-matcher to compare against, and nothing
+# counts matchers).  Row 4 passes there (the generic search allocates nothing
+# either) and row 6 MUST pass: the answers are what may not change.
 use v5.30;
 use strict;
 use warnings;
