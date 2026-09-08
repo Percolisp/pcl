@@ -25433,6 +25433,179 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (t (write-char c out) (incf i))))))
     (get-output-stream-string out)))
 
+;;; --- Literal-prefix scanning: BMH with a HASHED skip table (task #1461) ---
+;;;
+;;; cl-ppcre scans for a pattern's constant prefix (and suffix) with either a
+;;; Boyer-Moore-Horspool matcher or the generic `search`, chosen by
+;;; `cl-ppcre:*use-bmh-matchers*`.  The default is NIL — `search` — and that
+;;; branch is 11.5 % of the `textproc` bench row (14.5 % of `json-rt`).  The
+;;; flag alone makes the isolated scan 6.6x faster, but cl-ppcre's BMH skip
+;;; table is a DENSE array of `*regex-char-code-limit*` (1,114,112) fixnums:
+;;; 8.5 MB PER LITERAL PATTERN, unbounded across a module load (measured: 20
+;;; patterns take the heap from 14.8 MB to 184.8 MB).  The limit cannot be
+;;; lowered to shrink it — the same variable sizes cl-ppcre's character-class
+;;; maps, so lowering it silently removes Unicode support from `[...]`.
+;;;
+;;; So PCL supplies the MATCHER rather than merely setting the flag: the same
+;;; algorithm with a 256-way table keyed on `(logand (char-code c) 255)`,
+;;; 2 KB per pattern (the same 20 patterns: 14.9 MB).
+;;;
+;;; WHY HASHING IS SAFE.  BMH is correct under UNDER-skipping: the outer loop
+;;; advances by `(max 1 (aref skip …))`, and a skip smaller than the true one
+;;; can only make it re-test positions, never jump past a match.  A bucket
+;;; therefore takes the MINIMUM over every character that hashes into it, which
+;;; is ≤ each of their true skips.  For an ASCII/Latin-1 needle over
+;;; ASCII/Latin-1 text the table is exactly cl-ppcre's, restricted; a
+;;; non-Latin-1 needle (or subject) degrades to a shorter skip, never to a
+;;; wrong answer.
+
+(defun %pcl-bmh-skip-table (pattern case-insensitive-p)
+  "The 256-entry BMH skip table for PATTERN, keyed on the low 8 bits of a
+   character's code.  Entry h is the MINIMUM skip over every character that
+   hashes to h, defaulting to the pattern length for a bucket no pattern
+   character reaches — see the correctness note above.
+
+   cl-ppcre's dense version assigns rather than minimises, which comes to the
+   same thing there because k ascends and `(- m k 1)` therefore descends: the
+   last occurrence of a character wins and it is the smallest.  Here the MIN is
+   load-bearing, because two DIFFERENT characters can share a bucket."
+  (declare (simple-string pattern))
+  (let* ((m (length pattern))
+         (skip (make-array 256 :element-type 'fixnum :initial-element m)))
+    (declare (fixnum m))
+    (flet ((note (ch k)
+             (declare (character ch) (fixnum k))
+             (let ((i (logand (char-code ch) 255)))
+               (setf (aref skip i) (min (aref skip i) (- m k 1))))))
+      (loop for k of-type fixnum below m
+            for ch of-type character = (schar pattern k)
+            do (cond (case-insensitive-p
+                      (note (char-upcase ch) k)
+                      (note (char-downcase ch) k))
+                     (t (note ch k)))))
+    skip))
+
+(defmacro %pcl-bmh-matcher-aux (case-insensitive-p)
+  "The BMH inner loop, one variant per comparison predicate.  ANAPHORIC on
+   `m`, `skip` and `pattern`, exactly like cl-ppcre's own `bmh-matcher-aux`
+   (scanner.lisp) — this is a re-expression of that macro with the dense
+   `(char-code c)` index replaced by the hashed one, kept line-for-line
+   comparable to it on purpose."
+  (let ((cmp (if case-insensitive-p 'char-equal 'char=)))
+    `(lambda (start-pos)
+       (declare (fixnum start-pos))
+       (if (or (minusp start-pos)
+               (> (the fixnum (+ start-pos m)) cl-ppcre::*end-pos*))
+           nil
+           (loop named bmh-matcher
+                 for k of-type fixnum = (+ start-pos m -1)
+                   then (+ k (max 1 (aref skip (logand (char-code (schar cl-ppcre::*string* k))
+                                                       255))))
+                 while (< k cl-ppcre::*end-pos*)
+                 do (loop for j of-type fixnum downfrom (1- m)
+                          for i of-type fixnum downfrom k
+                          while (and (>= j 0)
+                                     (,cmp (schar cl-ppcre::*string* i)
+                                           (schar pattern j)))
+                          finally (if (minusp j)
+                                      (return-from bmh-matcher (1+ i)))))))))
+
+(defvar *pcl-bmh-matchers-built* 0
+  "How many hashed BMH matchers %pcl-create-bmh-matcher has built.  Read only
+   by the install-time self-test below, which has to know that cl-ppcre's
+   scanner builder actually REACHED this function.")
+
+(defun %pcl-bmh-generic-matcher (pattern case-insensitive-p)
+  "cl-ppcre's own no-BMH branch, verbatim: what `create-bmh-matcher` returns
+   when `*use-bmh-matchers*` is NIL.  Keeping it here means the replacement is
+   a drop-in for the WHOLE contract, so anything that turns the flag off gets
+   cl-ppcre's behaviour and not a table it did not ask for."
+  (declare (simple-string pattern))
+  (let ((test (if case-insensitive-p #'char-equal #'char=)))
+    (lambda (start-pos)
+      (declare (fixnum start-pos))
+      (and (not (minusp start-pos))
+           (search pattern cl-ppcre::*string*
+                   :start2 start-pos :end2 cl-ppcre::*end-pos* :test test)))))
+
+(defun %pcl-create-bmh-matcher (pattern case-insensitive-p)
+  "PCL's replacement for `cl-ppcre::create-bmh-matcher`: same contract (a
+   closure taking a start position and returning the index of the first
+   occurrence of PATTERN in cl-ppcre's `*string*` before `*end-pos*`, or NIL),
+   same algorithm, hashed skip table."
+  (declare (simple-string pattern))
+  (cond
+    ((not cl-ppcre:*use-bmh-matchers*)
+     (%pcl-bmh-generic-matcher pattern case-insensitive-p))
+    (t
+     (incf *pcl-bmh-matchers-built*)
+     (let ((m (length pattern))
+           (skip (%pcl-bmh-skip-table pattern case-insensitive-p)))
+       (declare (fixnum m) (type (simple-array fixnum (256)) skip))
+       (if case-insensitive-p
+           (%pcl-bmh-matcher-aux t)
+           (%pcl-bmh-matcher-aux nil))))))
+
+(defun %pcl-bmh-arglist ()
+  "The parameter NAMES of cl-ppcre::create-bmh-matcher, as strings — the
+   version pin.  sb-introspect is a contrib, so it is required lazily and a
+   host without it declines rather than breaking the load."
+  (ignore-errors
+    (require :sb-introspect)
+    (mapcar #'symbol-name
+            (funcall (find-symbol "FUNCTION-LAMBDA-LIST" :sb-introspect)
+                     'cl-ppcre::create-bmh-matcher))))
+
+(defun %pcl-bmh-decline (why version)
+  "Leave literal-prefix scanning on cl-ppcre's generic `search` — today's
+   behaviour, identical answers — and SAY SO.  Never silent: a PCL that
+   quietly lost this lever would look merely slow."
+  (setf cl-ppcre:*use-bmh-matchers* nil)
+  (format *error-output*
+          "~&PCL: literal-prefix (BMH) regex scanning is OFF: ~a.~%~
+           PCL: cl-ppcre version ~a; expected ~
+           CL-PPCRE::CREATE-BMH-MATCHER (PATTERN CASE-INSENSITIVE-P).~%~
+           PCL: regex answers are unaffected; matching is slower.~%"
+          why version)
+  (force-output *error-output*)
+  nil)
+
+(defun %pcl-install-bmh-matcher ()
+  "Install the hashed matcher into cl-ppcre and switch literal-prefix scanning
+   on, or decline loudly and change nothing.
+
+   cl-ppcre is a system PCL loads (`asdf:load-system`), not a vendored copy, so
+   this redefinition is pinned to an API: `create-bmh-matcher` must exist with
+   the lambda list `(pattern case-insensitive-p)`.  It is also pinned to a CALL
+   SHAPE, which the assertion cannot see and the SELF-TEST can: if a future
+   cl-ppcre inlined or block-compiled that call, the redefinition would be
+   invisible while `*use-bmh-matchers*` = T stayed in force — and cl-ppcre
+   would then build its own DENSE 8.5 MB table per pattern, which is strictly
+   worse than doing nothing.  So the flag is only left on when a probe scanner
+   for a literal-prefix pattern is observed to reach this side.
+
+   A failure here is EFFECT-ONLY — scanning stays on the generic `search`,
+   which answers identically — so per the rule-12 boundary (s329) it announces
+   and continues rather than dying."
+  (let ((v (or (ignore-errors (asdf:component-version (asdf:find-system :cl-ppcre)))
+               "unknown")))
+    (cond
+      ((not (fboundp 'cl-ppcre::create-bmh-matcher))
+       (%pcl-bmh-decline "cl-ppcre::create-bmh-matcher is not defined" v))
+      ((not (equal (%pcl-bmh-arglist) '("PATTERN" "CASE-INSENSITIVE-P")))
+       (%pcl-bmh-decline "cl-ppcre::create-bmh-matcher has a different lambda list" v))
+      (t
+       (setf (fdefinition 'cl-ppcre::create-bmh-matcher) #'%pcl-create-bmh-matcher)
+       (setf cl-ppcre:*use-bmh-matchers* t)
+       (let ((before *pcl-bmh-matchers-built*))
+         (ignore-errors (cl-ppcre:create-scanner "pclbmhprobe"))
+         (if (> *pcl-bmh-matchers-built* before)
+             t
+             (%pcl-bmh-decline "cl-ppcre does not call it (inlined or block-compiled)"
+                               v)))))))
+
+(%pcl-install-bmh-matcher)
+
 (defun %pcl-build-scanner (pattern options)
   "cl-ppcre:create-scanner wrapper.  Why this exists (yes, it looks stupid):
    cl-ppcre has a bug — after an inline `(?-x:...)`/`(?x:...)` mode group it does
