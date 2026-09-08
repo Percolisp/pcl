@@ -739,7 +739,7 @@
 
    THE PRIZE IT WAS FILED FOR IS NOT THERE, and that is measured, not
    suspected (s473s).  Task #1518 read #1189's finding as "12 `ensure-class`
-   executions per `moo-objs` loop iteration", by analogy with the
+  executions per `moo-objs` loop iteration", by analogy with the
    `p-defpackage` half s473r shipped.  Counting both readiness tests on the
    same program says otherwise: at N=500 and N=2000 `moo-objs` runs
    `%p-package-ready-p` 6096 and 24096 times (12 per iteration, exactly
@@ -12534,39 +12534,62 @@ the Kind-A `dyn-loop-exit` gate's OFF arm and the general form."
                                     ,val)))))
                   (go ,drv))))))))
 
-(defmacro p-dyn-once (form)
+(defmacro p-dyn-once (form &optional (continue-form nil contp))
   "The dynamic-loop-exit frame for a LOOP-ONCE — a bare block, which perl runs
 as a loop that iterates once (Parser2::_lower_bare_block emits FORM).
 
 A wrapper suffices here where the real loops need %p-loop-driver, and that is
 a fact about the construct, not a shortcut: a loop-once carries no state
-across iterations, so `redo` is simply a RESTART of FORM, and `next` and
-`last` both end the block.  FORM keeps its own `(block nil …)` — all three of
-_lower_bare_block's arms emit one — so every LEXICAL exit inside it stays a
-local transfer inside this catch.
+across iterations, so `redo` is simply a RESTART of FORM.  FORM keeps its own
+`(block nil …)` — all three of _lower_bare_block's arms emit one — so every
+LEXICAL exit inside it stays a local transfer inside this catch.
+
+CONTINUE-FORM is the block's `continue { … }` when it has one, and it is
+passed HERE rather than left inside FORM because a caught `:next` must still
+run it: perl ends a loop-once on `next`, but only AFTER the continue block
+(`{ f() } continue { … }` with `sub f { next }` runs it; a `last` skips it).
+So the RESUME variable outside the catch says where re-entry lands — the
+`cont` tag — exactly as %p-loop-driver's does, and the continue block sits
+INSIDE the catch so a dynamic exit performed BY it is caught here too (task
+#1161).  With no continue block the `cont` section is empty and a `:next`
+simply ends the block, which is the shape this macro has always emitted.
 
    The block's VALUE is FORM's, so nothing here observes context; `dies=no`
    because the only `error` is a compiler self-inconsistency (rule 12), never a
    Perl exception; `dynamic=yes` for the frame-count binding it establishes.
    Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=yes phase=no host=none"
   (let ((drv (gensym "ONCE")) (out (gensym "ONCEOUT"))
-        (val (gensym "VAL")) (mark (gensym "MARK")))
-    `(block ,out
-       (tagbody
-          ,drv
-          (multiple-value-bind (,val ,mark)
-              (catch 'p-loop-dyn
-                (let ((*p-dyn-loop-frames* (1+ *p-dyn-loop-frames*)))
-                  ;; FORM's own value is the block's — a bare block in tail
-                  ;; position IS its value.
-                  (values ,form :%p-normal)))
-            (if (eq ,mark :%p-normal)
-                (return-from ,out ,val)
-                (case ,val
-                  ((:last :next) (return-from ,out nil))
-                  (:redo (go ,drv))
-                  (t (error "PCL: p-dyn-once: unknown dynamic loop-exit kind ~S"
-                            ,val)))))))))
+        (val (gensym "VAL")) (mark (gensym "MARK"))
+        (resume (gensym "RESUME")) (v (gensym "V")) (cont (gensym "CONT")))
+    `(let ((,resume nil))
+       (block ,out
+         (tagbody
+            ,drv
+            (multiple-value-bind (,val ,mark)
+                (catch 'p-loop-dyn
+                  (let ((*p-dyn-loop-frames* (1+ *p-dyn-loop-frames*)))
+                    (values
+                     (let ((,v nil))
+                       (tagbody
+                          (when (eq ,resume :next)
+                            (setf ,resume nil)
+                            (go ,cont))
+                          ;; FORM's own value is the block's — a bare block in
+                          ;; tail position IS its value.
+                          (setf ,v ,form)
+                          ,cont
+                          ,@(when contp (list continue-form)))
+                       ,v)
+                     :%p-normal)))
+              (if (eq ,mark :%p-normal)
+                  (return-from ,out ,val)
+                  (case ,val
+                    (:last (return-from ,out nil))
+                    (:next (setf ,resume :next))
+                    (:redo (setf ,resume nil))
+                    (t (error "PCL: p-dyn-once: unknown dynamic loop-exit kind ~S"
+                              ,val)))))
+            (go ,drv))))))
 
 ;;; Helper: extract :label, :my, :dyn and :continue from loop body-and-keys.
 ;;; Returns (values label continue-form body myp dynp).
@@ -12893,6 +12916,31 @@ container.  Do not widen this arm without asking that question again."
     (svref (svref (p-array-run-data run) k)
            (- i (if (zerop k) 0 (the fixnum (svref ends (1- k))))))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-foreach-continue-thunk (continue-form cont-fn)
+    "THE PLACEMENT RULE for a FRAMED foreach's `continue` block, shared by both
+foreach expanders (task #1161): the form that stores the continue block as a
+CLOSURE in CONT-FN, or NIL when the loop is not framed.
+
+A foreach's continue block reads the loop variable, so it normally sits INSIDE
+the per-iteration binding — and a caught dynamic `:next` cannot re-enter it,
+because a CL `go` may not jump into a binding form.  So on a framed loop the
+block becomes a thunk created INSIDE the binding and CALLED from
+%p-loop-driver's post-forms, which is where every re-entry lands.
+
+A CLOSURE, not a saved value, and that is the whole point: the body may WRITE
+the loop variable, and `for my $i (1..3) { $i = 99 } continue { print $i }`
+prints 99 three times in perl (probed).  When the variable is a box the write
+mutates it, but when the compiler proved it unboxable the write is an ordinary
+`setf` of the LET binding — which a value copied at binding time cannot see and
+a closure over that binding can.  Reaching the element again through the vector
+would be wrong for the same reason.  A package-global loop variable is read
+through its cell, which the closure reaches just as the body does.
+
+Cost: one closure per iteration, and only for a loop that is BOTH framed and
+carries a continue block.  Every other foreach is emitted exactly as before."
+    (when cont-fn `(setf ,cont-fn (lambda () ,continue-form)))))
+
 (defun %expand-foreach (rawp var list body-and-keys env)
   "Shared expander for p-foreach / p-foreach-raw.  RAWP selects the loop-var
 binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
@@ -12909,13 +12957,6 @@ drift apart the way two copies would."
   (setf list (or (%p-aliasing-slice-list-form list) list))
   (multiple-value-bind (label continue-form body myp dynp arraysp)
       (parse-loop-keys body-and-keys)
-    ;; A `continue` block sits INSIDE the per-iteration binding here (it reads
-    ;; the loop variable), so it is not a post-form the driver can re-enter —
-    ;; the compiler therefore never licenses the frame for a foreach with one,
-    ;; and the combination arriving here is a compiler self-inconsistency
-    ;; (rule 12), not a quietly different loop.
-    (when (and dynp continue-form)
-      (error "p-foreach: :dyn with a :continue block — see %p-loop-driver"))
     ;; `:arrays` binds the slot AS IT STANDS, which is the read-only verdict's
     ;; own licence; with a promoting binding the run would have to write back
     ;; into a source it deliberately only reads.  Its arrival on the boxed
@@ -12931,13 +12972,21 @@ drift apart the way two copies would."
            (cellp (and (not myp) (%p-cell-loop-var-p var env)))
            (elt-fn (if arraysp '%p-run-elt-raw
                        (if rawp '%p-foreach-elt-raw '%p-foreach-elt)))
-           (iter-forms (cons `(incf ,i)
-                             (cons (make-loop-iteration-body label body)
-                                   (when continue-form (list continue-form))))))
+           ;; a FRAMED loop's continue block becomes a per-iteration thunk the
+           ;; driver's post-forms call — see %p-foreach-continue-thunk
+           (cont-fn (when (and dynp continue-form) (gensym "CONTFN")))
+           (iter-forms (append
+                        (let ((th (%p-foreach-continue-thunk continue-form cont-fn)))
+                          (when th (list th)))
+                        (list `(incf ,i) (make-loop-iteration-body label body))
+                        (when (and continue-form (not cont-fn))
+                          (list continue-form))))
+           (post (when cont-fn (list `(funcall ,cont-fn)))))
       `(block ,block-name
          (let* ((,raw (let ((*wantarray* t)) ,list))  ; list in list-context; body keeps outer context
                 (,vec ,(if arraysp `(%p-make-array-run ,raw) `(%p-flatten-for-list ,raw)))
                 (,i 0)
+                ,@(when cont-fn `((,cont-fn nil)))
                 ,@(when cellp `((,old (sb-ext:symbol-global-value ',var)))))
            ,(let* ((inner (%p-loop-driver
                            dynp block-name
@@ -12952,7 +13001,7 @@ drift apart the way two copies would."
                                   ,@iter-forms)
                                `(let ((,var (,elt-fn ,vec ,i)))
                                   ,@iter-forms))
-                           nil
+                           post
                            ;; the index is advanced BEFORE the body (so a
                            ;; lexical `(go :next)` cannot skip it), so a
                            ;; caught `:redo` must back it up to re-run the
@@ -13003,10 +13052,6 @@ over its cell instead of let-bound, and is ALWAYS boxed: the cell's contract is
 that it holds a box, and a raw integer parked there would be read as one by
 anything that reaches the global by name."
   (multiple-value-bind (label continue-form body myp dynp) (parse-loop-keys body-and-keys)
-    ;; see %expand-foreach: a foreach's `continue` block is inside the
-    ;; per-iteration binding, so it cannot be a driver post-form
-    (when (and dynp continue-form)
-      (error "p-foreach-range: :dyn with a :continue block — see %p-loop-driver"))
     (let* ((block-name (or label (gensym "FOREACH")))
            (last-tag (when label (%pcl-loop-tag "LAST" label)))
            (kind (gensym))
@@ -13016,7 +13061,10 @@ anything that reaches the global by name."
            (i (gensym))
            (old (gensym "OLD"))
            (hi (gensym))
-           (cellp (and (not myp) (%p-cell-loop-var-p var env))))
+           (cellp (and (not myp) (%p-cell-loop-var-p var env)))
+           ;; a FRAMED loop's continue block becomes a per-iteration thunk the
+           ;; driver's post-forms call — see %p-foreach-continue-thunk
+           (cont-fn (when (and dynp continue-form) (gensym "CONTFN"))))
       `(block ,block-name
          (multiple-value-bind (,kind ,a ,b)
              (let ((*wantarray* t))    ; endpoints in the list's context, like p-foreach's list
@@ -13024,15 +13072,22 @@ anything that reaches the global by name."
            (let* ((,vec (when (eq ,kind :string) (p-.. ,a ,b)))
                   (,i (if ,vec 0 ,a))
                   (,hi (if ,vec (1- (length ,vec)) ,b))
+                  ,@(when cont-fn `((,cont-fn nil)))
                   ,@(when cellp `((,old (sb-ext:symbol-global-value ',var)))))
              ,(let* ((val (if (and rawp (not cellp))
                               `(if ,vec (aref ,vec ,i) ,i)
                               `(if ,vec
                                    (ensure-boxed (aref ,vec ,i))
                                    (make-p-box ,i))))
-                     (iter-forms (cons `(incf ,i)
-                                       (cons (make-loop-iteration-body label body)
-                                             (when continue-form (list continue-form)))))
+                     (iter-forms (append
+                                  (let ((th (%p-foreach-continue-thunk
+                                             continue-form cont-fn)))
+                                    (when th (list th)))
+                                  (list `(incf ,i)
+                                        (make-loop-iteration-body label body))
+                                  (when (and continue-form (not cont-fn))
+                                    (list continue-form))))
+                     (post (when cont-fn (list `(funcall ,cont-fn))))
                      (inner (%p-loop-driver
                              dynp block-name
                              (lambda (b) `(when (> ,i ,hi) (return-from ,b "")))
@@ -13042,7 +13097,7 @@ anything that reaches the global by name."
                                     ,@iter-forms)
                                  `(let ((,var ,val))
                                     ,@iter-forms))
-                             nil
+                             post
                              `(decf ,i)))     ; see %expand-foreach
                      (wrapped (if label `(catch ',last-tag ,inner) inner)))
                 (if cellp
@@ -19100,7 +19155,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1060"
+(defparameter *pcl-cache-generation* "v2-1080"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -25499,8 +25554,8 @@ buffer's fill-pointer; everything else falls back to file-length."
            nil
            (loop named bmh-matcher
                  for k of-type fixnum = (+ start-pos m -1)
-                   then (+ k (max 1 (aref skip (logand (char-code (schar cl-ppcre::*string* k))
-                                                       255))))
+                 then (+ k (max 1 (aref skip (logand (char-code (schar cl-ppcre::*string* k))
+                                                     255))))
                  while (< k cl-ppcre::*end-pos*)
                  do (loop for j of-type fixnum downfrom (1- m)
                           for i of-type fixnum downfrom k

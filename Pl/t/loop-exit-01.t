@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 37;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run; stderr
 # is kept, because some of these rows are about what lands on it.  $OPT is an
@@ -323,3 +323,92 @@ PERL
     unlike(transpile($callee_cannot_exit), qr/:dyn/,
            'a loop that calls a sub which CANNOT exit takes no frame — that is what keeps the frame off 88 of t/op/loopctl.t\'s 89 loops (task #1162)');
 }
+
+# ---- 9. THE `continue` BLOCK IS INSIDE THE FRAME (task #1161) --------------
+#
+# A `continue` block used to make a foreach or a bare block DECLINE the frame,
+# so a dynamic exit into such a loop died with perl's own text instead of
+# performing the exit.  It could not simply be left where it was: it reads the
+# loop variable, so it sits inside the per-iteration binding, and a CL `go`
+# may not jump into a binding form.  On a FRAMED loop it is now created there
+# as a THUNK and called from the driver's post-forms, which is where every
+# re-entry lands (%p-foreach-continue-thunk); a bare block hands its continue
+# to p-dyn-once, which runs it on a caught `next` and skips it on a `last`.
+# Every expectation below is perl 5.40.3's, probed.
+
+is(run_cl(<<'PERL'), "n=3003\n",
+sub f { next }
+my $n = 0;
+for my $i (1..3) { $n++; f(); $n += 100 } continue { $n += 1000 }
+print "n=$n\n";
+PERL
+   'foreach + continue: a caught `next` RUNS the continue block (was `Can\'t "next" outside a loop block`)');
+
+is(run_cl(<<'PERL'), "n=1\n",
+sub f { last }
+my $n = 0;
+{ $n++; f(); $n += 100 } continue { $n += 1000 }
+print "n=$n\n";
+PERL
+   'bare block + continue: a caught `last` SKIPS the continue block (was a die)');
+
+is(run_cl(<<'PERL'), "n=1001\n",
+sub f { next }
+my $n = 0;
+{ $n++; f(); $n += 100 } continue { $n += 1000 }
+print "n=$n\n";
+PERL
+   '... and a caught `next` ends the loop-once but only AFTER its continue block');
+
+is(run_cl(<<'PERL'), "n=3003 g=4\n",
+sub f { next }
+my $n = 0; my $g = 0;
+while ($g++ < 3) { $n++; f(); $n += 100 } continue { $n += 1000 }
+print "n=$n g=$g\n";
+PERL
+   'inverse: `while` + continue was ALREADY right (its continue IS a post-body form) and is unchanged');
+
+is(run_cl(<<'PERL'), "seen=1 1 2 c=1 2\n",
+sub h { redo }
+my $r = 0; my @seen; my @c;
+for my $i (1..2) { push @seen, $i; if ($r++ < 1) { h() } } continue { push @c, $i }
+print "seen=@seen c=@c\n";
+PERL
+   'a caught `redo` re-runs the body and does NOT run the continue block');
+
+is(run_cl(<<'PERL'), "n=1 c=1\n",
+sub f { last }
+my $n = 0; my @c;
+for my $i (1..3) { $n++ } continue { push @c, $i; f(); push @c, "x" }
+print "n=$n c=@c\n";
+PERL
+   'a dynamic exit performed BY the continue block is caught too — the block runs inside the frame');
+
+is(run_cl(<<'PERL'), "n=4 c=j1 j2 i1 j1 j2 i2\n",
+sub f { next }
+my @c; my $n = 0;
+OUTER: for my $i (1..2) { for my $j (1..2) { $n++; f(); $n += 100 } continue { push @c, "j$j" } }
+continue { push @c, "i$i" }
+print "n=$n c=@c\n";
+PERL
+   'nested continue\'d loops: the INNERMOST frame catches, and both continue blocks still run in order');
+
+is(run_cl(<<'PERL'), "c=99 99 99\n",
+sub f { last if $_[0] }
+my @c;
+for my $i (1..3) { $i = 99; f(0) } continue { push @c, $i }
+print "c=@c\n";
+PERL
+   'the continue block sees the body\'s WRITE to the loop variable — the thunk closes over the binding, so an unboxable `setf $i 99` reaches it (a saved value would read 1 2 3)');
+
+is(run_cl(<<'PERL'), "n=3 c=10 20 30 a=10 20 30\n",
+sub f { next }
+my @c; my @a = (1,2,3); my $n = 0;
+for my $x (@a) { $n++; $x = $x * 10; f(); $n += 100 } continue { push @c, $x }
+print "n=$n c=@c a=@a\n";
+PERL
+   'the foreach ALIAS still writes through to the array, and the continue block sees the written element after a caught `next`');
+
+like(transpile('sub f { last } my $n = 0; for my $i (1..3) { f() } continue { $n++ } print "$n\n";'),
+     qr/:dyn\s+t/,
+     'emission: a foreach WITH a continue block now carries `:dyn t` — the licence used to be stripped by the continue block (`@dyn = () if @cont`)');

@@ -10112,9 +10112,15 @@ sub _lower_compound {
     # loop-once, so a `last` from a sub it calls exits it — perl-tests
     # loopctl.t's `dynamically scoped` row and t/op/rt119311.t's six
     # `{ foo(sub { …; last }) }` sites are exactly this shape.  A `continue`
-    # block declines: it sits after the tagbody inside the block, where the
-    # frame wrapper cannot re-enter it (see p-dyn-once).
-    my $dyn = !defined $cont && $self->_dyn_keys([$k[0]->schildren]) ? 1 : 0;
+    # block used to decline (it sits after the tagbody, where the wrapper could
+    # not re-enter it); it is now handed to p-dyn-once, which runs it on a
+    # caught `next` and skips it on a `last` as perl does (task #1161).
+    # The continue block is scanned too: it runs inside the frame, so a sub it
+    # calls can exit the block (`{ } continue { f() }` with `sub f { last }` —
+    # probed vs perl).  The compound-loop path already scans its whole
+    # statement for the same reason (see _dyn_keys).
+    my $dyn = $self->_dyn_keys([$k[0]->schildren,
+                                defined $cont ? $cont->schildren : ()]) ? 1 : 0;
     return $self->_lower_bare_block($k[0], $label, $vi, $cont, $tail_ctx, $dyn);
   }
 
@@ -10588,12 +10594,13 @@ sub _lower_compound {
     }
     my @array_keys = @arrays ? (':arrays', 't') : ();
     $list_form = ['vector', map { cl_sym($_) } @arrays] if @arrays;
-    # A foreach's `continue` block reads the loop variable, so it lives INSIDE
-    # the per-iteration binding and is not a post-form the dynamic-exit driver
-    # can re-enter: decline the licence rather than run a caught `next`
-    # without it (%p-loop-driver; the macro treats the combination as a
-    # compiler self-inconsistency and dies).
-    @dyn = () if @cont;
+    # A foreach's `continue` block used to make the loop DECLINE the
+    # dynamic-exit licence (it reads the loop variable, so it lives inside the
+    # per-iteration binding, where a caught `next` cannot re-enter it) — and a
+    # dynamic exit into such a loop then died.  It now travels with the frame:
+    # the runtime moves it to a driver POST-FORM and carries the element in a
+    # temporary, so it sees the same box the body saw (%p-foreach-continue-post,
+    # task #1161).
     my $loop = defined $to_form
       ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
          ['list', $cl_name, $from_form, $to_form],
@@ -10821,16 +10828,6 @@ sub _dyn_keys {
   return (':dyn', 't');
 }
 
-# Does this compound carry a `continue { … }` block?  The foreach family and
-# the bare block put theirs where the driver cannot re-enter it (inside the
-# per-iteration binding, or after the tagbody), so they decline the licence
-# rather than run a caught `next` without it — see %p-loop-driver.
-sub _has_continue_block {
-  my ($k) = @_;
-  return (grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @$k)
-         ? 1 : 0;
-}
-
 # `:continue (progn …)` pair for a while/foreach `continue { … }` block, placed
 # AFTER the loop body (parse-loop-keys finds :continue by position; v1 emits it
 # last), or nothing.  The continue block is its own lexical scope.
@@ -10864,6 +10861,12 @@ sub _lower_bare_block {
   my @cont = defined $cont
     ? (['progn', $self->_lower_scope([$cont->schildren], $vi)])
     : ();
+  # On a FRAMED block the continue form moves OUT of $inner and becomes
+  # p-dyn-once's second argument, because a caught dynamic `next` must still
+  # run it (perl ends a loop-once on `next`, but only after the continue
+  # block).  It is lowered ONCE and emitted in exactly one of the two places.
+  my $dyn_cont = ($dyn && @cont) ? 1 : 0;
+  my @in_cont  = $dyn_cont ? () : @cont;
   # Tail position (task #64): tagbody always yields NIL, which dropped the
   # block's value — Perl returns the last statement's value from a loop-once
   # bare block in sub-tail position.  Same regime as v1's text emitter:
@@ -10895,7 +10898,7 @@ sub _lower_bare_block {
                   ['progn', @body, '(go :next)']],
                 '(go :redo)',
                 ':next']],
-            @cont]]];
+            @in_cont]]];
   } elsif ($value_tail) {
     $self->{_blk_ret_counter} //= 0;
     my $ret = '--pcl-blk-ret--' . $self->{_blk_ret_counter}++;
@@ -10906,13 +10909,14 @@ sub _lower_bare_block {
                    ':next']],
                $ret];
   } else {
-    $inner = ['block', 'nil', ['tagbody', ':redo', @body, ':next'], @cont];
+    $inner = ['block', 'nil', ['tagbody', ':redo', @body, ':next'], @in_cont];
   }
   # The dynamic-loop-exit frame (task #1022 half (b)): a WRAPPER suffices for a
   # loop-once — it carries no state across iterations, so a caught `redo` is a
-  # restart and `next`/`last` both end the block.  $inner keeps its own
-  # `(block nil …)`, so every LEXICAL exit inside it is untouched.
-  $inner = ['p-dyn-once', $inner] if $dyn;
+  # restart, a `last` ends the block and a `next` ends it after the continue
+  # block.  $inner keeps its own `(block nil …)`, so every LEXICAL exit inside
+  # it is untouched.
+  $inner = ['p-dyn-once', $inner, ($dyn_cont ? @cont : ())] if $dyn;
   return ['let', ['list', ['list', '*package*', '*package*']], $inner];
 }
 
