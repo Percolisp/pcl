@@ -17,6 +17,270 @@ use v5.20;
 use strict;
 use warnings;
 
+# ---- THE TRANSPILE CLIENT (task #1545) ------------------------------------
+#
+# The gate is this project's throughput constraint — a batch runs it six to
+# nine times — and ~3200 of its rows spawn this script.  Measured s473u
+# (#1544): one spawn costs 0.13 CPU-s of perl plus PPI plus every Pl::* module
+# BEFORE it reads a byte of the snippet, so ~420 CPU-s of a 2900 CPU-s gate run
+# is that load, paid over and over on inputs of a few dozen characters.
+#
+# So: when PCL_XSERVER names a socket, ask the pl2cl ALREADY LOADED there and
+# print its answer.  This block sits above the `use Pl::Parser` chain on
+# purpose — it runs before that chain is compiled, so a served request never
+# pays the load at all; what is left is perl's own start and one round trip.
+#
+# THE STATE QUESTION, answered once instead of per variable: the server forks a
+# child per request from a process that has never transpiled, so a request
+# begins from exactly the module state a freshly spawned pl2cl has — the
+# renamed-lexical counters, the announce-once hashes, Pl::Environment, all of
+# it.  An enumeration of things to reset would drift the first time a counter
+# is added; a fork cannot.
+#
+# WHAT IS NOT SERVED falls through to the ordinary path, which is always
+# correct — declining is free, guessing is not:
+#   * --server / --xserver / --bundle / --executable / --help: not transpiles.
+#   * --output / --eval-pkg: both mean stdin, and deciding whether pl2cl would
+#     READ stdin needs the option spec — reading it when pl2cl would not can
+#     block on a pipe nobody closes.  The bare stdin form (`echo … | pl2cl`) is
+#     declined for the same reason; it is three call sites in the whole gate.
+#   * PCL_SHOW_MEM_CAP / PCL_NO_MEM_CAP / PCL_MEM_CAP_MB: the cap is a property
+#     of THIS process (the `ulimit -v` exec below), which no other process can
+#     honour on its behalf.
+#   * any argv this block cannot classify without re-implementing GetOptions.
+#     It serves exactly one shape: one non-flag argument that is an existing
+#     file.  `--deps FILE` is the one value-taking option it understands, so
+#     the `pl2cl --module --deps …` the RUNTIME spawns on a module cache miss
+#     is served too; Pl/t/gate-cost-01.t holds that list against pl2cl's own
+#     GetOptions spec so the two cannot drift.
+#
+# The flags, the whole environment and the working directory travel in the
+# request.  The environment is ALSO part of the socket name, because a variable
+# read at module-load time (Pl::Passes reads PCL_FACTS there) cannot be
+# answered by a server started under a different one.  What the name does NOT
+# carry is perl's own switches: the server is exec'd as `$^X $0 --xserver`, so
+# a caller that runs `perl -I<dir> pl2cl` would get a server without that -I.
+# No such caller sets PCL_XSERVER today (the sweep does not), and PERL5LIB is
+# in the key; if one ever does, it belongs in the key too.
+BEGIN {
+  # Helper subs live INSIDE this block so they are compiled with it: a sub
+  # further down the file does not exist yet when an early BEGIN runs.
+
+  # FNV-1a over the sorted compiler-relevant assignments PLUS this script's own
+  # path and interpreter.  An XS digest module costs more to load than this
+  # costs to compute, and separating the handful of environments one gate run
+  # uses is all it has to do.  The SCRIPT PATH is in the key because
+  # PCL_XSERVER is inherited by everything a test file spawns, and some of
+  # those run a pl2cl from ANOTHER tree (an installed copy, a `git archive`
+  # extraction) — that one must get its own server, never this one's answers.
+  sub _xc_key {
+    my ($script) = @_;
+    my $s = join "\0", "$^X\0$script",
+                       map { "$_=" . (defined $ENV{$_} ? $ENV{$_} : '') }
+                       sort grep { /^PCL/ || $_ eq 'PERL5LIB' } keys %ENV;
+    my $h = 2166136261;
+    for my $c (unpack 'C*', $s) { $h = (($h ^ $c) * 16777619) & 0xFFFFFFFF }
+    return sprintf '%08x', $h;
+  }
+
+  sub _xc_connect {
+    my ($path) = @_;
+    return undef if !-S $path;
+    socket(my $fh, Socket::PF_UNIX(), Socket::SOCK_STREAM(), 0) or return undef;
+    if (!connect($fh, Socket::pack_sockaddr_un($path))) { close $fh; return undef }
+    binmode($fh, ':raw');
+    my $old = select($fh); $| = 1; select($old);
+    return $fh;
+  }
+
+  sub _xc_readn {
+    my ($fh, $n) = @_;
+    my $buf = '';
+    while (length($buf) < $n) {
+      my $got = sysread($fh, my $c, $n - length($buf));
+      return undef if !defined $got || $got == 0;
+      $buf .= $c;
+    }
+    return $buf;
+  }
+
+  sub _xc_readline {
+    my ($fh) = @_;
+    my $line = '';
+    while (1) {
+      my $got = sysread($fh, my $c, 1);
+      return undef if !defined $got || $got == 0;
+      last if $c eq "\n";
+      $line .= $c;
+      return undef if length($line) > 64;
+    }
+    return $line;
+  }
+
+  # A server that cannot be reached says so ONCE, on stderr, and the run
+  # continues on the spawn path.  Both halves matter: a silently slow gate is
+  # exactly the drift #324 cost this project months of wrong measurements, and
+  # a fallback that DIED would turn a performance problem into a broken gate.
+  #   $path.warned  gates the line (O_EXCL, so concurrent clients say it once
+  #                 between them, not once each).
+  #   $path.down    is written only when no server could be STARTED, and makes
+  #                 every later client in this test process decline at once —
+  #                 without it each of the ~3200 calls pays the start timeout
+  #                 again, which is a hang in all but name.
+  # A server that dies mid-request does NOT get `.down`: the next client starts
+  # a fresh one and the run recovers, which is why the two markers are separate.
+  sub _xc_down {
+    my ($path, $why, $fatal) = @_;
+    require Errno;                     # %! below; this path is never hot
+    my $first = 1;
+    if (sysopen(my $w, "$path.warned",
+                POSIX::O_WRONLY() | POSIX::O_CREAT() | POSIX::O_EXCL(), 0600)) {
+      close $w;
+    }
+    elsif ($!{EEXIST}) { $first = 0 }   # someone already said it
+    # Any OTHER reason the marker could not be written (an unwritable socket
+    # directory is itself a way for the server to be unreachable) still warns:
+    # saying it more than once is a nuisance, saying it never is the failure.
+    if ($first) {
+      $why =~ s/\s+$//;
+      warn "pl2cl: transpile server unavailable ($why) -- falling back to a "
+         . "spawn per call; this run is CORRECT but slow\n";
+    }
+    if ($fatal) { if (open my $d, '>', "$path.down") { close $d } }
+    return;
+  }
+
+  # Double fork: the middle process exits at once, so the client never waits on
+  # the server and has no zombie to reap.  Liveness after that is the server's
+  # own business, exactly as it is for `--server` (ruled s397).
+  sub _xc_spawn {
+    my ($path, $owner, $script) = @_;
+    my $pid = fork();
+    return undef if !defined $pid;
+    if (!$pid) {
+      my $g = fork();
+      POSIX::_exit(127) if !defined $g;
+      if (!$g) {
+        POSIX::setsid();
+        open(STDIN,  '<', '/dev/null');
+        open(STDOUT, '>', '/dev/null');
+        # `or do {…}`, not a statement after exec(): the latter is what perl
+        # warns "Statement unlikely to be reached" about — on EVERY transpile,
+        # which would put a line on the stderr this script must keep clean.
+        exec($^X, $script, '--xserver', '--xsock', $path, '--xowner', $owner)
+          or do { POSIX::_exit(127) };
+      }
+      POSIX::_exit(0);
+    }
+    waitpid($pid, 0);
+    # 10 s.  The load it is waiting for is 0.13 CPU-s (measured #1544), so this
+    # is ~60x even on a box running the gate at -j8; and because the wait is
+    # paid at most ONCE per test process (`.down` below), a bigger number would
+    # only make a broken server look like a hang.
+    for (1 .. 200) {
+      my $fh = _xc_connect($path);
+      return $fh if $fh;
+      select(undef, undef, undef, 0.05);
+    }
+    return undef;
+  }
+
+  XCLIENT: {
+    my $base = $ENV{PCL_XSERVER};
+    last XCLIENT if !defined $base || !length $base;
+    # This block runs ABOVE the memory-cap re-exec below, so a call that
+    # declines here runs it a SECOND time in the re-exec'd incarnation — which
+    # would pay the start timeout twice and say the warning twice.  The flag is
+    # DELETED as it is read, so it is gone from the %ENV the re-exec carries and
+    # from every child's.
+    last XCLIENT if delete $ENV{PCL_XSERVER_TRIED};
+    # The socket's directory holds the server AND the markers below; if it is
+    # not there, nothing can be started and nothing can be remembered, so say so
+    # at once rather than paying the start timeout on every single call.
+    my $bdir = $base;
+    $bdir =~ s{/[^/]*$}{};
+    $bdir = '.' if !length $bdir;
+    if (!-d $bdir) {
+      warn "pl2cl: PCL_XSERVER=$base names no existing directory -- "
+         . "transpiling without the server\n";
+      $ENV{PCL_XSERVER_TRIED} = 1;
+      last XCLIENT;
+    }
+    last XCLIENT if $ENV{PCL_SHOW_MEM_CAP} || $ENV{PCL_NO_MEM_CAP}
+                 || defined $ENV{PCL_MEM_CAP_MB};
+    last XCLIENT if grep {
+      m{^--?(?:server|xserver|xsock|xowner|bundle|executable|h|help|o|output|eval-pkg)(?:=|$)}
+    } @ARGV;
+    my @nonflag;
+    for (my $i = 0; $i < @ARGV; $i++) {
+      my $a = $ARGV[$i];
+      if ($a =~ /^-/) { $i++ if $a eq '--deps'; next }
+      push @nonflag, $a;
+    }
+    last XCLIENT if @nonflag != 1 || !-f $nonflag[0];
+
+    my ($status, $out, $err, $path, $reached);
+    my $ok = eval {
+      require Socket;
+      require POSIX;
+      require Cwd;
+      # A server that exits between our connect and our write would otherwise
+      # kill this process with SIGPIPE, where the contract is that ANY failure
+      # falls through to the ordinary path.
+      local $SIG{PIPE} = 'IGNORE';
+      my $script = Cwd::abs_path($0);
+      die "no script path\n" if !defined $script;
+      $path = "$base-" . _xc_key($script) . ".sock";
+      # Already declined, already announced: decline again without paying the
+      # start timeout a second time.
+      die "server marked down\n" if -e "$path.down";
+      my $fh = _xc_connect($path);
+      if (!$fh) {
+        $fh = _xc_spawn($path, ($ENV{PCL_XSERVER_OWNER} || getppid()), $script);
+        _xc_down($path, 'it did not start', 1) if !$fh;
+      }
+      die "no server\n" if !$fh;
+      $reached = 1;
+      my @field = (Cwd::getcwd(), scalar(@ARGV), @ARGV,
+                   scalar(keys %ENV), map { ($_, $ENV{$_}) } sort keys %ENV);
+      my $blob = join '', map { length($_) . ':' . $_ . ',' } @field;
+      print {$fh} "PCLXS2 " . length($blob) . "\n" . $blob or die "write\n";
+      my $hdr = _xc_readline($fh);
+      die "no reply\n" if !defined $hdr;
+      die "bad reply\n" if $hdr !~ /^PCLXS2 (\d+) (\d+) (\d+)$/;
+      my ($st, $ol, $el) = ($1, $2, $3);
+      $out = $ol ? _xc_readn($fh, $ol) : '';
+      $err = $el ? _xc_readn($fh, $el) : '';
+      close $fh;
+      die "short reply\n" if !defined $out || !defined $err;
+      $status = $st;
+      1;
+    };
+    # ANY failure — no server, a short read, a protocol mismatch — falls through
+    # to the ordinary path.  A slow transpile beats a missing one; a SILENT slow
+    # transpile is what _xc_down is for.
+    if (!$ok) {
+      _xc_down($path, ($@ || 'unknown'), 0) if $reached;
+      $ENV{PCL_XSERVER_TRIED} = 1;   # read and deleted by the re-exec'd copy
+      last XCLIENT;
+    }
+    binmode(STDOUT, ':raw');
+    binmode(STDERR, ':raw');
+    my $o = select(STDOUT); $| = 1; select(STDERR); $| = 1; select($o);
+    print STDOUT $out;
+    print STDERR $err;
+    # The reply carries the child's RAW wait status, so a child that died of a
+    # signal kills US with that signal rather than exiting 128+n: a caller's $?
+    # must say the same thing either way, and quietly turning a signal death
+    # into an exit code is the substitution rule 12 exists to forbid.
+    if (my $sig = $status & 127) {
+      kill $sig, $$;
+      POSIX::_exit(128 + $sig);   # blocked or ignored: say it the other way
+    }
+    POSIX::_exit($status >> 8);
+  }
+}
+
 # ---- THE COMPILER SIDE'S MEMORY CAP (task #471) ----------------------------
 #
 # Before this, a runaway anywhere in Pl/** cost the MACHINE, not the run.
@@ -214,6 +478,9 @@ my $output_file;        # Output file for bundle/executable
 my $lenient_ppi = 0;    # DEBUG: truncate at first PPI-unparseable line (test runner only)
 my $eval_pkg;           # When set, emit minimal preamble for eval-string mode
 my $server_mode = 0;    # Persistent transpiler server mode
+my $xserver_mode = 0;   # Persistent COMMAND-LINE server for the test harness
+my $xsock;              # ... its socket path
+my $xowner;             # ... the pid whose death ends it
 my $manifest_mode = 0;  # Print the per-program manifest as JSON, not the CL
 my $facts_mode = 0;     # Annotate the emission with every Kind-A/B licence
 my $sexp_mode = 0;      # Print the lowered tree as PORTABLE S-expressions
@@ -265,6 +532,12 @@ Environment:
 USAGE
 }
 
+# Option parsing is a SUB rather than top-level code because `--xserver`
+# (task #1545) runs it a second time, in a forked child, on the argv of a
+# request — so a flag cannot mean something different when it arrives over a
+# socket than it does on a command line.  Called once at the bottom of this
+# file for the ordinary run.
+sub _parse_options {
 GetOptions(
   'h|help'       => \$want_help,
   'no-cache'     => \$no_cache,
@@ -277,6 +550,9 @@ GetOptions(
   'lenient-ppi'  => \$lenient_ppi,   # DEBUG: for test runner use only
   'eval-pkg=s'   => \$eval_pkg,      # eval "string" mode: minimal preamble for named package
   'server'       => \$server_mode,   # persistent transpiler server mode
+  'xserver'      => \$xserver_mode,  # persistent COMMAND-LINE server (#1545)
+  'xsock=s'      => \$xsock,         # ... its socket path
+  'xowner=i'     => \$xowner,        # ... the pid whose death ends it
   "manifest"     => \$manifest_mode, # print the JSON manifest INSTEAD of the CL
   "facts"        => \$facts_mode,    # wrap licensed forms in (p-fact (NAME) FORM)
   "emit-sexp"    => \$sexp_mode,     # print the data form INSTEAD of the CL
@@ -329,6 +605,8 @@ if ($sexp_mode) {
 # nondeterministic on top of noisy.  Off there; PCL_DROP_ANNOUNCE=all forces it
 # back on (that is how you see the drop inside a CPAN module).
 $Pl::Parser::ANNOUNCE_DROPS = 0 if $is_module;
+return;
+}   # _parse_options
 
 # Get path to this script for runtime to use
 my $script_path = abs_path($0);
@@ -627,21 +905,6 @@ sub do_bundle {
   }
 }
 
-if ($server_mode) {
-  _run_server();
-  exit 0;
-}
-
-my $code;
-my $source_file;
-
-# Handle bundle/executable modes
-if ($bundle_mode || $executable_mode) {
-  die "Bundle/executable mode requires a source file\n" unless @ARGV && -f $ARGV[0];
-  do_bundle($ARGV[0], $output_file, $executable_mode);
-  exit 0;
-}
-
 # Print the manifest for whatever was just transpiled and exit.  ONE place, so
 # the file path and the mode label cannot drift between the two entry points.
 # The data form for whatever was just transpiled, and exit.  ONE place, like
@@ -673,6 +936,27 @@ sub print_manifest {
   binmode(STDOUT, ':raw');
   print JSON::PP->new->utf8->canonical->pretty->encode($m);
   return;
+}
+
+# ONE run of the command line, called from the bottom of this file for an
+# ordinary invocation and from a forked child for each `--xserver` request
+# (task #1545).  The body is left at column 0: it moved into this sub
+# unchanged, and a re-indent would have hidden that in the diff.
+sub _run_cli {
+
+if ($server_mode) {
+  _run_server();
+  exit 0;
+}
+
+my $code;
+my $source_file;
+
+# Handle bundle/executable modes
+if ($bundle_mode || $executable_mode) {
+  die "Bundle/executable mode requires a source file\n" unless @ARGV && -f $ARGV[0];
+  do_bundle($ARGV[0], $output_file, $executable_mode);
+  exit 0;
 }
 
 if (@ARGV && -f $ARGV[0]) {
@@ -753,3 +1037,164 @@ else {
 }
 
 print "\n";
+return;
+}   # _run_cli
+
+# ---- THE TRANSPILE SERVER FOR THE TEST HARNESS (task #1545) ---------------
+#
+# NOT `--server`, and the two must never merge: that one answers the RUNTIME's
+# string-eval requests, in eval mode, in its own process, over a protocol the
+# runtime speaks.  This one answers whole COMMAND LINES from Pl/t — one
+# already-loaded pl2cl per test process — and it answers each of them in a
+# FORKED CHILD.  The fork is the entire correctness argument: the parent never
+# transpiles, so every request starts from the module state of a freshly
+# spawned pl2cl (the renamed-lexical counters, the announce-once hashes,
+# Pl::Environment), and the child re-parses the request's argv with the same
+# GetOptions the command line uses.
+#
+# LIVENESS is the same rule as `--server` (ruled s397): the process that can
+# outlive its client is the one that knows it did.  The owner is the TEST
+# process, named on our own command line — not our parent, since the client
+# double-forked away from us.
+sub _run_xserver {
+  my ($path, $owner) = @_;
+  die "pl2cl --xserver: --xsock PATH is required\n" if !defined $path;
+  require Socket;
+  require Errno;   # %! below — loaded here, not lazily inside a signal path
+  socket(my $srv, Socket::PF_UNIX(), Socket::SOCK_STREAM(), 0)
+    or die "pl2cl --xserver: socket: $!\n";
+  # Losing a start race is a SUCCESS: the client that spawned us is polling a
+  # socket someone else already answers.  ASK before unlinking — the naive
+  # `unlink; bind` pair removes a LIVE server's socket file and then binds
+  # happily, which leaves two servers with the second one shadowing the first
+  # and no bind failure to notice it by.
+  if (my $live = _xc_connect($path)) { close $live; POSIX::_exit(0) }
+  unlink $path;
+  bind($srv, Socket::pack_sockaddr_un($path)) or POSIX::_exit(0);
+  listen($srv, 32) or die "pl2cl --xserver: listen: $!\n";
+  $SIG{ALRM} = sub {
+    POSIX::_exit(0) if !defined $owner || !kill(0, $owner);
+    alarm 1;
+  };
+  alarm 1;
+  $SIG{PIPE} = 'IGNORE';
+  my $dir = $path;
+  $dir =~ s{/[^/]*$}{};
+  while (1) {
+    my $ok = accept(my $conn, $srv);
+    next if !$ok;                # EINTR from the liveness tick
+    binmode($conn, ':raw');
+    _xserve($conn, $dir);
+    close $conn;
+  }
+  return;
+}
+
+# One request: fork, run it as an ordinary pl2cl, ship back stdout, stderr and
+# the exit status.  The child's output goes through FILES rather than pipes
+# because two pipes need a select loop to avoid deadlocking on a big write, and
+# the emission is the one thing here that is reliably big.
+sub _xserve {
+  my ($conn, $dir) = @_;
+  my $req = _xread_request($conn);
+  return if !$req;
+  my ($cwd, $argv, $env) = @$req;
+  my ($out, $err) = ("$dir/o.$$", "$dir/e.$$");
+  my $pid = fork();
+  if (!defined $pid) { print {$conn} "PCLXS2 256 0 0\n"; return }   # exit 1
+  if (!$pid) {
+    open(STDIN,  '<', '/dev/null');
+    open(STDOUT, '>', $out) or POSIX::_exit(1);
+    open(STDERR, '>', $err) or POSIX::_exit(1);
+    binmode(STDOUT, ':utf8');   # reopening dropped the layers set at load
+    binmode(STDERR, ':utf8');
+    # The child must look like a fresh pl2cl in every way a transpile can
+    # observe: the liveness tick and the SIGPIPE policy are the SERVER's, not
+    # a compiler's.  (The alarm TIMER is already cleared by fork; the handlers
+    # are not.)
+    $SIG{ALRM} = 'DEFAULT';
+    $SIG{PIPE} = 'DEFAULT';
+    %ENV = %$env;
+    chdir($cwd) or POSIX::_exit(1);
+    @ARGV = @$argv;
+    # A freshly spawned pl2cl starts with $! and $? clear; this child inherited
+    # whatever the server's socket work left in them, and perl's exit code for
+    # an uncaught die is "$! if nonzero, else $?>>8 if nonzero, else 255" — so
+    # without this a `die usage_text()` exits 25 (ENOTTY from accept) where a
+    # spawn exits 255.  Measured: Pl/t/gate-cost-01.t's unknown-option row.
+    ($!, $?) = (0, 0);
+    ($xserver_mode, $xsock, $xowner) = (0, undef, undef);
+    _parse_options();
+    _run_cli();
+    exit 0;
+  }
+  # The once-a-second liveness tick interrupts this wait, and perl does NOT
+  # retry an EINTR'd waitpid — it returns -1 and leaves $? meaningless, which
+  # would report a wrong exit status for every transpile longer than a second.
+  my $got;
+  do { $got = waitpid($pid, 0) } while ($got == -1 && $!{EINTR});
+  # The RAW wait status travels, not a cooked exit code: the client re-raises a
+  # signal death as a signal death, so the caller's $? is what a spawn's would
+  # have been in both halves of its word.
+  my $st = $?;
+  my ($o, $e) = (_xslurp($out), _xslurp($err));
+  unlink $out, $err;
+  print {$conn} "PCLXS2 $st " . length($o) . " " . length($e) . "\n" . $o . $e;
+  return;
+}
+
+sub _xslurp {
+  my ($p) = @_;
+  open my $fh, '<:raw', $p or return '';
+  local $/;
+  my $s = <$fh>;
+  close $fh;
+  return defined $s ? $s : '';
+}
+
+# "PCLXS2 <len>\n" then <len> bytes of length-prefixed fields:
+#   cwd, argc, argv…, envc, (key, value)…
+# Length prefixes rather than a separator character, because an argument or an
+# environment value may contain anything at all.
+sub _xread_request {
+  my ($conn) = @_;
+  # Every read here can be interrupted by the liveness tick, so EINTR is a
+  # RETRY, never a dropped request.
+  my $hdr = '';
+  while (1) {
+    my $got = sysread($conn, my $c, 1);
+    next if !defined $got && $!{EINTR};
+    return undef if !defined $got || $got == 0;
+    last if $c eq "\n";
+    $hdr .= $c;
+    return undef if length($hdr) > 64;
+  }
+  return undef if $hdr !~ /^PCLXS2 (\d+)$/;
+  my $len = $1;
+  my $blob = '';
+  while (length($blob) < $len) {
+    my $got = sysread($conn, my $c, $len - length($blob));
+    next if !defined $got && $!{EINTR};
+    return undef if !defined $got || $got == 0;
+    $blob .= $c;
+  }
+  my @f;
+  while (length $blob) {
+    return undef if $blob !~ s/^(\d+)://s;
+    my $n = $1;
+    push @f, substr($blob, 0, $n);
+    substr($blob, 0, $n + 1) = '';
+  }
+  return undef if @f < 2;
+  my $cwd  = shift @f;
+  my $na   = shift @f;
+  my @argv = splice(@f, 0, $na);
+  my $ne   = @f ? shift @f : 0;
+  my %env  = splice(@f, 0, 2 * $ne);
+  return [ $cwd, \@argv, \%env ];
+}
+
+# ---- the ordinary run -----------------------------------------------------
+_parse_options();
+_run_xserver($xsock, $xowner) if $xserver_mode;   # never returns
+_run_cli();

@@ -25,6 +25,39 @@ use File::Temp qw(tempfile);
 use lib dirname(__FILE__) . "/../../tools/lib";
 use PCLSbcl ();
 
+# THE TRANSPILE SERVER (task #1545).  Every gate row that transpiles spawns
+# pl2cl, and that spawn costs 0.13 CPU-s of perl + PPI + every Pl::* module
+# before it reads a byte of the snippet — ~420 CPU-s of a 2900 CPU-s gate run
+# (measured s473u, #1544).  This names a socket under a temp dir private to
+# THIS test process; the first pl2cl that finds the variable starts one
+# already-loaded server there (see the client block at the top of pl2cl) and
+# every later call is a round trip.  Starting it is LAZY — a file that never
+# transpiles pays nothing — and the server ends itself within a second of this
+# process dying, so an interrupted run leaves nothing behind.
+#
+# The variable is inherited by everything a test file spawns, which is the
+# point: the `pl2cl --module` calls the RUNTIME makes from inside an sbcl row
+# are served too.
+#
+# PCL_NO_SERVER=1 keeps the old spawn-per-call path, one variable away.  So
+# does PCL_XSERVER= (empty), which is what Pl/t/gate-cost-01.t uses to compare
+# the two paths byte for byte.
+our $XDIR;
+if (!$ENV{PCL_NO_SERVER} && !defined $ENV{PCL_XSERVER}) {
+    $XDIR = File::Temp::tempdir("pcl-xs-$$-XXXXX", TMPDIR => 1, CLEANUP => 1);
+    $ENV{PCL_XSERVER}       = "$XDIR/s";
+    $ENV{PCL_XSERVER_OWNER} = $$;
+}
+
+# File::Temp's own CLEANUP removes the directory; this runs first (END blocks
+# are LIFO and File::Temp registered its at the tempdir call above) and takes
+# the socket and any in-flight capture files out of the way, so the rmtree
+# cannot carp about them on the way out.
+END {
+    return if !defined $XDIR;
+    unlink glob("$XDIR/*");
+}
+
 # sbcl args that go BETWEEN `sbcl` and the caller's `--load <cl_file>`:
 #   core mode:   --core <core> --control-stack-size 512 --noinform --non-interactive
 #   source mode: --control-stack-size 512 --noinform --non-interactive --load <runtime>
