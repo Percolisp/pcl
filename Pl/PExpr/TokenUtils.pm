@@ -377,11 +377,18 @@ sub heredoc_is_command {
 # time, so the only sound answer is "it may", which costs a frame on a loop
 # whose body string-evals and nothing anywhere else.
 #
+# AN INDIRECT CALL counts for exactly the same reason (task #1244 (c)):
+# `$c->()`, `&$c`, `&{$c}`, `$o->$m` name no sub, so the callee is a run-time
+# value and this walk cannot follow it.  perl exits the loop from every one of
+# those spellings (probed), so "it may" is again the only sound answer.  It is
+# also what makes an exit from a MODULE work when the call is indirect — the
+# frame is here, and the callee's own unit emits the throw.
+#
 # WHAT IT DELIBERATELY DOES NOT SEE, and this is the ruled residue that
-# `docs/not-supported.md` names: an exit reached from ANOTHER compilation unit
-# (a `use`d module).  Such an exit meets no frame and takes the perl-shaped
-# `Can't "last" outside a loop block` die at its own site — LOUD, never a
-# silently un-taken exit.
+# `docs/not-supported.md` names: an exit reached by a DIRECT named call into
+# ANOTHER compilation unit (`Some::Module::f()` where `f` does a bare `last`).
+# That exit meets no frame and takes the perl-shaped `Can't "last" outside a
+# loop block` die at its own site — LOUD, never a silently un-taken exit.
 sub may_dyn_exit {
   my ($elems, $set) = @_;
   return 0 unless ref $set;
@@ -389,6 +396,7 @@ sub may_dyn_exit {
   for my $el (@$elems) {
     next unless ref($el) && Scalar::Util::blessed($el);
     for my $t ($el->isa('PPI::Token') ? ($el) : $el->tokens) {
+      return 1 if is_indirect_call_token($t);
       next unless $t->isa('PPI::Token::Word');
       # a marked exit site sitting in a nested sub inside this run
       return 1 if defined $t->{_pcl_dyn_loop_exit};
@@ -396,6 +404,20 @@ sub may_dyn_exit {
       return 1 if is_string_eval_word($t);
     }
   }
+  return 0;
+}
+
+# Is this token the head of an INDIRECT call — a call whose callee is a value,
+# not a name this compiler can follow (`$c->()`, `&$c`, `&{$c}`, `$o->$m`)?
+# `$o->NAME` is NOT one: the bare method name is read by the name test above.
+sub is_indirect_call_token {
+  my ($t) = @_;
+  return 0 unless ref($t) && Scalar::Util::blessed($t) && $t->isa('PPI::Token');
+  return 1 if $t->isa('PPI::Token::Cast') && $t->content eq '&';
+  return 0 unless $t->isa('PPI::Token::Operator') && $t->content eq '->';
+  my $nx = $t->snext_sibling or return 0;
+  return 1 if $nx->isa('PPI::Structure::List');    # $c->(…)
+  return 1 if $nx->isa('PPI::Token::Symbol');      # $o->$m(…)
   return 0;
 }
 

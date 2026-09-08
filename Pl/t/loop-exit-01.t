@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 44;
+plan tests => 48;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run; stderr
 # is kept, because some of these rows are about what lands on it.  $OPT is an
@@ -257,17 +257,20 @@ PERL
          qr/:dyn\s+t/, '... and a loop that can REACH a dynamic exit carries :dyn t');
 }
 
-# ---- 8. THE #1162 LICENCE: only a loop that can REACH a marked site --------
+# ---- 8. THE #1162 LICENCE: only a loop that can REACH a dynamic exit -------
 #
 # The frame's `catch` costs ~4.8 MB of SBCL compile IR, so a loop is framed
-# only when its body can reach a marked exit site through NAMES this
-# compilation unit can follow: a direct call to a sub in MAY-DYN-EXIT (the
-# fixpoint over the unit's call graph), or a nested `sub {…}` carrying a site.
-# Everything else — a coderef out of a data structure, a computed method name,
-# a sub from another unit — meets NO frame and takes perl's own die at the
-# site, LOUDLY.  That is the ruled residue, and these rows are what keeps it
-# loud instead of silent.  (The name test is textual, so a word that merely
-# COLLIDES with a MAY-DYN-EXIT sub name costs a frame — never a missing one.)
+# only when its body can reach a dynamic exit: a direct call to a sub in
+# MAY-DYN-EXIT (the fixpoint over the unit's call graph), a nested `sub {…}`
+# carrying a site, a STRING EVAL (#1244 (b), section 10) or an INDIRECT CALL
+# (#1244 (c), section 11) — the last two because the callee is not a name this
+# walk can follow, so "it may" is the only sound answer.
+#
+# What is left of the ruled residue is ONE shape: a DIRECT named call into
+# another compilation unit.  It meets no frame and takes perl's own die at the
+# site, LOUDLY — never a silently un-taken exit.  (The name test is textual, so
+# a word that merely COLLIDES with a MAY-DYN-EXIT sub name costs a frame —
+# never a missing one.)
 
 is(run_cl(<<'PERL'), "n=1\n",
 sub g { last }
@@ -277,27 +280,6 @@ for my $i (1..3) { $n++; f(); $n += 100 }
 print "n=$n\n";
 PERL
    'a TWO-LEVEL named chain is followed: the loop is framed and the exit works');
-
-like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
-sub f { last }
-my %d = (k => \&f);
-my $n = 0;
-for my $i (1..3) { $n++; $d{k}->(); $n += 100 }
-print "n=$n\n";
-PERL
-     'a CODEREF out of a data structure is not a name: no frame, and the exit dies LOUDLY (perl exits the loop)');
-
-like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
-package C;
-sub hop { last }
-package main;
-my $o = bless {}, 'C';
-my $m = "hop";
-my $n = 0;
-for my $i (1..3) { $n++; $o->$m(); $n += 100 }
-print "n=$n\n";
-PERL
-     'a COMPUTED method name is not a name either: no frame, and the exit dies LOUDLY');
 
 {
     # a sub from ANOTHER compilation unit: the unit being compiled cannot see
@@ -468,3 +450,76 @@ like(transpile('my $n = 0; for my $i (1..3) { eval q{last}; $n++ } print "$n\n";
 unlike(transpile('my $n = 0; for my $i (1..3) { eval { $n++ } } print "$n\n";'),
        qr/:dyn/,
        'emission: a loop whose body only `eval BLOCK`s carries NO frame — the widening is keyed on the STRING spelling, not on the word');
+
+# ---- 11. AN INDIRECT CALL CARRIES THE FRAME (task #1244 (c)) ---------------
+#
+# `$c->()`, `&$c`, `&{$c}` and `$o->$m` name no sub, so the walk cannot follow
+# the callee — and perl exits the loop from every one of them (probed).  Same
+# answer as the string eval: "it may", so the loop is framed on the CALL SHAPE.
+# The call PROTOCOL never needed anything: `*p-dyn-loop-frames*` is a dynamic
+# variable, so it is carried by every call already; only the licence was
+# missing.  `$o->NAME` was already right by accident — the bare method name is
+# read by the textual name test.
+#
+# Rows 24 and 25 of section 8 used to assert that the coderef and the computed
+# method name DIE; they are gone, replaced by these (the s416 stale-guard rule).
+
+is(run_cl(<<'PERL'), "n=1\n",
+sub f { last }
+my %d = (k => \&f);
+my $n = 0;
+for my $i (1..3) { $n++; $d{k}->(); $n += 100 }
+print "n=$n\n";
+PERL
+   'a CODEREF out of a data structure exits the loop (this row used to assert the #1162 residue die)');
+
+is(run_cl(<<'PERL'), "n=1\n",
+package C;
+sub hop { last }
+package main;
+my $o = bless {}, 'C';
+my $m = "hop";
+my $n = 0;
+for my $i (1..3) { $n++; $o->$m(); $n += 100 }
+print "n=$n\n";
+PERL
+   'a COMPUTED method name exits the loop too (also used to assert the die)');
+
+is(run_cl(<<'PERL'), "amp=1 blk=1 anon=1\n",
+sub f { last }
+my $c = \&f;
+my $a = 0; for my $i (1..3) { $a++; &$c(); $a += 100 }
+my $b = 0; for my $i (1..3) { $b++; &{$c}(); $b += 100 }
+my $s = sub { last };
+my $d = 0; for my $i (1..3) { $d++; $s->(); $d += 100 }
+print "amp=$a blk=$b anon=$d\n";
+PERL
+   '`&$c()`, `&{$c}()` and an ANON sub through a coderef all reach the loop');
+
+like(transpile('my $c; my $n = 0; for my $i (1..3) { $c->(); $n++ } print "$n\n";'),
+     qr/:dyn\s+t/,
+     'emission: a loop whose body calls through a coderef carries `:dyn t`');
+
+unlike(transpile('my $r; my $n = 0; for my $i (1..3) { $n += $r->[0] + $r->{k} } print "$n\n";'),
+       qr/:dyn/,
+       'emission: `->[…]` and `->{…}` are SUBSCRIPTS, not calls — no frame');
+
+{
+    # THE BONUS the shape licence buys: a module sub reached INDIRECTLY has a
+    # frame to throw to (the frame is in THIS unit; the callee's own unit emits
+    # the throw), where the DIRECT named call still has none — the one residue
+    # left, guarded by the `use`d-module row in section 8.
+    my $dir = File::Temp::tempdir(CLEANUP => 1);
+    open my $mfh, '>', "$dir/DynExitMod2.pm" or die $!;
+    print $mfh "package DynExitMod2;\nsub mod_last { last }\n1;\n";
+    close $mfh;
+    is(run_cl(<<"PERL"), "n=1\n",
+use lib '$dir';
+use DynExitMod2;
+my \$cr = \\&DynExitMod2::mod_last;
+my \$n = 0;
+for my \$i (1..3) { \$n++; \$cr->(); \$n += 100 }
+print "n=\$n\\n";
+PERL
+       'a MODULE sub called through a CODEREF exits the loop, where the direct named call does not');
+}

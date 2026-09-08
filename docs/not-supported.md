@@ -3271,9 +3271,22 @@ only when its body names one of those subs, or lexically contains a nested
 `sub {…}` that carries an exit.  So these **do not** frame the loop, and an
 exit reached that way dies:
 
-- an **indirect call**: a coderef out of a data structure (`$h{cb}->()`), a
-  computed method name (`$o->$m`), `&$code`, `goto &$code`;
-- a sub from **another compilation unit**: a `use`d module, a `require`d file.
+- a sub from **another compilation unit** reached by a DIRECT NAMED call: a
+  `use`d module's `Some::Module::f()` where `f` does a bare `last`.  That is
+  now the ONLY shape left on this list.
+
+An **indirect call** used to be on it and is not any more (#1244 (c), s473e):
+`$c->()`, `&$c`, `&{$c}` and `$o->$m` name no sub, so the walk cannot follow the
+callee, and perl exits the loop from every one of them (probed) — "it may" is
+again the only sound answer, so the loop is framed on the CALL SHAPE.  Nothing
+in the call PROTOCOL had to change: `*p-dyn-loop-frames*` is a dynamic
+variable, carried by every call already.  A side effect worth knowing: this
+makes a MODULE sub work when it is called through a coderef, because the frame
+is in the calling unit and the callee's own unit emits the throw — only the
+direct named call is left refusing.  MEASURED: `perl-tests` 167 frames -> 218,
+the 94 bundled CPAN modules 5 -> 48, and a sweep of the eleven frame-heaviest
+files is IDENTICAL before and after (5451 passing / 223 failing, the same five
+partial-stop points).
 
 A **string eval** used to be on that list and is not any more (#1244 (b), s473e).
 Its text is compiled as its own unit, so the compiler cannot see whether it
