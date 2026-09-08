@@ -12,7 +12,7 @@
 # Rows leave this file BY EDIT, with the fix, one at a time.
 #
 # case<TAB>task<TAB>cause
-022-refs	1249	\(@b, 9) does not distribute over the array's elements: perl 3 refs, PCL 2
+022-refs	1247	stdout MATCHES perl since s473h (#1249(1) fixed: $$aryref is now the fatal); the residue is the EXIT CODE of the uncaught die -- SBCL exits 1 where perl exits 255, the same cause as 120-io
 033-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 034-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 077-typeglob	1242	*_{ARRAY} after `undef *_` still reports a slot (residue of #1020)

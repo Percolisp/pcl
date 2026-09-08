@@ -2104,7 +2104,9 @@
     (cond ((string= kind "HASH")  (or ary  code))
           ((string= kind "ARRAY") (or hash code))
           ((string= kind "CODE")  (or hash ary))
-          ;; SCALAR is deliberately absent — see the comment in p-cast-$.
+          ;; SCALAR is deliberately absent — a ${...} site cannot decide from
+          ;; the UNBOXED value at all (see %p-aggregate-referent-p, which asks
+          ;; the referent rule instead).
           (t (error "%p-wrong-referent-p: unknown ref kind ~S" kind)))))
 
 (defun %p-not-a-ref (kind)
@@ -22180,6 +22182,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-cast-$ (val &optional site)
   "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
    If val unboxes to a string or a number, treat as symbolic reference."
+  ;; `$$aryref` / `$$hashref` is perl's fatal, and the REFERENT rule is what
+  ;; tells it from the shapes that legitimately reach here (task #1249(1)).
+  (when (%p-aggregate-referent-p val) (%p-not-a-ref "SCALAR"))
   (let ((inner (unbox val)))
     (cond
       ((p-box-p inner)
@@ -22198,14 +22203,12 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; into one struct (which numifies as an address, correct for the REF
       ;; level), so the deref site is where the referent view is produced.
       ((p-regex-match-p inner) (to-string inner))
-      ;; NO wrong-referent guard here, deliberately (s317, task #154): PCL's
+      ;; A CODE referent falls through, deliberately (s317, task #154): PCL's
       ;; ref model COLLAPSES a scalar-ref-to-coderef, so this site legitimately
       ;; receives a raw function — Sub::Quote's generated
-      ;; `my $x = ${$_[1]->{'$name'}};` is exactly that, and guarding here took
-      ;; Moo down (6 rows of Pl/t/moo-01.t).  `$$aryref` therefore still reads
-      ;; as the array instead of dying "Not a SCALAR reference"; that residue is
-      ;; recorded in #154 and needs a referent-kind tag on the box, not a
-      ;; type-sniff at the deref site.
+      ;; `my $x = ${$_[1]->{'$name'}};` is exactly that, and guarding it took
+      ;; Moo down (6 rows of Pl/t/moo-01.t).  The ARRAY/HASH half is the guard
+      ;; above (%p-aggregate-referent-p).
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val &optional site)
@@ -22378,6 +22381,26 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((r (%p-ref-referent val)))
     (and (p-box-p r)
          (not (%p-referent-shaped-p (p-box-value r))))))
+
+(defun %p-aggregate-referent-p (val)
+  "True when VAL is a reference whose REFERENT is a raw ARRAY or HASH — the two
+   kinds `${...}` can never dereference, where perl dies `Not a SCALAR
+   reference` (task #1249(1), s473h).
+
+   The REFERENT rule is what makes this decidable, and a type sniff on the
+   unboxed value is not: after one unbox, `\\@a` and a `\\$aref` read back out of
+   a container leave the same shape behind (#154's ambiguity, and the reason
+   %p-wrong-referent-p has no SCALAR arm), but their referents differ — the
+   array itself vs. the scalar BOX that holds the array ref.
+
+   CODE is excluded deliberately (s317, #154): PCL's model COLLAPSES a
+   scalar-ref-to-coderef, so a raw function reaching a `${...}` site is
+   legitimately Sub::Quote's `my $x = ${$_[1]->{'$name'}}` — guarding it took
+   Moo down (6 rows of Pl/t/moo-01.t)."
+  (let ((r (%p-ref-referent val)))
+    (or (hash-table-p r)
+        (%p-hash-marker-p r)
+        (and (vectorp r) (not (stringp r))))))
 
 (defun %p-ref-string (val)
   "How perl stringifies the reference held by VAL: TYPE(0xADDR), where TYPE is

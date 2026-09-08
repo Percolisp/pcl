@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -110,3 +110,36 @@ test_cl('glob ref numifies to a non-zero address',
 
 test_cl('bare glob in scalar numifies to 0',
     'our $g_t = 5; my $g = *g_t; print 0 + $g, "\n";', "0\n");
+
+# ── ${ARRAY-or-HASH ref} is perl's fatal (task #1249(1), s473h) ──────────────
+#    The REFERENT rule is the discriminator: `\@a`'s referent is the array
+#    itself, while a `\$aref` read back out of a container has the same UNBOXED
+#    shape but a scalar BOX for a referent (#154's ambiguity).  A CODE referent
+#    is excluded on purpose — PCL collapses a scalar-ref-to-coderef, which is
+#    Sub::Quote's shape (Pl/t/moo-01.t).
+test_cl('${$aryref} dies "Not a SCALAR reference"',
+    'my @a=(1,2); my $r=\@a; my $v = eval { "".${$r} };'
+  . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$@]"), "\n";',
+    "died\n");
+
+test_cl('${$hashref} dies "Not a SCALAR reference"',
+    'my %h=(k=>1); my $r=\%h; my $v = eval { "".${$r} };'
+  . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$@]"), "\n";',
+    "died\n");
+
+test_cl('${$coderef} does NOT die (PCL collapses scalar-ref-to-coderef)',
+    'sub cc { 1 } my $r=\&cc; my $v = eval { "".${$r} };'
+  . 'print +($@ ? "died:[$@]" : "ok"), "\n";', "ok\n");
+
+test_cl('${ \\$aryref } is the array ref, not a fatal',
+    'my @a=(1,2); my $ar=\@a; my $rr=\$ar; print ref(${$rr}), "\n";', "ARRAY\n");
+
+test_cl('${ \\$hashref } is the hash ref, not a fatal',
+    'my %h=(k=>1); my $hr=\%h; my $rr=\$hr; print ref(${$rr}), "\n";', "HASH\n");
+
+test_cl('\\(@b, 9) is (ARRAY, SCALAR) and ${$r[0]} is the fatal',
+    'my @b=(7,8); my @r = \(@b, 9);'
+  . 'print scalar(@r), ref($r[0]), ref($r[1]), "\n";'
+  . 'eval { my $v = "".${$r[0]} };'
+  . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no"), "\n";',
+    "2ARRAYSCALAR\ndied\n");
