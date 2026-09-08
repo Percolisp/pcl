@@ -216,6 +216,8 @@ new, bop.t and defined.t, re-swept identical on the base extraction);
 emission-ab DIFF set byte-for-byte unchanged; sweep GATE clean, TOTAL 18675
 (+0); the three artifacts regenerate byte-identically, so gen stays v2-1120.
 
+**The two merges.**  s473h (MERGE-READY 19:04) went back once: its eval fix coerced the operand's value where perl imposes scalar context, so `eval two()` on a list-returning sub answered the count; the agent moved the rule to the emitter, and the guard row it added found #1393 (a parenthesised list handed to a named-unary builtin was split into arguments).  Merged `2f8a6adc` (gen v2-1120) after eight probe files matched perl; #1592–#1594 filed from the same probes, all pre-existing.  s473i (MERGE-READY 19:45, rebased over s473h) merged `44481de6` (gen v2-1140): `pl2cl --executable` produces a binary that really runs the program (it used to run it at build time and save an inert image), `-I` reaches a module's own transpile with the cache refusing a stale resolved entry, and the module cache key names the compiler (a stat stamp, 1.5 ms, measured against a 14.7 ms content hash).  The USER asked for a command reference and the session's end: `docs/pcl-commands.md` written and linked; nothing launched after the two merges.
+
 ## Session s473s (Opus agent, 2026-09-08) — perf round 32, the method-call round: the own-class method cache (methret −27.5 %), `p-defclass` shipped with its prize measured away, and literal-prefix scanning on a hashed BMH table (textproc −24.5 %)
 
 **Member 1, the measurement.**  `sb-sprof` `:cpu` over the `methret` row at
