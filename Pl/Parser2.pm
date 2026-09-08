@@ -9890,6 +9890,7 @@ sub _lower_stmt {
   # the same way) are outside the native subset — whole-statement fallback
   # through v1, which owns their loop/do-while semantics.
   return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
+
   # A postfix `EXPR if/unless COND` whose value is the sub's return ($tail_ctx
   # defined) yields the COND value when the body is skipped (`sub f { 5 if 0 }`
   # → 0), like a block bare-if — same ret-var transform as the block form.
@@ -9991,6 +9992,12 @@ sub _lower_stmt {
   # tail whose value the enclosing sub returns ($tail_ctx = 'inherit').
   my $vctx = $tail_ctx // ':void';
   my $form = $self->_lower_expr($expr, $stmt, $vctx);
+  # A BAREWORD ALONE AS A STATEMENT is perl's STRING CONSTANT, not a call
+  # (task #1249(7)) — rewritten IN the lowered form, so every context wrap the
+  # ordinary lowering put around the call is preserved exactly.
+  if (!$mod && @$expr == 1 && $expr->[0]->isa('PPI::Token::Word')) {
+    $form = $self->_rewrite_bareword_stmt($expr->[0], $form);
+  }
   # A void FALLBACK `m//g` match must bind *wantarray* :void explicitly: v1 adds
   # this wrap at the statement level, but _parse_expression(VOID_CTX) does not, so
   # the /g match would inherit the CALLER's list context dynamically and match
@@ -10071,6 +10078,78 @@ sub _restore_caller_wa {
 # True if the statement contains an `m//g` match (list-vs-scalar context
 # sensitive).  s///g / tr///g are not context-sensitive (they act globally in
 # any context), so they are excluded.
+# A BAREWORD standing alone as a whole STATEMENT (task #1249(7)).
+#
+# perl decides this at COMPILE time and answers a STRING CONSTANT: under `no
+# strict subs` a name that is not callable there is its own text, so `PERL;`
+# as a file's last statement is a NO-OP ("Useless use of a constant in void
+# context") and `sub f { FOO }` returns "FOO".  PCL emitted `(pl-PERL)` and
+# died "Undefined subroutine &main::PERL called", killing the whole run —
+# ir-conform 213-oo and 239-refs match perl's stdout byte for byte and differ
+# ONLY in that exit code.
+#
+# #266's THREE-VALUED classifier decides, and its two negatives are not
+# interchangeable here either — this is the SAME asymmetry at a new site:
+#   yes     – callable at this point: the call stands, unchanged.
+#   not-yet – this file declares the name BELOW, so the compiler has POSITIVE
+#             knowledge that perl does not know it here: perl's answer, the
+#             STRING, is emitted directly.
+#   no      – nothing this compiler can see, and PCL's callable set is
+#             INCOMPLETE (a `use` whose export list the prototype scan could
+#             not read).  Guessing either way is wrong, so the question goes
+#             to the IMAGE: `p-bareword-value` calls the sub if one exists at
+#             that name and otherwise answers the string.  Both outcomes are
+#             perl's; the emission it replaces died in both directions.
+#
+# TWO GUARDS, both measured by corpus-diff rather than reasoned about:
+#   * a name the EMITTER maps to a runtime builtin (`study;`, `reset;` — real
+#     perl builtins that Config's arity table does not carry, so the
+#     classifier answers `no`) must keep its `(p-study)` call.  The emitter's
+#     own table answers that, through Pl::ExprToCL::is_runtime_name;
+#   * the rewrite happens IN the lowered form, replacing only the `(pl-NAME)`
+#     node, so every context wrap the ordinary lowering built around the call
+#     — `p-void-ctx`, a sub-body regime, a tail's caller context — is kept.
+sub _rewrite_bareword_stmt {
+  my ($self, $word, $form) = @_;
+  my $name = $word->content // '';
+  return $form if $name !~ /\A[^\W\d]\w*(?:(?:::|')[^\W\d]\w*)*\z/;
+  return $form if Pl::ExprToCL::is_runtime_name($name);
+  my $expr_o = Pl::PExpr->new(
+    environment   => $self->environment,
+    parser        => $self->fallback_parser,
+    analysis_only => 1,
+  );
+  my $verdict = $expr_o->_bareword_callable_here($name, $word);
+  return $form if $verdict eq 'yes';
+  # The shape test above admits only word characters, `::` and `'`, so nothing
+  # in the name needs CL string escaping.
+  my $lit = '"' . $name . '"';
+  my $new = $verdict eq 'not-yet' ? $lit : ['p-bareword-value', $lit];
+  my ($out, $hits) = _swap_lone_call($form, $new);
+  # The statement is ONE word, so the lowering holds exactly one call node.
+  # Anything else means the shape assumption broke: leave the emission alone
+  # rather than rewrite something this rule was not measured against.
+  return $hits == 1 ? $out : $form;
+}
+
+# Replace the single `(pl-NAME)` / `(PKG::pl-NAME)` call node inside FORM with
+# NEW.  Returns (form, hit-count) — the caller only accepts a count of one.
+sub _swap_lone_call {
+  my ($form, $new) = @_;
+  return ($form, 0) if !ref($form) || ref($form) ne 'ARRAY';
+  if (@$form == 1 && !ref($form->[0]) && defined $form->[0]
+      && $form->[0] =~ /(?:\A|::|\|)pl-/) {
+    return ($new, 1);
+  }
+  my ($hits, @out) = (0);
+  for my $part (@$form) {
+    my ($p, $h) = _swap_lone_call($part, $new);
+    $hits += $h;
+    push @out, $p;
+  }
+  return (\@out, $hits);
+}
+
 sub _stmt_has_global_match {
   my ($stmt) = @_;
   for my $t (@{ $stmt->find('PPI::Token::Regexp::Match') || [] }) {

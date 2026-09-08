@@ -263,7 +263,7 @@
    #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-sort-named #:p-reverse
    ;; the classic-sort fast path (task #996 A5) — emitted, so exported
    #:%p-sort-classic
-   #:p-join #:p-split #:p-funcall-ref
+   #:p-join #:p-split #:p-funcall-ref #:p-bareword-value
    ;; Dereferencing (sigil cast operations)
    #:p-cast-@ #:p-cast-% #:p-cast-$
    #:p-symref-site           ; the `symref-const' emission's per-site cache
@@ -19173,7 +19173,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1080"
+(defparameter *pcl-cache-generation* "v2-1120"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -21377,6 +21377,33 @@ buffer's fill-pointer; everything else falls back to file-length."
     (values (when cl-pkg (find-symbol (%pcl-cl-sub-name bare-name) cl-pkg))
             perl-pkg
             bare-name)))
+
+(defun p-bareword-value (name)
+  "A BAREWORD standing alone as a whole STATEMENT whose name the compiler
+   could not place — #266's `no` verdict (task #1249(7)).
+
+   perl decides this at COMPILE time and answers a STRING CONSTANT: under `no
+   strict subs` a name that is not callable there is its own text, and in void
+   context the value is simply discarded (\"Useless use of a constant in void
+   context\").  So `PERL;` as a file's last statement is a NO-OP in perl, and
+   `sub f { FOO }` returns \"FOO\".
+
+   PCL cannot answer it at compile time, because its callable set is
+   INCOMPLETE: a sub imported by a `use` whose export list the prototype scan
+   could not read is invisible, and reading such a name as a string would
+   silently skip a real call.  So the question is asked of the IMAGE — call
+   the sub if one exists at this name (resolved by the ONE symbolic-sub
+   resolver, in the perl-level current package), otherwise answer perl's
+   string.  Both answers are perl's; the emission this replaces died
+   \"Undefined subroutine\" in both directions.
+
+   The `not-yet` verdict does NOT come here: there the compiler has POSITIVE
+   knowledge (this file declares the name BELOW, so perl does not know it at
+   this point either) and emits the string itself."
+  (multiple-value-bind (sym) (%p-resolve-sub-symbol name)
+    (if (and sym (fboundp sym))
+        (funcall (symbol-function sym))
+        name)))
 
 (defun p-funcall-ref (ref &rest args)
   "Call a code reference or a symbolic sub name (no-strict-refs semantics)."

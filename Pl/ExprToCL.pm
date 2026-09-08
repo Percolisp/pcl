@@ -177,6 +177,15 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   __pcl_set_prototype
 );
 
+# Does `cl_name` map this perl name to a RUNTIME BUILTIN (`p-…`) rather than a
+# user sub (`pl-…`)?  Read-only view of the table above, for a caller that must
+# not override the emitter's own dispatch — `Pl::Parser2::_bareword_statement_form`
+# rewrites a lone bareword statement into perl's string constant, and `study;` /
+# `reset;` are BUILTIN CALLS that the bareword classifier does not know about
+# (they are absent from Config's arity table).  Asking the emitter's table is
+# not a second name test: it is the same one decision, read once.
+sub is_runtime_name { return exists $RUNTIME_NAMES{ $_[0] // '' } ? 1 : 0 }
+
 # Wantarray-sensitive built-ins: their RETURN VALUE depends on the caller's
 # list-vs-scalar context, which they read at runtime from the *wantarray*
 # dynamic var (e.g. `(if (eq *wantarray* t) <list> <scalar>)` in pcl-runtime).

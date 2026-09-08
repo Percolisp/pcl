@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 37;
 
 sub run_cl {
     my ($code) = @_;
@@ -251,3 +251,50 @@ test_cl('`do { } x N` and `map { } LIST` keep the repetition operator',
 test_cl('a mid-statement `x` after a sub definition is still the operator',
     qq{sub x { "CALL" }\nmy \$s = "f";\nprint \$s x 3, "|", x(), "\\n";},
     "fff|CALL\n");
+
+# ── A BAREWORD ALONE AS A STATEMENT (task #1249(7), s473h) ──────────────────
+# perl answers a STRING CONSTANT at compile time, so `PERL;` as a file's last
+# statement is a no-op ("Useless use of a constant in void context") and
+# `sub f { FOO }` returns "FOO".  PCL emitted (pl-PERL) and died "Undefined
+# subroutine &main::PERL called", which killed the whole run — ir-conform
+# 213-oo and 239-refs matched perl's stdout and differed only in the exit code.
+#
+# #266's three-valued asymmetry decides which no-op, at this new site too:
+# `not-yet` (this file declares the name BELOW) is positive knowledge and emits
+# the string; `no` asks the IMAGE at run time (p-bareword-value), because PCL's
+# callable set is incomplete and a sub imported by a `use` the prototype scan
+# could not read must still be CALLED.  Every expectation is the live perl
+# answer (probed s473h).
+
+test_cl('a trailing bareword statement is a no-op, not a call',
+    qq{no strict 'refs';\nprint "one\\n";\nPERL\n}, "one\n");
+
+test_cl('a bareword statement mid-file does not stop the program',
+    qq{no strict 'refs';\nFOO;\nprint "after\\n";\n}, "after\n");
+
+test_cl('a bareword statement inside a block, and inside a sub body',
+    qq{no strict 'refs';\n\{ BAZ; print "in-block\\n" \}\n}
+  . qq{sub f \{ QUX; 7 \}\nprint "f=", f(), "\\n";\n},
+    "in-block\nf=7\n");
+
+test_cl('`not-yet`: a sub declared BELOW is NOT called',
+    qq{FOO;\nprint "a\\n";\nsub FOO \{ print "CALLED\\n" \}\n}, "a\n");
+
+test_cl('`yes` stands: a sub declared ABOVE IS called',
+    qq{sub gg \{ print "CALLED\\n" \}\ngg;\nprint "a\\n";\n}, "CALLED\na\n");
+
+# `study` and `reset` are perl BUILTINS that Config's arity table does not
+# carry, so the classifier answers `no` for them — the emitter's own table
+# (Pl::ExprToCL::is_runtime_name) is what keeps their call.  Without that
+# guard `study;` silently became the string "study" (measured by corpus-diff
+# on perl-tests/study.t, 8 sites).
+test_cl('`study` stays a BUILTIN call, not a bareword string',
+    qq{my \$s = "abc";\nstudy \$s;\nstudy;\nprint "ok\\n";\n}, "ok\n");
+
+# The `no` verdict's whole point: an imported no-arg sub whose export list the
+# prototype scan cannot read must still CALL at run time.  Test::More's
+# `pass`/`fail`/`done_testing` are exactly that (measured: perl-tests/pack.t,
+# signatures.t, splice.t and undef.t all spell one of them bare).
+test_cl('a name the compiler cannot place is CALLED when the image has it',
+    qq{sub helper \{ print "helper\\n" \}\nmy \$c = \\&helper;\n}
+  . qq{no strict 'refs';\nhelper;\nprint "done\\n";\n}, "helper\ndone\n");
