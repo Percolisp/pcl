@@ -85,7 +85,7 @@ our %KIND_A = (
   # reason, the one that is DEFAULT OFF (%DEFAULT_OFF below): shipping it on
   # is a speed decision that its own measurement did not authorise.  Turn it
   # on with `PCL_OPT=line-track`.
-  'line-track'     => "Parser2 _lower_block + cl/pcl-runtime.lisp's location register: every statement writes its LINE to *p-src-line* (and every sub body its FILE to *p-src-file*), so a die raised BY THE RUNTIME reports `at FILE line N.` as perl does instead of the placeholder `(eval 0) line 0.`",
+  'line-track'     => "Parser2 _lower_block + cl/pcl-runtime.lisp's location register: every statement writes its LINE to *p-src-line* (and every sub body its FILE to *p-src-file-id*, an index into *p-src-files*), so a die raised BY THE RUNTIME reports `at FILE line N.` as perl does instead of the placeholder `(eval 0) line 0.`",
   'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 

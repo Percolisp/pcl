@@ -81,6 +81,7 @@ not-supported.md → only then probe.*
 - **(B), a cold-branch line constant, cannot reach PCL's die sites**: `p-/`, `p-%`, the non-creatable-array-value store, the loop-control raiser and the undefined-subroutine path all raise INSIDE runtime functions, so it needs a per-call argument.
 - **#1359 (NEW): the module cache key is `path | *pcl-cache-generation* | "v2"` and ignores `PCL_OPT`** — a module transpiled under one optimization setting is silently reused under another, so any `PCL_OPT` A/B against a warm `~/.pcl-cache` measures a mixture; use `PCL_CACHE_DIR=<fresh>`.
 - **#1360 (NEW, pre-existing): an EXPLICIT `die` inside a string eval reports `at - line 1.`** where perl says `at (eval N) line M.` — codegen's `:loc` constant is built from `source_file`, which is `-` in eval mode, and it wins over the register.
+- **#1361 (NEW, pre-existing): `Carp`'s croak/confess/carp/cluck append a bare newline**, so every module diagnostic loses perl's ` at CALLER line N.` — the CALLER's location is the one thing the #1240 register cannot supply (it holds the die site).
 
 ## s473b (2026-09-07, Opus) — the nested-element family: a nested `=` writes THROUGH the slot, a READ vivifies every intermediate, an element compound assign evaluates its key ONCE, and a SLICE vivifies where its CONSUMER aliases it
 
