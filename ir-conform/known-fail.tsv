@@ -34,7 +34,7 @@
 239-refs	1249	a trailing BAREWORD statement is emitted as a CALL; perl treats it as a string constant
 243-string	1389	utf8::is_utf8 on a byte string answers 1; perl answers 0 -- RULED DIVERGENCE (s473h): PCL has no downgraded form, so 1 is the honest answer for its model
 246-exception	1240	the runtime-raised errors in the table carry `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
-253-string	1249	`exists $string->{k}` must die under `use strict refs`; PCL answers ''
+253-string	1390	`exists $string->{k}` must die under `use strict refs`; PCL answers "" -- the WHOLE arrow-deref family diverges (9 spellings measured s473h), and strict-refs enforcement needs the strict-hints model.  Second cause: exit 255 vs 0 (#1247)
 258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line
 272-sort	1249	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies
 282-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before

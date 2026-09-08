@@ -3389,4 +3389,9 @@ exactly that trade: `no strict refs, exist` moved from fail to pass and
 
 **What would lift it:** a `strict`-hints model, the same shape task #221
 sketches for warnings — one compiled-per-lexical-scope boolean the reference
-resolvers consult, plus perl's message text.  Not scheduled.
+resolvers consult (a SITE argument, not a dynamic variable: strict is lexical,
+so a dynamic binding would leak into called subs), plus perl's message text.
+Not scheduled; **task #1390** owns it and carries the nine-spelling
+measurement (s473h) — `$s->{k}`, `exists`, `delete`, `keys %$s`, the ARRAY
+spellings and the write all diverge together, so `exists` is not a singleton.
+`ir-conform/known-fail.tsv` row `253-string` is owned by #1390.
