@@ -39,7 +39,16 @@ for my $f (sort glob("$FindBin::Bin/*.t")) {
     close $fh;
     for my $i (0 .. $#l) {
         next if $l[$i] =~ /^\s*#/;               # a comment may quote the shape
-        next unless $l[$i] =~ /sbcl\b[^\n]*--load[^\n]*pcl-runtime\.lisp/;
+        # ANY `sbcl … --load` that is not built from the shared prefix.  The
+        # first version of this row looked for the literal `pcl-runtime.lisp`
+        # ON the sbcl line, and TEN files spelled the same source load through
+        # a variable (`my $runtime = 'cl/pcl-runtime.lisp'`) — they sailed
+        # past it and were the entire top of the table afterwards.  The rule is
+        # therefore about WHERE THE COMMAND COMES FROM, not how the path is
+        # spelled: a gate file names `sbcl` only with @sbcl_rt.
+        next unless $l[$i] =~ /(?:^|[^-\w])sbcl\b[^\n]*--load\b/;
+        next unless $l[$i] =~ /`|qx[{(]|system\s*\(/;   # a COMMAND, not a rule about one
+        next if $l[$i] =~ /\@sbcl(?:_rt)?\b|\@prefix\b|sbcl_prefix/;
         push @drift, (split m{/}, $f)[-1] . ':' . ($i + 1);
     }
 }
@@ -295,8 +304,7 @@ PL
             $ENV{PCL_XSERVER} = "$fake/s";
             open(STDOUT, '>', "$dir/sig.out");
             open(STDERR, '>', "$dir/sig.err");
-            exec($pl2cl, $plain);
-            POSIX::_exit(127);
+            exec($pl2cl, $plain) or do { POSIX::_exit(127) };
         }
         waitpid($c2, 0);
         $raw = $?;

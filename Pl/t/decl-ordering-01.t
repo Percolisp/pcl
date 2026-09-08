@@ -17,6 +17,9 @@ use File::Spec;
 
 use lib ".";
 use Pl::Parser2;
+use FindBin;
+use lib "$FindBin::Bin";
+use PCLCore;
 
 # Helper: parse and return CL output (no SBCL, fast)
 sub parse_pl {
@@ -54,7 +57,14 @@ sub relative_order {
 }
 
 my $pl2cl   = './pl2cl';
-my $runtime = 'cl/pcl-runtime.lisp';
+# The sbcl command line comes from the ONE builder every runner shares
+# (tools/lib/PCLSbcl.pm via PCLCore::sbcl_prefix, task #344): the saved core
+# with the runtime already compiled in, and the 512 MB control stack.  This
+# file used to keep its own `my $runtime = 'cl/pcl-runtime.lisp'` and `--load`
+# it, which recompiles the whole runtime on EVERY row -- 2.89 CPU-s a row
+# against 0.007 s from the core (measured s473u, #1544) -- ran on the default
+# 2 MB stack, and depended on prove's cwd for that relative path.
+my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 
 # Helper: run transpiled code through SBCL
 sub run_pcl {
@@ -70,7 +80,7 @@ sub run_pcl {
     print $cl_fh $cl_code;
     close $cl_fh;
 
-    my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+    my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
 
     # Filter SBCL noise
     $output =~ s/^;.*\n//gm;

@@ -134,7 +134,14 @@ output_matches('if (eval { dangerous() }) { ok() }',
 diag "";
 diag "-------- Runtime: eval STRING:";
 
-my $runtime = "cl/pcl-runtime.lisp";
+# The sbcl command line comes from the ONE builder every runner shares
+# (tools/lib/PCLSbcl.pm via PCLCore::sbcl_prefix, task #344): the saved core
+# with the runtime already compiled in, and the 512 MB control stack.  This
+# file used to keep its own `my $runtime = 'cl/pcl-runtime.lisp'` and `--load`
+# it, which recompiles the whole runtime on EVERY row -- 2.89 CPU-s a row
+# against 0.007 s from the core (measured s473u, #1544) -- ran on the default
+# 2 MB stack, and depended on prove's cwd for that relative path.
+my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 my $pl2cl   = "./pl2cl";
 
 # Helper: write Perl to temp file, transpile, run under SBCL, return output
@@ -147,7 +154,7 @@ sub run_pl {
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
     close $cl_fh;
-    my $out = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+    my $out = `sbcl @sbcl_rt --load $cl_file 2>&1`;
     $out =~ s/^;.*\n//gm;
     $out =~ s/PCL Runtime loaded\n?//g;
     $out =~ s/^\s*\n//gm;

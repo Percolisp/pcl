@@ -19,7 +19,14 @@ use File::Spec;
 use lib ".";
 use Pl::Parser2;
 
-my $runtime = "cl/pcl-runtime.lisp";
+# The sbcl command line comes from the ONE builder every runner shares
+# (tools/lib/PCLSbcl.pm via PCLCore::sbcl_prefix, task #344): the saved core
+# with the runtime already compiled in, and the 512 MB control stack.  This
+# file used to keep its own `my $runtime = 'cl/pcl-runtime.lisp'` and `--load`
+# it, which recompiles the whole runtime on EVERY row -- 2.89 CPU-s a row
+# against 0.007 s from the core (measured s473u, #1544) -- ran on the default
+# 2 MB stack, and depended on prove's cwd for that relative path.
+my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 my $pl2cl   = "./pl2cl";
 
 # ============================================================
@@ -203,7 +210,7 @@ say TestMod::get_value();
   close $cl_fh;
 
   # Run with SBCL
-  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
 
   # Filter SBCL noise
   $output =~ s/^;.*\n//gm;
@@ -238,7 +245,7 @@ if (\$INC{"TestMod.pm"}) {
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
   $output =~ s/^;.*\n//gm;
   $output =~ s/^\s*\n//gm;
   $output =~ s/PCL Runtime loaded\n?//g;
@@ -279,7 +286,7 @@ say Counter::get_count();
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
   $output =~ s/^;.*\n//gm;
   $output =~ s/^\s*\n//gm;
   $output =~ s/PCL Runtime loaded\n?//g;
@@ -311,7 +318,7 @@ sub run_pl {
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
   $output =~ s/^;.*\n//gm;
   $output =~ s/^\s*\n//gm;
   $output =~ s/PCL Runtime loaded\n?//g;
@@ -518,7 +525,7 @@ say Cached::test();
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  `sbcl @sbcl_rt --load $cl_file 2>&1`;
 
   # Check cache was created
   my @cache_files = glob("$ENV{HOME}/.pcl-cache/*");
@@ -760,7 +767,7 @@ ok($x == 2, "block-form arg body may reference diag before test-lib load");
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
   unlike($output, qr/name-conflict/i,
          'no pl-diag name conflict when test lib loads on demand');
   like($output, qr/^ok 1\b/m,
@@ -793,7 +800,7 @@ print "call=", f(), "\n";
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
   like($output, qr/^in-X=1$/m,
        'package X; in a sub body: the `use` after it imports into X');
   like($output, qr/^in-main=0$/m,
@@ -835,7 +842,7 @@ PERL
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $out  = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $out  = `sbcl @sbcl_rt --load $cl_file 2>&1`;
   my $home = $ENV{HOME};
   like($out, qr/^INC0=\Q$home\E\/pcl-t-zzz$/m,
        'use lib "$ENV{HOME}/..." puts the INTERPOLATED path on @INC');
@@ -875,7 +882,7 @@ PL
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $out = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $out = `sbcl @sbcl_rt --load $cl_file 2>&1`;
   like($out, qr/^hi from MyLocal350$/m,
        'a runtime `push @INC` is visible to the file-top require after it (#350)');
 
