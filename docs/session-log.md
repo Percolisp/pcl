@@ -82,6 +82,24 @@ Restart per the s478 recipe: main `a9f2a264`, CI green on it (public API), box f
 
 The board (`docs/faster-codegen-suggestions.md` §0.2m) was taken at load 0.86–1.20 and confirmed round 32 (methret 1.51× → 1.06×, textproc 4.58× → 3.29×) but read three rows the wrong way: arrhash-k +12 %, regexg +6 %, moo-objs +9 %.  Re-timed three times each (consistent), then a runtime A/B against nine earlier runtimes put the step for both micro rows on `72bb6d22`, whose only runtime change is a `let` inside `p-sort` — a function neither row calls — and whose expansion of the arrhash-k loop is byte-identical.  A padding-only runtime (one unused defun before `p-sort`) moved the same rows 10–12 % on its own: the "regression" is SBCL code placement, the effect s473c met on `intloop=`.  moo-objs alternated between the two whole trees overlaps.  Rule recorded in DECIDED §s479: measure a row's placement floor with the pad probe before attributing a ±10 % move; check a bisect's culprit against its diff before believing it.  README refreshed (#1527 DONE): 23 rows, the two method-call rows in sorted position.
 
+**The review fix (Fable, on `c8e8a848`): CONTEXT is not a value coercion.**
+Member 4 shipped `p-scalar` on eval's operand VALUE, and the emission said what
+was wrong with that — `(p-eval (p-list-ctx (pl-wa)) …)`, LIST context, where
+perl runs a CALL in that slot with wantarray FALSE.  `eval`/`evalbytes` now
+join the scalar-argument named-unary family in `PExpr::child_context`, so the
+operand is emitted `(p-scalar-ctx …)`; the runtime `p-scalar` STAYS as the
+second half, because `p-scalar-ctx` of a bare array read still yields the
+vector and `eval @a` IS its count.  `eval BLOCK` is a different node and keeps
+the caller context.  **The guard row Fable asked for found #1393**: `eval
+(1,2,3)` is 3 in perl and CRASHED here, because a named-unary builtin given a
+parenthesised list was split into N ARGUMENTS instead of one comma expression
+— `collapse_extra_unary_params`, the mirror of `add_implicit_default_param`,
+re-parents them under the `progn` the doubly-parenthesised spelling already
+produces.  Eight probe shapes identical to perl; corpus-diff 6 of 111 (the two
+new, bop.t and defined.t, re-swept identical on the base extraction);
+emission-ab DIFF set byte-for-byte unchanged; sweep GATE clean, TOTAL 18675
+(+0); the three artifacts regenerate byte-identically, so gen stays v2-1120.
+
 ## Session s473s (Opus agent, 2026-09-08) — perf round 32, the method-call round: the own-class method cache (methret −27.5 %), `p-defclass` shipped with its prize measured away, and literal-prefix scanning on a hashed BMH table (textproc −24.5 %)
 
 **Member 1, the measurement.**  `sb-sprof` `:cpu` over the `methret` row at

@@ -520,10 +520,15 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   scalar-ref-to-coderef, so a raw function legitimately reaches this site
   (`${$h{'$name'}}`, Sub::Quote's shape).  Example: `my @a=(1,2); my $r=\@a;
   ${$r}` dies; `my $rr=\$r; ${$rr}` is the ARRAY ref.
-- **`eval EXPR` evaluates its operand in SCALAR context** (normative, s473h /
-  #1249(4)), like every other named unary: `my @b = eval @a` is `eval("4")`
-  for a four-element `@a`, and `eval %h` the key count — never the aggregate's
-  stringification.
+- **`eval EXPR` evaluates its operand in SCALAR CONTEXT** (normative, s473h /
+  #1249(4)), like every other named unary — and it is a CONTEXT, not a
+  coercion of the operand's value: a CALL there runs with wantarray FALSE, so
+  `sub two { ("3+4","x") } eval two()` evaluates the string `"x"`, and
+  `eval (1,2,3)` is the comma operator's `eval("3")`.  An ARRAY in scalar
+  context IS its count, so `my @b = eval @a` is `eval("4")` for a four-element
+  `@a` and `eval %h` the key count — never the aggregate's stringification.
+  `eval BLOCK` is a different construct and keeps the CALLER's context
+  (`my @r = eval { (1,2,3) }` is the three-element list).
 - **A BAREWORD standing alone as a whole STATEMENT is a STRING CONSTANT, not a
   call**, wherever the name is not callable at that point (normative, s473h /
   #1249(7)): perl decides at compile time under `no strict subs`, so `PERL;`
