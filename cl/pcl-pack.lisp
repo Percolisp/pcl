@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-1060
+;;; pcl: pipeline=v2 gen=v2-1080
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -888,6 +888,8 @@
                                       (p-for ()
                                         ((p-< $cs $slen))
                                         ((p-incf-raw $cs $line_len))
+                                        :dyn
+                                        t
                                         (p-let
                                           (($ce :num
                                               (%pcl-to-number-strict
@@ -910,6 +912,8 @@
                                                 (p-for ()
                                                   ((p-< $k $clen))
                                                   ((p-incf-raw $k 3 :numeric))
+                                                  :dyn
+                                                  t
                                                   (p-let
                                                     (($b0 :num
                                                         (%pcl-to-number-strict
@@ -2101,6 +2105,8 @@
                                   (p-for ()
                                     ((p-< $i $nbits))
                                     ((p-incf-raw $i :numeric))
+                                    :dyn
+                                    t
                                     (p-let
                                       (($b__excl__2 :num
                                           (%pcl-to-number-strict
@@ -2156,6 +2162,8 @@
                                     (p-for ()
                                       ((p-< $i $nbits))
                                       ((p-incf-raw $i :numeric))
+                                      :dyn
+                                      t
                                       (p-let
                                         (($b__excl__4 :num
                                             (%pcl-to-number-strict
@@ -2206,6 +2214,8 @@
                               (p-let (($decoded :box (make-p-box nil)))
                                 (p-my-= $decoded "")
                                 (p-while (p-< (p-cast-$ $si_ref) $slen)
+                                  :dyn
+                                  t
                                   (p-let
                                     (($lc :num
                                         (%pcl-to-number-strict
@@ -2225,6 +2235,8 @@
                                           (p-for ()
                                             ((p-< $k $ng))
                                             ((p-incf-raw $k :numeric))
+                                            :dyn
+                                            t
                                             (p-let (($get :box (make-p-box nil)))
                                               (p-my-= $get
                                                 (lambda (&rest %_args)
@@ -2292,6 +2304,8 @@
                                     (p-my-= $done 0)
                                     (p-while
                                       (p-&& (p-< $done $n) (p-< (p-cast-$ $si_ref) $slen))
+                                      :dyn
+                                      t
                                       (p-funcall-ref $push_val
                                         (pl-_unpack_utf8_char $s $si_ref))
                                       (p-post++ $done))))))
@@ -2305,6 +2319,8 @@
                                       (p-for ()
                                         ((p-&& (p-< $i $n) (p-< (p-cast-$ $si_ref) $slen)))
                                         ((p-incf-raw $i :numeric))
+                                        :dyn
+                                        t
                                         (p-funcall-ref $push_val
                                           (p-list-ctx
                                             (p-ord (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1)))))))))
@@ -2316,6 +2332,8 @@
                                       (p-while
                                         (p-&& (p-|| $all (p-< $done $nrep))
                                           (p-< (p-cast-$ $si_ref) $slen))
+                                        :dyn
+                                        t
                                         (p-let
                                           (($v :box (make-p-box nil))
                                             ($more :box (make-p-box nil)))
@@ -2376,6 +2394,8 @@
               (p-my-= $ti 0)
               (p-let (($tlen :num (%pcl-to-number-strict (p-length $tmpl) "$tlen")))
                 (p-while 1
+                  :dyn
+                  t
                   (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
                   (p-if (p->= $ti $tlen) (p-last))
                   (p-let (($ch :box (make-p-box nil)))
@@ -2529,6 +2549,8 @@
                                                         :tier :native)))
                                                   (p-my-= $slash_n (p-+ $raw 0))))))))
                                       (p-while 1
+                                        :dyn
+                                        t
                                         (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
                                         (p-if (p->= $ti $tlen) (p-last))
                                         (p-let (($dch :box (make-p-box nil)))
@@ -2665,6 +2687,8 @@
                                                                         $dnb)
                                                                       $slen)))
                                                                 ((p-incf-raw $i :numeric))
+                                                                :dyn
+                                                                t
                                                                 (p-funcall-ref $push_val
                                                                   (pl-_unpack_read_int $s
                                                                     (p-cast-$ $si_ref)
@@ -2871,6 +2895,8 @@
                                           (p-for ()
                                             ((p-< $i $n))
                                             ((p-incf-raw $i :numeric))
+                                            :dyn
+                                            t
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
@@ -2894,6 +2920,8 @@
                                           (p-for ()
                                             ((p-< $i $n))
                                             ((p-incf-raw $i :numeric))
+                                            :dyn
+                                            t
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 4) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
@@ -2913,6 +2941,8 @@
                                           (p-for ()
                                             ((p-< $i $n))
                                             ((p-incf-raw $i :numeric))
+                                            :dyn
+                                            t
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 8) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val

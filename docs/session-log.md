@@ -93,6 +93,74 @@ depth-100 warning on core `Fcntl.pm`, visible only on a COLD module cache —
 which a generation bump is exactly what produces.  Reproduced on a clean main
 extraction and filed as **#1531**; it passes on a warm cache on both trees.
 
+## Session s473e (Opus agent, 2026-09-08) — the LOOP-CONTROL residue closed: a `continue` block joins the frame, and a string eval, an indirect call and a `sort` comparator each turn out to be one line of LICENCE rather than a mechanism
+
+**Member 1 (#1161 = #1244 (a)) — the `continue` block joins the frame.**  A
+`continue` block made a `foreach` or a bare block decline the #1022(b) frame, so
+`sub f { next }` called from `for … { … } continue { … }` died with perl's own
+`Can't "next" outside a loop block`.  It cannot simply stay where it is: it
+reads the loop variable, so it sits inside the per-iteration binding, and a CL
+`go` may not jump into a binding form.  On a framed loop it is now created there
+as a THUNK (`%p-foreach-continue-thunk`) and CALLED from `%p-loop-driver`'s
+post-forms, which is where every re-entry lands; a bare block hands its continue
+to `p-dyn-once`, which gained the driver's RESUME variable so a caught `next`
+ends the block only AFTER running it (perl n=1001) while a `last` still skips it
+(n=1).  **A closure, not a saved value** — the body may write the loop variable,
+and where the compiler proved it unboxable that write is an ordinary `setf` of
+the LET binding: `for my $i (1..3) { $i = 99 } continue { push @c, $i }` is
+99 99 99 in perl, and the first (value-carrying) design read 1 2 3.  The bare
+block's licence scan now covers its continue block too, since a sub called there
+can exit the loop.  11 probes vs perl all match; corpus-diff IDENTICAL over 111
+files (no framed continue'd loop exists in the corpus).
+
+**Member 2 (#1244 (b)) — a string eval is transparent to loop control.**  The
+finding is where the bug is NOT: the string eval catches with `handler-case`, a
+`throw` is not a condition, so the loop-control throw was already passing
+through it — the loop simply had no frame.  Verified before writing any code by
+framing the same loop another way, which made `eval q{last}` and `eval q{next}`
+correct with zero runtime change.  So this is one LICENCE widening
+(`is_string_eval_word`, read by both `may_dyn_exit` and `_may_dyn_exit_set`):
+an `eval` whose next sibling is not a Block may exit, because its text is
+another compilation unit.  `eval BLOCK` is deliberately excluded and asserted as
+a negative.  Priced in #1162's currency: `perl-tests` 1 → 167 frames, and a
+sweep of the eight frame-heaviest files is IDENTICAL before and after
+(5138 passing / 170 failing).  Removing the MAY-DYN-EXIT seeding would have
+saved 6 of the 166 frames and lost the `sub f { eval q{last} }` shape.
+
+**Member 3 (#1244 (c)) — an indirect call carries the frame.**  Same finding
+again, against the task's own suspicion: `*p-dyn-loop-frames*` is a dynamic
+variable, so every call carries it whatever its shape; the licence excluded
+indirect calls.  `is_indirect_call_token` reads the shape once — an `&` Cast, or
+a `->` whose next sibling is a Structure::List or a Symbol — and `->[…]`/`->{…}`
+are asserted as negatives.  A side effect worth knowing and guarded: a MODULE
+sub reached through a coderef now works, because the frame is in the CALLING
+unit; the direct named call into another unit is the ONLY residue left.
+`perl-tests` 167 → 218 frames, CPAN modules 5 → 48, and the eleven
+frame-heaviest files sweep IDENTICAL (5451 / 223).
+
+**Member 4 (#1164) — a `sort` comparator is a boundary.**  The one place PCL was
+MORE permissive than perl.  `p-sort` binds `*p-dyn-loop-frames*` to 0 for its
+call, so the exit site takes perl's own die instead of throwing past the sort;
+`%p-sort-classic` needs no bind (plain scalars and builtin comparators, and
+everything else it hands back).  All three comparator spellings are boundaries
+in perl and now here; `map`/`grep` stay transparent in both.  Cost: a runtime
+A/B against a 92d2eb74 runtime, five interleaved runs, reads `sortnum`
+-1.2 %..+1.2 % and `sortstr` -2.1 %..+0.8 % while the byte-identical `intloop`
+CONTROL rows read -4.1 %..+0.2 % on the same runs — inside the instrument's
+noise, and bounded arithmetically at ~0.2 %.
+
+**Bar.**  Guard `Pl/t/loop-exit-01.t` 27 → 54 rows, inverse-verified on a
+92d2eb74 extraction (every positive fails there; the negatives pass on both, and
+the `sort $cmp` row carries a deliberate `g(0)` because without it that loop
+takes no frame and the row would pass for the wrong reason).  Two stale guards
+repaired in the commits that removed their behaviour (the string-eval residue
+row, and the coderef/computed-method die rows).  ir-conform 186, 187 and 329
+left `known-fail.tsv`; 288's stdout now matches perl exactly and its row moved
+to #1247 (the uncaught die's exit code).  `docs/ir-spec.md` §6.2 and
+`docs/not-supported.md` rewritten for all four members; the IR inventory
+regenerated for `p-dyn-once`'s new lambda list; the three checked-in artifacts
+regenerated at gen v2-1080.  **#1379 filed** (pre-existing, not fixed): perl
+clears `$@` on eval ENTRY, PCL only on eval EXIT.
 ## Session s473u (Opus agent, 2026-09-08) — the gate is the cost: 25 gate files were recompiling the whole runtime on every row, and a transpile server now answers the other ~3200 spawns; 463 s / 2933 CPU-s → 86 s / 395 CPU-s
 
 * **Member 1, the profile (#1544) — measured BEFORE anything was built, which is what produced the finding.**  `PCLXS_DIR=~/pclxs prove -j8 --timer Pl/t/` on a quiet box: 224 files, 7720 rows, **463 s wall / 2933 CPU-s**.  Unit prices on the same box: one `pl2cl` spawn 0.13 CPU-s, one sbcl run from the CACHED CORE 0.007 s, one sbcl run that `--load`s `cl/pcl-runtime.lisp` **2.89 s**.  So of the ~3221 spawns and ~3106 sbcl runs the gate makes, the fixed transpile cost is ~419 CPU-s (14 %), SBCL start is ~22 (**not a lever** — the thing the brief had assumed), and ~2400 CPU-s was residue.  `tools/gate-profile.pl` prints that table from any `--timer` log.
