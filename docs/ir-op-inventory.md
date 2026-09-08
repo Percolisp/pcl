@@ -479,7 +479,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-do` | function | `(filename-val)` | — | — | — | — | — | — | — |
 | `p-do-until` | macro | `(condition &body body)` | — | — | — | — | — | — | — |
 | `p-do-while` | macro | `(condition &body body)` | — | — | — | — | — | — | — |
-| `p-dyn-once` | macro | `(form)` | insensitive | none | none | no | yes | no | none |
+| `p-dyn-once` | macro | `(form &optional (continue-form nil))` | insensitive | none | none | no | yes | no | none |
 | `p-for` | macro | `((&optional init) (test) (&optional step) &rest body-and-keys)` | — | — | — | — | — | — | — |
 | `p-foreach` | macro | `((var list) &rest body-and-keys)` | — | — | — | — | — | — | — |
 | `p-foreach-range` | macro | `((var from to) &rest body-and-keys)` | — | — | — | — | — | — | — |

@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 48;
+plan tests => 54;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run; stderr
 # is kept, because some of these rows are about what lands on it.  $OPT is an
@@ -523,3 +523,72 @@ print "n=\$n\\n";
 PERL
        'a MODULE sub called through a CODEREF exits the loop, where the direct named call does not');
 }
+
+# ---- 12. A `sort` COMPARATOR IS A BOUNDARY (task #1164) --------------------
+#
+# The one place PCL was MORE permissive than perl: perl will not `last` out of
+# a sort comparator (`Can't "last" outside a loop block`, in all three
+# spellings — block, SUBNAME, `$cmp`), while PCL exited the enclosing loop.  A
+# `map`/`grep` block is transparent in BOTH.
+#
+# The whole fix is hiding the frame COUNT: `p-sort` binds *p-dyn-loop-frames*
+# to 0 for its call, so %p-dyn-loop-exit takes perl's own die at the exit site
+# instead of throwing past the sort.  ONE special bind per sort CALL, never per
+# comparison — measured on `sortnum`/`sortstr` (20 000 sorts each) against a
+# 92d2eb74 runtime, five interleaved runs: the sort rows read between -1.2 %
+# and +1.2 % while the byte-identical `intloop` CONTROL rows read between
+# -4.1 % and +0.2 % on the same box, so the cost is inside the instrument's own
+# noise (and bounded above by ~0.2 % arithmetically: 20 000 special binds).
+
+like(run_cl(<<'PERL'), qr/^sortblk: 1 died/m,
+sub f { last }
+my $n = 0;
+eval { for my $i (1..3) { $n++; my @x = sort { f(); $a <=> $b } (3,1,2); $n += 100 } };
+print "sortblk: $n ", ($@ ? "died" : "ok"), "\n";
+PERL
+     'a sort BLOCK comparator is a boundary: the `last` dies where it stands, it does not exit the loop (PCL used to give n=1 ok)');
+
+like(run_cl(<<'PERL'), qr/^sortname: 1 died/m,
+sub f { last }
+sub cmpf { f(); $a <=> $b }
+my $n = 0;
+eval { for my $i (1..3) { $n++; my @x = sort cmpf (3,1,2); $n += 100 } };
+print "sortname: $n ", ($@ ? "died" : "ok"), "\n";
+PERL
+     '... and so is `sort SUBNAME`');
+
+like(run_cl(<<'PERL'), qr/^sortref: 1 died/m,
+sub f { last }
+sub g { last if $_[0] }
+my $cr = sub { f(); $a <=> $b };
+my $n = 0;
+eval { for my $i (1..3) { $n++; g(0); my @x = sort $cr (3,1,2); $n += 100 } };
+print "sortref: $n ", ($@ ? "died" : "ok"), "\n";
+PERL
+     '... and `sort $cmp` (all three probed against perl).  The `g(0)` is load-bearing: without it the loop takes no frame and the row would pass for the WRONG reason — it must be the sort that refuses, not a missing frame');
+
+like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
+sub f { last }
+my @x = sort { f(); $a <=> $b } (3,1,2);
+print "unreached\n";
+PERL
+     'with no loop anywhere the text is perl\'s own — the bind only hides the COUNT, it does not invent a message');
+
+is(run_cl(<<'PERL'), "map: 1 ok\ngrep: 1 ok\n",
+sub f { last }
+my $m = 0;
+eval { for my $i (1..3) { $m++; my @y = map { f(); $_ } (1,2); $m += 100 } };
+print "map: $m ", ($@ ? "died" : "ok"), "\n";
+my $g = 0;
+eval { for my $i (1..3) { $g++; my @y = grep { f(); 1 } (1,2); $g += 100 } };
+print "grep: $g ", ($@ ? "died" : "ok"), "\n";
+PERL
+   'inverse: a map or grep BLOCK is NOT a boundary — the exit still reaches the loop, in perl and here');
+
+is(run_cl(<<'PERL'), "4 1 2 5\n",
+sub f { 0 }
+my @x = sort { f(); $a <=> $b } (3,1,2,5);
+my @y = sort { $b <=> $a } (1,2,3);
+print scalar(@x), " ", $y[0] - 2, " ", $x[1], " ", $x[3], "\n";
+PERL
+   'inverse: an ordinary sort still sorts — the bind changes nothing a comparator that does not exit can see');

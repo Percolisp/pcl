@@ -20901,46 +20901,60 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl sort - sort a list with optional comparator function.
    (p-sort list)         - sort single array/list lexically
    (p-sort fn list...)   - sort with comparator fn (lambda or unboxed code ref)
-   (p-sort a b c ...)    - sort concatenated multi-arg list lexically"
-  (if (null args)
-      (make-array 0 :adjustable t :fill-pointer 0)
-      (let* ((first-val (%p-sort-resolve-comparator (unbox (first args))))
-             (has-fn (functionp first-val)))
-        (if has-fn
-            ;; Comparator form: (p-sort fn list...)
-            (let* ((fn first-val)
-                   (raw (apply #'%p-collect-list (rest args)))
-                   (result (if (typep raw 'sequence)
-                               (copy-seq raw)
-                               (make-array 0 :adjustable t :fill-pointer 0))))
-              ;; Box raw literal elements so \$a/\$b alias stably ([perl #78194]).
-              (stable-sort result (lambda (a b)
-                                    (< (to-number
-                                        (funcall fn
-                                                 (if (p-box-p a) a (make-p-box a))
-                                                 (if (p-box-p b) b (make-p-box b))))
-                                       0))))
-            ;; No comparator: flatten all args and sort lexically (stable)
-            (let* ((raw (apply #'%p-collect-list args))
-                   (result (if (typep raw 'sequence)
-                               (copy-seq raw)
-                               (make-array 0 :adjustable t :fill-pointer 0))))
-              ;; PERL'S DEFAULT COMPARATOR IS THE `cmp' OPERATOR (task #1021),
-              ;; not a raw string compare — perldoc -f sort: "sorts in standard
-              ;; string comparison order".  So a class with an overloaded `cmp'
-              ;; is ordered BY IT: `sort @objs' over a `cmp' that disagrees with
-              ;; its `""' answered `a b c' where perl answers `c b a', and it
-              ;; was silent, because a `cmp' that AGREES comes out right by
-              ;; accident.  `p-str-cmp' is the same function `sort { $a cmp $b }'
-              ;; already reaches (which was right all along), so the default and
-              ;; the explicit block cannot give two answers — and its
-              ;; fall-through, `to-string', is perl's autogeneration of `cmp'
-              ;; from `""'.
-              (if (%p-sort-plain-elements-p result)
-                  (stable-sort result (lambda (a b)
-                                        (string< (to-string a) (to-string b))))
-                  (stable-sort result (lambda (a b)
-                                        (< (to-number (p-str-cmp a b)) 0)))))))))
+   (p-sort a b c ...)    - sort concatenated multi-arg list lexically
+
+   A SORT COMPARATOR IS A LOOP-CONTROL BOUNDARY (task #1164).  perl will not
+   `last` out of one: `for (…) { sort { f() } … }` with `sub f { last }` is
+   `Can't \"last\" outside a loop block`, and so are the `sort SUBNAME` and
+   `sort $cmp` spellings (all three probed).  A `map`/`grep` block is NOT a
+   boundary in either language.  Hiding the frame COUNT is the whole of it —
+   %p-dyn-loop-exit reads that count, and with it zero it takes perl's own die
+   at the exit's own site instead of throwing past the sort.  ONE special bind
+   per sort CALL, never per comparison, and it also covers the list collection
+   below, where a tie FETCH or an overload handler could run user code (perl
+   refuses a `last` from those too).  %p-sort-classic needs no such bind: its
+   licence is plain scalars and builtin comparators, and everything else it
+   hands back to this function."
+  (let ((*p-dyn-loop-frames* 0))
+    (if (null args)
+        (make-array 0 :adjustable t :fill-pointer 0)
+        (let* ((first-val (%p-sort-resolve-comparator (unbox (first args))))
+               (has-fn (functionp first-val)))
+          (if has-fn
+              ;; Comparator form: (p-sort fn list...)
+              (let* ((fn first-val)
+                     (raw (apply #'%p-collect-list (rest args)))
+                     (result (if (typep raw 'sequence)
+                                 (copy-seq raw)
+                                 (make-array 0 :adjustable t :fill-pointer 0))))
+                ;; Box raw literal elements so \$a/\$b alias stably ([perl #78194]).
+                (stable-sort result (lambda (a b)
+                                      (< (to-number
+                                          (funcall fn
+                                                   (if (p-box-p a) a (make-p-box a))
+                                                   (if (p-box-p b) b (make-p-box b))))
+                                         0))))
+              ;; No comparator: flatten all args and sort lexically (stable)
+              (let* ((raw (apply #'%p-collect-list args))
+                     (result (if (typep raw 'sequence)
+                                 (copy-seq raw)
+                                 (make-array 0 :adjustable t :fill-pointer 0))))
+                ;; PERL'S DEFAULT COMPARATOR IS THE `cmp' OPERATOR (task #1021),
+                ;; not a raw string compare — perldoc -f sort: "sorts in standard
+                ;; string comparison order".  So a class with an overloaded `cmp'
+                ;; is ordered BY IT: `sort @objs' over a `cmp' that disagrees with
+                ;; its `""' answered `a b c' where perl answers `c b a', and it
+                ;; was silent, because a `cmp' that AGREES comes out right by
+                ;; accident.  `p-str-cmp' is the same function `sort { $a cmp $b }'
+                ;; already reaches (which was right all along), so the default and
+                ;; the explicit block cannot give two answers — and its
+                ;; fall-through, `to-string', is perl's autogeneration of `cmp'
+                ;; from `""'.
+                (if (%p-sort-plain-elements-p result)
+                    (stable-sort result (lambda (a b)
+                                          (string< (to-string a) (to-string b))))
+                    (stable-sort result (lambda (a b)
+                                          (< (to-number (p-str-cmp a b)) 0))))))))))
 
 ;;; ------------------------------------------------------------
 ;;; THE CLASSIC-SORT FAST PATH (task #996 half A5; the Kind-B pass

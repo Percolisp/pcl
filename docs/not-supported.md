@@ -3329,10 +3329,13 @@ overloaded `+`, an overloaded `""` and a tie `FETCH` even when the operation is
 written inside a loop, and so does PCL (probed, including the nested spelling
 where an outer loop is present).
 
-**A `sort` comparator is a boundary in perl and is not one in PCL** (#1164):
-`for (…) { my @x = sort { f() } … }` with `sub f { last }` is
-`Can't "last" outside a loop block` in perl and exits the loop in PCL.  A
-`map`/`grep` block is transparent in BOTH (probed).
+**A `sort` comparator IS a boundary**, in perl and now here too (#1164, closed
+s473e).  `for (…) { my @x = sort { f() } … }` with `sub f { last }` is
+`Can't "last" outside a loop block` in both, and so are the `sort SUBNAME` and
+`sort $cmp` spellings; `p-sort` binds the frame COUNT to 0 for its call, so the
+exit site takes perl's own die instead of throwing past the sort.  A
+`map`/`grep` block is transparent in BOTH (probed).  One special bind per sort
+CALL — measured inside the bench's own noise on `sortnum`/`sortstr`.
 
 **The Kind-A gate** `dyn-loop-exit` (`Pl/Passes.pm`) turns the whole mechanism
 off: `PCL_OPT=-dyn-loop-exit` emits the frame-less loops PCL emitted before

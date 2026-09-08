@@ -1920,14 +1920,22 @@ frame there is nothing to throw to, which is exactly what `PCL_OPT=none` /
 `-dyn-loop-exit` emits (frame-less loops, and a trappable
 `PCL: unsupported: "last" exiting subroutine NAME` at the site).
 
-**The licence is REACHABILITY BY NAME within one compilation unit**
+**The licence is REACHABILITY within one compilation unit**
 (`Pl::PExpr::TokenUtils::may_dyn_exit` over the loop statement's tokens, against
 the unit's MAY-DYN-EXIT set — `Environment::dyn_exit_subs`, the fixpoint
 `Pl::Parser2::_may_dyn_exit_set` takes over the call graph from the subs that
-contain a marked exit).  A loop is framed when its body NAMES one of those subs
-or lexically contains a nested `sub {…}` carrying an exit; everything else is
-emitted BYTE-IDENTICALLY to the pre-#1022(b) shape, which is what keeps the
-frame off ordinary code.
+contain a marked exit, or a STRING EVAL).  A loop is framed when its body
+
+- NAMES one of those subs, or lexically contains a nested `sub {…}` carrying an
+  exit;
+- contains a STRING EVAL (`eval EXPR`, not `eval BLOCK`) — its text is another
+  compilation unit and perl lets a `last` in it out (#1244 (b));
+- contains an INDIRECT CALL — `$c->(…)`, `&$c`, `&{$c}`, `$o->$m` — whose
+  callee is a value this walk cannot follow (#1244 (c)).  `$o->NAME` is read by
+  the name test; `->[…]` / `->{…}` are subscripts, not calls.
+
+Everything else is emitted BYTE-IDENTICALLY to the pre-#1022(b) shape, which is
+what keeps the frame off ordinary code.
 
 That boundary is a MEASUREMENT, not a taste (task #1162): the frame's `catch`
 costs about 4.8 MB of SBCL compile IR, and framing every loop with a call took
@@ -1936,20 +1944,33 @@ costs about 4.8 MB of SBCL compile IR, and framing every loop with a call took
 produced no rows at all.  Under reachability that file carries ONE frame, and
 the whole `perl-tests` corpus carries one.
 
-A consumer must therefore accept the ruled residue: an exit reached through an
-INDIRECT call (a coderef out of a structure, a computed method name, `&$code`,
-`goto &$code`) or from ANOTHER compilation unit (a `use`d module, a string
-eval) meets no frame and takes the perl-shaped die — LOUD, and
-`docs/not-supported.md` names it.  The name test is textual, so a word that
-merely collides with a MAY-DYN-EXIT name costs a frame, never a missing one.
+A consumer must therefore accept the one ruled residue that is left: an exit
+reached by a DIRECT NAMED call into ANOTHER compilation unit (a `use`d module's
+`M::f()` where `f` does a bare `last`) meets no frame and takes the perl-shaped
+die — LOUD, and `docs/not-supported.md` names it.  The same sub reached through
+a CODEREF does work, because the frame is in the calling unit.  The name test is
+textual, so a word that merely collides with a MAY-DYN-EXIT name costs a frame,
+never a missing one.
+
+**A `sort` COMPARATOR is a boundary the exit does not cross** (task #1164): the
+runtime binds `*p-dyn-loop-frames*` to 0 for the whole `p-sort` call, so a
+`last` inside a comparator — block, `SUBNAME` or `$cmp` — takes perl's own die
+at its site rather than throwing past the sort.  A `map`/`grep` block is
+transparent in both languages, and so is a string eval (above).  A consumer
+that gives `sort` its own frame-free scope reproduces this; one that does not
+is more permissive than perl.
 
 **Key order**: `:label NAME` must come first (its value is a symbol); `:my` and
 `:dyn` follow in any order; then the body; then `:continue (progn …)` last.
-A `foreach`-family loop or a bare block with a `continue` block is NOT
-licensed — its continue block is not a re-entry point the driver can reach —
-and the runtime treats the combination as a compiler self-inconsistency
-(rule 12).  `while`/`until` are licensed with a continue block: theirs is a
-post-body form.
+A `continue` block does NOT decline the licence (#1161).  A `while`/`until`
+continue block is already a driver post-form; a `foreach`'s reads the loop
+variable, so on a framed loop it becomes a per-iteration CLOSURE created inside
+the binding and CALLED from the driver's re-entry point, and a bare block's
+becomes `p-dyn-once`'s second argument.  A CLOSURE and not a saved value: the
+body may write the loop variable, and where the compiler proved that variable
+unboxable the write is an ordinary `setf` of the binding, which only a closure
+over it can see (`for my $i (1..3) { $i = 99 } continue { print $i }` prints 99
+three times).
 ### 6.3 Exceptions: `die` / `eval { }` / `$@`
 
 `die` signals a `p-exception` carrying either a string or an arbitrary
