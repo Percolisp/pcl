@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-1030
+;;; pcl: pipeline=v2 gen=v2-1060
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -18,7 +18,7 @@
 ;;; package mro
 (p-defpackage :mro)
 (in-package :mro)
-(defclass plc-mro () ())
+(p-defclass plc-mro () ())
 (p-register-pkg-name :mro "mro")
 
 (p-declare-sub pl-import)

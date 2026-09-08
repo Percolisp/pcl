@@ -343,7 +343,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
+   #:p-defpackage #:p-defclass #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
@@ -711,6 +711,53 @@
          (%p-ensure-storage isa-sym)
          (setf (symbol-value isa-sym)
                (make-array 0 :adjustable t :fill-pointer 0))))))
+
+(defun %p-class-ready-p (name supers)
+  "True when the CLOS class NAME already exists AND its direct superclasses
+   are exactly SUPERS, by name and in order — i.e. when the
+   `(defclass NAME SUPERS ())` form would change nothing.
+
+   The superclass comparison is load-bearing, not decoration (task #1518): a
+   program can name one package twice with a DIFFERENT @ISA, and a guard keyed
+   on mere existence would freeze the first one's parents.  Comparison is by
+   class NAME because a not-yet-defined parent is a FORWARD-REFERENCED-CLASS
+   here and the real class later — the same name throughout, and the same
+   answer before and after the parent arrives.
+
+   An empty SUPERS is STANDARD-OBJECT: that is what CLOS records as the direct
+   superclass of `(defclass foo () ())`, so the two spellings must be compared
+   in the same vocabulary or a bare class would never look ready."
+  (let ((c (find-class name nil)))
+    (and c
+         (equal (mapcar #'class-name (sb-mop:class-direct-superclasses c))
+                (or supers (list 'standard-object)))
+         t)))
+
+(defmacro p-defclass (name supers slots)
+  "The CLOS class that carries a Perl package's MRO, defined ONLY when it is
+   not already there in that exact shape.
+
+   The other half of #1189's finding (task #1518), and the same argument as
+   `p-defpackage`'s: every emitted program opens with a preamble for each
+   package it mentions, and the program a STRING EVAL produces is an emitted
+   program — so a module that generates code at run time re-runs `ensure-class`
+   for a class that already exists.  Measured on the `moo-objs` bench row:
+   12 `ensure-class` executions per loop iteration (10 of them Moo's
+   Sub::Quote eval package), and CL's `defclass` on an EXISTING class is not
+   cheap — sb-pcl's braid update, `update-ctors`, `shared-initialize` and two
+   mutexes, together ~35 % of that row's loop samples after the defpackage
+   half shipped.
+
+   SLOTS must be empty.  The readiness test above is about the class's
+   IDENTITY and its parents; it says nothing about slot definitions, so a
+   form carrying them would be silently skipped when only its slots changed
+   (rule 12 — a case this cannot answer says so instead of guessing).  pl2cl
+   emits `()` at all six of its `defclass` sites."
+  (when slots
+    (error "p-defclass: slots are not part of the readiness test: ~S" slots))
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (unless (%p-class-ready-p ',name ',supers)
+       (defclass ,name ,supers ()))))
 
 ;;; perl-pkg-to-cl-pkg-name: map a Perl package name to the CL package-name
 ;;; string PCL's codegen uses.  Codegen pipe-quotes multi-segment names
@@ -19039,7 +19086,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1030"
+(defparameter *pcl-cache-generation* "v2-1060"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

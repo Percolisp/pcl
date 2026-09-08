@@ -1130,12 +1130,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 # UNCLASSIFIED
 
-## UNCLASSIFIED (3)
+## UNCLASSIFIED (4)
 
 *No ir-spec §10 row and no note.*
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
 | `p-default-layers` | macro | `((in-layers out-layers) &body body)` | — | — | — | — | — | — | — |
+| `p-defclass` | macro | `(name supers slots)` | — | — | — | — | — | — | — |
 | `p-symref-site` | macro | `nil` | insensitive | none | none | no | no | no | none |
 | `p-use-open` | function | `(&rest args)` | — | — | — | — | — | — | — |

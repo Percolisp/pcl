@@ -2306,6 +2306,23 @@ var ⇒ plain lexical binding, no localization at all).
   package, whose superclass edges mirror `@ISA`); the first package
   defining the method wins. Method-name string → function mapping goes
   through the `%pcl-cl-sub-name` registry (case-preserving).
+- **The proxy class is emitted as `(p-defclass plc-NAME (PARENTS) ())`**
+  (s473s, task #1518), which defines the class only when it is not already
+  there with exactly those direct superclasses. The guard is normative, not
+  an optimisation detail a consumer may skip: a program's preamble names
+  every package it mentions, and a string `eval` produces a program with its
+  own preamble, so a module that generates code at run time re-opens classes
+  that already exist (12 per `moo-objs` bench iteration). Parents are
+  compared by NAME, so a not-yet-defined parent gives the same answer before
+  and after it arrives; an empty parent list compares against the host's
+  root object class; SLOTS must be empty — a form carrying them is a shape
+  the readiness test cannot answer, and dies (CLAUDE.md rule 12). A backend
+  implements it as "define this class unless it is already this class".
+
+  ```lisp
+  (p-defclass plc-dog (plc-animal) ())   ; a no-op when plc-dog already has
+                                         ; exactly (plc-animal) as parents
+  ```
 - `SUPER::name` dispatches starting *after* the current sub's home
   package in the linearization, and **finishes the lookup exactly like an
   ordinary method call** (s446m, #533): UNIVERSAL and UNIVERSAL's own
@@ -2330,13 +2347,21 @@ var ⇒ plain lexical binding, no localization at all).
   arm all call it). Raw `nil` is the empty list only where `%p-flatten-list`
   reads it; a translator that emits raw `nil` anywhere else gets an array
   hole or a phantom argument instead.
-- **Dispatch resolves per call — nothing about the resolution is cached**
-  (the USER's cache-free ruling, s444; measured in s446m). A method
-  glob-assigned or redefined after an object has already dispatched, and a
-  runtime `@ISA` rewrite, must be visible on the very next call. What *is*
-  memoized is name→package (the stash table, perl's `gv_stashpv` shape)
-  and name→`pl-NAME`, both pure functions of a name. Guard:
-  `Pl/t/method-dispatch-01.t`.
+- **Every redefinition is visible on the very next call.** A method
+  glob-assigned, redefined, `undef`-ed or `local`-ised after an object has
+  already dispatched, and a runtime `@ISA` rewrite, all take effect
+  immediately; there is no per-call-site inline cache (the USER's ruling,
+  s444). What may be memoized is only what a redefinition writes THROUGH:
+  name→package (the stash table, perl's `gv_stashpv` shape),
+  name→`pl-NAME`, and — since s473s, task #582's own-class half — the
+  OWN-CLASS resolution `(class name, method name)` → **the SYMBOL** naming
+  the sub. The symbol is the indirection perl's glob is: every definer
+  stores into its `symbol-function`, so a stored entry answers with the new
+  definition, and a removal (`fmakunbound`) is seen by the entry's own
+  `fboundp` test, which declines to the full walk. An own MISS is never
+  stored, so an inherited call re-walks `@ISA` every time and a method
+  defined later cannot be masked. Guards:
+  `Pl/t/method-dispatch-01.t`, `Pl/t/method-cache-01.t`.
 - `AUTOLOAD` is honored (walks `@ISA`, skips `DESTROY`). `can`/`isa` work.
   `DESTROY` is **never called by GC** (documented divergence).
 - PCL always linearizes with C3 (stock Perl defaults to DFS; documented
@@ -3462,7 +3487,7 @@ any PCL output.
 | `defun` `defmacro` | a top-level function.  A `defmacro` is expanded by the CL compiler and never reaches a backend that reads the EMITTED file — the emitted file only CALLS the `p-*` macros, so a backend implements them as functions or inlines them | the same |
 | `defvar` `defparameter` `defconstant` | a module-level `let` (`defvar` only initialises when unbound; `defparameter` always) | a global; `defvar`'s once-only rule needs an initialised flag |
 | `define-symbol-macro` | a getter/setter pair the emitter's reads and writes go through | an accessor macro |
-| `defclass` `defmethod` `defgeneric` `make-instance` `find-class` | a class per perl package, for the CLOS-backed `@ISA`/C3 machinery (§7.3) | a vtable per package |
+| `p-defclass` (expanding to `defclass`) `defmethod` `defgeneric` `make-instance` `find-class` | a class per perl package, for the CLOS-backed `@ISA`/C3 machinery (§7.3).  The EMITTED file writes `p-defclass`, never a bare `defclass` — see §7.3 for its readiness rule | a vtable per package |
 | `eval-when` | run in form order (§11) | run in form order |
 | `in-package` `*package*` | the CURRENT PACKAGE is a real run-time value here, not only a reader concept: a section switch binds `*package*` and the runtime resolves unqualified names against it (§7.1, §9.1).  A backend needs a module-level `currentPackage` with save/restore | the same, as a global with a save/restore stack |
 
@@ -3668,7 +3693,7 @@ Two things, both DECLARED rather than dropped in silence:
   the corpus's islands are the `p-let` init spellings and the `local` family's
   open text.
 * **The file's environment preamble and the CL-reader bookkeeping the
-  assembly writes as text** — `in-package`, `p-defpackage`, `defclass`, the
+  assembly writes as text** — `in-package`, `p-defpackage`, `p-defclass`, the
   per-package `$a`/`$b` defvars, the forward-global `defvar`s,
   `p-run-compile-phase-blocks`, `p-set-current-package`.  §11 already says the
   preamble is environment bootstrap; the rest a consumer derives from the

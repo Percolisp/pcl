@@ -2072,7 +2072,7 @@ sub parse {
       push @body, ";;; package $pkg",
                   "(p-defpackage $cl_pkg)",
                   "(in-package $cl_pkg)",
-                  "(defclass $cl_class () ())",
+                  "(p-defclass $cl_class () ())",
                   "(p-register-pkg-name $cl_pkg \"$pkg\")", '';
       $reader = $cl_pkg;
     } elsif ($i > 0) {

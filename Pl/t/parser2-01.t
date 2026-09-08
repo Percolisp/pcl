@@ -268,7 +268,7 @@ print hi(), "\n";
 EOF
 like($pkg, qr/^\(pcl:p-defpackage :Foo\)/m, 'later packages predeclared at file top');
 like($pkg, qr/\(p-defpackage :Foo\)\n\(in-package :Foo\)/, 'package section preamble enters :Foo');
-like($pkg, qr/\(defclass plc-foo \(\) \(\)\)/, 'CLOS class for MRO in the section preamble');
+like($pkg, qr/\(p-defclass plc-foo \(\) \(\)\)/, 'CLOS class for MRO in the section preamble');
 like($pkg, qr/\(p-set-current-package :Foo "Foo"\)/, 'runtime current-package tracking');
 like($pkg, qr/\(in-package :main\)/, 'package main section returns the reader to :main');
 my $hi_defs = () = $pkg =~ /\(p-sub pl-hi[\s(]/g;

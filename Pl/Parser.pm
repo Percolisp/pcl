@@ -3469,12 +3469,12 @@ sub _process_isa_declaration {
       # defclass in _emit_package_preamble's block branch).
       my $q_class = $self->_qualified_clos_class($pkg);
       $self->_emit(";; Redefine CLOS class with parents for MRO");
-      $self->_emit("(defclass $q_class ($parents_cl) ())");
+      $self->_emit("(p-defclass $q_class ($parents_cl) ())");
     }
     else {
       $self->_with_bucket('preamble', sub {
         $self->_emit(";; Redefine CLOS class with parents for MRO");
-        $self->_emit("(defclass $cl_class ($parents_cl) ())");
+        $self->_emit("(p-defclass $cl_class ($parents_cl) ())");
       });
     }
   }
@@ -3606,7 +3606,7 @@ sub _process_use_base {
       $self->_emit("(p-eval-always (p-defpackage "
                    . $self->_cl_pkg_designator($parent) . "))");
     }
-    $self->_emit("(defclass $cl_class ($parents_cl) ())");
+    $self->_emit("(p-defclass $cl_class ($parents_cl) ())");
   });
 
   # Declare @ISA in declarations bucket, push parents at load time
@@ -8705,7 +8705,7 @@ sub _process_package_statement {
       $self->_emit(";;; inline package $pkg_name");
       $self->_emit("(p-defpackage $cl_pkg)");
       $self->_emit(";; CLOS class for MRO");
-      $self->_emit("(defclass $cl_class () ())");
+      $self->_emit("(p-defclass $cl_class () ())");
       $self->_emit("(p-set-current-package $cl_pkg \"$pkg_name\")");
       $self->_emit("");
 
@@ -8840,7 +8840,7 @@ sub _emit_package_preamble {
     # Qualify the class name: the inline (in-package) above has not taken effect
     # at READ time (the whole block is one top-level form), so a bare class name
     # would intern in the wrong package — see _qualified_clos_class.
-    $self->_emit("(defclass @{[ $self->_qualified_clos_class($pkg_name) ]} () ())");
+    $self->_emit("(p-defclass @{[ $self->_qualified_clos_class($pkg_name) ]} () ())");
     # Declare $a/$b as special in this package using fully-qualified names in the
     # top-level declarations bucket.  Using pkg::$a at top level (where the reader's
     # *package* is whatever the enclosing section uses) ensures SBCL sees these as
@@ -8871,7 +8871,7 @@ sub _emit_package_preamble {
     $self->_emit("(p-defpackage $cl_pkg)");
     $self->_emit("(in-package $cl_pkg)");
     $self->_emit(";; CLOS class for MRO");
-    $self->_emit("(defclass $cl_class () ())");
+    $self->_emit("(p-defclass $cl_class () ())");
     # Register the original-case name eagerly (preamble is hoisted before any
     # runtime code, so before this package's `use` statements run).  Needed so
     # caller()/__PACKAGE__ inside an imported module's import() resolve this
