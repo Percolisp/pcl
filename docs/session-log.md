@@ -2,6 +2,122 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473i (Opus agent, 2026-09-08) — three PRODUCT bugs a user meets before any semantics: `--executable` builds a binary that RUNS the program, `-I` reaches a MODULE's own transpile, and the module cache key names the COMPILER
+
+**Member 1 — `pl2cl --executable` (#1060).**  It `load`ed the emitted program
+into the build image and saved an image whose `:toplevel` only exited, so the
+PROGRAM RAN AT BUILD TIME (the marker file a probe writes existed after the
+build) and the 49 MB binary exited 0 having done nothing — and, worse than the
+task said, a program containing `exit` killed the builder so no binary was
+written at all.  It needed no new emission mode: the emission already hoists
+every section's COMPILE phase above the single `(p-run-compile-phase-blocks)`
+(`Pl/Parser2.pm` 2044–2135, the #456(b)/#469 phase model — measured, 111 of 111
+perl-tests transpiles have exactly one, at column 0, with no
+defvar/p-sub/p-defcell after it).  So the split is a READ of the emitted file:
+`cl/pcl-build-exe.lisp` EVALs the compile phase into the build image (which IS
+perl's compile phase, and gives the plan's step-3 `use`-closure preload for
+free) and compiles each later top-level form into a thunk that the saved
+`:toplevel` calls after taking `@ARGV` and `$0` from the real process.
+`--bundle` had the same build-time run — it `--load`ed the bundle "to get
+ASDF/cl-ppcre" before `compile-file` — and now starts from the runtime/core
+prefix instead.  Measured against perl on the same source: `exit 3` → rc 3 with
+byte-identical stdout and END blocks run; uncaught `die` → rc 255 with the
+message and nothing else (`pcl` itself still prints an SBCL backtrace and exits
+1); `use List::Util` plus an OO package, sprintf, `s///`, `%ENV` and `$$` →
+identical, and the binary runs under `env -i` from another cwd.  Build 3.2 s →
+0.9 s (`--executable`), 7.2 s → 4.4 s (`--bundle`).  What is still NOT embedded
+is said in `pcl --help`, `pl2cl --help` and the README rather than assumed:
+`strace` shows the binary opening `cl/pcl-pack.lisp` from the build tree at run
+time, and a `require` that misses the module cache still shells out (plan steps
+3–5).  Guard `tools/t/executable-01.t` — 24 rows, ~8 s, NOT in the gate, 17 of
+them failing on the `a9f2a264` extraction — plus two help-text rows in
+`Pl/t/cache-surface-01.t`.
+
+**Member 2 — `-I` reaches a MODULE's own transpile (#1284).**  The runtime
+spawned `perl <pl2cl> --module` with NO `-I` at all, so `pcl -I DIR prog.pl`
+reached the PROGRAM's transpile and not module A's: a dependency B beside A in
+DIR did not resolve, `_extract_module_prototypes` returned undef, and every
+parse fact B carries was silently missing — `blk { 42 }` under a `(&)`
+prototype passed the block's VALUE (`VAL:42`) where perl passes a code ref
+(`CODE:42`).  `%p-transpile-inc-args` hands the child this program's own
+`@INC`, MINUS PCL's shim `lib/`: that directory holds `Errno.pm`, `Config.pm`,
+`POSIX.pm` and friends, which PCL transpiles but real perl cannot load, and the
+first version of the fix killed pl2cl outright (`panic: Can't use %! because
+Errno does not define _tie_it`).  The discriminator is NOT `*p-core-inc-dirs*`
+— that is pl2cl's whole `@INC`, so under `pcl -I DIR` it CONTAINS DIR, and a
+second attempt keyed on it was measured inert — but the shim directory alone,
+compared as TRUENAMES.  The cache half: "B did not resolve" is a fact the
+emission encodes, and the manifest has always recorded
+`missing<TAB>mod<TAB>NAME` while this side parsed and ignored it ("not
+re-checkable at load"); it is now re-checked through `p-find-module-in-inc`, a
+superset of the child's list, so the check errs only towards a needless
+re-transpile.  Measured with A in one directory and B in another against one
+cache: run 1 records `missing mod SplitB`; run 2, with B's directory added,
+served `VAL:42` before and prints `CODE:42` after.  Cost on this box's live
+cache: 256 `missing` records over 5939 entries, at most 4 in one file, 27
+distinct names (`Win32` and `VMS::Stdio` among them — never resolvable here, so
+never an invalidation).  `Pl/t/module-fasl-cache-01.t`'s `run_pcl` STOPS
+setting `PERL5LIB=$dir`, the workaround that had been carrying six of its own
+dependency rows.  ir-spec §9.2b updated (normative).
+
+**Member 3 — the module cache key names the COMPILER (#1119).**  The key was
+the module's path plus `*pcl-cache-generation*`, and that string says what a
+SESSION INTENDED; two worktrees on the same string shared the cache, and a
+stopped session's entries outlived its compiler — each cost a gate run in
+s470bi.  The rule is the one the tree already has:
+`Pl::ProtoCache::_compiler_stamp` (#560) keys its prototype memo on the `Pl/`
+directory's absolute path plus every `Pl/**.pm`'s mtime+size, and its POD says
+why in as many words ("this is also what keeps two worktrees that happen to
+share a generation string from reading each other's entries").  So this is that
+rule in the runtime, plus `pl2cl` — the file this side spawns, which ProtoCache
+cannot see.  STAT and not content, measured rather than assumed (the task and
+the brief both guessed content at ~5 ms): MD5 over the 2.24 MB of `Pl/**.pm` +
+`pl2cl` is **14.7 ms**, the stat stamp **1.5 ms**, paid once per process and
+only by one that loads a module.  What content would catch and this does not is
+a compiler file whose size AND mtime are unchanged while its bytes differ —
+`git checkout` does not produce that, and #1261's argument against mtimes is
+about a DEPENDENCY, a file the user edits and git restores, not about the PCL
+tree itself.  Computed at first use and memoised, never while the runtime loads
+(on the normal path that is when a core is built), with an
+`sb-ext:*init-hooks*` entry clearing the memo.  `pcl --cache-info` prints the
+compiler root, the compiler stamp and the runtime identity.
+
+**The bars, on the rebased tree (main `2f8a6adc`, generation renumbered to
+v2-1140 and the three artifacts regenerated — they differ from main's only in
+the `gen=` stamp).**  Gate COLD `PCLXS_DIR=~/pclxs tools/prove-core`: **230
+files / 7863 rows, 96 s wall / 439 CPU-s, failures only in
+`Pl/t/xs-01/02/03.t`** (the 13 standing pclxs rows).  Sweep `--jobs 4` on the
+rebased tree — the combined-tree sweep the protocol owes: **GATE clean, TOTAL
+passing 18675 (+0)**, drops 5 = census, 0 new / 0 fixed / 0 LOST.  corpus-diff
+vs the batch's own base: emission IDENTICAL over 111 files, silent drops 5
+unchanged.  emission-ab `--shapes`: `lib/` 25 files SAME / 0 DIFF / 0 RCDIFF,
+`cpan-tests` 99 files SAME / 0 DIFF / 0 RCDIFF — **both instruments are blind
+to #1284 by construction**, since they run `pl2cl` directly and the change is
+in how the RUNTIME spawns it; the sweep and the board are the measurement, and
+that is why they were run.  `tools/ir-host-leak.pl` 31 leaked symbols,
+identical to the base extraction.  `tools/ir-conform --jobs 2`: 311 pass / 0
+fail / 34 known / 0 stale.  Companion `--jobs 1` on `op/inccode.t
+op/incfilter.t op/require_errors.t op/do.t`: identical before and after
+(13/28, 0/0, 5/68, 66/7).  `tools/t/install-pcl.t` 57/57 in 22 s.
+
+**The CPAN board, and one operator error worth recording.**  The first run
+read 38 TRANSPILE-FAIL rows across Scalar-List-Utils — because the invocation
+omitted `--no-dist-lib`, which `docs/STATUS.md` and `run-dist-t.pl`'s own
+CAVEAT both spell out: that dist's unbuilt XS `lib/` shadows PCL's
+`Scalar::Util` shim inside pl2cl itself.  With the documented invocation, cold
+and warm against the same cache differ in **one** row and base-vs-batch on the
+52 shared rows of the two candidate dists differ in the **same** one:
+`Text-Balanced 05_extmul.t`, whose `rc` flips between 0 and 124 because the
+file runs 105–134 s against a 120 s timeout (timed on both trees; the verdict
+is `FAIL 0 0` every time, no TAP either way).  So nothing on the board is
+attributable to this batch.  Against the blessed `cpan-board14-s467.tsv` there
+are four further movers — `Scalar-List-Utils max.t 5/2 → 8/2, min.t 5/2 →
+20/2, product.t 12/1 → 23/4, sum.t PASS 8/0 → PARTIAL 15/3` — all UP, all
+reproduced exactly on the `a9f2a264` extraction, i.e. PRE-EXISTING between s467
+and this batch's base and the same List::Util family as the baseline header's
+own #1286 edit to `first.t`.  The baseline is NOT edited (this batch did not
+cause them and did not bisect them); they are **#1399**.
+
 ## Session s473h (Opus agent, 2026-09-08) — #1249's seven singletons: four shipped, three measured and filed; the range double-FETCH (#1430); `$ENV{_PCL_RUNTIME_}` (#1529); #1429 turned out to be #155; #1242/#1117 sized
 
 **The four that shipped.**  `${$aryref}` read the array where perl dies "Not a
