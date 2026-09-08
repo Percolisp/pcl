@@ -125,12 +125,10 @@ is($got{5}, '0 of 14',
 sub run_pl {
     my ($code) = @_;
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    binmode($fh, ':utf8');
     print $fh $code;
     close $fh;
     my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
-    binmode($cl_fh, ':utf8');
     print $cl_fh $cl_code;
     close $cl_fh;
     my $out = `sbcl @sbcl_rt --load $cl_file 2>&1`;
