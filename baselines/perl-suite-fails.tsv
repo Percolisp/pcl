@@ -3594,8 +3594,6 @@ op/eval.t	95	ok	not ok	[at t/op/eval.t line 377]
 op/eval.t	96	ok	not ok	[at t/op/eval.t line 378]
 op/eval.t	98	ok	not ok	[at t/op/eval.t line 385]
 op/eval.t	99	ok	not ok	[at t/op/eval.t line 391]
-op/eval.t	21	ok	not ok	[at t/op/eval.t line 75]
-op/eval.t	22	ok	not ok	[at t/op/eval.t line 76]
 op/eval.t	26	ok	not ok	[at t/op/eval.t line 86]
 op/eval.t	107	ok	not ok	eval and last
 op/eval.t	45	ok	not ok	eval catches bad goto calls
