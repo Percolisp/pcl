@@ -260,6 +260,10 @@ sub _ends_in_comment {
 
 sub _flat {
   my ($f) = @_;
+  # One frame per nesting level, and the emitted form nests each `my`'s block
+  # remainder: a block of >100 statements crosses perl's depth-100 report
+  # threshold legitimately (the s403 ruling: tree walkers get 'recursion'; #1531).
+  no warnings 'recursion';
   if (!ref $f) { return _no_flat($f) ? undef : $f }
   if (is_raw($f)) { return _no_flat($$f) ? undef : $$f }
   return undef if is_raw_wrap($f);
@@ -333,6 +337,7 @@ sub _is_plist {
 
 sub to_string {
   my ($f, $depth) = @_;
+  no warnings 'recursion';   # same as _flat: one frame per nesting level (#1531)
   $depth //= 0;
   _raw_census($f) if !$depth && $ENV{PCL_E2_RAW_CENSUS};
   return $f unless ref $f;

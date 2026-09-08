@@ -114,6 +114,10 @@ sub run { my ($form, $anno) = @_; $ANNO = $anno ? 1 : 0; return _walk($form, PLA
 # traversal and no allocation.
 sub _walk {
   my ($f, $mode) = @_;
+  # One frame per statement: the emitted form nests each `my`'s block
+  # remainder, so a block of >100 statements crosses perl's depth-100 report
+  # threshold legitimately (the s403 ruling: tree walkers get 'recursion'; #1531).
+  no warnings 'recursion';
   my $r = ref $f or return $f;
   if ($r eq 'Pl::CLForm::RawWrap') {
     $_ = _walk($_, PLAIN) for @{ $f->{body} };

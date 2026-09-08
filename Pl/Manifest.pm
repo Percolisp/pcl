@@ -230,6 +230,10 @@ sub _canon {
 
 sub _walk {
   my ($f, $acc) = @_;
+  # One frame per statement (each `my` nests the block remainder): a block of
+  # >100 statements crosses perl's depth-100 report threshold legitimately
+  # (the s403 ruling: tree walkers get 'recursion'; #1531).
+  no warnings 'recursion';
   return unless defined $f;
   if (!ref $f) { return }
   if (Pl::CLForm::is_raw($f))      { _scan_text($$f, $acc); return }

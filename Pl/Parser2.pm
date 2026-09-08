@@ -8457,6 +8457,14 @@ sub _leading_shift_params {
 # The form is emitted only when the statement produced code: a `use` that
 # lowers to nothing must not leave a bare (p-line N) behind.
 sub _lower_block {
+  # The two halves recurse through EACH OTHER once per statement (see
+  # _lower_block_1's note), and perl judges its depth-100 "Deep recursion"
+  # warning at the CALL SITE's lexical scope — so each half must carry the
+  # pragma for the call it makes into the other.  Without this one, the call
+  # below fired it on any block of >100 statements (lib/Fcntl.pm, lib/Errno.pm)
+  # during the runtime's own `pl2cl --module` transpile, on a COLD module cache
+  # only — which is every CI run (#1531).  Guard: Pl/t/module-transpile-quiet-01.t.
+  no warnings 'recursion';
   my ($self, $stmts, $vi, $tail_ctx) = @_;
   my @forms = $self->_lower_block_1($stmts, $vi, $tail_ctx);
   return @forms unless @forms && Pl::Passes::enabled('line-track');
