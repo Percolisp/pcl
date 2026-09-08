@@ -247,6 +247,18 @@ live against perl in s370.  Nothing consumes a wrong value — the program keeps
 running where perl stops — so it is an accepted divergence, not a silent-wrong
 in the rule-12 sense.
 
+**Sized s473h, task #1391** (18 shapes vs perl 5.40.3): perl dies in 8 of
+them, and the property is per **element** (`("a", $v)` writes the second and
+refuses the first), propagates through `sort`/`reverse`/`grep`, and does NOT
+propagate through `map` (which copies).  "A flag on literal boxes" is not
+available: a literal in the emitted list is a RAW value in `(vector "a" "b")`,
+and `%p-foreach-elt` PROMOTES it — while raw slots of a real array must keep
+being promoted, so raw-vs-boxed cannot stand in for literal-vs-variable.  What
+it would take is in #1391: the compiler marks the literal SLOTS, the aliasing
+binder refuses to promote a marked slot (the fatal already exists, from #159),
+and the aliasing operators propagate the mark.  The check then sits at the
+BINDER, not in `box-set`, which is what makes it worth trying.
+
 ---
 
 ## Read-only constants via `\undef` stash tricks

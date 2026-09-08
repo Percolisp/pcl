@@ -36,7 +36,7 @@
 246-exception	1240	the runtime-raised errors in the table carry `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 253-string	1390	`exists $string->{k}` must die under `use strict refs`; PCL answers "" -- the WHOLE arrow-deref family diverges (9 spellings measured s473h), and strict-refs enforcement needs the strict-hints model.  Second cause: exit 255 vs 0 (#1247)
 258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line
-272-sort	1249	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies
+272-sort	1391	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies -- 8 of 18 shapes measured s473h, per ELEMENT and propagating through sort/reverse/grep; needs a marked literal slot, not a box flag.  Second cause: exit 255 vs 0 (#1247)
 282-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 288-loops-exits	1247	stdout MATCHES perl exactly since s473e (#1244 closed); the residue is the EXIT CODE of the final uncaught die -- SBCL exits 1 where perl exits 255, the same cause as 120-io
 299-io	1246	`close($fh)` after a failed open returns undef; perl returns ''
