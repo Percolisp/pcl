@@ -140,7 +140,8 @@ generic form; the output must behave identically, and the test suite checks
 that it does.  Your own script is compiled on every run, so a large one pays
 a pause before its first line: a one-liner starts in under a quarter of a
 second, a thousand-line script takes a few seconds.  The full list is in
-[`docs/caching.md`](docs/caching.md) and in `pcl --help`.
+[`docs/caching.md`](docs/caching.md) and in `pcl --help`; every command and
+flag is on one page in [`docs/pcl-commands.md`](docs/pcl-commands.md).
 
 **Detecting PCL from Perl code.**  `$ENV{_PCL_RUNTIME_}` is true in every PCL
 process, and its value is the version `pcl --version` prints:
@@ -469,6 +470,7 @@ about a tenth of a second plus the time to compile your script.
 
 | | |
 |---|---|
+| [`docs/pcl-commands.md`](docs/pcl-commands.md) | the command reference: `pcl`, `pl2cl`, `runpcl`, the installer, how the runtime and modules are compiled and cached |
 | [`docs/STATUS.md`](docs/STATUS.md) | what runs, measured, with failure breakdowns |
 | [`docs/not-supported.md`](docs/not-supported.md) | what does not, and why |
 | [`docs/ir-spec.md`](docs/ir-spec.md) | what every form in the generated Lisp means |
