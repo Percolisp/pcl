@@ -9558,6 +9558,37 @@ per element."
         (error "panic: memory wrap")
         (error "Out of memory during list extend"))))
 
+(defun %p-range-string-vector (a b)
+  "The STRING (magical-increment) range from bounds ALREADY classified by
+   %p-range-classify — A and B are unboxed strings, undef normalised to \"\".
+
+   SPLIT OUT of `p-..` so the segment fill can build a string range WITHOUT
+   classifying a second time (task #1430).  %p-range-classify UNBOXES its
+   operands, and unboxing a tied scalar is a FETCH, so the old
+   classify-then-call-`p-..` shape in %p-array-fill-range read a tied operand
+   TWICE where perl reads it once — perl's pp_flop fetches both operands once
+   and only then decides numeric-vs-string.  The numeric arm never had the bug
+   because it never called back into `p-..`; this makes the two arms agree."
+  (if (and (> (length a) 0) (ppcre:scan "^[a-zA-Z0-9]+$" a))
+      ;; Magical string range (all alphanumeric start)
+      (if (> (length a) (length b))
+          (make-array 0)
+          (let ((result (make-array 0 :adjustable t :fill-pointer 0))
+                (current (copy-seq a))
+                (max-len (length b)))
+            (loop
+             (vector-push-extend current result)
+             (when (string= current b) (return))
+             (setf current (magical-string-increment current))
+             ;; If magical-string-increment returned a number, stop
+             (unless (stringp current) (return))
+             (when (> (length current) max-len) (return)))
+            result))
+      ;; Non-magical or empty start: return (a) if a <= b, else empty
+      (if (string<= a b)
+          (vector a)
+          (make-array 0))))
+
 (defun p-.. (start end)
   "Perl range operator .. - returns a vector from start to end (inclusive).
    Works with numbers, single characters, and multi-character strings
@@ -9566,26 +9597,7 @@ per element."
    p-foreach-range macro counting-loops without materializing the vector."
   (multiple-value-bind (kind a b) (%p-range-classify start end)
     (if (eq kind :string)
-        ;; String range: magical vs non-magical starts
-        (if (and (> (length a) 0) (ppcre:scan "^[a-zA-Z0-9]+$" a))
-            ;; Magical string range (all alphanumeric start)
-            (if (> (length a) (length b))
-                (make-array 0)
-                (let ((result (make-array 0 :adjustable t :fill-pointer 0))
-                      (current (copy-seq a))
-                      (max-len (length b)))
-                  (loop
-                   (vector-push-extend current result)
-                   (when (string= current b) (return))
-                   (setf current (magical-string-increment current))
-                   ;; If magical-string-increment returned a number, stop
-                   (unless (stringp current) (return))
-                   (when (> (length current) max-len) (return)))
-                  result))
-            ;; Non-magical or empty start: return (a) if a <= b, else empty
-            (if (string<= a b)
-                (vector a)
-                (make-array 0)))
+        (%p-range-string-vector a b)
         ;; Numeric range (materialized — only reached outside foreach)
         (progn
           (%p-range-size-check a b)
@@ -9602,9 +9614,11 @@ per element."
 
 (defun %p-array-fill-range (place start end)
   "Append the range START..END to PLACE without materialising it.
-   A magical STRING range has no counting form, so it goes through `p-..` and
-   the ordinary walk — the same answer the general path gives, since that is
-   the same call.
+   A magical STRING range has no counting form, so it is built by
+   %p-range-string-vector and walked — the same builder `p-..` uses, called
+   with the bounds THIS classification produced.  It must not call `p-..`
+   itself: that would classify a second time, and classification unboxes,
+   which for a tied operand is a second FETCH where perl does one (#1430).
 
    THE ELEMENT REPRESENTATION IS THE GATE'S, not this function's.  A range's
    elements are plain integers, and for those %p-array-store-scalar stores the
@@ -9615,7 +9629,7 @@ per element."
    or the all-boxed A/B world stops being measurable.)"
   (multiple-value-bind (kind a b) (%p-range-classify start end)
     (if (eq kind :string)
-        (%p-array-add-items (p-.. start end) place)
+        (%p-array-add-items (%p-range-string-vector a b) place)
         (progn
           (%p-range-size-check a b)
           (when (<= a b)

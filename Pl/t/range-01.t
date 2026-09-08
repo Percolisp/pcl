@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -117,3 +117,54 @@ test_cl('foreach undef..undef → ("")',
 test_cl('"ax".."az" still works',
     'print join(":", "ax".."az"), "\n";',
     "ax:ay:az\n");
+
+# ── A TIED OPERAND IS FETCHED ONCE (task #1430, s473h) ─────────────────────
+# perl's pp_flop reads both operands once and only then decides numeric vs
+# string.  PCL's segment fill (`@a = A .. B`, task #1204) classified the range,
+# then called `p-..` for the STRING arm, which classified AGAIN — and
+# classification UNBOXES, which for a tied scalar is a FETCH.  The numeric arm
+# never had the bug because it never called back into `p-..`.
+# perl's own t/op/tie_fetch_count.t rows 71-72 are exactly this.
+
+my $TIE = q{my $count = 0;
+sub TIESCALAR { my $pack = shift; bless [@_], $pack }
+sub FETCH { $count++; @{$_[0]} == 1 ? ${$_[0]}[0] : shift @{$_[0]} }
+sub STORE { unshift @{$_[0]}, $_[1] }
+my @dummy;
+};
+
+test_cl('#1430 $tied .. "a" FETCHes once (the string range)',
+    $TIE . q{tie my $v => 'main', "z";
+             @dummy = $v .. "a"; print "$count\n";},
+    "1\n");
+
+test_cl('#1430 "a" .. $tied FETCHes once (the string range)',
+    $TIE . q{tie my $v => 'main', "z";
+             @dummy = "a" .. $v; print "$count\n";},
+    "1\n");
+
+test_cl('#1430 the NUMERIC spellings still FETCH once',
+    $TIE . q{tie my $n => 'main', 3;
+             @dummy = $n .. 1; my $a = $count; $count = 0;
+             @dummy = 1 .. $n; print "$a $count\n";},
+    "1 1\n");
+
+test_cl('#1430 `my @out = $tied .. "c"` FETCHes once too',
+    $TIE . q{tie my $v => 'main', "a";
+             my @out = ($v .. "c"); print "$count @out\n";},
+    "1 a b c\n");
+
+# The flip-flop (scalar-context `..`) must not change: it reads its operand
+# once per evaluation, and the shipped fix touches only the LIST range's
+# string arm.
+test_cl('#1430 the scalar-context flip-flop is unchanged',
+    'my @lines = ("start","a","b","end","c"); my @sel;'
+  . 'for (@lines) { push @sel, $_ if /start/ .. /end/ }'
+  . 'print "@sel\n";',
+    "start a b end\n");
+
+# …and every string-range shape still builds the same list.
+test_cl('#1430 string ranges are unchanged by the split',
+    'print join(",", "az".."bb"), "|", join(",", "A".."C"), "|",'
+  . '      scalar(my @z = ("e".."a")), "|", join(",", "-x".."-z"), "\n";',
+    "az,ba,bb|A,B,C|22|-x\n");

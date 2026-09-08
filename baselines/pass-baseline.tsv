@@ -1,4 +1,11 @@
 # taken-at: 5323d9e 2026-08-15
+# s473h (2026-09-08, #1249(4), edited ROW BY ROW): eval.t 129 -> 131 (+2).
+#   `eval EXPR` imposes SCALAR context on its operand, so `my @b = eval @a`
+#   is eval("4") -- the element COUNT.  PCL stringified the raw vector as
+#   ARRAY(0x..) and rows 21 and 22 died "Undefined subroutine &main::ARRAY".
+#   Before/after sweeps of eval.t alone on an a9f2a264 extraction: exactly
+#   those two rows move, plus row 159 changing its observed text (still
+#   failing; its cause line in fail-baseline.tsv was re-pointed at #1390).
 # s473b (2026-09-07, #1010, edited ROW BY ROW): for.t OK 131 -> 130 (-1).
 #   for.t:559-564 is perl's OWN `TODO: { local $TODO = "RT #2166: foreach
 #   spuriously autovivifies"; my %h; foreach (@h{a,b}) {}; is keys(%h), 0 }`.
@@ -356,7 +363,7 @@ dor.t	OK	31	1	34
 each.t	OK	49	2	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	129	31	169
+eval.t	PARTIAL	131	29	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14

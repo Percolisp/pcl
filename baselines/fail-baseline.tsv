@@ -206,7 +206,7 @@ eval.t	106	string eval void context	'S'	'V'	NS:Context propagation into string e
 eval.t	160	test that nested eval '1+;' calls sig die as expected	'after eval '	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
 eval.t	161	test that nested eval '1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;' calls sig die as expected	'after eval '	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
 eval.t	163	test that nested eval ']' calls sig die as expected	'after eval '	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
-eval.t	159	test that nested eval 'bar' calls sig die as expected	'after eval The function main::pl-bar is undefined. at (eval 1) line 1.'	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
+eval.t	159	test that nested eval 'bar' calls sig die as expected	'after eval '	'after eval X at - line 1.'	#1390 (the fragment is `bar` under `use strict`: perl dies "Bareword not allowed while strict subs"; PCL enforces no strict, so since s473h a bareword STATEMENT is the no-strict STRING and $@ is empty -- it used to die with a WRONG message, which was no closer)
 eval.t	162	test that nested eval 's/' calls sig die as expected	'after eval '	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
 flip.t	11				#221 (NS:Warnings-gated diagnostics are absent) + CATALOG flip.t
 hash.t	5	deleting the current iterator in void context frees the val			NS:`DESTROY` called by garbage collector
