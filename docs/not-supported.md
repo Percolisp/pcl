@@ -2063,6 +2063,19 @@ boxed-aggregate data model, which changes the representation every array/hash
 access compiles against.  That is an E5-era design item (Target A: it costs an indirection on
 the hottest paths), deliberately **not** started pre-R1.
 
+**What it costs, measured (s473h, task #1429).**  `t/op/tiearray.t` reads
+26/29 with 20 rows never produced, and every one of them is this entry, not a
+separate bug: the file's `NegIndex` block ties an array whose class sets
+`$NEGATIVE_INDICES`, and since the tie is dropped the block runs against an
+ORDINARY array — `$n[-2] = 'a'` then dies "Modification of non-creatable array
+value attempted, subscript -2", which is *perl's own answer for an untied
+array of that size*, and the die takes the rest of the block with it.  A
+nineteen-shape probe vs perl 5.40.3 is in #1429: the only three shapes that
+agree are the three that involve no tie.  perl's `NEGATIVE_INDICES` rule (a
+tied array whose class sets the variable receives negative indices unchanged
+instead of normalised through `FETCHSIZE`) is a clause of the tied-array
+implementation, not something that can be added before it.
+
 **Interim, not final.**  A `die` was considered and rejected for R1: it would
 turn files that tie a container mid-run (`op/avhv.t`, 38/2 today) into crashes,
 i.e. trade an announced wrong answer for an un-registrable one days before a
