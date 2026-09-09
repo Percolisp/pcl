@@ -82,12 +82,19 @@ magic.  So the layer-correct answer is a `lib/constant.pm` shim (the mechanism
 it needs is probed working), and the parser widening must be gated on the #266
 callable classifier.  Both halves ship together — more than a filler.
 
-**Member 6 — #1512 profiled, and the profile is a finding of its own.**  The
-transpile is 0.88 s, so the ~150 s is entirely the SBCL side; `sb-sprof` :cpu
-EXHAUSTED THE HEAP TWICE (5 ms/200k samples in 4 GB, then 20 ms/30k in 8 GB),
-and time-stamping the TAP told nothing because SBCL's pipe is block-buffered —
-all 30 rows arrive at t=161.  The measurement that worked is a form-by-form
-`read`+`eval` harness over the emitted file.
+**Member 6 — #1512 profiled, and the answer is "NO SINGLE STATEMENT".**  Fault
+1 is answered by the timeout registry (the file reads PARTIAL 16/14 instead of
+FAIL 0/0).  For fault 2: the transpile is 0.88 s, so the ~150 s is entirely the
+SBCL side; `sb-sprof` :cpu EXHAUSTED THE HEAP TWICE (5 ms/200k samples in 4 GB,
+then 20 ms/30k in 8 GB) and time-stamping the TAP told nothing because SBCL
+block-buffers a pipe — all 30 rows arrive at t=161.  What worked is a
+form-by-form `read`+`eval` harness over the emitted file: ~860 top-level forms,
+3m09 total, and **exactly TWO forms over 200 ms** — both the `use
+Text::Balanced` module load (0.47 s + 4.9 s).  So ~145 s is spread at roughly
+170 ms per statement, and every statement of that file is one or two
+`extract_*` calls: the cost is PER CALL into Text::Balanced, whose inner loop
+drives `/\G…/gc` with `pos` — the shape #477 already measures as quadratic.
+Not the "one pathological loop" the task guessed.
 
 **Member 7 — the snapshot.**  `baselines/cpan-board14-s473w.tsv`: 183 files,
 84 PASS / 50 PARTIAL / 49 FAIL, 2213 ok / 353 not-ok.  EXACTLY SEVEN rows moved
