@@ -1,0 +1,23 @@
+# Per-file TIMEOUT ALLOWANCE registry for tools/cpan-scoreboard.pl (the CPAN
+# board).  Same shape and same rules as baselines/perl-suite-timeouts.tsv, read
+# by the same tools/lib/PCLTimeouts.pm:
+#
+#   <dist-dir-basename>/<t-file> <TAB> seconds <TAB> cause
+#
+# The effective per-file timeout is max(seconds, --timeout).  Registering a
+# file is NOT a skip and NOT an excuse: it still runs, still reports, still
+# counts its failures.  What it buys is that the file is measured AT ALL — the
+# board's FAIL rule is "zero ok", so a file killed on the clock is recorded
+# `FAIL 0 0 124` and every one of its passing rows vanishes with nothing
+# saying so.  That is the #176 pack.t lesson, and the board had no answer to it
+# until #1502.
+#
+# NOT FOR HANGS: this registry promises "give the file the time and it
+# finishes".  A file that returns the SAME rows at 10x the budget is stuck, not
+# slow, and belongs in a task with its profile instead.
+#
+# Rules: one line per file WITH A CAUSE naming the measurement it was sized
+# from; size it from a measured run and round up ~1.5x for machine load; when a
+# file gets faster, DELETE its row.
+#
+Text-Balanced-2.07-0/05_extmul.t	400	s473w/#1512: measured 150 s wall under PCL (perl 0.2 s) and it RUNS TO COMPLETION — at the 120 s default the board recorded FAIL 0/0 rc 124 and the file's rows were invisible.  Sized from the 150 s measurement + the 260 s the profiled run needed under sb-sprof, rounded up.

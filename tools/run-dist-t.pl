@@ -10,6 +10,14 @@
 #   tools/run-dist-t.pl <dist-dir> <t-file>            # run one t-file
 #   tools/run-dist-t.pl --no-dist-lib <dist-dir> <t>   # don't add <dist>/lib to @INC
 #   tools/run-dist-t.pl --summary <dist-dir> <t-file>  # print only the TAP summary
+#   tools/run-dist-t.pl --rows <dist-dir> <t-file>     # summary + one ROW line
+#                                                      # per FAILING assertion
+#
+# --rows is the summary plus, for each failing row,
+#   ROW <TAB> num <TAB> description <TAB> got <TAB> expected <TAB> directive
+# so tools/cpan-scoreboard.pl can keep a ROW-level board baseline with a cause
+# column (task #1502).  Both counts and rows come from ONE parse
+# (tools/lib/PCLTap.pm) — two parsers would drift (rule 11).
 #
 # <t-file> may be relative to <dist-dir> (e.g. t/basic.t) or an absolute path.
 #
@@ -28,14 +36,18 @@ use strict;
 use warnings;
 use File::Basename qw(dirname);
 use Cwd qw(abs_path);
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+use PCLTap ();   # the ONE TAP reader shared with tools/cpan-scoreboard.pl
 
 my $root = abs_path(dirname(abs_path($0)) . "/..");
 
-my ($no_dist_lib, $summary_only) = (0, 0);
+my ($no_dist_lib, $summary_only, $rows_out) = (0, 0, 0);
 my @args;
 for (@ARGV) {
   if    ($_ eq '--no-dist-lib') { $no_dist_lib = 1 }
   elsif ($_ eq '--summary')     { $summary_only = 1 }
+  elsif ($_ eq '--rows')        { $rows_out = 1; $summary_only = 1 }
   else                          { push @args, $_ }
 }
 
@@ -72,11 +84,21 @@ $raw =~ s/^PCL (?:Runtime|Test)[^\n]*\n//gm;
 $raw =~ s/^STYLE-WARNING[^\n]*\n//gm;
 
 if ($summary_only) {
-  # Count TAP ok/not ok lines.
-  my $ok    = () = $raw =~ /^ok \d+/mg;
-  my $notok = () = $raw =~ /^not ok \d+/mg;
-  print "pass=$ok fail=$notok  ($tfile)\n";
-  print STDERR $raw if $notok;   # show detail on failures
+  # ONE parse feeds the counts AND the rows (tools/lib/PCLTap.pm).  The counts
+  # are the historical /^ok \d+/ and /^not ok \d+/ ones, so no blessed board
+  # snapshot moves because the parser moved.
+  my $tap = PCLTap::parse_tap($raw);
+  print "pass=$tap->{ok} fail=$tap->{notok}  ($tfile)\n";
+  if ($rows_out) {
+    printf "PLAN\t%s\t%s\n", $tap->{plan} // '',
+           defined $tap->{skip_all}
+             ? '# SKIP ' . PCLTap::tsv_clean($tap->{skip_all}) : '';
+    for my $r (@{ $tap->{rows} }) {
+      print join("\t", 'ROW', $r->{num}, $r->{desc}, $r->{got},
+                       $r->{expected}, $r->{directive}), "\n";
+    }
+  }
+  print STDERR $raw if $tap->{notok};   # show detail on failures
 } else {
   print $raw;
 }
