@@ -1245,7 +1245,8 @@
 ;;; LENGTH derivation) on an inline function with a declaimed narrower return
 ;;; type.  The inline numberp/stringp fast paths already give callers
 ;;; branch-local type information, which is what the re-check elision needs.
-(declaim (ftype (function (t) t) to-number to-string unbox p-get-stream))
+(declaim (ftype (function (t) t) to-number to-string unbox p-get-stream
+                %p-handle-payload-p))
 ;;; Forward-declare functions defined later in the file to suppress SBCL
 ;;; STYLE-WARNING: "undefined function" during compilation.
 (declaim (ftype (function (t) t)
@@ -10363,7 +10364,14 @@ per element."
                 ;; hand back a bare glob (#423).  A glob VALUE element has no
                 ;; flag and unboxes as before.
                 (and (p-typeglob-p v) (p-box-p elem) (p-box-is-ref elem))
-                (%pcl-dualvar-p elem))               ; $!/dualvar: keep both halves
+                (%pcl-dualvar-p elem)                ; $!/dualvar: keep both halves
+                ;; A FILEHANDLE is a glob REF and the BOX is what says so
+                ;; (#1308): `open($a[0],…); ref($a[0])` must answer GLOB, and
+                ;; unboxing here handed back a bare stream, which is the glob
+                ;; VALUE spelling.  Asked LAST: it is reached only by an
+                ;; element that is not a number, a string, an aggregate, a
+                ;; coderef or a box, so an ordinary read never evaluates it.
+                (%p-handle-payload-p v))
             elem   ; reference or dualvar: return the box so both halves survive
             v))))  ; scalar: return unboxed value
 
@@ -10393,7 +10401,11 @@ per element."
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
                 (and (vectorp v) (not (stringp v)))       ; array-ref
-                (%pcl-dualvar-p elem))                  ; $!/dualvar: keep both halves
+                (%pcl-dualvar-p elem)                   ; $!/dualvar: keep both halves
+                ;; A FILEHANDLE is a glob REF and the BOX is what says so
+                ;; (#1308) — the array twin's arm, and asked last for the same
+                ;; reason.
+                (%p-handle-payload-p v))
             elem   ; keep box: box-set would convert these to count/length
             v))))
 
@@ -16530,7 +16542,16 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (let ((target (%p-stream-target stream)))
                   (cond
                     ((not (sb-sys:fd-stream-p target)) t)
-                    ((eq (stream-external-format target) ef) t)
+                    ;; ALREADY IN THAT DISCIPLINE: nothing to do.  EQUAL, not
+                    ;; EQ — the byte format is a LIST, `(:latin-1 :replacement
+                    ;; #\?)`, and SBCL hands back an EQUAL copy, never the same
+                    ;; object (measured).  So this test never fired and
+                    ;; `binmode($fh)` on a handle that was ALREADY bytes went
+                    ;; down the rebuild path, which DUPS THE DESCRIPTOR AND
+                    ;; CLOSES THE ORIGINAL: every other name for that handle
+                    ;; (`my $g = $fh; binmode($g)`) was left holding a closed
+                    ;; stream and its next print silently wrote nothing.
+                    ((equal (stream-external-format target) ef) t)
                     (t (let ((std (%p-std-descriptor target)))
                          (cond
                            (std (ignore-errors (finish-output target))
@@ -23165,11 +23186,12 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((p-typeglob-p inner) (if (and (p-box-p val) (p-box-is-ref val))
                                 "GLOB"
                                 ""))
-      ;; A FILEHANDLE payload: `open my $fh, …` leaves a GLOB REF in the
-      ;; scalar in perl, and this is PCL's spelling of it (#1308).  No is-ref
-      ;; test — unlike a typeglob there is no "glob VALUE" spelling of a
-      ;; stream to tell apart, so every box holding one is the ref.
-      ((%p-handle-payload-p inner) "GLOB")
+      ;; A FILEHANDLE payload IN A BOX: `open my $fh, …` leaves a GLOB REF in
+      ;; the scalar in perl, and this is PCL's spelling of it (#1308).  The
+      ;; BOX is what makes it a reference, exactly as it does for a typeglob
+      ;; above: a RAW stream is the glob VALUE `$$fh` hands back, and perl's
+      ;; ref() on that is "" (probed).
+      ((and (p-box-p val) (%p-handle-payload-p inner)) "GLOB")
       ;; Compiled regex (qr//) — ref() returns "Regexp"
       ((p-regex-match-p inner) "Regexp")
       ;; Not a reference
@@ -24704,6 +24726,33 @@ buffer's fill-pointer; everything else falls back to file-length."
               (p-box-class obj))))
     (t nil)))
 
+(defparameter +p-handle-class+ "IO::Handle"
+  "THE CLASS A FILEHANDLE INVOCANT DISPATCHES AGAINST (task #1074).  perl makes
+   every handle an object of its handle class with no `use' at all —
+   `STDOUT->autoflush(1)', `$fh->print(…)', `$fh->getline', `$fh->close' all
+   work in a bare script (probed 5.40.3).  perl names that class IO::File (and
+   IO::File ISA IO::Handle); PCL ships lib/IO/Handle.pm with lib/IO.pm's XS
+   half under it, so the METHOD SET is the same and only a `Can't locate object
+   method' message names a different class — error text is not a fidelity goal
+   (docs/not-supported.md).
+
+   THE METHODS THEMSELVES ARE PERL, in lib/ (CLAUDE.md 9a): the runtime's job
+   is only to say that a handle HAS a class, which is the generic mechanism.")
+
+(defun %p-handle-invocant-class (invocant)
+  "+P-HANDLE-CLASS+ when INVOCANT is a filehandle carrying no class of its own,
+   else NIL.  Only the shapes that are UNAMBIGUOUSLY a handle are answered here
+   — a box holding a stream or socket, a raw one, and a typeglob (`\\*STDOUT',
+   `my $g = *STDOUT').  A NAME is decided at the call site instead, where the
+   class package is already known not to exist, so an ordinary class method
+   pays nothing for this.
+   A class of one's own WINS: `$obj->print' on a blessed object with its own
+   `print' calls the method (probed), which is why every caller asks
+   p-get-class first."
+  (let ((v (if (p-box-p invocant) (p-box-value invocant) invocant)))
+    (and (or (%p-handle-payload-p v) (p-typeglob-p v))
+         +p-handle-class+)))
+
 (defun %pcl-invocant-class (invocant)
   "The class name a method-call invocant denotes: a blessed object's class, or
    a plain string (raw or in a scalar) treated as a class name — `my $c=\"Foo\";
@@ -24717,8 +24766,9 @@ buffer's fill-pointer; everything else falls back to file-length."
     ((p-box-p invocant)
      (or (p-get-class invocant)
          (let ((uv (unbox invocant)))
-           (when (stringp uv) uv))))
-    (t nil)))
+           (when (stringp uv) uv))
+         (%p-handle-invocant-class invocant)))
+    (t (%p-handle-invocant-class invocant))))
 
 (defun p-resolve-invocant (name)
   "Resolve a bareword invocant for method calls.
@@ -24988,6 +25038,19 @@ buffer's fill-pointer; everything else falls back to file-length."
           ((plusp (length (the string (p-ref resolved-obj))))
            (error "Can't call method ~A on unblessed reference" method-name)))))
 
+    ;; A NAME THAT NAMES AN OPEN FILEHANDLE IS A HANDLE, NOT A CLASS (#1074):
+    ;; `STDOUT->autoflush(1)`, `OPENED->fileno`, `my $c = "STDOUT"; $c->eof` —
+    ;; perl answers all three from its handle class (probed 5.40.3).  Asked
+    ;; only once the class package is known NOT to exist, so an ordinary class
+    ;; method never pays for it; the require just below then loads the shim.
+    ;; (perl goes further — its handle wins even over a package of that name
+    ;; that DOES exist; PCL prefers the package, which is the more useful of
+    ;; the two answers and the one no program can reach by accident.)
+    (when (and (null (%pcl-find-package class-name))
+               (%p-resolve-fh class-name))
+      (setf class-name +p-handle-class+
+            raw-class  +p-handle-class+
+            own-missed nil))
     ;; Auto-load the package if it doesn't exist yet.
     ;; This mirrors how Perl automatically has core modules (like version.pm)
     ;; pre-loaded in its runtime.  When user code writes `new version ~$_` or

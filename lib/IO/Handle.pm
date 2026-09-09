@@ -1,4 +1,4 @@
-# PCL SHIM — this is core perl IO/Handle.pm with exactly TWO subs changed.
+# PCL SHIM — this is core perl IO/Handle.pm with exactly THREE subs changed.
 #
 # autoflush() and printflush() switch the selected handle with SelectSaver,
 # which restores the previous selection from its DESTROY method.  PCL never
@@ -6,10 +6,16 @@
 # collector'), so under PCL those two subs switched the default output handle
 # and never switched it back — every later plain print went to the wrong
 # handle.  Both are rewritten here to save and restore the selection
-# explicitly; nothing else in this file differs from core.
+# explicitly.
 #
-# DELETE THIS FILE when DESTROY-at-scope-exit lands (task #198): core's own
-# file is then correct, and a copy here can only drift from it.
+# binmode() dereferences ($$fh) in core, because an IO::Handle object there is
+# a blessed GLOB REF.  A PCL handle is not one — see the note on that sub.
+#
+# Nothing else in this file differs from core.
+#
+# DELETE THIS FILE when DESTROY-at-scope-exit lands (task #198) — but keep the
+# binmode change, or restore it in whatever file replaces this one: core's own
+# file is correct for core's handle representation, not for PCL's.
 #
 # The XS half of IO::Handle lives in PCL's lib/IO.pm (task #197).
 
@@ -664,8 +670,16 @@ sub binmode {
 
     my($fh, $layer) = @_;
 
-    return binmode $$fh unless $layer;
-    return binmode $$fh, $layer;
+    # PCL: core writes `binmode $$fh` because an IO::Handle object is a blessed
+    # GLOB REF and the builtin wants the glob out of it.  A PCL handle is not a
+    # glob ref — the handle IS what the scalar holds (docs/ir-spec.md §7) — and
+    # `binmode` with a LAYER must re-install the REBUILT stream in the place it
+    # came from, which a dereferenced copy no longer names: `$fh->binmode(":utf8")`
+    # answered false and left the handle a byte handle (task #1074).  Passing the
+    # handle through is exact for every spelling PCL has: a lexical handle, a
+    # bareword, and a blessed glob ref (which %p-resolve-fh unwraps itself).
+    return binmode $fh unless $layer;
+    return binmode $fh, $layer;
 }
 
 1;

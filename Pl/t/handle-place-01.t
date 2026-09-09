@@ -50,7 +50,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 124;
+plan tests => 155;
 
 my $workdir = tempdir(CLEANUP => 1);
 my $datafile = "$workdir/data.txt";
@@ -415,6 +415,70 @@ for my $c (@std_cases) {
     is($pcl, $perl, "std handle $c->[0]: PCL redirects exactly as perl does");
 }
 
+# ── #1074 — A FILEHANDLE IS AN OBJECT OF ITS HANDLE CLASS, WITH NO `use` ──
+# perl answers `STDOUT->autoflush(1)`, `$fh->print(…)`, `$fh->getline` in a
+# bare script; PCL died "Can't locate object method … via package STDOUT" and
+# "Can't call method … on unblessed reference", and `use IO::Handle` did not
+# help because the dispatch never reached the class.  The runtime now says a
+# handle HAS a class (IO::Handle) — the METHODS stay perl, in lib/ — and the
+# shim's `binmode` stops dereferencing ($$fh), which is core's way of getting a
+# glob out of a blessed glob ref and names nothing under PCL's handle model.
+#
+# Rows 22-23 are the NEGATIVE: a blessed object with its own `print`/`close`
+# keeps them.  The program is run BOTH ways and compared; row 07's `fileno`
+# VALUE is deliberately reduced to ">= 0", the one fact PCL promises about it.
+my $PROG4 = <<'PERL';
+use strict; use warnings;
+no warnings 'uninitialized', 'once';
+my $D = $ENV{PCL_GUARD_DIR};
+my $F = "$D/iohandle.txt";
+sub d { my $v = shift; return !defined $v ? "undef" : $v eq "" ? "EMPTY" : "$v" }
+sub try { my ($tag, $code) = @_;
+  my $r = eval { $code->() };
+  my $e = $@; $e =~ s/ at .* line \d+\.?\n?//s; $e =~ s/\n.*//s;
+  printf "%s = %s%s\n", $tag, d($r), ($e ? " DIED[$e]" : "");
+}
+try("01 STDOUT->autoflush", sub { STDOUT->autoflush(1); "ok" });
+try("02 STDERR->autoflush", sub { STDERR->autoflush(1); "ok" });
+try("03 STDOUT->binmode",   sub { STDOUT->binmode(":utf8") ? "ok" : "false" });
+try("04 STDOUT->fileno",    sub { STDOUT->fileno });
+try("05 STDIN->eof",        sub { STDIN->eof ? 1 : 0 });
+try("06 STDOUT->opened",    sub { STDOUT->opened ? 1 : 0 });
+open(my $w, ">", $F) or die;
+try("07 lex->autoflush",    sub { $w->autoflush(1); "ok" });
+try("08 lex->print",        sub { $w->print("via-print\n") ? 1 : 0 });
+try("09 lex->printf",       sub { $w->printf("%s\n", "via-printf") ? 1 : 0 });
+try("10 lex->say",          sub { $w->say("via-say") ? 1 : 0 });
+try("11 lex->fileno",       sub { $w->fileno >= 0 ? "fd" : "bad" });
+try("12 lex->opened",       sub { $w->opened ? 1 : 0 });
+try("13 lex->binmode",      sub { $w->binmode ? 1 : 0 });
+try("14 lex->close",        sub { $w->close ? 1 : 0 });
+try("15 lex->opened-after", sub { $w->opened ? 1 : 0 });
+open(my $r, "<", $F) or die;
+try("16 lex->getline",      sub { my $l = $r->getline; chomp $l if defined $l; $l });
+try("17 lex->eof",          sub { $r->eof ? 1 : 0 });
+try("18 lex->getlines",     sub { scalar(my @l = $r->getlines) });
+try("19 lex->eof-after",    sub { $r->eof ? 1 : 0 });
+$r->close;
+try("20 globref->fileno",   sub { (\*STDOUT)->fileno });
+try("21 globval->fileno",   sub { my $g = *STDOUT; $g->fileno });
+{ package MyIO; sub new { bless {}, shift } sub print { "MY-PRINT" } sub close { "MY-CLOSE" } }
+try("22 obj->print",        sub { MyIO->new->print("x") });
+try("23 obj->close",        sub { MyIO->new->close });
+open(BW, ">", "$F.bw") or die;
+try("24 BW->print",         sub { BW->print("bw\n") ? 1 : 0 });
+try("25 BW->close",         sub { BW->close ? 1 : 0 });
+# binmode through a SECOND NAME must not close the handle the caller still holds
+{ open(my $f2, ">", "$F.2") or die; my $g = $f2; binmode($g);
+  my $p = print {$f2} "hello\n"; close($f2);
+  printf "26 copy-binmode print=%s size=%s\n", d($p), d(-s "$F.2"); }
+{ open(my $f3, ">", "$F.3") or die; sub bmarg { my ($h) = @_; binmode($h) }
+  bmarg($f3); my $p = print {$f3} "hello\n"; close($f3);
+  printf "27 arg-binmode print=%s size=%s\n", d($p), d(-s "$F.3"); }
+unlink $F, "$F.bw", "$F.2", "$F.3";
+print "28 alive\n";
+PERL
+
 my $perl_out = run_perl($PROG);
 my $pcl_out  = run_pcl($PROG);
 
@@ -464,4 +528,21 @@ is(scalar(@c3), scalar(@p3), 'PCL produced the same number of closed-consumer li
 for my $i (0 .. $#p3) {
   my $tag = ($p3[$i] =~ /^(\d\d) /) ? "closed row $1" : "closed line " . ($i + 1);
   is($c3[$i] // '(missing)', $p3[$i], "$tag matches perl");
+}
+
+my $perl4 = run_perl($PROG4);
+my $pcl4  = run_pcl($PROG4);
+my @p4 = grep { /^\d\d / } split /\n/, norm($perl4);
+my @c4 = grep { /^\d\d / } split /\n/, norm($pcl4);
+
+is(scalar(@p4), 28, 'perl produced 28 IO::Handle lines (the oracle is intact)')
+  or diag("perl said:\n$perl4");
+like($p4[0], qr/^01 STDOUT->autoflush = ok/,
+     'perl calls IO::Handle methods on a handle with no `use` (oracle sanity)');
+is(scalar(@c4), scalar(@p4), 'PCL produced the same number of IO::Handle lines')
+  or diag("PCL said:\n$pcl4");
+
+for my $i (0 .. $#p4) {
+  my $tag = ($p4[$i] =~ /^(\d\d) /) ? "io row $1" : "io line " . ($i + 1);
+  is($c4[$i] // '(missing)', $p4[$i], "$tag matches perl");
 }
