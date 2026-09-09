@@ -2536,6 +2536,96 @@ all — a read-only file handle, an in-memory `<` handle, a dup of a read-only
 descriptor — answers false with `$!` = EBADF without attempting the write, and
 goes on READING normally.
 
+### 7.5a What a handle IS, and where it LIVES (normative, s473f)
+
+**A scalar that holds a filehandle holds a GLOB REF.**  In the emitted CL that
+is a **box whose value is the host stream** (or a socket object); there is no
+separate glob object for a lexical handle.  Everything a program can ask
+follows from that one sentence, and a translator must make all of it agree:
+
+| asked of `$fh` after `open my $fh, …` | answer |
+|---|---|
+| `ref($fh)` / `reftype($fh)` | `GLOB` |
+| `"$fh"` | `GLOB(0x…)` |
+| `defined($fh)`, truthiness | 1, true |
+| `ref(\$fh)` | `REF` (a ref to a scalar that holds a ref) |
+| `my $b = $fh` | the SAME handle — a copy of the box's value |
+
+`open` in perl **creates the handle before it attempts to open it**, so the
+place is written whether the open succeeds or fails:
+
+```perl
+my @a;  open($a[3], "<", "/nonexistent") or warn;
+#  scalar(@a) == 4, exists $a[3], defined $a[3], ref($a[3]) eq "GLOB"
+```
+
+**The first argument of an opener is a PLACE, not a value** — `open`,
+`sysopen`, `opendir`, `pipe` (both), `socket`, `socketpair`, `accept`'s new
+handle.  A translator whose element accessor returns the slot's VALUE must use
+the lvalue accessor here, or an empty slot yields the host's shared
+undef object and the handle is installed on *that* — one entry for every such
+open in the image (PCL's own bug, #1309: an unrelated read then found another
+file's stream).  `undef` is not a designator: perl dies `Can't use an undefined
+value as filehandle reference`.
+
+**`close` does NOT empty the scalar.**  perl closes the handle; the glob stays.
+So after `close $fh`:
+
+| asked | answer |
+|---|---|
+| `defined($fh)`, `ref($fh)`, `"$fh"` | unchanged — 1, `GLOB`, `GLOB(0x…)` |
+| `fileno($fh)` | undef (§7 / task #529 — *not open*, never −1) |
+| `-e $fh`, `stat($fh)` | false, `$!` = EBADF — **not** ENOENT |
+| `eof($fh)` | 1 |
+| `readline($fh)`, `print {$fh}`, `binmode($fh)`, `getc` | undef (`print` also sets EBADF) |
+| `tell($fh)` | −1 |
+| `close($fh)` again | `""` — see below |
+
+The EBADF row is why the scalar must keep something: a translator that writes
+undef there cannot tell a closed handle from an empty variable, and perl's
+`-e undef` IS ENOENT (the empty path).  A **named** handle is different — its
+name-to-stream binding is dropped — but the scalar spelling has no name to
+drop.
+
+**`close`'s two answers are 1 and a DEFINED EMPTY STRING**, so
+`defined(close $fh)` is TRUE while `if (close $fh)` is false.  Every failure
+answers `""`: never opened, open failed, already closed, fork-pipe child exited
+non-zero, final flush refused.  `$!` is EBADF when there was **no open handle**
+and is left alone when the close failed for another reason.  **`closedir` is
+not the same fact**: its failure answer is `undef`, with EBADF.
+
+**Reopening a STANDARD handle re-points the DESCRIPTOR** (`dup2`), so the
+program's children follow it — `open(*STDOUT,'>',$f); system("echo x")` puts
+`x` in the file.  Every spelling that NAMES one does this: the bareword, a
+typeglob, a ref to one, a glob in a scalar, and a name string.  A qualifier
+other than `main::` does **not**: `Foo::STDOUT` is that package's own glob and
+descriptor 1 is untouched.
+
+**A filehandle is an object of the handle class with no `use`.**
+`STDOUT->autoflush(1)`, `$fh->print(…)`, `$fh->getline`, `$fh->close` all work
+in a bare script; perl's class there is `IO::File` (which ISA `IO::Handle`),
+PCL's is `IO::Handle`.  The rule is about the INVOCANT, not the method list: a
+handle designator with no class of its own dispatches against the handle class,
+and a blessed object with a method of its own keeps it.  The methods themselves
+are ordinary Perl (`lib/IO/Handle.pm`), so a translator supplies the *class*,
+not the *implementations* — but note that core's IO::Handle dereferences
+(`$$fh`) wherever it wants the glob out of its blessed glob ref, which names
+nothing in a model like this one.  Two rules come with it:
+
+* **A RAW TYPEGLOB invocant is auto-referenced**: `*glob->method` IS
+  `(\*glob)->method`, so the callee's `$_[0]` is the glob REF.  It does *not*
+  dispatch against the package the glob names — `sub myclass::squeak {…};
+  *myclass->squeak` is an error in perl.
+* **Loading the handle class cannot be gated on "does its package exist"**: a
+  program may write a sub into that stash (`sub IO::Handle::self { $_[0] }`)
+  without loading the module, and perl still autoloads its own handle class.
+
+**An UNCAUGHT die exits `$! || ($? >> 8) || 255`** and prints one line
+(perlfunc `die`).  A host whose default is "unhandled condition, exit 1" must
+convert at the top level, and must be able to tell a *perl* die from an
+internal error of its own — PCL gives the two the condition classes
+`p-exception` (a die with an object) and `p-die-error` (a die with a string).
+
 ### 7.6 stdio buffering (normative, s451)
 
 Buffering is not an implementation detail once a program can observe it, and

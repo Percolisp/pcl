@@ -391,9 +391,9 @@ ref.t	180	deref of undef from list slice fails	''	Can't use an undefined value a
 ref.t	130	freeing self-referential typeglob	'The value                                      "Symbol::"                                    is not of type                                      hash-table'	''	#1459 item 6 (freeing a self-referential typeglob type-errors; not reproduced in the 0d783d24 run)
 ref.t	67	stringify for ref to vstring	'SCALAR(0xf)'	^VSTRING\(0x[0-9a-f]+\)$	#1495 CATALOG ref.t "vstring refs"
 scalar.t	40		undef	'43'	NS:A LITERAL in a foreach list is writable, not read-only (consequence of 36: the accepted '>' open truncated \43)
-scalar.t	36				NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \43 must fail EACCES)
+scalar.t	36	Bad file descriptor			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \43 must fail EACCES).  s473f: the DESCRIPTION is $! itself, so it changed with #1307's EBADF for the same reason as row 34.
 scalar.t	30	FETCH only called once	'0'	'1'	#1446 (in-memory handle binds a STRING: FETCH never fires)
-scalar.t	34	[perl #40267] - 			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \undef must fail)
+scalar.t	34	[perl #40267] - Bad file descriptor			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \undef must fail).  s473f: the DESCRIPTION now carries "Bad file descriptor" because the test interpolates $! and #1307 made a close with no open handle set EBADF as perl does -- perl's own run never sees it, because there the open FAILS and overwrites $!.
 scalar.t	89	check $! is updated	'0'	'22'	#1447 (a >0xFF target must fail the open with EINVAL)
 scalar.t	92	check $! is updated even when we warn	'0'	'22'	#1447 (a >0xFF target must fail the open with EINVAL)
 scalar.t	112	check errno set	'0'	'22'	#1447 (print to a non-downgradable target must set EINVAL)

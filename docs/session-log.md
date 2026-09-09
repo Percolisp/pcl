@@ -2,6 +2,108 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473f (Opus agent, 2026-09-09) — the HANDLE family: a handle's PLACE and its IDENTITY (#1309 #1246 #1307 #1308 #1233 #1220 #1074 #1247(b))
+
+**Member 1 — #1309, and the task's premise was WRONG in an instructive way.**
+The STORE was never broken and the hash spelling did not "work": BOTH element
+spellings landed the stream under the shared `*p-undef*` KEYWORD in
+`*p-filehandles*`, because `p-aref`/`p-gethash` hand that keyword back for an
+empty slot and `%p-install-fh`'s last arm takes anything that is not a box for a
+handle NAME.  `readline($h{k})` "worked" only by looking the same wrong key up
+again — and an unrelated `readline($b[0])` on a never-opened element read the
+FIRST file's lines.  `<$a[0]>` is not a readline at all (perlop: a `<…>` that is
+not a simple scalar is a GLOB, and perl answers the stringified handle), so
+PCL's `p-glob` lowering was right and the filed probe's `defined $l` oracle
+could not see it.  Fix: `%p-fh-arg` gains a fourth slot kind `:INSTALL` —
+everything `:T` means plus an element read accessor rewritten to its eager
+`-box` twin through one map — and the seven openers go through one wrapper that
+also refuses an UNDEF designator with perl's own death.  `%p-resolve-dh`
+unifies the dirhandle resolver (rule 11: readdir/closedir/rewinddir each carried
+a two-armed copy while `%p-dirhandle-path` carried a three-armed one, so an
+element dirhandle opened fine and then read NOTHING).  #1246's element half fell
+out: the failure path's `%p-autoviv-failed-handle` finally has a box to vivify.
+
+**Member 2 — #1307: `close`'s false is a DEFINED "" and `closedir`'s is undef.**
+Five failing close shapes probed and all five answer `""`, so
+`defined(close $fh)` is TRUE while `if (close $fh)` is false; `closedir` probed
+separately answers undef, which is why the two have separate constants and not a
+shared one.  `$!` is EBADF when there was no open handle and is left alone when
+the close failed for another reason (perl reads errno 0 after a non-zero pipe
+child).  CL's `close` cannot tell an already-closed stream from one it closed,
+hence the `open-stream-p` test on `%p-stream-target`.
+
+**Member 3 — #1308 + #1233, the representation, DECIDED BY MEASUREMENT.**  Shape
+(b) shipped: the box keeps the raw stream and `ref`/`reftype` read it — the arm
+`%p-resolve-fh` already takes, 3.7 ns.  Shape (a) (a `p-typeglob` on the success
+path, as the failure path installs) would route every read and print through
+`find-symbol` + `gethash`: **32.1 ns, +28 ns per I/O op**.  A third variant —
+the openness test inside `p-get-stream` — was written and backed out at **−6.4 %
+(fhprint) / −4.0 % (fhread)** measured against an otherwise-identical runtime;
+as shipped those rows read +1.2 % / +0.8 % with controls at +0.9 / +0.8 / −2.8.
+`tools/bench-exec.pl` gained the project's first I/O rows for this.  `close` no
+longer empties the box, so a closed lexical is EBADF in a stat slot instead of
+the ENOENT of the empty path — and a closed stream then reaches callers that
+never saw one: print and the readers are right for FREE (`output-stream-p` and
+`input-stream-p` are both NIL for a closed stream), while nine builtins that
+would SIGNAL ask the new `%p-live-stream`.  Two divergences the same probe
+found rode along: `syswrite` on a handle that is not open sets EBADF, and
+`truncate` stops falling back to a file NAMED after a closed handle (its failure
+answer is perl's undef, not `''`, and an undef designator is the empty PATH).
+
+**Member 4 — #1220, probed first because the task said it had not been.**  The
+CHILD is the discriminator: only a `dup2` makes `system("echo child")` follow,
+and perl does it for all four designator spellings.  `%p-std-slot` answered only
+for a bareword symbol and a box holding a name string, so the glob spellings
+registered a second stream and left descriptor 1 alone.  The NEGATIVE was a
+silent wrong of its own: the string arm stripped ANY qualifier, so
+`$n = "Foo::STDOUT"` re-pointed stdout where perl opens that package's glob.
+
+**Member 5 — #1074, and two real bugs under it.**  The runtime's job is only to
+say that a handle HAS a class (`IO::Handle`); the methods stay perl, in `lib/`.
+Two hooks, each where it costs nothing — the invocant classifier for a box/glob,
+and `p-method-call` for a NAME, asked only once the class package is known not
+to exist.  Running the shim then exposed: `%p-binmode-impl` compared external
+formats with `EQ`, and the byte format is a LIST that SBCL hands back as an
+EQUAL copy — so "already in that discipline" NEVER fired and `binmode($fh)` on
+an already-byte handle took the rebuild path, which dups the descriptor and
+CLOSES the original, leaving every other name for that handle holding a closed
+stream (`my $g = $fh; binmode($g); print {$fh} "hello"` wrote NOTHING —
+pre-existing, silent data loss).  And the shim's `binmode` dereferenced `$$fh`,
+core's way of getting the glob out of a blessed glob ref, which names nothing
+under PCL's model — `lib/IO/Handle.pm`'s third documented difference from core.
+The sweep then found two more, both in the mechanism this member introduced: a
+RAW typeglob invocant must be AUTO-REFERENCED (perl's `*glob->method` IS
+`(\*glob)->method`, which `perl-tests/method.t:591` asserts with
+`sub IO::Handle::self { $_[0] }` as the probe), and the handle class cannot be
+loaded on "does its PACKAGE exist" — that same file writes one sub into
+`IO::Handle`, which creates the package and made every real method vanish.
+method.t now RUNS 125 rows where it ran 124, one fewer skip, and the newly
+running row fails honestly on **#437** (`\*foo == \*foo` is false in PCL): the
+shortfall baseline's own "`*glob->method` dies (#1434)" component, closed.
+
+**Member 6 — #1247(b): an uncaught die exits perl's status.**  Nine shapes
+probed.  A perl STRING die was an anonymous `(error "~A" msg)`, so nothing could
+tell it from a CL condition raised inside the runtime; it now carries the
+`p-die-error` class (a `simple-error` subclass, so every handler that caught it
+still does).  **The hook is armed IN `p-die`, not at load, and that is
+measured**: SBCL processes `--non-interactive` while parsing its command line —
+after `*init-hooks*` and after a saved core has restored whatever the runtime
+set — so a load-time install was silently overwritten every run.  A failed
+`require` is a perl die and now sets `$!` = ENOENT, which is what makes that
+exit status 2.  Only a perl die is reshaped; the wider half (perl-level errors
+PCL raises with a bare `error`) is #1427.  `runpcl` now propagates the child's
+exit status — it dropped it, so every probe of `exit N` read 0.
+
+**Bars.**  corpus-diff IDENTICAL over 111 (silent drops 5, unchanged) and
+`Pl/t/shapes` 6/6 — nothing under `Pl/` changed, so **no generation bump**;
+emission-ab 22 lib files SAME/0 DIFF/0 RCDIFF; `ir-host-leak` byte-identical to
+the base.  **ir-conform 316 → 321 pass, 0 fail, 24 known, 0 stale**: five rows
+left `known-fail.tsv` by edit (120-io, 288-loops-exits, 299-io, 308-io, 309-io)
+and 022-refs was re-attributed to #1427.  Guards `Pl/t/handle-place-01.t` (155
+rows; 81 fail on a `0ece3088` extraction) and `Pl/t/die-exit-status-01.t` (13;
+8 fail), both with perl 5.40.3 as the oracle — the same program run twice and
+compared line by line, so no expectation can encode the old bug.  Filed
+#1419–#1427, every one probed and attributed against the base.
 ## Session s473w (Opus agent, 2026-09-09) — the CPAN board gets the sweep's treatment: 389 failing rows with a cause each, and the two s1061 fixes that were ≤ 1 h
 
 **Member 1 — the instrument (#1502).**  The board's whole output was one line
