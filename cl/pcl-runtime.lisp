@@ -16080,18 +16080,41 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ((p-box-p fh) (box-set fh *p-undef*))
         ((symbolp fh) (remhash fh *p-filehandles*))))
 
+(defparameter +p-close-false+ ""
+  "PERL'S FALSE ANSWER FROM `close' IS A DEFINED EMPTY STRING (task #1307,
+   probed 5.40.3): a handle never opened, one whose open failed, one already
+   closed, one whose fork-pipe child exited non-zero and one whose final flush
+   failed all answer \"\" — so `defined(close $fh)` is TRUE while
+   `if (close $fh)` is false.  PCL answered undef and the two branches
+   disagreed.  Same family as #403 (a filetest's false) and #416 (s/// with no
+   match).  `closedir' is NOT this fact: ITS failure answer is undef (probed),
+   which is why the two have separate constants and not a shared one.")
+
 (defun %p-close-impl (fh)
   "Implementation of Perl close (file or socket handle).
    Resolves through %p-resolve-fh — the ONE resolver that knows every handle
    shape.  Reading the box directly instead missed a handle whose box holds a
    GLOB (IO::Handle->new / \\*FH), so close() quietly did nothing and the
-   buffered output was lost."
+   buffered output was lost.
+   Returns perl's 1 or +P-CLOSE-FALSE+ — never T/NIL, see that constant."
   (let ((v (%p-resolve-fh fh)))
     (cond
-      ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh) t)
-      ((streamp v)     (prog1 (%p-close-maybe-pipe v)
-                         (%p-forget-fh fh)))
-      (t nil))))
+      ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh) 1)
+      ((streamp v)
+       ;; A handle that is ALREADY CLOSED is one of perl's false answers, and
+       ;; CL `close' does not distinguish it — it returns T for a stream it
+       ;; closed and for one that was closed already.
+       (if (open-stream-p (%p-stream-target v))
+           (let ((ok (%p-close-maybe-pipe v)))
+             (%p-forget-fh fh)
+             ;; A close that FAILED with the handle open (a fork-pipe child
+             ;; that exited non-zero, a final flush the OS refused) leaves $!
+             ;; to whatever the real cause set — perl reads errno 0 after a
+             ;; non-zero child (probed), so no EBADF here.
+             (if ok 1 +p-close-false+))
+           (progn (%p-io-errno-fail 9) +p-close-false+)))   ; EBADF
+      ;; NO HANDLE AT ALL: perl sets $! = EBADF (9) and answers "" (probed).
+      (t (%p-io-errno-fail 9) +p-close-false+))))
 
 (defmacro p-close (&optional fh)
   "Perl close - close filehandle. Bareword is quoted; lexical $fh passed as box.
@@ -18097,12 +18120,21 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-closedir-impl (dh)
   "Perl closedir - close directory handle.  The remembered DIRECTORY goes too:
    a closed dirhandle must be EBADF in a stat/filetest slot, not a path that
-   still works (task #1048)."
-  (let ((handle (%p-resolve-dh dh)))
-    (when (consp handle) (remhash handle *p-dirhandle-paths*)))
-  (when (symbolp dh)
-    (remhash dh *p-dirhandles*))
-  t)
+   still works (task #1048).
+
+   TWO ANSWERS, AND THEY ARE NOT `close''s (probed 5.40.3, task #1307): 1 when
+   a dirhandle was open, UNDEF when it was not — never-opened and
+   already-closed alike, where `close' answers a defined \"\".  The path entry
+   IS the openness marker (opendir always writes one, this drops it), so the
+   second closedir sees no entry and answers undef the way perl does."
+  (let* ((handle (%p-resolve-dh dh))
+         (open-p (and (consp handle)
+                      (nth-value 1 (gethash handle *p-dirhandle-paths*)))))
+    (when (consp handle) (remhash handle *p-dirhandle-paths*))
+    (when (symbolp dh) (remhash dh *p-dirhandles*))
+    (if open-p
+        1
+        (progn (%p-io-errno-fail 9) *p-undef*))))          ; EBADF, as perl
 
 (defmacro p-closedir (dh)
   "Perl closedir — bareword dirhandle is auto-quoted."

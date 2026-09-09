@@ -50,7 +50,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 33;
+plan tests => 50;
 
 my $workdir = tempdir(CLEANUP => 1);
 my $datafile = "$workdir/data.txt";
@@ -181,6 +181,38 @@ sub g { my $v = shift; return "undef" if !defined $v; chomp $v; return $v }
   printf "28=%s\n", (close($h{out}) ? "ok" : "no");
   open(my $in, "<", $out) or die; my $l = <$in>; close $in; chomp $l;
   printf "29=%s\n", $l; }
+
+# --- close's TWO ANSWERS (#1307, #1246's close half) --------------------
+# perl's false from `close' is a DEFINED EMPTY STRING; from `closedir' it is
+# UNDEF.  They are different facts and the guard says so.
+sub cl { my $r = shift; return !defined $r ? "undef" : $r eq "" ? "EMPTY" : "[$r]" }
+{ my $fh; open($fh, "<", "/nonexistent-pcl-xyz");
+  printf "30=%s\n", cl(close($fh)); }
+{ open(my $fh, "<", $F) or die; close($fh); printf "31=%s\n", cl(close($fh)); }
+{ printf "32=%s\n", cl(close(NOPEHANDLE)); }
+{ open(BADFH, "<", "/nonexistent-pcl-xyz"); printf "33=%s\n", cl(close(BADFH)); }
+{ open(OKFH, "<", $F) or die; close(OKFH); printf "34=%s\n", cl(close(OKFH)); }
+{ open(my $fh, "<", $F) or die; printf "35=%s\n", cl(close($fh)); }
+{ open(my $p, "-|", "/bin/sh -c 'exit 3'") or die; my $r = close($p);
+  printf "36=%s status=%d\n", cl($r), $? >> 8; }
+{ open(my $p, "-|", "/bin/sh -c 'exit 0'") or die; my $r = close($p);
+  printf "37=%s status=%d\n", cl($r), $? >> 8; }
+{ my @a; open($a[0], "<", $F) or die;
+  printf "38=%s %s\n", cl(close($a[0])), cl(close($a[0])); }
+{ printf "39=%s\n", cl(closedir(NOPEDIR)); }
+{ opendir(my $dh, $D) or die; closedir($dh); printf "40=%s\n", cl(closedir($dh)); }
+{ my $fh; open($fh, "<", "/nonexistent-pcl-xyz"); my $r = close($fh);
+  printf "41=defined=%d true=%d len=%d\n",
+    (defined $r ? 1 : 0), ($r ? 1 : 0), length($r); }
+# $! after a close that had no open handle is EBADF; after a close that failed
+# for another reason it is left alone (probed 5.40.3).
+{ $! = 0; close(NOPEHANDLE2); printf "42=errno=%d\n", $! + 0; }
+{ open(my $fh, "<", $F) or die; close($fh); $! = 0; close($fh);
+  printf "43=errno=%d\n", $! + 0; }
+{ $! = 0; closedir(NOPEDIR3); printf "44=errno=%d\n", $! + 0; }
+{ open(my $fh, "<", $F) or die; $! = 0; close($fh); printf "45=errno=%d\n", $! + 0; }
+{ open(my $p, "-|", "/bin/sh -c 'exit 3'") or die; $! = 0; close($p);
+  printf "46=errno=%d\n", $! + 0; }
 PERL
 
 my $perl_out = run_perl($PROG);
@@ -190,7 +222,7 @@ my @p = grep { /^\d\d=/ } split /\n/, norm($perl_out);
 my @c = grep { /^\d\d=/ } split /\n/, norm($pcl_out);
 
 # The oracle must itself be sane before any row is claimed.
-is(scalar(@p), 29, 'perl produced 29 result lines (the oracle is intact)')
+is(scalar(@p), 46, 'perl produced 46 result lines (the oracle is intact)')
   or diag("perl said:\n$perl_out");
 like($p[0], qr/^01=1 L1/, 'perl row 01 reads the file (oracle sanity)');
 unlike($perl_out, qr/LEAK/, 'perl leaks nothing (oracle sanity)');
