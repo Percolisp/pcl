@@ -10401,6 +10401,13 @@ per element."
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
                 (and (vectorp v) (not (stringp v)))       ; array-ref
+                ;; glob REF: the array twin\x27s #423 arm, which this twin never
+                ;; got (s480 review of s473f): a typeglob\x27s ref-ness is the
+                ;; BOX\x27s is-ref flag, so unboxing handed back the bare glob and
+                ;; `$h{k} = \*STDOUT; ref($h{k})` answered "" — and once #1246
+                ;; vivified a failed `open($h{k},…)` into the slot, that glob
+                ;; ref read as the glob VALUE (`*Symbol::__pcl_anonfh_N`).
+                (and (p-typeglob-p v) (p-box-p elem) (p-box-is-ref elem))
                 (%pcl-dualvar-p elem)                   ; $!/dualvar: keep both halves
                 ;; A FILEHANDLE is a glob REF and the BOX is what says so
                 ;; (#1308) — the array twin's arm, and asked last for the same

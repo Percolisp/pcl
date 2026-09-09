@@ -118,9 +118,16 @@ sub g { my $v = shift; return "undef" if !defined $v; chomp $v; return $v }
 { my @a; my $ok = open($a[3], "<", "/nonexistent-pcl-xyz") ? 1 : 0;
   printf "08=%s n=%d exists=%d def=%d\n",
     $ok, scalar(@a), (exists $a[3] ? 1 : 0), (defined $a[3] ? 1 : 0); }
+# Row 09 also asks ref(): a glob REF in a HASH element is a GLOB, as it is in
+# an array element (#423 fixed the array unboxer only; the s480 review of s473f
+# gave the hash twin the same arm — before it, ref() answered "" and "$h{k}"
+# printed the glob VALUE), so the vivified handle and a plain `\*STDOUT` in a
+# hash element are both checked here.
 { my %h; my $ok = open($h{k}, "<", "/nonexistent-pcl-xyz") ? 1 : 0;
-  printf "09=%s keys=%d exists=%d def=%d\n",
-    $ok, scalar(keys %h), (exists $h{k} ? 1 : 0), (defined $h{k} ? 1 : 0); }
+  my %g; $g{k} = \*STDOUT; my $gs = "$g{k}"; $gs =~ s/0x[0-9a-f]+/0xA/;
+  printf "09=%s keys=%d exists=%d def=%d ref=%s gref=%s gstr=%s\n",
+    $ok, scalar(keys %h), (exists $h{k} ? 1 : 0), (defined $h{k} ? 1 : 0),
+    ref($h{k}), ref($g{k}), $gs; }
 { my @a; open($a[3], "<", $F) or die;
   printf "10=n=%d exists=%d def=%d\n",
     scalar(@a), (exists $a[3] ? 1 : 0), (defined $a[3] ? 1 : 0); close($a[3]); }
