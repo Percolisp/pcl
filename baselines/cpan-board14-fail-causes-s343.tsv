@@ -1,3 +1,8 @@
+# SUPERSEDED by baselines/cpan-board14-fails.tsv (task #1502, s473w 2026-09-09),
+# which carries a cause PER ROW instead of per FILE and is compared by
+# `tools/cpan-scoreboard.pl --diff`.  KEPT AS HISTORY: this file is the state
+# of the board's attribution at s343/s344, and nothing reads it.
+#
 # s343: first-cause line per FAIL file of the 14-dist board (baselines/cpan-board14-s343.tsv),
 # joined with what REAL PERL does with the same file (the discriminator: a file
 # perl skips or cannot run is not a PCL failure).

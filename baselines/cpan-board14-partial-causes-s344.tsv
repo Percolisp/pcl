@@ -1,3 +1,8 @@
+# SUPERSEDED by baselines/cpan-board14-fails.tsv (task #1502, s473w 2026-09-09),
+# which carries a cause PER ROW instead of per FILE and is compared by
+# `tools/cpan-scoreboard.pl --diff`.  KEPT AS HISTORY: this file is the state
+# of the board's attribution at s343/s344, and nothing reads it.
+#
 # s344 (#231): cause-classification of the 65 PARTIAL files of the 14-dist CPAN board.
 # Companion to docs/cpan-board14-survey-s343.md (which did the 53 FAILs).
 # Families: A-caller B-textbal(B1-goto,B2-scope,B3-extract) C-slu D-role E-capture F-dump G-trytiny H-single

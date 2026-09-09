@@ -2,6 +2,113 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473w (Opus agent, 2026-09-09) — the CPAN board gets the sweep's treatment: 389 failing rows with a cause each, and the two s1061 fixes that were ≤ 1 h
+
+**Member 1 — the instrument (#1502).**  The board's whole output was one line
+per t-file, so a file could lose a row and gain a row and read unchanged, and
+no row had a cause.  `tools/cpan-scoreboard.pl --rows FILE` now writes
+`dist, t-file, num, description, got, expected [, cause]` — the sweep's
+`fail-baseline.tsv` shape one column wider, keyed (dist, file, DESCRIPTION)
+because the number drifts — and `--diff OLD NEW` prints NEW / FIXED / LOST and
+`CAUSES: N of M`, says `LOST: NOT CHECKED` without the per-file tables, and
+exits nonzero on NEW or LOST.  ONE TAP parser feeds both the counts and the
+rows (`tools/lib/PCLTap.pm`), and its counts are deliberately the historical
+`/^ok \d+/` ones so no blessed snapshot moves for a tool reason.  A file that
+produces NO TAP gets a synthetic `*FILE*` row naming why — 38 of the 183 files,
+without which a third of the board could not appear in a file of failing
+assertions and `PERL-SKIP` would be unwritable.  The timeout registry is the
+companion runner's, extracted to `tools/lib/PCLTimeouts.pm` and verified
+identical against the live file.  Guard `tools/t/cpan-scoreboard.t`, 25 rows,
+~8 s, not in the gate.
+
+**The two instrument bugs the first run found.**  Text-Balanced 05_extmul.t
+needs ~150 s against a 120 s timeout, so it was recorded `FAIL 0 0 124` with
+every row invisible (#1512 fault 1); the registry's first row makes it
+PARTIAL 16/14.  And two Algorithm-Diff files read FAIL 0/0 in a loaded run and
+32/3 + 102/20 alone: `run-dist-t.pl` threw away the SBCL child's WAIT STATUS,
+so a run KILLED BY A SIGNAL published its empty TAP as a verdict.  The status
+is now reported and the scoreboard re-runs such a file serially, once.
+
+**Member 2 — the census.**  389 failing rows, 317 keys, `CAUSES: 0 of 317`.
+Real perl was run beside all 183 files (same @INC rule, CWD = the dist root)
+and every zero-row file's first error was captured.  Seven files perl skips too
+carry `PERL-SKIP`.  The largest clusters: #233 caller() fidelity (Sub-Uplevel,
+129 rows), #1568 Text::Balanced `extract_*` returning undef (55), #155 tie and
+#201/#1509 Capture-Tiny, #135 role composition, the Scalar-List-Utils
+introspection bundle #1571, #930 lvalue subs, `NS:DynaLoader` for the XS-only
+modules, `NS:Warnings-gated diagnostics` (#221).  Ten tasks filed, each with a
+reproducer: **#1567** (a `/g` match on an `@_` ELEMENT matches but records NO
+`pos`; `\$_[0]` and a lexical copy both work), **#1568**, **#1569** (`no
+overload` ignored), **#1570** (an `@ISA` parent whose CL package is never
+created makes the whole emitted file UNREADABLE — two Role-Tiny files),
+**#1571** and **#1573** (two bundles by population, explicitly not one bug),
+**#1572** (Class::Method::Modifiers dies at the CLOS level, 37 perl rows
+behind it), **#1574** (`lib/Socket.pm` has no `AF_UNIX`), **#1575** (THE BOARD
+DOES NOT CHDIR to the dist root while its oracle does — measured 2 of
+File-Which's 6 failures), **#1576** (`subtest` is not implemented, and a file
+using it produces no TAP at all).
+
+**Member 3 — #1525, `scalar(HASHREF)`.**  `p-scalar` returned the RAW hash
+table for a boxed hash, so `scalar($href)` lost the reference, an overloaded
+object printed `HASH(0x1)` and `my $c = scalar($href)` stored the KEY COUNT.
+The array arm already had the box-preserving shape and its own comment claimed
+the hash arm did; it did not (rule 11).  The existing guard row passed for two
+years because it used `\%h`, which sets the box's is-ref flag — a `{…}`
+CONSTRUCTOR does not, and `ref()` reads a raw table as HASH, which is what hid
+it.  ir-spec §2.4.
+
+**Member 4 — #1507, `use overload` is a BEGIN.**  perl installs the handler
+table at COMPILE time; PCL emitted `(p-register-overloads …)` at the
+statement's RUN position, so since the s436 phase model a class written in a
+block at the END of a file had its `sub new` visible to earlier code and its
+`""` handler installed after that code ran.  The fix is the classifier arm, not
+a hoist: every `use` already takes Parser2's `sched => 1` route, so the
+registration goes to the `definitions` bucket and is interleaved with the sub
+definitions BY SOURCE POSITION.  **The s433 hazard then materialised in the
+sweep** — `concat2.t`'s RT #132385 handler closes over a block `my @a`, and
+hoisted it pushed into the promoted package CELL while the code around it read
+the `let` binding: two variables, no error, `got=''`.  So a `use overload`
+whose text references a LET-BOUND lexical keeps its run position (the
+pre-existing divergence, not a new silent wrong), tested with the predicate
+Parser2's nested-sub route already uses — extracted as
+`Pl::Parser::text_refs_let_bound`, one predicate, two askers.
+
+**Member 5 — #1506 MEASURED, not shipped.**  `import PACKAGE LIST` already
+works when the package is declared in the file; what fails is one that is not,
+and the board's row then needs `constant->import` to land somewhere.  `require
+constant` loads perl's own constant.pm and dies at `_CAN_PCS`, which that
+module installs by writing a SCALAR REF into its own stash — proto-constant-sub
+magic.  So the layer-correct answer is a `lib/constant.pm` shim (the mechanism
+it needs is probed working), and the parser widening must be gated on the #266
+callable classifier.  Both halves ship together — more than a filler.
+
+**Member 6 — #1512 profiled, and the profile is a finding of its own.**  The
+transpile is 0.88 s, so the ~150 s is entirely the SBCL side; `sb-sprof` :cpu
+EXHAUSTED THE HEAP TWICE (5 ms/200k samples in 4 GB, then 20 ms/30k in 8 GB),
+and time-stamping the TAP told nothing because SBCL's pipe is block-buffered —
+all 30 rows arrive at t=161.  The measurement that worked is a form-by-form
+`read`+`eval` harness over the emitted file.
+
+**Member 7 — the snapshot.**  `baselines/cpan-board14-s473w.tsv`: 183 files,
+84 PASS / 50 PARTIAL / 49 FAIL, 2213 ok / 353 not-ok.  EXACTLY SEVEN rows moved
+vs `cpan-board14-s474.tsv` and every one is attributed in the header — four
+Scalar-List-Utils files to PASS (#1507 + #1525), Data-Dump filtered.t to PASS
+(#1525, attributed by running the file at the #1525 commit), Text-Balanced
+05_extmul.t out of its timeout, and ONE DOWN-MOVER: refaddr.t 23/9 → 18/14,
+five rows that were passing ON NOTHING now failing honestly because PCL's
+`refaddr` NUMIFIES THROUGH the `0+` overload where perl ignores it (#1571).
+
+**Bars.**  Gate 230 files / 7869 rows, Result FAIL = only the 13 pclxs xs rows.
+Full sweep `--jobs 4`: **TOTAL passing 18675 (+0)**, 0 new / 0 fixed / 0 LOST,
+drops 5 = census, GATE clean.  corpus-diff vs `0ece3088`: 13 of 111, all and
+only the files with a live `use overload`, silent drops 5 unchanged.
+emission-ab over lib/ + cpan-tests + the board's t/ (613 files): SAME 600 /
+DIFF 13 / **RCDIFF 0**.  Companion `op/ref.t op/hashassign.t op/context.t`
+`--jobs 1`: all three exactly their `perl-suite-run.tsv` rows, ROW DIFF 0 NEW /
+0 FIXED / 0 LOST.  `tools/ir-conform --jobs 2`: 316 pass / 0 fail / 29 known /
+0 stale.  ir-host-leak identical.  Generation **v2-1200**, three artifacts
+regenerated.
+
 ## Session s473i (Opus agent, 2026-09-08) — three PRODUCT bugs a user meets before any semantics: `--executable` builds a binary that RUNS the program, `-I` reaches a MODULE's own transpile, and the module cache key names the COMPILER
 
 **Member 1 — `pl2cl --executable` (#1060).**  It `load`ed the emitted program
