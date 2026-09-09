@@ -2,15 +2,18 @@
 
 **USER 2026-09-09:** "I am going to clean up the .md files so they are simpler and
 then publish pointers to PCL, hopefully to drum up some interest."  And:
-"Percolisp will be an experiment, until we can run DBI etc."  This plan is
+"Percolisp will be an experiment, until we can run DBI etc." — and, asked, "DBI was
+just an example of critical infrastructure."  This plan is
 **first on the next session's queue**; the bug-fix queue (`docs/plan-post-s473.md`,
 s473t4 → s473t3 → #1592 → #1117) resumes behind it.
 
 ## 0. Framing — what the pitch is allowed to say
 
-* **Percolisp is an experiment until DBI runs.**  That sentence goes into the
-  README's maturity line verbatim, and "DBI runs" becomes the milestone that
-  ends the experiment on the roadmap (§1 P7 says what DBI needs).  An honest
+* **Percolisp is an experiment until the critical infrastructure runs.**  DBI
+  is the USER's example, not the list.  The README's maturity line says that
+  sentence; the roadmap names the milestone as a LIST of infrastructure modules
+  (P7 proposes it, the USER prunes or extends it), and the experiment ends when
+  every module on the list runs its own test suite under PCL.  An honest
   "experiment" with numbers travels further than a "product" with adjectives.
 * **Enthusiasm is the goal; numbers are the method.**  Every claim on the first
   screen carries a measured number and a link to how it was measured.  Nothing
@@ -36,7 +39,7 @@ s473t4 → s473t3 → #1592 → #1117) resumes behind it.
 | P4 | **The docs split.**  `docs/` holds 156 files plus 28 in `history/`; a visitor sees session logs and review rulings.  Target: `docs/README.md` = an index of the **user-facing eight** — `STATUS.md`, `pcl-commands.md`, `caching.md`, `not-supported.md`, `ir-spec.md`, `extensions.md`, `shipped-modules.md`, `xs-artifact-cache.md` — and everything else under `docs/dev/` (plans, rulings, reviews, session-log, DECIDED, runbooks) with `docs/history/` untouched.  `CLAUDE.md` at the root is 60 KB of process; keep a short one that `@docs/dev/…`-imports the bulk (Claude Code honours `@path` imports), so sessions keep their rules and visitors see a page.  Every path that moves is fixed in the tools that read it (`grep -rn 'docs/' tools/ Pl/t/ CLAUDE.md` first — the staleness and license gates read `docs/`). | **USER** (doing it); the plan supplies the list above; an Opus agent fixes the tool paths afterwards if the USER asks | M | `prove -j8 Pl/t/` green after the move (no-hardcoded-paths, license-tag, artifact-staleness); a visitor who clicks `docs/` sees one index and eight pages |
 | P5 | **The announcement.**  One post (Sonnet drafts, Fable reviews, USER signs): the story is the hook — a Perl compiler largely written with Claude over 400+ sessions, differential fuzzing against perl as the bug finder, `pack` written in Perl and compiled by the compiler itself, and the IR.  Per-audience openers from §0.  Channels: blogs.perl.org + r/perl + Perl Weekly (Perl headline); r/lisp + Planet Lisp (Lisp headline); Hacker News with the compiler headline.  Goes out **after P1–P3** — a pointer that lands on the Quicklisp step is a pointer wasted. | Sonnet prose → Fable review → USER | S | the post makes no claim the README does not make with a number |
 | P6 | **A 30-second recording.**  `pcl script.pl` beside the generated Lisp, as an asciinema or GIF linked from the first screen.  Cheaper than any paragraph for "you can read the output". | USER or the s481a agent | S | under 40 s; the Lisp shown is real `pl2cl` output |
-| P7 | **The DBI milestone (what ends the experiment).**  DBI is XS, so it needs pclxs's remaining optional group (`io`, task #117), DBD::SQLite's XS through `tools/pcl-xs-install`, and the DESTROY question (`docs/xs-abi5-and-destroy.md`: an unimplemented destructor leaks every statement handle).  Not scheduled here — **sized** into one task so the roadmap can say what "DBI runs" costs, and the README roadmap says "the experiment ends when DBI runs". | Fable sizes (task), USER decides when | task only | the task names the three blockers with their tasks and an estimate |
+| P7 | **The critical-infrastructure milestone (what ends the experiment).**  DBI is one example.  #1607 PROPOSES the list for the USER to prune or extend — the modules a Perl deployment cannot do without, grouped by what they need: **pure Perl** (on the board or one board round away: Getopt::Long, JSON::PP, Data::Dumper's PP half, Path::Tiny, HTTP::Tiny, Try::Tiny, Moo, Test::More itself); **XS through pclxs** (DBI + one DBD, Encode, Storable, Time::HiRes, List::Util's XS, Digest::SHA, Cpanel::JSON::XS or JSON::XS, POSIX); **frameworks that stress everything** (Plack, Mojolicious, DateTime, Template Toolkit, Log::Log4perl).  Per module: does it transpile, does its own `t/` run, which blocker (task number), one estimate.  The README roadmap quotes the list and the count that run today; the count going up IS the public progress meter.  DBI's own blockers stay named (pclxs `io` #117, a DBD's XS through `tools/pcl-xs-install`, DESTROY for statement handles — `docs/xs-abi5-and-destroy.md`). | Fable sizes (#1607), USER fixes the list and decides when | task only | the list with a probe result and a blocker per module; the README roadmap can quote it |
 
 ## 2. Order and slots for the next session
 
