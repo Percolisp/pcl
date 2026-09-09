@@ -24283,14 +24283,22 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; exactly this (not (p-box-p val)) guard; the array branch never got it.
       ((and (vectorp v) (adjustable-array-p v))
        (if (p-box-p val) val (length v)))
-      ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count
-      ((and (hash-table-p v) (not (p-box-p val))) (%p-hash-user-count v))
+      ;; Perl 5.26+: plain %hash (not a hash ref) in scalar context → key count.
+      ;; A BOX holding a hash table is a hash REFERENCE, and the ref arm above
+      ;; cannot catch it: array and hash refs never set `is-ref` (a box wrapping
+      ;; a vector or a hash table is unambiguously a ref).  So this arm must
+      ;; hand the BOX back, exactly like the array branch.  Merely DECLINING
+      ;; here — the old `(not (p-box-p val))` guard — fell through to `(t v)`
+      ;; and returned the RAW HASH TABLE: `scalar($href)` lost the reference, an
+      ;; overloaded object lost its `""` handler (HASH(0x1)) and
+      ;; `my $c = scalar($href)` stored the KEY COUNT (#1525).
+      ((hash-table-p v) (if (p-box-p val) val (%p-hash-user-count v)))
       ;; …and the MARKER *is* the hash for %ENV / %INC (task #736), so it needs
       ;; the same arm: without it the symbol fell to the catch-all below and
       ;; `scalar(%ENV)` printed HASH(0x1) where perl prints the key count
       ;; (task #1392, s473h — pre-existing, found while wiring #1529).  p-keys
       ;; is the ONE walk of those two, so the count cannot disagree with `keys`.
-      ((and (%p-hash-marker-p v) (not (p-box-p val))) (length (p-keys v)))
+      ((%p-hash-marker-p v) (if (p-box-p val) val (length (p-keys v))))
       ;; An undef result is the scalar undef: return the *p-undef* sentinel, not
       ;; raw nil.  scalar(EXPR) ALWAYS produces a single scalar, so e.g.
       ;; `scalar(eval { die })` must contribute exactly one undef element to a

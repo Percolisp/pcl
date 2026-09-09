@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 23;
 
 sub run_cl {
     my ($code) = @_;
@@ -244,6 +244,32 @@ my %g = (x=>1); print "F:", scalar(%g), "\n";
 print "G:", scalar("str"), "\n";
 }), "A:ARRAY\nB:ARRAY\nC:SCALAR\nD:HASH\nE:3\nF:1\nG:str\n",
    'scalar(REF) is the ref itself; scalar(@a)/scalar(%h) are still the counts');
+
+# 7b. …and a hash ref that was NOT built by `\%h` (task #1525).  The row above
+# passed for two years while this one was broken, because `\%h` sets the box's
+# is-ref flag and a `{…}` CONSTRUCTOR does not: the ref arm caught the first
+# spelling and the hash arm merely DECLINED for the second, so it fell through
+# to the catch-all and returned the RAW HASH TABLE.  `scalar($href)` then lost
+# the reference — an overloaded object printed HASH(0x1) instead of running its
+# `""` handler, and `my $c = scalar($href)` stored the KEY COUNT.  The array arm
+# had been given the box-preserving shape and the hash arm had not (rule 11).
+# Every expected value below is real perl 5.40.3's (probed).
+is(run_cl(q{{ package H; use overload '""' => sub { "H<".$_[0]{v}.">" }, fallback => 1;
+  sub new { my ($c,$v)=@_; bless {v=>$v}, $c } }
+my $h = H->new(9);
+my $c = scalar($h);
+print "A:", scalar($h), "\n";
+print "B:$c\n";
+print "C:", ref($c), "\n";
+my $a = { v => 9 };
+print "D:", ref(scalar($a)), "\n";
+print "E:", scalar(@{[1,2,3]}), "\n";
+my %g = (x=>1, y=>2); print "F:", scalar(%g), "\n";
+my @ar = (1,2,3);     print "G:", scalar(@ar), "\n";
+print "H:", (scalar(%ENV) > 0 ? "many" : "none"), "\n";
+print "I:", ref(scalar(\%g)), "\n";
+}), "A:H<9>\nB:H<9>\nC:H\nD:HASH\nE:3\nF:2\nG:3\nH:many\nI:HASH\n",
+   'scalar(HASHREF) keeps the reference — overload, assignment and ref(); %h/%ENV/@a counts unmoved');
 
 # ------------------------------------ 8. explain() DUMPS a ref (task #236)
 #

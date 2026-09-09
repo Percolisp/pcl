@@ -407,6 +407,17 @@ stringified on the way in** (`(to-string key)`). A hash in numeric position
 coerces to its key count.  `%ENV` is special-cased: the table holds a marker
 and reads/writes go to the process environment.
 
+**A BOX holding a hash table is a hash REFERENCE, and `scalar()` never
+dereferences** (the same rule §2.3 states for arrays, and the same test —
+array and hash references do NOT set the box's `is-ref` flag, because a box
+wrapping a vector or a hash table is unambiguously a ref).  So `scalar(%h)`
+and `scalar(%ENV)` are key counts while `scalar($href)`, `scalar({…})` and
+`scalar($blessed_object)` are the reference itself, and a port must answer the
+count only for the BARE table: returning the raw table for a boxed one drops
+the reference silently — `ref()` still reads a raw table as `HASH`, so the
+divergence shows up only in stringification (an overload handler is never
+found) and in assignment, where the key count lands in the scalar (#1525).
+
 **Values follow §2.3's element model exactly** — RAW by default, promoted to a
 box in place (`%p-hash-elem-cell`) at an alias event, the same write rule, the
 same monotone promotion.  The array's `nil` hole has no hash counterpart: an
