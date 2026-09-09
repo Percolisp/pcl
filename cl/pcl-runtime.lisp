@@ -15980,9 +15980,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    The argument COUNT is passed on: it is what tells perl's bare fork-open
    `open(F,\"-|\")` from a three-argument open whose command is empty."
   (if filename
-      `(%p-open-impl (%p-fh-arg ,fh) ,mode ,filename t)
+      `(%p-open-impl (%p-fh-install-arg ,fh) ,mode ,filename t)
       `(let ((%parsed (%p-open-parse-2arg ,mode)))
-         (%p-open-impl (%p-fh-arg ,fh) (car %parsed) (cdr %parsed)))))
+         (%p-open-impl (%p-fh-install-arg ,fh) (car %parsed) (cdr %parsed)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; sysopen (task #730)
@@ -16047,7 +16047,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 (defmacro p-sysopen (fh path flags &optional perms)
   "Perl sysopen - open(2) with O_* flags.  Bareword FH is auto-quoted, exactly
    as p-open does it."
-  `(%p-sysopen-impl (%p-fh-arg ,fh) ,path ,flags ,perms))
+  `(%p-sysopen-impl (%p-fh-install-arg ,fh) ,path ,flags ,perms))
 
 (defun %p-close-socket (sock)
   "Close a socket: close its cached stream (which closes the fd) if one was made,
@@ -16177,6 +16177,51 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                         name))
             (not (upper-case-p (char name 0)))))))
 
+;;; AN INSTALLING HANDLE SLOT IS A PLACE, NOT A VALUE (task #1309).
+;;; `open($a[0], …)` must reach the array's own SLOT: perl vivifies the handle
+;;; into it before it even attempts the open, so after a failed open the
+;;; element is a closed glob and after a successful one it is the handle.  The
+;;; element accessors come in a READ flavour (the value in the slot) and an
+;;; eager LVALUE flavour (the live box), and an install slot wants the second —
+;;; the read flavour hands back the shared `*p-undef*` KEYWORD for an empty
+;;; slot, which %p-install-fh then registered as if it were a handle NAME, so
+;;; every element open in the image shared one entry of *p-filehandles* and an
+;;; unrelated `readline($b[0])` read the other file's lines (measured s473f).
+(defparameter +p-elem-place-box-accessor+
+  '((p-aref          . p-aref-box)
+    (p-gethash       . p-gethash-box)
+    (p-aref-deref    . p-aref-deref-box)
+    (p-gethash-deref . p-gethash-deref-box))
+  "The read accessor -> eager-lvalue accessor map for the four element places,
+   spelled here for %p-fh-arg's :INSTALL slot.  Same four heads p-setf's
+   refaliasing arm enumerates — an element place has exactly these spellings.")
+
+(defun %p-fh-place-form (fh-form)
+  "FH-FORM as a PLACE: an element read accessor becomes its eager -box twin,
+   anything else is handed back unchanged (a lexical `$fh` is already the box,
+   a bareword is a name)."
+  (let ((twin (and (consp fh-form) (symbolp (car fh-form))
+                   (cdr (assoc (car fh-form) +p-elem-place-box-accessor+)))))
+    (if twin (cons twin (cdr fh-form)) fh-form)))
+
+(defun %p-fh-place-check (designator)
+  "An install slot's designator, or perl's death.  UNDEF is not a filehandle
+   reference (`open(undef,'<',$f)` dies 5.40.3), and it is the one value that
+   must never reach %p-install-fh's by-name arm: registering the shared undef
+   as if it were a handle NAME gives every such open the SAME table entry, so
+   an unrelated read finds the other program's stream (rule 12 — the value
+   flows onward, so this DIES rather than announcing).  The check is at the
+   argument, not inside %p-install-fh, so it fires BEFORE the open the way
+   perl's does and covers the failing open too."
+  (when (or (null designator) (eq designator *p-undef*))
+    (p-die "Can't use an undefined value as filehandle reference"))
+  designator)
+
+(defmacro %p-fh-install-arg (fh-form)
+  "THE handle argument of an OPENER (open, sysopen, opendir, pipe, socket,
+   socketpair, accept's new handle): %p-fh-arg's :INSTALL slot, checked."
+  `(%p-fh-place-check (%p-fh-arg ,fh-form :install)))
+
 (defmacro %p-fh-arg (fh-form &optional (call-form-is-a-handle t))
   ;; A CONTEXT WRAP around the argument is peeled first (%p-strip-ctx): a
   ;; scalar-context user-sub call is emitted wrapped, and the (pl-NAME) arm
@@ -16202,7 +16247,14 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;;               arm here is the STRING-EVAL horizon, where the fragment was
   ;;               transpiled without the enclosing program's sub table — see
   ;;               %p-expr-slot-defers-to-sub.
+  ;;   :INSTALL    a glob slot the builtin WRITES — the openers (open, sysopen,
+  ;;               opendir, pipe, socket, socketpair, accept's NEW handle).
+  ;;               Everything :T means, plus: an element accessor is rewritten
+  ;;               to its eager-lvalue twin, because perl vivifies the handle
+  ;;               into the place (see +p-elem-place-box-accessor+, #1309).
   (let ((fh-form (if call-form-is-a-handle (%p-strip-ctx fh-form) fh-form)))
+    (when (eq call-form-is-a-handle :install)
+      (setf fh-form (%p-fh-place-form fh-form)))
     (cond
       ;; Bare symbol without sigil — bareword filehandle: quote it.
       ;; `_` is NOT one: it is the runtime's stat-cache VARIABLE (defvar _),
@@ -16625,7 +16677,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defmacro p-socket (fh domain type protocol)
   "Perl socket — bareword filehandle is auto-quoted."
-  `(%p-socket-impl (%p-fh-arg ,fh) ,domain ,type ,protocol))
+  `(%p-socket-impl (%p-fh-install-arg ,fh) ,domain ,type ,protocol))
 
 (defun %p-bind-impl (fh name)
   "Perl bind(SOCK, NAME): NAME is a packed sockaddr.  1 on success, '' + $!."
@@ -16687,7 +16739,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defmacro p-accept (newfh serverfh)
   "Perl accept — both filehandles are auto-quoted (the new socket is written
    through NEWSOCK, like read writes through its buffer)."
-  `(%p-accept-impl (%p-fh-arg ,newfh) (%p-fh-arg ,serverfh)))
+  `(%p-accept-impl (%p-fh-install-arg ,newfh) (%p-fh-arg ,serverfh)))
 
 (defun %p-shutdown-impl (fh how)
   "Perl shutdown(SOCK, HOW): HOW 0=read 1=write 2=both.  1 on success, '' + $!."
@@ -16944,7 +16996,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defmacro p-socketpair (fh1 fh2 domain type protocol)
   "Perl socketpair — both filehandles are auto-quoted."
-  `(%p-socketpair-impl (%p-fh-arg ,fh1) (%p-fh-arg ,fh2) ,domain ,type ,protocol))
+  `(%p-socketpair-impl (%p-fh-install-arg ,fh1) (%p-fh-install-arg ,fh2) ,domain ,type ,protocol))
 
 (defun %p-stat-vector (st)
   "Build Perl's 13-element stat list from an sb-posix stat struct.  Times are
@@ -17090,6 +17142,19 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((s (%p-as-stream (%p-resolve-fh v))))
     (and s (open-stream-p s) (%p-fd-of-stream s))))
 
+(defun %p-resolve-dh (dh)
+  "THE dirhandle resolver — the `(index . names)' cons DH designates, or nil.
+   Three spellings reach it and all three are one reading: the cons ITSELF
+   (what an element place hands back once its slot holds the handle — #1309),
+   a bareword SYMBOL through *p-dirhandles*, and a BOX holding the cons
+   (`opendir my $dh').  It is %p-resolve-fh's dirhandle twin and exists for
+   the same reason: readdir/closedir/rewinddir each carried their own
+   two-armed copy, so an element dirhandle opened fine and then read NOTHING
+   (rule 11 — three copies of one question, disagreeing)."
+  (cond ((consp dh) dh)
+        ((symbolp dh) (gethash dh *p-dirhandles*))
+        ((p-box-p dh) (let ((x (p-box-value dh))) (and (consp x) x)))))
+
 (defun %p-dirhandle-path (v)
   "The directory an open DIRHANDLE operand was opened on, or nil when V is not
    one.  A dirhandle's value is a `(index . names)' cons — the object BOTH
@@ -17099,9 +17164,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    no dirfd, so the resolver answers with the PATH, the same operand-not-buffer
    divergence `_' already documents.  A CLOSED dirhandle has no entry, which is
    what makes it EBADF."
-  (let ((h (cond ((consp v) v)
-                 ((symbolp v) (gethash v *p-dirhandles*))
-                 ((p-box-p v) (let ((x (p-box-value v))) (and (consp x) x))))))
+  (let ((h (%p-resolve-dh v)))
     (and h (gethash h *p-dirhandle-paths*))))
 
 (defun %p-stat-handle-shaped-p (v)
@@ -18005,16 +18068,14 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defmacro p-opendir (dh &rest args)
   "Perl opendir — bareword dirhandle is auto-quoted."
-  `(%p-opendir-impl (%p-fh-arg ,dh) ,@args))
+  `(%p-opendir-impl (%p-fh-install-arg ,dh) ,@args))
 
 (defun %p-readdir-impl (dh)
   "Perl readdir - next entry in scalar context; in LIST context all the
    remaining entries, leaving the handle exhausted.  Call sites bind
    *wantarray* explicitly (readdir is in ExprToCL's %WANTARRAY_SENSITIVE),
    so an ambient list binding cannot leak in."
-  (let ((handle (if (symbolp dh)
-                    (gethash dh *p-dirhandles*)
-                    (when (p-box-p dh) (p-box-value dh)))))
+  (let ((handle (%p-resolve-dh dh)))
     (when handle
       (let ((idx (car handle))
             (entries (cdr handle)))
@@ -18037,9 +18098,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl closedir - close directory handle.  The remembered DIRECTORY goes too:
    a closed dirhandle must be EBADF in a stat/filetest slot, not a path that
    still works (task #1048)."
-  (let ((handle (if (symbolp dh)
-                    (gethash dh *p-dirhandles*)
-                    (and (p-box-p dh) (p-box-value dh)))))
+  (let ((handle (%p-resolve-dh dh)))
     (when (consp handle) (remhash handle *p-dirhandle-paths*)))
   (when (symbolp dh)
     (remhash dh *p-dirhandles*))
@@ -18051,9 +18110,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-rewinddir-impl (dh)
   "Perl rewinddir - reset directory to beginning"
-  (let ((handle (if (symbolp dh)
-                    (gethash dh *p-dirhandles*)
-                    (when (p-box-p dh) (p-box-value dh)))))
+  (let ((handle (%p-resolve-dh dh)))
     (when handle
       (setf (car handle) 0))
     t))
@@ -18918,7 +18975,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defmacro p-pipe (read-fh write-fh)
   "Perl pipe - bareword filehandles are auto-quoted; lexical $fh passed as box."
-  `(%p-pipe-impl (%p-fh-arg ,read-fh) (%p-fh-arg ,write-fh)))
+  `(%p-pipe-impl (%p-fh-install-arg ,read-fh) (%p-fh-install-arg ,write-fh)))
 
 (defun %pcl-fdmask-int (v)
   "Perl 4-arg select bit-mask scalar → integer fd mask.
