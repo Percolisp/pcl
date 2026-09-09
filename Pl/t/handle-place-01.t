@@ -50,7 +50,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 115;
+plan tests => 124;
 
 my $workdir = tempdir(CLEANUP => 1);
 my $datafile = "$workdir/data.txt";
@@ -365,6 +365,55 @@ $! = 0; printf "24 trunc-path=%s size=%d\n", d(truncate($TMP, 2)), (-s $TMP);
 unlink $TMP;
 print "26 alive\n";
 PERL
+
+# ── #1220 — REOPENING A STANDARD HANDLE IS A dup2, WHATEVER NAMED IT ──────
+# `open(*STDOUT,'>',$f)` re-points DESCRIPTOR 1 in perl, so the program's own
+# prints AND ITS CHILDREN's go to the file (probed 5.40.3 — the child is the
+# discriminator; without it "it went to the file" is true either way).
+# %p-std-slot was blind to a typeglob, to a glob REF and to a raw name string,
+# so those spellings registered a SECOND stream under the name and left
+# descriptor 1 alone.  And a QUALIFIER other than main:: disqualifies: perl
+# opens THAT glob (row 09 is the negative, and it was silently wrong).
+#
+# Each case runs in a CHILD, because the case under test redirects stdout.
+sub std_case {
+    my ($tag, $body) = @_;
+    my $out = "$workdir/std-$tag.out";
+    my $src = "$workdir/std-$tag.pl";
+    unlink $out;
+    open(my $s, '>', $src) or die; print {$s} "my \$F = \"$out\";\n$body"; close $s;
+    my $cl_code = `$pl2cl $src 2>/dev/null`;
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl_code; close $cl_fh;
+    system("sbcl @sbcl_rt --load $cl_file >/dev/null 2>&1");
+    my $pcl = "";
+    if (open(my $r, '<', $out)) { local $/; $pcl = <$r> // ""; close $r }
+    unlink $out;
+    system($^X, $src);
+    my $perl = "";
+    if (open(my $r, '<', $out)) { local $/; $perl = <$r> // ""; close $r }
+    unlink $out, $src;
+    return ($perl, $pcl);
+}
+
+my @std_cases = (
+  ['01-glob',      "open(*STDOUT, '>', \$F) or die; print \"parent\\n\"; system(\"echo child\");"],
+  ['02-bareword',  "open(STDOUT, '>', \$F) or die; print \"parent\\n\"; system(\"echo child\");"],
+  ['03-globref',   "open(\\*STDOUT, '>', \$F) or die; print \"parent\\n\"; system(\"echo child\");"],
+  ['04-string',    "my \$n = \"STDOUT\"; open(\$n, '>', \$F) or die; print \"parent\\n\"; system(\"echo child\");"],
+  ['05-mainglob',  "open(*main::STDOUT, '>', \$F) or die; print \"parent\\n\";"],
+  ['06-globscalar',"my \$g = *STDOUT; open(\$g, '>', \$F) or die; print \"parent\\n\"; system(\"echo child\");"],
+  ['07-grefscalar',"my \$g = \\*STDOUT; open(\$g, '>', \$F) or die; print \"parent\\n\"; system(\"echo child\");"],
+  ['08-stderr',    "open(*STDERR, '>', \$F) or die; print STDERR \"pe\\n\"; system(\"echo ce 1>&2\");"],
+  # THE NEGATIVE: another package's STDOUT is a different glob, and descriptor
+  # 1 must be left alone — the program's own print still reaches the terminal.
+  ['09-pkgstring', "my \$n = \"Foo::STDOUT\"; open(\$n, '>', \$F) or die; print \"to-real-stdout\\n\"; print {\$n} \"to-foo\\n\";"],
+);
+
+for my $c (@std_cases) {
+    my ($perl, $pcl) = std_case(@$c);
+    is($pcl, $perl, "std handle $c->[0]: PCL redirects exactly as perl does");
+}
 
 my $perl_out = run_perl($PROG);
 my $pcl_out  = run_pcl($PROG);

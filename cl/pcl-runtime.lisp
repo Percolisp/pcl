@@ -14836,23 +14836,54 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           (when pos (file-position s pos))))))
   v)
 
+(defun %p-main-package-p (pkg)
+  "Whether the CL package PKG is perl's `main' stash — where the standard
+   handles live.  `main::STDOUT' IS STDOUT; `Foo::STDOUT' is a different glob."
+  (let ((n (%pcl-cl-pkg-to-perl-name pkg)))
+    (or (string-equal n "main") (string-equal n "pcl"))))
+
+(defun %p-std-name (fh)
+  "The UNQUALIFIED handle name the designator FH names IN MAIN, or nil.
+
+   EVERY SPELLING %p-install-fh HAS AN ARM FOR IS HERE, because the two must
+   agree about what a designator IS (task #1220): a bareword SYMBOL, a raw name
+   STRING (what Test::Builder's `->output' hands back), a box holding a name
+   string, a raw TYPEGLOB (`binmode *STDOUT', `open(*STDOUT,…)'), a box holding
+   one, and a box holding a glob REF (`my $g = \\*STDOUT; open($g,…)').  With
+   the glob spellings missing, `open(*STDOUT,'>',$f)' registered a SECOND
+   stream under the name and left descriptor 1 alone, so the program's own
+   prints went to the file but its CHILDREN still wrote to the terminal —
+   perl dup2s, and the child follows (probed 5.40.3, all four spellings).
+
+   A QUALIFIER OTHER THAN main:: DISQUALIFIES.  perl's `open(*Foo::STDOUT,…)'
+   and `$n = \"Foo::STDOUT\"; open($n,…)' open THAT glob and leave descriptor 1
+   alone (probed) — the string arm used to strip every qualifier, so PCL
+   re-pointed stdout for both."
+  (let ((v (if (p-box-p fh) (p-box-value fh) fh)))
+    (cond
+      ;; A glob, raw or in a box (a glob REF is the same box with is-ref set —
+      ;; the flag says how it PRINTS, not which glob it names).
+      ((p-typeglob-p v)
+       (and (%p-main-package-p (p-typeglob-package v)) (p-typeglob-name v)))
+      ;; A bareword symbol.  Generated code passes it read under the :invert
+      ;; readtable, so `STDOUT` is |stdout| — hence every test below is
+      ;; string-equal.
+      ((and v (symbolp v) (not (eq v *p-undef*))) (symbol-name v))
+      ((and (stringp v) (plusp (length v)))
+       (let ((sep (search "::" v :from-end t)))
+         (if sep
+             (let ((qual (subseq v 0 sep)))
+               (and (string-equal qual "main") (subseq v (+ sep 2))))
+             v)))
+      (t nil))))
+
 (defun %p-std-slot (fh)
   "The standard descriptor the filehandle designator FH NAMES — 0 STDIN,
-   1 STDOUT, 2 STDERR — or nil when it names none.
-   Both spellings that reach a bareword name answer: the symbol generated code
-   passes (read under the :invert readtable, `STDOUT` is |stdout| — hence
-   string-equal) and the symbolic-filehandle box (`my $x = \"STDOUT\";
-   open($x,…)` opens the STDOUT glob in perl), keyed exactly as %p-install-fh
-   keys such a box.  NOT a typeglob and not a raw name string, though both NAME
-   a standard handle — see #1115's note on %p-binmode-impl, which decides by
-   DESCRIPTOR for exactly that reason (task filed separately)."
-  (let ((name (cond ((and fh (symbolp fh)) (symbol-name fh))
-                    ((and (p-box-p fh) (stringp (p-box-value fh))
-                          (plusp (length (p-box-value fh))))
-                     (let* ((nm  (p-box-value fh))
-                            (sep (search "::" nm :from-end t)))
-                       (if sep (subseq nm (+ sep 2)) nm)))
-                    (t nil))))
+   1 STDOUT, 2 STDERR — or nil when it names none.  %p-std-name is the reading
+   of the designator; this is only the three names.  %p-install-fh consults it
+   so that reopening a standard handle moves the stream ONTO the descriptor
+   (%p-rebind-std's dup2) instead of registering a second stream beside it."
+  (let ((name (%p-std-name fh)))
     (and name
          (cond ((string-equal name "STDIN")  0)
                ((string-equal name "STDOUT") 1)
