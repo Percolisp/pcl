@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 40;
+plan tests => 45;
 
 sub run_cl {
     my ($code) = @_;
@@ -725,3 +725,84 @@ test_cl('#1005: abs autogenerates from < and -, ! from bool, plain paths intact'
      print((!0 ? "T" : "F"), (!1 ? "T" : "F"), (!"" ? "T" : "F"), "\n");
      print((not 0), "|", (not 1), "|\n");',
     "AB\nT\n7 7 7.5\n3.0000 1.0000 0.0000\n2.7183 0.0000 0.7854\nTFT\n1||\n");
+
+# ── #1507: `use overload` is a BEGIN — the handler table is in force for the
+# whole file, wherever the pragma sits ────────────────────────────────────────
+#
+# perl's `use` runs at COMPILE time, so a class written in a block at the END
+# of the file has its handlers installed before the first run-time statement.
+# PCL emitted `(p-register-overloads …)` at the statement's RUN position, and
+# since the phase model (s436) every section's compile phase runs before every
+# section's run phase — so such a block had its `sub new` visible to earlier
+# code (perl-correct) while its `""` handler was installed after that code had
+# already run.  The two halves of one `use` disagreed.  The registration is now
+# a compile-phase member, interleaved with the sub definitions by source
+# position, exactly where a BEGIN block written in its place would run.
+# Every expected value below is real perl 5.40.3's (probed s473w).
+
+test_cl('#1507: an overloaded class declared BELOW its first use is in force',
+    'use List::Util qw(max min);
+     my ($one,$two,$thr) = (Foo->new(1), Foo->new(2), Foo->new(3));
+     print max($one,$two,$thr), "\n";
+     print min($one,$two,$thr), "\n";
+     { package Foo;
+       use overload q("") => sub { ${$_[0]} }, q(0+) => sub { ${$_[0]} },
+                    q(>)  => sub { ${$_[0]} > ${$_[1]} }, fallback => 1;
+       sub new { my $c = shift; my $v = shift; bless \$v, $c } }',
+    "3\n1\n");
+
+test_cl('#1507: two classes below, a handler naming a sub defined later, StrVal, Overloaded',
+    'print "1a:", A->new(3), " 1b:", B->new(4), "\n";
+     print "2:", C->new(9), "\n";
+     my $a = A->new(5);
+     print "3:", (overload::StrVal($a) =~ /^A=SCALAR\(0x[0-9a-f]+\)$/ ? "raw" : "OVERLOADED"), "\n";
+     print "4:", (overload::Overloaded($a) ? "yes" : "no"), "\n";
+     { package A;
+       use overload q("") => sub { "A<".${$_[0]}.">" }, fallback => 1;
+       sub new { my ($c,$v)=@_; bless \$v, $c } }
+     { package B;
+       use overload q("") => sub { "B<".${$_[0]}.">" }, q(0+) => sub { ${$_[0]} }, fallback => 1;
+       sub new { my ($c,$v)=@_; bless \$v, $c } }
+     { package C;
+       use overload q("") => \&Cstr, fallback => 1;
+       sub new { my ($c,$v)=@_; bless \$v, $c } }
+     sub C::Cstr { "C<".${$_[0]}.">" }',
+    "1a:A<3> 1b:B<4>\n2:C<9>\n3:raw\n4:yes\n");
+
+# THE HAZARD the ruling names (s433, "whole compile phase or nothing"): a
+# handler that closes over a lexical is now COMPILED above that lexical's
+# assignment.  perl has the same two answers and they differ — a FILE lexical
+# assigned before the first use is seen with its value; a lexical declared
+# inside the class's own block is still undef when code above the block runs,
+# because `my $tag = "T"` is a RUN-time assignment.  PCL agrees with perl on
+# both (the warning perl prints for the undef is absent — a separate gap).
+test_cl('#1507: a handler closing over a FILE lexical sees its value',
+    'my $sep = "-";
+     print Foo->new(5), "\n";
+     { package Foo;
+       use overload q("") => sub { join $sep, "a", ${$_[0]} }, fallback => 1;
+       sub new { my ($c,$v)=@_; bless \$v, $c } }
+     print Foo->new(7), "\n";',
+    "a-5\na-7\n");
+
+test_cl('#1507: a handler closing over the BLOCK lexical sees undef before its assignment, as perl does',
+    'print Foo->new(5), "\n";
+     { package Foo;
+       my $tag = "T";
+       use overload q("") => sub { $tag . ${$_[0]} }, fallback => 1;
+       sub new { my ($c,$v)=@_; bless \$v, $c }
+       sub tag { $tag } }
+     print Foo->new(7), "\n";
+     print Foo->tag, "\n";',
+    "5\nT7\nT\n");
+
+# A NO-REGRESSION row, not an inverse-verified one: this shape already worked
+# on `0ece3088` (measured), and it is here because the eval route buckets the
+# statement differently and must keep working.
+test_cl('#1507: `use overload` inside a string eval still registers',
+    'eval q{ package E;
+             use overload q("") => sub { "E<".${$_[0]}.">" }, fallback => 1;
+             sub new { my ($c,$v)=@_; bless \$v, $c }
+             1; } or die "eval failed: $@";
+     print "1:", E->new(2), "\n";',
+    "1:E<2>\n");

@@ -2768,9 +2768,15 @@ that with two groups of top-level forms, in this order:
    `package NAME VERSION` section's `$VERSION` assignment (perl sets it as
    the `package` statement is COMPILED, so it precedes every `BEGIN`, `use`
    and sub of the section — s437), its
-   captured `use`/`require`/`BEGIN` declarations, and its sub definitions and
-   scheduled blocks interleaved by SOURCE POSITION (so a `BEGIN` sees exactly
-   the subs written above it and none below);
+   captured `use`/`require`/`BEGIN` declarations, and its sub definitions,
+   scheduled blocks and **`use overload` registrations** interleaved by SOURCE
+   POSITION (so a `BEGIN` sees exactly the subs written above it and none
+   below).  `(p-register-overloads "Pkg" …)` is a compile-phase member because
+   perl's `use` is a `BEGIN`: the handler table is installed while the file
+   compiles and is therefore in force for every run-time statement of the file,
+   wherever the pragma sits (#1507).  A translator that emits the registration
+   at the statement's run position gives a class written at the END of a file
+   its `sub new` (correct — subs are compile-phase) and not its `""` handler;
 2. `(p-run-compile-phase-blocks)` — UNITCHECK and CHECK in reverse
    registration order, then INIT in source order (§the phase boundary);
 3. **run phase**, one group per section in source order — an `(in-package …)`

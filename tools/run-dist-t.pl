@@ -76,6 +76,14 @@ if ($rc != 0) {
 }
 
 my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $lisp 2>&1`;
+# The child's WAIT STATUS, which this script used to throw away.  A SIGNAL
+# there (the OOM killer on a loaded box) produces an empty TAP stream that is
+# indistinguishable from "the file ran and printed nothing" — and the board's
+# rule is "zero ok = FAIL", so a killed run is silently published as a verdict.
+# Reported in --rows mode so the scoreboard can retry it instead of believing
+# it (measured s473w: two Algorithm-Diff files read FAIL 0/0 in a loaded board
+# run and 32/3 + 102/20 alone).
+my $sbcl_status = $?;
 unlink $lisp, $err;
 
 # Filter SBCL noise.
@@ -90,6 +98,7 @@ if ($summary_only) {
   my $tap = PCLTap::parse_tap($raw);
   print "pass=$tap->{ok} fail=$tap->{notok}  ($tfile)\n";
   if ($rows_out) {
+    printf "SBCL\t%d\t%d\n", $sbcl_status >> 8, $sbcl_status & 127;
     printf "PLAN\t%s\t%s\n", $tap->{plan} // '',
            defined $tap->{skip_all}
              ? '# SKIP ' . PCLTap::tsv_clean($tap->{skip_all}) : '';

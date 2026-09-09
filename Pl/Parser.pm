@@ -9617,9 +9617,24 @@ sub _process_use_overload {
 
   # Sanitize perl_code for comment — multi-line use overload would break CL
   (my $comment = $perl_code) =~ s/\n.*//s;  # keep only first line
-  $self->_emit(";; $comment ...");
-  $self->_emit("(p-register-overloads \"$pkg_name\" $args_cl)");
-  $self->_emit("");
+  # THE REGISTRATION IS A COMPILE-PHASE MEMBER (#1507).  perl's `use` is a
+  # BEGIN: the handler table is installed while the file COMPILES, so it is in
+  # force for every run-time statement of the file wherever the `use` sits.
+  # Emitting it in the `runtime` bucket put it at the statement's RUN position,
+  # and since the phase model (s436) every section's compile phase runs before
+  # every section's run phase — so a trailing `{ package Foo; use overload …;
+  # sub new {…} }` had its `new` visible to earlier code (perl-correct) while
+  # its `""` handler was installed after that code had already run.  The two
+  # halves of one `use` disagreed.  The `definitions` bucket is where a BEGIN
+  # block's p-BEGIN goes and where the caller (Parser2's `sched => 1` route for
+  # every Statement::Include) interleaves it with the sub definitions BY SOURCE
+  # POSITION — so the registration now happens exactly where a BEGIN block
+  # written in its place would happen.
+  $self->_with_bucket('definitions', sub {
+    $self->_emit(";; $comment ...");
+    $self->_emit("(p-register-overloads \"$pkg_name\" $args_cl)");
+    $self->_emit("");
+  });
 }
 
 

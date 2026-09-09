@@ -26,7 +26,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 24;
+use Test::More tests => 25;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -105,6 +105,14 @@ is($rowlines[1], "fixture-dist\trows.t\t3\t\t\t",
    'an unnamed failing assertion keys on the empty description');
 like($rowlines[2], qr/^fixture-dist\tskipped\.t\t0\t\*FILE\*\t1\.\.0 # SKIP fixture: nothing to run here \(rc=0\)\t/,
      'a file that produced NO TAP gets a *FILE* row naming why');
+
+# The SBCL child's WAIT STATUS is reported, so a run KILLED by a signal (the
+# OOM killer on a loaded box) can be told apart from a run that finished and
+# printed nothing.  Only the REPORTING half is asserted here — a killed child
+# is not reproducible in a fixture; the retry it feeds is a serial re-run of
+# exactly the rows whose signal is nonzero.
+my $rows_out = `perl \Q$root/tools/run-dist-t.pl\E --rows \Q$dist\E t/rows.t 2>/dev/null`;
+like($rows_out, qr/^SBCL\t0\t0$/m, 'run-dist-t --rows reports the SBCL exit code and signal');
 
 # ── --diff: NEW / FIXED / LOST / CAUSES ────────────────────────────────────
 {

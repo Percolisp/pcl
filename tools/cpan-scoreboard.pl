@@ -227,31 +227,41 @@ my @queue = @work;
 pipe(my $rd, my $wr) or die "pipe: $!";
 my @rows;
 
+sub run_one {
+  my ($w) = @_;
+  my @cmd = ("timeout", $w->{to}, "$root/tools/run-dist-t.pl", "--rows");
+  push @cmd, "--no-dist-lib" if $w->{ndl};
+  push @cmd, $w->{dist}, $w->{t};
+  my $out = do {
+    open(my $p, '-|', @cmd) or return undef;
+    local $/; my $o = <$p> // ''; close $p; $o;
+  };
+  my $rc = $? >> 8;
+  my ($ok, $notok) = $out =~ /pass=(\d+) fail=(\d+)/ ? ($1, $2) : (0, 0);
+  my $class = $ok == 0             ? 'FAIL'
+            : ($notok || $rc != 0) ? 'PARTIAL'
+            :                        'PASS';
+  $class = 'FAIL' if $rc == 124;   # timeout
+  my ($plan, $skip) = ('', '');
+  ($plan, $skip) = ($1, $2) if $out =~ /^PLAN\t([^\t]*)\t([^\n]*)$/m;
+  # The SBCL child's wait status, reported by run-dist-t.pl --rows.  A nonzero
+  # SIGNAL means the run was KILLED (the OOM killer on a loaded box), and a
+  # killed run's empty TAP must never be published as a verdict.
+  my $sig = ($out =~ /^SBCL\t\d+\t(\d+)$/m) ? $1 : 0;
+  open my $rf, '>', "$tmp/$w->{idx}.rows" or return undef;
+  print $rf "$_\n" for ($out =~ /^ROW\t([^\n]*)$/mg);
+  close $rf;
+  return [$w->{dist}, basename($w->{t}), $class, $ok, $notok, $rc,
+          $w->{idx}, $plan, $skip, $sig];
+}
+
 sub spawn_one {
   my ($w) = @_;
   my $pid = fork() // die "fork: $!";
   if ($pid == 0) {
     close $rd;
-    my @cmd = ("timeout", $w->{to}, "$root/tools/run-dist-t.pl", "--rows");
-    push @cmd, "--no-dist-lib" if $w->{ndl};
-    push @cmd, $w->{dist}, $w->{t};
-    my $out = do {
-      open(my $p, '-|', @cmd) or exit 9;
-      local $/; my $o = <$p> // ''; close $p; $o;
-    };
-    my $rc = $? >> 8;
-    my ($ok, $notok) = $out =~ /pass=(\d+) fail=(\d+)/ ? ($1, $2) : (0, 0);
-    my $class = $ok == 0             ? 'FAIL'
-              : ($notok || $rc != 0) ? 'PARTIAL'
-              :                        'PASS';
-    $class = 'FAIL' if $rc == 124;   # timeout
-    my ($plan, $skip) = ('', '');
-    ($plan, $skip) = ($1, $2) if $out =~ /^PLAN\t([^\t]*)\t([^\n]*)$/m;
-    open my $rf, '>', "$tmp/$w->{idx}.rows" or exit 9;
-    print $rf "$_\n" for ($out =~ /^ROW\t([^\n]*)$/mg);
-    close $rf;
-    print $wr join("\t", $w->{dist}, basename($w->{t}), $class, $ok, $notok, $rc,
-                         $w->{idx}, $plan, $skip), "\n";
+    my $r = run_one($w) or exit 9;
+    print $wr join("\t", @$r), "\n";
     exit 0;
   }
   $kids{$pid} = 1;
@@ -267,13 +277,32 @@ while (@rows < $expected) {
   my $line = <$rd>;
   defined $line or last;
   chomp $line;
-  push @rows, [split /\t/, $line, 9];
+  push @rows, [split /\t/, $line, 10];
   my $done = wait();
   delete $kids{$done} if $done > 0;
   spawn_one(shift @queue) if @queue;
 }
 close $rd;
 1 while wait() > 0;
+
+# A SIGNAL-KILLED run is not a verdict — re-run it SERIALLY at the end of the
+# queue, once, and take the serial reading (the sweep's #176 retry, narrowed to
+# the one condition that is provably not the file's own doing).  Normally this
+# list is empty and costs nothing; on a loaded box it is the difference between
+# a blessed row file and load noise.
+{
+  my %by_idx = map { $_->{idx} => $_ } @work;
+  for my $r (@rows) {
+    next unless $r->[9];
+    printf STDERR "retry: %s %s — SBCL killed by signal %d (verdict was %s %d/%d); re-running serially\n",
+                  basename($r->[0]), $r->[1], $r->[9], $r->[2], $r->[3], $r->[4];
+    my $again = run_one($by_idx{ $r->[6] }) or next;
+    printf STDERR "retry: %s %s — serial verdict %s %d/%d%s\n",
+                  basename($r->[0]), $r->[1], $again->[2], $again->[3], $again->[4],
+                  $again->[9] ? " (killed AGAIN, signal $again->[9])" : '';
+    @$r = @$again unless $again->[9];
+  }
+}
 
 # Report.
 my %by_dist;
