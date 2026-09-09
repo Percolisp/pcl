@@ -9576,6 +9576,29 @@ sub _process_scheduled_block {
 }
 
 
+# Does TEXT reference any of the LET-BOUND lexical names in LB?
+#
+# ONE predicate, two askers (rule 11).  Both ask the same question — "would
+# hoisting this form out of the enclosing `let` change which variable it sees?"
+# — and both act on the same answer:
+#   * Parser2's nested-sub route, deciding whether a named sub may lower with an
+#     EMPTY let-bound set (definitions bucket + nested-sub hoist);
+#   * _process_use_overload, deciding whether the overload registration may join
+#     the COMPILE phase (#1507).
+# A second copy would drift, and the cost of drifting is a SILENT WRONG: a form
+# hoisted above its `let` reads the promoted package CELL of the same name while
+# the code around it keeps using the `let` binding — two variables, no error.
+sub text_refs_let_bound {
+  my ($text, $lb) = @_;
+  return 0 unless $lb && %$lb;
+  for my $lv (keys %$lb) {
+    (my $bare = $lv) =~ s/^[\$\@\%]//;
+    $bare =~ s/__(?:lex|file|shadow)__\d+$//;
+    return 1 if $text =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/;
+  }
+  return 0;
+}
+
 # Process 'use overload' — register operator overloading for the current package.
 # Generates: (p-register-overloads (package-name *package*) PAIRS-VECTOR)
 # where PAIRS-VECTOR is the transpiled form of the alternating op/handler list.
@@ -9630,7 +9653,23 @@ sub _process_use_overload {
   # every Statement::Include) interleaves it with the sub definitions BY SOURCE
   # POSITION — so the registration now happens exactly where a BEGIN block
   # written in its place would happen.
-  $self->_with_bucket('definitions', sub {
+  #
+  # …UNLESS A HANDLER CLOSES OVER A LET-BOUND LEXICAL, which is the hazard the
+  # s433 ruling names and which perl-tests/concat2.t (RT #132385) contains:
+  #
+  #     package RT132385 { my @a;
+  #       use overload '.' => sub { push @a, \$_[1]; $_[0] }; … }
+  #
+  # Hoisted, that handler is compiled ABOVE the `let` that binds `@a`, so it
+  # pushes into the promoted package CELL while the code around it reads the
+  # `let` binding — two variables and no error, the worst failure mode there
+  # is (measured: the row read '' where perl reads 'AB').  Such a statement
+  # keeps its RUN position, which is the PRE-EXISTING divergence from perl
+  # rather than a new silent wrong.  The test is the one Parser2's nested-sub
+  # route already asks for the same question (`text_refs_let_bound`, above).
+  my $bucket = text_refs_let_bound($perl_code, $self->lex_home->{_let_bound_vars})
+             ? 'runtime' : 'definitions';
+  $self->_with_bucket($bucket, sub {
     $self->_emit(";; $comment ...");
     $self->_emit("(p-register-overloads \"$pkg_name\" $args_cl)");
     $self->_emit("");
