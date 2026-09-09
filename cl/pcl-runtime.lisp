@@ -2656,7 +2656,7 @@
 (defun %p-default-out ()
   "The stream print/printf/say write to when no filehandle is given: the
    select()ed one, else STDOUT."
-  (or (and *p-selected-out* (p-get-stream *p-selected-out*))
+  (or (and *p-selected-out* (%p-live-stream *p-selected-out*))
       *standard-output*))
 
 (defvar *p-autoflush-handles* (make-hash-table :test 'eq :weakness :key)
@@ -13567,12 +13567,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      * DIE \"Can't use an undefined value as a symbol reference\" on an
        undefined designator?  Perl does exactly that for a handle that was
        never opened — but NOT for one that was closed, where it returns undef.
-       PCL cannot tell the two apart: %p-forget-fh leaves the variable
+       PCL could not tell the two apart while %p-forget-fh left the variable
        UNDEFINED after close, so `print $closed_fh …` and
-       `my $u; print {$u} …` arrive here identical.  Dying would break the
-       closed-handle rows of transpile-test-09.t (#186), which are right.
-       Separating them needs close() to leave a closed-handle value behind
-       instead of nothing — a representation change, not a dispatch fix.
+       `my $u; print {$u} …` arrived here identical.  **THAT BLOCKER IS GONE
+       (#1233, s473f): a closed lexical keeps its closed stream**, so the two
+       shapes are now distinguishable and the die is implementable — it is
+       task #1421, held back only because a NEW die needs the gate-SET scan
+       over both populations, not because the information is missing.
 
    So this arm stays as perl-without-warnings behaves: no output, $! = EBADF,
    return false.  What the audit DID fix here is the duplication — print,
@@ -14507,8 +14508,29 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun p-get-stream (fh)
   "Get CL stream from Perl filehandle (symbol, box, stream, or socket object).
    A socket handle is lazily wrapped in a cached bidirectional stream so that
-   print/readline/read/eof/close all work through the normal stream paths."
+   print/readline/read/eof/close all work through the normal stream paths.
+
+   IT MAY BE CLOSED, and asking here would not be free: this is the hot path
+   of every print and every readline, and `open-stream-p' costs 5.8 ns against
+   `streamp''s 1.5 (measured s473f, 20 M calls) — putting it here read −6.4 %
+   on the `fhprint' bench row.  A closed stream now REACHES callers that never
+   saw one before #1233 (a closed lexical keeps its stream in the box instead
+   of being emptied), so the callers whose CL operation would SIGNAL on one ask
+   %P-LIVE-STREAM instead; the rest already answer correctly without a test —
+   `output-stream-p' and `input-stream-p' are both NIL for a closed stream, so
+   print's %p-writable-stream and the readers' own guards fire as they should."
   (%p-as-stream (%p-resolve-fh fh)))
+
+(defun %p-live-stream (fh)
+  "p-get-stream, restricted to a stream that is still OPEN — for the builtins
+   whose CL operation SIGNALS on a closed one (`file-position',
+   `stream-external-format', `read-char' …) and whose perl answer for a handle
+   that is not open is a plain false: tell's −1, seek's undef, binmode's undef,
+   getc/read/sysread's undef.  ONE spelling of the test (CLAUDE.md 11) —
+   before #1233 they got it for free, because %p-forget-fh emptied the box and
+   the resolver answered NIL."
+  (let ((s (p-get-stream fh)))
+    (and s (open-stream-p s) s)))
 
 (defun p-defined-fh (fh-sym)
   "Check if a bareword filehandle or dirhandle (symbol) is open — codegen's
@@ -16077,7 +16099,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                 (sep (search "::" nm :from-end t))
                 (name (if sep (subseq nm (+ sep 2)) nm)))
            (remhash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)))
-        ((p-box-p fh) (box-set fh *p-undef*))
+        ;; A LEXICAL HANDLE KEEPS ITS GLOB (task #1233).  perl's `close $fh'
+        ;; closes the handle; it does not empty the scalar — `defined $fh' is
+        ;; still 1, `ref($fh)' is still GLOB, `"$fh"' is still GLOB(0x…), and a
+        ;; stat/filetest on it is EBADF.  PCL used to `box-set' the box to
+        ;; undef, so the operand resolver saw undef, read it as perl's EMPTY
+        ;; PATH and answered ENOENT — right for undef, wrong for a closed
+        ;; handle, and indistinguishable.  The CLOSED STREAM stays in the box
+        ;; and every one of those answers follows from it; #529's `fileno'
+        ;; contract is unaffected because it reads `open-stream-p', not
+        ;; emptiness.  (The bareword and by-name spellings still lose their
+        ;; TABLE entry above — that is what makes THEM not-open.)
+        ((p-box-p fh) nil)
         ((symbolp fh) (remhash fh *p-filehandles*))))
 
 (defparameter +p-close-false+ ""
@@ -16311,7 +16344,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defun %p-tell-impl (&optional fh)
   "Perl tell - return current file position"
-  (let ((stream (if fh (p-get-stream fh) *standard-input*)))
+  (let ((stream (if fh (%p-live-stream fh) *standard-input*)))
     ;; tell FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
     (when (and fh stream) (setf *p-last-read-handle* stream))
     (if stream (file-position stream) -1)))
@@ -16322,7 +16355,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defun %p-seek-impl (fh pos whence)
   "Perl seek - seek to position. Whence: 0=start, 1=current, 2=end"
-  (let ((stream (p-get-stream fh))
+  (let ((stream (%p-live-stream fh))
         (position (to-number pos))
         (w (to-number whence)))
     ;; seek FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
@@ -16355,7 +16388,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl sysseek FH, POS, WHENCE — position the handle, bypassing buffering.
    Returns the NEW position; a new position of 0 returns \"0 but true\"
    (true in boolean, 0 in numeric context); a negative target returns undef."
-  (let ((stream (p-get-stream fh))
+  (let ((stream (%p-live-stream fh))
         (position (to-number pos))
         (w (to-number whence)))
     (when stream (setf *p-last-read-handle* stream))
@@ -16453,7 +16486,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    does — undef, $! = ENOENT, and the handle keeps the layers it had, whether
    the name stands alone or beside a good one (`\":utf8:nosuch\"` on a byte
    handle stays bytes; probed 5.40.3)."
-  (let ((stream (p-get-stream fh)))
+  (let ((stream (%p-live-stream fh)))
     (if (null stream)
         (%p-io-errno-fail 9)                                      ; EBADF (Linux)
         (let ((text (if (or (null layer) (eq layer *p-undef*))
@@ -16520,7 +16553,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    that position in BUF: a positive offset keeps (NUL-padding to) the first
    OFFSET chars of BUF's old value; a negative offset counts back from the end
    of BUF's current length.  An unopened handle fails with errno EBADF."
-  (let ((stream (p-get-stream fh)))
+  (let ((stream (%p-live-stream fh)))
     (unless stream
       (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
       (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
@@ -16533,7 +16566,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when (< (+ (length old) off) 0) (p-die "Offset outside string"))
       (setf off (+ (length old) off)))
     (handler-case
-        (let* ((stream (p-get-stream fh))
+        (let* ((stream (%p-live-stream fh))
                (tmp (make-string n))
                (got (read-sequence tmp stream))
                (data (subseq tmp 0 got)))
@@ -16585,18 +16618,22 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; upgrade print takes.  OUTSIDE the handler-case below on purpose: that
     ;; one answers NIL for every error, which would turn perl's die into a
     ;; quiet false (#1115).
-    (let ((stream (p-get-stream fh)))
+    (let ((stream (%p-live-stream fh)))
       (when (and stream (%p-byte-stream-p stream) (%p-wide-char-p str))
         (p-die "Wide character in syswrite")))
     (handler-case
-        (let ((stream (p-get-stream fh)))
-          (when stream
-            (let ((out (if n
-                           (subseq str off (min (+ off n) (length str)))
-                           str)))
-              (write-string out stream)
-              (finish-output stream)
-              (length out))))
+        (let ((stream (%p-live-stream fh)))
+          (if (null stream)
+              ;; A handle that is not open is EBADF, as it is for read/print
+              ;; (#1033's family; probed 5.40.3 — errno 9).  It answered undef
+              ;; with $! untouched.
+              (%p-io-errno-fail 9)
+              (let ((out (if n
+                             (subseq str off (min (+ off n) (length str)))
+                             str)))
+                (write-string out stream)
+                (finish-output stream)
+                (length out))))
       (error () nil))))
 
 (defmacro p-syswrite (fh &rest args)
@@ -16604,24 +16641,40 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-syswrite-impl (%p-fh-arg ,fh) ,@args))
 
 (defun %p-truncate-impl (fh-or-file size)
-  "Truncate a file (named or open) to SIZE bytes. Returns 1 on success, '' on
-   failure.  A filehandle is truncated via ftruncate(fd) after flushing buffered
+  "Truncate a file (named or open) to SIZE bytes.  perl's two answers are 1 on
+   success and UNDEF on failure (probed 5.40.3 over five failing shapes; this
+   used to hand back '').
+   A filehandle is truncated via ftruncate(fd) after flushing buffered
    output; a path string via truncate(2).  A BAREWORD filehandle (symbol) that is
    not open FAILS — it must NOT fall back to truncating a file named after it."
   (let* ((len (%pcl-to-integer (to-number size)))
          (v (if (p-box-p fh-or-file) (p-box-value fh-or-file) fh-or-file))
-         (stream (cond ((streamp v) v)
-                       ((or (symbolp v) (stringp v)) (p-get-stream v))
+         ;; A CLOSED stream is not a handle to truncate (#1233: a closed
+         ;; lexical keeps its stream in the box now) — ftruncate on a
+         ;; reused descriptor would truncate someone else's file.
+         (stream (cond ((streamp v) (and (open-stream-p v) v))
+                       ((or (symbolp v) (stringp v)) (%p-live-stream v))
                        (t nil))))
     (handler-case
         (cond
           (stream (finish-output stream)
                   (sb-posix:ftruncate (sb-sys:fd-stream-fd stream) len)
                   1)
-          ;; Bareword FH that is not open → fail (no file-name fallback).
-          ((symbolp v) (%pcl-save-errno) "")
+          ;; A FILEHANDLE that is not open → fail (no file-name fallback).  A
+          ;; bareword is a symbol; a lexical is a stream that is now CLOSED
+          ;; (#1233) or a glob ref from a failed open (#1271) — all three are
+          ;; handle designators, and truncating a file NAMED "GLOB(0x…)" or ""
+          ;; is the fallback the docstring forbids.  perl: undef, $! = EBADF.
+          ;; UNDEF is not a handle designator, it is perl's EMPTY PATH
+          ;; (probed: `truncate($u,0)` is ENOENT, not EBADF) — and *p-undef*
+          ;; is a KEYWORD, so it would otherwise pass the symbol test.
+          ((or (and (symbolp v) v (not (eq v *p-undef*)))
+               (streamp v) (%p-socket-p v) (p-typeglob-p v))
+           (%p-io-errno-fail 9))
           (t (sb-posix:truncate (to-string v) len) 1))
-      (error () (%pcl-save-errno) ""))))
+      ;; perl's truncate is TRUE on success and UNDEF on error (probed 5.40.3
+      ;; over five failing shapes) — never the empty string this handed back.
+      (error () (%pcl-save-errno) *p-undef*))))
 
 (defmacro p-truncate (fh-or-file size)
   "Perl truncate FH/EXPR, LENGTH — the first operand is filehandle-like, so a
@@ -17728,7 +17781,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    silent 0: their whole purpose is to write a value back into the SCALAR, which
    the program then reads — the rule-12 boundary between dying and announcing.
    docs/not-supported.md carries the entry."
-  (let* ((stream (p-get-stream fh))
+  (let* ((stream (%p-live-stream fh))
          (fd     (and stream (%p-fd-of-stream stream)))
          (v      (unbox arg)))
     (cond
@@ -17761,7 +17814,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    report the directory — measured with `$!` cleared after the open, so it is
    getc's own answer and not open's isatty leftover.  It takes its \"handle is
    not open for reading\" exit, whose SETERRNO is EBADF."
-  (let ((stream (if fh (p-get-stream fh) *standard-input*)))
+  (let ((stream (if fh (%p-live-stream fh) *standard-input*)))
     (when stream
       (handler-case
           (let ((ch (read-char stream nil nil)))
@@ -22783,6 +22836,23 @@ buffer's fill-pointer; everything else falls back to file-length."
       (p-regex-match-p v)
       (and (vectorp v) (not (stringp v)))))
 
+(defun %p-handle-payload-p (v)
+  "True when V is what PCL's box model stores for a FILEHANDLE — a CL stream
+   (an fd-stream, a synonym stream, an in-memory Gray stream) or a socket
+   object.  `open my $fh, …` puts a GLOB REF in the scalar in perl, and this
+   payload IS PCL's spelling of that glob: the whole of task #1308 is that
+   `ref($fh)` must therefore answer GLOB and `\\$fh` must answer REF, which
+   they did not because none of ref()'s arms knew a stream when it saw one
+   (`\"$fh\"` already answered GLOB(0x…) — stringify-value's stream arm — so
+   the word and the string disagreed).
+
+   THE PAYLOAD IS NOT CLEARED BY `close' (task #1233): perl leaves the glob in
+   $fh, so a closed handle is a CLOSED STREAM here, and `defined $fh',
+   `ref($fh)', `\"$fh\"' and the stat/filetest EBADF all follow from that one
+   fact.  %p-fileno-impl's contract (#529) is unchanged: it reads
+   `open-stream-p', not emptiness."
+  (or (streamp v) (%p-socket-p v)))
+
 (defun %p-glob-value-box-p (b)
   "True when box B holds a typeglob VALUE (`$g = *foo`) rather than a glob
    REFERENCE (`$g = \\*foo`).  perl turns such an SV into a GV, so it is not a
@@ -22886,6 +22956,10 @@ buffer's fill-pointer; everything else falls back to file-length."
            ;; \$g is a GLOB ref, not a REF — same discrimination p-ref makes.
            ((%p-glob-value-box-p referent)
             (format nil "GLOB(0x~(~X~))" (object-address referent)))
+           ;; The referent scalar holds a FILEHANDLE, which is a glob REF, so
+           ;; \$fh is a ref TO a ref (#1308) — the twin of p-ref's arm.
+           ((%p-handle-payload-p rv)
+            (format nil "REF(0x~(~X~))" (object-address referent)))
            ((or (p-box-is-ref referent) (%scalar-holds-ref-p referent))
             (format nil "REF(0x~(~X~))" (object-address referent)))
            (t (format nil "SCALAR(0x~(~X~))" (object-address referent))))))
@@ -23030,6 +23104,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                ;; '\substr does not coerce its glob arg just yet').  A referent
                ;; holding a glob REFERENCE keeps is-ref and stays REF below.
                ((%p-glob-value-box-p referent) "GLOB")
+               ;; The referent scalar holds a FILEHANDLE.  That payload IS a
+               ;; glob ref (see %p-handle-payload-p), so \$fh is a ref to a
+               ;; ref — perl says REF (#1308).
+               ((%p-handle-payload-p rv) "REF")
                ;; Ref-to-ref → "REF": the referent is itself a ref-wrapper (\\1)
                ;; or *holds* a reference (\$r, \$aref).  %scalar-holds-ref-p is
                ;; non-recursive so a self-referential scalar ($x=\$x) does not
@@ -23056,6 +23134,11 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((p-typeglob-p inner) (if (and (p-box-p val) (p-box-is-ref val))
                                 "GLOB"
                                 ""))
+      ;; A FILEHANDLE payload: `open my $fh, …` leaves a GLOB REF in the
+      ;; scalar in perl, and this is PCL's spelling of it (#1308).  No is-ref
+      ;; test — unlike a typeglob there is no "glob VALUE" spelling of a
+      ;; stream to tell apart, so every box holding one is the ref.
+      ((%p-handle-payload-p inner) "GLOB")
       ;; Compiled regex (qr//) — ref() returns "Regexp"
       ((p-regex-match-p inner) "Regexp")
       ;; Not a reference

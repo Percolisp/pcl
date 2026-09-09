@@ -185,6 +185,15 @@ my @benches = (
   # index spelling `for my $i (0..$#a) { $s += $a[$i] }` is the floor it is
   # chasing.
   ['feread',    "$HN my \@a = (1..1000); my \$s=0; for (1..\$n) { for my \$x (\@a) { \$s += \$x } } print \"\$s\\n\";", 30_000, 0],
+  # THE FILEHANDLE HOT PATH (s473f).  Every `print {$fh}` and every
+  # `readline($fh)` resolves the designator first (%p-resolve-fh, then
+  # p-get-stream), so a change to what a handle-holding box CONTAINS — the
+  # #1308/#1233 representation question — is paid here and nowhere else.  The
+  # file is a temp under $TMPDIR and the loop is the I/O, not the arithmetic.
+  # Both rows write/read a real fd so the row measures the resolver plus the
+  # stream call, which is what a representation change moves.
+  ['fhprint',   "$HN my \$f = (\$ENV{TMPDIR}||'/tmp') . \"/pcl-bench-fhprint.\$\$\"; open(my \$fh, '>', \$f) or die; for (1..\$n) { print {\$fh} \"x\\n\" } close(\$fh); my \$sz = -s \$f; unlink \$f; print \"\$sz\\n\";", 2_000_000, 0],
+  ['fhread',    "$HN my \$f = (\$ENV{TMPDIR}||'/tmp') . \"/pcl-bench-fhread.\$\$\"; open(my \$w, '>', \$f) or die; print {\$w} \"line\\n\" for 1..2000; close(\$w); my \$s=0; for (1..\$n) { open(my \$fh, '<', \$f) or die; while (defined(my \$l = readline(\$fh))) { \$s += length(\$l) } close(\$fh) } unlink \$f; print \"\$s\\n\";", 300, 0],
   # #883: the SAME read-only foreach over a MULTI-array list.  `for my $x
   # (@a, @b)` lowers to p-foreach-raw over (p-flatten-args (list @a @b)), and
   # the flattener promotes every source slot as it builds the flattened
