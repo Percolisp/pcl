@@ -1933,7 +1933,6 @@ io/open.t	136	ok	not ok	bad layer "<:u" warning
 io/open.t	135	ok	not ok	bad layer ">:u" warning
 io/open.t	134	ok	not ok	bad open (>>>) failure
 io/open.t	133	ok	not ok	bad open (>>>) warning
-io/open.t	186	ok	not ok	buffered write happens on dropping handle ref (complex open)
 io/open.t	183	ok	not ok	buffering delays writing to scalar (simple open)
 io/open.t	170	ok	not ok	check errno
 io/open.t	165	ok	not ok	check multiple arguments to unlink
@@ -1953,6 +1952,7 @@ io/open.t	60	ok	not ok	proper die message
 io/open.t	123	ok	not ok	right error
 io/open.t	152	ok	not ok	warn on embedded nul
 io/open.t	154	ok	not ok	warn on embedded nul
+io/open.t	185	ok	not ok	buffering delays writing to scalar (complex open)
 io/openpid.t	5	ok	not ok	message from first process
 io/openpid.t	7	ok	not ok	message from second process
 io/perlio_fail.t	5	ok	not ok	Got warning
@@ -3612,8 +3612,6 @@ op/eval.t	165	ok	not ok	test that nested eval 'bar' calls sig die as expected
 op/eval.t	168	ok	not ok	test that nested eval 's/' calls sig die as expected
 op/evalbytes.t	8	ok	not ok	evalbytes croaks on non-bytes
 op/evalbytes.t	1	ok	not ok	evalbytes outside feature scope
-op/evalbytes.t	6	ok	not ok	use utf8 within evalbytes
-op/evalbytes.t	7	ok	not ok	use utf8 within evalbytes on utf8 string
 op/exec.t	0	(none)	renumbered	*summary*
 op/exec.t	19	ok	(missing)	<<`HEREDOC`
 op/exec.t	32	ok	(missing)	<<`` respects overrides and interpolates [perl \#119827]
@@ -4750,7 +4748,6 @@ op/method.t	130	ok	(missing)	"3foo"->uc (autobox style!)
 op/method.t	134	ok	(missing)	$pvlv_glob->method
 op/method.t	133	ok	(missing)	*glob->method is equiv to (\*glob)->method
 op/method.t	161	ok	(missing)	RT \#123619
-op/method.t	125	ok	not ok	SUPER->method
 op/method.t	57	ok	not ok	[at t/op/method.t line 179]
 op/method.t	63	ok	not ok	[at t/op/method.t line 210]
 op/method.t	64	ok	not ok	[at t/op/method.t line 228]
@@ -4794,7 +4791,6 @@ op/method.t	127	ok	(missing)	method call on ::main
 op/method.t	132	ok	(missing)	method call on \*typeglob
 op/method.t	128	ok	(missing)	method call on empty string
 op/method.t	131	ok	(missing)	method call on typeglob ignores package
-op/method.t	123	ok	not ok	method{}@array
 op/method.t	163	ok	(missing)	no crash with undef method name on unblessed ref
 op/method.t	149	ok	(missing)	read from a file
 op/method.t	151	ok	(missing)	read from a file
@@ -4805,6 +4801,8 @@ op/method.t	141	ok	(missing)	undefining the typeglob does change object resoluti
 op/method.t	148	ok	(missing)	undefining the typeglob does change object resolution
 op/method.t	154	ok	(missing)	undefining the typeglob does change object resolution
 op/method.t	142	ok	(missing)	undefining the typeglob does change object resolution in aliased classes
+op/method.t	97	ok	not ok	[at t/op/method.t line 386]
+op/method.t	124	ok	not ok	method{@array}$more_args
 op/multideref.t	60	ok	not ok [PCL #47]	RT \#130727 array not autovivified
 op/multideref.t	59	ok	not ok [PCL #46]	RT \#130727 error
 op/multideref.t	62	ok	not ok [PCL #49]	RT \#130727 part 2: array not autovivified
@@ -5058,6 +5056,8 @@ op/range.t	17	ok	not ok	[at t/op/range.t line 93]
 op/readdir.t	6	ok	not ok	[at t/op/readdir.t line 52]
 op/readdir.t	8	ok	not ok	[at t/op/readdir.t line 54]
 op/readdir.t	10	ok	not ok	[at t/op/readdir.t line 56]
+op/readdir.t	11	ok	not ok	[at t/op/readdir.t line 57]
+op/readdir.t	12	ok	not ok	[at t/op/readdir.t line 58]
 op/readline.t	26	ok	not ok	<> does not autovivify
 op/readline.t	32	ok	not ok	[perl \#123790] *x=<y> used to fail an assertion
 op/readline.t	1	ok	not ok	[perl \#19566]
@@ -6088,8 +6088,6 @@ op/universal.t	143	ok	not ok	[at t/op/universal.t line 356]
 op/universal.t	144	ok	not ok	[at t/op/universal.t line 357]
 op/universal.t	18	ok	not ok	[at t/op/universal.t line 78]
 op/universal.t	129	ok	not ok	error for UNIVERSAL->import('can')
-op/universal.t	79	ok	not ok	globrefs with IOs can
-op/universal.t	78	ok	not ok	globs with IOs can
 op/universal.t	133	ok	not ok	modify @ISA in isa (RT66112::T1 isa RT66112::C)
 op/universal.t	134	ok	not ok	modify @ISA in isa (RT66112::T2 isa RT66112::B)
 op/universal.t	135	ok	not ok	modify @ISA in isa (RT66112::T3 isa RT66112::A)

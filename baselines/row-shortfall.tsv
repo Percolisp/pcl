@@ -216,7 +216,7 @@ t/op/lfs.t	17	UNEXPLAINED
 t/op/lock.t	5	UNEXPLAINED
 t/op/lvref.t	201	UNEXPLAINED
 t/op/magic.t	1	UNEXPLAINED
-t/op/method.t	38	UNEXPLAINED
+t/op/method.t	37	UNEXPLAINED  s473f: 38 -> 37 -- a raw typeglob invocant is auto-referenced (#1074/#1434), so `*glob->method` RUNS instead of dying and one aborted form fewer takes its rows with it (aborted-forms 3 -> 2 in perl-suite-run.tsv).
 t/op/multideref.t	0	s473t1 #1431 FIXED (was 13): the `exists +(EXPR)->…` arity crash aborted the file's top-level form at test 52; it produces all 65 rows now
 t/op/my_stash.t	2	UNEXPLAINED
 t/op/numconvert.t	1446	s474b/s473a: the file SKIPS ITSELF (`1..0 # Skip unsigned perl arithmetic is not sane`): its preamble computes `sprintf "%u", $max_uv1 ** 6` and `do { use integer; $max_uv1 * 16 }`, both exact bignums in PCL where perl clamps to UV_MAX and wraps to -16.  CAUSE: not-supported.md §Integers are unbounded: PCL has no 64-bit boundary (registered s473a; revisit pointer #1513, USER-ruled DOCUMENT-not-implement 2026-09-07).  All 1446 rows are the one skip, not 1446 failures.

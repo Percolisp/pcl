@@ -16380,10 +16380,40 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   '((p-aref          . p-aref-box)
     (p-gethash       . p-gethash-box)
     (p-aref-deref    . p-aref-deref-box)
-    (p-gethash-deref . p-gethash-deref-box))
-  "The read accessor -> eager-lvalue accessor map for the four element places,
-   spelled here for %p-fh-arg's :INSTALL slot.  Same four heads p-setf's
-   refaliasing arm enumerates — an element place has exactly these spellings.")
+    (p-gethash-deref . p-gethash-deref-box)
+    ;; A SCALAR DEREF is a place too, and `${\$x}` is the shape that proves it
+    ;; (t/io/open.t:538, [perl #115814]).  p-cast-$ answers the referent's
+    ;; VALUE, which for an undef target is undef — not a place at all.
+    (p-cast-$        . %p-scalar-deref-place))
+  "The read accessor -> eager-lvalue accessor map for the element and deref
+   places, spelled here for %p-fh-arg's :INSTALL slot.  The first four are the
+   heads p-setf's refaliasing arm enumerates — an element place has exactly
+   those spellings.")
+
+(defun %p-scalar-deref-place (val &optional site)
+  "The referent BOX a scalar deref names — `${$r}` / `${\\$x}` AS A PLACE.
+
+   p-cast-$ answers the referent's VALUE, and the two spellings reach it at
+   DIFFERENT depths: through a variable (`$$r`) the p-backslash wrapper sits
+   inside the variable's box, so p-cast-$'s one unbox lands on the referent
+   box and an install worked by luck; written INLINE (`${\\$b}`) the wrapper IS
+   the argument, so the same unbox lands one level deeper and the install saw
+   undef.  IS-REF is the discriminator (task #163's rule): the wrapper is the
+   box that carries it, and the referent is that box's value.
+
+   A symbolic reference (`${'name'}` under no-strict-refs) resolves to the
+   package CELL, which is the place perl writes.  Anything else — a name with
+   no variable, a non-reference — falls back to p-cast-$'s own answer, and the
+   caller's undef check then reports it as perl does."
+  (let* ((wrapper (cond ((and (p-box-p val) (p-box-is-ref val)) val)
+                        ((p-box-p val)
+                         (let ((v (p-box-value val))) (and (p-box-p v) v)))
+                        (t nil)))
+         (referent (and wrapper (p-box-value wrapper))))
+    (cond ((p-box-p referent) referent)
+          ((stringp (unbox val)) (or (%p-symref-box (unbox val) site)
+                                     (p-cast-$ val site)))
+          (t (p-cast-$ val site)))))
 
 (defun %p-fh-place-form (fh-form)
   "FH-FORM as a PLACE: an element read accessor becomes its eager -box twin,

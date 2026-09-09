@@ -1561,7 +1561,7 @@ op/dump.t	0	0	0	0	NOTAP		0
 op/each.t	65	0	37	10	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: Can't locate loadable object for module this module in @INC	0
 op/each_array.t	65	0	65	0	OK		0
 op/eval.t	169	0	133	35	DIFF	s473h: 131/37 -> 133/35, the two rows are t/op/eval.t:75-76 (`my @b = eval @a; is("@b",'4'); is($@,'')`) -- `eval EXPR` imposes SCALAR context on its operand (task #1249(4)); the old undef-fn:main::pl-ARRAY signature WAS this bug, PCL stringifying the raw vector as ARRAY(0x..)	0
-op/evalbytes.t	9	0	5	4	DIFF		0
+op/evalbytes.t	9	0	7	2	DIFF	s473f: 5/4 -> 7/2 -- #1074 gives a handle its class, and this file's two utf8-in-evalbytes rows depend on it (serial re-run; io/open.t, op/method.t, op/readdir.t, op/universal.t moved in the same run and are spliced with it)	0
 op/exec.t	41	0	24	1	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
 op/exp.t	31	0	31	0	OK		0
@@ -1621,7 +1621,7 @@ op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
 op/magic.t	207	1	176	31	DIFF		0
-op/method.t	163	0	103	22	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
+op/method.t	163	0	103	23	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b; s473f: 103/22 -> 103/23 with aborted-forms 3 -> 2 and shortfall 38 -> 37 -- #1074/#1434: `*glob->method` RUNS instead of dying (a raw typeglob invocant is auto-referenced), which un-drops one statement; `SUPER->method` and `method{}@array` now pass, `[line 386]` and `method{@array}$more_args` now fail on the SUPER:: edge shapes	1
 op/mkdir.t	17	0	17	0	OK		0
 op/multideref.t	65	0	53	12	DIFF	s473t1 #1431: `exists +(EXPR)->[..]{..}` lowered to a ONE-argument (p-exists VALUE) and the raw CL arity error aborted the file's whole top-level form at test 52, so 13 rows never ran (exists: general, the six delete:*, the six !exists:*).  12 of the 13 now PASS; `delete: const indices` fails on the pre-existing `local`-not-restored rows above it (not-supported.md '`local` on hash/array elements and typeglobs').  Was: s470bv: BISECTED over 19d42836..614c6af (8 steps) to 0d1b5c18 = s470bk #1058.  The two rows are "RT #130727 array not autovivified" and its part 2 -- an ACCEPTED DIVERGENCE (DECIDED s470, not-supported.md "local on hash/array elements and typeglobs", cl/skip-registry.lisp) that used to pass by ACCIDENT.  No task | aborted-forms:1: invalid number of arguments: N	0
 op/my.t	59	0	52	7	DIFF		0
@@ -1651,7 +1651,7 @@ op/quotemeta.t	60	0	58	2	DIFF		0
 op/rand.t	263	0	263	0	OK		0
 op/range.t	162	0	155	7	DIFF		0
 op/read.t	2116	0	2116	0	OK		0
-op/readdir.t	16	0	13	3	DIFF		0
+op/readdir.t	16	0	11	5	DIFF	s473f: 13/3 -> 11/5 -- #1309: `opendir($fh[0],...)` / `opendir($fh{abc},...)` now INSTALL into the element, so rows 57-58 (`isnt("$fh", "$fh[0]")`) stop passing on nothing: all three dirhandles used to differ only because two were undef.  PCL's dirhandle payload is a `(index . names)` CONS, which the box model reads as a LIST, so `ref` is ARRAY and the three stringify identically -- task #1428, whose fix is worth +5 rows here	0
 op/readline.t	35	1	25	7	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
 op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.	0
 op/ref.t	257	0	202	40	DIFF	s470bv: TWO steps, both measured: #1221 (b25afbc) 199/43 -> 201/41, then s470bs #1048 (row "IO slot of the temporary glob is set correctly") -> 202/40 at 424cabc | aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
@@ -1712,7 +1712,7 @@ op/tr.t	317	0	270	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated 
 op/tr_latin1.t	2	0	1	1	DIFF		0
 op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	33	4	DIFF	aborted-forms:1: Undefined subroutine &main::z called	0
-op/universal.t	142	2	80	64	DIFF		0
+op/universal.t	142	2	82	62	DIFF	s473f: 80/64 -> 82/62 -- #1074: `globs with IOs can` / `globrefs with IOs can` need a handle invocant to have a class	0
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
