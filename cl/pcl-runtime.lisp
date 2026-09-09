@@ -13851,6 +13851,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (:report (lambda (c s)
              (format s "~A" (p-exception-object c)))))
 
+(define-condition p-die-error (simple-error) ()
+  (:documentation
+   "A PERL-LEVEL die whose payload is a STRING — the other half of p-exception,
+    which carries an object.  It is a SIMPLE-ERROR, so every handler that
+    caught the plain `(error \"~A\" msg)` this replaces still catches it and
+    prints the same text; what it adds is a way to TELL a perl die from a CL
+    condition raised inside the runtime, which is what the uncaught-die exit
+    status needs (task #1247 (b)): perl exits `$! || ($? >> 8) || 255` and
+    prints one line, while an internal CL error is a PCL BUG whose backtrace is
+    the diagnosis."))
+
 (defun %p-extract-loc (args)
   "Pull an optional (:loc \"FILE line N\") marker out of a die/warn arg list.
    Returns (values real-args loc-or-nil).  Codegen passes :loc for an explicit
@@ -13865,12 +13876,91 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
             (t (push a real))))
     (values (nreverse real) loc)))
 
+;;; THE EXIT STATUS OF AN UNCAUGHT die (task #1247 (b)).
+;;;
+;;; perlfunc: "the exit value is $!, or $? >> 8 if $! is 0, else 255".  Probed
+;;; 5.40.3 over six shapes -- $!=2 after a failed open exits 2, $!=13 exits 13,
+;;; $!=0 with a child that exited 3 exits 3, $!=0 and $?=256 exits 1, both 0
+;;; exits 255, and $!=5 beside a child that exited 7 exits 5 ($! wins).
+;;;
+;;; PCL let the condition reach SBCL's toplevel, which exits 1 for every one of
+;;; them and prints a fifteen-frame BACKTRACE where perl prints one line.  A
+;;; program that checks `$?` after running another is reading a status PCL
+;;; never produced.
+;;;
+;;; ONLY A PERL-LEVEL die IS RESHAPED.  An internal CL condition -- a type
+;;; error inside the runtime, an unbound variable in emitted code -- is a PCL
+;;; BUG, and its backtrace is the diagnosis the sweep's crash triage reads; it
+;;; keeps the hook it had.  (perl exits 255 for its own runtime errors too, so
+;;; the ones PCL raises with a bare `error' rather than `p-die' still diverge;
+;;; that is the wider half of #1247 (b) and is filed, not guessed at here.)
+(defvar *p-prev-debugger-hook* nil
+  "The debugger hook PCL's own hook chains to for a NON-perl condition.")
+
+(defun %p-die-error (control &rest args)
+  "Signal a perl STRING die.  `(error \"~A\" msg)` with the p-die-error class
+   attached — the class is the only difference, and it is what lets the
+   uncaught-die hook tell a perl die from a CL condition."
+  (error 'p-die-error :format-control control :format-arguments args))
+
+(defun %p-perl-die-p (condition)
+  "Whether CONDITION is a PERL-level die — an object one (p-exception) or a
+   string one (p-die-error).  Everything else reaching the debugger is a PCL
+   bug."
+  (or (typep condition 'p-exception) (typep condition 'p-die-error)))
+
+(defun %p-uncaught-die-status ()
+  "perl's exit status for an uncaught die (see the note above)."
+  (let ((errno *p-stored-errno*)
+        (child (ash (truncate (to-number $?)) -8)))
+    (cond ((and (integerp errno) (/= 0 (logand errno 255))) (logand errno 255))
+          ((and (integerp child) (/= 0 (logand child 255))) (logand child 255))
+          (t 255))))
+
+(defun %p-uncaught-die-hook (condition hook)
+  "*invoke-debugger-hook* for an UNCAUGHT perl die: print perl's ONE line and
+   exit with perl's status.  Anything else is handed to the hook that was in
+   place (SBCL's --non-interactive quit), backtrace and all."
+  (if (%p-perl-die-p condition)
+      (let ((text (princ-to-string condition)))
+        (ignore-errors
+          (format *error-output* "~A~:[~%~;~]" text
+                  (and (plusp (length text))
+                       (char= (char text (1- (length text))) #\Newline)))
+          (finish-output *error-output*))
+        ;; NOT :abort — the exit hooks run the END blocks and flush every
+        ;; handle, which perl also does on the die path (see *exit-hooks*).
+        (sb-ext:exit :code (%p-uncaught-die-status)))
+      (if *p-prev-debugger-hook*
+          (funcall *p-prev-debugger-hook* condition hook)
+          (sb-debug::debugger-disabled-hook condition hook))))
+
+(defun %p-arm-uncaught-die-hook ()
+  "Put %p-uncaught-die-hook in front of whatever hook is installed, chaining to
+   it for everything that is not a perl die.
+
+   CALLED FROM p-die, not once at load, and that is not laziness: SBCL
+   processes `--non-interactive' (= `--disable-debugger --quit') while parsing
+   its command line, which happens AFTER *init-hooks* run and after a saved
+   core has restored whatever the runtime set — so an install at load time is
+   overwritten every run (measured: the hook was set and SBCL's
+   DEBUGGER-DISABLED-HOOK still ran).  Arming at the die is exact — the hook is
+   consulted when the condition is SIGNALLED — and costs one EQ test per die,
+   on a path that is about to unwind the stack anyway."
+  (unless (eq sb-ext:*invoke-debugger-hook* #'%p-uncaught-die-hook)
+    (setf *p-prev-debugger-hook* sb-ext:*invoke-debugger-hook*)
+    (setf sb-ext:*invoke-debugger-hook* #'%p-uncaught-die-hook)))
+
 (defun p-die (&rest raw-args)
   "Perl die - throw an exception.
    If given a single blessed reference, throw it as an exception object.
    Otherwise, concatenate args as error string.  An optional (:loc \"FILE line N\")
    marker (emitted by codegen for an explicit die) appends Perl's
    ' at FILE line N.' suffix when the message doesn't already end in a newline."
+  ;; See %p-arm-uncaught-die-hook: an UNCAUGHT die must exit with perl's status
+  ;; and print perl's one line, and this is the only moment at which the hook
+  ;; can be installed and stay (#1247 (b)).
+  (%p-arm-uncaught-die-hook)
   (multiple-value-bind (args loc) (%p-extract-loc raw-args)
     (if (and (= (length args) 1)
              (let ((obj (car args)))
@@ -13920,14 +14010,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
               ;; Message ends in newline: Perl does NOT append a location.
               ((and (> (length msg) 0)
                     (char= (char msg (1- (length msg))) #\Newline))
-               (error "~A" msg))
+               (%p-die-error "~A" msg))
               ;; No location recorded — the pre-#1240 answer, kept BYTE for
               ;; byte (the empty message included), so a program compiled
               ;; without `line-track` behaves exactly as it did.
-              ((null where) (error "~A" msg))
+              ((null where) (%p-die-error "~A" msg))
               ;; Empty die message: Perl uses "Died".
-              ((string= msg "") (error "Died at ~A.~%" where))
-              (t (error "~A at ~A.~%" msg where))))))))
+              ((string= msg "") (%p-die-error "Died at ~A.~%" where))
+              (t (%p-die-error "~A at ~A.~%" msg where))))))))
 
 ;;; Forward declarations for p-do (both defined later in this file)
 (declaim (ftype function p-eval %p-eval-1))
@@ -21136,8 +21226,14 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; Find module in @INC
     (let ((abs-path (p-find-module-in-inc rel-path)))
       (unless abs-path
-        (error "Can't locate ~A in @INC (@INC contains: ~{~A~^ ~})"
-               rel-path (map 'list #'to-string @INC)))
+        ;; p-die, not `error`: a failed require is a PERL die — trappable by
+        ;; `eval { require Foo }`, and when it is NOT trapped it must exit with
+        ;; perl's status and print one line, not SBCL's backtrace and 1 (task
+        ;; #1247 (b)).  ENOENT is what perl's own failed opens leave in $!, and
+        ;; it is what makes that exit status 2 (probed 5.40.3).
+        (%p-io-errno-fail 2)
+        (p-die (format nil "Can't locate ~A in @INC (@INC contains: ~{~A~^ ~})"
+                       rel-path (map 'list #'to-string @INC))))
       ;; Load with circular detection
       (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
         (p-load-module-cached abs-path))
@@ -21253,7 +21349,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                               cwd-path
                               (or (p-find-module-in-inc path-str) cwd-path))))))
       (unless (probe-file abs-path)
-        (error "Can't locate ~A" path-str))
+        ;; ENOENT, as perl's own search leaves it, and p-die for the same
+        ;; reason as p-use's twin above (#1247 (b)).
+        (%p-io-errno-fail 2)
+        (p-die (format nil "Can't locate ~A" path-str)))
       (p-load-module-cached abs-path)
       (setf (gethash path-str *p-inc-table*)
             (sb-ext:native-namestring (pathname abs-path)))

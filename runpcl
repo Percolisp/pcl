@@ -96,6 +96,11 @@ print STDERR "SBCL[runpcl]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
 # stdout, byte for byte, including blank lines and lines that begin with `;`.
 my $errfile = "/tmp/runpcl_$$.runerr";
 my $out = `$sbcl_cmd 2>$errfile`;
+# THE CHILD'S EXIT STATUS IS THE PROGRAM'S, and this runner used to drop it:
+# every probe of `exit N`, and every probe of an uncaught die's status, read 0
+# (task #1247 (b) had to be measured through `pcl` for exactly that reason).
+# Propagated at the very END of this file, after both streams are printed.
+my $run_rc = $? >> 8;
 my $err = '';
 if (open(my $ef, '<', $errfile)) { local $/; $err = <$ef> // ''; close $ef }
 
@@ -139,3 +144,6 @@ $err = strip_sbcl_notes($err);
 $err =~ s/^PCL (?:Runtime|Test)[^\n]*\n//gm;
 $err =~ s/^STYLE-WARNING[^\n]*\n//gm;
 print STDERR $err;
+
+# The program's exit status is this runner's (see the note by the run above).
+exit $run_rc;
