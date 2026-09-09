@@ -50,7 +50,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 155;
+plan tests => 158;
 
 my $workdir = tempdir(CLEANUP => 1);
 my $datafile = "$workdir/data.txt";
@@ -462,21 +462,35 @@ try("19 lex->eof-after",    sub { $r->eof ? 1 : 0 });
 $r->close;
 try("20 globref->fileno",   sub { (\*STDOUT)->fileno });
 try("21 globval->fileno",   sub { my $g = *STDOUT; $g->fileno });
+# A RAW TYPEGLOB invocant is AUTO-REFERENCED: perl's `*glob->method` IS
+# `(\*glob)->method` (perl-tests/method.t:591 asserts it with
+# `sub IO::Handle::self { $_[0] }` as the probe), so the callee's $_[0] is the
+# glob REF.  And defining ONE sub in the handle class must not stop the shim
+# from loading: asking whether the PACKAGE exists is not enough, which is
+# exactly what that file does.
+{ no warnings; sub IO::Handle::pcl_self { $_[0] } }
+open(GLOBBED, ">&", \*STDOUT) or die;
+try("22 glob-autoref", sub {
+      my $a = *GLOBBED->pcl_self; my $b = (\*GLOBBED)->pcl_self;
+      $a = "$a"; $b = "$b"; $a =~ s/0x[0-9a-f]+/0xA/; $b =~ s/0x[0-9a-f]+/0xA/;
+      ($a eq $b ? "same-shape" : "$a vs $b") });
+try("23 glob-in-scalar-fileno", sub { my $g = *STDOUT; $g->fileno });
+try("24 globref-in-scalar-fileno", sub { my $r = \*STDOUT; $r->fileno });
 { package MyIO; sub new { bless {}, shift } sub print { "MY-PRINT" } sub close { "MY-CLOSE" } }
-try("22 obj->print",        sub { MyIO->new->print("x") });
-try("23 obj->close",        sub { MyIO->new->close });
+try("25 obj->print",        sub { MyIO->new->print("x") });
+try("26 obj->close",        sub { MyIO->new->close });
 open(BW, ">", "$F.bw") or die;
-try("24 BW->print",         sub { BW->print("bw\n") ? 1 : 0 });
-try("25 BW->close",         sub { BW->close ? 1 : 0 });
+try("27 BW->print",         sub { BW->print("bw\n") ? 1 : 0 });
+try("28 BW->close",         sub { BW->close ? 1 : 0 });
 # binmode through a SECOND NAME must not close the handle the caller still holds
 { open(my $f2, ">", "$F.2") or die; my $g = $f2; binmode($g);
   my $p = print {$f2} "hello\n"; close($f2);
-  printf "26 copy-binmode print=%s size=%s\n", d($p), d(-s "$F.2"); }
+  printf "29 copy-binmode print=%s size=%s\n", d($p), d(-s "$F.2"); }
 { open(my $f3, ">", "$F.3") or die; sub bmarg { my ($h) = @_; binmode($h) }
   bmarg($f3); my $p = print {$f3} "hello\n"; close($f3);
-  printf "27 arg-binmode print=%s size=%s\n", d($p), d(-s "$F.3"); }
+  printf "30 arg-binmode print=%s size=%s\n", d($p), d(-s "$F.3"); }
 unlink $F, "$F.bw", "$F.2", "$F.3";
-print "28 alive\n";
+print "31 alive\n";
 PERL
 
 my $perl_out = run_perl($PROG);
@@ -535,7 +549,7 @@ my $pcl4  = run_pcl($PROG4);
 my @p4 = grep { /^\d\d / } split /\n/, norm($perl4);
 my @c4 = grep { /^\d\d / } split /\n/, norm($pcl4);
 
-is(scalar(@p4), 28, 'perl produced 28 IO::Handle lines (the oracle is intact)')
+is(scalar(@p4), 31, 'perl produced 31 IO::Handle lines (the oracle is intact)')
   or diag("perl said:\n$perl4");
 like($p4[0], qr/^01 STDOUT->autoflush = ok/,
      'perl calls IO::Handle methods on a handle with no `use` (oracle sanity)');

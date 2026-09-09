@@ -24838,6 +24838,22 @@ buffer's fill-pointer; everything else falls back to file-length."
    THE METHODS THEMSELVES ARE PERL, in lib/ (CLAUDE.md 9a): the runtime's job
    is only to say that a handle HAS a class, which is the generic mechanism.")
 
+(defvar *p-handle-class-loaded* nil
+  "Whether +P-HANDLE-CLASS+'s methods have been pulled in this image.")
+
+(defun %p-ensure-handle-class ()
+  "Load the handle class on demand.  Asking whether its PACKAGE EXISTS is not
+   enough, and perl-tests/method.t:589 is the case that proves it: a program
+   that writes `sub IO::Handle::self { $_[0] }` creates the package with ONE
+   method in it, so the dispatcher's ordinary auto-require declines and every
+   real method (`fileno`, `print`, `getline`) is then missing.  perl autoloads
+   its handle class regardless of what the program has put in that stash.
+   The flag is set BEFORE the require, so a handle method call made while the
+   shim itself loads cannot recurse."
+  (unless *p-handle-class-loaded*
+    (setf *p-handle-class-loaded* t)
+    (handler-case (p-require +p-handle-class+) (error () nil))))
+
 (defun %p-handle-invocant-class (invocant)
   "+P-HANDLE-CLASS+ when INVOCANT is a filehandle carrying no class of its own,
    else NIL.  Only the shapes that are UNAMBIGUOUSLY a handle are answered here
@@ -24849,8 +24865,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    `print' calls the method (probed), which is why every caller asks
    p-get-class first."
   (let ((v (if (p-box-p invocant) (p-box-value invocant) invocant)))
-    (and (or (%p-handle-payload-p v) (p-typeglob-p v))
-         +p-handle-class+)))
+    (when (or (%p-handle-payload-p v) (p-typeglob-p v))
+      (%p-ensure-handle-class)
+      +p-handle-class+)))
 
 (defun %pcl-invocant-class (invocant)
   "The class name a method-call invocant denotes: a blessed object's class, or
@@ -25070,10 +25087,17 @@ buffer's fill-pointer; everything else falls back to file-length."
       (return-from p-method-call (apply m obj args))))
   (let* ((method-name (to-string method))
          ;; If obj is a box containing a tie-proxy, FETCH to get the invocant
-         (resolved-obj (if (and (p-box-p obj)
-                                (p-tie-proxy-p (p-box-value obj)))
-                           (unbox (%p-tie-fetch obj (p-box-value obj)))
-                           obj))
+         ;; A RAW TYPEGLOB INVOCANT IS AUTO-REFERENCED: perl's `*glob->method`
+         ;; is `(\*glob)->method` — perl-tests/method.t:591 asserts exactly
+         ;; that, with `sub IO::Handle::self { $_[0] }` as the probe — so the
+         ;; callee's $_[0] must be the glob REF, not the glob VALUE.  It costs
+         ;; nothing on any other invocant (one struct test), and nothing at all
+         ;; before #1074, when a glob invocant simply died.
+         (resolved-obj (cond
+                         ((and (p-box-p obj) (p-tie-proxy-p (p-box-value obj)))
+                          (unbox (%p-tie-fetch obj (p-box-value obj))))
+                         ((p-typeglob-p obj) (p-backslash obj))
+                         (t obj)))
          (raw-class (%pcl-invocant-class resolved-obj))
          ;; Perl treats "" as "main" and "::" as "main::" in package/method
          ;; contexts, and a leading "::" names the root stash — the one reading
@@ -25147,6 +25171,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; the two answers and the one no program can reach by accident.)
     (when (and (null (%pcl-find-package class-name))
                (%p-resolve-fh class-name))
+      (%p-ensure-handle-class)
       (setf class-name +p-handle-class+
             raw-class  +p-handle-class+
             own-missed nil))
