@@ -9317,14 +9317,12 @@ sub _lower_block_1 {
     # the in-place capture behavior.
     if ($first->block && defined $self->_proto_or_sig_str($first)
         && !$self->_is_pure_prototype($first)) {
-      my $lb   = $self->{_let_bound_vars} // {};
-      my $text = $first->content;
-      my $refs_letbound = 0;
-      for my $lv (keys %$lb) {
-        (my $bare = $lv) =~ s/^[\$\@\%]//;
-        $bare =~ s/__(?:lex|file|shadow)__\d+$//;
-        if ($text =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/) { $refs_letbound = 1; last }
-      }
+      # ONE predicate, two askers (rule 11): _process_use_overload asks the
+      # same question for a `use overload` registration (#1507), and the test
+      # lives in Pl::Parser::text_refs_let_bound -- a second copy here is what
+      # s473w shipped and the s480 review removed.
+      my $refs_letbound = Pl::Parser::text_refs_let_bound(
+        $first->content, $self->{_let_bound_vars} // {});
       my @out;
       if ($refs_letbound) {
         @out = $self->_fallback_stmt($first);
