@@ -178,6 +178,7 @@ use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
 use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + reaping (#367)
 use PCLPaths qw(perl_suite_t);
 use PCLShortfall ();   # the ONE reader/writer of the shared shortfall baseline (#993)
+use PCLTimeouts ();    # the ONE reader of a per-file timeout-allowance registry
 
 # Contain the whole sweep in its own memory-capped cgroup: a runaway child
 # (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
@@ -288,29 +289,15 @@ if (open my $ff, '<', $fixture_tsv) {
   }
   close $ff;
 }
-# Per-file TIMEOUT ALLOWANCE registry: rel -> { secs, cause }.  A file that
-# TIMEOUTs contributes NO rows, so a file which merely needs longer than the
-# default reads as a total loss and its passing rows evaporate invisibly —
-# the #176 pack.t lesson, which cost the sweep a whole file's visibility.
-# The sweep answers it with a blind retry at 3x; here the need is KNOWN per
-# file and belongs written down with its cause, so the default run honours it
-# and the allowance is reviewable.  The effective timeout is the MAX of the
-# registry value and --timeout, so raising --timeout still works.
-my %file_timeout;
-if (open my $tf, '<', $timeouts_tsv) {
-  while (<$tf>) {
-    chomp;
-    next if /^\s*(?:#|$)/;
-    my ($rel, $secs, $cause) = split /\t/, $_, 3;
-    next unless defined $secs && $secs =~ /^\d+$/;
-    $file_timeout{$rel} = { secs => $secs, cause => $cause // '' };
-  }
-  close $tf;
-}
+# Per-file TIMEOUT ALLOWANCE registry: rel -> { secs, cause }.  The rules and
+# the file shape live in tools/lib/PCLTimeouts.pm — ONE reader, two populations
+# (this runner's baselines/perl-suite-timeouts.tsv and the CPAN board's
+# baselines/cpan-board-timeouts.tsv), because the board had no allowance at all
+# and read a merely-slow file as FAIL 0/0 (#1512).
+my %file_timeout = %{ PCLTimeouts::read_timeouts($timeouts_tsv) };
 sub timeout_for {
   my ($rel) = @_;
-  my $e = $file_timeout{$rel} or return $timeout;
-  return $e->{secs} > $timeout ? $e->{secs} : $timeout;
+  return PCLTimeouts::timeout_for(\%file_timeout, $rel, $timeout);
 }
 
 # ── I1: the ROW-level fail baseline (task #993, plan-test-audit §3) ──────────
