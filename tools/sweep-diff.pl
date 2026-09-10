@@ -80,6 +80,7 @@ use warnings;
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use PCLShortfall ();   # the ONE reader of the shared shortfall baseline (#993)
+use PCLCauses ();      # the ONE reading of the CAUSE column (#993 I3)
 
 # Read a per-file run status table: one line of
 #   name <TAB> status <TAB> pass <TAB> fail <TAB> planned [<TAB> drops <TAB> note]
@@ -585,22 +586,7 @@ if (!%$shortfall_base) {
 # a cause-less row is QUEUE, not baseline.  Counted on every run so the queue
 # can never silently grow — the same reason the UNEXPLAINED suite verdicts are
 # counted rather than inferred from an absence.
-{
-    my ($have, $none) = (0, 0);
-    for my $k (keys %$base) {
-        my $c = $base->{$k}{cause};
-        if (defined $c && length $c && $c !~ /^UNEXPLAINED/) { $have++ } else { $none++ }
-    }
-    if (!$have && !$none) {
-        print "CAUSES: NOT CHECKED — the baseline has no rows\n";
-    } elsif (!$have) {
-        printf "CAUSES: NOT CHECKED — no cause column in %s (add one: docs/plan-test-audit-s464.md §3 I3)\n",
-            $base_path;
-    } else {
-        printf "CAUSES: %d of %d blessed row(s) have no cause — a cause-less row is QUEUE, not baseline (#993)\n",
-            $none, $have + $none;
-    }
-}
+print PCLCauses::causes_line([ map { $base->{$_}{cause} } keys %$base ], $base_path);
 
 # The TOTAL line is the gate itself: it must be printed on EVERY run, including
 # the runs where nothing was lost, and it must say so when it could not be

@@ -179,6 +179,7 @@ use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + re
 use PCLPaths qw(perl_suite_t);
 use PCLShortfall ();   # the ONE reader/writer of the shared shortfall baseline (#993)
 use PCLTimeouts ();    # the ONE reader of a per-file timeout-allowance registry
+use PCLCauses ();      # the ONE reading of the CAUSE column (#993 I3)
 
 # Contain the whole sweep in its own memory-capped cgroup: a runaway child
 # (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
@@ -314,24 +315,27 @@ sub timeout_for {
 # NOT in here: their rows are already gated, per row, by those registries.
 # One gate per file, or a moved row reads twice and is fixed once.
 my %blessed_fails;      # rel -> sorted arrayref of rowkeys
-my %blessed_fail_meta;  # rel -> arrayref of [num, perl_verb, pcl_verb, rowkey]
+my %blessed_fail_meta;  # rel -> arrayref of [num, perl_verb, pcl_verb, rowkey, cause]
+# The CAUSE column (#993 I3), keyed the way the row diff joins - (rel, rowkey)
+# - so a cause survives a re-measure that renumbers the row, and a bless can
+# carry it forward instead of throwing every attribution away.  A file's rows
+# can repeat a description (the multiset is the comparison), and a repeated
+# description gets ONE cause: same assertion text, same divergence.
+my %blessed_fail_cause; # "rel\trowkey" -> cause
 # Whether the baseline existed AT STARTUP, not at report time: a --bless-fails
 # run WRITES the file before the report, so `-e` there would answer yes and the
 # report would list every blessed row as a NEW ROW.  It did exactly that on the
 # first bless (s465az).  Every registry answer must come from the state the run
 # was MEASURED against.
 my $fails_tsv_existed = -e $fails_tsv;
-if (open my $bf, '<', $fails_tsv) {
-  while (<$bf>) {
-    chomp;
-    next if /^\s*(?:#|$)/;
-    my ($rel, $num, $pv, $cv, $key) = split /\t/, $_, 5;
-    next unless defined $key;
-    push @{ $blessed_fails{$rel} }, $key;
-    push @{ $blessed_fail_meta{$rel} }, [$num, $pv, $cv, $key];
-  }
-  close $bf;
-  @{ $blessed_fails{$_} } = sort @{ $blessed_fails{$_} } for keys %blessed_fails;
+{
+  # ONE reading of the six-field format (tools/lib/PCLCauses.pm), shared
+  # with the guard test, so the parse the runner uses is the parse the test
+  # checks.
+  my ($meta, $cause) = PCLCauses::read_fail_rows($fails_tsv);
+  %blessed_fail_meta  = %$meta;
+  %blessed_fail_cause = %$cause;
+  $blessed_fails{$_} = [ sort map { $_->[3] } @{ $meta->{$_} } ] for keys %$meta;
 }
 
 # ── I2: the ROW-SHORTFALL baseline, SHARED with the sweep ────────────────────
@@ -1364,6 +1368,13 @@ sub bless_fail_rows {
     $touched++;
     my ($rr, undef, $trunc) = diverging_rows_full($rel);
     $truncated++ if $trunc;
+    # Re-attach the blessed CAUSE of each row that is still here, by the
+    # join key.  A bless is still DESTRUCTIVE to this file's hand-written
+    # comment block and to the rows of files the run did not measure (s473,
+    # and the reason the standing practice is a row-by-row edit) - but it
+    # must not additionally throw away the attributions of the rows it DID
+    # re-measure, which is what an un-carried column would do.
+    $_->[4] = $blessed_fail_cause{"$rel\t$_->[3]"} for @$rr;
     $rows{$rel} = $rr if @$rr;
   }
   open my $out, '>', $fails_tsv or die "write $fails_tsv: $!";
@@ -1376,6 +1387,14 @@ sub bless_fail_rows {
 #
 # One line per DIVERGING TAP row:
 #   <rel> <TAB> <PERL's test#> <TAB> <perl verb> <TAB> <PCL verb> <TAB> <rowkey>
+#         [<TAB> <cause>]
+# The CAUSE is an OPTIONAL sixth column (task #993 / plan-test-audit-s464 I3),
+# in the sweep baseline's spelling: a task number (#1234), a not-supported
+# anchor (NS:<section>), a parking note (PARKED: ...), a catalogue pointer
+# (CATALOG ...), or combinations.  A cause-less row is QUEUE, not baseline,
+# and every run prints `CAUSES: N of M` so the queue cannot grow unnoticed.
+# The rowkey may not contain a TAB (PclTapAlign::rowkey_desc normalizes it):
+# it is a TSV field with a column after it.
 # rowkey = PERL's test DESCRIPTION (test NUMBERS are the unstable coordinate,
 # task #177), with the same fallbacks as perl-suite-expected-rows.tsv: "#N" for
 # an unnamed test, "*extra* <desc>" for a PCL-ONLY row, "*summary*" for the
@@ -1411,7 +1430,10 @@ HDR
   my $n = 0;
   for my $rel (sort keys %rows) {
     for my $r (sort { $a->[3] cmp $b->[3] || ($a->[0] // 0) <=> ($b->[0] // 0) } @{ $rows{$rel} }) {
-      print $out join("\t", $rel, @$r), "\n";
+      # A row with no cause writes FIVE fields, byte-identical to the
+      # pre-column file: the cause is an OPTIONAL sixth, so an unattributed
+      # row is not rewritten just because the column exists.
+      print $out PCLCauses::fail_row_line($rel, $r);
       $n++;
     }
   }
@@ -1662,6 +1684,15 @@ sub report_row_diff {
     $absent_rows, $absent_files if $absent_rows;
   printf "  %d file(s) exceed the 500-row log cap — their row baselines are PARTIAL: %s\n",
     scalar(@trunc), join(', ', @trunc) if @trunc;
+  # The CAUSE column (#993 I3), the sweep's line on this population.  Read
+  # from the BASELINE, never from this run: the question is how much of the
+  # blessed queue is still unattributed, and a run that measured ten files
+  # must answer it about all of them.  ONE reading (tools/lib/PCLCauses.pm).
+  print PCLCauses::causes_line(
+    [ map { my $rel = $_;
+            map { $blessed_fail_cause{"$rel\t$_->[3]"} }
+                @{ $blessed_fail_meta{$rel} } } sort keys %blessed_fail_meta ],
+    $fails_tsv);
   return;
 }
 

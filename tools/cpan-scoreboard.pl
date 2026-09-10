@@ -73,6 +73,7 @@ use Cwd qw(abs_path);
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use PCLTimeouts ();   # the ONE reader of a per-file timeout-allowance registry
+use PCLCauses ();     # the ONE reading of the CAUSE column (#993 I3)
 
 my $root = abs_path(dirname(abs_path($0)) . "/..");
 
@@ -167,10 +168,8 @@ if (@ARGV && $ARGV[0] eq '--diff') {
     }
 
     # A cause-less row is QUEUE, not baseline (#993, the sweep's rule).
-    my $nocause = grep { !defined $_->{cause} || $_->{cause} !~ /\S/
-                         || $_->{cause} =~ /^UNEXPLAINED/ } values %$base;
-    printf "CAUSES: %d of %d blessed row(s) have no cause — a cause-less row is QUEUE, not baseline (#993)\n",
-           $nocause, scalar(keys %$base);
+    # ONE reading, three populations (tools/lib/PCLCauses.pm).
+    print PCLCauses::causes_line([ map { $_->{cause} } values %$base ], $pos[0]);
     printf "\n%d NEW / %d FIXED / %d LOST\n", scalar(@new), scalar(@fixed), $lost;
     exit(@new || $lost ? 1 : 0);
 }

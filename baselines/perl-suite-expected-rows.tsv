@@ -2506,7 +2506,7 @@ run/fresh_perl.t	$ren = 'joy';
 run/fresh_perl.t	$stimpy = 'happy';
 run/fresh_perl.t	$x=0x0eabcd; print $x->ref;
 run/fresh_perl.t	$| = 1;
-run/fresh_perl.t	/(?{"{"}})/	\# Check it outside of eval too
+run/fresh_perl.t	/(?{"{"}})/ \# Check it outside of eval too
 run/fresh_perl.t	@list = ([ 'one', 1 ], [ 'two', 2 ]);
 run/fresh_perl.t	BEGIN {
 run/fresh_perl.t	BEGIN { 1/$zero }

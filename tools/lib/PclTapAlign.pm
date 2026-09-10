@@ -145,6 +145,15 @@ sub rowkey_desc {
   my ($desc, $tdir) = @_;
   $desc = '' unless defined $desc;
   $desc =~ s/\s+\z//;
+  # A TAB inside the key is the FIELD SEPARATOR of every baseline the key is
+  # written to, so a key carrying one cannot have a column after it.  Three
+  # blessed rows do: perl runs the re_tests HEADER line as a test
+  # ("pat<TAB>string<TAB>y/n/etc<TAB>...", re/alpha_assertions.t and
+  # re/regexp_normal.t) and run/fresh_perl.t names a program containing one.
+  # The 5-field parse survived them only because the key was LAST; the #993
+  # I3 cause column makes it not-last, so the separator is normalized HERE,
+  # in the ONE key projection, rather than escaped at each writer.
+  $desc =~ tr/\t/ /;
   $desc =~ s{\Q$tdir\E/}{t/}g if defined $tdir && length $tdir;
   $desc =~ s/\b((?:[\w:]+=)?(?:CODE|HASH|ARRAY|SCALAR|REF|GLOB|LVALUE|FORMAT|IO|VSTRING|Regexp))\(0x[0-9a-f]+\)/$1(0xADDR)/g;
   $desc =~ s/\btmp_[A-Z]+_[A-Z]+/tmp_TMPFILE/g;

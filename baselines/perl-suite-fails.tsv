@@ -17,6 +17,23 @@
 # the files it MEASURED; a file that produced no comparable TAP this run keeps
 # its blessed rows (they are UNVERIFIED, never "fixed").
 #
+# THE CAUSE COLUMN (task #993 I3 / docs/plan-test-audit-s464.md, added s473t4):
+# an OPTIONAL sixth field naming why the row diverges, in the sweep baseline's
+# spelling — a task number (`#1234`), a not-supported anchor (`NS:<section>`),
+# a parking note (`PARKED: …`), a catalogue pointer (`CATALOG …`), or a
+# combination.  A cause-less row is QUEUE, not baseline, and every run prints
+# `CAUSES: N of M blessed row(s) have no cause`.  A row with no cause writes
+# FIVE fields, exactly as before, so an unattributed row is byte-identical to
+# the pre-column file.
+#
+# THE ROWKEY MAY NOT CONTAIN A TAB, and since s473t4 it cannot:
+# PclTapAlign::rowkey_desc — the ONE key projection, shared with
+# perl-suite-expected-rows.tsv — normalizes it to a space.  Three blessed rows
+# carried one (perl runs the `re_tests` HEADER line as a test:
+# re/alpha_assertions.t and re/regexp_normal.t "pat<TAB>string<TAB>y/n/etc…",
+# and run/fresh_perl.t in the other file), and the five-field parse survived
+# them only because the key was LAST.  The cause column makes it not-last, so
+# those two rows were edited here BY HAND, tabs to spaces, nothing else.
 # NOT IN HERE: files registered in perl-suite-expected.tsv (XDIFF) or
 # perl-suite-fixture.tsv (FIXTURE) — their rows are already gated per row by
 # those registries, and one row must have exactly one gate.
@@ -7062,7 +7079,7 @@ re/alpha_assertions.t	2195	ok	(missing)	expanded name from original test number 
 re/alpha_assertions.t	2196	ok	(missing)	expanded name from original test number 999
 re/alpha_assertions.t	2046	ok	(missing)	khw doesn't like leading underscores, but don't rmv them accidentally # skipped.  Pattern doesn't contain assertions
 re/alpha_assertions.t	2015	ok	(missing)	make sure that we reset capture buffers properly (from regtry) # skipped.  Pattern doesn't contain assertions
-re/alpha_assertions.t	2168	ok	(missing)	pat	string	y/n/etc	expr	expected-expr	skip-reason	comment
+re/alpha_assertions.t	2168	ok	(missing)	pat string y/n/etc expr expected-expr skip-reason comment
 re/alpha_assertions.t	1880	ok	(missing)	patterns
 re/alpha_assertions.t	1859	ok	(missing)	skipped.  Pattern doesn't contain assertions
 re/alpha_assertions.t	1860	ok	(missing)	skipped.  Pattern doesn't contain assertions
@@ -15789,7 +15806,7 @@ re/regexp_normal.t	1992	ok	(missing)	[perl-126222] # skipped.  Test not valid fo
 re/regexp_normal.t	1879	ok	(missing)	check we have the right utf8ness as we switch back and forth between
 re/regexp_normal.t	2046	ok	(missing)	khw doesn't like leading underscores, but don't rmv them accidentally # skipped.  Test not valid for t/re/regexp_normal.t
 re/regexp_normal.t	2015	ok	(missing)	make sure that we reset capture buffers properly (from regtry) # skipped.  Test not valid for t/re/regexp_normal.t
-re/regexp_normal.t	2168	ok	(missing)	pat	string	y/n/etc	expr	expected-expr	skip-reason	comment
+re/regexp_normal.t	2168	ok	(missing)	pat string y/n/etc expr expected-expr skip-reason comment
 re/regexp_normal.t	1880	ok	(missing)	patterns
 re/regexp_normal.t	2040	ok	(missing)	skipped.  Test is only valid for EBCDIC platforms.  Test not valid for t/re/regexp_normal.t
 re/regexp_normal.t	1859	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t
