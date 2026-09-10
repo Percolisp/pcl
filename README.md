@@ -1,36 +1,83 @@
-# Percolisp (PCL) — Perl 5 compiled to native code, by way of Common Lisp
+# Percolisp (PCL) — Perl 5 compiled to native code
 
 [![CI](https://github.com/Percolisp/pcl/actions/workflows/ci.yml/badge.svg)](https://github.com/Percolisp/pcl/actions/workflows/ci.yml)
 
-PCL is an execution environment for Perl.
+Percolisp compiles Perl 5 to native code by way of [SBCL](https://www.sbcl.org/),
+a Common Lisp compiler.  Your script runs unchanged.  Numeric loops run **three
+to five times faster than perl**; whole programs are still slower (1.9× and
+3.4× on the two measured); and **84 of 183 test files** from a board of
+pure-Perl CPAN distributions pass exactly as their authors wrote them.  Every
+number on this page is [measured](#measured) by a command you can run.  The
+command is `pcl`.
 
-Perl is compiled into a Common Lisp, [SBCL](https://www.sbcl.org/). A
-runtime library supplies what perl does behind the scenes: context,
-coercion, `local`, `tie`, `use overload`, string `eval`, etc.
+**Percolisp is an experiment until the critical infrastructure runs.**  The
+infrastructure is the modules a Perl deployment cannot do without — pure Perl:
+Getopt::Long, JSON::PP, Data::Dumper, Path::Tiny, HTTP::Tiny, Try::Tiny, Moo,
+Test::More; XS, through the [pclxs](#what-works) bridge: DBI with one DBD,
+Encode, Storable, Time::HiRes, Digest::SHA, JSON::XS, POSIX, Socket;
+frameworks that stress everything: Plack, Mojolicious, DateTime, Template
+Toolkit, Log::Log4perl.  Each is being measured the same way: does it compile,
+does its own test suite pass, what blocks it.  None is declared done yet.  The
+experiment ends when every module on that list runs its own tests under
+Percolisp; the count that do is the progress meter and will be kept here.
 
-PCL is written in Perl. The compiled program only use a Perl process
-with PCL to handle `eval` strings at run time.
+Five lines of Perl, and what the compiler makes of them:
 
-Why?
+```perl
+use feature 'say';
+my $n   = shift // 1000;
+my $sum = 0;
+for my $i (1 .. $n) { $sum += $i * $i }
+say $sum;
+```
 
-* **Speed.** A variable becomes a machine integer or string instead of
-  a Perl scalar (unless a reference to it is taken). Some operations
-  are slower (at least for now), see [numbers](#speed) for an overview.
+```lisp
+(p-let (($n :box (make-p-box nil)))
+  (p-my-= $n (p-// (p-shift @ARGV) 1000))
+  (p-let (($sum :scalar 0))
+    (p-foreach-range-raw ($i 1 $n) :my t (p-incf-raw $sum (p-* $i $i)))
+    (p-say $sum)))
+```
+
+`p-let` is `my`, and the word after each variable is what the compiler
+proved about it.  `$n` is `:box`: it is handed to `shift`, so something could
+alias it, and it lives in a small container.  `$sum` is `:scalar`: nothing
+ever takes a reference to it, so it is a bare machine integer, and
+`p-incf-raw` adds into it directly.  Everything with a `p-` prefix is a
+runtime function named after the Perl operator it implements.  Those proofs
+are where the speed comes from, and they are written into the output: the
+generated Lisp is a documented [intermediate representation](docs/ir-spec.md)
+that another tool could compile to another target.
+
+Why Percolisp:
+
+* **Speed where it can be proved.**  A variable the compiler can show is
+  only ever a number, or is never referenced, becomes a machine value instead
+  of a Perl scalar.  Where nothing can be proved — method calls, overloading,
+  regexes — perl's C implementation is still faster.  The [numbers](#speed)
+  say which is which.
 * **Output you can read.**  The Lisp keeps your variable names, sigils and
   Perl's operator names.
-* **PCL is a compiler toolkit with a documented IR.** Most of the work
-  is done for compiling Perl to other environments!  The compiler
-  makes an intermediate representation (IR), which is documented
-  [here](docs/ir-spec.md). It saves facts about variables (if it
-  always is a number, if a reference is never taken, if it is only
-  read in one loop, etc). It gives information about context,
-  coercion, calling convention, non-local exits and so on.  Also see
-  the [architecture](docs/v2-target-architecture.md).
+* **A compiler toolkit with a documented IR.**  The compiler is written in
+  Perl and records facts about every variable and call site (always a number,
+  never referenced, read-only in this loop, calling convention, context).  The
+  IR, its facts and its coercion rules are [specified](docs/ir-spec.md); the
+  [architecture](docs/v2-target-architecture.md) is documented.
 
-**Maturity: early.** First tag v0.1.0, August 2026.  Pure-Perl code
-works well, including most CPAN modules written in Perl.  XS modules
-are being looked at, hopefully that will work out too.  See [What
-works](#what-works).
+Three plain facts before you install anything:
+
+* Compiling needs perl: the compiler is a Perl program built on PPI.
+* Running a compiled program needs SBCL, and it needs perl installed too,
+  because string `eval` compiles Perl while the program runs and Percolisp
+  does that by calling its own compiler.
+* There is no standalone binary yet.  `pl2cl --executable` saves an image
+  that runs the program, but it still reads this tree for modules.
+
+**Maturity: early.**  First tag v0.1.0, August 2026.  Most of the language
+works, verified against perl's own test suite, and most CPAN modules written
+in Perl compile; XS modules go through pclxs, which runs one real module end
+to end and is not bundled yet.  [What works](#what-works) has the list and
+the failure counts.
 
 ## Quick start
 
@@ -211,35 +258,14 @@ sum of squares: 385
 eval: 42
 ```
 
-To see what the compiler produces, take a smaller piece:
-
-```perl
-my $n   = shift // 1000;
-my $sum = 0;
-for my $i (1 .. $n) { $sum += $i * $i }
-print "$sum\n";
-```
-
-`pl2cl` turns the body of that into
-
-```lisp
-(p-let (($n :box (make-p-box nil)))
-  (p-my-= $n (p-// (p-shift @ARGV) 1000))
-  (p-let (($sum :scalar 0))
-    (p-foreach-range-raw ($i 1 $n) :my t (p-incf-raw $sum (p-* $i $i)))
-    (p-print (p-string-concat $sum "\n"))))
-```
-
-Reading it as a Perl programmer: `p-let` is `my`, and the word after the
-variable is what the compiler decided about it.  `$n` is `:box` — it is
-handed to `shift` and could be aliased, so it lives in a small container
-that references and `local` can work on.  `$sum` is `:scalar` — nothing
-ever takes a reference to it, so it is a bare machine value.  The loop is
-`p-foreach-range-raw`, the counting-loop form that keeps `$i` as a raw
-integer, and `p-incf-raw` adds into the raw slot.  Everything with a `p-`
-prefix is a runtime function or macro named after the Perl operator it
-implements.  That decision-making is where the speed comes from, and the
-[IR manual](docs/ir-spec.md) documents every form.
+To see what the compiler produces for a whole program, run `pl2cl demo.pl`:
+the output is one Lisp form per Perl statement, in source order, with the
+same shape as the five-line example at the top of this page.  The loop
+there is `p-foreach-range-raw`, the counting-loop form that keeps `$i` as a
+raw integer for the whole loop because nothing in the body can alias it; a
+`print` of a string with an escape comes out as `(p-print (p-string-concat
+$sum (p-esc "\\n")))`, the escape kept as data.  The [IR manual](docs/ir-spec.md)
+documents every form.
 
 ## What works
 
@@ -284,14 +310,14 @@ the reason for each entry and what you will observe instead.
 
 Every number below comes from a command you can run; nothing is estimated.
 [`docs/STATUS.md`](docs/STATUS.md) has the same figures with the failure
-breakdowns.  All were taken on 2026-09-04.
+breakdowns.  All were taken on 2026-09-04, except the CPAN board row, re-taken on 2026-09-09 when its failures gained per-row causes.
 
 | measurement | result | reproduce |
 |---|---|---|
 | PCL's own regression suite | **195 files, 6,729 assertions, all passing** | `tools/prove-core` |
 | perl's test suite, extracted (108 files from perl 5.40's `t/`) | **18,581 pass / 649 fail (96.6 %)**; 58 files pass completely | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's whole `t/` tree, run in place (528 files) | 92 files identical to perl; 108 differ for a registered, explained reason; 275 differ and are the bug queue; the rest do not compile, time out or produce no test output | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| a board of 14 pure-Perl CPAN distributions, 183 test files | **78 files pass, 54 pass partially, 51 fail** (2,140 assertions pass / 342 fail) | `tools/cpan-scoreboard.pl` |
+| a board of 14 pure-Perl CPAN distributions, 183 test files | **84 files pass, 50 pass partially, 49 fail** (2,213 assertions pass / 353 fail), every failing assertion with a recorded cause | `tools/cpan-scoreboard.pl` |
 | statements the compiler cannot translate, over all of the above | **62 statements in 19 files**, each with a filed cause | `tools/drop-census.pl` |
 
 Every failing assertion is recorded row by row in a baseline that the test
@@ -300,10 +326,24 @@ passing fails the run.  The numbers can only move honestly.
 
 ### Speed
 
-These are microbenchmarks: each isolates one Perl feature so that a
-difference has one cause.  They are not a promise about whole programs.
-Ratio is PCL time / perl time, best of five runs, process startup
-subtracted; below 1.00× means PCL is faster.  The table is the board of
+**Two whole programs first**, because "what about a real program" is the
+first question.  Ratio is PCL time / perl time, best of five, process
+startup subtracted; measured 2026-09-10 on a quiet machine (load 0.7) with
+`perl tools/bench-exec.pl json-rt textproc`.
+
+| program | what it does | PCL / perl |
+|---|---|---:|
+| json-rt | `JSON::PP` encode and decode of a 50 kB nested structure | 1.85× |
+| textproc | `Text::Balanced`/`Text::Wrap`-style line processing of a 1 MB string: regexes, `pos`, `substr`, `.=`, `split`, `join` | 3.40× |
+
+Both are slower than perl, and both got faster since they were first
+measured at the start of September (json-rt 3.4×, textproc 5.1×, on a busy
+machine, best of three); what moved them is on the linked page.
+
+The rest are microbenchmarks: each isolates one Perl feature so that a
+difference has one cause.  They are not a promise about whole programs; the
+two rows above are.  Same ratio; below 1.00× means PCL is faster.  The
+table is the board of
 2026-09-08, taken on a quiet machine (§0.2m of the linked page).
 
 | benchmark | what it measures | PCL / perl |
@@ -453,7 +493,7 @@ about a tenth of a second plus the time to compile your script.
 ## Roadmap
 
 * **v0.2**: the compiler's census of untranslatable statements over all
-  test populations goes to zero (57 today); the queue of small correctness
+  test populations goes to zero (62 today; see [Measured](#measured)); the queue of small correctness
   fixes found by perl's `t/` tree and the CPAN board; a measured speed story
   for whole programs rather than microbenchmarks.
 * **After that:** finishing the standalone binary — `pl2cl --executable`
