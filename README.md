@@ -17,7 +17,11 @@ Test::More; XS, through the [pclxs](#what-works) bridge: DBI with one DBD,
 Encode, Storable, Time::HiRes, Digest::SHA, JSON::XS, POSIX, Socket;
 frameworks that stress everything: Plack, Mojolicious, DateTime, Template
 Toolkit, Log::Log4perl.  Each is being measured the same way: does it compile,
-does its own test suite pass, what blocks it.  None is declared done yet.  The
+does its own test suite pass, what blocks it.  Measured on 2026-09-10:
+**one of the twenty-one runs** — Getopt::Long, whose eight test files give 109
+assertions and 0 failures, exactly as under perl; the table with a probe, a
+blocker and an estimate for each of the other twenty is
+[docs/infrastructure-milestone.md](docs/infrastructure-milestone.md).  The
 experiment ends when every module on that list runs its own tests under
 Percolisp; the count that do is the progress meter and will be kept here.
 

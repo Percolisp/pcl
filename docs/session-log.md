@@ -2,6 +2,77 @@
 
 Append new entries at the top. One section per session.
 
+## Session s481b (Opus agent, 2026-09-10) — #1607 measured: the critical-infrastructure milestone is 1 of 21; `while ()` and `File::Spec->canonpath` fixed; nine bugs filed
+
+**The deliverable is `docs/infrastructure-milestone.md`.**  Twenty-six modules
+(the README's twenty-one plus File::Temp, Text::CSV_PP, YAML::Tiny, Pod::Usage
+and the List/Scalar::Util shims), each measured three ways on main `f330e885`:
+every `lib/**/*.pm` through `pl2cl --module`; the dist's own `t/` through
+`tools/cpan-scoreboard.pl --jobs 4 --timeout 120`; and the same files under
+real perl 5.40.3 with the same `@INC` rule and CWD = the dist root.  The
+threshold for "runs" is stated in §0 and is the strict one — every file perl
+does not skip gives the same ok / not-ok counts — because the two nearest
+misses (Try::Tiny 93 of 104, Data::Dumper 406 of 829) show what a softer one
+would let through.  **Getopt::Long is the only module that meets it**: 8 files,
+109 assertions, 0 failures, not one row of difference.  The README's "None is
+declared done yet" became that count plus a link; nothing else in README moved.
+
+**Group A.**  Ten of the twelve compile with zero drops and zero refusals and
+fail at RUN time; the exceptions are HTTP::Tiny (did not compile at all, fixed
+below) and Template Toolkit in group C.  The causes are individual, not one
+theme: JSON::PP emits invalid JSON for any control character (#1609, up to
+25,076 assertions), Text::CSV_PP does not load because Encode is XS (52,556),
+Moo loses twenty-nine files to Test::Fatal's `exception` colliding with a
+runtime export (#1611), Data::Dumper stops at `re::is_regexp` (#1612),
+File::Temp at the glob-as-hash idiom (#1614), YAML::Tiny and Test::More at
+`subtest` (#1576).
+
+**Group B is shut by one thing, and it is upstream:** `xs-pin` says pclxs abi 6
+and `~/pclxs` is abi 8, so `tools/pcl-xs-install` refuses every distribution and
+`~/.pcl-cache/xs` is empty.  Every XS module fails at `XSLoader::load`.  Worth
+recording separately: **`DBI.pm` transpiles clean** — 8682 lines, no drops, no
+refusals — and the pure-Perl route (`DBI_PUREPERL=2` + DBD::DBM) needs no XS at
+all and runs under perl with `-I` alone, so the only thing between PCL and a
+running DBI program is **#1610**, one `local(*DBI::DIR, $@)` whose bare CL
+symbol makes the whole emitted file unreadable.
+
+**Group C: the compiler is not the wall.**  Mojolicious's 112 modules and
+Plack's 70 transpile with zero hard errors, zero drops and zero refusals; what
+stops them is Digest::MD5, a `getaddrinfo` gap in `lib/Socket.pm`, an
+argument-less `XSLoader::load()` and #1617.  Log::Log4perl loses forty-four of
+its fifty-eight countable files to one bug (#1616).  DateTime is **not
+measurable here** — its dependencies are absent, so real perl fails 50 of 51
+files too — and Template Toolkit's perl side is degraded for the same kind of
+reason (the dist is unbuilt); both are said so rather than scored.
+
+**Two fillers shipped**, each with a guard inverse-verified on a `git archive
+f330e885` extraction.  `while ()` is perl's infinite loop and PCL died
+"Parser2: empty expression" — a hard error that loses the whole file, and
+`HTTP/Tiny.pm` is spelled that way; the C-style-`for` arm already carried the
+rule ("empty cond → constant true"), so the `while` arm now reads it too
+(`Pl/t/while-empty-01.t`, 9 rows, 1.4 s).  `File::Spec->canonpath` was missing
+from PCL's Unix-only shim, which its own header invites keeping in sync;
+`Path::Tiny::_path` calls it, so every one of that dist's 30 files died at
+load.  Twelve paths now answer byte-identically to real File::Spec 5.40.3
+(`Pl/t/file-spec-01.t`, 4 rows).  Re-measured: **Path::Tiny 1 PASS / 29 FAIL,
+1 ok → 9 PASS / 2 PARTIAL / 19 FAIL, 41 ok**; **HTTP::Tiny compiles and its row
+count does not move**, because the file-level wall was replaced by a load-level
+one (#1574) — which is the honest way to report it.
+
+**Filed with reproducers: #1609–#1617.**  Three of them are silent-wrongs
+(#1609 invalid JSON, #1611 a hijacked sub name, #1616 a die where perl returns
+undef), two are whole-file losses (#1610, #1617), one is a correction to an
+existing task whose diagnosis would have sent a session to the wrong file
+(#1615).  #1617 also records a hole in the instruments: `pl2cl --module` exits
+0 on a file it cannot fully compile, and the CORE modules PCL loads from the
+system perl at run time are in no drop-census population.
+
+Bars: gate 234 files / 8053 rows with only the 13 standing pclxs xs rows;
+sweep GATE clean, TOTAL passing 18675 (+0), drops 5 = census, shortfall +0;
+`corpus-diff f330e885` emission identical over 111; `emission-ab --shapes` over
+lib 27 SAME / 0 DIFF / 0 RCDIFF; ir-host-leak 31 over 111; ir-conform
+321/0/24/0.  Generation v2-1280, the three artifacts regenerated (gen stamp
+only).
 ## Session s481a (Opus agent, 2026-09-10) — the install wall: cl-ppcre vendored, the Quicklisp step gone, a container image, and install lines that were actually run
 
 **#1597 — cl-ppcre is in the tree.**  The wall was "first set up Quicklisp".  `cl/vendor/cl-ppcre/` now holds the library as upstream source carried verbatim, and `cl/pcl-runtime.lisp` pushes that directory onto `asdf:*central-registry*` before its `asdf:load-system`, with ASDF's ordinary search kept as the fallback and an error that names which of the two was tried.  **Which copy mattered.**  The box loads Debian's `cl-ppcre`, whose `.asd` reports 2.1.2 — but it is not the v2.1.2 *tag*: it is upstream master at `a2ea581c23fdc184168423adbd4b4c1f48d42743`, and the tag differs in `optimize.lisp` and `closures.lisp`.  Every vendored file is byte-identical (`cmp`) to that commit, so nothing about the library changed under the batch; vendoring the tag would have been a silent library change riding a packaging commit.  Three consequences were handled rather than discovered later: the directory is derived from the runtime's own `*load-truename*`/`*compile-file-truename*`, never `$PCL_ROOT`, so a checkout, a worktree and an installation each get the copy beside *their* runtime (verified on a real install: `ISRC=<prefix>/lib/pcl/cl/vendor/cl-ppcre/`); the vendored sources are compiled *into* the saved core, so `PCLSbcl::_vendor_stamp` folds `cl/vendor/`'s content into the core's key (`CORE_KEY_VERSION` 1 → 2), content rather than mtimes so a fresh checkout of the same bytes reuses its core; and `tools/lib/PCLLicense.pm` gained `%EXCLUDE_TREES`, because a third-party tree *inside* a scanned root needs a prune where `perl-tests/` and `cpan-tests/` merely are not in `@ROOTS`.  #1461's BMH shadow still holds against the vendored version (probed: `BMH-ON=t BUILT=1 SHADOW=t`).  Guard `Pl/t/vendored-ppcre-01.t`, 8 rows, ~11 s: every leg runs with `$HOME` pointed at a fresh empty directory *and* `CL_SOURCE_REGISTRY` set to ignore inherited configuration, so no `~/.sbclrc`, no Quicklisp and no distro package can answer — inverse-verified on a `bb5a6d77` archive, where all 8 fail at `PCL: ASDF could not load cl-ppcre`, which is the wall itself.
