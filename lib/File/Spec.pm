@@ -129,6 +129,28 @@ sub no_upwards {
     return grep { $_ ne '.' && $_ ne '..' } @_;
 }
 
+sub canonpath {
+    # File::Spec::Unix::_pp_canonpath, minus the qnx/nto "//node" branch this
+    # Unix-only shim has no use for.  It TIDIES a path textually and resolves
+    # nothing: `..` stays put except at the very front of an absolute path,
+    # which is the one place perl collapses it (/ has no parent).  The five
+    # substitutions and their order are perl's, verbatim.
+    #
+    # Added s481b (#1607): `Path::Tiny::_path` — the constructor every single
+    # Path::Tiny object goes through — calls it, so its absence made all 30 of
+    # that dist's test files die at load with "Can't locate object method
+    # canonpath via package File::Spec" (perl: 29 PASS, 1779 assertions).
+    my ($class, $path) = @_;
+    return unless defined $path;
+    $path =~ s|/{2,}|/|g;                            # xx////xx  -> xx/xx
+    $path =~ s{(?:/\.)+(?:/|\z)}{/}g;                # xx/././xx -> xx/xx
+    $path =~ s|^(?:\./)+||s unless $path eq "./";    # ./xx      -> xx
+    $path =~ s|^/(?:\.\./)+|/|;                      # /../../xx -> /xx
+    $path =~ s|^/\.\.$|/|;                           # /..       -> /
+    $path =~ s|/\z|| unless $path eq "/";            # xx/       -> xx
+    return $path;
+}
+
 sub path {
     return split(/:/, $ENV{PATH} // '');
 }

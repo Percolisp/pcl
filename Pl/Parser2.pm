@@ -10291,7 +10291,15 @@ sub _lower_compound {
       %sv_lb   = %{ $self->{_let_bound_vars} // {} };
       $self->_reg_lex(@cond_mys);
     }
-    my $cond = $self->_lower_expr([_cond_parts($cond_s)], $stmt);
+    # `while ()` is perl's infinite loop — the empty condition is constant
+    # TRUE, exactly as an empty COND section of a C-style `for` is (the arm
+    # below spells that as `['list','t']`; `p-while`'s cond is a bare form, so
+    # it is plain `t` here).  Without this the empty parts list reached
+    # _lower_expr and died "Parser2: empty expression", taking the whole FILE
+    # with it: HTTP::Tiny's `_do_timeout` writer loop is one such statement and
+    # cost the dist 31 of its 32 test files (#1607's measurement, s481b).
+    my @cond_parts = _cond_parts($cond_s);
+    my $cond = @cond_parts ? $self->_lower_expr(\@cond_parts, $stmt) : 't';
     # Perl loop conditions whose value comes from each/readline/readdir/glob
     # terminate on *undef*, not false-but-defined ("0" line, each's index 0),
     # and a bare `<FH>` implicitly assigns to $_ — v1's _auto_defined_cond,
