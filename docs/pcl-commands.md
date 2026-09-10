@@ -98,9 +98,10 @@ in a **saved SBCL core**:
 
 * **In a checkout**, the first run builds the core under
   `~/.pcl-cache/core/` and every later run starts from it (startup ~1 s →
-  ~0.1 s).  The core's file name is a hash of the runtime source, the SBCL
-  version and the checkout's path, so editing the runtime or upgrading SBCL
-  makes a *new* core rather than a stale one; old ones are pruned.
+  ~0.1 s).  The core's file name is a hash of the runtime source, the
+  vendored Lisp libraries beside it, the SBCL version and the checkout's
+  path, so editing the runtime, replacing a vendored library or upgrading
+  SBCL makes a *new* core rather than a stale one; old ones are pruned.
   `pcl --make-core` builds it early, `pcl --cache-info` names the one a run
   would use, `PCL_NO_CORE=1` runs from source instead, `PCL_CORE=path` uses
   a specific one.
@@ -116,6 +117,17 @@ compiled artifacts (`cl/pcl-pack.lisp`, `cl/pcl-mro.lisp`,
 `tools/rebuild-pack` and `pl2cl --extension lib/mro.pm > cl/pcl-mro.lisp`
 (same for `lib/warnings.pm`); the test `Pl/t/artifact-staleness-01.t` fails
 until you do.  Details: [`extensions.md`](extensions.md).
+
+**Where cl-ppcre comes from.**  The runtime's one external Lisp dependency
+is [cl-ppcre](https://edicl.github.io/cl-ppcre/), the regex engine.  It is
+**vendored** under `cl/vendor/cl-ppcre/` — upstream source carried verbatim,
+never edited here — and the runtime pushes that directory onto
+`asdf:*central-registry*` before loading the system, so **a machine needs
+SBCL and nothing else**: no Quicklisp, no `~/.sbclrc`, no distribution Lisp
+package.  If the directory is missing, ASDF's ordinary search is the
+fallback; if neither answers, the load fails with a message naming which of
+the two was tried.  `cl/vendor/README.md` has the version and the upstream
+commit; `caching.md` §1a has the details.
 
 ## Modules, and how they are compiled
 
@@ -209,6 +221,7 @@ uninstall; `pcl --clear-cache` empties it.
 | `<prefix>/lib/pcl/pcl.core` | the core an installation compiled at install time |
 | `cl/pcl-runtime.lisp` | the runtime library |
 | `cl/pcl-pack.lisp`, `cl/pcl-mro.lisp`, `cl/pcl-warnings.lisp` | the three checked-in extensions, written in Perl and compiled by PCL |
+| `cl/vendor/cl-ppcre/` | the vendored regex engine, upstream source carried verbatim (`cl/vendor/README.md`) |
 | `lib/` | the pure-Perl replacements for C-implemented modules |
 
 ## SEE ALSO

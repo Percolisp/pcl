@@ -23,10 +23,12 @@ the runtime already compiled in, dropping that to about 0.1 s.
 
 - **Location and key**: `~/.pcl-cache/core/pcl-<path-hash>-<content-hash>.core`,
   named from the runtime's absolute path, its own source, `sbcl --version`,
-  `~/.sbclrc`'s size+mtime and a format version (`tools/lib/PCLSbcl.pm`; see
+  the contents of the `cl/vendor/` tree beside it (§1a), `~/.sbclrc`'s
+  size+mtime and a format version (`tools/lib/PCLSbcl.pm`; see
   `test-infrastructure.md` "The saved-core optimisation"). Editing the
-  runtime, upgrading SBCL, or using a different checkout each produce a
-  *different* name — there is no stale-core case, only a miss that rebuilds.
+  runtime, replacing the vendored library, upgrading SBCL, or using a
+  different checkout each produce a *different* name — there is no
+  stale-core case, only a miss that rebuilds.
 - **Build**: on first use, under an `flock` so concurrent spawns don't race;
   written temp-file-then-rename. A failed build leaves `<core>.failed` for
   one hour and falls back to loading from source, loudly.
@@ -40,6 +42,30 @@ the runtime already compiled in, dropping that to about 0.1 s.
   (§7 has what an install shares vs. keeps per-user).
 - `PCL_SHOW_SBCL=1 pcl -e 1` prints the exact `sbcl --core …` command, so
   you can see which core a run actually used.
+
+### 1a. Where cl-ppcre comes from
+
+The runtime's one external Lisp dependency is
+[cl-ppcre](https://edicl.github.io/cl-ppcre/), the regex engine `m//`,
+`s///` and `split` run on. It is **vendored**: the sources live in
+`cl/vendor/cl-ppcre/`, carried verbatim from upstream, and
+`cl/pcl-runtime.lisp` pushes that directory onto `asdf:*central-registry*`
+before loading the system. A machine therefore needs SBCL and nothing
+else — no Quicklisp, no `~/.sbclrc`, no distribution Lisp package.
+`cl/vendor/README.md` records the version, the upstream commit and the
+rule that the directory is never edited here.
+
+- **Fallback**: if `cl/vendor/cl-ppcre/` is missing (a repackaged tree, or
+  a deliberate test against another version), ASDF's ordinary search runs
+  instead — a distro package, Quicklisp, whatever a `~/.sbclrc` set up.
+- **When neither answers**, the load fails with a message naming which of
+  the two was tried, never a silent fall-back.
+- Because the vendored sources are compiled *into* the saved core, they are
+  part of the core's key (above): replacing them rebuilds the core.
+- `sbcl … --load cl/pcl-runtime.lisp --eval '(print (asdf:system-source-directory :cl-ppcre))'`
+  says which copy an image actually loaded; the gate row
+  `Pl/t/vendored-ppcre-01.t` asserts it is the vendored one under an empty
+  `$HOME` with ASDF's inherited configuration ignored.
 
 ## 2. The module cache
 
@@ -223,9 +249,10 @@ JSON::PP's own loader `eval`s — warms it further to 0.41 s.
   its own cache under their own home, never under the install prefix
   (`tools/install-pcl --help`; tasks #1302/#1304). **One known limitation,
   task #1327 (found, not fixed):** a saved core remembers the ASDF cache
-  directory of whoever *built* it, so `asdf:load-system`/Quicklisp work
-  from a shared install's core can target a directory another user can't
-  write to — ordinary Perl `use`/`require` is unaffected.
+  directory of whoever *built* it, so any `asdf:load-system` work done from
+  a shared install's core (recompiling the vendored cl-ppcre, say) can
+  target a directory another user can't write to — ordinary Perl
+  `use`/`require` is unaffected.
 - `tools/install-pcl --uninstall` removes the installed tree and wrappers
   only; it never touches any user's `~/.pcl-cache` — `pcl --clear-cache`
   for that.

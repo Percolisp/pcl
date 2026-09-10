@@ -35,7 +35,7 @@ for my $rel (@$files) {
   push @{ $by{$grp} }, $rel;
 }
 
-plan tests => scalar(keys %by) + 3;
+plan tests => scalar(keys %by) + 4;
 
 for my $grp (sort keys %by) {
   my @missing = grep { !PCLLicense::has_tag("$root/$_") } @{ $by{$grp} };
@@ -53,6 +53,12 @@ ok(!@gone, sprintf("all %d named exclusions still exist", scalar keys %PCLLicens
 my @unmet = grep { !$excl_seen->{$_} } sort keys %PCLLicense::EXCLUDE;
 ok(!@unmet, "every named exclusion was met by the scan")
   or diag("exclusions the scan never reached:\n  " . join("\n  ", @unmet));
+
+# Every pruned TREE must still exist, for the same reason: a prune that
+# excuses nothing hides whatever grows in its place.
+my @gone_trees = grep { !-d "$root/$_" } sort keys %PCLLicense::EXCLUDE_TREES;
+ok(!@gone_trees, sprintf("all %d pruned trees still exist", scalar keys %PCLLicense::EXCLUDE_TREES))
+  or diag("pruned but no longer present -- delete from PCLLicense::EXCLUDE_TREES:\n  " . join("\n  ", @gone_trees));
 
 # Sanity: the scan saw a plausible number of files (a broken walker that finds
 # 3 files would pass every row above vacuously).

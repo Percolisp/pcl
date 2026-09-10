@@ -37,16 +37,60 @@
             v)
     (force-output *error-output*)))
 
-;;; Load CL-PPCRE for regex support
+;;; Load CL-PPCRE for regex support.
+;;;
+;;; WHERE IT COMES FROM (s481a, task #1597).  PCL ships cl-ppcre under
+;;; cl/vendor/cl-ppcre/ — upstream source, carried verbatim, never edited here
+;;; (cl/vendor/README.md has the version, the commit and the rule).  That
+;;; directory goes onto ASDF's central registry FIRST, so a machine needs SBCL
+;;; and nothing else: no Quicklisp, no ~/.sbclrc, no distro Lisp package.  When
+;;; the vendored copy is absent — a repackaged tree, or a deliberate test
+;;; against another version — ASDF's ordinary search is the FALLBACK, and the
+;;; error below says which of the two was tried.
+;;;
+;;; The directory is derived from THIS FILE's own load location, not from
+;;; $PCL_ROOT: an installed tree, a checkout and a worktree each load their own
+;;; runtime and must get the library sitting beside it.  *load-truename* is
+;;; bound when the file is --load'ed, *compile-file-truename* when it is being
+;;; compiled.  (This runs before *pcl-runtime-directory* is defined — that
+;;; defvar is further down, after the package.)
 (require :asdf)
-(handler-case (asdf:load-system :cl-ppcre :silent t)
+(defvar *pcl-vendor-cl-ppcre*
+  (let ((here (or *load-truename* *compile-file-truename*)))
+    (when here
+      (let ((dir (merge-pathnames "vendor/cl-ppcre/"
+                                  (make-pathname :name nil :type nil :defaults here))))
+        (when (probe-file (merge-pathnames "cl-ppcre.asd" dir))
+          dir))))
+  "The vendored cl-ppcre directory beside this file, or NIL when it is absent.
+   Read by the load below, and by a probe asking which copy an image runs on
+   (`asdf:system-source-directory :cl-ppcre` answers the same question after
+   the fact).  Lives in CL-USER: this form runs before PCL's own package.")
+(when *pcl-vendor-cl-ppcre*
+  (pushnew *pcl-vendor-cl-ppcre* asdf:*central-registry* :test #'equal))
+;;; ASDF's :silent covers ASDF's own chatter, not the SBCL compiler's.  The
+;;; vendored sources are compiled once per (machine, SBCL) into ASDF's output
+;;; cache, and that one compile used to be invisible only because the library
+;;; happened to be pre-compiled by whoever installed it; here it is OURS, so
+;;; muffle its optimization notes.  Warnings and errors are NOT muffled — a
+;;; library that fails to build must still say so.
+(handler-case (handler-bind ((sb-ext:compiler-note #'muffle-warning))
+                (let ((*compile-verbose* nil) (*compile-print* nil)
+                      (*load-verbose* nil) (*load-print* nil))
+                  (asdf:load-system :cl-ppcre :silent t)))
   (error (e)
-    (error "PCL: ASDF could not load cl-ppcre (~a).~%~
-            If cl-ppcre was installed via Quicklisp, note that `sbcl --script` ~
-            skips ~~/.sbclrc, so Quicklisp never registers with ASDF in that ~
-            mode.  Run via `sbcl --noinform --non-interactive --load ~
-            cl/pcl-runtime.lisp --load FILE` (what ./runpcl does) instead of ~
-            --script, or make cl-ppcre visible to plain ASDF." e)))
+    (error "PCL: ASDF could not load cl-ppcre (~a).~%~a"
+           e
+           (if *pcl-vendor-cl-ppcre*
+               (format nil "The vendored copy at ~a was on ASDF's central ~
+                            registry and still failed to build — restore ~
+                            cl/vendor/cl-ppcre/ from upstream (see ~
+                            cl/vendor/README.md)."
+                       *pcl-vendor-cl-ppcre*)
+               "cl/vendor/cl-ppcre/ was NOT found beside this runtime, so ~
+                ASDF's ordinary search was used and found nothing.  Restore ~
+                the vendored copy (see cl/vendor/README.md), or make cl-ppcre ~
+                visible to plain ASDF."))))
 
 ;;; Load sb-posix for process ID
 (require :sb-posix)
@@ -26492,8 +26536,10 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Install the hashed matcher into cl-ppcre and switch literal-prefix scanning
    on, or decline loudly and change nothing.
 
-   cl-ppcre is a system PCL loads (`asdf:load-system`), not a vendored copy, so
-   this redefinition is pinned to an API: `create-bmh-matcher` must exist with
+   PCL vendors cl-ppcre (cl/vendor/cl-ppcre/, upstream a2ea581), but the load
+   FALLS BACK to whatever ASDF finds when that directory is absent, so the
+   version running is not guaranteed to be the vendored one and this
+   redefinition stays pinned to an API: `create-bmh-matcher` must exist with
    the lambda list `(pattern case-insensitive-p)`.  It is also pinned to a CALL
    SHAPE, which the assertion cannot see and the SELF-TEST can: if a future
    cl-ppcre inlined or block-compiled that call, the redefinition would be

@@ -44,6 +44,16 @@ our $SPDX = $TAG_LINES[3];
 our @ROOTS  = qw(Pl cl lib tools examples ir-conform .claude/hooks);
 our @EXTRAS = qw(docs/ppi-bug-report.t);
 
+# Whole TREES never scanned under a scanned root, => reason.  Like %EXCLUDE
+# every one must EXIST (the gate checks), so a pruned tree cannot outlive
+# what it excuses.  cl/vendor/ is third-party source carried verbatim
+# (s481a): upstream files are never tagged, the same rule perl-tests/ and
+# cpan-tests/ get -- those are simply not in @ROOTS, but this one sits
+# INSIDE a scanned root, so it needs a prune.
+our %EXCLUDE_TREES = (
+  "cl/vendor" => "third-party source carried verbatim (cl/vendor/README.md); upstream files are never tagged",
+);
+
 # Named exclusions => reason.  Every one must EXIST (the gate checks) so an
 # exclusion cannot outlive the file it excuses.
 our %EXCLUDE = (
@@ -53,6 +63,15 @@ our %EXCLUDE = (
 # Whole trees never scanned (not ours): perl-tests/ (perl\'s own t/ files and
 # test.pl), cpan-tests/ (CPAN distributions), docs/ (prose; the one .t is an
 # EXTRA), memory/, .suitelog*/.
+
+# A path (relative to the checkout) inside one of the pruned trees.
+sub in_excluded_tree {
+  my ($rel) = @_;
+  for my $t (sort keys %EXCLUDE_TREES) {
+    return 1 if $rel eq $t || index($rel, "$t/") == 0;
+  }
+  return 0;
+}
 
 sub _has_shebang {
   my ($path) = @_;
@@ -80,6 +99,7 @@ sub code_files {
       return unless -f $_;
       my $rel = substr($_, length($root) + 1);
       return if $rel =~ /~$/;
+      return if in_excluded_tree($rel);
       my $is_code = $rel =~ /\.(?:pm|pl|t|lisp|sh)$/
                  || ($rel !~ m{[^/]*\.[^/]*$} && _has_shebang($_));
       return unless $is_code;

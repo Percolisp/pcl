@@ -35,6 +35,7 @@ use warnings;
 use Exporter 'import';
 use Cwd        qw(abs_path);
 use Digest::SHA qw(sha1_hex);
+use File::Basename qw(dirname);
 use Fcntl      qw(:flock);
 use File::Path qw(make_path);
 our @EXPORT_OK = qw(sbcl_prefix sbcl_prefix_str cached_core core_cache_dir clear_cached_cores);
@@ -142,19 +143,25 @@ sub sbcl_prefix_str {
 # *pcl-runtime-directory* at load time, so two checkouts — main and a
 # worktree — must never share one even when their runtimes are byte-identical),
 # and <content12> hashes the runtime SOURCE plus `sbcl --version` (a core only
-# starts on the SBCL that built it), ~/.sbclrc's size+mtime (it is what makes
-# Quicklisp's cl-ppcre visible inside the image) and a format version.  Edit
-# the runtime, upgrade SBCL, touch .sbclrc: the name changes and the next spawn
-# builds a new core; the previous ones for that path are pruned.  Nothing is
+# starts on the SBCL that built it), the CONTENT of the cl/vendor/ tree beside
+# it (the vendored cl-ppcre is compiled INTO the core, s481a), ~/.sbclrc's
+# size+mtime (which can still make a FALLBACK copy of cl-ppcre visible when the
+# vendored one is absent) and a format version.  Edit the runtime, replace the
+# vendored library, upgrade SBCL, touch .sbclrc: the name changes and the next
+# spawn builds a new core; the previous ones for that path are pruned.  Nothing is
 # compared by mtime, so no "stale core masks a runtime edit" case exists —
 # the failure tools/prove-core's per-run rebuild was designed against.
 #
-# What is IN the core: cl/pcl-runtime.lisp and what its load pulls in
-# (cl-ppcre).  The extensions (pcl-pack / pcl-mro / pcl-warnings / pcl-xs) are
-# loaded LAZILY at first use from *pcl-runtime-directory*, so they are read
-# fresh from the tree and never need to invalidate the core; cl/pcl-test.lisp
-# and cl/skip-registry.lisp are --load'ed by the callers after the prefix, as
-# before.  That is also why the key hashes ONE file.
+# What is IN the core: cl/pcl-runtime.lisp and what its load pulls in --
+# cl-ppcre, which since s481a is VENDORED beside the runtime
+# (cl/vendor/cl-ppcre/).  Vendored code is compiled INTO the core, so it is the
+# second thing that can go stale, and the key hashes it too (_vendor_stamp
+# below): swap the library and the next spawn builds a new core, exactly as
+# editing the runtime does.  The extensions (pcl-pack / pcl-mro / pcl-warnings
+# / pcl-xs) are loaded LAZILY at first use from *pcl-runtime-directory*, so
+# they are read fresh from the tree and never need to invalidate the core;
+# cl/pcl-test.lisp and cl/skip-registry.lisp are --load'ed by the callers after
+# the prefix, as before.
 #
 # Concurrency: eight gate files starting at once on a cold cache take an
 # flock on one lock per path; the first builds (~2 s), the rest wait and find
@@ -163,7 +170,7 @@ sub sbcl_prefix_str {
 # each pay a failing build — it expires after an hour, and `pcl --make-core`
 # (`cached_core(..., force => 1)`) ignores it.  Failure = source mode, once
 # announced.  PCL_SHOW_SBCL=1 shows which core a runner spawns, as always.
-our $CORE_KEY_VERSION = 1;    # bump when the key's ingredients change
+our $CORE_KEY_VERSION = 2;    # bump when the key's ingredients change
 
 # <cache>/core, where <cache> is PCLPaths::cache_root() — the ONE Perl-side
 # reading of $PCL_CACHE_DIR (task #1303).  PCLPaths sits in this directory, so
@@ -193,6 +200,7 @@ sub cached_core {
     my $content = do { local $/; open my $fh, '<:raw', $abs or return undef; <$fh> };
     my $pathkey = substr(sha1_hex($abs), 0, 8);
     my $ckey    = substr(sha1_hex(join "\0", $content, $ident, _sbclrc_stamp(),
+                                              _vendor_stamp($abs),
                                               $ENV{SBCL_HOME} // '', $CORE_KEY_VERSION), 0, 12);
     my $dir  = core_cache_dir();
     my $core = "$dir/pcl-$pathkey-$ckey.core";
@@ -208,6 +216,41 @@ sub _sbcl_identity {
     return undef if $? != 0 || !defined $v || $v !~ /\S/;
     $v =~ s/\s+\z//;
     return $SBCL_IDENTITY = $v;
+}
+
+# The VENDORED libraries beside a runtime, as one digest -- cl/vendor/ next to
+# the runtime's own directory (task #1597).  They are compiled into the core,
+# so a change to them must rename it; hashing their CONTENT rather than their
+# mtimes means a fresh checkout of the same bytes reuses the same core.  ~400 KB
+# of Lisp, read once per process -- well under the 1.5 MB runtime the caller has
+# just read.  'none' is a real answer: a tree with no vendor directory falls
+# back to whatever ASDF finds, which is a different image than one built with
+# the vendored copy, and must not share its core.
+sub _vendor_stamp {
+    my ($runtime) = @_;
+    my $dir = dirname($runtime) . "/vendor";
+    return 'none' unless -d $dir;
+    my @files;
+    my $walk;
+    $walk = sub {
+        my ($d) = @_;
+        opendir my $dh, $d or return;
+        for my $e (sort readdir $dh) {
+            next if $e eq '.' || $e eq '..';
+            my $p = "$d/$e";
+            if (-d $p) { $walk->($p) } else { push @files, $p }
+        }
+        closedir $dh;
+    };
+    $walk->($dir);
+    my $sha = Digest::SHA->new(1);
+    for my $p (@files) {
+        $sha->add(substr($p, length($dir)));       # the NAME matters, not just the bytes
+        open my $vfh, '<:raw', $p or next;
+        $sha->addfile($vfh);
+        close $vfh;
+    }
+    return $sha->hexdigest;
 }
 
 sub _sbclrc_stamp {
