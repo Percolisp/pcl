@@ -5,6 +5,17 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-10: **installing needs SBCL and nothing else.**  cl-ppcre, the
+  regex engine, is now vendored in the tree (`cl/vendor/cl-ppcre/`, upstream
+  source carried verbatim) and the runtime puts that directory on ASDF's
+  registry itself, so the Quicklisp step is gone from the quick start, from
+  CI and from the install matrix; ASDF's ordinary search stays as the
+  fallback.  A `Dockerfile` at the root and a release workflow publish
+  `ghcr.io/percolisp/pcl`, so `docker run --rm ghcr.io/percolisp/pcl -E 'say
+  6*7'` is the whole trial.  The README's install lines are now commands
+  that were run, verbatim, in a fresh `ubuntu:24.04` container.  Repository
+  metadata caught up too: the Artistic and GPL texts ship beside `LICENSE`,
+  and there is a `CONTRIBUTING.md`.
 - 2026-09-08: `pl2cl --executable` produces a binary that RUNS the program
   (#1060).  It used to run the program during the BUILD and save an image
   that exited 0 having done nothing — and a program containing `exit` killed
@@ -131,8 +142,39 @@ sessions); dates are development-time, not release-time.
 
 ## v0.1.0 — 2026-08-23 (first public version)
 
-Initial release of PCL (Percolisp): a from-scratch Perl 5 → Common Lisp
-compiler with a CL runtime that reproduces Perl's semantics.
+<!-- Everything from here to "Known limitations" is the GitHub Release text
+     for the v0.1.0 tag: paste it into the Release form as it stands. -->
+
+**Percolisp (PCL) is a Perl 5 compiler.**  It compiles your Perl to Common
+Lisp, which SBCL compiles to native code; a runtime library supplies what
+perl does behind the scenes — context, coercion, `local`, `tie`,
+`use overload`, string `eval`.  The compiler itself is written in Perl.
+
+The numbers below are the ones in [`docs/STATUS.md`](docs/STATUS.md), which
+carries the command that reproduces each and the date it was taken — nothing
+here is an estimate:
+
+* **Numeric loops and recursion run 3–5× faster than perl**; array and hash
+  element traffic mostly beats it too.  Slower where nothing can be proved
+  ahead of time: `use overload`, `m//g`, and `pack`/`unpack`.
+* **perl's own test suite**, extracted: 18,581 assertions pass, 649 fail
+  (96.6 %); 58 of 108 files pass completely.
+* **A board of 14 pure-Perl CPAN distributions**, 183 test files: 84 pass,
+  50 pass partially, 49 fail — and every failing assertion has a recorded
+  cause.
+* **The compiled output is meant to be read** — it keeps your variable names
+  and Perl's operator names, and every form in it is documented
+  ([`docs/ir-spec.md`](docs/ir-spec.md)).
+
+**This is an experiment until the critical infrastructure runs.**  XS
+modules do not load, so `DBI`, `JSON::XS`, `Moose` and `Storable` are out;
+`@_` is not aliased and `DESTROY` is never called.  The complete list, with
+what each would take, is [`docs/not-supported.md`](docs/not-supported.md).
+
+**Trying it** needs perl with PPI ≥ 1.291 and Moo, and SBCL ≥ 2.5.2; the
+README's "Quick start" has the exact commands.  (Installing this tag also
+needs cl-ppcre available to ASDF — from the next version on, PCL carries its
+own copy and SBCL is the only Lisp requirement.)
 
 ### Compiler
 - Full expression grammar: all precedence levels, ternary, ranges, string

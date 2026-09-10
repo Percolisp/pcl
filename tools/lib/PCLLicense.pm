@@ -62,7 +62,8 @@ our %EXCLUDE = (
 );
 # Whole trees never scanned (not ours): perl-tests/ (perl\'s own t/ files and
 # test.pl), cpan-tests/ (CPAN distributions), docs/ (prose; the one .t is an
-# EXTRA), memory/, .suitelog*/.
+# EXTRA), .suitelog*/.  (An empty untracked memory/ used to sit at the root
+# and was named here too; it was removed in s481a.)
 
 # A path (relative to the checkout) inside one of the pruned trees.
 sub in_excluded_tree {
