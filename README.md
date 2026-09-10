@@ -81,24 +81,41 @@ the failure counts.
 
 ## Quick start
 
-You need perl (5.20 or newer), two CPAN modules, and SBCL with one Lisp
-library.  [Requirements](#requirements) has the version rules; the short
-version is that both minimum versions are newer than most Linux
-distributions ship.
+You need perl (5.20 or newer) with two CPAN modules, and SBCL.  Both minimum
+versions are newer than most Linux distributions ship, so the lines below
+install them; [Requirements](#requirements) has the version rules and the
+one choice to make (which SBCL binary — it depends on your glibc).
+
+**These commands were run, exactly as they stand, in a fresh `ubuntu:24.04`
+container** (2026-09-10, on an image with nothing but `sudo` and an
+unprivileged user).  They assume `sudo`; on a root shell, drop it.
 
 ```bash
+sudo apt-get update
+sudo apt-get install -qy perl cpanminus make gcc curl ca-certificates bzip2 git
+sudo cpanm --notest PPI Moo
+
+curl -fsSL -o /tmp/sbcl.tar.bz2 \
+  https://downloads.sourceforge.net/project/sbcl/sbcl/2.6.0/sbcl-2.6.0-x86-64-linux-binary.tar.bz2
+tar -xjf /tmp/sbcl.tar.bz2 -C /tmp
+( cd /tmp/sbcl-2.6.0-x86-64-linux && sudo sh install.sh )
+
 git clone https://github.com/Percolisp/pcl.git
 cd pcl
-
-cpanm PPI Moo                                  # PPI must be 1.291 or newer
-sbcl --eval '(ql:quickload :cl-ppcre)' --quit  # SBCL 2.5.2 or newer, with Quicklisp
-
 ./pcl -E 'my @a = (1..5); say join ",", map { $_ * 2 } @a'
 ```
 
 ```console
 2,4,6,8,10
 ```
+
+On Ubuntu 22.04 or Debian 12, put `2.5.2` where those lines say `2.6.0`: the
+current SBCL binary needs a newer glibc than those releases have.  Nothing
+else changes, and both versions are tested.
+
+There is no Lisp-library step.  PCL carries its regex engine
+([cl-ppcre](https://edicl.github.io/cl-ppcre/)) in the tree, so SBCL is the
+whole Lisp side.
 
 The first run takes a few seconds longer than the rest: PCL compiles its
 runtime library once and caches the result under `~/.pcl-cache/`.
@@ -116,6 +133,26 @@ and never edits a startup file for you).  `tools/install-pcl --uninstall
 from an installation and stays — `pcl --clear-cache` is what empties that.
 `PCL_ROOT` overrides where an installed command looks for its runtime tree, if
 you ever repackage the layout.
+
+## Run it in a container
+
+If you would rather install nothing:
+
+```bash
+docker run --rm ghcr.io/percolisp/pcl -E 'say 6*7'          # podman is identical
+docker run --rm -v "$PWD":/work ghcr.io/percolisp/pcl script.pl
+```
+
+The image is built from the repository's [`Dockerfile`](Dockerfile) by CI
+when a release is tagged, using the same installer as everything above, so it
+is the same PCL.  Your working directory is mounted at `/work`, which is where
+the container starts, so a relative path to your script is what you would
+expect; `--entrypoint pl2cl` runs the compiler instead and prints the Lisp.
+
+**It is not published yet** — the workflow exists and has been run locally,
+but the first push to `ghcr.io` happens with the next release tag, so that
+`docker run` will not find an image until then.  Building it yourself works
+today: `docker build -t percolisp/pcl .` in a checkout.
 
 ## Using PCL
 
@@ -420,8 +457,11 @@ runs, so it needs both.
   PPI's token stream is tied to 1.291.
 * **SBCL 2.5.2 or later.** Debian 12, Ubuntu 22.04 and Ubuntu 24.04
   all ship with an older version, but a binary from
-  [sbcl.org](https://www.sbcl.org/platform-table.html) installs
-  without root.  Which one to install depends on your glibc: the
+  [sbcl.org](https://www.sbcl.org/platform-table.html) installs in a
+  minute — into `/usr/local` with `sudo sh install.sh` (what [Quick
+  start](#quick-start) does), or into your home with
+  `INSTALL_ROOT=$HOME/sbcl sh install.sh` and no root at all.  Which one
+  to install depends on your glibc: the
   current 2.6.0 binary needs glibc 2.38, which Ubuntu 24.04 and Debian
   13 have; Ubuntu 22.04 and Debian 12 do not, and need the 2.5.2
   binary.  Both combinations are installed and tested by the [install
@@ -431,12 +471,12 @@ runs, so it needs both.
   |---|---|
   | Ubuntu 22.04, Debian 12 | 2.5.2 |
   | Ubuntu 24.04, Debian 13 and newer | 2.6.0 (current) |
-* **cl-ppcre**, the regex engine, installed through
-  [Quicklisp](https://www.quicklisp.org/):
-  `sbcl --eval '(ql:quickload :cl-ppcre)' --quit`.
-
-Use `pcl` and the other wrappers rather than `sbcl --script`: that flag
-skips `~/.sbclrc`, so SBCL never sees the Quicklisp-installed cl-ppcre.
+* **No Lisp libraries to install.**  The one PCL needs,
+  [cl-ppcre](https://edicl.github.io/cl-ppcre/) (the regex engine), is
+  carried in the tree under `cl/vendor/cl-ppcre/` as upstream source, and
+  the runtime finds it there.  If you would rather use your own copy —
+  a distribution package, or Quicklisp — remove that directory and PCL
+  falls back to whatever ASDF can find.
 
 ## How it works
 
@@ -525,7 +565,9 @@ about a tenth of a second plus the time to compile your script.
 ## Contributing
 
 Issues and pull requests are welcome at
-<https://github.com/Percolisp/pcl>.  `tools/prove-core` runs the test suite
+<https://github.com/Percolisp/pcl>; [`CONTRIBUTING.md`](CONTRIBUTING.md) says
+what a useful bug report carries (the short answer: one small program, run by
+`perl` and by `pcl` side by side).  `tools/prove-core` runs the test suite
 and must stay green; CI runs the same suite on a clean Ubuntu machine.
 [`CLAUDE.md`](CLAUDE.md) records the working rules the project follows.  It
 is written as instructions for the AI sessions that do much of the
@@ -547,5 +589,12 @@ PCL will go on CPAN once it is closer to ready.
 
 ## License
 
-Free software, under the same terms as Perl itself: the Artistic License 1.0
-or the GNU GPL v1 or later.  See [`LICENSE`](LICENSE).
+Free software, under the same terms as Perl itself: at your option the
+Artistic License 1.0 or the GNU GPL v1 or later.  [`LICENSE`](LICENSE) is the
+statement; the two texts ship beside it, copied verbatim from a perl source
+distribution, as [`LICENSE-Artistic`](LICENSE-Artistic) and
+[`LICENSE-GPL`](LICENSE-GPL).
+
+`cl/vendor/` holds third-party source carried verbatim and is not covered by
+that: today it is cl-ppcre, under its own BSD 2-clause licence
+(`cl/vendor/cl-ppcre/LICENSE`).
