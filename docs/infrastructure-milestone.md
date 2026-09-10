@@ -92,7 +92,17 @@ failure; this table records where each module stops and fixes nothing.
 
 ### Group C — frameworks
 
-*(filled in below)*
+| dist | transpiles? | PCL's own t/ | perl beside it | blocker | est. |
+|---|---|---|---|---|---|
+| **Log::Log4perl** (1.58) | 51 pm, 0 died, 0 drops, 0 refusals | 13 PASS / 1 PARTIAL / 61 FAIL — 117 ok / 4 | 58 PASS, **17 PERL-SKIP** (Log::Dispatch, DBI, XML::DOM, RRDs … are absent) — 752 ok / 0 | **#1616** — a hash deref of a plain scalar raises a raw SBCL type error where perl (without `strict refs`) returns undef.  Sampled `002Logger.t`, `003Layout.t`, `004Config.t`: all three die at it with zero rows | M |
+| **Template Toolkit** (3.106) | 46 pm, **4 DIED** — three `PCL: cannot compile the s///e replacement` (Filters.pm, Plugin/String.pm, VMethods.pm) and one `cannot compile interpolated regex reference '${ … }'` (Parser.pm) | 2 PASS / 3 PARTIAL / 112 FAIL — 77 ok / 15 | 9 PASS / 59 PARTIAL / 31 FAIL — 414 ok / 26 | the four refusals above.  **Caveat: the perl side is degraded too** — the dist is unbuilt (no `Makefile.PL` run, so no `blib` and no `Template::Stash::XS`), so 108 of its 117 files are not clean under perl either; the comparison is honest but the denominator is small | L |
+| **DateTime** (1.67) | 9 pm, 0 died, 0 drops | 1 PASS / 0 / 50 FAIL — 1 ok / 1 | **1 PASS / 0 / 50 FAIL — 1 ok / 3** | **NOT MEASURABLE on this machine**: the dist's own dependencies (`namespace::autoclean`, `Specio`, `Params::ValidationCompiler`) are not installed, so real perl fails 50 of 51 files as well.  DateTime also has an XS half; the pure-Perl mode (`PERL_DATETIME_PP=1`) needs the same dependency tree | ? |
+| **Mojolicious** (9.49) | **112 pm, 0 died, 0 drops, 0 refusals** | its tests live in `t/*/` (107 files), which the scoreboard's `t/*.t` glob does not reach; not run, because `require Mojolicious` fails | — | four separate loads, measured per module: `Mojo::Util` and `Mojolicious::Controller` → **Digest::MD5** (XS); `Mojo::File` → **#1617** (core `File::Copy` is refused); `Mojo::IOLoop` → `getaddrinfo` is not exported by `lib/Socket.pm`; `Mojolicious::Routes` → an argument-less `XSLoader::load()` outside an eval.  `Mojo::Base` alone LOADS | L |
+| **Plack** (1.0054) | **70 pm, 0 died, 0 drops, 0 refusals** | tests in `t/*/` (137 files); not run | — | `Plack::Util` LOADS under PCL; `Plack::Request` needs `HTTP::Headers::Fast`, which is **not installed for perl either**, so the dist cannot be measured here without pulling its dependency tree | L |
+
+**The compiler is not the problem for the two big frameworks.**  Mojolicious's
+112 modules and Plack's 70 transpile with zero hard errors, zero dropped
+statements and zero ruled refusals; what stops them is XS and two shim gaps.
 
 ## 1a. What this batch fixed, and what it bought
 
