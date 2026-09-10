@@ -33,19 +33,19 @@
 # image rather than reusing a stale one.  Later runs cost the legs only.
 #
 # The image runs deps.sh with HOME pointed at a world-readable /opt/pcldeps
-# instead of root's home: the recipe installs SBCL and Quicklisp under $HOME,
-# and the non-root legs need both.  Same script, one variable different.
+# instead of root's home: the recipe installs SBCL under $HOME, and the
+# non-root legs need it.  Same script, one variable different.
 #
-# Its /etc/sbclrc loads Quicklisp only `(unless (find-package "QUICKLISP-CLIENT"))`,
-# and that guard is load-bearing, not tidiness.  A PCL core already CONTAINS
-# Quicklisp and cl-ppcre (it was loaded to build the core), so re-entering ASDF
-# at startup is pure waste — and worse than waste here, because a saved core
-# memoises `asdf:*user-cache*` as the BUILDER's ~/.cache and ASDF then tries to
-# compile into it whoever is running.  Leg (c) found that on its first run:
-# root's core, pcluser's process, "Can't create directory /root/.cache".  It is
-# a PCL bug, filed as task #1327 with a container-free reproducer; the guard is
-# what an /etc/sbclrc should say anyway, and it keeps this file measuring the
-# installation rather than that.
+# THERE IS NO /etc/sbclrc AND NO QUICKLISP (task #1597).  PCL vendors cl-ppcre
+# under cl/vendor/cl-ppcre/, so the image's whole Lisp side is SBCL itself.
+# What that file used to do was load Quicklisp — guarded, because a PCL core
+# already CONTAINS the regex library (it was compiled in to build the core), so
+# re-entering ASDF at startup is pure waste, and worse than waste here: a saved
+# core memoises `asdf:*user-cache*` as the BUILDER's ~/.cache and ASDF then
+# tries to compile into it whoever is running.  Leg (c) found that on its first
+# run: root's core, pcluser's process, "Can't create directory /root/.cache".
+# That is still a PCL bug (task #1327, container-free reproducer), and with the
+# init file gone the legs below are what shows nothing re-enters ASDF at all.
 #
 # The repo enters as a `git archive HEAD` extraction bind-mounted READ-ONLY at
 # /src — never the live checkout, so nothing a leg does can touch the working
@@ -106,7 +106,6 @@ RUN mkdir -p /opt/pcldeps \\
  && HOME=/opt/pcldeps /deps.sh \\
  && chmod -R a+rX /opt/pcldeps \\
  && ln -sf /opt/pcldeps/sbcl/bin/sbcl /usr/local/bin/sbcl \\
- && printf '%s\\n' '(unless (find-package "QUICKLISP-CLIENT") (load "/opt/pcldeps/quicklisp/setup.lisp"))' > /etc/sbclrc \\
  && useradd -m -s /bin/bash $CUSER
 ENV SBCL_HOME=/opt/pcldeps/sbcl/lib/sbcl
 DOCKERFILE
@@ -126,7 +125,7 @@ if ($? != 0) {
     open my $d, '>', "$ctx/deps.sh" or die $!; print $d $deps_text; close $d;
     chmod 0755, "$ctx/deps.sh";
     open my $c, '>', "$ctx/Containerfile" or die $!; print $c $CONTAINERFILE; close $c;
-    diag("building $tag from $BASE_IMAGE (first run: apt, cpanm PPI, SBCL $SBCL_VERSION, Quicklisp)");
+    diag("building $tag from $BASE_IMAGE (first run: apt, cpanm PPI, SBCL $SBCL_VERSION)");
     my $t0 = time;
     my $log = `$RT build -t $tag -f $ctx/Containerfile $ctx 2>&1`;
     my $rc = $?;

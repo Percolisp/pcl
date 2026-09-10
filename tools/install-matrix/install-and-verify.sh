@@ -13,7 +13,8 @@
 #   - tools/install-matrix/Dockerfile (the local harness)
 #
 # SINCE s470bz IT IS TWO HALVES (task #1304, rule 11): deps.sh (apt, PPI from
-# CPAN, the pinned SBCL, Quicklisp + cl-ppcre) and verify.sh (from
+# CPAN, the pinned SBCL — no Lisp-library step since PCL vendors cl-ppcre,
+# task #1597) and verify.sh (from
 # tools/install-pcl on).  This file is the two in sequence and nothing else,
 # so the workflow's step invocation is unchanged.  The split exists because
 # the LOCAL container test (tools/t/install-container.t) bakes the dependency

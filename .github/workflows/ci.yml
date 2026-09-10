@@ -64,14 +64,12 @@ jobs:
           echo "$HOME/sbcl/bin" >> "$GITHUB_PATH"
           echo "SBCL_HOME=$HOME/sbcl/lib/sbcl" >> "$GITHUB_ENV"
 
-      - name: Install Quicklisp + cl-ppcre
-        run: |
-          curl -fsSL -o /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
-          sbcl --non-interactive --load /tmp/quicklisp.lisp \
-               --eval '(quicklisp-quickstart:install)' \
-               --eval '(ql-util:without-prompting (ql:add-to-init-file))'
-          sbcl --non-interactive --eval '(ql:quickload :cl-ppcre)'
-          sbcl --version
+      - name: SBCL is the whole Lisp side (cl-ppcre is vendored)
+        # No Quicklisp step: PCL ships cl-ppcre under cl/vendor/cl-ppcre/ and
+        # the runtime puts that directory on ASDF's central registry itself
+        # (task #1597).  A stock machine needs SBCL and nothing else, and this
+        # step is what says so out loud in the log.
+        run: sbcl --version
 
       - name: Fresh-machine install (tools/install-pcl, builds the saved core)
         # The installer self-verifies (it refuses to finish unless the

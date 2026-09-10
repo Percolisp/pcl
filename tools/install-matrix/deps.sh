@@ -7,8 +7,11 @@
 # deps.sh — the DEPENDENCY half of the fresh-machine recipe (tasks #876, #1304).
 #
 # Everything a stock Ubuntu/Debian image needs before PCL can be installed:
-# apt packages, PPI from CPAN (apt's is under the 1.291 floor), the pinned
-# SBCL binary from sbcl.org, Quicklisp and cl-ppcre.  Nothing here knows about
+# apt packages, PPI from CPAN (apt's is under the 1.291 floor) and the pinned
+# SBCL binary from sbcl.org.  There is NO Lisp-library step: PCL vendors
+# cl-ppcre (cl/vendor/cl-ppcre/, task #1597), so SBCL itself is the whole Lisp
+# side and the Quicklisp install this file used to do is gone.
+# Nothing here knows about
 # PCL's own installer — that is verify.sh, and the two together are
 # install-and-verify.sh, which is what .github/workflows/install-matrix.yml
 # runs (unchanged).  The split exists so the LOCAL container test
@@ -16,10 +19,10 @@
 # re-run the verify half in seconds, instead of re-downloading SBCL per
 # attempt — one recipe, two consumers (rule 11).
 #
-# Run as root, from anywhere.  SBCL lands under $HOME/sbcl and Quicklisp under
-# $HOME/quicklisp, so the caller decides WHOSE they are: the CI matrix runs as
-# root and gets root's; the container image builds with HOME pointed at a
-# world-readable directory so every user in the image can use them.
+# Run as root, from anywhere.  SBCL lands under $HOME/sbcl, so the caller
+# decides WHOSE it is: the CI matrix runs as root and gets root's; the
+# container image builds with HOME pointed at a world-readable directory so
+# every user in the image can use it.
 #
 # Rationale for each choice lives in .github/workflows/ci.yml's header comment:
 # PPI comes from CPAN because apt's 1.277 is under the 1.291 floor; SBCL is
@@ -69,12 +72,5 @@ tar -xjf /tmp/sbcl.tar.bz2 -C /tmp
 export PATH="$HOME/sbcl/bin:$PATH"
 export SBCL_HOME="$HOME/sbcl/lib/sbcl"
 sbcl --version
-
-echo "== Quicklisp + cl-ppcre =="
-curl -fsSL -o /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
-sbcl --non-interactive --load /tmp/quicklisp.lisp \
-     --eval '(quicklisp-quickstart:install)' \
-     --eval '(ql-util:without-prompting (ql:add-to-init-file))'
-sbcl --non-interactive --eval '(ql:quickload :cl-ppcre)'
 
 echo "== deps: PASS =="
