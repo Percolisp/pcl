@@ -1,0 +1,89 @@
+# Publish the container image (task #1599).
+#
+# `docker run --rm ghcr.io/percolisp/pcl -E 'say 6*7'` is the cheapest way for
+# a stranger to find out whether PCL is interesting.  This workflow is what
+# puts an image behind that line.
+#
+# TRIGGERS.  A `v*` tag push (the release), and workflow_dispatch (so the USER
+# can publish without tagging — the first run will be a dispatch, because the
+# image has never been pushed).  NOT per-push: an image per commit is minutes
+# of runner time and a registry full of noise.
+#
+# CREDENTIALS: none to configure.  GITHUB_TOKEN with `packages: write` is
+# issued to the job by GitHub itself and is what logs in to ghcr.io.  The one
+# manual step is on the repository's Packages page, ONCE, after the first
+# successful run: make the package public, or `docker pull` asks strangers for
+# a login.  (That step is on the USER checklist this batch produced.)
+#
+# The build itself is the root Dockerfile — the same file `podman build .`
+# uses locally, whose recipe halves are tools/install-matrix/deps.sh and
+# tools/install-pcl, so nothing here can drift from what CI proves installable.
+# The image is SMOKE-TESTED before it is pushed: an image that cannot run
+# `say 6*7` must never reach the registry under a release tag.
+
+name: container
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  IMAGE: ghcr.io/percolisp/pcl
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # The version the image reports.  The build context has no .git
+      # (.dockerignore), so the Dockerfile takes this ARG rather than guessing;
+      # on a tag it is the tag, on a dispatch it is the branch plus the short
+      # SHA, which is what a dispatch actually is.
+      - name: Decide the version and the tags
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+            tags="${IMAGE}:${GITHUB_REF_NAME} ${IMAGE}:latest"
+          else
+            version="${GITHUB_REF_NAME}-$(git rev-parse --short HEAD)"
+            tags="${IMAGE}:${version} ${IMAGE}:edge"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags"       >> "$GITHUB_OUTPUT"
+          echo "building $version as: $tags"
+
+      - name: Build
+        run: |
+          args=""
+          for t in ${{ steps.v.outputs.tags }}; do args="$args -t $t"; done
+          docker build $args --build-arg PCL_VERSION="${{ steps.v.outputs.version }}" .
+
+      # Smoke test before the push, not after: a broken image that is already
+      # in the registry is a broken image people pull.
+      - name: The image runs a program
+        run: |
+          first=$(echo "${{ steps.v.outputs.tags }}" | awk '{print $1}')
+          docker run --rm "$first" --version
+          test "$(docker run --rm "$first" -E 'say 6*7')" = "42"
+          printf 'my @w = map { uc } qw(pcl works); print "@w\\n";\n' > "$PWD/hello.pl"
+          test "$(docker run --rm -v "$PWD":/work "$first" hello.pl)" = "PCL WORKS"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        run: |
+          for t in ${{ steps.v.outputs.tags }}; do docker push "$t"; done
+          echo "::notice::pushed ${{ steps.v.outputs.tags }} -- if this is the first run, make the package PUBLIC on the repository's Packages page"

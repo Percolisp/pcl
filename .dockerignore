@@ -1,0 +1,28 @@
+# What must NOT enter the image build context (docker/podman read this).
+#
+# The context is the checkout, and the checkout accumulates things that are
+# large, machine-local, or both: a 50 MB saved core, a failure log, agent
+# worktrees with their own .git.  None of them belongs in an image, and each
+# of them would also change the context hash on every run and defeat layer
+# caching.  Keep this list in step with .gitignore.
+
+.git
+.gitignore
+.claude
+.claude/worktrees
+.faillog
+.suitelog
+.suitelog-*
+scratch
+pcl.core
+*.core
+*~
+
+# Development-only corpora and material: minutes of copying, and the image
+# runs programs rather than PCL's own test suites.
+perl-tests
+cpan-tests
+docs
+baselines
+ir-conform
+Pl/t
