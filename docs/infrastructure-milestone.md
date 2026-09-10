@@ -1,8 +1,3 @@
-# Copyright (c) 2025-2026 the PCL authors
-# This is free software; you can redistribute it and/or modify it under the
-# same terms as the Perl 5 programming language system itself.
-# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
-
 # The critical-infrastructure milestone — measured
 
 *Task #1607, measured in session s481b (2026-09-10) on main `f330e885`
