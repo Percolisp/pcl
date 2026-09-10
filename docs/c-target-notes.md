@@ -7,6 +7,10 @@ same tables with a different right-hand column, and every row that could not be
 filled in for C was a place the IR was still describing SBCL rather than perl.
 Written s470bt (Part B item B7 of `docs/plan-speed-and-ir-s470.md`); everything
 asserted about perl's semantics comes from `docs/ir-spec.md` or a probe.
+**§8 (s481, 2026-09-10) answers the USER question "C or C++ as a target, then
+perl's own regex library etc for compatibility — hard or simple?": the target is
+HARD (§8.4 adds the cost §1–§6 had not priced, string eval), the borrowing is
+SIMPLE to do and the WRONG dependency (§8.2), probed and measured on this box.
 
 **The acceptance bar is the same for every backend**: `tools/ir-conform
 --backend ./my-backend` — 345 small programs with perl 5.40.3's stdout and exit
@@ -236,3 +240,175 @@ Slice the corpus by `pl2cl --manifest`'s `NEEDS` to get the subset a partial
 backend owes: that is what the manifest is for.  PCL's own CL target scores
 287 of 345 with 58 known bugs (`ir-conform/known-fail.tsv`, each with its task)
 — the honest ceiling to measure against, not 345.
+
+## 8. The libperl question (s481, 2026-09-10): borrowing perl's own libraries
+
+USER asked: use C (or C++) as the target, then link perl's own regex library
+"etc" for compatibility — would it be hard or simple?  Two questions, two
+answers, both measured here rather than argued.
+
+**A C backend is the hardest of the three targets** — everything §6 lists as
+"not for free" plus the one obligation this note had not priced: string eval
+has no host answer in C (§8.4).  **Calling perl's own libraries from C is
+simple** — 60 lines, §8.1 — **and it is the wrong dependency**: it binds the
+product to one perl BUILD's ABI and semantics, and every library past the
+regex engine takes SVs, which are exactly what PCL's speed comes from not
+having (§8.2).  The recommendation is §8.5.
+
+### 8.1 The probe: what "simple" means
+
+A C program that constructs an interpreter, compiles a pattern with perl's
+own `pregcomp`, matches with `regexec_flags`, reads the captures out of the
+`regexp` struct, then numifies with `grok_number_flags`/`my_atof` and
+stringifies an NV the way perl does — against the DISTRO perl (5.40.1,
+threaded, shared), compiled with the flags `ExtUtils::Embed` prints:
+
+```c
+#define PERL_NO_GET_CONTEXT
+#include <EXTERN.h>
+#include <perl.h>
+static PerlInterpreter *my_perl;
+/* PERL_SYS_INIT3; my_perl = perl_alloc(); perl_construct(my_perl);
+   perl_parse(my_perl, NULL, 3, {"", "-e", "0"}, NULL); */
+REGEXP *rx = pregcomp(newSVpvs("(\\w+)@(\\w+)\\.com"), 0);
+SV *sv = newSVpvn(subj, len);                       /* pos()/$& magic wants an SV */
+I32 r = regexec_flags(rx, subj, subj + len, subj, 0, sv, NULL, 0);
+regexp *rxp = ReANY(rx);                            /* rxp->offs[i].start/.end, RX_NPARENS(rx) */
+int f = grok_number_flags("  12.5e3xyz", 11, &uv, PERL_SCAN_TRAILING);   /* 0x44, trailing */
+NV v = my_atof("  12.5e3xyz");                      /* 12500 */
+SvPV_nolen(newSVnv(0.1 + 0.2));                     /* "0.3" — perl's %.15g rule, not printf's */
+```
+
+```
+gcc -O2 embed-re.c $(/usr/bin/perl -MExtUtils::Embed -e ccopts) \
+    $(/usr/bin/perl -MExtUtils::Embed -e ldopts | sed 's|-lperl|/usr/lib/x86_64-linux-gnu/libperl.so.5.40|')
+```
+
+Everything answered the way perl does (captures `alice@example.com` /
+`alice` / `example`; the numifier reports the trailing garbage; `0.1+0.2`
+prints `0.3`).  The link line needed the versioned soname because
+`libperl-dev` — the unversioned `libperl.so` — is not installed here; the
+headers are (the `perl` package ships `CORE/` for XS builds).
+
+| same loop, 3 000 000 matches of `(\w+)@(\w+)\.com` over a 40-byte subject | time | per match |
+|---|---|---|
+| C calling perl's engine through libperl (this probe) | 0.422 s | **141 ns** |
+| perl 5.40.1 (distro) `for (1..$n) { $c++ if $s =~ /…/ }` | 0.54 s | 180 ns incl. the loop |
+| perl 5.40.3 (perlbrew, the dev perl) | 0.51 s | 170 ns |
+| PCL (cl-ppcre), differenced between n = 3 M and 6 M so transpile + startup drop out | 2.78 s per 3 M | **927 ns** = 5.2× perl on this shape |
+
+An embedded interpreter costs nothing visible at start (0.00 s wall for the
+n = 1 run) and 5.7 MB RSS; the binary is 16.8 kB.  So: the engine is
+reachable, its answer is perl's by construction, and the boundary is cheaper
+than perl's own op loop.  That is the whole of the "simple" half.
+
+### 8.2 Why it is the wrong dependency — four facts from this box
+
+1. **The ABI is per perl BUILD, not per perl version.**  This machine has two
+   perl 5.40s.  The distro one is threaded and shared: every API call carries
+   the interpreter pointer (`aTHX_`), and `libperl.so.5.40` exists.  The
+   perlbrew one that PCL develops against is non-threaded and **static**
+   (`useshrplib='false'`, `libperl.a` only): there is nothing to link a
+   runtime against at all, and a struct layout compiled for one does not
+   match the other.  XS modules are rebuilt per perl for exactly this
+   reason; a PCL runtime linked to libperl inherits the rebuild-per-perl
+   rule for the RUNTIME ITSELF.  This is strictly worse than the PCRE2
+   version spread (10.39 → 10.46) that parked #71 (DECIDED §s476), and the
+   s474 portability rule (install matrix + a macOS leg green, and macOS's
+   perl is another build again) applies to it in full.
+2. **Semantics follow the INSTALLED perl.**  The engine's answers are those
+   of whatever perl the machine has — 5.38 and 5.40 disagree on `re_tests`
+   rows — which is "behaviour that varies by OS", the s473q objection to a
+   PCRE2 floor, now for every regex in every program.
+3. **The SV data model is the price of the "etc".**  The regex engine is the
+   ONE library whose subject is a plain buffer (and even it wants an SV for
+   the pattern and one for `pos()`/`$&` magic, inside a constructed
+   interpreter).  Everything else the ask reaches for takes `SV*`: sprintf
+   (`sv_vcatpvfn_flags`), pack/unpack (`packlist`/`unpackstring`), `sort`'s
+   comparators (`sv_cmp`), `do_sprintf`, the numeric-string cache.  Building
+   on them means PCL's values BECOME SVs — and that is B::CC, the perl 5
+   perl-to-C compiler that emitted C against the perl runtime: 1–2× at best,
+   dead since the 5.2x series.  The README rows where PCL is 3–5× FASTER
+   than perl (`collatz` 0.18×, `cfor` 0.24×, `arith` 0.25×, `feread` 0.29×)
+   are precisely the rows with no SV anywhere: raw locals, raw arrays, the
+   §2 facts.  Adopting SVs for the libraries forfeits the speed target to
+   buy fidelity that perl-as-oracle already gives for free.
+4. **`(?{ … })` stays refused either way.**  An embedded perl would compile a
+   code block, but against ITS pad, not PCL's lexicals — the same refusal
+   boundary PCRE2 callouts have (s473q), with less control over it.
+
+### 8.3 The same engine from the CL target — and why that is not #71's answer
+
+The shape exists and is proven: the PCRE2 spike's `%pcl-build-scanner` seam
+(one function returning a closure with cl-ppcre's `(scanner function)`
+protocol, `sb-alien`, no CFFI).  Perl's engine could sit behind the same
+seam — and would pay what PCRE2-32 did not: perl's engine wants **UTF-8
+bytes** with the SV's UTF8 flag, an SBCL string is 32-bit code points, so a
+non-ASCII subject is encoded per match and every capture offset comes back
+as a BYTE offset to map to a character index — the "budgeted hard part" that
+the `libpcre2-32` design (DECIDED §s474) deleted, back again.  Plus a live
+interpreter inside the SBCL image (`PERL_SYS_INIT3` wants argv/env, perl's
+signal and locale initialisation beside SBCL's, 5.7 MB), fact 1's ABI
+problem (the dev perl on this very box could not host it), the one-engine
+rule, and a sweep whose verdicts would depend on which perl is installed.
+Parity would be 100 % of the installed perl by construction; portability is
+below PCRE2's, which was the parking reason.  Verdict: a possible future with
+#71's three re-open triggers (`docs/faster-codegen-suggestions.md` §8) and a
+fourth that does not exist today — a shared, build-stable libperl on every
+supported OS.
+
+### 8.4 The string-eval crux: the cost §1–§6 had not priced
+
+`eval $string` compiles Perl at run time, and it is a HARD REQUIREMENT
+(USER 2026-07-07; ir-spec §9.1 is the protocol).  The CL target answers it
+with SBCL's in-image `compile`; the JavaScript target with `new Function`
+behind a subprocess compiler (js-target-plan II.8 item 4).  **C has no host
+compiler**, so a C backend must choose one of:
+
+| answer | what it costs |
+|---|---|
+| (i) run `cc` at run time and `dlopen` the result | a C toolchain on every machine that RUNS a PCL program — perl users do not have one; two-step failure modes at run time |
+| (ii) embed `libtcc` | a foreign library = the s474 platform rule (matrix + macOS); tcc's code is several times slower than gcc's, so eval'd code runs in a different speed class; two code generators to keep in agreement |
+| (iii) an IR interpreter inside the C runtime | the only portable answer, and a SECOND execution engine — two semantics for one program, the s474 one-engine argument generalised; a project the size of the backend's own op inventory |
+
+None is free; (iii) is the one that ships, and it is what makes C the
+largest of the three targets rather than merely the least hosted.
+
+How much code needs it — the manifest census, this session, `pl2cl
+--manifest --module` over the 112 shipped `lib/` shims and CPAN board
+modules: **10 files carry a string eval (9 %)** — and they are
+`Test::More`, `Test::Builder`, `Test2::API`, `Test2::API::Instance`,
+`Text::CSV`, `Text::CSV_PP` and YAML::Tiny's test libraries.  A C target
+without string eval runs no CPAN test suite at all.  (Same census, the other
+obligations: `BEGIN` 51 files, `local` 21, `goto` 8, `tie` 6, `overload` 3,
+formats 1; regex tiers native 289 / dynamic 36 / pcre 0 / refused 0.)
+
+### 8.5 Sizing and verdict
+
+* **What a C backend re-owes.**  The host-supplied parts of the 28 303-line
+  runtime — GC, closures, dynamic binding, the unwind path, bignum and float
+  printing, CLOS dispatch, code-point strings, the 534 `sb-*` references
+  that are libc/POSIX in disguise — plus §8.4's engine, plus the 698-op
+  vocabulary (§4), on the same M0–M3 ladder as the JavaScript target
+  (js-target-plan II.6) with C's §6 extras.  Larger than the JS target,
+  which is itself deferred until the IR is quiet (USER s448/s460f).  Not
+  sized in sessions: nothing on the queue depends on it.
+* **The slow rows are not the target language.**  SBCL emits native code and
+  the loop rows already beat perl 3–5×.  Where PCL is slower it is the
+  regex engine (`regexg` 2.07×; 5.2× on §8.1's capture shape) and OO
+  dispatch/overload/Moo (`methret` 1.06× … `moo-objs` 32.3×) — runtime
+  DESIGN, which a C rewrite would carry over unchanged.  The engine has its
+  own parked lever (#71); the OO rows have theirs (#582's inherited half,
+  #1546, parked by the USER 2026-09-09).
+* **C vs C++.**  If it were built: C++ — RAII for the refcounts §1
+  recommends, table-driven zero-cost exceptions for §3's unwind path instead
+  of `setjmp`, lambdas for the closure conversion.  It changes nothing in
+  §8.2 or §8.4; pclxs's ABI is C either way.
+* **Recommendation.**  No C target now, and no libperl dependency in the
+  runtime at any point: the portability rule forbids it and the SV model
+  forfeits Target A.  "Use perl itself for compatibility" already lives where
+  it costs nothing — perl is the ORACLE of every measurement (the sweep,
+  `ir-conform`, `re_tests`, the board), and that is the right seat for it.
+  Re-open a C backend on the JS target's trigger (a quiet IR, or an explicit
+  ask); re-open an engine swap on #71's triggers, with PCRE2 ahead of libperl
+  on every axis but parity.
