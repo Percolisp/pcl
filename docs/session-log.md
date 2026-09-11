@@ -2,6 +2,22 @@
 
 Append new entries at the top. One section per session.
 
+## Session 482 (Fable, 2026-09-11) — the owed s481b merge, and nothing else
+
+**Main = `bc788dc2` (code tip `3cf64a0c`, gen v2-1280), pushed.**  The USER's
+instruction was to finish what was in flight and start nothing new; the one
+item the s481 restart recipe left was s481b's merge.  Its reviewed tip
+`dad5072c` sat on `24575a4c`; main had moved by one docs commit (`72fa166b`),
+so the branch was rebased (clean, no conflicts) and fast-forwarded.  The code
+half is byte-identical to what Fable reviewed (`git diff dad5072c bc788dc2`
+outside `docs/` is empty), so the s481 gate on `dad5072c` stands; on the
+merged tree the batch's guards `while-empty-01.t` + `file-spec-01.t` and the
+`artifact-staleness-01.t` + `license-tag-01.t` gates ran 34/34, building the
+v2-1280 core.  Worktree and branch removed; the scratch archive
+(`s473/s481b-agent-a474222d9f676fd09/`, 165 files) was byte-compared first.
+CI on `bc788dc2` was in progress at the push (public API).  s473t4's worktree
+stays STOPPED at `0411de22`; no agents launched.
+
 ## Session s481b (Opus agent, 2026-09-10) — #1607 measured: the critical-infrastructure milestone is 1 of 21; `while ()` and `File::Spec->canonpath` fixed; nine bugs filed
 
 **The deliverable is `docs/infrastructure-milestone.md`.**  Twenty-six modules
