@@ -468,6 +468,38 @@ sub _amp_cast_operand_id {
 }
 
 
+# `\` applied to a `&`-MENTION is the SUB SLOT, never a call — and perl applies
+# that per ELEMENT, so the rule has to be one reading (task #1681).  All three
+# spellings of the mention (`&NAME` as one Symbol, `&$cr` and `&{EXPR}` as a
+# `&`-Cast prefix_op) answer here; a mention WITH argument parens is a
+# different node and correctly falls through to the call lowering, which is
+# perl's own discriminator: `\(&foo)` is a CODE ref and `\(&foo())` is a
+# SCALAR ref to the call's result (probed 5.40.3).  Callers: the bare `\&foo`
+# operand, the one-element `\(&foo)`, and every element of `\(&foo, &bar)` —
+# before this was shared, only the bare spelling had it, so `\(&foo)` CALLED
+# foo with the caller's @_ and took a ref to the result.
+sub _backslash_amp_ref_form {
+  my ($self, $operand_id) = @_;
+  my $operand_node = $self->expr_o->get_a_node($operand_id);
+  if (ref($operand_node) eq 'PPI::Token::Symbol'
+      && $operand_node->content() =~ /^&(.+)$/) {
+    my $cl_func = $self->cl_name($1, 1, 1);
+    return ['p-backslash-sub', "'$cl_func"];
+  }
+  my $amp_id = $self->_amp_cast_operand_id($operand_id);
+  return undef unless defined $amp_id;
+  my $saved = $self->lvalue_context;
+  $self->lvalue_context(1);
+  my $inner = $self->gen_node_form($amp_id);
+  $self->lvalue_context($saved);
+  # p-backslash-sub-ref, not (p-backslash (p-get-coderef …)): a NAME with no
+  # body is late-bound exactly as `\&NAME` is (task #517).  p-get-coderef
+  # answers NIL there, and the \-wrap made that a SCALAR ref whose call
+  # reached AUTOLOAD with an empty name.
+  return ['p-backslash-sub-ref', $inner];
+}
+
+
 # The SUB a `&`-MENTION names — `&NAME` / `&Pkg::NAME` as one Symbol token
 # (#387, s414: `exists`, `defined` and `undef` each spelled this).  Returns
 # the split package and name, or () when ARG is not that shape.  Its sibling
@@ -2665,10 +2697,19 @@ sub gen_funcall_form {
       $arg = ['p-scalar', $arg] unless $already_scalar;
     }
 
-    # Reference prototype slot (\@, \%, \$): auto-box a matching bare var.
+    # Reference prototype slot (\@, \%, \$, \&): auto-box a matching bare var.
+    # `\&` is the fourth member and was missing (task #1681): `f(&NAME)` under
+    # a `(\&)` prototype is the SUB SLOT in perl, so it takes the same reading
+    # as `\&NAME` — one helper, never a second `p-backslash` spelling, because
+    # a `\`-wrap around the `&`-prefix CALL is what made t/comp/proto.t's
+    # `a_subx &tmp_sub_2` run the sub and then die on `&{$_[0]}`.
     if ($param_idx < @ref_params) {
       my $param_type = $ref_params[$param_idx];
-      if ($param_type =~ /^\\([@%\$])$/) {
+      if (($param_type // '') eq '\\&') {
+        my $amp_ref = $self->_backslash_amp_ref_form($kids->[$i]);
+        $arg = $amp_ref if defined $amp_ref;
+      }
+      elsif ($param_type =~ /^\\([@%\$])$/) {
         my $expected_sigil = $1;
         my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
         if (ref($arg_node) eq 'PPI::Token::Symbol') {
@@ -3230,25 +3271,8 @@ sub gen_prefix_op_form {
   if ($op eq '\\') {
     my $operand_id   = $kids->[1];
     my $operand_node = $self->expr_o->get_a_node($operand_id);
-    # \&NAME — the sub slot, never a builtin; force the user sub.
-    if (ref($operand_node) eq 'PPI::Token::Symbol'
-        && $operand_node->content() =~ /^&(.+)$/) {
-      my $cl_func = $self->cl_name($1, 1, 1);
-      return ['p-backslash-sub', "'$cl_func"];
-    }
-    # \&{expr} / \&$var — the coderef itself, not a call (mirrors the text
-    # emitter's intercept above the `&`-prefix call lowering).
-    if (defined(my $amp_id = $self->_amp_cast_operand_id($operand_id))) {
-      my $saved = $self->lvalue_context;
-      $self->lvalue_context(1);
-      my $inner = $self->gen_node_form($amp_id);
-      $self->lvalue_context($saved);
-      # p-backslash-sub-ref, not (p-backslash (p-get-coderef …)): a NAME with
-      # no body is late-bound exactly as `\&NAME` is (task #517).  p-get-coderef
-      # answers NIL there, and the \-wrap made that a SCALAR ref whose call
-      # reached AUTOLOAD with an empty name.
-      return ['p-backslash-sub-ref', $inner];
-    }
+    my $amp_ref = $self->_backslash_amp_ref_form($operand_id);
+    return $amp_ref if defined $amp_ref;
     # \(LIST) — the distribute-over-elements family.  Mirrors the text
     # emitter branch for branch: single-scalar tree_val → (p-backslash …),
     # multi-term comma list (with or without ranges) →
@@ -3267,7 +3291,10 @@ sub gen_prefix_op_form {
         my $tv_kids = $self->expr_o->get_node_children($operand_id);
         if (@$tv_kids == 1
             && !$self->_is_list_node_for_refgen($tv_kids->[0], 'spread')) {
-          # Single scalar child: \(scalar_expr) == \scalar_expr
+          # Single scalar child: \(scalar_expr) == \scalar_expr — INCLUDING
+          # the `&`-mention, which is why the intercept is a shared helper.
+          my $one_amp = $self->_backslash_amp_ref_form($tv_kids->[0]);
+          return $one_amp if defined $one_amp;
           my $saved_ctx = $self->expr_o->get_node_context($operand_id);
           $self->expr_o->set_node_context($operand_id, 0);
           my $scalar_form = $self->gen_node_form($operand_id);
@@ -4513,7 +4540,12 @@ sub _gen_backslash_multi_term_form {
       $self->expr_o->set_node_context($kid_id, $saved);
       push @parts, ['spread', ['p-refgen-list', $kid_form]];
     } else {
-      push @parts, ['single', ['p-backslash', $self->gen_node_form($kid_id)]];
+      # An `&`-mention element is a CODE ref, not a call: `\(&foo, $x)` is
+      # (CODE, SCALAR) in perl and calls nothing.  Same helper as the bare
+      # `\&foo` and the one-element `\(&foo)`.
+      my $amp_ref = $self->_backslash_amp_ref_form($kid_id);
+      push @parts, ['single', $amp_ref // ['p-backslash',
+                                           $self->gen_node_form($kid_id)]];
     }
   }
 
