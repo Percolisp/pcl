@@ -140,14 +140,14 @@ t/class/method.t	8	XDIFF: not-supported.md §Perl 5.38 class/field/method — de
 t/class/phasers.t	3	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
 t/class/utf8.t	4	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
 t/cmd/subval.t	1	UNEXPLAINED
-t/comp/decl.t	3	UNEXPLAINED
-t/comp/final_line_num.t	1	UNEXPLAINED
-t/comp/form_scope.t	12	UNEXPLAINED
+t/comp/decl.t	3	NS:format / write report formatting -- three `write` rows
+t/comp/final_line_num.t	1	NS:Error compatibility for invalid Perl input -- the file is invalid perl by design and PCL drops the statement, so its single row never runs
+t/comp/form_scope.t	12	NS:format / write report formatting -- the file produces 2 of perl's 14 rows; the 12 are formats and closures over a format's variables
 t/comp/hints.t	2	XDIFF: not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile...
 t/comp/our.t	7	#1583 -- `our $y = $y;` inside a block where a `my $y` is in scope refuses; perl reads the my on the RHS
-t/comp/parser.t	93	UNEXPLAINED
-t/comp/proto.t	155	UNEXPLAINED
-t/comp/require.t	3	UNEXPLAINED
+t/comp/parser.t	93	#1694 -- FIVE #138 drops in the file's `#line`-tracking section (a `=pod` inside "${...}", a quoted sub NAME, three bare `<<HEREDOC;` statements) take the interpolated `check_line` calls with them and the recovery load abandons the rest of the form
+t/comp/proto.t	100	#1682 -- was 155; s473t5c's #1681 (`\(&NAME)` is the sub slot) removed the `&main::1` abort and the file went 47/14 -> 78/38, 61 -> 116 of 216 rows.  The residue is a SECOND abort at `sub star (*&)`: `star FOO` with nothing declaring FOO is CALLED where perl reads the bareword
+t/comp/require.t	3	NS:Error message text and format -- perl plans 1750 rows and PCL 1747. Two of the three are `RT #24404` and `[perl #24482] require CORE::foo`, where `require $scalar` / `require CORE::lc "..."` must die "Can't locate threads in @INC"; PCL's message differs, the file takes its `else` branch, and THAT branch prints a TAP line with no test number (the test file's own bug), so the row is never produced
 t/io/closepid.t	3	UNEXPLAINED
 t/io/crlf.t	3	UNEXPLAINED
 t/io/data.t	4	UNEXPLAINED

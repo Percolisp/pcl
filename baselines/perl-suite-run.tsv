@@ -1409,7 +1409,7 @@ comp/filter_exception.t	4	0	2	2	DIFF		0
 comp/final_line_num.t	1	0	0	0	DIFF		1
 comp/fold.t	35	0	25	10	DIFF	aborted-forms:2: The function main::pl-INSTALL is undefined.	0
 comp/form_scope.t	14	0	0	2	DIFF		0
-comp/hints.t	31	0	16	13	DIFF	NOT fully registered: 3 unregistered diverging row(s): #15; tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
+comp/hints.t	31	0	16	13	XDIFF	s473t5c: the XDIFF row set was STALE IN BOTH DIRECTIONS (3 rows diverged unregistered, 2 registered rows no longer diverged) and is now the measured 15; all five were READ and every one is %^H scoping.  Counts UNCHANGED -- a REGISTRATION, not a behaviour move | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
 comp/line_debug.t	25	0	1	24	DIFF		0
 comp/multiline.t	6	0	6	0	OK		0
 comp/opsubs.t	36	0	32	4	DIFF		0
@@ -1418,7 +1418,7 @@ comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to d
 comp/package_block.t	7	0	0	7	DIFF		0
 comp/parser.t	191	0	51	47	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: PCL: statement not supported at parser.t line N: "${; =pod =cut }"; -- Bug. Fell through.	5
 comp/parser_run.t	70	0	33	37	DIFF	unbound:$00	0
-comp/proto.t	216	0	47	14	DIFF	aborted-forms:1: Undefined subroutine &main::N called at (eval N) line N. 	0
+comp/proto.t	216	0	78	38	DIFF	s473t5c: #1681 (`\(&NAME)` is the sub slot) removed the `Undefined subroutine &main::1` abort -- 47/14 -> 78/38, shortfall 155 -> 100, measured --jobs 1 with the #366 serial re-run agreeing.  The residue is #1682 | aborted-forms:1: Undefined subroutine &main::FOO called	0
 comp/redef.t	20	0	1	19	DIFF		0
 comp/require.t	1750	0	910	837	DIFF	s469bf: PRE-EXISTING and multi-step, NOT a round-23 mover -- 910/837 in five readings (s465az, s466, s468 parallel+serial, s469bf parallel+serial); the 909/835 it replaces was last confirmed at s396 and this QUICK-CAPPED file is reached only by a full --all.  s440's tree reads 906/836 and round 19's TIMEOUTs at 868/795 inside the 450 s allowance, so the drift is multi-step and partly a speed effect; the moved rows are past the 500-row log cap (#1051) and cannot be named without raising it.	0
 comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0

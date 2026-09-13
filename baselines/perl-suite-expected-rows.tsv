@@ -50,20 +50,21 @@ class/utf8.t	*summary*
 cmd/for.t	[perl #78194] Lone C-style for in a block
 cmd/for.t	double destroy, x=1
 cmd/for.t	freed value in iteration
+comp/hints.t	#15
 comp/hints.t	#16
 comp/hints.t	$^H contains HINT_LOCALIZE_HH at eval""-time
 comp/hints.t	$^H contains HINT_LOCALIZE_HH while compiling
 comp/hints.t	$^H correct after require
 comp/hints.t	$^H correct before require
 comp/hints.t	$^H{foo} cleared for require
-comp/hints.t	$^H{foo} correct after /unicode/i (res=foo-foo-)
-comp/hints.t	$^H{foo} doesn't exist at runtime
 comp/hints.t	$^H{foo} doesn't exist when compilation complete
 comp/hints.t	$^H{foo} doesn't exist while finishing compilation
 comp/hints.t	$^H{foo} is 'a' at eval-"" time
 comp/hints.t	$^H{foo} restored to 'a'
 comp/hints.t	%^H does not leak when autovivified in destructor
 comp/hints.t	setting ${^WARNING_BITS} to its own value has no effect
+comp/hints.t	tied empty hint hash is copied to inner scope
+comp/hints.t	tied hint hash is copied to inner scope
 io/defout.t	$-
 io/msg.t	*summary*
 io/sem.t	*summary*
