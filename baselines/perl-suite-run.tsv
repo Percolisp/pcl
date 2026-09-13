@@ -1,4 +1,50 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s473t5d (2026-09-13, Opus) -- SIX rows spliced by hand, `--jobs 1`, the #366
+#   serial re-run agreeing on each ("REAL MOVE (both runs agree)"), the same 48
+#   files measured first on the UNMODIFIED tree, and the emitted CL byte-
+#   IDENTICAL to a `git archive 2ff53f8d` extraction for all six -- the fixes
+#   are cl/ + harness only, so every move below is a RUN-TIME move:
+#     io/tell.t         26/0 -> 36/0, DIFF -> OK.  #1696: the "+>>" (read/append)
+#       open mode was missing from all five dispatch sites, so `open($tst,
+#       "+>>$written")` matched the "+>" arm and opened a file named
+#       ">/tmp/...".  10 fail rows + 10 shortfall rows left the baselines.
+#     io/closepid.t      0/0 -> 3/0,  DIFF -> OK.  #1697: the LIST form
+#       `open($fh,"-|",$prog,@argv)` was a macroexpansion ARITY ERROR, so the
+#       whole top-level form failed to compile and the file produced no TAP.
+#     io/perlio_open.t   9/1 -> 10/0, DIFF -> OK.  #1696 (`+>>`,undef) plus
+#       #1699's second half: an APPEND anonymous temporary needs O_APPEND.
+#     io/utf8.t         23/4 -> 53/9.  #1698: `bytes::length` was undefined and
+#       the undef-fn abort stopped the file at 27 of 62.  Its 39 blessed rows
+#       are REPLACED by the 9 measured here; 35 shortfall rows went to zero.
+#     io/inplace.t       2/6 -> 6/2.  #1701: run_perl() quotemeta'd `args`, so
+#       `args => ['>', $file]` never redirected and the fixtures were absent.
+#     run/switches.t     6/99 -> 28/112, shortfall 35 -> 11.  #1700 (-i sets
+#       $^I) and #1699 (a refused open answers FALSE, never a signal) removed
+#       BOTH of the file's aborts.  Its 134 blessed rows are REPLACED by the 112
+#       measured here.
+#     op/filetest_t.t    0/0 -> 7/0,  DIFF -> OK.  FOUND BY THE `--all --quick`
+#       COMPANION, not by my own population, and attributed by a back-to-back
+#       `--jobs 1` A/B under the SAME load: the base extraction reads 0/0 with
+#       `aborted-forms:1: Error opening #P"/dev/tty": No such device or
+#       address`, this tree reads 7/0.  That is #1699 exactly -- opening
+#       /dev/tty fails ENXIO, CL `open` SIGNALLED it, and the abort took the
+#       file s only top-level form.  Its `*summary*` fail row left the row
+#       baseline by EDIT and its 7-row shortfall went to zero.
+#   Seventeen MORE files differ from the snapshot in that same companion run
+#   and are NOT MINE: twelve read IDENTICALLY on a 2ff53f8d extraction in a
+#   back-to-back `--jobs 1` pass (comp/use.t, op/coreamp.t, op/coresubs.t,
+#   op/inc.t, op/inccode.t, op/inccode-tie.t, run/fresh_perl.t, run/switchM.t,
+#   uni/method.t, io/iofile.t, io/pipe.t, io/open.t), FOUR carry the runner s
+#   own THREE-WAY rows-unstable verdict under load (io/crlf_through.t,
+#   io/through.t, io/pvbm.t, uni/variables.t) and TWO are the #1651 hangs
+#   (op/gv.t, uni/gv.t).  None spliced.
+#   NOT spliced, each verified on the base extraction or in the base
+#   measurement: io/pvbm.t (23/5 alone three times AND on a 2ff53f8d
+#   extraction, 20/8 inside a batch -- the seventh recording of that flap),
+#   io/open.t (-2 rows) and run/switchM.t (-2), both STABLE across three lone
+#   runs and reproduced on the base extraction, io/iofile.t (+1) and io/pipe.t
+#   (+1).  A row I did not move is not mine to re-bless; #1710 and #1708 name
+#   the two stable ones.
 # s473t5e (2026-09-13, Opus) -- FIVE rows spliced by hand, `--jobs 1`, and the
 #   #366 serial re-run agrees on every one ("REAL MOVE (both runs agree)"):
 #     re/reg_posixcc.t        1544/7646 -> 1544/1016.  MINE: #1501 round 6's
@@ -1452,7 +1498,7 @@ comp/utf.t	4216	0	24	4192	DIFF	s470bv: #1115 (already 24/4192 at a3d6d8e, 12/420
 io/argv.t	52	1	27	26	DIFF		0
 io/binmode.t	9	0	9	0	OK		0
 io/bom.t	3	0	1	2	DIFF		0
-io/closepid.t	3	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-open $fhN "-|" $perl "-e" "sleep N")	0
+io/closepid.t	3	0	3	0	OK		0
 io/crlf.t	16421	0	16412	6	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
 io/crlf_through.t	942	0	942	0	OK		0
 io/data.t	4	0	0	0	DIFF		0
@@ -1465,7 +1511,7 @@ io/errnosig.t	1	0	0	1	DIFF		0
 io/fflush.t	7	0	4	0	DIFF	aborted-forms:1: Undefined subroutine &main::_create_runperl called	0
 io/fs.t	61	0	59	2	DIFF		0
 io/getcwd.t	0	0	0	0	NOTAP		0
-io/inplace.t	8	0	2	6	DIFF		0
+io/inplace.t	8	0	6	2	DIFF		0
 io/iofile.t	3	0	1	2	DIFF		0
 io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
@@ -1477,7 +1523,7 @@ io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 io/perlio_fail.t	15	0	11	4	DIFF	s471a: 6/9 -> 11/4, PRE-EXISTING and MEASURED, not this batch -- a `git archive ed302e13` extraction of main gives the SAME 11/4 with the same five fixed rows (serial re-run agrees on both trees), so the blessed row was stale, not moved.  The five rows left baselines/perl-suite-fails.tsv by EDIT in the same commit; the four `Got warning` rows still fail (PCL emits no warnings-gated diagnostic, #221).	0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
-io/perlio_open.t	10	0	9	1	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
+io/perlio_open.t	10	0	10	0	OK		0
 io/pipe.t	27	0	18	14	DIFF		0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	23	5	DIFF	s473 (Fable): 20/8 -> 23/5 on d348dcea (serial; 22/6 on the 637fc58e extraction): the 3 FIXED rows are stat/lstat/truncate(PVBM ref) -- #1043 (s470bx, stat/lstat answer their context) for the last one; the known pvbm flapper (DECIDED s437/s438) reads 23/5 alone, the number memory records	0
@@ -1490,9 +1536,9 @@ io/semctl.t	2	0	0	0	DIFF		0
 io/shm.t	21	0	0	2	XDIFF	aborted-forms:8: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/socket.t	45	0	0	0	DIFF		0
 io/socketpair.t	8	0	0	0	DIFF		0
-io/tell.t	36	0	26	0	DIFF	aborted-forms:1: The path #P"/tmp/nKNTIilTqW/t/>/tmp/pcl-test-N-N" does not exist.	0
+io/tell.t	36	0	36	0	OK		0
 io/through.t	942	0	942	0	OK		0
-io/utf8.t	62	0	23	4	DIFF	aborted-forms:1: The function bytes::pl-length is undefined.	0
+io/utf8.t	62	0	53	9	DIFF		0
 mro/basic.t	66	0	35	22	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ISACLEAR'  | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions	0
 mro/basic_01_c3.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/basic_01_c3_utf8.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
@@ -1627,7 +1673,7 @@ op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
 op/filetest.t	436	0	369	65	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
 op/filetest_stack_ok.t	136	0	98	38	DIFF	s473 (Fable): 71/65 -> 98/38, PRE-EXISTING at fcf076f1 AND 637fc58e: the 27 FIXED rows are the -X $overld stack rows (the s470bs filetest operand resolver, #1031 family); the row was stale, not moved by this session	0
-op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
+op/filetest_t.t	7	0	7	0	OK		0
 op/flip.t	14	0	12	2	DIFF		0
 op/for-many.t	71	0	63	8	DIFF		0
 op/for.t	148	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1893,7 +1939,7 @@ run/switchM.t	5	0	2	3	DIFF		0
 run/switcha.t	2	0	0	1	DIFF		0
 run/switchd-78586.t	2	0	0	2	DIFF		0
 run/switchd.t	21	0	2	19	DIFF	undef-fn:main::pl-ARRAY	0
-run/switches.t	140	0	6	99	DIFF	aborted-forms:1: sbcl: Failed to open 'tmpswitches.bak': No such file or directory at /home/bernt/perlN/per	0
+run/switches.t	140	0	28	112	DIFF		0
 run/switchn.t	3	0	1	1	DIFF		0
 run/switchp.t	3	0	1	0	DIFF		0
 run/switcht.t	0	0	9	4	NOTAP		0

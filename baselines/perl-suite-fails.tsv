@@ -1823,268 +1823,222 @@ comp/utf.t	16	ok	not ok	UTF-16LE 0 1 chrs 0xff	#1693
 comp/utf.t	24	ok	not ok	UTF-16LE 0 1 chrs 0xfff	#1693
 comp/utf.t	32	ok	not ok	UTF-16LE 0 1 chrs 0xffff	#1693
 comp/utf.t	40	ok	not ok	UTF-16LE 0 1 chrs 0xfffff	#1693
-io/argv.t	9	ok	not ok	$. counts <>
-io/argv.t	0	(none)	extra [PCL #10]	*extra* $. counts <>
-io/argv.t	0	(none)	extra [PCL #11]	*extra* $. counts <>
-io/argv.t	0	(none)	renumbered	*summary*
-io/argv.t	33	ok	not ok	<<>> does not open empty string in ARGV
-io/argv.t	34	ok	not ok	<<>> does not treat ...| as fork
-io/argv.t	35	ok	not ok	<<>> does not treat ...| as fork after eof
-io/argv.t	32	ok	not ok	<> does not open empty string in ARGV
-io/argv.t	36	ok	not ok	ARGV aliasing and eof()
-io/argv.t	13	ok	not ok [PCL #15]	[at t/io/argv.t line 119]
-io/argv.t	25	ok	(missing)	[at t/io/argv.t line 163]
-io/argv.t	26	ok	(missing)	[at t/io/argv.t line 164]
-io/argv.t	50	ok	not ok	check for warning for  - |
-io/argv.t	52	ok	not ok	check for warning for  - |
-io/argv.t	42	ok	not ok	check for warning for  -|
-io/argv.t	44	ok	not ok	check for warning for  -|
-io/argv.t	46	ok	not ok	check for warning for  | -
-io/argv.t	48	ok	not ok	check for warning for  | -
-io/argv.t	38	ok	not ok	check for warning for  |-
-io/argv.t	40	ok	not ok	check for warning for  |-
-io/argv.t	49	ok	not ok	check for warning for - |
-io/argv.t	51	ok	not ok	check for warning for - |
-io/argv.t	41	ok	not ok	check for warning for -|
-io/argv.t	43	ok	not ok	check for warning for -|
-io/argv.t	45	ok	not ok	check for warning for | -
-io/argv.t	47	ok	not ok	check for warning for | -
-io/argv.t	37	ok	not ok	check for warning for |-
-io/argv.t	39	ok	not ok	check for warning for |-
-io/argv.t	14	ok	not ok [PCL #16]	eof() true on unopened filehandle
-io/bom.t	2	ok	not ok	BOM indicates UTF-16BE
-io/bom.t	3	ok	not ok	BOM indicates UTF-16LE
-io/closepid.t	0	ok*	(no TAP)	*summary*
-io/crlf.t	0	(none)	renumbered	*summary*
-io/crlf.t	5	ok	not ok	[at t/io/crlf.t line 29]
-io/crlf.t	6	ok	not ok	[at t/io/crlf.t line 34]
-io/crlf.t	16409	ok	not ok	[at t/io/crlf.t line 83]
-io/crlf.t	16411	ok	not ok	[at t/io/crlf.t line 83]
-io/crlf.t	16413	ok	not ok	[at t/io/crlf.t line 83]
-io/crlf.t	16415	ok	not ok	[at t/io/crlf.t line 83]
-io/crlf.t	16421	ok	(missing)	check :utf8 removed
-io/crlf.t	16419	ok	(missing)	check :utf8 set
-io/crlf.t	16420	ok	(missing)	remove :utf8
-io/data.t	0	ok*	(no TAP)	*summary*
-io/dup.t	11	ok	(missing)	#11
-io/dup.t	12	ok	(missing)	#12
-io/dup.t	0	(none)	renumbered	*summary*
-io/dup.t	21	ok	(missing)	[at t/io/dup.t line 104]
-io/dup.t	22	ok	(missing)	[at t/io/dup.t line 105]
-io/dup.t	23	ok	(missing)	[at t/io/dup.t line 108]
-io/dup.t	24	ok	(missing)	[at t/io/dup.t line 109]
-io/dup.t	25	ok	(missing)	[at t/io/dup.t line 120]
-io/dup.t	26	ok	(missing)	[at t/io/dup.t line 121]
-io/dup.t	27	ok	(missing)	[at t/io/dup.t line 138]
-io/dup.t	28	ok	(missing)	[at t/io/dup.t line 139]
-io/dup.t	29	ok	(missing)	[at t/io/dup.t line 140]
-io/dup.t	13	ok	(missing)	[at t/io/dup.t line 85]
-io/dup.t	14	ok	(missing)	[at t/io/dup.t line 86]
-io/dup.t	15	ok	(missing)	[at t/io/dup.t line 89]
-io/dup.t	16	ok	(missing)	[at t/io/dup.t line 90]
-io/dup.t	17	ok	(missing)	[at t/io/dup.t line 93]
-io/dup.t	18	ok	(missing)	[at t/io/dup.t line 94]
-io/dup.t	19	ok	(missing)	[at t/io/dup.t line 97]
-io/dup.t	20	ok	(missing)	[at t/io/dup.t line 98]
-io/errnosig.t	1	ok	not ok	Signal does not modify $!
-io/fflush.t	5	ok	(missing)	#5
-io/fflush.t	6	ok	(missing)	#6
-io/fflush.t	7	ok	(missing)	#7
-io/inplace.t	2	ok	not ok	backup file contents stay the same
-io/inplace.t	7	ok	not ok	die shouldn't touch file
-io/inplace.t	1	ok	not ok	file contents properly replaced
-io/inplace.t	8	ok	not ok	last should update file
-io/inplace.t	4	ok	not ok	normal inplace edit
-io/inplace.t	6	ok	not ok	normal inplace edit
-io/iofile.t	3	ok	not ok	IO::File now loaded
-io/iofile.t	2	ok	not ok	STDOUT->autoflush(1) lives
-io/iprefix.t	2	ok	not ok	backup file contents stay the same
-io/iprefix.t	1	ok	not ok	file contents properly replaced
-io/layers.t	0	ok*	(no TAP)	*summary*
-io/nargv.t	0	(none)	extra [PCL #3]	*extra* (unnamed)
-io/nargv.t	0	(none)	extra [PCL #4]	*extra* (unnamed)
-io/nargv.t	0	(none)	extra [PCL #5]	*extra* (unnamed)
-io/nargv.t	0	(none)	extra [PCL #2]	*extra* (unnamed)
-io/nargv.t	0	(none)	extra [PCL #7]	*extra* check fd leak
-io/nargv.t	0	(none)	extra [PCL #6]	*extra* check setuid mode preserved
-io/nargv.t	0	(none)	renumbered	*summary*
-io/open.t	0	(none)	extra [PCL #41]	*extra* not inherited across exec
-io/open.t	0	(none)	extra [PCL #89]	*extra* not inherited across exec
-io/open.t	132	ok	not ok	<...> line 1 when $/ is set to a glob
-io/open.t	156	ok	not ok	also on chmod
-io/open.t	158	ok	not ok	also on chmod
-io/open.t	160	ok	not ok	also on glob
-io/open.t	162	ok	not ok	also on glob
-io/open.t	174	ok	not ok	also on unlink
-io/open.t	176	ok	not ok	also on unlink
-io/open.t	129	ok	not ok	autoviv fh lexical aelem
-io/open.t	131	ok	not ok	autoviv fh lexical helem
-io/open.t	125	ok	not ok	autoviv fh package aelem
-io/open.t	127	ok	not ok	autoviv fh package helem
-io/open.t	137	ok	not ok	bad layer ":c" failure
-io/open.t	136	ok	not ok	bad layer "<:u" warning
-io/open.t	135	ok	not ok	bad layer ">:u" warning
-io/open.t	134	ok	not ok	bad open (>>>) failure
-io/open.t	133	ok	not ok	bad open (>>>) warning
-io/open.t	183	ok	not ok	buffering delays writing to scalar (simple open)
-io/open.t	170	ok	not ok	check errno
-io/open.t	165	ok	not ok	check multiple arguments to unlink
-io/open.t	155	ok	not ok	chmod fails with \0 in name
-io/open.t	9	ok	not ok	die message correct
-io/open.t	159	ok	not ok	glob fails with \0 in name
-io/open.t	161	ok	not ok	glob fails with \0 in name (overload)
-io/open.t	41	ok	(missing)	not inherited across exec
-io/open.t	89	ok	(missing)	not inherited across exec
-io/open.t	178	ok	not ok	nothing changed its mode
-io/open.t	179	ok	not ok	nothing changes its mtime
-io/open.t	177	ok	not ok	nothing removed the temp file
-io/open.t	138	ok	not ok	open m test
-io/open.t	151	ok	not ok	open with nul in pathnames since 5.18 [perl \#117265]
-io/open.t	163	ok	not ok	open with nul with no warnings syscalls
-io/open.t	60	ok	not ok	proper die message
-io/open.t	123	ok	not ok	right error
-io/open.t	152	ok	not ok	warn on embedded nul
-io/open.t	154	ok	not ok	warn on embedded nul
-io/open.t	185	ok	not ok	buffering delays writing to scalar (complex open)
-io/openpid.t	5	ok	not ok	message from first process
-io/openpid.t	7	ok	not ok	message from second process
-io/perlio_fail.t	5	ok	not ok	Got warning
-io/perlio_fail.t	8	ok	not ok	Got warning
-io/perlio_fail.t	11	ok	not ok	Got warning
-io/perlio_fail.t	14	ok	not ok	Got warning
-io/perlio_leaks.t	10	ok	not ok	:crlf
-io/perlio_leaks.t	11	ok	not ok	:crlf
-io/perlio_leaks.t	12	ok	not ok	:crlf
-io/perlio_leaks.t	7	ok	not ok	:perlio
-io/perlio_leaks.t	8	ok	not ok	:perlio
-io/perlio_leaks.t	9	ok	not ok	:perlio
-io/perlio_leaks.t	4	ok	not ok	:stdio
-io/perlio_leaks.t	1	ok	not ok	:unix
-io/perlio_open.t	7	ok	not ok	open my $fh, '+>>', undef
-io/pipe.t	0	(none)	extra [PCL #27]	*extra* but we did get the exception from die
-io/pipe.t	0	(none)	extra [PCL #25]	*extra* child reaped if piped program cannot be executed
-io/pipe.t	0	(none)	extra [PCL #22]	*extra* missing command in piped open input
-io/pipe.t	0	(none)	extra [PCL #26]	*extra* no exception from PerlIO
-io/pipe.t	0	(none)	extra [PCL #23]	*extra* output
-io/pipe.t	0	(none)	extra [PCL #24]	*extra* status unaffected by implicit close
-io/pipe.t	0	(none)	renumbered	*summary*
-io/pipe.t	10	ok	(missing)	[]
-io/pipe.t	27	ok	not ok	but we did get the exception from die
-io/pipe.t	25	ok	not ok	child reaped if piped program cannot be executed
-io/pipe.t	16	ok	not ok	close failure for... umm, something
-io/pipe.t	14	ok	not ok	errno
-io/pipe.t	18	ok	not ok	errno
-io/pipe.t	21	ok	not ok	errno
-io/pipe.t	22	ok	not ok	missing command in piped open input
-io/pipe.t	23	ok	not ok	output
-io/pipe.t	17	ok	not ok	status
-io/pipe.t	24	ok	not ok	status unaffected by implicit close
-io/print.t	23	ok	not ok	printf with %n (got a5c)
-io/pvbm.t	16	ok	not ok	close(PVBM) fails
-io/pvbm.t	12	ok	not ok	lstat(PVBM) fails
-io/pvbm.t	7	ok	not ok	pipe(, PVBM ref) fails
-io/pvbm.t	6	ok	not ok	pipe(PVBM ref, ) fails
-io/pvbm.t	10	ok	not ok	stat(PVBM) fails
-io/scalar.t	30	ok	not ok	FETCH only called once
-io/scalar.t	36	ok	not ok	Permission denied
-io/scalar.t	40	ok	not ok	[at t/io/scalar.t line 195]
-io/scalar.t	20	ok	not ok	[at t/io/scalar.t line 66]
-io/scalar.t	34	ok	not ok	[perl \#40267] - Permission denied
-io/scalar.t	89	ok	not ok	check $! is updated
-io/scalar.t	92	ok	not ok	check $! is updated even when we warn
-io/scalar.t	112	ok	not ok	check errno set
-io/scalar.t	104	ok	not ok	check errno set correctly
-io/scalar.t	107	ok	not ok	check warnings
-io/scalar.t	108	ok	not ok	check warnings
-io/scalar.t	115	ok	not ok	check warnings
-io/scalar.t	116	ok	not ok	check warnings
-io/scalar.t	38	ok	not ok	check we did warn
-io/scalar.t	37	ok	not ok	check we get a read-onlyish error code
-io/scalar.t	91	ok	not ok	non byte open should fail (and warn)
-io/scalar.t	88	ok	not ok	non-byte open should fail
-io/scalar.t	103	ok	not ok	read from scalar with >0xff chars
-io/scalar.t	106	ok	not ok	read from scalar with >0xff chars
-io/scalar.t	25	ok	not ok	reading from magic scalars
-io/scalar.t	93	ok	not ok	should have warned
-io/scalar.t	94	ok	not ok	should have warned
-io/scalar.t	119	ok	not ok	still a ref after opening for appending
-io/scalar.t	73	ok	not ok	tied actions - read
-io/scalar.t	63	ok	not ok	tied actions - write
-io/scalar.t	111	ok	not ok	write to an non-downgradable SV
-io/scalar.t	114	ok	not ok	write to an non-downgradable SV (and warn)
-io/scalar.t	77	ok	not ok	writing to numeric scalar
-io/scalar.t	78	ok	not ok	writing to numeric scalar
-io/scalar.t	76	ok	not ok	writing to refs
-io/scalar_ungetc.t	1	ok	not ok	$s is readonly
-io/scalar_ungetc.t	5	ok	(missing)	$s remains "foo"
-io/scalar_ungetc.t	4	ok	(missing)	getc
-io/scalar_ungetc.t	6	ok	(missing)	getc/2
-io/scalar_ungetc.t	7	ok	(missing)	getc/3
-io/scalar_ungetc.t	8	ok	(missing)	getc/4
-io/scalar_ungetc.t	3	ok	(missing)	ungetc
-io/scalar_ungetc.t	9	ok	(missing)	ungetc(65)
-io/scalar_ungetc.t	10	ok	(missing)	ungetc(66)
-io/scalar_ungetc.t	11	ok	(missing)	ungetc(67)
-io/scalar_ungetc.t	12	ok	(missing)	ungetc(68)
-io/scalar_ungetc.t	13	ok	(missing)	ungetc(69)
-io/scalar_ungetc.t	14	ok	(missing)	ungetc(70)
-io/scalar_ungetc.t	15	ok	(missing)	ungetc(71)
-io/scalar_ungetc.t	16	ok	(missing)	ungetc(72)
-io/scalar_ungetc.t	17	ok	(missing)	ungetc(73)
-io/scalar_ungetc.t	18	ok	(missing)	ungetc(74)
-io/scalar_ungetc.t	19	ok	(missing)	ungetc(75)
-io/semctl.t	0	ok*	(no TAP)	*summary*
-io/socket.t	0	ok*	(no TAP)	*summary*
-io/socketpair.t	0	ok*	(no TAP)	*summary*
-io/tell.t	32	ok	(missing)	argless tell after eof $coercible
-io/tell.t	33	ok	(missing)	argless tell after eof *$coercible
-io/tell.t	34	ok	(missing)	argless tell after seek $coercible...
-io/tell.t	35	ok	(missing)	argless tell after seek *$coercible...
-io/tell.t	30	ok	(missing)	argless tell after tell $coercible
-io/tell.t	31	ok	(missing)	argless tell after tell *$coercible
-io/tell.t	27	ok	(missing)	check tell() after writing "xxxx\n"
-io/tell.t	28	ok	(missing)	check tell() after writing in mode '>>'
-io/tell.t	36	ok	(missing)	eof with no ${^LAST_FH}
-io/tell.t	29	ok	(missing)	tell on coercible glob
-io/utf8.t	35	ok	(missing)	21395 '.= <>' bytes vs. utf8
-io/utf8.t	34	ok	(missing)	21395 '.= <>' utf8 vs. bytes
-io/utf8.t	52	ok	(missing)	23428 syswrite should not downgrade scalar
-io/utf8.t	54	ok	(missing)	<:utf8 rcatline must warn about bad utf8
-io/utf8.t	60	ok	(missing)	<:utf8 readline (fixed) must warn about bad utf8
-io/utf8.t	53	ok	(missing)	<:utf8 readline must warn about bad utf8
-io/utf8.t	19	ok	not ok	[at t/io/utf8.t line 101]
-io/utf8.t	26	ok	not ok	[at t/io/utf8.t line 177]
-io/utf8.t	27	ok	not ok	[at t/io/utf8.t line 178]
-io/utf8.t	28	ok	(missing)	[at t/io/utf8.t line 214]
-io/utf8.t	29	ok	(missing)	[at t/io/utf8.t line 227]
-io/utf8.t	30	ok	(missing)	[at t/io/utf8.t line 234]
-io/utf8.t	31	ok	(missing)	[at t/io/utf8.t line 242]
-io/utf8.t	32	ok	(missing)	[at t/io/utf8.t line 251]
-io/utf8.t	33	ok	(missing)	[at t/io/utf8.t line 261]
-io/utf8.t	16	ok	not ok	[at t/io/utf8.t line 83]
-io/utf8.t	61	ok	(missing)	getc returning non-utf8 after utf8
-io/utf8.t	62	ok	(missing)	getc returning non-utf8 after utf8
-io/utf8.t	36	ok	(missing)	rcatline utf8
-io/utf8.t	37	ok	(missing)	rcatline utf8
-io/utf8.t	38	ok	(missing)	rcatline utf8
-io/utf8.t	39	ok	(missing)	rcatline utf8
-io/utf8.t	40	ok	(missing)	rcatline utf8
-io/utf8.t	41	ok	(missing)	rcatline utf8
-io/utf8.t	42	ok	(missing)	rcatline utf8
-io/utf8.t	43	ok	(missing)	rcatline utf8
-io/utf8.t	44	ok	(missing)	rcatline utf8
-io/utf8.t	45	ok	(missing)	rcatline utf8
-io/utf8.t	46	ok	(missing)	rcatline utf8
-io/utf8.t	47	ok	(missing)	rcatline utf8
-io/utf8.t	48	ok	(missing)	rcatline utf8
-io/utf8.t	49	ok	(missing)	rcatline utf8
-io/utf8.t	50	ok	(missing)	rcatline utf8
-io/utf8.t	51	ok	(missing)	rcatline utf8
-io/utf8.t	56	ok	(missing)	rcatline with $/ = \4
-io/utf8.t	55	ok	(missing)	readline with $/ = \4
-io/utf8.t	58	ok	(missing)	readline with another boundary condition
-io/utf8.t	59	ok	(missing)	readline with boundary condition
-io/utf8.t	57	ok	(missing)	readline with several encoded characters
+io/argv.t	9	ok	not ok	$. counts <>	#1710
+io/argv.t	0	(none)	extra [PCL #10]	*extra* $. counts <>	#1710
+io/argv.t	0	(none)	extra [PCL #11]	*extra* $. counts <>	#1710
+io/argv.t	0	(none)	renumbered	*summary*	#1710
+io/argv.t	33	ok	not ok	<<>> does not open empty string in ARGV	#1710
+io/argv.t	34	ok	not ok	<<>> does not treat ...| as fork	#1710
+io/argv.t	35	ok	not ok	<<>> does not treat ...| as fork after eof	#1710
+io/argv.t	32	ok	not ok	<> does not open empty string in ARGV	#1710
+io/argv.t	36	ok	not ok	ARGV aliasing and eof()	#1710
+io/argv.t	13	ok	not ok [PCL #15]	[at t/io/argv.t line 119]	#1710
+io/argv.t	25	ok	(missing)	[at t/io/argv.t line 163]	#1710
+io/argv.t	26	ok	(missing)	[at t/io/argv.t line 164]	#1710
+io/argv.t	50	ok	not ok	check for warning for  - |	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	52	ok	not ok	check for warning for  - |	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	42	ok	not ok	check for warning for  -|	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	44	ok	not ok	check for warning for  -|	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	46	ok	not ok	check for warning for  | -	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	48	ok	not ok	check for warning for  | -	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	38	ok	not ok	check for warning for  |-	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	40	ok	not ok	check for warning for  |-	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	49	ok	not ok	check for warning for - |	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	51	ok	not ok	check for warning for - |	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	41	ok	not ok	check for warning for -|	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	43	ok	not ok	check for warning for -|	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	45	ok	not ok	check for warning for | -	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	47	ok	not ok	check for warning for | -	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	37	ok	not ok	check for warning for |-	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	39	ok	not ok	check for warning for |-	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/argv.t	14	ok	not ok [PCL #16]	eof() true on unopened filehandle	#1710
+io/bom.t	2	ok	not ok	BOM indicates UTF-16BE	#1710
+io/bom.t	3	ok	not ok	BOM indicates UTF-16LE	#1710
+io/crlf.t	0	(none)	renumbered	*summary*	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	5	ok	not ok	[at t/io/crlf.t line 29]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	6	ok	not ok	[at t/io/crlf.t line 34]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	16409	ok	not ok	[at t/io/crlf.t line 83]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	16411	ok	not ok	[at t/io/crlf.t line 83]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	16413	ok	not ok	[at t/io/crlf.t line 83]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	16415	ok	not ok	[at t/io/crlf.t line 83]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	16421	ok	(missing)	check :utf8 removed	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	16419	ok	(missing)	check :utf8 set	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/crlf.t	16420	ok	(missing)	remove :utf8	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/data.t	0	ok*	(no TAP)	*summary*	#1652
+io/dup.t	11	ok	(missing)	#11	#1703
+io/dup.t	12	ok	(missing)	#12	#1703
+io/dup.t	0	(none)	renumbered	*summary*	#1703
+io/dup.t	21	ok	(missing)	[at t/io/dup.t line 104]	#1703
+io/dup.t	22	ok	(missing)	[at t/io/dup.t line 105]	#1703
+io/dup.t	23	ok	(missing)	[at t/io/dup.t line 108]	#1703
+io/dup.t	24	ok	(missing)	[at t/io/dup.t line 109]	#1703
+io/dup.t	25	ok	(missing)	[at t/io/dup.t line 120]	#1703
+io/dup.t	26	ok	(missing)	[at t/io/dup.t line 121]	#1703
+io/dup.t	27	ok	(missing)	[at t/io/dup.t line 138]	#1703
+io/dup.t	28	ok	(missing)	[at t/io/dup.t line 139]	#1703
+io/dup.t	29	ok	(missing)	[at t/io/dup.t line 140]	#1703
+io/dup.t	13	ok	(missing)	[at t/io/dup.t line 85]	#1703
+io/dup.t	14	ok	(missing)	[at t/io/dup.t line 86]	#1703
+io/dup.t	15	ok	(missing)	[at t/io/dup.t line 89]	#1703
+io/dup.t	16	ok	(missing)	[at t/io/dup.t line 90]	#1703
+io/dup.t	17	ok	(missing)	[at t/io/dup.t line 93]	#1703
+io/dup.t	18	ok	(missing)	[at t/io/dup.t line 94]	#1703
+io/dup.t	19	ok	(missing)	[at t/io/dup.t line 97]	#1703
+io/dup.t	20	ok	(missing)	[at t/io/dup.t line 98]	#1703
+io/errnosig.t	1	ok	not ok	Signal does not modify $!	#1710
+io/fflush.t	5	ok	(missing)	#5	#1585
+io/fflush.t	6	ok	(missing)	#6	#1585
+io/fflush.t	7	ok	(missing)	#7	#1585
+io/inplace.t	7	ok	not ok	die shouldn't touch file	#1710
+io/inplace.t	8	ok	not ok	last should update file	#1710
+io/iofile.t	3	ok	not ok	IO::File now loaded	#1710
+io/iofile.t	2	ok	not ok	STDOUT->autoflush(1) lives	#1710
+io/iprefix.t	2	ok	not ok	backup file contents stay the same	#1710
+io/iprefix.t	1	ok	not ok	file contents properly replaced	#1710
+io/layers.t	0	ok*	(no TAP)	*summary*	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+io/nargv.t	0	(none)	extra [PCL #3]	*extra* (unnamed)	#1710
+io/nargv.t	0	(none)	extra [PCL #4]	*extra* (unnamed)	#1710
+io/nargv.t	0	(none)	extra [PCL #5]	*extra* (unnamed)	#1710
+io/nargv.t	0	(none)	extra [PCL #2]	*extra* (unnamed)	#1710
+io/nargv.t	0	(none)	extra [PCL #7]	*extra* check fd leak	#1710
+io/nargv.t	0	(none)	extra [PCL #6]	*extra* check setuid mode preserved	#1710
+io/nargv.t	0	(none)	renumbered	*summary*	#1710
+io/open.t	0	(none)	extra [PCL #41]	*extra* not inherited across exec	#1707
+io/open.t	0	(none)	extra [PCL #89]	*extra* not inherited across exec	#1707
+io/open.t	132	ok	not ok	<...> line 1 when $/ is set to a glob	#1710
+io/open.t	156	ok	not ok	also on chmod	#1710
+io/open.t	158	ok	not ok	also on chmod	#1710
+io/open.t	160	ok	not ok	also on glob	#1710
+io/open.t	162	ok	not ok	also on glob	#1710
+io/open.t	174	ok	not ok	also on unlink	#1710
+io/open.t	176	ok	not ok	also on unlink	#1710
+io/open.t	129	ok	not ok	autoviv fh lexical aelem	#1710
+io/open.t	131	ok	not ok	autoviv fh lexical helem	#1710
+io/open.t	125	ok	not ok	autoviv fh package aelem	#1710
+io/open.t	127	ok	not ok	autoviv fh package helem	#1710
+io/open.t	137	ok	not ok	bad layer ":c" failure	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/open.t	136	ok	not ok	bad layer "<:u" warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/open.t	135	ok	not ok	bad layer ">:u" warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/open.t	134	ok	not ok	bad open (>>>) failure	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/open.t	133	ok	not ok	bad open (>>>) warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/open.t	183	ok	not ok	buffering delays writing to scalar (simple open)	#1710
+io/open.t	170	ok	not ok	check errno	#1710
+io/open.t	165	ok	not ok	check multiple arguments to unlink	#1710
+io/open.t	155	ok	not ok	chmod fails with \0 in name	#1710
+io/open.t	9	ok	not ok	die message correct	#1710
+io/open.t	159	ok	not ok	glob fails with \0 in name	#1710
+io/open.t	161	ok	not ok	glob fails with \0 in name (overload)	#1710
+io/open.t	41	ok	(missing)	not inherited across exec	#1707
+io/open.t	89	ok	(missing)	not inherited across exec	#1707
+io/open.t	178	ok	not ok	nothing changed its mode	#1710
+io/open.t	179	ok	not ok	nothing changes its mtime	#1710
+io/open.t	177	ok	not ok	nothing removed the temp file	#1710
+io/open.t	138	ok	not ok	open m test	#1710
+io/open.t	151	ok	not ok	open with nul in pathnames since 5.18 [perl \#117265]	#1710
+io/open.t	163	ok	not ok	open with nul with no warnings syscalls	#1710
+io/open.t	60	ok	not ok	proper die message	#1710
+io/open.t	123	ok	not ok	right error	#1710
+io/open.t	152	ok	not ok	warn on embedded nul	#1710
+io/open.t	154	ok	not ok	warn on embedded nul	#1710
+io/open.t	185	ok	not ok	buffering delays writing to scalar (complex open)	#1710
+io/openpid.t	5	ok	not ok	message from first process	#1710
+io/openpid.t	7	ok	not ok	message from second process	#1710
+io/perlio_fail.t	5	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/perlio_fail.t	8	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/perlio_fail.t	11	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/perlio_fail.t	14	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/perlio_leaks.t	10	ok	not ok	:crlf	#1710
+io/perlio_leaks.t	11	ok	not ok	:crlf	#1710
+io/perlio_leaks.t	12	ok	not ok	:crlf	#1710
+io/perlio_leaks.t	7	ok	not ok	:perlio	#1710
+io/perlio_leaks.t	8	ok	not ok	:perlio	#1710
+io/perlio_leaks.t	9	ok	not ok	:perlio	#1710
+io/perlio_leaks.t	4	ok	not ok	:stdio	#1710
+io/perlio_leaks.t	1	ok	not ok	:unix	#1710
+io/pipe.t	0	(none)	extra [PCL #27]	*extra* but we did get the exception from die	#1710
+io/pipe.t	0	(none)	extra [PCL #25]	*extra* child reaped if piped program cannot be executed	#1710
+io/pipe.t	0	(none)	extra [PCL #22]	*extra* missing command in piped open input	#1710
+io/pipe.t	0	(none)	extra [PCL #26]	*extra* no exception from PerlIO	#1710
+io/pipe.t	0	(none)	extra [PCL #23]	*extra* output	#1710
+io/pipe.t	0	(none)	extra [PCL #24]	*extra* status unaffected by implicit close	#1710
+io/pipe.t	0	(none)	renumbered	*summary*	#1710
+io/pipe.t	10	ok	(missing)	[]	#1710
+io/pipe.t	27	ok	not ok	but we did get the exception from die	#1710
+io/pipe.t	25	ok	not ok	child reaped if piped program cannot be executed	#1710
+io/pipe.t	16	ok	not ok	close failure for... umm, something	#1710
+io/pipe.t	14	ok	not ok	errno	#1710
+io/pipe.t	18	ok	not ok	errno	#1710
+io/pipe.t	21	ok	not ok	errno	#1710
+io/pipe.t	22	ok	not ok	missing command in piped open input	#1710
+io/pipe.t	23	ok	not ok	output	#1710
+io/pipe.t	17	ok	not ok	status	#1710
+io/pipe.t	24	ok	not ok	status unaffected by implicit close	#1710
+io/print.t	23	ok	not ok	printf with %n (got a5c)	#1710
+io/pvbm.t	16	ok	not ok	close(PVBM) fails	#1710
+io/pvbm.t	12	ok	not ok	lstat(PVBM) fails	#1710
+io/pvbm.t	7	ok	not ok	pipe(, PVBM ref) fails	#1710
+io/pvbm.t	6	ok	not ok	pipe(PVBM ref, ) fails	#1710
+io/pvbm.t	10	ok	not ok	stat(PVBM) fails	#1710
+io/scalar.t	30	ok	not ok	FETCH only called once	#1710
+io/scalar.t	36	ok	not ok	Permission denied	#1710
+io/scalar.t	40	ok	not ok	[at t/io/scalar.t line 195]	#1710
+io/scalar.t	20	ok	not ok	[at t/io/scalar.t line 66]	#1710
+io/scalar.t	34	ok	not ok	[perl \#40267] - Permission denied	#1710
+io/scalar.t	89	ok	not ok	check $! is updated	#1710
+io/scalar.t	92	ok	not ok	check $! is updated even when we warn	#1710
+io/scalar.t	112	ok	not ok	check errno set	#1710
+io/scalar.t	104	ok	not ok	check errno set correctly	#1710
+io/scalar.t	107	ok	not ok	check warnings	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	108	ok	not ok	check warnings	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	115	ok	not ok	check warnings	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	116	ok	not ok	check warnings	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	38	ok	not ok	check we did warn	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	37	ok	not ok	check we get a read-onlyish error code	#1710
+io/scalar.t	91	ok	not ok	non byte open should fail (and warn)	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	88	ok	not ok	non-byte open should fail	#1710
+io/scalar.t	103	ok	not ok	read from scalar with >0xff chars	#1710
+io/scalar.t	106	ok	not ok	read from scalar with >0xff chars	#1710
+io/scalar.t	25	ok	not ok	reading from magic scalars	#1710
+io/scalar.t	93	ok	not ok	should have warned	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	94	ok	not ok	should have warned	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	119	ok	not ok	still a ref after opening for appending	#1710
+io/scalar.t	73	ok	not ok	tied actions - read	#1710
+io/scalar.t	63	ok	not ok	tied actions - write	#1710
+io/scalar.t	111	ok	not ok	write to an non-downgradable SV	#1710
+io/scalar.t	114	ok	not ok	write to an non-downgradable SV (and warn)	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/scalar.t	77	ok	not ok	writing to numeric scalar	#1710
+io/scalar.t	78	ok	not ok	writing to numeric scalar	#1710
+io/scalar.t	76	ok	not ok	writing to refs	#1710
+io/scalar_ungetc.t	1	ok	not ok	$s is readonly	NS:`Internals::*` C-level introspection -- Internals::SvREADONLY is announced and ignored, so there are no read-only scalars
+io/scalar_ungetc.t	5	ok	(missing)	$s remains "foo"	#1704
+io/scalar_ungetc.t	4	ok	(missing)	getc	#1704
+io/scalar_ungetc.t	6	ok	(missing)	getc/2	#1704
+io/scalar_ungetc.t	7	ok	(missing)	getc/3	#1704
+io/scalar_ungetc.t	8	ok	(missing)	getc/4	#1704
+io/scalar_ungetc.t	3	ok	(missing)	ungetc	#1704
+io/scalar_ungetc.t	9	ok	(missing)	ungetc(65)	#1704
+io/scalar_ungetc.t	10	ok	(missing)	ungetc(66)	#1704
+io/scalar_ungetc.t	11	ok	(missing)	ungetc(67)	#1704
+io/scalar_ungetc.t	12	ok	(missing)	ungetc(68)	#1704
+io/scalar_ungetc.t	13	ok	(missing)	ungetc(69)	#1704
+io/scalar_ungetc.t	14	ok	(missing)	ungetc(70)	#1704
+io/scalar_ungetc.t	15	ok	(missing)	ungetc(71)	#1704
+io/scalar_ungetc.t	16	ok	(missing)	ungetc(72)	#1704
+io/scalar_ungetc.t	17	ok	(missing)	ungetc(73)	#1704
+io/scalar_ungetc.t	18	ok	(missing)	ungetc(74)	#1704
+io/scalar_ungetc.t	19	ok	(missing)	ungetc(75)	#1704
+io/semctl.t	0	ok*	(no TAP)	*summary*	NS:DynaLoader / XS binary extensions -- IPC::SysV is XS
+io/socket.t	0	ok*	(no TAP)	*summary*	#1705
+io/socketpair.t	0	ok*	(no TAP)	*summary*	#1705
+io/utf8.t	54	ok	not ok	<:utf8 rcatline must warn about bad utf8	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/utf8.t	60	ok	not ok	<:utf8 readline (fixed) must warn about bad utf8	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/utf8.t	53	ok	not ok	<:utf8 readline must warn about bad utf8	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/utf8.t	19	ok	not ok	[at t/io/utf8.t line 101]	NS:`use bytes` -- byte view of upgraded strings (the PRAGMA half; `bytes::length` itself works since #1698)
+io/utf8.t	26	ok	not ok	[at t/io/utf8.t line 177]	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/utf8.t	27	ok	not ok	[at t/io/utf8.t line 178]	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
+io/utf8.t	32	ok	not ok	[at t/io/utf8.t line 251]	#1710 -- PARKED: io/utf8.t:251 `isnt(defined $@, !0)` after `no warnings 'utf8'`; three probes vs perl 5.40.3 all MATCH (undef $@, a wide print to a byte handle, `no warnings` itself), so the cause is upstream in the file's state and was not found in s473t5d's budget
+io/utf8.t	16	ok	not ok	[at t/io/utf8.t line 83]	NS:`use bytes` -- byte view of upgraded strings (the PRAGMA half; `bytes::length` itself works since #1698)
+io/utf8.t	61	ok	not ok	getc returning non-utf8 after utf8	#1710
 op/aassign.t	180	ok	not ok	RT \#130132 scalar derefffed 1
 op/aassign.t	181	ok	not ok	RT \#130132 scalar derefffed 2
 op/aassign.t	182	ok	not ok	RT \#130132 scalar undef 1
@@ -10930,505 +10884,483 @@ re/subst_amp.t	11	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/per
 re/subst_amp.t	12	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 85]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
 re/subst_amp.t	13	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 91]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
 re/subst_wamp.t	0	ok*	(no TAP)	*summary*	#1664 (the typeglob model: perl's constant.pm sets $constant::{_CAN_PCS} to a SCALAR REF, i.e. a constant sub; under `do FILE` that abort costs the WHOLE file, there is no per-form recovery)
-run/cloexec.t	0	(none)	extra [PCL #18]	*extra* child return code=0 (zero means inherited fd=5 ok)
-run/cloexec.t	0	(none)	extra [PCL #15]	*extra* child stdout: fd
-run/cloexec.t	0	(none)	extra [PCL #21]	*extra* child stdout: fd
-run/cloexec.t	0	(none)	extra [PCL #14]	*extra* child stdout: has 1 newline (rc=0, should be non-zero)
-run/cloexec.t	0	(none)	extra [PCL #19]	*extra* child stdout: has 2 newlines
-run/cloexec.t	0	(none)	extra [PCL #22]	*extra* child stdout: line 1
-run/cloexec.t	0	(none)	extra [PCL #20]	*extra* child stdout: split into 2 lines
-run/cloexec.t	0	(none)	extra [PCL #12]	*extra* parent open fd=5 ($^F=4)
-run/cloexec.t	0	(none)	extra [PCL #16]	*extra* parent open fd=5 ($^F=5)
-run/cloexec.t	0	(none)	extra [PCL #13]	*extra* tmpfile '/tmp/pcl-test-TMPFILE' exists
-run/cloexec.t	0	(none)	extra [PCL #17]	*extra* tmpfile '/tmp/pcl-test-TMPFILE' exists
-run/cloexec.t	0	(none)	renumbered	*summary*
-run/cloexec.t	7	ok	(missing)	child return code=0 (zero means inherited fd=3 ok)
-run/cloexec.t	10	ok	(missing)	child stdout: fd
-run/cloexec.t	15	ok	(missing)	child stdout: fd
-run/cloexec.t	14	ok	(missing)	child stdout: has 1 newline (rc=9, should be non-zero)
-run/cloexec.t	8	ok	(missing)	child stdout: has 2 newlines
-run/cloexec.t	19	ok	not ok [PCL #8]	child stdout: has 2 newlines
-run/cloexec.t	11	ok	(missing)	child stdout: line 1
-run/cloexec.t	22	ok	not ok [PCL #11]	child stdout: line 1
-run/cloexec.t	9	ok	(missing)	child stdout: split into 2 lines
-run/cloexec.t	20	ok	not ok [PCL #9]	child stdout: split into 2 lines
-run/cloexec.t	12	ok	(missing)	parent open fd=4 ($^F=3)
-run/cloexec.t	16	ok	(missing)	parent open fd=4 ($^F=4)
-run/cloexec.t	13	ok	(missing)	tmpfile 'tmp_TMPFILE' exists
-run/cloexec.t	17	ok	(missing)	tmpfile 'tmp_TMPFILE' exists
-run/exit.t	3	ok	not ok	Normal exit ${^CHILD_ERROR_NATIVE}
-run/exit.t	10	ok	not ok	Term by signal
-run/exit.t	12	ok	not ok	Term by signal $?
-run/locale.t	0	ok*	(no TAP)	*summary*
-run/noswitch.t	2	ok	not ok	read from aliased DATA filehandle
-run/runenv_hashseed.t	278	ok	(missing)	mode = DETERMINISTIC same key order with different seed no more than 2 times
-run/runenv_hashseed.t	70	ok	(missing)	mode = DETERMINISTIC, try  1: base run set the mode digit as expected
-run/runenv_hashseed.t	71	ok	(missing)	mode = DETERMINISTIC, try  1: base run set the mode name as expected
-run/runenv_hashseed.t	76	ok	(missing)	mode = DETERMINISTIC, try  1: mode digits match between retries
-run/runenv_hashseed.t	77	ok	(missing)	mode = DETERMINISTIC, try  1: mode names match between retries
-run/runenv_hashseed.t	78	ok	(missing)	mode = DETERMINISTIC, try  1: results in the same key order each time
-run/runenv_hashseed.t	73	ok	(missing)	mode = DETERMINISTIC, try  1: retry 1 set the mode by name as expected
-run/runenv_hashseed.t	72	ok	(missing)	mode = DETERMINISTIC, try  1: retry 1 set the seed as expected
-run/runenv_hashseed.t	74	ok	(missing)	mode = DETERMINISTIC, try  1: retry 2 set the mode by digit as expected
-run/runenv_hashseed.t	75	ok	(missing)	mode = DETERMINISTIC, try  1: seeds match between retries
-run/runenv_hashseed.t	82	ok	(missing)	mode = DETERMINISTIC, try  2: results in the same key order each time
-run/runenv_hashseed.t	86	ok	(missing)	mode = DETERMINISTIC, try  3: results in the same key order each time
-run/runenv_hashseed.t	90	ok	(missing)	mode = DETERMINISTIC, try  4: results in the same key order each time
-run/runenv_hashseed.t	94	ok	(missing)	mode = DETERMINISTIC, try  5: results in the same key order each time
-run/runenv_hashseed.t	98	ok	(missing)	mode = DETERMINISTIC, try  6: results in the same key order each time
-run/runenv_hashseed.t	102	ok	(missing)	mode = DETERMINISTIC, try  7: results in the same key order each time
-run/runenv_hashseed.t	106	ok	(missing)	mode = DETERMINISTIC, try  8: results in the same key order each time
-run/runenv_hashseed.t	110	ok	(missing)	mode = DETERMINISTIC, try  9: results in the same key order each time
-run/runenv_hashseed.t	114	ok	(missing)	mode = DETERMINISTIC, try 10: results in the same key order each time
-run/runenv_hashseed.t	118	ok	(missing)	mode = DETERMINISTIC, try 11: results in the same key order each time
-run/runenv_hashseed.t	122	ok	(missing)	mode = DETERMINISTIC, try 12: results in the same key order each time
-run/runenv_hashseed.t	126	ok	(missing)	mode = DETERMINISTIC, try 13: results in the same key order each time
-run/runenv_hashseed.t	130	ok	(missing)	mode = DETERMINISTIC, try 14: results in the same key order each time
-run/runenv_hashseed.t	134	ok	(missing)	mode = DETERMINISTIC, try 15: results in the same key order each time
-run/runenv_hashseed.t	138	ok	(missing)	mode = DETERMINISTIC, try 16: results in the same key order each time
-run/runenv_hashseed.t	142	ok	(missing)	mode = DETERMINISTIC, try 17: results in the same key order each time
-run/runenv_hashseed.t	146	ok	(missing)	mode = DETERMINISTIC, try 18: results in the same key order each time
-run/runenv_hashseed.t	150	ok	(missing)	mode = DETERMINISTIC, try 19: results in the same key order each time
-run/runenv_hashseed.t	154	ok	(missing)	mode = DETERMINISTIC, try 20: results in the same key order each time
-run/runenv_hashseed.t	158	ok	(missing)	mode = DETERMINISTIC, try 21: results in the same key order each time
-run/runenv_hashseed.t	162	ok	(missing)	mode = DETERMINISTIC, try 22: results in the same key order each time
-run/runenv_hashseed.t	166	ok	(missing)	mode = DETERMINISTIC, try 23: results in the same key order each time
-run/runenv_hashseed.t	170	ok	(missing)	mode = DETERMINISTIC, try 24: results in the same key order each time
-run/runenv_hashseed.t	174	ok	(missing)	mode = DETERMINISTIC, try 25: results in the same key order each time
-run/runenv_hashseed.t	178	ok	(missing)	mode = DETERMINISTIC, try 26: results in the same key order each time
-run/runenv_hashseed.t	182	ok	(missing)	mode = DETERMINISTIC, try 27: results in the same key order each time
-run/runenv_hashseed.t	186	ok	(missing)	mode = DETERMINISTIC, try 28: results in the same key order each time
-run/runenv_hashseed.t	190	ok	(missing)	mode = DETERMINISTIC, try 29: results in the same key order each time
-run/runenv_hashseed.t	194	ok	(missing)	mode = DETERMINISTIC, try 30: results in the same key order each time
-run/runenv_hashseed.t	198	ok	(missing)	mode = DETERMINISTIC, try 31: results in the same key order each time
-run/runenv_hashseed.t	202	ok	(missing)	mode = DETERMINISTIC, try 32: results in the same key order each time
-run/runenv_hashseed.t	206	ok	(missing)	mode = DETERMINISTIC, try 33: results in the same key order each time
-run/runenv_hashseed.t	210	ok	(missing)	mode = DETERMINISTIC, try 34: results in the same key order each time
-run/runenv_hashseed.t	214	ok	(missing)	mode = DETERMINISTIC, try 35: results in the same key order each time
-run/runenv_hashseed.t	218	ok	(missing)	mode = DETERMINISTIC, try 36: results in the same key order each time
-run/runenv_hashseed.t	222	ok	(missing)	mode = DETERMINISTIC, try 37: results in the same key order each time
-run/runenv_hashseed.t	226	ok	(missing)	mode = DETERMINISTIC, try 38: results in the same key order each time
-run/runenv_hashseed.t	230	ok	(missing)	mode = DETERMINISTIC, try 39: results in the same key order each time
-run/runenv_hashseed.t	234	ok	(missing)	mode = DETERMINISTIC, try 40: results in the same key order each time
-run/runenv_hashseed.t	238	ok	(missing)	mode = DETERMINISTIC, try 41: results in the same key order each time
-run/runenv_hashseed.t	242	ok	(missing)	mode = DETERMINISTIC, try 42: results in the same key order each time
-run/runenv_hashseed.t	246	ok	(missing)	mode = DETERMINISTIC, try 43: results in the same key order each time
-run/runenv_hashseed.t	250	ok	(missing)	mode = DETERMINISTIC, try 44: results in the same key order each time
-run/runenv_hashseed.t	254	ok	(missing)	mode = DETERMINISTIC, try 45: results in the same key order each time
-run/runenv_hashseed.t	258	ok	(missing)	mode = DETERMINISTIC, try 46: results in the same key order each time
-run/runenv_hashseed.t	262	ok	(missing)	mode = DETERMINISTIC, try 47: results in the same key order each time
-run/runenv_hashseed.t	266	ok	(missing)	mode = DETERMINISTIC, try 48: results in the same key order each time
-run/runenv_hashseed.t	270	ok	(missing)	mode = DETERMINISTIC, try 49: results in the same key order each time
-run/runenv_hashseed.t	274	ok	(missing)	mode = DETERMINISTIC, try 50: results in the same key order each time
-run/runenv_hashseed.t	59	ok	(missing)	mode = NO same key order with different seed no more than 2 times
-run/runenv_hashseed.t	10	ok	(missing)	mode = NO, try  2: results in the same key order each time
-run/runenv_hashseed.t	11	ok	(missing)	mode = NO, try  3: results in the same key order each time
-run/runenv_hashseed.t	12	ok	(missing)	mode = NO, try  4: results in the same key order each time
-run/runenv_hashseed.t	13	ok	(missing)	mode = NO, try  5: results in the same key order each time
-run/runenv_hashseed.t	14	ok	(missing)	mode = NO, try  6: results in the same key order each time
-run/runenv_hashseed.t	15	ok	(missing)	mode = NO, try  7: results in the same key order each time
-run/runenv_hashseed.t	16	ok	(missing)	mode = NO, try  8: results in the same key order each time
-run/runenv_hashseed.t	17	ok	(missing)	mode = NO, try  9: results in the same key order each time
-run/runenv_hashseed.t	18	ok	(missing)	mode = NO, try 10: results in the same key order each time
-run/runenv_hashseed.t	19	ok	(missing)	mode = NO, try 11: results in the same key order each time
-run/runenv_hashseed.t	20	ok	(missing)	mode = NO, try 12: results in the same key order each time
-run/runenv_hashseed.t	21	ok	(missing)	mode = NO, try 13: results in the same key order each time
-run/runenv_hashseed.t	22	ok	(missing)	mode = NO, try 14: results in the same key order each time
-run/runenv_hashseed.t	23	ok	(missing)	mode = NO, try 15: results in the same key order each time
-run/runenv_hashseed.t	24	ok	(missing)	mode = NO, try 16: results in the same key order each time
-run/runenv_hashseed.t	25	ok	(missing)	mode = NO, try 17: results in the same key order each time
-run/runenv_hashseed.t	26	ok	(missing)	mode = NO, try 18: results in the same key order each time
-run/runenv_hashseed.t	27	ok	(missing)	mode = NO, try 19: results in the same key order each time
-run/runenv_hashseed.t	28	ok	(missing)	mode = NO, try 20: results in the same key order each time
-run/runenv_hashseed.t	29	ok	(missing)	mode = NO, try 21: results in the same key order each time
-run/runenv_hashseed.t	30	ok	(missing)	mode = NO, try 22: results in the same key order each time
-run/runenv_hashseed.t	31	ok	(missing)	mode = NO, try 23: results in the same key order each time
-run/runenv_hashseed.t	32	ok	(missing)	mode = NO, try 24: results in the same key order each time
-run/runenv_hashseed.t	33	ok	(missing)	mode = NO, try 25: results in the same key order each time
-run/runenv_hashseed.t	34	ok	(missing)	mode = NO, try 26: results in the same key order each time
-run/runenv_hashseed.t	35	ok	(missing)	mode = NO, try 27: results in the same key order each time
-run/runenv_hashseed.t	36	ok	(missing)	mode = NO, try 28: results in the same key order each time
-run/runenv_hashseed.t	37	ok	(missing)	mode = NO, try 29: results in the same key order each time
-run/runenv_hashseed.t	38	ok	(missing)	mode = NO, try 30: results in the same key order each time
-run/runenv_hashseed.t	39	ok	(missing)	mode = NO, try 31: results in the same key order each time
-run/runenv_hashseed.t	40	ok	(missing)	mode = NO, try 32: results in the same key order each time
-run/runenv_hashseed.t	41	ok	(missing)	mode = NO, try 33: results in the same key order each time
-run/runenv_hashseed.t	42	ok	(missing)	mode = NO, try 34: results in the same key order each time
-run/runenv_hashseed.t	43	ok	(missing)	mode = NO, try 35: results in the same key order each time
-run/runenv_hashseed.t	44	ok	(missing)	mode = NO, try 36: results in the same key order each time
-run/runenv_hashseed.t	45	ok	(missing)	mode = NO, try 37: results in the same key order each time
-run/runenv_hashseed.t	46	ok	(missing)	mode = NO, try 38: results in the same key order each time
-run/runenv_hashseed.t	47	ok	(missing)	mode = NO, try 39: results in the same key order each time
-run/runenv_hashseed.t	48	ok	(missing)	mode = NO, try 40: results in the same key order each time
-run/runenv_hashseed.t	49	ok	(missing)	mode = NO, try 41: results in the same key order each time
-run/runenv_hashseed.t	50	ok	(missing)	mode = NO, try 42: results in the same key order each time
-run/runenv_hashseed.t	51	ok	(missing)	mode = NO, try 43: results in the same key order each time
-run/runenv_hashseed.t	52	ok	(missing)	mode = NO, try 44: results in the same key order each time
-run/runenv_hashseed.t	53	ok	(missing)	mode = NO, try 45: results in the same key order each time
-run/runenv_hashseed.t	54	ok	(missing)	mode = NO, try 46: results in the same key order each time
-run/runenv_hashseed.t	55	ok	(missing)	mode = NO, try 47: results in the same key order each time
-run/runenv_hashseed.t	56	ok	(missing)	mode = NO, try 48: results in the same key order each time
-run/runenv_hashseed.t	57	ok	(missing)	mode = NO, try 49: results in the same key order each time
-run/runenv_hashseed.t	58	ok	(missing)	mode = NO, try 50: results in the same key order each time
-run/runenv_hashseed.t	68	ok	(missing)	mode = RANDOM same key order no more than 2 times
-run/runenv_hashseed.t	69	ok	(missing)	mode = RANDOM same key order with different seed no more than 2 times
-run/runenv_hashseed.t	60	ok	(missing)	mode = RANDOM, try  1: base run set the mode digit as expected
-run/runenv_hashseed.t	61	ok	(missing)	mode = RANDOM, try  1: base run set the mode name as expected
-run/runenv_hashseed.t	66	ok	(missing)	mode = RANDOM, try  1: mode digits match between retries
-run/runenv_hashseed.t	67	ok	(missing)	mode = RANDOM, try  1: mode names match between retries
-run/runenv_hashseed.t	63	ok	(missing)	mode = RANDOM, try  1: retry 1 set the mode by name as expected
-run/runenv_hashseed.t	62	ok	(missing)	mode = RANDOM, try  1: retry 1 set the seed as expected
-run/runenv_hashseed.t	64	ok	(missing)	mode = RANDOM, try  1: retry 2 set the mode by digit as expected
-run/runenv_hashseed.t	65	ok	(missing)	mode = RANDOM, try  1: seeds match between retries
-run/runenv_hashseed.t	79	ok	(missing)	skip mode = DETERMINISTIC, try  1: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	80	ok	(missing)	skip mode = DETERMINISTIC, try  1: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	81	ok	(missing)	skip mode = DETERMINISTIC, try  1: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	83	ok	(missing)	skip mode = DETERMINISTIC, try  2: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	84	ok	(missing)	skip mode = DETERMINISTIC, try  2: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	85	ok	(missing)	skip mode = DETERMINISTIC, try  2: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	87	ok	(missing)	skip mode = DETERMINISTIC, try  3: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	88	ok	(missing)	skip mode = DETERMINISTIC, try  3: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	89	ok	(missing)	skip mode = DETERMINISTIC, try  3: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	91	ok	(missing)	skip mode = DETERMINISTIC, try  4: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	92	ok	(missing)	skip mode = DETERMINISTIC, try  4: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	93	ok	(missing)	skip mode = DETERMINISTIC, try  4: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	95	ok	(missing)	skip mode = DETERMINISTIC, try  5: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	96	ok	(missing)	skip mode = DETERMINISTIC, try  5: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	97	ok	(missing)	skip mode = DETERMINISTIC, try  5: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	99	ok	(missing)	skip mode = DETERMINISTIC, try  6: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	100	ok	(missing)	skip mode = DETERMINISTIC, try  6: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	101	ok	(missing)	skip mode = DETERMINISTIC, try  6: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	103	ok	(missing)	skip mode = DETERMINISTIC, try  7: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	104	ok	(missing)	skip mode = DETERMINISTIC, try  7: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	105	ok	(missing)	skip mode = DETERMINISTIC, try  7: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	107	ok	(missing)	skip mode = DETERMINISTIC, try  8: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	108	ok	(missing)	skip mode = DETERMINISTIC, try  8: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	109	ok	(missing)	skip mode = DETERMINISTIC, try  8: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	111	ok	(missing)	skip mode = DETERMINISTIC, try  9: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	112	ok	(missing)	skip mode = DETERMINISTIC, try  9: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	113	ok	(missing)	skip mode = DETERMINISTIC, try  9: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	115	ok	(missing)	skip mode = DETERMINISTIC, try 10: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	116	ok	(missing)	skip mode = DETERMINISTIC, try 10: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	117	ok	(missing)	skip mode = DETERMINISTIC, try 10: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	119	ok	(missing)	skip mode = DETERMINISTIC, try 11: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	120	ok	(missing)	skip mode = DETERMINISTIC, try 11: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	121	ok	(missing)	skip mode = DETERMINISTIC, try 11: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	123	ok	(missing)	skip mode = DETERMINISTIC, try 12: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	124	ok	(missing)	skip mode = DETERMINISTIC, try 12: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	125	ok	(missing)	skip mode = DETERMINISTIC, try 12: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	127	ok	(missing)	skip mode = DETERMINISTIC, try 13: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	128	ok	(missing)	skip mode = DETERMINISTIC, try 13: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	129	ok	(missing)	skip mode = DETERMINISTIC, try 13: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	131	ok	(missing)	skip mode = DETERMINISTIC, try 14: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	132	ok	(missing)	skip mode = DETERMINISTIC, try 14: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	133	ok	(missing)	skip mode = DETERMINISTIC, try 14: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	135	ok	(missing)	skip mode = DETERMINISTIC, try 15: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	136	ok	(missing)	skip mode = DETERMINISTIC, try 15: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	137	ok	(missing)	skip mode = DETERMINISTIC, try 15: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	139	ok	(missing)	skip mode = DETERMINISTIC, try 16: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	140	ok	(missing)	skip mode = DETERMINISTIC, try 16: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	141	ok	(missing)	skip mode = DETERMINISTIC, try 16: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	143	ok	(missing)	skip mode = DETERMINISTIC, try 17: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	144	ok	(missing)	skip mode = DETERMINISTIC, try 17: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	145	ok	(missing)	skip mode = DETERMINISTIC, try 17: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	147	ok	(missing)	skip mode = DETERMINISTIC, try 18: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	148	ok	(missing)	skip mode = DETERMINISTIC, try 18: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	149	ok	(missing)	skip mode = DETERMINISTIC, try 18: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	151	ok	(missing)	skip mode = DETERMINISTIC, try 19: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	152	ok	(missing)	skip mode = DETERMINISTIC, try 19: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	153	ok	(missing)	skip mode = DETERMINISTIC, try 19: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	155	ok	(missing)	skip mode = DETERMINISTIC, try 20: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	156	ok	(missing)	skip mode = DETERMINISTIC, try 20: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	157	ok	(missing)	skip mode = DETERMINISTIC, try 20: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	159	ok	(missing)	skip mode = DETERMINISTIC, try 21: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	160	ok	(missing)	skip mode = DETERMINISTIC, try 21: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	161	ok	(missing)	skip mode = DETERMINISTIC, try 21: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	163	ok	(missing)	skip mode = DETERMINISTIC, try 22: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	164	ok	(missing)	skip mode = DETERMINISTIC, try 22: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	165	ok	(missing)	skip mode = DETERMINISTIC, try 22: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	167	ok	(missing)	skip mode = DETERMINISTIC, try 23: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	168	ok	(missing)	skip mode = DETERMINISTIC, try 23: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	169	ok	(missing)	skip mode = DETERMINISTIC, try 23: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	171	ok	(missing)	skip mode = DETERMINISTIC, try 24: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	172	ok	(missing)	skip mode = DETERMINISTIC, try 24: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	173	ok	(missing)	skip mode = DETERMINISTIC, try 24: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	175	ok	(missing)	skip mode = DETERMINISTIC, try 25: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	176	ok	(missing)	skip mode = DETERMINISTIC, try 25: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	177	ok	(missing)	skip mode = DETERMINISTIC, try 25: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	179	ok	(missing)	skip mode = DETERMINISTIC, try 26: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	180	ok	(missing)	skip mode = DETERMINISTIC, try 26: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	181	ok	(missing)	skip mode = DETERMINISTIC, try 26: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	183	ok	(missing)	skip mode = DETERMINISTIC, try 27: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	184	ok	(missing)	skip mode = DETERMINISTIC, try 27: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	185	ok	(missing)	skip mode = DETERMINISTIC, try 27: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	187	ok	(missing)	skip mode = DETERMINISTIC, try 28: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	188	ok	(missing)	skip mode = DETERMINISTIC, try 28: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	189	ok	(missing)	skip mode = DETERMINISTIC, try 28: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	191	ok	(missing)	skip mode = DETERMINISTIC, try 29: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	192	ok	(missing)	skip mode = DETERMINISTIC, try 29: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	193	ok	(missing)	skip mode = DETERMINISTIC, try 29: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	195	ok	(missing)	skip mode = DETERMINISTIC, try 30: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	196	ok	(missing)	skip mode = DETERMINISTIC, try 30: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	197	ok	(missing)	skip mode = DETERMINISTIC, try 30: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	199	ok	(missing)	skip mode = DETERMINISTIC, try 31: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	200	ok	(missing)	skip mode = DETERMINISTIC, try 31: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	201	ok	(missing)	skip mode = DETERMINISTIC, try 31: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	203	ok	(missing)	skip mode = DETERMINISTIC, try 32: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	204	ok	(missing)	skip mode = DETERMINISTIC, try 32: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	205	ok	(missing)	skip mode = DETERMINISTIC, try 32: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	207	ok	(missing)	skip mode = DETERMINISTIC, try 33: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	208	ok	(missing)	skip mode = DETERMINISTIC, try 33: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	209	ok	(missing)	skip mode = DETERMINISTIC, try 33: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	211	ok	(missing)	skip mode = DETERMINISTIC, try 34: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	212	ok	(missing)	skip mode = DETERMINISTIC, try 34: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	213	ok	(missing)	skip mode = DETERMINISTIC, try 34: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	215	ok	(missing)	skip mode = DETERMINISTIC, try 35: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	216	ok	(missing)	skip mode = DETERMINISTIC, try 35: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	217	ok	(missing)	skip mode = DETERMINISTIC, try 35: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	219	ok	(missing)	skip mode = DETERMINISTIC, try 36: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	220	ok	(missing)	skip mode = DETERMINISTIC, try 36: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	221	ok	(missing)	skip mode = DETERMINISTIC, try 36: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	223	ok	(missing)	skip mode = DETERMINISTIC, try 37: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	224	ok	(missing)	skip mode = DETERMINISTIC, try 37: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	225	ok	(missing)	skip mode = DETERMINISTIC, try 37: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	227	ok	(missing)	skip mode = DETERMINISTIC, try 38: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	228	ok	(missing)	skip mode = DETERMINISTIC, try 38: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	229	ok	(missing)	skip mode = DETERMINISTIC, try 38: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	231	ok	(missing)	skip mode = DETERMINISTIC, try 39: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	232	ok	(missing)	skip mode = DETERMINISTIC, try 39: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	233	ok	(missing)	skip mode = DETERMINISTIC, try 39: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	235	ok	(missing)	skip mode = DETERMINISTIC, try 40: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	236	ok	(missing)	skip mode = DETERMINISTIC, try 40: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	237	ok	(missing)	skip mode = DETERMINISTIC, try 40: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	239	ok	(missing)	skip mode = DETERMINISTIC, try 41: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	240	ok	(missing)	skip mode = DETERMINISTIC, try 41: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	241	ok	(missing)	skip mode = DETERMINISTIC, try 41: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	243	ok	(missing)	skip mode = DETERMINISTIC, try 42: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	244	ok	(missing)	skip mode = DETERMINISTIC, try 42: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	245	ok	(missing)	skip mode = DETERMINISTIC, try 42: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	247	ok	(missing)	skip mode = DETERMINISTIC, try 43: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	248	ok	(missing)	skip mode = DETERMINISTIC, try 43: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	249	ok	(missing)	skip mode = DETERMINISTIC, try 43: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	251	ok	(missing)	skip mode = DETERMINISTIC, try 44: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	252	ok	(missing)	skip mode = DETERMINISTIC, try 44: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	253	ok	(missing)	skip mode = DETERMINISTIC, try 44: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	255	ok	(missing)	skip mode = DETERMINISTIC, try 45: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	256	ok	(missing)	skip mode = DETERMINISTIC, try 45: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	257	ok	(missing)	skip mode = DETERMINISTIC, try 45: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	259	ok	(missing)	skip mode = DETERMINISTIC, try 46: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	260	ok	(missing)	skip mode = DETERMINISTIC, try 46: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	261	ok	(missing)	skip mode = DETERMINISTIC, try 46: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	263	ok	(missing)	skip mode = DETERMINISTIC, try 47: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	264	ok	(missing)	skip mode = DETERMINISTIC, try 47: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	265	ok	(missing)	skip mode = DETERMINISTIC, try 47: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	267	ok	(missing)	skip mode = DETERMINISTIC, try 48: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	268	ok	(missing)	skip mode = DETERMINISTIC, try 48: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	269	ok	(missing)	skip mode = DETERMINISTIC, try 48: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	271	ok	(missing)	skip mode = DETERMINISTIC, try 49: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	272	ok	(missing)	skip mode = DETERMINISTIC, try 49: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	273	ok	(missing)	skip mode = DETERMINISTIC, try 49: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	275	ok	(missing)	skip mode = DETERMINISTIC, try 50: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	276	ok	(missing)	skip mode = DETERMINISTIC, try 50: not testing rand bits, not a DEBUGGING perl
-run/runenv_hashseed.t	277	ok	(missing)	skip mode = DETERMINISTIC, try 50: not testing rand bits, not a DEBUGGING perl
-run/runenv_randseed.t	1	ok	not ok	Test randomness with PERL_RAND_SEED=1
-run/runenv_randseed.t	2	ok	not ok	Test randomness with PERL_RAND_SEED=1
-run/runenv_randseed.t	3	ok	not ok	Test randomness with PERL_RAND_SEED=2
-run/runenv_randseed.t	4	ok	not ok	Test randomness with PERL_RAND_SEED=2
-run/runenv_randseed.t	7	ok	not ok	Works as expected with forks.
-run/runenv_randseed.t	9	ok	not ok	Works as expected with forks.
-run/switch0.t	1	ok	not ok	$/ set to 0 via switch
-run/switchC.t	2	ok	not ok	-C2: no warning on UTF-8 output
-run/switchC.t	3	ok	not ok	-CI: read in UTF-8 input
-run/switchC.t	1	ok	not ok	-CO: no warning on UTF-8 output
-run/switchC.t	6	ok	not ok	-Ci: auto-UTF-8 open for input
-run/switchC.t	7	ok	not ok	-Ci: auto-UTF-8 open for input affects the current file
-run/switchC.t	5	ok	not ok	-Co: auto-UTF-8 open for output
-run/switchC.t	10	ok	not ok	\#!perl -C
-run/switchC.t	14	ok	not ok	\#!perl -C but not command line
-run/switchC.t	11	ok	not ok	\#!perl -C followed by another switch
-run/switchC.t	13	ok	not ok	\#!perl -C with different -C on command line
-run/switchC.t	12	ok	not ok	\#!perl -C<num> followed by another switch
-run/switchC.t	15	ok	not ok	perl -C00 [perl \#123991]
-run/switchF.t	1	ok	not ok	line 1
-run/switchF.t	2	ok	(missing)	line 2
-run/switchI.t	3	ok	not ok	-I
-run/switchI.t	4	ok	not ok	-I with colons
-run/switchI.t	1	ok	not ok	Identified entry in @INC
-run/switchI.t	2	ok	not ok	Identified entry in @INC with double colons
-run/switchM.t	1	ok	not ok	Ensure -Irun/flib produces correct filename in warnings
-run/switchM.t	2	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings
-run/switchM.t	3	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings with space after -M
-run/switcha.t	2	ok	(missing)	testing split of string 'not ok 3'
-run/switcha.t	1	ok	not ok	testing split of string 'not ok'
-run/switchd-78586.t	1	ok	not ok	[at t/run/switchd-78586.t line 31]
-run/switchd-78586.t	2	ok	not ok	[at t/run/switchd-78586.t line 39]
-run/switchd.t	16	ok	not ok	%DB::lsub is not vivified
-run/switchd.t	13	ok	not ok	Copy on write does not mangle ${"_<-e"}[0] [perl \#118627]
-run/switchd.t	11	ok	not ok	DB::DB works after '*DB::DB if 0'
-run/switchd.t	15	ok	not ok	DB::goto
-run/switchd.t	1	ok	not ok	Got debugging output: 1
-run/switchd.t	2	ok	not ok	Got debugging output: 2
-run/switchd.t	3	ok	not ok	Got debugging output: 3
-run/switchd.t	10	ok	not ok	No crash when &DB::DB exists but isn't actually defined
-run/switchd.t	9	ok	not ok	No crash when *DB::DB exists but not &DB::DB
-run/switchd.t	8	ok	not ok	No crash when calling orphaned subroutine via goto &
-run/switchd.t	14	ok	not ok	PERL5DB with embedded newlines
-run/switchd.t	12	ok	not ok	Recursive DB::DB does not clobber its own pad
-run/switchd.t	6	ok	not ok	Subroutine redefinition works in the debugger [perl \#48332]
-run/switchd.t	7	ok	not ok	Subroutines no longer found under their names can be called
-run/switchd.t	4	ok	not ok	The debugger can see the lines of the main program under \#!perl -d
-run/switchd.t	18	ok	not ok	UTF8 length caches on $DB::sub are flushed
-run/switchd.t	5	ok	not ok	\#!perl -d:whatever does not throw line numbers off
-run/switchd.t	21	ok	not ok	putenv does not interfere with PERL5OPT parsing
-run/switchd.t	17	ok	not ok	setting breakpoints without *DB::dbline aliased
-run/switches.t	7	ok	not ok	$/ set at compile-time
-run/switches.t	1	ok	not ok	-0
-run/switches.t	2	ok	not ok	-0 after a -l
-run/switches.t	3	ok	not ok	-0 before a -l
-run/switches.t	5	ok	not ok	-00 (paragraph mode)
-run/switches.t	6	ok	not ok	-0777 (slurp mode)
-run/switches.t	80	ok	not ok	-1 correctly unknown
-run/switches.t	81	ok	not ok	-1 unrecognised on \#! line
-run/switches.t	82	ok	not ok	-2 correctly unknown
-run/switches.t	83	ok	not ok	-2 unrecognised on \#! line
-run/switches.t	84	ok	not ok	-3 correctly unknown
-run/switches.t	85	ok	not ok	-3 unrecognised on \#! line
-run/switches.t	86	ok	not ok	-4 correctly unknown
-run/switches.t	87	ok	not ok	-4 unrecognised on \#! line
-run/switches.t	88	ok	not ok	-5 correctly unknown
-run/switches.t	89	ok	not ok	-5 unrecognised on \#! line
-run/switches.t	90	ok	not ok	-6 correctly unknown
-run/switches.t	91	ok	not ok	-6 unrecognised on \#! line
-run/switches.t	92	ok	not ok	-7 correctly unknown
-run/switches.t	93	ok	not ok	-7 unrecognised on \#! line
-run/switches.t	94	ok	not ok	-8 correctly unknown
-run/switches.t	95	ok	not ok	-8 unrecognised on \#! line
-run/switches.t	96	ok	not ok	-9 correctly unknown
-run/switches.t	97	ok	not ok	-9 unrecognised on \#! line
-run/switches.t	35	ok	not ok	-? looks okay
-run/switches.t	36	ok	not ok	-A correctly unknown
-run/switches.t	37	ok	not ok	-A unrecognised on \#! line
-run/switches.t	38	ok	not ok	-B correctly unknown
-run/switches.t	39	ok	not ok	-B unrecognised on \#! line
-run/switches.t	135	ok	(missing)	-E does not enable strictures
-run/switches.t	133	ok	(missing)	-E enables 'reftype' builtin
-run/switches.t	132	ok	(missing)	-E enables 'say' feature
-run/switches.t	103	ok	not ok	-E on \#! line
-run/switches.t	134	ok	(missing)	-E works outside of the block created by -n
-run/switches.t	42	ok	not ok	-G correctly unknown
-run/switches.t	43	ok	not ok	-G unrecognised on \#! line
-run/switches.t	44	ok	not ok	-H correctly unknown
-run/switches.t	45	ok	not ok	-H unrecognised on \#! line
-run/switches.t	46	ok	not ok	-J correctly unknown
-run/switches.t	47	ok	not ok	-J unrecognised on \#! line
-run/switches.t	50	ok	not ok	-K correctly unknown
-run/switches.t	51	ok	not ok	-K unrecognised on \#! line
-run/switches.t	54	ok	not ok	-L correctly unknown
-run/switches.t	55	ok	not ok	-L unrecognised on \#! line
-run/switches.t	15	ok	not ok	-M
-run/switches.t	16	ok	not ok	-M with import parameter
-run/switches.t	24	ok	not ok	-M- not allowed
-run/switches.t	20	ok	not ok	-M:Foo not allowed
-run/switches.t	56	ok	not ok	-N correctly unknown
-run/switches.t	57	ok	not ok	-N unrecognised on \#! line
-run/switches.t	58	ok	not ok	-O correctly unknown
-run/switches.t	59	ok	not ok	-O unrecognised on \#! line
-run/switches.t	62	ok	not ok	-P correctly unknown
-run/switches.t	63	ok	not ok	-P unrecognised on \#! line
-run/switches.t	64	ok	not ok	-Q correctly unknown
-run/switches.t	65	ok	not ok	-Q unrecognised on \#! line
-run/switches.t	68	ok	not ok	-R correctly unknown
-run/switches.t	69	ok	not ok	-R unrecognised on \#! line
-run/switches.t	104	ok	not ok	-S on \#! line
-run/switches.t	27	ok	not ok	-V generates 20+ lines
-run/switches.t	28	ok	not ok	-V looks okay
-run/switches.t	105	ok	not ok	-V on \#! line
-run/switches.t	137	ok	(missing)	-W
-run/switches.t	138	ok	(missing)	-W with no warnings
-run/switches.t	140	ok	(missing)	-X with use 5.36
-run/switches.t	139	ok	(missing)	-X with use warnings
-run/switches.t	72	ok	not ok	-Y correctly unknown
-run/switches.t	73	ok	not ok	-Y unrecognised on \#! line
-run/switches.t	76	ok	not ok	-Z correctly unknown
-run/switches.t	77	ok	not ok	-Z unrecognised on \#! line
-run/switches.t	98	ok	not ok	-_ correctly unknown
-run/switches.t	99	ok	not ok	-_ unrecognised on \#! line
-run/switches.t	40	ok	not ok	-b correctly unknown
-run/switches.t	41	ok	not ok	-b unrecognised on \#! line
-run/switches.t	9	ok	not ok	-c
-run/switches.t	100	ok	not ok	-e on \#! line
-run/switches.t	101	ok	not ok	-f on \#! line
-run/switches.t	8	ok	not ok	-g undefines $/ at compile-time
-run/switches.t	34	ok	not ok	-h looks okay
-run/switches.t	107	ok	(missing)	-i backup file
-run/switches.t	106	ok	(missing)	-i new file
-run/switches.t	48	ok	not ok	-j correctly unknown
-run/switches.t	49	ok	not ok	-j unrecognised on \#! line
-run/switches.t	52	ok	not ok	-k correctly unknown
-run/switches.t	53	ok	not ok	-k unrecognised on \#! line
-run/switches.t	18	ok	not ok	-m with import parameters
-run/switches.t	23	ok	not ok	-m- not allowed
-run/switches.t	22	ok	not ok	-m-Foo:Bar not allowed
-run/switches.t	21	ok	not ok	-mFoo:Bar not allowed
-run/switches.t	60	ok	not ok	-o correctly unknown
-run/switches.t	61	ok	not ok	-o unrecognised on \#! line
-run/switches.t	66	ok	not ok	-q correctly unknown
-run/switches.t	67	ok	not ok	-q unrecognised on \#! line
-run/switches.t	70	ok	not ok	-r correctly unknown
-run/switches.t	71	ok	not ok	-r unrecognised on \#! line
-run/switches.t	13	ok	not ok	-s on the shebang line
-run/switches.t	12	ok	not ok	-s switch parsing
-run/switches.t	14	ok	not ok	-sn on the shebang line
-run/switches.t	33	ok	not ok	-v looks okay
-run/switches.t	102	ok	not ok	-x on \#! line
-run/switches.t	74	ok	not ok	-y correctly unknown
-run/switches.t	75	ok	not ok	-y unrecognised on \#! line
-run/switches.t	78	ok	not ok	-z correctly unknown
-run/switches.t	79	ok	not ok	-z unrecognised on \#! line
-run/switches.t	136	ok	(missing)	Spaces on the \#! line (\#30660)
-run/switches.t	26	ok	not ok	\#!perl -M
-run/switches.t	25	ok	not ok	\#!perl -m
-run/switches.t	128	ok	(missing)	abs paths
-run/switches.t	118	ok	(missing)	chdir while in-place editing
-run/switches.t	112	ok	(missing)	check original content still in file
-run/switches.t	113	ok	(missing)	check original content still in file
-run/switches.t	114	ok	(missing)	check original content still in file
-run/switches.t	115	ok	(missing)	check original content still in file
-run/switches.t	117	ok	(missing)	check output
-run/switches.t	111	ok	(missing)	correct output without backup extension
-run/switches.t	127	ok	(missing)	fail backup rename
-run/switches.t	130	ok	(missing)	fail final rename
-run/switches.t	120	ok	(missing)	file successfully saved after chdir
-run/switches.t	126	ok	(missing)	file successfully saved after fork
-run/switches.t	124	ok	(missing)	fork while in-place editing
-run/switches.t	116	ok	(missing)	no errors or warnings
-run/switches.t	129	ok	(missing)	no extra files
-run/switches.t	109	ok	(missing)	no warning when files given
-run/switches.t	110	ok	(missing)	no warnings/errors without backup extension
-run/switches.t	119	ok	(missing)	open out file
-run/switches.t	125	ok	(missing)	open out file
-run/switches.t	29	ok	not ok	perl -V:osname
-run/switches.t	31	ok	not ok	perl -V:re got a result
-run/switches.t	30	ok	not ok	perl -V:unknown var
-run/switches.t	121	ok	(missing)	skip Need threads and full perl
-run/switches.t	122	ok	(missing)	skip Need threads and full perl
-run/switches.t	123	ok	(missing)	skip Need threads and full perl
-run/switches.t	131	ok	(missing)	skip Testing without *at functions
-run/switches.t	108	ok	(missing)	warning when no files given
-run/switchn.t	0	(none)	renumbered	*summary*
-run/switchn.t	1	ok	not ok	Checking line 1
-run/switchn.t	2	ok	(missing)	Checking line 2
-run/switchp.t	1	ok	(missing)	-p switch first iteration
-run/switchp.t	2	ok	(missing)	-p switch second iteration
-run/switchx.t	0	(none)	renumbered	*summary*
-run/switchx.t	8	ok	not ok	-x and -e gives expected error
-run/switchx.t	1	ok	not ok [PCL #6]	Correct line number
-run/switchx.t	5	ok	(missing)	Second test file utilized
-run/switchx.t	2	ok	(missing)	Test file exists
-run/switchx.t	3	ok	(missing)	Test file utilized
-run/switchx.t	7	ok	not ok	Test program dies
-run/switchx.t	6	ok	(missing)	Test the error message when -x can't find a \#!perl line
-run/switchx.t	4	ok	(missing)	perl -l option tested
+run/cloexec.t	0	(none)	extra [PCL #18]	*extra* child return code=0 (zero means inherited fd=5 ok)	#1707
+run/cloexec.t	0	(none)	extra [PCL #15]	*extra* child stdout: fd	#1707
+run/cloexec.t	0	(none)	extra [PCL #21]	*extra* child stdout: fd	#1707
+run/cloexec.t	0	(none)	extra [PCL #14]	*extra* child stdout: has 1 newline (rc=0, should be non-zero)	#1707
+run/cloexec.t	0	(none)	extra [PCL #19]	*extra* child stdout: has 2 newlines	#1707
+run/cloexec.t	0	(none)	extra [PCL #22]	*extra* child stdout: line 1	#1707
+run/cloexec.t	0	(none)	extra [PCL #20]	*extra* child stdout: split into 2 lines	#1707
+run/cloexec.t	0	(none)	extra [PCL #12]	*extra* parent open fd=5 ($^F=4)	#1707
+run/cloexec.t	0	(none)	extra [PCL #16]	*extra* parent open fd=5 ($^F=5)	#1707
+run/cloexec.t	0	(none)	extra [PCL #13]	*extra* tmpfile '/tmp/pcl-test-TMPFILE' exists	#1707
+run/cloexec.t	0	(none)	extra [PCL #17]	*extra* tmpfile '/tmp/pcl-test-TMPFILE' exists	#1707
+run/cloexec.t	0	(none)	renumbered	*summary*	#1707
+run/cloexec.t	7	ok	(missing)	child return code=0 (zero means inherited fd=3 ok)	#1707
+run/cloexec.t	10	ok	(missing)	child stdout: fd	#1707
+run/cloexec.t	15	ok	(missing)	child stdout: fd	#1707
+run/cloexec.t	14	ok	(missing)	child stdout: has 1 newline (rc=9, should be non-zero)	#1707
+run/cloexec.t	8	ok	(missing)	child stdout: has 2 newlines	#1707
+run/cloexec.t	19	ok	not ok [PCL #8]	child stdout: has 2 newlines	#1707
+run/cloexec.t	11	ok	(missing)	child stdout: line 1	#1707
+run/cloexec.t	22	ok	not ok [PCL #11]	child stdout: line 1	#1707
+run/cloexec.t	9	ok	(missing)	child stdout: split into 2 lines	#1707
+run/cloexec.t	20	ok	not ok [PCL #9]	child stdout: split into 2 lines	#1707
+run/cloexec.t	12	ok	(missing)	parent open fd=4 ($^F=3)	#1707
+run/cloexec.t	16	ok	(missing)	parent open fd=4 ($^F=4)	#1707
+run/cloexec.t	13	ok	(missing)	tmpfile 'tmp_TMPFILE' exists	#1707
+run/cloexec.t	17	ok	(missing)	tmpfile 'tmp_TMPFILE' exists	#1707
+run/exit.t	3	ok	not ok	Normal exit ${^CHILD_ERROR_NATIVE}	NS:`fork` caveat 2 -- a fork-then-continue child is an SBCL process, so `$? & 127` reads 0 where perl shows the signal number; ${^CHILD_ERROR_NATIVE} is absent
+run/exit.t	10	ok	not ok	Term by signal	NS:`fork` caveat 2 -- a fork-then-continue child is an SBCL process, so `$? & 127` reads 0 where perl shows the signal number; ${^CHILD_ERROR_NATIVE} is absent
+run/exit.t	12	ok	not ok	Term by signal $?	NS:`fork` caveat 2 -- a fork-then-continue child is an SBCL process, so `$? & 127` reads 0 where perl shows the signal number; ${^CHILD_ERROR_NATIVE} is absent
+run/locale.t	0	ok*	(no TAP)	*summary*	#1705
+run/noswitch.t	2	ok	not ok	read from aliased DATA filehandle	#1702
+run/runenv_hashseed.t	278	ok	(missing)	mode = DETERMINISTIC same key order with different seed no more than 2 times	#1590
+run/runenv_hashseed.t	70	ok	(missing)	mode = DETERMINISTIC, try  1: base run set the mode digit as expected	#1590
+run/runenv_hashseed.t	71	ok	(missing)	mode = DETERMINISTIC, try  1: base run set the mode name as expected	#1590
+run/runenv_hashseed.t	76	ok	(missing)	mode = DETERMINISTIC, try  1: mode digits match between retries	#1590
+run/runenv_hashseed.t	77	ok	(missing)	mode = DETERMINISTIC, try  1: mode names match between retries	#1590
+run/runenv_hashseed.t	78	ok	(missing)	mode = DETERMINISTIC, try  1: results in the same key order each time	#1590
+run/runenv_hashseed.t	73	ok	(missing)	mode = DETERMINISTIC, try  1: retry 1 set the mode by name as expected	#1590
+run/runenv_hashseed.t	72	ok	(missing)	mode = DETERMINISTIC, try  1: retry 1 set the seed as expected	#1590
+run/runenv_hashseed.t	74	ok	(missing)	mode = DETERMINISTIC, try  1: retry 2 set the mode by digit as expected	#1590
+run/runenv_hashseed.t	75	ok	(missing)	mode = DETERMINISTIC, try  1: seeds match between retries	#1590
+run/runenv_hashseed.t	82	ok	(missing)	mode = DETERMINISTIC, try  2: results in the same key order each time	#1590
+run/runenv_hashseed.t	86	ok	(missing)	mode = DETERMINISTIC, try  3: results in the same key order each time	#1590
+run/runenv_hashseed.t	90	ok	(missing)	mode = DETERMINISTIC, try  4: results in the same key order each time	#1590
+run/runenv_hashseed.t	94	ok	(missing)	mode = DETERMINISTIC, try  5: results in the same key order each time	#1590
+run/runenv_hashseed.t	98	ok	(missing)	mode = DETERMINISTIC, try  6: results in the same key order each time	#1590
+run/runenv_hashseed.t	102	ok	(missing)	mode = DETERMINISTIC, try  7: results in the same key order each time	#1590
+run/runenv_hashseed.t	106	ok	(missing)	mode = DETERMINISTIC, try  8: results in the same key order each time	#1590
+run/runenv_hashseed.t	110	ok	(missing)	mode = DETERMINISTIC, try  9: results in the same key order each time	#1590
+run/runenv_hashseed.t	114	ok	(missing)	mode = DETERMINISTIC, try 10: results in the same key order each time	#1590
+run/runenv_hashseed.t	118	ok	(missing)	mode = DETERMINISTIC, try 11: results in the same key order each time	#1590
+run/runenv_hashseed.t	122	ok	(missing)	mode = DETERMINISTIC, try 12: results in the same key order each time	#1590
+run/runenv_hashseed.t	126	ok	(missing)	mode = DETERMINISTIC, try 13: results in the same key order each time	#1590
+run/runenv_hashseed.t	130	ok	(missing)	mode = DETERMINISTIC, try 14: results in the same key order each time	#1590
+run/runenv_hashseed.t	134	ok	(missing)	mode = DETERMINISTIC, try 15: results in the same key order each time	#1590
+run/runenv_hashseed.t	138	ok	(missing)	mode = DETERMINISTIC, try 16: results in the same key order each time	#1590
+run/runenv_hashseed.t	142	ok	(missing)	mode = DETERMINISTIC, try 17: results in the same key order each time	#1590
+run/runenv_hashseed.t	146	ok	(missing)	mode = DETERMINISTIC, try 18: results in the same key order each time	#1590
+run/runenv_hashseed.t	150	ok	(missing)	mode = DETERMINISTIC, try 19: results in the same key order each time	#1590
+run/runenv_hashseed.t	154	ok	(missing)	mode = DETERMINISTIC, try 20: results in the same key order each time	#1590
+run/runenv_hashseed.t	158	ok	(missing)	mode = DETERMINISTIC, try 21: results in the same key order each time	#1590
+run/runenv_hashseed.t	162	ok	(missing)	mode = DETERMINISTIC, try 22: results in the same key order each time	#1590
+run/runenv_hashseed.t	166	ok	(missing)	mode = DETERMINISTIC, try 23: results in the same key order each time	#1590
+run/runenv_hashseed.t	170	ok	(missing)	mode = DETERMINISTIC, try 24: results in the same key order each time	#1590
+run/runenv_hashseed.t	174	ok	(missing)	mode = DETERMINISTIC, try 25: results in the same key order each time	#1590
+run/runenv_hashseed.t	178	ok	(missing)	mode = DETERMINISTIC, try 26: results in the same key order each time	#1590
+run/runenv_hashseed.t	182	ok	(missing)	mode = DETERMINISTIC, try 27: results in the same key order each time	#1590
+run/runenv_hashseed.t	186	ok	(missing)	mode = DETERMINISTIC, try 28: results in the same key order each time	#1590
+run/runenv_hashseed.t	190	ok	(missing)	mode = DETERMINISTIC, try 29: results in the same key order each time	#1590
+run/runenv_hashseed.t	194	ok	(missing)	mode = DETERMINISTIC, try 30: results in the same key order each time	#1590
+run/runenv_hashseed.t	198	ok	(missing)	mode = DETERMINISTIC, try 31: results in the same key order each time	#1590
+run/runenv_hashseed.t	202	ok	(missing)	mode = DETERMINISTIC, try 32: results in the same key order each time	#1590
+run/runenv_hashseed.t	206	ok	(missing)	mode = DETERMINISTIC, try 33: results in the same key order each time	#1590
+run/runenv_hashseed.t	210	ok	(missing)	mode = DETERMINISTIC, try 34: results in the same key order each time	#1590
+run/runenv_hashseed.t	214	ok	(missing)	mode = DETERMINISTIC, try 35: results in the same key order each time	#1590
+run/runenv_hashseed.t	218	ok	(missing)	mode = DETERMINISTIC, try 36: results in the same key order each time	#1590
+run/runenv_hashseed.t	222	ok	(missing)	mode = DETERMINISTIC, try 37: results in the same key order each time	#1590
+run/runenv_hashseed.t	226	ok	(missing)	mode = DETERMINISTIC, try 38: results in the same key order each time	#1590
+run/runenv_hashseed.t	230	ok	(missing)	mode = DETERMINISTIC, try 39: results in the same key order each time	#1590
+run/runenv_hashseed.t	234	ok	(missing)	mode = DETERMINISTIC, try 40: results in the same key order each time	#1590
+run/runenv_hashseed.t	238	ok	(missing)	mode = DETERMINISTIC, try 41: results in the same key order each time	#1590
+run/runenv_hashseed.t	242	ok	(missing)	mode = DETERMINISTIC, try 42: results in the same key order each time	#1590
+run/runenv_hashseed.t	246	ok	(missing)	mode = DETERMINISTIC, try 43: results in the same key order each time	#1590
+run/runenv_hashseed.t	250	ok	(missing)	mode = DETERMINISTIC, try 44: results in the same key order each time	#1590
+run/runenv_hashseed.t	254	ok	(missing)	mode = DETERMINISTIC, try 45: results in the same key order each time	#1590
+run/runenv_hashseed.t	258	ok	(missing)	mode = DETERMINISTIC, try 46: results in the same key order each time	#1590
+run/runenv_hashseed.t	262	ok	(missing)	mode = DETERMINISTIC, try 47: results in the same key order each time	#1590
+run/runenv_hashseed.t	266	ok	(missing)	mode = DETERMINISTIC, try 48: results in the same key order each time	#1590
+run/runenv_hashseed.t	270	ok	(missing)	mode = DETERMINISTIC, try 49: results in the same key order each time	#1590
+run/runenv_hashseed.t	274	ok	(missing)	mode = DETERMINISTIC, try 50: results in the same key order each time	#1590
+run/runenv_hashseed.t	59	ok	(missing)	mode = NO same key order with different seed no more than 2 times	#1590
+run/runenv_hashseed.t	10	ok	(missing)	mode = NO, try  2: results in the same key order each time	#1590
+run/runenv_hashseed.t	11	ok	(missing)	mode = NO, try  3: results in the same key order each time	#1590
+run/runenv_hashseed.t	12	ok	(missing)	mode = NO, try  4: results in the same key order each time	#1590
+run/runenv_hashseed.t	13	ok	(missing)	mode = NO, try  5: results in the same key order each time	#1590
+run/runenv_hashseed.t	14	ok	(missing)	mode = NO, try  6: results in the same key order each time	#1590
+run/runenv_hashseed.t	15	ok	(missing)	mode = NO, try  7: results in the same key order each time	#1590
+run/runenv_hashseed.t	16	ok	(missing)	mode = NO, try  8: results in the same key order each time	#1590
+run/runenv_hashseed.t	17	ok	(missing)	mode = NO, try  9: results in the same key order each time	#1590
+run/runenv_hashseed.t	18	ok	(missing)	mode = NO, try 10: results in the same key order each time	#1590
+run/runenv_hashseed.t	19	ok	(missing)	mode = NO, try 11: results in the same key order each time	#1590
+run/runenv_hashseed.t	20	ok	(missing)	mode = NO, try 12: results in the same key order each time	#1590
+run/runenv_hashseed.t	21	ok	(missing)	mode = NO, try 13: results in the same key order each time	#1590
+run/runenv_hashseed.t	22	ok	(missing)	mode = NO, try 14: results in the same key order each time	#1590
+run/runenv_hashseed.t	23	ok	(missing)	mode = NO, try 15: results in the same key order each time	#1590
+run/runenv_hashseed.t	24	ok	(missing)	mode = NO, try 16: results in the same key order each time	#1590
+run/runenv_hashseed.t	25	ok	(missing)	mode = NO, try 17: results in the same key order each time	#1590
+run/runenv_hashseed.t	26	ok	(missing)	mode = NO, try 18: results in the same key order each time	#1590
+run/runenv_hashseed.t	27	ok	(missing)	mode = NO, try 19: results in the same key order each time	#1590
+run/runenv_hashseed.t	28	ok	(missing)	mode = NO, try 20: results in the same key order each time	#1590
+run/runenv_hashseed.t	29	ok	(missing)	mode = NO, try 21: results in the same key order each time	#1590
+run/runenv_hashseed.t	30	ok	(missing)	mode = NO, try 22: results in the same key order each time	#1590
+run/runenv_hashseed.t	31	ok	(missing)	mode = NO, try 23: results in the same key order each time	#1590
+run/runenv_hashseed.t	32	ok	(missing)	mode = NO, try 24: results in the same key order each time	#1590
+run/runenv_hashseed.t	33	ok	(missing)	mode = NO, try 25: results in the same key order each time	#1590
+run/runenv_hashseed.t	34	ok	(missing)	mode = NO, try 26: results in the same key order each time	#1590
+run/runenv_hashseed.t	35	ok	(missing)	mode = NO, try 27: results in the same key order each time	#1590
+run/runenv_hashseed.t	36	ok	(missing)	mode = NO, try 28: results in the same key order each time	#1590
+run/runenv_hashseed.t	37	ok	(missing)	mode = NO, try 29: results in the same key order each time	#1590
+run/runenv_hashseed.t	38	ok	(missing)	mode = NO, try 30: results in the same key order each time	#1590
+run/runenv_hashseed.t	39	ok	(missing)	mode = NO, try 31: results in the same key order each time	#1590
+run/runenv_hashseed.t	40	ok	(missing)	mode = NO, try 32: results in the same key order each time	#1590
+run/runenv_hashseed.t	41	ok	(missing)	mode = NO, try 33: results in the same key order each time	#1590
+run/runenv_hashseed.t	42	ok	(missing)	mode = NO, try 34: results in the same key order each time	#1590
+run/runenv_hashseed.t	43	ok	(missing)	mode = NO, try 35: results in the same key order each time	#1590
+run/runenv_hashseed.t	44	ok	(missing)	mode = NO, try 36: results in the same key order each time	#1590
+run/runenv_hashseed.t	45	ok	(missing)	mode = NO, try 37: results in the same key order each time	#1590
+run/runenv_hashseed.t	46	ok	(missing)	mode = NO, try 38: results in the same key order each time	#1590
+run/runenv_hashseed.t	47	ok	(missing)	mode = NO, try 39: results in the same key order each time	#1590
+run/runenv_hashseed.t	48	ok	(missing)	mode = NO, try 40: results in the same key order each time	#1590
+run/runenv_hashseed.t	49	ok	(missing)	mode = NO, try 41: results in the same key order each time	#1590
+run/runenv_hashseed.t	50	ok	(missing)	mode = NO, try 42: results in the same key order each time	#1590
+run/runenv_hashseed.t	51	ok	(missing)	mode = NO, try 43: results in the same key order each time	#1590
+run/runenv_hashseed.t	52	ok	(missing)	mode = NO, try 44: results in the same key order each time	#1590
+run/runenv_hashseed.t	53	ok	(missing)	mode = NO, try 45: results in the same key order each time	#1590
+run/runenv_hashseed.t	54	ok	(missing)	mode = NO, try 46: results in the same key order each time	#1590
+run/runenv_hashseed.t	55	ok	(missing)	mode = NO, try 47: results in the same key order each time	#1590
+run/runenv_hashseed.t	56	ok	(missing)	mode = NO, try 48: results in the same key order each time	#1590
+run/runenv_hashseed.t	57	ok	(missing)	mode = NO, try 49: results in the same key order each time	#1590
+run/runenv_hashseed.t	58	ok	(missing)	mode = NO, try 50: results in the same key order each time	#1590
+run/runenv_hashseed.t	68	ok	(missing)	mode = RANDOM same key order no more than 2 times	#1590
+run/runenv_hashseed.t	69	ok	(missing)	mode = RANDOM same key order with different seed no more than 2 times	#1590
+run/runenv_hashseed.t	60	ok	(missing)	mode = RANDOM, try  1: base run set the mode digit as expected	#1590
+run/runenv_hashseed.t	61	ok	(missing)	mode = RANDOM, try  1: base run set the mode name as expected	#1590
+run/runenv_hashseed.t	66	ok	(missing)	mode = RANDOM, try  1: mode digits match between retries	#1590
+run/runenv_hashseed.t	67	ok	(missing)	mode = RANDOM, try  1: mode names match between retries	#1590
+run/runenv_hashseed.t	63	ok	(missing)	mode = RANDOM, try  1: retry 1 set the mode by name as expected	#1590
+run/runenv_hashseed.t	62	ok	(missing)	mode = RANDOM, try  1: retry 1 set the seed as expected	#1590
+run/runenv_hashseed.t	64	ok	(missing)	mode = RANDOM, try  1: retry 2 set the mode by digit as expected	#1590
+run/runenv_hashseed.t	65	ok	(missing)	mode = RANDOM, try  1: seeds match between retries	#1590
+run/runenv_hashseed.t	79	ok	(missing)	skip mode = DETERMINISTIC, try  1: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	80	ok	(missing)	skip mode = DETERMINISTIC, try  1: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	81	ok	(missing)	skip mode = DETERMINISTIC, try  1: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	83	ok	(missing)	skip mode = DETERMINISTIC, try  2: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	84	ok	(missing)	skip mode = DETERMINISTIC, try  2: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	85	ok	(missing)	skip mode = DETERMINISTIC, try  2: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	87	ok	(missing)	skip mode = DETERMINISTIC, try  3: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	88	ok	(missing)	skip mode = DETERMINISTIC, try  3: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	89	ok	(missing)	skip mode = DETERMINISTIC, try  3: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	91	ok	(missing)	skip mode = DETERMINISTIC, try  4: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	92	ok	(missing)	skip mode = DETERMINISTIC, try  4: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	93	ok	(missing)	skip mode = DETERMINISTIC, try  4: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	95	ok	(missing)	skip mode = DETERMINISTIC, try  5: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	96	ok	(missing)	skip mode = DETERMINISTIC, try  5: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	97	ok	(missing)	skip mode = DETERMINISTIC, try  5: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	99	ok	(missing)	skip mode = DETERMINISTIC, try  6: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	100	ok	(missing)	skip mode = DETERMINISTIC, try  6: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	101	ok	(missing)	skip mode = DETERMINISTIC, try  6: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	103	ok	(missing)	skip mode = DETERMINISTIC, try  7: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	104	ok	(missing)	skip mode = DETERMINISTIC, try  7: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	105	ok	(missing)	skip mode = DETERMINISTIC, try  7: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	107	ok	(missing)	skip mode = DETERMINISTIC, try  8: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	108	ok	(missing)	skip mode = DETERMINISTIC, try  8: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	109	ok	(missing)	skip mode = DETERMINISTIC, try  8: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	111	ok	(missing)	skip mode = DETERMINISTIC, try  9: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	112	ok	(missing)	skip mode = DETERMINISTIC, try  9: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	113	ok	(missing)	skip mode = DETERMINISTIC, try  9: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	115	ok	(missing)	skip mode = DETERMINISTIC, try 10: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	116	ok	(missing)	skip mode = DETERMINISTIC, try 10: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	117	ok	(missing)	skip mode = DETERMINISTIC, try 10: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	119	ok	(missing)	skip mode = DETERMINISTIC, try 11: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	120	ok	(missing)	skip mode = DETERMINISTIC, try 11: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	121	ok	(missing)	skip mode = DETERMINISTIC, try 11: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	123	ok	(missing)	skip mode = DETERMINISTIC, try 12: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	124	ok	(missing)	skip mode = DETERMINISTIC, try 12: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	125	ok	(missing)	skip mode = DETERMINISTIC, try 12: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	127	ok	(missing)	skip mode = DETERMINISTIC, try 13: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	128	ok	(missing)	skip mode = DETERMINISTIC, try 13: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	129	ok	(missing)	skip mode = DETERMINISTIC, try 13: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	131	ok	(missing)	skip mode = DETERMINISTIC, try 14: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	132	ok	(missing)	skip mode = DETERMINISTIC, try 14: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	133	ok	(missing)	skip mode = DETERMINISTIC, try 14: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	135	ok	(missing)	skip mode = DETERMINISTIC, try 15: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	136	ok	(missing)	skip mode = DETERMINISTIC, try 15: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	137	ok	(missing)	skip mode = DETERMINISTIC, try 15: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	139	ok	(missing)	skip mode = DETERMINISTIC, try 16: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	140	ok	(missing)	skip mode = DETERMINISTIC, try 16: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	141	ok	(missing)	skip mode = DETERMINISTIC, try 16: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	143	ok	(missing)	skip mode = DETERMINISTIC, try 17: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	144	ok	(missing)	skip mode = DETERMINISTIC, try 17: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	145	ok	(missing)	skip mode = DETERMINISTIC, try 17: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	147	ok	(missing)	skip mode = DETERMINISTIC, try 18: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	148	ok	(missing)	skip mode = DETERMINISTIC, try 18: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	149	ok	(missing)	skip mode = DETERMINISTIC, try 18: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	151	ok	(missing)	skip mode = DETERMINISTIC, try 19: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	152	ok	(missing)	skip mode = DETERMINISTIC, try 19: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	153	ok	(missing)	skip mode = DETERMINISTIC, try 19: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	155	ok	(missing)	skip mode = DETERMINISTIC, try 20: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	156	ok	(missing)	skip mode = DETERMINISTIC, try 20: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	157	ok	(missing)	skip mode = DETERMINISTIC, try 20: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	159	ok	(missing)	skip mode = DETERMINISTIC, try 21: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	160	ok	(missing)	skip mode = DETERMINISTIC, try 21: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	161	ok	(missing)	skip mode = DETERMINISTIC, try 21: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	163	ok	(missing)	skip mode = DETERMINISTIC, try 22: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	164	ok	(missing)	skip mode = DETERMINISTIC, try 22: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	165	ok	(missing)	skip mode = DETERMINISTIC, try 22: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	167	ok	(missing)	skip mode = DETERMINISTIC, try 23: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	168	ok	(missing)	skip mode = DETERMINISTIC, try 23: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	169	ok	(missing)	skip mode = DETERMINISTIC, try 23: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	171	ok	(missing)	skip mode = DETERMINISTIC, try 24: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	172	ok	(missing)	skip mode = DETERMINISTIC, try 24: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	173	ok	(missing)	skip mode = DETERMINISTIC, try 24: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	175	ok	(missing)	skip mode = DETERMINISTIC, try 25: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	176	ok	(missing)	skip mode = DETERMINISTIC, try 25: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	177	ok	(missing)	skip mode = DETERMINISTIC, try 25: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	179	ok	(missing)	skip mode = DETERMINISTIC, try 26: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	180	ok	(missing)	skip mode = DETERMINISTIC, try 26: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	181	ok	(missing)	skip mode = DETERMINISTIC, try 26: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	183	ok	(missing)	skip mode = DETERMINISTIC, try 27: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	184	ok	(missing)	skip mode = DETERMINISTIC, try 27: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	185	ok	(missing)	skip mode = DETERMINISTIC, try 27: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	187	ok	(missing)	skip mode = DETERMINISTIC, try 28: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	188	ok	(missing)	skip mode = DETERMINISTIC, try 28: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	189	ok	(missing)	skip mode = DETERMINISTIC, try 28: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	191	ok	(missing)	skip mode = DETERMINISTIC, try 29: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	192	ok	(missing)	skip mode = DETERMINISTIC, try 29: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	193	ok	(missing)	skip mode = DETERMINISTIC, try 29: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	195	ok	(missing)	skip mode = DETERMINISTIC, try 30: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	196	ok	(missing)	skip mode = DETERMINISTIC, try 30: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	197	ok	(missing)	skip mode = DETERMINISTIC, try 30: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	199	ok	(missing)	skip mode = DETERMINISTIC, try 31: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	200	ok	(missing)	skip mode = DETERMINISTIC, try 31: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	201	ok	(missing)	skip mode = DETERMINISTIC, try 31: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	203	ok	(missing)	skip mode = DETERMINISTIC, try 32: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	204	ok	(missing)	skip mode = DETERMINISTIC, try 32: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	205	ok	(missing)	skip mode = DETERMINISTIC, try 32: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	207	ok	(missing)	skip mode = DETERMINISTIC, try 33: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	208	ok	(missing)	skip mode = DETERMINISTIC, try 33: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	209	ok	(missing)	skip mode = DETERMINISTIC, try 33: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	211	ok	(missing)	skip mode = DETERMINISTIC, try 34: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	212	ok	(missing)	skip mode = DETERMINISTIC, try 34: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	213	ok	(missing)	skip mode = DETERMINISTIC, try 34: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	215	ok	(missing)	skip mode = DETERMINISTIC, try 35: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	216	ok	(missing)	skip mode = DETERMINISTIC, try 35: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	217	ok	(missing)	skip mode = DETERMINISTIC, try 35: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	219	ok	(missing)	skip mode = DETERMINISTIC, try 36: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	220	ok	(missing)	skip mode = DETERMINISTIC, try 36: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	221	ok	(missing)	skip mode = DETERMINISTIC, try 36: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	223	ok	(missing)	skip mode = DETERMINISTIC, try 37: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	224	ok	(missing)	skip mode = DETERMINISTIC, try 37: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	225	ok	(missing)	skip mode = DETERMINISTIC, try 37: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	227	ok	(missing)	skip mode = DETERMINISTIC, try 38: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	228	ok	(missing)	skip mode = DETERMINISTIC, try 38: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	229	ok	(missing)	skip mode = DETERMINISTIC, try 38: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	231	ok	(missing)	skip mode = DETERMINISTIC, try 39: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	232	ok	(missing)	skip mode = DETERMINISTIC, try 39: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	233	ok	(missing)	skip mode = DETERMINISTIC, try 39: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	235	ok	(missing)	skip mode = DETERMINISTIC, try 40: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	236	ok	(missing)	skip mode = DETERMINISTIC, try 40: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	237	ok	(missing)	skip mode = DETERMINISTIC, try 40: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	239	ok	(missing)	skip mode = DETERMINISTIC, try 41: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	240	ok	(missing)	skip mode = DETERMINISTIC, try 41: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	241	ok	(missing)	skip mode = DETERMINISTIC, try 41: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	243	ok	(missing)	skip mode = DETERMINISTIC, try 42: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	244	ok	(missing)	skip mode = DETERMINISTIC, try 42: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	245	ok	(missing)	skip mode = DETERMINISTIC, try 42: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	247	ok	(missing)	skip mode = DETERMINISTIC, try 43: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	248	ok	(missing)	skip mode = DETERMINISTIC, try 43: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	249	ok	(missing)	skip mode = DETERMINISTIC, try 43: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	251	ok	(missing)	skip mode = DETERMINISTIC, try 44: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	252	ok	(missing)	skip mode = DETERMINISTIC, try 44: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	253	ok	(missing)	skip mode = DETERMINISTIC, try 44: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	255	ok	(missing)	skip mode = DETERMINISTIC, try 45: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	256	ok	(missing)	skip mode = DETERMINISTIC, try 45: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	257	ok	(missing)	skip mode = DETERMINISTIC, try 45: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	259	ok	(missing)	skip mode = DETERMINISTIC, try 46: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	260	ok	(missing)	skip mode = DETERMINISTIC, try 46: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	261	ok	(missing)	skip mode = DETERMINISTIC, try 46: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	263	ok	(missing)	skip mode = DETERMINISTIC, try 47: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	264	ok	(missing)	skip mode = DETERMINISTIC, try 47: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	265	ok	(missing)	skip mode = DETERMINISTIC, try 47: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	267	ok	(missing)	skip mode = DETERMINISTIC, try 48: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	268	ok	(missing)	skip mode = DETERMINISTIC, try 48: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	269	ok	(missing)	skip mode = DETERMINISTIC, try 48: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	271	ok	(missing)	skip mode = DETERMINISTIC, try 49: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	272	ok	(missing)	skip mode = DETERMINISTIC, try 49: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	273	ok	(missing)	skip mode = DETERMINISTIC, try 49: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	275	ok	(missing)	skip mode = DETERMINISTIC, try 50: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	276	ok	(missing)	skip mode = DETERMINISTIC, try 50: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_hashseed.t	277	ok	(missing)	skip mode = DETERMINISTIC, try 50: not testing rand bits, not a DEBUGGING perl	#1590
+run/runenv_randseed.t	1	ok	not ok	Test randomness with PERL_RAND_SEED=1	#1236
+run/runenv_randseed.t	2	ok	not ok	Test randomness with PERL_RAND_SEED=1	#1236
+run/runenv_randseed.t	3	ok	not ok	Test randomness with PERL_RAND_SEED=2	#1236
+run/runenv_randseed.t	4	ok	not ok	Test randomness with PERL_RAND_SEED=2	#1236
+run/runenv_randseed.t	7	ok	not ok	Works as expected with forks.	#1236
+run/runenv_randseed.t	9	ok	not ok	Works as expected with forks.	#1236
+run/switch0.t	1	ok	not ok	$/ set to 0 via switch	#1702
+run/switchC.t	2	ok	not ok	-C2: no warning on UTF-8 output	#1272
+run/switchC.t	3	ok	not ok	-CI: read in UTF-8 input	#1272
+run/switchC.t	1	ok	not ok	-CO: no warning on UTF-8 output	#1272
+run/switchC.t	6	ok	not ok	-Ci: auto-UTF-8 open for input	#1272
+run/switchC.t	7	ok	not ok	-Ci: auto-UTF-8 open for input affects the current file	#1272
+run/switchC.t	5	ok	not ok	-Co: auto-UTF-8 open for output	#1272
+run/switchC.t	10	ok	not ok	\#!perl -C	#1272
+run/switchC.t	14	ok	not ok	\#!perl -C but not command line	#1272
+run/switchC.t	11	ok	not ok	\#!perl -C followed by another switch	#1272
+run/switchC.t	13	ok	not ok	\#!perl -C with different -C on command line	#1272
+run/switchC.t	12	ok	not ok	\#!perl -C<num> followed by another switch	#1272
+run/switchC.t	15	ok	not ok	perl -C00 [perl \#123991]	#1272
+run/switchF.t	1	ok	not ok	line 1	#1702
+run/switchF.t	2	ok	(missing)	line 2	#1702
+run/switchI.t	3	ok	not ok	-I	#1708
+run/switchI.t	4	ok	not ok	-I with colons	#1708
+run/switchI.t	1	ok	not ok	Identified entry in @INC	#1702
+run/switchI.t	2	ok	not ok	Identified entry in @INC with double colons	#1702
+run/switchM.t	1	ok	not ok	Ensure -Irun/flib produces correct filename in warnings	#1708
+run/switchM.t	2	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings	#1708
+run/switchM.t	3	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings with space after -M	#1708
+run/switcha.t	2	ok	(missing)	testing split of string 'not ok 3'	#1702
+run/switcha.t	1	ok	not ok	testing split of string 'not ok'	#1702
+run/switchd-78586.t	1	ok	not ok	[at t/run/switchd-78586.t line 31]	#1706
+run/switchd-78586.t	2	ok	not ok	[at t/run/switchd-78586.t line 39]	#1706
+run/switchd.t	16	ok	not ok	%DB::lsub is not vivified	#1706
+run/switchd.t	13	ok	not ok	Copy on write does not mangle ${"_<-e"}[0] [perl \#118627]	#1706
+run/switchd.t	11	ok	not ok	DB::DB works after '*DB::DB if 0'	#1706
+run/switchd.t	15	ok	not ok	DB::goto	#1706
+run/switchd.t	1	ok	not ok	Got debugging output: 1	#1706
+run/switchd.t	2	ok	not ok	Got debugging output: 2	#1706
+run/switchd.t	3	ok	not ok	Got debugging output: 3	#1706
+run/switchd.t	10	ok	not ok	No crash when &DB::DB exists but isn't actually defined	#1706
+run/switchd.t	9	ok	not ok	No crash when *DB::DB exists but not &DB::DB	#1706
+run/switchd.t	8	ok	not ok	No crash when calling orphaned subroutine via goto &	#1706
+run/switchd.t	14	ok	not ok	PERL5DB with embedded newlines	#1706
+run/switchd.t	12	ok	not ok	Recursive DB::DB does not clobber its own pad	#1706
+run/switchd.t	6	ok	not ok	Subroutine redefinition works in the debugger [perl \#48332]	#1706
+run/switchd.t	7	ok	not ok	Subroutines no longer found under their names can be called	#1706
+run/switchd.t	4	ok	not ok	The debugger can see the lines of the main program under \#!perl -d	#1706
+run/switchd.t	18	ok	not ok	UTF8 length caches on $DB::sub are flushed	#1706
+run/switchd.t	5	ok	not ok	\#!perl -d:whatever does not throw line numbers off	#1706
+run/switchd.t	21	ok	not ok	putenv does not interfere with PERL5OPT parsing	#1706
+run/switchd.t	17	ok	not ok	setting breakpoints without *DB::dbline aliased	#1706
+run/switches.t	7	ok	not ok	$/ set at compile-time	#1709
+run/switches.t	1	ok	not ok	-0	#1709
+run/switches.t	2	ok	not ok	-0 after a -l	#1709
+run/switches.t	3	ok	not ok	-0 before a -l	#1709
+run/switches.t	5	ok	not ok	-00 (paragraph mode)	#1709
+run/switches.t	6	ok	not ok	-0777 (slurp mode)	#1709
+run/switches.t	80	ok	not ok	-1 correctly unknown	#1709
+run/switches.t	81	ok	not ok	-1 unrecognised on \#! line	#1702
+run/switches.t	82	ok	not ok	-2 correctly unknown	#1709
+run/switches.t	83	ok	not ok	-2 unrecognised on \#! line	#1702
+run/switches.t	84	ok	not ok	-3 correctly unknown	#1709
+run/switches.t	85	ok	not ok	-3 unrecognised on \#! line	#1702
+run/switches.t	86	ok	not ok	-4 correctly unknown	#1709
+run/switches.t	87	ok	not ok	-4 unrecognised on \#! line	#1702
+run/switches.t	88	ok	not ok	-5 correctly unknown	#1709
+run/switches.t	89	ok	not ok	-5 unrecognised on \#! line	#1702
+run/switches.t	90	ok	not ok	-6 correctly unknown	#1709
+run/switches.t	91	ok	not ok	-6 unrecognised on \#! line	#1702
+run/switches.t	92	ok	not ok	-7 correctly unknown	#1709
+run/switches.t	93	ok	not ok	-7 unrecognised on \#! line	#1702
+run/switches.t	94	ok	not ok	-8 correctly unknown	#1709
+run/switches.t	95	ok	not ok	-8 unrecognised on \#! line	#1702
+run/switches.t	96	ok	not ok	-9 correctly unknown	#1709
+run/switches.t	97	ok	not ok	-9 unrecognised on \#! line	#1702
+run/switches.t	35	ok	not ok	-? looks okay	#1709
+run/switches.t	36	ok	not ok	-A correctly unknown	#1709
+run/switches.t	37	ok	not ok	-A unrecognised on \#! line	#1702
+run/switches.t	38	ok	not ok	-B correctly unknown	#1709
+run/switches.t	39	ok	not ok	-B unrecognised on \#! line	#1702
+run/switches.t	135	ok	not ok	-E does not enable strictures	#1709
+run/switches.t	133	ok	not ok	-E enables 'reftype' builtin	#1709
+run/switches.t	132	ok	not ok	-E enables 'say' feature	#1709
+run/switches.t	103	ok	not ok	-E on \#! line	#1702
+run/switches.t	134	ok	not ok	-E works outside of the block created by -n	#1709
+run/switches.t	42	ok	not ok	-G correctly unknown	#1709
+run/switches.t	43	ok	not ok	-G unrecognised on \#! line	#1702
+run/switches.t	44	ok	not ok	-H correctly unknown	#1709
+run/switches.t	45	ok	not ok	-H unrecognised on \#! line	#1702
+run/switches.t	46	ok	not ok	-J correctly unknown	#1709
+run/switches.t	47	ok	not ok	-J unrecognised on \#! line	#1702
+run/switches.t	50	ok	not ok	-K correctly unknown	#1709
+run/switches.t	51	ok	not ok	-K unrecognised on \#! line	#1702
+run/switches.t	54	ok	not ok	-L correctly unknown	#1709
+run/switches.t	55	ok	not ok	-L unrecognised on \#! line	#1702
+run/switches.t	15	ok	not ok	-M	#1709
+run/switches.t	16	ok	not ok	-M with import parameter	#1709
+run/switches.t	24	ok	not ok	-M- not allowed	#1709
+run/switches.t	20	ok	not ok	-M:Foo not allowed	#1709
+run/switches.t	56	ok	not ok	-N correctly unknown	#1709
+run/switches.t	57	ok	not ok	-N unrecognised on \#! line	#1702
+run/switches.t	58	ok	not ok	-O correctly unknown	#1709
+run/switches.t	59	ok	not ok	-O unrecognised on \#! line	#1702
+run/switches.t	62	ok	not ok	-P correctly unknown	#1709
+run/switches.t	63	ok	not ok	-P unrecognised on \#! line	#1702
+run/switches.t	64	ok	not ok	-Q correctly unknown	#1709
+run/switches.t	65	ok	not ok	-Q unrecognised on \#! line	#1702
+run/switches.t	68	ok	not ok	-R correctly unknown	#1709
+run/switches.t	69	ok	not ok	-R unrecognised on \#! line	#1702
+run/switches.t	104	ok	not ok	-S on \#! line	#1702
+run/switches.t	27	ok	not ok	-V generates 20+ lines	#1709
+run/switches.t	28	ok	not ok	-V looks okay	#1709
+run/switches.t	105	ok	not ok	-V on \#! line	#1702
+run/switches.t	137	ok	not ok	-W	#1709
+run/switches.t	138	ok	not ok	-W with no warnings	#1709
+run/switches.t	72	ok	not ok	-Y correctly unknown	#1709
+run/switches.t	73	ok	not ok	-Y unrecognised on \#! line	#1702
+run/switches.t	76	ok	not ok	-Z correctly unknown	#1709
+run/switches.t	77	ok	not ok	-Z unrecognised on \#! line	#1702
+run/switches.t	98	ok	not ok	-_ correctly unknown	#1709
+run/switches.t	99	ok	not ok	-_ unrecognised on \#! line	#1702
+run/switches.t	40	ok	not ok	-b correctly unknown	#1709
+run/switches.t	41	ok	not ok	-b unrecognised on \#! line	#1702
+run/switches.t	9	ok	not ok	-c	#1709
+run/switches.t	100	ok	not ok	-e on \#! line	#1702
+run/switches.t	101	ok	not ok	-f on \#! line	#1702
+run/switches.t	8	ok	not ok	-g undefines $/ at compile-time	#1709
+run/switches.t	34	ok	not ok	-h looks okay	#1709
+run/switches.t	48	ok	not ok	-j correctly unknown	#1709
+run/switches.t	49	ok	not ok	-j unrecognised on \#! line	#1702
+run/switches.t	52	ok	not ok	-k correctly unknown	#1709
+run/switches.t	53	ok	not ok	-k unrecognised on \#! line	#1702
+run/switches.t	18	ok	not ok	-m with import parameters	#1709
+run/switches.t	23	ok	not ok	-m- not allowed	#1709
+run/switches.t	22	ok	not ok	-m-Foo:Bar not allowed	#1709
+run/switches.t	21	ok	not ok	-mFoo:Bar not allowed	#1709
+run/switches.t	60	ok	not ok	-o correctly unknown	#1709
+run/switches.t	61	ok	not ok	-o unrecognised on \#! line	#1702
+run/switches.t	66	ok	not ok	-q correctly unknown	#1709
+run/switches.t	67	ok	not ok	-q unrecognised on \#! line	#1702
+run/switches.t	70	ok	not ok	-r correctly unknown	#1709
+run/switches.t	71	ok	not ok	-r unrecognised on \#! line	#1702
+run/switches.t	13	ok	not ok	-s on the shebang line	#1709
+run/switches.t	12	ok	not ok	-s switch parsing	#1709
+run/switches.t	14	ok	not ok	-sn on the shebang line	#1709
+run/switches.t	33	ok	not ok	-v looks okay	#1709
+run/switches.t	102	ok	not ok	-x on \#! line	#1702
+run/switches.t	74	ok	not ok	-y correctly unknown	#1709
+run/switches.t	75	ok	not ok	-y unrecognised on \#! line	#1702
+run/switches.t	78	ok	not ok	-z correctly unknown	#1709
+run/switches.t	79	ok	not ok	-z unrecognised on \#! line	#1702
+run/switches.t	136	ok	not ok	Spaces on the \#! line (\#30660)	#1702
+run/switches.t	26	ok	not ok	\#!perl -M	#1702
+run/switches.t	25	ok	not ok	\#!perl -m	#1702
+run/switches.t	127	ok	not ok	fail backup rename	#1709
+run/switches.t	130	ok	not ok	fail final rename	#1709
+run/switches.t	126	ok	not ok	file successfully saved after fork	#1709
+run/switches.t	124	ok	not ok	fork while in-place editing	#1709
+run/switches.t	29	ok	not ok	perl -V:osname	#1709
+run/switches.t	31	ok	not ok	perl -V:re got a result	#1709
+run/switches.t	30	ok	not ok	perl -V:unknown var	#1709
+run/switches.t	131	ok	not ok	skip Testing without *at functions	#1709
+run/switches.t	108	ok	not ok	warning when no files given	#1709
+run/switchn.t	0	(none)	renumbered	*summary*	#1702
+run/switchn.t	1	ok	not ok	Checking line 1	#1702
+run/switchn.t	2	ok	(missing)	Checking line 2	#1702
+run/switchp.t	1	ok	(missing)	-p switch first iteration	#1702
+run/switchp.t	2	ok	(missing)	-p switch second iteration	#1702
+run/switchx.t	0	(none)	renumbered	*summary*	#1702
+run/switchx.t	8	ok	not ok	-x and -e gives expected error	#1702
+run/switchx.t	1	ok	not ok [PCL #6]	Correct line number	#1702
+run/switchx.t	5	ok	(missing)	Second test file utilized	#1702
+run/switchx.t	2	ok	(missing)	Test file exists	#1702
+run/switchx.t	3	ok	(missing)	Test file utilized	#1702
+run/switchx.t	7	ok	not ok	Test program dies	#1702
+run/switchx.t	6	ok	(missing)	Test the error message when -x can't find a \#!perl line	#1702
+run/switchx.t	4	ok	(missing)	perl -l option tested	#1702
 uni/attrs.t	0	(none)	renumbered	*summary*
 uni/attrs.t	31	ok	not ok [PCL #30]	Calling closure proto with (no) args
 uni/attrs.t	32	ok	not ok [PCL #31]	Calling closure proto with no @_ that returns a lexical
@@ -12818,8 +12750,8 @@ uni/write.t	8	ok	not ok	no such top format
 uni/write.t	1	ok	not ok	non-UTF8 literal / UTF8 item (1)
 uni/write.t	2	ok	not ok	non-UTF8 literal / UTF8 item (2)
 uni/write.t	5	ok	not ok	non-UTF8 literal / UTF8 multiline
-io/fs.t	40	ok	not ok	skip has futimes
-io/fs.t	53	ok	not ok	truncate(word) does not fall back to file name
+io/fs.t	40	ok	not ok	skip has futimes	#1710
+io/fs.t	53	ok	not ok	truncate(word) does not fall back to file name	#1710
 op/filetest.t	0	(none)	renumbered	*summary*
 op/filetest.t	18	ok	not ok	-d and -e: file at least exists
 op/filetest.t	19	ok	not ok	-e and -d: file at least exists
@@ -12888,7 +12820,6 @@ op/filetest.t	383	ok	not ok [PCL #381]	string overload is called for -B on IO
 op/filetest.t	355	ok	not ok [PCL #353]	string overload is called for -T on IO
 op/filetest.t	299	ok	not ok [PCL #297]	string overload is called for -t on IO
 op/filetest.t	33	ok	not ok	warning for -l $handle
-op/filetest_t.t	0	ok*	(no TAP)	*summary*
 op/stat.t	0	ok*	(no TAP)	*summary*
 op/stat_errors.t	570	ok	not ok	error from -B \*_
 op/stat_errors.t	548	ok	not ok	error from -T \*_

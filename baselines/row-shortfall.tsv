@@ -148,21 +148,18 @@ t/comp/our.t	7	#1583 -- `our $y = $y;` inside a block where a `my $y` is in scop
 t/comp/parser.t	93	#1694 -- FIVE #138 drops in the file's `#line`-tracking section (a `=pod` inside "${...}", a quoted sub NAME, three bare `<<HEREDOC;` statements) take the interpolated `check_line` calls with them and the recovery load abandons the rest of the form
 t/comp/proto.t	100	#1682 -- was 155; s473t5c's #1681 (`\(&NAME)` is the sub slot) removed the `&main::1` abort and the file went 47/14 -> 78/38, 61 -> 116 of 216 rows.  The residue is a SECOND abort at `sub star (*&)`: `star FOO` with nothing declaring FOO is CALLED where perl reads the bareword
 t/comp/require.t	3	NS:Error message text and format -- perl plans 1750 rows and PCL 1747. Two of the three are `RT #24404` and `[perl #24482] require CORE::foo`, where `require $scalar` / `require CORE::lc "..."` must die "Can't locate threads in @INC"; PCL's message differs, the file takes its `else` branch, and THAT branch prints a TAP line with no test number (the test file's own bug), so the row is never produced
-t/io/closepid.t	3	UNEXPLAINED
-t/io/crlf.t	3	UNEXPLAINED
-t/io/data.t	4	UNEXPLAINED
-t/io/dup.t	19	UNEXPLAINED
+t/io/crlf.t	3	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
+t/io/data.t	4	#1652 -- run_multiple_progs is a no-op in the PCL test.pl stub
+t/io/dup.t	19	#1703 -- closing a `>&=` (fdopen) handle closes the shared descriptor, so dup.t:65 takes STDOUT out and dup.t:68 fails EBADF, losing every row after it
 t/io/fflush.t	3	#1585 -- the PCL test.pl stub has no `_create_runperl`
-t/io/layers.t	55	UNEXPLAINED
+t/io/layers.t	55	#139 -- the whole file is `PerlIO::get_layers`.  Its ABORT is one layer in front: `PerlIO::get_layers(STDIN)` emits a BARE CL symbol and dies "The variable STDIN is unbound" (the #266/#452 bareword-in-an-argument-slot family); see #1710
 t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
-t/io/scalar_ungetc.t	17	UNEXPLAINED
+t/io/scalar_ungetc.t	17	#1704 -- IO::Handle::ungetc is an explicit croak in lib/IO.pm and the file needs a pushback STACK (eleven ungetc calls in a row)
 t/io/sem.t	22	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
-t/io/semctl.t	2	UNEXPLAINED
+t/io/semctl.t	2	NS:DynaLoader / XS binary extensions -- IPC::SysV is XS
 t/io/shm.t	19	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
-t/io/socket.t	45	UNEXPLAINED
-t/io/socketpair.t	8	UNEXPLAINED
-t/io/tell.t	10	UNEXPLAINED
-t/io/utf8.t	35	UNEXPLAINED
+t/io/socket.t	45	#1705 -- the file skip_alls on `$Config{d_getpbyname} undefined`; sockets themselves are fully implemented (docs/socket-impl-plan.md)
+t/io/socketpair.t	8	#1705 -- the file skip_alls on `$Config{extensions} =~ /\bSocket\b/`, and lib/Config.pm has `extensions => ''`
 t/mro/basic.t	9	XDIFF: not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
 t/mro/basic_utf8.t	9	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/complex_c3.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
@@ -197,7 +194,6 @@ t/op/eval.t	1	UNEXPLAINED
 t/op/exec.t	16	UNEXPLAINED
 t/op/filehandle.t	2	UNEXPLAINED
 t/op/filetest.t	2	UNEXPLAINED
-t/op/filetest_t.t	7	UNEXPLAINED
 t/op/for.t	149	#1580 -- PPI 1.291's LEXER fails on a DEREFERENCE as the foreach loop variable (`for ${*$f} (…)`, ppi-upstream-bugs.md §29), so the whole file is lost.  SIZED s473t5a: 148 of the 149 rows are BEFORE the offending line 767, the repair must be PRE-LEX (there is no document to mutate), and a lex-only repair is a SILENT WRONG -- see the task
 t/op/fork.t	27	UNEXPLAINED
 t/op/getppid.t	8	UNEXPLAINED
@@ -299,15 +295,15 @@ t/re/uniprops07.t	29260	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops08.t	30492	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/run/locale.t	44	UNEXPLAINED
+t/run/locale.t	44	#1705 -- the file skip_alls because `require POSIX; POSIX->import("locale_h")` fails; lib/POSIX.pm exists but has no `locale_h` export tag
 t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
 t/run/runenv_hashseed.t	269	#1590 -- the PCL test.pl stub has no `unlink_tempfiles`/`unlink_all` (and no `is_linux_container`); the undef-fn abort kills every remaining top-level form.  MEASURED s473t4: adding them gives this file 9 -> 278 rows, all of perl's, but the same ~26 extra lines in the module re/pat_advanced.t `require`s tip that file over SBCL's default 1 GB heap and cost it all 1680 of its rows, so the patch is REVERTED and waits on headroom
-t/run/switchF.t	1	UNEXPLAINED
-t/run/switcha.t	1	UNEXPLAINED
-t/run/switches.t	35	UNEXPLAINED
-t/run/switchn.t	1	UNEXPLAINED
-t/run/switchp.t	2	UNEXPLAINED
-t/run/switchx.t	5	UNEXPLAINED
+t/run/switchF.t	1	#1702
+t/run/switcha.t	1	#1702
+t/run/switches.t	11	#1709 + #1702 -- was 35.  s473t5d's #1700 (-i sets $^I) and #1699 (a refused open answers FALSE) removed BOTH aborts and the file now runs to its end at 28/112; the 11 that remain are its `Need threads and full perl` skip block and the *at-functions* skip
+t/run/switchn.t	1	#1702
+t/run/switchp.t	2	#1702
+t/run/switchx.t	5	#1702
 t/uni/attrs.t	1	UNEXPLAINED
 t/uni/fold.t	18072	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/gv.t	118	#1664 -- the typeglob model: the file aborts in the PROXY CONSTANT SUBROUTINE block (a stash slot holding a string or a SCALAR ref IS a sub in perl), and every row after it is behind that abort
