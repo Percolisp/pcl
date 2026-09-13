@@ -2,6 +2,95 @@
 
 Append new entries at the top. One section per session.
 
+## Session s484b (Opus agent, 2026-09-13) — #1117 shape (B): a glob-cleared aggregate slot reads as ABSENT, and the two residue halves are written down
+
+**The ruling and the shape.** The USER ruled shape (B) of the s480 design with
+a stop-rule ("ignore this and document this, if it is expensive to
+implement").  perl DELETES a glob's array/hash slot on `undef *G`, so
+`*G{ARRAY}` is undef; PCL can only EMPTY the cell, because a `makunbound`
+global cannot be re-vivified on read (SBCL offers no per-variable restart,
+probed s480) and a `boundp` guard in every package aggregate's symbol-macro
+expansion costs 3–5 % on element access (1 207 sites over 40 files, s473h).
+(B) keeps the cell bound and remembers the CONTAINER instead:
+`*p-removed-agg-slots*`, a weak-key `eq` set, registered by
+`%p-glob-clear-var-slot` — the ONE place both clearing spellings meet
+(`undef *G` and `*A = *B`'s missing-slot half; verified, no second
+registration site) — and consulted by `p-glob-slot`'s two aggregate arms
+through `%p-agg-slot-cleared-p`.  **No read or write path changes**, so the
+emission is untouched: `tools/corpus-diff.pl a217cb49` IDENTICAL over 111
+files, no generation bump.  The stop-rule did NOT fire; the shape stayed the
+sized one (one table, two arms, one registration).
+
+**What it buys, measured.** After `undef *s; undef *a; undef *h; undef *c` and
+before anything touches the variables, PCL now answers SCALAR def / ARRAY
+undef / HASH undef / CODE undef — perl's table, where PCL used to say def for
+both aggregates.  `push @a, 42` and `%h = (k=>1)` bring the slot back;
+`*a = \@o` is present and `== \@o`; `*a2 = *b2` where b2 has only a scalar
+slot is absent (#602's rule); a second `undef` is idempotent.  The one row
+this task owns, `perl-tests/sub.t` 24 `goto &xsub when @_ does not exist`,
+PASSES: the sweep TOTAL is 18675 → 18676 and the row left
+`baselines/fail-baseline.tsv` by EDIT.  The companion agrees: `op/sub.t`
+54/11 → 55/10 (`--jobs 1` before on an `a217cb49` extraction, after on the
+tree; the #366 serial re-run reads 55/10 too), and its ROW DIFF names exactly
+one FIXED ROW, that same description.  `op/magic.t` 176/31 and `op/undef.t`
+33/4 are unmoved.  `op/gv.t` was measured once at `--timeout 420` for the
+record and nothing was spliced for it (#1651).
+
+**What it does not buy — the two residue halves, and why they are documented
+rather than fixed.** (a) perl RE-VIVIFIES a cleared slot on any READ of `@a`
+(`my @x = @a`, `@a ? 1 : 0`, `\@a`, `keys %h`) and on an empty write
+(`@a = ()`, `$#a = -1`); PCL does not, so `*a{ARRAY}` stays undef until the
+container is non-empty.  (b) PCL asks "is the container still empty?" at READ
+time, so a write undone before anything asks (`push @a, 42; pop @a`) reads as
+absent where perl has been present since the push — while a read that DOES
+observe it non-empty deregisters it for good (probed: `push; *a{ARRAY}; pop;
+*a{ARRAY}` is present twice in both).  Closing (a) is the 3–5 % guard;
+closing (b) is a hook in every aggregate write path — stop-rule (a) either
+way.  Both are `docs/not-supported.md` "`undef *GLOB` leaves an EMPTY
+aggregate slot where perl REMOVES it", with the twelve-row probe table, and
+ir-spec §7.2 states the rule normatively.
+
+**The corpus said the same thing from the other side.** `tools/ir-conform`
+reported three known-fails STALE — `077/078/092-typeglob`, all three this
+divergence's own rows — and one NEW failure, `037-autoviv`, which was an
+ACCIDENTAL PASS: its line 7 asks the slots *after* reading `@a` and `%h`, so
+perl's recorded answer is `ARRAY=def HASH=def` (the read re-vivified them) and
+PCL used to answer `def` because it had never removed them. It now fails
+honestly on residue (a). `094-typeglob` still fails, but only at its last
+line, so its cause was rewritten too. Every row was attributed on the
+`a217cb49` extraction before it was touched (037 passes there, the four
+typeglob rows are `known`); after the edits the corpus is 323 pass / 0 fail /
+22 known / 0 stale.
+
+**Filed from the probes, both PRE-EXISTING.** **#1726**: Carp's guard
+(`ref \$_ eq 'GLOB' && *$_{HASH} && exists $$_{$sub}`, the only non-test
+consumer of the slot) answers 0 in PCL for a glob whose hash slot IS written,
+and at its OTHER conjunct — `exists $$_{k}` on a glob-valued `$_` is false
+here and true in perl, because the element-access path lacks the typeglob arm
+its own cast (`%{$_}`, which works) has.  So every Carp guard short-circuits
+to "not trusted", and (B) changes none of its answers — which is what the
+probe was for.  **#1727**: `local *G` is a THIRD clear path (`%p-glob-clear`)
+that installs fresh empties without registering them, so the slot reads
+present inside the scope where perl says undef; out of the design's scope, no
+consumer row, fix sized S.
+
+**Bars.** Full sweep `--jobs 4`: GATE clean, 0 new / 0 fixed, TOTAL passing
+18675 → **18676 (+1)** — that +1 IS sub.t row 24 — drops census 5 / current 5
+(+0), planned-not-asserted 12213 (+0); the 5 UNSTABLE and 15 DID-NOT-RUN rows
+are the PARTIAL files' standing crash-file noise, and pack.t's 90 s TIMEOUT
+under load 8 completed on its 270 s retry (#176's backstop).
+`tools/corpus-diff.pl a217cb49` IDENTICAL across 111 files (silent drops 5,
+unchanged) — hence no generation bump; `tools/ir-host-leak.pl` byte-identical
+to the base; `tools/ir-conform --jobs 2` 323 pass / 0 fail / 22 known /
+0 stale; `tools/tag-license --check` exit 0; `Pl/t/artifact-staleness-01.t`
+green inside the gate.  Gate **239 files / 8200 tests** (8196 + this file's 4
+new rows), the only red being the 13 standing pclxs xs rows.  No bench row: the emission is
+unchanged, so the hot paths are byte-identical, and the only new instruction is
+one `eq`-hash lookup inside `*G{ARRAY}` / `*G{HASH}`.  Guard
+`Pl/t/glob-undef-01.t` 5 → 9 rows (922 ms), rows 6/7/9 inverse-verified
+FAILING on an `a217cb49` extraction, row 8 the inverse guard that must pass
+both sides.
+
 ## Session s473t5c (Opus agent, 2026-09-13) — #1501 round 4: `comp/` CHECK 1 + CHECK 2, one abort fixed, the directory attributed
 
 **Member 1, the population.**  Every non-OK `comp/` file was re-measured once on
