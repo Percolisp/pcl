@@ -290,9 +290,9 @@ fd inheritance across exec, **#1708** `-I` not reaching the child's runtime
 `@INC`, **#1709** perl's switch DIAGNOSTICS (`run/switches.t`'s 112-row
 residue, sub-family by sub-family), **#1710** the eleven-file residue bundle
 with one measured shape per bullet.  `baselines/perl-suite-fails.tsv` CAUSES
-**4,338 -> 5,033 of 18,509**, every row outside `run/` + `io/` byte-identical;
-`baselines/row-shortfall.tsv` t/ half UNEXPLAINED **93 -> 75 files /
-62,629 -> 62,339 rows** -- all eighteen CHECK-1 files explained, three of them
+**8,278 -> 8,973 of 12,611**, every row outside `run/` + `io/` byte-identical
+(11,916 of them);  `baselines/row-shortfall.tsv` t/ half UNEXPLAINED
+**71 -> 52 files / 43,220 -> 42,923 rows** -- all eighteen CHECK-1 files explained, three of them
 because the shortfall went to ZERO.
 
 **What was NOT done, said plainly.**  #1705's Config half was left to its task
@@ -312,8 +312,8 @@ IDENTICAL over 111**, silent drops 5 unchanged, 6 shapes identical;
 `emission-ab --shapes` over `lib/**` **28 SAME / 0 DIFF / 0 RCDIFF**;
 `ir-host-leak` **31 symbols / 111 files** = main's by construction;
 `ir-conform --jobs 2` **321 pass / 0 fail / 24 known / 0 stale**; full sweep
-`--jobs 4` **GATE clean, TOTAL passing 18675 (+0)**, 0 new / 0 fixed, drops
-**5 = census**; FULL GATE **240 files / 8203 rows**, 160 s wall / 687 CPU-s,
+`--jobs 4` **GATE clean, TOTAL passing 18676 (+0)**, 0 new / 0 fixed, drops
+**5 = census**; FULL GATE **241 files / 8214 rows**, 139 s wall / 600 CPU-s,
 failures ONLY xs-01/02/03 (the 13 standing pclxs rows); companion
 `--all --quick --jobs 2` **528 files**, whose EIGHTEEN snapshot differences are
 classified without exception -- ONE mine (op/filetest_t.t, spliced), TWELVE
