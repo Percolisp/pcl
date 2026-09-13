@@ -652,7 +652,9 @@
   (with-xs-guard ()
     ;; sv_derived_from: the @ISA walk PCL already implements for method
     ;; dispatch.  (sv_isa, the exact-class check, is the macro layer's job.)
-    (if (p-isa (%xs-deref h) (%xs-string-in cls len 0)) 1 0)))
+    ;; P-TRUE-P, never a bare `if`: p-isa answers perl's FALSE, which is the
+    ;; empty string (#1737) and is TRUE to CL.
+    (if (p-true-p (p-isa (%xs-deref h) (%xs-string-in cls len 0))) 1 0)))
 
 ;;; ---- arrays --------------------------------------------------------------
 

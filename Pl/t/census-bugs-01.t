@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 28;
+plan tests => 29;
 
 sub run_cl {
     my ($code) = @_;
@@ -370,3 +370,39 @@ three
 four
 PL
 
+
+# ── #1737: perl's `isa` / `DOES` are BOOLEAN-valued — FALSE is "" ─────────
+# Found by the s473t5f uni/ census: t/uni/universal.t's 49-row
+# `is UNIVERSAL::isa($vals[$p], $refs[$q]), ($p==$q or $p+$q==1)` matrix
+# failed 40 rows on `got: undef / expected: ''` while truthiness agreed all
+# the way, which is why it read as a Unicode problem and is not one.
+#
+# perl 5.40.3, probed row by row (universal.c's XS_UNIVERSAL_isa is the
+# oracle): the METHOD spelling is always 1 or '' (never undef), and the
+# FUNCTION spelling adds perl's own guard
+#   !SvOK(sv) || !(SvROK(sv) || (SvPOKp(sv) && SvCUR(sv)))  ->  undef
+# so isa(undef,X), isa(42,X) and isa("",X) are undef while isa("str",X) and
+# isa([],X) are ''.  `can` is the one that really answers undef for false.
+test_cl('#1737 isa/DOES answer perl\'s FALSE ("" ), and undef only where perl does',
+        <<'PL', "m1=[] m2=[] m3=[] d1=[] d2=[] fn1=[] fn2=[] u1=undef u2=undef u3=undef can=undef t1=[1] t2=[1] len=[0]\n");
+package Bar; sub new { bless {}, shift }
+package main;
+no warnings;
+my $b = Bar->new;
+sub s_ { my $v = shift; return defined($v) ? "[$v]" : "undef" }
+print "m1=", s_($b->isa("Zed")),                  # method, blessed invocant
+      " m2=", s_(Bar->isa("Zed")),                # method, class-name invocant
+      " m3=", s_($b->isa("Bar") && $b->isa("Zed")),
+      " d1=", s_($b->DOES("Zed")),
+      " d2=", s_(Bar->DOES("Zed")),
+      " fn1=", s_(UNIVERSAL::isa("str", "Zed")),  # POK, non-empty -> ''
+      " fn2=", s_(UNIVERSAL::isa([], "HASH")),    # ROK -> ''
+      " u1=", s_(UNIVERSAL::isa(undef, "Zed")),   # !SvOK -> undef
+      " u2=", s_(UNIVERSAL::isa(42, "Zed")),      # number, no PV -> undef
+      " u3=", s_(UNIVERSAL::isa("", "Zed")),      # empty string -> undef
+      " can=", s_($b->can("nope")),               # can IS undef for false
+      " t1=", s_($b->isa("Bar")),
+      " t2=", s_(UNIVERSAL::isa([], "ARRAY")),
+      " len=", s_(length($b->isa("Zed"))),        # DEFINED, length 0
+      "\n";
+PL

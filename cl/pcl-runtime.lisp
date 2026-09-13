@@ -26258,11 +26258,21 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-isa (invocant class-name)
   "Perl isa() - check if object is-a class.
    Uses C3 MRO to check inheritance chain.
-   Returns t if invocant is-a class-name, nil otherwise."
+
+   BOOLEAN-VALUED: 1 or \"\", never NIL (#1737).  perl's `isa` and `DOES` are
+   `boolSV(sv_derived_from(...))`, so a FALSE answer is PL_sv_no -- the empty
+   string, which is DEFINED.  Returning undef instead made every
+   `is $obj->isa(X), ''` row fail on definedness while truthiness agreed
+   (t/uni/universal.t's 49-row UNIVERSAL::isa matrix).  The UNDEF answers perl
+   does give belong to the FUNCTION spelling and are UNIVERSAL::pl-isa's guard,
+   not this predicate's.
+
+   Callers must therefore ask P-TRUE-P, never a bare CL `if`: \"\" is true to
+   CL and false to perl."
   (let* ((check-class (to-string class-name))
          (obj-class (%pcl-invocant-class invocant)))
     (unless obj-class
-      (return-from p-isa nil))
+      (return-from p-isa ""))
 
     ;; If the object's class defines a custom isa() method (PL-ISA), call it.
     ;; Perl's infix isa operator delegates to ->isa if the class overrides it.
@@ -26278,8 +26288,8 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let ((want (%pcl-normalize-pkg check-class)))
       (if (member want (%pcl-isa-ancestry obj-class)
                   :test (lambda (a b) (string-equal a (%pcl-normalize-pkg b))))
-          t
-          nil))))
+          1
+          ""))))
 
 ;;; ============================================================
 ;;; Regex Support (using CL-PPCRE)
@@ -29189,10 +29199,24 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; p-reftype is undef (NOT "") for a non-ref, so ordinary strings/numbers fall
   ;; through to the normal @ISA inheritance check.  (A blessed hashref isa "HASH"
   ;; AND isa its class; both work — reftype path then @ISA path.)
+  ;;
+  ;; THE UNDEF GUARD (#1737) is perl's own, verbatim from universal.c's
+  ;; XS_UNIVERSAL_isa: `if (!SvOK(sv) || !(SvROK(sv) || (SvPOKp(sv) &&
+  ;; SvCUR(sv)))) XSRETURN_UNDEF`.  So the FUNCTION spelling answers undef for
+  ;; undef, for a plain NUMBER and for the empty string, and 1 / "" for
+  ;; everything else — probed 5.40.3: isa(undef,"Foo") undef, isa(42,"Foo")
+  ;; undef, isa("","Foo") undef, isa("str","Foo") '', isa([],"Foo") ''.
+  ;; The METHOD spelling (p-isa, reached by the dispatch arms) has no such
+  ;; guard: it is always 1 / "".
   (let ((rt (p-reftype obj)))
-    (if (and (stringp rt) (plusp (length rt)) (string= rt (to-string class)))
-        (make-p-box 1)
-        (p-isa obj class))))
+    (cond
+      ((and (stringp rt) (plusp (length rt)) (string= rt (to-string class)))
+       (make-p-box 1))
+      ((and (stringp rt) (plusp (length rt))) (p-isa obj class))
+      (t (let ((uv (unbox obj)))
+           (if (and (stringp uv) (plusp (length uv)))
+               (p-isa obj class)
+               nil))))))
 (defun pl-DOES (obj class  &rest args) (declare (ignore args)) (pl-isa obj class))
 (defun pl-VERSION (&rest args) (declare (ignore args)) nil)
 
