@@ -348,6 +348,27 @@ sub _all_scalar_casts {
   return 1;
 }
 
+# THE INVOCANT of an arrow at index $i (#1620).  It is not simply $e->[$i-1]:
+# a leading run of SCALAR-DEREF casts binds WITH the target, because perl's
+# sigil deref is part of the TERM and `->` cannot get between them —
+# `$$r->who` is `${$r}->who`, `$$$rr->who` is `${${$rr}}->who` (probed).
+# `\` is excluded by _cast_run_start: `\` IS an operator, and a lower-precedence
+# one, so `\$x->m` is `\($x->m)` (probed: `ref(\$h->self)` is REF).  A run that
+# contains a non-`$` cast keeps the single-token reading — there is no deref
+# level to fold (`@$r` is already the array).
+#
+# Returns ($node_id, $start): $start is the index the caller must splice FROM
+# — the cast run's start, not $i-1.  This is the one reading of a rule two
+# sibling arms already had privately: #305 for `$$r->(...)` and #211 for
+# `$$r->{k}` / `$$r->[0]`.  The METHOD arms (and the postfix-deref arms) did
+# not, so `$$r->who` parsed as `${ $r->who }` and died on an unblessed ref.
+sub _arrow_invocant {
+  my ($self, $e, $i) = @_;
+  my $start = $self->_cast_run_start($e, $i - 1);
+  $start = $i - 1 if !$self->_all_scalar_casts($e, $start, $i - 2);
+  return ($self->parse([ @$e[$start .. $i - 1] ]), $start);
+}
+
 
 # ----------------------------------------------------------------------
 # See PPI tree:
@@ -1294,11 +1315,9 @@ sub parse {
         # here the casts would wrap the whole funcall instead — ${ $r->() }.
         # ALL of them belong to the target (#305): `$$$crr->(1)` is
         # `${${$crr}}->(1)`, so parse the whole run together with $pre.
-        my $cast_s  = $self->_cast_run_start($e, $i-1);
-        $cast_s     = $i-1
-          if !$self->_all_scalar_casts($e, $cast_s, $i-2);
-        my @pre_toks = (@$e[$cast_s .. $i-2], $pre);
-        my $pre_id   = $self->parse(\@pre_toks);
+        # (#1620: this reading is now the shared _arrow_invocant — every arrow
+        # arm asks it, so they cannot drift again.)
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);
         my $pst_id = $nxt->{id};
         my $kids   = $self->get_node_children($pst_id);
 
@@ -1351,18 +1370,20 @@ sub parse {
 
         $nxt->{type}= 'methodcall';
 
-        my $pre_id  = $self->parse([$pre]);
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my $pst_id  = $nxt->{id};
         $self->prepend_child_to_node($pst_id, $pre_id);
-        splice @$e, $i-1, 2;
-        $i--;  # Adjust for removed elements so recheck for following subscript
+        # Remove the invocant (cast run included) and the arrow; the methodcall
+        # node is $nxt, which lands at $cast_s.
+        splice @$e, $cast_s, $i - $cast_s + 1;
+        $i = $cast_s;  # recheck from the node for a following subscript
         next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/
                && $nxt_2 && $self->is_internal_node_type($nxt_2)
                && $nxt_2->{type} eq 'tree_val') {
         # Case 1B: X->$foo(...)
-        my $pre_id = $self->parse([$pre]);
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my $meth_id= $self->parse([$nxt]); # Variable name with method
         my $pars_id= $nxt_2->{id};
         my $params = $self->get_node_children($pars_id);
@@ -1375,7 +1396,7 @@ sub parse {
           $self->add_child_to_node($id, $kid_id);
         }
 
-        _reduce_pre($e, \$i, $node, 3);
+        _reduce_pre($e, \$i, $node, 3, $cast_s);
 
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
@@ -1385,7 +1406,7 @@ sub parse {
         # scalar deref of EXPR.  e.g. Moo::Object's $self->${\(...)}(@_).
         # Build the ${ EXPR } deref node as a (computed/dynamic) method, with
         # optional trailing argument list (already a tree_val node).
-        my $pre_id  = $self->parse([$pre]);
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my $meth_id = $self->parse([$nxt, $nxt_2]);  # ${ EXPR } scalar deref
         my ($node, $id) = $self->make_node_insert('methodcall');
         $self->add_child_to_node($id, $pre_id);   # Object
@@ -1399,19 +1420,19 @@ sub parse {
           }
           $count++;  # also consume the params node
         }
-        _reduce_pre($e, \$i, $node, $count);
+        _reduce_pre($e, \$i, $node, $count, $cast_s);
         next;
       } elsif ($self->is_word($nxt)) {
         # Case 1C: X->method (no parentheses)
         # Method call without arguments, e.g., $obj->DEBUG or $self->nodes
-        my $pre_id = $self->parse([$pre]);
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my $meth_id = $self->make_node($nxt);  # Method name as node
 
         my($node, $id) = $self->make_node_insert('methodcall');
         $self->add_child_to_node($id, $pre_id);  # Object
         $self->add_child_to_node($id, $meth_id); # Method name
 
-        _reduce_pre($e, \$i, $node, 2);  # Remove -> and method name
+        _reduce_pre($e, \$i, $node, 2, $cast_s);  # Remove -> and method name
 
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
@@ -1422,18 +1443,20 @@ sub parse {
         # exactly those prefix casts (#612: `&*` and `**` used to fall through
         # to the "unhandled postfix '->' term" die, i.e. a whole statement DROP).
         my $sigil = $1;
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my $node  = $self->_prefix_op_node(PPI::Token::Cast->new($sigil),   # Cast sigil ($, @, or %)
-                                           $self->parse([$pre]));           # Ref being dereferenced
-        _reduce_pre($e, \$i, $node, 2);  # Remove -> and Cast($*/\@*/\%*)
+                                           $pre_id);                        # Ref being dereferenced
+        _reduce_pre($e, \$i, $node, 2, $cast_s);  # Remove -> and Cast($*/\@*/\%*)
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() eq '$#*') {
         # Postfix deref: X->$#* — last index of an arrayref (Perl 5.20+).
         # Equivalent to $#{X}; build the same $# prefix_op the braced form uses
         # ($# op token + ref operand) so codegen emits (p-array-last-index X).
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my $node = $self->_prefix_op_node(PPI::Token::Cast->new('$#'),   # $# operator
-                                          $self->parse([$pre]));         # Arrayref being dereferenced
-        _reduce_pre($e, \$i, $node, 2);  # Remove -> and Cast($#*)
+                                          $pre_id);                # Arrayref being dereferenced
+        _reduce_pre($e, \$i, $node, 2, $cast_s);  # Remove -> and Cast($#*)
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() =~ /^([@%])$/
@@ -1448,28 +1471,29 @@ sub parse {
         my $type   = $sigil eq '@'
                      ? ($is_arr ? 'slice_a_acc'    : 'slice_h_acc')
                      : ($is_arr ? 'kv_slice_a_acc' : 'kv_slice_h_acc');
-        my $pre_id = $self->parse([$pre]);
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my ($node, $id) = $self->make_node_insert($type);
         $self->add_child_to_node($id, $pre_id);
         my @ix    = $nxt_2->children();
         my $ix_id = $self->_parse_subscript_ix(\@ix, $is_arr);
         # Flatten comma-separated indices/keys into separate children
         $self->add_child_flattening($id, $ix_id, 'progn');
-        _reduce_pre($e, \$i, $node, 3);  # Remove ->, Cast(@/%), and the subscript
+        # Remove ->, Cast(@/%), and the subscript
+        _reduce_pre($e, \$i, $node, 3, $cast_s);
         next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/) {
         # Case 1D: X->$foo (variable method name, no parentheses)
         # Method call with method name in a variable, no arguments
         # e.g., $obj->$method or $_[0]->$probe
-        my $pre_id = $self->parse([$pre]);
+        my ($pre_id, $cast_s) = $self->_arrow_invocant($e, $i);   # #1620
         my $meth_id = $self->parse([$nxt]);  # Variable containing method name
 
         my($node, $id) = $self->make_node_insert('methodcall');
         $self->add_child_to_node($id, $pre_id);  # Object
         $self->add_child_to_node($id, $meth_id); # Method (name in $variable)
 
-        _reduce_pre($e, \$i, $node, 2);  # Remove -> and $variable
+        _reduce_pre($e, \$i, $node, 2, $cast_s);  # Remove -> and $variable
 
         next;
       } else {
@@ -6204,10 +6228,14 @@ sub _is_filetest_reduction {
 # steps back onto the new node so the loop re-examines it — a postfix chain
 # (`$x->[0]->{k}->m()`) reduces one link per iteration.  The caller `next`s.
 sub _reduce_pre {
-  my ($e, $i, $node, $width) = @_;
-  $e->[$$i-1] = $node;
-  splice @$e, $$i, $width;
-  $$i--;
+  my ($e, $i, $node, $width, $start) = @_;
+  # $start (#1620): the index the reduction consumed FROM — $$i-1 by default,
+  # but the arrow arms pass the start of the scalar-deref cast run that
+  # _arrow_invocant folded into the invocant, so those cast tokens go with it.
+  $start = $$i - 1 if !defined $start;
+  $e->[$start] = $node;
+  splice @$e, $start + 1, ($$i - $start - 1) + $width;
+  $$i = $start;
   return;
 }
 

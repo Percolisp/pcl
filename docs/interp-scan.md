@@ -33,6 +33,14 @@ implemented in `Pl/InterpScan.pm` or not at all.
   `Perl_regcurly` (regcomp.c), read from the running perl's own source.
   Event schema is documented in the module header (sigil/form/name/canon/
   span/name_span/expr_span/chain/slice/postderef).
+- `escape_skip($text, $pos, %opt)` (s483c, #1621) — THE escape rule as one
+  step: given a backslash at `$pos`, how many characters it hides from
+  reference detection (2, or 3 for a dq-text `\cX`, whose char toke eats in
+  string mode but not in a pattern).  Extracted out of `scan`'s driver loop
+  (byte-identical there) for a consumer that runs its OWN narrower name scan
+  and must decide "is this sigil escaped?" the same way — `Pl::VarAnnotator`'s
+  quote-leaf USE scan, where an escaped `\$name` had been licensing the B-str
+  raw-slot freeze.  §8 applies to the escape rule too: one definition.
 - `Pl/t/interp-scan-01.t` — 180 assertions, three layers over one row table:
   the PROBE TABLE re-derives every recorded verdict from the running perl at
   test time (a perl drift fails loudly), the classifier must match each

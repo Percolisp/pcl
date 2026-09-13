@@ -251,6 +251,25 @@ asymmetric case — the classic trap:**
 - any call argument (unknown callee), `\$q`, `local`, tie/glob contact,
   closure capture (the existing box vetoes all still apply first).
 
+**Closure capture disqualifies the B regime but not the A regime (s483c, task
+#1622).**  The entry above is right for both as written, and the shipped code
+had drifted: #760's `raw-closure-capture` narrowed the veto to "capture PLUS a
+boxing event in the closure body", which is sound where the raw slot holds the
+SAME value a box would (A) and wrong where the slot COERCES what it stores (B)
+— the term walk never classifies the closure body's reads at all
+(`_tw_expr_parse` skips `sub {…}` blocks), so the B verdict was taken on an
+incomplete use set and `my $cr = sub {7}; my $s = "$cr"; my $f = sub { $cr->() }`
+froze a code ref into `"CODE(0x…)"`.  The B gate therefore carries `!$captured`
+outright; the A regime keeps #760.
+
+**The USE SCAN must be exact, because a licensing use is a LICENCE (s483c,
+task #1621).**  Over-firing is the safe direction for a *disqualifier* and the
+UNSAFE direction for a licence: a spurious `str` use freezes a value that must
+not be frozen.  So the textual quote-leaf scan registers nothing for text perl
+never interpolates — an escaped `\$name` (the escape rule is
+`Pl::InterpScan::escape_skip`, the one scanner's) or a LITERAL heredoc
+(`<<'EOT'`).
+
 ## Checked coercion — the runtime DECLINE (s460, task #890; supersedes the s286 "die loud" below)
 
 **As shipped, the check does not die: it DECLINES the freeze.**  The two
