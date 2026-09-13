@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 66;
+use Test::More tests => 73;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -854,4 +854,49 @@ for my $src ('for my \$x (\$main::y) { 1 }',
     ok( $cmp && $cmp->find_any('PPI::Structure::List')
              && $cmp->find_any('PPI::Structure::Block'),
         '`for my $x (1,2) { 1 }`: list and block inside the compound (control)' );
+}
+
+# ── Bug 30: an indented here-doc's INDENTATION over-counts when the delimiter
+#            itself begins with whitespace, or is empty ──────────────────────
+#
+# perl strips the whitespace standing BEFORE the delimiter TEXT on the
+# terminator line.  PPI::Token::HereDoc::_indent takes `^(\s*)` of the WHOLE
+# terminator line, so `<<~' EOF'` counts the delimiter's own leading space as
+# indentation (and `<<~''` counts the NEWLINE); _is_match_indent then fails and
+# the body is left unstripped — or, when the body is indented as far as the
+# over-count, it is stripped one character too many.
+for my $c (
+  # [ source, what heredoc() should give, label ]
+  [ "print <<~' EOF'\n  some data\n   EOF\n", "some data\n",
+    "<<~' EOF' strips the 2 spaces before the delimiter" ],
+  [ "print <<~' EOF '\n  some data\n   EOF \n", "some data\n",
+    "<<~' EOF ' strips the 2 spaces before the delimiter" ],
+  [ "print <<~\"  EOF\"\n    some data\n      EOF\n", "some data\n",
+    '<<~"  EOF" strips the 4 spaces before the delimiter' ],
+  [ "print <<~' EOF'\n   some data\n   EOF\n", " some data\n",
+    "<<~' EOF' over a 3-space body leaves one space (no over-strip)" ],
+  [ "print <<~''\n  some data\n  \n", "some data\n",
+    "<<~'' strips the terminator line's 2 spaces" ],
+) {
+    my ($src, $want, $label) = @$c;
+    my $doc = PPI::Document->new(\$src);
+    my ($hd) = @{ $doc ? ($doc->find('PPI::Token::HereDoc') || []) : [] };
+    is( ($hd ? join('', $hd->heredoc) : '(no here-doc token)'), $want, $label );
+}
+# The CONTROL PPI gets right and must keep getting right: a delimiter with no
+# leading whitespace.
+{
+    my $src = "print <<~EOF\n  some data\n  EOF\n";
+    my $doc = PPI::Document->new(\$src);
+    my ($hd) = @{ $doc->find('PPI::Token::HereDoc') || [] };
+    is( join('', $hd->heredoc), "some data\n",
+        '<<~EOF strips the terminator line indentation (control)' );
+}
+# The second face of the same bug: serialize() rebuilds each body line as
+# `indentation . line`, so the over-count is ADDED and the document grows.
+{
+    my $src = "print <<~' EOF'\n  some data\n   EOF\n";
+    my $doc = PPI::Document->new(\$src);
+    is( $doc->serialize, $src,
+        "a <<~' EOF' document round-trips through serialize" );
 }

@@ -1806,6 +1806,73 @@ with #1648).  PPI version tested 1.291; no workaround shipped.
 
 ---
 
+## 30. An indented here-doc's INDENTATION is `^(\s*)` of the whole terminator line, so a delimiter that begins with whitespace (or is empty) over-counts  [CONFIRMED 1.291]
+
+**Perl:** `<<~DELIM` strips, from every body line, the whitespace that stands
+**before the delimiter TEXT** on the terminator line.  The delimiter may itself
+begin with whitespace (`<<~' EOF'`) or be empty (`<<~''`), and perl still
+measures only what precedes it:
+
+```perl
+print <<~' EOF'          #   terminator line is "   EOF": 2 spaces + " EOF"
+  some data              #   so perl strips 2 and prints "some data"
+   EOF
+```
+
+**PPI:** `PPI::Token::HereDoc::_indent` is
+
+```perl
+my ($indent) = $token->{_terminator_line} =~ /^(\s*)/;
+```
+
+which for `"   EOF\n"` answers three spaces — the delimiter's own leading space
+is counted as indentation — and for the empty delimiter answers `"  \n"`,
+with the NEWLINE in it.  `_is_match_indent` then fails (no body line starts
+with the over-long indent), PPI marks the here-doc `_damaged` and strips
+NOTHING; when the body happens to be indented as far as the over-count it
+strips ONE CHARACTER TOO MANY instead.  The public effect, `$hd->heredoc`:
+
+```
+source                                   perl prints      PPI's heredoc()
+<<~EOF     / body "  x" / term "  EOF"   "x"              "x"              OK
+<<~' EOF'  / body "  x" / term "   EOF"  "x"              "  x"            WRONG
+<<~' EOF ' / body "  x" / term "   EOF " "x"              "  x"            WRONG
+<<~"  EOF" / body "    x"/term "      EOF" "x"            "    x"          WRONG
+<<~' EOF'  / body "   x"/ term "   EOF"  " x"             "x"              WRONG (over-strip)
+<<~''      / body "  x" / term "  "      "x"              "  x"            WRONG
+```
+
+`$doc->serialize` is wrong on the same inputs, in a second way: it rebuilds
+each body line as `indentation . line`, so the over-counted indent is added to
+an unstripped body and the document GROWS — 9 of the 13 shapes in
+`scratch/s473t5b/probes/roundtrip-ppi.pl` do not round-trip through plain PPI
+(`print <<~' EOF'\n  some data\n   EOF\n` comes back with five leading spaces).
+
+**Impact on PCL (task #1501 round 3, s473t5b):** `t/op/heredoc.t` builds one
+child program per delimiter spelling, so 20 of its rows are exactly this bug
+(8 for `' EOF'`/`' EOF '`, 8 for `" EOF"`/`" EOF "`, 4 for the empty delimiter
+with a trailing newline).  The body is printed with its indentation intact —
+a SILENT WRONG, not a diagnostic.
+
+**PCL's workaround:** `Pl::Parser::_repair_indented_heredocs`, a fourth
+in-place token repair beside `_reclassify_bare_vwords` /
+`_merge_unicode_symbols` / `_merge_punct_array_symbols` (and so it runs on
+fragments too, #435).  It recomputes the indentation as the terminator line
+minus the delimiter text — recoverable because PPI keeps its own answer in
+`_indentation` and has already removed it from `_terminator_line`, so the two
+concatenated are the original line — and then either strips it from the body
+(when PPI gave up) or gives the over-count back (when PPI stripped).  After
+the repair, all 13 shapes round-trip byte-exact through `serialize`, which is
+the check that says the repair is complete.  Guard `Pl/t/heredoc-indent-01.t`.
+
+**Residue, deliberately left alone:** a `_damaged` here-doc whose terminator
+is the LAST LINE OF THE FILE with no newline.  There PPI's own match test
+decided whether the body was stripped and nothing in the token says which way;
+the one measured shape (`<<~''` with the terminator unterminated) is already
+right.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

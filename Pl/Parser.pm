@@ -613,6 +613,7 @@ sub _ppi_parse {
   _reclassify_bare_vwords($doc) if $doc;
   _merge_unicode_symbols($doc) if $doc;
   _merge_punct_array_symbols($doc) if $doc;
+  _repair_indented_heredocs($doc) if $doc;
   # A DIAGNOSTIC, not a repair — deliberately NOT one of the three in-place
   # passes above, so `fragment_doc`'s re-parses do not announce a construct
   # twice (#435 routes those three and only those three).
@@ -631,9 +632,11 @@ sub _ppi_parse {
 # into Cast + Word (ppi-upstream-bugs.md §23) and only `_merge_unicode_symbols`
 # puts it back together.
 #
-# The three passes below are exactly the ones `_ppi_parse` runs AFTER any
-# serialize+reparse: they swap token CLASSES in place and leave the text
-# untouched, which is what makes them safe on a fragment — a fragment is not a
+# The four passes below are exactly the ones `_ppi_parse` runs AFTER any
+# serialize+reparse: the first three swap token CLASSES in place and leave the
+# text untouched, and the fourth moves whitespace between a here-doc's
+# `_indentation` and its body lines in a way `serialize` puts back byte for
+# byte — which is what makes them safe on a fragment.  A fragment is not a
 # program, so the passes that rewrite structure (signature desugaring,
 # prototype attributes, `__SUB__`) must NOT run here, and do not.
 #
@@ -648,6 +651,7 @@ sub fragment_doc {
   _reclassify_bare_vwords($doc);
   _merge_unicode_symbols($doc);
   _merge_punct_array_symbols($doc);
+  _repair_indented_heredocs($doc);
   return $doc;
 }
 
@@ -1247,6 +1251,65 @@ sub _merge_punct_array_symbols {
   }
   _reclass_subscripts_after($_) for @repaired;
   return 1;
+}
+
+# INDENTED HERE-DOCS whose DELIMITER itself begins with whitespace, or is
+# empty (`<<~' EOF'`, `<<~''`).  perl strips the whitespace that stands
+# BEFORE THE DELIMITER TEXT on the terminator line; PPI 1.291 takes `^(\s*)`
+# of the WHOLE terminator line, which swallows the delimiter's own leading
+# space (and, for an empty delimiter, the NEWLINE)
+# — docs/ppi-upstream-bugs.md §30.  The over-long indent then makes PPI
+# declare the here-doc damaged and strip NOTHING (`print <<~' EOF'` kept its
+# two leading spaces: a SILENT WRONG), or, when the body happens to be
+# indented as far as the over-count, strip ONE CHARACTER TOO MANY.
+#
+# perl's answer is recoverable without re-reading the source: PPI keeps its
+# own indent in `_indentation` and has already removed it from
+# `_terminator_line`, so the ORIGINAL terminator line is the two
+# concatenated, and the true indentation is what stands before the delimiter
+# in it.  Repairing `_heredoc` + `_indentation` + `_terminator_line` together
+# keeps `$doc->serialize` byte-exact (`_indentation . line` is how serialize
+# rebuilds each body line), which is why this pass is safe in the same slot
+# as the three class-swapping repairs above.
+#
+# WHICH BRANCH PPI TOOK has to be known, because the two need opposite
+# repairs, and it is decidable:
+#   * an indent containing a NEWLINE can match no body line at all, so the
+#     body is certainly unstripped;
+#   * `_damaged` is set on both paths that give up mid-file and at EOF, but
+#     only the mid-file one keeps the terminator line's own newline;
+#   * without `_damaged` PPI matched and stripped, so the over-count must be
+#     GIVEN BACK.
+# The one case left alone is a damaged here-doc whose terminator is the last
+# line of the file with no newline: there PPI's own match test decided, and
+# nothing here can tell which way (§30 records it as the residue).
+sub _repair_indented_heredocs {
+  my ($doc) = @_;
+  for my $t (@{ $doc->find('PPI::Token::HereDoc') || [] }) {
+    next unless $t->{_indented};
+    my $ppi_ind = $t->{_indentation};
+    my $tline   = $t->{_terminator_line};
+    my $term    = $t->{_terminator};
+    next unless defined $ppi_ind && length $ppi_ind;
+    next unless defined $tline && defined $term;
+    my $true = $ppi_ind . $tline;
+    next unless $true =~ s/\Q$term\E[\r\n]*\z//;
+    next if $true eq $ppi_ind;                  # PPI got this one right
+    next unless $ppi_ind =~ /^\Q$true\E/;       # only ever a PREFIX of PPI's
+    my $extra = substr($ppi_ind, length $true);
+    my $unstripped = $ppi_ind =~ /\n/                   ? 1
+                   : !$t->{_damaged}                    ? 0
+                   : $tline =~ /\n\z/                   ? 1
+                   :                                      undef;
+    next unless defined $unstripped;
+    for my $line (@{ $t->{_heredoc} }) {
+      if ($unstripped)      { $line =~ s/^\Q$true\E// }
+      elsif ($line ne "\n") { $line = $extra . $line }
+    }
+    $t->{_indentation}     = $true;
+    $t->{_terminator_line} = $extra . $tline;
+  }
+  return;
 }
 
 # The LEXER had already decided what the `{…}` / `[…]` after one of those
