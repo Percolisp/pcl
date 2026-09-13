@@ -53,7 +53,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 13;
 
 sub write_pl {
     my ($code) = @_;
@@ -227,4 +227,49 @@ PL
     my $oracle = run_perl($prog);
     is(run_cl($prog),         $oracle, '#442: the raw-string slot keeps the superchar payload (perl oracle)');
     is(run_cl_general($prog), $oracle, '#442: PCL_OPT=none gives the SAME answer — no optimizer-dependent value');
+}
+
+# ── 8. the STRING EVAL's transport must carry a non-character (task #1711) ──
+# A run-time string eval crosses the pl2cl transpile SERVER, whose protocol
+# counts CHARACTERS.  Its layer was `:encoding(utf-8)` — the STRICT one, which
+# refuses to encode the 2,048 surrogates, U+FDD0-U+FDEF and every plane's last
+# two code points, and substitutes the `\x{...}` ESCAPE TEXT instead (1
+# character out, 12 bytes and 12 characters back for U+10FFFF, in BOTH
+# directions, measured).  The count then did not describe the bytes, the
+# reader on the other side stopped short, and the truncated form died
+# `end of file on #<string-input-stream … from ";;; pcl:…">` — which is how
+# t/re/alpha_assertions.t, t/re/regexp_normal.t and t/re/regex_sets_compat.t
+# all stopped at t/re/re_tests line 1859 and lost 1,043 rows between them.
+# The layer is now `:utf8`, the same one this script's own STDOUT uses for the
+# file-mode emission, so the two transports of one emission agree.
+{
+    # 8a: every code point the strict layer refused, through `eval STRING`.
+    my $prog = <<'PL';
+no warnings;
+for my $cp (0xD800, 0xDFFF, 0xFDD0, 0xFDEF, 0xFFFE, 0xFFFF,
+            0x1FFFE, 0x10FFFE, 0x10FFFF, 0x1F600) {
+    my $t = sprintf('\x{%X}', $cp);
+    my $r = eval qq("$t");
+    printf "%X %s %s [%s]\n", $cp, (defined $r ? length($r) : 'undef'),
+        (defined $r && length $r ? ord($r) : '-'), ($@ =~ s/\n.*//sr);
+}
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#1711: a non-character in an eval STRING survives the transpile server (perl oracle)');
+
+    # 8b: the other direction — the eval's own SOURCE holds the character,
+    # not an escape, so it travels client -> server as bytes to be decoded.
+    # The SURROGATES are deliberately absent: SBCL's own `:utf-8` external
+    # format refuses to ENCODE one onto the pipe (`:utf-8 stream encoding
+    # error`), which is a different layer and a LOUD failure — task #1712.
+    my $prog2 = <<'PL';
+no warnings;
+for my $cp (0xFDD0, 0xFDEF, 0xFFFE, 0xFFFF, 0x1FFFE, 0x10FFFE, 0x10FFFF) {
+    my $c = chr($cp);
+    my $r = eval "length(q{$c})";
+    printf "%X %s [%s]\n", $cp, (defined $r ? $r : 'undef'), ($@ =~ s/\n.*//sr);
+}
+PL
+    is(run_cl($prog2), run_perl($prog2),
+       '#1711: a non-character in the eval SOURCE reaches the server intact (perl oracle)');
 }

@@ -748,8 +748,25 @@ sub _run_server {
   # eval SITE (#364).  perl's feature pragmas are lexical and a string eval
   # inherits them; this parse only sees the bare text, so the site has to say.
   # Compiler input in the same sense, and keyed into the same cache.
-  binmode(STDIN,  ':encoding(utf-8)');
-  binmode(STDOUT, ':encoding(utf-8)');
+  # `:utf8`, NOT `:encoding(utf-8)`, and the difference is the protocol's
+  # correctness (found s473t5e, task #1711).  The lengths above are CHARACTER
+  # counts, so the layer must write exactly the characters it is given.  The
+  # STRICT layer does not: perl calls the surrogates, U+FDD0-U+FDEF and every
+  # plane's last two code points NON-CHARACTERS, refuses to encode them, and
+  # substitutes the `\x{...}` ESCAPE TEXT instead — 1 character out, 12 bytes
+  # (and 12 characters back) for U+10FFFF, in BOTH directions, measured.  The
+  # count then no longer describes the bytes, the reader on the other side
+  # stops short, and what it got is a TRUNCATED form: `eval "\x{10FFFF}"`
+  # died `end of file on #<string-input-stream … from ";;; pcl:…">`, which is
+  # how t/re/alpha_assertions.t, t/re/regexp_normal.t and
+  # t/re/regex_sets_compat.t all stopped at re_tests line 1859 and lost 1,043
+  # rows between them.  `:utf8` is permissive (it encodes any code point and
+  # decodes what it wrote), it is the layer THIS SCRIPT'S OWN STDOUT uses for
+  # the file-mode emission, and SBCL's `:external-format :utf-8` on the pipe
+  # reads and writes the same bytes — so the two transports of one emission
+  # now agree (CLAUDE.md rule 11).
+  binmode(STDIN,  ':utf8');
+  binmode(STDOUT, ':utf8');
 
   # LIVENESS (task #273, ruled s397).  This loop looks at STDIN only BETWEEN
   # requests, so a server whose client SBCL is SIGKILLed while a transpile is
