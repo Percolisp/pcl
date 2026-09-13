@@ -341,6 +341,41 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
     ok(defined $ok, "#240 step 2: collapses natively [$w]") or diag($@);
   }
 
+  # #1587 (s484a): the single-switch shape is ALL SEVEN spellings.  A VERSION
+  # is one switch that also sets $VERSION; a BLOCK form is not a switch at all
+  # (the code after it is back in the outer package).  perl accepts all seven
+  # with `$@` empty — probed 5.40.3, scratch/s484a/probes/p1587.pl — and the
+  # two exclusions in the collapse guard refused five of them, which cost
+  # t/op/packagev.t its whole method (109 rows) plus op/inccode-tie.t and
+  # uni/opcroak.t.
+  for my $w (q{package V1 1.2; 1},   q{package V2 1.2;},  q{package V3 1.2},
+             q{package B2 { 1 }},    q{package B3 1.2 { 1 }},
+             q{package V4 v1.2.3; 1},
+             q{package B4 { sub f { 1 } } 1},
+             q{package B5 { our $x = 1 } our $x = 7; $x}) {
+    my $ok = eval { Pl::Parser2->parse_code($w, eval_mode => 1,
+                                            eval_pkg => 'main') };
+    ok(defined $ok, "#1587: collapses natively [$w]") or diag($@);
+  }
+  # The VERSION reaches the region as `X::$VERSION`, in the COMPILE phase —
+  # the cell must NOT be spelled for the section (the eval's root is main, so
+  # a section-spelled cell would be $main::VERSION).  The s437 phase rule is
+  # what makes a BEGIN in the same region read it.
+  my $vv = Pl::Parser2->parse_code(q{package V5 1.25; 1},
+                                   eval_mode => 1, eval_pkg => 'main');
+  like($vv, qr/\(p-defcell V5::\$VERSION /,
+       '#1587: $VERSION is spelled for the region package');
+  unlike($vv, qr/\b(?!V5::)\w+::\$VERSION/,
+         '#1587: and never for the eval root (no MAIN::$VERSION)');
+  like($vv, qr/\(p-scalar-= V5::\$VERSION 1\.25\)/,
+       '#1587: the version literal is assigned, not stringified away');
+
+  # The BLOCK form's own tail value is the eval's value — the restore call,
+  # whose value is the package NAME, must not be the last form (`prog1`).
+  my $bt = Pl::Parser2->parse_code(q{package B6 { 42 }},
+                                   eval_mode => 1, eval_pkg => 'main');
+  like($bt, qr/\(prog1\b/, '#1587: the block form keeps its tail value behind prog1');
+
   # The multi-switch shape stays refused (zero measured events).
   eval { Pl::Parser2->parse_code(q{package A1; sub a {1} package B1; sub b {2} 1},
                                  eval_mode => 1, eval_pkg => 'main') };

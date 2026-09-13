@@ -815,6 +815,17 @@ sub _eval_literal_only_stmts {
   return 1;
 }
 
+# Is SEG a STATEMENT-FORM package switch — `package X;`, the shape whose effect
+# runs to the end of its enclosing scope?  ONE reading, because the eval
+# collapse asks it four times and the answer decides both "is this the switch I
+# can collapse" and "is this segment free of a switch" (task #1587).  A
+# BLOCK-form segment carries `pkg_stmt` too (it has one) but is NOT a switch:
+# it is self-contained, and the code after it is back in the outer package.
+sub _seg_is_pkg_switch {
+  my ($seg) = @_;
+  return $seg->{pkg_stmt} && !$seg->{blockform} ? 1 : 0;
+}
+
 # Pre-seed the strict_subs pragma from the document's use/no strict includes
 # (see the parse() call site).  Mirrors v1's per-statement rule — bare
 # `use strict` or an arg list mentioning 'subs' counts; `no strict 'refs'`
@@ -1411,7 +1422,7 @@ sub parse {
       # (which already has its own section — hence reopen).
       push @segments, { pkg => $pkg, stmts => [$block->schildren],
                         reopen => ($opened{$pkg}++ ? 1 : 0), version => $version,
-                        blockform => 1, blk => $cur_blk };
+                        blockform => 1, blk => $cur_blk, pkg_stmt => $child };
       push @segments, { pkg => $cur_pkg, stmts => [], reopen => 1, blk => $cur_blk };
       return 1;                             # $cur_pkg unchanged
     }
@@ -1571,14 +1582,55 @@ sub parse {
   # under the v1 fallback (pre-existing, the #163 referent-kind-tag
   # residue; probed at HEAD in file mode too), so this arm changes nothing
   # for that shape.
+  # A VERSION IS NOT A SECOND SWITCH (task #1587).  `package X VERSION;` is one
+  # switch that also sets $VERSION, so it collapses like the plain spelling and
+  # the version rides along in `version_pkg`/`version`: the section emission
+  # spells the cell `X::$VERSION` instead of the section package's, and puts it
+  # at the HEAD of the compile phase, where perl sets it (s437 — a BEGIN in the
+  # same region reads it).  Refusing it cost t/op/packagev.t its whole method
+  # (109 rows, every one an `eval "package withversion 1.2"` asserting `$@` eq
+  # ''), plus t/op/inccode-tie.t and t/uni/opcroak.t.
   if ($self->eval_mode && @segments == 2
       && $self->_eval_safe_leading_stmts($segments[0]{stmts})
-      && $segments[1]{pkg_stmt} && !$segments[1]{blockform}
-      && !defined $segments[1]{version}) {
+      && _seg_is_pkg_switch($segments[1])) {
     $self->{_eval_pkg_stmt} = $segments[1]{pkg_stmt};
     @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
+                   version      => $segments[1]{version},
+                   version_pkg  => $segments[1]{pkg},
+                   version_stmt => $segments[1]{pkg_stmt},
                    stmts => [ @{ $segments[0]{stmts} },
                               $segments[1]{pkg_stmt}, @{ $segments[1]{stmts} } ] });
+  }
+  # A BLOCK FORM IS NOT A SWITCH AT ALL (task #1587).  `package X { … }` is
+  # self-contained: the code after it is back in the OUTER package (probed —
+  # `eval 'package Foo { our $x = 1 } $x'` reads `$main::x`), so PPI's three
+  # segments are [leading | X's block | back to the caller's package].  There
+  # is nothing to collapse a REGION around, and nothing new to write: the
+  # `if ($blk)` arm of _lower_block's Statement::Package branch already emits
+  # enter / block body / restore / remainder with exactly that scoping, and it
+  # is the arm a nested `package X { … }` takes in file mode.  So hand the
+  # Package statement ITSELF back into one region segment, between the leading
+  # statements and the ones that followed the block, and let that arm run.
+  #
+  # `eval_pkg_region` still applies: this loop's sub extraction runs BEFORE
+  # lowering and would name a sub unqualified, and after the restore
+  # `_sub_name_for_emission` spells a trailing sub unqualified anyway (current
+  # eq cur_pkg), so both sides come out right.  The three-segment shape is the
+  # ONLY one accepted: two blocks make five segments and stay refused, which is
+  # what keeps `package A { } package B { }` a multi-switch.
+  if ($self->eval_mode && @segments == 3
+      && $self->_eval_safe_leading_stmts($segments[0]{stmts})
+      && !_seg_is_pkg_switch($segments[0])
+      && $segments[1]{blockform} && $segments[1]{pkg_stmt}
+      && !_seg_is_pkg_switch($segments[2])
+      && !$segments[2]{blockform}
+      && $segments[2]{pkg} eq $segments[0]{pkg}) {
+    @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
+                   version      => $segments[1]{version},
+                   version_pkg  => $segments[1]{pkg},
+                   version_stmt => $segments[1]{pkg_stmt},
+                   stmts => [ @{ $segments[0]{stmts} },
+                              $segments[1]{pkg_stmt}, @{ $segments[2]{stmts} } ] });
   }
   # E4.1 M1 (s353): the same collapse for the FLATTENED bare-block spelling.
   # Sub::Quote wraps everything in one `{ … }` with a trailing `1;`, which
@@ -1589,15 +1641,17 @@ sub parse {
   # one region segment the #226 machinery already lowers.  The block's
   # lexical scoping is erased, which the two whitelists make unobservable.
   if ($self->eval_mode && @segments == 4
-      && !@{ $segments[0]{stmts} } && !$segments[0]{pkg_stmt}
-      && defined $segments[1]{blk} && !$segments[1]{pkg_stmt}
+      && !@{ $segments[0]{stmts} } && !_seg_is_pkg_switch($segments[0])
+      && defined $segments[1]{blk} && !_seg_is_pkg_switch($segments[1])
       && $self->_eval_safe_leading_stmts($segments[1]{stmts})
-      && $segments[2]{pkg_stmt} && !$segments[2]{blockform}
-      && !defined $segments[2]{version}
-      && !$segments[3]{pkg_stmt}
+      && _seg_is_pkg_switch($segments[2])
+      && !_seg_is_pkg_switch($segments[3])
       && _eval_literal_only_stmts($segments[3]{stmts})) {
     $self->{_eval_pkg_stmt} = $segments[2]{pkg_stmt};
     @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
+                   version      => $segments[2]{version},
+                   version_pkg  => $segments[2]{pkg},
+                   version_stmt => $segments[2]{pkg_stmt},
                    stmts => [ @{ $segments[1]{stmts} },
                               $segments[2]{pkg_stmt}, @{ $segments[2]{stmts} },
                               @{ $segments[3]{stmts} } ] });
@@ -1853,6 +1907,14 @@ sub parse {
     # the hoist in _lower_block's Statement::Package branch.
     $self->{_eval_pkg_enter} = $seg->{eval_pkg_region} ? [] : undef;
     $self->{_eval_pkg_enter_cl} = undef;
+    # #1587: the ONE `package NAME VERSION` statement in this segment whose
+    # $VERSION the SECTION emits (see `version_pkg` below and the head of the
+    # compile phase in _assemble).  _lower_block's Statement::Package branch
+    # refuses a versioned nested switch — nothing else would set $VERSION —
+    # and exempts exactly this element, so the refusal and the exemption are
+    # derived from the same field instead of two agreeing conditions.
+    $self->{_eval_version_stmt} = defined $seg->{version} ? $seg->{version_stmt}
+                                                          : undef;
     # Named subs + Scheduled blocks of this segment — the embedded-my
     # let-hoist consults these (a sub referencing the name vetoes the hoist).
     $self->{_seg_named_subs} = _collect_named_subs($seg->{stmts});
@@ -1945,6 +2007,9 @@ sub parse {
       pkg      => $seg->{pkg},
       reopen   => $seg->{reopen},
       version  => $seg->{version},
+      # #1587: only an eval-mode collapsed region sets this — the package the
+      # $VERSION cell belongs to, when it is not the section's own.
+      version_pkg => $seg->{version_pkg},
       # Every top-level form passes through the Kind-B optimization registry
       # (Pl::Passes::run — the identity until a pass is registered) HERE, the
       # one place a lowered tree becomes text.  Captured/sched entries are v1
@@ -2083,23 +2148,7 @@ sub parse {
       $reader = $cl_pkg;
     }
     push @body, @{ $sec->{decls} };
-    # Versioned `package Foo 1.5;`: $VERSION defvar, then its assignment —
-    # HERE, at the head of the section's compile phase.  perl sets $VERSION
-    # as it COMPILES the `package NAME VERSION` statement, i.e. before any
-    # sub, `use` or BEGIN of the section: `package Foo 1.5; BEGIN { print
-    # $Foo::VERSION }` prints 1.5 (probed s437).  It used to ride at the end of
-    # the compile phase (s436) and, before the phase model, at the front of the
-    # run phase (v1's _emit_package_version) — both read undef from a BEGIN in
-    # the same section.  Guard: Pl/t/decl-ordering-02.t.
-    if (defined $sec->{version}) {
-      (my $prefix = $cl_pkg) =~ s/^://;
-      my $sym    = "$prefix\::\$VERSION";
-      my $ver_cl = ($sec->{version} =~ /^\d+(?:\.\d+)?$/) ? $sec->{version}
-                                                          : "\"$sec->{version}\"";
-      push @body, "(eval-when (:compile-toplevel :load-toplevel :execute)",
-                  "  " . _decl_cell($sym, '(make-p-box nil)') . ")",
-                  "(p-scalar-= $sym $ver_cl)", '';
-    }
+    push @body, $self->_pkg_version_forms($sec, $pkg);
     # Per-package $a/$b specials: once per package (not on reopen — duplicate
     # defvars are noisy).
     push @body, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))', ''
@@ -7737,6 +7786,11 @@ sub _assemble_eval_mode {
               sort keys %pre;
   push @head, @{ $sec->{decls} };
   push @head, '(defvar $a (make-p-box nil))', '(defvar $b (make-p-box nil))';
+  # A collapsed `package X VERSION` region's $VERSION — same forms, same phase
+  # position as file mode's (#1587): @head runs before @body, and @body is
+  # where the interleaved defs and the sched bucket's BEGIN blocks live, so a
+  # BEGIN in the region reads 1.5 the way perl's does.
+  push @head, $self->_pkg_version_forms($sec, $sec->{pkg});
   push @head, @fwd;
   push @head, @{ $sec->{captured} };
 
@@ -9399,7 +9453,15 @@ sub _lower_block_1 {
     # PPI quirk (see $consume_pkg): ->version returns the BLOCK text for an
     # unversioned block form — accept only real version literals.
     undef $version unless defined $version && $version =~ /^v?\d+(?:[._]\d+)*$/;
-    die "Parser2 TODO: versioned nested package statement\n" if defined $version;
+    # The refusal stands for a genuinely nested versioned switch (`sub f {
+    # package X 1.2; … }`) — nothing here would set $VERSION, and dropping it
+    # silently is the #138 failure mode.  It does NOT stand for the statement
+    # the eval-mode collapse handed back into this stream: that segment's
+    # section emits `X::$VERSION` at the head of its compile phase, which is
+    # where perl sets it (task #1587; `version_pkg` in _lower_segments).
+    die "Parser2 TODO: versioned nested package statement\n"
+      if defined $version
+      && !($self->{_eval_version_stmt} && $first == $self->{_eval_version_stmt});
     my ($blk) = grep { $_->isa('PPI::Structure::Block') } $first->schildren;
     my $env  = $self->environment;
     my $fp   = $self->fallback_parser;
@@ -9420,9 +9482,22 @@ sub _lower_block_1 {
     my $restore = ['p-set-current-package', $cl_prev, "\"$prev\""];
     if ($blk) {
       $env->push_package($pkg);
-      my @inner = $self->_lower_scope([grep { $_->significant } $blk->children], $vi, undef);
+      # The block's own tail value is WANTED when the block form is the last
+      # thing in a value position — `eval 'package X { 42 }'` is 42 in perl,
+      # and `eval 'package X { __PACKAGE__ }'` is X (task #1587).  So the
+      # block body is lowered with the tail context it will actually be read
+      # in, and the RESTORE, whose own value is the package NAME, is put
+      # behind a prog1 instead of being the last form — the same problem the
+      # statement form solves below by skipping the restore, which this arm
+      # cannot do (the block's scope really does end here).
+      my $inner_tail = (!@rest && defined $tail_ctx) ? $tail_ctx : undef;
+      my @inner = $self->_lower_scope([grep { $_->significant } $blk->children],
+                                      $vi, $inner_tail);
       $env->pop_package;
-      return (@enter, @inner, $restore,
+      return (@enter,
+              (defined $inner_tail
+                 ? ['prog1', ['progn', @inner], $restore]
+                 : (@inner, $restore)),
               $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
     # #226: the eval region's LEADING `package X;` must take effect before the
@@ -12486,6 +12561,36 @@ sub _decl_cell {
   return $form unless @f;
   $form =~ s/\)\z/ @f)/;
   return $form;
+}
+
+# A versioned `package Foo 1.5;`: the $VERSION cell and its assignment, as the
+# lines that go at the HEAD of the section's compile phase.  perl sets $VERSION
+# as it COMPILES the `package NAME VERSION` statement, i.e. before any sub,
+# `use` or BEGIN of the section: `package Foo 1.5; BEGIN { print $Foo::VERSION }`
+# prints 1.5 (probed s437).  It used to ride at the end of the compile phase
+# (s436) and, before the phase model, at the front of the run phase (v1's
+# _emit_package_version) — both read undef from a BEGIN in the same section.
+# Guard: Pl/t/decl-ordering-02.t.
+#
+# ONE reading, TWO assemblers (task #1587): file mode emits these into the
+# section body, eval mode into the eval's head — the same phase position in
+# each, and a second copy of the rule would be a second chance to disagree
+# about the phase, which is the one thing s437 had to fix.
+#
+# `version_pkg` is the eval collapse's: it folds a `package X VERSION;` /
+# `package X VERSION { … }` into a region segment whose own package is the
+# eval's ROOT, so the cell must be spelled for X, not for the section.
+sub _pkg_version_forms {
+  my ($self, $sec, $pkg) = @_;
+  return () unless defined $sec->{version};
+  (my $prefix = $self->fallback_parser
+                     ->_cl_pkg_designator($sec->{version_pkg} // $pkg)) =~ s/^://;
+  my $sym    = "$prefix\::\$VERSION";
+  my $ver_cl = ($sec->{version} =~ /^\d+(?:\.\d+)?$/) ? $sec->{version}
+                                                      : "\"$sec->{version}\"";
+  return ("(eval-when (:compile-toplevel :load-toplevel :execute)",
+          "  " . _decl_cell($sym, '(make-p-box nil)') . ")",
+          "(p-scalar-= $sym $ver_cl)", '');
 }
 
 # One `p-raw-params` entry `(NAME CLASS . FACTS)` (task #1035, step 3).  A parameter of

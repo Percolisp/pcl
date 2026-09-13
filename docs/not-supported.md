@@ -2709,13 +2709,31 @@ eval 'my $v = some_free_global(); package X; $v';         # PCL: unsupported
 `PCL: unsupported in string eval: multiple package sections`
 
 **Why:** an eval body lowers as ONE thunk, and the thunk cannot change the
-reader package part-way through. The single-switch shape (`package X;` plus
-a body) is supported and common — it lowers AS section X through the D1-lite
-qualified emission (#226, RULED s345 §2). A *second* switch would need the
-thunk split into independently-packaged sections with values threaded
-between them, which is whole-file section machinery inside a runtime eval.
+reader package part-way through. The single-switch shape is supported and
+common — it lowers AS section X through the D1-lite qualified emission
+(#226, RULED s345 §2). A *second* switch would need the thunk split into
+independently-packaged sections with values threaded between them, which is
+whole-file section machinery inside a runtime eval.
 Measured share: one event across the whole sweep + CPAN board, and it is a
 shape no surveyed CPAN module uses.
+
+**The single-switch shape is ALL SEVEN spellings (task #1587, s484a)** — a
+VERSION is not a second switch, and a BLOCK form is not a switch at all:
+
+```perl
+eval 'package Foo;';        eval 'package Foo; 1';          # always worked
+eval 'package Foo 1.2;';    eval 'package Foo 1.2; 1';      # accepted s484a
+eval 'package Foo 1.2';                                     # accepted s484a
+eval 'package Foo { 1 }';   eval 'package Foo 1.2 { 1 }';   # accepted s484a
+```
+
+`package X VERSION;` is one switch that also sets `$X::VERSION`, at the head
+of the region's compile phase where perl sets it (a `BEGIN` in the same
+region reads it — s437's rule). `package X { … }` is self-contained: the
+code after the block is back in the outer package, and the block form is
+lowered by the same `_lower_block` arm a nested `package X { … }` takes in
+file mode. Two block forms in one eval are still five segments and still
+refused, so `eval 'package A { } package B { }'` remains a multi-switch.
 
 **Why it is NOT statement-level** (task #1037's classification, s466): the unit
 here *is* the eval.  The emission is produced by the `pl2cl --server`
