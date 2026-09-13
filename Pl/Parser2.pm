@@ -7914,6 +7914,16 @@ sub _assemble_eval_mode {
 # (task #66).  Pipe symbols (|$;|, |${^MPE}|) pass through whole (they are
 # code, and a raw `;`/`"` inside one must not start a comment/string);
 # #\X char literals are skipped so #\" cannot toggle string state.
+#
+# A BACKSLASH INSIDE A PIPE SYMBOL DOES NOT CLOSE IT (task #1655).  perl's `$|`
+# compiles to `|$\||` — the inner pipe is ESCAPED — and without this the
+# escaped pipe ended the region, the real closing pipe OPENED a new one, and
+# from there the scan ran one region out of phase: every string literal after
+# the file's first `$|` was read as CODE.  Measured before the fix: `$| = 1;`
+# followed by `eval 'my $phantomvar = 5; …'` declared `$phantomvar` and
+# `@phantomary` as package globals out of the eval TEXT — the very hazard the
+# paragraph above says this function exists to prevent — and op/write.t's
+# `format` picture line `"@0##"` minted a phantom `@0`.
 sub _blank_string_innards {
   my ($text) = @_;
   my @c = split //, $text;
@@ -7931,6 +7941,7 @@ sub _blank_string_innards {
       next;
     }
     if ($in_pipe) {
+      if ($ch eq '\\') { $i++ if $i + 1 < @c; next }   # \| stays inside (#1655)
       $in_pipe = 0 if $ch eq '|';
       next;
     }

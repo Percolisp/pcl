@@ -138,4 +138,47 @@ for my $n ('@0a', '@02x', '@007', '%02x', '$1', '$119797', '@', '%', '$0z9!',
 ok('%02x' !~ /$vt/, 'VAR_TOKEN_RX finds no name inside the format spec %02x');
 ok('%1x'  !~ /$vt/, 'VAR_TOKEN_RX finds no name inside the format spec %1x');
 
+# --- _blank_string_innards: a `\|` stays INSIDE a pipe symbol (#1655) -------
+# The same pass's other half.  It blanks CL string literals and `;` comments
+# before the scan reads the emitted text, so that a name occurring only in
+# string DATA (an eval'd Perl source, a sprintf format, a `format` picture
+# line) cannot be declared a package global.  perl's `$|` compiles to the
+# pipe-quoted symbol `|$\||` -- the inner pipe is ESCAPED -- and the pipe
+# branch used to end the region there, after which the real closing pipe
+# opened a NEW region and the blanker ran one region out of phase for the rest
+# of the file: every string literal after the first `$|` was read as CODE (and,
+# where quote parity inverted, real code was blanked as if it were a string).
+# The rows below pin both directions.
+{
+  my $blank = \&Pl::Parser2::_blank_string_innards;
+  # Expectations are built with `' ' x length` so a space count can never be
+  # miscounted by hand: sp('…') is the blanked stand-in for that text.
+  my $sp = sub { ' ' x length $_[0] };
+  # A plain string's innards go blank; the delimiters stay.
+  is($blank->('(p-print "hello $x")'),
+     '(p-print "' . $sp->('hello $x') . '")',
+     'blanker: a string literal is blanked, delimiters kept');
+  # A pipe symbol passes through WHOLE -- it is code, not data.
+  is($blank->('(p-setf |$;| 1)'), '(p-setf |$;| 1)',
+     'blanker: an unescaped pipe symbol passes through whole');
+  # THE REGRESSION: `|$\||` must not end at its escaped pipe, so the string
+  # that follows is still recognised as a string and blanked.
+  is($blank->('(p-setf |$\|| 1) (pl-plan "tests" 205)'),
+     '(p-setf |$\|| 1) (pl-plan "' . $sp->('tests') . '" 205)',
+     'blanker: a string after |$\\|| is still blanked (#1655)');
+  # A `format` picture line and an eval'd Perl source are the two shapes that
+  # minted phantoms once the phase slipped.
+  is($blank->('(p-setf |$\||1)(p-array-init "@0##")'),
+     '(p-setf |$\||1)(p-array-init "' . $sp->('@0##') . '")',
+     'blanker: a format picture after |$\\|| is blanked (#1655)');
+  # A `;` comment is blanked to end of line, and the newline survives.
+  is($blank->("(a) ; my \$x = 1\n(b)"),
+     '(a) ' . $sp->('; my $x = 1') . "\n(b)",
+     'blanker: a line comment is blanked, the newline kept');
+  # #\" is a CHARACTER literal and must not open a string.
+  is($blank->('(p-eq $c #\") (f "zz")'),
+     '(p-eq $c #\") (f "' . $sp->('zz') . '")',
+     'blanker: #\\" does not open a string');
+}
+
 done_testing();
