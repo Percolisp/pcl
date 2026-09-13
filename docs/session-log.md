@@ -254,7 +254,43 @@ errno SBCL raises KILLS the program — perl returns false and sets `$!`;
 `/dev/tty` with no controlling terminal is the live case, and it is what
 t/op/stat.t now stops on).  The companion was then re-run on the reverted tree.
 
-Filed: #1577–#1590.
+**Member 5 again, on the reverted tree (the round's bar).**  The second full
+`--all --jobs 4 --bless-stamps` (528 files, 47 min, box load 0.1 at launch)
+confirms the revert: re/pat_advanced.t is back at DIFF 957/723, and the run
+leaves exactly ONE real mover, op/coresubs.t TRANSPILE 0/0 -> DIFF 1/1, spliced
+row by row into `perl-suite-run.tsv` (the row + its cause), `row-shortfall.tsv`
+(1109 -> 1107, plus #1590 on t/op/stat.t and t/run/runenv_hashseed.t) and
+`perl-suite-fails.tsv` (+500 rows, the log's cap of 1108 diverging; the one live
+`not ok` is #1577, the 499 `ok -> (missing)` carry the file's `use B` abort).
+**A hand splice must call the KEY PROJECTION**: the first attempt copied the
+description out of the `.suitelog` verbatim and the one-file re-run reported 169
+NEW + 169 FIXED over an identical row set -- 169 descriptions carry a trailing
+space that `PclTapAlign::rowkey_desc` strips; with the projection applied the
+re-run reads 0 NEW / 0 FIXED / 0 UNVERIFIED / 0 LOST and SHORTFALL 1107.
+**Every other mover is NOT mine and that is measured**: the #366 serial phase
+named 26 files, and transpiling all 26 here and on a `git archive 8ab11c15`
+extraction (root paths normalised) gives 25 byte-IDENTICAL emissions with
+op/coresubs.t the only DIFFERS -- there the base TRANSPILE-FAILs with
+"Parser2 TODO: state $classcount in named sub (string eval)", which is the
+fix's positive control.  The 25 are the registered classes (#1082
+rows-unstable, the #326 clock, the io/pvbm flapper) and pre-existing drift that
+the FIRST run -- measured before main gained s483a/s483b -- reported identically
+(uni/method.t's 24 FIXED rows among them).  `perl-suite-notrun-stamps.tsv` is
+the run's `--bless-stamps` write, read row by row: every row keeps its
+registered reason and only the session, date and verdict refresh.  Final bars on
+the tree rebased onto main `2ffefb36`: gate **236 files / 8100 rows**, failures
+only the 13 standing pclxs xs rows; sweep **GATE clean, TOTAL passing 18675
+(+0)**, drops 5 = census, CAUSES 0 of 479 without cause; corpus-diff
+**IDENTICAL over 111** and emission-ab **13 SAME / 0 DIFF / 0 RCDIFF**, so the
+generation stays main's **v2-1320**.  Guards: `Pl/t/state-eval-01.t` 6 rows /
+782 ms, `tools/t/perl-suite-causes.t` 30 rows / 72 ms (not in the gate).  The
+two census populations at the end of round 1: `perl-suite-fails.tsv` CAUSES
+**2,269 of 18,836** (from 0), and `row-shortfall.tsv`'s `t/` half **124 files /
+67,765 rows UNEXPLAINED -> 107 / 63,751** (the file is shared with the sweep
+population, whose own half is unchanged).
+
+Filed: #1577–#1590.  Round 1 of #1501 is done; the task stays open for the
+rounds t5a–t5f the census schedules.
 
 ## Session 482 (Fable, 2026-09-11) — the owed s481b merge, and nothing else
 
