@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-1280
+;;; pcl: pipeline=v2 gen=v2-1320
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -2022,7 +2022,8 @@
           ($checksum_p :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $ch $nrep $all $s $si_ref $push_val $checksum_p) @_))
         (p-void-ctx
-          (p-let (($slen :num (%pcl-to-number-strict (p-length $s) "$slen") :captured t))
+          (p-let (($slen :box (make-p-box nil) :captured t))
+            (p-my-= $slen (p-length $s))
             (let ((--pcl-if-ret--2 nil))
               (p-if
                 (setf --pcl-if-ret--2
