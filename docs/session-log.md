@@ -2,6 +2,51 @@
 
 Append new entries at the top. One section per session.
 
+## Session s483a (Opus agent, 2026-09-13) — #1592: `${$coderef}` dies like perl, and the CODE exclusion turned out to be a measurement of a different check
+
+**The finding first, because it is the deliverable.**  `%p-aggregate-referent-p`
+(s473h, #1249(1)) deliberately left CODE out, on the record that including it
+"failed all 15 rows of `Pl/t/moo-01.t`, exactly as the code comment warned"
+(s317, #154).  On this tree the referent rule WITH CODE leaves moo-01.t at
+15/15 — so the dependency had to be explained, not merely re-tried.  s473h's
+own commit message names what it actually ran: **a `%p-wrong-referent-p
+"SCALAR"` arm — a type sniff on the UNBOXED value.**  Reconstructed here
+(`(functionp (unbox (unbox val)))` at the same site) it fails all 15 rows, and
+the failure is Sub::Quote's `capture_unroll` output
+`my $trigger_for_w = ${$_[1]->{"\$trigger_for_w"}};` — a capture whose scalar
+HOLDS a code ref, which unboxed twice IS a bare function.  The referent rule
+stops one level higher (the capture's scalar box), which is why it can include
+CODE.  A trace of every `p-cast-$` call in the Moo run confirms it: 133 calls,
+every referent boxed.
+
+**Member 1** widened the rule (`%p-non-scalar-referent-p`, an unboxed operand
+is its own referent) and gave the LVALUE side the same guard — `${$aryref} = 5`
+and `${$hashref} = 5` wrote nowhere and `${$coderef} = 5` CLOBBERED the
+variable, so the next call through it died "Undefined subroutine &main::5".
+
+**Member 2 came from the sweep, which is the bar the guards could not be.**
+Member 1 was gate-green and identical to perl over 40 probe shapes, and still
+cost `perl-tests/ref.t` and `postfixderef.t` one row each: ref.t:139
+(`$subrefref = \\&mysub2; is ($$subrefref->("GOOD"), "good")`) is a reference
+TO a code ref, and `\ CODEVALUE` was IDEMPOTENT in PCL — p-backslash's
+aggregate arm made box(FN), which is exactly what a variable holding a code ref
+looks like.  A raw function now takes the raw-VALUE arm (double box + is-ref),
+like `\42`: perl gives a code value an anonymous scalar.  That also fixed a
+pre-existing silent wrong, `ref(\\&f)` answering CODE where perl says REF.  The
+two spellings that must NOT gain a level keep their shape — `\&NAME` never
+reaches p-backslash, and `\&$cr` (p-backslash-sub-ref's direct branch) now
+answers with the function itself.
+
+**Bars.**  Sweep (2nd): GATE clean, 0 new / 0 fixed / 0 LOST, TOTAL passing
+18675 (+0), drops 5 = census.  ir-conform 321 pass / 0 fail / 24 known /
+0 stale (unchanged).  63 probe shapes vs perl 5.40.3 identical except the
+filed #1618 and an address string.  Guard `Pl/t/ref-to-ref-01.t` 20 → 30 rows,
+six of them failing on the `eabff00d` extraction and four negatives passing on
+both.  **#1618 filed**: `$coderef->[0]` answers the code ref where perl dies
+"Not an ARRAY reference" — `p-aref-deref`'s `functionp` arm serves the arrow
+subscript and the list slice `(sub{…})[0]` alike, so the fix is an emitter
+change.
+
 ## Session 482 (Fable, 2026-09-11) — the owed s481b merge, and nothing else
 
 **Main = `bc788dc2` (code tip `3cf64a0c`, gen v2-1280), pushed.**  The USER's
