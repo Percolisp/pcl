@@ -5790,7 +5790,6 @@ op/sub_lval.t	8	ok	not ok	[at t/op/sub_lval.t line 61]
 op/sub_lval.t	91	ok	not ok	[at t/op/sub_lval.t line 659]
 op/sub_lval.t	9	ok	not ok	[at t/op/sub_lval.t line 65]
 op/sub_lval.t	95	ok	not ok	[at t/op/sub_lval.t line 673]
-op/sub_lval.t	96	ok	(missing)	[at t/op/sub_lval.t line 676]
 op/sub_lval.t	97	ok	(missing)	[at t/op/sub_lval.t line 679]
 op/sub_lval.t	98	ok	(missing)	[at t/op/sub_lval.t line 682]
 op/sub_lval.t	99	ok	(missing)	[at t/op/sub_lval.t line 685]
@@ -5892,7 +5891,6 @@ op/sub_lval.t	191	ok	(missing)	sub:lvalue{&$x}->() does not die for non-lvalue i
 op/sub_lval.t	135	ok	(missing)	subroutine declared with lvalue before definition retains lvalue. [perl \#68758]
 op/sub_lval.t	89	ok	not ok	tied pad var explicitly returned in list lvalue context
 op/sub_lval.t	87	ok	not ok	tied pad var explicitly returned in scalar lvalue context
-op/sub_lval.t	88	ok	not ok	tied pad var explicitly returned in scalar ref context
 op/sub_lval.t	111	ok	(missing)	value assigned to recursive lvalue substr (depth 0)
 op/sub_lval.t	113	ok	(missing)	value assigned to recursive lvalue substr (depth 1)
 op/sub_lval.t	115	ok	(missing)	value assigned to recursive lvalue substr (depth 2)
