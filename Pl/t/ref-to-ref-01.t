@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 27;
 
 sub run_cl {
     my ($code) = @_;
@@ -111,12 +111,13 @@ test_cl('glob ref numifies to a non-zero address',
 test_cl('bare glob in scalar numifies to 0',
     'our $g_t = 5; my $g = *g_t; print 0 + $g, "\n";', "0\n");
 
-# ── ${ARRAY-or-HASH ref} is perl's fatal (task #1249(1), s473h) ──────────────
+# ── ${ARRAY-, HASH- or CODE ref} is perl's fatal (#1249(1) s473h, #1592 s483a)
 #    The REFERENT rule is the discriminator: `\@a`'s referent is the array
 #    itself, while a `\$aref` read back out of a container has the same UNBOXED
-#    shape but a scalar BOX for a referent (#154's ambiguity).  A CODE referent
-#    is excluded on purpose — PCL collapses a scalar-ref-to-coderef, which is
-#    Sub::Quote's shape (Pl/t/moo-01.t).
+#    shape but a scalar BOX for a referent (#154's ambiguity).  CODE was
+#    excluded until s483a on a measurement of a DIFFERENT check (a type sniff on
+#    the unboxed value, which Sub::Quote's `${$_[1]->{'$t'}}` does take down —
+#    see the #1592 rows below and Pl/t/moo-01.t).
 test_cl('${$aryref} dies "Not a SCALAR reference"',
     'my @a=(1,2); my $r=\@a; my $v = eval { "".${$r} };'
   . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$@]"), "\n";',
@@ -127,9 +128,10 @@ test_cl('${$hashref} dies "Not a SCALAR reference"',
   . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$@]"), "\n";',
     "died\n");
 
-test_cl('${$coderef} does NOT die (PCL collapses scalar-ref-to-coderef)',
+test_cl('${\&named} dies "Not a SCALAR reference" (#1592)',
     'sub cc { 1 } my $r=\&cc; my $v = eval { "".${$r} };'
-  . 'print +($@ ? "died:[$@]" : "ok"), "\n";', "ok\n");
+  . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$@]"), "\n";',
+    "died\n");
 
 test_cl('${ \\$aryref } is the array ref, not a fatal',
     'my @a=(1,2); my $ar=\@a; my $rr=\$ar; print ref(${$rr}), "\n";', "ARRAY\n");
@@ -143,3 +145,56 @@ test_cl('\\(@b, 9) is (ARRAY, SCALAR) and ${$r[0]} is the fatal',
   . 'eval { my $v = "".${$r[0]} };'
   . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no"), "\n";',
     "2ARRAYSCALAR\ndied\n");
+
+# ── #1592 (s483a): a CODE referent is the same fatal, and the shapes that must
+#    keep working are Sub::Quote's.  `${$coderef}` used to hand the code ref
+#    back silently, and `${$coderef} = 5` CLOBBERED the variable holding it, so
+#    the next call through that variable died "Undefined subroutine &main::5".
+test_cl('${$coderef} dies and the sub stays callable',
+    'my $cr = sub { 7 }; my $v = eval { "".${$cr} };'
+  . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$@]"), "\n";'
+  . 'print $cr->(), "\n";',
+    "died\n7\n");
+
+test_cl('${CODE} dies through a container element and as a literal',
+    'my $cr = sub { 7 }; my %h = (c => $cr); my @a = ($cr); my $o = "";'
+  . 'for my $t (sub { ${$h{c}} }, sub { ${$a[0]} }, sub { ${sub {7}} }) {'
+  . '  eval { my $v = "".$t->() };'
+  . '  $o .= ($@ =~ /^Not a SCALAR reference/ ? "d" : "n");'
+  . '} print $o, "\n";',
+    "ddd\n");
+
+test_cl('the CALL spellings still call; @{$cr} and %{$cr} keep their own fatals',
+    'my $cr = sub { 7 }; print $cr->(), &{$cr}(), &$cr(), "\n";'
+  . 'eval { my @x = @{$cr} };'
+  . 'print +($@ =~ /^Not an ARRAY reference/ ? "ary-died" : "no:[$@]"), "\n";'
+  . 'eval { my %x = %{$cr} };'
+  . 'print +($@ =~ /^Not a HASH reference/ ? "hash-died" : "no:[$@]"), "\n";',
+    "777\nary-died\nhash-died\n");
+
+test_cl('a ref TO a scalar holding a code ref still derefs (Sub::Quote)',
+    'my $cr = sub { 7 }; my $rr = \$cr; print ref(${$rr}), "\n";'
+  . 'my $caps = { q{$t} => \$cr };'
+  . 'my $s = eval q{ sub { my $t = ${$_[1]->{q{$t}}}; ref($t) } };'
+  . 'print $s->(undef, $caps), "\n";',
+    "CODE\nCODE\n");
+
+test_cl('${$ref} = 5 is the same fatal for ARRAY, HASH and CODE referents',
+    'my @a=(1,2); my %h=(k=>1); my $cr = sub { 7 }; my $o = "";'
+  . 'for my $t (sub { ${\@a} = 5 }, sub { ${\%h} = 5 }, sub { ${$cr} = 5 }) {'
+  . '  eval { $t->() };'
+  . '  $o .= ($@ =~ /^Not a SCALAR reference/ ? "d" : "n");'
+  . '} print $o, "\n";'
+  . 'print scalar(@a), scalar(keys %h), $cr->(), "\n";',
+    "ddd\n217\n");
+
+test_cl('the scalar-ref and symbolic WRITE paths are untouched',
+    'my $x = 1; my $r = \$x; ${$r} = 5; print $x, "\n";'
+  . 'my $cr = sub { 7 }; my $rc = \$cr; ${$rc} = 9; print $cr, "\n";'
+  . 'our $nm; my $n = "nm"; ${$n} = 3; print $main::nm, "\n";',
+    "5\n9\n3\n");
+
+test_cl('"$$coderef" interpolation is the fatal too',
+    'my $cr = sub { 7 }; my $s = eval { "$$cr" };'
+  . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$s]"), "\n";',
+    "died\n");
