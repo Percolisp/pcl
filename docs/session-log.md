@@ -29,6 +29,64 @@ and one fact, `proto.t`'s 169 are all `ok -> (missing)` behind the one abort,
 `redef.t`/`colon.t`/`package.t`/`bproto.t`/`package_block.t`/`line_debug.t` are
 one shape each.  `comp/parser.t` alone is `op/`-shaped (134 shapes over 140
 rows) and is attributed by FILE.
+**Member 2a — `\` over a `&`-MENTION is the SUB SLOT, per ELEMENT (#1681).**
+`comp/proto.t`'s one aborted form, `Undefined subroutine &main::1 called`, was
+`a_sub \(&tmp_sub_1);` at line 291: `\&foo` had the code-ref intercept and the
+PARENTHESISED spelling did not, so `\(&foo)` lowered its element through the
+ordinary `&`-prefix CALL path — `(p-backslash (pl-foo @_))` — which runs the
+sub with the caller's `@_` and references the RESULT.  The sub printed the
+file's `ok 61`, `a_sub` received a SCALAR ref holding printf's 1, and
+`&{$_[0]}` symbolically called the sub named "1" — inside the giant
+`(p-let ((@array …)) …)` form the file's first top-level `my @array` opens,
+i.e. everything after it.  A SECOND site had the same gap: the prototype
+ref-slot table in `gen_funcall_form` knew `\@`, `\%` and `\$` and not `\&`, so
+`f(&NAME)` under a `(\&)` prototype ran the sub too.  ONE reading,
+`_backslash_amp_ref_form`, extracted from the bare intercept and called from
+four sites; both mention spellings answer there (`&NAME` as one Symbol,
+`&$cr`/`&{EXPR}` as a `&`-Cast prefix_op), anything else returns undef and
+falls through — which is what keeps `\(&foo())` a ref to the call's VALUE,
+perl's own discriminator being the ARGUMENT parens, not the parens around the
+list.  `comp/proto.t` **47/14 → 78/38** (61 → 116 of 216 rows), shortfall
+**155 → 100**, 28 blessed fail rows fixed.  The residue is a SECOND abort with
+a different cause: `sub star (*&)` fed `star FOO` where nothing declares FOO —
+#266's ruled `no` arm, filed as **#1682** with its 100-row price and #266's own
+stop-rule.  Guard `Pl/t/backslash-amp-01.t`, 16 rows, all 16 failing on a
+`git archive 17d831fe` extraction (which reproduces the `&main::1` abort), every
+expectation byte-identical to perl 5.40.3 running the same program.
+
+**Member 2b — every `comp/` fail row now carries a cause.**  1,614 rows / 0
+causes → **1,590 rows / 1,590 causes** (the count fell because proto.t's 169
+blessed rows were replaced by this round's measured 145, through
+`PclTapAlign::rowkey_desc`).  The directory collapses much harder than `op/`:
+four files are ONE fact each (`utf.t` 500 → #1693, `require.t` 500 → #1688,
+`retainedlines.t` 91 + `line_debug.t` 24 → #1684, `uproto.t` 23 → #260) and
+five more are one registered not-supported class each (`redef.t` 19 warnings,
+`form_scope.t` 15 + `decl.t` 4 format/write, `package.t` 6 live stash,
+`bproto.t` 6 + `final_line_num.t` 1 invalid-perl arity, `opsubs.t` 4 error
+text).  Only `comp/parser.t` needed a three-way split, measured by locating
+each description's own source line: 93 never produced (#1694, five #138 drops
+in its `#line`-tracking section), 35 asserting `$@`'s text for invalid perl,
+12 a genuine scatter (#1695).  All six UNEXPLAINED `comp/` shortfall rows were
+attributed, and `comp/hints.t`'s three unregistered diverging rows were
+REGISTERED under the reason the file already carries after reading them — all
+three are `%^H` scoping (tests 15/16 are `eval q(BEGIN{ $^H{x}==1 && !$^H{y} })`
+inside a hint-hash scope; the two named rows are a TIED `%^H` copied into an
+inner scope).
+
+**Member 3 — one mover, and it is mine.**  The emission A/B over the whole
+`comp/` population (25 files) vs the base extraction is **24 SAME / 1 DIFF**,
+and the DIFF is `comp/proto.t` — the fix's positive control.  The two shapes
+the fix can reach (`\(&` and a `(\&)` prototype) occur in exactly three files
+of perl's whole `t/` tree (`comp/proto.t`, `op/sub_lval.t`, `op/lvref.t`) and
+in NO file of `perl-tests/`, `lib/`, `cl/` or `cpan-tests/`; A/B on those three
+is 2 SAME + the one DIFF.  So `comp/proto.t` is the only row I may splice, and
+it is spliced.  `comp/require.t` (911/836) and `comp/use.t` (40/47) read
+differently from their snapshot on MAIN at `--jobs 1`, with the #366 serial
+re-run agreeing — not mine, not spliced; require.t's own `sig` already records
+that it is a multi-step drift past the #1051 log cap, and use.t's two extra
+rows are accidental passes in the strict-enforcement class (`$nonexistent_pack_var`
+and `ursine_word` used to die for an unrelated reason and now do not).
+
 ## Session s473t5b (Opus agent, 2026-09-13) -- #1501 round 3: `op/` CHECK 2 over six files, 786 rows attributed, and PPI §30 (the indented here-doc's indentation) fixed
 
 **Member 1, the cluster table** (`scratch/s473t5b/cluster-table.md`).  Measured
