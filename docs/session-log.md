@@ -170,6 +170,91 @@ both.  **#1618 filed**: `$coderef->[0]` answers the code ref where perl dies
 "Not an ARRAY reference" — `p-aref-deref`'s `functionp` arm serves the arrow
 subscript and the list slice `(sub{…})[0]` alike, so the fix is an emitter
 change.
+## Session s473t4 (Opus agent, 2026-09-13) — the companion suite gets the sweep's two triage checks: a CAUSE column, a census, two fixes and a PPI lexer bug
+
+**Member 1 (the instrument, committed in the stopped half of this agent on 2026-09-10).**
+`baselines/perl-suite-fails.tsv` gains an optional sixth CAUSE field and
+`tools/run-perl-suite.pl` prints `CAUSES: N of M blessed row(s) have no cause`
+in its ROW DIFF block.  The line existed in TWO copies with two behaviours
+(`tools/sweep-diff.pl` says NOT CHECKED for a baseline with no column;
+`tools/cpan-scoreboard.pl` reported "N of N have no cause" for the same state),
+so the reading moved to `tools/lib/PCLCauses.pm` and both callers route through
+it — one reading, three askers.  The rowkey may not contain a TAB and now
+cannot: `PclTapAlign::rowkey_desc` normalizes one away, and the three blessed
+rows that carried one (perl runs the `re_tests` HEADER line as a test) were
+edited by hand.  Guard `tools/t/perl-suite-causes.t`, 30 rows, 61 ms.
+
+**Member 2 (the census).**  The census is a JOIN, not 188 re-runs:
+`tools/run-perl-suite.pl` does NOT strip the PCL side's `^;` lines (the sweep
+runner does, `sweep-perl-tests.pl:215` — that is what hid the cause in s473t1),
+so every early-stopper's recovery line was already sitting in
+`baselines/perl-suite-run.tsv`'s `sig` column and nobody had joined it to
+`baselines/row-shortfall.tsv`.  528 files = DIFF 270 / XDIFF 104 / OK 101 /
+NOTAP 31 / TRANSPILE 10 / TIMEOUT 9 / NOT-RUN 2 / FIXTURE 1; shortfall 190
+files / 445,101 rows (124 / 67,765 UNEXPLAINED); 18,336 fail rows over 265
+files with CAUSES 0.  `re/` + `uni/` hold 98 % of the rows short and 61 % of
+the fail rows and collapse to one fact per file; `op/` is the opposite shape —
+3,427 clusters over 4,707 rows, 1.4 rows per distinct assertion — so `op/` is
+attributed by FILE, not row by row.  Tables and the per-directory rounds
+t5a–t5f are `docs/plan-post-s473.md` §5.
+
+**Member 3 (CHECK 1 round 1).**  Nine of the ten TRANSPILE-FAIL files named
+their cause in one command (`./pl2cl < FILE`), and every file ≥ 200 rows short
+outside `re/` + `uni/` was triaged.  TWO FIXES.  (a) A `state` declaration in
+an INNER BLOCK of a named sub refused the whole file whenever the sub contained
+any `eval EXPR` — t/op/coresubs.t, all 1109 rows, on a `state $classcount = 1`
+inside an `if` whose `eval $core_code` sits OUTSIDE the `if` and can never name
+it.  Perl ends the name's scope with the block, so `_shadow_rename_blocker`
+gained an optional eval-scan ROOT and the state handler passes the decl's own
+block; the narrowing needs a second condition (`_symbol_confined_to`) because
+the positional rename does not itself stop at the block's end.  Both
+must-still-refuse shapes were probed and still refuse.  (b) `unlink_tempfiles`
+(+ `unlink_all`) and `is_linux_container` were missing from the 489-line PCL
+test.pl stub that the shadow t/ symlinks over perl's own 2069-line one — not a
+missing feature but an undef-fn abort that kills every REMAINING top-level form:
+t/run/runenv_hashseed.t 9 → 278 rows (perl: 278) and t/op/stat.t 0 → 44, both
+files reported DIFF, so the loss was invisible to every verdict.  **That fix was
+then REVERTED** — see the last paragraph.  And ONE PPI
+BUG: `for $$f (1,2) { }` — ANY dereference as the foreach loop variable — fails
+PPI 1.291's LEXER outright, so `PPI::Document->new` returns undef and t/op/for.t
+loses all 149 rows (`docs/ppi-upstream-bugs.md` §29, three failing rows +
+two controls in `docs/ppi-bug-report.t`).
+
+**Member 4 (CHECK 2 round 1).**  CAUSES 0 → 1,769 of 18,336, every edited row a
+pure append of TAB + cause and the other 16,782 byte-identical.  The shape of
+the job, measured before doing it: 5,335 of the 18,336 rows are
+`ok -> (missing)`, so a third of CHECK 2 is answered by CHECK 1's per-file
+cause.  op/'s biggest clusters: op/write.t 468 + op/index.t 308 = the same
+`&main::formline` abort; op/coreamp.t 454 = #1577; op/cproto.t 183 = #1586
+(`prototype("CORE::x")` is undef for every builtin, probed); op/packagev.t 109 =
+#1587 (`eval "package NAME VERSION"` and `eval "package NAME { … }"` are
+refused as "multiple package sections" although each is ONE switch — the
+seven-shape acceptance table is in the task); 262 rows are the already-ruled
+warnings family (#221).
+
+**Member 5 (the full companion) — and the revert it forced.**  The first
+`--all --jobs 4 --bless-stamps` run (52 min) showed t/re/pat_advanced.t going
+DIFF 957/723 → DIFF **0/0**: the whole file, 1680 rows.  Its PCL side dies with
+`Heap exhausted … bytes_allocated = 1050769584 [97.9% of 1073741824 max]` inside
+`SB-REGALLOC::PACK-TN` — SBCL's DEFAULT 1 GB dynamic space, exhausted while
+register-allocating.  Bisected rather than guessed: the emitted CL for the file
+is BYTE-IDENTICAL on both trees (root paths normalised), so the compiler change
+is not the cause; my tree alone on a quiet box with the 900 s allowance gives
+0/0 three times; a `git archive eabff00d` extraction gives 957/723; and the SAME
+extraction with ONLY my `perl-tests/t/test.pl` copied in gives 0/0.  The file
+does not CALL any of the three helpers — ~26 lines of extra code in a module it
+`require`s is simply enough to tip a file already at 97.9 %.  +313 rows against
+−1680, so **the stub helpers are reverted and filed as #1590** with the patch,
+the guard, the timeout-registry row and the two candidate unblocks; the
+`state`-in-inner-block fix, the PPI §29 report and every baseline cause stay.
+Two findings the reverted measurement produced stand on their own: **#1588**
+(hash order is not randomised — PERL_HASH_SEED and PERL_PERTURB_KEYS are inert,
+so `keys` gives the same order every run) and **#1589** (a failing `open` whose
+errno SBCL raises KILLS the program — perl returns false and sets `$!`;
+`/dev/tty` with no controlling terminal is the live case, and it is what
+t/op/stat.t now stops on).  The companion was then re-run on the reverted tree.
+
+Filed: #1577–#1590.
 
 ## Session 482 (Fable, 2026-09-11) — the owed s481b merge, and nothing else
 
