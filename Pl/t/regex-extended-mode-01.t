@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 8;
 
 sub run_cl {
     my ($code) = @_;
@@ -94,3 +94,35 @@ test_cl('(?#...) comment group is not treated as an /x comment',
 test_cl('nested (?-x: (?x: ) ) scopes each restore the enclosing mode',
     'print "[", ("a b c d e" =~ /a (?-x: b (?x:c) d ) e/x ? 1:0), "]\n";',
     "[1]\n");
+
+# ── the CHARSET letters in an inline modifier group (task #1715) ────────────
+# perl's `(?a:…)` `(?aa:…)` `(?u:…)` `(?l:…)` `(?d:…)` pick which Unicode
+# semantics the group uses, and docs/not-supported.md "Regex encoding
+# modifiers (/a, /d, /l, /u)" blesses IGNORING them — cl-ppcre always matches
+# with /u.  But cl-ppcre does not ignore the LETTER: it rejected the whole
+# pattern ("Character 'a' may not follow '(?'"), so `"0" =~ /(?a:\d)/` was 0
+# where perl says 1, with a warning on stderr.  `%pcl-strip-charset-flags`
+# drops just those letters, so "ignored" means what the entry says it means.
+# Every expectation below is perl 5.40.3's own answer to the same program.
+test_cl('an inline charset-modifier group compiles and matches',
+    'print "[", ("0" =~ /(?a:\d)/x  ? 1:0), "]",'
+  . '       "[", ("0" =~ /(?aa:\d)/x ? 1:0), "]",'
+  . '       "[", ("0" =~ /(?u:\d)/x ? 1:0), "]",'
+  . '       "[", ("0" =~ /(?l:\d)/x ? 1:0), "]",'
+  . '       "[", ("0" =~ /(?d:\d)/x ? 1:0), "]",'
+  . '       "[", ("0" =~ /(?a: \d )/x ? 1:0), "]",'
+  . '       "[", ("0" =~ /(?a)\d/x  ? 1:0), "]\n";',
+    "[1][1][1][1][1][1][1]\n");
+
+# The cases the strip could BREAK: a charset letter combined with a real flag
+# (which must keep the real flag, in both polarities), and an ESCAPED paren
+# followed by modifier letters — `/\(?u:/` is an optional literal `(` then
+# `u:`, and dropping the `u` there would be a silent wrong.
+test_cl('charset strip keeps real flags and leaves an escaped paren alone',
+    'print "[", ("X"    =~ /(?ai:x)/x  ? 1:0), "]",'
+  . '       "[", ("x"    =~ /(?a-i:x)/x ? 1:0), "]",'
+  . '       "[", ("X"    =~ /(?a-i:x)/x ? 1:0), "]",'
+  . '       "[", ("u:"   =~ /\(?u:/x    ? 1:0), "]",'
+  . '       "[", ("(u:"  =~ /\(?u:/x    ? 1:0), "]",'
+  . '       "[", ("x"    =~ /(?a)x/x    ? 1:0), "]\n";',
+    "[1][1][0][1][1][1]\n");

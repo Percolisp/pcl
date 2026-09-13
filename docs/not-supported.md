@@ -1336,6 +1336,17 @@ Unicode semantics to use:
 ignored.  CL-PPCRE always uses Unicode semantics (roughly equivalent to
 `/u`).
 
+**"Ignored" was not true of the INLINE spelling until s473t5e (task #1715).**
+`(?a:…)` `(?aa:…)` `(?u:…)` `(?l:…)` `(?d:…)` and the flag-only `(?a)` are not
+cl-ppcre flags, and cl-ppcre does not ignore an unknown one — it rejected the
+whole pattern (`Regex syntax error: Character 'a' may not follow '(?'`), so
+`"0" =~ /(?a:\d)/` was **0** where perl says 1, with a warning on stderr.
+`%pcl-strip-charset-flags` now drops just the charset letters from an inline
+modifier group, keeping any real flag (`(?ai:x)` → `(?i:x)`, `(?a-i:x)` →
+`(?-i:x)`, `(?a)` → nothing).  What remains ignored is the SEMANTICS, which is
+this entry: `"\x{100}" =~ /(?a:\w)/` is 1 in PCL and 0 in perl.  Guard
+`Pl/t/regex-extended-mode-01.t`.
+
 **Rationale:** The difference between `/a` and `/u` matters for
 `\d`/`\s`/`\w` on non-ASCII text, which is uncommon in real CPAN code.
 Emulating `/l` (locale) would require calling SBCL locale-aware functions,

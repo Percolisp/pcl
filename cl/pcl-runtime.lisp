@@ -26254,6 +26254,32 @@ buffer's fill-pointer; everything else falls back to file-length."
               (write-char #\- s)
               (write-string (%pcl-regex-class-char (cdr r)) s))))))))
 
+(defun %pcl-strip-charset-flags (pat)
+  "Drop perl's CHARSET letters (a aa d l u) from inline modifier groups.
+   `(?a:X)` -> `(?:X)`, `(?ai:X)` -> `(?i:X)`, `(?a-i:X)` -> `(?-i:X)`, and
+   the flag-only `(?a)` -> nothing at all, which is what ignoring it means.
+   Only a run made ENTIRELY of perl's modifier letters followed by `:` or `)`
+   is touched, so `(?:` `(?=` `(?!` `(?>` `(?#` `(?<name>` `(?&name` `(?(1)`
+   and `(?{` are all left exactly as they are.  The `(?<!\\\\)` guard keeps an
+   ESCAPED paren out of it: `/\\(?u:/` is an optional literal `(` followed by
+   `u:`, not a modifier group, and rewriting it would silently drop the `u`.
+   A doubled backslash before a real group therefore DECLINES — cl-ppcre then
+   rejects the pattern in its own words, exactly as it does today, which is
+   the loud answer rather than a wrong one."
+  (cl-ppcre:regex-replace-all
+   "(?<!\\\\)\\(\\?([adlupimsnx]*)((?:-[imsnx]+)?)([:)])"
+   pat
+   (lambda (match flags neg close)
+     (let ((kept (remove-if (lambda (c) (member c '(#\a #\d #\l #\u))) flags)))
+       (cond
+         ;; nothing was a charset letter: leave the group byte-identical, so a
+         ;; pattern without one is untouched by this pass.
+         ((= (length kept) (length flags)) match)
+         ;; a flag-only group whose flags were ALL charset letters disappears.
+         ((and (string= close ")") (zerop (length kept)) (zerop (length neg))) "")
+         (t (concatenate 'string "(?" kept neg close)))))
+   :simple-calls t))
+
 (defun perl-regex-to-ppcre (pattern)
   "Convert Perl regex escape sequences to cl-ppcre compatible form.
    cl-ppcre does not handle \\x{HHHH} (Perl hex escapes with braces).
@@ -26291,6 +26317,18 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; the semantics are identical.
          (pat (cl-ppcre:regex-replace-all "\\(\\?\\^" pat "(?"
                                           :simple-calls t))
+         ;; The CHARSET letters in an inline modifier group — perl's `(?a:…)`
+         ;; `(?aa:…)` `(?u:…)` `(?l:…)` `(?d:…)` and the flag-only `(?a)` —
+         ;; are not cl-ppcre flags, and cl-ppcre does not merely ignore them:
+         ;; it rejects the whole pattern ("Character 'a' may not follow '(?'"),
+         ;; so `"0" =~ /(?a:\d)/` was 0 where perl says 1, plus a warning on
+         ;; stderr.  The MODIFIERS themselves stay ignored — that is the blessed
+         ;; entry docs/not-supported.md "Regex encoding modifiers (/a, /d, /l,
+         ;; /u)", and cl-ppcre always matches with /u semantics — but "ignored"
+         ;; has to mean the pattern still compiles, which is what that entry
+         ;; already claims and what the trailing spelling `/a` already does.
+         ;; See %pcl-strip-charset-flags for the two shapes.
+         (pat (%pcl-strip-charset-flags pat))
          ;; Convert \Q...\E: quote all regex metacharacters in the enclosed text.
          ;; \E is optional — \Q extends to end of pattern if \E is absent.
          (pat (cl-ppcre:regex-replace-all
