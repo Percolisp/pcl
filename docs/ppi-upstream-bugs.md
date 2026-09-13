@@ -1759,6 +1759,51 @@ file, produce nothing** (the file is `TRANSPILE` in
 one is the family's usual repair — rewrite the for-head into a spelling PPI
 lexes, restore the dereference when lowering.
 
+### 29a. …and a DECLARED REF as the loop variable falls OUT of the compound (task #1649)
+
+The same `for`-compound lexer, one step milder: `for my \$x (LIST) {…}` (the
+`declared_refs` feature, perl 5.26+) does not fail the lexer — it builds a
+`Statement::Compound` holding *only the two Words* and leaves the loop
+variable, the list and the block in a **sibling `PPI::Statement`**.  So the
+document exists and is silently wrong-shaped:
+
+```perl
+for my \$x (\$main::y) {
+    print "hi\n";
+}
+```
+
+```
+PPI::Document
+  PPI::Statement::Compound
+    PPI::Token::Word      'for'
+    PPI::Token::Word      'my'
+  PPI::Statement                       <-- should all be INSIDE the Compound
+    PPI::Token::Cast      '\'
+    PPI::Token::Symbol    '$x'
+    PPI::Structure::List      ( ... )
+      PPI::Statement::Expression
+        PPI::Token::Cast      '\'
+        PPI::Token::Symbol    '$main::y'
+    PPI::Structure::Block     { ... }
+      PPI::Statement
+        PPI::Token::Word      'print'
+        PPI::Token::Quote::Double  '"hi\n"'
+        PPI::Token::Structure ';'
+```
+
+Expected: ONE `Statement::Compound` with the Words, the declared-ref loop
+variable, the List and the Block.  perl runs the snippet and prints `in loop
+x=5` for `our $z = 5`-style input; the loop aliases `$x` to each element's
+referent.
+
+**Impact on PCL (task #1649):** `_lower_compound` finds no
+`PPI::Structure::List` among the compound's children and dies `Parser2 TODO:
+foreach without list`, which inside `t/op/decl-refs.t`'s `eval $code or die $@`
+kills the enclosing top-level loop — **nine of that file's 21 eval'd programs
+carry this shape and nothing else**, and 195 of its 402 rows are lost (shared
+with #1648).  PPI version tested 1.291; no workaround shipped.
+
 ---
 
 ## Possibly FIXED upstream — verify before trusting

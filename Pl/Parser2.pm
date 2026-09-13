@@ -7945,6 +7945,32 @@ sub _blank_string_innards {
   return join '', @c;
 }
 
+# THE VARIABLE-TOKEN CLASS the free-global scan below recognises, in ONE place
+# because its two readings — the UNQUALIFIED scan and the CROSS-PACKAGE scan —
+# have to agree about what a name is, and until #1650 they did not agree with
+# perl: an ALL-DIGIT container name (`@119797`, t/op/sub_lval.t's own [perl
+# #119797] fixture) matched neither, so it was never forward-declared and the
+# read died "The variable @119797 is unbound", taking its whole top-level form.
+# A sigil plus a letter/underscore head is the ordinary case.  `\w*+` is
+# possessive (#415): the scan must not backtrack into a shorter match that
+# dodges the `(?!-)` runtime-internal lookahead its callers apply.
+#
+# THE DIGIT-HEADED BRANCH IS PERL'S OWN RULE, PROBED, not "a digit then word
+# characters" — that first spelling minted a phantom `%02x` out of
+# `(p-sprintf "%02x" …)` in perl-tests/sort.t (caught by corpus-diff, exactly
+# the task-#66 phantom one sigil over).  perl accepts a digit-headed variable
+# name only when the name is ALL DIGITS, and rejects a multi-digit name that
+# starts with `0`:
+#     @0a  = (1)   syntax error (bareword found where operator expected)
+#     @02x = (1)   "Numeric variables with more than one digit may not start with '0'"
+#     @007 = (1)   same
+#     @1, %12, @119797   legal, ordinary package containers
+# so the branch is `0 | [1-9][0-9]*` with a trailing `(?!\w)` — which is what
+# excludes a format spec, since every one of those carries a conversion letter.
+# `@`/`%` ONLY: perl makes just the `$` spelling magic (`$119797` is capture
+# group 119797, read-only and runtime-owned).
+our $VAR_TOKEN_RX = qr/(?:[\$\@\%][A-Za-z_]\w*+|[\@\%](?:0|[1-9][0-9]*)(?!\w))/;
+
 # $free_out (E3 eval-mode only): when given, the plain undeclared sigil-vars
 # (%seen) are recorded there as p-eval-thunk capture candidates INSTEAD of
 # being defvar'd — a defvar would proclaim the name special and defeat the
@@ -8023,7 +8049,7 @@ sub _forward_global_decls {
     # caret specials (|$"|, |${^MPE}|) are excluded by the word-shaped inner
     # pattern and stay with %punct/%caret; a package-qualified `|P|::|$x|` is
     # excluded by the ::-lookbehind and belongs to the %cross scan below.
-    while ($line =~ /(?<![\w:|])([\$\@\%][A-Za-z_]\w*+)(?!-)|(?<!::)\|([\$\@\%][^\W\d]\w*)\|/g) {
+    while ($line =~ /(?<![\w:|])($VAR_TOKEN_RX)(?!-)|(?<!::)\|([\$\@\%][^\W\d]\w*)\|/g) {
       my ($v, $bare) = defined($1) ? ($1, $1) : ("|$2|", $2);
       next if $runtime_vars{$bare} || $lb->{$bare};
       # W5-renamed cells are defvar'd via _captured_decls — don't double-declare.
@@ -8042,7 +8068,7 @@ sub _forward_global_decls {
     # The VARIABLE half may be pipe-quoted too when its name carries a
     # non-ASCII character (#418) — `|ＦＯＯ|::|$ｚ|`.  Both halves are matched
     # in their CL spelling, which is what the declaration must repeat.
-    while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::(?:([\$\@\%][A-Za-z_]\w*+)(?!-)|\|([\$\@\%][^\W\d]\w*)\|)/g) {
+    while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::(?:($VAR_TOKEN_RX)(?!-)|\|([\$\@\%][^\W\d]\w*)\|)/g) {
       my ($pkg, $var) = (defined($1) ? $1 : "|$2|", defined($3) ? $3 : "|$4|");
       next if $skip_pkg{ defined($1) ? $1 : $2 };
       # Referenced packages must exist when the qualified symbol is READ —

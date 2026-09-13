@@ -105,4 +105,37 @@ is(partition_name('બʑ::$a'), 'exception', 'sort pair stays an exception in a 
 # A digit may not start an identifier — still not word-shaped.
 is(partition_name('9bad::$x'), 'exception', 'digit-initial package segment is not word-shaped');
 
+# --- $Pl::Parser2::VAR_TOKEN_RX: the free-global scan's NAME CLASS (#1650) --
+# The declaration pass scans EMITTED CL TEXT for undeclared package globals,
+# and its two readings (the unqualified scan and the cross-package scan) share
+# this one class.  It is pinned here, beside the partition predicate, because
+# the class is where perl's rule for a DIGIT-headed name lives and that rule is
+# narrow: a digit-headed variable name must be ALL DIGITS and, beyond one
+# digit, must not start with `0`.  PROBED vs perl 5.40.3:
+#     @0a  = (1)   syntax error ("Bareword found where operator expected")
+#     @02x = (1)   "Numeric variables with more than one digit may not start with '0'"
+#     @007 = (1)   same
+#     @1, %12, @119797   legal ordinary package containers
+# The first version of this class was "a digit then word characters", which
+# minted a phantom `%02x` out of `(p-sprintf "%02x" …)` in perl-tests/sort.t --
+# caught by tools/corpus-diff.pl, and the task-#66 phantom one sigil over.  So
+# the NEGATIVES below are the point of these rows, not the positives.
+require Pl::Parser2;
+# `no warnings 'once'`: a runtime `require` means the compiler sees this
+# package variable named exactly once here, which is not a typo.
+my $vt = do { no warnings 'once'; $Pl::Parser2::VAR_TOKEN_RX };
+for my $n ('$x', '@arr', '%h', '$_private', '@a9', '@1', '%1', '%12', '@119797',
+           '@424242') {
+  ok("$n" =~ /\A$vt\z/, "VAR_TOKEN_RX matches $n");
+}
+for my $n ('@0a', '@02x', '@007', '%02x', '$1', '$119797', '@', '%', '$0z9!',
+           '@-', '%+') {
+  ok("$n" !~ /\A$vt\z/, "VAR_TOKEN_RX does NOT match $n");
+}
+# …and the scan's own use of it: a format spec in a CL string must not yield a
+# name even when the string is scanned as code (the sort.t phantom).  `%02x`
+# cannot match even as a PREFIX, which is what the possessive/lookahead buys.
+ok('%02x' !~ /$vt/, 'VAR_TOKEN_RX finds no name inside the format spec %02x');
+ok('%1x'  !~ /$vt/, 'VAR_TOKEN_RX finds no name inside the format spec %1x');
+
 done_testing();

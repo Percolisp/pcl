@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 63;
+use Test::More tests => 66;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -821,4 +821,37 @@ for my $src ('for $$f (1,2) { }',
 {
     my $doc = PPI::Document->new(\'for $x (1,2) { }');
     ok( defined $doc, '`for $x (1,2) { }` lexes — a plain Symbol is fine (control)' );
+}
+
+# ── Bug 29a: a DECLARED REF as the foreach loop variable falls OUT of the
+# compound ───────────────────────────────────────────────────────────────────
+#
+# The same for-compound lexer, one step milder.  `for my \$x (LIST) {…}` (the
+# `declared_refs` feature, perl 5.26+) does not fail the lexer — it builds a
+# Statement::Compound holding ONLY the two Words and leaves the loop variable,
+# the list and the block in a SIBLING PPI::Statement, so the document exists
+# and is silently wrong-shaped.  perl runs the loop, aliasing $x to each
+# element's referent.
+for my $src ('for my \$x (\$main::y) { 1 }',
+             'foreach my \@a (\@main::b) { 1 }') {
+    my $doc = PPI::Document->new(\$src) or do {
+        fail("`$src` should lex at all"); next;
+    };
+    my ($cmp) = grep { $_->isa('PPI::Statement::Compound') } $doc->schildren;
+    ok( $cmp && $cmp->find_any('PPI::Structure::List')
+             && $cmp->find_any('PPI::Structure::Block'),
+        "`$src`: the list and the block belong INSIDE the for compound" )
+        or diag "compound children: "
+              . ($cmp ? join(' ', map { ref($_) =~ s/^PPI:://r . "[" . $_->content . "]" }
+                                      $cmp->schildren)
+                      : "(no Statement::Compound at all)");
+}
+# The control PPI gets right and must keep getting right: `my` plus a PLAIN
+# symbol stays inside the compound.
+{
+    my $doc = PPI::Document->new(\'for my $x (1,2) { 1 }');
+    my ($cmp) = grep { $_->isa('PPI::Statement::Compound') } $doc->schildren;
+    ok( $cmp && $cmp->find_any('PPI::Structure::List')
+             && $cmp->find_any('PPI::Structure::Block'),
+        '`for my $x (1,2) { 1 }`: list and block inside the compound (control)' );
 }

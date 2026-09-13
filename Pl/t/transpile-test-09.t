@@ -1096,4 +1096,29 @@ package B { my $c = 3; sub b { return $c } }
 print "4 file=$c A=", A::a(), " B=", B::b(), "\n";
 });
 
+# ── s473t5a #1650: an ALL-DIGIT container name.  perl names a package ARRAY or
+# HASH with digits happily — only the `$` spelling is magic there (`$119797` is
+# capture group 119797) — but the free-global scan's name class wanted a
+# letter/underscore head, so `@119797` was never forward-declared and READING
+# it died "The variable @119797 is unbound", taking its whole top-level form
+# (t/op/sub_lval.t's [perl #119797] fixture).  An ASSIGNMENT at segment top
+# level declared the name on the ordinary path, which is why only the
+# read-without-write shape crashed.  One name class, shared by the pass's TWO
+# scans — the unqualified one and the cross-package one, which were blind the
+# same way one `::` apart.
+# INVERSE GUARDS in the same snippet: the assigned spelling still works (2);
+# a digit-headed name read but never written is EMPTY, not an error (3, and
+# that is perl's answer); and `$1` stays the capture family, not a global (4).
+test_transpile("all-digit container names are ordinary globals (#1650)", q{
+no strict; no warnings;
+sub g { return "@119797" }
+print "1 read=[", g(), "] file=[@119797]\n";
+@Foo::424242 = (4,5);
+print "2 assigned=[@Foo::424242]\n";
+sub r { return "@Bar::777" }
+print "3 never-written=[", r(), "]\n";
+"abc" =~ /(b)/;
+print "4 cap=$1\n";
+});
+
 done_testing();
