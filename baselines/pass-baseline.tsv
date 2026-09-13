@@ -1,4 +1,9 @@
 # taken-at: 5323d9e 2026-08-15
+# s484b (2026-09-13, #1117, EDITED BY HAND — one row): sub.t 53 -> 54 (+1).
+#   `undef *_` now leaves the @_ slot ABSENT rather than empty, so row 24
+#   `goto &xsub when @_ does not exist` (`is *_{ARRAY}, undef`) passes; it left
+#   baselines/fail-baseline.tsv by EDIT in the same commit, and the companion
+#   op/sub.t moved 54/11 -> 55/10 for the same row.  TOTAL 18675 -> 18676.
 # s473h (2026-09-08, #1249(4), edited ROW BY ROW): eval.t 129 -> 131 (+2).
 #   `eval EXPR` imposes SCALAR context on its operand, so `my @b = eval @a`
 #   is eval("4") -- the element COUNT.  PCL stringified the raw vector as
@@ -464,7 +469,7 @@ sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
 state.t	PARTIAL	88	0	166
 study.t	OK	43	0	43
-sub.t	OK	53	3	65
+sub.t	OK	54	2	65
 substr.t	PARTIAL	351	0	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	239	3	317
