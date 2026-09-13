@@ -2,6 +2,56 @@
 
 Append new entries at the top. One section per session.
 
+## Session s483c (Opus agent, 2026-09-13) — the arrow's invocant includes the cast run (#1620), and the B-str freeze's use set (#1621 + #1622)
+
+**#1620 — eight arrow arms, two readings.**  `$$r->who` died "Can't call method
+who on unblessed reference": the cast was read as a deref OF THE METHOD CALL
+(`${ $r->who }`) where perl binds the sigil deref with the TERM (`${$r}->who`).
+The rule was not missing — it sat in TWO arms privately (#305's `$$r->(…)`,
+#211's `$$r->{k}`) and was absent from the six others, so every method spelling,
+every postfix-deref arm and the braced `${$r}->who` (which task #1620 says
+worked, and did not) were wrong: 12 of 24 probe shapes, one SILENTLY —
+`$$ar->$#*` answered `-1`.  One helper `Pl::PExpr::_arrow_invocant` asked by
+every arm (`\` stays outside the run: `\$x->m` is `\($x->m)`), plus a `$start`
+argument on `_reduce_pre` so the splice consumes the run.  43 probe shapes vs
+perl 5.40.3 in three batteries — all identical but three BASE-IDENTICAL rows
+(#1628); corpus-diff IDENTICAL over 111 + 6 shapes and the 1034-file A/B
+SAME/0/0, i.e. the shape occurs in NO corpus file, which is why no sweep ever
+saw it.  Guard `Pl/t/deref-arrow-01.t`.
+
+**#1621 + #1622 — a `str` use is a LICENCE, so the use set must be exact.**
+`_tw_scan_quote_leaf` scans a quote-like leaf's TEXT for `$name` and records a
+`str` USE, and that use is what lets Parser2 keep a host STRING in the slot —
+so over-firing DESTROYS the value, the opposite of safe.  With no escape rule
+`"x \$cr y"` (literal text) licensed the freeze and `my $cr = sub {…}` was
+stringified into its own slot: `$cr->()` died "Undefined subroutine
+&main::CODE(0x…)"; a LITERAL heredoc was scanned too.  The escape rule is now
+`Pl::InterpScan::escape_skip`, extracted out of the one scanner's driver loop
+(`\cX` hides the X in dq text, not in a pattern).  #1622 is the same hole from
+the other side: the walk never classifies a CAPTURED name's reads
+(`_tw_expr_parse` skips `sub {…}`), so one real interpolation froze a captured
+code ref — #760's "capture alone is not a boxing event" is sound for the A
+regime (same value) and wrong for the B regime (it COERCES); one `!$captured`
+conjunct, and `docs/raw-numeric-verdict.md` had listed closure capture as
+disqualifying all along.  Guard rows 61–70 in `Pl/t/raw-verdict-01.t` (61–67
+fail on the base extraction, 68–70 pass on both).
+
+**The bar.**  Gate **236 files / 8097 rows**, failures only `xs-01/02/03` (the 13
+standing pclxs rows); the base extraction reads 235 / 8091 with the new 70-row
+`raw-verdict-01.t` already in place, so 8081 + 10 + 6 = 8097 closes exactly, and
+that run re-confirms the member-1 inverse (rows 61–67 FAIL there, 68–70 pass).
+Full sweep GATE clean, **0 new / 0 fixed, TOTAL passing 18675 (+0)**, dropped
+statements 5 = census; the 5 UNSTABLE rows are crash-file noise — method.t's
+fail SET is byte-identical between the base extraction and this tree (23 rows,
+76 pass both), measured file-alone.  gate-set-scan over BOTH populations (638
+files) IDENTICAL, so no verdict moved; ir-host-leak identical to base (31
+symbols); ir-conform 321 pass / 0 fail / 24 known / 0 stale.  Generation
+**v2-1320** with the three artifacts regenerated — one body moved, and it is
+#1622 acting on `cl/pack-impl.pl`'s own `$slen` (filed #1629, cost inside the
+noise).  Filed: **#1628** (element access through a wrong-kind reference is not
+perl's fatal — a raw SBCL `gethash3` error one way, a silent undef the other)
+and **#1629**.
+
 ## Session s483b (Opus agent, 2026-09-13) — two reference-representation fillers: a scalar's own stash gets its own home (#1619), and `$coderef->[0]` dies without touching the emitter (#1618)
 
 **#1619 — one box slot, two perl facts.**  `ref(\$o)` for `my $o = bless {}, "H"`
