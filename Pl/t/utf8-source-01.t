@@ -101,7 +101,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 38;
+plan tests => 39;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -127,6 +127,37 @@ is(run_bytes(encode_utf8("use utf8;\nmy \$café = 42;\nprint \$café, \"\\n\";")
 # index() is character-based under use utf8.
 is(run_bytes(encode_utf8('use utf8; my $s = "axé"; print index($s,"é"), "\n";')),
    "2\n", 'use utf8: index() is character-based');
+
+# ---------------------------------------------------------------------------
+# Task #1736: the INDIRECT-OBJECT invocant slot.  perl reads `nèw Àlìcè` as
+# `Àlìcè->nèw` — its own heuristic never consults case — and PCL narrows that
+# to "the invocant looks like a class name", which was spelled /^[A-Z]/, i.e.
+# ASCII only.  So the ASCII twin `new Alice` worked and every non-ASCII class
+# name became `nèw(Àlìcè())`, an undefined-subroutine death that took the whole
+# top-level form (t/uni/universal.t's abort, 60 fail rows + 10 never produced).
+# The shape is now Pl::Environment::class_bareword_shape (\p{Lu}-initial), the
+# third member of the all_caps_shape / fh_bareword_shape family; on an ASCII
+# name \p{Lu} IS [A-Z], so every ASCII answer is unchanged by construction
+# (corpus-diff IDENTICAL over 111, emission A/B 571 files 1 DIFF = the file
+# this row is taken from).
+#
+# All four answers below are perl 5.40.3's, probed.  Rows 3 and 4 are the
+# NEGATIVES the widening must not swallow: a lowercase non-ASCII bareword stays
+# an ordinary function call, and an ALL-CAPS-shaped non-ASCII invocant is
+# admitted only because `package ÀÉÎ` declared it (all_caps_shape's own rule
+# still applies on top).
+is(run_file_bytes(encode_utf8(
+     "use utf8;\nuse open qw( :utf8 :std );\n"
+   . "package Àlìcè;\nsub nèw { bless {}, shift }\nsub nàme { \"alice\" }\n"
+   . "package ÀÉÎ;\nsub nèw { bless {}, shift }\n"
+   . "package main;\n"
+   . "sub ärg { \"arg(\@_)\" }\nsub cäll { \"call(\@_)\" }\n"
+   . "my \$a = nèw Àlìcè;\nprint \"1:\", ref(\$a), \"/\", \$a->nàme, \"\\n\";\n"
+   . "my \$c = nèw ÀÉÎ;\nprint \"2:\", ref(\$c), \"\\n\";\n"
+   . "print \"3:\", cäll(ärg(7)), \"\\n\";\n"
+   . "my \$d = nèw Àlìcè(1,2);\nprint \"4:\", ref(\$d), \"\\n\";\n")),
+   "1:Àlìcè/alice\n2:ÀÉÎ\n3:call(arg(7))\n4:Àlìcè\n",
+   'indirect object with a non-ASCII class name (#1736)');
 
 # Task #313 (LOAD-TIME CRASH, found by the s392 companion-suite audit): a
 # package whose name STARTS with a non-ASCII letter must land in the ORDINARY

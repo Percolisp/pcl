@@ -726,6 +726,33 @@ sub all_caps_call_guess {
     return $name =~ /\A[A-Z][A-Z0-9_]*\z/ ? 1 : 0;
 }
 
+=head2 class_bareword_shape($name)
+
+The UPPERCASE-INITIAL bareword convention, as a shape — "this bareword looks
+like a CLASS NAME", the test the indirect-object invocant slot uses to decide
+that C<nèw Àlìcè> is C<< Àlìcè->nèw >> (task #1736).
+
+UNICODE, not ASCII, for the same reason C<all_caps_shape> is: under C<use utf8>
+a source name is a decoded string and C<À> (U+00C0) is an uppercase letter, so
+C<nèw Àlìcè> is exactly as much a class-name-shaped bareword as C<new Alice>
+is — perl reads both as indirect-object syntax (perl's own heuristic does not
+consult case at all; the case test is PCL's conservative narrowing of it).  The
+pattern is a strict superset of the old C<^[A-Z]>: on an ASCII name C<\p{Lu}>
+IS C<[A-Z]>, so every ASCII answer is unchanged by construction.
+
+Asked of the FIRST CHARACTER only — the rest of a class name is unconstrained
+(C<Foo::Bar>, C<HTTP_Tiny>), which is why this is not C<all_caps_shape> with a
+different anchor.
+
+=cut
+
+sub class_bareword_shape {
+    my $name = shift;
+
+    return 0 if !defined $name;
+    return $name =~ /\A\p{Lu}/ ? 1 : 0;
+}
+
 # The handles perl resolves in main:: whatever package names them unqualified
 # (gv.c's forced-main list, handle members).  A qualifier on one of these is
 # therefore NOT the same glob as the bare name — see canon_filehandle_name.

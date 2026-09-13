@@ -3039,7 +3039,7 @@ sub handle_subcalls {
       my $invocant_is_class = 0;
       if (ref($invocant) eq 'PPI::Token::Word'
           && !$self->is_token_operator($invocant)
-          && $invocant->content =~ /^[A-Z]/) {
+          && Pl::Environment::class_bareword_shape($invocant->content)) {
         # A qualified name (Foo::bar) immediately followed by parens is a
         # function call — `is UNIVERSAL::isa($x,$y)` is `is(UNIVERSAL::isa(...))`,
         # NOT the indirect-object `UNIVERSAL::isa->is(...)`.  (The `new Foo::Bar(...)`
