@@ -2975,6 +2975,506 @@ op/coreamp.t	330	ok	(missing)	value read by 4-arg &read	#1577
 op/coreamp.t	464	ok	(missing)	what 4-arg &substr does	#1577
 op/coreamp.t	300	ok	(missing)	writing to &pos without args	#1577
 op/coreamp.t	302	ok	(missing)	writing to &pos without args	#1577
+op/coresubs.t	19	ok	(missing)	defined &{'CORE::__CLASS__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	1	ok	not ok	defined &{'CORE::__FILE__'}	#1577
+op/coresubs.t	7	ok	(missing)	defined &{'CORE::__LINE__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	13	ok	(missing)	defined &{'CORE::__PACKAGE__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	25	ok	(missing)	defined &{'CORE::__SUB__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	39	ok	(missing)	defined &{'CORE::abs'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	45	ok	(missing)	defined &{'CORE::accept'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	50	ok	(missing)	defined &{'CORE::alarm'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	57	ok	(missing)	defined &{'CORE::atan2'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	62	ok	(missing)	defined &{'CORE::bind'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	67	ok	(missing)	defined &{'CORE::binmode'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	72	ok	(missing)	defined &{'CORE::bless'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	77	ok	(missing)	defined &{'CORE::break'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	83	ok	(missing)	defined &{'CORE::caller'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	90	ok	(missing)	defined &{'CORE::chdir'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	96	ok	(missing)	defined &{'CORE::chmod'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	101	ok	(missing)	defined &{'CORE::chomp'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	105	ok	(missing)	defined &{'CORE::chop'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	109	ok	(missing)	defined &{'CORE::chown'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	114	ok	(missing)	defined &{'CORE::chr'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	120	ok	(missing)	defined &{'CORE::chroot'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	127	ok	(missing)	defined &{'CORE::close'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	133	ok	(missing)	defined &{'CORE::closedir'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	140	ok	(missing)	defined &{'CORE::connect'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	145	ok	(missing)	defined &{'CORE::continue'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	151	ok	(missing)	defined &{'CORE::cos'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	157	ok	(missing)	defined &{'CORE::crypt'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	162	ok	(missing)	defined &{'CORE::dbmclose'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	168	ok	(missing)	defined &{'CORE::dbmopen'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	175	ok	(missing)	defined &{'CORE::defined'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	180	ok	(missing)	defined &{'CORE::delete'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	185	ok	(missing)	defined &{'CORE::die'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	192	ok	(missing)	defined &{'CORE::each'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	199	ok	(missing)	defined &{'CORE::endgrent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	205	ok	(missing)	defined &{'CORE::endhostent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	211	ok	(missing)	defined &{'CORE::endnetent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	217	ok	(missing)	defined &{'CORE::endprotoent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	223	ok	(missing)	defined &{'CORE::endpwent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	229	ok	(missing)	defined &{'CORE::endservent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	235	ok	(missing)	defined &{'CORE::eof'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	243	ok	(missing)	defined &{'CORE::evalbytes'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	248	ok	(missing)	defined &{'CORE::exec'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	252	ok	(missing)	defined &{'CORE::exists'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	257	ok	(missing)	defined &{'CORE::exit'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	263	ok	(missing)	defined &{'CORE::exp'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	269	ok	(missing)	defined &{'CORE::fc'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	275	ok	(missing)	defined &{'CORE::fcntl'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	281	ok	(missing)	defined &{'CORE::fileno'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	288	ok	(missing)	defined &{'CORE::flock'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	295	ok	(missing)	defined &{'CORE::fork'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	302	ok	(missing)	defined &{'CORE::formline'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	307	ok	(missing)	defined &{'CORE::getc'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	313	ok	(missing)	defined &{'CORE::getgrent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	319	ok	(missing)	defined &{'CORE::getgrgid'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	325	ok	(missing)	defined &{'CORE::getgrnam'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	331	ok	(missing)	defined &{'CORE::gethostbyaddr'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	336	ok	(missing)	defined &{'CORE::gethostbyname'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	342	ok	(missing)	defined &{'CORE::gethostent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	348	ok	(missing)	defined &{'CORE::getlogin'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	354	ok	(missing)	defined &{'CORE::getnetbyaddr'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	359	ok	(missing)	defined &{'CORE::getnetbyname'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	365	ok	(missing)	defined &{'CORE::getnetent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	371	ok	(missing)	defined &{'CORE::getpeername'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	377	ok	(missing)	defined &{'CORE::getpgrp'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	383	ok	(missing)	defined &{'CORE::getppid'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	389	ok	(missing)	defined &{'CORE::getpriority'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	394	ok	(missing)	defined &{'CORE::getprotobyname'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	400	ok	(missing)	defined &{'CORE::getprotobynumber'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	405	ok	(missing)	defined &{'CORE::getprotoent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	411	ok	(missing)	defined &{'CORE::getpwent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	417	ok	(missing)	defined &{'CORE::getpwnam'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	423	ok	(missing)	defined &{'CORE::getpwuid'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	429	ok	(missing)	defined &{'CORE::getservbyname'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	434	ok	(missing)	defined &{'CORE::getservbyport'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	439	ok	(missing)	defined &{'CORE::getservent'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	445	ok	(missing)	defined &{'CORE::getsockname'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	451	ok	(missing)	defined &{'CORE::getsockopt'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	457	ok	(missing)	defined &{'CORE::glob'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	462	ok	(missing)	defined &{'CORE::gmtime'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	471	ok	(missing)	defined &{'CORE::hex'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	478	ok	(missing)	defined &{'CORE::index'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	483	ok	(missing)	defined &{'CORE::int'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	489	ok	(missing)	defined &{'CORE::ioctl'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	495	ok	(missing)	defined &{'CORE::join'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	499	ok	(missing)	defined &{'CORE::keys'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	21	ok	(missing)	inlinability of CORE::__CLASS__ with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	22	ok	(missing)	inlinability of CORE::__CLASS__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	3	ok	(missing)	inlinability of CORE::__FILE__ with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	4	ok	(missing)	inlinability of CORE::__FILE__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	9	ok	(missing)	inlinability of CORE::__LINE__ with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	10	ok	(missing)	inlinability of CORE::__LINE__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	15	ok	(missing)	inlinability of CORE::__PACKAGE__ with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	16	ok	(missing)	inlinability of CORE::__PACKAGE__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	27	ok	(missing)	inlinability of CORE::__SUB__ with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	28	ok	(missing)	inlinability of CORE::__SUB__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	41	ok	(missing)	inlinability of CORE::abs with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	42	ok	(missing)	inlinability of CORE::abs without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	47	ok	(missing)	inlinability of CORE::accept with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	48	ok	(missing)	inlinability of CORE::accept without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	52	ok	(missing)	inlinability of CORE::alarm with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	53	ok	(missing)	inlinability of CORE::alarm without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	59	ok	(missing)	inlinability of CORE::atan2 with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	60	ok	(missing)	inlinability of CORE::atan2 without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	64	ok	(missing)	inlinability of CORE::bind with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	65	ok	(missing)	inlinability of CORE::bind without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	69	ok	(missing)	inlinability of CORE::binmode with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	70	ok	(missing)	inlinability of CORE::binmode without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	74	ok	(missing)	inlinability of CORE::bless with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	75	ok	(missing)	inlinability of CORE::bless without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	79	ok	(missing)	inlinability of CORE::break with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	80	ok	(missing)	inlinability of CORE::break without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	85	ok	(missing)	inlinability of CORE::caller with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	86	ok	(missing)	inlinability of CORE::caller without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	92	ok	(missing)	inlinability of CORE::chdir with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	93	ok	(missing)	inlinability of CORE::chdir without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	98	ok	(missing)	inlinability of CORE::chmod with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	99	ok	(missing)	inlinability of CORE::chmod without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	103	ok	(missing)	inlinability of CORE::chomp with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	104	ok	(missing)	inlinability of CORE::chomp without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	107	ok	(missing)	inlinability of CORE::chop with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	108	ok	(missing)	inlinability of CORE::chop without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	111	ok	(missing)	inlinability of CORE::chown with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	112	ok	(missing)	inlinability of CORE::chown without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	116	ok	(missing)	inlinability of CORE::chr with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	117	ok	(missing)	inlinability of CORE::chr without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	122	ok	(missing)	inlinability of CORE::chroot with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	123	ok	(missing)	inlinability of CORE::chroot without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	129	ok	(missing)	inlinability of CORE::close with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	130	ok	(missing)	inlinability of CORE::close without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	135	ok	(missing)	inlinability of CORE::closedir with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	136	ok	(missing)	inlinability of CORE::closedir without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	142	ok	(missing)	inlinability of CORE::connect with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	143	ok	(missing)	inlinability of CORE::connect without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	147	ok	(missing)	inlinability of CORE::continue with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	148	ok	(missing)	inlinability of CORE::continue without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	153	ok	(missing)	inlinability of CORE::cos with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	154	ok	(missing)	inlinability of CORE::cos without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	159	ok	(missing)	inlinability of CORE::crypt with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	160	ok	(missing)	inlinability of CORE::crypt without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	164	ok	(missing)	inlinability of CORE::dbmclose with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	165	ok	(missing)	inlinability of CORE::dbmclose without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	170	ok	(missing)	inlinability of CORE::dbmopen with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	171	ok	(missing)	inlinability of CORE::dbmopen without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	177	ok	(missing)	inlinability of CORE::defined with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	178	ok	(missing)	inlinability of CORE::defined without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	182	ok	(missing)	inlinability of CORE::delete with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	183	ok	(missing)	inlinability of CORE::delete without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	187	ok	(missing)	inlinability of CORE::die with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	188	ok	(missing)	inlinability of CORE::die without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	194	ok	(missing)	inlinability of CORE::each with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	195	ok	(missing)	inlinability of CORE::each without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	201	ok	(missing)	inlinability of CORE::endgrent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	202	ok	(missing)	inlinability of CORE::endgrent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	207	ok	(missing)	inlinability of CORE::endhostent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	208	ok	(missing)	inlinability of CORE::endhostent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	213	ok	(missing)	inlinability of CORE::endnetent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	214	ok	(missing)	inlinability of CORE::endnetent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	219	ok	(missing)	inlinability of CORE::endprotoent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	220	ok	(missing)	inlinability of CORE::endprotoent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	225	ok	(missing)	inlinability of CORE::endpwent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	226	ok	(missing)	inlinability of CORE::endpwent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	231	ok	(missing)	inlinability of CORE::endservent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	232	ok	(missing)	inlinability of CORE::endservent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	237	ok	(missing)	inlinability of CORE::eof with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	238	ok	(missing)	inlinability of CORE::eof without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	245	ok	(missing)	inlinability of CORE::evalbytes with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	246	ok	(missing)	inlinability of CORE::evalbytes without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	250	ok	(missing)	inlinability of CORE::exec with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	251	ok	(missing)	inlinability of CORE::exec without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	254	ok	(missing)	inlinability of CORE::exists with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	255	ok	(missing)	inlinability of CORE::exists without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	259	ok	(missing)	inlinability of CORE::exit with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	260	ok	(missing)	inlinability of CORE::exit without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	265	ok	(missing)	inlinability of CORE::exp with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	266	ok	(missing)	inlinability of CORE::exp without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	271	ok	(missing)	inlinability of CORE::fc with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	272	ok	(missing)	inlinability of CORE::fc without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	277	ok	(missing)	inlinability of CORE::fcntl with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	278	ok	(missing)	inlinability of CORE::fcntl without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	283	ok	(missing)	inlinability of CORE::fileno with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	284	ok	(missing)	inlinability of CORE::fileno without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	290	ok	(missing)	inlinability of CORE::flock with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	291	ok	(missing)	inlinability of CORE::flock without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	297	ok	(missing)	inlinability of CORE::fork with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	298	ok	(missing)	inlinability of CORE::fork without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	304	ok	(missing)	inlinability of CORE::formline with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	305	ok	(missing)	inlinability of CORE::formline without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	309	ok	(missing)	inlinability of CORE::getc with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	310	ok	(missing)	inlinability of CORE::getc without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	315	ok	(missing)	inlinability of CORE::getgrent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	316	ok	(missing)	inlinability of CORE::getgrent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	321	ok	(missing)	inlinability of CORE::getgrgid with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	322	ok	(missing)	inlinability of CORE::getgrgid without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	327	ok	(missing)	inlinability of CORE::getgrnam with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	328	ok	(missing)	inlinability of CORE::getgrnam without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	333	ok	(missing)	inlinability of CORE::gethostbyaddr with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	334	ok	(missing)	inlinability of CORE::gethostbyaddr without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	338	ok	(missing)	inlinability of CORE::gethostbyname with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	339	ok	(missing)	inlinability of CORE::gethostbyname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	344	ok	(missing)	inlinability of CORE::gethostent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	345	ok	(missing)	inlinability of CORE::gethostent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	350	ok	(missing)	inlinability of CORE::getlogin with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	351	ok	(missing)	inlinability of CORE::getlogin without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	356	ok	(missing)	inlinability of CORE::getnetbyaddr with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	357	ok	(missing)	inlinability of CORE::getnetbyaddr without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	361	ok	(missing)	inlinability of CORE::getnetbyname with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	362	ok	(missing)	inlinability of CORE::getnetbyname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	367	ok	(missing)	inlinability of CORE::getnetent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	368	ok	(missing)	inlinability of CORE::getnetent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	373	ok	(missing)	inlinability of CORE::getpeername with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	374	ok	(missing)	inlinability of CORE::getpeername without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	379	ok	(missing)	inlinability of CORE::getpgrp with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	380	ok	(missing)	inlinability of CORE::getpgrp without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	385	ok	(missing)	inlinability of CORE::getppid with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	386	ok	(missing)	inlinability of CORE::getppid without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	391	ok	(missing)	inlinability of CORE::getpriority with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	392	ok	(missing)	inlinability of CORE::getpriority without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	396	ok	(missing)	inlinability of CORE::getprotobyname with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	397	ok	(missing)	inlinability of CORE::getprotobyname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	402	ok	(missing)	inlinability of CORE::getprotobynumber with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	403	ok	(missing)	inlinability of CORE::getprotobynumber without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	407	ok	(missing)	inlinability of CORE::getprotoent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	408	ok	(missing)	inlinability of CORE::getprotoent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	413	ok	(missing)	inlinability of CORE::getpwent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	414	ok	(missing)	inlinability of CORE::getpwent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	419	ok	(missing)	inlinability of CORE::getpwnam with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	420	ok	(missing)	inlinability of CORE::getpwnam without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	425	ok	(missing)	inlinability of CORE::getpwuid with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	426	ok	(missing)	inlinability of CORE::getpwuid without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	431	ok	(missing)	inlinability of CORE::getservbyname with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	432	ok	(missing)	inlinability of CORE::getservbyname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	436	ok	(missing)	inlinability of CORE::getservbyport with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	437	ok	(missing)	inlinability of CORE::getservbyport without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	441	ok	(missing)	inlinability of CORE::getservent with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	442	ok	(missing)	inlinability of CORE::getservent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	447	ok	(missing)	inlinability of CORE::getsockname with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	448	ok	(missing)	inlinability of CORE::getsockname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	453	ok	(missing)	inlinability of CORE::getsockopt with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	454	ok	(missing)	inlinability of CORE::getsockopt without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	459	ok	(missing)	inlinability of CORE::glob with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	460	ok	(missing)	inlinability of CORE::glob without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	464	ok	(missing)	inlinability of CORE::gmtime with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	465	ok	(missing)	inlinability of CORE::gmtime without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	473	ok	(missing)	inlinability of CORE::hex with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	474	ok	(missing)	inlinability of CORE::hex without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	480	ok	(missing)	inlinability of CORE::index with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	481	ok	(missing)	inlinability of CORE::index without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	485	ok	(missing)	inlinability of CORE::int with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	486	ok	(missing)	inlinability of CORE::int without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	491	ok	(missing)	inlinability of CORE::ioctl with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	492	ok	(missing)	inlinability of CORE::ioctl without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	497	ok	(missing)	inlinability of CORE::join with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	498	ok	(missing)	inlinability of CORE::join without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	501	ok	(missing)	inlinability of CORE::keys with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	6	ok	(missing)	inlined CORE::__FILE__ with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	12	ok	(missing)	inlined CORE::__LINE__ with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	18	ok	(missing)	inlined CORE::__PACKAGE__ with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	30	ok	(missing)	inlined CORE::__SUB__ with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	44	ok	(missing)	inlined CORE::abs with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	49	ok	(missing)	inlined CORE::accept with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	55	ok	(missing)	inlined CORE::alarm with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	61	ok	(missing)	inlined CORE::atan2 with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	66	ok	(missing)	inlined CORE::bind with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	71	ok	(missing)	inlined CORE::binmode with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	76	ok	(missing)	inlined CORE::bless with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	82	ok	(missing)	inlined CORE::break with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	88	ok	(missing)	inlined CORE::caller with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	95	ok	(missing)	inlined CORE::chdir with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	119	ok	(missing)	inlined CORE::chr with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	125	ok	(missing)	inlined CORE::chroot with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	132	ok	(missing)	inlined CORE::close with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	138	ok	(missing)	inlined CORE::closedir with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	144	ok	(missing)	inlined CORE::connect with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	150	ok	(missing)	inlined CORE::continue with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	156	ok	(missing)	inlined CORE::cos with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	161	ok	(missing)	inlined CORE::crypt with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	167	ok	(missing)	inlined CORE::dbmclose with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	172	ok	(missing)	inlined CORE::dbmopen with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	179	ok	(missing)	inlined CORE::defined with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	184	ok	(missing)	inlined CORE::delete with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	204	ok	(missing)	inlined CORE::endgrent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	210	ok	(missing)	inlined CORE::endhostent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	216	ok	(missing)	inlined CORE::endnetent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	222	ok	(missing)	inlined CORE::endprotoent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	228	ok	(missing)	inlined CORE::endpwent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	234	ok	(missing)	inlined CORE::endservent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	240	ok	(missing)	inlined CORE::eof with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	256	ok	(missing)	inlined CORE::exists with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	262	ok	(missing)	inlined CORE::exit with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	268	ok	(missing)	inlined CORE::exp with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	274	ok	(missing)	inlined CORE::fc with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	279	ok	(missing)	inlined CORE::fcntl with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	286	ok	(missing)	inlined CORE::fileno with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	292	ok	(missing)	inlined CORE::flock with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	300	ok	(missing)	inlined CORE::fork with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	312	ok	(missing)	inlined CORE::getc with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	318	ok	(missing)	inlined CORE::getgrent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	324	ok	(missing)	inlined CORE::getgrgid with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	330	ok	(missing)	inlined CORE::getgrnam with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	335	ok	(missing)	inlined CORE::gethostbyaddr with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	341	ok	(missing)	inlined CORE::gethostbyname with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	347	ok	(missing)	inlined CORE::gethostent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	353	ok	(missing)	inlined CORE::getlogin with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	358	ok	(missing)	inlined CORE::getnetbyaddr with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	364	ok	(missing)	inlined CORE::getnetbyname with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	370	ok	(missing)	inlined CORE::getnetent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	376	ok	(missing)	inlined CORE::getpeername with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	382	ok	(missing)	inlined CORE::getpgrp with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	388	ok	(missing)	inlined CORE::getppid with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	393	ok	(missing)	inlined CORE::getpriority with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	399	ok	(missing)	inlined CORE::getprotobyname with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	404	ok	(missing)	inlined CORE::getprotobynumber with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	410	ok	(missing)	inlined CORE::getprotoent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	416	ok	(missing)	inlined CORE::getpwent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	422	ok	(missing)	inlined CORE::getpwnam with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	428	ok	(missing)	inlined CORE::getpwuid with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	433	ok	(missing)	inlined CORE::getservbyname with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	438	ok	(missing)	inlined CORE::getservbyport with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	444	ok	(missing)	inlined CORE::getservent with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	450	ok	(missing)	inlined CORE::getsockname with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	455	ok	(missing)	inlined CORE::getsockopt with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	461	ok	(missing)	inlined CORE::glob with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	467	ok	(missing)	inlined CORE::gmtime with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	476	ok	(missing)	inlined CORE::hex with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	482	ok	(missing)	inlined CORE::index with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	488	ok	(missing)	inlined CORE::int with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	493	ok	(missing)	inlined CORE::ioctl with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	31	ok	(missing)	no CORE::ADJUST	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	32	ok	(missing)	no CORE::AUTOLOAD	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	33	ok	(missing)	no CORE::BEGIN	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	38	ok	(missing)	no CORE::CHECK	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	35	ok	(missing)	no CORE::DESTROY	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	36	ok	(missing)	no CORE::END	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	37	ok	(missing)	no CORE::INIT	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	34	ok	(missing)	no CORE::UNITCHECK	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	23	ok	(missing)	no CORE::__DATA__	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	24	ok	(missing)	no CORE::__END__	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	56	ok	(missing)	no CORE::and	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	89	ok	(missing)	no CORE::catch	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	126	ok	(missing)	no CORE::class	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	139	ok	(missing)	no CORE::cmp	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	173	ok	(missing)	no CORE::default	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	174	ok	(missing)	no CORE::defer	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	190	ok	(missing)	no CORE::do	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	191	ok	(missing)	no CORE::dump	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	197	ok	(missing)	no CORE::else	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	198	ok	(missing)	no CORE::elsif	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	241	ok	(missing)	no CORE::eq	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	242	ok	(missing)	no CORE::eval	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	280	ok	(missing)	no CORE::field	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	287	ok	(missing)	no CORE::finally	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	293	ok	(missing)	no CORE::for	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	294	ok	(missing)	no CORE::foreach	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	301	ok	(missing)	no CORE::format	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	306	ok	(missing)	no CORE::ge	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	456	ok	(missing)	no CORE::given	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	468	ok	(missing)	no CORE::goto	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	469	ok	(missing)	no CORE::grep	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	470	ok	(missing)	no CORE::gt	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	477	ok	(missing)	no CORE::if	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	494	ok	(missing)	no CORE::isa	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	5	ok	(missing)	precedence of CORE::__FILE__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	11	ok	(missing)	precedence of CORE::__LINE__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	17	ok	(missing)	precedence of CORE::__PACKAGE__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	29	ok	(missing)	precedence of CORE::__SUB__ without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	43	ok	(missing)	precedence of CORE::abs without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	54	ok	(missing)	precedence of CORE::alarm without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	81	ok	(missing)	precedence of CORE::break without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	87	ok	(missing)	precedence of CORE::caller without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	94	ok	(missing)	precedence of CORE::chdir without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	100	ok	(missing)	precedence of CORE::chmod without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	113	ok	(missing)	precedence of CORE::chown without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	118	ok	(missing)	precedence of CORE::chr without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	124	ok	(missing)	precedence of CORE::chroot without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	131	ok	(missing)	precedence of CORE::close without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	137	ok	(missing)	precedence of CORE::closedir without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	149	ok	(missing)	precedence of CORE::continue without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	155	ok	(missing)	precedence of CORE::cos without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	166	ok	(missing)	precedence of CORE::dbmclose without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	189	ok	(missing)	precedence of CORE::die without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	196	ok	(missing)	precedence of CORE::each without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	203	ok	(missing)	precedence of CORE::endgrent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	209	ok	(missing)	precedence of CORE::endhostent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	215	ok	(missing)	precedence of CORE::endnetent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	221	ok	(missing)	precedence of CORE::endprotoent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	227	ok	(missing)	precedence of CORE::endpwent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	233	ok	(missing)	precedence of CORE::endservent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	239	ok	(missing)	precedence of CORE::eof without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	247	ok	(missing)	precedence of CORE::evalbytes without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	261	ok	(missing)	precedence of CORE::exit without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	267	ok	(missing)	precedence of CORE::exp without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	273	ok	(missing)	precedence of CORE::fc without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	285	ok	(missing)	precedence of CORE::fileno without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	299	ok	(missing)	precedence of CORE::fork without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	311	ok	(missing)	precedence of CORE::getc without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	317	ok	(missing)	precedence of CORE::getgrent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	323	ok	(missing)	precedence of CORE::getgrgid without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	329	ok	(missing)	precedence of CORE::getgrnam without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	340	ok	(missing)	precedence of CORE::gethostbyname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	346	ok	(missing)	precedence of CORE::gethostent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	352	ok	(missing)	precedence of CORE::getlogin without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	363	ok	(missing)	precedence of CORE::getnetbyname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	369	ok	(missing)	precedence of CORE::getnetent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	375	ok	(missing)	precedence of CORE::getpeername without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	381	ok	(missing)	precedence of CORE::getpgrp without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	387	ok	(missing)	precedence of CORE::getppid without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	398	ok	(missing)	precedence of CORE::getprotobyname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	409	ok	(missing)	precedence of CORE::getprotoent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	415	ok	(missing)	precedence of CORE::getpwent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	421	ok	(missing)	precedence of CORE::getpwnam without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	427	ok	(missing)	precedence of CORE::getpwuid without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	443	ok	(missing)	precedence of CORE::getservent without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	449	ok	(missing)	precedence of CORE::getsockname without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	466	ok	(missing)	precedence of CORE::gmtime without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	475	ok	(missing)	precedence of CORE::hex without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	487	ok	(missing)	precedence of CORE::int without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	20	ok	(missing)	prototype of &CORE::__CLASS__	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	8	ok	(missing)	prototype of &CORE::__LINE__	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	14	ok	(missing)	prototype of &CORE::__PACKAGE__	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	26	ok	(missing)	prototype of &CORE::__SUB__	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	40	ok	(missing)	prototype of &CORE::abs	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	46	ok	(missing)	prototype of &CORE::accept	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	51	ok	(missing)	prototype of &CORE::alarm	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	58	ok	(missing)	prototype of &CORE::atan2	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	63	ok	(missing)	prototype of &CORE::bind	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	68	ok	(missing)	prototype of &CORE::binmode	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	73	ok	(missing)	prototype of &CORE::bless	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	78	ok	(missing)	prototype of &CORE::break	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	84	ok	(missing)	prototype of &CORE::caller	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	91	ok	(missing)	prototype of &CORE::chdir	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	97	ok	(missing)	prototype of &CORE::chmod	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	102	ok	(missing)	prototype of &CORE::chomp	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	106	ok	(missing)	prototype of &CORE::chop	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	110	ok	(missing)	prototype of &CORE::chown	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	115	ok	(missing)	prototype of &CORE::chr	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	121	ok	(missing)	prototype of &CORE::chroot	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	128	ok	(missing)	prototype of &CORE::close	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	134	ok	(missing)	prototype of &CORE::closedir	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	141	ok	(missing)	prototype of &CORE::connect	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	146	ok	(missing)	prototype of &CORE::continue	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	152	ok	(missing)	prototype of &CORE::cos	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	158	ok	(missing)	prototype of &CORE::crypt	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	163	ok	(missing)	prototype of &CORE::dbmclose	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	169	ok	(missing)	prototype of &CORE::dbmopen	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	176	ok	(missing)	prototype of &CORE::defined	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	181	ok	(missing)	prototype of &CORE::delete	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	186	ok	(missing)	prototype of &CORE::die	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	193	ok	(missing)	prototype of &CORE::each	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	200	ok	(missing)	prototype of &CORE::endgrent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	206	ok	(missing)	prototype of &CORE::endhostent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	212	ok	(missing)	prototype of &CORE::endnetent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	218	ok	(missing)	prototype of &CORE::endprotoent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	224	ok	(missing)	prototype of &CORE::endpwent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	230	ok	(missing)	prototype of &CORE::endservent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	236	ok	(missing)	prototype of &CORE::eof	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	244	ok	(missing)	prototype of &CORE::evalbytes	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	249	ok	(missing)	prototype of &CORE::exec	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	253	ok	(missing)	prototype of &CORE::exists	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	258	ok	(missing)	prototype of &CORE::exit	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	264	ok	(missing)	prototype of &CORE::exp	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	270	ok	(missing)	prototype of &CORE::fc	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	276	ok	(missing)	prototype of &CORE::fcntl	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	282	ok	(missing)	prototype of &CORE::fileno	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	289	ok	(missing)	prototype of &CORE::flock	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	296	ok	(missing)	prototype of &CORE::fork	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	303	ok	(missing)	prototype of &CORE::formline	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	308	ok	(missing)	prototype of &CORE::getc	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	314	ok	(missing)	prototype of &CORE::getgrent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	320	ok	(missing)	prototype of &CORE::getgrgid	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	326	ok	(missing)	prototype of &CORE::getgrnam	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	332	ok	(missing)	prototype of &CORE::gethostbyaddr	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	337	ok	(missing)	prototype of &CORE::gethostbyname	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	343	ok	(missing)	prototype of &CORE::gethostent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	349	ok	(missing)	prototype of &CORE::getlogin	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	355	ok	(missing)	prototype of &CORE::getnetbyaddr	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	360	ok	(missing)	prototype of &CORE::getnetbyname	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	366	ok	(missing)	prototype of &CORE::getnetent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	372	ok	(missing)	prototype of &CORE::getpeername	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	378	ok	(missing)	prototype of &CORE::getpgrp	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	384	ok	(missing)	prototype of &CORE::getppid	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	390	ok	(missing)	prototype of &CORE::getpriority	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	395	ok	(missing)	prototype of &CORE::getprotobyname	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	401	ok	(missing)	prototype of &CORE::getprotobynumber	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	406	ok	(missing)	prototype of &CORE::getprotoent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	412	ok	(missing)	prototype of &CORE::getpwent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	418	ok	(missing)	prototype of &CORE::getpwnam	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	424	ok	(missing)	prototype of &CORE::getpwuid	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	430	ok	(missing)	prototype of &CORE::getservbyname	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	435	ok	(missing)	prototype of &CORE::getservbyport	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	440	ok	(missing)	prototype of &CORE::getservent	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	446	ok	(missing)	prototype of &CORE::getsockname	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	452	ok	(missing)	prototype of &CORE::getsockopt	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	458	ok	(missing)	prototype of &CORE::glob	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	463	ok	(missing)	prototype of &CORE::gmtime	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	472	ok	(missing)	prototype of &CORE::hex	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	479	ok	(missing)	prototype of &CORE::index	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	484	ok	(missing)	prototype of &CORE::int	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	490	ok	(missing)	prototype of &CORE::ioctl	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	496	ok	(missing)	prototype of &CORE::join	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
+op/coresubs.t	500	ok	(missing)	prototype of &CORE::keys	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/cproto.t	9	ok	not ok	CORE	#1586
 op/cproto.t	1	ok	not ok	__FILE__	#1586
 op/cproto.t	2	ok	not ok	__LINE__	#1586

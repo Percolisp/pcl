@@ -182,7 +182,7 @@ t/op/attrs.t	14	UNEXPLAINED
 t/op/bless.t	1	UNEXPLAINED
 t/op/bop.t	13	UNEXPLAINED
 t/op/coreamp.t	723	#1577 -- MIXED, 15 aborted forms, MEASURED s473t4: six are the `&CORE::NAME` / `&__FILE__` / `&__LINE__` / `&__PACKAGE__` family (the file's subject), two are the ruled given/when refusal, three a runtime arity error, four other undefined subs.
-t/op/coresubs.t	1109	NS:Readouts of perl's own internals -- `use B` + B::walkoptree is the file's whole method (s473t4: the #1501 `state`-in-inner-block fix took it from TRANSPILE/0 rows to DIFF 1/1; the residue is B)
+t/op/coresubs.t	1107	NS:Readouts of perl's own internals -- `use B` + B::walkoptree is the file's whole method (s473t4: 1109 -> 1107 rows short, the file now produces 2; the #1501 `state`-in-inner-block fix took it from TRANSPILE/0 rows to DIFF 1/1; the residue is B)
 t/op/current_sub.t	11	XDIFF: not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-s...
 t/op/dbm.t	5	UNEXPLAINED
 t/op/decl-refs.t	195	UNEXPLAINED
@@ -234,7 +234,7 @@ t/op/signame_canonical.t	15	UNEXPLAINED
 t/op/signatures.t	35	XDIFF: not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error...
 t/op/sigsystem.t	4	XDIFF: not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the p...
 t/op/smartmatch.t	3	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl ...
-t/op/stat.t	111	UNEXPLAINED
+t/op/stat.t	111	#1590 -- the PCL test.pl stub has no `unlink_tempfiles`/`unlink_all` (and no `is_linux_container`); the undef-fn abort kills every remaining top-level form.  MEASURED s473t4: adding them gives this file 0 -> 44 rows, but the same ~26 extra lines in the module re/pat_advanced.t `require`s tip that file over SBCL's default 1 GB heap and cost it all 1680 of its rows, so the patch is REVERTED and waits on headroom
 t/op/state.t	74	not-supported.md §`given`/`when` — the file’s ONE `given` block (line 350).  The refusal is STATEMENT-level since s466 (#1037), so the file runs to it and its 88 rows before it pass; the tail of the enclosing TOP-LEVEL form goes with the die (ir-spec §9.3, sizing task #1055).  aborted-forms:1, and that one form IS the refusal.  The twin perl-tests/state.t row (78) carries the same cause.
 t/op/sub_lval.t	116	UNEXPLAINED
 t/op/substr.t	46	UNEXPLAINED
@@ -297,7 +297,7 @@ t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/run/locale.t	44	UNEXPLAINED
 t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
-t/run/runenv_hashseed.t	269	UNEXPLAINED
+t/run/runenv_hashseed.t	269	#1590 -- the PCL test.pl stub has no `unlink_tempfiles`/`unlink_all` (and no `is_linux_container`); the undef-fn abort kills every remaining top-level form.  MEASURED s473t4: adding them gives this file 9 -> 278 rows, all of perl's, but the same ~26 extra lines in the module re/pat_advanced.t `require`s tip that file over SBCL's default 1 GB heap and cost it all 1680 of its rows, so the patch is REVERTED and waits on headroom
 t/run/switchF.t	1	UNEXPLAINED
 t/run/switcha.t	1	UNEXPLAINED
 t/run/switches.t	35	UNEXPLAINED
