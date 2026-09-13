@@ -355,6 +355,46 @@ sub tempfile {
     }
 }
 
+# unlink_all / unlink_tempfiles - perl's own t/test.pl helpers, over THIS
+# stub's %tempfiles (perl spells the hash %tmpfiles).  A missing sub here is
+# not a missing feature, it is an `undef-fn` abort that kills every remaining
+# top-level form of the calling file: run/runenv_hashseed.t calls
+# unlink_tempfiles between its hash-seed runs and lost 269 of its 278 rows to
+# it (s473t4, #1501).
+sub unlink_all {
+    my $count = 0;
+    foreach my $file (@_) {
+        1 while unlink $file;
+        if (-f $file) {
+            print STDERR "# Couldn't unlink '$file': $!\n";
+        } else {
+            ++$count;
+        }
+    }
+    $count;
+}
+
+sub unlink_tempfiles {
+    unlink_all(keys %tempfiles);
+    %tempfiles = ();
+}
+
+# is_linux_container - perl's own t/test.pl, VERBATIM.  op/stat.t calls it to
+# decide whether /proc's st_nlink answers are trustworthy; without it the file
+# lost 111 of its rows (s473t4, #1501).
+sub is_linux_container {
+
+    if ($^O eq 'linux' && open my $fh, '<', '/proc/1/cgroup') {
+        while (<$fh>) {
+            if (m{^\d+:pids:(.*)} && $1 ne '/init.scope') {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 # object_ok - check if value is a blessed object (optionally of a specific class)
 sub object_ok {
     my ($obj, $class, $name) = @_;
