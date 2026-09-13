@@ -157,7 +157,7 @@ sub scan {
   while ($i < $n) {
     my $c = substr($text, $i, 1);
     if ($c eq '\\') {
-      $i += (!$opt{in_regex} && substr($text, $i + 1, 1) eq 'c') ? 3 : 2;
+      $i += escape_skip($text, $i, %opt);
       next;
     }
     if ($c eq '$' || $c eq '@') {
@@ -167,6 +167,19 @@ sub scan {
     $i++;
   }
   return \@events;
+}
+
+# THE escape rule, as one step: given that $text[$pos] is a backslash, how
+# many characters does it hide from reference detection?  A backslash hides
+# the next character; in dq text `\cX` also hides the X (toke's string-mode
+# `\c` eats its char), while in a PATTERN `\c` passes through and the char
+# after it can still start an interpolation.  Exported because a consumer
+# that runs its OWN narrower name scan (VarAnnotator's quote-leaf USE scan)
+# must decide "is this sigil escaped?" the same way this scanner does —
+# one definition, per the §8 standing rule.
+sub escape_skip {
+  my ($text, $pos, %opt) = @_;
+  return (!$opt{in_regex} && substr($text, $pos + 1, 1) eq 'c') ? 3 : 2;
 }
 
 # ── Single-reference entry (for callers that run their own outer loop,

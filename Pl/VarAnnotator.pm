@@ -90,6 +90,7 @@ use Scalar::Util qw(refaddr);
 
 use Pl::PExpr ();
 use Pl::Passes ();
+use Pl::InterpScan ();
 
 # Operators whose p-functions return raw CL values (number / string / 1-or-"").
 my %ARITH_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=>
@@ -555,7 +556,17 @@ sub _analyze_tree {
     my $only_liftable
       = !grep { $_ ne 'write-shape' && $_ ne 'write-incdec-root' } @reasons;
     my $in_fallback = grep { /\Q$name\E(?!\w)/ } @{ $ctx->{fallback_texts} };
-    if (!$no_b && @reasons && $only_liftable
+    # #1622: a name CAPTURED by a nested anon sub has uses this walk never
+    # classified — `_tw_expr_parse` skips `sub { … }` blocks ("the nested-sub
+    # region fact owns those") and that fact records only boxing EVENTS, not
+    # read classes.  #760's narrowing (capture alone is not a boxing event)
+    # is sound for the A regime, where the raw slot holds the SAME value a
+    # box would; the B regime COERCES what it stores, so an unclassified read
+    # in the closure body is exactly the premise the freeze needs and does not
+    # have.  `my $cr = sub {7}; my $s = "$cr"; my $f = sub { $cr->() };` froze
+    # $cr to "CODE(0x1)" and `$f->()` died.
+    my $captured = $ctx->{nested_sub}{$name};
+    if (!$no_b && @reasons && $only_liftable && !$captured
         && !$ctx->{write_fam}{$name}{caller} && !$in_fallback) {
       my $uc = $ctx->{use_class}{$name};
       my @cls = $uc ? keys %$uc : ();
@@ -1604,15 +1615,46 @@ sub _tw_walk {
 # is a stringify use ('str') — except a deref form ("$q->[0]", "$q->{k}"):
 # there the ELEMENT is interpolated and $q's own use is a dereference →
 # opaque.  "$q[0]"/"$q{k}" (element of @q/%q) over-fires on the same-named
-# SCALAR as opaque — over-conservative, safe.  Escaped \$q also over-fires
-# as a str use — same direction.  ${name} spelled with braces is caught.
+# SCALAR as opaque — over-conservative, safe.  ${name} spelled with braces
+# is caught.
+#
+# #1621: A 'str' use is a LICENCE (it is what lets the B-str freeze fire and
+# stringify the slot's value), so over-firing here is NOT the safe direction
+# — the opposite of the array-escape scan below, which only adds vetoes.
+# Text that perl never interpolates must therefore register NOTHING:
+#   * an ESCAPED sigil (`"a \$cr b"` is the literal text `$cr`).  The escape
+#     rule is the ONE scanner's (Pl::InterpScan::escape_skip, §8 standing
+#     rule) — a backslash hides the next character, and in dq text `\cX`
+#     hides the X too.  `"\\$cr"` is a literal backslash followed by a real
+#     interpolation and still counts.
+#   * a LITERAL heredoc (`<<'EOT'`), which PPI marks `_mode eq 'literal'`.
+# Both were `:str` freeze licences before, so `my $cr = sub {…}; "…\$cr…";`
+# stringified the code ref into its own slot and the value was LOST.
 sub _tw_scan_quote_leaf {
   my ($ctx, $node) = @_;
+  my $heredoc = $node->isa('PPI::Token::HereDoc');
+  return if $heredoc && ($node->{_mode} // '') eq 'literal';
   my $c = $node->content;
-  $c .= join '', $node->heredoc if $node->isa('PPI::Token::HereDoc');
-  while ($c =~ /\$\{?(\w+)\}?((?:->)?[\[\{])?/g) {
-    _use($ctx, '$' . $1, $2 ? undef : 'str');
+  $c .= join '', $node->heredoc if $heredoc;
+  my %esc = (in_regex => ($node->isa('PPI::Token::Regexp') ? 1 : 0));
+  my ($i, $n) = (0, length $c);
+  while ($i < $n) {
+    my $ch = substr($c, $i, 1);
+    if ($ch eq '\\') {
+      $i += Pl::InterpScan::escape_skip($c, $i, %esc);
+      next;
+    }
+    if ($ch eq '$') {
+      pos($c) = $i;
+      if ($c =~ /\G\$\{?(\w+)\}?((?:->)?[\[\{])?/gc) {
+        _use($ctx, '$' . $1, $2 ? undef : 'str');
+        $i = pos($c);
+        next;
+      }
+    }
+    $i++;
   }
+  pos($c) = undef;        # the /g loops below must start at 0, not at my pos()
   # #1140: a plain `"@a"` interpolation only STRINGIFIES the array, but a
   # BLOCK deref `"@{[ … ]}"` carries arbitrary code this walk never sees (it
   # is compiled by StringInterpolation, not by the tree), so every array named

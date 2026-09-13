@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 60;
+plan tests => 70;
 
 sub run_cl {
     my ($code, $env) = @_;
@@ -554,3 +554,102 @@ test_cl('#1105: the boxed default arm is unchanged (magical string increment, va
         $magic, "Ba Az aaa aaa\n");
 test_cl('#1105: … and under PCL_OPT=none',
         $magic, "Ba Az aaa aaa\n", 'PCL_OPT=none');
+
+# ---- the USE SET must be COMPLETE and CORRECT (#1621 + #1622) -------------
+#
+# A 'str' use is the B-str freeze's LICENCE: it is what lets Parser2 wrap the
+# write in %pcl-to-string-strict and keep a host STRING in the slot.  So a
+# spurious 'str' use is not "over-conservative" — it destroys the value, and
+# a missing use is the same hole from the other side.  Two causes, both
+# silent-wrong at run time (`$cr->()` → "Undefined subroutine &main::CODE(0x…)"):
+#
+#   #1621  _tw_scan_quote_leaf scanned the quote-like leaf's TEXT with no
+#          escape rule, so `"x \$cr1 y"` — literal text, no interpolation at
+#          all — registered `$cr1` as a stringify use; and a LITERAL heredoc
+#          (`<<'EOT'`) was scanned as if it interpolated.
+#   #1622  a name CAPTURED by a nested anon sub has uses this walk never
+#          classified (`_tw_expr_parse` skips `sub { … }` blocks).  #760's
+#          "a capture alone is not a boxing event" is sound for the A regime,
+#          where the raw slot holds the SAME value a box would, and wrong for
+#          the B regime, which COERCES what it stores.
+#
+# INVERSE GUARD (measured on a 6eea8578 `git archive` extraction): rows
+# marked #1621/#1622 below FAIL there — the three closure-CALL rows die with
+# "Undefined subroutine &main::CODE(0x1)" and the array row prints an empty
+# element.  The must-not-change rows pass on both sides.
+#
+# NOTE for anyone extending these: the verdict region is the whole FILE, so
+# re-using a `my` name across two of these snippets adds a `multi-decl`
+# reason and the B verdict stops firing — a reproducer that silently stops
+# reproducing.  Every name here is unique.
+
+my $esc1621 = <<'PL';
+my $cr1 = sub { 7 };
+my $f1  = sub { return $cr1->() };
+print "1 label=", "x \$cr1 y", " call=", $f1->(), "\n";
+PL
+$cl = Pl::Parser2->parse_code($esc1621);
+unlike($cl, qr/\(\$cr1 :str\s/,
+     '#1621: an ESCAPED \$name in a dq string is not a string USE (no :str slot)');
+test_cl('#1621: … and the code ref survives the escaped mention',
+        $esc1621, "1 label=x \$cr1 y call=7\n");
+
+my $here1621 = <<'PL';
+my $cr2 = sub { 8 };
+my $t2  = <<'EOT';
+the name is $cr2
+EOT
+my $f2 = sub { return $cr2->() };
+chomp $t2;
+print "2 text=[$t2] call=", $f2->(), "\n";
+PL
+$cl = Pl::Parser2->parse_code($here1621);
+unlike($cl, qr/\(\$cr2 :str\s/,
+     '#1621: a LITERAL heredoc interpolates nothing, so it is not a string USE');
+test_cl('#1621: … and the code ref survives the literal heredoc',
+        $here1621, "2 text=[the name is \$cr2] call=8\n");
+
+my $cap1622 = <<'PL';
+my $cr3 = sub { 9 };
+my $s3  = "ref=$cr3";
+my $f3  = sub { return $cr3->() };
+print "3 isCODE=", ($s3 =~ /^ref=CODE\(0x/ ? 1 : 0), " call=", $f3->(), "\n";
+PL
+$cl = Pl::Parser2->parse_code($cap1622);
+unlike($cl, qr/\(\$cr3 :str\s/,
+     '#1622: a name captured by an anon sub has unclassified uses — no B freeze');
+test_cl('#1622: … a REAL interpolation plus a closure call keeps the ref',
+        $cap1622, "3 isCODE=1 call=9\n");
+
+test_cl('#1621: the same hole through an ARRAY ref and a closure deref',
+        <<'PL', "4 label=\$ar4 elem=11\n");
+my $ar4 = [10, 11];
+my $f4  = sub { return $ar4->[1] };
+print "4 label=", "\$ar4", " elem=", $f4->(), "\n";
+PL
+
+# The must-NOT-change side: `\$x` is literal text, `\\$x` is a literal
+# backslash followed by a REAL interpolation, `\@a` is literal, and a dq
+# `\c` eats the character after it (so `"\c$x6"` does not interpolate) while
+# a PATTERN `\c` does not (so `/\c$x7/` does).
+test_cl('#1621: the literal/interpolating split is perl\'s, both directions',
+        <<'PL', "5 a=[\$x5] b=[\\X] c=[\@a5] d=[X\$y5]\n6 len=3 last=6\n7 m=1\n");
+my $x5 = 'X'; my $y5 = 'Y'; my @a5 = ('A');
+print "5 a=[", "\$x5", "] b=[", "\\$x5", "] c=[", "\@a5", "] d=[", "$x5\$y5", "]\n";
+{ no warnings; my $x6 = 'X'; my $s6 = "\c$x6";
+  print "6 len=", length($s6), " last=", substr($s6, -1), "\n"; }
+my $x7 = 'X';
+print "7 m=", (chr(24) =~ /\c$x7/ ? 1 : 0), "\n";
+PL
+
+# …and the licence must still FIRE where it is earned: a real interpolation
+# and an interpolating heredoc are stringify uses, and an uncaptured slot
+# keeps its freeze.
+$cl = Pl::Parser2->parse_code(
+  q{my %h8=(k=>'vv'); my $v8 = $h8{k}; print "8 v=[$v8] len=", length($v8), "\n";});
+like($cl, qr/\(\$v8 :str \(%pcl-to-string-strict /,
+     '#1621: a genuine interpolation still licenses the B-str freeze');
+$cl = Pl::Parser2->parse_code(
+  qq{my \%h10=(k=>'zz'); my \$v10 = \$h10{k};\nmy \$t10 = <<"EOT";\nvalue is \$v10\nEOT\nprint "10 t=[\$t10]\\n";});
+like($cl, qr/\(\$v10 :str \(%pcl-to-string-strict /,
+     '#1621: an INTERPOLATING heredoc still licenses it');
