@@ -260,6 +260,19 @@ reproduced on the base extraction, so pre-existing unbisected drift;
 `io/iofile.t` (+1) and `io/pipe.t` (+1), present in the base measurement.  None
 spliced.
 
+**A SEVENTH mover, and seven non-movers, from the `--all --quick` companion.**
+`op/filetest_t.t` 0/0 DIFF -> **7/0 OK** -- outside my population, found only
+because the harness change made the full companion leg mandatory.  Its abort was
+`Error opening #P"/dev/tty": No such device or address`, i.e. #1699: a `/dev/tty`
+open fails ENXIO, CL `open` signalled it, and the file has exactly one top-level
+form.  Eight files differed from the snapshot in that run; all eight were
+re-measured `--jobs 1` on THIS tree and on the 2ff53f8d extraction BACK TO BACK
+under the same load, and seven read identically on both (`comp/use.t` 40/47,
+`op/coreamp.t` 9/58, `op/coresubs.t` 0/2, `op/inc.t` 67/26, `op/inccode.t`
+13/26, `run/fresh_perl.t` STALE 61/30, `run/switchM.t` 0/5; `op/gv.t` is #1651's
+known hang).  Back to back is the point: a suspected flapper measured under two
+different loads cannot be told from a fix.
+
 **Member 2b, the attribution.**  695 rows, one cause per (file, rowkey), the
 join key being the runner's WHOLE projection -- `PclTapAlign::rowkey_desc` PLUS
 the test#-0 `*extra*`/`*summary*` fallbacks (the s473t5c lesson).  Sixteen rows
