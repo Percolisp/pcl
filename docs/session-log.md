@@ -1,7 +1,92 @@
-# PCL Session Log
+0# PCL Session Log
 
 Append new entries at the top. One section per session.
 
+## Session s473t5e (Opus agent, 2026-09-13) — #1501 round 6: `re/` — three fixes, 9,836 causeless rows → 3,940 all caused, and the re_tests TIMEOUT verdict is HANG
+
+**Member 1, the population.**  Joined from the three baselines on this tree:
+`re/` held **9,836 blessed fail rows over 34 files with CAUSES 0**, and
+**352,093 rows short over 80 files, 19,409 of them UNEXPLAINED in 22 files**.
+The `re/` half of the shortfall is 98 % registered (the ten `uniprops*.t` alone
+are 324,976 rows of #1036), so the round's whole population is those 22 files
+and the 34 fail-row files.  CHECK 2 is a shallow census: 1,560 clusters over
+9,836 rows, and the three biggest files are ONE fact each.
+
+| CHECK 1 (UNEXPLAINED, rows short) | short | the fact |
+|---|---|---|
+| `reg_mesg.t` | 3,348 | `display_rx` is in PERL's `t/test.pl`, NOT in the file — #1590 |
+| `charset.t` | 2,776 | the INLINE `(?a:…)` group — FIX 3 |
+| `regexp_nonull.t` | 2,169 | its own `1..0 # Skip XS::APItest not available` |
+| the six `regexp*.t` | 1,264 ea | **HANG** (member 2, #1714) |
+| `anyof.t` | 1,187 | `Can't locate loadable object for module Storable` |
+| `pat.t` | 898 | the file's own `Failed to match at pat.t line N` die — #1720 |
+| `alpha_assertions.t` / `regexp_normal.t` / `regex_sets_compat.t` | 421+311+311 | ONE recovery line, `end of file on string-input-stream` — FIX 2 |
+| `subst_wamp.t` | 281 | `do './re/subst.t'`, whose abort is #1664 |
+| `overload.t` / `speed.t` | 87 / 4 | TIMEOUT (the #326 quick-skip set) |
+| `reg_email.t` | 13 | `seek DATA,0,0` — #1716 |
+| `subst.t` / `reg_nc_tie.t` / `pat_rt_report.t` / `rxcode.t` | 9+5+4+1 | #1664 / #1717 / #1721 / NS code blocks |
+
+**Member 2 — the re_tests TIMEOUT verdict is HANG, not an allowance (#1714).**
+`re/regexp_qr_embed.t` at `--timeout 1200`, `--jobs 1`, quiet box: **799/108 =
+907 rows**, against 905 at the 90 s default.  Thirteen times the time bought TWO
+rows, so no row belongs in `perl-suite-timeouts.tsv`.  The place is re_tests
+lines 906–926, the nested-quantifier family (`.X(.+)+X` and 20 siblings):
+measured under PCL with subject `'bbbbXX' . ('a' x n)`, **n=22 0 s, n=26 4 s,
+n=30 64 s** — 16× per four characters, exactly 2^n — where perl answers in 0 s
+because its engine has the super-linear cache and cl-ppcre has neither that nor
+a backtrack limit.  re_tests' own subject is n=39, i.e. ~9 hours for ONE row.
+The other three re_tests drivers get past it only because they skip those rows
+on their own preamble.  Registered `docs/not-supported.md` "Catastrophic
+backtracking has no limit"; do NOT add the six to `--quick` (they still produce
+905 rows inside 90 s — losing that is the #176 failure mode).
+
+**Member 3 — the `end of file on string-input-stream` abort is the transpile
+server's LAYER (#1711, FIX 2).**  `pl2cl`'s server protocol counts CHARACTERS
+and `_run_server` used `:encoding(utf-8)`, the STRICT encoding, which refuses
+perl's non-characters (the 2,048 surrogates, U+FDD0–U+FDEF, every plane's last
+two) and substitutes the `\x{...}` ESCAPE TEXT: 1 character out, 12 bytes and
+12 characters back for U+10FFFF, **in both directions**, measured.  The count
+then does not describe the bytes, the reader stops short, and the truncated form
+is an unterminated string.  re_tests line 1859's subject is ten `\x{10FFFF}`,
+`t/re/regexp.t` does `$subject = eval qq("$subject"); die $@ if $@`, and
+`do $file or die $@` takes the file: two aborted forms, exactly the blessed
+`sig`.  The fix is the layer the rest of `pl2cl` already uses for the file-mode
+emission — `:utf8`, one line each way (rule 11: two transports of one emission
+that disagreed).  The three drivers now stop at re_tests line 2030
+(`\x{400000}`, the RULED #419 refusal): **+513 rows produced**.  Residue #1712
+(a surrogate in the eval SOURCE — SBCL's own `:utf-8` refuses to ENCODE one).
+**Operational finding: a desynchronised request can produce a syntactically
+VALID but WRONG transpile, and the eval DISK cache makes it permanent** — one
+such entry was found on this box (`(p-length (p-unparsable-quote "q{mai"))`)
+and removed by hand; it is why the guard row appeared to fail after the fix.
+
+**Member 4 — two more fixes, both rule-12 silent fall-throughs.**  **FIX 1**:
+`perl-regex-to-ppcre`'s POSIX-class table had no `[:^class:]` arm and no
+`ascii`, so `[[:^alnum:]]` reached cl-ppcre as the class `[[:^alnum:]` plus a
+literal `]` — two characters where perl needs one.  It matched nothing, and so
+did `[^[:^alnum:]]`, so a class and its complement AGREED, which is what
+`reg_posixcc.t`'s 6,630 extra rows assert cannot happen.  ONE range table
+(`+p-posix-class-ranges+`, perl's complete fourteen probed) with the negated
+spelling DERIVED from it; a 32-spelling × 20-subject matrix byte-identical to
+perl.  **reg_posixcc.t 1544/7646 → 1544/1016**, 6,630 rows fixed; the residue is
+#1713.  **FIX 3**: `docs/not-supported.md` said the charset modifiers were
+"accepted and silently ignored", and that was false of the INLINE spelling —
+`(?a:…)` is a cl-ppcre SYNTAX ERROR, so `"0" =~ /(?a:\d)/` was 0.
+`%pcl-strip-charset-flags` drops just those letters (the breaking case, `/\(?u:/`
+as an optional literal paren, is probed and guarded with a `(?<!\\)`).
+**charset.t 2776/2776 → 5224/328, +2,448 passing rows.**
+
+**Members 5–6, the bars.**  Every mover re-run serially (#366) agrees
+("REAL MOVE (both runs agree)"); the 55 rows that ARRIVED in
+`regex_sets_compat.t` and the 470 in `charset.t` were read one by one and are
+all `ok -> (missing)` — the 500-row log cap's window moving, not new failures.
+Three baselines edited row by row: **`re/` fail rows 9,836 → 3,940 with ALL
+3,940 caused** (whole file CAUSES 4,338 → 8,278 of 12,681), **`re/` shortfall
+UNEXPLAINED 22 files / 19,409 rows → 0 / 0**, five run-baseline verdicts
+spliced with the header note.  Two STALE attributions corrected by measurement:
+the six `fold_grind_*` files were blessed #1036 and are not — four die on
+`Encode` (XS) inside `fold_grind.pl`'s `do`, two skip on "No locales", which is
+`locales_enabled` answering 0 from the harness stub.
 ## Session s484b (Opus agent, 2026-09-13) — #1117 shape (B): a glob-cleared aggregate slot reads as ABSENT, and the two residue halves are written down
 
 **The ruling and the shape.** The USER ruled shape (B) of the s480 design with
