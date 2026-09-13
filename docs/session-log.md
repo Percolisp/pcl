@@ -2,6 +2,93 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473t5b (Opus agent, 2026-09-13) -- #1501 round 3: `op/` CHECK 2 over six files, 786 rows attributed, and PPI §30 (the indented here-doc's indentation) fixed
+
+**Member 1, the cluster table** (`scratch/s473t5b/cluster-table.md`).  Measured
+once per file on this worktree (`--jobs 1`, `PCL_SUITE_KEEP`) and clustered
+from the BLESSED rows, which are the population CHECK 2 must attribute:
+
+| file | blessed rows | clusters | `ok->not ok` | `ok->(missing)` |
+|---|---|---|---|---|
+| `op/sub_lval.t` | 180 (178 after s473t5a) | 106 | 64 | 116 |
+| `op/gv.t` | 170 | 126 | 56 | 113 |
+| `uni/gv.t` | 148 | 83 | 12 | 136 |
+| `op/attrs.t` | 125 | 89 | 88 | 36 |
+| `op/heredoc.t` | 106 | 75 | 106 | 0 |
+| `op/packagev.t` | 79 | 68 | 79 | 0 |
+
+An `ok->(missing)` row carries the FILE's early-stop cause (the s473t4 rule),
+so half of this round was CHECK 1 in disguise: op/sub_lval.t's 116 sit behind
+9 aborted `LVSUB = VALUE` forms, and op/gv.t's 111 + uni/gv.t's 118 sit behind
+**one block**, gv.t:580-586, whose `or die $@` guards a proxy constant
+subroutine.  Finding that block is what collapsed two 126- and 83-cluster
+files into one cause.
+
+**Member 2, the fix.**  `<<~' EOF'` and `<<~''` are valid perl that PPI 1.291
+gets wrong twice over: `_indent` takes `^(\s*)` of the whole terminator line,
+so the delimiter's own leading space (or, for the empty delimiter, the
+NEWLINE) is counted as indentation; `_is_match_indent` then fails, PPI marks
+the here-doc damaged and strips NOTHING -- `print <<~' EOF'` printed its body
+indented, a silent wrong -- or, over a body indented as far as the over-count,
+strips one character too many.  `Pl::Parser::_repair_indented_heredocs` is a
+fourth in-place token repair beside the three class-swappers, so it reaches
+fragments too (#435) and all eleven readers of `->heredoc` are served from one
+place.  The original terminator line is recoverable as `_indentation .
+_terminator_line`, and which of PPI's three branches ran is decidable from the
+token -- an indent containing a newline can match no line; `_damaged` with a
+newline-terminated terminator line is the mid-file give-up; no `_damaged`
+means PPI stripped; and in the EOF branch its match condition is recoverable
+(it stripped only if every body line began with the over-long indent), which
+is the 8 rows that took the file from 12 moved rows to 20.  After the repair
+12 of 13 measured shapes round-trip byte-exact through `$doc->serialize` where
+plain PPI manages 4 -- the second face of the bug and the check that says the
+repair is complete.  `op/heredoc.t 32/106 -> 52/86`, ROW DIFF **20 FIXED / 0
+NEW**, measured twice.  `docs/ppi-upstream-bugs.md` §30 + 7 rows in
+`docs/ppi-bug-report.t` (66 -> 73, six of them failing); guard
+`Pl/t/heredoc-indent-01.t` 15 rows / 495 ms, 10 of 15 FAIL on a `git archive
+186134ce` extraction.
+
+**Member 2, the attribution.**  786 rows, one probe battery per cluster
+(`scratch/s473t5b/probes/`): op/sub_lval.t 178 = `NS:Lvalue subroutines`
+(#930, USER-deferred) -- every row in the file is downstream of a `sub :
+lvalue`, including the four whose descriptions do not say so; op/gv.t 160 +
+uni/gv.t 138 = **#1664, filed**, the typeglob model (proxy constant
+subroutines, FAKE-glob stash identity, the IO/FORMAT slots, the anon IO
+glob's name), with 10+10 rows to the ruled #221 warnings family; op/attrs.t
+125 = `NS:Attributes on a variable declaration` (#322), whose own text already
+names both residues; op/heredoc.t 44 = **#1666, filed** (a here-doc in an
+`s///e` replacement whose body is outside the replacement text -- PPI's own TO
+DO admits the gap) and 42 = invalid-input diagnostics; op/packagev.t 71 =
+**#1665, filed** (perl's version grammar absent in both strictness levels) and
+8 = #1640.  s484a's blanket `#1587` on all 79 packagev rows is replaced row by
+row, which is what this round was for.  CAUSES **2,072 -> 2,748 of 18,601**;
+`row-shortfall.tsv`'s t/ half UNEXPLAINED **101 files / 63,028 rows -> 99 /
+62,896**.
+
+**What was NOT done, and why.**  The `version->new("bad")` half of #1665 is a
+`lib/version.pm` change of about thirty lines (its `$LAX` regex and `is_lax`
+are already right; `new` never asks) and it was left to its task, because the
+case it would BREAK is in the same test file: column 4 of packagev.t's
+`__DATA__` calls `version->new(V)` UNQUOTED, so the argument is a v-string,
+which is not lax-matching as text -- those rows pass today only because a
+v-string literal is still its own source text (#1640).  The vstring arm
+belongs in the same change as the gate, and a `lib/` change makes the full
+sweep non-optional.  `op/gv.t`'s verdict was not spliced either: it is
+rows-unstable three ways on one tree (67/24, 67/24, **89/96** serially at
+`--timeout 420`, blessed 135/56) and #1651 owns the hang.
+
+**Bars** (all on the tree rebased onto main `17d831fe`): corpus-diff
+**IDENTICAL over 111**, silent drops 5 unchanged, 6 shapes identical;
+`emission-ab --shapes` over `lib/**` **27 SAME / 0 DIFF / 0 RCDIFF**; full
+sweep `--jobs 4` **GATE clean, TOTAL passing 18675 (+0)**, 0 new / 0 fixed,
+drops 5 = census (run although corpus-diff was identical, because
+op/heredoc.t's CHILD programs transpile differently -- and it answered the
+question: `perl-tests/heredoc.t` is in the sweep's known-hang skip list, so
+nothing there could move); companion `--jobs 1` on the six touched files;
+**no generation bump**, measured rather than assumed -- the trigger shape
+occurs nowhere in `lib/` or `cpan-tests/` and its one `perl-tests/`
+occurrence is inside a string.
+
 ## Session s473t5a (Opus agent, 2026-09-13) — #1501 round 2: `op/` CHECK 1 in the 50-199 band, three fixes and seven filings
 
 **Member 1, the population.**  The census band (`docs/plan-post-s473.md` §5.3)
