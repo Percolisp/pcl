@@ -101,7 +101,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 40;
+plan tests => 41;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -192,6 +192,33 @@ is(run_bytes(encode_utf8(
    . "}\n"
    . "print \"ok\\n\";\n")),
    "ok\n", 'utf8 package name in a nested block: @ISA is an ordinary cell (#313)');
+
+# Task #1741, #313's sibling on the other axis: a non-ASCII VARIABLE name
+# written inside a `{ package X; … }` nested block.  `in-package` is read-time
+# and cannot re-home a symbol inside a nested form, so the WRITE has to come
+# out QUALIFIED — and `_requalify_region`'s word-shaped name class was
+# `[A-Za-z_]\w*`, ASCII only, so it emitted the bare `|$ㄅĽuṞfⳐ|` while every
+# READ of the same global came out `압Ƈ::|$ㄅĽuṞfⳐ|`.  A SILENT WRONG: the
+# assignment simply went somewhere else.  Measured: 3 of t/uni/package.t's
+# rows.  Rows 1-3 cover all three container sigils; row 5 is the negative — a
+# `my` inside the same shape is still a LEXICAL, not a package global.
+# All five answers are perl 5.40.3's, probed.
+is(run_file_bytes(encode_utf8(
+     "use utf8;\nuse open qw( :utf8 :std );\nno strict;\n"
+   . "{\n"
+   . "    package ꑭʑ;\n"
+   . "    { package 압Ƈ; \$ㄅĽuṞfⳐ = 5; \@ᕘ = (1,2); \%ᑫ = (k => 3); }\n"
+   . "    print \"1:\", (defined \$압Ƈ::ㄅĽuṞfⳐ ? \$압Ƈ::ㄅĽuṞfⳐ : 'undef'), \"\\n\";\n"
+   . "    print \"2:\", scalar(\@압Ƈ::ᕘ), \"\\n\";\n"
+   . "    print \"3:\", (defined \$압Ƈ::ᑫ{k} ? \$압Ƈ::ᑫ{k} : 'undef'), \"\\n\";\n"
+   . "    package 압Ƈ;\n"
+   . "    print \"4:[\", (defined \$ㄅĽuṞfⳐ ? \$ㄅĽuṞfⳐ : 'undef'), \"]\\n\";\n"
+   . "    package main;\n"
+   . "    { package Абв; my \$ㄅĽuṞfⳐ = 9; print \"5:\", \$ㄅĽuṞfⳐ, \"/\",\n"
+   . "        (defined \$Абв::ㄅĽuṞfⳐ ? 'set' : 'unset'), \"\\n\"; }\n"
+   . "}\n")),
+   "1:5\n2:2\n3:3\n4:[5]\n5:9/unset\n",
+   'a non-ASCII global written in a nested package block requalifies (#1741)');
 
 # Task #410 (21 census drops across uni/gv.t, uni/stash.t, uni/caller.t,
 # uni/method.t, uni/readline.t and the two mro utf8 files).  PPI's `$` branch

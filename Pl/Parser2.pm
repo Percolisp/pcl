@@ -481,7 +481,18 @@ sub _requalify_region {
     (my $bare = $canon) =~ s/^[\$\@\%]//;
     next unless $sig =~ /^[\$\@\%]$/;          # &sub / *glob: not this axis
     next if $bare =~ /::/;                     # (c) already qualified
-    next unless $bare =~ /^[A-Za-z_]\w*$/;     # (b) $1, $@, ${^X}, …
+    # (b) $1, $@, ${^X}, … — the WORD-SHAPED name class, and it is UNICODE
+    # (#1741): under `use utf8` a source name is a decoded string, so
+    # `{ package X; $ㄅĽuṞfⳐ = 5 }` inside a bare block must requalify to
+    # `$X::ㄅĽuṞfⳐ` exactly as its ASCII twin does.  With the ASCII-only
+    # `[A-Za-z_]` the write stayed UNQUALIFIED while every read of the same
+    # global came out qualified — a silent wrong, because `in-package` is
+    # read-time and cannot re-home a symbol inside a nested form
+    # (reference_in_package_is_read_time).  `[^\W\d]` is the spelling
+    # $VAR_TOKEN_RX's pipe-quoted alternative already uses, and it is a strict
+    # superset of the old class on ASCII.  An all-DIGIT container name (#1650)
+    # stays out, as it always was.
+    next unless $bare =~ /^[^\W\d]\w*\z/;
     next if $PKG_SWITCH_IMMUNE_VARS{$canon};   # (b)
     my %homes;                                 # (a) `our` homes seen, ne $pkg
     my $binding = sub {
