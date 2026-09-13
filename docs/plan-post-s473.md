@@ -52,7 +52,7 @@ successor.
 | 13c | **s473u** — **MERGED s478 = main `bd1e4144` (#1544 profile + lever A ×2, #1545 the transpile server: gate 463 s/2933 CPU-s → 86 s/395 CPU-s; #1546 filed = the next lever)** (brief `s473/s473u/prompt.md`, written s477 — USER: "Try, then see so this really works"; **FIRST LAUNCH next session**) | the GATE is the bug-throughput cost (7.5–8.5 min / ~2900 CPU-s, run 6–9× per batch): profile per file FIRST, then a persistent transpile server per test process (the fixed 190 ms per `pl2cl` spawn × ~2 800 calls), identical verdicts + byte-identical CL as the bar, before/after wall as the number; sweep + companion out of scope | none (tooling) | a slot; IDs 1544–1553 |
 | 13b | **#1262** — **MERGED s475 `7c4f302f`** (Sonnet; `docs/caching.md`, the USER-facing page on the four cache layers incl. the s473p eval disk cache; filed #1335 = `pcl --cache-info` does not list `evals/`) | prose | done |
 | 0c | **s473t3** | FILLER: the 79 blessed rows whose only cause is a `CATALOG` note get TASKS (one perl-probed reproducer per cluster, ~25 clusters; ≤2 one-hour fixes may ship) — `s473/s473t3/prompt.md`; brief WRITTEN s474b, launches on the next free slot | v2-1000 only if a fix ships | a slot |
-| 0d | **#1501** (label s473t4; brief NOT yet written — Fable writes it when the s473a–f rounds have consumed #1431–#1460, USER 2026-09-07 "after those bugs are fixed") | the companion suite gets the sweep's two triage checks: one cause per early-stopping file (188 files produce fewer rows than perl) + a CAUSE column on `baselines/perl-suite-fails.tsv` (18,340 rows / 265 files, none attributed); first brief = the cluster census + per-directory split; re/ after s473q | if a fix | after s473a…f; re/ after s473q |
+| 0d | **#1501** (label s473t4; **IN FLIGHT s473t4**, worktree `agent-acd33469931ad06c4`; member 1 = the CAUSE-column instrument, member 2 = the census in §5 below) | the companion suite gets the sweep's two triage checks: one cause per early-stopping file (190 files produce fewer rows than perl, 124 UNEXPLAINED) + a CAUSE column on `baselines/perl-suite-fails.tsv` (18,336 rows / 265 files, CAUSES 0 at the start); the census and the per-directory rounds t5a-t5f are §5 | if a fix | re/ (t5e) after s473q -- DONE, kept cl-ppcre |
 | 0e | **#1061** — **MERGED s475 `46ede39d`** (label s1061; gen v2-1010; #1505 `import Foo::Bar` bare designator = a whole file unreadable, #1508 `$ref->{k} =~ s///` wrote to a VALUE; nine down-movers each bisected, #1506–#1512 + #1525 filed; board `cpan-board14-s474.tsv` 79/54/50, 2190/346, exactly four SLU rows moved vs s467, all explained) | FILLER (USER 2026-09-07 "Sounds good"): the CPAN board's nine unattributed DOWN-movers bisected + a fresh board snapshot on main with every mover since s467 attributed | if a fix | the slot after s473t3 |
 | 0e′ | **#1513** | FILLER (USER 2026-09-07 "Sounds good"): DOCUMENT the missing 64-bit integer boundary as ONE not-supported entry (folds two old ones), register `op/numconvert.t` as an expected divergence (1446 rows leave UNEXPLAINED), ir-spec paragraph, guard row asserting the documented answers | none | after #1061 (same filler slot; ~1 h) |
 | 0f | **#1502** — **DONE s473w** (label s473w; gen v2-1200; the board's ROW-level file `baselines/cpan-board14-fails.tsv` = 389 rows / 317 keys with **CAUSES 0**, `--rows` + `--diff` + `baselines/cpan-board-timeouts.tsv` in `tools/cpan-scoreboard.pl`, one TAP parser `tools/lib/PCLTap.pm`, the registry reader shared as `tools/lib/PCLTimeouts.pm`, guard `tools/t/cpan-scoreboard.t` 25 rows; snapshot `baselines/cpan-board14-s473w.tsv` 84/50/49 and 2213/353 with all SEVEN movers attributed; **#1525 + #1507 shipped**, #1506 + #1512 measured into their tasks, #1567–#1576 filed) | the board gets the sweep's treatment: a ROW-level fail file with a CAUSE column, one probe per cluster, ≤1 h clusters ship, CAUSES line in the board diff | v2-1200 | done |
@@ -86,3 +86,104 @@ s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range), **#1595–#159
   main `637fc58e` (log in the session scratchpad); read its NOT-RUN and ROW DIFF blocks.
 - The quiet-box bench re-measure (BN/BP rows + #1188 constants).
 - A full `--all --jobs 4 --bless-stamps` once per round (I4).
+
+## 5. The companion triage census (#1501 / s473t4 member 2, 2026-09-13)
+
+Measured on the `eabff00d` tree from the three blessed baselines — `baselines/perl-suite-run.tsv`
+(528 files), `baselines/row-shortfall.tsv` (190 `t/` rows) and `baselines/perl-suite-fails.tsv`
+(18,336 rows / 265 files).  Nothing was re-run to build it: the runner already writes the STOP
+point into the run baseline's `sig` column (`aborted-forms:N: <the recovery line>`), so the
+census is a join, not 188 re-runs.  **`tools/run-perl-suite.pl` does NOT strip the PCL side's
+`^;` lines** (the sweep runner does, `tools/sweep-perl-tests.pl:215` — that is what hid the
+cause in s473t1), so the companion's causes were there all along and nobody had joined them.
+
+### 5.1 The population
+| status | files | | status | files |
+|---|---|---|---|---|
+| DIFF | 270 | | TRANSPILE | 10 |
+| XDIFF | 104 | | TIMEOUT | 9 |
+| OK | 101 | | NOT-RUN | 2 |
+| NOTAP | 31 | | FIXTURE | 1 |
+
+Shortfall: **190 files / 445,101 rows short, of which 124 files / 67,765 rows UNEXPLAINED.**
+Row-level fails: **18,336 rows over 265 files, CAUSES 0 of 18,336** before this round.
+
+### 5.2 The per-directory split (this is the schedule)
+| dir | files w/ shortfall | rows short | unexpl. files | unexpl. rows | fail-row files | fail rows | clusters | run statuses |
+|---|---|---|---|---|---|---|---|---|
+| re | 42 | 352,093 | 23 | 19,458 | 34 | 9,836 | 1,560 | DIFF 34, NOTAP 14, OK 10, TIMEOUT 8, XDIFF 13, TRANSPILE 1 |
+| uni | 11 | 84,476 | 7 | 42,520 | 22 | 1,389 | 623 | DIFF 22, OK 4, NOTAP 2, TIMEOUT 1, XDIFF 1 |
+| op | 76 | 7,233 | 63 | 4,722 | 138 | 4,707 | 3,427 | DIFF 139, OK 44, XDIFF 21, NOTAP 8, TRANSPILE 6, NOT-RUN 2, FIXTURE 1 |
+| comp | 8 | 276 | 7 | 274 | 20 | 1,614 | 373 | DIFF 21, OK 3, TRANSPILE 1 |
+| run | 9 | 464 | 9 | 464 | 18 | 499 | 211 | DIFF 18, NOTAP 3, OK 3, TRANSPILE 1, XDIFF 1 |
+| io | 15 | 263 | 12 | 204 | 29 | 264 | 162 | DIFF 29, OK 8, XDIFF 4, NOTAP 3 |
+| base | 1 | 120 | 1 | 120 | 1 | 15 | 15 | OK 7, DIFF 1, TRANSPILE 1 |
+| class | 9 | 100 | 0 | 0 | 0 | 0 | 0 | XDIFF 9, NOTAP 1 |
+| mro | 17 | 73 | 0 | 0 | 0 | 0 | 0 | XDIFF 54, OK 16, DIFF 3 |
+| cmd / opbasic | 2 | 3 | 2 | 3 | 3 | 12 | 8 | OK 6, DIFF 3, XDIFF 1 |
+
+`re/` + `uni/` hold **98 %** of the rows short and **61 %** of the fail rows, and their shortfall
+is dominated by files whose whole body is one engine or one table: the ten `re/uniprops*.t`
+(324,976 rows short, every one `Could not run lib/unicore/…`) and the `uni/` case-mapping four
+are ALREADY attributed to #1036 and must not be re-probed.  The genuinely open `re/` work is the
+six `re/regexp*.t` TIMEOUTs (1,264 each, the same generated `re_tests` corpus) plus `re/reg_mesg.t`
+(3,348), `re/charset.t` (2,776), `re/regexp_nonull.t` (2,169) and `re/anyof.t` (1,187).
+
+### 5.3 The early-stopper tail (CHECK 1), banded
+| band | files | rows short | UNEXPLAINED files |
+|---|---|---|---|
+| ≥ 1000 | 28 | 435,229 | 12 |
+| 200–999 | 15 | 5,991 | 10 |
+| 50–199 | 22 | 2,581 | 18 |
+| 10–49 | 44 | 1,010 | 30 |
+| 1–9 | 81 | 290 | 54 |
+
+The ten files ≥ 200 short outside `re/` + `uni/` — round 1's target — and the 18 UNEXPLAINED in
+the 50–199 band are the tables in §5.5/§5.6 below.
+
+### 5.4 The fail-row clusters (CHECK 2)
+The row baseline caps a file at ~500 rows, so a file's *cluster count* is what sizes it, not its
+row count.  Clustered by the description with digits/hex/high-bytes normalised (the description
+is Test::More's and is the join key):
+
+| file | fail rows | distinct shapes | biggest shape |
+|---|---|---|---|
+| re/reg_posixcc.t | 7,130 | 727 | 200 (`*extra* chr(NxN) … =~ /[[:^alnum:]]/`) |
+| op/write.t | 501 | 164 | 131 (`[at t/op/write.t line N]`) |
+| uni/fold.t | 501 | 311 | 7 |
+| op/coreamp.t | 501 | 490 | 3 |
+| re/charset.t | 501 | 362 | 10 |
+| comp/require.t | 500 | 83 | 119 (`(BB) saw expected error`) |
+| re/regexp_qr_embed.t | 500 | 7 | 481 (`#N`) |
+| re/regex_sets_compat.t | 500 | 56 | 288 (`#N`) |
+| comp/utf.t | 500 | 17 | 306 (`UTF-NLE N N '\x{N}' with N spaces before it`) |
+| uni/upper.t | 500 | 113 | 61 |
+| re/alpha_assertions.t | 495 | 78 | 161 (`skipped. Pattern doesn't contain assertions`) |
+| op/decl-refs.t | 360 | 343 | 3 |
+| re/regexp_normal.t | 319 | 63 | 166 (`skipped. Test not valid for …`) |
+| op/index.t | 311 | 309 | 2 |
+| run/runenv_hashseed.t | 269 | 23 | 150 |
+| op/tie_fetch_count.t | 212 | 211 | 2 |
+| op/cproto.t | 183 | 183 | 1 |
+| op/sub_lval.t | 180 | 106 | 71 |
+| op/gv.t | 170 | 126 | 14 |
+| comp/proto.t | 169 | 54 | 103 |
+
+**The shape of the job:** `op/` has 3,427 clusters over 4,707 rows — a 1.4 rows-per-cluster
+population, i.e. mostly ONE row per distinct assertion, so `op/` is attributed by FILE (its
+early-stop cause explains the rows that follow it), not cluster by cluster.  `re/`, `comp/` and
+`uni/` are the opposite: 9,836 rows over 1,560 clusters in `re/`, and the four biggest `comp/`
+and `re/` files collapse to one engine fact each.
+
+### 5.5 The rounds this census schedules (t5…)
+| round | population | size |
+|---|---|---|
+| **t5a** | `op/` CHECK 1 — the remaining early-stoppers 50–199 short (18 UNEXPLAINED files) + the three `op/` TRANSPILE-FAILs not done in t4 (`op/for.t` 149, `op/goto.t` 134, `op/svleak.t` 156; `op/taint.t` is TRANSPILE but costs 0 rows — perl produces none either) | ~20 files |
+| **t5b** | `op/` CHECK 2 — the clusters with an owner nobody wrote into the row: `op/cproto.t` 183 (one shape × 183), `op/sub_lval.t` 180, `op/gv.t` 170 + `uni/gv.t` 148 (one family), `op/attrs.t` 125, `op/heredoc.t` 106, `op/packagev.t` 109 | 7 files / ~1,000 rows |
+| **t5c** | `comp/` — 1,614 rows over 373 clusters, dominated by `comp/require.t` (83 shapes; `(BB) saw expected error` × 119), `comp/utf.t` (17 shapes; `UTF-16LE …` × 306), `comp/proto.t` (54), `comp/parser.t`, `comp/retainedlines.t` (17) | 20 files |
+| **t5d** | `run/` + `io/` — 763 rows / 373 clusters; `run/runenv_hashseed.t` (23 shapes, 269 rows, `unlink_tempfiles`), `run/switches.t` (110), the three `run/*.t` TRANSPILE/NOTAP | 47 files |
+| **t5e** | `re/` — AFTER the #71 decision (s473q kept cl-ppcre, DECIDED §s476).  The six `re/regexp*.t` TIMEOUTs are ONE corpus (`re_tests`, 1,264 rows each); `re/reg_posixcc.t` 7,130 rows / 727 shapes is ONE POSIX-class fact; `re/charset.t`, `re/anyof.t`, `re/reg_mesg.t` (diagnostic TEXT) are three more single facts.  Name the fact once per file; do NOT walk the rows. | 34 files / 9,836 rows |
+| **t5f** | `uni/` — everything not already #1036.  `uni/variables.t` (42,387 short, TIMEOUT, its own `PCL: string literal: cod…` recovery line) is the one real bug in the directory; the rest of the shortfall is the registered case-mapping class. | 22 files |
+
+`mro/` and `class/` need no round: 0 fail rows and 0 UNEXPLAINED shortfall — every divergence is
+already file-registered in `baselines/perl-suite-expected.tsv`.
