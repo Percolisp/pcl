@@ -2,6 +2,14 @@
 
 Append new entries at the top. One section per session.
 
+## Session 483 (Fable, 2026-09-13) — two slots filled on the USER's ask; s483a (#1592) reviewed and merged; #1619 filed
+
+USER: "We are a bit low on tokens. Please run two tasks at the same time."  The s482 recipe queued s473t4 → s473t3 → #1592 → #1117, but s473t3 had been merged on 2026-09-07 — so the two launches were **s473t4 RESUMED** in its own stopped worktree (rebase onto `eabff00d` first; members 2–5; IDs 1577–1591; gen v2-1300 only on an emission change) and **s483a = #1592** in a fresh worktree (brief `~/pcl-agent-scratch/s473/s483a/prompt.md`; IDs 1618–1627; gen v2-1320 only on an emission change), both pinned Opus.
+
+**s483a came back MERGE-READY at `cc32d64f`** (three commits, runtime-only).  The finding: the CODE exclusion in the `${…}` referent rule had been measured on the OTHER check — a type sniff on the twice-unboxed value, which is what Sub::Quote's `my $t = ${$_[1]->{'$t'}}` trips (a capture whose scalar HOLDS a code ref).  The referent rule stops one level higher, so with CODE included `moo-01.t` is 15/15.  Making it decidable needed `\ CODEVALUE` to gain perl's anonymous scalar (`ref(\\&f)` was CODE, perl says REF; `perl-tests/ref.t:139` forced it), and the write half `${$coderef} = 5` had been CLOBBERING the variable.  Review: diff read whole, gate re-run on the sha (235/8072, xs-only), both guards green, 13 probes vs perl — 12 identical; the 13th is a pre-existing, blessing-wide bug: `ref(\$var)` for a variable holding a blessed ref answers the class, perl REF → **#1619**.  Fast-forwarded, pushed, worktree removed, scratch archived to `s473/s483a-agent-a75ddf1033ea3f79c/` (2413 files, byte-identical).
+
+s473t4 still running at session-log time.  Next free task ID 1620.
+
 ## Session s483a (Opus agent, 2026-09-13) — #1592: `${$coderef}` dies like perl, and the CODE exclusion turned out to be a measurement of a different check
 
 **The finding first, because it is the deliverable.**  `%p-aggregate-referent-p`
