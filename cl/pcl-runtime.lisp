@@ -10733,6 +10733,14 @@ per element."
       ;; `$coderef->[0]` / `${$cr}[0]` / `$$cr[0]` deref reaches a raw
       ;; function — measured, the whole slice family is unmoved by this.
       ((functionp arr) (%p-not-a-ref "ARRAY"))
+      ;; A GLOB VALUE in container position: the glob's ARRAY slot, resolved by
+      ;; the ONE resolver that decides it (task #1726).  Before the slice arm,
+      ;; so `@$glob[0,1]` resolves the container the same way.
+      ((p-typeglob-p arr)
+       (let ((a (p-ensure-arrayref ref)))
+         (if (and (vectorp idx) (not (stringp idx)))
+             (p-aslice a idx)
+             (p-aref a idx))))
       ((and (vectorp idx) (not (stringp idx)))
        (p-aslice arr idx))
       ;; $scalarref->[0] on the READ path: perl's fatal, and the same arm the
@@ -11693,6 +11701,18 @@ which is one of #1140's escape spellings (probed)."
       ;; package hash named "" instead of Foo's symbol table.
       ((stringp h) (p-cast-% h))
       ((hash-table-p h) h)
+      ;; A GLOB VALUE designates that glob's HASH slot — `local $_ = *written;
+      ;; exists $$_{k}` is Carp's own guard (task #1726).  The SAME reading
+      ;; `%{$_}` takes, which is %p-glob-slot-place (p-cast-%'s typeglob arm);
+      ;; this is where the element primitives meet it, because they resolve
+      ;; their container here (rule 11).  A REF TO a glob is NOT this — perl
+      ;; dies "Not a HASH reference" for `$$g{k}` with `$g = \*FH` (probed) —
+      ;; and the box model represents both with a typeglob in the box, so the
+      ;; is-ref flag is what separates them (%p-glob-referent-p).
+      ((p-typeglob-p h)
+       (if (%p-glob-referent-p ref)
+           (%p-not-a-ref "HASH")
+           (%p-glob-slot-place h "%" (make-hash-table :test 'equal))))
       ;; %ENV / %INC through a reference: the marker IS the hash, and both
       ;; p-gethash arms take it (task #736), so `$$envref{PATH} = "x"` writes
       ;; the real environment as perl does.
@@ -11723,6 +11743,15 @@ which is one of #1140's escape spellings (probed)."
       ;; ONE resolver — %p-symref-array, the same one @{"name"} goes through
       ;; (p-cast-@); this was a second copy of it.
       ((stringp a) (%p-symref-array a))
+      ;; A GLOB VALUE designates that glob's ARRAY slot, and a REF to a glob is
+      ;; perl's fatal — p-ensure-hashref's twin (task #1726).  Before the
+      ;; vectorp arm, since a typeglob is not a vector but the order is the
+      ;; semantics here.
+      ((p-typeglob-p a)
+       (if (%p-glob-referent-p ref)
+           (%p-not-a-ref "ARRAY")
+           (%p-glob-slot-place a "@"
+                               (make-array 0 :adjustable t :fill-pointer 0))))
       ;; A RAW vector in container position can be the list-slice codegen shape
       ;; — `(f())[1]{k}` reaches here through expand-autoviv's p-aref-deref arm
       ;; — so it takes the same normalisation p-aref-deref's own read does
@@ -11919,6 +11948,9 @@ which is one of #1140's escape spellings (probed)."
       ;; Only a still-boxed H can be one, so the guard is all the hot path
       ;; (an ordinary `$href->{k}`, where H is the hash) ever pays.
       ((and (p-box-p h) (%p-scalar-referent-p ref)) (%p-not-a-ref "HASH"))
+      ;; A GLOB VALUE in container position: the glob's HASH slot, resolved by
+      ;; the ONE resolver that decides it (task #1726).
+      ((p-typeglob-p h) (p-gethash (p-ensure-hashref ref) key))
       (t (p-gethash h key)))))
 
 (defun (setf p-gethash-deref) (value ref key)
@@ -12367,6 +12399,10 @@ which is one of #1140's escape spellings (probed)."
     (cond
       ((stringp h) (p-ensure-hashref hash))
       ((and (p-box-p h) (%p-scalar-referent-p hash)) (%p-not-a-ref "HASH"))
+      ;; A GLOB VALUE designates its HASH slot, through the same resolver the
+      ;; read and write paths use — `exists $$_{$sub}` is Carp's guard, and it
+      ;; answered a quiet NO (task #1726).
+      ((p-typeglob-p h) (p-ensure-hashref hash))
       (t h))))
 
 (defun %p-designator-array (arr)
@@ -12377,6 +12413,7 @@ which is one of #1140's escape spellings (probed)."
     (cond
       ((stringp a) (p-ensure-arrayref arr))
       ((and (p-box-p a) (%p-scalar-referent-p arr)) (%p-not-a-ref "ARRAY"))
+      ((p-typeglob-p a) (p-ensure-arrayref arr))   ; the glob's ARRAY slot (#1726)
       (t a))))
 
 (defun p-exists (hash key)
@@ -23332,6 +23369,17 @@ buffer's fill-pointer; everything else falls back to file-length."
    That narrower question — reftype's SCALAR-vs-REF — is
    %p-plain-scalar-referent-p below, which is this predicate's strict subset."
   (p-box-p (%p-ref-referent val)))
+
+(defun %p-glob-referent-p (val)
+  "True when VAL is a REFERENCE TO A TYPEGLOB (`\\*FH`) rather than a scalar
+   holding a glob VALUE (`*FH`), which perl tells apart in container position:
+   `$$_{k}` where $_ holds a glob value is THAT GLOB'S HASH (Carp's guard,
+   task #1726), and the same spelling through `\\*FH` is the fatal \"Not a
+   HASH reference\" — probed 5.40.3, both spellings, hash and array.
+   The discriminator is p-backslash's `is-ref`, its typeglob arm being the ONE
+   construction of a glob ref and the same flag that makes `ref()` answer GLOB
+   for one and \"\" for the other."
+  (and (p-box-p val) (p-box-is-ref val) (p-typeglob-p (p-box-value val))))
 
 (defun %p-plain-scalar-referent-p (val)
   "The STRICT SUBSET of %p-scalar-referent-p: VAL's referent is a scalar that

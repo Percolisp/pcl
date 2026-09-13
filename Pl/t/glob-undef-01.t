@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run.
 sub run_cl {
@@ -208,11 +208,9 @@ PERL
 # consumer of the slot) asks exactly the first conjunct below — perl answers
 # 1/0/0 for a written / undef'd / never-created hash slot.
 #
-# NOTE: Carp's FULL guard, `*$_{HASH} && exists $$_{$sub}`, still answers 0 in
-# PCL for the WRITTEN glob, at its OTHER conjunct: `exists $$_{k}` on a
-# GLOB-valued $_ is false here and true in perl (task #1726, pre-existing and
-# unrelated to the slot table).  Only the slot conjunct is asserted here.
-is(run_cl(<<'PERL'), "1 _ARRAY=undef\n2 written=1 undefd=0 never=0\n",
+# Carp's FULL guard is line 3: its other conjunct, `exists $$_{$sub}` on a
+# GLOB-valued $_, answered 0 here until task #1726 (row 10 below).
+is(run_cl(<<'PERL'), "1 _ARRAY=undef\n2 written=1 undefd=0 never=0\n3 full written=1 undefd=0 never=0\n",
 undef *_;
 eval { &utf8::encode };
 printf "1 _ARRAY=%s\n", (defined *_{ARRAY} ? "def":"undef");
@@ -224,5 +222,54 @@ for my $g (*written, *undefd, *nevercreated) {
     push @out, (*$_{HASH} ? 1 : 0);
 }
 printf "2 written=%d undefd=%d never=%d\n", @out;
+my @full;
+for my $g (*written, *undefd, *nevercreated) {
+    local $_ = $g;
+    push @full, ((ref \$_ eq 'GLOB' && *$_{HASH} && exists $$_{sub1}) ? 1 : 0);
+}
+printf "3 full written=%d undefd=%d never=%d\n", @full;
 PERL
-   '#1117: sub.t row 24s shape answers undef, and Carps hash-slot guard matches perl');
+   '#1117: sub.t row 24s shape answers undef, and Carps whole guard matches perl');
+
+# ---- 10. a GLOB VALUE in ELEMENT position is that glob's slot (#1726) ------
+# `$$_{k}` / `$$_[i]` where $_ holds a glob VALUE reach the glob's HASH/ARRAY
+# slot in perl — it is the second conjunct of Carp's guard above, and it used
+# to answer a quiet NO here (the element primitives resolved their container
+# without the typeglob arm their own `%{$_}` cast already had).
+#
+# Lines 6-7 are the case the fix would BREAK if it keyed on the value alone: a
+# REF TO a glob is NOT a container in perl ("Not a HASH reference"), and the
+# box model represents a glob value and a glob ref with the same typeglob in
+# the box, so only p-backslash's is-ref flag separates them.  Every expectation
+# is perl 5.40.3's own (probed, scratch/s484c/probe/g10.pl).
+is(run_cl(<<'PERL'),
+our %written = (sub1 => 1, sub2 => 2);
+our @warr = (10, 20, 30);
+local $_ = *written;
+printf "1 read=%s exists=%d keys=%s\n", (defined $$_{sub1} ? $$_{sub1} : "U"),
+    (exists $$_{sub1} ? 1 : 0), join(",", sort keys %$_);
+my $h = *written;
+printf "2 arrow=%s delete=%s left=%s\n", (defined $h->{sub2} ? $h->{sub2} : "U"),
+    (delete($$h{sub2}) // "U"), join(",", sort keys %written);
+$$h{sub3} = 33;
+printf "3 write=%s slice=%s\n", (defined $written{sub3} ? $written{sub3} : "U"),
+    join(",", map { defined $_ ? $_ : "U" } @$h{qw(sub1 sub3)});
+my $g = *warr;
+printf "4 elem=%s arrow=%s exists=%d absent=%d\n", (defined $$g[1] ? $$g[1] : "U"),
+    (defined $g->[2] ? $g->[2] : "U"), (exists $$g[0] ? 1 : 0), (exists $$g[9] ? 1 : 0);
+printf "5 wrong-slot=%s\n", (defined $$g{x} ? $$g{x} : "U");
+my $gr = \*written;
+my $ok = eval { my $v = $$gr{sub1}; 1 };
+printf "6 globref=%s\n", ($ok ? "lived" : "died");
+my $ar = \*warr;
+my $ok2 = eval { my $v = $$ar[0]; 1 };
+printf "7 globref-array=%s\n", ($ok2 ? "lived" : "died");
+PERL
+   "1 read=1 exists=1 keys=sub1,sub2\n"
+ . "2 arrow=2 delete=2 left=sub1\n"
+ . "3 write=33 slice=1,33\n"
+ . "4 elem=20 arrow=30 exists=1 absent=0\n"
+ . "5 wrong-slot=U\n"
+ . "6 globref=died\n"
+ . "7 globref-array=died\n",
+   '#1726: $$glob{k} / $$glob[i] read the glob slot, and \*G stays perls fatal');
