@@ -257,38 +257,38 @@ t/op/utfhash.t	2	UNEXPLAINED
 t/op/write.t	505	not-supported.md §`format` / `write` report formatting — the file aborts at `Undefined subroutine &main::formline`.  Was 595 rows; #1032 (`p-write` takes a bareword handle) moved the abort later and produced 90 more (s468be).
 t/op/yadayada.t	1	UNEXPLAINED
 t/opbasic/magic_phase.t	2	UNEXPLAINED
-t/re/alpha_assertions.t	421	UNEXPLAINED
-t/re/anyof.t	1187	UNEXPLAINED
-t/re/charset.t	2776	UNEXPLAINED
-t/re/fold_grind_8.t	213	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/re/fold_grind_a.t	31	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/re/fold_grind_aa.t	103	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/re/fold_grind_d.t	31	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/re/fold_grind_l.t	113	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/re/fold_grind_u.t	213	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/alpha_assertions.t	250	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
+t/re/anyof.t	1187	NS:DynaLoader / XS binary extensions -- Storable
+t/re/charset.t	2776	NS:Regex encoding modifiers (`/a`, `/d`, `/l`, `/u`) -- the SEMANTICS stay ignored; #1715 fixed the inline group's compile (2776 -> 5552 rows produced)
+t/re/fold_grind_8.t	213	PARKED: no locale support -- `locales_enabled` is a harness stub answering 0 (cl/pcl-test.lisp), so the file skips itself; the blessed #1036 was STALE
+t/re/fold_grind_a.t	31	NS:DynaLoader / XS binary extensions -- fold_grind.pl's `do` dies "Can't locate loadable object for module Encode"; the blessed #1036 was STALE
+t/re/fold_grind_aa.t	103	NS:DynaLoader / XS binary extensions -- Encode, via fold_grind.pl; the blessed #1036 was STALE
+t/re/fold_grind_d.t	31	NS:DynaLoader / XS binary extensions -- Encode, via fold_grind.pl; the blessed #1036 was STALE
+t/re/fold_grind_l.t	113	PARKED: no locale support -- `locales_enabled` is a harness stub answering 0 (cl/pcl-test.lisp), so the file skips itself; the blessed #1036 was STALE
+t/re/fold_grind_u.t	213	NS:DynaLoader / XS binary extensions -- Encode, via fold_grind.pl; the blessed #1036 was STALE
 t/re/opt.t	656	XDIFF: not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimiz...
-t/re/overload.t	87	UNEXPLAINED
-t/re/pat.t	898	UNEXPLAINED
-t/re/pat_rt_report.t	4	UNEXPLAINED
-t/re/reg_email.t	13	UNEXPLAINED
+t/re/overload.t	87	PARKED: TIMEOUT, in the #326 quick-skip set ("HANG measured s404")
+t/re/pat.t	898	#1720 -- the file's own `Failed to match at pat.t line N` die
+t/re/pat_rt_report.t	4	#1721
+t/re/reg_email.t	13	#1716 -- `seek DATA,0,0` rewinds the DATA TEXT, where perl rewinds the source FILE
 t/re/reg_eval_scope.t	49	NS:Regex code blocks -- `(?{...})` is STRIPPED and the transpile refuses the file
 t/re/reg_fold.t	6891	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/re/reg_mesg.t	3348	UNEXPLAINED
-t/re/reg_nc_tie.t	5	UNEXPLAINED
+t/re/reg_mesg.t	3348	#1590 -- the missing perl-tests/t/test.pl helper `display_rx` (adding it tips re/pat_advanced.t over SBCL's 1 GB heap)
+t/re/reg_nc_tie.t	5	#1717 -- Tie::Hash::NamedCapture
 t/re/regex_sets.t	8	XDIFF: not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); per...
-t/re/regex_sets_compat.t	311	UNEXPLAINED
-t/re/regexp.t	1264	UNEXPLAINED
-t/re/regexp_noamp.t	1264	UNEXPLAINED
-t/re/regexp_nonull.t	2169	UNEXPLAINED
-t/re/regexp_normal.t	311	UNEXPLAINED
-t/re/regexp_notrie.t	1264	UNEXPLAINED
-t/re/regexp_qr.t	1264	UNEXPLAINED
-t/re/regexp_qr_embed.t	1264	UNEXPLAINED
-t/re/regexp_trielist.t	1264	UNEXPLAINED
-t/re/rxcode.t	1	UNEXPLAINED
-t/re/speed.t	4	UNEXPLAINED
-t/re/subst.t	9	UNEXPLAINED
-t/re/subst_wamp.t	281	UNEXPLAINED
+t/re/regex_sets_compat.t	140	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
+t/re/regexp.t	1264	#1714
+t/re/regexp_noamp.t	1264	#1714
+t/re/regexp_nonull.t	2169	NS:DynaLoader / XS binary extensions -- the file skips itself: XS::APItest not available
+t/re/regexp_normal.t	140	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
+t/re/regexp_notrie.t	1264	#1714
+t/re/regexp_qr.t	1264	#1714
+t/re/regexp_qr_embed.t	1264	#1714
+t/re/regexp_trielist.t	1264	#1714
+t/re/rxcode.t	1	NS:Regex code blocks: `(?{code})` and `(??{code})`
+t/re/speed.t	4	PARKED: TIMEOUT -- the engine's own speed corpus; see #1714 for the backtracking family
+t/re/subst.t	9	#1664 -- perl's constant.pm sets $constant::{_CAN_PCS} to a SCALAR REF (a constant sub)
+t/re/subst_wamp.t	281	#1664 -- via re/subst.t; under `do FILE` that abort costs the WHOLE file (no per-form recovery)
 t/re/uniprops01.t	39811	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops02.t	39961	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops03.t	39793	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)

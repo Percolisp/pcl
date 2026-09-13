@@ -1,4 +1,27 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s473t5e (2026-09-13, Opus) -- FIVE rows spliced by hand, `--jobs 1`, and the
+#   #366 serial re-run agrees on every one ("REAL MOVE (both runs agree)"):
+#     re/reg_posixcc.t        1544/7646 -> 1544/1016.  MINE: #1501 round 6's
+#       POSIX-class fix -- `[:^class:]` and `[:ascii:]` had no table arm and
+#       fell through untranslated, so a class and its complement both matched
+#       NOTHING and the file's 6,630 complement assertions all fired as EXTRA
+#       rows.  Those 6,630 left baselines/perl-suite-fails.tsv by EDIT; the
+#       1,016 that remain are #1713 (`\h \H \v \V` are literal h/H/v/V).
+#     re/charset.t            2776/2776 -> 5224/328.  MINE: #1715 -- the INLINE
+#       charset-modifier group `(?a:…)` was a cl-ppcre SYNTAX ERROR, not
+#       "ignored", so every one of this file's assertions failed to compile.
+#       +2,448 passing rows; the 328 that remain are the /a-vs-/u SEMANTICS,
+#       which IS the blessed not-supported entry.
+#     re/alpha_assertions.t   1784/74  -> 1951/78
+#     re/regexp_normal.t      1850/8   -> 2021/8
+#     re/regex_sets_compat.t  1600/258 -> 1755/274.  MINE: #1711 -- the pl2cl
+#       transpile server's STRICT `:encoding(utf-8)` layer substituted the
+#       `\x{...}` escape text for perl's non-characters and desynchronised the
+#       char-counted protocol, so `eval qq("\x{10FFFF}")` died `end of file on
+#       string-input-stream`.  All three `do './t/re/regexp.t'` drivers stopped
+#       at t/re/re_tests line 1859 and now stop at line 2030 (`\x{400000}`,
+#       the RULED #419 refusal): +513 rows produced between them.  Their new
+#       `aborted-forms:2` signature names that refusal.
 # s473t5b (2026-09-13, Opus) -- ONE row spliced by hand, `--jobs 1`, and the
 #   #366 serial re-run agrees ("parallel DIFF 52/86  serial DIFF 52/86  REAL
 #   MOVE"):
@@ -1769,11 +1792,11 @@ opbasic/cmp.t	13280	0	13280	0	OK	s470bv: #1221 (b25afbc; 12078/0 at a3d6d8e): 12
 opbasic/concat.t	254	0	249	5	DIFF		0
 opbasic/magic_phase.t	7	0	0	5	DIFF		0
 opbasic/qq.t	30	0	30	0	OK		0
-re/alpha_assertions.t	2279	0	1784	74	DIFF	aborted-forms:2: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (	0
+re/alpha_assertions.t	2279	0	1951	78	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
 re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 re/begin-once.t	2	0	1	1	DIFF		0
 re/bigfuzzy_not_utf8.t	1	0	1	0	OK	s470bv: #1115 (already 1/0 OK at a3d6d8e)	0
-re/charset.t	8328	0	2776	2776	DIFF	s470bv: #1115 (already at a3d6d8e): one MORE row is PRODUCED and fails; the passing count is unchanged	0
+re/charset.t	8328	0	5224	328	DIFF	
 re/fold_grind_8.t	213	0	0	0	DIFF		0
 re/fold_grind_T.t	0	0	0	0	NOTAP		0
 re/fold_grind_a.t	31	0	0	0	DIFF		0
@@ -1814,13 +1837,13 @@ re/reg_namedcapture.t	2	0	1	1	DIFF		0
 re/reg_nc_tie.t	37	0	14	18	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-STORE; aborted-forms:5: The function |Tie::Hash::NamedCapture|::pl-FETCH is undefined.	0
 re/reg_nocapture.t	25	0	14	11	DIFF		0
 re/reg_pmod.t	88	0	58	30	DIFF		0
-re/reg_posixcc.t	2560	0	1544	7646	DIFF		0
+re/reg_posixcc.t	2560	0	1544	1016	DIFF	
 re/regex_sets.t	96	0	4	84	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it	0
-re/regex_sets_compat.t	2167	2	1600	258	DIFF	aborted-forms:2: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (	0
+re/regex_sets_compat.t	2167	2	1755	274	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
 re/regexp.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_noamp.t	2169	0	796	109	TIMEOUT	timeout	0
 re/regexp_nonull.t	2167	2	0	0	DIFF		0
-re/regexp_normal.t	2169	0	1850	8	DIFF	aborted-forms:2: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (	0
+re/regexp_normal.t	2169	0	2021	8	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
 re/regexp_notrie.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_qr.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_qr_embed.t	2167	2	795	110	TIMEOUT	timeout	0
