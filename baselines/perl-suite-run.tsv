@@ -1,4 +1,35 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s484d (2026-09-14, Opus) -- NINE rows spliced by hand.  The round adds four
+#   missing perl-tests/t/test.pl helpers (#1652 run_multiple_progs, #1585
+#   _create_runperl, #1584 todo_skip, #1590's unlink_all/unlink_tempfiles/
+#   is_linux_container, the last re-applied on a per-file SBCL heap allowance),
+#   so these nine files produce rows they never produced: **+543 rows, +411 of
+#   them passing**, and all nine of their row-shortfall entries go to ZERO.
+#   Each measured `--jobs 1`, the #366 serial re-run agreeing on all nine, and
+#   the same files measured first on a `git archive f6b56feb` extraction:
+#     op/tie.t                0/0 -> 14/81.  #1652: the file's whole body is
+#       `run_multiple_progs('', \*DATA)` and that was a NO-OP, so it reported
+#       1..0; 95 rows now, perl's 95.  66 of the 81 failures are `tie`
+#       announcing "not implemented" (#155), residue #1768.
+#     op/fork.t               1/0 -> 20/8.   #1652; 28 rows = perl's 28.  Its
+#       `sig` is a FALSE alarm kept as measured: the text is a record
+#       program's own diagnostic (`kill 'INT', $cid` at its line 70) quoted
+#       inside a TAP comment, and the runner's signature scan does not skip
+#       comments.  The file ran to `1..28`.  Noted in #1770.
+#     op/runlevel.t           0/0 -> 8/16.   #1652; 24 rows = perl's 24.
+#     op/anonsub.t            1/5 -> 6/9.    #1652; 15 rows = perl's 15.
+#     io/data.t               0/0 -> 3/1.    #1652; 4 rows = perl's 4.
+#     io/fflush.t             4/0 -> 7/0, DIFF -> **OK**.  #1585.
+#     uni/overload.t        184/8 -> 184/9.  #1584: the `not ok N # TODO &
+#       SKIP` row is emitted as perl emits it, so 193 rows = perl's 193.
+#     op/stat.t               0/0 -> 94/17.  #1590; 111 rows = perl's 111,
+#       where the file produced NONE.  (#1590 predicted 44 rows behind #1589;
+#       #1589 is gone -- s473t5d's #1699 made a refused open answer FALSE.)
+#     run/runenv_hashseed.t   9/0 -> 274/4.  #1590; 278 rows = perl's 278.
+#       The 4 survivors are #1588 (hash order is not randomised).
+#   NOT spliced: re/pat_advanced.t reads 958/722 against its 951/729 row, and
+#   the `git archive f6b56feb` extraction measures 958/722 as well -- the
+#   pre-existing drift this file's own note above records, not mine.
 # s484c (2026-09-14, Opus) -- FOUR rows spliced by hand, `--jobs 1`, the #366
 #   serial re-run agreeing ("REAL MOVE (both runs agree)"), and the same file
 #   measured first on a `git archive f6b56feb` extraction (1544/1016 there):
@@ -1545,14 +1576,14 @@ io/bom.t	3	0	1	2	DIFF		0
 io/closepid.t	3	0	3	0	OK		0
 io/crlf.t	16421	0	16412	6	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
 io/crlf_through.t	942	0	942	0	OK		0
-io/data.t	4	0	0	0	DIFF		0
+io/data.t	4	0	3	1	DIFF		0
 io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented	0
 io/dup.t	29	0	10	0	DIFF	aborted-forms:1: Cannot dup to string 'N': Bad file descriptor at dup.t line N. 	0
 io/eintr.t	0	0	0	0	NOTAP		0
 io/eintr_print.t	0	0	0	0	NOTAP	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC	0
 io/errno.t	16	0	16	0	OK		0
 io/errnosig.t	1	0	0	1	DIFF		0
-io/fflush.t	7	0	4	0	DIFF	aborted-forms:1: Undefined subroutine &main::_create_runperl called	0
+io/fflush.t	7	0	7	0	OK		0
 io/fs.t	61	0	59	2	DIFF		0
 io/getcwd.t	0	0	0	0	NOTAP		0
 io/inplace.t	8	0	6	2	DIFF		0
@@ -1660,7 +1691,7 @@ op/64bitint.t	425	0	425	0	OK		0
 op/aassign.t	188	1	175	14	DIFF		0
 op/alarm.t	5	0	5	0	OK	reaped 12 orphan(s)	0
 op/anonconst.t	7	0	1	6	DIFF		0
-op/anonsub.t	14	1	1	5	DIFF		0
+op/anonsub.t	14	1	6	9	DIFF		0
 op/append.t	13	0	13	0	OK		0
 op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.	0
 op/arith2.t	9	0	9	0	OK		0
@@ -1721,7 +1752,7 @@ op/filetest_t.t	7	0	7	0	OK		0
 op/flip.t	14	0	12	2	DIFF		0
 op/for-many.t	71	0	63	8	DIFF		0
 op/for.t	148	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-op/fork.t	28	0	1	0	DIFF		0
+op/fork.t	28	0	20	8	DIFF	crash:sb-sys:interactive-interrupt	0
 op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
 op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
 op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
@@ -1812,7 +1843,7 @@ op/require_override.t	10	0	7	3	DIFF		0
 op/reset.t	45	0	26	19	DIFF		0
 op/reverse.t	25	0	25	0	OK		0
 op/rt119311.t	22	0	11	2	DIFF	aborted-forms:2: Can't find label test at rtN.t line N.	0
-op/runlevel.t	24	0	0	0	DIFF		0
+op/runlevel.t	24	0	8	16	DIFF		0
 op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0
 op/sigdispatch.t	29	0	24	3	DIFF	crash:sb-sys:interactive-interrupt: Interactive interrupt at #xNBNEANEBB.	0
@@ -1832,7 +1863,7 @@ op/srand.t	10	0	8	2	DIFF		0
 op/sselect.t	23	0	17	6	DIFF		0
 op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
-op/stat.t	108	3	0	0	DIFF	aborted-forms:1: Undefined subroutine &main::is_linux_container called	0
+op/stat.t	108	3	94	17	DIFF		0
 op/stat_errors.t	638	0	636	2	DIFF		0
 op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
@@ -1849,7 +1880,7 @@ op/sysio.t	45	0	45	0	OK		0
 op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/threads-dirh.t	0	0	0	1	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support threads ; reaped 4 orphan(s)	0
-op/tie.t	94	1	0	0	DIFF		0
+op/tie.t	94	1	14	81	DIFF		0
 op/tie_fetch_count.t	343	0	131	10	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N; s473 (Fable): 76/65 -> 129/12, PRE-EXISTING at fcf076f1 AND 637fc58e: the 55 FIXED rows are the -X $tied_glob / -X filetest rows (the s470bs filetest operand resolver, #1031/#1049/#1048/#1033/#1047); the 2 NEW rows ($tied.."a", "a"..$tied: FETCH called twice) = task #1430; s473h: 129/12 -> 131/10, the 2 rows are task #1430 FIXED (the segment fill classified the range and then called p-.. for the STRING arm, which classified AGAIN -- and classification unboxes, which for a tied scalar is a second FETCH); serial re-run agrees, 0 NEW ROW	0
 op/tiearray.t	75	0	26	29	DIFF	aborted-forms:1: Modification of non-creatable array value attempted, subscript -N PCL: tie: an ARRAY (class NegIndex); s473 (Fable): 40/35 -> 26/29, PRE-EXISTING at fcf076f1 AND 637fc58e (extractions, serial): the #1273 rule-12 fatal (s471a) fires on a TIED array whose class sets $NEGATIVE_INDICES -- task #1429 (20 rows never produced, 15 NEW fails at t/op/tiearray.t lines 273-284)	0
 op/tiehandle.t	67	0	12	32	DIFF		0
@@ -1969,7 +2000,7 @@ run/fresh_perl.t	91	0	60	31	XDIFF	s471a: #1273 FIXED -- the file produces TAP ag
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-run/runenv_hashseed.t	278	0	9	0	DIFF	aborted-forms:1: Undefined subroutine &main::unlink_tempfiles called	0
+run/runenv_hashseed.t	278	0	274	4	DIFF		0
 run/runenv_randseed.t	9	0	3	6	DIFF	s473 (Fable): 2/7 -> 3/6, OURS: task #1236 (s470bx) -- rand is auto-seeded from entropy on first use, so two runs differ; measured 2/7 on the 637fc58e extraction and 3/6 on d348dcea	0
 run/script.t	3	0	3	0	OK		0
 run/switch0.t	1	0	0	1	DIFF		0
@@ -2004,7 +2035,7 @@ uni/lex_utf8.t	16	0	6	10	DIFF		0
 uni/lower.t	11720	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/method.t	62	0	56	6	DIFF	s470bv: #1221 (b25afbc; 28/21 at a3d6d8e): a GAIN wearing a loss numbers -- utf8::decode was a stub, so the file ABORTED and 13 perl rows (39-51) were never produced.  They are produced now, four pass, the rest fail honestly.  No row went from a genuine ok to not ok.  Residual: task #1274 | s473t5f: #1736 in both its halves -- the non-ASCII and the CASELESS indirect-object invocant (perl reads `ニュー クラス` as a method call, and \p{Lo} has no uppercase to require).  31/30 -> 56/6, 26 blessed rows fixed, the abort gone, measured --jobs 1 with the #366 serial re-run agreeing.  The residue is NS:Error message text and format (5 rows) + #1664 (1)	0
 uni/opcroak.t	5	0	0	5	DIFF		0
-uni/overload.t	191	2	184	8	DIFF	aborted-forms:1: Undefined subroutine &main::todo_skip called	0
+uni/overload.t	191	2	184	9	DIFF		0
 uni/package.t	18	0	11	7	DIFF	s473t5f: #1741 (a non-ASCII global WRITTEN in a nested `package X` block was emitted UNQUALIFIED while every read of it was qualified).  8/10 -> 11/7, 3 blessed rows fixed, measured --jobs 1 with the #366 serial re-run agreeing.  The residue is NS:Live symbol-table hashes (6 rows) + NS:Error compatibility for invalid Perl input (1)	0
 uni/parser.t	58	0	32	26	DIFF	s470bv: #1221 (b25afbc; 28/30 at a3d6d8e)	0
 uni/readline.t	7	0	6	1	DIFF		0

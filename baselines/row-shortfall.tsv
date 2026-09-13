@@ -78,6 +78,16 @@
 #   touched -- t/op/attrs.t 14 (the attribute protocol, #322) and t/uni/gv.t 118
 #   (#1664, the typeglob model: the file aborts in the proxy-constant-subroutine
 #   block).  UNEXPLAINED, t/ half: 101 files / 63,028 rows -> 99 / 62,896.
+# s484d (2026-09-14): NINE rows DELETED -- the shortfall is fixed, measured.
+#   The four missing perl-tests/t/test.pl helpers (#1652 run_multiple_progs,
+#   #1585 _create_runperl, #1584 todo_skip, #1590's unlink_all/
+#   unlink_tempfiles/is_linux_container) were every one of these files' whole
+#   cause, and each now produces exactly as many rows as perl:
+#     t/op/tie.t 95 -> 0, t/run/runenv_hashseed.t 269 -> 0, t/op/stat.t
+#     111 -> 0, t/op/fork.t 27 -> 0, t/op/runlevel.t 24 -> 0, t/op/anonsub.t
+#     9 -> 0, t/io/data.t 4 -> 0, t/io/fflush.t 3 -> 0, t/uni/overload.t 1 -> 0
+#   = 543 rows.  The verdicts and the per-row attributions are in
+#   baselines/perl-suite-run.tsv and baselines/perl-suite-fails.tsv.
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -149,9 +159,7 @@ t/comp/parser.t	93	#1694 -- FIVE #138 drops in the file's `#line`-tracking secti
 t/comp/proto.t	100	#1682 -- was 155; s473t5c's #1681 (`\(&NAME)` is the sub slot) removed the `&main::1` abort and the file went 47/14 -> 78/38, 61 -> 116 of 216 rows.  The residue is a SECOND abort at `sub star (*&)`: `star FOO` with nothing declaring FOO is CALLED where perl reads the bareword
 t/comp/require.t	3	NS:Error message text and format -- perl plans 1750 rows and PCL 1747. Two of the three are `RT #24404` and `[perl #24482] require CORE::foo`, where `require $scalar` / `require CORE::lc "..."` must die "Can't locate threads in @INC"; PCL's message differs, the file takes its `else` branch, and THAT branch prints a TAP line with no test number (the test file's own bug), so the row is never produced
 t/io/crlf.t	3	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
-t/io/data.t	4	#1652 -- run_multiple_progs is a no-op in the PCL test.pl stub
 t/io/dup.t	19	#1703 -- closing a `>&=` (fdopen) handle closes the shared descriptor, so dup.t:65 takes STDOUT out and dup.t:68 fails EBADF, losing every row after it
-t/io/fflush.t	3	#1585 -- the PCL test.pl stub has no `_create_runperl`
 t/io/layers.t	55	#139 -- the whole file is `PerlIO::get_layers`.  Its ABORT is one layer in front: `PerlIO::get_layers(STDIN)` emits a BARE CL symbol and dies "The variable STDIN is unbound" (the #266/#452 bareword-in-an-argument-slot family); see #1710
 t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
 t/io/scalar_ungetc.t	17	#1704 -- IO::Handle::ungetc is an explicit croak in lib/IO.pm and the file needs a pushback STACK (eleven ungetc calls in a row)
@@ -177,7 +185,6 @@ t/mro/next_skip.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / ne
 t/mro/next_skip_utf8.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/pkg_gen.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 t/mro/pkg_gen_utf8.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
-t/op/anonsub.t	9	UNEXPLAINED
 t/op/attrhand.t	4	UNEXPLAINED
 t/op/attrs.t	14	NS:Attributes on a variable declaration -- the file aborts at `Undefined subroutine &attributes::_guess_stash called`; the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 t/op/bless.t	1	UNEXPLAINED
@@ -195,7 +202,6 @@ t/op/exec.t	16	UNEXPLAINED
 t/op/filehandle.t	2	UNEXPLAINED
 t/op/filetest.t	2	UNEXPLAINED
 t/op/for.t	149	#1580 -- PPI 1.291's LEXER fails on a DEREFERENCE as the foreach loop variable (`for ${*$f} (…)`, ppi-upstream-bugs.md §29), so the whole file is lost.  SIZED s473t5a: 148 of the 149 rows are BEFORE the offending line 767, the repair must be PRE-LEX (there is no document to mutate), and a lex-only repair is a SILENT WRONG -- see the task
-t/op/fork.t	27	UNEXPLAINED
 t/op/getppid.t	8	UNEXPLAINED
 t/op/gmagic.t	45	UNEXPLAINED
 t/op/goto.t	134	#1654 -- #1581 is FIXED (the `package Do_undef { my $count }` beside a file `my $count` no longer refuses), and the transpile now reaches a SECOND refusal, "Parser2 TODO: forward goto to a standalone label" for `label2:`; the file stays TRANSPILE-FAIL at 0 rows
@@ -228,13 +234,11 @@ t/op/readline.t	4	UNEXPLAINED
 t/op/ref.t	15	UNEXPLAINED
 t/op/require_37033.t	4	UNEXPLAINED
 t/op/rt119311.t	9	UNEXPLAINED
-t/op/runlevel.t	24	UNEXPLAINED
 t/op/sigdispatch.t	2	UNEXPLAINED
 t/op/signame_canonical.t	15	UNEXPLAINED
 t/op/signatures.t	35	XDIFF: not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error...
 t/op/sigsystem.t	4	XDIFF: not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the p...
 t/op/smartmatch.t	3	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl ...
-t/op/stat.t	111	#1590 -- the PCL test.pl stub has no `unlink_tempfiles`/`unlink_all` (and no `is_linux_container`); the undef-fn abort kills every remaining top-level form.  MEASURED s473t4: adding them gives this file 0 -> 44 rows, but the same ~26 extra lines in the module re/pat_advanced.t `require`s tip that file over SBCL's default 1 GB heap and cost it all 1680 of its rows, so the patch is REVERTED and waits on headroom
 t/op/state.t	74	not-supported.md §`given`/`when` — the file’s ONE `given` block (line 350).  The refusal is STATEMENT-level since s466 (#1037), so the file runs to it and its 88 rows before it pass; the tail of the enclosing TOP-LEVEL form goes with the die (ir-spec §9.3, sizing task #1055).  aborted-forms:1, and that one form IS the refusal.  The twin perl-tests/state.t row (78) carries the same cause.
 t/op/sub_lval.t	114	not-supported.md §Lvalue subroutines -- 9 of the file's aborted top-level forms are `LVSUB = VALUE` assignments ("Can't modify non-lvalue subroutine call in assignment"); the residue is one "Bug. Fell through. Missing case" on `sub x : lvalue {…} continue {…}` and one "Cannot dereference non-reference: undef".  Was 116: s473t5a's #1650 (an all-digit ARRAY name is now forward-declared) un-aborted the two forms that read `@119797`, measured 31/64 -> 33/64 on the base extraction vs this tree
 t/op/substr.t	46	UNEXPLAINED
@@ -242,7 +246,6 @@ t/op/svflags.t	16	UNEXPLAINED
 t/op/svleak.t	156	NS:Regex code blocks -- `(?{...})` is STRIPPED and the transpile refuses the file
 t/op/switch.t	195	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL re...
 t/op/symbolcache.t	1	UNEXPLAINED
-t/op/tie.t	95	#1652 -- `run_multiple_progs('', \*DATA)` is the file's whole body and the PCL test.pl stub's `run_multiple_progs` is a NO-OP, so the file reports `1..0`.  FIVE companion files / 159 rows share the cause (op/tie.t 95, op/fork.t 27, op/runlevel.t 24, op/anonsub.t 9, io/data.t 4); blocked on #1590's SBCL heap headroom, since the helper means ~40 more lines in perl-tests/t/test.pl
 t/op/tie_fetch_count.t	202	not-supported.md §`given`/`when` / smart match (`~~`) — the file’s ONE infix `~~` statement.  Statement-level since s466 (#1037): 141 of perl’s 343 rows now run, and the 202 missing ones are the tail of the refused statement’s enclosing top-level form (#1055).  aborted-forms:1, and that one form IS the refusal.
 t/op/tiearray.t	20	#1429 (s473, Fable): the #1273 rule-12 fatal fires on a TIED array whose class sets $NEGATIVE_INDICES (`$n[-2] = q(a)`, t/op/tiearray.t ~268) and aborts the form: the STORE + DELETE/EXISTS block, "n freed" and the NegFetchsize block are never produced.  PRE-EXISTING at fcf076f1 (extraction); companion op/tiearray.t 40/35 -> 26/29.
 t/op/tiehandle.t	23	UNEXPLAINED
@@ -297,7 +300,6 @@ t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/run/locale.t	44	#1705 -- the file skip_alls because `require POSIX; POSIX->import("locale_h")` fails; lib/POSIX.pm exists but has no `locale_h` export tag
 t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
-t/run/runenv_hashseed.t	269	#1590 -- the PCL test.pl stub has no `unlink_tempfiles`/`unlink_all` (and no `is_linux_container`); the undef-fn abort kills every remaining top-level form.  MEASURED s473t4: adding them gives this file 9 -> 278 rows, all of perl's, but the same ~26 extra lines in the module re/pat_advanced.t `require`s tip that file over SBCL's default 1 GB heap and cost it all 1680 of its rows, so the patch is REVERTED and waits on headroom
 t/run/switchF.t	1	#1702
 t/run/switcha.t	1	#1702
 t/run/switches.t	11	#1709 + #1702 -- was 35.  s473t5d's #1700 (-i sets $^I) and #1699 (a refused open answers FALSE) removed BOTH aborts and the file now runs to its end at 28/112; the 11 that remain are its `Need threads and full perl` skip block and the *at-functions* skip
@@ -310,7 +312,6 @@ t/uni/gv.t	118	#1664 -- the typeglob model: the file aborts in the PROXY CONSTAN
 t/uni/labels.t	2	#1494 + #1747 -- the `redo L\N{…}BEL` eval is dropped (so the LABEL block runs once, not twice) and the final `goto` into a nested block loses its form
 t/uni/lower.t	11720	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/method.t	0	s473t5f #1736 FIXED (was 1): the indirect-object abort is gone, so the file now emits all 62 of perl's rows.  The `*{"main::DATA"}{IO}` row is PRODUCED and fails honestly -- it is the blessed fail row at t/uni/method.t line 216, cause #1664
-t/uni/overload.t	1	#1584 -- the PCL test.pl stub has no `todo_skip` (its `last TODO` jumps to a label in the CALLER's frame)
 t/uni/title.t	5936	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/upper.t	6228	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/variables.t	42387	#1750 + NS:Code points above U+10FFFF (perl's extended UTF-8).  THREE measured facts, s473t5f: (1) the file makes 66,880 assertions, almost all of them a STRING EVAL (`eval "my \$<chr> = q<test>"` for every code point 0x100..0xffff), and PCL compiles each one -- at 90 s it produces 29,182 rows, at 900 s 59,916, and at 900 s TWICE it produces EXACTLY 59,916, i.e. it stops making progress at a deterministic ~60k-eval wall while still burning CPU (#1750 half b; an isolated 3,000-eval loop of the same shape runs at ~270 evals/s, and the code point it stops at, U+E4ED, evaluates in 0 s on its own -- so the wall is cumulative, not per-item).  NO timeouts.tsv allowance: it could not promise completion, and 15 min per run would buy 30,734 more rows of ONE already-named fact.  (2) ~58,700 of the rows it DOES produce fail on that one fact: PCL does not enforce perl's identifier-start rule, so `eval "my \$<non-XIDS char>"` does not die "Unrecognized character \x{...}" (#1750 half a) -- and the DOMINANT layer, found by the same probe: `\p{_Perl_IDStart}` itself answers NO for EVERY character in PCL (cl-ppcre has no such property, #1036 property half), so the loop always takes its ELSE branch and then asserts a diagnostic PCL does not produce.  (3) its ONE aborted form is the ruled refusal for `"\x{11_1111}"` -- a code point above SBCL's char-code-limit -- which costs the enclosing 9-row loop.
