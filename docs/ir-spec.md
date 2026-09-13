@@ -2598,6 +2598,33 @@ all — a read-only file handle, an in-memory `<` handle, a dup of a read-only
 descriptor — answers false with `$!` = EBADF without attempting the write, and
 goes on READING normally.
 
+**An OPEN the OS refuses is a FALSE `open`, never an exception** (task #1699,
+probed 5.40.3 over nine shapes).  This is the same sentence one step earlier,
+and a host whose `open` signals (SBCL's does for everything but ENOENT) must
+convert at the open too: a `>` into a mode-0500 directory, a `<` of a
+mode-000 file, a `>` onto a DIRECTORY, and a path leading through a
+non-directory are all `undef` with `$!` set, and the program runs on.  (A `<`
+of a directory SUCCEEDS in perl; it is the READ that fails.)  What must NOT be
+converted is a host error that is not an OS refusal — that is a translator bug
+and has to stay loud (rule 12).
+
+**The open MODE SET is closed, and `+>>` is in it** (task #1696).  The base
+modes are `<` `>` `>>` `+<` `+>` `+>>` `-|` `|-` and the eight dup spellings
+(`<&` `>&` `+<&` `+>&` and their `=` forms); a mode is matched LONGEST FIRST,
+or `+>>` reads as `+>` with a `>` left on the filename.  `+>>` is read/APPEND:
+the file is not truncated, the handle opens positioned at the end, reads see
+the existing contents after a seek, and every write goes to the END whatever
+the position says (perl's O_APPEND) — which also holds for `>>` and `+>>` on
+the ANONYMOUS TEMPORARY (`open $fh, MODE, undef`), where a host that merely
+seeks to the end instead of setting the flag diverges the moment the program
+seeks back.
+
+**The LIST form of a pipe open takes no shell** (task #1697):
+`open FH, "-|", PROG, ARG…` / `"|-"` execs PROG directly, so a shell
+metacharacter in an argument survives literally, exactly as `exec LIST` with
+more than one element does.  Every OTHER mode takes exactly one target and a
+second one is perl's FATAL `More than one argument to open`.
+
 ### 7.5a What a handle IS, and where it LIVES (normative, s473f)
 
 **A scalar that holds a filehandle holds a GLOB REF.**  In the emitted CL that
@@ -3428,7 +3455,7 @@ function's docstring states its Perl contract. The families:
 | array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""`.  `p-sort` also has a *sugar* form with no comparator, `(%p-sort-classic MODE ARGS…)` — §5.4; expand it back to `p-sort` and nothing is lost.  `(%p-push1 @a X)` is the same sugar for `push`: exactly `(p-push @a X)` for a single SCALAR X on a non-escaping `my @a` (§2.3a), value = the new length; rewrite it back to `p-push` and nothing is lost |
 | regex | `p-=~ p-!~` with `(p-regex :pat "…" :flags "…" :tier T)`, `(p-subst :pat … :rep … :flags … :tier T)`, `(p-tr :from … :to … :flags …)` — the STRUCTURED literal (task #1211; the pre-s470bq spelling was one string with perl delimiters inside, `(p-regex "/pat/flags")`) | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split`.  **A FAILED `m//` answers by context and by NOTHING else (tasks #962/#459):** scalar/void gives perl's defined-false `""` (never `undef`, never `0` — the `$&`-family rule of #416), and LIST context gives **the EMPTY LIST**, whatever the pattern — a capture-less miss is not a one-element false value.  The empty list is a zero-length VECTOR, never raw `nil`: only `%p-flatten-list` reads raw `nil` as "no elements", while `p-array-fill` keeps it as an array HOLE and `p-flatten-args` spreads it as ONE argument, so `f(/nomatch/, "d")` handed the callee two arguments where perl hands one and every later argument shifted.  (The runtime builds that vector with `%p-empty-list`, which is INTERNAL and is never emitted — measured s470bm over 111 + 592 files, so a translator sees the value and never the form) |
 | compiled regex (qr) | `(pcl::p-qr :pat "…" :flags "…" :tier T)` literal · `(pcl::p-regex-from-parts :pat FORM :flags "…" :tier :dynamic)` interpolated | A **Regexp object**, not a string: it carries its own flags and identity. It stringifies as perl's `(?^flags:SOURCE)` wrapper — from the SOURCE text as written, never from any backend-rewritten form, and `/xx` prints both x's (a one-x wrapper silently demotes an interpolated pattern to `/x`). Two rules a translator must implement, both about the wrapper (s322, task #181): **(1)** a pattern that is exactly ONE interpolated qr *is* that qr — `qr/$re/` and `/$re/` keep `$re`'s own flags and **ignore the outer modifiers** (`qr/$re/i` on `qr/abc/` does not match `"ABC"`), so the check must happen where the operand is still the object; **(2)** a qr used as PART of a larger pattern embeds its wrapper verbatim (`qr/x$re/` → `(?^:x(?^:abcdef))`), which is what keeps the inner flags scoped. Consequently a variable holding a qr must NOT be frozen to its string form by any raw-slot/unboxing optimization (`write-object` in `Pl/VarAnnotator.pm`): the stringification is lossy and is re-parsed by the next regex that interpolates it |
-| I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup |
+| I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup.  A LIST-form pipe open `(p-open FH "-|" PROG ARG…)` execs PROG with NO shell (#1697); the mode set is closed and matched longest-first, `+>>` included (#1696); an open the OS refuses is FALSE with `$!`, never a signal (#1699) — §7.5 |
 | command capture | `p-backtick` (`` `CMD` ``, every `qx` delimiter, `` <<`TAG` `` and the NAMED `readpipe EXPR` — ONE runtime function, four surface syntaxes) | **wantarray-sensitive, exactly like `p-readline`** (task #731): scalar/void yields the whole captured stdout as one string, LIST context yields it SPLIT INTO `$/` RECORDS, each keeping its separator — so empty output is the empty list in list context and `""` in scalar.  The split uses `%p-read-record`, the same `$/` reader `p-readline` uses, so slurp (`$/ = undef`), paragraph mode (`$/ = ""`) and a custom separator cannot drift apart between the two.  A package that displaced the builtin with `use subs "readpipe"` is called instead, for every one of the four syntaxes (#703/#734) |
 | introspection | `p-ref p-bless p-caller p-can p-isa` | §7; `p-caller` returns package but file/line are stubs (divergence) |
 | context & frames | `p-list-ctx p-scalar-ctx p-void-ctx p-caller-ctx` (§4) · `p-sort-cmp` (§5.4) | **names, not operations**: each expands to exactly the `let`/`lambda` shape it replaced, so a translator implements the expansion and nothing else. They mark where the IR says "this runs in context C" / "this is a comparator frame" |

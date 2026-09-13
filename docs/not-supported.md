@@ -501,7 +501,18 @@ UTF-8 byte sequences).  PCL strings are SBCL character vectors with no
 byte-view; the pragma is a no-op, so such characters format as their code
 points.  Affects `op/ver.t` tests 21/23/25 and `op/chr.t` tests 10-13 (both
 the `use bytes` block; chr.t asks for `chr(-1)` to be the single byte `\xFF`
-under the pragma, where PCL keeps the un-pragma'd `\x{FFFD}`).
+under the pragma, where PCL keeps the un-pragma'd `\x{FFFD}`), and two rows of
+`t/io/utf8.t` (its `{ use bytes; $y = length($a) }` blocks at lines 82 and 100).
+
+**`bytes::length` — the pragma's CALLABLE half — DOES work** (task #1698, s473t5d).
+`bytes::length($s)` is `utf8::is_utf8($s) ? <utf8 octet count> : length($s)` in
+perl, and PCL's stand-in — "a character above 255 has no octet form, so measure
+as UTF-8; otherwise the string IS its octets" — agrees with perl on every
+naturally-occurring string (thirteen shapes probed, plus a number and undef).
+The one divergence is the same missing flag this section is about: a string
+ARTIFICIALLY upgraded with `utf8::upgrade` (`"\xa3\xff"` → perl 4, PCL 2).
+`bytes::substr`/`chr`/`ord`/`index`/`rindex` are absent and occur nowhere in
+perl's `t/`, `perl-tests/`, `lib/` or `cpan-tests/`.
 
 ### Code points above U+10FFFF (perl's extended UTF-8)
 

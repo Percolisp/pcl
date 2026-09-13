@@ -271,7 +271,7 @@ ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-ope
 | `p-getc` | macro | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-install-data-handle` | function | `(handle text)` | insensitive | none | none | no | no | no | none |
 | `p-lock` | function | `(x)` | — | — | — | — | — | — | — |
-| `p-open` | macro | `(fh mode &optional filename)` | — | — | — | — | — | — | — |
+| `p-open` | macro | `(fh mode &optional filename &rest more)` | — | — | — | — | — | — | — |
 | `p-pipe` | macro | `(read-fh write-fh)` | — | — | — | — | — | — | — |
 | `p-print` | function | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-printf` | function | `(&rest args)` | — | — | — | — | — | — | — |
