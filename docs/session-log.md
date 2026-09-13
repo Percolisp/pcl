@@ -2,6 +2,135 @@
 
 Append new entries at the top. One section per session.
 
+## Session s484a (Opus agent, 2026-09-13) — three fillers from the day's two rounds: the wrong-kind deref fatal (#1628), the eval `package` spellings (#1587), and the generated `CORE::` prototype table (#1586)
+
+**#1628 — one predicate was asking the wrong question.**  `$$hrr{k}` through a
+ref-to-ref leaked an SBCL `gethash3` type error naming a P-BOX into user-visible
+output; `$$arr[0]` answered undef with **no error at all**; `@$arr` handed the
+referent box back for the caller to read as a one-element list.  All three were
+`%p-scalar-referent-p`, which required the referent SCALAR to hold a PLAIN value
+— so a `\$hr` (a scalar holding a hashref) was not counted as a scalar ref at
+all.  perl asks only about the referent's TYPE: an SV holding an RV is still an
+SV.  Dropping that conjunct gave the fatal to all fourteen container-deref sites
+at once.  The narrower question is real and has exactly one asker — reftype's
+SCALAR-vs-REF, which s483b had fixed the same day — so it became
+`%p-plain-scalar-referent-p`, documented as the broad predicate's strict subset;
+widening the shared one without splitting would have re-broken #1619 within
+hours.  Two more arms in the family: `exists`/`delete` take the fatal from their
+ONE resolver (`%p-designator-hash`/`-array`) rather than from four callers, and
+`%p-wrong-referent-p` now counts a compiled REGEXP for every kind.  A TYPEGLOB
+still does not, and that is not an oversight — a glob VALUE in container
+position IS perl's glob slot, so only a glob REF is the fatal and the
+discrimination needs the BOX (filed as **#1638** with a 17-row table).  38 of 40
+probe shapes identical to perl 5.40.3; the two that are not are #1638's.  Bench
+A/B: arrhash 0.0804 → 0.0788 s, slices 0.1113 → 0.1084, arrhash-k 0.0592 →
+0.0599 (best-of-5, quiet box) — nothing outside noise.  Guard
+`Pl/t/ref-to-ref-01.t` 39 → 45, rows 40–42 + 44 failing on a base extraction and
+43 (symref) + 45 (reftype) passing on both by design.  Writing the guard found
+**#1639**: a scalar declared inside `\(my $hr = \%h)` loses the whole-aggregate
+fatal on its own, pre-existing on both trees — which is why the rows spell their
+fixtures in two statements, and the file says so.
+
+**#1587 — neither exclusion was a second switch.**  The #226 eval collapse
+refused `package Foo 1.2;` and `package Foo { 1 }` as "multiple package
+sections", i.e. five of perl's seven spellings, and op/packagev.t's whole method
+(109 rows, every one an `eval "package withversion 1.2"` asserting `$@` eq '')
+sat behind it with op/inccode-tie.t and uni/opcroak.t.  A `package NAME VERSION;`
+is ONE switch that also sets $VERSION, so the exclusion goes and the version
+rides on the region as `version_pkg`/`version_stmt` — the cell must be spelled
+for X, since the region's own package is the eval's root.  The emission became
+ONE reading, `_pkg_version_forms`, called by the file-mode assembler and the
+eval-mode one at the same phase position; a second copy would have been a second
+chance to disagree about the phase, which is the one thing s437 had to fix
+(`eval 'package V 1.5; BEGIN { … } 1'` now reads 1.5 from the BEGIN).  The BLOCK
+form needed **no new mechanism at all**: PPI's segments are [leading | X's block
+| back to the caller's package], and `_lower_block`'s `if ($blk)` arm — the arm a
+nested `package X { … }` already takes in file mode — emits enter / body /
+restore / remainder with exactly perl's scoping, so the collapse hands the
+Package statement itself back into one region segment.  Two blocks are five
+segments and stay refused.  Its TAIL VALUE was wrong on both paths and is the
+same bug in file mode: the restore call's value is the package NAME and it was
+the last form, so `eval 'package X { 42 }'` answered "main" and `sub f { package
+T { 42 } }` returned "main" too; behind a `prog1`, four file-mode shapes move to
+perl's answer while corpus-diff stays IDENTICAL, because no corpus file has the
+shape.  One predicate `_seg_is_pkg_switch` now answers "is this segment a
+statement-form switch" for all four askers, because a blockform segment carries
+`pkg_stmt` too while not being a switch.  The `versioned nested package
+statement` refusal STAYS for a genuinely nested versioned switch — nothing there
+would set $VERSION — and exempts exactly the statement whose section emits it,
+derived from the same field.  19-row acceptance probe vs perl; filed **#1640**
+(a v-string version stores $VERSION as the literal TEXT, so `%vd` prints the
+source characters — pre-existing in FILE mode) and **#1641** (`eval 'package
+Foo;'` answers the package name where perl answers undef).
+
+**#1586 — the table is generated, not typed.**  Every `prototype("CORE::…")`
+read undef and `prototype("CORE::nosuchthing")` did not die, so op/cproto.t's 183
+diverging rows were one cluster with one cause.  perl's prototype strings are
+LANGUAGE data, so `%pcl-core-prototypes` lives in the runtime — but they are
+~180 strings perl alone is the authority for, and a hand copy is a copy that
+drifts silently, so `tools/gen-core-protos.pl` asks the live perl for every one
+and `--check` re-asks and diffs as a guard row.  The VALUES and the LIST are two
+different problems and the tool says so: the values are always a live
+measurement, while the list cannot be enumerated from a running perl (`%CORE::`
+is empty, keyword subs being autovivified on demand), so the candidates are
+perl's own `t/op/cproto.t` `__DATA__` NAMES unioned with `known_no_of_params` —
+only the names, never that file's expectations, which is what keeps the guard
+row non-circular.  253 keywords, 182 with a prototype, and all three of perl's
+answers including the one a blanket rule-12 die would have got wrong:
+`prototype("CORE::")` — the empty name — is undef, not a fatal.  The filler's
+own bar was to MEASURE the disagreement with `Pl::PExpr::Config`'s
+`known_no_of_params` rather than unify: 151 keywords carry both facts, 88 are
+comparable, **0 disagree**, so there is nothing to file.  Its first reading said
+12 and all twelve were the tool reading a `\[%@]` reference-group as a slurpy
+`@` — a `\[…]` group is ONE argument.  One lesson for any future generated Lisp:
+the block must be generated in the repo formatter's own indentation (a LOOP
+clause's argument aligns under the clause word), or `--check` reports a phantom
+DRIFT the first time the file is touched.
+
+**And the COMPANION LEG found a fourth thing, which is why it is run.**  After
+member 2, op/cproto.t went 71/183 → **254/0 OK** and op/packagev.t 198/109 →
+**228/79**, but op/inccode-tie.t and uni/opcroak.t did not move at all — both
+still aborted on the same refusal.  Their shape is a BLOCK-form package inside
+a BARE BLOCK, which the T-A1 flattening renders as FIVE segments where the
+top-level spelling is three (measured with a throwaway `PCL_SEG_TRACE` dump,
+since deleted).  So arm B is keyed on the STRUCTURE rather than a segment
+count — a count-keyed arm would have had to be written twice for one rule:
+exactly one package-affecting segment and it is a blockform, no statement-form
+switch anywhere, every other segment the eval's root.  The s353 whitelists then
+apply for their own reason, and only there: flattening ERASES the bare block's
+scope, so the literal-only TAIL rule is kept for exactly that case while a
+top-level block form may be followed by anything.  uni/opcroak.t's eval now
+runs (its five rows fail on their own subject, UTF-8 message text, which had
+never been measured because nothing got that far); op/inccode-tie.t's
+`push @INC, …` tail keeps the refusal, filed as **#1642** with the reproducer.
+
+**Bars, on the rebased tree (`8c8fa4c0`, generation v2-1340, the three artifacts
+regenerated — stamp-only diffs, so the emission is byte-identical).**
+`tools/ir-host-leak.pl` byte-identical to base (31 symbols / 111 files);
+`tools/corpus-diff.pl 8c8fa4c0` emission IDENTICAL across 111 files with silent
+drops 5 unchanged, plus 6 shapes identical; `tools/emission-ab.pl --shapes`
+27 lib files SAME / 0 DIFF / 0 RCDIFF; `tools/gate-set-scan.pl` over BOTH
+populations 638 files IDENTICAL (twice — before and after the generalization);
+`tools/ir-conform --jobs 2` 321 pass / 0 fail / 24 known / 0 stale; the FULL
+sweep GATE clean with **TOTAL passing 18675 (+0)**, 0 new / 0 fixed, drops 5 =
+census and CAUSES 0 of 479 without one (twice); the FULL gate **237 files /
+8129 rows** with only the 13 standing pclxs xs rows failing.  Baselines spliced
+row by row, the six files measured on a base extraction FIRST so that "ours" is
+a measurement: `perl-suite-fails.tsv` −213 = the ROW DIFF exactly (0 NEW),
+three `perl-suite-run.tsv` rows each with its cause, and `row-shortfall.tsv`'s
+inccode-tie row keeping its 89 while its cause moves to #1642.
+
+**Two traps paid for in wall time, written down so the next session does not.**
+The FULL GATE must be given **stdin from /dev/null**: `Pl/t/handle-place-01.t`
+runs a perl oracle containing `STDIN->eof`, and in a backgrounded shell whose
+stdin neither has data nor EOFs that child blocks forever (measured: 370 s, the
+log frozen after the last finished file, prove sitting on one child).  And
+`until ! pgrep -f "<pattern>"` **matches its own command line** — four waiter
+loops deadlocked on each other and had to be killed by pid; that is the trap
+project memory already names, met from the other side.  The gate also earned
+its keep: it caught `docs/ir-op-inventory.tsv` going stale on a DOCSTRING
+change, which no other instrument sees.
+
 ## Session s483c (Opus agent, 2026-09-13) — the arrow's invocant includes the cast run (#1620), and the B-str freeze's use set (#1621 + #1622)
 
 **#1620 — eight arrow arms, two readings.**  `$$r->who` died "Can't call method

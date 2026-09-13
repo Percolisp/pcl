@@ -495,12 +495,27 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   therefore **not cached** on the holding box — the referent is a different box
   and writing to it cannot invalidate a cache there. (`box-nv` refuses to cache
   address-based NVs for the same reason.)
-- A reference **to a plain scalar is not a container**: `@$sref`, `%$sref`,
-  `$sref->{k}`, `$sref->[0]` are perl's fatal `Not a(n) HASH/ARRAY reference`.
+- A reference **whose REFERENT IS A SCALAR is not a container**: `@$sref`,
+  `%$sref`, `$sref->{k}`, `$sref->[0]`, `$$sref{k}`, `$$sref[0]`, the write
+  side of each, and `exists`/`delete` through any of them are perl's fatal
+  `Not a(n) HASH/ARRAY reference`. **What the referent scalar HOLDS is not the
+  question** (normative, s484a / #1628): a `\$r` where `$r` holds a hashref is
+  still a reference to a SCALAR, because perl reports SvTYPE of the referent
+  and an SV holding an RV is still an SV. `%p-scalar-referent-p` is that one
+  rule; the strictly narrower question — does the referent hold a plain value,
+  i.e. is `reftype` SCALAR rather than REF (#1619) — is
+  `%p-plain-scalar-referent-p`, its subset, and `reftype` is its only asker.
   What PCL still tolerates is one *representation* layer (a box left over after
-  one unwrap) — see `%p-scalar-referent-p`; that leniency exists only because
-  the parser drops the outer level of `$$refref->{k}` (task #211), and goes
-  away when that is fixed.
+  one unwrap, whose referent is the container itself); that leniency exists
+  only because the parser drops the outer level of `$$refref->{k}` (task #211),
+  and goes away when that is fixed.
+- A **compiled regexp** (`qr//`) is a referent of no container kind: `@$qr`,
+  `%$qr`, `$$qr[0]`, `$$qr{k}` and `&$qr` are all perl's fatal (normative,
+  s484a / #1628; `%p-wrong-referent-p`). A **typeglob** is not in that
+  predicate on purpose — a glob VALUE in container position IS perl's glob
+  slot (`@{*main::gl}` is `@main::gl`), so only a glob REF is the fatal, and
+  that discrimination needs the holding box's `is-ref` rather than the unboxed
+  value (task #1638, not implemented).
 - **The invocant of a postfix `->` is ONE scalar value, whatever the group
   around it looks like** (normative, s443h/#516 + s448p/#527). A
   parenthesised base — `($r//0)->[i]`, `(1,2,$r)->[1]`, `(1,2,$h)->{k}`,
@@ -1411,7 +1426,7 @@ both ends (an unknown key is an error at macroexpansion):
 | `:writes-args` | `t` / `nil` | does the sub write through `@_` into its caller's variables (#189, §5.2)?  **Both directions**: the scan answers 1 on any doubt, so `nil` is a real proof that the arguments may be passed by value |
 | `:string-eval` | `t` | the body contains a string `eval`.  True-only, and conservative: `->eval`, `eval =>` and a hash key spelled `eval` over-fire harmlessly |
 | `:captures` | a list of cell names | the promoted package cells this hoisted sub closes over, recorded by the promotion that PROVED the capture (§2b.3's `:captured` / `:spanning` families) |
-| `:prototype` | the text (`"$$"`) | an OLD-STYLE prototype.  A signature is not a prototype and prints nothing |
+| `:prototype` | the text (`"$$"`) | an OLD-STYLE prototype.  A signature is not a prototype and prints nothing.  This is the SUB's prototype; `prototype("CORE::NAME")` is a different question, answered by the runtime's generated `%pcl-core-prototypes` table (perl's own strings, `tools/gen-core-protos.pl`) — a keyword's string, NIL for the ~70 control-flow words, and the fatal `Can't find an opnumber for "NAME"` for a non-keyword, with the empty name `CORE::` undef rather than fatal (normative, s484a / #1586) |
 | `:needs` | a list of class keywords | the OBLIGATION classes this sub's BODY exercises, in §10b's own class names (`:nonlocal_exit.die`, `:dynamic_scope.local`, `:io`, `:regex.native` …) — task #1214.  **The one key here that is a COMPLETE answer rather than a proof-if-present**, so it is always printed and `()` is a real fact: nothing in this sub can throw, so a target needs no frame; nothing localizes, so it needs no save/restore stack (`docs/plan-speed-and-ir-s470.md` §B.3).  It also lets a backend compile a program PARTIALLY — every sub whose classes it implements — and refuse the rest with §9.3b's shape.  Computed by the same walk `pl2cl --manifest` uses, scoped to the body, so the two answers cannot drift |
 
 `()` is common and means exactly "nothing proven": 155 of the perl-tests
@@ -2882,7 +2897,9 @@ that with two groups of top-level forms, in this order:
    section's package preamble and `(in-package …)`, its declarations, a
    `package NAME VERSION` section's `$VERSION` assignment (perl sets it as
    the `package` statement is COMPILED, so it precedes every `BEGIN`, `use`
-   and sub of the section — s437), its
+   and sub of the section — s437; **inside a string eval the same assignment
+   goes at the head of the eval's compile group and is spelled for the REGION
+   package, not for the eval's root** — s484a / #1587), its
    captured `use`/`require`/`BEGIN` declarations, and its sub definitions,
    scheduled blocks and **`use overload` registrations** interleaved by SOURCE
    POSITION (so a `BEGIN` sees exactly the subs written above it and none
