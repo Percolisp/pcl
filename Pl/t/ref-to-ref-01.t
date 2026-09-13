@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 39;
+plan tests => 45;
 
 sub run_cl {
     my ($code) = @_;
@@ -308,3 +308,77 @@ test_cl('the ARRAY fatal does not reach an ARRAY ref or the HASH twin',
   . 'my $s = "xy"; my $x = $s->[0];'
   . 'print +(defined $x ? "def" : "undef"), "\n";',
     "59\nhash-died\nundef\n");
+
+# NB: the declarations are spelled in TWO statements, never `\(my $hr = \%h)`
+#    — that shape loses the whole-aggregate fatal on its own (task #1639,
+#    pre-existing and measured on the base tree), so writing it here would make
+#    a row assert the bug instead of the rule.
+# ── #1628: element access through a reference of the WRONG KIND is perl's
+#    fatal, and "wrong kind" includes a ref-to-ref.  The referent rule already
+#    told a `\$x` from the representation layer of a `\%h`; what it also asked
+#    was what the referent scalar HOLDS, so a `\$hr` (a scalar holding a
+#    hashref) answered "not a scalar ref" and `$$hrr{k}` reached SBCL's GETHASH
+#    (a host error naming a P-BOX), `$$arr[0]` answered undef with NO error at
+#    all, and `@$arr` handed the referent box back as a one-element list.
+#    perl asks only the referent's TYPE: an SV holding an RV is still an SV.
+test_cl('element access through a ref-to-ref dies, read and write, both kinds',
+    'my %h = (k=>"v"); my $hr = \%h; my $hrr = \$hr;'
+  . 'my @a = (10,11);  my $ar = \@a; my $arr = \$ar;'
+  . 'my $o = "";'
+  . 'for my $t (sub { $$hrr{k} }, sub { $$arr[0] }, sub { $$hrr{k} = 1 },'
+  . '           sub { $$arr[0] = 1 }, sub { $arr->[0] }, sub { $hrr->{k} }) {'
+  . '  eval { my $v = "".($t->() // "") };'
+  . '  $o .= ($@ =~ /^Not a(?:n)? (?:HASH|ARRAY) reference/ ? "d" : "n");'
+  . '} print $o, "\n";'
+  . 'print $$hr{k}, $$ar[0], "\n";',
+    "dddddd\nv10\n");
+
+test_cl('exists / delete through a ref-to-ref die like perl, not quietly',
+    'my %h = (k=>"v"); my $hr = \%h; my $hrr = \$hr;'
+  . 'my @a = (10,11);  my $ar = \@a; my $arr = \$ar;'
+  . 'my $o = "";'
+  . 'for my $t (sub { exists $$hrr{k} }, sub { delete $$hrr{k} },'
+  . '           sub { exists $$arr[0] }, sub { delete $$arr[0] }) {'
+  . '  eval { my $v = "".($t->() // "") };'
+  . '  $o .= ($@ =~ /^Not a(?:n)? (?:HASH|ARRAY) reference/ ? "d" : "n");'
+  . '} print $o, "\n";'
+  . 'print +(exists $$hr{k} ? 1 : 0), (exists $$ar[1] ? 1 : 0), "\n";',
+    "dddd\n11\n");
+
+test_cl('the whole-aggregate cast through a ref-to-ref is the same fatal',
+    'my %h = (k=>"v"); my $hr = \%h; my $hrr = \$hr;'
+  . 'my @a = (10,11);  my $ar = \@a; my $arr = \$ar;'
+  . 'my $o = "";'
+  . 'for my $t (sub { scalar @$arr }, sub { scalar keys %$hrr },'
+  . '           sub { scalar @$hr },  sub { scalar keys %$ar }) {'
+  . '  eval { my $v = "".$t->() };'
+  . '  $o .= ($@ =~ /^Not a(?:n)? (?:HASH|ARRAY) reference/ ? "d" : "n");'
+  . '} print $o, "\n";'
+  . 'print scalar(@$ar), scalar(keys %$hr), "\n";',
+    "dddd\n21\n");
+
+test_cl('a SYMBOLIC ref — a plain string in the slot — keeps working',
+    'no strict "refs"; our @ga = (1,2); our %gh = (z=>9);'
+  . 'my $an = "main::ga"; my $hn = "main::gh";'
+  . 'print $$an[1], $$hn{z}, "\n";'
+  . '$$an[2] = 3; $$hn{q} = 5;'
+  . 'print $ga[2], $gh{q}, (exists $$hn{z} ? 1 : 0), "\n";',
+    "29\n351\n");
+
+test_cl('a qr// ref is a container of no kind at all',
+    'my $qr = qr/x/; my $o = "";'
+  . 'for my $t (sub { $$qr[0] }, sub { $$qr{k} }, sub { $qr->[0] },'
+  . '           sub { scalar @$qr }, sub { scalar keys %$qr }) {'
+  . '  eval { my $v = "".($t->() // "") };'
+  . '  $o .= ($@ =~ /^Not a(?:n)? (?:HASH|ARRAY) reference/ ? "d" : "n");'
+  . '} print $o, "\n";'
+  . 'print +("axb" =~ $qr ? "m" : "no"), " ", ref($qr), "\n";',
+    "ddddd\nm Regexp\n");
+
+test_cl('reftype still separates SCALAR from REF (the #1619 answer is intact)',
+    'use Scalar::Util qw(reftype);'
+  . 'my $x = 7; my $h = {}; my $sr = \$x; my $rr = \$h;'
+  . 'print join(" ", reftype($sr), reftype($rr), reftype(\$sr)), "\n";'
+  . 'my $bs = bless \(my $p = 7), "S"; my $br = bless \(my $q = {}), "S";'
+  . 'print reftype($bs), " ", reftype($br), "\n";',
+    "SCALAR REF REF\nSCALAR REF\n");

@@ -2133,6 +2133,16 @@
    Callers put this AFTER their fast path — it is a diagnosis of a failure
    already reached, never a test a correct access has to pay for.
 
+   A COMPILED REGEXP counts for every kind (task #1628): `qr//` is a REGEXP
+   ref and perl dereferences it as nothing — `@$qr` / `$$qr[0]` / `%$qr` /
+   `$$qr{k}` / `&$qr` are all `Not a … reference` (probed 5.40.3).  PCL
+   answered the stringified pattern as a one-element list, zero keys, undef,
+   and an SBCL type error naming a P-REGEX-MATCH.  A TYPEGLOB still does not
+   count, and that is not an oversight: a glob VALUE in container position IS
+   perl's glob slot (`@{*main::gl}` is `@main::gl`), so only a glob REF is the
+   fatal and telling them apart needs the BOX, not the unboxed value — see
+   task #1638.
+
    A REMAINING P-BOX IS NOT A MISMATCH, and that is the subtle one (s317).
    PCL's `\\%h` is a DOUBLE box — box(box(hash-table)) — so `unbox` peeling one
    layer legitimately leaves a box that the caller unboxes again:
@@ -2145,10 +2155,11 @@
    UNAMBIGUOUS container types below count as mismatches."
   (let ((hash (or (hash-table-p v) (%p-hash-marker-p v)))   ; %ENV/%INC: #736
         (ary  (and (vectorp v) (not (stringp v))))
-        (code (functionp v)))
-    (cond ((string= kind "HASH")  (or ary  code))
-          ((string= kind "ARRAY") (or hash code))
-          ((string= kind "CODE")  (or hash ary))
+        (code (functionp v))
+        (rx   (p-regex-match-p v)))                         ; qr//: #1628
+    (cond ((string= kind "HASH")  (or ary  code rx))
+          ((string= kind "ARRAY") (or hash code rx))
+          ((string= kind "CODE")  (or hash ary  rx))
           ;; SCALAR is deliberately absent — a ${...} site cannot decide from
           ;; the UNBOXED value at all (see %p-non-scalar-referent-p, which asks
           ;; the referent rule instead; #1592 measured what the unboxed sniff
@@ -12303,15 +12314,30 @@ which is one of #1140's escape spellings (probed)."
    answered NO and `delete $$p{k}` crashed SBCL's GETHASH on a string.  One
    resolver for every element primitive.  Everything else — hash tables, the
    %ENV/%INC markers, a wrong referent — comes back unchanged, so the caller
-   keeps its own dispatch."
+   keeps its own dispatch.
+
+   A SCALAR REFERENT IS THIS RESOLVER'S FATAL, not the caller's (task #1628):
+   `exists $$hrr{k}` / `delete $$hrr{k}` through a ref-to-ref left a p-box
+   here, which %p-wrong-referent-p cannot diagnose (it sees only the unboxed
+   value), so exists answered a quiet NO and delete crashed SBCL's GETHASH
+   naming a P-BOX.  perl dies `Not a HASH reference` for both.  One check
+   here covers all four element primitives; the p-box-p guard is the whole
+   cost on the warm path, where H is the hash table itself."
   (let ((h (unbox hash)))
-    (if (stringp h) (p-ensure-hashref hash) h)))
+    (cond
+      ((stringp h) (p-ensure-hashref hash))
+      ((and (p-box-p h) (%p-scalar-referent-p hash)) (%p-not-a-ref "HASH"))
+      (t h))))
 
 (defun %p-designator-array (arr)
   "The vector behind a Perl array DESIGNATOR — the array-side twin of
-   %p-designator-hash (`exists $$p[0]` / `delete $$p[0]` under no strict refs)."
+   %p-designator-hash (`exists $$p[0]` / `delete $$p[0]` under no strict refs,
+   and its scalar-referent fatal — #1628)."
   (let ((a (unbox arr)))
-    (if (stringp a) (p-ensure-arrayref arr) a)))
+    (cond
+      ((stringp a) (p-ensure-arrayref arr))
+      ((and (p-box-p a) (%p-scalar-referent-p arr)) (%p-not-a-ref "ARRAY"))
+      (t a))))
 
 (defun p-exists (hash key)
   "Perl exists function — 1 or the DEFINED empty string, never undef (#1173).
@@ -23157,13 +23183,33 @@ buffer's fill-pointer; everything else falls back to file-length."
           inner))))
 
 (defun %p-scalar-referent-p (val)
-  "True when VAL is a reference to a plain SCALAR — `\\$x` — and therefore
-   cannot be dereferenced as a container.  This is the distinction
-   %p-wrong-referent-p documents that it cannot make (#154): after one unbox a
-   `\\$x` and the representation layer of a `\\%h` reached through a ref-to-ref
-   both leave a p-box behind, so counting either as a mismatch broke the other.
-   The referent rule tells them apart — `\\$x`'s referent is a box holding a
-   plain scalar; a representation layer's holds the container."
+  "True when VAL is a reference whose REFERENT IS A SCALAR — `\\$x`, and equally
+   `\\$r` where $r itself holds a reference — and therefore cannot be
+   dereferenced as a container.  This is the distinction %p-wrong-referent-p
+   documents that it cannot make (#154): after one unbox a `\\$x` and the
+   representation layer of a `\\%h` both leave a p-box behind, so counting
+   either as a mismatch broke the other.  The referent rule tells them apart —
+   a scalar ref's referent is a BOX, a `\\%h`'s referent is the container
+   itself.
+
+   WHAT THE REFERENT SCALAR HOLDS IS NOT THE QUESTION (task #1628).  This
+   predicate used to require the referent to hold a PLAIN value, which made a
+   ref-to-ref (`\\$hr` where $hr holds a `\\%h`) answer NIL — so `$$hrr{k}`
+   reached SBCL's GETHASH and died naming a P-BOX, `$$arr[0]` answered undef
+   with no error at all, and `@$arr` returned the referent box for the caller
+   to read as a one-element list.  perl asks only about the referent's TYPE: an
+   SV holding an RV is still an SV, so `Not a HASH reference` / `Not an ARRAY
+   reference` (probed 5.40.3, read and write, element and whole-aggregate).
+   That narrower question — reftype's SCALAR-vs-REF — is
+   %p-plain-scalar-referent-p below, which is this predicate's strict subset."
+  (p-box-p (%p-ref-referent val)))
+
+(defun %p-plain-scalar-referent-p (val)
+  "The STRICT SUBSET of %p-scalar-referent-p: VAL's referent is a scalar that
+   holds a PLAIN value, not another reference.  Only `reftype` asks this — perl
+   reports SvTYPE of the referent, so an SV holding an RV is REF and only a
+   plain one is SCALAR (#1619).  Every wrong-kind-deref site asks the broader
+   question instead: both shapes are fatal in container position (#1628)."
   (let ((r (%p-ref-referent val)))
     (and (p-box-p r)
          (not (%p-referent-shaped-p (p-box-value r))))))
@@ -23496,8 +23542,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                   ((functionp inner) "CODE")
                   ;; SCALAR vs REF by the same referent rule as above: a
                   ;; blessed `\$x` is SCALAR only when $x holds a plain
-                  ;; scalar (`bless \$h, "S"` with a ref in $h is REF).
-                  ((p-box-p inner) (if (%p-scalar-referent-p val)
+                  ;; scalar (`bless \$h, "S"` with a ref in $h is REF).  This
+                  ;; is the ONE site that wants the PLAIN variant — every
+                  ;; wrong-kind-deref site wants the broad one (#1628).
+                  ((p-box-p inner) (if (%p-plain-scalar-referent-p val)
                                        "SCALAR"
                                        "REF"))
                   ((p-typeglob-p inner) "GLOB")
