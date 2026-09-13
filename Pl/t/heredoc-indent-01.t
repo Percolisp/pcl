@@ -43,7 +43,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 15;
 
 sub write_pl {
     my ($code) = @_;
@@ -121,6 +121,18 @@ is($w->{lead2}, " some data\n", "oracle: perl strips 2 (NOT 3) for <<~' EOF' ove
 for my $s (@shapes) {
     my $label = $s->[0];
     is($g->{$label}, $w->{$label}, "<<~ indentation, $label: PCL matches perl");
+}
+
+# THE TERMINATOR AS THE FILE'S LAST LINE, with no newline after it: PPI takes
+# a different branch there (it runs off the end and pops the terminator back
+# out of the body), and t/op/heredoc.t has EIGHT rows in exactly this shape —
+# every `$script_end = ""` twin of the rows above.  It needs its own program,
+# because nothing can follow it in the file.
+{
+    my $prog = "print <<~' EOF'\n  some data\n   EOF";
+    my ($g2, $w2) = (run_cl($prog), run_perl($prog));
+    is($w2, "some data\n", "oracle: perl strips 2 with the terminator at EOF");
+    is($g2, $w2, "<<~ indentation, terminator at EOF with no newline: PCL matches perl");
 }
 
 # The INVERSE side of the repair, at the PPI level and with no SBCL: after it

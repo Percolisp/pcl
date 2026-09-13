@@ -74,6 +74,10 @@
 #   found, bisected and closed from this file's row alone.
 # s473 2026-09-06 (Fable): perl-tests/tiearray.t 20 ADDED by hand (task #1429) after the companion
 #   --all --quick; nothing re-blessed (a --bless-shortfall drops this header, measured and reverted).
+# s473t5b 2026-09-13 (Opus, #1501 round 3): TWO causes written by hand, no count
+#   touched -- t/op/attrs.t 14 (the attribute protocol, #322) and t/uni/gv.t 118
+#   (#1664, the typeglob model: the file aborts in the proxy-constant-subroutine
+#   block).  UNEXPLAINED, t/ half: 101 files / 63,028 rows -> 99 / 62,896.
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -178,7 +182,7 @@ t/mro/pkg_gen.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cach
 t/mro/pkg_gen_utf8.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
 t/op/anonsub.t	9	UNEXPLAINED
 t/op/attrhand.t	4	UNEXPLAINED
-t/op/attrs.t	14	UNEXPLAINED
+t/op/attrs.t	14	NS:Attributes on a variable declaration -- the file aborts at `Undefined subroutine &attributes::_guess_stash called`; the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 t/op/bless.t	1	UNEXPLAINED
 t/op/bop.t	13	UNEXPLAINED
 t/op/coreamp.t	723	#1577 -- MIXED, 15 aborted forms, MEASURED s473t4: six are the `&CORE::NAME` / `&__FILE__` / `&__LINE__` / `&__PACKAGE__` family (the file's subject), two are the ruled given/when refusal, three a runtime arity error, four other undefined subs.
@@ -306,7 +310,7 @@ t/run/switchp.t	2	UNEXPLAINED
 t/run/switchx.t	5	UNEXPLAINED
 t/uni/attrs.t	1	UNEXPLAINED
 t/uni/fold.t	18072	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/uni/gv.t	118	UNEXPLAINED
+t/uni/gv.t	118	#1664 -- the typeglob model: the file aborts in the PROXY CONSTANT SUBROUTINE block (a stash slot holding a string or a SCALAR ref IS a sub in perl), and every row after it is behind that abort
 t/uni/labels.t	2	UNEXPLAINED
 t/uni/lower.t	11720	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/method.t	1	UNEXPLAINED

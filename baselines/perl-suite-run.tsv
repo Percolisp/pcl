@@ -1,4 +1,15 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s473t5b (2026-09-13, Opus) -- ONE row spliced by hand, `--jobs 1`, and the
+#   #366 serial re-run agrees ("parallel DIFF 52/86  serial DIFF 52/86  REAL
+#   MOVE"):
+#     op/heredoc.t  32/106 -> 52/86, and its `undef-fn:main::pl-EOF` signature
+#       is GONE.  MINE: the PPI §30 indented-here-doc indentation repair
+#       (`Pl::Parser::_repair_indented_heredocs`, task #1501 round 3) makes the
+#       20 `Indented here-doc: <<~' EOF'` / `<<~''` rows pass -- the file's own
+#       ROW DIFF reads 20 FIXED / 0 NEW, and those 20 rows left
+#       baselines/perl-suite-fails.tsv by EDIT.  The remaining 86 are #1666
+#       (a here-doc in an s///e replacement) and the invalid-input
+#       diagnostics, each carrying its cause now.
 # s473a (2026-09-07, Opus) -- ONE row spliced by hand, `--jobs 1`, and the #366
 #   serial re-run agrees ("parallel XDIFF 0/0  serial XDIFF 0/0  REAL MOVE"):
 #     op/numconvert.t  DIFF -> XDIFF, counts UNCHANGED (1446/0 vs 0/0).  This is
@@ -1614,7 +1625,7 @@ op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
 op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).	0
 op/hashwarn.t	20	0	5	15	DIFF		0
-op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF	0
+op/heredoc.t	138	0	52	86	DIFF		0
 op/hexfp.t	125	0	111	14	DIFF		0
 op/inc.t	93	0	62	13	DIFF		0
 op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0

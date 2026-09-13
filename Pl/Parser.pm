@@ -1279,10 +1279,16 @@ sub _merge_punct_array_symbols {
 #   * `_damaged` is set on both paths that give up mid-file and at EOF, but
 #     only the mid-file one keeps the terminator line's own newline;
 #   * without `_damaged` PPI matched and stripped, so the over-count must be
-#     GIVEN BACK.
-# The one case left alone is a damaged here-doc whose terminator is the last
-# line of the file with no newline: there PPI's own match test decided, and
-# nothing here can tell which way (§30 records it as the residue).
+#     GIVEN BACK;
+#   * and in the remaining path — damaged because the terminator was the FILE'S
+#     LAST LINE with no newline — PPI's own match test decided, and its
+#     condition is recoverable: it stripped only if EVERY body line began with
+#     the over-long indent, so a body line that does NOT begin with it refutes
+#     the stripped reading.  (The converse is exact too: in the not-stripped
+#     case some line must fail that test, which is why PPI gave up.)  The one
+#     shape this cannot separate is a body indented at least as far as the
+#     over-count at EOF, where the answer stays what it is today — §30's
+#     residue.
 sub _repair_indented_heredocs {
   my ($doc) = @_;
   for my $t (@{ $doc->find('PPI::Token::HereDoc') || [] }) {
@@ -1300,8 +1306,9 @@ sub _repair_indented_heredocs {
     my $unstripped = $ppi_ind =~ /\n/                   ? 1
                    : !$t->{_damaged}                    ? 0
                    : $tline =~ /\n\z/                   ? 1
-                   :                                      undef;
-    next unless defined $unstripped;
+                   : (grep { $_ ne "\n" && !/^\Q$ppi_ind\E/ }
+                          @{ $t->{_heredoc} })          ? 1
+                   :                                      0;
     for my $line (@{ $t->{_heredoc} }) {
       if ($unstripped)      { $line =~ s/^\Q$true\E// }
       elsif ($line ne "\n") { $line = $extra . $line }

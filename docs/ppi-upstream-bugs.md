@@ -1865,11 +1865,15 @@ concatenated are the original line — and then either strips it from the body
 the repair, all 13 shapes round-trip byte-exact through `serialize`, which is
 the check that says the repair is complete.  Guard `Pl/t/heredoc-indent-01.t`.
 
-**Residue, deliberately left alone:** a `_damaged` here-doc whose terminator
-is the LAST LINE OF THE FILE with no newline.  There PPI's own match test
-decided whether the body was stripped and nothing in the token says which way;
-the one measured shape (`<<~''` with the terminator unterminated) is already
-right.
+**Residue, one shape:** when the terminator is the FILE'S LAST LINE with no
+newline PPI takes a third path (it runs off the end and pops the terminator
+back out of the body), and there its own match test decided whether the body
+was stripped.  That test's condition is recoverable — it stripped only if
+every body line began with the over-long indent — so the repair separates the
+two except when the body is indented at least as far as the over-count, where
+the answer stays what it is today.  t/op/heredoc.t has EIGHT rows in the
+recoverable half (every `$script_end = ""` twin), which is why the file moves
+20 rows and not 12.
 
 ---
 
