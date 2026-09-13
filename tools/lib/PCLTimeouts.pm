@@ -27,14 +27,24 @@ package PCLTimeouts;
 #
 # A missing file is an EMPTY registry, and every caller reads "no entry" as
 # "no information" — never as zero.
+#
+# THE SHAPE IS NOT ABOUT SECONDS (task #1590).  "one line per file, a NUMBER,
+# and a CAUSE naming the measurement it was sized from" is the shape of a
+# per-file RESOURCE allowance, and time is only the first resource a runner had
+# to hand out: baselines/perl-suite-heap.tsv says how much SBCL dynamic space
+# one file needs (MB), for exactly the #176 reason the timeout registry exists
+# — a file that dies for want of a resource contributes NO rows, so the need
+# belongs written down with its cause instead of discovered again.  read_
+# allowances() is that one parse; read_timeouts() is it with the number named
+# `secs`, which is what this module's existing callers already say.
 
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(read_timeouts timeout_for);
+our @EXPORT_OK = qw(read_timeouts timeout_for read_allowances);
 
-# path -> { rel => { secs => N, cause => TEXT } }
-sub read_timeouts {
+# path -> { rel => { n => N, cause => TEXT } } — the ONE parse.
+sub read_allowances {
     my ($path) = @_;
     my %reg;
     return \%reg unless defined $path && -e $path;
@@ -42,12 +52,20 @@ sub read_timeouts {
     while (my $line = <$fh>) {
         chomp $line;
         next if $line =~ /^\s*(?:#|$)/;
-        my ($rel, $secs, $cause) = split /\t/, $line, 3;
-        next unless defined $secs && $secs =~ /^\d+$/;
-        $reg{$rel} = { secs => $secs, cause => (defined $cause ? $cause : '') };
+        my ($rel, $n, $cause) = split /\t/, $line, 3;
+        next unless defined $n && $n =~ /^\d+$/;
+        $reg{$rel} = { n => $n, cause => (defined $cause ? $cause : '') };
     }
     close $fh;
     return \%reg;
+}
+
+# path -> { rel => { secs => N, cause => TEXT } }
+sub read_timeouts {
+    my ($path) = @_;
+    my $reg = read_allowances($path);
+    return { map { $_ => { secs => $reg->{$_}{n}, cause => $reg->{$_}{cause} } }
+                 keys %$reg };
 }
 
 # The effective per-file timeout: the MAX of the registered allowance and the

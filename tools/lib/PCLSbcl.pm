@@ -45,6 +45,25 @@ our @EXPORT_OK = qw(sbcl_prefix sbcl_prefix_str cached_core core_cache_dir clear
 # about all four runners at once, which is the point of it living here.
 our $STACK_MB = 512;
 
+# Dynamic space (the GC'd heap), MB.  undef = EMIT NO FLAG, i.e. SBCL's own
+# default (1 GB on this build) — which is what every runner spawned before this
+# existed, so an unset knob leaves all five command lines byte-identical
+# (PCL_SHOW_SBCL=1 is the proof).
+#
+# WHY IT IS A PER-CALL OVERRIDE AND NOT A RAISED DEFAULT (task #1590).  One
+# companion file, re/pat_advanced.t, compiles to a 296 KB emission and sits at
+# 97.9 % of the 1 GB default while SB-REGALLOC packs one enormous top-level
+# form; ~26 extra lines in a module it `require`s tipped it into "Heap
+# exhausted" and cost the file all 1680 of its rows.  But the gate runs EIGHT
+# SBCLs at once on a 12 GB box, so raising the default for everyone spends the
+# machine on the 99.8 % of files that need nothing.  The need is per FILE, so
+# the allowance is per file: baselines/perl-suite-heap.tsv (rel<TAB>MB<TAB>cause,
+# read through PCLTimeouts like the timeout registry) names the file and the
+# runner passes `dynamic_space_mb` for it alone.  PCL_DYNAMIC_SPACE_MB is the
+# same knob from the environment, so a CHILD PCL (tools/pclperl-for-tests)
+# inherits its parent file's allowance without a second plumbing path.
+our $DYNAMIC_SPACE_MB;
+
 # The arguments between `sbcl` and the caller's own --load/--eval, as a LIST.
 #   core mode:    --core <core> --control-stack-size N --noinform --non-interactive
 #   source mode:  --control-stack-size N --noinform --non-interactive --load <runtime>
@@ -56,6 +75,12 @@ our $STACK_MB = 512;
 #               than the runtime (the gate's contract — a hand-set stale core
 #               can never mask a runtime edit).  An explicit `core` wins.
 #   stack_mb => override $STACK_MB for this call
+#   dynamic_space_mb => --dynamic-space-size for this call (MB; see
+#               $DYNAMIC_SPACE_MB above).  Falls back to $DYNAMIC_SPACE_MB and
+#               then $ENV{PCL_DYNAMIC_SPACE_MB}; anything that is not a
+#               positive integer emits NO flag, because a malformed allowance
+#               must not silently become a different heap size than the one
+#               written down.
 #
 # RESOLUTION ORDER for the core (first hit wins):
 #   1. an explicit `core`                      (the caller knows best)
@@ -78,7 +103,14 @@ our $STACK_MB = 512;
 # any development runner spawns (verify with PCL_SHOW_SBCL=1).
 sub sbcl_prefix {
     my (%o) = @_;
+    # --dynamic-space-size is a C RUNTIME option like --core and
+    # --control-stack-size, so it goes in that run of flags, never after
+    # --noinform/--non-interactive.
+    my $heap = $o{dynamic_space_mb} // $DYNAMIC_SPACE_MB
+                                    // $ENV{PCL_DYNAMIC_SPACE_MB};
+    undef $heap unless defined $heap && $heap =~ /^[1-9][0-9]*$/;
     my @base = ('--control-stack-size', $o{stack_mb} // $STACK_MB,
+                (defined $heap ? ('--dynamic-space-size', $heap) : ()),
                 '--noinform', '--non-interactive');
     my $core = $o{core};
     if ($o{env_core} && !(defined $core && length $core)) {

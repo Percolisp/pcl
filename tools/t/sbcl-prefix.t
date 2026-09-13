@@ -11,7 +11,7 @@
 # the harness.  Run it directly:  prove tools/t/sbcl-prefix.t
 use strict;
 use warnings;
-use Test::More tests => 27;
+use Test::More tests => 39;
 use File::Temp qw(tempdir);
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
@@ -54,6 +54,45 @@ is_deeply([ sbcl_prefix(core => '', runtime => $rt) ],
 my @small = sbcl_prefix(runtime => $rt, stack_mb => 64);
 is($small[1], 64, 'stack_mb overrides the default');
 is($PCLSbcl::STACK_MB, 512, 'the default the four runners share is 512 MB (#324)');
+
+# --- dynamic space (the heap), task #1590 ----------------------------------
+# The DEFAULT must emit NO flag: that is what makes every runner's command
+# line byte-identical to the ones built before this knob existed, so a per-file
+# allowance in baselines/perl-suite-heap.tsv cannot change the other 527 files'
+# measurement (or the gate's eight parallel SBCLs).
+ok( !grep({ $_ eq '--dynamic-space-size' } sbcl_prefix(runtime => $rt)),
+    'no allowance: no --dynamic-space-size, i.e. SBCL\'s own default' );
+is($PCLSbcl::DYNAMIC_SPACE_MB, undef, 'and the package default is "unset", not a number');
+
+is_deeply([ sbcl_prefix(runtime => $rt, dynamic_space_mb => 2048) ],
+          ['--control-stack-size', 512, '--dynamic-space-size', 2048,
+           '--noinform', '--non-interactive', '--load', $rt],
+          'dynamic_space_mb sits with the other C RUNTIME options, before --noinform');
+
+is_deeply([ sbcl_prefix(core => $core, runtime => $rt, dynamic_space_mb => 2048) ],
+          ['--core', $core, '--control-stack-size', 512,
+           '--dynamic-space-size', 2048, '--noinform', '--non-interactive'],
+          'core mode: --core still FIRST, the heap flag after the stack flag');
+
+{
+  # The environment spelling exists so a CHILD PCL (tools/pclperl-for-tests)
+  # inherits its parent file's allowance without a second plumbing path.
+  local $ENV{PCL_DYNAMIC_SPACE_MB} = 3072;
+  my @p = sbcl_prefix(runtime => $rt);
+  is_deeply([@p[0..3]], ['--control-stack-size', 512, '--dynamic-space-size', 3072],
+            'PCL_DYNAMIC_SPACE_MB is honoured');
+  my @q = sbcl_prefix(runtime => $rt, dynamic_space_mb => 2048);
+  is($q[3], 2048, 'an explicit dynamic_space_mb wins over the environment');
+}
+
+# A malformed allowance emits NO flag rather than a heap size nobody wrote
+# down: `2048MB`, `0` and a word are all "no information", never a silent
+# different number (this is the case a looser check would break).
+for my $bad ('2048MB', '0', 'lots', '', '-512', '1.5') {
+  local $ENV{PCL_DYNAMIC_SPACE_MB} = $bad;
+  ok( !grep({ $_ eq '--dynamic-space-size' } sbcl_prefix(runtime => $rt)),
+      "a malformed PCL_DYNAMIC_SPACE_MB ('$bad') emits no flag" );
+}
 
 # --- env_core: the gate contract -------------------------------------------
 {

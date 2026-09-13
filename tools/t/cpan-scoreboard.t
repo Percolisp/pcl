@@ -26,7 +26,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 25;
+use Test::More tests => 29;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -52,6 +52,17 @@ my $tmp  = tempdir(CLEANUP => 1);
   is(PCLTimeouts::timeout_for($reg, 'fixture-dist/rows.t', 500), 500, 'a bigger --timeout still wins (max, not override)');
   is(PCLTimeouts::timeout_for($reg, 'fixture-dist/other.t', 120), 120, 'an unregistered file gets the default');
   is_deeply(PCLTimeouts::read_timeouts("$tmp/no-such-file"), {}, 'a missing registry is empty, not fatal');
+
+  # The same file shape carries any per-file NUMERIC allowance with a cause —
+  # baselines/perl-suite-heap.tsv says MB of SBCL dynamic space (task #1590) —
+  # so read_allowances is the ONE parse and read_timeouts is it with the number
+  # named `secs`.  Both readings of the same fixture must agree.
+  my $gen = PCLTimeouts::read_allowances($reg_file);
+  is_deeply([sort keys %$gen], ['fixture-dist/rows.t'], 'read_allowances: same rows, same skipping');
+  is($gen->{'fixture-dist/rows.t'}{n}, 200, 'read_allowances names the number `n` (MB, seconds, ...)');
+  is($gen->{'fixture-dist/rows.t'}{cause}, 'fixture allowance', 'read_allowances keeps the cause');
+  is($reg->{'fixture-dist/rows.t'}{secs}, $gen->{'fixture-dist/rows.t'}{n},
+     'read_timeouts is read_allowances with the number named `secs`');
 }
 
 # ── the TAP reader: the counts are the historical ones ─────────────────────

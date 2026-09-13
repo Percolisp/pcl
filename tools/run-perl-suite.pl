@@ -301,6 +301,21 @@ sub timeout_for {
   return PCLTimeouts::timeout_for(\%file_timeout, $rel, $timeout);
 }
 
+# Per-file SBCL DYNAMIC-SPACE (heap) ALLOWANCE registry: rel -> { n (MB), cause }
+# — the same shape, the same reader, the same reason (task #1590).  One
+# companion file compiles a 296 KB emission and sat at 95 % of SBCL's 1 GB
+# default, so any growth in a module it `require`s cost it all 1680 of its rows
+# to "Heap exhausted"; the need is per FILE, so the allowance is.  An
+# unregistered file's command line is byte-identical to one built before this
+# existed (PCL_SHOW_SBCL=1 is the check), which is the whole point of the flag
+# being emitted only for a registered file.
+my $heap_tsv = "$root/baselines/perl-suite-heap.tsv";
+my %file_heap = %{ PCLTimeouts::read_allowances($heap_tsv) };
+sub heap_for {
+  my ($rel) = @_;
+  return $file_heap{$rel} ? $file_heap{$rel}{n} : undef;
+}
+
 # ── I1: the ROW-level fail baseline (task #993, plan-test-audit §3) ──────────
 # baselines/perl-suite-fails.tsv — the companion's answer to the sweep's
 # baselines/fail-baseline.tsv.  Until this existed the 273 DIFF files were blessed
@@ -606,10 +621,21 @@ END { local $?; unlink $core if $core && $$ == $MAIN_PID }
 # and a PCL side per worker, so `--jobs 8` reserves 8x this much stack at once
 # — see the measurement in task #324 before lowering it.
 my $stack_mb = $ENV{PCL_SUITE_STACK_MB} // $PCLSbcl::STACK_MB;
-my $sbcl = $core
-  ? PCLSbcl::sbcl_prefix_str(core => $core, stack_mb => $stack_mb)
-  : PCLSbcl::sbcl_prefix_str(runtime => $runtime, stack_mb => $stack_mb)
-      . " --load \Q$testlib\E";
+# One command line per HEAP ALLOWANCE, memoised: the unregistered spelling (no
+# --dynamic-space-size, built exactly as before this registry existed) plus one
+# per registered file.  Built here and not per file so the string work happens
+# once, and asked for BY FILE so the allowance is the registry's, never a
+# runner's opinion (task #1590).
+my %SBCL_CMD;
+sub sbcl_cmd_for {
+  my ($rel) = @_;
+  my $mb = heap_for($rel) // 0;
+  return $SBCL_CMD{$mb} if exists $SBCL_CMD{$mb};
+  my @o = (stack_mb => $stack_mb, $mb ? (dynamic_space_mb => $mb) : ());
+  return $SBCL_CMD{$mb} = $core
+    ? PCLSbcl::sbcl_prefix_str(core => $core, @o)
+    : PCLSbcl::sbcl_prefix_str(runtime => $runtime, @o) . " --load \Q$testlib\E";
+}
 
 my $tmpdir = tempdir(CLEANUP => 0);
 END { local $?; system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir && $$ == $MAIN_PID }
@@ -695,6 +721,14 @@ for my $rel (sort grep { $file_timeout{$_} && !$not_run{$_} } @files) {
   printf $JOURNAL "# timeout-allowance\t%s\t%d\t%s\n", $rel, timeout_for($rel), $e->{cause};
   printf STDERR "timeout allowance: %-24s %4ds  (%s)\n", $rel, timeout_for($rel), $e->{cause};
 }
+# ...and the HEAP allowances, for the same reason: a file running on a
+# different --dynamic-space-size than the other 527 must say so per run, or the
+# registry becomes a hidden property of one measurement (task #1590).
+for my $rel (sort grep { $file_heap{$_} && !$not_run{$_} } @files) {
+  my $e = $file_heap{$rel};
+  printf $JOURNAL "# heap-allowance\t%s\t%d\t%s\n", $rel, $e->{n}, $e->{cause};
+  printf STDERR "heap allowance:    %-24s %4dMB (%s)\n", $rel, $e->{n}, $e->{cause};
+}
 print $JOURNAL "# queued\t$_\n" for @files;
 
 
@@ -753,8 +787,15 @@ sub run_one {
     # PCLPERL: fresh_perl_*/runperl children in the PCL stub test.pl run
     # under PCL (tools/pclperl-for-tests) instead of the real perl; the
     # fresh core doubles as the children's startup image.
+    # A registered HEAP ALLOWANCE is the FILE's, not just its top SBCL's: the
+    # children this file spawns are PCL too, and they compile the same kind of
+    # program.  PCL_DYNAMIC_SPACE_MB is the same knob PCLSbcl reads from the
+    # environment, so the child inherits it with no second plumbing path
+    # (task #1590).
+    my $heap_mb  = heap_for($rel);
     my $childenv = "PCLPERL=\Q$root\E/tools/pclperl-for-tests"
-                 . ($core ? " PCL_TEST_CORE=\Q$core\E" : "");
+                 . ($core ? " PCL_TEST_CORE=\Q$core\E" : "")
+                 . ($heap_mb ? " PCL_DYNAMIC_SPACE_MB=$heap_mb" : "");
     # -k: an SBCL wedged in a runaway compile ignores/defers TERM and lives on
     # PAST the run (s316h: two escaped SBCLs + their orphaned 6 GB pl2cl
     # --server eval process); SIGKILL 10s after the TERM guarantees reaping.
@@ -772,7 +813,7 @@ sub run_one {
     # command builder.  The load is the second axis they must share.
     # Users (./runpcl) stay a plain load: recovery is a MEASUREMENT policy — it
     # buys rows after a failure, which a harness wants and a program must not.
-    my $sbcl_cmd = "$sbcl --eval \Q(pcl::p-load-with-recovery \"$lisp\")\E";
+    my $sbcl_cmd = sbcl_cmd_for($rel) . " --eval \Q(pcl::p-load-with-recovery \"$lisp\")\E";
     print STDERR "SBCL[run-perl-suite]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
     (my $rc, $k) = run_isolated("cd \Q$shadow\E && $childenv timeout -k 10 $to $sbcl_cmd"
                               . " > \Q$out\E 2>&1");

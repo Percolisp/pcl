@@ -1,0 +1,31 @@
+# Per-file SBCL DYNAMIC-SPACE (heap) ALLOWANCE registry for
+# tools/run-perl-suite.pl.  Task #1590.
+#
+#   rel<TAB>megabytes<TAB>cause
+#
+# Read by PCLTimeouts::read_allowances — the same one-line-per-file,
+# number-plus-cause shape as baselines/perl-suite-timeouts.tsv, for the same
+# #176 reason: a file that dies for want of a resource contributes NO TAP rows,
+# so its passing rows evaporate without anything saying so.  The number here is
+# MB of `--dynamic-space-size`, handed to that file's SBCL (and, through
+# PCL_DYNAMIC_SPACE_MB, to any child PCL it spawns) by tools/lib/PCLSbcl.pm —
+# the ONE builder of the command line, so no runner grows its own spelling.
+#
+# WHY PER FILE AND NOT A RAISED DEFAULT.  The gate runs EIGHT SBCLs at once on
+# a 12 GB box and the sweep four, so the default must keep costing what it
+# costs today; measured over the whole companion population exactly one file
+# needs more.  A registered file is NOT skipped and NOT excused: it runs,
+# reports and fails the run if it diverges.  What the allowance buys is that
+# the file is measured at all.
+#
+# Rules:
+#  - one line per file, with a CAUSE naming the measurement it was sized from
+#    (an allowance without a cause is a hiding place);
+#  - size it from a MEASURED peak, then leave real headroom — the resource is
+#    consumed by the COMPILER packing one top-level form, so the need grows
+#    with the emission and with anything the file `require`s;
+#  - when a file no longer needs it, DELETE the row (the flag is only ever
+#    emitted for a registered file, so a stale row costs the other 527 nothing
+#    but misreports this one).
+#
+re/pat_advanced.t	2048	s484d/#1590: measured 977 MB peak RSS on the PCL side at SBCL's 1 GB default (/usr/bin/time -v around tools/run-perl-suite.pl --jobs 1, quiet box) = 95% of the default, spent by SB-REGALLOC::PACK-TN on ONE 296 KB top-level form.  At that margin any growth in a module it `require`s is a cliff: s473t4 measured ~26 extra lines in perl-tests/t/test.pl turning DIFF 957/723 into "Heap exhausted during garbage collection" and 0/0 -- the whole file, 1680 rows.  2048 doubles the room; the file still peaks near 1 GB, so the cost of the row is address space, not RSS.
