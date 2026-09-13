@@ -139,7 +139,14 @@ sub run_perl {
     close $fh;
     my $perl = _pcl_child_perl();
     my $sw   = join(' ', @switches);
-    my $argv = join(' ', map { quotemeta($_) } @{$opts{args} // []});
+    # THE REAL t/test.pl APPENDS `args` RAW (its _quote_args quotes only on
+    # VMS), and that is not an oversight: `args => ['>', $file]` is how
+    # t/io/inplace.t and t/io/iprefix.t ask the SHELL to redirect the child's
+    # output into a file.  quotemeta turned the `>` into a literal argument, so
+    # those files' fixtures were never written and every row failed on an
+    # absent file.  Measured over perl's t/: nine files pass `args =>` and none
+    # of their values needs quoting (plain words, filenames, `>`, chr(256)).
+    my $argv = join(' ', @{$opts{args} // []});
     my $got;
     if (defined $opts{stdin}) {
         my $sin = "/tmp/pcl_rp_sin_$$.txt";

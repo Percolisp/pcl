@@ -14766,6 +14766,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (dup (cons dup (string-left-trim " " (subseq s (length dup)))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) ">>"))
        (cons ">>" (string-left-trim " " (subseq s 2))))
+      ;; "+>>" BEFORE "+>", longest first: the shorter arm used to win and
+      ;; leave the second ">" on the FILENAME, so `open($fh,"+>>$path")`
+      ;; created (and read-failed on) a file literally named ">/tmp/…".
+      ((and (>= (length s) 3) (string= (subseq s 0 3) "+>>"))
+       (cons "+>>" (string-left-trim " " (subseq s 3))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "+<"))
        (cons "+<" (string-left-trim " " (subseq s 2))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "+>"))
@@ -15282,7 +15287,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "True for the base open modes that produce a READ handle, which is the half
    `use open IN => …` sets.  A read/write mode counts as input: perl's IN
    layer applies to it, and PCL has one format per stream either way."
-  (member base-mode '("<" "+<" "+>" "-|" "<&" "<&=") :test #'string=))
+  (member base-mode '("<" "+<" "+>" "+>>" "-|" "<&" "<&=") :test #'string=))
 
 (defmacro p-default-layers ((in-layers out-layers) &body body)
   "Run BODY — one `open` / `readpipe` / backtick site — with the layers a
@@ -15720,6 +15725,17 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                                         :target target-box
                                         :pos (length cur)))
        t)
+      ;; Read+write, APPEND: keep the contents and position at the END, the
+      ;; same seeding ">>" does but over the read+write class (probed 5.40.3:
+      ;; `$s="abc"; open $m,"+>>",\$s` gives tell() 3 and a print leaves
+      ;; "abcde").
+      ((string= mode-str "+>>")
+       (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
+             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
+       (%p-install-fh fh (make-instance 'p-string-io-stream
+                                        :target target-box
+                                        :pos (length cur)))
+       t)
       ;; Read+write, keep contents: position at start, reads see the current
       ;; contents, writes overwrite/extend in place (Perl's "+<" on a scalar).
       ((string= mode-str "+<")
@@ -16086,18 +16102,30 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    line); the missing warning is the known warnings-gated-diagnostic gap
    (not-supported.md, #221)."
   (cond ((string= mode-str "<") :input)
-        ((member mode-str '(">" ">>" "+<" "+>") :test #'string=) :io)
+        ((member mode-str '(">" ">>" "+<" "+>" "+>>") :test #'string=) :io)
         (t nil)))
 
-(defun %p-open-anon-temp (direction ef)
+(defun %p-open-anon-temp (direction ef &optional append-p)
   "Open perl's anonymous temporary file and return the stream.  The file is
    created, opened, and immediately UNLINKED, so it has no name a program can
    reach and lives exactly as long as the handle — which is what makes it
-   anonymous.  TMPDIR is honoured, as perl's tmpfile(3) does."
+   anonymous.  TMPDIR is honoured, as perl's tmpfile(3) does.
+
+   APPEND-P carries the one part of the mode the direction does not: an APPEND
+   mode (`>>`, `+>>`) opens the descriptor O_APPEND, so a write goes to the END
+   whatever the file position says.  Probed 5.40.3 over the four modes with a
+   `print; seek(0); print; seek(0); readline` — `>>` and `+>>` read back
+   \"abcxyz\", `>` and `+>` read back \"xyz\".  mkstemp cannot be asked for the
+   flag, so it is set afterwards with F_SETFL, which is where O_APPEND is
+   settable on an open descriptor."
   (let ((template (format nil "~A/pcl-anon-XXXXXX"
                           (or (sb-posix:getenv "TMPDIR") "/tmp"))))
     (multiple-value-bind (fd path) (sb-posix:mkstemp template)
       (sb-posix:unlink path)
+      (when append-p
+        (sb-posix:fcntl fd sb-posix:f-setfl
+                        (logior (sb-posix:fcntl fd sb-posix:f-getfl)
+                                sb-posix:o-append)))
       (sb-sys:make-fd-stream fd
                              :input  (if (member direction '(:input :io)) t nil)
                              :output (if (member direction '(:output :io)) t nil)
@@ -16106,14 +16134,45 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                              :name "anonymous temporary file"
                              :auto-close t))))
 
-(defun %p-open-impl (fh mode filename &optional three-arg-p)
+(defun %p-open-file (path &rest open-args)
+  "CL `open` with PERL'S FAILURE SHAPE: NIL and `$!`, never a signal.
+
+   perl's `open` returns false for every OS refusal and puts the errno in `$!`;
+   SBCL's `open` SIGNALS a FILE-ERROR for all of them but ENOENT (which the
+   `<` arm asks for with :if-does-not-exist NIL).  So a write into a
+   mode-0500 directory, an open of a mode-000 file, a `>` onto a DIRECTORY and
+   a path through a non-directory all aborted the whole top-level form where
+   perl runs on with $! set — probed 5.40.3, seven of nine failing shapes
+   (t/run/switches.t's own `my $canwrite = open my $fh, \">\", $check` after a
+   chmod 0500 is one of them, task #1699).
+
+   ONLY FILE-ERROR is caught, deliberately: an OS refusal is perl's answer, and
+   anything else escaping CL `open` is a PCL bug that must stay loud (rule 12)."
+  (handler-case (apply #'open path open-args)
+    (file-error () (%pcl-save-errno) nil)))
+
+(defun %p-open-impl (fh mode filename &optional three-arg-p more-args)
   "Implementation of Perl open.  THREE-ARG-P says the program wrote the mode and
    the target as SEPARATE arguments; it is the only thing that distinguishes
    perl's bare fork-open `open(F,\"-|\")` — two arguments, no command, both
    processes go on running the program — from `open(F,'-|',$cmd)` with $cmd
    EMPTY, which is an error (probed 5.40.3: undef, $! = Broken pipe).  PCL
    forked for both, so an empty command made the CHILD carry on running the
-   whole program beside its parent (task #535)."
+   whole program beside its parent (task #535).
+
+   MORE-ARGS are the arguments AFTER the target, i.e. perl's LIST-form pipe
+   open `open($fh,'-|',$prog,@argv)`, which execs PROG directly — no shell, so
+   a metacharacter in an argument survives literally (probed 5.40.3:
+   `'a;echo BOOM'` arrives as that string).  Every other mode takes exactly one
+   target and perl is FATAL about a second (`More than one argument to
+   open(,':perlio')`), so this says so rather than picking one (rule 12)."
+  ;; Only the two pipe modes take a LIST; every other mode is perl's fatal
+  ;; "More than one argument to open".  Checked on the SIGILS, so a layered
+  ;; spelling (">:utf8") is judged the same as a bare one.
+  (when more-args
+    (let ((base (%p-split-open-mode (to-string mode))))
+      (unless (or (string= base "|-") (string= base "-|"))
+        (p-die (format nil "More than one argument to open(,'~A')" base)))))
   ;; In-memory filehandle: the target is a SCALAR ref (a box whose value is a box),
   ;; e.g. open my $fh, '>', \$s.  Dispatch before the filename is stringified.
   (when (and (p-box-p filename) (p-box-p (p-box-value filename)))
@@ -16138,7 +16197,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             ;; the file is touched: `open($fh,'<:nosuch',$f)` is false with
             ;; $! = ENOENT even when $f exists (probed 5.40.3).  #1224.
             (bad-layer (return-from %p-open-impl (%p-io-errno-fail 2)))
-            (anon-dir (%p-open-anon-temp anon-dir ef))
+            (anon-dir (%p-open-anon-temp anon-dir ef
+                                         (member mode-str '(">>" "+>>")
+                                                 :test #'string=)))
             ;; The magic filename "-" means a standard stream (Perl dups it):
             ;; "<-" / "<","-" → STDIN; ">-" / ">","-" → STDOUT.
             ((and (string= file-str "-") (string= mode-str "<"))
@@ -16147,37 +16208,51 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                   (member mode-str '(">" ">>") :test #'string=))
              *standard-output*)
             ((string= mode-str "<")
-             (open (%p-literal-path file-str)
-                   :direction :input :if-does-not-exist nil
-                   :external-format ef))
+             (%p-open-file (%p-literal-path file-str)
+                           :direction :input :if-does-not-exist nil
+                           :external-format ef))
             ;; The two OUTPUT opens ask %p-line-buffer-if-tty (task #710): CL
             ;; `open` takes no :buffering, so a handle onto a TERMINAL was
             ;; block-buffered where perl line-buffers it.  A non-tty target is
             ;; handed straight back, untouched.
             ((string= mode-str ">")
              (%p-line-buffer-if-tty
-              (open (%p-literal-path file-str)
-                    :direction :output :if-exists :supersede
-                    :if-does-not-exist :create :external-format ef)))
+              (%p-open-file (%p-literal-path file-str)
+                            :direction :output :if-exists :supersede
+                            :if-does-not-exist :create :external-format ef)))
             ((string= mode-str ">>")
              (%p-line-buffer-if-tty
-              (open (%p-literal-path file-str)
-                    :direction :output :if-exists :append
-                    :if-does-not-exist :create :external-format ef)))
+              (%p-open-file (%p-literal-path file-str)
+                            :direction :output :if-exists :append
+                            :if-does-not-exist :create :external-format ef)))
             ((string= mode-str "+<")
-             (open (%p-literal-path file-str)
-                   :direction :io :if-exists :overwrite
-                   :if-does-not-exist nil :external-format ef))
+             (%p-open-file (%p-literal-path file-str)
+                           :direction :io :if-exists :overwrite
+                           :if-does-not-exist nil :external-format ef))
             ((string= mode-str "+>")
-             (open (%p-literal-path file-str)
-                   :direction :io :if-exists :supersede
-                   :if-does-not-exist :create :external-format ef))
+             (%p-open-file (%p-literal-path file-str)
+                           :direction :io :if-exists :supersede
+                           :if-does-not-exist :create :external-format ef))
+            ;; "+>>" is read/APPEND: perl's O_RDWR|O_APPEND|O_CREAT.  It does
+            ;; NOT truncate and the handle opens positioned at the end (probed
+            ;; 5.40.3: a 10-byte file gives tell() 10, and a seek(0,0) then
+            ;; reads the first line back).
+            ((string= mode-str "+>>")
+             (%p-open-file (%p-literal-path file-str)
+                           :direction :io :if-exists :append
+                           :if-does-not-exist :create :external-format ef))
             ((or (string= mode-str "|-") (string= mode-str "-|"))
              ;; Fork-pipe open (#70): bare (the TWO-argument spelling, no
              ;; command) when there is no command text, else the child execs
              ;; the command.  Returns pid/0/undef directly — the filehandle
              ;; install happens inside (parent only).
-             (let ((cmd (when (plusp (length file-str)) (list file-str))))
+             ;; MORE-ARGS makes it perl's LIST form: p-exec with more than one
+             ;; string is the no-shell exec, which is exactly what perl does.
+             (let ((cmd (when (plusp (length file-str))
+                          (cons file-str
+                                (mapcar (lambda (a)
+                                          (to-string (if (p-box-p a) (unbox a) a)))
+                                        more-args)))))
                ;; An empty command in the THREE-argument form is perl's error,
                ;; not the bare fork (see this function's docstring, task #535).
                (when (and three-arg-p (null cmd))
@@ -16208,15 +16283,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           (%p-autoviv-failed-handle fh)))
     (if stream t nil)))
 
-(defmacro p-open (fh mode &optional filename)
+(defmacro p-open (fh mode &optional filename &rest more)
   "Perl open - open file with given mode.
    2-arg: (p-open FH expr) - mode is parsed from expr
    3-arg: (p-open FH mode filename)
+   LIST-form: (p-open FH \"-|\" PROG ARG...) — perl's no-shell pipe open.
    Bareword FH is quoted; lexical $fh is passed as evaluated box.
    The argument COUNT is passed on: it is what tells perl's bare fork-open
-   `open(F,\"-|\")` from a three-argument open whose command is empty."
+   `open(F,\"-|\")` from a three-argument open whose command is empty.
+
+   MORE is the LIST form's extra arguments (task #1697).  The macro used to
+   take three parameters, so `open($fh,'-|',$prog,'-e',$code)` — perl's
+   documented way to spawn a program WITHOUT a shell — was a macroexpansion
+   ARITY ERROR: the whole top-level form failed to compile."
   (if filename
-      `(%p-open-impl (%p-fh-install-arg ,fh) ,mode ,filename t)
+      `(%p-open-impl (%p-fh-install-arg ,fh) ,mode ,filename t (list ,@more))
       `(let ((%parsed (%p-open-parse-2arg ,mode)))
          (%p-open-impl (%p-fh-install-arg ,fh) (car %parsed) (cdr %parsed)))))
 
@@ -28121,6 +28202,48 @@ buffer's fill-pointer; everything else falls back to file-length."
           (t (pcl::p-die "Wide character")))))
 
 (defun pl-is_utf8 (&optional str) (declare (ignore str)) 1)
+(in-package :pcl)
+
+;;; ---------------------------------------------------------------------------
+;;; The `bytes` pragma's FUNCTIONS (task #1698)
+;;; ---------------------------------------------------------------------------
+;;; `use bytes` itself is a no-op here (docs/not-supported.md §`use bytes` —
+;;; PCL strings are SBCL character vectors with no byte view), but bytes.pm also
+;;; exports CALLABLE names, and `bytes::length($s)` is one programs really
+;;; write: t/io/utf8.t asserts tell() against it, and Text::CSV_PP computes its
+;;; `sep_len`/`quo_len` cache entries with it.  With the function missing the
+;;; call was an undef-fn abort that took the whole top-level form.
+;;;
+;;; It lives HERE, beside :utf8, and not in a lib/bytes.pm shim, for the reason
+;;; rule 9a gives: the answer is a statement about the SV's internal form, which
+;;; only the box model can make.  A plain-Perl shim would have to ask
+;;; `utf8::is_utf8`, which is hardcoded true (see above), and would then take
+;;; the octet branch for every string.
+(defpackage :bytes (:use :cl :pcl))
+(in-package :bytes)
+
+(defun pl-length (&optional str)
+  "perl's bytes::length: the length of the string's INTERNAL buffer.
+
+   perl's rule, probed 5.40.3 over thirteen shapes, is exactly
+   `utf8::is_utf8($s) ? <utf8 octet count> : length($s)` — so chr(130) is 1
+   byte and chr(300) is 2.  PCL has no UTF8 flag, and the available stand-in is
+   the only one that agrees with perl on every naturally-occurring string:
+   a string holding a character above 255 has no octet form and is measured as
+   UTF-8; one that does not IS its own octets and is measured as characters.
+   ascii/latin-1/chr(130)/chr(255)/chr(256)/chr(300)/mixed/NUL/U+2019/U+10000,
+   a number (5) and undef (0) all match perl.
+
+   THE ONE DIVERGENCE is an ARTIFICIALLY upgraded latin-1 string
+   (`utf8::upgrade($s)` on \"\\xa3\\xff\"): perl answers 4, this answers 2,
+   because the upgrade PCL cannot represent is exactly the fact the answer
+   would need.  That is the same no-UTF8-flag gap the `use bytes` section
+   records."
+  (let ((s (pcl::to-string (pcl::unbox str))))
+    (if (pcl::%p-wide-char-p s)
+        (length (pcl::%p-utf8-octets s))
+        (length s))))
+
 (in-package :pcl)
 
 ;; warnings module stub - needed because modules like Carp.pm check $warnings::VERSION

@@ -18,9 +18,10 @@
 # -a, -F pattern (implies -a; -a implies -n, perl 5.20 semantics),
 # -l[NNN], -0[NNN], -c (transpile-only check), -x, clustered bundles
 # (-wl, -lXMfeature=:all), `--`, script file or stdin, trailing @ARGV.
+# -i[ext] (in-place: sets $^I, which PCL's <> honours).
 # Accepted and IGNORED (children exercising them fail their assertions but
 # must not crash the harness): -w/-W/-X/-s/-T/-t/-u/-U/-v/-V, -d[:Module]
-# (debugger), -C* (unicode IO layers), -i[ext] (in-place).
+# (debugger), -C* (unicode IO layers).
 # PERL5OPT is honored (switches prepended), matching perl; PERL5LIB reaches
 # the child's @INC for free because the perl that runs pl2cl honors it.
 #
@@ -49,6 +50,7 @@ unshift @args, split(' ', $ENV{PERL5OPT}) if defined $ENV{PERL5OPT} && length $E
 
 my (@code, @incs, @uses, @rest);
 my ($opt_n, $opt_p, $opt_a, $opt_l, $opt_c, $opt_x, $opt_F, $l_arg, $zero_arg);
+my $opt_i;   # -i[ext]: perl sets $^I to the extension ("" for a bare -i)
 
 sub _q { my $s = shift // ""; $s =~ s/'/\\'/g; "'$s'" }
 
@@ -84,7 +86,7 @@ while (@args) {
       elsif ($c eq 'x') { $opt_x = 1 }
       elsif ($c eq 'd') { $a =~ s/^:\S*//; }      # -d / -d:Module — ignored
       elsif ($c eq 'C') { $a =~ s/^[A-Za-z0-9]*// }
-      elsif ($c eq 'i') { $a = '' }               # -i[ext] — extension consumed
+      elsif ($c eq 'i') { $opt_i = $a; $a = '' }  # -i[ext] — sets $^I
       elsif ($c =~ /^[wWXsTtuUvV]$/) { }          # accepted no-ops
       # anything else: silently ignored (harness must not crash)
   }
@@ -113,6 +115,16 @@ if ($opt_x) {
 
 # Switch semantics that perl implements by rewriting the program: do the same.
 my @prelude = @uses;
+# -i[ext] IS `$^I = "ext"` — perl's in-place edit is driven by that variable
+# and nothing else, and PCL's `<>` already honours it byte for byte (probed:
+# the main files and the .bak backups match perl exactly).  This used to
+# consume the extension and do nothing, which is what aborted
+# t/run/switches.t at `tmpswitches.bak`.
+if (defined $opt_i) {
+  my $q = $opt_i;
+  $q =~ s/(["\\\$\@])/\\$1/g;
+  push @prelude, qq{\$^I = "$q";};
+}
 if (defined $zero_arg) {
   push @prelude, !length($zero_arg)      ? '$/ = "\0";'
                : oct($zero_arg) > 0377   ? 'undef $/;'      # -0777 slurp

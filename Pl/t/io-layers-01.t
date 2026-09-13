@@ -427,4 +427,26 @@ open($b, '<', '/nonexistent-pcl-1271');
 printf "distinct=%d\n", ("$a" ne "$b" ? 1 : 0);
 PL
 
+# ── #1698 — `bytes::length`, the CALLABLE half of the `bytes` pragma.  The
+# pragma itself is a no-op (not-supported.md §`use bytes`), but the FUNCTION is
+# one programs really write: t/io/utf8.t asserts tell() against it and
+# Text::CSV_PP computes its sep_len/quo_len cache entries with it, and a
+# missing sub is an undef-fn abort that takes the whole top-level form.
+# perl's rule is `utf8::is_utf8($s) ? <utf8 octet count> : length($s)`; PCL has
+# no UTF8 flag, so the stand-in is "a character above 255 means measure as
+# UTF-8".  Every value below is perl's (probed 5.40.3 over thirteen shapes);
+# `upgraded` is the ONE divergence and is asserted as PCL's 2 so the row says
+# out loud where the model stops — perl answers 4.
+is(run_cl(<<'PL'), "3 1 1 1 1 2 2 5 0 2 3 4 5 0 upgraded=2\n", q{#1698 bytes::length measures octets for a wide string and characters otherwise});
+require bytes;
+my @t = ("abc", "\xa3", "\xff", chr(130), chr(255), chr(256), chr(300),
+         "a" . chr(0x100) . "\xa3", "", "\0a", "\x{2019}", "\x{10000}");
+print join(" ", map { bytes::length($_) } @t), " ";
+print bytes::length(12345), " ";
+my $u; { no warnings; print bytes::length($u), " " }
+my $up = "\xa3\xff";
+utf8::upgrade($up);
+print "upgraded=", bytes::length($up), "\n";
+PL
+
 done_testing();
