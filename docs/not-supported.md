@@ -1597,6 +1597,16 @@ sub is easy but changes `defined prototype(...)` guards in code that works
 today; do it deliberately (with a sweep) or not at all.  No maintained CPAN
 module reads its own classic prototypes back at runtime.
 
+**`prototype("CORE::NAME")` IS supported (task #1586, s484a)** and is a
+different mechanism: perl's own prototype strings are LANGUAGE data, so they
+live in the runtime as `%pcl-core-prototypes`, GENERATED from perl's answers
+by `tools/gen-core-protos.pl` (`--check` re-asks the live perl and diffs;
+guard `Pl/t/core-proto-01.t`).  All three of perl's answers are given: a
+keyword's string (`abs` → `_`, `push` → `\@@`), `undef` for the ~70
+control-flow words, and the fatal `Can't find an opnumber for "NAME"` for a
+name that is not a keyword.  `prototype("CORE::")` — the empty name — is
+`undef`, not a fatal, as in perl.  A *user* sub is never looked up there.
+
 **Affected tests:** `perl-tests/signatures.t` rows reading classic
 prototypes back.
 

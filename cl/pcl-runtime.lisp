@@ -24951,11 +24951,124 @@ buffer's fill-pointer; everything else falls back to file-length."
             (if (%pcl-definedp proto) (to-string (unbox proto)) nil))))
   code)
 
+;;; BEGIN GENERATED core-prototypes (tools/gen-core-protos.pl)
+;;;
+;;; `prototype("CORE::NAME")` — perl's own prototype strings, which are
+;;; LANGUAGE data (CLAUDE.md 9a's core-builtin exception) and so live here.
+;;; Regenerate with `tools/gen-core-protos.pl > …`; verify with
+;;; `tools/gen-core-protos.pl --check`, which re-asks the live perl and
+;;; diffs.  DO NOT HAND-EDIT: perl is the only authority for these strings,
+;;; and a hand copy is a copy that drifts silently (task #1586).
+(defparameter %pcl-core-prototypes
+  (let ((h (make-hash-table :test 'equal)))
+    (loop for (kw . proto) in
+          '(("AUTOLOAD") ("BEGIN") ("CHECK") ("DESTROY") ("END") ("INIT")
+            ("__DATA__") ("__END__") ("__FILE__" . "") ("__LINE__" . "")
+            ("__PACKAGE__" . "") ("__SUB__" . "") ("abs" . "_")
+            ("accept" . "**") ("alarm" . "_") ("and") ("atan2" . "$$")
+            ("bind" . "*$") ("binmode" . "*;$") ("bless" . "$;$")
+            ("break" . "") ("caller" . ";$") ("chdir" . ";$") ("chmod" . "@")
+            ("chomp") ("chop") ("chown" . "@") ("chr" . "_") ("chroot" . "_")
+            ("close" . ";*") ("closedir" . "*") ("cmp") ("connect" . "*$")
+            ("continue" . "") ("cos" . "_") ("crypt" . "$$")
+            ("dbmclose" . "\\%") ("dbmopen" . "\\%$$") ("default") ("defined")
+            ("delete") ("die" . "@") ("do") ("dump" . "") ("each" . "\\[%@]")
+            ("else") ("elsif") ("endgrent" . "") ("endhostent" . "")
+            ("endnetent" . "") ("endprotoent" . "") ("endpwent" . "")
+            ("endservent" . "") ("eof" . ";*") ("eq") ("eval")
+            ("evalbytes" . "_") ("exec") ("exists") ("exit" . ";$")
+            ("exp" . "_") ("fc" . "_") ("fcntl" . "*$$") ("fileno" . "*")
+            ("flock" . "*$") ("for") ("foreach") ("fork" . "") ("format")
+            ("formline" . "$@") ("ge") ("getc" . ";*") ("getgrent" . "")
+            ("getgrgid" . "$") ("getgrnam" . "$") ("gethostbyaddr" . "$$")
+            ("gethostbyname" . "$") ("gethostent" . "") ("getlogin" . "")
+            ("getnetbyaddr" . "$$") ("getnetbyname" . "$") ("getnetent" . "")
+            ("getpeername" . "*") ("getpgrp" . ";$") ("getppid" . "")
+            ("getpriority" . "$$") ("getprotobyname" . "$")
+            ("getprotobynumber" . "$;") ("getprotoent" . "") ("getpwent" . "")
+            ("getpwnam" . "$") ("getpwuid" . "$") ("getservbyname" . "$$")
+            ("getservbyport" . "$$") ("getservent" . "") ("getsockname" . "*")
+            ("getsockopt" . "*$$") ("given") ("glob" . "_;") ("gmtime" . ";$")
+            ("goto") ("grep") ("gt") ("hex" . "_") ("if") ("index" . "$$;$")
+            ("int" . "_") ("ioctl" . "*$$") ("join" . "$@")
+            ("keys" . "\\[%@]") ("kill" . "@") ("last") ("lc" . "_")
+            ("lcfirst" . "_") ("le") ("length" . "_") ("link" . "$$")
+            ("listen" . "*$") ("local") ("localtime" . ";$")
+            ("lock" . "\\[$@%&*]") ("log" . "_") ("lstat" . ";*") ("lt") ("m")
+            ("map") ("mkdir" . "_;$") ("msgctl" . "$$$") ("msgget" . "$$")
+            ("msgrcv" . "$$$$$") ("msgsnd" . "$$$") ("my") ("ne") ("next")
+            ("no") ("not" . "$;") ("oct" . "_") ("open" . "*;$@")
+            ("opendir" . "*$") ("or") ("ord" . "_") ("our") ("pack" . "$@")
+            ("package") ("pipe" . "**") ("pop" . ";\\@") ("pos" . ";\\[$*]")
+            ("print") ("printf") ("prototype" . "_") ("push" . "\\@@") ("q")
+            ("qq") ("qr") ("quotemeta" . "_") ("qw") ("qx") ("rand" . ";$")
+            ("read" . "*\\$$;$") ("readdir" . "*") ("readline" . ";*")
+            ("readlink" . "_") ("readpipe" . "_") ("recv" . "*\\$$$") ("redo")
+            ("ref" . "_") ("rename" . "$$") ("require") ("reset" . ";$")
+            ("return") ("reverse" . "@") ("rewinddir" . "*")
+            ("rindex" . "$$;$") ("rmdir" . "_") ("s") ("say") ("scalar" . "$")
+            ("seek" . "*$$") ("seekdir" . "*$") ("select") ("semctl" . "$$$$")
+            ("semget" . "$$$") ("semop" . "$$") ("send" . "*$$;$")
+            ("setgrent" . "") ("sethostent" . "$") ("setnetent" . "$")
+            ("setpgrp" . ";$$") ("setpriority" . "$$$") ("setprotoent" . "$")
+            ("setpwent" . "") ("setservent" . "$") ("setsockopt" . "*$$$")
+            ("shift" . ";\\@") ("shmctl" . "$$$") ("shmget" . "$$$")
+            ("shmread" . "$$$$") ("shmwrite" . "$$$$") ("shutdown" . "*$")
+            ("sin" . "_") ("sleep" . ";$") ("socket" . "*$$$")
+            ("socketpair" . "**$$$") ("sort") ("splice" . "\\@;$$@") ("split")
+            ("sprintf" . "$@") ("sqrt" . "_") ("srand" . ";$") ("stat" . ";*")
+            ("state") ("study" . "_") ("sub") ("substr" . "$$;$$")
+            ("symlink" . "$$") ("syscall" . "$@") ("sysopen" . "*$$;$")
+            ("sysread" . "*\\$$;$") ("sysseek" . "*$$") ("system")
+            ("syswrite" . "*$;$$") ("tell" . ";*") ("telldir" . "*")
+            ("tie" . "\\[$@%*]$@") ("tied" . "\\[$@%*]") ("time" . "")
+            ("times" . "") ("tr") ("truncate" . "$$") ("uc" . "_")
+            ("ucfirst" . "_") ("umask" . ";$") ("undef" . ";\\[$@%&*]")
+            ("unless") ("unlink" . "@") ("unpack" . "$_") ("unshift" . "\\@@")
+            ("untie" . "\\[$@%*]") ("until") ("use") ("utime" . "@")
+            ("values" . "\\[%@]") ("vec" . "$$$") ("wait" . "")
+            ("waitpid" . "$$") ("wantarray" . "") ("warn" . "@") ("when")
+            ("while") ("write" . ";*") ("x") ("xor") ("y"))
+          do (setf (gethash kw h) proto))
+    h)
+  "Every perl KEYWORD, mapped to the prototype string `prototype(\"CORE::NAME\")`
+   answers for it, or NIL where perl answers undef (`if`, `my`, `print`, and
+   the other ~70 control-flow words).  A name that is NOT A KEY is not a
+   keyword at all: %p-core-prototype then dies `Can't find an opnumber for
+   \"NAME\"`, perl's own message.  Generated — see the header.")
+;;; END GENERATED core-prototypes
+
+(defun %p-core-prototype (name)
+  "`prototype(\"CORE::NAME\")` for the part after `CORE::` (task #1586).
+   Three answers, all perl's, probed 5.40.3:
+     * a keyword with a prototype  -> its string (`abs` is `_`, `push` is `\\@@`)
+     * a keyword without one       -> undef (`if`, `my`, `print`)
+     * ANYTHING ELSE               -> the fatal `Can't find an opnumber for
+                                      \"NAME\"`, which quotes the name WITHOUT
+                                      the CORE:: prefix (`CORE::Foo::bar` dies
+                                      naming `Foo::bar`).
+   The EMPTY name is the one exception and is NOT fatal: `prototype(\"CORE::\")`
+   is undef in perl.
+   Rule 12: absence from the table is a real answer here, not a missing case —
+   the table holds every keyword, so a non-key IS the not-a-keyword verdict."
+  (if (zerop (length name))
+      *p-undef*
+      (multiple-value-bind (proto found) (gethash name %pcl-core-prototypes)
+        (cond ((not found) (error "Can't find an opnumber for \"~A\"" name))
+              ((null proto) *p-undef*)
+              (t proto)))))
+
 (defun p-prototype (&optional ref)
   "Perl prototype() - returns the prototype string of a function, or undef.
-   Only prototypes declared via the :prototype(...) attribute (or
+   A `CORE::NAME` argument answers perl's own prototype for that builtin, from
+   the generated %pcl-core-prototypes table (task #1586) — every one of them
+   used to read undef, and `prototype(\"CORE::nosuchthing\")` used not to die.
+   Otherwise: only prototypes declared via the :prototype(...) attribute (or
    Sub::Util::set_prototype) are tracked; classic `sub f ($$)` prototypes are
    consumed at transpile time and report undef here."
+  (let ((v (unbox ref)))
+    (when (and (stringp v) (>= (length v) 6) (string= v "CORE::" :end1 6))
+      (return-from p-prototype (%p-core-prototype (subseq v 6)))))
   (let* ((fn (%p-code-function ref))
          (proto (and fn (gethash fn %pcl-sub-prototypes))))
     (or proto *p-undef*)))
