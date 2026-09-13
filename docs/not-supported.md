@@ -2742,8 +2742,17 @@ of the region's compile phase where perl sets it (a `BEGIN` in the same
 region reads it — s437's rule). `package X { … }` is self-contained: the
 code after the block is back in the outer package, and the block form is
 lowered by the same `_lower_block` arm a nested `package X { … }` takes in
-file mode. Two block forms in one eval are still five segments and still
+file mode. Two block forms in one eval are still two blockforms and still
 refused, so `eval 'package A { } package B { }'` remains a multi-switch.
+
+**The block form counts inside a BARE BLOCK too** — `eval '{ my $x; package
+X { … } 1 }'`, which is `t/uni/opcroak.t`'s shape and `t/op/inccode.t`'s.
+**What still refuses there is a non-literal TAIL**: flattening the bare block
+erases its lexical scope, so the s353 whitelists are what license the
+collapse, and the tail rule (literal-only) applies only to that erased case.
+`eval '{ package X { … } push @INC, $y; }'` is therefore still
+`multiple package sections` — owner **task #1642**, which carries the
+reproducer and the reason the rule is conservative for a block form.
 
 **Why it is NOT statement-level** (task #1037's classification, s466): the unit
 here *is* the eval.  The emission is produced by the `pl2cl --server`

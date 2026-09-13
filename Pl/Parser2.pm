@@ -1615,22 +1615,46 @@ sub parse {
   # `eval_pkg_region` still applies: this loop's sub extraction runs BEFORE
   # lowering and would name a sub unqualified, and after the restore
   # `_sub_name_for_emission` spells a trailing sub unqualified anyway (current
-  # eq cur_pkg), so both sides come out right.  The three-segment shape is the
-  # ONLY one accepted: two blocks make five segments and stay refused, which is
-  # what keeps `package A { } package B { }` a multi-switch.
-  if ($self->eval_mode && @segments == 3
-      && $self->_eval_safe_leading_stmts($segments[0]{stmts})
-      && !_seg_is_pkg_switch($segments[0])
-      && $segments[1]{blockform} && $segments[1]{pkg_stmt}
-      && !_seg_is_pkg_switch($segments[2])
-      && !$segments[2]{blockform}
-      && $segments[2]{pkg} eq $segments[0]{pkg}) {
-    @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
-                   version      => $segments[1]{version},
-                   version_pkg  => $segments[1]{pkg},
-                   version_stmt => $segments[1]{pkg_stmt},
-                   stmts => [ @{ $segments[0]{stmts} },
-                              $segments[1]{pkg_stmt}, @{ $segments[2]{stmts} } ] });
+  # eq cur_pkg), so both sides come out right.
+  #
+  # THE ARM IS KEYED ON THE STRUCTURE, NOT ON A SEGMENT COUNT, because the
+  # block form arrives at two lengths and a count-keyed arm would have to be
+  # written twice: `eval 'package X { … }'` is THREE segments, and the same
+  # thing inside a BARE BLOCK — `eval '{ my $x; package X { … } 1 }'`, which is
+  # uni/opcroak.t's and op/inccode.t's shape — is FIVE, because the T-A1
+  # flattening adds the block's own leading/restore pair (measured, s484a).
+  # What both have in common is the whole rule: EXACTLY ONE package-affecting
+  # segment, and it is a BLOCKFORM; no statement-form switch anywhere (two
+  # blocks are two blockforms and stay refused, which is what keeps
+  # `package A { } package B { }` a multi-switch); and every other segment is
+  # the eval's own root package.
+  #
+  # The two whitelists are the s353 ones and they apply for the same reason:
+  # the LEADING statements lose their block scope when a flattened bare block
+  # is erased, and the TRAILING ones do too — so a FLATTENED shape keeps the
+  # literal-only rule on its tail, while a TOP-LEVEL block form (nothing
+  # erased) may be followed by anything.
+  if ($self->eval_mode && @segments > 1) {
+    my @bf = grep { $segments[$_]{blockform} } 0 .. $#segments;
+    my $b  = @bf == 1 ? $bf[0] : undef;
+    if (defined $b && $segments[$b]{pkg_stmt}
+        && !grep { _seg_is_pkg_switch($segments[$_]) } 0 .. $#segments
+        && !grep { ($segments[$_]{pkg} // '') ne $root_pkg }
+                 grep { $_ != $b } 0 .. $#segments) {
+      my @lead  = map { @{ $segments[$_]{stmts} || [] } } 0 .. $b - 1;
+      my @trail = map { @{ $segments[$_]{stmts} || [] } } $b + 1 .. $#segments;
+      # `blk` on the blockform segment says a bare block was flattened around
+      # it — that is the erased scope, and the only reason the tail is limited.
+      my $erased = defined $segments[$b]{blk};
+      if ($self->_eval_safe_leading_stmts(\@lead)
+          && (!$erased || _eval_literal_only_stmts(\@trail))) {
+        @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
+                       version      => $segments[$b]{version},
+                       version_pkg  => $segments[$b]{pkg},
+                       version_stmt => $segments[$b]{pkg_stmt},
+                       stmts => [ @lead, $segments[$b]{pkg_stmt}, @trail ] });
+      }
+    }
   }
   # E4.1 M1 (s353): the same collapse for the FLATTENED bare-block spelling.
   # Sub::Quote wraps everything in one `{ … }` with a trailing `1;`, which

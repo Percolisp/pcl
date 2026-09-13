@@ -83,6 +83,30 @@
 #     NOT spliced -- serial re-runs on d348dcea read the snapshot exactly).  Each of the
 #     six carries its cause in column 7; the WHEN was measured on git-archive extractions
 #     of fcf076f1 (the snapshot's own s470bv bless point) and 637fc58e (pre-BX).
+# s484a (2026-09-13, Opus) -- THREE rows spliced by hand, `--jobs 1`, with the
+#   SAME six files measured on a `git archive 8c8fa4c0` extraction first, so
+#   that "ours" is a measurement: the before-leg reproduced every blessed row
+#   (cproto 71/183, attrproto 17/31, protowarn 4/8, packagev 198/109,
+#   inccode-tie 0/0, opcroak 0/5) with ROW DIFF 0/0/0/0.
+#     op/cproto.t    71/183 -> 254/0, DIFF -> OK.  Task #1586: the file loops
+#       over perl's keyword list asserting `prototype("CORE::$kw")`, and PCL
+#       had no model of the CORE:: package at all -- every one read undef and
+#       the unknown-keyword case did not throw.  The runtime now carries
+#       %pcl-core-prototypes, GENERATED from perl's own answers by
+#       tools/gen-core-protos.pl.  183 rows FIXED, 0 new.
+#     op/packagev.t  198/109 -> 228/79.  Task #1587: the file's whole method is
+#       `eval "package withversion 1.2"` in six spellings asserting `$@` eq '',
+#       and the #226 eval collapse refused a VERSION and a BLOCK form as
+#       "multiple package sections".  Neither is a second switch.  30 rows
+#       FIXED, 0 new; the 79 that remain are the file's other assertions.
+#     uni/opcroak.t  the `aborted-forms` NOTE goes; counts UNCHANGED (0/5).
+#       Same task: its eval is a BLOCK-form package inside a BARE BLOCK, so the
+#       file used to abort on the refusal and now RUNS.  Its five rows fail on
+#       their own subject (UTF-8 error-message text), which is pre-existing and
+#       was never measured before because nothing got that far.
+#     op/inccode-tie.t did NOT move and keeps its row: its tail after the
+#       package block is not literal-only, which the flattened bare block's
+#       erased scope still forbids -- task #1642, with the reproducer.
 
 # s470bq (task #1219, 2026-09-06) -- ONE ROW SPLICED BY HAND.  op/eval.t
 #   C_ok 130 -> 131, C_notok 38 -> 37: test 6, `print eval '$foo = /';
@@ -1541,7 +1565,7 @@ op/const-optree.t	148	0	90	58	XDIFF	not-supported.md §Readouts of perl's own in
 op/context.t	8	0	7	1	DIFF		0
 op/coreamp.t	778	0	9	46	DIFF	undef-fn:main::pl-__FILE__; aborted-forms:15: Undefined subroutine &File::Spec::Functions called	4
 op/coresubs.t	1109	0	1	1	DIFF	s473t4: TRANSPILE-FAIL 0/0 -> DIFF 1/1 -- #1501's `state`-in-inner-block fix (a `state $classcount` inside an `if` no longer refuses the whole file); the residue is `use B`, an XS module, which aborts 2 forms and leaves 1107 of perl's 1109 rows unproduced. Emission A/B vs main 8ab11c15: base TRANSPILE-FAILs with "Parser2 TODO: state $classcount in named sub (string eval)", mine emits 26,507 bytes. #366 serial re-run agrees (parallel DIFF 1/1, serial DIFF 1/1) | aborted-forms:2: Can't locate loadable object for module this module in @INC	0
-op/cproto.t	254	0	71	183	DIFF		0
+op/cproto.t	254	0	254	0	OK		0
 op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).	0
 op/current_sub.t	22	0	8	3	XDIFF	aborted-forms:3: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)	0
 op/dbm.t	5	0	0	0	DIFF		0
@@ -1638,7 +1662,7 @@ op/ord.t	38	0	38	0	OK		0
 op/overload_integer.t	2	0	2	0	OK		0
 op/override.t	36	0	3	17	DIFF	aborted-forms:2: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/xN_N-linux/Confi	0
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
-op/packagev.t	307	0	198	109	DIFF		0
+op/packagev.t	307	0	228	79	DIFF		0
 op/pos.t	33	0	15	15	DIFF		0
 op/postfixderef.t	128	0	102	19	DIFF	s470bv: #1221 (b25afbc; 100/21 at a3d6d8e) | aborted-forms:3: Undefined subroutine &main::foo called	0
 op/pow.t	268	0	268	0	OK		0
@@ -1855,7 +1879,7 @@ uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0
 uni/lower.t	11720	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/method.t	62	0	31	30	DIFF	s470bv: #1221 (b25afbc; 28/21 at a3d6d8e): a GAIN wearing a loss numbers -- utf8::decode was a stub, so the file ABORTED and 13 perl rows (39-51) were never produced.  They are produced now, four pass, the rest fail honestly.  No row went from a genuine ok to not ok.  Residual: task #1274 | aborted-forms:1: Undefined subroutine &main::クラス called	0
-uni/opcroak.t	5	0	0	5	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
+uni/opcroak.t	5	0	0	5	DIFF		0
 uni/overload.t	191	2	184	8	DIFF	aborted-forms:1: Undefined subroutine &main::todo_skip called	0
 uni/package.t	18	0	8	10	DIFF		0
 uni/parser.t	58	0	32	26	DIFF	s470bv: #1221 (b25afbc; 28/30 at a3d6d8e)	0

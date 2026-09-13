@@ -204,7 +204,7 @@ t/op/hash-clear-placeholders.t	9	UNEXPLAINED
 t/op/hash-rt85026.t	1	UNEXPLAINED
 t/op/hash.t	479	NS:`Hash::Util` bucket statistics -- `require Hash::Util` at hash.t:137 aborts the top-level form that holds every torture_hash call (#1578 is the separate message bug: the die text says "module this module" instead of the name).
 t/op/inc.t	18	UNEXPLAINED
-t/op/inccode-tie.t	89	#1587 -- `eval "package NAME VERSION"` / `eval "package NAME { … }"` refuse: the #226 single-switch collapse excludes both spellings
+t/op/inccode-tie.t	89	#1642 -- a BLOCK-form package in a BARE BLOCK whose tail is not literal-only; #1587 (s484a) fixed the VERSION and BLOCK spellings and the flattened bare block, and uni/opcroak.t now runs, but this file's `push @INC, …` tail keeps the ruled refusal
 t/op/inccode.t	48	UNEXPLAINED
 t/op/incfilter.t	153	UNEXPLAINED
 t/op/index.t	308	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`, same reason as op/write.t

@@ -376,6 +376,28 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
                                    eval_mode => 1, eval_pkg => 'main');
   like($bt, qr/\(prog1\b/, '#1587: the block form keeps its tail value behind prog1');
 
+  # THE BLOCK FORM INSIDE A BARE BLOCK is the same rule at a different LENGTH:
+  # the T-A1 flattening makes it FIVE segments where the top-level spelling is
+  # three, which is why the arm is keyed on the STRUCTURE (exactly one
+  # blockform, no statement-form switch anywhere) and not on a count.  This is
+  # uni/opcroak.t's shape and op/inccode.t's.
+  for my $w (q[{ package BB1 { 1 } }],
+             q[{ my $x = 1; package BB2 { sub f { 2 } } }],
+             q[{ package BB5 { 1 } 1 }],
+             qq[{\n package BB3 {\n  sub new { bless {}, shift }\n }\n}\n]) {
+    my $ok = eval { Pl::Parser2->parse_code($w, eval_mode => 1,
+                                            eval_pkg => 'main') };
+    ok(defined $ok, "#1587: a flattened bare-block blockform collapses [$w]")
+      or diag($@);
+  }
+  # …and a NON-literal tail inside the erased bare block still refuses, because
+  # the flattening erases that block's lexical scope (the s353 whitelists are
+  # what license the collapse, and they are unchanged).
+  eval { Pl::Parser2->parse_code(q[{ package BB7 { 1 } push @main::z, 1; }],
+                                 eval_mode => 1, eval_pkg => 'main') };
+  like($@, qr/^PCL: unsupported in string eval: multiple package sections/,
+       '#1587: a non-literal tail in an ERASED bare block stays refused');
+
   # The multi-switch shape stays refused (zero measured events).
   eval { Pl::Parser2->parse_code(q{package A1; sub a {1} package B1; sub b {2} 1},
                                  eval_mode => 1, eval_pkg => 'main') };
