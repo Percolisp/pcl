@@ -23262,25 +23262,57 @@ buffer's fill-pointer; everything else falls back to file-length."
       (let ((r (and w (p-box-value w))))
         (and (p-box-p r) r)))))
 
+(defvar *p-sv-stash* (make-hash-table :test 'eq :weakness :key)
+  "A SCALAR'S OWN STASH: the class `bless \\$x, \"C\"` writes on the SV $x
+   itself, keyed by $x's BOX (task #1619).
+
+   A box's CLASS SLOT plays two roles that perl keeps in two places: the
+   cache of the class of the REFERENCE the box holds (`my $o = bless {},
+   \"H\"` — the only storage there is for a raw ARRAY/CODE/GLOB payload),
+   and the SvSTASH of the scalar itself.  They collide exactly when a
+   scalar HOLDS a reference and is ALSO blessed through `\\$x`: reading the
+   slot then made `ref(\\$o)` answer the held object's class where perl
+   says REF, and `bless \\$h, \"S\"` clobbered the cache so `ref($h)`
+   answered S where perl says HASH.
+
+   The rare role moves out of the slot: only p-bless's scalar-referent
+   branch writes here, and only %p-referent-class reads, so the cost on
+   every other box is one HASH-TABLE-COUNT test.  Weak on the key — the
+   stash dies with the scalar, like perl's.")
+
+(defun %p-sv-stash (box)
+  "The class BOX's scalar was blessed into by `bless \\$x`, or NIL.
+   The COUNT test keeps the lookup off the p-ref/box-sv hot path in the
+   overwhelming majority of programs, which never bless a scalar ref."
+  (and (plusp (hash-table-count *p-sv-stash*))
+       (gethash box *p-sv-stash*)))
+
 (defun %p-referent-class (val)
   "The class recorded on the REFERENT of a plain scalar reference, or NIL.
    Perl blesses the referent, not the reference, so when this answers it
    OUTRANKS any class cached on a wrapper or variable box: a second \\$x
    wrapper never met the bless, and a re-bless through one alias must show
-   through all of them.  Declines (NIL) when the referent holds anything
-   but a plain scalar -- those shapes are REF/ARRAY/REGEXP/... in ref()
-   terms and their arms must keep winning."
+   through all of them.
+
+   The referent's own stash (*p-sv-stash*) answers WHATEVER the referent
+   scalar holds — that is perl's rule for `\\$x` and it is the whole reason
+   the stash lives in its own table (#1619).  The class SLOT may only be
+   read for a referent holding a PLAIN scalar, where the slot cannot be a
+   held reference's class cache; for every other payload the slot is that
+   cache, and reading it answered the held object's class for `ref(\\$obj)`
+   where perl says REF."
   (let ((r (%p-scalar-ref-referent val)))
     (when r
-      (let ((rv (p-box-value r)))
-        (and (not (p-box-p rv))
-             (not (and (vectorp rv) (not (stringp rv))))
-             (not (hash-table-p rv))
-             (not (functionp rv))
-             (not (p-typeglob-p rv))
-             (not (p-regex-match-p rv))
-             (not (p-magic-cell-p rv))
-             (p-box-class r))))))
+      (or (%p-sv-stash r)
+          (let ((rv (p-box-value r)))
+            (and (not (p-box-p rv))
+                 (not (and (vectorp rv) (not (stringp rv))))
+                 (not (hash-table-p rv))
+                 (not (functionp rv))
+                 (not (p-typeglob-p rv))
+                 (not (p-regex-match-p rv))
+                 (not (p-magic-cell-p rv))
+                 (p-box-class r)))))))
 
 (defun %p-ref-shaped-p (v)
   "Is V a REFERENCE payload -- a shape whose class may legitimately be
@@ -23313,7 +23345,18 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; this lookup is on the box-sv/p-ref/p-get-class hot paths).
       ((or (null v) (stringp v) (numberp v) (eq v *p-undef*)) nil)
       ((hash-table-p v) (gethash :__class__ v))
-      ((p-box-p v) (or (%p-referent-class box) (p-box-class v)))
+      ;; V is a box, and WHICH box decides what its class slot means --
+      ;; the same is-ref discriminator %p-ref-referent uses.  BOX not
+      ;; is-ref: V is the WRAPPER the variable holds, and its slot is the
+      ;; cache of the class of the reference (`my $x = bless [], "A"`
+      ;; double-boxed).  BOX is-ref: BOX *is* the wrapper and V is the
+      ;; REFERENT scalar, whose slot is that scalar's cache for what IT
+      ;; holds -- never the class of the reference we are asking about.
+      ;; perl reads SvSTASH(SvRV), and the referent's own stash is what
+      ;; %p-referent-class answers above (#1619: reading the slot here
+      ;; made ref(\\$obj) answer the object's class instead of REF).
+      ((p-box-p v) (or (%p-referent-class box)
+                       (and (not (p-box-is-ref box)) (p-box-class v))))
       (t nil))))
 
 (defun p-ref (val)
@@ -23340,54 +23383,58 @@ buffer's fill-pointer; everything else falls back to file-length."
        (gethash :__class__ inner))
       ;; Reference box: inner is a p-box - check what it wraps (ARRAY/HASH/SCALAR)
       ((p-box-p inner)
-       ;; (A classed inner was already answered by %p-target-class above.)
-       (if (p-box-class inner)
-           (p-box-class inner)
-           ;; The REFERENT — what the reference points at — is `inner` when VAL
-           ;; is itself the p-backslash wrapper (a literal `\$x` handed straight
-           ;; to ref()) and one level deeper when VAL is a variable holding one.
-           ;; %p-ref-referent is that rule, shared with the stringifiers (#163);
-           ;; every arm below reads the referent, so the same reference cannot
-           ;; answer two different words depending on how it arrived.
-           (let* ((referent (%p-ref-referent val))
-                  (rv (and (p-box-p referent) (p-box-value referent))))
-             (cond
-               ;; Magic lvalue ref (\substr / \pos / \vec): the referent box holds
-               ;; a p-magic-cell with :lvalue kind → "LVALUE" (arylen's cell has
-               ;; kind nil and falls through to "SCALAR").
-               ((and (p-magic-cell-p rv) (eq (p-magic-cell-kind rv) :lvalue))
-                "LVALUE")
-               ;; Referent scalar holds a v-string literal → "VSTRING" (op/ver.t).
-               ((p-vstring-p rv) "VSTRING")
-               ;; The referent IS a raw aggregate: a wrapper for `\@a`/`\%h`/…
-               ;; stored in a variable or element.  (When VAL is a ref TO a
-               ;; scalar that HOLDS such a value — `\$aref` — the referent is the
-               ;; scalar BOX, so these do not fire and the REF arm below wins,
-               ;; which is what perl answers.)
-               ((and (vectorp referent) (not (stringp referent))) "ARRAY")
-               ((hash-table-p referent) (or (gethash :__class__ referent) "HASH"))
-               ((p-regex-match-p referent) "REGEXP")
-               ((functionp referent) "CODE")
-               ((p-typeglob-p referent) "GLOB")
-               ;; The referent SCALAR holds a glob VALUE: `my $g = *foo` makes
-               ;; the SV a GV in perl, so \$g is a GLOB ref (substr.t 784 —
-               ;; '\substr does not coerce its glob arg just yet').  A referent
-               ;; holding a glob REFERENCE keeps is-ref and stays REF below.
-               ((%p-glob-value-box-p referent) "GLOB")
-               ;; The referent scalar holds a FILEHANDLE.  That payload IS a
-               ;; glob ref (see %p-handle-payload-p), so \$fh is a ref to a
-               ;; ref — perl says REF (#1308).
-               ((%p-handle-payload-p rv) "REF")
-               ;; Ref-to-ref → "REF": the referent is itself a ref-wrapper (\\1)
-               ;; or *holds* a reference (\$r, \$aref).  %scalar-holds-ref-p is
-               ;; non-recursive so a self-referential scalar ($x=\$x) does not
-               ;; loop, and a plain scalar — incl. undef (*p-undef*) and ''
-               ;; array elements — yields SCALAR, not REF.
-               ((or (and (p-box-p referent) (p-box-is-ref referent))
-                    (%scalar-holds-ref-p referent))
-                "REF")
-               ;; Scalar reference: box containing box (from p-backslash $x)
-               (t "SCALAR")))))
+       ;; THE CLASS SLOT OF `inner` IS NOT READ HERE (#1619).  Every reading
+       ;; of it that is about the reference VAL denotes was already made by
+       ;; %p-target-class above, under the is-ref discriminator: when VAL is
+       ;; the wrapper, `inner` is the REFERENT SCALAR and its slot is that
+       ;; scalar's own cache for what IT holds — answering it made
+       ;; `ref(\$obj)` say the object's class where perl says REF.
+       ;;
+       ;; The REFERENT — what the reference points at — is `inner` when VAL
+       ;; is itself the p-backslash wrapper (a literal `\$x` handed straight
+       ;; to ref()) and one level deeper when VAL is a variable holding one.
+       ;; %p-ref-referent is that rule, shared with the stringifiers (#163);
+       ;; every arm below reads the referent, so the same reference cannot
+       ;; answer two different words depending on how it arrived.
+       (let* ((referent (%p-ref-referent val))
+              (rv (and (p-box-p referent) (p-box-value referent))))
+         (cond
+           ;; Magic lvalue ref (\substr / \pos / \vec): the referent box holds
+           ;; a p-magic-cell with :lvalue kind → "LVALUE" (arylen's cell has
+           ;; kind nil and falls through to "SCALAR").
+           ((and (p-magic-cell-p rv) (eq (p-magic-cell-kind rv) :lvalue))
+            "LVALUE")
+           ;; Referent scalar holds a v-string literal → "VSTRING" (op/ver.t).
+           ((p-vstring-p rv) "VSTRING")
+           ;; The referent IS a raw aggregate: a wrapper for `\@a`/`\%h`/…
+           ;; stored in a variable or element.  (When VAL is a ref TO a
+           ;; scalar that HOLDS such a value — `\$aref` — the referent is the
+           ;; scalar BOX, so these do not fire and the REF arm below wins,
+           ;; which is what perl answers.)
+           ((and (vectorp referent) (not (stringp referent))) "ARRAY")
+           ((hash-table-p referent) (or (gethash :__class__ referent) "HASH"))
+           ((p-regex-match-p referent) "REGEXP")
+           ((functionp referent) "CODE")
+           ((p-typeglob-p referent) "GLOB")
+           ;; The referent SCALAR holds a glob VALUE: `my $g = *foo` makes
+           ;; the SV a GV in perl, so \$g is a GLOB ref (substr.t 784 —
+           ;; '\substr does not coerce its glob arg just yet').  A referent
+           ;; holding a glob REFERENCE keeps is-ref and stays REF below.
+           ((%p-glob-value-box-p referent) "GLOB")
+           ;; The referent scalar holds a FILEHANDLE.  That payload IS a
+           ;; glob ref (see %p-handle-payload-p), so \$fh is a ref to a
+           ;; ref — perl says REF (#1308).
+           ((%p-handle-payload-p rv) "REF")
+           ;; Ref-to-ref → "REF": the referent is itself a ref-wrapper (\\1)
+           ;; or *holds* a reference (\$r, \$aref).  %scalar-holds-ref-p is
+           ;; non-recursive so a self-referential scalar ($x=\$x) does not
+           ;; loop, and a plain scalar — incl. undef (*p-undef*) and ''
+           ;; array elements — yields SCALAR, not REF.
+           ((or (and (p-box-p referent) (p-box-is-ref referent))
+                (%scalar-holds-ref-p referent))
+            "REF")
+           ;; Scalar reference: box containing box (from p-backslash $x)
+           (t "SCALAR"))))
       ;; Old-format hash reference (autovivified, single-boxed) — and \%ENV /
       ;; \%INC, whose referent IS the marker symbol (task #736).
       ((or (hash-table-p inner) (%p-hash-marker-p inner)) "HASH")
@@ -23431,8 +23478,11 @@ buffer's fill-pointer; everything else falls back to file-length."
              ((string= r "CODE")   "CODE")
              ((string= r "SCALAR") "SCALAR")
              ((string= r "LVALUE") "LVALUE")
-             ;; ref-to-ref: the referent is still a SCALAR (it happens to hold a ref)
-             ((string= r "REF")    "SCALAR")
+             ;; ref-to-ref: perl's reftype says REF, not SCALAR — it reports
+             ;; SvTYPE of the referent, and an SV holding a reference is an
+             ;; RV (probed 5.40.3: reftype(\$h) is REF for every $h that
+             ;; holds a ref, SCALAR only for a plain one; #1619).
+             ((string= r "REF")    "REF")
              ((string= r "GLOB")   "GLOB")
              ;; Non-ref: Perl's reftype returns undef (NOT ""; ref() returns "").
              ((string= r "") *p-undef*)
@@ -23441,7 +23491,12 @@ buffer's fill-pointer; everything else falls back to file-length."
                   ((hash-table-p inner) "HASH")
                   ((and (vectorp inner) (not (stringp inner))) "ARRAY")
                   ((functionp inner) "CODE")
-                  ((p-box-p inner) "SCALAR")
+                  ;; SCALAR vs REF by the same referent rule as above: a
+                  ;; blessed `\$x` is SCALAR only when $x holds a plain
+                  ;; scalar (`bless \$h, "S"` with a ref in $h is REF).
+                  ((p-box-p inner) (if (%p-scalar-referent-p val)
+                                       "SCALAR"
+                                       "REF"))
                   ((p-typeglob-p inner) "GLOB")
                   (t r)))))))))
 
@@ -24901,7 +24956,16 @@ buffer's fill-pointer; everything else falls back to file-length."
              ;; what the scalar happens to HOLD (e.g. a hash ref) keeps its
              ;; own class untouched (bless.t 25-32: blessing \$a1 as "F"
              ;; must not change the class of the object in $a1).
-             (setf (p-box-class scalar-referent) class-name)
+             ;; The stash goes in its own table, because the class SLOT is
+             ;; also the cache of the class of a reference the scalar holds
+             ;; -- writing it for a ref payload made `bless \$h, "S"' answer
+             ;; S for ref($h), where perl says HASH (#1619).  A PLAIN-scalar
+             ;; payload has no cache to lose, and readers older than the
+             ;; table still find it there.
+             (progn
+               (setf (gethash scalar-referent *p-sv-stash*) class-name)
+               (unless (%p-ref-shaped-p (p-box-value scalar-referent))
+                 (setf (p-box-class scalar-referent) class-name)))
              ;; Aggregate ref through a variable (double-boxed): `inner`
              ;; IS the target box -- restamp it (and a hash target's
              ;; :__class__), not just the variable's slot, or a re-bless

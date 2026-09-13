@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 36;
 
 sub run_cl {
     my ($code) = @_;
@@ -91,10 +91,16 @@ test_cl('ref(\\$undef) is SCALAR',
 test_cl('self-referential $x = \\$x is REF (no hang)',
     'my $x; $x = \$x; print ref($x), "\n";', "REF\n");
 
-# ── reftype of a ref-to-ref is SCALAR (the referent scalar) ──────────────────
-test_cl('reftype($rr) is SCALAR',
+# ── reftype of a ref-to-ref is REF, not SCALAR: perl reports SvTYPE of the
+#    referent, and an SV that HOLDS a reference is an RV (probed 5.40.3 —
+#    `my $x=1; my $r=\$x; my $rr=\$r; reftype($rr)` is REF, and so is ref($rr);
+#    only a referent holding a PLAIN scalar is SCALAR, the row below).  This
+#    row asserted SCALAR until #1619, where it was the reftype half of the
+#    same wrong level. ──────────────────────────────────────────────────────
+test_cl('reftype($rr) of a ref-to-ref is REF, like ref($rr)',
     'use Scalar::Util qw(reftype);'
-  . 'my $x=1; my $r=\$x; my $rr=\$r; print reftype($rr), "\n";', "SCALAR\n");
+  . 'my $x=1; my $r=\$x; my $rr=\$r; print reftype($rr), " ", ref($rr), "\n";',
+    "REF REF\n");
 
 test_cl('reftype($r) of a plain scalar ref is SCALAR',
     'use Scalar::Util qw(reftype);'
@@ -219,3 +225,51 @@ test_cl('\\&$coderef is that same code ref, not a reference to it',
     'my $cr = sub { 7 }; my $r = \&$cr; print ref($r), " ", $r->(), "\n";'
   . 'sub g { 5 } my $n = "g"; my $r2 = \&$n; print ref($r2), " ", $r2->(), "\n";',
     "CODE 7\nCODE 5\n");
+
+# ── #1619: `ref(\$var)` reports the blessing of the REFERENT ITSELF, and a
+#    scalar that merely HOLDS a blessed reference is not blessed.  PCL kept the
+#    class of the held reference in the variable box's class SLOT, where it
+#    collided with the *other* thing that slot means — the SvSTASH `bless \$x`
+#    writes on the scalar — so every reader answered the held object's class
+#    (probed 5.40.3: REF for all four payload kinds below).  The scalar's own
+#    stash now lives in its own table (*p-sv-stash*).
+test_cl('ref(\$obj) is REF for every blessed payload kind',
+    'my $h = bless {}, "H"; my $a = bless [], "A";'
+  . 'my $c = bless sub { 11 }, "K"; my $s = "x"; my $b = bless \$s, "S";'
+  . 'print join(" ", ref(\$h), ref(\$a), ref(\$c), ref(\$b)), "\n";'
+  . 'print join(" ", ref($h), ref($a), ref($c), ref($b)), "\n";',
+    "REF REF REF REF\nH A K S\n");
+
+test_cl('an element holding an object is not a blessed scalar either',
+    'my %hh; $hh{k} = bless {}, "H"; my @aa; $aa[0] = bless {}, "H";'
+  . 'my $rr = \\(bless {}, "H");'
+  . 'print join(" ", ref(\$hh{k}), ref(\$aa[0]), ref($rr)), "\n";'
+  . 'print join(" ", ref($hh{k}), ref($aa[0]), ref($$rr)), "\n";',
+    "REF REF REF\nH H H\n");
+
+test_cl('bless \$x writes the SCALAR stash and leaves what $x HOLDS alone',
+    'my $h = {}; bless \$h, "S"; print ref(\$h), " ", ref($h), "\n";'
+  . 'my $h2 = bless {}, "H"; bless \$h2, "S";'
+  . 'print ref(\$h2), " ", ref($h2), "\n";'
+  . 'my $a = bless [], "A"; bless \$a, "S";'
+  . 'print ref(\$a), " ", ref($a), "\n";',
+    "S HASH\nS H\nS A\n");
+
+test_cl('blessing a ref TO an object does not re-class the object',
+    'my $a1 = bless {}, "A"; my $r = \$a1; bless $r, "F";'
+  . 'print ref($a1), " ", ref($r), " ", ref(\$a1), "\n";',
+    "A F F\n");
+
+test_cl('blessed() and reftype() follow ref() through the same rule',
+    'use Scalar::Util qw(blessed reftype);'
+  . 'my $o = bless {}, "H"; my $s = "x"; my $b = bless \$s, "S";'
+  . 'print join(" ", map { defined $_ ? $_ : "undef" }'
+  . '  blessed(\$o), blessed($o), blessed(\$b), blessed($b)), "\n";'
+  . 'print join(" ", reftype(\$o), reftype($o), reftype(\$b), reftype($b)), "\n";',
+    "undef H undef S\nREF HASH REF SCALAR\n");
+
+test_cl('a plain scalar ref keeps its own stash, and never shows it through $x',
+    'my $s = "x"; bless \$s, "S";'
+  . 'print ref(\$s), " ", ref($s), " [$s]", "\n";'
+  . 'my $u; print ref(\$u), " ", ref(\5), "\n";',
+    "S  [x]\nSCALAR SCALAR\n");
