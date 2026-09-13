@@ -2,6 +2,33 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473t5c (Opus agent, 2026-09-13) — #1501 round 4: `comp/` CHECK 1 + CHECK 2, one abort fixed, the directory attributed
+
+**Member 1, the population.**  Every non-OK `comp/` file was re-measured once on
+this tree (`--jobs 1 --timeout 200`, `PCL_SUITE_KEEP`); the three that already
+read OK (`cmdopt.t`, `multiline.t`, `term.t`) were not.  At launch the
+directory was **1,614 blessed fail rows over 20 files with CAUSES 0**, plus 8
+`row-shortfall.tsv` rows (7 UNEXPLAINED).  Measured shortfall **276 rows in 8
+files, 267 in 6 UNEXPLAINED** — and 155 of those 267 are ONE aborted top-level
+form in `comp/proto.t`.
+
+| CHECK 1 (rows short) | short | the aborting form / why |
+|---|---|---|
+| `comp/proto.t` | 155 | `Undefined subroutine &main::1` — the `\(&NAME)` bug below |
+| `comp/parser.t` | 93 | `"${; =pod =cut }";` not supported + 5 drops (#1276) |
+| `comp/form_scope.t` | 12 | no abort — `format`/`write` produce nothing |
+| `comp/our.t` | 7 | TRANSPILE-FAIL, #1583 |
+| `comp/decl.t` | 3 | three `write` rows |
+| `comp/require.t` | 3 | no abort |
+| `comp/hints.t` | 2 | registered XDIFF |
+| `comp/final_line_num.t` | 1 | the file is invalid perl by design |
+
+CHECK 2 is one cluster table per file in `scratch/s473t5c/tables.md`; the
+directory is far more collapsible than `op/`: `utf.t`'s 500 rows are 4 shapes
+and one fact, `proto.t`'s 169 are all `ok -> (missing)` behind the one abort,
+`redef.t`/`colon.t`/`package.t`/`bproto.t`/`package_block.t`/`line_debug.t` are
+one shape each.  `comp/parser.t` alone is `op/`-shaped (134 shapes over 140
+rows) and is attributed by FILE.
 ## Session s473t5b (Opus agent, 2026-09-13) -- #1501 round 3: `op/` CHECK 2 over six files, 786 rows attributed, and PPI §30 (the indented here-doc's indentation) fixed
 
 **Member 1, the cluster table** (`scratch/s473t5b/cluster-table.md`).  Measured
