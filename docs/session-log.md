@@ -313,9 +313,18 @@ IDENTICAL over 111**, silent drops 5 unchanged, 6 shapes identical;
 `ir-host-leak` **31 symbols / 111 files** = main's by construction;
 `ir-conform --jobs 2` **321 pass / 0 fail / 24 known / 0 stale**; full sweep
 `--jobs 4` **GATE clean, TOTAL passing 18675 (+0)**, 0 new / 0 fixed, drops
-**5 = census**; companion `--all --quick`; **no generation bump** -- v2-1360
-stands, and the reason is measured, not assumed (the emission is byte-identical
-over four populations).
+**5 = census**; FULL GATE **240 files / 8203 rows**, 160 s wall / 687 CPU-s,
+failures ONLY xs-01/02/03 (the 13 standing pclxs rows); companion
+`--all --quick --jobs 2` **528 files**, whose EIGHTEEN snapshot differences are
+classified without exception -- ONE mine (op/filetest_t.t, spliced), TWELVE
+measured IDENTICAL on the 2ff53f8d extraction back to back (comp/use.t,
+op/coreamp.t, op/coresubs.t, op/inc.t, op/inccode.t, op/inccode-tie.t,
+run/fresh_perl.t, run/switchM.t, uni/method.t, io/iofile.t, io/pipe.t,
+io/open.t), FOUR the runner's own THREE-WAY rows-unstable verdict under load
+(io/crlf_through.t, io/through.t, io/pvbm.t, uni/variables.t) and TWO the #1651
+hangs (op/gv.t, uni/gv.t); **no generation bump** -- v2-1360 stands, and the
+reason is measured, not assumed (the emission is byte-identical over four
+populations).
 
 ## Session s473t5c (Opus agent, 2026-09-13) — #1501 round 4: `comp/` CHECK 1 + CHECK 2, one abort fixed, the directory attributed
 
