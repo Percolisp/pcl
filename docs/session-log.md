@@ -2,6 +2,31 @@
 
 Append new entries at the top. One section per session.
 
+## Session 484 (Fable, 2026-09-13 17:25 → 2026-09-14 01:00) — "Please continue. Keep at most two subjobs": nine merges in two (then three) slots, #1117 ruled (B) and closed, the companion census caused in five of six directories
+
+**Where it started.** Fresh-booted box; main `8ab11c15`; two worktrees stopped mid-step from s483 (s473t4 at ac2258e8 with uncommitted records, s483c at 52666d1c with a mid-edit in PExpr).  Both were resumed from written resume briefs, both finished, both merged.
+
+**Merged, in order (each Fable-reviewed: gate log on the sha, probes vs perl 5.40.3, hunks and every baseline splice read):**
+| batch | main after | what |
+|---|---|---|
+| s483c | 2ffefb36 | #1620 `_arrow_invocant` (the scalar-deref cast run binds with the arrow's target in EVERY arm; the one emission mover in 1034 files was Test::Builder's `_unoverload`, which used to DIE), #1621 escaped `\$name` / literal heredoc is not a `str` use, #1622 capture by a nested anon sub disqualifies the B regime; gen v2-1320 |
+| s473t4 | 8c8fa4c0 | #1501 round 1: the CAUSE column on `perl-suite-fails.tsv` via ONE reading `tools/lib/PCLCauses.pm` (0 → 2,269 causes), the census + rounds t5a–t5f, the state-in-inner-block eval narrowing; test.pl helpers REVERTED → #1590 |
+| s484a | 186134ce | #1628 wrong-kind element access is perl's fatal (`%p-scalar-referent-p` asks the referent's TYPE), #1587 `package NAME VERSION`/`{…}` in a string eval are ONE switch, #1586 `prototype("CORE::NAME")` from a perl-generated table; gen v2-1340 |
+| s473t5a | 17d831fe | round 2 (op/ 50–199 band, eight files caused): #1581 a `my` in a package BLOCK is not the file lexical, #1650 all-digit container names (`$VAR_TOKEN_RX`), #1655 `$|` desynced the string blanker; gen v2-1360 |
+| s473t5b | 2ff53f8d | round 3 (op/ CHECK 2, 806 rows caused): PPI §30 — an indented here-doc's indentation is what stands before the delimiter text (`_repair_indented_heredocs`, the fourth in-place repair) |
+| s473t5c | ee53ce76 | round 4 (comp/, 1,590 rows caused, 6 → 0 unexplained): #1681 `\` over a `&`-mention is the sub slot per element (`\(&foo)` used to CALL foo); killed by the API limit mid-round and resumed from its transcript |
+| s484b | 347a46e3 | **#1117 shape (B), USER-ruled with a stop-rule that did not fire**: a glob-cleared aggregate slot reads ABSENT while its registered container is empty; sub.t 24 left the fail baseline, TOTAL 18675 → 18676; #1726 #1727 filed |
+| s473t5e | 420c335b | round 6 (re/, 9,836 causeless → 3,940 all caused, 22 → 0 unexplained): #1711 the transpile SERVER's strict encoding layer desynchronised its protocol on non-characters (→ `:utf8`), POSIX `[:^class:]`/`[:ascii:]` via ONE table, #1715 inline `(?a:…)` compiles; #1714 the re_tests six HANG (2^n backtracking), #1719 filed (zero-length match stalls `//g` — a hang in ordinary Perl).  Delivered BEHIND main; Fable rebased it and ran the combined-tree gate + sweep |
+| s473t5d | f6b56feb | round 5 (run/+io/, 763 → 695 all caused, 18 → 0 unexplained): #1696 `+>>`, #1697 LIST-form pipe open (was a macro arity error), #1698 `bytes::length`, #1699 ONE `%p-open-file` (perl's open never signals), #1700 `-i` is `$^I`, #1701 the stub passes `args` raw |
+
+Sweep TOTAL: 18675 → 18676 (the one #1117 row), GATE clean on every merge; gate 235/8072 → 241/8214.  CI green through 420c335b at session end.
+
+**Fable's own filings from the review probes:** #1663 (rvalue element access through an UNDEF scalar does not vivify it), #1679 (`$119797[1]` reads capture group 119797), #1680 (PPI tokenizes `%12` as Operator + Number).  **Rulings recorded:** #1117 = (B) with the USER's stop-rule ("document it if expensive"); the USER granted a THIRD slot for this session only.
+
+**Stopped at session end, intact, none merge-ready** (resume points in PAUSE-s474's top entry): s473t5f (uni/; the LAST t5 round; census residue measured: 2,402 causeless rows, 2,375 in op/), s484c (#1719 #1713 #1726 #1727 all committed), s484d (#1590 heap allowance + the three test.pl helpers, #1652 #1585 #1584).  The Sonnet README prose rewrite is on disk outside git for the USER to judge.
+
+**Lessons:** a delivered tip can sit behind main — rebase + the combined-tree bars before `--ff-only`; both records files conflict at the newest-first slot when two batches land in one round — keep both, later above; the API session limit kills agents mid-round — a committed one is resumed by a continue-message, an empty one relaunched fresh; the full gate needs `< /dev/null`; `until ! pgrep -f` matches itself.
+
 ## Session s473t5e (Opus agent, 2026-09-13) — #1501 round 6: `re/` — three fixes, 9,836 causeless rows → 3,940 all caused, and the re_tests TIMEOUT verdict is HANG
 
 **Member 1, the population.**  Joined from the three baselines on this tree:
