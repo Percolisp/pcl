@@ -2,6 +2,68 @@
 
 Append new entries at the top. One section per session.
 
+## Session s483b (Opus agent, 2026-09-13) — two reference-representation fillers: a scalar's own stash gets its own home (#1619), and `$coderef->[0]` dies without touching the emitter (#1618)
+
+**#1619 — one box slot, two perl facts.**  `ref(\$o)` for `my $o = bless {}, "H"`
+answered `H` where perl says `REF`, for every payload kind.  The trace (box dump
+of the wrapper, the variable box and the referent) put the class on the VARIABLE
+box, and reading the code said why: that slot is both the CACHE of the class of
+the reference the box holds — the only storage there is for a raw ARRAY/CODE/GLOB
+payload — and the SvSTASH that `bless \$x, "C"` writes on the scalar itself.
+Three readers took the first for the second: `%p-target-class`'s `(p-box-class v)`
+arm, `p-ref`'s `((p-box-p inner) (if (p-box-class inner) …))` arm, and — on the
+write side — `p-bless`, which overwrote the cache, so `my $h = {}; bless \$h,"S"`
+made `ref($h)` answer `S` where perl says `HASH`.  The two facts now have two
+homes: the rare one, a scalar's own stash, lives in the weak EQ table
+`*p-sv-stash*` (written only by p-bless's scalar-referent branch, read only by
+`%p-referent-class`, guarded by a `hash-table-count` test so the p-ref/box-sv hot
+path pays one slot read), and the class slot keeps the cache.  `%p-target-class`
+reads it only when the box is NOT is-ref — the same discriminator `%p-ref-referent`
+uses — and p-ref's arm is gone.  `p-reftype` came with it (rule 11: the second
+copy of the same question): perl's reftype of a ref-to-ref is `REF`, not `SCALAR`
+(probed six shapes), and its blessed arm now asks `%p-scalar-referent-p`.  38-shape
+battery vs perl 5.40.3: 37 identical, the 38th a parse bug (below).  One `Pl/t`
+row asserted the old reftype answer and was rewritten under the s377 four-conjunct
+rule.  Guard `Pl/t/ref-to-ref-01.t` 30 → 36; ir-spec §2.6 gains the rule.
+
+**#1618 — the emitter change the task predicted is not needed, and the measurement
+says so.**  `p-aref-deref`'s `functionp` arm answered "the sub itself", written in
+April 2026 (`7818b23f`) for the one-element list slice `(sub{…})[0]`, which then
+reached that entry as a bare function.  It no longer does: a list-slice operand is
+wrapped in `(vector …)` and normalised by `%p-listslice-array`, so only a
+`$coderef->[i]` / `${$cr}[i]` / `$$cr[i]` deref arrives raw.  Replacing the arm
+with `(%p-not-a-ref "ARRAY")` made all 24 probe shapes identical to perl — the
+whole slice family (`(sub{7})[0]`, `(mk())[1]`, `($cr)[0]`, mixed lists) unmoved.
+So the batch is runtime-only: no generation bump, and corpus-diff cannot move
+because nothing under `Pl/` changed.  Guard rows 37–39 (the five deref spellings
+die; the slice family is asserted UNMOVED; the ARRAY/HASH siblings untouched).
+
+**Two pre-existing bugs filed from the probes.**  **#1620**: `$$r->who` is parsed
+as `${ $r->who }` — perl binds the sigil deref tighter than `->`, and the
+subscript siblings `$$r{k}` / `$$r[0]` are already right, so it is the `->` arm of
+the same postfix decision.  **#1621**, the more serious: an ESCAPED `\$cr` inside a
+double-quoted LABEL counts as a string-typed USE for the raw-slot verdict, so
+`$cr` is given `:str` and the code ref is stringified into its own slot
+(`(p-let (($cr :str (%pcl-to-string-strict <lambda> "$cr")))`) — after which
+`$cr->[i]` and `@$cr` are symbolic derefs that answer instead of dying and
+`$cr->()` dies "Undefined subroutine &main::CODE(0x…)".  Two files differing in
+that one token, plus `PCL_NO_RAW_VERDICT=1`, are the discriminator.  It surfaced
+as a probe file whose EARLIER rows were wrong because of text further down — the
+reason the extended battery was re-measured on a `git archive` extraction of the
+base before any of it was believed.
+
+**Bars.**  Gate `PCLXS_DIR=~/pclxs tools/prove-core` on a fresh core: **235 files /
+8081 rows**, failures only `xs-01/02/03` (13 rows, the standing pclxs state; 8072 +
+the 9 new guard rows).  Full sweep `--jobs 4`, run per member: both **GATE clean,
+0 new / 0 fixed / 0 LOST, TOTAL passing 18675 (+0)**, drops 5 = census, shortfall
++0 (the 5 UNSTABLE + 15 unverified are the usual PARTIAL-file noise).  Companion
+`--jobs 1`: `op/ref.t` 202/40, `op/bless.t` 111/6, `op/array.t` 171/24,
+`op/anonsub.t` 1/5 — every one equal to `baselines/perl-suite-run.tsv`, ROW DIFF 0
+NEW / 0 FIXED / 0 LOST.  `tools/ir-conform --jobs 2` twice: 321 pass / 0 fail / 24
+known / 0 stale.  Guards inverse-verified on a `git archive e3767cff` extraction —
+rows 11, 31–33, 35, 37 FAIL there and the two negatives (34, 38, 39) pass on both
+sides, which is what a negative is for.
+
 ## Session 483 (Fable, 2026-09-13) — two slots filled on the USER's ask; s483a (#1592) reviewed and merged; #1619 filed
 
 USER: "We are a bit low on tokens. Please run two tasks at the same time."  The s482 recipe queued s473t4 → s473t3 → #1592 → #1117, but s473t3 had been merged on 2026-09-07 — so the two launches were **s473t4 RESUMED** in its own stopped worktree (rebase onto `eabff00d` first; members 2–5; IDs 1577–1591; gen v2-1300 only on an emission change) and **s483a = #1592** in a fresh worktree (brief `~/pcl-agent-scratch/s473/s483a/prompt.md`; IDs 1618–1627; gen v2-1320 only on an emission change), both pinned Opus.
