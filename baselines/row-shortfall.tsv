@@ -125,7 +125,7 @@ perl-tests/tr.t	75	s473t1: 2 lost + 73 registered skips.  The 2 are `RT #132608 
 perl-tests/undef.t	4	UNEXPLAINED
 perl-tests/vec.t	2	UNEXPLAINED
 perl-tests/yadayada.t	1	s473t1: not a lost ASSERTION -- a lost VERDICT LINE.  The file's last loop runs each program inside `eval qq { {local *STDOUT; ...; $line;} pass $mess; 1 }`; `local *STDOUT` does not detach the handle in PCL (task #1437), so `print 'D' ... 'A'` writes DEFGHIJKLMNOPQRSTUVWXYZ to real stdout and the next line comes out as `DEFGHIJKLMNOPQRSTUVWXYZok 32 - ...`, matching no TAP row regex.  The assertion PASSED.
-t/base/lex.t	120	UNEXPLAINED
+t/base/lex.t	120	NS:Regex code blocks -- `(?{...})` is STRIPPED and the transpile refuses the file
 t/class/accessor.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
 t/class/class.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
 t/class/construct.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
@@ -140,7 +140,7 @@ t/comp/decl.t	3	UNEXPLAINED
 t/comp/final_line_num.t	1	UNEXPLAINED
 t/comp/form_scope.t	12	UNEXPLAINED
 t/comp/hints.t	2	XDIFF: not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile...
-t/comp/our.t	7	UNEXPLAINED
+t/comp/our.t	7	#1583 -- `our $y = $y;` inside a block where a `my $y` is in scope refuses; perl reads the my on the RHS
 t/comp/parser.t	93	UNEXPLAINED
 t/comp/proto.t	155	UNEXPLAINED
 t/comp/require.t	3	UNEXPLAINED
@@ -148,7 +148,7 @@ t/io/closepid.t	3	UNEXPLAINED
 t/io/crlf.t	3	UNEXPLAINED
 t/io/data.t	4	UNEXPLAINED
 t/io/dup.t	19	UNEXPLAINED
-t/io/fflush.t	3	UNEXPLAINED
+t/io/fflush.t	3	#1585 -- the PCL test.pl stub has no `_create_runperl`
 t/io/layers.t	55	UNEXPLAINED
 t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
 t/io/scalar_ungetc.t	17	UNEXPLAINED
@@ -181,8 +181,8 @@ t/op/attrhand.t	4	UNEXPLAINED
 t/op/attrs.t	14	UNEXPLAINED
 t/op/bless.t	1	UNEXPLAINED
 t/op/bop.t	13	UNEXPLAINED
-t/op/coreamp.t	723	UNEXPLAINED — MIXED, not measured per row.  The `CORE::given` refusal is one cause (statement-level since s466, #1037, which is why the file produces 55 rows at all instead of none), but the file also aborts FIFTEEN forms, the first on `Undefined subroutine &File::Spec::Functions` (#1073), and its 46 failing rows are the &CORE:: sub family.  Attribution of the 723 is an audit job, so the row stays in the queue on purpose.
-t/op/coresubs.t	1109	UNEXPLAINED
+t/op/coreamp.t	723	#1577 -- MIXED, 15 aborted forms, MEASURED s473t4: six are the `&CORE::NAME` / `&__FILE__` / `&__LINE__` / `&__PACKAGE__` family (the file's subject), two are the ruled given/when refusal, three a runtime arity error, four other undefined subs.
+t/op/coresubs.t	1109	NS:Readouts of perl's own internals -- `use B` + B::walkoptree is the file's whole method (s473t4: the #1501 `state`-in-inner-block fix took it from TRANSPILE/0 rows to DIFF 1/1; the residue is B)
 t/op/current_sub.t	11	XDIFF: not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-s...
 t/op/dbm.t	5	UNEXPLAINED
 t/op/decl-refs.t	195	UNEXPLAINED
@@ -194,27 +194,27 @@ t/op/exec.t	16	UNEXPLAINED
 t/op/filehandle.t	2	UNEXPLAINED
 t/op/filetest.t	2	UNEXPLAINED
 t/op/filetest_t.t	7	UNEXPLAINED
-t/op/for.t	149	UNEXPLAINED
+t/op/for.t	149	#1580 -- PPI 1.291 LEXER fails on a DEREFERENCE as the foreach loop variable (`for ${*$f} (…)`); ppi-upstream-bugs.md section 29
 t/op/fork.t	27	UNEXPLAINED
 t/op/getppid.t	8	UNEXPLAINED
 t/op/gmagic.t	45	UNEXPLAINED
-t/op/goto.t	134	UNEXPLAINED
+t/op/goto.t	134	#1581 -- a `my $count` inside a `package NAME { … }` block plus a FILE-level `my $count` refuses ("spans a package boundary")
 t/op/gv.t	113	UNEXPLAINED
 t/op/hash-clear-placeholders.t	9	UNEXPLAINED
 t/op/hash-rt85026.t	1	UNEXPLAINED
-t/op/hash.t	479	UNEXPLAINED
+t/op/hash.t	479	NS:`Hash::Util` bucket statistics -- `require Hash::Util` at hash.t:137 aborts the top-level form that holds every torture_hash call (#1578 is the separate message bug: the die text says "module this module" instead of the name).
 t/op/inc.t	18	UNEXPLAINED
-t/op/inccode-tie.t	89	UNEXPLAINED
+t/op/inccode-tie.t	89	#1587 -- `eval "package NAME VERSION"` / `eval "package NAME { … }"` refuse: the #226 single-switch collapse excludes both spellings
 t/op/inccode.t	48	UNEXPLAINED
 t/op/incfilter.t	153	UNEXPLAINED
-t/op/index.t	308	UNEXPLAINED
+t/op/index.t	308	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`, same reason as op/write.t
 t/op/kvhslice.t	0	s473t1 #1024 FIXED (was 1): a lone BAREWORD key in a kv-slice was compiled as a sub call, so the assertion inside `eval '… %h{i} …'` never ran
 t/op/length.t	2	UNEXPLAINED
 t/op/lex.t	1	UNEXPLAINED
 t/op/lexsub.t	15	UNEXPLAINED
 t/op/lfs.t	17	UNEXPLAINED
 t/op/lock.t	5	UNEXPLAINED
-t/op/lvref.t	201	UNEXPLAINED
+t/op/lvref.t	201	#1579 -- `\state @a = [1..3]` (refaliasing a state container) refuses the whole file
 t/op/magic.t	1	UNEXPLAINED
 t/op/method.t	37	UNEXPLAINED  s473f: 38 -> 37 -- a raw typeglob invocant is auto-referenced (#1074/#1434), so `*glob->method` RUNS instead of dying and one aborted form fewer takes its rows with it (aborted-forms 3 -> 2 in perl-suite-run.tsv).
 t/op/multideref.t	0	s473t1 #1431 FIXED (was 13): the `exists +(EXPR)->…` arity crash aborted the file's top-level form at test 52; it produces all 65 rows now
@@ -239,7 +239,7 @@ t/op/state.t	74	not-supported.md §`given`/`when` — the file’s ONE `given` b
 t/op/sub_lval.t	116	UNEXPLAINED
 t/op/substr.t	46	UNEXPLAINED
 t/op/svflags.t	16	UNEXPLAINED
-t/op/svleak.t	156	UNEXPLAINED
+t/op/svleak.t	156	NS:Regex code blocks -- `(?{...})` is STRIPPED and the transpile refuses the file
 t/op/switch.t	195	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL re...
 t/op/symbolcache.t	1	UNEXPLAINED
 t/op/tie.t	95	UNEXPLAINED
@@ -267,7 +267,7 @@ t/re/overload.t	87	UNEXPLAINED
 t/re/pat.t	898	UNEXPLAINED
 t/re/pat_rt_report.t	4	UNEXPLAINED
 t/re/reg_email.t	13	UNEXPLAINED
-t/re/reg_eval_scope.t	49	UNEXPLAINED
+t/re/reg_eval_scope.t	49	NS:Regex code blocks -- `(?{...})` is STRIPPED and the transpile refuses the file
 t/re/reg_fold.t	6891	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/reg_mesg.t	3348	UNEXPLAINED
 t/re/reg_nc_tie.t	5	UNEXPLAINED
@@ -296,7 +296,7 @@ t/re/uniprops08.t	30492	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/run/locale.t	44	UNEXPLAINED
-t/run/runenv.t	106	UNEXPLAINED
+t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
 t/run/runenv_hashseed.t	269	UNEXPLAINED
 t/run/switchF.t	1	UNEXPLAINED
 t/run/switcha.t	1	UNEXPLAINED
@@ -310,7 +310,7 @@ t/uni/gv.t	118	UNEXPLAINED
 t/uni/labels.t	2	UNEXPLAINED
 t/uni/lower.t	11720	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/method.t	1	UNEXPLAINED
-t/uni/overload.t	1	UNEXPLAINED
+t/uni/overload.t	1	#1584 -- the PCL test.pl stub has no `todo_skip` (its `last TODO` jumps to a label in the CALLER's frame)
 t/uni/title.t	5936	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/universal.t	10	UNEXPLAINED
 t/uni/upper.t	6228	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
