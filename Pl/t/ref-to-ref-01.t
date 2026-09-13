@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 30;
 
 sub run_cl {
     my ($code) = @_;
@@ -198,3 +198,24 @@ test_cl('"$$coderef" interpolation is the fatal too',
     'my $cr = sub { 7 }; my $s = eval { "$$cr" };'
   . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$s]"), "\n";',
     "died\n");
+
+# ── #1592, the other half: `\` on a CODE VALUE gains the anonymous scalar perl
+#    gives it, so a reference TO a code ref is one level deeper than the code
+#    ref.  It used to be idempotent (box(FN) either way), which is what made
+#    the fatal above undecidable — and it answered ref(\\&f) = CODE.
+test_cl('ref(\\\\&f) is REF and ref(\\&f) is CODE',
+    'sub f { 1 } print ref(\&f), " ", ref(\\\\&f), " ", ref(\ sub { 7 }), "\n";',
+    "CODE REF REF\n");
+
+test_cl('a ref to a code ref derefs to the code ref, and once more is the fatal',
+    'sub mysub2 { lc shift } our $subrefref = \\\\&mysub2;'
+  . 'print $$subrefref->("GOOD"), "\n";'
+  . 'my $rr = \\\\&mysub2; print ref(${$rr}), " ", ${$rr}->("X"), "\n";'
+  . 'eval { my $v = "".${${$rr}} };'
+  . 'print +($@ =~ /^Not a SCALAR reference/ ? "died" : "no:[$@]"), "\n";',
+    "good\nCODE x\ndied\n");
+
+test_cl('\\&$coderef is that same code ref, not a reference to it',
+    'my $cr = sub { 7 }; my $r = \&$cr; print ref($r), " ", $r->(), "\n";'
+  . 'sub g { 5 } my $n = "g"; my $r2 = \&$n; print ref($r2), " ", $r2->(), "\n";',
+    "CODE 7\nCODE 5\n");

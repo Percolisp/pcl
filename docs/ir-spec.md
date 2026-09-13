@@ -461,9 +461,15 @@ comma operator: `my $s = \@A[0,1]` is `\$A[1]`.
 `value` is:
 - for a scalar: the scalar's *box* (so writes through `$$r` hit the
   original — a box-in-box);
-- for an array/hash/code/glob: the underlying vector/table/function
-  itself;
-- for a raw value (`\42`): a fresh box wrapping it (so `$$r += 1` works).
+- for an array/hash/glob: the underlying vector/table/glob itself;
+- for a raw value (`\42`) **and for a raw CODE value** (`\ sub {…}`,
+  `\ \&f`): a fresh box wrapping it (so `$$r += 1` works, and so a reference
+  TO a code ref is one level deeper than the code ref — normative, s483a /
+  #1592).  A code ref itself is *not* made here: `\&NAME` is
+  `p-backslash-sub` (the function) and `\&$cr` is `p-backslash-sub-ref`'s
+  direct branch (that same function).  Before #1592 `\` on a code value was
+  idempotent, which made `ref(\\&f)` answer `CODE` where perl says `REF` and
+  left `${$refref}` indistinguishable from the fatal `${$coderef}`.
 
 Dereference ops unwrap one level. Reference identity = identity of the
 referenced structure. Stringification of a reference yields
@@ -521,16 +527,20 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   one the arrow's base gets — has to be pushed down as the group lowers:
   the LAST child only, which is the comma operator's value; the earlier
   ones are still evaluated, for their effects.
-- **`${ EXPR }` on an ARRAY or HASH referent is FATAL** (normative, s473h /
-  #1249(1)): perl dies `Not a SCALAR reference`, and so does PCL.  The
-  discriminator is the REFERENT (`%p-ref-referent`, the same rule `ref()` and
+- **`${ EXPR }` on an ARRAY, HASH or CODE referent is FATAL, reading AND
+  writing** (normative, s473h / #1249(1), widened s483a / #1592): perl dies
+  `Not a SCALAR reference`, and so does PCL.  The discriminator is the REFERENT
+  (`%p-non-scalar-referent-p` over `%p-ref-referent`, the same rule `ref()` and
   the stringifiers use), never the unboxed value — after one unbox a `\@a` and
   a `\$aref` read back out of a container are the same shape, which is why the
-  ARRAY/HASH question is decidable and the SCALAR one is not (#154).  A CODE
-  referent is DELIBERATELY excluded: PCL's model collapses a
-  scalar-ref-to-coderef, so a raw function legitimately reaches this site
-  (`${$h{'$name'}}`, Sub::Quote's shape).  Example: `my @a=(1,2); my $r=\@a;
-  ${$r}` dies; `my $rr=\$r; ${$rr}` is the ARRAY ref.
+  question is decidable at the referent and not at the value (#154).  That
+  level is exactly what makes CODE decidable too: `\$x` where `$x` holds a code
+  ref has the holding BOX for a referent (Sub::Quote's
+  `my $t = ${$_[1]->{'$t'}}`), while `${$coderef}` has the raw function.  An
+  UNBOXED operand is its own referent — `${\&named}`, `${sub{7}}` and a code
+  ref read out of a hash element arrive bare.  Example: `my @a=(1,2); my
+  $r=\@a; ${$r}` dies and so does `${$r} = 5`; `my $rr=\$r; ${$rr}` is the
+  ARRAY ref and `${$rr} = 5` writes.
 - **`eval EXPR` evaluates its operand in SCALAR CONTEXT** (normative, s473h /
   #1249(4)), like every other named unary — and it is a CONTEXT, not a
   coercion of the operand's value: a CALL there runs with wantarray FALSE, so

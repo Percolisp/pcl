@@ -22183,7 +22183,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; perl prints is stable, exactly as for a table (task #736).  Without this
     ;; the raw-scalar branch below double-boxed it and %$r died "Not a HASH
     ;; reference".
-    ((or (and (vectorp val) (not (stringp val))) (hash-table-p val) (functionp val)
+    ((or (and (vectorp val) (not (stringp val))) (hash-table-p val)
          (%p-hash-marker-p val))
      (make-p-box val))
     ;; Typeglob ref \\*foo: set is-ref so it is distinguishable from a *bare* glob
@@ -22194,6 +22194,15 @@ buffer's fill-pointer; everything else falls back to file-length."
        (setf (p-box-is-ref b) t)
        b))
     ;; Raw scalar value (e.g. \42): double-box + is-ref so box-set handles it right.
+    ;; A raw FUNCTION takes this arm too (#1592, s483a), NOT the aggregate one
+    ;; above: a code ref is a VALUE a scalar holds, so `\ sub {…}` / `\ \&f`
+    ;; needs the anonymous scalar, exactly like `\ 42` — the aggregate arm made
+    ;; `\` of a code ref IDEMPOTENT (box(FN) is what a variable holding a code
+    ;; ref already looks like), so `ref(\\&f)` answered CODE where perl says
+    ;; REF, and `${$rr}` could not be told from the fatal `${$coderef}`.  The
+    ;; two spellings that must NOT gain a level are `\&NAME` (p-backslash-sub,
+    ;; which never comes here) and `\&$coderef` (p-backslash-sub-ref's direct
+    ;; branch, which now answers with the code ref itself).
     (t
      (let ((b (make-p-box (make-p-box val))))
        (setf (p-box-is-ref b) t)
@@ -22426,10 +22435,14 @@ buffer's fill-pointer; everything else falls back to file-length."
    p-backslash-sub, the ONE late-binding path (rule 11), so a body defined
    after the ref is taken is still found and a body-less name reaches its own
    package's AUTOLOAD with the full name.  A value that already IS code keeps
-   its old shape — perl's `\\&$coderef` is that same coderef."
+   its old shape — perl's `\\&$coderef` is that same coderef, so this branch
+   answers with FN itself.  (It used to go through p-backslash, which was a
+   no-op on a raw function — an accident, not a decision: since #1592
+   p-backslash gives a code VALUE the anonymous scalar perl gives it, which is
+   a reference one level too deep for `\\&$cr`.)"
   (multiple-value-bind (fn direct) (%p-denoted-code val)
     (if direct
-        (p-backslash fn)
+        fn
         (multiple-value-bind (sym perl-pkg bare)
             (%p-resolve-sub-symbol (stringify-value (unbox val)))
           (let ((s (or sym (%p-sub-symbol-in perl-pkg bare))))
@@ -23178,9 +23191,14 @@ buffer's fill-pointer; everything else falls back to file-length."
    (its contract is boxes, and its callers guard), but a bare function/vector/
    hash-table DOES arrive here — `${\\&named}`, `${sub{7}}` and a coderef read
    out of a HASH element (the ARRAY element arrives boxed; that asymmetry is
-   the representation's, not perl's).  A bare one cannot be a `\\$x` whose
-   scalar holds a code ref: that shape always keeps the holding box (probed,
-   18 shapes)."
+   the representation's, not perl's).
+
+   A CODE referent is decidable only because `\\ CODEVALUE` gains the anonymous
+   scalar perl gives it (the p-backslash change in the same task): `\\\\&mysub2`
+   (perl-tests/ref.t:139) is a reference to a scalar HOLDING the code ref, so
+   its referent is that box and `$$subrefref` is the code ref — while
+   `${$coderef}` has the raw function for a referent and is the fatal.  Without
+   that change both were box(FN) and no rule here could separate them."
   (let ((r (if (p-box-p val) (%p-ref-referent val) val)))
     (or (hash-table-p r)
         (%p-hash-marker-p r)
