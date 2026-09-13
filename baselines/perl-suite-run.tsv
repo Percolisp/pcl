@@ -2002,10 +2002,10 @@ uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with er
 uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0
 uni/lower.t	11720	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
-uni/method.t	62	0	31	30	DIFF	s470bv: #1221 (b25afbc; 28/21 at a3d6d8e): a GAIN wearing a loss numbers -- utf8::decode was a stub, so the file ABORTED and 13 perl rows (39-51) were never produced.  They are produced now, four pass, the rest fail honestly.  No row went from a genuine ok to not ok.  Residual: task #1274 | aborted-forms:1: Undefined subroutine &main::クラス called	0
+uni/method.t	62	0	56	6	DIFF	s470bv: #1221 (b25afbc; 28/21 at a3d6d8e): a GAIN wearing a loss numbers -- utf8::decode was a stub, so the file ABORTED and 13 perl rows (39-51) were never produced.  They are produced now, four pass, the rest fail honestly.  No row went from a genuine ok to not ok.  Residual: task #1274 | s473t5f: #1736 in both its halves -- the non-ASCII and the CASELESS indirect-object invocant (perl reads `ニュー クラス` as a method call, and \p{Lo} has no uppercase to require).  31/30 -> 56/6, 26 blessed rows fixed, the abort gone, measured --jobs 1 with the #366 serial re-run agreeing.  The residue is NS:Error message text and format (5 rows) + #1664 (1)	0
 uni/opcroak.t	5	0	0	5	DIFF		0
 uni/overload.t	191	2	184	8	DIFF	aborted-forms:1: Undefined subroutine &main::todo_skip called	0
-uni/package.t	18	0	8	10	DIFF		0
+uni/package.t	18	0	11	7	DIFF	s473t5f: #1741 (a non-ASCII global WRITTEN in a nested `package X` block was emitted UNQUALIFIED while every read of it was qualified).  8/10 -> 11/7, 3 blessed rows fixed, measured --jobs 1 with the #366 serial re-run agreeing.  The residue is NS:Live symbol-table hashes (6 rows) + NS:Error compatibility for invalid Perl input (1)	0
 uni/parser.t	58	0	32	26	DIFF	s470bv: #1221 (b25afbc; 28/30 at a3d6d8e)	0
 uni/readline.t	7	0	6	1	DIFF		0
 uni/select.t	3	2	1	4	DIFF		0
@@ -2014,7 +2014,7 @@ uni/stash.t	48	1	44	6	DIFF		0
 uni/tie.t	9	1	9	1	OK		0
 uni/title.t	5936	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/tr_utf8.t	8	0	8	0	OK		0
-uni/universal.t	90	0	31	49	DIFF	aborted-forms:2: The function main::pl-Àlìcè is undefined.	0
+uni/universal.t	90	0	86	4	DIFF	s473t5f: #1736 (the indirect-object invocant shape was ASCII-only, so `nèw Àlìcè` was a call to an undefined sub and aborted the form) + #1737 (isa/DOES answered undef for perl's FALSE "").  31/49 -> 86/4, shortfall 10 -> 0, 57 blessed rows fixed, measured --jobs 1 with the #366 serial re-run agreeing.  The residue is #1740 + #1743 (2 rows) + #1744; row 19 is a NEW blessed row for an honest reason (see #1743)	0
 uni/upper.t	6230	0	1	1	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/variables.t	66880	0	1248	27934	TIMEOUT	timeout; aborted-forms:1: PCL: string literal: code point NxN is not implemented — above SBCL's char-code-limit (U	0
 uni/write.t	8	0	0	8	DIFF		0
