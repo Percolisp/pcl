@@ -3533,14 +3533,17 @@ halves:
   every aggregate write path (`p-push-impl`, `p-array-=`, element setf, …) —
   the change the shape was chosen to avoid.
 
-**Also not modelled: `local *a` (task #1727).** Perl's `local *a` installs a
-fresh glob, so `*a{ARRAY}` is undef inside the scope until something writes
-`@a`; PCL's `local` path (`%p-glob-clear`) installs fresh empties without
-registering them, so the slot reads as present. Same family, a different
-clear path, and it has no consumer row today.
+**`local *a` is the same rule (task #1727, shipped s484c).** Perl's `local *a`
+installs a fresh glob, so `*a{ARRAY}` is undef inside the scope until
+something writes `@a`. PCL's `local` path (`%p-glob-clear`) used to install
+fresh empties without registering them, so the slot read as present; it now
+takes its empties from `%p-glob-empty-slot` and registers the two aggregate
+ones, like the other two clear paths. Residue (a) applies there too — a READ
+of `@a` inside the scope re-vivifies the slot in perl and not here — so
+`local *a; my @copy = @a; *a{ARRAY}` is a ref in perl and undef here.
 
 **What would lift (a):** shape (A) of the s480 design — vivify-on-read in the
 `p-defcell` symbol macro plus `makunbound` of the cleared slot — at the price
 above. Nothing in the shipped shape blocks it: the table becomes dead code.
 `docs/ir-spec.md` §7.2 carries the normative statement; the guard rows are
-`Pl/t/glob-undef-01.t` 6–9.
+`Pl/t/glob-undef-01.t` 6–9 and 11 (`local`).

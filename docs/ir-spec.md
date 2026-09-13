@@ -2390,15 +2390,17 @@ neither when the condition fails. *Porter mapping:* any host can spell this
 as "if COND then (save; install; unwind-protect BODY (restore)) else BODY",
 with BODY emitted once.
 
-**An aggregate slot cleared by `undef *G` reads as ABSENT from `*G{ARRAY}` /
-`*G{HASH}` until a write makes it non-empty; reads do not re-vivify it**
-(normative, s484b, task #1117). Perl *deletes* the slot and re-creates it on
+**An aggregate slot cleared by `undef *G`, by `*A = *B`, or by `local *G`
+reads as ABSENT from `*G{ARRAY}` / `*G{HASH}` until a write makes it
+non-empty; reads do not re-vivify it** (normative, s484b task #1117, extended
+to `local` s484c task #1727). Perl *deletes* the slot and re-creates it on
 the next read of `@G`; a host whose globals are value cells cannot delete one
 without a vivify-on-read guard at every cell expansion, which costs 3–5 % on
 element access (measured), so PCL keeps the emptied container and remembers
-it: `undef *a` (and `*A = *B` for a slot B lacks) registers the fresh empty
-container, and the two introspection slots answer undef while a registered
-container is still empty.
+it: all three clear paths register the fresh empty container, and the two
+introspection slots answer undef while a registered container is still empty.
+`local *G` is the same statement scoped: the slot is absent for the extent of
+the block and the outer container comes back on exit.
 
 ```lisp
 (p-glob-undef (find-package "MAIN") "a")   ; installs + registers the empty

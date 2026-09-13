@@ -24278,11 +24278,25 @@ buffer's fill-pointer; everything else falls back to file-length."
           (gethash code-sym *p-declared-subs*)))
 
 (defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym)
-  "Reset the four glob slots to fresh empties (Perl: local *foo starts fresh)."
+  "Reset the four glob slots to fresh empties (Perl: local *foo starts fresh).
+
+   The empties come from %p-glob-empty-slot, the ONE reading of what an emptied
+   slot holds — this function spelled all three inline, which is the rule-11
+   debt task #1727 names — and the two AGGREGATE ones are REGISTERED in
+   *p-removed-agg-slots*, exactly as %p-glob-clear-var-slot registers the ones
+   IT installs: perl's `local *a` gives the scope a glob with NO array slot, so
+   `*a{ARRAY}` is undef there until something writes @a, and PCL can only
+   empty the container and remember that it did (task #1117's model; this is
+   its THIRD clear path).  The residue is #1117's: a READ of @a re-vivifies the
+   slot in perl and not here (docs/not-supported.md)."
   (when (fboundp code-sym) (fmakunbound code-sym))
-  (setf (symbol-value scalar-sym) (make-p-box *p-undef*))
-  (setf (symbol-value array-sym)  (make-array 0 :adjustable t :fill-pointer 0))
-  (setf (symbol-value hash-sym)   (make-hash-table :test 'equal)))
+  (setf (symbol-value scalar-sym) (%p-glob-empty-slot "$"))
+  (let ((arr (%p-glob-empty-slot "@"))
+        (hsh (%p-glob-empty-slot "%")))
+    (setf (symbol-value array-sym) arr
+          (symbol-value hash-sym) hsh
+          (gethash arr *p-removed-agg-slots*) t
+          (gethash hsh *p-removed-agg-slots*) t)))
 
 (defun %p-glob-restore (saved code-sym scalar-sym array-sym hash-sym)
   "Restore the four glob slots from a %p-glob-save snapshot."

@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run.
 sub run_cl {
@@ -273,3 +273,56 @@ PERL
  . "6 globref=died\n"
  . "7 globref-array=died\n",
    '#1726: $$glob{k} / $$glob[i] read the glob slot, and \*G stays perls fatal');
+
+# ---- 11. `local *G` is the THIRD clear path (#1727) ------------------------
+# perl's `local *a` gives the scope a glob with NO array slot, so `*a{ARRAY}`
+# is undef there until something writes @a.  `%p-glob-clear` (the localizer)
+# installed its own fresh empties inline and registered nothing, so the slot
+# read PRESENT inside the scope; it now takes them from %p-glob-empty-slot and
+# registers the two aggregates, like the other two clear paths.
+# Rows 2/5 are the write half of #1117's rule (a write vivifies), 3/6 the
+# restore, 7/8 the assigning spelling `local *t = \@src` (whose slots come from
+# the SOURCE and are never absent), 9 the `local *FH` idiom itself.
+# perl 5.40.3's own answers (probed, scratch/s484c/probe/g11.pl).
+is(run_cl(<<'PERL'),
+our @a = (1,2);
+our %h = (k=>1);
+{
+    local *a;
+    printf "1 inside ARRAY=%s SCALAR=%s\n", (defined *a{ARRAY} ? "ref" : "undef"),
+        (defined *a{SCALAR} ? "ref" : "undef");
+    push @a, 9;
+    printf "2 after-push ARRAY=%s val=%s\n", (defined *a{ARRAY} ? "ref" : "undef"), join(",", @a);
+}
+printf "3 outside ARRAY=%s val=%s\n", (defined *a{ARRAY} ? "ref" : "undef"), join(",", @a);
+{
+    local *h;
+    printf "4 inside HASH=%s\n", (defined *h{HASH} ? "ref" : "undef");
+    $h{z} = 2;
+    printf "5 after-write HASH=%s\n", (defined *h{HASH} ? "ref" : "undef");
+}
+printf "6 outside HASH=%s keys=%s\n", (defined *h{HASH} ? "ref" : "undef"), join(",", sort keys %h);
+our @src = (7,8);
+{
+    local *t = \@src;
+    printf "7 assigned ARRAY=%s val=%s\n", (defined *t{ARRAY} ? "ref" : "undef"), join(",", @t);
+}
+printf "8 after-assign ARRAY=%s\n", (defined *t{ARRAY} ? "ref" : "undef");
+{
+    local *FH;
+    open(FH, '<', '/etc/hostname') or die "open: $!";
+    my $l = <FH>;
+    close FH;
+    printf "9 local-fh read=%d\n", (defined $l ? 1 : 0);
+}
+PERL
+   "1 inside ARRAY=undef SCALAR=ref\n"
+ . "2 after-push ARRAY=ref val=9\n"
+ . "3 outside ARRAY=ref val=1,2\n"
+ . "4 inside HASH=undef\n"
+ . "5 after-write HASH=ref\n"
+ . "6 outside HASH=ref keys=k\n"
+ . "7 assigned ARRAY=ref val=7,8\n"
+ . "8 after-assign ARRAY=ref\n"
+ . "9 local-fh read=1\n",
+   '#1727: inside local *G the aggregate slots read ABSENT, as perl says');
