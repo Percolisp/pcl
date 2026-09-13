@@ -2,6 +2,99 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473t5a (Opus agent, 2026-09-13) — #1501 round 2: `op/` CHECK 1 in the 50-199 band, three fixes and seven filings
+
+**Member 1, the population.**  The census band (`docs/plan-post-s473.md` §5.3)
+counts 18 UNEXPLAINED files 50-199 rows short across ALL directories; the `op/`
+half, taken from the LIVE `baselines/row-shortfall.tsv`, is **six** —
+decl-refs.t 195, incfilter.t 153, sub_lval.t 116, gv.t 113, tie.t 95,
+undef.t 51 — plus the two `op/` TRANSPILE-FAILs round 1 filed and did not fix,
+for.t 149 (#1580) and goto.t 134 (#1581).  §5.5's "three TRANSPILE-FAILs" is
+two: op/svleak.t already carries NS:Regex code blocks.  Each file was
+re-measured here (`--jobs 1`, `PCL_SUITE_KEEP`) — the census numbers were from
+2026-09-07 — and the per-file table is `scratch/s473t5a/population.tsv`.
+
+| file | short | cause / verdict |
+|---|---|---|
+| op/decl-refs.t | 195 | #1648 `state (LIST)` mid-statement + #1649 PPI's declared-ref foreach loop variable; both reach the file through `eval $code or die $@` |
+| op/incfilter.t | 153 | NS:Source filters — `Filter::Util::Call` is XS |
+| op/sub_lval.t | 116 → **114** | NS:Lvalue subroutines (9 of 11 aborted forms) + **#1650 FIXED** (2 rows) |
+| op/gv.t | 113 | #1651 — the file HANGS (67/24 at `--timeout 400`), on the base extraction too |
+| op/tie.t | 95 | #1652 — the test.pl stub's `run_multiple_progs` is a no-op; FIVE files / 159 rows |
+| op/undef.t | 51 | NS:DESTROY by GC (50) + NS:stash `\undef` constants (1); **not an early stopper** |
+| op/for.t | 149 | #1580 **SIZED**, not fixed |
+| op/goto.t | 134 | **#1581 FIXED**, second blocker #1654 |
+
+**#1581 — the refusal was the RENAME's, not the CHECKER's.**  `my $count = 0;
+… package Do_undef { my $count; sub bump { $count++ } } … $count` refused the
+whole file.  `_check_my_spanning` was already right (it skips a block-form
+segment's declarations); what refused was `_rename_spanning_lexicals`, whose
+extent gate counted the block's `my` as a same-level re-declaration
+(`SPANREFUSE count@seg0: sdecls=2 dc=2`), after which the checker killed the
+file.  `_hard_decl_count`'s own rule is "a decl nested inside a
+`Structure::Block` is a scopeable SHADOW" — and a `package Foo { my $x; … }`
+decl IS inside a block, but the segment flattening presents it as segment TOP
+level, so the block is gone by the time the count runs.  The compensation
+therefore belongs at the SEGMENT level, which is where the checker, the span
+pre-filter and the container pass already make it; this was the fourth site.
+The rewrite needed nothing: a block-form segment's PPI parent IS the package
+block, so `_ref_shadowed` already discounts every use the block's own decl
+shadows (probed: a use before the block's `my` is rewritten to the promoted
+cell, one after it is left alone).  Four shapes identical to perl and all four
+refusing on the base.  Only the BLOCK form was ever affected — `package NAME;`
+opens an ordinary segment whose `my` really does live to end of file.
+
+**#1650 — an all-digit container name, and why the class is perl's own rule.**
+`@119797` (t/op/sub_lval.t's [perl #119797] fixture) was never
+forward-declared, so reading it died "The variable @119797 is unbound" and took
+its top-level form.  The free-global scan's name class wanted a
+letter/underscore head; it is now ONE reading,
+`$Pl::Parser2::VAR_TOKEN_RX`, shared by both of the pass's scans — the
+unqualified one and the cross-package one, which were blind the same way one
+`::` apart (`@Bar::424242` crashed too).  The first spelling was "a digit then
+word characters" and minted a phantom `%02x` out of `(p-sprintf "%02x" …)` in
+perl-tests/sort.t; `tools/corpus-diff.pl` caught it, and the probe that fixed
+it is perl's rule: a digit-headed name must be ALL DIGITS (`@0a` is a syntax
+error) and beyond one digit must not start with `0`.  `@`/`%` only: `$119797`
+is capture group 119797.
+
+**#1655 — `$|` had been desyncing the string blanker.**  Chasing the `@0`
+phantom that `"@0##"` (a `format` picture line in op/write.t) produced under
+the new class led to the cause: perl's `$|` compiles to `|$\||`, and
+`_blank_string_innards`' pipe branch had no backslash handling, so the ESCAPED
+pipe closed the region, the real closing pipe opened a new one, and from there
+the blanker ran one region out of phase — every string literal after a file's
+first `$|` was scanned as CODE.  One line fixes it, and it cut both ways:
+phantoms declared out of string data (readline.t, splice.t, tr.t, English.pm's
+two `qw()` entries) AND real code-level names blanked away where quote parity
+inverted (lfs.t's `my $zero` and `$::Tests_Are_Passing`, sort.t's `$sub`,
+English.pm's three real `our @*_EXPORT` arrays — undeclared globals waiting to
+read unbound).  Every one of the 5 corpus and 22 A/B diffs is a declaration
+line; English.pm being among them is why the generation bumped.
+
+**Two census corrections worth more than their rows.**  `t/op/undef.t` is not
+an early stopper at all: it runs to its LAST row, and its 51 missing rows are
+50 `X::DESTROY` assertions (perl reaches them only because `undef %hash` frees
+the blessed values) plus 1 behind the `BEGIN { $::{z} = \undef }` stash trick —
+so a recovery line proves an abort, never that the abort cost the rows after
+it.  And `t/op/for.t`'s prize is 148 rows for a LEX-only repair, but a lex-only
+repair is a silent wrong (`_lower_compound`'s foreach arm would take the
+deref's own `{…}` as the loop body and default the variable to `$_`), so #1580
+is three pieces and its task now says which and in what order.
+
+**Bars.**  Gate (`PCLXS_DIR=~/pclxs tools/prove-core < /dev/null`)
+**237 files / 8165 rows**, 133 s wall / 593 CPU-s, only the 13 pclxs xs rows
+failing.  Full sweep `--jobs 4`: **GATE clean**, 0 new / 0 fixed, TOTAL passing
+**18675 (+0)**, drops **5 = census**, 5 unstable + 15 unverified = the standing
+crash-file noise.  corpus-diff vs 186134ce: 5 of 111, all declaration lines.
+emission-ab (lib 22 + t/op+comp+io+run 316 + shapes 6): 322 SAME / 22 DIFF /
+1 RCDIFF (op/goto.t 255 → 2, both empty).  gate-SET scan over BOTH populations
+(638 files): **exactly one row moved** — op/goto.t's refusal from #1581's to
+#1654's.  ir-conform 321 pass / 0 fail / 24 known / 0 stale; ir-host-leak 31 =
+main's.  Companion leg on the 23 touched files: ONE real mover, op/sub_lval.t
+33/64 (base 31/64), spliced; io/pipe.t and op/inccode.t read identically on the
+base and are NOT mine.  Generation **v2-1360**, three artifacts regenerated.
+
 ## Session s484a (Opus agent, 2026-09-13) — three fillers from the day's two rounds: the wrong-kind deref fatal (#1628), the eval `package` spellings (#1587), and the generated `CORE::` prototype table (#1586)
 
 **#1628 — one predicate was asking the wrong question.**  `$$hrr{k}` through a
