@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 36;
+plan tests => 39;
 
 sub run_cl {
     my ($code) = @_;
@@ -273,3 +273,38 @@ test_cl('a plain scalar ref keeps its own stash, and never shows it through $x',
   . 'print ref(\$s), " ", ref($s), " [$s]", "\n";'
   . 'my $u; print ref(\$u), " ", ref(\5), "\n";',
     "S  [x]\nSCALAR SCALAR\n");
+
+# ── #1618: `$coderef->[0]` is perl's "Not an ARRAY reference" on the READ path
+#    too (the write path and the whole HASH twin already died).  p-aref-deref
+#    answered "the sub itself" for a raw function in container position, a rule
+#    written in April 2026 for the ONE-ELEMENT LIST SLICE `(sub{…})[0]`, which
+#    reached that entry bare.  It no longer does — a list-slice operand is
+#    wrapped in `(vector …)` — so the arm served only the deref, and the slice
+#    family below is unmoved (probed: perl answers the sub for every one).
+test_cl('$coderef->[0] dies on the read path, in all three spellings',
+    'my $cr = sub { 7 }; my $o = "";'
+  . 'for my $t (sub { $cr->[0] }, sub { ${$cr}[0] }, sub { $$cr[0] },'
+  . '           sub { $cr->[1] }, sub { $cr->[-1] }) {'
+  . '  eval { my $v = "".$t->() };'
+  . '  $o .= ($@ =~ /^Not an ARRAY reference/ ? "d" : "n");'
+  . '} print $o, "\n"; print $cr->(), "\n";',
+    "ddddd\n7\n");
+
+test_cl('a one-element LIST SLICE of a sub is still the sub',
+    'my $cr = sub { 7 };'
+  . 'my $a = (sub { 7 })[0]; my $b = (sub {7}, sub {8})[1];'
+  . 'my $c = ($cr)[0]; my $d = ($cr)[1];'
+  . 'print join(" ", ref($a), ref($b), $b->(), ref($c), $c->(),'
+  . '  (defined $d ? "def" : "undef")), "\n";'
+  . 'sub mk { return (sub { 5 }, sub { 6 }) }'
+  . 'my $e = (mk())[1]; print ref($e), " ", $e->(), "\n";',
+    "CODE CODE 8 CODE 7 undef\nCODE 6\n");
+
+test_cl('the ARRAY fatal does not reach an ARRAY ref or the HASH twin',
+    'my $ar = [5,6]; my $hr = {k=>9}; my $cr = sub { 7 };'
+  . 'print $ar->[0], $hr->{k}, "\n";'
+  . 'eval { my $v = "".$cr->{k} };'
+  . 'print +($@ =~ /^Not a HASH reference/ ? "hash-died" : "no:[$@]"), "\n";'
+  . 'my $s = "xy"; my $x = $s->[0];'
+  . 'print +(defined $x ? "def" : "undef"), "\n";',
+    "59\nhash-died\nundef\n");

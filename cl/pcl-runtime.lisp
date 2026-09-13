@@ -10673,12 +10673,15 @@ per element."
          (if (and (vectorp idx) (not (stringp idx)))
              (p-aslice sym-arr idx)
              (p-aref sym-arr idx))))
-      ;; Function as single-element list: (sub{...})[0] = the sub itself
-      ((functionp arr)
-       (let ((i (truncate (to-number idx))))
-         (if (eql i 0)
-             (make-p-box arr)
-             *p-undef*)))
+      ;; A CODE ref in container position is perl's fatal, on the READ path
+      ;; as on the write path (task #1618; the HASH twin already did it).
+      ;; This arm used to answer `(sub{…})[0] = the sub itself`, from the
+      ;; April-2026 codegen where a one-element LIST SLICE handed its list
+      ;; here bare.  It no longer does: gen_progn wraps a list-slice operand
+      ;; in `(vector …)`, so every slice arrives as a VECTOR and only a
+      ;; `$coderef->[0]` / `${$cr}[0]` / `$$cr[0]` deref reaches a raw
+      ;; function — measured, the whole slice family is unmoved by this.
+      ((functionp arr) (%p-not-a-ref "ARRAY"))
       ((and (vectorp idx) (not (stringp idx)))
        (p-aslice arr idx))
       ;; $scalarref->[0] on the READ path: perl's fatal, and the same arm the

@@ -640,6 +640,21 @@ unblessed scalar, exactly as perl's SV-attached stash does not travel
 with the value. The *identity* of an object is the underlying
 hash/array/referent — two references to it share blessing.
 
+**A SCALAR'S OWN STASH IS NOT THE CLASS OF WHAT IT HOLDS (normative,
+s483b/#1619).**  `ref(R)` reports the blessing of R's *referent itself*,
+so a scalar that merely HOLDS a blessed reference is not blessed: with
+`my $o = bless {}, "H"`, `ref($o)` is `H` and `ref(\$o)` is `REF` — for
+every payload kind, hash, array, code and scalar ref alike.  The two
+facts therefore need two homes, because a box's `class` slot is already
+the cache above: the stash `bless \$x, "C"` writes on the SV `$x` lives
+in the weak table `*p-sv-stash*`, keyed by `$x`'s box, written only by
+`p-bless`'s scalar-referent branch and read only by `%p-referent-class`.
+Consequently `bless \$h, "S"` leaves what `$h` holds alone (`ref($h)` is
+still `HASH`), and the class slot of a box reached *through* an is-ref
+wrapper is never read as that wrapper's class.  `reftype` follows the
+same rule: a reference to a scalar that holds a reference is `REF`, and
+`SCALAR` only when the referent holds a plain scalar.
+
 Strings are host Unicode strings (character, not byte, semantics — see
 `docs/not-supported.md` §Unicode for divergences).
 
