@@ -74,6 +74,8 @@ s473t4 still running at session-log time.  Next free task ID 1620.
 
 **s483b (#1619 + #1618) came back MERGE-READY at `907a77d6`** and was reviewed the same way (diff read whole, gate re-run on the sha 235/8081 xs-only, three guard files 99/99, 16 probe lines identical to perl) and fast-forwarded, pushed, worktree removed, scratch archived (`s473/s483b-agent-a9cff11d0039b5d70/`, 58 files).  The #1619 cause was a box's class slot playing two perl roles — the cache of the HELD reference's class and the scalar's own SvSTASH — and three readers plus the write side confusing them; the stash now has its own weak table.  #1618 needed one runtime line: the list-slice operand never reaches `p-aref-deref` as a bare function.  Two new fillers filed, #1620 and #1621; **s483c launched on them** (slot 2; IDs 1628–1637; gen v2-1320 — both are `Pl/` changes).
 
+**Session end.**  The USER first asked for no new subtasks, then to end the session.  s473t4 (HEAD `ac2258e8`, five commits, member 5 not run, FIX B uncommitted) and s483c (HEAD `52666d1c`, #1621 fixed + #1622 found, #1620 mid-edit, no bars) were stopped by TaskStop, worktrees intact; the restart recipe carries both resume blocks.  Main `6eea8578` + this docs commit, pushed.
+
 ## Session s483a (Opus agent, 2026-09-13) — #1592: `${$coderef}` dies like perl, and the CODE exclusion turned out to be a measurement of a different check
 
 **The finding first, because it is the deliverable.**  `%p-aggregate-referent-p`
