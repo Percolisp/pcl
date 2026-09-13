@@ -48,6 +48,12 @@
 #   184, 185, 186 and 201 (see #1458 (c)).  They STAY in this file with that
 #   cause rather than leaving by edit, because they DID fail in the blessed
 #   run and the isolated measurement is a different one.
+# s484d (2026-09-14, #1652): TWO rows ADDED by hand -- anonsub.t's row 4 (the
+#   collapsed unnamed key for rows 4, 6 and 7) and row 9.  They are rows that
+#   did not EXIST before: the PCL test.pl stub's `run_multiple_progs` was a
+#   no-op, so this file asserted one row, and implementing the helper makes it
+#   produce perl's ten (6 passing -- baselines/pass-baseline.tsv carries the
+#   +5).  Neither row is a regression: nothing that used to pass fails.
 aassign.t	180	RT #130132 scalar derefffed 1	'3'	'2'	#1452 (a) (LHS lvalues must be resolved before the assignment)
 aassign.t	181	RT #130132 scalar derefffed 2	'1'	'3'	#1452 (a) (LHS lvalues must be resolved before the assignment)
 aassign.t	182	RT #130132 scalar undef 1	undef	'2'	#1452 (a) (LHS lvalues must be resolved before the assignment)
@@ -61,6 +67,8 @@ aassign.t	58	tied left second	'b'	'a'	#155 (NS:tie on an ARRAY or HASH — the f
 aassign.t	59	tied right first	'a'	'b'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
 aassign.t	60	tied right second	'b'	'a'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
 aassign.t	176	undef as lvalue	'21:10:20'	'21:11:20'	#1452 (b) (`undef` on the LHS must make the RHS element the lvalue)
+anonsub.t	4				#1771 (the collapsed unnamed key: rows 4, 6 and 7, the three failing run_multiple_progs records -- 4 fails only on the child's SBCL compiler noise (#1773), 6 and 7 on absent warnings-gated diagnostics (owner #221))
+anonsub.t	9	undef &anon giving it a freed GV			#1771 (perl renders the freed GV's name; the record runs)
 args.t	23	delete $_[0] : outside block			NS:`DESTROY` called by garbage collector CATALOG args.t "test 23"
 array.t	127				#1456 (the collapsed unnamed key: Bug #37350, a symbolic array named by a NUMBER)
 array.t	83	$a: $# on freed array is undef	'-1'	undef	#1478 CATALOG array.t "freed-array length (GC-hard)"

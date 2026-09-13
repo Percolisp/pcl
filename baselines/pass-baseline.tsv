@@ -327,8 +327,18 @@
 #   the worktree), so the per-file diff against this file could not be
 #   completed.  The next session re-runs the full sweep and attributes them
 #   before the merge -- do not treat the +2 as blessed.
+# s484d (2026-09-14, #1652, EDITED BY HAND — one row): anonsub.t 1 -> 6 (+5),
+#   fail 0 -> 4, planned 1 -> 10.  The PCL test.pl stub's
+#   `run_multiple_progs` was a NO-OP and this file's whole body is
+#   `run_multiple_progs('', \*DATA)`, so it asserted ONE row (its
+#   `done_testing`); the helper now runs perl's records and the file produces
+#   10.  The four new failing rows are in baselines/fail-baseline.tsv with
+#   their causes.  TOTAL 18676 -> 18681.  The only other file that moved in
+#   the same sweep, method.t 76/22 -> 76/23, is a PARTIAL (crash) file that
+#   uses NONE of the four helpers -- the tool's own UNSTABLE bucket, not a
+#   regression, and left alone.
 aassign.t	OK	175	13	189
-anonsub.t	OK	1	0	1
+anonsub.t	OK	6	4	10
 append.t	OK	13	0	13
 args.t	OK	22	1	23
 arith.t	OK	183	0	183

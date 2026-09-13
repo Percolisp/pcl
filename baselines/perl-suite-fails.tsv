@@ -220,7 +220,7 @@
 #   same files were measured first on a `git archive f6b56feb` extraction.
 #     op/tie.t              1 -> 81 rows.  run_multiple_progs (#1652) was a
 #       NO-OP, so the file reported 1..0; it now produces all 95 of perl's
-#       rows, 14 passing.  66 of the 81 failures are `tie` announcing "a HASH
+#       rows, 14 passing.  63 of the 81 failures are `tie` announcing "a HASH
 #       (class X) is not implemented" (#155); the residue is #1768.
 #     op/fork.t            27 -> 8 rows (19 keys FIXED).  Same cause; 28 rows,
 #       20 passing.  Residue #1770.  Its `sig` reads
@@ -5886,86 +5886,86 @@ op/svflags.t	0	ok*	(no TAP)	*summary*
 op/symbolcache.t	0	(none)	renumbered	*summary*
 op/symbolcache.t	1	ok	(missing)	function still bound
 op/symbolcache.t	3	ok	not ok [PCL #2]	original function still bound
-op/tie.t	78	ok	not ok	EXISTS on arrays	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	77	ok	not ok	Test that tying a hash does not leak a deleted iterator	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	1	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	2	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	3	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	4	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	5	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	6	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	7	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	8	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	9	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	10	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	11	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	12	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	13	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	14	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	15	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	16	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	17	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	20	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	21	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	22	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	24	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	25	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	26	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	30	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	31	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	32	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	34	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	35	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	36	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	38	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	39	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	41	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	42	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	43	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	44	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	45	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	46	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	48	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	49	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	50	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	51	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	52	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	53	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	54	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	55	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	56	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	57	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	59	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	60	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	61	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	62	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	63	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	64	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	65	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	66	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	67	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	69	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	70	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	72	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	73	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	74	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	76	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	79	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	80	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	82	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	83	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	84	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	85	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	86	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	87	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	88	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	89	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	90	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	91	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	92	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	93	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	94	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
-op/tie.t	95	ok	not ok	[at t/op/tie.t line 18]	#155 -- 66 of this file's 81 rows are `tie` announcing "not implemented"; the 15-row residue is #1768
+op/tie.t	78	ok	not ok	EXISTS on arrays	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	77	ok	not ok	Test that tying a hash does not leak a deleted iterator	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	1	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	2	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	3	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	4	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	5	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	6	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	7	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	8	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	9	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	10	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	11	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	12	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	13	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	14	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	15	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	16	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	17	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	20	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	21	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	22	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	24	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	25	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	26	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	30	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	31	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	32	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	34	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	35	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	36	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	38	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	39	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	41	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	42	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	43	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	44	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	45	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	46	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	48	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	49	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	50	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	51	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	52	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	53	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	54	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	55	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	56	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	57	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	59	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	60	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	61	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	62	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	63	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	64	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	65	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	66	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	67	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	69	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	70	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	72	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	73	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	74	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	76	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	79	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	80	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	82	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	83	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	84	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	85	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	86	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	87	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	88	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	89	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	90	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	91	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	92	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	93	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	94	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
+op/tie.t	95	ok	not ok	[at t/op/tie.t line 18]	#155 -- 63 of this file's 81 rows are `tie` announcing "not implemented"; the 18-row residue is #1768
 op/tiearray.t	0	(none)	renumbered	*summary*
 op/tiearray.t	71	ok	not ok [PCL #51]	- croak on negative FETCHSIZE
 op/tiearray.t	72	ok	not ok [PCL #52]	Magical array fetch 1

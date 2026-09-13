@@ -9,7 +9,7 @@
 #   the same files measured first on a `git archive f6b56feb` extraction:
 #     op/tie.t                0/0 -> 14/81.  #1652: the file's whole body is
 #       `run_multiple_progs('', \*DATA)` and that was a NO-OP, so it reported
-#       1..0; 95 rows now, perl's 95.  66 of the 81 failures are `tie`
+#       1..0; 95 rows now, perl's 95.  63 of the 81 failures are `tie`
 #       announcing "not implemented" (#155), residue #1768.
 #     op/fork.t               1/0 -> 20/8.   #1652; 28 rows = perl's 28.  Its
 #       `sig` is a FALSE alarm kept as measured: the text is a record
