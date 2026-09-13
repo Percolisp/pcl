@@ -5673,7 +5673,6 @@ op/sub.t	38	ok	not ok	RT124156 freed cv
 op/sub.t	36	ok	not ok	RT124156 plain
 op/sub.t	64	ok	not ok	\#6998 freeing array used as args to sub
 op/sub.t	23	ok	not ok	content of nonexistent $_[0] is modified by &xsub
-op/sub.t	24	ok	not ok	goto &xsub when @_ does not exist
 op/sub.t	13	ok	not ok	no double free redefining anon stub
 op/sub.t	61	not ok	ok	simple sub stored as CV in stash (non-main::) # TODO disabled for now
 op/sub.t	12	ok	not ok	sub redefinition sets CvGV

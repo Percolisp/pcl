@@ -1724,7 +1724,7 @@ op/stat_errors.t	638	0	636	2	DIFF		0
 op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
-op/sub.t	64	1	54	11	DIFF		0
+op/sub.t	64	1	55	10	DIFF	s484b (#1117): 54/11 -> 55/10, ONE row FIXED ("goto &xsub when @_ does not exist") -- `undef *_` now leaves the ARRAY slot ABSENT, so *_{ARRAY} is undef as perl says; `--jobs 1` before/after on an a217cb49 extraction, and the #366 serial re-run agrees (parallel 55/10, serial 55/10)	0
 op/sub_lval.t	211	0	33	64	DIFF	aborted-forms:9: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	351	3	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
