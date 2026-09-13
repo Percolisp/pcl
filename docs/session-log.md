@@ -87,6 +87,30 @@ that it is a multi-step drift past the #1051 log cap, and use.t's two extra
 rows are accidental passes in the strict-enforcement class (`$nonexistent_pack_var`
 and `ursine_word` used to die for an unrelated reason and now do not).
 
+**Two measurement lessons, both paid this round.**  s473t4's note says a hand
+splice into `perl-suite-fails.tsv` MUST call `PclTapAlign::rowkey_desc`; it
+must call MORE than that.  The rowkey is `rowkey_desc` PLUS the test#-0
+fallbacks in `run-perl-suite.pl::diverging_rows_full` — `*extra* <desc>` when
+the PCL verb is `extra …`, `*summary*` otherwise, `#N` for an unnamed numbered
+test.  Calling `rowkey_desc` alone gave 4 NEW + 4 FIXED over an IDENTICAL row
+set, and the post-splice re-run is what caught it.  And `comp/hints.t` showed
+that a **"NOT fully registered" verdict HIDES the staleness report**: while the
+file read DIFF the runner named only the 3 rows diverging without a
+registration, and the moment those were added it turned STALE on 2 registered
+rows that no longer diverge.  A file whose row set is stale in both directions
+looks, from one report, stale in one.
+
+**Bars, on the rebased tree.**  Gate (`PCLXS_DIR=~/pclxs tools/prove-core
+< /dev/null`) **239 files / 8196 rows**, 104 s wall / 477 CPU-s, failures only
+`xs-01/02/03` (the 13 standing pclxs rows) — main is 8180, so the guard adds
+exactly its 16.  corpus-diff vs `2ff53f8d`: **emission IDENTICAL across 111
+files**, silent drops 5 unchanged, shapes 6 identical; `emission-ab --shapes
+--list lib/**/*.pm` **27 SAME / 0 DIFF / 0 RCDIFF** — so **no generation
+bump**, and the `comp/`-population A/B (25 files) is **24 SAME / 1 DIFF** with
+the DIFF being `comp/proto.t`, the fix's positive control.  Full sweep
+`--jobs 4`: GATE clean, TOTAL passing 18675 = baseline (+0), 0 new / 0 fixed, drops 5 = census (+0), 5 unstable + 15 unverified = the standing crash-file noise.  Companion on the `comp/` files: 22 files, and the ONLY row-level movement is in the two files this round did not cause: `comp/require.t` 1 NEW + 1 FIXED (past the #1051 500-row cap, and its own `sig` already records the drift as multi-step) and `comp/use.t` 2 NEW (`no strict refs/vars allows ver decl to enable subs` -- accidental passes in the strict-enforcement class).  `comp/proto.t` and `comp/hints.t` read 0 NEW / 0 FIXED / 0 LOST, `comp/hints.t` is XDIFF, and the `comp/` SHORTFALL is **221 rows with 0 UNEXPLAINED in 0 files**.
+`tools/tag-license --check` clean; `Pl/t/artifact-staleness-01.t` 8/8.
+
 ## Session s473t5b (Opus agent, 2026-09-13) -- #1501 round 3: `op/` CHECK 2 over six files, 786 rows attributed, and PPI §30 (the indented here-doc's indentation) fixed
 
 **Member 1, the cluster table** (`scratch/s473t5b/cluster-table.md`).  Measured
