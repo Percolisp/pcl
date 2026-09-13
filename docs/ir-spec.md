@@ -2505,6 +2505,17 @@ var ⇒ plain lexical binding, no localization at all).
   `Pl/t/method-dispatch-01.t`, `Pl/t/method-cache-01.t`.
 - `AUTOLOAD` is honored (walks `@ISA`, skips `DESTROY`). `can`/`isa` work.
   `DESTROY` is **never called by GC** (documented divergence).
+- **`p-isa` is BOOLEAN-VALUED: `1` or `""`, never NIL** (#1737).  perl's `isa`
+  and `DOES` are `boolSV(sv_derived_from(…))`, so a FALSE answer is PL_sv_no —
+  the empty string, which is **defined** — and `is $obj->isa("Nope"), ''`
+  must hold.  A caller in the runtime therefore asks `p-true-p`, never a bare
+  CL `if`: perl's false is CL's true.  `p-can`, by contrast, really does
+  answer NIL for false, as perl's `can` answers undef.
+  The UNDEF answers perl gives belong to the FUNCTION spelling
+  `UNIVERSAL::isa(X, Y)`, whose own guard is
+  `!SvOK(X) || !(SvROK(X) || (SvPOKp(X) && SvCUR(X)))` — so `isa(undef,Y)`,
+  `isa(42,Y)` and `isa("",Y)` are undef while `isa("str",Y)` and `isa([],Y)`
+  are `""`.  Guard `Pl/t/census-bugs-01.t`.
 - PCL always linearizes with C3 (stock Perl defaults to DFS; documented
   divergence — `docs/not-supported.md` §mro).
 

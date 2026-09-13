@@ -2,6 +2,111 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473t5f (Opus agent, 2026-09-13) — #1501 round 7, the LAST: `uni/` — three fixes, 1,236 causeless rows → 0, and the whole census's residue named
+
+Round 7 of `docs/plan-post-s473.md` §5.5.  The population was the directory's
+**1,389 blessed fail rows (1,236 causeless) over 22 files**, the **five
+UNEXPLAINED early-stoppers** and the **two NOTAP files**.  Every number below
+was measured on this tree; `uni/gv.t`'s 148 rows and `uni/opcroak.t`'s 5
+already carried a cause and were not re-probed.
+
+**CHECK 1 — the five UNEXPLAINED and the two NOTAP files.**  `uni/greek.t` and
+`uni/latin2.t` owe NOTHING: both are perl's own unconditional
+`skip_all("encoding.pm is no longer supported by the perl core")` in a BEGIN
+block and PCL's output is BYTE-IDENTICAL to perl's (`1..0 # Skip …`), and
+NOTAP is already the runner's own not-bad status.  `uni/attrs.t` (1 short),
+`uni/labels.t` (2) and `uni/method.t` (1) are attributed below;
+`uni/universal.t`'s 10 are FIXED.  The brief's two "#418-family fix
+candidates" were both WRONG HYPOTHESES and the ASCII twin settled each in one
+command: `goto ここ` fails exactly as `goto HERE` does (#1747 — a `goto` whose
+label is in a NESTED block emits an unreachable `(go :LABEL)`, a compile-time
+CL error that loses the whole form, which is the shape #1654 warns about), and
+`uni/universal.t`'s abort was the indirect-object classifier, not a
+pipe-quoting miss.
+
+**#1736 — the indirect-object invocant shape, in two commits.**  perl reads
+`new Alice` as `Alice->new` and its own heuristic never consults case; PCL
+narrows that to "the invocant looks like a class name", spelled `/^[A-Z]/` at
+one site in `Pl/PExpr.pm` — ASCII only.  So the ASCII spelling worked and every
+non-ASCII class name became `new(Alice())`, an undefined-subroutine death that
+aborts the top-level form.  `Pl::Environment::class_bareword_shape` is the
+third member of the `all_caps_shape` / `fh_bareword_shape` family; and the
+shape is NOT-LOWERCASE, not uppercase, because a CASELESS script has no
+uppercase to require — probed 5.40.3, `ニュー クラス` and its Hebrew twin are
+method calls in perl, so the class is `[\p{Lu}\p{Lt}\p{Lo}]`.
+`uni/universal.t` 31/49 → **86/4** (shortfall 10 → 0), `uni/method.t` 31/30 →
+**56/6**; corpus-diff IDENTICAL over 111, emission A/B 571 files with exactly
+those two as the DIFFs.
+
+**#1737 — `isa`/`DOES` answer perl's FALSE, which is `""`.**  perl's are
+`boolSV(sv_derived_from(…))`, so a false answer is PL_sv_no — DEFINED — and
+`p-isa` returned `nil`, which is undef.  40 of `uni/universal.t`'s 49-row
+`UNIVERSAL::isa` matrix failed on `got: undef / expected: ''` while truthiness
+agreed all the way, which is exactly why a pure-ASCII bug read as a Unicode
+one.  `p-isa` is boolean-valued (1/"") now; the UNDEF answers perl DOES give
+belong to the FUNCTION spelling and are `UNIVERSAL::pl-isa`'s guard, copied
+verbatim from universal.c (`!SvOK || !(SvROK || (SvPOKp && SvCUR))`), so
+`isa(undef,X)` / `isa(42,X)` / `isa("",X)` stay undef.  **perl's FALSE is CL's
+TRUE**, so both callers were read: `cl/pcl-test.lisp` already asked
+`p-true-p`, `cl/pcl-xs.lisp`'s `xs-isa` used a bare CL `if`.  Ten shapes in
+boolean position (if / unless / grep / && / || / infix) identical to perl.
+
+**#1741 — a non-ASCII global written in a nested package block.**  `in-package`
+is read-time and cannot re-home the symbols around it, so a global WRITTEN
+inside `{ package X; … }` must be emitted QUALIFIED; `_requalify_region`'s
+word-shaped name class was `[A-Za-z_]\w*`, so a non-ASCII name was skipped and
+the WRITE came out bare while every READ came out qualified — a SILENT WRONG,
+the assignment landed in main.  Measured four ways (ASCII packages + a
+non-ASCII variable FAILS, non-ASCII packages + an ASCII variable PASSES), so
+it is the VARIABLE name's class; `[^\W\d]\w*` now, the spelling
+`$VAR_TOKEN_RX` already uses.  `uni/package.t` 8/10 → **11/7**.  And
+**corpus-diff's SHAPES line is what caught its second victim**:
+`interpolation-nonascii.pl` S08/S11 had BOTH the write and the interpolated
+read going to main, so the file's output agreed with perl BY ACCIDENT — which
+is what the SHAPES population (#496) exists for.  Generation v2-1360 →
+**v2-1460**, all three artifacts regenerated on the rebased tree.
+
+**`uni/variables.t` — the directory's one real bug, and a DECISION not to
+register it.**  Three measured facts.  (1) Its ONE aborted form is
+`"\x{11_1111}"`, the already-ruled refusal in `not-supported.md` "Code points
+above U+10FFFF" (#419/s422), which costs the enclosing 9-row loop.  (2) A
+CUMULATIVE ~60k-STRING-EVAL WALL: 90 s gives 29,182 rows, 900 s gives 59,916,
+and 900 s TWICE gives EXACTLY 59,916 while the process still burns CPU — the
+code point it stops at (U+E4ED) evaluates in 0 s on its own and an isolated
+3,000-eval loop of the same shape is linear at ~270 evals/s, so it is the
+ACCUMULATION, not the item.  **No `perl-suite-timeouts.tsv` allowance**: that
+registry promises "give the file the time and it finishes" and this file never
+does, while 15 minutes per companion run would buy 30,734 more failing rows of
+ONE already-named fact.  (3) That fact: `\p{_Perl_IDStart}` answers NO for
+EVERY character in PCL (U+0100 and U+3042 included — cl-ppcre has no such
+property, #1036's property half), so the file's loop always takes its ELSE
+branch and then asserts perl's "Unrecognized character" diagnostic, which PCL
+also does not produce.  All three now sit in the file's `row-shortfall.tsv`
+cause; **#1750** carries the two halves.
+
+**CHECK 2 — the directory attributed.**  `uni/` 1,389 rows / 1,236 causeless →
+**1,304 rows / 0 causeless**, every non-`uni/` row of `perl-suite-fails.tsv`
+byte-identical (11,436 lines `cmp`-checked).  One fact per file where the file
+IS one fact: the four case-mapping files (1,003 rows) verified — not assumed —
+to abort on `t/uni/case.pl`'s `Unicode::UCD` → Storable XS load, with
+`upper.t`'s single failing row a genuine YPOGEGRAMMENI full-case divergence;
+`attrs.t` 28 = NS:Attributes (#322); `class.t` 12 = #1036's property half;
+`caller.t` 13 = **#1742**; `write.t` 8 = NS:format (re-measured on the rebased
+tree: s473t5d's `run_perl` `args` change does not move it); `lex_utf8.t` 8 =
+NS:`use bytes` + 2 = #1494.  A measured split where it is not: `parser.t` 26 =
+#1664 (2) + NS:quote-delimiters (4) + invalid-input diagnostics (20),
+`stash.t` and `package.t` = the stash model plus invalid input, `labels.t` =
+#1746 (3) + #1494 (4) + #1747.  The five UNEXPLAINED `uni/` shortfall rows are
+**ZERO**.
+
+**THE CENSUS'S RESIDUE AFTER ALL SIX t5 ROUNDS**: **12,526 blessed fail rows,
+2,402 causeless — 2,375 of them `op/`**, the rest `base/` 15, `cmd/` 6,
+`opbasic/` 6; `re/ comp/ uni/ run/ io/ class/ mro/` all at ZERO.  Companion
+shortfall UNEXPLAINED: **47 files / 522 rows, 45 of those files `op/`**.  So
+what the six rounds leave is one directory and 27 rows.
+
+Filed **#1736**(done) **#1737**(done) **#1741**(done) #1738 #1739 #1740 #1742
+#1743 #1744 #1745 #1746 #1747 #1748 #1749 #1750.
 ## Session s484c (Opus agent, 2026-09-13 → 2026-09-14) — the regex + glob fillers: perl's global-match advance rule, `\h \H \v \V \R`, a glob VALUE in element position, and `local *G`
 
 Four filler tasks from s473t5e's and s484b's probe residue, all four RUNTIME
