@@ -3457,3 +3457,68 @@ Not scheduled; **task #1390** owns it and carries the nine-spelling
 measurement (s473h) — `$s->{k}`, `exists`, `delete`, `keys %$s`, the ARRAY
 spellings and the write all diverge together, so `exists` is not a singleton.
 `ir-conform/known-fail.tsv` row `253-string` is owned by #1390.
+
+## `undef *GLOB` leaves an EMPTY aggregate slot where perl REMOVES it — a READ does not re-vivify it, and a write is noticed at the next read (#1117)
+
+**Perl behaviour.** `undef *a` DELETES the glob's array slot, so `*a{ARRAY}`
+is undef — and then perl **re-vivifies the slot on the next READ** of `@a`.
+Any read does it (`my @x = @a`, `@a ? 1 : 0`, `\@a`, `keys %h`), and so does
+an *empty* write (`@a = ()`, `$#a = -1`); afterwards `*a{ARRAY}` is a ref
+again and stays one for good. Probed 5.40.3
+(`scratch/s484b/probe/t3-residue.pl`, `t8-vivify.pl`):
+
+| after `our @a=(9); undef *a;` then … | perl | PCL |
+|---|---|---|
+| *nothing* | `undef` | `undef` |
+| `my @x = @a;` | **ref** | `undef` |
+| `@a ? 1 : 0` | **ref** | `undef` |
+| `my $r = \@a;` | **ref** | `undef` |
+| `@a = ();` | **ref** | `undef` |
+| `$#a = -1;` | **ref** | `undef` |
+| `keys %h` (hash slot) | **ref** | `undef` |
+| `push @a, 42;` | ref | ref |
+| `push @a, 42; pop @a;` | **ref** | `undef` |
+| `@a = (1); @a = ();` | **ref** | `undef` |
+| `*a = \@other;` | ref | ref (and `== \@other`) |
+| `our @o = ()` (never cleared) | ref | ref |
+
+**PCL behaviour (task #1117, shipped s484b).** The cell stays BOUND to the
+fresh empty container the clear installs; that container is registered in
+`*p-removed-agg-slots*` (a weak-key `eq` set), and `*G{ARRAY}` / `*G{HASH}`
+answer undef **while a registered container is still empty**. So the rule is:
+
+> a cleared aggregate slot is ABSENT while it is empty, and PRESENT from the
+> first read that finds it non-empty.
+
+That gives perl's answer for every spelling that asks *before* touching the
+variable — which is what the introspection idiom does (`perl-tests/sub.t` row
+24, Carp's `*$_{HASH} && exists $$_{$sub}` guard) — and leaves two residue
+halves:
+
+* **(a) a READ (or an empty write) does not re-vivify.** Perl's re-vivification
+  is a side effect of *every* aggregate read; modelling it needs a `boundp`
+  guard in the symbol-macro expansion of every package aggregate — 1 207 read
+  and write sites over 40 emitted files, measured **3–5 % slower** on a loop
+  made of nothing but element access (s473h; 0 % on `for my $x (@a)`, which
+  expands the cell once). Target A is absolute speed (USER 2026-09-05), and
+  this buys an introspection corner whose only consumers are test files.
+* **(b) a vivifying write is noticed at the next READ of the slot.** PCL asks
+  "is the container still empty?", so a write whose effect is undone before
+  anything asks (`push @a, 42; pop @a;`) reads as absent, where perl has been
+  present since the push. A read that *does* observe the container non-empty
+  deregisters it permanently, so `push @a,42; *a{ARRAY}; pop @a; *a{ARRAY}` is
+  present twice, as in perl. Catching the write itself would mean a hook in
+  every aggregate write path (`p-push-impl`, `p-array-=`, element setf, …) —
+  the change the shape was chosen to avoid.
+
+**Also not modelled: `local *a` (task #1727).** Perl's `local *a` installs a
+fresh glob, so `*a{ARRAY}` is undef inside the scope until something writes
+`@a`; PCL's `local` path (`%p-glob-clear`) installs fresh empties without
+registering them, so the slot reads as present. Same family, a different
+clear path, and it has no consumer row today.
+
+**What would lift (a):** shape (A) of the s480 design — vivify-on-read in the
+`p-defcell` symbol macro plus `makunbound` of the cleared slot — at the price
+above. Nothing in the shipped shape blocks it: the table becomes dead code.
+`docs/ir-spec.md` §7.2 carries the normative statement; the guard rows are
+`Pl/t/glob-undef-01.t` 6–9.

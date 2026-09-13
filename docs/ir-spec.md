@@ -2390,6 +2390,28 @@ neither when the condition fails. *Porter mapping:* any host can spell this
 as "if COND then (save; install; unwind-protect BODY (restore)) else BODY",
 with BODY emitted once.
 
+**An aggregate slot cleared by `undef *G` reads as ABSENT from `*G{ARRAY}` /
+`*G{HASH}` until a write makes it non-empty; reads do not re-vivify it**
+(normative, s484b, task #1117). Perl *deletes* the slot and re-creates it on
+the next read of `@G`; a host whose globals are value cells cannot delete one
+without a vivify-on-read guard at every cell expansion, which costs 3–5 % on
+element access (measured), so PCL keeps the emptied container and remembers
+it: `undef *a` (and `*A = *B` for a slot B lacks) registers the fresh empty
+container, and the two introspection slots answer undef while a registered
+container is still empty.
+
+```lisp
+(p-glob-undef (find-package "MAIN") "a")   ; installs + registers the empty
+(p-glob-slot (make-p-typeglob …"a") "ARRAY")  ; => *p-undef*, as perl says
+```
+
+Emptiness is the whole test, so an aggregate that merely *is* empty
+(`our @o = ()`) still HAS its slot, and a foreign container assigned in
+(`*a = \@other`) is present and identical to `\@other`. The two residue
+halves — a read does not re-vivify, and a write undone before the next read
+of the slot is not seen — are `docs/not-supported.md` "`undef *GLOB` leaves an
+EMPTY aggregate slot where perl REMOVES it".
+
 `foreach $pkgvar (LIST)` is an *implicit* `local` of the loop variable —
 the body and everything it calls see the current element, and the old
 value is restored on exit, including via `last`/`die`. The loop macros
