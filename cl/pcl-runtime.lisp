@@ -23823,6 +23823,38 @@ buffer's fill-pointer; everything else falls back to file-length."
                         (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
            (make-p-typeglob pkg (%pcl-invert-case bare-str))))))))
 
+(defvar *p-removed-agg-slots* (make-hash-table :test 'eq :weakness :key)
+  "The empty ARRAY/HASH containers a glob CLEAR installed, as an identity set
+   (task #1117).  perl REMOVES an aggregate slot where PCL can only EMPTY it —
+   a `makunbound` cell cannot be re-vivified on read (SBCL offers no
+   per-variable restart on an unbound global, probed s480) and guarding every
+   cell expansion costs 3–5 % on element access (measured s473h), which Target
+   A does not pay for an introspection corner.  So the cell stays BOUND and
+   this table records WHICH containers stand for an ABSENT slot: `*G{ARRAY}` /
+   `*G{HASH}` answer undef for a container that is in here AND still empty.
+   Weak on the key, so a glob that goes away takes its entry with it.")
+
+(defun %p-agg-slot-empty-p (container)
+  "Is CONTAINER — one ARRAY or HASH glob slot — empty?  Rule 12: the two
+   aggregate representations are the closed set (only %p-glob-empty-slot's own
+   products ever reach here), so a third kind is a runtime inconsistency and
+   says so rather than answering."
+  (cond ((hash-table-p container) (zerop (hash-table-count container)))
+        ((and (vectorp container) (not (stringp container)))
+         (zerop (length container)))
+        (t (error "%p-agg-slot-empty-p: not an aggregate glob slot: ~S" container))))
+
+(defun %p-agg-slot-cleared-p (container)
+  "True when CONTAINER still stands for a slot a glob clear REMOVED — it is in
+   *p-removed-agg-slots* and nothing has been written to it since.
+
+   A write VIVIFIES the slot, as in perl: after `undef *a; push @a, 42`,
+   `*a{ARRAY}` is a ref again, and it STAYS one when @a is emptied later
+   (probed 5.40.3) — so a container found non-empty leaves the set for good."
+  (when (gethash container *p-removed-agg-slots*)
+    (or (%p-agg-slot-empty-p container)
+        (progn (remhash container *p-removed-agg-slots*) nil))))
+
 (defun %p-glob-empty-slot (prefix)
   "The EMPTY value a cleared glob slot holds, for slot sigil PREFIX.  ONE
    reading, shared by `undef *foo` (p-glob-undef) and by the clear half
@@ -23848,12 +23880,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    CREATES a variable perl would not (probed: `defined $c3` is false after
    `*c3 = *neverdefined`, and no $c3 comes into being).
 
-   perl REMOVES an aggregate slot where this EMPTIES it — after `undef *a`,
-   `*a{ARRAY}` is undef in perl until the next read re-vivifies it — so the
-   introspection spelling still diverges: task #1117, which also owns
-   perl-tests/sub.t row 24.  Every VALUE spelling agrees."
+   perl REMOVES an aggregate slot where this EMPTIES it, so the fresh empty
+   container is REGISTERED in *p-removed-agg-slots* and `*G{ARRAY}` /
+   `*G{HASH}` read it as ABSENT until a write makes it non-empty (task #1117).
+   This is the ONE place the registration belongs: both spellings that clear a
+   variable slot — `undef *G` and `*A = *B`'s missing-slot half — come through
+   here (rule 11).  The SCALAR slot needs none: perl's `undef *s` leaves
+   `*s{SCALAR}` a ref to undef, which is what an emptied cell already is."
   (let ((sym (intern (%p-slot-name prefix uname) pkg)))
-    (when (boundp sym) (set sym (%p-glob-empty-slot prefix)))))
+    (when (boundp sym)
+      (let ((empty (%p-glob-empty-slot prefix)))
+        (set sym empty)
+        (when (or (string= prefix "@") (string= prefix "%"))
+          (setf (gethash empty *p-removed-agg-slots*) t))))))
 
 (defun %p-glob-clear-code-slot (pkg uname)
   "UNDEFINE the CODE slot of glob PKG::UNAME, so BOTH `defined &name` and
@@ -23990,14 +24029,20 @@ buffer's fill-pointer; everything else falls back to file-length."
         ((string= slot-s "SCALAR")
          (let ((sym (find-sym "$")))
            (when (boundp sym) (make-p-box (symbol-value sym)))))
+        ;; ARRAY/HASH return \@foo / \%foo — a reference (box containing the
+        ;; vector / hash-table).  A slot a glob CLEAR removed reads as ABSENT
+        ;; while its container is still the registered empty one (task #1117):
+        ;; perl deletes the slot, PCL empties it and remembers that it did.
         ((string= slot-s "ARRAY")
-         ;; Returns \@foo — an array reference (box containing the vector).
          (let ((sym (find-sym "@")))
-           (when (boundp sym) (make-p-box (symbol-value sym)))))
+           (when (boundp sym)
+             (let ((v (symbol-value sym)))
+               (if (%p-agg-slot-cleared-p v) *p-undef* (make-p-box v))))))
         ((string= slot-s "HASH")
-         ;; Returns \%foo — a hash reference (box containing the hash-table).
          (let ((sym (find-sym "%")))
-           (when (boundp sym) (make-p-box (symbol-value sym)))))
+           (when (boundp sym)
+             (let ((v (symbol-value sym)))
+               (if (%p-agg-slot-cleared-p v) *p-undef* (make-p-box v))))))
         ((string= slot-s "IO")
          ;; *FH{IO} is the handle itself — the idiom Test.pm uses to stash
          ;; STDOUT ($TESTOUT = *STDOUT{IO}) before anything can reopen it.
