@@ -1718,6 +1718,49 @@ rows: `Pl/t/minus-word-01.t`.
 
 ---
 
+## 29. A DEREFERENCE as the `foreach` loop variable fails the LEXER: "Illegal state in 'for' compound statement"  [CONFIRMED 1.291]
+
+Not a mis-tokenization — a hard lexer failure.  `PPI::Document->new` returns
+`undef` and `PPI::Document->errstr` says `Lexer failed: Illegal state in 'for'
+compound statement`, so the WHOLE FILE is unparseable, not one statement.
+
+**Perl:** `foreach` accepts any lvalue as its loop variable, not just a plain
+symbol.  A dereference is the documented way to alias a symbol-ref target for
+the duration of the loop:
+
+```perl
+our $z = 7;  my $f = "z";  no strict "refs";
+my @seen;  for $$f (5,11) { push @seen, $$f }   # perl: @seen = (5,11), $z = 7 after
+```
+
+**PPI:** every dereferenced loop variable fails, and the same dereference
+outside a `for` head is fine — so it is the `for`-compound lexer, not the
+tokenizer:
+
+```
+for $$f (1,2) { }          FAIL  Lexer failed: Illegal state in 'for' compound statement
+for ${$f} (1,2) { }        FAIL  same
+for ${*$f} (5,11,33) { }   FAIL  same
+foreach ${*$f} (1,2) { }   FAIL  same
+my $x = ${*$f};            OK    <-- the control: the deref alone lexes
+for $x (1,2) { }           OK    <-- the control: a plain Symbol lexes
+for my $x (1,2) { }        OK
+```
+
+`PPI::Lexer::_statement_continues`/the `for` branch accepts a `Token::Symbol`
+or a `my`/`our`/`local` declaration in the loop-variable slot and has no arm
+for a `Token::Cast` + operand, which is how a dereference arrives.
+
+**Impact on PCL (task #1580):** `t/op/for.t:767` is
+`for ${*$f} (5,11,33) {`, and PCL reports `PCL: cannot parse (inline code):
+PPI failed to tokenize it` for the whole file — **149 perl rows, the entire
+file, produce nothing** (the file is `TRANSPILE` in
+`baselines/perl-suite-run.tsv`).  No workaround is shipped yet; the shape of
+one is the family's usual repair — rewrite the for-head into a spelling PPI
+lexes, restore the dereference when lowering.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

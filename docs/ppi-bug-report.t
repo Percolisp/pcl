@@ -5,14 +5,15 @@
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 #
-# PPI tokenizer/lexer bug report — fifteen small cases.
-# Tested against PPI 1.291 / perl 5.40.3.  All fifteen tests currently FAIL (the bugs).
+# PPI tokenizer/lexer bug report — the cases in docs/ppi-upstream-bugs.md.
+# Tested against PPI 1.291 / perl 5.40.3.  Every row that is not marked a CONTROL
+# currently FAILS — a failing row IS the bug.
 #
 #   perl ppi-bug-report.t
 #
 use strict;
 use warnings;
-use Test::More tests => 58;
+use Test::More tests => 63;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -793,4 +794,31 @@ PERL
     my $doc = PPI::Document->new(\'my $x = .5;');
     ok( (grep { $_->isa('PPI::Token::Number') && $_->content eq '.5' } $doc->tokens),
         '`= .5` is the NUMBER 0.5 (the negative control)' );
+}
+
+# ── Bug 29: a DEREFERENCE as the foreach loop variable fails the LEXER ────────
+#
+# perl accepts any lvalue as the foreach loop variable; a dereference is the
+# documented way to alias a symbol-ref target for the loop's duration:
+#   our $z = 7; my $f = "z"; no strict "refs";
+#   for $$f (5,11) { ... }        # perl: aliases $z, restores it afterwards
+# PPI does not merely mis-tokenize these — PPI::Document->new returns undef
+# ("Lexer failed: Illegal state in 'for' compound statement"), so the WHOLE
+# FILE is lost.  The same dereference outside a for head lexes fine, so the
+# fault is in the for-compound lexer's loop-variable slot.
+for my $src ('for $$f (1,2) { }',
+             'for ${$f} (1,2) { }',
+             'for ${*$f} (5,11,33) { }') {
+    my $doc = PPI::Document->new(\$src);
+    ok( defined $doc, "`$src` should lex (perl accepts a deref as the loop variable)" )
+        or diag "errstr: " . PPI::Document->errstr;
+}
+# The controls PPI gets right and must keep getting right.
+{
+    my $doc = PPI::Document->new(\'my $x = ${*$f};');
+    ok( defined $doc, '`my $x = ${*$f};` lexes — the deref alone is fine (control)' );
+}
+{
+    my $doc = PPI::Document->new(\'for $x (1,2) { }');
+    ok( defined $doc, '`for $x (1,2) { }` lexes — a plain Symbol is fine (control)' );
 }

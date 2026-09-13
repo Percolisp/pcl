@@ -4720,7 +4720,7 @@ sub _count_decls_of {
 
 # Reasons renaming `my $x` within $root is NOT safe; undef when safe.
 sub _shadow_rename_blocker {
-  my ($self, $root, $sym, $eval_ok, $shadow_ok) = @_;
+  my ($self, $root, $sym, $eval_ok, $shadow_ok, $eval_root) = @_;
   my $old = $sym->content;
   return "non-scalar" unless $old =~ /^\$\w+$/;
   (my $bare = $old) =~ s/^\$//;
@@ -4748,14 +4748,39 @@ sub _shadow_rename_blocker {
   # too (s418, #401): its cell rides the alist via _eval_state_captures.
   # Other state/cond renames produce cells the alist does not carry, so
   # they keep the refusal.
+  # $eval_root narrows the scan to the region the NAME is actually visible in
+  # (the state handler passes a decl's own inner block, #1501): a string eval
+  # outside that region can never resolve the name, so it is not a blocker.
   unless ($eval_ok) {
-    for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
-                                    && $_[1]->content eq 'eval' }) || [] }) {
+    my $er = $eval_root // $root;
+    for my $w (@{ $er->find(sub { $_[1]->isa('PPI::Token::Word')
+                                  && $_[1]->content eq 'eval' }) || [] }) {
       my $nx = $w->snext_sibling;
       return "string eval" unless $nx && $nx->isa('PPI::Structure::Block');
     }
   }
   return undef;
+}
+
+# Every occurrence of $name under $root lies inside $region.  The state
+# handler's test for "this inner-block declaration's name is not used anywhere
+# else in the sub", so its positional rename cannot reach past the block and
+# the string-eval refusal only has to look at the block (#1501, s473t4).
+# Conservative on purpose: an occurrence is any Symbol token with the name AND
+# any token whose TEXT spells it after a `$` (interpolation, "${x}"), so a
+# false positive only keeps the existing refusal.
+sub _symbol_confined_to {
+  my ($root, $region, $name) = @_;
+  (my $bare = $name) =~ s/^[\$\@\%]//;
+  for my $tok ($root->tokens) {
+    next if $tok->isa('PPI::Token::Whitespace') || $tok->isa('PPI::Token::Comment');
+    next unless ($tok->isa('PPI::Token::Symbol') && $tok->content eq $name)
+             || $tok->content =~ /\$\{?\Q$bare\E\b/;
+    my $in = 0;
+    for (my $p = $tok; $p; $p = $p->parent) { if ($p == $region) { $in = 1; last } }
+    return 0 unless $in;
+  }
+  return 1;
 }
 
 # Container (`state @x` / `state %h`) variant of _shadow_rename_blocker: same
@@ -7287,10 +7312,22 @@ sub _rename_state_vars {
     # nested in an inner block keeps the refusal: its region ends with that
     # block, which the sub-scoped map cannot express.
     my $eval_cap_ok = $k[1]->content =~ /^\$/ && $stmt->parent == $sub->block;
+    # A scalar decl in an INNER block is invisible to a string eval OUTSIDE
+    # that block — perl ends the name's scope with the block — so scanning the
+    # whole sub for `eval EXPR` refuses shapes that cannot go wrong.  The
+    # narrowing is only safe when the name occurs nowhere else in the sub,
+    # because the rename walks forward from the symbol and does not itself
+    # stop at the block's end (#1501, s473t4: op/coresubs.t's
+    # `if (...) { state $classcount = 1; … }` cost the file all 1109 rows,
+    # while its `eval $core_code` sits outside the `if` and can never name it).
+    my $eval_root = ($k[1]->content =~ /^\$/ && !$eval_cap_ok
+                     && $stmt->parent != $sub->block
+                     && _symbol_confined_to($sub->block, $stmt->parent, $k[1]->content))
+                  ? $stmt->parent : undef;
     my $why = $k[1]->content =~ /^\$/
       ? $self->_shadow_rename_blocker($sub->block, $k[1],
                                       ($eval_cap_ok ? 'eval_ok' : undef),
-                                      'shadow_ok')
+                                      'shadow_ok', $eval_root)
       : $self->_state_container_blocker($sub->block, $k[1]);
     die "Parser2 TODO: state " . $k[1]->content . " in named sub ($why)\n" if $why;
     my $orig = $k[1]->content;

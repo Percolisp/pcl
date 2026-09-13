@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 6;
 
 sub write_pl {
     my ($code) = @_;
@@ -113,3 +113,75 @@ sub m1 { state $q = "STQ"; my $q = "MY"; return eval '$q' }
 print "m=", m1(), "\n";
 PL
    'pair starts at the decl, dies with the sub, loses to a my-shadow');
+
+# ── 4-6. #1501 (s473t4): a `state` decl in an INNER BLOCK of a named sub.
+# Perl ends the name's scope with that block, so a string eval OUTSIDE the
+# block can never resolve it — scanning the whole sub for `eval EXPR` refused
+# shapes that cannot go wrong, and t/op/coresubs.t (1109 rows) was refused
+# whole for exactly that.  The narrowing is licensed by TWO conditions, and
+# rows 5 and 6 are the ones that must STILL refuse: an eval inside the decl's
+# own block (which perl DOES let name the variable), and the name occurring
+# outside the block (where the positional rename would reach past it).
+is(run_cl(<<'PL'), "in:1\neval:42\nin:2\neval:42\neval:42\n",
+use strict; use warnings;
+sub f {
+  my ($w) = @_;
+  if ($w) {
+    use feature 'state';
+    state $n = 1;
+    print "in:$n\n";
+    $n++;
+  }
+  my $code = 'sub { 42 }';
+  my $r = eval $code;
+  print "eval:", $r->(), "\n";
+}
+f(1); f(1); f(0);
+PL
+   'inner-block state + a string eval OUTSIDE the block: perl 5.40.3 byte-for-byte');
+
+# The eval is INSIDE the decl's block and can name the variable: perl prints
+# 6 then 7.  PCL must keep REFUSING, loudly, rather than answer the global.
+{
+    my $pl = write_pl(<<'PL');
+use strict; use warnings;
+sub g {
+  if ($_[0]) {
+    use feature 'state';
+    state $n = 5;
+    my $v = eval '$n + 1';
+    print "inner-eval:", (defined $v ? $v : "undef"), "\n";
+    $n++;
+  }
+}
+g(1); g(1);
+PL
+    my $err = `$pl2cl < $pl 2>&1 >/dev/null`;
+    like($err, qr/state \$n in named sub \(string eval\)/,
+         'an eval INSIDE the decl block keeps the refusal (perl: 6 then 7)');
+}
+
+# The name also occurs OUTSIDE the block (here the package `our $n`), so the
+# rename would reach past the block's end.  perl prints state:1 / outer:100 /
+# eval:100.  PCL must keep refusing.
+{
+    my $pl = write_pl(<<'PL');
+use strict; use warnings;
+our $n = 100;
+sub k {
+  if ($_[0]) {
+    use feature 'state';
+    state $n = 1;
+    print "state:$n\n";
+    $n++;
+  }
+  print "outer:$n\n";
+  my $v = eval '$n';
+  print "eval:", (defined $v ? $v : "undef"), "\n";
+}
+k(1); k(1);
+PL
+    my $err = `$pl2cl < $pl 2>&1 >/dev/null`;
+    like($err, qr/state \$n in named sub \(string eval\)/,
+         'the name used OUTSIDE the block keeps the refusal (perl: 1/100/100)');
+}
