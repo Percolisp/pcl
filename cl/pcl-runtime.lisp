@@ -26176,6 +26176,84 @@ buffer's fill-pointer; everything else falls back to file-length."
    CPAN modules (measured), which is what makes waiting for that affordable."
   (cl-ppcre:regex-replace-all "\\(\\?\\??\\{[^}]*\\}\\)" pattern ""))
 
+;;; ----- POSIX bracket classes: [:name:] and [:^name:] --------------------
+;;;
+;;; cl-ppcre has no `[:name:]` syntax at all, so PCL rewrites the form into
+;;; an equivalent range list before the pattern reaches the engine.  perl's
+;;; set is CLOSED and is exactly these fourteen names (probed 5.40.3: any
+;;; other name is the compile error "POSIX class [:foo:] unknown in regex"),
+;;; and each has a NEGATED spelling `[:^name:]` that is its complement
+;;; WITHIN the enclosing bracket class — which is the only way to say "not
+;;; this class" there, since a class's own `^` applies to the whole class.
+;;;
+;;; ONE table, both spellings derived from it (CLAUDE.md rule 11): the
+;;; negated spelling used to fall through untranslated, so `[[:^alnum:]]`
+;;; reached cl-ppcre as the class `[[:^alnum:]` followed by a literal `]`,
+;;; needing TWO characters where perl needs one — it matched nothing, AND
+;;; `[^[:^alnum:]]` matched nothing either, so the class and its complement
+;;; agreed, which is exactly what t/re/reg_posixcc.t's 6,630 rows assert
+;;; cannot happen.  The membership itself is still ASCII-only (perl's /u
+;;; classes are Unicode-aware — #1036, out of scope by USER decision s465);
+;;; what this restores is that `[:name:]` and `[:^name:]` are complements.
+(defparameter +p-posix-class-ranges+
+  '(("alpha"  (#x41 . #x5A) (#x61 . #x7A))
+    ("digit"  (#x30 . #x39))
+    ("alnum"  (#x30 . #x39) (#x41 . #x5A) (#x61 . #x7A))
+    ("upper"  (#x41 . #x5A))
+    ("lower"  (#x61 . #x7A))
+    ("word"   (#x30 . #x39) (#x41 . #x5A) (#x5F . #x5F) (#x61 . #x7A))
+    ("space"  (#x09 . #x0D) (#x20 . #x20))
+    ("blank"  (#x09 . #x09) (#x20 . #x20))
+    ("print"  (#x20 . #x7E))
+    ("graph"  (#x21 . #x7E))
+    ("punct"  (#x21 . #x2F) (#x3A . #x40) (#x5B . #x60) (#x7B . #x7E))
+    ("cntrl"  (#x00 . #x1F) (#x7F . #x7F))
+    ("xdigit" (#x30 . #x39) (#x41 . #x46) (#x61 . #x66))
+    ("ascii"  (#x00 . #x7F)))
+  "perl's POSIX bracket-class names -> the ASCII code-point ranges PCL gives
+   them, LOW TO HIGH and non-adjacent, so the complement is one walk.")
+
+(defconstant +p-posix-class-top+ #x10FFFF
+  "The last code point a complemented POSIX class reaches — Unicode's last,
+   which is what perl matches for `[[:^alnum:]]`.")
+
+(defun %pcl-posix-complement (ranges)
+  "The complement of RANGES over 0 .. +p-posix-class-top+, same shape."
+  (let ((out '())
+        (next 0))
+    (dolist (r ranges)
+      (when (< next (car r))
+        (push (cons next (1- (car r))) out))
+      (setf next (1+ (cdr r))))
+    (when (<= next +p-posix-class-top+)
+      (push (cons next +p-posix-class-top+) out))
+    (nreverse out)))
+
+(defun %pcl-regex-class-char (code)
+  "CODE as one bracket-class element: the character, backslash-escaped when
+   it is one of the five that would otherwise END or RESHAPE the class."
+  (let ((ch (code-char code)))
+    (if (member ch '(#\\ #\] #\- #\^ #\[))
+        (coerce (list #\\ ch) 'string)
+        (string ch))))
+
+(defun %pcl-posix-class-text (name negated)
+  "The bracket-class BODY for perl's [:NAME:] (or [:^NAME:] when NEGATED),
+   or NIL when NAME is not one of perl's fourteen — which is invalid Perl
+   (perl refuses it at compile time) and so is left for cl-ppcre to read as
+   the literal class it spells, per design principle 9."
+  (let ((entry (assoc name +p-posix-class-ranges+ :test #'string=)))
+    (when entry
+      (let ((ranges (if negated
+                        (%pcl-posix-complement (cdr entry))
+                        (cdr entry))))
+        (with-output-to-string (s)
+          (dolist (r ranges)
+            (write-string (%pcl-regex-class-char (car r)) s)
+            (unless (= (car r) (cdr r))
+              (write-char #\- s)
+              (write-string (%pcl-regex-class-char (cdr r)) s))))))))
+
 (defun perl-regex-to-ppcre (pattern)
   "Convert Perl regex escape sequences to cl-ppcre compatible form.
    cl-ppcre does not handle \\x{HHHH} (Perl hex escapes with braces).
@@ -26223,26 +26301,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (cl-ppcre:quote-meta-chars content))
                :simple-calls t))
          ;; Translate POSIX character classes to equivalent ranges.
-         ;; CL-PPCRE 2.1.2 does not support [:class:] syntax.
+         ;; CL-PPCRE 2.1.2 does not support [:class:] syntax — in either
+         ;; spelling.  See +p-posix-class-ranges+ for the table and for why
+         ;; the negated spelling is not optional.
          (pat (cl-ppcre:regex-replace-all
-               "\\[:(\\w+):\\]"
+               "\\[:(\\^?)(\\w+):\\]"
                pat
-               (lambda (match class-name)
-                 (cond
-                   ((equal class-name "alpha")  "a-zA-Z")
-                   ((equal class-name "digit")  "0-9")
-                   ((equal class-name "alnum")  "a-zA-Z0-9")
-                   ((equal class-name "upper")  "A-Z")
-                   ((equal class-name "lower")  "a-z")
-                   ((equal class-name "word")   "a-zA-Z0-9_")
-                   ((equal class-name "space")  " \\t\\n\\r\\x{0c}\\x{0b}")
-                   ((equal class-name "blank")  " \\t")
-                   ((equal class-name "print")  "\\x{20}-\\x{7e}")
-                   ((equal class-name "graph")  "\\x{21}-\\x{7e}")
-                   ((equal class-name "punct")  "\\x{21}-\\x{2f}\\x{3a}-\\x{40}\\x{5b}-\\x{60}\\x{7b}-\\x{7e}")
-                   ((equal class-name "cntrl")  "\\x{00}-\\x{1f}\\x{7f}")
-                   ((equal class-name "xdigit") "0-9a-fA-F")
-                   (t match)))
+               (lambda (match caret class-name)
+                 (or (%pcl-posix-class-text class-name (string= caret "^"))
+                     match))
                :simple-calls t)))
     (cl-ppcre:regex-replace-all
      "\\\\x\\{([0-9a-fA-F]+)\\}"
