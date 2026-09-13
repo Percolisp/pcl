@@ -3824,11 +3824,29 @@ sub _rename_spanning_lexicals {
       # key on ->symbol; the `$x` interp fixer skips `$x[`/`$x{`), so the
       # matching family DECL must not refuse either.  (The capture-promotion
       # pass keeps its conflated count on purpose — see _promote_captured.)
-      $dc     += $self->_hard_decl_count($top, $bare, '$');
+      # A BLOCK-FORM package segment declares nothing that binds out here
+      # (#1581).  `_hard_decl_count`'s own rule is "a decl nested inside a
+      # Structure::Block is a scopeable SHADOW, not a same-level re-binding",
+      # and a `package Foo { my $x; … }` decl IS inside a block — but the
+      # flattening hands its statements over as this segment's TOP level, so
+      # the block is no longer between the declarator and the statement and
+      # the count reads `hard`.  The compensation therefore has to be made at
+      # the SEGMENT level, exactly as the checker (`_check_my_spanning`), the
+      # span pre-filter and the container pass already make it: same rule,
+      # same reading, fourth site.  The rewrite needs no other change — the
+      # segment's parent IS the package block, so `_ref_shadowed` discounts
+      # every use the block's own decl shadows (measured: op/goto.t's
+      # `package Do_undef { my $count; sub bump { $count++ } }` beside a file
+      # `my $count`).  USE facts ($family/$interp) are NOT segment-skipped: a
+      # blockform segment that merely READS the outer lexical is a real
+      # reference.
+      unless ($segments->[$j]{blockform}) {
+        $dc += $self->_hard_decl_count($top, $bare, '$');
+        push @sdecls, grep { my $v = $_; grep { $_ == $v } @$top }
+                      @{ _scalar_decl_stmts($csf->[$j], $bare) };
+      }
       $family ||= $csf->[$j]{family}{$bare};
       $interp ||= $csf->[$j]{interp}{$bare};
-      push @sdecls, grep { my $v = $_; grep { $_ == $v } @$top }
-                    @{ _scalar_decl_stmts($csf->[$j], $bare) };
     }
     # (The old blanket 'family use (@x/%x/$#x)' refusal was REMOVED in M-F:
     # Symbol rewrites key on ->symbol (a sibling @x/%x is never touched),

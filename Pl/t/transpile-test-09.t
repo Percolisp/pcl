@@ -1058,4 +1058,42 @@ if ($h{my} + $h{our} + $h{state}) { package Q; $z = "ok"; }
 print "z=", (defined $Q::z ? $Q::z : "U"), "\n";
 });
 
+# ── s473t5a #1581: a `my $c` inside a `package NAME { … }` BLOCK made a
+# FILE-level `my $c` of the same name refuse the WHOLE FILE ("my-lexical 'c'
+# spans a package boundary") — t/op/goto.t's 134 rows, and three more shapes
+# below.  The two are DIFFERENT variables: the block-form segment's `my` dies
+# with its block, which is the rule `_check_my_spanning`, the span pre-filter
+# and the container pass already apply per segment — but the span RENAME's
+# extent decl count did not, because the flattening presents a block-form
+# segment's statements as segment TOP level and `_hard_decl_count` then reads
+# a genuinely block-nested decl as a same-level re-binding (`sdecls=2 dc=2`
+# → refuse → the checker kills the file).
+# INVERSE GUARDS in the same snippet: a block-form segment that only READS the
+# outer lexical still reads it (1); a use BEFORE the block's own `my` is the
+# OUTER variable and one after it is the block's (2); two block-form packages
+# each declaring the same name keep three distinct variables (3); and an
+# INTERPOLATED read inside the block resolves to the block's own (4).
+test_transpile("my inside a package BLOCK is not the file lexical (#1581)", q{
+my $count = 0;
+$count = 7;
+package Do_undef {
+    my $count;
+    sub bump { $count++; return $count }
+}
+print "1 file=$count inner=", Do_undef::bump(), "\n";
+my $r = "F";
+package Reads { sub show { return $r } }
+print "2 read-outer=", Reads::show(), "\n";
+my $c = 1;
+package Pre {
+    our @log; push @log, "pre=$c";
+    my $c = 9;
+    push @log, "post=$c";
+}
+print "3 order=@Pre::log after=$c\n";
+package A { my $c = 2; sub a { return $c } }
+package B { my $c = 3; sub b { return $c } }
+print "4 file=$c A=", A::a(), " B=", B::b(), "\n";
+});
+
 done_testing();
