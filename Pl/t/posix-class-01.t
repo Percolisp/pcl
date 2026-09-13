@@ -20,6 +20,13 @@
 # Unicode-aware — #1036, out of scope by USER decision s465), so every
 # expectation below stays inside 0x00-0x7F; row 2 is the complement property,
 # which must hold at every code point.
+#
+# Rows 4-5 are the same shape for \h \H \v \V \R (task #1713), which were not
+# in cl-ppcre's six escapes at all and so matched the LETTER: `/\h+/` matched a
+# run of h.  Those two sets are NOT ASCII-only — they ARE their Unicode selves
+# in perl (probed code point by code point over 0..0x11000) — and the rewrite
+# has to know whether the escape sits inside a bracket class, because a class's
+# own `^` applies to the whole class.
 
 use v5.30;
 use strict;
@@ -38,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 5;
 
 sub run_cl {
     my ($code) = @_;
@@ -150,3 +157,75 @@ test_cl('[:ascii:] exists and [:^ascii:] is its complement',
   . q{      "[", (chr(0x100) =~ /[[:^ascii:]]/ ? 1:0), "]",}
   . q{      "[", (chr(0x100) =~ /[[:ascii:]]/ ? 1:0), "]\n";},
     "[1][0][1][0]\n");
+
+# ── 4. \h \H \v \V: membership, and the complement property at every code ──
+# point up to 0x3100, which is reg_posixcc.t's own assertion for these pairs.
+# The four rows of the code-point table are the task's: TAB, SPACE, NL, VT, the
+# LETTERS h and H (which must NOT match \h/\v), NBSP and LINE SEPARATOR.
+my $hv_prog = <<'PROG';
+use strict; use warnings;
+for my $cp (0x09, 0x20, 0x0A, 0x0B, 0x68, 0x48, 0xA0, 0x2028) {
+    my $c = chr($cp);
+    printf "%04X %d %d %d %d\n", $cp,
+        ($c =~ /\h/) ? 1 : 0, ($c =~ /\H/) ? 1 : 0,
+        ($c =~ /\v/) ? 1 : 0, ($c =~ /\V/) ? 1 : 0;
+}
+my ($bad, $n) = (0, 0);
+for my $cp (0 .. 0x3100) {
+    next if $cp >= 0xD800 && $cp <= 0xDFFF;
+    my $c = chr($cp); $n++;
+    $bad++ if (($c =~ /\h/) ? 1 : 0) == (($c =~ /\H/) ? 1 : 0);
+    $bad++ if (($c =~ /\v/) ? 1 : 0) == (($c =~ /\V/) ? 1 : 0);
+    $bad++ if (($c =~ /[\h]/) ? 1 : 0) != (($c =~ /[^\H]/) ? 1 : 0);
+    $bad++ if (($c =~ /[\v]/) ? 1 : 0) != (($c =~ /[^\V]/) ? 1 : 0);
+}
+print "complement: $bad bad of $n\n";
+PROG
+test_cl('\h \H \v \V: perl 5.40.3 membership, and complements at every code point',
+    $hv_prog, <<'EXPECT');
+0009 1 0 0 1
+0020 1 0 0 1
+000A 0 1 1 0
+000B 0 1 1 0
+0068 0 1 0 1
+0048 0 1 0 1
+00A0 1 0 0 1
+2028 0 1 1 0
+complement: 0 bad of 12545
+EXPECT
+
+# ── 5. \R, and the cases the rewrite must NOT touch ────────────────────────
+# `\\h` is an escaped backslash then the letter h; a `\h` inside \Q…\E is
+# literal text; `\R` INSIDE a class is the letter R in perl 5.40.3 (probed) and
+# is left for the engine to read that way; a class whose first character is `]`
+# keeps it literal; and the /x and /xx normalisers must not eat the whitespace
+# the rewrite itself emits into a class.
+# (perl also WARNS on `[\R]` — "Unrecognized escape \R in character class" — on
+# stderr; PCL emits no warnings-gated diagnostic at all, #221, so the
+# expectation is perl's STDOUT, which is what this row compares.)
+my $r_prog = <<'PROG';
+use strict; use warnings;
+my @m = ("a\r\nb" =~ /(\R)/g); printf "R1 %d %d\n", scalar(@m), length($m[0]);
+print "R2 ", ("x\x{2028}y" =~ /\R/) ? 1 : 0, ("xy" =~ /\R/) ? 1 : 0, "\n";
+my $s = "a\r\nb\nc"; my $k = ($s =~ s/\R/|/g); print "R3 $k $s\n";
+print "R4 ", ("R" =~ /[\R]/) ? 1 : 0, ("\n" =~ /[\R]/) ? 1 : 0, "\n";
+print "B1 ", ("a\\hb" =~ /\\h/) ? 1 : 0, ("h" =~ /\h/) ? 1 : 0, "\n";
+print "B2 ", ("a\\hb" =~ /\Q\h\E/) ? 1 : 0, (" " =~ /\Q\h\E/) ? 1 : 0, "\n";
+print "B3 ", ("a\tb" =~ /(?x: a \h b )/) ? 1 : 0, ("a\tb" =~ /a [ \h ] b/xx) ? 1 : 0, "\n";
+print "B4 ", ("]" =~ /[]\h]/) ? 1 : 0, ("\t" =~ /[]\h]/) ? 1 : 0, ("[" =~ /[[\h]/) ? 1 : 0, "\n";
+print "B5 ", ("\t" =~ /[^\h]/) ? 1 : 0, ("z" =~ /[^\h]/) ? 1 : 0, "\n";
+print "B6 ", join("|", split /\h+/, "a  b\tc"), "\n";
+PROG
+test_cl('\R at top level, and \\\\h / \Q\h\E / [\R] / (?x:) left alone',
+    $r_prog, <<'EXPECT');
+R1 1 2
+R2 10
+R3 2 a|b|c
+R4 10
+B1 10
+B2 10
+B3 11
+B4 111
+B5 01
+B6 a|b|c
+EXPECT

@@ -26359,12 +26359,29 @@ buffer's fill-pointer; everything else falls back to file-length."
     (nreverse out)))
 
 (defun %pcl-regex-class-char (code)
-  "CODE as one bracket-class element: the character, backslash-escaped when
-   it is one of the five that would otherwise END or RESHAPE the class."
+  "CODE as one bracket-class element: the character, backslash-escaped when it
+   is one of the five that would otherwise END or RESHAPE the class, or a
+   WHITESPACE character — which cl-ppcre keeps either way, but which PCL's own
+   /xx and inline-`(?x:` normaliser drops inside a class (that is perl's rule
+   for the SOURCE pattern, and these characters are a rewrite's output, not
+   the program's text).  An escaped literal is the same class member in both
+   engines (probed)."
   (let ((ch (code-char code)))
-    (if (member ch '(#\\ #\] #\- #\^ #\[))
+    (if (or (member ch '(#\\ #\] #\- #\^ #\[))
+            (<= #x09 code #x0D)
+            (= code #x20))
         (coerce (list #\\ ch) 'string)
         (string ch))))
+
+(defun %pcl-class-ranges-text (ranges)
+  "RANGES as a bracket-class BODY (no enclosing brackets): the one rendering
+   every range table in this file goes through."
+  (with-output-to-string (s)
+    (dolist (r ranges)
+      (write-string (%pcl-regex-class-char (car r)) s)
+      (unless (= (car r) (cdr r))
+        (write-char #\- s)
+        (write-string (%pcl-regex-class-char (cdr r)) s)))))
 
 (defun %pcl-posix-class-text (name negated)
   "The bracket-class BODY for perl's [:NAME:] (or [:^NAME:] when NEGATED),
@@ -26373,15 +26390,109 @@ buffer's fill-pointer; everything else falls back to file-length."
    the literal class it spells, per design principle 9."
   (let ((entry (assoc name +p-posix-class-ranges+ :test #'string=)))
     (when entry
-      (let ((ranges (if negated
-                        (%pcl-posix-complement (cdr entry))
-                        (cdr entry))))
-        (with-output-to-string (s)
-          (dolist (r ranges)
-            (write-string (%pcl-regex-class-char (car r)) s)
-            (unless (= (car r) (cdr r))
-              (write-char #\- s)
-              (write-string (%pcl-regex-class-char (cdr r)) s))))))))
+      (%pcl-class-ranges-text (if negated
+                                  (%pcl-posix-complement (cdr entry))
+                                  (cdr entry))))))
+
+;;; ----- \h \H \v \V \R: the escapes cl-ppcre does not know ----------------
+;;;
+;;; cl-ppcre's map-char-to-special-char-class answers for exactly six escapes
+;;; — \d \D \w \W \s \S — so `\h` fell through to `handle-char` and the
+;;; pattern matched the LETTER h: `/\h+/`, a common idiom for horizontal
+;;; whitespace, matched a run of h and nothing else, with no diagnostic.
+;;;
+;;; The sets are perl's (perlrecharclass), probed code point by code point
+;;; over 0..0x11000 in 5.40.3.  They are rewritten into bracket classes, so
+;;; unlike the POSIX table this is NOT ASCII-only — these two sets ARE their
+;;; Unicode selves in perl, and perl's own \h/\H and \v/\V are complements at
+;;; every code point (probed: zero disagreements).
+(defparameter +p-hv-class-ranges+
+  '(("h" (#x09 . #x09) (#x20 . #x20) (#xA0 . #xA0) (#x1680 . #x1680)
+     (#x2000 . #x200A) (#x202F . #x202F) (#x205F . #x205F) (#x3000 . #x3000))
+    ("v" (#x0A . #x0D) (#x85 . #x85) (#x2028 . #x2029)))
+  "perl's \\h (horizontal whitespace) and \\v (vertical whitespace) as code
+   point ranges, LOW TO HIGH and non-adjacent, like +p-posix-class-ranges+.")
+
+(defparameter +p-linebreak-text+
+  (format nil "(?>\\r\\n|[~A])"
+          (%pcl-class-ranges-text
+           (cdr (assoc "v" +p-hv-class-ranges+ :test #'string=))))
+  "perl's \\R: a CRLF pair or one vertical-whitespace character, and ATOMIC —
+   perlrebackslash gives `(?>\\x0D\\x0A|\\v)` — so \"\\r\\n\" is ONE match of
+   length two and never backtracks into matching the \\r alone.")
+
+(defun %pcl-hv-class-text (letter in-class)
+  "The replacement for \\LETTER (one of h H v V) at this point in a pattern.
+   Outside a bracket class it is a class of its own, and the negated spelling
+   is simply a negated class.  INSIDE one the COMPLEMENT RANGES have to be
+   spelled out, because a class's own `^` applies to the whole class — which
+   is also why this pass has to know where it is."
+  (let* ((ranges (cdr (assoc (string (char-downcase letter))
+                             +p-hv-class-ranges+ :test #'string=)))
+         (negated (upper-case-p letter)))
+    (if in-class
+        (%pcl-class-ranges-text (if negated
+                                    (%pcl-posix-complement ranges)
+                                    ranges))
+        (concatenate 'string "[" (if negated "^" "")
+                     (%pcl-class-ranges-text ranges) "]"))))
+
+(defun %pcl-has-hv-escape (pat)
+  "Does PAT contain a backslash followed by h H v V or R?  A cheap pre-test:
+   almost no pattern does, and the rewrite below is a full copying scan."
+  (loop for i from 0 below (max 0 (1- (length pat)))
+        thereis (and (char= (char pat i) #\\)
+                     (find (char pat (1+ i)) "hHvVR") t)))
+
+(defun %pcl-expand-hv-escapes (pat)
+  "Rewrite \\h \\H \\v \\V and \\R into forms cl-ppcre reads.  ONE forward
+   scan, because the answer depends on whether the escape sits inside a
+   bracket class: `\\h` becomes a class outside one and a bare element list
+   inside one.  Every other escape pair is copied VERBATIM, so `\\\\h` stays
+   an escaped backslash followed by the letter h, and a `\\h` that the \\Q
+   pass already quoted stays literal.
+   \\R inside a class is left alone: perl rejects it there outright (\"\\R
+   cannot be used inside a character class\"), so per design principle 9 it
+   is cl-ppcre's to refuse."
+  (if (not (%pcl-has-hv-escape pat))
+      pat
+      (let ((out (make-string-output-stream)) (i 0) (n (length pat))
+            (in-class nil))
+        (loop while (< i n) do
+              (let ((c (char pat i)))
+                (cond
+                  ((char= c #\\)
+                   (let ((nx (and (< (1+ i) n) (char pat (1+ i)))))
+                     (cond
+                       ((and nx (find nx "hHvV"))
+                        (write-string (%pcl-hv-class-text nx in-class) out))
+                       ((and nx (char= nx #\R) (not in-class))
+                        (write-string +p-linebreak-text+ out))
+                       (t (write-char c out)
+                          (when nx (write-char nx out))))
+                     (incf i (if nx 2 1))))
+                  ;; An inner `[:name:]` is ONE unit: its brackets neither open
+                  ;; nor close a class.  The POSIX pass has already replaced
+                  ;; every valid name, so what reaches here is invalid Perl —
+                  ;; but mis-tracking it would desynchronise IN-CLASS and
+                  ;; mangle a later \h.
+                  ((and in-class (char= c #\[) (< (1+ i) n)
+                        (char= (char pat (1+ i)) #\:)
+                        (search ":]" pat :start2 (+ i 2)))
+                   (let ((e (+ 2 (search ":]" pat :start2 (+ i 2)))))
+                     (write-string (subseq pat i e) out)
+                     (setf i e)))
+                  ((and (not in-class) (char= c #\[))
+                   (write-char c out) (incf i) (setf in-class t)
+                   ;; a leading `^`, and then a leading `]`, are literal
+                   (when (and (< i n) (char= (char pat i) #\^))
+                     (write-char #\^ out) (incf i))
+                   (when (and (< i n) (char= (char pat i) #\]))
+                     (write-char #\] out) (incf i)))
+                  ((and in-class (char= c #\]))
+                   (write-char c out) (incf i) (setf in-class nil))
+                  (t (write-char c out) (incf i)))))
+        (get-output-stream-string out))))
 
 (defun %pcl-strip-charset-flags (pat)
   "Drop perl's CHARSET letters (a aa d l u) from inline modifier groups.
@@ -26477,7 +26588,12 @@ buffer's fill-pointer; everything else falls back to file-length."
                (lambda (match caret class-name)
                  (or (%pcl-posix-class-text class-name (string= caret "^"))
                      match))
-               :simple-calls t)))
+               :simple-calls t))
+         ;; \h \H \v \V \R — six escapes are all cl-ppcre knows, so these
+         ;; matched the LETTER.  AFTER the \Q pass (so a quoted `\h` stays
+         ;; literal) and AFTER the POSIX pass (so no `[:name:]` brackets are
+         ;; left to confuse the in-class scan).  See %pcl-expand-hv-escapes.
+         (pat (%pcl-expand-hv-escapes pat)))
     (cl-ppcre:regex-replace-all
      "\\\\x\\{([0-9a-fA-F]+)\\}"
      pat
