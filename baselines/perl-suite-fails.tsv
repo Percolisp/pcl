@@ -585,8 +585,11 @@ comp/proto.t	90	ok	not ok	#90	#1682
 comp/proto.t	91	ok	not ok	#91	#1682
 comp/proto.t	92	ok	not ok	#92	#1682
 comp/proto.t	95	ok	not ok	#95	#1682
+comp/proto.t	0	(none)	extra [PCL #110]	*extra* star "FOO"	#1682
+comp/proto.t	0	(none)	extra [PCL #108]	*extra* star FOO	#1682
+comp/proto.t	0	(none)	extra [PCL #109]	*extra* star(FOO)	#1682
+comp/proto.t	0	(none)	renumbered	*summary*	#1682
 comp/proto.t	193	ok	(missing)	Check that ckproto ignores spaces in comparisons	#1682
-comp/proto.t	0	(none)	renumbered	PCL's TAP numbering is offset from perl's for 18 row(s) — rows below are paired by description, not by number	#1682
 comp/proto.t	215	ok	(missing)	[perl #123514] (got 1 2 3 $$$$$$$ 4 5 6)	#1682
 comp/proto.t	134	ok	(missing)	\$ with invalid argument	#1682
 comp/proto.t	72	ok	not ok	\& prohibits foo()	#1682
@@ -620,13 +623,10 @@ comp/proto.t	130	ok	(missing)	sreftest	#1682
 comp/proto.t	131	ok	(missing)	sreftest	#1682
 comp/proto.t	132	ok	(missing)	sreftest	#1682
 comp/proto.t	133	ok	(missing)	sreftest	#1682
-comp/proto.t	0	(none)	extra [PCL #110]	star "FOO"	#1682
 comp/proto.t	109	ok	not ok [PCL #114]	star *FOO	#1682
-comp/proto.t	0	(none)	extra [PCL #108]	star FOO	#1682
 comp/proto.t	103	ok	not ok [PCL #105]	star FOO	#1682
 comp/proto.t	111	ok	not ok [PCL #116]	star \*FOO	#1682
 comp/proto.t	110	ok	not ok [PCL #115]	star(*FOO)	#1682
-comp/proto.t	0	(none)	extra [PCL #109]	star(FOO)	#1682
 comp/proto.t	112	ok	not ok [PCL #117]	star(\*FOO)	#1682
 comp/proto.t	117	ok	(missing)	star2 "FOO", "BAR"	#1682
 comp/proto.t	119	ok	(missing)	star2 $star, $star	#1682
