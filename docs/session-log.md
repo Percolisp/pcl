@@ -175,6 +175,134 @@ one `eq`-hash lookup inside `*G{ARRAY}` / `*G{HASH}`.  Guard
 `Pl/t/glob-undef-01.t` 5 → 9 rows (922 ms), rows 6/7/9 inverse-verified
 FAILING on an `a217cb49` extraction, row 8 the inverse guard that must pass
 both sides.
+## Session s473t5d (Opus agent, 2026-09-13) -- #1501 round 5: `run/` + `io/`, six fixes, 695 rows attributed and all 18 UNEXPLAINED early-stoppers explained
+
+**Member 1, the two tables** (`scratch/s473t5d/check1-table.md`,
+`clusters-blessed.txt`).  The population, taken LIVE from the three blessed
+baselines: CHECK 2 = **47 files / 763 blessed fail rows / 373 clusters / CAUSES
+0**; CHECK 1 = the **18 UNEXPLAINED** `run/` + `io/` files of
+`baselines/row-shortfall.tsv`, **290 rows short**.  All 48 files (the 47 plus
+`run/runenv.t`, a TRANSPILE-FAIL) were measured once on this worktree
+(`--jobs 1`, `PCL_SUITE_KEEP`) BEFORE any change, which is what made every later
+"mine vs not-mine" call a measurement rather than an argument.
+
+| CHECK 1: the aborting FORM | short | recovery line |
+|---|---|---|
+| `io/layers.t` | 55 | `The variable STDIN is unbound` -- `PerlIO::get_layers(STDIN)` |
+| `io/socket.t` + `io/socketpair.t` | 53 | `1..0 # Skip` on two `%Config` keys |
+| `run/locale.t` | 44 | `1..0 # Skip could not load the POSIX module` |
+| `io/utf8.t` | 35 | `Undefined subroutine &BYTES::length` |
+| `run/switches.t` | 35 | `Failed to open 'tmpswitches.bak'` |
+| `io/dup.t` | 19 | `Cannot dup to string '1': Bad file descriptor` |
+| `io/scalar_ungetc.t` | 17 | `IO::Handle::ungetc is not implemented under PCL` |
+| `io/tell.t` | 10 | `The path #P"pcl-test-N-N" does not exist` |
+| `io/data.t` 4, `io/crlf.t` 3, `io/closepid.t` 3, `io/semctl.t` 2, `run/switch{p,x,F,a,n}.t` 10 | 22 | (four are `1..0 # Skip` or a no-op helper; the rest are the shebang family) |
+
+| CHECK 2: blessed rows / distinct shapes | rows | shapes |
+|---|---|---|
+| `run/runenv_hashseed.t` | 269 | 23 |
+| `run/switches.t` | 134 | 110 |
+| `io/utf8.t` | 39 | 14 |
+| `io/open.t` | 38 | 32 |
+| `io/scalar.t` | 30 | 23 |
+| `io/argv.t` | 29 | 14 |
+| `run/cloexec.t` | 26 | 17 |
+| `io/dup.t` | 20 | 3 |
+| `run/switchd.t` | 19 | 17 |
+| `io/pipe.t` | 18 | 16 |
+| `io/scalar_ungetc.t` | 18 | 6 |
+| `run/switchC.t` | 12 | 12 |
+| `io/crlf.t` 10, `io/tell.t` 10, `run/switchx.t` 9, `io/perlio_leaks.t` 8, `io/nargv.t` 7, `run/runenv_randseed.t` 6, `io/inplace.t` 6, `io/pvbm.t` 5 | 61 | 44 |
+| the 27 files with fewer than 5 rows | 50 | 42 |
+
+A `run/` file has one shape per ROW (switches.t: 110 shapes over 134 rows) and
+an `io/` file two or three per FACT (dup.t: 3 shapes over 20 rows), so the two
+halves of the pair had to be read the opposite way round: `run/` collapses by
+SWITCH (seven files are one missing mechanism, #1702) and `io/` by ABORT POINT.
+
+**Member 2, the six fixes.**  Four are one family -- what `open` does when it
+cannot do what it was asked.  **#1696**: `+>>` (read/append) was in NONE of its
+five dispatch sites, so the shorter `+>` arm won and left the second `>` on the
+FILENAME; `open($fh,"+>>$path")` opened a file literally named `>/tmp/…`.
+**#1697**: the LIST form `open($fh,'-|',$prog,@argv)` was a macroexpansion
+ARITY ERROR -- `p-open` took three parameters -- so `t/io/closepid.t`'s whole
+top-level form failed to COMPILE and the file produced no TAP; the machinery
+existed twice over (`%p-open-fork-pipe` takes a command LIST, `p-exec` with more
+than one string is already the no-shell exec), so the fix is one `&rest` and one
+`cons`, plus rule 12's die for a second target on a non-pipe mode.  **#1699**:
+perl's `open` never signals and SBCL's signals a FILE-ERROR for everything but
+ENOENT, so seven of nine probed failing shapes aborted the whole form -- ONE
+helper `%p-open-file` at the six plain-file arms, catching FILE-ERROR only so a
+PCL bug escaping `open` stays loud; its second half is that an APPEND
+ANONYMOUS TEMPORARY needs O_APPEND, which was already wrong for plain `>>`.
+**#1698**: `bytes::length`, a `:bytes` package beside `:utf8` -- rule 9a says
+runtime, not a `lib/bytes.pm` shim, because the answer is a statement about the
+SV's internal form and a Perl shim would have to ask `utf8::is_utf8`, which PCL
+hardcodes to 1.  And two in the harness: **#1700**, perl's `-i` IS `$^I = "ext"`
+and PCL's `<>` already honours it byte for byte, so the wrapper's switch is one
+prelude line; **#1701**, the real `t/test.pl` appends `args` RAW and PCL's stub
+`quotemeta`'d them, so `args => ['>', $file]` -- how `io/inplace.t` and
+`io/iprefix.t` write their fixtures -- became a literal argument and the
+fixtures never existed.
+
+**The verdicts that moved, and the ones that did not.**  Six: `io/tell.t`
+26/0 -> **36/0 OK**, `io/closepid.t` 0/0 -> **3/0 OK**, `io/perlio_open.t`
+9/1 -> **10/0 OK**, `io/utf8.t` 23/4 -> 53/9, `io/inplace.t` 2/6 -> 6/2,
+`run/switches.t` 6/99 -> 28/112 (shortfall 35 -> 11).  Each was re-run serially
+(#366 agreeing), and the emitted CL for all six is byte-IDENTICAL to a
+`git archive 2ff53f8d` extraction with the root paths normalised out -- which is
+what "cl/ + harness only" should mean, and is the proof that every move is a
+RUN-TIME move.  FIVE other files differ from the blessed snapshot and are NOT
+mine, each proved so: `io/pvbm.t` 23/5 alone (three times, and on the base
+extraction) vs 20/8 inside a batch -- the seventh recording of that flap;
+`io/open.t` (-2) and `run/switchM.t` (-2), STABLE across three lone runs and
+reproduced on the base extraction, so pre-existing unbisected drift;
+`io/iofile.t` (+1) and `io/pipe.t` (+1), present in the base measurement.  None
+spliced.
+
+**Member 2b, the attribution.**  695 rows, one cause per (file, rowkey), the
+join key being the runner's WHOLE projection -- `PclTapAlign::rowkey_desc` PLUS
+the test#-0 `*extra*`/`*summary*` fallbacks (the s473t5c lesson).  Sixteen rows
+left BY EDIT because this round fixed them, and the two files whose row SET
+changed materially were replaced from this round's own measurement (`io/utf8.t`
+39 -> 9, `run/switches.t` 134 -> 112).  The nine filings: **#1702** the
+`#!perl -SWITCHES` line (eight files -- one mechanism, not nine bugs; the
+rewriting already exists in `pclperl-for-tests` and belongs in `pl2cl`),
+**#1703** the `>&=` close taking the shared descriptor out, **#1704** `ungetc`
+needing a pushback STACK, **#1705** a shipped shim that the gating probe cannot
+see (`$Config{extensions}` empty, `d_getpbyname` missing, POSIX with no
+`locale_h` -- 97 rows behind two keys and a tag, and sockets have been SHIPPED
+since 2026-06-27), **#1706** the `-d` debugger hook model, **#1707** `$^F` and
+fd inheritance across exec, **#1708** `-I` not reaching the child's runtime
+`@INC`, **#1709** perl's switch DIAGNOSTICS (`run/switches.t`'s 112-row
+residue, sub-family by sub-family), **#1710** the eleven-file residue bundle
+with one measured shape per bullet.  `baselines/perl-suite-fails.tsv` CAUSES
+**4,338 -> 5,033 of 18,509**, every row outside `run/` + `io/` byte-identical;
+`baselines/row-shortfall.tsv` t/ half UNEXPLAINED **93 -> 75 files /
+62,629 -> 62,339 rows** -- all eighteen CHECK-1 files explained, three of them
+because the shortfall went to ZERO.
+
+**What was NOT done, said plainly.**  #1705's Config half was left to its task
+although it is two lines: un-skipping `io/socket.t` + `io/socketpair.t` makes 53
+rows RUN, most of which will fail honestly (their server/client split uses real
+`fork`, which `not-supported.md` already names), and that is a ~50-row baseline
+churn to be read row by row, not slipped in beside six other fixes.  #1703's fix
+needs an fdopen-ALIAS registry in the `close` path, which is hot code and wanted
+its own session.  And ONE row is PARKED rather than caused: `io/utf8.t:251`'s
+`isnt(defined $@, !0)` -- three probes vs perl (`undef $@`, a wide print to a
+byte handle, `no warnings 'utf8'` itself) all MATCH, so the cause is upstream in
+the file's state and the round's budget ran out before it was found; the task
+says so.
+
+**Bars** (all on the tree rebased onto main `a217cb49`): corpus-diff **emission
+IDENTICAL over 111**, silent drops 5 unchanged, 6 shapes identical;
+`emission-ab --shapes` over `lib/**` **28 SAME / 0 DIFF / 0 RCDIFF**;
+`ir-host-leak` **31 symbols / 111 files** = main's by construction;
+`ir-conform --jobs 2` **321 pass / 0 fail / 24 known / 0 stale**; full sweep
+`--jobs 4` **GATE clean, TOTAL passing 18675 (+0)**, 0 new / 0 fixed, drops
+**5 = census**; companion `--all --quick`; **no generation bump** -- v2-1360
+stands, and the reason is measured, not assumed (the emission is byte-identical
+over four populations).
 
 ## Session s473t5c (Opus agent, 2026-09-13) — #1501 round 4: `comp/` CHECK 1 + CHECK 2, one abort fixed, the directory attributed
 
