@@ -2,6 +2,136 @@
 
 Append new entries at the top. One section per session.
 
+## Session s484c (Opus agent, 2026-09-13 → 2026-09-14) — the regex + glob fillers: perl's global-match advance rule, `\h \H \v \V \R`, a glob VALUE in element position, and `local *G`
+
+Four filler tasks from s473t5e's and s484b's probe residue, all four RUNTIME
+(`cl/pcl-runtime.lisp`) changes: emission is byte-identical over the corpus and
+the generation stays `v2-1360`.  The session was stopped by the operator after
+member 4 and resumed from its STOP.md + commits; what follows is the whole
+batch, the splice and the bars.
+
+**#1719 — the global-match advance rule, ONE reading.**  perl's regexec takes a
+MINEND and a global match passes 1 exactly when the match that set the current
+position was zero-length (`pp_hot.c`'s `was_zero_len`; `pp_split` passes it
+unconditionally).  That one number is the whole rule and it is NOT "advance one
+character": at the same position the engine repeats the attempt with the empty
+match forbidden, so a longer alternative there still wins.  PCL had neither half
+consistently in two loops that disagreed — the scalar `m//g` iterator never
+advanced at all (`while ($s =~ /(\w*)/g)` never terminated, heap exhaustion
+measured) and `s///g` / list `m//g` / `split` bumped a character without the
+retry (`s/\d*|x/<$&>/g` on `'xxxx'` → `<>x<>x<>x<>x<>`, perl
+`<><x><><x><><x><><x><>`).  cl-ppcre has no minend, so the constraint is a
+zero-width `:filter` appended to the pattern in a parse tree, memoized by the
+existing scanner cache and built only when a plain scan actually returns an
+empty match at the position; five loops (the iterator, list `//g`, the
+`\G`-anchored list, `s///g`, `split`) now ask the one helper `%p-global-scan`.
+The iterator's state is `pos` PLUS perl's `MGf_MINMATCH` bit in one value, which
+is why `p-pos` also gained `magic_setpos`'s normalisation (`pos($x) = -2` used to
+store -2 and crash the next match inside cl-ppcre).  Probed vs 5.40.3: the task's
+7-row table, 9 termination/`\G` rows, 23 split spellings, a 19-row global-match
+battery and 6 `pos()` edge cases, all identical.  Guard `Pl/t/global-match-01.t`
+(4 rows, every child under a timeout so a regression FAILS instead of hanging).
+
+**#1713 — `\h \H \v \V \R` are not letters.**  cl-ppcre's
+`map-char-to-special-char-class` answers for exactly six escapes, so `\h` fell
+through to the LETTER: `chr(0x68)` matched `/\h/` and `chr(0x09)` did not, with
+no diagnostic.  perl's two sets (probed code point by code point over 0..0x11000)
+are Unicode, not ASCII like the POSIX table, and `\h`/`\H`, `\v`/`\V` are exact
+complements everywhere.  One forward scan expands them in `perl-regex-to-ppcre`
+after the `\Q` and POSIX passes, POSITION-SENSITIVELY: outside a bracket class
+`\h` is a class of its own, inside one it contributes bare ranges and `\H` the
+COMPLEMENT ranges, since a class's own `^` applies to the whole class.  `\R` is
+the linebreak atom `(?:\r\n|[\n\x0B\f\r\x{85}\x{2028}\x{2029}])` at top level and
+is left for cl-ppcre to reject inside a class, as perl does.  `t/re/reg_posixcc.t`
+1544/1016 → **2560/0, fully passing**.  Guard `Pl/t/posix-class-01.t` 3 → 5.
+
+**#1726 — a glob VALUE in element position is that glob's slot.**  Carp guards
+every "is this package trusted" answer with `ref \$_ eq 'GLOB' && *$_{HASH} &&
+exists $$_{$sub}`, and the last conjunct answered a quiet NO, so all four guards
+short-circuited.  The CAST spelling already worked (`%{$_}` resolves the slot
+through `%p-glob-slot-place`); the ELEMENT primitives resolve their container in
+`p-ensure-hashref` / `p-ensure-arrayref`, which had every other container shape
+and not this one, so the arm went THERE — once per sigil, delegating to the same
+reading (rule 11).  The case it would break, and does not: a REF to a glob is not
+a container in perl (`$$g{k}` with `$g = \*FH` dies), and the box model gives a
+glob value and a glob ref the same datum, so the first attempt silently turned
+that fatal into undef; `%p-glob-referent-p` names the discriminator once, keyed
+on the `is-ref` flag `p-backslash` sets and `ref()` already reads.  Guard
+`Pl/t/glob-undef-01.t` 9 → 10, and its Carp row strengthened to the whole guard.
+
+**#1727 — `local *G` registers the empties it installs.**  #1117 made a cleared
+aggregate slot read ABSENT while its registered container is still empty, through
+the one helper that registers; the THIRD clear path, `%p-glob-clear`, spelled all
+three empties inline and registered nothing, so `*a{ARRAY}` read PRESENT inside a
+`local *a` scope where perl says undef.  The empties now come from
+`%p-glob-empty-slot` and the two aggregates are registered.  The population was
+measured, not argued: the 9 `perl-tests/` files that use `local *` are
+byte-identical per-file to a base extraction, and the 33 companion `t/` files
+were run `--jobs 1` with their five snapshot-differing files A/B'd on the base and
+identical there.  Guard `Pl/t/glob-undef-01.t` 11.
+
+**THE COMPANION SPLICE, three rows, each with its cause.**  `t/re/reg_posixcc.t`
+1544/1016 → **2560/0, OK** (#1713): its 500 blessed fail rows are ALL tagged
+`#1713` — verified row by row, the edit script dies on any other cause — and
+left `baselines/perl-suite-fails.tsv` by EDIT.  `re/subst_amp.t` 0/13 → **1/12**
+and `re/subst.t` 205/67 → **206/66**, both #1719 and both attributed by a
+back-to-back `--jobs 1` A/B on a `git archive edd6dc78` extraction run on the
+same box minutes before: subst_amp's moving row is its line 14 (`s/\d*|x/<$&>/g`)
+and subst's is its line 395 (`s/(\d*|x)/<$1>/g` plus the 41-replacement count).
+The two rows' blessed causes (`#1664 (via re/subst.t)` and `NS:Error message text
+and format`) were MIS-ATTRIBUTIONS — both were #1719 all along.  And the task's
+prediction that subst_amp.t would go 0/13 → 13/0 is simply WRONG and is recorded
+as such: exactly one of that file's rows is #1719's, the other twelve are
+`(?{ CODE })` code blocks.  `baselines/row-shortfall.tsv` needed no edit (subst's
+9-row shortfall is #1664 and is unchanged; the other two files have no row).
+
+**THE `re/` DIRECTORY, measured whole and A/B'd.**  #1719 and #1713 are regex
+SEMANTICS, so the companion leg was the brief's seven files AND the whole `re/`
+dir (80 files, `--jobs 2`); ten differ from the snapshot and each one was re-run
+on a `git archive edd6dc78` extraction under the same load.  NINE are NOT MINE —
+the base reads them identically: `re/regexp.t`, `re/regexp_noamp.t`,
+`re/regexp_notrie.t`, `re/regexp_qr.t`, `re/regexp_qr_embed.t`,
+`re/regexp_trielist.t` (all 811/94 or 813/92 here and on the base, against a
+blessed 795/110 — the #326/#1714 hang set, whose row counts are how far the file
+gets before the clock), `re/regexp_qr_embed_thr.t` (242/1787 both),
+`re/overload.t` (0/0 TIMEOUT both) and `re/speed.t` (25/34 both).  Their snapshot
+rows are NOT spliced: a load-dependent count is not mine to bless.  The TENTH is:
+`re/pat_advanced.t` reads **958/722 on the base and 1258/422 here**, parallel and
+serial alike — +300 rows, and 195 of the 207 failures that disappear name `\h`,
+`\v`, `\H`, `\V` or `HORIZWS`.  That row IS spliced, with #1713 as its cause.
+(Its row baseline is one `*rows-unstable*` marker row, #1082, so there is
+nothing else to edit; the 138 rows that look NEW in its fail log are the 500-row
+cap moving, the base's log saying "TRUNCATED: 738 diverging rows".)
+
+**THE BARS, on the rebased tree (main `edd6dc78`).**  `tools/corpus-diff.pl`:
+emission IDENTICAL over 111 files, silent drops 5 unchanged — all four members
+are runtime-only, so the generation stays **v2-1360** and no artifact is stale
+(`Pl/t/artifact-staleness-01.t` 8 rows PASS).  `tools/ir-host-leak.pl` 31
+distinct leaked symbols over 111 files = main's standing number;
+`tools/ir-conform --jobs 2` 323 pass / 0 fail / 22 known / **0 stale**.  FULL
+sweep `--jobs 4`: **TOTAL passing 18676 = baseline (+0)**, 0 new / 0 fixed / 0
+LOST, drops 5 = census, GATE clean.  FULL gate `PCLXS_DIR=~/pclxs
+tools/prove-core`: **242 files / 8222 rows**, Result FAIL = the 13 pclxs xs rows
+and nothing else.  `tools/tag-license --check` clean.  BENCH for #1719 (startup
+subtracted, min of 6, box shared with one other agent): the `while ($x =~ /./g)`
+scanning loop reads −0.9 %, −2.4 % and (order reversed) −4.6 % against the base
+— no cost, inside the ±5 % band of this box, where the first instance's three
+pairs had read +1.3 / +6.2 / +3.3 %; the `s///g` loop is **−8.9 %** (and −3.5 %
+earlier), which is the second counting scan this member deleted.  A review read
+of the batch's own dispatch added the rule-12 arm `%pcl-hv-class-text` owed
+(a letter with no range table now dies instead of emitting an empty class) and
+corrected a docstring that claimed perl rejects `\R` inside a bracket class —
+perl passes it through as the letter R with a warning, which is what PCL already
+did and what `Pl/t/posix-class-01.t` already asserted.
+
+**Filed, all PRE-EXISTING and probed vs perl 5.40.3:** **#1751** (after `s///g`
+perl's `$1` is the LAST match's capture, PCL's the FIRST), **#1752** (a LEXICAL
+filehandle in element position — `$$fh[0]` undef, `exists $$fh{x}` 0, `exists
+$$fh[0]` 0 and `$$fh[0] = 1` a SUCCEEDING WRITE where perl dies "Not an ARRAY
+reference"; the three spellings that do die leak SBCL's own type error into
+`$@`), **#1753** (`local *c` leaves `defined &c` true), **#1754** (`*FH{IO}` is
+undef after `close FH`).  Tasks **#1719 #1713 #1726 #1727 are DONE**.
+
 ## Session 484 (Fable, 2026-09-13 17:25 → 2026-09-14 01:00) — "Please continue. Keep at most two subjobs": nine merges in two (then three) slots, #1117 ruled (B) and closed, the companion census caused in five of six directories
 
 **Where it started.** Fresh-booted box; main `8ab11c15`; two worktrees stopped mid-step from s483 (s473t4 at ac2258e8 with uncommitted records, s483c at 52666d1c with a mid-edit in PExpr).  Both were resumed from written resume briefs, both finished, both merged.

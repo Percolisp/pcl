@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -2414,6 +2414,23 @@ halves — a read does not re-vivify, and a write undone before the next read
 of the slot is not seen — are `docs/not-supported.md` "`undef *GLOB` leaves an
 EMPTY aggregate slot where perl REMOVES it".
 
+**A glob VALUE in element position is that glob's slot; a glob REFERENCE is
+perl's fatal** (normative, s484c, task #1726). `$$g{k}` and `$$g[i]` where
+`$g` holds a glob read the glob's HASH / ARRAY slot — the same slot
+`%{$g}` / `@{$g}` already resolve, and the same one `*$g{HASH}` names — so
+Carp's `ref \$_ eq 'GLOB' && *$_{HASH} && exists $$_{$sub}` guard answers.
+A REF to a glob (`\*FH`) is not a container at all: every spelling of it
+dies `Not a HASH reference` / `Not an ARRAY reference`, exactly as perl
+does, so a host that represents a glob value and a glob ref with the same
+datum must carry the is-a-reference bit that `ref()` already reads.
+
+```lisp
+;; $_ holds *Foo::bar out of a stash — the emitted forms for
+;;   my $v = $$_{baz};  my $e = exists $$_{baz};
+(p-gethash-deref $_ "baz")     ; the glob's HASH slot, not undef
+(p-exists (unbox $_) "baz")    ; 1, not a quiet 0
+```
+
 `foreach $pkgvar (LIST)` is an *implicit* `local` of the loop variable —
 the body and everything it calls see the current element, and the old
 value is restored on exit, including via `last`/`die`. The loop macros
@@ -3467,6 +3484,57 @@ Anything not covered: read the `p-NAME` docstring in
 `cl/pcl-runtime.lisp` — by project rule the runtime implements *real Perl
 semantics only*, so the function *is* the spec, and
 `docs/not-supported.md` is the closed list of deliberate divergences.
+
+### 10-gmatch. What a global match attempts after a ZERO-LENGTH match (normative, s484c, task #1719)
+
+Perl's regex engine takes a **minend** — the match must end at least that
+many characters past the start position — and every global match passes 1
+exactly when the match that set the current position was zero-length
+(`pp_hot.c`'s `was_zero_len`; `pp_split` passes 1 unconditionally). That one
+number is the whole rule, and it is not "advance one character": at the same
+position the engine first REPEATS the attempt with the empty match
+forbidden, which lets a longer alternative there win, and only a failure
+there moves on. So `s/\d*|x/<$&>/g` on `'x' x 4` is
+`<><x><><x><><x><><x><>`, not `<>x<>x<>x<>x<>`, and `while ($s =~ /(\w*)/g)`
+TERMINATES.
+
+Five loops obey it — the scalar `m//g` iterator, list-context `m//g`, a
+`\G`-anchored list match, `s///g` and `split` — through one runtime reading
+(`%p-global-scan`). A host whose engine has no minend can spell it as a
+zero-width filter appended to the pattern that rejects a match ending at or
+before the floor, which is what PCL does; what it may NOT do is bump the
+position by a character instead, because that loses every non-empty
+alternative available at that position.
+
+The iterator's state is therefore `pos` PLUS one bit ("the match that set it
+was empty"), perl's `MGf_MINMATCH`. `pos($x) = N` normalises the way perl's
+`magic_setpos` does: undef REMOVES the position, a negative counts back from
+the end and clamps at 0, a value past the end clamps to the length.
+
+### 10-esc. `\h \H \v \V \R` are CHARACTER CLASSES, expanded before the engine sees them (normative, s484c, task #1713)
+
+perl's horizontal- and vertical-whitespace escapes are Unicode sets, not
+ASCII ones, and `\h`/`\H` and `\v`/`\V` are exact complements at every code
+point (probed 0..0x11000):
+
+| escape | set |
+|---|---|
+| `\h` | `09 20 A0 1680 2000-200A 202F 205F 3000` |
+| `\v` | `0A-0D 85 2028-2029` |
+| `\R`  | `(?:\r\n\|[\n\x0B\f\r\x{85}\x{2028}\x{2029}])` — a linebreak ATOM, one match on `"\r\n"` |
+
+PCL expands them into the engine's own bracket syntax in one forward scan
+over the pattern, and the expansion is POSITION-SENSITIVE: outside a
+bracketed class `\h` becomes a class of its own and `\H` its negated twin;
+INSIDE one it contributes its bare ranges, and `\H` inside a class
+contributes the COMPLEMENT ranges (a class's own leading `^` applies to the
+whole class, so the complement cannot be spelled with `^` there). `\R` is a
+group, so it is expanded only OUTSIDE a class: inside one perl treats it as an
+unrecognised escape and passes it through as the literal letter R (a warning,
+not an error), so leaving it alone IS perl's answer — probed, `[\R]` matches
+"R" and not "\r" in both. Their `:tier` stays `:pcre` (§10-tier): the tier
+describes the CONSTRUCT a target may meet in the source pattern, and a
+target that cannot expand them locally still needs the bigger engine.
 
 ### 10-tier. The regex literal's `:tier` — which ENGINE a target needs (normative, s470bq, task #1211)
 
