@@ -99,14 +99,40 @@ NS:`use bytes` + 2 = #1494.  A measured split where it is not: `parser.t` 26 =
 #1746 (3) + #1494 (4) + #1747.  The five UNEXPLAINED `uni/` shortfall rows are
 **ZERO**.
 
-**THE CENSUS'S RESIDUE AFTER ALL SIX t5 ROUNDS**: **12,526 blessed fail rows,
-2,402 causeless — 2,375 of them `op/`**, the rest `base/` 15, `cmd/` 6,
-`opbasic/` 6; `re/ comp/ uni/ run/ io/ class/ mro/` all at ZERO.  Companion
+**THE CENSUS'S RESIDUE AFTER ALL SIX t5 ROUNDS** (re-counted 2026-09-14 on the
+tree rebased over s484c, after the 40 `op/universal.t` rows below left the
+baseline): **11,984 blessed fail rows, 2,362 causeless — 2,335 of them `op/`**,
+the rest `base/` 15, `cmd/` 6, `opbasic/` 6; `re/ comp/ uni/ run/ io/ class/ mro/` all at ZERO.  Companion
 shortfall UNEXPLAINED: **47 files / 522 rows, 45 of those files `op/`**.  So
 what the six rounds leave is one directory and 27 rows.
 
+**The two companion legs (finished by the resumed instance, 2026-09-14).**
+`uni/` + `mro/` + `class/`, 113 files, `--jobs 1`: 20 OK, 3 NOTAP, 64 XDIFF,
+2 TIMEOUT, 24 DIFF; ROW DIFF 0 NEW / 0 FIXED; CAUSES exactly the census.  One
+owed baseline row paid -- `t/uni/method.t`'s shortfall 1 -> 0, because #1736
+removed the file's abort and it now emits all 62 of perl's rows, the
+`*{"main::DATA"}{IO}` row among them (it is the blessed fail row at line 216,
+cause #1664).  Then the `op/` reach of the `cl/` change, 38 files (every `op/`
+file that mentions isa/DOES/UNIVERSAL, `op/gv.t` included -- the earlier list
+had dropped it with no reason given).  **Four files differ from the snapshot
+and the A/B says exactly one is mine: `op/universal.t` 82/62 -> 122/22, +40
+rows** -- the 7x7 `UNIVERSAL::isa($vals[$p], $refs[$q])` matrix at line 106,
+whose false cells the file compares with `is ..., ''`; the 49-cell matrix is
+byte-identical to perl 5.40.3 now and reads UNDEF on an `edd6dc78` extraction.
+`op/coreamp.t` (9/46 -> 9/58) and `op/coresubs.t` (1/1 -> 0/2) read the SAME on
+the base extraction, so the snapshot is stale against MAIN, not against this
+round, and neither was spliced.  **Both `gv.t` files are #1781**: `t/uni/gv.t`
+and `t/op/gv.t` straddle the 90 s companion clock, and the variable is machine
+LOAD, not the tree -- base measured 5 DIFF / 3 TIMEOUT over eight runs of
+uni/gv.t while this tree measured 2 / 4 over six, with the emission
+byte-identical between them.  The one attributable delta is +1 row (74/85 ->
+75/84), reproduced on a third tree carrying ONLY the `cl/` half of #1737.  No
+allowance was registered: one run did not finish inside 600 s, so the
+registry's promise cannot be met -- the same reasoning #1750 applied to
+uni/variables.t.
+
 Filed **#1736**(done) **#1737**(done) **#1741**(done) #1738 #1739 #1740 #1742
-#1743 #1744 #1745 #1746 #1747 #1748 #1749 #1750.
+#1743 #1744 #1745 #1746 #1747 #1748 #1749 #1750 **#1781**.
 ## Session s484c (Opus agent, 2026-09-13 → 2026-09-14) — the regex + glob fillers: perl's global-match advance rule, `\h \H \v \V \R`, a glob VALUE in element position, and `local *G`
 
 Four filler tasks from s473t5e's and s484b's probe residue, all four RUNTIME
