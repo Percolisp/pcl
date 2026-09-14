@@ -309,7 +309,7 @@ t/uni/fold.t	18072	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER
 t/uni/gv.t	118	#1664 -- the typeglob model: the file aborts in the PROXY CONSTANT SUBROUTINE block (a stash slot holding a string or a SCALAR ref IS a sub in perl), and every row after it is behind that abort
 t/uni/labels.t	2	#1494 + #1747 -- the `redo L\N{…}BEL` eval is dropped (so the LABEL block runs once, not twice) and the final `goto` into a nested block loses its form
 t/uni/lower.t	11720	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
-t/uni/method.t	1	#1664 -- `*{"main::DATA"}{IO}`; the file's indirect-object abort is FIXED by #1736 (s473t5f)
+t/uni/method.t	0	s473t5f #1736 FIXED (was 1): the indirect-object abort is gone, so the file now emits all 62 of perl's rows.  The `*{"main::DATA"}{IO}` row is PRODUCED and fails honestly -- it is the blessed fail row at t/uni/method.t line 216, cause #1664
 t/uni/overload.t	1	#1584 -- the PCL test.pl stub has no `todo_skip` (its `last TODO` jumps to a label in the CALLER's frame)
 t/uni/title.t	5936	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/upper.t	6228	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)

@@ -1860,7 +1860,7 @@ op/tr.t	317	0	270	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated 
 op/tr_latin1.t	2	0	1	1	DIFF		0
 op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	33	4	DIFF	aborted-forms:1: Undefined subroutine &main::z called	0
-op/universal.t	142	2	82	62	DIFF	s473f: 80/64 -> 82/62 -- #1074: `globs with IOs can` / `globrefs with IOs can` need a handle invocant to have a class	0
+op/universal.t	142	2	122	22	DIFF	s473f: 80/64 -> 82/62 -- #1074: `globs with IOs can` / `globrefs with IOs can` need a handle invocant to have a class | s473t5f: #1737 (UNIVERSAL::isa answers perl's FALSE, the DEFINED empty string, not undef).  82/62 -> 122/22, 40 blessed rows fixed -- the whole 7x7 `UNIVERSAL::isa($vals[$p], $refs[$q])` matrix at line 106, whose false cells were compared with `is ..., ''`.  Measured --jobs 1 with the #366 serial re-run agreeing, and A/B-verified on an edd6dc78 extraction (base reads 82/62 = the snapshot).  The 49-cell matrix is byte-identical to perl 5.40.3 now and UNDEF on the base	0
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
