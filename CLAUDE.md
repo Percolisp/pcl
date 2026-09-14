@@ -483,6 +483,15 @@ func => -12         # 1 param before list
 
 ## Test Status
 
+- **The three xs files are PARKED (USER decision, s485, 2026-09-14): `Pl/t/xs-01/02/03.t`
+  `plan skip_all` at the top until the pclxs project (the XS bridge, a separate
+  repo, sibling checkout `~/pclxs`) is working again — their 13 failing rows were
+  pclxs's, not PCL's (USER s394/s395: "ignore XS rows").  So the gate now reads
+  **`Result: PASS`** with those three files reported as skipped, and "xs-only"
+  is no longer a verdict: a `Result: FAIL` is a real failure.  The tests are kept
+  whole; `PCL_XS_TESTS=1 prove Pl/t/xs-0*.t` runs them; re-enabling = deleting
+  the block at the top of each file.  The paragraphs below describe the
+  pre-s485 state (the 14 conditional rows) and stay as history.
 - **160 test files, 5700 rows** (s430) with a built pclxs sibling (s409, measured
   COLD; the 13 pclxs xs rows currently FAIL there — pclxs is under separate
   work, user s394/s395: ignore XS rows); **5600 without** (arithmetic: minus

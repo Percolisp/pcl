@@ -23,6 +23,20 @@
 use strict;
 use warnings;
 use Test::More;
+
+# ---------------------------------------------------------------------------
+# PARKED (USER decision, session s485, 2026-09-14): this file is SKIPPED until
+# the pclxs project -- the XS bridge, a SEPARATE repository checked out as a
+# sibling of this one (~/pclxs) -- is back in a working state.  Its current
+# build fails 13 of the 14 xs rows across Pl/t/xs-01/02/03.t for reasons that
+# are pclxs's, not PCL's (USER s394/s395: "ignore XS rows"), so until then the
+# gate read `Result: FAIL` on rows nobody was going to fix here.  The tests
+# are kept WHOLE below and still run on request:
+#     PCL_XS_TESTS=1 prove Pl/t/xs-01.t Pl/t/xs-02.t Pl/t/xs-03.t
+# Re-enabling is deleting this block (all three files carry it).
+# ---------------------------------------------------------------------------
+plan skip_all => "PARKED until the pclxs project works again (USER s485; PCL_XS_TESTS=1 runs it)"
+    if ! $ENV{PCL_XS_TESTS};
 use File::Temp qw(tempdir);
 use FindBin;
 
