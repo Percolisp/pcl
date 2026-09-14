@@ -10717,6 +10717,16 @@ per element."
    When ref is a string, treat as symbolic reference to @name."
   (let ((arr (%p-listslice-array (unbox ref))))
     (cond
+      ;; THE HOT PATH, first: an ordinary `$aref->[i]` -- a non-string vector
+      ;; indexed by something that is not a vector at all.  Every arm below
+      ;; is then provably false (a vector is not a string, a function, a
+      ;; p-typeglob or a p-box -- the last two are ordinary structs) except
+      ;; the SLICE arm, which this guard's `(not (vectorp idx))` excludes,
+      ;; so the slice arm and %p-listslice-array keep their order exactly.
+      ;; A STRING index simply declines here and takes the old route to the
+      ;; same `(p-aref arr idx)`.
+      ((and (vectorp arr) (not (stringp arr)) (not (vectorp idx)))
+       (p-aref arr idx))
       ;; Symbolic reference: string used as array name (no strict refs)
       ((stringp arr)
        (when (find #\Nul arr) (return-from p-aref-deref *p-undef*))
@@ -11936,6 +11946,13 @@ which is one of #1140's escape spellings (probed)."
    When ref is a string, treats as symbolic reference to %name."
   (let ((h (unbox ref)))
     (cond
+      ;; THE HOT PATH, first and alone: an ordinary `$href->{k}`.  No
+      ;; hash-table can satisfy any arm below (*p-undef* is a keyword, and
+      ;; p-box / p-typeglob are ordinary structs, so none of null / eq /
+      ;; stringp / p-box-p / p-typeglob-p can be true of one), which is why
+      ;; hoisting it is semantics-preserving -- and it turns five type tests
+      ;; into one on the path every hash deref takes.
+      ((hash-table-p h) (p-gethash h key))
       ((or (null h) (eq h *p-undef*)) *p-undef*)
       ;; Symbolic reference: string used as hash name (no strict refs)
       ((stringp h)

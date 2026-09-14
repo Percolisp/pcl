@@ -124,6 +124,33 @@ corrected a docstring that claimed perl rejects `\R` inside a bracket class —
 perl passes it through as the letter R with a warning, which is what PCL already
 did and what `Pl/t/posix-class-01.t` already asserted.
 
+**THE REVIEW FIX (Fable, on `ad8d151c`): a container-kind arm belongs BEHIND the
+hot path.**  #1726 added its typeglob arm inside the `cond` of
+`p-gethash-deref` and `p-aref-deref`, which is the path EVERY ordinary
+`$href->{k}` and `$aref->[i]` takes — five type tests before its own arm — and
+the cost was real, not theoretical.  A fast arm placed FIRST is
+semantics-preserving because no value of that kind can satisfy an earlier arm
+(a hash-table is not nil, `:undef`, a string, a p-box or a p-typeglob — the
+last two are ordinary structs, so `vectorp` is false of them too), and for the
+array the guard `(not (vectorp idx))` excludes the SLICE arm, so the slice arm
+and the `%p-listslice-array` normalisation keep their order exactly; a STRING
+index simply declines and takes the old route to the same `(p-aref arr idx)`.
+Bench, exec seconds for 80 M reads (startup subtracted, min of 5, box shared
+with one other agent, load 2.6–4.1):
+
+| loop | base `edd6dc78` | BEFORE (the batch) | AFTER (fast arm first) |
+|---|---:|---:|---:|
+| `$h->{k}` | 2.2420 / 2.2461 / 2.1719 | 2.3464 (**+4.7 %**) | 2.1988, 2.1396 (**−2.1 %, −1.5 %**) |
+| `$a->[3]` | 0.9199 / 0.8751 / 0.8468 | 1.0328 (**+12.3 %**) | 0.8637, 0.8393 (**−1.3 %, −0.9 %**) |
+
+(The base column is re-measured in every pair — it is the control, and its own
+spread, 2.17–2.25 and 0.85–0.92, is this box's noise band.  The AFTER rows are
+two pairs each, the second with the tree order reversed.)  Re-run on the
+reordered tree, REBASED onto main `c2c06057` (which parks `Pl/t/xs-01/02/03.t`):
+full gate 242 files / 8208 rows **Result: PASS** with the three xs files
+skipped, full sweep TOTAL **18676 (+0)** GATE clean drops 5 = census,
+`ir-conform` 323/0/22/**0 stale**, paren checker balanced.
+
 **Filed, all PRE-EXISTING and probed vs perl 5.40.3:** **#1751** (after `s///g`
 perl's `$1` is the LAST match's capture, PCL's the FIRST), **#1752** (a LEXICAL
 filehandle in element position — `$$fh[0]` undef, `exists $$fh{x}` 0, `exists
