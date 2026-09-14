@@ -1,4 +1,48 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s484c (2026-09-14, Opus) -- FOUR rows spliced by hand, `--jobs 1`, the #366
+#   serial re-run agreeing ("REAL MOVE (both runs agree)"), and the same file
+#   measured first on a `git archive f6b56feb` extraction (1544/1016 there):
+#     re/reg_posixcc.t  1544/1016 -> 2560/0, DIFF -> OK.  #1713: `\h \H \v \V`
+#       were not among cl-ppcre's six escapes, so they matched the LETTER and
+#       the file's 1,016 remaining "chr(N) isn't both \h and \H" rows all
+#       failed.  Its 500 blessed fail rows (the runner's per-file cap; all
+#       attributed to #1713) left perl-suite-fails.tsv by EDIT in the same
+#       commit; row-shortfall.tsv had none.
+#   TWO MORE rows, from the same batch's member 1 (#1719, perl's global-match
+#   advance rule) -- the AFTER leg found them, the #366 serial re-run agreed on
+#   both ("REAL MOVE"), and a back-to-back `--jobs 1` A/B on a `git archive
+#   edd6dc78` extraction read the OLD counts on the same box minutes earlier:
+#     re/subst_amp.t  0/13 -> 1/12.  Its test 1 (line 14) is `$_ = 'x' x 20;
+#       s/\d*|x/<$&>/g` -- #1719's headline case, the empty alternative that
+#       must be RETRIED non-emptily at the same position.  The other 12 rows
+#       are all `(?{ CODE })` regex code blocks, a different absence: the
+#       task's "0/13 -> 13/0" prediction counted them as #1719's and they are
+#       not.
+#     re/subst.t    205/67 -> 206/66.  Its line 395 is the same rule with a
+#       capture and the replacement COUNT: `s/(\d*|x)/<$1>/g` on 'x' x 20 must
+#       give 41 replacements.  Shortfall unchanged (272 rows produced either
+#       way, 9 short -- that is #1664, not this).
+#   Both rows left perl-suite-fails.tsv by EDIT in the same commit; the causes
+#   they carried there (`#1664 (via re/subst.t)` and `NS:Error message text and
+#   format`) were mis-attributions -- both rows were #1719 all along.
+#   A FOURTH row, from the WHOLE `--dir re` leg (80 files) this batch also ran
+#   because #1719 and #1713 are regex SEMANTICS.  Ten files there differ from
+#   the snapshot and each was re-measured on a `git archive edd6dc78`
+#   extraction: NINE read IDENTICALLY on the base and are NOT MINE (re/regexp.t,
+#   re/regexp_noamp.t, re/regexp_notrie.t, re/regexp_qr.t, re/regexp_qr_embed.t,
+#   re/regexp_trielist.t — the #326/#1714 hang set, 811/94 or 813/92 on both
+#   trees against a blessed 795/110, i.e. how far the file gets before the
+#   clock; re/regexp_qr_embed_thr.t 242/1787 both; re/overload.t 0/0 TIMEOUT
+#   both; re/speed.t 25/34 both).  Their rows are NOT spliced — a load-dependent
+#   count is not this batch's to bless.  The tenth is:
+#     re/pat_advanced.t  951/729 -> 1258/422.  #1713: the base extraction reads
+#       958/722 parallel AND serial, this tree 1258/422 parallel AND serial, and
+#       195 of the 207 failures that disappear name `\h`, `\v`, `\H`, `\V` or
+#       HORIZWS — the file runs each pattern through its utf8/latin matrix, so
+#       its 15 horizontal/vertical-whitespace lines are ~300 rows.  (The 7-row
+#       gap between the blessed 951/729 and the base's 958/722 is the file's own
+#       registered instability, task #1082.)  Its row baseline is the single
+#       `*rows-unstable*` marker row, so there is nothing to edit there.
 # s473t5d (2026-09-13, Opus) -- SIX rows spliced by hand, `--jobs 1`, the #366
 #   serial re-run agreeing on each ("REAL MOVE (both runs agree)"), the same 48
 #   files measured first on the UNMODIFIED tree, and the emitted CL byte-
@@ -1855,7 +1899,7 @@ re/no_utf8_pm.t	1	0	1	0	OK		0
 re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
 re/overload.t	87	0	3	0	TIMEOUT	timeout	0
 re/pat.t	1263	4	231	138	DIFF	aborted-forms:1: Failed to match at pat.t line N. 	0
-re/pat_advanced.t	1678	0	951	729	DIFF		0
+re/pat_advanced.t	1678	0	1258	422	DIFF		0
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_psycho.t	15	0	15	0	OK		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
@@ -1883,7 +1927,7 @@ re/reg_namedcapture.t	2	0	1	1	DIFF		0
 re/reg_nc_tie.t	37	0	14	18	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-STORE; aborted-forms:5: The function |Tie::Hash::NamedCapture|::pl-FETCH is undefined.	0
 re/reg_nocapture.t	25	0	14	11	DIFF		0
 re/reg_pmod.t	88	0	58	30	DIFF		0
-re/reg_posixcc.t	2560	0	1544	1016	DIFF	
+re/reg_posixcc.t	2560	0	2560	0	OK	
 re/regex_sets.t	96	0	4	84	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it	0
 re/regex_sets_compat.t	2167	2	1755	274	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
 re/regexp.t	2167	2	795	110	TIMEOUT	timeout	0
@@ -1903,9 +1947,9 @@ re/script_run.t	185	0	0	185	XDIFF	not-supported.md §Regex script-run assertions
 re/speed.t	59	0	1	0	TIMEOUT	timeout	0
 re/speed_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/stclass_threads.t	0	0	5	1	NOTAP		0
-re/subst.t	281	0	205	67	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
+re/subst.t	281	0	206	66	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
 re/substT.t	0	0	0	0	NOTAP		0
-re/subst_amp.t	13	0	0	13	DIFF		0
+re/subst_amp.t	13	0	1	12	DIFF		0
 re/subst_wamp.t	281	0	0	0	DIFF		0
 re/uniprops01.t	39811	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
 re/uniprops02.t	39961	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
