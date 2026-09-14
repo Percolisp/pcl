@@ -26492,6 +26492,10 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let* ((ranges (cdr (assoc (string (char-downcase letter))
                              +p-hv-class-ranges+ :test #'string=)))
          (negated (upper-case-p letter)))
+    ;; Rule 12: the caller passes one of h H v V and nothing else, so a miss
+    ;; here is a compiler self-inconsistency, never a pattern PCL must answer.
+    (unless ranges
+      (error "PCL internal: %pcl-hv-class-text: no range table for ~S" letter))
     (if in-class
         (%pcl-class-ranges-text (if negated
                                     (%pcl-posix-complement ranges)
@@ -26513,9 +26517,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    inside one.  Every other escape pair is copied VERBATIM, so `\\\\h` stays
    an escaped backslash followed by the letter h, and a `\\h` that the \\Q
    pass already quoted stays literal.
-   \\R inside a class is left alone: perl rejects it there outright (\"\\R
-   cannot be used inside a character class\"), so per design principle 9 it
-   is cl-ppcre's to refuse."
+   \\R inside a class is left alone, and that IS perl's answer: there it is an
+   unrecognised escape, which perl warns about and passes through as the
+   LETTER R (probed 5.40.3 -- `[\\R]` matches \"R\" and not \"\\r\"; cl-ppcre
+   reads the untouched text the same way)."
   (if (not (%pcl-has-hv-escape pat))
       pat
       (let ((out (make-string-output-stream)) (i 0) (n (length pat))
