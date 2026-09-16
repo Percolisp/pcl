@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 70;
+plan tests => 76;
 
 sub run_cl {
     my ($code, $env) = @_;
@@ -177,6 +177,42 @@ test_cl('S1 runtime: append loop matches perl',
 test_cl('S1 runtime: self-append is safe',
     'my $s = "ab"; $s .= $s; $s .= $s; print "$s\n"; print "eq\n" if $s eq "abababab";',
     "abababab\neq\n");
+
+# ---- the APPEND ITSELF (task #1809) ---------------------------------------
+#
+# `$s .= "x"` copies through the buffer's UNDERLYING simple string, and a
+# one-character append writes the character directly instead of calling
+# `replace` — half of the `strcat` bench row was that one call.  These rows
+# are the shapes the shortcut has to keep answering for.
+
+test_cl('S1 runtime: one-char appends across a growth boundary',
+    'my $s = ""; $s .= "x" for 1..40; print length($s), " ", substr($s,0,3),
+     " ", substr($s,-1), "\n";',
+    "40 xxx x\n");
+
+test_cl('S1 runtime: multi-char and empty appends interleave',
+    'my $s = ""; $s .= "ab"; $s .= ""; $s .= "c"; $s .= "";
+     print "$s ", length($s), "\n";',
+    "abc 3\n");
+
+test_cl('S1 runtime: a NON-base character appends and reads back',
+    'my $s = ""; $s .= "a"; $s .= "\x{263A}"; $s .= "b";
+     print length($s), " ", ord(substr($s,1,1)), "\n";',
+    "3 9786\n");
+
+test_cl('S1 runtime: 4-arg substr writes into an appended buffer',
+    'my $s = ""; $s .= "abc" for 1..3; substr($s, 3, 3, "XYZ");
+     print "$s ", length($s), "\n";',
+    "abcXYZabc 9\n");
+
+test_cl('S1 runtime: a buffer is a regex subject, then grows',
+    'my $s = ""; $s .= "hello world" ; $s =~ /wor/; my $m = $&;
+     $s .= "!!!"; print "$m $& ", length($s), "\n";',
+    "wor wor 14\n");
+
+test_cl('S1 runtime: appending a NUMBER stringifies as perl does',
+    'my $s = ""; $s .= 1; $s .= 2.5; $s .= 0; print "$s ", length($s), "\n";',
+    "12.50 5\n");
 
 # ---- the runtime DECLINE (task #890) --------------------------------------
 #

@@ -5322,20 +5322,58 @@
     (replace buf s)
     buf))
 
+(defun %p-str-data (v)
+  "The SIMPLE character STRING holding V's characters, or NIL when V is not
+   that shape.  The string twin of %p-vec-data (rule 11: same guard, same
+   answer shape).  A str-buffer is an ADJUSTABLE fill-pointer string, so every
+   `replace` / `aref` on it goes through the hairy accessor unless the caller
+   reaches the data vector itself; not being displaced is what makes index 0
+   of the data index 0 of the buffer."
+  (cond
+    ((typep v '(simple-array character (*))) v)
+    ((and (sb-kernel:array-header-p v)
+          (not (sb-kernel::%array-displaced-p v))
+          (let ((d (sb-kernel:%array-data v)))
+            (and (typep d '(simple-array character (*))) d))))
+    (t nil)))
+
+(declaim (inline %pcl-str-blit))
+(defun %pcl-str-blit (data start s n)
+  "Copy S's first N characters into the simple string DATA at START.  The
+   one-character arm is not a micro-taste: `$s .= 'x'` IS the shape (the
+   `strcat` bench row, and every `.=` in a template/JSON encoder), and a
+   `replace` call to move one character was HALF of that row — 35.9 % in the
+   generic sequence function plus 14.5 % in the bash-copy it dispatches to."
+  (declare (type (simple-array character (*)) data)
+           (type fixnum start n))
+  (cond
+    ((zerop n))
+    ((and (= n 1) (typep s 'simple-string))
+     (setf (aref data start) (schar s 0)))
+    (t (replace data s :start1 start :end1 (+ start n) :end2 n))))
+
 (defun %pcl-str-append (buf v)
   "In-place `$s .= V` on a str-buffer slot: extend and copy V's string
    value after the fill pointer.  Returns the buffer (the compound assign's
    value, like the boxed macro returns the variable's new value).
    Self-append (`$s .= $s`) is safe: the source length is captured first
    and the copied-from region [0,n) never overlaps the destination [n,2n)."
-  (let* ((s (to-string v))
-         (n (length s))
-         (start (fill-pointer buf)))
-    (when (> (+ start n) (array-total-size buf))
-      (adjust-array buf (max (+ start n) (* 2 (array-total-size buf)))))
-    (setf (fill-pointer buf) (+ start n))
-    (replace buf s :start1 start)
-    buf))
+  (let ((s (locally (declare (inline to-string)) (to-string v))))
+    (declare (type string s))
+    (let ((n (length s))
+          (start (fill-pointer buf)))
+      (declare (type fixnum n start))
+      (when (> (+ start n) (array-total-size buf))
+        (adjust-array buf (max (+ start n) (* 2 (array-total-size buf)))))
+      (setf (fill-pointer buf) (+ start n))
+      (let ((data (%p-str-data buf)))
+        ;; A buffer that is not the plain adjustable-character-string shape
+        ;; (nothing in this runtime makes one, but a raw-slot DECLINE could
+        ;; put any string here) takes the general call: same answer, slower.
+        (if data
+            (%pcl-str-blit data start s n)
+            (replace buf s :start1 start)))
+      buf)))
 
 (defun p-length (val)
   "Perl length function - returns undef for undef input.
