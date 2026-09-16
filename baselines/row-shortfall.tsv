@@ -305,7 +305,7 @@ t/run/switcha.t	1	#1702
 t/run/switches.t	11	#1709 + #1702 -- was 35.  s473t5d's #1700 (-i sets $^I) and #1699 (a refused open answers FALSE) removed BOTH aborts and the file now runs to its end at 28/112; the 11 that remain are its `Need threads and full perl` skip block and the *at-functions* skip
 t/run/switchn.t	1	#1702
 t/run/switchp.t	2	#1702
-t/run/switchx.t	5	#1702
+t/run/switchx.t	6	#1702 -- s486c merge review (Fable, 2026-09-17): was 5; #1652's progfile plumbing makes the -x child RUN and its `1..8` arrives without a newline (#1702: the shebang's own -l is not honoured), gluing the first `not ok` to the plan -- one more perl row never produced
 t/uni/attrs.t	1	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322) -- the 1 missing row sits behind the file's last attribute block
 t/uni/fold.t	18072	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/gv.t	118	#1664 -- the typeglob model: the file aborts in the PROXY CONSTANT SUBROUTINE block (a stash slot holding a string or a SCALAR ref IS a sub in perl), and every row after it is behind that abort

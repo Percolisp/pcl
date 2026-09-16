@@ -10648,9 +10648,8 @@ run/switchn.t	1	ok	not ok	Checking line 1	#1702
 run/switchn.t	2	ok	(missing)	Checking line 2	#1702
 run/switchp.t	1	ok	(missing)	-p switch first iteration	#1702
 run/switchp.t	2	ok	(missing)	-p switch second iteration	#1702
-run/switchx.t	0	(none)	renumbered	*summary*	#1702
 run/switchx.t	8	ok	not ok	-x and -e gives expected error	#1702
-run/switchx.t	1	ok	not ok [PCL #6]	Correct line number	#1702
+run/switchx.t	1	ok	(missing)	Correct line number	#1702
 run/switchx.t	5	ok	(missing)	Second test file utilized	#1702
 run/switchx.t	2	ok	(missing)	Test file exists	#1702
 run/switchx.t	3	ok	(missing)	Test file utilized	#1702

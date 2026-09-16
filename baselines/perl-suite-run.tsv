@@ -2018,7 +2018,7 @@ run/switches.t	140	0	28	112	DIFF		0
 run/switchn.t	3	0	1	1	DIFF		0
 run/switchp.t	3	0	1	0	DIFF		0
 run/switcht.t	0	0	9	4	NOTAP		0
-run/switchx.t	8	0	0	3	DIFF		0
+run/switchx.t	8	0	0	2	DIFF	s486c merge review (Fable, 2026-09-17): 0/3 -> 0/2 -- #1652's progfile plumbing makes the -x child RUN; its output is #1702's (the shebang's -l is not honoured, so `1..8` arrives without a newline and glues `not ok 6` to the plan); the child is byte-identical on main 2ac855aa, only the harness changed	0
 uni/attrs.t	35	0	8	26	DIFF		0
 uni/bless.t	84	0	83	1	DIFF		0
 uni/caller.t	18	0	7	12	DIFF		0

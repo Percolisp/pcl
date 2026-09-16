@@ -159,6 +159,23 @@ Full perl-tests sweep: **GATE clean**, 0 new / 0 fixed, TOTAL passing
 **18681 = 18681 (+0)**, drops 5 = census, CAUSES 0 of 480 blessed rows
 causeless.
 
+
+### Merge review (Fable, s487, 2026-09-17)
+
+The owed companion had died incomplete (41 files unmeasured); re-run on this
+tree with two agents sharing the box.  Movers classified one by one, each
+re-run `--jobs 1` here and on a `git archive 2ac855aa` extraction:
+
+| file | snapshot | this tree | main extraction | class |
+|---|---|---|---|---|
+| re/pat.t | 231/138 | **0/0** (heap exhausted at 99.3 % of 1 GB while compiling `pl-run_tests`) | 231/138 | **the batch's** — the bigger stub test.pl tips it (#1590's own finding); fixed by registering `re/pat.t` at 2048 MB → 231/138 |
+| run/switchx.t | 0/3 | 0/2 | 0/3 | **the batch's**, harness only: #1652's progfile makes the `-x` child run; the child is identical on main (#1702) — spliced with cause |
+| op/gv.t, uni/gv.t | 135/56, 59/29 | TIMEOUT | TIMEOUT (serial, load 0.8) | #1651 hangs, known since s473t5d — not spliced |
+| comp/use.t, io/open.t, op/coresubs.t, run/switchM.t, op/inccode.t, op/inc.t, run/switches.t, op/coreamp.t | various | = extraction | = extraction | main's drift, listed by s473t5d on 2026-09-13 — not spliced; #1834 |
+| io/pvbm.t | 23/5 | 23/5 serial | 20/8 | the known flap |
+
+A one-file `--bless-fails --bless-shortfall` turned out to rewrite the whole
+baselines (4,691 lines); reverted, spliced by hand; #1835 filed.
 ## Session 485 (Fable, 2026-09-14 ~08:00 → ~10:30) — "Please continue": the three stopped worktrees resumed in place, s484c and s473t5f reviewed and merged; the xs gate files parked (USER); "Don't start more subjobs" (USER)
 
 **Resume.**  The box had been rebooted before the session (no leftover processes); main `edd6dc78`, CI green through it.  Per the s484 restart recipe, s473t5f (uni/) and s484c (the regex + glob fillers) were resumed as pinned Opus agents in their EXISTING worktrees — each told main had moved by one docs-only commit and to rebase first — and s484d was held for the second slot per the recipe's merge order (it edits `perl-tests/t/test.pl` + the runner; its companion `--all --quick` belongs on top of the other two).  While they ran: review probes were written from the seven task records (t5f 21 rows, s484c 22 rows; perl 5.40.3 oracle) and the base inverse measured on main — the t5f base dies at `nèw Àlìcè`, the s484c base hangs in `while ($s =~ /(\w*)/g)` and dies with a raw SBCL type error on `$$_{k}` with a glob in `$_`; and the op/ census residue was designed as three size bands (`~/pcl-agent-scratch/s473/s473t6/plan.md` + the t6a brief).
