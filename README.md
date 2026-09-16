@@ -548,8 +548,8 @@ about a tenth of a second plus the time to compile your script.
   pclxs, and the generated code as a documented target for other tools.
 * **Planned, not rejected:** live symbol-table hashes (`%Foo::`), full
   `caller()` fidelity, perl 5.38 classes, `defer` blocks, `tie` on
-  aggregates, `format`, indirect object syntax with a scalar invocant, and a
-  `use warnings` model.  Each has an entry in
+  aggregates, `format`, indirect object syntax with a scalar invocant,
+  user-defined `:lvalue` subs, and a `use warnings` model.  Each has an entry in
   [`docs/not-supported.md`](docs/not-supported.md) saying what it would take.
 
 ## Documentation

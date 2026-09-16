@@ -115,7 +115,7 @@ The handful most likely to matter to a program that is otherwise portable:
 ### Subroutines, arguments and closures
 
 * [`@_` argument aliasing — PARTIAL](#_-argument-aliasing--partial-plain-my-lexicals-only)
-* [Lvalue subroutines](#lvalue-subroutines)
+* [Lvalue subroutines — DEFERRED for now](#lvalue-subroutines--deferred-for-now-task-930)
 * [`prototype()` — only registered prototypes](#prototype--returns-only-registered-prototypes-attribute--subutil)
 * [Signature syntax is read as a signature even with the feature off](#signature-syntax-is-read-as-a-signature-even-with-the-feature-off)
 * [`:prototype(...)` on an anonymous sub at the START of an expression](#prototype-on-an-anonymous-sub-at-the-start-of-an-expression)
@@ -1528,7 +1528,7 @@ which is fully supported; a true trampoline loop is not.
 
 ---
 
-## Lvalue subroutines
+## Lvalue subroutines — [DEFERRED] for now (task #930)
 
 **Perl behaviour:** A sub marked `: lvalue` can appear on the left-hand
 side of an assignment.  The sub must return a reference to a writable
@@ -1541,7 +1541,15 @@ field() = 42;           # modifies $obj->{field}
 
 The built-in `substr` also acts as an lvalue: `substr($s, 0, 4) = "new"`.
 
-**PCL behaviour:** The user-defined `: lvalue` attribute is not implemented.
+**Status: DEFERRED, not rejected — "for now" (USER, 2026-09-17; first deferred
+s464, task #930).**  The user-defined `: lvalue` attribute is not implemented.
+It is the single largest item in the compiler's census of untranslatable
+statements: **43 of the 62** statements in
+`baselines/parse-error-drop-census-s399.tsv` (2026-09-16) are this one
+refusal — 33 of them in `t/op/sub_lval.t`, the rest in `op/coreamp.t`,
+`substr.t` (both suites), `op/signatures.t` and `op/try.t` — and 178 companion
+rows, 7 CPAN-board rows and 2 sweep rows carry `NS:Lvalue subroutines` as their
+cause.  Taking #930 would remove all 43 in one step.
 
 Note (session 219): the *built-in* magic lvalues `substr`, `pos` and `vec` **are**
 supported, both as direct assignment targets and as live references:
@@ -1575,13 +1583,26 @@ error does — which is what a feature probe (`eval 'return 1; &_sub = 1'`) is
 asking.  Dying at TRANSPILE is still refused: that would take every other row
 of `perl-tests/substr.t` and `t/op/sub_lval.t` with it, whereas the run-time
 die costs only the rows at or after the statement inside its own top-level
-form (the s329 boundary — the sin was the silence).  39 of the 102 drops in
-`baselines/parse-error-drop-census-s399.tsv` are this refusal.
+form (the s329 boundary — the sin was the silence).  43 of the 62 statements in
+`baselines/parse-error-drop-census-s399.tsv` (2026-09-16) are this refusal.
 
-**Rationale:** Implementing user lvalue subs requires an "lvalue context"
-that propagates through the call, returns a settable location, and then
-performs the store — a fundamentally different calling convention from
-normal subs.  No maintained CPAN module in scope requires custom lvalue subs.
+**Rationale (why deferred, and what it would take — SIZED in task #930 from a
+measured table, s461ar):** implementing user lvalue subs means an *lvalue
+context* that propagates into the sub body's tail and `return` positions,
+returns a settable location, and then performs the store — a different
+calling convention from an ordinary call, not a bounded fix.  PCL's box model
+already makes the simplest body work by accident: `sub f :lvalue { $x }`
+returns `$x`'s box, so `\f()` writes through today.  That is **one of eight**
+measured body shapes; the other seven (`return $x`, `$_[0]`, `${\shift}`,
+`substr(...)`, `vec(...)`, `$h{k}`, `$a[0]`) return a COPY, so a half-fix that
+merely accepted `f() = V` would turn 33 loud refusals into 33 silent wrongs —
+the project's worst failure mode — unless the runtime store also died on a
+non-box.  Every piece the real feature needs already exists in the runtime
+(the eager element accessors `p-aref-box` / `p-gethash-box`, the `substr` /
+`pos` / `vec` magic cells that `box-set` already delegates to); what does not
+exist is the compile mode that selects them.  No maintained CPAN module in
+scope requires custom lvalue subs, which is why it waits behind the census
+items that block real modules.
 
 **Affected tests:** `perl-tests/aassign.t` (a few tests use user `: lvalue` subs).
 The `\substr`/`\pos`/`\vec` lvalue-ref rows in `perl-tests/ref.t` now pass.
