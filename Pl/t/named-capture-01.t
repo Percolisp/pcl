@@ -65,11 +65,22 @@ is run_cl(<<'END'), "foo bar\n", 'named captures also set $1/$2';
 print "$1 $2\n";
 END
 
-# 4. Failed match clears %+
-is run_cl(<<'END'), "hello\nafter\n", 'failed match clears %+';
+# 4. A FAILED match leaves %+ alone; a SUCCESSFUL one rebuilds it.
+#
+# This row asserted the opposite until s473v ("failed match clears %+",
+# expecting "hello\nafter\n"), and it was the OLD BUG written down: perl 5.40.3
+# prints "hello\nhello\n" — %+ persists across a failed attempt exactly as $1
+# does (probed; the runtime comment claiming perl clears it per attempt was
+# wrong too, and PCL paid two hash-table-count calls per match for that wrong
+# answer).  The second half is new and is what makes the row a real test of
+# the rule rather than of one direction: the NEXT SUCCESSFUL match, whose
+# pattern has no named groups at all, does empty it.
+is run_cl(<<'END'), "hello\nhello\nafter\n", '%+ survives a failed match and is rebuilt by a successful one';
 "hello" =~ /(?<w>\w+)/;
 print "$+{w}\n";
 "hello" =~ /(?<x>\d+)/;
+print defined($+{w}) ? $+{w} : "after", "\n";
+"hello" =~ /ell/;
 print defined($+{w}) ? $+{w} : "after", "\n";
 END
 

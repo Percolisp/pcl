@@ -1571,6 +1571,21 @@
 (defvar *match-derived* nil
   "T when the seven variables below hold THIS record's values.  Cleared by
    every successful match; set by %p-derive-match-vars.")
+(defvar *match-derived-eager* nil
+  "T once a program has taken the CONTAINER of one of the derived aggregates
+   out from behind its accessor — `*X = *-` aliases the hash into another
+   name, and `@{\"-\"}` hands it to a symbolic-reference caller.  A reader of
+   the ALIAS never goes through the accessor, so laziness would leave it
+   holding whatever the last materialisation put there.  From then on every
+   successful match materialises immediately: the flag is set ONCE, tested
+   once per match, and no program that does not do this pays anything.")
+
+(defun %p-mv-pin ()
+  "Switch the derived variables to EAGER for the rest of the run, and
+   materialise now — see *match-derived-eager*.  Called from the two places
+   that hand a derived CONTAINER to a caller who can then read it directly."
+  (setf *match-derived-eager* t)
+  (values))
 
 (defvar *p-mv-last-paren* nil "Storage behind $+.")
 (defvar *p-mv-caret-n* nil "Storage behind $^N.")
@@ -23340,7 +23355,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; is false and the vivify below would hand back a fresh empty vector.
     ;; Same rule, same table, as ${"&"} (task #477).
     (let ((getter (gethash sym *computed-magic-getters*)))
-      (when getter (return-from %p-symref-array (funcall getter))))
+      (when getter (%p-mv-pin) (return-from %p-symref-array (funcall getter))))
     (unless (and (boundp sym)
                  (vectorp (symbol-value sym))
                  (not (stringp (symbol-value sym))))
@@ -23357,7 +23372,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((sym (%p-symref-sym name-str "%" t site)))
     ;; %{"+"} / %{"-"} are DERIVED, exactly as @{"-"} is — see the array twin.
     (let ((getter (gethash sym *computed-magic-getters*)))
-      (when getter (return-from %p-symref-hash (funcall getter))))
+      (when getter (%p-mv-pin) (return-from %p-symref-hash (funcall getter))))
     (if (boundp sym)
         (let ((v (symbol-value sym)))
           (cond
@@ -24410,11 +24425,28 @@ buffer's fill-pointer; everything else falls back to file-length."
    b2 empties $a2 and %a2).  Copying bound slots only left the destination's
    old value in place: task #602, and the reason t/re/pat.t:1715's
    `*^R = *caretRglobwithnoscalar` did not make $^R undef."
-  (let ((src-sym (intern (%p-slot-name prefix sn) sp)))
-    (if (boundp src-sym)
-        (setf (symbol-value (intern (%p-slot-name prefix dst-uname) dst-pkg))
-              (symbol-value src-sym))
-        (%p-glob-clear-var-slot prefix dst-pkg dst-uname))))
+  (let* ((src-sym (intern (%p-slot-name prefix sn) sp))
+         ;; A COMPUTED magic slot holds no value in its symbol, so `boundp`
+         ;; answers NIL and the clear below would fire — `*X = *-` then EMPTIED
+         ;; %X instead of aliasing it to %-.  Ask the getter, the same table
+         ;; ${"&"} consults (task #477, widened by #1804 to the seven derived
+         ;; match variables).  For an AGGREGATE the getter returns the live
+         ;; container, so the alias is perl's; for a computed SCALAR it returns
+         ;; the current VALUE, which is a copy where perl aliases the magic —
+         ;; the accepted boundary ir-spec §8 already records for `$!`, and
+         ;; still strictly closer to perl than emptying the destination.
+         (getter (gethash src-sym *computed-magic-getters*)))
+    (cond
+      (getter
+       ;; An aggregate alias reads the CONTAINER directly from now on, never
+       ;; through the accessor, so the derived family goes eager (#1804).
+       (unless (string= prefix "$") (%p-mv-pin))
+       (setf (symbol-value (intern (%p-slot-name prefix dst-uname) dst-pkg))
+             (funcall getter)))
+      ((boundp src-sym)
+       (setf (symbol-value (intern (%p-slot-name prefix dst-uname) dst-pkg))
+             (symbol-value src-sym)))
+      (t (%p-glob-clear-var-slot prefix dst-pkg dst-uname)))))
 
 (defun %p-glob-copy-code-slot (sp sn dst-pkg dst-uname)
   "The CODE slot of a glob-to-glob assignment.  The alias inherits the
@@ -27970,7 +28002,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (svref dst-e i) (svref reg-ends i)))
           (dotimes (i n)
             (setf (svref dst-s i) (aref reg-starts i)
-                  (svref dst-e i) (aref reg-ends i)))))))
+                  (svref dst-e i) (aref reg-ends i))))))
+  ;; One special read on the hot path, NIL for every program that has not
+  ;; aliased a derived container out from behind its accessor.
+  (when *match-derived-eager* (%p-derive-match-vars)))
 
 ;;; THE MATERIALISER.  Everything below runs at most once per successful
 ;;; match, and only when the program actually reads one of the seven.

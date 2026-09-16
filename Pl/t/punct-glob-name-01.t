@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 26;
+plan tests => 28;
 
 sub write_pl {
     my ($code) = @_;
@@ -89,6 +89,34 @@ no strict 'refs';
 our %X; *X = *-;
 'X' =~ /(?<X>X)/;
 print "aliased=", (defined $X{X} ? "yes" : "no"), "\n";
+PL
+
+# The same alias ACROSS A LATER MATCH, and the `%+` twin (task #1804): the
+# seven derived match variables are built on READ, so a glob alias — which
+# reads the container DIRECTLY, never through the accessor — has to pin them
+# eager.  Without the pin `*X = *-` copied a container that then never
+# refilled, and the first row above went from `yes` to `no`.
+both_agree(<<'PL', 'a derived container ALIASED through a glob keeps tracking (task #1804)');
+no strict 'refs';
+our %X; *X = *-;
+our %P; *P = *+;
+'X' =~ /(?<X>X)/;
+print "minus1=", (defined $X{X} ? "yes" : "no"),
+      " plus1=", ($P{X} // "undef"), "\n";
+'Q' =~ /(?<Q>Q)/;
+print "minus2=", (defined $X{Q} ? "yes" : "no"),
+      " gone=",  (defined $X{X} ? "no" : "yes"),
+      " plus2=", ($P{Q} // "undef"), "\n";
+PL
+
+both_agree(<<'PL', 'the OFFSET arrays aliased through a glob (task #1804)');
+no strict 'refs';
+our @A; *A = *-;
+our @B; *B = *+;
+"hello" =~ /(ll)/;
+print "a=@A b=@B\n";
+"xxhello" =~ /(l)/;
+print "a=@A b=@B\n";
 PL
 
 both_agree(<<'PL', 'a DIGIT glob name: local *a = *1 (t/re/subst.t:951)');

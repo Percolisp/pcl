@@ -653,7 +653,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `$$` | variable | `` | — | — | — | — | — | — | — |
 | `$%` | variable | `` | — | — | — | — | — | — | — |
 | `$&` | symbol-macro | `` | — | — | — | — | — | — | — |
-| `$+` | variable | `` | — | — | — | — | — | — | — |
+| `$+` | symbol-macro | `` | — | — | — | — | — | — | — |
 | `$-` | variable | `` | — | — | — | — | — | — | — |
 | `$.` | variable | `` | — | — | — | — | — | — | — |
 | `$/` | variable | `` | — | — | — | — | — | — | — |
@@ -696,7 +696,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `$^i` | variable | `` | — | — | — | — | — | — | — |
 | `$^l` | variable | `` | — | — | — | — | — | — | — |
 | `$^m` | variable | `` | — | — | — | — | — | — | — |
-| `$^n` | variable | `` | — | — | — | — | — | — | — |
+| `$^n` | symbol-macro | `` | — | — | — | — | — | — | — |
 | `$^o` | variable | `` | — | — | — | — | — | — | — |
 | `$^p` | variable | `` | — | — | — | — | — | — | — |
 | `$^r` | variable | `` | — | — | — | — | — | — | — |
@@ -713,8 +713,8 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `%%` | variable | `` | — | — | — | — | — | — | — |
 | `%&` | variable | `` | — | — | — | — | — | — | — |
 | `%*` | variable | `` | — | — | — | — | — | — | — |
-| `%+` | variable | `` | — | — | — | — | — | — | — |
-| `%-` | variable | `` | — | — | — | — | — | — | — |
+| `%+` | symbol-macro | `` | — | — | — | — | — | — | — |
+| `%-` | symbol-macro | `` | — | — | — | — | — | — | — |
 | `%.` | variable | `` | — | — | — | — | — | — | — |
 | `%/` | variable | `` | — | — | — | — | — | — | — |
 | `%<` | variable | `` | — | — | — | — | — | — | — |
@@ -736,8 +736,8 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `@%` | variable | `` | — | — | — | — | — | — | — |
 | `@&` | variable | `` | — | — | — | — | — | — | — |
 | `@*` | variable | `` | — | — | — | — | — | — | — |
-| `@+` | variable | `` | — | — | — | — | — | — | — |
-| `@-` | variable | `` | — | — | — | — | — | — | — |
+| `@+` | symbol-macro | `` | — | — | — | — | — | — | — |
+| `@-` | symbol-macro | `` | — | — | — | — | — | — | — |
 | `@.` | variable | `` | — | — | — | — | — | — | — |
 | `@/` | variable | `` | — | — | — | — | — | — | — |
 | `@<` | variable | `` | — | — | — | — | — | — | — |
@@ -751,7 +751,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `@]` | variable | `` | — | — | — | — | — | — | — |
 | `@^` | variable | `` | — | — | — | — | — | — | — |
 | `@_` | variable | `` | — | — | — | — | — | — | — |
-| `@{^capture}` | variable | `` | — | — | — | — | — | — | — |
+| `@{^capture}` | symbol-macro | `` | — | — | — | — | — | — | — |
 | `@~` | variable | `` | — | — | — | — | — | — | — |
 | `p-errno-string` | function | `nil` | — | — | — | — | — | — | — |
 | `|$"|` | variable | `` | — | — | — | — | — | — | — |
