@@ -6,8 +6,9 @@ Task #1787.  **Do not merge into main — Fable merges after review.**
 
 ## MERGE-READY SHA
 
-**`ff44e0df`** — the four commits below plus this one (STOP.md), on top of
-main `4429126a`.  Every bar green; nothing owed.
+**The branch TIP** — `80faeebe` plus this one-line fix; confirm with
+`git rev-parse --short HEAD` in this worktree.  On top of main `4429126a`.
+Every bar green; nothing owed.
 
 ```
 0c567b12 s486b: STOP.md current
