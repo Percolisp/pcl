@@ -6,10 +6,11 @@ Task #1787.  **Do not merge into main — Fable merges after review.**
 
 ## MERGE-READY SHA
 
-`d6382c0d` (three commits on top of `4429126a`) — **plus whatever the two
-remaining bars force**; see OWED.
+**`ff44e0df`** — the four commits below plus this one (STOP.md), on top of
+main `4429126a`.  Every bar green; nothing owed.
 
 ```
+0c567b12 s486b: STOP.md current
 d6382c0d s486b step 3: docs + task record -- the ruling recorded verbatim
 de0b7b7d s486b step 2: the REGISTRY-STALE entries narrowed or dropped -- 7 of them, in 4 files
 f28a688a s486b step 1: the registry's skip line is marked [registry] and the sweep COUNTS it
@@ -38,8 +39,8 @@ f28a688a s486b step 1: the registry's skip line is marked [registry] and the swe
 | `prove tools/t/audit-instruments.t tools/t/tap-align.t tools/t/sbcl-prefix.t` | **PASS, 81 rows** |
 | `prove Pl/t/license-tag-01.t Pl/t/no-hardcoded-paths-01.t` | **PASS, 16 rows** |
 | stale cleanup, per-file before/after | **all four identical except stale → 0** (table below) |
-| FULL sweep `--jobs 8` | **RUNNING** → `scratch/s486b/full-sweep.log` |
-| `tools/prove-core` | **OWED** (run after the sweep) |
+| FULL sweep `--jobs 8` | **GATE: clean** — 0 new / 0 fixed / 0 LOST, TOTAL passing **18676 (+0)** = baseline, drops **5 = census**, shortfall +0, CAUSES 0 causeless, `REGISTRY: 198 rows relabelled in 24 files`, `REGISTRY-STALE: 0 entries in 0 files`; exit 0 (`scratch/s486b/full-sweep.log`) |
+| `tools/prove-core` | **Result: PASS**, 242 files / 8212 rows, 101 s (`scratch/s486b/gate.log`) |
 | companion | **NOT OWED** — the companion loads `cl/pcl-test.lisp` but never `cl/skip-registry.lisp`, so `%skip-registry-lookup` always answers nil there and the changed branch cannot fire |
 
 ### the stale cleanup, measured — `(pass, fail, skip, registry, stale)`
@@ -71,17 +72,7 @@ one measurement, and it is why the reason text must never be the classifier.
 
 ## OWED
 
-1. Read `scratch/s486b/full-sweep.log` when it finishes.  Expect: GATE clean
-   (0 new / 0 fixed / 0 LOST), **TOTAL passing 18676** (the baseline), drops 5
-   = census, `REGISTRY: ~198 rows relabelled in ~24 files`,
-   **REGISTRY-STALE: 0 entries in 0 files**.  A changed pass/fail count in ANY
-   file is a FINDING, not noise — compare file by file against
-   `baselines/pass-baseline.tsv`.  NB another agent's `Pl/t` gate was on the
-   box when this run started (load ~7), so a LOST report may be load noise —
-   the sweep re-runs a LOST file serially by itself and prints both verdicts.
-2. `tools/prove-core` ONCE (`cl/pcl-test.lisp` is loaded by gate files).
-   Expect `Result: PASS`, 242 files / 8212 rows (the three xs files parked).
-3. Write both results into this file and into the final report.
+Nothing.  Every bar is green; the branch is merge-ready at the sha above.
 
 ## RESUME COMMANDS
 
