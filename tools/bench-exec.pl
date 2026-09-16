@@ -211,6 +211,20 @@ my @benches = (
   # array costs one more entry in the run's ends table and nothing per element.
   # Matched to feread and feread2 on both axes so the three subtract cleanly.
   ['feread3',   "$HN my \@a = (1..334); my \@b = (335..667); my \@c = (668..1000); my \$s=0; for (1..\$n) { for my \$x (\@a, \@b, \@c) { \$s += \$x } } print \"\$s\\n\";", 30_000, 0],
+  # THE FLATTENER, on the one shape that still reaches it (task #1517, s473v).
+  # `f(@a)` passes an ARRAY to a sub, which lowers to `p-flatten-args` and
+  # costs a three-way `cond` plus a vector-push-extend PER ELEMENT; perl
+  # ALIASES @a into @_ and does no per-element work at all.  So this row is a
+  # RATIO OUTLIER BY CONSTRUCTION and must be read as ABSOLUTE SECONDS (plan
+  # §A.0's metric), exactly as the `pack` rows are.
+  #
+  # It exists because `feread2`, the row #883 was sized against, NO LONGER
+  # REACHES THE FLATTENER: `for my $x (@a, @b)` takes the `foreach-arrays` run
+  # since #1184/#1409 and `grep -c p-flatten-args` on its emission is 0.  The
+  # callee returns `scalar(@_)` so the flattened list is CONSUMED (a callee
+  # that ignored @_ would let a future optimisation delete the work the row
+  # exists to price), and the sum is printed so both engines must agree.
+  ['feargs',    "$HN my \@a = (1..1000); my \$s=0; sub fargs { return scalar(\@_) } for (1..\$n) { \$s += fargs(\@a) } print \"\$s\\n\";", 20_000, 0],
   ['ovlsub',    "$HN package V; use overload '-' => sub { V->new(\$_[2] ? \$_[1] - \$_[0]{v} : \$_[0]{v} - (ref \$_[1] ? \$_[1]{v} : \$_[1])) }, '\"\"' => sub { \$_[0]{v} }; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$x = V->new(1000); my \$s = 0; for (1..\$n) { my \$y = \$x - 3; \$s += \"\$y\" } print \"\$s\\n\";", 100_000, 0],
   ['symref',    "$HN no strict 'refs'; our \$g = 2; our \@ga = (1,2,3); my \$s=0; for (1..\$n) { \$s += \${'main::g'} + \${'g'} + scalar(\@{'main::ga'}) } print \"\$s\\n\";", 200_000, 0],
   # Scalar-context m//g per-match cost (task #680): N repeats of a 200k-char
