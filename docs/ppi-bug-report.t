@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 73;
+use Test::More tests => 78;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -899,4 +899,39 @@ for my $c (
     my $doc = PPI::Document->new(\$src);
     is( $doc->serialize, $src,
         "a <<~' EOF' document round-trips through serialize" );
+}
+
+# ── Bug 31: `sub _ { … }` — the NAME `_` after `sub` is lexed as Token::Magic,
+#            so no Statement::Sub is built and the NEXT statement is swallowed ─
+#
+# `_` is an ordinary subroutine name; it keeps its magic meaning (the stat
+# buffer) only in filetest operand position.  PPI classifies it as
+# Token::Magic everywhere, and PPI::Lexer's Statement::Sub rule needs a
+# Token::Word there, so `sub _ { "x" } print 1;` becomes ONE plain
+# PPI::Statement spanning both halves.
+{
+    my $doc = PPI::Document->new(\q{sub _ { "x" } print 1;});
+    my @st  = $doc->schildren;
+    is( scalar @st, 2,
+        'sub _ { … } and the statement after it are TWO statements' );
+    is( ref($st[0]), 'PPI::Statement::Sub',
+        'sub _ { … } lexes as a PPI::Statement::Sub' );
+    my ($name) = grep { $_->content eq '_' } $doc->tokens;
+    is( ref($name), 'PPI::Token::Word',
+        'the `_` naming the sub is a Token::Word, not Token::Magic' );
+}
+# The forward declaration is the same shape.
+{
+    my $doc = PPI::Document->new(\q{sub _; print 1;});
+    my @st  = $doc->schildren;
+    is( ref($st[0]), 'PPI::Statement::Sub',
+        'sub _; lexes as a PPI::Statement::Sub' );
+}
+# The CONTROL: a QUALIFIED name with the same last segment lexes correctly, so
+# the trigger really is the bare `_`.
+{
+    my $doc = PPI::Document->new(\q{sub main::_ { "x" } print 1;});
+    my @st  = $doc->schildren;
+    is( ref($st[0]), 'PPI::Statement::Sub',
+        'sub main::_ { … } lexes as a PPI::Statement::Sub (control)' );
 }

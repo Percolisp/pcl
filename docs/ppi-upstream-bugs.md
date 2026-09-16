@@ -1877,6 +1877,65 @@ recoverable half (every `$script_end = ""` twin), which is why the file moves
 
 ---
 
+## 31. `sub _ { … }` — the NAME `_` after `sub` is lexed as `Token::Magic`, so no `Statement::Sub` is built and the FOLLOWING statement is swallowed  [CONFIRMED 1.291]
+
+**Perl:** `_` is an ordinary subroutine name.  `sub _ { "x" }` defines
+`&main::_`, and the bareword `_` keeps its magic meaning (the stat buffer)
+only in filetest operand position — `perldoc -f -X` says so explicitly, and
+`t/op/filetest.t:160-162` is the test that pins it:
+
+```perl
+-f 'TEST';
+is(-f _, 1, "_ is bareword after filetest operator");
+sub _ { "this is not a file name" }
+is(-f _, 1, "_ is bareword after filetest operator");   # STILL the stat buffer
+```
+
+**PPI:** the tokenizer classifies `_` as `PPI::Token::Magic` wherever it
+appears, including directly after the keyword `sub`.  `PPI::Lexer`'s
+`Statement::Sub` rule requires a `Token::Word` there, so it does not fire: the
+whole thing becomes one plain `PPI::Statement` that runs on past the block and
+**absorbs the next statement**.
+
+```
+$ perl -MPPI -e '
+  my $d = PPI::Document->new(\q{sub _ { "x" } print 1;});
+  for my $e ($d->schildren) { printf "%s: %s\n", ref($e), $e->content }
+  for my $t ($d->tokens)    { printf "  %-24s %s\n", ref($t), $t->content }'
+
+PPI::Statement: sub _ { "x" } print 1;          <-- ONE statement, both halves
+  PPI::Token::Word         sub
+  PPI::Token::Magic        _                    <-- expected Token::Word
+  PPI::Token::Structure    {
+  PPI::Token::Quote::Double "x"
+  PPI::Token::Structure    }
+  PPI::Token::Word         print
+  PPI::Token::Number       1
+  PPI::Token::Structure    ;
+```
+
+Expected: `PPI::Statement::Sub` for `sub _ { "x" }` and a separate
+`PPI::Statement` for `print 1;`, with the `_` a `PPI::Token::Word`.
+
+The same shape holds for a forward declaration (`sub _;`) and for a qualified
+name (`sub main::_ { }` lexes correctly — it is only the bare `_`).
+
+**PPI version tested:** 1.291.
+
+**What it costs PCL:** the statement is a `#138` DROP
+(`Bug. Fell through. Missing case: ['Token::Magic<_>', …]`) that takes the
+swallowed sibling with it, and in `t/op/filetest.t` the die that follows
+(`Undefined subroutine &main::f called`) aborts the top-level form, so the two
+`_ is bareword after filetest operator` rows are never produced.  **No
+workaround is implemented** — task **#1817** owns it and carries this repro;
+the natural shape is a `_ppi_parse` in-place repair that re-classifies a
+`Token::Magic` `_` that directly follows the keyword `sub` as a `Token::Word`
+and re-lexes, in the family of `_reclassify_bare_vwords` /
+`_merge_unicode_symbols` / `_merge_punct_array_symbols` /
+`_repair_indented_heredocs`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`
