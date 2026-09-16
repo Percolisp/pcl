@@ -2,6 +2,33 @@
 
 Append new entries at the top. One section per session.
 
+## Session 486 (Fable, 2026-09-16) — the not-supported share measured and instrumented; three agents merged; the commands reviewed for security
+
+The USER asked, reviewing the README's `Measured` table, how many of the
+failing rows are from what PCL deliberately does not support.  Measured by
+hand from the baselines first (every blessed row carries a cause; nothing had
+summed them), then three pinned-Opus agents ran in parallel for the USER's
+one-hour window: **s486a** built the failure-cause class census
+(`PCLCauses::cause_class`, `tools/cause-census.pl`, `docs/failure-cause-classes.md`,
+the STATUS.md table; merged `13ce14ed`), **s486b** made the skip registry
+countable (`[registry]` marker, two `_status.tsv` columns, `REGISTRY:` lines,
+7 stale entries cleaned; merged `0cd146ce` + one Fable integration fix: the
+census now reads the registry column positionally), **s486c** resumed the
+parked s484d worktree (rebased row by row, gate PASS 243/8216, sweep clean
+18681; its companion run is OWED).  Sweep on merged main:
+`18676 passing, 676 failing, 12027 skipped (198 by the registry)`, GATE clean.
+
+Then, at the USER's request ("don't start more subtasks; review the used
+commands from a security perspective"), Fable reviewed `pcl`, `pl2cl`,
+`runpcl`, the runners, the installer, the caches and the harness server:
+`docs/security-review-s486.md`.  Verified by probe: list-form `system`/`open`
+never reach a shell (identical to perl), generated strings are reader-safe,
+`pcl -c` runs nothing from the file.  Findings → tasks #1798 (`runpcl`/`runt`/
+`clt` predictable `/tmp` names, shell strings, world-readable transpile),
+#1799 (`--clear-cache` marker), #1800 (`*read-eval*` NIL + one-line drop
+comment), #1801 (pipe-open EIO divergence), #1802 (runner drift: a hand run of
+a `fresh_perl` file is not the sweep's verdict — lex.t 53 vs 45).
+
 ## Session 486b (Opus, 2026-09-16) — the sweep's skip registry made COUNTABLE, and its stale entries cleaned out (task #1787)
 
 Ran concurrently with s486a (the cause-class census tool, which reads the

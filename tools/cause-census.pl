@@ -129,7 +129,7 @@ sub registry_count {
     return (undef, "no $sf") unless -e $sf;
     open my $fh, '<:raw', $sf or return (undef, "cannot read $sf");
     my @head;
-    my $total = 0; my $seen = 0;
+    my $total = 0; my $seen = 0; my $have = 0;
     while (my $line = <$fh>) {
         chomp $line;
         if ($line =~ /^#/) {
@@ -139,15 +139,20 @@ sub registry_count {
         }
         next unless $line =~ /\S/;
         my @f = split /\t/, $line, -1;
+        # The writer (tools/sweep-perl-tests.pl, write_status_file) puts the
+        # column ELEVENTH, after `note` -- the position its header comment
+        # documents; the file itself carries no header line.  A `#` header
+        # naming the column (a hand-made fixture) is honoured when present.
+        my $i = 10;
         if (@head) {
-            my ($i) = grep { ($head[$_] // '') =~ /registry/i } 0 .. $#head;
-            if (defined $i && defined $f[$i] && $f[$i] =~ /^\d+$/) {
-                $total += $f[$i]; $seen++;
-            }
+            ($i) = grep { ($head[$_] // '') =~ /registry/i } 0 .. $#head;
+        }
+        if (defined $i && @f > $i && defined $f[$i] && $f[$i] =~ /^\d+$/) {
+            $total += $f[$i]; $have++; $seen++ if $f[$i] > 0;   # column present; files WITH relabels
         }
     }
     close $fh;
-    return ($total, "$seen file(s)") if $seen;
+    return ($total, "$seen file(s)") if $have;   # a present column summing to 0 is COUNTED
     return (undef, "no registry column in $sf");
 }
 

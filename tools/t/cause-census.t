@@ -139,6 +139,16 @@ spew("$root/baselines/row-shortfall.tsv",
   ($out) = run_census();
   like($out, qr/registry: 20 skip-registry relabel\(s\) in the sweep \(2 file\(s\)\)/,
        'a named registry column is summed, and named as not-supported failures');
+
+  # The sweep's OWN shape (s486b): no header line; registry-skips is the
+  # ELEVENTH field, after the tab-free `note`, registry-stale the twelfth.
+  spew("$root/.faillog/_status.tsv",
+    join("\t", 'a.t', 'OK', 10, 3, 13, 0, 0, 0, 0, '', 17, 0),
+    join("\t", 'b.t', 'OK', 10, 0, 10, 0, 0, 0, 0, '', 3, 1),
+    join("\t", 'c.t', 'OK', 10, 0, 10, 0, 0, 0, 0, ''));
+  ($out) = run_census();
+  like($out, qr/registry: 20 skip-registry relabel\(s\) in the sweep \(2 file\(s\)\)/,
+       'the positional eleventh column (the runner\'s own layout) is summed; a row without it is not counted');
 }
 
 # ── --hygiene lists every `other` row, because the class must trend to zero ─

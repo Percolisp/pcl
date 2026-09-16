@@ -33,17 +33,17 @@ what is a bug and what is the deliberate edge of the language PCL
 implements.**  One rule, six classes, one command
 (`tools/cause-census.pl --markdown`, rule and reconciliation in
 [`failure-cause-classes.md`](failure-cause-classes.md)) — measured
-2026-09-16 against the sweep log of 2026-09-06:
+2026-09-16 against the sweep of 2026-09-16 on `0cd146ce`:
 
 | population | rows | not-supported | parked | bug | other | unexplained | perl-skip | not-supported + parked |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| perl-tests sweep | 635 | 268 | 69 | 291 | 7 | 0 | 0 | 53.1% |
+| perl-tests sweep | 671 | 291 | 69 | 304 | 7 | 0 | 0 | 53.7% |
 | companion (perl's own t/) | 11,984 | 4,661 | 88 | 4,873 | 0 | 2,362 | 0 | 39.6% |
 | CPAN board (14 dists) | 389 | 88 | 0 | 294 | 0 | 0 | 7 | 23.0% |
 | companion XDIFF rows | 2,517 | 2,516 | 0 | 0 | 0 | 1 | 0 | 100.0% |
 | shortfall: perl-tests | 12,213 | 267 | 0 | 104 | 0 | 11,842 | 0 | 2.2% |
 | shortfall: perl's t/ | 444,439 | 55,393 | 417 | 388,107 | 0 | 522 | 0 | 12.6% |
-| **all populations** | **472,177** | **63,193** | **574** | **393,669** | **7** | **14,727** | **7** | **13.5%** |
+| **all populations** | **472,213** | **63,216** | **574** | **393,682** | **7** | **14,727** | **7** | **13.5%** |
 
 `not-supported` = the cause names a [`not-supported.md`](not-supported.md)
 section; `parked` = a scheduling decision; `bug` = a filed task; `perl-skip`
@@ -54,8 +54,10 @@ total**: the total is dominated by the `t/` shortfall's few enormous
 generated files.  The `perl-tests` sweep is the population PCL is measured
 against on every change, and **just over half of its failing rows are
 deliberate non-support, not bugs**.  Rows the skip registry relabels as
-skips are not-supported failures too; they were NOT COUNTED in the
-measurement above (the log predates the column).
+skips are not-supported failures too, and they sit OUTSIDE the sweep row:
+198 rows in 24 files on the same sweep (the `(198 by the registry)` in its
+TOTAL line).  Counting them, the sweep's honest not-supported share is
+(291 + 69 + 198) / (671 + 198) = 64 %.
 
 **Untranslatable statements are never silent.**  One the compiler cannot
 lower is announced on stderr at compile time
