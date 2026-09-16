@@ -128,8 +128,8 @@ like($rows_out, qr/^SBCL\t0\t0$/m, 'run-dist-t --rows reports the SBCL exit code
   like($out, qr/^NEW\s+fixture-dist rows\.t #3\s*$/m, 'a row absent from the baseline is NEW');
   like($out, qr/^FIXED\s+fixture-dist rows\.t #9 gone now$/m, 'a baseline row the run did not produce is FIXED');
   like($out, qr/^LOST: NOT CHECKED/m, 'without the per-file tables LOST says so instead of printing nothing');
-  like($out, qr/^CAUSES: 2 of 3 blessed row\(s\) have no cause/m,
-       'UNEXPLAINED and an empty cause both count as cause-less');
+  like($out, qr/^CAUSES: 1 of 3 — not-supported 0, parked 0, bug 1, other 0, unexplained 2/m,
+       'UNEXPLAINED and an empty cause both count as cause-less (class split, s486a)');
   is($rc, 1, '--diff exits nonzero when there are NEW rows');
 
   # LOST needs the two per-file tables: a file that aborts earlier loses

@@ -19,7 +19,8 @@ use Test::More;
 use File::Temp qw(tempdir);
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
-use PCLCauses qw(has_cause causes_line read_fail_rows fail_row_line);
+use PCLCauses qw(has_cause causes_line read_fail_rows fail_row_line
+                 cause_class class_census census_line);
 use PclTapAlign qw(rowkey_desc);
 
 my $dir = tempdir(CLEANUP => 1);
@@ -52,8 +53,38 @@ sub slurp { open my $fh, '<:raw', $_[0] or die; local $/; return <$fh> }
        qr/^CAUSES: NOT CHECKED — no cause column in x\.tsv/,
        'a baseline that predates the column says so, and names itself');
   like(causes_line(['#1', undef, 'UNEXPLAINED'], 'x.tsv'),
-       qr/^CAUSES: 2 of 3 blessed row\(s\) have no cause/,
-       'the queue is counted, and UNEXPLAINED counts into it');
+       qr/^CAUSES: 1 of 3 — not-supported 0, parked 0, bug 1, other 0, unexplained 2/,
+       'the third answer is the class split (s486a); UNEXPLAINED counts into it');
+  like(causes_line(['#1', undef, 'UNEXPLAINED'], 'x.tsv'),
+       qr/\(unexplained = 2 cause-less blessed row\(s\): QUEUE, not baseline/,
+       'the queue claim the three runners have always made is still on the line');
+}
+
+# ── cause_class: THE RULE, one row per class (s486a) ────────────────────────
+{
+  is(cause_class('NS:Warnings-gated diagnostics are absent'), 'not-supported',
+     'an NS: anchor is a not-supported.md section');
+  is(cause_class('#221 (NS:Warnings-gated diagnostics are absent)'), 'not-supported',
+     'a row naming BOTH a task and a section is not-supported — the task owns the residue');
+  is(cause_class("not-supported.md \x{a7}mro \x{2014} C3-only"), 'not-supported',
+     'the perl-suite-expected.tsv spelling counts too');
+  is(cause_class('PARKED: pack/unpack (USER s485)'), 'parked', 'PARKED: is its own class');
+  is(cause_class('#1452 (a) (LHS lvalues must be resolved first)'), 'bug', 'a bare task is the queue');
+  is(cause_class('PERL-SKIP: perl skips this file too'), 'perl-skip', 'the board class');
+  is(cause_class('DECIDED "PCL has no PVBM"'), 'other', 'a cause citing nothing citable is HYGIENE');
+  is(cause_class('UNEXPLAINED'), 'unexplained', 'UNEXPLAINED is the queue, not a cause');
+  is(cause_class(undef), 'unexplained', 'a missing column is unexplained, never other');
+
+  my $n = class_census(['NS:x', 'PARKED: y', '#12', 'DECIDED z', undef, 'PERL-SKIP']);
+  is_deeply($n, { 'not-supported' => 1, parked => 1, bug => 1, other => 1,
+                  unexplained => 1, 'perl-skip' => 1 },
+            'class_census reports every class, zeros included');
+  is(census_line('CAUSES', $n),
+     "CAUSES: 5 of 6 — not-supported 1, parked 1, bug 1, other 1, perl-skip 1, unexplained 1\n",
+     'census_line is the ONE formatter; perl-skip shows only where it occurs');
+  is(census_line('CAUSES', class_census([('#1') x 1234, ('UNEXPLAINED') x 2])),
+     "CAUSES: 1,234 of 1,236 — not-supported 0, parked 0, bug 1,234, other 0, unexplained 2\n",
+     'thousands are commified so a five-figure population stays readable');
 }
 
 # ── the six-field format: read, and its inverse ────────────────────────────
@@ -72,7 +103,7 @@ sub slurp { open my $fh, '<:raw', $_[0] or die; local $/; return <$fh> }
      'the cause is keyed the way the ROW DIFF joins: (rel, rowkey)');
   ok(!exists $cause->{"op/a.t\trow one"}, 'an uncaused row is absent from the cause map');
   like(causes_line([ map { $_->[4] } map { @$_ } values %$meta ], $p),
-       qr/CAUSES: 2 of 3 /, 'the runner counts the baseline, not the run');
+       qr/CAUSES: 1 of 3 — /, 'the runner counts the baseline, not the run');
 
   # The inverse: five fields when there is no cause, so the column's arrival
   # rewrites NOTHING.  This is the property that let the real 18,336-row
@@ -131,7 +162,7 @@ sub slurp { open my $fh, '<:raw', $_[0] or die; local $/; return <$fh> }
     is(scalar(@wide), 0,
        'every blessed line has at most six fields — five plus the cause');
     like(causes_line([ map { $_->[4] } @keys ], $real),
-         qr/^CAUSES: (?:\d+ of \d+ blessed row|NOT CHECKED — no cause column)/,
+         qr/^CAUSES: (?:[\d,]+ of [\d,]+ — not-supported |NOT CHECKED — no cause column)/,
          'the runner can report on it');
   }
 }

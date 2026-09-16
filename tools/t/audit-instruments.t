@@ -132,7 +132,9 @@ sub run_diff {
   my ($out, $rc) = run_diff('diff', $base, $log);
   like($out, qr/summary: 0 new, 0 fixed/,
        'the six-column baseline still joins on (file, description)');
-  like($out, qr/CAUSES: 1 of 2 blessed row\(s\) have no cause/,
+  like($out, qr/CAUSES: 1 of 2 — not-supported 0, parked 0, bug 1, other 0, unexplained 1/,
+       'the CAUSES line is the class split (s486a), unexplained = the queue');
+  like($out, qr/\(unexplained = 1 cause-less blessed row\(s\)/,
        'cause-less rows are counted, so the queue cannot silently grow');
   unlike($out, qr/expected=.*#1028/,
          'the cause never leaks into the expected field (the 5-vs-6 split bug)');
