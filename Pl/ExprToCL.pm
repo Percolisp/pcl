@@ -326,6 +326,11 @@ my %SPECIAL_VARS = (
   '@{^CAPTURE}'      => '|@{^CAPTURE}|',
   '%{^CAPTURE}'      => '%+',
   '%{^CAPTURE_ALL}'  => '%-',
+  # (Every caret entry above whose value is a plain CL symbol names a variable
+  # the RUNTIME owns; runtime_owned_caret_syms below is that reading, and the
+  # forward-declaration pass uses it so a file never re-declares one.  Since
+  # #1804 `|@{^CAPTURE}|` is a SYMBOL MACRO, and proclaiming one special is a
+  # load-time abort of the whole file rather than the no-op it used to be.)
   # ${^...} caret variables — stub implementations (return undef)
   '${^WARNING_BITS}' => ['p-undef'],   # warning bits bitmask (Perl internal)
   '${^LAST_FH}'      => ['p-undef'],   # last filehandle used (Perl internal)
@@ -526,6 +531,24 @@ sub generate {
   # now runs the same generator as Parser2.
   return ($self->indent_str x $self->indent_level)
        . Pl::CLForm::to_flat($self->gen_node_form($node_id));
+}
+
+# The CL symbols that a `${^NAME}`-shaped perl variable resolves to when the
+# RUNTIME owns it — i.e. every %SPECIAL_VARS caret entry whose value is a plain
+# CL symbol, not a compound form.  ONE reading, because two passes need it and
+# they must agree: the leaf renderer (which maps the name to the symbol) and
+# Parser2's forward-declaration scan (which must NOT re-declare it).  The scan
+# sees only the emitted TEXT, and `|@{^CAPTURE}|` looks exactly like the
+# `|${^MPE}|` of an ordinary unknown caret global there.
+sub runtime_owned_caret_syms {
+  my %syms;
+  for my $name (keys %SPECIAL_VARS) {
+    next unless $name =~ /^[\$\@\%]\{\^/;
+    my $v = $SPECIAL_VARS{$name};
+    next if ref $v;                      # a compound form, not a symbol
+    $syms{$v} = 1;
+  }
+  return \%syms;
 }
 
 

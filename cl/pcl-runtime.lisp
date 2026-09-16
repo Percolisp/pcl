@@ -1523,30 +1523,146 @@
       (gethash '|$`| *computed-magic-getters*) #'%match-pre
       (gethash '|$'| *computed-magic-getters*) #'%match-post)
 
+;;; ── THE DERIVED MATCH VARIABLES (task #1804) ───────────────────────────────
+;;; $& / $` / $' above are cut on demand (#477).  These SEVEN are the rest of
+;;; the family, and they follow the same rule: a successful match RECORDS its
+;;; offsets and nothing else, and $+, $^N, %+, %-, @-, @+ and @{^CAPTURE} are
+;;; built the first time one of them is READ after that match.
+;;;
+;;; WHY: measured s473v (task #1803), the eager trio
+;;; clear-capture-groups -> set-capture-groups -> set-match-vars was 33.6 % of
+;;; the `regexg` bench row — on /./g, a pattern with NO capture groups, where
+;;; every one of those seven is empty and none is read.  `subste` (one group,
+;;; only $1 read) put ~33 % there and `textproc` ~28 %.
+;;;
+;;; $1..$20 stay EAGER on purpose: they are the ones programs actually read,
+;;; the emitter reads them as bare symbols, and a read capture pays the same
+;;; one subseq either way.  The seven here are the ones almost nobody reads.
+;;;
+;;; WHY SYMBOL MACROS, not boxes: the #477 reason unchanged — a shared magic
+;;; box would make `push @a, $+` alias, every element reading the CURRENT
+;;; match.  A symbol macro keeps each use site's value ordinary.  `boundp` no
+;;; longer answers for these names, so the symref paths (${"+"} and @{"-"})
+;;; consult *computed-magic-getters* the way ${"&"} already does.
+;;;
+;;; WHAT IT RELIES ON: the same thing the deferred $& cut relies on — the
+;;; subject is not mutated in place between the match and the read — plus the
+;;; register offsets, which are COPIED out of the scanner's vectors into
+;;; reused ones (%p-store-match), so a later FAILED attempt cannot corrupt
+;;; them.  perl's own model is this one: the offsets live in the regexp and
+;;; $1 is magic.
+(defvar *match-have* nil
+  "T once a successful match has been recorded.  Distinguishes `no match has
+   ever happened' (every derived variable empty) from a recorded match whose
+   subject was later forgotten.")
+(defvar *match-rs* (make-array 8 :initial-element nil)
+  "Register START offsets of the last successful match — a simple-vector
+   REUSED across matches (grown, never reallocated in steady state), which is
+   what keeps a 0-group m//g loop allocation-free.")
+(defvar *match-re* (make-array 8 :initial-element nil)
+  "Register END offsets of the last successful match; twin of *match-rs*.")
+(defvar *match-ngroups* 0
+  "How many registers of *match-rs* / *match-re* the last match filled.")
+(defvar *match-closers* nil
+  "The last match's closing-paren position vector (cached with the scanner):
+   $^N's rule, consulted only when $^N is read.")
+(defvar *match-reg-names* nil
+  "The last match's capture-name list, for %+ and %-.")
+(defvar *match-derived* nil
+  "T when the seven variables below hold THIS record's values.  Cleared by
+   every successful match; set by %p-derive-match-vars.")
+
+(defvar *p-mv-last-paren* nil "Storage behind $+.")
+(defvar *p-mv-caret-n* nil "Storage behind $^N.")
+(defvar *p-mv-plus* (make-hash-table :test 'equal) "Storage behind %+.")
+(defvar *p-mv-minus* (make-hash-table :test 'equal)
+  "Storage behind %- : each value an ARRAY of all buffers with that name
+   (undef elements for non-participating buffers).")
+(defvar *p-mv-at-minus* (make-array 0 :adjustable t :fill-pointer 0)
+  "Storage behind @- (@LAST_MATCH_START): element 0 is the whole-match start,
+   element N is capture group N's.  Elements are permanent MAGIC CELLS — see
+   %p-at-cell — so the array's LENGTH is all the materialiser has to set.")
+(defvar *p-mv-at-plus* (make-array 0 :adjustable t :fill-pointer 0)
+  "Storage behind @+ (@LAST_MATCH_END).")
+(defvar *p-mv-at-minus-hwm* 0
+  "How many magic cells *p-mv-at-minus* has ever been given: its fill pointer
+   moves with each match, but a cell below this mark is already there.")
+(defvar *p-mv-at-plus-hwm* 0 "Twin of *p-mv-at-minus-hwm* for @+.")
+(defvar *p-mv-capture* (make-array 0 :adjustable t :fill-pointer 0)
+  "Storage behind @{^CAPTURE} (5.26+): the capture group VALUES, 0-based —
+   element 0 is $1 — truncated after the last participating group, exactly
+   like @- (perl: \"$#{^CAPTURE} is one less than $#-\"), with undef for a
+   non-participating group inside that range (t/re/pat.t asserts both).
+   %{^CAPTURE} and %{^CAPTURE_ALL} are perl SYNONYMS for %+ and %-, so they
+   get no state of their own — the emitter maps them onto those two.")
+
+;; The materialiser lives beside the match code, ~26 000 lines below; declaring
+;; it here keeps `--load` of this file as source warning-free (each top-level
+;; form is its own compilation unit there, so a plain forward reference would
+;; warn once per accessor).
+(declaim (ftype (function () (values)) %p-derive-match-vars))
+
+(declaim (inline %p-mv-ensure))
+(defun %p-mv-ensure ()
+  "Materialise the seven derived match variables if they are stale.  One
+   special read on the hot path of every one of their accessors."
+  (unless *match-derived* (%p-derive-match-vars)))
+
+(defun %p-last-paren () (%p-mv-ensure) *p-mv-last-paren*)
+(defun %p-caret-n ()    (%p-mv-ensure) *p-mv-caret-n*)
+(defun %p-plus-hash ()  (%p-mv-ensure) *p-mv-plus*)
+(defun %p-minus-hash () (%p-mv-ensure) *p-mv-minus*)
+(defun %p-at-minus ()   (%p-mv-ensure) *p-mv-at-minus*)
+(defun %p-at-plus ()    (%p-mv-ensure) *p-mv-at-plus*)
+(defun %p-at-capture () (%p-mv-ensure) *p-mv-capture*)
+
+;; Writers.  perl makes all seven read-only, but generated code can still name
+;; one as an assignment target and the emission must COMPILE — the #477 rule
+;; for $& / $` / $'.  A write wins until the next successful match.
+(defun (setf %p-last-paren) (v) (setf *match-derived* t *p-mv-last-paren* v))
+(defun (setf %p-caret-n)    (v) (setf *match-derived* t *p-mv-caret-n* v))
+(defun (setf %p-plus-hash)  (v) (setf *match-derived* t *p-mv-plus* v))
+(defun (setf %p-minus-hash) (v) (setf *match-derived* t *p-mv-minus* v))
+(defun (setf %p-at-minus) (v)
+  (setf *match-derived* t *p-mv-at-minus-hwm* 0 *p-mv-at-minus* v))
+(defun (setf %p-at-plus) (v)
+  (setf *match-derived* t *p-mv-at-plus-hwm* 0 *p-mv-at-plus* v))
+(defun (setf %p-at-capture) (v) (setf *match-derived* t *p-mv-capture* v))
+
+(define-symbol-macro |$+| (%p-last-paren))      ; last group that matched
+(define-symbol-macro |$^N| (%p-caret-n))        ; rightmost closing paren
+(define-symbol-macro %+ (%p-plus-hash))         ; named captures
+(define-symbol-macro |%-| (%p-minus-hash))      ; named captures, all buffers
+(define-symbol-macro |@-| (%p-at-minus))        ; @LAST_MATCH_START
+(define-symbol-macro |@+| (%p-at-plus))         ; @LAST_MATCH_END
+(define-symbol-macro |@{^CAPTURE}| (%p-at-capture))
+
+(setf (gethash '|$+| *computed-magic-getters*) #'%p-last-paren
+      (gethash '|$^N| *computed-magic-getters*) #'%p-caret-n
+      (gethash '|@-| *computed-magic-getters*) #'%p-at-minus
+      (gethash '|@+| *computed-magic-getters*) #'%p-at-plus
+      (gethash '|@{^CAPTURE}| *computed-magic-getters*) #'%p-at-capture
+      (gethash '%+ *computed-magic-getters*) #'%p-plus-hash
+      (gethash '|%-| *computed-magic-getters*) #'%p-minus-hash)
+
 (defun %clear-match-strings ()
-  "Forget the last match: the three offsets AND any memo/override."
+  "Forget the last match: the three offsets, any memo/override, AND the
+   record the seven derived variables are built from — otherwise $& would say
+   `no match' while @- still answered from the forgotten one."
   (setf *match-subject* nil *match-beg* 0 *match-end* 0
-        *match-whole* nil *match-pre* nil *match-post* nil))
-(defvar |$+| nil "Regex - last (highest-numbered) capture group that matched")
-(defvar |$^N| nil
-  "Perl $^N - the participating capture group whose closing parenthesis is
-   rightmost in the pattern (perlvar).  Set by set-match-vars from the
-   closer-position vector cached with the scanner.")
-(defvar %+ (make-hash-table :test 'equal) "Perl %+ - named regex captures")
-(defvar |%-| (make-hash-table :test 'equal)
-  "Perl %- - named regex captures, each value an ARRAY of all buffers with
-   that name (undef elements for non-participating buffers).")
+        *match-whole* nil *match-pre* nil *match-post* nil
+        *match-have* nil *match-ngroups* 0
+        *match-closers* nil *match-reg-names* nil
+        *match-derived* nil))
 ;; Compile-time hints: $^H (bitmask) and %^H (hints hash).  PCL keeps them as
 ;; ordinary globals — the perl lexical save/restore-at-scope-exit semantics
 ;; (and (caller)[10] exposure) are NOT implemented; see docs/perl-suite-triage.md.
 (defvar |$^H| 0 "Perl $^H - compile-time hint bits (no lexical scoping in PCL)")
 (defvar |%^H| (make-hash-table :test 'equal)
   "Perl %^H - compile-time hints hash (no lexical scoping in PCL)")
-;; @- (@LAST_MATCH_START) and @+ (@LAST_MATCH_END): offset arrays from the last
-;; successful match.  Element 0 is the whole-match start/end; element N is the
-;; start/end of capture group N.  Non-participating groups hold undef (nil).
-(defvar |@-| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_START - match/group start offsets")
-(defvar |@+| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_END - match/group end offsets")
+;; @- (@LAST_MATCH_START) and @+ (@LAST_MATCH_END) are symbol macros over
+;; *p-mv-at-minus* / *p-mv-at-plus*, built on demand — see THE DERIVED MATCH
+;; VARIABLES above.
 ;; The punctuation ARRAYS -- `@?` `@!` `@.` `@/` `@~` `@^` `@&` `@%` `@=` `@<`
 ;; `@>` (legal perl, no special meaning) and `@#` (never in source: perl reads
 ;; `#` as a comment; the compiler synthesizes it for `$#[...]`).  perlvar:
@@ -1623,14 +1739,8 @@
 (defvar |%\|| (make-hash-table :test 'equal))
 (defvar |%~| (make-hash-table :test 'equal))
 (defvar |%\\| (make-hash-table :test 'equal))
-;; @{^CAPTURE} (5.26+): the capture GROUP VALUES of the last successful match,
-;; 0-based -- element 0 is $1.  Truncated after the last participating group,
-;; exactly like @- / @+ (perl: "$#{^CAPTURE} is one less than $#-"), with undef
-;; for a non-participating group inside that range (t/re/pat.t asserts both).
-;; %{^CAPTURE} and %{^CAPTURE_ALL} are perl SYNONYMS for %+ and %-, so they get
-;; no state of their own -- the emitter maps them onto those two.
-(defvar |@{^CAPTURE}| (make-array 0 :adjustable t :fill-pointer 0)
-  "Regex @{^CAPTURE} - capture group values of the last successful match")
+;; @{^CAPTURE} is a symbol macro over *p-mv-capture*, built on demand -- see
+;; THE DERIVED MATCH VARIABLES above, where its contract is written down.
 
 ;;; Default variable ($_) - defined later after make-p-box (see Boxed special variables section)
 ;;; Process ID ($$) is likewise boxed and defined in that later section so
@@ -6863,6 +6973,17 @@ per element."
                 (or (numberp inner)
                     (and (stringp inner) (not (p-box-nv-ok item)))))
            (%p-vpush (make-p-box inner) arr))
+          ;; A box holding a MAGIC CELL is a COMPUTED scalar ($., $-[0],
+          ;; \substr): perl copies its VALUE into the new element, never the
+          ;; magic.  Without this arm `push @lines, $.` put the SAME box in
+          ;; every element, so all of them read the CURRENT line number —
+          ;; `3 3 3` where perl says `1 2 3` (task #683, filed at #477 and
+          ;; fixed here).  #1804 made the same thing visible for @-/@+, whose
+          ;; elements are now magic cells as perl's are: `my @c = @-` followed
+          ;; the next match.  The arm costs nothing on the ordinary element,
+          ;; which left through the fast path above.
+          ((p-magic-cell-p inner)
+           (%p-vpush (make-p-box (funcall (p-magic-cell-getter inner))) arr))
           ;; Blessed box: preserve as-is (class must not be lost)
           ((p-box-class item) (%p-vpush item arr))
           ;; Scalar/nested reference (box-in-box, e.g. \$x or \\$x): the depth of
@@ -19877,7 +19998,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1460"
+(defparameter *pcl-cache-generation* "v2-1480"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -23051,6 +23172,12 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; MARKER-valued array — every `@`-sigil global is a real vector.  If one
   ;; ever appears, this is its other half.
   (let ((sym (%p-symref-sym name-str "@" t site)))
+    ;; @{"-"} / @{"+"} / @{"^CAPTURE"} hold no value in their symbol at all —
+    ;; they are DERIVED from the last match's record (task #1804), so `boundp`
+    ;; is false and the vivify below would hand back a fresh empty vector.
+    ;; Same rule, same table, as ${"&"} (task #477).
+    (let ((getter (gethash sym *computed-magic-getters*)))
+      (when getter (return-from %p-symref-array (funcall getter))))
     (unless (and (boundp sym)
                  (vectorp (symbol-value sym))
                  (not (stringp (symbol-value sym))))
@@ -23065,6 +23192,9 @@ buffer's fill-pointer; everything else falls back to file-length."
   (when (%p-symref-nul-p name-str site) (return-from %p-symref-hash
                                           (make-hash-table :test 'equal)))
   (let ((sym (%p-symref-sym name-str "%" t site)))
+    ;; %{"+"} / %{"-"} are DERIVED, exactly as @{"-"} is — see the array twin.
+    (let ((getter (gethash sym *computed-magic-getters*)))
+      (when getter (return-from %p-symref-hash (funcall getter))))
     (if (boundp sym)
         (let ((v (symbol-value sym)))
           (cond
@@ -27500,21 +27630,20 @@ buffer's fill-pointer; everything else falls back to file-length."
   "The capture specials in order, for clear-capture-groups' counted reset.")
 
 (defun clear-capture-groups ()
-  "Reset the capture group variables that are currently set (see
-   *p-captures-set*).  $N resets to *p-undef* (Perl undef), NOT raw nil — see
-   the defvar note: a raw-nil capture vanishes when flattened into a list
-   (%p-flatten-list treats raw nil as an empty-list/hole marker)."
+  "Forget the last match entirely: the capture specials that are currently set
+   (see *p-captures-set*), the $& offsets, and the record the seven derived
+   variables are built from.  $N resets to *p-undef* (Perl undef), NOT raw nil
+   — see the defvar note: a raw-nil capture vanishes when flattened into a
+   list (%p-flatten-list treats raw nil as an empty-list/hole marker).
+
+   NOT on the match hot path any more (task #1804): a SUCCESSFUL match goes
+   through %p-match-record, which clears and sets in one pass.  This is the
+   `there is no match now' primitive."
   (let ((n *p-captures-set*))
     (loop for i from 0 below n
           do (set (svref *p-capture-syms* i) *p-undef*)))
   (setf *p-captures-set* 0)
-  (setf |$+| nil |$^N| nil)
-  ;; $& / $` / $' are computed from the last match's offsets (task #477), so
-  ;; clearing them means forgetting the match, not assigning nil.
-  (%clear-match-strings)
-  (when (plusp (hash-table-count %+)) (clrhash %+))
-  (when (plusp (hash-table-count |%-|)) (clrhash |%-|))
-  (setf (fill-pointer |@{^CAPTURE}|) 0))
+  (%clear-match-strings))
 
 (declaim (inline %p-ppcre-scan))
 (defun %p-ppcre-scan (scanner str start)
@@ -27607,87 +27736,168 @@ buffer's fill-pointer; everything else falls back to file-length."
           (when (and ms counter) (incf (car counter)))
           (values ms me rs re))))))
 
-(defun %p-at-elem-set (arr i val)
-  "Write VAL into offset array ARR at index I, reusing the element box in
-   place when one is there (task #680).  perl's @-/@+ elements are magic —
-   a saved \\$-[0] reads the CURRENT match (probed vs 5.40) — so mutating
-   the box is what perl does; it also removes two allocations per match
-   from a 0-group m//g loop.  @-/@+ are read-only in perl (a write dies),
-   so no program-held box arrives here with other state.  Sequential
-   callers only: I is at most the fill pointer."
-  (if (< i (fill-pointer arr))
-      (let ((old (aref arr i)))
-        (if (p-box-p old)
-            (setf (p-box-value old) val
-                  (p-box-sv-ok old) nil
-                  (p-box-nv-ok old) nil)
-            (setf (aref arr i) (make-p-box val))))
-      (vector-push-extend (make-p-box val) arr)))
+(defun %p-at-offset (endp i)
+  "@-[I] (ENDP nil) or @+[I] (ENDP true) as of the CURRENT match.  Element 0
+   is the whole match; element N is capture group N.  NIL — perl undef — when
+   there is no match or the group did not participate."
+  (declare (type fixnum i))
+  (when *match-have*
+    (if (zerop i)
+        (if endp *match-end* *match-beg*)
+        (let ((g (1- i)))
+          (declare (type fixnum g))
+          (when (< g *match-ngroups*)
+            (svref (the simple-vector (if endp *match-re* *match-rs*)) g))))))
 
-(defun set-match-vars (str match-start match-end reg-starts reg-ends
-                       &optional closers)
-  "Set the match position variables from a successful match: $& (MATCH),
-   $` (PREMATCH), $' (POSTMATCH), $+ (last capture that matched) and
-   $^N (rightmost-closing participating capture, from the CLOSERS vector
-   cached by %pcl-create-scanner; without it, falls back to $+'s rule)."
-  ;; OFFSETS ONLY (task #477): the three strings are cut on demand.  Copying
-  ;; the subject twice here is what made a scalar-context m//g loop quadratic.
-  (when (and match-start match-end)
-    (setf *match-subject* str
-          *match-beg* match-start
-          *match-end* match-end
-          *match-whole* nil *match-pre* nil *match-post* nil))
-  ;; $+ = highest-numbered capture group that actually participated
-  (when (and reg-starts reg-ends)
-    (loop for i from (1- (length reg-starts)) downto 0
-          do (let ((rs (aref reg-starts i)) (re (aref reg-ends i)))
-               (when (and rs re)
-                 (setf |$+| (subseq str rs re))
-                 (return))))
-    ;; $^N = participating group with the rightmost closing paren (perlvar)
-    (let ((best -1)
-          (best-pos -1))
-      (dotimes (i (length reg-starts))
-        (when (and (aref reg-starts i) (aref reg-ends i))
-          (let ((pos (if (and closers (< i (length closers)))
-                         (aref closers i)
-                         i)))
-            (when (> pos best-pos)
-              (setf best-pos pos best i)))))
-      (when (>= best 0)
-        (setf |$^N| (subseq str (aref reg-starts best) (aref reg-ends best))))))
-  ;; @- / @+ : offset arrays.  Element 0 is the whole-match start/end; element
-  ;; N (1-based) is capture group N's start/end (undef for a group that did not
-  ;; participate).  THE TWO ARE SIZED DIFFERENTLY, and perl means it (task
-  ;; #417, probed: "ab" =~ /(a)(x)?(y)?/ gives $#+ 3 and $#- 1):
-  ;;   @- stops after the LAST PARTICIPATING group  ($#- = last matched paren)
-  ;;   @+ runs to the pattern's GROUP COUNT         ($#+ = number of groups)
-  ;; so a trailing non-participant is absent from @- and a present undef in @+.
-  ;; Elements are boxed integers like any other array element, and the boxes
-  ;; are REUSED in place (%p-at-elem-set, task #680): perl's @-/@+ elements
-  ;; are magic, so a saved \$-[0] reads the CURRENT match — probed; rebuilding
-  ;; with fresh boxes left such a ref on the stale box AND allocated two boxes
-  ;; per match of a 0-group m//g loop.
-  (when (and match-start match-end)
-    (%p-at-elem-set |@-| 0 match-start)
-    (%p-at-elem-set |@+| 0 match-end)
-    (let ((n-minus 1)
-          (n-plus 1))
-      (when (and reg-starts reg-ends)
-        (let ((last-matched -1))
-          (loop for i from (1- (length reg-starts)) downto 0
-                when (aref reg-starts i)
-                do (setf last-matched i) (return))
-          (loop for i from 0 to last-matched
-                do (%p-at-elem-set |@-| (1+ i) (aref reg-starts i)))
-          (loop for i from 0 below (length reg-ends)
-                do (%p-at-elem-set |@+| (1+ i) (aref reg-ends i)))
-          (setf n-minus (+ 2 last-matched)
-                n-plus (1+ (length reg-ends)))))
-      (when (> (fill-pointer |@-|) n-minus)
-        (setf (fill-pointer |@-|) n-minus))
-      (when (> (fill-pointer |@+|) n-plus)
-        (setf (fill-pointer |@+|) n-plus)))))
+(defun %p-at-cell (endp i)
+  "One @- / @+ element: a box holding a MAGIC CELL that computes its offset
+   from the CURRENT match.
+
+   perl's @-/@+ elements ARE magic scalars, and that is observable: a saved
+   \\$-[0] reads the current match, not the one that was current when the ref
+   was taken (probed vs 5.40.3).  The cells are what let the two arrays be
+   built lazily (task #1804) and keep that property — a materialiser that
+   wrote VALUES would refresh the boxes only when @- itself is next read, so a
+   ref taken earlier would answer from a stale match.  perl also makes a WRITE
+   through one a read-only death, which the setter is."
+  (declare (type fixnum i))
+  (make-p-box (make-p-magic-cell
+               :getter (lambda () (%p-at-offset endp i))
+               :setter (lambda (v) (declare (ignore v))
+                         (%p-readonly-modification)))))
+
+(defun %p-at-cell-fit (arr endp n hwm)
+  "Make offset array ARR exactly N elements long, minting a cell for any index
+   that never had one.  Returns the new high-water mark.  Cells live for the
+   image, so a m//g loop allocates nothing here (task #680's point, kept)."
+  (declare (type fixnum n hwm))
+  (cond
+    ((<= n hwm) (setf (fill-pointer arr) n) hwm)
+    (t (setf (fill-pointer arr) hwm)
+       (loop while (< (fill-pointer arr) n)
+             do (vector-push-extend (%p-at-cell endp (fill-pointer arr)) arr))
+       n)))
+
+(defun %p-store-match (str match-start match-end reg-starts reg-ends n
+                       closers reg-names)
+  "Record a successful match: the $& offsets (task #477) plus everything the
+   seven DERIVED variables are later built from (task #1804).  The register
+   offsets are COPIED into reused vectors — a later FAILED attempt must not be
+   able to corrupt the values $1 and @- still answer with (perl keeps them),
+   and the copy is also what makes a 0-group m//g loop allocation-free."
+  (declare (type fixnum n))
+  (setf *match-subject* str
+        *match-beg* match-start
+        *match-end* match-end
+        *match-whole* nil *match-pre* nil *match-post* nil
+        *match-have* t
+        *match-ngroups* n
+        *match-closers* closers
+        *match-reg-names* reg-names
+        *match-derived* nil)
+  (when (plusp n)
+    (when (< (length (the simple-vector *match-rs*)) n)
+      (setf *match-rs* (make-array n :initial-element nil)
+            *match-re* (make-array n :initial-element nil)))
+    (let ((dst-s *match-rs*) (dst-e *match-re*))
+      (declare (type simple-vector dst-s dst-e))
+      (if (and (simple-vector-p reg-starts) (simple-vector-p reg-ends))
+          (dotimes (i n)
+            (setf (svref dst-s i) (svref reg-starts i)
+                  (svref dst-e i) (svref reg-ends i)))
+          (dotimes (i n)
+            (setf (svref dst-s i) (aref reg-starts i)
+                  (svref dst-e i) (aref reg-ends i)))))))
+
+;;; THE MATERIALISER.  Everything below runs at most once per successful
+;;; match, and only when the program actually reads one of the seven.
+;;; %p-derive-named sits with %pcl-push-named-buffer, its only helper, further
+;;; down; declared here so loading this file as source stays warning-free.
+(declaim (ftype (function (t fixnum simple-vector simple-vector) t)
+                %p-derive-named))
+
+(defun %p-derive-offsets ()
+  "Give @- and @+ the LENGTHS the current match calls for.  Their VALUES need
+   no work: each element is a permanent magic cell that reads the record
+   (%p-at-cell-ensure), which is how a saved \\$-[0] keeps answering from the
+   current match.
+
+   THE TWO ARE SIZED DIFFERENTLY, and perl means it (task #417, probed:
+   \"ab\" =~ /(a)(x)?(y)?/ gives $#+ 3, $#- 1):
+     @- stops after the LAST PARTICIPATING group  ($#- = last matched paren)
+     @+ runs to the pattern's GROUP COUNT         ($#+ = number of groups)
+   so a trailing non-participant is absent from @- and a present undef in @+."
+  (let ((minus *p-mv-at-minus*)
+        (plus *p-mv-at-plus*)
+        (n *match-ngroups*)
+        (rs *match-rs*))
+    (declare (type fixnum n) (type simple-vector rs))
+    (let ((n-minus 1) (n-plus 1) (last-matched -1))
+      (declare (type fixnum n-minus n-plus last-matched))
+      (when (plusp n)
+        (loop for i of-type fixnum from (1- n) downto 0
+              when (svref rs i) do (setf last-matched i) (return))
+        (setf n-minus (+ 2 last-matched)
+              n-plus (1+ n)))
+      (setf *p-mv-at-minus-hwm* (%p-at-cell-fit minus nil n-minus
+                                                *p-mv-at-minus-hwm*)
+            *p-mv-at-plus-hwm* (%p-at-cell-fit plus t n-plus
+                                               *p-mv-at-plus-hwm*)))))
+
+(defun %p-derive-scalars (str n rs re)
+  "Build $+ (highest-numbered participating group) and $^N (the participating
+   group whose closing paren is rightmost — perlvar, from the closer-position
+   vector cached with the scanner; without one it falls back to $+'s rule)."
+  (declare (type fixnum n) (type simple-vector rs re))
+  (loop for i of-type fixnum from (1- n) downto 0
+        do (let ((s (svref rs i)) (e (svref re i)))
+             (when (and s e) (setf *p-mv-last-paren* (subseq str s e)) (return))))
+  (let ((best -1) (best-pos -1) (closers *match-closers*))
+    (declare (type fixnum best best-pos))
+    (dotimes (i n)
+      (when (and (svref rs i) (svref re i))
+        (let ((pos (if (and closers (< i (length closers))) (aref closers i) i)))
+          (when (> pos best-pos) (setf best-pos pos best i)))))
+    (when (>= best 0)
+      (setf *p-mv-caret-n* (subseq str (svref rs best) (svref re best))))))
+
+(defun %p-derive-capture-values (str n rs re)
+  "Build @{^CAPTURE}: the group VALUES, 0-based, truncated after the last
+   participating group — one element shorter than @-, which is exactly what
+   t/re/pat.t asserts (\"$#{^CAPTURE} is one less than $#-\").  A
+   non-participating group INSIDE that range is a present undef element."
+  (declare (type fixnum n) (type simple-vector rs re))
+  (let ((last-matched -1))
+    (declare (type fixnum last-matched))
+    (loop for i of-type fixnum from (1- n) downto 0
+          when (svref rs i) do (setf last-matched i) (return))
+    (loop for i of-type fixnum from 0 to last-matched
+          for s = (svref rs i)
+          for e = (svref re i)
+          do (vector-push-extend (make-p-box (and s e (subseq str s e)))
+                                 *p-mv-capture*))))
+
+(defun %p-derive-match-vars ()
+  "Build the seven derived match variables from the record.  Called by their
+   accessors when *match-derived* is NIL — at most once per successful match,
+   and not at all for the matches nobody asks about."
+  (setf *match-derived* t)
+  (setf *p-mv-last-paren* nil *p-mv-caret-n* nil)
+  (when (plusp (hash-table-count *p-mv-plus*)) (clrhash *p-mv-plus*))
+  (when (plusp (hash-table-count *p-mv-minus*)) (clrhash *p-mv-minus*))
+  (setf (fill-pointer *p-mv-capture*) 0)
+  (cond
+    ((not *match-have*)
+     (setf (fill-pointer *p-mv-at-minus*) 0
+           (fill-pointer *p-mv-at-plus*) 0))
+    (t
+     (%p-derive-offsets)
+     (let ((str *match-subject*) (n *match-ngroups*))
+       (when (and str (plusp n))
+         (%p-derive-scalars str n *match-rs* *match-re*)
+         (%p-derive-capture-values str n *match-rs* *match-re*)
+         (%p-derive-named str n *match-rs* *match-re*)))))
+  (values))
 
 (defun p-high-capture (n)
   "$N for an N above the pre-declared capture specials (task #851).
@@ -27698,14 +27908,17 @@ buffer's fill-pointer; everything else falls back to file-length."
    line 362, where perl's point is that $99 is a READ-ONLY capture variable)
    left the whole FILE dead at load: `The variable $99 is unbound`.
 
-   The answer comes from @{^CAPTURE}, which set-capture-groups fills with EVERY
-   participating group's value, 0-based and cleared per match — so this is not
-   a stub returning undef for want of the real value: it is the same state the
+   The answer comes from @{^CAPTURE}, which carries EVERY participating
+   group's value, 0-based and rebuilt per match — so this is not a stub
+   returning undef for want of the real value: it is the same state the
    specials hold, read by index.  ($1 and (p-high-capture 1) therefore agree;
-   the threshold in the compiler is a SPEED choice, not a correctness one.)"
-  (let ((i (1- (truncate (to-number n)))))
-    (if (and (>= i 0) (< i (length |@{^CAPTURE}|)))
-        (let ((v (aref |@{^CAPTURE}| i)))
+   the threshold in the compiler is a SPEED choice, not a correctness one.)
+   Reading it here MATERIALISES the derived variables (task #1804), which is
+   right: a program that asks for $99 is asking for that state."
+  (let ((i (1- (truncate (to-number n))))
+        (caps |@{^CAPTURE}|))
+    (if (and (>= i 0) (< i (length caps)))
+        (let ((v (aref caps i)))
           (if (p-box-p v) (p-box-value v) v))
         *p-undef*)))
 
@@ -27749,69 +27962,81 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %pcl-push-named-buffer (name val)
   "Append VAL to %-'s array for NAME (Perl %-: every buffer with that name,
    undef for non-participating ones).  Elements boxed like array elements."
-  (let ((v (or (gethash name |%-|)
-               (setf (gethash name |%-|)
+  (let ((v (or (gethash name *p-mv-minus*)
+               (setf (gethash name *p-mv-minus*)
                      (make-array 0 :adjustable t :fill-pointer 0)))))
     (vector-push-extend (make-p-box val) v)))
 
-(defun set-capture-groups (str reg-starts reg-ends &optional reg-names)
-  "Set capture group variables $1..$9 and named captures %+ from regex match results.
-   REG-NAMES is the optional list of capture names returned by cl-ppcre:create-scanner.
-   Groups that did not participate in the match (optional groups) set $N to nil."
-  (when (and reg-starts reg-ends)
-    (let ((num-groups (length reg-starts)))
-      ;; Record how many $N are being written, so clear-capture-groups can
-      ;; reset exactly that many next time (task #680).
-      (setf *p-captures-set* (min num-groups 20))
-      (when (> num-groups 0) (%set-cap $1 str reg-starts reg-ends 0))
-      (when (> num-groups 1) (%set-cap $2 str reg-starts reg-ends 1))
-      (when (> num-groups 2) (%set-cap $3 str reg-starts reg-ends 2))
-      (when (> num-groups 3) (%set-cap $4 str reg-starts reg-ends 3))
-      (when (> num-groups 4) (%set-cap $5 str reg-starts reg-ends 4))
-      (when (> num-groups 5) (%set-cap $6 str reg-starts reg-ends 5))
-      (when (> num-groups 6) (%set-cap $7 str reg-starts reg-ends 6))
-      (when (> num-groups 7) (%set-cap $8 str reg-starts reg-ends 7))
-      (when (> num-groups 8) (%set-cap $9 str reg-starts reg-ends 8))
-      (when (> num-groups 9) (%set-cap $10 str reg-starts reg-ends 9))
-      (when (> num-groups 10) (%set-cap $11 str reg-starts reg-ends 10))
-      (when (> num-groups 11) (%set-cap $12 str reg-starts reg-ends 11))
-      (when (> num-groups 12) (%set-cap $13 str reg-starts reg-ends 12))
-      (when (> num-groups 13) (%set-cap $14 str reg-starts reg-ends 13))
-      (when (> num-groups 14) (%set-cap $15 str reg-starts reg-ends 14))
-      (when (> num-groups 15) (%set-cap $16 str reg-starts reg-ends 15))
-      (when (> num-groups 16) (%set-cap $17 str reg-starts reg-ends 16))
-      (when (> num-groups 17) (%set-cap $18 str reg-starts reg-ends 17))
-      (when (> num-groups 18) (%set-cap $19 str reg-starts reg-ends 18))
-      (when (> num-groups 19) (%set-cap $20 str reg-starts reg-ends 19))
-      ;; @{^CAPTURE} (5.26+): the group VALUES, 0-based, truncated after the
-      ;; last participating group -- one element shorter than @-, which is
-      ;; exactly what t/re/pat.t asserts ("$#{^CAPTURE} is one less than $#-").
-      ;; A non-participating group INSIDE that range is a present undef element.
-      (let ((last-matched -1))
-        (loop for i from (1- num-groups) downto 0
-              when (aref reg-starts i)
-              do (setf last-matched i) (return))
-        (loop for i from 0 to last-matched
-              for rs = (aref reg-starts i)
-              for re = (aref reg-ends i)
-              do (vector-push-extend (make-p-box (and rs re (subseq str rs re)))
-                                     |@{^CAPTURE}|)))
-      ;; Populate %+ with named captures
-      ;; reg-names is a list from cl-ppcre:create-scanner, e.g. ("year" "month" NIL)
-      (when reg-names
-        (clrhash |%-|)
-        (loop for name in reg-names
-              for i from 0
-              when (and name (< i num-groups))
-              do (let ((rs (aref reg-starts i))
-                       (re (aref reg-ends   i))
-                       ;; Reverse the _ <-> - name mapping perl-regex-to-ppcre
-                       ;; applied (cl-ppcre rejects _ in register names).
-                       (pname (substitute #\_ #\- name)))
-                   (when (and rs re)
-                     (setf (gethash pname %+) (subseq str rs re)))
-                   (%pcl-push-named-buffer pname
-                                           (if (and rs re) (subseq str rs re) *p-undef*))))))))
+(defun %p-derive-named (str n rs re)
+  "Build %+ and %- from the record's capture-name list (what
+   cl-ppcre:create-scanner returned, e.g. (\"year\" \"month\" NIL)).  Runs only
+   when one of the two is READ after the match — and only when the pattern had
+   names at all, which is the common case's whole cost: one NIL test."
+  (declare (type fixnum n) (type simple-vector rs re))
+  (let ((reg-names *match-reg-names*))
+    (when reg-names
+      (loop for name in reg-names
+            for i of-type fixnum from 0
+            when (and name (< i n))
+            do (let ((s (svref rs i))
+                     (e (svref re i))
+                     ;; Reverse the _ <-> - name mapping perl-regex-to-ppcre
+                     ;; applied (cl-ppcre rejects _ in register names).
+                     (pname (substitute #\_ #\- name)))
+                 (when (and s e)
+                   (setf (gethash pname *p-mv-plus*) (subseq str s e)))
+                 (%pcl-push-named-buffer pname
+                                         (if (and s e) (subseq str s e)
+                                             *p-undef*)))))))
+
+(defmacro %set-caps-upto (m str rs re &rest syms)
+  "Expand to NESTED whens: set $1 when M > 0, and inside that $2 when M > 1,
+   and so on.  Nested rather than sequential on purpose — a pattern with no
+   capture groups then pays ONE fixnum test instead of twenty, which is the
+   `regexg' shape (14 M matches, zero groups)."
+  (labels ((nest (i names)
+             (when names
+               `((when (> ,m ,i)
+                   (%set-cap ,(car names) ,str ,rs ,re ,i)
+                   ,@(nest (1+ i) (cdr names)))))))
+    (car (nest 0 syms))))
+
+(defun %p-set-captures (str reg-starts reg-ends n)
+  "Write $1..$20 for a successful match of N groups AND clear the ones a
+   PREVIOUS match had set above N — perl's clear-to-count rule, probed:
+   `\"ab\" =~ /(a)(b)/' then `\"a\" =~ /(a)/' leaves $2 undef.  One pass, where
+   clear-capture-groups + set-capture-groups used to make two.
+
+   $N resets to *p-undef* (Perl undef), NOT raw nil: a raw-nil capture
+   vanishes when flattened into a list (%p-flatten-list reads raw nil as an
+   empty-list/hole marker).  *p-captures-set* is how many are live (task
+   #680), so a 0-group m//g loop pays no special-variable writes at all."
+  (declare (type fixnum n))
+  (let ((m (min n 20))
+        (old *p-captures-set*))
+    (declare (type fixnum m old))
+    (%set-caps-upto m str reg-starts reg-ends
+                    $1 $2 $3 $4 $5 $6 $7 $8 $9 $10
+                    $11 $12 $13 $14 $15 $16 $17 $18 $19 $20)
+    (loop for i of-type fixnum from m below old
+          do (set (svref *p-capture-syms* i) *p-undef*))
+    (setf *p-captures-set* m)))
+
+(defun %p-match-record (str match-start match-end reg-starts reg-ends
+                        &optional closers reg-names)
+  "THE one writer of the match variables on a SUCCESSFUL match (task #1804,
+   rule 11): it replaces the clear-capture-groups -> set-capture-groups ->
+   set-match-vars trio that all six call sites used to make.
+
+   $1..$20 are written EAGERLY — they are what programs read, and the emitter
+   reads them as bare symbols.  $+, $^N, %+, %-, @-, @+ and @{^CAPTURE} are
+   NOT written: %p-store-match's record is enough to build them, and they are
+   built the first time one of them is read (%p-derive-match-vars)."
+  (let ((n (if reg-starts (length reg-starts) 0)))
+    (declare (type fixnum n))
+    (%p-set-captures str reg-starts reg-ends n)
+    (%p-store-match str match-start match-end reg-starts reg-ends n
+                    closers reg-names)))
 
 (defun %pcl-strip-gpos (pattern)
   "Remove \\G anchors from PATTERN.  cl-ppcre has no \\G; \\G is zero-width and
@@ -27867,9 +28092,7 @@ buffer's fill-pointer; everything else falls back to file-length."
            (result (make-array (length lst) :adjustable t :fill-pointer t)))
       (loop for it in lst for i from 0 do (setf (aref result i) it))
       (when any
-        (clear-capture-groups)
-        (set-capture-groups str last-rs last-re reg-names)
-        (set-match-vars str last-ms last-me last-rs last-re closers))
+        (%p-match-record str last-ms last-me last-rs last-re closers reg-names))
       result)))
 
 (defun %p-regex-compiled (op)
@@ -27913,6 +28136,10 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; to a copy no str-buffer append can mutate under a deferred
          ;; $&/$`/$' cut (see the #477 block comment).
          (str (if (simple-string-p str0) str0 (coerce str0 'simple-string))))
+    ;; The coercion above already decided it; SAYING so is worth ~5 % of a
+    ;; scalar m//g loop, because the (length str) each /g step makes is
+    ;; otherwise a full call into the generic sequence function (task #1804).
+    (declare (type simple-string str))
     (handler-case
         (let* ((c (%p-regex-compiled op))
                (scanner    (svref c 0))
@@ -27922,10 +28149,13 @@ buffer's fill-pointer; everything else falls back to file-length."
                (global-p   (svref c 4))
                (cont-p     (svref c 5))
                (minend-key (svref c 6)))
-          ;; Perl clears %+/%- on every match attempt, even failures.
-          ;; $1..$9 are only cleared/set on successful matches.
-          (when (plusp (hash-table-count %+)) (clrhash %+))
-          (when (plusp (hash-table-count |%-|)) (clrhash |%-|))
+          ;; NOTE (task #1804): perl does NOT clear %+/%- on a FAILED attempt —
+          ;; probed 5.40.3, `"ab" =~ /(?<f>a)(?<s>b)/; "zz" =~ /(q)/` leaves
+          ;; both keys in %+, exactly as it leaves $1 alone.  PCL used to
+          ;; clrhash them here on every attempt, which was two hash-table-count
+          ;; calls per match AND the wrong answer; both hashes are now derived
+          ;; from the last SUCCESSFUL match's record, which gives perl's rule
+          ;; for free.
           (cond
             ;; /\G.../g in list context: contiguous anchored matches from pos
             ((and global-p (eq *wantarray* t) anchored-g)
@@ -27967,9 +28197,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                       (result (make-array (length items) :adjustable t :fill-pointer t)))
                  (loop for item in items for i from 0 do (setf (aref result i) item))
                  (when items
-                   (clear-capture-groups)
-                   (set-capture-groups str last-rs last-re reg-names)
-                   (set-match-vars str last-ms last-me last-rs last-re closers))
+                   (%p-match-record str last-ms last-me last-rs last-re closers reg-names))
                  result)))
             ;; /g in scalar/void context: iterate from current pos
             ((and global-p (not (eq *wantarray* t)))
@@ -27989,10 +28217,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                        (progn
                          (%p-set-match-pos string match-end
                                            (= match-start match-end))
-                         (clear-capture-groups)
-                         (set-capture-groups str reg-starts reg-ends reg-names)
-                         (set-match-vars str match-start match-end reg-starts reg-ends
-                                         closers)
+                         (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
                          t)
                        (progn
                          (unless cont-p
@@ -28008,10 +28233,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (setf match-start nil))
                  (if match-start
                      (progn
-                       (clear-capture-groups)
-                       (set-capture-groups str reg-starts reg-ends reg-names)
-                       (set-match-vars str match-start match-end reg-starts reg-ends
-                                       closers)
+                       (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
                        (if (eq *wantarray* t)
                            (let* ((num-groups (length reg-starts))
                                   (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
@@ -28177,10 +28399,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                                      reg-starts reg-ends)
                               (declare (ignore start end))
                               (incf count)
-                              (clear-capture-groups)
-                              (set-capture-groups target reg-starts reg-ends reg-names)
-                              (set-match-vars target match-start match-end
-                                              reg-starts reg-ends closers)
+                              (%p-match-record target match-start match-end reg-starts reg-ends closers reg-names)
                               (to-string (funcall raw-replacement)))))
                 (setf result
                       (if global-p
@@ -28195,10 +28414,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (multiple-value-bind (match-start match-end reg-starts reg-ends)
                     (cl-ppcre:scan scanner str)
                   (when match-start
-                    (clear-capture-groups)
-                    (set-capture-groups str reg-starts reg-ends reg-names)
-                    (set-match-vars str match-start match-end reg-starts reg-ends
-                                    closers)))
+                    (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)))
                 ;; Perform the substitution.  /g: perl's advance rule, and the
                 ;; count comes back from the scanner that did the loop instead
                 ;; of a second whole scan of the subject (task #1719).

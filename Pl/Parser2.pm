@@ -7993,6 +7993,10 @@ sub _blank_string_innards {
 # group 119797, read-only and runtime-owned).
 our $VAR_TOKEN_RX = qr/(?:[\$\@\%][A-Za-z_]\w*+|[\@\%](?:0|[1-9][0-9]*)(?!\w))/;
 
+# The caret-named CL symbols the runtime owns (see the scan in
+# _forward_global_decls).  Built once: %SPECIAL_VARS is a file-scoped constant.
+our $RUNTIME_CARET_SYMS = Pl::ExprToCL::runtime_owned_caret_syms();
+
 # $free_out (E3 eval-mode only): when given, the plain undeclared sigil-vars
 # (%seen) are recorded there as p-eval-thunk capture candidates INSTEAD of
 # being defvar'd — a defvar would proclaim the name special and defeat the
@@ -8058,7 +8062,15 @@ sub _forward_global_decls {
     # CL symbol |${^MPE}| — the [A-Za-z_] scan below can't match the `{^`.  They
     # are user-writable globals; defvar any that appear.  Keyed on the full
     # pipe-wrapped symbol; sigil (for container choice) is the char after `|`.
-    $caret{$1} = 1 while $line =~ /(\|[\$\@\%]\{\^[A-Za-z_]\w*\}\|)/g;
+    # ... but a caret name the RUNTIME owns is NOT one of those: the runtime
+    # declares it, and since #1804 some of them (|@{^CAPTURE}|) are SYMBOL
+    # MACROS, which a defvar cannot proclaim special — it aborts the file at
+    # load.  Pl::ExprToCL::runtime_owned_caret_syms is the one reading of
+    # which they are; the scan sees only text, where they are indistinguishable
+    # from |${^MPE}|.
+    while ($line =~ /(\|[\$\@\%]\{\^[A-Za-z_]\w*\}\|)/g) {
+      $caret{$1} = 1 unless $RUNTIME_CARET_SYMS->{$1};
+    }
     # (?<![\w:|]) skips pkg-qualified Foo::$x / |P|::$x; (?!-) skips runtime
     # internals like %pcl-cl-sub-name — with a POSSESSIVE \w*+ so the scan
     # cannot backtrack into a shorter match that dodges the lookahead
