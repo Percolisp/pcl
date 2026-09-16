@@ -7994,8 +7994,19 @@ sub _blank_string_innards {
 our $VAR_TOKEN_RX = qr/(?:[\$\@\%][A-Za-z_]\w*+|[\@\%](?:0|[1-9][0-9]*)(?!\w))/;
 
 # The caret-named CL symbols the runtime owns (see the scan in
-# _forward_global_decls).  Built once: %SPECIAL_VARS is a file-scoped constant.
-our $RUNTIME_CARET_SYMS = Pl::ExprToCL::runtime_owned_caret_syms();
+# _forward_global_decls).  Built ONCE and LAZILY, through a runtime `require`:
+# %SPECIAL_VARS is a file-scoped constant, but this file does not `use
+# Pl::ExprToCL` (it arrives through Pl::Parser), and a file-scope call would
+# make that implicit order load-bearing — the s438e trap, where a
+# fully-qualified cross-file call cost the gate 97 rows while every population
+# stayed clean.
+our $RUNTIME_CARET_SYMS;
+sub _runtime_caret_syms {
+  return $RUNTIME_CARET_SYMS //= do {
+    require Pl::ExprToCL;
+    Pl::ExprToCL::runtime_owned_caret_syms();
+  };
+}
 
 # $free_out (E3 eval-mode only): when given, the plain undeclared sigil-vars
 # (%seen) are recorded there as p-eval-thunk capture candidates INSTEAD of
@@ -8068,8 +8079,9 @@ sub _forward_global_decls {
     # load.  Pl::ExprToCL::runtime_owned_caret_syms is the one reading of
     # which they are; the scan sees only text, where they are indistinguishable
     # from |${^MPE}|.
+    my $owned = _runtime_caret_syms();
     while ($line =~ /(\|[\$\@\%]\{\^[A-Za-z_]\w*\}\|)/g) {
-      $caret{$1} = 1 unless $RUNTIME_CARET_SYMS->{$1};
+      $caret{$1} = 1 unless $owned->{$1};
     }
     # (?<![\w:|]) skips pkg-qualified Foo::$x / |P|::$x; (?!-) skips runtime
     # internals like %pcl-cl-sub-name — with a POSSESSIVE \w*+ so the scan
