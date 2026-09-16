@@ -758,6 +758,68 @@ code PLACEMENT, and it is measured with a padding-only runtime before a
 that culprit's diff is the tell: when it touches nothing the row calls, run
 the pad probe.  Raw output: `~/pcl-agent-scratch/s479/bench-*-s479.txt`.
 
+### 0.2n Round 33 movers (2026-09-16) — the text round without the engine
+
+Perf round 33 (s473v) shipped three runtime levers: **#1804** the match record
+(the seven derived match variables materialise on READ), **#1809** the
+str-buffer append (copy through the underlying simple string, one store for a
+one-character append) and **#1810** the classic sort (one typed classification
+pass, a typed predicate per element kind, the one-source case collected into a
+right-sized vector).  The tables below are the MEASURED A/B rows only —
+`BENCH_RT_B=<the 2ac855aa runtime>`, so ONE emission runs against two cores,
+interleaved, best-of-5, with the controls in the same window.  `B/A` positive
+means the OLD runtime is slower.  **This is not a board**: the box was shared
+with another agent all evening (1-min load 1.2–3.5 per run, printed beside each
+table in the task), so these are A/B deltas, not absolute board numbers.  The
+README table is refreshed only by a quiet-box board (#1527's rule).
+
+**#1804, the match record** (A = the record, B = 2ac855aa):
+
+```
+bench          perl(s)    pclA(s)    pclB(s)       B/A    A/perl   (was)
+regexg          0.3956     0.5441     0.8432    +55.0%     1.38x   2.18x
+subste          0.0603     0.1999     0.2712    +35.7%     3.32x   4.78x
+textproc        0.4599     1.1598     1.5284    +31.8%     2.52x   3.17x
+json-rt         0.9279     1.6298     1.6225     -0.4%     1.80x   -- predicted
+strcat          0.3193     0.6913     0.6927     +0.2%     control
+sortnum         0.0267     0.0726     0.0750     +3.3%     control
+sortstr         0.0698     0.1200     0.1197     -0.2%     control
+feread/2/3         --         --         --  +2.6/-0.6/-2.9%  controls
+```
+
+json-rt's −0.4 % is worth as much as the three movers: the profile
+(task #1803) had said the eager trio never appears in that row, because
+JSON::PP's hot regexes are FAILED matches and the trio ran only on success.
+The table chose the lever AND said which rows could not move.
+
+**#1809 (str-buffer) and #1810 (classic sort)**, each A/B'd against the same
+2ac855aa runtime with the earlier levers already in A:
+
+```
+bench          perl(s)    pclA(s)    pclB(s)       B/A    A/perl   (was)
+strcat          0.3077     0.2877     0.6434   +123.6%     0.94x   2.14x
+sortstr         0.0744     0.0523     0.1300   +148.7%     0.70x   1.55x
+sortnum         0.0271     0.0426     0.0762    +78.6%     1.58x   2.63x
+arrfill         0.0519     0.0283     0.0314    +11.0%     control
+slices          0.0767     0.1279     0.1244     -2.8%     control
+listcopy        0.5526     0.2068     0.2098     +1.5%     control
+```
+
+**PCL now runs `strcat` and `sortstr` FASTER than perl** (0.94× and 0.70×,
+from 2.14× and 1.55×).  Peak RSS is flat on the text rows (regexg 33.0 vs
+33.2 MB, textproc 91.5 vs 91.0, subste 87.0 vs 87.2) and DROPS on the sort
+rows (79.9 → 60.6 MB), which is the per-sort adjustable vector and copy-seq
+going away.
+
+**What the round measured and did NOT build** (all in task #1803, so nobody
+re-derives it): a one-entry cache in front of `*p-match-pos*` has a CEILING of
+2.8 % (that is the whole gethash + puthash traffic on regexg); a cached
+subject coercion is not measurable because every subject in all four rows is
+already simple (#1187 closed the same question from the other side); and the
+7.6 % of `subste` that sits in a CLOS dispatch is cl-ppcre's OWN generic
+`scan`, called by its `regex-replace-all` and `split` — filed as **#1808**,
+not fixable from PCL's side of the call.
+
 ### 0.2l Round 32 movers (2026-09-08) — the method-call round
 
 **Not a re-run of the board.**  Each line is the round's own interleaved A/B
