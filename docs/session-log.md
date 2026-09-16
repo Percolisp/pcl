@@ -100,6 +100,18 @@ PASS there, which is their point), `raw-verdict-01.t` 70 → 76,
 the 7.6 % of `subste` in a CLOS dispatch is cl-ppcre's OWN generic `scan`,
 called by its `regex-replace-all` and `split` — not reachable from PCL's side
 of the call, with three shapes a fix could take.
+
+**The sweep caught the round's one real regression, and it was in the #683
+fix, not in any of the three levers.**  Run 1 read TOTAL 18676 → **18670**
+with six new `reverse.t` failures, all about deleted elements surviving a
+reverse: `%p-defelem-box` is a box holding a magic cell, so the new
+"an array store of a computed-magic box stores its VALUE" arm turned every
+HOLE a list walk had flattened into a present undef.  A `:defelem` cell is not
+a computed scalar at all — it is an ALIAS TO A HOLE whose contract is that
+reading it leaves the hole in place — so it is excluded, and run 2 reads
+**0 new / 0 fixed / 0 LOST, TOTAL 18676 (+0), drops 5 = census, GATE clean**.
+`tools/ir-conform --jobs 2`: 323 pass / 0 fail / 22 known / **0 stale**.
+
 ## Session 486 (Fable, 2026-09-16) — the not-supported share measured and instrumented; three agents merged; the commands reviewed for security
 
 The USER asked, reviewing the README's `Measured` table, how many of the
