@@ -2,6 +2,64 @@
 
 Append new entries at the top. One section per session.
 
+## Session 486b (Opus, 2026-09-16) — the sweep's skip registry made COUNTABLE, and its stale entries cleaned out (task #1787)
+
+Ran concurrently with s486a (the cause-class census tool, which reads the
+column added here) and s486c (the s484d resume).  Worktree
+`agent-a6c7caf694eb1f8c2`, based on main `4429126a`.
+
+**The problem.** `cl/skip-registry.lisp` relabels a matched FAILING assertion
+as a TAP skip.  The sweep merged those rows into one "skipped" total together
+with the skips the test files ask for themselves (EBCDIC, threads, miniperl,
+`XS::APItest`, `Devel::Peek`), recorded no registry count anywhere, and the
+headline "N fail" therefore EXCLUDED ~180 rows while INCLUDING 267 others
+whose cause cites the same `docs/not-supported.md`.  Two mechanisms owned one
+fact, and neither was countable.
+
+**The marker.** `cl/pcl-test.lisp`'s registry branch now emits
+`ok N # skip [registry] <reason>` — TAP-legal, and it makes the registry's
+rows separable **at the TAP line, independently of the reason text**.  No
+summary line: a file that aborts mid-run never reaches one.  The branch is the
+registry branch only, so the companion suite (which loads `cl/pcl-test.lisp`
+but never the registry) cannot reach it — no companion run is owed.
+
+**The counting.** `tools/sweep-perl-tests.pl` counts the marked lines as
+`registry_skips` and `# REGISTRY-STALE` lines as `registry_stale`, prints a
+`Reg` column per file, `TOTAL: … K skipped (R by the registry) …` and
+`REGISTRY-STALE: S entries in T files`, and writes both as the LAST TWO
+columns of `.faillog/_status.tsv`, after the tab-scrubbed `note` — so every
+index-based reader of the first ten columns is unaffected.
+`tools/sweep-diff.pl` prints one `REGISTRY:` line, or `REGISTRY: NOT COUNTED`
+when the column is absent: an absent instrument is never read as a zero.
+
+**The finding the instrument produced immediately.** The session brief carried
+a per-file table built by matching each skip's REASON text against the
+registry file, and it said 19 REGISTRY-STALE lines.  Measured with the marker:
+**7, in 4 files**.  The 12 extra were lex.t (8), join.t (2) and sub.t (2) —
+live registry skips the text classifier had mis-read.  That is the whole case
+for the marker in one measurement.
+
+**The cleanup** (rule 3 of the ruling: narrow or remove so no passing row
+matches and every still-failing row stays covered).  ref.t's
+`^(Scalar|Array|Hash|Code|Glob) dereference$` → `^(Scalar|Array|Glob)
+dereference$` plus integer keys 38/39: the file's `foreach $ref (*STDOUT{IO},
+*STDERR{FORMAT})` loop emits the same four descriptions twice and the FORMAT
+iteration's `%$ref`/`&$ref` now die with a matching message, so a description
+cannot separate the passing rows from the failing ones.  ref.t's UTF8 pattern
+→ `via the correct name works` (the first two alternatives pass; the third
+still covers all ten failing rows).  array.t's `\@_ alias to nonexistent` →
+`…nonexistent neg index`.  chop.t's `chomp @a when.*eq 0 and` and state.t's
+`^Reference to state variable$` DROPPED — one row each, both passing.
+Per-file `(pass, fail, skip, registry, stale)` before → after: ref.t
+(199,12,31,25,4)→(199,12,31,25,0); array.t (171,15,9,9,1)→(171,15,9,9,0);
+chop.t (144,0,4,4,1)→(144,0,4,4,0); state.t (88,0,4,4,1)→(88,0,4,4,0).
+Count-neutral by construction — the registry only ever relabels a FAILING row.
+
+**Open for the USER:** retire the registry in favour of the cause column, or
+keep both.  Fable recommends retiring, after the tag; it would move the
+headline (649 → ~830 fails), so it is not a session's call.  Ruling and
+rationale: `docs/DECIDED.md` `## s486b`, `docs/test-skip-registry.md`
+"How skips are counted".
 ## Session 486a (Opus, 2026-09-16) — the failure-cause CLASS census: one rule, six classes, one command (task #1782)
 
 **The USER's question**: "how many of the failures are from what we don't support?"  Every blessed failing row has carried a CAUSE since #993 I3, but the causes had never been summed by class, and no runner printed the split.

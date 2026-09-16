@@ -12,3 +12,6 @@
 # PCLSbcl picks up <root>/pcl.core automatically, which is the point — but it
 # is a ~60 MB build artifact, never a tracked file.
 /pcl.core
+
+# s486b measurement outputs (regenerable: scratch/s486b/measure.pl)
+scratch/*/out/
