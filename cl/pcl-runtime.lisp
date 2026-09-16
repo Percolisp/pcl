@@ -7020,7 +7020,15 @@ per element."
           ;; elements are now magic cells as perl's are: `my @c = @-` followed
           ;; the next match.  The arm costs nothing on the ordinary element,
           ;; which left through the fast path above.
-          ((p-magic-cell-p inner)
+          ;;
+          ;; A :DEFELEM cell is EXCLUDED and that is not a special case — it is
+          ;; not a computed scalar at all but an ALIAS TO A HOLE (%p-defelem-box),
+          ;; whose whole contract is that reading it leaves the hole in place.
+          ;; Copying its VALUE would turn every hole a list walk flattened into
+          ;; a present undef: measured, it cost perl-tests/reverse.t six rows
+          ;; about deleted elements surviving a reverse.
+          ((and (p-magic-cell-p inner)
+                (not (eq (p-magic-cell-kind inner) :defelem)))
            (%p-vpush (make-p-box (funcall (p-magic-cell-getter inner))) arr))
           ;; Blessed box: preserve as-is (class must not be lost)
           ((p-box-class item) (%p-vpush item arr))
