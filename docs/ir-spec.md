@@ -270,6 +270,26 @@ duration of the handler call (`%with-tie-magic-off`), so no read/write
 site needs a special case; only `tied`/`untie` consult the suppression
 list.
 
+**5. AN OPERATOR READS ITS OPERAND ONCE** (task #1813).  The FETCH count
+is observable — a `FETCH` may count, log, or advance an iterator — and
+perl calls it exactly once per operator.  An operator that INSPECTS its
+operand (to choose a string arm over a numeric one, or to find the old
+value of a postfix `++`) and then COERCES *the same place* again is
+reading it twice.  Every such site coerces the value the inspection
+already produced; `%p-read-operand` is the one reading of the exception,
+which is that a box carrying a **bless class**, the **is-ref** flag or a
+**cached numeric half** must still be coerced as the box — the `""`/`0+`
+handlers, a reference's address and a dualvar's numeric side all live on
+the container, not in the value.
+
+```perl
+sub FETCH { $count++; ... }
+tie my $v, 'Counter';
+my $x = -$v;        # $count == 1, not 2
+my $y = $v & 1;     # $count == 1
+my $z = $v++;       # $count == 1 (one FETCH, one STORE)
+```
+
 ### 2.3 Arrays
 
 A Perl array is an **adjustable vector with a fill pointer** (growable,

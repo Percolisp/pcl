@@ -2240,6 +2240,39 @@
       val))
 (declaim (notinline unbox))
 
+;;; ── AN OPERATOR READS ITS OPERAND ONCE (task #1813, the #1430 family) ─────
+;;; perl calls a tied scalar's FETCH EXACTLY ONCE per operator (probed, 5.40.3:
+;;; `-$tied`, `$tied x 1`, `$tied++`, `$tied & 1`, `~$tied` are all one FETCH).
+;;; An operator that first INSPECTS its operand — to choose a string arm from a
+;;; numeric one — and then COERCES the same PLACE with to-string / to-number is
+;;; reading it TWICE, and for a tie that second read is a second FETCH with the
+;;; program's side effects in it.  #1430 fixed one member of this family (the
+;;; range operator) by building both arms from one read; this helper is that
+;;; rule spelled once for the rest.
+(declaim (inline %p-read-operand))
+(defun %p-read-operand (place val)
+  "The operand to hand to to-string / to-number / perl-increment AFTER PLACE has
+   already been read once, VAL being that read.  VAL itself when the box carried
+   NOTHING BUT that value — going back to PLACE would re-run a tie FETCH or a
+   magic getter — and PLACE otherwise.
+
+   `Nothing but the value' is `%p-storable-raw''s rule without its gate: no
+   bless CLASS (`\"\"` / `0+` / `++` handlers live on the box and unboxing has
+   thrown them away — and a blessed box is not a tied one), no IS-REF flag, no
+   cached numeric half (a dualvar like `$!` numifies through the box, not by
+   re-reading its string), and a plain scalar body.  A REFERENCE keeps its box
+   because perl's numification of one is the referent's ADDRESS, which PCL
+   derives from the container: `~ [1]' answers a different number per array
+   only while the box is what is coerced."
+  (if (and (p-box-p place)
+           (or (p-box-class place)
+               (p-box-is-ref place)
+               (p-box-nv-ok place)
+               (not (or (numberp val) (stringp val)
+                        (null val) (eq val *p-undef*)))))
+      place
+      val))
+
 (defun ensure-boxed (val)
   "Ensure a value is boxed"
   (if (p-box-p val)
@@ -4367,9 +4400,11 @@
                                   ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
                                    (concatenate 'string "-" val))
                                   ;; Starts with digit but not pure number (e.g. "12foo"): numeric
-                                  (t (- (to-number a)))))
-                              ;; Numeric negation
-                              (- (to-number a))))))
+                                  (t (- (to-number (%p-read-operand a val))))))
+                              ;; Numeric negation.  The operand is the value
+                              ;; `unbox` already produced — a tied scalar's
+                              ;; FETCH fires once (#1813).
+                              (- (to-number (%p-read-operand a val)))))))
 
 (defun %p---slow (a b)
   "Perl binary subtraction slow path: use overload dispatch, then coercion."
@@ -5117,9 +5152,11 @@
   (let* ((v (unbox str))
          ;; If it's an adjustable array (Perl @array), use its length
          ;; Regular strings are also vectors in CL, so check adjustable-array-p
+         ;; `unbox` above is the operand's ONE read: stringify what it
+         ;; produced, not the place again (a tie FETCH fires once, #1813).
          (s (if (and (vectorp v) (not (stringp v)) (adjustable-array-p v))
                 (write-to-string (length v))
-                (to-string str)))
+                (to-string (%p-read-operand str v))))
          (nc (to-number count))
          (n (if (and (floatp nc)
                      (or (sb-ext:float-infinity-p nc) (sb-ext:float-nan-p nc)))
@@ -5399,7 +5436,10 @@
   (let ((v (unbox val)))
     (if (or (eq v *p-undef*) (null v))
         *p-undef*
-        (length (to-string val)))))
+        ;; The definedness test above IS the operand's read, so stringify what
+        ;; it produced (#1813); only a BLESSED box goes on as the box, which is
+        ;; what keeps the `""' handler reachable.
+        (length (to-string (%p-read-operand val v))))))
 
 (defun p-substr (str start &optional len replacement)
   "Perl substr function.
@@ -9552,10 +9592,16 @@ per element."
       ;; Boxed scalar - return the original value (string or number).
       ;; When value is nil (Perl undef), return 0 — Perl's undef++ returns 0
       ;; because ++ treats undef as 0 in numeric context.
+      ;; `%p-incdec-old' above IS the place's read; `%p-read-operand' hands that
+      ;; value to `perl-increment' instead of the place, so a tied scalar's
+      ;; FETCH fires once as perl's does (#1813) — and a blessed box, where the
+      ;; `++'/`+' handlers live, still goes through as the box.
       (t (let ((val (gensym "VAL")))
            `(let* ((,val (%p-incdec-old ,real-place))
                    (,old (if (or (null ,val) (eq ,val *p-undef*)) 0 ,val)))
-              ,(%p-incdec-store-form real-place `(perl-increment ,real-place))
+              ,(%p-incdec-store-form
+                real-place
+                `(perl-increment (%p-read-operand ,real-place ,val)))
               ,old))))))
 
 (defmacro p-pre-- (place)
@@ -9620,9 +9666,12 @@ per element."
           ,old))
       ;; Boxed scalar — return the RAW old value (string or number).  Postfix --
       ;; on undef returns undef (NOT 0 like ++), so do not numify the old value.
+      ;; One read of the place, as in p-post++ (#1813).
       (t (let ((val (gensym "VAL")))
            `(let ((,val (%p-incdec-old ,real-place)))
-              ,(%p-incdec-store-form real-place `(perl-decrement ,real-place))
+              ,(%p-incdec-store-form
+                real-place
+                `(perl-decrement (%p-read-operand ,real-place ,val)))
               ,val))))))
 
 ;;; ------------------------------------------------------------
@@ -10381,42 +10430,54 @@ per element."
                 stringify it); unary `~' treats it as :NUMBER (the address).
    A state that is none of the three DIES naming itself — the arm this
    replaced answered :NUMBER for every unlisted state and so turned an
-   unknown value into 0 (rule 12)."
+   unknown value into 0 (rule 12).
+
+   SECOND VALUE: the operand this classification read, for `%p-read-operand'.
+   Classifying UNBOXES, so an operator that then coerced the place again ran a
+   tied scalar's FETCH twice (#1813) — the caller coerces this value instead."
   (let* ((boxp (p-box-p v))
          (val (unbox v)))
-    (cond
-      ((numberp val) :number)
-      ;; CL's T is perl's PL_sv_yes, which carries an IV.  CL's NIL is NOT
-      ;; PL_sv_no: it is PCL's OTHER spelling of undef (`%pcl-definedp' calls
-      ;; both NIL and *p-undef* undefined, and `my ($a,$b);' fills the boxes
-      ;; with NIL), so it stringifies into the bit-string op like undef.
-      ;; perl's false reaches here as the STRING "" — `p-bool' answers 1/"".
-      ((eq val t) :number)
-      ((null val) :string)
-      ((eq val *p-undef*) :string)       ; do_vop stringifies undef to ""
-      ((stringp val) (if (looks-like-number val) :number :string))
-      ((p-vstring-p val) :string)        ; a vstring is PV-only
-      ((p-superchar-p val) :string)
-      ;; A BARE glob has a string body ("*main::g"); a glob REF is a reference.
-      ((p-typeglob-p val) (if (and boxp (p-box-is-ref v)) :reference :string))
-      ((p-box-p val) :reference)         ; \$x
-      ((hash-table-p val) :reference)
-      ((%p-hash-marker-p val) :reference); \%ENV / \%INC
-      ((vectorp val) :reference)         ; strings are excluded above
-      ((functionp val) :reference)
-      ((streamp val) :reference)         ; a lexical filehandle IS a glob ref
-      ((p-regex-match-p val) :reference)
-      ;; A PCL return-list that reached a scalar slot: it has a string body
-      ;; (stringify-value joins it) and no number.
-      ((listp val) :string)
-      (t (error "PCL internal: bitwise operator operand of unhandled type ~S: ~S"
-                (type-of val) val)))))
+    (%p-bitwise-kind-of boxp val v)))
 
-(defun p-string-bitwise-operand-p (v)
-  "True when V does not force the NUMERIC bitwise op — i.e. the binary
-   `& | ^' take the bit-string path when this holds for BOTH operands.
-   :REFERENCE answers T here: perl stringifies it into `do_vop'."
-  (not (eq (%p-bitwise-operand-kind v) :number)))
+(defun %p-bitwise-kind-of (boxp val v)
+  "%p-bitwise-operand-kind's dispatch over the ALREADY-READ value VAL (BOXP and
+   V are the original operand's box-ness and the box itself, which the typeglob
+   arm needs).  Returns (values kind val)."
+  (values
+   (cond
+     ((numberp val) :number)
+     ;; CL's T is perl's PL_sv_yes, which carries an IV.  CL's NIL is NOT
+     ;; PL_sv_no: it is PCL's OTHER spelling of undef (`%pcl-definedp' calls
+     ;; both NIL and *p-undef* undefined, and `my ($a,$b);' fills the boxes
+     ;; with NIL), so it stringifies into the bit-string op like undef.
+     ;; perl's false reaches here as the STRING "" — `p-bool' answers 1/"".
+     ((eq val t) :number)
+     ((null val) :string)
+     ((eq val *p-undef*) :string)       ; do_vop stringifies undef to ""
+     ((stringp val) (if (looks-like-number val) :number :string))
+     ((p-vstring-p val) :string)        ; a vstring is PV-only
+     ((p-superchar-p val) :string)
+     ;; A BARE glob has a string body ("*main::g"); a glob REF is a reference.
+     ((p-typeglob-p val) (if (and boxp (p-box-is-ref v)) :reference :string))
+     ((p-box-p val) :reference)         ; \$x
+     ((hash-table-p val) :reference)
+     ((%p-hash-marker-p val) :reference); \%ENV / \%INC
+     ((vectorp val) :reference)         ; strings are excluded above
+     ((functionp val) :reference)
+     ((streamp val) :reference)         ; a lexical filehandle IS a glob ref
+     ((p-regex-match-p val) :reference)
+     ;; A PCL return-list that reached a scalar slot: it has a string body
+     ;; (stringify-value joins it) and no number.
+     ((listp val) :string)
+     (t (error "PCL internal: bitwise operator operand of unhandled type ~S: ~S"
+               (type-of val) val)))
+   val))
+
+;;; (The predicate `p-string-bitwise-operand-p' lived here: "V does not force
+;;; the NUMERIC op", i.e. the kind is not :NUMBER.  It took the OPERAND and so
+;;; read it a second time; `%p-binary-bit-op' now asks `%p-bitwise-operand-kind'
+;;; once per operand and tests the kind itself.  :REFERENCE still means the
+;;; bit-STRING path for the binary trio — perl stringifies it into `do_vop'.)
 
 (defun %p-check-bit-string-width (op-name &rest strings)
   "perl makes a bit-STRING op FATAL when an operand holds a code point above
@@ -10476,26 +10537,33 @@ per element."
 ;;; `bless([],"Baz") | "x"' answered the object's ADDRESS where perl calls the
 ;;; class's `|' handler (perl-tests/bop.t 464).  perl overloads all ten keys —
 ;;; probed one class per key, 5.40.3.
+(defun %p-binary-bit-op (a b op truncate-p op-name)
+  "The body the binary `& | ^' share: classify BOTH operands (which reads each
+   one ONCE — a tied scalar's FETCH must fire exactly once, #1813) and run the
+   chosen arm over the values that read produced."
+  (multiple-value-bind (ka va) (%p-bitwise-operand-kind a)
+    (multiple-value-bind (kb vb) (%p-bitwise-operand-kind b)
+      (if (and (not (eq ka :number)) (not (eq kb :number)))
+          (p-string-bit-op (%p-read-operand a va) (%p-read-operand b vb)
+                           op truncate-p op-name)
+          (funcall op
+                   (%pcl-to-u64 (to-number (%p-read-operand a va)))
+                   (%pcl-to-u64 (to-number (%p-read-operand b vb))))))))
+
 (defun p-bit-and (a b)
   "Perl bitwise AND — string (char-by-char, truncates) or numeric (unsigned 64-bit)"
   (%with-binary-overload ("&" a b)
-                         (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-                             (p-string-bit-op a b #'logand t "bitwise and (&)")
-                             (logand (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
+                         (%p-binary-bit-op a b #'logand t "bitwise and (&)")))
 
 (defun p-bit-or (a b)
   "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
   (%with-binary-overload ("|" a b)
-                         (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-                             (p-string-bit-op a b #'logior nil "bitwise or (|)")
-                             (logior (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
+                         (%p-binary-bit-op a b #'logior nil "bitwise or (|)")))
 
 (defun p-bit-xor (a b)
   "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
   (%with-binary-overload ("^" a b)
-                         (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-                             (p-string-bit-op a b #'logxor nil "bitwise xor (^)")
-                             (logxor (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
+                         (%p-binary-bit-op a b #'logxor nil "bitwise xor (^)")))
 
 (defun p-bit-not (a)
   "Perl bitwise NOT — bit-string complement when the operand has a string body,
@@ -10503,9 +10571,12 @@ per element."
    clause is where `~' parts company with the binary trio: `~ [1]' is the
    complemented address while `[1] | \"x\"' is the string op (#1028)."
   (%with-unary-overload ("~" a)
-                        (if (eq (%p-bitwise-operand-kind a) :string)
-                            (%p-string-bit-not a "1's complement (~)")
-                            (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF))))
+                        (multiple-value-bind (kind val) (%p-bitwise-operand-kind a)
+                          (let ((operand (%p-read-operand a val)))
+                            (if (eq kind :string)
+                                (%p-string-bit-not operand "1's complement (~)")
+                                (logand (lognot (%pcl-to-integer (to-number operand)))
+                                        #xFFFFFFFFFFFFFFFF))))))
 
 (defun p-str-bit-and (a b)
   "Perl string bitwise AND (&.) — always string, byte-by-byte, truncates to shorter"
