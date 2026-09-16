@@ -1,0 +1,4 @@
+PCL: refused statement at state.t line 350: given (do { unless ($spam__state__6__init) { $spam__state__6 = $spam ; $spam__state__6__init = 1 } $spam__state__6 }) { ... -- given/when (feature 'switch') is not supported -- removed in perl 5.42
+Deep recursion on subroutine "Pl::Parser2::_lower_block" at /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/Pl/Parser2.pm line 8435.
+Deep recursion on subroutine "Pl::Parser2::_lower_block" at /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/Pl/Parser2.pm line 11427.
+Deep recursion on subroutine "Pl::Parser2::_lower_block" at /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/Pl/Parser2.pm line 11427.

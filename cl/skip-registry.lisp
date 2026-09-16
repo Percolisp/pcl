@@ -156,9 +156,13 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                     "chop($x,$y)=(1,2) must die 'Can't modify chop in assignment' — error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
                 (51 :principle9
                     "chomp($x,$y)=(1,2) must die 'Can't modify chomp in assignment' — error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
-                ("chomp @a when.*eq 0 and"
-                 :alias
-                 "result aliasing (\\$a[0] == \\$b after `chomp @a`, the $/ eq 0 case) -- the RESULT of chomp on an array element must stay the element's own SV. NB @_ argument aliasing itself WORKS in PCL (probed s464ay); the gap here is result-SV identity. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'. (The eq 7 sibling legitimately passes.)"))
+                ;; DROPPED s486b (task #1787): ("chomp @a when.*eq 0 and" :alias
+                ;; "result aliasing (\$a[0] == \$b after `chomp @a`, the $/ eq 0
+                ;; case)") covered exactly ONE row, 148, and that row passes now
+                ;; -- it reported REGISTRY-STALE, so the entry goes.  Dropping a
+                ;; stale entry is count-neutral by construction: the registry
+                ;; only ever relabels a FAILING row.
+                )
 
 (register-skips "crypt.t"
                 ("crypt turns off utf8 on its target"
@@ -180,9 +184,24 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ;; reference" etc. PCL does not produce these errors, and FORMAT
                 ;; is not implemented. (The passing "Glob dereference of PVIO is
                 ;; acceptable" sibling is excluded by the $-anchor.)
-                ("^(Scalar|Array|Hash|Code|Glob) dereference$"
+                ;;
+                ;; NARROWED s486b (task #1787): the file's `foreach $ref
+                ;; (*STDOUT{IO}, *STDERR{FORMAT})` loop emits the SAME four
+                ;; descriptions twice, and in the FORMAT iteration `%$ref` (42)
+                ;; and `&$ref` (43) now die with a matching message -- so the
+                ;; entry reported REGISTRY-STALE on two rows while covering two
+                ;; still-failing rows (38 Hash / 39 Code, the IO iteration) with
+                ;; the SAME text.  Description-keying cannot separate them, so
+                ;; those two keep an integer (test-number) key -- the mechanism
+                ;; chop.t 48-51 already uses -- and the stale-detector remains
+                ;; the backstop if the numbering ever drifts.
+                ("^(Scalar|Array|Glob) dereference$"
                  :error-msg
                  "deref of an IO/FORMAT glob slot must die 'Not a X reference' — error detection PCL does not perform; FORMAT unsupported. not-supported.md: 'Error message text and format' + 'format / write report formatting'.")
+                (38 :error-msg
+                    "'Hash dereference' of *STDOUT{IO} (the FIRST loop iteration) must die 'Not a HASH reference' — error detection PCL does not perform. Number-keyed because the FORMAT iteration's row 42 carries the same description and now passes. not-supported.md: 'Error message text and format'.")
+                (39 :error-msg
+                    "'Code dereference' of *STDOUT{IO} (the FIRST loop iteration) must die 'Not a CODE reference' — error detection PCL does not perform. Number-keyed because the FORMAT iteration's row 43 carries the same description and now passes. not-supported.md: 'Error message text and format'.")
                 ;; (\substr / \pos / \vec lvalue refs are now IMPLEMENTED via
                 ;;  p-magic-cell — session 219 — so they are no longer skipped.)
                 ;; ref()/stringify of a ref to a FORMAT, and IO-handle stringify.
@@ -191,7 +210,13 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  "ref to a FORMAT or IO handle ('FORMAT'/'IO::File=IO(...)') — format/write not implemented. not-supported.md: 'format / write report formatting'.")
                 ;; Symbolic references to package variables whose names contain a
                 ;; NUL or are UTF-8 encoded — Unicode/NUL stash names not supported.
-                ("UTF8 representation is 3 chars|via the UTF8 byte sequence|via the correct name works"
+                ;; NARROWED s486b (task #1787): the first two alternatives went
+                ;; REGISTRY-STALE (rows 140 "UTF8 representation is 3 chars" and
+                ;; 144 "Accessing via the UTF8 byte sequence gives nothing" both
+                ;; pass now).  The third alternative still covers all ten
+                ;; still-failing rows ("Accessing/defined via the correct name
+                ;; works", 148-174).
+                ("via the correct name works"
                  :utf8
                  "symbolic ref to a stash entry with a NUL/UTF-8 name — Unicode/NUL stash lookup not supported. not-supported.md: 'Unicode semantics differences'.")
                 ;; Assigning through a value aliased to a read-only literal, or
@@ -322,7 +347,10 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ;; ("undef preserves identity in array" …) DROPPED s295b:
                 ;; passes since $#a++ extends with real holes (stale-detector).
                 ;; @_ aliasing to nonexistent (sparse) elements.
-                ("\\@_ alias to nonexistent"
+                ;; NARROWED s486b (task #1787): "…nonexistent elem within array"
+                ;; (row 130) passes now and reported REGISTRY-STALE; only the
+                ;; NEGATIVE-index sibling (row 131) still fails.
+                ("\\@_ alias to nonexistent neg index"
                  :alias
                  "writing through an @_ alias to a nonexistent array element must autovivify the caller's element -- WRONG REASON, corrected s464ay: the named primitive WORKS (`$#a=3; sub setit { $_[0]="v" } setit($a[1])` vivifies in PCL exactly as in perl, probed).  This row therefore fails for an as-yet-unidentified reason and its registration is provisional -- re-probe it against the file before trusting this line. not-supported.md: '@_ argument aliasing'.")
                 ;; Sparse-array holes preserved through subs / reads.
@@ -359,9 +387,11 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
 ;; state.t — \state identity (same address each call) + computed goto into a label
 ;; held in a state variable.
 (register-skips "state.t"
-                ("^Reference to state variable$"
-                 :alias
-                 "\\state $x must yield the same address on every call -- PCL re-boxes on scalar copy. not-supported.md: 'Scalar copy does not preserve reference/SV identity'.")
+                ;; DROPPED s486b (task #1787): ("^Reference to state variable$"
+                ;; :alias "\state $x must yield the same address on every call")
+                ;; covered exactly ONE row, 76, and that row passes now -- it
+                ;; reported REGISTRY-STALE, so the entry goes.  Count-neutral:
+                ;; the registry only ever relabels a FAILING row.
                 ("computed goto"
                  :feature
                  "goto EXPR to a runtime-computed label is not implementable in CL (tags are lexical, not first-class). not-supported.md: 'Computed goto (goto EXPR)'."))

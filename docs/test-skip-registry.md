@@ -116,9 +116,71 @@ tests use real Perl `Test::More` anyway, so this never affects the gate.
 
 ### Sweep reporting
 
-The sweep now reports **three columns: Pass / Fail / Skip** (test-own `skip` directives
-and registry skips both count as Skip). `TOTAL:` prints all three. "Fully passing" =
-`fail == 0` (skips allowed), and `all_ran` counts `pass + fail + skip` against the plan.
+The sweep reports **four columns: Pass / Fail / Skip / Reg** (test-own `skip` directives
+and registry skips both count as Skip; `Reg` is the registry's share of it). `TOTAL:`
+prints all of them. "Fully passing" = `fail == 0` (skips allowed), and `all_ran` counts
+`pass + fail + skip` against the plan.
+
+## How skips are counted (task #1787, ruled s486b)
+
+A run's skipped rows come from **two different mechanisms that must never be added up
+into one number**:
+
+| | **test-own skip** | **registry skip** |
+|---|---|---|
+| Who asked for it | the `perl-tests/*.t` file itself (`skip 'EBCDIC', 3`, threads, miniperl, `XS::APItest`, `Devel::Peek`, …) | `cl/skip-registry.lisp`, because `docs/not-supported.md` explains the failure |
+| What the assertion did | it never ran, or perl itself would skip it | **it RAN and it FAILED** |
+| What it says about PCL | nothing | PCL does not do this |
+| TAP line | `ok N # skip <reason>` | `ok N # skip [registry] <reason>` |
+
+**The ruling, in three parts:**
+
+1. A registry-relabelled row is a **not-supported FAILURE that the headline fail count
+   does not include**. Every report that states the sweep's fail count states the registry
+   count beside it, from a **MEASURED per-run column** — never from the registry's pattern
+   count, which is not a row count (one pattern can cover several rows; a pattern in a file
+   that aborts early covers none).
+2. **The registry STAYS** (CLAUDE.md principle 5 names it as the mechanism). Retiring it in
+   favour of the cause column would move the headline (649 → ~830 fails) and is a USER
+   decision — do NOT migrate rows, do not change what counts as pass or fail.
+3. A **stale entry is NARROWED or REMOVED** so that no passing row matches while every
+   still-failing row it covered stays covered. Measured per file before and after: pass,
+   fail and skip counts identical, zero `REGISTRY-STALE` lines. (A pattern is a regex over
+   descriptions and may cover several rows, some still failing — that is why "delete the
+   pattern" is not the rule.)
+
+**The marker is the classifier.** `[registry]` is emitted by `test-ok`'s registry branch
+(`cl/pcl-test.lisp`) and is TAP-legal — a skip directive's reason is free text. It makes
+the two mechanisms separable **at the TAP line, independently of the reason text**; the
+reason text is *not* a reliable classifier, which is how a hand count arrived at
+"lex.t: 0 registry, 8 stale" for a file that in fact has 8 live registry skips and no stale
+entries. There is deliberately **no summary line**: a file that aborts mid-run never
+reaches one, and the count would vanish exactly when the file is most interesting.
+
+**Where the numbers land.** `tools/sweep-perl-tests.pl` counts the marked lines per file as
+`registry_skips` and `# REGISTRY-STALE` lines as `registry_stale`, prints
+
+```
+TOTAL: N passing, M failing, K skipped (R by the registry) across F files (+ 3 files skipped)
+REGISTRY-STALE: S entries in T files
+```
+
+and writes both as the **last two columns of `.faillog/_status.tsv`**, after the
+(tab-scrubbed) `note` — so every index-based reader of the first ten columns is unaffected.
+`tools/sweep-diff.pl` reads them and prints one line:
+
+```
+REGISTRY: R rows relabelled in T files (not in the fail count)
+```
+
+or `REGISTRY: NOT COUNTED` when the column is absent. **A reader that finds no such column
+must treat it as UNKNOWN, never as zero** — "no registry column" and "no registry rows" are
+different facts, and `baselines/pass-baseline.tsv` and every log written before s486b have
+neither column.
+
+`REGISTRY-STALE: 0` is the instrument the stale-detector lacked: the detector always
+printed per file, and nobody reads per-file output, which is how stale entries accumulated
+silently for months.
 
 ## Crashing / aborting tests are NOT skipped — they are fix targets
 

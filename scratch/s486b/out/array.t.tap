@@ -1,0 +1,403 @@
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %tap-out
+;     (DEFUN PCL::%TAP-OUT (PCL::CONTROL &REST PCL::ARGS)
+;       #<(SIMPLE-ARRAY CHARACTER
+;          (583)) Every TAP line this layer emits, through ONE writer (task #1115).
+;   
+;      Since #1115 STDOUT is a BYTE handle ? perl's default ? and a test
+;      DESCRIPTION carries whatever a `use utf8` file wrote into it,... {12013C675F}>
+;       PCL::|Dying|
+;       PCL::ON
+;       WARNING
+;       #<(SIMPLE-ARRAY CHARACTER
+;          (212)) , @_ }` at BEGIN), so one wide TAP description ended that whole
+;      file.  The handler is the backstop for the format directives' own output.
+;      It replaced 25 direct `format t` calls: one writer, not ... {12013C749F}>
+;       (PCL::%P-WITH-WIDE-UPGRADE
+;         (PCL::%P-OUT-STRING (APPLY #'FORMAT NIL PCL::CONTROL PCL::ARGS)
+;                             *STANDARD-OUTPUT* NIL)))
+; ==>
+;   (BLOCK PCL::%TAP-OUT
+;     PCL::|Dying|
+;     PCL::ON
+;     WARNING
+;     #<(SIMPLE-ARRAY CHARACTER
+;        (212)) , @_ }` at BEGIN), so one wide TAP description ended that whole
+;    file.  The handler is the backstop for the format directives' own output.
+;    It replaced 25 direct `format t` calls: one writer, not ... {12013C749F}>
+;     (PCL::%P-WITH-WIDE-UPGRADE
+;       (PCL::%P-OUT-STRING (APPLY #'FORMAT NIL PCL::CONTROL PCL::ARGS)
+;                           *STANDARD-OUTPUT* NIL)))
+; 
+; caught warning:
+;   undefined variable: pcl::Dying
+; 
+; caught warning:
+;   undefined variable: pcl::on
+; 
+; caught warning:
+;   undefined variable: common-lisp:warning
+; 
+; compilation unit finished
+;   Undefined variables:
+;     Dying on warning
+;   caught 3 WARNING conditions
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %test-log-stream
+;     (CONCATENATE 'STRING PCL::*CURRENT-TEST-FILE* ".fails.tsv")
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+
+;     (AND PCL::DIR (PLUSP (LENGTH PCL::DIR)) PCL::*CURRENT-TEST-FILE*)
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *current-test-file*
+;   caught 2 WARNING conditions
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %test-log-failure
+;     (PCL::%TEST-LOG-CLEAN PCL::*CURRENT-TEST-FILE*)
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+
+;     (PCL::TEST-DISPLAY-VALUE PCL::NAME)
+; 
+; caught style-warning:
+;   undefined function: pcl::test-display-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     test-display-value
+;   Undefined variable:
+;     *current-test-file*
+;   caught 1 WARNING condition
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %current-todo
+;     (PCL::TEST-UNDEF-P PCL::V)
+; 
+; caught style-warning:
+;   undefined function: pcl::test-undef-p
+; 
+; compilation unit finished
+;   Undefined function:
+;     test-undef-p
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-array
+;     (PCL::%DUMPER-VALUE (AREF PCL::VEC PCL::I) (1+ PCL::LEVEL)
+;      (FORMAT NIL "~A->[~D]" PCL::PATH PCL::I))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-hash
+;     (PCL::%DUMPER-VALUE (GETHASH (CDR PCL::PAIR) PCL::H) (1+ PCL::LEVEL)
+;      (FORMAT NIL "~A->{~A}" PCL::PATH (PCL::%DUMPER-QUOTE (CAR PCL::PAIR))))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-body
+;     (PCL::%DUMPER-VALUE PCL::INNER PCL::LEVEL (FORMAT NIL "${~A}" PCL::PATH))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun p-load-with-recovery
+;     (PCL::%P-LOAD-FORMS-WITH-RECOVERY PCL::PATH)
+; 
+; caught style-warning:
+;   undefined function: pcl::%p-load-forms-with-recovery
+; 
+; compilation unit finished
+;   Undefined function:
+;     %p-load-forms-with-recovery
+;   caught 1 STYLE-WARNING condition
+# PCL Test library loaded
+; in: p-sub pl-test_arylen
+;     (MAIN::|$^w| (PCL:P-BOX-FOR-LOCAL 1))
+; 
+; caught style-warning:
+;   The variable $^W is defined but never used.
+; 
+; compilation unit finished
+;   caught 1 STYLE-WARNING condition
+Use of uninitialized value in join or string
+1..195
+ok 1
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16
+ok 17
+ok 18
+ok 19
+ok 20
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25
+ok 26
+ok 27
+ok 28
+ok 29
+ok 30
+ok 31
+ok 32
+ok 33
+ok 34
+ok 35
+ok 36
+ok 37
+ok 38
+ok 39
+ok 40
+ok 41
+ok 42
+ok 43
+ok 44
+ok 45
+ok 46
+ok 47
+ok 48
+ok 49
+ok 50
+ok 51
+ok 52
+ok 53
+ok 54
+ok 55
+ok 56
+ok 57
+ok 58
+ok 59
+ok 60
+ok 61
+ok 62
+ok 63
+ok 64
+ok 65
+ok 66
+ok 67
+ok 68
+ok 69
+ok 70
+ok 71
+ok 72
+; in:
+;      p-void-ctx (pl-is
+;              (p-scalar
+;               (p-scalar-ctx
+;                 (p-eval-block
+;                   (pl-pling #))))
+;              "pling" "arylen_p magic does not stop isa magic from being copied")
+;     (PEEN::PL-PEEN)
+; 
+; caught style-warning:
+;   undefined function: peen::pl-peen
+
+;     (PEEN::PL-PLING
+;      (PCL:P-LIST-CTX
+;        (PEEN::PL-PEEN)))
+; 
+; caught style-warning:
+;   undefined function: peen::pl-pling
+; 
+; compilation unit finished
+;   Undefined functions:
+;     pl-peen pl-pling
+;   caught 2 STYLE-WARNING conditions
+ok 73
+ok 74
+ok 75
+ok 76
+ok 77
+ok 78
+ok 79
+ok 80
+ok 81
+ok 82 - $a[-1] = 0
+not ok 83 - $a: $# on freed array is undef
+#      got: '-1'
+# expected: undef
+not ok 84 - $a: number of warnings
+#      got: '0'
+# expected: '1'
+not ok 85 - $a: msg
+#                   got: undef
+# expected to match: ^Attempt to set length of freed array
+not ok 86 - do {}: $# on freed array is undef
+#      got: '-1'
+# expected: undef
+not ok 87 - do {}: number of warnings
+#      got: '0'
+# expected: '1'
+not ok 88 - do {}: msg
+#                   got: undef
+# expected to match: ^Attempt to set length of freed array
+ok 89
+ok 90
+ok 91
+ok 92
+ok 93
+ok 94
+ok 95
+ok 96
+ok 97
+ok 98
+ok 99
+not ok 100 - orphaned 1 is always undef
+#      got: '42'
+# expected: undef
+ok 101
+ok 102
+ok 103
+ok 104
+ok 105
+ok 106
+ok 107
+ok 108
+not ok 109
+#      got: '-1'
+# expected: '7'
+ok 110
+not ok 111
+#      got: undef
+# expected: '23'
+not ok 112
+#      got: '-1'
+# expected: '7'
+ok 113
+not ok 114
+#      got: undef
+# expected: '23'
+ok 115
+ok 116
+ok 117
+ok 118 - bug 70171 (self-assignment via my %x = %$x)
+ok 119 - bug 70171 (self-assignment via my @x = @$x)
+ok 120 - bug 70171 (self-assignment via my @x = @$x) - goto variant
+ok 121 - bug 70171 (self-assignment via my %x = %$x) - goto variant
+ok 122 - aelem_fast on a nonexistent array does not crash
+ok 123 - no crash when freeing array that is being undeffed
+ok 124 - no crash when freeing array that is being cleared
+ok 125 - backref magic is not copied to elements
+not ok 126 - arylen_p magic does not stop isa magic from being copied
+#      got: undef
+# expected: 'pling'
+ok 127 - exists returns true for &PL_sv_undef elem [perl #7508]
+not ok 128 - undef preserves identity in array [perl #109726]
+#      got: 'SCALAR(0x1)'
+# expected: 'SCALAR(0x2)'
+ok 129 - returning my @a with nonexistent elements
+ok 130 - @_ alias to nonexistent elem within array
+ok 131 # skip [registry] writing through an @_ alias to a nonexistent array element must autovivify the caller's element -- WRONG REASON, corrected s464ay: the named primitive WORKS (`$#a=3; sub setit { $_[0]=
+ok 132 - reading alias to negative index past beginning
+ok 133 # skip [registry] assigning through an @_ alias to a non-creatable negative index must die 'Modification of non-creatable array value attempted' — error detection. not-supported.md: 'Error compatibility for invalid Perl input'.
+ok 134 - reading alias to -1 elem of empty array
+ok 135 # skip [registry] assigning through an @_ alias to a non-creatable negative index must die 'Modification of non-creatable array value attempted' — error detection. not-supported.md: 'Error compatibility for invalid Perl input'.
+ok 136 - no assertion failure after assigning ref to arylen when ary is gone
+ok 137 - lex -256
+ok 138 - lex -255
+ok 139 - lex -254
+ok 140 - lex -129
+ok 141 - lex -128
+ok 142 - lex -127
+ok 143 - lex -126
+ok 144 - lex   -1
+ok 145 - lex    0
+ok 146 - lex    1
+ok 147 - lex  126
+ok 148 - lex  127
+ok 149 - lex  128
+ok 150 - lex  129
+ok 151 - lex  254
+ok 152 - lex  255
+ok 153 - lex  256
+ok 154 - pkg -256
+ok 155 - pkg -255
+ok 156 - pkg -254
+ok 157 - pkg -129
+ok 158 - pkg -128
+ok 159 - pkg -127
+ok 160 - pkg -126
+ok 161 - pkg   -1
+ok 162 - pkg    0
+ok 163 - pkg    1
+ok 164 - pkg  126
+ok 165 - pkg  127
+ok 166 - pkg  128
+ok 167 - pkg  129
+ok 168 - pkg  254
+ok 169 - pkg  255
+ok 170 - pkg  256
+ok 171 - aelemfast with the same array on both sides of list assignment
+not ok 172 - assigning to arylen aliased in foreach(scalar $#arylen)
+#      got: '1'
+# expected: '3'
+ok 173 - assigning to itself
+ok 174 - lazy element creation with sub call
+ok 175 - lazy element creation with refgen
+not ok 176 - lazy element creation with refgen
+#      got: 'SCALAR(0x4)'
+# expected: 'SCALAR(0x5)'
+ok 177 - lazy element creation with refgen
+ok 178 - lazy element creation with refgen
+ok 179 - lazy element creation with foreach
+ok 180 - copying an array via = does not vivify elements
+ok 181 - map {} @a does not vivify elements
+ok 182 - unwinding localization of elem past end of array shrinks it
+ok 183 - copying an array via = does not vivify elements
+ok 184 - map {} @a does not vivify elements
+ok 185 - unwinding localization of elem past end of array shrinks it
+ok 186 - copying an array via = does not vivify elements
+ok 187 - map {} @a does not vivify elements
+ok 188 - unwinding localization of elem past end of array shrinks it
+ok 189 # skip [registry] reading a hole must not vivify or shift later elements — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'. (s295b: the 'magical @a' sibling is INCLUDED again — it only ever passed via the pre-hole-fix box-filled $#a++ representation.)
+ok 190 # skip [registry] reading a hole must not vivify or shift later elements — sparse arrays not emulated. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'. (s295b: the 'magical @a' sibling is INCLUDED again — it only ever passed via the pre-hole-fix box-filled $#a++ representation.)
+ok 191 # skip [registry] array holes (nonexistent elements) passed to a sub must keep their position — PCL has no defelem/hole. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.
+ok 192 # skip [registry] array holes (nonexistent elements) passed to a sub must keep their position — PCL has no defelem/hole. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.
+ok 193 # skip [registry] array holes (nonexistent elements) passed to a sub must keep their position — PCL has no defelem/hole. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.
+ok 194 # skip [registry] array holes (nonexistent elements) passed to a sub must keep their position — PCL has no defelem/hole. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.
+ok 195 - unshifting and growing an array initializes trailing elements

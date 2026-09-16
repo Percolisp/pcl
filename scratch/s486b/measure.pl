@@ -34,10 +34,10 @@ for my $name (map { basename($_) } @ARGV) {
             or die "transpile $name failed\n";
     }
     my $cmd = PCLSbcl::sbcl_prefix_str(runtime => $runtime, quote => 0)
-        . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry"
+        . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib" . ($ENV{PCL_NO_REGISTRY} ? "" : " --load $registry")
         . " --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\""
         . " --eval \"(pcl::p-load-with-recovery \\\"$cl\\\")\"";
-    my $tap = "$out_dir/$name.tap";
+    my $tap = "$out_dir/$name" . ($ENV{PCL_NO_REGISTRY} ? ".noreg" : "") . ".tap";
     system("timeout 300 $cmd > \Q$tap\E 2>&1");
     chdir $orig;
 

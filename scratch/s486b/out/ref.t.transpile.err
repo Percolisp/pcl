@@ -1,0 +1,1 @@
+PCL: statement dropped at ref.t line 335: $foo = doit $object "FOO"; -- Bug. Fell through. Missing case: ['Token::Symbol<$object>','Token::Quote::Double<"FOO">']

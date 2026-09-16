@@ -1,0 +1,489 @@
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %tap-out
+;     (DEFUN PCL::%TAP-OUT (PCL::CONTROL &REST PCL::ARGS)
+;       #<(SIMPLE-ARRAY CHARACTER
+;          (583)) Every TAP line this layer emits, through ONE writer (task #1115).
+;   
+;      Since #1115 STDOUT is a BYTE handle ? perl's default ? and a test
+;      DESCRIPTION carries whatever a `use utf8` file wrote into it,... {12013C675F}>
+;       PCL::|Dying|
+;       PCL::ON
+;       WARNING
+;       #<(SIMPLE-ARRAY CHARACTER
+;          (212)) , @_ }` at BEGIN), so one wide TAP description ended that whole
+;      file.  The handler is the backstop for the format directives' own output.
+;      It replaced 25 direct `format t` calls: one writer, not ... {12013C749F}>
+;       (PCL::%P-WITH-WIDE-UPGRADE
+;         (PCL::%P-OUT-STRING (APPLY #'FORMAT NIL PCL::CONTROL PCL::ARGS)
+;                             *STANDARD-OUTPUT* NIL)))
+; ==>
+;   (BLOCK PCL::%TAP-OUT
+;     PCL::|Dying|
+;     PCL::ON
+;     WARNING
+;     #<(SIMPLE-ARRAY CHARACTER
+;        (212)) , @_ }` at BEGIN), so one wide TAP description ended that whole
+;    file.  The handler is the backstop for the format directives' own output.
+;    It replaced 25 direct `format t` calls: one writer, not ... {12013C749F}>
+;     (PCL::%P-WITH-WIDE-UPGRADE
+;       (PCL::%P-OUT-STRING (APPLY #'FORMAT NIL PCL::CONTROL PCL::ARGS)
+;                           *STANDARD-OUTPUT* NIL)))
+; 
+; caught warning:
+;   undefined variable: pcl::Dying
+; 
+; caught warning:
+;   undefined variable: pcl::on
+; 
+; caught warning:
+;   undefined variable: common-lisp:warning
+; 
+; compilation unit finished
+;   Undefined variables:
+;     Dying on warning
+;   caught 3 WARNING conditions
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %test-log-stream
+;     (CONCATENATE 'STRING PCL::*CURRENT-TEST-FILE* ".fails.tsv")
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+
+;     (AND PCL::DIR (PLUSP (LENGTH PCL::DIR)) PCL::*CURRENT-TEST-FILE*)
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *current-test-file*
+;   caught 2 WARNING conditions
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %test-log-failure
+;     (PCL::%TEST-LOG-CLEAN PCL::*CURRENT-TEST-FILE*)
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+
+;     (PCL::TEST-DISPLAY-VALUE PCL::NAME)
+; 
+; caught style-warning:
+;   undefined function: pcl::test-display-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     test-display-value
+;   Undefined variable:
+;     *current-test-file*
+;   caught 1 WARNING condition
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %current-todo
+;     (PCL::TEST-UNDEF-P PCL::V)
+; 
+; caught style-warning:
+;   undefined function: pcl::test-undef-p
+; 
+; compilation unit finished
+;   Undefined function:
+;     test-undef-p
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-array
+;     (PCL::%DUMPER-VALUE (AREF PCL::VEC PCL::I) (1+ PCL::LEVEL)
+;      (FORMAT NIL "~A->[~D]" PCL::PATH PCL::I))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-hash
+;     (PCL::%DUMPER-VALUE (GETHASH (CDR PCL::PAIR) PCL::H) (1+ PCL::LEVEL)
+;      (FORMAT NIL "~A->{~A}" PCL::PATH (PCL::%DUMPER-QUOTE (CAR PCL::PAIR))))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-body
+;     (PCL::%DUMPER-VALUE PCL::INNER PCL::LEVEL (FORMAT NIL "${~A}" PCL::PATH))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun p-load-with-recovery
+;     (PCL::%P-LOAD-FORMS-WITH-RECOVERY PCL::PATH)
+; 
+; caught style-warning:
+;   undefined function: pcl::%p-load-forms-with-recovery
+; 
+; compilation unit finished
+;   Undefined function:
+;     %p-load-forms-with-recovery
+;   caught 1 STYLE-WARNING condition
+# PCL Test library loaded
+; in: let ((*package* *package*))
+;     (RE::PL-IS_REGEXP MAIN::$Z)
+; 
+; caught style-warning:
+;   undefined function: re::pl-is_regexp
+; 
+; compilation unit finished
+;   Undefined function:
+;     re::pl-is_regexp
+;   caught 1 STYLE-WARNING condition
+; PCL recovery: top-level form aborted (recovered): PCL: statement not supported at ref.t line 335: $foo = doit $object "FOO"; -- Bug. Fell through. Missing case: ['Token::Symbol<$object>','Token::Quote::Double<"FOO">']
+
+; in: p-eval-thunk (list "$x" "$y")
+;     (LAMBDA (MAIN::$X MAIN::$Y)
+;       (PCL:P-LIST-=
+;        (VECTOR (PCL:P-BACKSLASH MAIN::$X) (PCL:P-BACKSLASH MAIN::$Y))
+;        (PROGN 1 2)))
+; 
+; caught style-warning:
+;   The variable $x is assigned but never read.
+; 
+; caught style-warning:
+;   The variable $y is assigned but never read.
+; 
+; compilation unit finished
+;   caught 2 STYLE-WARNING conditions
+1..245
+ok 1
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16
+ok 17
+ok 18
+ok 19
+ok 20
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25 - reference to &{""} [perl #94476]
+ok 26 - creating stub with \&deleted_stash::foo [perl #128532]
+ok 27 - refgen+PADTMP
+ok 28
+ok 29 # skip no dynamic loading on miniperl, so can't load re
+ok 30 # skip no dynamic loading on miniperl, so can't load re
+ok 31 # skip no dynamic loading on miniperl, so can't load re
+ok 32 # skip no dynamic loading on miniperl, so can't load re
+ok 33 # skip no dynamic loading on miniperl, so can't load re
+ok 34 - REGEXP keeps a ref to its mother_re
+ok 35 - REGEXP with mother_re still matches
+not ok 36 - Scalar dereference
+#                   got: ''
+# expected to match: Not a SCALAR reference
+not ok 37 - Array dereference
+#                   got: ''
+# expected to match: Not an ARRAY reference
+not ok 38 - Hash dereference
+#                   got: ''
+# expected to match: Not a HASH reference
+not ok 39 - Code dereference
+#                   got: 'Undefined subroutine &main::GLOB(0x2) called at (eval 4) line 1.
+'
+# expected to match: Not a CODE reference
+not ok 40 - Scalar dereference
+#                   got: ''
+# expected to match: Not a SCALAR reference
+not ok 41 - Array dereference
+#                   got: ''
+# expected to match: Not an ARRAY reference
+ok 42 - Hash dereference
+ok 43 - Code dereference
+not ok 44 - Glob dereference
+#                   got: 'Can't use an undefined value as a symbol reference at (eval 9) line 1.
+'
+# expected to match: Not a GLOB reference
+ok 45 - Glob dereference of PVIO is acceptable
+ok 46 - IO slot of the temporary glob is set correctly
+ok 47 - ref() for ref to undef
+ok 48 - stringify for ref to undef
+ok 49 - ref() for ref to constant IV
+ok 50 - stringify for ref to constant IV
+ok 51 - ref() for ref to constant NV
+ok 52 - stringify for ref to constant NV
+ok 53 - ref() for ref to constant PV
+ok 54 - stringify for ref to constant PV
+ok 55 - ref() for ref to scalar
+ok 56 - stringify for ref to scalar
+ok 57 - ref() for ref to PVIV
+ok 58 - stringify for ref to PVIV
+ok 59 - ref() for ref to PVNV
+ok 60 - stringify for ref to PVNV
+ok 61 - ref() for ref to PVMG
+ok 62 - stringify for ref to PVMG
+ok 63 - ref() for ref to PVBM
+ok 64 - stringify for ref to PVBM
+ok 65 - ref() for ref to scalar @array
+ok 66 - stringify for ref to scalar @array
+ok 67 - ref() for ref to scalar %hash
+ok 68 - stringify for ref to scalar %hash
+ok 69 - ref() for ref to vstring
+ok 70 - stringify for ref to vstring
+ok 71 - ref() for ref to ref
+ok 72 - stringify for ref to ref
+ok 73 - ref() for ref to substr lvalue
+ok 74 - stringify for ref to substr lvalue
+ok 75 - ref() for ref to pos lvalue
+ok 76 - stringify for ref to pos lvalue
+ok 77 - ref() for ref to vec lvalue
+ok 78 - stringify for ref to vec lvalue
+ok 79 - ref() for ref to named array
+ok 80 - stringify for ref to named array
+ok 81 - ref() for ref to anon array
+ok 82 - stringify for ref to anon array
+ok 83 - ref() for ref to named hash
+ok 84 - stringify for ref to named hash
+ok 85 - ref() for ref to anon hash
+ok 86 - stringify for ref to anon hash
+ok 87 - ref() for ref to named sub
+ok 88 - stringify for ref to named sub
+ok 89 - ref() for ref to anon sub
+ok 90 - stringify for ref to anon sub
+ok 91 - ref() for ref to glob
+ok 92 - stringify for ref to glob
+not ok 93 - ref() for ref to format
+#      got: ''
+# expected: 'FORMAT'
+not ok 94 - stringify for ref to format
+#                   got: ''
+# expected to match: ^FORMAT\(0x[0-9a-f]+\)$
+not ok 95 - IO refs are blessed into IO::File
+#      got: 'GLOB'
+# expected: 'IO::File'
+not ok 96 - stringify for IO refs
+#                   got: 'GLOB(0x2)'
+# expected to match: ^IO::File=IO\(0x[0-9a-f]+\)$
+ok 97 - ref sets UTF8 flag correctly
+ok 98
+ok 99 - single value in anonhash creates a key (count)
+ok 100 - single value in anonhash creates a key (existence)
+ok 101 - single value in anonhash creates a key (value)
+ok 102
+ok 103
+ok 104
+ok 105
+ok 106
+ok 107
+ok 108
+not ok 109
+#      got: 'bar'
+# expected: 'foo'
+ok 110
+ok 111
+ok 112
+ok 113
+ok 114
+ok 115
+ok 116
+not ok 117
+#                   got: 'Assigned value is not a SCALAR reference at (eval 11) line 1.
+'
+# expected to match: Can\'t modify.*ref.*in.*assignment(?x:
+           )|Experimental aliasing via reference not enabled
+# leaving block
+# left block
+not ok 118
+#      got: undef
+# expected: 'glob 3'
+ok 119
+# should generate an error...
+# good, didn't recurse
+ok 120 - DESTROY called on array elem
+ok 121 - DESTROY called on closure variable
+ok 122 - no double free when stashes are blessed into each other
+ok 123
+ok 124
+ok 125
+ok 126
+ok 127
+ok 128
+ok 129
+ok 130 - UNIVERSAL::AUTOLOAD called when freeing qr//
+ok 131 - warn called inside UNIVERSAL::DESTROY
+ok 132 - coredump on typeglob = (SvRV && !SvROK)
+ok 133 - freeing self-referential typeglob
+ok 134 - STDOUT destructor
+ok 135 - Nothing before we start
+ok 136 - Nothing before we start
+ok 137 - Accessing via 8 bit symref works
+ok 138 - Accessing via UTF8 symref works
+ok 139 - Name is 1 char
+ok 140 - UTF8 representation is 3 chars
+ok 141 - Nothing before we start
+ok 142 - Nothing before we start
+ok 143 - Accessing via Unicode symref works
+ok 144 - Accessing via the UTF8 byte sequence gives nothing
+ok 145 - They differ
+ok 146 - Nothing before we start (scalars)
+ok 147 - Nothing before we start
+not ok 148 - Accessing via the correct name works
+#      got: undef
+# expected: 'Yummy'
+ok 149 - Accessing via a different NUL-containing name gives nothing
+not ok 150 - defined via the correct name works
+ok 151 - defined via a different NUL-containing name gives nothing
+ok 152 - Nothing before we start (arrays)
+ok 153 - Nothing before we start
+not ok 154 - Accessing via the correct name works
+#      got: undef
+# expected: 'Yummy'
+ok 155 - Accessing via a different NUL-containing name gives nothing
+not ok 156 - defined via the correct name works
+ok 157 - defined via a different NUL-containing name gives nothing
+ok 158 - Nothing before we start (array slices)
+ok 159 - Nothing before we start
+not ok 160 - Accessing via the correct name works
+#      got: undef
+# expected: 'Yummy'
+ok 161 - Accessing via a different NUL-containing name gives nothing
+not ok 162 - defined via the correct name works
+ok 163 - defined via a different NUL-containing name gives nothing
+ok 164 - Nothing before we start (hashes)
+ok 165 - Nothing before we start
+not ok 166 - Accessing via the correct name works
+#      got: undef
+# expected: 'Yummy'
+ok 167 - Accessing via a different NUL-containing name gives nothing
+not ok 168 - defined via the correct name works
+ok 169 - defined via a different NUL-containing name gives nothing
+ok 170 - Nothing before we start (hash slices)
+ok 171 - Nothing before we start
+not ok 172 - Accessing via the correct name works
+#      got: undef
+# expected: 'Yummy'
+ok 173 - Accessing via a different NUL-containing name gives nothing
+not ok 174 - defined via the correct name works
+ok 175 - defined via a different NUL-containing name gives nothing
+ok 176 - We get different typeglobs. In fact, undef
+ok 177
+ok 178
+ok 179 - hash deref from list slice w/o ->
+ok 180 - hash deref from list slice w/ ->
+ok 181 - array deref from list slice w/o ->
+ok 182 - array deref from list slice w/ ->
+ok 183 - code deref from list slice w/o ->
+ok 184 - code deref from list slice w/ ->
+not ok 185 - deref of undef from list slice fails
+#                   got: 'Modification of a read-only value attempted at (eval 0) line 0.
+'
+# expected to match: Can't use an undefined value as a HASH reference
+not ok 186 - PVBM ref is not a GLOB ref
+not ok 187 - PVBM is not a GLOB ref
+not ok 188 - PVBM is not a SCALAR ref
+not ok 189 - PVBM is not an ARRAY ref
+ok 190 - PVBM is not a HASH ref
+ok 191 - PVBM is not a CODE ref
+ok 192 - PVBM is not an object
+ok 193
+ok 194
+ok 195
+not ok 196
+#      got: 'Died at - line 1.
+'
+# expected: 'Died at -e line 1.
+'
+not ok 197
+#      got: 'Died at - line 1.
+'
+# expected: 'Died at -e line 1.
+'
+not ok 198
+#      got: 'Died at - line 1.
+'
+# expected: 'Died at -e line 1.
+'
+ok 199
+ok 200 - freeing freed glob in global destruction
+ok 201 - %$undef
+ok 202 - scalar %$undef
+ok 203 - !%$undef
+ok 204 - if ( %$undef) {}
+ok 205 - if (!%$undef) {}
+ok 206 - unless ( %$undef) {}
+ok 207 - unless (!%$undef) {}
+ok 208 - 1 if %$undef
+ok 209 - 1 if !%$undef
+ok 210 - 1 unless %$undef;
+ok 211 - 1 unless ! %$undef
+ok 212 -  %$undef ? 1 : 0
+ok 213 - !%$undef ? 1 : 0
+ok 214 - array with 1 weak ref
+ok 215 - array with 2 weak refs
+ok 216 - hash with 1 weak ref
+Blessing into '' is deprecated at unknown line 0.
+; PCL recovery: 1 top-level form(s) aborted in /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/scratch/s486b/out/ref.t.lisp
+ok 217 - hash with 2 weak refs
+not ok 218 - weaken refuses to weaken a read-only ref
+#                   got: ''
+# expected to match: ^Modification of a read-only
+ok 219 - ref() is nul-clean
+not ok 220 - assignment to value aliased to literal number
+#                   got: ''
+# expected to match: ^Modification of a read-only
+not ok 221 - refgen does not allow assignment to value aliased to literal number
+#                   got: ''
+# expected to match: ^Modification of a read-only
+not ok 222 - assignment to value aliased to literal string
+#                   got: ''
+# expected to match: ^Modification of a read-only
+not ok 223 - refgen does not allow assignment to value aliased to literal string
+#                   got: ''
+# expected to match: ^Modification of a read-only
+ok 224 - [perl #109746] referential identity of \literal under threads+mad
+ok 225 - !ref $false
+ok 226 - !ref $true
+ok 227 - !ref $plain
+ok 228 - !ref $obj
+ok 229 - !ref $objnull
+ok 230 - !ref $obj0
+ok 231 - !ref $obj00
+ok 232 - !ref $obj1
+ok 233 - ref $obj || 0
+ok 234 - ref $obj // 0
+ok 235 - $true && ref $obj
+ok 236 - ref $obj ? "true" : "false"
+ok 237 - if (ref $obj)
+ok 238 - if (ref $obj0)
+ok 239 - if (ref $obj) else
+ok 240 - if (ref $obj0) else
+ok 241 - RT #78288 - mutable PL_sv_zero copy
+ok 242 # skip no dynamic loading on miniperl, so can't load arybase
+# Looks like you planned 245 tests but ran 242.
+# PCL-INCOMPLETE last=242 planned=245 desc=RT #78288 - mutable PL_sv_zero copy

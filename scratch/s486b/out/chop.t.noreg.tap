@@ -1,0 +1,294 @@
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %tap-out
+;     (DEFUN PCL::%TAP-OUT (PCL::CONTROL &REST PCL::ARGS)
+;       #<(SIMPLE-ARRAY CHARACTER
+;          (583)) Every TAP line this layer emits, through ONE writer (task #1115).
+;   
+;      Since #1115 STDOUT is a BYTE handle ? perl's default ? and a test
+;      DESCRIPTION carries whatever a `use utf8` file wrote into it,... {12013C675F}>
+;       PCL::|Dying|
+;       PCL::ON
+;       WARNING
+;       #<(SIMPLE-ARRAY CHARACTER
+;          (212)) , @_ }` at BEGIN), so one wide TAP description ended that whole
+;      file.  The handler is the backstop for the format directives' own output.
+;      It replaced 25 direct `format t` calls: one writer, not ... {12013C749F}>
+;       (PCL::%P-WITH-WIDE-UPGRADE
+;         (PCL::%P-OUT-STRING (APPLY #'FORMAT NIL PCL::CONTROL PCL::ARGS)
+;                             *STANDARD-OUTPUT* NIL)))
+; ==>
+;   (BLOCK PCL::%TAP-OUT
+;     PCL::|Dying|
+;     PCL::ON
+;     WARNING
+;     #<(SIMPLE-ARRAY CHARACTER
+;        (212)) , @_ }` at BEGIN), so one wide TAP description ended that whole
+;    file.  The handler is the backstop for the format directives' own output.
+;    It replaced 25 direct `format t` calls: one writer, not ... {12013C749F}>
+;     (PCL::%P-WITH-WIDE-UPGRADE
+;       (PCL::%P-OUT-STRING (APPLY #'FORMAT NIL PCL::CONTROL PCL::ARGS)
+;                           *STANDARD-OUTPUT* NIL)))
+; 
+; caught warning:
+;   undefined variable: pcl::Dying
+; 
+; caught warning:
+;   undefined variable: pcl::on
+; 
+; caught warning:
+;   undefined variable: common-lisp:warning
+; 
+; compilation unit finished
+;   Undefined variables:
+;     Dying on warning
+;   caught 3 WARNING conditions
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %test-log-stream
+;     (CONCATENATE 'STRING PCL::*CURRENT-TEST-FILE* ".fails.tsv")
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+
+;     (AND PCL::DIR (PLUSP (LENGTH PCL::DIR)) PCL::*CURRENT-TEST-FILE*)
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *current-test-file*
+;   caught 2 WARNING conditions
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %test-log-failure
+;     (PCL::%TEST-LOG-CLEAN PCL::*CURRENT-TEST-FILE*)
+; 
+; caught warning:
+;   undefined variable: pcl::*current-test-file*
+
+;     (PCL::TEST-DISPLAY-VALUE PCL::NAME)
+; 
+; caught style-warning:
+;   undefined function: pcl::test-display-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     test-display-value
+;   Undefined variable:
+;     *current-test-file*
+;   caught 1 WARNING condition
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %current-todo
+;     (PCL::TEST-UNDEF-P PCL::V)
+; 
+; caught style-warning:
+;   undefined function: pcl::test-undef-p
+; 
+; compilation unit finished
+;   Undefined function:
+;     test-undef-p
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-array
+;     (PCL::%DUMPER-VALUE (AREF PCL::VEC PCL::I) (1+ PCL::LEVEL)
+;      (FORMAT NIL "~A->[~D]" PCL::PATH PCL::I))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-hash
+;     (PCL::%DUMPER-VALUE (GETHASH (CDR PCL::PAIR) PCL::H) (1+ PCL::LEVEL)
+;      (FORMAT NIL "~A->{~A}" PCL::PATH (PCL::%DUMPER-QUOTE (CAR PCL::PAIR))))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun %dumper-body
+;     (PCL::%DUMPER-VALUE PCL::INNER PCL::LEVEL (FORMAT NIL "${~A}" PCL::PATH))
+; 
+; caught style-warning:
+;   undefined function: pcl::%dumper-value
+; 
+; compilation unit finished
+;   Undefined function:
+;     %dumper-value
+;   caught 1 STYLE-WARNING condition
+
+; file: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/cl/pcl-test.lisp
+; in: defun p-load-with-recovery
+;     (PCL::%P-LOAD-FORMS-WITH-RECOVERY PCL::PATH)
+; 
+; caught style-warning:
+;   undefined function: pcl::%p-load-forms-with-recovery
+; 
+; compilation unit finished
+;   Undefined function:
+;     %p-load-forms-with-recovery
+;   caught 1 STYLE-WARNING condition
+# PCL Test library loaded
+1..148
+ok 1 - optimized
+ok 2 - unoptimized
+ok 3 - chop list of strings
+ok 4 - chop on list reduces one-character element to an empty string
+ok 5 - check return value when chomp string ending with two newlines; $/ is set to default of one newline
+ok 6 - chomp string ending with two newlines while $/ is set to one newline
+ok 7 - check return value chomp string ending with one newline while $/ is set to a newline
+ok 8 - test typical use of chomp; chomp a string ending in a single newline while $/ is set to default of one newline
+ok 9 - check return value when chomp a string that does not end with current value of $/, 0 should be returned
+ok 10 - chomp a string that does not end with the current value of $/
+ok 11 - check return value when chomp string with $/ consisting of more than one character, and with the ending of the string matching $/
+ok 12 - chomp a string when $/ consists of two characters that are at the end of the string, check that chomped string contains remnant of original string
+ok 13 - check return value when call chomp with $/ consisting of more than one character, and with the ending of the string NOT matching $/
+ok 14 - chomp a string when $/ consists of two characters that are NOT at the end of the string
+ok 15 - check return value when chomp in paragraph mode on string ending with 5 newlines
+ok 16 - chomp in paragraph mode on string ending with 5 newlines
+ok 17 - check return value when chomp in paragraph mode on string ending with 2 newlines
+ok 18 - chomp in paragraph mode on string ending with 2 newlines
+ok 19 - check return value when chomp in paragraph mode on string ending with 1 newline
+ok 20 - chomp in paragraph mode on string ending with 1 newlines
+ok 21 - check return value when chomp in paragraph mode on string ending with no newlines
+ok 22 - chomp in paragraph mode on string lacking trailing newlines
+ok 23 - check return value when chomp string that consists solely of current value of $/
+ok 24 - chomp on string that consists solely of current value of $/; check that empty string remains
+ok 25 - check return value when chomp string that ends with current value of $/. $/ contains two characters
+ok 26 - check that when chomp string that ends with currnt value of $/, the part of original string that wasn't in $/ remains
+ok 27 - check return value when chomp string that does not end with $/
+ok 28 - chomp a string that does not end with $/, the entire string should remain intact
+ok 29 - check return value when call chomp with $_ = "ab\n", $/ = \3
+ok 30 - chomp with $_ = "ab\n", $/ = \3
+ok 31 - Go Unicode
+ok 32
+ok 33
+ok 34
+ok 35
+ok 36
+ok 37
+ok 38
+ok 39 - chomp ref (modify)
+ok 40
+ok 41 - chomp ref (no modify)
+ok 42 - chomp hash key
+ok 43 - chomp hash key
+ok 44 - chomp hash key
+ok 45 - chop hash key
+ok 46 - chop hash key
+ok 47 - chop hash key
+not ok 48
+not ok 49
+not ok 50
+not ok 51
+ok 52 - start=78 end=78 [returns 1]
+ok 53 - start=78 end=78
+ok 54 - start=78 end=211 [returns 1]
+ok 55 - start=78 end=211
+ok 56 - start=78 end=211 (end as bytes) [returns 0]
+ok 57 - start=78 end=211 (end as bytes)
+ok 58 - start=78 end=211 ($/ as bytes) [returns 0]
+ok 59 - start=78 end=211 ($/ as bytes)
+ok 60 - start=78 end=212 [returns 1]
+ok 61 - start=78 end=212
+ok 62 - start=78 end=212 (end as bytes) [returns 0]
+ok 63 - start=78 end=212 (end as bytes)
+ok 64 - start=78 end=212 ($/ as bytes) [returns 0]
+ok 65 - start=78 end=212 ($/ as bytes)
+ok 66 - start=78 end=1296 [returns 1]
+ok 67 - start=78 end=1296
+ok 68 - start=78 end=1296 (end as bytes) [returns 0]
+ok 69 - start=78 end=1296 (end as bytes)
+ok 70 - start=78 end=1296 ($/ as bytes) [returns 0]
+ok 71 - start=78 end=1296 ($/ as bytes)
+ok 72 - start=211 end=78 [returns 1]
+ok 73 - start=211 end=78
+ok 74 - start=211 end=211 [returns 1]
+ok 75 - start=211 end=211
+ok 76 - start=211 end=211 (end as bytes) [returns 0]
+ok 77 - start=211 end=211 (end as bytes)
+ok 78 - start=211 end=211 ($/ as bytes) [returns 0]
+ok 79 - start=211 end=211 ($/ as bytes)
+ok 80 - start=211 end=212 [returns 1]
+ok 81 - start=211 end=212
+ok 82 - start=211 end=212 (end as bytes) [returns 0]
+ok 83 - start=211 end=212 (end as bytes)
+ok 84 - start=211 end=212 ($/ as bytes) [returns 0]
+ok 85 - start=211 end=212 ($/ as bytes)
+ok 86 - start=211 end=1296 [returns 1]
+ok 87 - start=211 end=1296
+ok 88 - start=211 end=1296 (end as bytes) [returns 0]
+ok 89 - start=211 end=1296 (end as bytes)
+ok 90 - start=211 end=1296 ($/ as bytes) [returns 0]
+ok 91 - start=211 end=1296 ($/ as bytes)
+ok 92 - start=212 end=78 [returns 1]
+ok 93 - start=212 end=78
+ok 94 - start=212 end=211 [returns 1]
+ok 95 - start=212 end=211
+ok 96 - start=212 end=211 (end as bytes) [returns 0]
+ok 97 - start=212 end=211 (end as bytes)
+ok 98 - start=212 end=211 ($/ as bytes) [returns 0]
+ok 99 - start=212 end=211 ($/ as bytes)
+ok 100 - start=212 end=212 [returns 1]
+ok 101 - start=212 end=212
+ok 102 - start=212 end=212 (end as bytes) [returns 0]
+ok 103 - start=212 end=212 (end as bytes)
+ok 104 - start=212 end=212 ($/ as bytes) [returns 0]
+ok 105 - start=212 end=212 ($/ as bytes)
+ok 106 - start=212 end=1296 [returns 1]
+ok 107 - start=212 end=1296
+ok 108 - start=212 end=1296 (end as bytes) [returns 0]
+ok 109 - start=212 end=1296 (end as bytes)
+ok 110 - start=212 end=1296 ($/ as bytes) [returns 0]
+ok 111 - start=212 end=1296 ($/ as bytes)
+ok 112 - start=1296 end=78 [returns 1]
+ok 113 - start=1296 end=78
+ok 114 - start=1296 end=211 [returns 1]
+ok 115 - start=1296 end=211
+ok 116 - start=1296 end=211 (end as bytes) [returns 0]
+ok 117 - start=1296 end=211 (end as bytes)
+ok 118 - start=1296 end=211 ($/ as bytes) [returns 0]
+ok 119 - start=1296 end=211 ($/ as bytes)
+ok 120 - start=1296 end=212 [returns 1]
+ok 121 - start=1296 end=212
+ok 122 - start=1296 end=212 (end as bytes) [returns 0]
+ok 123 - start=1296 end=212 (end as bytes)
+ok 124 - start=1296 end=212 ($/ as bytes) [returns 0]
+ok 125 - start=1296 end=212 ($/ as bytes)
+ok 126 - start=1296 end=1296 [returns 1]
+ok 127 - start=1296 end=1296
+ok 128 - start=1296 end=1296 (end as bytes) [returns 0]
+ok 129 - start=1296 end=1296 (end as bytes)
+ok 130 - start=1296 end=1296 ($/ as bytes) [returns 0]
+ok 131 - start=1296 end=1296 ($/ as bytes)
+ok 132
+ok 133
+ok 134 - chopping ascii NUL
+ok 135 - chopping utf8 NUL
+ok 136 - chopped ascii NUL
+ok 137 - chopped utf8 NUL
+ok 138 - extend sp in pp_chop
+ok 139 - extend sp in pp_chomp
+ok 140 - chopping high 'unicode'- remnant
+ok 141 - chopping high 'unicode' - result
+ok 142 - chop even higher 'unicode'- remnant
+ok 143 - chop even higher 'unicode' - result
+ok 144 - RT #123057: chomp works as expected on split
+ok 145 - lexical $a = chomp $a when $a eq $/ eq 7
+ok 146 - lexical $a = chomp $a when $a eq $/ eq 0
+ok 147 - lexical $b = chomp @a when $b eq $/ eq 7 and \$a[0] == \$b
+ok 148 - lexical $b = chomp @a when $b eq $/ eq 0 and \$a[0] == \$b
