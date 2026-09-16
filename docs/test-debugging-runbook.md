@@ -171,6 +171,17 @@ queue cannot grow unnoticed — 229 of the 708 rows (bop.t, one mechanism, now
 (file, description); `save` cannot write causes and warns before it would throw
 them away.  Rows leave, and gain a cause, BY EDIT.
 
+**The causes are SUMMED BY CLASS** (s486a): one rule, six classes
+(`not-supported` / `parked` / `bug` / `unexplained` / `perl-skip` / `other`),
+one function `PCLCauses::cause_class`, and the `CAUSES:` line every runner
+prints IS that split.  So when you write a cause, you are choosing its class:
+cite the `docs/not-supported.md` section with an `NS:` anchor when one covers
+the row (a task number beside it is fine — the section still wins, because
+fixing every filed bug would not make the row pass), a bare `#NNNN` when it is
+a bug, `PARKED:` for a scheduling decision.  A cause that cites neither lands
+in `other`, the hygiene list — see `docs/failure-cause-classes.md` and
+`tools/cause-census.pl --hygiene`.
+
 ## 5. The migration (remaining work): un-mutate the ~14 inline-skipped files
 Files with inline `ok(1,'SKIP…')` / commented-out tests (sort.t, state.t, reset.t, lex.t,
 quotemeta.t, each.t, join.t, range.t, splice.t, sub.t, loopctl.t, local.t, time.t,

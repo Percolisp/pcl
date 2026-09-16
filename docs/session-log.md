@@ -2,6 +2,20 @@
 
 Append new entries at the top. One section per session.
 
+## Session 486a (Opus, 2026-09-16) — the failure-cause CLASS census: one rule, six classes, one command (task #1782)
+
+**The USER's question**: "how many of the failures are from what we don't support?"  Every blessed failing row has carried a CAUSE since #993 I3, but the causes had never been summed by class, and no runner printed the split.
+
+**The rule (Fable, recorded verbatim in DECIDED §s486a and in the module header)**: six classes — `not-supported` (an `NS:` anchor anywhere, or the literal `not-supported.md` citation; it WINS over a task number, because with every filed bug fixed PCL would still fail the row), `parked`, `bug`, `unexplained`, `perl-skip` (excluded from the share's denominator), `other` (a hygiene list expected to trend to zero).  The ORDER of the tests IS the rule.  `PCLCauses::cause_class` is the only reading; `has_cause` still defines "attributed", so the census's `unexplained` is the number the runners have always printed.
+
+**Where it prints**: `causes_line`'s third answer IS `census_line`, so `tools/sweep-diff.pl`, `tools/run-perl-suite.pl` and `tools/cpan-scoreboard.pl --diff` gained the split with no second reading of the column (rule 11) — the question is answerable from any run, not only from the new tool.  The three tests that asserted the old line's shape were updated.
+
+**The tool**: `tools/cause-census.pl` over six populations, guard `tools/t/cause-census.t` (25 rows, fixture baselines).  Two design points worth keeping: the sweep is ROW-weighted by joining `.faillog` to the key baseline when a run log exists (it names the log's DATE) and KEY-weighted otherwise, **saying which** — 488 blessed lines stand for 635 failing rows, so the two answers differ; and the skip-registry column of `_status.tsv` is read when it exists and printed `NOT COUNTED` otherwise, never zero, because a registry relabel is a not-supported FAILURE the fail count does not contain.
+
+**First measurement** (main `4429126a`, `.faillog` of 2026-09-06): sweep 635 rows = 268 not-supported / 69 parked / 291 bug / 7 other — **53 % of the sweep's failing rows are deliberate non-support**; companion 11,984 = 4,661 / 88 / 4,873 / 2,362 unexplained (**40 %**); board 389 = 88 / 294 / 7 perl-skip; XDIFF 2,517 all not-supported by construction; shortfall 12,213 + 444,439.  Read the per-population rows — the grand total is dominated by the `t/` shortfall's generated files.
+
+**Against Fable's hand measurement**: every population TOTAL reproduces; three splits differ and all three are the hand grep (an `NS:`-less `not-supported.md` citation, 59 `partly #752` rows, a `PARKED:`+task row), reconciled row by row in `docs/failure-cause-classes.md`.  Filed **#1783**: `mro/inconsistent_c3_utf8.t` has a blessed XDIFF row but no reason row — the one row in that population the rule cannot class.
+
 ## Session 485 (Fable, 2026-09-14 ~08:00 → ~10:30) — "Please continue": the three stopped worktrees resumed in place, s484c and s473t5f reviewed and merged; the xs gate files parked (USER); "Don't start more subjobs" (USER)
 
 **Resume.**  The box had been rebooted before the session (no leftover processes); main `edd6dc78`, CI green through it.  Per the s484 restart recipe, s473t5f (uni/) and s484c (the regex + glob fillers) were resumed as pinned Opus agents in their EXISTING worktrees — each told main had moved by one docs-only commit and to rebase first — and s484d was held for the second slot per the recipe's merge order (it edits `perl-tests/t/test.pl` + the runner; its companion `--all --quick` belongs on top of the other two).  While they ran: review probes were written from the seven task records (t5f 21 rows, s484c 22 rows; perl 5.40.3 oracle) and the base inverse measured on main — the t5f base dies at `nèw Àlìcè`, the s484c base hangs in `while ($s =~ /(\w*)/g)` and dies with a raw SBCL type error on `$$_{k}` with a glob in `$_`; and the op/ census residue was designed as three size bands (`~/pcl-agent-scratch/s473/s473t6/plan.md` + the t6a brief).

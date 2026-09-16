@@ -28,6 +28,35 @@ that breaks a previously passing assertion, or that makes a file stop
 before rows it used to produce, fails the run — so the numbers above can
 only move honestly.
 
+**And every blessed row carries a CAUSE, so the failures can be split into
+what is a bug and what is the deliberate edge of the language PCL
+implements.**  One rule, six classes, one command
+(`tools/cause-census.pl --markdown`, rule and reconciliation in
+[`failure-cause-classes.md`](failure-cause-classes.md)) — measured
+2026-09-16 against the sweep log of 2026-09-06:
+
+| population | rows | not-supported | parked | bug | other | unexplained | perl-skip | not-supported + parked |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| perl-tests sweep | 635 | 268 | 69 | 291 | 7 | 0 | 0 | 53.1% |
+| companion (perl's own t/) | 11,984 | 4,661 | 88 | 4,873 | 0 | 2,362 | 0 | 39.6% |
+| CPAN board (14 dists) | 389 | 88 | 0 | 294 | 0 | 0 | 7 | 23.0% |
+| companion XDIFF rows | 2,517 | 2,516 | 0 | 0 | 0 | 1 | 0 | 100.0% |
+| shortfall: perl-tests | 12,213 | 267 | 0 | 104 | 0 | 11,842 | 0 | 2.2% |
+| shortfall: perl's t/ | 444,439 | 55,393 | 417 | 388,107 | 0 | 522 | 0 | 12.6% |
+| **all populations** | **472,177** | **63,193** | **574** | **393,669** | **7** | **14,727** | **7** | **13.5%** |
+
+`not-supported` = the cause names a [`not-supported.md`](not-supported.md)
+section; `parked` = a scheduling decision; `bug` = a filed task; `perl-skip`
+= perl skips the file too (excluded from the share's denominator);
+`unexplained` = not yet attributed — the audit's own queue, counted on every
+run so it cannot grow unnoticed.  **Read the per-population rows, not the
+total**: the total is dominated by the `t/` shortfall's few enormous
+generated files.  The `perl-tests` sweep is the population PCL is measured
+against on every change, and **just over half of its failing rows are
+deliberate non-support, not bugs**.  Rows the skip registry relabels as
+skips are not-supported failures too; they were NOT COUNTED in the
+measurement above (the log predates the column).
+
 **Untranslatable statements are never silent.**  One the compiler cannot
 lower is announced on stderr at compile time
 (`PCL: statement dropped at FILE line N: …`) and, when the program reaches

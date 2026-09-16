@@ -11,6 +11,23 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s486a (2026-09-16, Fable ruling / Opus execution) — the failure-cause CLASS census: ONE rule, six classes, `tools/cause-census.pl`
+
+- **THE RULE (verbatim; the code is `PCLCauses::cause_class`, the explanation `docs/failure-cause-classes.md`).**  A blessed row (failing, diverging, or never produced) falls into EXACTLY ONE class, decided from its CAUSE text by ONE function, `PCLCauses::cause_class`:
+  1. **`not-supported`** — the cause names a `docs/not-supported.md` section: an `NS:` anchor ANYWHERE in the text, or the literal `not-supported.md` citation (the spelling `baselines/perl-suite-expected.tsv` uses).  A row that ALSO names a task is still not-supported: with every filed bug fixed PCL would still fail it; the task owns the residue, not the row.
+  2. **`parked`** — `PARKED:` — a USER scheduling decision (pack/unpack today).  Reported beside not-supported, never folded into it.
+  3. **`bug`** — a task number (`#NNNN`) and nothing of the above: the queue.
+  4. **`unexplained`** — no cause, or `UNEXPLAINED…` (= `has_cause` false).
+  5. **`perl-skip`** — `PERL-SKIP` (the board): perl skips the file too, so it is not a PCL failure; shown, and EXCLUDED from the share's denominator.
+  6. **`other`** — has a cause matching none of the above (today: `DECIDED "PCL has no PVBM"` ×7, `PCL does not model use strict refs` ×2, the s473t1 shortfall notes).  A HYGIENE list the tool prints; it is expected to trend to zero, because a DECIDED divergence must carry the `NS:` section it rests on.
+- **The ORDER of the tests IS the rule** — not-supported before task; `unexplained` decided first, so a cause-less row can never read as `other`.  `has_cause` stays the ONE definition of "attributed", so the census's `unexplained` is the same number the runners have printed since #993.
+- **`causes_line`'s third answer IS `census_line`**, so `tools/sweep-diff.pl`, `tools/run-perl-suite.pl` and `tools/cpan-scoreboard.pl --diff` all print the split with no second reading of the column (rule 11); the cause-less count they always printed moved to a continuation line, unchanged in meaning.
+- **The skip registry enters the DENOMINATOR, and is NEVER inferred**: a `cl/skip-registry.lisp` relabel is a not-supported FAILURE the sweep's fail count does not contain (~180/run), read from `.faillog/_status.tsv`'s registry column when it exists, printed `registry: NOT COUNTED (…)` otherwise.
+- **Two weightings, never silently substituted**: with a `.faillog` the sweep is ROW-weighted (joined on (file, description), the log's DATE printed); without one KEY-weighted, and the tool says which.  A run row with no blessed row is log/baseline DRIFT, reported on its own line.
+- **First measurement (2026-09-16, main `4429126a`, `.faillog` of 2026-09-06)** — sweep 635 rows: not-supported 268 / parked 69 / bug 291 / other 7; companion 11,984: 4,661 / 88 / 4,873 / 0 / unexplained 2,362; board 389: 88 / 0 / 294 / 0 / perl-skip 7; XDIFF 2,517 (2,516 not-supported by construction); shortfall perl-tests 12,213 (11,842 unexplained) and t/ 444,439.  **Read the per-population rows, never the grand total** — it is dominated by the t/ shortfall's generated files; the honest headline is the sweep's **53 %** not-supported+parked and the companion's **40 %**.
+- **`docs/failure-cause-classes.md` reconciles the tool against the hand measurement row by row** — three splits differ, all three the hand grep (an `NS:`-less `not-supported.md` citation; 59 `partly #752` rows; a `PARKED:`+task row), every population TOTAL identical.
+- Filed **#1783**: `mro/inconsistent_c3_utf8.t` has a blessed XDIFF row in `baselines/perl-suite-expected-rows.tsv` but NO reason row in `baselines/perl-suite-expected.tsv` — the one row in that population the rule cannot class.
+
 ## s485 (2026-09-14, Fable) — "Please continue": the three stopped worktrees resumed IN PLACE, s484c and s473t5f reviewed and merged; USER: the xs gate files PARKED; USER: "Don't start more subjobs"
 
 - **The three xs gate files are PARKED (USER, s485)**: `Pl/t/xs-01/02/03.t` `plan skip_all` at the top until the pclxs project (a SEPARATE repo, sibling checkout `~/pclxs`) works again — their 13 failing rows were pclxs's, not PCL's (USER s394/s395).  `PCL_XS_TESTS=1 prove Pl/t/xs-0*.t` runs them (verified: the same 13 failures as before); re-enabling = deleting the block in each file.  **The gate must read `Result: PASS`; "xs-only" is no longer a green verdict, a FAIL is real** (c2c06057; CLAUDE.md "Test Status"; the agents' COMMON.md).
