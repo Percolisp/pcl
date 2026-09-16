@@ -23,11 +23,11 @@
    once and write the string's UTF-8 encoding, which is what %p-out-string
    does, and SILENTLY: a warning would run the PROGRAM's $SIG{__WARN__}, and
    perl-tests/magic.t dies on any warning at all (`sub { die "Dying on
-   warning", @_ }` at BEGIN), so one wide TAP description ended that whole
+  warning", @_ }` at BEGIN), so one wide TAP description ended that whole
    file.  The handler is the backstop for the format directives' own output.
    It replaced 25 direct `format t` calls: one writer, not twenty-five."
   (%p-with-wide-upgrade
-    (%p-out-string (apply #'format nil control args) *standard-output* nil)))
+   (%p-out-string (apply #'format nil control args) *standard-output* nil)))
 
 ;;; Test state
 (defvar *test-count* 0)
@@ -361,8 +361,14 @@
       (cond
         ((not pass)
          ;; Expected failure -> emit a real TAP skip (counts as neither pass nor fail).
+         ;; The `[registry]` marker (s486b) makes THIS skip distinguishable from a
+         ;; skip the test file asked for itself (EBCDIC, threads, miniperl, ...) at
+         ;; the TAP line, independently of the reason text -- which is what lets a
+         ;; runner COUNT the rows the registry relabelled.  TAP-legal: a skip
+         ;; directive's reason is free text.  Never add a summary line here: a file
+         ;; that aborts mid-run never reaches one, and the count would vanish.
          (incf *test-skipped*)
-         (%tap-out "ok ~A # skip ~A~%" *test-count* (third entry))
+         (%tap-out "ok ~A # skip [registry] ~A~%" *test-count* (third entry))
          (return-from test-ok nil))
         (t
          ;; Unexpectedly passes -> emit ok AND flag the stale registry entry.
@@ -1232,14 +1238,14 @@
               (let ((form (handler-case (read stream nil eof)
                             (error (e)
                               (%p-diag
-                                      "~&; PCL recovery: unreadable form, stopping: ~A~%" e)
+                               "~&; PCL recovery: unreadable form, stopping: ~A~%" e)
                               eof))))
                 (when (eq form eof) (return))
                 (handler-case (eval form)
                   (error (e)
                     (incf errs)
                     (%p-diag
-                            "~&; PCL recovery: top-level form aborted (recovered): ~A~%" e)))
+                     "~&; PCL recovery: top-level form aborted (recovered): ~A~%" e)))
                 (%las-flush-terminated atomic)))
           (%las-flush-terminated atomic))
         (when (plusp errs)

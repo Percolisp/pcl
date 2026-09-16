@@ -1,0 +1,44 @@
+Statement unlikely to be reached at /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/tools/lib/PCLProc.pm line 58.
+	(Maybe you meant system() when you said exec()?)
+Building child core for fresh_perl/runperl (pclperl-for-tests)...
+Running 3 tests with 2 parallel jobs (timeout=90s, TIMEOUT retried once at 270s)
+Skipping: heredoc.t, list.t, lfs.t
+Failure log: /home/bernt/pcl/.claude/worktrees/agent-a6c7caf694eb1f8c2/.faillog/*.fails.tsv
+
+Warm-first: running crypt.t alone to populate the module cache, then fanning out to 2 jobs
+[  1/  3] crypt.t                started
+  done  crypt.t                PASS  (5/6 skip=1)  [7s]
+[  2/  3] join.t                 started
+[  3/  3] lex.t                  started
+  done  join.t                 PASS  (41/43 skip=2)  [2s]
+  done  lex.t                  PASS  (45/53 skip=8)  [3s]
+
+========================================================================
+RESULTS SUMMARY
+========================================================================
+
+Test                        Pass  Fail  Skip           Reg  Notes
+------------------------------------------------------------------------
+lex.t                         45     0     8/53          8  
+join.t                        41     0     2/43          2  
+crypt.t                        5     0     1/6           1  
+
+========================================================================
+TOTAL: 91 passing, 0 failing, 11 skipped (11 by the registry) across 3 files (+ 3 files skipped)
+REGISTRY-STALE: 0 entries in 0 files
+
+Fully passing   (3): crypt.t, join.t, lex.t
+
+Zero passing    (0): 
+
+Skipped (known hang): heredoc.t, list.t, lfs.t
+
+DROPS (statements the compiler could not lower): 0 in 0 file(s)
+
+CHILD DROPS (statements lost in transpiles during the run): 2 in 1 file(s)
+  lex.t                  2
+  -- 2 distinct site(s):
+     (child program):1                              in  1 file(s)  flock _$ -- Got op '$', not postfix. But there is nothing after it??
+     /tmp/pcl_rp_3046950787.pl:1                    in  1 file(s)  ub ub -- Bug. Fell through. Missing case: [bless( {'id' => 2,'type' => 'funcall'}, 'PPIreference' ),bless( {'id' => 0,'type' => 'funcall'}, 'PPIreference' )]
+
+min MemAvailable during the run: 6.2 GB

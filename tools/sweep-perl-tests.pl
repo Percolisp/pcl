@@ -144,6 +144,17 @@ sub run_one_test {
     # per drop to PCL_DROP_LOG; we set it around the RUN only, never around
     # this file's own transpile, or the file's drops would be counted twice.
     my $child_drops = 0;
+    # REGISTRY (task #1787, ruled s486b).  A row the skip-registry
+    # (cl/skip-registry.lisp) relabelled is a FAILING assertion that PCL does
+    # not support and that the headline fail count therefore does not include;
+    # cl/pcl-test.lisp marks exactly those TAP lines `# skip [registry] ...`,
+    # so they are countable here and separable from the skips the test file
+    # asked for itself (EBCDIC, threads, miniperl, ...).  REGISTRY-STALE lines
+    # are the registry's own stale-detector firing: an entry whose test now
+    # PASSES.  It was printed per file and nobody read per-file output, which
+    # is how 19 accumulated -- so the run TOTALS them.
+    my $registry_skips = 0;
+    my $registry_stale = 0;
     my $child_log = "$log_dir/$name.childdrops";
     unlink $child_log;
 
@@ -227,11 +238,16 @@ sub run_one_test {
         # an unexpected success, counted as pass); plain `ok N` = pass.
         while ($out =~ /^(not ok|ok) \d+([^\n]*)$/gm) {
             my ($verb, $rest) = ($1, $2);
-            if    ($rest =~ /#\s*skip/i) { $skip++ }
+            if    ($rest =~ /#\s*skip/i) { $skip++;
+                                           $registry_skips++ if $rest =~ /#\s*skip\s+\[registry\]/i }
             elsif ($rest =~ /#\s*todo/i) { $verb eq 'not ok' ? $skip++ : $pass++ }
             elsif ($verb eq 'not ok')    { $fail++ }
             else                         { $pass++ }
         }
+        # The registry's stale-detector: a registered test that now PASSES.
+        # Counted from the same output, so a file that aborts still reports the
+        # stale entries it reached.
+        $registry_stale = () = $out =~ /^#\s*REGISTRY-STALE:/gm;
 
         # Detect abnormal termination
         if ($sbcl_exit != 0) {
@@ -277,6 +293,7 @@ sub run_one_test {
             ($status, $snippet) = ('ERROR', substr($err, 0, 100));
         }
         ($pass, $fail, $skip) = (0, 0, 0);
+        ($registry_skips, $registry_stale) = (0, 0);
     }
 
     # A file that TIMEOUTs or crashes still ran children up to that point, and
@@ -284,11 +301,13 @@ sub run_one_test {
     $child_drops = count_child_drops($child_log) if !$child_drops;
 
     # Write tab-separated result (skip + planned added between fail and status;
-    # drops after planned, child-drops after drops — the free-form snippet
-    # stays last)
+    # drops after planned, child-drops after drops, then the two registry
+    # counts — every new field goes BEFORE $status, because the free-form
+    # snippet stays last and is the only field that may contain anything)
     open(my $rf, '>', $result_file) or die;
     print $rf join("\t", $name, $pass, $fail, $skip, $planned, $drops,
-                   $child_drops, $status, $snippet) . "\n";
+                   $child_drops, $registry_skips, $registry_stale,
+                   $status, $snippet) . "\n";
     close $rf;
 }
 
@@ -401,13 +420,16 @@ while (@queue || %children) {
         $warm_first = 0;   # the cache is populated (or the first file failed) — fan out
 
         # Read result file
-        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0, status => 'NO_RESULT', snippet => '' };
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0,
+                  registry_skips => 0, registry_stale => 0, status => 'NO_RESULT', snippet => '' };
         if (open my $rf, '<', $info->{result_file}) {
             chomp(my $line = <$rf>);
             close $rf;
-            my ($n, $p, $f, $sk, $pl, $dr, $cdr, $s, $snip) = split /\t/, $line, 9;
+            my ($n, $p, $f, $sk, $pl, $dr, $cdr, $rs, $rst, $s, $snip)
+                = split /\t/, $line, 11;
             $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
                    drops => $dr // -1, child_drops => $cdr // 0,
+                   registry_skips => $rs // 0, registry_stale => $rst // 0,
                    status => $s // 'OK', snippet => $snip // '' };
         }
 
@@ -466,6 +488,7 @@ while (@queue || %children) {
                        $info->{name}, $info->{timeout} * $RETRY;
             } else {
                 $results{$info->{name}} = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0,
+                                            registry_skips => 0, registry_stale => 0,
                                             status => 'TIMEOUT', snippet => "(killed)" };
                 printf "  KILLED %-22s TIMEOUT\n", $info->{name};
                 $finished++;
@@ -482,10 +505,11 @@ print "\n" . "=" x 72 . "\n";
 print "RESULTS SUMMARY\n";
 print "=" x 72 . "\n\n";
 
-printf "%-26s %5s %5s %5s  %s\n", "Test", "Pass", "Fail", "Skip", "Notes";
+printf "%-26s %5s %5s %5s%-8s %5s  %s\n", "Test", "Pass", "Fail", "Skip", "", "Reg", "Notes";
 printf "%s\n", "-" x 72;
 
 my ($total_pass, $total_fail, $total_skip) = (0, 0, 0);
+my ($total_reg, $total_stale, $stale_files) = (0, 0, 0);
 my (@fully_passing, @crashed_files, @partial_files, @zero_pass, @timeouts);
 
 for my $name (sort { ($results{$b}{pass} <=> $results{$a}{pass}) || ($a cmp $b) } keys %results) {
@@ -493,12 +517,20 @@ for my $name (sort { ($results{$b}{pass} <=> $results{$a}{pass}) || ($a cmp $b) 
     $total_pass += $r->{pass};
     $total_fail += $r->{fail};
     $total_skip += ($r->{skip} // 0);
+    $total_reg  += ($r->{registry_skips} // 0);
+    $total_stale += ($r->{registry_stale} // 0);
+    $stale_files++ if ($r->{registry_stale} // 0) > 0;
 
     my $note = ($r->{status} ne 'OK') ? "$r->{status} $r->{snippet}" : $r->{snippet};
-    $note = substr($note // '', 0, 40);
+    $note = ($r->{registry_stale} // 0) > 0
+        ? substr("REGISTRY-STALE=$r->{registry_stale} $note", 0, 40)
+        : substr($note // '', 0, 40);
 
     my $plan_info = $r->{planned} >= 0 ? "/$r->{planned}" : '';
-    printf "%-26s %5d %5d %5d%s  %s\n", $name, $r->{pass}, $r->{fail}, ($r->{skip} // 0), $plan_info, $note;
+    # `Reg` = the rows the skip registry relabelled (a subset of `Skip`): a
+    # not-supported FAILURE that `Fail` does not include.
+    printf "%-26s %5d %5d %5d%-8s %5d  %s\n", $name, $r->{pass}, $r->{fail},
+        ($r->{skip} // 0), $plan_info, ($r->{registry_skips} // 0), $note;
 
     # "Fully passing" requires: clean exit, no failures, at least all planned tests ran
     # (pass+fail > planned is OK — subtests or done_testing() can cause minor over-count)
@@ -516,8 +548,19 @@ for my $name (sort { ($results{$b}{pass} <=> $results{$a}{pass}) || ($a cmp $b) 
 
 my $file_count = scalar(keys %results);
 print "\n" . "=" x 72 . "\n";
-printf "TOTAL: %d passing, %d failing, %d skipped across %d files (+ %d files skipped)\n",
-    $total_pass, $total_fail, $total_skip, $file_count, scalar(@SKIP);
+# THE REGISTRY, COUNTED (task #1787, ruled s486b).  A registry-relabelled row
+# is a not-supported FAILURE that `%d failing` does NOT include, so every
+# report of the fail count states the registry count beside it -- and from THIS
+# measurement, never from the registry's pattern count (103 patterns is not a
+# row count: one pattern can cover many rows, and a pattern whose file aborts
+# early covers none).
+printf "TOTAL: %d passing, %d failing, %d skipped (%d by the registry) across %d files (+ %d files skipped)\n",
+    $total_pass, $total_fail, $total_skip, $total_reg, $file_count, scalar(@SKIP);
+# The registry's own stale-detector, TOTALLED.  It was printed per file and
+# nobody reads per-file output, which is how 19 stale entries accumulated.
+printf "REGISTRY-STALE: %d entries in %d files%s\n", $total_stale, $stale_files,
+    ($total_stale ? "  <-- registered tests that now PASS: narrow or drop the pattern"
+                  : "");
 print "\nFully passing   (" . scalar(@fully_passing) . "): " . join(', ', sort @fully_passing) . "\n";
 if (@crashed_files) {
     print "\nCrashed (SBCL)  (" . scalar(@crashed_files) . "): " . join(', ', sort @crashed_files) . "\n";
@@ -614,6 +657,7 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 # baseline failure in that file look "FIXED".  One line per file:
 #   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> drops
 #        <TAB> child-drops <TAB> shortfall <TAB> unrun <TAB> note
+#        <TAB> registry-skips <TAB> registry-stale
 # where `note` carries the crash-localization snippet (# ABORTED after test N ...)
 # for CRASH/PARTIAL files, and `drops` is the #138-family count (task #343):
 # how many statements the compiler replaced with nil in this file's CL, or -1
@@ -629,6 +673,18 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 # "no previously-passing row was lost", never "the plan was produced".  `unrun`
 # is the half of it that produced no TAP row AT ALL (the file stopped);
 # shortfall - unrun is the skipped half.  Reported, not separately gated.
+#
+# `registry-skips` and `registry-stale` (task #1787, ruled s486b) are the LAST
+# two columns, AFTER the free-form `note` — which is safe because `note` is
+# tab-scrubbed below, so every index-based reader up to the tenth column is
+# unaffected.  `registry-skips` = rows THIS run's TAP marked
+# `# skip [registry] ...`: assertions that FAILED and were relabelled by
+# cl/skip-registry.lisp because docs/not-supported.md explains them.  They are
+# in `skip`, never in `fail`, so any report of the fail count that omits them
+# understates what PCL does not do.  `registry-stale` = `# REGISTRY-STALE`
+# lines: registered tests that now PASS (the registry's own stale-detector).
+# A reader that finds NO such column must treat it as UNKNOWN, never as zero —
+# baselines/pass-baseline.tsv and any log written before s486b have neither.
 sub write_status_file {
     open my $sf, '>', "$log_dir/_status.tsv" or return;
     for my $name (sort keys %results) {
@@ -638,7 +694,8 @@ sub write_status_file {
         print $sf join("\t", $name, $r->{status} // 'OK',
                        $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1,
                        $r->{drops} // -1, $r->{child_drops} // 0,
-                       shortfall_of($r), unrun_of($r), $note) . "\n";
+                       shortfall_of($r), unrun_of($r), $note,
+                       $r->{registry_skips} // 0, $r->{registry_stale} // 0) . "\n";
     }
     close $sf;
 }
@@ -737,13 +794,16 @@ sub rerun_serially {
         die "fork: $!" unless defined $pid;
         if ($pid == 0) { run_one_test($file, $result_file, $TIMEOUT * $RETRY); _exit(0) }
         waitpid($pid, 0);
-        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0, status => 'NO_RESULT', snippet => '' };
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0,
+                  registry_skips => 0, registry_stale => 0, status => 'NO_RESULT', snippet => '' };
         if (open my $in, '<', $result_file) {
             chomp(my $line = <$in>);
             close $in;
-            my ($n, $p, $f, $sk, $pl, $dr, $cdr, $s, $snip) = split /\t/, $line, 9;
+            my ($n, $p, $f, $sk, $pl, $dr, $cdr, $rs, $rst, $s, $snip)
+                = split /\t/, $line, 11;
             $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
                    drops => $dr // -1, child_drops => $cdr // 0,
+                   registry_skips => $rs // 0, registry_stale => $rst // 0,
                    status => $s // 'OK', snippet => $snip // '' };
         }
         printf "  serial %-22s pass=%d fail=%d planned=%s status=%s  [%ds]  (parallel run: pass=%d status=%s)\n",

@@ -98,7 +98,8 @@ sub read_status_file {
         chomp $line;
         next unless length $line;
         next if $line =~ /^#/;
-        my ($file, $status, $pass, $fail, $planned, $drops, $child, $short, $unrun)
+        my ($file, $status, $pass, $fail, $planned, $drops, $child, $short, $unrun,
+            $note, $reg, $reg_stale)
             = split /\t/, $line;
         next unless defined $file;
         $st{$file} = { status  => $status  // 'OK',
@@ -113,7 +114,16 @@ sub read_status_file {
                        short   => (defined $short && $short =~ /^-?\d+$/) ? $short : -1,
                        # the half of the shortfall that produced NO row at all
                        # (the file stopped); the rest of it was SKIPPED
-                       unrun   => (defined $unrun && $unrun =~ /^-?\d+$/) ? $unrun : -1 };
+                       unrun   => (defined $unrun && $unrun =~ /^-?\d+$/) ? $unrun : -1,
+                       # THE REGISTRY (task #1787, s486b): the eleventh and
+                       # twelfth columns — rows cl/skip-registry.lisp relabelled
+                       # from a FAILURE to a `# skip [registry]`, and the
+                       # registry's own stale-detector lines.  Absent (any log
+                       # written before s486b, and the blessed pass baseline) =
+                       # -1 = NOT COUNTED, never 0: "no registry column" and
+                       # "no registry rows" are different facts.
+                       reg     => (defined $reg && $reg =~ /^\d+$/) ? $reg : -1,
+                       reg_stale => (defined $reg_stale && $reg_stale =~ /^\d+$/) ? $reg_stale : -1 };
     }
     close $fh;
     return \%st;
@@ -602,6 +612,34 @@ if (!%$pass_base) {
     printf "TOTAL passing: baseline %d, current %d (%+d)%s\n",
         $base_total, $cur_total, $cur_total - $base_total,
         (@lost ? '  <-- LOST is non-empty: this run is NOT clean' : '');
+}
+
+# ── THE REGISTRY (task #1787, ruled s486b) ─────────────────────────────────
+# Rows cl/skip-registry.lisp relabelled from a FAILURE to a documented skip.
+# They are neither in `passing` nor in `fails`, so a fail count quoted without
+# them understates what PCL does not do — this line is how a report states
+# both.  NOT COUNTED (no column) is printed as such: an absent instrument is
+# never read as a zero.
+{
+    my @have = grep { ($cur_status->{$_}{reg} // -1) >= 0 } keys %$cur_status;
+    if (!@have) {
+        print "REGISTRY: NOT COUNTED — this run's _status.tsv has no registry column"
+            . " (a log written before s486b)\n";
+    } else {
+        my ($rows, $files, $stale, $stale_files) = (0, 0, 0, 0);
+        for my $f (@have) {
+            my $n = $cur_status->{$f}{reg};
+            $rows += $n; $files++ if $n > 0;
+            my $s = $cur_status->{$f}{reg_stale} // -1;
+            next if $s < 0;
+            $stale += $s; $stale_files++ if $s > 0;
+        }
+        printf "REGISTRY: %d rows relabelled in %d files (not in the fail count)%s\n",
+            $rows, $files,
+            ($stale ? sprintf("  <-- %d REGISTRY-STALE entr%s in %d file(s): the test now PASSES",
+                              $stale, ($stale == 1 ? 'y' : 'ies'), $stale_files)
+                    : '');
+    }
 }
 
 printf "summary: %d new, %d fixed%s%s%s%s%s (baseline %d fails, current %d fails)\n",
