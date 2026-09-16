@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 39;
+plan tests => 50;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -423,4 +423,116 @@ for my $t (@src) { my ($z) = $t =~ /(\d)/; defined $z ? $i++ : $u++ }
 print "loop=$i/$u\n";
 sub sub_ret { my $x = shift; $x =~ /zzz/ }
 my @r = (sub_ret("q"), "b");           print "ret=", scalar(@r), "\n";
+END
+
+# ── THE MATCH RECORD (task #1804) ──────────────────────────────────────────
+# $+, $^N, %+, %-, @-, @+ and @{^CAPTURE} are no longer written at the match:
+# they are built from a per-match RECORD the first time one of them is READ.
+# Every row below is a shape that laziness could get wrong, probed against
+# perl 5.40.3 first (scratch/s473v/probe/match-vars*.pl of the s473v worktree).
+
+# 40. Captures and named captures PERSIST across a failed match, and a later
+# match with FEWER groups clears only what it does not set (perl's
+# clear-to-count rule).  PCL used to clrhash %+/%- on every ATTEMPT, which is
+# not what perl does.
+is run_cl(<<'END'), "p=ab k=2 f=a\nc=undef\n", 'captures and %+ persist across a failed match';
+"ab" =~ /(?<f>a)(?<s>b)/;
+"zz" =~ /(q)/;
+print "p=$1$2 k=", scalar(keys %+), " f=$+{f}\n";
+"ab" =~ /(a)(b)/;
+"a"  =~ /(a)/;
+print "c=", (defined $2 ? "def" : "undef"), "\n";
+END
+
+# 41. @- and @+ are SIZED DIFFERENTLY and perl means it (task #417): @- stops
+# after the last participating group, @+ runs to the group count.
+is run_cl(<<'END'), "m=1 p=3 s=0 e=1 g1=0\nn=0 0 1 2\n", '@-/@+ sizes and offsets';
+"ab" =~ /(a)(x)?(y)?/;
+print "m=$#- p=$#+ s=$-[0] e=$+[0] g1=$-[1]\n";
+"abc" =~ /b/;
+print "n=$#- $#+ $-[0] $+[0]\n";
+END
+
+# 42. perl's @-/@+ elements are MAGIC: a saved \$-[0] reads the CURRENT match.
+# This is what stops the arrays being materialised as plain values.
+is run_cl(<<'END'), "before=2 after=4 now=4\n", 'a saved \$-[0] reads the current match';
+"hello" =~ /l/;
+my $r = \$-[0];
+my $before = $$r;
+"xxhello" =~ /ll/;
+print "before=$before after=$$r now=$-[0]\n";
+END
+
+# 43. ... but a COPY of @- copies VALUES, not the magic.
+is run_cl(<<'END'), "copy=2 now=4\n", 'my @c = @- copies values, not the magic';
+"hello" =~ /ll/;
+my @c = @-;
+"xxhello" =~ /l/;
+print "copy=@c now=$-[0]\n";
+END
+
+# 44. A write through an offset element is perl's read-only death.
+is run_cl(<<'END'), "w=died v=1\n", 'a write through $-[0] dies as perl does';
+"abc" =~ /b/;
+my $ok = eval { $-[0] = 5; 1 };
+print "w=", ($ok ? "allowed" : "died"), " v=$-[0]\n";
+END
+
+# 45. $+ is the highest-numbered PARTICIPATING group; $^N the one whose
+# closing paren is rightmost.
+is run_cl(<<'END'), "plus=c n=c m=3 p=3\n", '$+ and $^N with a non-participating group';
+"ac" =~ /(a)(b)?(c)/;
+print "plus=$+ n=$^N m=$#- p=$#+\n";
+END
+
+# 46. @{^CAPTURE} is truncated after the last participating group, and a
+# later 0-group match empties it.
+# (The reads are spelled in CODE, not interpolated: `"${^CAPTURE}[0]"` inside a
+# string is `${^CAPTURE}` followed by a literal `[0]` in PERL TOO — probed —
+# so an interpolated spelling would assert perl's tokenizer, not this state.)
+is run_cl(<<'END'), "n=2 a=a b=b\nafter=0 d1=undef\n", '@{^CAPTURE} truncation and reset';
+"ab" =~ /(a)(b)(z)?/;
+print "n=", scalar(@{^CAPTURE}), " a=", ${^CAPTURE}[0], " b=", ${^CAPTURE}[1], "\n";
+"zz" =~ /z/;
+print "after=", scalar(@{^CAPTURE}), " d1=", (defined $1 ? "def" : "undef"), "\n";
+END
+
+# 47. %- keeps EVERY buffer with a given name.
+is run_cl(<<'END'), "b=xy n=2\n", '%- buffers for two same-named groups';
+"xy" =~ /(?<p>x)(?<p>y)/;
+print "b=$-{p}[0]$-{p}[1] n=", scalar(@{$-{p}}), "\n";
+END
+
+# 48. The SYMBOLIC-reference spellings reach the same state (the derived names
+# hold no value in their symbol, so `boundp` cannot answer for them — the
+# ${"&"} mechanism of task #477, widened).
+is run_cl(<<'END'), "m=3 p=3 d=b nm=a\n", 'symref spellings of the derived match names';
+no strict 'refs';
+"ab" =~ /(?<n>a)(b)/;
+print "m=", scalar(@{"-"}), " p=", scalar(@{"+"}),
+      " d=", ${"+"}, " nm=", ${"+"}{n}, "\n";
+END
+
+# 49. Before ANY match in the process, every derived name reads empty.
+is run_cl(<<'END'), "m=-1 p=-1 a=0 b=0 d=undef n=undef k=0 c=0\n", 'the derived names before any match';
+print "m=$#- p=$#+ a=", scalar(@-), " b=", scalar(@+),
+      " d=", (defined $+ ? "def" : "undef"),
+      " n=", (defined $^N ? "def" : "undef"),
+      " k=", scalar(keys %+), " c=", scalar(@{^CAPTURE}), "\n";
+END
+
+# 50. THE SAME RULE FOR THE OTHER MAGIC SCALAR: pushing $. records the line
+# number AT THE PUSH, not the current one (task #683, filed at #477 and fixed
+# with the record: an array store of a magic-cell box stores its VALUE).
+is run_cl(<<'END'), "1 2 3\n", 'push @a, $. records each line number (#683)';
+my $f = "/tmp/pcl-s473v-dot-$$.txt";
+open(my $w, ">", $f) or die "w: $!";
+print $w "a\nb\nc\n";
+close $w;
+open(my $fh, "<", $f) or die "r: $!";
+my @l;
+while (my $x = <$fh>) { push @l, $. }
+close $fh;
+unlink $f;
+print "@l\n";
 END

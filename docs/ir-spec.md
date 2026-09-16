@@ -2864,7 +2864,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `$_` | default topic. **The transpiler materializes it explicitly at parse time** (`add_implicit_default_param` / `_default_filetest_operand` in `Pl/PExpr.pm`, and the print family in `ExprToCL` `gen_funcall`): Perl's omitted-operand forms — `uc;`, `chomp;`, `length;`, bare `-e`, a bare `/re/` match, and bare `print;`/`say;`/`printf;` — arrive in the tree as `(p-uc $_)`, `(p-=~ $_ …)`, `(p-print $_)`, etc. **A translator implements no per-op defaulting** — there is no longer any runtime-side `$_` default. |
 | `@_` | current sub's args (lexical per `p-args-body`, §5.2) |
 | `$@` | last eval error (§6.3) |
-| `$1`…`$N`, `%+` | capture groups; set by the most recent successful match (`p-=~` family); dynamically saved/restored around scopes like Perl.  **TWO SPELLINGS, one meaning (task #851):** `$1`…`$20` are emitted as bare symbols (one runtime special per group — that is what makes a capture read a variable read), and `$21` and up as `(p-high-capture N)`, which reads element N−1 of `@{^CAPTURE}`.  The two agree — `@{^CAPTURE}` is filled by the same `set-capture-groups` that writes the specials, and it is complete — so **20 is a SPEED boundary, not a semantic one** and a translator may implement either spelling as the same accessor.  What PCL does NOT model is that a capture variable is READ-ONLY in perl (`$1 = 5`, `chop $1`, and `open $99` — which autovivifies into an undef scalar — are all `Modification of a read-only value attempted`); under PCL such a write is a silent no-op (task #873) |
+| `$1`…`$N`, `%+` | capture groups; set by the most recent successful match (`p-=~` family); dynamically saved/restored around scopes like Perl.  **TWO SPELLINGS, one meaning (task #851):** `$1`…`$20` are emitted as bare symbols (one runtime special per group — that is what makes a capture read a variable read), and `$21` and up as `(p-high-capture N)`, which reads element N−1 of `@{^CAPTURE}`.  The two agree — `@{^CAPTURE}` is built from the same match RECORD that writes the specials, and it is complete — so **20 is a SPEED boundary, not a semantic one** and a translator may implement either spelling as the same accessor.  What PCL does NOT model is that a capture variable is READ-ONLY in perl (`$1 = 5`, `chop $1`, and `open $99` — which autovivifies into an undef scalar — are all `Modification of a read-only value attempted`); under PCL such a write is a silent no-op (task #873) |
 | `$0`, `@ARGV`, `%ENV` | program name, args, environment (`%ENV` writes through to the process).  **`$0` is an ORDINARY WRITABLE box** (task #512), initialised by the program preamble to the script the compiler was given — not to `argv[0]`, which under a CL host is the lisp binary and is what no Perl program means by `$0`.  A translator must make it assignable: `$0 = "X"` is a plain scalar store whose value every later read sees, `local $0` saves and restores it, and because a SCALAR in the filehandle slot naming a handle IS that handle (§7.5), `$0 = "H"; print $0 LIST` writes through the handle named `H`.  What PCL does not do — and a host without argv-area access cannot — is the OS-level process rename `ps` reports; see `not-supported.md`. |
 | `$ENV{_PCL_RUNTIME_}` | **SYNTHETIC, set by the runtime — the host's own "am I here?" signal** (task #1529).  One key, a closed set of one.  Its value is the host's VERSION string (PCL's is what `pcl --version` prints).  It is present in `$ENV{…}`, `exists`, `keys`, `values`, `each` and every `%ENV` copy, and ABSENT from the real process environment, so **a child process does not inherit it** — that is the contract, not an implementation detail: `$^X` names real perl (§9), so a perl child that saw the key would conclude it runs under the host.  A host child sets its own.  A REAL environment variable of that name always WINS over the synthetic entry, which is what makes writing to it an ordinary `%ENV` write (it exports, as `%ENV` always does); `delete` (and a wholesale `%ENV = LIST`, and `local $ENV{_PCL_RUNTIME_}` for its extent) removes it for the rest of the process.  **A translator that emits for a different host MUST rename it** — the key asserts which runtime is executing. |
 | `$!` | last OS error (dualvar: numifies to errno, stringifies to message).  **Also a CANONICAL MAGIC BOX** — see the rule below. |
@@ -2892,6 +2892,30 @@ string, so `$x =~ /cd/; substr($x,0,1) = "Z"` still answers from the subject
 as it was at match time); and the three names then hold no value in their
 symbol at all, so the symbolic-reference rule below has to reach them through
 their getter rather than through storage.
+
+**SO ARE `$+`, `$^N`, `%+`, `%-`, `@-`, `@+` and `@{^CAPTURE}`** (normative,
+s473v / task #1804) — the same rule as `$&`, one step further.  A successful
+match records the subject, the whole-match offsets and the register offsets
+(copied out of the engine's vectors, so a later FAILED attempt cannot corrupt
+what the program is still entitled to read), and those seven are built from
+the record the first time one of them is read.  `$1`…`$20` stay EAGER, because
+they are the ones programs actually read.  **WHEN a derived match variable's
+value is fixed is the MATCH, not the read** — a read after a later match sees
+the later match, and a read after a FAILED match sees the last successful one,
+exactly as `$1` does.  Two consequences a translator must keep:
+
+* `%+` and `%-` PERSIST across a failed match.  perl does not clear them per
+  ATTEMPT (probed 5.40.3: `"ab" =~ /(?<f>a)(?<s>b)/; "zz" =~ /(q)/` leaves
+  both keys), and a runtime that clears them there is wrong twice over — the
+  answer and the cost.
+* **`@-`/`@+` ELEMENTS ARE MAGIC SCALARS**, as perl's are: `\$-[0]` saved
+  before a later match reads the LATER match through the ref (probed).  So the
+  elements cannot be materialised as plain values on read — they are permanent
+  cells that compute from the record — while a COPY (`my @c = @-`, `push @a,
+  $-[0]`) copies the VALUE at the copy, and a WRITE through one is perl's
+  `Modification of a read-only value attempted`.  That copy rule is general:
+  **an array store of any computed-magic scalar stores its value** (`push
+  @lines, $.` records each line number, task #683).
 
 **A SYMBOLIC scalar reference reaches the magic globals** (normative, s446j /
 task #505).  `${"1"}` is `$1`, `${"10"}` is `$10`, `${"&"}` is `$&` — perl
