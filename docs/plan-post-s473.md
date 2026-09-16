@@ -203,3 +203,20 @@ the long tail.
 
 `mro/` and `class/` need no round: 0 fail rows and 0 UNEXPLAINED shortfall — every divergence is
 already file-registered in `baselines/perl-suite-expected.tsv`.
+
+### 5.6 The op/ rounds (t6…) — the census residue, banded by fail-row count
+
+Designed s485 (`~/pcl-agent-scratch/s473/s473t6/plan.md`) from t5f's measurement:
+after the six t5 rounds the residue is ONE directory, and it is WIDE rather than
+deep (91 files, median 7 rows), so the rounds are cut by band, biggest first.
+Recipe unchanged from t5 (CHECK 1 on the shortfall files, CHECK 2 per file,
+FIX ≤ 1 h / FILE / CITE, the cause into EVERY row, movers serial + A/B before a
+splice, the t5 bar, records); what t6 adds is that the population is RE-MEASURED
+on the launch tree first, and that a file's known OWNER is grepped out of
+DECIDED + the task store before anything is probed.
+
+| round | band | files | causeless rows | state |
+|---|---|---|---|---|
+| **t6a** | ≥ 50 | 12 | 1,138 at design | **DONE (s473t6a, 2026-09-17).**  The population re-measured on the launch tree was **1,098**, not 1,138 — `op/universal.t` is 20 rows and not 60, because s473t5f's second companion leg had already fixed 40 with #1737; plus **140 UNEXPLAINED shortfall rows in six files**.  **All 1,098 now carry a cause and all 140 shortfall rows do too** (companion `unexplained` 2,362 → **1,264**; the `t/` shortfall's UNEXPLAINED half 522 → **382**; `cause-census --hygiene` adds ZERO `other` rows).  ONE FIX: **#1813**, an operator reads its operand ONCE — nine operators (`unary -`, `x`, `post ++`, `post --`, `&`, `^`, `|`, `~`, `length`) called a tied scalar's FETCH TWICE because each INSPECTED the operand and then COERCED the same PLACE again; ONE helper `%p-read-operand` whose NARROWING is the fix (a box carrying a class, the is-ref flag or a cached numeric half is still coerced as the box — a bare `unbox` made `~ [1] == ~ [1]` answer "same" where perl gives two addresses).  `t/op/tie_fetch_count.t` 131/10 → **139/2**, `perl-tests/bop.t` 480/29 → **485/24**, sweep TOTAL **18676 → 18681**.  The tie trio is ONE decision (#155, with the per-method inventory measured into it).  Filed **#1814** (the ZERO-FETCH half — `@a = ($tied)` pushes the tie PROXY, a silent wrong that also makes the element alias the tied variable), **#1815** (@INC hooks, 93 rows, the round's biggest prize), **#1816** (a `-X` overload under stacking, 47), **#1817** (PPI §31: `sub _ { … }` swallows the next statement — logged in `ppi-upstream-bugs.md` + 5 rows in `ppi-bug-report.t`), **#1818 #1819 #1820 #1821 #1823 #1825 #1826 #1828 #1829**.  Bars: gate **PASS 243/8227**, sweep **GATE clean / TOTAL 18681 / drops 5 = census / CAUSES 478 of 478**, corpus-diff **IDENTICAL over 111** (no generation bump — `cl/` only), ir-conform 323/0/22/0, ir-host-leak byte-identical.  **Leaves for t6b/t6c:** #1815 is the one to take first (93 rows behind one mechanism); #1433's blast radius now has three data points (`op/method.t`, `op/ref.t`, `op/tie_fetch_count.t`) and its option (c) — narrowing the emitted `p-let` — is the lever that would pay across the directory. |
+| **t6b** | 20–49 | 21 | 782 | OPEN — brief = a copy of t6a's with this band |
+| **t6c** | < 20 | 58 | 455 (+ the shortfall-only files) | OPEN — brief = a copy of t6a's with this band |

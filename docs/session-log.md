@@ -30,6 +30,81 @@ RE-SCOPED — the sweep half is done by the cached core, but the CPAN board's
 per-file runner `tools/run-dist-t.pl` still spawns SBCL by hand outside
 `tools/lib/PCLSbcl.pm`.  The `:num`/`:scalar` answer and the speed-queue
 count from that chat are now in DECIDED `## s488`.
+## Session s473t6a (Opus agent, 2026-09-17) — #1501 round 8: the `op/` census residue's ≥ 50-row band — one fix, thirteen filings, and 1,098 causeless rows attributed
+
+**Member 1 — the tables.**  The twelve files re-measured on the launch tree
+(`tools/run-perl-suite.pl --jobs 1 --timeout 180`, artifacts kept): **1,188
+blessed fail rows of which 1,098 are CAUSELESS**, plus **140 UNEXPLAINED
+shortfall rows in six files**.  Two corrections to the brief's population, both
+measured: `op/universal.t` is **20** rows, not 60 (s473t5f's second companion
+leg already fixed 40 with #1737), so the round's population is 1,098 and not
+1,138; and `op/inccode.t` reads 13/26 with 50 short here where the snapshot says
+13/28 / 48 — reproduced on a `git archive 2ac855aa` extraction and in three lone
+runs, so PRE-EXISTING and NOT spliced.  CHECK 1 produced the aborting FORM for
+every shortfall file; the structural fact behind most of them is that **a file
+whose body declares a FILE LEXICAL emits ONE top-level form**, so one runtime
+die costs every row after it (`op/tie_fetch_count.t` loses 202 of 343 rows to
+the ruled smart-match refusal at line 169).
+
+**Member 2 — #1813, an operator reads its operand ONCE.**  perl calls a tied
+scalar's FETCH exactly once per operator; nine PCL operators called it twice,
+because each INSPECTED the operand (to choose a string arm over a numeric one,
+or to find a postfix `++`'s old value) and then COERCED the same PLACE again:
+`unary -`, `x`, `post ++`, `post --`, `&`, `^`, `|`, `~`, `length`, all measured
+at 2 against perl's 1.  ONE helper `%p-read-operand` hands the coercion the
+value the inspection already produced — **except** for a box carrying a bless
+class, the is-ref flag or a cached numeric half, where the CONTAINER is what
+must be coerced.  That narrowing is load-bearing and the first spelling got it
+wrong: a bare `unbox` made `~ [1] == ~ [1]` answer "same" where perl gives two
+addresses.  `%p-bitwise-operand-kind` now returns its read as a second value and
+the binary trio share one body.  Guard `Pl/t/tie-fetch-once-01.t` (15 rows: 9
+counts + 6 that ARE the exception), inverse-verified on a `2ac855aa` extraction;
+ir-spec §2.2b rule 5.  `t/op/tie_fetch_count.t` 131/10 → **139/2**;
+`perl-tests/bop.t`'s own "double magic tests" block 480/29 → **485/24**, sweep
+TOTAL **18676 → 18681**.  The ZERO-FETCH half is filed as **#1814** and is worse:
+`@a = ($tied)` pushes the tie PROXY, so the element prints
+`#<p-tie-proxy {…}>` and a write through it STOREs into the tied variable.
+
+**Member 2b — the tie trio as ONE decision.**  `tie @ary` and `tie *$fh` reach
+`p-tie` as a RAW aggregate or a glob, take the announce-and-drop arm, and there
+is no proxy for a method to hang on, so `op/tiehandle.t` (56 rows) and
+`op/tiearray.t` (50) are that one fact end to end; the per-method inventory both
+files need was measured and written into **#155**.  `op/tiehandle.t` has NO
+aborted form — its 23 never-produced rows are assertions written INSIDE the tie
+methods, which never fire.
+
+**Members 3+4 — the attribution.**  886 rows given a cause in place, 204
+replaced from this round's own measurement, 90 (t5a's #221 rows) left
+byte-identical; the six UNEXPLAINED shortfall rows caused; ONE verdict spliced.
+Companion `unexplained` **2,362 → 1,264**; the `t/` shortfall's UNEXPLAINED half
+**522 → 382**; `tools/cause-census.pl --hygiene` adds ZERO `other` rows.  Three
+hypotheses died to probes and that is why the causes are right: `op/method.t`'s
+37 missing rows are **26 × #1439** (the test.pl stub's `skip_if_miniperl` skips
+UNCONDITIONALLY) plus **#1821**; `"3foo"->CORE::uc` is the `CORE::` METHOD form,
+not the digit-headed class name (`"Foo"->CORE::uc` dies identically); and the
+four "PVBM" rows of `op/ref.t` are not about PVBMs at all — `my $pvbm = PVBM` is
+the STRING `'foo'`, so three of them are `NS:use strict 'refs' is not enforced`
+(#1390) and the fourth is **#1829** (`*$ref` on a scalar referent must die "Not
+a GLOB reference").  Nine rows that reproduce perl EXACTLY in isolation carry
+#1433 with "NOT isolated further" rather than an invented mechanism.
+
+**PPI §31 logged with its repro (rule 13).**  `sub _ { … }`: PPI 1.291 lexes the
+NAME `_` after `sub` as `Token::Magic`, so `PPI::Lexer` builds no
+`Statement::Sub` and the FOLLOWING statement is swallowed into one plain
+`PPI::Statement`.  `docs/ppi-upstream-bugs.md` §31 + five rows in
+`docs/ppi-bug-report.t` (plan 73 → 78; the four bug rows FAIL on 1.291 and the
+`sub main::_` control PASSES).  No workaround; **#1817** owns it.
+
+**Bars.**  Gate **`Result: PASS`, 243 files / 8,227 rows** (151 s wall, 573 CPU-s;
+the three xs files skipped as PARKED).  Sweep `--jobs 4`: **GATE clean, 0 new /
+0 fixed, TOTAL passing 18,681, drops 5 = census, CAUSES 478 of 478 with 0
+unexplained**.  `tools/corpus-diff.pl 2ac855aa`: **emission IDENTICAL over 111
+files**, silent drops 5 unchanged, shapes identical — so **no generation bump**
+(the change is `cl/` only).  `tools/ir-conform --jobs 2` 323 pass / 0 fail / 22
+known / 0 stale; `tools/ir-host-leak.pl` byte-identical to the base extraction;
+`tools/ir-inventory.pl` unchanged (the new helper is internal); `tools/tag-license
+--check` clean.  Filed **#1814 #1815 #1816 #1817 #1818 #1819 #1820 #1821 #1823
+#1825 #1826 #1828 #1829**, **#1813 DONE**; #1501 stays OPEN for t6b and t6c.
 
 ## Session 473v (Opus agent, 2026-09-16) — perf round 33: the match RECORD, the str-buffer append and the classic sort; `strcat` and `sortstr` are now FASTER than perl
 

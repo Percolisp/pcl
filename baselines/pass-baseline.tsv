@@ -337,6 +337,17 @@
 #   the same sweep, method.t 76/22 -> 76/23, is a PARTIAL (crash) file that
 #   uses NONE of the four helpers -- the tool's own UNSTABLE bucket, not a
 #   regression, and left alone.
+# s473t6a (#1501 ROUND 8, 2026-09-17): bop.t PARTIAL 480/29 -> 485/24 EDITED BY
+#   HAND (+5 passing).  #1813, "an operator reads its operand ONCE": bop.t's own
+#   "double magic tests" block (line 145) asserts `fetches($x) == 1` after each
+#   bitwise op on a TIED scalar, and fourteen of those rows read `got 2 want 1`
+#   because `&` `|` `^` `~` classified the operand (classifying UNBOXES, which
+#   for a tie is a FETCH) and then coerced the PLACE again.  Five of the
+#   fourteen now pass; the nine that remain are the rest of the block and stay
+#   blessed.  Measured 480/29 on a `git archive 2ac855aa` extraction and 485/24
+#   here, one file at a time, --jobs 1.  The FAIL baseline's row set is
+#   UNCHANGED: those rows are UNNAMED, so all fourteen collapse to the single
+#   `bop.t 144 <no description>` key and sweep-diff correctly reads 0/0.
 aassign.t	OK	175	13	189
 anonsub.t	OK	6	4	10
 append.t	OK	13	0	13
@@ -349,7 +360,7 @@ auto.t	OK	47	0	47
 bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
-bop.t	PARTIAL	480	29	510
+bop.t	PARTIAL	485	24	510
 caller.t	OK	26	85	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
