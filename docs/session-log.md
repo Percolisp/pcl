@@ -31,6 +31,75 @@ per-file runner `tools/run-dist-t.pl` still spawns SBCL by hand outside
 `tools/lib/PCLSbcl.pm`.  The `:num`/`:scalar` answer and the speed-queue
 count from that chat are now in DECIDED `## s488`.
 
+## Session 473v (Opus agent, 2026-09-16) — perf round 33: the match RECORD, the str-buffer append and the classic sort; `strcat` and `sortstr` are now FASTER than perl
+
+**Member 1, the measurement (task #1803).**  Four `sb-sprof` breakdowns on
+this tree BEFORE any lever, plus exact allocation (`get-bytes-consed` at two
+N, the same cancellation bench-exec does for time).  They said three things
+the brief could not have known.  (a) The eager
+`clear-capture-groups → set-capture-groups → set-match-vars` trio is **33.6 %
+of `regexg`** — on `/./g`, a pattern with NO capture groups, where every
+variable it fills is empty and none is read — ~33 % of `subste` and ~28 % of
+`textproc`.  (b) It is **0 % of `json-rt`**: not one sample in 3152, because
+JSON::PP's hot regexes are FAILED matches and the trio runs only on success.
+So the table said which row could NOT move before a lever was built for it.
+(c) The eager path allocates ~0 bytes per match (#680's reused boxes), which
+made "a record per match" mean reused storage, never a fresh struct.  The
+round-27 table in `plan-speed-and-ir-s470.md` §A.4 predates #1250/#1251/#1461
+and had moved under itself; §A.4.3 rows 12/14/15 now carry the current
+numbers.
+
+**Member 2, THE MATCH RECORD (#1804).**  `$+`, `$^N`, `%+`, `%-`, `@-`, `@+`
+and `@{^CAPTURE}` are symbol macros over accessors that build them from a
+per-match record the first time one is read — the #477 rule for `$&` widened
+to the rest of the family, which is perl's own model.  `$1`..`$20` stay eager.
+Register offsets are COPIED into reused vectors so a later FAILED attempt
+cannot corrupt what the program may still read, and `@-`/`@+` elements became
+permanent MAGIC CELLS, which is what keeps a saved `\$-[0]` reading the
+CURRENT match (probed; the first version materialised values and the probe
+caught it at once).  Three rows moved TOWARD perl: `%+`/`%-` now persist
+across a failed attempt (perl does not clear them per attempt — the runtime
+comment said it does), a write through `$-[0]` dies read-only, and **#683's
+half (a)** — `push @lines, $.` records each line number — fixed by one
+magic-cell arm in `%p-array-store-scalar`, which `my @c = @-` needed anyway.
+One compiler-side rule came with it: a caret name the RUNTIME owns is never
+forward-declared by a file (`runtime_owned_caret_syms`), because a `defvar` of
+a symbol macro aborts the whole file at load.  **regexg +55.0 %, subste
++35.7 %, textproc +31.8 %, json-rt −0.4 %**, controls ±3.3 %, RSS flat.
+
+**Member 3, the str-buffer append (#1809).**  `strcat`'s profile: 35.9 % in
+CL's generic `replace` plus 14.5 % in the bash-copy it dispatches to — half
+the row was a keyword-parsing sequence call to move ONE character into an
+ADJUSTABLE string.  `%p-str-data` (the twin of `%p-vec-data`, same guard) hands
+`%pcl-str-blit` the underlying simple string, and a one-character append is
+one store.  **+123.6 %: 2.14× perl → 0.94×, PCL now faster.**  The growth
+policy, the round's other candidate, is not a cost (~20 adjust-arrays for 20 M
+appends, counted rather than assumed).
+
+**Member 4, the classic sort (#1810).**  The sort was never the cost: CL's
+`string<` — keyword parsing, string-type dispatch, a mismatch INDEX where a
+sort wants a boolean — is **61.3 % of `sortstr`**, the generic `<` 24.3 % of
+`sortnum`, and the `every #'realp` / `notany #'%pcl-nan-p` check passes another
+13.5 %.  Now: one typed classification pass answering `(values KIND SAW-NAN)`,
+a typed predicate per kind (fixnum, double, all-simple-string), and the
+one-source case (`sort @a`) collected straight into a right-sized
+simple-vector instead of an adjustable one plus `copy-seq`.  **sortstr
++148.7 % (1.55× → 0.70×, faster than perl), sortnum +78.6 % (2.63× → 1.58×)**,
+peak RSS 79.9 → 60.6 MB.  Sort ADOPTION (plan §A.2 row 2) was not needed and
+stays open with its licence question intact.
+
+**Bar.**  Emission IDENTICAL over the 111-file corpus (silent drops 5,
+unchanged) and over 633 lib + perl-suite files with ONE intended DIFF
+(`t/re/pat.t` loses the `@{^CAPTURE}` defvar); ir-host-leak byte-identical to
+the base; the three artifacts regenerated at gen **v2-1480** (stamp-only
+diffs); full sweep and gate below; the companion `re/` + `op/` legs run for
+the `cl/` change.  Guards: `match-vars-01.t` 39 → 50 (inverse-verified: rows
+40/44/50 FAIL on a 2ac855aa extraction — the three fixes — and the other eight
+PASS there, which is their point), `raw-verdict-01.t` 70 → 76,
+`classic-sort-01.t` 29 → 33 (with a `PCL_OPT=none` twin).  Filed **#1808**:
+the 7.6 % of `subste` in a CLOS dispatch is cl-ppcre's OWN generic `scan`,
+called by its `regex-replace-all` and `split` — not reachable from PCL's side
+of the call, with three shapes a fix could take.
 ## Session 486 (Fable, 2026-09-16) — the not-supported share measured and instrumented; three agents merged; the commands reviewed for security
 
 The USER asked, reviewing the README's `Measured` table, how many of the
