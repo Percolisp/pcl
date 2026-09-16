@@ -60,7 +60,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 29;
+plan tests => 33;
 
 sub write_pl {
     my ($code) = @_;
@@ -324,3 +324,87 @@ is(run_cl($MAGIC, 'none'), $MAGIC_WANT, 'the fallback answers are PCL_OPT=none`s
     like($out, qr/DIED:.*unknown mode :NO-SUCH-MODE/i,
          'an unknown mode DIES naming the value (rule 12)');
 }
+
+# ── 8. THE ELEMENT-KIND CLASSIFIER (task #1810) ──────────────────────────────
+#
+# The values are classified in ONE typed pass and each kind gets a TYPED
+# predicate (fixnum / double-float / all-simple-string), with the reals, the
+# non-simple strings and every mixed list falling to the shared decorated or
+# generic path.  Each row below is one arm, probed against perl 5.40.3 first
+# (scratch/s473v/probe/sorts.pl of the s473v worktree).
+my $KINDS = <<'PL';
+my @n   = (10, 2, 33, 4);
+my @f   = (1.5, -2.25, 0.5, 10.0);
+my @m   = (1, 2.5, 3, 0.5);
+my @big = (2**70, 3, 2**80, 1);
+my @s   = ("pear", "Apple", "fig", "apple");
+my @u   = ("b", "\x{263A}", "a");
+my @mix = (3, "20", 1.5, "abc");
+print "fix:   @{[ sort { $a <=> $b } @n ]}\n";
+print "fixd:  @{[ sort { $b <=> $a } @n ]}\n";
+print "dbl:   @{[ sort { $a <=> $b } @f ]}\n";
+print "dbld:  @{[ sort { $b <=> $a } @f ]}\n";
+print "real:  @{[ sort { $a <=> $b } @m ]}\n";
+print "big:   @{[ sort { $a <=> $b } @big ]}\n";
+print "str:   @{[ sort { $a cmp $b } @s ]}\n";
+print "strd:  @{[ sort { $b cmp $a } @s ]}\n";
+print "uni:   @{[ map { ord } sort { $a cmp $b } @u ]}\n";
+print "plain: @{[ sort @s ]}\n";
+print "mixn:  @{[ sort { $a <=> $b } @mix ]}\n";
+print "mixs:  @{[ sort { $a cmp $b } @mix ]}\n";
+PL
+my $KINDS_WANT = <<'OUT';
+fix:   2 4 10 33
+fixd:  33 10 4 2
+dbl:   -2.25 0.5 1.5 10
+dbld:  10 1.5 0.5 -2.25
+real:  0.5 1 2.5 3
+big:   1 3 1.18059162071741e+21 1.20892581961463e+24
+str:   Apple apple fig pear
+strd:  pear fig apple Apple
+uni:   97 98 9786
+plain: Apple apple fig pear
+mixn:  abc 1.5 3 20
+mixs:  1.5 20 3 abc
+OUT
+is(run_cl($KINDS), $KINDS_WANT, 'every element kind sorts as perl does');
+is(run_cl($KINDS, 'none'), $KINDS_WANT, 'the same answers under PCL_OPT=none');
+
+# The EDGES of the collection: one element, none, an undef among numbers, two
+# sources in one sort, a literal list, and stability.
+my $EDGES = <<'PL';
+no warnings 'uninitialized';
+my @one = (7);
+my @nil = ();
+my @undefs = (3, undef, 1);
+my @n = (10, 2, 33, 4);
+my @m = (1, 2.5, 3, 0.5);
+my @st = ("b1", "a1", "b2", "a2");
+print "one:    @{[ sort { $a <=> $b } @one ]}\n";
+print "empty:  [@{[ sort { $a <=> $b } @nil ]}]\n";
+print "undef:  @{[ sort { $a <=> $b } @undefs ]}\n";
+print "multi:  @{[ sort { $a <=> $b } @n, @m ]}\n";
+my @lit = sort { $a cmp $b } ('c', 'a', 'b');
+print "lit:    @lit\n";
+print "stable: @{[ sort { substr($a,0,1) cmp substr($b,0,1) } @st ]}\n";
+PL
+is(run_cl($EDGES), <<'OUT', 'the collection edges: one, none, undef, two sources, stability');
+one:    7
+empty:  []
+undef:   1 3
+multi:  0.5 1 2 2.5 3 4 10 33
+lit:    a b c
+stable: a1 a2 b1 b2
+OUT
+
+# A sort assigned back over its own source, and a ref taken into the source
+# before the sort (the sorted vector is FRESH, so the old elements stand).
+is(run_cl(<<'PL'), "self:  1 2 3\nref:   1 5 9 / 5 / 5 1 9\n", 'self-assignment and a ref into the source');
+my @self = (3, 1, 2);
+@self = sort { $a <=> $b } @self;
+print "self:  @self\n";
+my @r = (5, 1, 9);
+my $ref = \$r[0];
+my @sorted = sort { $a <=> $b } @r;
+print "ref:   @sorted / $$ref / @r\n";
+PL

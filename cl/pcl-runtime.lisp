@@ -22115,6 +22115,104 @@ buffer's fill-pointer; everything else falls back to file-length."
             (unless p (return-from %p-sort-collect-plain nil))
             (vector-push-extend p out))))))
 
+;;; ── THE CLASSIC SORT'S PER-CALL CONSTANT (task #1810) ──────────────────────
+;;; 20 000 sorts of 50 elements, profiled (s473v, sb-sprof self time):
+;;;   sortnum  stable-sort-simple-vector 26.0 %, the generic `<' called once
+;;;            per comparison 24.3 %, the two check passes (`every #'realp' +
+;;;            `notany #'%pcl-nan-p', a funcall per element each) 13.5 %,
+;;;            %p-sort-collect-plain 21.4 % total (vector-push-extend into an
+;;;            adjustable vector, two growths, then copy-seq).
+;;;   sortstr  `string<' 14.3 % + string<* 22.0 % + %sp-string-compare 25.0 %
+;;;            = 61.3 %: CL's `string<' is a full call that parses four
+;;;            keyword arguments, dispatches on the string type and answers a
+;;;            mismatch INDEX, where a sort wants a boolean.
+;;; So: ONE typed classification pass instead of two funcall passes, the
+;;; one-source-vector case collected straight into a right-sized simple-vector,
+;;; and a TYPED predicate per element kind.
+
+(defun %p-sort-plain-vector (src)
+  "The plain VALUES of a single source vector as a FRESH simple-vector, or NIL
+   when any element is not plain.  `sort @a' is what every classic sort in a
+   program looks like and it knows its length up front, so it never needs the
+   adjustable vector, its growths, or the copy-seq the general walk needs."
+  (let* ((n (length src))
+         (out (make-array n)))
+    (declare (type fixnum n))
+    (dotimes (i n out)
+      (let ((p (%p-plain-scalar (aref src i))))
+        (unless p (return-from %p-sort-plain-vector nil))
+        (setf (svref out i) p)))))
+
+(defun %p-sort-collect-general (items)
+  "The many-source / scalar-source collection: the shared walk into an
+   adjustable vector, copied out to the fresh simple-vector the sorters want."
+  (let ((out (make-array 16 :adjustable t :fill-pointer 0)))
+    (and (%p-sort-collect-plain out items) (coerce out 'simple-vector))))
+
+(defun %p-sort-values (items)
+  "ITEMS' collected plain values as a FRESH simple-vector nobody else holds,
+   or NIL when an element is not plain (the generic path's cue)."
+  (if (and items (null (cdr items)))
+      (let ((val (unbox (car items))))
+        (if (and (vectorp val) (not (stringp val)))
+            (%p-sort-plain-vector val)
+            (%p-sort-collect-general items)))
+      (%p-sort-collect-general items)))
+
+(defun %p-sort-kind (v)
+  "Classify the collected values in ONE typed pass: (values KIND SAW-NAN).
+   KIND is :fixnum / :double / :real / :sstring (all SIMPLE strings) /
+   :string / :mixed.  It replaces `every #'realp' and `notany #'%pcl-nan-p'
+   (and `every #'stringp'), which were two more passes with a funcall per
+   element — and the NaN answer has to come from the same walk, because a NaN
+   sends the whole sort to the generic path (task #996, D5)."
+  (declare (type simple-vector v))
+  (let ((fix t) (dbl t) (real t) (str t) (simp t) (nan nil)
+        (n (length v)))
+    (declare (type fixnum n))
+    (dotimes (i n)
+      (let ((p (svref v i)))
+        (cond
+          ((typep p 'fixnum) (setf dbl nil str nil simp nil))
+          ((typep p 'double-float)
+           (setf fix nil str nil simp nil)
+           (when (sb-ext:float-nan-p p) (setf nan t)))
+          ((realp p) (setf fix nil dbl nil str nil simp nil))
+          ((stringp p)
+           (setf fix nil dbl nil real nil)
+           (unless (simple-string-p p) (setf simp nil)))
+          (t (setf fix nil dbl nil real nil str nil simp nil)))))
+    (values (cond ((zerop n) :fixnum)
+                  (fix :fixnum)
+                  (dbl :double)
+                  (real :real)
+                  ((and str simp) :sstring)
+                  (str :string)
+                  (t :mixed))
+            nan)))
+
+(defun %p-fix< (a b) (declare (type fixnum a b)) (< a b))
+(defun %p-fix> (a b) (declare (type fixnum a b)) (> a b))
+(defun %p-dbl< (a b) (declare (type double-float a b)) (< a b))
+(defun %p-dbl> (a b) (declare (type double-float a b)) (> a b))
+
+(defun %p-sstring< (a b)
+  "A before B by CHARACTER CODE over two SIMPLE strings — perl's `cmp', and
+   the same order CL's `string<' gives, as a BOOLEAN and without the keyword
+   parsing, the string-type dispatch and the mismatch-index answer that make
+   `string<' 61.3 % of the sortstr row."
+  (declare (type simple-string a b))
+  (let* ((la (length a)) (lb (length b)) (n (min la lb)))
+    (declare (type fixnum la lb n))
+    (dotimes (i n)
+      (let ((ca (char-code (schar a i)))
+            (cb (char-code (schar b i))))
+        (declare (type fixnum ca cb))
+        (unless (= ca cb) (return-from %p-sstring< (< ca cb)))))
+    (< la lb)))
+
+(defun %p-sstring> (a b) (%p-sstring< b a))
+
 (defun %p-sort-classic-decorated (v keyfn pred)
   "Sort V by KEYFN under PRED, computing each key EXACTLY ONCE.  Legal only
    because every element is plain (%p-plain-scalar), so how many times the
@@ -22144,22 +22242,32 @@ buffer's fill-pointer; everything else falls back to file-length."
                (known: :default :num-asc :num-desc :str-asc :str-desc)"
               mode))))
 
-(defun %p-sort-classic-sorted (vals mode numeric)
-  "Sort the collected plain VALS (a fill-pointer vector) into a fresh
-   simple-vector — the shape p-sort returns — or NIL when a NaN key sends the
-   sort to the generic path.  When every value already IS its own key (reals
-   under <=>, strings under cmp) there is nothing to decorate and the values
-   are sorted in place."
-  (let ((v (copy-seq vals)))
-    (if numeric
-        (let ((pred (if (eq mode :num-asc) #'< #'>)))
-          (if (every #'realp v)
-              (and (notany #'%pcl-nan-p v) (stable-sort v pred))
-              (%p-sort-classic-decorated v #'to-number pred)))
-        (let ((pred (if (eq mode :str-desc) #'string> #'string<)))
-          (if (every #'stringp v)
-              (stable-sort v pred)
-              (%p-sort-classic-decorated v #'to-string pred))))))
+(defun %p-sort-numeric (v mode kind nan)
+  "Sort V under <=> for the element KIND the classification found.  When every
+   value already IS its own key there is nothing to decorate and V is sorted in
+   place; a NaN answers NIL, which sends the sort to the generic path."
+  (let ((desc (eq mode :num-desc)))
+    (case kind
+      (:fixnum (stable-sort v (if desc #'%p-fix> #'%p-fix<)))
+      (:double (and (not nan) (stable-sort v (if desc #'%p-dbl> #'%p-dbl<))))
+      (:real   (and (not nan) (stable-sort v (if desc #'> #'<))))
+      (t       (%p-sort-classic-decorated v #'to-number (if desc #'> #'<))))))
+
+(defun %p-sort-stringly (v mode kind)
+  "Sort V under cmp for the element KIND the classification found."
+  (let ((desc (eq mode :str-desc)))
+    (case kind
+      (:sstring (stable-sort v (if desc #'%p-sstring> #'%p-sstring<)))
+      (:string  (stable-sort v (if desc #'string> #'string<)))
+      (t (%p-sort-classic-decorated v #'to-string (if desc #'string> #'string<))))))
+
+(defun %p-sort-classic-sorted (v mode numeric kind nan)
+  "Sort the collected plain values V — a FRESH simple-vector nobody else holds,
+   which is the shape p-sort returns — in place, or NIL when a NaN key sends
+   the sort to the generic path."
+  (if numeric
+      (%p-sort-numeric v mode kind nan)
+      (%p-sort-stringly v mode kind)))
 
 (defun %p-sort-classic-generic (mode items)
   "THE FALLBACK, spelled exactly as the emitter spells the general form for
@@ -22190,9 +22298,10 @@ buffer's fill-pointer; everything else falls back to file-length."
              items
              (functionp (%p-sort-resolve-comparator (unbox (first items)))))
         (apply #'p-sort items)
-        (let ((vals (make-array 16 :adjustable t :fill-pointer 0)))
-          (or (and (%p-sort-collect-plain vals items)
-                   (%p-sort-classic-sorted vals mode numeric))
+        (let ((v (%p-sort-values items)))
+          (or (and v
+                   (multiple-value-bind (kind nan) (%p-sort-kind v)
+                     (%p-sort-classic-sorted v mode numeric kind nan)))
               (%p-sort-classic-generic mode items))))))
 
 (defun p-reverse (&rest items)
