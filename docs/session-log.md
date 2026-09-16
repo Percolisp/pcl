@@ -100,6 +100,64 @@ rationale: `docs/DECIDED.md` `## s486b`, `docs/test-skip-registry.md`
 **First measurement** (main `4429126a`, `.faillog` of 2026-09-06): sweep 635 rows = 268 not-supported / 69 parked / 291 bug / 7 other — **53 % of the sweep's failing rows are deliberate non-support**; companion 11,984 = 4,661 / 88 / 4,873 / 2,362 unexplained (**40 %**); board 389 = 88 / 294 / 7 perl-skip; XDIFF 2,517 all not-supported by construction; shortfall 12,213 + 444,439.  Read the per-population rows — the grand total is dominated by the `t/` shortfall's generated files.
 
 **Against Fable's hand measurement**: every population TOTAL reproduces; three splits differ and all three are the hand grep (an `NS:`-less `not-supported.md` citation, 59 `partly #752` rows, a `PARKED:`+task row), reconciled row by row in `docs/failure-cause-classes.md`.  Filed **#1783**: `mro/inconsistent_c3_utf8.t` has a blessed XDIFF row but no reason row — the one row in that population the rule cannot class.
+## Session s486c (Opus agent, 2026-09-16) — s484d resumed IN PLACE: rebased onto main, its bars re-measured on the combined tree
+
+s484d had been left intact at `21a1711a` on `f6b56feb` when the USER stopped
+s485 ("Don't start more subjobs"), with its gate, its `--all --quick`
+companion and its records owed.  This session resumed that worktree in place —
+no new worktree, no replay — rebased it onto main `4429126a`, and ran the owed
+bars on the combined tree.
+
+**What s484d is.**  The harness family: four `perl-tests/t/test.pl` helpers
+perl's own stub owed (#1652 `run_multiple_progs`, #1585 `_create_runperl`,
+#1584 `todo_skip`, and #1590's `unlink_all`/`unlink_tempfiles`/
+`is_linux_container`), plus the per-FILE SBCL heap allowance
+(`dynamic_space_mb` in the one command-line builder `tools/lib/PCLSbcl.pm`,
+registry `baselines/perl-suite-heap.tsv`) that made the last of them
+affordable — s473t4 had shipped those three and reverted them because ~26
+extra lines in a module `re/pat_advanced.t` requires tipped that file over
+SBCL's 1 GB default and cost it all 1,680 rows.  Net: **+543 companion rows
+over nine files, +411 of them passing**, all nine of those files'
+`row-shortfall.tsv` entries to zero, and the perl-tests sweep TOTAL
+18676 → 18681 (anonsub.t 1/0 → 6/4).
+
+**The rebase.**  Five commits stayed five.  Commits 1–3 and 5 applied clean;
+commit 4 (the three companion baselines) conflicted, because main had taken
+s484c and s473t5f since `f6b56feb` and both of those edit the same files.
+Each conflict was resolved row by row rather than hunk by hunk: a script
+rebuilt the file from MAIN's rows and spliced back only the `rel` blocks each
+side had actually edited, then verified the result in both directions
+block-for-block — so every row neither side touched is byte-identical to
+main's by construction, which `git`'s hunk-level automerge cannot promise on a
+file where two sessions edited 24 and 9 file blocks.
+
+`baselines/perl-suite-run.tsv` and `baselines/row-shortfall.tsv` were disjoint
+at row level (s484d's nine files vs main's eight and five); only their header
+notes collided, and both were kept, newest first.
+`baselines/perl-suite-fails.tsv` had exactly ONE overlapping file,
+`uni/overload.t` — and that is the interesting one, because main had just
+given its ten rows causes and one of those causes is `#1584 — the PCL test.pl
+stub has no todo_skip`, which is the bug s484d fixes.  Resolved per row against
+what each side measured: the eight "acute" rows keep main's new `#1036`; test
+192 leaves the baseline entirely (PCL now emits `not ok N # TODO & SKIP`
+exactly as perl does, so it stops diverging); test 193 keeps s484d's measured
+verbs (`not ok` / `ok`, where the blessed row said `(missing)`) and stays
+causeless, because the `#1584` cause described the `(missing)` verb and is
+retired by the very fix.  Carrying it forward would have attributed a
+surviving divergence — PCL *passing* a row perl has as a TODO failure — to a
+bug that no longer exists.  It is the one causeless row this branch adds, and
+it is named in the commit rather than invented over.
+
+`baselines/fail-baseline.tsv` and `baselines/pass-baseline.tsv` auto-merged
+with no conflict; the diff against main was re-read and is exactly s484d's two
+added anonsub.t fail rows, its pass row and the two notes.
+
+**The bars on the combined tree.**  Gate `Result: PASS`, **243 files / 8216
+rows** — main's 242/8212 plus this batch's `Pl/t/suite-stub-01.t` (+1 file, +4
+rows); the three xs files report skipped, as the USER parked them in s485.
+Full perl-tests sweep: **GATE clean**, 0 new / 0 fixed, TOTAL passing
+**18681 = 18681 (+0)**, drops 5 = census, CAUSES 0 of 480 blessed rows
+causeless.
 
 ## Session 485 (Fable, 2026-09-14 ~08:00 → ~10:30) — "Please continue": the three stopped worktrees resumed in place, s484c and s473t5f reviewed and merged; the xs gate files parked (USER); "Don't start more subjobs" (USER)
 
