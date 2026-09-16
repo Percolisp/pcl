@@ -22245,7 +22245,14 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-sort-numeric (v mode kind nan)
   "Sort V under <=> for the element KIND the classification found.  When every
    value already IS its own key there is nothing to decorate and V is sorted in
-   place; a NaN answers NIL, which sends the sort to the generic path."
+   place; a NaN answers NIL, which sends the sort to the generic path.
+
+   RULE 12: the `t' arm is not a swallowed missing case — it is the DECORATED
+   path, which is a correct general answer for EVERY kind (it is the answer
+   this whole function had before the typed arms existed).  A kind added to
+   %p-sort-kind and forgotten here therefore sorts correctly and slowly, which
+   is the safe direction; the MODE set, where a wrong guess would be a wrong
+   ORDER, is the one that dies — see %p-sort-classic-numeric-p."
   (let ((desc (eq mode :num-desc)))
     (case kind
       (:fixnum (stable-sort v (if desc #'%p-fix> #'%p-fix<)))
@@ -22254,7 +22261,8 @@ buffer's fill-pointer; everything else falls back to file-length."
       (t       (%p-sort-classic-decorated v #'to-number (if desc #'> #'<))))))
 
 (defun %p-sort-stringly (v mode kind)
-  "Sort V under cmp for the element KIND the classification found."
+  "Sort V under cmp for the element KIND the classification found.  Its `t'
+   arm is the decorated path, for the reason %p-sort-numeric gives."
   (let ((desc (eq mode :str-desc)))
     (case kind
       (:sstring (stable-sort v (if desc #'%p-sstring> #'%p-sstring<)))
