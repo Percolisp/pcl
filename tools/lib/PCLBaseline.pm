@@ -111,7 +111,7 @@ sub _merge_block {
     $want{$_}++ for @$new;
     my @kept;
     for my $l (@{ $old || [] }) {
-        next unless $want{$l};
+        next if !$want{$l};
         $want{$l}--;
         push @kept, $l;
     }
