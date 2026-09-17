@@ -48,6 +48,33 @@ fasl).  The USER: "add a todo to look at this for a real implementation" —
 task #1841, unlaunched.  The USER also ruled "Don't start a new subjob right
 now", so the s488a brief (#1834 + #1835) stays on disk.
 
+Afternoon and session end.  The USER asked how the module cache works and
+whether it extends to scripts (answered from the code; task #1841 filed as
+the todo, blocked by #1843 which folds the perl binary and PPI's files into
+the compiler fingerprint), how `@INC` is initialised (per run, from the PATH
+perl's own `@INC`; no reinstall after a perl upgrade), and whether `caller()`
+needs SBCL in a debug state (it does not: PCL's own frame stack) — and then
+RULED `caller()` fidelity (#233) DEFERRED "for now", which superseded the
+morning's bug-queue ruling: the not-supported entry was widened to the whole
+family and the 181 baseline rows citing #233 re-caused `NS:` (main
+`eb22f7a4`).  The USER's rewritten README (their edit of the s484 Sonnet
+draft, reviewed line by line by Fable: twelve factual/stale items, ~25
+language items) replaced README.md (`72e73713`, then the core-vs-module key
+sentence `7cb4fb37`).  PPI is pure Perl but requires XS modules (Clone is
+XS-only; Params::Util, Class::XSAccessor, Digest::MD5, Storable are XS
+here), so self-hosting waits on XS or four shims.
+
+At ~15:45 the USER re-opened the two slots: **s488a** (#1834 + #1835, the
+companion snapshot drift attributed and spliced; worktree
+`agent-a5c41f50e288e58df`) and **s488b** (#1843 → #1841, the fingerprint
+and the script cache; worktree `agent-a51234c8fe1966476`) launched from
+`11ef34a1`.  At ~17:00 the USER ended the session ("I feel good about this
+project now"); both agents were stopped with their work COMMITTED — s488a
+one commit (member 1, #1835 done), s488b four commits (#1843 done, a #1861
+filler, #1841's runtime + `pcl` + guard + docs in WIP) — neither
+merge-ready; each resumes IN PLACE from its STOP.md.  Recipe at the top of
+`~/pcl-agent-scratch/s470/PAUSE-s474.md`.
+
 ## Session s473t6a (Opus agent, 2026-09-17) — #1501 round 8: the `op/` census residue's ≥ 50-row band — one fix, thirteen filings, and 1,098 causeless rows attributed
 
 **Member 1 — the tables.**  The twelve files re-measured on the launch tree
