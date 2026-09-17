@@ -2,6 +2,35 @@
 
 Append new entries at the top. One section per session.
 
+## Session 488 (Fable, 2026-09-17) — the four open USER questions ruled; the two stopped worktrees resumed
+
+The session opened, as s487 had been told to, by asking the USER the four
+questions that had been open since s486.  Ruled: the skip registry is
+RETIRED in favour of the `NS:` cause column, AFTER the next tag (task
+#1836 carries the mechanical recipe and its bar; the headline fail count
+will read ~830 instead of 649 with the pass count unchanged); `caller()`
+fidelity (#233) is BUG QUEUE, planned — no not-supported section; the
+README's companion figures are refreshed AT TAG TIME, not between merges;
+and the 30-day cache prune is not a startup cost (miss-only, once per
+process, one scan a day across processes — one sentence added to
+`docs/caching.md`).  The USER also lifted s487's "no subjobs today": TWO
+slots.
+
+Both worktrees stopped at the end of s487 were resumed IN PLACE on pinned
+Opus agents, each from its own STOP.md: **s473v** (perf round 33 — the
+match record #1804, the str-buffer append #1809, the classic sort #1810,
+the `feargs` bench row; 12 commits, already rebased onto 2f9cc300) owes its
+final bar on the rebased tree; **s473t6a** (op/ census round t6a — #1813
+"an operator reads its operand ONCE", every causeless row of twelve op/
+files caused; 3 commits on 2ac855aa) owes the rebase and its companion
+op/ leg.  Each reports `MERGE-READY`; Fable reviews per the merge protocol.
+
+Housekeeping from the s487 chat: #212 was suspected stale and is instead
+RE-SCOPED — the sweep half is done by the cached core, but the CPAN board's
+per-file runner `tools/run-dist-t.pl` still spawns SBCL by hand outside
+`tools/lib/PCLSbcl.pm`.  The `:num`/`:scalar` answer and the speed-queue
+count from that chat are now in DECIDED `## s488`.
+
 ## Session 486 (Fable, 2026-09-16) — the not-supported share measured and instrumented; three agents merged; the commands reviewed for security
 
 The USER asked, reviewing the README's `Measured` table, how many of the

@@ -116,6 +116,13 @@ and `proto/` alike (`*pcl-cache-max-age*`; `docs/DECIDED.md` §s470by).
 There is no age limit on *validity* — an untouched, unedited entry is a
 hit indefinitely.
 
+The prune is never a startup cost: it is reached only on a cache **miss**,
+runs once per process, and the scan itself happens at most once a day
+across processes (a `.last-prune` stamp in the cache root claims the day;
+`%p-claim-prune`) -- one directory walk of `modules/`, `evals/` and `proto/`
+comparing mtimes to the cutoff, milliseconds.  A warm start never reaches
+it (USER question s486, answered s488).
+
 **The directory is created `0700`, and an unsafe one is refused** — a
 cached module is compiled code that will be loaded and run. PCL refuses a
 cache root owned by another user, or writable by group/other, with a

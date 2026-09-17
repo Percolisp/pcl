@@ -140,7 +140,9 @@ into one number**:
    count beside it, from a **MEASURED per-run column** — never from the registry's pattern
    count, which is not a row count (one pattern can cover several rows; a pattern in a file
    that aborts early covers none).
-2. **The registry STAYS** (CLAUDE.md principle 5 names it as the mechanism). Retiring it in
+2. **The registry STAYS UNTIL THE NEXT TAG, then is RETIRED (USER ruling s488, 2026-09-17;
+   task #1836 carries the migration recipe and its bar).** CLAUDE.md principle 5 names it as
+   the mechanism until then. Retiring it in
    favour of the cause column would move the headline (649 → ~830 fails) and is a USER
    decision — do NOT migrate rows, do not change what counts as pass or fail.
 3. A **stale entry is NARROWED or REMOVED** so that no passing row matches while every
