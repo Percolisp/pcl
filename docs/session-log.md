@@ -256,6 +256,41 @@ length: **9.0 ns per element**, which confirms s473r's 8.5 ns from the other
 direction and is what the lever must beat.  Half two — the per-array "every
 element is a box" fact — is untouched.
 
+**The companion `op/` leg (221 files, `--jobs 1`), and the one regression it
+found.**  The `cl/` change's mandatory directory leg, owed from the stop and run
+on the rebased tree: 46 OK / 137 DIFF / 21 XDIFF / 8 NOTAP / 5 TRANSPILE / 1
+FIXTURE / 1 TIMEOUT / 2 QUARANTINED, **7 files differing from the snapshot**,
+every one re-run ALONE by the runner (#366) with both runs agreeing, and every
+one A/B'd against a `git archive 2f9cc300` extraction that is CODE-IDENTICAL to
+main.  **Two are this round's and are SPLICED**: `op/tie.t` 14/81 → **15/80**
+(DATA record 44, "Bug 68192 — numeric ops not calling mg_get when tied scalar
+holds a ref", whose own comment reads *make sure FETCH is called once per op*)
+and `op/bop.t` 469/28 → **474/23**.  **Five are not, and each reads the SAME on
+the base extraction**: `op/coreamp.t` 9/58 (blessed 9/46), `op/coresubs.t` 0/2
+(blessed 1/1) — both already named-not-spliced by s473t5f — `op/inc.t` 67/26
+(blessed 62/13, a stale row nobody has spliced), `op/inccode.t` 13/26 (blessed
+13/28, the pre-existing drift this round's shortfall cause already names) and
+`op/gv.t` TIMEOUT (**#1781**, the file straddles the 90 s clock).  `op/inccode-tie.t`
+appeared in the ROW DIFF with one `+` and one `-`; its blessed, base and current
+rows are BYTE-IDENTICAL, so that pair is the runner's key projection, not a move.
+
+**`op/bop.t` is 14 rows FIXED and 9 rows BROKEN, and the 9 are a real
+regression — filed as #1840, not blessed over.**  The file's "double magic
+tests" block counts a tied scalar's FETCHes per operator.  #1813 fixed the 14
+rows that read `got 2 want 1` after a PLAIN `|`/`&`/`^`/`~`.  The 9 that now
+fail all assert `fetches($x) == 2` right after a COMPOUND `|=`/`&=`/`^=`, and
+they were passing only because PCL's old DOUBLE read made that count 2 BY
+ACCIDENT.  The probe says what perl actually does: **a compound assignment's
+value is its LEFT OPERAND AS AN LVALUE**, so consuming it reads the variable
+again — `$x |= $y;` in VOID context is ONE fetch in perl and one in PCL, while
+`my $a = ($x |= $y)` is TWO in perl and one in PCL; a plain `my $c = ($x = 5)`
+is one in both.  The same gap is OLDER than #1813 and was already visible on
+main for `+=` and `.=` (perl 2, PCL 1) — #1813 only made it uniform.  Fixing it
+means the compound macros must return the PLACE, which changes what every
+consumer of an `OP=` expression receives (aliasing, list context, the raw
+twins): a new mechanism, outside this round's bound, so it is **#1840** with
+both candidate shapes, the rows behind it and a DO-NOT-RETRY line.
+
 ## Session 486 (Fable, 2026-09-16) — the not-supported share measured and instrumented; three agents merged; the commands reviewed for security
 
 The USER asked, reviewing the README's `Measured` table, how many of the

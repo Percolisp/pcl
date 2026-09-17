@@ -1705,7 +1705,7 @@ op/avhv.t	40	0	39	1	DIFF		0
 op/bless.t	116	2	111	6	DIFF		0
 op/blocks.t	25	1	16	10	DIFF		0
 op/bool.t	8	0	8	0	OK		0
-op/bop.t	510	0	469	28	DIFF	aborted-forms:1: Invalid type 'P' in pack 	0
+op/bop.t	510	0	474	23	DIFF	aborted-forms:1: Invalid type 'P' in pack ; s473t6a: 469/28 -> 474/23 (#1813, an operator reads its operand ONCE).  The file's "double magic tests" block counts a tied scalar's FETCHes per op: 14 rows that read `got 2 want 1` for a PLAIN `|`/`&`/`^`/`~` now pass, and 9 rows that asserted `fetches($x) == 2` after a COMPOUND `|=`/`&=`/`^=` now fail, because PCL's old DOUBLE read made that 2 by accident -- perl's second FETCH there is the OUTER assignment reading the lvalue a compound assignment returns (probed: `$x |= $y;` in VOID context is 1 FETCH in perl AND in PCL; `my $a = ($x |= $y)` is 2 in perl, 1 in PCL).  That residue is task #1840.  Net -5 failing; measured --jobs 1 with the #366 serial re-run agreeing, and 469/28 on a `git archive 2f9cc300` extraction	0
 op/caller.t	111	1	28	84	DIFF		0
 op/catch.t	12	0	10	2	DIFF		0
 op/chars.t	34	0	34	0	OK		0
@@ -1880,7 +1880,7 @@ op/sysio.t	45	0	45	0	OK		0
 op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/threads-dirh.t	0	0	0	1	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support threads ; reaped 4 orphan(s)	0
-op/tie.t	94	1	14	81	DIFF		0
+op/tie.t	94	1	15	80	DIFF	s473t6a: 14/81 -> 15/80 (#1813).  DATA record 44, "Bug 68192 - numeric ops not calling mg_get when tied scalar holds a ref", whose own comment reads `make sure FETCH is called once per op`, now matches perl.  Measured --jobs 1 with the #366 serial re-run agreeing, and 14/81 on a `git archive 2f9cc300` extraction (main's own s486c measurement)	0
 op/tie_fetch_count.t	343	0	139	2	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N; s473 (Fable): 76/65 -> 129/12, PRE-EXISTING at fcf076f1 AND 637fc58e: the 55 FIXED rows are the -X $tied_glob / -X filetest rows (the s470bs filetest operand resolver, #1031/#1049/#1048/#1033/#1047); the 2 NEW rows ($tied.."a", "a"..$tied: FETCH called twice) = task #1430; s473h: 129/12 -> 131/10, the 2 rows are task #1430 FIXED (the segment fill classified the range and then called p-.. for the STRING arm, which classified AGAIN -- and classification unboxes, which for a tied scalar is a second FETCH); serial re-run agrees, 0 NEW ROW; s473t6a: #1813 (an operator reads its operand ONCE -- nine operators called a tied scalar's FETCH twice because they INSPECTED the operand and then COERCED the place again).  131/10 -> 139/2, 8 blessed rows FIXED (unary -, x, post ++, post --, &, ^, |, ~), measured --jobs 1 with the #366 serial re-run agreeing, ROW DIFF 0 NEW / 8 FIXED.  The residue is 2 rows of #1814 (the ZERO-FETCH half: `@a = ($tied) x 1` and `<$tied_glob>` never FETCH at all) plus the 202 rows the ruled smart-match refusal at line 169 takes with its form	0
 op/tiearray.t	75	0	26	29	DIFF	aborted-forms:1: Modification of non-creatable array value attempted, subscript -N PCL: tie: an ARRAY (class NegIndex); s473 (Fable): 40/35 -> 26/29, PRE-EXISTING at fcf076f1 AND 637fc58e (extractions, serial): the #1273 rule-12 fatal (s471a) fires on a TIED array whose class sets $NEGATIVE_INDICES -- task #1429 (20 rows never produced, 15 NEW fails at t/op/tiearray.t lines 273-284)	0
 op/tiehandle.t	67	0	12	32	DIFF		0
