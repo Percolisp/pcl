@@ -3847,8 +3847,29 @@ the emitted call form.
 13-element list (empty on failure); in scalar and void context perl's
 `&PL_sv_yes` / `&PL_sv_no` — 1 on success and the **empty string**, not undef,
 on failure, so `defined(scalar stat "/no/such")` is TRUE.  The filetests are
-not in this rule: each answers its own scalar value (`-s` a size, the rest a
-boolean; see #403 on the defined-`""` false).
+not in this rule: each answers its own scalar value (`-s` a size, `-M`/`-A`/`-C`
+an age in days, the rest a boolean).
+
+**A FILETEST'S FALSE IS A VALUE, and which false it is carries information**
+(normative, s473t6b, task #403).  A `-X` answers
+
+| the operation that would fill `_` | the test | the answer |
+|---|---|---|
+| SUCCEEDED | holds | `1` (or the value: a size, an age) |
+| SUCCEEDED | does not hold | the **empty string** — DEFINED |
+| FAILED (ENOENT, EBADF, a NUL in the path) | — | **undef** |
+
+so `-f "/tmp"` is defined and `-f "/nope"` is not, and a program can tell "not
+a plain file" from "no such file".  `-e` is the one member with no middle row:
+its test *is* the stat, so it is `1` or undef and never `""`.  `-t`, which
+fills no `_`, answers the same two falses from its own errno: `""` for ENOTTY
+(the handle is open and is not a tty) and undef for EBADF.
+
+**Either false is ONE value**, so a filetest in LIST context contributes
+exactly one element: `() = -d $f` counts 1, true or false.  A target that
+answers a false filetest with its host's "no value" (CL `NIL`, an empty list)
+is wrong in both readings — that was PCL's own bug until s473t6b, and
+`t/op/filetest_stack_ok.t` is 135 rows of nothing but this rule.
 
 **`$!` is part of the answer.** EBADF and ENOENT are different facts and every
 member of the family sets one of them: EBADF for a handle that is not open,

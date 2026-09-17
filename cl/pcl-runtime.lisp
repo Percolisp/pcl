@@ -18105,15 +18105,37 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; block scan) over THE resolver above, so the operand rules cannot drift
 ;;; from one operator to the next.
 
+(defun %p--false ()
+  "A FILETEST'S FALSE, and never CL NIL (task #403).  perl's false carries
+   information: `\"\"` — DEFINED — when the operation that would fill `_`
+   SUCCEEDED and the test simply does not hold, and undef when that operation
+   FAILED.  So `-f \"/tmp\"` is defined and `-f \"/nope\"` is not, and a
+   program can tell \"not a plain file\" from \"no such file\".
+   *pcl-stat-cache-ok* is already exactly that flag (it is what makes `_`
+   an invalid operand after a failed stat), so this is a reading of it and
+   not a second piece of state.
+
+   NIL was wrong twice over.  It is not a perl value, so in LIST context it
+   left ZERO values where perl leaves ONE: `() = -d $f` counted 0 here and 1
+   in perl, which is what t/op/filetest_stack_ok.t measures for all 27
+   operators (`-X returns single value`, `-X *gv returns single value`).
+   And it conflated the two falses, which is the silent wrong #403 filed.
+   `%p-stat-answer` has answered scalar `stat` with perl's `\"\"` since
+   #1043 — same rule, same region."
+  (if *pcl-stat-cache-ok* "" *p-undef*))
+
 (defun %p--stat-test (file op pred &key lstat)
   "Shared body for every stat-based filetest: resolve FILE for OP through the
    one operand resolver, stat (or lstat) it, and answer (funcall PRED struct).
-   A `-X' overload answers instead of the stat; a failed stat answers nil."
+   A `-X' overload answers instead of the stat; a false PRED and a failed stat
+   both answer through %p--false, which keeps them apart.  A pred's own 0 (the
+   size `-s` reports for an empty file) is a VALUE and passes through."
   (multiple-value-bind (kind val) (%p-stat-operand file op)
     (if (eq kind :over)
         val
-        (let ((st (%p-stat-buf kind val lstat)))
-          (and st (funcall pred st))))))
+        (let ((v (let ((st (%p-stat-buf kind val lstat)))
+                   (and st (funcall pred st)))))
+          (if v v (%p--false))))))
 
 (defun %p--access-test (file op mode)
   "Shared body for -r/-w/-x: resolve FILE, STAT it, then access(2) with MODE.
@@ -18125,11 +18147,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   (multiple-value-bind (kind val) (%p-stat-operand file op)
     (if (eq kind :over)
         val
-        (and (%p-stat-buf kind val nil)
-             (multiple-value-bind (path err) (%p--path kind val)
-               (if path
-                   (%p-stat-try (progn (sb-posix:access path mode) 1))
-                   (%p-stat-fail err)))))))
+        (let ((v (and (%p-stat-buf kind val nil)
+                      (multiple-value-bind (path err) (%p--path kind val)
+                        (if path
+                            (%p-stat-try (progn (sb-posix:access path mode) 1))
+                            (%p-stat-fail err))))))
+          ;; The stat ran first, so %p--false separates "the file is there and
+          ;; the permission is not" (perl: DEFINED "") from "no such file"
+          ;; (perl: undef) — probed on a chmod 0000 file, where perl answers
+          ;; "" for all six of -r -w -x -R -W -X (task #403).
+          (if v v (%p--false))))))
 
 (defun %p--e-impl (file)
   "Perl -e: the file exists — a stat that succeeds, which is perl's own test."
@@ -18299,12 +18326,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p--T-impl (file)
   "Perl -T: heuristic text-file test (empty files are text)"
   (multiple-value-bind (scan ov) (%p--text-scan file "T")
-    (if ov ov (case scan ((:empty :text) 1) (t nil)))))
+    (if ov ov (case scan ((:empty :text) 1) (t (%p--false))))))
 
 (defun %p--B-impl (file)
   "Perl -B: heuristic binary-file test (empty files are binary too, as in perl)"
   (multiple-value-bind (scan ov) (%p--text-scan file "B")
-    (if ov ov (case scan ((:empty :binary) 1) (t nil)))))
+    (if ov ov (case scan ((:empty :binary) 1) (t (%p--false))))))
 
 ;;; A BAREWORD FILEHANDLE IS A NAME IN A stat / FILETEST SLOT TOO (task #1032).
 ;;; `stat FH` and `-e FH` emitted the bare CL symbol FH, which is an UNBOUND
@@ -18366,19 +18393,22 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p--t-impl (fh)
   "Perl -t body: is the filehandle attached to a tty?  Three answers, all
-   perl's (probed 5.40.3): 1 for a tty, false with ENOTTY for an open handle
-   that is not one, and false with EBADF when the operand names no open
-   handle at all — the errno is how a caller tells those two apart."
+   perl's (probed 5.40.3): 1 for a tty, DEFINED \"\" with ENOTTY for an open
+   handle that is not one, and undef with EBADF when the operand names no open
+   handle at all — the errno is how a caller tells those two apart, and so is
+   the definedness (task #403; measured on an open file handle, a closed one
+   and a redirected STDIN).  `-t' does not fill `_', so it answers the two
+   falses itself instead of reading %p--false's flag."
   (let ((ov (%p-stat-overload-answer fh "t")))
     (if (not (eq ov :none))
         ov
         (handler-case
             (let ((fd (%p-fileno-impl (%p--t-handle fh))))
               (cond ((not (and (integerp fd) (>= fd 0)))
-                     (%p-stat-fail sb-posix:ebadf))
+                     (%p-stat-fail sb-posix:ebadf) *p-undef*)
                     ((plusp (sb-unix:unix-isatty fd)) 1)
-                    (t (%p-stat-fail sb-posix:enotty))))
-          (error () (%p-stat-fail sb-posix:ebadf))))))
+                    (t (%p-stat-fail sb-posix:enotty) "")))
+          (error () (%p-stat-fail sb-posix:ebadf) *p-undef*)))))
 
 (defmacro p--t (&optional (fh ''STDIN))
   "Perl -t: bareword filehandle is auto-quoted (like p-fileno)."

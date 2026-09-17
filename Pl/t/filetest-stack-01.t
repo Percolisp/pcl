@@ -30,14 +30,15 @@
 #
 # Every expectation below is the live `perl` answer (probed s417).
 #
-# NOT asserted here, and deliberately: perl's filetest FALSE is defined ("")
-# when the stat succeeded and undef only when it failed, while PCL answers
-# undef for both.  That is a property of the whole `p--*` runtime family, not
-# of stacking — it diverges for a plain `-f "/tmp"` too — so it is filed with
-# its own reproducer (task #403) rather than weakened into a wrong expectation
-# here.  The one member of that family whose answer is a VALUE rather than a
-# flag, `-s`, IS asserted (task #740, s456ah): an empty file's size is a
-# defined 0, and only a FAILED stat is undef.
+# ASSERTED here since s473t6b (task #403 CLOSED): perl's filetest FALSE is
+# defined ("") when the operation that would fill `_` SUCCEEDED and undef only
+# when it FAILED, and it is ONE value either way — `() = -d $f` counts 1 in
+# perl.  PCL used to answer CL NIL for both, which is undef in scalar context
+# and ZERO VALUES in list context.  `%p--false` is the one returner; the rows
+# in section 5 are the whole rule, every expectation the live perl answer.
+# The one member of the family whose answer is a VALUE rather than a flag,
+# `-s`, was done first (task #740, s456ah): an empty file's size is a defined
+# 0, and only a FAILED stat is undef.
 
 use v5.30;
 use strict;
@@ -56,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 16;
 
 # Fixtures built by the HARNESS (real perl), with their paths interpolated into
 # the generated program — so the expectations below do not depend on anything
@@ -215,3 +216,50 @@ like($spaced, qr/\(pl-e\s+\$f\)/,
      '`print $fh - e $f` (spaced) stays a call to sub e, not a filetest');
 unlike($spaced, qr/p--e/,
      '`print $fh - e $f` (spaced) emits no filetest operator');
+
+# ── 5. A FILETEST'S FALSE IS A VALUE (task #403) ────────────────────────────
+# perl's false carries information and is never "no value": DEFINED "" when
+# the stat/scan/handle lookup SUCCEEDED and the test simply does not hold,
+# undef when that operation FAILED.  Both leave exactly ONE value on the
+# stack, which is what t/op/filetest_stack_ok.t measures for all 27 operators.
+# Every expectation below was probed against perl 5.40.3 (the round's
+# probes/p5.pl, p6.pl, p7.pl); PCL answered `u` and `0` on the base tree.
+is(run_cl($FIX . <<'PL'), "d:d[]\nz:d[]\nx:d[]\nf:d[]\ne:u[]\nfm:u[]\ntm:u[]\n",
+print "d:", (defined(-d $F) ? "d" : "u"), "[", (-d $F), "]\n";
+print "z:", (defined(-z $F) ? "d" : "u"), "[", (-z $F), "]\n";
+print "x:", (defined(-x $F) ? "d" : "u"), "[", (-x $F), "]\n";
+print "f:", (defined(-f $D) ? "d" : "u"), "[", (-f $D), "]\n";
+print "e:", (defined(-e $M) ? "d" : "u"), "[", (-e $M), "]\n";
+print "fm:", (defined(-f $M) ? "d" : "u"), "[", (-f $M), "]\n";
+print "tm:", (defined(-T $M) ? "d" : "u"), "[", (-T $M), "]\n";
+PL
+   'a FALSE filetest is a defined "" after a successful stat, undef after a failed one (#403)');
+
+# The LIST-context arity: one value, always — the fact all 135 rows of
+# t/op/filetest_stack_ok.t are about.  `-M` is in the list because its answer
+# is a number and a failed stat must still leave one value.
+is(run_cl($FIX . <<'PL'), "d:1\nzm:1\nk:1\nMm:1\nB:1\nst:1\n",
+print "d:", scalar(() = -d $F), "\n";
+print "zm:", scalar(() = -z $M), "\n";
+print "k:", scalar(() = -k $F), "\n";
+print "Mm:", scalar(() = -M $M), "\n";
+print "B:", scalar(() = -B $F), "\n";
+print "st:", scalar(() = -f -d $D), "\n";
+PL
+   'a filetest leaves exactly ONE value in list context, true or false (#403)');
+
+# An EXISTING but permission-less file: perl answers DEFINED "" for all six
+# access tests, because it reads the stat's mode bits.  (PCL reaches the same
+# answer through access(2) and additionally sets $! — a residue noted on #403,
+# not asserted here.)
+is(run_cl($FIX . <<'PL'), "r:d\nw:d\nx:d\nR:d\nW:d\nX:d\n",
+my $N = "$D/noperm.txt";
+open my $mk, ">", $N or die; print $mk "x"; close $mk;
+chmod 0000, $N;
+for my $op (qw(r w x R W X)) {
+  my $v = eval "-$op \$N";
+  print "$op:", (defined $v ? "d" : "u"), "\n";
+}
+chmod 0644, $N; unlink $N;
+PL
+   'an existing but permission-less file is a DEFINED false for -r -w -x -R -W -X (#403)');
