@@ -180,6 +180,7 @@ use PCLPaths qw(perl_suite_t);
 use PCLShortfall ();   # the ONE reader/writer of the shared shortfall baseline (#993)
 use PCLTimeouts ();    # the ONE reader of a per-file timeout-allowance registry
 use PCLCauses ();      # the ONE reading of the CAUSE column (#993 I3)
+use PCLBaseline ();    # a bless SPLICES the measured blocks, never the file (#1835)
 
 # Contain the whole sweep in its own memory-capped cgroup: a runaway child
 # (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
@@ -1400,26 +1401,27 @@ sub bless_fail_rows {
   my %rows;   # rel -> arrayref of [num, pv, cv, key]
   %rows = %blessed_fail_meta;
   my ($touched, $truncated) = (0, 0);
+  my %measured;                  # the rels this run may rewrite (task #1835)
   for my $rel (keys %results) {
     my $st = $results{$rel}[5];
-    if (!row_gated_here($rel)) { delete $rows{$rel}; next }
+    if (!row_gated_here($rel)) { $measured{$rel} = 1; delete $rows{$rel}; next }
     next if fails_rows_unstable($rel);     # hand-placed opt-out survives a bless
     next unless row_verifiable($st);       # unmeasured: keep what is blessed
     delete $rows{$rel};
     $touched++;
+    $measured{$rel} = 1;
     my ($rr, undef, $trunc) = diverging_rows_full($rel);
     $truncated++ if $trunc;
     # Re-attach the blessed CAUSE of each row that is still here, by the
-    # join key.  A bless is still DESTRUCTIVE to this file's hand-written
-    # comment block and to the rows of files the run did not measure (s473,
-    # and the reason the standing practice is a row-by-row edit) - but it
-    # must not additionally throw away the attributions of the rows it DID
-    # re-measure, which is what an un-carried column would do.
+    # join key.  A bless no longer touches this file's hand-written comment
+    # block or the rows of files the run did not measure (task #1835: the
+    # write is a PCLBaseline splice) - and it must not throw away the
+    # attributions of the rows it DID re-measure, which is what an
+    # un-carried column would do.
     $_->[4] = $blessed_fail_cause{"$rel\t$_->[3]"} for @$rr;
     $rows{$rel} = $rr if @$rr;
   }
-  open my $out, '>', $fails_tsv or die "write $fails_tsv: $!";
-  print $out <<'HDR';
+  my $hdr = <<'HDR';
 # perl-suite-fails.tsv — the ROW-level fail baseline for tools/run-perl-suite.pl
 # (task #993 / docs/plan-test-audit-s464.md §3 I1).  The companion suite's
 # answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
@@ -1467,18 +1469,25 @@ sub bless_fail_rows {
 # delete", "key '2' incremented correctly") and were measured DIFFERENT in two
 # runs of ONE tree.
 HDR
-  printf $out "# taken-at: %s %s\n", stamp_session(), stamp_today();
-  my $n = 0;
-  for my $rel (sort keys %rows) {
+  my (%blocks, $n);
+  $n = 0;
+  for my $rel (keys %rows) {
     for my $r (sort { $a->[3] cmp $b->[3] || ($a->[0] // 0) <=> ($b->[0] // 0) } @{ $rows{$rel} }) {
       # A row with no cause writes FIVE fields, byte-identical to the
       # pre-column file: the cause is an OPTIONAL sixth, so an unattributed
       # row is not rewritten just because the column exists.
-      print $out PCLCauses::fail_row_line($rel, $r);
+      push @{ $blocks{$rel} }, PCLCauses::fail_row_line($rel, $r);
       $n++;
     }
   }
-  close $out;
+  $blocks{$_} ||= [] for keys %measured;    # a measured file with no rows left
+  PCLBaseline::splice_blocks(
+    path    => $fails_tsv,
+    blocks  => \%blocks,
+    touched => \%measured,
+    header  => $hdr,
+    stamp   => sprintf("# taken-at: %s %s (%d file(s) re-measured)\n",
+                       stamp_session(), stamp_today(), $touched));
   printf "blessed fail-rows: %d row(s) over %d file(s) (%d file(s) re-measured, %d truncated) -> %s\n",
     $n, scalar(keys %rows), $touched, $truncated, $fails_tsv;
   return;
@@ -1490,6 +1499,7 @@ HDR
 sub bless_shortfall {
   my %rows = map { $_ => { %{ $shortfall_base{$_} } } } keys %shortfall_base;
   my $touched = 0;
+  my %measured;                  # the keys this run may rewrite (task #1835)
   for my $rel (sort keys %results) {
     my $r = $results{$rel};
     my $key = "t/$rel";
@@ -1498,6 +1508,7 @@ sub bless_shortfall {
     # in three runs of the same tree), so its shortfall is NOT MEASURED here.
     next if $r->[5] =~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT|TIMEOUT)$/;   # unmeasured
     $touched++;
+    $measured{$key} = 1;
     my $short = ($r->[1] + $r->[2]) - ($r->[3] + $r->[4]);
     $short = 0 if $short < 0;
     if (!$short) { delete $rows{$key}; next }
@@ -1515,7 +1526,9 @@ sub bless_shortfall {
     $rows{$key} = { rows => $short, cause => $cause };
   }
   PCLShortfall::write_shortfall($shortfall_tsv, \%rows,
-                                stamp_session() . ' ' . stamp_today());
+                                stamp_session() . ' ' . stamp_today()
+                                . sprintf(' (%d companion file(s) re-measured)', $touched),
+                                \%measured);
   my $sum = 0; $sum += $rows{$_}{rows} for keys %rows;
   printf "blessed shortfall: %d row(s) over %d file(s) (%d companion file(s) re-measured) -> %s\n",
     $sum, scalar(keys %rows), $touched, $shortfall_tsv;

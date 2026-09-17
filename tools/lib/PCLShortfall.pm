@@ -38,6 +38,7 @@ package PCLShortfall;
 
 use strict;
 use warnings;
+use PCLBaseline;
 use Exporter 'import';
 our @EXPORT_OK = qw(read_shortfall write_shortfall shortfall_header);
 
@@ -83,22 +84,47 @@ sub shortfall_header {
 HDR
 }
 
-# Rewrite the whole file from a hash of the same shape.  BOTH populations must
-# be present in the hash: a writer that only knows its own population must copy
+# Write the file from a hash of the same shape.  BOTH populations must be
+# present in the hash: a writer that only knows its own population must copy
 # the other's rows through unchanged (both blessers do), or one bless silently
 # erases the other runner's baseline.
+#
+# The write is a SPLICE (task #1835, PCLBaseline): only the keys the run
+# MEASURED are rewritten, so a one-file bless is a one-row diff and the
+# hand-written header — this file's per-session history — survives.  Pass
+# $touched (key -> 1) for the keys the run measured; omitting it means "all of
+# them", which is what a fresh file wants.
+#
+# A ZERO ROW IS HAND-PLACED and survives any bless verbatim: `t/op/kvhslice.t
+# 0 <TAB> #1024 FIXED (was 1)` records WHY a shortfall closed, and that is a
+# hand edit by construction (this writer never creates one — a measured key
+# whose shortfall is gone simply loses its row).
 sub write_shortfall {
-    my ($path, $rows, $stamp) = @_;
-    open my $out, '>', $path or die "write $path: $!\n";
-    print $out shortfall_header();
-    printf $out "# taken-at: %s\n", $stamp if defined $stamp;
-    for my $key (sort keys %$rows) {
+    my ($path, $rows, $stamp, $touched) = @_;
+    my %blocks;
+    for my $key (keys %$rows) {
         my $r = $rows->{$key};
         next unless ($r->{rows} // 0) > 0;
-        print $out join("\t", $key, $r->{rows}, $r->{cause} // 'UNEXPLAINED'), "\n";
+        $blocks{$key} = [ join("\t", $key, $r->{rows}, $r->{cause} // 'UNEXPLAINED') . "\n" ];
     }
-    close $out;
+    # A key the caller dropped is REMOVED, so every key the baseline has must
+    # be offered to the splicer as touched-or-not; `$touched` decides.
+    my %t = $touched ? %$touched : map { $_ => 1 } keys %$rows;
+    PCLBaseline::splice_blocks(
+        path    => $path,
+        blocks  => \%blocks,
+        touched => \%t,
+        keep    => \&_is_zero_row,
+        header  => shortfall_header(),
+        stamp   => defined $stamp ? "# taken-at: $stamp\n" : undef,
+    );
     return;
+}
+
+sub _is_zero_row {
+    my ($line) = @_;
+    my (undef, $n) = split /\t/, $line, 3;
+    return defined $n && $n =~ /^0$/;
 }
 
 1;

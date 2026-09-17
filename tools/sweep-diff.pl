@@ -253,11 +253,13 @@ if ($mode eq 'save-shortfall') {
     die "no _status.tsv under $cur (a live .faillog directory is required)\n" unless %$st;
     my $rows = PCLShortfall::read_shortfall($dest);
     my $touched = 0;
+    my %measured;                 # the keys this run may rewrite (task #1835)
     for my $file (sort keys %$st) {
         my $now = $st->{$file}{short};
         next if !defined $now || $now < 0;         # not measured: keep the row
         $touched++;
         my $key = "perl-tests/$file";
+        $measured{$key} = 1;
         if (!$now) { delete $rows->{$key}; next }
         $rows->{$key} = { rows  => $now,
                           cause => ($rows->{$key} ? $rows->{$key}{cause} : 'UNEXPLAINED') };
@@ -266,7 +268,9 @@ if ($mode eq 'save-shortfall') {
     chomp $sha;
     my @t = localtime;
     PCLShortfall::write_shortfall($dest, $rows,
-        sprintf("%s %04d-%02d-%02d", (length $sha ? $sha : 'unknown'), $t[5]+1900, $t[4]+1, $t[3]));
+        sprintf("%s %04d-%02d-%02d (%d sweep file(s) re-measured)",
+                (length $sha ? $sha : 'unknown'), $t[5]+1900, $t[4]+1, $t[3], $touched),
+        \%measured);
     my $sum = 0; $sum += $rows->{$_}{rows} for keys %$rows;
     printf "saved %d shortfall row(s) over %d file(s) (%d sweep file(s) re-measured) -> %s\n",
         $sum, scalar(keys %$rows), $touched, $dest;
