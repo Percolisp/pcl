@@ -291,6 +291,18 @@ consumer of an `OP=` expression receives (aliasing, list context, the raw
 twins): a new mechanism, outside this round's bound, so it is **#1840** with
 both candidate shapes, the rows behind it and a DO-NOT-RETRY line.
 
+**Re-rebased onto main `89dbac1c` (s473v, perf round 33) and re-verified there.**
+That round changed `cl/pcl-runtime.lisp` as well, so the two runtime diffs were
+checked together rather than assumed disjoint: the combined tree's gate reads
+**`Result: PASS`, 244 files / 8,254 rows** (97 s wall, 431 CPU-s — main alone is
+243/8,239, the delta is still this round's one guard file), `tools/corpus-diff.pl
+89dbac1c` is **emission IDENTICAL over 111 files** with silent drops 5 unchanged
+and the six shapes identical, `tools/check-parens.lisp` is balanced and the
+generation string stays main's **v2-1480** (this round bumps nothing — its change
+is `cl/` only).  The sweep and the `op/` leg were NOT re-run for that move by
+instruction; both were measured on the `5eb87b01` tree and the two runtime
+changes touch disjoint operators.
+
 ## Session 486 (Fable, 2026-09-16) — the not-supported share measured and instrumented; three agents merged; the commands reviewed for security
 
 The USER asked, reviewing the README's `Measured` table, how many of the
