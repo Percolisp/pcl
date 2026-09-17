@@ -2,6 +2,56 @@
 
 Append new entries at the top. One section per session.
 
+## Session 489 (Fable, 2026-09-17 evening) — the two stopped batches resumed and merged; #1850 re-scoped at review; the script cache lands default-on
+
+The session opened on the s488 pause recipe ("Please continue"): both
+worktrees stopped at the end of s488 were resumed IN PLACE on pinned Opus
+agents from their STOP.md files, per the USER's "Run two subjobs at a time (or
+one subjob and work yourself, if you have a larger task for Fable)".  While
+they ran, Fable wrote the review probes for the script cache BEFORE either
+report (durably, `~/pcl-agent-scratch/s489/probes/`, perl 5.40.3 and main
+answers beside them — the s488 probes had died with the session scratchpad)
+and drafted the two successor briefs (op/ census t6b; perf round 34 = `s473x`).
+
+**s488a (#1834 + #1835) — reviewed and merged at `f26282db`.**  Every stable
+companion mover is tied to ONE commit, the three baselines spliced row by row,
+the bless flags splice per file (`tools/lib/PCLBaseline.pm`, guard
+`tools/t/baseline-splice.t`); gate on its tree PASS 244/8254, its sweep 18686
+(+0), its companion `--all --quick` SNAPSHOT 14 → 4 movers all explained.  Two
+review fixes went in as one commit: a new `unless` → `if !`, and **#1850
+re-scoped** — the agent had filed "PCL ignores `$|`" from a reproducer run
+under `./runpcl`; the same program under four runners gave perl 273 bytes
+mid-run, `pcl FILE > out` 273, `tools/pclperl-for-tests` 273, `./runpcl` 0
+(runpcl captures stdout with backticks and prints at exit).  The companion's
+kept `.out` IS buffered, for a reason one level up: the shadow `t/` loads
+PCL's transpilable stub `perl-tests/t/test.pl`, which lacks perl test.pl's
+line-22 `$| = 1`.  DECIDED, this log and the two task records (#1850, #1651's
+(C)) say so; the stub line + runpcl streaming became member 0 of t6b.
+
+**s473t6b launched** in the freed slot and later CUT OFF by the session rate limit (three commits in its worktree, member 0 done but unbarred, two CHECK-2 fixes on top; resume from its STOP.md — details in DECIDED `## s489`) (Opus, own worktree; IDs 1870–1889;
+gen v2-1520 if emission moves): member 0 = #1850 with the harness bar, then
+the op/ 20–49 band (20 files, ~741 causeless rows measured on today's main).
+**USER ~19:50: "Don't start more subjobs after these" (this session)** — the
+perf round 34 brief stays drafted.
+
+**s488b (#1843 + #1861 + #1841) — reviewed and merged.**  Gate on its tree
+PASS 245/8318; corpus-diff IDENTICAL over 111 (no generation bump); Fable's
+own combined-tree sweep on the rebased tree GATE clean, 0 new / 0 fixed, TOTAL
+18686 (+0), drops 5 = census; merged at `184f60d4`;
+the probes: `$0`/`__FILE__`/`__LINE__`/DATA identical on a MISS, a HIT and in
+perl; `-I d1` then `-I d2` on a warm cache = perl; `-e` ×3 and `--no-cache`
+leave no entry.  One review fix: four new `unless` lines in the guard →
+`if !`.  The batch's own review probe found the deciding input to the USER's
+default-on-vs-opt-in question: **#1860's second half is a REGRESSION for a
+script** (a shadowing module file CREATED earlier on an unchanged `-I` list is
+served from the old parse: perl 107/8/8, PCL 107/107/107, where a pre-#1841
+script was right because it was re-transpiled every run).  Fable merged the
+tree DEFAULT-ON as built — the hole is the one every cached module has had
+since the manifest existed, and #1860's fix closes both populations — and
+named the one-line flip for the USER.  Also #1335 closed (`--cache-info` /
+`--clear-cache` never named `evals/`), #1863 filed (the core cache has no age
+policy: 151 of 154 cores belong to deleted runtime paths, 7.03 GB).
+
 ## Session 488 (Fable, 2026-09-17) — the four open USER questions ruled; the two stopped worktrees resumed
 
 The session opened, as s487 had been told to, by asking the USER the four
