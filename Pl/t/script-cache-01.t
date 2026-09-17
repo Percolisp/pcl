@@ -46,11 +46,11 @@ my $pcl  = "$root/pcl";
 use lib "$RealBin/../../tools/lib";
 use PCLSbcl ();
 
-plan skip_all => "pcl not found"  unless -x $pcl;
-plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
+plan skip_all => "pcl not found"  if !-x $pcl;
+plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 
 my $core = PCLSbcl::cached_core("$root/cl/pcl-runtime.lisp");
-plan skip_all => "no cached core" unless $core && -f $core;
+plan skip_all => "no cached core" if !($core && -f $core);
 
 plan tests => 51;
 
@@ -95,7 +95,7 @@ sub run_pcl {
     }
     $out =~ s/^;.*\n//gm;
     $out =~ s/^PCL Runtime loaded\n//gm;
-    $out =~ s/^PCL: script .*\n//gm unless $opt{debug};
+    $out =~ s/^PCL: script .*\n//gm if !$opt{debug};
     return wantarray ? ($out, $rc >> 8) : $out;
 }
 
