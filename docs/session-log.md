@@ -53,6 +53,22 @@ by default"** — the decision is CLOSED; #1860 stays the first filler.  Also #1
 `--clear-cache` never named `evals/`), #1863 filed (the core cache has no age
 policy: 151 of 154 cores belong to deleted runtime paths, 7.03 GB).
 
+**Session end (USER ~00:05: "It proved everything worked. End of session then").**
+After the merges the USER ruled the script cache stays DEFAULT-ON ("Keep it on
+by default") and asked for the documentation to follow: README, docs/STATUS.md,
+docs/pcl-commands.md and the CHANGELOG now describe three caches (core, modules,
+the script you run), "compiled on its first run after an edit", startup from
+the cache ~0.04 s, and the one-liner sentence names the runtime-core build apart
+from the script cache (the USER had read a core-build message on a `-E` run as a
+cached one-liner).  The USER then asked whether a changed script or dependency
+is really recompiled: probed live (`~/pcl-agent-scratch/s489/probes/rebuild/`)
+— a dependency's value change, its prototype change and a script edit each
+rebuilt the entry with perl-identical output, a plain re-run is a hit, and an
+edit-then-run inside the same second rebuilds once more (the safe direction).
+Main ends at `b5c9ce12`, pushed.  s473t6b's worktree (3 commits, member 0 code
+done, bars owed) waits for the USER's call; its member-0 companion run was
+left to finish on its own.  Next session's first filler: #1860.
+
 ## Session 488 (Fable, 2026-09-17) — the four open USER questions ruled; the two stopped worktrees resumed
 
 The session opened, as s487 had been told to, by asking the USER the four
