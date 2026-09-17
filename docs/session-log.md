@@ -226,6 +226,24 @@ functionally checking `pcl --cache-info`: `core/` is 7.2 GB / 154 cores and
 because the core prune globs one pathkey and `%p-cleanup-old-cache` never
 walks `core/` — one deleted agent worktree is one 49 MB core, forever.
 
+**The companion, twice, and every mover attributed — NOTHING spliced.**  Run 1
+(`--all --quick --jobs 2`) overlapped s488a's own companion, so the box carried
+four workers plus two perl oracle sides, and it read eight verdict movers.  Six
+of them — `op/gv.t` 90/95, `comp/use.t` 40/47, `io/open.t` 152/36,
+`run/switchM.t` 0/5, `op/coresubs.t` 0/2, `op/inccode.t` 13/26 — are
+BYTE-IDENTICAL to s488a's independent run on a main-compiler tree, so they are
+main's drift and s488a spliced them; `io/pvbm.t` 21/7 and `uni/variables.t` are
+the registered flappers (#1851), and both runs agree on them.  The two that
+were mine alone, `io/through.t` and `io/crlf_through.t` (942 rows each, no
+registered allowance), are the CLOCK: **on a quiet box at `--jobs 1` both read
+OK 942/0, the snapshot exactly**, and the base extraction reads `io/through.t`
+942/0 too.  Run 2, against the spliced snapshot, is down to exactly those three
+— the two clock files (TIMEOUT again, a third agent's companion having started)
+and the `io/pvbm.t` flapper — with SNAPSHOT quiet, 105 OK / 31 NOTAP / 105
+XDIFF / 1 FIXTURE, and a ROW DIFF whose remaining movement is the matched
+NEW+FIXED pairs of #1837 (re/charset.t 104+104, re/regexp_normal.t 128+128, …)
+plus `op/gv.t`'s and `uni/gv.t`'s own row-baseline residue from s488a's splice.
+
 **Bars** (all on the tree rebased onto `f26282db`): gate **PASS 245 files /
 8318 rows** (107 s wall / 469 CPU-s); `tools/corpus-diff.pl` emission
 **IDENTICAL over 111**, silent drops 5 unchanged, **no generation bump**;
