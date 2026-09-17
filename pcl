@@ -86,6 +86,34 @@ if (defined $source && !-f $source) {
   die "pcl: can't open script \"$source\": No such file or directory\n";
 }
 
+# ---- run from the SCRIPT CACHE when this invocation can (task #1841) ------
+#
+# The runtime owns the hit/miss decision exactly as it does for a `use`d
+# module (pcl::p-run-script-cached); this script only decides whether to ASK,
+# and hands over the two things a MISS needs that no preamble has set yet --
+# where pl2cl is, and the -I list to give it.
+#
+# The four shapes that keep the transpile-and-load path:
+#   * -e/-E, and a file run with -M prefixes: `pcl` writes those to a TEMP
+#     source with a fresh random name, so a path-keyed entry would leave one
+#     dead entry per run.  Content-keying them is task #1862.
+#   * --no-cache / PCL_NO_CACHE: one switch turns every cache off, and it also
+#     CHANGES the emission (pl2cl writes `(setf *pcl-skip-cache* t)` into the
+#     preamble), so a cached entry could not be shared with a normal run.
+#   * -c: it must transpile and NOT run, which is the one thing this path
+#     cannot do.
+#
+# TO MAKE THE CACHE OPT-IN instead of default-on, this is the one line:
+#     my $use_script_cache = $ENV{PCL_SCRIPT_CACHE} && defined($source) && ...
+# nothing else moves, because the runtime entry point is reached only here.
+my $cache_off = $no_cache || $ENV{PCL_NO_CACHE};
+my $use_script_cache = defined($source) && !defined($inline) && !@use_mods
+                       && !$check_only && !$cache_off;
+
+if ($use_script_cache) {
+  exec_sbcl(script_cache_form($source), \@script_args);   # never returns
+}
+
 # ---- transpile to a temp .lisp (Tier 0) ----------------------------------
 my $lisp = transpile($source, $inline);
 
@@ -97,7 +125,7 @@ if ($check_only) {
 }
 
 # ---- run --------------------------------------------------------------------
-exec_sbcl($lisp, \@script_args);   # never returns
+exec_sbcl(quiet_load_form($lisp), \@script_args);   # never returns
 
 # ===========================================================================
 # Helpers
@@ -140,7 +168,7 @@ sub transpile {
   #   -M-Module=arg1,arg2   → no Module split(...);
   my $use_prefix = join('', map { _use_line_for_M($_) } @use_mods);
 
-  my @inc_args = map { ("-I", $_) } ($ROOT, @inc_dirs);   # -I dirs ride pl2cl's @INC
+  my @inc_args = map { ("-I", $_) } inc_dirs_for_transpile();
 
   my $src_path;          # the .pl file we hand to pl2cl
   my @cleanup;
@@ -177,24 +205,64 @@ sub transpile {
   return $tmp;
 }
 
+# The `-I` directories a transpile of THIS invocation gets, in order.  ONE
+# derivation (rule 11): the transpile-to-a-temp-file path passes them to pl2cl
+# on the command line, and the script cache puts them in its KEY and hands
+# them to the runtime, which passes the same list to the same pl2cl on a miss.
+# They must be the same list or a cached entry would be keyed on one search
+# path and built with another.
+sub inc_dirs_for_transpile { return ($ROOT, @inc_dirs) }
+
+# The form that asks the RUNTIME to run $source from its cache entry
+# (task #1841).  Three arguments, because a cache MISS spawns pl2cl before any
+# preamble has run: the script AS THE USER SPELLED IT (that string is `$0`),
+# where pl2cl is, and the -I list.
+sub script_cache_form {
+  my ($src) = @_;
+  my $dirs = cl_list(inc_dirs_for_transpile());
+  # …and a SEED SEARCH PATH for the window before the entry's own preamble has
+  # run.  Two things happen in that window and both need it: the compiler
+  # fingerprint locates PPI through it (task #1843), and — on a MISS — the
+  # program's `use` statements run at COMPILE-FILE time, because that is what
+  # creates a module's package before the reader meets a symbol in it.
+  #
+  # The list MIRRORS what pl2cl's build_preamble will set @INC to, in that
+  # order, and it is in force only until the preamble replaces it.  The order
+  # is the load-bearing part, measured: with perl's own library directories
+  # ahead of PCL's lib/, the compile-time `use Carp` found perl's REAL Carp.pm
+  # instead of PCL's shim and cached a transpile of it.
+  my $srcdir = dirname(abs_path($src));
+  my $seed = cl_list($srcdir, '.', "$ROOT/lib", inc_dirs_for_transpile(),
+                     grep { defined $_ && !ref $_ && -d $_ } @INC);
+  return '(pcl::p-run-script-cached "' . cl_escape($src) . '" "'
+       . cl_escape($PL2CL) . '" ' . $dirs . ' ' . $seed . ')';
+}
+
+sub cl_list {
+  return '(list ' . join(' ', map { '"' . cl_escape($_) . '"' } @_) . ')';
+}
+
+# Load a .lisp quietly: no loader chatter, and the program's own warnings
+# muffled -- what `pcl` has always done, kept in one named place because the
+# runtime's own text fallback (%p-load-script-text) must match it.
+sub quiet_load_form {
+  my ($file) = @_;
+  return '(let ((*load-verbose* nil) (*load-print* nil)'
+       . ' (*compile-verbose* nil) (*compile-print* nil))'
+       . ' (handler-bind ((warning #\'muffle-warning))'
+       . qq{ (load #P"$file"}.')))';
+}
+
 # Build the SBCL command and exec it (replacing this process so the script's
 # exit code becomes pcl's). @ARGV is injected as a fresh vector of raw strings;
 # warnings/verbose load chatter is muffled so only the program's own output shows.
 # (SBCL-version policing lives in the runtime itself — the first form of
 # cl/pcl-runtime.lisp warns on a too-old host; no extra process here.)
 sub exec_sbcl {
-  my ($lisp, $args) = @_;
+  my ($run_form, $args) = @_;
 
   my $argv_form = '(setf pcl::@ARGV '
     . cl_string_vector(@$args) . ')';
-
-  my $quiet_load = sub {
-    my ($file) = @_;
-    return '(let ((*load-verbose* nil) (*load-print* nil)'
-         . ' (*compile-verbose* nil) (*compile-print* nil))'
-         . ' (handler-bind ((warning #\'muffle-warning))'
-         . qq{ (load #P"$file"}.')))';
-  };
 
   # The prefix (--core placement, stack size, banner flags) comes from
   # tools/lib/PCLSbcl.pm like every other PCL runner's: an explicit $PCL_CORE
@@ -205,12 +273,12 @@ sub exec_sbcl {
   my @cmd = ('sbcl', PCLSbcl::sbcl_prefix(runtime => $RUNTIME, core => $ENV{PCL_CORE}));
   for my $i (0 .. $#cmd - 1) {
     if ($cmd[$i] eq '--load' && $cmd[$i + 1] eq $RUNTIME) {
-      splice @cmd, $i, 2, '--eval', $quiet_load->($RUNTIME);
+      splice @cmd, $i, 2, '--eval', quiet_load_form($RUNTIME);
       last;
     }
   }
   push @cmd, '--eval', $argv_form;
-  push @cmd, '--eval', $quiet_load->($lisp);
+  push @cmd, '--eval', $run_form;
 
   say STDERR "pcl: exec @cmd" if $verbose;
   exec { $cmd[0] } @cmd or die "pcl: cannot exec sbcl: $!\n";
@@ -225,13 +293,19 @@ sub make_core {
 }
 
 sub clear_cache {
-  # Remove cached compiled modules AND the cached runtime cores; the next run
-  # rebuilds what it needs.  A module entry is three files under modules/ —
+  # Remove every cached TRANSPILE AND the cached runtime cores; the next run
+  # rebuilds what it needs.  An entry is three files under its directory —
   # the transpiled .lisp, its compiled .fasl, and since task #1261 the .deps
   # DEPENDENCY MANIFEST that decides whether the other two are still valid.
+  # THREE directories, not one: modules/ (a `use`d module), scripts/ (the main
+  # script, task #1841) and evals/ (a string eval, task #1200 — which this
+  # glob had never named, so `--clear-cache` left it standing while claiming
+  # to remove everything PCL made).
   # (The flat `$cache_dir/*.lisp|*.fasl` glob is kept for entries written
   # before #1261 moved them into modules/.)
   my @files = (glob("\Q$cache_dir\E/modules/*"),
+               glob("\Q$cache_dir\E/scripts/*"),
+               glob("\Q$cache_dir\E/evals/*"),
                glob("\Q$cache_dir\E/*.fasl"), glob("\Q$cache_dir\E/*.lisp"));
   my $n = @files ? unlink(@files) : 0;
   my $k = PCLSbcl::clear_cached_cores();
@@ -316,18 +390,21 @@ sub cache_info {
   print runtime_cache_info();
 }
 
-# Size and count per kind.  modules/ is broken down by extension because the
-# three files of an entry answer different questions: the .lisp is the
-# transpile, the .deps its dependency manifest (what makes it valid), the
+# Size and count per kind.  modules/ and scripts/ are broken down by extension
+# because the three files of an entry answer different questions: the .lisp is
+# the transpile, the .deps its dependency manifest (what makes it valid), the
 # .fasl the compiled form, and a .failed marker means a compile that did not
 # work and is not retried for an hour.
+# scripts/ is the MAIN SCRIPT's entries (task #1841) and evals/ the string-eval
+# cache -- the latter had been missing from this list since it was created
+# (task #1335), so its absence read as "the eval cache is not working".
 sub print_kinds {
-  for my $kind (qw(modules proto core xs)) {
+  for my $kind (qw(modules scripts evals proto core xs)) {
     my @f = grep { -f $_ } glob("\Q$cache_dir\E/$kind/*");
     my $bytes = 0; $bytes += -s $_ for @f;
     if (!@f) { say sprintf("  %-9s (empty)", "$kind/"); next }
     my $extra = '';
-    if ($kind eq 'modules') {
+    if ($kind eq 'modules' || $kind eq 'scripts') {
       my %n;
       for my $f (@f) { $n{$1}++ if $f =~ /\.(lisp|fasl|deps|failed)$/ }
       $extra = sprintf("  %d transpiles, %d fasls, %d manifests, %d failed",

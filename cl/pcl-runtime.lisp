@@ -20306,13 +20306,26 @@ buffer's fill-pointer; everything else falls back to file-length."
                    dirs)))))
 
 (defun %p-compile-module-p (source-path class)
-  "Is the module at SOURCE-PATH compiled to native code and cached?  CLASS is
-   its trust class from the dependency manifest (:installed or :local).
+  "Is the file at SOURCE-PATH compiled to native code and cached?  CLASS is
+   its trust class from the dependency manifest (:installed or :local), or
+   :MAIN-SCRIPT for the program itself (task #1841).
    PCL_NO_COMPILE_DIRS wins on any match; PCL_COMPILE_DIRS decides when set;
    unset, the answer is the trust class.  PCL_NO_FASL_CACHE=1 is kept as the
-   alias of PCL_NO_COMPILE_DIRS=* it has always meant."
+   alias of PCL_NO_COMPILE_DIRS=* it has always meant.
+
+   :MAIN-SCRIPT IS EXEMPT FROM THE POSITIVE LIST, and that is the whole
+   compile-policy question task #1841 had to answer.  The directory lists
+   exist because a module under `-I`/PERL5LIB/`.` is probably being EDITED,
+   and a fasl is the most opaque artifact PCL writes.  A main script is
+   ALWAYS under one of those directories, so the module rule would mean the
+   script cache paid the SBCL compile again on every run — 3.3 s of the 5.6 s
+   a 1,211-line script costs, i.e. the whole prize.  The two OFF switches
+   still reach it: `PCL_NO_FASL_CACHE=1` and a `PCL_NO_COMPILE_DIRS` match
+   are tested BEFORE this clause, so `--no-fasl`-shaped opt-outs behave for a
+   script exactly as they do for a module."
   (cond ((sb-posix:getenv "PCL_NO_FASL_CACHE") nil)
         ((%p-under-dirs-p source-path (%p-dir-list "PCL_NO_COMPILE_DIRS")) nil)
+        ((eq class :main-script) t)
         ((sb-posix:getenv "PCL_COMPILE_DIRS")
          (%p-under-dirs-p source-path (%p-dir-list "PCL_COMPILE_DIRS")))
         (t (eq class :installed))))
@@ -20471,6 +20484,17 @@ buffer's fill-pointer; everything else falls back to file-length."
    while the runtime loads would be baked into the saved core, i.e. the core
    builder's answer rather than this run's (task #1303)."
   (%p-ensure-dir-0700 (merge-pathnames "modules/" *pcl-cache-dir*)))
+
+(defun %p-script-cache-dir ()
+  "Where the cached MAIN SCRIPT transpiles live: <cache>/scripts/, created on
+   demand, 0700 — a sibling of modules/ and evals/, derived at CALL time for
+   the same reason (task #1303).
+
+   ITS OWN DIRECTORY, not modules/ (task #1841): a script entry is a module
+   entry in every mechanism — the stem rule, the manifest, the fasl identity,
+   the prune — but it is a different POPULATION, and `pcl --cache-info` has to
+   be able to count it separately for \"what is in my cache\" to be answerable."
+  (%p-ensure-dir-0700 (merge-pathnames "scripts/" *pcl-cache-dir*)))
 
 (defun %p-dir-list-line (var default-text)
   "How VAR resolved, for `pcl --cache-info`: unset (with what that means), the
@@ -20754,6 +20778,17 @@ buffer's fill-pointer; everything else falls back to file-length."
   (or *p-compiler-stamp*
       (setf *p-compiler-stamp* (%p-compute-compiler-stamp))))
 
+(defun %p-cache-stem (material)
+  "THE ONE cache-entry stem rule: 16 hex digits of SXHASH over MATERIAL, the
+   string that spells everything an entry depends on.  Two callers — a MODULE
+   (its absolute path) and a SCRIPT (task #1841: its path, its path AS GIVEN,
+   the cwd and the include path) — and the same generation + \"v2\" + compiler
+   fingerprint tail on both, so a change to that tail moves both at once.
+   (A string EVAL's stem is MD5, not this: a run reaches dozens of module
+   paths and can reach thousands of eval texts, where a collision would run
+   one eval's code for another's — %P-EVAL-CACHE-STEM says so.)"
+  (format nil "~16,'0X" (logand (sxhash material) #xFFFFFFFFFFFFFFFF)))
+
 (defun p-compute-cache-path (source-path &optional lisp-p)
   "Compute cache path for a source file: hash of the absolute path, the cache
    GENERATION (*pcl-cache-generation*) and the COMPILER FINGERPRINT
@@ -20776,9 +20811,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    anyway and the move therefore cost nothing.  The directory is derived from
    *PCL-CACHE-DIR* HERE, at call time, never at load time."
   (let* ((abs-path (namestring (truename source-path)))
-         (hash (sxhash (concatenate 'string abs-path "|" *pcl-cache-generation*
-                                    "|" "v2" "|" (p-compiler-stamp))))
-         (stem (format nil "~16,'0X" (logand hash #xFFFFFFFFFFFFFFFF)))
+         (stem (%p-cache-stem (concatenate 'string abs-path "|"
+                                           *pcl-cache-generation* "|" "v2" "|"
+                                           (p-compiler-stamp))))
          (dir (p-module-cache-dir)))
     (cond (lisp-p (merge-pathnames (concatenate 'string stem ".lisp") dir))
           (*pcl-runtime-identity*
@@ -20993,11 +21028,19 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Drop the memo after a re-transpile has written a new sidecar."
   (remhash (namestring source-path) *p-cache-manifest-cache*))
 
-(defun p-cache-valid-p (source-path cache-path)
+(defun p-cache-valid-p (source-path cache-path &optional deps-path)
   "Check if a cached file is valid: it exists, it is newer than the source,
    and every module whose prototypes/exports its transpile read still hashes
    to what was read (the dependency manifest, task #1261).  THE ONE validity
    predicate: both the .lisp and the fasl go through it.
+
+   DEPS-PATH names the manifest explicitly, for an entry whose sidecar is not
+   where a MODULE's derivation puts it — the main SCRIPT's (task #1841), whose
+   key carries the include path as well as the source path.  Without it the
+   manifest comes from the module derivation and is memoised per source path,
+   which is what a module load wants (it asks twice, once for the fasl and
+   once for the .lisp).  The explicit form reads the file each time it is
+   asked, exactly as the string-eval cache does with %P-MANIFEST-AT.
 
    NO AGE CLAUSE.  Until #1261 an entry also expired after
    *PCL-CACHE-MAX-AGE*, which was a stand-in for the staleness this predicate
@@ -21013,7 +21056,9 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((cached (%p-mtime cache-path))
         (source (%p-mtime source-path)))
     (and cached source (> cached source)
-         (p-cm-valid-p (%p-cache-manifest source-path)))))
+         (p-cm-valid-p (if deps-path
+                           (%p-manifest-at deps-path)
+                           (%p-cache-manifest source-path))))))
 
 ;;; --- Module Transpilation ---
 
@@ -21072,13 +21117,24 @@ buffer's fill-pointer; everything else falls back to file-length."
         when (and s (plusp (length s)) (not (%p-shim-lib-dir-p s)))
         append (list "-I" s)))
 
-(defun p-transpile-file (source-path &optional deps-path)
+(defun p-transpile-file (source-path &optional deps-path (mode :module) inc-dirs)
   "Transpile a Perl file to Common Lisp code by calling pl2cl.
    Uses --module flag to skip preamble (for dynamic module loading).
    DEPS-PATH, when given, is where pl2cl writes this transpile's DEPENDENCY
    MANIFEST — the modules whose prototypes and exports it read, with a content
    hash each (task #1261).  pl2cl writes it BEFORE the emission reaches us, so
    the sidecar is already in place when the .lisp becomes valid.
+
+   MODE :PROGRAM is the MAIN SCRIPT (task #1841): NO `--module`, so the file
+   gets its program preamble ($0, @INC, the `main` package) AND the #339 drop
+   announcement stays on — a drop in the program the user is running is a
+   diagnostic they must see, which is exactly why `--module` silences it.
+   INC-DIRS is then the `-I` list to hand the child, the one `pcl` would have
+   passed; a module transpile derives its own from this program's @INC
+   (%P-TRANSPILE-INC-ARGS) because by then there IS one.
+
+   SOURCE-PATH is passed to the child VERBATIM, and for a program that
+   matters: `$0` is the path AS THE USER SPELLED IT.
    Returns the transpiled code as a string, or nil on failure."
   (unless *pcl-pl2cl-path*
     (error "pl2cl path not set - cannot transpile ~A" source-path))
@@ -21090,11 +21146,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (append
                     ;; -I BEFORE the script: perl's own switches must precede
                     ;; the program name, and they are the point of #1284.
-                    (%p-transpile-inc-args)
-                    (list (namestring *pcl-pl2cl-path*)
-                          "--module")  ; Skip preamble for module loading
+                    (if (eq mode :program)
+                        (loop for d in inc-dirs append (list "-I" d))
+                        (%p-transpile-inc-args))
+                    (list (namestring *pcl-pl2cl-path*))
+                    (when (eq mode :module) (list "--module"))
                     (when deps-path (list "--deps" (namestring deps-path)))
-                    (list (namestring source-path)))
+                    (list (if (stringp source-path)
+                              source-path
+                              (namestring source-path))))
                    :output s
                    :error *error-output*
                    :wait t
@@ -21469,9 +21529,10 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Set PATH's access and modification times to now; nil when it cannot be."
   (ignore-errors (sb-posix:utime (sb-ext:native-namestring path)) t))
 
-(defun %p-note-cache-use (source-path)
-  "Stamp the cache ENTRY for SOURCE-PATH as used NOW — the .lisp, its .deps
-   manifest and this runtime's fasl together.
+(defun %p-note-entry-use (key files)
+  "Stamp a cache ENTRY as used NOW — FILES is its .lisp, its .deps manifest
+   and this runtime's fasl, and the FIRST of them decides whether the stamp is
+   due.  KEY identifies the entry for the per-process memo.
 
    AS A UNIT, because the prune reads each file's own mtime: stamping only one
    member would let the prune delete the others out from under a live entry
@@ -21481,22 +21542,26 @@ buffer's fill-pointer; everything else falls back to file-length."
    happen to them.
 
    Skipped when the entry is younger than *PCL-CACHE-TOUCH-INTERVAL*, and at
-   most once per source per process, so a run pays at most one utime(2) per
-   module and usually none."
-  (let ((key (namestring source-path)))
-    (unless (gethash key *p-touched-cache-entries*)
-      (setf (gethash key *p-touched-cache-entries*) t)
-      (let* ((lisp (p-compute-cache-path source-path t))
-             (date (and lisp (%p-mtime lisp)))
-             (cutoff (- (get-universal-time) *pcl-cache-touch-interval*)))
-        (when (and date (< date cutoff))
-          (dolist (f (list lisp
-                           (%p-manifest-path source-path)
-                           (p-compute-cache-path source-path nil)))
-            ;; %P-UTIME-NOW already answers NIL for a file that is gone; no
-            ;; PROBE-FILE first, which would only widen the window (#1338).
-            (when f (%p-utime-now f)))))))
+   most once per key per process, so a run pays at most one utime(2) per
+   module and usually none.  Two callers: a module's entry and, since task
+   #1841, the main SCRIPT's."
+  (unless (gethash key *p-touched-cache-entries*)
+    (setf (gethash key *p-touched-cache-entries*) t)
+    (let ((date (%p-mtime (first files)))
+          (cutoff (- (get-universal-time) *pcl-cache-touch-interval*)))
+      (when (and date (< date cutoff))
+        (dolist (f files)
+          ;; %P-UTIME-NOW already answers NIL for a file that is gone; no
+          ;; PROBE-FILE first, which would only widen the window (#1338).
+          (when f (%p-utime-now f))))))
   nil)
+
+(defun %p-note-cache-use (source-path)
+  "Stamp the MODULE cache entry for SOURCE-PATH; see %P-NOTE-ENTRY-USE."
+  (%p-note-entry-use (namestring source-path)
+                     (list (p-compute-cache-path source-path t)
+                           (%p-manifest-path source-path)
+                           (p-compute-cache-path source-path nil))))
 
 (defvar *p-cache-pruned-this-run* nil
   "The prune runs at most once per process, whatever the stamp says.")
@@ -21548,6 +21613,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let ((cutoff (- (get-universal-time) *pcl-cache-max-age*)))
       (%p-prune-dir (p-module-cache-dir) cutoff)
       (%p-prune-dir (%p-eval-cache-dir) cutoff)
+      (%p-prune-dir (%p-script-cache-dir) cutoff)
       (%p-prune-dir (merge-pathnames "proto/" *pcl-cache-dir*) cutoff))))
 (defun %p-load-module-uncached (source-path)
   "Load SOURCE-PATH with NO cache at all — *PCL-SKIP-CACHE*, which is what
@@ -21664,6 +21730,171 @@ buffer's fill-pointer; everything else falls back to file-length."
             (load lisp-path))
           t))))
 
+
+;;; ── THE MAIN SCRIPT IS A CACHE ENTRY TOO (task #1841) ──────────────────
+;;; Until this task `pcl prog.pl` transpiled the program on EVERY run and
+;;; handed SBCL the text, which compiled every form again: measured on
+;;; cl/pack-impl.pl (1,211 lines), 2.26 s of transpile + 3.30 s of SBCL
+;;; compile = 5.6 s end to end, where the same code loads from a fasl in
+;;; 0.003 s.  Only `use`d MODULES were cached.
+;;;
+;;; A script entry IS a module entry: the same stem rule (%P-CACHE-STEM), the
+;;; same dependency manifest and the same ONE validity predicate, the same
+;;; fasl identity in the filename, the same `*pcl-fasl-build*` discipline (so
+;;; compile-file compiles the body WITHOUT running it and the fasl's load runs
+;;; it once, in source order — the rule that already stops the #1060 "ran the
+;;; program at build time" shape), the same prune.  Three things are new, and
+;;; each is a guard row in Pl/t/script-cache-01.t:
+;;;
+;;;   1. THE INCLUDE PATH IS IN THE KEY.  A module's key is its path; a
+;;;      script's must also carry the `-I` list, the cwd and PERL5LIB,
+;;;      because they are emitted into @INC *and* they decide which file each
+;;;      `use` resolved to at transpile time.  Measured (the probe #1841 (c)
+;;;      asked for): with two -I directories whose B.pm differ only in an
+;;;      empty prototype, perl answers 8 then 107; a cached MODULE entry
+;;;      answers 8 twice — the pre-existing hole task #1860 owns — and the
+;;;      script side is right today ONLY because it is re-transpiled.  So
+;;;      caching the script without this would have GIVEN scripts that bug.
+;;;   2. THE PATH AS GIVEN IS IN THE KEY, because `$0` is that string
+;;;      verbatim: `pcl ./p.pl` and `pcl p.pl` are different programs to $0,
+;;;      __FILE__, `caller`'s file and every `#line`-shaped answer.
+;;;   3. THE COMPILE-POLICY EXEMPTION (%P-COMPILE-MODULE-P's :MAIN-SCRIPT
+;;;      clause): a main script is always under `.`/-I/PERL5LIB, so the module
+;;;      rule would never compile it and the cache would buy nothing.
+;;;
+;;; NOT cached: `pcl -e` and a file run with `-M` prefixes, because `pcl`
+;;; writes those to a temp file with a fresh random name — a path key would
+;;; leave one dead entry per run.  Content-keying them the way the string-eval
+;;; cache keys its texts is task #1862.  `pcl` keeps the old transpile-and-load
+;;; path for them, and for `--no-cache`/PCL_NO_CACHE and `-c`.
+
+(defun %p-script-key-material (abs as-given inc-dirs)
+  "Everything a cached script entry depends on, as one string.  Over-keying
+   costs a MISS; under-keying is a silent wrong, so where the two were in
+   tension this chose the miss.  Perl's own library directories are NOT here:
+   they are a function of the perl binary, which the compiler fingerprint
+   already hashes (task #1843)."
+  (let ((acc (make-string-output-stream)))
+    (write-string abs acc)
+    (dolist (part (list as-given
+                        (or (ignore-errors (sb-posix:getcwd)) "")
+                        (format nil "~{~A~^:~}" inc-dirs)
+                        (or (sb-posix:getenv "PERL5LIB") "")
+                        *pcl-cache-generation*
+                        "v2"
+                        (p-compiler-stamp)))
+      (write-char #\Nul acc)
+      (write-string part acc))
+    (get-output-stream-string acc)))
+
+(defun %p-script-cache-paths (abs as-given inc-dirs)
+  "(values .lisp .deps .fasl) for a script entry; the fasl is NIL when the
+   runtime identity is unknown, exactly as P-COMPUTE-CACHE-PATH answers for a
+   module."
+  (let* ((stem (%p-cache-stem (%p-script-key-material abs as-given inc-dirs)))
+         (dir (%p-script-cache-dir)))
+    (values (merge-pathnames (concatenate 'string stem ".lisp") dir)
+            (merge-pathnames (concatenate 'string stem ".deps") dir)
+            (when *pcl-runtime-identity*
+              (merge-pathnames (format nil "~A-~A.fasl" stem
+                                       *pcl-runtime-identity*)
+                               dir)))))
+
+(defun %p-transpile-script (as-given inc-dirs lisp-path deps-path)
+  "Fill a script's cache entry: transpile AS-GIVEN in PROGRAM mode (so it gets
+   its preamble AND the #339 drop announcement) with DEPS-PATH as the manifest
+   sidecar, then publish the text.  T on success.
+
+   A FAILED TRANSPILE ENDS THE RUN with pl2cl's own verdict: pl2cl has already
+   written the error to stderr (:error *error-output*), and `pcl` answered 255
+   for it before this task — so exiting anything else here, or printing a
+   second message, would be a change nobody asked for."
+  (let ((code (p-transpile-file as-given deps-path :program inc-dirs)))
+    (cond ((null code)
+           (finish-output *error-output*)
+           (sb-ext:exit :code 255 :abort t))
+          (t (%p-write-cache-file lisp-path code)
+             (ignore-errors (p-cleanup-old-cache))
+             t))))
+
+(defun p-run-script-cached (as-given pl2cl-path inc-dirs seed-inc-dirs)
+  "Run the MAIN SCRIPT named AS-GIVEN, from its cache entry when there is a
+   valid one.  PL2CL-PATH and INC-DIRS are what a MISS needs and no preamble
+   has yet supplied: on a hit the entry's own preamble sets them again.
+   See the commentary above; `pcl` calls this and nothing else does.
+
+   SEED-INC-DIRS IS NOT DECORATION.  Two things happen before the entry's own
+   preamble runs, and both resolve modules through P-FIND-MODULE-IN-INC with
+   @INC still empty:
+
+     * the COMPILER FINGERPRINT locates PPI (task #1843).  With nothing to
+       search it records `ppi=0` — and that stamp then keys not only this
+       script's entry (which would silently survive a PPI upgrade, the very
+       hole #1843 closed) but every MODULE this program loads, splitting the
+       module cache into a script-run population and an everything-else one.
+       Measured: `use Carp` from a cached script wrote entries no `pcl -e`
+       run could reach.
+     * on a MISS, the program's own `use` statements, which run at
+       COMPILE-FILE time because that is what creates a module's package
+       before the reader meets a symbol in it.
+
+   So `pcl` hands over the search path its preamble is ABOUT to set, in the
+   same order, and it is in force only until the preamble replaces it.  The
+   ORDER is load-bearing, also measured: with perl's own library directories
+   ahead of PCL's lib/, that compile-time `use Carp` bound perl's REAL Carp.pm
+   instead of PCL's shim."
+  (setf *p-core-inc-dirs* seed-inc-dirs)
+  (setf *pcl-pl2cl-path* (%p-literal-path pl2cl-path))
+  (let ((abs (ignore-errors
+               (namestring (truename (%p-literal-path as-given))))))
+    (when (null abs)
+      ;; `pcl` tests the file first, so this is a race, not the ordinary
+      ;; missing-file message — but it is still the program's whole outcome.
+      (format *error-output* "pcl: can't open script ~A: No such file or directory~%"
+              as-given)
+      (finish-output *error-output*)
+      (sb-ext:exit :code 2 :abort t))
+    (%p-run-script-cached-1 abs as-given inc-dirs)))
+
+(defun %p-run-script-cached-1 (abs as-given inc-dirs)
+  "p-run-script-cached's body; see it for the contract.  The three steps are
+   %P-LOAD-MODULE-CACHED-1's, with the script's own paths."
+  (p-ensure-cache-dir)
+  (multiple-value-bind (lisp deps fasl) (%p-script-cache-paths abs as-given
+                                                               inc-dirs)
+    (let ((fasl (when (%p-fasl-cache-enabled-p abs :main-script) fasl))
+          (%start (get-internal-real-time)))
+      ;; 1. A fasl for THIS runtime, newer than the source, whose dependencies
+      ;;    all still hash as read: one load and the program has run.
+      (when (and fasl (p-cache-valid-p abs fasl deps) (%p-load-module-fasl fasl))
+        (%p-note-entry-use (namestring lisp) (list lisp deps fasl))
+        (%p-fasl-note "PCL: script ~A -> FASL HIT (~,3Fs)~%" as-given
+                      (%p-secs-since %start))
+        (return-from %p-run-script-cached-1 t))
+      ;; 2. The text: transpile when it is missing, older than the source, or
+      ;;    a dependency it read has changed.
+      (if (p-cache-valid-p abs lisp deps)
+          (%p-note-entry-use (namestring lisp) (list lisp deps fasl))
+          (%p-transpile-script as-given inc-dirs lisp deps))
+      ;; 3. Build the fasl from that text and RUN THE FASL, so the program
+      ;;    executes once here too; on any failure, run the text.
+      (%p-fasl-note "PCL: script ~A -> ~:[TEXT~;fasl-build~] (~,3Fs to here)~%"
+                    as-given (and fasl t) (%p-secs-since %start))
+      (or (and fasl
+               (%p-build-module-fasl lisp fasl)
+               (%p-load-module-fasl fasl))
+          (%p-load-script-text lisp)))))
+
+(defun %p-load-script-text (lisp-path)
+  "Load a script's cached CL TEXT — the fallback when there is no fasl, or
+   when building or loading one failed.  The bindings are the ones `pcl`'s own
+   loader used before this task, so a text run is what it always was: quiet
+   about loading, and the program's own warnings muffled exactly as they were."
+  (let ((*load-verbose* nil) (*load-print* nil)
+        (*compile-verbose* nil) (*compile-print* nil))
+    (handler-bind ((warning #'muffle-warning))
+      (load lisp-path)))
+  t)
 
 (defun p-find-module-package (module-name)
   "Find CL package for a Perl module.
