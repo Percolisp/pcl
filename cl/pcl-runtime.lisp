@@ -20530,6 +20530,12 @@ buffer's fill-pointer; everything else falls back to file-length."
             (if ppi
                 (format nil "~A (~D files)" (first ppi) (length ppi))
                 "not resolvable from this program's @INC -- recorded as absent")))
+  (let ((set (loop for v in *p-emission-env-vars*
+                   for raw = (sb-posix:getenv v)
+                   when (and raw (plusp (length raw)))
+                   collect (format nil "~A=~A" v raw))))
+    (format t "emission env: ~:[none set -- the default emission~;~:*~{~A~^ ~}~]~%"
+            set))
   nil)
 
 ;;; ── WHICH COMPILER WROTE THIS ENTRY (task #1119) ───────────────────────
@@ -20616,6 +20622,26 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; gets these directories as `-I` (%P-TRANSPILE-INC-ARGS), so the two agree
 ;;; except when a `-I` the child alone sees carries its own PPI.  It errs
 ;;; towards a needless re-transpile, never towards a stale parse.
+
+(defparameter *p-emission-env-vars*
+  '("PCL_OPT" "PCL_NO_RAW_VERDICT" "PCL_FACTS" "PCL_IR_PLAIN")
+  "The environment variables that SELECT AN EMISSION, so a cache entry written
+   under one setting must not be served to a run under another (task #1861).
+   PCL_OPT and PCL_NO_RAW_VERDICT switch named speed transforms off
+   (Pl/Passes.pm, the optimization registry); PCL_FACTS emits the facts that
+   licensed them; PCL_IR_PLAIN changes the IR's shape (Pl/CLForm.pm).
+
+   NOT a correctness hole before this — `PCL_OPT=none` is required to RUN
+   identically, by the registry's own contract — but a MEASUREMENT one, and
+   measurement is this project's Target A: `PCL_OPT=none` on a warm cache
+   silently re-ran the optimized emission, so an A/B measured one side twice
+   (probed s488b: four alternating runs, one cache entry).
+
+   THE PERL-SIDE TWIN is @Pl::ProtoCache::EMISSION_ENV and the two lists must
+   name the same variables — a gate row compares them, because nothing else
+   can (one is Lisp, one is Perl).  A variable that only WARNS or dumps
+   (PCL_E2_RAW_CENSUS, PCL_DROP_LOG, PCL_PROTO_ORACLE) does not belong here:
+   the emitted text is what this list is about.")
 
 (defun %p-perl-on-path ()
   "The `perl` binary a transpile will run, as a truename: the first executable
@@ -20713,6 +20739,10 @@ buffer's fill-pointer; everything else falls back to file-length."
     (%p-stamp-files acc "perl" (let ((p (%p-perl-on-path)))
                                  (when p (list p))))
     (%p-stamp-files acc "ppi" (%p-ppi-files))
+    ;; …and the environment that SELECTS an emission (task #1861): unset and
+    ;; empty are one answer, since the compiler reads both as "off".
+    (dolist (v *p-emission-env-vars*)
+      (format acc "~C~A=~A" #\Nul v (or (sb-posix:getenv v) "")))
     (subseq (format nil "~{~2,'0X~}"
                     (coerce (sb-md5:md5sum-string
                              (get-output-stream-string acc))

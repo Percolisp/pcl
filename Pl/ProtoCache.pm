@@ -203,8 +203,20 @@ sub _stat_part {
 # patched PPI and $] does not move for a rebuilt perl.  The runtime's twin
 # %p-compute-compiler-stamp folds in the same two inputs; the two stamps key
 # different caches, so they need the same INPUTS, not the same bytes.
+#
+# …and the environment that SELECTS an emission (task #1861).  PCL_OPT and
+# PCL_NO_RAW_VERDICT switch named speed transforms off (Pl/Passes.pm);
+# PCL_FACTS emits the facts that licensed them; PCL_IR_PLAIN changes the IR's
+# shape (Pl/CLForm.pm).  Not a correctness hole -- PCL_OPT=none is required to
+# RUN identically -- but a MEASUREMENT one: on a warm cache an A/B under
+# PCL_OPT measured the same emission twice.  THE RUNTIME TWIN is
+# pcl::*p-emission-env-vars* and a gate row compares the two lists, because
+# nothing else can.  A variable that only warns or dumps does not belong here.
+our @EMISSION_ENV = qw(PCL_OPT PCL_NO_RAW_VERDICT PCL_FACTS PCL_IR_PLAIN);
+
 sub _toolchain_parts {
   my @parts;
+  push @parts, map { "$_=" . ($ENV{$_} // '') } @EMISSION_ENV;
   my $perl = _running_perl();
   push @parts, 'perl=' . (defined $perl ? 1 : 0);
   push @parts, _stat_part($perl) if defined $perl;

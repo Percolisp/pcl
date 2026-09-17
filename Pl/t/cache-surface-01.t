@@ -39,7 +39,7 @@ use PCLSbcl ();   # sbcl_prefix — the %p-mtime contract row asks the runtime i
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 54;
+plan tests => 59;
 
 my $dir = tempdir(CLEANUP => 1);       # where the fixture modules live
 
@@ -229,6 +229,14 @@ sub run_pcl {
          '... names the perl binary the fingerprint hashes (#1843)');
     like($info, qr{^\s*PPI sources: /\S+ \(\d+ files\)}m,
          '... and PPI, resolved through a real program @INC');
+    like($info, qr{^\s*emission env: none set}m,
+         '... and the emission-selecting environment, here unset (#1861)');
+    my $oinfo = `PCL_CACHE_DIR='$ncache' PCL_OPT=none $pcl --cache-info 2>&1`;
+    like($oinfo, qr{^\s*emission env: PCL_OPT=none}m,
+         '... which names PCL_OPT when it is set');
+    isnt(($oinfo =~ /^\s*compiler stamp: (\S+)/m)[0],
+         ($info  =~ /^\s*compiler stamp: (\S+)/m)[0],
+         '... and PCL_OPT changes the compiler stamp, so the two do not share entries');
 
     my $ver = `$pcl --version 2>&1`;
     like($ver, qr/^pcl \(PCL\) \S/m,     'pcl --version prints the PCL version');
@@ -250,6 +258,32 @@ sub run_pcl {
          '... says --executable produces a binary that RUNS the program');
     like($help, qr/single-binary-plan\.md/,
          '... and points at the plan for the closure it does not embed yet');
+}
+
+# THE TWO EMISSION-ENV LISTS ARE ONE LIST (task #1861).  The compiler
+# fingerprint has a Lisp half (the module and eval caches) and a Perl half
+# (the prototype memo), and they must name the same variables or one cache
+# notices a PCL_OPT change and the other does not.  Nothing but a row can
+# compare them: one is Lisp and one is Perl.
+{
+    my $lisp = _slurp_file("$root/cl/pcl-runtime.lisp");
+    my $pm   = _slurp_file("$root/Pl/ProtoCache.pm");
+    my ($l)  = $lisp =~ /\(defparameter \*p-emission-env-vars\*\s*\n?\s*'\(([^)]*)\)/;
+    my ($p)  = $pm   =~ /our \@EMISSION_ENV = qw\(([^)]*)\)/;
+    my @l = defined $l ? ($l =~ /"([^"]+)"/g) : ();
+    my @p = defined $p ? split(' ', $p) : ();
+    ok(scalar(@l), 'the runtime names the emission-selecting environment');
+    is(join(',', sort @l), join(',', sort @p),
+       '... and Pl::ProtoCache names exactly the same variables (#1861)');
+}
+
+sub _slurp_file {
+    my ($p) = @_;
+    open my $fh, '<', $p or return '';
+    local $/;
+    my $t = <$fh>;
+    close $fh;
+    return $t // '';
 }
 
 # ─────────────────────────────────────────────────────────────────────────
