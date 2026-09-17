@@ -30,6 +30,24 @@ RE-SCOPED — the sweep half is done by the cached core, but the CPAN board's
 per-file runner `tools/run-dist-t.pl` still spawns SBCL by hand outside
 `tools/lib/PCLSbcl.pm`.  The `:num`/`:scalar` answer and the speed-queue
 count from that chat are now in DECIDED `## s488`.
+Both resumes came back merge-ready and were merged after review: s473v at
+`89dbac1c` (one Fable fix on top, the agent's two new `unless` lines made
+`if !` per the USER's style rule, gate re-run PASS 243/8239) and s473t6a at
+`61151938` (gate PASS 244/8254; the combined-tree sweep, run by Fable, clean
+at TOTAL 18686 = baseline with drops 5 = census).  Main is `61151938`,
+generation v2-1480, both pushed.  The review probes filed #1848 (`%+` with
+duplicate names answers the last defined group, perl the leftmost), #1842
+(`sprintf` reads a tied argument twice) and widened #1814 with the sub-return
+proxy leak; s473v filed #1837 (the companion ROW DIFF's permanent churn).
+
+Mid-session the USER asked how the module cache works and whether it extends
+to ordinary scripts.  Answered from the code (`p-cache-valid-p`'s two rules,
+the `.deps` manifest written by the prototype walk's frames, the 30-day prune
+by last use) and measured (a 1,211-line script: 5.6 s today, 0.003 s from its
+fasl).  The USER: "add a todo to look at this for a real implementation" —
+task #1841, unlaunched.  The USER also ruled "Don't start a new subjob right
+now", so the s488a brief (#1834 + #1835) stays on disk.
+
 ## Session s473t6a (Opus agent, 2026-09-17) — #1501 round 8: the `op/` census residue's ≥ 50-row band — one fix, thirteen filings, and 1,098 causeless rows attributed
 
 **Member 1 — the tables.**  The twelve files re-measured on the launch tree
