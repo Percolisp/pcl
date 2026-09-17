@@ -272,9 +272,10 @@ exception is thrown, which `eval` can catch. A construct that is
 deliberately unsupported dies the same way, naming its entry in
 [`docs/not-supported.md`](docs/not-supported.md) in the message.
 
-**Caches.** PCL caches two types of compiled binaries. A saved SBCL
-core with the PCL runtime (a tenth of the startup time) and modules
-loaded with `use`. Both types are stored in `~/.pcl-cache/`. Change
+**Caches.** PCL caches three types of compiled binaries. A saved SBCL
+core with the PCL runtime (a tenth of the startup time), modules
+loaded with `use`, and the script you run. All three are stored in
+`~/.pcl-cache/`. Change
 the directory with `PCL_CACHE_DIR` and clear with `pcl
 --clear-cache`. The directory is created `0700`. (Compiled `eval`
 statements are also cached, it was needed for e.g. Moo.)
@@ -282,8 +283,11 @@ statements are also cached, it was needed for e.g. Moo.)
 The cache's file name of the runtime core is a hash of the source plus
 the SBCL version. A module's cache entry is indexed/named from the
 module's path, the compiler generation and a compiler fingerprint.
+The fingerprint covers PCL's own compiler files, the `perl` binary and
+PPI's files, so a perl or PPI upgrade re-makes every entry. A script's
+entry is named the same way, plus the `-I` directories it was run with.
 
-So a cached module is re-transpiled when its own file
+So a cached module or script is re-transpiled when its own file
 changes. It is also re-transpiled when modules it depends on changes
 (if constants etc are declared in dependencies, the generated code
 might change). Entries are removed after 30 days without use, so they
@@ -292,8 +296,9 @@ get recompiled if used again.
 `pcl --cache-info` says where the cache is and what is in it, and `pcl
 --no-cache` runs once without it.
 
-This design should work even for normal scripts, a planned
-extension. It will work with a newly installed/updated perl.
+The script you run is cached the same way (since 2026-09-17), and a
+newly installed or updated perl simply re-makes the entries. `pcl -e`
+one-liners are not cached.
 
 **The knobs.** `PCL_COMPILE_DIRS` and `PCL_NO_COMPILE_DIRS` take
 colon-separated directories, in `PERL5LIB` syntax, and say which modules are
@@ -302,9 +307,10 @@ directories plus PCL's own `lib/`, so a module you are *editing* is cached
 as readable text.
 
 `PCL_OPT=none` turns off every speed optimization and compiles the
-fully generic form. Scripts are (for now) compiled on every run, so a
-large script has a startup time: a one-liner starts in under a quarter
-of a second, and a thousand-line script takes a few seconds.
+fully generic form. A script is compiled on its first run after an
+edit: a one-liner starts in under a quarter of a second, and a
+thousand-line script takes a few seconds. From the cache both start in
+about 0.04 seconds.
 
 The full list of knobs is in [`docs/caching.md`](docs/caching.md) and
 in `pcl --help`. Every command and flag is on one page in
@@ -423,10 +429,11 @@ and give them a plain slot instead. Every such decision is a named,
 switchable optimization, controlled by `PCL_OPT`. The general form
 must produce the same output, and the test suite checks that it does.
 
-**Running.** `pcl` compiles the script to a temporary Lisp file, and starts
-SBCL from a saved memory image that already contains the compiled runtime.
-That image is built on first use, cached, and keyed on the runtime's source.
-Startup is about a tenth of a second, plus the time to compile your script.
+**Running.** `pcl` compiles the script into a cache entry (a temporary Lisp
+file for `-e`), and starts SBCL from a saved memory image that already
+contains the compiled runtime. That image is built on first use, cached, and
+keyed on the runtime's source. Startup from the cache is about 0.04 seconds;
+the first run after an edit adds the time to compile your script.
 
 ## Requirements
 
@@ -485,7 +492,7 @@ runs, so it needs both perl and SBCL.
 
 | | |
 |---|---|
-| [`docs/pcl-commands.md`](docs/pcl-commands.md) | the command reference: `pcl`, `pl2cl`, `runpcl`, the installer, how the runtime and modules are compiled and cached |
+| [`docs/pcl-commands.md`](docs/pcl-commands.md) | the command reference: `pcl`, `pl2cl`, `runpcl`, the installer, how the runtime, modules and scripts are compiled and cached |
 | [`docs/STATUS.md`](docs/STATUS.md) | what runs, measured, with failure breakdowns |
 | [`docs/not-supported.md`](docs/not-supported.md) | what does not, and why |
 | [`docs/ir-spec.md`](docs/ir-spec.md) | what every form in the generated Lisp means |

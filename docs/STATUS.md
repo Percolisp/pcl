@@ -99,10 +99,12 @@ observable difference is.  The big items:
   binds nothing useful, `$, = …` is dropped loudly), and
   `pl2cl --executable` runs the program at build time and produces a binary
   that does nothing (task #1060).
-* **Compile happens at run start.**  A large program pays a transpile and
-  SBCL-compile cost on every run (about five seconds for 800 statements);
-  module transpiles are cached (`~/.pcl-cache`), as is the runtime itself
-  (a saved SBCL core, keyed on the runtime's source).  See
+* **Compile happens on the first run after an edit.**  A large program pays
+  its transpile and SBCL-compile cost once (about six seconds for 1,200
+  lines) and then starts from its cache entry in 0.04 s; module transpiles
+  are cached the same way (`~/.pcl-cache`), as is the runtime itself (a
+  saved SBCL core, keyed on the runtime's source).  `pcl -e` one-liners are
+  not cached.  See
   [`caching.md`](caching.md) for what is cached, where, and how to clear
   or disable it.
 * **Signatures are read as signatures whenever the feature could be on.**

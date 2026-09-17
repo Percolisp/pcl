@@ -1,7 +1,8 @@
 # PCL command reference
 
-The commands you run, what they do, and how the two compiled things — the
-runtime library and the modules a program `use`s — get built and cached.
+The commands you run, what they do, and how the three compiled things — the
+runtime library, the modules a program `use`s and the program itself — get
+built and cached.
 Every option below is taken from the tools' own `--help` output; run
 `pcl --help` and `pl2cl --help` for the authoritative text of the version you
 have.  The design behind the caches is in [`caching.md`](caching.md).
@@ -30,8 +31,10 @@ runpcl file.pl
 
 Works like `perl` for the Perl subset PCL supports: `@ARGV`, `%ENV`, `$0`,
 exit codes, `die` and `END` blocks behave as the running process's.  Your
-script is compiled on every run (only modules are cached), so a large script
-pays a pause before its first line.
+script is compiled on its first run after an edit and cached like a module
+(`~/.pcl-cache/scripts/`), so a large script pays a pause before its first
+line once; later runs start from the cache in about 0.04 s.  `-e` code is
+not cached.
 
 | option | meaning |
 |---|---|
@@ -43,9 +46,9 @@ pays a pause before its first line.
 | `-v`, `--verbose` | print the `sbcl` command line `pcl` runs |
 | `--version` | print the PCL, cache-generation, SBCL and PPI versions |
 | `--cache-info` | where the cache is, what is in it, which core this run would use, the compile policy in effect — the one diagnostic for "PCL did not notice my change" |
-| `--no-cache` | this run reads and writes no module cache — the one-flag answer to "is it the cache?" |
+| `--no-cache` | this run reads and writes no module, script or eval cache — the one-flag answer to "is it the cache?" |
 | `--make-core` | build the cached runtime core now, then exit (every run builds one on first use anyway) |
-| `--clear-cache` | remove everything PCL made under the cache directory (cached modules, prototype facts, saved cores), then exit; XS artifacts are left alone |
+| `--clear-cache` | remove everything PCL made under the cache directory (cached modules, scripts and evals, prototype facts, saved cores), then exit; XS artifacts are left alone |
 | `-h`, `--help` | the full text, including the environment variables |
 
 Examples:
@@ -69,7 +72,7 @@ directly to see what PCL makes of your code, or to compile a program once.
 | `--executable` | save a standalone binary that runs the program when started.  The compile phase (subs, packages, `use`d modules, `BEGIN`) happens at build time, as in perl; the run phase happens when the binary starts.  Not yet embedded, so the binary needs this PCL tree on the machine: a run-time `require` of a module not already loaded, and the pack/mro/warnings extensions ([`single-binary-plan.md`](single-binary-plan.md)) |
 | `--bundle` | compile runtime + program into one `.fasl`; loading it runs the program (`sbcl --load out.fasl`) |
 | `-o FILE`, `--output FILE` | output file (default `<input>.fasl` or `<input>`) |
-| `--no-cache` | the emitted program runs without the module cache (also `PCL_NO_CACHE=1`) |
+| `--no-cache` | the emitted program runs without the module, script and eval caches (also `PCL_NO_CACHE=1`) |
 | `--cache-lisp` | cache `.lisp` instead of `.fasl` (for debugging) |
 | `--module` | emit a module: no program preamble (what the runtime spawns when a `use` misses the cache) |
 | `--extension` | build a checked-in `cl/*.lisp` artifact (see below) |
@@ -134,7 +137,10 @@ commit; `caching.md` §1a has the details.
 A `use` or `require` is resolved through `@INC` — the directories perl
 searches, plus `-I` — and the module's source is compiled the same way as
 your program, then **cached** as its transpiled Lisp plus a compiled `.fasl`
-under `~/.pcl-cache/modules/`.  Only the first run pays.
+under `~/.pcl-cache/modules/`.  Only the first run pays.  The program you run
+is an entry of the same kind under `~/.pcl-cache/scripts/`, keyed on its path,
+the `-I` list, the compiler generation and the compiler fingerprint (`-e` code
+is not cached).
 
 * **Installing a pure-Perl CPAN module** is `cpanm Module`: PCL finds it in
   perl's library and compiles it.  `pcl -MData::Dump=dump -E 'say dump [1..3]'`
@@ -149,9 +155,10 @@ under `~/.pcl-cache/modules/`.  Only the first run pays.
   (`~/.pcl-cache/xs/abi-N/auto/...`); `--list` shows what is installed,
   `--clean` drops artifacts built for other ABIs.  This needs the `pclxs`
   checkout beside PCL's.
-* **A cached module is re-transpiled** when its own file changes, when any
-  module whose prototypes or exports its parse read changes, and when the
-  compiler itself changes (the cache key names the compiler, since s473i).
+* **A cached module or script is re-transpiled** when its own file changes,
+  when any module whose prototypes or exports its parse read changes, and
+  when the compiler itself changes (the cache key names the compiler, the
+  `perl` binary and PPI's files).
   Entries unused for 30 days are removed.  `pcl --no-cache` runs once
   without the cache; `pcl --clear-cache` empties it.
 * **What gets compiled to native code** is a policy: by default modules under
@@ -198,10 +205,10 @@ uninstall; `pcl --clear-cache` empties it.
 
 | variable | effect |
 |---|---|
-| `PCL_CACHE_DIR` | root of every per-user cache: compiled modules, prototype facts, saved cores, XS artifacts (default `~/.pcl-cache`, created `0700`) |
+| `PCL_CACHE_DIR` | root of every per-user cache: compiled modules, scripts and evals, prototype facts, saved cores, XS artifacts (default `~/.pcl-cache`, created `0700`) |
 | `PCL_COMPILE_DIRS` | directories (colon-separated) whose modules are compiled to native code; `*` = every directory; unset = perl's library directories plus PCL's `lib/` |
 | `PCL_NO_COMPILE_DIRS` | directories whose modules are never compiled; wins over `PCL_COMPILE_DIRS`; `*` = compile nothing (`PCL_NO_FASL_CACHE=1` is the kept alias) |
-| `PCL_NO_CACHE=1` | the program runs without the module cache (what `--no-cache` sets) |
+| `PCL_NO_CACHE=1` | the program runs without the module, script and eval caches (what `--no-cache` sets) |
 | `PCL_CORE=path` | use this saved core |
 | `PCL_NO_CORE=1` | never build or use a cached core (an installed one still counts) |
 | `PCL_OPT` | switch named optimizations off: `PCL_OPT=none` is the fully generic compiler, `PCL_OPT=-raw-numeric,-str-buffer` names individual ones; a typo dies naming the known list |
@@ -216,6 +223,8 @@ uninstall; `pcl --clear-cache` empties it.
 |---|---|
 | `~/.pcl-cache/core/` | saved runtime cores, one per runtime source × SBCL version × checkout path |
 | `~/.pcl-cache/modules/` | transpiled modules, their `.fasl`s and dependency manifests |
+| `~/.pcl-cache/scripts/` | the same three files for the program `pcl FILE` runs |
+| `~/.pcl-cache/evals/` | compiled string evals |
 | `~/.pcl-cache/proto/` | the compiler's prototype and export facts per module |
 | `~/.pcl-cache/xs/abi-N/` | XS artifacts built by `tools/pcl-xs-install`, keyed by bridge ABI |
 | `<prefix>/lib/pcl/pcl.core` | the core an installation compiled at install time |

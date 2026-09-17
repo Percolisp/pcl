@@ -5,6 +5,21 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-17: **the script you run is cached like a module.**  `pcl FILE`
+  keeps the program's transpile and compiled code under
+  `~/.pcl-cache/scripts/`, keyed on the path, the `-I` list, the compiler
+  generation and the compiler fingerprint, and re-made when the script or
+  any module it depends on changes: a one-line script 0.18 s -> 0.04 s, a
+  1,200-line script 6.1 s -> 0.04 s (perl: 0.006 s).  On by default;
+  `--no-cache` / `PCL_NO_CACHE` turn every cache off; `pcl -e` is not
+  cached.  The compiler fingerprint now also covers the `perl` binary and
+  PPI's files, so a perl or PPI upgrade re-makes every cached transpile,
+  and `PCL_OPT` and the other emission-selecting variables are part of
+  the key.  `pcl --cache-info` and `--clear-cache` name the eval cache too.
+  Known hole, shared with the module cache (task #1860): a module file
+  created later, earlier on an unchanged `-I` list, is not noticed until
+  the script or a recorded dependency changes.
+
 - 2026-09-10: **installing needs SBCL and nothing else.**  cl-ppcre, the
   regex engine, is now vendored in the tree (`cl/vendor/cl-ppcre/`, upstream
   source carried verbatim) and the runtime puts that directory on ASDF's
