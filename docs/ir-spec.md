@@ -3416,6 +3416,13 @@ must see. Three rules are the script's own:
    name to a *different file*, and which file that was is a parse fact the
    emission encodes. (The module key does **not** carry this; a dependency
    that MOVES is the hole stated three paragraphs up, task #1860.)
+   **The other half of #1860 a script DOES inherit** (measured s488b): a
+   name that starts resolving to a different file while the search path is
+   UNCHANGED — a file created earlier on an `-I` directory already in the
+   list — moves nothing in the key and leaves the recorded dependency
+   hashing as read, so the entry stays valid and answers with the old
+   file's parse. For a main script that is NEW with this cache: before it,
+   the program was re-transpiled every run.
 2. **The key carries the path AS GIVEN**, because `$0` is that string
    verbatim; `__FILE__`, `caller`'s file and the `__END__`/DATA section are
    functions of the path and the content, so the key covers them too.

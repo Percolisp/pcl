@@ -204,6 +204,42 @@ made.  `docs/pcl-rollout-plan.md` Phase 6 and Phase 7 are marked SUPERSEDED in
 place (their `md5(path + mtime)` key and stat'ed sidecar predate the
 content-hash manifest).
 
+**The review probes, after the batch was built — two findings, one of them
+about this batch.**  **#1860 stops being a latent hole and becomes a
+regression owner.**  The include-path probe had established that a `-I` LIST
+change is in the script key; the second half — a name that starts resolving
+to a *different* file while the search path is UNCHANGED — moves nothing in
+the key and leaves the recorded dependency hashing as read.  Measured with
+`-I d1 -I d2` on all three passes and `d1/B4.pm` created between pass 1 and
+pass 2 with an empty prototype: perl 107 / 8 / 8, PCL at `f26282db` 107 / 8 /
+8, PCL with the script cache 107 / **107** / **107**.  For a main script this
+is NEW with #1841, because before it the program was re-transpiled every run,
+so it is the deciding input to the USER's default-on-vs-opt-in question.  Not
+fixed here: #1860's own fix shape (re-resolve each recorded `dep mod NAME` and
+require the recorded path) carries a measure-first warning — PCL's shim `lib/`
+is on the transpiler's inc_paths and NOT on the child's `-I`, so a naive path
+compare calls every shim dependency stale forever — and a full-sweep
+acceptance bar.  It is stated in `docs/caching.md` §2c and `docs/ir-spec.md`
+§9.2b instead of being left for a user to hit.  **#1863** came out of
+functionally checking `pcl --cache-info`: `core/` is 7.2 GB / 154 cores and
+151 of them (7.03 GB) belong to runtime absolute paths that no longer exist,
+because the core prune globs one pathkey and `%p-cleanup-old-cache` never
+walks `core/` — one deleted agent worktree is one 49 MB core, forever.
+
+**Bars** (all on the tree rebased onto `f26282db`): gate **PASS 245 files /
+8318 rows** (107 s wall / 469 CPU-s); `tools/corpus-diff.pl` emission
+**IDENTICAL over 111**, silent drops 5 unchanged, **no generation bump**;
+full sweep `--jobs 4` **GATE clean, 0 new / 0 fixed, TOTAL 18686 = baseline
+(+0), drops 5 = census, CAUSES 480/480** (5 UNSTABLE + 15 unverified = the
+standing crash-file set); `tools/ir-conform --jobs 2` **323 / 0 / 22 / 0**;
+`tools/ir-host-leak.pl` 31 leaks over 111 = the standing census (and
+necessarily identical, corpus-diff having proved the emission byte-identical
+over the same files); `tools/tag-license --check` clean; parens balanced;
+`prove tools/t/sbcl-prefix.t tools/t/install-pcl.t` PASS 96 rows.  Timings
+re-confirmed on the final tree, best-of-N at load ~1.8: `hello.pl` 0.176 base
+/ 0.188 miss / **0.041** hit, `cl/pack-impl.pl` 6.129 / 6.812 / **0.041**
+(perl 0.006) — 4.3× and 150×, a miss costing 7–11 % over not caching.
+
 ## Session s473t6a (Opus agent, 2026-09-17) — #1501 round 8: the `op/` census residue's ≥ 50-row band — one fix, thirteen filings, and 1,098 causeless rows attributed
 
 **Member 1 — the tables.**  The twelve files re-measured on the launch tree

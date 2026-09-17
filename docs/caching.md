@@ -198,6 +198,15 @@ module, and the second run loads its compiled form in **0.037 s**.
   would leak one dead entry per run; content-keying them the way §3 keys an
   eval is task **#1862**. `pcl -c` is not cached either — it must transpile
   and *not* run.
+- **The one case validity does NOT cover** (task **#1860**, measured): a
+  dependency whose *name* starts resolving to a **different file** while the
+  search path is unchanged — you create `d1/B4.pm` on an `-I` directory that
+  was already there, shadowing the `d2/B4.pm` the transpile read. Nothing in
+  the key moves and the recorded dependency still exists and still hashes as
+  read, so the entry stays valid and answers with the old file's parse. A
+  changed `-I` list *is* covered (it is in the key); this is the other half,
+  it is the module cache's hole too, and for a main script it is **new with
+  this cache** — before it, the script was re-transpiled every run.
 - **A script edited in the same second its entry was written re-transpiles
   once more**: validity wants the entry *strictly* newer than the source.
   That is §2's rule, and it errs towards doing the work again.
