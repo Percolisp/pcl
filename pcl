@@ -19,14 +19,17 @@
 # hash of the runtime source + the SBCL version, so an edit or an upgrade
 # simply produces a new one (tools/lib/PCLSbcl.pm, the ONE SBCL command
 # builder every PCL runner shares).  --make-core only forces that build early.
-# (`pcl` itself transpiles the script fresh every run; compiling a script ONCE
-# into a .fasl or a binary is `pl2cl --bundle` / `pl2cl --executable`, and
-# `pcl`'s own caching tiers are still Phase 6.)  See `pcl --help`.
+# (Shipping a script as a .fasl or a binary is `pl2cl --bundle` /
+# `pl2cl --executable`.)  See `pcl --help`.
 #
-# Phase 1 of docs/pcl-rollout-plan.md: Tier-0 "transpile-and-run" only — the main
-# script is transpiled fresh on every run (no main-script FASL). The module cache
-# (use/require) still applies underneath, with its own mtime freshness check.
-# Caching tiers (--cache / --fasl) are Phase 6; user test support is Phase 4.
+# THE MAIN SCRIPT IS A CACHE ENTRY (task #1841, s488b): `pcl FILE` asks the
+# runtime for the program's cached transpile + fasl exactly as a `use` asks
+# for a module's, so only the first run after an edit pays for it.  This
+# SUPERSEDES docs/pcl-rollout-plan.md's Phase 6 and Phase 7, whose md5(path +
+# mtime) key and stat'ed dependency sidecar predate the content-hash manifest
+# (#1261) — do not build them as written.  The design is docs/caching.md 2c
+# and docs/ir-spec.md 9.2b; -e, -M-prefixed files and -c keep the
+# transpile-to-a-temp-file path.
 
 use v5.20;
 use strict;
@@ -548,36 +551,44 @@ Options:
   -h, --help     this message
 
 Caches:
-  PCL caches two things, both purely for speed and neither able to change a
+  PCL caches three things, all purely for speed and none able to change a
   result: a saved SBCL core with the PCL runtime compiled in (startup ~1 s ->
-  ~0.1 s), and, per module you `use`, its transpiled Common Lisp plus a
-  compiled fasl.  A cached module is re-transpiled when its own file changes,
-  and also when any module whose prototypes or exports its parse read changes.
+  ~0.1 s); per module you `use`, its transpiled Common Lisp plus a compiled
+  fasl; and YOUR SCRIPT ITSELF, the same way (a 1,211-line program: 6.6 s
+  every run before, 0.04 s from its cache entry).  An entry is re-transpiled
+  when its own file changes, and also when any module whose prototypes or
+  exports its parse read changes; a script's entry additionally belongs to the
+  -I list it was built under, because a different search path can resolve the
+  same `use` to a different file.  `pcl -e` and a file run with -M prefixes
+  are NOT cached -- they have a fresh temp path each run.
   Everything lives under PCL_CACHE_DIR (below), in a directory PCL creates
-  with mode 0700 -- a cached module is code, so PCL refuses to load out of a
+  with mode 0700 -- a cached entry is code, so PCL refuses to load out of a
   directory anybody else could write to.
 
-  --cache-info   Print where the cache is, what is in it, which core this run
-                 would use, and the compile policy in effect.  The one
+  --cache-info   Print where the cache is, what is in it (modules, scripts,
+                 evals, prototype facts, cores), which core this run would
+                 use, the compile policy in effect, and the compiler
+                 fingerprint with the perl binary, the PPI sources and the
+                 emission-selecting environment it hashed.  The one
                  diagnostic for "PCL did not notice my change".
-  --no-cache     This run reads and writes no module cache -- the one-flag
-                 answer to "is it the cache?".
+  --no-cache     This run reads and writes no module, script or eval cache --
+                 the one-flag answer to "is it the cache?".
   --make-core    Build the cached runtime core now, then exit.  Every run
                  builds and uses one BY DEFAULT (the first use compiles it;
                  the core is named by a hash of the runtime + the SBCL
                  version, so an edit or an upgrade simply makes a new one) --
                  this flag only does the build early.
   --clear-cache  Remove everything PCL made under PCL_CACHE_DIR -- the cached
-                 modules (.lisp / .fasl / .deps), the transpiler's prototype
-                 facts and the saved cores -- then exit.  The next run
-                 rebuilds what it needs.  XS artifacts are NOT a cache and are
-                 left alone: they are installed by tools/pcl-xs-install and
-                 removed by its --clean.
+                 modules, scripts and evals (.lisp / .fasl / .deps), the
+                 transpiler's prototype facts and the saved cores -- then
+                 exit.  The next run rebuilds what it needs.  XS artifacts are
+                 NOT a cache and are left alone: they are installed by
+                 tools/pcl-xs-install and removed by its --clean.
 
 Notes:
-  * Every run of `pcl` transpiles your script fresh; only `use`/`require`d
-    modules are cached (caching the script itself is Phase 6 of
-    docs/pcl-rollout-plan.md).  To compile a script ONCE, use the compiler
+  * Your script is cached like a module (docs/caching.md 2c), so only the
+    FIRST run after an edit pays the transpile and the compile.  To compile a
+    script ONCE into something you can ship, use the compiler
     directly: `pl2cl --executable -o prog prog.pl` saves a binary that runs
     the program, and `pl2cl --bundle -o prog.fasl prog.pl` a .fasl that runs
     it when loaded.  Neither embeds the module closure yet, so both still

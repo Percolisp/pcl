@@ -63,6 +63,10 @@ resolves a custom module dir; `-M` prepends `use`. **`--cache`/`--fasl` (Tier 1/
 deliberately NOT added yet — Phase 6.** **`$0` not yet wired** (resolves to "sbcl";
 follow-up — no clean symbol hook found).
 
+> *Both of those trailing notes are now history*: `$0` was wired in task #512,
+> and the main script IS cached since task #1841 — as a module-cache entry,
+> which is why Phase 6 below is marked SUPERSEDED rather than done.
+
 ---
 
 ## Phase 2 — saved core (startup speed) ✅ DONE
@@ -153,7 +157,17 @@ results; `-j` parallelism works.
 
 ---
 
-## Phase 6 — caching tiers (`--cache`, `--fasl PATH`)
+## Phase 6 — caching tiers (`--cache`, `--fasl PATH`) — SUPERSEDED (task #1841, s488b)
+
+> **DO NOT BUILD THIS AS WRITTEN.** The main script IS cached, since task
+> #1841 — but as a **module-cache entry**, not as the tiers below: the key is
+> a hash of the absolute path, the path *as given*, the include path, the
+> generation and the compiler fingerprint — never `md5(abs-path + mtime)` —
+> and it is **on by default** for `pcl FILE` rather than opt-in behind
+> `--cache`. Read [`caching.md`](caching.md) §2c and
+> [`ir-spec.md`](ir-spec.md) §9.2b instead. `--cache` and `--fasl PATH` were
+> never implemented and are not planned; shipping a compiled script is
+> `pl2cl --bundle` / `--executable`. What follows is the original sketch.
 
 Now that the common path (Tier 0) is proven, add opt-in persistence.
 
@@ -177,7 +191,15 @@ open — Phase 7 closes it).
 
 ---
 
-## Phase 7 — the `.deps` manifest (close caveat 2 for cached scripts)
+## Phase 7 — the `.deps` manifest — SUPERSEDED (tasks #1261 + #1841)
+
+> **DO NOT BUILD THIS AS WRITTEN.** The dependency manifest exists and is
+> normative ([`ir-spec.md`](ir-spec.md) §9.2b), but it hashes each
+> dependency's **content** rather than stat'ing its mtime — a `git checkout`
+> restores an old mtime, and a stale dependent is exactly the silent-wrong
+> this project refuses. It is written by `pl2cl --deps`, and it covers
+> modules, scripts and string evals alike. What follows is the pre-#1261
+> sketch.
 
 Makes Tier 1/2 sound against compile-time interface drift in the `use`-closure.
 See `docs/fasl-caching-design.md` §9.

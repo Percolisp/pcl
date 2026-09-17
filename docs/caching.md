@@ -8,11 +8,12 @@ between runs, where, what invalidates each thing, how to see or clear it.
 starts.** The one-line answer to "why did PCL not notice my change?" is
 `pcl --cache-info`.
 
-PCL keeps four kinds of thing under `~/.pcl-cache/` (or `$PCL_CACHE_DIR`,
+PCL keeps five kinds of thing under `~/.pcl-cache/` (or `$PCL_CACHE_DIR`,
 §6): a compiled image of PCL's own runtime (§1), each `use`d/`require`d
-module's transpile and compiled form (§2), each distinct `eval "STRING"`
-text's transpile (§3) — and, for now, nothing for the three checked-in
-extension files pack/mro/warnings, which are recompiled every run (§4).
+module's transpile and compiled form (§2), **the main script's own transpile
+and compiled form (§2c)**, each distinct `eval "STRING"` text's transpile
+(§3) — and, for now, nothing for the three checked-in extension files
+pack/mro/warnings, which are recompiled every run (§4).
 
 ## 1. The saved runtime core
 
@@ -162,6 +163,47 @@ directory you own
 (A directory PCL creates itself is always `0700`; this fires only on one
 made by hand with `mkdir`, which inherits the shell's umask.)
 
+## 2c. The script cache — the program itself is an entry too
+
+`pcl prog.pl` used to transpile the program on **every** run and hand SBCL
+the text, which compiled every form again. Measured on a 1,211-line script:
+6.57 s, every time. Since task #1841 the program is a cache entry like any
+module, and the second run loads its compiled form in **0.037 s**.
+
+- **Where**: `~/.pcl-cache/scripts/`, the same three files per entry as §2
+  (`.lisp`, `.deps`, `<key>-<runtime-id>.fasl`) and the same 30-day
+  last-use prune. `pcl --cache-info` counts them separately.
+- **Validity** is §2's, unchanged: the entry must be newer than the script,
+  and every module whose prototypes or exports its transpile read must still
+  hash to what was read. Editing the script, **or editing only a module it
+  uses**, re-transpiles it on the next run.
+- **The key carries more than a module's**, because a program's emission
+  does: besides the absolute path, the generation and the compiler
+  fingerprint (§2), it carries **the path as you spelled it** (`$0` is that
+  string verbatim, so `pcl ./p.pl` and `pcl p.pl` are two entries), **the
+  `-I` list, the cwd and `PERL5LIB`**. The last three are not belt and
+  braces: a different `-I` can resolve the same `use`d name to a *different*
+  file, and which file that was changes the parse — measured, with two
+  directories whose `B.pm` differ only in an empty prototype, perl answers
+  8 then 107, and a key without the include path would answer 8 twice.
+- **The main script is compiled to a fasl by default**, unlike a module
+  under `-I`/`PERL5LIB`/`.`. The module rule exists because such a module is
+  probably being *edited*; a main script is always under one of those
+  directories, so applying it would mean paying the SBCL compile on every
+  run and the cache would buy nothing. The **off** switches still reach it:
+  `PCL_NO_FASL_CACHE=1` or a `PCL_NO_COMPILE_DIRS` match leaves the entry as
+  readable text, and `--no-cache` / `PCL_NO_CACHE` skips the whole thing.
+- **Not cached**: `pcl -e CODE` and a file run with `-M` prefixes. `pcl`
+  writes both to a temp file with a fresh random name, so a path-keyed entry
+  would leak one dead entry per run; content-keying them the way §3 keys an
+  eval is task **#1862**. `pcl -c` is not cached either — it must transpile
+  and *not* run.
+- **A script edited in the same second its entry was written re-transpiles
+  once more**: validity wants the entry *strictly* newer than the source.
+  That is §2's rule, and it errs towards doing the work again.
+- `runpcl`, the perl-tests sweep and the companion suite do **not** use it —
+  they measure the transpile, and none of them goes through `pcl`.
+
 ## 3. String eval has its own disk cache
 
 `eval "PERL CODE"` used to transpile through a `pl2cl --server` subprocess
@@ -189,10 +231,11 @@ perl's own test files alone leave over 600 entries), so it's the one the
 30-day last-use prune matters most for.
 
 `pcl --no-cache` / `PCL_NO_CACHE=1` disables this together with the module
-cache — one switch for both, not two. **As of this writing,
-`pcl --cache-info` does not list `evals/` among the directories it
-reports** — a gap, filed as task #1335, so don't read its absence there as
-"the eval cache isn't working."
+and script caches — one switch for all three, not three. `pcl --cache-info`
+lists `evals/` beside the others (it did not until task #1335 closed in
+s488b, which is why older notes warn not to read its absence there as "the
+eval cache isn't working"), and `pcl --clear-cache` removes it — that glob
+had never named the directory either.
 
 ## 4. The three checked-in artifacts (pack, mro, warnings)
 
@@ -227,6 +270,9 @@ lever is worth roughly this much," not as a portable benchmark.
 | `use Moo` (eval-cache leg) | 0.343 s | 0.201 s | s473p, 2026-09-07 |
 | `use JSON::PP` cold (no fasl caching at all, pre-#1188 baseline) | 13.42 s | — | s470bn, 2026-09-05 |
 | `pack("N",1)` | — | 8.3 s | s470bp, 2026-09-05 (extension load, §4, still uncached) |
+| `pcl hello.pl` (1 line) | 0.181 s | **0.033 s** | s488b, 2026-09-17 (script cache, §2c; the cold-entry run costs 0.203 s) |
+| `pcl cl/pack-impl.pl` (1,211 lines) | 6.571 s | **0.037 s** | s488b, 2026-09-17 (cold entry 7.256 s, i.e. one run's worth; `perl` itself 0.006 s) |
+| the compiler fingerprint, per process | 1.15 ms | 1.95 ms | s488b, 2026-09-17 (#1843's ~95 extra stats; invisible in a run's wall time) |
 
 These stack: pre-#1188 `use JSON::PP` cold was 13.4 s; fasl caching (§2)
 alone warmed it to 1.43 s; the string-eval disk cache (§3) on top — since
@@ -238,11 +284,12 @@ JSON::PP's own loader `eval`s — warms it further to 0.41 s.
 
 | variable | meaning | default |
 |---|---|---|
-| `PCL_CACHE_DIR` | root of every per-user cache: `modules/`, `evals/`, `proto/`, `core/`, `xs/` | `~/.pcl-cache` |
-| `PCL_COMPILE_DIRS` | colon-separated directories (`PERL5LIB` syntax); a module under one is compiled to a fasl. `*` = every directory | perl's installed library directories + PCL's own `lib/` |
-| `PCL_NO_COMPILE_DIRS` | same syntax; a module under one is **never** compiled to native code (still gets the `.lisp`/manifest cache); wins over `PCL_COMPILE_DIRS` on any match. `*` = compile nothing | empty |
+| `PCL_CACHE_DIR` | root of every per-user cache: `modules/`, `scripts/`, `evals/`, `proto/`, `core/`, `xs/` | `~/.pcl-cache` |
+| `PCL_COMPILE_DIRS` | colon-separated directories (`PERL5LIB` syntax); a module under one is compiled to a fasl. `*` = every directory. The **main script** is exempt from this list (§2c) | perl's installed library directories + PCL's own `lib/` |
+| `PCL_NO_COMPILE_DIRS` | same syntax; a module — or the main script — under one is **never** compiled to native code (still gets the `.lisp`/manifest cache); wins over `PCL_COMPILE_DIRS` on any match. `*` = compile nothing | empty |
 | `PCL_NO_FASL_CACHE=1` | kept alias of `PCL_NO_COMPILE_DIRS='*'` | |
-| `PCL_NO_CACHE` / `pcl --no-cache` | this run reads and writes no module cache **and** no eval cache — one switch | off |
+| `PCL_NO_CACHE` / `pcl --no-cache` | this run reads and writes no module cache, **no script cache and no eval cache** — one switch | off |
+| `PCL_OPT`, `PCL_NO_RAW_VERDICT`, `PCL_FACTS`, `PCL_IR_PLAIN` | not cache knobs, but they **select an emission**, so since task #1861 they are part of the compiler fingerprint: a run under one setting never reads an entry written under another. `pcl --cache-info` prints the ones in force | unset |
 | `PCL_NO_CORE=1` | never build or use a saved core; always load the runtime from source | off |
 | `PCL_CORE=path` | use this specific saved core | — |
 | `PCL_FASL_DEBUG=1` | per-module trace: FASL HIT / fasl-build / TEXT, and why | off |
@@ -253,9 +300,9 @@ JSON::PP's own loader `eval`s — warms it further to 0.41 s.
 
 | flag | what it does |
 |---|---|
-| `pcl --cache-info` | where the cache is, size/count per kind, which core this run would use and why, and the compile policy in effect. **The** diagnostic for "PCL did not notice my change" |
-| `pcl --clear-cache` | removes everything under `PCL_CACHE_DIR` that PCL made: modules (`.lisp`/`.fasl`/`.deps`/`.failed`), evals, prototype facts, saved cores. One flag, no sub-selection — a core rebuilds in ~20 s. **Not** the XS artifacts (`tools/pcl-xs-install --clean` for those) |
-| `pcl --no-cache` | this run only: skip both the module and the eval cache entirely |
+| `pcl --cache-info` | where the cache is, size/count per kind, which core this run would use and why, the compile policy in effect, and the compiler fingerprint with the perl binary, the PPI sources and the emission-selecting environment it hashed. **The** diagnostic for "PCL did not notice my change" |
+| `pcl --clear-cache` | removes everything under `PCL_CACHE_DIR` that PCL made: modules, scripts and evals (`.lisp`/`.fasl`/`.deps`/`.failed`), prototype facts, saved cores. One flag, no sub-selection — a core rebuilds in ~20 s. **Not** the XS artifacts (`tools/pcl-xs-install --clean` for those) |
+| `pcl --no-cache` | this run only: skip the module, script and eval caches entirely |
 | `pcl --version` | PCL version, cache generation, SBCL version, PPI version |
 | `pcl --make-core` | build the cached core now, then exit |
 

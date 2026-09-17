@@ -3391,6 +3391,32 @@ under `use lib`/`-I`/`PERL5LIB`/`.` is very likely being edited, and a fasl is
 the most opaque artifact PCL writes — but it is a belt: correctness is rule 2
 above, for both cache layers alike.
 
+**THE MAIN SCRIPT IS AN ENTRY TOO** (normative, s488b, task #1841). `pcl
+FILE` caches the program exactly as a `use`d module is cached: three files
+under `~/.pcl-cache/scripts/`, the same stem rule, the same manifest, the
+same ONE validity predicate, the same fasl identity, the same prune. The
+transpile is `pl2cl --deps FILE` in **PROGRAM** mode — not `--module`, so the
+file gets its preamble *and* the #339 drop announcement stays on, because a
+dropped statement in the program the user is running is a diagnostic they
+must see. Three rules are the script's own:
+
+1. **The key carries the include path** — the `-I` list, the cwd and
+   `PERL5LIB` — because a different search path can resolve the same `use`d
+   name to a *different file*, and which file that was is a parse fact the
+   emission encodes. (The module key does **not** carry this; a dependency
+   that MOVES is the hole stated three paragraphs up, task #1860.)
+2. **The key carries the path AS GIVEN**, because `$0` is that string
+   verbatim; `__FILE__`, `caller`'s file and the `__END__`/DATA section are
+   functions of the path and the content, so the key covers them too.
+3. **The compile policy exempts it**: a main script is always under
+   `.`/`-I`/`PERL5LIB`, so the module rule would never compile it. The *off*
+   switches (`PCL_NO_FASL_CACHE`, a `PCL_NO_COMPILE_DIRS` match,
+   `--no-cache`) still apply.
+
+`pcl -e`, a file run with `-M` prefixes and `pcl -c` are not cached: the
+first two have a fresh temp path per run (content-keying them is task
+#1862), and `-c` must transpile and not run.
+
 **Where the cache is, is a fact about the PROCESS, not about the build**
 (task #1303). `PCL_CACHE_DIR` names the root of every per-user cache —
 `modules/`, `proto/`, `core/`, `xs/` — and defaults to `<home>/.pcl-cache`.
