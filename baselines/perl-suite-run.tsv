@@ -173,8 +173,13 @@
 #   RESOLVED s488a (2026-09-17): each of those seventeen is attributed to a
 #   single commit now (the s488a block at the head of this file) and spliced --
 #   except uni/method.t, which has been quiet on its own since s473t5f's #1736
-#   (it reads 56/6 = its snapshot row), and the four rows-unstable files, of
-#   which only io/pvbm.t still moves.  "NOT MINE" was right about WHO; the
+#   (it reads 56/6 = its snapshot row), and the four rows-unstable files.  Of
+#   those, io/crlf_through.t and io/through.t are quiet (942/0 = their rows),
+#   io/pvbm.t is the flapper above, and uni/variables.t is a TIMEOUT file whose
+#   count is whatever the clock reached -- it read 1300/29413 in parallel and
+#   1300/24509 in the #366 serial re-run of the SAME run, which is the
+#   definition of a count that must not be blessed (#1851).  "NOT MINE" was
+#   right about WHO; the
 #   missing half was WHICH COMMIT, and that is what this pass measured.
 # s473t5e (2026-09-13, Opus) -- FIVE rows spliced by hand, `--jobs 1`, and the
 #   #366 serial re-run agrees on every one ("REAL MOVE (both runs agree)"):
@@ -1624,7 +1629,7 @@ comp/require.t	1750	0	910	837	DIFF	s469bf: PRE-EXISTING and multi-step, NOT a ro
 comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0
 comp/term.t	23	0	23	0	OK		0
 comp/uproto.t	32	0	13	21	DIFF		0
-comp/use.t	87	0	40	47	DIFF	s488a: 42/45 -> 40/47 at 0ea8d7e1 (s473h member 7, #1249(7): a BAREWORD ALONE AS A STATEMENT is perl's string constant, not a call).  comp/use.t:157 and :163 are `eval 'no strict "refs"; use 5.012; fancy_bareword'` + `ok $@`: perl dies `Bareword "fancy_bareword" not allowed while "strict subs" in use` because the ver decl re-enables strict subs (probed vs perl 5.40.3), PCL answers the STRING and $@ is empty, so both rows fail HONESTLY where they were passing on an undefined-sub death -- which is also why the file's `undef-fn:main::pl-true` signature is gone.  Cause: NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)	0
+comp/use.t	87	0	40	47	DIFF	s488a: 42/45 -> 40/47 at 0ea8d7e1 (s473h member 7, #1249(7): a BAREWORD ALONE AS A STATEMENT is perl's string constant, not a call).  comp/use.t:157 and :163 are `eval 'no strict "refs"; use 5.012; fancy_bareword'` + `ok $@`: perl dies `Bareword "fancy_bareword" not allowed while "strict subs" in use` because the ver decl re-enables strict subs (probed vs perl 5.40.3), PCL answers the STRING and $@ is empty, so both rows fail HONESTLY where they were passing on an undefined-sub death.  The blessed `undef-fn:main::pl-true` signature is NOT this commit's: the sig column already read EMPTY on a `git archive ad5c45ac` extraction (2026-09-06), i.e. it went stale before this window and is dropped here as stale, unattributed.  Cause: NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)	0
 comp/utf.t	4216	0	24	4192	DIFF	s470bv: #1115 (already 24/4192 at a3d6d8e, 12/4204 at 614c6af)	0
 io/argv.t	52	1	27	26	DIFF		0
 io/binmode.t	9	0	9	0	OK		0
@@ -1827,7 +1832,7 @@ op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagn
 op/hashwarn.t	20	0	5	15	DIFF		0
 op/heredoc.t	138	0	52	86	DIFF		0
 op/hexfp.t	125	0	111	14	DIFF		0
-op/inc.t	93	0	67	26	DIFF	s488a: 62/13 -> 67/26, shortfall 18 -> 0, at e2536f81 (s473d member 3, #1248(b): `**` returns an NV wherever perl is not sure of an integer -- and that was NEVER the 64-bit boundary), measured 62/13 at its parent 9089d12a.  The file now produces all 93 of perl's rows; 13 more fail honestly and its row baseline is the hand-placed *rows-unstable* marker (#1082), so there is nothing to edit there	0
+op/inc.t	93	0	67	26	DIFF	s488a: 62/13 -> 67/26, shortfall 18 -> 0, at e2536f81 (s473d member 3, #1248(b): `**` returns an NV wherever perl is not sure of an integer -- and that was NEVER the 64-bit boundary), measured 62/13 at its parent 9089d12a.  The file now produces all 93 of perl's rows; its row baseline is the hand-placed *rows-unstable* marker (#1082), so there is nothing to edit there, and CHECK 2 splits its 26 failures into exactly three classes: 14 `... under use warnings 'imprecision'` rows (NS:Warnings-gated diagnostics are absent -- `use warnings` is not modelled; owner #221), 8 `++*GLOB126637`-family rows where `eval 'my $y = ++$_ for *GLOB'` must die perl's `Modification of a read-only value` and instead dies of a #138 DROP (#1852: a `my` declaration WITH an initializer plus a statement-modifier `for` is dropped -- the same statement works without the `my`, probed), and 4 `9466 case N` rows that need a blessed object finalized at the end of a block (NS:`DESTROY` called by garbage collector)	0
 op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
 op/inccode.t	89	0	13	26	DIFF	s488a: 13/28 -> 13/26, shortfall 48 -> 50, at 319d0f4d (s483a member 1, #1592: `${$coderef}` is perl's fatal -- the CODE exclusion), measured 13/28 at its parent eabff00d.  Two rows change VERB from `not ok` to `(missing)` -- same rowkeys, so the fail multiset is unchanged and there is nothing to edit in the row baseline.  The file's own gap is #1815 (@INC HOOKS are not implemented)	0
 op/incfilter.t	153	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Filter::Util::Call in @INC	0

@@ -13,7 +13,7 @@
 # session `NEVER` = this file has no measurement on record at all.
 # GENERATED: `tools/run-perl-suite.pl --all --bless-stamps` (a file measured by
 # that run gets the run's session; one it did not measure keeps its old stamp).
-# taken-at: s473t4 2026-09-13
+# taken-at: s488a 2026-09-17
 comp/require.t	s473t4	2026-09-13	QUICK-CAPPED: registered allowance 450s > quick cap 120s ... — measured DIFF 911/836
 op/list.t	NEVER	-	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run
 op/pack.t	NEVER	-	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed
@@ -27,3 +27,4 @@ re/regexp_qr.t	s473t4	2026-09-13	QUICK-SKIP: task #326 — same driver/data as r
 re/regexp_qr_embed.t	s473t4	2026-09-13	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured DIFF 797/108
 re/regexp_trielist.t	s473t4	2026-09-13	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 797/108
 re/speed.t	s473t4	2026-09-13	QUICK-SKIP: HANG measured s404 — 1 of perl's 59 rows at... — measured DIFF 25/34
+run/runenv_hashseed.t	s484d	2026-09-14	QUICK-CAPPED: registered allowance 900s > quick cap 120s — s473t4 (#1501): before thi... — s488a: NOT "NEVER": the FULL form measured it at s484d (9/0 -> 274/4, #1590, spliced into perl-suite-run.tsv there), which is what "reached ONLY by the full form" means; this row was added by s488a's --bless-stamps with NEVER because no earlier --bless-stamps run had it
