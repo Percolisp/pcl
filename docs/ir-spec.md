@@ -3297,7 +3297,11 @@ mtime and size:
 2. the **perl binary** a transpile will run — the first `perl` on `$PATH`,
    which is what `run-program … :search t` execs;
 3. **PPI's own sources** — the `PPI.pm` this program's `@INC` resolves plus
-   every `PPI/**/*.pm` beside it.
+   every `PPI/**/*.pm` beside it;
+4. the **environment that SELECTS an emission** — `PCL_OPT`,
+   `PCL_NO_RAW_VERDICT`, `PCL_FACTS` and `PCL_IR_PLAIN` (task #1861), with
+   unset and empty collapsing to one answer because the compiler reads both
+   as off.
 
 2 and 3 are normative because **the emission is a function of PPI's token
 stream**: PCL's tokenizer repairs are keyed on one PPI's output, so an
@@ -3308,7 +3312,14 @@ moves. It is mtime+size and never a version string: `$PPI::VERSION` does not
 move for a patched PPI, `$]` does not move for a rebuilt perl. An input that
 cannot be located is recorded as a count of zero, so "PPI was not findable"
 hashes differently from "PPI was found" rather than both collapsing to an
-empty run. The transpiler's own prototype memo (`Pl::ProtoCache::_key`) and
+empty run. **4 is the same rule from the other side**: those four
+variables choose *which compiler runs*, so an entry written under one
+setting must be unreachable from a run under another — before #1861 a
+`PCL_OPT=none` run silently reused the entry an optimized run had written,
+which made the registry's own promise ("`PCL_OPT=none` is the general-form
+compiler") false on a warm cache.
+
+The transpiler's own prototype memo (`Pl::ProtoCache::_key`) and
 the string-eval cache stem (`%p-eval-cache-stem`) carry the same fingerprint;
 the three move together by construction.
 

@@ -113,6 +113,97 @@ Two findings the attribution forced.  **Four of the twelve rows are a fix exposi
 
 **And one datum the bar handed back to #1651.**  op/gv.t read DIFF **90/95** in the parallel pass — 185 rows, the file ENDED — and TIMEOUT 67/24 serially, in the same run.  The hang is INTERMITTENT, so the 669-second `--timeout 400` TIMEOUT is one side of a race rather than a wall, and the child-process probes that came back clean are consistent with that.  Appended to the task.
 
+## Session s488b (Opus agent, 2026-09-17) — the CACHE batch: the fingerprint learns perl + PPI + the emission environment (#1843, #1861), and the MAIN SCRIPT becomes a cache entry (#1841)
+
+**Member 1 — #1843, what the fingerprint had not been hashing.**  A cache
+entry's key carried a fingerprint of PCL's own files only, so a perl upgrade or
+a PPI change left every module, script and string-eval entry VALID while the
+thing that had produced them was gone.  A version string would not have fixed
+it — a rebuilt same-version perl, or a locally patched `PPI/Token.pm`, fools
+one — so the stamp now hashes the `perl` binary as resolved on `$PATH`
+(truename + mtime + size) and every `PPI/**/*.pm` it can find (95 files here),
+on BOTH sides of what `docs/caching.md` calls the same set: the runtime's
+`%p-compute-compiler-stamp` (PPI located through `*p-core-inc-dirs*`) and
+`Pl::ProtoCache::_compiler_stamp` (through `@INC`).  The same stamp is folded
+into `%p-eval-cache-stem`, so the eval cache moves with it, and
+`pcl --cache-info` asks through a real preamble and names both.  Measured cost:
+1.15 → 1.95 ms per process, i.e. ~95 extra `stat`s, invisible in a run's wall
+time.  Guard rows in `Pl/t/module-fasl-cache-01.t` (59 → 65): a touched fake
+`PPI/Token.pm` on a private `PERL5LIB` dir gives a new key, a wrapper `perl`
+earlier on `$PATH` gives a different key, an untouched tree gives the same key
+twice.
+
+**Filler — #1861, the environment that selects an emission.**  `PCL_OPT`,
+`PCL_NO_RAW_VERDICT`, `PCL_FACTS` and `PCL_IR_PLAIN` choose *which compiler*
+runs, and none of them was in the key: measured before the fix, a
+`PCL_OPT=none` run happily reused the entry an optimized run had written, so
+the optimization registry's documented promise ("`PCL_OPT=none` is the
+general-form compiler") was false on a warm cache — the exact shape #1843 was
+closing.  All four join the fingerprint on both sides, and a gate row compares
+the Lisp list against the Perl one so they cannot drift (`Pl/t/cache-surface-01.t`
+52 → 59).
+
+**Member 2 — #1841, the script cache, and the probe that shaped its key.**
+Step 1 was the include-path probe the task asked for, and it changed the
+design: two `-I` directories whose `B2.pm` differ only in an empty prototype
+(`zap + 1` is `zap()+1` = 8 with it, `zap(+1)` = 107 without) run three passes
+`d1`/`d2`/`d1`.  perl answers 8 / 107 / 8.  A cached **module** that read that
+prototype answers 8 / **8** / 8 — a silent wrong, pre-existing, the first
+measurement of a hole the runtime already names in prose (the manifest
+re-hashes the OLD path, which still exists and still hashes as read); filed as
+**#1860**, not fixed here.  The **script** side is right today only because it
+is re-transpiled every run — so caching it without the include path in the key
+would have *given* scripts that bug.  The include path is therefore in the key,
+non-negotiably.
+
+Everything else about a script entry is a module entry: `%p-cache-stem`, the
+`pl2cl --deps` manifest, the ONE validity predicate (`p-cache-valid-p`, which
+gains an explicit manifest path so it stays the one predicate for three
+callers), the fasl identity in the filename, the `*pcl-fasl-build*` discipline
+that keeps `compile-file` from running the body, the 30-day prune.  Its own
+directory `<cache>/scripts/` so `pcl --cache-info` can count the population.
+The transpile is PROGRAM mode, never `--module`: the program keeps its preamble
+*and* the #339 drop announcement, because a dropped statement in the program
+the user is running is a diagnostic they must see.  The compile-policy
+**exemption** (`%p-compile-module-p`'s `:main-script` clause) is the design
+question the task had to answer: the directory lists exist because a module
+under `-I`/`PERL5LIB`/`.` is probably being edited, and a main script is
+*always* under one of those, so the module rule would pay the SBCL compile
+again on every run — 3.3 s of the 5.6 s, i.e. the whole prize.  The two OFF
+switches still reach it.  `pcl -e`, a file run with `-M` prefixes and `pcl -c`
+keep the old transpile-and-load path (a fresh temp path per run would leak one
+dead entry per invocation; content-keying them is **#1862**).
+
+Two things had to be discovered by measurement.  **`pcl` hands the runtime a
+SEED search path**, because two things happen before the entry's own preamble
+runs and both resolve modules with `@INC` still empty — the fingerprint
+locating PPI, and, on a miss, the program's `use` statements at COMPILE-FILE
+time.  With no seed the stamp recorded `ppi=0` and split the module cache into
+a script-run population and an everything-else one; with perl's own library
+directories ahead of PCL's `lib/`, the compile-time `use Carp` bound perl's
+REAL `Carp.pm` instead of PCL's shim.  The order is load-bearing and mirrors
+what `build_preamble` is about to set.  Measured end to end (warm core, cold
+entry): `cl/pack-impl.pl` (1,211 lines) **6.571 s base / 7.256 s miss /
+0.037 s hit**; `hello.pl` **0.181 / 0.203 / 0.033**; `perl` itself 0.006.
+Guard `Pl/t/script-cache-01.t`, 51 rows, 10 s: the second run skips both
+transpile and compile (asserted by the entry's mtimes, not by timing), editing
+the script rebuilds, editing only a used module's prototype rebuilds through
+the manifest, `-e` leaves no path-keyed entry, `--no-cache` bypasses, the `-I`
+case from step 1, and `$0` / `__FILE__` / `caller`'s file / the `__END__` DATA
+section answer the same on a HIT as on a MISS and as perl.  Inverse-verified on
+the base tree (7 failures and an abort at row 45).  A row asserts that
+`runpcl`, the sweep, the companion and `pclperl-for-tests` never ask for a
+script entry.
+
+**DEFAULT-ON vs OPT-IN is the USER's open decision**, and it is one line in
+`pcl` (`my $use_script_cache = …` gains `$ENV{PCL_SCRIPT_CACHE} &&`); the tree
+ships default-on.  As a by-product **#1335 closed**: `pcl --cache-info` now
+lists `evals/` and `scripts/`, and `--clear-cache`'s glob names them — it had
+never named the eval directory while the help claimed it removed everything PCL
+made.  `docs/pcl-rollout-plan.md` Phase 6 and Phase 7 are marked SUPERSEDED in
+place (their `md5(path + mtime)` key and stat'ed sidecar predate the
+content-hash manifest).
+
 ## Session s473t6a (Opus agent, 2026-09-17) — #1501 round 8: the `op/` census residue's ≥ 50-row band — one fix, thirteen filings, and 1,098 causeless rows attributed
 
 **Member 1 — the tables.**  The twelve files re-measured on the launch tree
