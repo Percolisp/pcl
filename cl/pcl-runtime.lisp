@@ -14379,73 +14379,127 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (setf *p-prev-debugger-hook* sb-ext:*invoke-debugger-hook*)
     (setf sb-ext:*invoke-debugger-hook* #'%p-uncaught-die-hook)))
 
+(declaim (ftype function p-can))
+
+(defun %p-string-concat-safe (args)
+  "p-string-concat over ARGS, which may be empty (the bare `die`)."
+  (if args (apply #'p-string-concat args) ""))
+
+(defun %p-die-split-loc (where)
+  "The (FILE LINE) pair inside a `FILE line N` location string, which is what
+   PROPAGATE is handed (perl passes __FILE__ and __LINE__ separately).  A
+   location PCL could not build answers the whole string and line 0, the same
+   placeholder the rest of the die family uses."
+  (let ((p (search " line " where :from-end t)))
+    (if p
+        (list (subseq where 0 p)
+              (or (parse-integer (subseq where (+ p 6)) :junk-allowed t) 0))
+        (list where 0))))
+
+(defun %p-die-reuse-eval-error (args where)
+  "perl's `die` WITH NO ARGUMENTS (or one that makes an empty string) REUSES
+   `$@` (perldoc -f die), and this is the exact mirror of the `warn` rule
+   `p-warn-build-message` has implemented all along — `warn` appends
+   \"\\t...caught at\" where `die` appends \"\\t...propagated at\".  Four
+   answers, every one measured against perl 5.40.3:
+
+     $@ is a reference whose class has PROPAGATE
+         -> $@->PROPAGATE(__FILE__, __LINE__) REPLACES it and THAT is thrown
+            (`eval { eval { die bless [7],\"Error\" }; die if $@ }` leaves an
+            `Out` object in $@, not an `Error` one)
+     $@ is any other reference   -> thrown UNCHANGED, with no suffix
+     $@ is a non-empty string    -> $@ . \"\\t...propagated at FILE line N.\\n\"
+                                    (`$@ = 100; die` is `100\\t...propagated…`)
+     $@ is empty                 -> nothing to reuse; the caller's \"Died\"
+
+   ARGS is answered unchanged in the last case and whenever there ARE
+   arguments, so the ordinary die path is untouched."
+  (let ((empty (or (null args)
+                   (string= (%p-string-concat-safe args) ""))))
+    (if (not empty)
+        args
+        (let ((err $@))
+          (cond
+            ((p-warn-is-reference err)
+             (let ((prop (p-can err "PROPAGATE")))
+               (if prop
+                   (list (apply #'p-method-call err "PROPAGATE"
+                                (%p-die-split-loc where)))
+                   (list err))))
+            ((plusp (length (to-string (unbox err))))
+             (list (format nil "~A~A...propagated at ~A.~%"
+                           (to-string (unbox err)) #\Tab where)))
+            (t args))))))
+
 (defun p-die (&rest raw-args)
   "Perl die - throw an exception.
    If given a single blessed reference, throw it as an exception object.
    Otherwise, concatenate args as error string.  An optional (:loc \"FILE line N\")
    marker (emitted by codegen for an explicit die) appends Perl's
-   ' at FILE line N.' suffix when the message doesn't already end in a newline."
+   ' at FILE line N.' suffix when the message doesn't already end in a newline.
+   A die with NO message REUSES $@ — see %p-die-reuse-eval-error."
   ;; See %p-arm-uncaught-die-hook: an UNCAUGHT die must exit with perl's status
   ;; and print perl's one line, and this is the only moment at which the hook
   ;; can be installed and stay (#1247 (b)).
   (%p-arm-uncaught-die-hook)
-  (multiple-value-bind (args loc) (%p-extract-loc raw-args)
-    (if (and (= (length args) 1)
-             (let ((obj (car args)))
-               ;; Perl's `die REF` preserves ANY reference (blessed or not) as
-               ;; the exception object — $@/$_ in the catcher IS that reference,
-               ;; with no stringification and no " at FILE line N." suffix (the
-               ;; suffix is only for string dies).  So preserve: a blessed raw
-               ;; hash, a scalar/glob ref box (p-box-is-ref), or a box wrapping a
-               ;; reference container (hashref/arrayref/coderef/ref-to-ref).
-               ;; Without this, `die { prev => $@ }` (an UNBLESSED hashref) fell
-               ;; to the string branch and stringified to "HASH(0x..) at line N".
-               (or (and (hash-table-p obj) (gethash :__class__ obj))
-                   (and (p-box-p obj)
-                        (or (p-box-class obj)
-                            (p-box-is-ref obj)
-                            (let ((inner (p-box-value obj)))
-                              (or (hash-table-p inner)
-                                  (and (vectorp inner) (not (stringp inner)))
-                                  (functionp inner)
-                                  (p-box-p inner)
-                                  (p-typeglob-p inner))))))))
-        ;; Object exception - preserve for $@
-        (error 'p-exception :object (car args))
-        ;; String exception
-        (let ((msg (apply #'p-string-concat args)))
-          ;; "~A", never (error msg): the message is DATA, and `(error msg)`
-          ;; would make it a format CONTROL string.  Every perl die message can
-          ;; carry a `~` -- the drop form (s435) embeds arbitrary user SOURCE
-          ;; TEXT, so `f() = ($x =~ /b/)` fed `~ ` to the format engine and
-          ;; raised an untrappable sb-format:format-error that killed the whole
-          ;; file instead of setting $@.  It is latent for the runtime's own
-          ;; callers too -- several build their message from user data (a method
-          ;; name, a module name) via an inner (format nil ...), and a `~` in
-          ;; THAT data lands here the same way.
-          ;;
-          ;; LOC is the explicit ` at FILE line N` codegen attaches to a user
-          ;; `die`; when there is none this is an INTERNAL runtime die
-          ;; (`Illegal division by zero`, `Can't "last" outside a loop block`,
-          ;; …) and perl gives it the location of the statement that was
-          ;; running — which is what the location register holds (task #1240).
-          ;; Before that register existed such a die printed with NO location
-          ;; when uncaught and with the placeholder `(eval 0) line 0.` when
-          ;; caught.  The newline test comes FIRST because it applies to both:
-          ;; a message ending in "\n" never gets a location, whichever it is.
-          (let ((where (or loc (%p-loc-string))))
-            (cond
-              ;; Message ends in newline: Perl does NOT append a location.
-              ((and (> (length msg) 0)
-                    (char= (char msg (1- (length msg))) #\Newline))
-               (%p-die-error "~A" msg))
-              ;; No location recorded — the pre-#1240 answer, kept BYTE for
-              ;; byte (the empty message included), so a program compiled
-              ;; without `line-track` behaves exactly as it did.
-              ((null where) (%p-die-error "~A" msg))
-              ;; Empty die message: Perl uses "Died".
-              ((string= msg "") (%p-die-error "Died at ~A.~%" where))
-              (t (%p-die-error "~A at ~A.~%" msg where))))))))
+  (multiple-value-bind (args0 loc) (%p-extract-loc raw-args)
+    (let ((args (%p-die-reuse-eval-error args0 (or loc (%p-loc-string) ""))))
+      (if (and (= (length args) 1)
+               (let ((obj (car args)))
+                 ;; Perl's `die REF` preserves ANY reference (blessed or not) as
+                 ;; the exception object — $@/$_ in the catcher IS that reference,
+                 ;; with no stringification and no " at FILE line N." suffix (the
+                 ;; suffix is only for string dies).  So preserve: a blessed raw
+                 ;; hash, a scalar/glob ref box (p-box-is-ref), or a box wrapping a
+                 ;; reference container (hashref/arrayref/coderef/ref-to-ref).
+                 ;; Without this, `die { prev => $@ }` (an UNBLESSED hashref) fell
+                 ;; to the string branch and stringified to "HASH(0x..) at line N".
+                 (or (and (hash-table-p obj) (gethash :__class__ obj))
+                     (and (p-box-p obj)
+                          (or (p-box-class obj)
+                              (p-box-is-ref obj)
+                              (let ((inner (p-box-value obj)))
+                                (or (hash-table-p inner)
+                                    (and (vectorp inner) (not (stringp inner)))
+                                    (functionp inner)
+                                    (p-box-p inner)
+                                    (p-typeglob-p inner))))))))
+          ;; Object exception - preserve for $@
+          (error 'p-exception :object (car args))
+          ;; String exception
+          (let ((msg (apply #'p-string-concat args)))
+            ;; "~A", never (error msg): the message is DATA, and `(error msg)`
+            ;; would make it a format CONTROL string.  Every perl die message can
+            ;; carry a `~` -- the drop form (s435) embeds arbitrary user SOURCE
+            ;; TEXT, so `f() = ($x =~ /b/)` fed `~ ` to the format engine and
+            ;; raised an untrappable sb-format:format-error that killed the whole
+            ;; file instead of setting $@.  It is latent for the runtime's own
+            ;; callers too -- several build their message from user data (a method
+            ;; name, a module name) via an inner (format nil ...), and a `~` in
+            ;; THAT data lands here the same way.
+            ;;
+            ;; LOC is the explicit ` at FILE line N` codegen attaches to a user
+            ;; `die`; when there is none this is an INTERNAL runtime die
+            ;; (`Illegal division by zero`, `Can't "last" outside a loop block`,
+            ;; …) and perl gives it the location of the statement that was
+            ;; running — which is what the location register holds (task #1240).
+            ;; Before that register existed such a die printed with NO location
+            ;; when uncaught and with the placeholder `(eval 0) line 0.` when
+            ;; caught.  The newline test comes FIRST because it applies to both:
+            ;; a message ending in "\n" never gets a location, whichever it is.
+            (let ((where (or loc (%p-loc-string))))
+              (cond
+                ;; Message ends in newline: Perl does NOT append a location.
+                ((and (> (length msg) 0)
+                      (char= (char msg (1- (length msg))) #\Newline))
+                 (%p-die-error "~A" msg))
+                ;; No location recorded — the pre-#1240 answer, kept BYTE for
+                ;; byte (the empty message included), so a program compiled
+                ;; without `line-track` behaves exactly as it did.
+                ((null where) (%p-die-error "~A" msg))
+                ;; Empty die message: Perl uses "Died".
+                ((string= msg "") (%p-die-error "Died at ~A.~%" where))
+                (t (%p-die-error "~A at ~A.~%" msg where)))))))))
 
 ;;; Forward declarations for p-do (both defined later in this file)
 (declaim (ftype function p-eval %p-eval-1))
@@ -14688,6 +14742,15 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; the identity on a string, a number and a reference, so nothing else
         ;; moves.
         (s (to-string (p-scalar string))))
+    ;; $@ IS CLEARED ON THE WAY IN, not only on the way out (perl's
+    ;; CLEAR_ERRSV in pp_entereval/pp_entertry).  So the eval's own body — and
+    ;; anything it calls — reads "" and can never see the PREVIOUS eval's
+    ;; error, which is what makes `eval { ... die ... }` nestable and what
+    ;; `die` with no arguments depends on (%p-die-reuse-eval-error).  Probed
+    ;; 5.40.3: `eval { die "x\n" }; eval { print $@ }` prints nothing, in the
+    ;; block form, the string form, and from a sub CALLED inside the eval.
+    ;; p-try has done this since #340; p-eval-block and this had not.
+    (box-set $@ "")
     ;; eval undef / eval "" -> nil (undef), $@ = ""
     (when (string= s "")
       (box-set $@ "")
@@ -14845,9 +14908,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; read the die site by then (%p-caught-perl-value runs inside the branch,
   ;; the restore after it).  Without this, everything after a caught die would
   ;; report the file the die came from.
+  ;;
+  ;; $@ IS CLEARED ON THE WAY IN as well as on the way out (perl's CLEAR_ERRSV
+  ;; in pp_entertry), so the body — and anything it calls — reads "" and can
+  ;; never see the PREVIOUS eval's error.  `die` with no arguments reuses $@
+  ;; (%p-die-reuse-eval-error), so without the entry clear a bare `die` inside
+  ;; an eval propagated a STALE error: probed 5.40.3, `eval { die "x\n" };
+  ;; eval { die }` leaves "Died", not "x ...propagated".  p-try has cleared at
+  ;; entry since #340 — this is that sibling's missing half.
   `(p-loc-save
     (handler-case
-        (prog1 (%p-leavesub (let ((|$^S| 1)) (catch :p-return ,@body)))
+        (prog1 (%p-leavesub (let ((|$^S| 1))
+                              (box-set $@ "")
+                              (catch :p-return ,@body)))
           (box-set $@ ""))
       (error (e)
         (box-set $@ (%p-caught-perl-value e))

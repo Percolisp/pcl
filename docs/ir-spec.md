@@ -2080,17 +2080,36 @@ from is §6.3b.
 `eval { body }` compiles to `p-eval-block`:
 1. installs its own `:p-return` catch (Perl: `return` inside `eval{}`
    exits the eval, not the enclosing sub);
-2. runs the body; on success sets `$@` to `""` and yields the body value
+2. **sets `$@` to `""` BEFORE running the body** (normative, s473t6b) —
+   perl's `CLEAR_ERRSV` in `pp_entertry`/`pp_entereval`, so the body, and
+   anything it calls, can never see the *previous* eval's error;
+3. runs the body; on success sets `$@` to `""` and yields the body value
    **after applying the frame leave rule to it** — an eval is a frame
    (`pp_leaveeval`), so the value is a copy, exactly as at a sub's exit;
    see §5.3;
-3. on `p-exception` sets `$@` to the payload (string or object) and
+4. on `p-exception` sets `$@` to the payload (string or object) and
    yields `nil`; any other host error is stringified into `$@`.
 
-A string `eval` is a frame on the same terms.  A `do { }` block is **not**:
-it has no return frame and no copy, so `\do { $x }` *is* `\$x`.
+A string `eval` is a frame on the same terms, and clears `$@` on the way in
+too.  A `do { }` block is **not** a frame: it has no return frame and no copy,
+so `\do { $x }` *is* `\$x`.
 
-`$@` is an ordinary global box. `die` with no arguments re-raises `$@`.
+`$@` is an ordinary global box.
+
+**`die` WITH NO ARGUMENTS — or one that makes an empty string — REUSES `$@`**
+(normative, s473t6b; perldoc -f die), and the entry clear above is what makes
+that well-defined:
+
+| `$@` | what is thrown |
+|---|---|
+| a reference whose class has `PROPAGATE` | `$@->PROPAGATE(__FILE__, __LINE__)` **replaces** it, and that is thrown |
+| any other reference | the reference, **unchanged**, with no location tail |
+| a non-empty string | `$@` . `"\t...propagated at FILE line N.\n"` (the string's own newline is kept, the tail follows it) |
+| empty | the string `"Died"`, which then takes the ordinary location tail |
+
+`warn` with no arguments is the same rule with `"\t...caught at"` and a
+default of `"Warning: something's wrong"`.
+
 `$SIG{__WARN__}` fires on `warn`; `$SIG{__DIE__}` does **not** fire
 (documented divergence).
 

@@ -14,7 +14,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 57;
+use Test::More tests => 67;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -162,8 +162,8 @@ sub run_pl {
 }
 
 SKIP: {
-    skip "pl2cl not found", 42 unless -x $pl2cl;
-    skip "sbcl not found",  42 unless `which sbcl 2>/dev/null`;
+    skip "pl2cl not found", 52 unless -x $pl2cl;
+    skip "sbcl not found",  52 unless `which sbcl 2>/dev/null`;
 
     # Test 1: basic arithmetic
     {
@@ -542,4 +542,73 @@ SKIP: {
     like($out, qr/^\[1 2 3\]$/m, 'eval BLOCK keeps the caller LIST context (the negative)');
 }
 
+
+# ---------------------------------------------------------------------------
+# `die` WITH NO ARGUMENTS REUSES $@, and $@ IS CLEARED ON THE WAY INTO AN EVAL
+# (s473t6b).  The two are ONE fact: the reuse is defined in terms of $@, so a
+# stale $@ makes a bare `die` propagate the wrong error — which is exactly what
+# the negatives below caught when only the first half was in.  Every
+# expectation is the live perl 5.40.3 answer (the round's probes/p8.pl and
+# probes/p9.pl, byte-compared).
+{
+    my $out = run_pl(<<'PL');
+{ package Error; sub PROPAGATE { bless [$_[0]->[0]], "Out" } }
+eval { eval { die bless [7], "Error" }; die if $@ };
+print "A:", ref($@), "\n";
+eval { eval { die [5] }; die if $@ };
+print "B:", ref($@), ":", $@->[0], "\n";
+eval { $@ = 100; die };
+print "C:", ($@ =~ s/\n/|/gr), "\n";
+eval { eval { die "Horribly\n" }; die if $@ };
+print "D:", ($@ =~ s/\n/|/gr), "\n";
+PL
+    like($out, qr/^A:Out$/m,
+         'die with no args: $@->PROPAGATE replaces the object');
+    like($out, qr/^B:ARRAY:5$/m,
+         'die with no args: a reference with no PROPAGATE is re-thrown unchanged');
+    like($out, qr/^C:100\t\.\.\.propagated at \S+ line \d+\.\|$/m,
+         'die with no args: a non-PV $@ gets "\t...propagated at F line N."');
+    like($out, qr/^D:Horribly\|\t\.\.\.propagated at \S+ line \d+\.\|$/m,
+         'die with no args: a newline-terminated $@ keeps its newline');
+}
+
+{
+    # The NEGATIVES — what the reuse must NOT do.  `die ""` inside an eval is
+    # "Died", because ENTERING the eval cleared $@; an ARGUMENT die never
+    # propagates; and a bare `die` in a fresh eval sees an empty $@, so what
+    # the enclosing eval finally propagates is a STRING, not the inner ref.
+    my $out = run_pl(<<'PL');
+eval { die "noline" };
+eval { die "" };
+print "E:", ($@ =~ s/\n/|/gr), "\n";
+eval { die "first\n" };
+eval { die "second\n" };
+print "F:", ($@ =~ s/\n/|/gr), "\n";
+eval { eval { die [9] }; eval { die }; die };
+print "G:", (ref($@) || "notref"), "\n";
+PL
+    like($out, qr/^E:Died at \S+ line \d+\.\|$/m,
+         'die "" inside an eval is "Died" - the entry clear, not a propagation');
+    like($out, qr/^F:second\|$/m, 'an ARGUMENT die never propagates');
+    like($out, qr/^G:notref$/m,
+         'a bare die in a fresh eval sees an EMPTY $@, so the outer one propagates a STRING');
+}
+
+{
+    # $@ is cleared on ENTRY to an eval — block form, string form, and as seen
+    # by a sub CALLED inside the eval.  perl's CLEAR_ERRSV in pp_entertry /
+    # pp_entereval; p-try has done it since #340 and these two had not.
+    my $out = run_pl(<<'PL');
+sub peek { return "[" . ($@ =~ s/\n/|/gr) . "]" }
+eval { die "first\n" };
+eval { print "H:[", ($@ =~ s/\n/|/gr), "]\n" };
+eval { die "second\n" };
+eval q{ print "I:[", ($@ =~ s/\n/|/gr), "]\n" };
+eval { die "third\n" };
+eval { print "J:", peek(), "\n" };
+PL
+    like($out, qr/^H:\[\]$/m, '$@ is "" inside an eval BLOCK');
+    like($out, qr/^I:\[\]$/m, '$@ is "" inside a STRING eval');
+    like($out, qr/^J:\[\]$/m, '$@ is "" in a sub called from inside an eval');
+}
 }
