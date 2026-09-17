@@ -1347,9 +1347,11 @@ comp/use.t	65	ok	not ok	no 5.039003	#1689
 comp/use.t	61	ok	not ok	no 5.040002	#1689
 comp/use.t	73	ok	not ok	no 5.040003	#1689
 comp/use.t	30	ok	not ok	no strict refs allows ver decl to enable subs	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
+comp/use.t	29	ok	not ok	no strict refs allows ver decl to enable subs	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
 comp/use.t	27	ok	not ok	no strict subs allows ver decl to enable refs	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
 comp/use.t	28	ok	not ok	no strict subs allows ver decl to enable vars	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
 comp/use.t	31	ok	not ok	no strict vars allows ver decl to enable refs	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
+comp/use.t	32	ok	not ok	no strict vars allows ver decl to enable subs	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
 comp/use.t	71	ok	not ok	no v4.40.3	#1689
 comp/use.t	67	ok	not ok	no v5.39.3	#1689
 comp/use.t	63	ok	not ok	no v5.40.2	#1689
@@ -1926,7 +1928,6 @@ io/errnosig.t	1	ok	not ok	Signal does not modify $!	#1710
 io/inplace.t	7	ok	not ok	die shouldn't touch file	#1710
 io/inplace.t	8	ok	not ok	last should update file	#1710
 io/iofile.t	3	ok	not ok	IO::File now loaded	#1710
-io/iofile.t	2	ok	not ok	STDOUT->autoflush(1) lives	#1710
 io/iprefix.t	2	ok	not ok	backup file contents stay the same	#1710
 io/iprefix.t	1	ok	not ok	file contents properly replaced	#1710
 io/layers.t	0	ok*	(no TAP)	*summary*	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
@@ -1959,6 +1960,7 @@ io/open.t	183	ok	not ok	buffering delays writing to scalar (simple open)	#1710
 io/open.t	170	ok	not ok	check errno	#1710
 io/open.t	165	ok	not ok	check multiple arguments to unlink	#1710
 io/open.t	155	ok	not ok	chmod fails with \0 in name	#1710
+io/open.t	157	ok	not ok	chmod fails with \0 in name (overload)	#1710
 io/open.t	9	ok	not ok	die message correct	#1710
 io/open.t	159	ok	not ok	glob fails with \0 in name	#1710
 io/open.t	161	ok	not ok	glob fails with \0 in name (overload)	#1710
@@ -1969,6 +1971,7 @@ io/open.t	179	ok	not ok	nothing changes its mtime	#1710
 io/open.t	177	ok	not ok	nothing removed the temp file	#1710
 io/open.t	138	ok	not ok	open m test	#1710
 io/open.t	151	ok	not ok	open with nul in pathnames since 5.18 [perl \#117265]	#1710
+io/open.t	153	ok	not ok	open with nul in pathnames since 5.18 [perl \#117265] (overload)	#1710
 io/open.t	163	ok	not ok	open with nul with no warnings syscalls	#1710
 io/open.t	60	ok	not ok	proper die message	#1710
 io/open.t	123	ok	not ok	right error	#1710
@@ -1999,7 +2002,6 @@ io/pipe.t	0	(none)	renumbered	*summary*	#1710
 io/pipe.t	10	ok	(missing)	[]	#1710
 io/pipe.t	27	ok	not ok	but we did get the exception from die	#1710
 io/pipe.t	25	ok	not ok	child reaped if piped program cannot be executed	#1710
-io/pipe.t	16	ok	not ok	close failure for... umm, something	#1710
 io/pipe.t	14	ok	not ok	errno	#1710
 io/pipe.t	18	ok	not ok	errno	#1710
 io/pipe.t	21	ok	not ok	errno	#1710
@@ -2428,7 +2430,6 @@ op/closure.t	270	ok	not ok	[at t/op/closure.t line 653]
 op/closure.t	271	ok	not ok	don't copy a stale lexical; create a fresh undef one instead
 op/context.t	8	ok	not ok	context of { foo(); BEGIN {} }
 op/coreamp.t	63	ok	not ok [PCL #36]	&CORE::close with no args
-op/coreamp.t	67	ok	not ok [PCL #40]	&CORE::closedir
 op/coreamp.t	68	ok	not ok [PCL #41]	&CORE::closedir in list context
 op/coreamp.t	89	ok	not ok [PCL #48]	&CORE::die
 op/coreamp.t	127	ok	(missing)	&CORE::fileno	#1577
@@ -2462,12 +2463,13 @@ op/coreamp.t	39	ok	not ok [PCL #20]	&bless in list context
 op/coreamp.t	40	ok	not ok [PCL #21]	&bless with one arg
 op/coreamp.t	36	ok	(missing)	&bless with too few args	#1577
 op/coreamp.t	37	ok	not ok [PCL #18]	&bless with too many args
-op/coreamp.t	42	ok	not ok [PCL #23]	&break
 op/coreamp.t	41	ok	not ok [PCL #22]	&break with too many args
 op/coreamp.t	44	ok	not ok [PCL #25]	&caller
 op/coreamp.t	46	ok	(missing)	&caller in list context	#1577
 op/coreamp.t	45	ok	not ok [PCL #26]	&caller(1)
 op/coreamp.t	47	ok	(missing)	&caller(1) in list context	#1577
+op/coreamp.t	43	ok	not ok [PCL #28]	&caller with too many args	#1577
+op/coreamp.t	62	ok	not ok [PCL #37]	effect of &CORE::close	#1577
 op/coreamp.t	49	ok	(missing)	&chmod	#1577
 op/coreamp.t	50	ok	(missing)	&chmod in list context	#1577
 op/coreamp.t	48	ok	(missing)	&chmod with no args	#1577
@@ -2930,6 +2932,7 @@ op/coreamp.t	300	ok	(missing)	writing to &pos without args	#1577
 op/coreamp.t	302	ok	(missing)	writing to &pos without args	#1577
 op/coresubs.t	19	ok	(missing)	defined &{'CORE::__CLASS__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	1	ok	not ok	defined &{'CORE::__FILE__'}	#1577
+op/coresubs.t	2	ok	not ok	prototype of &CORE::__FILE__	#1577
 op/coresubs.t	7	ok	(missing)	defined &{'CORE::__LINE__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	13	ok	(missing)	defined &{'CORE::__PACKAGE__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	25	ok	(missing)	defined &{'CORE::__SUB__'}	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
@@ -3181,7 +3184,6 @@ op/coresubs.t	491	ok	(missing)	inlinability of CORE::ioctl with parens	NS:Readou
 op/coresubs.t	492	ok	(missing)	inlinability of CORE::ioctl without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	497	ok	(missing)	inlinability of CORE::join with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	498	ok	(missing)	inlinability of CORE::join without parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
-op/coresubs.t	501	ok	(missing)	inlinability of CORE::keys with parens	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	6	ok	(missing)	inlined CORE::__FILE__ with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	12	ok	(missing)	inlined CORE::__LINE__ with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
 op/coresubs.t	18	ok	(missing)	inlined CORE::__PACKAGE__ with too many args	NS:Readouts of perl's own internals -- the file aborts at `use B` ("Can't locate loadable object for module"); B is an XS module
@@ -4328,7 +4330,7 @@ op/hexfp.t	98	ok	not ok	[at t/op/hexfp.t line 225]
 op/hexfp.t	99	ok	not ok	[at t/op/hexfp.t line 226]
 op/hexfp.t	104	ok	not ok	[at t/op/hexfp.t line 240]
 op/inc.t	0	(none)	rows-unstable	*rows-unstable* (s468be, task #1082): t/op/inc.t:112-127 iterates `foreach (keys %inc)` / `keys %dec` and interpolates the (incremented) key into the description, so perl emits "key '2' incremented correctly" / "key '0' decremented correctly" in ITS hash order while PCL emits them in its own; which of the four the description aligner cannot pair is a per-run draw.  Measured on ONE tree, THREE draws: the s465az bless has row 22 "key '0' decremented correctly" unpaired, s466 validate2 and the s468be serial run have row 17 "key '2' incremented correctly" (36 diverging rows), and the s468be bless run has BOTH (40 rows).  The COUNTS are stable (62 ok / 13 not ok), so the count snapshot and the shortfall still gate it.
-op/inccode-tie.t	0	ok*	(no TAP)	PCL produced no TAP output (aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. )	#1587
+op/inccode-tie.t	0	ok*	(no TAP)	*summary*	#1587 | s488a: the ROWKEY was the message TEXT, but the runner projects a test#-0 non-extra row to `*summary*` (PclTapAlign), so this row read as one GONE + one NEW on every run.  Counts unchanged (0/0), same abort: PCL produced no TAP output (aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. )
 op/inccode.t	17	ok	not ok	%INC sees Bar.pm	#1815 — @INC HOOKS are not implemented: `%p-inc-dir-file` calls `namestring` on every @INC element, so a CODE ref / ARRAY ref / blessed object there leaks a raw SBCL type error ("The value #<function …> is not of type (or string pathname synonym-stream file-stream)") instead of being CALLED
 op/inccode.t	21	ok	not ok	%INC sees Bar1.pm	#1815 — @INC HOOKS are not implemented: `%p-inc-dir-file` calls `namestring` on every @INC element, so a CODE ref / ARRAY ref / blessed object there leaks a raw SBCL type error ("The value #<function …> is not of type (or string pathname synonym-stream file-stream)") instead of being CALLED
 op/inccode.t	3	ok	not ok	%INC sees Foo.pm	#1815 — @INC HOOKS are not implemented: `%p-inc-dir-file` calls `namestring` on every @INC element, so a CODE ref / ARRAY ref / blessed object there leaks a raw SBCL type error ("The value #<function …> is not of type (or string pathname synonym-stream file-stream)") instead of being CALLED
@@ -10492,7 +10494,9 @@ run/switchI.t	4	ok	not ok	-I with colons	#1708
 run/switchI.t	1	ok	not ok	Identified entry in @INC	#1702
 run/switchI.t	2	ok	not ok	Identified entry in @INC with double colons	#1702
 run/switchM.t	1	ok	not ok	Ensure -Irun/flib produces correct filename in warnings	#1708
+run/switchM.t	4	ok	not ok	Ensure -Irun/flib loads pmc	#1708
 run/switchM.t	2	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings	#1708
+run/switchM.t	5	ok	not ok	Ensure -Irun/flib/ loads pmc	#1708
 run/switchM.t	3	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings with space after -M	#1708
 run/switcha.t	2	ok	(missing)	testing split of string 'not ok 3'	#1702
 run/switcha.t	1	ok	not ok	testing split of string 'not ok'	#1702

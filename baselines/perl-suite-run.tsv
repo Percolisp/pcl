@@ -1,4 +1,54 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s488a (2026-09-17, Opus) -- TWELVE rows spliced by hand, and the POINT of the
+#   batch is the ATTRIBUTION (task #1834): every file this block had been
+#   reporting as a mover since s473t5d (2026-09-13) is now tied to ONE COMMIT,
+#   measured OLD at that commit's immediate PARENT and NEW at the commit itself
+#   on `git archive` extractions with `--jobs 1` (the runner's own serial
+#   re-run agreeing), adjacency verified with `git rev-list --count A..B` = 1.
+#   Each row's own cause is in its sig column.  The commits:
+#     0ea8d7e1  s473h m7  #1249(7) a BAREWORD ALONE AS A STATEMENT is perl's
+#               string constant, not a call ->  op/gv.t 135/56 DIFF -> TIMEOUT
+#               67/24 (#1651's hang), uni/gv.t 59/29 -> TIMEOUT 0/0,
+#               comp/use.t 42/45 -> 40/47
+#     ec8ac8c0  s473u m2  #1545 one transpile server per test process
+#                         ->  run/switchM.t 2/3 -> 0/5 (#1708's file)
+#     6aa2f358  s473e m1  #1161/#1244(a) a `continue` block joins the
+#               dynamic-exit frame ->  run/fresh_perl.t 60/31 -> 61/30, and its
+#               perl-suite-expected-rows.tsv registration (the STALE verdict)
+#               left that file by EDIT in this commit
+#     e2536f81  s473d m3  #1248(b) `**` returns an NV wherever perl is not sure
+#               of an integer ->  op/inc.t 62/13 -> 67/26, shortfall 18 -> 0
+#     4bdde171  s473w m4  #1507 `use overload` is a compile-phase member
+#                         ->  io/open.t 154/34 -> 152/36
+#     5fe48176  s473f m2  #1307/#1246 close's FALSE is a defined ""
+#                         ->  io/pipe.t 18/14 -> 19/13
+#     a31369fc  s473f m5  #1074 a FILEHANDLE is an object of its handle class
+#                         ->  io/iofile.t 1/2 -> 2/1
+#     319d0f4d  s483a m1  #1592 `${$coderef}` is perl's fatal (the CODE
+#               exclusion) ->  op/inccode.t 13/28 -> 13/26, shortfall 48 -> 50
+#     4af36604  s484a m3  #1586 prototype("CORE::NAME") answers perl's own
+#               string ->  op/coreamp.t 9/46 -> 9/58 (shortfall 723 -> 711),
+#               op/coresubs.t 1/1 -> 0/2
+#   FOUR of them are a fix EXPOSING what had been passing on nothing, and the
+#   rows fail honestly now: comp/use.t's two `ver decl enables subs` rows were
+#   passing on an undefined-sub death; io/open.t's two `(overload)` rows were
+#   passing because the `""` handler was not yet installed, so the path had no
+#   NUL in it (they join #1710's NUL family).
+#   THREE are NOT behaviour moves and are recorded as such:
+#     run/switches.t  shortfall 11 -> 0 is BOOKKEEPING: the s473t5d splice wrote
+#       11 beside its own verdict row of 28/112 = all 140 of perl's rows, i.e.
+#       zero short.  Re-measured 0 here and on a f6b56feb extraction.
+#     op/inccode-tie.t  its perl-suite-fails.tsv ROWKEY was the message TEXT
+#       where the runner projects a test#-0 non-extra row to `*summary*`, so the
+#       row read as one GONE + one NEW on every run.  Counts unchanged (0/0).
+#     io/pvbm.t  NOT SPLICED -- the known flapper (23/5 run alone, 20/8 inside a
+#       batch; the ninth recording).  The runner's THREE-WAY "rows unstable?"
+#       line is a LABEL, not an opt-out: `*rows-unstable*` gates only the ROW
+#       check, so a file whose COUNT flaps keeps reporting here.  Task #1851
+#       proposes the one mechanism; nothing is blessed by number.
+#   op/coreamp.t and op/coresubs.t are CAPPED files (only their first 500
+#   diverging rows reach the per-test log), so a row entering the log pushes
+#   another out: the +2/-2 in their ROW DIFF is the cap, not behaviour.
 # s484d (2026-09-14, Opus) -- NINE rows spliced by hand.  The round adds four
 #   missing perl-tests/t/test.pl helpers (#1652 run_multiple_progs, #1585
 #   _create_runperl, #1584 todo_skip, #1590's unlink_all/unlink_tempfiles/
@@ -120,6 +170,12 @@
 #   runs and reproduced on the base extraction, io/iofile.t (+1) and io/pipe.t
 #   (+1).  A row I did not move is not mine to re-bless; #1710 and #1708 name
 #   the two stable ones.
+#   RESOLVED s488a (2026-09-17): each of those seventeen is attributed to a
+#   single commit now (the s488a block at the head of this file) and spliced --
+#   except uni/method.t, which has been quiet on its own since s473t5f's #1736
+#   (it reads 56/6 = its snapshot row), and the four rows-unstable files, of
+#   which only io/pvbm.t still moves.  "NOT MINE" was right about WHO; the
+#   missing half was WHICH COMMIT, and that is what this pass measured.
 # s473t5e (2026-09-13, Opus) -- FIVE rows spliced by hand, `--jobs 1`, and the
 #   #366 serial re-run agrees on every one ("REAL MOVE (both runs agree)"):
 #     re/reg_posixcc.t        1544/7646 -> 1544/1016.  MINE: #1501 round 6's
@@ -1568,7 +1624,7 @@ comp/require.t	1750	0	910	837	DIFF	s469bf: PRE-EXISTING and multi-step, NOT a ro
 comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0
 comp/term.t	23	0	23	0	OK		0
 comp/uproto.t	32	0	13	21	DIFF		0
-comp/use.t	87	0	42	45	DIFF	undef-fn:main::pl-true	0
+comp/use.t	87	0	40	47	DIFF	s488a: 42/45 -> 40/47 at 0ea8d7e1 (s473h member 7, #1249(7): a BAREWORD ALONE AS A STATEMENT is perl's string constant, not a call).  comp/use.t:157 and :163 are `eval 'no strict "refs"; use 5.012; fancy_bareword'` + `ok $@`: perl dies `Bareword "fancy_bareword" not allowed while "strict subs" in use` because the ver decl re-enables strict subs (probed vs perl 5.40.3), PCL answers the STRING and $@ is empty, so both rows fail HONESTLY where they were passing on an undefined-sub death -- which is also why the file's `undef-fn:main::pl-true` signature is gone.  Cause: NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)	0
 comp/utf.t	4216	0	24	4192	DIFF	s470bv: #1115 (already 24/4192 at a3d6d8e, 12/4204 at 614c6af)	0
 io/argv.t	52	1	27	26	DIFF		0
 io/binmode.t	9	0	9	0	OK		0
@@ -1587,19 +1643,19 @@ io/fflush.t	7	0	7	0	OK		0
 io/fs.t	61	0	59	2	DIFF		0
 io/getcwd.t	0	0	0	0	NOTAP		0
 io/inplace.t	8	0	6	2	DIFF		0
-io/iofile.t	3	0	1	2	DIFF		0
+io/iofile.t	3	0	2	1	DIFF	s488a: 1/2 -> 2/1 at a31369fc (s473f member 5, #1074: a FILEHANDLE is an object of its handle class, with no `use`) -- "STDOUT->autoflush(1) lives" passes; the residue is "IO::File now loaded" (#1710)	0
 io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/nargv.t	7	0	11	2	DIFF		0
-io/open.t	188	0	154	34	DIFF		0
+io/open.t	188	0	152	36	DIFF	s488a: 154/34 -> 152/36 at 4bdde171 (s473w member 4, #1507: `use overload` is a compile-phase member -- perl's `use` is a BEGIN).  io/open.t builds its NUL-path object at line 443 and declares `use overload '""'` at line 523, so before the fix the object stringified as `OverloadTest=SCALAR(0x..)` and open/chmod failed on a path that did not exist -- the two rows passed for the wrong reason.  They now really stringify to "$temp\0.overload" and join #1710's NUL-in-a-pathname family (PCL accepts a NUL where perl 5.18+ refuses it); their `glob` twin was already failing	0
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 io/perlio_fail.t	15	0	11	4	DIFF	s471a: 6/9 -> 11/4, PRE-EXISTING and MEASURED, not this batch -- a `git archive ed302e13` extraction of main gives the SAME 11/4 with the same five fixed rows (serial re-run agrees on both trees), so the blessed row was stale, not moved.  The five rows left baselines/perl-suite-fails.tsv by EDIT in the same commit; the four `Got warning` rows still fail (PCL emits no warnings-gated diagnostic, #221).	0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	10	0	OK		0
-io/pipe.t	27	0	18	14	DIFF		0
+io/pipe.t	27	0	19	13	DIFF	s488a: 18/14 -> 19/13 at 5fe48176 (s473f member 2, #1307/#1246: close's FALSE is a defined "" and closedir's is undef) -- "close failure for... umm, something" passes; residue #1710	0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	23	5	DIFF	s473 (Fable): 20/8 -> 23/5 on d348dcea (serial; 22/6 on the 637fc58e extraction): the 3 FIXED rows are stat/lstat/truncate(PVBM ref) -- #1043 (s470bx, stat/lstat answer their context) for the last one; the known pvbm flapper (DECIDED s437/s438) reads 23/5 alone, the number memory records	0
 io/read.t	2	0	2	0	OK		0
@@ -1718,8 +1774,8 @@ op/concat2.t	4	0	4	0	OK		0
 op/cond.t	5	0	4	1	XDIFF	reaped 1 orphan(s) | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)	0
 op/const-optree.t	148	0	90	58	XDIFF	not-supported.md §Readouts of perl's own internals -> "Constant-folding / inlinability and the :method attribute readout" (53 of 58 rows: 28 "… is/is not inlinable", 25 "… has (no) :method attribute" — both are diagnostics ABOUT an optree PCL does not build) AND §Error compatibility for invalid Perl input / CLAUDE.md §9 (the other 5: "… now throws exception (RT 134138)", where perl REJECTS `sub () { $x }` for a lexical modified elsewhere and PCL compiles it). REGISTERED s408, after #337 fixed the 4 "retval of my sub …" rows that were the file's real fix target and kept it UNEXPLAINED — a fresh per-row read of all 58 was the precondition the s399 note set.	0
 op/context.t	8	0	7	1	DIFF		0
-op/coreamp.t	778	0	9	46	DIFF	undef-fn:main::pl-__FILE__; aborted-forms:15: Undefined subroutine &File::Spec::Functions called	4
-op/coresubs.t	1109	0	1	1	DIFF	s473t4: TRANSPILE-FAIL 0/0 -> DIFF 1/1 -- #1501's `state`-in-inner-block fix (a `state $classcount` inside an `if` no longer refuses the whole file); the residue is `use B`, an XS module, which aborts 2 forms and leaves 1107 of perl's 1109 rows unproduced. Emission A/B vs main 8ab11c15: base TRANSPILE-FAILs with "Parser2 TODO: state $classcount in named sub (string eval)", mine emits 26,507 bytes. #366 serial re-run agrees (parallel DIFF 1/1, serial DIFF 1/1) | aborted-forms:2: Can't locate loadable object for module this module in @INC	0
+op/coreamp.t	778	0	9	58	DIFF	s488a: 9/46 -> 9/58, shortfall 723 -> 711, aborted forms 15 -> 18, at 4af36604 (s484a member 3, #1586: prototype("CORE::NAME") answers perl's own string and an unknown keyword throws), measured 9/46 at its parent 8b1ccf3d.  12 rows the file never produced are PRODUCED and fail honestly (#1577).  Its 501 logged rows are the runner's 500-row CAP, so two rows left the log as two entered it -- a cap artifact, not a behaviour change | undef-fn:main::pl-__FILE__; aborted-forms:18: Undefined subroutine &File::Spec::Functions called	4
+op/coresubs.t	1109	0	0	2	DIFF	s473t4: TRANSPILE-FAIL 0/0 -> DIFF 1/1 -- #1501's `state`-in-inner-block fix (a `state $classcount` inside an `if` no longer refuses the whole file); the residue is `use B`, an XS module, which aborts 2 forms and leaves 1107 of perl's 1109 rows unproduced. Emission A/B vs main 8ab11c15: base TRANSPILE-FAILs with "Parser2 TODO: state $classcount in named sub (string eval)", mine emits 26,507 bytes. #366 serial re-run agrees (parallel DIFF 1/1, serial DIFF 1/1)  s488a: 1/1 -> 0/2 at 4af36604 (s484a member 3, #1586), measured 1/1 at its parent 8b1ccf3d: row 2 "prototype of &CORE::__FILE__" now fails too, so the file's two produced rows both fail.  The residue is still `use B` (an XS module).  Its 500 logged rows are the runner's CAP, so "inlinability of CORE::keys with parens" (row 501) left the log when row 2 entered it | aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/cproto.t	254	0	254	0	OK		0
 op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).	0
 op/current_sub.t	22	0	8	3	XDIFF	aborted-forms:3: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)	0
@@ -1763,7 +1819,7 @@ op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is und
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-op/gv.t	304	0	135	56	DIFF	aborted-forms:4: Died at gv.t line N. ; s473 (Fable): 134/57 -> 135/56, ONE row ("Export of proxy constant as is") FIXED between the s470bi bless and fcf076f1 (measured 135/56 on the fcf076f1, 637fc58e and d348dcea trees alike); NOT bisected within the s470bj..s471b batches, said so rather than picking one	0
+op/gv.t	304	0	67	24	TIMEOUT	#1651 -- THE HANG IS ATTRIBUTED: 135/56 DIFF -> TIMEOUT 67/24 at 0ea8d7e1 (s473h member 7, #1249(7)), measured 135/56 at e66761f4 and TIMEOUT 67/24 at 0ea8d7e1 with the two commits between them DOCS ONLY; TIMEOUT again at --timeout 400 (669 s wall), so it is a hang, not the clock.  Emission byte-identical across the commit, so the move is at RUN time.  The last FLUSHED TAP row is 93 (gv.t:312) and the `runperl` child at gv.t:321 is NOT it (0 s standalone under ./runpcl and 1 s through a backtick + pclperl-for-tests), but #1850 -- PCL ignores `$|`, which perl's t/test.pl sets at its line 22 -- means a killed run loses up to one buffer, so the hang is at or AFTER gv.t:312 | timeout	0
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
@@ -1771,9 +1827,9 @@ op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagn
 op/hashwarn.t	20	0	5	15	DIFF		0
 op/heredoc.t	138	0	52	86	DIFF		0
 op/hexfp.t	125	0	111	14	DIFF		0
-op/inc.t	93	0	62	13	DIFF		0
+op/inc.t	93	0	67	26	DIFF	s488a: 62/13 -> 67/26, shortfall 18 -> 0, at e2536f81 (s473d member 3, #1248(b): `**` returns an NV wherever perl is not sure of an integer -- and that was NEVER the 64-bit boundary), measured 62/13 at its parent 9089d12a.  The file now produces all 93 of perl's rows; 13 more fail honestly and its row baseline is the hand-placed *rows-unstable* marker (#1082), so there is nothing to edit there	0
 op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
-op/inccode.t	89	0	13	28	DIFF	aborted-forms:4: The value #<function (lambda (&rest %_args) :in	0
+op/inccode.t	89	0	13	26	DIFF	s488a: 13/28 -> 13/26, shortfall 48 -> 50, at 319d0f4d (s483a member 1, #1592: `${$coderef}` is perl's fatal -- the CODE exclusion), measured 13/28 at its parent eabff00d.  Two rows change VERB from `not ok` to `(missing)` -- same rowkeys, so the fail multiset is unchanged and there is nothing to edit in the row baseline.  The file's own gap is #1815 (@INC HOOKS are not implemented)	0
 op/incfilter.t	153	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Filter::Util::Call in @INC	0
 op/index.t	415	0	104	3	DIFF	s470bv: #1221 (b25afbc; 94/13 at a3d6d8e) | aborted-forms:1: Undefined subroutine &main::formline called	0
 op/index_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
@@ -1996,7 +2052,7 @@ re/user_prop_race_thr.t	0	0	0	3	NOTAP	aborted-forms:1: This Perl not built to su
 run/cloexec.t	22	0	16	6	DIFF		0
 run/dtrace.t	0	0	0	0	NOTAP		0
 run/exit.t	17	0	14	3	DIFF		0
-run/fresh_perl.t	91	0	60	31	XDIFF	s471a: #1273 FIXED -- the file produces TAP again.  60/31, ONE row BETTER than the 3016011e bless of 59/32: `sub NewShell` is `$Shells[$#Shells++]{HOST} = $Host`, i.e. $Shells[-1]{HOST} on a 1-element array -- the SAME negative-subscript mechanism, so its perl-suite-expected-rows.tsv registration is stale and was removed in this commit.  Measured --jobs 1, re-run ALONE by the #366 serial pass, both 60/31. | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
+run/fresh_perl.t	91	0	61	30	XDIFF	s488a: 60/31 -> 61/30 at 6aa2f358 (s473e member 1, #1161/#1244(a): a `continue` block joins the dynamic-exit frame).  t/run/fresh_perl.t:524 is `sub f { my $a = 1; ...; next } my $x = "foo"; { f } continue { print $x, "\n" }` -- probed directly: at the parent c60336e6 PCL dies `Can't "next" outside a loop block`, at 6aa2f358 it prints `foo` as perl does.  Its perl-suite-expected-rows.tsv registration was STALE and was removed in this commit (which is what the runner's STALE verdict asked for)	0
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -2010,7 +2066,7 @@ run/switchF.t	2	0	0	1	DIFF		0
 run/switchF1.t	5	0	5	0	OK		0
 run/switchF2.t	5	0	5	0	OK		0
 run/switchI.t	4	0	0	4	DIFF		0
-run/switchM.t	5	0	2	3	DIFF		0
+run/switchM.t	5	0	0	5	DIFF	s488a: 2/3 -> 0/5 at ec8ac8c0 (s473u member 2, #1545: one transpile server per test process), measured 2/3 at its parent f6db155b.  The two "Ensure -Irun/flib loads pmc" rows are the file's .pmc-preference half; #1708 owns the file and had recorded this drift as PRE-EXISTING and unattributed	0
 run/switcha.t	2	0	0	1	DIFF		0
 run/switchd-78586.t	2	0	0	2	DIFF		0
 run/switchd.t	21	0	2	19	DIFF	undef-fn:main::pl-ARRAY	0
@@ -2028,7 +2084,7 @@ uni/eval.t	5	0	5	0	OK		0
 uni/fold.t	19128	104	928	232	DIFF	aborted-forms:3: Can't locate loadable object for module Storable in @INC While evaluating the form startin	0
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
 uni/greek.t	0	0	0	0	NOTAP		0
-uni/gv.t	206	0	59	29	DIFF	aborted-forms:1: Died at gv.t line N. 	0
+uni/gv.t	206	0	0	0	TIMEOUT	#1651 -- 59/29 DIFF -> TIMEOUT 0/0 at 0ea8d7e1 (s473h member 7, #1249(7)), measured 59/29 at e66761f4 and TIMEOUT 0/0 at 0ea8d7e1: op/gv.t's twin, and this one produces NO rows at all.  See op/gv.t's row for the measurement | timeout	0
 uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (go :ここ)	0
 uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0
