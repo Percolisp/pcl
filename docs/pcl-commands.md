@@ -34,7 +34,9 @@ exit codes, `die` and `END` blocks behave as the running process's.  Your
 script is compiled on its first run after an edit and cached like a module
 (`~/.pcl-cache/scripts/`), so a large script pays a pause before its first
 line once; later runs start from the cache in about 0.04 s.  `-e` code is
-not cached.
+not cached (the runtime core that every run needs is a separate cache, built
+once per runtime change — the `compiling the runtime into a cached core`
+message — and a one-liner can trigger that build too).
 
 | option | meaning |
 |---|---|

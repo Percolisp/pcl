@@ -298,7 +298,10 @@ get recompiled if used again.
 
 The script you run is cached the same way (since 2026-09-17), and a
 newly installed or updated perl simply re-makes the entries. `pcl -e`
-one-liners are not cached.
+one-liners are not cached. (The runtime core is a separate cache that
+every run needs, built once per runtime change; that is what the
+message `compiling the runtime into a cached core` is about, and a
+one-liner can trigger it too.)
 
 **The knobs.** `PCL_COMPILE_DIRS` and `PCL_NO_COMPILE_DIRS` take
 colon-separated directories, in `PERL5LIB` syntax, and say which modules are
