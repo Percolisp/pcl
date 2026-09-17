@@ -189,7 +189,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`Internals::*` C-level introspection](#internals-c-level-introspection)
 * [Readouts of perl's own internals: `B::`, `re::optimization`, `XS::APItest`](#readouts-of-perls-own-internals-b-optree-inspection-reoptimization-xsapitest)
 * [DynaLoader / XS binary extensions](#dynaloader--xs-binary-extensions)
-* [`caller()` filename and line number — DEFERRED](#caller-filename-and-line-number--deferred--see-roadmap)
+* [`caller()` fidelity — DEFERRED for now (task #233)](#caller-fidelity--deferred-for-now-task-233) — the whole family: 3-vs-4 fields, filename/line, `$0`, `#line`, frame hiding, `CORE::GLOBAL::caller`; USER 2026-09-17
 
 ### No longer limitations — kept for the record
 
@@ -323,28 +323,42 @@ typeglob slots are the fiddly remainder.
 
 ---
 
-## `caller()` filename and line number  [DEFERRED — see roadmap]
+## `caller()` fidelity  [DEFERRED for now — task #233]
 
-**Perl behaviour:** `caller()` in list context returns `($package, $filename, $line)`.
-`caller(N)` returns the Nth frame's package, file, and line.  Many modules use
-this for error reporting (`Carp`, `Exporter`, `Test::More`).
+**USER decision (2026-09-17, s488): deferred, "for now".**  The whole
+`caller()` fidelity family is one deliberate deferral, so every test row that
+fails on it carries `NS:caller() fidelity [DEFERRED, USER s488] + #233` and the
+cause census counts it as not-supported, not as a bug.  The morning-s488
+"bug queue" ruling is superseded by this entry (DECIDED `## s488`).
 
-**PCL behaviour:** `pl-caller` returns the package name correctly.  Filename is
-always `"(unknown)"` and line number is always `0`.  `caller(N)` for N > 0 is
-unreliable.
+**Perl behaviour:** `caller` with no argument returns exactly
+`($package, $filename, $line)`; `caller(N)` returns the Nth frame's eleven
+fields (package, file, line, sub name, hasargs, wantarray, evaltext, …);
+`#line` directives adjust the reported line; `*CORE::GLOBAL::caller` may be
+overridden; frames belong to the program, so `Sub::Uplevel` can hide one.
 
-**Rationale:** CL does not naturally expose Perl-compatible source location
-metadata at runtime.  Embedding per-form source locations would require either
-reader macros at transpile time or a side-table mapping CL function names to
-source positions.  `caller.t` also depends on string eval (36 tests) and
-`%::` stash manipulation — together these make the file essentially impossible
-to pass without implementing those larger features first.  No CPAN module in
-scope depends on exact `caller()` filename/line values; they use it only for
-error message strings (where "at (unknown) line 0" is acceptable) or in test
-infrastructure.
+**PCL behaviour:** the PACKAGE field is right (`docs/caller-implementation.md`
+— the mechanism that `Exporter`-style `import` depends on), and since #1240
+the location registers that `die` uses exist per frame.  The rest is the
+#233 list: `caller` with no argument returns 4 fields; the filename is the
+generated `.lisp`; `$0` is the SBCL binary; `#line` is ignored; the package
+is empty inside an anonymous sub; `caller(N)` past the top returns a count,
+not an empty list; PCL's own frames are visible to a walk (so `uplevel`
+cannot hide one); `CORE::GLOBAL::caller` overrides are not honoured.
 
-**Affected tests:** `perl-tests/caller.t` — only ~3/112 tests pass even after
-fixing the crash bugs found in session 90.
+**What it is NOT (recorded because it was asked, s488):** it does not need
+SBCL in any debug state.  `caller` reads PCL's own per-sub frame stack, the
+same bookkeeping perl keeps in its context stack, in an ordinary compiled
+run.  Most items are a store per call or nothing (the frame and the location
+registers already exist for `die` messages); `#line`, frame hiding and the
+`CORE::GLOBAL` override need design.  The deferral is a priority call
+(Target A: no per-call bookkeeping without a measured reason), not a
+feasibility one.
+
+**Affected tests:** `perl-tests/caller.t` (36 rows in the sweep baseline);
+t/op/caller.t and neighbours in the companion (43 rows); the CPAN board's
+seven `Sub-Uplevel` files (130 rows, 103 of them `03_nested_uplevels.t`).
+Listed in the README roadmap under "planned, not rejected".
 
 ---
 

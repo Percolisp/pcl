@@ -131,41 +131,41 @@ caller.t	35	@DB::args is still tied			#1450 (@DB::args is never populated) + #15
 caller.t	62	BEGIN block sees correct caller filename	undef	'virtually/op/caller.t'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	63	BEGIN block sees correct caller line	undef	'12345'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	64	BEGIN block sees correct caller package	undef	'RT129239'	NS:`caller()` filename and line number [DEFERRED] + #233
-caller.t	49	GH #15109 - callers count	'0'	'10'	#233 (caller() fidelity family)
-caller.t	48	GH #15109 - eval	'Can't locate Apack.pm in @INC (@INC contains: lib/caller/) at (eval 2) line 1. '	''	#233 (caller() fidelity family)
-caller.t	60	GH #15109 - eval okay	'Can't locate Foo.pm in @INC (@INC contains: lib/caller/) at (eval 3) line 1. '	''	#233 (caller() fidelity family)
-caller.t	50	GH #15109 level 0	undef	caller/Bpack.pm:3	#233 (caller() fidelity family)
-caller.t	51	GH #15109 level 1	undef	caller/Bpack.pm:3	#233 (caller() fidelity family)
-caller.t	52	GH #15109 level 2	undef	caller/Bpack.pm:3	#233 (caller() fidelity family)
-caller.t	53	GH #15109 level 3	undef	caller/Apack.pm:3	#233 (caller() fidelity family)
-caller.t	54	GH #15109 level 4	undef	caller/Apack.pm:3	#233 (caller() fidelity family)
-caller.t	55	GH #15109 level 5	undef	caller/Apack.pm:3	#233 (caller() fidelity family)
-caller.t	56	GH #15109 level 6	undef	\(eval \d+\):1	#233 (caller() fidelity family)
-caller.t	57	GH #15109 level 7	undef	\(eval \d+\):1	#233 (caller() fidelity family)
-caller.t	58	GH #15109 level 8	undef	\(eval \d+\):1	#233 (caller() fidelity family)
-caller.t	59	GH #15109 level 9	undef	caller\.t	#233 (caller() fidelity family)
+caller.t	49	GH #15109 - callers count	'0'	'10'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	48	GH #15109 - eval	'Can't locate Apack.pm in @INC (@INC contains: lib/caller/) at (eval 2) line 1. '	''	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	60	GH #15109 - eval okay	'Can't locate Foo.pm in @INC (@INC contains: lib/caller/) at (eval 3) line 1. '	''	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	50	GH #15109 level 0	undef	caller/Bpack.pm:3	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	51	GH #15109 level 1	undef	caller/Bpack.pm:3	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	52	GH #15109 level 2	undef	caller/Bpack.pm:3	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	53	GH #15109 level 3	undef	caller/Apack.pm:3	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	54	GH #15109 level 4	undef	caller/Apack.pm:3	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	55	GH #15109 level 5	undef	caller/Apack.pm:3	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	56	GH #15109 level 6	undef	\(eval \d+\):1	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	57	GH #15109 level 7	undef	\(eval \d+\):1	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	58	GH #15109 level 8	undef	\(eval \d+\):1	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	59	GH #15109 level 9	undef	caller\.t	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
 caller.t	38	[perl #115768] caller gets line numbers from nulled cops	undef	'253'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	39	[perl #115768] caller gets line numbers from nulled cops (2)	'20'	'2'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	1	[perl #68712] filenames after require in a BEGIN block	undef	'caller.t'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	2	all bits off via "no warnings"			#221 (NS:Warnings-gated diagnostics are absent)
-caller.t	20	anonymous subroutine name	undef	'main::__ANON__'	#233 (caller() fidelity family)
+caller.t	20	anonymous subroutine name	undef	'main::__ANON__'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
 caller.t	34	caller dies with tie @DB::args	''	^Cannot set tied \@DB::args at 	#1450 (@DB::args is never populated) + #155 (NS:tie on an ARRAY or HASH)
 caller.t	32	caller does not leak @DB::args elems when AvREAL	''	'1'	#1450 (@DB::args is never populated) + NS:`DESTROY` called by garbage collector
-caller.t	46	caller should not SEGV for eval '' stack frames	''	'main'	#233 (caller() fidelity family: the frame of a string-eval seen from a __DIE__ handler)
-caller.t	45	caller should not SEGV when the current package is undefined	'foo::doof'	'__ANON__::doof'	#233 (caller() fidelity family: undef %stash:: does not detach the package)
+caller.t	46	caller should not SEGV for eval '' stack frames	''	'main'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family: the frame of a string-eval seen from a __DIE__ handler)
+caller.t	45	caller should not SEGV when the current package is undefined	'foo::doof'	'__ANON__::doof'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family: undef %stash:: does not detach the package)
 caller.t	44	check large line numbers are preserved	'7'	'3000000000'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	3	default bits on via "use warnings"			#221 (NS:Warnings-gated diagnostics are absent)
-caller.t	26	do not skip over eval (and caller returns 10 elements)	'0'	'11'	#233 (caller() fidelity family: 4 elements not 3)
-caller.t	28	do not skip over eval even if $^P had been on at some point	'0'	'11'	#233 (caller() fidelity family: 4 elements not 3)
-caller.t	37	eval text returned by caller does not include \n;	undef	'(caller 0)[6]'	#233 (caller() fidelity family)
-caller.t	21	hasargs true with anon sub			#233 (caller() fidelity family)
-caller.t	14	hasargs true with callf()			#233 (caller() fidelity family)
-caller.t	23	hasargs true with deleted sub			#233 (caller() fidelity family)
-caller.t	41	here-docs do not gut eval text	undef	'<<END; foo END (caller 0)[6]'	#233 (caller() fidelity family)
-caller.t	42	here-docs in quote-like ops do not gut eval text	undef	's//<<END/e; foo END (caller 0)[6]'	#233 (caller() fidelity family)
+caller.t	26	do not skip over eval (and caller returns 10 elements)	'0'	'11'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family: 4 elements not 3)
+caller.t	28	do not skip over eval even if $^P had been on at some point	'0'	'11'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family: 4 elements not 3)
+caller.t	37	eval text returned by caller does not include \n;	undef	'(caller 0)[6]'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	21	hasargs true with anon sub			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	14	hasargs true with callf()			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	23	hasargs true with deleted sub			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	41	here-docs do not gut eval text	undef	'<<END; foo END (caller 0)[6]'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	42	here-docs in quote-like ops do not gut eval text	undef	's//<<END/e; foo END (caller 0)[6]'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
 caller.t	65	no freed scalars	'fwib=ARRAY(0x1)-'	'-B'	#1450 (@DB::args is never populated) + NS:`DESTROY` called by garbage collector
-caller.t	18	subroutine name in an eval ''	undef	'(eval)'	#233 (caller() fidelity family)
-caller.t	16	subroutine name in an eval {}	undef	'(eval)'	#233 (caller() fidelity family)
+caller.t	18	subroutine name in an eval ''	undef	'(eval)'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
+caller.t	16	subroutine name in an eval {}	undef	'(eval)'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family)
 caller.t	43	value from (caller 0)[9] (bitmask) works in ${^WARNING_BITS}	''	'1'	#221 (NS:Warnings-gated diagnostics are absent)
 caller.t	25	warnings match caller (all)			#221 (NS:Warnings-gated diagnostics are absent)
 caller.t	24	warnings match caller (no bits)			#221 (NS:Warnings-gated diagnostics are absent)
@@ -497,8 +497,8 @@ sprintf2.t	1519	subnormal 3e-322 %.4a 0x1.e800p-1069 got 0x1.e000p-1069	'0x1.e00
 sprintf2.t	1509	subnormal 3e-322 %a 0x1.e8p-1069 got 0x1.ep-1069	'0x1.ep-1069'	'0x1.e8p-1069'	#1476 CATALOG sprintf2.t "subnormal/denormal %a rounding"
 sprintf2.t	1513	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064	'0x1.62p-1064'	'0x1.624p-1064'	#1476 CATALOG sprintf2.t "subnormal/denormal %a rounding"
 sprintf2.t	1514	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067	'0x1.1ap-1067'	'0x1.1cp-1067'	#1476 CATALOG sprintf2.t "subnormal/denormal %a rounding"
-sub.t	13	no double free redefining anon stub	'ok'	'main::foo ok'	#233 (caller() fidelity family: (caller 0)[3] reports the CALLED glob, not the sub's CvGV name)
-sub.t	12	sub redefinition sets CvGV	'main::bar'	'main::foo'	#233 (caller() fidelity family: (caller 0)[3] reports the CALLED glob, not the sub's CvGV name)
+sub.t	13	no double free redefining anon stub	'ok'	'main::foo ok'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family: (caller 0)[3] reports the CALLED glob, not the sub's CvGV name)
+sub.t	12	sub redefinition sets CvGV	'main::bar'	'main::foo'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity family: (caller 0)[3] reports the CALLED glob, not the sub's CvGV name)
 substr.t	372		''	undef	s473t1 shortfall: substr.t stops at row 351 of 397, so row 372 is never produced (see baselines/row-shortfall.tsv)
 tr.t	224	    doesn't stringify its argument	''	'SCALAR'	#1493 CATALOG tr.t "tests 223-224"
 tr.t	307	RT #133880 illegal \N{}	''	Unknown charname	NS:Error compatibility for invalid Perl input (principle 9) CATALOG tr.t "test 257" + NS:Error compatibility for invalid Perl input
