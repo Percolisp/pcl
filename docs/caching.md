@@ -80,6 +80,30 @@ it qualifies (below), compiled once — not on every run. On disk, under
 | `<key>.deps` | the **dependency manifest**: which other modules this transpile read facts from, and their content hashes |
 | `<key>-<runtime-id>.fasl` | that text compiled to native code, for one runtime build and one SBCL |
 
+**What the key holds — and therefore what a change to it re-transpiles.**
+The `<key>` above is a hash of the module's absolute path, the cache
+*generation* string, and a **fingerprint of the compiler that will write the
+entry** (task #1119): the PCL tree's own path plus every `Pl/**.pm`'s and
+`pl2cl`'s mtime and size, *and* — since task #1843 — the toolchain those
+files run on, namely the `perl` binary first on `$PATH` and every one of
+PPI's own `.pm` files. The fasl adds a fourth component, the runtime
+identity (`cl/pcl-runtime.lisp`'s content plus the SBCL), because a fasl has
+this runtime's macro expansions baked in.
+
+PPI and perl are in there because **a transpile's output is a function of
+PPI's token stream**: PCL's tokenizer repairs are keyed on PPI 1.291's
+stream, and a PPI point release that fixes one of the bugs in
+`ppi-upstream-bugs.md` changes that stream for the shapes it touches. A
+perl *major* upgrade moves the library directories, so module paths move and
+the keys move with them; the hole was the **in-place** upgrade — a distro PPI
+update, `cpanm PPI`, a same-version perl rebuild — where nothing else in the
+key moves at all. It is mtime+size and not a version *string* for the same
+reason: `$PPI::VERSION` does not move for a patched PPI and `$]` does not move
+for a rebuilt perl. Cost, measured: ~95 extra `stat(2)`s, ~0.8 ms, paid once
+per process that loads a module and invisible in a `pcl` run's wall time
+(`pcl -e 'use JSON::PP; 1'` reads 0.360 s with and without it). The
+transpiler's own prototype memo (§`proto/`) keys on the same two inputs.
+
 **Validity is a content manifest — editing a dependency DOES re-transpile
 the dependent.** A module's own source changing was always caught by its
 mtime; since task #1261, a module's *parse* also depends on facts about
@@ -151,7 +175,10 @@ Since task #1200, each distinct eval text's transpile is kept under
 `~/.pcl-cache/evals/`, one `.lisp` + one `.deps` sidecar per entry, beside
 `modules/`. The key is exactly what decides the emission and nothing more
 — the perl text, the caller's package, the names of any captured
-lexicals, and the feature set in force, plus the compiler generation
+lexicals, and the feature set in force, plus the compiler generation and
+(since task #1843) the same **compiler fingerprint** a module's key carries,
+so an eval entry is no more shareable between two PCL trees, or across a PPI
+upgrade, than a module's is
 (`%p-eval-cache-stem`, `cl/pcl-runtime.lisp` "THE STRING-EVAL DISK CACHE").
 Validity uses the same `.deps` manifest as §2: an eval that `use`s a
 module is re-transpiled when that module's content changes. A **failing**
@@ -243,14 +270,14 @@ JSON::PP's own loader `eval`s — warms it further to 0.41 s.
   name embeds the runtime file's absolute path, so two trees never collide
   there, even with byte-identical runtime source.
 - **The module and eval caches ARE shared**, though, across every tree
-  using the same `$PCL_CACHE_DIR` that produces the same compiler
-  generation string — including two checkouts, or a checkout and an
-  install. **Open caveat, task #1119 (unfixed as of this writing):** that
-  generation string is a hand-maintained version marker, not a hash of the
-  compiler's content, so two different PCL builds sharing one generation
-  string (e.g. two branches mid-development) can read each other's cached
-  entries. Until it closes, don't point two different PCL *versions* at
-  one `$HOME`/`$PCL_CACHE_DIR` concurrently; `pcl --clear-cache` recovers.
+  using the same `$PCL_CACHE_DIR` — but only between trees that hash to the
+  same **compiler fingerprint** (§2's key: the PCL tree's path and its files,
+  plus perl and PPI). Two checkouts, or two branches mid-development, get
+  *different* keys and cannot read each other's entries (task #1119, closed;
+  before it, they could, and a gate row died calling a function that existed
+  only in the sibling tree). A checkout and an install of the same source
+  are two trees by path, so they do not share either. `pcl --cache-info`
+  prints the fingerprint this run computed.
 - **A shared, system-wide install** (root installs to `/opt/pcl`, several
   users run it) works for the module/eval caches: each user's `pcl` writes
   its own cache under their own home, never under the install prefix

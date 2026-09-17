@@ -41,7 +41,7 @@ use PCLSbcl ();    # cached_core — the saved core the #1303 rows run through
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 59;
+plan tests => 65;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -571,4 +571,73 @@ sub _write_at {
        '... while the same tree, untouched, keeps its key (the cache still works)');
     isnt($k1, $k4,
          '... and editing a Pl/*.pm changes it, without touching the generation');
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# THE TOOLCHAIN IS PART OF THE COMPILER (task #1843).
+#
+# PCL's own files are not the whole compiler: a transpile's emission is a
+# function of PPI's TOKEN STREAM and of the perl that runs pl2cl.  Neither was
+# in the key, and the hole is the IN-PLACE upgrade — a distro PPI update or
+# `cpanm PPI` leaves every module path, every module's content and every
+# Pl/*.pm untouched, so every cached .lisp stayed VALID and ran on the OLD
+# tokenizer's parse.  (A perl MAJOR upgrade moves the library directories, so
+# module paths move and the keys move with them; a same-version rebuild does
+# not, which is why a version STRING is not the fix.)
+#
+# Same method as the #1119 block above: ask the runtime for the cache PATH in
+# a fresh process per answer, with a FAKE PPI tree and a FAKE perl, because
+# neither a real PPI upgrade nor a second perl build belongs in a gate row.
+{
+    my $ppi1 = tempdir(CLEANUP => 1);   # a "PPI installation"
+    my $pdir = tempdir(CLEANUP => 1);   # a directory holding a `perl`
+    _write_at("$ppi1/PPI.pm", "package PPI; our \$VERSION = '1.291'; 1;\n");
+    mkdir "$ppi1/PPI" or die "mkdir $ppi1/PPI: $!";
+    mkdir "$ppi1/PPI/Token" or die "mkdir $ppi1/PPI/Token: $!";
+    _write_at("$ppi1/PPI/Token.pm", "package PPI::Token; 1;\n");
+    _write_at("$ppi1/PPI/Token/Word.pm", "package PPI::Token::Word; 1;\n");
+
+    my $src = write_mod('ToolSrc', "package ToolSrc;\nsub v { 1 }\n1;\n");
+    my @prefix = PCLSbcl::sbcl_prefix(runtime => "$root/cl/pcl-runtime.lisp",
+                                      env_core => 1);
+
+    # The probe names the module-search path the runtime resolves PPI through
+    # (*p-core-inc-dirs* is what a program preamble sets), so the fixture above
+    # IS the PPI this answer is about.  NO APOSTROPHE in the form — see the
+    # #1119 block's note.
+    my $key = sub {
+        my (%opt) = @_;
+        my $probe = qq{(progn (setf pcl::*p-core-inc-dirs* (list "$ppi1")) }
+                  . qq{(format t "KEY ~A~%" }
+                  . qq{(namestring (pcl::p-compute-cache-path "$src" t))))};
+        local $ENV{PATH} = $opt{path} if defined $opt{path};
+        my $out = `sbcl @prefix --eval '$probe' 2>&1`;
+        return $out =~ /^KEY (\S+)$/m ? $1 : '';
+    };
+
+    my $k1 = $key->();
+    my $k2 = $key->();
+    ok(length $k1, 'the runtime answers with a cache path for a PPI tree');
+    is($k1, $k2, 'an untouched toolchain keeps its key (the cache still works)');
+
+    # A PPI point release that fixes one of docs/ppi-upstream-bugs.md changes
+    # the token stream for the affected shapes.  mtime+size and not
+    # $PPI::VERSION: a patched PPI keeps its version number.
+    my $then = time + 100;
+    utime($then, $then, "$ppi1/PPI/Token.pm") or die "utime: $!";
+    isnt($k1, $key->(),
+         'touching a PPI/**.pm changes the key (#1843 — an in-place upgrade)');
+
+    _write_at("$ppi1/PPI/Token/Word.pm", "package PPI::Token::Word; 1; # +\n");
+    my $k3 = $key->();
+    isnt($k1, $k3, '... and so does one two directories deep (the walk recurses)');
+
+    # THE PERL BINARY.  The runtime spawns `perl` with :search t, so a
+    # different first-on-PATH perl is a different compiler — a wrapper script
+    # here, which is a real different FILE and needs no second perl build.
+    _write_at("$pdir/perl", "#!/bin/sh\nexec " . ($^X =~ m{/} ? $^X : 'perl') . " \"\$\@\"\n");
+    chmod 0755, "$pdir/perl" or die "chmod: $!";
+    my $k4 = $key->(path => "$pdir:$ENV{PATH}");
+    isnt($k3, $k4, 'a different `perl` first on PATH changes the key (#1843)');
+    is($k3, $key->(), '... and the ambient PATH still answers what it did');
 }

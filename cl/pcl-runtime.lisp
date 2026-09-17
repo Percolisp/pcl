@@ -20510,10 +20510,26 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; exactly what --cache-info is asked.
   (format t "compiler root: ~A~%"
           (let ((r (%p-compiler-root))) (if r (namestring r) "unknown")))
+  (%p-cache-info-toolchain)
   (format t "compiler stamp: ~A~%" (p-compiler-stamp))
   (format t "runtime identity: ~A~%"
           (or *pcl-runtime-identity* "unknown -- module fasls are disabled"))
   (finish-output)
+  nil)
+
+(defun %p-cache-info-toolchain ()
+  "The two NON-PCL halves of the compiler fingerprint, named (task #1843).
+   Printed because `why did my whole cache re-transpile` now has two more
+   answers — a perl upgrade and a PPI upgrade — and a stamp alone cannot say
+   which.  An input that was not found says so: the key records its ABSENCE,
+   which is a different key from the one a run that found it computes."
+  (format t "perl binary: ~A~%"
+          (or (%p-perl-on-path) "not found on $PATH -- recorded as absent"))
+  (let ((ppi (%p-ppi-files)))
+    (format t "PPI sources: ~A~%"
+            (if ppi
+                (format nil "~A (~D files)" (first ppi) (length ppi))
+                "not resolvable from this program's @INC -- recorded as absent")))
   nil)
 
 ;;; ── WHICH COMPILER WROTE THIS ENTRY (task #1119) ───────────────────────
@@ -20575,26 +20591,133 @@ buffer's fill-pointer; everything else falls back to file-length."
                   #'string< :key #'namestring)
             (list (merge-pathnames "pl2cl" root)))))
 
+;;; ── THE TOOLCHAIN IS PART OF THE COMPILER (task #1843) ─────────────────
+;;; PCL's own files are not the whole compiler.  A transpile's emission is a
+;;; function of PPI's TOKEN STREAM (the repairs in Pl/Parser.pm are keyed on
+;;; 1.291's, and a PPI point release that fixes one of docs/ppi-upstream-bugs.md
+;;; changes the stream for the affected shapes) and of the PERL that runs
+;;; pl2cl.  Neither was in the key, and the hole is the IN-PLACE upgrade: a
+;;; distro PPI update or `cpanm PPI` leaves every module PATH, every module's
+;;; CONTENT and every Pl/*.pm untouched, so every cached .lisp stayed VALID and
+;;; ran on the OLD tokenizer's parse.  (A perl MAJOR upgrade usually moves the
+;;; library directories, so module paths move and the keys move with them; a
+;;; same-version rebuild does not.)
+;;;
+;;; mtime+size, NOT a version STRING, for the reason the rest of this stamp
+;;; gives: `$PPI::VERSION` does not move for a patched PPI, and `$]` does not
+;;; move for a rebuilt perl.  ~95 stats on this box, paid once per process
+;;; that loads a module — the same order as the Pl/ walk beside it.
+;;;
+;;; WHICH perl: the one this runtime will SPAWN, i.e. the first `perl` on
+;;; $PATH, because that is what P-TRANSPILE-FILE's `:search t` execs.  WHICH
+;;; PPI: the one THIS program's @INC resolves, through P-FIND-MODULE-IN-INC —
+;;; the same resolver the manifest's `missing` re-check uses (rule 11).  That
+;;; is an approximation of the CHILD's @INC and known to be one: the child
+;;; gets these directories as `-I` (%P-TRANSPILE-INC-ARGS), so the two agree
+;;; except when a `-I` the child alone sees carries its own PPI.  It errs
+;;; towards a needless re-transpile, never towards a stale parse.
+
+(defun %p-perl-on-path ()
+  "The `perl` binary a transpile will run, as a truename: the first executable
+   named `perl` on $PATH.  NIL when there is none.
+
+   PATH and not |$^X|: that variable answers `what should a Perl PROGRAM exec`
+   and honours $PERL, while P-TRANSPILE-FILE hands `perl` to RUN-PROGRAM with
+   :SEARCH T, which is execvp's PATH walk and nothing else."
+  (let ((path (sb-posix:getenv "PATH")))
+    (when path
+      (dolist (dir (remove "" (%p-split-fields path #\: most-positive-fixnum)
+                           :test #'string=))
+        (let ((cand (concatenate 'string dir "/perl")))
+          (when (ignore-errors (sb-posix:access cand sb-posix:x-ok) t)
+            ;; The TRUENAME, so two PATH spellings of one binary (a bin/ that
+            ;; is a symlink, ~/perl5/.../bin vs a wrapper dir) give one key —
+            ;; and a WRAPPER script, which is a different file, gives another.
+            (return (or (ignore-errors
+                          (sb-ext:native-namestring
+                           (truename (%p-literal-path cand))))
+                        cand))))))))
+
+(defun %p-pm-files-under (dir acc)
+  "Push every *.pm under DIR (recursively) onto ACC, a string list, and return
+   it.  readdir(3) + lstat(2), not (DIRECTORY \"**/*.pm\"): measured on PPI's
+   94 files, the CL glob costs 3.6 ms and this 0.5 ms, because DIRECTORY takes
+   the TRUENAME of every entry it returns.  This walk needs no truename — the
+   path it produces is the one the next stat reads.
+
+   lstat, so a SYMLINKED subdirectory is not descended and a library tree with
+   a loop in it cannot make this run forever; a symlink to a .pm file is still
+   counted as a file."
+  (let ((d (ignore-errors (sb-posix:opendir dir))))
+    (when d
+      (unwind-protect
+           (loop for e = (sb-posix:readdir d)
+                 until (sb-alien:null-alien e)
+                 do (let ((n (sb-posix:dirent-name e)))
+                      (unless (or (string= n ".") (string= n ".."))
+                        (let* ((p (concatenate 'string dir "/" n))
+                               (s (ignore-errors (sb-posix:lstat p))))
+                          (cond ((null s))
+                                ((sb-posix:s-isdir (sb-posix:stat-mode s))
+                                 (setf acc (%p-pm-files-under p acc)))
+                                ((and (> (length n) 3)
+                                      (string= n ".pm" :start1 (- (length n) 3)))
+                                 (push p acc)))))))
+        (sb-posix:closedir d))))
+  acc)
+
+(defun %p-ppi-files ()
+  "PPI's own sources, sorted: the PPI.pm this program's @INC resolves plus
+   every PPI/**/*.pm beside it.  NIL when PPI cannot be located from here.
+
+   The subdirectory is derived from the RESOLVED file's own directory, not by
+   stripping `.pm` off its name: P-FIND-MODULE-IN-INC answers a `.pmc` when
+   one is there (perl's PMC preference), and PPI's tree sits beside either."
+  (let ((ppi (p-find-module-in-inc "PPI.pm")))
+    (when ppi
+      (let* ((slash (position #\/ ppi :from-end t))
+             (dir (concatenate 'string (subseq ppi 0 (1+ (or slash -1)))
+                               "PPI")))
+        (cons ppi (sort (%p-pm-files-under dir '()) #'string<))))))
+
+(defun %p-stamp-files (acc label files)
+  "Write LABEL, the COUNT of FILES and each file's path, mtime and size into
+   ACC — the compiler fingerprint's one record format.  The count is written
+   because an input that is NOT THERE must hash differently from one that is:
+   without it `PPI could not be located` and `PPI has no files` would both
+   vanish into an empty run and share a key."
+  (format acc "~C~A=~D" #\Nul label (length files))
+  (dolist (f files)
+    ;; A member is a STRING (the OS path a readdir walk produced) or a
+    ;; PATHNAME (what DIRECTORY hands %P-COMPILER-FILES back); both spell one
+    ;; OS path and sb-posix:stat wants that.
+    (let* ((path (if (stringp f) f (namestring f)))
+           (s (ignore-errors (sb-posix:stat path))))
+      (format acc "~C~A:~D:~D" #\Nul path
+              (if s (sb-posix:stat-mtime s) 0)
+              (if s (sb-posix:stat-size s) 0))))
+  nil)
+
 (defun %p-compute-compiler-stamp ()
   "A fingerprint of the compiler that will write cache entries in this run:
-   its ROOT PATH plus each file's mtime and size.  When the root is unknown
-   the path component alone is the answer — that is the pre-#1119 behaviour
-   (path + generation), never something weaker."
-  (let ((root (%p-compiler-root)))
-    (if (null root)
-        "no-compiler-root"
-        (let ((acc (make-string-output-stream)))
-          (write-string (namestring root) acc)
-          (dolist (f (%p-compiler-files root))
-            (let ((s (ignore-errors (sb-posix:stat (namestring f)))))
-              (format acc "~C~A:~D:~D" #\Nul (namestring f)
-                      (if s (sb-posix:stat-mtime s) 0)
-                      (if s (sb-posix:stat-size s) 0))))
-          (subseq (format nil "~{~2,'0X~}"
-                          (coerce (sb-md5:md5sum-string
-                                   (get-output-stream-string acc))
-                                  'list))
-                  0 16)))))
+   PCL's ROOT PATH and each of its files' mtime and size, plus the TOOLCHAIN
+   those files run on — the perl binary and PPI's sources (task #1843, see the
+   commentary above).  When the root is unknown its component is the literal
+   `no-compiler-root`, which is the pre-#1119 answer for that half; the
+   toolchain half is still hashed, so the result is never weaker than before."
+  (let ((root (%p-compiler-root))
+        (acc (make-string-output-stream)))
+    (write-string (if root (namestring root) "no-compiler-root") acc)
+    (when root
+      (%p-stamp-files acc "pcl" (%p-compiler-files root)))
+    (%p-stamp-files acc "perl" (let ((p (%p-perl-on-path)))
+                                 (when p (list p))))
+    (%p-stamp-files acc "ppi" (%p-ppi-files))
+    (subseq (format nil "~{~2,'0X~}"
+                    (coerce (sb-md5:md5sum-string
+                             (get-output-stream-string acc))
+                            'list))
+            0 16)))
 
 (defun p-compiler-stamp ()
   "This process's compiler fingerprint, computed once (see the commentary)."
@@ -21129,12 +21252,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-eval-cache-stem (text pkg-name cap-names feat-names)
   "The cache stem for one string eval: MD5 hex over EXACTLY the inputs
-   p-eval's in-process key carries, plus *PCL-CACHE-GENERATION*.
+   p-eval's in-process key carries, plus *PCL-CACHE-GENERATION* and the
+   COMPILER FINGERPRINT (P-COMPILER-STAMP, task #1843).
+   The fingerprint for the reason a module's path key carries it: an eval's
+   cached CL is this compiler's emission, produced by this pl2cl through this
+   PPI, and two trees sharing a generation string — or one tree after a PPI
+   upgrade — must not read each other's entries (#1119's measurement, and the
+   same hole this side had for the tokenizer).
    MD5 and not SXHASH (which P-COMPUTE-CACHE-PATH uses for a module's PATH):
    one run reaches dozens of module paths and can reach thousands of distinct
    eval texts, and a collision here would run one eval's code for another's."
-  (let ((material (format nil "~A~C~A~C~{~A ~}~C~{~A ~}~C~A"
-                          *pcl-cache-generation* #\Nul pkg-name #\Nul
+  (let ((material (format nil "~A~C~A~C~A~C~{~A ~}~C~{~A ~}~C~A"
+                          *pcl-cache-generation* #\Nul (p-compiler-stamp) #\Nul
+                          pkg-name #\Nul
                           feat-names #\Nul cap-names #\Nul text)))
     (string-downcase
      (format nil "~{~2,'0X~}"

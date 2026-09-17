@@ -3284,7 +3284,33 @@ bug" and "this path is a build-machine artifact of the emitter".
 ### 9.2b A cached module entry, and what makes it valid (normative, s470bw)
 
 **A cache entry is three files under `~/.pcl-cache/modules/`, named by one
-key: `sxhash(<the module's absolute path> | <generation> | "v2")`.**
+key: `sxhash(<the module's absolute path> | <generation> | "v2" |
+<compiler fingerprint>)`.**
+
+**The compiler fingerprint** (`p-compiler-stamp`; task #1119, extended by
+#1843) is what identifies *which compiler* wrote the entry, because the
+generation string says only what a session intended. It hashes, by path plus
+mtime and size:
+
+1. the PCL tree's own root path, every `Pl/**.pm` one directory deep, and
+   `pl2cl`;
+2. the **perl binary** a transpile will run — the first `perl` on `$PATH`,
+   which is what `run-program … :search t` execs;
+3. **PPI's own sources** — the `PPI.pm` this program's `@INC` resolves plus
+   every `PPI/**/*.pm` beside it.
+
+2 and 3 are normative because **the emission is a function of PPI's token
+stream**: PCL's tokenizer repairs are keyed on one PPI's output, so an
+in-place PPI upgrade (or a same-version perl rebuild) changes what a
+transpile produces while leaving every module path, every module's content
+and every PCL file untouched — the one case where nothing else in the key
+moves. It is mtime+size and never a version string: `$PPI::VERSION` does not
+move for a patched PPI, `$]` does not move for a rebuilt perl. An input that
+cannot be located is recorded as a count of zero, so "PPI was not findable"
+hashes differently from "PPI was found" rather than both collapsing to an
+empty run. The transpiler's own prototype memo (`Pl::ProtoCache::_key`) and
+the string-eval cache stem (`%p-eval-cache-stem`) carry the same fingerprint;
+the three move together by construction.
 
 | file | what it is |
 |---|---|

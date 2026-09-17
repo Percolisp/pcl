@@ -58,6 +58,16 @@ that happen to share a generation string from reading each other's entries —
 the same rule C<PCLSbcl> uses to key a saved core by the runtime's absolute
 path;
 
+=item * the TOOLCHAIN that compiler runs on (task #1843) — the perl binary
+executing the transpile and every one of PPI's own C<.pm> files, by mtime+size
+like the C<Pl/> walk.  The token stream IS the walk's input, so an in-place PPI
+upgrade (a distro update, C<cpanm PPI>) or a same-version perl rebuild makes
+every stored entry an answer from a different compiler, while leaving the module
+paths, the module contents and every C<Pl/*.pm> untouched.  A version STRING
+does not close that: C<$PPI::VERSION> does not move for a patched PPI and C<$]>
+does not move for a rebuilt perl — they stay in the key below as the cheap
+coarse half, not as the test;
+
 =item * C<$PPI::VERSION> and C<$]>, since the token stream is the walk's input;
 
 =item * every DEPENDENCY the walk resolved.  The facts an entry holds are
@@ -170,12 +180,87 @@ sub _compiler_stamp {
   for my $dir (_pm_dirs()) {
     opendir my $dh, $dir or next;
     for my $f (sort grep { /\.pm$/ } readdir $dh) {
-      my @s = stat "$dir/$f";
-      push @parts, "$dir/$f:" . ($s[9] // 0) . ':' . ($s[7] // 0);
+      push @parts, _stat_part("$dir/$f");
     }
     closedir $dh;
   }
+  push @parts, _toolchain_parts();
   return $COMPILER_STAMP = md5_hex(join "\0", @parts);
+}
+
+sub _stat_part {
+  my ($path) = @_;
+  my @s = stat $path;
+  return "$path:" . ($s[9] // 0) . ':' . ($s[7] // 0);
+}
+
+# The TOOLCHAIN the compiler runs on (task #1843): the perl binary executing
+# this transpile and PPI's own sources.  The facts this memo holds are derived
+# from PPI's TOKEN STREAM by that perl, so an in-place PPI upgrade or a perl
+# rebuild makes every stored entry an answer from a different compiler --
+# while the module PATHS, the module CONTENT and every Pl/*.pm stay untouched.
+# mtime+size, never a version string: $PPI::VERSION does not move for a
+# patched PPI and $] does not move for a rebuilt perl.  The runtime's twin
+# %p-compute-compiler-stamp folds in the same two inputs; the two stamps key
+# different caches, so they need the same INPUTS, not the same bytes.
+sub _toolchain_parts {
+  my @parts;
+  my $perl = _running_perl();
+  push @parts, 'perl=' . (defined $perl ? 1 : 0);
+  push @parts, _stat_part($perl) if defined $perl;
+  my @ppi = _ppi_files();
+  push @parts, 'ppi=' . scalar(@ppi);
+  push @parts, map { _stat_part($_) } @ppi;
+  return @parts;
+}
+
+# The perl running THIS transpile, as an absolute path.  $^X is it, except
+# that a PATH-resolved invocation can leave it a bare name -- resolved the way
+# execvp would, which is also how the runtime side picks the binary it spawns.
+sub _running_perl {
+  my $x = $^X;
+  return undef if !defined $x || !length $x;
+  return Cwd::abs_path($x) // $x if $x =~ m{/};
+  for my $dir (split /:/, ($ENV{PATH} // '')) {
+    next if !length $dir;
+    return Cwd::abs_path("$dir/$x") // "$dir/$x" if -x "$dir/$x";
+  }
+  return undef;
+}
+
+# PPI.pm as actually LOADED (%INC is exact), else the first one on @INC, plus
+# every PPI/**/*.pm beside it.
+sub _ppi_files {
+  my $pm = $INC{'PPI.pm'};
+  if (!defined $pm) {
+    for my $dir (@INC) {
+      next if ref $dir;
+      if (-f "$dir/PPI.pm") { $pm = "$dir/PPI.pm"; last }
+    }
+  }
+  return () if !defined $pm;
+  $pm = Cwd::abs_path($pm) // $pm;
+  (my $dir = $pm) =~ s{/[^/]+$}{};
+  return ($pm, _pm_files_under("$dir/PPI"));
+}
+
+# Every *.pm under DIR, recursively, sorted -- one walk, no File::Find (the
+# ordering must be stable across runs and platforms, so it is spelled here).
+sub _pm_files_under {
+  my ($dir) = @_;
+  opendir my $dh, $dir or return ();
+  my @names = sort grep { $_ ne '.' && $_ ne '..' } readdir $dh;
+  closedir $dh;
+  my @out;
+  for my $n (@names) {
+    my $p = "$dir/$n";
+    # -l before -d: a symlinked subdirectory is not descended, so a loop in
+    # the library tree cannot make this walk run forever.
+    if (-l $p) { push @out, $p if $n =~ /\.pm$/ }
+    elsif (-d $p) { push @out, _pm_files_under($p) }
+    elsif ($n =~ /\.pm$/) { push @out, $p }
+  }
+  return @out;
 }
 
 sub _pm_dirs {

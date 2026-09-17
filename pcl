@@ -365,8 +365,21 @@ sub core_line {
 }
 
 # The compile policy, printed by the runtime that resolves it.
+#
+# THROUGH A REAL PROGRAM PREAMBLE, not a bare --eval (task #1843).  Two of the
+# things this prints -- the PPI the compiler fingerprint hashes, and the
+# fingerprint itself -- are resolved through the PROGRAM's @INC, which only a
+# transpiled preamble sets.  Asked of a bare image they would read "not
+# resolvable" and print a stamp no actual run computes: a diagnostic answering
+# a question nobody asked.  So --cache-info transpiles an empty program (the
+# ONE place @INC is derived, rule 11) and asks inside it.
 sub runtime_cache_info {
+  my $probe = mktmp('.pl');
+  write_file($probe, "1;\n");
+  my $lisp = transpile($probe, undef);
+  unlink $probe;
   my @cmd = ('sbcl', PCLSbcl::sbcl_prefix(runtime => $RUNTIME, core => $ENV{PCL_CORE}),
+             '--eval', "(load #P\"$lisp\")",
              '--eval', '(pcl::p-cache-info)');
   my $out = qx{@{[ join ' ', map { quotemeta } @cmd ]} 2>/dev/null};
   # In source mode the runtime announces itself as it loads; that is the

@@ -39,7 +39,7 @@ use PCLSbcl ();   # sbcl_prefix — the %p-mtime contract row asks the runtime i
 plan skip_all => "pcl not found"  unless -x $pcl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 52;
+plan tests => 54;
 
 my $dir = tempdir(CLEANUP => 1);       # where the fixture modules live
 
@@ -217,6 +217,18 @@ sub run_pcl {
     like($info, qr/^\s*proto\//m,   '... and the prototype cache');
     like($info, qr/core for this run/i, '... names the core this run would use');
     like($info, qr/PCL_COMPILE_DIRS/, '... and the compile policy in effect');
+
+    # THE TOOLCHAIN HALF OF THE COMPILER FINGERPRINT (task #1843).  The perl
+    # binary and PPI's sources are in the cache key, so "why did my whole
+    # cache re-transpile" has two answers a stamp alone cannot give.  PPI is
+    # resolved through the PROGRAM's @INC, which only a transpiled preamble
+    # sets -- asked of a bare image (what --cache-info used to do) both lines
+    # would read "not resolvable"/"not found" and the stamp printed would be
+    # one no actual run computes.  That is what these two rows pin.
+    like($info, qr{^\s*perl binary: /\S+}m,
+         '... names the perl binary the fingerprint hashes (#1843)');
+    like($info, qr{^\s*PPI sources: /\S+ \(\d+ files\)}m,
+         '... and PPI, resolved through a real program @INC');
 
     my $ver = `$pcl --version 2>&1`;
     like($ver, qr/^pcl \(PCL\) \S/m,     'pcl --version prints the PCL version');
