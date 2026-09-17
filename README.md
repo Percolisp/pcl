@@ -279,9 +279,9 @@ the directory with `PCL_CACHE_DIR` and clear with `pcl
 --clear-cache`. The directory is created `0700`. (Compiled `eval`
 statements are also cached, it was needed for e.g. Moo.)
 
-The cache's file names are a hash of the source plus the SBCL
-version. A module's cache entry is indexed/named from the module's
-path, the compiler generation and a compiler fingerprint.
+The cache's file name of the runtime core is a hash of the source plus
+the SBCL version. A module's cache entry is indexed/named from the
+module's path, the compiler generation and a compiler fingerprint.
 
 So a cached module is re-transpiled when its own file
 changes. It is also re-transpiled when modules it depends on changes
