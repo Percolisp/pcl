@@ -109,8 +109,56 @@ reverse: `%p-defelem-box` is a box holding a magic cell, so the new
 HOLE a list walk had flattened into a present undef.  A `:defelem` cell is not
 a computed scalar at all — it is an ALIAS TO A HOLE whose contract is that
 reading it leaves the hole in place — so it is excluded, and run 2 reads
-**0 new / 0 fixed / 0 LOST, TOTAL 18676 (+0), drops 5 = census, GATE clean**.
-`tools/ir-conform --jobs 2`: 323 pass / 0 fail / 22 known / **0 stale**.
+**0 new / 0 fixed / 0 LOST, TOTAL 18676 (+0), drops 5 = census, GATE clean**
+(both runs on the LAUNCH tree, whose pass baseline was still 18,676 — the
+rebased numbers are below).  `tools/ir-conform --jobs 2`: 323 pass / 0 fail /
+22 known / **0 stale**.
+
+**THE FINAL BAR WAS RE-TAKEN ON THE REBASED TREE, and the three
+harness-independent bars were not.**  Main moved to `2f9cc300` during the
+round (s486c: four `perl-tests/t/test.pl` helpers and the per-FILE SBCL heap
+allowance in `tools/lib/PCLSbcl.pm`), which moves the sweep's pass baseline to
+18,681 and changes how the companion runner spawns SBCL — so gate, sweep and
+companion were re-run after `git rebase main`.  The others stand by
+construction: between the launch commit and that tip, main touched nothing
+under `cl/` or `lib/` and nothing under `Pl/` but one new test file, so
+corpus-diff, the 633-file emission A/B, ir-host-leak and ir-conform cannot
+have moved.  Gate `Result: PASS`, **243 files / 8,239 rows** (91 s wall /
+402 CPU-s — main's 243/8,216 plus this round's 23 guard rows).  Sweep
+`--jobs 4`: **0 new / 0 fixed / 0 LOST, TOTAL passing 18,681 = baseline (+0),
+drops 5 = census (+0), CAUSES 480 of 480 with 0 causeless, GATE clean**.
+
+**The companion `re/` + `op/` leg has NO mover of this round's, and proving
+that took a second tree.**  `--jobs 1` over `re/regexp.t re/pat.t
+re/pat_advanced.t re/subst.t re/pat_rt_report.t op/pos.t op/sort.t op/split.t
+op/substr.t`: eight of the nine read their `perl-suite-run.tsv` snapshot
+EXACTLY (re/pat.t 231/138, re/pat_advanced.t 1258/422, re/pat_rt_report.t
+2458/52, re/subst.t 206/66, op/pos.t 15/15, op/sort.t 183/22, op/split.t
+213/6, op/substr.t 351/3).  The ninth, `re/regexp.t`, reads 811/94 against a
+snapshot of 795/110 — the same 905 comparable rows with sixteen moved from
+`not ok` to `ok`, which is not a clock artefact — **and a `git archive main`
+extraction (5eb87b01, gen v2-1460, the same harness) reads 811/94 too**, so it
+is main's own drift since the snapshot was blessed, the #1834 class: named
+here, NOT spliced.  The run's "534 NEW ROW / 34 FIXED ROW" is the same answer:
+500 of them are re/regexp.t's log-capped rows, which have never been blessed
+(it is the #326 hang file), and the remaining 34 reproduce row for row on that
+main extraction.  Their cause is now located and filed as **#1837** —
+`PclTapAlign.pm:157` rewrites the t-dir prefix out of a description for the
+set it COMPARES but not when it reads `perl-suite-fails.tsv`, so every row
+whose text contains its own file path (`[at <file> line N]`, test.pl's
+`_where`) is reported as NEW and FIXED at once, forever.  A direct row-by-row
+diff of `.suitelog/re_subst.t.fails.tsv` against the baseline block finds
+exactly ONE difference (the synthetic test#0 `*summary*` row), not fourteen.
+
+**#1517's first half closed with a number** (member 5): `feargs` — 20,000
+calls of `fargs(@a)` over a 1000-element array, 20 M elements through
+`p-flatten-args` — reads **perl 0.0242 s vs PCL 0.1805 s (7.46×)**, and
+0.0228 / 0.1813 (7.96×) on a second best-of-5 minutes later, with `feread2`
+0.30× as the control in the same window (quiet box, load 2.0).  Read as
+ABSOLUTE seconds, because perl ALIASES `@a` into `@_` and is O(1) in the
+length: **9.0 ns per element**, which confirms s473r's 8.5 ns from the other
+direction and is what the lever must beat.  Half two — the per-array "every
+element is a box" fact — is untouched.
 
 ## Session 486 (Fable, 2026-09-16) — the not-supported share measured and instrumented; three agents merged; the commands reviewed for security
 

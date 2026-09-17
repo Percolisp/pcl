@@ -811,6 +811,29 @@ from 2.14× and 1.55×).  Peak RSS is flat on the text rows (regexg 33.0 vs
 rows (79.9 → 60.6 MB), which is the per-sort adjustable vector and copy-seq
 going away.
 
+**A NEW ROW, not a mover: `feargs`** (task #1517's first half).  `f(@a)` with a
+1000-element array, 20,000 times = 20 M elements through `p-flatten-args`, which
+is the one shape that still reaches the flattener — `feread2`, the row #883 was
+sized against, stopped reaching it when `for my $x (@a, @b)` took the
+`foreach-arrays` run (#1184/#1409).  Quiet box (load 2.0), two best-of-5 runs
+minutes apart, `feread2` as the control in the same window:
+
+```
+bench          perl(s)    pcl(s)   pcl/perl
+feargs          0.0242    0.1805     7.46x
+feargs          0.0228    0.1813     7.96x
+feread2         0.4448    0.1325     0.30x   control
+```
+
+**Read it as ABSOLUTE seconds, never as the ratio** — perl ALIASES `@a` into
+`@_` and does no per-element work at all, so the row is a ratio outlier BY
+CONSTRUCTION, the same reading rule the `pack` rows carry (plan §A.0).  PCL's
+0.181 s over 20 M elements is **9.0 ns per element**, which confirms s473r's
+8.5 ns (measured there by subtracting an `f(1)` program) from the other
+direction and is the number the lever must beat.  The lever itself — a
+per-array "every element is a box" fact, so a bulk `replace` can replace the
+per-element `cond` + `vector-push-extend` — is NOT this round's.
+
 **What the round measured and did NOT build** (all in task #1803, so nobody
 re-derives it): a one-entry cache in front of `*p-match-pos*` has a CEILING of
 2.8 % (that is the whole gethash + puthash traffic on regexg); a cached
