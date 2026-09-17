@@ -61,7 +61,8 @@ the binary trio share one body.  Guard `Pl/t/tie-fetch-once-01.t` (15 rows: 9
 counts + 6 that ARE the exception), inverse-verified on a `2ac855aa` extraction;
 ir-spec §2.2b rule 5.  `t/op/tie_fetch_count.t` 131/10 → **139/2**;
 `perl-tests/bop.t`'s own "double magic tests" block 480/29 → **485/24**, sweep
-TOTAL **18676 → 18681**.  The ZERO-FETCH half is filed as **#1814** and is worse:
+TOTAL **18681 → 18686** (on the tree rebased over main `5eb87b01`; s486c's
+own anonsub.t +5 is the other half of main's 18681).  The ZERO-FETCH half is filed as **#1814** and is worse:
 `@a = ($tied)` pushes the tie PROXY, so the element prints
 `#<p-tie-proxy {…}>` and a write through it STOREs into the tied variable.
 
@@ -76,8 +77,9 @@ methods, which never fire.
 **Members 3+4 — the attribution.**  886 rows given a cause in place, 204
 replaced from this round's own measurement, 90 (t5a's #221 rows) left
 byte-identical; the six UNEXPLAINED shortfall rows caused; ONE verdict spliced.
-Companion `unexplained` **2,362 → 1,264**; the `t/` shortfall's UNEXPLAINED half
-**522 → 382**; `tools/cause-census.pl --hygiene` adds ZERO `other` rows.  Three
+Companion `unexplained` **2,319 → 1,221**; the `t/` shortfall's UNEXPLAINED half
+**462 → 322** (the same 1,098 + 140 rows; both pairs read lower than the
+launch-tree 2,362 → 1,264 / 522 → 382 because s486c caused 43 rows first); `tools/cause-census.pl --hygiene` adds ZERO `other` rows.  Three
 hypotheses died to probes and that is why the causes are right: `op/method.t`'s
 37 missing rows are **26 × #1439** (the test.pl stub's `skip_if_miniperl` skips
 UNCONDITIONALLY) plus **#1821**; `"3foo"->CORE::uc` is the `CORE::` METHOD form,
@@ -95,9 +97,9 @@ NAME `_` after `sub` as `Token::Magic`, so `PPI::Lexer` builds no
 `docs/ppi-bug-report.t` (plan 73 → 78; the four bug rows FAIL on 1.291 and the
 `sub main::_` control PASSES).  No workaround; **#1817** owns it.
 
-**Bars.**  Gate **`Result: PASS`, 243 files / 8,227 rows** (151 s wall, 573 CPU-s;
+**Bars.**  Gate **`Result: PASS`, 244 files / 8,231 rows** (102 s wall, 450 CPU-s;
 the three xs files skipped as PARKED).  Sweep `--jobs 4`: **GATE clean, 0 new /
-0 fixed, TOTAL passing 18,681, drops 5 = census, CAUSES 478 of 478 with 0
+0 fixed, TOTAL passing 18,686 = baseline, drops 5 = census, CAUSES 480 of 480 with 0
 unexplained**.  `tools/corpus-diff.pl 2ac855aa`: **emission IDENTICAL over 111
 files**, silent drops 5 unchanged, shapes identical — so **no generation bump**
 (the change is `cl/` only).  `tools/ir-conform --jobs 2` 323 pass / 0 fail / 22
@@ -106,6 +108,25 @@ known / 0 stale; `tools/ir-host-leak.pl` byte-identical to the base extraction;
 --check` clean.  Filed **#1814 #1815 #1816 #1817 #1818 #1819 #1820 #1821 #1823
 #1825 #1826 #1828 #1829**, **#1813 DONE**; #1501 stays OPEN for t6b and t6c.
 
+**The rebase onto main `5eb87b01` (2026-09-17), and what it moved.**  The round
+was stopped before its companion leg and resumed in place; main had meanwhile
+taken s486c (the harness batch) and two docs commits.  `git rebase main` hit
+four conflicts and every one was ROW-LEVEL, resolved by keeping both sides:
+`baselines/perl-suite-fails.tsv` (merged by KEY, not by text â the two sides are
+provably disjoint: main added 133 rows and removed 321 over nine files with
+**zero** cause edits, this round changed 1,090 causes and removed 8 rows, and
+the both-changed set is EMPTY), `baselines/perl-suite-run.tsv` (main's new
+`op/tie.t` row beside this round's `op/tie_fetch_count.t` row),
+`baselines/pass-baseline.tsv` (both header blocks kept; the data rows are
+disjoint â main's anonsub.t, this round's bop.t) and the two docs at their
+newest-first anchors.  **Three numbers in the records were measured against the
+OLD main and are corrected above**: the sweep TOTAL is 18681 → **18686** on the
+combined tree (main's own +5 and this round's +5), the gate is **244 files /
+8,231 rows** (main's 243/8,216 plus this round's one guard file), and the two
+census pairs read **2,319 → 1,221** and **462 → 322** because s486c had
+already caused 43 of the rows this round measured as causeless.  The DELTAS are
+unchanged â 1,098 fail rows and 140 shortfall rows â which is the check that the
+key-merge lost nothing.
 ## Session 473v (Opus agent, 2026-09-16) — perf round 33: the match RECORD, the str-buffer append and the classic sort; `strcat` and `sortstr` are now FASTER than perl
 
 **Member 1, the measurement (task #1803).**  Four `sb-sprof` breakdowns on

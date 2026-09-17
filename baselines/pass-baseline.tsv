@@ -348,6 +348,8 @@
 #   here, one file at a time, --jobs 1.  The FAIL baseline's row set is
 #   UNCHANGED: those rows are UNNAMED, so all fourteen collapse to the single
 #   `bop.t 144 <no description>` key and sweep-diff correctly reads 0/0.
+#   REBASED over main 5eb87b01: the sweep TOTAL is 18681 -> 18686 there (this
+#   +5 on top of s484d's anonsub.t +5 (merged as s486c)), re-measured GATE clean, +0.
 aassign.t	OK	175	13	189
 anonsub.t	OK	6	4	10
 append.t	OK	13	0	13
