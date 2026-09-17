@@ -543,7 +543,7 @@ sub generate {
 sub runtime_owned_caret_syms {
   my %syms;
   for my $name (keys %SPECIAL_VARS) {
-    next unless $name =~ /^[\$\@\%]\{\^/;
+    next if $name !~ /^[\$\@\%]\{\^/;
     my $v = $SPECIAL_VARS{$name};
     next if ref $v;                      # a compound form, not a symbol
     $syms{$v} = 1;

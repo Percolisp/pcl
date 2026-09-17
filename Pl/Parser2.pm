@@ -8081,7 +8081,7 @@ sub _forward_global_decls {
     # from |${^MPE}|.
     my $owned = _runtime_caret_syms();
     while ($line =~ /(\|[\$\@\%]\{\^[A-Za-z_]\w*\}\|)/g) {
-      $caret{$1} = 1 unless $owned->{$1};
+      $caret{$1} = 1 if !$owned->{$1};
     }
     # (?<![\w:|]) skips pkg-qualified Foo::$x / |P|::$x; (?!-) skips runtime
     # internals like %pcl-cl-sub-name — with a POSSESSIVE \w*+ so the scan
