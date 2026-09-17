@@ -43,7 +43,7 @@ my $runpcl = "$root/runpcl";
 plan skip_all => "runpcl not found" unless -x $runpcl;
 plan skip_all => "sbcl not found"   unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 15;
 
 sub write_pl {
     my ($code) = @_;
@@ -106,3 +106,96 @@ for my $i (1 .. 5) {
     print STDERR "err$i\n";
 }
 PL
+
+# ---- $| = 1 reaches the fd WHILE the program runs (task #1850) -------------
+#
+# The instrument, not just the feature: perl's t/test.pl sets `$| = 1` at its
+# line 22 so a test file's TAP is on disk row by row, and every companion file
+# runs under PCL's transpilable stub perl-tests/t/test.pl.  While that stub
+# lacked the line (and while %tap-out wrote past the autoflush table), a file
+# killed by the runner's timeout kept only the rows that happened to have
+# flushed — so its C_ok/C_notok were the rows that reached the fd, not the rows
+# that ran, and "the last row is N" bounded a hang from BELOW and up to one
+# buffer short.  ./runpcl hid the same fact for any program, because it
+# captured the child's stdout with backticks and printed it at exit.
+#
+# A plain run cannot see this: the buffer flushes at exit either way.  The
+# discriminator is a RACE the program itself decides — it writes its first
+# line, busy-loops, then touches a MARKER file, then writes its last line.  We
+# poll both paths: stdout first means the write reached the fd mid-run, marker
+# first means it sat in a buffer until exit.  No sleep() in the harness times
+# anything, so a slow or a fast box gives the same verdict.
+
+sub flush_race {
+    my ($runner, $code, $want, $desc) = @_;
+    my (undef, $out)    = tempfile(SUFFIX => '.out',    UNLINK => 1);
+    my (undef, $marker) = tempfile(SUFFIX => '.marker', UNLINK => 1);
+    unlink $out, $marker;
+    my $file = write_pl($code =~ s/__MARKER__/$marker/gr);
+    my $pid = fork();
+    defined $pid or die "fork: $!";
+    if (!$pid) {
+        open(STDOUT, '>', $out)     or die;
+        open(STDERR, '>', '/dev/null') or die;
+        exec($runner, $file);
+        die "exec $runner: $!";
+    }
+    my ($saw, $deadline) = ('timeout', time + 120);
+    while (time < $deadline) {
+        if (-s $out)   { $saw = 'stdout'; last }
+        if (-e $marker) { $saw = 'marker'; last }
+        select(undef, undef, undef, 0.05);
+    }
+    waitpid($pid, 0);
+    unlink $out, $marker;
+    is($saw, $want, $desc);
+}
+
+# TWO busy windows, not one: the marker must be written far enough from the
+# program's EXIT that a poll can tell them apart.  With one window the marker
+# write, the last print and the exit flush all landed inside one 50 ms tick,
+# so the buffered case read 'stdout' too and the row could not fail.
+my $BODY = <<'PL';
+print "first\n";
+my $t = time; 1 while time - $t < 5;
+open(my $m, '>', '__MARKER__') or die; print $m "x"; close $m;
+my $u = time; 1 while time - $u < 5;
+print "last\n";
+PL
+
+flush_race($runpcl, "\$| = 1;\n$BODY", 'stdout',
+           'runpcl: $| = 1 puts the first line on the fd before the program ends');
+flush_race($runpcl, $BODY, 'marker',
+           'runpcl: without $| the line waits for exit (the flag is honoured, not ignored)');
+
+my $pclperl = "$root/tools/pclperl-for-tests";
+SKIP: {
+    skip 'pclperl-for-tests not executable', 2 unless -x $pclperl;
+    flush_race($pclperl, "\$| = 1;\n$BODY", 'stdout',
+               'pclperl-for-tests: $| = 1 reaches the fd mid-run');
+    flush_race($pclperl, $BODY, 'marker',
+               'pclperl-for-tests: without $| the line waits for exit');
+}
+
+# The TAP writer is the harness's own `print`, so it obeys the same flag: this
+# is the half the companion's kept .out depends on (cl/pcl-test.lisp %tap-out).
+my $TAP = <<'PL';
+use Test::More tests => 2;
+ok(1, 'first');
+my $t = time; 1 while time - $t < 5;
+open(my $m, '>', '__MARKER__') or die; print $m "x"; close $m;
+my $u = time; 1 while time - $u < 5;
+ok(1, 'last');
+PL
+flush_race($runpcl, "\$| = 1;\n$TAP", 'stdout',
+           'TAP: $| = 1 puts a row on the fd as it is emitted');
+flush_race($runpcl, $TAP, 'marker',
+           'TAP: without $| the rows wait for exit');
+
+# And the stub carries the line, where perl's harness carries it.
+my $stub = do {
+    open(my $f, '<', "$root/perl-tests/t/test.pl") or die "stub: $!";
+    local $/; <$f>;
+};
+like($stub, qr/^\$\| = 1;$/m,
+     'perl-tests/t/test.pl sets $| = 1, as perl t/test.pl does at its line 22');

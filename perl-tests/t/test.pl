@@ -4,6 +4,15 @@
 
 package main;  # Explicitly in main package (Perl's default)
 
+# AUTOFLUSH, exactly where perl's t/test.pl sets it (its line 22), and for the
+# same reason: a test file's TAP must be ON DISK row by row.  Without it every
+# companion run is block-buffered, so a file killed by the runner's timeout
+# keeps only the rows that happened to have FLUSHED — its C_ok/C_notok are the
+# rows that reached the fd, not the rows that ran, and "the last row is N"
+# bounds a hang from BELOW and up to one buffer (~4 KB, ~60 rows) short.
+# Task #1850.
+$| = 1;
+
 # Used by many tests for tracking call depth (e.g., local $::Level = $::Level + 1)
 our $Level = 1;
 

@@ -25,9 +25,20 @@
    perl-tests/magic.t dies on any warning at all (`sub { die "Dying on
   warning", @_ }` at BEGIN), so one wide TAP description ended that whole
    file.  The handler is the backstop for the format directives' own output.
-   It replaced 25 direct `format t` calls: one writer, not twenty-five."
+   It replaced 25 direct `format t` calls: one writer, not twenty-five.
+
+   IT HONOURS $| (task #1850).  This writer IS the equivalent of the `print`
+   perl's t/test.pl uses, and that harness sets `$| = 1` at its line 22 so a
+   test file's TAP is on disk row by row; PCL's stub sets the same flag, and
+   before this call the flag had no effect on TAP at all — %p-out-string is a
+   bare write-string, so a companion file killed by the runner's timeout kept
+   only the rows that happened to have flushed.  Routed through the ONE
+   autoflush mechanism rather than an unconditional force-output: with $| off
+   the check is a single fixnum read (the table is empty), and with it on the
+   behaviour is perl's, not a second policy of our own."
   (%p-with-wide-upgrade
-   (%p-out-string (apply #'format nil control args) *standard-output* nil)))
+   (%p-out-string (apply #'format nil control args) *standard-output* nil))
+  (%p-maybe-autoflush *standard-output*))
 
 ;;; Test state
 (defvar *test-count* 0)

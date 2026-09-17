@@ -92,10 +92,35 @@ print STDERR "SBCL[runpcl]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
 # warnings, an unhandled condition's backtrace, and the runtime's own
 # "PCL Runtime loaded" line (cl/pcl-runtime.lisp writes it to *error-output*).
 # Measured in both modes — cached-core and PCL_NO_CORE=1 source — SBCL puts
-# NOTHING on stdout.  So stdout below is printed VERBATIM: it is the program's
-# stdout, byte for byte, including blank lines and lines that begin with `;`.
+# NOTHING on stdout.  So this runner's stdout IS the program's, byte for byte,
+# including blank lines and lines that begin with `;` — nothing filters it.
+#
+# STDOUT IS STREAMED, NOT CAPTURED (task #1850).  This used to be
+# `my $out = \`$sbcl_cmd 2>$errfile\`` with a `print $out` after the run, and
+# that capture is what made `$| = 1` look broken under this runner: the
+# program's writes went into a pipe this process only drained at exit, so a
+# program reporting progress showed NOTHING mid-run and a program killed by a
+# supervisor lost its whole output — while `pcl FILE > out` and
+# tools/pclperl-for-tests, which let the child own fd 1, wrote perl's exact
+# bytes at perl's exact moment.  The child now inherits this process's own
+# stdout, so WHEN a byte appears is the program's business (its $| and the
+# handle it is connected to), exactly as under perl.  stderr still goes to a
+# file and is filtered after the run, so the note-stripping below is unchanged
+# and the two streams still stay apart.
+#
+# ONE CONSEQUENCE, MEASURED AND ACCEPTED: under `runpcl prog 2>&1` the two
+# streams now arrive stdout-then-stderr, where the capture gave
+# stderr-then-stdout.  Neither order was the program's: the old one came from
+# the PARENT's own buffering (the captured stdout sat in a block-buffered pipe
+# while `print STDERR` went straight out), which happened to match `perl prog
+# 2>&1` only because perl's stdout is block-buffered to a pipe too.  Making it
+# match in general would mean filtering stderr INCREMENTALLY (the note strip
+# is a whole-text look-ahead), which buys ordering in a capture and costs the
+# one thing that matters in a program: seeing its output while it runs.  No
+# gate row depends on the order (the six Pl/t files that capture `./runpcl …
+# 2>&1` were run either way).
 my $errfile = "/tmp/runpcl_$$.runerr";
-my $out = `$sbcl_cmd 2>$errfile`;
+system("$sbcl_cmd 2>$errfile");
 # THE CHILD'S EXIT STATUS IS THE PROGRAM'S, and this runner used to drop it:
 # every probe of `exit N`, and every probe of an uncaught die's status, read 0
 # (task #1247 (b) had to be measured through `pcl` for exactly that reason).
@@ -107,8 +132,7 @@ if (open(my $ef, '<', $errfile)) { local $/; $err = <$ef> // ''; close $ef }
 # Cleanup
 unlink $lisp, "/tmp/runpcl_$$.err", $errfile;
 
-# stdout: the program's, unfiltered.
-print $out;
+# stdout: the program's, written by the program itself (see the run above).
 
 # stderr: the program's, with SBCL's noise removed.  A note is taken out WHOLE
 # — the empty line that opens the block goes with the `;` lines, so no
