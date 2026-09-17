@@ -48,7 +48,8 @@ served from the old parse: perl 107/8/8, PCL 107/107/107, where a pre-#1841
 script was right because it was re-transpiled every run).  Fable merged the
 tree DEFAULT-ON as built — the hole is the one every cached module has had
 since the manifest existed, and #1860's fix closes both populations — and
-named the one-line flip for the USER.  Also #1335 closed (`--cache-info` /
+named the one-line flip for the USER.  **USER, same evening: "Keep it on
+by default"** — the decision is CLOSED; #1860 stays the first filler.  Also #1335 closed (`--cache-info` /
 `--clear-cache` never named `evals/`), #1863 filed (the core cache has no age
 policy: 151 of 154 cores belong to deleted runtime paths, 7.03 GB).
 
