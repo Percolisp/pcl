@@ -250,6 +250,7 @@
 #       (PERL_HASH_SEED / PERL_PERTURB_KEYS are inert), which is what they
 #       always were once the file could run.
 # taken-at: 3ac9394f 2026-09-18 (6 file(s) re-measured)
+# taken-at: 158be071 2026-09-18 (3 file(s) re-measured)
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -1894,7 +1895,6 @@ io/argv.t	39	ok	not ok	check for warning for |-	NS:Warnings-gated diagnostics ar
 io/argv.t	14	ok	not ok [PCL #16]	eof() true on unopened filehandle	#1710
 io/bom.t	2	ok	not ok	BOM indicates UTF-16BE	#1710
 io/bom.t	3	ok	not ok	BOM indicates UTF-16LE	#1710
-io/crlf.t	0	(none)	renumbered	*summary*	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 io/crlf.t	5	ok	not ok	[at t/io/crlf.t line 29]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 io/crlf.t	6	ok	not ok	[at t/io/crlf.t line 34]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 io/crlf.t	16409	ok	not ok	[at t/io/crlf.t line 83]	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
@@ -1939,8 +1939,6 @@ io/nargv.t	0	(none)	extra [PCL #2]	*extra* (unnamed)	#1710
 io/nargv.t	0	(none)	extra [PCL #7]	*extra* check fd leak	#1710
 io/nargv.t	0	(none)	extra [PCL #6]	*extra* check setuid mode preserved	#1710
 io/nargv.t	0	(none)	renumbered	*summary*	#1710
-io/open.t	0	(none)	extra [PCL #41]	*extra* not inherited across exec	#1707
-io/open.t	0	(none)	extra [PCL #89]	*extra* not inherited across exec	#1707
 io/open.t	132	ok	not ok	<...> line 1 when $/ is set to a glob	#1710
 io/open.t	156	ok	not ok	also on chmod	#1710
 io/open.t	158	ok	not ok	also on chmod	#1710
@@ -1965,8 +1963,6 @@ io/open.t	157	ok	not ok	chmod fails with \0 in name (overload)	#1710
 io/open.t	9	ok	not ok	die message correct	#1710
 io/open.t	159	ok	not ok	glob fails with \0 in name	#1710
 io/open.t	161	ok	not ok	glob fails with \0 in name (overload)	#1710
-io/open.t	41	ok	(missing)	not inherited across exec	#1707
-io/open.t	89	ok	(missing)	not inherited across exec	#1707
 io/open.t	178	ok	not ok	nothing changed its mode	#1710
 io/open.t	179	ok	not ok	nothing changes its mtime	#1710
 io/open.t	177	ok	not ok	nothing removed the temp file	#1710
@@ -10661,7 +10657,6 @@ uni/class.t	10	ok	not ok	[at t/uni/class.t line 84]	#1036 -- NS:Unicode case fol
 uni/class.t	11	ok	not ok	[at t/uni/class.t line 89]	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- every row is a \p{…} property match (\p{Letter}, \p{IsMyUniClass} and the other user-defined classes, \p{BidiClass: AL}, \p{InGreek}) and every one answers undef
 uni/class.t	12	ok	not ok	foo	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- every row is a \p{…} property match (\p{Letter}, \p{IsMyUniClass} and the other user-defined classes, \p{BidiClass: AL}, \p{InGreek}) and every one answers undef
 uni/class.t	1	ok	not ok	user-defined class compiled before defined	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- every row is a \p{…} property match (\p{Letter}, \p{IsMyUniClass} and the other user-defined classes, \p{BidiClass: AL}, \p{InGreek}) and every one answers undef
-uni/fold.t	0	(none)	renumbered	*summary*	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- and t/uni/case.pl, which all four case-mapping files run, loads Unicode::UCD -> Storable, an XS module PCL cannot load ("Can't locate loadable object for module Storable in @INC"), so lower.t and title.t produce NO TAP at all and fold.t/upper.t abort after a handful of rows
 uni/fold.t	58	ok	not ok	0041 - LATIN CAPITAL LETTER A - 0061 - C - ":A:" =~ /:A:/i	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- and t/uni/case.pl, which all four case-mapping files run, loads Unicode::UCD -> Storable, an XS module PCL cannot load ("Can't locate loadable object for module Storable in @INC"), so lower.t and title.t produce NO TAP at all and fold.t/upper.t abort after a handful of rows
 uni/fold.t	59	ok	not ok	0041 - LATIN CAPITAL LETTER A - 0061 - C - ":A:" =~ /:[_A]:/	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- and t/uni/case.pl, which all four case-mapping files run, loads Unicode::UCD -> Storable, an XS module PCL cannot load ("Can't locate loadable object for module Storable in @INC"), so lower.t and title.t produce NO TAP at all and fold.t/upper.t abort after a handful of rows
 uni/fold.t	62	ok	not ok	0041 - LATIN CAPITAL LETTER A - 0061 - C - ":a:" =~ /:A:/i	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- and t/uni/case.pl, which all four case-mapping files run, loads Unicode::UCD -> Storable, an XS module PCL cannot load ("Can't locate loadable object for module Storable in @INC"), so lower.t and title.t produce NO TAP at all and fold.t/upper.t abort after a handful of rows
