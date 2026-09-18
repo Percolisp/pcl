@@ -52,7 +52,7 @@ plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 my $core = PCLSbcl::cached_core("$root/cl/pcl-runtime.lisp");
 plan skip_all => "no cached core" if !($core && -f $core);
 
-plan tests => 51;
+plan tests => 57;
 
 my $dir   = tempdir(CLEANUP => 1);   # fixtures
 my $cache = tempdir(CLEANUP => 1);   # the cache these rows write
@@ -100,6 +100,25 @@ sub run_pcl {
 }
 
 sub entries { return glob("$cache/scripts/*") }
+
+# The `dep`/`missing` module lines of the manifest whose `source` names
+# BASENAME, as "dep:NAME"/"missing:NAME" — the cache's own record of what a
+# module's transpile resolved.
+sub mod_manifest_lines {
+    my ($cachedir, $basename) = @_;
+    my @out;
+    for my $f (glob("$cachedir/modules/*.deps")) {
+        open my $fh, '<', $f or next;
+        my @l = <$fh>;
+        close $fh;
+        next if !grep { m{^source\t\S+\t.*\Q$basename\E$} } @l;
+        for (@l) {
+            chomp;
+            push @out, join(':', (split /\t/)[0, 2]) if /^(?:dep|missing)\tmod\t/;
+        }
+    }
+    return join ' ', sort @out;
+}
 
 # ─────────────────────────────────────────────────────────────────────────
 # A MISS WRITES AN ENTRY; THE NEXT RUN IS A FASL HIT THAT TRANSPILES NOTHING.
@@ -341,6 +360,69 @@ PL
     is(run_pcl("'$p'", cache => $ncache), "c\n", 'a cached-script run loads Carp');
     is(count_glob("$ncache/modules/*.lisp"), $after_e,
        '... reusing the very entries the transpiled run wrote (#1843 + #1841)');
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# A MODULE'S OWN DEPENDENCIES RESOLVE ON THE **FIRST** RUN (task #1844).
+#
+# On a script-cache MISS the entry's text is compile-file'd, and the program's
+# `use` statements run THEN — before the entry's own preamble has set @INC.
+# The resolver has a fallback for exactly that moment (the SEED `pcl` hands
+# p-run-script-cached); the list a child transpile was given did not, so a
+# module loaded there was transpiled with NO `-I` and its own dependencies
+# were recorded `missing`: every parse fact they carry silently absent, on the
+# first run only, healing from the second via #1284's missing re-check.
+#
+# The oracle is perl's, and it is sharp: with the empty prototype `zap + 1` is
+# `zap() + 1` = 8, without it `zap(+1)` = 107.  Both rows below therefore fail
+# on the first run at ab4da8b4 and pass on the second — which is why each
+# checks the MANIFEST as well as the answer.
+{
+    my $dep = <<'PM';
+package FRDep;
+use Exporter 'import';
+our @EXPORT = qw(zap);
+sub zap () { return 7 + (@_ ? 100 : 0) }
+1;
+PM
+    my $d = tempdir(CLEANUP => 1);
+    mkdir "$d/lib" or die "mkdir: $!";
+    write_file("$d/lib/FRDep.pm", $dep);
+    write_file("$d/lib/FRMid.pm",
+               "package FRMid;\nuse FRDep;\nsub go { return zap + 1 }\n1;\n");
+    my $p = write_file("$d/prog.pl",
+                       "use FRMid;\nprint FRMid::go(), \"\\n\";\n");
+
+    my $oracle = `perl -I '$d/lib' '$p' 2>&1`;
+    is($oracle, "8\n",
+       'perl: a module\'s own dependency supplies the empty prototype');
+
+    my $fcache = tempdir(CLEANUP => 1);
+    is(run_pcl("-I '$d/lib' '$p'", cache => $fcache), $oracle,
+       'the FIRST run resolves a MODULE\'s own dependencies too (#1844)');
+    is(mod_manifest_lines($fcache, 'FRMid.pm'), 'dep:FRDep',
+       '... and FRMid\'s manifest records it as a dep, never as `missing`');
+    is(run_pcl("-I '$d/lib' '$p'", cache => $fcache), $oracle,
+       '... and the second run agrees, without the heal having to do it');
+
+    # THE `use lib` VARIANT, which is why the fix is not keyed on "@INC is
+    # empty": here @INC holds exactly the `use lib` directory at that moment,
+    # and the dependency lives on the -I list, reachable only through the seed.
+    my $d2 = tempdir(CLEANUP => 1);
+    mkdir "$d2/lib1" or die "mkdir: $!";
+    mkdir "$d2/lib2" or die "mkdir: $!";
+    (my $dep2 = $dep) =~ s/FRDep/ULDep/;
+    write_file("$d2/lib1/ULDep.pm", $dep2);
+    write_file("$d2/lib2/ULMid.pm",
+               "package ULMid;\nuse ULDep;\nsub go { return zap + 1 }\n1;\n");
+    my $p2 = write_file("$d2/prog.pl",
+                        "use lib '$d2/lib2';\nuse ULMid;\nprint ULMid::go(), \"\\n\";\n");
+    my $ucache = tempdir(CLEANUP => 1);
+    is(run_pcl("-I '$d2/lib1' '$p2'", cache => $ucache),
+       `perl -I '$d2/lib1' '$p2' 2>&1`,
+       'a `use lib` before the `use` does not shrink the child\'s search path');
+    is(mod_manifest_lines($ucache, 'ULMid.pm'), 'dep:ULDep',
+       '... and that dependency is a dep in the manifest too');
 }
 
 # ─────────────────────────────────────────────────────────────────────────

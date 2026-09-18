@@ -20519,18 +20519,37 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((probe-file full-path)
        (namestring (truename full-path))))))
 
+(defun %p-inc-search-dirs ()
+  "THE list a module search walks, in order: this program's @INC, then the
+   FALLBACK — *p-core-inc-dirs* (the built-in paths the preamble records) or,
+   when no preamble ever ran, PCL's lib/ beside the runtime's cl/.
+
+   ONE LIST BUILDER (task #1844).  Two callers ask the same question and must
+   not answer it differently: P-FIND-MODULE-IN-INC, which RESOLVES a name, and
+   %P-TRANSPILE-INC-ARGS, which tells a child transpile where to look for the
+   same names.  They did: the resolver had the fallback and the transpile list
+   did not.  While @INC is still short — a script-cache MISS compile-files the
+   program, and its `use` statements run BEFORE the entry's own preamble sets
+   @INC — the resolver found a module through the fallback while the child got
+   no -I at all, so every dependency of that module was recorded `missing` and
+   every parse fact it carries was silently absent.  Measured: prog -> A3 ->
+   B2 with an empty prototype answered 107 where perl answers 8, on the FIRST
+   run only, healing from the second via #1284's missing re-check.
+
+   Not a special case on \"@INC is empty\": `use lib \"x\"; use A3;` leaves
+   @INC = (x) at that moment and has the same hole."
+  (append (coerce @INC 'list)
+          (or *p-core-inc-dirs*
+              (when *pcl-runtime-directory*
+                (list (merge-pathnames "../lib/" *pcl-runtime-directory*))))))
+
 (defun p-find-module-in-inc (rel-path)
   "Search @INC for module file, return absolute path or nil.
-   Falls back to *p-core-inc-dirs* (see its docstring); when the preamble
-   never ran, PCL's lib/ beside the runtime's cl/ is the backstop."
-  (or
-   (loop for dir across @INC
-         thereis (%p-inc-dir-file dir rel-path))
-   (loop for dir in (or *p-core-inc-dirs*
-                        (when *pcl-runtime-directory*
-                          (list (merge-pathnames "../lib/"
-                                                 *pcl-runtime-directory*))))
-         thereis (%p-inc-dir-file dir rel-path))))
+   The list is %P-INC-SEARCH-DIRS — @INC, then the fallback that stands in for
+   perl's compiled-in default @INC.  A first match over the concatenation is
+   exactly the two-stage search this was written as."
+  (loop for dir in (%p-inc-search-dirs)
+        thereis (%p-inc-dir-file dir rel-path)))
 
 ;;; --- Cache Management ---
 
@@ -21224,15 +21243,30 @@ buffer's fill-pointer; everything else falls back to file-length."
    `-I` mechanism `pcl` uses for the PROGRAM's transpile, given the same kind
    of directory.
 
+   THE LIST IS THE RESOLVER'S (task #1844): %P-INC-SEARCH-DIRS, so a name the
+   loader can find is a name the child transpile can find.  It used to read
+   @INC alone, and the resolver's FALLBACK dirs were therefore invisible to
+   every child — which on a script-cache miss meant no `-I` at all, because
+   the program's `use` runs before its preamble sets @INC.  In ordinary
+   operation the fallback only repeats directories already on @INC, so the
+   child's first match does not move; the DEDUPE below keeps that repetition
+   off the command line.
+
    An @INC entry that is not a string or pathname (perl allows a code ref or
    an object hook there) has no `-I` spelling and is skipped: the child simply
    does not see it, exactly as it did not before."
-  (loop for dir across @INC
-        for d = (unbox dir)
-        for s = (cond ((stringp d) d)
-                      ((pathnamep d) (namestring d)))
-        when (and s (plusp (length s)) (not (%p-shim-lib-dir-p s)))
-        append (list "-I" s)))
+  (let ((seen (make-hash-table :test 'equal))
+        (args '()))
+    (dolist (dir (%p-inc-search-dirs) (nreverse args))
+      (let* ((d (unbox dir))
+             (s (cond ((stringp d) d)
+                      ((pathnamep d) (namestring d)))))
+        (when (and s (plusp (length s))
+                   (not (gethash s seen))
+                   (not (%p-shim-lib-dir-p s)))
+          (setf (gethash s seen) t)
+          (push "-I" args)
+          (push s args))))))
 
 (defun p-transpile-file (source-path &optional deps-path (mode :module) inc-dirs)
   "Transpile a Perl file to Common Lisp code by calling pl2cl.
