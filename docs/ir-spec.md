@@ -3444,10 +3444,12 @@ checks facts rather than re-deriving them:
   directories), so it passes.
 
 **R2 is a MODULE clause.** The script and string-eval layers ask for validity
-with it off, explicitly: a script's key already carries the `-I` list, the cwd
-and `PERL5LIB` (§below), and the search path in force while a script's own
-entry is validated is the seed `pcl` hands over, not the one its child was
-given. R1 runs for all three layers.
+with it off, and each says so rather than taking a default: a script's key
+already carries the `-I` list, the cwd and `PERL5LIB` (below), and the search
+path in force while a script's own entry is validated is the seed `pcl` hands
+over, not the one its child was given; an eval's transpile runs through the
+`pl2cl --server`, which is spawned with no `-I` list at all. R1 runs for all
+three layers.
 
 **A `dep mod` line with no `resolve` line makes the manifest INVALID** — a
 recording path the transpile side missed costs a re-transpile, never a stale
