@@ -2,6 +2,40 @@
 
 Append new entries at the top. One section per session.
 
+## Session 490 (Fable, 2026-09-18) — two slots refilled; the #1860 design ruled; the review probes find a first-run regression in the script cache (#1844)
+
+Opened on "Please continue, use two subjobs as normal."  Slot 1: **s473t6b
+resumed IN PLACE** (pinned Opus, its existing worktree) from STOP.md plus its
+three commits — told to rebase onto `ab4da8b4`, to READ the member-0 companion
+run that had finished as an orphan overnight (`run-journal.tsv` ends
+`# complete`) rather than re-run it, then the two CHECK-2 fixes' bars and
+members 1–6.  Slot 2: **s490a** (fresh worktree, IDs 1910–1919) = the
+cache-validity batch, #1860 then #1863.
+
+**The #1860 design was re-ruled before launch.**  The task's fix shape —
+re-resolve each recorded name with the runtime's resolver and compare paths —
+fails on reading `Pl::Parser`: the transpiler searches `use lib` dirs
+(unshifted ahead of everything), then the shim `lib/`, then the child's @INC,
+and the runtime can neither know a module's `use lib` dirs before loading it nor
+keeps the shim at that position.  So the manifest becomes self-describing (the
+MISS-PREFIX and a HEAD/BASE class per `mod` dependency) and the runtime checks
+recorded facts: R1 exact over the recorded prefix, R2 for base hits against the
+current walk.  The acceptance bar is the second-run re-transpile count, base vs
+tree — a sweep's "0 new" cannot show a needless re-transpile.  #1863 ruled to
+the path sidecar.
+
+**#1844, found by running the review probes on main first.**
+`~/pcl-agent-scratch/s490/probes/p1860.pl` (three shadow scenarios, six breaking
+cases) reproduced #1860's regression and showed something else: two scenarios
+were wrong on pass 1 of a COLD cache and right afterwards.  Isolated by
+`p-firstrun.pl`: default 107 with `missing mod B2` in A3's manifest,
+`--no-cache` 8, `PCL_NO_FASL_CACHE=1` 8, second run 8.  The script-cache MISS
+path compile-files the script, its `use` loads modules before the preamble has
+set @INC, and `%p-transpile-inc-args` reads @INC only — the resolver had been
+given the seed list, the transpile list had not.  Filed with the ruled fix (one
+list builder for both), and sent to s490a as member 0 because it inflates the
+base reading of that batch's own acceptance measurement.
+
 ## Session 489 (Fable, 2026-09-17 evening) — the two stopped batches resumed and merged; #1850 re-scoped at review; the script cache lands default-on
 
 The session opened on the s488 pause recipe ("Please continue"): both
