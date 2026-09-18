@@ -71,6 +71,30 @@ five live trees kept.  Combined tree after the t6b merge: gate PASS 246 files /
 warm-start numbers: a Moo class with one `has` costs about five seconds on
 every warm run, and four modules rebuild their fasl every run.
 
+**The README refresh (USER: "I am going to read the README and announce the
+first real alpha today").**  Everything the front page quotes was re-measured
+on main rather than carried: the bench board on a quiet box (load 0.24, best of
+five; §0.2p of the perf doc — `regexg` 2.07× → 1.25× confirmed by a second run,
+`strcat` 0.94× → 0.85×, the numeric rows where they were), the gate (246 files /
+8,365), the sweep (18,686 / 675, 60 files fully passing, 96 run to the end), the
+in-place `t/` counts from the day's `--all --quick` (107 / 105 / 258), the drop
+census (62 in 19, identical to the blessed census) and the 14-dist CPAN board.
+The board was the one that had moved: 84 / 49 / 50 with 2,273 ok / 339 not ok
+against a snapshot of 2026-09-09, six files different, and its row gate reading
+4 NEW / 3 FIXED / 18 LOST.  Each mover was looked at before the numbers went in:
+three are gains; `safe_isa.t` now runs 68 rows instead of 8 and its one failing
+row minimises to a false `can` losing its value across a sub return in list
+context (#1912, killed hypothesis first: `can` in a list is fine); two
+`openhan.t` rows had been passing on nothing, `openhandle` being a stub (#1571);
+and `05_extmul.t` produces no rows because SBCL exhausts its 1 GB heap after
+~100 s (#1512 — the "unstable verdict" finally has a mechanism).  Re-blessing
+with attribution is #1913.  docs/STATUS.md still carried the gate of 2026-09-04
+and was regenerated whole, cause-class table included.  The README's compiled
+example is byte-identical to today's `pl2cl` output and its demo program prints
+the same six lines under perl and pcl.  One review miss from t6b surfaced in
+the dist runner's output and was fixed (a redundant `ftype` proclamation for
+`p-can`).  Pushed as `2233f51c` + `ec26b3b1`; CI green through `67781634`.
+
 ## Session s473t6b (Opus agent, 2026-09-17/18) — the 20–49-row op/ band: a filetest's false, `die` with no arguments, and 464 rows that stopped being causeless
 
 **Member 0 (#1850, the harness).**  PCL's transpilable stub `perl-tests/t/test.pl`
