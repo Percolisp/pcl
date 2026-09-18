@@ -20499,10 +20499,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    (`BEGIN { @INC = '../lib' }`, the t/run/* preamble) must still resolve
    core modules, whose PCL equivalents live here.")
 
-(defun %p-inc-dir-file (dir rel-path)
+(defun %p-inc-dir-file (dir rel-path &key (pmc t))
   "Probe DIR (string/pathname/box) for REL-PATH; absolute path or nil.
    For a .pm, a .pmc beside it wins (perl's PMC preference — modern .pmc
-   files are just alternative source, which PCL transpiles like any .pm)."
+   files are just alternative source, which PCL transpiles like any .pm).
+
+   :PMC NIL asks the OTHER question, and there is exactly one caller of it
+   (%P-DIR-HOLDS-P, task #1860): not \"what would PCL load from here\" but
+   \"what would a child TRANSPILE resolve here\" — and the transpiler's
+   resolver is `-f \"$inc/$file\"` and nothing else, no PMC preference.  The
+   difference is not cosmetic: a directory holding a .pmc and no .pm would
+   answer YES here and NO there, so the cache would invalidate an entry the
+   re-transpile then rebuilds identically — an endless re-transpile, which is
+   the failure mode this whole clause is designed around."
   (let* ((d (unbox dir))
          ;; %p-literal-path AS-DIRECTORY treats DIR as a directory with or
          ;; without a trailing slash, and keeps any wildcard character in
@@ -20510,12 +20519,13 @@ buffer's fill-pointer; everything else falls back to file-length."
          (s (if (stringp d) d (namestring d)))
          (full-path (merge-pathnames (%p-literal-path rel-path)
                                      (%p-literal-path s t)))
-         (pmc (and (>= (length rel-path) 3)
-                   (string= rel-path ".pm" :start1 (- (length rel-path) 3))
-                   (probe-file (concatenate 'string (namestring full-path)
-                                            "c")))))
+         (pmc-file (and pmc
+                        (>= (length rel-path) 3)
+                        (string= rel-path ".pm" :start1 (- (length rel-path) 3))
+                        (probe-file (concatenate 'string (namestring full-path)
+                                                 "c")))))
     (cond
-      (pmc (namestring (truename pmc)))
+      (pmc-file (namestring (truename pmc-file)))
       ((probe-file full-path)
        (namestring (truename full-path))))))
 
@@ -21133,14 +21143,16 @@ buffer's fill-pointer; everything else falls back to file-length."
    on is probed once per directory however many times it is asked about.")
 
 (defun %p-dir-holds-p (dir rel-path)
-  "The file REL-PATH has in DIR right now, as an absolute truename, or NIL.
-   %P-INC-DIR-FILE is the one directory probe (rule 11: it is the same one the
-   module search uses, so a `.pmc` beside a `.pm` counts here too)."
+  "The file REL-PATH has in DIR right now, as an absolute truename, or NIL —
+   asked the way a child TRANSPILE would ask it, which is why :PMC NIL is here
+   and what that argument's docstring is about.  %P-INC-DIR-FILE is still the
+   ONE directory probe (rule 11); only the PMC rule differs, because only the
+   question differs."
   (let* ((key (concatenate 'string dir (string #\Nul) rel-path))
          (hit (gethash key *p-inc-probe-cache* :miss)))
     (if (eq hit :miss)
         (setf (gethash key *p-inc-probe-cache*)
-              (ignore-errors (%p-inc-dir-file dir rel-path)))
+              (ignore-errors (%p-inc-dir-file dir rel-path :pmc nil)))
         hit)))
 
 (defun %p-dep-shadowed-p (name manifest)
