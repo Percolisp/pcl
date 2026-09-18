@@ -241,7 +241,7 @@ SKIP: {
 # their sidecars, and building four real 49 MB cores to test a naming rule
 # would add a minute to this file for nothing.
 SKIP: {
-    skip 'sbcl not on PATH', 9 unless `sbcl --version 2>/dev/null` =~ /SBCL/;
+    skip 'sbcl not on PATH', 9 if `sbcl --version 2>/dev/null` !~ /SBCL/;
     delete local $ENV{PCL_NO_CORE};
     local $ENV{PCL_CACHE_DIR} = tempdir(CLEANUP => 1);
     my $cdir = core_cache_dir();

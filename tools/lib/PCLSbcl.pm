@@ -260,7 +260,8 @@ sub cached_core {
     if (-f $core && !$opt{force}) {
         # A core built before task #1863 has no sidecar; stamp it on first use,
         # so a LIVE tree is never mistaken for the leftovers of a deleted one.
-        _write_core_sidecar($dir, $pathkey, $abs) unless -e _core_sidecar($dir, $pathkey);
+        _write_core_sidecar($dir, $pathkey, $abs)
+            if !-e _core_sidecar($dir, $pathkey);
         return $CORE_FOR{$abs} = $core;
     }
     my $built = _build_cached_core($abs, $dir, $pathkey, $core, $opt{force});
@@ -395,7 +396,7 @@ sub _prune_orphan_cores {
         if (open my $fh, '<', $side) {
             my $path = <$fh>;
             close $fh;
-            $path = '' unless defined $path;
+            $path = q{} if !defined $path;
             chomp $path;
             $stale = 1 if length $path && !-e $path;
         }
@@ -403,7 +404,7 @@ sub _prune_orphan_cores {
             my $mtime = (stat $old)[9];
             $stale = 1 if defined $mtime && (time - $mtime) > $LEGACY_CORE_MAX_AGE;
         }
-        next unless $stale;
+        next if !$stale;
         unlink $old, $side, "$dir/pcl-$pk.lock", "$old.failed";
         $gone++;
     }
