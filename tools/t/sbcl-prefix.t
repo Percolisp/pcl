@@ -11,7 +11,7 @@
 # the harness.  Run it directly:  prove tools/t/sbcl-prefix.t
 use strict;
 use warnings;
-use Test::More tests => 39;
+use Test::More tests => 48;
 use File::Temp qw(tempdir);
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
@@ -226,4 +226,75 @@ SKIP: {
 
     ok(clear_cached_cores() >= 1 && !glob("\Q$cdir\E/pcl-*.core"),
        'clear_cached_cores removes every cached core');
+}
+
+# --- ONE CORE PER EXISTING RUNTIME PATH (task #1863) -----------------------
+# The prune above removes older cores for the SAME path.  A core whose runtime
+# path is GONE it could not even recognise — `pathkey` is a hash — so every
+# deleted worktree left a ~49 MB core behind: 154 cores / 7.2 GB on this box,
+# 151 of them (7.03 GB) with no runtime left.  A core now names its runtime in
+# a `pcl-<pathkey>.path` sidecar, and the build-time prune collects a core
+# whose named path is gone, or one with no sidecar that is older than
+# $LEGACY_CORE_MAX_AGE (a legacy core of a tree that has not run since).
+#
+# The foreign cores are PLANTED, not built: the prune reads their NAMES and
+# their sidecars, and building four real 49 MB cores to test a naming rule
+# would add a minute to this file for nothing.
+SKIP: {
+    skip 'sbcl not on PATH', 9 unless `sbcl --version 2>/dev/null` =~ /SBCL/;
+    delete local $ENV{PCL_NO_CORE};
+    local $ENV{PCL_CACHE_DIR} = tempdir(CLEANUP => 1);
+    my $cdir = core_cache_dir();
+
+    my $rdir = tempdir(CLEANUP => 1);
+    my $rrt  = "$rdir/pcl-runtime.lisp";
+    open my $fh, '>', $rrt or die $!;
+    print $fh "(defvar cl-user::*pcl-fake-runtime* 3)\n";
+    close $fh;
+
+    my $mine = cached_core($rrt) or die "no core built";
+    my ($mypk) = $mine =~ m{/pcl-([0-9a-f]{8})-};
+    is(do { open my $s, '<', "$cdir/pcl-$mypk.path" or die $!; my $l = <$s>; chomp $l; $l },
+       $rrt, 'a freshly built core names its runtime in a .path sidecar');
+
+    # Four foreign entries, one per rule.  The 8-hex pathkeys are arbitrary:
+    # nothing derives them back, which is the whole point of the sidecar.
+    my $plant = sub {
+        my ($pk, $path, $age) = @_;
+        my $c = "$cdir/pcl-$pk-0123456789ab.core";
+        open my $p, '>', $c or die $!; print $p "core\n"; close $p;
+        if (defined $path) {
+            open my $s, '>', "$cdir/pcl-$pk.path" or die $!;
+            print $s "$path\n"; close $s;
+        }
+        if ($age) { my $t = time - $age; utime $t, $t, $c or die $! }
+        return $c;
+    };
+    my $dead  = $plant->('aaaaaaaa', "$rdir/gone/pcl-runtime.lisp");
+    my $live  = $plant->('bbbbbbbb', $rrt);
+    my $fresh = $plant->('cccccccc', undef);
+    my $aged  = $plant->('dddddddd', undef, 8 * 24 * 3600);
+    # An INSTALLED core is `<root>/pcl.core` and lives elsewhere entirely; one
+    # planted here must survive the name-shaped glob all the same.
+    open my $ic, '>', "$cdir/pcl.core" or die $!; print $ic "installed\n"; close $ic;
+
+    cached_core($rrt, force => 1);            # a build: the prune runs here
+
+    ok(!-e $dead,  'a core whose sidecar names a path that is GONE is removed');
+    ok(!-e "$cdir/pcl-aaaaaaaa.path", '... together with its sidecar');
+    ok( -e $live,  'a core whose sidecar names a path that EXISTS is kept');
+    ok( -e $fresh, 'a sidecar-less core younger than the legacy age is kept');
+    ok(!-e $aged,  'a sidecar-less core older than it is removed (a legacy orphan)');
+    ok( -e $mine,  'THE CORE THIS RUN WOULD USE is never removed');
+    ok( -e "$cdir/pcl.core", '... and an installed-shaped pcl.core is not touched');
+
+    # A core built before this task has no sidecar.  Its first USE writes one,
+    # so a live tree is never mistaken for a deleted one.  In a child process:
+    # cached_core memoises its answer per runtime within one process.
+    unlink "$cdir/pcl-$mypk.path";
+    system($^X, "-I$RealBin/../lib", '-MPCLSbcl',
+           '-e', 'PCLSbcl::cached_core($ARGV[0])', $rrt) == 0
+        or die "child cached_core failed";
+    is(do { open my $s, '<', "$cdir/pcl-$mypk.path" or die $!; my $l = <$s>; chomp $l; $l },
+       $rrt, 'the first use of a sidecar-less core stamps the sidecar');
 }

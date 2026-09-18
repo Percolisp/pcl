@@ -202,6 +202,27 @@ sub sbcl_prefix_str {
 # each pay a failing build — it expires after an hour, and `pcl --make-core`
 # (`cached_core(..., force => 1)`) ignores it.  Failure = source mode, once
 # announced.  PCL_SHOW_SBCL=1 shows which core a runner spawns, as always.
+# ONE CORE PER EXISTING RUNTIME PATH (task #1863).  The prune above removes
+# older cores FOR THE SAME PATH, and that half works — but a core whose runtime
+# PATH IS GONE it cannot even recognise, because `pathkey` is a hash and a hash
+# is not invertible.  The agent-worktree workflow manufactures a path per
+# worktree, so every finished tree left a ~49 MB core behind for ever: measured
+# on this box, 154 cores / 7.2 GB, of which 151 / 7.03 GB had no runtime left.
+# core/ was also the one cache directory `%p-cleanup-old-cache` never walks.
+#
+# So a core now carries a SIDECAR naming its runtime, `pcl-<pathkey>.path`, and
+# the build-time prune removes a core whose named path is gone.  The sidecar is
+# written at BUILD, and also by the first use of a core that predates this (one
+# `-e` per spawn).  A core with NO sidecar and an mtime older than the age below
+# is a legacy core of a tree that has not run since: a live tree stamps its
+# sidecar the first time it is used, and a live tree still running code from
+# before this change built its core within the week.
+#
+# THE CORE THIS RUN WOULD USE IS NEVER REMOVED, and an unreadable or empty
+# sidecar is KEPT rather than guessed at — the cost of a wrong removal is a
+# ~20 s rebuild for somebody else, which is exactly what this is here to avoid.
+our $LEGACY_CORE_MAX_AGE = 7 * 24 * 3600;
+
 our $CORE_KEY_VERSION = 2;    # bump when the key's ingredients change
 
 # <cache>/core, where <cache> is PCLPaths::cache_root() — the ONE Perl-side
@@ -236,7 +257,12 @@ sub cached_core {
                                               $ENV{SBCL_HOME} // '', $CORE_KEY_VERSION), 0, 12);
     my $dir  = core_cache_dir();
     my $core = "$dir/pcl-$pathkey-$ckey.core";
-    if (-f $core && !$opt{force}) { return $CORE_FOR{$abs} = $core }
+    if (-f $core && !$opt{force}) {
+        # A core built before task #1863 has no sidecar; stamp it on first use,
+        # so a LIVE tree is never mistaken for the leftovers of a deleted one.
+        _write_core_sidecar($dir, $pathkey, $abs) unless -e _core_sidecar($dir, $pathkey);
+        return $CORE_FOR{$abs} = $core;
+    }
     my $built = _build_cached_core($abs, $dir, $pathkey, $core, $opt{force});
     $CORE_FOR{$abs} = $built // '';
     return $built;
@@ -321,11 +347,67 @@ sub _build_cached_core {
     }
     unless (rename $tmp, $core) { unlink $tmp; close $lk; return undef }
     unlink $failed;
+    _write_core_sidecar($dir, $pathkey, $runtime);
     for my $old (glob("\Q$dir\E/pcl-$pathkey-*.core")) {   # this runtime's older cores
         unlink $old unless $old eq $core;
     }
+    _prune_orphan_cores($dir, $core, $pathkey);
     close $lk;
     return $core;
+}
+
+# <cache>/core/pcl-<pathkey>.path — the runtime this pathkey stands for, one
+# line.  `pathkey` is a hash, so without this nothing can answer "does this
+# core's runtime still exist?" (task #1863).
+sub _core_sidecar {
+    my ($dir, $pathkey) = @_;
+    return "$dir/pcl-$pathkey.path";
+}
+
+# Written temp + rename, and never fatal: a sidecar that cannot be written just
+# leaves that core in the legacy bucket, which costs disk and never correctness.
+sub _write_core_sidecar {
+    my ($dir, $pathkey, $runtime) = @_;
+    my $side = _core_sidecar($dir, $pathkey);
+    my $tmp  = "$side.tmp.$$";
+    open my $fh, '>', $tmp or return 0;
+    my $ok = print {$fh} "$runtime\n";
+    $ok &&= close $fh;
+    if (!$ok)                  { unlink $tmp; return 0 }
+    if (!rename $tmp, $side)   { unlink $tmp; return 0 }
+    return 1;
+}
+
+# Remove cores belonging to runtimes that are GONE, and legacy cores of trees
+# that have not run since this mechanism landed.  Called at BUILD time only,
+# under the build lock — never on the path a warm run takes.  Returns the
+# number of cores removed.  See the commentary above $LEGACY_CORE_MAX_AGE for
+# why the two rules are the two rules, and why an unreadable sidecar is kept.
+sub _prune_orphan_cores {
+    my ($dir, $keep, $keep_pathkey) = @_;
+    my $gone = 0;
+    for my $old (glob("\Q$dir\E/pcl-*-*.core")) {
+        next if $old eq $keep;
+        my ($pk) = $old =~ m{/pcl-([0-9a-f]{8})-[0-9a-f]{12}\.core$} or next;
+        next if $pk eq $keep_pathkey;      # this runtime's own: handled above
+        my $side = _core_sidecar($dir, $pk);
+        my $stale;
+        if (open my $fh, '<', $side) {
+            my $path = <$fh>;
+            close $fh;
+            $path = '' unless defined $path;
+            chomp $path;
+            $stale = 1 if length $path && !-e $path;
+        }
+        else {
+            my $mtime = (stat $old)[9];
+            $stale = 1 if defined $mtime && (time - $mtime) > $LEGACY_CORE_MAX_AGE;
+        }
+        next unless $stale;
+        unlink $old, $side, "$dir/pcl-$pk.lock", "$old.failed";
+        $gone++;
+    }
+    return $gone;
 }
 
 # Remove every cached core (and marker); the next spawn rebuilds.  Returns the
@@ -333,7 +415,7 @@ sub _build_cached_core {
 sub clear_cached_cores {
     my $dir = core_cache_dir();
     my @files = (glob("\Q$dir\E/pcl-*.core"), glob("\Q$dir\E/pcl-*.failed"),
-                 glob("\Q$dir\E/pcl-*.lock"));
+                 glob("\Q$dir\E/pcl-*.lock"), glob("\Q$dir\E/pcl-*.path"));
     %CORE_FOR = ();
     return @files ? unlink(@files) : 0;
 }
