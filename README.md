@@ -80,8 +80,10 @@ parameters, etc). The remaining test failures are the todo list. :-)
 | PCL's own regression suite | **246 files, 8,365 assertions, all passing** | `tools/prove-core` |
 | perl's test suite, extracted (108 files from perl 5.40's `t/`) | **18,686 pass / 675 fail** (96.5 %); 60 files pass completely | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's whole `t/` tree, run in place (528 files) | 107 files identical to perl; 105 differ for a registered, explained reason; 258 differ and are the bug queue; the remaining 58 do not compile, time out, are too slow for the quick run or produce no test output | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| a board of 14 pure-Perl CPAN distributions, 183 test files | **84 files pass, 50 pass partially, 49 fail** (2,213 assertions pass / 353 fail), every failing assertion with a recorded cause | `tools/cpan-scoreboard.pl` |
+| a board of 14 pure-Perl CPAN distributions, 183 test files | **84 files pass, 49 pass partially, 50 fail** (2,273 assertions pass / 339 fail); "fail" also counts the seven files perl itself skips | `tools/cpan-scoreboard.pl` |
 | statements the compiler cannot translate, over all of the above | **62 statements in 19 files**, each with a filed cause (mostly unsupported, like `:lvalue` subs) | `tools/drop-census.pl` |
+
+All five rows were re-measured on 2026-09-18.
 
 Every failing assertion is recorded row by row in a baseline that the test
 runner compares against, so a change that breaks something previously

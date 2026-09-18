@@ -3,10 +3,10 @@
 The measured compatibility state.  Every number below comes from a named,
 re-runnable measurement; nothing here is estimated.
 
-**Last full re-measure: 2026-09-04** — the gate, the extracted perl suite,
-the in-place perl `t/` snapshot, the execution benchmarks
-([`faster-codegen-suggestions.md`](faster-codegen-suggestions.md) §0.2i is
-the table) and the CPAN board, the bench and CPAN boards on main `bc9aa4a` (generation v2-611, the morning of 2026-09-04); the gate, the sweep, the companion counts and the census re-measured the same afternoon on main `a715608` (generation v2-650, after round 23 landed).
+**Last full re-measure: 2026-09-18** (main `67781634`, generation v2-1480) —
+the gate, the extracted perl suite, the CPAN board, the drop census and the
+execution benchmarks ([`faster-codegen-suggestions.md`](faster-codegen-suggestions.md)
+§0.2p is the table, taken on a quiet box) on that commit; the in-place perl `t/` counts from the same day's `--all --quick` run on `158be071`, two merges earlier (the later merge changed only the module cache and was re-checked on the 33 files that exercise the search path, zero movers).
 
 **Contents:** [what runs](#what-runs) · [what deliberately does not](#what-deliberately-does-not-work) · [known sharp edges](#known-sharp-edges) · [XS](#xs)
 
@@ -14,11 +14,11 @@ the table) and the CPAN board, the bench and CPAN boards on main `bc9aa4a` (gene
 
 | measurement | result | how to reproduce |
 |---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **195 files, 6,729 assertions, all passing.**  With the experimental [pclxs](#xs) sibling checked out beside the tree, three more files add 14 XS-bridge rows (198 / 6,743); those 14 currently fail because pclxs is mid-change | `tools/prove-core` (or `prove -j8 Pl/t/`) |
-| perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.40's `t/op`, `t/base`, …) | **18,581 assertions pass / 649 fail (96.6 %)**; **58 files pass completely**; 92 files run to the end, 16 abort part-way, none fails to compile (`state.t`'s one `given` block is a statement-level refusal since round 23, so its other 88 assertions run) | `perl tools/sweep-perl-tests.pl --jobs 8` |
-| perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **92 files identical to perl**; **108** differ for a registered, explained reason (`baselines/perl-suite-expected.tsv` — perl-internals probes, threads, taint, …); **275** differ and are the bug queue; 10 do not compile; 9 time out; 31 produce no TAP; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| pure-Perl CPAN modules: a 14-distribution board, 183 test files | **84 files PASS / 50 PARTIAL / 49 FAIL; 2,213 assertions ok / 353 not ok**, and since s473w every one of the 353 has a CAUSE (a PARTIAL file ran most of its suite; FAIL is "zero ok", which also counts the seven files perl itself skips — they carry the cause `PERL-SKIP`).  Snapshot [`../baselines/cpan-board14-s473w.tsv`](../baselines/cpan-board14-s473w.tsv), taken 2026-09-09; its header attributes each of the seven rows that moved since [`cpan-board14-s474.tsv`](../baselines/cpan-board14-s474.tsv) (four Scalar-List-Utils files and Data-Dump `filtered.t` to PASS on #1507 + #1525; Text-Balanced `05_extmul.t` out of the board's 120 s timeout; and one DOWN-mover, `refaddr.t`, five rows that were passing on nothing).  The ROW-level file [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv) is the board's answer to the sweep's `fail-baseline.tsv`: one line per failing assertion with its got/expected and its cause, compared by `tools/cpan-scoreboard.pl --diff` (task #1502) | the command below |
-| statements the compiler cannot translate, counted over six populations (the two suites above, the CPAN board, PCL's shipped `lib/`, the examples, the `Pl/t` fixtures) | **62 statements in 19 files**, every one classified with an owning task; zero in PCL's own shipped module tree | `tools/drop-census.pl` vs [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
+| PCL's own regression gate (`Pl/t/`) | **246 files, 8,365 assertions, all passing.**  Three of the files are the XS-bridge tests, parked (`plan skip_all`) while the experimental [pclxs](#xs) sibling is mid-change; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
+| perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.40's `t/op`, `t/base`, …) | **18,686 assertions pass / 675 fail (96.5 %)**; **60 files pass completely**; 96 files run to the end, 12 abort part-way, none fails to compile.  (The fail count is higher than the 649 of 2026-09-04 although 105 more assertions pass: files that used to stop early now run further and show rows that always failed) | `perl tools/sweep-perl-tests.pl --jobs 8` |
+| perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **107 files identical to perl**; **105** differ for a registered, explained reason (`baselines/perl-suite-expected.tsv` — perl-internals probes, threads, taint, …); **258** differ and are the bug queue; 9 do not compile; 3 time out; 31 produce no TAP; 12 are too slow for the `--quick` form and are listed as NOT-RUN; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
+| pure-Perl CPAN modules: a 14-distribution board, 183 test files | **84 files PASS / 49 PARTIAL / 50 FAIL; 2,273 assertions ok / 339 not ok** on 2026-09-18 (a PARTIAL file ran most of its suite; FAIL is "zero ok", which also counts the seven files perl itself skips — they carry the cause `PERL-SKIP`).  The BLESSED snapshot is still [`../baselines/cpan-board14-s473w.tsv`](../baselines/cpan-board14-s473w.tsv) of 2026-09-09 (84 / 50 / 49; 2,213 / 353, every failing row with a cause); today's run differs from it in six files — three gained rows (Data-Dump `dump.t` to PASS, Safe-Isa `safe_does.t` 6 → 20 rows, Scalar-List-Utils `reftype.t`), Safe-Isa `safe_isa.t` now runs 68 rows instead of 8 and shows one failing row (#1912), `openhan.t` lost two rows that had been passing on nothing (#1571), and Text-Balanced `05_extmul.t` exhausts the 1 GB heap and produces no rows (#1512) — and attributing those movers and re-blessing is task #1913.  The ROW-level file [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv) is the board's answer to the sweep's `fail-baseline.tsv`: one line per failing assertion with its got/expected and its cause, compared by `tools/cpan-scoreboard.pl --diff` (task #1502) | the command below |
+| statements the compiler cannot translate, counted over six populations (the two suites above, the CPAN board, PCL's shipped `lib/`, the examples, the `Pl/t` fixtures) | **62 statements in 19 files** (re-counted 2026-09-18, row for row the blessed census), every one classified with an owning task; zero in PCL's own shipped module tree | `tools/drop-census.pl` vs [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
 | XS bridge conformance corpus (pclxs, real perl as oracle) | 398 pass / 0 fail at the last measurement (2026-08-03); `Digest::MD5`'s own `md5-aaa.t` passed 256/256 under PCL.  Not re-run since — pclxs is under separate development | `tools/pcl-conform` |
 
 Failures are tracked row by row in blessed baselines
@@ -33,17 +33,17 @@ what is a bug and what is the deliberate edge of the language PCL
 implements.**  One rule, six classes, one command
 (`tools/cause-census.pl --markdown`, rule and reconciliation in
 [`failure-cause-classes.md`](failure-cause-classes.md)) — measured
-2026-09-16 against the sweep of 2026-09-16 on `0cd146ce`:
+2026-09-18 against the sweep of 2026-09-18 on `67781634`:
 
 | population | rows | not-supported | parked | bug | other | unexplained | perl-skip | not-supported + parked |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| perl-tests sweep | 671 | 291 | 69 | 304 | 7 | 0 | 0 | 53.7% |
-| companion (perl's own t/) | 11,984 | 4,661 | 88 | 4,873 | 0 | 2,362 | 0 | 39.6% |
-| CPAN board (14 dists) | 389 | 88 | 0 | 294 | 0 | 0 | 7 | 23.0% |
-| companion XDIFF rows | 2,517 | 2,516 | 0 | 0 | 0 | 1 | 0 | 100.0% |
+| perl-tests sweep | 670 | 319 | 69 | 275 | 7 | 0 | 0 | 57.9% |
+| companion (perl's own t/) | 11,736 | 5,464 | 88 | 5,440 | 3 | 741 | 0 | 47.3% |
+| CPAN board (14 dists) | 389 | 203 | 0 | 179 | 0 | 0 | 7 | 53.1% |
+| companion XDIFF rows | 2,516 | 2,515 | 0 | 0 | 0 | 1 | 0 | 100.0% |
 | shortfall: perl-tests | 12,213 | 267 | 0 | 104 | 0 | 11,842 | 0 | 2.2% |
-| shortfall: perl's t/ | 444,439 | 55,393 | 417 | 388,107 | 0 | 522 | 0 | 12.6% |
-| **all populations** | **472,213** | **63,216** | **574** | **393,682** | **7** | **14,727** | **7** | **13.5%** |
+| shortfall: perl's t/ | 443,859 | 55,432 | 417 | 387,706 | 0 | 304 | 0 | 12.6% |
+| **all populations** | **471,383** | **64,200** | **574** | **393,704** | **10** | **12,888** | **7** | **13.7%** |
 
 `not-supported` = the cause names a [`not-supported.md`](not-supported.md)
 section; `parked` = a scheduling decision; `bug` = a filed task; `perl-skip`
@@ -52,12 +52,12 @@ section; `parked` = a scheduling decision; `bug` = a filed task; `perl-skip`
 run so it cannot grow unnoticed.  **Read the per-population rows, not the
 total**: the total is dominated by the `t/` shortfall's few enormous
 generated files.  The `perl-tests` sweep is the population PCL is measured
-against on every change, and **just over half of its failing rows are
-deliberate non-support, not bugs**.  Rows the skip registry relabels as
+against on every change, and **58 % of its failing rows are deliberate
+non-support or parked, not bugs**.  Rows the skip registry relabels as
 skips are not-supported failures too, and they sit OUTSIDE the sweep row:
 198 rows in 24 files on the same sweep (the `(198 by the registry)` in its
 TOTAL line).  Counting them, the sweep's honest not-supported share is
-(291 + 69 + 198) / (671 + 198) = 64 %.
+(319 + 69 + 198) / (670 + 198) = 67.5 %.
 
 **Untranslatable statements are never silent.**  One the compiler cannot
 lower is announced on stderr at compile time

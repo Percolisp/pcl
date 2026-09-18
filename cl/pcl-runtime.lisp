@@ -14379,7 +14379,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (setf *p-prev-debugger-hook* sb-ext:*invoke-debugger-hook*)
     (setf sb-ext:*invoke-debugger-hook* #'%p-uncaught-die-hook)))
 
-(declaim (ftype function p-can))
+;;; p-can is called below and defined much later; its forward declaration is
+;;; the (function (t t) t) proclamation at the top of this file.  A second,
+;;; weaker `(declaim (ftype function p-can))` here made every load of the
+;;; runtime FROM SOURCE print "The new ftype proclamation for pcl:p-can does
+;;; not match the old" (s490: seen in every tools/run-dist-t.pl run).
 
 (defun %p-string-concat-safe (args)
   "p-string-concat over ARGS, which may be empty (the bare `die`)."
