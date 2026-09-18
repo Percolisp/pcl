@@ -9803,6 +9803,23 @@ sub _process_use_lib {
 
 # Find a module file in @INC paths
 # Returns the path to the .pm file, or undef if not found
+#
+# THE ONE RESOLVER, AND IT RECORDS HOW IT ANSWERED (task #1860).  The cache
+# manifest must be able to re-ask THIS question later, and the runtime cannot
+# ask it: this list is not the runtime's @INC.  It is
+#
+#   [ the file's own `use lib` dirs (unshifted, so AHEAD of everything),
+#     PCL's shim lib/,                      <-- $_pcl_lib_dir, the HEAD/BASE line
+#     the child perl's @INC (the -I list the runtime handed it, PERL5LIB,
+#     perl's own directories) ]
+#
+# so the manifest is made SELF-DESCRIBING instead: per resolved module it
+# records every directory probed BEFORE the hit (the runtime re-probes exactly
+# those — a file appearing in one of them is a dependency that has MOVED) and
+# whether the hit was in the HEAD or in the BASE (only a BASE hit can be moved
+# by a change to the runtime's own search path).  A hit at or before the shim
+# counts as HEAD; if the shim is not on the list at all nothing is BASE, which
+# errs towards checking less rather than towards a false stale.
 sub _find_module_file {
   my ($self, $module) = @_;
 
@@ -9811,9 +9828,19 @@ sub _find_module_file {
   $file =~ s/::/\//g;
   $file .= '.pm';
 
+  my @tried;
+  my $head = 1;
   for my $inc (@{$self->inc_paths}) {
     my $path = "$inc/$file";
-    return $path if -f $path;
+    if (-f $path) {
+      Pl::ProtoCache::note_resolution($module, $path, \@tried, $head);
+      return $path;
+    }
+    # An @INC code ref has no directory spelling and is no directory to probe
+    # (the runtime's own -I derivation skips it for the same reason).
+    next if ref $inc || !defined $inc || !length $inc;
+    push @tried, $inc;
+    $head = 0 if $inc eq $_pcl_lib_dir;
   }
 
   return undef;

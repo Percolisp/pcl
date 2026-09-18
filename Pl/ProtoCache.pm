@@ -319,6 +319,25 @@ sub end_walk {
            taint => $f->{taint} };
 }
 
+# HOW A MODULE NAME WAS RESOLVED, by the ONE resolver (task #1860).
+# "NAME\0PATH" => [ \@dirs-probed-before-the-hit (absolute), $head ].  Keyed by
+# the PATH as well as the name because a process can resolve one name twice
+# under different inc_paths (a `use lib` inside a module mutates the list): the
+# facts wanted are those of the resolution that produced the path being
+# recorded, not the newest ones.  Never cleared: it is a record of what this
+# process did, and a dependency's own staleness is the MD5's job.
+our %RESOLVED;
+
+sub note_resolution {
+  my ($module, $path, $tried, $head) = @_;
+  require File::Spec;
+  # rel2abs, NEVER abs_path: a `use lib 't/lib'` that does not exist yet is
+  # exactly the directory R1 must watch, and abs_path answers undef for it.
+  $RESOLVED{"$module\0$path"} =
+    [ [ map { File::Spec->rel2abs($_) } @$tried ], ($head ? 1 : 0) ];
+  return;
+}
+
 # Record one resolved dependency in the walk currently in progress.  PATH may
 # be undef ("this name does not resolve"), which is a fact the walk used.
 sub note_dep {
@@ -329,15 +348,28 @@ sub note_dep {
     my @s = stat $path or return;   # vanished under us: record nothing
     ($mtime, $size) = ($s[9], $s[7]);
   }
-  $FRAMES[-1]{deps}{"$kind\0$name"} = [ $kind, $name, $path, $mtime, $size ];
+  my $res = ($kind eq 'mod' && defined $path) ? $RESOLVED{"$name\0$path"} : undef;
+  $FRAMES[-1]{deps}{"$kind\0$name"} = [ $kind, $name, $path, $mtime, $size, $res ];
   return;
 }
 
 # Merge a finished walk's transitive dependency list into the enclosing walk.
+# The RESOLUTION FACTS are re-read from %RESOLVED rather than copied: on the
+# path that matters — an on-disk (L2) hit, whose records come from another
+# process — load() has just re-resolved every `mod` dependency through the ONE
+# resolver under THIS process's inc_paths, so those facts are the current ones
+# and the stored ones might not be.  The record's own facts are the fallback,
+# which is what an in-process (L1) replay uses.
 sub note_deps {
   my ($deps) = @_;
   return unless @FRAMES && ref $deps eq 'ARRAY';
-  $FRAMES[-1]{deps}{ $_->[0] . "\0" . $_->[1] } = $_ for @$deps;
+  for my $d (@$deps) {
+    my ($kind, $name, $path) = @$d;
+    my @rec = @{$d}[0 .. 4];
+    $rec[5] = ($kind eq 'mod' && defined $path)
+            ? ($RESOLVED{"$name\0$path"} // $d->[5]) : undef;
+    $FRAMES[-1]{deps}{"$kind\0$name"} = \@rec;
+  }
   return;
 }
 
@@ -436,7 +468,12 @@ mean the cache does nothing).  Never fatal: a record that does not serialise
 sub store {
   my ($module, $path, $env, $frame) = @_;
   return unless enabled();
-  my $deps = $frame->{deps} || [];
+  # FIVE FIELDS ON DISK.  A live record carries a sixth — how the name was
+  # resolved (task #1860) — and that is a fact about THIS process's inc_paths,
+  # so it is never stored: a hit re-resolves every name anyway (_deps_valid),
+  # and note_deps takes the facts from that fresh resolution.  Writing it would
+  # also change the on-disk arity, which _deps_valid reads as corruption.
+  my $deps = [ map { [ @{$_}[0 .. 4] ] } @{ $frame->{deps} || [] } ];
   if ($frame->{taint}) {
     $STATS{taint}++;
     push @{ $STATS{tainted} }, $module;
@@ -604,7 +641,8 @@ sub depends_records {
                  name  => $name,
                  path  => $path,
                  sha   => file_sha($path),
-                 class => trust_class($path) };
+                 class => trust_class($path),
+                 res   => $d->[5] };
   }
   return \@out;
 }
@@ -619,7 +657,21 @@ may contain anything but a newline):
   gen<TAB>v2-830
   source<TAB>installed<TAB>/abs/Foo.pm
   dep<TAB>mod<TAB>Bar<TAB>installed<TAB><md5><TAB>/abs/Bar.pm
+  resolve<TAB>mod<TAB>Bar<TAB>head|base
+  tried<TAB>mod<TAB>Bar<TAB>/abs/dir-probed-before-the-hit
   missing<TAB>mod<TAB>Nope
+
+C<resolve> and C<tried> are HOW the name was resolved (task #1860), and they
+are what lets the runtime re-ask the TRANSPILER's question instead of
+emulating its search order, which is not the runtime's (see
+C<Pl::Parser::_find_module_file>).  C<head> means the hit was at or before
+PCL's shim C<lib/> — a C<use lib> directory or a shim — and can therefore not
+be moved by a change to the runtime's own include path; C<base> means it was
+in the child perl's C<@INC> part and can.  One C<tried> line per directory
+probed BEFORE the hit, absolute, path LAST, in order (the runtime reads them
+as a set).  Every C<dep mod> line gets a C<resolve> line: without one the
+runtime treats the whole manifest as INVALID, so a recording path nobody
+thought of costs a re-transpile and never a stale parse (rule 12).
 
 Returns 1 on success.  Never fatal: a sidecar that cannot be written simply
 leaves the cache entry INVALID on the next run, which costs a re-transpile and
@@ -638,12 +690,25 @@ sub write_deps_file {
     if (defined $d->{path} && defined $d->{sha}) {
       push @lines, join("\t", 'dep', $d->{kind}, $d->{name},
                               $d->{class}, $d->{sha}, $d->{path});
+      push @lines, _resolution_lines($d);
     }
     else {
       push @lines, join("\t", 'missing', $d->{kind}, $d->{name});
     }
   }
   return _atomic_write_any($file, join("\n", @lines) . "\n");
+}
+
+# The `resolve`/`tried` lines for one resolved dependency, or none at all for a
+# kind that has no module search behind it (`file`: a path-required file is
+# resolved relative to the requiring file, not by a name walk, so there is no
+# prefix to watch and nothing can shadow it).
+sub _resolution_lines {
+  my ($d) = @_;
+  return () if $d->{kind} ne 'mod';
+  my $res = $d->{res} or return ();
+  return (join("\t", 'resolve', 'mod', $d->{name}, $res->[1] ? 'head' : 'base'),
+          map { join("\t", 'tried', 'mod', $d->{name}, $_) } @{ $res->[0] });
 }
 
 # temp + rename, like _atomic_write above, but to an arbitrary directory (the

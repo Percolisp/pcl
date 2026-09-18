@@ -20989,21 +20989,58 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; resolves NOW invalidates the entry — see %p-missing-resolves-p for the
 ;;; measurement.
 ;;;
-;;; WHAT IT STILL DOES NOT COVER, said out loud rather than assumed: a
-;;; dependency that MOVES — a new `-I` shadowing a shim, so the same name now
-;;; resolves to a DIFFERENT file — is not detected here; only "did not resolve,
-;;; now does" is.  The transpiler's own prototype cache (Pl/ProtoCache.pm)
-;;; re-resolves every recorded name and does catch a move; the remedy at this
-;;; layer is `pcl --clear-cache`.
+;;; A DEPENDENCY THAT MOVES (task #1860).  The two clauses above catch "this
+;;; file changed" and "this name did not resolve and now does".  They do not
+;;; catch the third: the same name resolving to a DIFFERENT FILE — a
+;;; `d1/B.pm` created on an `-I` directory that was already there, shadowing
+;;; the `d2/B.pm` the transpile read (nothing in any key moves, and the
+;;; recorded file still hashes as read), or a changed `-I` list for a MODULE,
+;;; whose key does not carry one.  Measured both ways: with two `B.pm` that
+;;; differ only in an empty prototype, perl answers 107 then 8 and PCL served
+;;; yesterday's parse twice.
+;;;
+;;; THE MANIFEST IS SELF-DESCRIBING, because this side cannot ask the
+;;; transpiler's question.  The transpiler's search list is not @INC: it is
+;;; [the file's own `use lib` dirs, PCL's shim lib/, then the child's @INC],
+;;; and emulating that order from here is the endless-re-transpile trap (every
+;;; shim dependency would read stale forever).  So `pl2cl --deps` records, per
+;;; resolved `mod` dependency, the directories it probed BEFORE the hit and
+;;; whether the hit was in the HEAD of that list (a `use lib` dir or the shim)
+;;; or in the BASE (the child's @INC part) — and this side checks those facts:
+;;;
+;;;   R1  no recorded `tried` directory holds the dependency's file NOW
+;;;       (%p-dep-shadowed-p).  Exact, and it needs no search path of ours.
+;;;   R2  for a BASE hit only, the first directory of the list a child
+;;;       transpile would search NOW still holds the recorded file
+;;;       (%p-dep-moved-p).  A HEAD hit never runs it — that is what keeps a
+;;;       shim dependency and a `use lib` dependency from reading stale
+;;;       forever.
+;;;
+;;; A `dep mod` line with no `resolve` line makes the manifest INVALID, so a
+;;; recording path the transpile side missed costs a re-transpile and never a
+;;; stale parse (rule 12).
+;;;
+;;; WHAT IT STILL DOES NOT COVER, said out loud rather than assumed: R2 is for
+;;; MODULE entries.  The SCRIPT and string-EVAL layers pass :CHECK-MOVE NIL —
+;;; a script's key already carries the `-I` list, the cwd and PERL5LIB
+;;; (task #1841), and the list in force while a script's own entry is
+;;; validated is the SEED, which is not what its child transpile was given.
+;;; R1 runs for all three.
 
 (defstruct (p-cache-manifest (:conc-name p-cm-))
   "A cache entry's dependency manifest: the module's trust CLASS (:installed
    or :local — see %p-compile-module-p), the (path . md5) pairs its transpile
-   read, and the (kind . name) pairs it could NOT resolve.  VALID-P is the
-   verdict, computed once per source per run."
+   read, the (kind . name) pairs it could NOT resolve, and how each `mod`
+   dependency was RESOLVED (task #1860) — MOD-DEPS holds (name . path), RES
+   holds (name . head-p), TRIED holds one (name . directory) per directory
+   probed before the hit.  VALID-P is the verdict, computed once per source
+   per run."
   (class :local)
   (deps nil)
   (missing nil)
+  (mod-deps nil)
+  (res nil)
+  (tried nil)
   (valid-p nil))
 
 (defvar *p-file-hash-cache* (make-hash-table :test 'equal)
@@ -21087,6 +21124,71 @@ buffer's fill-pointer; everything else falls back to file-length."
         (and (p-find-module-in-inc (p-module-to-path name)) t)
         t)))
 
+(defvar *p-inc-probe-cache* (make-hash-table :test 'equal)
+  "\"DIR<NUL>REL\" -> the file REL-PATH has in DIR right now (a truename), or
+   NIL.  For THIS run only, and it makes the same assumption
+   *p-file-hash-cache* makes: a file cannot appear under a running program in
+   any way perl would notice either, since perl resolves each name once.  The
+   memo is shared by both resolution clauses, so a name several modules depend
+   on is probed once per directory however many times it is asked about.")
+
+(defun %p-dir-holds-p (dir rel-path)
+  "The file REL-PATH has in DIR right now, as an absolute truename, or NIL.
+   %P-INC-DIR-FILE is the one directory probe (rule 11: it is the same one the
+   module search uses, so a `.pmc` beside a `.pm` counts here too)."
+  (let* ((key (concatenate 'string dir (string #\Nul) rel-path))
+         (hit (gethash key *p-inc-probe-cache* :miss)))
+    (if (eq hit :miss)
+        (setf (gethash key *p-inc-probe-cache*)
+              (ignore-errors (%p-inc-dir-file dir rel-path)))
+        hit)))
+
+(defun %p-dep-shadowed-p (name manifest)
+  "R1 (task #1860): true when a directory the TRANSPILER probed before this
+   dependency's hit NOW holds its file — the dependency has moved, so the
+   emission that encodes the old file's prototypes and exports is stale.
+
+   This is the transpiler's own question re-asked over the list it used, so it
+   needs no search path of ours: the shim `lib/` and a `use lib` directory are
+   just directories in that list, and neither needs special-casing."
+  (let ((rel (p-module-to-path name)))
+    (some (lambda (entry)
+            (and (string= (car entry) name)
+                 (%p-dir-holds-p (cdr entry) rel)
+                 t))
+          (p-cm-tried manifest))))
+
+(defun %p-dep-moved-p (name path)
+  "R2 (task #1860): true when the first directory a child transpile would
+   search NOW that holds NAME's file is not the recorded PATH — the `-I` list
+   has changed under a MODULE entry, whose key does not carry one.
+
+   %P-CHILD-INC-DIRS is the list, because it is the one definition of what a
+   child transpile searches; nothing found there is NOT evidence of a move
+   (the child searches PERL5LIB and perl's own directories too, which are not
+   on it), so it answers NIL.  Truenames on both sides: the recorded path is
+   spelled as the transpiler's `$inc/$file` and may be relative or hold `..`."
+  (let* ((rel (p-module-to-path name))
+         (now (loop for dir in (%p-child-inc-dirs)
+                    thereis (%p-dir-holds-p dir rel))))
+    (and now
+         (let ((was (ignore-errors
+                      (namestring (truename (%p-literal-path path))))))
+           (not (and was (string= now was)))))))
+
+(defun %p-mod-dep-resolves-as-recorded-p (dep manifest check-move)
+  "The resolution verdict for one `dep mod` line, DEP being (name . path).
+   NIL — the entry is stale — when the manifest carries no `resolve` line for
+   it (rule 12: a recording path the transpile side missed is a re-transpile,
+   never a silent gap), when R1 finds it shadowed, or when R2 finds it moved.
+   CHECK-MOVE is the layer's answer to R2; see the commentary above."
+  (let ((entry (assoc (car dep) (p-cm-res manifest) :test #'string=)))
+    (and entry
+         (not (%p-dep-shadowed-p (car dep) manifest))
+         (or (cdr entry)                    ; a HEAD hit cannot have been moved
+             (not check-move)
+             (not (%p-dep-moved-p (car dep) (cdr dep)))))))
+
 (defun %p-parse-manifest-line (line manifest)
   "Fold one manifest line into MANIFEST.  T when the line is understood; NIL
    when it is not, which makes the whole entry invalid — an unknown key is
@@ -21117,14 +21219,42 @@ buffer's fill-pointer; everything else falls back to file-length."
              (let ((f (%p-split-fields line #\Tab 6)))
                (when (= (length f) 6)
                  (push (cons (sixth f) (fifth f)) (p-cm-deps manifest))
+                 (when (string= (second f) "mod")
+                   (push (cons (third f) (sixth f)) (p-cm-mod-deps manifest)))
+                 t)))
+            ;; HOW a `mod` dependency resolved (task #1860): where in the
+            ;; transpiler's list the hit was, and every directory it probed
+            ;; before it.  Another kind is not silently accepted — a resolution
+            ;; fact this side does not understand is corruption or a writer
+            ;; from another version (rule 12).
+            ((string= key "resolve")
+             (let ((f (%p-split-fields line #\Tab 4)))
+               (when (and (= (length f) 4)
+                          (string= (second f) "mod")
+                          (or (string= (fourth f) "head")
+                              (string= (fourth f) "base")))
+                 (push (cons (third f) (string= (fourth f) "head"))
+                       (p-cm-res manifest))
+                 t)))
+            ((string= key "tried")
+             (let ((f (%p-split-fields line #\Tab 4)))
+               (when (and (= (length f) 4) (string= (second f) "mod"))
+                 (push (cons (third f) (fourth f)) (p-cm-tried manifest))
                  t)))
             (t nil)))))
 
-(defun %p-manifest-at (path)
+(defun %p-manifest-at (path &key check-move)
   "Read and VERIFY the manifest sidecar AT PATH.  Returns a P-CACHE-MANIFEST
    whose VALID-P says whether the cache entry beside it may be used: the file
-   must exist, parse, and every dependency it names must still hash to what
-   the transpile read.
+   must exist, parse, every dependency it names must still hash to what the
+   transpile read, no name it recorded as unresolved may resolve now, and
+   every `mod` dependency must still resolve as it did (task #1860).
+
+   CHECK-MOVE is R2, and every caller states it rather than taking a default:
+   only a MODULE entry runs it (%P-READ-MANIFEST), because only a module's key
+   is blind to the `-I` list, and because the list in force while a SCRIPT's
+   own entry is validated is the seed `pcl` hands over, not the one its child
+   transpile was given.  R1 runs for every layer.
 
    THE ONE MANIFEST READER (rule 11).  Two cache layers publish one: a
    module's transpile, keyed by its source path (%P-READ-MANIFEST below), and
@@ -21146,12 +21276,17 @@ buffer's fill-pointer; everything else falls back to file-length."
                             (let ((now (%p-file-md5 (car dep))))
                               (and now (string= now (cdr dep)))))
                           (p-cm-deps manifest))
-                   (notany #'%p-missing-resolves-p (p-cm-missing manifest))))))
+                   (notany #'%p-missing-resolves-p (p-cm-missing manifest))
+                   (every (lambda (dep)
+                            (%p-mod-dep-resolves-as-recorded-p
+                             dep manifest check-move))
+                          (p-cm-mod-deps manifest))))))
     manifest))
 
 (defun %p-read-manifest (source-path)
-  "SOURCE-PATH's manifest sidecar, read and verified."
-  (%p-manifest-at (%p-manifest-path source-path)))
+  "SOURCE-PATH's manifest sidecar, read and verified.  A MODULE entry: its key
+   carries no include path, so it is the one layer that runs R2."
+  (%p-manifest-at (%p-manifest-path source-path) :check-move t))
 
 (defun %p-cache-manifest (source-path)
   "SOURCE-PATH's manifest, read once per run."
@@ -21176,7 +21311,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    manifest comes from the module derivation and is memoised per source path,
    which is what a module load wants (it asks twice, once for the fasl and
    once for the .lisp).  The explicit form reads the file each time it is
-   asked, exactly as the string-eval cache does with %P-MANIFEST-AT.
+   asked, exactly as the string-eval cache does with %P-MANIFEST-AT — and it
+   passes :CHECK-MOVE NIL, because the layer that names its own sidecar is the
+   SCRIPT cache, whose key already carries the `-I` list, the cwd and PERL5LIB
+   (#1860's R2 is a module's clause; R1 runs either way).
 
    NO AGE CLAUSE.  Until #1261 an entry also expired after
    *PCL-CACHE-MAX-AGE*, which was a stand-in for the staleness this predicate
@@ -21193,7 +21331,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (source (%p-mtime source-path)))
     (and cached source (> cached source)
          (p-cm-valid-p (if deps-path
-                           (%p-manifest-at deps-path)
+                           (%p-manifest-at deps-path :check-move nil)
                            (%p-cache-manifest source-path))))))
 
 ;;; --- Module Transpilation ---
@@ -21255,9 +21393,20 @@ buffer's fill-pointer; everything else falls back to file-length."
    An @INC entry that is not a string or pathname (perl allows a code ref or
    an object hook there) has no `-I` spelling and is skipped: the child simply
    does not see it, exactly as it did not before."
+  (loop for dir in (%p-child-inc-dirs) append (list "-I" dir)))
+
+(defun %p-child-inc-dirs ()
+  "The DIRECTORIES %P-TRANSPILE-INC-ARGS spells as `-I`, in order: the
+   resolver's list, minus PCL's shim lib/ and minus every entry with no
+   directory spelling, deduplicated (the fallback repeats @INC in ordinary
+   operation, and a first match does not care but a command line does).
+
+   ONE DEFINITION OF WHAT A CHILD TRANSPILE SEARCHES, because #1860's R2 asks
+   the same question from the other end: given this list, is the file a
+   recorded dependency resolved to still the first one a child would find?"
   (let ((seen (make-hash-table :test 'equal))
-        (args '()))
-    (dolist (dir (%p-inc-search-dirs) (nreverse args))
+        (dirs '()))
+    (dolist (dir (%p-inc-search-dirs) (nreverse dirs))
       (let* ((d (unbox dir))
              (s (cond ((stringp d) d)
                       ((pathnamep d) (namestring d)))))
@@ -21265,8 +21414,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (not (gethash s seen))
                    (not (%p-shim-lib-dir-p s)))
           (setf (gethash s seen) t)
-          (push "-I" args)
-          (push s args))))))
+          (push s dirs))))))
 
 (defun p-transpile-file (source-path &optional deps-path (mode :module) inc-dirs)
   "Transpile a Perl file to Common Lisp code by calling pl2cl.
