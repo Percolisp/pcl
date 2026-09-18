@@ -249,6 +249,7 @@
 #       passing.  The four survivors' cause is corrected #1590 -> **#1588**
 #       (PERL_HASH_SEED / PERL_PERTURB_KEYS are inert), which is what they
 #       always were once the file could run.
+# taken-at: 3ac9394f 2026-09-18 (6 file(s) re-measured)
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -2102,30 +2103,30 @@ op/anonsub.t	4	ok	not ok	[at t/op/anonsub.t line 11]	#1771
 op/anonsub.t	6	ok	not ok	[at t/op/anonsub.t line 11]	#1771
 op/anonsub.t	7	ok	not ok	[at t/op/anonsub.t line 11]	#1771
 op/anonsub.t	9	ok	not ok	undef &anon giving it a freed GV	#1771
-op/array.t	83	ok	not ok	$a: $\# on freed array is undef
-op/array.t	85	ok	not ok	$a: msg
-op/array.t	84	ok	not ok	$a: number of warnings
+op/array.t	83	ok	not ok	$a: $\# on freed array is undef	#1871
+op/array.t	85	ok	not ok	$a: msg	#1871
+op/array.t	84	ok	not ok	$a: number of warnings	#1871
 op/array.t	131	ok	not ok	@_ alias to nonexistent neg index within array
 op/array.t	109	ok	not ok	[at t/op/array.t line 358]
 op/array.t	111	ok	not ok	[at t/op/array.t line 365]
 op/array.t	112	ok	not ok	[at t/op/array.t line 372]
 op/array.t	114	ok	not ok	[at t/op/array.t line 379]
-op/array.t	126	ok	not ok	arylen_p magic does not stop isa magic from being copied
-op/array.t	172	ok	not ok	assigning to arylen aliased in foreach(scalar $\#arylen)
-op/array.t	86	ok	not ok	do {}: $\# on freed array is undef
-op/array.t	88	ok	not ok	do {}: msg
-op/array.t	87	ok	not ok	do {}: number of warnings
+op/array.t	126	ok	not ok	arylen_p magic does not stop isa magic from being copied	#1871
+op/array.t	172	ok	not ok	assigning to arylen aliased in foreach(scalar $\#arylen)	#1871
+op/array.t	86	ok	not ok	do {}: $\# on freed array is undef	#1871
+op/array.t	88	ok	not ok	do {}: msg	#1871
+op/array.t	87	ok	not ok	do {}: number of warnings	#1871
 op/array.t	135	ok	not ok	error when setting alias to -1 elem of empty array
 op/array.t	133	ok	not ok	error when setting alias to negative index past beginning
-op/array.t	193	ok	not ok	holes passed to sub do not lose their position (aelem)
-op/array.t	194	ok	not ok	holes passed to sub do not lose their position (aelem, mg)
-op/array.t	191	ok	not ok	holes passed to sub do not lose their position (multideref)
-op/array.t	192	ok	not ok	holes passed to sub do not lose their position (multideref, mg)
-op/array.t	176	ok	not ok	lazy element creation with refgen
-op/array.t	189	ok	not ok	non-elems read from @a do not lose their position
-op/array.t	190	ok	not ok	non-elems read from magical @a do not lose their position
-op/array.t	100	ok	not ok	orphaned 1 is always undef
-op/array.t	128	ok	not ok	undef preserves identity in array [perl \#109726]
+op/array.t	193	ok	not ok	holes passed to sub do not lose their position (aelem)	NS:Sparse arrays (holes), element aliasing, and SV identity
+op/array.t	194	ok	not ok	holes passed to sub do not lose their position (aelem, mg)	NS:Sparse arrays (holes), element aliasing, and SV identity
+op/array.t	191	ok	not ok	holes passed to sub do not lose their position (multideref)	NS:Sparse arrays (holes), element aliasing, and SV identity
+op/array.t	192	ok	not ok	holes passed to sub do not lose their position (multideref, mg)	NS:Sparse arrays (holes), element aliasing, and SV identity
+op/array.t	176	ok	not ok	lazy element creation with refgen	NS:Sparse arrays (holes), element aliasing, and SV identity
+op/array.t	189	ok	not ok	non-elems read from @a do not lose their position	NS:Sparse arrays (holes), element aliasing, and SV identity
+op/array.t	190	ok	not ok	non-elems read from magical @a do not lose their position	NS:Sparse arrays (holes), element aliasing, and SV identity
+op/array.t	100	ok	not ok	orphaned 1 is always undef	#1871
+op/array.t	128	ok	not ok	undef preserves identity in array [perl \#109726]	NS:Sparse arrays (holes), element aliasing, and SV identity
 op/attrhand.t	0	ok*	(no TAP)	*summary*
 op/attrproto.t	40	ok	not ok	(anon) bar triggers illegal proto warnings	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	41	ok	not ok	(anon) baz triggers illegal proto warnings	NS:Warnings-gated diagnostics are absent (#221)
@@ -2429,21 +2430,21 @@ op/closure.t	264	ok	not ok	RT \#1028
 op/closure.t	270	ok	not ok	[at t/op/closure.t line 653]
 op/closure.t	271	ok	not ok	don't copy a stale lexical; create a fresh undef one instead
 op/context.t	8	ok	not ok	context of { foo(); BEGIN {} }
-op/coreamp.t	63	ok	not ok [PCL #36]	&CORE::close with no args
-op/coreamp.t	68	ok	not ok [PCL #41]	&CORE::closedir in list context
-op/coreamp.t	89	ok	not ok [PCL #48]	&CORE::die
+op/coreamp.t	63	ok	not ok [PCL #36]	&CORE::close with no args	#1577
+op/coreamp.t	68	ok	not ok [PCL #41]	&CORE::closedir in list context	#1577
+op/coreamp.t	89	ok	not ok [PCL #48]	&CORE::die	#1577
 op/coreamp.t	127	ok	(missing)	&CORE::fileno	#1577
 op/coreamp.t	128	ok	(missing)	&CORE::fileno in list cx	#1577
-op/coreamp.t	2	ok	not ok	&__CLASS__ with too many args
-op/coreamp.t	3	ok	not ok	&__FILE__ with too many args
-op/coreamp.t	4	ok	not ok	&__LINE__ with too many args
-op/coreamp.t	5	ok	not ok	&__PACKAGE__ with too many args
-op/coreamp.t	10	ok	not ok	&__SUB__
-op/coreamp.t	6	ok	not ok	&__SUB__ with too many args
-op/coreamp.t	12	ok	not ok	&abs
-op/coreamp.t	13	ok	not ok	&abs in list context
-op/coreamp.t	14	ok	not ok	&abs with no args
-op/coreamp.t	11	ok	not ok	&abs with too many args
+op/coreamp.t	2	ok	not ok	&__CLASS__ with too many args	#1577
+op/coreamp.t	3	ok	not ok	&__FILE__ with too many args	#1577
+op/coreamp.t	4	ok	not ok	&__LINE__ with too many args	#1577
+op/coreamp.t	5	ok	not ok	&__PACKAGE__ with too many args	#1577
+op/coreamp.t	10	ok	not ok	&__SUB__	#1577
+op/coreamp.t	6	ok	not ok	&__SUB__ with too many args	#1577
+op/coreamp.t	12	ok	not ok	&abs	#1577
+op/coreamp.t	13	ok	not ok	&abs in list context	#1577
+op/coreamp.t	14	ok	not ok	&abs with no args	#1577
+op/coreamp.t	11	ok	not ok	&abs with too many args	#1577
 op/coreamp.t	17	ok	(missing)	&accept	#1577
 op/coreamp.t	18	ok	(missing)	&accept in list context	#1577
 op/coreamp.t	15	ok	(missing)	&accept w/too few args	#1577
@@ -2455,40 +2456,40 @@ op/coreamp.t	28	ok	(missing)	&bind	#1577
 op/coreamp.t	29	ok	(missing)	&bind in list context	#1577
 op/coreamp.t	26	ok	(missing)	&bind w/too few args	#1577
 op/coreamp.t	27	ok	(missing)	&bind w/too many args	#1577
-op/coreamp.t	34	ok	not ok [PCL #17]	&binmode in list context
+op/coreamp.t	34	ok	not ok [PCL #17]	&binmode in list context	#1577
 op/coreamp.t	35	ok	(missing)	&binmode with one arg	#1577
 op/coreamp.t	31	ok	(missing)	&binmode with too few args	#1577
-op/coreamp.t	32	ok	not ok [PCL #15]	&binmode with too many args
-op/coreamp.t	39	ok	not ok [PCL #20]	&bless in list context
-op/coreamp.t	40	ok	not ok [PCL #21]	&bless with one arg
+op/coreamp.t	32	ok	not ok [PCL #15]	&binmode with too many args	#1577
+op/coreamp.t	39	ok	not ok [PCL #20]	&bless in list context	#1577
+op/coreamp.t	40	ok	not ok [PCL #21]	&bless with one arg	#1577
 op/coreamp.t	36	ok	(missing)	&bless with too few args	#1577
-op/coreamp.t	37	ok	not ok [PCL #18]	&bless with too many args
-op/coreamp.t	41	ok	not ok [PCL #22]	&break with too many args
-op/coreamp.t	44	ok	not ok [PCL #25]	&caller
+op/coreamp.t	37	ok	not ok [PCL #18]	&bless with too many args	#1577
+op/coreamp.t	41	ok	not ok [PCL #22]	&break with too many args	#1577
+op/coreamp.t	44	ok	not ok [PCL #25]	&caller	#1577
 op/coreamp.t	46	ok	(missing)	&caller in list context	#1577
-op/coreamp.t	45	ok	not ok [PCL #26]	&caller(1)
+op/coreamp.t	45	ok	not ok [PCL #26]	&caller(1)	#1577
 op/coreamp.t	47	ok	(missing)	&caller(1) in list context	#1577
 op/coreamp.t	43	ok	not ok [PCL #28]	&caller with too many args	#1577
 op/coreamp.t	62	ok	not ok [PCL #37]	effect of &CORE::close	#1577
 op/coreamp.t	49	ok	(missing)	&chmod	#1577
 op/coreamp.t	50	ok	(missing)	&chmod in list context	#1577
 op/coreamp.t	48	ok	(missing)	&chmod with no args	#1577
-op/coreamp.t	54	ok	not ok [PCL #30]	&chown in list context
+op/coreamp.t	54	ok	not ok [PCL #30]	&chown in list context	#1577
 op/coreamp.t	56	ok	(missing)	&chr	#1577
 op/coreamp.t	57	ok	(missing)	&chr in list context	#1577
 op/coreamp.t	58	ok	(missing)	&chr with no args	#1577
-op/coreamp.t	55	ok	not ok [PCL #31]	&chr with too many args
-op/coreamp.t	59	ok	not ok [PCL #32]	&chroot with too many args
-op/coreamp.t	64	ok	not ok [PCL #37]	&close in list context
-op/coreamp.t	60	ok	not ok [PCL #33]	&close with too many args
-op/coreamp.t	65	ok	not ok [PCL #38]	&closedir w/too few args
-op/coreamp.t	66	ok	not ok [PCL #39]	&closedir w/too many args
-op/coreamp.t	71	ok	not ok [PCL #44]	&connect
-op/coreamp.t	72	ok	not ok [PCL #45]	&connect in list context
-op/coreamp.t	69	ok	not ok [PCL #42]	&connect w/too few args
-op/coreamp.t	70	ok	not ok [PCL #43]	&connect w/too many args
-op/coreamp.t	74	ok	not ok [PCL #47]	&continue
-op/coreamp.t	73	ok	not ok [PCL #46]	&continue with too many args
+op/coreamp.t	55	ok	not ok [PCL #31]	&chr with too many args	#1577
+op/coreamp.t	59	ok	not ok [PCL #32]	&chroot with too many args	#1577
+op/coreamp.t	64	ok	not ok [PCL #37]	&close in list context	#1577
+op/coreamp.t	60	ok	not ok [PCL #33]	&close with too many args	#1577
+op/coreamp.t	65	ok	not ok [PCL #38]	&closedir w/too few args	#1577
+op/coreamp.t	66	ok	not ok [PCL #39]	&closedir w/too many args	#1577
+op/coreamp.t	71	ok	not ok [PCL #44]	&connect	#1577
+op/coreamp.t	72	ok	not ok [PCL #45]	&connect in list context	#1577
+op/coreamp.t	69	ok	not ok [PCL #42]	&connect w/too few args	#1577
+op/coreamp.t	70	ok	not ok [PCL #43]	&connect w/too many args	#1577
+op/coreamp.t	74	ok	not ok [PCL #47]	&continue	#1577
+op/coreamp.t	73	ok	not ok [PCL #46]	&continue with too many args	#1577
 op/coreamp.t	75	ok	(missing)	&cos with too many args	#1577
 op/coreamp.t	76	ok	(missing)	&crypt w/too few args	#1577
 op/coreamp.t	77	ok	(missing)	&crypt w/too many args	#1577
@@ -2510,14 +2511,14 @@ op/coreamp.t	110	ok	(missing)	&each with non-ref arg	#1577
 op/coreamp.t	114	ok	(missing)	&each with scalarref arg	#1577
 op/coreamp.t	109	ok	(missing)	&each with too few args	#1577
 op/coreamp.t	108	ok	(missing)	&each with too many args	#1577
-op/coreamp.t	90	ok	not ok [PCL #49]	&endgrent with too many args
-op/coreamp.t	91	ok	not ok [PCL #50]	&endhostent with too many args
-op/coreamp.t	92	ok	not ok [PCL #51]	&endnetent with too many args
-op/coreamp.t	93	ok	not ok [PCL #52]	&endprotoent with too many args
-op/coreamp.t	94	ok	not ok [PCL #53]	&endpwent with too many args
-op/coreamp.t	95	ok	not ok [PCL #54]	&endservent with too many args
+op/coreamp.t	90	ok	not ok [PCL #49]	&endgrent with too many args	#1577
+op/coreamp.t	91	ok	not ok [PCL #50]	&endhostent with too many args	#1577
+op/coreamp.t	92	ok	not ok [PCL #51]	&endnetent with too many args	#1577
+op/coreamp.t	93	ok	not ok [PCL #52]	&endprotoent with too many args	#1577
+op/coreamp.t	94	ok	not ok [PCL #53]	&endpwent with too many args	#1577
+op/coreamp.t	95	ok	not ok [PCL #54]	&endservent with too many args	#1577
 op/coreamp.t	97	ok	(missing)	&evalbytes	#1577
-op/coreamp.t	96	ok	not ok [PCL #55]	&evalbytes with too many args
+op/coreamp.t	96	ok	not ok [PCL #55]	&evalbytes with too many args	#1577
 op/coreamp.t	102	ok	(missing)	&exit with no args	#1577
 op/coreamp.t	101	ok	(missing)	&exit with too many args	#1577
 op/coreamp.t	119	ok	(missing)	&exp with too many args	#1577
@@ -2875,7 +2876,7 @@ op/coreamp.t	506	ok	(missing)	&times with too many args	#1577
 op/coreamp.t	509	ok	(missing)	&uc with too many args	#1577
 op/coreamp.t	502	ok	(missing)	&untie unties	#1577
 op/coreamp.t	178	ok	(missing)	*CORE::glob not autovivified yet	#1577
-op/coreamp.t	0	(none)	renumbered	*summary*
+op/coreamp.t	0	(none)	renumbered	*summary*	#1577
 op/coreamp.t	354	ok	(missing)	1-arg &reset	#1577
 op/coreamp.t	466	ok	(missing)	2-arg &substr	#1577
 op/coreamp.t	465	ok	(missing)	3-arg &substr	#1577
@@ -2886,9 +2887,9 @@ op/coreamp.t	20	ok	(missing)	CORE::accept does not autovivify its second argumen
 op/coreamp.t	21	ok	(missing)	CORE::accept will not accept undef 2nd arg under strict	#1577
 op/coreamp.t	30	ok	(missing)	CORE::bind dies with undef first arg	#1577
 op/coreamp.t	214	ok	(missing)	[at t/op/coreamp.t line 647]	#1577
-op/coreamp.t	7	ok	not ok	__FILE__ does check its caller
-op/coreamp.t	8	ok	not ok	__LINE__ does check its caller
-op/coreamp.t	9	ok	not ok	__PACKAGE__ does check its caller
+op/coreamp.t	7	ok	not ok	__FILE__ does check its caller	#1577
+op/coreamp.t	8	ok	not ok	__LINE__ does check its caller	#1577
+op/coreamp.t	9	ok	not ok	__PACKAGE__ does check its caller	#1577
 op/coreamp.t	99	ok	(missing)	compile-time hh propagates into &evalbytes	#1577
 op/coreamp.t	100	ok	(missing)	compile-time hint bits propagate into &evalbytes	#1577
 op/coreamp.t	106	ok	(missing)	effect of &myformline	#1577
@@ -3796,15 +3797,12 @@ op/delete.t	54	ok	not ok	a b c also equivalent
 op/delete.t	26	ok	not ok	a b c equivalent
 op/die.t	11	ok	(missing)	$@ is an Error object isa Error
 op/die.t	0	(none)	renumbered	*summary*
-op/die.t	2	ok	not ok	... and appends a phrase
 op/die.t	4	ok	not ok	Embedded null passed back into $@
-op/die.t	23	ok	not ok [PCL #15]	The __DIE__ handler should have seen this message
+op/die.t	23	ok	not ok [PCL #15]	The __DIE__ handler should have seen this message	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 op/die.t	24	ok	not ok [PCL #16]	The eval error in '$ should contain this message
-op/die.t	25	ok	not ok [PCL #17]	__DIE__ handler and $@ should be the same
+op/die.t	25	ok	not ok [PCL #17]	__DIE__ handler and $@ should be the same	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 op/die.t	6	ok	(missing)	actual array, not a copy, passed to signal handler
-op/die.t	20	ok	not ok [PCL #12]	check non-PVs in $@ are propagated
 op/die.t	16	ok	not ok [PCL #8]	die handler with utf8
-op/die.t	1	ok	not ok	die with no args propagates $@
 op/die.t	9	ok	(missing)	die with no arguments propagates $@, but leaves references alone
 op/die.t	21	ok	not ok [PCL #13]	eval should return undef
 op/die.t	5	ok	not ok	pass an array ref as an argument isa ARRAY
@@ -3815,7 +3813,7 @@ op/die.t	12	ok	(missing)	pass an array ref as an argument isa ARRAY
 op/die.t	14	ok	not ok [PCL #6]	reference returned correctly
 op/die.t	13	ok	(missing)	returning a different object than what was passed in, via PROPAGATE isa Out
 op/die.t	18	ok	not ok [PCL #10]	utf8 symbol names show up in $@
-op/die.t	22	ok	not ok [PCL #14]	we should have captured 1 error via __DIE__
+op/die.t	22	ok	not ok [PCL #14]	we should have captured 1 error via __DIE__	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 op/die_keeperr.t	8	ok	not ok	[at t/op/die_keeperr.t line 27]
 op/die_keeperr.t	10	ok	not ok	[at t/op/die_keeperr.t line 27]
 op/die_keeperr.t	12	ok	not ok	[at t/op/die_keeperr.t line 27]
@@ -3848,11 +3846,11 @@ op/each.t	38	ok	not ok [PCL #18]	U+0100        -> 3
 op/each.t	18	ok	(missing)	assign to keys does not shrink hash bucket array
 op/each.t	20	ok	(missing)	assign to keys will grow hash bucket array
 op/each.t	21	ok	(missing)	but still 3 keys
-op/each.t	40	ok	not ok [PCL #20]	each demands argument
+op/each.t	40	ok	not ok [PCL #20]	each demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
 op/each.t	64	ok	not ok [PCL #44]	each in list assignment
 op/each.t	35	ok	not ok [PCL #15]	four different Unicode keys
 op/each.t	13	ok	(missing)	keys (%hash)
-op/each.t	41	ok	not ok [PCL #21]	keys demands argument
+op/each.t	41	ok	not ok [PCL #21]	keys demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
 op/each.t	16	ok	(missing)	now 3 keys
 op/each.t	14	ok	(missing)	sanity check - more buckets than keys
 op/each.t	56	ok	not ok [PCL #36]	single key now freed
@@ -3862,14 +3860,14 @@ op/each.t	19	ok	(missing)	still 3 keys
 op/each.t	11	ok	(missing)	test iterator of each is being maintained
 op/each.t	10	ok	(missing)	test scalar keys resets iterator
 op/each.t	12	ok	(missing)	test values keys resets iterator
-op/each.t	42	ok	not ok [PCL #22]	values demands argument
+op/each.t	42	ok	not ok [PCL #22]	values demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
 op/each.t	65	ok	not ok [PCL #45]	values in list assignment
-op/eval.t	143	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 0 blocks BEGIN blocks entirely
-op/eval.t	146	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 2 blocked three nested BEGIN blocks
-op/eval.t	145	ok	not ok	BEGIN really did nothing
-op/eval.t	148	ok	not ok	BEGIN really did nothing
-op/eval.t	144	ok	not ok	Blocked BEGIN results in expected error
-op/eval.t	147	ok	not ok	Blocked BEGIN results in expected error
+op/eval.t	143	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 0 blocks BEGIN blocks entirely	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+op/eval.t	146	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 2 blocked three nested BEGIN blocks	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+op/eval.t	145	ok	not ok	BEGIN really did nothing	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+op/eval.t	148	ok	not ok	BEGIN really did nothing	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+op/eval.t	144	ok	not ok	Blocked BEGIN results in expected error	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
+op/eval.t	147	ok	not ok	Blocked BEGIN results in expected error	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	164	ok	not ok	No segfault inside sort: my @x= sort { INIT      { eval q(UNITCHECK { die; } print 0;); print q(A-); } } 1,2;
 op/eval.t	152	ok	not ok	No segfault inside sort: my @x= sort { eval "UNITCHECK { eval q(BEGIN     { die; }); print q(A-) }"; } 1,2;
 op/eval.t	150	ok	not ok	No segfault inside sort: my @x= sort { eval "UNITCHECK { eval q(UNITCHECK { die; }); print q(A-) }"; } 1,2;
@@ -3925,44 +3923,6 @@ op/filehandle.t	0	(none)	renumbered	*summary*
 op/filehandle.t	2	ok	(missing)	after 'seek' and 'tell', got expected current fh position in bytes
 op/filehandle.t	3	ok	(missing)	after 'seek' and 'tell', still got expected content
 op/filehandle.t	4	ok	not ok [PCL #2]	no errors after 'seek' or 'tell'
-op/filetest_stack_ok.t	127	ok	not ok	-A *gv returns single value
-op/filetest_stack_ok.t	122	ok	not ok	-B *gv returns single value
-op/filetest_stack_ok.t	121	ok	not ok	-B returns single value
-op/filetest_stack_ok.t	132	ok	not ok	-C *gv returns single value
-op/filetest_stack_ok.t	117	ok	not ok	-M *gv returns single value
-op/filetest_stack_ok.t	37	ok	not ok	-O *gv returns single value
-op/filetest_stack_ok.t	22	ok	not ok	-R *gv returns single value
-op/filetest_stack_ok.t	77	ok	not ok	-S *gv returns single value
-op/filetest_stack_ok.t	76	ok	not ok	-S returns single value
-op/filetest_stack_ok.t	112	ok	not ok	-T *gv returns single value
-op/filetest_stack_ok.t	27	ok	not ok	-W *gv returns single value
-op/filetest_stack_ok.t	32	ok	not ok	-X *gv returns single value
-op/filetest_stack_ok.t	82	ok	not ok	-b *gv returns single value
-op/filetest_stack_ok.t	81	ok	not ok	-b returns single value
-op/filetest_stack_ok.t	87	ok	not ok	-c *gv returns single value
-op/filetest_stack_ok.t	86	ok	not ok	-c returns single value
-op/filetest_stack_ok.t	62	ok	not ok	-d *gv returns single value
-op/filetest_stack_ok.t	61	ok	not ok	-d returns single value
-op/filetest_stack_ok.t	42	ok	not ok	-e *gv returns single value
-op/filetest_stack_ok.t	57	ok	not ok	-f *gv returns single value
-op/filetest_stack_ok.t	102	ok	not ok	-g *gv returns single value
-op/filetest_stack_ok.t	101	ok	not ok	-g returns single value
-op/filetest_stack_ok.t	107	ok	not ok	-k *gv returns single value
-op/filetest_stack_ok.t	106	ok	not ok	-k returns single value
-op/filetest_stack_ok.t	67	ok	not ok	-l *gv returns single value
-op/filetest_stack_ok.t	17	ok	not ok	-o *gv returns single value
-op/filetest_stack_ok.t	72	ok	not ok	-p *gv returns single value
-op/filetest_stack_ok.t	71	ok	not ok	-p returns single value
-op/filetest_stack_ok.t	2	ok	not ok	-r *gv returns single value
-op/filetest_stack_ok.t	52	ok	not ok	-s *gv returns single value
-op/filetest_stack_ok.t	92	ok	not ok	-t *gv returns single value
-op/filetest_stack_ok.t	91	ok	not ok	-t returns single value
-op/filetest_stack_ok.t	97	ok	not ok	-u *gv returns single value
-op/filetest_stack_ok.t	96	ok	not ok	-u returns single value
-op/filetest_stack_ok.t	7	ok	not ok	-w *gv returns single value
-op/filetest_stack_ok.t	12	ok	not ok	-x *gv returns single value
-op/filetest_stack_ok.t	47	ok	not ok	-z *gv returns single value
-op/filetest_stack_ok.t	46	ok	not ok	-z returns single value
 op/flip.t	10	ok	not ok	[at t/op/flip.t line 61]
 op/flip.t	11	ok	not ok	[at t/op/flip.t line 65]
 op/for-many.t	52	ok	not ok	aliased rvalue
@@ -4763,37 +4723,37 @@ op/kvhslice.t	25	ok	not ok [PCL #24]	not allowed as result of lvalue sub
 op/kvhslice.t	26	ok	not ok [PCL #25]	not allowed as result of lvalue sub
 op/kvhslice.t	37	ok	not ok [PCL #36]	values %hash{key} forbidden
 op/kvhslice.t	27	ok	not ok [PCL #26]	warning in scalar context
-op/lc.t	66	ok	not ok	U+03C2 ucfirst is U+03A3
+op/lc.t	66	ok	not ok	U+03C2 ucfirst is U+03A3	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	71	ok	not ok	Using s///e to change case.
 op/lc.t	73	ok	not ok	Using s///e to change case.
 op/lc.t	74	ok	not ok	Using s///e to change case.
-op/lc.t	109	ok	not ok	fc U+03B0 grows threefold
-op/lc.t	112	ok	not ok	fc U+03B0 grows threefold
-op/lc.t	115	ok	not ok	fc U+03B0 grows threefold
-op/lc.t	118	ok	not ok	fc U+03B0 grows threefold
-op/lc.t	121	ok	not ok	fc U+03B0 grows threefold
+op/lc.t	109	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	112	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	115	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	118	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	121	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	7	ok	not ok	fc() throws an exception,
-op/lc.t	108	ok	not ok	lc U+0130 grows
-op/lc.t	111	ok	not ok	lc U+0130 grows
-op/lc.t	114	ok	not ok	lc U+0130 grows
-op/lc.t	117	ok	not ok	lc U+0130 grows
-op/lc.t	120	ok	not ok	lc U+0130 grows
-op/lc.t	128	ok	not ok	lc of above-ASCII Latin1 is itself under use bytes
-op/lc.t	127	ok	not ok	lc(LATIN CAPITAL LETTER SHARP S)
+op/lc.t	108	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	111	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	114	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	117	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	120	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	128	ok	not ok	lc of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
+op/lc.t	127	ok	not ok	lc(LATIN CAPITAL LETTER SHARP S)	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	134	ok	not ok	lc(TEMP ref) does not produce a corrupt string
-op/lc.t	129	ok	not ok	lcfirst of above-ASCII Latin1 is itself under use bytes
-op/lc.t	63	ok	not ok	ligature foldcase
-op/lc.t	61	ok	not ok	ligature titlecase
-op/lc.t	59	ok	not ok	multicharacter foldcase
-op/lc.t	57	ok	not ok	multicharacter uppercase
-op/lc.t	107	ok	not ok	uc U+03B0 grows threefold
-op/lc.t	110	ok	not ok	uc U+03B0 grows threefold
-op/lc.t	113	ok	not ok	uc U+03B0 grows threefold
-op/lc.t	116	ok	not ok	uc U+03B0 grows threefold
-op/lc.t	119	ok	not ok	uc U+03B0 grows threefold
-op/lc.t	130	ok	not ok	uc of above-ASCII Latin1 is itself under use bytes
+op/lc.t	129	ok	not ok	lcfirst of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
+op/lc.t	63	ok	not ok	ligature foldcase	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	61	ok	not ok	ligature titlecase	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	59	ok	not ok	multicharacter foldcase	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	57	ok	not ok	multicharacter uppercase	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	107	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	110	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	113	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	116	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	119	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
+op/lc.t	130	ok	not ok	uc of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
 op/lc.t	133	ok	not ok	uc(TEMP ref) does not produce a corrupt string
-op/lc.t	131	ok	not ok	ucfirst of above-ASCII Latin1 is itself under use bytes
+op/lc.t	131	ok	not ok	ucfirst of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
 op/length.t	46	ok	(missing)	'print length undef' warned
 op/length.t	0	(none)	renumbered	*summary*
 op/length.t	34	ok	not ok	[at t/op/length.t line 139]
@@ -4824,17 +4784,17 @@ op/lex.t	20	ok	not ok [PCL #19]	/$a[m||/<<a with no newline [perl \#123712]
 op/lex.t	24	ok	not ok [PCL #23]	<\L\L> with no newline [perl \#123802]
 op/lex.t	12	ok	not ok [PCL #11]	@ <null> ident
 op/lex.t	18	ok	not ok [PCL #17]	@ { \327 \n - used to garble output (or fail asan) [perl \#128951]
-op/lex.t	38	ok	not ok [PCL #37]	And the expected number of warnings were generated
-op/lex.t	39	ok	not ok [PCL #38]	And the first warning is as expected
-op/lex.t	40	ok	not ok [PCL #39]	And the second warning is as expected
-op/lex.t	41	ok	not ok [PCL #40]	And the third warning is as expected
-op/lex.t	46	ok	not ok [PCL #45]	Reversing delimiters works, as expected within scope of extra delims
-op/lex.t	44	ok	not ok [PCL #43]	Using extra paired delimiter outside scope fails as expected
-op/lex.t	50	ok	not ok [PCL #49]	Using nested extra paired delimiters works
-op/lex.t	42	ok	not ok [PCL #41]	Using paired delimiter both fore/aft fails as expected
-op/lex.t	48	ok	not ok [PCL #47]	Using terminating paired delimiter fore, opening aft fails as expected outside scope of extra delims
-op/lex.t	52	ok	not ok [PCL #51]	Using too few closing delims in nesting fails as expected
-op/lex.t	37	ok	not ok [PCL #36]	Various tests of string delims \xAB/\xBB returned without error
+op/lex.t	38	ok	not ok [PCL #37]	And the expected number of warnings were generated	#1876
+op/lex.t	39	ok	not ok [PCL #38]	And the first warning is as expected	#1876
+op/lex.t	40	ok	not ok [PCL #39]	And the second warning is as expected	#1876
+op/lex.t	41	ok	not ok [PCL #40]	And the third warning is as expected	#1876
+op/lex.t	46	ok	not ok [PCL #45]	Reversing delimiters works, as expected within scope of extra delims	#1876
+op/lex.t	44	ok	not ok [PCL #43]	Using extra paired delimiter outside scope fails as expected	#1876
+op/lex.t	50	ok	not ok [PCL #49]	Using nested extra paired delimiters works	#1876
+op/lex.t	42	ok	not ok [PCL #41]	Using paired delimiter both fore/aft fails as expected	#1876
+op/lex.t	48	ok	not ok [PCL #47]	Using terminating paired delimiter fore, opening aft fails as expected outside scope of extra delims	#1876
+op/lex.t	52	ok	not ok [PCL #51]	Using too few closing delims in nesting fails as expected	#1876
+op/lex.t	37	ok	not ok [PCL #36]	Various tests of string delims \xAB/\xBB returned without error	#1876
 op/lex.t	28	ok	not ok [PCL #27]	[perl \#126482] Assert failure when mentioning a constant twice in a row
 op/lex.t	32	ok	not ok [PCL #31]	[perl \#128996] - use of PL_op after op is freed
 op/lex.t	33	ok	not ok [PCL #32]	[perl \#128997] - buffer read overflow
@@ -4954,21 +4914,21 @@ op/loopctl.t	61	not ok	ok	constant optimization doesn't change return value # TO
 op/loopctl.t	62	ok	not ok	last with non-constant label
 op/loopctl.t	63	ok	not ok	next with non-constant label
 op/loopctl.t	64	ok	not ok	redo with non-constant label
-op/magic.t	160	ok	not ok [PCL #162]	${^LAST_FH} after another tell
-op/magic.t	159	ok	not ok [PCL #161]	${^LAST_FH} after tell
-op/magic.t	161	ok	not ok [PCL #163]	${^LAST_FH} referencing lexical coercible glob
+op/magic.t	160	ok	not ok [PCL #162]	${^LAST_FH} after another tell	#1872
+op/magic.t	159	ok	not ok [PCL #161]	${^LAST_FH} after tell	#1872
+op/magic.t	161	ok	not ok [PCL #163]	${^LAST_FH} referencing lexical coercible glob	#1872
 op/magic.t	0	(none)	extra [PCL #135]	*extra* Assign a constant to a magic hash
 op/magic.t	0	(none)	extra [PCL #134]	*extra* Push a constant on a magic array
 op/magic.t	0	(none)	renumbered	*summary*
-op/magic.t	111	ok	not ok	.. and /proc cmdline shows that
+op/magic.t	111	ok	not ok	.. and /proc cmdline shows that	NS:Assigning `$0` does not change the OS process name
 op/magic.t	110	ok	not ok	.. and the UTF-8 version is written
 op/magic.t	109	ok	not ok	.. and the warning is about a wide character
-op/magic.t	106	ok	not ok	/proc cmdline shows as expected (compare to UTF8-flagged)
-op/magic.t	107	ok	not ok	/proc cmdline shows as expected (compare to non-UTF8-flagged)
-op/magic.t	139	ok	not ok [PCL #141]	Can assign to INT
-op/magic.t	135	ok	not ok [PCL #137]	Can assign to __WARN__
-op/magic.t	140	ok	not ok [PCL #142]	Can delete from INT
-op/magic.t	136	ok	not ok [PCL #138]	Can delete from __WARN__
+op/magic.t	106	ok	not ok	/proc cmdline shows as expected (compare to UTF8-flagged)	NS:Assigning `$0` does not change the OS process name
+op/magic.t	107	ok	not ok	/proc cmdline shows as expected (compare to non-UTF8-flagged)	NS:Assigning `$0` does not change the OS process name
+op/magic.t	139	ok	not ok [PCL #141]	Can assign to INT	#1873
+op/magic.t	135	ok	not ok [PCL #137]	Can assign to __WARN__	#1873
+op/magic.t	140	ok	not ok [PCL #142]	Can delete from INT	#1873
+op/magic.t	136	ok	not ok [PCL #138]	Can delete from __WARN__	#1873
 op/magic.t	191	ok	not ok [PCL #193]	ENV key store warns about wide characters
 op/magic.t	185	ok	not ok [PCL #187]	ENV store downgrades utf8 in SV
 op/magic.t	186	ok	not ok [PCL #188]	ENV store downgrades utf8 in setenv
@@ -4983,8 +4943,8 @@ op/magic.t	74	ok	(missing)	[at t/op/magic.t line 216]
 op/magic.t	93	ok	not ok	[at t/op/magic.t line 361]
 op/magic.t	94	ok	not ok	[at t/op/magic.t line 370]
 op/magic.t	126	ok	not ok	[at t/op/magic.t line 619]
-op/magic.t	202	ok	not ok [PCL #204]	altering $0 is effective (testing with /proc/)
-op/magic.t	203	ok	not ok [PCL #205]	altering $0 is effective (testing with `ps`)
+op/magic.t	202	ok	not ok [PCL #204]	altering $0 is effective (testing with /proc/)	NS:Assigning `$0` does not change the OS process name
+op/magic.t	203	ok	not ok [PCL #205]	altering $0 is effective (testing with `ps`)	NS:Assigning `$0` does not change the OS process name
 op/magic.t	70	ok	(missing)	deleting $::{ENV}
 op/magic.t	85	ok	not ok	no %@
 op/magic.t	194	not ok	ok [PCL #196]	not exists $ENV{existing} during local $ENV{existing} # TODO exists on %ENV should reflect real env
@@ -5083,40 +5043,40 @@ op/numconvert.t	0	ok*	(no TAP)	*summary*
 op/numify_chkflags.t	0	ok*	(no TAP)	*summary*
 op/or.t	10	ok	not ok	|| propagates lvaluish context to its lhs
 op/or.t	9	ok	not ok	|| propagates lvaluish context to its rhs
-op/override.t	0	(none)	renumbered	*summary*
-op/override.t	35	ok	not ok [PCL #19]	<> does not ignore &CORE::GLOBAL::readline aliased to a constant
-op/override.t	25	ok	not ok [PCL #11]	[at t/op/override.t line 118]
-op/override.t	26	ok	not ok [PCL #12]	[at t/op/override.t line 118]
-op/override.t	28	ok	(missing)	[at t/op/override.t line 126]
-op/override.t	29	ok	(missing)	[at t/op/override.t line 142]
-op/override.t	1	ok	not ok	[at t/op/override.t line 20]
-op/override.t	2	ok	not ok	[at t/op/override.t line 25]
-op/override.t	3	ok	not ok	[at t/op/override.t line 34]
-op/override.t	4	ok	not ok	[at t/op/override.t line 37]
-op/override.t	5	ok	not ok	[at t/op/override.t line 40]
-op/override.t	6	ok	not ok	[at t/op/override.t line 43]
-op/override.t	7	ok	(missing)	[at t/op/override.t line 46]
-op/override.t	8	ok	(missing)	[at t/op/override.t line 49]
-op/override.t	9	ok	(missing)	[at t/op/override.t line 52]
-op/override.t	10	ok	(missing)	[at t/op/override.t line 58]
-op/override.t	11	ok	(missing)	[at t/op/override.t line 64]
-op/override.t	12	ok	(missing)	[at t/op/override.t line 72]
-op/override.t	13	ok	(missing)	[at t/op/override.t line 81]
-op/override.t	14	ok	(missing)	[at t/op/override.t line 82]
-op/override.t	15	ok	(missing)	[at t/op/override.t line 84]
-op/override.t	17	ok	(missing)	[at t/op/override.t line 94]
-op/override.t	18	ok	(missing)	[at t/op/override.t line 95]
-op/override.t	19	ok	(missing)	[at t/op/override.t line 96]
-op/override.t	21	ok	not ok [PCL #7]	``
-op/override.t	23	ok	not ok [PCL #9]	``
-op/override.t	34	ok	not ok [PCL #18]	`` does not ignore &CORE::GLOBAL::readpipe aliased to a constant
-op/override.t	30	ok	not ok [PCL #14]	constant inlining does not undo "use subs" on keywords
-op/override.t	36	ok	not ok [PCL #20]	keywords respect global constant overrides
-op/override.t	31	ok	not ok [PCL #15]	no crash with CORE::GLOBAL::do stub
-op/override.t	22	ok	not ok [PCL #8]	qx
-op/override.t	24	ok	not ok [PCL #10]	qx
-op/override.t	16	ok	(missing)	rcatline
-op/override.t	20	ok	(missing)	rcatline
+op/override.t	0	(none)	renumbered	*summary*	#1870
+op/override.t	35	ok	not ok [PCL #19]	<> does not ignore &CORE::GLOBAL::readline aliased to a constant	#1870
+op/override.t	25	ok	not ok [PCL #11]	[at t/op/override.t line 118]	#1870
+op/override.t	26	ok	not ok [PCL #12]	[at t/op/override.t line 118]	#1870
+op/override.t	28	ok	(missing)	[at t/op/override.t line 126]	#1870
+op/override.t	29	ok	(missing)	[at t/op/override.t line 142]	#1870
+op/override.t	1	ok	not ok	[at t/op/override.t line 20]	#1870
+op/override.t	2	ok	not ok	[at t/op/override.t line 25]	#1870
+op/override.t	3	ok	not ok	[at t/op/override.t line 34]	#1870
+op/override.t	4	ok	not ok	[at t/op/override.t line 37]	#1870
+op/override.t	5	ok	not ok	[at t/op/override.t line 40]	#1870
+op/override.t	6	ok	not ok	[at t/op/override.t line 43]	#1870
+op/override.t	7	ok	(missing)	[at t/op/override.t line 46]	#1870
+op/override.t	8	ok	(missing)	[at t/op/override.t line 49]	#1870
+op/override.t	9	ok	(missing)	[at t/op/override.t line 52]	#1870
+op/override.t	10	ok	(missing)	[at t/op/override.t line 58]	#1870
+op/override.t	11	ok	(missing)	[at t/op/override.t line 64]	#1870
+op/override.t	12	ok	(missing)	[at t/op/override.t line 72]	#1870
+op/override.t	13	ok	(missing)	[at t/op/override.t line 81]	#1870
+op/override.t	14	ok	(missing)	[at t/op/override.t line 82]	#1870
+op/override.t	15	ok	(missing)	[at t/op/override.t line 84]	#1870
+op/override.t	17	ok	(missing)	[at t/op/override.t line 94]	#1870
+op/override.t	18	ok	(missing)	[at t/op/override.t line 95]	#1870
+op/override.t	19	ok	(missing)	[at t/op/override.t line 96]	#1870
+op/override.t	21	ok	not ok [PCL #7]	``	#1870
+op/override.t	23	ok	not ok [PCL #9]	``	#1870
+op/override.t	34	ok	not ok [PCL #18]	`` does not ignore &CORE::GLOBAL::readpipe aliased to a constant	#1870
+op/override.t	30	ok	not ok [PCL #14]	constant inlining does not undo "use subs" on keywords	#1870
+op/override.t	36	ok	not ok [PCL #20]	keywords respect global constant overrides	#1870
+op/override.t	31	ok	not ok [PCL #15]	no crash with CORE::GLOBAL::do stub	#1870
+op/override.t	22	ok	not ok [PCL #8]	qx	#1870
+op/override.t	24	ok	not ok [PCL #10]	qx	#1870
+op/override.t	16	ok	(missing)	rcatline	#1870
+op/override.t	20	ok	(missing)	rcatline	#1870
 op/packagev.t	134	ok	not ok	package withversion .1.2; -> syntax error (0 before decimal required)	#1665
 op/packagev.t	136	ok	not ok	package withversion .1.2{} -> syntax error (0 before decimal required)	#1665
 op/packagev.t	127	ok	not ok	package withversion .1; -> syntax error (0 before decimal required)	#1665
@@ -5224,7 +5184,7 @@ op/postfixderef.t	66	ok	not ok [PCL #62]	Code dereference
 op/postfixderef.t	38	ok	(missing)	Curly
 op/postfixderef.t	71	ok	not ok [PCL #67]	Glob dereference
 op/postfixderef.t	65	ok	not ok [PCL #61]	Hash dereference
-op/postfixderef.t	73	ok	not ok [PCL #69]	IO slot of the temporary glob is set correctly
+op/postfixderef.t	73	ok	not ok [PCL #69]	IO slot of the temporary glob is set correctly	#1877
 op/postfixderef.t	37	ok	(missing)	Larry
 op/postfixderef.t	39	ok	(missing)	Moe
 op/postfixderef.t	77	ok	not ok [PCL #73]	PVBM is not a GLOB ref
@@ -5240,7 +5200,7 @@ op/postfixderef.t	127	ok	(missing)	[at t/op/postfixderef.t line 381]
 op/postfixderef.t	128	ok	(missing)	[at t/op/postfixderef.t line 382]
 op/postfixderef.t	55	ok	not ok [PCL #51]	defined via the correct name works
 op/postfixderef.t	61	ok	not ok [PCL #57]	defined via the correct name works
-op/postfixderef.t	27	ok	not ok	glob access syntax
+op/postfixderef.t	27	ok	not ok	glob access syntax	#1877
 op/postfixderef.t	40	ok	not ok [PCL #36]	no stooges outlast their scope
 op/protowarn.t	1	ok	not ok	One warning	NS:Warnings-gated diagnostics are absent (#221)
 op/protowarn.t	5	ok	not ok	One warning	NS:Warnings-gated diagnostics are absent (#221)
@@ -5513,10 +5473,10 @@ op/sort.t	197	ok	not ok	[at t/op/sort.t line 1184]
 op/sort.t	198	ok	not ok	[at t/op/sort.t line 1191]
 op/sort.t	22	ok	not ok	[at t/op/sort.t line 206]
 op/sort.t	172	ok	not ok	all gone
-op/sort.t	204	ok	not ok	empty (sort); not allowed
-op/sort.t	201	ok	not ok	empty sort not allowed
-op/sort.t	203	ok	not ok	empty sort; not allowed
-op/sort.t	202	ok	not ok	empty {sort} not allowed
+op/sort.t	204	ok	not ok	empty (sort); not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
+op/sort.t	201	ok	not ok	empty sort not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
+op/sort.t	203	ok	not ok	empty sort; not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
+op/sort.t	202	ok	not ok	empty {sort} not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
 op/sort.t	147	ok	not ok	goto out of a pseudo block 1
 op/sort.t	148	ok	not ok	goto out of a pseudo block 2
 op/sort.t	146	ok	not ok	goto subr from a sort sub
@@ -5525,7 +5485,7 @@ op/sort.t	162	ok	not ok	overload compare called once
 op/sort.t	163	ok	not ok	overload sort result
 op/sort.t	164	ok	not ok	overload string called twice
 op/sort.t	26	ok	not ok	redefinition should not take effect during the sort
-op/sort.t	184	ok	not ok	sort block modifying $a and $b
+op/sort.t	184	ok	not ok	sort block modifying $a and $b	NS:Writing to `$a`/`$b` inside a sort comparator
 op/sort.t	89	ok	not ok	test that EXTEND was called with an argument of 3 by pp_sort()
 op/sort.t	149	ok	not ok	undef active subr
 op/split.t	32	ok	not ok	[at t/op/split.t line 99]
@@ -5534,53 +5494,53 @@ op/split.t	151	ok	not ok	assignment to split-to-array (stacked)
 op/split.t	150	ok	not ok	assignment to split-to-array (targ/lexical)
 op/split.t	153	ok	not ok	compile-time re-eval count
 op/split.t	155	ok	not ok	run-time re-eval count
-op/split_unicode.t	33	ok	not ok	Space: U+0085 - ' '
-op/split_unicode.t	31	ok	not ok	Space: U+0085 - /\s+/
-op/split_unicode.t	35	ok	not ok	Space: U+0085 - /\s+/ No.2
-op/split_unicode.t	39	ok	not ok	Space: U+00a0 - ' '
-op/split_unicode.t	37	ok	not ok	Space: U+00a0 - /\s+/
-op/split_unicode.t	41	ok	not ok	Space: U+00a0 - /\s+/ No.2
-op/split_unicode.t	43	ok	not ok	Space: U+1680 - /\s+/
-op/split_unicode.t	47	ok	not ok	Space: U+1680 - /\s+/ No.2
-op/split_unicode.t	49	ok	not ok	Space: U+2000 - /\s+/
-op/split_unicode.t	53	ok	not ok	Space: U+2000 - /\s+/ No.2
-op/split_unicode.t	55	ok	not ok	Space: U+2001 - /\s+/
-op/split_unicode.t	59	ok	not ok	Space: U+2001 - /\s+/ No.2
-op/split_unicode.t	61	ok	not ok	Space: U+2002 - /\s+/
-op/split_unicode.t	65	ok	not ok	Space: U+2002 - /\s+/ No.2
-op/split_unicode.t	67	ok	not ok	Space: U+2003 - /\s+/
-op/split_unicode.t	71	ok	not ok	Space: U+2003 - /\s+/ No.2
-op/split_unicode.t	73	ok	not ok	Space: U+2004 - /\s+/
-op/split_unicode.t	77	ok	not ok	Space: U+2004 - /\s+/ No.2
-op/split_unicode.t	79	ok	not ok	Space: U+2005 - /\s+/
-op/split_unicode.t	83	ok	not ok	Space: U+2005 - /\s+/ No.2
-op/split_unicode.t	85	ok	not ok	Space: U+2006 - /\s+/
-op/split_unicode.t	89	ok	not ok	Space: U+2006 - /\s+/ No.2
-op/split_unicode.t	91	ok	not ok	Space: U+2007 - /\s+/
-op/split_unicode.t	95	ok	not ok	Space: U+2007 - /\s+/ No.2
-op/split_unicode.t	97	ok	not ok	Space: U+2008 - /\s+/
-op/split_unicode.t	101	ok	not ok	Space: U+2008 - /\s+/ No.2
-op/split_unicode.t	103	ok	not ok	Space: U+2009 - /\s+/
-op/split_unicode.t	107	ok	not ok	Space: U+2009 - /\s+/ No.2
-op/split_unicode.t	109	ok	not ok	Space: U+200a - /\s+/
-op/split_unicode.t	113	ok	not ok	Space: U+200a - /\s+/ No.2
-op/split_unicode.t	115	ok	not ok	Space: U+2028 - /\s+/
-op/split_unicode.t	119	ok	not ok	Space: U+2028 - /\s+/ No.2
-op/split_unicode.t	121	ok	not ok	Space: U+2029 - /\s+/
-op/split_unicode.t	125	ok	not ok	Space: U+2029 - /\s+/ No.2
-op/split_unicode.t	127	ok	not ok	Space: U+202f - /\s+/
-op/split_unicode.t	131	ok	not ok	Space: U+202f - /\s+/ No.2
-op/split_unicode.t	133	ok	not ok	Space: U+205f - /\s+/
-op/split_unicode.t	137	ok	not ok	Space: U+205f - /\s+/ No.2
-op/split_unicode.t	139	ok	not ok	Space: U+3000 - /\s+/
-op/split_unicode.t	143	ok	not ok	Space: U+3000 - /\s+/ No.2
+op/split_unicode.t	33	ok	not ok	Space: U+0085 - ' '	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	31	ok	not ok	Space: U+0085 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	35	ok	not ok	Space: U+0085 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	39	ok	not ok	Space: U+00a0 - ' '	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	37	ok	not ok	Space: U+00a0 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	41	ok	not ok	Space: U+00a0 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	43	ok	not ok	Space: U+1680 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	47	ok	not ok	Space: U+1680 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	49	ok	not ok	Space: U+2000 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	53	ok	not ok	Space: U+2000 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	55	ok	not ok	Space: U+2001 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	59	ok	not ok	Space: U+2001 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	61	ok	not ok	Space: U+2002 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	65	ok	not ok	Space: U+2002 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	67	ok	not ok	Space: U+2003 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	71	ok	not ok	Space: U+2003 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	73	ok	not ok	Space: U+2004 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	77	ok	not ok	Space: U+2004 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	79	ok	not ok	Space: U+2005 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	83	ok	not ok	Space: U+2005 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	85	ok	not ok	Space: U+2006 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	89	ok	not ok	Space: U+2006 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	91	ok	not ok	Space: U+2007 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	95	ok	not ok	Space: U+2007 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	97	ok	not ok	Space: U+2008 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	101	ok	not ok	Space: U+2008 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	103	ok	not ok	Space: U+2009 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	107	ok	not ok	Space: U+2009 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	109	ok	not ok	Space: U+200a - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	113	ok	not ok	Space: U+200a - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	115	ok	not ok	Space: U+2028 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	119	ok	not ok	Space: U+2028 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	121	ok	not ok	Space: U+2029 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	125	ok	not ok	Space: U+2029 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	127	ok	not ok	Space: U+202f - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	131	ok	not ok	Space: U+202f - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	133	ok	not ok	Space: U+205f - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	137	ok	not ok	Space: U+205f - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	139	ok	not ok	Space: U+3000 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
+op/split_unicode.t	143	ok	not ok	Space: U+3000 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
 op/sprintf.t	550	ok	not ok	> 011/ 022/ 033< four reordered args
 op/sprintf.t	540	ok	not ok	> MISSING<
-op/sprintf.t	272	ok	not ok	> a1c< %n w/magic
-op/sprintf.t	227	ok	not ok	>%.0hf INVALID< 'h' should be rejected
-op/sprintf.t	271	ok	not ok	>%n 2< Slight sneakiness to test %n
-op/sprintf.t	482	ok	not ok	>%v%,63 INVALID INVALID<
-op/sprintf.t	494	ok	not ok	>%v\#x INVALID<
+op/sprintf.t	272	ok	not ok	> a1c< %n w/magic	#1874
+op/sprintf.t	227	ok	not ok	>%.0hf INVALID< 'h' should be rejected	#1875
+op/sprintf.t	271	ok	not ok	>%n 2< Slight sneakiness to test %n	#1874
+op/sprintf.t	482	ok	not ok	>%v%,63 INVALID INVALID<	#1875
+op/sprintf.t	494	ok	not ok	>%v\#x INVALID<	#1875
 op/sprintf.t	157	ok	not ok	>+1 .2  .3  <
 op/sprintf.t	158	ok	not ok	>+1 .2  .3  <
 op/sprintf.t	165	ok	not ok	>+1 .2  .3  < cf perl \#83194
@@ -5598,8 +5558,8 @@ op/sprintf.t	151	ok	not ok	>1048576.5<
 op/sprintf.t	553	ok	not ok	>123 MISSING<
 op/sprintf.t	341	ok	not ok	>1< Coarse hack: hex from %\#p
 op/sprintf.t	152	ok	not ok	>50<
-op/sprintf.t	273	ok	not ok	>5< Unicode %n
-op/sprintf2.t	1604	ok	not ok	%n
+op/sprintf.t	273	ok	not ok	>5< Unicode %n	#1874
+op/sprintf2.t	1604	ok	not ok	%n	#1874
 op/sprintf2.t	1537	ok	not ok	[at t/op/sprintf2.t line 842]
 op/sprintf2.t	1543	ok	not ok	[at t/op/sprintf2.t line 854]
 op/sprintf2.t	1545	ok	not ok	[at t/op/sprintf2.t line 856]
@@ -6227,8 +6187,6 @@ op/tiehandle.t	14	ok	not ok	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh
 op/tiehandle.t	15	ok	not ok	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	17	ok	not ok	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	20	ok	not ok	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
-op/tiehandle.t	23	ok	not ok	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
-op/tiehandle.t	26	ok	not ok	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	29	ok	(missing)	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	32	ok	(missing)	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	34	ok	(missing)	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
@@ -6249,8 +6207,6 @@ op/tiehandle.t	16	ok	not ok	[at t/op/tiehandle.t line 120]	NS:`tie` on an ARRAY 
 op/tiehandle.t	18	ok	not ok	[at t/op/tiehandle.t line 126]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	19	ok	not ok	[at t/op/tiehandle.t line 127]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	21	ok	not ok	[at t/op/tiehandle.t line 134]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
-op/tiehandle.t	24	ok	not ok	[at t/op/tiehandle.t line 141]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
-op/tiehandle.t	25	ok	not ok	[at t/op/tiehandle.t line 142]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	27	ok	(missing)	[at t/op/tiehandle.t line 148]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	28	ok	(missing)	[at t/op/tiehandle.t line 149]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	30	ok	(missing)	[at t/op/tiehandle.t line 155]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
@@ -6272,6 +6228,11 @@ op/tiehandle.t	3	ok	not ok	[at t/op/tiehandle.t line 89]	NS:`tie` on an ARRAY or
 op/tiehandle.t	5	ok	not ok	[at t/op/tiehandle.t line 93]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	45	ok	not ok [PCL #27]	say sets $\ to \n in PRINT	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehandle.t	49	ok	not ok [PCL #30]	say sets $\ to \n in PRINT	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
+op/tiehandle.t	23	ok	not ok [PCL #24]	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
+op/tiehandle.t	26	ok	(missing)	[]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
+op/tiehandle.t	22	ok	not ok [PCL #23]	[at t/op/tiehandle.t line 135]	#1850 -- the harness's TAP reaches disk ROW BY ROW since s473t6b, so a NON-TAP write with no trailing newline now GLUES to the next TAP row instead of landing elsewhere in the old block buffer's flush order, and that row stops being PARSEABLE.  perl with `$| = 1` glues the same way.  Each file produces such a write only because something upstream already diverges: op/tiehandle.t prints "sometext" on the REAL handle because `tie *$fh` is DROPPED (#155), uni/stash.t ends a recovery diagnostic without a newline.  Measured s473t6b, --jobs 1 both sides: base (f26282db) 12/32 and 44/6, this tree 11/32 and 43/6, and the byte diff of the two .out files is the glue and nothing else
+op/tiehandle.t	24	ok	not ok [PCL #25]	[at t/op/tiehandle.t line 141]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
+op/tiehandle.t	25	ok	not ok [PCL #26]	[at t/op/tiehandle.t line 142]	NS:`tie` on an ARRAY or HASH (#155) — `tie *$fh, 'Class'` is announced and DROPPED (`PCL: tie: a non-lvalue (class …) is not implemented`), so the program runs on the untied handle: every row of the file is downstream of that.  The file has NO aborted form — its 23 never-produced rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire.  Method inventory in #155
 op/tiehash.t	14	ok	not ok	2 keys from the loop this time
 op/tiehash.t	24	ok	not ok	Zero keys when tied
 op/tiehash.t	3	ok	not ok	missing key was not found
@@ -6285,38 +6246,38 @@ op/tr.t	130	ok	not ok [PCL #128]	/r warns in void context
 op/tr.t	131	ok	not ok [PCL #129]	/r warns just once
 op/tr.t	5	ok	not ok	Illegal to tr/// named sequence
 op/tr.t	167	ok	not ok [PCL #165]	LHS bad on updating tr
-op/tr.t	290	ok	not ok [PCL #288]	RT \#130198 eval: chomp($s =~ tr/a/a/);
-op/tr.t	292	ok	not ok [PCL #290]	RT \#130198 eval: chomp($s =~ tr/a/a/r);
-op/tr.t	294	ok	not ok [PCL #292]	RT \#130198 eval: chomp($s =~ tr/a/b/);
-op/tr.t	296	ok	not ok [PCL #294]	RT \#130198 eval: chomp($s =~ tr/a/b/r);
-op/tr.t	298	ok	not ok [PCL #296]	RT \#130198 eval: chomp(@a =~ tr/a/a/);
-op/tr.t	300	ok	not ok [PCL #298]	RT \#130198 eval: chomp(@a =~ tr/a/a/r);
-op/tr.t	302	ok	not ok [PCL #300]	RT \#130198 eval: chomp(@a =~ tr/a/b/);
-op/tr.t	304	ok	not ok [PCL #302]	RT \#130198 eval: chomp(@a =~ tr/a/b/r);
-op/tr.t	282	ok	not ok [PCL #280]	RT \#130198 eval: chomp(tr/a/a/);
-op/tr.t	284	ok	not ok [PCL #282]	RT \#130198 eval: chomp(tr/a/a/r);
-op/tr.t	286	ok	not ok [PCL #284]	RT \#130198 eval: chomp(tr/a/b/);
-op/tr.t	288	ok	not ok [PCL #286]	RT \#130198 eval: chomp(tr/a/b/r);
-op/tr.t	266	ok	not ok [PCL #264]	RT \#130198 eval: chop($s =~ tr/a/a/);
-op/tr.t	268	ok	not ok [PCL #266]	RT \#130198 eval: chop($s =~ tr/a/a/r);
-op/tr.t	270	ok	not ok [PCL #268]	RT \#130198 eval: chop($s =~ tr/a/b/);
-op/tr.t	272	ok	not ok [PCL #270]	RT \#130198 eval: chop($s =~ tr/a/b/r);
-op/tr.t	274	ok	not ok [PCL #272]	RT \#130198 eval: chop(@a =~ tr/a/a/);
-op/tr.t	276	ok	not ok [PCL #274]	RT \#130198 eval: chop(@a =~ tr/a/a/r);
-op/tr.t	278	ok	not ok [PCL #276]	RT \#130198 eval: chop(@a =~ tr/a/b/);
-op/tr.t	280	ok	not ok [PCL #278]	RT \#130198 eval: chop(@a =~ tr/a/b/r);
-op/tr.t	258	ok	not ok [PCL #256]	RT \#130198 eval: chop(tr/a/a/);
-op/tr.t	260	ok	not ok [PCL #258]	RT \#130198 eval: chop(tr/a/a/r);
-op/tr.t	262	ok	not ok [PCL #260]	RT \#130198 eval: chop(tr/a/b/);
-op/tr.t	264	ok	not ok [PCL #262]	RT \#130198 eval: chop(tr/a/b/r);
-op/tr.t	299	ok	not ok [PCL #297]	RT \#130198 warn: chomp(@a =~ tr/a/a/);
-op/tr.t	301	ok	not ok [PCL #299]	RT \#130198 warn: chomp(@a =~ tr/a/a/r);
-op/tr.t	303	ok	not ok [PCL #301]	RT \#130198 warn: chomp(@a =~ tr/a/b/);
-op/tr.t	305	ok	not ok [PCL #303]	RT \#130198 warn: chomp(@a =~ tr/a/b/r);
-op/tr.t	275	ok	not ok [PCL #273]	RT \#130198 warn: chop(@a =~ tr/a/a/);
-op/tr.t	277	ok	not ok [PCL #275]	RT \#130198 warn: chop(@a =~ tr/a/a/r);
-op/tr.t	279	ok	not ok [PCL #277]	RT \#130198 warn: chop(@a =~ tr/a/b/);
-op/tr.t	281	ok	not ok [PCL #279]	RT \#130198 warn: chop(@a =~ tr/a/b/r);
+op/tr.t	290	ok	not ok [PCL #288]	RT \#130198 eval: chomp($s =~ tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	292	ok	not ok [PCL #290]	RT \#130198 eval: chomp($s =~ tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	294	ok	not ok [PCL #292]	RT \#130198 eval: chomp($s =~ tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	296	ok	not ok [PCL #294]	RT \#130198 eval: chomp($s =~ tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	298	ok	not ok [PCL #296]	RT \#130198 eval: chomp(@a =~ tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	300	ok	not ok [PCL #298]	RT \#130198 eval: chomp(@a =~ tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	302	ok	not ok [PCL #300]	RT \#130198 eval: chomp(@a =~ tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	304	ok	not ok [PCL #302]	RT \#130198 eval: chomp(@a =~ tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	282	ok	not ok [PCL #280]	RT \#130198 eval: chomp(tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	284	ok	not ok [PCL #282]	RT \#130198 eval: chomp(tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	286	ok	not ok [PCL #284]	RT \#130198 eval: chomp(tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	288	ok	not ok [PCL #286]	RT \#130198 eval: chomp(tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	266	ok	not ok [PCL #264]	RT \#130198 eval: chop($s =~ tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	268	ok	not ok [PCL #266]	RT \#130198 eval: chop($s =~ tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	270	ok	not ok [PCL #268]	RT \#130198 eval: chop($s =~ tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	272	ok	not ok [PCL #270]	RT \#130198 eval: chop($s =~ tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	274	ok	not ok [PCL #272]	RT \#130198 eval: chop(@a =~ tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	276	ok	not ok [PCL #274]	RT \#130198 eval: chop(@a =~ tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	278	ok	not ok [PCL #276]	RT \#130198 eval: chop(@a =~ tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	280	ok	not ok [PCL #278]	RT \#130198 eval: chop(@a =~ tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	258	ok	not ok [PCL #256]	RT \#130198 eval: chop(tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	260	ok	not ok [PCL #258]	RT \#130198 eval: chop(tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	262	ok	not ok [PCL #260]	RT \#130198 eval: chop(tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	264	ok	not ok [PCL #262]	RT \#130198 eval: chop(tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	299	ok	not ok [PCL #297]	RT \#130198 warn: chomp(@a =~ tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	301	ok	not ok [PCL #299]	RT \#130198 warn: chomp(@a =~ tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	303	ok	not ok [PCL #301]	RT \#130198 warn: chomp(@a =~ tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	305	ok	not ok [PCL #303]	RT \#130198 warn: chomp(@a =~ tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	275	ok	not ok [PCL #273]	RT \#130198 warn: chop(@a =~ tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	277	ok	not ok [PCL #275]	RT \#130198 warn: chop(@a =~ tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	279	ok	not ok [PCL #277]	RT \#130198 warn: chop(@a =~ tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
+op/tr.t	281	ok	not ok [PCL #279]	RT \#130198 warn: chop(@a =~ tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
 op/tr.t	95	ok	(missing)	RT \#132608 len=0x12000
 op/tr.t	96	ok	(missing)	RT \#132608 len=0x12000 count
 op/tr.t	307	ok	not ok [PCL #305]	RT \#133880 illegal \N{}
@@ -6474,8 +6435,8 @@ op/while.t	15	ok	not ok	[at t/op/while.t line 121]
 op/while.t	21	ok	not ok	[at t/op/while.t line 191]
 op/while.t	26	ok	not ok	[perl \#72406] segv with do{}until CONST where const is not folded
 op/write.t	400	ok	(missing)	#400	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	8	ok	not ok [PCL #9]	#8
-op/write.t	0	(none)	renumbered	*summary*
+op/write.t	8	ok	not ok [PCL #9]	#8	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	0	(none)	renumbered	*summary*	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	587	ok	(missing)	+{...} is interpreted as anon hash	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	475	ok	(missing)	>64K	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	472	ok	(missing)	@* doesn't overflow	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
@@ -6487,25 +6448,25 @@ op/write.t	404	ok	(missing)	RT 91032: tied	NS:`format` / `write` report formatti
 op/write.t	473	ok	(missing)	RT \#130703	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	474	ok	(missing)	RT \#130703 part 2	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	409	ok	(missing)	RT91032: don't overwrite orig format string	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	111	ok	not ok [PCL #112]	[at t/op/write.t line 1335]
-op/write.t	113	ok	not ok [PCL #115]	[at t/op/write.t line 1356]
-op/write.t	114	ok	not ok [PCL #116]	[at t/op/write.t line 1365]
-op/write.t	115	ok	not ok [PCL #117]	[at t/op/write.t line 1374]
-op/write.t	116	ok	not ok [PCL #118]	[at t/op/write.t line 1383]
-op/write.t	118	ok	not ok [PCL #120]	[at t/op/write.t line 1389]
-op/write.t	119	ok	not ok [PCL #121]	[at t/op/write.t line 1392]
-op/write.t	120	ok	not ok [PCL #122]	[at t/op/write.t line 1395]
-op/write.t	121	ok	not ok [PCL #123]	[at t/op/write.t line 1398]
-op/write.t	122	ok	not ok [PCL #124]	[at t/op/write.t line 1401]
-op/write.t	123	ok	not ok [PCL #125]	[at t/op/write.t line 1404]
-op/write.t	124	ok	not ok [PCL #126]	[at t/op/write.t line 1407]
-op/write.t	125	ok	not ok [PCL #127]	[at t/op/write.t line 1410]
-op/write.t	127	ok	not ok [PCL #129]	[at t/op/write.t line 1416]
+op/write.t	111	ok	not ok [PCL #112]	[at t/op/write.t line 1335]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	113	ok	not ok [PCL #115]	[at t/op/write.t line 1356]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	114	ok	not ok [PCL #116]	[at t/op/write.t line 1365]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	115	ok	not ok [PCL #117]	[at t/op/write.t line 1374]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	116	ok	not ok [PCL #118]	[at t/op/write.t line 1383]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	118	ok	not ok [PCL #120]	[at t/op/write.t line 1389]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	119	ok	not ok [PCL #121]	[at t/op/write.t line 1392]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	120	ok	not ok [PCL #122]	[at t/op/write.t line 1395]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	121	ok	not ok [PCL #123]	[at t/op/write.t line 1398]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	122	ok	not ok [PCL #124]	[at t/op/write.t line 1401]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	123	ok	not ok [PCL #125]	[at t/op/write.t line 1404]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	124	ok	not ok [PCL #126]	[at t/op/write.t line 1407]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	125	ok	not ok [PCL #127]	[at t/op/write.t line 1410]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	127	ok	not ok [PCL #129]	[at t/op/write.t line 1416]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	398	ok	(missing)	[at t/op/write.t line 1487]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	399	ok	(missing)	[at t/op/write.t line 1490]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	401	ok	(missing)	[at t/op/write.t line 1513]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	402	ok	(missing)	[at t/op/write.t line 1514]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	1	ok	not ok	[at t/op/write.t line 170]
+op/write.t	1	ok	not ok	[at t/op/write.t line 170]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	482	ok	(missing)	[at t/op/write.t line 1754]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	483	ok	(missing)	[at t/op/write.t line 1755]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	484	ok	(missing)	[at t/op/write.t line 1757]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
@@ -6604,20 +6565,20 @@ op/write.t	576	ok	(missing)	[at t/op/write.t line 1898]	NS:`format` / `write` re
 op/write.t	577	ok	(missing)	[at t/op/write.t line 1899]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	594	ok	(missing)	[at t/op/write.t line 2082]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	598	ok	(missing)	[at t/op/write.t line 2091]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	2	ok	not ok	[at t/op/write.t line 209]
-op/write.t	3	ok	not ok	[at t/op/write.t line 250]
-op/write.t	4	ok	not ok [PCL #5]	[at t/op/write.t line 282]
-op/write.t	5	ok	not ok [PCL #6]	[at t/op/write.t line 283]
-op/write.t	9	ok	not ok [PCL #10]	[at t/op/write.t line 331]
-op/write.t	11	ok	not ok [PCL #12]	[at t/op/write.t line 360]
-op/write.t	61	ok	not ok [PCL #62]	[at t/op/write.t line 662]
-op/write.t	63	ok	not ok [PCL #64]	[at t/op/write.t line 683]
-op/write.t	65	ok	not ok [PCL #66]	[at t/op/write.t line 705]
-op/write.t	67	ok	not ok [PCL #68]	[at t/op/write.t line 726]
-op/write.t	70	ok	not ok [PCL #71]	[at t/op/write.t line 762]
-op/write.t	74	ok	not ok [PCL #75]	[at t/op/write.t line 811]
-op/write.t	78	ok	not ok [PCL #79]	[at t/op/write.t line 884]
-op/write.t	82	ok	not ok [PCL #83]	[at t/op/write.t line 932]
+op/write.t	2	ok	not ok	[at t/op/write.t line 209]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	3	ok	not ok	[at t/op/write.t line 250]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	4	ok	not ok [PCL #5]	[at t/op/write.t line 282]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	5	ok	not ok [PCL #6]	[at t/op/write.t line 283]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	9	ok	not ok [PCL #10]	[at t/op/write.t line 331]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	11	ok	not ok [PCL #12]	[at t/op/write.t line 360]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	61	ok	not ok [PCL #62]	[at t/op/write.t line 662]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	63	ok	not ok [PCL #64]	[at t/op/write.t line 683]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	65	ok	not ok [PCL #66]	[at t/op/write.t line 705]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	67	ok	not ok [PCL #68]	[at t/op/write.t line 726]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	70	ok	not ok [PCL #71]	[at t/op/write.t line 762]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	74	ok	not ok [PCL #75]	[at t/op/write.t line 811]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	78	ok	not ok [PCL #79]	[at t/op/write.t line 884]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	82	ok	not ok [PCL #83]	[at t/op/write.t line 932]	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	592	ok	(missing)	\#123245 different panic in sv_chop	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	591	ok	(missing)	\#123245 panic in sv_chop	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	593	ok	(missing)	\#123538 crash in FF_MORE	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
@@ -6704,8 +6665,8 @@ op/write.t	585	ok	(missing)	low-prec ops on arg line	NS:`format` / `write` repor
 op/write.t	582	ok	(missing)	nested formats	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	584	ok	(missing)	no crash with invalid use/format inside format	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	589	ok	(missing)	pragmata on format line	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/write.t	10	ok	not ok [PCL #11]	skipspace inside "${...}"
-op/write.t	131	ok	not ok [PCL #133]	swrite("1^*2 3@*4", "N", "N") class=""
+op/write.t	10	ok	not ok [PCL #11]	skipspace inside "${...}"	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
+op/write.t	131	ok	not ok [PCL #133]	swrite("1^*2 3@*4", "N", "N") class=""	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	132	ok	(missing)	swrite("1^*2 3@*4", "N", "N") class="Count"	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	137	ok	(missing)	swrite("1^*2 3@*4", "N", "N\n") class=""	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	138	ok	(missing)	swrite("1^*2 3@*4", "N", "N\n") class="Count"	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
@@ -11428,14 +11389,13 @@ uni/sprintf.t	22	ok	not ok	%s \x{5678}	#1749 -- pack/unpack `U` is UTF-8 OCTETS 
 uni/sprintf.t	21	ok	not ok	\x{1234}	#1749 -- pack/unpack `U` is UTF-8 OCTETS in both directions where perl's default is CHARACTER mode; the area is USER-PARKED (pack/unpack, 2026-09-06)
 uni/sprintf.t	23	ok	not ok	\x{1234}%s \x{5678}	#1749 -- pack/unpack `U` is UTF-8 OCTETS in both directions where perl's default is CHARACTER mode; the area is USER-PARKED (pack/unpack, 2026-09-06)
 uni/stash.t	49	ok	not ok [PCL #50]	' is equivalent to :: before a null	#1685 -- the old `'` package separator: `${"a'\0b"}` and `${"a::\0b"}` name the same global in perl
-uni/stash.t	0	(none)	extra [PCL #39]	*extra* __ANON__ sub called ok	NS:Error message text and format -- the row asserts "Undefined subroutine &PKG::ok"; PCL raises a differently-worded death
 uni/stash.t	0	(none)	renumbered	*summary*	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] + NS:Error message text and format -- the renumber follows from the rows the stash model loses
-uni/stash.t	24	not ok	ok	...and an __ANON__ stash # TODO STASHES not anonymized	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- PERL'S OWN $TODO row ("STASHES not anonymized"): perl fails it as its TODO says and PCL PASSES it, because PCL has no anonymised-stash state at all and its `*pkg::sub{PACKAGE}` answers the string the assertion wants.  An accidental agreement, not a feature -- the sibling rows 47/48 are the same model and fail
-uni/stash.t	38	ok	not ok	__ANON__ sub called ok	NS:Error message text and format -- the row asserts "Undefined subroutine &PKG::ok"; PCL raises a differently-worded death
 uni/stash.t	5	ok	not ok	op/my_stash.t test	NS:Error compatibility for invalid Perl input -- `eval "sub { my NoSuchClass \$obj = shift; }"` must FAIL at compile time ("No such class …"); PCL accepts the typed lexical, so $@ is empty
 uni/stash.t	6	ok	not ok	op/my_stash.t test	NS:Error compatibility for invalid Perl input -- `eval "sub { my NoSuchClass \$obj = shift; }"` must FAIL at compile time ("No such class …"); PCL accepts the typed lexical, so $@ is empty
 uni/stash.t	7	ok	not ok	op/my_stash.t test	NS:Error compatibility for invalid Perl input -- `eval "sub { my NoSuchClass \$obj = shift; }"` must FAIL at compile time ("No such class …"); PCL accepts the typed lexical, so $@ is empty
 uni/stash.t	47	ok	not ok [PCL #48]	setting stash name during undef has no effect	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- perl ANONYMISES a stash whose name is set during `undef`, so the glob stringifies through __ANON__
+uni/stash.t	24	not ok	ok [PCL #25]	...and an __ANON__ stash # TODO STASHES not anonymized	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- PERL'S OWN $TODO row ("STASHES not anonymized"): perl fails it as its TODO says and PCL PASSES it, because PCL has no anonymised-stash state at all and its `*pkg::sub{PACKAGE}` answers the string the assertion wants.  An accidental agreement, not a feature -- the sibling rows 47/48 are the same model and fail
+uni/stash.t	37	ok	not ok [PCL #38]	[at t/uni/stash.t line 225]	#1850 -- the harness's TAP reaches disk ROW BY ROW since s473t6b, so a NON-TAP write with no trailing newline now GLUES to the next TAP row instead of landing elsewhere in the old block buffer's flush order, and that row stops being PARSEABLE.  perl with `$| = 1` glues the same way.  Each file produces such a write only because something upstream already diverges: op/tiehandle.t prints "sometext" on the REAL handle because `tie *$fh` is DROPPED (#155), uni/stash.t ends a recovery diagnostic without a newline.  Measured s473t6b, --jobs 1 both sides: base (f26282db) 12/32 and 44/6, this tree 11/32 and 43/6, and the byte diff of the two .out files is the glue and nothing else
 uni/title.t	0	ok*	(no TAP)	*summary*	#1036 -- NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- and t/uni/case.pl, which all four case-mapping files run, loads Unicode::UCD -> Storable, an XS module PCL cannot load ("Can't locate loadable object for module Storable in @INC"), so lower.t and title.t produce NO TAP at all and fold.t/upper.t abort after a handful of rows
 uni/universal.t	85	ok	not ok	DOES call error message says DOES, not isa	#1740
 uni/universal.t	16	ok	not ok	[at t/uni/universal.t line 74]	#1744
@@ -11952,9 +11912,6 @@ uni/write.t	5	ok	not ok	non-UTF8 literal / UTF8 multiline	NS:format / write repo
 io/fs.t	40	ok	not ok	skip has futimes	#1710
 io/fs.t	53	ok	not ok	truncate(word) does not fall back to file name	#1710
 op/filetest.t	0	(none)	renumbered	*summary*	#1817 — the renumber follows from the two rows the aborted form loses
-op/filetest.t	18	ok	not ok	-d and -e: file at least exists	#403 — a filetest's FALSE is a DEFINED "" when the stat SUCCEEDED, so `defined(-f -d "TEST")` is 1 in perl; PCL answers undef and the whole `p--*` family conflates the two
-op/filetest.t	19	ok	not ok	-e and -d: file at least exists	#403 — a filetest's FALSE is a DEFINED "" when the stat SUCCEEDED, so `defined(-f -d "TEST")` is 1 in perl; PCL answers undef and the whole `p--*` family conflates the two
-op/filetest.t	11	ok	not ok	-f and -d stackable: plain file found	#403 — a filetest's FALSE is a DEFINED "" when the stat SUCCEEDED, so `defined(-f -d "TEST")` is 1 in perl; PCL answers undef and the whole `p--*` family conflates the two
 op/filetest.t	34	ok	not ok	-l $handle warning is utf8-clean	NS:Warnings-gated diagnostics are absent (#221) — the `-l` on a filehandle warning ("-l on filehandle") and its utf8-clean/globref/ioref variants
 op/filetest.t	35	ok	not ok	-l $handle warning occurs for globs, not just globrefs	NS:Warnings-gated diagnostics are absent (#221) — the `-l` on a filehandle warning ("-l on filehandle") and its utf8-clean/globref/ioref variants
 op/filetest.t	36	ok	not ok	-l $handle warning occurs for iorefs as well	NS:Warnings-gated diagnostics are absent (#221) — the `-l` on a filehandle warning ("-l on filehandle") and its utf8-clean/globref/ioref variants

@@ -1790,7 +1790,7 @@ op/defer.t	28	0	4	8	XDIFF	aborted-forms:13: Undefined subroutine &main::defer ca
 op/defined.t	5	0	5	0	OK		0
 op/defins.t	27	0	27	0	OK		0
 op/delete.t	56	0	53	3	DIFF		0
-op/die.t	25	1	5	15	DIFF		0
+op/die.t	25	1	9	11	DIFF	s473t6b: `die` with no arguments REUSES $@ (PROPAGATE / a reference re-thrown unchanged / "\t...propagated at F line N.\n" / "Died" only when $@ is empty), and $@ is CLEARED on the way INTO an eval (perl's CLEAR_ERRSV), which is what made the reuse rule well-defined	0
 op/die_except.t	12	0	12	0	OK		0
 op/die_exit.t	17	0	17	0	OK		0
 op/die_keeperr.t	24	0	15	9	DIFF		0
@@ -1807,8 +1807,8 @@ op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for inval
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
-op/filetest.t	436	0	369	65	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
-op/filetest_stack_ok.t	136	0	98	38	DIFF	s473 (Fable): 71/65 -> 98/38, PRE-EXISTING at fcf076f1 AND 637fc58e: the 27 FIXED rows are the -X $overld stack rows (the s470bs filetest operand resolver, #1031 family); the row was stale, not moved by this session	0
+op/filetest.t	436	0	372	62	DIFF	aborted-forms:1: Undefined subroutine &main::f called; s473t6b (#403): a filetest's FALSE is a VALUE -- the empty string when the operation that would fill `_` SUCCEEDED, undef when it failed, and ONE value either way where PCL left CL NIL (= undef, and ZERO values in list context).  The whole file is `-X returns single value` / `-X *gv returns single value`	1
+op/filetest_stack_ok.t	136	0	136	0	OK	s473 (Fable): 71/65 -> 98/38, PRE-EXISTING at fcf076f1 AND 637fc58e: the 27 FIXED rows are the -X $overld stack rows (the s470bs filetest operand resolver, #1031 family); the row was stale, not moved by this session; s473t6b (#403): a filetest's FALSE is a VALUE -- the empty string when the operation that would fill `_` SUCCEEDED, undef when it failed, and ONE value either way where PCL left CL NIL (= undef, and ZERO values in list context).  The whole file is `-X returns single value` / `-X *gv returns single value`	0
 op/filetest_t.t	7	0	7	0	OK		0
 op/flip.t	14	0	12	2	DIFF		0
 op/for-many.t	71	0	63	8	DIFF		0
@@ -1944,7 +1944,7 @@ op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support thr
 op/tie.t	94	1	15	80	DIFF	s473t6a: 14/81 -> 15/80 (#1813).  DATA record 44, "Bug 68192 - numeric ops not calling mg_get when tied scalar holds a ref", whose own comment reads `make sure FETCH is called once per op`, now matches perl.  Measured --jobs 1 with the #366 serial re-run agreeing, and 14/81 on a `git archive 2f9cc300` extraction (main's own s486c measurement)	0
 op/tie_fetch_count.t	343	0	139	2	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N; s473 (Fable): 76/65 -> 129/12, PRE-EXISTING at fcf076f1 AND 637fc58e: the 55 FIXED rows are the -X $tied_glob / -X filetest rows (the s470bs filetest operand resolver, #1031/#1049/#1048/#1033/#1047); the 2 NEW rows ($tied.."a", "a"..$tied: FETCH called twice) = task #1430; s473h: 129/12 -> 131/10, the 2 rows are task #1430 FIXED (the segment fill classified the range and then called p-.. for the STRING arm, which classified AGAIN -- and classification unboxes, which for a tied scalar is a second FETCH); serial re-run agrees, 0 NEW ROW; s473t6a: #1813 (an operator reads its operand ONCE -- nine operators called a tied scalar's FETCH twice because they INSPECTED the operand and then COERCED the place again).  131/10 -> 139/2, 8 blessed rows FIXED (unary -, x, post ++, post --, &, ^, |, ~), measured --jobs 1 with the #366 serial re-run agreeing, ROW DIFF 0 NEW / 8 FIXED.  The residue is 2 rows of #1814 (the ZERO-FETCH half: `@a = ($tied) x 1` and `<$tied_glob>` never FETCH at all) plus the 202 rows the ruled smart-match refusal at line 169 takes with its form	0
 op/tiearray.t	75	0	26	29	DIFF	aborted-forms:1: Modification of non-creatable array value attempted, subscript -N PCL: tie: an ARRAY (class NegIndex); s473 (Fable): 40/35 -> 26/29, PRE-EXISTING at fcf076f1 AND 637fc58e (extractions, serial): the #1273 rule-12 fatal (s471a) fires on a TIED array whose class sets $NEGATIVE_INDICES -- task #1429 (20 rows never produced, 15 NEW fails at t/op/tiearray.t lines 273-284)	0
-op/tiehandle.t	67	0	12	32	DIFF		0
+op/tiehandle.t	67	0	11	32	DIFF	s473t6b (#1850): the harness's TAP reaches disk ROW BY ROW, so a NON-TAP write with no trailing newline GLUES to the next TAP row and that row stops being parseable -- perl with `$| = 1` glues the same way.  The write exists only because something upstream already diverges (here "sometext" printed on the REAL handle because `tie *$fh` is DROPPED, #155).  A/B --jobs 1: f26282db extraction 12/32, this tree 11/32	0
 op/tiehash.t	27	0	20	7	DIFF		0
 op/time.t	72	0	72	0	OK		0
 op/time_loop.t	2	0	2	0	OK		0
@@ -2102,7 +2102,7 @@ uni/parser.t	58	0	32	26	DIFF	s470bv: #1221 (b25afbc; 28/30 at a3d6d8e)	0
 uni/readline.t	7	0	6	1	DIFF		0
 uni/select.t	3	2	1	4	DIFF		0
 uni/sprintf.t	52	0	49	3	DIFF		0
-uni/stash.t	48	1	44	6	DIFF		0
+uni/stash.t	48	1	43	6	DIFF	s473t6b (#1850): same glue as op/tiehandle.t -- the TAP is on disk row by row, and this file ends a recovery diagnostic without a newline, so the next row (`ok 9 # skip no B`) is no longer parseable.  A/B --jobs 1: f26282db extraction 44/6, this tree 43/6	0
 uni/tie.t	9	1	9	1	OK		0
 uni/title.t	5936	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/tr_utf8.t	8	0	8	0	OK		0
