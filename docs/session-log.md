@@ -36,6 +36,41 @@ given the seed list, the transpile list had not.  Filed with the ruled fix (one
 list builder for both), and sent to s490a as member 0 because it inflates the
 base reading of that batch's own acceptance measurement.
 
+**s473t6b — reviewed, two review commits, merged at `8d699b91`.**  The probes
+written before reading the report (`~/pcl-agent-scratch/s490/probes/t6b/`)
+agreed with perl on the batch's two fixes — a filetest's false is a value
+(35 of 37 lines; the residue is #1845) and `die` with no arguments reuses `$@`
+— and found one regression: the new emptiness test concatenated every die's
+arguments, so `die $obj` ran the object's `""` overload where perl never does.
+Fixed on the branch (the message is built once; a list holding a reference is
+not stringified to ask whether it is empty), guard rows K/L.  The batch's one
+`--all --quick` had run as an orphan with commits landing under it, so Fable
+re-ran it on the final tree: the three contention movers re-measured alone at
+their snapshot, the re/ ROW DIFF block was main's standing one file for file
+(s488a's log), and the rows #1850 moves — a file the runner kills now keeps
+every row that ran — were spliced: four snapshot rows, six fail rows out by
+per-file bless.  Gate PASS 245/8331 (+2 with the guard rows), sweep on the
+fixed tree GATE clean TOTAL 18686 (+0).
+
+**s490a — reviewed and merged at `372651c6`.**  `p-firstrun.pl` 4 of 4 and
+`p1860.pl` 22 of 22 identical to perl, COLD, on its tree and again on the
+rebased tip; every breaking case (shim dependencies, `use lib 't/lib'`, a file
+created later on the path, a `use lib` hit with a base twin, a code ref in
+@INC) stays a SCRIPT FASL HIT on its second run.  The agent's acceptance table:
+second-run re-transpiles 2 on raw `ab4da8b4` (#1844's size, with two answers
+moving between runs), 0 with member 0, 0 on the tree, over 50 module / 18
+script / 178 eval entries and two CPAN dists run through `pcl` — it also found
+that the sweep and `run-dist-t.pl` cannot measure a re-transpile at all (both
+set `*pcl-skip-cache*`).  Warm start unchanged (0.0466 s vs 0.0467 s; Moo 4.89
+vs 4.99).  The core prune fired live: 163 cores / 7.61 GB → 55 / 2.61 GB, all
+five live trees kept.  Combined tree after the t6b merge: gate PASS 246 files /
+8365 rows, sweep GATE clean TOTAL 18686 (+0), drops 5 = census.
+
+**USER, mid-session: "Don't start new subjobs in this session."**  Perf round
+34 stays drafted.  Its head is now #1910, which s490a measured while taking
+warm-start numbers: a Moo class with one `has` costs about five seconds on
+every warm run, and four modules rebuild their fasl every run.
+
 ## Session s473t6b (Opus agent, 2026-09-17/18) — the 20–49-row op/ band: a filetest's false, `die` with no arguments, and 464 rows that stopped being causeless
 
 **Member 0 (#1850, the harness).**  PCL's transpilable stub `perl-tests/t/test.pl`
