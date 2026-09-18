@@ -77,9 +77,9 @@ parameters, etc). The remaining test failures are the todo list. :-)
 
 | measurement | result | reproduce |
 |---|---|---|
-| PCL's own regression suite | **244 files, 8,254 assertions, all passing** | `tools/prove-core` |
-| perl's test suite, extracted (108 files from perl 5.40's `t/`) | **18,686 pass / 675 fail**; 58 files pass completely | `perl tools/sweep-perl-tests.pl --jobs 8` |
-| perl's whole `t/` tree, run in place (528 files) | 92 files identical to perl; 108 differ for a registered, explained reason; 275 differ and are the bug queue; the rest do not compile, time out or produce no test output | `tools/run-perl-suite.pl --all --quick --jobs 4` |
+| PCL's own regression suite | **246 files, 8,365 assertions, all passing** | `tools/prove-core` |
+| perl's test suite, extracted (108 files from perl 5.40's `t/`) | **18,686 pass / 675 fail** (96.5 %); 60 files pass completely | `perl tools/sweep-perl-tests.pl --jobs 8` |
+| perl's whole `t/` tree, run in place (528 files) | 107 files identical to perl; 105 differ for a registered, explained reason; 258 differ and are the bug queue; the remaining 58 do not compile, time out, are too slow for the quick run or produce no test output | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | a board of 14 pure-Perl CPAN distributions, 183 test files | **84 files pass, 50 pass partially, 49 fail** (2,213 assertions pass / 353 fail), every failing assertion with a recorded cause | `tools/cpan-scoreboard.pl` |
 | statements the compiler cannot translate, over all of the above | **62 statements in 19 files**, each with a filed cause (mostly unsupported, like `:lvalue` subs) | `tools/drop-census.pl` |
 
@@ -91,35 +91,38 @@ See [`docs/STATUS.md`](docs/STATUS.md) for more details.
 
 ### Speed
 
-These are microbenchmarks for different Perl features. A ratio below
-1.00× means PCL is faster. The linked page has more detail. (It might
-not be updated to the latest speed optimizations.)
+These are microbenchmarks for different Perl features, measured
+2026-09-18 on a quiet machine (best of five runs, startup time
+subtracted for both). A ratio below 1.00× means PCL is faster. The
+linked page has the full board of 37 rows, including the ones where
+PCL is still slower that are not shown here (file I/O about 3.4×,
+`s///e` 3.5×, a text-processing loop 2.7×).
 
 | benchmark | what it measures | PCL / perl |
 |---|---|---:|
 | collatz | `while` loop with integer arithmetic | 0.18× |
-| cfor | C-style `for` loop summing integers | 0.24× |
-| arith | `$s = ($s * 3 + int($i / 7)) % 1000003` | 0.25× |
-| useint | `$s = ($s * 3 + $i / 7) % 1000003` under `use integer` | 0.25× |
-| feread | read-only `foreach` over a 1000-element array | 0.29× |
-| intloop= | `for (1..$n) { $s = $s + $_ }` | 0.29× |
+| cfor | C-style `for` loop summing integers | 0.26× |
+| arith | `$s = ($s * 3 + int($i / 7)) % 1000003` | 0.27× |
+| useint | `$s = ($s * 3 + $i / 7) % 1000003` under `use integer` | 0.28× |
 | fib(27) | recursion | 0.29× |
-| feread2 | `foreach` over two arrays at once | 0.30× |
-| intloop+= | `for (1..$n) { $s += $_ }` | 0.32× |
-| listcopy | `my @copy = @src`, 50 elements | 0.34× |
-| symref | symbolic references, `${'main::g'}` | 0.41× |
-| gcdrec | recursion with modulo | 0.52× |
-| arrfill | `@a = (1..20, $_)` on every iteration | 0.60× |
-| arrhash | one array element and one hash element, read and written | 0.63× |
-| methret | a method call on a blessed hash, `$o->bump` | 1.06× |
-| strcat | `$s .= 'x'`, twenty million times | 0.94× |
-| sliceasgn | assignment to array and hash slices | 1.14× |
-| slices | reading `@a[1..5]` and `@h{@k}` | 1.64× |
-| regexg | `while ($x =~ /./g)` over a 200 kB string | 2.07× |
-| ovlsub | `use overload` arithmetic and stringification on objects | 3.33× |
-| moo-objs | Moo objects: constructor, accessors, a method building another object | 29× |
-| pack | `pack` with two templates | 1095× |
-| packunpk | `pack` followed by `unpack` | 1015× |
+| intloop= | `for (1..$n) { $s = $s + $_ }` | 0.30× |
+| feread | read-only `foreach` over a 1000-element array | 0.30× |
+| intloop+= | `for (1..$n) { $s += $_ }` | 0.31× |
+| feread2 | `foreach` over two arrays at once | 0.31× |
+| listcopy | `my @copy = @src`, 50 elements | 0.35× |
+| symref | symbolic references, `${'main::g'}` | 0.52× |
+| gcdrec | recursion with modulo | 0.54× |
+| arrfill | `@a = (1..20, $_)` on every iteration | 0.59× |
+| arrhash | one array element and one hash element, read and written | 0.64× |
+| strcat | `$s .= 'x'`, twenty million times | 0.85× |
+| methret | a method call on a blessed hash, `$o->bump` | 1.05× |
+| sliceasgn | assignment to array and hash slices | 1.11× |
+| regexg | `while ($x =~ /./g)` over a 200 kB string | 1.25× |
+| slices | reading `@a[1..5]` and `@h{@k}` | 1.67× |
+| ovlsub | `use overload` arithmetic and stringification on objects | 3.37× |
+| moo-objs | Moo objects: constructor, accessors, a method building another object | 28× |
+| pack | `pack` with two templates | 1035× |
+| packunpk | `pack` followed by `unpack` | 1080× |
 
 Numeric loops and recursion are fast. When the compiler can prove a
 variable holds a machine integer for its whole life, the generated
@@ -133,7 +136,7 @@ array, filling one from a range, and a read-only `foreach` over one or
 several arrays are faster. The compiler proves which arrays are never
 written or aliased inside a loop and binds their storage
 directly. (Moving several elements at once through slices is still
-slower, reading at 1.64× and writing at 1.14×: PCL's per-element
+slower, reading at 1.67× and writing at 1.11×: PCL's per-element
 checks cost more than perl's flat C arrays on bulk work.)
 
 Method calls are level with perl, but overloading and regex matching
@@ -413,7 +416,7 @@ Perl source → PPI → Pl::Parser2 (statements) → Pl::CLForm → Common Lisp 
 ```
 
 **The runtime**, in [`cl/pcl-runtime.lisp`](cl/pcl-runtime.lisp), is about
-13,000 lines of Common Lisp, not counting blank lines, comments and
+14,500 lines of Common Lisp, not counting blank lines, comments and
 docstrings. It is a library of the Perl operations: what `+` does to `3` or
 to `"3 apples"`, how `local` restores a value on scope exit, how a method
 call finds its target, how `sort` calls its comparator. The compiled program

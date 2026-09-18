@@ -671,6 +671,69 @@ round-22 changes landing as predicted.  The `pack` ratio rose because
 *perl* ran faster on this machine today; PCL's own time is unchanged.
 **Ten of nineteen rows beat perl**, the same ten as §0.2f.
 
+### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
+
+Taken for the README refresh before the first alpha announcement: no agent and
+no other measurement running, 1-min load 0.24 at the start and 1.80 at the end
+(the board's own), one `perl tools/bench-exec.pl` at the default best-of-5.
+The first full table with round 33 (s473v, the text round: §0.2n) and the
+s486–s490 correctness batches in the tree.  (The label skips 0.2o, which the
+drafted round-34 brief reserves for its movers.)  All 37 rows:
+
+```
+bench          perl(s)     pcl(s)  pcl/perl
+----------- ---------- ---------- ---------
+intloop+=       0.0677     0.0211     0.31x
+intloop=        0.0672     0.0204     0.30x
+cfor            0.1077     0.0281     0.26x
+arith           0.1490     0.0402     0.27x
+useint          0.0986     0.0276     0.28x
+arrhash         0.1301     0.0835     0.64x
+arrhash-k       0.0590     0.0621     1.05x
+fib(27)x        1.5139     0.4385     0.29x
+gcdrec          0.1890     0.1014     0.54x
+fibret          1.4723     0.4246     0.29x
+gcdret          0.1876     0.0846     0.45x
+subret          0.2095     0.0856     0.41x
+methret         0.0939     0.0988     1.05x
+collatz         1.8941     0.3431     0.18x
+strcat          0.3233     0.2764     0.85x
+pack            0.0039     4.0588  1035.33x
+packunpk        0.0037     4.0407  1080.39x
+arrfill         0.0481     0.0282     0.59x
+slices          0.0665     0.1107     1.67x
+sliceasgn       0.0256     0.0285     1.11x
+listcopy        0.5038     0.1777     0.35x
+pushloc         0.0993     0.0296     0.30x
+sortnum         0.0256     0.0369     1.44x
+sortstr         0.0660     0.0482     0.73x
+feread          0.4096     0.1218     0.30x
+fhprint         0.0639     0.2160     3.38x
+fhread          0.0314     0.1098     3.50x
+feread2         0.4070     0.1253     0.31x
+feread3         0.4116     0.1182     0.29x
+feargs          0.0225     0.1849     8.23x
+ovlsub          0.0389     0.1310     3.37x
+symref          0.0219     0.0115     0.52x
+json-rt         0.8704     1.5424     1.77x
+moo-objs        0.0394     1.0932    27.71x
+textproc        0.4463     1.1961     2.68x
+regexg          0.3760     0.4714     1.25x
+subste          0.0575     0.2000     3.48x
+```
+
+Against §0.2m (2026-09-08): the numeric-loop, recursion and `foreach` rows are
+where they were to within two hundredths (`cfor` 0.24 → 0.26, `arith` 0.25 →
+0.27, `useint` 0.25 → 0.28 read a little slower; the perl side of each is also
+2–3 % slower in this run, so part of that is the box).  **`regexg` 2.07× →
+1.25×** is round 33's literal-prefix and match-loop work and was confirmed by a
+second run of that row alone (1.29×); `strcat` 0.94× → 0.85× likewise (0.90×
+alone).  `symref` is a 13 ms signal and reads 0.41× / 0.52× / 0.58× on three
+boards — read it as "about half of perl's time", not as a trend.  `moo-objs`
+29× → 27.7×.  Rows NOT on the README's front page and slower than perl:
+`feargs` 8.23× (9 ns per element, absolute), `fhread` 3.50×, `subste` 3.48×,
+`fhprint` 3.38×, `textproc` 2.68×, `json-rt` 1.77×, `sortnum` 1.44×.
+
 ### 0.2m The board on a QUIET box (s479, 2026-09-08, main `a9f2a264`, gen v2-1080)
 
 Taken for the README refresh (#1527: the method-call rows join the
