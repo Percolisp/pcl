@@ -36,6 +36,84 @@ given the seed list, the transpile list had not.  Filed with the ruled fix (one
 list builder for both), and sent to s490a as member 0 because it inflates the
 base reading of that batch's own acceptance measurement.
 
+## Session s473t6b (Opus agent, 2026-09-17/18) — the 20–49-row op/ band: a filetest's false, `die` with no arguments, and 464 rows that stopped being causeless
+
+**Member 0 (#1850, the harness).**  PCL's transpilable stub `perl-tests/t/test.pl`
+lacked the `$| = 1` perl's `t/test.pl` sets at its line 22, so a TIMEOUT-killed
+companion file's counts were the rows that had FLUSHED.  The stub line ALONE
+changed nothing, and that is the finding: `%tap-out` in `cl/pcl-test.lisp` — the
+one writer every TAP line goes through — called a bare `write-string` that never
+consulted `*p-autoflush-handles*`.  Measured on a 41-row file behind a 45 s busy
+loop: base 0 bytes mid-run, stub only 0, stub + the autoflush line 588, perl 588.
+`./runpcl` also stopped capturing the program's stdout with backticks.  Guard
+`tools/t/runpcl-streams.t` 8 → 15 rows, three of them inverse-verified failing on
+the base.  Cost: exactly two companion rows (below).
+
+**Member 3 fix 1 (#403).**  perl's false answer to a `-X` is not one thing: when
+the operation that would fill `_` SUCCEEDED it is the empty string — DEFINED — and
+when that operation FAILED it is undef, so a program can tell "not a plain file"
+from "no such file".  PCL answered CL NIL for both, which is wrong twice: it
+conflates the two falses, and NIL is not a perl value, so a false filetest left
+ZERO values in list context where perl leaves one.  ONE returner `%p--false` and
+no new state (`*pcl-stat-cache-ok*` already meant "did the operation succeed"),
+four call sites.  `t/op/filetest_stack_ok.t`, which is 135 rows of
+`-X returns single value` and nothing else, went **98/38 → 136/0 OK**;
+`t/op/filetest.t` +3.  Guard `Pl/t/filetest-stack-01.t` 13 → 16; ir-spec §10c.
+
+**Member 3 fix 2 (#1878).**  `die` with no arguments reuses `$@` — PROPAGATE for
+a reference whose class has it, any other reference re-thrown unchanged, a
+non-empty string with `"\t...propagated at F line N.\n"` appended, and "Died" only
+when `$@` is empty.  PCL gave "Died" for all four.  The NEGATIVES then caught a
+second divergence: with only that half in, `eval { die "x\n" }; eval { die "" }`
+propagated the FIRST eval's error, because perl CLEARS `$@` when an eval is
+ENTERED (CLEAR_ERRSV) and PCL's `p-eval-block` and `%p-eval-1` did not (`p-try`
+had since #340).  The two ship together because the first is defined in terms of
+`$@`.  `t/op/die.t` 5/15 → 9/11; `t/op/eval.t` **unchanged**, which is the wide
+half's bar.  Guard `Pl/t/eval-01.t` 57 → 67; ir-spec §6.3.
+
+**Member 1 (the tables).**  All fifteen remaining band files re-run `--jobs 1`
+read EXACTLY their blessed snapshot verdict — zero movers, so the population the
+round was sized against is the population on this tree.  The one `--all --quick`
+companion of this batch had been left running as an ORPHAN while two commits
+landed, and every spawn re-keys its core on the runtime's content hash, so its
+two biggest "movers" were its own contamination: io/crlf_through.t and
+io/through.t both re-measure **942/0 OK**, the snapshot exactly.  io/pvbm.t reads
+its blessed 23/5, op/gv.t is the #1651 TIMEOUT, and re/charset.t's 506 "FIXED
+ROW"s are the 500-row log cap.  What was real was two rows: with the TAP on disk
+row by row a newline-less NON-TAP write glues to the next TAP row
+(`sometextok 22`), and op/tiehandle.t (12/32 → 11/32) and uni/stash.t (44/6 →
+43/6) are the only two companion files that make such a write — op/tiehandle.t
+because `tie *$fh` is DROPPED (#155) so "sometext" goes to the REAL handle, and
+uni/stash.t because a recovery diagnostic ends without a newline.  perl with
+`$| = 1` glues the same way.  Proved by byte-diffing `PCL_SUITE_KEEP` output from
+both trees: the glue is the only difference.
+
+**Member 3 (the causes).**  Band causeless **683 → 219**, companion `unexplained`
+**1205 → 741**, in two passes, one rule per MEASURED fact and a row no rule
+matches left five-field and COUNTED.  Pass 1 (277 rows): op/coreamp.t 45 and
+op/write.t 33 join the 456 and 468 rows of their own files that already say the
+same thing; op/split_unicode.t 40 → #407 (the 38 `/\s+/` rows fail for every one
+of the file's 19 White_Space code points, and the 2 awk-mode rows are U+0085 and
+U+00A0 ALONE — every other code point passes there); op/override.t 34 → #1870;
+op/tr.t 32 → NS:Error compatibility for invalid Perl input (`chop(tr///)` is a
+COMPILE error in perl); op/lc.t 25, op/array.t 17, op/magic.t 12, op/lex.t 11,
+op/sprintf.t 6, op/eval.t 6, and eight smaller sets.  Pass 2 (148 rows) is CHECK
+1: the runner's own `aborted-forms:` message names the form that died, and a
+`(missing)` row stops being a mystery — op/substr.t 49 (two lvalue-sub aborts at
+:697 and :899), op/gmagic.t 47 (the dropped `Tie::Monitor`, so `$x->init` dies
+and five forms abort — the rows that DO run are counting an untied scalar),
+op/each.t 20 (DynaLoader), op/bop.t 13 (pack `P`), op/postfixderef.t 11,
+op/magic.t 5, op/tr.t 2 (the F6 refusal), op/lex.t 1.
+
+**Left causeless, by file:** op/eval.t 29, op/lex.t 29, op/sprintf2.t 24,
+op/magic.t 22, op/sprintf.t 19, op/sort.t 17, op/die.t 16, op/tr.t 14, op/bop.t
+14, op/postfixderef.t 14, op/each.t 8, op/array.t 7, op/lc.t 6 = 219, which t6c
+inherits.  Filed **#1877** (postfix glob-slot deref `$gr->*{NAME}` is the one
+postfix-deref spelling PExpr has no arm for, a #138 DROP) and **#1878**; #403,
+#1850 and #1878 closed.  Bars: full sweep GATE clean / 0 new / 0 fixed / 0 LOST /
+TOTAL **18686 (+0)** / drops 5 = census; ir-conform 323 pass, 0 fail, 22 known, 0
+stale; gate `Result: PASS`.
+
 ## Session 489 (Fable, 2026-09-17 evening) — the two stopped batches resumed and merged; #1850 re-scoped at review; the script cache lands default-on
 
 The session opened on the s488 pause recipe ("Please continue"): both
