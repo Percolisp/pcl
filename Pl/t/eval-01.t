@@ -14,7 +14,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 67;
+use Test::More tests => 69;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -162,8 +162,8 @@ sub run_pl {
 }
 
 SKIP: {
-    skip "pl2cl not found", 52 unless -x $pl2cl;
-    skip "sbcl not found",  52 unless `which sbcl 2>/dev/null`;
+    skip "pl2cl not found", 54 if !-x $pl2cl;
+    skip "sbcl not found",  54 if !`which sbcl 2>/dev/null`;
 
     # Test 1: basic arithmetic
     {
@@ -610,5 +610,26 @@ PL
     like($out, qr/^H:\[\]$/m, '$@ is "" inside an eval BLOCK');
     like($out, qr/^I:\[\]$/m, '$@ is "" inside a STRING eval');
     like($out, qr/^J:\[\]$/m, '$@ is "" in a sub called from inside an eval');
+}
+
+{
+    # THE EMPTINESS TEST NEVER STRINGIFIES A REFERENCE, and the message is built
+    # ONCE (s490 review of s473t6b).  Deciding "were there arguments?" by
+    # concatenating them ran an exception object's `""` overload on every
+    # `die $obj` — perl runs it ZERO times there — and twice for a list.
+    # Live perl 5.40.3: K: n=0 ref=Ex / L: n=1 [strx|].
+    my $out = run_pl(<<'PL');
+package Ex; use overload '""' => sub { $main::n++; "str" }, fallback => 1;
+sub new { bless {}, shift }
+package main; our $n = 0;
+eval { die Ex->new };
+print "K: n=$n ref=", ref($@), "\n";
+$n = 0; eval { die Ex->new, "x\n" };
+print "L: n=$n [", ($@ =~ s/\n/|/gr), "]\n";
+PL
+    like($out, qr/^K: n=0 ref=Ex$/m,
+         'die OBJECT never runs the object\'s "" overload');
+    like($out, qr/^L: n=1 \[strx\|\]$/m,
+         'die LIST stringifies each piece ONCE');
 }
 }

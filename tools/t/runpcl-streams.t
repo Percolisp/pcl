@@ -170,7 +170,7 @@ flush_race($runpcl, $BODY, 'marker',
 
 my $pclperl = "$root/tools/pclperl-for-tests";
 SKIP: {
-    skip 'pclperl-for-tests not executable', 2 unless -x $pclperl;
+    skip 'pclperl-for-tests not executable', 2 if !-x $pclperl;
     flush_race($pclperl, "\$| = 1;\n$BODY", 'stdout',
                'pclperl-for-tests: $| = 1 reaches the fd mid-run');
     flush_race($pclperl, $BODY, 'marker',

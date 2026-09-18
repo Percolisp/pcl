@@ -14413,23 +14413,36 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      $@ is empty                 -> nothing to reuse; the caller's \"Died\"
 
    ARGS is answered unchanged in the last case and whenever there ARE
-   arguments, so the ordinary die path is untouched."
-  (let ((empty (or (null args)
-                   (string= (%p-string-concat-safe args) ""))))
-    (if (not empty)
-        args
+   arguments, so the ordinary die path is untouched.
+
+   TWO VALUES: the arguments to throw, and the MESSAGE when this function
+   already built it (NIL otherwise) — so p-die concatenates ONCE.  And the
+   emptiness test NEVER stringifies a reference (s490 review): the first
+   version concatenated every die's arguments just to see whether they were
+   empty, so `die $exception_object` ran the class's `\"\"` overload — perl
+   runs it ZERO times there, and once for `die $obj, \"x\"` where that
+   version ran it twice (measured with an overload that counts its calls;
+   real exception classes build a whole trace string in it).  A list holding
+   a reference is therefore never \"empty\" here; perl would reuse `$@` for a
+   list whose every overload answers \"\", a shape this deliberately gives up."
+  (let* ((has-ref (some #'p-warn-is-reference args))
+         (msg (if has-ref nil (%p-string-concat-safe args))))
+    (if (or has-ref (string/= msg ""))
+        (values args msg)
         (let ((err $@))
           (cond
             ((p-warn-is-reference err)
              (let ((prop (p-can err "PROPAGATE")))
-               (if prop
-                   (list (apply #'p-method-call err "PROPAGATE"
-                                (%p-die-split-loc where)))
-                   (list err))))
+               (values (if prop
+                           (list (apply #'p-method-call err "PROPAGATE"
+                                        (%p-die-split-loc where)))
+                           (list err))
+                       nil)))
             ((plusp (length (to-string (unbox err))))
-             (list (format nil "~A~A...propagated at ~A.~%"
-                           (to-string (unbox err)) #\Tab where)))
-            (t args))))))
+             (values (list (format nil "~A~A...propagated at ~A.~%"
+                                   (to-string (unbox err)) #\Tab where))
+                     nil))
+            (t (values args msg)))))))
 
 (defun p-die (&rest raw-args)
   "Perl die - throw an exception.
@@ -14443,7 +14456,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; can be installed and stay (#1247 (b)).
   (%p-arm-uncaught-die-hook)
   (multiple-value-bind (args0 loc) (%p-extract-loc raw-args)
-    (let ((args (%p-die-reuse-eval-error args0 (or loc (%p-loc-string) ""))))
+    (multiple-value-bind (args msg0)
+        (%p-die-reuse-eval-error args0 (or loc (%p-loc-string) ""))
       (if (and (= (length args) 1)
                (let ((obj (car args)))
                  ;; Perl's `die REF` preserves ANY reference (blessed or not) as
@@ -14467,7 +14481,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           ;; Object exception - preserve for $@
           (error 'p-exception :object (car args))
           ;; String exception
-          (let ((msg (apply #'p-string-concat args)))
+          (let ((msg (or msg0 (apply #'p-string-concat args))))
             ;; "~A", never (error msg): the message is DATA, and `(error msg)`
             ;; would make it a format CONTROL string.  Every perl die message can
             ;; carry a `~` -- the drop form (s435) embeds arbitrary user SOURCE
