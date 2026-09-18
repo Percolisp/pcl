@@ -21676,8 +21676,14 @@ buffer's fill-pointer; everything else falls back to file-length."
   "The cached CL text for a string eval, or NIL when there is no valid entry.
    A HIT stamps the pair, so the 30-day prune measures LAST USE here exactly
    as it does for a module (%P-TOUCH-CACHE-ENTRY's rule, one utime(2) per
-   entry per day at most)."
-  (when (p-cm-valid-p (%p-manifest-at deps-path))
+   entry per day at most).
+
+   :CHECK-MOVE NIL is stated rather than defaulted (task #1860): an eval's own
+   transpile runs through the SERVER, which is spawned with no `-I` list at
+   all, so the child's search path is not the one R2 would compare against.
+   R1 — the directories that transpile actually probed — runs here as
+   everywhere else, and it is the clause an eval needs."
+  (when (p-cm-valid-p (%p-manifest-at deps-path :check-move nil))
     (let ((text (ignore-errors
                   (with-open-file (in lisp-path :direction :input)
                     (let ((buf (make-string (file-length in))))
