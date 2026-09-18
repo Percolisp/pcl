@@ -290,8 +290,12 @@ entry is named the same way, plus the `-I` directories it was run with.
 So a cached module or script is re-transpiled when its own file
 changes. It is also re-transpiled when modules it depends on changes
 (if constants etc are declared in dependencies, the generated code
-might change). Entries are removed after 30 days without use, so they
-get recompiled if used again.
+might change) — and when one of those `use`d names starts resolving to
+a *different file*, which changes the parse in the same way: you added
+a module earlier on the search path, or changed the search path itself.
+Entries are removed after 30 days without use, so they
+get recompiled if used again. A saved core is kept as long as the
+runtime it was built from is still there.
 
 `pcl --cache-info` says where the cache is and what is in it, and `pcl
 --no-cache` runs once without it.

@@ -3354,7 +3354,9 @@ the fasl go through it. An entry is valid when, and only when:
 1. the file exists and is newer than the module's own source; **and**
 2. its manifest exists, parses, **every dependency it names still hashes to
    what the transpile read**, and **no name it recorded as unresolved
-   resolves now** (s473i, task #1284).
+   resolves now** (s473i, task #1284); **and**
+3. **every `mod` dependency still RESOLVES as it did** (s490a, task #1860) —
+   the two clauses R1 and R2 below.
 
 Nothing else. In particular there is **no age limit**: an age clause was a
 stand-in for the staleness rule 2 now states directly, and keeping it would
@@ -3377,6 +3379,8 @@ itself loads.
 gen<TAB>v2-830
 source<TAB>installed|local<TAB>/abs/path/A.pm
 dep<TAB>mod|file<TAB>NAME<TAB>installed|local<TAB><md5-hex><TAB>/abs/path/B.pm
+resolve<TAB>mod<TAB>NAME<TAB>head|base
+tried<TAB>mod<TAB>NAME<TAB>/abs/dir
 missing<TAB>mod<TAB>NAME
 ```
 
@@ -3400,11 +3404,68 @@ this, the child saw only its ambient `@INC`, and `pcl -I DIR prog.pl` reached
 the program's transpile but not a module's — every parse fact a dependency in
 `DIR` carries was silently missing.
 
-What is *not* covered, said plainly: a dependency that MOVES (a new `-I`
-shadowing a shim, so the same name resolves to a *different* file) is not
-detected — only "did not resolve, now does" is. The transpiler's own prototype
-cache (`Pl/ProtoCache.pm`) re-resolves every recorded name and does catch a
-move; the remedy at this layer is `pcl --clear-cache`.
+**That list is the RESOLVER's list, and one builder makes it** (normative,
+s490a, task #1844): `@INC` **then the fallback** — `*p-core-inc-dirs*`, the
+built-in paths the preamble records, standing in for perl's compiled-in default
+`@INC`. The resolver had the fallback and the `-I` derivation did not, and
+there is a moment when that is the whole search path: a script-cache MISS
+compile-files the program, so its `use` statements run **before** the entry's
+own preamble sets `@INC`. A module loaded there was transpiled with no `-I` at
+all and every one of its own dependencies was recorded `missing` — the first
+run of such a program answered with parse facts that were silently absent, and
+healed only from the second run on, via the `missing` re-check. In ordinary
+operation the fallback only repeats directories already on `@INC`, so a first
+match does not move.
+
+**A dependency that MOVES — the `resolve`/`tried` lines** (normative, s490a,
+task #1860). A name that starts resolving to a *different file* changes the
+emission exactly as an edit does, and neither the content hashes nor the
+`missing` re-check can see it: the recorded file still exists and still hashes
+as read. This side cannot simply re-resolve the name, because **the
+transpiler's search list is not `@INC`** — it is [the file's own `use lib`
+directories, PCL's shim `lib/`, then the child perl's `@INC`], and emulating
+that order from the runtime is the endless-re-transpile trap (every shim
+dependency would read stale for ever). So the manifest is **self-describing**:
+`pl2cl --deps` records, per resolved `mod` dependency, one `tried` line per
+directory its resolver probed **before** the hit (absolute; a relative
+`use lib 't/lib'` is `rel2abs`'d at record time) and one `resolve` line saying
+whether the hit was in the **head** of that list (a `use lib` directory or the
+shim `lib/`) or in the **base** (the child's `@INC` part). The runtime then
+checks facts rather than re-deriving them:
+
+- **R1** — no recorded `tried` directory holds the dependency's file now. The
+  transpiler's own question, re-asked over the list it used; the shim and a
+  `use lib` directory are just directories in it.
+- **R2** — for a **base** hit only, the first directory the child transpile
+  would search *now* that holds the file must be the recorded file (truenames).
+  A **head** hit never runs R2: that is what keeps a shim dependency and a
+  `use lib` dependency from reading stale for ever. Nothing found is *not*
+  evidence of a move (the child also searches `PERL5LIB` and perl's own
+  directories), so it passes.
+
+**R2 is a MODULE clause.** The script and string-eval layers ask for validity
+with it off, explicitly: a script's key already carries the `-I` list, the cwd
+and `PERL5LIB` (§below), and the search path in force while a script's own
+entry is validated is the seed `pcl` hands over, not the one its child was
+given. R1 runs for all three layers.
+
+**A `dep mod` line with no `resolve` line makes the manifest INVALID** — a
+recording path the transpile side missed costs a re-transpile, never a stale
+parse (rule 12). A `dep file` line carries neither: a path-required file is
+resolved relative to the requiring file, not by a name walk.
+
+Example — `A.pm` does `use B;` under `pcl -I d1 -I d2` with only `d2/B.pm`
+present:
+
+```
+dep<TAB>mod<TAB>B<TAB>local<TAB>e8f0…<TAB>/abs/d2/B.pm
+resolve<TAB>mod<TAB>B<TAB>base
+tried<TAB>mod<TAB>B<TAB>/abs/pcl/lib
+tried<TAB>mod<TAB>B<TAB>/abs/d1
+```
+
+Create `/abs/d1/B.pm` and R1 fires on the last line: `A`'s entry is invalid and
+`A` is re-transpiled, which is what perl does for free by re-parsing.
 
 **Which entries get a fasl** is a separate, purely-performance question —
 two directory lists in `PERL5LIB` syntax, read at run time:
@@ -3433,15 +3494,11 @@ must see. Three rules are the script's own:
 1. **The key carries the include path** — the `-I` list, the cwd and
    `PERL5LIB` — because a different search path can resolve the same `use`d
    name to a *different file*, and which file that was is a parse fact the
-   emission encodes. (The module key does **not** carry this; a dependency
-   that MOVES is the hole stated three paragraphs up, task #1860.)
-   **The other half of #1860 a script DOES inherit** (measured s488b): a
-   name that starts resolving to a different file while the search path is
-   UNCHANGED — a file created earlier on an `-I` directory already in the
-   list — moves nothing in the key and leaves the recorded dependency
-   hashing as read, so the entry stays valid and answers with the old
-   file's parse. For a main script that is NEW with this cache: before it,
-   the program was re-transpiled every run.
+   emission encodes. (The module key does **not** carry this; that is what
+   R2 above is for, and why R2 is a module's clause and not a script's.)
+   The other half — a name that starts resolving to a different file while
+   the search path is UNCHANGED — moves nothing in any key, and is R1's,
+   which runs here too.
 2. **The key carries the path AS GIVEN**, because `$0` is that string
    verbatim; `__FILE__`, `caller`'s file and the `__END__`/DATA section are
    functions of the path and the content, so the key covers them too.

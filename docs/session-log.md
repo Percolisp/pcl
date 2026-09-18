@@ -114,6 +114,65 @@ postfix-deref spelling PExpr has no arm for, a #138 DROP) and **#1878**; #403,
 TOTAL **18686 (+0)** / drops 5 = census; ir-conform 323 pass, 0 fail, 22 known, 0
 stale; gate `Result: PASS`.
 
+## Session s490a (Opus agent, 2026-09-18) — the cache-validity batch: a dependency that MOVES (#1860), a module's own dependencies on the FIRST run (#1844), and a saved core that outlives its tree (#1863)
+
+**Member 0 — #1844, a first-run silent wrong in the default-on script cache.**
+`p-find-module-in-inc` walked `@INC` and then a fallback (`*p-core-inc-dirs*`,
+the seed `pcl` hands `p-run-script-cached`); `%p-transpile-inc-args` walked
+`@INC` only.  On a script-cache MISS the program's `use` statements run at
+compile-file time, before the entry's own preamble sets `@INC` — so the
+resolver found the module through the seed while its child transpile was given
+no `-I` at all, and every dependency of that module was recorded `missing`:
+`prog -> A3 -> B2` with `sub zap ()` answered 107 where perl answers 8, on the
+first run only, healing from the second via #1284's missing re-check.  Fixed
+with one list builder, `%p-inc-search-dirs`, which both functions iterate (a
+first match over the concatenation is exactly the two-stage search the resolver
+was written as); `%p-transpile-inc-args` still drops the shim dir and
+non-string entries and now dedupes, because in ordinary operation the fallback
+only repeats `@INC`.  Probed both ways: the `-I` shape and the `use lib "x"`
+shape reproduce on the base (107, `missing:`) and answer 8 on the tree.
+
+**Member 1 — #1860, a cached entry that survives a dependency MOVING.**  The
+manifest re-hashes the old path, which still exists, so a `use`d name that
+starts resolving to a *different file* — a `d1/B.pm` created on an `-I`
+directory already in the list, or a changed `-I` list for a module, whose key
+carries none — served yesterday's parse (perl 107/8/8 against PCL 107/107/107;
+perl 8/107/8 against 8/8/8).  The task's own fix shape (re-resolve from the
+runtime) is the trap its MEASURE-BEFORE-SHIPPING paragraph names: the
+transpiler's list is [the file's `use lib` dirs, the shim `lib/`, the child's
+`@INC`], so every shim dependency would read stale for ever.  So the manifest
+became self-describing — `resolve mod NAME head|base` plus one `tried mod NAME
+DIR` per directory probed before the hit, written from the ONE resolver and
+carried through all four paths a dependency reaches the manifest by (fresh
+walk, L1 memo, L2 proto-cache hit, frame replay; on the L2 path the facts are
+re-read from the hit's own re-resolution, so the JSON's arity does not move).
+The runtime checks R1 (no recorded directory holds the file now) always and R2
+(a BASE hit is still the first file a child would find) for module entries
+only, `%p-child-inc-dirs` being the one definition of what a child searches.
+The acceptance measurement is the second-run re-transpile count, because a
+"0 new" sweep cannot see a false stale: nine `pcl` runs against one fresh
+cache, twice, counting entries the second run replaced by inode — 0 of 50
+modules / 18 scripts / 178 evals on base+member-0 and the same on this tree.
+Interleaved warm-start A/B: no measurable cost (one-module 0.0466 s vs
+0.0467 s best; `use Moo`+`has` 4.887 s vs 4.991 s).
+
+**Member 2 — #1863, 7.6 GB of saved cores.**  The prune removed older cores for
+the same runtime PATH and could not see a core whose path was gone, because
+`pathkey` is a hash: 163 cores / 7.61 GB on this box, 158 of them belonging to
+deleted worktrees.  A core now names its runtime in a `pcl-<pathkey>.path`
+sidecar (written at build, and by the first use of a core that has none), and
+the build-time prune collects a core whose named path is gone, or a
+sidecar-less core older than seven days — a live tree stamps its sidecar the
+first time it runs.  The core this run would use is never removed, an
+unreadable sidecar is kept rather than guessed at, and `CORE_KEY_VERSION` does
+not move.
+
+**Bars.**  Gate `Result: PASS`; full sweep GATE clean, TOTAL unchanged, drops =
+census; `corpus-diff.pl ab4da8b4` IDENTICAL over 111 and `emission-ab.pl
+--shapes` RCDIFF 0, so no generation bump; `ir-conform` clean; the @INC-touching
+companion files re-run before and after; three new guard rows sets, all
+inverse-verified on an `ab4da8b4` extraction.
+
 ## Session 489 (Fable, 2026-09-17 evening) — the two stopped batches resumed and merged; #1850 re-scoped at review; the script cache lands default-on
 
 The session opened on the s488 pause recipe ("Please continue"): both

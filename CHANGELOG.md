@@ -16,9 +16,24 @@ sessions); dates are development-time, not release-time.
   PPI's files, so a perl or PPI upgrade re-makes every cached transpile,
   and `PCL_OPT` and the other emission-selecting variables are part of
   the key.  `pcl --cache-info` and `--clear-cache` name the eval cache too.
-  Known hole, shared with the module cache (task #1860): a module file
-  created later, earlier on an unchanged `-I` list, is not noticed until
-  the script or a recorded dependency changes.
+
+- 2026-09-18: **a cached entry notices that a dependency MOVED** (#1860).
+  A `use`d name that starts resolving to a *different file* changes the
+  parse exactly as an edit does, and nothing saw it: the recorded file
+  still existed and still hashed as read.  Two spellings — a module
+  created earlier on an unchanged `-I` list (the hole the script cache
+  inherited the day it landed, since before it the program was
+  re-transpiled every run), and a changed `-I` list for a `use`d module,
+  whose key carries none.  The dependency manifest now records, per
+  resolved module, the directories the transpiler probed before the hit
+  and whether the hit was a `use lib`/shim one, and the next run re-checks
+  those facts; measured to re-transpile nothing extra on a warm cache.
+  Two more first-run cache bugs went with it: a module loaded on a
+  script-cache miss was transpiled with no `-I` list at all, so its own
+  dependencies' prototypes and exports were silently absent on the first
+  run of every program (#1844), and saved runtime cores of deleted
+  checkouts are now collected instead of accumulating for ever (#1863 —
+  7.6 GB of them on the development box).
 
 - 2026-09-10: **installing needs SBCL and nothing else.**  cl-ppcre, the
   regex engine, is now vendored in the tree (`cl/vendor/cl-ppcre/`, upstream

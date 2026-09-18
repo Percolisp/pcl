@@ -33,6 +33,16 @@ the runtime already compiled in, dropping that to about 0.1 s.
 - **Build**: on first use, under an `flock` so concurrent spawns don't race;
   written temp-file-then-rename. A failed build leaves `<core>.failed` for
   one hour and falls back to loading from source, loudly.
+- **One core per runtime that still exists** (task #1863). Editing the runtime
+  replaces that runtime's core; a *checkout you delete* used to leave its
+  ~49 MB core behind for ever, because the core's name holds a **hash** of the
+  runtime path and a hash cannot be turned back into a path. Each core now
+  names its runtime in a `pcl-<path-hash>.path` sidecar beside it, and the
+  next core *build* removes any core whose sidecar names a path that is gone.
+  A core with no sidecar at all (one built before this) is stamped the first
+  time it is used, and collected only if nothing has used it for a week. The
+  core the current run needs is never removed, and the prune happens at build
+  time — never on the path a warm start takes.
 - `PCL_NO_CORE=1` always runs from source; `PCL_CORE=path` uses a named
   core; `pcl --make-core` builds the cache entry now and exits.
 - **A checkout's cached core and an *installed* core are different
@@ -121,6 +131,20 @@ that `use`s `B2.pm` and calls one of B2's subs bareword-style, editing
 `A3.pm` — changes `A3`'s next-run answer to match perl's new parse,
 without `A3.pm`'s own mtime having moved.
 
+**A dependency that MOVES counts as a change too** (task #1860). Editing a
+dependency is only half of it: the same `use`d *name* can start resolving to
+a **different file**, and that changes the parse the same way while the
+recorded file still exists and still hashes as read. Two spellings — you
+create `d1/B.pm` on a `-I` directory that was already on the list, shadowing
+the `d2/B.pm` the transpile read; or you change the `-I` list itself, which a
+script's key notices (§2c) and a module's key cannot. Both re-transpile now.
+The manifest says how each dependency was found — the directories PCL's
+transpiler probed before the hit, and whether the hit was in a `use lib`
+directory or PCL's shim `lib/` rather than on the child perl's own search path
+— and the next run re-checks exactly those facts. Nothing else changed: a
+module you have not touched, whose dependencies have not moved, is still a hit
+indefinitely, and the check costs one `stat` per probed directory.
+
 **The compile policy — which entries also get a `.fasl` — is two directory
 lists**, read at run time (`PCL_COMPILE_DIRS` / `PCL_NO_COMPILE_DIRS`,
 §6). By default it's perl's own installed library directories plus PCL's
@@ -198,15 +222,14 @@ module, and the second run loads its compiled form in **0.037 s**.
   would leak one dead entry per run; content-keying them the way §3 keys an
   eval is task **#1862**. `pcl -c` is not cached either — it must transpile
   and *not* run.
-- **The one case validity does NOT cover** (task **#1860**, measured): a
-  dependency whose *name* starts resolving to a **different file** while the
-  search path is unchanged — you create `d1/B4.pm` on an `-I` directory that
-  was already there, shadowing the `d2/B4.pm` the transpile read. Nothing in
-  the key moves and the recorded dependency still exists and still hashes as
-  read, so the entry stays valid and answers with the old file's parse. A
-  changed `-I` list *is* covered (it is in the key); this is the other half,
-  it is the module cache's hole too, and for a main script it is **new with
-  this cache** — before it, the script was re-transpiled every run.
+- **A dependency that MOVES is covered too, since task #1860** — a name that
+  starts resolving to a *different file* while the search path is unchanged
+  (you create `d1/B4.pm` on an `-I` directory that was already there,
+  shadowing the `d2/B4.pm` the transpile read). Nothing in the key moves and
+  the recorded dependency still hashes as read, so this was the one shape a
+  cached script answered with yesterday's parse — and it was **new with this
+  cache**, because before it the script was re-transpiled every run. §2's
+  paragraph has the mechanism.
 - **A script edited in the same second its entry was written re-transpiles
   once more**: validity wants the entry *strictly* newer than the source.
   That is §2's rule, and it errs towards doing the work again.
