@@ -187,9 +187,21 @@ my %VIV_CONTAINER_NODE = map { $_ => 1 } qw(h_acc a_acc h_ref_acc a_ref_acc);
 # substr appears rvalue-3-arg here; the mutating 4-arg form is already
 # vetoed via mutating-builtin-arg.  sprintf/printf license only the FORMAT
 # (arg values depend on the format string, which this pass does not read).
+#
+# `length` IS NOT IN THIS TABLE, and it is the one string-position builtin
+# that is not (task #1847).  A class here says the value is STRINGIFIED and
+# the use CANNOT OBSERVE UNDEF — which is what licenses the B-regime freeze,
+# where the slot stores a raw string and an undef initialiser becomes "".
+# perl's `length(undef)` is UNDEF (since 5.12), so `defined length $x`,
+# `length($x) // $d` and a list-context `(length $x)` all see the difference:
+# `my $v = -d "/nope"; defined(length($v))` was DEFINED here and undef in
+# perl.  PROBED, the whole table at once: `length` is the ONLY member that
+# answers undef for an undef argument — lc/uc/lcfirst/ucfirst/substr/sprintf
+# give "", ord/hex/oct/index2/split give 0, index/rindex give -1.  So this is
+# a family of one, and the fix is its absence, not a new class.
 my %USE_FN = (
   print   => 'str-all',  say => 'str-all',  join => 'str-all',
-  length  => ['str'],    lc  => ['str'],    uc   => ['str'],
+                         lc  => ['str'],    uc   => ['str'],
   lcfirst => ['str'],    ucfirst => ['str'],
   ord     => ['str'],    hex => ['str'],    oct  => ['str'],
   index   => ['str', 'str', 'num'],

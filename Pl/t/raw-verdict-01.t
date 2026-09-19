@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 76;
+plan tests => 78;
 
 sub run_cl {
     my ($code, $env) = @_;
@@ -68,10 +68,29 @@ my $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>5); my $n = $h{k}; my $s=0; for (my $i=0; $i<$n; $i++) { $s+=$i } print "$s\n";});
 like($cl, qr/\(\$n :num \(%pcl-to-number-strict /, 'element-seeded numeric bound: B-num freeze');
 
-# All-string uses (interpolation, length, bool) → raw-string; bool licenses str.
+# All-string uses (interpolation, bool) → raw-string; bool licenses str.
+# `length` USED TO BE in this fixture and is not any more (task #1847): it is
+# the one string-position builtin that OBSERVES undef, so it cannot license
+# the freeze — the row below is its own.
 $cl = Pl::Parser2->parse_code(
-  q{my %h=(k=>"x"); my $m = $h{k}; if ($m) { print "got $m\n"; } print length($m),"\n";});
+  q{my %h=(k=>"x"); my $m = $h{k}; if ($m) { print "got $m\n"; } print "again $m\n";});
 like($cl, qr/\(\$m :str \(%pcl-to-string-strict /, 'string/bool uses: B-str freeze');
+
+# #1847: `length` is NOT an undef-insensitive string use.  perl's
+# length(undef) is UNDEF (since 5.12), and the freeze turns an undef
+# initialiser into "" — so `my $v = -d "/nope"; defined(length($v))` answered
+# DEFINED here and undef in perl.  Probed across the whole %USE_FN table:
+# length is the ONLY member that answers undef for an undef argument
+# (lc/uc/lcfirst/ucfirst/substr/sprintf give "", ord/hex/oct give 0,
+# index/rindex give -1), so it is a family of one and the fix is its absence.
+$cl = Pl::Parser2->parse_code(
+  q{my %h=(k=>"x"); my $m = $h{k}; print length($m),"\n";});
+unlike($cl, qr/\(\$m :str /,
+       '#1847: a lexical read ONLY by length() is not frozen to a raw :str slot');
+$cl = Pl::Parser2->parse_code(
+  q{my %h=(k=>"x"); my $m = $h{k}; print "got $m\n"; print length($m),"\n";});
+unlike($cl, qr/\(\$m :str /,
+       '#1847: ... and one length() read disqualifies the freeze beside real string uses');
 
 # Boolean context DISQUALIFIES raw-numeric ("0.0"/"00"/" " are true strings
 # that numify false) — a bool + num mix stays boxed.
@@ -681,8 +700,11 @@ PL
 # …and the licence must still FIRE where it is earned: a real interpolation
 # and an interpolating heredoc are stringify uses, and an uncaptured slot
 # keeps its freeze.
+# (the `length($v8)` this fixture used to carry moved out with task #1847 —
+# length observes undef and cannot license the freeze; the subject here is the
+# INTERPOLATION.)
 $cl = Pl::Parser2->parse_code(
-  q{my %h8=(k=>'vv'); my $v8 = $h8{k}; print "8 v=[$v8] len=", length($v8), "\n";});
+  q{my %h8=(k=>'vv'); my $v8 = $h8{k}; print "8 v=[$v8] more=[$v8]\n";});
 like($cl, qr/\(\$v8 :str \(%pcl-to-string-strict /,
      '#1621: a genuine interpolation still licenses the B-str freeze');
 $cl = Pl::Parser2->parse_code(
