@@ -186,29 +186,28 @@ t/mro/next_skip.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / ne
 t/mro/next_skip_utf8.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/pkg_gen.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 t/mro/pkg_gen_utf8.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
-t/op/attrhand.t	4	UNEXPLAINED
+t/op/attrhand.t	4	NS:Attributes on a variable declaration (#322) -- the file is `use Attribute::Handlers` + `sub X :ATTR(CODE,RAWDATA)`.  The module itself fails to transpile (`Parser2 TODO: oversized top-level my extent: %global_phases not promotable`, the F6 family), so the top-level form aborts and none of the four rows runs
 t/op/attrs.t	14	NS:Attributes on a variable declaration -- the file aborts at `Undefined subroutine &attributes::_guess_stash called`; the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-t/op/bless.t	1	UNEXPLAINED
+t/op/bless.t	1	NS:`DESTROY` called by garbage collector -- the never-produced row is the `# TODO` half of "RT #3306: DESTROY should be called on CODE ref"
 t/op/bop.t	13	UNEXPLAINED
 t/op/coreamp.t	711	#1577 -- MIXED, 15 aborted forms, MEASURED s473t4: six are the `&CORE::NAME` / `&__FILE__` / `&__LINE__` / `&__PACKAGE__` family (the file's subject), two are the ruled given/when refusal, three a runtime arity error, four other undefined subs.  s488a: 723 -> 711 at 4af36604 (s484a member 3, #1586: prototype("CORE::NAME") answers perl's own string and an unknown keyword throws), measured 9/46 at its parent 8b1ccf3d and 9/58 at it: 12 rows the file never produced are PRODUCED and fail honestly, and its aborted forms went 15 -> 18.
 t/op/coresubs.t	1107	NS:Readouts of perl's own internals -- `use B` + B::walkoptree is the file's whole method (s473t4: 1109 -> 1107 rows short, the file now produces 2; the #1501 `state`-in-inner-block fix took it from TRANSPILE/0 rows to DIFF 1/1; the residue is B)
 t/op/current_sub.t	11	XDIFF: not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-s...
-t/op/dbm.t	5	UNEXPLAINED
+t/op/dbm.t	5	NS:DynaLoader / XS binary extensions -- the file's own `eval { require AnyDBM_File }; skip_all("No dbm functions") if $@` fires under PCL (AnyDBM_File resolves to SDBM_File/NDBM_File, which are XS), so PCL prints `1..0 # Skip No dbm functions` where perl runs 5 rows
 t/op/decl-refs.t	195	#1648 + #1649 -- the file evals a program per declarator/sigil pair with `eval $code or die $@`, so a refusal kills the enclosing top-level loop.  Two refusals: `@ret = state (\($d,$e));` (a `state (LIST)` mid-statement) and `for MY \~x (\~::y) {…}` (PPI mis-lexes a declared-ref foreach loop variable, ppi-upstream-bugs.md §29a).  Rows 1..207 are loop 1 plus the three `my` iterations; the 195 are the state/our/local x sigil ones
 t/op/defer.t	16	XDIFF: not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B ph...
 t/op/die.t	6	UNEXPLAINED
 t/op/each.t	18	UNEXPLAINED
 t/op/eval.t	1	UNEXPLAINED
-t/op/exec.t	16	UNEXPLAINED
-t/op/filehandle.t	2	UNEXPLAINED
+t/op/filehandle.t	2	#1931 -- `seek`/`tell` on a handle opened with the 2-argument `open(FH, "<file")` spelling: rows 2 and 3 are never produced and row 4 fails
 t/op/filetest.t	2	#1817 — `-f _` after `sub _ {…}` is defined: the form dies "Undefined subroutine &main::f called" and the two rows that pin `_` as a BAREWORD after a filetest are never produced
 t/op/for.t	149	#1580 -- PPI 1.291's LEXER fails on a DEREFERENCE as the foreach loop variable (`for ${*$f} (…)`, ppi-upstream-bugs.md §29), so the whole file is lost.  SIZED s473t5a: 148 of the 149 rows are BEFORE the offending line 767, the repair must be PRE-LEX (there is no document to mutate), and a lex-only repair is a SILENT WRONG -- see the task
-t/op/getppid.t	8	UNEXPLAINED
+t/op/getppid.t	8	#271 (RULED s373: BEHIND #153's FOLD) -- `pipe my ($r, $w)`: a `my (LIST)` in an argument run contributes ONE vector argument instead of N, so `(p-pipe (vector $r $w))` fails to COMPILE and the top-level form is aborted.  The file's three `pipe my (...)` calls are its whole body (probed s473t6c: the shape still reproduces exactly as #271 records it)
 t/op/gmagic.t	45	UNEXPLAINED
 t/op/goto.t	134	#1654 -- #1581 is FIXED (the `package Do_undef { my $count }` beside a file `my $count` no longer refuses), and the transpile now reaches a SECOND refusal, "Parser2 TODO: forward goto to a standalone label" for `label2:`; the file stays TRANSPILE-FAIL at 0 rows
 t/op/gv.t	113	#1651 -- the file HANGS: TIMEOUT at 67/24 with --timeout 400, on this tree AND on the base extraction (emission byte-identical), so the blessed 135/56 is unreachable today and the four `Died at gv.t line N` aborted forms cannot be attributed until it completes
-t/op/hash-clear-placeholders.t	9	UNEXPLAINED
-t/op/hash-rt85026.t	1	UNEXPLAINED
+t/op/hash-clear-placeholders.t	9	NS:Readouts of perl's own internals -- `use Devel::Peek` + `Hash::Util::lock_keys_plus`; the rows read the hash's internal placeholder count out of the dump (see also NS:`Hash::Util` bucket statistics)
+t/op/hash-rt85026.t	1	NS:Readouts of perl's own internals -- the same Devel::Peek dump shape as t/op/hash-clear-placeholders.t (both files are one RT ticket's fixture)
 t/op/hash.t	479	NS:`Hash::Util` bucket statistics -- `require Hash::Util` at hash.t:137 aborts the top-level form that holds every torture_hash call (#1578 is the separate message bug: the die text says "module this module" instead of the name).
 t/op/inc.t	0	s488a #1248(b) FIXED (was 18): e2536f81 (s473d member 3, `**` returns an NV wherever perl is not sure of an integer), measured 62/13 at its parent 9089d12a and 67/26 at it -- the file produces all 93 of perl's rows now
 t/op/inccode-tie.t	89	#1642 -- a BLOCK-form package in a BARE BLOCK whose tail is not literal-only; #1587 (s484a) fixed the VERSION and BLOCK spellings and the flattened bare block, and uni/opcroak.t now runs, but this file's `push @INC, …` tail keeps the ruled refusal
@@ -216,46 +215,46 @@ t/op/inccode.t	50	#1815 — @INC HOOKS are not implemented: `%p-inc-dir-file` ca
 t/op/incfilter.t	153	NS:Source filters -- not-supported.md §Source filters (`Filter::Util::Call`, `Filter::Simple`, `use Switch`, …).  The file's whole subject is source filters in coderef-@INC and `Filter::Util::Call` is XS (Call.so), so `use Filter::Util::Call` at incfilter.t:18 aborts and the file produces 0 of perl's 153 rows
 t/op/index.t	308	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`, same reason as op/write.t
 t/op/kvhslice.t	0	s473t1 #1024 FIXED (was 1): a lone BAREWORD key in a kv-slice was compiled as a sub call, so the assertion inside `eval '… %h{i} …'` never ran
-t/op/length.t	2	UNEXPLAINED
+t/op/length.t	2	NS:Warnings-gated diagnostics are absent (#221) -- the two never-produced rows are `print length undef` under a `$SIG{__WARN__}` that expects the "Use of uninitialized value" warning
 t/op/lex.t	1	UNEXPLAINED
 t/op/lexsub.t	15	#376 + #377 + #374 — the LEXICAL SUB family (`my sub` / `state sub` / `our sub`): the forward declaration, the lexical alias, the per-invocation clone and the rename's uncovered spellings — 15 of perl's rows are never produced: eleven top-level forms abort with `Undefined subroutine &main::<lexname> called` (the lexical sub the compiler renamed, or never defined), one with `Can't call method is on an undefined value`, and one is a PPI mis-lex (`is y, 43, '…'` at line 851 reads as a TRANSLITERATION).  The file also CRASHES the binding stack
-t/op/lfs.t	17	UNEXPLAINED
-t/op/lock.t	5	UNEXPLAINED
+t/op/lfs.t	17	#1924 -- PCL's %Config is a 108-key hand-written subset (lib/Config.pm) where perl's is 1,253 keys, and `lseeksize` is not in it, so the file's own BEGIN `skip_all('no 64-bit file offsets') if $Config{lseeksize} < 8` fires and PCL produces NO rows.  Probed s473t6c: perl 8, PCL undef
+t/op/lock.t	5	#1926 -- `lock` is not implemented: the five rows are `is \lock $foo, \$foo` and its @/%/& spellings, each of which reaches the runtime with the wrong arity ("invalid number of arguments") and aborts its form.  In a non-threaded perl `lock` is a no-op that RETURNS A REFERENCE to its argument; the last row also needs NS:Lvalue subroutines
 t/op/lvref.t	201	#1579 -- `\state @a = [1..3]` (refaliasing a state container) refuses the whole file
 t/op/magic.t	1	UNEXPLAINED
 t/op/method.t	37	#1439 (26 rows) + #1821 (the rest) — the PCL test.pl stub's `skip_if_miniperl` skips UNCONDITIONALLY, so the `SKIP:` block at method.t line 586 ("file handles as methods requires loading IO::File", 26 assertions) is skipped where perl RUNS it; and `CLASS->CORE::uc` dies (#1821), aborting the form that holds perl rows 126-134.  Measured from PCL's own output: it emits 12 `# skip file handles as methods…` rows in place of perl's 26
 t/op/multideref.t	0	s473t1 #1431 FIXED (was 13): the `exists +(EXPR)->…` arity crash aborted the file's top-level form at test 52; it produces all 65 rows now
-t/op/my_stash.t	2	UNEXPLAINED
+t/op/my_stash.t	2	#1664 -- the TYPEGLOB MODEL: `my Dog $spot` looks the class up in the stash and consults its %FIELDS; the two never-produced rows need a FIELDS sub STUB to exist in that stash
 t/op/numconvert.t	1446	s474b/s473a: the file SKIPS ITSELF (`1..0 # Skip unsigned perl arithmetic is not sane`): its preamble computes `sprintf "%u", $max_uv1 ** 6` and `do { use integer; $max_uv1 * 16 }`, both exact bignums in PCL where perl clamps to UV_MAX and wraps to -16.  CAUSE: not-supported.md §Integers are unbounded: PCL has no 64-bit boundary (registered s473a; revisit pointer #1513, USER-ruled DOCUMENT-not-implement 2026-09-07).  All 1446 rows are the one skip, not 1446 failures.
-t/op/numify_chkflags.t	14	UNEXPLAINED
+t/op/numify_chkflags.t	14	NS:Readouts of perl's own internals -- `use Devel::Peek` + `Dump()`: every row parses Devel::Peek's SV dump for the IOK/NOK/POK flags a PV->NV conversion left.  PCL has no SV flags to dump
 t/op/override.t	16	UNEXPLAINED
-t/op/pos.t	3	UNEXPLAINED
+t/op/pos.t	3	#1922 -- `pos` is kept on a SCALAR only: `pos($h{k})`, `pos($a[0])` and `pos($_[0])` all read UNDEF after a `//g` match on that very place where perl reads 2 (probed s473t6c).  The three never-produced rows are the re-eval block that reads pos through a defelem
 t/op/postfixderef.t	7	UNEXPLAINED
-t/op/readline.t	4	UNEXPLAINED
+t/op/readline.t	4	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's tail opens a file for WRITE and reads its layers back; the runner's abort is `The function PerlIO::pl-get_layers is undefined`
 t/op/ref.t	15	#1826 — `$foo = doit $object "FOO";` (indirect object, scalar invocant WITH arguments) is a ruled DROP at line 335 and the drop aborts the form; NS:Indirect object syntax (#399)
-t/op/require_37033.t	4	UNEXPLAINED
-t/op/rt119311.t	9	UNEXPLAINED
-t/op/sigdispatch.t	2	UNEXPLAINED
-t/op/signame_canonical.t	15	UNEXPLAINED
+t/op/require_37033.t	4	#1935 -- the file closes STDIN and then `require`s a fixture module, asserting the module's own handle does not reuse fd 0.  PCL cannot find the fixture (`Can't locate test_use_14937.pm in @INC`): the @INC the file builds from its own directory does not reach the require
+t/op/rt119311.t	9	NS:`DESTROY` called by garbage collector + NS:`format` / `write` report formatting -- the file needs a DESTROY to run at the exact moment a die/last/next/redo/goto unwinds the stack, and its second half does it from inside `format` templates.  The runner's own abort is `Can't find label test` (a `goto LABEL` out of a sub into file scope, NS:Computed goto)
+t/op/sigdispatch.t	2	#1928 -- %SIG lookups are not NUL-clean and `$SIG{"__DIE__\0whoops"}` must be "No such hook"; the two never-produced rows need a deferred-signal model (a signal raised inside a handler)
+t/op/signame_canonical.t	15	#1927 -- the file plans `scalar @duplicate_signals * 5` rows from the signal names %Config lists twice (CHLD/CLD, POLL/IO, ABRT/IOT), sends each with `kill $name, $$` under a `local $SIG{$name}` and asserts the handler sees the CANONICAL name.  %Config has sig_name/sig_num here (probed s473t6c), so the plan is computable, but PCL produces NO rows
 t/op/signatures.t	35	XDIFF: not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error...
 t/op/sigsystem.t	4	XDIFF: not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the p...
 t/op/smartmatch.t	3	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl ...
 t/op/state.t	74	not-supported.md §`given`/`when` — the file’s ONE `given` block (line 350).  The refusal is STATEMENT-level since s466 (#1037), so the file runs to it and its 88 rows before it pass; the tail of the enclosing TOP-LEVEL form goes with the die (ir-spec §9.3, sizing task #1055).  aborted-forms:1, and that one form IS the refusal.  The twin perl-tests/state.t row (78) carries the same cause.
 t/op/sub_lval.t	114	not-supported.md §Lvalue subroutines -- 9 of the file's aborted top-level forms are `LVSUB = VALUE` assignments ("Can't modify non-lvalue subroutine call in assignment"); the residue is one "Bug. Fell through. Missing case" on `sub x : lvalue {…} continue {…}` and one "Cannot dereference non-reference: undef".  Was 116: s473t5a's #1650 (an all-digit ARRAY name is now forward-declared) un-aborted the two forms that read `@119797`, measured 31/64 -> 33/64 on the base extraction vs this tree
 t/op/substr.t	46	UNEXPLAINED
-t/op/svflags.t	16	UNEXPLAINED
+t/op/svflags.t	16	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file is `use B qw(svref_2object SVf_IOK SVf_NOK SVf_POK)` and every row reads an SV's FLAGS; the `require B` fails (`Can't locate loadable object`) and aborts the form
 t/op/svleak.t	156	NS:Regex code blocks -- `(?{...})` is STRIPPED and the transpile refuses the file
 t/op/switch.t	195	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL re...
-t/op/symbolcache.t	1	UNEXPLAINED
+t/op/symbolcache.t	1	#1664 -- the TYPEGLOB MODEL: the file deletes a sub from the stash and re-installs it, then checks that an already-compiled call site is still bound to the ORIGINAL body
 t/op/tie_fetch_count.t	202	not-supported.md §`given`/`when` / smart match (`~~`) — the file’s ONE infix `~~` statement.  Statement-level since s466 (#1037): 141 of perl’s 343 rows now run, and the 202 missing ones are the tail of the refused statement’s enclosing top-level form (#1055).  aborted-forms:1, and that one form IS the refusal.
 t/op/tiearray.t	20	#1429 (s473, Fable): the #1273 rule-12 fatal fires on a TIED array whose class sets $NEGATIVE_INDICES (`$n[-2] = q(a)`, t/op/tiearray.t ~268) and aborts the form: the STORE + DELETE/EXISTS block, "n freed" and the NegFetchsize block are never produced.  PRE-EXISTING at fcf076f1 (extraction); companion op/tiearray.t 40/35 -> 26/29.
 t/op/tiehandle.t	24	NS:`tie` on an ARRAY or HASH (#155) — NO aborted form: the 23 rows are assertions written INSIDE the tie methods (PRINT / WRITE / READLINE), which never fire because `tie *$fh` is dropped (#155)  The 24th (s473t6b) is #1850's glue: the TAP is on disk row by row, so the untied handle's newline-less "sometext" now GLUES to the next TAP row and that row is no longer parseable (perl with `$| = 1` glues too)
 t/op/tr.t	2	UNEXPLAINED
-t/op/try.t	2	UNEXPLAINED
+t/op/try.t	2	#1942 + NS:Lvalue subroutines [DEFERRED] (#930) -- the two never-produced rows are `try { return }` inside a `sub : lvalue`
 t/op/undef.t	51	NS:DESTROY called by garbage collector (50 rows) + NS:Read-only constants via `\undef` stash tricks (1).  NOT an early stopper: the file runs to its LAST row.  50 of the 51 are `X::DESTROY`'s five assertions x 10 keys, reached in perl only because `undef %hash` frees the blessed values; the remaining row is `undef constants preserve identity`, behind the `BEGIN { $::{z} = \undef }` stash-constant trick whose bareword `z` dies as an undefined sub
-t/op/utfhash.t	2	UNEXPLAINED
+t/op/utfhash.t	2	NS:Unicode semantics differences -- a hash key whose UTF8 flag differs from its bytes; the never-produced rows are the \w-on-keys loop.  The file is also *rows-unstable* (#1082): its descriptions interpolate the hash order
 t/op/write.t	505	not-supported.md §`format` / `write` report formatting — the file aborts at `Undefined subroutine &main::formline`.  Was 595 rows; #1032 (`p-write` takes a bareword handle) moved the abort later and produced 90 more (s468be).
-t/op/yadayada.t	1	UNEXPLAINED
+t/op/yadayada.t	1	NS:Error compatibility for invalid Perl input -- the never-produced row evals a `...` spelling perl rejects at COMPILE time and matches $@ against /\Asyntax error/
 t/opbasic/magic_phase.t	2	UNEXPLAINED
 t/re/alpha_assertions.t	250	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
 t/re/anyof.t	1187	NS:DynaLoader / XS binary extensions -- Storable

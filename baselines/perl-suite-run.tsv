@@ -1802,7 +1802,7 @@ op/each.t	65	0	37	10	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT
 op/each_array.t	65	0	65	0	OK		0
 op/eval.t	169	0	133	35	DIFF	s473h: 131/37 -> 133/35, the two rows are t/op/eval.t:75-76 (`my @b = eval @a; is("@b",'4'); is($@,'')`) -- `eval EXPR` imposes SCALAR context on its operand (task #1249(4)); the old undef-fn:main::pl-ARRAY signature WAS this bug, PCL stringifying the raw vector as ARRAY(0x..)	0
 op/evalbytes.t	9	0	7	2	DIFF	s473f: 5/4 -> 7/2 -- #1074 gives a handle its class, and this file's two utf8-in-evalbytes rows depend on it (serial re-run; io/open.t, op/method.t, op/readdir.t, op/universal.t moved in the same run and are spliced with it)	0
-op/exec.t	41	0	24	1	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
+op/exec.t	41	0	37	4	DIFF	s473t6c: C 24/1 -> 37/4 and the 16-row shortfall -> 0.  #1920 -- `system` must not DIE when the child cannot be started (perl returns -1, sets $? to -1 and $! from the failed exec); sb-ext:run-program SIGNALS instead, so `system { "lskdfj" } "lskdfj"` at line 109 aborted the top-level form.  #1921 -- a rename inside a PPI full-quote token left its SECTION RECORD stale, so `system qq{$Perl -le "print q{ok $tnum - ..."}}` lost its tail.  14 FIXED ROWS, 0 NEW; the 4 that stay are the `Too many arguments for` compile-time diagnostics	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
@@ -1843,8 +1843,8 @@ op/int.t	19	0	19	0	OK		0
 op/isa.t	14	0	14	0	OK		0
 op/join.t	43	0	41	2	DIFF		0
 op/kill0.t	9	0	6	3	DIFF		0
-op/kvaslice.t	38	0	23	15	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
-op/kvhslice.t	39	0	21	18	DIFF	s473t1 #1024: a lone BAREWORD key in a kv-slice was compiled as a SUB CALL (_kv_slice_node never called _parse_subscript_ix), so rows 157/158 died and the `eval` at line 53 took its assertion with it.  +2 pass, -1 fail, +1 row.  Was: s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
+op/kvaslice.t	38	0	25	13	DIFF	s473t6c #1923: a kv-slice in SCALAR context is its LAST value, not the COUNT of the flattened key/value list -- gen_kv_array_slice_form was one of the two slice emitters that did not call _slice_in_context_form.  C 23/15 -> 25/13, 2 FIXED ROWS ("last element in scalar context", "correct value"), 0 NEW.  Was: s457ai #818 (the KV-slice VALUE half is an alias, so the write-through rows pass)	0
+op/kvhslice.t	39	0	22	17	DIFF	s473t6c #1923: the hash twin of the kv-slice scalar-context fix.  C 21/18 -> 22/17, 1 FIXED ROW ("correct value"), 0 NEW.  Was: s473t1 #1024 (a lone BAREWORD key in a kv-slice was compiled as a SUB CALL)	0
 op/lc.t	2716	0	2685	31	DIFF		0
 op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
 op/length.t	49	0	35	12	DIFF		0
