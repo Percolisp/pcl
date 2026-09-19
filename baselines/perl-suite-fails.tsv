@@ -434,7 +434,7 @@ comp/parser.t	104	ok	(missing)	initial tick in sub declaration	#1694
 comp/parser.t	25	ok	not ok	interpolation, here doc	#1695
 comp/parser.t	18	ok	not ok	interpolation, qq//	#1695
 comp/parser.t	19	ok	not ok	interpolation, qq//	#1695
-comp/parser.t	23	ok	not ok	interpolation, s/...//	#1695
+comp/parser.t	24	ok	not ok	interpolation, s//.../	#1695 -- `"${a}{"` : a BRACED scalar interpolation followed by a literal `{` or `[` loses the VALUE (probed s473t6c: PCL prints `{` and `[` where perl prints `A{` and `A[`; `@{b}{`, `${a}x` and `"$a\{"` are all right).  s473t6c #1921 (a rename left the token's SECTION RECORD stale) SWAPPED which of the two `s///` rows shows it: the PATTERN row (`interpolation, s/...//`, perl test 23) now PASSES and this REPLACEMENT row (perl test 24) fails instead, on the same pre-existing braced-brace bug the stale record had been masking.  The file's counts are unchanged (51/47)
 comp/parser.t	130	ok	(missing)	keys .=	#1694
 comp/parser.t	13	ok	not ok	lexical block discarded by yacc	NS:Error compatibility for invalid Perl input + NS:Error message text and format
 comp/parser.t	187	ok	(missing)	line number after "nullary\n#line"	#1694
