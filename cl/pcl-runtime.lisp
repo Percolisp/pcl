@@ -11239,6 +11239,81 @@ create the key on a read-only call, which perl does not."
 ;; 0.1064 -> 0.1088 (+2.3 %), against feread2 0.5815 -> 0.5694 (-2.1 %).
 ;; Same rule as %p-no-overload-possible-p's comment: a guard added in front
 ;; of an existing fast path is measured against the path it precedes.
+;;; THE WHOLE-ARRAY ARGUMENT IS COPIED IN BULK (task #1517 half two, s473x).
+;;; sb-sprof over the `feargs` row (20 M elements through this function) says
+;;; the per-element spread below was, in round numbers, two thirds MACHINERY:
+;;; reading the source array through its ARRAY HEADER cost 33.6 % of the row
+;;; (slow-hairy-data-vector-ref + vector-hairy-data-vector-ref +
+;;; optimized-data-vector-ref), growing the result ONE ELEMENT AT A TIME cost
+;;; ~36 % (prepare-vector-push-extend + extend-vector +
+;;; reallocate-vector-with-widetag + %DATA-VECTOR-AND-INDEX) and the index
+;;; arithmetic of both another 7.8 % — while the element PROMOTION the comment
+;;; above is about was 0.2 %, amortised to nothing exactly as #1517 predicted.
+;;;
+;;; So the fix is not the per-array "every element is a box" FACT #1517
+;;; designed: it is ONE grow and ONE `replace` through %p-vec-data's
+;;; simple-vectors, then a patch pass over the run that fixes the slots which
+;;; are not already boxes.  No new fact, no invalidation rule, and — unlike
+;;; #883's rejected pre-sizing — nothing at all happens for a SCALAR argument,
+;;; which is the call this function overwhelmingly serves.
+(defun %p-flatten-grow (result n)
+  "Make room for N more elements at the end of RESULT, advance its fill pointer
+   past them and answer the index the run starts at."
+  (declare (type fixnum n))
+  (let* ((base (fill-pointer result))
+         (need (+ base n))
+         (cap (array-dimension result 0)))
+    (when (> need cap)
+      (adjust-array result (max need (* 2 (max cap 1)))))
+    (setf (fill-pointer result) need)
+    base))
+
+(defun %p-flatten-vector-slow (arg result)
+  "The element-at-a-time spread: the answer whenever ARG or RESULT is not the
+   plain element-vector shape %p-vec-data answers for (a displaced or
+   specialised vector).  Identical elements in identical slots — the bulk path
+   is a speed decision, never a semantic one (the %p-vec-data contract)."
+  (loop for j from 0
+        for elem across arg
+        do (vector-push-extend
+            (cond ((null elem) (%p-defelem-box arg j))
+                  ((p-box-p elem) elem)
+                  (t (%p-elem-cell arg j)))
+            result)))
+
+(defun %p-flatten-run (arg src dst base n)
+  "Give the run DST[BASE..BASE+N), just bulk-copied from ARG's storage SRC, the
+   boxes @_ needs.  A slot already holding a box is left alone, which at steady
+   state is every slot, so the pass costs one SVREF and one type test each.
+   %p-elem-cell writes into ARG's own slot, never grows it, so SRC and DST stay
+   the live storage across the loop."
+  (declare (type simple-vector src dst) (type fixnum base n))
+  (replace dst src :start1 base :end1 (+ base n) :end2 n)
+  (loop for j of-type fixnum from 0 below n
+        for elem = (svref src j)
+        do (cond ((null elem)
+                  (setf (svref dst (+ base j)) (%p-defelem-box arg j)))
+                 ((p-box-p elem))
+                 (t (setf (svref dst (+ base j)) (%p-elem-cell arg j))))))
+
+(defun %p-flatten-vector-into (arg result)
+  "Spread the raw vector ARG into RESULT — one grow and one `replace` when both
+   are the plain shape, else the element-at-a-time spread."
+  (let ((n (length arg)))
+    (when (plusp n)
+      (let ((src (%p-vec-data arg)))
+        (if (null src)
+            (%p-flatten-vector-slow arg result)
+            (let* ((base (%p-flatten-grow result n))
+                   (dst (%p-vec-data result)))
+              (if (null dst)
+                  ;; RESULT is built here as the plain shape, so this cannot
+                  ;; fire today; if it ever does, unwind the grow and take the
+                  ;; slow spread, which is the same answer.
+                  (progn (setf (fill-pointer result) base)
+                         (%p-flatten-vector-slow arg result))
+                  (%p-flatten-run arg src dst base n))))))))
+
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
    This implements Perl's argument flattening: foo(@arr) and foo(%hash) spread their
@@ -11257,13 +11332,7 @@ create the key on a read-only call, which perl does not."
       (cond
         ((and (vectorp arg) (not (stringp arg)))
          ;; Raw vector = array passed in list context: spread its elements
-         (loop for j from 0
-               for elem across arg
-               do (vector-push-extend
-                   (cond ((null elem) (%p-defelem-box arg j))
-                         ((p-box-p elem) elem)
-                         (t (%p-elem-cell arg j)))
-                   result)))
+         (%p-flatten-vector-into arg result))
         ((and (hash-table-p arg) (not (gethash :__class__ arg)))
          ;; Hash in argument context: spread to alternating key-value pairs.
          ;; But NOT blessed objects (which have :__class__) — those stay as-is.
