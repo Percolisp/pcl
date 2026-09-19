@@ -7,10 +7,8 @@ Percolisp/PCL compiles Perl to Common Lisp (using the
 compatibility.
 
 The second main target is to make a compiler toolkit for Perl, with a
-documented IR (Intermediate Representation). The compiler records
-facts about every variable and call site. The IR, its facts and its
-coercion rules are [specified](docs/ir-spec.md) and here is the
-information about the IR
+documented IR (Intermediate Representation),
+[specified](docs/ir-spec.md) here. Then see the
 [architecture](docs/v2-target-architecture.md).
 
 All the development files used by the AI for making Percolisp will be
@@ -126,12 +124,11 @@ PCL is still slower that are not shown here (file I/O about 3.4×,
 | pack | `pack` with two templates | 1035× |
 | packunpk | `pack` followed by `unpack` | 1080× |
 
-Numeric loops and recursion are fast. When the compiler can prove a
-variable holds a machine integer for its whole life, the generated
-code uses native arithmetic instead of perl's generic scalar. Such a
-variable can't have a reference taken, get assigned to a string and no
-string `eval` can reach it. If possible, a read-only `foreach` bind
-array slots directly instead of copying each element.
+When the compiler can prove a variable holds an integer for its whole
+life, the generated code uses native arithmetic without verifying the
+type. Those variables can't have a reference taken, get assigned to a
+string and no string `eval` can reach it. If possible, a read-only
+`foreach` bind array slots directly instead of copying each element.
 
 Reading and writing single array or hash elements, copying a whole
 array, filling one from a range, and a read-only `foreach` over one or
