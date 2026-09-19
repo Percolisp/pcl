@@ -4228,13 +4228,13 @@ sub _interp_token_candidate {
 # content, so it needs nothing and says so by having no {sections}.
 sub _resync_quote_sections {
   my ($t) = @_;
-  return 1 unless $t->{sections};
+  return 1 if !$t->{sections};
   my $text = $t->content;
   my $doc  = eval { PPI::Document->new(\(my $src = "my \$pcl_resync = $text;")) }
     or return 0;
   my @hit = grep { ref($_) eq ref($t) && $_->content eq $text }
             @{ $doc->find('PPI::Token') || [] };
-  return 0 unless @hit == 1 && $hit[0]{sections};
+  return 0 if !(@hit == 1 && $hit[0]{sections});
   $t->{sections} = $hit[0]{sections};
   return 1;
 }

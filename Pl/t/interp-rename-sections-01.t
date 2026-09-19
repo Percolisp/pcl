@@ -38,8 +38,8 @@ my $pl2cl        = "$project_root/pl2cl";
 my $runtime      = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
-plan skip_all => "pl2cl not found" unless -x $pl2cl;
-plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
+plan skip_all => "pl2cl not found" if !-x $pl2cl;
+plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
 plan tests => 8;
 
