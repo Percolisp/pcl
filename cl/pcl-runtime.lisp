@@ -3264,6 +3264,30 @@
                                  (every (lambda (c) (digit-char-p c 16))
                                         (subseq content 2))))))))))))
 
+;;; A DECIMAL DIGIT, AS PERL'S NUMIFIER COUNTS ONE (task #1918).
+;;;
+;;; perl's grok_number reads ASCII digits and stops: `"\x{0661}\x{0662}" + 0`
+;;; is 0, and `"12\x{0663}" + 0` is 12 — the leading ASCII run.  CL's
+;;; `digit-char-p` answers for EVERY Unicode Nd character in SBCL, so the
+;;; extent scan below took the non-ASCII digit and the string numified to 12,
+;;; to 123, to 312.  Worse in two shapes: having taken it, the CL reader then
+;;; refused the extent, so `"12.\x{0663}"` and `"1e\x{0663}"` came back 0
+;;; where perl gives 12 and 1.
+;;;
+;;; The REGEX side is a DIFFERENT question with the OPPOSITE answer — perl's
+;;; `\d` matches every Nd unless /a is in effect — and is deliberately not
+;;; touched here (divergence #1972).  Nor are sprintf's width/precision parse
+;;; and the string-increment magic test, which read PROGRAM TEXT rather than a
+;;; numified value; they are named in #1918 as the siblings that were greped
+;;; and left.
+(declaim (inline %p-ascii-digit-p))
+(defun %p-ascii-digit-p (ch)
+  "CH's value as an ASCII decimal digit (0-9), or NIL.  The one reading of
+   `is this a digit' for every scanner that has to answer as perl's numifier
+   does — parse-perl-number's extent scan and looks-like-number."
+  (let ((d (- (char-code ch) 48)))
+    (when (<= 0 d 9) d)))
+
 ;;; THE COMMONEST STRING A PERL PROGRAM NUMIFIES IS AN ASCII INTEGER, and until
 ;;; s473x it took the whole general body below: a `string-left-trim`, a
 ;;; `string-downcase` OF THE WHOLE STRING and a `string-right-trim` of that —
@@ -3369,13 +3393,13 @@
             (incf end))
           ;; Integer part
           (loop while (and (< end len)
-                           (digit-char-p (char trimmed end)))
+                           (%p-ascii-digit-p (char trimmed end)))
                 do (setf has-digit t) (incf end))
           ;; Optional decimal part
           (when (and (< end len) (char= (char trimmed end) #\.))
             (incf end)
             (loop while (and (< end len)
-                             (digit-char-p (char trimmed end)))
+                             (%p-ascii-digit-p (char trimmed end)))
                   do (setf has-digit t) (incf end)))
           ;; Optional exponent
           (when (and (< end len)
@@ -3386,9 +3410,9 @@
               (when (and (< end len)
                          (member (char trimmed end) '(#\+ #\-)))
                 (incf end))
-              (if (and (< end len) (digit-char-p (char trimmed end)))
+              (if (and (< end len) (%p-ascii-digit-p (char trimmed end)))
                   (loop while (and (< end len)
-                                   (digit-char-p (char trimmed end)))
+                                   (%p-ascii-digit-p (char trimmed end)))
                         do (incf end))
                   ;; No valid exponent, backtrack
                   (setf end exp-start))))
@@ -4353,7 +4377,13 @@
 
 (defun looks-like-number (str)
   "Check if the ENTIRE string is a valid number (Perl's looks_like_number).
-   Returns T only if the whole string (minus whitespace) is numeric."
+   Returns T only if the whole string (minus whitespace) is numeric.
+   A DIGIT here is an ASCII digit, through the same %p-ascii-digit-p
+   parse-perl-number's extent scan asks (task #1918): this is grok_number's
+   question and grok_number reads ASCII only, so `\"\\x{0661}\\x{0662}\"` is
+   not a number.  (`Scalar::Util::looks_like_number` is a lib/ shim with its
+   own `[0-9]` regex and already agreed; this is the RUNTIME's copy, which
+   %p-sv-kind and the dualvar decisions read.)"
   (and (stringp str)
        (> (length str) 0)
        (let* ((s (string-trim '(#\Space #\Tab #\Newline #\Return) str))
@@ -4365,12 +4395,12 @@
          (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
            (incf pos))
          ;; Digits before dot
-         (loop while (and (< pos len) (digit-char-p (char s pos)))
+         (loop while (and (< pos len) (%p-ascii-digit-p (char s pos)))
                do (setf has-digit t) (incf pos))
          ;; Optional dot + digits
          (when (and (< pos len) (char= (char s pos) #\.))
            (incf pos)
-           (loop while (and (< pos len) (digit-char-p (char s pos)))
+           (loop while (and (< pos len) (%p-ascii-digit-p (char s pos)))
                  do (setf has-digit t) (incf pos)))
          ;; Optional exponent
          (when (and (< pos len) has-digit
@@ -4378,7 +4408,7 @@
            (incf pos)
            (when (and (< pos len) (member (char s pos) '(#\+ #\-)))
              (incf pos))
-           (loop while (and (< pos len) (digit-char-p (char s pos)))
+           (loop while (and (< pos len) (%p-ascii-digit-p (char s pos)))
                  do (incf pos)))
          ;; Must have consumed entire string AND have at least one digit
          (and has-digit (= pos len)))))

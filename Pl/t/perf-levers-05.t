@@ -53,7 +53,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
-plan tests => 63;
+plan tests => 78;
 
 sub run_pl {
     my ($src) = @_;
@@ -252,4 +252,72 @@ for my $r (@flat_rows) {
     my ($line, $desc) = @$r;
     my $q = quotemeta $line;
     like($flat, qr/^$q$/m, "flatten: $desc");
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1918 — NUMIFICATION READS ASCII DIGITS ONLY.
+#
+# The round-34 fast path (%p-plain-integer-string, above) tests
+# `(<= 0 (- code 48) 9)` and is right; the GENERAL BODY it falls through to
+# used CL's `digit-char-p`, which SBCL answers for every Unicode Nd character.
+# So `"\x{661}\x{662}" + 0` was 12 where perl says 0, and `"12\x{663}" + 0`
+# was 123 where perl says 12 — perl's grok_number reads ASCII digits and stops.
+# Worse in two of the shapes: the extent scan TOOK the non-ASCII digit and the
+# CL reader then refused the substring, so `"12.\x{663}"` and `"1e\x{663}"`
+# came back 0 where perl gives 12 and 1.
+#
+# ONE predicate, %p-ascii-digit-p, used by the extent scan of parse-perl-number
+# and by looks-like-number (the same grok_number question).  The REGEX side is
+# a DIFFERENT question and is untouched: perl's `\d` DOES match Unicode digits
+# without /a, and PCL's does not — measured here, filed as #1972.
+#
+# EVERY EXPECTATION IS PERL 5.40.3's OWN OUTPUT
+# (scratch/s491a/probes/p1918.{pl,perl.out}).
+{
+    my ($nfh, $nfile) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $nfh <<'LISP';
+(format t "asciidigit ~a~%" (and (fboundp 'pcl::%p-ascii-digit-p) t))
+(format t "control ~a~%"    (and (fboundp 'pcl::parse-perl-number) t))
+LISP
+    close $nfh;
+    my $mech = `sbcl @sbcl_rt --load $nfile 2>&1`;
+    like($mech, qr/^asciidigit T$/mi,
+         '#1918 mechanism: the ASCII-only digit predicate exists');
+    like($mech, qr/^control T$/mi,
+         '#1918 control: parse-perl-number is fbound on both trees');
+}
+
+{
+    my $out = run_pl(<<'PERL');
+no warnings;
+my @cases = ("\x{ff11}\x{ff12}", "\x{661}\x{662}", "12\x{663}", "\x{663}12",
+             "1\x{660}2", "12.\x{663}", "1e\x{663}", "\x{1D7CE}",
+             "12", " 12 ", "-12", "3.5", "1e3");
+my $i = 0;
+for my $c (@cases) {
+    $i++;
+    my $inc = $c; $inc++;
+    printf "n%02d %s %s %s %s %s\n", $i, $c + 0, $c * 1, int($c), -$c, $inc;
+}
+PERL
+    my @rows = (
+        ['n01 0 0 0 0 1',                'FULLWIDTH ONE TWO numifies to 0'],
+        ['n02 0 0 0 0 1',                'ARABIC-INDIC ONE TWO numifies to 0'],
+        ['n03 12 12 12 -12 13',          'an ASCII run stops at the first non-ASCII digit'],
+        ['n04 0 0 0 0 1',                'a LEADING non-ASCII digit numifies to 0'],
+        ['n05 1 1 1 -1 2',               'a non-ASCII digit INSIDE an ASCII run ends it'],
+        ['n06 12 12 12 -12 13',          'the decimal part stops at a non-ASCII digit'],
+        ['n07 1 1 1 -1 2',               'an exponent of non-ASCII digits is not an exponent'],
+        ['n08 0 0 0 0 1',                'a non-BMP mathematical digit numifies to 0'],
+        ['n09 12 12 12 -12 13',          'the ASCII control is unmoved'],
+        ['n10 12 12 12 -12 13',          '... with surrounding blanks'],
+        ['n11 -12 -12 -12 12 -11',       '... signed'],
+        ['n12 3.5 3.5 3 -3.5 4.5',       '... a float'],
+        ['n13 1000 1000 1000 -1000 1001','... an exponent'],
+    );
+    for my $r (@rows) {
+        my ($line, $desc) = @$r;
+        my $q = quotemeta $line;
+        like($out, qr/^$q$/m, "#1918 numify: $desc");
+    }
 }
