@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -184,3 +184,25 @@ test_cl('unknown bareword in a kv-ARRAY slice reads element 0, does not die',
      my @kv = %a[zzz];
      print scalar(@kv), ":", $kv[1], ":", $a[zzz], "\n";',
     "2:10:10\n");
+
+# A kv-slice in SCALAR context is its LAST element — the VALUE of the last
+# key — exactly like the plain @h{…} / @a[…] slices beside it (task #1923,
+# s473t6c).  PCL answered the COUNT of the flattened pair list (4 for two
+# pairs), because gen_kv_*_slice_form was the one slice emitter that did not
+# go through _slice_in_context_form.  The plain-slice rows are the control:
+# they were always right and must stay right.
+test_cl('kv-slices in scalar context are the LAST value, like plain slices',
+    'my %kv = (a=>1, b=>2, c=>3);
+     my @arr = (10,20,30);
+     my $hs = @kv{"a","b"};  my $as = @arr[0,1];
+     my $kh = %kv{"a","b"};  my $ka = %arr[0,1];
+     my $k1 = %kv{"a"};      my $a1 = %arr[0];
+     print "$hs|$as|$kh|$ka|$k1|$a1\n";',
+    "2|20|2|20|1|10\n");
+
+# List context is untouched by that wrap.
+test_cl('kv-slices in LIST context still give key/value pairs',
+    'my %kv = (a=>1, b=>2);
+     my @arr = (10,20);
+     print join(",", %kv{"a","b"}), "|", join(",", %arr[0,1]), "\n";',
+    "a,1,b,2|0,10,1,20\n");

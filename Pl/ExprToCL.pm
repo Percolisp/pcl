@@ -4077,7 +4077,12 @@ sub gen_hash_slice_form {
   return $self->_slice_in_context_form(['p-hslice', $hash, $self->_slice_index_forms($kids)], $node_id);
 }
 
-# %h{a,b} → (p-kv-hslice %h a b)  (no context wrap).
+# %h{a,b} → (p-kv-hslice %h a b), context-wrapped exactly like @h{a,b} (#1923):
+# a kv-slice is a LIST, so in scalar context it is its LAST element — the value
+# of the last key, `my $x = %h{'a','b'}` is 2 — and PCL answered the COUNT
+# (4: two key/value pairs) because this was the one slice emitter that did not
+# go through _slice_in_context_form.  perl's own rule for @h{…} and %h{…} is the
+# same one, so the two emitters use the same helper (rule 11).
 sub gen_kv_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
@@ -4085,10 +4090,12 @@ sub gen_kv_hash_slice_form {
                $self->_slice_base_form(sub {                            # #612, #720
                  $self->_paren_deref_base_form($kids->[0], 1)
                    // $self->gen_node_form($kids->[0]) }), 'p-cast-%');
-  return ['p-kv-hslice', $hash, $self->_slice_index_forms($kids)];
+  return $self->_slice_in_context_form(
+           ['p-kv-hslice', $hash, $self->_slice_index_forms($kids)], $node_id);
 }
 
 # %a[i,j] → (p-kv-aslice @a i j)  (%→@ sigil rewrite; $ref base derefed).
+# Context-wrapped like @a[i,j] — see gen_kv_hash_slice_form (#1923).
 sub gen_kv_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
@@ -4104,7 +4111,8 @@ sub gen_kv_array_slice_form {
   # `(unbox $r)` stood here — the shape-blind half of _slice_container_form's
   # rule, right for a single-boxed anon ref and one layer short of \@named.
   my $arr_form = $self->_slice_container_form($kids->[0], $arr, 'p-cast-@');
-  return ['p-kv-aslice', $arr_form, $self->_slice_index_forms($kids)];
+  return $self->_slice_in_context_form(
+           ['p-kv-aslice', $arr_form, $self->_slice_index_forms($kids)], $node_id);
 }
 
 # --- E2 form variants: progn + the small I/O nodes --------------------------
