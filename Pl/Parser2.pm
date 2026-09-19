@@ -4211,6 +4211,34 @@ sub _interp_token_candidate {
       || $t->isa('PPI::Token::HereDoc');
 }
 
+# A PPI "full" quote token (qq{} qx{} qr// m// s/// <$fh>) does NOT keep its
+# body as text: it keeps a SECTION RECORD — {position, size} offsets into its
+# own content — and every body reader slices the content with it (PPI's own
+# ->string, and PCL's Pl::PExpr::_command_body).  `set_content` replaces the
+# TEXT and leaves that record untouched, so a rename that LENGTHENS a name
+# ($tnum → $tnum__file__0) leaves a size that is too small and the body is
+# SILENTLY TRUNCATED at exactly the ORIGINAL length — `qq{X "q{ok $tnum -
+# bb}"}` came out as `X "q{ok $tnum__file_`, tail and all gone (#1921).
+# The repair is PPI's own tokenizer: re-lex the new text and take the fresh
+# record.  The text is lexed as the right-hand side of an assignment because
+# that is the one context in which EVERY affected spelling lexes as itself —
+# a bare `<$fh>` is three operators on its own, an assignment's RHS makes it
+# the Readline token it was (probed, all 8 classes + tr///).
+# A "simple" quote ("…" '…' `…`) has no record and derives its body from the
+# content, so it needs nothing and says so by having no {sections}.
+sub _resync_quote_sections {
+  my ($t) = @_;
+  return 1 unless $t->{sections};
+  my $text = $t->content;
+  my $doc  = eval { PPI::Document->new(\(my $src = "my \$pcl_resync = $text;")) }
+    or return 0;
+  my @hit = grep { ref($_) eq ref($t) && $_->content eq $text }
+            @{ $doc->find('PPI::Token') || [] };
+  return 0 unless @hit == 1 && $hit[0]{sections};
+  $t->{sections} = $hit[0]{sections};
+  return 1;
+}
+
 # Apply an _interp_fixer closure to ONE token, iff it is interpolating text
 # (double/qq/backtick/qx/regex/readline, or an interpolating heredoc's body).
 #
@@ -4243,6 +4271,13 @@ sub _fix_interp_token {
     return unless $fix->($c);
     return if $skip && $skip->($t);
     $t->set_content($c);
+    # Rule 12: the section record feeds a VALUE the program then consumes (the
+    # string's own text), so a record this cannot repair DIES naming the token
+    # rather than handing back a quietly shorter string.
+    _resync_quote_sections($t)
+      or die "PCL internal: cannot re-lex " . ref($t)
+           . " after an interpolation rename, so its section record would stay"
+           . " stale and truncate the body: " . $t->content . "\n";
   }
   return;
 }
