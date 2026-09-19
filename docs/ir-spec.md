@@ -1219,6 +1219,26 @@ the status quo, never a wrong value.  NOT modelled: a deref-rooted slice
 whose root is an unboxed read-only local (`my $r; for (@$r{'a'})`) does not
 vivify the ROOT (task #1352, the §3.2c root question over again).
 
+### 3.2e EVERY slice, kv-slices included, is its LAST element in scalar context (normative, s473t6c)
+
+A slice is a LIST, and perl's scalar-context rule for a list is its last
+element — never its length.  That covers the key/value slices too, whose
+flattened list is `(k1 v1 k2 v2 …)`, so the scalar answer is the VALUE of the
+last key:
+
+    my %kv = (a=>1, b=>2, c=>3);   my @arr = (10,20,30);
+    my $x = @kv{'a','b'};   # 2   (the plain slice: its last element)
+    my $y = %kv{'a','b'};   # 2   (the kv slice: v2, not 4)
+    my $z = %arr[0,1];      # 20  (not 4)
+    my $w = %kv{'a'};       # 1   (not 2)
+
+**How the IR says it.**  The four slice emitters all wrap in the same context
+form — `(p-list-scalar (p-kv-hslice …))` in scalar context, `(p-slice-result
+…)` when the context is inherited — so a backend needs ONE rule, not one per
+slice kind (task #1923: the two kv emitters were the pair that did not, and
+answered the pair COUNT).  List context is unaffected: a kv-slice is its
+key/value pairs.
+
 ### 3.3 `p-true-p` (truthiness)
 
 False: the number 0 (but **NaN is true**), the strings `""` and `"0"`,
@@ -2783,6 +2803,27 @@ nothing in a model like this one.  Two rules come with it:
 convert at the top level, and must be able to tell a *perl* die from an
 internal error of its own — PCL gives the two the condition classes
 `p-exception` (a die with an object) and `p-die-error` (a die with a string).
+
+### 7.5b Spawning a child NEVER raises: a child that cannot start is a VALUE (normative, s473t6c)
+
+perl's `system` and `exec` report a failed spawn through their return value
+and `$!`; neither dies, and a program that checks the return value keeps
+running.  A host whose spawn primitive SIGNALS (SBCL's `run-program` with
+`:search t` does, when the program is not found) must catch it:
+
+| form | answer when the child cannot be started |
+|---|---|
+| `system PROG, LIST` / `system BLOCK LIST` | returns **−1**, `$?` is **−1**, `$!` from the failed exec (ENOENT) |
+| `system EXPR` (one string) | the same −1/−1/ENOENT when perl execs directly; a string with shell metacharacters goes through `/bin/sh`, whose own exit status (`127 << 8`) is the answer |
+| `exec` | returns **undef** with `$!` set — the call that "never returns" does return here |
+
+The consequence is bigger than the value: PCL's whole top-level form died on
+the signal, so **every statement after the failed `system` was lost** —
+`t/op/exec.t` produced 16 fewer rows than perl for that one reason (#1920).
+A translator that maps `system` onto a signalling primitive owes the same
+conversion.  *(PCL still sends a one-string `system` through the shell
+unconditionally, where perl execs the words directly when the string carries
+no shell metacharacter; that is the remaining divergence, recorded in #1920.)*
 
 ### 7.6 stdio buffering (normative, s451)
 

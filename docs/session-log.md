@@ -176,6 +176,91 @@ the same six lines under perl and pcl.  One review miss from t6b surfaced in
 the dist runner's output and was fixed (a redundant `ftype` proclamation for
 `p-can`).  Pushed as `2233f51c` + `ec26b3b1`; CI green through `67781634`.
 
+## Session s473t6c (Opus agent, 2026-09-19) — #1501 ROUND 10: the op/ census tail — `system` stops dying, a rename stops truncating strings, and the last 494 causeless op/ rows get a cause
+
+**The population, confirmed before anything was written.**  90 `t/op` files —
+every op/ file with fewer than 20 causeless blessed fail rows, plus the
+shortfall-only ones, minus the 13 files t6b leaves to t6d — measured **494
+causeless fail rows and 145 UNEXPLAINED shortfall rows in 24 files**, byte for
+byte the launch table.  A `--jobs 1` re-measurement of all 90 on the launch
+tree read every blessed snapshot verdict EXACTLY (0 differing of 90) with a ROW
+DIFF of 0 NEW / 0 FIXED / 0 LOST, so t6b's rule was met: the band was confirmed
+before a single cause was written.  The CHECK-1 half needed no re-runs at all —
+the run baseline's `sig` column already carries the aborting form for every
+file that stops early, so it is a join.
+
+**#1920 — a child that cannot be started is a VALUE, never a death.**  perl's
+`system` returns −1, leaves `$?` at −1 and sets `$!` from the failed exec;
+`sb-ext:run-program` with `:search t` SIGNALS instead, and nothing caught it,
+so `system { "lskdfj" } "lskdfj"` at `t/op/exec.t:109` killed the whole
+top-level form and the 16 rows after it were never produced.  `p-exec` has
+carried exactly this `handler-case` all along — rule 11, the mechanism existed
+and one call site did not use it.  The one-argument form still goes through
+`/bin/sh` unconditionally where perl execs the words directly when the string
+has no shell metacharacter; that is a separate measured change and is recorded
+in the task rather than done blind.
+
+**#1921 — a rename inside a full-quote token silently truncated it.**  A PPI
+"full" quote (`qq{}` `qq[]` `qx{}` `qr{}` `m{}` `s{}{}` `<$fh>`) does not keep
+its body as text: it keeps a SECTION RECORD, `{position, size}` offsets into
+its own content, and every body reader slices the content with it — PPI's own
+`->string`, and `Pl::PExpr::_command_body`.  `set_content` replaces the TEXT
+and leaves the record alone, so Parser2's interpolation rewriter, which
+LENGTHENS a name when a file lexical is identity-promoted (`$v` →
+`$v__file__0`), left a size that was too small and the body was cut at exactly
+the ORIGINAL length: `qq{A "q{x $v y}"}` came out as `A "q{x`,
+`s{x $v y}{got $v ok}` as `le__0 y}{3 y` (both sections mangled), and
+`qx{echo "a{$v}b"}` as nothing at all.  The repair is PPI's own tokenizer, at
+the ONE site that set_contents such a token: re-lex the new text and take the
+fresh record.  The text is lexed as an ASSIGNMENT'S RIGHT-HAND SIDE because
+that is the one context in which every affected spelling lexes as itself — a
+bare `<$fh>` is three operators on its own.  A record that cannot be re-lexed
+DIES naming the token (rule 12: the value it feeds is the string's own text);
+the emission A/B over 360 files says RCDIFF 0, so it never fires.  This is not
+a PPI bug — `set_content` is a documented low-level setter and keeping the
+metadata consistent is the caller's job.  With #1920 it takes `t/op/exec.t`
+from 24/1 to **37/4** with its 16-row shortfall gone: 14 FIXED ROWS, 0 NEW.
+
+**#1923 — a kv-slice in scalar context is its LAST value, not the pair count.**
+`my $x = %kv{'a','b'}` is 2 in perl (the value of the last key) and was 4 here;
+`%arr[0,1]` was 4 where perl says 20.  A kv-slice is a LIST like every other
+slice, and `_slice_in_context_form` already applies perl's rule for `@h{…}` and
+`@a[…]`; the two kv emitters were the pair that did not call it, their own
+comment saying "no context wrap".  `t/op/kvhslice.t` 21/18 → 22/17 and
+`t/op/kvaslice.t` 23/15 → 25/13, 3 FIXED ROWS, 0 NEW.
+
+**The tail's value is the cross-file clusters.**  494 rows over 90 files is not
+90 investigations: they collapse to ten causes — warnings-gated diagnostics
+(#221, ~95 rows in 13 files), rejection of invalid Perl (~80 in 18), the
+typeglob/stash model (#1664, ~40 in 9), readouts of perl's own internals (~45
+in 7), Unicode semantics (~25 in 7), DESTROY at the moment of unwinding (~20 in
+7), tie/FETCH counts (~20 in 6), `local` on an element or a typeglob (~15 in
+3), lvalue subs (~9 in 5), and **#1924**, PCL's `%Config` being a 108-key
+hand-written subset where perl's is 1,253: seven files of this round ask for a
+key that reads UNDEF here, and `op/lfs.t`'s own `skip_all('no 64-bit file
+offsets')` fires on the absent `lseeksize`, so the file produces NO rows — a
+hole only the shortfall bucket can see.  Two more findings came out of the
+probes: **#1925**, `reset` is a no-op stub where perl CLEARS every package
+variable whose name starts with a listed letter (only the `?pattern?` half was
+written down), and **#1922**, `pos` is kept on a SCALAR only — `pos($h{k})`,
+`pos($a[0])` and `pos($_[0])` all read UNDEF after a `//g` match on that very
+place, which is the whole of `t/op/pos.t`.
+
+**Numbers.**  Causeless **494 → 0**, UNEXPLAINED shortfall **145 rows in 24
+files → 0**, companion `unexplained` **741 → 247** (the 247 are t6d's band).
+`baselines/perl-suite-fails.tsv`: 477 rows gain a cause, 17 leave BY EDIT with
+theirs, 0 new, 11,098 byte-identical.  `baselines/row-shortfall.tsv`: 23 rows
+caused, 1 removed, 203 identical, all 91 comment lines kept.
+`baselines/perl-suite-run.tsv`: 3 of 2,112 lines differ, each the spliced
+verdict of a file this round moved.  `cause-census --hygiene` adds ZERO `other`
+rows.  Bars: corpus-diff **1 of 111** (perl-tests/kvhslice.t, #1923's positive
+control — `lib/` byte-identical, so no generation bump); emission A/B over
+lib/ + perl-tests/ + t/op/ + SHAPES **360 files, 359 SAME, 1 DIFF, RCDIFF 0**;
+the full perl-tests sweep **GATE clean, TOTAL 18,686 (+0), drops 5 = census,
+CAUSES 480 of 480**.  Guards `Pl/t/interp-rename-sections-01.t` (8 rows, 302 ms)
+and `Pl/t/kvaslice-01.t` (16 → 18), both inverse-verified on a `4c6565e5`
+extraction where 4 of 8 and 1 of 18 fail.
+
 ## Session s473t6b (Opus agent, 2026-09-17/18) — the 20–49-row op/ band: a filetest's false, `die` with no arguments, and 464 rows that stopped being causeless
 
 **Member 0 (#1850, the harness).**  PCL's transpilable stub `perl-tests/t/test.pl`
