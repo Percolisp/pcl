@@ -1,4 +1,10 @@
 # taken-at: 5323d9e 2026-08-15
+# s473t6c (2026-09-19, Opus, EDITED BY HAND -- one row): kvhslice.t 21 -> 22 (+1).
+#   Task #1923 -- a kv-slice in SCALAR context is its LAST value, not the COUNT
+#   of the flattened key/value list.  perl-tests/kvhslice.t:53
+#   `eval 'is( scalar %h{i}, "I", "correct value")'` had been failing on that
+#   (got '2', the pair count, wanted 'I') since s473t1 #1024 made the row RUN
+#   at all.  Its twin in baselines/fail-baseline.tsv leaves in the same commit.
 # s484b (2026-09-13, #1117, EDITED BY HAND — one row): sub.t 53 -> 54 (+1).
 #   `undef *_` now leaves the @_ slot ABSENT rather than empty, so row 24
 #   `goto &xsub when @_ does not exist` (`is *_{ARRAY}, undef`) passes; it left
@@ -408,7 +414,7 @@ int.t	OK	19	0	19
 isa.t	OK	14	0	14
 join.t	OK	41	0	43
 kvaslice.t	OK	17	0	17
-kvhslice.t	OK	21	3	39
+kvhslice.t	OK	22	2	39
 lc.t	OK	82	0	2659
 length.t	PARTIAL	35	3	49
 lex.t	OK	45	0	53

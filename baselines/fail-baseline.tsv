@@ -532,11 +532,10 @@ postfixderef.t	73	PVBM is not a GLOB ref			DECIDED s438-era "PCL has no PVBM" (p
 postfixderef.t	75	PVBM is not a SCALAR ref			DECIDED s438-era "PCL has no PVBM" (postfixderef.t 72/73)
 each.t	64	each in list assignment	' 7'	'f 7'	#1027 (refaliasing + each in list assignment, in-file only)
 each.t	65	values in list assignment	' 7'	'3 7'	#1027 (refaliasing + each in list assignment, in-file only)
-kvhslice.t	9	last element in scalar context	'6'	'E'	#1023 (kv-slice in scalar context yields the count)
-kvhslice.t	11		'0'	'2'	#1023 (kv-slice in scalar context yields the count)
+kvhslice.t	9	last element in scalar context	'6'	'E'	#1943 (was #1023, whose own reproducer PASSES after s473t6c's #1923): the LAST EXPRESSION of a string eval is emitted in LIST context whatever the call site is, so `scalar eval "%h{'c','d','e'}"` is the pair COUNT.  Probed s473t6c: the PLAIN slice `@h{...}` in an eval is wrong the same way (3 vs E) and both are RIGHT with no eval, so it is the eval's emission context and not a slice fact
+kvhslice.t	11		'0'	'2'	#1943 (was #1023, whose own reproducer PASSES after s473t6c's #1923): the LAST EXPRESSION of a string eval is emitted in LIST context whatever the call site is, so `scalar eval "%h{'c','d','e'}"` is the pair COUNT.  Probed s473t6c: the PLAIN slice `@h{...}` in an eval is wrong the same way (3 vs E) and both are RIGHT with no eval, so it is the eval's emission context and not a slice fact
 kvhslice.t	28		undef	'a'	#1024 (bareword key in a kv-slice is not autoquoted)
 kvhslice.t	29		undef	'A'	#1024 (bareword key in a kv-slice is not autoquoted)
-kvhslice.t	11	correct value	'2'	'I'	s473t1 #1024: the row is `eval 'is( scalar %h{i}, "I", "correct value")'` (kvhslice.t:53).  It never RAN before -- the bareword kv-slice key was compiled as a sub call and the eval died -- and now runs and fails on task #1023: `%h{...}` in SCALAR context yields the element COUNT, not the last VALUE (got '2', expected 'I'), which reproduces with no eval at all
 sort.t	26	redefinition should not take effect during the sort			#1491 CATALOG sort.t "in-file interaction only -- does not reproduce in isolation (review s464 §1c)"
 sort.t	162	overload compare called once	'0'	'1'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	163	overload sort result	' '	'1 2'	#1021 (sort default comparator ignores an overloaded cmp)
