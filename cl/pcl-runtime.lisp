@@ -3801,11 +3801,60 @@
                 thereis (%p-class-overloaded-p parent seen))))))
 
 (defun p-overloaded (obj)
-  "Return true (1) if OBJ has any use overload handlers registered, else undef.
-   Implements overload::Overloaded($obj)."
-  (if (and (p-box-p obj) (%p-class-overloaded-p (p-get-class obj)))
-      (make-p-box 1)
-      *p-undef*))
+  "overload::Overloaded(OBJ_OR_CLASS) — 1 when the class overloads ANY
+   operator, else undef (perl's own answer is undef, not \"\" — probed).
+
+   THE INVOCANT IS A CLASS NAME OR AN OBJECT, exactly as for a method call, so
+   the class comes from %pcl-invocant-class — the one resolver p-method-call,
+   p-can and p-isa already share.  It used to be `(p-box-p obj)` plus
+   p-get-class, which reported NIL for a boxed plain string: the very common
+   `overload::Overloaded(\"Some::Class\")` spelling answered 0 for a class that
+   plainly overloads, and 0 for one that INHERITS its overloads (task #1914).
+   An unblessed ref and the empty string are not class names and stay undef."
+  (let ((cls (%pcl-invocant-class obj)))
+    (if (and (stringp cls) (plusp (length cls)) (%p-class-overloaded-p cls))
+        (make-p-box 1)
+        *p-undef*)))
+
+(defun p-overload-method (invocant op)
+  "overload::Method(OBJ_OR_CLASS, OP) — the CODE ref that implements OP for
+   that class, walking @ISA, or undef when there is none (task #1914).  This
+   is the standard way to ask \"can this object do OP\" (Test::Builder's
+   _unoverload, Type::Tiny, JSON::PP's `overload::Method($o, q(\"\"))` probe),
+   and PCL had no such sub at all: the call died \"Undefined subroutine
+   &OVERLOAD::Method\".
+
+   ONE resolver, shared with the operator dispatch (rule 11): the direct table
+   entry, then %p-find-overload-mro.  `fallback' is deliberately NOT found —
+   PCL keeps it in its own table because it is not a handler, and perl answers
+   undef for it too (probed).  `nomethod' IS an ordinary key and is found.
+
+   A BY-NAME HANDLER ('+' => 'add') is perl's `shift->can($name)`: the method
+   RESOLVED THROUGH THE INVOCANT'S OWN MRO at lookup time, not the class that
+   registered the name.  Probed 5.40.3: with `package D; our @ISA=('C'); sub
+   add {...}` overriding P's `add`, overload::Method($d,'+') answers D's.
+   %p-can-answer is that lookup, and it is also why a miss here is perl's
+   undef rather than CL NIL (#1912)."
+  (let* ((cls (%pcl-invocant-class invocant))
+         (op-str (to-string op))
+         (handler (when (and (stringp cls) (plusp (length cls)))
+                    (or (gethash (cons cls op-str) *p-overload-table*)
+                        (%p-find-overload-mro cls op-str nil)))))
+    (cond
+      ((null handler) *p-undef*)
+      ((stringp handler) (%p-can-answer cls handler))
+      ((and (p-box-p handler) (stringp (unbox handler)))
+       (%p-can-answer cls (unbox handler)))
+      (t handler))))
+
+;; overload::Method reaches the runtime through the SAME seam as
+;; overload::import — the OVERLOAD package — so the compiler needs no name of
+;; its own for it and no emission moves (task #1914).  The symbol is MIXED
+;; CASE on purpose: `:invert` leaves a mixed-case token alone, and what
+;; codegen emits for `overload::Method(...)` is literally
+;; `(overload::pl-Method …)`.
+(eval-when (:load-toplevel :execute)
+  (setf (symbol-function (intern "pl-Method" "OVERLOAD")) #'p-overload-method))
 
 (defun box-nv (box)
   "Get numeric value from box with lazy caching.

@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 45;
+plan tests => 46;
 
 sub run_cl {
     my ($code) = @_;
@@ -806,3 +806,68 @@ test_cl('#1507: `use overload` inside a string eval still registers',
              1; } or die "eval failed: $@";
      print "1:", E->new(2), "\n";',
     "1:E<2>\n");
+
+# ── #1914: the overload:: INTROSPECTION family ─────────────────────────────
+# `overload::Method($obj_or_class, $op)` is the standard way to ask "can this
+# object do OP" — Test::Builder's _unoverload, Type::Tiny, Data::Printer and
+# JSON::PP all call it — and PCL had no such sub at all: the call died
+# "Undefined subroutine &OVERLOAD::Method called".  `overload::Overloaded`
+# existed but answered 0 for the CLASS-NAME spelling, including for a class
+# that plainly overloads.
+#
+# ONE resolver, shared with the operator dispatch (the direct table entry then
+# %p-find-overload-mro); the invocant is resolved by %pcl-invocant-class, the
+# same one p-method-call / p-can / p-isa share.  `fallback` is deliberately NOT
+# a handler here — perl answers undef for it too (probed), and `nomethod` IS an
+# ordinary key.  The #1915 fallback-die is a DIFFERENT open bug and is not
+# touched.
+#
+# THE SHARP ONE: a by-NAME handler ('+' => 'add') is perl's `shift->can($name)`
+# — the method resolved through the INVOCANT'S OWN MRO at LOOKUP time, so a
+# subclass that overrides `add` gets ITS OWN.  The row below builds exactly
+# that three-level hierarchy.
+{
+    my $prog = <<'PL';
+use strict; use warnings;
+package P;
+use overload '+' => 'add', '""' => sub { "P" }, 'nomethod' => sub { "NM" },
+             'fallback' => 1;
+sub new { bless {}, shift }
+sub add { "added" }
+package C;  our @ISA = ('P');
+package D;  our @ISA = ('C');  sub add { "D-added" }
+package Plain; sub new { bless {}, shift }
+package main;
+my $p = P->new; my $c = C->new; my $d = D->new; my $pl = Plain->new;
+sub d { my $v = shift; return defined $v ? "def" : "undef" }
+sub rf { my $v = shift; return defined $v ? (ref($v) || "notref[$v]") : "undef" }
+print "O1 ", (overload::Overloaded($p) ? 1 : 0), (overload::Overloaded($c) ? 1 : 0),
+             (overload::Overloaded($pl) ? 1 : 0), "\n";
+print "O2 ", (overload::Overloaded("P") ? 1 : 0), (overload::Overloaded("C") ? 1 : 0),
+             (overload::Overloaded("D") ? 1 : 0), (overload::Overloaded("Plain") ? 1 : 0),
+             (overload::Overloaded("No::Such::Class1914") ? 1 : 0), "\n";
+print "O3 ", d(scalar overload::Overloaded("Plain")), " ",
+             d(scalar overload::Overloaded($pl)), "\n";
+print "O4 ", (overload::Overloaded([]) ? 1 : 0), (overload::Overloaded("") ? 1 : 0), "\n";
+print "M1 ", rf(overload::Method($p, '+')), " ", overload::Method($p, '+')->($p, 1, ''), "\n";
+print "M2 ", rf(overload::Method($p, '""')), " ", overload::Method($p, '""')->($p), "\n";
+print "M3 ", rf(overload::Method($c, '""')), " ", overload::Method($c, '""')->($c), "\n";
+print "M4 ", rf(overload::Method($c, '+')),  " ", overload::Method($c, '+')->($c, 1, ''), "\n";
+print "M5 ", rf(overload::Method($d, '+')),  " ", overload::Method($d, '+')->($d, 1, ''), "\n";
+print "M6 ", d(overload::Method($p, '-')), " ", d(overload::Method($pl, '+')), "\n";
+print "M7 ", rf(overload::Method("P", '+')), " ", rf(overload::Method("C", '""')), " ",
+             d(overload::Method("Plain", '+')), " ", d(overload::Method("No::Such1914", '+')), "\n";
+print "M8 ", rf(overload::Method($p, 'nomethod')), "\n";
+print "M9 ", d(overload::Method($p, 'fallback')), "\n";
+print "M10 ", d(overload::Method([], '+')), " ", d(overload::Method(undef, '+')), " ",
+              d(overload::Method("", '+')), "\n";
+print "S1 ", (overload::StrVal($p) =~ /^P=HASH\(0x[0-9a-f]+\)$/ ? "strval" : "bad"), "\n";
+print "U1 ", (overload::Method($p, '""') ? "stringifiable" : "no"), " ",
+             (overload::Method($pl, '""') ? "stringifiable" : "no"), "\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    binmode($fh, ':raw'); print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want,
+       '#1914: overload::Method and Overloaded — own / inherited / by-name resolved through the MRO / absent / class-name string / nomethod / fallback (perl oracle)');
+}
