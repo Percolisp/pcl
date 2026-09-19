@@ -188,20 +188,34 @@ my %VIV_CONTAINER_NODE = map { $_ => 1 } qw(h_acc a_acc h_ref_acc a_ref_acc);
 # vetoed via mutating-builtin-arg.  sprintf/printf license only the FORMAT
 # (arg values depend on the format string, which this pass does not read).
 #
-# `length` IS NOT IN THIS TABLE, and it is the one string-position builtin
-# that is not (task #1847).  A class here says the value is STRINGIFIED and
-# the use CANNOT OBSERVE UNDEF — which is what licenses the B-regime freeze,
-# where the slot stores a raw string and an undef initialiser becomes "".
-# perl's `length(undef)` is UNDEF (since 5.12), so `defined length $x`,
-# `length($x) // $d` and a list-context `(length $x)` all see the difference:
-# `my $v = -d "/nope"; defined(length($v))` was DEFINED here and undef in
-# perl.  PROBED, the whole table at once: `length` is the ONLY member that
-# answers undef for an undef argument — lc/uc/lcfirst/ucfirst/substr/sprintf
-# give "", ord/hex/oct/index2/split give 0, index/rindex give -1.  So this is
-# a family of one, and the fix is its absence, not a new class.
+# `length` HAS ITS OWN CLASS, `strlen`, and it is the one string-position
+# builtin that does (task #1847).  `str` says two things at once — the value
+# is STRINGIFIED, and the use CANNOT OBSERVE UNDEF — and for `length` only the
+# first is true: perl's `length(undef)` is UNDEF (since 5.12), so `defined
+# length $x`, `length($x) // $d` and a list-context `(length $x)` all see the
+# difference the B-regime freeze erases when it turns an undef initialiser
+# into "".  `my $v = -d "/nope"; defined(length($v))` answered DEFINED here
+# and undef in perl.  PROBED, the whole table at once: `length` is the ONLY
+# member that answers undef for an undef argument — lc/uc/lcfirst/ucfirst/
+# substr/sprintf give "", ord/hex/oct/index2/split give 0, index/rindex give
+# -1.  A family of one.
+#
+# WHY A CLASS AND NOT SIMPLY ITS ABSENCE.  Two licences read these classes and
+# they are not the same question.  The B-regime `:str` FREEZE stores a raw
+# string in place of the box, so an undef initialiser is lost — `length` must
+# not license it.  The `str-buffer` licence (_mark_strbuf) is given only when
+# the variable's ONLY write op is `.=`, and `.=` on a defined string keeps it
+# defined, so the buffer holds a real string from its first append on and
+# `length` sees exactly what perl sees.  Making `length` opaque killed the
+# second along with the first, and the cost is not marginal: MEASURED, 200,000
+# appends in `my $s=""; $s .= "x"; length($s)` went from 0.19 s to 7.66 s
+# (40x, and QUADRATIC — the bench's 20 M-append `strcat` row did not finish).
+# The residue this leaves is one shape, strictly narrower than what it
+# replaces: a buffer whose `.=` never runs AND whose initialiser is undef
+# answers `length` 0 where perl answers undef.
 my %USE_FN = (
   print   => 'str-all',  say => 'str-all',  join => 'str-all',
-                         lc  => ['str'],    uc   => ['str'],
+  length  => ['strlen'], lc  => ['str'],    uc   => ['str'],
   lcfirst => ['str'],    ucfirst => ['str'],
   ord     => ['str'],    hex => ['str'],    oct  => ['str'],
   index   => ['str', 'str', 'num'],
@@ -785,7 +799,14 @@ sub _mark_strbuf {
   return if $ctx->{foreach_var}{$name};
   my $uc = $ctx->{use_class}{$name};
   return unless $uc && %$uc;
-  return if grep { $_ ne 'str' && $_ ne 'bool' } keys %$uc;
+  # `strlen` (a `length` read, task #1847) IS accepted here and is NOT
+  # accepted by the B-str freeze above, and the difference is the whole reason
+  # it has a class of its own: the freeze loses an undef INITIALISER, while a
+  # buffer's only write is `.=`, which leaves a defined string behind it — so
+  # `length` on a buffer sees exactly what perl sees.  See %USE_FN's note for
+  # the measurement that made this worth separating (40x on 200k appends) and
+  # for the one shape it still leaves.
+  return if grep { $_ ne 'str' && $_ ne 'bool' && $_ ne 'strlen' } keys %$uc;
   $vi->{$name}{strbuf} = 1;
 }
 
