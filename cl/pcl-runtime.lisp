@@ -12053,6 +12053,7 @@ which is one of #1140's escape spellings (probed)."
           (setf (gethash k h) box)
           box))))
 
+(declaim (inline %p-symref-name))
 (defun %p-symref-name (v)
   "The package-variable NAME a scalar designates when it is used as a HASH or
    ARRAY reference under `no strict refs` — or NIL when it designates none.
@@ -12067,7 +12068,11 @@ which is one of #1140's escape spellings (probed)."
 
    The SCALAR deref `${...}` deliberately does NOT go through here: a number
    there is ambiguous with a collapsed hard ref in the box model, ruled in
-   tasks #505/#551, and its arms say so.  This is the CONTAINER question."
+   tasks #505/#551, and its arms say so.  This is the CONTAINER question.
+
+   INLINE, and every caller asks it AFTER its own hot arm: it sits in four
+   container resolvers, two of which (p-ensure-hashref, p-ensure-arrayref) run
+   on the autovivifying WRITE path of every `$h->{k} = v`."
   (cond ((stringp v) v)
         ((numberp v) (to-string v))
         (t nil)))
@@ -12083,13 +12088,17 @@ which is one of #1140's escape spellings (probed)."
          ;; Wrap in make-p-box so box-set does not treat it as scalar-context %hash.
          (box-set ref (make-p-box new-hash))
          new-hash))
-      ;; Symbolic reference: string used as hash name (no strict refs).
+      ;; THE HOT ARM: an ordinary hashref, on the write path of every
+      ;; `$h->{k} = v`.  It is FIRST because it can be — a hash table is
+      ;; neither a string nor a number nor a glob, so no arm below can want it.
+      ((hash-table-p h) h)
+      ;; Symbolic reference: a string — or a NUMBER, which perl stringifies
+      ;; into one (%p-symref-name) — used as a hash name (no strict refs).
       ;; ONE resolver — p-cast-% (%{"name"}) already decides between a package
       ;; hash and a STASH ("Pkg::" → p-stash).  This used to be a second copy
       ;; that knew nothing about stashes, so `$$p{k}` with $p="Foo::" read a
       ;; package hash named "" instead of Foo's symbol table.
       ((%p-symref-name h) (p-cast-% (%p-symref-name h)))
-      ((hash-table-p h) h)
       ;; A GLOB VALUE designates that glob's HASH slot — `local $_ = *written;
       ;; exists $$_{k}` is Carp's own guard (task #1726).  The SAME reading
       ;; `%{$_}` takes, which is %p-glob-slot-place (p-cast-%'s typeglob arm);
@@ -27160,7 +27169,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             ((string-equal pkg-part "UNIVERSAL")
              (return-from p-method-call
                (cond
-                 ((string-equal meth-part "can")  (apply #'p-can  resolved-obj args))
+                 ((string-equal meth-part "can")  (apply #'%p-can-answer resolved-obj args))
                  ((string-equal meth-part "isa")  (apply #'p-isa  resolved-obj args))
                  ((string-equal meth-part "DOES") (apply #'p-isa  resolved-obj args))
                  (t (when target-pkg
@@ -27258,7 +27267,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             ;; Not found in any class in MRO - check UNIVERSAL fallbacks, then AUTOLOAD
             (cond
               ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
-              ((string-equal method-name "can") (apply #'p-can resolved-obj args))
+              ((string-equal method-name "can") (apply #'%p-can-answer resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return
               ;; nothing — the empty list in list context, undef otherwise.
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
@@ -27333,7 +27342,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             (cond
               ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
               ((string-equal method-name "DOES") (apply #'p-isa resolved-obj args))
-              ((string-equal method-name "can") (apply #'p-can resolved-obj args))
+              ((string-equal method-name "can") (apply #'%p-can-answer resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return nothing
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
                (%pcl-no-op-import-result))
@@ -27445,7 +27454,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (cond
     ((string-equal method-name "isa")  (apply #'p-isa obj args))
     ((string-equal method-name "DOES") (apply #'p-isa obj args))
-    ((string-equal method-name "can")  (apply #'p-can obj args))
+    ((string-equal method-name "can")  (apply #'%p-can-answer obj args))
     ((or (string-equal method-name "import") (string-equal method-name "unimport"))
      (%pcl-no-op-import-result))
     (t (multiple-value-bind (result found)
@@ -27584,6 +27593,27 @@ buffer's fill-pointer; everything else falls back to file-length."
                    ;; p-stash.  See docs/declaration-ordering-fix-plan.md.
                    (not (eq (gethash fn *p-declared-subs*) :stub)))
           (return-from p-can (symbol-function fn)))))))
+
+(defun %p-can-answer (invocant &rest args)
+  "`can` AS A PERL PROGRAM SEES IT (task #1912) — the CODE ref, or perl's
+   UNDEF, and never CL NIL.
+
+   p-can above answers NIL for a miss because the RUNTIME asks it as a CL
+   boolean (`(let ((prop (p-can err \"PROPAGATE\"))) (if prop …))`, the
+   overload / DESTROY / AUTOLOAD lookups), and *p-undef* is TRUE in CL.  But
+   NIL is not a perl value: crossing the return protocol in LIST context it
+   leaves ZERO values where perl leaves ONE.  So
+   `sub r { $x->can(\"nope\") } my @a = r();` was EMPTY here and one undef in
+   perl — the Safe::Isa `$_can` idiom (`is_deeply [ $o->$_can(\"bar\") ],
+   [ undef ]`), and the same family as #403's filetest false.
+
+   THE CONVERSION BELONGS AT THE PERL-VISIBLE BOUNDARY, which is every
+   dispatch arm that serves the method NAME `can` plus UNIVERSAL::can — one
+   returner, no new state, exactly #403's shape.  Everything else keeps
+   calling p-can and keeps reading a CL boolean.  (A DIRECT `$o->can(\"x\")`
+   in a list was already right: the emitter wraps a call site's value.  What
+   was lost was a sub RESULT.)"
+  (or (apply #'p-can invocant args) *p-undef*))
 
 (defun p-isa (invocant class-name)
   "Perl isa() - check if object is-a class.
@@ -30617,7 +30647,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; UNIVERSAL package methods — callable as UNIVERSAL::can($obj, $m) etc.
 (defpackage :UNIVERSAL (:use :cl :pcl))
 (in-package :UNIVERSAL)
-(defun pl-can  (obj method &rest args) (declare (ignore args)) (p-can  obj method))
+;; The FUNCTION spelling is a perl-visible boundary like the method arms, so
+;; it answers through %p-can-answer: undef for a miss, never CL NIL (#1912).
+(defun pl-can  (obj method &rest args) (declare (ignore args))
+       (pcl::%p-can-answer obj method))
 (defun pl-isa  (obj class  &rest args)
   (declare (ignore args))
   ;; Perl's UNIVERSAL::isa(REF, TYPE) carries interpreter-baked behaviour beyond
