@@ -20070,35 +20070,51 @@ buffer's fill-pointer; everything else falls back to file-length."
       (throw '%p-end-exit nil))
     (sb-ext:exit :code n)))
 
+(defun %p-system-run (cmd prog-args)
+  "Spawn for p-system and return the raw wait status.  PROG-ARGS nil means the
+   one-argument form, which perl hands to the shell."
+  (let ((proc (if prog-args
+                  (sb-ext:run-program cmd prog-args
+                                      :search t
+                                      :input nil
+                                      :output *standard-output*
+                                      :error *error-output*
+                                      :wait t)
+                  (sb-ext:run-program "/bin/sh" (list "-c" cmd)
+                                      :input nil
+                                      :output *standard-output*
+                                      :error *error-output*
+                                      :wait t))))
+    (ash (sb-ext:process-exit-code proc) 8)))
+
 (defun p-system (&rest args)
   "Perl system - execute a shell command.
    system(CMD) or system(PROG, ARGS...).
    Sets $? to wait status (exit_code << 8), returns same value.
    Perl's PERL_FLUSHALL_FOR_CHILD runs first: with a block-buffered STDOUT
    (#542) `print \"a\\n\"; system(\"echo MARK\")` would otherwise print MARK
-   first (probed 5.40.3: perl prints a, MARK)."
+   first (probed 5.40.3: perl prints a, MARK).
+
+   A CHILD THAT CANNOT BE STARTED IS A VALUE, NEVER A DEATH (#1920): perl's
+   system returns -1, leaves $? at -1 and sets $! from the failed exec — it
+   does not die, and a program that checks the return value keeps running.
+   `sb-ext:run-program` SIGNALS instead when :search finds nothing, which
+   aborted the whole top-level form (t/op/exec.t lost 16 rows to one
+   `system { \"lskdfj\" } \"lskdfj\"`).  p-exec already had this handler;
+   this is the same rule for its sibling."
   (%p-flush-all-output)
   (if (null args)
       -1
-      (let* ((cmd (to-string (car args)))
-             (wait-status
-              (if (cdr args)
-                  (let* ((prog-args (mapcar #'to-string (cdr args)))
-                         (proc (sb-ext:run-program cmd prog-args
-                                                   :search t
-                                                   :input nil
-                                                   :output *standard-output*
-                                                   :error *error-output*
-                                                   :wait t)))
-                    (ash (sb-ext:process-exit-code proc) 8))
-                  (let ((proc (sb-ext:run-program "/bin/sh" (list "-c" cmd)
-                                                  :input nil
-                                                  :output *standard-output*
-                                                  :error *error-output*
-                                                  :wait t)))
-                    (ash (sb-ext:process-exit-code proc) 8)))))
-        (setf $? wait-status)
-        wait-status)))
+      (let ((cmd (to-string (car args)))
+            (prog-args (mapcar #'to-string (cdr args))))
+        (handler-case
+            (let ((wait-status (%p-system-run cmd prog-args)))
+              (setf $? wait-status)
+              wait-status)
+          (error ()
+            (%pcl-save-errno)
+            (setf $? -1)
+            -1)))))
 
 (defun p-fork ()
   "Perl fork - duplicate the current process via fork(2) (sb-posix:fork).
