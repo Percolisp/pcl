@@ -1114,14 +1114,28 @@ these rules (every one probed on perl 5.40.3):
 - A DEREF base continues the same way: `"$$r[1]"` is `$r->[1]`, `"@$r[0,1]"`
   is a slice, `"$$h{k}"` an element, `"${$r}[1]"` is `$r->[1]`.
 - A braced NAME **closes** the reference — `"${x}[0]"` is `$x` followed by a
-  literal `[0]`; so do the braced magic spellings `${^NAME}`, `@{^NAME}`,
-  `${+}`, `@{+}` (the magic arrays `@-`, `@+`, `@{^CAPTURE}` join with `$"`).
+  literal `[0]`, and so is `"${x}->{k}"`; so do the braced magic spellings
+  `${^NAME}`, `@{^NAME}`, `${+}`, `@{+}` (the magic arrays `@-`, `@+`,
+  `@{^CAPTURE}` join with `$"`).
+- **The ARROW set is not the SUBSCRIPT set (normative, s491a, task #1846).**
+  A BARE `[`/`{` after a magic name continues only when the punctuation
+  ARRAY/HASH exists (`"$-[0]"`, `"$+{k}"`, `"$?[1]"`); an EXPLICIT `->`
+  continues after **every** scalar the string interpolates, because by then
+  perl is dereferencing the scalar's VALUE and no punctuation array is
+  involved. Measured character by character: every single-punctuation magic
+  name, `$^W`, `$$`, `$0`, `$1` and `$_` take `->{k}` and `->[0]`. No name
+  takes `->meth` — a method is never called inside a string — and a blank
+  before the arrow ends the reference. So `$@ = { code => 5 }; "$@->{code}"`
+  is `5`, the everyday exception-object idiom; before this it was the literal
+  `HASH(0x…)->{code}`. The braced forms above are unaffected.
 - A braced EXPRESSION does **not** close it: `"${$r}[1]"` is 20,
   `"@{$hr}{'a','b'}"` is a hash slice, `"@{[1,2]}[0]"` is 1, and
   `"${\ $x}[0]"` dies "Not an ARRAY reference" — perl TOOK the group.
 - The `$#` family — `$#name`, `$#{name}`, `$#$r`, `$#{EXPR}`, `$#-`, `$#+` —
   never chains (a following `[` is literal text; in code it is a syntax
-  error).
+  error).  An explicit ARROW after `$#name` DOES continue in perl — it
+  dereferences the index as a symbolic name — and PCL leaves it literal
+  (divergence #1971; `"$#ar->[0]"` is `""` in perl, `"2->[0]"` here).
 - The VALUE of a reference is what the equivalent CODE gives: a deref base,
   a braced expression, a second subscript group or an explicit arrow is
   compiled from the reference's own source text through the ordinary
@@ -1149,7 +1163,13 @@ The kind of the created aggregate is decided by the NEXT subscript's sigil:
 slot already holds something DEFINED is *not* a vivification site: a
 reference is used, a STRING is a symbolic reference to the package variable
 it names (PCL never enforces `strict refs`; see `docs/not-supported.md`), and
-a referent of the wrong kind is perl's fatal.
+a referent of the wrong kind is perl's fatal.  **A NUMBER in HASH or ARRAY
+container position is a symbolic reference too** (normative, s491a, task
+#1846): perl stringifies it first, so `no strict; my $n = 7; $n->{k}` reads
+`%main::7` and answers undef, and so does `$$->{k}` with the pid.  The SCALAR
+deref `${…}` is the exception — a number there is ambiguous with a collapsed
+hard reference in the box model and is not treated as symbolic (tasks
+#505/#551).
 
 **How the IR says it.**  The runtime cannot decide this — `$h{a}` and
 `$h{a}{b}` lower the inner access identically, and what differs is that the

@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 39;
+plan tests => 44;
 
 sub write_pl {
     my ($code) = @_;
@@ -653,4 +653,139 @@ print "12:", $x % $y % 3, "\n";
 PL
     is(run_cl($prog), run_perl($prog),
        '#550 negative: every spelling of MODULO keeps its arithmetic (perl oracle)');
+}
+
+# ── #1846: THE ARROW SET IS NOT THE SUBSCRIPT SET ──────────────────────────
+# `$@ = { code => 5 }; print "failed: $@->{code}"` is the everyday exception-
+# object idiom, and PCL left the arrow LITERAL: `HASH(0x1)->{code}`, plausible
+# text rather than a crash.  The scan continued into `->[`/`->{` after a plain
+# name and after `$_`, and after the punctuation names whose ARRAY exists
+# (section 1 above, task #451) -- but an explicit arrow needs no punctuation
+# array at all: by then perl is dereferencing the scalar's VALUE.
+#
+# MEASURED CHARACTER BY CHARACTER on 5.40.3 (the table is in task #1846):
+# every name in InterpScan's $PUNCT_MAGIC, plus `$^W`, `$$`, `$0`, `$1` and
+# `$_`, takes `->{k}` and `->[0]`; NONE takes `->meth`, because perl never
+# calls a method inside a string.  The BARE-subscript set is untouched.
+{
+    my $prog = <<'PL';
+no warnings; no strict;
+$@ = { code => 5, n => [ 7, 8 ] };
+print "E:$@->{code} F:$@->{n}[1] G:$@->{n}->[0]\n";
+$@ = [ 9, 8 ];
+print "H:$@->[1]\n";
+$@ = { k => "AT" };
+my $h = <<"EOT";
+I:$@->{k}
+EOT
+print $h;
+print "J:", ("xATx" =~ /$@->{k}/ ? "match" : "no"), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#1846: an arrow chain after $@ — hash, array, two-deep, heredoc, regex (perl oracle)');
+}
+
+# The EXTENT, name by name: does the literal `->` survive?  The read-only match
+# variables ($& $' $` $+ $1) are left out on purpose — perl's rvalue
+# autovivification of a read-only value is FATAL there and PCL's is not, which
+# is a different question from the extent (and not this task's).
+{
+    my $prog = <<'PL';
+no warnings; no strict;
+# Half these names ARE the output separators, and taking the arrow chain
+# autovivifies them into hashrefs — so every row puts them back.
+sub ext { my $s = shift;
+  $, = ""; $\ = ""; $" = " "; $; = "\034"; $/ = "\n";
+  return index($s, "->") >= 0 ? "LIT" : "TOOK"; }
+print "at ",     ext("$@->{k}"),  "\n";
+print "bang ",   ext("$!->{k}"),  "\n";
+print "query ",  ext("$?->{k}"),  "\n";
+print "dot ",    ext("$.->{k}"),  "\n";
+print "slash ",  ext("$/->{k}"),  "\n";
+print "bslash ", ext("$\->{k}"),  "\n";
+print "semi ",   ext("$;->{k}"),  "\n";
+print "comma ",  ext("$,->{k}"),  "\n";
+print "pipe ",   ext("$|->{k}"),  "\n";
+print "colon ",  ext("$:->{k}"),  "\n";
+print "pct ",    ext("$%->{k}"),  "\n";
+print "eq ",     ext("$=->{k}"),  "\n";
+print "minus ",  ext("$-->{k}"),  "\n";
+print "lt ",     ext("$<->{k}"),  "\n";
+print "gt ",     ext("$>->{k}"),  "\n";
+print "lpar ",   ext("$(->{k}"),  "\n";
+print "rpar ",   ext("$)->{k}"),  "\n";
+print "lbrk ",   ext("$[->{k}"),  "\n";
+print "rbrk ",   ext("$]->{k}"),  "\n";
+print "tilde ",  ext("$~->{k}"),  "\n";
+print "dquote ", ext(qq{$"->{k}}), "\n";
+print "pid ",    ext("$$->{k}"),  "\n";
+print "caretW ", ext("$^W->{k}"), "\n";
+print "zero ",   ext("$0->{k}"),  "\n";
+print "under ",  ext("$_->{k}"),  "\n";
+print "arr0 ",   ext("$@->[0]"),  "\n";
+print "arr1 ",   ext("$;->[0]"),  "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#1846: every punctuation/magic scalar takes an explicit arrow chain (perl oracle)');
+}
+
+# THE NEGATIVES — what an over-wide rule would break.  A method name is not a
+# subscript; a blank ends the reference; a braced NAME closes it (perl's own
+# asymmetry, probed); a lone arrow and a call arrow stay literal.
+{
+    my $prog = <<'PL';
+no warnings; no strict;
+our $q = { k => "QK" };
+$@ = { k => "AT" };
+# The EXTENT is the claim, never the stringified ref: perl prints the real
+# address and PCL prints its own counter, so a row that let one through would
+# be comparing addresses.
+print "1:", ("$@->meth"  =~ /\Q->meth\E/  ? "literal" : "took"), "\n";
+print "2:", ("$@ ->{k}"  =~ /\Q ->{k}\E/  ? "literal" : "took"), "\n";
+print "3:", ("${q}->{k}" =~ /\Q->{k}\E/ ? "literal" : "took"), "\n";
+print "4:", ("$@->" =~ /\Q->\E/ ? "literal" : "took"), "\n";
+print "5:", ("$@->(1)" =~ /\Q->(1)\E/ ? "literal" : "took"), "\n";
+print "6:$q->{k}\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#1846 negatives: ->method, a blank, ${name}, a bare arrow, ->(…) all stay literal (perl oracle)');
+}
+
+# THE BARE-SUBSCRIPT SET IS UNCHANGED: the names whose punctuation ARRAY/HASH
+# exists still subscript without an arrow, and section 1's `$?[1]` still works.
+{
+    my $prog = <<'PL';
+no warnings; no strict;
+"hello world" =~ /(\w+)\s+(\w+)/;
+print "pre:$-[1] post:$+[1] pre2:$-[2]\n";
+"ab" =~ /(?<first>a)(?<second>b)/;
+print "named:$+{first}$+{second}\n";
+@? = (10, 11, 12);
+print "q:$?[1]\n";
+@! = (20, 21);
+print "b:$![0]\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#1846: the BARE punctuation subscript set is untouched (perl oracle)');
+}
+
+# THE RUNTIME HALF.  Taking the arrow after `$$` / `$^W` hands a NUMBER to the
+# container resolver, where PCL had a string arm and no number arm: the value
+# fell through to SBCL's GETHASH and the program died with a raw CL type error
+# naming an internal ("Value of pcl::h in (sb-impl::gethash3 …) is 204316, not
+# a hash-table") — untrappable in perl terms.  perl stringifies a number and
+# treats it as a symbolic reference, and that was ALREADY the divergence in
+# CODE, with no string in sight: `my $v = $$->{k}` crashed the same way.
+{
+    my $prog = <<'PL';
+no warnings; no strict;
+my $s = "12345"; my $n = 7; my $u;
+print "a1[", "$s->{k}", "] a2[", "$n->[0]", "] a3[", "$u->{k}", "]\n";
+print "a4[", "$$->{k}", "] a5[", "$^W->{k}", "]\n";
+my $v1 = $s->{k}; my $v2 = $$->{k}; my $v3 = $n->[0];
+print "b1[", (defined $v1 ? $v1 : "undef"), "] b2[", (defined $v2 ? $v2 : "undef"),
+      "] b3[", (defined $v3 ? $v3 : "undef"), "]\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#1846: a NUMBER in container position is a symbolic ref, not a CL type error (perl oracle)');
 }

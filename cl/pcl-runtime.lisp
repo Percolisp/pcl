@@ -11015,9 +11015,12 @@ per element."
       ;; same `(p-aref arr idx)`.
       ((and (vectorp arr) (not (stringp arr)) (not (vectorp idx)))
        (p-aref arr idx))
-      ;; Symbolic reference: string used as array name (no strict refs)
-      ((stringp arr)
-       (when (find #\Nul arr) (return-from p-aref-deref *p-undef*))
+      ;; Symbolic reference: a string — or a NUMBER, which perl stringifies
+      ;; into one — used as an array name (no strict refs); %p-symref-name is
+      ;; the one reading of that.
+      ((%p-symref-name arr)
+       (when (find #\Nul (%p-symref-name arr))
+         (return-from p-aref-deref *p-undef*))
        (let ((sym-arr (p-ensure-arrayref ref)))
          (if (and (vectorp idx) (not (stringp idx)))
              (p-aslice sym-arr idx)
@@ -12050,6 +12053,25 @@ which is one of #1140's escape spellings (probed)."
           (setf (gethash k h) box)
           box))))
 
+(defun %p-symref-name (v)
+  "The package-variable NAME a scalar designates when it is used as a HASH or
+   ARRAY reference under `no strict refs` — or NIL when it designates none.
+
+   A STRING is perl's classic symbolic reference (`$p = \"Foo::bar\";
+   $$p{k}`).  A NUMBER is the same thing: perl stringifies it first, so
+   `no strict; my $n = 7; $n->{k}` reads %main::7 and answers undef, and so
+   does `$$->{k}` with the pid (probed 5.40.3, task #1846).  PCL used to have
+   the string arm only, so a number fell through to SBCL's GETHASH and the
+   program died with a raw type error naming a CL internal — the worst kind of
+   failure, and untrappable in perl terms (rule 12's family).
+
+   The SCALAR deref `${...}` deliberately does NOT go through here: a number
+   there is ambiguous with a collapsed hard ref in the box model, ruled in
+   tasks #505/#551, and its arms say so.  This is the CONTAINER question."
+  (cond ((stringp v) v)
+        ((numberp v) (to-string v))
+        (t nil)))
+
 (defun p-ensure-hashref (ref)
   "Ensure ref (a p-box) contains a hash table.
    If ref contains nil or undef, autovivify: create a hash table and store it in the box.
@@ -12066,7 +12088,7 @@ which is one of #1140's escape spellings (probed)."
       ;; hash and a STASH ("Pkg::" → p-stash).  This used to be a second copy
       ;; that knew nothing about stashes, so `$$p{k}` with $p="Foo::" read a
       ;; package hash named "" instead of Foo's symbol table.
-      ((stringp h) (p-cast-% h))
+      ((%p-symref-name h) (p-cast-% (%p-symref-name h)))
       ((hash-table-p h) h)
       ;; A GLOB VALUE designates that glob's HASH slot — `local $_ = *written;
       ;; exists $$_{k}` is Carp's own guard (task #1726).  The SAME reading
@@ -12109,7 +12131,7 @@ which is one of #1140's escape spellings (probed)."
       ;; Symbolic reference: string used as array name (no strict refs).
       ;; ONE resolver — %p-symref-array, the same one @{"name"} goes through
       ;; (p-cast-@); this was a second copy of it.
-      ((stringp a) (%p-symref-array a))
+      ((%p-symref-name a) (%p-symref-array (%p-symref-name a)))
       ;; A GLOB VALUE designates that glob's ARRAY slot, and a REF to a glob is
       ;; perl's fatal — p-ensure-hashref's twin (task #1726).  Before the
       ;; vectorp arm, since a typeglob is not a vector but the order is the
@@ -12311,9 +12333,12 @@ which is one of #1140's escape spellings (probed)."
       ;; into one on the path every hash deref takes.
       ((hash-table-p h) (p-gethash h key))
       ((or (null h) (eq h *p-undef*)) *p-undef*)
-      ;; Symbolic reference: string used as hash name (no strict refs)
-      ((stringp h)
-       (when (find #\Nul h) (return-from p-gethash-deref *p-undef*))
+      ;; Symbolic reference: a string — or a NUMBER, which perl stringifies
+      ;; into one — used as a hash name (no strict refs); %p-symref-name is the
+      ;; one reading of that.
+      ((%p-symref-name h)
+       (when (find #\Nul (%p-symref-name h))
+         (return-from p-gethash-deref *p-undef*))
        (let ((sym-hash (p-ensure-hashref ref)))
          (p-gethash sym-hash key)))
       ;; $scalarref->{k} on the READ path: perl's fatal.  Without it the box
@@ -20396,7 +20421,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1580"
+(defparameter *pcl-cache-generation* "v2-1620"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

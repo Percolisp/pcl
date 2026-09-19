@@ -329,17 +329,21 @@ sub _scan_dollar {
     }
     # bare $$ = pid ($$$x scans as pid + $x, StringInterpolation's reading;
     # perl's ${${$x}} nesting is a recorded divergence)
-    return _ev(sigil => '$', form => 'magic', name => '$', canon => undef,
-               name_span => [$pos + 1, $pos + 2], span => [$pos, $pos + 2]);
+    my $ev = _ev(sigil => '$', form => 'magic', name => '$', canon => undef,
+                 name_span => [$pos + 1, $pos + 2], span => [$pos, $pos + 2]);
+    _scan_chain($text, $ev, $opt) if _arrow_next($text, $ev);
+    return $ev;
   }
 
   # $^W caret magic (single uppercase letter; braced ${^NAME} is above)
   if ($next eq '^') {
     my $letter = substr($text, $pos + 2, 1);
     return undef unless $letter =~ /^[A-Z]$/;
-    return _ev(sigil => '$', form => 'magic', name => '^' . $letter,
-               canon => undef, name_span => [$pos + 1, $pos + 3],
-               span => [$pos, $pos + 3]);
+    my $ev = _ev(sigil => '$', form => 'magic', name => '^' . $letter,
+                 canon => undef, name_span => [$pos + 1, $pos + 3],
+                 span => [$pos, $pos + 3]);
+    _scan_chain($text, $ev, $opt) if _arrow_next($text, $ev);
+    return $ev;
   }
 
   return _scan_array_index($text, $pos, $opt) if $next eq '#';
@@ -364,9 +368,12 @@ sub _scan_dollar {
                  span => [$pos, $pos + 2]);
     # `$+`/`$-` are %+/%-/@+/@- elements; the rest of the punctuation ARRAY
     # family subscripts the same way (#451) — the set above says which.
+    # An EXPLICIT arrow is a different question and has a different answer
+    # (_arrow_next): it needs no punctuation array at all.
     _scan_chain($text, $ev, $opt)
       if $next eq '+' || $next eq '-'
-      || index($PUNCT_ARRAY_SUBSCRIPT, $next) >= 0;
+      || index($PUNCT_ARRAY_SUBSCRIPT, $next) >= 0
+      || _arrow_next($text, $ev);
     return $ev;
   }
 
@@ -524,6 +531,31 @@ sub _scan_snail {
   my $ev = _name_event($text, $pos, $pos + 1, '@') or return undef;
   _scan_chain($text, $ev, $opt, 1);
   return $ev;
+}
+
+# Is the text right after this event's name an EXPLICIT arrow?
+#
+# THE ARROW SET IS NOT THE SUBSCRIPT SET, and the difference is the whole of
+# task #1846.  A BARE `[`/`{` after a magic name only subscripts when the
+# punctuation ARRAY/HASH exists ($-[0], $+{k}, …) — $PUNCT_ARRAY_SUBSCRIPT says
+# which, measured for #451.  An EXPLICIT `->` needs no such array: perl
+# continues into `->[` / `->{` after ANY scalar it interpolates, because by then
+# it is dereferencing the scalar's VALUE.  Probed character by character on
+# 5.40.3 (scratch table in task #1846): every name in $PUNCT_MAGIC plus `$^W`,
+# `$$`, `$0`, `$1` and `$_` takes `->{k}` and `->[0]`, and NONE takes `->meth`
+# — perl never calls a method inside a string, which is why this is a test for
+# the arrow only and `_scan_chain` still decides what may follow it.
+# A blank breaks it (`"$@ ->{k}"` is literal), which is automatic here: the
+# test starts at the name's end.
+#
+# The BRACED forms are deliberately not routed through this: `"${r}->{k}"`
+# leaves the arrow literal in perl, as `"${r}[0]"` does (probed; see
+# _scan_braced_dollar).  `$#name->[0]` DOES continue in perl — a divergence
+# left standing and filed as #1971, because the value it produces is a
+# symbolic deref of a NUMBER.
+sub _arrow_next {
+  my ($text, $ev) = @_;
+  return substr($text, $ev->{span}[1], 2) eq '->';
 }
 
 # ── Subscript chain ────────────────────────────────────────────────────────
