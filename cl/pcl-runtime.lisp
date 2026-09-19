@@ -3264,12 +3264,47 @@
                                  (every (lambda (c) (digit-char-p c 16))
                                         (subseq content 2))))))))))))
 
+;;; THE COMMONEST STRING A PERL PROGRAM NUMIFIES IS AN ASCII INTEGER, and until
+;;; s473x it took the whole general body below: a `string-left-trim`, a
+;;; `string-downcase` OF THE WHOLE STRING and a `string-right-trim` of that —
+;;; three allocations made only to test for `inf`/`nan` — then a run of
+;;; `subseq`+`string=` probes, then the manual extent scan, then a `subseq` of
+;;; the extent, and finally `read-from-string`: the full CL READER, with a
+;;; string input stream, to turn "1000" into 1000.  sb-sprof put the lot at
+;;; 23.5 % of the `ovlsub` bench row (s473x member 1), and every string→number
+;;; coercion in PCL arrives here.
+(declaim (inline %p-plain-integer-string))
+(defun %p-plain-integer-string (s)
+  "The INTEGER value of S when S is EXACTLY an optionally-signed run of ASCII
+   digits — no space, no dot, no exponent, no trailing junk — else NIL.
+   Exact by construction, so it cannot disagree with the general body: a run of
+   ASCII digits reads as that integer and nothing else.  Anything at all
+   outside the shape answers NIL and takes the general body unchanged, which is
+   what keeps `inf`, `nan`, `3.14foo`, `1e9999`, a leading blank and a Unicode
+   digit on exactly the answers they had."
+  (declare (type string s))
+  (let ((len (length s)))
+    (when (plusp len)
+      (let* ((c0 (char s 0))
+             (neg (char= c0 #\-))
+             (i (if (or neg (char= c0 #\+)) 1 0)))
+        (when (< i len)
+          (let ((acc 0))
+            (loop for k of-type fixnum from i below len
+                  for d of-type fixnum = (- (char-code (char s k)) 48)
+                  do (if (<= 0 d 9)
+                         (setf acc (+ (* acc 10) d))
+                         (return-from %p-plain-integer-string nil)))
+            (if neg (- acc) acc)))))))
+
 (defun parse-perl-number (str)
   "Parse a string to number using Perl semantics.
    Extracts leading numeric portion: '3rd' -> 3, '3.14foo' -> 3.14.
    Handles integers, floats, scientific notation, Inf/NaN.
    Returns 0 for non-numeric strings."
   (when (stringp str)
+    (let ((plain (%p-plain-integer-string str)))
+      (when plain (return-from parse-perl-number plain)))
     (let ((trimmed (string-left-trim '(#\Space #\Tab #\Newline) str)))
       (when (> (length trimmed) 0)
         ;; Check for Inf/Infinity/NaN (case-insensitive)
