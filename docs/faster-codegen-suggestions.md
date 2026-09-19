@@ -671,6 +671,70 @@ round-22 changes landing as predicted.  The `pack` ratio rose because
 *perl* ran faster on this machine today; PCL's own time is unchanged.
 **Ten of nineteen rows beat perl**, the same ten as §0.2f.
 
+### 0.2o Round 34 movers (2026-09-19) — the argument flattener and the CL reader
+
+Perf round 34 (s473x) shipped two RUNTIME levers, both found by member 1's
+re-taken profile: **#1517 half two** — a whole-array argument is copied in BULK
+(one grow and one `replace` through `%p-vec-data`'s simple-vectors, then a patch
+pass over the slots that are not already boxes) — and **`parse-perl-number`'s
+integer fast path** (`%p-plain-integer-string`): an optionally-signed run of
+ASCII digits is a digit loop instead of three whole-string allocations, a run of
+`subseq`+`string=` probes and a call to the CL READER.
+
+The table is the MEASURED A/B only — `BENCH_RT_B=<the 4c6565e5 runtime>`, so
+ONE emission runs against two cores, interleaved, best-of-5, controls in the
+same window.  `B/A` positive means the OLD runtime is slower.  **This is not a
+board**: the box was shared with another agent (1-min load 0.8–1.6 per run,
+printed beside each table in the tasks), so these are A/B deltas, not absolute
+board numbers; the README table is refreshed only by a quiet-box board
+(#1527's rule).
+
+```
+bench          perl(s)    pclA(s)    pclB(s)       B/A    A/perl   (was)
+feargs          0.0224     0.0551     0.1854   +236.6%     2.46x   8.23x
+ovlsub          0.0407     0.1056     0.1368    +29.5%     2.60x   3.37x
+textproc        0.4526     1.1209     1.1658     +4.0%     2.48x   2.68x
+json-rt         0.8927     1.5344     1.5543     +1.3%     1.72x   1.77x
+sortnum         0.0255     0.0375     0.0380     +1.3%     control
+feread2         0.4340     0.1286     0.1303     +1.3%     control
+methret         0.0900     0.0950     0.0950     +0.0%     control
+slices          0.0684     0.1131     0.1127     -0.3%     control
+subret          0.2062     0.0825     0.0812     -1.6%     control
+gcdrec          0.1874     0.0968     0.0946     -2.2%     control
+intloop+=       0.0666     0.0210     0.0205     -2.4%     control
+fib(27)x        1.4583     0.4253     0.4426     +4.1%     control
+```
+
+`feargs` is **0.1854 → 0.0551 s**, i.e. 9.0 ns per element → 2.7 ns, and the row
+goes from 8.2× perl to 2.5×.  A second A/B in another window read +254.0 %.
+
+**THE NEGATIVE CONTROLS ARE CORE LAYOUT, AND THE s473r DISCRIMINATOR SAYS SO.**
+A runtime carrying this batch's new functions but keeping the ORIGINAL call
+site — same code, same size, lever never reached — A/B's against the same base
+at `intloop+=` −7.4 %, `gcdrec` −2.5 %, `slices` −2.3 %, `arrfill` −2.1 %,
+`subret` −1.7 %, `fib(27)x` +2.6 % … and **`feargs` +0.7 %**.  So the band is the
+core's own layout and the `feargs` move is entirely the lever.
+
+**MEASURED AND NOT BUILT, so it is not re-derived.**  **#1808** (shadow
+`cl-ppcre:scan`'s `(function t)` method): the generic dispatch is **11.6 % self
+of `subste`** (`fast-method` 3.0, `emf` 2.7, `check-applicable-keywords` 3.3,
+the `DLISP3.LISP` dispatch lambda 2.6) and **3.2 % of `textproc`** — s473v
+measured 7.7 % there, and the row has since gained the match record and the BMH
+matcher, so the dispatch is a smaller slice of a faster row.  Both are under
+this round's 20 %-of-a-row bar; the absolute prize over the two rows is ~0.06 s.
+**`json-rt`** has no lever ≥ 20 % at all — see `docs/plan-speed-and-ir-s470.md`
+§A.4.3 row 7.  **`moo-objs`' loop half** is `defclass` per iteration under a
+system mutex (#1518) and is an L — filed with its share, not built.
+
+**`moo-objs` and `ovlsub` have a ~6–11 % spread of their own** where every other
+row sits inside ±2 % (three boards this session).  For `moo-objs` the cause is
+arithmetic: the row is `t(N) − t(0)` and `t(0)` is ~4.4 s, because `has` loads
+Moo AND — through `Sub::Quote`'s `pack("F",0)` — the whole pack extension from
+SOURCE, every run (#1202/#1910).  A 3 % wobble in a 4.4 s constant is ±0.13 s
+against a 1.14 s signal, so a lever on that row must be A/B'd with a control
+pair in the same window; a board-to-board comparison cannot see less than ~10 %
+on it.
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and

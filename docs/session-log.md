@@ -2,6 +2,77 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473x (Opus agent, 2026-09-19) — perf round 34: the argument flattener stops working one element at a time, an ASCII integer stops going through the CL reader, and #1910's five seconds turn out to be #1202's
+
+**Member 1 re-took the profile, because the table goes stale (the s473v rule).**
+The BEFORE board was taken twice (`BENCH_K=5`, load 0.85–2.03) against §0.2p:
+every row inside ±2 % except `feread3` (+1.5 % on the second take), `textproc`
+and `subste` (which agreed with §0.2p on the second take), and `ovlsub` /
+`moo-objs`, which have a **6–11 % spread of their own**.  That spread is a
+finding, not noise to shrug at: `moo-objs` is `t(N) − t(0)` and its `t(0)` is
+~4.4 s, so a 3 % wobble in the constant is ±0.13 s against a 1.14 s signal.
+Then sb-sprof `:cpu` tables for `ovlsub` (never profiled before), `feargs`,
+`subste`, `textproc`, `json-rt` and the `moo-objs` LOOP half — the last two
+through `pcl`'s warm script cache, so the transpile and the program's own
+compile are out of the profile.  The ranking, in ABSOLUTE seconds, is in
+`scratch/s473x/member1-ranking.md` and summarised in DECIDED §s473x.
+
+**Member 1b — #1910, measurement first, and its two hypotheses are both dead.**
+A warm `package Pt; use Moo; has x => (is=>'rw')` costs 4.4 s against perl's
+0.013 s.  Six warm runs with `PCL_FASL_DEBUG` say the module fasl ladder
+**settles at run 5** (runs 5 and 6 are all FASL HIT, zero builds; the task's
+"never settles" was run 4, the last rung).  sb-sprof over the whole warm run is
+~100 % `sb-c::*` — the SBCL compiler — and encapsulating
+`sb-c::compile-in-lexenv` names the three slowest forms as `pl-_pack_tmpl`
+1.374 s, `pl-_unpack_tmpl` 0.900 s, `pl-_unpack_str` 0.487 s.  Encapsulating
+`pcl::p-load-extension` with a backtrace closes it: `Sub::Quote`'s top-level
+`pack("F",0)`, reached from the CACHED FASL of Sub/Quote.pm, fires the pack
+stub, and `p-load-extension` does a plain `(load "cl/pcl-pack.lisp")` —
+**3.978 s of artifact recompiled on every run, in a program that never mentions
+pack**.  That is #1202, which is USER-PARKED, so nothing was built: the
+mechanism, the prize table for seven representative programs and #1917's number
+(`MOO_XS_DISABLE=1` is worth 0.05–0.12 s warm, ~0.5 s cold) went into #1910,
+#1202 and #1917, and Fable put the park question to the USER.
+
+**Member 2 — #1517 half two, and the fact it was waiting for is not needed.**
+`feargs` is 91.9 % `p-flatten-args`, and the profile splits it: reading the
+source array through its ARRAY HEADER 33.6 %, growing the result ONE ELEMENT AT
+A TIME ~36 %, the index arithmetic of both 7.8 % — while the element PROMOTION
+the code is really about is **0.2 %**, amortised to nothing exactly as #1517
+predicted.  So the lever is ONE `%p-flatten-grow` and ONE `replace` through
+`%p-vec-data`'s simple-vectors, then a patch pass over the run that fixes only
+the slots which are not already boxes; `%p-flatten-vector-slow` keeps the old
+spread for a vector that is not the plain shape.  No new per-array fact, no
+invalidation rule, and — unlike #883's rejected pre-sizing — nothing happens at
+all for a SCALAR argument.  **`feargs` 0.1854 → 0.0551 s, B/A +236.6 %** (a
+second window read +254.0 %), 9.0 ns → 2.7 ns per element, 8.2× perl → 2.5×.
+
+**Member 3 — the commonest string a Perl program numifies.**  `parse-perl-number`
+met "1000" with a `string-left-trim`, a `string-downcase` OF THE WHOLE STRING
+and a `string-right-trim` of that (three allocations made only to test for
+inf/nan), a run of `subseq`+`string=` probes, the manual extent scan, a `subseq`
+of the extent and finally `read-from-string` — the full CL READER with a string
+input stream.  sb-sprof put the lot at 23.5 % of `ovlsub`.
+`%p-plain-integer-string` is a digit loop for an exactly-signed run of ASCII
+digits and NIL for everything else, so inf, nan, `3.14foo`, `1e9999`, a leading
+blank and a non-ASCII digit keep exactly the answers they had.  **`ovlsub`
++29.5 % (3.4× perl → 2.6×)**, textproc +4.0 %, json-rt +1.3 %.
+
+**The negative control band was measured, not waved at.**  A runtime carrying
+this batch's new functions but keeping the ORIGINAL call site — the s473r
+size-matched discriminator — A/B's at `intloop+=` −7.4 %, `gcdrec` −2.5 %,
+`slices` −2.3 %, `arrfill` −2.1 %, `fib(27)x` +2.6 % and **`feargs` +0.7 %**.
+The band is the core's own layout; the `feargs` move is the lever.
+
+**Measured and NOT built, with their numbers**: #1808 shape 2 (11.6 % self of
+`subste`, 3.2 % of `textproc` — under the round's 20 % bar), `json-rt` (no lever
+≥ 20 % anywhere in it), `moo-objs`' loop half (`defclass` per iteration under a
+system mutex = #1518, an L).  Bars: gate `Result: PASS`, sweep GATE clean TOTAL
+18686 (+0), corpus-diff IDENTICAL over 111 (runtime-only, no generation bump),
+ir-conform 323/0/22/0, companion `op/` 10 files ROW DIFF 0/0/0/0.  Guard
+`Pl/t/perf-levers-05.t`, 63 rows, 0.53 s, inverse-verified on a `4c6565e5`
+extraction.
+
 ## Session 490 (Fable, 2026-09-18) — two slots refilled; the #1860 design ruled; the review probes find a first-run regression in the script cache (#1844)
 
 Opened on "Please continue, use two subjobs as normal."  Slot 1: **s473t6b
