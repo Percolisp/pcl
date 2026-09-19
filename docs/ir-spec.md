@@ -3058,6 +3058,28 @@ arrive — an entry satisfies `p-use`'s already-loaded guard, and `no Moose`
 recorded: `use constant` / `vars` / `lib` / `base` / `parent` / `overload`,
 which PCL also handles without a load.
 
+**An XS module with no built artifact is NOT INSTALLED (normative, s491a, task
+#1917).** A `.pm` whose body bootstraps a loadable object (`XSLoader::load`)
+is found in `@INC` on any host where perl has the module installed, so PCL
+transpiles and runs it and the bootstrap fails. That failure signals a MARKER
+class (`p-xs-no-artifact`): an ordinary perl string die — same text
+(`Can't locate loadable object for module M in @INC`), same trappability, same
+uncaught exit — plus a class. Where it escapes on its own (a direct
+`XSLoader::load`, an inner `eval` that catches it) nothing changes. When it
+escapes a module's **own top-level load**, the `require`/`use` frame that owns
+that load converts it into perl's module-not-found die,
+`Can't locate M/Path.pm in @INC (the module is XS and has no PCL build -- …)`,
+which is what the ecosystem's `/\ACan't locate \Q$file\E /` wrappers read as
+"not installed"; no `%INC` entry is written, and the negative answer is
+remembered for the process. The innermost require frame wins (CL searches
+handler clusters innermost-first), so a nested require of a *different* XS file
+names that file, as perl does when it is genuinely absent.
+
+```perl
+# on a host where perl has Class::XSAccessor installed, PCL has no build:
+eval { require Class::XSAccessor; 1 }    # $@ = "Can't locate Class/XSAccessor.pm in @INC (…"
+```
+
 **`do FILE` records its own entry, and the moment matters (normative, s470br,
 task #1116).**  Perl writes `$INC{FILE}` as soon as it has OPENED the file,
 keyed by THE STRING THE CALLER WROTE (`"./t.pl"`, `"inc.pl"` — not the resolved

@@ -118,6 +118,38 @@ then calling a sub that does not exist. `Pl/t/xs-02.t` pins the message.
 
 *What would change it.* Nothing, short of perl changing it.
 
+## Decision 4a — but a `require` of such a module says NOT INSTALLED (task #1917)
+
+**Chosen:** the bootstrap failure keeps the text above wherever it escapes on
+its own, **and** carries a marker class (`p-xs-no-artifact`). When it escapes a
+module's *own* top-level load, `require`/`use` re-raise it as perl's
+module-not-found die:
+
+```
+Can't locate Class/XSAccessor.pm in @INC (the module is XS and has no PCL
+build -- see tools/pcl-xs-install) (@INC entries checked: ...)
+```
+
+*Why.* Decision 4 is right about the `eval { … XSLoader::load … }` idiom, which
+is *inside* the module and never reaches us. It is wrong about the **wrapper**
+idiom, which is outside it: `_maybe_load_module`-shaped code (Moo's, and the
+same shape in Type::Tiny, Package::Stash, JSON::MaybeXS) matches only
+`/\ACan't locate \Q$file\E /` for "not installed" and **warns** on anything
+else. PCL's `@INC` includes the host perl's `site_perl`, so such a module is
+*found*, transpiled and run, and its bootstrap fails — which made every Moo
+program on a box with `Class::XSAccessor` installed print a line perl never
+prints. And the situation is not perl's: a `.pm` whose `.so` went missing is a
+broken install, whereas for PCL the module is simply not available until
+somebody runs `tools/pcl-xs-install` for it.
+
+*What this preserves.* A direct `XSLoader::load` outside a require reads
+exactly as before (`Pl/t/xs-02.t`'s pinned message); a module that catches its
+own failure still loads and falls back; the innermost require frame owns the
+conversion, so a nested require of a different XS file names *that* file, as
+perl does when it is genuinely absent. `%INC` gets no entry — the not-installed
+shape — and the negative answer is remembered per process. Guard:
+`Pl/t/require-xs-01.t`; semantics in `docs/ir-spec.md` §9.
+
 ## What is deliberately not here yet
 
 - **`.pm` installation.** A distribution's Perl side is ordinary Perl and

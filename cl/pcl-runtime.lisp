@@ -14262,7 +14262,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    ' at FILE line N.' suffix on a message that doesn't end in a newline.
    A warning raised INSIDE the handler skips it and takes the default action,
    which is perl's own rule — see *p-in-warn-handler*."
-  (multiple-value-bind (args loc) (%p-extract-loc raw-args)
+  (multiple-value-bind (args loc) (%p-extract-die-markers raw-args)
     (let* ((msg (p-warn-build-message args loc))
            (handler (and (not *p-in-warn-handler*) (gethash "__WARN__" %SIG))))
       (cond
@@ -14394,19 +14394,37 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     prints one line, while an internal CL error is a PCL BUG whose backtrace is
     the diagnosis."))
 
-(defun %p-extract-loc (args)
-  "Pull an optional (:loc \"FILE line N\") marker out of a die/warn arg list.
-   Returns (values real-args loc-or-nil).  Codegen passes :loc for an explicit
-   user die/warn so the Perl ' at FILE line N.' suffix carries the real source
-   location; internal runtime callers pass no :loc and so keep legacy behavior.
-   The marker is the keyword symbol :loc, which user die/warn args (strings,
-   numbers, boxes) never are, so this is unambiguous."
-  (let ((loc nil) (real '()) (skip nil))
+(define-condition p-xs-no-artifact (p-die-error) ()
+  (:documentation
+   "The die raised when an XS module asks to bootstrap its loadable object and
+    THIS HOST HAS NONE BUILT (task #1917).  It is an ordinary perl string die —
+    same text, same trappability, same uncaught-die exit — plus a CLASS, which
+    is the whole marker: `require`/`use` recognise it escaping a module's own
+    top-level load and re-raise it as perl's module-NOT-FOUND die, because for
+    PCL an XS module with no built artifact is not a broken install, it is a
+    module the program cannot have (see p-use and %p-xs-not-installed).
+    Nothing carries a slot: the require frame that converts it already knows
+    which FILE it was loading, and that is the name the message must use."))
+
+(defun %p-extract-die-markers (args)
+  "Pull the optional (:loc \"FILE line N\") and (:die-class CLASS) markers out of
+   a die/warn arg list.  Returns (values real-args loc-or-nil class-or-nil).
+   Codegen passes :loc for an explicit user die/warn so the Perl
+   ' at FILE line N.' suffix carries the real source location; internal runtime
+   callers pass no :loc and so keep legacy behavior.  :die-class names a MARKER
+   SUBCLASS of p-die-error to signal instead (p-xs-no-artifact), so a runtime
+   die that some caller must be able to recognise keeps every other property of
+   an ordinary perl die rather than growing a second death path.
+   Both markers are keyword SYMBOLS, which user die/warn args (strings, numbers,
+   boxes) never are, so this is unambiguous."
+  (let ((loc nil) (class nil) (real '()) (want nil))
     (dolist (a args)
-      (cond (skip (setf loc a skip nil))
-            ((eq a :loc) (setf skip t))
+      (cond ((eq want :loc) (setf loc a want nil))
+            ((eq want :class) (setf class a want nil))
+            ((eq a :loc) (setf want :loc))
+            ((eq a :die-class) (setf want :class))
             (t (push a real))))
-    (values (nreverse real) loc)))
+    (values (nreverse real) loc class)))
 
 ;;; THE EXIT STATUS OF AN UNCAUGHT die (task #1247 (b)).
 ;;;
@@ -14429,11 +14447,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defvar *p-prev-debugger-hook* nil
   "The debugger hook PCL's own hook chains to for a NON-perl condition.")
 
-(defun %p-die-error (control &rest args)
-  "Signal a perl STRING die.  `(error \"~A\" msg)` with the p-die-error class
+(defun %p-die-error (class control &rest args)
+  "Signal a perl STRING die.  `(error \"~A\" msg)` with a perl-die class
    attached — the class is the only difference, and it is what lets the
-   uncaught-die hook tell a perl die from a CL condition."
-  (error 'p-die-error :format-control control :format-arguments args))
+   uncaught-die hook tell a perl die from a CL condition.  CLASS is
+   p-die-error, or a marker subclass of it that some caller must be able to
+   recognise (p-xs-no-artifact); nil means the plain one."
+  (error (or class 'p-die-error)
+         :format-control control :format-arguments args))
 
 (defun %p-perl-die-p (condition)
   "Whether CONDITION is a PERL-level die — an object one (p-exception) or a
@@ -14558,12 +14579,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Otherwise, concatenate args as error string.  An optional (:loc \"FILE line N\")
    marker (emitted by codegen for an explicit die) appends Perl's
    ' at FILE line N.' suffix when the message doesn't already end in a newline.
+   An optional (:die-class CLASS) marker signals a MARKER SUBCLASS of
+   p-die-error instead (p-xs-no-artifact) — everything else about the die is
+   unchanged, which is the point: a runtime die some caller must recognise
+   stays one perl die with one set of rules.
    A die with NO message REUSES $@ — see %p-die-reuse-eval-error."
   ;; See %p-arm-uncaught-die-hook: an UNCAUGHT die must exit with perl's status
   ;; and print perl's one line, and this is the only moment at which the hook
   ;; can be installed and stay (#1247 (b)).
   (%p-arm-uncaught-die-hook)
-  (multiple-value-bind (args0 loc) (%p-extract-loc raw-args)
+  (multiple-value-bind (args0 loc class) (%p-extract-die-markers raw-args)
     (multiple-value-bind (args msg0)
         (%p-die-reuse-eval-error args0 (or loc (%p-loc-string) ""))
       (if (and (= (length args) 1)
@@ -14614,14 +14639,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                 ;; Message ends in newline: Perl does NOT append a location.
                 ((and (> (length msg) 0)
                       (char= (char msg (1- (length msg))) #\Newline))
-                 (%p-die-error "~A" msg))
+                 (%p-die-error class "~A" msg))
                 ;; No location recorded — the pre-#1240 answer, kept BYTE for
                 ;; byte (the empty message included), so a program compiled
                 ;; without `line-track` behaves exactly as it did.
-                ((null where) (%p-die-error "~A" msg))
+                ((null where) (%p-die-error class "~A" msg))
                 ;; Empty die message: Perl uses "Died".
-                ((string= msg "") (%p-die-error "Died at ~A.~%" where))
-                (t (%p-die-error "~A at ~A.~%" msg where)))))))))
+                ((string= msg "") (%p-die-error class "Died at ~A.~%" where))
+                (t (%p-die-error class "~A at ~A.~%" msg where)))))))))
 
 ;;; Forward declarations for p-do (both defined later in this file)
 (declaim (ftype function p-eval %p-eval-1))
@@ -22480,6 +22505,49 @@ buffer's fill-pointer; everything else falls back to file-length."
   '("XSLoader" "DynaLoader" "Carp::Heavy")
   "Modules that use XS/C code and cannot be transpiled. Skip loading them.")
 
+;;; --- AN XS MODULE WITH NO PCL BUILD IS NOT INSTALLED (task #1917) ---------
+;;; A .pm whose body bootstraps a loadable object is FOUND in @INC on a machine
+;;; where perl has the module installed — PCL's @INC includes perl's site_perl —
+;;; so PCL used to transpile it, run it, and let its XSLoader::load die with
+;;; perl's "Can't locate loadable object for module M in @INC".  That is perl's
+;;; message for a BROKEN INSTALL (a .pm whose .so went missing), and every
+;;; optional-XS wrapper on CPAN treats it as one: Moo's _maybe_load_module, for
+;;; instance, matches only /\ACan't locate $file / for "not installed" and WARNS
+;;; on anything else — so every Moo program on a box with Class::XSAccessor
+;;; printed a line perl never prints.
+;;;
+;;; For PCL the situation is not a broken install: the module simply is not
+;;; available here until somebody runs tools/pcl-xs-install for it.  So the
+;;; load raises the MARKER class p-xs-no-artifact, and the require frame that
+;;; owns the file's own top-level load converts it into perl's module-NOT-FOUND
+;;; die.  The innermost frame wins for free — CL searches handler clusters
+;;; innermost-first — which is exactly the rule we want: a nested require of a
+;;; DIFFERENT file converts at that file's own frame, and the outer require then
+;;; sees an ordinary "Can't locate <inner>.pm" die, as perl does.  A module that
+;;; catches its OWN bootstrap failure (the `eval { XSLoader::load … } or use the
+;;; pure-perl path` idiom) never reaches us: its eval is innermore still.
+(defvar *p-xs-unavailable-modules* (make-hash-table :test #'equal)
+  "REL-PATH (\"Class/XSAccessor.pm\") -> T for a module whose load raised
+   p-xs-no-artifact.  The negative result is remembered PER PROCESS so a repeat
+   require answers from here instead of loading the module's cached fasl again
+   only to die in the same place — and so the answer cannot drift inside one
+   run.  It is never written for a module that loaded (an XS module WITH a
+   built artifact is an ordinary module).")
+
+(defun %p-xs-not-installed (rel-path)
+  "Raise perl's module-NOT-FOUND die for REL-PATH, and remember it (#1917).
+   The text is perl's own up to `in @INC ' — which is the part the ecosystem
+   greps — with OUR reason in the slot where perl writes `you may need to
+   install the M module'.  ENOENT for the same reason as p-use's twin below:
+   it is what perl's failed search leaves in $! and what an uncaught require
+   exits with."
+  (setf (gethash rel-path *p-xs-unavailable-modules*) t)
+  (%p-io-errno-fail 2)
+  (p-die (format nil "Can't locate ~A in @INC (the module is XS and has no PCL ~
+                      build -- see tools/pcl-xs-install) (@INC entries ~
+                      checked: ~{~A~^ ~})"
+                 rel-path (map 'list #'to-string @INC))))
+
 (defparameter *p-pcl-provided-modules*
   '("Test::More" "Test::Simple" "Test2::Bundle::More")
   "Modules whose interface PCL supplies INTERNALLY (here: the Test::More TAP API
@@ -22590,6 +22658,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when do-import
         (%p-do-import module-name caller-pkg import-args))
       (return-from p-use t))
+    ;; An XS module whose load already told us there is no artifact here is NOT
+    ;; INSTALLED, and stays so for the rest of the process (#1917).
+    (when (gethash rel-path *p-xs-unavailable-modules*)
+      (%p-xs-not-installed rel-path))
     ;; Circular dependency?
     (when (member rel-path *p-loading-modules* :test #'string=)
       (warn "Circular dependency detected: ~A" rel-path)
@@ -22605,9 +22677,14 @@ buffer's fill-pointer; everything else falls back to file-length."
         (%p-io-errno-fail 2)
         (p-die (format nil "Can't locate ~A in @INC (@INC contains: ~{~A~^ ~})"
                        rel-path (map 'list #'to-string @INC))))
-      ;; Load with circular detection
-      (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
-        (p-load-module-cached abs-path))
+      ;; Load with circular detection.  THE HANDLER IS THE FAILURE PATH ONLY:
+      ;; a load that succeeds never enters it, and the frame is established once
+      ;; per module load, not per call into the module (#1917 — see the
+      ;; p-xs-no-artifact note above *p-xs-unavailable-modules*).
+      (handler-case
+          (let ((*p-loading-modules* (cons rel-path *p-loading-modules*)))
+            (p-load-module-cached abs-path))
+        (p-xs-no-artifact () (%p-xs-not-installed rel-path)))
       ;; Update %INC
       (setf (gethash rel-path *p-inc-table*) abs-path)
       ;; Import symbols from module (skipped for bare require)
@@ -30499,8 +30576,16 @@ buffer's fill-pointer; everything else falls back to file-length."
     (unless (pcl::%p-xs-try-load mod)
       ;; Nothing built.  Fail EXACTLY as perl does on a system where the
       ;; loadable object is missing -- see the comment above; this message
-      ;; is load-bearing for every dual-life module on CPAN.
-      (p-die (format nil "Can't locate loadable object for module ~A in @INC"
+      ;; is load-bearing for every dual-life module on CPAN, and a direct
+      ;; XSLoader::load outside a require still reads exactly like this.
+      ;;
+      ;; THE CLASS is the marker `require` reads (task #1917): when this die
+      ;; escapes a module's OWN top-level load, p-use turns it into perl's
+      ;; module-not-found die, because an XS module with no PCL-built artifact
+      ;; is not a broken install here -- it is a module this host does not
+      ;; have.  Everything else about the die is unchanged.
+      (p-die :die-class 'pcl::p-xs-no-artifact
+             (format nil "Can't locate loadable object for module ~A in @INC"
                      mod)))
     1))
 (defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
