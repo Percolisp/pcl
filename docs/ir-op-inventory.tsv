@@ -496,7 +496,7 @@ p-or	macro	logical	(a b)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNC
 p-or-assign	macro	compound-assignment	(place value)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl ||= (or-assign) - assigns value only if place is false.
 p-ord	function	string	(str)	insensitive	str	none	no	no	no	none		Perl ord - code point of first character
 p-overload-strval	function	overload	(obj)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Return the non-overloaded string value of OBJ (the raw address form). Implements overload::StrVal($obj) — bypasses any '""' overload.
-p-overloaded	function	overload	(obj)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Return true (1) if OBJ has any use overload handlers registered, else undef. Implements overload::Overloaded($obj).
+p-overloaded	function	overload	(obj)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		overload::Overloaded(OBJ_OR_CLASS) — 1 when the class overloads ANY operator, else undef (perl's own answer is undef, not "" — probed). THE INVOCANT IS A CLASS 
 p-pack	function	pack	(&rest args)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		
 p-pipe	macro	io	(read-fh write-fh)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl pipe - bareword filehandles are auto-quoted; lexical $fh passed as box.
 p-pop	function	aggregate-builtin	(arr)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl pop - removes from end, returns the element as-is (preserving references).
