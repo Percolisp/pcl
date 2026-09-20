@@ -123,7 +123,11 @@ like($o4, qr/extension pcl-t1202 -> FASL HIT/, 'rewritten: warm is a hit');
 # A crash or a full disk can leave one.  It must not be loaded, must not be
 # fatal, and must not cost the entry: the file is unreadable, not a failed
 # BUILD, so nothing refuses the rebuild (%p-note-fasl-unreadable).
-open my $trunc, '>', $f2[0] or die $!;
+# (`$f2[0]` is undef only where there is no cache at all — on a tree without
+# this feature, where the rows below are meant to fail; name a scratch path
+# there rather than letting the open pick one.)
+my $victim = @f2 ? $f2[0] : "$tmp/no-entry.fasl";
+open my $trunc, '>', $victim or die "truncate: $!";
 print $trunc "not a fasl";
 close $trunc;
 my ($o5) = run_ext(ext_dir => $ext, cache => $cache);

@@ -86,7 +86,10 @@ remainder is the probe's own work: 18 module fasl hits and a 0.003 s extension
 load), `mro` 0.344 → 0.275, `warnings` 0.300 → 0.269, and **the control
 `print 1` 0.263 → 0.264 — unchanged**, because a program that loads no
 extension does no work here at all.  The one run that pays: 6.09 s the first
-time after an artifact is regenerated, 0.25 s the next.  Task **#2086** filed
+time after an artifact is regenerated, 0.25 s the next.  **Where it does NOT
+show, said plainly: the gate** — 638.60 and 631.18 CPU-seconds on the base
+against 621.16 on this tree, and no wall-clock difference, because only a
+handful of `Pl/t` files reach an extension at all.  Task **#2086** filed
 for the shape this does not cover — pre-building the entries into an INSTALL
 TREE beside `pcl.core`, for the shared `/opt/pcl` case where every user
 otherwise pays the 4.7 s compile once.
