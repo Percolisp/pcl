@@ -106,8 +106,10 @@ extraction — every fasl-existence, HIT and debug-line row; the answer rows and
 the #349 `@INC` rows pass there, as they must); `tools/t/install-pcl.t` 57/57
 and an installed tree verified to use the entry; `PCL_NO_CORE=1` and core mode
 produce the same runtime identity and share it; `tools/ir-conform --jobs 2`
-323 pass / 0 fail / 0 stale; paren checker, `tag-license --check`, and
-`tools/ir-inventory.pl` regenerated identical.
+323 pass / 0 fail / 0 stale; companion leg `--jobs 1` over the ten files under
+perl's own `t/` that reach an extension (`op/pack.t` is quarantined) **10
+identical, 0 movers**, before = the extraction; paren checker,
+`tag-license --check`, and `tools/ir-inventory.pl` regenerated identical.
 
 ## Session s473t6d (Opus agent, 2026-09-20) — #1501 ROUND 11, the LAST op/ round: a tie on an ELEMENT, a foreach list that ran twice, and the band's last 213 causeless rows
 
