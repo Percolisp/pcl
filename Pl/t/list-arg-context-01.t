@@ -62,7 +62,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 13;
 
 sub write_pl {
     my ($code) = @_;
@@ -166,6 +166,44 @@ sub is3 ($$;$) { my ($u, $v) = @_; "$u/$v" } print "g ", is3(ctx(), ctx()), "\n"
 sub takes { scalar(@_) } print "h ", takes(two()), "\n";
 print "i ", sprintf("%d%d%d", 1..3), "\n";
 printf "j %s-%s\n", two();
+P
+
+# ---- 7-8. die/warn take a LIST and CONCATENATE it -------------------------
+#      Giving them LIST context (rows 1-2) made the ARGUMENTS right; the
+#      MESSAGE was still built from unflattened values, so `die "a",
+#      @arr[0,1], "\n"` said `aARRAY(0x1)`.  perl joins the flattened list
+#      (perlfunc), and `print` has always flattened through p-flatten-args —
+#      die and warn now use that ONE flattener.  The single-reference
+#      exception (`die $obj` keeps the object) is what the rows below guard.
+#      Locations are stripped: the perl and PCL runs are different tempfiles.
+both_agree(<<'P', 'die and warn CONCATENATE their flattened list');
+my @arr = (3, 4); sub two { (10, 20) }
+print "a ", (eval { die "a", @arr[0,1], "\n" } || $@);
+my $e = eval { die @arr } || $@; $e =~ s/ at .*//s;  print "b [$e]\n";
+print "c ", (eval { die "c", two(), "\n" } || $@);
+{ local $SIG{__WARN__} = sub { print "d $_[0]" }; warn "w", @arr[0,1], "\n"; }
+{ local $SIG{__WARN__} = sub { my $m = $_[0]; $m =~ s/ at .*//s; print "e [$m]\n" };
+  warn @arr; }
+P
+
+both_agree(<<'P', 'die/warn negatives: a lone reference is still the exception object');
+package E; sub new { bless {}, shift } package main;
+my $obj = E->new;
+eval { die $obj };        print "a ", (ref($@) || "not-a-ref"), "\n";
+eval { die [1,2] };       print "b ", (ref($@) || "not-a-ref"), "\n";
+eval { die { k => 1 } };  print "c ", (ref($@) || "not-a-ref"), "\n";
+eval { die $obj, "x" };   print "d ", (ref($@) ? "ref"
+                                     : ($@ =~ /^E=HASH\(0x[0-9a-f]+\)x at / ? "string-ok"
+                                                                            : "BAD:$@")), "\n";
+eval { die "z\n" };       print "e [$@]";
+eval { die "y" };         print "f ", ($@ =~ /^y at .* line \d+\.$/m ? "loc-ok" : "BAD"), "\n";
+eval { die "p", "q\n" };  print "g [$@]";
+eval { die "p", "q" };    print "h ", ($@ =~ /^pq at / ? "loc-ok" : "BAD"), "\n";
+eval { eval { die "first\n" }; die };
+                          print "i ", ($@ =~ /^first\n\t\.\.\.propagated at / ? "prop-ok" : "BAD"), "\n";
+my @empty; eval { die @empty };
+                          print "j ", ($@ =~ /Died/ ? "died-ok" : "BAD"), "\n";
+{ local $SIG{__WARN__} = sub { print "k ", (ref($_[0]) || "str"), "\n" }; warn $obj; }
 P
 
 # ---- transpile shapes (no SBCL): the emission the fix produces ------------

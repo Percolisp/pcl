@@ -14383,6 +14383,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    A warning raised INSIDE the handler skips it and takes the default action,
    which is perl's own rule — see *p-in-warn-handler*."
   (multiple-value-bind (args loc) (%p-extract-die-markers raw-args)
+    ;; `warn LIST` concatenates its flattened list, like `die` and like
+    ;; `print` — one flattener for all three (task #2004 residue).
+    (setf args (coerce (p-flatten-args args) 'list))
     (let* ((msg (p-warn-build-message args loc))
            (handler (and (not *p-in-warn-handler*) (gethash "__WARN__" %SIG))))
       (cond
@@ -14709,6 +14712,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; can be installed and stay (#1247 (b)).
   (%p-arm-uncaught-die-hook)
   (multiple-value-bind (args0 loc class) (%p-extract-die-markers raw-args)
+    ;; `die LIST` takes a LIST and CONCATENATES it (perlfunc), so a raw @array
+    ;; or a slice among the arguments spreads to its elements exactly as it
+    ;; does for `print` — ONE flattener, p-flatten-args, and not a second one
+    ;; (task #2004 residue): `die "a", @arr[0,1], "\n"` said `aARRAY(0x1)`.
+    ;; A p-box-wrapped REFERENCE stays one element, which is what keeps the
+    ;; single-reference exception below reachable (`die $obj`).
+    (setf args0 (coerce (p-flatten-args args0) 'list))
     (multiple-value-bind (args msg0)
         (%p-die-reuse-eval-error args0 (or loc (%p-loc-string) ""))
       (if (and (= (length args) 1)
