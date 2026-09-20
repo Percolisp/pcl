@@ -238,7 +238,7 @@ my %FAMILY;
                      p-exception-object p-die p-warn p-evalbytes)],
   'io' => [qw(p-print p-say p-printf p-open p-sysopen p-close p-eof p-tell
               p-seek p-sysseek p-pipe p-select p-write p-binmode p-read
-              p-sysread p-syswrite p-fileno p-fcntl p-getc p-readline
+              p-sysread p-syswrite p-fileno p-flock p-fcntl p-getc p-readline
               *p-filehandles* p-lock p-install-data-handle)],
   'directory-io' => [qw(p-opendir p-readdir p-closedir p-rewinddir)],
   'socket' => [qw(p-socket p-socketpair p-bind p-connect p-listen p-accept
