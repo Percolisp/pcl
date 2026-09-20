@@ -2056,6 +2056,20 @@ sub _sole_ternary_lvalue_id {
 sub _class_name_bareword {
   my ($self, $kid_id) = @_;
   my $class_node = $self->expr_o->get_a_node($kid_id);
+  # TWO SHAPES, one fact — the same reading `_read_star_slot_bareword` makes
+  # of its own slot.  A bareword the classifier could not place arrives as a
+  # plain Word leaf marked `_bareword_runtime` (#1996) instead of a zero-param
+  # funcall, and it is still a CLASS NAME here: this POSITION is positive
+  # knowledge, and #1996's runtime lookup is for ignorance (`p-bareword-value`
+  # asks the image precisely because nothing else knows).  Without this arm
+  # `tie $s, Tie::StdThing` and `bless $r, Tie::StdThing` lowered to a runtime
+  # sub lookup per call, and the two spellings of the class name stopped
+  # emitting the same bytes (task #142's invariant).
+  if (ref($class_node) eq 'PPI::Token::Word' && $class_node->{_bareword_runtime}) {
+    my $rt_name = $class_node->content();
+    $rt_name =~ s/::\z//;
+    return qq{"$rt_name"};
+  }
   return undef unless $self->expr_o->is_internal_node_type($class_node)
                    && $class_node->{type} eq 'funcall';
   # Bareword funcalls have exactly 1 child (the word itself, no arguments).

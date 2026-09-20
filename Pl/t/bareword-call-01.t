@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 42;
+plan tests => 43;
 
 sub run_cl {
     my ($code) = @_;
@@ -346,3 +346,17 @@ test_cl('a qualified name with NO sub behind it is still the string',
 # it (`print "x=", nosuch;`, `\@ISA = (Exporter)`).
 test_cl('an UNQUALIFIED unknown name in a list is still the string',
     qq{my \@l = (nosuchname, 5);\nprint "\@l\\n";}, "nosuchname 5\n");
+
+# A CLASS-NAME ARGUMENT POSITION is positive knowledge, so the runtime lookup
+# does NOT reach it: `bless $r, Some::Class` and `tie $s, Some::Class` name a
+# class, and task #142's invariant is that the bareword and the quoted
+# spelling emit the SAME bytes.  The DISCRIMINATING guard is the shape, in
+# Pl/t/parser2-01.t (nine rows, which is what caught the #1996 collision); this
+# row is the end-to-end half and does NOT fail on the broken emission, because
+# `p-bareword-value` answers the same string when no sub of that name exists.
+# It is here to pin that the class slot still blesses and ties for real.
+test_cl('a qualified bareword in the CLASS slot of bless/tie is the class',
+    qq{package My::Thing;\nsub TIESCALAR { bless {}, shift }\nsub FETCH { "F" }\n}
+  . qq{package main;\nmy \$r = {};\nbless \$r, My::Thing;\n}
+  . qq{my \$s;\ntie \$s, My::Thing;\nprint ref(\$r), "|", ref(tied \$s), "|\$s\\n";},
+    "My::Thing|My::Thing|F\n");

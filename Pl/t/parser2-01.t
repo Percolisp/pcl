@@ -857,6 +857,17 @@ EOF
   my $inv = Pl::Parser2->parse_code(q[my $x = Count::DATA->getline;]);
   like($inv, qr/p-method-call \(p-resolve-invocant "Count::DATA"\)/,
        'bareword method invocant still resolves at runtime');
+  # BLESS's own slot, which had no shape row until s493 — #1996's runtime
+  # lookup for an unplaceable QUALIFIED bareword reached it and only `tie`
+  # above caught it.  Same invariant, same reason: the position is positive
+  # knowledge, so the two spellings emit the same bytes and no per-call sub
+  # resolution is emitted.  (perl CALLS a declared sub of that name in this
+  # slot — PCL does not; pre-existing on both trees, filed as #2015.)
+  my $bb = Pl::Parser2->parse_code(q[my $r = {}; bless $r, Tie::StdThing;]);
+  like($bb, qr/\(p-bless \$r "Tie::StdThing"\)/,
+       'bless CLASSNAME bareword is a string, not a runtime lookup');
+  is($bb, Pl::Parser2->parse_code(q[my $r = {}; bless $r, 'Tie::StdThing';]),
+     'bless: bareword and quoted class emit identical CL');
 }
 
 # CLAUDE.md's paren checker (handles strings, ;-comments, #\( char literals).
