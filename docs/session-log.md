@@ -195,14 +195,28 @@ is used only when the two bytes there really are `$)`, so a residual drift can
 only lose a repair, never corrupt a file.
 
 **Bars (logs in the agent's `scratch/s492a/`).**  Gate `Result: PASS`
-253 files / 8542 tests on the rebased tree (main 250/8495).  Full sweep GATE
-clean, TOTAL 18687 (+0 against the merged baseline; the +2 over main's 18685 is
-member 2's, blessed row by row), drops 5 = census.  corpus-diff vs 5316d666:
+253 files / 8542 tests on the tree rebased onto `33513766` (main 250/8495).
+Full sweep GATE clean, TOTAL 18687 (+0 against the merged baseline; the +2 over
+main's 18685 is member 2's, blessed row by row), drops 5 = census.  corpus-diff:
 5 files, all explained (four gain `(p-import-builtins "weaken")`, delete.t gains
 the scalar-context wrapper).  emission-ab --shapes 122 files SAME / 0 DIFF /
 0 RCDIFF.  gate-SET scan both populations 638 × 2: EMPTY diff.  ir-conform 323
 pass / 0 fail / 0 stale.  ir-host-leak: the leak set byte-identical to the base.
 All seven guard files inverse-verified on a 268d7e00 extraction in one run.
+
+**Companion, board, battery.**  Fifteen companion files `--jobs 1`, before = a
+`5316d666` extraction: TWO movers, both this batch's gains, re-run serially
+alone and spliced with their causes — `op/join.t` 41/2 → **43/0 (OK)** (#1991:
+the two rows that make `$"` a tied scalar and a magic PVX) and `comp/use.t`
+40/47 → **42/45** (#1999's `use builtin LIST` import; rows 33/34, the
+version-declaration spelling, still fail as #1690).  The four now-passing rows
+left `baselines/perl-suite-fails.tsv` by edit.  CPAN board, 13 dists by ROWS
+against s490's: zero movement from this batch — Safe-Isa 67/1 → 68/0 is s491's
+recorded gain, Text-Balanced `05_extmul.t` reads 16/14 on the base too (s490's
+snapshot predates #1512's timeout allowance), and Scalar-List-Utils is
+byte-identical once run with its documented `--no-dist-lib`.  The everyday
+battery's core modules: **57 → 60 of 73** (IO::Socket and HTTP::Tiny from
+member 4, File::Copy from member 5).
 
 ## Session s473t6d (Opus agent, 2026-09-20) — #1501 ROUND 11, the LAST op/ round: a tie on an ELEMENT, a foreach list that ran twice, and the band's last 213 causeless rows
 
