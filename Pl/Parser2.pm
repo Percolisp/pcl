@@ -4169,8 +4169,18 @@ sub _interp_fixer {
   (my $bare = $canon) =~ s/^[\$\@\%]//;
   # Each arm rewrites the plain spelling AND the braced-interpolation
   # spelling ("${x}" / "@{x}[…]" / "${x}{k}" — E4.1 M2, s353): braces are
-  # kept in the output so adjacency stays unambiguous.  The `(?:^|[^\\])`
-  # prefix skips escaped sigils, as before.
+  # kept in the output so adjacency stays unambiguous.
+  #
+  # THE ESCAPE GUARD IS A LOOKBEHIND, AND THAT IS LOAD-BEARING (task #1919).
+  # It used to CONSUME the character to the left — `((?:^|[^\\])(?:\\\\)*)` —
+  # so under /g the second of two ADJACENT occurrences had its left context
+  # eaten by the first match and was never seen: `"A[$v$v]"` under a rename
+  # printed `A[7]`, silently, and so did an s/// on both its sides.
+  # `(?<!\\)((?:\\\\)*)` says the same thing zero-width: a position with no
+  # backslash before it, then zero or more backslash PAIRS, i.e. an EVEN
+  # number of backslashes immediately before the sigil.  Measured over
+  # `A[$v$v]` (1 -> 2 substitutions), `A[$v-$v]` (2, unchanged) and
+  # `\\$v$v` (1 -> 2, the escaped-backslash case still correct).
   # `(?!::)` on the UNBRACED arms: "$x::y" interpolates the qualified global
   # $x::y, not $x followed by the text "::y", so a rename of $x must not
   # reach into it (the braced form "${x}::y" DOES mean $x then text, which
@@ -4178,24 +4188,24 @@ sub _interp_fixer {
   return
     $sigil eq '$' ? sub {
       my $n = 0;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E\b(?![\[\{])(?!::)/$1\$$newbare/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?![\[\{])/$1\${$newbare}/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\Q$bare\E\b(?![\[\{])(?!::)/$1\$$newbare/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?![\[\{])/$1\${$newbare}/g;
       return $n;
     }
   : $sigil eq '@' ? sub {
       my $n = 0;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\@\Q$bare\E\b(?!\{)(?!::)/$1\@$newbare/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E(?=\[)/$1\$$newbare/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\#\Q$bare\E\b(?!::)/$1\$#$newbare/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\@\{\s*\Q$bare\E\s*\}(?!\{)/$1\@{$newbare}/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?=\[)/$1\${$newbare}/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\#\{\s*\Q$bare\E\s*\}/$1\$#{$newbare}/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\@\Q$bare\E\b(?!\{)(?!::)/$1\@$newbare/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\Q$bare\E(?=\[)/$1\$$newbare/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\#\Q$bare\E\b(?!::)/$1\$#$newbare/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\@\{\s*\Q$bare\E\s*\}(?!\{)/$1\@{$newbare}/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?=\[)/$1\${$newbare}/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)\$\#\{\s*\Q$bare\E\s*\}/$1\$#{$newbare}/g;
       return $n;
     }
   : sub {
       my $n = 0;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)([\$\@])\Q$bare\E(?=\{)/$1$2$newbare/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)([\$\@])\{\s*\Q$bare\E\s*\}(?=\{)/$1$2\{$newbare\}/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)([\$\@])\Q$bare\E(?=\{)/$1$2$newbare/g;
+      $n += $_[0] =~ s/(?<!\\)((?:\\\\)*)([\$\@])\{\s*\Q$bare\E\s*\}(?=\{)/$1$2\{$newbare\}/g;
       return $n;
     };
 }
