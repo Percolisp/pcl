@@ -148,7 +148,7 @@ sub slurp { open my $fh, '<:raw', $_[0] or die; local $/; return <$fh> }
 {
   my $real = "$RealBin/../../baselines/perl-suite-fails.tsv";
   SKIP: {
-    skip 'no checked-in companion fail baseline', 4 unless -e $real;
+    skip 'no checked-in companion fail baseline', 5 unless -e $real;
     my ($meta, $cause) = read_fail_rows($real);
     my @keys = map { @$_ } values %$meta;
     ok(scalar(@keys) > 1000, 'the blessed baseline reads as thousands of rows');
@@ -161,6 +161,20 @@ sub slurp { open my $fh, '<:raw', $_[0] or die; local $/; return <$fh> }
                split /\n/, slurp($real);
     is(scalar(@wide), 0,
        'every blessed line has at most six fields — five plus the cause');
+    # A blessed key is what the ONE projection produces, or it can never
+    # match: 170 rows written on 2026-09-13 carried this machine's ABSOLUTE
+    # perl build path (`[at /home/…/perl-5.40.3/t/re/subst.t line 119]`)
+    # where every run produces `[at t/re/subst.t line 119]`, so each was a
+    # phantom NEW ROW plus a phantom FIXED ROW on every companion run for a
+    # week (#1966).  Stated WITHOUT knowing any machine's t/ directory: no
+    # key may hold an absolute path into a perl source tree's t/, and the
+    # projection must be the identity on every blessed key.
+    my @abs = grep { $_->[3] =~ m{/[^\s'"]*/t/(?:op|re|io|uni|comp|cmd|base|lib|mro|run|opbasic|porting|class|win32|bigmem|japh|perf|test_pl|benchmark)/[\w.-]+\.t\b}
+                       && $_->[3] =~ m{(?:^|[\s\['"(])/} } @keys;
+    my @moved = grep { rowkey_desc($_->[3], undef) ne $_->[3] } @keys;
+    is(scalar(@abs) + scalar(@moved), 0,
+       'every blessed rowkey is already in the projected spelling — no absolute t/ path, no unnormalised address')
+      or diag(join "\n", map { $_->[3] } (@abs, @moved)[0 .. 4]);
     like(causes_line([ map { $_->[4] } @keys ], $real),
          qr/^CAUSES: (?:[\d,]+ of [\d,]+ — not-supported |NOT CHECKED — no cause column)/,
          'the runner can report on it');

@@ -4747,7 +4747,7 @@ op/lex.t	50	ok	not ok [PCL #49]	Using nested extra paired delimiters works	#1876
 op/lex.t	42	ok	not ok [PCL #41]	Using paired delimiter both fore/aft fails as expected	#1876
 op/lex.t	48	ok	not ok [PCL #47]	Using terminating paired delimiter fore, opening aft fails as expected outside scope of extra delims	#1876
 op/lex.t	52	ok	not ok [PCL #51]	Using too few closing delims in nesting fails as expected	#1876
-op/lex.t	37	ok	not ok [PCL #36]	Various tests of string delims \xAB/\xBB returned without error	#1876
+op/lex.t	37	ok	not ok [PCL #36]	Various tests of string delims «/» returned without error	#1876
 op/lex.t	28	ok	not ok [PCL #27]	[perl \#126482] Assert failure when mentioning a constant twice in a row	NS:Error compatibility for invalid Perl input -- measured s473t6d: `ub ub` must be `Bareword found`; PCL drops the statement loudly
 op/lex.t	32	ok	not ok [PCL #31]	[perl \#128996] - use of PL_op after op is freed	NS:Error compatibility for invalid Perl input -- measured s473t6d: [perl #128996] needs `Integer overflow in hexadecimal number` + malformed-UTF-8 fatals; PPI refuses the document
 op/lex.t	33	ok	not ok [PCL #32]	[perl \#128997] - buffer read overflow	NS:Error compatibility for invalid Perl input -- measured s473t6d: [perl #128997] needs a malformed-UTF-8 fatal; PPI refuses the document
@@ -7942,7 +7942,7 @@ re/pat.t	296	ok	not ok [PCL #309]	Recursion with (??{ })	#1720
 re/pat.t	297	ok	not ok [PCL #310]	Recursion with (??{ })	#1720
 re/pat.t	298	ok	not ok [PCL #311]	"abc" =~ /^(??{"a"})b/	#1720
 re/pat.t	300	ok	not ok [PCL #313]	Eval-group not allowed at runtime	#1720
-re/pat.t	301	ok	(missing)	Eval-group not allowed at runtime 'Eval-group not allowed at runtime, use re 'eval' in regex m/(?{$blah = 45})/ at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 520.', '', '12'	#1720
+re/pat.t	301	ok	(missing)	Eval-group not allowed at runtime 'Eval-group not allowed at runtime, use re 'eval' in regex m/(?{$blah = 45})/ at t/re/pat.t line 520.', '', '12'	#1720
 re/pat.t	302	ok	not ok [PCL #314]	Eval-group not allowed at runtime '', '1', '12'	#1720
 re/pat.t	303	ok	not ok [PCL #316]	Eval-group not allowed at runtime	#1720
 re/pat.t	304	ok	not ok [PCL #317]	Eval-group not allowed at runtime	#1720
@@ -7958,11 +7958,11 @@ re/pat.t	337	ok	not ok [PCL #350]	Empty clause	#1720
 re/pat.t	341	ok	not ok [PCL #354]	Prefixify	#1720
 re/pat.t	343	ok	not ok [PCL #356]	Prefixify	#1720
 re/pat.t	345	ok	not ok [PCL #358]	(?{ $var } refers to package vars	#1720
-re/pat.t	347	ok	not ok [PCL #360]	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 685]	#1720
+re/pat.t	347	ok	not ok [PCL #360]	[at t/re/pat.t line 685]	#1720
 re/pat.t	348	ok	not ok [PCL #361]	POSIX class [: :] must have valid name	#1720
-re/pat.t	349	ok	not ok [PCL #362]	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 690]	#1720
+re/pat.t	349	ok	not ok [PCL #362]	[at t/re/pat.t line 690]	#1720
 re/pat.t	350	ok	not ok [PCL #363]	POSIX syntax [[= =]] is an error	#1720
-re/pat.t	351	ok	not ok [PCL #364]	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 690]	#1720
+re/pat.t	351	ok	not ok [PCL #364]	[at t/re/pat.t line 690]	#1720
 re/pat.t	352	ok	not ok [PCL #365]	POSIX syntax [[. .]] is an error	#1720
 re/pat.t	357	ok	(missing)	ACCEPT and CLOSE - buffer 1 is defined with expected value	#1720
 re/pat.t	358	ok	(missing)	ACCEPT and CLOSE - buffer 2 is defined with expected value	#1720
@@ -8049,17 +8049,17 @@ re/pat.t	438	ok	(missing)	@- and @+ and @{^CAPTURE} tests	#1720
 re/pat.t	439	ok	(missing)	values do not stick to @- elements	#1720
 re/pat.t	440	ok	(missing)	values do not stick to @+ elements	#1720
 re/pat.t	441	ok	(missing)	values do not stick to @{^CAPTURE} elements	#1720
-re/pat.t	442	ok	(missing)	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 848]	#1720
+re/pat.t	442	ok	(missing)	[at t/re/pat.t line 848]	#1720
 re/pat.t	443	ok	(missing)	$^N, @- and @+ are read-only	#1720
-re/pat.t	444	ok	(missing)	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 848]	#1720
+re/pat.t	444	ok	(missing)	[at t/re/pat.t line 848]	#1720
 re/pat.t	445	ok	(missing)	$^N, @- and @+ are read-only	#1720
-re/pat.t	446	ok	(missing)	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 848]	#1720
+re/pat.t	446	ok	(missing)	[at t/re/pat.t line 848]	#1720
 re/pat.t	447	ok	(missing)	$^N, @- and @+ are read-only	#1720
-re/pat.t	448	ok	(missing)	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 848]	#1720
+re/pat.t	448	ok	(missing)	[at t/re/pat.t line 848]	#1720
 re/pat.t	449	ok	(missing)	$^N, @- and @+ are read-only	#1720
-re/pat.t	450	ok	(missing)	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 848]	#1720
+re/pat.t	450	ok	(missing)	[at t/re/pat.t line 848]	#1720
 re/pat.t	451	ok	(missing)	$^N, @- and @+ are read-only	#1720
-re/pat.t	452	ok	(missing)	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 848]	#1720
+re/pat.t	452	ok	(missing)	[at t/re/pat.t line 848]	#1720
 re/pat.t	453	ok	(missing)	$^N, @- and @+ are read-only	#1720
 re/pat.t	454	ok	(missing)	\G testing	#1720
 re/pat.t	455	ok	(missing)	\G testing	#1720
@@ -8251,19 +8251,19 @@ re/pat.t	640	ok	(missing)	\p property after empty * match	#1720
 re/pat.t	641	ok	(missing)	\p property after empty * match	#1720
 re/pat.t	642	ok	(missing)	\p property after empty * match	#1720
 re/pat.t	643	ok	(missing)	\p property after empty * match	#1720
-re/pat.t	644	ok	(missing)	\xc0 =~ (?^:((\xC0)+,?)); Neither pattern nor target utf8	#1720
-re/pat.t	645	ok	(missing)	\xc0 =~ /(?^:((\xC0)+,?))/i; Neither pattern nor target utf8	#1720
-re/pat.t	646	ok	(missing)	\xc0 =~ (?^:((\xC0)+,?)); pattern utf8, target not	#1720
-re/pat.t	647	ok	(missing)	\xc0 =~ /(?^:((\xC0)+,?))/i; pattern utf8, target not	#1720
-re/pat.t	648	ok	(missing)	\xc0 =~ (?^:((\xC0)+,?)); target utf8, pattern not	#1720
-re/pat.t	649	ok	(missing)	\xc0 =~ /(?^:((\xC0)+,?))/i; target utf8, pattern not	#1720
-re/pat.t	650	ok	(missing)	\xc0 =~ (?^:((\xC0)+,?)); Both target and pattern utf8	#1720
-re/pat.t	651	ok	(missing)	\xc0 =~ /(?^:((\xC0)+,?))/i; Both target and pattern utf8	#1720
+re/pat.t	644	ok	(missing)	\xc0 =~ (?^:((À)+,?)); Neither pattern nor target utf8	#1720
+re/pat.t	645	ok	(missing)	\xc0 =~ /(?^:((À)+,?))/i; Neither pattern nor target utf8	#1720
+re/pat.t	646	ok	(missing)	\xc0 =~ (?^:((À)+,?)); pattern utf8, target not	#1720
+re/pat.t	647	ok	(missing)	\xc0 =~ /(?^:((À)+,?))/i; pattern utf8, target not	#1720
+re/pat.t	648	ok	(missing)	\xc0 =~ (?^:((À)+,?)); target utf8, pattern not	#1720
+re/pat.t	649	ok	(missing)	\xc0 =~ /(?^:((À)+,?))/i; target utf8, pattern not	#1720
+re/pat.t	650	ok	(missing)	\xc0 =~ (?^:((À)+,?)); Both target and pattern utf8	#1720
+re/pat.t	651	ok	(missing)	\xc0 =~ /(?^:((À)+,?))/i; Both target and pattern utf8	#1720
 re/pat.t	652	ok	(missing)	Under unicode_strings: "\xc0" =~ /\w/	#1720
 re/pat.t	653	ok	(missing)	Under unicode_strings: "\xc0" !~ /(?d:\w)/	#1720
 re/pat.t	654	ok	(missing)	Empty pattern qr// stringifies to (?^:) with unicode flag enabled - Bug \#80212	#1720
 re/pat.t	655	ok	(missing)	Empty pattern qr// stringifies to (?^:) with unicode flag disabled - Bug \#80212	#1720
-re/pat.t	656	not ok	(missing)	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat.t line 1320] # TODO [perl #38133]	#1720
+re/pat.t	656	not ok	(missing)	[at t/re/pat.t line 1320] # TODO [perl #38133]	#1720
 re/pat.t	657	ok	(missing)	RT \#3516 A	#1720
 re/pat.t	658	ok	(missing)	RT \#3516 B	#1720
 re/pat.t	659	ok	(missing)	RT \#3516 C	#1720
@@ -8394,10 +8394,10 @@ re/pat_rt_report.t	2465	ok	not ok [PCL #2461]	$REGMARK in replacement; Bug 49190
 re/pat_rt_report.t	2466	ok	not ok [PCL #2462]	$REGMARK in replacement; Bug 49190	#1721
 re/pat_rt_report.t	2467	ok	not ok [PCL #2463]	$REGMARK in replacement; Bug 49190	#1721
 re/pat_rt_report.t	2478	ok	not ok [PCL #2474]	Check if tree logic breaks $^R; Bug 57042	#1721
-re/pat_rt_report.t	2479	ok	not ok [PCL #2475]	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat_rt_report.t line 963]	#1721
-re/pat_rt_report.t	2480	ok	not ok [PCL #2476]	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat_rt_report.t line 964]	#1721
-re/pat_rt_report.t	2481	ok	not ok [PCL #2477]	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat_rt_report.t line 965]	#1721
-re/pat_rt_report.t	2487	not ok	ok [PCL #2483]	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/pat_rt_report.t line 1008] # TODO [perl #38133]	#1721
+re/pat_rt_report.t	2479	ok	not ok [PCL #2475]	[at t/re/pat_rt_report.t line 963]	#1721
+re/pat_rt_report.t	2480	ok	not ok [PCL #2476]	[at t/re/pat_rt_report.t line 964]	#1721
+re/pat_rt_report.t	2481	ok	not ok [PCL #2477]	[at t/re/pat_rt_report.t line 965]	#1721
+re/pat_rt_report.t	2487	not ok	ok [PCL #2483]	[at t/re/pat_rt_report.t line 1008] # TODO [perl #38133]	#1721
 re/pat_rt_report.t	2490	ok	not ok [PCL #2486]	my $r1 = qr/\N{THAI CHARACTER SARA I}/; my $s1 = "\x{E34}\x{E34}\x{E34}\x{E34}; $s1 =~ /$r1+/	#1721
 re/pat_rt_report.t	2491	ok	not ok [PCL #2487]	my $r2 = qr'\N{THAI CHARACTER SARA I}'; my $s1 = "\x{E34}\x{E34}\x{E34}\x{E34}; $s1 =~ '$r2+'	#1721
 re/pat_rt_report.t	2492	ok	not ok [PCL #2488]	"${s1}A" =~ m/$s1\N{LATIN CAPITAL LETTER A}/	#1721
@@ -8963,142 +8963,142 @@ re/regexp_normal.t	1169	ok	not ok	#1169	NS:Regex code blocks: `(?{code})` and `(
 re/regexp_normal.t	1177	ok	not ok	#1177	NS:Regex code blocks: `(?{code})` and `(??{code})`
 re/regexp_normal.t	1178	ok	not ok	#1178	NS:Regex code blocks: `(?{code})` and `(??{code})`
 re/regexp_normal.t	1179	ok	not ok	#1179	NS:Regex code blocks: `(?{code})` and `(??{code})`
-re/regexp_normal.t	2030	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2031	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2032	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2033	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2034	ok	(missing)	[perl #132900] # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2035	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2036	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2037	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2038	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2039	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2040	ok	(missing)	skipped.  Test is only valid for EBCDIC platforms.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2041	ok	(missing)	This compiles but fails to match as \1 is not set when parsed # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2042	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2043	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2044	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2045	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2046	ok	(missing)	khw doesn't like leading underscores, but don't rmv them accidentally # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2047	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2048	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2049	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2050	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2051	ok	(missing)	[GH #18096] # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2052	ok	(missing)	[GH #18096] # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2053	ok	(missing)	[GH #18451] # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2054	ok	(missing)	0 or more # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2055	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2056	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2057	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2030	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2031	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2032	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2033	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2034	ok	(missing)	[perl #132900] # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2035	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2036	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2037	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2038	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2039	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2040	ok	(missing)	skipped.  Test is only valid for EBCDIC platforms.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2041	ok	(missing)	This compiles but fails to match as \1 is not set when parsed # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2042	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2043	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2044	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2045	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2046	ok	(missing)	khw doesn't like leading underscores, but don't rmv them accidentally # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2047	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2048	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2049	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2050	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2051	ok	(missing)	[GH #18096] # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2052	ok	(missing)	[GH #18096] # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2053	ok	(missing)	[GH #18451] # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2054	ok	(missing)	0 or more # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2055	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2056	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2057	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2058	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2059	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2060	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2061	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2059	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2060	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2061	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2062	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2063	ok	(missing)	Positive variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2064	ok	(missing)	Positive variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2065	ok	(missing)	Positive variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2066	ok	(missing)	Negative variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2067	ok	(missing)	Negative variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2068	ok	(missing)	Negative variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2069	ok	(missing)	Variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2070	ok	(missing)	Variable length lookbehind GH #19168 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2071	ok	(missing)	OPFAIL # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2072	ok	(missing)	OPFAIL # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2073	ok	(missing)	NOTHING # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2074	ok	(missing)	NOTHING # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2075	ok	(missing)	Lookahead with zero width negative lookbehind # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2076	ok	(missing)	Negative lookbehind with zero width assertion # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2077	ok	(missing)	Postive lookbehind with minmod (leftmost longest) # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2078	ok	(missing)	Positive lookbehind with min/max (leftmost longest) # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2079	ok	(missing)	Positive lookbehind with alternation (leftmost longest) # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2080	ok	(missing)	Nested lookbehind without early bailout # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2081	ok	(missing)	Nested lookbehind with early bailout # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2082	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2083	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2084	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2085	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2086	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2087	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2088	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2089	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2090	ok	(missing)	ACCEPT with SUSPEND in pattern # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2091	ok	(missing)	ACCEPT with SUSPEND in pattern # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2092	ok	(missing)	ACCEPT with IFMATCH in pattern # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2093	ok	(missing)	ACCEPT with IFMATCH in pattern # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2094	ok	(missing)	ACCEPT with UNLESSM in pattern # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2095	ok	(missing)	ACCEPT with UNLESSM in pattern # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2096	ok	(missing)	ACCEPT in GOSUB # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2097	ok	(missing)	(not) ACCEPT in GOSUB # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2098	ok	(missing)	(not) ACCEPT in GOSUB # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2099	ok	(missing)	ACCEPT in IFMATCH var pos lookbehind # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2100	ok	(missing)	ACCEPT in IFMATCH var pos lookbehind # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2101	ok	(missing)	(not) ACCEPT in IFMATCH var pos lb # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2102	ok	(missing)	ACCEPT in UNLESSM var neg lookbehind # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2103	ok	(missing)	ACCEPT in UNLESSM var neg lookbehind # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2104	ok	(missing)	(not) ACCEPT in UNLESSM var neg lb # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2105	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2106	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2107	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2108	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2109	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2110	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2111	ok	(missing)	ACCEPT optimizer check # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2063	ok	(missing)	Positive variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2064	ok	(missing)	Positive variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2065	ok	(missing)	Positive variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2066	ok	(missing)	Negative variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2067	ok	(missing)	Negative variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2068	ok	(missing)	Negative variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2069	ok	(missing)	Variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2070	ok	(missing)	Variable length lookbehind GH #19168 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2071	ok	(missing)	OPFAIL # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2072	ok	(missing)	OPFAIL # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2073	ok	(missing)	NOTHING # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2074	ok	(missing)	NOTHING # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2075	ok	(missing)	Lookahead with zero width negative lookbehind # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2076	ok	(missing)	Negative lookbehind with zero width assertion # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2077	ok	(missing)	Postive lookbehind with minmod (leftmost longest) # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2078	ok	(missing)	Positive lookbehind with min/max (leftmost longest) # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2079	ok	(missing)	Positive lookbehind with alternation (leftmost longest) # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2080	ok	(missing)	Nested lookbehind without early bailout # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2081	ok	(missing)	Nested lookbehind with early bailout # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2082	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2083	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2084	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2085	ok	(missing)	ACCEPT with CurlyM optimization GH #19484 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2086	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2087	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2088	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2089	ok	(missing)	ACCEPT without CurlyM optimization # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2090	ok	(missing)	ACCEPT with SUSPEND in pattern # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2091	ok	(missing)	ACCEPT with SUSPEND in pattern # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2092	ok	(missing)	ACCEPT with IFMATCH in pattern # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2093	ok	(missing)	ACCEPT with IFMATCH in pattern # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2094	ok	(missing)	ACCEPT with UNLESSM in pattern # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2095	ok	(missing)	ACCEPT with UNLESSM in pattern # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2096	ok	(missing)	ACCEPT in GOSUB # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2097	ok	(missing)	(not) ACCEPT in GOSUB # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2098	ok	(missing)	(not) ACCEPT in GOSUB # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2099	ok	(missing)	ACCEPT in IFMATCH var pos lookbehind # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2100	ok	(missing)	ACCEPT in IFMATCH var pos lookbehind # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2101	ok	(missing)	(not) ACCEPT in IFMATCH var pos lb # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2102	ok	(missing)	ACCEPT in UNLESSM var neg lookbehind # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2103	ok	(missing)	ACCEPT in UNLESSM var neg lookbehind # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2104	ok	(missing)	(not) ACCEPT in UNLESSM var neg lb # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2105	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2106	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2107	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2108	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2109	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2110	ok	(missing)	Test minlen for ACCEPT # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2111	ok	(missing)	ACCEPT optimizer check # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2112	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2113	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2114	ok	(missing)	Bug is GH #8369; test is GH #19781 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2115	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2116	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2117	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2118	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2119	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2120	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2121	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2122	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2123	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2124	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2125	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2126	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2127	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2128	ok	(missing)	GH 20653 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2113	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2114	ok	(missing)	Bug is GH #8369; test is GH #19781 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2115	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2116	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2117	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2118	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2119	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2120	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2121	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2122	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2123	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2124	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2125	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2126	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2127	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2128	ok	(missing)	GH 20653 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2129	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2130	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2131	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2132	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2133	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2134	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2135	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2136	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2137	ok	(missing)	GH 20912 # skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2130	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2131	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2132	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2133	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2134	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2135	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2136	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2137	ok	(missing)	GH 20912 # skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2138	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2139	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2140	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2141	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2142	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2143	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2139	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2140	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2141	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2142	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2143	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2144	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2145	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2146	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2147	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2148	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2149	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2150	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2151	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2152	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2153	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2154	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2155	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2156	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2157	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2158	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2145	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2146	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2147	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2148	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2149	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2150	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2151	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2152	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2153	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2154	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2155	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2156	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2157	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2158	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2159	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2160	ok	(missing)	GH 22094 - a character class optimized to OPFAIL shouldn't panic when quantified	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2161	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2162	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2163	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2164	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
-re/regexp_normal.t	2165	ok	(missing)	skipped.  Test not valid for /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2161	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2162	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2163	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2164	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
+re/regexp_normal.t	2165	ok	(missing)	skipped.  Test not valid for t/re/regexp_normal.t	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2166	ok	(missing)	(blank line)	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2167	ok	(missing)	Keep these lines at the end of the file	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regexp_normal.t	2168	ok	(missing)	pat string y/n/etc expr expected-expr skip-reason comment	NS:Code points above U+10FFFF (perl's extended UTF-8)
@@ -10260,19 +10260,19 @@ re/subst.t	11	ok	not ok	s///r !~ operator gives error	#1719
 re/subst.t	12	ok	not ok	s///r with undef input	#1719
 re/subst.t	13	ok	not ok	s///r Uninitialized warning	#1719
 re/subst.t	14	ok	not ok	s///r void context warning	#1719
-re/subst.t	29	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 119]	NS:Error message text and format
-re/subst.t	76	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 286]	NS:Error message text and format
-re/subst.t	77	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 290]	NS:Error message text and format
-re/subst.t	92	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 385]	NS:Error message text and format
-re/subst.t	96	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 402]	NS:Error message text and format
-re/subst.t	97	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 407]	NS:Error message text and format
-re/subst.t	98	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 412]	NS:Error message text and format
-re/subst.t	99	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 417]	NS:Error message text and format
-re/subst.t	100	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 421]	NS:Error message text and format
-re/subst.t	101	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 425]	NS:Error message text and format
-re/subst.t	102	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 429]	NS:Error message text and format
-re/subst.t	103	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 433]	NS:Error message text and format
-re/subst.t	105	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 440]	NS:Error message text and format
+re/subst.t	29	ok	not ok	[at t/re/subst.t line 119]	NS:Error message text and format
+re/subst.t	76	ok	not ok	[at t/re/subst.t line 286]	NS:Error message text and format
+re/subst.t	77	ok	not ok	[at t/re/subst.t line 290]	NS:Error message text and format
+re/subst.t	92	ok	not ok	[at t/re/subst.t line 385]	NS:Error message text and format
+re/subst.t	96	ok	not ok	[at t/re/subst.t line 402]	NS:Error message text and format
+re/subst.t	97	ok	not ok	[at t/re/subst.t line 407]	NS:Error message text and format
+re/subst.t	98	ok	not ok	[at t/re/subst.t line 412]	NS:Error message text and format
+re/subst.t	99	ok	not ok	[at t/re/subst.t line 417]	NS:Error message text and format
+re/subst.t	100	ok	not ok	[at t/re/subst.t line 421]	NS:Error message text and format
+re/subst.t	101	ok	not ok	[at t/re/subst.t line 425]	NS:Error message text and format
+re/subst.t	102	ok	not ok	[at t/re/subst.t line 429]	NS:Error message text and format
+re/subst.t	103	ok	not ok	[at t/re/subst.t line 433]	NS:Error message text and format
+re/subst.t	105	ok	not ok	[at t/re/subst.t line 440]	NS:Error message text and format
 re/subst.t	149	ok	not ok	\#20684 s/// with (??{..}) inside	#1719
 re/subst.t	153	ok	not ok	[perl \#34171]	#1719
 re/subst.t	159	ok	not ok	RT\#52104: 65	#1719
@@ -10320,7 +10320,7 @@ re/subst.t	228	ok	not ok [PCL #223]	s/pat/$alias_to_match_var/	#1719
 re/subst.t	229	ok	not ok [PCL #224]	s/pat/foo$alias_to_match_var/	#1719
 re/subst.t	230	ok	not ok [PCL #225]	last-used pattern disables constant repl optimisation	#1719
 re/subst.t	234	ok	(missing)	locking target in $hash{key} =~ s//.../e	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
-re/subst.t	235	ok	(missing)	err msg: Modification of a read-only value attempted at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst.t line 993.	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
+re/subst.t	235	ok	(missing)	err msg: Modification of a read-only value attempted at t/re/subst.t line 993.	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
 re/subst.t	236	ok	not ok [PCL #229]	vivifying stash elem in $that::{elem} =~ s//.../e	#1719
 re/subst.t	237	ok	not ok [PCL #230]	read-only COW =~ s/does not match// should croak	#1719
 re/subst.t	239	ok	not ok [PCL #232]	\b matches Latin1 before string, mid, and end, /a	#1719
@@ -10330,18 +10330,18 @@ re/subst.t	270	ok	not ok [PCL #263]	\#RT 126260 gofs	#1719
 re/subst.t	272	ok	not ok [PCL #265]	RT \#23624	#1719
 re/subst.t	280	ok	(missing)	Issue \#20690 - s/b{0}//gr on non-utf8 string should not remove anything	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
 re/subst.t	281	ok	(missing)	Issue \#20690 - s/b{0}//gr on utf8 string should not remove anything	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
-re/subst_amp.t	2	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 22]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	3	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 28]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	4	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 34]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	5	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 40]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	6	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 46]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	7	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 52]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	8	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 58]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	9	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 64]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	10	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 73]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	11	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 79]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	12	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 85]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
-re/subst_amp.t	13	ok	not ok	[at /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/re/subst_amp.t line 91]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	2	ok	not ok	[at t/re/subst_amp.t line 22]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	3	ok	not ok	[at t/re/subst_amp.t line 28]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	4	ok	not ok	[at t/re/subst_amp.t line 34]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	5	ok	not ok	[at t/re/subst_amp.t line 40]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	6	ok	not ok	[at t/re/subst_amp.t line 46]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	7	ok	not ok	[at t/re/subst_amp.t line 52]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	8	ok	not ok	[at t/re/subst_amp.t line 58]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	9	ok	not ok	[at t/re/subst_amp.t line 64]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	10	ok	not ok	[at t/re/subst_amp.t line 73]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	11	ok	not ok	[at t/re/subst_amp.t line 79]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	12	ok	not ok	[at t/re/subst_amp.t line 85]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
+re/subst_amp.t	13	ok	not ok	[at t/re/subst_amp.t line 91]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
 re/subst_wamp.t	0	ok*	(no TAP)	*summary*	#1664 (the typeglob model: perl's constant.pm sets $constant::{_CAN_PCS} to a SCALAR REF, i.e. a constant sub; under `do FILE` that abort costs the WHOLE file, there is no per-form recovery)
 run/cloexec.t	0	(none)	extra [PCL #18]	*extra* child return code=0 (zero means inherited fd=5 ok)	#1707
 run/cloexec.t	0	(none)	extra [PCL #15]	*extra* child stdout: fd	#1707
