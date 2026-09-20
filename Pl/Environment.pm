@@ -426,6 +426,27 @@ has overridden_builtins => (
     default => sub { {} },
 );
 
+=head2 global_builtin_overrides
+
+Core builtins displaced for EVERY package by a compile-time assignment to
+C<*CORE::GLOBAL::NAME> (task #1870).  Keys are the bare builtin name, values
+the C<[line, column]> of the earliest assignment — the same position rule the
+package-scoped registry uses, because perl decides both at each use site's
+parse.
+
+    global_builtin_overrides => { time => [22, 9] }
+
+The sub lives in the C<CORE::GLOBAL> package, so the call must be emitted
+QUALIFIED there; a package-scoped override of the same name wins over it
+(perl looks in the current package first — probed 5.40.3).
+
+=cut
+
+has global_builtin_overrides => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 =head2 isa_declarations
 
 Hash of @ISA declarations per package.
@@ -1153,14 +1174,53 @@ sub add_builtin_override {
     $self->overridden_builtins->{$key} = $at;
 }
 
-sub builtin_is_overridden {
-    my ($self, $pkg, $name, $line, $col) = @_;
-    return 0 if !defined $pkg || !defined $name;
-    my $at = $self->overridden_builtins->{"${pkg}::${name}"} or return 0;
+sub _override_in_force {
+    my ($at, $line, $col) = @_;
+    return 0 if !$at;
     return 1 if !defined $line;
     return 0 if $line < $at->[0];
     return 0 if $line == $at->[0] && defined $col && $col < $at->[1];
     return 1;
+}
+
+=head2 add_global_builtin_override($name, $line, $col) / builtin_override_target($pkg, $name, $line, $col)
+
+C<add_global_builtin_override> records a C<*CORE::GLOBAL::NAME> assignment.
+
+C<builtin_override_target> is the ONE reading of both registries: it answers
+the PACKAGE whose sub a use site of builtin C<$name> in C<$pkg> must call, or
+undef for the builtin itself.  C<$pkg> when the package predeclared/imported
+the name, C<'CORE::GLOBAL'> when only the global assignment is in force.
+C<builtin_is_overridden> is the boolean half, kept so callers that only need
+"is it displaced here" do not re-derive the answer.
+
+=cut
+
+sub add_global_builtin_override {
+    my ($self, $name, $line, $col) = @_;
+    my $at  = [ $line // 0, $col // 0 ];
+    my $old = $self->global_builtin_overrides->{$name};
+    return if $old && ($old->[0] < $at->[0]
+                       || ($old->[0] == $at->[0] && $old->[1] <= $at->[1]));
+    $self->global_builtin_overrides->{$name} = $at;
+}
+
+sub builtin_override_target {
+    my ($self, $pkg, $name, $line, $col) = @_;
+    return undef if !defined $name;
+    return $pkg
+      if defined $pkg
+         && _override_in_force($self->overridden_builtins->{"${pkg}::${name}"},
+                               $line, $col);
+    return 'CORE::GLOBAL'
+      if _override_in_force($self->global_builtin_overrides->{$name}, $line, $col);
+    return undef;
+}
+
+sub builtin_is_overridden {
+    my ($self, $pkg, $name, $line, $col) = @_;
+    return 0 if !defined $pkg || !defined $name;
+    return defined $self->builtin_override_target($pkg, $name, $line, $col) ? 1 : 0;
 }
 
 =head2 builtin_is_overridable($name)

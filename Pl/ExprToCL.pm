@@ -2269,6 +2269,9 @@ sub gen_funcall_form {
   # the CORE::-qualified spelling names the builtin UNCONDITIONALLY — PExpr's
   # normalize pre-pass strips the prefix but leaves the _core_qualified
   # marker on the token for exactly this lookup.
+  # A `*CORE::GLOBAL::NAME` override lives in ANOTHER package, so the call is
+  # emitted QUALIFIED there; a package-scoped one keeps the force_user path.
+  my $override_pkg;
   if (!$force_user && exists $RUNTIME_NAMES{$func_name}
       && $self->environment
       && $self->environment->can('builtin_is_overridable')
@@ -2277,9 +2280,12 @@ sub gen_funcall_form {
     unless (ref($fn) && $fn->{_core_qualified}) {
       my $at  = (ref($fn) && $fn->can('location')) ? ($fn->location || undef) : undef;
       my $pkg = $self->environment->current_package // 'main';
-      $force_user = 1
-        if $self->environment->builtin_is_overridden($pkg, $func_name,
-                                                     $at ? @$at[0,1] : ());
+      my $target = $self->environment->builtin_override_target($pkg, $func_name,
+                                                               $at ? @$at[0,1] : ());
+      if (defined $target) {
+        $force_user   = 1;
+        $override_pkg = $target if $target ne $pkg;
+      }
     }
   }
 
@@ -2288,7 +2294,9 @@ sub gen_funcall_form {
   # #2100's declared-sub rule must not catch a shim's own `CORE::` delegation.
   my $head_node      = $self->expr_o->get_a_node($kids->[0]);
   my $core_qualified = (ref($head_node) && $head_node->{_core_qualified}) ? 1 : 0;
-  my $cl_func = $self->cl_name($func_name, 1, $force_user, $core_qualified);
+  my $cl_func = defined $override_pkg
+                  ? $self->cl_name("${override_pkg}::${func_name}", 1, 1, $core_qualified)
+                  : $self->cl_name($func_name, 1, $force_user, $core_qualified);
 
   # `readpipe EXPR` — the NAMED spelling of `` `CMD` ``/`qx`/`` <<`TAG` ``, and
   # the SAME runtime function they lower to (task #734): one command capture,
@@ -2305,12 +2313,15 @@ sub gen_funcall_form {
     my $pkg  = $self->environment ? ($self->environment->current_package // 'main') : 'main';
     # CORE::readpipe (the _core_qualified marker, #732) is the builtin even
     # inside a `use subs "readpipe"` package.
-    $cl_func = 'p-backtick'
-      unless !(ref($fn) && $fn->{_core_qualified})
-             && $self->environment
-             && $self->environment->can('builtin_is_overridden')
-             && $self->environment->builtin_is_overridden($pkg, 'readpipe',
-                                                          $at ? @$at[0,1] : ());
+    my $target = (!(ref($fn) && $fn->{_core_qualified})
+                  && $self->environment
+                  && $self->environment->can('builtin_override_target'))
+                 ? $self->environment->builtin_override_target($pkg, 'readpipe',
+                                                               $at ? @$at[0,1] : ())
+                 : undef;
+    $cl_func = !defined $target      ? 'p-backtick'
+             : $target eq $pkg       ? $cl_func
+             : $self->cl_name("${target}::readpipe", 1, 1);
   }
 
   # ---- converted special branches (same order as the text emitter; a

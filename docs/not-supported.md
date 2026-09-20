@@ -3621,3 +3621,40 @@ of `@a` inside the scope re-vivifies the slot in perl and not here — so
 above. Nothing in the shipped shape blocks it: the table becomes dead code.
 `docs/ir-spec.md` §7.2 carries the normative statement; the guard rows are
 `Pl/t/glob-undef-01.t` 6–9 and 11 (`local`).
+
+## Time::HiRes: the signal-driven timers (`ualarm`, `setitimer`, `getitimer`)
+
+`lib/Time/HiRes.pm` (task #1992, s492c) is plain Perl over four runtime
+primitives — a clock with sub-second resolution and a fractional sleep — and
+covers `time`, `sleep`, `usleep`, `nanosleep`, `gettimeofday`, `tv_interval`,
+`clock_gettime`, `clock_getres`, `stat` and `utime`.
+
+**Absent, and loud about it** (`Undefined subroutine &Time::HiRes::ualarm`):
+`ualarm`, `setitimer`, `getitimer`, `clock_nanosleep`, `clock()`.  All five are
+*interval-timer* machinery: they need `setitimer(2)` plus a per-signal handler
+table, and PCL installs a Unix handler for `SIGALRM` only (`%SIG` handlers for
+the other signals are a separate gap, task #2094).  A program that wants a
+sub-second timeout can use `alarm` with a whole second, or poll
+`Time::HiRes::time()`.
+
+**The clock ids are PCL's own consistent pair**: `CLOCK_REALTIME` 0 (the wall
+clock) and `CLOCK_MONOTONIC` 1.  Those are Linux's numbers; PCL never hands
+them to the OS, so the pair means the same thing on every host, but a program
+that compares `CLOCK_MONOTONIC` against a number it got from elsewhere on
+macOS (where the system value is 6) will disagree.  Any other id DIES naming
+itself (CLAUDE.md rule 12) rather than answering a wrong time.
+
+## Builtin override: only the COMPILE-TIME spellings perl can be shown
+
+A core builtin is displaced by a sub that reached the package at compile time
+(tasks #1870/#1992): `use subs`, an import list (`use Time::HiRes qw(time)`),
+`BEGIN { *CORE::GLOBAL::NAME = sub {…} }` and `BEGIN { *Other::NAME = sub {…} }`
+all work.
+
+**What does not**: an import whose NAMES are not in the source — the
+`BEGIN { Some::Module->import }` spelling, where the module's `import` installs
+globs at run time.  PCL decides the override at compile time from the `use`
+statement's own import list, which that spelling does not have, so the call
+stays the builtin (task #2053).  The `CORE::GLOBAL::` overrides of `require`,
+`do` and `readline` are separate emission sites and are not routed yet
+(task #2054).

@@ -19837,11 +19837,48 @@ buffer's fill-pointer; everything else falls back to file-length."
          (csys 0.0d0))
     (vector (make-p-box user) (make-p-box sys) (make-p-box cuser) (make-p-box csys))))
 
+;;; ── Sleeping, and what ends a sleep (task #2002) ─────────────────────────
+;;; perl's `sleep` RETURNS EARLY when a signal handler ran during it, with the
+;;; seconds actually slept — that is how `while (!$done) { sleep 60 }` sees a
+;;; TERM/CHLD flag at once instead of up to a minute later.  SBCL's `sleep`
+;;; resumes after an interrupt, so the early return has to be a non-local exit
+;;; FROM the handler: a sleeping thread publishes a catch tag here, and the
+;;; signal trampoline throws to it after the Perl handler returns.  Nothing is
+;;; polled and a program that never sleeps pays nothing.
+(defvar *p-sleep-wakeup* nil
+  "Catch tag of the innermost sleep in this thread, or NIL when none is running.")
+
+(defun %p-monotonic-seconds ()
+  "Seconds from an arbitrary fixed point, as a double.  Monotonic and portable
+   (CL's own internal real time — no platform clock id)."
+  (/ (coerce (get-internal-real-time) 'double-float)
+     (coerce internal-time-units-per-second 'double-float)))
+
+(defun %p-epoch-seconds ()
+  "Unix epoch seconds as a DOUBLE, with sub-second precision.
+   sb-ext:get-time-of-day is SBCL's portable gettimeofday — Linux and macOS
+   both answer it; no sb-unix/sb-posix symbol is named here."
+  (multiple-value-bind (sec usec) (sb-ext:get-time-of-day)
+    (+ (coerce sec 'double-float)
+       (/ (coerce usec 'double-float) 1000000.0d0))))
+
+(defun %p-sleep-seconds (secs)
+  "Sleep SECS (a non-negative real) and answer the seconds ACTUALLY slept.
+   A Perl signal handler that runs during the sleep ends it (task #2002)."
+  (let ((start (%p-monotonic-seconds)))
+    (when (> secs 0)
+      (catch '%p-sleep-interrupted
+        (let ((*p-sleep-wakeup* '%p-sleep-interrupted))
+          (sleep secs))))
+    (max 0.0d0 (- (%p-monotonic-seconds) start))))
+
 (defun p-sleep (secs)
-  "Perl sleep - pause execution for specified seconds. Returns seconds slept."
-  (let ((n (truncate (to-number secs))))
-    (sleep n)
-    n))
+  "Perl sleep - pause execution for specified seconds. Returns seconds slept.
+   perl TRUNCATES the argument (`sleep 0.25` sleeps 0); the fractional sleep is
+   Time::HiRes's, reached through builtin::hires_sleep."
+  (let* ((n (truncate (to-number secs)))
+         (slept (%p-sleep-seconds n)))
+    (if (< slept n) (values (floor slept)) n)))
 
 (defvar *p-alarm-handler-installed* nil
   "Whether the SIGALRM Unix handler has been installed yet (lazy, on first alarm).")
@@ -19859,7 +19896,11 @@ buffer's fill-pointer; everything else falls back to file-length."
          (when (and handler (functionp (unbox handler)))
            ;; Perl passes the signal name as $_[0]; the handler may die, which
            ;; unwinds out of any blocking syscall (read) interrupted by the signal.
-           (funcall (unbox handler) (make-p-box "ALRM"))))))))
+           (funcall (unbox handler) (make-p-box "ALRM"))
+           ;; A handler that RETURNS still ends a sleep, with the seconds
+           ;; slept so far (task #2002).
+           (when *p-sleep-wakeup*
+             (throw *p-sleep-wakeup* nil))))))))
 
 (defun p-alarm (&optional secs)
   "Perl alarm - schedule SIGALRM after SECS seconds (0 cancels a pending alarm).
@@ -20582,7 +20623,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1740"
+(defparameter *pcl-cache-generation* "v2-1780"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -25511,6 +25552,27 @@ buffer's fill-pointer; everything else falls back to file-length."
   "builtin::trim — strip leading/trailing ASCII whitespace."
   (string-trim '(#\Space #\Tab #\Newline #\Return #\Page) (to-string s)))
 
+;;; The CLOCK IDS are PCL's own pair, defined by `lib/Time/HiRes.pm` and read
+;;; only here: 0 = wall clock (the epoch), 1 = monotonic.  They are Linux's
+;;; numbers, which is what a program that prints CLOCK_MONOTONIC sees on this
+;;; platform; PCL never passes them to the OS, so the PAIR is what matters and
+;;; it is the same on every host.  A clock id PCL does not implement DIES
+;;; naming it (rule 12) — a wrong time is not a plausible answer to fall back
+;;; on.
+(defun %p-clock-seconds (id)
+  "builtin::hires_clock — seconds on clock ID, as a double."
+  (case id
+    (0 (%p-epoch-seconds))
+    (1 (%p-monotonic-seconds))
+    (t (p-die (format nil "clock_gettime: unimplemented clock id ~A" id)))))
+
+(defun %p-clock-resolution (id)
+  "builtin::hires_clock_res — the smallest step clock ID can report, in seconds."
+  (case id
+    (0 1.0d-6)                          ; gettimeofday is microseconds
+    (1 (/ 1.0d0 (coerce internal-time-units-per-second 'double-float)))
+    (t (p-die (format nil "clock_getres: unimplemented clock id ~A" id)))))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (unless (find-package "BUILTIN")
     (make-package "BUILTIN" :use '(:cl :pcl))))
@@ -25548,7 +25610,16 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; been stringified in place may read as a string; acceptable for the inlining
     ;; decisions these drive, e.g. Sub::Quote::quotify.)
     (def "CREATED_AS_NUMBER" (lambda (x) (make-p-box (if (numberp (unbox x)) 1 ""))))
-    (def "CREATED_AS_STRING" (lambda (x) (make-p-box (if (stringp (unbox x)) 1 ""))))))
+    (def "CREATED_AS_STRING" (lambda (x) (make-p-box (if (stringp (unbox x)) 1 ""))))
+    ;; Sub-second CLOCKS.  Plain Perl can express every one of Time::HiRes's
+    ;; functions over these four (`lib/Time/HiRes.pm` does), so the shim owns
+    ;; the module and the runtime owns only what no Perl can say: a clock with
+    ;; sub-second resolution and a sleep that takes a fraction.  The names are
+    ;; PCL's own in this namespace, exactly as is_dual / is_vstring are.
+    (def "HIRES_TIME"  (lambda () (%p-epoch-seconds)))
+    (def "HIRES_SLEEP" (lambda (s) (%p-sleep-seconds (max 0 (to-number s)))))
+    (def "HIRES_CLOCK" (lambda (id) (%p-clock-seconds (to-number id))))
+    (def "HIRES_CLOCK_RES" (lambda (id) (%p-clock-resolution (to-number id))))))
 
 ;;; `use builtin LIST` — THE ONE PRAGMA IN THAT FAMILY THAT IMPORTS (#1999
 ;;; residue).  perl aliases each named builtin into the CALLING package, so an

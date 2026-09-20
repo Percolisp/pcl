@@ -6920,12 +6920,14 @@ sub _make_command_node {
           ? ($self->environment->current_package // 'main') : 'main';
   my $at  = ($origin && ref($origin) && $origin->can('location'))
           ? ($origin->location || undef) : undef;
-  if ($self->has_environment
-      && $self->environment->builtin_is_overridden($pkg, 'readpipe',
-                                                   $at ? @$at[0,1] : ())) {
+  my $ovr_pkg = $self->has_environment
+              ? $self->environment->builtin_override_target($pkg, 'readpipe',
+                                                            $at ? @$at[0,1] : ())
+              : undef;
+  if (defined $ovr_pkg) {
     my ($cnode, $call_id) = $self->make_node_insert('funcall');
     $self->add_child_to_node($call_id,
-      $self->make_node(PPI::Token::Word->new("${pkg}::readpipe")));
+      $self->make_node(PPI::Token::Word->new("${ovr_pkg}::readpipe")));
     $self->add_child_to_node($call_id, $cmd_id);
     say "parse(): Made overridden readpipe call $call_id" if 1 & DEBUG;
     return $call_id;

@@ -56,8 +56,17 @@ This split already exists in practice — it just isn't named:
    (`List::Util`/`Scalar::Util` are XS on CPAN but have pure-Perl forms, so they
    live in `lib/`.)
 2. **Is it XS with no pure-Perl form, or does it need to reach the host** (TAP +
-   `$?` + exit for testing, raw memory for `pack`, the SBCL clock for
-   `Time::HiRes`)? → `cl/modules/NAME.lisp`, hand-written CL.
+   `$?` + exit for testing, raw memory for `pack`)? → `cl/modules/NAME.lisp`,
+   hand-written CL.
+
+   **CORRECTION (s492c, 2026-09-21): `cl/modules/` was never created and
+   `Time::HiRes` is NOT in it.** "Needs the host" is almost never the whole
+   module: the heuristic's own example turned out to be one clock and one
+   sleep. `Time::HiRes` now ships as `lib/Time/HiRes.pm` — plain Perl (home #1)
+   over four primitives on the blessed `builtin::` shim-dispatch seam
+   (`hires_time`, `hires_sleep`, `hires_clock`, `hires_clock_res`; task
+   #1992).  **That is the pattern to copy**: split the module into the part no
+   Perl can say — which is small — and write the rest as a shim.
 3. **Is it XS and out of scope?** → no implementation; a registry `:xs` entry so
    `use` fails cleanly (see §3).
 
@@ -105,7 +114,7 @@ Collapse all three into a single table that `p-use` consults first:
     ("List::Util"        :perl)          ; lib/List/Util.pm
     ("Scalar::Util"      :perl)          ; lib/Scalar/Util.pm
     ("Storable"          :cl   "storable")
-    ("Time::HiRes"       :cl   "time-hires")
+    ("Time::HiRes"       :perl)          ; lib/Time/HiRes.pm since s492c
     ("Socket"            :xs)))           ; out of scope → clean error
 ```
 

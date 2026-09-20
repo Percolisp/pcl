@@ -957,19 +957,112 @@ sub _package_of_element {
 # Records the SOURCE POSITION too, because perl decides this at each use site's
 # parse: a backtick BEFORE the `use subs` is still the builtin.  See
 # Pl::Environment::builtin_is_overridden.
-sub _premerge_use_subs {
+# The LANGUAGE pragmas: `use` statements that configure the compiler and
+# install no subs in the using package.  ONE reading — the prototype pre-merge
+# never reads their files (v1's use-branch short-circuits before its extraction
+# call) and the builtin-override recorder never reads their argument list as a
+# list of imported names (`use feature qw(fc)` imports nothing, and `fc` is an
+# overridable keyword).  A module NOT listed here may install subs, which is
+# why `autodie` and `constant` are absent: perl lets both displace a builtin.
+our $PRAGMA_INCLUDES = qr/^(?:overload|base|parent|lib|strict|warnings|warnings::register|
+                             feature|utf8|open|bytes|locale|integer|builtin|overloading|
+                             XSLoader|DynaLoader|re)$/x;
+
+sub _premerge_builtin_overrides {
   my ($self, $doc) = @_;
-  my $fp = $self->fallback_parser;
+  $self->_record_use_overrides($doc);
+  $self->_record_glob_overrides($doc);
+}
+
+# `use subs LIST` and `use Module LIST`: both PREDECLARE names in the package
+# the statement appears in.  perl's own rule is ONE rule — a weak keyword is
+# displaced by a sub that was IMPORTED into the package (the glob's
+# IMPORTED_CV flag) or predeclared with `use subs` — so both spellings feed
+# the SAME registry (task #1870/#1992).  `use Time::HiRes qw(time sleep)` is
+# the everyday case; the import list is the only static evidence of what the
+# module installs, and a name it does not export dies at the import anyway.
+sub _record_use_overrides {
+  my ($self, $doc) = @_;
+  my $fp  = $self->fallback_parser;
+  my $env = $self->environment;
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
-    next unless ($inc->type // '') eq 'use' && ($inc->module // '') eq 'subs';
+    next if ($inc->type // '') ne 'use';
+    my $mod = $inc->module // '';
+    next if $mod eq '';
     my $pkg = _package_of_element($inc);
     my $loc = $inc->location || [0, 0];
-    # bare_quote: every argument of `use subs` IS a name, so the
-    # unparenthesised `use subs "readpipe";` spelling counts here — which it
-    # must not for a general module (see _parse_use_import_list's note).
-    $self->environment->add_builtin_override($pkg, $_, $loc->[0], $loc->[1])
-      for $fp->_parse_use_import_list($inc, bare_quote => 1);
+    if ($mod eq 'subs') {
+      # bare_quote: every argument of `use subs` IS a name, so the
+      # unparenthesised `use subs "readpipe";` spelling counts here — which it
+      # must not for a general module (see _parse_use_import_list's note).
+      $env->add_builtin_override($pkg, $_, $loc->[0], $loc->[1])
+        for $fp->_parse_use_import_list($inc, bare_quote => 1);
+      next;
+    }
+    next if $mod =~ $PRAGMA_INCLUDES;
+    # A fat comma in the argument list means the arguments are a KEY => VALUE
+    # CONFIGURATION, not a list of names to import, so nothing there names an
+    # imported sub.
+    next if grep { $_->isa('PPI::Token::Operator') && $_->content eq '=>' }
+                 @{ $inc->find('PPI::Token::Operator') || [] };
+    # A general module's import list: only the names perl would let displace a
+    # builtin at all (Environment::builtin_is_overridable, Perl_keyword()'s
+    # weak half) are recorded, so `use POSIX qw(floor)` and `use Fcntl qw(:flock)`
+    # leave the registry untouched.
+    for my $name ($fp->_parse_use_import_list($inc)) {
+      next if $name !~ /\A\w+\z/;
+      next if !$env->builtin_is_overridable($name);
+      $env->add_builtin_override($pkg, $name, $loc->[0], $loc->[1]);
+    }
   }
+}
+
+# A COMPILE-TIME glob assignment `*PKG::NAME = <a sub>` displaces the builtin
+# NAME — for PKG, or for EVERY package when PKG is `CORE::GLOBAL` (perlsub,
+# "Overriding Built-in Functions"; task #1870).  Three conditions, each probed
+# against 5.40.3 (scratch probes ovr-perlrule.pl):
+#   * it must run at COMPILE time — a run-time `*P::umask = sub {…}` does NOT
+#     displace the builtin (probe row 4);
+#   * the CV must come from another package — `package P; BEGIN { *P::getppid
+#     = sub {…} }` keeps the builtin (row 2), which is perl's IMPORTED_CV rule
+#     and the same reason a plain `sub readpipe {…}` does not override;
+#   * `CORE::GLOBAL` is exempt from that second condition: it displaces the
+#     keyword globally and its sub is called QUALIFIED there.
+sub _record_glob_overrides {
+  my ($self, $doc) = @_;
+  my $env = $self->environment;
+  for my $sym (@{ $doc->find('PPI::Token::Symbol') || [] }) {
+    my $content = $sym->content;
+    next if $content !~ /\A\*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)::(\w+)\z/;
+    my ($target, $name) = ($1, $2);
+    next if !$env->builtin_is_overridable($name);
+    next if !_is_assigned_glob($sym);
+    next if !_inside_begin_block($sym);
+    my $loc = $sym->location || [0, 0];
+    if ($target eq 'CORE::GLOBAL') {
+      $env->add_global_builtin_override($name, $loc->[0], $loc->[1]);
+      next;
+    }
+    next if _package_of_element($sym) eq $target;
+    $env->add_builtin_override($target, $name, $loc->[0], $loc->[1]);
+  }
+}
+
+# `*X = …` — the glob must be the assignment's TARGET; `my $r = \*X::name` and
+# `local *X::name` (without a value) install nothing.
+sub _is_assigned_glob {
+  my ($sym) = @_;
+  my $next = $sym->snext_sibling or return 0;
+  return $next->isa('PPI::Token::Operator') && $next->content eq '=';
+}
+
+sub _inside_begin_block {
+  my ($el) = @_;
+  for (my $n = $el; $n; $n = $n->parent) {
+    return 1
+      if $n->isa('PPI::Statement::Scheduled') && ($n->type // '') eq 'BEGIN';
+  }
+  return 0;
 }
 
 sub _premerge_include_prototypes {
@@ -989,9 +1082,7 @@ sub _premerge_include_prototypes {
   # the pragma list / lib).  `use feature` in particular reaches PPI shapes
   # the module transpiler warns about ("Handle single node of unknown
   # type") — and pl2cl's stderr must stay clean: test harnesses capture it.
-  my $skip = qr/^(?:overload|base|parent|lib|strict|warnings|warnings::register|
-                   feature|utf8|open|bytes|locale|integer|builtin|overloading|
-                   XSLoader|DynaLoader|re)$/x;
+  my $skip = $PRAGMA_INCLUDES;
   # `use lib "dir"` paths must reach the TRANSPILE-TIME search list before
   # the extraction loop below, or a module the file itself puts on @INC is
   # never found and its prototypes (block-form `(&@)` etc.) are silently
@@ -1322,7 +1413,7 @@ sub parse {
   # include statement processes made `sub f { `cmd` }` in an overriding
   # package silently run the shell while the same backtick at the package's
   # top level called the sub (task #703, probed).
-  $self->_premerge_use_subs($doc);
+  $self->_premerge_builtin_overrides($doc);
 
   # `use open`'s LAYERS, as source-location spans, for the same reason and by
   # the same clock (task #1222): the pragma is LEXICAL and a named sub's body
