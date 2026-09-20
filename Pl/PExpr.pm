@@ -5491,6 +5491,19 @@ sub child_context {
       }
     }
 
+    # The BOUND OPERAND of `=~` / `!~` is always evaluated in SCALAR context,
+    # whatever context the match itself is in (perlop; task #2102).  Without
+    # this a context-sensitive left operand — backticks, `<$fh>`, a
+    # list-returning call, `localtime`, `reverse` — inherited the LIST context
+    # of an enclosing print-argument list or list assignment and handed the
+    # match an ARRAY: ``print `echo hello` =~ s/\n//r`` printed `ARRAY(0x1)`
+    # and ``my ($w) = `cmd` =~ /(\w+)$/`` captured nothing.  Child 0 is the
+    # operand; child 1 is the pattern/substitution, which keeps the match's
+    # own context so a list-context `m//g` still collects every match.
+    if ($op eq '=~' || $op eq '!~') {
+      return SCALAR_CTX if $child_index == 0;
+    }
+
     # String concatenation always forces scalar context on both operands.
     # Without this, parens inside concat inherit list context from outer
     # constructs (e.g. [...]) and produce unwanted (vector ...) wrappers.
