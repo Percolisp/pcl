@@ -424,7 +424,7 @@ lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
 # argv rename from SBCL, docs/not-supported.md) added to fail-baseline in the same commit.
-magic.t	PARTIAL	158	31	208
+magic.t	PARTIAL	156	31	208
 # s449 (#564, agent S): `local *{EXPR} = sub {…}` has a lowering, so the four rows of the
 # `local *1 = sub {123}` loop at method.t:38 PASS — 72/26 -> 76/22, verified SERIALLY on both
 # this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the
@@ -485,6 +485,15 @@ recurse.t	OK	27	1	28
 # s446j (#517): ref.t 192 -> 193 EDITED BY HAND — `ref(\&{""})` is CODE, as perl says
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
 #   p-get-coderef's NIL.  The row left fail-baseline.tsv by EDIT in the same commit.
+# s473t6d 2026-09-20 (Opus): magic.t 158 -> 156 EDITED BY HAND -- task #1954.
+#   magic.t:591 `foreach (['powie::!','Errno'])` used to run TWICE with $_ bound to each
+#   ELEMENT (an anonymous constructor in a one-element foreach list was flattened), so the
+#   block emitted FOUR rows whose descriptions interpolated to `Referencing %{""} doesn't load `.
+#   It now runs ONCE and emits perl's own TWO rows, so the file produces two fewer rows.
+#   MEASURED A/B with the sweep's own command on a 268d7e00 extraction (four rows there, two
+#   here) and by the sweep serially ("Still losing rows after a serial re-run: magic.t").  The
+#   file's 31 failing rows are the SAME 31 (their numbers shift by 2), so fail-baseline.tsv is
+#   unchanged; baselines/row-shortfall.tsv perl-tests/magic.t 19 -> 21 in the same commit.
 ref.t	PARTIAL	196	15	245
 reset.t	OK	22	0	45
 reverse.t	OK	25	0	25

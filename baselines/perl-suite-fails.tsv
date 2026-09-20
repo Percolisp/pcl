@@ -2102,18 +2102,18 @@ op/anonsub.t	9	ok	not ok	undef &anon giving it a freed GV	#1771
 op/array.t	83	ok	not ok	$a: $\# on freed array is undef	#1871
 op/array.t	85	ok	not ok	$a: msg	#1871
 op/array.t	84	ok	not ok	$a: number of warnings	#1871
-op/array.t	131	ok	not ok	@_ alias to nonexistent neg index within array
-op/array.t	109	ok	not ok	[at t/op/array.t line 358]
-op/array.t	111	ok	not ok	[at t/op/array.t line 365]
-op/array.t	112	ok	not ok	[at t/op/array.t line 372]
-op/array.t	114	ok	not ok	[at t/op/array.t line 379]
+op/array.t	131	ok	not ok	@_ alias to nonexistent neg index within array	NS:Sparse arrays (holes), element aliasing, and SV identity -- measured s473t6d (t6b probe G3: the ERROR TEXT agrees, so this is the alias path, not the message): `@_` aliased to a nonexistent NEGATIVE index
+op/array.t	109	ok	not ok	[at t/op/array.t line 358]	#1871 -- measured s473t6d: `\$#a` arylen magic; the file's other 9 rows already carry it
+op/array.t	111	ok	not ok	[at t/op/array.t line 365]	#1871 -- measured s473t6d: `\$#a` arylen magic
+op/array.t	112	ok	not ok	[at t/op/array.t line 372]	#1871 -- measured s473t6d: `\$#a` arylen magic
+op/array.t	114	ok	not ok	[at t/op/array.t line 379]	#1871 -- measured s473t6d: `\$#a` arylen magic
 op/array.t	126	ok	not ok	arylen_p magic does not stop isa magic from being copied	#1871
 op/array.t	172	ok	not ok	assigning to arylen aliased in foreach(scalar $\#arylen)	#1871
 op/array.t	86	ok	not ok	do {}: $\# on freed array is undef	#1871
 op/array.t	88	ok	not ok	do {}: msg	#1871
 op/array.t	87	ok	not ok	do {}: number of warnings	#1871
-op/array.t	135	ok	not ok	error when setting alias to -1 elem of empty array
-op/array.t	133	ok	not ok	error when setting alias to negative index past beginning
+op/array.t	135	ok	not ok	error when setting alias to -1 elem of empty array	NS:Sparse arrays (holes), element aliasing, and SV identity -- measured s473t6d: the same rule for the -1 element of an EMPTY array
+op/array.t	133	ok	not ok	error when setting alias to negative index past beginning	NS:Sparse arrays (holes), element aliasing, and SV identity -- measured s473t6d: setting an `@_` alias to a negative index past the beginning must die `Modification of non-creatable array value attempted`
 op/array.t	193	ok	not ok	holes passed to sub do not lose their position (aelem)	NS:Sparse arrays (holes), element aliasing, and SV identity
 op/array.t	194	ok	not ok	holes passed to sub do not lose their position (aelem, mg)	NS:Sparse arrays (holes), element aliasing, and SV identity
 op/array.t	191	ok	not ok	holes passed to sub do not lose their position (multideref)	NS:Sparse arrays (holes), element aliasing, and SV identity
@@ -2308,21 +2308,21 @@ op/bop.t	506	ok	(missing)	Use of strings with code points over 0xFF as arguments
 op/bop.t	509	ok	(missing)	Use of strings with code points over 0xFF as arguments to bitwise xor (^) operator is not allowed	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`) -- measured s473t6b: the file aborts ONE top-level form with "Invalid type 'P' in pack", and these rows are inside it
 op/bop.t	499	ok	(missing)	[perl \#129995] access to freed memory	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`) -- measured s473t6b: the file aborts ONE top-level form with "Invalid type 'P' in pack", and these rows are inside it
 op/bop.t	510	ok	(missing)	[perl \#17844] access beyond end of block	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`) -- measured s473t6b: the file aborts ONE top-level form with "Invalid type 'P' in pack", and these rows are inside it
-op/bop.t	160	ok	not ok	and turns off the UTF-8 flag
-op/bop.t	465	ok	not ok	correct error
-op/bop.t	483	ok	not ok	neg UV (sic) left shift  = 0xFF..E
-op/bop.t	484	ok	not ok	neg UV (sic) right shift = 0x7F..F
-op/bop.t	216	ok	not ok	no duplicate warnings
-op/bop.t	229	ok	not ok	no duplicate warnings
-op/bop.t	27	ok	not ok	str var & const str
-op/bop.t	28	ok	not ok	str var & const str again
-op/bop.t	31	ok	not ok	str var ^ const str
-op/bop.t	32	ok	not ok	str var ^ const str again
-op/bop.t	29	ok	not ok	str var | const str
-op/bop.t	30	ok	not ok	str var | const str again
-op/bop.t	464	ok	not ok	string overload can't use |
+op/bop.t	160	ok	not ok	and turns off the UTF-8 flag	NS:Unicode semantics differences -- measured s473t6d: the row asserts a bit-string op turns the UTF-8 flag OFF; PCL has no per-SV flag
+op/bop.t	465	ok	not ok	correct error	#1915 -- measured s473t6d: the row matches that `no method found` text
+op/bop.t	483	ok	not ok	neg UV (sic) left shift  = 0xFF..E	NS:Integers are unbounded: PCL has no 64-bit boundary -- measured s473t6d: the row asserts a NEGATIVE value shifts as an unsigned 64-bit quantity (18446744073709551614); PCL keeps -2
+op/bop.t	484	ok	not ok	neg UV (sic) right shift = 0x7F..F	NS:Integers are unbounded: PCL has no 64-bit boundary -- measured s473t6d: the row asserts an unsigned 64-bit right shift (9223372036854775807); PCL keeps -1
+op/bop.t	216	ok	not ok	no duplicate warnings	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts 10 `Use of uninitialized value` warnings
+op/bop.t	229	ok	not ok	no duplicate warnings	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts 10 warnings from the string-bitwise ops
+op/bop.t	27	ok	not ok	str var & const str	#1040 -- measured s473t6d: `"waf" & "+0"` takes the NUMERIC op because `"+0"` LOOKS like a number; perl decides from the SV's flags, so a pure string takes the bit-string op whatever its characters (`"10" & "12"` is "10" in perl, 8 here)
+op/bop.t	28	ok	not ok	str var & const str again	#1040 -- measured s473t6d: same numeric-looking-string rule
+op/bop.t	31	ok	not ok	str var ^ const str	#1040 -- measured s473t6d: same numeric-looking-string rule, `^`
+op/bop.t	32	ok	not ok	str var ^ const str again	#1040 -- measured s473t6d: same numeric-looking-string rule, `^`
+op/bop.t	29	ok	not ok	str var | const str	#1040 -- measured s473t6d: same numeric-looking-string rule, `|`
+op/bop.t	30	ok	not ok	str var | const str again	#1040 -- measured s473t6d: same numeric-looking-string rule, `|`
+op/bop.t	464	ok	not ok	string overload can't use |	#1915 -- measured s473t6d: an operand with only a `""` overload must make `|` die `no method found`; PCL stringifies and computes
 op/bop.t	498	ok	(missing)	utf8 &. appends null byte	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`) -- measured s473t6b: the file aborts ONE top-level form with "Invalid type 'P' in pack", and these rows are inside it
-op/bop.t	467	ok	not ok	|= doesn't break string overload
+op/bop.t	467	ok	not ok	|= doesn't break string overload	#1915 -- measured s473t6d: `|=` on a `""`-overloaded operand must not fall back to the string value
 op/bop.t	65	ok	not ok	[at t/op/bop.t line 179]	#1840 -- a COMPOUND assignment's VALUE is its LEFT OPERAND AS AN LVALUE, so consuming it re-READS (re-FETCHes) it: perl answers 2 for `fetches($x)` after `my $a = ($x |= $y)` and 1 after a VOID `$x |= $y`, while PCL's compound macros return the computed VALUE and answer 1 in both.  The row PASSED before s473t6a only because PCL read the operand TWICE for every bitwise op (#1813), which made this count 2 by accident while making the VOID count 2 as well -- which perl says is 1.  Exposed, not caused, by #1813
 op/bop.t	70	ok	not ok	[at t/op/bop.t line 185]	#1840 -- a COMPOUND assignment's VALUE is its LEFT OPERAND AS AN LVALUE, so consuming it re-READS (re-FETCHes) it: perl answers 2 for `fetches($x)` after `my $a = ($x |= $y)` and 1 after a VOID `$x |= $y`, while PCL's compound macros return the computed VALUE and answer 1 in both.  The row PASSED before s473t6a only because PCL read the operand TWICE for every bitwise op (#1813), which made this count 2 by accident while making the VOID count 2 as well -- which perl says is 1.  Exposed, not caused, by #1813
 op/bop.t	75	ok	not ok	[at t/op/bop.t line 191]	#1840 -- a COMPOUND assignment's VALUE is its LEFT OPERAND AS AN LVALUE, so consuming it re-READS (re-FETCHes) it: perl answers 2 for `fetches($x)` after `my $a = ($x |= $y)` and 1 after a VOID `$x |= $y`, while PCL's compound macros return the computed VALUE and answer 1 in both.  The row PASSED before s473t6a only because PCL read the operand TWICE for every bitwise op (#1813), which made this count 2 by accident while making the VOID count 2 as well -- which perl says is 1.  Exposed, not caused, by #1813
@@ -3791,24 +3791,24 @@ op/decl-refs.t	241	ok	(missing)	state \@h : risible  calls handler with right no
 op/delete.t	56	ok	not ok	[perl \#30733] array delete didn't free returned element	NS:`DESTROY` called by garbage collector -- the rows watch for a DESTROY when `delete` drops the last reference
 op/delete.t	54	ok	not ok	a b c also equivalent	NS:`DESTROY` called by garbage collector -- the rows watch for a DESTROY when `delete` drops the last reference
 op/delete.t	26	ok	not ok	a b c equivalent	NS:`DESTROY` called by garbage collector -- the rows watch for a DESTROY when `delete` drops the last reference
-op/die.t	11	ok	(missing)	$@ is an Error object isa Error
+op/die.t	11	ok	(missing)	$@ is an Error object isa Error	#1953 -- measured s473t6d: the row IS produced, but the harness stub's own `sub isa_ok` (perl-tests/t/test.pl:658) shadows the runtime's `pl-isa_ok` and prints `ok - $@ is an Error object` -- no test NUMBER and without perl's ` isa Error` suffix -- so the row can never join
 op/die.t	0	(none)	renumbered	*summary*
-op/die.t	4	ok	not ok	Embedded null passed back into $@
+op/die.t	4	ok	not ok	Embedded null passed back into $@	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the row reads `$x->[0]` after a `__DIE__` handler was supposed to increment it
 op/die.t	23	ok	not ok [PCL #15]	The __DIE__ handler should have seen this message	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
-op/die.t	24	ok	not ok [PCL #16]	The eval error in '$ should contain this message
+op/die.t	24	ok	not ok [PCL #16]	The eval error in '$ should contain this message	NS:Error compatibility for invalid Perl input -- measured s473t6d: the row matches perl's `Global symbol "$intentionally_missing" requires explicit package name` in $@; PCL compiles the program
 op/die.t	25	ok	not ok [PCL #17]	__DIE__ handler and $@ should be the same	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
-op/die.t	6	ok	(missing)	actual array, not a copy, passed to signal handler
-op/die.t	16	ok	not ok [PCL #8]	die handler with utf8
-op/die.t	9	ok	(missing)	die with no arguments propagates $@, but leaves references alone
-op/die.t	21	ok	not ok [PCL #13]	eval should return undef
-op/die.t	5	ok	not ok	pass an array ref as an argument isa ARRAY
-op/die.t	7	ok	(missing)	pass an array ref as an argument isa ARRAY
-op/die.t	8	ok	(missing)	pass an array ref as an argument isa ARRAY
-op/die.t	10	ok	(missing)	pass an array ref as an argument isa ARRAY
-op/die.t	12	ok	(missing)	pass an array ref as an argument isa ARRAY
-op/die.t	14	ok	not ok [PCL #6]	reference returned correctly
-op/die.t	13	ok	(missing)	returning a different object than what was passed in, via PROPAGATE isa Out
-op/die.t	18	ok	not ok [PCL #10]	utf8 symbol names show up in $@
+op/die.t	6	ok	(missing)	actual array, not a copy, passed to signal handler	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the row reads `$x->[0]` after the handler was supposed to increment it (PCL 3, perl 4)
+op/die.t	16	ok	not ok [PCL #8]	die handler with utf8	NS:Unicode semantics differences -- measured s473t6d: `die $msg` with a utf8 message comes back as `[ ]` -- the bytes are lost on the way through $@
+op/die.t	9	ok	(missing)	die with no arguments propagates $@, but leaves references alone	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the value is the one the handler increments on the way through (PCL 5, perl 7)
+op/die.t	21	ok	not ok [PCL #13]	eval should return undef	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: `eval` must return undef when a `__DIE__` handler re-dies
+op/die.t	5	ok	not ok	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the row reads the array the handler was supposed to have modified
+op/die.t	7	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body (`isa_ok($_[0],'ARRAY',...)`), which PCL never calls, so the row is never produced
+op/die.t	8	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body, never called
+op/die.t	10	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body, never called
+op/die.t	12	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body, never called
+op/die.t	14	ok	not ok [PCL #6]	reference returned correctly	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the reference the handler's PROPAGATE returned
+op/die.t	13	ok	(missing)	returning a different object than what was passed in, via PROPAGATE isa Out	#1953 -- measured s473t6d: the row IS produced, unnumbered and without perl's ` isa Out` suffix, by the stub's shadowing `sub isa_ok`
+op/die.t	18	ok	not ok [PCL #10]	utf8 symbol names show up in $@	NS:Error messages: no "at FILE line N" location info -- measured s473t6d: the row matches `Global symbol "$α"` in a compile-time diagnostic PCL does not produce
 op/die.t	22	ok	not ok [PCL #14]	we should have captured 1 error via __DIE__	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 op/die_keeperr.t	8	ok	not ok	[at t/op/die_keeperr.t line 27]	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- every row asserts the "\t(in cleanup) ..." warning perl raises when a DESTROY or an END dies while $@ already holds an exception
 op/die_keeperr.t	10	ok	not ok	[at t/op/die_keeperr.t line 27]	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- every row asserts the "\t(in cleanup) ..." warning perl raises when a DESTROY or an END dies while $@ already holds an exception
@@ -3836,20 +3836,20 @@ op/each.t	29	ok	(missing)	Check length of "\x{12345}"	NS:DynaLoader / XS binary 
 op/each.t	27	ok	(missing)	Check length of "\x{1234}"	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	25	ok	(missing)	Check length of "\x{123}"	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	23	ok	(missing)	DESTROY called	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	58	ok	not ok [PCL #38]	Hash iterator reset warnings fires when expected
-op/each.t	36	ok	not ok [PCL #16]	U+00B6        -> 1
-op/each.t	38	ok	not ok [PCL #18]	U+0100        -> 3
+op/each.t	58	ok	not ok [PCL #38]	Hash iterator reset warnings fires when expected	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row needs the `Use of each() on hash after insertion` warning
+op/each.t	36	ok	not ok [PCL #16]	U+00B6        -> 1	NS:Unicode semantics differences -- measured s473t6d: the U+00B6 key collides with its byte twin
+op/each.t	38	ok	not ok [PCL #18]	U+0100        -> 3	NS:Unicode semantics differences -- measured s473t6d: the U+0100 key collides with its byte twin
 op/each.t	18	ok	(missing)	assign to keys does not shrink hash bucket array	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	20	ok	(missing)	assign to keys will grow hash bucket array	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	21	ok	(missing)	but still 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	40	ok	not ok [PCL #20]	each demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
-op/each.t	64	ok	not ok [PCL #44]	each in list assignment
-op/each.t	35	ok	not ok [PCL #15]	four different Unicode keys
+op/each.t	64	ok	not ok [PCL #44]	each in list assignment	#1964 -- measured s473t6d (probes/p9.pl): the row REPRODUCES PERL IN ISOLATION (`\$h2{f} = \$a; ($a,$b) = each %h2` gives `f 7` in PCL as in perl), so this is DOWNSTREAM STATE of the file and is NOT isolated further (the s473t6a rule)
+op/each.t	35	ok	not ok [PCL #15]	four different Unicode keys	NS:Unicode semantics differences -- measured s473t6d: four keys that differ only above Latin-1 collapse to two -- hash keys are compared as CHARACTERS where perl compares the utf8 BYTES
 op/each.t	13	ok	(missing)	keys (%hash)	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	41	ok	not ok [PCL #21]	keys demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
 op/each.t	16	ok	(missing)	now 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	14	ok	(missing)	sanity check - more buckets than keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	56	ok	not ok [PCL #36]	single key now freed
+op/each.t	56	ok	not ok [PCL #36]	single key now freed	NS:`DESTROY` called by garbage collector -- measured s473t6d: the row asserts the freed key's value was finalized
 op/each.t	15	ok	(missing)	size doesn't change when hash is emptied	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	17	ok	(missing)	size doesn't change with 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	19	ok	(missing)	still 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
@@ -3857,42 +3857,42 @@ op/each.t	11	ok	(missing)	test iterator of each is being maintained	NS:DynaLoade
 op/each.t	10	ok	(missing)	test scalar keys resets iterator	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	12	ok	(missing)	test values keys resets iterator	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	42	ok	not ok [PCL #22]	values demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
-op/each.t	65	ok	not ok [PCL #45]	values in list assignment
+op/each.t	65	ok	not ok [PCL #45]	values in list assignment	#1964 -- measured s473t6d (probes/p9.pl): the `values` twin also reproduces perl in isolation; downstream state, NOT isolated further
 op/eval.t	143	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 0 blocks BEGIN blocks entirely	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	146	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 2 blocked three nested BEGIN blocks	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	145	ok	not ok	BEGIN really did nothing	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	148	ok	not ok	BEGIN really did nothing	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	144	ok	not ok	Blocked BEGIN results in expected error	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	147	ok	not ok	Blocked BEGIN results in expected error	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
-op/eval.t	164	ok	not ok	No segfault inside sort: my @x= sort { INIT      { eval q(UNITCHECK { die; } print 0;); print q(A-); } } 1,2;
-op/eval.t	152	ok	not ok	No segfault inside sort: my @x= sort { eval "UNITCHECK { eval q(BEGIN     { die; }); print q(A-) }"; } 1,2;
-op/eval.t	150	ok	not ok	No segfault inside sort: my @x= sort { eval "UNITCHECK { eval q(UNITCHECK { die; }); print q(A-) }"; } 1,2;
-op/eval.t	163	ok	not ok	No segfault: INIT      { eval q(UNITCHECK { die; } print 0;); print q(A-); }
-op/eval.t	151	ok	not ok	No segfault: eval "UNITCHECK { eval q(BEGIN     { die; }); print q(A-) }";
-op/eval.t	149	ok	not ok	No segfault: eval "UNITCHECK { eval q(UNITCHECK { die; }); print q(A-) }";
-op/eval.t	132	ok	not ok	Right line number for eval "{"
-op/eval.t	131	ok	not ok	Right line number for eval "{;"
-op/eval.t	94	ok	not ok	[at t/op/eval.t line 376]
-op/eval.t	95	ok	not ok	[at t/op/eval.t line 377]
-op/eval.t	96	ok	not ok	[at t/op/eval.t line 378]
-op/eval.t	98	ok	not ok	[at t/op/eval.t line 385]
-op/eval.t	99	ok	not ok	[at t/op/eval.t line 391]
-op/eval.t	26	ok	not ok	[at t/op/eval.t line 86]
-op/eval.t	107	ok	not ok	eval and last
-op/eval.t	45	ok	not ok	eval catches bad goto calls
-op/eval.t	127	ok	not ok	eval clears %^H
-op/eval.t	128	ok	not ok	eval does not localise %^H at run time
-op/eval.t	133	ok	not ok	eval qq{\${\nfoo\n}; warn} updates the line number correctly
-op/eval.t	10	ok	not ok	eval run-time error in list context
-op/eval.t	9	ok	not ok	eval syntax error in list context
-op/eval.t	109	ok	not ok	eval syntax error, no warnings
-op/eval.t	40	ok	not ok	lexical search terminates correctly at subroutine boundary
-op/eval.t	106	ok	not ok	string eval void context
-op/eval.t	166	ok	not ok	test that nested eval '1+;' calls sig die as expected
-op/eval.t	167	ok	not ok	test that nested eval '1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;' calls sig die as expected
-op/eval.t	169	ok	not ok	test that nested eval ']' calls sig die as expected
-op/eval.t	165	ok	not ok	test that nested eval 'bar' calls sig die as expected
-op/eval.t	168	ok	not ok	test that nested eval 's/' calls sig die as expected
+op/eval.t	164	ok	not ok	No segfault inside sort: my @x= sort { INIT      { eval q(UNITCHECK { die; } print 0;); print q(A-); } } 1,2;	#1959 -- measured s473t6d: UNITCHECK inside INIT inside a sort block; PCL prints `ok`
+op/eval.t	152	ok	not ok	No segfault inside sort: my @x= sort { eval "UNITCHECK { eval q(BEGIN     { die; }); print q(A-) }"; } 1,2;	#1959 -- measured s473t6d: UNITCHECK blocks are never run (the row's child prints `ok` where perl prints `A-ok`)
+op/eval.t	150	ok	not ok	No segfault inside sort: my @x= sort { eval "UNITCHECK { eval q(UNITCHECK { die; }); print q(A-) }"; } 1,2;	#1959 -- measured s473t6d: UNITCHECK blocks are never run (the row's child prints `ok` where perl prints `A-ok`)
+op/eval.t	163	ok	not ok	No segfault: INIT      { eval q(UNITCHECK { die; } print 0;); print q(A-); }	#1959 -- measured s473t6d: UNITCHECK inside INIT; PCL prints `0A-ok`, perl `A-ok`
+op/eval.t	151	ok	not ok	No segfault: eval "UNITCHECK { eval q(BEGIN     { die; }); print q(A-) }";	#1959 -- measured s473t6d: UNITCHECK blocks are never run (the row's child prints `ok` where perl prints `A-ok`)
+op/eval.t	149	ok	not ok	No segfault: eval "UNITCHECK { eval q(UNITCHECK { die; }); print q(A-) }";	#1959 -- measured s473t6d: UNITCHECK blocks are never run (the row's child prints `ok` where perl prints `A-ok`)
+op/eval.t	132	ok	not ok	Right line number for eval "{"	NS:Error compatibility for invalid Perl input -- measured s473t6d: `eval "{"` must report `Missing right curly or square bracket`; PCL accepts it silently
+op/eval.t	131	ok	not ok	Right line number for eval "{;"	NS:Error compatibility for invalid Perl input -- measured s473t6d: `eval "{;"` must report `Missing right curly or square bracket`; PCL accepts it silently
+op/eval.t	94	ok	not ok	[at t/op/eval.t line 376]	#1958 -- measured s473t6d: an `eval STRING` inside a sub of package DB sees the CALLER's pad (perl's debugger rule); PCL reads its own lexical
+op/eval.t	95	ok	not ok	[at t/op/eval.t line 377]	#1958 -- measured s473t6d: an `eval STRING` inside a sub of package DB sees the CALLER's pad (perl's debugger rule); PCL reads its own lexical
+op/eval.t	96	ok	not ok	[at t/op/eval.t line 378]	#1958 -- measured s473t6d: DB::db5 has its own `my $x=4` and perl STILL answers the caller's 3; PCL answers 4
+op/eval.t	98	ok	not ok	[at t/op/eval.t line 385]	#1958 -- measured s473t6d: the [GH #19370] lexical-sub call into DB::db3; same rule
+op/eval.t	99	ok	not ok	[at t/op/eval.t line 391]	#1958 -- measured s473t6d: the [GH #19370] anon-sub call into DB::db3; same rule
+op/eval.t	26	ok	not ok	[at t/op/eval.t line 86]	NS:Context propagation into string eval -- measured s473t6d: eval.t:86 is the VOID-context row (`eval $a; is($b,'V')`); PCL answers 'S', which is the one gap that section names
+op/eval.t	107	ok	not ok	eval and last	NS:`tie` on an ARRAY or HASH (#155) -- measured s473t6d: the row's child program ties an ARRAY, and the announce-and-drop line lands in the compared output ahead of its `ok`
+op/eval.t	45	ok	not ok	eval catches bad goto calls	NS:Error message text and format -- measured s473t6d: PCL reports SBCL's `attempt to GO to nonexistent tag: :foo` where perl says `Can't "goto" into the middle of a foreach loop`
+op/eval.t	127	ok	not ok	eval clears %^H	NS:Lexical compile-time hints (`$^H` / `%^H` scoping) -- measured s473t6d: the third of the row's three checks reads `nokay`, the hints hash never having been cleared
+op/eval.t	128	ok	not ok	eval does not localise %^H at run time	NS:Lexical compile-time hints (`$^H` / `%^H` scoping) -- measured s473t6d: %^H is an inert global, so a run-time `local` of it is not modelled
+op/eval.t	133	ok	not ok	eval qq{\${\nfoo\n}; warn} updates the line number correctly	NS:Error messages: no "at FILE line N" location info -- measured s473t6d: PCL says `at - line 3`, perl `at (eval 1) line 3` -- the eval's own NAME in the location
+op/eval.t	10	ok	not ok	eval run-time error in list context	#1956 -- measured s473t6d: the same `+()=` countof idiom; the eval half agrees with perl in isolation
+op/eval.t	9	ok	not ok	eval syntax error in list context	#1956 -- measured s473t6d (probes/p9.pl + le3.pl): the EVAL half is NOT the bug (`my @r = eval { die }` is 0 elements in PCL exactly as in perl).  The row is `is +()=eval q{++}, 0` -- an assignment whose LHS is the EMPTY LIST, which yields the LAST RHS element in PCL and the count / nothing in perl
+op/eval.t	109	ok	not ok	eval syntax error, no warnings	NS:Error compatibility for invalid Perl input -- measured s473t6d: PCL emits the #138 drop announcement for `&& ;` where perl emits `syntax error`
+op/eval.t	40	ok	not ok	lexical search terminates correctly at subroutine boundary	#1957 -- measured s473t6d: `sub terminal { eval '$r . q{!}' }` called from a string eval whose caller has `my $r` must see $main::r (perl's lexical search STOPS at the sub boundary); PCL sees neither and reads undef
+op/eval.t	106	ok	not ok	string eval void context	NS:Context propagation into string eval -- measured s473t6d: `string eval void context` got 'S', expected 'V' -- the section's own table
+op/eval.t	166	ok	not ok	test that nested eval '1+;' calls sig die as expected	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: same handler; PCL also emits a #138 drop announcement for the fragment `1+;`
+op/eval.t	167	ok	not ok	test that nested eval '1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;' calls sig die as expected	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: same handler; PCL also emits a #138 drop announcement for the fragment `1+;`
+op/eval.t	169	ok	not ok	test that nested eval ']' calls sig die as expected	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: same handler; PCL also emits a #138 drop announcement for the fragment `]`
+op/eval.t	165	ok	not ok	test that nested eval 'bar' calls sig die as expected	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the row needs `$SIG{__DIE__} = sub { die "X" }` to fire when an inner string eval fails to compile
+op/eval.t	168	ok	not ok	test that nested eval 's/' calls sig die as expected	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: same handler; the fragment `s/` produces nothing
 op/evalbytes.t	8	ok	not ok	evalbytes croaks on non-bytes	NS:Unicode semantics differences -- `evalbytes` must treat its argument as BYTES and croak on a wide character; PCL has one string type
 op/evalbytes.t	1	ok	not ok	evalbytes outside feature scope	NS:Unicode semantics differences -- `evalbytes` must treat its argument as BYTES and croak on a wide character; PCL has one string type
 op/exec.t	27	ok	not ok	[at t/op/exec.t line 153]	NS:Error compatibility for invalid Perl input -- perl rejects `my $r = readpipe($::p,$::q)` at COMPILE time ("Too many arguments for readpipe"); the row eval-STRINGs it with `if 0` and reads $@.  PCL compiles and runs it, so $@ is empty.  The other 14 rows of this file were FIXED in s473t6c (#1920 + #1921)
@@ -4703,15 +4703,15 @@ op/kvhslice.t	26	ok	not ok [PCL #25]	not allowed as result of lvalue sub	NS:Erro
 op/kvhslice.t	37	ok	not ok [PCL #36]	values %hash{key} forbidden	NS:Error compatibility for invalid Perl input -- `local %h{...}`, an assignment to a kv-slice and a reference to one are compile-time errors in perl
 op/kvhslice.t	27	ok	not ok [PCL #26]	warning in scalar context	NS:Warnings-gated diagnostics are absent (#221) -- "%h{...} in scalar context better written as $h{...}"
 op/lc.t	66	ok	not ok	U+03C2 ucfirst is U+03A3	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
-op/lc.t	71	ok	not ok	Using s///e to change case.
-op/lc.t	73	ok	not ok	Using s///e to change case.
-op/lc.t	74	ok	not ok	Using s///e to change case.
+op/lc.t	71	ok	not ok	Using s///e to change case.	NS:Unicode case folding and property tables -- measured s473t6d: `s///e` case change of a FINAL SIGMA; the file's other 21 rows already carry it
+op/lc.t	73	ok	not ok	Using s///e to change case.	NS:Unicode case folding and property tables -- measured s473t6d: `s///e` case change, same family
+op/lc.t	74	ok	not ok	Using s///e to change case.	NS:Unicode case folding and property tables -- measured s473t6d: `s///e` case change, same family
 op/lc.t	109	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	112	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	115	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	118	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	121	ok	not ok	fc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
-op/lc.t	7	ok	not ok	fc() throws an exception,
+op/lc.t	7	ok	not ok	fc() throws an exception,	NS:Error compatibility for invalid Perl input -- measured s473t6d: without `use feature 'fc'` perl dies `Undefined subroutine &main::fc`; PCL provides fc unconditionally
 op/lc.t	108	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	111	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	114	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
@@ -4719,7 +4719,7 @@ op/lc.t	117	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property table
 op/lc.t	120	ok	not ok	lc U+0130 grows	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	128	ok	not ok	lc of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
 op/lc.t	127	ok	not ok	lc(LATIN CAPITAL LETTER SHARP S)	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
-op/lc.t	134	ok	not ok	lc(TEMP ref) does not produce a corrupt string
+op/lc.t	134	ok	not ok	lc(TEMP ref) does not produce a corrupt string	NS:Unicode case folding and property tables -- measured s473t6d: `lc` of U+0130 must expand to two characters; PCL leaves it identity
 op/lc.t	129	ok	not ok	lcfirst of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
 op/lc.t	63	ok	not ok	ligature foldcase	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	61	ok	not ok	ligature titlecase	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
@@ -4731,7 +4731,7 @@ op/lc.t	113	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and prop
 op/lc.t	116	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	119	ok	not ok	uc U+03B0 grows threefold	NS:Unicode case folding and property tables [DEFERRED] (RULED by the USER s465) -- the multi-character and growth mappings (U+0130, U+03B0, U+1E9E, U+FB00, U+0149): probed s473t6b, PCL uses sb-unicode's SIMPLE mappings and answers IDENTITY where perl expands
 op/lc.t	130	ok	not ok	uc of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
-op/lc.t	133	ok	not ok	uc(TEMP ref) does not produce a corrupt string
+op/lc.t	133	ok	not ok	uc(TEMP ref) does not produce a corrupt string	NS:Unicode case folding and property tables -- measured s473t6d: `uc` of U+0390 must expand to three characters; PCL leaves it identity
 op/lc.t	131	ok	not ok	ucfirst of above-ASCII Latin1 is itself under use bytes	NS:`use bytes` -- byte view of upgraded strings -- probed s473t6b: PCL case-maps an above-ASCII latin-1 BYTE where perl leaves it alone
 op/length.t	46	ok	(missing)	'print length undef' warned	NS:Warnings-gated diagnostics are absent (#221) -- the "Use of uninitialized value" warning `length undef` raises
 op/length.t	0	(none)	renumbered	*summary*	NS:Unicode semantics differences -- the rows build a string with `byte_utf8a_to_utf8n` and assert its CHARACTER length; PCL has no SV-level UTF8 flag, so a byte string and its upgraded twin are the same value
@@ -4748,21 +4748,21 @@ op/length.t	23	ok	not ok	[at t/op/length.t line 91]	NS:Unicode semantics differe
 op/length.t	47	ok	(missing)	[perl \#106726] no crash with length @lexical warning	NS:Warnings-gated diagnostics are absent (#221) -- the "Use of uninitialized value" warning `length undef` raises
 op/length.t	36	ok	not ok	uninit warning for stringifying as undef	NS:Warnings-gated diagnostics are absent (#221) -- the "Use of uninitialized value" warning `length undef` raises
 op/length.t	42	ok	not ok	uninit warning for stringifying as undef	NS:Warnings-gated diagnostics are absent (#221) -- the "Use of uninitialized value" warning `length undef` raises
-op/lex.t	25	ok	not ok [PCL #24]	"@<fullwidth digit>" [perl \#123963]
-op/lex.t	21	ok	not ok [PCL #20]	"@{" [perl \#123712]
-op/lex.t	23	ok	not ok [PCL #22]	"\L\L" with no newline [perl \#123802]
-op/lex.t	11	ok	not ok [PCL #10]	$ <null> ident
+op/lex.t	25	ok	not ok [PCL #24]	"@<fullwidth digit>" [perl \#123963]	#1960 -- measured s473t6d (probes/p4.pl): inside a STRING EVAL, `qq'@\x{ff13}'` interpolates the fullwidth digit as an ARRAY NAME and dies `The variable |@３| is unbound`; the DIRECT spelling is right, and perl makes `@` before a non-identifier-START character a literal `@`
+op/lex.t	21	ok	not ok [PCL #20]	"@{" [perl \#123712]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `"@{"` must be `Missing right curly or square bracket`; PCL's child prints nothing
+op/lex.t	23	ok	not ok [PCL #22]	"\L\L" with no newline [perl \#123802]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `"\L\L"` with no newline must be a syntax error; PCL's child prints nothing
+op/lex.t	11	ok	not ok [PCL #10]	$ <null> ident	NS:Error compatibility for invalid Perl input -- measured s473t6d: a NUL inside an identifier; PPI refuses the document and PCL says so
 op/lex.t	9	ok	(missing)	${no strict; ...}	measured s473t6b: the file aborts ONE top-level form at lex.t:99 -- `is ${no strict; \$_}, "rhubarb", …` is a #138 DROP ("Bug. Fell through"), and this row is inside it
-op/lex.t	13	ok	not ok [PCL #12]	% <null> ident
-op/lex.t	14	ok	not ok [PCL #13]	& <null> ident
-op/lex.t	15	ok	not ok [PCL #14]	* <null> ident
+op/lex.t	13	ok	not ok [PCL #12]	% <null> ident	NS:Error compatibility for invalid Perl input -- measured s473t6d: a NUL inside an identifier; PPI refuses the document and PCL says so
+op/lex.t	14	ok	not ok [PCL #13]	& <null> ident	NS:Error compatibility for invalid Perl input -- measured s473t6d: a NUL inside an identifier; PPI refuses the document and PCL says so
+op/lex.t	15	ok	not ok [PCL #14]	* <null> ident	NS:Error compatibility for invalid Perl input -- measured s473t6d: a NUL inside an identifier; PPI refuses the document and PCL says so
 op/lex.t	0	(none)	renumbered	*summary*
-op/lex.t	22	ok	not ok [PCL #21]	/$0{}/ with no newline [perl \#123802]
-op/lex.t	19	ok	not ok [PCL #18]	/$a[/<<a with no newline [perl \#123712]
-op/lex.t	20	ok	not ok [PCL #19]	/$a[m||/<<a with no newline [perl \#123712]
-op/lex.t	24	ok	not ok [PCL #23]	<\L\L> with no newline [perl \#123802]
-op/lex.t	12	ok	not ok [PCL #11]	@ <null> ident
-op/lex.t	18	ok	not ok [PCL #17]	@ { \327 \n - used to garble output (or fail asan) [perl \#128951]
+op/lex.t	22	ok	not ok [PCL #21]	/$0{}/ with no newline [perl \#123802]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `/$0{}/` must be a syntax error; PCL's child prints nothing
+op/lex.t	19	ok	not ok [PCL #18]	/$a[/<<a with no newline [perl \#123712]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `/$a[/<<a` is invalid perl; PCL drops the statement loudly where perl reports `Missing right curly or square bracket`
+op/lex.t	20	ok	not ok [PCL #19]	/$a[m||/<<a with no newline [perl \#123712]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `/$a[m||/<<a` is invalid perl; same drop
+op/lex.t	24	ok	not ok [PCL #23]	<\L\L> with no newline [perl \#123802]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `<\L\L>` must be a syntax error; PCL drops the statement loudly
+op/lex.t	12	ok	not ok [PCL #11]	@ <null> ident	NS:Error compatibility for invalid Perl input -- measured s473t6d: a NUL inside an identifier; PPI refuses the document and PCL says so
+op/lex.t	18	ok	not ok [PCL #17]	@ { \327 \n - used to garble output (or fail asan) [perl \#128951]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `@ { \327 \n` is invalid perl; PPI refuses the document
 op/lex.t	38	ok	not ok [PCL #37]	And the expected number of warnings were generated	#1876
 op/lex.t	39	ok	not ok [PCL #38]	And the first warning is as expected	#1876
 op/lex.t	40	ok	not ok [PCL #39]	And the second warning is as expected	#1876
@@ -4774,21 +4774,21 @@ op/lex.t	42	ok	not ok [PCL #41]	Using paired delimiter both fore/aft fails as ex
 op/lex.t	48	ok	not ok [PCL #47]	Using terminating paired delimiter fore, opening aft fails as expected outside scope of extra delims	#1876
 op/lex.t	52	ok	not ok [PCL #51]	Using too few closing delims in nesting fails as expected	#1876
 op/lex.t	37	ok	not ok [PCL #36]	Various tests of string delims \xAB/\xBB returned without error	#1876
-op/lex.t	28	ok	not ok [PCL #27]	[perl \#126482] Assert failure when mentioning a constant twice in a row
-op/lex.t	32	ok	not ok [PCL #31]	[perl \#128996] - use of PL_op after op is freed
-op/lex.t	33	ok	not ok [PCL #32]	[perl \#128997] - buffer read overflow
-op/lex.t	34	ok	not ok [PCL #33]	[perl \#129000] read before buffer
-op/lex.t	30	ok	not ok [PCL #29]	[perl \#129069] - "Missing name" warning and valgrind clean
-op/lex.t	29	ok	not ok [PCL #28]	[perl \#129069] - no output and valgrind clean
-op/lex.t	36	ok	not ok [PCL #35]	[perl \#129190] intuit_method() invalidates PL_bufptr
-op/lex.t	35	ok	not ok [PCL #34]	[perl \#129273] heap use after free or overflow
-op/lex.t	5	ok	not ok	correct output (and no crash) when charnames cannot load for \N{...}
-op/lex.t	16	ok	not ok [PCL #15]	gibberish containing &\0z - used to crash [perl \#123753]
-op/lex.t	17	ok	not ok [PCL #16]	gibberish containing &{+z} - used to crash [perl \#123753]
-op/lex.t	8	ok	not ok	no buffer corruption with multiline *{...expr...}
-op/lex.t	6	ok	not ok	no crash when charnames cannot load and %^H holds string
-op/lex.t	7	ok	not ok	no crash when charnames cannot load and %^H holds string reference
-op/lex.t	26	ok	not ok [PCL #25]	s;@{<<a; [perl \#123995]
+op/lex.t	28	ok	not ok [PCL #27]	[perl \#126482] Assert failure when mentioning a constant twice in a row	NS:Error compatibility for invalid Perl input -- measured s473t6d: `ub ub` must be `Bareword found`; PCL drops the statement loudly
+op/lex.t	32	ok	not ok [PCL #31]	[perl \#128996] - use of PL_op after op is freed	NS:Error compatibility for invalid Perl input -- measured s473t6d: [perl #128996] needs `Integer overflow in hexadecimal number` + malformed-UTF-8 fatals; PPI refuses the document
+op/lex.t	33	ok	not ok [PCL #32]	[perl \#128997] - buffer read overflow	NS:Error compatibility for invalid Perl input -- measured s473t6d: [perl #128997] needs a malformed-UTF-8 fatal; PPI refuses the document
+op/lex.t	34	ok	not ok [PCL #33]	[perl \#129000] read before buffer	NS:Error compatibility for invalid Perl input -- measured s473t6d: [perl #129000] needs a malformed-UTF-8 fatal; PPI refuses the document
+op/lex.t	30	ok	not ok [PCL #29]	[perl \#129069] - "Missing name" warning and valgrind clean	NS:Error compatibility for invalid Perl input -- measured s473t6d: [perl #129069] needs `Missing name in "my sub"`; PPI refuses the document
+op/lex.t	29	ok	not ok [PCL #28]	[perl \#129069] - no output and valgrind clean	NS:Error compatibility for invalid Perl input -- measured s473t6d: [perl #129069] feeds the lexer NUL source; PPI refuses the document
+op/lex.t	36	ok	not ok [PCL #35]	[perl \#129190] intuit_method() invalidates PL_bufptr	NS:Error compatibility for invalid Perl input -- measured s473t6d: `flock _$` must be `Not enough arguments for flock`; PCL drops the statement loudly
+op/lex.t	35	ok	not ok [PCL #34]	[perl \#129273] heap use after free or overflow	NS:Error compatibility for invalid Perl input -- measured s473t6d: `$#` must be `$# is no longer supported as of Perl 5.30`; PCL calls an undefined sub instead
+op/lex.t	5	ok	not ok	correct output (and no crash) when charnames cannot load for \N{...}	NS:Error compatibility for invalid Perl input -- measured s473t6d: the row needs perl's `Constant(\N{a}) unknown ... Execution of - aborted due to compilation errors`; PCL's child prints nothing
+op/lex.t	16	ok	not ok [PCL #15]	gibberish containing &\0z - used to crash [perl \#123753]	NS:Error compatibility for invalid Perl input -- measured s473t6d: gibberish containing &\0z; PPI refuses the document
+op/lex.t	17	ok	not ok [PCL #16]	gibberish containing &{+z} - used to crash [perl \#123753]	NS:Error compatibility for invalid Perl input -- measured s473t6d: gibberish containing &{+z}; PPI refuses the document
+op/lex.t	8	ok	not ok	no buffer corruption with multiline *{...expr...}	NS:Readouts of perl's own internals -- measured s473t6d: the row's child calls `XS::APItest::gv_fetchmeth_type`
+op/lex.t	6	ok	not ok	no crash when charnames cannot load and %^H holds string	NS:Error compatibility for invalid Perl input -- measured s473t6d: the row needs a compile-time failure of the charnames handler; PCL's child prints nothing
+op/lex.t	7	ok	not ok	no crash when charnames cannot load and %^H holds string reference	NS:Error compatibility for invalid Perl input -- measured s473t6d: the row needs a compile-time `Not a CODE reference`; PCL's child prints nothing
+op/lex.t	26	ok	not ok [PCL #25]	s;@{<<a; [perl \#123995]	NS:Error compatibility for invalid Perl input -- measured s473t6d: `s;@{<<a;` must be `Can't find string terminator "a"`; PCL's child prints nothing
 op/lex_assign.t	3	ok	not ok	object destruction via reassignment to variable	NS:`DESTROY` called by garbage collector
 op/lex_assign.t	283	ok	not ok	skip Can't modify constant item in chop at (eval 232) line 5, at EOF schop syntax not good for selfassign	NS:Error compatibility for invalid Perl input
 op/lex_assign.t	106	ok	not ok	sselect	#1934
@@ -4896,42 +4896,42 @@ op/loopctl.t	64	ok	not ok	redo with non-constant label	NS:Computed goto (`goto E
 op/magic.t	160	ok	not ok [PCL #162]	${^LAST_FH} after another tell	#1872
 op/magic.t	159	ok	not ok [PCL #161]	${^LAST_FH} after tell	#1872
 op/magic.t	161	ok	not ok [PCL #163]	${^LAST_FH} referencing lexical coercible glob	#1872
-op/magic.t	0	(none)	extra [PCL #135]	*extra* Assign a constant to a magic hash
-op/magic.t	0	(none)	extra [PCL #134]	*extra* Push a constant on a magic array
-op/magic.t	0	(none)	renumbered	*summary*
+op/magic.t	0	(none)	extra [PCL #135]	*extra* Assign a constant to a magic hash	#1954 -- measured s473t6d: the two `*extra*` rows are the file's +2 ROW DRIFT, whose cause is magic.t:591 -- `foreach (['powie::!','Errno'])` ran TWICE with $_ bound to each element, so the block emitted two extra rows with empty descriptions.  FIXED here; the drift closes with it
+op/magic.t	0	(none)	extra [PCL #134]	*extra* Push a constant on a magic array	#1954 -- measured s473t6d: the two `*extra*` rows are the file's +2 ROW DRIFT, whose cause is magic.t:591 -- `foreach (['powie::!','Errno'])` ran TWICE with $_ bound to each element, so the block emitted two extra rows with empty descriptions.  FIXED here; the drift closes with it
+op/magic.t	0	(none)	renumbered	*summary*	#1954 -- measured s473t6d: the two `*extra*` rows are the file's +2 ROW DRIFT, whose cause is magic.t:591 -- `foreach (['powie::!','Errno'])` ran TWICE with $_ bound to each element, so the block emitted two extra rows with empty descriptions.  FIXED here; the drift closes with it
 op/magic.t	111	ok	not ok	.. and /proc cmdline shows that	NS:Assigning `$0` does not change the OS process name
-op/magic.t	110	ok	not ok	.. and the UTF-8 version is written
-op/magic.t	109	ok	not ok	.. and the warning is about a wide character
+op/magic.t	110	ok	not ok	.. and the UTF-8 version is written	NS:Assigning `$0` does not change the OS process name -- measured s473t6d: the row reads the UTF-8 bytes back out of $0
+op/magic.t	109	ok	not ok	.. and the warning is about a wide character	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row matches the text of that warning
 op/magic.t	106	ok	not ok	/proc cmdline shows as expected (compare to UTF8-flagged)	NS:Assigning `$0` does not change the OS process name
 op/magic.t	107	ok	not ok	/proc cmdline shows as expected (compare to non-UTF8-flagged)	NS:Assigning `$0` does not change the OS process name
 op/magic.t	139	ok	not ok [PCL #141]	Can assign to INT	#1873
 op/magic.t	135	ok	not ok [PCL #137]	Can assign to __WARN__	#1873
 op/magic.t	140	ok	not ok [PCL #142]	Can delete from INT	#1873
 op/magic.t	136	ok	not ok [PCL #138]	Can delete from __WARN__	#1873
-op/magic.t	191	ok	not ok [PCL #193]	ENV key store warns about wide characters
-op/magic.t	185	ok	not ok [PCL #187]	ENV store downgrades utf8 in SV
-op/magic.t	186	ok	not ok [PCL #188]	ENV store downgrades utf8 in setenv
-op/magic.t	187	ok	not ok [PCL #189]	ENV store downgrades utf8 key in setenv
-op/magic.t	192	ok	not ok [PCL #194]	ENV store encodes high utf8 in SV
-op/magic.t	190	ok	not ok [PCL #192]	ENV store takes utf8-encoded key in setenv
-op/magic.t	189	ok	not ok [PCL #191]	ENV store warns about wide characters
+op/magic.t	191	ok	not ok [PCL #193]	ENV key store warns about wide characters	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts a wide-character warning on an %ENV key store
+op/magic.t	185	ok	not ok [PCL #187]	ENV store downgrades utf8 in SV	NS:Unicode semantics differences -- measured s473t6d: `%ENV` store must DOWNGRADE a utf8-flagged SV to bytes
+op/magic.t	186	ok	not ok [PCL #188]	ENV store downgrades utf8 in setenv	NS:Unicode semantics differences -- measured s473t6d: `%ENV` store must downgrade in setenv too
+op/magic.t	187	ok	not ok [PCL #189]	ENV store downgrades utf8 key in setenv	NS:Unicode semantics differences -- measured s473t6d: `%ENV` store must downgrade the KEY in setenv
+op/magic.t	192	ok	not ok [PCL #194]	ENV store encodes high utf8 in SV	NS:Unicode semantics differences -- measured s473t6d: `%ENV` store must ENCODE high utf8 in the SV
+op/magic.t	190	ok	not ok [PCL #192]	ENV store takes utf8-encoded key in setenv	NS:Unicode semantics differences -- measured s473t6d: `%ENV` must take a utf8-ENCODED key in setenv
+op/magic.t	189	ok	not ok [PCL #191]	ENV store warns about wide characters	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts a wide-character warning on an %ENV store
 op/magic.t	71	ok	(missing)	[at t/op/magic.t line 213]	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- `delete $::{ENV}` and the rows that read back through the stash
 op/magic.t	72	ok	(missing)	[at t/op/magic.t line 214]	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- `delete $::{ENV}` and the rows that read back through the stash
 op/magic.t	73	ok	(missing)	[at t/op/magic.t line 215]	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- `delete $::{ENV}` and the rows that read back through the stash
 op/magic.t	74	ok	(missing)	[at t/op/magic.t line 216]	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- `delete $::{ENV}` and the rows that read back through the stash
-op/magic.t	93	ok	not ok	[at t/op/magic.t line 361]
-op/magic.t	94	ok	not ok	[at t/op/magic.t line 370]
-op/magic.t	126	ok	not ok	[at t/op/magic.t line 619]
+op/magic.t	93	ok	not ok	[at t/op/magic.t line 361]	NS:Readouts of perl's own internals -- measured s473t6d: the row asserts `$^X` is the string the child was INVOKED as (`./perl`); under PCL the child is sbcl and `$^X` is perl's absolute path
+op/magic.t	94	ok	not ok	[at t/op/magic.t line 370]	NS:Readouts of perl's own internals -- measured s473t6d: same `$^X` assertion through a different spawn
+op/magic.t	126	ok	not ok	[at t/op/magic.t line 619]	NS:Readouts of perl's own internals -- measured s473t6d: the row reads `${^TAINT}` back after assigning to it
 op/magic.t	202	ok	not ok [PCL #204]	altering $0 is effective (testing with /proc/)	NS:Assigning `$0` does not change the OS process name
 op/magic.t	203	ok	not ok [PCL #205]	altering $0 is effective (testing with `ps`)	NS:Assigning `$0` does not change the OS process name
 op/magic.t	70	ok	(missing)	deleting $::{ENV}	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- `delete $::{ENV}` and the rows that read back through the stash
-op/magic.t	85	ok	not ok	no %@
-op/magic.t	194	not ok	ok [PCL #196]	not exists $ENV{existing} during local $ENV{existing} # TODO exists on %ENV should reflect real env
-op/magic.t	114	ok	not ok	one warning: non-wide -> local wide
-op/magic.t	113	ok	not ok	one warning: wide -> local wide
-op/magic.t	77	ok	not ok	referencing @' before $' etc. still saws off ampersands
-op/magic.t	75	ok	not ok	referencing @` before $` etc. still saws off ampersands
-op/magic.t	108	ok	not ok	warning after assignment of wide character
+op/magic.t	85	ok	not ok	no %@	#1664 -- measured s473t6d: `ok !*@{HASH}` reads a typeglob SLOT; the typeglob/stash model answers wrongly
+op/magic.t	194	not ok	ok [PCL #196]	not exists $ENV{existing} during local $ENV{existing} # TODO exists on %ENV should reflect real env	NS:Live symbol-table hashes (%main::, %Foo::) [DEFERRED] -- measured s473t6d: a perl-side TODO row about `exists` on %ENV under `local`
+op/magic.t	114	ok	not ok	one warning: non-wide -> local wide	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts one wide-character warning
+op/magic.t	113	ok	not ok	one warning: wide -> local wide	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts one wide-character warning
+op/magic.t	77	ok	not ok	referencing @' before $' etc. still saws off ampersands	#418 -- measured s473t6d: the child program references the punctuation array `@'` and PCL drops the statement
+op/magic.t	75	ok	not ok	referencing @` before $` etc. still saws off ampersands	#418 -- measured s473t6d: the child program references the punctuation array `@\`` and PCL drops the statement (`] -- Handle single node of unknown type`) -- the CL-unsafe punctuation-array emission
+op/magic.t	108	ok	not ok	warning after assignment of wide character	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts a `Wide character` warning after assigning to $0
 op/method.t	129	ok	(missing)	"3foo"->CORE::uc	#1821 — `CLASS->CORE::uc` (a `CORE::` METHOD call) dies `Can't locate object method "uc" via package "CLASS"` — probed: it is NOT about the digit-headed class name, `"Foo"->CORE::uc` dies the same way.  The die aborts its top-level form, so perl rows 126-134 (`method call on ::`, `on ::main`, `on empty string`, the TYPEGLOB invocants) and the three rows after the skip block are never produced; the typeglob invocants are #1664
 op/method.t	130	ok	(missing)	"3foo"->uc (autobox style!)	#1821 — `CLASS->CORE::uc` (a `CORE::` METHOD call) dies `Can't locate object method "uc" via package "CLASS"` — probed: it is NOT about the digit-headed class name, `"Foo"->CORE::uc` dies the same way.  The die aborts its top-level form, so perl rows 126-134 (`method call on ::`, `on ::main`, `on empty string`, the TYPEGLOB invocants) and the three rows after the skip block are never produced; the typeglob invocants are #1664
 op/method.t	134	ok	(missing)	$pvlv_glob->method	#1821 — `CLASS->CORE::uc` (a `CORE::` METHOD call) dies `Can't locate object method "uc" via package "CLASS"` — probed: it is NOT about the digit-headed class name, `"Foo"->CORE::uc` dies the same way.  The die aborts its top-level form, so perl rows 126-134 (`method call on ::`, `on ::main`, `on empty string`, the TYPEGLOB invocants) and the three rows after the skip block are never produced; the typeglob invocants are #1664
@@ -5155,30 +5155,30 @@ op/pos.t	4	ok	not ok	pos() set inside //g	#1922 -- `pos` is kept on a SCALAR onl
 op/pos.t	21	ok	(missing)	re-evals set pos through defelems	#1922 -- `pos` is kept on a SCALAR only: `pos($h{k})`, `pos($a[0])` and `pos($_[0])` all read UNDEF after a `//g` match on that very place, where perl reads 2 (probed s473t6c, three spellings; `pos($scalar)` is right).  perl stores the match position in the magic of the SV the match ran on, and an element or an @_ alias IS that SV (a defelem/PVLV); PCL matches on a COPY, so every "defelem" row of this file is one fact
 op/pos.t	20	ok	not ok	s///g setting pos through a defelem	#1922 -- `pos` is kept on a SCALAR only: `pos($h{k})`, `pos($a[0])` and `pos($_[0])` all read UNDEF after a `//g` match on that very place, where perl reads 2 (probed s473t6c, three spellings; `pos($scalar)` is right).  perl stores the match position in the magic of the SV the match ran on, and an element or an @_ alias IS that SV (a defelem/PVLV); PCL matches on a COPY, so every "defelem" row of this file is one fact
 op/postfixderef.t	0	(none)	renumbered	*summary*
-op/postfixderef.t	53	ok	not ok [PCL #49]	Accessing via the correct name works
-op/postfixderef.t	59	ok	not ok [PCL #55]	Accessing via the correct name works
-op/postfixderef.t	64	ok	not ok [PCL #60]	Array dereference
-op/postfixderef.t	68	ok	not ok [PCL #64]	Array dereference
-op/postfixderef.t	66	ok	not ok [PCL #62]	Code dereference
-op/postfixderef.t	38	ok	(missing)	Curly	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
-op/postfixderef.t	71	ok	not ok [PCL #67]	Glob dereference
-op/postfixderef.t	65	ok	not ok [PCL #61]	Hash dereference
+op/postfixderef.t	53	ok	not ok [PCL #49]	Accessing via the correct name works	#1454 -- measured s473t6d: `'name'->**` is a #138 drop, so the alias it should install never exists
+op/postfixderef.t	59	ok	not ok [PCL #55]	Accessing via the correct name works	#1454 -- measured s473t6d: the same glob-deref drop through the second spelling
+op/postfixderef.t	64	ok	not ok [PCL #60]	Array dereference	#1454 -- measured s473t6d: the block's aliases were never installed
+op/postfixderef.t	68	ok	not ok [PCL #64]	Array dereference	#1454 -- measured s473t6d: the block's aliases were never installed
+op/postfixderef.t	66	ok	not ok [PCL #62]	Code dereference	#1454 -- measured s473t6d: the block's aliases were never installed
+op/postfixderef.t	38	ok	(missing)	Curly	NS:`DESTROY` called by garbage collector -- measured s473t6d (probes/p2.pl): a blessed scalar ref from a symbolic postfix deref, destroyed at scope exit
+op/postfixderef.t	71	ok	not ok [PCL #67]	Glob dereference	#1454 -- measured s473t6d: the block's aliases were never installed
+op/postfixderef.t	65	ok	not ok [PCL #61]	Hash dereference	#1454 -- measured s473t6d: the block's aliases were never installed
 op/postfixderef.t	73	ok	not ok [PCL #69]	IO slot of the temporary glob is set correctly	#1877
-op/postfixderef.t	37	ok	(missing)	Larry	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
-op/postfixderef.t	39	ok	(missing)	Moe	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
+op/postfixderef.t	37	ok	(missing)	Larry	NS:`DESTROY` called by garbage collector -- measured s473t6d (probes/p2.pl): a blessed scalar ref from a symbolic postfix deref, destroyed at scope exit
+op/postfixderef.t	39	ok	(missing)	Moe	NS:`DESTROY` called by garbage collector -- measured s473t6d (probes/p2.pl): a blessed scalar ref from a symbolic postfix deref, destroyed at scope exit
 op/postfixderef.t	77	ok	not ok [PCL #73]	PVBM is not a GLOB ref	DECIDED "PCL has no PVBM" -- a Boyer-Moore-compiled constant is not a distinct SV type here, so `ref \$pvbm` cannot answer GLOB
 op/postfixderef.t	79	ok	not ok [PCL #75]	PVBM is not a SCALAR ref	DECIDED "PCL has no PVBM" -- a Boyer-Moore-compiled constant is not a distinct SV type here, so `ref \$pvbm` cannot answer GLOB
 op/postfixderef.t	76	ok	not ok [PCL #72]	PVBM ref is not a GLOB ref	DECIDED "PCL has no PVBM" -- a Boyer-Moore-compiled constant is not a distinct SV type here, so `ref \$pvbm` cannot answer GLOB
-op/postfixderef.t	63	ok	not ok [PCL #59]	Scalar dereference
-op/postfixderef.t	67	ok	not ok [PCL #63]	Scalar dereference
-op/postfixderef.t	36	ok	(missing)	Shemp	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
-op/postfixderef.t	28	ok	not ok	[at t/op/postfixderef.t line 120]
-op/postfixderef.t	29	ok	not ok	[at t/op/postfixderef.t line 121]
-op/postfixderef.t	126	ok	(missing)	[at t/op/postfixderef.t line 380]	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
-op/postfixderef.t	127	ok	(missing)	[at t/op/postfixderef.t line 381]	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
-op/postfixderef.t	128	ok	(missing)	[at t/op/postfixderef.t line 382]	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
-op/postfixderef.t	55	ok	not ok [PCL #51]	defined via the correct name works
-op/postfixderef.t	61	ok	not ok [PCL #57]	defined via the correct name works
+op/postfixderef.t	63	ok	not ok [PCL #59]	Scalar dereference	#1454 -- measured s473t6d: the block's aliases were never installed, so the per-slot reads all fail
+op/postfixderef.t	67	ok	not ok [PCL #63]	Scalar dereference	#1454 -- measured s473t6d: the block's aliases were never installed
+op/postfixderef.t	36	ok	(missing)	Shemp	NS:`DESTROY` called by garbage collector -- measured s473t6d (probes/p2.pl): `bless \'joe'->$*, 'woulda'` is destroyed at scope exit and its DESTROY prints the row; PCL never finalizes it.  NOT #1877 (t6b's attribution), which is a different postfix spelling
+op/postfixderef.t	28	ok	not ok	[at t/op/postfixderef.t line 120]	#1453 -- measured s473t6d: the row reads a glob's IO slot through a postfix deref
+op/postfixderef.t	29	ok	not ok	[at t/op/postfixderef.t line 121]	#1453 -- measured s473t6d: the row reads a glob's IO slot through a postfix deref
+op/postfixderef.t	126	ok	(missing)	[at t/op/postfixderef.t line 380]	#1436 -- measured s473t6d (probes/p1.pl): the aborting form is `"@{[foo->@*]}"` at postfixderef.t:345; a BAREWORD invocant of a postfix deref is a SYMBOLIC REFERENCE in perl and a SUB CALL in PCL ("Undefined subroutine &main::foo called").  NOT #1877
+op/postfixderef.t	127	ok	(missing)	[at t/op/postfixderef.t line 381]	#1436 -- measured s473t6d (probes/p1.pl): the aborting form is `"@{[foo->@[0,1]]}"` at postfixderef.t:346
+op/postfixderef.t	128	ok	(missing)	[at t/op/postfixderef.t line 382]	#1436 -- measured s473t6d (probes/p1.pl): the aborting form is `"@{[foo->@{foo}]}"` at postfixderef.t:347
+op/postfixderef.t	55	ok	not ok [PCL #51]	defined via the correct name works	#1454 -- measured s473t6d: the `defined` twin of the same dropped statement
+op/postfixderef.t	61	ok	not ok [PCL #57]	defined via the correct name works	#1454 -- measured s473t6d: the `defined` twin of the same dropped statement
 op/postfixderef.t	27	ok	not ok	glob access syntax	#1877
 op/postfixderef.t	40	ok	not ok [PCL #36]	no stooges outlast their scope	#1877 -- measured s473t6b: the file aborts THREE top-level forms with "Undefined subroutine &main::foo called", and these rows are inside them.  The spelling behind it is the postfix GLOB-SLOT deref `$gr->*{NAME}`, the one postfix-deref spelling PExpr has no arm for (a #138 DROP), so the CODE-slot alias the block installs never happens
 op/protowarn.t	1	ok	not ok	One warning	NS:Warnings-gated diagnostics are absent (#221)
@@ -5445,28 +5445,28 @@ op/smartkve.t	8	ok	not ok	Errors: values $undef throws error	NS:Error compatibil
 op/smartkve.t	10	ok	not ok	Errors: values CONSTANT throws error	NS:Error compatibility for invalid Perl input -- every row evals `keys $undef` / `values CONSTANT` / `each qr/foo/` / `keys $h, @s` and asserts $@.  Probed s473t6c: perl rejects them at COMPILE time ("Experimental keys on scalar is now forbidden", "Type of arg 1 to keys must be hash or array"); PCL compiles and runs them, so $@ is empty (CLAUDE.md principle 9: PCL is a transpiler for valid Perl)
 op/smartkve.t	11	ok	not ok	Errors: values qr/foo/ throws error	NS:Error compatibility for invalid Perl input -- every row evals `keys $undef` / `values CONSTANT` / `each qr/foo/` / `keys $h, @s` and asserts $@.  Probed s473t6c: perl rejects them at COMPILE time ("Experimental keys on scalar is now forbidden", "Type of arg 1 to keys must be hash or array"); PCL compiles and runs them, so $@ is empty (CLAUDE.md principle 9: PCL is a transpiler for valid Perl)
 op/smartkve.t	7	ok	not ok	Errors: values undef throws error	NS:Error compatibility for invalid Perl input -- every row evals `keys $undef` / `values CONSTANT` / `each qr/foo/` / `keys $h, @s` and asserts $@.  Probed s473t6c: perl rejects them at COMPILE time ("Experimental keys on scalar is now forbidden", "Type of arg 1 to keys must be hash or array"); PCL compiles and runs them, so $@ is empty (CLAUDE.md principle 9: PCL is a transpiler for valid Perl)
-op/sort.t	175	ok	not ok	Match vars do not leak from one $$ sort sub to the next
-op/sort.t	174	ok	not ok	Match vars do not leak from one plain sort sub to the next
-op/sort.t	5	ok	not ok	No elements were wrongly converted to utf8 in sorting
-op/sort.t	197	ok	not ok	[at t/op/sort.t line 1184]
-op/sort.t	198	ok	not ok	[at t/op/sort.t line 1191]
-op/sort.t	22	ok	not ok	[at t/op/sort.t line 206]
-op/sort.t	172	ok	not ok	all gone
+op/sort.t	175	ok	not ok	Match vars do not leak from one $$ sort sub to the next	#1804 -- measured s473t6d: same leak through the `($$)`-prototype comparator
+op/sort.t	174	ok	not ok	Match vars do not leak from one plain sort sub to the next	#1804 -- measured s473t6d: match variables must not leak from one sort comparator to the next; PCL prints `WinLeakageLeakage`
+op/sort.t	5	ok	not ok	No elements were wrongly converted to utf8 in sorting	NS:Unicode semantics differences -- measured s473t6d: the row asserts no element was upgraded to utf8 by sorting; PCL reports 256 of 256 upgraded
+op/sort.t	197	ok	not ok	[at t/op/sort.t line 1184]	NS:`DESTROY` called by garbage collector -- measured s473t6d: the row reads a destruction LOG written by DESTROY during the sort
+op/sort.t	198	ok	not ok	[at t/op/sort.t line 1191]	NS:`DESTROY` called by garbage collector -- measured s473t6d: the row reads a destruction LOG written by DESTROY during the fill
+op/sort.t	22	ok	not ok	[at t/op/sort.t line 206]	NS:Error message text and format -- measured s473t6d: the row needs `Undefined sort subroutine "CORE::revers" called`; PCL's child prints nothing
+op/sort.t	172	ok	not ok	all gone	NS:`DESTROY` called by garbage collector -- measured s473t6d: the row counts objects still alive after the sort; PCL never finalizes them
 op/sort.t	204	ok	not ok	empty (sort); not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
 op/sort.t	201	ok	not ok	empty sort not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
 op/sort.t	203	ok	not ok	empty sort; not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
 op/sort.t	202	ok	not ok	empty {sort} not allowed	NS:Error compatibility for invalid Perl input -- `sort` with no arguments is "Not enough arguments for sort" at COMPILE time in perl; probed s473t6b: PCL accepts it, so the rows that eval the text and expect a death fail
-op/sort.t	147	ok	not ok	goto out of a pseudo block 1
-op/sort.t	148	ok	not ok	goto out of a pseudo block 2
-op/sort.t	146	ok	not ok	goto subr from a sort sub
-op/sort.t	145	ok	not ok	goto subr outside subr
-op/sort.t	162	ok	not ok	overload compare called once
-op/sort.t	163	ok	not ok	overload sort result
-op/sort.t	164	ok	not ok	overload string called twice
-op/sort.t	26	ok	not ok	redefinition should not take effect during the sort
+op/sort.t	147	ok	not ok	goto out of a pseudo block 1	NS:Error message text and format -- measured s473t6d: a `goto LABEL` out of a sort block must be `Can't "goto" out of a pseudo block`; PCL says `Can't find label label`
+op/sort.t	148	ok	not ok	goto out of a pseudo block 2	NS:Error message text and format -- measured s473t6d: same pseudo-block rule through the other spelling
+op/sort.t	146	ok	not ok	goto subr from a sort sub	NS:Error message text and format -- measured s473t6d: `goto &sub` from a sort sub must be `Can't goto subroutine from a sort sub`
+op/sort.t	145	ok	not ok	goto subr outside subr	NS:Error message text and format -- measured s473t6d: `goto &sub` outside a sub must be `Can't goto subroutine outside a subroutine`; PCL's child prints nothing
+op/sort.t	162	ok	not ok	overload compare called once	NS:`tie` on an ARRAY or HASH (#155) -- measured s473t6d: the block sorts a slice of a TIED hash, so the overload counters never move (t6b probe G6: the overload itself AGREES)
+op/sort.t	163	ok	not ok	overload sort result	NS:`tie` on an ARRAY or HASH (#155) -- measured s473t6d: the sorted slice comes from a TIED hash
+op/sort.t	164	ok	not ok	overload string called twice	NS:`tie` on an ARRAY or HASH (#155) -- measured s473t6d: the sorted slice comes from a TIED hash
+op/sort.t	26	ok	not ok	redefinition should not take effect during the sort	NS:Error compatibility for invalid Perl input -- measured s473t6d: redefining the comparator DURING the sort; PCL neither dies nor keeps the old body
 op/sort.t	184	ok	not ok	sort block modifying $a and $b	NS:Writing to `$a`/`$b` inside a sort comparator
-op/sort.t	89	ok	not ok	test that EXTEND was called with an argument of 3 by pp_sort()
-op/sort.t	149	ok	not ok	undef active subr
+op/sort.t	89	ok	not ok	test that EXTEND was called with an argument of 3 by pp_sort()	NS:`tie` on an ARRAY or HASH (#155) -- measured s473t6d: the row asserts pp_sort called EXTEND on a TIED array
+op/sort.t	149	ok	not ok	undef active subr	NS:Error message text and format -- measured s473t6d: `undef &active_sub` must be `Can't undef active subroutine`; PCL's child prints nothing
 op/split.t	32	ok	not ok	[at t/op/split.t line 99]	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the rows read perl's optree (a `const(IV(3))` in the split's B:: dump) and count compile-time vs run-time re-evals of an embedded code block
 op/split.t	149	ok	not ok	assignment to split-to-array (pmtarget/package array)	#1933 -- `my @a = split ...` has a PMTARGET optimisation in perl: the split writes the array in place.  The rows assert the array is the SAME one afterwards
 op/split.t	151	ok	not ok	assignment to split-to-array (stacked)	#1933 -- `my @a = split ...` has a PMTARGET optimisation in perl: the split writes the array in place.  The rows assert the array is the SAME one afterwards
@@ -5513,56 +5513,56 @@ op/split_unicode.t	133	ok	not ok	Space: U+205f - /\s+/	#407 -- PCL's whitespace 
 op/split_unicode.t	137	ok	not ok	Space: U+205f - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
 op/split_unicode.t	139	ok	not ok	Space: U+3000 - /\s+/	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
 op/split_unicode.t	143	ok	not ok	Space: U+3000 - /\s+/ No.2	#407 -- PCL's whitespace class is not Unicode White_Space.  The 38 `/\s+/` rows fail for EVERY one of the file's 19 White_Space code points (PCL's `\s` is the ASCII set, probed s473t6b: chr(0x85)..chr(0x3000) all fail /\s/); the 2 `- ' '` rows are U+0085 (NEL) and U+00A0 (NBSP) ALONE -- every other code point in the file PASSES the awk-mode `split ' '` rows, so that splitter's set has the same NEL/NBSP hole and nothing else
-op/sprintf.t	550	ok	not ok	> 011/ 022/ 033< four reordered args
-op/sprintf.t	540	ok	not ok	> MISSING<
+op/sprintf.t	550	ok	not ok	> 011/ 022/ 033< four reordered args	#1962 -- measured s473t6d: four reordered `%N$` arguments with `*` widths; PCL rejects the whole directive where perl formats it
+op/sprintf.t	540	ok	not ok	> MISSING<	#1962 -- measured s473t6d: an explicit-index vector conversion with a `*` width (`%*1073741819$v2d`) must be REJECTED (copied literally); PCL rejects a DIFFERENT text
 op/sprintf.t	272	ok	not ok	> a1c< %n w/magic	#1874
 op/sprintf.t	227	ok	not ok	>%.0hf INVALID< 'h' should be rejected	#1875
 op/sprintf.t	271	ok	not ok	>%n 2< Slight sneakiness to test %n	#1874
 op/sprintf.t	482	ok	not ok	>%v%,63 INVALID INVALID<	#1875
 op/sprintf.t	494	ok	not ok	>%v\#x INVALID<	#1875
-op/sprintf.t	157	ok	not ok	>+1 .2  .3  <
-op/sprintf.t	158	ok	not ok	>+1 .2  .3  <
-op/sprintf.t	165	ok	not ok	>+1 .2  .3  < cf perl \#83194
-op/sprintf.t	235	ok	not ok	>-0< C99 standard mandates minus sign but C89 does not
-op/sprintf.t	169	ok	not ok	>00-07-11< cf perl \#83194
-op/sprintf.t	155	ok	not ok	>001.002.003<
-op/sprintf.t	442	ok	not ok	>1.14.12c<
-op/sprintf.t	147	ok	not ok	>1.2.3<
-op/sprintf.t	441	ok	not ok	>1.2.3<
-op/sprintf.t	148	ok	not ok	>1.2<
-op/sprintf.t	149	ok	not ok	>1.2<
-op/sprintf.t	150	ok	not ok	>1.2<
-op/sprintf.t	237	ok	not ok	>1.e+04<
-op/sprintf.t	151	ok	not ok	>1048576.5<
-op/sprintf.t	553	ok	not ok	>123 MISSING<
-op/sprintf.t	341	ok	not ok	>1< Coarse hack: hex from %\#p
-op/sprintf.t	152	ok	not ok	>50<
+op/sprintf.t	157	ok	not ok	>+1 .2  .3  <	#1961 -- measured s473t6d: `%+-v3d` applies `+` to EVERY component (`+1 .+2 .+3 `); perl signs only the first (`+1 .2  .3  `)
+op/sprintf.t	158	ok	not ok	>+1 .2  .3  <	#1961 -- measured s473t6d: `%+-v3d` of a `version` object; PCL prints MISSING
+op/sprintf.t	165	ok	not ok	>+1 .2  .3  < cf perl \#83194	#1961 -- measured s473t6d: `%+-v*d` applies `+` to EVERY component; perl signs only the first
+op/sprintf.t	235	ok	not ok	>-0< C99 standard mandates minus sign but C89 does not	#1962 -- measured s473t6d: `%.0g` of -0.0 is `-0` in perl and `0` here (the sign of negative zero is lost)
+op/sprintf.t	169	ok	not ok	>00-07-11< cf perl \#83194	#1961 -- measured s473t6d: `%0*v*d` of a `version` object; PCL prints MISSING
+op/sprintf.t	155	ok	not ok	>001.002.003<	#1961 -- measured s473t6d: `%v.3d` of a `version` object; PCL prints MISSING
+op/sprintf.t	442	ok	not ok	>1.14.12c<	#1961 -- measured s473t6d: `%vx` of a `version` object; PCL prints MISSING
+op/sprintf.t	147	ok	not ok	>1.2.3<	#1961 -- measured s473t6d: `%vd` of a `version` object; PCL prints MISSING (the object contributes no argument) where perl prints the version
+op/sprintf.t	441	ok	not ok	>1.2.3<	#1961 -- measured s473t6d: `%vx` of a `version` object; PCL prints MISSING
+op/sprintf.t	148	ok	not ok	>1.2<	#1961 -- measured s473t6d: `%vd` of `version->new("1.2")` formats the ordinals of the STRING ("49.46.50") instead of the version's own components
+op/sprintf.t	149	ok	not ok	>1.2<	#1961 -- measured s473t6d: `%vd` of a `version` object formats the ordinals of its stringification
+op/sprintf.t	150	ok	not ok	>1.2<	#1961 -- measured s473t6d: `%vd` of a `version` object formats the ordinals of its stringification
+op/sprintf.t	237	ok	not ok	>1.e+04<	#1962 -- measured s473t6d: `%#.0g` must keep the decimal point (`1.e+04`); PCL prints `1e+04`
+op/sprintf.t	151	ok	not ok	>1048576.5<	#1961 -- measured s473t6d: `%vd` of a `version` object formats the ordinals of its stringification
+op/sprintf.t	553	ok	not ok	>123 MISSING<	#1962 -- measured s473t6d: `%*2$d` must consume the explicit-index argument and then report MISSING; PCL prints `123`
+op/sprintf.t	341	ok	not ok	>1< Coarse hack: hex from %\#p	#1962 -- measured s473t6d: `%#p` must render a hex pointer; PCL's result does not match `^0x[0-9a-f]+\s*$`
+op/sprintf.t	152	ok	not ok	>50<	#1961 -- measured s473t6d: `%vd` of a `version` object formats the ordinals of its stringification
 op/sprintf.t	273	ok	not ok	>5< Unicode %n	#1874
 op/sprintf2.t	1604	ok	not ok	%n	#1874
-op/sprintf2.t	1537	ok	not ok	[at t/op/sprintf2.t line 842]
-op/sprintf2.t	1543	ok	not ok	[at t/op/sprintf2.t line 854]
-op/sprintf2.t	1545	ok	not ok	[at t/op/sprintf2.t line 856]
-op/sprintf2.t	1547	ok	not ok	[at t/op/sprintf2.t line 858]
-op/sprintf2.t	1549	ok	not ok	[at t/op/sprintf2.t line 860]
-op/sprintf2.t	1551	ok	not ok	[at t/op/sprintf2.t line 862]
-op/sprintf2.t	1553	ok	not ok	[at t/op/sprintf2.t line 864]
-op/sprintf2.t	1555	ok	not ok	[at t/op/sprintf2.t line 866]
-op/sprintf2.t	1557	ok	not ok	[at t/op/sprintf2.t line 868]
-op/sprintf2.t	1558	ok	not ok	[at t/op/sprintf2.t line 869]
-op/sprintf2.t	1563	ok	not ok	[at t/op/sprintf2.t line 876]
-op/sprintf2.t	1564	ok	not ok	[at t/op/sprintf2.t line 877]
-op/sprintf2.t	1699	ok	not ok	croak for very large numeric format results
-op/sprintf2.t	1603	ok	not ok	first arg not special utf8-wise
-op/sprintf2.t	1703	ok	not ok	offset after 0
-op/sprintf2.t	1702	ok	not ok	offset at start
-op/sprintf2.t	1701	ok	not ok	reasonable result
-op/sprintf2.t	1522	ok	not ok	subnormal 3e-322 %.4a 0x1.e800p-1069 got 0x1.e800p-1069
-op/sprintf2.t	1512	ok	not ok	subnormal 3e-322 %a 0x1.e8p-1069 got 0x1.e8p-1069
-op/sprintf2.t	1529	ok	not ok	subnormal 3e-324 %.1a 0x1.0p-1074 got 0x1.0p-1074
-op/sprintf2.t	1524	ok	not ok	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x1.0000p-1074
-op/sprintf2.t	1514	ok	not ok	subnormal 3e-324 %a 0x1p-1074 got 0x1p-1074
-op/sprintf2.t	1516	ok	not ok	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.624p-1064
-op/sprintf2.t	1517	ok	not ok	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1cp-1067
+op/sprintf2.t	1537	ok	not ok	[at t/op/sprintf2.t line 842]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP (`0x1.1p+0`); perl rounds half-to-EVEN (`0x1.0p+0`)
+op/sprintf2.t	1543	ok	not ok	[at t/op/sprintf2.t line 854]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1545	ok	not ok	[at t/op/sprintf2.t line 856]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1547	ok	not ok	[at t/op/sprintf2.t line 858]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1549	ok	not ok	[at t/op/sprintf2.t line 860]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1551	ok	not ok	[at t/op/sprintf2.t line 862]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1553	ok	not ok	[at t/op/sprintf2.t line 864]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1555	ok	not ok	[at t/op/sprintf2.t line 866]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1557	ok	not ok	[at t/op/sprintf2.t line 868]	#1963 -- measured s473t6d: `%.1a` rounds HALF-UP; perl rounds half-to-EVEN
+op/sprintf2.t	1558	ok	not ok	[at t/op/sprintf2.t line 869]	#1963 -- measured s473t6d: after rounding to `0x2.0p+0` PCL RE-NORMALISES to `0x1.0p+1`; perl keeps the exponent
+op/sprintf2.t	1563	ok	not ok	[at t/op/sprintf2.t line 876]	#1963 -- measured s473t6d: after rounding to `0x2.00p+0` PCL RE-NORMALISES to `0x1.00p+1`
+op/sprintf2.t	1564	ok	not ok	[at t/op/sprintf2.t line 877]	#1963 -- measured s473t6d: after rounding to `0x2.00p+3` PCL RE-NORMALISES to `0x1.00p+4`
+op/sprintf2.t	1699	ok	not ok	croak for very large numeric format results	NS:Error message text and format -- measured s473t6d: PCL says `Integer overflow in format string for sprintf %7000000000E`, perl `Numeric format result too large`
+op/sprintf2.t	1603	ok	not ok	first arg not special utf8-wise	#1875 -- measured s473t6d: the row asserts an INVALID `%v` conversion is copied literally; PCL reports `Missing argument in sprintf` instead
+op/sprintf2.t	1703	ok	not ok	offset after 0	#1874 -- measured s473t6d: the formline/`$^A` offset rows are `%n` read through the accumulator
+op/sprintf2.t	1702	ok	not ok	offset at start	#1874 -- measured s473t6d: the formline/`$^A` offset rows are `%n` read through the accumulator
+op/sprintf2.t	1701	ok	not ok	reasonable result	#1874 -- measured s473t6d: the formline/`$^A` offset rows are `%n` read through the accumulator; PCL leaves `%n` literal
+op/sprintf2.t	1522	ok	not ok	subnormal 3e-322 %.4a 0x1.e800p-1069 got 0x1.e800p-1069	#1963 -- measured s473t6d: `%.4a` of a SUBNORMAL truncates the mantissa
+op/sprintf2.t	1512	ok	not ok	subnormal 3e-322 %a 0x1.e8p-1069 got 0x1.e8p-1069	#1963 -- measured s473t6d: `%a` of a SUBNORMAL truncates the mantissa (`0x1.ep-1069` for `0x1.e8p-1069`)
+op/sprintf2.t	1529	ok	not ok	subnormal 3e-324 %.1a 0x1.0p-1074 got 0x1.0p-1074	#1963 -- measured s473t6d: a subnormal literal reads as ZERO
+op/sprintf2.t	1524	ok	not ok	subnormal 3e-324 %.4a 0x1.0000p-1074 got 0x1.0000p-1074	#1963 -- measured s473t6d: a subnormal literal reads as ZERO
+op/sprintf2.t	1514	ok	not ok	subnormal 3e-324 %a 0x1p-1074 got 0x1p-1074	#1963 -- measured s473t6d: a subnormal literal reads as ZERO (`0x0p+0`); the row is a perl-side TODO but PCL still diverges
+op/sprintf2.t	1516	ok	not ok	subnormal 7e-321 %a 0x1.624p-1064 got 0x1.624p-1064	#1963 -- measured s473t6d: `%a` of a SUBNORMAL truncates the mantissa
+op/sprintf2.t	1517	ok	not ok	subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1cp-1067	#1963 -- measured s473t6d: `%a` of a SUBNORMAL truncates the mantissa
 op/srand.t	10	ok	not ok	got a warning	NS:Warnings-gated diagnostics are absent (#221) -- `srand(0)` warns "Setting srand() seed to 0"; the other row wants srand's return
 op/srand.t	6	ok	not ok	true return value for srand(0)	NS:Warnings-gated diagnostics are absent (#221) -- `srand(0)` warns "Setting srand() seed to 0"; the other row wants srand's return
 op/sselect.t	10	ok	not ok	select "a"    $blank $blank 0	#1934 -- 4-argument `select` with a non-bit-vector string argument ("a") must still be accepted and treated as bits
@@ -6219,12 +6219,12 @@ op/tiehash.t	15	ok	not ok	tie/untie resets the hash iterator	NS:`tie` on an ARRA
 op/tiehash.t	17	ok	not ok	two FETCHes for tied hash in list context	NS:`tie` on an ARRAY or HASH (#155) -- `tie %h` reaches p-tie as a RAW aggregate and takes the announce-and-drop arm, so the program runs on an ORDINARY hash: the FETCH counts, the iterator reset and the missing-key error these rows assert never happen
 op/tiehash.t	21	ok	not ok	two FETCHes for tied hash values in list context	NS:`tie` on an ARRAY or HASH (#155) -- `tie %h` reaches p-tie as a RAW aggregate and takes the announce-and-drop arm, so the program runs on an ORDINARY hash: the FETCH counts, the iterator reset and the missing-key error these rows assert never happen
 op/tiehash.t	4	ok	not ok	with the correct error	NS:`tie` on an ARRAY or HASH (#155) -- `tie %h` reaches p-tie as a RAW aggregate and takes the announce-and-drop arm, so the program runs on an ORDINARY hash: the FETCH counts, the iterator reset and the missing-key error these rows assert never happen
-op/tr.t	129	ok	not ok [PCL #127]	!~ y///r error message
+op/tr.t	129	ok	not ok [PCL #127]	!~ y///r error message	NS:Error compatibility for invalid Perl input -- measured s473t6d: `!~ y///r` must be rejected at compile time
 op/tr.t	0	(none)	renumbered	*summary*
-op/tr.t	130	ok	not ok [PCL #128]	/r warns in void context
-op/tr.t	131	ok	not ok [PCL #129]	/r warns just once
-op/tr.t	5	ok	not ok	Illegal to tr/// named sequence
-op/tr.t	167	ok	not ok [PCL #165]	LHS bad on updating tr
+op/tr.t	130	ok	not ok [PCL #128]	/r warns in void context	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row needs `Useless use of non-destructive transliteration`
+op/tr.t	131	ok	not ok [PCL #129]	/r warns just once	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts that warning once
+op/tr.t	5	ok	not ok	Illegal to tr/// named sequence	NS:Error compatibility for invalid Perl input -- measured s473t6d: a named SEQUENCE in tr/// must be rejected; PCL accepts it
+op/tr.t	167	ok	not ok [PCL #165]	LHS bad on updating tr	NS:Error message text and format -- measured s473t6d: PCL dies `Modification of a read-only value attempted` where perl says `Can't modify constant item in transliteration`
 op/tr.t	290	ok	not ok [PCL #288]	RT \#130198 eval: chomp($s =~ tr/a/a/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
 op/tr.t	292	ok	not ok [PCL #290]	RT \#130198 eval: chomp($s =~ tr/a/a/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
 op/tr.t	294	ok	not ok [PCL #292]	RT \#130198 eval: chomp($s =~ tr/a/b/);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
@@ -6259,14 +6259,14 @@ op/tr.t	279	ok	not ok [PCL #277]	RT \#130198 warn: chop(@a =~ tr/a/b/);	NS:Error
 op/tr.t	281	ok	not ok [PCL #279]	RT \#130198 warn: chop(@a =~ tr/a/b/r);	NS:Error compatibility for invalid Perl input -- `chop(tr/a/a/)` / `chomp($s =~ tr/a/b/r)` and their spellings are a COMPILE-time error in perl ("Can't modify transliteration (tr///) in chop"), which the RT #130198 rows assert by eval-ing the text and reading `$@` / the warning.  Probed s473t6b: perl dies at compile time, PCL compiles and RUNS them, so `$@` is empty and no warning is raised
 op/tr.t	95	ok	(missing)	RT \#132608 len=0x12000	the ruled F6 refusal -- measured s473t6b: the file aborts ONE top-level form with "PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit", and these two rows (`RT #132608 len=0x12000`) are inside it
 op/tr.t	96	ok	(missing)	RT \#132608 len=0x12000 count	the ruled F6 refusal -- measured s473t6b: the file aborts ONE top-level form with "PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit", and these two rows (`RT #132608 len=0x12000`) are inside it
-op/tr.t	307	ok	not ok [PCL #305]	RT \#133880 illegal \N{}
-op/tr.t	6	ok	not ok	UTF-8 range with min > max
-op/tr.t	224	ok	not ok [PCL #222]	doesn't stringify its argument
-op/tr.t	161	ok	not ok [PCL #159]	reversed range check
-op/tr.t	257	ok	not ok [PCL #255]	tr// of \N{name} works for upper-Latin1
-op/tr.t	154	ok	not ok [PCL #152]	tr/a-z-9//
-op/tr.t	250	ok	not ok [PCL #248]	tr/a/b/ fails on zero-length ro string
-op/tr.t	251	ok	not ok [PCL #249]	tr/a/b/ fails on zero-length ro string
+op/tr.t	307	ok	not ok [PCL #305]	RT \#133880 illegal \N{}	NS:Error compatibility for invalid Perl input -- measured s473t6d: an illegal `\N{}` must be `Unknown charname`
+op/tr.t	6	ok	not ok	UTF-8 range with min > max	NS:Error compatibility for invalid Perl input -- measured s473t6d: a UTF-8 range with min > max must be rejected
+op/tr.t	224	ok	not ok [PCL #222]	doesn't stringify its argument	NS:Scalar copy does not preserve reference/SV identity -- measured s473t6d: the row asserts `tr` does not STRINGIFY its argument (it stays a SCALAR ref); PCL's answer is empty
+op/tr.t	161	ok	not ok [PCL #159]	reversed range check	NS:Error compatibility for invalid Perl input -- measured s473t6d: a reversed range must be `Invalid range "m-d"`
+op/tr.t	257	ok	not ok [PCL #255]	tr// of \N{name} works for upper-Latin1	NS:Unicode case folding and property tables -- measured s473t6d: `tr//` of a `\N{name}` upper-Latin1 character; PCL answers the raw byte
+op/tr.t	154	ok	not ok [PCL #152]	tr/a-z-9//	NS:Error compatibility for invalid Perl input -- measured s473t6d: `tr/a-z-9//` must be `Ambiguous range in transliteration operator`
+op/tr.t	250	ok	not ok [PCL #248]	tr/a/b/ fails on zero-length ro string	#936 -- measured s473t6d: `tr/a/b/` on a ZERO-LENGTH read-only string must die `Modification of a read-only value attempted`; PCL accepts it
+op/tr.t	251	ok	not ok [PCL #249]	tr/a/b/ fails on zero-length ro string	#936 -- measured s473t6d: same read-only residue through the other spelling
 op/tr_latin1.t	2	ok	not ok	gh\#17227	NS:Unicode semantics differences -- gh#17227: `tr` on a Latin-1 string
 op/try.t	0	(none)	renumbered	*summary*	#1942 -- the try/catch residue after #340: a `try` block must be INVISIBLE to caller(), `try` must not be usable in a :lvalue sub's return, and `catch` without (VAR) is a compile-time parse error (NS:Error compatibility for invalid Perl input).  The *summary* row is the file's two never-produced rows
 op/try.t	28	ok	not ok [PCL #26]	Parse error for catch without (VAR)	NS:Error compatibility for invalid Perl input -- `catch` without `(VAR)` is a compile-time parse error in perl
