@@ -23242,8 +23242,19 @@ buffer's fill-pointer; everything else falls back to file-length."
           for slot = (if (p-box-p item) item (make-p-box item))  ; stable $_ box, [perl #78194]
           do (let ((r (let ((*wantarray* t)) (funcall fn slot))))
                (cond
+                 ;; ONE COLLECTOR: every value the block returns is copied, on
+                 ;; EVERY result arity (task #2005).  The multi-element arm used
+                 ;; to push the block's own boxes, so `my %m = map { $_ => ++$i }
+                 ;; qw(a b c)` stored $i's BOX three times and every month of a
+                 ;; log parser's table read 12.  perl's pp_mapwhile copies the
+                 ;; values unless they are TEMPs, once per iteration, so the
+                 ;; alias never survives the iteration -- and the single-element
+                 ;; arm below has always done exactly that.  `grep` and `sort`
+                 ;; return ALIASES and must NOT copy: `$_++ for grep { 1 } @a`
+                 ;; writes through to @a.
                  ((and (vectorp r) (not (stringp r)))
-                  (loop for e across r do (vector-push-extend e result)))
+                  (loop for e across r
+                        do (vector-push-extend (%p-map-copy-scalar e) result)))
                  ;; CL nil means "return empty list" (e.g. from (progn) or if-without-else
                  ;; evaluating to false). Perl: map { () } produces 0 elements.
                  ((null r) nil)

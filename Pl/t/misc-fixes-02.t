@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 132;
+plan tests => 136;
 
 sub run_cl {
     my ($code) = @_;
@@ -1364,3 +1364,34 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
           'CANARY: PPI still mis-lexes `$)` under the signatures feature '
         . '(when this FAILS, drop Pl::Parser::_signature_gid_offsets)' );
 }
+
+# ── #2005: map COPIES what its block returns, on EVERY result arity ─────────
+# `my %idx = map { $_ => ++$i } qw(a b c)` was a=3,b=3,c=3: the block's
+# multi-element result list carried $i's BOX, and p-map's multi-element arm
+# pushed the boxes while its single-element arm copied.  perl's pp_mapwhile
+# copies the values unless they are TEMPs, once per iteration, so the alias
+# never survives the iteration.  ONE collector now (rule 11).
+# `grep` and `sort` return ALIASES and must keep doing so — the last two rows.
+test_cl('#2005: map { $_ => ++$i } keeps a per-iteration copy',
+    'my $i = 0; my %m = map { $_ => ++$i } qw(a b c);'
+  . ' print join(",", map { "$_=$m{$_}" } sort keys %m), "\n";',
+    "a=1,b=2,c=3\n");
+
+test_cl('#2005: the same on every multi-element shape',
+    'my $j = 0; my @p = map { ($_, ++$j) } qw(x y);'
+  . ' my $n = 0; my @r = map { $n += 1; ($_, $n) } qw(u v);'
+  . ' my $s = ""; my @t = map { ($_ => ($s .= "x")) } 1..3;'
+  . ' my $e = 0; my @u = map +($_ => ++$e), qw(g h);'
+  . ' print "@p|@r|@t|@u\n";',
+    "x 1 y 2|u 1 v 2|1 x 2 xx 3 xxx|g 1 h 2\n");
+
+test_cl('#2005 negative: grep and sort still return ALIASES',
+    'my @a = (1, 2, 3); $_++ for grep { 1 } @a;'
+  . ' my @b = (3, 1, 2); $_ *= 10 for sort { $a <=> $b } @b;'
+  . ' print "@a|@b\n";',
+    "2 3 4|30 10 20\n");
+
+test_cl('#2005 negative: map still ALIASES $_ to the element it reads',
+    'my @d = (1, 2); my @e = map { $_ *= 2; $_ } @d; print "@d|@e\n";'
+  . ' my @c = (1, 2); $_ .= "!" for map { $_ } @c; print "@c\n";',
+    "2 4|2 4\n1 2\n");
