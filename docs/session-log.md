@@ -2,6 +2,23 @@
 
 Append new entries at the top. One section per session.
 
+## Session 493 (Fable, 2026-09-20 evening) — the stopped batches resumed, t6d merged, #1202 launched; eight NEW WAYS OF RUNNING TESTS tried, each with its yield
+
+USER: "Please continue. Do look for new ways of running tests, to find problems. Present them to me after the session, no hurry." + "keep 2 jobs running too".  The three questions re-asked from s492 were answered at once (DECIDED `## s493`): two agents at a time; README wording proposed in chat only; the everyday battery becomes a permanent on-demand instrument (#2099).
+
+**Agents.**  Both worktrees stopped at s492's token limit were RESUMED IN PLACE from written resume briefs (`~/pcl-agent-scratch/s493/resume-*.md`).  s473t6d owed only its companion verdict — 85 "NEW ROW"s that turned out to be four spliced movers it caused (#1950/#1954) and five pre-existing ones it measured and filed (#1965–#1968: hash-order descriptions in re/pat.t, two unreachable blessed-row spellings, op/gv.t's hang label); merged by fast-forward after Fable's own gate (250 / 8495 PASS) and two probe files run perl → base → tree.  #1202, whose park the USER lifted in s492, took the freed slot with a fresh brief (loader-only fasl cache for the extension artifacts; the ~4 s every Moo program pays for `pack`).
+
+**The angles** (record + every runner: `~/pcl-agent-scratch/s493/angles/`, `bin/`, `corpus/`).  The common method is what made them cheap: PERL IS THE JUDGE OF THE TEST, not only of the answer — a mutated, expanded or extracted program is admitted only if perl's output for it equals the original's (or `perl -c` accepts it), so no transformation has to be proven correct.
+1. *Walk perl's own index.*  perlfunc had never been enumerated against the runtime: a static list (84 of 255 names without a definition, mostly keywords) and 19 one-program probes found telldir/seekdir, gethostby*, getservby*, setpriority and formline absent (#2093) and a silent mojibake: `lc`/`\w` apply Latin-1 rules to bytes 128–255 in a program without `use utf8` (#2092, a design item).  perlvar, perlop, perlre and perlrun are the same walk, not yet done.
+2. *The one-liner list* (perl1line.txt, 177 entries).  `pcl` has none of -n -p -l -a -F -i -0 (#2097).  With each switch expanded into perlrun's documented source form — perl validating the expansion against the real one-liner — 141 of 152 are byte-identical, and the misses include `my ($first, @rest) = <$fh>` reading one line (#2090).
+3. *B::Deparse as a spelling mutator.*  21 of the 77 programs PCL gets right go wrong in Deparse's spelling (25 with -p).  Two shapes blind it (`@{$x;}`, `"${$}"`, #2096); behind them is the non-leading-`local` family in everyday spellings (`$cond and local $x = v;`, `(local $/ = undef);` — never restored; appended to #1192).
+4. *Scope-wrapping variants* (body in a sub, a bare block, a string eval, another package, + strict).  Sub / block / package / strict: 1 worse in 411 runs — those paths are solid.  String eval: `local` on an unqualified package variable never reaches a sibling sub (#2091).
+5. *perl's documentation as a corpus.*  1,618 `perl -c`-valid blocks from 33 pods; pl2cl compiles 98.5 % without a drop.  The misses include perlfaq4's first example: PPI lexes a float followed by `-1` as two numbers (#2095, a new rule-13 bug).
+6. *A complexity-class battery.*  40 everyday operations at N and 4N; perl flags none.  PCL is quadratic in `.=` append loops, `shift` drains and `unshift` (#2098) — 200k shifts take 189 s — and linear in the other 37.  The recursion row crashed: the limit is ~10k frames and untrappable (#1929 amended).
+7. *Process probes that fell out of (1)*: `$$` is stale in a forked child; HUP/USR1 handlers are never installed (#2094).
+8. *A runtime stub census* (functions that ignore every argument and answer a constant): finds the two known stubs, otherwise honest — low yield, run once.
+Still running at the time of writing: the core modules' OWN test suites (2,373 `.t` files in the perl source tree that no runner has ever pointed PCL at; a ten-dist sample) and the Rosetta Code Perl solutions (2,239 fetched; pure-computation subset selected by a static filter and validated by perl).
+
 ## Session s473t6d (Opus agent, 2026-09-20) — #1501 ROUND 11, the LAST op/ round: a tie on an ELEMENT, a foreach list that ran twice, and the band's last 213 causeless rows
 
 **Member 1 — the band, confirmed before a cause was written.**  The 15 files
