@@ -1,4 +1,14 @@
 # taken-at: 5323d9e 2026-08-15
+# s492a (2026-09-20, Opus, EDITED BY HAND -- one row): join.t 41 -> 43 (+2).
+#   Task #1991 -- p-join asked "is this an aggregate to spread?" of the
+#   UNBOXED item, so a blessed hash REF among its arguments was spread into
+#   its key/value pairs (i.e. into nothing, since :__class__ is not a real
+#   key) instead of being stringified through its `""` overload.  The two
+#   GH #21484 rows ("modifications delim from magic should be ignored",
+#   "modifications to delim PVX shouldn't crash") assert exactly that
+#   stringification and now pass; their two cl/skip-registry.lisp entries
+#   reported REGISTRY-STALE and were removed in the same commit, and
+#   baselines/row-shortfall.tsv's join.t row went 2 -> 0.
 # s473t6c (2026-09-19, Opus, EDITED BY HAND -- one row): kvhslice.t 21 -> 22 (+1).
 #   Task #1923 -- a kv-slice in SCALAR context is its LAST value, not the COUNT
 #   of the flattened key/value list.  perl-tests/kvhslice.t:53
@@ -412,7 +422,7 @@ index.t	OK	120	0	120
 infnan.t	OK	1106	0	1112
 int.t	OK	19	0	19
 isa.t	OK	14	0	14
-join.t	OK	41	0	43
+join.t	OK	43	0	43
 kvaslice.t	OK	17	0	17
 kvhslice.t	OK	22	2	39
 lc.t	OK	82	0	2659

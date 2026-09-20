@@ -23112,9 +23112,34 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; List Functions
 ;;; ============================================================
 
+;;; ── WHAT SPREADS IN A LIST, AND WHAT IS ONE ELEMENT (task #1991) ──────────
+;;; A list operator's argument list flattens `@array` and `%hash` and leaves
+;;; everything else alone — and a REFERENCE to an array is one of the things it
+;;; must leave alone.  The two arrive in the IR as: a RAW non-string vector (an
+;;; array's live storage, which is what `@a`, `@$r`, `keys`, a sub's list
+;;; return and the emitter's own `(vector …)` all hand over) versus a vector
+;;; INSIDE A P-BOX (what `p-backslash` of an array builds, what a hash or array
+;;; element holding an array ref contains, what `[…]` makes).  So the test is
+;;; on the ITEM AS IT ARRIVES, never on `(unbox item)`.
+;;;
+;;; `p-flatten-args` — the @_ builder — has always read it that way, which is
+;;; why `f(\@a, \@b)`, `push @l, \@a, \@b` and `for (\@a, \@b)` were right
+;;; while `map { ref } \@a, \@b` answered two empty strings: the collectors
+;;; below unboxed first and spread the referent (task #1991, a silent wrong —
+;;; element VALUES where perl gives refs).  One predicate now, read by every
+;;; collector, so the two answers cannot drift again (CLAUDE.md rule 11).
+(declaim (inline %p-spread-vector-p))
+(defun %p-spread-vector-p (item)
+  "True when ITEM is an @array to be SPREAD into a list, rather than one
+   element.  See the note above: a raw non-string vector spreads; a p-box
+   wrapping one is an array REFERENCE and is a single element."
+  (and (vectorp item) (not (stringp item))))
+
 (defun %p-collect-list (&rest items)
   "Collect &rest args into a flat vector.
-   Pl-boxes wrapping vectors (@arrays) are flattened into individual elements.
+   RAW vectors (@arrays) are flattened into individual elements; a vector
+   inside a p-box is an array REFERENCE and stays one element
+   (%p-spread-vector-p).
    p-flatten-markers (from ->import/->unimport empty returns) contribute 0 elements.
    Used by p-map and p-grep to handle both (fn @arr) and (fn a b c) forms."
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
@@ -23132,21 +23157,18 @@ buffer's fill-pointer; everything else falls back to file-length."
                            ((p-box-p x) x)
                            (t (%p-elem-cell src j)))
                      result))))
-        (t
-         (let ((val (unbox item)))
-           (cond
-             ((and (vectorp val) (not (stringp val)))
-              (loop for j from 0
-                    for x across val
-                    do (vector-push-extend
-                        (cond ((null x) (%p-defelem-box val j))
-                              ((p-box-p x) x)
-                              (t (%p-elem-cell val j)))
-                        result)))
-             ;; Raw %hash (not a ref): spread to key/value pairs in list context.
-             ((and (hash-table-p val) (not (p-box-p item)))
-              (dolist (kv (%p-hash-keyval-list val)) (vector-push-extend kv result)))
-             (t (vector-push-extend item result)))))))
+        ((%p-spread-vector-p item)
+         (loop for j from 0
+               for x across item
+               do (vector-push-extend
+                   (cond ((null x) (%p-defelem-box item j))
+                         ((p-box-p x) x)
+                         (t (%p-elem-cell item j)))
+                   result)))
+        ;; Raw %hash (not a ref): spread to key/value pairs in list context.
+        ((hash-table-p item)
+         (dolist (kv (%p-hash-keyval-list item)) (vector-push-extend kv result)))
+        (t (vector-push-extend item result))))
     result))
 
 (defun %p-map-copy-scalar (r)
@@ -23404,21 +23426,22 @@ buffer's fill-pointer; everything else falls back to file-length."
    T when every element was plain; NIL — OUT then meaningless — as soon as one
    was not, which sends the whole sort to the generic path.
 
-   The walk knows exactly TWO shapes: a vector (an @array box or a raw list
-   value), whose slots are read as they stand, and a plain scalar.  Every
+   The walk knows exactly TWO shapes: a RAW vector (an @array's storage or a
+   raw list value — %p-spread-vector-p, the same reading %p-collect-list
+   makes), whose slots are read as they stand, and a plain scalar.  Every
    other shape %p-collect-list knows about — a flatten marker, a raw %hash, a
-   hole — answers NIL here and is flattened by %p-collect-list itself on the
-   fallback, so the general flattening rules stay in one place."
+   hole, an array REFERENCE — answers NIL here and is flattened by
+   %p-collect-list itself on the fallback, so the general flattening rules
+   stay in one place."
   (dolist (item items t)
-    (let ((val (unbox item)))
-      (if (and (vectorp val) (not (stringp val)))
-          (dotimes (j (length val))
-            (let ((p (%p-plain-scalar (aref val j))))
-              (unless p (return-from %p-sort-collect-plain nil))
-              (vector-push-extend p out)))
-          (let ((p (%p-plain-scalar item)))
+    (if (%p-spread-vector-p item)
+        (dotimes (j (length item))
+          (let ((p (%p-plain-scalar (aref item j))))
             (unless p (return-from %p-sort-collect-plain nil))
-            (vector-push-extend p out))))))
+            (vector-push-extend p out)))
+        (let ((p (%p-plain-scalar item)))
+          (unless p (return-from %p-sort-collect-plain nil))
+          (vector-push-extend p out)))))
 
 ;;; ── THE CLASSIC SORT'S PER-CALL CONSTANT (task #1810) ──────────────────────
 ;;; 20 000 sorts of 50 elements, profiled (s473v, sb-sprof self time):
@@ -23629,11 +23652,33 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Scalar context: join all items into a string and reverse characters
       (let ((str (with-output-to-string (s)
                    (dolist (item items)
-                     (let ((val (unbox item)))
-                       (if (and (vectorp val) (not (stringp val)))
-                           (loop for x across val do (write-string (to-string x) s))
-                           (write-string (to-string item) s)))))))
+                     (if (%p-spread-vector-p item)
+                         (loop for x across item do (write-string (to-string x) s))
+                         (write-string (to-string item) s))))))
         (nreverse (copy-seq str)))))
+
+(defun %p-join-args (item)
+  "The FRESH list of values one join(SEP, LIST) argument contributes: an
+   @array's or %hash's elements, a spliced value group, or the single scalar
+   ITEM is.  The list is fresh, so p-join nconcs it.
+
+   An aggregate reached only by UNBOXING is a REFERENCE and contributes
+   ITSELF, not its referent's elements (%p-spread-vector-p, task #1991) — the
+   BOX, so it stringifies as ARRAY(0x…)/HASH(0x…) rather than as the raw
+   storage.  The scalar arm reads ITEM ONCE (a tie FETCHes here, and to-string
+   on the value read out does not FETCH again)."
+  (cond
+    ((%p-spread-vector-p item) (coerce item 'list))
+    ((hash-table-p item) (%p-hash-keyval-list item))
+    (t
+     (let ((val (unbox item)))
+       (cond
+         ((and (listp val) val) (copy-list val))
+         ((or (%p-spread-vector-p val) (hash-table-p val)) (list item))
+         (t
+          (when (or (null val) (eq val *p-undef*))
+            (p-warn (format nil "Use of uninitialized value in join or string~%")))
+          (list val)))))))
 
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
@@ -23646,15 +23691,16 @@ buffer's fill-pointer; everything else falls back to file-length."
                        (not (%pcl-definedp sep)))
               (p-warn (format nil "Use of uninitialized value in join or string~%"))))
          ;; Pre-count items WITHOUT calling FETCH (to decide sep evaluation)
-         ;; Tied scalars in items are counted as 1 without fetching
+         ;; Tied scalars in items are counted as 1 without fetching.
+         ;; A vector or hash inside a p-box is a REFERENCE and counts 1
+         ;; (%p-spread-vector-p, task #1991) — only raw storage spreads.
          (item-count (loop for item in items
-                           for raw = (if (p-box-p item) (p-box-value item) item)
-                           if (and (vectorp raw) (not (stringp raw)))
-                           sum (length raw)
-                           else if (hash-table-p raw)
-                           sum (* 2 (%p-hash-user-count raw))
-                           else if (and (listp raw) raw)
-                           sum (length raw)
+                           if (%p-spread-vector-p item)
+                           sum (length item)
+                           else if (hash-table-p item)
+                           sum (* 2 (%p-hash-user-count item))
+                           else if (and (listp item) item)
+                           sum (length item)
                            else sum 1))
          ;; Perl optimization: sep is NOT evaluated when ≤1 elements
          ;; (FETCH not called on tied separator — matches Perl's join optimization)
@@ -23662,19 +23708,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (s (when (> item-count 1) (to-string sep)))
          ;; Now flatten and evaluate elements (FETCH called for tied element vars).
          ;; Warn for each undef element (Perl uses-of-uninitialized-value warning).
-         (elements (loop for item in items
-                         for val = (unbox item)
-                         if (and (vectorp val) (not (stringp val)))
-                         append (coerce val 'list)
-                         else if (hash-table-p val)
-                         append (%p-hash-keyval-list val)
-                         else if (and (listp val) val)
-                         append val
-                         else
-                         collect (progn
-                                   (when (or (null val) (eq val *p-undef*))
-                                     (p-warn (format nil "Use of uninitialized value in join or string~%")))
-                                   val))))
+         (elements (loop for item in items nconc (%p-join-args item))))
     (declare (ignore _))
     (if s
         (format nil (concatenate 'string "~{~A~^" s "~}")

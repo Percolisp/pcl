@@ -600,13 +600,14 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
 ;;     sub does not reach the caller's loop (task #1022); the labelled twin
 ;;     row 40 passes.  In a `for` loop the exit is silently ignored, in a
 ;;     `while` loop it dies "attempt to GO to nonexistent tag: :next".
-(register-skips "join.t"
-                ("modifications delim from magic should be ignored"
-                 :utf8
-                 "compares fresh_perl output byte-for-byte after utf8::encode -- PCL's utf8::encode is a no-op (no per-scalar UTF-8 flag). not-supported.md: 'Unicode semantics differences'.")
-                ("modifications to delim PVX shouldn't crash"
-                 :utf8
-                 "same byte-level comparison after utf8::encode. not-supported.md: 'Unicode semantics differences'."))
+;; join.t's two GH #21484 rows ("modifications delim from magic should be
+;; ignored", "modifications to delim PVX shouldn't crash") were registered as
+;; :utf8 on the grounds that utf8::encode was a no-op.  That reason went stale
+;; twice over -- #1221 (s470br) made utf8::encode real, and #1991 (s492a) made
+;; p-join stringify a blessed hash REF through its `""` overload instead of
+;; spreading it into its key/value pairs -- so both rows PASS and reported
+;; REGISTRY-STALE.  The entries go; dropping a stale entry is count-neutral by
+;; construction (the registry only ever relabels a FAILING row).
 
 (register-skips "reset.t"
                 ("match doesn't match second time"

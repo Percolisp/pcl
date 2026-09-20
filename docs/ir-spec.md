@@ -513,6 +513,27 @@ Dereference ops unwrap one level. Reference identity = identity of the
 referenced structure. Stringification of a reference yields
 `"HASH(0x…)"`-style text; numification yields the object address.
 
+**WHAT SPREADS IN A LIST IS DECIDED ON THE ITEM AS IT ARRIVES, NEVER ON
+`(unbox item)` (normative, s492a, task #1991).**  A list operator flattens
+`@array` and `%hash` and leaves every other value alone — and a REFERENCE to
+an array or hash is one of the values it must leave alone.  The two arrive
+differently and that difference IS the answer: an array being flattened is a
+**raw** non-string vector (an array's live storage, what `@a`, `@$r`, `keys`,
+a sub's list return and the emitter's own `(vector …)` all hand over), while
+`(p-backslash @a)`, `[…]` and any container slot holding an array ref hand
+over a vector **inside a p-box**.  A collector that unboxes first spreads the
+referent, which is a silent wrong — `map { ref } \@a, \@b` answered two empty
+strings (`@b`'s elements) where perl answers `ARRAY, ARRAY`.  The predicate is
+`%p-spread-vector-p` and every collector reads it (`%p-collect-list`, hence
+`p-map`/`p-grep`/`p-sort`/`p-reverse`; `%p-sort-collect-plain`; `p-join`);
+`p-flatten-args`, the `@_` builder, has always read it this way, which is why
+`f(\@a, \@b)` and `push @l, \@a, \@b` were never affected.
+
+```lisp
+(p-map FN (p-backslash @b))   ; ONE element: the array ref
+(p-map FN @b)                 ; @b's elements
+```
+
 **The printed type and the address are properties of the REFERENT, never of
 the wrapper** (normative, task #163). `\` allocates a fresh wrapper on every
 evaluation, so any rule that reads the wrapper makes `\$x == \$x` false and
