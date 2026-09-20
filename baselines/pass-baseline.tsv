@@ -1,4 +1,14 @@
 # taken-at: 5323d9e 2026-08-15
+# s492b (2026-09-21, Opus, EDITED BY HAND -- one row): pack.t 5636/89 -> 5637/88.
+#   cl/pcl-pack.lisp is cl/pack-impl.pl transpiled, and s492b regenerated it at
+#   generation v2-1740, so the batch's own emission fixes reach pack's
+#   implementation.  MEASURED, not assumed: a 5ce155cb extraction (carrying
+#   main's v2-1700 artifact) runs the same file at 5636/89 and this tree at
+#   5637/88 -- one row ARRIVED, which is what the s492b brief expects of the
+#   sprintf / pack / die family.  The sweep GATE is clean (0 new, 0 fixed).
+#   NOT EDITED, and pre-existing: method.t reads PARTIAL 76/23 here AND on that
+#   same extraction while this file says 76/22 -- its abort point moves, its
+#   PASS count does not, and nothing in s492b touches it.
 # s492a (2026-09-20, Opus, EDITED BY HAND -- one row): join.t 41 -> 43 (+2).
 #   Task #1991 -- p-join asked "is this an aggregate to spread?" of the
 #   UNBOXED item, so a blessed hash REF among its arguments was spread into
@@ -476,7 +486,7 @@ num.t	OK	56	0	56
 oct.t	OK	79	0	79
 or.t	OK	11	2	14
 ord.t	OK	38	0	38
-pack.t	OK	5636	89	14722
+pack.t	OK	5637	88	14722
 parent.t	OK	7	2	9
 pos.t	OK	15	15	30
 # s446j (#517): postfixderef.t 95 -> 96 EDITED BY HAND — the same `ref(\&{""})` row as ref.t's
