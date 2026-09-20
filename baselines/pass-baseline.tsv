@@ -500,7 +500,7 @@ qr.t	OK	23	14	37
 quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
 readline.t	PARTIAL	25	5	36
-recurse.t	OK	27	1	28
+recurse.t	OK	26	2	28
 # s428 (#411 elided-arrow call): ref.t 191 -> 192 EDITED BY HAND — `(sub{})[0]()` (line 674) no longer DROPS.
 # s446j (#517): ref.t 192 -> 193 EDITED BY HAND — `ref(\&{""})` is CODE, as perl says
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
@@ -514,7 +514,7 @@ recurse.t	OK	27	1	28
 #   here) and by the sweep serially ("Still losing rows after a serial re-run: magic.t").  The
 #   file's 31 failing rows are the SAME 31 (their numbers shift by 2), so fail-baseline.tsv is
 #   unchanged; baselines/row-shortfall.tsv perl-tests/magic.t 19 -> 21 in the same commit.
-ref.t	PARTIAL	196	15	245
+ref.t	PARTIAL	195	16	245
 reset.t	OK	22	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
