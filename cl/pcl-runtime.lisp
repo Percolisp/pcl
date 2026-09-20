@@ -25592,9 +25592,38 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
     (make-p-typeglob pkg (%pcl-invert-case name-str))))
 
+(defun %p-glob-rhs-slot-kind (rhs)
+  "WHICH SLOT of a typeglob a glob-assignment RHS names: :code, :scalar,
+   :array, :hash, :all (a glob or a symbolic alias — every slot) or :none
+   (undef, which assigns nothing).
+
+   THE ONE READING of that question, and %p-glob-assign-slots dispatches on it
+   so the two cannot drift.  It exists because `local` needs the answer before
+   the assignment happens: perl's `local *name = \\$x` saves and replaces ONLY
+   the slot the reference names, leaving every other slot of the glob alone —
+   which is what makes the everyday test mock `local *Pkg::f = sub {…}` leave
+   `$Pkg::f`/`@Pkg::f` intact, and what makes core File::Find work at all
+   (`_find_opt` opens with `local *_ = \\my $a;` and then loops over `@_`;
+   clearing the whole glob emptied its argument list and `find()` silently
+   visited nothing — task #2080).  Bare `local *name` and `local *name =
+   *other` DO localize the whole glob, which is :none's and :all's case."
+  (let ((inner (if (p-box-p rhs) (unbox rhs) rhs)))
+    (cond ((p-typeglob-p rhs)   :all)
+          ((p-typeglob-p inner) :all)
+          ((functionp inner)    :code)
+          ((p-box-p inner)      :scalar)
+          ((and (vectorp inner) (adjustable-array-p inner)) :array)
+          ((hash-table-p inner) :hash)
+          ((stringp inner)      :all)
+          ((or (null inner) (eq inner *p-undef*)) :none)
+          ((functionp rhs)      :code)
+          (t                    :none))))
+
 (defun %p-glob-assign-slots (pkg uname rhs)
   "Assign RHS to the appropriate slot of typeglob (PKG package-object, UNAME
-   already-upcased name string).  Dispatch is by type of the unwrapped RHS.
+   already-upcased name string).  Dispatch is by type of the unwrapped RHS —
+   the same reading %p-glob-rhs-slot-kind names, which `local` consults to
+   decide which slots to clear.
    Shared by p-glob-assign (name-string form) and the glob-REF form of
    p-glob-assign-dynamic (*{\\*Pkg::name} = val)."
   (let ((inner (if (p-box-p rhs) (unbox rhs) rhs)))
@@ -26021,8 +26050,14 @@ buffer's fill-pointer; everything else falls back to file-length."
           (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))
           (gethash code-sym *p-declared-subs*)))
 
-(defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym)
-  "Reset the four glob slots to fresh empties (Perl: local *foo starts fresh).
+(defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym &optional (kind :all))
+  "Reset glob slots to fresh empties (Perl: local *foo starts fresh).
+
+   KIND says WHICH slots, and it is %p-glob-rhs-slot-kind's answer for the
+   value being assigned: :all for bare `local *foo` and `local *foo = *bar`,
+   and one of :code/:scalar/:array/:hash when a REFERENCE names a single slot
+   — perl replaces only that one and leaves the rest of the glob alone
+   (task #2080).  :none clears nothing.
 
    The empties come from %p-glob-empty-slot, the ONE reading of what an emptied
    slot holds — this function spelled all three inline, which is the rule-11
@@ -26033,14 +26068,24 @@ buffer's fill-pointer; everything else falls back to file-length."
    empty the container and remember that it did (task #1117's model; this is
    its THIRD clear path).  The residue is #1117's: a READ of @a re-vivifies the
    slot in perl and not here (docs/not-supported.md)."
-  (when (fboundp code-sym) (fmakunbound code-sym))
-  (setf (symbol-value scalar-sym) (%p-glob-empty-slot "$"))
-  (let ((arr (%p-glob-empty-slot "@"))
-        (hsh (%p-glob-empty-slot "%")))
-    (setf (symbol-value array-sym) arr
-          (symbol-value hash-sym) hsh
-          (gethash arr *p-removed-agg-slots*) t
-          (gethash hsh *p-removed-agg-slots*) t)))
+  ;; The CODE slot's *p-declared-subs* entry is part of it: `defined &foo`
+  ;; reads THAT, never fboundp, so clearing the function alone left `defined
+  ;; &X` true inside `local *X` with nothing to call (%p-glob-save saves the
+  ;; entry and %p-glob-restore puts it back — only the clear half was missing).
+  (when (member kind '(:all :code))
+    (when (fboundp code-sym) (fmakunbound code-sym))
+    (remhash code-sym *p-declared-subs*))
+  (when (member kind '(:all :scalar))
+    (setf (symbol-value scalar-sym) (%p-glob-empty-slot "$")))
+  (when (member kind '(:all :array))
+    (let ((arr (%p-glob-empty-slot "@")))
+      (setf (symbol-value array-sym) arr
+            (gethash arr *p-removed-agg-slots*) t)))
+  (when (member kind '(:all :hash))
+    (let ((hsh (%p-glob-empty-slot "%")))
+      (setf (symbol-value hash-sym) hsh
+            (gethash hsh *p-removed-agg-slots*) t)))
+  (values))
 
 (defun %p-glob-restore (saved code-sym scalar-sym array-sym hash-sym)
   "Restore the four glob slots from a %p-glob-save snapshot."
@@ -26208,16 +26253,35 @@ buffer's fill-pointer; everything else falls back to file-length."
            (,@localizer (,b))
            (,b)))))
 
-(defmacro p-local-glob (pkg-str name-str &body body)
-  "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
-   execute body, restore on exit."
+(defmacro p-local-glob (pkg-str name-str rhs-form &body body)
+  "`local *pkg::name` and `local *pkg::name = RHS`: save all four slots, clear
+   the ones RHS replaces, assign, run BODY, restore on exit.
+
+   RHS-FORM :none is the assignment-less spelling `local *foo` — the same
+   marker p-local-glob-if and p-local-glob-dynamic use — and it clears the
+   WHOLE glob, as perl does.  With a value, only the slot the value names is
+   cleared (%p-glob-rhs-slot-kind): perl's `local *_ = \\my $a` replaces the
+   SCALAR slot and leaves @_ alone, and clearing everything is what made core
+   File::Find's `find()` visit nothing (task #2080).
+
+   RHS-FORM is evaluated FIRST, before anything is saved or cleared: localizing
+   *_ clears the @_ slot, so an RHS that reads @_ (Text::ParseWords'
+   `local *_ = \\join('', @_)`) must see the old one.  The codegen used to do
+   that with a wrapping `let`; it is the macro's job because the macro is what
+   knows the order."
   (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
-        (sv (gensym "SAVED")))
-    `(multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
-       (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
-         (%p-glob-clear ,cs ,ss ,as ,hs)
-         (unwind-protect (progn ,@body)
-           (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
+        (sv (gensym "SAVED")) (rv (gensym "RHS")) (kd (gensym "KIND")))
+    `(let ((,rv ,(if (eq rhs-form :none) nil rhs-form)))
+       (declare (ignorable ,rv))
+       (multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
+         (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs))
+               (,kd ,(if (eq rhs-form :none) :all `(%p-glob-rhs-slot-kind ,rv))))
+           (%p-glob-clear ,cs ,ss ,as ,hs ,kd)
+           ,@(if (eq rhs-form :none)
+                 nil
+                 `((p-glob-assign ,pkg-str ,name-str ,rv)))
+           (unwind-protect (progn ,@body)
+             (%p-glob-restore ,sv ,cs ,ss ,as ,hs)))))))
 
 (defmacro p-local-glob-if (cond-form pkg-str name-str rhs-form &body body)
   "The deprecated conditional-local idiom `local *foo = RHS if COND`
@@ -26240,9 +26304,9 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
          (when ,cond-form
            ,(if (eq rhs-form :none)
-                `(%p-glob-clear ,cs ,ss ,as ,hs)
+                `(%p-glob-clear ,cs ,ss ,as ,hs :all)
                 `(let ((,rv ,rhs-form))
-                   (%p-glob-clear ,cs ,ss ,as ,hs)
+                   (%p-glob-clear ,cs ,ss ,as ,hs (%p-glob-rhs-slot-kind ,rv))
                    (p-glob-assign ,pkg-str ,name-str ,rv))))
          (unwind-protect (progn ,@body)
            (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
@@ -26272,7 +26336,10 @@ buffer's fill-pointer; everything else falls back to file-length."
          (multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms-in ,pk ,un)
            (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
              (when ,cond-form
-               (%p-glob-clear ,cs ,ss ,as ,hs)
+               (%p-glob-clear ,cs ,ss ,as ,hs
+                              ,(if (eq rhs-form :none)
+                                   :all
+                                   `(%p-glob-rhs-slot-kind ,rv)))
                ,@(if (eq rhs-form :none)
                      nil
                      `((%p-glob-assign-slots ,pk ,un ,rv))))

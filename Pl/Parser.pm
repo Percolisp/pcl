@@ -4381,20 +4381,17 @@ sub _process_local_declaration {
         $self->{_local_let_depth}++;
       } else {
         # Perl evaluates the RHS of `local *foo = EXPR` in the ENCLOSING scope,
-        # BEFORE *foo is localized.  This matters because localizing *_ clears the
-        # @_ slot too, so an RHS that reads @_ (e.g. local *_ = \join('', @_), the
-        # Text::ParseWords idiom) must see the old @_.  Bind the RHS in a wrapping
-        # let so it is computed before p-local-glob clears slots.
-        $self->{_local_glob_counter} //= 0;
-        my $rhs_tmp = '--local-glob-rhs--' . $self->{_local_glob_counter}++;
-        $self->_emit("(let (($rhs_tmp $rhs_cl))");
+        # BEFORE *foo is localized (localizing *_ clears the @_ slot, so an RHS
+        # that reads @_ — Text::ParseWords' `local *_ = \join('', @_)` — must
+        # see the old @_), and it replaces ONLY the slot the RHS names
+        # (task #2080).  Both are p-local-glob's job now: it takes the RHS in
+        # the same slot p-local-glob-if and p-local-glob-dynamic take theirs.
+        # This used to be a wrapping `let` plus a `p-glob-assign` as the first
+        # body form, which cleared the WHOLE glob before assigning one slot.
+        $self->_emit("(p-local-glob \"$pkg\" \"$name\" $rhs_cl");
         $self->indent_level($self->indent_level + 1);
-        $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
-        $self->indent_level($self->indent_level + 1);
-        $self->_emit("(p-glob-assign \"$pkg\" \"$name\" $rhs_tmp)");
-        # Two wrapping forms (let + p-local-glob) → two closing parens at scope end.
         $self->{_local_let_depth} //= 0;
-        $self->{_local_let_depth} += 2;
+        $self->{_local_let_depth} += 1;
       }
     } elsif ($lmod ne '') {
       # `local *foo if COND` — no RHS (task #508).  Perl clears the glob only
@@ -4407,7 +4404,8 @@ sub _process_local_declaration {
       $self->{_local_let_depth} //= 0;
       $self->{_local_let_depth}++;
     } else {
-      $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
+      # Bare `local *foo` localizes the WHOLE glob — `:none` in the value slot.
+      $self->_emit("(p-local-glob \"$pkg\" \"$name\" :none");
       $self->indent_level($self->indent_level + 1);
       $self->{_local_let_depth} //= 0;
       $self->{_local_let_depth}++;
