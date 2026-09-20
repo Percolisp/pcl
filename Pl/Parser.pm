@@ -570,7 +570,7 @@ sub _ppi_new {
   my $doc = PPI::Document->new(\$src,
                                custom_feature_include_cb => \&_pcl_feature_include_cb,
                                %opt);
-  _restore_signature_gid($doc, \@gid_at) if $doc && @gid_at;
+  _restore_signature_gid($doc, $src, \@gid_at) if $doc && @gid_at;
   return $doc;
 }
 
@@ -603,13 +603,58 @@ sub _ppi_new {
 # the token is put back to `$)` after the parse by the same offset walk.  What
 # the rest of the compiler sees is a `PPI::Token::Magic` with content `$)`.
 sub _restore_signature_gid {
-  my ($doc, $at) = @_;
+  my ($doc, $src, $at) = @_;
   my %want = map { $_ => 1 } @$at;
-  my $off  = 0;
-  for my $t (@{ $doc->find('PPI::Token') || [] }) {
-    my $len = length($t->content);
+  _walk_token_offsets($src, $doc->find('PPI::Token') || [], sub {
+    my ($t, $off) = @_;
     $t->set_content('$)') if $want{$off} && $t->content eq '$;';
-    $off += $len;
+  });
+  return;
+}
+
+# THE ONE SOURCE-OFFSET WALK over a PPI token stream — both halves of the
+# repair above use it, because the two must agree byte for byte or a token is
+# replaced and never put back (s493 review fix).
+#
+# PPI'S STREAM DOES NOT COVER THE SOURCE BYTE FOR BYTE, which the first version
+# of this repair assumed.  Measured over perl's own t/ (551 files), a running
+# sum of `length($t->content)` drifts in 45 of them, for two reasons:
+#   * a HereDoc token's content is its `<<MARKER` alone — the BODY and the
+#     terminator line live in the token object and never enter the stream
+#     (271 bytes on t/op/stat.t, from line 158 on, which put the `$;` over an
+#     unrelated statement twelve lines earlier and DROPPED it), and
+#   * at `__END__` / `__DATA__` the stream stops matching the source.
+# Both are handled here: the body is skipped in the SOURCE by its own line
+# count, and the walk STOPS at the data separator, where perl's code ends —
+# after which 549 of the 551 walk byte-exact, and the two that do not contain
+# no `$)` at all.  Every consumer also VERIFIES the source text at the offset
+# before it touches anything, so a residual drift can only lose a repair
+# (leaving the PPI bug visible, which is loud) and never corrupt a file.
+sub _walk_token_offsets {
+  my ($src, $tokens, $cb) = @_;
+  my $off = 0;
+  my @pending;                     # heredocs whose body is still ahead of $off
+  for my $t (@$tokens) {
+    my $ref = ref $t;
+    return if $ref eq 'PPI::Token::Separator' || $ref eq 'PPI::Token::End'
+           || $ref eq 'PPI::Token::Data';
+    my $c = $t->content;
+    $c = '' if !defined $c;
+    $cb->($t, $off);
+    $off += length $c;
+    push @pending, $t if $ref eq 'PPI::Token::HereDoc';
+    next if !@pending || index($c, "\n") < 0;
+    # The marker's line has ended, so the bodies start here, in the order the
+    # markers appeared: each is its own lines plus the terminator line.
+    for my $hd (@pending) {
+      my $lines = 1 + scalar(my @body = $hd->heredoc);
+      while ($lines-- > 0) {
+        my $nl = index($src, "\n", $off);
+        if ($nl < 0) { $off = length $src; last }
+        $off = $nl + 1;
+      }
+    }
+    @pending = ();
   }
   return;
 }
@@ -627,20 +672,21 @@ sub _restore_signature_gid {
 # So "a Magic token whose content is `$)`" is exactly the set to repair, with
 # no signature/paren analysis at all.
 #
-# The token stream concatenates to the source, so the running length IS each
-# token's byte offset.
+# Each token's byte offset comes from `_walk_token_offsets` below, and the
+# SOURCE has the last word: an offset is used only when the two bytes there
+# really are `$)`.
 sub _signature_gid_offsets {
   my ($src) = @_;
   return () if index($src, '$)') < 0;
   my $tok = eval { PPI::Tokenizer->new(\$src) } or return ();
   my $all = eval { $tok->all_tokens } or return ();
-  my (@at, $off);
-  $off = 0;
-  for my $t (@$all) {
-    my $c = $t->content;
-    push @at, $off if $c eq '$)' && ref($t) eq 'PPI::Token::Magic';
-    $off += length $c;
-  }
+  return () if ref($all) ne 'ARRAY';
+  my @at;
+  _walk_token_offsets($src, $all, sub {
+    my ($t, $off) = @_;
+    return if ref($t) ne 'PPI::Token::Magic' || $t->content ne '$)';
+    push @at, $off if substr($src, $off, 2) eq '$)';
+  });
   return @at;
 }
 

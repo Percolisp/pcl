@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 35;
 
 sub write_pl {
     my ($code) = @_;
@@ -383,4 +383,47 @@ PL
 both_agree(<<'PL', '`$)` with NO feature pragma is unchanged (control)');
 sub f { my $x = $); return ($x =~ /^\d+/) ? "num" : "other" }
 print f(), "\n";
+PL
+
+# A HEREDOC BEFORE THE `$)` (s493 review fix).  PPI's token stream does not
+# cover the source byte for byte -- a heredoc's BODY and terminator line are
+# in the token object, not in the stream -- so the first version of the repair
+# computed every later offset too small and wrote its two-byte replacement
+# over an UNRELATED statement, which was then dropped (perl's own t/op/stat.t,
+# found by the gate-SET scan: 271 bytes of drift from line 158).  Both halves
+# of the repair now walk the source heredoc-aware, and each offset is verified
+# against the source text before anything is written.
+both_agree(<<'PL', 'a HEREDOC before `$)` does not shift the repair (2 heredocs)');
+use v5.36;
+my $a = <<"ONE";
+alpha
+beta
+ONE
+my $b = <<'TWO';
+gamma
+TWO
+my @g = split /\s+/, $);
+print "a=$a" . "b=$b" . "n=" . (@g > 0 ? "some" : "none") . "\n";
+print "still-here\n";
+PL
+
+# Two heredocs started on the SAME line: both bodies are skipped, in order.
+both_agree(<<'PL', 'two heredocs on ONE line, then `$)`');
+use v5.36;
+my ($x, $y) = (<<"A", <<"B");
+aaa
+A
+bbb
+B
+my $g = $);
+print "x=$x" . "y=$y" . (($g =~ /^\d+/) ? "gid-ok" : "gid-bad") . "\n";
+PL
+
+# `$)` AFTER __END__ is not code, and the walk stops there.
+both_agree(<<'PL', '`$)` in an __END__ section is left alone');
+use v5.36;
+my $g = $);
+print(($g =~ /^\d+/) ? "ok\n" : "bad\n");
+__END__
+$) is not code here
 PL
