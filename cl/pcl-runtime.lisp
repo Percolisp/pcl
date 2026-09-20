@@ -22035,13 +22035,30 @@ buffer's fill-pointer; everything else falls back to file-length."
   nil)
 
 (defun %p-note-fasl-failure (fasl-path reason)
-  "Record that FASL-PATH could not be built.  Not fatal: the module still
-   loads, from its text, and the only loss is speed."
+  "Record that FASL-PATH could not be BUILT.  Not fatal: the module still
+   loads, from its text, and the only loss is speed.
+
+   THE MARKER MEANS \"a build of this failed recently\" and nothing else, so
+   only the build path writes one — see %P-NOTE-FASL-UNREADABLE for the other
+   two ways a fasl can fail to be used."
   (ignore-errors
     (with-open-file (out (%p-fasl-failed-marker fasl-path)
                          :direction :output :if-exists :supersede)
       (format out "~A~%" reason)))
   (%p-fasl-note "PCL: module fasl build failed (~A): ~A~%"
+                (file-namestring fasl-path) reason))
+
+(defun %p-note-fasl-unreadable (fasl-path reason)
+  "Say that FASL-PATH could not be READ — a leftover from an older key scheme,
+   a file truncated by a crash or a full disk, or one a sibling process pruned
+   between the validity check and the LOAD (task #1338).
+
+   NO .failed MARKER, deliberately (s1202).  The marker refuses a REBUILD for
+   an hour, which is right when a compile has just failed and would fail again
+   — and wrong here: nothing was built, the broken file has been deleted, and
+   the next build is the very thing that fixes the entry.  Writing one meant a
+   single truncated fasl cost an hour of loading from text."
+  (%p-fasl-note "PCL: fasl unreadable, will rebuild (~A): ~A~%"
                 (file-namestring fasl-path) reason))
 
 (defun %p-build-module-fasl (lisp-path fasl-path)
@@ -22097,7 +22114,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (progn (handler-bind ((warning #'muffle-warning)) (load fasl-path))
              t)
     (sb-fasl::invalid-fasl (e)
-      (%p-note-fasl-failure fasl-path e)
+      (%p-note-fasl-unreadable fasl-path e)
       (ignore-errors (delete-file fasl-path))
       nil)
     ;; ... and the same answer when the file itself has GONE between the
@@ -22107,7 +22124,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; still propagates and cannot be re-run from the text.
     (file-error (e)
       (when (probe-file fasl-path) (error e))
-      (%p-note-fasl-failure fasl-path e)
+      (%p-note-fasl-unreadable fasl-path e)
       nil)))
 
 ;;; ── PRUNE BY LAST USE (task #1300, F2; #682 folds in) ─────────────────
