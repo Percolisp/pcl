@@ -3689,3 +3689,33 @@ value:
 
 `lib/POSIX.pm`'s errno, `O_*` and `F_*` numbers are Linux's, like
 `lib/Fcntl.pm`'s and `lib/Errno.pm`'s; that portability gap is unchanged here.
+
+## Regex escapes that are still passed through untranslated
+
+The escape rewriter (`%pcl-expand-hv-escapes`) translates `\h \H \v \V \R`
+and, since s492c (task #2050), `\X` and `\N`.  An AUDIT of the dispatch against
+perl 5.40.3 found the rest, and every one of them SILENTLY NEVER MATCHES
+rather than saying so — which is rule 12's worst case, and the reason it is
+written down here:
+
+| escape | perl | PCL |
+|---|---|---|
+| `\X` | one grapheme cluster | one character or a CRLF pair (see below) |
+| `\N` | any character but newline | same |
+| `\K` | keep (drop what is before it from `$&`) | never matches |
+| `\p{…}` / `\P{…}` / `\pM` | Unicode properties | never matches |
+| `\g{-1}` | relative backreference | never matches |
+| `\b{wb}` etc. | boundary variants | never matches |
+
+**`\X` is an APPROXIMATION.** perl's is UAX #29 — a base character plus its
+combining marks, Hangul syllables, emoji ZWJ sequences, regional indicators.
+The legacy approximation `(?>\r\n|\P{M}\p{M}*|\p{M}+)` needs `\p{M}`, which
+this engine does not answer, so PCL uses `(?>\r\n|(?s:.))` and a combining
+mark is its own cluster.  What changed is that `\X` MATCHES at all.
+
+**The `\p{…}` row is the DEFERRED Unicode-property class** (above, owner
+#1036) and it is what still blocks core `Text::Wrap` under perl 5.40.3: that
+version's main loop is `\PM\pM*`, not the `\X` an older one used.  cl-ppcre
+HAS the hook for it — `cl-ppcre:*property-resolver*` — and PCL never sets it;
+`sb-unicode:general-category` is the primitive.  Task #2060 carries the
+measurement.

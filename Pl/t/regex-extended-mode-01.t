@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 12;
 
 sub run_cl {
     my ($code) = @_;
@@ -126,3 +126,36 @@ test_cl('charset strip keeps real flags and leaves an escaped paren alone',
   . '       "[", ("(u:"  =~ /\(?u:/x    ? 1:0), "]",'
   . '       "[", ("x"    =~ /(?a)x/x    ? 1:0), "]\n";',
     "[1][1][0][1][1][1]\n");
+
+# ── s492c, task #2050: \X and \N were passed through UNTRANSLATED, so they
+# ── NEVER MATCHED and nothing said so ─────────────────────────────────────
+# An untranslated escape that silently never matches is rule 12's worst case.
+# The AUDIT (scratch probe resc1.pl, perl 5.40.3 vs PCL) found SEVEN in that
+# state -- \X \N \K \p{...} \g{-1} \b{wb} -- and these are the two that can be
+# said exactly or nearly so here:
+#   \N  is "any character but a newline", perl's own definition: EXACT.
+#   \X  is an extended grapheme cluster, APPROXIMATED as a CRLF pair or one
+#       character, because the legacy approximation needs \p{M} and this
+#       engine has no property support (docs/not-supported.md; that class is
+#       DEFERRED, owner #1036).
+# The rest stay silent for now and are named in docs/not-supported.md.
+test_cl('#2050: \X matches one character (it used to match NOTHING)',
+        q{my $s = "abc"; print $s =~ /^(\X{0,5})/ ? "[$1]" : "no", "\n";},
+        "[abc]\n");
+
+test_cl('... and \X is ATOMIC over a CRLF pair, as perl is',
+        qq{my \$s = "a\\r\\nb"; my \$n = () = \$s =~ /\\X/g; print "\$n\\n";},
+        "3\n");
+
+test_cl('... and inside a bracket class it is the LETTER X, as perl says',
+        q{print "X" =~ /^[\X]$/ ? "letter" : "no", "\n";},
+        "letter\n");
+
+test_cl('#2050: \N is any character but a newline',
+        qq{print "a\\nb" =~ /^(\\N+)/ ? "[\$1]" : "no", "\\n";},
+        "[a]\n");
+
+# The rewrite deliberately DECLINES on `\N{`, which is the NAMED-character
+# construct and a different question (it does not work under PCL today either
+# — `/^\N{U+0041}$/` does not match "A"; that is a separate gap, not this
+# one, and no row here asserts the broken answer).

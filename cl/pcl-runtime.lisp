@@ -28562,12 +28562,25 @@ buffer's fill-pointer; everything else falls back to file-length."
         (concatenate 'string "[" (if negated "^" "")
                      (%pcl-class-ranges-text ranges) "]"))))
 
+(defparameter +p-grapheme-text+ "(?>\\r\\n|(?s:.))"
+  "perl's \\X (extended grapheme cluster), APPROXIMATED as \"a CRLF pair or one
+   character\" (task #2050).  perl's own definition is UAX #29 -- a base
+   character plus its combining marks, Hangul syllables, emoji ZWJ sequences,
+   regional indicators -- and the legacy approximation
+   `(?>\\r\\n|\\P{M}\\p{M}*|\\p{M}+)` needs \\p{M}, which this engine does not
+   answer (measured: `\"\\x{301}\" =~ /\\p{M}/` is false here and true in perl).
+   So a combining mark is its own cluster under PCL.  What matters is that \\X
+   MATCHES: it used to be passed through untouched and NEVER matched anything,
+   which made core Text::Wrap's whole main loop fail and every wrap()/fill()
+   die \"This shouldn't happen\".  docs/not-supported.md carries the residue.")
+
 (defun %pcl-has-hv-escape (pat)
-  "Does PAT contain a backslash followed by h H v V or R?  A cheap pre-test:
-   almost no pattern does, and the rewrite below is a full copying scan."
+  "Does PAT contain a backslash followed by h H v V R X or N?  A cheap
+   pre-test: almost no pattern does, and the rewrite below is a full copying
+   scan."
   (loop for i from 0 below (max 0 (1- (length pat)))
         thereis (and (char= (char pat i) #\\)
-                     (find (char pat (1+ i)) "hHvVR") t)))
+                     (find (char pat (1+ i)) "hHvVRXN") t)))
 
 (defun %pcl-expand-hv-escapes (pat)
   "Rewrite \\h \\H \\v \\V and \\R into forms cl-ppcre reads.  ONE forward
@@ -28594,6 +28607,17 @@ buffer's fill-pointer; everything else falls back to file-length."
                         (write-string (%pcl-hv-class-text nx in-class) out))
                        ((and nx (char= nx #\R) (not in-class))
                         (write-string +p-linebreak-text+ out))
+                       ;; \X — one grapheme cluster, approximated (task #2050).
+                       ;; Inside a class perl treats it as the LETTER X, like
+                       ;; \R, so only the outside spelling is rewritten.
+                       ((and nx (char= nx #\X) (not in-class))
+                        (write-string +p-grapheme-text+ out))
+                       ;; \N — "any character but a newline", perl's own
+                       ;; definition.  \N{...} is the NAMED character and is a
+                       ;; different construct, handled before this pass.
+                       ((and nx (char= nx #\N) (not in-class)
+                             (not (and (< (+ i 2) n) (char= (char pat (+ i 2)) #\{))))
+                        (write-string "[^\\n]" out))
                        (t (write-char c out)
                           (when nx (write-char nx out))))
                      (incf i (if nx 2 1))))
