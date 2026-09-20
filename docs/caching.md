@@ -12,8 +12,8 @@ PCL keeps five kinds of thing under `~/.pcl-cache/` (or `$PCL_CACHE_DIR`,
 §6): a compiled image of PCL's own runtime (§1), each `use`d/`require`d
 module's transpile and compiled form (§2), **the main script's own transpile
 and compiled form (§2c)**, each distinct `eval "STRING"` text's transpile
-(§3) — and, for now, nothing for the three checked-in extension files
-pack/mro/warnings, which are recompiled every run (§4).
+(§3), and **the compiled form of each checked-in extension** — pack, mro,
+warnings, xs (§4).
 
 ## 1. The saved runtime core
 
@@ -269,20 +269,50 @@ s488b, which is why older notes warn not to read its absence there as "the
 eval cache isn't working"), and `pcl --clear-cache` removes it — that glob
 had never named the directory either.
 
-## 4. The three checked-in artifacts (pack, mro, warnings)
+## 4. The checked-in extensions (pack, mro, warnings, xs)
 
 `cl/pcl-pack.lisp`, `cl/pcl-mro.lisp` and `cl/pcl-warnings.lisp` are
 Perl-to-CL transpiles of `pack`, `mro` and `warnings` support, checked into
-the tree so PCL doesn't need Perl itself to build them at run time. They
-load into a running program via `p-load-extension`, on first use of
-`pack`/`unpack`, `mro::...` or `warnings`.
+the tree so PCL doesn't need Perl itself to build them at run time;
+`cl/pcl-xs.lisp` is hand-written CL. They load into a running program via
+`p-load-extension`, on first use of `pack`/`unpack`, `mro::...`,
+`warnings::...` or an XS module — never before (`docs/extensions.md`).
 
-**They are not cached at all today.** `p-load-extension` calls plain
-`load` on the `.lisp` source (`cl/pcl-runtime.lisp`, `p-load-extension`),
-so SBCL recompiles the file every run — measured, `pack("N",1)` costs
-about 8.3 s for exactly this (`docs/DECIDED.md` §s470bp). It's the same
-disease §2 and §3 solve, and the same fix would apply, but it's a known,
-open, user-parked gap: task **#1202**.
+Until task **#1202** they were not cached at all: `p-load-extension` called
+plain `load` on the `.lisp`, so SBCL recompiled the whole artifact on every
+run that reached it. That cost **4.26 s** for `cl/pcl-pack.lisp` — and it was
+not paid by `pack` users. `Sub::Quote`'s top-level code calls `pack("F",0)`
+and Moo loads `Sub::Quote` for any `has`, so **every Moo class with one
+attribute** paid the whole pack recompile, every run, without the program, or
+Moo, or Sub::Quote's author mentioning pack (task #1910).
+
+They now go through **the same fasl machinery as §2**: `*pcl-fasl-build*`,
+temp + `rename(2)`, the `.failed` marker, the 30-day last-use prune. One
+thing differs, and only because an extension is not a transpile —
+
+> **the key is the extension file's own BYTES**, plus the runtime identity
+> of §1. An entry is `<cache>/ext/<name>-<content stem>-<runtime
+> identity>.fasl`.
+
+A module entry is keyed by its *path* and validated against a dependency
+manifest; an extension has no separate source to fall out of date with, so
+there is no validity question left to ask. **A stale extension fasl is not
+unlikely — it is unreachable.** Regenerate `cl/pcl-pack.lisp` and the next run
+computes a different name, builds a new entry, and deletes the superseded one
+*for this runtime* (entries built against a different runtime belong to
+another tree and simply age out).
+
+Two notes:
+
+* `--no-cache` / `PCL_NO_CACHE` does **not** turn this off, deliberately.
+  That switch answers "is it the cache?" about a transpile of *your* code; an
+  extension is a checked-in file compiled against this runtime and keyed by
+  its bytes — exactly what the saved core of §1 is, and `--no-cache` does not
+  disable that either (`PCL_NO_CORE` does). **`PCL_NO_FASL_CACHE=1`** is the
+  switch, and it turns off every fasl in the image at once.
+* Every failure — unreadable file, refused build, broken fasl — ends in the
+  text load, so the worst case is what PCL did before. `PCL_FASL_DEBUG=1`
+  names the path taken per extension (`FASL HIT` / `fasl-build` / `TEXT`).
 
 ## 5. Measured numbers (dated; each an A/B on one machine, one core)
 
@@ -316,15 +346,15 @@ JSON::PP's own loader `eval`s — warms it further to 0.41 s.
 
 | variable | meaning | default |
 |---|---|---|
-| `PCL_CACHE_DIR` | root of every per-user cache: `modules/`, `scripts/`, `evals/`, `proto/`, `core/`, `xs/` | `~/.pcl-cache` |
+| `PCL_CACHE_DIR` | root of every per-user cache: `modules/`, `scripts/`, `evals/`, `ext/`, `proto/`, `core/`, `xs/` | `~/.pcl-cache` |
 | `PCL_COMPILE_DIRS` | colon-separated directories (`PERL5LIB` syntax); a module under one is compiled to a fasl. `*` = every directory. The **main script** is exempt from this list (§2c) | perl's installed library directories + PCL's own `lib/` |
 | `PCL_NO_COMPILE_DIRS` | same syntax; a module — or the main script — under one is **never** compiled to native code (still gets the `.lisp`/manifest cache); wins over `PCL_COMPILE_DIRS` on any match. `*` = compile nothing | empty |
-| `PCL_NO_FASL_CACHE=1` | kept alias of `PCL_NO_COMPILE_DIRS='*'` | |
-| `PCL_NO_CACHE` / `pcl --no-cache` | this run reads and writes no module cache, **no script cache and no eval cache** — one switch | off |
+| `PCL_NO_FASL_CACHE=1` | kept alias of `PCL_NO_COMPILE_DIRS='*'`; also the one switch that turns off the **compiled extensions** of §4 | |
+| `PCL_NO_CACHE` / `pcl --no-cache` | this run reads and writes no module cache, **no script cache and no eval cache** — one switch. It does *not* disable the saved core (§1) or the compiled extensions (§4): both are compiles of files in PCL's own tree, keyed by their bytes | off |
 | `PCL_OPT`, `PCL_NO_RAW_VERDICT`, `PCL_FACTS`, `PCL_IR_PLAIN` | not cache knobs, but they **select an emission**, so since task #1861 they are part of the compiler fingerprint: a run under one setting never reads an entry written under another. `pcl --cache-info` prints the ones in force | unset |
 | `PCL_NO_CORE=1` | never build or use a saved core; always load the runtime from source | off |
 | `PCL_CORE=path` | use this specific saved core | — |
-| `PCL_FASL_DEBUG=1` | per-module trace: FASL HIT / fasl-build / TEXT, and why | off |
+| `PCL_FASL_DEBUG=1` | per-module and per-extension trace: FASL HIT / fasl-build / TEXT, and why | off |
 | `PCL_SHOW_SBCL=1` | print the exact `sbcl` command line a run spawns (which core, which flags) | off |
 | `PCL_OPT` | switch named speed optimizations off (`PCL_OPT=none` = fully generic emission); unrelated to caching but sits beside these knobs in `pcl --help` | all on |
 
@@ -333,8 +363,8 @@ JSON::PP's own loader `eval`s — warms it further to 0.41 s.
 | flag | what it does |
 |---|---|
 | `pcl --cache-info` | where the cache is, size/count per kind, which core this run would use and why, the compile policy in effect, and the compiler fingerprint with the perl binary, the PPI sources and the emission-selecting environment it hashed. **The** diagnostic for "PCL did not notice my change" |
-| `pcl --clear-cache` | removes everything under `PCL_CACHE_DIR` that PCL made: modules, scripts and evals (`.lisp`/`.fasl`/`.deps`/`.failed`), prototype facts, saved cores. One flag, no sub-selection — a core rebuilds in ~20 s. **Not** the XS artifacts (`tools/pcl-xs-install --clean` for those) |
-| `pcl --no-cache` | this run only: skip the module, script and eval caches entirely |
+| `pcl --clear-cache` | removes everything under `PCL_CACHE_DIR` that PCL made: modules, scripts and evals (`.lisp`/`.fasl`/`.deps`/`.failed`), compiled extensions, prototype facts, saved cores. One flag, no sub-selection — a core rebuilds in ~20 s. **Not** the XS artifacts (`tools/pcl-xs-install --clean` for those) |
+| `pcl --no-cache` | this run only: skip the module, script and eval caches entirely. Not the core (§1) or the compiled extensions (§4) — `PCL_NO_CORE` and `PCL_NO_FASL_CACHE` are those |
 | `pcl --version` | PCL version, cache generation, SBCL version, PPI version |
 | `pcl --make-core` | build the cached core now, then exit |
 
@@ -357,6 +387,14 @@ JSON::PP's own loader `eval`s — warms it further to 0.41 s.
   only in the sibling tree). A checkout and an install of the same source
   are two trees by path, so they do not share either. `pcl --cache-info`
   prints the fingerprint this run computed.
+- **The compiled extensions (§4) are shared more widely, on purpose**: their
+  key is the extension file's bytes plus the runtime identity, and neither
+  carries a path — so a checkout, a `git worktree` of it and an install of the
+  same source all reach the *same* `ext/` entry and one of them pays the
+  compile. That is right: the entry depends on nothing else. Two trees whose
+  runtime source differs get different identities and different entries, and
+  neither deletes the other's (a superseded entry is dropped only for the
+  runtime identity that just built one).
 - **A shared, system-wide install** (root installs to `/opt/pcl`, several
   users run it) works for the module/eval caches: each user's `pcl` writes
   its own cache under their own home, never under the install prefix

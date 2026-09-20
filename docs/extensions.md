@@ -36,13 +36,59 @@ Two consequences of the lazy model:
 * **Extensions are NOT baked into the saved runtime core.**  Every runner
   starts SBCL from a content-keyed saved core of `pcl-runtime.lisp` alone
   (`~/.pcl-cache/core/`, USER s439); extensions load from the tree at first
-  use.  A program that never calls `pack` never pays for it.
+  use, through the compiled-extension cache below.  A program that never
+  calls `pack` never pays for it — not even the hash of a file it never
+  loads, since `p-load-extension` does nothing at all until something asks.
 * **An extension may install definitions and nothing else.**  It is `load`ed
   *into a running program*, so a PROGRAM preamble (the `@INC` reset, the
   `*pcl-pl2cl-path*` setup) would clobber that program's state — that was
   task #349's silent bug.  `pl2cl --extension` therefore emits no preamble,
   and `p-load-extension` **dies** (rule 12) on an artifact that carries one
-  (`%pcl-check-extension-clean`).
+  (`%pcl-check-extension-clean`).  The check reads the program's load state
+  *after* the load, whichever form ran it, so a compiled extension smuggles
+  nothing past it either — `tools/t/ext-fasl.t` has that row on both paths.
+
+## The compiled-extension cache (task #1202)
+
+An extension used to be `load`ed as **text**, so SBCL recompiled the whole
+artifact on every run that reached it: `cl/pcl-pack.lisp` costs **4.26 s** to
+load that way and **0.004 s** as a fasl (measured s1202).  And that cost was
+not paid by `pack` users — `Sub::Quote`'s top-level code calls `pack("F",0)`
+and Moo loads `Sub::Quote` for any `has`, so **every Moo class with one
+attribute** paid the whole pack recompile, every run (task #1910).
+
+So `p-load-extension` now goes through the **module fasl machinery**
+(`docs/caching.md` §2): `%p-build-module-fasl` with its `*pcl-fasl-build*`
+discipline, `%p-load-module-fasl`, the same temp + `rename(2)` publication,
+the same `.failed` marker, the same 30-day prune.  One thing differs, and
+only because an extension is not a transpile:
+
+> **The key is the extension file's own BYTES**, plus `*pcl-runtime-identity*`
+> (this runtime's source hash + this SBCL).  The entry is
+> `<cache>/ext/<name>-<content stem>-<runtime identity>.fasl`.
+
+A module entry is keyed by its *path* and validated against a dependency
+manifest; an extension has no source to be out of date with, so there is no
+validity question left to ask. **A stale extension fasl is not unlikely, it is
+unreachable**: regenerate `cl/pcl-pack.lisp` and the next run computes a
+different name and builds a new entry — and the superseded entry *for this
+runtime* is deleted at that build (entries for a different runtime identity
+are left alone; they belong to another tree and age out).
+
+Notes:
+
+* `--no-cache` / `PCL_NO_CACHE` does **not** turn this off, deliberately.
+  That switch answers "is it the cache?" about a *transpile* of your code; an
+  extension is a checked-in file compiled against this runtime and keyed by
+  its bytes — which is exactly what the saved core is, and `--no-cache` does
+  not disable that either (`PCL_NO_CORE` does).  **`PCL_NO_FASL_CACHE=1`** is
+  the switch, and it turns off every fasl in the image at once.
+* `PCL_FASL_DEBUG=1` names the path taken per extension: `FASL HIT`,
+  `fasl-build`, or `TEXT`.
+* Every failure — unreadable file, refused build, broken fasl — ends in the
+  text load, so the worst case is the speed PCL had before this task.
+* `pcl --cache-info` counts `ext/` as its own population; `pcl --clear-cache`
+  removes it.
 
 ## Regenerating the transpiled artifacts
 
