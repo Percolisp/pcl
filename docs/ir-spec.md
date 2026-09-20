@@ -711,6 +711,24 @@ same rule: a reference to a scalar that holds a reference is `REF`, and
 Strings are host Unicode strings (character, not byte, semantics — see
 `docs/not-supported.md` §Unicode for divergences).
 
+**`utf8::is_utf8` asks about a STRING, and answers FALSE for anything else
+(normative, s492a, task #1995).**  PCL has no per-scalar UTF-8 flag (#1389),
+and the ruling is that every PCL string is in perl's *upgraded* form, so `1` is
+the honest answer *for a string*.  A value that is not a string — an integer, a
+double, undef, a reference, a code ref, a glob, a v-string — has no character
+form to be upgraded, and the predicate is therefore perl's false (a defined
+empty string) for it, exactly as perl answers.  `(pcl::p-bool (stringp (unbox
+v)))` is the whole rule; the *representation* decides, so a number that was
+interpolated once is still a number and a numeric-looking string that was
+added to once is still a string.  Consumers branch on this:
+`JSON::PP::_looks_like_number` begins `return if utf8::is_utf8($value)`, so an
+unconditional `1` encodes every number as a JSON string.
+
+```lisp
+(utf8::pl-is_utf8 5)       ; => ""   (perl's false)
+(utf8::pl-is_utf8 "abc")   ; => 1
+```
+
 **The numeric model (normative, s473a).**  A number in the IR is either a
 host **integer of arbitrary precision** or an IEEE **double**;
 `*read-default-float-format*` is double-float, i.e. every float literal in

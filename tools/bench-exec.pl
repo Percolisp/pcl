@@ -243,9 +243,19 @@ my @benches = (
   # cost); the SHAPE of each is in docs/plan-speed-and-ir-s470.md A.1.
   #
   # `json-rt` — JSON::PP encode+decode of a ~42 kB nested document.  EVERY leaf
-  #   is a STRING deliberately: PCL's JSON::PP encodes an integer as \"1\" where
+  #   is a STRING deliberately: PCL's JSON::PP encoded an integer as \"1\" where
   #   perl encodes 1 (task #1185), so a document with numbers in it would make
   #   the two engines do different work AND print different sums.
+  #   That verification hole is therefore REAL and this row was blind to it:
+  #   #1185/#1995 (fixed s492a, `utf8::is_utf8` of a non-string) was invisible
+  #   here by construction.  The document is left UNCHANGED all the same — it
+  #   is a PERFORMANCE row and its numbers are a series going back to s470bn,
+  #   which a changed document would silently break.  The correctness claim
+  #   lives in `Pl/t/is-utf8-01.t` instead, which compares JSON::PP's output
+  #   against perl's for numbers, floats and numeric-looking strings.  (The
+  #   DECODE side still brings integers back as strings — task #1513, no
+  #   64-bit integer boundary — so a number-carrying variant of this row would
+  #   still have to avoid re-encoding what it decoded.)
   ['json-rt',   "$HN use strict; use warnings; use JSON::PP; my \$doc = { meta => { name => \"bench\", tags => [map { \"t\$_\" } 1..40], nested => { a => \"1\", b => [map { \"n\$_\" } 1..30] } }, rows => [ map { { id => \"id-\$_\", name => \"row-\$_\", vals => [map { sprintf(\"%03d\", \$_) } 1..12], flag => (\$_ % 2 ? \"y\" : \"n\"), text => \"some text for row \$_ with a few words\" } } 1..120 ] }; my \$j = JSON::PP->new->canonical; my \$len = 0; for (1 .. \$n) { my \$s = \$j->encode(\$doc); my \$back = \$j->decode(\$s); \$len += length(\$s) + scalar(\@{\$back->{rows}}) } print \"\$len\\n\";", 100, 0],
   # `moo-objs` — a Moo class with three attributes: constructor, rw accessor,
   #   ro accessor, a method building another object.  The OO mix.

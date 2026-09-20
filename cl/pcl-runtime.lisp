@@ -30277,7 +30277,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; SV's INTERNAL REPRESENTATION, and PCL's box model has no UTF8 flag
 ;;; (docs/not-supported.md).  `upgrade` answers perl's octet count so a program
 ;;; that uses the return value gets a number of the right shape; `is_utf8`
-;;; keeps answering 1.
+;;; answers 1 for every STRING (#1389: every PCL string IS in the upgraded
+;;; form) — but only for a string, see pl-is_utf8.
 
 (defun pl-encode (&optional str)
   "perl's utf8::encode: replace the string with its UTF-8 OCTETS in place.
@@ -30326,7 +30327,23 @@ buffer's fill-pointer; everything else falls back to file-length."
           ((and fail-ok (pcl::p-true-p (car fail-ok))) pcl::*p-undef*)
           (t (pcl::p-die "Wide character")))))
 
-(defun pl-is_utf8 (&optional str) (declare (ignore str)) 1)
+(defun pl-is_utf8 (&optional str)
+  "perl's utf8::is_utf8: does this scalar hold a STRING in the upgraded form?
+
+   PCL has no per-SV UTF-8 flag (#1389, docs/not-supported.md), and the ruling
+   there is that every PCL string IS in the upgraded (character) form, so 1 is
+   the honest answer FOR A STRING.  It says nothing about a value that is not a
+   string at all: a number, undef, a reference, a code ref, a glob, a v-string
+   have no character form to be upgraded and perl answers FALSE for every one
+   of them (probed 5.40.3 over 21 shapes: only a string holding a character
+   above 0xFF is true).  Answering 1 there was not a divergence of the flag
+   model but a plain wrong answer, and it was load-bearing: JSON::PP's
+   `_looks_like_number` starts `return if utf8::is_utf8($value)`, so EVERY
+   number encoded as a JSON string (#1995).
+
+   The predicate is total — every value is or is not a string — so rule 12
+   does not apply."
+  (pcl::p-bool (stringp (pcl::unbox str))))
 (in-package :pcl)
 
 ;;; ---------------------------------------------------------------------------

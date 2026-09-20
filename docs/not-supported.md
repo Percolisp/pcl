@@ -443,13 +443,35 @@ diverge from Perl in several respects:
 
 - **The per-scalar UTF-8 flag** (`utf8::is_utf8`, task **#1389**): Perl has an
   internal UTF-8 flag per scalar, and `utf8::is_utf8` reports it.  CL strings
-  are always Unicode; the flag does not exist, so `utf8::is_utf8` always
-  answers **1**.
+  are always Unicode; the flag does not exist, so `utf8::is_utf8` answers
+  **1 for every STRING** (Perl answers 1 only for a string it has upgraded).
   That is the ONE remaining divergence of the seven read shapes #1115 probed
   against perl 5.40.3 — every `length` and every `ord` now agrees.
   `utf8::upgrade` likewise has no representation to change; it answers perl's
   OCTET COUNT so a program that uses the return value gets a number of the
   right shape, but a subsequent `is_utf8` still says 1 either way.
+
+  > **NARROWED s492a (task #1995): only a STRING answers 1.**  The ruling below
+  > is about strings, and answering 1 for a value that is not a string at all —
+  > an integer, a double, undef, a reference, a code ref, a glob — was not a
+  > divergence of the flag model but a plain wrong answer: such a value has no
+  > character form to be upgraded and Perl answers false for every one of them
+  > (probed 5.40.3, 21 shapes).  It was load-bearing: core `JSON::PP`'s
+  > `_looks_like_number` starts `return if utf8::is_utf8($value)`, so PCL
+  > encoded **every number as a JSON string** (`encode([1,2.5])` was
+  > `["1","2.5"]`).  `pl-is_utf8` is now `stringp` of the unboxed value; the
+  > *representation* decides, so `my $n = 5; "$n"` leaves `$n` a number and
+  > `my $s = "7"; $s + 0` leaves `$s` a string.
+  >
+  > The one place Perl and PCL still part company is Perl's own SV-flag quirk
+  > in the other direction: after `$s + 0`, Perl's `"7"` carries IOK as well as
+  > POK, and `JSON::PP` then emits it UNQUOTED, where PCL (which keeps the two
+  > representations apart) emits `"7"`.  That is the no-per-SV-flag gap this
+  > section documents, and it is not chased.  Unrelated to it, a JSON *decode*
+  > still brings integers back as strings — that is task **#1513** (no 64-bit
+  > integer boundary), because `JSON::PP`'s `$max_intsize` BEGIN loop looks for
+  > the digit count at which Perl renders an integer in exponential form, never
+  > finds one under PCL's exact integers, and leaves `$max_intsize` undef.
 
   > **RULED s473h**, after a 15-shape probe matrix vs perl 5.40.3 (the matrix
   > is in task #1389).  perl's flag means "this SV is in the UPGRADED
