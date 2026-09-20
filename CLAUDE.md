@@ -181,6 +181,9 @@ prove -j8 Pl/t/
 # runtime's absolute path (a worktree gets its own) -- so it cannot be stale:
 # an edit makes a new core and prunes the old.  Extensions (pack/mro/warnings/
 # xs) load lazily from the tree and are NOT in the core.  Plain `prove -j8
+# (#1202, s493: an extension is compiled ONCE into ~/.pcl-cache/ext/, keyed by the
+# artifact's own BYTES + the runtime identity, so a regenerated artifact cannot reach
+# the old entry; PCL_NO_FASL_CACHE=1 turns it off, --no-cache does not.  pack: 4.3 s -> 0.004 s.)
 # Pl/t/` therefore runs at prove-core speed (~3:45 wall, measured s439).
 # PCL_NO_CORE=1 = source mode; PCL_SHOW_SBCL=1 prints which core; `pcl
 # --clear-cache` removes the cores; a failed build leaves <core>.failed (one
