@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 22;
 
 sub run_cl {
     my ($code) = @_;
@@ -229,4 +229,37 @@ test_cl('INVERSE: require Foo if COND does run when COND is true',
     is($out, "after-flush=one\nlines=2\n",
        'IO::Handle->new / ->flush / ->autoflush work, and autoflush RESTORES '
      . 'the selection (SelectSaver needs DESTROY, which PCL lacks)');
+}
+
+# ── s492c, task #2000: IO::Seekable's getpos/setpos and IO::File::new_tmpfile
+# Core FileHandle.pm imports `seek tell getpos setpos` from IO::Seekable BY
+# GLOB at load and DIES on the first name with no CODE slot, so `use
+# FileHandle;` -- and IPC::Cmd, and everything else that loads it -- died with
+# "IO::Seekable::getpos missing at .../FileHandle.pm line 60".  Both names are
+# XS in perl (IO.xs's fgetpos/fsetpos and tmpfile(3)); they are plain Perl in
+# PCL's lib/IO.pm, which is where the rest of IO.xs's half already lives.
+{
+    my $out = run_cl(qq{use FileHandle;\n}
+                   . qq{open(my \$w, ">", "$dir/fh.txt") or die; print \$w "l1\\nl2\\nl3\\n"; close \$w;\n}
+                   . qq{my \$fh = FileHandle->new("< $dir/fh.txt") or die "open: \$!";\n}
+                   . qq{my \$first = <\$fh>;\n}
+                   . qq{my \$pos = \$fh->getpos;\n}
+                   . qq{my \$second = <\$fh>;\n}
+                   . qq{\$fh->setpos(\$pos);\n}
+                   . qq{my \$again = <\$fh>;\n}
+                   . qq{\$fh->close;\n}
+                   . qq{print "first=\$first";\n}
+                   . qq{print "replay=", (\$again eq \$second ? "ok" : "bad"), "\\n";\n});
+    is($out, "first=l1\nreplay=ok\n",
+       '#2000: `use FileHandle` loads, and getpos/setpos replay a line');
+}
+
+{
+    my $out = run_cl(qq{use IO::File;\n}
+                   . qq{my \$t = IO::File->new_tmpfile or die "no tmpfile";\n}
+                   . qq{print \$t "scratch\\n"; seek(\$t, 0, 0);\n}
+                   . qq{my \$back = <\$t>; close \$t;\n}
+                   . qq{print "tmpfile=", (\$back eq "scratch\\n" ? "ok" : "bad"), "\\n";\n});
+    is($out, "tmpfile=ok\n",
+       '... and IO::File->new_tmpfile is a real anonymous read/write handle');
 }

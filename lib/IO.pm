@@ -148,4 +148,50 @@ sub ungetc {
     Carp::croak('IO::Handle::ungetc is not implemented under PCL');
 }
 
+#--------------------------------------------------------------------------#
+# IO::Seekable's XS half (task #2000)
+#--------------------------------------------------------------------------#
+# Core FileHandle.pm imports `seek tell getpos setpos` from IO::Seekable BY
+# GLOB at load and DIES on the first name with no CODE slot, so the two that
+# are XS in perl (IO.xs's fgetpos/fsetpos) took `use FileHandle;` -- and
+# IPC::Cmd, and everything else that loads it -- down with them:
+#     IO::Seekable::getpos missing at .../FileHandle.pm line 60
+# perl's own position token is opaque and in practice is the byte offset, so
+# these are `tell` and `seek(..., SEEK_SET)`, which is what perl's documented
+# contract ("the value is only useful to setpos") allows.
+
+package IO::Seekable;
+
+sub getpos {
+    my $fh = shift;
+    my $pos = CORE::tell($fh);
+    return $pos < 0 ? undef : $pos;
+}
+
+sub setpos {
+    my ($fh, $pos) = @_;
+    return undef if !defined $pos;
+    return CORE::seek($fh, $pos, 0);
+}
+
+#--------------------------------------------------------------------------#
+# IO::File's XS half (task #2000, the name after getpos in the same list)
+#--------------------------------------------------------------------------#
+
+package IO::File;
+
+# tmpfile(3): an anonymous read/write handle that disappears when it is
+# closed.  perl's is XS; the portable spelling is a temp file opened and then
+# UNLINKED while the handle is still open, which is what tmpfile(3) itself
+# does on Unix.
+sub new_tmpfile {
+    my $class = shift || 'IO::File';
+    require File::Temp;
+    my ($fh, $name) = File::Temp::tempfile();
+    return undef if !$fh;
+    unlink $name;
+    bless $fh, ref($class) || $class;
+    return $fh;
+}
+
 1;
