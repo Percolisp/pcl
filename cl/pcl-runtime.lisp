@@ -25616,6 +25616,19 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; the module and the runtime owns only what no Perl can say: a clock with
     ;; sub-second resolution and a sleep that takes a fraction.  The names are
     ;; PCL's own in this namespace, exactly as is_dual / is_vstring are.
+    ;; A signal NAME's number, from the runtime's own table — the same table
+    ;; kill() and %SIG read (never a literal in a shim, which would be this
+    ;; machine's numbers frozen into Perl source).  undef for an unknown name.
+    (def "SIGNAL_NUMBER"
+        (lambda (name)
+          (let ((hit (assoc (to-string name) *p-signal-numbers* :test #'string=)))
+            (if hit (cdr hit) *p-undef*))))
+    ;; Leave the process NOW: no END blocks, no buffer flush.  That is a
+    ;; property of the HOST's exit, not of any module, and nothing in Perl can
+    ;; say it (`exit` runs the END phase).
+    (def "EXIT_IMMEDIATELY"
+        (lambda (&optional code)
+          (sb-ext:exit :code (if code (truncate (to-number code)) 0) :abort t)))
     (def "HIRES_TIME"  (lambda () (%p-epoch-seconds)))
     (def "HIRES_SLEEP" (lambda (s) (%p-sleep-seconds (max 0 (to-number s)))))
     (def "HIRES_CLOCK" (lambda (id) (%p-clock-seconds (to-number id))))

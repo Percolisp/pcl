@@ -10055,9 +10055,13 @@ sub _extract_module_prototypes {
   # a bareword before a comma is a call only for a KNOWN sub, so skipping the
   # shim made `catfile(updir, ...)` read updir as the string "updir"
   # (op/signatures.t keywords block, s316l — same lesson as List::Util.)
-  if ($module =~ /^(Carp|Scalar::Util|Time::HiRes|Cwd|
+  # POSIX and Time::HiRes left for the SAME reason in s492c (#1997/#1992):
+  # both now have real shims whose CONSTANTS are `()`-prototype subs, and a
+  # `()` prototype is a PARSE fact — without it `INT_MAX - 1` reads as
+  # `INT_MAX(-1)` and swallows the rest of the argument list (probed).
+  if ($module =~ /^(Carp|Scalar::Util|Cwd|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
-                    utf8|bytes|overload|mro|B::|POSIX|File::(?!Spec)|IO::|Data::Dumper)/x) {
+                    utf8|bytes|overload|mro|B::|File::(?!Spec)|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;
   }
   # (There used to be a second skip here, of `Test2::*` and `Test::*` BY NAME —

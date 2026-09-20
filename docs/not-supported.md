@@ -3658,3 +3658,34 @@ statement's own import list, which that spelling does not have, so the call
 stays the builtin (task #2053).  The `CORE::GLOBAL::` overrides of `require`,
 `do` and `readline` are separate emission sites and are not routed yet
 (task #2054).
+
+## POSIX: the classes and the syscalls that need a real libc
+
+`lib/POSIX.pm` (task #1997, which folds #1613, s492c) is plain Perl with
+perl's own default export list restricted to what it implements: the math and
+string functions, `strftime`/`mktime`/`asctime`/`ctime`/`difftime`, the
+`:sys_wait_h` macros, `strtod`/`strtol`/`strtoul` with perl's two-value
+return, the limits/float/errno/locale constants, the signal numbers (read from
+the runtime's own table, never literals), `errno`/`strerror`, `access`, `dup`,
+`isatty` and `_exit`.
+
+**Absent, and loud about it** — Exporter's "not exported" at the `use`, or
+"Undefined subroutine" at the call, never a stub that answers a plausible
+value:
+
+* the OO classes `POSIX::SigSet`, `POSIX::SigAction`, `POSIX::Termios`, and
+  `sigprocmask`/`sigaction`/`sigpending`/`sigsuspend` — PCL installs a Unix
+  handler for `SIGALRM` only (task #2094), so a sigset API would be a facade;
+* `sysconf`/`pathconf`/`confstr` and the `_SC_*`/`_PC_*` names — they ask the
+  running libc, and a frozen number would be this machine's;
+* `setsid`, `setpgid`, `mkfifo`, `pause`, `nice`, `ttyname`, `dup2`, `chroot`,
+  `uname`, `times` (the POSIX one), `tcgetattr` and the termios family;
+* `setlocale` ANSWERS the locale the process started in (`$ENV{LC_ALL}` /
+  `$ENV{LANG}` / `"C"`) and changes nothing — PCL has no locale machinery, so
+  a "successful" `setlocale(LC_ALL, "de_DE")` would be a lie;
+* `strftime` implements the C89 + common GNU conversions and **DIES naming any
+  other letter** (`POSIX::strftime: unimplemented conversion %Q`), because a
+  format letter produces a value the program consumes (CLAUDE.md rule 12).
+
+`lib/POSIX.pm`'s errno, `O_*` and `F_*` numbers are Linux's, like
+`lib/Fcntl.pm`'s and `lib/Errno.pm`'s; that portability gap is unchanged here.
