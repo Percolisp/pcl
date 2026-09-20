@@ -2,6 +2,77 @@
 
 Append new entries at the top. One section per session.
 
+## Session s473t6d (Opus agent, 2026-09-20) — #1501 ROUND 11, the LAST op/ round: a tie on an ELEMENT, a foreach list that ran twice, and the band's last 213 causeless rows
+
+**Member 1 — the band, confirmed before a cause was written.**  The 15 files
+(`op/override.t` is the sibling batch's) re-measured `--jobs 1` read their
+blessed `baselines/perl-suite-run.tsv` verdict EXACTLY — zero movers — with a
+ROW DIFF of 1 NEW / 1 FIXED that is the SAME op/lex.t row re-keyed (#1853's
+`\xAB/\xBB` escaping), and a shortfall of 140 rows in 10 files.  The
+population is therefore **213 causeless fail rows** (the brief's 219 was
+measured two days earlier, before t6c and s491a landed) and **140 UNEXPLAINED
+shortfall rows**.
+
+**Member 2 — CHECK 1, where the rows were.**  Every one of the 140 now names
+the aborting FORM and the fact behind it.  Two measurements did the work that
+reading could not: neutralising ONLY the two `:lvalue` sub assignments of
+`op/substr.t` in a shadow `t/` tree takes the file from 354 to **398**
+produced rows, so its 46 are `NS:Lvalue subroutines` (#930) end to end; and
+`op/gmagic.t`'s five aborts are not the scalar tie its baseline blamed —
+`tie my $c => 'Tie::Monitor'` with the package declared LATER is byte for byte
+perl's answer (probe), while `tie $h{foo}` is DROPPED.  `op/postfixderef.t`'s
+seven rows were attributed to #1877 by the previous round and are measured
+here to be two different facts (#1436 for the three aborts at :345-347, DESTROY
+for the other four).  The others: Hash::Util (XS) 18, pack `P` 13, the
+`$SIG{__DIE__}` handler 6, the F6 oversized-form refusal 2, and three singles
+that became #1951 / #1952 / the live stash.
+
+**Member 3 fix 1 — #1950, a tie on an ELEMENT.**  The tie proxy IS the box's
+value slot, so `tie $h{foo}` has to reach the element's BOX.  `tied($h{k})`
+already asked for `p-gethash-box` and `pos()` already had the full four-kind
+table (#960); `tie`/`untie` had neither — three sites, three subsets of one
+table.  One `%ELEM_BOX_FORM` + `_elem_box_form` now serves all four, which also
+widens `tied` to the deref kinds.  The emitter half alone was not enough: a
+READ of a tied element returned the proxy itself (`print $h{foo}` printed
+`#<p-tie-proxy {…}>` into the program's own output), because
+`%p-hash-unbox-elem` / `p-aref-unbox-elem` carried the magic-cell arm but not
+the `p-tie-proxy-p` one `unbox` and `%p-assign-snapshot` already have.
+`t/op/gmagic.t` **31/2 → 50/2**, its shortfall 45 → 26; the residue is
+`tie $$s` (a tie through a scalar-ref deref that must AUTOVIVIFY), a different
+mechanism, written into the task.
+
+**Member 3 fix 2 — #1954, found by a CHECK-2 probe.**  `op/magic.t`'s
+descriptions came out as `Referencing %{""} doesn't load ` and its block ran
+TWICE: `foreach (['powie::!','Errno'])` iterated the REFERENT, binding `$_` to
+each element, so `@$_` was a symbolic deref of a string.  #267's rule already
+says a foreach list of single SCALAR operands must emit `(vector …)` rather
+than go through the run-time flattener — an anonymous constructor is exactly as
+unambiguously one value, and its sigil is compile-time knowledge.  One `elsif`
+in `_foreach_single_scalar_p`.  It costs `perl-tests/magic.t` two rows the
+double iteration had invented (158 → 156 passing, A/B'd against a `268d7e00`
+extraction with the sweep's own command), spliced by hand with that cause.
+
+**Member 3 — CHECK 2, and two probes that corrected a filing.**  213 → **0**
+causeless.  `op/eval.t` rows 9/10 are NOT about `eval` (`my @r = eval { die }`
+is 0 elements in PCL exactly as in perl): they are `+()=`, an assignment whose
+LHS is the EMPTY LIST, which yields the LAST RHS element here and the count in
+perl — #1956, an everyday countof idiom.  `op/each.t` 64/65 REPRODUCE PERL IN
+ISOLATION and therefore carry downstream state and say so (#1964).  The rest
+collapse to clusters: invalid-Perl rejection 26 rows in lex.t alone, `%a` hex
+float 19 (#1963), the `%v` family 13 (#1961), UNITCHECK 6 (#1959), the `DB::`
+pad 5 (#1958), warnings 11 (#221), DESTROY 6, `tie` 5 (#155), #1040's own
+documented stand-in 6.  Filed **#1951 #1952 #1953 #1955 #1956 #1957 #1958
+#1959 #1960 #1961 #1962 #1963 #1964**; #1950 and #1954 DONE.
+
+**Bars.**  Gate `Result: PASS` 250 files / 8,517 rows; sweep GATE clean, 0 new
+/ 0 fixed, TOTAL 18,685 = 18,687 − the 2 magic.t rows above, drops 5 = census,
+CAUSES 479 of 479 causeless 0; corpus-diff 5 of 111, every diff the intended
+shape; lib emission A/B 27 SAME / 0 DIFF / 0 RCDIFF; ir-conform 323/0/22/0;
+ir-host-leak 31 = main's; `cause-census --hygiene` ZERO new `other` rows;
+generation **v2-1660**, the three artifacts regenerated.  Guards
+`Pl/t/tie-01.t` 18 → 24 and `Pl/t/foreach-aliasing-01.t` 22 → 30, both
+inverse-verified on a `268d7e00` extraction.
+
 ## Session s491a (Opus agent, 2026-09-19; finished and recorded by Fable) — the user-visible filler batch: what a new user's first Moo program and first exception object show
 
 Six members, ordered by how many users meet them; all six shipped.  **#1917**: every Moo run printed "Class::XSAccessor exists but failed to load …" wherever that XS module is installed for perl, because PCL's XSLoader failure text is not the "Can't locate FILE in @INC" that the ecosystem's optional-XS probes grep for.  The no-artifact failure now raises a marker subclass of the perl die, and the `require` frame that owns the file's own top-level load re-raises perl's not-found text (innermost frame first, so a module's own `eval { XSLoader::load }` fallback never sees it; a direct `XSLoader::load` reads as before; remembered per process; `%INC` stays empty).  Moo cold / warm / warm-again: stdout == perl, stderr empty.  **#1846**: `"$@->{code}"` printed `HASH(0x1)->{code}` — the arrow set was measured character by character and is NOT the #451 subscript set (an explicit arrow continues after any interpolated scalar, never into a method call, never across a blank, never after the braced spelling); one predicate in InterpScan's `$` arm; corpus emission identical.  On the way a NUMBER used as a symbolic container ref stopped dying with a raw CL type error (`%p-symref-name`).  **#1912**: a false `can` returned from a sub left ZERO values in list context — one returner `%p-can-answer` at every perl-visible `can` boundary, `p-can` itself still a CL boolean for the runtime; Safe-Isa's `safe_isa.t` went PARTIAL 67/1 → PASS 68/0.  **#1914**: `overload::Method` (own / inherited / by-name resolved through the invocant's MRO / absent → undef) and `overload::Overloaded("ClassName")`.  **#1847**: `length` observes undef, so it got its OWN use class — it no longer licenses the `:str` freeze but still licenses the `.=` buffer, because making it opaque measured 40× slower and quadratic; the accepted residue is a never-appended buffer with an undef initialiser.  **#1918**: ASCII-only digits in numification (the regex side, where perl's answer is the opposite, filed as #1972).
