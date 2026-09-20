@@ -10818,6 +10818,12 @@ per element."
         ;; magic slot (defelem @_ hole alias): read through the getter, like unbox
         (when (p-magic-cell-p v)
           (setf v (funcall (p-magic-cell-getter v))))
+        ;; TIED slot: `tie $a[1], 'C'` puts the proxy in the element's BOX, so
+        ;; a READ of the element is a FETCH — the same arm unbox and
+        ;; %p-assign-snapshot already carry (task #1950).  Without it the raw
+        ;; p-tie-proxy leaked into the program's own output.
+        (when (p-tie-proxy-p v)
+          (setf v (unbox (%p-tie-fetch elem v))))
         (if (or (and (vectorp v) (not (stringp v)))  ; arrayref
                 (hash-table-p v)                      ; hashref
                 (functionp v)                          ; coderef
@@ -10861,6 +10867,10 @@ per element."
       (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
         (when (p-magic-cell-p v)
           (setf v (funcall (p-magic-cell-getter v))))
+        ;; TIED slot, the array twin's arm (task #1950): the proxy lives in the
+        ;; element's BOX, so reading the element is a FETCH.
+        (when (p-tie-proxy-p v)
+          (setf v (unbox (%p-tie-fetch elem v))))
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
                 (and (vectorp v) (not (stringp v)))       ; array-ref
@@ -20509,7 +20519,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1620"
+(defparameter *pcl-cache-generation* "v2-1660"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

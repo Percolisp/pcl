@@ -2464,6 +2464,23 @@ sub gen_funcall_form {
   # tie VARIABLE, CLASSNAME, LIST: same class-name argument position as bless.
   # `tie %h, Tie::StdHash;` (trailing bareword, no LIST) parses as a funcall —
   # every other shape already reaches here as a string (task #142).
+  #
+  # tie/untie on an ELEMENT need the element's BOX, because the tie proxy IS
+  # the box's value slot: `tie $h{foo}, 'C'` on the element's VALUE reached
+  # p-tie with a raw string and took the announce-and-drop arm, so `tied
+  # $h{foo}` read undef (task #1950).  The box spellings are `tied`'s and
+  # `pos`'s own, shared through _elem_box_form.
+  if (($func_name eq 'tie' || $func_name eq 'untie') && @$kids >= 2) {
+    if (my $box = $self->_elem_box_form($kids->[1])) {
+      return ['p-untie', $box] if $func_name eq 'untie';
+      if (@$kids >= 3) {
+        my $class_arg = $self->_class_name_bareword($kids->[2])
+                     // $self->gen_node_form($kids->[2]);
+        my @rest = map { $self->gen_node_form($kids->[$_]) } 3 .. $#$kids;
+        return ['p-tie', $box, $class_arg, @rest];
+      }
+    }
+  }
   if ($func_name eq 'tie' && @$kids >= 3) {
     my $class_arg = $self->_class_name_bareword($kids->[2]);
     if (defined $class_arg) {
@@ -2529,12 +2546,12 @@ sub gen_funcall_form {
     }
   }
 
-  # tied($a[i]) / tied($h{k}): needs the box for identity tracking.
+  # tied($a[i]) / tied($h{k}) / tied($r->[i]) / tied($r->{k}): needs the box,
+  # because the tie proxy IS the box's value slot.  All four kinds, from the
+  # shared table — the deref pair used to be missing here exactly as it was
+  # missing from `pos` before task #960.
   if ($func_name eq 'tied' && @$kids == 2) {
-    my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
-    $kind //= '';
-    return ['p-tied', ['p-aref-box',    $container, $keys[0]]] if $kind eq 'a_acc';
-    return ['p-tied', ['p-gethash-box', $container, $keys[0]]] if $kind eq 'h_acc';
+    if (my $box = $self->_elem_box_form($kids->[1])) { return ['p-tied', $box] }
   }
 
   # pos($a[i]) / pos($h{k}) / pos($r->[i]) / pos($r->{k}): needs the box, since
@@ -2544,13 +2561,7 @@ sub gen_funcall_form {
   # shape Text::CSV_PP uses) wrote to a value and `pos($c->{tmp})` read undef,
   # while the same code through a named hash worked (task #960).
   if ($func_name eq 'pos' && @$kids == 2) {
-    my %pos_box = (
-      'a_acc'     => 'p-aref-box',          'h_acc'     => 'p-gethash-box',
-      'a_ref_acc' => 'p-aref-deref-box',    'h_ref_acc' => 'p-gethash-deref-box',
-    );
-    my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
-    $kind //= '';
-    return ['p-pos', [$pos_box{$kind}, $container, $keys[0]]] if $pos_box{$kind};
+    if (my $box = $self->_elem_box_form($kids->[1])) { return ['p-pos', $box] }
   }
 
   # delete on array/hash elements and slices: pass container + key/index.
@@ -3692,6 +3703,26 @@ sub _thru_unary_plus {
     $id = $tv->[0] if $tv && @$tv == 1;
   }
   return $id;
+}
+
+# The BOX of an element PLACE, for the builtins that must reach the SLOT and
+# never its value: `pos` (*p-match-pos* is keyed by box identity, task #960),
+# and the tie trio `tie`/`tied`/`untie` (the tie proxy IS the box's value
+# slot, task #1950).  ONE table, because a missing kind is a silent wrong at
+# every one of them, and the three sites had three different subsets of it.
+# Returns undef for anything that is not one of the four element kinds — a
+# named scalar already IS its box and takes the ordinary path.
+my %ELEM_BOX_FORM = (
+  'a_acc'     => 'p-aref-box',          'h_acc'     => 'p-gethash-box',
+  'a_ref_acc' => 'p-aref-deref-box',    'h_ref_acc' => 'p-gethash-deref-box',
+);
+
+sub _elem_box_form {
+  my ($self, $arg_id) = @_;
+  my ($kind, $container, @keys) = $self->_elem_container_key($arg_id);
+  $kind //= '';
+  return undef unless $ELEM_BOX_FORM{$kind};
+  return [$ELEM_BOX_FORM{$kind}, $container, $keys[0]];
 }
 
 sub _elem_container_key {

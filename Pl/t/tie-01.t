@@ -313,4 +313,74 @@ print "tied-after:[", (defined(tied $t) ? ref(tied $t) : 'UNDEF'), "]\n";
 print "t:[$t]\n";
 PERL
 
+# ── tie on an ELEMENT (task #1950) ─────────────────────────────────────────
+# The tie proxy IS the box's value slot, so `tie $h{foo}` has to reach the
+# element's BOX and a READ of the element has to be a FETCH.  Before the fix
+# the tie was DROPPED ("PCL: tie: a non-lvalue …"), `tied $h{foo}` was undef,
+# and once the element WAS promoted the read leaked `#<p-tie-proxy {…}>` into
+# the program's own output.
+my $MON = <<'PERL';
+package Mon;
+sub TIESCALAR { bless { r => 0, w => 0, v => 'INIT' }, shift }
+sub FETCH { my $s = shift; ++$s->{r}; "F<$s->{v}>" }
+sub STORE { my ($s, $v) = @_; ++$s->{w}; $s->{v} = $v }
+sub counts { my $s = shift; my @r = ($s->{r}, $s->{w}); $s->{r} = $s->{w} = 0; @r }
+package main;
+PERL
+
+test_tie('tie on a HASH element: FETCH, STORE and tied()', $MON . <<'PERL');
+my %h;
+my $t = tie $h{foo}, 'Mon';
+print "tied:", (defined tied $h{foo} ? 'yes' : 'no'), "\n";
+print "read0:", $h{foo}, "\n";
+$h{foo} = 7;
+print "read1:", $h{foo}, "\n";
+print "counts:", join('/', $t->counts), "\n";
+PERL
+
+test_tie('tie on an ARRAY element: FETCH, STORE and tied()', $MON . <<'PERL');
+my @a;
+my $t = tie $a[1], 'Mon';
+print "tied:", (defined tied $a[1] ? 'yes' : 'no'), "\n";
+$a[1] = 9;
+print "read:", $a[1], "\n";
+print "counts:", join('/', $t->counts), "\n";
+PERL
+
+test_tie('tie through a reference: $r->{k} and $ar->[0]', $MON . <<'PERL');
+my $r  = {};
+my $ar = [];
+tie $r->{k},  'Mon';
+tie $ar->[0], 'Mon';
+$r->{k} = 'R'; $ar->[0] = 'A';
+print "h:", $r->{k}, " tied:", (defined tied $r->{k} ? 'yes' : 'no'), "\n";
+print "a:", $ar->[0], " tied:", (defined tied $ar->[0] ? 'yes' : 'no'), "\n";
+PERL
+
+test_tie('untie on an element restores the slot', $MON . <<'PERL');
+my %u;
+$u{k} = 'before';
+tie $u{k}, 'Mon';
+$u{k} = 'during';
+my $mid = $u{k};
+untie $u{k};
+print "mid:$mid after:", (defined $u{k} ? $u{k} : 'undef'), "\n";
+PERL
+
+test_tie('an UNTIED element still reads its own value (refs included)', $MON . <<'PERL');
+my %g = (s => 'str', n => 42, ar => [1,2], hr => {k => 'v'}, cr => sub { 9 });
+my @a = ('x', 7, [3]);
+print join(' ', $g{s}, $g{n}, ref($g{ar}), ref($g{hr}), $g{cr}->()), "\n";
+print join(' ', $a[0], $a[1], ref($a[2])), "\n";
+print "tied-plain:", (defined tied $g{s} ? 'yes' : 'no'), "\n";
+PERL
+
+test_tie('a tied element in list context and in interpolation', $MON . <<'PERL');
+my %l;
+tie $l{x}, 'Mon';
+$l{x} = 'LX';
+my @copy = ($l{x}, $l{x});
+print "list:", join('|', @copy), " interp:$l{x}\n";
+PERL
+
 done_testing;

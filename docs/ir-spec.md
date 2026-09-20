@@ -290,6 +290,24 @@ my $y = $v & 1;     # $count == 1
 my $z = $v++;       # $count == 1 (one FETCH, one STORE)
 ```
 
+**6. A TIED ELEMENT IS A TIED BOX IN THE CONTAINER'S SLOT** (task #1950).
+`tie $h{k}` / `tie $a[i]` / `tie $r->{k}` / `tie $r->[i]` tie the ELEMENT,
+not a copy of its value, so the argument of `tie`, `tied` and `untie` is the
+element's **box** (§2.3's promotion event, the same one `\$h{k}` fires) and
+never the value the element currently holds.  Reading such an element is
+therefore a FETCH and writing it a STORE, exactly as for a named scalar: an
+element read that hands back the raw proxy is a representation leak, and an
+element read that skips the proxy is a missing FETCH the program can count.
+Only a whole ARRAY or HASH tie (`tie @a` / `tie %h`) is unimplemented —
+`docs/not-supported.md`, task #155.
+
+```perl
+tie $h{k}, 'Counter';      # the BOX in %h's "k" slot carries the proxy
+my $x = $h{k};             # one FETCH
+$h{k} = 5;                 # one STORE
+print defined tied $h{k};  # the tie object, not undef
+```
+
 ### 2.3 Arrays
 
 A Perl array is an **adjustable vector with a fill pointer** (growable,
