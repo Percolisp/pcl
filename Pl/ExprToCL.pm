@@ -186,6 +186,21 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # not a second name test: it is the same one decision, read once.
 sub is_runtime_name { return exists $RUNTIME_NAMES{ $_[0] // '' } ? 1 : 0 }
 
+# Does THIS PROGRAM declare (or import) a sub of this name?  The environment's
+# prototype record is the registry every declaration lands in — a plain `sub
+# f {…}`, a prototyped one, a signature, a `use constant`, and a name a `use`
+# merged in — and `min_params` is what separates those from the handful of
+# BUILTIN records `_builtin_prototypes` seeds (open/close/…, which carry no
+# arity).  The same test `_declared_named_unary` makes, for the same reason:
+# it is the one reading of "the program has a sub by this name" (task #2100).
+sub _name_is_declared_sub {
+  my ($self, $name) = @_;
+  return 0 if !defined $name || !length $name;
+  return 0 if !$self->environment;
+  my $rec = $self->environment->get_prototype($name);
+  return ($rec && defined $rec->{min_params}) ? 1 : 0;
+}
+
 # Wantarray-sensitive built-ins: their RETURN VALUE depends on the caller's
 # list-vs-scalar context, which they read at runtime from the *wantarray*
 # dynamic var (e.g. `(if (eq *wantarray* t) <list> <scalar>)` in pcl-runtime).
@@ -369,6 +384,12 @@ sub cl_name {
   my $perl_name  = shift;
   my $for_funcall = shift // 0;  # 1 = being used as a function call, not an operator
   my $force_user  = shift // 0;  # 1 = &NAME(...) form: call the user sub, never a builtin
+  # 1 = the source wrote `CORE::NAME`, which names the builtin UNCONDITIONALLY
+  # (PExpr's normalize pre-pass strips the prefix and leaves the marker on the
+  # token).  Without it, #2100's "a declared sub of a runtime-internal name is
+  # the user's" rule caught `sub cwd { CORE::cwd() }` in lib/Cwd.pm and made it
+  # call ITSELF.
+  my $force_builtin = shift // 0;
 
   # Guard against undefined input
   return 'p-UNDEFINED' unless defined $perl_name && length($perl_name);
@@ -416,7 +437,21 @@ sub cl_name {
   # The `&NAME(...)` call form forces the user sub even when NAME is a builtin
   # (Perl's `&` sigil bypasses builtins/prototypes — e.g. a user `sub connect`
   # imported into main:: called as `&connect()`).
-  if (!$force_user && exists $RUNTIME_NAMES{$perl_name}) {
+  # %RUNTIME_NAMES is NOT perl's builtin list: beside `print` and `reverse` it
+  # holds the runtime's own internal operators (flatten, hash, aref, setf,
+  # regex, box, cwd, reftype, …).  A DECLARED sub of such a name is the user's
+  # and must lower to `pl-NAME`; lowering it to the internal operator hijacked
+  # the call — `sub hash {…} hash(1,2)` printed "12" (the runtime's hash
+  # constructor, stringified) and `sub let`/`sub setf` failed inside a
+  # MACROEXPANSION, taking the whole file (task #2100).  A PERL KEYWORD still
+  # wins over a declared sub, because that is what perl does (`sub reverse
+  # {…}; reverse(…)` calls the builtin unless imported or `use subs`), and
+  # `is_core_keyword` measures that from the running perl rather than listing
+  # it.  `$force_user` (the `&NAME(...)` sigil) already bypassed the table.
+  if (!$force_user && exists $RUNTIME_NAMES{$perl_name}
+      && ($force_builtin
+          || Pl::PExpr::Config::is_core_keyword($perl_name)
+          || !$self->_name_is_declared_sub($perl_name))) {
     return "p-$perl_name";
   }
   # Inside a non-main package, qualify user-defined sub calls so SBCL's reader
@@ -2248,7 +2283,12 @@ sub gen_funcall_form {
     }
   }
 
-  my $cl_func = $self->cl_name($func_name, 1, $force_user);
+  # The `CORE::NAME` spelling names the builtin unconditionally — the same
+  # marker the `use subs` lookup above reads, asked once more here because
+  # #2100's declared-sub rule must not catch a shim's own `CORE::` delegation.
+  my $head_node      = $self->expr_o->get_a_node($kids->[0]);
+  my $core_qualified = (ref($head_node) && $head_node->{_core_qualified}) ? 1 : 0;
+  my $cl_func = $self->cl_name($func_name, 1, $force_user, $core_qualified);
 
   # `readpipe EXPR` — the NAMED spelling of `` `CMD` ``/`qx`/`` <<`TAG` ``, and
   # the SAME runtime function they lower to (task #734): one command capture,

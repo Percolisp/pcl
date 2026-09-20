@@ -370,7 +370,31 @@ our %NO_PROTO_ARG_CONTEXT = (
   defined => 'SCALAR',
 );
 
-my %CORE_SLOTS;   # name -> [\@slot_kinds, $slurpy_index_or_undef], memoized
+my %CORE_SLOTS;    # name -> [\@slot_kinds, $slurpy_index_or_undef], memoized
+my %CORE_KEYWORD;  # name -> 0/1, memoized
+
+# IS THIS NAME A PERL KEYWORD AT ALL?  Measured, never listed: perl's
+# `prototype("CORE::NAME")` DIES ("Can't find an opnumber for") when NAME is
+# not a keyword and answers a string or undef when it is — so the die IS the
+# discriminator, and the answer comes from the perl that is running us rather
+# than from a hand-maintained list that drifts.
+#
+# It exists because the compiler's `%RUNTIME_NAMES` is NOT a list of perl
+# builtins: beside `print` and `reverse` it holds the runtime's own internal
+# operators (`flatten`, `hash`, `aref`, `setf`, `regex`, `box`, …), and a plain
+# call lowered to `p-NAME` on that table alone.  A user `sub flatten {…}` was
+# therefore hijacked at its call site — `hash(1,2)` printed "12", `let`/`setf`
+# failed inside a MACROEXPANSION and took the whole file with them (task
+# #2100).  A perl keyword keeps winning over a declared sub of the same name,
+# because that is what perl does (`sub reverse {…}; reverse(...)` calls the
+# BUILTIN unless imported or `use subs`).
+sub is_core_keyword {
+  my $name = shift;
+  return 0 if !defined $name || !length $name;
+  return $CORE_KEYWORD{$name} if exists $CORE_KEYWORD{$name};
+  my $ok = eval { my $p = prototype("CORE::$name"); 1 };
+  return $CORE_KEYWORD{$name} = ($ok ? 1 : 0);
+}
 
 # Ask the running perl for a builtin's prototype.  Not a keyword at all =>
 # perl dies ("Can't find an opnumber for"); a keyword with no prototype (`if`,
