@@ -20378,7 +20378,16 @@ buffer's fill-pointer; everything else falls back to file-length."
    threads — only the forking thread survives in the child — but ordinary
    single-threaded Perl fork/exec and fork/exit works.)"
   (%p-flush-all-output)                  ; perl flushes EVERY handle, not just the std three
-  (handler-case (sb-posix:fork)          ; 0 in child, >0 in parent
+  (handler-case
+      (let ((pid (sb-posix:fork)))       ; 0 in child, >0 in parent
+        ;; perl REFRESHES $$ in the child (task #2094).  Leaving the parent's
+        ;; pid there is silent and dangerous: `kill SIG, $$` in the child hits
+        ;; the PARENT, and "/tmp/x.$$" collides between the two.  The pipe-open
+        ;; child (%p-install-fh's fork) already did this; this is the same rule
+        ;; for the bare fork.
+        (when (eql pid 0)
+          (box-set $$ (sb-posix:getpid)))
+        pid)
     (error ()
       (%pcl-save-errno)
       *p-undef*)))
@@ -20520,19 +20529,39 @@ buffer's fill-pointer; everything else falls back to file-length."
    PERL_FLUSHALL_FOR_CHILD first — my_popen runs it, and the child inherits
    STDERR, so a block-buffered handle must not hold text across the fork."
   (%p-flush-all-output)
-  (let* ((proc (sb-ext:run-program "/bin/sh" (list "-c" (to-string cmd))
-                                   :input nil
-                                   :output :stream
-                                   :external-format :latin-1
-                                   :error nil
-                                   :wait nil))
-         (output (with-output-to-string (s)
-                   (loop for c = (read-char (sb-ext:process-output proc) nil nil)
-                         while c do (write-char c s)))))
-    (sb-ext:process-wait proc)
-    (if (eq *wantarray* t)
-        (%p-split-records output)
-        output)))
+  (handler-case
+      (let* ((proc (sb-ext:run-program "/bin/sh" (list "-c" (to-string cmd))
+                                       :input nil
+                                       :output :stream
+                                       :external-format :latin-1
+                                       :error nil
+                                       :wait nil))
+             (output (with-output-to-string (s)
+                       (loop for c = (read-char (sb-ext:process-output proc) nil nil)
+                             while c do (write-char c s)))))
+        (sb-ext:process-wait proc)
+        ;; `$?` IS THE COMMAND'S STATUS, in both contexts (task #2101).  It was
+        ;; left untouched, so `my $out = `cmd`; die if $?;` read whatever an
+        ;; earlier `system` had put there — and with no earlier `system` a
+        ;; FAILING command looked like success.  The encoding is perl's raw
+        ;; wait status, the same one p-system, p-wait and pipe-close store.
+        (setf $? (%p-process-wait-status proc))
+        (if (eq *wantarray* t)
+            (%p-split-records output)
+            output))
+    (error ()
+      ;; The shell could not be started: perl's `-1` with $! set (#1920's rule).
+      (%pcl-save-errno)
+      (setf $? -1)
+      (if (eq *wantarray* t) (make-array 0 :adjustable t :fill-pointer 0) ""))))
+
+(defun %p-process-wait-status (proc)
+  "PROC's raw perl wait status: exit code << 8, or the signal number when it
+   was killed.  SBCL reports the two as :EXITED / :SIGNALED."
+  (let ((code (sb-ext:process-exit-code proc)))
+    (if (eq (sb-ext:process-status proc) :signaled)
+        (logand (or code 0) #x7f)
+        (ash (or code 0) 8))))
 
 (defun %p-split-records (text)
   "TEXT split into perl records by the current $/ — the list-context answer of

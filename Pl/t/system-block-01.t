@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 31;
+plan tests => 36;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -268,3 +268,37 @@ is run_cl(q{package O; use subs "readpipe"; sub readpipe { "OVR:$_[0]" }}
         . q{ print "n=$n l=", scalar(@l), ":$l[0] c=$c";}),
    "n=OVR:named l=1:OVR:namedlist c=core\n",
    '#734 inverse: `use subs "readpipe"` wins for the named form too';
+
+# ── s492c, tasks #2101 + #2094: the command capture sets `$?`, and a forked
+# ── child gets its OWN `$$` ─────────────────────────────────────────────────
+# `` `cmd` `` never touched `$?`, so `my $out = `cmd`; die if $?;` — the way
+# nearly every script that shells out detects failure — read whatever an
+# earlier `system` had left there, and with no earlier `system` a FAILING
+# command looked like success.  `system`, pipe-close and wait already stored
+# the status; this is the fourth path, in both contexts.  Expectations probed
+# against perl 5.40.3.
+is run_cl('system("sh", "-c", "exit 3"); `true`; print "$?\n";'),
+   "0\n",
+   '#2101: a backtick command REPLACES the status a previous system left';
+
+is run_cl('my $f = `sh -c "exit 2"`; print $? >> 8, "\n";'),
+   "2\n",
+   '... scalar context sees the commands own exit code';
+
+is run_cl('my @l = `sh -c "echo a; echo b; exit 5"`; print scalar(@l), " ", $? >> 8, "\n";'),
+   "2 5\n",
+   '... and so does LIST context, without disturbing the records';
+
+is run_cl('my $g = qx{sh -c "exit 7"}; my $h = readpipe(q{sh -c "exit 1"});'
+          . ' print $? >> 8, "\n";'),
+   "1\n",
+   '... every spelling shares the one path (qx then readpipe)';
+
+# `$$` is refreshed in a forked child: `kill SIG, $$` in the child must not
+# signal the PARENT, and "/tmp/x.$$" must not collide between the two.
+is run_cl('$| = 1; my $parent = $$; my $p = fork(); die "no fork" if !defined $p;'
+          . ' if (!$p) { print +($$ == $parent ? "STALE" : "fresh"), " ",'
+          . '            (getppid() == $parent ? "ppid-ok" : "ppid-bad"), "\n"; exit 0 }'
+          . ' waitpid($p, 0); print +($$ == $parent ? "parent-same" : "parent-CHANGED"), "\n";'),
+   "fresh ppid-ok\nparent-same\n",
+   '#2094: fork refreshes $$ in the child and leaves the parents alone';
