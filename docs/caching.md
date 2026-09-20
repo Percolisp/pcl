@@ -331,7 +331,9 @@ lever is worth roughly this much," not as a portable benchmark.
 | `eval "1"` | 0.304 s | 0.172 s | s473p, 2026-09-07 |
 | `use Moo` (eval-cache leg) | 0.343 s | 0.201 s | s473p, 2026-09-07 |
 | `use JSON::PP` cold (no fasl caching at all, pre-#1188 baseline) | 13.42 s | — | s470bn, 2026-09-05 |
-| `pack("N",1)` | — | 8.3 s | s470bp, 2026-09-05 (extension load, §4, still uncached) |
+| `pack("N",1)` | 5.588 s | **0.280 s** | s1202, 2026-09-20 (extension fasl cache, §4, task #1202; 8.3 s at s470bp on a colder tree) |
+| Moo class with one `has` | 5.774 s | **1.050 s** | s1202, 2026-09-20 — it never mentions `pack`; `Sub::Quote` does (§4) |
+| `cl/pcl-pack.lisp`, loaded | 4.262 s as text | **0.004 s** as a fasl | s1202, 2026-09-20 (the compile it replaces costs 4.70 s, once) |
 | `pcl hello.pl` (1 line) | 0.181 s | **0.033 s** | s488b, 2026-09-17 (script cache, §2c; the cold-entry run costs 0.203 s) |
 | `pcl cl/pack-impl.pl` (1,211 lines) | 6.571 s | **0.037 s** | s488b, 2026-09-17 (cold entry 7.256 s, i.e. one run's worth; `perl` itself 0.006 s) |
 | the compiler fingerprint, per process | 1.15 ms | 1.95 ms | s488b, 2026-09-17 (#1843's ~95 extra stats; invisible in a run's wall time) |

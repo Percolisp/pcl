@@ -587,8 +587,8 @@ Caches:
                  this flag only does the build early.
   --clear-cache  Remove everything PCL made under PCL_CACHE_DIR -- the cached
                  modules, scripts and evals (.lisp / .fasl / .deps), the
-                 compiled extensions, the
-                 transpiler's prototype facts and the saved cores -- then
+                 compiled extensions, the transpiler's prototype facts and
+                 the saved cores -- then
                  exit.  The next run rebuilds what it needs.  XS artifacts are
                  NOT a cache and are left alone: they are installed by
                  tools/pcl-xs-install and removed by its --clean.
