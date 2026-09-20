@@ -63,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 29;
 
 sub write_pl {
     my ($code) = @_;
@@ -280,3 +280,51 @@ both_agree('my @a=(1,2,3,4,5);my $s="a>b";my $r=($#a<3&&$s=~/a>b/)?"y":"n";print
 # (before a diamond it is a filehandle, not a constant).
 both_agree('my $r = (time < 2 && "ab" =~ /a>b/) ? "y" : "n"; print "$r\n";',
            'negative: `time` is a term, so `time < 2` is a comparison');
+
+# ---- #2090: <FH> on the RHS of a LIST ASSIGNMENT is LIST context -----------
+#
+# `p-readline` used to consult a second variable besides *wantarray*:
+# `*p-in-list-assign-rhs*`, bound T by `p-list-=` around its whole RHS, forced
+# SCALAR mode there.  So `my ($header, @rows) = <$fh>` left @rows EMPTY and
+# `my $n = () = <$fh>` was 1 — silently, on the commonest CSV/report idiom
+# there is.  The flag was a patch over a different bug: the shape it was added
+# for, `while (($seen ? $dummy : $name) = <FILE>)`, is a SCALAR assignment in
+# perl (a ternary is not a list: `($s ? $d : $n) = @a` stores the COUNT), and
+# ExprToCL's `_sole_ternary_lvalue_id` arm has lowered it as one since.
+# Every expectation is the live `perl` answer, including the one that surprises:
+# `while (my ($x) = <FH>)` iterates ONCE, because the first list-context read
+# slurps the handle.
+
+agree_with_file(<<'PL', '#2090: my ($first, @rest) = <$fh> reads every line');
+open(my $f, '<', $F) or die;
+my ($first, @rest) = <$f>;
+print "first=$first", "rest=", scalar(@rest), "\n";
+PL
+
+agree_with_file(<<'PL', '#2090: my $n = () = <$fh> counts the lines');
+open(my $f, '<', $F) or die;
+my $n = () = <$f>;
+print "n=$n\n";
+PL
+
+agree_with_file(<<'PL', '#2090: while (my ($x) = <$fh>) iterates ONCE (perl slurps)');
+open(my $f, '<', $F) or die;
+my $it = 0; my $last = "";
+while (my ($x) = <$f>) { $it++; $last = $x; last if $it > 20 }
+print "it=$it last=$last";
+PL
+
+agree_with_file(<<'PL', '#2090 negative: a ternary LHS is a SCALAR assignment, one line per loop');
+open(FILE, '<', $F) or die;
+my ($seen, $dummy, $name) = (0, '', '');
+while (($seen ? $dummy : $name) = <FILE>) { $seen++; last if $seen > 20 }
+print "seen=$seen\n";
+close FILE;
+PL
+
+agree_with_file(<<'PL', '#2090 negative: a scalar `my $line = <$fh>` still reads one line');
+open(my $f, '<', $F) or die;
+my $line = <$f>;
+my $left = 0; $left++ while <$f>;
+print "line=$line", "left=$left\n";
+PL

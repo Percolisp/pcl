@@ -5073,7 +5073,7 @@ sub _process_local_declaration {
   if ($init_idx >= 0 && !$solo_binding) {
     # @mrhs is the RHS run with any if/unless modifier already split off above.
     my $rhs_cl = $self->_parse_expression(\@mrhs, $stmt, 1) // 'nil';  # 1 = LIST_CTX
-    $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
+    $rhs_cl = "(let ((*wantarray* t)) $rhs_cl)";
     # Under a modifier the RHS must not run when the condition is false: perl
     # never reaches the statement, so its side effects never happen (probed —
     # `local($a,$b) = r() if 0` does not call r()).

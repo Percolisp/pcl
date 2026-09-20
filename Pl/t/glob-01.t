@@ -437,11 +437,15 @@ END_CODE
   like($output, qr/2/, 'glob with [^d] negated class works');
 }
 
-# Regression (defins.t test 16): a list-assignment whose RHS is a lone glob, used
-# as a while-condition, must run glob as a SCALAR iterator (one file per loop) not
-# list context (all files at once).  glob is wrapped (p-list-ctx ...) on
-# a p-list-= RHS, so p-glob must fall back to scalar mode when *p-in-list-assign-rhs*
-# is set — mirroring p-readline's handling of while (($x) = <FH>).
+# Regression (defins.t test 16): `while (($seen ? $dummy : $name) = glob(...))`
+# must run glob as a SCALAR iterator, one file per loop.  perl reads that LHS as
+# a SCALAR assignment — a ternary is not a list, and `($s ? $d : $n) = @a` stores
+# the COUNT (probed 5.40.3) — so the RHS is scalar context and glob iterates.
+# PCL lowers it through ExprToCL's `_sole_ternary_lvalue_id` arm.  Until #2090
+# this row passed for a DIFFERENT reason (a `*p-in-list-assign-rhs*` flag that
+# forced scalar mode inside every p-list-= RHS, which also made
+# `my ($h, @rows) = <$fh>` read one line); the flag is gone and this row now
+# tests the arm that is actually right.
 {
   my $output = run_pcl(<<"END_CODE");
 my (\$seen, \$dummy, \$name) = (0, '', '');
@@ -451,6 +455,17 @@ END_CODE
 
   # a.txt, b.txt, d.txt = 3 .txt files; iterator visits each once.
   like($output, qr/\b3\b/, 'while (($x)=glob) iterates one file per loop, not all at once');
+}
+
+# #2090's other half for glob: a GENUINE list assignment gets list context, so
+# `my ($first, @rest) = glob(...)` sees every match (perl).
+{
+  my $output = run_pcl(<<"END_CODE");
+my (\$first, \@rest) = glob("$tmpdir/*.txt");
+print scalar(\@rest);
+END_CODE
+
+  like($output, qr/\b2\b/, 'my ($first, @rest) = glob gets all matches (3 files: 1 + 2)');
 }
 
 # Companion: @a = glob stays LIST context (p-array-=, no scalar fallback).

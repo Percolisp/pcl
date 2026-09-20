@@ -299,7 +299,7 @@ my %FAMILY;
                         *p-errno-table*)],
   'context-frame' => [qw(*wantarray* p-list-ctx p-scalar-ctx p-void-ctx
                          p-caller-ctx p-sort-cmp *pcl-caller-wantarray*
-                         *p-in-list-assign-rhs* *pcl-sub-call-depth*)],
+                         *pcl-sub-call-depth*)],
   'runtime-config' => [qw(*p-raw-elems*)],
   'package-tracking' => [qw(*pcl-current-package* *pcl-caller-pkg-stack*
                             *pcl-caller-subname-stack* p-set-current-package

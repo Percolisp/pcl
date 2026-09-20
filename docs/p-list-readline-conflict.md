@@ -1,5 +1,31 @@
 # `p-list-=` List Context vs `p-readline` Scalar Idiom Conflict
 
+> **RESOLVED, AND THE PREMISE WAS FALSE (task #2090, s492b, 2026-09-21).**
+> There was never a conflict: requirement 2 below is not perl's rule.  Probed
+> against perl 5.40.3 —
+>
+> * `while (my ($x) = <FH>)` iterates **once**.  The RHS is list context, the
+>   first read slurps the handle, the second returns the empty list.
+> * `while (($seen ? $dummy : $name) = <FILE>)` iterates **once per line** —
+>   not because readline is special there, but because **a ternary is not a
+>   list**: `($s ? $d : $n) = @a` stores the COUNT (2), so that statement is a
+>   SCALAR assignment and its RHS is scalar context.  `B::Deparse -p` shows
+>   perl wrapping exactly that one in `defined(...)` and leaving `(($x) =
+>   readline(FILE))` alone.
+>
+> PCL has lowered the ternary shape through ExprToCL's
+> `_sole_ternary_lvalue_id` arm ("Sole-ternary parenthesized lvalue = SCALAR
+> assignment") since long before s492b, so `*p-in-list-assign-rhs*` had been
+> dead weight that was still costing correctness: it forced **every**
+> `p-list-=` RHS to scalar readline/glob, which made `my ($header, @rows) =
+> <$fh>` leave `@rows` empty and `my $n = () = <$fh>` answer 1 — the everyday
+> CSV/report idiom, failing silently.  The variable, its export, its binding in
+> `p-list-=` and its two consumers (`p-readline`, `p-glob`) are deleted;
+> `defins.t` stays 27/27.  Guards: `Pl/t/readline-ternary-01.t` (#2090 block,
+> three positives and two negatives) and `Pl/t/glob-01.t`.
+>
+> The analysis below is kept as the record of how the flag came to be.
+
 ## Problem Statement
 
 There are two competing requirements that cannot both be satisfied by a single approach:

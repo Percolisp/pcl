@@ -369,7 +369,6 @@
    #:p-list-ctx #:p-scalar-ctx #:p-void-ctx #:p-caller-ctx
    #:p-sort-cmp
    #:*pcl-caller-wantarray*
-   #:*p-in-list-assign-rhs*
    ;; Call depth tracking (for p-caller at top level)
    #:*pcl-sub-call-depth*
    ;; Current/caller package tracking (for caller() package, __PACKAGE__-at-runtime)
@@ -1888,9 +1887,6 @@
 
 ;;; Wantarray context variable
 (defvar *wantarray* nil "Context for the current call: t=list, nil=scalar, :void=void.")
-(defvar *p-in-list-assign-rhs* nil
-  "True while evaluating the RHS of a p-list-= assignment. Tells p-readline to use scalar
-   mode even when *wantarray* is t (avoids reading the entire file in while-loop idioms).")
 (defvar *pcl-caller-wantarray* :void
   "Saved *wantarray* from sub entry. p-wantarray reads this so wantarray() always
    reflects the context of the CURRENT sub's caller, even when *wantarray* has been
@@ -8462,7 +8458,7 @@ per element."
                (incf static-idx 1)))))
 
         (let ((body
-               `(let* ((,src (let ((*wantarray* t) (*p-in-list-assign-rhs* t)) ,value))
+               `(let* ((,src (let ((*wantarray* t)) ,value))
                        (,src-vec (%p-flatten-list ,src ,(if all-scalar targets nil)))
                        ,@(reverse extra-lets))
                   ,@(nreverse forms)
@@ -19126,15 +19122,22 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defmacro p-readline (&rest args)
   "Perl readline / <FH> — in list context reads all records; in scalar reads one.
-   When *p-in-list-assign-rhs* is t (inside p-list-= RHS), always use scalar mode
-   so that while (($x) = <FH>) reads one line per iteration, not the whole file.
+   THE CONTEXT IS *wantarray* AND NOTHING ELSE (task #2090).  A
+   `*p-in-list-assign-rhs*' flag used to force scalar mode inside every
+   p-list-= RHS, so `my ($header, @rows) = <$fh>' left @rows EMPTY and
+   `my $n = () = <$fh>' was 1.  It was a 2021-era patch over a DIFFERENT bug:
+   `while (($seen ? $dummy : $name) = <FILE>)' is a SCALAR assignment in perl
+   (probed: `($s ? $d : $n) = @a' stores the COUNT), and ExprToCL's
+   `_sole_ternary_lvalue_id' arm has lowered that shape as one since.  perl,
+   probed 5.40.3: `while (my ($x) = <FH>)' iterates ONCE — the first list-context
+   read slurps the handle.
    No filehandle (<>) or the bareword ARGV (<ARGV>) is the diamond operator.
    %p-readline-impl bumps $. (per-handle line counter) on each successful read."
   (if (or (null args) (%p-readline-argv-form-p (car args)))
-      `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
+      `(if (eq *wantarray* t)
            (%p-readline-argv-all)
            (%p-readline-argv))
-      `(if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
+      `(if (eq *wantarray* t)
            (%p-readline-all ,(car args))
            (%p-readline-impl ,@args))))
 
@@ -19502,11 +19505,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    never stateful; the s440 fix -- `glob($p)` in a loop used to answer full, EMPTY,
    full, ... -- task #499).
    In scalar context: returns one match per call, nil when exhausted; resets for next cycle.
-   When *p-in-list-assign-rhs* is t (inside a p-list-= RHS) glob always uses scalar
-   (iterator) mode, so `while (($x) = glob(...))` returns one file per iteration —
-   mirrors p-readline's handling of `while (($x) = <FH>)`."
+   The context is *wantarray* and nothing else — see p-readline's docstring for
+   the `*p-in-list-assign-rhs*' flag both used to consult and why it went (#2090).
+   `while (($seen ? $dummy : $name) = glob(...))` still iterates one file per
+   loop, because that LHS is a scalar assignment, not a list one."
   (let ((pat (if pattern (to-string pattern) "*")))
-    (if (and (eq *wantarray* t) (not *p-in-list-assign-rhs*))
+    (if (eq *wantarray* t)
         (p-glob--list-context pat)
         (p-glob--scalar-context pat))))
 
