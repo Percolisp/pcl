@@ -224,13 +224,14 @@ DECIDED + the task store before anything is probed.
 
 ## 6. The queue as of s494 (Fable, 2026-09-21) — the EVERYDAY-PERL rounds (#1994) and the s493 proposals the USER ruled
 
-Briefs for this era live under `~/pcl-agent-scratch/s492/<label>/` (COMMON stays
+**USER s494 on the ORDER: "don't put too much time deciding order, it can take one week more" — the table below stands as written.**  Briefs for this era live under `~/pcl-agent-scratch/s492/<label>/` (COMMON stays
 `~/pcl-agent-scratch/s473/COMMON.md`).  Two slots, as always.
 
 | # | label / task | what | gen | state |
 |---|---|---|---|---|
 | 1 | **s492b** | the SILENT-WRONG core: #2004 (scalar context leaks into a builtin's LIST arguments) + #2090 + #2102, #2080 `local *GLOB = REF`, #2005 `map` copies per iteration, #2003 TAP names by IMPORT + #2100 runtime-name hijack, #2006 half (a), #2008 exported scalar = alias, #2001 list `m//g` and `pos` | v2-1740 | **IN FLIGHT** (launched s494 on `5ce155cb`; IDs 2030–2049) |
 | 2 | **s492c** | the MODULE SURFACE: #1870 → #1992 builtin override + `Time::HiRes` (+ #2002), #1997 POSIX, #2007 File::Spec/`tempdir`, #2081 `flock`, #2050 `\X`, #1361 Carp location, #1743/#1818 `->VERSION`, #2082, #2000, #2085, MIME::Base64, then #2101 → #2094 → #2093; acceptance instrument = the core dists' own t/ | v2-1780 | **IN FLIGHT** (launched s494 on `5ce155cb`; IDs 2052–2079; owns `op/override.t`, which closes #1501) |
+| 2a | **#2194 `pcl --check`** | USER-APPROVED s494: run a program under perl and PCL, compare stdout + exit-status class, print the first difference; a TOOL batch (driver + tools/t + docs) | none | brief READY (`~/pcl-agent-scratch/s494/s494k/prompt.md`, label s494k, IDs 2275–2284); **FIRST launch next session** |
 | 3 | **#2098** | PERF slot (USER s494: ahead of #1890/#1891): the three QUADRATIC everyday operations — `.=` append loop, `shift` drain, `unshift`; profile FIRST (one cause or three) | v2-1820 (member 3 only) | next free slot; brief READY `~/pcl-agent-scratch/s494/s494p/prompt.md` (label s494p = perf round 35, IDs 2110–2129); the `shift` mechanism is MEASURED in the task — O(1) through the array header window, 200k drain 0.003 s in bare SBCL |
 | 4 | **#2104** | the ROSETTA census round: 655 perl-validated programs, 177 differ, **77 SILENT** — narrow to causes, cluster, file; ≤ 1 h fixes may ship | v2-1860 if a fix | next free slot, preferably after s492b or s492c is merged (their fixes explain a share of the 77); brief READY `~/pcl-agent-scratch/s494/s494r/prompt.md` (label s494r, IDs 2130–2189) |
 | 5 | **#2106** | the CORE-MODULE LEG for the companion: a second root for `tools/run-perl-suite.pl` = the core dists' own t/ (2,373 files never run before s493), own baselines, on demand | none | brief READY (`~/pcl-agent-scratch/s494/s494m/prompt.md`, label s494m, IDs 2230–2259); AFTER s492c merges (the first bless must measure a tree that is not moving) |

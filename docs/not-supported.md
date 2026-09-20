@@ -392,6 +392,23 @@ fatal-death rows (`run/fresh_perl.t` expected-tsv row).  If a CPAN module
 pattern-matches a specific message it actually triggers, fix that one message
 at the point that raises it.
 
+**Refined by the user 2026-09-21 (s494): "It is OK if errors aren't the same as
+Perl, as long as they fail in the same places. But we don't want it to be
+horribly messy either."**  So this entry blesses the TEXT of a message and
+nothing else:
+- **WHERE a program fails is NOT covered by this entry.**  A program must die
+  at the statement perl dies at, with a non-zero status.  The run-time fatals
+  perl raises and PCL lives through (task #2103: `strict refs`, modification of
+  a read-only value, an `@$undef` rvalue, …) are BUGS, not message-fidelity
+  rows, and may not be registered under this section.
+- **TIDY is a requirement.**  An uncaught error of any kind — perl-level or
+  PCL-internal — is one readable line on stderr, not an SBCL backtrace, a
+  `#S(p-box …)` struct dump, or a "While evaluating the form…" load note
+  (tasks #2108, #1595, #1970, #1929).  The Lisp backtrace belongs behind
+  `PCL_BACKTRACE=1`.
+- `pcl --check` (task #2194) follows the same split: it compares STDOUT and
+  the exit status by class, and never the text on stderr.
+
 ---
 
 ## Error messages: no "at FILE line N" location info
