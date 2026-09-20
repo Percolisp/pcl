@@ -58,7 +58,8 @@ It is easier to list what doesn't work:
   code reference (`$f->($x)`) or a method call: those get copies.
 * **`DESTROY` is never called.**  Memory is reclaimed by the Lisp garbage
   collector, so there is no scope-exit destructor; code that relies on one
-  for cleanup (guard objects, temporary files) does not get it.
+  for cleanup (guard objects, temporary files) does not get it. The same
+  goes for filehandles: for now, close your filehandles explicitly.
 * **`tie` on an array, hash or filehandle** aren't supported, for now
   (scalar ties work).
 * **`format`/`write`**, **regex code blocks** `(?{ })`, **perl 5.38
@@ -78,13 +79,13 @@ etc). The remaining test failures are the todo list. :-)
 
 | measurement | result | reproduce |
 |---|---|---|
-| PCL's own regression suite | **250 files, 8,481 assertions, all passing** | `tools/prove-core` |
+| PCL's own regression suite | **253 files, 8,542 assertions, all passing** | `tools/prove-core` |
 | perl's test suite, extracted (108 files from perl 5.40's `t/`) | **18,687 pass / 674 fail** (96.5 %); 60 files pass completely | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's whole `t/` tree, run in place (528 files) | 107 files identical to perl; 105 differ for a registered, explained reason; 258 differ and are the bug queue; the remaining 58 do not compile, time out, are too slow for the quick run or produce no test output | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | a board of 14 pure-Perl CPAN distributions, 183 test files | **85 files pass, 48 pass partially, 50 fail** (2,274 assertions pass / 338 fail); "fail" also counts the seven files perl itself skips | `tools/cpan-scoreboard.pl` |
 | statements the compiler cannot translate, over all of the above | **62 statements in 19 files**, each with a filed cause (mostly unsupported, like `:lvalue` subs) | `tools/drop-census.pl` |
 
-The first two rows were re-measured on 2026-09-19.  The CPAN board was measured on 2026-09-18 and its four Moo-family distributions again on 2026-09-19 (one file went from partial to pass; the other 64 read the same); the remaining rows are from 2026-09-18.
+The first two rows were re-measured on 2026-09-20.  The CPAN board was measured on 2026-09-18 and its four Moo-family distributions again on 2026-09-19 (one file went from partial to pass; the other 64 read the same); the remaining rows are from 2026-09-18.
 
 Every failing assertion is recorded row by row in a baseline that the test
 runner compares against, so a change that breaks something previously
