@@ -3658,6 +3658,42 @@ What a mode check cannot see, said plainly: a cache root inside a
 world-writable directory **without** the sticky bit can be renamed away by
 another user, and no permission on the root itself prevents that.
 
+### 9.2c A cached EXTENSION entry (normative, s1202, task #1202)
+
+An **extension** is a `.lisp` file in PCL's own tree that `p-load-extension`
+pulls in at the first call that needs it — `cl/pcl-pack.lisp`,
+`cl/pcl-mro.lisp`, `cl/pcl-warnings.lisp`, `cl/pcl-xs.lisp`. It is compiled
+and cached with the *same* machinery as a module (`%p-build-module-fasl`
+under `*pcl-fasl-build*`, `%p-load-module-fasl`, temp + `rename(2)`, the
+`.failed` marker, the one prune), and **one file, not three**:
+
+| file | what it is |
+|---|---|
+| `<cache>/ext/<name>-<stem>-<runtime-identity>.fasl` | the extension compiled, for one runtime + one SBCL |
+
+where `<stem>` is `sxhash(<name> NUL <the extension file's bytes>)`.
+
+**The key is the file's CONTENT, and there is no separate validity predicate.**
+A module entry is keyed by its *path* and validated against its source's mtime
+and a dependency manifest; an extension has no separate source to fall out of
+date with and reads no dependency at transpile time — it *is* the emitted
+file. So a name that exists was built from exactly those bytes by exactly this
+runtime, and **a stale extension entry is not unlikely, it is unreachable**:
+regenerating an artifact (`tools/rebuild-pack`) computes a different name.
+On a successful build the loader deletes the other entries *for the same name
+and the same runtime identity* — never another identity's, which belongs to a
+different tree and ages out by the prune.
+
+Two consequences that follow from this and are normative:
+
+- **The generation stamp is not in the key.** §9.2's stamp still says which
+  compiler emitted an artifact, and `Pl/t/artifact-staleness-01.t` still gates
+  it; but since the stamp is line 1 of the file, a generation bump that
+  regenerates the artifact changes its bytes and therefore its key anyway.
+- **`*pcl-skip-cache*` (`--no-cache`) does not reach this layer**, by the same
+  reasoning that exempts the saved core: neither is a transpile of the user's
+  program. `PCL_NO_FASL_CACHE=1` turns it off with every other fasl.
+
 ### 9.3 The drop form: a statement the compiler could not lower (normative, s435)
 
 Where a statement of the source program could not be lowered, the emitter puts

@@ -19,6 +19,89 @@ USER: "Please continue. Do look for new ways of running tests, to find problems.
 8. *A runtime stub census* (functions that ignore every argument and answer a constant): finds the two known stubs, otherwise honest — low yield, run once.
 Still running at the time of writing: the core modules' OWN test suites (2,373 `.t` files in the perl source tree that no runner has ever pointed PCL at; a ten-dist sample) and the Rosetta Code Perl solutions (2,239 fetched; pure-computation subset selected by a static filter and validated by perl).
 
+## Session s1202 (Opus agent, 2026-09-20) — #1202: the extension load gets the module-fasl cache, and a Moo class stops paying four seconds for `pack`
+
+**What it acts on.**  `p-load-extension` `load`ed a checked-in `.lisp` from the
+tree as TEXT, so SBCL recompiled the whole artifact on every run that reached
+it.  Measured here: `cl/pcl-pack.lisp` (195 KB) costs **4.26 s** loaded as text
+and **0.004 s** loaded as a fasl.  And that bill went to programs that never
+mention `pack`: `Sub::Quote`'s top-level code calls `pack("F",0)`, Moo loads
+`Sub::Quote` for any `has`, so every Moo class with one attribute paid the
+whole recompile, every run (s473x's finding, task #1910).  The USER lifted the
+park in s492.
+
+**The change is the loader and nothing else.**  `p-load-extension` keeps its
+contract (idempotent per name, NIL when the file is absent,
+`%pcl-check-extension-clean` after the load) and gains one step:
+`%p-load-extension-file` resolves `<cache>/ext/<name>-<content stem>-<runtime
+identity>.fasl`, loads it with `%p-load-module-fasl` if it is there, else
+builds it with `%p-build-module-fasl` — the module cache's own machinery, with
+its `*pcl-fasl-build*` discipline, its temp + `rename(2)`, its `.failed`
+marker and its one 30-day prune (`ext/` is now a fourth directory in it).
+Every failure ends in the text `load`, so the worst case is what PCL did
+before.  No line of `cl/pack-impl.pl` or of any artifact moved; no emission
+change, no generation bump.  Feasibility was measured first: all four
+extensions `compile-file` cleanly under the flag and load in a fresh image,
+`cl/pcl-xs.lisp` included (its `define-alien-callable`s compile; the
+`load-shared-object` is inside a function, called at run time), so nothing is
+excluded and the loader never names an extension — rule 9a.
+
+**The key is the file's BYTES, and that removes the validity question.**  A
+module entry is keyed by its path and validated against its source's mtime
+plus a dependency manifest; an extension *is* the emitted file and reads no
+dependency, so a name that exists was built from exactly those bytes by
+exactly this runtime.  A stale extension fasl is therefore not unlikely — it
+is unreachable, and `tools/rebuild-pack` proves it by computing a different
+name.  Hashing costs ~1 ms for the largest artifact, which is why the key is
+content and not path+size+mtime with content as a tiebreak.  A successful
+build drops the other entries for the same name *and the same runtime
+identity*; another identity's belongs to a different tree and ages out — the
+alternative has two worktrees rebuilding each other's entry for ever.
+Normative text: `docs/ir-spec.md` §9.2c.
+
+**One deliberate difference from the module gate: `--no-cache` does not reach
+it.**  `*pcl-skip-cache*` turns off the caches of derived TEXT, because "is it
+the cache?" is a question about a transpile of the user's code.  An extension
+is a checked-in file compiled against this runtime and keyed by its bytes —
+which is precisely what the saved core is, and `--no-cache` does not disable
+that either (`PCL_NO_CORE` does).  `PCL_NO_FASL_CACHE=1` is the switch, reached
+through `%p-compile-module-p`'s new `:extension` class, beside `:main-script`
+and for the same reason (the directory lists are about modules someone is
+editing).  Measured consequence: `./runpcl`, `tools/runt` and the perl-tests
+sweep, which all set the flag, get the speed-up.
+
+**A second, smaller fix the guard forced out.**  `%p-load-module-fasl`'s two
+NON-build failure arms — an unreadable fasl, and one a sibling pruned between
+the check and the `load` — wrote the `.failed` BUILD marker, which refuses a
+rebuild for an hour.  That is right after a compile that just failed and wrong
+for a file a crash truncated: one bad fasl cost an hour of loading from text,
+for modules and scripts as well.  They now say so under `PCL_FASL_DEBUG` and
+rebuild.
+
+**Measured** (this box, a sibling agent running, load 4.6–10; each tree its own
+fresh `PCL_CACHE_DIR` at 0700; WARM = best of 3 after 6 settling runs):
+`pcl -E 'print pack("N",1)'` **5.588 → 0.280 s**, Moo + one `has`
+**5.774 → 1.050 s**, the s491 `p1910-moo.pl` probe 9.723 → 4.427 s (its
+remainder is the probe's own work: 18 module fasl hits and a 0.003 s extension
+load), `mro` 0.344 → 0.275, `warnings` 0.300 → 0.269, and **the control
+`print 1` 0.263 → 0.264 — unchanged**, because a program that loads no
+extension does no work here at all.  The one run that pays: 6.09 s the first
+time after an artifact is regenerated, 0.25 s the next.  Task **#2086** filed
+for the shape this does not cover — pre-building the entries into an INSTALL
+TREE beside `pcl.core`, for the shared `/opt/pcl` case where every user
+otherwise pays the 4.7 s compile once.
+
+**Bar.**  Gate `Result: PASS` 250 files / 8495 tests on a fresh core; full
+sweep `--jobs 4` GATE clean, 0 new / 0 fixed, **TOTAL passing 18685 (+0)**,
+drops 5 = census, `pack.t` 5636 / 89 identical to the blessed baseline;
+`tools/t/ext-fasl.t` 25 rows (10 of them FAIL on a `git archive main`
+extraction — every fasl-existence, HIT and debug-line row; the answer rows and
+the #349 `@INC` rows pass there, as they must); `tools/t/install-pcl.t` 57/57
+and an installed tree verified to use the entry; `PCL_NO_CORE=1` and core mode
+produce the same runtime identity and share it; `tools/ir-conform --jobs 2`
+323 pass / 0 fail / 0 stale; paren checker, `tag-license --check`, and
+`tools/ir-inventory.pl` regenerated identical.
+
 ## Session s473t6d (Opus agent, 2026-09-20) — #1501 ROUND 11, the LAST op/ round: a tie on an ELEMENT, a foreach list that ran twice, and the band's last 213 causeless rows
 
 **Member 1 — the band, confirmed before a cause was written.**  The 15 files
