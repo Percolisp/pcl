@@ -2,19 +2,20 @@
 
 [![CI](https://github.com/Percolisp/pcl/actions/workflows/ci.yml/badge.svg)](https://github.com/Percolisp/pcl/actions/workflows/ci.yml)
 
-Percolisp/PCL compiles Perl to Common Lisp (using the
+Percolisp/PCL compiles Perl to Common Lisp (for the
 [SBCL](https://www.sbcl.org/) compiler), working towards CPAN
 compatibility.
 
 The second main target is to make a compiler toolkit for Perl, with a
 documented IR (Intermediate Representation),
-[specified](docs/ir-spec.md) here. Then see the
+[specified](docs/ir-spec.md) here. Also, see the
 [architecture](docs/v2-target-architecture.md).
 
 All the development files used by the AI for making Percolisp will be
-in this repo. It is licensed the same as Perl.
+in this repo. It is licensed the same as Perl. The aim is to allow
+someone to fork this as a basis for their own Perl compiler.
 
-Here is an example of compiled Perl:
+Here is an example, this Perl:
 
 ```perl
 use feature 'say';
@@ -24,7 +25,7 @@ for my $i (1 .. $n) { $sum += $i * $i }
 say $sum;
 ```
 
-This get compiled to:
+The compiler output:
 
 
 ```lisp
@@ -40,8 +41,8 @@ that variable names are kept and that there are type declarations for
 variables.
 
 Everything with a `p-` prefix is a runtime function (/macro) named
-after the Perl operator it implements. `p-incf-raw` use direct changes
-of the variable (no risk of references or overloads etc).
+after the Perl operator it implements. `p-incf-raw` changes the
+variable directly (no risk of references or overloads etc).
 
 See the documentation and test suite for more.
 
@@ -51,8 +52,10 @@ It is easier to list what doesn't work:
 
 * **XS modules.**  Anything with compiled C fails. It is on the todo list,
   hopefully it will work.
-* **`@_` aliasing.**  Arguments are copies; `$_[0] = 42` inside a sub does
-  not change the caller's variable.  Plain lexical arguments are fine.
+* **`@_` aliasing is partial.**  `$_[0] = 42` changes the caller's
+  variable, array element or hash element, as in perl. It doesn't for an
+  element reached through a reference (`f($r->{k})`), a call through a
+  code reference (`$f->($x)`) or a method call: those get copies.
 * **`DESTROY` is never called.**  Memory is reclaimed by the Lisp garbage
   collector, so there is no scope-exit destructor; code that relies on one
   for cleanup (guard objects, temporary files) does not get it.
@@ -69,9 +72,9 @@ It is easier to list what doesn't work:
 
 ### Measured
 
-A large part of the failures are from unsupported features (lack of
-XS, error messages are different, `caller()` returns too few
-parameters, etc). The remaining test failures are the todo list. :-)
+A large part of the failures are from unsupported features (no XS,
+error messages are different, `caller()` returns too few parameters,
+etc). The remaining test failures are the todo list. :-)
 
 | measurement | result | reproduce |
 |---|---|---|
@@ -93,10 +96,7 @@ See [`docs/STATUS.md`](docs/STATUS.md) for more details.
 
 These are microbenchmarks for different Perl features, measured
 2026-09-18 on a quiet machine (best of five runs, startup time
-subtracted for both). A ratio below 1.00× means PCL is faster. The
-linked page has the full board of 37 rows, including the ones where
-PCL is still slower that are not shown here (file I/O about 3.4×,
-`s///e` 3.5×, a text-processing loop 2.7×).
+subtracted for both). A ratio below 1.00× means PCL is faster.
 
 | benchmark | what it measures | PCL / perl |
 |---|---|---:|
@@ -121,14 +121,14 @@ PCL is still slower that are not shown here (file I/O about 3.4×,
 | slices | reading `@a[1..5]` and `@h{@k}` | 1.67× |
 | ovlsub | `use overload` arithmetic and stringification on objects | 3.37× |
 | moo-objs | Moo objects: constructor, accessors, a method building another object | 28× |
-| pack | `pack` with two templates | 1035× |
-| packunpk | `pack` followed by `unpack` | 1080× |
+| pack | `pack` with two templates | ~150× |
+| packunpk | `pack` followed by `unpack` | ~135× |
 
 When the compiler can prove a variable holds an integer for its whole
 life, the generated code uses native arithmetic without verifying the
 type. Those variables can't have a reference taken, get assigned to a
 string and no string `eval` can reach it. If possible, a read-only
-`foreach` bind array slots directly instead of copying each element.
+`foreach` binds array slots directly instead of copying each element.
 
 Reading and writing single array or hash elements, copying a whole
 array, filling one from a range, and a read-only `foreach` over one or
@@ -148,9 +148,11 @@ loop runs a regex engine written in Lisp
 ([cl-ppcre](https://edicl.github.io/cl-ppcre/)) instead of perl's
 hand-tuned C one.
 
-`pack`/`unpack` is a thousand times slower and will be redone after XS
-works.  (PCL's `pack` is itself Perl, compiled by PCL and kept as a
-correctness oracle.)
+`pack`/`unpack` is more than a hundred times slower and will be redone
+after XS works.  (PCL's `pack` is itself Perl, compiled by PCL and kept
+as a correctness oracle. The two `pack` rows were re-measured on
+2026-09-20: until then every run also recompiled that code, which was
+most of the earlier 1000×.)
 
 The full table over time, and the measurements behind each optimization,
 are in [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).
@@ -163,7 +165,7 @@ are in [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md
   string `eval` is compiled to CL from Perl. (If/when XS is done, then
   Percolisp could theoretically be compiled to CL.)
 * There is no standalone binary (yet). `pl2cl --executable` saves an
-  image that runs the program, but it still need to load modules
+  image that runs the program, but it still needs to load modules
   loaded with `require` or from an `eval`.
 
 Minimum perl version is 5.20. The SBCL needs a later version than most
@@ -274,9 +276,10 @@ exception is thrown, which `eval` can catch. A construct that is
 deliberately unsupported dies the same way, naming its entry in
 [`docs/not-supported.md`](docs/not-supported.md) in the message.
 
-**Caches.** PCL caches three types of compiled binaries. A saved SBCL
+**Caches.** PCL caches four types of compiled binaries. A saved SBCL
 core with the PCL runtime (a tenth of the startup time), modules
-loaded with `use`, and the script you run. All three are stored in
+loaded with `use`, the script you run, and PCL's own lazily loaded
+parts (`pack`, `mro`, `warnings`). All four are stored in
 `~/.pcl-cache/`. Change
 the directory with `PCL_CACHE_DIR` and clear with `pcl
 --clear-cache`. The directory is created `0700`. (Compiled `eval`
@@ -290,7 +293,7 @@ PPI's files, so a perl or PPI upgrade re-makes every entry. A script's
 entry is named the same way, plus the `-I` directories it was run with.
 
 So a cached module or script is re-transpiled when its own file
-changes. It is also re-transpiled when modules it depends on changes
+changes. It is also re-transpiled when modules it depends on change
 (if constants etc are declared in dependencies, the generated code
 might change) — and when one of those `use`d names starts resolving to
 a *different file*, which changes the parse in the same way: you added
@@ -425,7 +428,7 @@ dynamic typing, closures, dynamic binding for `local`, non-local exits for
 `die`/`last`/`return`, and garbage collection. So the runtime uses those
 directly, instead of rebuilding them.
 
-**Scalars are "boxes" small data structures, unless proved
+**Scalars are "boxes", small data structures, unless proved
 otherwise.** A Perl scalar can be aliased by `foreach`, referenced
 with `\$x`, localized, or tied. So by default PCL represents each
 variable as a small mutable container, a *box*, and passes the box
