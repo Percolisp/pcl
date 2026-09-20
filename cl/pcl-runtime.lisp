@@ -16276,6 +16276,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (when cloexec (%p-set-cloexec stream))
   (let ((std (%p-std-slot fh)))
     (when std (return-from %p-install-fh (%p-rebind-std std stream))))
+  ;; PERL CLOSES WHAT THE HANDLE ALREADY HOLDS (task #2006 (a)).  `open(FH,
+  ;; ">", $f); print FH "x"; open(FH, "<", $f); <FH>` reads "x" in perl and
+  ;; read NOTHING here: the second open replaced the box's value and the first
+  ;; stream was never flushed, so the bytes were still in its buffer.  This
+  ;; sits AFTER the standard-handle branch on purpose — %p-rebind-std dup2s,
+  ;; and dup2 closes whatever was on the descriptor already, which is perl's
+  ;; own mechanism for STDOUT/STDERR; closing *standard-output* here would
+  ;; take the program's own output with it.
+  (%p-close-previous-stream fh)
   (cond ;; The box holds a GLOB (Symbol::gensym, \*FH, IO::Handle->new — often
     ;; blessed).  Perl attaches the stream to the glob's IO slot and leaves
     ;; the scalar itself alone; overwriting the box with the stream
@@ -16552,6 +16561,38 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                 (setf $? status)
                 (if (and flushed (zerop status)) t nil))
             (error () (%pcl-save-errno) nil))))))
+
+(defun %p-close-previous-stream (fh)
+  "perl's implicit close: an `open` (or `opendir`, `socket`, `accept`, `pipe`)
+   into a handle that ALREADY HOLDS AN OPEN STREAM closes that stream first
+   (task #2006 (a)).  Without it the old stream's BUFFER was never flushed, so
+   the everyday write-then-read-back idiom
+
+       open(FH, \">\", $f); print FH \"bareword\"; open(FH, \"<\", $f); my $got = <FH>;
+
+   read nothing where perl reads \"bareword\".
+
+   It is the CLOSE PATH, not a second one: a fork-pipe's parent end is reaped
+   (or it would become a zombie) and a socket goes through the socket close.
+   What it must NOT do is %p-close-impl's NO-HANDLE arm — that sets $! = EBADF,
+   and every ordinary `open(my $fh, ...)` into a fresh box would land there.
+   So the test is positive: close only what is demonstrably an OPEN stream or
+   a socket.
+
+   `$?` IS SAVED AND RESTORED, which is perl's answer and not the one to
+   guess (probed 5.40.3): an EXPLICIT `close` on a fork-pipe sets `$?` to the
+   child's status, and an IMPLICIT one — the reopen — leaves `$?` exactly as
+   it was, zero or not.  The child is still reaped here; only the status is
+   not published."
+  (let ((v (%p-resolve-fh fh)))
+    (cond
+      ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh))
+      ((and (streamp v) (open-stream-p (%p-stream-target v)))
+       (let ((saved $?))
+         (%p-close-maybe-pipe v)
+         (setf $? saved))
+       (%p-forget-fh fh))))
+  (values))
 
 (defun %p-dup-src-name (have-val val name-str)
   "The handle NAME a dup-open's source designator spells, when it spells one:
@@ -16863,6 +16904,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    `'a;echo BOOM'` arrives as that string).  Every other mode takes exactly one
    target and perl is FATAL about a second (`More than one argument to
    open(,':perlio')`), so this says so rather than picking one (rule 12)."
+  ;; perl closes what the handle already holds BEFORE it attempts the new
+  ;; open, so a FAILED reopen still flushed and closed the old stream (task
+  ;; #2006 (a), probed: `open($r,">",$f); print $r "gone"; open($r,"<",
+  ;; "/nope/x")` leaves $f four bytes long).  %p-install-fh runs the same
+  ;; helper for every other opener — it is one reading called from the two
+  ;; points perl's ORDER distinguishes, not two implementations.
+  (%p-close-previous-stream fh)
   ;; Only the two pipe modes take a LIST; every other mode is perl's fatal
   ;; "More than one argument to open".  Checked on the SIGILS, so a layered
   ;; spelling (">:utf8") is judged the same as a bare one.

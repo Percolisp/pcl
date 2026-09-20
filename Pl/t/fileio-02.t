@@ -67,7 +67,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 40;
+plan tests => 43;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -738,3 +738,49 @@ print "exists=", (-e $f ? 1 : 0), "\n";
 unlink $f;
 PERL
 }
+
+# 41-43: #2006 (a) — an `open` into a handle that ALREADY HOLDS AN OPEN STREAM
+# closes it first.  `open(FH, ">", $f); print FH "x"; open(FH, "<", $f); <FH>`
+# read NOTHING: the second open replaced the handle's value and the first
+# stream's buffer was never flushed.  `%p-close-previous-stream` runs from the
+# two points perl's ORDER distinguishes — the top of the open (so a FAILED
+# reopen has still flushed and closed the old stream) and `%p-install-fh` (so
+# socket / accept / pipe follow it too).  `$?` is SAVED AND RESTORED across it,
+# which is perl's answer and not the obvious one: an EXPLICIT `close` of a
+# fork-pipe publishes the child's status, an IMPLICIT one leaves `$?` alone
+# (probed 5.40.3).  Half (b) — closing a lexical handle at SCOPE exit — is a
+# separate design item and is deliberately not touched here.
+test_io('#2006(a): re-open flushes and closes the previous stream', <<'PERL');
+my $f = "/tmp/pcl-t-reopen-$$";
+open(FH, ">", $f) or die; print FH "bareword"; open(FH, "<", $f) or die;
+my $got = <FH>; close FH; print "1 [", ($got // ""), "]\n";
+open(my $h, ">", $f) or die; print $h "lexical"; open($h, "<", $f) or die;
+my $g = <$h>; close $h; print "2 [", ($g // ""), "]\n";
+open(my $a, ">", $f) or die; print $a "one\n"; open($a, ">>", $f) or die;
+print $a "two\n"; open($a, "<", $f) or die; my @l = <$a>; close $a;
+print "3 ", scalar(@l), "\n";
+unlink $f;
+PERL
+
+test_io('#2006(a): a FAILED re-open has still closed the old stream', <<'PERL');
+my $f = "/tmp/pcl-t-reopen2-$$";
+open(my $r, ">", $f) or die; print $r "gone";
+my $ok = open($r, "<", "/nonexistent-dir-xyz/file");
+print "1 ", ($ok ? "opened" : "failed"), " size=", (-s $f), "\n";
+unlink $f;
+PERL
+
+test_io('#2006(a) negatives: a dup SOURCE stays open; a loop of opens is unaffected', <<'PERL');
+my $f = "/tmp/pcl-t-reopen3-$$";
+open(my $s, ">", $f) or die; print $s "dup-src\n";
+open(my $d, ">&", $s) or die; print $d "dup-wrote\n"; close $d; close $s;
+open(my $rd, "<", $f) or die; my @dl = <$rd>; close $rd;
+print "1 ", scalar(@dl), "\n";
+open(my $t, ">", $f) or die; close $t;
+for my $i (1 .. 3) { open(my $w, ">>", $f) or die; print $w "line $i\n"; close $w }
+open(my $u, "<", $f) or die; my @ul = <$u>; close $u; print "2 ", scalar(@ul), "\n";
+opendir(my $dh, "/tmp") or die; my $e1 = readdir($dh);
+opendir($dh, "/") or die; my @root = readdir($dh); closedir($dh);
+print "3 ", (scalar(@root) > 2 ? "ok" : "BAD"), "\n";
+unlink $f;
+PERL
