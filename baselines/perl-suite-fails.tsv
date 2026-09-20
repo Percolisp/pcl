@@ -5010,12 +5010,6 @@ op/or.t	10	ok	not ok	|| propagates lvaluish context to its lhs	NS:Lvalue subrout
 op/or.t	9	ok	not ok	|| propagates lvaluish context to its rhs	NS:Lvalue subroutines [DEFERRED] (#930) -- `($x || $y) = 1` propagates lvalue context through `||` to whichever side it returns
 op/override.t	0	(none)	renumbered	*summary*	#1870
 op/override.t	35	ok	not ok [PCL #19]	<> does not ignore &CORE::GLOBAL::readline aliased to a constant	#1870
-op/override.t	25	ok	not ok [PCL #11]	[at t/op/override.t line 118]	#1870
-op/override.t	26	ok	not ok [PCL #12]	[at t/op/override.t line 118]	#1870
-op/override.t	28	ok	(missing)	[at t/op/override.t line 126]	#1870
-op/override.t	29	ok	(missing)	[at t/op/override.t line 142]	#1870
-op/override.t	1	ok	not ok	[at t/op/override.t line 20]	#1870
-op/override.t	2	ok	not ok	[at t/op/override.t line 25]	#1870
 op/override.t	3	ok	not ok	[at t/op/override.t line 34]	#1870
 op/override.t	4	ok	not ok	[at t/op/override.t line 37]	#1870
 op/override.t	5	ok	not ok	[at t/op/override.t line 40]	#1870
