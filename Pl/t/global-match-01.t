@@ -46,7 +46,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 5;
 
 sub run_cl {
     my ($code) = @_;
@@ -226,4 +226,41 @@ c16 dollar: aaa!
 c17 caretmg: 2
 c19 r: bbb
 c20 i: 2 zbzb
+EXPECT
+
+# ── 5. #2001: a LIST-context m//g starts AT pos and RESETS it ──────────────
+# perlop: in list context //g returns every match FROM pos (so a preceding
+# scalar //g or a `pos() =` assignment positions the scan), and on completion
+# pos goes back to undef unless /c keeps it at the end of the last match.
+# PCL started the list scan at 0 and never touched pos, so after `$t =~ /;/g`
+# the list match `my %h = $t =~ /(\w+)=(\w+)/g` collected the FIRST pair too.
+# The anchored \G arm has always read pos and cleared it; this is the same rule
+# for the ordinary spelling, and rows 5-9 are the negatives that must not move.
+is(run_cl(<<'PROG'), <<'EXPECT', '#2001: list-context m//g honours and resets pos');
+my $s = "aXbXcXd"; pos($s) = 3; my @m = $s =~ /X/g;
+print "1 ", scalar(@m), " pos=", (defined pos($s) ? pos($s) : "undef"), "\n";
+my $t = "k1=v1;k2=v2;k3=v3"; $t =~ /;/g; my %h = $t =~ /(\w+)=(\w+)/g;
+print "2 ", join(",", map { "$_=$h{$_}" } sort keys %h), "\n";
+my $u = "abcabc"; $u =~ /b/g; my $c = () = $u =~ /b/g; print "3 $c\n";
+my $x = "x1x2"; my @g = $x =~ /(\d)/gc;
+print "4 ", scalar(@g), " pos=", (defined pos($x) ? pos($x) : "undef"), "\n";
+my $y = "abc"; pos($y) = 1; my @n = $y =~ /(z)/g;
+print "5 ", scalar(@n), " pos=", (defined pos($y) ? pos($y) : "undef"), "\n";
+my $z = "abc"; pos($z) = 1; my @n2 = $z =~ /(z)/gc;
+print "6 ", scalar(@n2), " pos=", (defined pos($z) ? pos($z) : "undef"), "\n";
+my $w = "aXbXc"; my $k = 0; $k++ while $w =~ /X/g;
+print "7 $k pos=", (defined pos($w) ? pos($w) : "undef"), "\n";
+my $a = "aaab"; pos($a) = 1; my @ga = $a =~ /\Ga/g; print "8 ", scalar(@ga), "\n";
+my $q = "k1=v1;k2=v2"; my @one = $q =~ /(\w+)=(\w+)/g;
+my @two = $q =~ /(\w+)=(\w+)/g; print "9 ", scalar(@one), " ", scalar(@two), "\n";
+PROG
+1 2 pos=undef
+2 k2=v2,k3=v3
+3 1
+4 2 pos=4
+5 0 pos=undef
+6 0 pos=1
+7 2 pos=undef
+8 2
+9 4 4
 EXPECT

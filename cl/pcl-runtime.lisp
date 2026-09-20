@@ -29925,14 +29925,22 @@ buffer's fill-pointer; everything else falls back to file-length."
                ;; `while (pos < len) { @m = /\G.../g }` loop never terminate;
                ;; clearing it matches Perl (pos() becomes undef).
                (remhash string *p-match-pos*)))
-            ;; /g in list context: return all matches at once, no pos tracking
-            ;; :void is NOT list context — only (eq *wantarray* t) is list context
+            ;; /g in list context: every match FROM pos, at once.
+            ;; :void is NOT list context — only (eq *wantarray* t) is list context.
+            ;; IT STARTS AT pos AND RESETS IT (task #2001, perlop): a preceding
+            ;; scalar `//g` or a `pos() =` assignment positions the scan, and on
+            ;; completion pos goes back to undef unless /c keeps it.  PCL started
+            ;; at 0 and never touched pos, so after `$t =~ /;/g` the list match
+            ;; `my %h = $t =~ /(\w+)=(\w+)/g` collected k1 as well as k2 and k3.
+            ;; The anchored \G arm above has always read pos and cleared it; this
+            ;; is the same rule for the ordinary spelling.
             ((and global-p (eq *wantarray* t))
              (let ((all-results nil)
                    (last-rs nil) (last-re nil) (last-ms nil) (last-me nil)
                    ;; perl's own loop, not cl-ppcre's do-scans: the advance rule
                    ;; is %p-global-scan's (task #1719).
-                   (pos 0) (slen (length str)) (empty nil))
+                   (pos (or (%p-match-pos-state string) 0))
+                   (slen (length str)) (empty nil))
                (loop
                 (multiple-value-bind (ms me rs re)
                     (%p-global-scan scanner minend-key str pos slen empty)
@@ -29955,6 +29963,12 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (loop for item in items for i from 0 do (setf (aref result i) item))
                  (when items
                    (%p-match-record str last-ms last-me last-rs last-re closers reg-names))
+                 ;; perl resets pos() when a list-context /g finishes — on a hit
+                 ;; and on a miss alike — unless /c, which leaves it where the
+                 ;; last match ended (probed 5.40.3).
+                 (if cont-p
+                     (when items (%p-set-match-pos string last-me (= last-ms last-me)))
+                     (remhash string *p-match-pos*))
                  result)))
             ;; /g in scalar/void context: iterate from current pos
             ((and global-p (not (eq *wantarray* t)))
