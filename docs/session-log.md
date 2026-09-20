@@ -73,6 +73,39 @@ generation **v2-1660**, the three artifacts regenerated.  Guards
 `Pl/t/tie-01.t` 18 → 24 and `Pl/t/foreach-aliasing-01.t` 22 → 30, both
 inverse-verified on a `268d7e00` extraction.
 
+**Member 4 — the companion leg (finished s493).**  The targeted run over the
+44 files that carry the two shapes read `85 NEW ROW / 68 FIXED ROW / 1 LOST`,
+which looked like a regression and was not: nine files moved and only four of
+them are this round's.  Every one was A/B'd file-alone, `--jobs 1 --timeout
+180`, against a `git archive 268d7e00` extraction, comparing ROW TEXT.
+
+| file | NEW | FIXED | cause | verdict |
+|---|---|---|---|---|
+| `op/gv.t` | 51 | 6 | the #1651 HANG: 90/95 and the identical row set on BOTH trees, and the tool itself prints `noise, not a regression` when it labels the run TIMEOUT — the batch run happened to label it DIFF | not ours, **#1967** |
+| `re/pat.t` | 28 | 30 | `for (keys %ans)` at pat.t:434 — 16 row descriptions in perl's HASH ORDER, and the oracle and PCL are separate processes.  233/136 and the same 28/32 on BOTH trees; the two faillogs are 523 rows each differing in exactly the 10 `20000 nodes` rows | not ours, **#1965** |
+| `re/pat_rt_report.t` | 4 | 4 | four blessed rows spelled with the ABSOLUTE perl-build path where `rowkey_desc` strips `$tdir` — a key the projection can never produce.  Same 4/4 on BOTH trees | not ours, **#1966** |
+| `op/lex.t` | 1 | 1 | one blessed row spelled `\xAB/\xBB` where perl's own description carries the raw bytes.  Same 1/1 on BOTH trees | not ours, **#1966** |
+| `op/gmagic.t` | 0 | 19 | #1950 | SPLICED 31/2 → **50/2** |
+| `op/tie.t` | 0 | 2 | #1950 — DATA records 25 (`tie $a->{foo}` + `untie` from within FETCH) and 43 (RT 5475, `tie $a[0]`/`tie $h{foo}` FETCH counts) | SPLICED 15/80 → **17/78** |
+| `op/inccode.t` | 0 | 3 | #1950 — inccode.t:312 `tie $INC[0], 'INCtie'`, emitted `(p-tie (p-aref @INC 0) …)` and announced "a non-lvalue … is not implemented"; now `p-aref-box`.  The form stops aborting at `Not a SCALAR reference` and the file reaches 41 rows instead of 39 | SPLICED 13/26 → **16/25**, shortfall 50 → 48 |
+| `op/magic.t` | 1 | 3 | #1954 — the two `*extra*` tail rows were the file's +2 drift; the ONE new row is the SAME failure re-labelled, see below | SPLICED 176/31 → **174/31**, shortfall 1 → 3 |
+
+**The one genuinely new companion row is a mis-attribution this round removed.**
+`op/magic.t`'s blessed `[at t/op/magic.t line 619]` was caused in member 3 as
+"the row reads `${^TAINT}` back after assigning to it".  It is not: with the
+two invented rows gone the numbering offset drops from 82 rows to 7, PCL's
+failing unnamed row lines up with perl's row 124 instead of 126, and the
+assertion that actually fails is `eval " BEGIN { ok ! defined \$^S } "` at
+magic.t:615 — `$^S` is UNDEF DURING COMPILATION in perl and PCL has only the
+two run-time states (0 / 1 in an eval).  Probed both spellings vs perl 5.40.3
+and filed as **#1968**; the row was replaced, not re-caused.  A re-run of the
+four spliced files reads `0 NEW / 0 FIXED / 0 UNVERIFIED / 0 LOST`, shortfall
+UNEXPLAINED 0, no snapshot mover (`scratch/s473t6d/ab/verify.log`).  Baseline
+byte-identity re-checked after the splices: the only file keys that changed in
+any baseline are the round's own 15 band files plus `op/tie.t` and
+`op/inccode.t`, nothing foreign; `cause-census --hygiene` still ZERO new
+`other` rows (the 3 are the pre-existing PVBM ones).
+
 ## Session s491a (Opus agent, 2026-09-19; finished and recorded by Fable) — the user-visible filler batch: what a new user's first Moo program and first exception object show
 
 Six members, ordered by how many users meet them; all six shipped.  **#1917**: every Moo run printed "Class::XSAccessor exists but failed to load …" wherever that XS module is installed for perl, because PCL's XSLoader failure text is not the "Can't locate FILE in @INC" that the ecosystem's optional-XS probes grep for.  The no-artifact failure now raises a marker subclass of the perl die, and the `require` frame that owns the file's own top-level load re-raises perl's not-found text (innermost frame first, so a module's own `eval { XSLoader::load }` fallback never sees it; a direct `XSLoader::load` reads as before; remembered per process; `%INC` stays empty).  Moo cold / warm / warm-again: stdout == perl, stderr empty.  **#1846**: `"$@->{code}"` printed `HASH(0x1)->{code}` — the arrow set was measured character by character and is NOT the #451 subscript set (an explicit arrow continues after any interpolated scalar, never into a method call, never across a blank, never after the braced spelling); one predicate in InterpScan's `$` arm; corpus emission identical.  On the way a NUMBER used as a symbolic container ref stopped dying with a raw CL type error (`%p-symref-name`).  **#1912**: a false `can` returned from a sub left ZERO values in list context — one returner `%p-can-answer` at every perl-visible `can` boundary, `p-can` itself still a CL boolean for the runtime; Safe-Isa's `safe_isa.t` went PARTIAL 67/1 → PASS 68/0.  **#1914**: `overload::Method` (own / inherited / by-name resolved through the invocant's MRO / absent → undef) and `overload::Overloaded("ClassName")`.  **#1847**: `length` observes undef, so it got its OWN use class — it no longer licenses the `:str` freeze but still licenses the `.=` buffer, because making it opaque measured 40× slower and quadratic; the accepted residue is a never-appended buffer with an undef initialiser.  **#1918**: ASCII-only digits in numification (the regex side, where perl's answer is the opposite, filed as #1972).
