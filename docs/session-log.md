@@ -110,6 +110,99 @@ produce the same runtime identity and share it; `tools/ir-conform --jobs 2`
 perl's own `t/` that reach an extension (`op/pack.t` is quarantined) **10
 identical, 0 movers**, before = the extraction; paren checker,
 `tag-license --check`, and `tools/ir-inventory.pl` regenerated identical.
+## Session s492a (Opus agent, 2026-09-20) — the EVERYDAY-PERL batch part 1 (#1994): seven members, and two review fixes the final bar found
+
+**Member 1 — #1995, JSON numbers.**  `pl-is_utf8` answered 1 for EVERY value,
+including an integer, a double, undef and a code ref — values with no character
+form to be upgraded, which perl answers false for (21 shapes probed).  That is
+not the #1389 flag divergence but a plain wrong answer, and it was load-bearing:
+core JSON::PP's `_looks_like_number` starts `return if utf8::is_utf8($value)`,
+so PCL encoded every number as a JSON string.  The fix is
+`(p-bool (stringp (unbox str)))` — the REPRESENTATION decides, every string
+still answers 1.  The `json-rt` bench row could not have caught it (its document
+is all strings); its comment now says so.  Guard `Pl/t/is-utf8-01.t`, 6/6 fail
+on the base.
+
+**Member 2 — #1991, a flattened reference.**  The task suspected the parser;
+the discriminating measurement killed that in a minute — the emission of
+`map { ref } \@b` is byte-identical to the parenthesised spelling.  The bug is
+in the runtime COLLECTORS, which unboxed each item before asking "is this a
+vector to spread?"; `p-backslash` of an array is exactly a p-box holding a
+vector.  ONE predicate `%p-spread-vector-p` now serves `%p-collect-list`,
+`%p-sort-collect-plain` and `p-join`, which is how `p-flatten-args` had always
+read it.  Wider than filed (35 rows probed): `reverse`, `join`, and every
+array-ref VALUE handed to one of them.  Sweep TOTAL 18687 → 18689: join.t's two
+GH #21484 rows assert that an overloaded `""` among join's arguments is
+stringified, and p-join used to spread the blessed hash ref into nothing.
+
+**Member 3 — #1996, a qualified bareword in a paren list.**  Measured, not
+guessed: the site is PExpr's binary-only-operator branch, it fires only WITHOUT
+`use strict`, and #266's classifier answers `no` for `JSON::PP::true` because
+no table here crosses a `use`.  So neither option in the task: `no` on a
+QUALIFIED name is ignorance, and the answer is #266's own — ask the IMAGE.
+
+**Member 4 — #1998, a circular `use`.**  perl sets %INC before it runs a file's
+body, so a module reached again while loading takes the already-loaded path:
+no second load, and `import` called on what is defined so far.  p-use returned
+early and warned about a state perl treats as ordinary.  Four quadrants probed
+({custom import, Exporter} × {partner by require, by use}).  Measured, not "it
+loads": the battery's 73 core modules go 57 → 59, and a loopback TCP echo
+between a forked child and the parent through IO::Socket::INET answers
+`echo:ping`.  What the modules still miss is filed per cause (#2010, #2011,
+#2012), never patched by name.
+
+**Member 5 — #1999, `$)` under signatures.**  PPI decides `$` + `)` from
+file-region state, so once `use v5.36` is in force the magic variable is split
+everywhere and the stray `)` reaches the LEXER — the reproducer's blocks come
+back unclosed — which is why a token-class repair runs too late and core
+File::Copy was refused whole.  The repair is on the source, with PPI's own
+tokenizer (run without feature tracking) as the oracle: every false-positive
+shape keeps its `$)` inside another token, so the set is "a Magic token whose
+content is `$)`".  Rule 13 in the same commit (ppi-upstream-bugs §32, three
+rows in ppi-bug-report.t, a canary).  File::Copy then wanted
+`use builtin 'blessed'`, which PCL dropped without importing →
+`p-import-builtins` / `p-unimport-builtins`, targeting `*package*` (the runtime
+current package still says MAIN while a module's own `use` runs).
+
+**Member 6 — #1919, adjacent renamed names.**  The task's own discriminating
+measurement, taken first: the fixer's regex makes ONE substitution over
+`A[$v$v]`, because the escape guard consumed the character to the left of the
+sigil and /g ate the second occurrence's left context.  The zero-width
+`(?<!\\)((?:\\\\)*)` says the same thing without consuming.  Twelve shapes
+probed.  The braced spelling's whole-file refusal is a different mechanism and
+is filed (#2014).
+
+**Member 7 — #1990, `delete` of a slice.**  #1923 routed the READ emitters
+through `_slice_in_context_form` and the `delete` arm was left behind — for all
+FOUR slice kinds, not only the kv pair filed, and a count is always TRUE, so
+deleting a ZERO value read as true.
+
+**The final bar found two of its own.**  The full gate FAILED on
+`Pl/t/parser2-01.t`: member 3's runtime lookup reached the CLASS-NAME slot of
+`bless`/`tie`, breaking task #142's invariant that the bareword and quoted
+spellings emit the same bytes, and putting a sub resolution on every such call.
+`_class_name_bareword` now reads the marked Word leaf back — the position is
+positive knowledge, the lookup is for ignorance — and the two `bless` shape
+rows parser2-01.t never had were added, which is why only half the collision
+had been visible.  Then the gate-SET scan over both populations moved exactly
+one file, `t/op/stat.t`, from OK to a dropped statement carrying the repair's
+own replacement character: member 5's header claimed "the token stream
+concatenates to the source", and it does not — a HereDoc token's content is its
+marker alone, and `__END__` breaks the stream, so 45 of perl's 551 t/ files
+drift and the two bytes landed twelve lines early.  Both halves of the repair
+now share ONE heredoc-aware walk, and the SOURCE has the last word: an offset
+is used only when the two bytes there really are `$)`, so a residual drift can
+only lose a repair, never corrupt a file.
+
+**Bars (logs in the agent's `scratch/s492a/`).**  Gate `Result: PASS`
+253 files / 8542 tests on the rebased tree (main 250/8495).  Full sweep GATE
+clean, TOTAL 18687 (+0 against the merged baseline; the +2 over main's 18685 is
+member 2's, blessed row by row), drops 5 = census.  corpus-diff vs 5316d666:
+5 files, all explained (four gain `(p-import-builtins "weaken")`, delete.t gains
+the scalar-context wrapper).  emission-ab --shapes 122 files SAME / 0 DIFF /
+0 RCDIFF.  gate-SET scan both populations 638 × 2: EMPTY diff.  ir-conform 323
+pass / 0 fail / 0 stale.  ir-host-leak: the leak set byte-identical to the base.
+All seven guard files inverse-verified on a 268d7e00 extraction in one run.
 
 ## Session s473t6d (Opus agent, 2026-09-20) — #1501 ROUND 11, the LAST op/ round: a tie on an ELEMENT, a foreach list that ran twice, and the band's last 213 causeless rows
 

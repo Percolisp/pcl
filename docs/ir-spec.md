@@ -645,7 +645,13 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   reading already wins, so this is the `no strict` regime only.  A word the
   operator to its right AUTOQUOTES (`=>`, `->`) stays a string, whatever the
   name means, and so does a name this file declares BELOW (positive knowledge
-  that perl does not know it here either).
+  that perl does not know it here either).  A CLASS-NAME ARGUMENT POSITION —
+  `bless REF, CLASSNAME` and `tie VAR, CLASSNAME` — is also positive knowledge
+  and keeps the string, so the bareword and the quoted spelling emit the same
+  bytes and no per-call sub resolution is emitted there:
+  `bless $r, Foo::Bar` is `(p-bless $r "Foo::Bar")`.  (perl applies the
+  ordinary bareword rule in that slot, so a DECLARED sub of that name is
+  called; PCL does not — task #2015.)
 
 - **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
   object** (normative, task #423). Perl distinguishes a glob *value*
