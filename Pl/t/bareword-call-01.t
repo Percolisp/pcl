@@ -32,7 +32,7 @@ use v5.30;
 use strict;
 use warnings;
 use Test::More;
-use File::Temp qw(tempfile);
+use File::Temp qw(tempfile tempdir);
 use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 37;
+plan tests => 42;
 
 sub run_cl {
     my ($code) = @_;
@@ -298,3 +298,51 @@ test_cl('`study` stays a BUILTIN call, not a bareword string',
 test_cl('a name the compiler cannot place is CALLED when the image has it',
     qq{sub helper \{ print "helper\\n" \}\nmy \$c = \\&helper;\n}
   . qq{no strict 'refs';\nhelper;\nprint "done\\n";\n}, "helper\ndone\n");
+
+# ── #1996: a QUALIFIED name in a package this compiler CANNOT SEE INTO ───────
+#
+# No table here crosses a `use`: `declared_subs` holds only this file's subs,
+# and the prototype table is keyed by the BARE name (#421) and carries only
+# what the export scan could read plus `()`-prototypes (#365).  So `no` for
+# `Ext::yes` means "cannot see into package Ext", never "perl finds no sub
+# there" — and answering the STRING made `my %h = (b => Ext::yes)` store the
+# text "Ext::yes" where perl stores what the sub returned.  The question goes
+# to the IMAGE (`p-bareword-value`), the same answer #266's `no` verdict
+# already gives a bareword standing alone as a statement.
+#
+# ONLY `no strict` reaches this: under `use strict` an undeclared bareword is
+# a compile error, so the call reading already wins (probed both ways).
+#
+# The module is written here rather than named, because the FACT under test is
+# "a sub the compiler cannot see", not any one module.
+my $EXTDIR = tempdir(CLEANUP => 1);
+{
+    open my $efh, '>', "$EXTDIR/Ext.pm" or die $!;
+    print $efh "package Ext;\nsub yes { 'Y' }\nsub no_args { 'N' }\n1;\n";
+    close $efh;
+}
+my $USE_EXT = qq{use lib "$EXTDIR";\nuse Ext ();\n};
+
+test_cl('a qualified name from a `use`d module is CALLED inside a paren list',
+    qq{$USE_EXT\nmy \@l = (Ext::yes, 1);\nprint "\@l\\n";}, "Y 1\n");
+
+test_cl('... and as a hash value',
+    qq{$USE_EXT\nmy %h = (b => Ext::yes, c => 2);\nprint "\$h{b}\$h{c}\\n";},
+    "Y2\n");
+
+# The LEFT of a fat comma is autoquoted whatever the name means — perl's rule,
+# and the one the runtime resolution must not reach.
+test_cl('a qualified name LEFT of `=>` is still the string',
+    qq{$USE_EXT\nmy %h = (Ext::yes => 1);\nprint join(",", keys %h), "\\n";},
+    "Ext::yes\n");
+
+# A package with no such sub: the image answers perl's string, so the rewrite
+# is answer-preserving where the old one was already right.
+test_cl('a qualified name with NO sub behind it is still the string',
+    qq{my \@l = (No::Such::Thing, 4);\nprint "\@l\\n";},
+    "No::Such::Thing 4\n");
+
+# An UNQUALIFIED unknown keeps #266's string reading — the corpus depends on
+# it (`print "x=", nosuch;`, `\@ISA = (Exporter)`).
+test_cl('an UNQUALIFIED unknown name in a list is still the string',
+    qq{my \@l = (nosuchname, 5);\nprint "\@l\\n";}, "nosuchname 5\n");

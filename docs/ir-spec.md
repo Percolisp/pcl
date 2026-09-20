@@ -632,6 +632,20 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   IMAGE — `(p-bareword-value "NAME")` calls the sub if one exists at that name
   and otherwise answers the string.  Both outcomes are perl's; a translator
   whose name knowledge IS complete may fold it at compile time.
+- **The same `(p-bareword-value "NAME")` is emitted for a PACKAGE-QUALIFIED
+  bareword used as a VALUE that the compiler could not place** (normative,
+  s492a, task #1996).  A bareword in operator context — after `,`, after `=`,
+  before a binary operator — reads as its own text under `no strict subs`, and
+  that is right for an UNQUALIFIED name the compiler does not know.  It is not
+  right for a qualified one: no compile-time table crosses a `use`
+  (`declared_subs` is this file's subs; the prototype table is keyed by the
+  BARE name and carries only what the export scan could read), so "unknown"
+  there means "cannot see into that package", and reading the string made
+  `my %h = (b => JSON::PP::true)` store the text.  Under `use strict` the call
+  reading already wins, so this is the `no strict` regime only.  A word the
+  operator to its right AUTOQUOTES (`=>`, `->`) stays a string, whatever the
+  name means, and so does a name this file declares BELOW (positive knowledge
+  that perl does not know it here either).
 
 - **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
   object** (normative, task #423). Perl distinguishes a glob *value*

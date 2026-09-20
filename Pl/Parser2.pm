@@ -1064,7 +1064,8 @@ sub _source {
 # `use constant nought => 0;` emitted `(pl-"nought")`).  Snapshot both;
 # restore puts back the exact prior state, deleting keys that did not exist.
 # Used by _lower_expr's native attempt AND VarAnnotator's analysis parses.
-our @PPI_ADHOC_KEYS = qw(_bareword_string _has_match_context _pcl_decl_list
+our @PPI_ADHOC_KEYS = qw(_bareword_string _bareword_runtime
+                         _has_match_context _pcl_decl_list
                          _pcl_dyn_loop_exit
                          _core_qualified);
 

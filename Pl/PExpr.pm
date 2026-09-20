@@ -4099,8 +4099,8 @@ sub handle_subcalls {
           # BUT: if the word is not a known function (not in known_no_of_params,
           # not declared in Environment), it's an unknown bareword string literal
           # in NO-STRICT code: e.g., !Bare || $x — Bare is the string "Bare".
-          my $is_known_bop =
-              $self->_bareword_callable_here($sub_name, $now) eq 'yes';
+          my $verdict_bop = $self->_bareword_callable_here($sub_name, $now);
+          my $is_known_bop = $verdict_bop eq 'yes';
           # ALL-CAPS words (DIR, FILE, STDIN, MAXSIZE, etc.) are filehandles or
           # constants — leave them as funcalls so %p-fh-arg can identify them.
           # Only mixed-case unknown words (like Bare in !Bare) are string literals.
@@ -4120,7 +4120,8 @@ sub handle_subcalls {
               && $self->has_environment
               && $self->environment->has_pragma('strict_subs');
           if (!($is_known_bop || $is_all_caps_bop || $strict_call_bop)) {
-            $now->{_bareword_string} = 1;
+            $self->_mark_unplaceable_bareword($now, $sub_name, $verdict_bop,
+                                              $next_op);
             next;
           }
           my($top_node, $top_id) = $self->make_node_insert('funcall');
@@ -4567,12 +4568,17 @@ sub handle_subcalls {
         # string reading holds with no previous token at all.
         my $strict_subs = $self->has_environment
                           && $self->environment->has_pragma('strict_subs');
+        # "Already decided" means EITHER marking — the token may carry
+        # `_bareword_runtime` from the binary-only-operator branch above, and
+        # reading only `_bareword_string` here let the same word be marked
+        # there and then built into a funcall here (#1996).
+        my $already = $now->{_bareword_string} || $now->{_bareword_runtime};
         my $is_op_context = $strict_subs
-            ? ($prev_is_unary || $now->{_bareword_string})
+            ? ($prev_is_unary || $already)
             : ($prev_is_unary || $prev_is_value_op || $prev_is_separator
-               || $callable_fb eq 'not-yet' || $now->{_bareword_string});
+               || $callable_fb eq 'not-yet' || $already);
         if ($is_op_context) {
-          $now->{_bareword_string} = 1;
+          $self->_mark_unplaceable_bareword($now, $sub_name, $callable_fb);
           next;
         }
       }
@@ -5873,6 +5879,48 @@ sub _bareword_callable_here {
   # qualified name (it is keyed bare), so a qualified unknown is a string.
   return 'yes' if !defined $pkg && $env->has_prototype($name);
   return 'no';
+}
+
+# THE TWO SITES THAT READ AN UNPLACEABLE BAREWORD AS A VALUE — the
+# binary-only-operator branch and the end-of-expression branch of
+# handle_subcalls — mark the token HERE, so they cannot drift apart (rule 11).
+#
+# The default is perl's: under `no strict subs` a name that is not callable at
+# this point is its own text, which is what `_bareword_string` emits.
+#
+# A PACKAGE-QUALIFIED name is the exception, and the reason is structural, not
+# a guess: neither table this compiler consults crosses a `use`.  `declared_subs`
+# holds only THIS file's subs, and the prototype table is keyed by the BARE name
+# (#421) and only imports names the export scan could read plus `()`-prototypes
+# (#365).  So `no` for `Foo::bar` means "this compiler cannot see into package
+# Foo", never "perl would not find a sub there" — and answering the STRING made
+# `my %h = (b => JSON::PP::true)` store the text "JSON::PP::true" where perl
+# stores a JSON::PP::Boolean (#1996; under `use strict` the same file is
+# already right, because `$strict_call_bop` below reads it as a call).
+#
+# The question therefore goes to the IMAGE, exactly as #266's `no` verdict
+# already does for a bareword standing alone as a whole statement
+# (`Parser2::_rewrite_bareword_stmt` -> `p-bareword-value`): call the sub if one
+# exists at that name, else answer perl's string.  Both outcomes are perl's.
+#
+# What stays a STRING, and why:
+#   * an UNQUALIFIED name — #266's measured ruling; the corpus depends on
+#     `print "x=", nosuch;` and `@ISA = (Exporter)` reading as text;
+#   * `not-yet` — POSITIVE knowledge that this file declares the name BELOW, so
+#     perl provably does not know it here either;
+#   * a word autoquoted by the operator to its right, `=>` and `->`, which perl
+#     quotes whatever the name means;
+#   * a trailing-`::` name (`Foo::Bar::`), which is always a string in perl.
+sub _mark_unplaceable_bareword {
+  my ($self, $tok, $name, $verdict, $next_op) = @_;
+  if ($verdict eq 'no'
+      && $name =~ /::[^\W\d]\w*\z/
+      && !(defined $next_op && ($next_op eq '=>' || $next_op eq '->'))) {
+    $tok->{_bareword_runtime} = 1;
+    return;
+  }
+  $tok->{_bareword_string} = 1;
+  return;
 }
 
 # THE reading of a bareword in the `*` (filehandle) slot of a prototyped call

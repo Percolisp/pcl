@@ -693,6 +693,14 @@ sub gen_leaf_form {
     return _cl_string_literal_form(join('', $node->heredoc()));
   }
 
+  # The ONE Word leaf whose answer is a FORM, not an atom: a qualified
+  # bareword the classifier could not place, which asks the image at run time
+  # (PExpr::_mark_unplaceable_bareword, #1996).  It has to be read here rather
+  # than through gen_leaf, whose Word arm declines anything starting with "(".
+  if ($ref eq 'PPI::Token::Word' && $node->{_bareword_runtime}) {
+    return ['p-bareword-value', _cl_string_literal_form($node->content() // '')];
+  }
+
   # Pure atom leaves: barewords and operator tokens.  gen_leaf for
   # these is pure and its output is always an atom (a "…" literal, a
   # bareword, a number, an operator string), so it never starts with "(" —
@@ -1296,6 +1304,15 @@ sub gen_leaf {
     if ($node->{_bareword_string}) {
       (my $escaped = $content) =~ s/"/\\"/g;
       return qq{"$escaped"};
+    }
+    # A PACKAGE-QUALIFIED word the classifier could not place: perl reads it as
+    # a call when the sub exists and as its own text otherwise, and only the
+    # IMAGE knows which, because no table here crosses a `use`
+    # (PExpr::_mark_unplaceable_bareword, #1996).  Same runtime resolver as the
+    # whole-statement bareword (#266's `no` verdict).
+    if ($node->{_bareword_runtime}) {
+      (my $escaped = $content) =~ s/"/\\"/g;
+      return qq{(p-bareword-value "$escaped")};
     }
     # A bareword the environment KNOWS to be a filehandle becomes a CL SYMBOL
     # in the emitted call (`(p-open ＦＨ …)`, `(p-close ＦＨ)`, `p-binmode`,
