@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 131;
+plan tests => 132;
 
 sub run_cl {
     my ($code) = @_;
@@ -1348,3 +1348,19 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
      my %idx = (i => 1); my @a = ("p", "q"); $a[$idx{i}] =~ s/q/Q/;
      print "$m|$r->{k}|$c|$q->{k}|@a|$idx{i}\n";',
     "y|abc|aXc|abc|p Q|1\n");
+
+# ── CANARY for PPI bug 32 (ppi-upstream-bugs.md; task #1999) ────────────────
+# PPI 1.291 splits the magic variable `$)` into Symbol:$ + Structure:) once
+# the `signatures` feature is in force, and the stray `)` wrecks the enclosing
+# block structure -- so PCL repairs the SOURCE before PPI sees it
+# (Pl::Parser::_signature_gid_offsets).  THIS ROW ASSERTS THE BUG IS STILL
+# THERE: when a PPI upgrade fixes it, this row FAILS, and that is the signal
+# to delete the repair.
+{
+    my $src = "use v5.36;\nmy \$e = \$);\n";
+    my $doc = PPI::Document->new(\$src);
+    my ($tok) = grep { $_->content eq '$)' } $doc->tokens;
+    isnt( ref($tok), 'PPI::Token::Magic',
+          'CANARY: PPI still mis-lexes `$)` under the signatures feature '
+        . '(when this FAILS, drop Pl::Parser::_signature_gid_offsets)' );
+}

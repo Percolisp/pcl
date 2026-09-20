@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 78;
+use Test::More tests => 82;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -934,4 +934,39 @@ for my $c (
     my @st  = $doc->schildren;
     is( ref($st[0]), 'PPI::Statement::Sub',
         'sub main::_ { … } lexes as a PPI::Statement::Sub (control)' );
+}
+
+# ---------------------------------------------------------------------------
+# 32.  `$)` under the `signatures` feature  (ppi-upstream-bugs.md 32)
+#
+# Once the feature is on, PPI decides `$` + `)` from FILE-REGION state rather
+# than from "the tokenizer is inside a signature", so the magic variable `$)`
+# is split EVERYWHERE -- and the stray `)` reaches the lexer, which uses it to
+# close a structure.  `$(` is not affected, and without the pragma `$)` is a
+# single Magic token.
+{
+    my $src = qq{use v5.36;\nmy \$e = \$);\n};
+    my $doc = PPI::Document->new(\$src);
+    my ($tok) = grep { $_->content eq '$)' } $doc->tokens;
+    is( ref($tok), 'PPI::Token::Magic',
+        '`$)` under the signatures feature is ONE Token::Magic' );
+}
+{
+    # The structural damage: the stray `)` closes blocks that are not closed.
+    my $src = qq{use v5.36;\nsub f {\n  if (1) {\n    my \$x = \$)\n  }\n  return 1;\n}\n};
+    my $doc = PPI::Document->new(\$src);
+    my @unmatched = grep { $_->isa('PPI::Statement::UnmatchedBrace') }
+                    $doc->schildren;
+    is( scalar @unmatched, 0,
+        '`$)` inside a nested block leaves no UnmatchedBrace statements' );
+    my @subs = grep { $_->isa('PPI::Statement::Sub') } $doc->schildren;
+    is( scalar @subs, 1, 'the sub holding `$)` is still one Statement::Sub' );
+}
+{
+    # The CONTROL: `$(` takes the correct branch in the same document.
+    my $src = qq{use v5.36;\nmy \$g = \$(;\n};
+    my $doc = PPI::Document->new(\$src);
+    my ($tok) = grep { $_->content eq '$(' } $doc->tokens;
+    is( ref($tok), 'PPI::Token::Magic',
+        '`$(` under the same feature is a Token::Magic (control)' );
 }

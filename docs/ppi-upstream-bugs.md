@@ -1936,6 +1936,86 @@ and re-lexes, in the family of `_reclassify_bare_vwords` /
 
 ---
 
+## 32. `$)` is tokenized as `Symbol:$` + `Structure:)` ANYWHERE once the `signatures` feature is on — and the stray `)` wrecks the enclosing structure  [CONFIRMED 1.291]
+
+**PPI version tested:** 1.291 (`perl -MPPI -e 'print $PPI::VERSION'`).
+
+**Minimal repro** (valid Perl; `$)` is the effective GID):
+
+```perl
+use v5.36;
+sub f {
+    my $ok = 1;
+    if ($ok) {
+        $ok = grep { $_ == 5 } split /\s+/, $)
+    }
+    return $ok;
+}
+say f() ? "yes" : "no";
+```
+
+perl prints `no`.  Delete the pragma line and PPI is right; keep it and PPI
+is wrong.  `$(`, the twin, is NOT affected.
+
+**The token dump** (line 5, `PPI::Document->new(\$src)` with the feature on):
+
+```
+… Word:split | Regexp::Match:/\s+/ | Operator:, | Symbol:$ | Structure:)
+expected:                                        … | Magic:$)
+```
+
+**And the LEXER has already used it** — this is the part a token-class repair
+cannot undo:
+
+```
+PPI::Statement::Sub
+  PPI::Structure::Block   { ... ???          <- unclosed
+    …
+    PPI::Structure::Block { ... ???          <- unclosed
+      PPI::Statement
+        PPI::Token::Symbol '$ok'
+        PPI::Token::Operator '='
+        PPI::Token::Symbol '$'
+PPI::Statement::UnmatchedBrace  ')'
+PPI::Statement::UnmatchedBrace  '}'
+PPI::Statement::Break …
+PPI::Statement::UnmatchedBrace  '}'
+```
+
+**Cause.**  `PPI/Token/Unknown.pm`'s `$` branch tests
+`_current_token_has_signatures_active`, which is FILE-REGION state ("the
+feature is on here"), not "the tokenizer is inside a signature", and turns
+`$` + `)` into an unnamed placeholder parameter plus the closing paren.
+Inside a real signature that is right (`sub f ($x, $) {…}`); anywhere else
+`$)` is the magic variable.
+
+**PCL's workaround** (`Pl::Parser::_signature_gid_offsets` /
+`_restore_signature_gid`, called from the one construction site `_ppi_new`, so
+`fragment_doc`'s re-parses get it too): a SOURCE pre-pass, because the tree is
+already wrong by the time any token pass could run.
+
+Its oracle is **PPI's own tokenizer run WITHOUT the feature tracking** —
+`PPI::Tokenizer->new(\$src)->all_tokens` answers `Magic:$)` for the variable
+in every position, and every shape that could be a false positive keeps its
+`$)` INSIDE another token: a real signature is a single `Prototype:($x, $)`
+(named, leading-placeholder and anonymous alike), a dq string one
+`Quote::Double`, a comment one `Comment`, a pattern one `Regexp::Match`.  So
+"a `Magic` token whose content is `$)`" is exactly the set to repair, with no
+signature or paren analysis at all.  The token stream concatenates to the
+source, so the running length is each token's byte offset.
+
+The replacement is the SAME LENGTH (`$;`, which PPI lexes whole), so every
+later offset, line and column is byte-identical; the token's content is put
+back to `$)` after the parse by the same offset walk, leaving a
+`PPI::Token::Magic` the rest of the compiler reads normally.
+
+**What it unblocks:** core `File::Copy` (it starts `use 5.035007;`) was
+REFUSED WHOLE — `PCL: statement not supported at …/File/Copy.pm line 238: )` —
+so `copy`/`move`/`cp` did not exist under PCL at all.  Guard rows in
+`Pl/t/sig-param-shadow-01.t`; the upstream rows are in `docs/ppi-bug-report.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

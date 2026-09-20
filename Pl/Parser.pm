@@ -565,9 +565,83 @@ sub _include_string_args {
 # attached once and cannot drift between them.
 sub _ppi_new {
   my ($src, %opt) = @_;
-  return PPI::Document->new(\$src,
-                            custom_feature_include_cb => \&_pcl_feature_include_cb,
-                            %opt);
+  my @gid_at = _signature_gid_offsets($src);
+  substr($src, $_, 2) = '$;' for @gid_at;
+  my $doc = PPI::Document->new(\$src,
+                               custom_feature_include_cb => \&_pcl_feature_include_cb,
+                               %opt);
+  _restore_signature_gid($doc, \@gid_at) if $doc && @gid_at;
+  return $doc;
+}
+
+# ── `$)` UNDER THE `signatures` FEATURE (task #1999; ppi-upstream-bugs.md §24)
+#
+# PPI 1.291 decides `$` + `)` from FILE-REGION state — "is the signatures
+# feature on here" — and not from "is the tokenizer inside a signature", so
+# once `use v5.36` (or `use feature 'signatures'`) is in force the magic
+# variable `$)` is tokenized EVERYWHERE as `Symbol:$` + `Structure:)`.  Its
+# twin `$(` is untouched; without the pragma `$)` is a single `Magic` token.
+#
+# THE REPAIR IS ON THE SOURCE, BEFORE PPI, AND THAT IS NOT A PREFERENCE.
+# The stray `)` reaches the LEXER, which uses it to close a structure: the
+# reproducer's `sub f { if ($ok) { … $) … } … }` comes back with BOTH blocks
+# unclosed (`{ ... ???`) and three `Statement::UnmatchedBrace` at document
+# level, so File::Copy — which starts `use 5.035007;` — is refused whole.  A
+# token-class repair like `_merge_punct_array_symbols` runs AFTER that tree is
+# built and cannot undo it (the #410 lesson).  The two honest options were a
+# source pre-pass and a post-lex RE-PARENTING of the wrecked statements; the
+# second is a re-lex written by hand, so this is the smaller one.
+#
+# A BLIND TEXT SUBSTITUTION WOULD BE WRONG — `"$)"`, `# $)`, `m/$)/` are not
+# code — so the decision is made on PPI'S OWN TOKEN STREAM, which is right
+# about WHERE the characters are (it keeps `"$)"` as one Quote::Double) and
+# wrong only about what they mean.  The token stream concatenates to the
+# source, so walking it gives each token's byte offset for free.
+#
+# The replacement is the SAME LENGTH (`$;`, a magic token PPI lexes whole), so
+# every later offset, line and column is byte-identical to the original, and
+# the token is put back to `$)` after the parse by the same offset walk.  What
+# the rest of the compiler sees is a `PPI::Token::Magic` with content `$)`.
+sub _restore_signature_gid {
+  my ($doc, $at) = @_;
+  my %want = map { $_ => 1 } @$at;
+  my $off  = 0;
+  for my $t (@{ $doc->find('PPI::Token') || [] }) {
+    my $len = length($t->content);
+    $t->set_content('$)') if $want{$off} && $t->content eq '$;';
+    $off += $len;
+  }
+  return;
+}
+
+# The byte offsets in SRC at which `$)` is the MAGIC VARIABLE.
+#
+# THE ORACLE IS PPI'S OWN TOKENIZER, RUN WITHOUT THE FEATURE TRACKING — which
+# is where the bug lives: `PPI::Tokenizer->new(\$src)->all_tokens` answers
+# `Magic:$)` for the variable in every position, and the mis-lex only appears
+# once `PPI::Document` turns the feature on.  Measured over the eight shapes
+# that could give a FALSE POSITIVE, and not one does, because each keeps its
+# `$)` INSIDE another token: a real signature is a single `Prototype:($x, $)`
+# token (named, leading-placeholder and anon alike), a dq string is one
+# `Quote::Double`, a comment one `Comment`, a pattern one `Regexp::Match`.
+# So "a Magic token whose content is `$)`" is exactly the set to repair, with
+# no signature/paren analysis at all.
+#
+# The token stream concatenates to the source, so the running length IS each
+# token's byte offset.
+sub _signature_gid_offsets {
+  my ($src) = @_;
+  return () if index($src, '$)') < 0;
+  my $tok = eval { PPI::Tokenizer->new(\$src) } or return ();
+  my $all = eval { $tok->all_tokens } or return ();
+  my (@at, $off);
+  $off = 0;
+  for my $t (@$all) {
+    my $c = $t->content;
+    push @at, $off if $c eq '$)' && ref($t) eq 'PPI::Token::Magic';
+    $off += length $c;
+  }
+  return @at;
 }
 
 sub _ppi_parse {
@@ -645,8 +719,11 @@ sub _ppi_parse {
 # it produces (they preserve text exactly), so routing it would buy nothing and
 # cost a walk on a guarded path.
 sub fragment_doc {
+  # ALWAYS through _ppi_new (#1999): the `$)` source repair lives there, and a
+  # fragment that built its own document would take PPI's mis-lex — the same
+  # shape #435 fixed for the three token passes below.
   my ($src, %opt) = @_;
-  my $doc = %opt ? _ppi_new($src, %opt) : PPI::Document->new(\$src);
+  my $doc = _ppi_new($src, %opt);
   return undef unless $doc;
   _reclassify_bare_vwords($doc);
   _merge_unicode_symbols($doc);
@@ -9017,6 +9094,30 @@ my $NEVER_LOADED_PRAGMA = qr/^(?:strict|warnings|warnings::register|feature
                               |overloading|XSLoader|DynaLoader|re)$/x;
 sub _never_loaded_pragma { defined $_[0] && $_[0] =~ $NEVER_LOADED_PRAGMA }
 
+# The names `use builtin LIST` / `no builtin LIST` aliases into the current
+# package: the literal words of the import list, with a `:5.NN` VERSION BUNDLE
+# standing for "every builtin this version has" — which PCL reads as "every
+# one the runtime defines", since a name it does not implement cannot be
+# aliased anyway.  A `:bundle` is passed through as the literal `:5.NN` and
+# the runtime expands it; that keeps the bundle's membership in ONE place
+# (the runtime, which knows what it has) instead of a second table here.
+sub _builtin_import_names {
+  my ($self, $stmt) = @_;
+  my @names;
+  for my $child ($stmt->schildren) {
+    if ($child->isa('PPI::Token::QuoteLike::Words')) {
+      (my $c = $child->content) =~ s/^qw\s*[\(\[\{<]//;
+      $c =~ s/[\)\]\}>]\s*$//;
+      push @names, grep { length } split /\s+/, $c;
+    }
+    elsif ($child->isa('PPI::Token::Quote')) {
+      my $s = $child->string;
+      push @names, $s if defined $s && length $s;
+    }
+  }
+  return grep { /\A(?::[\w.]+|[^\W\d]\w*)\z/ } @names;
+}
+
 # The %INC entry perl WOULD have made for a module PCL does not load (task
 # #511): `use strict` sets $INC{"strict.pm"} to strict.pm's real path, and
 # programs read that (`require Foo unless $INC{"Foo.pm"}`, `if.pm`'s string
@@ -9420,6 +9521,23 @@ sub _process_include_statement {
             $self->_emit("(p-eval-always (p-use-open $args_cl))");
           });
         }
+      }
+    }
+    # `use builtin LIST` is the one pragma in this list that IMPORTS: perl
+    # aliases each named builtin into the calling package, so an unqualified
+    # `blessed($x)` after it is `builtin::blessed($x)` (core File::Copy is
+    # written that way, and dies "Undefined subroutine &File::Copy::blessed"
+    # without it).  The functions already live in the BUILTIN package; only
+    # the ALIASING was missing.  `no builtin LIST` removes the alias again —
+    # perl's own unimport.
+    if ($module eq 'builtin') {
+      my @names = $self->_builtin_import_names($stmt);
+      if (@names) {
+        my $fn   = $type eq 'no' ? 'p-unimport-builtins' : 'p-import-builtins';
+        my $args = join ' ', map { "\"$_\"" } @names;
+        $self->_with_bucket('definitions', sub {
+          $self->_emit("(p-eval-always ($fn $args))");
+        });
       }
     }
     $self->_emit(";; $perl_code (pragma)");

@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 26;
+plan tests => 32;
 
 sub write_pl {
     my ($code) = @_;
@@ -326,3 +326,61 @@ PL
 # signatures.t "() not signature when not enabled") and task #486 — it is
 # NOT what the boundary repair above changes (emission over the 111-file
 # corpus is identical), so asserting it here would add a knowingly-failing row.
+
+# ---- #1999: `$)` under the `signatures` feature ---------------------------
+#
+# PPI 1.291 decides `$` + `)` from FILE-REGION state ("the feature is on"),
+# not from "the tokenizer is inside a signature", so once `use v5.36` is in
+# force the magic variable `$)` is tokenized EVERYWHERE as Symbol:$ +
+# Structure:) -- and the stray `)` reaches the LEXER, which uses it to close
+# a structure.  The reproducer below came back with BOTH blocks unclosed and
+# three Statement::UnmatchedBrace at document level, which is why core
+# File::Copy (it starts `use 5.035007;`) was refused whole.
+# ppi-upstream-bugs.md 32; docs/ppi-bug-report.t carries the upstream rows.
+
+both_agree(<<'PL', '`$)` inside a nested block under the signatures feature');
+use v5.36;
+sub f {
+    my $ok = 1;
+    if ($ok) {
+        $ok = grep { $_ == 5 } split /\s+/, $)
+    }
+    return $ok;
+}
+say f() ? "yes" : "no";
+PL
+
+both_agree(<<'PL', '`$)` at file level, and `$(` beside it');
+use v5.36;
+say(($) =~ /^\d+/) ? "num" : "other");
+say(($( =~ /^\d+/) ? "num2" : "other2");
+my @g = ($(, $));
+say scalar(@g);
+PL
+
+both_agree(<<'PL', '"$)" in a dq string is InterpScan`s, and still interpolates');
+use v5.36;
+my $s = "[$)]";
+say(($s =~ /^\[\d/) ? "interp-ok" : "interp-bad");
+PL
+
+# THE CASES THE REPAIR MUST NOT TOUCH: a real signature's unnamed placeholder,
+# leading and trailing.  PPI keeps the whole signature in ONE token when the
+# feature tracking is off, which is exactly why the repair's oracle -- the
+# plain tokenizer -- cannot see these as the magic variable.
+both_agree(<<'PL', 'a signature`s TRAILING unnamed placeholder stays a parameter');
+use v5.36;
+sub f ($x, $) { return "got $x" }
+say f(7, 8);
+PL
+
+both_agree(<<'PL', 'a signature`s LEADING unnamed placeholder stays a parameter');
+use v5.36;
+sub f ($, $y) { return "got $y" }
+say f(7, 8);
+PL
+
+both_agree(<<'PL', '`$)` with NO feature pragma is unchanged (control)');
+sub f { my $x = $); return ($x =~ /^\d+/) ? "num" : "other" }
+print f(), "\n";
+PL
