@@ -2,6 +2,14 @@
 
 Append new entries at the top. One section per session.
 
+## Session 494 (Fable, 2026-09-21) — the two everyday-Perl batches launched; the s493 proposals ruled
+
+Opening state verified before anything ran: local main `5ce155cb` (one README/STATUS-only commit ahead of origin `1f4a43af`, CI green there), gen v2-1700, no worktree, the USER's uncommitted README.md edit left alone; the opening gate on that tree PASS 253 / 8542 in 101 s (`~/pcl-agent-scratch/s494/gate-opening.log`).
+
+**Asked, as s493's last instruction required** (AskUserQuestion): launch both agents, two at a time as before — YES; push `5ce155cb` — HOLD; of the four s493 proposals the USER scheduled **#2098** (the quadratic `.=` / `shift` / `unshift` as the next PERF slot, ahead of #1890/#1891), **#2104** (the Rosetta census round) and the **core-module companion leg** (had no task: filed as **#2106** with the s493 ten-dist measurement and the shape — a second root for `tools/run-perl-suite.pl`, own baselines, blessed only after s492c merges so the first bless measures a tree that is not moving); the fourth, **#2097** (`pcl` one-liner switches), goes "on the todo, but not so prioritized" — the task stops being an open USER decision and becomes a low-priority feature.  Queue table: `docs/plan-post-s473.md` §6.
+
+**Agents.**  s492b (silent-wrong core; gen v2-1740; IDs 2030–2049) and s492c (module surface; gen v2-1780; IDs 2052–2079) launched pinned to Opus, each in its own worktree, from `prompt.launch.md` files with the launch-time facts filled in (`__MAIN__` = `5ce155cb`; the briefs' older "after s473t6d" figures explicitly superseded).
+
 ## Session 493 (Fable, 2026-09-20 evening) — the stopped batches resumed, t6d merged, #1202 launched; eight NEW WAYS OF RUNNING TESTS tried, each with its yield
 
 USER: "Please continue. Do look for new ways of running tests, to find problems. Present them to me after the session, no hurry." + "keep 2 jobs running too".  The three questions re-asked from s492 were answered at once (DECIDED `## s493`): two agents at a time; README wording proposed in chat only; the everyday battery becomes a permanent on-demand instrument (#2099).
