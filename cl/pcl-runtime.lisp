@@ -282,6 +282,7 @@
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file #:p-require-version #:p-note-inc
+   #:p-import-builtins #:p-unimport-builtins
    ;; Functions
    ;; Reference aliasing (use feature 'refaliasing'): p-setf's \-cast place
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
@@ -20519,7 +20520,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1660"
+(defparameter *pcl-cache-generation* "v2-1700"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -22964,9 +22965,27 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; INSTALLED, and stays so for the rest of the process (#1917).
     (when (gethash rel-path *p-xs-unavailable-modules*)
       (%p-xs-not-installed rel-path))
-    ;; Circular dependency?
+    ;; MID-LOAD (a circular use): perl skips the LOAD and still IMPORTS
+    ;; (task #1998).
+    ;;
+    ;; perl's `use` is `require` + `import`, and `require` is skipped when the
+    ;; file is in %INC — which perl sets BEFORE it runs the file's body, so a
+    ;; module reached again while it is still loading takes exactly the
+    ;; already-loaded path above: no second load, and `import` called on
+    ;; whatever the half-loaded module has DEFINED SO FAR.  That is how
+    ;; IO::Socket::UNIX gets AF_UNIX out of a mid-load IO::Socket, and it is
+    ;; how HTTP::Tiny loads at all.  Probed over the four quadrants ({custom
+    ;; import, Exporter} x {partner reached by require, by use}): a custom
+    ;; `sub import` is defined at compile time and DOES import; an Exporter
+    ;; import whose `our @EXPORT = …` sits BELOW the require imports NOTHING,
+    ;; silently — and perl prints no warning for any of it.
+    ;;
+    ;; Returning here without importing was the bug, and the warning was the
+    ;; second half of it: it announced, on stderr, a state perl treats as
+    ;; ordinary.
     (when (member rel-path *p-loading-modules* :test #'string=)
-      (warn "Circular dependency detected: ~A" rel-path)
+      (when do-import
+        (%p-do-import module-name caller-pkg import-args))
       (return-from p-use t))
     ;; Find module in @INC
     (let ((abs-path (p-find-module-in-inc rel-path)))
@@ -25457,6 +25476,69 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; decisions these drive, e.g. Sub::Quote::quotify.)
     (def "CREATED_AS_NUMBER" (lambda (x) (make-p-box (if (numberp (unbox x)) 1 ""))))
     (def "CREATED_AS_STRING" (lambda (x) (make-p-box (if (stringp (unbox x)) 1 ""))))))
+
+;;; `use builtin LIST` — THE ONE PRAGMA IN THAT FAMILY THAT IMPORTS (#1999
+;;; residue).  perl aliases each named builtin into the CALLING package, so an
+;;; unqualified `blessed($x)` after it is `builtin::blessed($x)`; core
+;;; File::Copy is written that way (`use builtin 'blessed';`) and died
+;;; "Undefined subroutine &File::Copy::blessed" without the alias.  The
+;;; functions already live in the BUILTIN package — only the aliasing was
+;;; missing — so this is one `setf fdefinition` per name, into the package the
+;;; `use` was read in.
+;;;
+;;; A NAME THIS RUNTIME DOES NOT HAVE IS SKIPPED, not an error: perl's own list
+;;; grows per version, and `created_as_*` are deliberately absent here (see the
+;;; note above) so that a consumer's `defined &builtin::created_as_number` test
+;;; still answers false.  Dying on one name would cost the whole file the ones
+;;; it does have.
+(defun %p-builtin-names ()
+  "Every name the BUILTIN package actually defines, as perl spells it."
+  (let (names)
+    (do-symbols (s (find-package "BUILTIN"))
+      (let ((n (symbol-name s)))
+        (when (and (eql 0 (search "PL-" n)) (fboundp s))
+          (push (string-downcase (subseq n 3)) names))))
+    (sort (remove-duplicates names :test #'string=) #'string<)))
+
+(defun p-import-builtins (&rest names)
+  "Alias the named builtins into the package this `use` was READ in.  A
+   `:5.NN` version bundle means every builtin this runtime has.
+
+   THE TARGET IS `*package*`, not `*pcl-current-package*`, for the reason
+   %p-do-import gives for its own TO-PKG: the runtime current-package is set
+   by a call the codegen emits AFTER a section's use statements, so it still
+   says MAIN while a module's own `use builtin` runs — and the alias landed in
+   main instead of the module (measured on core File::Copy).  `*package*` is
+   the reader's package for this top-level form, which a `package Foo;`
+   section has already switched."
+  (let ((to *package*))
+    (dolist (raw names)
+      (dolist (name (if (and (plusp (length raw)) (char= (char raw 0) #\:))
+                        (%p-builtin-names)
+                        (list raw)))
+        (let ((from (find-symbol (%pcl-cl-sub-name name) "BUILTIN")))
+          (when (and from (fboundp from))
+            (let ((sym (intern (%pcl-cl-sub-name name) to)))
+              (setf (fdefinition sym) (fdefinition from))
+              (setf (gethash sym *p-declared-subs*) :defined)))))))
+  t)
+
+(defun p-unimport-builtins (&rest names)
+  "perl's `no builtin LIST`: drop the aliases this package got from `use
+   builtin`.  Only an alias is removed — a sub the package defined itself
+   under that name is left alone, which is what perl's unimport does."
+  (let ((to *package*))
+    (dolist (raw names)
+      (dolist (name (if (and (plusp (length raw)) (char= (char raw 0) #\:))
+                        (%p-builtin-names)
+                        (list raw)))
+        (let ((from (find-symbol (%pcl-cl-sub-name name) "BUILTIN"))
+              (sym  (find-symbol (%pcl-cl-sub-name name) to)))
+          (when (and from sym (fboundp sym)
+                     (eq (fdefinition sym) (fdefinition from)))
+            (fmakunbound sym)
+            (remhash sym *p-declared-subs*))))))
+  t)
 
 ;;; ============================================================
 ;;; Typeglob Support
