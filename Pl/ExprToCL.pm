@@ -3721,7 +3721,7 @@ sub _elem_box_form {
   my ($self, $arg_id) = @_;
   my ($kind, $container, @keys) = $self->_elem_container_key($arg_id);
   $kind //= '';
-  return undef unless $ELEM_BOX_FORM{$kind};
+  return undef if !$ELEM_BOX_FORM{$kind};
   return [$ELEM_BOX_FORM{$kind}, $container, $keys[0]];
 }
 
