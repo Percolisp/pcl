@@ -4070,7 +4070,21 @@ sub gen_array_ref_access_form {
     if !$paren_scalar_base;
   my $idx = $self->gen_node_form($kids->[1]);
   my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
-  return [$func, $ref, $idx];
+  my $form = [$func, $ref, $idx];
+  # A LIST SLICE IN SCALAR CONTEXT YIELDS ITS LAST SELECTED ELEMENT (perl's
+  # comma-operator rule): `$foo = ('a'..'f')[0,2,4]` is 'e', not the count.
+  # The index list is a LIST (task #2004 annotates it so, which is what makes
+  # `(localtime)[5,4,3]` three values instead of `(progn 5 4)`), so
+  # p-aref-deref answers with the selected VECTOR here and the collapse has to
+  # be said explicitly — before #2004 this row passed by accident, on a
+  # `(progn 0 2 4)` that evaluated to the last INDEX.  p-list-scalar is
+  # identity on a non-vector, so a single-index slice is untouched.
+  return ['p-list-scalar', $form]
+    if $is_list_subscript
+    && !$self->lvalue_context
+    && defined $node_id
+    && $self->expr_o->get_node_context($node_id) == SCALAR_CTX;
+  return $form;
 }
 
 # $ref->{k} → (p-gethash-deref ref k) / (p-gethash-deref-box …); multi-key
