@@ -7965,6 +7965,15 @@ sub _foreach_single_scalar_p {
     return 0 unless $casts || $refcast || $prim->content =~ /^\$/;
   } elsif (ref($prim) eq 'PPI::Structure::Block') {
     return 0 unless $casts || $refcast;         # only as ${ EXPR } / \{…}
+  } elsif (ref($prim) eq 'PPI::Structure::Constructor') {
+    # An ANONYMOUS constructor — `[LIST]` or `{LIST}` — is exactly ONE value,
+    # a reference, and the sigil-free spelling is the one the k>1 path has
+    # always got right (`for ([1],[2])` iterates twice).  At k=1 the missing
+    # arm sent the constructor through the run-time flattener, which cannot
+    # tell a box wrapping a vector from an @array box, so `for ([1,2]) {…}`
+    # ran ONCE PER ELEMENT with `$_` bound to the element (task #1954).
+    # A `$`-cast in front (`${[…]}`) is a deref, not a single value.
+    return 0 if $casts;
   } else {
     return 0;
   }

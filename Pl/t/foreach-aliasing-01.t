@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 30;
 
 sub run_cl {
     my ($code) = @_;
@@ -195,6 +195,36 @@ test_cl('a ref element stays ONE iteration, not spread (#267 inverse)',
 # on a copy (the #262/#263 silent-wrong), or the verdict and the lowering
 # disagree about the same tokens.  These two rows pin the undef half; the die
 # half is one line at each caller.  Pure perl — no SBCL, no transpile.
+# --- #1954: an ANONYMOUS CONSTRUCTOR in the foreach list is ONE value.
+# `[LIST]` / `{LIST}` are references, and the sigil is compile-time knowledge,
+# exactly as for `$x` / `$$r` above.  Before the fix a one-element list holding
+# a constructor went through the run-time flattener, which cannot tell a box
+# wrapping a vector from an @array box, so `for ([1,2]) {…}` ran ONCE PER
+# ELEMENT with $_ bound to the element ("1" then "2").  The k>1 spelling
+# `for ([1],[2,3])` already ANSWERED right (`p-flatten-args` keeps a box as one
+# element) but went through the flattener; it is a net here, not an inverse
+# guard, and its emission is now the direct `(vector …)` the k=1 case uses.
+test_cl('a one-element list holding an ARRAY constructor is ONE iteration (#1954)',
+    q{my $n=0; my $e=0; for ([1,2,3]) { $n++; $e = scalar @$_ } print "$n/$e\n";},
+    "1/3\n");
+test_cl('a one-element list holding a HASH constructor is ONE iteration (#1954)',
+    q{my $n=0; my $k=0; for ({a=>1,b=>2}) { $n++; $k = scalar keys %$_ } print "$n/$k\n";},
+    "1/2\n");
+test_cl('an EMPTY constructor is still one iteration (#1954)',
+    q{my $n=0; for ([]) { $n++ } for ({}) { $n++ } print "$n\n";}, "2\n");
+test_cl('several constructors are one iteration EACH (#1954, the k>1 half)',
+    q{my $t=0; for ([1],[2,3],[4,5,6]) { $t .= scalar @$_ } print "$t\n";}, "0123\n");
+test_cl('the statement-modifier spelling agrees (#1954)',
+    q{my $n=0; $n += scalar @$_ for ([1,2,3]); print "$n\n";}, "3\n");
+test_cl('my-declaration from @$_ inside the loop (#1954, op/magic.t:591)',
+    q{for (["powie","Errno"]) { my ($s,$p) = @$_; print "$s/$p\n" }},
+    "powie/Errno\n");
+# INVERSE GUARDS: the neighbouring spellings must keep flattening.
+test_cl('@{[...]} still FLATTENS (#1954 inverse)',
+    q{my $n=0; for (@{[10,20,30]}) { $n++ } print "$n\n";}, "3\n");
+test_cl('keys %{{...}} still flattens (#1954 inverse)',
+    q{my $n=0; for (keys %{{p=>1,q=>2}}) { $n++ } print "$n\n";}, "2\n");
+
 {
   local @INC = ($project_root, @INC);   # the compiler modules, not the shims
   require Pl::Parser;
