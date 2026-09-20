@@ -24,7 +24,9 @@ not-supported.md → only then probe.*
 - **COMPLEXITY-CLASS battery (each operation at N and 4N; flagged above 8×)**: perl flags nothing; PCL is QUADRATIC in a `.=` append loop (400k: 126 s, perl 0.02 s), a `shift @a` drain (200k: 189 s) and `unshift` (**#2098**); 37 other operations linear.  **Recursion limit MEASURED ~10k frames, untrappable** (#1929 said 64K; appended).
 - **`$$` is STALE in a forked child** (`kill SIG, $$` hits the PARENT) + %SIG handlers for HUP / USR1 never installed (**#2094**).
 - **Tried, LOW yield**: a runtime STUB CENSUS (32 constant-answer functions, all honest but Test::Builder->output & co).
-- Fable IDs used: 2090–2099; #1202's batch 2086–2089; next free **2100**.
+- **THE META LIST SAVED (USER: "save your list of questions, this meta level was good")**: `docs/questions-worth-asking.md` — eight questions that change the population or the observer, with status.  Worked s493: Q1 the USER`s own Perl (~600k lines) READ-ONLY — module-usage table (Carp 394 files, Test::More 345, Data::Dumper 319, Smart::Comments 203, Getopt::Long 131, File::Spec 119, Moo 97, DBI 87) + a 528-file compile-acceptance sample, NEVER executed unasked; Q2 keyword cluster census of tasks #1000+ (name resolution 96 filed / 72 open; CONTEXT 17 filed, 10 SILENT); Q3 perldiag run-time fatals: 16 perl-dies / PCL-lives (**#2103**: strict refs, read-only modification, invalid regex at run time …).  Q4 endurance + Q5 failure-experience batteries DESIGNED, not run.
+- **`=~` left operand inherits LIST context (#2102) + backticks never set `$?` (#2101)** — found by the perlvar walk.
+- Fable IDs used: 2090–2103; #1202`s batch 2086–2089; next free **2104**.  USER late s493: NO NEW SUBTASKS this session (tokens) — s492b / s492c launch next session.
 
 ## s491 (2026-09-19, Fable) — "continue, two subjobs at a time": perf round 34 + the op/ census tail launched; the t6c band RE-CUT (new round t6d); #1910 turns out to be the USER-parked #1202 — ASKED, not lifted; s473x reviewed and merged; five pre-existing bugs filed from the review probes
 
