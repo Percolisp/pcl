@@ -2596,7 +2596,20 @@ sub gen_funcall_form {
     );
     # Without the two ref arms the element lowered as a VALUE and delete got
     # one argument — an arity crash, not a wrong answer.
-    return [$head{$kind}, $container, @keys] if $kind && $head{$kind};
+    if ($kind && $head{$kind}) {
+      my $form = [$head{$kind}, $container, @keys];
+      # A DELETE OF A SLICE IS STILL A SLICE, so it is its LAST element in
+      # scalar context and not the COUNT of what it removed (ir-spec 3.2e,
+      # #1923 — task #1990).  All four slice kinds take the same wrapper the
+      # READ forms take; the two ELEMENT kinds return one value and must not.
+      # Probed 5.40.3 over ten shapes: `my $d = delete %h{"a"}` is 1 (the
+      # value), `delete @h{"c","d"}` is 4 (the last value), `delete %arr[0]`
+      # is 10, `delete @arr[2,3]` is 40 — PCL answered the pair/element count
+      # for every one, which also made `delete %j{"q"}` on a ZERO value TRUE.
+      $form = $self->_slice_in_context_form($form, $node_id)
+        if $kind =~ /^(?:kv_)?slice_[ha]_acc\z/;
+      return $form;
+    }
   }
 
   # exists on array/hash elements, refs, and sub/coderef existence.

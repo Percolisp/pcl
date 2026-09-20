@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 21;
 
 sub run_cl {
     my ($code) = @_;
@@ -206,3 +206,41 @@ test_cl('kv-slices in LIST context still give key/value pairs',
      my @arr = (10,20);
      print join(",", %kv{"a","b"}), "|", join(",", %arr[0,1]), "\n";',
     "a,1,b,2|0,10,1,20\n");
+
+# A DELETE OF A SLICE IS STILL A SLICE (task #1990, the #1923 residue): in
+# SCALAR context it is its LAST element, not the COUNT of what it removed.
+# #1923 routed the kv-slice READ forms through _slice_in_context_form; the
+# `delete` arm builds its own form and was left behind -- for all FOUR slice
+# kinds, not only the kv ones the task named.  The `? "true" : "false"` row is
+# why it is not cosmetic: a count is always true, so deleting a ZERO value
+# read as TRUE.  Every expectation is perl 5.40.3's own output.
+test_cl('delete of a slice in scalar context is its LAST value, not a count',
+    'my %h = (a=>1, b=>2, c=>3, d=>4, e=>5);
+     my @arr = (10,20,30,40,50);
+     my $kh = delete %h{"a"};
+     my $hs = delete @h{"c","d"};
+     my $ka = delete %arr[0];
+     my $as = delete @arr[2,3];
+     my %g = (x=>7, y=>8);
+     print "$kh|$hs|$ka|$as|", scalar(delete %g{"x","y"}), "\n";',
+    "1|4|10|40|8\n");
+
+test_cl('delete of a slice in BOOLEAN context reads the value, so 0 is false',
+    'my %i = (p=>1); my %j = (q=>0); my %k = (r=>0);
+     print((delete %i{"p"} ? "t" : "f"), (delete %j{"q"} ? "t" : "f"),
+           (delete @k{"r"} ? "t" : "f"), "\n");',
+    "tff\n");
+
+# LIST context is untouched, and so is a delete of one ELEMENT (which returns
+# one value and must NOT be wrapped).
+test_cl('delete in LIST context and delete of an ELEMENT are unchanged',
+    'my %h = (a=>1, b=>2, c=>3);
+     my @arr = (10,20,30);
+     my @d1 = delete %h{"b"};
+     my @d2 = delete @h{"c"};
+     my @d3 = delete %arr[1];
+     my $e1 = delete $h{"a"};
+     my $e2 = delete $arr[0];
+     print join(",", @d1), "|", join(",", @d2), "|", join(",", @d3),
+           "|$e1|$e2\n";',
+    "b,2|3|1,20|1|10\n");

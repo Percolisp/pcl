@@ -1330,6 +1330,14 @@ slice kind (task #1923: the two kv emitters were the pair that did not, and
 answered the pair COUNT).  List context is unaffected: a kv-slice is its
 key/value pairs.
 
+**A `delete` OF A SLICE IS STILL A SLICE** (normative, s492a, task #1990), so
+all four `p-delete-*-slice` forms take the same wrapper — `delete %h{'a'}` is
+the VALUE 1, `delete @h{'c','d'}` the last value, `delete %arr[0]` the
+element, `delete @arr[2,3]` the last one.  The count reading is not merely a
+wrong number: a count is always true, so `delete %j{'q'}` on a ZERO value read
+as TRUE.  The ELEMENT deletes (`delete $h{k}`, `delete $a[i]`) return ONE
+value and are not wrapped.
+
 ### 3.3 `p-true-p` (truthiness)
 
 False: the number 0 (but **NaN is true**), the strings `""` and `"0"`,
