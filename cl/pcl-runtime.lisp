@@ -31346,7 +31346,91 @@ buffer's fill-pointer; everything else falls back to file-length."
                (p-isa obj class)
                nil))))))
 (defun pl-DOES (obj class  &rest args) (declare (ignore args)) (pl-isa obj class))
-(defun pl-VERSION (&rest args) (declare (ignore args)) nil)
+
+;;; UNIVERSAL::VERSION — the method every class inherits (tasks #1743/#1818).
+;;; It was a stub that always answered undef and never performed the check, so
+;;; `$obj->VERSION` was undef, `Class->VERSION(9)` succeeded on a 1.0 module,
+;;; and `use Module VERSION` had nothing to call.
+;;;
+;;;   $obj->VERSION          -> $CLASS::VERSION (undef when the class has none)
+;;;   $obj->VERSION($req)    -> $VERSION, or a die naming both versions
+;;;   a class with NO $VERSION and a $req -> "does not define ... version check failed"
+;;;
+;;; The class is resolved with %pcl-invocant-class, the one resolver p-isa and
+;;; p-can use; $VERSION is read through %p-symref-scalar-value, the one
+;;; symbolic scalar read.  The comparison is the NUMERIC one perl does for an
+;;; ordinary decimal $VERSION; a v-string or a three-part "2.7.18" is not a
+;;; number, and perl says "Invalid version format" for both sides — that text
+;;; is reproduced, and the full version-object grammar is #1665's.
+(defun %p-version-parts (str)
+  "STR as version.pm's list of integer parts, or NIL when it is not a version.
+   perl compares version OBJECTS, not numbers, and the two spellings normalise
+   differently — probed 5.40.3: `$VERSION = \"2.7.18\"` FAILS a `VERSION(2.719)`
+   check (v2.7.18 < v2.719.0) while `$VERSION = 2.718` SATISFIES a
+   `VERSION(\"2.7.19\")` one (v2.718.0 > v2.7.19).  A dotted or v-string
+   version is its parts; a plain decimal splits its FRACTION into 3-digit
+   groups, right-padded, which is why 1.02 is v1.20.0."
+  (let* ((s (string-trim " " (pcl::to-string str)))
+         (s (if (and (plusp (length s)) (char-equal (char s 0) #\v)) (subseq s 1) s)))
+    (when (zerop (length s)) (return-from %p-version-parts nil))
+    (let ((dots (count #\. s)))
+      (cond
+        ((find-if-not (lambda (c) (or (digit-char-p c) (char= c #\.))) s) nil)
+        ((> dots 1) (%p-version-split s))
+        (t (let* ((dot (position #\. s))
+                  (whole (if dot (subseq s 0 dot) s))
+                  (frac  (if dot (subseq s (1+ dot)) "")))
+             (when (zerop (length whole)) (setf whole "0"))
+             (cons (parse-integer whole)
+                   (loop for i from 0 below (length frac) by 3
+                         collect (parse-integer
+                                  (let ((g (subseq frac i (min (length frac) (+ i 3)))))
+                                    (concatenate 'string g
+                                                 (make-string (- 3 (length g))
+                                                              :initial-element #\0))))))))))))
+
+(defun %p-version-split (s)
+  "The dotted spelling: every component is its own integer."
+  (let ((parts nil) (start 0))
+    (loop for i = (position #\. s :start start)
+          do (push (subseq s start (or i (length s))) parts)
+          (when (null i) (return))
+          (setf start (1+ i)))
+    (mapcar (lambda (p) (if (plusp (length p)) (parse-integer p) 0))
+            (nreverse parts))))
+
+(defun %p-version-less-p (a b)
+  "Element-wise compare, a missing component being 0."
+  (loop for i from 0 below (max (length a) (length b))
+        for x = (or (nth i a) 0)
+        for y = (or (nth i b) 0)
+        do (when (< x y) (return t))
+        (when (> x y) (return nil))
+        finally (return nil)))
+
+(defun pl-VERSION (obj &optional req &rest args)
+  (declare (ignore args))
+  (let* ((class (pcl::%pcl-invocant-class obj))
+         (raw   (and class (pcl::%p-symref-scalar-value
+                            (concatenate 'string class "::VERSION"))))
+         (have  (and raw (not (eq raw pcl::*p-undef*)) (pcl::unbox raw))))
+    (cond
+      ((null req) (if have (pcl::make-p-box have) pcl::*p-undef*))
+      ((null have)
+       (pcl::p-die (format nil "~A does not define $~A::VERSION--version check failed"
+                           class class)))
+      (t (%p-version-check class have req)))))
+
+(defun %p-version-check (class have req)
+  "perl's `use`/->VERSION comparison, with its own two diagnostics."
+  (let ((hv (%p-version-parts have))
+        (rv (%p-version-parts req)))
+    (when (or (null hv) (null rv))
+      (pcl::p-die "Invalid version format (non-numeric data)"))
+    (when (%p-version-less-p hv rv)
+      (pcl::p-die (format nil "~A version ~A required--this is only version ~A"
+                          class (pcl::to-string req) (pcl::to-string have))))
+    (pcl::make-p-box have)))
 
 (in-package :pcl)
 

@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 5;
 
 sub write_pl {
     my ($code) = @_;
@@ -189,4 +189,43 @@ print "auto:", $a->whatever, " can:", ($a->can("whatever") ? "T" : "F"), "\n";
 PL
     is(run_cl($prog), run_perl($prog),
        '#1912: the runtime consumers of the same lookup (PROPAGATE, AUTOLOAD) are unmoved (perl oracle)');
+}
+
+# ── s492c, tasks #1743 + #1818: UNIVERSAL::VERSION was a STUB ──────────────
+# `(defun pl-VERSION (&rest args) nil)` — so `$obj->VERSION` was undef,
+# `Class->VERSION(9)` SUCCEEDED on a 1.0 module (the stub returned undef, the
+# eval succeeded, and `! undef` is true, which is how t/op/universal.t row 20
+# "passed"), and `use Module VERSION` had nothing to call.
+#
+# perl compares version OBJECTS, not numbers, and the two spellings normalise
+# differently — probed 5.40.3, and these two rows are the pair a numeric
+# comparison gets backwards: $VERSION "2.7.18" FAILS a VERSION(2.719) check
+# (v2.7.18 < v2.719.0) while $VERSION 2.718 SATISFIES a VERSION("2.7.19") one.
+{
+    my $prog = <<'PL';
+package Alice; our $VERSION = 2.718; sub new { bless {}, shift }
+package Nover;  sub new { bless {}, shift }
+package Sub1;   our @ISA = ('Alice');
+package main;
+sub msg { my $e = shift; $e =~ s/ at .* line \d+\.?\n?\z//s; $e =~ s/\n\z//; $e }
+my $a = Alice->new;
+print "1 ", (eval { $a->VERSION } // 'undef'), "\n";
+print "2 ", (eval { Alice->VERSION } // 'undef'), "\n";
+eval { $a->VERSION(2.719) }; print "3 [", msg($@), "]\n";
+print "4 ", (eval { $a->VERSION(2.718) } ? "ok" : "BAD"), "\n";
+print "5 ", (eval { $a->VERSION(2.0) } ? "ok" : "BAD"), "\n";
+eval { Nover->VERSION(1) }; print "6 [", msg($@), "]\n";
+print "7 ", (eval { Nover->VERSION } // 'undef'), "\n";
+print "8 ", (eval { UNIVERSAL::VERSION("Alice") } // 'undef'), "\n";
+{ local $Alice::VERSION = "2.7.18";
+  eval { $a->VERSION(2.719) }; print "9 [", msg($@), "]\n"; }
+eval { $a->VERSION("2.7.19") }; print "10 [", msg($@), "]\n";
+{ local $Alice::VERSION = "not-a-version";
+  eval { $a->VERSION(1) }; print "11 [", msg($@), "]\n"; }
+print "12 ", (eval { $a->VERSION("1.0") } ? "ok" : "BAD"), "\n";
+print "13 ", (eval { Sub1->VERSION } // 'undef'), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#1743/#1818: ->VERSION reads $VERSION, compares as a VERSION OBJECT '
+     . 'and raises perl\'s own two diagnostics (perl oracle, 13 rows)');
 }
