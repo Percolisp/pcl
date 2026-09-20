@@ -5264,6 +5264,18 @@ sub child_context {
     # scalar context would yield only its last element.
     return LIST_CTX if $type eq 'array_str_interp';
 
+    # A LIST SLICE — `(LIST)[i]`, `qw(a b c)[1]`, `f()[0]` — evaluates BOTH
+    # its list and its index list in LIST context, whatever context the slice
+    # itself sits in (perl: `sub r { return (ctx(), "z")[0] }` called in scalar
+    # context still runs ctx() in LIST context; `(localtime)[5,4,3]` inside a
+    # scalar-context sprintf must yield three values, not `(progn 5 4)`).
+    # The marker is the one PExpr's two slice sites already set and
+    # gen_array_ref_access_form already reads — never a re-derivation of
+    # "is this a slice" (task #2004).
+    return LIST_CTX
+      if $type eq 'a_ref_acc'
+      && $self->node_tree->get_metadata($parent_id, 'list_ctx_subscript');
+
     # Assignment: RHS context depends on LHS, LHS ctxt depends on lvalue type
     if ($type eq '=') {
       my $children  = $self->get_node_children($parent_id);
@@ -5304,84 +5316,27 @@ sub child_context {
             if $child_index == 2;
       }
 
-      # join forces list context on all arguments after separator
-      if ($func_name && $func_name eq 'join') {
-        return LIST_CTX
-            if $child_index >= 2;  # All arguments after function name and separator
-      }
-
-      # Functions that always take lists
-      if ($func_name && $func_name =~ /^(push|unshift|splice|reverse)$/) {
-        return LIST_CTX
-            if $child_index >= 2;  # List argument(s)
-      }
-
-      # chop/chomp operate on a LIST of lvalues (chop @array, chop @h{@keys},
-      # chop($a,$b)) and must evaluate their argument(s) in list context — even
-      # when the call itself sits in scalar context (e.g. is(chop(@slice), 't'),
-      # where Test::More's $-proto forces the result scalar).  Without this the
-      # slice collapses via p-list-scalar and chop sees a single string.
-      # NB: this lives here (a context-only hint) rather than as a (@) entry in
-      # _builtin_prototypes because the prototype table is also read by codegen
-      # paths, and giving chomp a prototype there changes how `chomp @a`
-      # compiles (breaks chop.t).
-      if ($func_name && $func_name =~ /^(chop|chomp)$/) {
-        return LIST_CTX
-            if $child_index >= 1;
-      }
-
-      # print/say force list context on all arguments
-      if ($func_name && $func_name =~ /^(print|say)$/) {
-        return LIST_CTX
-            if $child_index > 0;  # All arguments after function name
-      }
-
-      # scalar forces scalar context on its argument
-      if ($func_name && $func_name eq 'scalar') {
-        return SCALAR_CTX
-            if $child_index >= 1;  # Argument is scalar context
-      }
-
-      # Scalar-argument named-unary operators impose SCALAR context on their
-      # argument even when the operator itself is in list context — e.g.
-      # `print ucfirst(reverse $s)` must reverse the STRING, not the list, and
-      # `push @a, length reverse $s` counts characters.  Without this the arg
-      # inherits the caller's list context and a context-sensitive callee like
-      # reverse/sort returns a list.
-      # `readpipe` is one of them (task #734): its prototype is `$`, so
-      # `join(",", "a", readpipe(f()), "b")` calls f in SCALAR context even
-      # though readpipe itself is in list context there — t/op/exec.t's
-      # "readpipe argument context in list context" row asserts exactly that.
-      # `eval` and `evalbytes` are members of this family too (task #1249(4)):
-      # perl imposes SCALAR CONTEXT on the operand of `eval EXPR`, so a CALL
-      # in that slot runs with wantarray FALSE — `sub two { ("3+4","x") }
-      # eval two()` evaluates the string "x", not the list.  Only the EXPR
-      # form reaches here: `eval BLOCK` lowers to `p-eval-block`, a different
-      # node, and keeps the caller's context as perl does.
-      if ($func_name && $func_name =~ /^(length|uc|lc|ucfirst|lcfirst|fc
-                                         |ord|chr|hex|oct|quotemeta
-                                         |abs|int|sqrt|sin|cos|exp|log
-                                         |defined|ref|readpipe
-                                         |eval|evalbytes)$/x) {
-        return SCALAR_CTX
-            if $child_index >= 1;
-      }
-
-      # split takes scalar arguments (pattern, string, limit) even though it
-      # returns a list.  In list context (e.g. join ':', split('a'=~/b/, $s)) the
-      # pattern arg must stay scalar — otherwise `'a' =~ /b/` returns the list (1)
-      # instead of the scalar 1 used as the pattern.
-      if ($func_name && $func_name eq 'split') {
-        return SCALAR_CTX
-            if $child_index >= 1;
-      }
-
-      # Functions that take a filehandle as their first argument.
-      # The FH arg must be SCALAR_CTX: bareword FHs become (pl-NAME) funcalls,
-      # and wrapping them in (let ((*wantarray* t)) ...) prevents %p-fh-arg
-      # from recognising them, causing an UNDEFINED-FUNCTION crash.
-      if ($func_name && $func_name =~ /^(readdir|opendir|closedir|seekdir|telldir|rewinddir|eof|getc|read|sysread|syswrite|fileno|binmode|truncate)$/) {
-        return SCALAR_CTX if $child_index == 1;  # First arg is the filehandle
+      # A CORE BUILTIN's argument context is a fact of its PROTOTYPE, and
+      # `Pl::PExpr::Config::core_arg_context` is the ONE reading of it (task
+      # #2004; that sub's header has the rules and why the six hand-written
+      # name regexes this replaces were wrong).  Every argument at or after
+      # the first slurpy (`@`/`%`) slot is LIST context WHATEVER context the
+      # call itself sits in — that is the bug this closes: `my $s =
+      # sprintf("%02d:%02d", @t[2,1])` used to format the slice's LAST element
+      # and `sprintf("%s", f())` used to call f in scalar context, because
+      # sprintf/pack/die/warn/printf were in none of the lists and INHERITED.
+      # `$`/`_`/`+`/`*` slots are SCALAR (what the named-unary and
+      # filehandle-first lists said by hand); reference slots keep inheriting.
+      # Gated on `known_no_of_params` — the compiler's own definition of "this
+      # name is a builtin here" — so a perl keyword PCL does not treat as a
+      # builtin keeps taking the user-sub paths below.
+      if ($func_name && $child_index >= 1
+          && exists $self->known_no_of_params->{$func_name}) {
+        my $bctx = Pl::PExpr::Config::core_arg_context($func_name,
+                                                       $child_index - 1);
+        if (defined $bctx) {
+          return $bctx eq 'LIST' ? LIST_CTX : SCALAR_CTX;
+        }
       }
 
       # return: the value expression inherits *wantarray* from the caller's

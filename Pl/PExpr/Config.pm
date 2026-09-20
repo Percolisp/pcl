@@ -328,6 +328,91 @@ has statement_modifiers => (
   default => sub { return { %STATEMENT_MODIFIERS } },
 );
 
+# ----------------------------------------------------------------------
+# THE ONE READING of "what context does a core builtin evaluate its Nth
+# argument in" (task #2004).  Perl answers it from the builtin's PROTOTYPE:
+# every argument at or after the first slurpy (`@`/`%`) slot is LIST context,
+# a `$` / `_` / `+` slot is SCALAR, a `*` (glob) slot is SCALAR, and a
+# reference slot (`\@`, `\[%@]`, …) is an lvalue container PCL lowers on its
+# own — it keeps inheriting.  The VALUES are always measured
+# (`prototype("CORE::NAME")`, the same authority the runtime's generated
+# `%pcl-core-prototypes` table is built from) — never hand-copied, because a
+# hand copy drifts silently.
+#
+# `child_context` used to answer this from SIX hand-written name regexes, and
+# a builtin in none of them INHERITED its caller's context: that is why
+# `my $s = sprintf("%02d:%02d", @t[2,1])` formatted only the slice's LAST
+# element and `sprintf("%s", f())` called f in SCALAR context (#2004 — a
+# silent wrong reaching core Time::Local).  The regexes are gone; what stays
+# beside this is (a) the map/grep/sort arm, which is STRUCTURAL (which CHILD
+# is the list, not what context it gets) and (b) this table, for the builtins
+# perl gives no prototype at all.
+#
+# `chomp`/`chop` are here rather than in `Pl::Environment::_builtin_prototypes`
+# for the reason that table's own comment gives: it is read by codegen paths
+# too, and a `(@)` entry there changes how `chomp @a` COMPILES.  This table is
+# read for context only.
+our %NO_PROTO_ARG_CONTEXT = (
+  # perl: `print LIST` / `printf FORMAT, LIST` — the whole argument run is one
+  # list, so `printf @a` takes $a[0] as the format (NOT scalar(@a)).
+  print   => 'LIST',
+  say     => 'LIST',
+  printf  => 'LIST',
+  system  => 'LIST',
+  exec    => 'LIST',
+  # chop/chomp take a LIST of lvalues (`chop @a`, `chop @h{@k}`, `chop($a,$b)`).
+  chop    => 'LIST',
+  chomp   => 'LIST',
+  # split's pattern/string/limit are scalars although split returns a list.
+  split   => 'SCALAR',
+  # `eval EXPR` imposes scalar context on its operand (task #1249(4)).
+  eval    => 'SCALAR',
+  defined => 'SCALAR',
+);
+
+my %CORE_SLOTS;   # name -> [\@slot_kinds, $slurpy_index_or_undef], memoized
+
+# Ask the running perl for a builtin's prototype.  Not a keyword at all =>
+# perl dies ("Can't find an opnumber for"); a keyword with no prototype (`if`,
+# `print`, `sort`, …) => undef.  Both mean "this table has nothing to say".
+sub _core_slots {
+  my $name = shift;
+  return $CORE_SLOTS{$name} if exists $CORE_SLOTS{$name};
+  my $p = eval { prototype("CORE::$name") };
+  return $CORE_SLOTS{$name} = undef if !defined $p || $p eq '';
+  my (@slots, $slurpy);
+  while ($p =~ /\G(.)/gcs) {
+    my $c = $1;
+    next if $c eq ';';                       # start of the optional tail
+    if ($c eq '\\') {                        # \@  \%  \[$@%&*]  — one ref slot
+      $p =~ /\G\[[^\]]*\]/gc or $p =~ /\G./gcs;
+      push @slots, 'ref';
+      next;
+    }
+    if ($c eq '@' || $c eq '%') { $slurpy = scalar(@slots); last }
+    push @slots, $c eq '$' || $c eq '_' || $c eq '+' ? 'scalar'
+               : $c eq '*'                           ? 'glob'
+               : $c eq '&'                           ? 'code'
+               :                                       'other';
+  }
+  return $CORE_SLOTS{$name} = [\@slots, $slurpy];
+}
+
+# 'LIST' | 'SCALAR' | undef (= inherit the caller's context), for ARGUMENT
+# index $idx (0-based) of core builtin $name.
+sub core_arg_context {
+  my ($name, $idx) = @_;
+  return $NO_PROTO_ARG_CONTEXT{$name} if exists $NO_PROTO_ARG_CONTEXT{$name};
+  my $rec = _core_slots($name);
+  return undef if !$rec;
+  my ($slots, $slurpy) = @$rec;
+  return 'LIST' if defined $slurpy && $idx >= $slurpy;
+  my $kind = $idx <= $#$slots ? $slots->[$idx] : undef;
+  return undef if !defined $kind;
+  return 'SCALAR' if $kind eq 'scalar' || $kind eq 'glob';
+  return undef;                              # ref / code slots inherit
+}
+
 # perldoc perlfun:
 has known_no_of_params => (
   is        => 'ro',

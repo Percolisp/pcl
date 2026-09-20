@@ -2856,6 +2856,14 @@ sub gen_funcall_form {
   }
 
   # join always evaluates its list arguments in list context.
+  # THE FACT is `Config::core_arg_context`'s (join's prototype is `$@`: the
+  # separator SCALAR, the tail LIST), and since #2004 that annotation is what
+  # makes a context-sensitive callee in the tail carry its own bind — this
+  # call-wide bind is therefore redundant for CORRECTNESS.  It is kept as an
+  # EMISSION shape: removing it was measured (s492b) at 12 more corpus files
+  # and one shapes file changing, all of them only losing a `(p-list-ctx …)`
+  # wrapper, so the churn buys nothing.  Do not read it as a second source of
+  # the context fact.
   if ($func_name eq 'join') {
     return Pl::CLForm::ctx_bind('t', $call);
   }
