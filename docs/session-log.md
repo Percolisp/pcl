@@ -64,7 +64,7 @@ pad 5 (#1958), warnings 11 (#221), DESTROY 6, `tie` 5 (#155), #1040's own
 documented stand-in 6.  Filed **#1951 #1952 #1953 #1955 #1956 #1957 #1958
 #1959 #1960 #1961 #1962 #1963 #1964**; #1950 and #1954 DONE.
 
-**Bars.**  Gate `Result: PASS` 250 files / 8,517 rows; sweep GATE clean, 0 new
+**Bars.**  Gate `Result: PASS` 250 files / 8,495 rows; sweep GATE clean, 0 new
 / 0 fixed, TOTAL 18,685 = 18,687 − the 2 magic.t rows above, drops 5 = census,
 CAUSES 479 of 479 causeless 0; corpus-diff 5 of 111, every diff the intended
 shape; lib emission A/B 27 SAME / 0 DIFF / 0 RCDIFF; ir-conform 323/0/22/0;
