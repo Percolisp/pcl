@@ -534,6 +534,7 @@ has known_no_of_params => (
       eof        => [0, 1],       # eof or eof FH
       fcntl      => 3,            # fcntl FH, FUNCTION, SCALAR
       fileno     => 1,            # fileno FH
+      flock      => 2,            # flock FH, OPERATION
       getc       => [0, 1],       # getc or getc FH
       read       => [3, 4],       # read FH, SCALAR, LENGTH [, OFFSET]
       readline   => [0, 1],       # readline FH or readline

@@ -261,7 +261,7 @@
    ;; `_` — perl's stat-cache filehandle (`-e $f and -f _`).  A bare CL symbol,
    ;; deliberately: that is exactly what the emitter produces for the bareword.
    #:_ #:*pcl-stat-cache-path*
-   #:p-unlink #:p-lock #:p-fileno #:p-fcntl #:p-getc #:p-readline #:*p-filehandles*
+   #:p-unlink #:p-lock #:p-fileno #:p-flock #:p-fcntl #:p-getc #:p-readline #:*p-filehandles*
    ;; Directory I/O
    #:p-opendir #:p-readdir #:p-closedir #:p-rewinddir
    ;; File glob
@@ -18863,6 +18863,41 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defmacro p-fileno (fh)
   "Perl fileno — bareword filehandle is auto-quoted."
   `(%p-fileno-impl (%p-fh-arg ,fh)))
+
+;;; ── flock (task #2081) ───────────────────────────────────────────────────
+;;; `flock` simply did not exist: a lock file, a pid file or an append-to-a-
+;;; shared-log died "Undefined subroutine &main::flock called", and
+;;; docs/not-supported.md did not mention it.  sb-posix HAS the symbol but
+;;; never defines the function, so the route is the C entry point — which is
+;;; flock(2) on Linux and on macOS alike, with the SAME operation bits
+;;; (LOCK_SH 1 / LOCK_EX 2 / LOCK_NB 4 / LOCK_UN 8), so lib/Fcntl.pm's
+;;; constants travel unchanged.
+(sb-alien:define-alien-routine ("flock" %p-c-flock) sb-alien:int
+  (fd sb-alien:int) (operation sb-alien:int))
+
+(defun %p-flock-impl (fh op)
+  "Perl flock(FH, OPERATION): 1 on success, \"\" with $! set on failure.
+   The handle's buffered output is flushed FIRST, as perl does — a lock that
+   another process can see while our bytes are still in a buffer is exactly
+   the race the lock is being taken against."
+  (let* ((stream (p-get-stream fh))
+         (fd (and stream (open-stream-p stream) (%p-fd-of-stream stream))))
+    (cond
+      ((null fd)
+       ;; A closed or never-opened handle is EBADF and FALSE — never a silent
+       ;; success (rule 12).  %p-io-errno-fail is the one spelling of that pair.
+       (%p-io-errno-fail 9)
+       "")
+      (t
+       (ignore-errors (force-output stream))
+       (let ((rc (%p-c-flock fd (truncate (to-number op)))))
+         (if (zerop rc)
+             1
+             (progn (%pcl-save-errno) "")))))))
+
+(defmacro p-flock (fh op)
+  "Perl flock — bareword filehandle is auto-quoted, like fileno's."
+  `(%p-flock-impl (%p-fh-arg ,fh) ,op))
 
 (defun %p-fcntl-int-arg-p (v)
   "Whether V is fcntl's INTEGER third argument rather than its packed-struct

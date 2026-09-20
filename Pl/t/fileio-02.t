@@ -67,7 +67,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 43;
+plan tests => 44;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -784,3 +784,39 @@ opendir($dh, "/") or die; my @root = readdir($dh); closedir($dh);
 print "3 ", (scalar(@root) > 2 ? "ok" : "BAD"), "\n";
 unlink $f;
 PERL
+# ── s492c, task #2081: `flock` did not exist ──────────────────────────────
+# lib/Fcntl.pm exported the LOCK_* constants and the runtime's prototype table
+# listed `flock (*$)`, but there was no p-flock, so every lock file, pid file
+# and append-to-a-shared-log died "Undefined subroutine &main::flock called".
+# sb-posix HAS the symbol and never defines the function, so the route is the
+# C entry point -- flock(2) on Linux and macOS alike, with the same operation
+# bits, so lib/Fcntl.pm's constants travel unchanged.  Expectations probed
+# against perl 5.40.3 (scratch probe flock1.pl).
+is(run_cl(<<'PERL'), "locked unlocked shared upgraded\nchild blocked\nfalse\nsh-on-read\n",
+use strict; use warnings;
+use Fcntl qw(:flock);
+$| = 1;
+my $path = "/tmp/pcl-flock-guard-$$";
+open(my $fh, ">", $path) or die "open: $!";
+print +(flock($fh, LOCK_EX) ? "locked" : "FAILED"), " ",
+      (flock($fh, LOCK_UN) ? "unlocked" : "FAILED"), " ",
+      (flock($fh, LOCK_SH) ? "shared" : "FAILED"), " ",
+      (flock($fh, LOCK_EX | LOCK_NB) ? "upgraded" : "nb-failed"), "\n";
+my $pid = fork();
+if (!$pid) {
+    open(my $c, ">>", $path) or die;
+    print "child ", (flock($c, LOCK_EX | LOCK_NB) ? "GOT-IT" : "blocked"), "\n";
+    close $c;
+    exit 0;
+}
+waitpid($pid, 0);
+flock($fh, LOCK_UN);
+close $fh;
+print +(flock($fh, LOCK_EX) ? "SILENT-SUCCESS" : "false"), "\n";
+open(my $g, "<", $path) or die;
+print +(flock($g, LOCK_SH) ? "sh-on-read" : "FAILED"), "\n";
+close $g;
+unlink $path;
+PERL
+   '#2081: flock locks, unlocks, blocks a contending process, and answers '
+ . 'FALSE (never a silent success) on a closed handle');
