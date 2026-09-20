@@ -1629,7 +1629,7 @@ comp/require.t	1750	0	910	837	DIFF	s469bf: PRE-EXISTING and multi-step, NOT a ro
 comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0
 comp/term.t	23	0	23	0	OK		0
 comp/uproto.t	32	0	13	21	DIFF		0
-comp/use.t	87	0	40	47	DIFF	s488a: 42/45 -> 40/47 at 0ea8d7e1 (s473h member 7, #1249(7): a BAREWORD ALONE AS A STATEMENT is perl's string constant, not a call).  comp/use.t:157 and :163 are `eval 'no strict "refs"; use 5.012; fancy_bareword'` + `ok $@`: perl dies `Bareword "fancy_bareword" not allowed while "strict subs" in use` because the ver decl re-enables strict subs (probed vs perl 5.40.3), PCL answers the STRING and $@ is empty, so both rows fail HONESTLY where they were passing on an undefined-sub death.  The blessed `undef-fn:main::pl-true` signature is NOT this commit's: the sig column already read EMPTY on a `git archive ad5c45ac` extraction (2026-09-06), i.e. it went stale before this window and is dropped here as stale, unattributed.  Cause: NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)	0
+comp/use.t	87	0	42	45	DIFF	s492a: 40/47 -> 42/45 (#1999 second half, `use builtin LIST` IMPORTS -- perl aliases each named builtin into the calling package): rows 35 `builtin funcs not removed after use v5.36` and 36 `imported true is eq "1"`.  Rows 33/34, the VERSION-declaration spelling that enables builtins implicitly, still fail (#1690).  This restores the count s488a's #1249(7) change had taken it down from.  Serial re-run, base 5316d666 vs tree.
 comp/utf.t	4216	0	24	4192	DIFF	s470bv: #1115 (already 24/4192 at a3d6d8e, 12/4204 at 614c6af)	0
 io/argv.t	52	1	27	26	DIFF		0
 io/binmode.t	9	0	9	0	OK		0
@@ -1841,7 +1841,7 @@ op/index_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support thr
 op/infnan.t	1112	0	1106	6	DIFF		0
 op/int.t	19	0	19	0	OK		0
 op/isa.t	14	0	14	0	OK		0
-op/join.t	43	0	41	2	DIFF		0
+op/join.t	43	0	43	0	OK	s492a: 41/2 -> 43/0 (#1991, a REFERENCE in a list operator's arguments is ONE element): rows 42 `modifications delim from magic should be ignored` and 43 `modifications to delim PVX shouldn't crash` make $" a TIED scalar / a magic PVX, and p-join used to SPREAD the blessed ref handed to it instead of stringifying it.  Serial re-run, base 5316d666 vs tree.	0
 op/kill0.t	9	0	6	3	DIFF		0
 op/kvaslice.t	38	0	25	13	DIFF	s473t6c #1923: a kv-slice in SCALAR context is its LAST value, not the COUNT of the flattened key/value list -- gen_kv_array_slice_form was one of the two slice emitters that did not call _slice_in_context_form.  C 23/15 -> 25/13, 2 FIXED ROWS ("last element in scalar context", "correct value"), 0 NEW.  Was: s457ai #818 (the KV-slice VALUE half is an alias, so the write-through rows pass)	0
 op/kvhslice.t	39	0	22	17	DIFF	s473t6c #1923: the hash twin of the kv-slice scalar-context fix.  C 21/18 -> 22/17, 1 FIXED ROW ("correct value"), 0 NEW.  Was: s473t1 #1024 (a lone BAREWORD key in a kv-slice was compiled as a SUB CALL)	0

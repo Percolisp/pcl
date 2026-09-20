@@ -1339,11 +1339,9 @@ comp/use.t	59	ok	not ok	#59	#1689
 comp/use.t	6	ok	not ok	#6	#1689
 comp/use.t	9	ok	not ok	#9	#1689
 comp/use.t	33	ok	not ok	builtin funcs available after use 5.39.0	#1690
-comp/use.t	35	ok	not ok	builtin funcs not removed after use v5.36	#1690
 comp/use.t	26	ok	not ok	explicit use strict "subs" does not stop ver decl from enabling refs	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
 comp/use.t	25	ok	not ok	explicit use strict overrides later use 5.01	NS:use strict 'refs' is not enforced -- every dereference is the no strict one (the subs/vars halves are the same missing hints model; #1390)
 comp/use.t	34	ok	not ok	imported true is eq "1"	#1690
-comp/use.t	36	ok	not ok	imported true is eq "1"	#1690
 comp/use.t	69	ok	not ok	no 4.040003	#1689
 comp/use.t	65	ok	not ok	no 5.039003	#1689
 comp/use.t	61	ok	not ok	no 5.040002	#1689
@@ -4645,8 +4643,6 @@ op/infnan.t	255	ok	not ok	pack P -Inf	NS:`pack`/`unpack` -- pointer types (`p`/`
 op/infnan.t	252	ok	not ok	pack p +Inf	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`)
 op/infnan.t	463	ok	not ok	pack p +NaN	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`)
 op/infnan.t	254	ok	not ok	pack p -Inf	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`)
-op/join.t	42	ok	not ok	modifications delim from magic should be ignored	#1813 family -- the rows make $" (the join separator) a TIED scalar and a magic PVX and assert that `join` reads it exactly once and is not confused when the handler modifies it mid-join
-op/join.t	43	ok	not ok	modifications to delim PVX shouldn't crash	#1813 family -- the rows make $" (the join separator) a TIED scalar and a magic PVX and assert that `join` reads it exactly once and is not confused when the handler modifies it mid-join
 op/kill0.t	5	ok	not ok	dies killing alphabetic pid	NS:Error compatibility for invalid Perl input -- `kill 0, undef` / `kill 0, ""` / `kill 0, "abc"` are fatal in perl ("Argument isn't numeric in kill" promoted to a die); PCL kills nothing and returns
 op/kill0.t	4	ok	not ok	dies killing empty string pid	NS:Error compatibility for invalid Perl input -- `kill 0, undef` / `kill 0, ""` / `kill 0, "abc"` are fatal in perl ("Argument isn't numeric in kill" promoted to a die); PCL kills nothing and returns
 op/kill0.t	3	ok	not ok	dies killing undef pid	NS:Error compatibility for invalid Perl input -- `kill 0, undef` / `kill 0, ""` / `kill 0, "abc"` are fatal in perl ("Argument isn't numeric in kill" promoted to a die); PCL kills nothing and returns
