@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 7;
 
 sub run_cl {
     my ($code) = @_;
@@ -107,3 +107,37 @@ print File::Spec->rootdir, " ", File::Spec->curdir, " ", File::Spec->updir,
       " ", File::Spec->file_name_is_absolute('x'), "\n";
 PERL
    'inverse: rootdir / curdir / updir / catfile / file_name_is_absolute unchanged');
+
+# ── s492c, task #2007: catdir DROPPED the leading empty component ──────────
+# `catdir("", "tmp")` was "tmp" where perl says "/tmp" — the empty part at the
+# front is what says ROOT.  File::Temp builds a tempdir's parent as
+# `catdir($volume, @dirs[0..$#dirs-1])` over a split absolute path, so the
+# commonest call in the module, `tempdir(CLEANUP => 1)`, died "Parent
+# directory (tmp) does not exist".  catdir/catfile are now File::Spec::Unix's
+# own shape (join with a trailing empty part, then canonpath), and abs2rel is
+# the real algorithm.  Expectations are real perl 5.40.3's.
+is(run_cl(<<'PERL'), "[/tmp] [/tmp] [a/b] [/] [] [/etc/passwd] [a/b/c]\n",
+use File::Spec;
+my @d = File::Spec->splitdir("/tmp/XXXX");
+print "[", File::Spec->catdir("", "", "tmp"), "] [", File::Spec->catdir("", @d[0..$#d-1]),
+      "] [", File::Spec->catdir("a", "", "b"), "] [", File::Spec->catdir(""),
+      "] [", File::Spec->catdir(), "] [", File::Spec->catfile("", "etc", "passwd"),
+      "] [", File::Spec->catfile("a", "b", "c"), "]\n";
+PERL
+   'catdir keeps the LEADING empty component, which is root (perl-probed)');
+
+is(run_cl(<<'PERL'), "[b/c] [../c] [.] [b]\n",
+use File::Spec;
+print "[", File::Spec->abs2rel("/a/b/c", "/a"), "] [", File::Spec->abs2rel("/a/c", "/a/b"),
+      "] [", File::Spec->abs2rel("/a", "/a"), "] [", File::Spec->abs2rel("/a/b", "/a"), "]\n";
+PERL
+   'abs2rel exists and is File::Spec::Unix\'s algorithm');
+
+is(run_cl(<<'PERL'), "dir file name-ok\n",
+use File::Temp qw(tempdir tempfile);
+my $d = tempdir(CLEANUP => 1);
+my ($fh, $fn) = tempfile("pcl-gXXXXXX", TMPDIR => 1, UNLINK => 1, SUFFIX => ".txt");
+print +(-d $d ? "dir" : "no-dir"), " ", (-f $fn ? "file" : "no-file"), " ",
+      ($fn =~ m{^/tmp/pcl-g\w{6}\.txt$} ? "name-ok" : $fn), "\n";
+PERL
+   'File::Temp::tempdir/tempfile work again (they died in catdir)');

@@ -40,19 +40,24 @@ use strict;
 
 sub catfile {
     my $class = shift if @_ > 0 && !ref($_[0]) && $_[0] eq 'File::Spec';
-    my @parts = @_;
-    return join('/', @parts);
+    return '' if !@_;
+    my $file = __PACKAGE__->canonpath(pop @_);
+    return $file if !@_;
+    my $dir = __PACKAGE__->catdir(@_);
+    $dir .= '/' if substr($dir, -1) ne '/';
+    return $dir . $file;
 }
 
+# File::Spec::Unix::catdir, verbatim in shape: join with a TRAILING empty
+# component and canonpath the result.  Dropping empty parts instead (what this
+# did until s492c, task #2007) drops the LEADING one, which is what says
+# "root": catdir("", "tmp") was "tmp" where perl says "/tmp", and File::Temp
+# builds a tempdir's parent exactly that way, so `tempdir(CLEANUP => 1)` --
+# the commonest call in the module -- died "Parent directory (tmp) does not
+# exist".
 sub catdir {
     my $class = shift if @_ > 0 && !ref($_[0]) && $_[0] eq 'File::Spec';
-    my @parts = grep { defined $_ && $_ ne '' } @_;
-    # perl: catdir() is '' (join of nothing, canonpath'd), NOT '/'.
-    # Verified against real File::Spec 5.40.3.
-    return '' if @parts == 0;
-    my $path = join('/', @parts);
-    $path =~ s{//+}{/}g;
-    return $path;
+    return __PACKAGE__->canonpath(join('/', @_, ''));
 }
 
 sub splitdir {
@@ -154,5 +159,51 @@ sub canonpath {
 sub path {
     return split(/:/, $ENV{PATH} // '');
 }
+
+# File::Spec::Unix::abs2rel, with `_same` inlined (Unix compares exactly) and
+# Cwd::getcwd() replaced by the cwd builtin the rest of this file uses.
+sub abs2rel {
+    my ($class, $path, $base) = @_;
+    $base = cwd() if !defined $base || !length $base;
+    ($path, $base) = map { __PACKAGE__->canonpath($_) } ($path, $base);
+    my ($path_directories, $base_directories);
+    if (grep { __PACKAGE__->file_name_is_absolute($_) } ($path, $base)) {
+        ($path, $base) = map { __PACKAGE__->rel2abs($_) } ($path, $base);
+        $path_directories = (__PACKAGE__->splitpath($path, 1))[1];
+        $base_directories = (__PACKAGE__->splitpath($base, 1))[1];
+        $base_directories = '/' if !length($base_directories)
+                                   && __PACKAGE__->file_name_is_absolute($base);
+    }
+    else {
+        my $wd = (__PACKAGE__->splitpath(cwd(), 1))[1];
+        $path_directories = __PACKAGE__->catdir($wd, $path);
+        $base_directories = __PACKAGE__->catdir($wd, $base);
+    }
+    my @pathchunks = __PACKAGE__->splitdir($path_directories);
+    my @basechunks = __PACKAGE__->splitdir($base_directories);
+    if ($base_directories eq '/') {
+        return '.' if $path_directories eq '/';
+        shift @pathchunks;
+        return __PACKAGE__->canonpath(__PACKAGE__->catpath('', __PACKAGE__->catdir(@pathchunks), ''));
+    }
+    my @common;
+    while (@pathchunks && @basechunks && $pathchunks[0] eq $basechunks[0]) {
+        push @common, shift @pathchunks;
+        shift @basechunks;
+    }
+    return '.' if !@pathchunks && !@basechunks;
+    my @reverse_base;
+    while (defined(my $dir = shift @basechunks)) {
+        if ($dir ne '..') { unshift @reverse_base, '..'; push @common, $dir }
+        elsif (@common) {
+            if (@reverse_base && $reverse_base[0] eq '..') { shift @reverse_base; pop @common }
+            else { unshift @reverse_base, pop @common }
+        }
+    }
+    my $result_dirs = __PACKAGE__->catdir(@reverse_base, @pathchunks);
+    return __PACKAGE__->canonpath(__PACKAGE__->catpath('', $result_dirs, ''));
+}
+
+sub case_tolerant { return 0 }
 
 1;
