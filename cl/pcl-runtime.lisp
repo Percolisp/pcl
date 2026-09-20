@@ -20711,10 +20711,17 @@ buffer's fill-pointer; everything else falls back to file-length."
    a 1,211-line script costs, i.e. the whole prize.  The two OFF switches
    still reach it: `PCL_NO_FASL_CACHE=1` and a `PCL_NO_COMPILE_DIRS` match
    are tested BEFORE this clause, so `--no-fasl`-shaped opt-outs behave for a
-   script exactly as they do for a module."
+   script exactly as they do for a module.
+
+   :EXTENSION IS EXEMPT FOR THE SAME REASON (task #1202).  An extension is a
+   .lisp file in PCL'S OWN TREE (cl/pcl-pack.lisp and its siblings), so it is
+   under no library directory a user names and the positive list would answer
+   NO for it always — while the thing the list guards against, a file the user
+   is editing, is not what it is.  The two OFF switches reach it, above."
   (cond ((sb-posix:getenv "PCL_NO_FASL_CACHE") nil)
         ((%p-under-dirs-p source-path (%p-dir-list "PCL_NO_COMPILE_DIRS")) nil)
         ((eq class :main-script) t)
+        ((eq class :extension) t)
         ((sb-posix:getenv "PCL_COMPILE_DIRS")
          (%p-under-dirs-p source-path (%p-dir-list "PCL_COMPILE_DIRS")))
         (t (eq class :installed))))
@@ -20913,6 +20920,14 @@ buffer's fill-pointer; everything else falls back to file-length."
    the prune — but it is a different POPULATION, and `pcl --cache-info` has to
    be able to count it separately for \"what is in my cache\" to be answerable."
   (%p-ensure-dir-0700 (merge-pathnames "scripts/" *pcl-cache-dir*)))
+
+(defun %p-ext-cache-dir ()
+  "Where compiled EXTENSIONS live: <cache>/ext/, created on demand, 0700 —
+   a fourth sibling of modules/, scripts/ and evals/, derived at CALL time for
+   the same reason (task #1303).  Its own directory, and its own line in
+   `pcl --cache-info`, because it is its own POPULATION: a handful of entries
+   that come from PCL's tree rather than from anything the user wrote."
+  (%p-ensure-dir-0700 (merge-pathnames "ext/" *pcl-cache-dir*)))
 
 (defun %p-dir-list-line (var default-text)
   "How VAR resolved, for `pcl --cache-info`: unset (with what that means), the
@@ -22203,7 +22218,154 @@ buffer's fill-pointer; everything else falls back to file-length."
       (%p-prune-dir (p-module-cache-dir) cutoff)
       (%p-prune-dir (%p-eval-cache-dir) cutoff)
       (%p-prune-dir (%p-script-cache-dir) cutoff)
+      (%p-prune-dir (%p-ext-cache-dir) cutoff)
       (%p-prune-dir (merge-pathnames "proto/" *pcl-cache-dir*) cutoff))))
+
+;;; ── THE EXTENSION FASL CACHE (task #1202) ──────────────────────────────
+;;; An EXTENSION is a .lisp file in PCL's OWN TREE that P-LOAD-EXTENSION pulls
+;;; in the first time something needs it: cl/pcl-pack.lisp (pack/unpack),
+;;; cl/pcl-mro.lisp, cl/pcl-warnings.lisp, cl/pcl-xs.lisp.  Until this task it
+;;; was `load`ed as TEXT, so SBCL recompiled the whole artifact on every run
+;;; that reached it — 4.26 s for cl/pcl-pack.lisp, measured here, against
+;;; 0.004 s for the same file as a fasl.
+;;;
+;;; AND THAT COST WAS NOT PAID BY `pack` USERS.  Sub::Quote's top-level code
+;;; calls pack("F",0) and Moo loads Sub::Quote for any `has`, so every Moo
+;;; class with one attribute paid the whole pack recompile on every run —
+;;; 4.0 s of a 4.4 s warm start — without the program, or Moo, or Sub::Quote's
+;;; author mentioning pack (task #1910).
+;;;
+;;; THE MACHINERY IS THE MODULE CACHE'S, unchanged: %P-BUILD-MODULE-FASL (with
+;;; its *PCL-FASL-BUILD* discipline, its temp + rename(2) and its .failed
+;;; marker), %P-LOAD-MODULE-FASL, %P-NOTE-ENTRY-USE and the one 30-day prune.
+;;; What is new is the KEY, and only because an extension is not a transpile:
+;;; a module entry is keyed by its source PATH and validated by a dependency
+;;; manifest, while an extension is keyed by THE FILE'S OWN BYTES.  There is
+;;; then no validity question left to ask — a fasl whose NAME says which bytes
+;;; it was built from cannot be stale, only unreachable, and an artifact that
+;;; tools/rebuild-pack regenerates makes exactly that.
+
+(defun %p-ext-file-text (file)
+  "FILE's bytes as a latin-1 string: the material an extension's key is made
+   of.  Read as OCTETS, so the key is the file and nothing about the machine
+   it sits on.  Measured (s1202): 1 ms for cl/pcl-pack.lisp, the largest of
+   them, against the 4.26 s its text load costs — which is why the key is the
+   content itself and not path+size+mtime with content as a tiebreak."
+  (ignore-errors
+    (with-open-file (in file :element-type '(unsigned-byte 8))
+      (let ((buf (make-array (file-length in) :element-type '(unsigned-byte 8))))
+        (read-sequence buf in)
+        (sb-ext:octets-to-string buf :external-format :latin-1)))))
+
+(defun %p-ext-fasl-path (name file)
+  "<cache>/ext/<NAME>-<content stem>-<runtime identity>.fasl, or NIL when FILE
+   cannot be read, the cache directory cannot be prepared, or this image has
+   no *PCL-RUNTIME-IDENTITY*.  NIL means the extension loads from its text,
+   exactly as it did before task #1202.
+
+   THE NAME CARRIES ALL THREE PARTS ON PURPOSE.  The stem is the extension's
+   own bytes, so a regenerated artifact makes a DIFFERENT entry rather than an
+   invalid one; the identity is this runtime plus this SBCL, because a fasl has
+   the runtime's macro expansions baked in and one built against another
+   runtime is the silent-wrong this key exists to prevent; and NAME is in front
+   so a superseded entry can be found (%P-DROP-SUPERSEDED-EXT-FASLS) and so the
+   directory is readable by a human.
+
+   THE CACHE DIRECTORY IS PREPARED INSIDE IGNORE-ERRORS, which P-LOAD-MODULE-
+   CACHED does not do, because an extension is reached from a BUILTIN: a
+   program that calls pack never asked for a cache, and P-ENSURE-CACHE-DIR
+   refuses an unsafe directory by dying.  Here that must cost the speed-up and
+   nothing else."
+  (let ((dir (ignore-errors (p-ensure-cache-dir) (%p-ext-cache-dir)))
+        (text (%p-ext-file-text file)))
+    (when (and dir text *pcl-runtime-identity*)
+      (merge-pathnames
+       (format nil "~A-~A-~A.fasl" name
+               (%p-cache-stem (concatenate 'string name (string #\Nul) text))
+               *pcl-runtime-identity*)
+       dir))))
+
+(defun %p-ext-fasl-enabled-p (file)
+  "True when the extension at FILE may be compiled to, and loaded from, a
+   cached fasl.  The module gate's conjuncts (%P-FASL-CACHE-ENABLED-P) minus
+   one, and the one is deliberate:
+
+   *PCL-SKIP-CACHE* (`--no-cache` / PCL_NO_CACHE) IS NOT CONSULTED.  That
+   switch turns off the caches of DERIVED TEXT — a module's transpile, a
+   script's, a string eval's — because \"is it the cache?\" is a question about
+   a transpile PCL produced.  An extension is not transpiled here at all: it is
+   a checked-in file compiled against this runtime and keyed by its own bytes,
+   which is precisely what the saved CORE is (tools/lib/PCLSbcl.pm) — and
+   `--no-cache` does not disable that either; PCL_NO_CORE does.  Honouring it
+   here would mean ./runpcl, tools/runt and the whole perl-tests sweep kept
+   recompiling cl/pcl-pack.lisp once per file, for no question anyone asked.
+   PCL_NO_FASL_CACHE=1 is the switch that turns this off, through
+   %P-COMPILE-MODULE-P, together with every other fasl in the image."
+  (and *pcl-cache-fasl*
+       *pcl-runtime-identity*
+       (not *pcl-fasl-build*)
+       (%p-compile-module-p file :extension)))
+
+(defun %p-ext-superseded-p (file keep-name prefix suffix)
+  "True when FILE in <cache>/ext/ is an entry for THE SAME extension and THE
+   SAME runtime as KEEP-NAME, built from other bytes — i.e. one the artifact
+   that just compiled has superseded."
+  (let ((n (or (pathname-name file) "")))
+    (and (not (string= n keep-name))
+         (not (%p-cache-temp-p file))
+         (> (length n) (length prefix))
+         (string= prefix n :end2 (length prefix))
+         (> (length n) (length suffix))
+         (string= suffix n :start2 (- (length n) (length suffix))))))
+
+(defun %p-drop-superseded-ext-fasls (name keep)
+  "Delete THIS runtime's other fasls for extension NAME — the entries the
+   artifact just compiled has made unreachable.  KEEP is the one that stays.
+
+   Same runtime identity only.  A fasl carrying a DIFFERENT identity belongs to
+   another runtime build (a sibling worktree, an older checkout) that may be
+   running right now: it is unreachable from here, not superseded, and the
+   30-day prune is what removes it.  Deleting it instead would leave two trees
+   rebuilding each other's entry for ever.  An in-flight temp belongs to its
+   writer (%P-CACHE-TEMP-P, task #1338) and is never touched."
+  (let ((prefix (concatenate 'string name "-"))
+        (suffix (concatenate 'string "-" *pcl-runtime-identity*))
+        (keep-name (pathname-name keep)))
+    (dolist (f (ignore-errors
+                 (directory (merge-pathnames "*.fasl" (%p-ext-cache-dir)))))
+      (when (%p-ext-superseded-p f keep-name prefix suffix)
+        (ignore-errors (delete-file f)))))
+  nil)
+
+(defun %p-load-extension-text (file)
+  "Load an extension from its TEXT — what P-LOAD-EXTENSION always did, and
+   still the answer whenever there is no fasl to use."
+  (handler-bind ((warning #'muffle-warning))
+    (load file))
+  t)
+
+(defun %p-load-extension-file (name file)
+  "Load extension NAME from FILE: this runtime's cached fasl when there is one,
+   else build it and load that, else the text.  Every failure ends in the text
+   load, so the worst case is the speed PCL had before task #1202 — and the
+   three paths are named, per extension, under PCL_FASL_DEBUG."
+  (let ((fasl (and (%p-ext-fasl-enabled-p file) (%p-ext-fasl-path name file)))
+        (start (get-internal-real-time)))
+    (cond ((and fasl (probe-file fasl) (%p-load-module-fasl fasl))
+           (%p-note-entry-use (namestring fasl) (list fasl))
+           (%p-fasl-note "PCL: extension ~A -> FASL HIT (~,3Fs)~%"
+                         name (%p-secs-since start)))
+          (t
+           (%p-fasl-note "PCL: extension ~A -> ~:[TEXT~;fasl-build~] ~
+                          (~,3Fs to here)~%"
+                         name (and fasl t) (%p-secs-since start))
+           (or (and fasl
+                    (%p-build-module-fasl file fasl)
+                    (progn (%p-drop-superseded-ext-fasls name fasl)
+                           (%p-load-module-fasl fasl)))
+               (%p-load-extension-text file)))))
+  t)
+
 (defun %p-load-module-uncached (source-path)
   "Load SOURCE-PATH with NO cache at all — *PCL-SKIP-CACHE*, which is what
    `pcl --no-cache`, `pl2cl --no-cache` and ./runpcl set.
@@ -30795,6 +30957,13 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; Load a named extension .lisp file from *pcl-runtime-directory*.
 ;;; Skips if already loaded. Returns t if the file was found and loaded, nil otherwise.
 ;;; Called eagerly for built-in extensions, or lazily from generated code.
+;;;
+;;; The load itself goes through %P-LOAD-EXTENSION-FILE, which since task #1202
+;;; reads a cached FASL of the artifact when there is one for this runtime and
+;;; builds it when there is not (see that section's commentary).  Everything
+;;; around it is unchanged, and deliberately so: the POST-LOAD CHECK below reads
+;;; the program's load state AFTER the load, whichever of the two forms ran it,
+;;; so a fasl cannot smuggle a program preamble past it either.
 (defun p-load-extension (name)
   (unless (gethash name *pcl-loaded-extensions*)
     (when *pcl-runtime-directory*
@@ -30806,8 +30975,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (len (length @INC))
                 (pl2cl *pcl-pl2cl-path*)
                 (core-dirs *p-core-inc-dirs*))
-            (handler-bind ((warning #'muffle-warning))
-              (load file))
+            (%p-load-extension-file name file)
             (%pcl-check-extension-clean name inc len pl2cl core-dirs))
           (setf (gethash name *pcl-loaded-extensions*) t)
           (return-from p-load-extension t)))))

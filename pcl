@@ -300,15 +300,17 @@ sub clear_cache {
   # rebuilds what it needs.  An entry is three files under its directory —
   # the transpiled .lisp, its compiled .fasl, and since task #1261 the .deps
   # DEPENDENCY MANIFEST that decides whether the other two are still valid.
-  # THREE directories, not one: modules/ (a `use`d module), scripts/ (the main
-  # script, task #1841) and evals/ (a string eval, task #1200 — which this
+  # FOUR directories, not one: modules/ (a `use`d module), scripts/ (the main
+  # script, task #1841), evals/ (a string eval, task #1200 — which this
   # glob had never named, so `--clear-cache` left it standing while claiming
-  # to remove everything PCL made).
+  # to remove everything PCL made) and ext/ (a compiled PCL extension, task
+  # #1202: cl/pcl-pack.lisp and its siblings).
   # (The flat `$cache_dir/*.lisp|*.fasl` glob is kept for entries written
   # before #1261 moved them into modules/.)
   my @files = (glob("\Q$cache_dir\E/modules/*"),
                glob("\Q$cache_dir\E/scripts/*"),
                glob("\Q$cache_dir\E/evals/*"),
+               glob("\Q$cache_dir\E/ext/*"),
                glob("\Q$cache_dir\E/*.fasl"), glob("\Q$cache_dir\E/*.lisp"));
   my $n = @files ? unlink(@files) : 0;
   my $k = PCLSbcl::clear_cached_cores();
@@ -401,8 +403,10 @@ sub cache_info {
 # scripts/ is the MAIN SCRIPT's entries (task #1841) and evals/ the string-eval
 # cache -- the latter had been missing from this list since it was created
 # (task #1335), so its absence read as "the eval cache is not working".
+# ext/ is the compiled PCL EXTENSIONS (task #1202): cl/pcl-pack.lisp and its
+# siblings, keyed by their own bytes plus the runtime identity.
 sub print_kinds {
-  for my $kind (qw(modules scripts evals proto core xs)) {
+  for my $kind (qw(modules scripts evals ext proto core xs)) {
     my @f = grep { -f $_ } glob("\Q$cache_dir\E/$kind/*");
     my $bytes = 0; $bytes += -s $_ for @f;
     if (!@f) { say sprintf("  %-9s (empty)", "$kind/"); next }
@@ -566,13 +570,16 @@ Caches:
   directory anybody else could write to.
 
   --cache-info   Print where the cache is, what is in it (modules, scripts,
-                 evals, prototype facts, cores), which core this run would
-                 use, the compile policy in effect, and the compiler
+                 evals, extensions, prototype facts, cores), which core this
+                 run would use, the compile policy in effect, and the compiler
                  fingerprint with the perl binary, the PPI sources and the
                  emission-selecting environment it hashed.  The one
                  diagnostic for "PCL did not notice my change".
   --no-cache     This run reads and writes no module, script or eval cache --
-                 the one-flag answer to "is it the cache?".
+                 the one-flag answer to "is it the cache?".  It does NOT
+                 disable the saved core or the compiled EXTENSIONS: both are
+                 compiles of files in PCL's own tree, keyed by their bytes,
+                 and neither can hold a stale transpile of your code.
   --make-core    Build the cached runtime core now, then exit.  Every run
                  builds and uses one BY DEFAULT (the first use compiles it;
                  the core is named by a hash of the runtime + the SBCL
@@ -580,6 +587,7 @@ Caches:
                  this flag only does the build early.
   --clear-cache  Remove everything PCL made under PCL_CACHE_DIR -- the cached
                  modules, scripts and evals (.lisp / .fasl / .deps), the
+                 compiled extensions, the
                  transpiler's prototype facts and the saved cores -- then
                  exit.  The next run rebuilds what it needs.  XS artifacts are
                  NOT a cache and are left alone: they are installed by
