@@ -1,0 +1,63 @@
+# everyday-baseline.tsv -- the blessed state of tools/everyday-smoke.pl (task #2099).
+#
+# THIS FILE LISTS WHAT IS WRONG.  A program that matches perl has NO row, exactly
+# like baselines/fail-baseline.tsv.  Every row carries a CAUSE that explains THE
+# FIRST DIFFERING STDOUT LINE -- a task number, or an anchor in
+# docs/not-supported.md for ruled non-support.
+#
+# ROWS LEAVE BY EDIT, with the batch that fixed them named in the commit message.
+# There is deliberately no --bless-baseline: a baseline you can re-bless from a
+# run is a baseline that absorbs regressions silently.
+#
+#   NEW          not `same`, no row here                     => the run exits 1
+#   FIXED        a row whose program is now `same`           => edit the row out
+#   MOVED        the first-diff line or the verdict changed  => re-attribute it
+#   UNEXPLAINED  a row with an empty cause                   => the run exits 1
+#   STALE        a row naming a program that is not there    => the run exits 1
+#
+# BLESSED s495e (2026-09-21) on 98313c26, gen v2-1740: 85 of 122 identical
+# (idioms 38/42, index 10/19, modules 14/28, programs 23/33).  Every cause below
+# was confirmed against the first differing line, not copied from a table.
+#
+# EXPECTED TO MOVE SOON: the rows citing #1997 #1998 #2000 #2002 #2007 #2050
+# #2081 #1743 are what the s492c batch is fixing in its own worktree; when it
+# merges they become FIXED and leave by edit, citing s492c.
+#
+# area/name<TAB>verdict<TAB>first-diff-line<TAB>cause
+idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector -- DESTROY is never called at scope exit
+idioms/list-util	DIFF	1	#2286 List::Util::pairs is unblessed and answers the COUNT in scalar context
+idioms/posix-funcs	DIFF	1	#1997 lib/POSIX.pm is a 45-name stub; `use POSIX` exports nothing, floor() dies
+idioms/sig-and-sleep	DIFF	2	#2002 sleep is not interrupted by a handler that returns
+index/dirpos	DIFF	1	#2093 telldir / seekdir do not exist
+index/flock	DIFF	1	#2081 flock does not exist
+index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
+index/formline	DIFF	1	#2093 formline + $^A do not exist
+index/gethost	DIFF	1	#2093 gethostbyname / gethostbyaddr do not exist
+index/getsrv	DIFF	1	#2093 getservbyname / getservbyport do not exist
+index/lc-uc-etc	DIFF	3	#2092 lc/uc treat bytes 128-255 as Latin-1 letters; perl leaves high bytes alone
+index/priority	DIFF	2	#2093 setpriority does not exist
+index/proc	DIFF	10	#2002 sleep is not interrupted by a handler that returns
+modules/Archive-Tar-Compress	DIFF	1	#2084 (4) Archive::Tar::Constant builds @EXPORT by walking its own stash
+modules/Benchmark-Memoize	DIFF	1	#2285 a `package` statement inside a string-eval'd sub loses the captured lexicals
+modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
+modules/Fcntl-Errno	DIFF	1	#2081 flock does not exist
+modules/File-Compare-Copy	DIFF	1	#2287 File::Copy's forward goto lowers to a bare (go :tag) with no tag
+modules/File-Temp	DIFF	1	#2007 the File::Spec shim's catdir drops a leading empty component; tempdir() dies
+modules/IO-Select-Socket	DIFF	1	#1998 a circular `use` of a mid-load module skips its import
+modules/IPC-Open2-Open3	DIFF	1	#2082 open2/open3 with a LIST command; the handles never open
+modules/MIME-Base64	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- XS, no PCL build (a pure-Perl shim would move it)
+modules/Math-BigInt-BigFloat	DIFF	1	#2083 Math::BigFloat->bdiv(3, 20) exhausts the binding stack
+modules/Scalar-Util	DIFF	1	#2084 (3) isweak is always false after weaken; openhandle/readonly stubs
+modules/Sys-Hostname-Env-English	DIFF	1	#2084 (5) `use Env qw(HOME @PATH)` needs tie on scalars-by-name and arrays (#155)
+modules/Text-Wrap-ParseWords-Abbrev	DIFF	1	#2050 the regex escape \X never matches, so core Text::Wrap::wrap() dies
+modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not implemented
+programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
+programs/env-exit-end	DIFF	3	#2009 $? is 0 inside END, and END's $? does not set the exit code
+programs/exporter-tags-lib	DIFF	2	#2008 an exported SCALAR is imported as a copy, not an alias
+programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
+programs/nested-eval-errors	DIFF	3	#2103 an rvalue deref of undef under `strict refs` does not die
+programs/real-dir-walker	DIFF	1	#2007 tempdir(CLEANUP => 1) dies in the File::Spec shim
+programs/ref-types	DIFF	3	#2051 a qr// object is not blessed into Regexp, so blessed(qr//) is undef
+programs/require-do-file	DIFF	1	#1743 UNIVERSAL::VERSION is a stub that always answers undef
+programs/resource-idioms	DIFF	1	#2006 (b) a lexical filehandle is not closed at scope exit
+programs/tied-scalar-hash	DIFF	2	#155 tie on HASH is announced, not implemented
