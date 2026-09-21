@@ -21,13 +21,13 @@ design ruling; `sNNN` names an internal working session.
 * [2. The data model](#2-the-data-model) — [undef](#21-undef) · [scalars and raw slots](#22-scalars-boxes-and-raw-slots) · [tied scalars](#22b-tied-scalars--the-raw-slot-behind-the-magic) · [arrays](#23-arrays) · [hashes](#24-hashes) · [references](#25-references) · [blessed objects](#26-blessed-objects-strings-numbers)
 * [2b. Declarations, scoping, and the rename families](#2b-declarations-scoping-and-the-rename-families) — [the tension](#2b1-the-fundamental-tension) · [declaration forms](#2b2-the-declaration-forms) · [rename families](#2b3-the-rename-families) · [guard rails](#2b4-the-guard-rails-when-renaming-refuses)
 * [3. Coercion](#3-coercion--the-heart-of-perl-semantics) — [numification](#31-to-number-numification) · [stringification](#32-to-string-stringification) · [interpolation extent](#32b-interpolation-extent--which-text-belongs-to-a--reference-inside-a-dq-string-regex-or-heredoc-normative-s426) · [truthiness](#33-p-true-p-truthiness) · [what ops return](#34-what-ops-return)
-* [4. Context (scalar / list / void)](#4-context-scalar--list--void)
+* [4. Context (scalar / list / void)](#4-context-scalar--list--void) — [argument context is the callee's signature](#41-a-calls-argument-context-is-a-fact-of-the-callees-signature-normative-s492b-task-2004)
 * [5. Calling convention](#5-calling-convention) — [definition](#51-definition) · [arguments](#52-arguments--two-body-shapes) · [return](#53-return) · [comparator frames](#54-comparator-frames--p-sort-cmp)
 * [6. Control flow](#6-control-flow) — [conditionals](#61-conditionals) · [loops](#62-loops-and-loop-control) · [exceptions](#63-exceptions-die--eval----) · [goto](#64-goto)
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -1535,6 +1535,41 @@ defaulting to "inherit". Context-sensitivity is *observable* — `wantarray`,
 list-vs-scalar returns, `=~` in list context returning captures — so it
 cannot be erased statically in general.
 
+### 4.1 A call's ARGUMENT context is a fact of the callee's SIGNATURE (normative, s492b, task #2004)
+
+The context a call evaluates its arguments in is decided by the callee, never
+inherited from the context the call itself sits in.  For a core builtin the
+signature IS its prototype, read from the running perl
+(`prototype("CORE::NAME")` — the authority the runtime's `%pcl-core-prototypes`
+is built from): every argument at and after the first slurpy slot (`@`/`%`) is
+LIST context, a `$` / `_` / `+` / `*` slot is SCALAR, a reference slot (`\@`,
+`\%`, `&`) inherits.  The builtins perl gives no prototype (`print say printf
+system exec chop chomp split eval defined`) are ONE explicit table beside it.
+The `map`/`grep`/`sort` arm stays, because it answers a STRUCTURAL question
+(which child is the list), not a context one.
+
+    my @t = localtime;
+    my $s = sprintf("%02d:%02d", @t[2,1]);   # "14:35" — the slice is a LIST
+    my $k = pack("ss", @_[4,5]);             # two shorts, not one element
+
+Three sites read that same rule, and each was a silent wrong before it:
+
+* **A LIST SLICE's list and its INDEX list are always LIST context.**
+  `(localtime)[5,4,3]` inside a scalar-context `sprintf` is three values, not
+  `(progn 5 4)`.  The slice's own RESULT still obeys §3.2e — its LAST selected
+  element in scalar context, which is perl's comma-operator rule, not the
+  index.
+* **The RHS of a LIST assignment is LIST context whatever shape the LHS has**
+  (task #2090): `my ($first, @rest) = <$fh>` reads the whole handle and
+  `my $n = () = <$fh>` counts its lines.  There is no second variable beside
+  `*wantarray*` for this: a ternary lvalue (`($seen ? $d : $n) = <FH>`) is not
+  a list assignment in perl either, and is lowered as the scalar assignment it
+  is.
+* **The bound operand of `=~` / `!~` is SCALAR context** (task #2102), whatever
+  context the match sits in — `` print "[", `cmd` =~ s/\n//r, "]" `` binds the
+  captured string, not an array.  The pattern / replacement child keeps the
+  match's own context, so a list-context `m//g` still collects every match.
+
 ## 5. Calling convention
 
 ### 5.1 Definition
@@ -2595,6 +2630,22 @@ datum must carry the is-a-reference bit that `ref()` already reads.
 (p-exists (unbox $_) "baz")    ; 1, not a quiet 0
 ```
 
+**`local *name = REF` localizes ONLY the slot the reference names** (normative,
+s492b, task #2080).  Perl saves and replaces the one slot the assignment
+writes and leaves the rest of the glob alone; bare `local *name` and
+`local *name = *other` take the WHOLE glob, and still do.  The classification
+that decides where a glob assignment stores (`%p-glob-rhs-slot-kind`) is the
+same one `local` asks BEFORE it clears, so the two can never disagree:
+
+    sub f { local *_ = \my $x;  scalar(@_) }   f(1,2)   # 2 — @_ untouched
+    { local *Pkg::m = sub { 42 };  Pkg::m() }            # $Pkg::m, @Pkg::m intact
+
+This is what makes core `File::Find`'s `find()` work at all (`_find_opt`
+opens with `local *_ = \my $a;` and then loops over `@_`) and what makes the
+everyday test mock `local *Pkg::f = sub {…}` safe.  Clearing a CODE slot also
+drops its `*p-declared-subs*` entry, so `defined &X` is false inside the
+scope rather than true-with-nothing-to-call.
+
 `foreach $pkgvar (LIST)` is an *implicit* `local` of the loop variable —
 the body and everything it calls see the current element, and the old
 value is restored on exit, including via `last`/`die`. The loop macros
@@ -2850,6 +2901,25 @@ undef object and the handle is installed on *that* — one entry for every such
 open in the image (PCL's own bug, #1309: an unrelated read then found another
 file's stream).  `undef` is not a designator: perl dies `Can't use an undefined
 value as filehandle reference`.
+
+**An opener CLOSES what the handle already holds, before it opens** (normative,
+s492b, task #2006): `open`, `opendir`, `socket`, `accept`, `pipe` and the
+fork-pipe forms all reach one helper that closes — and therefore FLUSHES — an
+open stream found in the target place first.  The order is perl's: the close
+happens before the new open is attempted, so a reopen that FAILS has still
+flushed the old stream.
+
+```perl
+open(FH, ">", $f);  print FH "text";   # not flushed yet
+open(FH, "<", $f);  my $got = <FH>;    # "text" — the write open was closed first
+```
+
+`$?` is saved and restored across that implicit close, which is perl's answer
+and not the obvious one: an EXPLICIT `close` of a fork-pipe publishes the
+child's status, an implicit one leaves `$?` as it was (the child is still
+reaped).  A half-(b) rule — closing a non-escaping lexical handle at scope
+exit — is NOT part of this: a handle still lives until the program exits or
+the collector reclaims it.
 
 **`close` does NOT empty the scalar.**  perl closes the handle; the glob stays.
 So after `close $fh`:
@@ -3892,6 +3962,35 @@ Anything not covered: read the `p-NAME` docstring in
 semantics only*, so the function *is* the spec, and
 `docs/not-supported.md` is the closed list of deliberate divergences.
 
+### 10-map. `map` COPIES what its block returns; `grep` and `sort` ALIAS (normative, s492b, task #2005)
+
+`map` copies each value its block yields, once per iteration and at EVERY
+result arity — perl's `pp_mapwhile` copies the values unless they are TEMPs,
+so a variable's container never survives the iteration it was yielded in:
+
+    my $i = 0;  my %m = map { $_ => ++$i } qw(a b c);   # a=1 b=2 c=3
+
+A host with ONE collector for the one-element and the multi-element result
+cannot get this half right and half wrong; PCL's was two paths, and the
+multi-element one pushed the block's own boxes, so every key read the final
+`$i` (a=3 b=3 c=3 — silent).  `grep` and `sort` return ALIASES and must keep
+doing so (`$_++ for grep { 1 } @a` writes through to `@a`), and `map` still
+aliases `$_` to the element it reads (`map { $_ *= 2 } @d` modifies `@d`).
+The copy is a real per-element cost (+20 % on a map-only hot loop, measured
+s492b) and it is inherent: perl pays it too.
+
+### 10-name. The `p-` vocabulary is NOT reachable from a Perl identifier (normative, s492b, task #2100)
+
+The `p-*` / `%p-*` names are the IR's own vocabulary, and a Perl program that
+happens to DECLARE a sub of the same name must reach ITS sub — `sub flatten
+{…}; flatten(1,2)` is `(pl-flatten …)`, never `(p-flatten …)`.  Only a perl
+KEYWORD may lower to the runtime's operator, and "is it a keyword" is MEASURED
+rather than listed: `prototype("CORE::NAME")` dies for a non-keyword, so the
+die is the discriminator.  `CORE::NAME` names the builtin unconditionally and
+travels as its own flag, so a shim's `sub cwd { CORE::cwd() }` does not call
+itself.  A host adding an operator therefore adds no hazard: the rule is
+keyed on the perl side of the name, not on the runtime's symbol list.
+
 ### 10-gmatch. What a global match attempts after a ZERO-LENGTH match (normative, s484c, task #1719)
 
 Perl's regex engine takes a **minend** — the match must end at least that
@@ -3917,6 +4016,16 @@ The iterator's state is therefore `pos` PLUS one bit ("the match that set it
 was empty"), perl's `MGf_MINMATCH`. `pos($x) = N` normalises the way perl's
 `magic_setpos` does: undef REMOVES the position, a negative counts back from
 the end and clamps at 0, a value past the end clamps to the length.
+
+**A LIST-context `//g` reads and writes that same `pos`** (normative, s492b,
+task #2001): it starts its scan AT the target's current position — so a
+preceding scalar `//g` or a `pos() =` assignment positions it — and on
+completion clears it, unless `/c` keeps it at the end of the last match.  The
+list arm is not a separate iterator from the scalar one:
+
+    my $t = "k1=v1;k2=v2";  $t =~ /;/g;
+    my %h = $t =~ /(\w+)=(\w+)/g;   # k2 only — the scan resumes at pos, not at 0
+    # pos($t) is undef afterwards (with /gc it is the end of the last match)
 
 ### 10-esc. `\h \H \v \V \R` are CHARACTER CLASSES, expanded before the engine sees them (normative, s484c, task #1713)
 
