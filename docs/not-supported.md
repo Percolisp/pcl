@@ -1811,7 +1811,7 @@ handled via `is_valid_error()` skip, so they count as passes once the error is t
 
 ## `DESTROY` called by garbage collector
 
-> **A staged design exists (s495): `docs/scope-exit-destroy-design.md`** — DESTROY at program exit (sound, small), then scope-owned objects (a static licence, no reference counts).  Nothing of it is built yet; the text below is still what PCL does.
+> **A staged design exists (s495): `docs/scope-exit-destroy-design.md`** — DESTROY at program exit (sound, small), then scope-owned objects (a static licence, no reference counts).  **USER ruling s495: DESTROY at program exit is on the todo list (#2371); the scope-owned stage is PARKED as not worth the trouble (#2370).**  Nothing of it is built yet; the text below is still what PCL does.
 
 **Perl behaviour:** When a blessed object goes out of scope and its reference count drops
 to zero, Perl calls the `DESTROY` method (if defined).  Code that relies on deterministic
