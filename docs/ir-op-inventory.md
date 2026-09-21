@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **714**
+* names exported: **713**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 714
+* with a machine-readable `Contract:` tail: **69** of 713
 * UNCLASSIFIED (no family rule matches): **7**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -165,13 +165,12 @@ ir-spec §10 row **compound assignment** — read-modify-write; boxed macros sto
 | `p-str-x=` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-str-x=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 
-## context-frame (9)
+## context-frame (8)
 
 ir-spec §10 row **context & frames** — names, not operations: each expands to exactly the `let`/`lambda` shape it replaced, so a translator implements the expansion and nothing else
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
-| `*p-in-list-assign-rhs*` | variable | `` | — | — | — | — | — | — | — |
 | `*pcl-caller-wantarray*` | variable | `` | — | — | — | — | — | — | — |
 | `*pcl-sub-call-depth*` | variable | `` | — | — | — | — | — | — | — |
 | `*wantarray*` | variable | `` | — | — | — | — | — | — | — |
@@ -528,7 +527,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-local-deref-hash` | macro | `(ref-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-deref-scalar` | macro | `(ref-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-dot` | macro | `(&body body)` | — | — | — | — | — | — | — |
-| `p-local-glob` | macro | `(pkg-str name-str &body body)` | — | — | — | — | — | — | — |
+| `p-local-glob` | macro | `(pkg-str name-str rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob-dynamic` | macro | `(name-form cond-form rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-glob-if` | macro | `(cond-form pkg-str name-str rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-hash-elem` | macro | `(hash-var key-form &body body)` | — | — | — | — | — | — | — |
