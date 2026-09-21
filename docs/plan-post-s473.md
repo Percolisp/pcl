@@ -269,7 +269,7 @@ Interleaved as before (one perf agent beside a correctness agent): **s494k `pcl 
 #2104 (Rosetta census) now measures with the SAME tool (`--corpus DIR --baseline FILE`) and its
 brief should say so before it launches; #2107 signals, #2106 and #2097 keep §6's order.
 
-**Todo, USER s495 — #2371 DESTROY AT PROGRAM EXIT** (Stage 0 of `docs/scope-exit-destroy-design.md`; about one agent-day; runtime-only; sound by construction: perl destroys survivors at exit too).  A filler for the first correctness slot that has a day to spare — it rides well with **s494h #2006(b)** (the filehandle stage of the same design).  The scope-owned-object stage is PARKED by the USER (#2370): not worth the trouble.
+**Todo, LOW PRIORITY (USER s495: "do give stage 0 a low priority") — #2371 DESTROY AT PROGRAM EXIT** (Stage 0 of `docs/scope-exit-destroy-design.md`; about one agent-day; runtime-only; sound by construction: perl destroys survivors at exit too).  It sits beside #2097 at the bottom of the queue — only when nothing above waits, never ahead of a batch that moves the everyday number.  The scope-owned-object stage is PARKED by the USER (#2370): not worth the trouble.  The filehandle stage (s494h #2006(b)) keeps its own place in the table above.
 
 **The denominator must grow.**  122 programs cover ground, they are not a sample; "90 % of 122"
 is a milestone, not the goal.  Battery 3 (new programs, each admitted under perl by the runner's

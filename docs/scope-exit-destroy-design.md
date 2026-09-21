@@ -5,8 +5,9 @@ closing files (and even DESTROY) at scope exit — are guards possible with a re
 amount of work that won't slow down execution much?"*  Status: **DESIGN, nothing built.**
 
 **USER RULING (s495, on reading this): "DESTROY doesn't seem to be worth the trouble?  If
-stage 0 is cheap, please put that in the todo list."**  So: **Stage 0 (DESTROY at program
-exit) is ON THE TODO LIST — task #2371.  Stage 1 (filehandles) stays queued as `#2006(b)`
+stage 0 is cheap, please put that in the todo list."**  Then: **"do give stage 0 a low
+priority."**  So: **Stage 0 (DESTROY at program exit) is ON THE TODO LIST AT LOW PRIORITY —
+task #2371.  Stage 1 (filehandles) stays queued as `#2006(b)`
 (label s494h).  Stage 2 (scope-owned objects) is PARKED — task #2370 keeps the design and
 the measurements so nobody re-derives them; do not schedule it without a new USER word.**
 
