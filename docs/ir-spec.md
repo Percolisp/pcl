@@ -24,7 +24,7 @@ design ruling; `sNNN` names an internal working session.
 * [4. Context (scalar / list / void)](#4-context-scalar--list--void) — [argument context is the callee's signature](#41-a-calls-argument-context-is-a-fact-of-the-callees-signature-normative-s492b-task-2004)
 * [5. Calling convention](#5-calling-convention) — [definition](#51-definition) · [arguments](#52-arguments--two-body-shapes) · [return](#53-return) · [comparator frames](#54-comparator-frames--p-sort-cmp)
 * [6. Control flow](#6-control-flow) — [conditionals](#61-conditionals) · [loops](#62-loops-and-loop-control) · [exceptions](#63-exceptions-die--eval----) · [goto](#64-goto)
-* [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
+* [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [weak-keyword override](#71a-a-weak-keyword-is-displaced-by-a-sub-the-package-has-at-compile-time-normative-s492c-task-18701992) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
 * [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
@@ -2537,6 +2537,33 @@ READER rather than through this resolver, so it still leaks (task #700); and
 `%{"main::ENV"}` / `%{"ENV"}` overwrite the `%ENV` marker binding with a plain
 empty hash (task #701).
 
+### 7.1a A WEAK KEYWORD is displaced by a sub the package HAS at compile time (normative, s492c, task #1870/#1992)
+
+Perl's builtins split in two.  A **strong** keyword (`if`, `my`, `print`, …)
+can never be displaced.  A **weak** one — the set `prototype("CORE::NAME")`
+answers a string for: `time`, `sleep`, `stat`, `readpipe`, `require`, `glob`,
+`getppid`, … — is displaced by a sub of that name *in the calling package*,
+and the decision is made **at compile time, by how the sub got there**:
+
+| spelling | displaces the builtin? |
+|---|---|
+| `use subs "time"; sub time {…}` | **yes** — the pragma is the declaration |
+| `use Time::HiRes qw(time);` | **yes** — an import installs a CV from ANOTHER package |
+| `BEGIN { *CORE::GLOBAL::time = sub {…} }` | **yes**, for every package |
+| `BEGIN { *Other::time = sub {…} }` | **yes**, in `Other` only |
+| `sub time {…}` alone | **no** — a sub merely DEFINED in its own package does not |
+| `*time = sub {…}` at RUN time | **no** — it is not there when the call is compiled |
+
+The rule behind rows 2 and 5 is one rule: the CV must come from a *different*
+package (perl's `IMPORTED_CV`).  That is why `package P; BEGIN { *P::getppid
+= … }` keeps the builtin while the same glob assignment from `main` does not.
+
+For a translator: this is a **compile-time name-resolution fact**, not a
+runtime dispatch — the call site emits either the builtin op or a call to the
+overriding package's sub, and a `CORE::GLOBAL` override is emitted QUALIFIED
+because its sub lives in that package, not in the caller's.  `CORE::NAME`
+always reaches the builtin whatever is in scope.
+
 ### 7.2 Package variables and `local`
 
 Package vars are globally-registered boxes. **How** the box is registered
@@ -2733,6 +2760,20 @@ var ⇒ plain lexical binding, no localization at all).
   are `""`.  Guard `Pl/t/census-bugs-01.t`.
 - PCL always linearizes with C3 (stock Perl defaults to DFS; documented
   divergence — `docs/not-supported.md` §mro).
+
+### 7.3a `->VERSION` compares VERSION OBJECTS, not numbers (normative, s492c, task #1743)
+
+`CLASS->VERSION` reads `$CLASS::VERSION` of the INVOCANT ITSELF (never an
+inherited one) and answers it unchanged.  `CLASS->VERSION(WANT)` compares and
+raises perl's own diagnostic when it is not satisfied
+(`CLASS version WANT required--this is only version HAVE`), or
+`CLASS does not define $CLASS::VERSION--version check failed` when there is
+none.  The comparison is the pair a NUMERIC one gets backwards: a plain
+decimal splits its fraction into right-padded three-digit groups (`1.02` is
+`v1.20.0`), a dotted or v-string version is its parts, and the compare is
+element-wise — so `$VERSION = "2.7.18"` FAILS a `VERSION(2.719)` check while
+`$VERSION = 2.718` SATISFIES `VERSION("2.7.19")`.  `use Module VERSION` is the
+same call.
 
 ### 7.4 Scheduled blocks
 
@@ -3000,6 +3041,23 @@ conversion.  *(PCL still sends a one-string `system` through the shell
 unconditionally, where perl execs the words directly when the string carries
 no shell metacharacter; that is the remaining divergence, recorded in #1920.)*
 
+**But the conversion is for HOST errors only — a PERL DEATH raised while the
+child runs propagates (normative, s495, task #2062).**  A signal handler is
+the everyday way to put a deadline on a child, and its `die` must unwind the
+caller's `eval` exactly as perl's does:
+
+```perl
+local $SIG{ALRM} = sub { die "timeout\n" };
+eval { alarm 5; system("slow"); alarm 0 };   # $@ is "timeout\n"
+```
+
+The same holds for `` `cmd` ``, `waitpid` and `wait`.  A blanket
+"any error here is a failed spawn" guard swallows that death and the program
+reads an empty `$@` — silent, and exactly wrong for the idiom the guard is
+most likely to sit under.  The host wrapper must therefore distinguish *its
+own* error from a perl-level exception raised inside it (PCL: one macro,
+`%p-child-host-error`, over the one predicate `%p-perl-die-p`).
+
 ### 7.6 stdio buffering (normative, s451)
 
 Buffering is not an implementation detail once a program can observe it, and
@@ -3126,6 +3184,8 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `%!` | the errno hash: one key per platform errno NAME, each value magic.  `$!{NAME}` is the errno NUMBER when `$!` holds that errno and `0` otherwise — never `1`, and always defined; a STORE is fatal (`ERRNO hash is read only!`), as Errno's tied hash is.  `keys`/`values`/`each`/`exists` are ordinary hash reads of a REAL table. |
 | `%SIG` | signal handlers. **A `__WARN__` handler is NOT RE-ENTERED** (task #1223): perl calls it once and a `warn` raised INSIDE it takes the default action — without that rule the commonest handler idiom in perl's own suite, `… else { warn $_[0] }`, is an infinite loop. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators. |
 | `$.` | line number of the last-read filehandle (per-handle) |
+| `$?` | the RAW WAIT STATUS of the last child: `exit << 8`, or the signal number in the low byte when it was killed -- perl's own encoding, never a bare exit code (normative, s492c, task #2101).  **Every path that reaps a child writes it**: `system`, a pipe-handle `close`, `wait`/`waitpid` AND ``` `cmd` ``` / `qx` / `readpipe` in BOTH contexts.  A host that leaves it untouched after a command capture is SILENT-WRONG in the commonest failure check a script has (`my $out = `cmd`; die if $?;`) -- the value then belongs to some earlier `system`, or to nothing.  A shell that cannot be STARTED gives perl's `-1` with `$!` set (see 7.5b). |
+| `$$` | the CURRENT process id, REFRESHED in a forked child (normative, s492c, task #2094).  A host that copies it at image start leaves the parent's pid in the child, where `kill SIG, $$` then signals the PARENT and `"/tmp/x.$$"` collides between the two -- silent, and the sort of bug a program only meets in production.  Both fork paths (the bare `fork` and the pipe-open fork) write it. |
 | `$a`, `$b` | sort comparator operands (per-package defvars) |
 | `$\`, `$,` | output record / field separator. **Both are UNDEF until the program sets one** (task #465) — the separator defaults are asymmetric and a translator must copy the asymmetry, not normalize it: `$/` is `"\n"`, `$;` is `"\034"`, `$"` is `" "`, `$!` is the errno dualvar, all DEFINED. An empty string here is invisible on the write side and wrong on the read side (`defined($,)`, `$\ // ","`, `length($\)`), which is what made it silent. `print` treats undef as "print nothing between/after": its readers test *non-empty string*, never `defined`. **`say` appends `"\n"` INSTEAD of `$\`, never as well as it** (task #500), while `$,` still separates its arguments; `printf` appends neither. perl does not *localize* `$\` over the call — an overload or tie handler that runs while an argument stringifies still reads the program's value (probed s442d) — so the terminator is passed to the one writer (`%p-write-list`), not bound over it. |
 
@@ -4051,6 +4111,25 @@ not an error), so leaving it alone IS perl's answer — probed, `[\R]` matches
 "R" and not "\r" in both. Their `:tier` stays `:pcre` (§10-tier): the tier
 describes the CONSTRUCT a target may meet in the source pattern, and a
 target that cannot expand them locally still needs the bigger engine.
+
+### 10-esc2. `\N` and `\X` are the same family, and an UNTRANSLATED escape must not silently never match (normative, s492c, task #2050)
+
+Two more escapes ride the same forward scan, with the same position rule
+(inside a bracketed class they are the literal letters `N` and `X`, exactly as
+perl says):
+
+| escape | meaning | PCL |
+|---|---|---|
+| `\N` | any character but a newline — perl's own definition | EXACT (`[^\n]`).  `\N{NAME}` is a different construct, resolved earlier, and is DECLINED here |
+| `\X` | an extended grapheme cluster (UAX #29) | APPROXIMATED as a CRLF pair or one character: the legacy rule needs `\p{M}`, which this engine does not answer |
+
+The rule the family exists for is rule 12's: **a regex escape the translator
+does not implement must not be passed to the engine as a literal letter.**
+`\X` was, so every `\X` match silently never matched — the worst failure mode,
+because nothing says so.  The audit of the dispatch against perl 5.40.3 found
+seven escapes in that state; two are answered here, and the remaining five
+(`\K`, `\p{...}`, `\pM`, `\g{-1}`, `\b{wb}`) are named in `not-supported.md`
+with their owners.
 
 ### 10-tier. The regex literal's `:tier` — which ENGINE a target needs (normative, s470bq, task #1211)
 

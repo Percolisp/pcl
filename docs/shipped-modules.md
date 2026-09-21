@@ -31,6 +31,9 @@ This split already exists in practice — it just isn't named:
   slash.  Our copy is core's file with that one sub also RETURNING the value.
   Delete it when task #189 lands),
   `Math::BigInt::Calc`, `Test::More` (prototype-only),
+  `Time::HiRes` and `MIME::Base64` (**both XS upstream, both plain Perl here**
+  — s492c: the first over four `builtin::` primitives, the second the whole
+  RFC 4648 transform, so `use MIME::Base64;` stops dying),
   `IO` (**the XS half of `IO::Handle` written in plain Perl** — core's `IO.pm`
   is only a loader plus `XSLoader::load 'IO'`, and without that half
   `use IO::Handle` died "Can't locate loadable object for module IO".  Ours
