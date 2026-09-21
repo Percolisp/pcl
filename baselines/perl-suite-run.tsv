@@ -1,4 +1,20 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s492b (2026-09-21, Opus) -- SIX rows spliced by hand, every one UPWARD and every
+#   one A/B'd `--jobs 1` against a 5ce155cb `git archive` extraction before it was
+#   touched (scratch/s492b/log-movers-{base,tree}.txt, log-pat-{base,tree}.txt,
+#   keep-{base,tree}/*.out for the positional TAP diffs).  Each row's own cause is
+#   in its sig column: io/crlf.t + io/pipe.t = #2006(a), op/goto_xs.t = #2004's
+#   die/warn flatten residue, op/stat.t = #2090, re/pat.t = #2004, re/pat_rt_report.t
+#   = #2001.
+#   NOT SPLICED, because this batch did not cause them and "pre-existing" is WHEN,
+#   not WHY: op/alarm.t (snapshot OK 5/0, the 5ce155cb extraction itself reads
+#   DIFF 4/1), op/coreamp.t (9/58 -> 10/57 on the base too), re/pat_re_eval.t
+#   (65/462 -> STALE 80/447 on the base too), run/switches.t (28/112 -> 29/111 on
+#   the base too) -- filed as #2033, which says each needs its own cause first.
+#   Also not spliced: io/pvbm.t and io/crlf_through.t (contention -- serial on both
+#   trees matches the snapshot), uni/variables.t (TIMEOUT, load-dependent row
+#   count), re/charset.t + re/regexp_unicode_prop.t (row-DESCRIPTION churn with
+#   identical counts on both trees -- #2032).
 # s488a (2026-09-17, Opus) -- TWELVE rows spliced by hand, and the POINT of the
 #   batch is the ATTRIBUTION (task #1834): every file this block had been
 #   reporting as a mover since s473t5d (2026-09-13) is now tied to ONE COMMIT,
@@ -1635,7 +1651,7 @@ io/argv.t	52	1	27	26	DIFF		0
 io/binmode.t	9	0	9	0	OK		0
 io/bom.t	3	0	1	2	DIFF		0
 io/closepid.t	3	0	3	0	OK		0
-io/crlf.t	16421	0	16412	6	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
+io/crlf.t	16421	0	16413	5	DIFF	s492b: 16412/6 -> 16413/5, #2006(a) -- an opener CLOSES (and flushes) a stream the handle already holds, so t/io/crlf.t:29's `open(FOO,">:crlf")` + print + `open(FOO,"<:crlf")` reads back what was written.  Measured --jobs 1 on a 5ce155cb extraction: 16412/6 there, 16413/5 here  |  aborted-forms:1: Undefined subroutine &PerlIO::get_layers called	0
 io/crlf_through.t	942	0	942	0	OK		0
 io/data.t	4	0	3	1	DIFF		0
 io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented	0
@@ -1660,7 +1676,7 @@ io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT 
 io/perlio_fail.t	15	0	11	4	DIFF	s471a: 6/9 -> 11/4, PRE-EXISTING and MEASURED, not this batch -- a `git archive ed302e13` extraction of main gives the SAME 11/4 with the same five fixed rows (serial re-run agrees on both trees), so the blessed row was stale, not moved.  The five rows left baselines/perl-suite-fails.tsv by EDIT in the same commit; the four `Got warning` rows still fail (PCL emits no warnings-gated diagnostic, #221).	0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	10	0	OK		0
-io/pipe.t	27	0	19	13	DIFF	s488a: 18/14 -> 19/13 at 5fe48176 (s473f member 2, #1307/#1246: close's FALSE is a defined "" and closedir's is undef) -- "close failure for... umm, something" passes; residue #1710	0
+io/pipe.t	27	0	20	12	DIFF	s492b: 19/13 -> 20/12, #2006(a) -- the implicit close REAPS the child, so "child reaped if piped program cannot be executed" (`$child = wait` = -1) passes.  Measured --jobs 1 on a 5ce155cb extraction: 19/13 there, 20/12 here  |  s488a: 18/14 -> 19/13 at 5fe48176 (s473f member 2, #1307/#1246: close's FALSE is a defined "" and closedir's is undef) -- "close failure for... umm, something" passes; residue #1710	0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	23	5	DIFF	s473 (Fable): 20/8 -> 23/5 on d348dcea (serial; 22/6 on the 637fc58e extraction): the 3 FIXED rows are stat/lstat/truncate(PVBM ref) -- #1043 (s470bx, stat/lstat answer their context) for the last one; the known pvbm flapper (DECIDED s437/s438) reads 23/5 alone, the number memory records	0
 io/read.t	2	0	2	0	OK		0
@@ -1820,7 +1836,7 @@ op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with err
 op/glob.t	18	0	14	4	DIFF		0
 op/gmagic.t	78	0	50	2	DIFF	s473t6d: 31/2 -> 50/2 (+19 passing, 0 new fails) by #1950 in this round -- `tie $h{foo}` / `tie $_{elem}` handed p-tie the element VALUE and took its announce-and-drop arm, so `tied` read undef and `$obj->init` died.  Measured --jobs 1 with the runner's own serial re-run agreeing, and 31/2 on a `git archive 268d7e00` extraction | aborted-forms:4: Can't call method init on an undefined value	0
 op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is undefined.	0
+op/goto_xs.t	11	0	11	0	OK	s492b: DIFF 10/1 -> OK 11/0, #2004 residue -- the file's non-XS fallback is `*mycroak = sub { die @_ }`, and `die LIST` now CONCATENATES its flattened list instead of stringifying the array as ARRAY(0x..), so "[perl #35878] croak in XS after goto segfaulted" gets "boo1\nboo2\nboo3\nboo4\n".  Measured --jobs 1 on a 5ce155cb extraction: 10/1 there	0
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
@@ -1924,7 +1940,7 @@ op/srand.t	10	0	8	2	DIFF		0
 op/sselect.t	23	0	17	6	DIFF		0
 op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
-op/stat.t	108	3	94	17	DIFF		0
+op/stat.t	108	3	95	16	DIFF	s492b: 94/17 -> 95/16, #2090 -- `() = <FOO>` is a LIST assignment and its RHS is LIST context, so the handle is drained and `ok(eof FOO, "at EOF")` passes; the deleted *p-in-list-assign-rhs* flag had made it read ONE line.  Measured --jobs 1 on a 5ce155cb extraction: 94/17 there	0
 op/stat_errors.t	638	0	636	2	DIFF		0
 op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
@@ -1990,14 +2006,14 @@ re/keep_tabs.t	14	0	14	0	OK		0
 re/no_utf8_pm.t	1	0	1	0	OK		0
 re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
 re/overload.t	87	0	3	0	TIMEOUT	timeout	0
-re/pat.t	1263	4	231	138	DIFF	aborted-forms:1: Failed to match at pat.t line N. 	0
+re/pat.t	1263	4	245	124	DIFF	s492b: 231/138 -> 245/124 (233/136 measured on a 5ce155cb extraction -- +2 of the 14 are PRE-EXISTING snapshot drift, +12 are this batch), #2004 -- t/re/pat.t:45's `eval sprintf 'is $%d, "%s", q($%d = %s); 1', ($n, substr(...))x2` gives sprintf a LIST where the call's own SCALAR context used to leak in, so the twelve `$1 = A` .. `$12 = L` rows pass.  Positional TAP diff of the two runs: exactly those 12 flipped, nothing flipped the other way (scratch/s492b/keep-{base,tree}/re_pat.t.out).  aborted-forms:1: Failed to match at pat.t line N.	0
 re/pat_advanced.t	1678	0	1258	422	DIFF		0
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_psycho.t	15	0	15	0	OK		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_re_eval.t	527	0	65	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-re/pat_rt_report.t	2513	1	2458	52	DIFF		0
+re/pat_rt_report.t	2513	1	2459	51	DIFF	s492b: 2458/52 -> 2459/51, #2001 -- "pos() works with () = m//; Bug 20010814.004 (#7526)": a LIST-context `//gc` now starts at pos and, with /c, leaves it at the end of the last match, so `join ":", /b./gc` then `join ":", /a./gc` then `pos` is "ba:ba ad:ae 10".  Positional TAP diff: exactly that one row flipped.  Measured --jobs 1 on a 5ce155cb extraction: 2458/52 there	0
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_special_cc.t	9	0	9	0	OK		0
 re/pat_special_cc_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
