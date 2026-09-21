@@ -26,26 +26,21 @@
 # area/name<TAB>verdict<TAB>first-diff-line<TAB>cause
 idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector -- DESTROY is never called at scope exit
 idioms/list-util	DIFF	1	#2286 List::Util::pairs is unblessed and answers the COUNT in scalar context
-idioms/posix-funcs	DIFF	1	#1997 lib/POSIX.pm is a 45-name stub; `use POSIX` exports nothing, floor() dies
-idioms/sig-and-sleep	DIFF	2	#2002 sleep is not interrupted by a handler that returns
 index/dirpos	DIFF	1	#2093 telldir / seekdir do not exist
-index/flock	DIFF	1	#2081 flock does not exist
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	#2093 formline + $^A do not exist
 index/gethost	DIFF	1	#2093 gethostbyname / gethostbyaddr do not exist
 index/getsrv	DIFF	1	#2093 getservbyname / getservbyport do not exist
 index/lc-uc-etc	DIFF	3	#2092 lc/uc treat bytes 128-255 as Latin-1 letters; perl leaves high bytes alone
 index/priority	DIFF	2	#2093 setpriority does not exist
-index/proc	DIFF	10	#2002 sleep is not interrupted by a handler that returns
+index/proc	DIFF	12	#2107 only $SIG{ALRM} is wired: a USR1 handler never runs and the default disposition kills the process (s492c re-attribution -- #2002's sleep row was line 10 and is fixed; measured: PCL prints through `kill0` and then stops)
 modules/Archive-Tar-Compress	DIFF	1	#2084 (4) Archive::Tar::Constant builds @EXPORT by walking its own stash
 modules/Benchmark-Memoize	DIFF	1	#2285 a `package` statement inside a string-eval'd sub loses the captured lexicals
 modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
-modules/Fcntl-Errno	DIFF	1	#2081 flock does not exist
 modules/File-Compare-Copy	DIFF	1	#2287 File::Copy's forward goto lowers to a bare (go :tag) with no tag
 modules/File-Temp	DIFF	1	#2007 the File::Spec shim's catdir drops a leading empty component; tempdir() dies
 modules/IO-Select-Socket	DIFF	1	#1998 a circular `use` of a mid-load module skips its import
 modules/IPC-Open2-Open3	DIFF	1	#2082 open2/open3 with a LIST command; the handles never open
-modules/MIME-Base64	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- XS, no PCL build (a pure-Perl shim would move it)
 modules/Math-BigInt-BigFloat	DIFF	1	#2083 Math::BigFloat->bdiv(3, 20) exhausts the binding stack
 modules/Scalar-Util	DIFF	1	#2084 (3) isweak is always false after weaken; openhandle/readonly stubs
 modules/Sys-Hostname-Env-English	DIFF	1	#2084 (5) `use Env qw(HOME @PATH)` needs tie on scalars-by-name and arrays (#155)
@@ -56,8 +51,6 @@ programs/env-exit-end	DIFF	3	#2009 $? is 0 inside END, and END's $? does not set
 programs/exporter-tags-lib	DIFF	2	#2008 an exported SCALAR is imported as a copy, not an alias
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
 programs/nested-eval-errors	DIFF	3	#2103 an rvalue deref of undef under `strict refs` does not die
-programs/real-dir-walker	DIFF	1	#2007 tempdir(CLEANUP => 1) dies in the File::Spec shim
 programs/ref-types	DIFF	3	#2051 a qr// object is not blessed into Regexp, so blessed(qr//) is undef
-programs/require-do-file	DIFF	1	#1743 UNIVERSAL::VERSION is a stub that always answers undef
 programs/resource-idioms	DIFF	1	#2006 (b) a lexical filehandle is not closed at scope exit
 programs/tied-scalar-hash	DIFF	2	#155 tie on HASH is announced, not implemented
