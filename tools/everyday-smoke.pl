@@ -156,7 +156,7 @@ sub all_programs {
     my @out;
     opendir(my $dh, $dir) or return ();
     for my $area (sort grep { $_ !~ /^\./ } readdir $dh) {
-        next unless -d "$dir/$area";
+        next if !-d "$dir/$area";
         opendir(my $ah, "$dir/$area") or next;
         for my $f (sort grep { /\.pl$/ } readdir $ah) {
             (my $name = $f) =~ s/\.pl$//;
@@ -221,7 +221,7 @@ sub select_programs {
             @hit = grep { $_->{area} eq $area } @$all;
             if (!@hit) { print STDERR "everyday-smoke: no area or program '$a'\n"; exit 2 }
         }
-        for my $h (@hit) { push @sel, $h unless $seen{ $h->{key} }++ }
+        for my $h (@hit) { push @sel, $h if !$seen{ $h->{key} }++ }
     }
     return (\@sel, scalar(@sel) != scalar(@$all));
 }
@@ -458,7 +458,9 @@ sub buckets {
         }
     }
     for my $k (sort keys %$rows) {
-        push @stale, $k if !$have{$k} && !$IS_SUBSET;
+        # STALE is a fact of the CORPUS, not of this run's selection: ask the
+        # disk, so a subset run catches a stale row too (s495 review).
+        push @stale, $k if !$have{$k} && !-f "$CORPUS/$k.pl";
         push @unexplained, $k if $rows->{$k}{cause} !~ /\S/;
     }
 

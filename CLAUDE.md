@@ -313,6 +313,16 @@ plus the targeted files the change names.
 | harness: `perl-tests/t/test.pl`, `cl/pcl-test.lisp`, `cl/skip-registry.lisp` | YES | **`--all --quick`** (both populations reach it) | baselines edited ROW BY ROW |
 | runners: `tools/sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file-by-file | same | `PCL_SHOW_SBCL=1` before/after diff |
 | `docs/**`, `tools/t/**`, memory | nothing beyond the gate | no | — |
+| **any BATCH that changes `Pl/**`, `cl/**` or `lib/**`** (once per batch, not per change) | — | — | **`tools/everyday-smoke.pl`** (~2 min cold, ~20 s warm; needs no perl): quote its last line `EVERYDAY: N of M identical to perl` BEFORE → AFTER in the report.  A **NEW** row is yours to fix or explain; a **FIXED** row leaves `baselines/everyday-baseline.tsv` BY EDIT citing your batch; a **MOVED** row is re-attributed.  There is no bless option. |
+
+**THE NUMBER THE PROJECT STEERS BY (USER, end of s494; instrument #2099,
+s495):** the `EVERYDAY:` line — ordinary programs whose STDOUT + exit status
+are byte-identical to perl's — not the suite pass rate.  Goal **> 90 %**
+(85 of 122 = 69.7 % at s495).  The baseline's cause column is the steering
+input: the task that holds the most programs is the next correctness batch.
+It is a steering number, never a compatibility percentage
+(`docs/everyday-battery.md`).  `--record` (whole corpus, clean tree) appends
+`baselines/everyday-history.tsv` — Fable runs it at each merge.
 
 Companion: **`--quick` is the default form** (#345: skips the #326 hang
 set, caps registered allowances at 120 s, LISTS every skipped/capped file as
@@ -898,6 +908,7 @@ Not relevant now:
 - `docs/xs-blessed-ref-referent-bug.md` - **XS OO: DONE end to end (s315, task #115).** The full history of the blocker (s314 diagnosis → pclxs ABI-6 magic group → PCL's `xs-magic-set`/`xs-magic-get` + the `xs-ref-target` referent-identity fix + the 64-arg argv cap removal) with the rules that made it correct. Read the DONE section before touching magic/ref_target; guard `Pl/t/xs-03.t`.
 - `docs/xs-abi5-and-destroy.md` - **what pclxs ABI 5 changes here, and what it costs**: nothing is broken (filehandles are the first OPTIONAL vtable capability group, so the pin can stay at abi 4), but DESTROY is now callable and needs no ABI bump — an unimplemented destructor leaks the C side of every T_PTROBJ object, which is bounded in a script and unbounded in a long-lived image. Has the performance section: cache `pclxs_has_destroy` per CLASS or pay a bridge crossing per finalized object.
 - `docs/extensions.md` - **Extension loading**: `p-load-extension`, self-loading stubs, standalone binaries, adding new extensions
+- `docs/everyday-battery.md` - **THE NUMBER THE PROJECT STEERS BY** (#2099, s495): `tools/everyday-smoke.pl` + the checked-in `everyday/` corpus — "N of M ordinary programs identical to perl", with a blessed per-program baseline (`baselines/everyday-baseline.tsv`, rows leave BY EDIT) and a batch-by-batch history (`baselines/everyday-history.tsv`). Read it before quoting the number: it is a steering number, never a compatibility percentage. `--corpus DIR --baseline FILE` measures another population (Rosetta, #2104) with the same tool.
 
 ## Dependencies
 

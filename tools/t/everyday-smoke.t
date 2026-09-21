@@ -35,7 +35,7 @@ my $SMOKE = "$RealBin/../everyday-smoke.pl";
 my $FIX   = "$RealBin/everyday-fixture";
 my $ADMIT = "$RealBin/everyday-admit";
 my $FAKE  = "$FIX/fake-pcl";
-plan skip_all => "$SMOKE not found" unless -f $SMOKE;
+plan skip_all => "$SMOKE not found" if !-f $SMOKE;
 
 my $TMP = tempdir(CLEANUP => 1);
 my $N   = 0;
