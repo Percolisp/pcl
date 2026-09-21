@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 sub run_cl {
     my ($code) = @_;
@@ -113,3 +113,20 @@ verdict('my $got = 0; $SIG{ALRM} = sub { $got++ }; my $t0 = time; alarm 1;'
 verdict('my $r = eval { local $SIG{ALRM} = sub { die "to\n" }; alarm 1; sleep 6; alarm 0; 1 };'
         . ' print +(!defined $r && $@ eq "to\n") ? "ok" : "bad", "\n";',
         'ok', '... and the classic die-in-handler timeout idiom still works');
+
+# ---- s495: the d_* capability flags are all there, and each is honest ----
+# The module's own t/ asks the build what it can do before it plans a single
+# row, so a MISSING flag is not a neutral absence -- it is "Undefined
+# subroutine &Time::HiRes::d_gettimeofday" where perl skips or runs.  Measured
+# on the dist's t/ (s495): 10 -> 36 of 118 rows, and every death became a
+# clean skip.
+verdict('use Time::HiRes qw(d_gettimeofday d_usleep d_nanosleep d_clock_gettime'
+        . ' d_clock_getres d_alarm d_ualarm d_setitimer d_getitimer d_clock'
+        . ' d_clock_nanosleep d_hires_stat d_hires_utime d_file_times);'
+        . ' my $have = d_gettimeofday() + d_usleep() + d_nanosleep()'
+        . '          + d_clock_gettime() + d_clock_getres() + d_alarm();'
+        . ' my $not  = d_ualarm() + d_setitimer() + d_getitimer() + d_clock()'
+        . '          + d_clock_nanosleep() + d_hires_stat() + d_hires_utime()'
+        . '          + d_file_times();'
+        . ' print +($have == 6 && $not == 0) ? "ok" : "bad:$have/$not", "\n";',
+        'ok', 'every d_* flag the real module exports is exported here, and each says what the shim implements');

@@ -27,7 +27,9 @@ our @EXPORT_OK = qw(
     clock_gettime clock_getres
     stat utime
     CLOCK_REALTIME CLOCK_MONOTONIC
-    d_hires_stat d_hires_utime d_nanosleep d_clock_gettime d_clock_getres
+    d_hires_stat d_hires_utime d_file_times d_futimens d_utimensat
+    d_nanosleep d_clock_gettime d_clock_getres d_clock_nanosleep d_clock
+    d_gettimeofday d_usleep d_alarm d_ualarm d_setitimer d_getitimer
 );
 our %EXPORT_TAGS = (clock => [qw(CLOCK_REALTIME CLOCK_MONOTONIC clock_gettime clock_getres)]);
 
@@ -91,11 +93,27 @@ sub clock_getres (;$) {
 sub stat (;$)  { return CORE::stat(@_  ? $_[0] : $_) }
 sub utime (@)  { return CORE::utime(@_) }
 
-# The d_* capability flags real Time::HiRes exports, answered honestly.
-sub d_hires_stat     () { 0 }
-sub d_hires_utime    () { 0 }
+# The d_* capability flags real Time::HiRes exports, answered honestly.  They
+# are how a program — and the module's own t/ — asks what this build can do,
+# so a MISSING one is not a neutral absence: the dist's t/time.t, t/usleep.t
+# and t/nanosleep.t died "Undefined subroutine &Time::HiRes::d_gettimeofday"
+# where perl skips or runs (measured s495).  Every flag the real module
+# exports is here, and each says what THIS shim actually implements.
+sub d_hires_stat     () { 0 }   # stat is CORE's: whole seconds
+sub d_hires_utime    () { 0 }   # utime is CORE's
+sub d_file_times     () { 0 }   # ... so the hi-res file-time pair is absent
+sub d_futimens       () { 0 }
+sub d_utimensat      () { 0 }
 sub d_nanosleep      () { 1 }
 sub d_clock_gettime  () { 1 }
 sub d_clock_getres   () { 1 }
+sub d_clock_nanosleep() { 0 }
+sub d_clock          () { 0 }   # no CPU clock primitive on the seam
+sub d_gettimeofday   () { 1 }
+sub d_usleep         () { 1 }
+sub d_alarm          () { 1 }   # CORE alarm, whole seconds
+sub d_ualarm         () { 0 }   # signal-driven: not-supported.md
+sub d_setitimer      () { 0 }
+sub d_getitimer      () { 0 }
 
 1;
