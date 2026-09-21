@@ -1,0 +1,43 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# fake-pcl — the command under test in tools/t/everyday-smoke.t.
+#
+# It runs the program under the running perl, so the fixture's expectations are
+# always right, and then MISBEHAVES BY NAME so every verdict the runner can
+# produce is reachable without SBCL and without depending on a live PCL bug
+# (which would be fixed next week, taking the test with it):
+#
+#   diff-*   the same output with line 3 changed        -> DIFF, first-diff 3
+#   rc-*     the right output, exit status 3            -> RC
+#   slow-*   sleeps past any sane --timeout             -> TIMEOUT
+#   *noisy*  also writes SBCL-ish noise and one real     (the stderr filter is
+#            complaint to stderr                            exercised)
+#   anything else   exactly what perl printed           -> same
+#
+# STDIN is inherited by the child, so a program with a .stdin file gets it.
+use strict;
+use warnings;
+
+my ($prog, @args) = @ARGV;
+die "fake-pcl: no program\n" if !defined $prog;
+my $base = $prog; $base =~ s{.*/}{};
+
+if ($base =~ /^slow-/) { sleep 30; exit 0 }
+
+open my $ph, '-|', $^X, $prog, @args or die "fake-pcl: $!\n";
+my @lines = <$ph>;
+close $ph;
+my $status = $? >> 8;
+
+if ($base =~ /^diff-/ && @lines >= 3) { $lines[2] = "THIS IS NOT WHAT PERL SAID\n" }
+if ($base =~ /noisy/) {
+    print STDERR "PCL Runtime loaded\n; compiling something\nWARNING: redefining X\n";
+    print STDERR "PCL: a real complaint\n";
+}
+print @lines;
+exit 3 if $base =~ /^rc-/;
+exit $status;

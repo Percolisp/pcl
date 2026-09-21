@@ -41,7 +41,11 @@ our $SPDX = $TAG_LINES[3];
 # the tag like any other code file.  Their `.expected` oracles, `.ir`
 # snapshots and `.rules` files are DATA and have no code extension, so the
 # scan below never reaches them.
-our @ROOTS  = qw(Pl cl lib tools examples ir-conform .claude/hooks);
+# everyday/ holds the everyday-smoke corpus (s495e, task #2099): ordinary
+# programs written HERE, one per file, so each is a code file like any other.
+# Their `.expect` / `.rc` / `.stdin` oracles are DATA and have no code
+# extension, so the scan below never reaches them.
+our @ROOTS  = qw(Pl cl lib tools examples ir-conform everyday .claude/hooks);
 our @EXTRAS = qw(docs/ppi-bug-report.t);
 
 # Whole TREES never scanned under a scanned root, => reason.  Like %EXCLUDE
