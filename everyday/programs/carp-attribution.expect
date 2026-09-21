@@ -1,0 +1,4 @@
+msg caller-line
+one-line
+WARN[careful] line-ok=1
+has-trace eval-frame

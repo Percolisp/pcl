@@ -1,0 +1,7 @@
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# origin: s493 perlfunc index walk / pf-sysio.pl
+my $f = "/tmp/s493-sysio.$$"; use Fcntl; sysopen(my $h, $f, O_WRONLY|O_CREAT|O_TRUNC, 0644) or die "sysopen: $!"; my $w = syswrite($h, "hello world\n"); print "w=$w\n"; close $h; sysopen($h, $f, O_RDONLY) or die; my $n = sysread($h, my $buf, 5); print "n=$n [$buf]\n"; my $pos = sysseek($h, 0, 1); print "pos=$pos\n"; $n = sysread($h, $buf, 100, length $buf); print "n=$n [", $buf =~ s/\n/\n/r, "]\n"; print eof($h) ? "eof?\n" : "not-eof\n"; close $h; open($h, "+<", $f) or die; seek($h, 6, 0); print $h "WORLD"; seek($h, 0, 0); my $l = <$h>; print $l; print tell($h), "\n"; truncate($h, 5); close $h; print -s $f, "\n"; print ((stat $f)[2] & 07777 ? "mode\n" : "nomode\n"); chmod 0600, $f; printf "%o\n", (stat $f)[2] & 07777; rename $f, "$f.2" or die; print -e "$f.2" ? "renamed\n" : "no\n"; link("$f.2", "$f.3"); symlink("$f.2", "$f.4"); print readlink("$f.4") eq "$f.2" ? "symlink\n" : "nolink\n"; print -l "$f.4" ? "is-l\n" : "not-l\n"; my @st = stat "$f.2"; print "nlink=$st[3]\n"; utime(1000000000, 1000000000, "$f.2"); print ((stat "$f.2")[9], "\n"); print unlink("$f.2", "$f.3", "$f.4"), "\n"; mkdir "$f.d" or die; print -d "$f.d" ? "dir\n" : "nodir\n"; rmdir "$f.d"; print -e "$f.d" ? "still\n" : "gone\n"; print umask() =~ /^\d+$/ ? "umask\n" : "no\n";

@@ -1,0 +1,20 @@
+w=12
+n=5 [hello]
+pos=5
+n=7 [hello world
+]
+eof?
+hello WORLD
+12
+5
+mode
+600
+renamed
+symlink
+is-l
+nlink=2
+1000000000
+3
+dir
+gone
+umask

@@ -1,0 +1,3 @@
+http 80 tcp
+ssh
+tcp 6

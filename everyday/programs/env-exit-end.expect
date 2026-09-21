@@ -1,0 +1,3 @@
+from-begin child-sees path undef
+x env-exit-end.pl
+end block ran, status=3

@@ -1,0 +1,4 @@
+dirs=5 .md:1/999 .pl:1/120 .pm:2/345 .t:1/80 .txt:1/10
+big: docs/README.md src/lib/A.pm src/main.pl
+A.pm B.pm a/b/c.txt /x/y/ z.txt /x/y abs resolved cwd
+removed docs-kept

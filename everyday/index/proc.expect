@@ -1,0 +1,17 @@
+child
+status=3
+got: from child
+list form
+to cat
+close-status=0
+sys=2
+out
+alarm
+slept<3
+kill0
+usr1
+wait=-1
+env
+v
+4
+time-ok

@@ -1,0 +1,15 @@
+{
+   "f" : 1.5,
+   "list" : [
+      1,
+      "2",
+      true,
+      null
+   ],
+   "n" : 3,
+   "name" : "x",
+   "nested" : {
+      "k" : []
+   }
+}
+c T F undef 3 -150 JSON::PP::Boolean [2,4,6]

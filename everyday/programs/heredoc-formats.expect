@@ -1,0 +1,10 @@
+Dear Ann, you have 3 items: a b (2)
+  total: 4.50
+raw $u{name} \n stays
+indented Ann
+  keeps relative
+shout ann
+tail
+a?b\n|A?|A|?|?[0m|?|
+single $u{name} \n
+q-braces {nested} qq 3 email@example.com

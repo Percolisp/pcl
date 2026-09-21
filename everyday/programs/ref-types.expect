@@ -1,0 +1,6 @@
+SCALAR ARRAY HASH CODE REF Regexp GLOB Foo Bar
+SCALAR ARRAY HASH CODE REF REGEXP GLOB ARRAY HASH
+- - - - - Regexp - Foo Bar
+1 1 1 0 0 1 0 1 0
+codestr called:1 called:2 called:3
+same numeq streq

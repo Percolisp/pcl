@@ -15,3 +15,8 @@
 
 # s486b measurement outputs (regenerable: scratch/s486b/measure.pl)
 scratch/*/out/
+
+# tools/everyday-smoke.pl's results and per-program work directories.
+# The CORPUS is everyday/ and is tracked; this is where a run puts what it
+# produced (.out/.err/.rc) and the fresh cwd each program gets.
+/.everyday/

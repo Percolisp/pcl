@@ -1,0 +1,5 @@
+ONE two three
+in-memory 42
+3
+dup ok
+failed: errno

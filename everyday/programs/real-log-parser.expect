@@ -1,0 +1,8 @@
+period: 2026-09-19 09:59:58 .. 2026-09-19 10:02:00; malformed: 1
+status: 200 x2, 201 x1, 304 x1, 404 x1, 500 x1
+/api/items    3 hits  avg  676.3 ms
+/index.html   2 hits  avg    7.0 ms
+/missing      1 hits  avg    3.0 ms
+top host: 10.0.0.2 (20.1 KB)
+slow: /api/items@10.0.0.2=1204; /api/items@10.0.0.2=730
+error rate: 33.3% of 6

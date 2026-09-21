@@ -1,0 +1,2 @@
+main::inner from main::outer args=w x y
+main::whoami line main defined nosuch

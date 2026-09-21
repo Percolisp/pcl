@@ -1,0 +1,6 @@
+eng    n=2 avg=  4650.25 top=Smith, Anna
+ops    n=2 avg=  3900.00 top=Carl "CJ" Jones
+sales  n=1 avg=  2800.75 top=Eve Black
+quoted: Smith, Anna | Carl "CJ" Jones
+2019:2 2020:1 2021:2
+"Smith, Anna",Carl "CJ" Jones,Dana White,Eve Black,Bob Stone

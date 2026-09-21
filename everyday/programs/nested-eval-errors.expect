@@ -1,0 +1,3 @@
+caught:inner
+ outer:outer
+ ref:42 div0 strict-refs-died after:empty line-appended sigdie

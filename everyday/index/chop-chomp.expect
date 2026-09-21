@@ -1,0 +1,15 @@
+1 [line]
+a b
+foo
+ab
+xy
+abc
+[trim]
+a-b-c aXbXc
+2
+a+b+c
+1,22,333
+yes
+x1,y2
+ifmmp
+3
