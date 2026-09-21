@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 36;
+plan tests => 37;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -302,3 +302,32 @@ is run_cl('$| = 1; my $parent = $$; my $p = fork(); die "no fork" if !defined $p
           . ' waitpid($p, 0); print +($$ == $parent ? "parent-same" : "parent-CHANGED"), "\n";'),
    "fresh ppid-ok\nparent-same\n",
    '#2094: fork refreshes $$ in the child and leaves the parents alone';
+
+
+# ── s495 (task #2062): a PERL DEATH raised while a child runs is not a host
+# ── failure ────────────────────────────────────────────────────────────────
+# `local $SIG{ALRM} = sub { die }; alarm 3; system(...)` is the everyday
+# timeout idiom.  The child-process wrappers guarded themselves against a HOST
+# error with a blanket `(error () -1)` — #1920's "a child that cannot be
+# started is a value, never a death" — and that guard also swallowed the
+# handler's die: the caller's eval saw an EMPTY `$@` and carried on, where
+# perl unwinds.  All four spellings share one macro now (%p-child-host-error),
+# and the last line proves the #1920 path is untouched.  Every expectation was
+# probed against perl 5.40.3, which prints this line byte for byte.
+my $HD_ALRM = <<'PL';
+my @r;
+{ local $SIG{ALRM} = sub { die "A\n" }; eval { alarm 1; system("sleep 2"); alarm 0 };
+  push @r, "sys=" . ($@ eq "A\n" ? "die" : "LOST") }
+{ local $SIG{ALRM} = sub { die "A\n" }; eval { alarm 1; my $x = `sleep 2`; alarm 0 };
+  push @r, "qx=" . ($@ eq "A\n" ? "die" : "LOST") }
+{ local $SIG{ALRM} = sub { die "A\n" }; my $p = fork(); if (!$p) { sleep 2; exit 0 }
+  eval { alarm 1; waitpid($p, 0); alarm 0 };
+  push @r, "wpid=" . ($@ eq "A\n" ? "die" : "LOST"); kill "KILL", $p; waitpid($p, 0) }
+my $rc = system("pcl-no-such-prog-xyz", "a");
+push @r, "start=" . ($rc == -1 ? "minus1" : $rc) . ($! ? ":errno" : ":noerrno");
+print join(" ", @r), "\n";
+PL
+
+is run_cl($HD_ALRM),
+   "sys=die qx=die wpid=die start=minus1:errno\n",
+   '#2062: an ALRM handler that dies during system / qx / waitpid unwinds, and a child that cannot START is still -1 with $!';

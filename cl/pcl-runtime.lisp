@@ -20357,6 +20357,22 @@ buffer's fill-pointer; everything else falls back to file-length."
       (throw '%p-end-exit nil))
     (sb-ext:exit :code n)))
 
+(defmacro %p-child-host-error (failure &body body)
+  "Run BODY around a CHILD PROCESS.  A HOST error — the child could not be
+   started, or the wait had no child to reap — evaluates FAILURE instead of
+   dying (#1920: perl's system / qx / wait answer -1 and set $!, never die).
+
+   A PERL DEATH RAISED WHILE THE CHILD RUNS IS NOT A HOST FAILURE (#2062).
+   `local $SIG{ALRM} = sub { die }; alarm 3; system(...)` is the everyday
+   timeout idiom, and perl's die unwinds the caller's eval; a blanket
+   `(error () -1)` around the WAIT swallowed it, and the program read an
+   empty `$@` and carried on.  The one reading of `is this a perl die`
+   (%p-perl-die-p) decides, and the death is re-signalled."
+  (let ((c (gensym "COND")))
+    `(handler-case (progn ,@body)
+       (error (,c)
+         (if (%p-perl-die-p ,c) (error ,c) ,failure)))))
+
 (defun %p-system-run (cmd prog-args)
   "Spawn for p-system and return the raw wait status.  PROG-ARGS nil means the
    one-argument form, which perl hands to the shell."
@@ -20394,14 +20410,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       -1
       (let ((cmd (to-string (car args)))
             (prog-args (mapcar #'to-string (cdr args))))
-        (handler-case
-            (let ((wait-status (%p-system-run cmd prog-args)))
-              (setf $? wait-status)
-              wait-status)
-          (error ()
-            (%pcl-save-errno)
-            (setf $? -1)
-            -1)))))
+        (%p-child-host-error (progn (%pcl-save-errno) (setf $? -1) -1)
+                             (let ((wait-status (%p-system-run cmd prog-args)))
+                               (setf $? wait-status)
+                               wait-status)))))
 
 (defun p-fork ()
   "Perl fork - duplicate the current process via fork(2) (sb-posix:fork).
@@ -20432,19 +20444,17 @@ buffer's fill-pointer; everything else falls back to file-length."
    / 0), and sets $? to the child's raw wait status (exit_code << 8 | signal)."
   (let ((p (truncate (to-number (if (p-box-p pid) (unbox pid) pid))))
         (f (truncate (to-number (if (p-box-p flags) (unbox flags) flags)))))
-    (handler-case
-        (multiple-value-bind (rpid status) (sb-posix:waitpid p f)
-          (setf $? status)
-          rpid)
-      (error () (%pcl-save-errno) -1))))
+    (%p-child-host-error (progn (%pcl-save-errno) -1)
+                         (multiple-value-bind (rpid status) (sb-posix:waitpid p f)
+                           (setf $? status)
+                           rpid))))
 
 (defun p-wait ()
   "Perl wait - wait for any child.  Returns the reaped PID (or -1), sets $?."
-  (handler-case
-      (multiple-value-bind (rpid status) (sb-posix:wait)
-        (setf $? status)
-        rpid)
-    (error () (%pcl-save-errno) -1)))
+  (%p-child-host-error (progn (%pcl-save-errno) -1)
+                       (multiple-value-bind (rpid status) (sb-posix:wait)
+                         (setf $? status)
+                         rpid)))
 
 (defun p-getppid ()
   "Perl getppid - parent process id."
@@ -20564,31 +20574,35 @@ buffer's fill-pointer; everything else falls back to file-length."
    PERL_FLUSHALL_FOR_CHILD first — my_popen runs it, and the child inherits
    STDERR, so a block-buffered handle must not hold text across the fork."
   (%p-flush-all-output)
-  (handler-case
-      (let* ((proc (sb-ext:run-program "/bin/sh" (list "-c" (to-string cmd))
-                                       :input nil
-                                       :output :stream
-                                       :external-format :latin-1
-                                       :error nil
-                                       :wait nil))
-             (output (with-output-to-string (s)
-                       (loop for c = (read-char (sb-ext:process-output proc) nil nil)
-                             while c do (write-char c s)))))
-        (sb-ext:process-wait proc)
-        ;; `$?` IS THE COMMAND'S STATUS, in both contexts (task #2101).  It was
-        ;; left untouched, so `my $out = `cmd`; die if $?;` read whatever an
-        ;; earlier `system` had put there — and with no earlier `system` a
-        ;; FAILING command looked like success.  The encoding is perl's raw
-        ;; wait status, the same one p-system, p-wait and pipe-close store.
-        (setf $? (%p-process-wait-status proc))
-        (if (eq *wantarray* t)
-            (%p-split-records output)
-            output))
-    (error ()
-      ;; The shell could not be started: perl's `-1` with $! set (#1920's rule).
-      (%pcl-save-errno)
-      (setf $? -1)
-      (if (eq *wantarray* t) (make-array 0 :adjustable t :fill-pointer 0) ""))))
+  ;; ONLY THE START is guarded (#2062): a perl death raised while the child
+  ;; runs — a $SIG{ALRM} handler that dies during the read — must unwind the
+  ;; caller's eval, so the read and the wait sit OUTSIDE the guard.
+  (let ((proc (%p-child-host-error nil
+                                   (sb-ext:run-program "/bin/sh" (list "-c" (to-string cmd))
+                                                       :input nil
+                                                       :output :stream
+                                                       :external-format :latin-1
+                                                       :error nil
+                                                       :wait nil))))
+    (if (null proc)
+        ;; The shell could not be started: perl's `-1` with $! set (#1920's rule).
+        (progn
+          (%pcl-save-errno)
+          (setf $? -1)
+          (if (eq *wantarray* t) (make-array 0 :adjustable t :fill-pointer 0) ""))
+        (let ((output (with-output-to-string (s)
+                        (loop for c = (read-char (sb-ext:process-output proc) nil nil)
+                              while c do (write-char c s)))))
+          (sb-ext:process-wait proc)
+          ;; `$?` IS THE COMMAND'S STATUS, in both contexts (task #2101).  It was
+          ;; left untouched, so `my $out = `cmd`; die if $?;` read whatever an
+          ;; earlier `system` had put there — and with no earlier `system` a
+          ;; FAILING command looked like success.  The encoding is perl's raw
+          ;; wait status, the same one p-system, p-wait and pipe-close store.
+          (setf $? (%p-process-wait-status proc))
+          (if (eq *wantarray* t)
+              (%p-split-records output)
+              output)))))
 
 (defun %p-process-wait-status (proc)
   "PROC's raw perl wait status: exit code << 8, or the signal number when it
