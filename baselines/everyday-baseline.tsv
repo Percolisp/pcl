@@ -38,13 +38,13 @@ modules/Archive-Tar-Compress	DIFF	1	#2084 (4) Archive::Tar::Constant builds @EXP
 modules/Benchmark-Memoize	DIFF	1	#2285 a `package` statement inside a string-eval'd sub loses the captured lexicals
 modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
 modules/File-Compare-Copy	DIFF	1	#2287 File::Copy's forward goto lowers to a bare (go :tag) with no tag
-modules/File-Temp	DIFF	1	#2007 the File::Spec shim's catdir drops a leading empty component; tempdir() dies
+modules/File-Temp	DIFF	1	#2056 File::Temp->new dies "Cannot dereference non-reference: #<fd-stream>" (the glob-as-object idiom); tempdir() and tempfile() work since s492c's #2007 (re-attributed s495 review)
 modules/IO-Select-Socket	DIFF	1	#1998 a circular `use` of a mid-load module skips its import
 modules/IPC-Open2-Open3	DIFF	1	#2082 open2/open3 with a LIST command; the handles never open
 modules/Math-BigInt-BigFloat	DIFF	1	#2083 Math::BigFloat->bdiv(3, 20) exhausts the binding stack
 modules/Scalar-Util	DIFF	1	#2084 (3) isweak is always false after weaken; openhandle/readonly stubs
 modules/Sys-Hostname-Env-English	DIFF	1	#2084 (5) `use Env qw(HOME @PATH)` needs tie on scalars-by-name and arrays (#155)
-modules/Text-Wrap-ParseWords-Abbrev	DIFF	1	#2050 the regex escape \X never matches, so core Text::Wrap::wrap() dies
+modules/Text-Wrap-ParseWords-Abbrev	DIFF	1	#2060 \pM / \PM never match (cl-ppcre's property resolver is never set): core Text::Wrap 5.40.3's loop is built on them, not on \X, so EVERY wrap()/fill() call still dies (re-attributed s495 review; #2050 is closed)
 modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not implemented
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/env-exit-end	DIFF	3	#2009 $? is 0 inside END, and END's $? does not set the exit code
