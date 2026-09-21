@@ -245,3 +245,32 @@ Fable's own work, in order: the Q4 ENDURANCE and Q5 FAILURE-EXPERIENCE batteries
 (`docs/questions-worth-asking.md`), the #2006(b) scope-exit-close design, the #2092
 byte-program casing design, #1966/#1967 re-spelled, a quiet-box `tools/bench-exec.pl` run for
 the README's pack / moo rows.
+
+## 7. The queue as of s495 (Fable, 2026-09-21) — STEERED BY THE EVERYDAY NUMBER
+
+**USER directive (end of s494): stop opening new test angles, build #2099 early, steer by its
+number — goal > 90 % of everyday programs identical to perl.**  #2099 is MERGED (s495, main
+`ba30b0f7`): `tools/everyday-smoke.pl` reads **`EVERYDAY: 85 of 122 identical to perl (69.7 %)`**.
+90 % of 122 is **110**.  The baseline's cause column (`baselines/everyday-baseline.tsv`, 37 rows)
+orders the correctness queue from here; §6's order stands only where this table is silent.
+
+| step | batch | programs it buys (baseline rows) | running total |
+|---|---|---|---|
+| 0 | **s492b** — MERGED s495 (`87e4e4b3`) | already in the 85 (b2-26, b2-29) | 85 |
+| 1 | **s492c** — in flight at the end of s495 (rebased onto s492b; merge bar = combined-tree gate + sweep) | up to **11**: `idioms/posix-funcs` #1997 · `idioms/sig-and-sleep` + `index/proc` #2002 · `index/flock` + `modules/Fcntl-Errno` #2081 · `modules/File-Temp` + `programs/real-dir-walker` #2007 · `modules/IO-Select-Socket` · `modules/Text-Wrap-ParseWords-Abbrev` #2050 · `programs/require-do-file` #1743 · `modules/MIME-Base64` (its plain-Perl shim) | ≤ 96 |
+| 2 | **s495f — EVERYDAY ROUND A** (brief `~/pcl-agent-scratch/s495/s495f/prompt.md`, IDs 2340–2369, gen v2-1980) | **10**: #2093 ×5 (`telldir`/`seekdir`, `formline` + `$^A`, `gethostby*`, `getservby*`, `setpriority`/`getpriority`) · #2286 `List::Util::pairs` · #2051 `qr//` is blessed into `Regexp` · #2009 `$?` inside END / END's `$?` is the exit code · #2103 rvalue deref of undef under `strict refs` dies · #2008 an exported SCALAR is an alias (root cause LOCATED by s492b: `p-cast-$`'s symbolic arm) | ≤ 106 |
+| 3 | **s494h** #2006(b) PART 1 (brief READY) | 1: `programs/resource-idioms` | ≤ 107 |
+| 4 | **s494u** #2092 PHASE 1 (brief READY) | 1: `index/lc-uc-etc` | ≤ 108 |
+| 5 | **#2084** module edges (brief OWED) | 2 without tie: (3) Scalar::Util `isweak`/`openhandle`/`readonly`, (4) Archive::Tar::Constant's stash walk; (5) `use Env` waits for #155 | ≤ 110 = **90.2 %** |
+| — | what is left after that | #155 tie ARRAY/HASH ×2 (+ Env) — a Fable design · #1361 Carp location (needs the per-frame location stack; s492c's drop-the-newline attempt is a DO-NOT-RETRY) · #2082 open2/open3 · #2083 BigFloat `bdiv` · #2285 Benchmark · #2287 File::Copy `goto` · 4 ruled non-supports (DESTROY at scope exit, `format`, XS digests, Unicode case folding) — so the ceiling without new rulings is 118 | |
+
+Interleaved as before (one perf agent beside a correctness agent): **s494k `pcl --check`**
+(USER-approved, tool batch) takes the first slot next session, **s494p #2098** the perf slot;
+#2104 (Rosetta census) now measures with the SAME tool (`--corpus DIR --baseline FILE`) and its
+brief should say so before it launches; #2107 signals, #2106 and #2097 keep §6's order.
+
+**The denominator must grow.**  122 programs cover ground, they are not a sample; "90 % of 122"
+is a milestone, not the goal.  Battery 3 (new programs, each admitted under perl by the runner's
+own `--bless-expect`) is Fable's owed work and lands as corpus-only commits between batches —
+every addition arrives WITH its baseline row and cause, so the number may go DOWN on the day the
+corpus grows, and the history file's M column is what keeps that honest.
