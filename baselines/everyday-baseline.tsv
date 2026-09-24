@@ -28,7 +28,6 @@ idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
 index/lc-uc-etc	DIFF	3	#2092 lc/uc treat bytes 128-255 as Latin-1 letters; perl leaves high bytes alone
-index/proc	DIFF	12	#2107 only $SIG{ALRM} is wired: a USR1 handler never runs and the default disposition kills the process (s492c re-attribution -- #2002's sleep row was line 10 and is fixed; measured: PCL prints through `kill0` and then stops)
 modules/Archive-Tar-Compress	DIFF	1	#2084 (4) Archive::Tar::Constant builds @EXPORT by walking its own stash
 modules/Benchmark-Memoize	DIFF	1	#2285 a `package` statement inside a string-eval'd sub loses the captured lexicals
 modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
