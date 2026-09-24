@@ -230,16 +230,24 @@ sub tail ($@) {
     return @_[@_-$n .. $#_];
 }
 
+# pairs / unpairs / pairkeys / pairvalues are XS LIST returners in the real
+# List::Util, so in SCALAR context they answer the LAST element of that list
+# (probed 5.40.3: scalar(pairkeys(a=>1,b=>2,c=>3)) is "c"), never a count --
+# `return @out` would answer the count.  Each pair is an ARRAY ref blessed into
+# List::Util::_Pair (->key / ->value / ->TO_JSON, below); an odd-length list
+# pads the last pair with undef (task #2286).
 sub pairs {
     my @out;
     while (@_) {
-        push @out, [shift, shift];
+        push @out, bless [shift, shift], 'List::Util::_Pair';
     }
-    return @out;
+    return wantarray ? @out : $out[-1];
 }
 
+# Each ARRAY ref contributes exactly its first two elements, undef-padded.
 sub unpairs {
-    map { @$_ } @_;
+    my @out = map { ($_->[0], $_->[1]) } @_;
+    return wantarray ? @out : $out[-1];
 }
 
 sub pairkeys {
@@ -248,7 +256,7 @@ sub pairkeys {
         push @out, shift;
         shift;
     }
-    return @out;
+    return wantarray ? @out : $out[-1];
 }
 
 sub pairvalues {
@@ -257,7 +265,7 @@ sub pairvalues {
         shift;
         push @out, shift;
     }
-    return @out;
+    return wantarray ? @out : $out[-1];
 }
 
 # pair* expose each pair's key/value as the caller's $a/$b (see reduce above).
@@ -399,5 +407,14 @@ sub sample ($@) {
     }
     return @list[0 .. $n-1];
 }
+
+# The class every `pairs` element is blessed into -- List::Util's own name, so
+# `ref`, `->isa` and `blessed` answer as they do in perl.
+package List::Util::_Pair;
+sub key     { $_[0][0] }
+sub value   { $_[0][1] }
+sub TO_JSON { [ @{$_[0]} ] }
+
+package List::Util;
 
 1;

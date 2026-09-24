@@ -1121,4 +1121,24 @@ print "3 never-written=[", r(), "]\n";
 print "4 cap=$1\n";
 });
 
+# Task #2286 (s495f): List::Util::pairs builds objects BLESSED into
+# List::Util::_Pair (->key / ->value / ->TO_JSON) and, like every XS list
+# returner, answers the LAST element in scalar context -- the shim answered
+# unblessed refs and the COUNT.  The same scalar rule for unpairs / pairkeys /
+# pairvalues; unpairs contributes exactly two elements per ref (undef-padded).
+# INVERSE GUARDS: pairmap's scalar answer IS the element count and pairgrep's
+# the PAIR count (their documented rules, must not move), a pair is still a
+# plain ARRAY underneath (deref, writes), and an odd list pads with undef.
+test_transpile("List::Util pairs are blessed _Pair objects; scalar context is the last element (#2286)", q{
+use List::Util qw(pairs unpairs pairkeys pairvalues pairmap pairgrep);
+my @all = pairs(1..4); my $s = pairs(1..4);
+print "1 ", ref($all[-1]), " ", scalar(@all), " ", ref($s), " [$s->[0] $s->[1]]\n";
+print "2 ", $all[0]->key, $all[0]->value, $all[1]->key, $all[1]->value, " ", join(",", @{ $all[1]->TO_JSON }), "\n";
+print "3 ", (UNIVERSAL::isa($all[0], "ARRAY") ? 1 : 0), " $all[0][0] @{$all[1]}\n";
+my @odd = pairs(1, 2, 3); print "4 ", scalar(@{$odd[1]}), " ", (defined $odd[1][1] ? "def" : "undef"), " ", (defined(scalar(pairs())) ? "def" : "undef"), "\n";
+print "5 ", scalar(unpairs([5, 6], [7, 9])), " ", join(",", map { $_ // "u" } unpairs([1, 2], [3])), " ", scalar(pairkeys(a => 1, b => 2, c => 3)), " ", scalar(pairvalues(a => 7, b => 8)), "\n";
+print "6 ", scalar(pairmap { ($a, $b) } a => 1, b => 2), " ", scalar(pairgrep { $b > 1 } a => 1, b => 2, c => 3), "\n";
+for my $p (pairs(x => 10)) { my ($k, $v) = @$p; print "7 $k=$v ", $p->key, "\n" }
+});
+
 done_testing();

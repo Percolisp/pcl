@@ -25,7 +25,6 @@
 #
 # area/name<TAB>verdict<TAB>first-diff-line<TAB>cause
 idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector -- DESTROY is never called at scope exit
-idioms/list-util	DIFF	1	#2286 List::Util::pairs is unblessed and answers the COUNT in scalar context
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
 index/lc-uc-etc	DIFF	3	#2092 lc/uc treat bytes 128-255 as Latin-1 letters; perl leaves high bytes alone
