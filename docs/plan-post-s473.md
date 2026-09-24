@@ -276,3 +276,21 @@ is a milestone, not the goal.  Battery 3 (new programs, each admitted under perl
 own `--bless-expect`) is Fable's owed work and lands as corpus-only commits between batches —
 every addition arrives WITH its baseline row and cause, so the number may go DOWN on the day the
 corpus grows, and the history file's M column is what keeps that honest.
+
+### 7a. The table RE-DERIVED from the baseline at s496 (Fable, 2026-09-25) — supersedes §7's running totals
+
+`baselines/everyday-baseline.tsv` at `40da28bd` has **30 rows** (92 of 122 identical).  Grouped by owning cause: **#2093 ×5** (`index/dirpos formline gethost getsrv priority`) · **#2084 ×3** (`modules/Archive-Tar-Compress Scalar-Util Sys-Hostname-Env-English`) · **#155 ×2** (`modules/Tie-Hash-Array-Scalar programs/tied-scalar-hash`) · sixteen singletons (#1361 #1998 #2006 #2008 #2009 #2051 #2056 #2060 #2082 #2083 #2092 #2103 #2107 #2285 #2286 #2287) · four ruled non-supports (`idioms/destroy-scope` DESTROY at scope exit, `modules/Digest-SHA-MD5` XS, `index/format` format/write, `programs/lc-uc-nonascii` case folding).  s492c bought 7 rows, not the 11 §7 assumed (Text-Wrap is #2060, File-Temp is #2056, IO-Select-Socket moved to #1998, index/proc to #2107).
+
+| step | batch | rows it buys | running total |
+|---|---|---|---|
+| 0 | main `40da28bd` (s494k merged: a tool, no row) | — | **92** |
+| 1 | **s495f EVERYDAY ROUND A** (in flight) | 10: #2093 ×5 · #2286 · #2051 · #2009 · #2103 · #2008 | ≤ 102 |
+| 2 | **s494g #2107 signals** (launching s496) | 1: `index/proc` | ≤ 103 |
+| 3 | s494h #2006(b) | 1: `programs/resource-idioms` | ≤ 104 |
+| 4 | s494u #2092 | 1: `index/lc-uc-etc` | ≤ 105 |
+| 5 | #2084 module edges (brief OWED) | 3 | ≤ 108 |
+| 6 | **s496a #2060 Unicode properties** (brief READY) — needs **#2085** too (the program's line 9 is a `%{{ f() }}` drop; the row moves there otherwise) | 1: `modules/Text-Wrap-ParseWords-Abbrev` | ≤ 109 |
+| 7 | #2056 `File::Temp->new` | 1: `modules/File-Temp` | ≤ **110 = 90.2 %** |
+| — | after that: #1998 · #155 ×2 · #1361 · #2082 · #2083 · #2285 · #2287 = 8 more → the ceiling without new rulings is **118**; the four ruled rows stay | | |
+
+The denominator still has to grow (battery 3); every number above is "of 122".
