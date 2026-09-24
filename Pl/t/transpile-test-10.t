@@ -1240,4 +1240,28 @@ for my $case (['my $s = q*abc',                  'q*abc'],
            '#940: …and its raw Perl text is NOT emitted into the CL');
 }
 
+# Task #2051 (s495f): a qr// object is BLESSED into Regexp -- blessed() says
+# so, ->isa / ->can / ->DOES and a user method in Regexp:: dispatch on it, and
+# `bless qr/x/, "Foo"` STAYS a regexp (matches, is_regexp, reftype REGEXP,
+# stringifies as its pattern).  re::is_regexp and re::regexp_pattern are core
+# (universal.c); Data::Dumper reads the latter to print qr/ab+c/i.
+# INVERSE GUARDS: ref(qr//) and the stringification do not move, a qr still
+# interpolates into another pattern, a method call on an UNBLESSED array ref
+# and on undef still dies, a plain string is not a regexp.
+test_transpile("qr// objects are blessed into Regexp; re::is_regexp / regexp_pattern (#2051)", q{
+use Scalar::Util qw(blessed reftype); require overload; use Data::Dumper;
+$Data::Dumper::Indent = 1; $Data::Dumper::Sortkeys = 1;
+my $r = qr/x/i;
+print "1 ", ref($r), " ", (blessed($r) // "undef"), " ", reftype($r), " $r\n";
+print "2 ", ($r->isa("Regexp") ? 1 : 0), ($r->can("isa") ? 1 : 0), ($r->DOES("Regexp") ? 1 : 0), (UNIVERSAL::isa($r, "Regexp") ? 1 : 0), "\n";
+sub Regexp::shout { "shout:" . $_[0] }
+print "3 ", $r->shout, " ", (re::is_regexp($r) ? 1 : 0), (re::is_regexp("x") ? 1 : 0), "\n";
+my $f = bless qr/b+/, "Foo";
+print "4 ", ref($f), " ", blessed($f), " ", reftype($f), " ", ("abbc" =~ $f ? "yes" : "no"), " ", (re::is_regexp($f) ? 1 : 0), " $f\n";
+print "5 ", ("xab" =~ /a${r}?/ ? "m" : "n"), ("AX" =~ /A$r/ ? "m" : "n"), " ", (overload::StrVal($r) =~ /^Regexp=REGEXP\(0x[0-9a-f]+\)$/ ? "strval" : "bad"), "\n";
+my @l = re::regexp_pattern(qr/a:b/xi); print "6 [$l[0]] [$l[1]] [", scalar(re::regexp_pattern($r)), "] ", scalar(my @n = re::regexp_pattern("x")), "\n";
+print "7 ", (eval { [1]->isa("X"); 1 } ? "lived" : "died"), " ", (eval { my $u; $u->foo; 1 } ? "lived" : "died"), " ", (blessed([]) // "undef"), "\n";
+print Dumper(qr/ab+c/i, bless(qr/y/, "Foo"));
+});
+
 done_testing();

@@ -46,6 +46,5 @@ programs/env-exit-end	DIFF	3	#2009 $? is 0 inside END, and END's $? does not set
 programs/exporter-tags-lib	DIFF	2	#2008 an exported SCALAR is imported as a copy, not an alias
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
 programs/nested-eval-errors	DIFF	3	#2103 an rvalue deref of undef under `strict refs` does not die
-programs/ref-types	DIFF	3	#2051 a qr// object is not blessed into Regexp, so blessed(qr//) is undef
 programs/resource-idioms	DIFF	1	#2006 (b) a lexical filehandle is not closed at scope exit
 programs/tied-scalar-hash	DIFF	2	#155 tie on HASH is announced, not implemented

@@ -3788,6 +3788,15 @@
   "Return the non-overloaded string value of OBJ (the raw address form).
    Implements overload::StrVal($obj) — bypasses any '\"\"' overload."
   ;; use overload: get raw address representation ignoring any "" handler
+  (let ((rx (if (p-box-p obj) (p-box-value obj) obj)))
+    ;; A compiled pattern is a REGEXP referent blessed into Regexp (or the
+    ;; class it was re-blessed into): perl's StrVal is CLASS=REGEXP(0x…)
+    ;; (probed 5.40.3, task #2051).
+    (when (p-regex-match-p rx)
+      (return-from p-overload-strval
+        (make-p-box (format nil "~A=REGEXP(0x~(~X~))"
+                            (or (and (p-box-p obj) (p-get-class obj)) "Regexp")
+                            (object-address rx))))))
   (if (p-box-p obj)
       (let* ((cls   (p-get-class obj))
              ;; Same words and the same REFERENT address the plain stringifier
@@ -4207,7 +4216,10 @@
                          ;; INNER is the referent.
                          (format nil "SCALAR(0x~(~X~))" (object-address inner))))
                     (t (stringify-value inner))))
-             (s (if class
+             ;; A compiled pattern stringifies as its PATTERN however it is
+             ;; blessed: `bless qr/b+/, "Foo"` prints (?^:b+), never
+             ;; Foo=(?^:b+) — the REGEXP stays a regexp (probed, #2051).
+             (s (if (and class (not (p-regex-match-p inner)))
                     (format nil "~A=~A" class raw)
                     raw)))
         ;; Don't cache a SCALAR-reference's string.  Its word is a property of
@@ -25982,10 +25994,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; is provided but best-effort: it always returns false ("not a tracked bool"),
 ;;; which is the safe answer (a boolean is still an ordinary scalar).
 (defun %p-builtin-blessed (x)
-  "builtin::blessed — class name of a blessed ref, else undef."
+  "builtin::blessed — class name of a blessed ref, else undef.  A qr// object
+   IS blessed, into Regexp (perl: blessed(qr/x/) is \"Regexp\", task #2051),
+   so p-ref's \"Regexp\" is a class name here, not a reftype."
   (let ((r (p-ref x)))
     (if (or (string= r "")
-            (member r '("HASH" "ARRAY" "CODE" "SCALAR" "REF" "GLOB" "LVALUE" "Regexp")
+            (member r '("HASH" "ARRAY" "CODE" "SCALAR" "REF" "GLOB" "LVALUE")
                     :test #'string=))
         *p-undef*
         r)))
@@ -27866,6 +27880,18 @@ buffer's fill-pointer; everything else falls back to file-length."
       (%p-ensure-handle-class)
       +p-handle-class+)))
 
+(defun %p-value-invocant-class (invocant)
+  "The class an invocant with NO class of its own dispatches against because
+   perl gives its KIND one: a filehandle's handle class (#1074), and a qr//
+   object's `Regexp' — perl blesses every compiled pattern into package Regexp,
+   so `->isa', `->can', UNIVERSAL methods and user methods in Regexp:: work on
+   it (task #2051).  NIL otherwise.  Reached only after the invocant's own
+   class and the class-name-string readings have missed, so an ordinary
+   method call never pays for it."
+  (or (%p-handle-invocant-class invocant)
+      (let ((v (if (p-box-p invocant) (p-box-value invocant) invocant)))
+        (when (p-regex-match-p v) "Regexp"))))
+
 (defun %pcl-invocant-class (invocant)
   "The class name a method-call invocant denotes: a blessed object's class, or
    a plain string (raw or in a scalar) treated as a class name — `my $c=\"Foo\";
@@ -27880,8 +27906,8 @@ buffer's fill-pointer; everything else falls back to file-length."
      (or (p-get-class invocant)
          (let ((uv (unbox invocant)))
            (when (stringp uv) uv))
-         (%p-handle-invocant-class invocant)))
-    (t (%p-handle-invocant-class invocant))))
+         (%p-value-invocant-class invocant)))
+    (t (%p-value-invocant-class invocant))))
 
 (defun p-resolve-invocant (name)
   "Resolve a bareword invocant for method calls.
@@ -28142,7 +28168,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (apply (symbol-function own) resolved-obj args)))
             (setf own-missed t))))
     (unless class-name
-      (error "Can't call method ~A on non-blessed reference" method-name))
+      (p-die (format nil "Can't call method \"~A\" on non-blessed reference" method-name)))
 
     ;; A method call on undef or an UNBLESSED reference is a fatal Perl error
     ;; ("Can't call method X on an undefined value" / "on unblessed reference").
@@ -28154,9 +28180,9 @@ buffer's fill-pointer; everything else falls back to file-length."
       (let ((uv (unbox resolved-obj)))
         (cond
           ((or (null uv) (eq uv *p-undef*))
-           (error "Can't call method ~A on an undefined value" method-name))
+           (p-die (format nil "Can't call method \"~A\" on an undefined value" method-name)))
           ((plusp (length (the string (p-ref resolved-obj))))
-           (error "Can't call method ~A on unblessed reference" method-name)))))
+           (p-die (format nil "Can't call method \"~A\" on unblessed reference" method-name))))))
 
     ;; A NAME THAT NAMES AN OPEN FILEHANDLE IS A HANDLE, NOT A CLASS (#1074):
     ;; `STDOUT->autoflush(1)`, `OPENED->fileno`, `my $c = "STDOUT"; $c->eof` —
@@ -31896,6 +31922,48 @@ buffer's fill-pointer; everything else falls back to file-length."
         (let ((sym (intern m pkg)))
           (setf (fdefinition sym) (lambda (&rest a) (declare (ignore a)) nil))
           (setf (gethash sym *p-declared-subs*) :defined))))))
+
+;;; re::is_regexp(THING) — core perl (universal.c), callable with no `use re`:
+;;; true for a qr// object, blessed into Regexp or re-blessed elsewhere alike
+;;; (`bless qr/x/, "Foo"` STAYS a regex), false for anything else, a pattern
+;;; STRING included (task #2051).  The `re' package exists by now: the pragma
+;;; loop above made it.
+(defun %p-re-is-regexp (x)
+  "re::is_regexp — 1 for a compiled pattern, \"\" otherwise."
+  (let ((v (unbox x)))
+    (when (p-box-p v) (setf v (p-box-value v)))
+    (if (p-regex-match-p v) 1 "")))
+
+(defun %p-re-regexp-pattern (x)
+  "re::regexp_pattern — core perl like is_regexp (task #2051).  For a compiled
+   pattern: in LIST context (PATTERN, MODIFIERS), in scalar context the
+   stringified form `(?^MODS:PATTERN)'; for anything else the empty list / \"\"
+   (probed 5.40.3).  Both halves are cut from the ONE stringification, so they
+   cannot disagree with it: MODS is what sits between `(?^' and the first `:'
+   (a modifier letter is never a colon), PATTERN is the rest minus the `)'.
+   Data::Dumper reads this to print qr/ab+c/i rather than qr/(?^i:ab+c)/."
+  (let ((v (unbox x)))
+    (when (p-box-p v) (setf v (p-box-value v)))
+    (cond
+      ((not (p-regex-match-p v))
+       (if (eq *wantarray* t) (%p-empty-list) ""))
+      ((not (eq *wantarray* t)) (to-string v))
+      (t (let* ((s (to-string v))
+                (colon (position #\: s :start 3)))
+           (unless (and (> (length s) 4) (string= "(?^" s :end2 3) colon)
+             (error "re::regexp_pattern: unexpected pattern string ~S" s))
+           (make-array 2 :initial-contents
+                       (list (subseq s (1+ colon) (1- (length s)))
+                             (subseq s 3 colon))
+                       :adjustable t :fill-pointer t))))))
+
+(eval-when (:load-toplevel :execute)
+  (let ((pkg (find-package "RE")))
+    (dolist (pair '(("PL-IS_REGEXP" . %p-re-is-regexp)
+                    ("PL-REGEXP_PATTERN" . %p-re-regexp-pattern)))
+      (let ((sym (intern (car pair) pkg)))
+        (setf (fdefinition sym) (fdefinition (cdr pair)))
+        (setf (gethash sym *p-declared-subs*) :defined)))))
 
 ;;; Extension loading registry — tracks which extension files have been loaded.
 (defvar *pcl-loaded-extensions* (make-hash-table :test 'equal))
