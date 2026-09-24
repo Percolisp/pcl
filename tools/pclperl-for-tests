@@ -234,8 +234,10 @@ my $load_form = sprintf(
   $lisp, $lisp, $lisp);
 my $cmd = join(' ', map { "\Q$_\E" } (@sbcl, @argv_form, '--eval', $load_form))
         . " 2> \Q$dir\E/err";
-system($cmd);
-my $status = ($? >> 8) & 0xFF;
+# `exec`: the wait status must be SBCL's OWN -- under dash a signal death
+# would come back as an ordinary exit of 128 + N (task #2107).
+system("exec $cmd");
+my $status = $?;
 if (open(my $efh, '<', "$dir/err")) {
   my ($skip_block, $seen_real) = (0, 0);
   while (my $line = <$efh>) {
@@ -264,4 +266,9 @@ if (open(my $efh, '<', "$dir/err")) {
     print STDERR $line;
   }
 }
-exit($status);
+# A signal death is re-raised, so the test that ran this "perl" reads it as
+# `$? & 127`, like a real perl child (PCLSbcl::exit_like).  The temp dir goes
+# first: a signal death skips the END block File::Temp cleans up in.
+File::Temp::cleanup();
+require PCLSbcl;
+PCLSbcl::exit_like($status);

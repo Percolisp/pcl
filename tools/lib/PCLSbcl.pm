@@ -38,7 +38,7 @@ use Digest::SHA qw(sha1_hex);
 use File::Basename qw(dirname);
 use Fcntl      qw(:flock);
 use File::Path qw(make_path);
-our @EXPORT_OK = qw(sbcl_prefix sbcl_prefix_str cached_core core_cache_dir clear_cached_cores);
+our @EXPORT_OK = qw(sbcl_prefix sbcl_prefix_str cached_core core_cache_dir clear_cached_cores exit_like);
 
 # Control stack, MB.  PCL recurses deeply in both the compiler and the runtime;
 # SBCL's 2 MB default is not enough (#324).  Changing the value is a decision
@@ -426,6 +426,35 @@ sub _fresh {
     my ($core, $runtime) = @_;
     return 0 unless defined $runtime && -f $core && -f $runtime;
     return (stat $core)[9] >= (stat $runtime)[9];
+}
+
+# exit_like($wait_status) -- end THIS process the way the SBCL child ended.
+#
+# A wrapper that runs the program as a child (./runpcl, tools/pclperl-for-tests)
+# stands in for `perl` to whoever started it, and perl's caller reads a signal
+# death as `$? & 127` (task #2107, s494g).  `exit(128 + N)` is NOT that: it is
+# an ordinary exit whose code happens to be 128 + N, so a fresh_perl row that
+# asks `$? & 127` read 0.  So a signal death is re-raised on this process with
+# the default disposition, after flushing what this wrapper has printed.  The
+# `exit 128 + N` after the kill is reached only for a signal whose default
+# action does not terminate (CHLD, WINCH, CONT ...), where a shell's own
+# convention is the least surprising answer.  The core-dump bit is ignored.
+# The wait status must be the SBCL process's OWN: run it as `exec sbcl ...`
+# under /bin/sh, or dash reports a signal death as an exit of 128 + N.
+sub exit_like {
+    my ($st) = @_;
+    my $sig = $st & 127;
+    if ($sig) {
+        require Config;
+        require IO::Handle;
+        my @names = split ' ', $Config::Config{sig_name};
+        STDOUT->flush;
+        STDERR->flush;
+        $SIG{$names[$sig]} = 'DEFAULT' if defined $names[$sig];
+        kill $sig, $$;
+        exit 128 + $sig;
+    }
+    exit(($st >> 8) & 0xFF);
 }
 
 1;
