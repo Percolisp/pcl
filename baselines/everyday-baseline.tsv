@@ -44,6 +44,6 @@ modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not im
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/exporter-tags-lib	DIFF	2	#2008 an exported SCALAR is imported as a copy, not an alias
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
-programs/nested-eval-errors	DIFF	3	#2103 an rvalue deref of undef under `strict refs` does not die
+programs/nested-eval-errors	DIFF	3	#2103 `@$undef` as an rvalue dies only under `strict refs` (strict-DEPENDENT, measured s495f -- strict refs is unenforced) + #1554 $SIG{__DIE__} is never invoked
 programs/resource-idioms	DIFF	1	#2006 (b) a lexical filehandle is not closed at scope exit
 programs/tied-scalar-hash	DIFF	2	#155 tie on HASH is announced, not implemented
