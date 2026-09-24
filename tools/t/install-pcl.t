@@ -38,7 +38,7 @@ my $inst = "$root/tools/install-pcl";
 
 plan skip_all => "install-pcl not executable" unless -x $inst;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
-plan tests => 57;
+plan tests => 60;
 
 my $prefix = tempdir(CLEANUP => 1);
 
