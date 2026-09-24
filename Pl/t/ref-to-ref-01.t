@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 45;
+plan tests => 47;
 
 sub run_cl {
     my ($code) = @_;
@@ -382,3 +382,33 @@ test_cl('reftype still separates SCALAR from REF (the #1619 answer is intact)',
   . 'my $bs = bless \(my $p = 7), "S"; my $br = bless \(my $q = {}), "S";'
   . 'print reftype($bs), " ", reftype($br), "\n";',
     "SCALAR REF REF\nSCALAR REF\n");
+
+# Task #2008 (s495f): `\${EXPR}` is a reference to the PLACE the deref names.
+# A SYMBOLIC name gives a ref to the package CELL (perl's Exporter builds every
+# scalar export as `*{"caller::x"} = \${"P::x"}`, so a copy made an imported
+# scalar a second variable), vivifying it; a HARD ref gives a ref to its own
+# referent (`\${$r} == $r`).  Expected text probed on perl 5.40.3.
+# INVERSE GUARDS: a capture name keeps its VALUE (row 5 of the probe is the
+# pre-existing read-only miss, not asserted here), a non-scalar referent still
+# dies, and `local` on the aliased cell behaves as perl's glob-slot local.
+test_cl('\\${"name"} is a ref to the package cell; \\${$ref} to the referent (#2008)',
+    'no strict "refs"; our $g = 7;'
+  . 'my $sym = \${"main::g"}; $$sym = 9; print "a $g ", ($sym == \$g ? "same" : "diff"), "\n";'
+  . 'my $n = "main::g"; my $s2 = \${$n}; $$s2 = 11; print "b $g\n";'
+  . 'my $nv = \${"nosuchvar_x"}; $$nv = 3; print "c $main::nosuchvar_x ", ($nv == \$main::nosuchvar_x ? "same" : "diff"), "\n";'
+  . 'package Other; our $y = 10; package main;'
+  . '*main::x = \${"Other::y"}; our $x; $x = 2; print "d $Other::y "; $Other::y = 7; print "$x\n";'
+  . 'my $v = 5; my $r17 = \${\$v}; $$r17 = 6; my $r = \$v; print "e $v ", (\${$r} == $r ? "same" : "diff"), "\n";'
+  . 'my %h = (a => 1); my $he = \$h{a}; my $h2 = \$$he; $$h2 = 4; print "f $h{a}\n";'
+  . 'my $aref = [1]; print "g ", (eval { my $z = \${$aref}; 1 } ? "lived" : "died"), "\n";',
+    "a 9 same\nb 11\nc 3 same\nd 2 7\ne 6 same\nf 4\ng died\n");
+
+test_cl('an exported SCALAR is an alias, through Exporter (#2008)',
+    'BEGIN { package EV; use Exporter "import"; our @EXPORT_OK = qw($Scale @List get_scale set_scale);'
+  . ' our $Scale = 10; our @List = (1, 2); sub get_scale { $Scale } sub set_scale { $Scale = shift }'
+  . ' $INC{"EV.pm"} = 1; }'
+  . 'use EV qw($Scale @List get_scale set_scale);'
+  . '$Scale = 2; print get_scale(), " "; set_scale(7);'
+  . 'print "$Scale ", (\$Scale == \$EV::Scale ? "aliased" : "COPY"), " ";'
+  . '{ local $Scale = 50; print get_scale(), " "; } print get_scale(), " ", eval(q{ $Scale + 1 }), "\n";',
+    "2 7 aliased 7 7 8\n");

@@ -272,7 +272,7 @@ my %FAMILY;
   'refaliasing' => [qw(p-alias-scalar-target p-alias-array-target
                        p-alias-hash-target p-alias-code-target p-alias-hash-slot
                        p-alias-array-slot p-alias-array-elements)],
-  'reference' => [qw(p-vector-append p-backslash p-backslash-sub p-backslash-sub-ref
+  'reference' => [qw(p-vector-append p-backslash p-backslash-cast-$ p-backslash-sub p-backslash-sub-ref
                      p-backslash-list p-arylen-ref p-substr-ref p-pos-ref
                      p-vec-ref p-substr-lvalue-cell p-pos-lvalue-cell
                      p-vec-lvalue-cell p-arylen-lvalue-cell p-refgen-list

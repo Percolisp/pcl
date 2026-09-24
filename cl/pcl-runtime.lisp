@@ -294,7 +294,7 @@
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
    #:p-alias-code-target #:p-alias-hash-slot #:p-alias-array-slot
    #:p-alias-array-elements
-   #:p-backslash #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-arylen-lvalue-cell #:p-refgen-list #:p-vector-append #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
+   #:p-backslash #:p-backslash-cast-$ #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-arylen-lvalue-cell #:p-refgen-list #:p-vector-append #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -25487,6 +25487,46 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((p-box-p val)
        (box-set val new-value))
       (t (error "Cannot dereference non-reference: ~A" inner)))))
+
+(defun %p-symref-cell (name-str site)
+  "The package CELL — the box itself — that the symbolic scalar name NAME-STR
+   denotes, vivified as a plain `${\"name\"} = …' write would vivify it; NIL for
+   the names that have no ordinary cell to hand out: perl's read-only
+   regex-result family, the COMPUTED magics ($& $` $' — no value in their
+   symbol at all) and the magics the runtime keeps RAW in their symbol ($1..,
+   $+ …).  Those keep today's `\\' of the VALUE (task #2008)."
+  (unless (or (%p-symref-nul-p name-str site)
+              (%p-symref-read-only-p name-str))
+    (let ((sym (%p-symref-sym name-str "$" t site)))
+      (when (and sym (not (gethash sym *computed-magic-getters*)))
+        (if (boundp sym)
+            (let ((v (symbol-value sym)))
+              (cond ((p-box-p v) v)
+                    ((or (null v) (eq v *p-undef*))
+                     (setf (symbol-value sym) (make-p-box nil)))
+                    (t nil)))
+            (setf (symbol-value sym) (make-p-box nil)))))))
+
+(defun p-backslash-cast-$ (val &optional site)
+  "Perl `\\${EXPR}' — a reference to the PLACE the scalar deref names (task
+   #2008).  A SYMBOLIC name answers a ref to the package cell itself, so
+   `\\${\"P::x\"} == \\$P::x' and a write through it lands in $P::x: perl's
+   own Exporter builds every scalar export with exactly this spelling
+   (`*{\"caller::x\"} = \\${\"P::x\"}'), and answering a ref to a COPY made an
+   imported scalar a second, unrelated variable.  A HARD scalar ref answers
+   a ref to its own REFERENT, so `\\${$r} == $r' and `\\${\\$v}' writes $v
+   (probed 5.40.3 — both made a copy before).  Every other operand — a name
+   with no ordinary cell (%p-symref-cell), a non-scalar referent (whose fatal
+   p-cast-$ raises) — keeps (p-backslash (p-cast-$ VAL SITE)).  The operand is
+   read from the box's RAW slot so a tied one is FETCHed once, by that
+   fallback."
+  (let* ((raw (if (p-box-p val) (p-box-value val) val))
+         (cell (if (stringp raw)
+                   (%p-symref-cell raw site)
+                   (%p-scalar-ref-referent val))))
+    (if cell
+        (p-backslash cell)
+        (p-backslash (p-cast-$ val site)))))
 
 (defun p-hash-deref-= (hash-ref value)
   "Assign to a dereferenced hash: %$ref = (list).

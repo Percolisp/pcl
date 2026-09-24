@@ -3407,6 +3407,20 @@ sub gen_ternary {
 # pl-substr) falls to the generic wrap on both paths, so parity holds by
 # construction.  Never declines (the last decline — the \(RANGE, …)
 # range-mix multi-term — converted via _gen_backslash_multi_term_form).
+# The `\` of an already-generated scalar operand FORM.  `\${EXPR}` asks for
+# the PLACE the deref names, not for its value: a SYMBOLIC name (`\${"P::x"}`,
+# the spelling perl's own Exporter builds every scalar export with) must yield
+# a reference to the package CELL, or the importer aliases a copy (task #2008).
+# p-cast-$ answers the VALUE, and every rvalue read stays on it; only the
+# backslash site changes, to p-backslash-cast-$, which resolves a name to its
+# cell and falls back to (p-backslash (p-cast-$ ...)) for anything else.
+sub _backslash_of {
+  my ($form) = @_;
+  return ['p-backslash-cast-$', @$form[1 .. $#$form]]
+    if ref($form) eq 'ARRAY' && !ref($form->[0]) && $form->[0] eq 'p-cast-$';
+  return ['p-backslash', $form];
+}
+
 sub gen_prefix_op_form {
   my ($self, $node, $node_id, $kids) = @_;
   my $op_node = $self->expr_o->get_a_node($kids->[0]);
@@ -3443,7 +3457,7 @@ sub gen_prefix_op_form {
           $self->expr_o->set_node_context($operand_id, 0);
           my $scalar_form = $self->gen_node_form($operand_id);
           $self->expr_o->set_node_context($operand_id, $saved_ctx);
-          return ['p-backslash', $scalar_form];
+          return _backslash_of($scalar_form);
         }
         if (@$tv_kids > 1) {
           return $self->_gen_backslash_multi_term_form($tv_kids);
@@ -3480,7 +3494,7 @@ sub gen_prefix_op_form {
       # heads were spelled here and there independently before.
       return [$MAGIC_LVALUE_BASE{$head} . '-ref', @rest]
         if $MAGIC_LVALUE_BASE{$head};
-      return [$self->cl_name($op), $operand];
+      return _backslash_of($operand);
     }
     # prefix ++/--: arylen target gets the setter shape (value = new length)
     if ($head eq 'p-array-last-index') {
