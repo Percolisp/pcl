@@ -1034,6 +1034,25 @@ the file transpiles and only that statement dies, when it is reached:
 PCL: format/write report formatting is not supported, at FILE line N
 ```
 
+**`formline PICTURE, LIST` and `$^A`** (s495f, task #2093) follow the same
+ruling: `formline` IS the engine `write` drives, and its product is `$^A`, a
+value the program reads afterwards — so under rule 12's value boundary a call
+**dies**, one trappable line, rather than leaving `$^A` silently empty:
+
+```
+PCL: formline (format/write report formatting) is not supported
+```
+
+`$^A` itself exists as a plain writable global (default `""`).  Sizing, for
+whoever lifts this ruling: the picture language is `@<<<` / `@>>>` / `@|||`
+(justify), `@##.##` / `@0##` (numeric, blank on undef), `@*` / `^*`
+(multi-line), `^<<<` (continuation — it CHOPS the consumed text off the
+caller's variable, so the arguments must arrive as places, not values), `~`
+and `~~` (suppress / repeat a line while any `^` field has text), `...` after
+a `^` field, and `$:` as the break set — more than one agent-hour to do
+against perl-probed rows, and `format`/`write` would then need the
+per-filehandle `$~`/`$^`/`$=`/`$-`/`$%` state on top.
+
 **Rationale:** Perl's report-formatting system is essentially unused in
 modern CPAN code.  No maintained module targets it.
 
@@ -3721,3 +3740,25 @@ version's main loop is `\PM\pM*`, not the `\X` an older one used.  cl-ppcre
 HAS the hook for it — `cl-ppcre:*property-resolver*` — and PCL never sets it;
 `sb-unicode:general-category` is the primitive.  Task #2060 carries the
 measurement.
+
+---
+
+## Builtins ruled out: SysV IPC, `syscall`, `ioctl`, `chroot`, `dbmopen`, `dump`
+
+**Perl behaviour:** `msgctl` `msgget` `msgrcv` `msgsnd`, `semctl` `semget`
+`semop`, `shmctl` `shmget` `shmread` `shmwrite` (System V IPC), `syscall`
+(a raw numbered system call), `ioctl` (a device control request with a packed
+C struct), `chroot` (root only), `dbmopen`/`dbmclose` (a DBM file tied to a
+hash) and `dump` (a core dump for undump) are perl builtins.
+
+**PCL behaviour:** absent.  A call **dies** where it is made
+(`Undefined subroutine &main::NAME called`, one line, trappable by `eval`) —
+never a silent value.  Probed s495f (task #2093): each of them lives in perl
+and dies here; `lstat` on a handle and `readpipe` from the same static list
+work.  `dump` is deliberately NOT made a runtime name: `use Data::Dump
+qw(dump); dump($x)` must keep reaching the imported sub.
+
+**Rationale:** each one exposes a host C interface that has no portable
+answer (struct layouts, syscall numbers, IPC keys) or none at all in a
+garbage-collected image (`dump`).  The IPC family would be a `IPC::SysV`-style shim over libc if a
+program ever needs it.

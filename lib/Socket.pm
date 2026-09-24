@@ -75,17 +75,19 @@ sub INADDR_NONE      { pack 'N', 0xFFFFFFFF }
 
 # --- Address conversion -----------------------------------------------------
 
-# inet_aton(STRING) -> 4-byte packed address (or undef).  Handles dotted-quad
-# ("127.0.0.1") and the literal "localhost"; no DNS resolution (XS-less).
+# inet_aton(STRING) -> 4-byte packed address (or undef).  A dotted quad is
+# packed directly; any other name goes to the host database the way the real
+# Socket's inet_aton does -- through the core gethostbyname (task #2093), so
+# "localhost", /etc/hosts names and DNS all resolve, and a miss is undef.
 sub inet_aton {
     my ($host) = @_;
     return undef unless defined $host;
-    $host = '127.0.0.1' if $host eq 'localhost';
     if ($host =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/) {
         return undef if $1 > 255 || $2 > 255 || $3 > 255 || $4 > 255;
         return pack 'C4', $1, $2, $3, $4;
     }
-    return undef;
+    my $addr = scalar gethostbyname($host);
+    return defined $addr && length($addr) == 4 ? $addr : undef;
 }
 
 # inet_ntoa(PACKED) -> "a.b.c.d"

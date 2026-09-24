@@ -129,7 +129,7 @@ my %OBLIGATION = (
   'p-tie'   => 'tie', 'p-untie' => 'tie', 'p-tied' => 'tie',
   'p-register-overloads' => 'overload',
   # formats — `write` is the only format op PCL has
-  'p-write' => 'formats',
+  'p-write' => 'formats', 'p-formline' => 'formats',
   # XS
   'p-load-extension' => 'xs',
   # I/O: filehandles, directories, glob
@@ -137,11 +137,11 @@ my %OBLIGATION = (
     qw(p-print p-say p-printf p-open p-sysopen p-close p-eof p-tell p-seek
        p-sysseek p-pipe p-select p-binmode p-read p-sysread p-syswrite
        p-fileno p-fcntl p-getc p-readline p-lock p-opendir p-readdir
-       p-closedir p-rewinddir p-glob)),
+       p-closedir p-rewinddir p-telldir p-seekdir p-glob)),
   # processes and the shell
   (map { ($_ => 'process') }
     qw(p-exit p-system p-fork p-waitpid p-wait p-getppid p-kill p-exec
-       p-getpgrp p-setpgrp p-getpriority p-backtick)),
+       p-getpgrp p-setpgrp p-getpriority p-setpriority p-backtick)),
 );
 
 # The assignment heads whose FIRST argument is the write target — used to spot

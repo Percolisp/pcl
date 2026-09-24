@@ -251,7 +251,12 @@
    ;; Socket builtins
    #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
    #:p-send #:p-recv #:p-shutdown #:p-getsockname #:p-getpeername
-   #:p-getprotobyname #:p-getprotobynumber #:p-setsockopt #:p-getsockopt
+   #:p-getprotobyname #:p-getprotobynumber
+   #:p-getprotoent #:p-setprotoent #:p-endprotoent
+   #:p-getservbyname #:p-getservbyport #:p-getservent #:p-setservent #:p-endservent
+   #:p-gethostbyname #:p-gethostbyaddr #:p-gethostent #:p-sethostent #:p-endhostent
+   #:p-getnetbyname #:p-getnetbyaddr #:p-getnetent #:p-setnetent #:p-endnetent
+   #:p-setsockopt #:p-getsockopt
    #:p-truncate #:p-stat #:p-lstat
    ;; File test operators
    #:p--e #:p--d #:p--f #:p--r #:p--w #:p--x #:p--s #:p--z
@@ -263,7 +268,7 @@
    #:_ #:*pcl-stat-cache-path*
    #:p-unlink #:p-lock #:p-fileno #:p-flock #:p-fcntl #:p-getc #:p-readline #:*p-filehandles*
    ;; Directory I/O
-   #:p-opendir #:p-readdir #:p-closedir #:p-rewinddir
+   #:p-opendir #:p-readdir #:p-closedir #:p-rewinddir #:p-telldir #:p-seekdir
    ;; File glob
    #:p-glob
    ;; File/Directory operations
@@ -273,7 +278,8 @@
    #:p-time #:p-times #:p-sleep #:p-alarm #:p-evalbytes #:p-study #:p-reset #:p-vec #:p-vec-set #:p-localtime #:p-gmtime
    ;; Process control
    #:p-exit #:p-system #:p-fork #:p-waitpid #:p-wait #:p-getppid #:p-kill #:p-exec
-   #:p-getpgrp #:p-setpgrp #:p-getpriority
+   #:p-getpgrp #:p-setpgrp #:p-getpriority #:p-setpriority
+   #:p-formline
    #:p-backtick #:p-errno-string #:p-stash
    ;; Group/passwd database
    #:p-getgrent #:p-setgrent #:p-endgrent #:p-getgrgid #:p-getgrnam
@@ -18003,10 +18009,13 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defvar *p-protocols-by-number* nil
   "Protocol NUMBER -> (NAME ALIAS-LIST NUMBER).  NIL until first use.")
 
-(defun %p-protocols-parse-line (line)
-  "One /etc/protocols line -> (NAME ALIAS-LIST NUMBER), or NIL for a blank,
-   comment or malformed line.  Fields are NAME NUMBER [ALIAS...]; a '#' starts
-   a comment anywhere on the line."
+(defvar *p-protocols-list* nil
+  "Every protocol entry in FILE ORDER — what getprotoent walks.")
+
+(defun %p-etc-db-fields (line)
+  "The whitespace-separated fields of one /etc/protocols or /etc/services
+   line; a '#' starts a comment anywhere on the line.  Both files share this
+   one reading (task #2093)."
   (flet ((blankp (c) (or (char= c #\Space) (char= c #\Tab))))
     (let* ((hash (position #\# line))
            (body (if hash (subseq line 0 hash) line))
@@ -18019,28 +18028,40 @@ buffer's fill-pointer; everything else falls back to file-length."
          (let ((end (or (position-if #'blankp body :start start) len)))
            (push (subseq body start end) fields)
            (setf i end))))
-      (setf fields (nreverse fields))
-      (when (>= (length fields) 2)
-        (let ((num (parse-integer (second fields) :junk-allowed t)))
-          (when num
-            (list (first fields) (cddr fields) num)))))))
+      (nreverse fields))))
+
+(defun %p-protocols-parse-line (line)
+  "One /etc/protocols line -> (NAME ALIAS-LIST NUMBER), or NIL for a blank,
+   comment or malformed line.  Fields are NAME NUMBER [ALIAS...]."
+  (let ((fields (%p-etc-db-fields line)))
+    (when (>= (length fields) 2)
+      (let ((num (parse-integer (second fields) :junk-allowed t)))
+        (when num
+          (list (first fields) (cddr fields) num))))))
+
+(defun %p-read-etc-db (path parse-line)
+  "The entries of the /etc database file PATH, in file order, each one
+   PARSE-LINE's answer for a line (NIL lines skipped); '() when the file is
+   missing or unreadable."
+  (let ((entries '()))
+    (handler-case
+        (with-open-file (in path :direction :input :if-does-not-exist nil)
+          (when in
+            (loop for line = (read-line in nil nil)
+                  while line
+                  do (let ((e (funcall parse-line line)))
+                       (when e (push e entries))))))
+      (error () (setf entries '())))
+    (nreverse entries)))
 
 (defun %p-load-protocols ()
   "Fill both protocol tables from /etc/protocols, or from the fallback list
    when that file is missing or unreadable."
   (let ((by-name (make-hash-table :test 'equal))
         (by-number (make-hash-table :test 'eql))
-        (entries '()))
-    (handler-case
-        (with-open-file (in "/etc/protocols" :direction :input
-                            :if-does-not-exist nil)
-          (when in
-            (loop for line = (read-line in nil nil)
-                  while line
-                  do (let ((e (%p-protocols-parse-line line)))
-                       (when e (push e entries))))))
-      (error () (setf entries '())))
-    (setf entries (or (nreverse entries) +p-protocols-fallback+))
+        (entries (or (%p-read-etc-db "/etc/protocols"
+                                     #'%p-protocols-parse-line)
+                     +p-protocols-fallback+)))
     (dolist (e entries)
       ;; perl matches the name or ANY alias, exactly — getprotobyname("TCP")
       ;; hits tcp's alias, getprotobyname("Tcp") misses.  For a number the
@@ -18051,7 +18072,21 @@ buffer's fill-pointer; everything else falls back to file-length."
           (unless (gethash a by-name) (setf (gethash a by-name) e)))
         (unless (gethash number by-number) (setf (gethash number by-number) e))))
     (setf *p-protocols-by-name* by-name
-          *p-protocols-by-number* by-number)))
+          *p-protocols-by-number* by-number
+          *p-protocols-list* entries)))
+
+(defun %p-ent-answer (fields scalar)
+  "The return shape every get*by* / get*ent builtin shares: the list FIELDS
+   in LIST context, SCALAR in scalar context; a miss (FIELDS nil) is the empty
+   list or undef (task #2093 — the protocol pair was its first user)."
+  (if (eq *wantarray* t)
+      (make-array (length fields) :initial-contents fields
+                  :adjustable t :fill-pointer t)
+      (if fields scalar *p-undef*)))
+
+(defun %p-ent-aliases (aliases)
+  "perl's ALIASES field: the alias list joined by single spaces, \"\" if none."
+  (format nil "~{~A~^ ~}" aliases))
 
 (defun %p-protocol-result (entry scalar-slot)
   "perl's return shape: (NAME, ALIASES, NUMBER) in list context; in SCALAR
@@ -18059,19 +18094,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    get the other thing\" (perlfunc) — so SCALAR-SLOT is :number for
    getprotobyname and :name for getprotobynumber.  A miss is the empty list in
    list context, undef in scalar context."
-  (if (eq *wantarray* t)
-      (if entry
-          (make-array 3 :initial-contents
-                      (list (first entry)
-                            (format nil "~{~A~^ ~}" (second entry))
-                            (third entry))
-                      :adjustable t :fill-pointer t)
-          (make-array 0 :adjustable t :fill-pointer t))
-      (if entry
-          (ecase scalar-slot
-            (:number (third entry))
-            (:name (first entry)))
-          *p-undef*)))
+  (%p-ent-answer
+   (and entry
+        (list (first entry) (%p-ent-aliases (second entry)) (third entry)))
+   (and entry
+        (ecase scalar-slot
+          (:number (third entry))
+          (:name (first entry))))))
 
 (defun p-getprotobyname (name)
   "Perl getprotobyname(NAME) — looked up in /etc/protocols by name or alias.
@@ -18086,6 +18115,290 @@ buffer's fill-pointer; everything else falls back to file-length."
   (%p-protocol-result
    (gethash (truncate (to-number number)) *p-protocols-by-number*)
    :name))
+
+(defvar *p-protoent-pos* 0
+  "getprotoent's position in *p-protocols-list*; setprotoent/endprotoent rewind.")
+
+(defun p-getprotoent ()
+  "Perl getprotoent — the next /etc/protocols entry in file order (NAME,
+   ALIASES, NUMBER); scalar context answers the NAME; past the end, the empty
+   list / undef (task #2093)."
+  (unless *p-protocols-by-name* (%p-load-protocols))
+  (let ((e (nth *p-protoent-pos* *p-protocols-list*)))
+    (when e (incf *p-protoent-pos*))
+    (%p-protocol-result e :name)))
+
+(defun p-setprotoent (&optional stayopen)
+  "Perl setprotoent STAYOPEN — rewind getprotoent.  Answers 1, as perl."
+  (declare (ignore stayopen))
+  (setf *p-protoent-pos* 0)
+  1)
+
+(defun p-endprotoent ()
+  "Perl endprotoent — rewind getprotoent.  Answers 1, as perl."
+  (setf *p-protoent-pos* 0)
+  1)
+
+;;; --- getservbyname / getservbyport / getservent ------------------------------
+;;; The protocols approach over /etc/services (task #2093): read once, lazily,
+;;; with the SAME field reader.  An entry is (NAME ALIAS-LIST PORT PROTO); the
+;;; PORT is in HOST order, as perl returns it.
+
+(defvar *p-services* :unloaded
+  "Every /etc/services entry in file order, as a vector; :unloaded until the
+   first call.  An unreadable file is an empty vector — every lookup misses.")
+
+(defvar *p-servent-pos* 0
+  "getservent's position in *p-services*; setservent/endservent rewind.")
+
+(defun %p-services-parse-line (line)
+  "One /etc/services line (NAME PORT/PROTO [ALIAS...]) -> (NAME ALIAS-LIST
+   PORT PROTO), or NIL for a blank, comment or malformed line."
+  (let ((fields (%p-etc-db-fields line)))
+    (when (>= (length fields) 2)
+      (let* ((pp (second fields))
+             (slash (position #\/ pp))
+             (port (and slash (parse-integer pp :end slash :junk-allowed t))))
+        (when port
+          (list (first fields) (cddr fields) port (subseq pp (1+ slash))))))))
+
+(defun %p-services ()
+  "The services vector, loaded at the first use."
+  (when (eq *p-services* :unloaded)
+    (setf *p-services*
+          (coerce (%p-read-etc-db "/etc/services" #'%p-services-parse-line)
+                  'simple-vector)))
+  *p-services*)
+
+(defun %p-service-find (proto match)
+  "The first services entry MATCH accepts whose protocol is PROTO — an empty
+   or undef PROTO accepts any protocol (probed 5.40.3: getservbyname('ssh','')
+   is ssh/tcp).  Names and protocols compare EXACTLY, case included."
+  (let ((p (to-string proto)))
+    (find-if (lambda (e)
+               (and (funcall match e)
+                    (or (string= p "") (string= p (fourth e)))))
+             (%p-services))))
+
+(defun %p-service-result (entry scalar-slot)
+  "(NAME, ALIASES, PORT, PROTO) in list context; the PORT (SCALAR-SLOT :port,
+   a lookup BY NAME) or the NAME (:name) in scalar context."
+  (%p-ent-answer
+   (and entry
+        (list (first entry) (%p-ent-aliases (second entry))
+              (third entry) (fourth entry)))
+   (and entry
+        (ecase scalar-slot
+          (:port (third entry))
+          (:name (first entry))))))
+
+(defun p-getservbyname (name proto)
+  "Perl getservbyname NAME, PROTO — by service name or alias."
+  (let ((n (to-string name)))
+    (%p-service-result
+     (%p-service-find proto (lambda (e) (or (string= n (first e))
+                                            (member n (second e)
+                                                    :test #'string=))))
+     :port)))
+
+(defun p-getservbyport (port proto)
+  "Perl getservbyport PORT, PROTO — PORT in host order, as perl takes it."
+  (let ((pn (truncate (to-number port))))
+    (%p-service-result
+     (%p-service-find proto (lambda (e) (= pn (third e))))
+     :name)))
+
+(defun p-getservent ()
+  "Perl getservent — the next /etc/services entry in file order; scalar
+   context answers the NAME."
+  (let* ((v (%p-services))
+         (e (and (< *p-servent-pos* (length v)) (svref v *p-servent-pos*))))
+    (when e (incf *p-servent-pos*))
+    (%p-service-result e :name)))
+
+(defun p-setservent (&optional stayopen)
+  "Perl setservent STAYOPEN — rewind getservent.  Answers 1, as perl."
+  (declare (ignore stayopen))
+  (setf *p-servent-pos* 0)
+  1)
+
+(defun p-endservent ()
+  "Perl endservent — rewind getservent.  Answers 1, as perl."
+  (setf *p-servent-pos* 0)
+  1)
+
+;;; --- gethostbyname / gethostbyaddr / gethostent ------------------------------
+;;; perl calls the C library's resolver (task #2093), and so does PCL — the
+;;; answers then agree by construction, /etc/hosts quirks and DNS alike.
+;;; struct hostent is POSIX: name, aliases, addrtype, length, addr_list.
+
+(sb-alien:define-alien-type nil
+    (sb-alien:struct %p-hostent
+                     (name (sb-alien:c-string :external-format :latin-1))
+                     (aliases (* (sb-alien:c-string :external-format :latin-1)))
+                     (addrtype sb-alien:int)
+                     (length sb-alien:int)
+                     (addr-list (* (* (sb-alien:unsigned 8))))))
+
+(sb-alien:define-alien-routine ("gethostbyname" %c-gethostbyname)
+    (* (sb-alien:struct %p-hostent))
+  (name (sb-alien:c-string :external-format :latin-1)))
+
+(sb-alien:define-alien-routine ("gethostbyaddr" %c-gethostbyaddr)
+    (* (sb-alien:struct %p-hostent))
+  (addr sb-alien:system-area-pointer)
+  (len sb-alien:unsigned-int)
+  (type sb-alien:int))
+
+(sb-alien:define-alien-routine ("gethostent" %c-gethostent)
+    (* (sb-alien:struct %p-hostent)))
+
+(sb-alien:define-alien-routine ("sethostent" %c-sethostent) sb-alien:void
+  (stayopen sb-alien:int))
+
+(sb-alien:define-alien-routine ("endhostent" %c-endhostent) sb-alien:void)
+
+(defun %p-hostent-list (h accessor)
+  "The NULL-terminated array slot of hostent H, each element passed through
+   ACCESSOR (the element alien) — a list."
+  (let ((arr (sb-alien:slot h accessor)))
+    (if (sb-alien:null-alien arr)
+        '()
+        (loop for i from 0
+              for el = (sb-alien:deref arr i)
+              while (if (eq accessor 'aliases)
+                        el
+                        (not (sb-alien:null-alien el)))
+              collect el))))
+
+(defun %p-hostent-fields (ptr)
+  "hostent* -> perl's list (NAME ALIASES ADDRTYPE LENGTH ADDR...), each ADDR
+   a packed byte string; NIL for a NULL pointer (a miss)."
+  (unless (sb-alien:null-alien ptr)
+    (let* ((h (sb-alien:deref ptr))
+           (len (sb-alien:slot h 'length))
+           (addrs (mapcar (lambda (a)
+                            (let ((s (make-string len)))
+                              (dotimes (j len s)
+                                (setf (char s j)
+                                      (code-char (sb-alien:deref a j))))))
+                          (%p-hostent-list h 'addr-list))))
+      (list* (sb-alien:slot h 'name)
+             (%p-ent-aliases (%p-hostent-list h 'aliases))
+             (sb-alien:slot h 'addrtype)
+             len
+             addrs))))
+
+(defun %p-host-result (fields scalar-slot)
+  "In scalar context the first ADDRESS (:addr, a lookup by name) or the NAME
+   (:name); list context is FIELDS whole."
+  (%p-ent-answer fields
+                 (and fields
+                      (ecase scalar-slot
+                        (:addr (fifth fields))
+                        (:name (first fields))))))
+
+(defun p-gethostbyname (name)
+  "Perl gethostbyname NAME — gethostbyname(3), IPv4, as perl."
+  (%p-host-result (%p-hostent-fields (%c-gethostbyname (to-string name)))
+                  :addr))
+
+(defun p-gethostbyaddr (addr addrtype)
+  "Perl gethostbyaddr ADDR, ADDRTYPE — ADDR a packed byte string."
+  (let* ((s (to-string addr))
+         (v (make-array (length s) :element-type '(unsigned-byte 8))))
+    (dotimes (i (length s))
+      (setf (aref v i) (logand (char-code (char s i)) #xff)))
+    (%p-host-result
+     (%p-hostent-fields
+      (sb-sys:with-pinned-objects (v)
+        (%c-gethostbyaddr (sb-sys:vector-sap v) (length v)
+                          (truncate (to-number addrtype)))))
+     :name)))
+
+(defun p-gethostent ()
+  "Perl gethostent — the next host database entry (gethostent(3)); scalar
+   context answers the NAME."
+  (%p-host-result (%p-hostent-fields (%c-gethostent)) :name))
+
+(defun p-sethostent (&optional (stayopen 0))
+  "Perl sethostent STAYOPEN — rewind the host database.  Answers 1, as perl."
+  (%c-sethostent (if (p-true-p stayopen) 1 0))
+  1)
+
+(defun p-endhostent ()
+  "Perl endhostent — close the host database.  Answers 1, as perl."
+  (%c-endhostent)
+  1)
+
+;;; --- getnetbyname / getnetbyaddr / getnetent ---------------------------------
+;;; The networks database, through the C library as the host family above.
+;;; struct netent is POSIX: name, aliases, addrtype, net (uint32, host order).
+
+(sb-alien:define-alien-type nil
+    (sb-alien:struct %p-netent
+                     (name (sb-alien:c-string :external-format :latin-1))
+                     (aliases (* (sb-alien:c-string :external-format :latin-1)))
+                     (addrtype sb-alien:int)
+                     (net (sb-alien:unsigned 32))))
+
+(sb-alien:define-alien-routine ("getnetbyname" %c-getnetbyname)
+    (* (sb-alien:struct %p-netent))
+  (name (sb-alien:c-string :external-format :latin-1)))
+
+(sb-alien:define-alien-routine ("getnetbyaddr" %c-getnetbyaddr)
+    (* (sb-alien:struct %p-netent))
+  (net (sb-alien:unsigned 32))
+  (type sb-alien:int))
+
+(sb-alien:define-alien-routine ("getnetent" %c-getnetent)
+    (* (sb-alien:struct %p-netent)))
+
+(sb-alien:define-alien-routine ("setnetent" %c-setnetent) sb-alien:void
+  (stayopen sb-alien:int))
+
+(sb-alien:define-alien-routine ("endnetent" %c-endnetent) sb-alien:void)
+
+(defun %p-net-result (ptr scalar-slot)
+  "netent* -> (NAME ALIASES ADDRTYPE NET) in list context; the NET (:net, a
+   lookup by name) or the NAME (:name) in scalar context; NULL is a miss."
+  (let ((fields
+         (unless (sb-alien:null-alien ptr)
+           (let ((n (sb-alien:deref ptr)))
+             (list (sb-alien:slot n 'name)
+                   (%p-ent-aliases (%p-hostent-list n 'aliases))
+                   (sb-alien:slot n 'addrtype)
+                   (sb-alien:slot n 'net))))))
+    (%p-ent-answer fields
+                   (and fields
+                        (ecase scalar-slot
+                          (:net (fourth fields))
+                          (:name (first fields)))))))
+
+(defun p-getnetbyname (name)
+  "Perl getnetbyname NAME — getnetbyname(3)."
+  (%p-net-result (%c-getnetbyname (to-string name)) :net))
+
+(defun p-getnetbyaddr (net addrtype)
+  "Perl getnetbyaddr NET, ADDRTYPE — NET a number in host order."
+  (%p-net-result (%c-getnetbyaddr (logand (truncate (to-number net))
+                                          #xffffffff)
+                                  (truncate (to-number addrtype)))
+                 :name))
+
+(defun p-getnetent ()
+  "Perl getnetent — the next networks entry; scalar context the NAME."
+  (%p-net-result (%c-getnetent) :name))
+
+(defun p-setnetent (&optional (stayopen 0))
+  "Perl setnetent STAYOPEN — rewind the networks database.  Answers 1."
+  (%c-setnetent (if (p-true-p stayopen) 1 0))
+  1)
+
+(defun p-endnetent ()
+  "Perl endnetent — close the networks database.  Answers 1."
+  (%c-endnetent)
+  1)
 
 (defun %p-setsockopt-impl (fh level optname optval)
   "Perl setsockopt(SOCK, LEVEL, OPTNAME, OPTVAL).  Only SO_REUSEADDR (the one real
@@ -19355,6 +19668,41 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl rewinddir — bareword dirhandle is auto-quoted."
   `(%p-rewinddir-impl (%p-fh-arg ,dh)))
 
+(defun %p-open-dh (dh)
+  "The OPEN dirhandle cons DH designates, or nil — the %p-resolve-dh reading
+   plus openness: closedir drops the path entry, so a closed handle is nil."
+  (let ((handle (%p-resolve-dh dh)))
+    (and (consp handle) (%p-dirhandle-path handle) handle)))
+
+(defun %p-telldir-impl (dh)
+  "Perl telldir DIRHANDLE — the current position.  opendir materialises the
+   entry list once and keeps an index into it, so the position IS that index;
+   perl promises only that seekdir on the SAME handle resumes there (task
+   #2093).  Unopened or closed: undef with $! = EBADF, as perl."
+  (let ((handle (%p-open-dh dh)))
+    (if handle
+        (car handle)
+        (progn (%p-io-errno-fail 9) *p-undef*))))
+
+(defmacro p-telldir (dh)
+  "Perl telldir — bareword dirhandle is auto-quoted."
+  `(%p-telldir-impl (%p-fh-arg ,dh)))
+
+(defun %p-seekdir-impl (dh pos)
+  "Perl seekdir DIRHANDLE, POS — resume at a position telldir returned; 1 on
+   an open handle, undef with $! = EBADF otherwise (probed 5.40.3).  A POS past
+   the end is clamped to the end (the next readdir answers undef)."
+  (let ((handle (%p-open-dh dh)))
+    (if handle
+        (let ((i (truncate (to-number pos))))
+          (setf (car handle) (max 0 (min i (length (cdr handle)))))
+          1)
+        (progn (%p-io-errno-fail 9) *p-undef*))))
+
+(defmacro p-seekdir (dh pos)
+  "Perl seekdir — bareword dirhandle is auto-quoted."
+  `(%p-seekdir-impl (%p-fh-arg ,dh) ,pos))
+
 ;;; ============================================================
 ;;; File Glob
 ;;; ============================================================
@@ -20337,6 +20685,14 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl write — a bareword filehandle in the slot is a NAME (#1032)."
   (if fh `(%p-write-impl (%p-fh-arg ,fh)) `(%p-write-impl)))
 
+(defun p-formline (picture &rest args)
+  "Perl formline PICTURE, LIST — the ENGINE of format/write, and ruled with
+   them (docs/not-supported.md, the format section; task #2093).  Its product
+   is $^A, a VALUE the program goes on to read, so the missing case DIES (rule
+   12's value boundary) — one tidy, trappable line, never an empty $^A."
+  (declare (ignore picture args))
+  (p-die (format nil "PCL: formline (format/write report formatting) is not supported~%")))
+
 (defun p-exit (&optional code)
   "Perl exit - terminate program with exit code.
    exit during the COMPILE phase (inside BEGIN/UNITCHECK/CHECK) still runs
@@ -20505,6 +20861,22 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when (= r -1)
         (%pcl-save-errno))
       r)))
+
+(sb-alien:define-alien-routine ("setpriority" %c-setpriority) sb-alien:int
+  (which sb-alien:int)
+  (who sb-alien:int)
+  (prio sb-alien:int))
+
+(defun p-setpriority (which who priority)
+  "Perl setpriority WHICH, WHO, PRIORITY — setpriority(2) (task #2093).
+   Answers 1 on success, 0 with $! set on failure (probed 5.40.3: lowering
+   the nice value unprivileged is EACCES, a bad WHICH is EINVAL)."
+  (let ((wh (truncate (to-number which)))
+        (wo (truncate (to-number who)))
+        (pr (truncate (to-number priority))))
+    (if (zerop (%c-setpriority wh wo pr))
+        1
+        (progn (%pcl-save-errno) 0))))
 
 (defun p-kill (signal &rest pids)
   "Perl kill SIGNAL, LIST - send SIGNAL to each PID.  SIGNAL may be a number or
@@ -20701,7 +21073,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-1780"
+(defparameter *pcl-cache-generation* "v2-1980"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

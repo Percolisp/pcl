@@ -169,10 +169,14 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   string-concat study sub sub-defined sub-exists subst substr super-call sysread sysseek system syswrite
   socket socketpair bind connect listen accept send recv shutdown getsockname getpeername
   getprotobyname getprotobynumber setsockopt getsockopt
+  getprotoent setprotoent endprotoent getservbyname getservbyport getservent
+  setservent endservent gethostbyname gethostbyaddr gethostent sethostent endhostent
+  getnetbyname getnetbyaddr getnetent setnetent endnetent
+  telldir seekdir setpriority
   tell tie tie-proxy tie-proxy-p tie-proxy-saved-value tie-proxy-tie-obj tied time times tr
   truncate typeglob typeglob-name typeglob-p typeglob-package uc ucfirst umask undef undef-sub unless
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
-  while write xor ||
+  while write formline xor ||
   overloaded overload-strval
   __pcl_set_prototype
 );
@@ -218,6 +222,9 @@ sub _name_is_declared_sub {
 my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
   reverse localtime gmtime caller unpack each splice readdir
   getprotobyname getprotobynumber readpipe stat lstat
+  getprotoent getservbyname getservbyport getservent
+  gethostbyname gethostbyaddr gethostent
+  getnetbyname getnetbyaddr getnetent
 );
 
 # Only exceptions that need different CL names than p-<perl-op>

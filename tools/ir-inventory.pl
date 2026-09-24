@@ -237,14 +237,21 @@ my %FAMILY;
                      p-alias-eval-cell *p-eval-lex-alist* p-exception
                      p-exception-object p-die p-warn p-evalbytes)],
   'io' => [qw(p-print p-say p-printf p-open p-sysopen p-close p-eof p-tell
-              p-seek p-sysseek p-pipe p-select p-write p-binmode p-read
+              p-seek p-sysseek p-pipe p-select p-write p-formline p-binmode p-read
               p-sysread p-syswrite p-fileno p-flock p-fcntl p-getc p-readline
               *p-filehandles* p-lock p-install-data-handle)],
-  'directory-io' => [qw(p-opendir p-readdir p-closedir p-rewinddir)],
+  'directory-io' => [qw(p-opendir p-readdir p-closedir p-rewinddir
+                         p-telldir p-seekdir)],
   'socket' => [qw(p-socket p-socketpair p-bind p-connect p-listen p-accept
                   p-send p-recv p-shutdown p-getsockname p-getpeername
                   p-getprotobyname p-getprotobynumber p-setsockopt
-                  p-getsockopt)],
+                  p-getsockopt
+                  p-getprotoent p-setprotoent p-endprotoent
+                  p-getservbyname p-getservbyport p-getservent p-setservent
+                  p-endservent p-gethostbyname p-gethostbyaddr p-gethostent
+                  p-sethostent p-endhostent
+                  p-getnetbyname p-getnetbyaddr p-getnetent p-setnetent
+                  p-endnetent)],
   'filetest' => [qw(_ *pcl-stat-cache-path*)],
   'file-ops' => [qw(p-unlink p-glob p-chdir p-set_up_inc p-mkdir p-rmdir
                     p-getcwd p-cwd p-rename p-chmod p-umask p-link p-symlink
@@ -253,7 +260,8 @@ my %FAMILY;
   'misc-builtin' => [qw(p-study p-reset p-pos)],
   'bit-string' => [qw(p-vec p-vec-set)],
   'process' => [qw(p-exit p-system p-fork p-waitpid p-wait p-getppid p-kill
-                   p-exec p-getpgrp p-setpgrp p-getpriority)],
+                   p-exec p-getpgrp p-setpgrp p-getpriority
+                   p-setpriority)],
   'command-capture' => [qw(p-backtick)],
   'user-db' => [qw(p-getgrent p-setgrent p-endgrent p-getgrgid p-getgrnam
                    p-getpwent p-setpwent p-endpwent p-getpwuid p-getpwnam

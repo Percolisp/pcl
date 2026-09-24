@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **713**
+* names exported: **735**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 713
+* with a machine-readable `Contract:` tail: **69** of 735
 * UNCLASSIFIED (no family rule matches): **7**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -255,7 +255,7 @@ ir-spec §10 row **introspection** — §7; `p-caller` returns package but file/
 | `p-undef-sub` | function | `(pkg-str name-str)` | — | — | — | — | — | — | — |
 | `pl-__SUB__` | function | `nil` | — | — | — | — | — | — | — |
 
-## io (25)
+## io (26)
 
 ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument.  2-arg `p-open` parses pipe/dup modes; `p-close` on a pipe handle reaps the child and sets `$?`
 
@@ -268,6 +268,7 @@ ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-ope
 | `p-fcntl` | macro | `(fh func arg)` | — | — | — | — | — | — | — |
 | `p-fileno` | macro | `(fh)` | — | — | — | — | — | — | — |
 | `p-flock` | macro | `(fh op)` | — | — | — | — | — | — | — |
+| `p-formline` | function | `(picture &rest args)` | — | — | — | — | — | — | — |
 | `p-getc` | macro | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-install-data-handle` | function | `(handle text)` | insensitive | none | none | no | no | no | none |
 | `p-lock` | function | `(x)` | — | — | — | — | — | — | — |
@@ -499,7 +500,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-until` | macro | `(condition &body body)` | — | — | — | — | — | — | — |
 | `p-while` | macro | `(condition &rest body-and-keys)` | — | — | — | — | — | — | — |
 
-## directory-io (4)
+## directory-io (6)
 
 *No ir-spec §10 row.*  opendir/readdir/closedir/rewinddir
 
@@ -509,6 +510,8 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-opendir` | macro | `(dh &rest args)` | — | — | — | — | — | — | — |
 | `p-readdir` | macro | `(dh)` | — | — | — | — | — | — | — |
 | `p-rewinddir` | macro | `(dh)` | — | — | — | — | — | — | — |
+| `p-seekdir` | macro | `(dh pos)` | — | — | — | — | — | — | — |
+| `p-telldir` | macro | `(dh)` | — | — | — | — | — | — | — |
 
 ## dynamic-scope (18)
 
@@ -886,7 +889,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-eval-always` | macro | `(&body body)` | — | — | — | — | — | — | — |
 | `p-run-compile-phase-blocks` | function | `nil` | — | — | — | — | — | — | — |
 
-## process (11)
+## process (12)
 
 *No ir-spec §10 row.*  fork/exec/wait/kill/exit and the process ids
 
@@ -900,6 +903,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-getpriority` | function | `(which who)` | — | — | — | — | — | — | — |
 | `p-kill` | function | `(signal &rest pids)` | — | — | — | — | — | — | — |
 | `p-setpgrp` | function | `(&optional pid pgrp)` | — | — | — | — | — | — | — |
+| `p-setpriority` | function | `(which who priority)` | — | — | — | — | — | — | — |
 | `p-system` | function | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-wait` | function | `nil` | — | — | — | — | — | — | — |
 | `p-waitpid` | function | `(pid &optional (flags 0))` | — | — | — | — | — | — | — |
@@ -980,7 +984,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-sig-rest-array` | function | `(args start)` | — | — | — | — | — | — | — |
 | `p-sig-rest-hash` | function | `(args start)` | — | — | — | — | — | — | — |
 
-## socket (15)
+## socket (33)
 
 *No ir-spec §10 row.*  the socket builtins
 
@@ -989,14 +993,32 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-accept` | macro | `(newfh serverfh)` | — | — | — | — | — | — | — |
 | `p-bind` | macro | `(fh name)` | — | — | — | — | — | — | — |
 | `p-connect` | macro | `(fh name)` | — | — | — | — | — | — | — |
+| `p-endhostent` | function | `nil` | — | — | — | — | — | — | — |
+| `p-endnetent` | function | `nil` | — | — | — | — | — | — | — |
+| `p-endprotoent` | function | `nil` | — | — | — | — | — | — | — |
+| `p-endservent` | function | `nil` | — | — | — | — | — | — | — |
+| `p-gethostbyaddr` | function | `(addr addrtype)` | — | — | — | — | — | — | — |
+| `p-gethostbyname` | function | `(name)` | — | — | — | — | — | — | — |
+| `p-gethostent` | function | `nil` | — | — | — | — | — | — | — |
+| `p-getnetbyaddr` | function | `(net addrtype)` | — | — | — | — | — | — | — |
+| `p-getnetbyname` | function | `(name)` | — | — | — | — | — | — | — |
+| `p-getnetent` | function | `nil` | — | — | — | — | — | — | — |
 | `p-getpeername` | macro | `(fh)` | — | — | — | — | — | — | — |
 | `p-getprotobyname` | function | `(name)` | — | — | — | — | — | — | — |
 | `p-getprotobynumber` | function | `(number)` | — | — | — | — | — | — | — |
+| `p-getprotoent` | function | `nil` | — | — | — | — | — | — | — |
+| `p-getservbyname` | function | `(name proto)` | — | — | — | — | — | — | — |
+| `p-getservbyport` | function | `(port proto)` | — | — | — | — | — | — | — |
+| `p-getservent` | function | `nil` | — | — | — | — | — | — | — |
 | `p-getsockname` | macro | `(fh)` | — | — | — | — | — | — | — |
 | `p-getsockopt` | macro | `(fh level optname)` | — | — | — | — | — | — | — |
 | `p-listen` | macro | `(fh queue)` | — | — | — | — | — | — | — |
 | `p-recv` | macro | `(fh buf len flags)` | — | — | — | — | — | — | — |
 | `p-send` | macro | `(fh msg flags &optional to)` | — | — | — | — | — | — | — |
+| `p-sethostent` | function | `(&optional (stayopen 0))` | — | — | — | — | — | — | — |
+| `p-setnetent` | function | `(&optional (stayopen 0))` | — | — | — | — | — | — | — |
+| `p-setprotoent` | function | `(&optional stayopen)` | — | — | — | — | — | — | — |
+| `p-setservent` | function | `(&optional stayopen)` | — | — | — | — | — | — | — |
 | `p-setsockopt` | macro | `(fh level optname optval)` | — | — | — | — | — | — | — |
 | `p-shutdown` | macro | `(fh how)` | — | — | — | — | — | — | — |
 | `p-socket` | macro | `(fh domain type protocol)` | — | — | — | — | — | — | — |
