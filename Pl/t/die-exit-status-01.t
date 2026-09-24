@@ -43,7 +43,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 28;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -138,4 +138,34 @@ my @end_cases = (
 for my $c (@end_cases) {
     my ($perl, $pcl) = out_and_status(@$c);
     is($pcl, $perl, "END phase / \$? $c->[0] matches perl");
+}
+
+# AN UNCAUGHT OBJECT DIE PRINTS THE OBJECT'S PERL STRINGIFICATION (task
+# #2108 (a), s494g): `HASH(0x…)`, `Class=HASH(0x…)`, or its `""` overload —
+# with NO newline added, as perl — where PCL printed the Lisp printer's
+# eight-line `#S(p-box …)`.  An overload that itself dies prints that die.
+# Addresses are normalised; stderr AND status must agree with perl.
+sub stderr_status_of {
+    my ($tag, $body) = @_;
+    my $src = "$workdir/$tag.pl";
+    open(my $s, '>', $src) or die; print {$s} $body; close $s;
+    my $perl = `$^X $src 2>&1 >/dev/null`; my $ps = $? >> 8;
+    my $cl_code = `$pl2cl $src 2>/dev/null`;
+    my $cl_file = "$workdir/$tag.lisp";
+    open(my $c, '>', $cl_file) or die; print {$c} $cl_code; close $c;
+    my $pcl = `sbcl @sbcl_rt --load $cl_file 2>&1 >/dev/null`; my $cs = $? >> 8;
+    s/0x[0-9a-f]+/0xADDR/g for $perl, $pcl;
+    # A plain `--load` prefixes SBCL's loader context (#1595 / #1970, not this
+    # row's subject); tools/pclperl-for-tests strips the same two pieces.
+    $pcl =~ s/^While evaluating the form starting at line[^\n]*\n//;
+    $pcl =~ s/^\s+of #P"[^"]*"://;
+    return ("$ps|$perl", "$cs|$pcl");
+}
+for my $c (['12-die-hashref', 'die { code => 42 };'],
+           ['13-die-overload', 'package E; use overload q{""} => sub { "E: custom failure" }; package main; die bless {}, "E";'],
+           ['14-die-plain-obj', 'die bless [], "Plain";'],
+           ['15-die-overload-dies', 'package E; use overload q{""} => sub { die "inner\n" }; package main; die bless {}, "E";'],
+           ['16-die-coderef', 'die sub { 1 };']) {
+    my ($perl, $pcl) = stderr_status_of(@$c);
+    is($pcl, $perl, "uncaught object die $c->[0]: stderr text and status are perl's");
 }

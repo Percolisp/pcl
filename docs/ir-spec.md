@@ -3202,12 +3202,55 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `$ENV{_PCL_RUNTIME_}` | **SYNTHETIC, set by the runtime — the host's own "am I here?" signal** (task #1529).  One key, a closed set of one.  Its value is the host's VERSION string (PCL's is what `pcl --version` prints).  It is present in `$ENV{…}`, `exists`, `keys`, `values`, `each` and every `%ENV` copy, and ABSENT from the real process environment, so **a child process does not inherit it** — that is the contract, not an implementation detail: `$^X` names real perl (§9), so a perl child that saw the key would conclude it runs under the host.  A host child sets its own.  A REAL environment variable of that name always WINS over the synthetic entry, which is what makes writing to it an ordinary `%ENV` write (it exports, as `%ENV` always does); `delete` (and a wholesale `%ENV = LIST`, and `local $ENV{_PCL_RUNTIME_}` for its extent) removes it for the rest of the process.  **A translator that emits for a different host MUST rename it** — the key asserts which runtime is executing. |
 | `$!` | last OS error (dualvar: numifies to errno, stringifies to message).  **Also a CANONICAL MAGIC BOX** — see the rule below. |
 | `%!` | the errno hash: one key per platform errno NAME, each value magic.  `$!{NAME}` is the errno NUMBER when `$!` holds that errno and `0` otherwise — never `1`, and always defined; a STORE is fatal (`ERRNO hash is read only!`), as Errno's tied hash is.  `keys`/`values`/`each`/`exists` are ordinary hash reads of a REAL table. |
-| `%SIG` | signal handlers. **A `__WARN__` handler is NOT RE-ENTERED** (task #1223): perl calls it once and a `warn` raised INSIDE it takes the default action — without that rule the commonest handler idiom in perl's own suite, `… else { warn $_[0] }`, is an infinite loop. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators. |
+| `%SIG` | signal handlers. **A `__WARN__` handler is NOT RE-ENTERED** (task #1223): perl calls it once and a `warn` raised INSIDE it takes the default action — without that rule the commonest handler idiom in perl's own suite, `… else { warn $_[0] }`, is an infinite loop. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators, and its NUMBERS are the platform's (sb-unix constants by name).  **A signal key's value is MAGIC: storing into it installs the OS disposition** — the contract is "The %SIG contract" below. |
 | `$.` | line number of the last-read filehandle (per-handle) |
 | `$?` | the RAW WAIT STATUS of the last child: `exit << 8`, or the signal number in the low byte when it was killed -- perl's own encoding, never a bare exit code (normative, s492c, task #2101).  **Every path that reaps a child writes it**: `system`, a pipe-handle `close`, `wait`/`waitpid` AND ``` `cmd` ``` / `qx` / `readpipe` in BOTH contexts.  A host that leaves it untouched after a command capture is SILENT-WRONG in the commonest failure check a script has (`my $out = `cmd`; die if $?;`) -- the value then belongs to some earlier `system`, or to nothing.  A shell that cannot be STARTED gives perl's `-1` with `$!` set (see 7.5b).  **`$?` is a WRITABLE INTEGER variable** (normative, s495f, tasks #2009/#2031): `$? = N`, compound and list assignment and a write through `\$?` all store, and a store keeps perl's integer (`$? = "7abc"` reads 7, `$? = 3.7` reads 3).  The runtime's own writers store into whatever `$?` is BOUND to, so inside `local $?` a child's status lands in the local value and the outer one returns at scope exit.  **The END phase reads and sets it**: END blocks see the status the program is leaving with (`exit N`'s N, an uncaught die's status, 0 at the natural end even after a failed `system`), each (LIFO) sees the previous block's assignment, and the process then exits with `$? & 255` -- `END { $? = 5 } exit 3` exits 5. |
 | `$$` | the CURRENT process id, REFRESHED in a forked child (normative, s492c, task #2094).  A host that copies it at image start leaves the parent's pid in the child, where `kill SIG, $$` then signals the PARENT and `"/tmp/x.$$"` collides between the two -- silent, and the sort of bug a program only meets in production.  Both fork paths (the bare `fork` and the pipe-open fork) write it. |
 | `$a`, `$b` | sort comparator operands (per-package defvars) |
 | `$\`, `$,` | output record / field separator. **Both are UNDEF until the program sets one** (task #465) — the separator defaults are asymmetric and a translator must copy the asymmetry, not normalize it: `$/` is `"\n"`, `$;` is `"\034"`, `$"` is `" "`, `$!` is the errno dualvar, all DEFINED. An empty string here is invisible on the write side and wrong on the read side (`defined($,)`, `$\ // ","`, `length($\)`), which is what made it silent. `print` treats undef as "print nothing between/after": its readers test *non-empty string*, never `defined`. **`say` appends `"\n"` INSTEAD of `$\`, never as well as it** (task #500), while `$,` still separates its arguments; `printf` appends neither. perl does not *localize* `$\` over the call — an overload or tie handler that runs while an argument stringifies still reads the program's value (probed s442d) — so the terminator is passed to the one writer (`%p-write-list`), not bound over it. |
+
+**The %SIG contract** (normative, s494g, task #2107).  A host that treats
+`%SIG` as a plain hash runs no handler but ALRM's, lets `^C` print its own
+backtrace, and EXITS 0 on SIGTERM — a supervisor then reads success.
+
+- **A store into a signal key installs the disposition at once.**  A code ref
+  or a sub NAME installs one dispatcher; `"IGNORE"` ignores; `undef`, `""`,
+  `"DEFAULT"`, `delete $SIG{NAME}` and the end of `local $SIG{NAME}` restore
+  the DEFAULT.  An unqualified name is stored as `main::NAME` (always `main`,
+  whatever the current package); `IGNORE`, `DEFAULT`, `""` and a name holding
+  `::` or `'` are stored as given.  The dispatcher reads the handler AT
+  DELIVERY, so reassigning needs no re-install, and calls it with the signal
+  NAME as `$_[0]` (the canonical name: `CHLD`, not `CLD`).  A name that
+  denotes no defined sub does nothing.
+- **Perl's defaults, not the host's.**  With no handler, INT, TERM, ALRM and
+  the rest end the process BY THE SIGNAL (the parent sees `$? & 127`), with no
+  END blocks and no buffer flush, as perl; PIPE's default is also death, so a
+  producer writing into a closed pipe (`prog | head -1`) stops.  With
+  `$SIG{PIPE} = "IGNORE"` the write returns false and `$!` is EPIPE.  An
+  INHERITED ignore (`nohup`'s HUP) reads back as `"IGNORE"` and stays in force.
+- **Delivery.**  A handler runs as soon as the program is at a safe point; a
+  signal a process sends ITSELF (`kill USR1 => $$`) is handled before `kill`
+  returns.  A handler that RETURNS ends a running `sleep` early (it returns the
+  seconds slept); one that DIES unwinds to the nearest `eval` from wherever the
+  program was.  A signal arriving inside a handler waits until it returns.
+  Handlers survive `fork` in both processes; a program started by `system`,
+  qx or `exec` starts with default dispositions.
+- **CHLD** is also the host's own (child bookkeeping): the Perl handler runs
+  AFTER the host's, and is held back while `system` / qx wait for their
+  child, so a reaping handler (`waitpid(-1, WNOHANG)`) never takes their
+  status.
+- **Runtime-owned signals.**  The signals the host itself catches at start-up
+  (derived from the running image, never listed: on SBCL 2.6 / Linux ILL TRAP
+  ABRT BUS FPE SEGV USR2 URG — USR2 is the garbage collector's stop signal)
+  cannot take a Perl handler: the store is kept and readable, the handler is
+  NOT installed, and one `PCL: %SIG: …` line says so (docs/not-supported.md
+  "%SIG").
+
+```perl
+$SIG{TERM} = sub { unlink $lock; exit 0 };   # (p-setf (p-gethash %SIG "TERM") (lambda …))
+$SIG{HUP}  = "reload";                        # reads back "main::reload"
+{ local $SIG{ALRM} = sub { die "timeout\n" }; alarm 5; ...; alarm 0 }
+```
 
 Regex match state is *global-with-dynamic-save*, exactly Perl: a failed
 match leaves `$1` from the previous successful match intact.

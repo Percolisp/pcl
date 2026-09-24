@@ -2356,7 +2356,7 @@
    P-BOX (not catchable in Perl terms), and a SILENT wrong answer where the
    site defaulted (`keys %$aryref` returned the empty list).  CLAUDE.md rule
    12: a dispatch that cannot handle a value says so loudly."
-  (error "Not ~A ~A reference" (if (char= (char kind 0) #\A) "an" "a") kind))
+  (%p-die-error nil "Not ~A ~A reference" (if (char= (char kind 0) #\A) "an" "a") kind))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Read-only arrays — Internals::SvREADONLY(@a, 1)   (task #159)
@@ -2399,7 +2399,7 @@
   "Perl's fatal for a write to read-only storage, byte for byte — push.t,
    unshift.t, splice.t and sort.t all match /^Modification of a read-only
    value/."
-  (error "Modification of a read-only value attempted"))
+  (%p-die-error nil "Modification of a read-only value attempted"))
 
 (declaim (inline %p-check-array-writable))
 (defun %p-check-array-writable (a)
@@ -5046,7 +5046,7 @@
                         (let ((n (to-number val)))
                           (cond
                             ((%pcl-nan-p n) n)
-                            ((zerop n) (error "Can't take log of 0"))
+                            ((zerop n) (%p-die-error nil "Can't take log of 0"))
                             (t (log (coerce n 'double-float)))))))
 
 (defun p-sqrt (val)
@@ -5055,7 +5055,7 @@
                         (let ((n (to-number val)))
                           (cond
                             ((%pcl-nan-p n) n)
-                            ((minusp n) (error "Can't take sqrt of ~A" n))
+                            ((minusp n) (%p-die-error nil "Can't take sqrt of ~A" n))
                             (t (sqrt (coerce n 'double-float)))))))
 
 ;;; Perl's OWN drand48 (perl 5.20+, [perl #115928]): since that change perl
@@ -5214,8 +5214,8 @@
    and `delete` all answer quietly.  PCL used to DROP the write and carry on,
    so the program read the old value back — CLAUDE.md rule 12, and the #138
    silent-wrong one level down."
-  (error "Modification of non-creatable array value attempted, subscript ~D"
-         (truncate (to-number idx))))
+  (%p-die-error nil "Modification of non-creatable array value attempted, subscript ~D"
+                (truncate (to-number idx))))
 
 ;;; ============================================================
 ;;; String Operators
@@ -5726,7 +5726,7 @@
       (p-warn (format nil "Use of uninitialized value in substr~%")))
     (when oob
       (if replacement
-          (error "substr outside of string")
+          (%p-die-error nil "substr outside of string")
           (progn
             ;; An out-of-range READ is perl's UNDEF, not the empty string it
             ;; clamps to (#1173): `substr("abc",10,2)` and `substr("abc",10)`
@@ -6003,9 +6003,9 @@
   (let ((num (to-number n)))
     (when (floatp num)
       (when #+sbcl (sb-ext:float-infinity-p num) #-sbcl nil
-            (error "Cannot chr ~A" (to-string n)))
+            (%p-die-error nil "Cannot chr ~A" (to-string n)))
       (when #+sbcl (sb-ext:float-nan-p num) #-sbcl nil
-            (error "Cannot chr ~A" (to-string n))))
+            (%p-die-error nil "Cannot chr ~A" (to-string n))))
     (if (< num 0)
         (string #\REPLACEMENT_CHARACTER)                   ; negative → U+FFFD
         (let ((code (truncate num)))
@@ -6033,7 +6033,7 @@
   "Signal error if string contains wide characters (code point > 255)."
   (loop for c across s
         when (> (char-code c) 255)
-        do (error "Wide character in ~A" fname)))
+        do (%p-die-error nil "Wide character in ~A" fname)))
 
 (defun p-hex (str)
   "Perl hex - convert hex string to number.
@@ -6734,8 +6734,8 @@
                                   (when (and peek-has-digit (< peek len)
                                              (char= (char fmt-str peek) #\$))
                                     (when (> peek-n 2147483647)
-                                      (error "Integer overflow in format string for ~A ~A"
-                                             *p-sprintf-caller* fmt-str))
+                                      (%p-die-error nil "Integer overflow in format string for ~A ~A"
+                                                    *p-sprintf-caller* fmt-str))
                                     (setf positional-idx (1- peek-n))
                                     (setf has-positional t)
                                     (setf j (1+ peek))))
@@ -6779,8 +6779,8 @@
                                      ;; Perl dies "Integer overflow" (abs covers the
                                      ;; huge-negative IV_MIN case before the - flip).
                                      (when (> (abs width) 2147483647)
-                                       (error "Integer overflow in format string for ~A ~A"
-                                              *p-sprintf-caller* fmt-str))
+                                       (%p-die-error nil "Integer overflow in format string for ~A ~A"
+                                                     *p-sprintf-caller* fmt-str))
                                      (when (minusp width)
                                        (setf flags (concatenate 'string flags "-"))
                                        (setf width (- width)))))
@@ -6792,8 +6792,8 @@
                                            (incf j))
                                      (when has-digit
                                        (when (> w 2147483647)
-                                         (error "Integer overflow in format string for ~A ~A"
-                                                *p-sprintf-caller* fmt-str))
+                                         (%p-die-error nil "Integer overflow in format string for ~A ~A"
+                                                       *p-sprintf-caller* fmt-str))
                                        (setf width w)))))
                                 ;; Parse precision
                                 (when (and (< j len) (char= (char fmt-str j) #\.))
@@ -6814,8 +6814,8 @@
                                          ;; huge magnitude (even negative) overflows
                                          ;; before the "negative means omitted" rule.
                                          (when (> (abs pv) 2147483647)
-                                           (error "Integer overflow in format string for ~A ~A"
-                                                  *p-sprintf-caller* fmt-str))
+                                           (%p-die-error nil "Integer overflow in format string for ~A ~A"
+                                                         *p-sprintf-caller* fmt-str))
                                          (setf precision (if (minusp pv) nil pv))
                                          (unless pos-idx (incf arg-idx)))))
                                     (t
@@ -6825,8 +6825,8 @@
                                              (setf has-digit t)
                                              (incf j))
                                        (when (and has-digit (> p 2147483647))
-                                         (error "Integer overflow in format string for ~A ~A"
-                                                *p-sprintf-caller* fmt-str))
+                                         (%p-die-error nil "Integer overflow in format string for ~A ~A"
+                                                       *p-sprintf-caller* fmt-str))
                                        (setf precision (if has-digit p 0))))))
                                 ;; Skip size modifiers (l, h, q, L, V, etc.) — Perl's
                                 ;; integer-size flags.  V is Perl's IV/UV-size modifier
@@ -8713,28 +8713,28 @@ per element."
          (inner (unbox wrapper)))
     (if (p-box-p inner)
         inner
-        (error "Assigned value is not a SCALAR reference"))))
+        (%p-die-error nil "Assigned value is not a SCALAR reference"))))
 
 (defun p-alias-array-target (ref)
   "The VECTOR an array reference points at, for `\\@a = REF`."
   (let ((v (p-cast-@ ref)))
     (if (and (vectorp v) (not (stringp v)))
         v
-        (error "Assigned value is not an ARRAY reference"))))
+        (%p-die-error nil "Assigned value is not an ARRAY reference"))))
 
 (defun p-alias-hash-target (ref)
   "The HASH-TABLE a hash reference points at, for `\\%h = REF`."
   (let ((h (p-cast-% ref)))
     (if (hash-table-p h)
         h
-        (error "Assigned value is not a HASH reference"))))
+        (%p-die-error nil "Assigned value is not a HASH reference"))))
 
 (defun p-alias-code-target (ref)
   "The FUNCTION a code reference points at, for `\\&c = REF`."
   (let ((f (unbox ref)))
     (if (functionp f)
         f
-        (error "Assigned value is not a CODE reference"))))
+        (%p-die-error nil "Assigned value is not a CODE reference"))))
 
 (defun p-alias-array-elements (arr refs)
   "`\\(@a) = LIST` — perlref's parenthesized-ARRAY refaliasing: each element
@@ -8751,7 +8751,7 @@ per element."
   (let ((v (p-cast-@ arr))
         (items (%p-flatten-list refs)))
     (unless (and (vectorp v) (not (stringp v)))
-      (error "Not an ARRAY reference"))
+      (%p-die-error nil "Not an ARRAY reference"))
     (%p-check-array-writable v)
     (setf (fill-pointer v) 0)
     (loop for r across items
@@ -8765,7 +8765,7 @@ per element."
   (let ((h (p-cast-% hash))
         (box (p-alias-scalar-target ref)))
     (unless (hash-table-p h)
-      (error "Not a HASH reference"))
+      (%p-die-error nil "Not a HASH reference"))
     (setf (gethash (to-string key) h) box)))
 
 (defun p-alias-array-slot (arr idx ref)
@@ -8774,7 +8774,7 @@ per element."
   (let* ((a (p-cast-@ arr))
          (box (p-alias-scalar-target ref)))
     (unless (and (vectorp a) (not (stringp a)))
-      (error "Not an ARRAY reference"))
+      (%p-die-error nil "Not an ARRAY reference"))
     (let ((n (%p-array-index a idx)))
       (when (< n 0) (%p-non-creatable-index idx))
       (loop while (>= n (length a)) do (vector-push-extend nil a))
@@ -9698,8 +9698,8 @@ per element."
       ;; is a protocol change across p-pre++/p-post++/p-incf.  Measured
       ;; (`$o++` then `$o > 100`: perl big, PCL small) and filed as task #961.
       ((eq fallback t) (values nil nil))
-      (t (error "Operation \"~A\": no method found, argument in overloaded package ~A"
-                op-str cls)))))
+      (t (%p-die-error nil "Operation \"~A\": no method found, argument in overloaded package ~A"
+                       op-str cls)))))
 
 (defun perl-increment (val)
   "Perl ++ semantics: magical string increment for certain strings, numeric otherwise"
@@ -11855,13 +11855,13 @@ create the key on a read-only call, which perl does not."
    an ODD number of leftover args dies, as in perl."
   (cond
     ((< got min)
-     (error "Too few arguments for subroutine '~A' (got ~D; expected ~A~D)"
-            funcname got (if flexible "at least " "") min))
+     (%p-die-error nil "Too few arguments for subroutine '~A' (got ~D; expected ~A~D)"
+                   funcname got (if flexible "at least " "") min))
     ((and max (> got max))
-     (error "Too many arguments for subroutine '~A' (got ~D; expected ~A~D)"
-            funcname got (if flexible "at most " "") max))
+     (%p-die-error nil "Too many arguments for subroutine '~A' (got ~D; expected ~A~D)"
+                   funcname got (if flexible "at most " "") max))
     ((and hash-start (> got hash-start) (oddp (- got hash-start)))
-     (error "Odd name/value argument for subroutine '~A'" funcname))))
+     (%p-die-error nil "Odd name/value argument for subroutine '~A'" funcname))))
 
 (defmacro p-arg-supplied-p (args index)
   "Did the caller supply the INDEX'th positional argument?  This is the ONE
@@ -11924,8 +11924,8 @@ create the key on a read-only call, which perl does not."
    nothing.  Returns the unchanged length in that one legal no-op case."
   (unless (and (vectorp arr) (not (stringp arr)))
     (if (p-box-p arr)
-        (error "Experimental push on scalar is now forbidden")
-        (error "Type of arg 1 to push must be array (not constant item)")))
+        (%p-die-error nil "Experimental push on scalar is now forbidden")
+        (%p-die-error nil "Type of arg 1 to push must be array (not constant item)")))
   (when (%p-push-stores-anything-p items)
     (%p-readonly-modification))
   (length arr))
@@ -14330,11 +14330,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-continue ()
   "Perl continue (given/when) - fall through to next when clause"
-  (error "Can't \"continue\" outside a when block"))
+  (%p-die-error nil "Can't \"continue\" outside a when block"))
 
 (defun p-break ()
   "Perl break (given/when) - exit given block"
-  (error "Can't \"break\" outside a when block"))
+  (%p-die-error nil "Can't \"break\" outside a when block"))
 
 ;;; ============================================================
 ;;; I/O Functions
@@ -14721,7 +14721,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    attached — the class is the only difference, and it is what lets the
    uncaught-die hook tell a perl die from a CL condition.  CLASS is
    p-die-error, or a marker subclass of it that some caller must be able to
-   recognise (p-xs-no-artifact); nil means the plain one."
+   recognise (p-xs-no-artifact); nil means the plain one.
+   It is also how the runtime raises PERL'S OWN run-time fatals (\"Not a HASH
+   reference\", \"Can't call method ... on an undefined value\" — task #2108
+   (b)), so it arms the uncaught-die hook exactly as p-die does: uncaught, they
+   are one line and perl's exit status, not a Lisp backtrace and exit 1."
+  (%p-arm-uncaught-die-hook)
   (error (or class 'p-die-error)
          :format-control control :format-arguments args))
 
@@ -14739,16 +14744,34 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           ((and (integerp child) (/= 0 (logand child 255))) (logand child 255))
           (t 255))))
 
+(defun %p-uncaught-die-text (condition)
+  "The text perl prints for an uncaught die (task #2108 (a)).  A STRING die is
+   its message.  An OBJECT die (`die {…}', `die $obj') is the payload's perl
+   STRINGIFICATION — `HASH(0x…)', `Class=HASH(0x…)', or its `\"\"' overload —
+   printed with NO newline added (probed 5.40.3); the Lisp printer's
+   `#S(p-box …)' is never a perl answer.  An overload that itself dies prints
+   THAT die's text, as perl does."
+  (if (typep condition 'p-exception)
+      (handler-case (to-string (p-exception-object condition))
+        (error (c)
+          (if (%p-perl-die-p c)
+              (if (typep c 'p-exception)
+                  (or (ignore-errors (to-string (p-exception-object c))) "")
+                  (princ-to-string c))
+              (princ-to-string condition))))
+      (princ-to-string condition)))
+
 (defun %p-uncaught-die-hook (condition hook)
   "*invoke-debugger-hook* for an UNCAUGHT perl die: print perl's ONE line and
    exit with perl's status.  Anything else is handed to the hook that was in
    place (SBCL's --non-interactive quit), backtrace and all."
   (if (%p-perl-die-p condition)
-      (let ((text (princ-to-string condition)))
+      (let ((text (%p-uncaught-die-text condition)))
         (ignore-errors
           (format *error-output* "~A~:[~%~;~]" text
-                  (and (plusp (length text))
-                       (char= (char text (1- (length text))) #\Newline)))
+                  (or (typep condition 'p-exception)
+                      (and (plusp (length text))
+                           (char= (char text (1- (length text))) #\Newline))))
           (finish-output *error-output*))
         ;; NOT :abort — the exit hooks run the END blocks and flush every
         ;; handle, which perl also does on the die path (see *exit-hooks*).
@@ -14877,7 +14900,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  ;; reference container (hashref/arrayref/coderef/ref-to-ref).
                  ;; Without this, `die { prev => $@ }` (an UNBLESSED hashref) fell
                  ;; to the string branch and stringified to "HASH(0x..) at line N".
+                 ;; A bare CODE ref (`die sub {...}`) is a raw function here (#2108).
                  (or (and (hash-table-p obj) (gethash :__class__ obj))
+                     (functionp obj)
                      (and (p-box-p obj)
                           (or (p-box-class obj)
                               (p-box-is-ref obj)
@@ -28310,7 +28335,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (if (zerop (length name))
       *p-undef*
       (multiple-value-bind (proto found) (gethash name %pcl-core-prototypes)
-        (cond ((not found) (error "Can't find an opnumber for \"~A\"" name))
+        (cond ((not found) (%p-die-error nil "Can't find an opnumber for \"~A\"" name))
               ((null proto) *p-undef*)
               (t proto)))))
 
@@ -28342,7 +28367,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((ref-type-of-class (p-ref class)))
     (when (and (string/= ref-type-of-class "")
                (not (p-find-overload class "\"\"")))
-      (error "Attempt to bless into a reference")))
+      (%p-die-error nil "Attempt to bless into a reference")))
   (let* ((raw-class-val (unbox class))
          ;; Detect Perl undef (nil or *p-undef*): emits 2 warnings
          (is-undef (or (null raw-class-val) (eq raw-class-val *p-undef*)))

@@ -1391,18 +1391,62 @@ into the child.
 before forking, the child is missing them and fork-then-continue is undefined.
 Ordinary single-threaded Perl (the overwhelming majority) is fine.
 
-**Caveat 2 — a fork-then-*continue* child is still an SBCL process.**  Such a
-child inherits SBCL's signal handlers, so a signal that would *kill* a plain
-perl child (e.g. `kill 'TERM'`) may instead be caught and turned into a clean
-exit — so `$? & 127` (death-by-signal) can read `0` where perl shows the signal
-number.  This does **not** affect fork-then-`exec` children (the exec'd program
-has default handlers) nor the fork/wait/exit-status path; it is a narrow
-artifact of running Lisp in the post-fork child.
+**(Caveat 2 is GONE, s494g / task #2107.)**  A fork-then-*continue* child used
+to inherit SBCL's own signal handlers, so `kill 'TERM'` turned into a clean exit
+0 and `kill 'INT'` into a backtrace.  The runtime now gives every process
+perl's dispositions at start-up, and a fork child inherits them: re-probed,
+TERM INT HUP USR1 QUIT all kill the child by the signal, `$? & 127` identical to
+perl.  What remains of signals is the "%SIG" section below.
 
 **Affected tests:** `t/io/pipe.t`, `t/io/openpid.t` and similar now *run* rather
 than crashing.  (`t/io/socket.t`/`socketpair.t` still need the socket-server
 plumbing, and Perl's `runperl`/`fresh_perl_*` helpers spawn a *separate*
 `./perl` binary — those are different, unrelated gaps.)
+
+---
+
+## %SIG
+
+Since s494g (task #2107) `%SIG` works the way perl's does for every signal a
+program can own: a store installs the handler, `"IGNORE"` / `"DEFAULT"` /
+`delete` / `local` behave as in perl, and a signal with no handler kills the
+process BY the signal (the normative contract is `docs/ir-spec.md` §8, "The
+%SIG contract").  What is left:
+
+- **Runtime-owned signals take no Perl handler.**  The signals SBCL itself
+  catches when the process starts are its own — derived from the running image
+  at boot, never listed; on SBCL 2.6 / Linux: ILL TRAP ABRT BUS FPE SEGV
+  **USR2** URG (USR2 is the garbage collector's stop signal, and it is the one
+  a Perl program is likely to want).  `$SIG{USR2} = sub {…}` is stored and
+  reads back, but the handler is NOT installed, and the runtime says so once:
+  `PCL: %SIG: $SIG{USR2} is not implemented — the SBCL runtime uses this
+  signal itself; the handler is NOT installed`.  A program that owns its
+  signal protocol should use USR1 or HUP.  (Design limit: a Lisp handler on
+  SBCL's stop signal would deadlock the collector.)
+- **`$SIG{CHLD} = 'IGNORE'` does not auto-reap.**  SBCL's own SIGCHLD handler
+  must stay in force (run-program's bookkeeping), so the store is announced
+  once and children still need `wait`; `system` keeps returning the child's
+  status where perl's returns -1 under this setting.  A CHLD *handler* works
+  and is chained after SBCL's.
+- **A reaping CHLD handler cannot take a qx or command pipe-open child's
+  status.**  perl does not block SIGCHLD around qx / a `-|` command open, so a
+  `waitpid(-1, WNOHANG)` handler reaps that child first and `$?` reads -1.
+  Under PCL SBCL's handler reaps a run-program child before any Perl handler
+  runs, so `$?` keeps the real status (better than perl, but different).
+  `system` agrees with perl (both keep it).
+- **`exists $SIG{NAME}` stays true after `delete $SIG{NAME}`** (perl: false).
+  The value is undef and the disposition is back to the default — the magic
+  slot is kept so a later store is still installed.
+- **A wholesale `%SIG = (...)` or `local %SIG` holds PLAIN slots** for its
+  extent: a handler stored through them is not installed (task #2264), except
+  ALRM, which `alarm` installs from whatever `$SIG{ALRM}` holds.
+- **An inherited SIG_IGN on a signal SBCL resets at start-up** (INT TERM ALRM
+  CHLD PIPE — the background job of a non-interactive shell ignores INT) is
+  invisible: those start at perl's default (task #2263).  Inherited ignores on
+  every other signal (`nohup`'s HUP) are seen and kept.
+- **Signal NAMES are Linux's.**  `%SIG`'s key set is perl's Linux `sig_name`
+  list; the NUMBERS come from SBCL's constants by name, so `kill USR1` sends
+  the right signal on macOS, but a macOS-only name (`INFO`, `EMT`) is not a key.
 
 ---
 
@@ -3652,9 +3696,9 @@ covers `time`, `sleep`, `usleep`, `nanosleep`, `gettimeofday`, `tv_interval`,
 
 **Absent, and loud about it** (`Undefined subroutine &Time::HiRes::ualarm`):
 `ualarm`, `setitimer`, `getitimer`, `clock_nanosleep`, `clock()`.  All five are
-*interval-timer* machinery: they need `setitimer(2)` plus a per-signal handler
-table, and PCL installs a Unix handler for `SIGALRM` only (`%SIG` handlers for
-the other signals are a separate gap, task #2094).  A program that wants a
+*interval-timer* machinery: they need `setitimer(2)`, which PCL does not bind
+(the `%SIG` side is in place since s494g — a `$SIG{ALRM}` / `$SIG{VTALRM}` /
+`$SIG{PROF}` handler is installed like any other).  A program that wants a
 sub-second timeout can use `alarm` with a whole second, or poll
 `Time::HiRes::time()`.
 
