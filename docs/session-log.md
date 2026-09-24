@@ -25,6 +25,7 @@ USER at the start: "Please continue." then the two queued questions answered -- 
 * **plan-post-s473 §7a**: the everyday queue re-derived from the baseline (30 rows): 92 -> 102 (s495f) -> 103 (signals) -> 104 (s494h) -> 105 (s494u) -> 108 (#2084) -> 109 (#2060 + #2085) -> **110 = 90.2 %** (#2056); ceiling without new rulings 118.
 * Review probes for s495f written BEFORE its report (`~/pcl-agent-scratch/s496/review/s495f/r*.pl`, perl -> base: all eleven differ on the base); s494g's review reuses the s494 signal battery (`~/pcl-agent-scratch/s494/q5/sig/run-sig.pl`).
 * Docs commit `8efdd90e` pushed (DECIDED `## s496`, plan §7a).  Next free Fable task ID 2373 (2380-2399 reserved by s496a).
+* **s495f (EVERYDAY ROUND A) MERGED** (ff `25d7fede`) after Fable's review: probes 8 of 11 identical, gate 262 / 8675 PASS, everyday `100 of 122` re-run, container install test PASS.  `EVERYDAY: 92 -> 100 of 122 (82.0 %)`.  Its HIGH finding #2341 (raw-slot: a never-assigned `my $u` cannot be vivified through a deref) is the next correctness candidate.  USER late in the session: no new subtasks; one read-only Opus README review + an Opus README rewrite were USER-asked exceptions -- README.md in the checkout is now that draft, uncommitted, for the USER to judge.
 
 
 ## Session s495f (Opus agent, 2026-09-25) -- EVERYDAY ROUND A: 92 -> 100 of 122 identical to perl; the builtins that did not exist, `pairs`, `qr//` as a Regexp, `$?` and END, exported scalars
