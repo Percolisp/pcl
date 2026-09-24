@@ -1767,8 +1767,8 @@
 ;;; Process ID ($$) is likewise boxed and defined in that later section so
 ;;; Perl-side `$$ = N` works (assignable since 5.16).
 
-;;; Child exit status ($?)
-(defvar $? 0 "Child process exit status from last system/backtick")
+;;; Child exit status ($?) - a MAGIC box, defined later after make-p-box (see
+;;; the $? note beside $@ in the Boxed special variables section)
 
 ;;; Input line number ($.) - defined later after make-p-box (see Boxed special variables section)
 
@@ -1998,7 +1998,9 @@
    started them (a fork CHILD inherits the binding and must still exit for
    real — hence the pid, not just the flag).")
 (defvar *p-end-phase-pid* nil "The pid that entered the END phase.")
-(defvar *p-end-exit-code* nil "Status set by an `exit` inside an END block.")
+(defvar *p-exit-status* nil
+  "The status `exit' or an uncaught die is leaving with, recorded by
+   %p-exit-process for the END phase; NIL = the program ran off its end.")
 
 (defvar *p-compile-phase-done* nil
   "True once the main program's compile->run boundary has been crossed.
@@ -2041,24 +2043,40 @@
 ;; Pl/t/stdio-buffering-01.t's die-after-print row is the guard: if a future
 ;; SBCL makes the first case an abort, that row fails instead of the sweep
 ;; quietly losing thousands of rows.
-(pushnew (lambda ()
-           (let ((*p-in-end-phase* t)
-                 (*p-end-phase-pid* (sb-posix:getpid)))
-             (dolist (fn *end-blocks*)
-               (handler-case
-                   ;; The catch is per BLOCK: `exit` inside one ends that
-                   ;; block and the loop goes on, which is perl (task #738).
-                   (catch '%p-end-exit (funcall fn))
-                 (error (e)
-                   (%p-diag "Error in END block: ~A~%" e)))))
-           (%p-flush-all-output)
-           ;; Only now, with every END run and every handle flushed, does the
-           ;; status an END block asked for become the process's.  A nested
-           ;; sb-ext:exit aborts the rest of this hook — which is exactly why
-           ;; it is the LAST thing here.
-           (when *p-end-exit-code*
-             (sb-ext:exit :code *p-end-exit-code*)))
-         sb-ext:*exit-hooks*)
+;;
+;; THE STATUS PROTOCOL (task #2009; ir-spec §8), probed on 5.40.3:
+;;   * the END blocks see in $? the status the program is leaving with —
+;;     `exit N`'s N, an uncaught die's (errno / child / 255), 0 when the
+;;     program ran off its end (even after a failed `system`);
+;;   * an END block may ASSIGN $?, and each later block sees the new value
+;;     (they run LIFO);
+;;   * after the last one the process exits with $? & 255 (`$? = 300` exits
+;;     44, `$? = 256` exits 0).
+;; exit and the uncaught-die hook record the status in *p-exit-status* (via
+;; %p-exit-process) before SBCL runs this hook; NIL means the natural end.
+(defun %p-run-end-phase ()
+  "The exit hook: run the END blocks, flush every handle, exit with $?."
+  (let ((pending (or *p-exit-status* 0)))
+    (%p-set-status pending)
+    (let ((*p-in-end-phase* t)
+          (*p-end-phase-pid* (sb-posix:getpid)))
+      (dolist (fn *end-blocks*)
+        (handler-case
+            ;; The catch is per BLOCK: `exit` inside one ends that
+            ;; block and the loop goes on, which is perl (task #738).
+            (catch '%p-end-exit (funcall fn))
+          (error (e)
+            (%p-diag "Error in END block: ~A~%" e)))))
+    (%p-flush-all-output)
+    ;; Only now, with every END run and every handle flushed, does a status
+    ;; an END block changed become the process's.  A nested sb-ext:exit
+    ;; aborts the rest of this hook — which is exactly why it is the LAST
+    ;; thing here, and why it runs only when the status really changed.
+    (let ((final (logand (%p-status) 255)))
+      (unless (= final (logand pending 255))
+        (sb-ext:exit :code final)))))
+
+(pushnew '%p-run-end-phase sb-ext:*exit-hooks*)
 
 ;;; ============================================================
 ;;; Value Boxing - All Perl scalars are boxed for reference support
@@ -2848,6 +2866,40 @@
 
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
 (defvar $@ (make-p-box "") "Error from last eval")
+
+;;; $? — the child / exit STATUS, a MAGIC BOX like $. and $! (tasks #2009,
+;;; #2031).  It was a raw number, the one scalar every perl-side write missed:
+;;; box-set is a no-op on a non-box, so `$? = 5`, `$? |= 8`, `($?) = (4)` and
+;;; `$$ref = 2` through \$? all silently did nothing, and an END block could
+;;; neither read the pending exit status nor change it.  perl's $? is an
+;;; INTEGER variable (`$? = "7abc"` stores 7, `$? = 3.7` stores 3 -- probed),
+;;; which is what the setter enforces.  The runtime's own writers (system, qx,
+;;; wait, close on a pipe, exit, the END phase) go through %p-set-status, which
+;;; writes whatever $? is BOUND to -- so inside `local $?` the child's status
+;;; lands in the local box and the outer value comes back at scope exit, as in
+;;; perl.  docs/ir-spec.md §8.
+(defvar *p-status* 0 "The integer the global $? box reads and writes.")
+
+(defun %p-status-int (v)
+  "perl's integer coercion for a store into $?."
+  (let ((n (to-number v)))
+    (if (integerp n) n (truncate n))))
+
+(defvar $? (make-p-box (make-p-magic-cell
+                        :getter (lambda () *p-status*)
+                        :setter (lambda (v) (setf *p-status* (%p-status-int v)))))
+  "Child process / exit status -- a magic box holding an INTEGER (task #2009)")
+
+(defun %p-status ()
+  "The current value of $? as an integer, through whatever $? is bound to."
+  (%p-status-int $?))
+
+(defun %p-set-status (n)
+  "Store N into $? — the one writer every runtime site uses (see above)."
+  (if (p-box-p $?)
+      (box-set $? n)
+      (setf $? n))
+  n)
 ;;; Input record separator ($/)
 (defvar |$/| (make-p-box (string #\Newline)) "Input record separator")
 ;;; Output record separator ($\) — perl's default is UNDEF, not "" (task #465).
@@ -14606,7 +14658,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun %p-uncaught-die-status ()
   "perl's exit status for an uncaught die (see the note above)."
   (let ((errno *p-stored-errno*)
-        (child (ash (truncate (to-number $?)) -8)))
+        (child (ash (%p-status) -8)))
     (cond ((and (integerp errno) (/= 0 (logand errno 255))) (logand errno 255))
           ((and (integerp child) (/= 0 (logand child 255))) (logand child 255))
           (t 255))))
@@ -14624,7 +14676,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
           (finish-output *error-output*))
         ;; NOT :abort — the exit hooks run the END blocks and flush every
         ;; handle, which perl also does on the die path (see *exit-hooks*).
-        (sb-ext:exit :code (%p-uncaught-die-status)))
+        (%p-exit-process (%p-uncaught-die-status)))
       (if *p-prev-debugger-hook*
           (funcall *p-prev-debugger-hook* condition hook)
           (sb-debug::debugger-disabled-hook condition hook))))
@@ -16576,7 +16628,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           (handler-case
               (multiple-value-bind (rpid status) (sb-posix:waitpid pid 0)
                 (declare (ignore rpid))
-                (setf $? status)
+                (%p-set-status status)
                 (if (and flushed (zerop status)) t nil))
             (error () (%pcl-save-errno) nil))))))
 
@@ -16606,9 +16658,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (cond
       ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh))
       ((and (streamp v) (open-stream-p (%p-stream-target v)))
-       (let ((saved $?))
+       (let ((saved (%p-status)))
          (%p-close-maybe-pipe v)
-         (setf $? saved))
+         (%p-set-status saved))
        (%p-forget-fh fh))))
   (values))
 
@@ -20720,10 +20772,17 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; for real.
     (when (and *p-in-end-phase*
                (eql *p-end-phase-pid* (sb-posix:getpid)))
-      (setf *p-end-exit-code* n)
-      (setf $? n)
+      (%p-set-status n)
       (throw '%p-end-exit nil))
-    (sb-ext:exit :code n)))
+    (%p-exit-process n)))
+
+(defun %p-exit-process (n)
+  "Leave the process with status N through the END phase: record N for
+   %p-run-end-phase (the END blocks read it as $?) and exit.  exit and the
+   uncaught-die hook both come here (task #2009)."
+  (setf *p-exit-status* n)
+  (%p-set-status n)
+  (sb-ext:exit :code n))
 
 (defmacro %p-child-host-error (failure &body body)
   "Run BODY around a CHILD PROCESS.  A HOST error — the child could not be
@@ -20778,9 +20837,9 @@ buffer's fill-pointer; everything else falls back to file-length."
       -1
       (let ((cmd (to-string (car args)))
             (prog-args (mapcar #'to-string (cdr args))))
-        (%p-child-host-error (progn (%pcl-save-errno) (setf $? -1) -1)
+        (%p-child-host-error (progn (%pcl-save-errno) (%p-set-status -1) -1)
                              (let ((wait-status (%p-system-run cmd prog-args)))
-                               (setf $? wait-status)
+                               (%p-set-status wait-status)
                                wait-status)))))
 
 (defun p-fork ()
@@ -20814,14 +20873,14 @@ buffer's fill-pointer; everything else falls back to file-length."
         (f (truncate (to-number (if (p-box-p flags) (unbox flags) flags)))))
     (%p-child-host-error (progn (%pcl-save-errno) -1)
                          (multiple-value-bind (rpid status) (sb-posix:waitpid p f)
-                           (setf $? status)
+                           (%p-set-status status)
                            rpid))))
 
 (defun p-wait ()
   "Perl wait - wait for any child.  Returns the reaped PID (or -1), sets $?."
   (%p-child-host-error (progn (%pcl-save-errno) -1)
                        (multiple-value-bind (rpid status) (sb-posix:wait)
-                         (setf $? status)
+                         (%p-set-status status)
                          rpid)))
 
 (defun p-getppid ()
@@ -20972,7 +21031,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; The shell could not be started: perl's `-1` with $! set (#1920's rule).
         (progn
           (%pcl-save-errno)
-          (setf $? -1)
+          (%p-set-status -1)
           (if (eq *wantarray* t) (make-array 0 :adjustable t :fill-pointer 0) ""))
         (let ((output (with-output-to-string (s)
                         (loop for c = (read-char (sb-ext:process-output proc) nil nil)
@@ -20983,7 +21042,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; earlier `system` had put there — and with no earlier `system` a
           ;; FAILING command looked like success.  The encoding is perl's raw
           ;; wait status, the same one p-system, p-wait and pipe-close store.
-          (setf $? (%p-process-wait-status proc))
+          (%p-set-status (%p-process-wait-status proc))
           (if (eq *wantarray* t)
               (%p-split-records output)
               output)))))
