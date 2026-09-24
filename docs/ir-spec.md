@@ -495,6 +495,17 @@ is the single predicate for the first question and `_is_list_node_for_refgen`
 for the second. In explicit scalar/void context a distributing form is the
 comma operator: `my $s = \@A[0,1]` is `\$A[1]`.
 
+**`\${EXPR}` is `(p-backslash-cast-$ EXPR [SITE])` — a reference to the PLACE
+the deref names** (normative, s495f, task #2008): for a SYMBOLIC name, the
+package CELL itself (vivified), so `\${"P::x"} == \$P::x` and a write through
+it lands in `$P::x` -- perl's Exporter builds every scalar export as
+`*{"caller::x"} = \${"P::x"}`, and a reference to a COPY made an imported
+scalar a second variable; for a HARD scalar ref, its referent (`\${$r} == $r`).
+Names with no ordinary cell (the read-only capture family, the computed
+`$&`-family) keep `(p-backslash (p-cast-$ EXPR SITE))`, the reference to the
+VALUE.  Every rvalue `${EXPR}` stays `(p-cast-$ …)`; only the backslash site
+changes.
+
 `(p-backslash X)` — Perl `\X` — returns a **box with `is-ref` = t** whose
 `value` is:
 - for a scalar: the scalar's *box* (so writes through `$$r` hit the
@@ -2682,6 +2693,15 @@ var ⇒ plain lexical binding, no localization at all).
 
 ### 7.3 Method dispatch
 
+- **A value with no class of its own may still HAVE one** (normative,
+  s495f, task #2051): a filehandle dispatches against the handle class
+  (§7.5a) and a **`qr//` object against `Regexp`** -- perl blesses every
+  compiled pattern, so `blessed(qr/x/)` is `"Regexp"`, `->isa("Regexp")` /
+  `->can` / UNIVERSAL methods and a program's own `sub Regexp::m` work, and
+  `bless qr/x/, "Foo"` STAYS a pattern (it matches, `reftype` is `REGEXP`,
+  it stringifies as `(?^:x)` without the class).  `re::is_regexp` and
+  `re::regexp_pattern` are core (no `use re`).  A method call on an
+  UNBLESSED reference or undef is a perl die (trappable, one line).
 - Method names travel as **strings**. `(p-method-call OBJ "name" ARGS…)`:
   flatten args; find the invocant's class (the box `class` field for an
   object, the package-name string for `Class->method`); walk the class's
@@ -3184,7 +3204,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `%!` | the errno hash: one key per platform errno NAME, each value magic.  `$!{NAME}` is the errno NUMBER when `$!` holds that errno and `0` otherwise — never `1`, and always defined; a STORE is fatal (`ERRNO hash is read only!`), as Errno's tied hash is.  `keys`/`values`/`each`/`exists` are ordinary hash reads of a REAL table. |
 | `%SIG` | signal handlers. **A `__WARN__` handler is NOT RE-ENTERED** (task #1223): perl calls it once and a `warn` raised INSIDE it takes the default action — without that rule the commonest handler idiom in perl's own suite, `… else { warn $_[0] }`, is an infinite loop. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators. |
 | `$.` | line number of the last-read filehandle (per-handle) |
-| `$?` | the RAW WAIT STATUS of the last child: `exit << 8`, or the signal number in the low byte when it was killed -- perl's own encoding, never a bare exit code (normative, s492c, task #2101).  **Every path that reaps a child writes it**: `system`, a pipe-handle `close`, `wait`/`waitpid` AND ``` `cmd` ``` / `qx` / `readpipe` in BOTH contexts.  A host that leaves it untouched after a command capture is SILENT-WRONG in the commonest failure check a script has (`my $out = `cmd`; die if $?;`) -- the value then belongs to some earlier `system`, or to nothing.  A shell that cannot be STARTED gives perl's `-1` with `$!` set (see 7.5b). |
+| `$?` | the RAW WAIT STATUS of the last child: `exit << 8`, or the signal number in the low byte when it was killed -- perl's own encoding, never a bare exit code (normative, s492c, task #2101).  **Every path that reaps a child writes it**: `system`, a pipe-handle `close`, `wait`/`waitpid` AND ``` `cmd` ``` / `qx` / `readpipe` in BOTH contexts.  A host that leaves it untouched after a command capture is SILENT-WRONG in the commonest failure check a script has (`my $out = `cmd`; die if $?;`) -- the value then belongs to some earlier `system`, or to nothing.  A shell that cannot be STARTED gives perl's `-1` with `$!` set (see 7.5b).  **`$?` is a WRITABLE INTEGER variable** (normative, s495f, tasks #2009/#2031): `$? = N`, compound and list assignment and a write through `\$?` all store, and a store keeps perl's integer (`$? = "7abc"` reads 7, `$? = 3.7` reads 3).  The runtime's own writers store into whatever `$?` is BOUND to, so inside `local $?` a child's status lands in the local value and the outer one returns at scope exit.  **The END phase reads and sets it**: END blocks see the status the program is leaving with (`exit N`'s N, an uncaught die's status, 0 at the natural end even after a failed `system`), each (LIFO) sees the previous block's assignment, and the process then exits with `$? & 255` -- `END { $? = 5 } exit 3` exits 5. |
 | `$$` | the CURRENT process id, REFRESHED in a forked child (normative, s492c, task #2094).  A host that copies it at image start leaves the parent's pid in the child, where `kill SIG, $$` then signals the PARENT and `"/tmp/x.$$"` collides between the two -- silent, and the sort of bug a program only meets in production.  Both fork paths (the bare `fork` and the pipe-open fork) write it. |
 | `$a`, `$b` | sort comparator operands (per-package defvars) |
 | `$\`, `$,` | output record / field separator. **Both are UNDEF until the program sets one** (task #465) — the separator defaults are asymmetric and a translator must copy the asymmetry, not normalize it: `$/` is `"\n"`, `$;` is `"\034"`, `$"` is `" "`, `$!` is the errno dualvar, all DEFINED. An empty string here is invisible on the write side and wrong on the read side (`defined($,)`, `$\ // ","`, `length($\)`), which is what made it silent. `print` treats undef as "print nothing between/after": its readers test *non-empty string*, never `defined`. **`say` appends `"\n"` INSTEAD of `$\`, never as well as it** (task #500), while `$,` still separates its arguments; `printf` appends neither. perl does not *localize* `$\` over the call — an overload or tie handler that runs while an argument stringifies still reads the program's value (probed s442d) — so the terminator is passed to the one writer (`%p-write-list`), not bound over it. |
@@ -4050,6 +4070,22 @@ die is the discriminator.  `CORE::NAME` names the builtin unconditionally and
 travels as its own flag, so a shim's `sub cwd { CORE::cwd() }` does not call
 itself.  A host adding an operator therefore adds no hazard: the rule is
 keyed on the perl side of the name, not on the runtime's symbol list.
+
+### 10-db. The system-database builtins answer in perl's two SHAPES (normative, s495f, task #2093)
+
+`p-gethostby{name,addr}` / `p-gethostent`, `p-getservby{name,port}` /
+`p-getservent`, `p-getprotoby{name,number}` / `p-getprotoent` and
+`p-getnetby{name,addr}` / `p-getnetent` read `*wantarray*`: LIST context is
+the whole record (host: name, aliases, addrtype, length, @packed-addrs;
+service: name, aliases, PORT in host order, proto; protocol: name, aliases,
+number; network: name, aliases, addrtype, net), SCALAR context is ONE field
+-- the "other thing" for a lookup by name (the packed address, the port, the
+number, the net) and the NAME otherwise; a miss is `()` / undef.  The
+`set*ent` / `end*ent` forms answer 1.  A character above 0xFF in a name or
+address dies `Wide character in NAME`.  `p-telldir` answers a position that
+is meaningful ONLY to `p-seekdir` on the same handle (PCL's is an index into
+the handle's entry list; perl's is an opaque cookie).  `p-formline` DIES
+(ruled with `format`, not-supported.md).
 
 ### 10-gmatch. What a global match attempts after a ZERO-LENGTH match (normative, s484c, task #1719)
 
