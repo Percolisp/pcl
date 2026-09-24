@@ -1,4 +1,10 @@
 # taken-at: 5323d9e 2026-08-15
+# s494g (2026-09-25, Opus, EDITED BY HAND -- two rows): local.t 300/13 -> 302/11 and
+#   magic.t 156/31 -> 158/29.  Cause: #2107's %SIG store seam qualifies a bare handler
+#   NAME with main:: (#1029) -- magic.t `Can assign to INT` / `Can delete from INT`
+#   (left fail-baseline.tsv by edit) and local.t's two unnamed `local $SIG{...}`
+#   rows ('foo' vs 'main::foo').  A/B'd on a 40da28bd extraction: there the four
+#   rows still fail; method.t / yadayada.t read identically on both trees.
 # s492b (2026-09-21, Opus, EDITED BY HAND -- one row): pack.t 5636/89 -> 5637/88.
 #   cl/pcl-pack.lisp is cl/pack-impl.pl transpiled, and s492b regenerated it at
 #   generation v2-1740, so the batch's own emission fixes reach pack's
@@ -438,13 +444,13 @@ kvhslice.t	OK	22	2	39
 lc.t	OK	82	0	2659
 length.t	PARTIAL	35	3	49
 lex.t	OK	45	0	53
-local.t	OK	300	13	319
+local.t	OK	302	11	319
 loopctl.t	OK	64	0	67
 lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
 # argv rename from SBCL, docs/not-supported.md) added to fail-baseline in the same commit.
-magic.t	PARTIAL	156	31	208
+magic.t	PARTIAL	158	29	208
 # s449 (#564, agent S): `local *{EXPR} = sub {…}` has a lowering, so the four rows of the
 # `local *1 = sub {123}` loop at method.t:38 PASS — 72/26 -> 76/22, verified SERIALLY on both
 # this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the

@@ -246,9 +246,7 @@ magic.t	111	.. and /proc cmdline shows that	'sbcl --control-stack-size 512 --noi
 magic.t	109	.. and the warning is about a wide character	undef	wide	#221 (NS:Warnings-gated diagnostics are absent)
 magic.t	106	/proc cmdline shows as expected (compare to UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/6PoOxzTESX/qpib0FrMJ0.lisp")'	'é'	NS:Assigning `$0` does not change the OS process name + #512
 magic.t	107	/proc cmdline shows as expected (compare to non-UTF8-flagged)	'sbcl --control-stack-size 512 --noinform --non-interactive --load /home/bernt/pcl/cl/pcl-runtime.lisp --eval (setf pcl::*pcl-skip-cache* t) --load /home/bernt/pcl/cl/pcl-test.lisp --load /home/bernt/pcl/cl/skip-registry.lisp --eval (setf pcl::*current-test-file* "magic.t") --eval (pcl::p-load-with-recovery "/tmp/6PoOxzTESX/qpib0FrMJ0.lisp")'	'é'	NS:Assigning `$0` does not change the OS process name + #512
-magic.t	141	Can assign to INT	'int'	'main::int'	#1029 (%SIG stores a bare handler NAME unqualified)
 magic.t	137	Can assign to __WARN__	'__warn__'	'main::__warn__'	#1029 (%SIG stores a bare handler NAME unqualified)
-magic.t	142	Can delete from INT	'int'	'main::int'	#1029 (%SIG stores a bare handler NAME unqualified)
 magic.t	138	Can delete from __WARN__	'__warn__'	'main::__warn__'	#1029 (%SIG stores a bare handler NAME unqualified)
 magic.t	193	ENV key store warns about wide characters			#221 (NS:Warnings-gated diagnostics are absent: "Wide character in setenv")
 magic.t	187	ENV store downgrades utf8 in SV			NS:Unicode semantics differences (the per-scalar utf8 flag: utf8::is_utf8)
