@@ -12,7 +12,6 @@
 # Rows leave this file BY EDIT, with the fix, one at a time.
 #
 # case<TAB>task<TAB>cause
-022-refs	1427	stdout MATCHES perl; the residue is the EXIT CODE — `Not a SCALAR reference` is a perl-level runtime error PCL raises with a bare CL `error`, not p-die, so it still reaches SBCL's hook (exit 1) where perl exits 255.  s473f gave a perl DIE perl's status; the census of the runtime's other perl-level `error` sites is #1427.
 033-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 034-array	1240	a runtime-raised die reports `at (eval 0) line 0.` where perl reports the file and line -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
 037-autoviv	1117	AN ACCIDENTAL PASS UNTIL s484b: line 7 asks the slots AFTER reading @a and %h, so perl answers `ARRAY=def HASH=def` (a read RE-VIVIFIES a cleared slot) and PCL used to answer def because it had not removed them at all.  Shape (B) removes them, so the case now fails honestly on residue (a) -- reads do not re-vivify; NS:`undef *GLOB` leaves an EMPTY aggregate slot where perl REMOVES it
