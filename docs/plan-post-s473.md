@@ -294,3 +294,5 @@ corpus grows, and the history file's M column is what keeps that honest.
 | — | after that: #1998 · #155 ×2 · #1361 · #2082 · #2083 · #2285 · #2287 = 8 more → the ceiling without new rulings is **118**; the four ruled rows stay | | |
 
 The denominator still has to grow (battery 3); every number above is "of 122".
+
+**s495f LANDED (s496, `25d7fede`): 92 -> 100, not the 102 the row allowed** -- `index/formline` stays (formline is ruled with format/write and now DIES, its row re-worded to the not-supported anchor) and `programs/nested-eval-errors` stays (#2103's death is strict-DEPENDENT; strict refs is unenforced).  So the path from here reads 100 -> 101 (signals, in flight) -> 102 (s494h) -> 103 (s494u) -> 106 (#2084) -> 107 (#2060 + #2085) -> 108 (#2056); **110 now needs two more rows than this table had** -- candidates: #2103 strict refs (sized in the task) and **#2341** (HIGH, filed by s495f: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref, `push @$u, 1` dies; it holds no everyday row today but it is an everyday idiom, and battery 3 will find it).
