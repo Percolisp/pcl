@@ -113,6 +113,16 @@ test_diff('setpriority returns 1 on success and 0 with $! on failure',
      print "up [", setpriority(0, 0, $p + 1), "] now ", getpriority(0, 0) - $p, "\n";
      my $r = setpriority(99, 0, 0); print "bad-which [$r] ", ($! + 0), "\n";');
 
+# A WIDE character (> 0xFF) in a name/address dies "Wide character in NAME" in
+# every lookup (t/op/ver.t's `Non-bytes leak to gethostbyaddr' row); a byte
+# string still looks up (the inverse guard: the last case).
+test_diff('host/service/protocol/network lookups die on a wide character',
+    'for my $c (sub { gethostbyaddr(v2004.148.0.1, 2) }, sub { gethostbyname("\x{100}x") },
+                sub { getservbyname("\x{100}", "tcp") }, sub { getprotobyname("\x{100}") },
+                sub { getnetbyname("\x{100}") }, sub { getservbyport(22, "\x{100}") },
+                sub { getservbyname("ssh", "tcp") }) {
+       eval { $c->() }; print "[", ($@ =~ /Wide character in (\w+)/ ? $1 : "none"), "]\n" }');
+
 # formline is RULED with format/write (docs/not-supported.md, the format
 # section): perl fills $^A, PCL dies -- one trappable line.  NOT differential.
 like(run_cl('my $ok = eval { formline("@<<< @>>>\n", "ab", "cd"); 1 };

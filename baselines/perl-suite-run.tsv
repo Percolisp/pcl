@@ -1983,7 +1983,7 @@ op/waitpid.t	1	0	1	0	OK		0
 op/wantarray.t	28	0	27	1	DIFF		0
 op/warn.t	32	1	20	13	DIFF	s470bv: #1115 (already 20/13 at a3d6d8e)	0
 op/while.t	26	0	20	6	DIFF		0
-op/write.t	636	0	99	32	DIFF	aborted-forms:13: Undefined subroutine &main::formline called	1
+op/write.t	636	0	98	33	DIFF	aborted-forms:13: PCL: formline (format/write report formatting) is not supported (s495f #2093: formline now DIES with the ruled message -- the fresh_perl row "#130722 - assertion failure" reads it on stderr and fails honestly; every other row identical to 3d9b3712 by full TAP diff)	1
 op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A	0
 opbasic/arith.t	183	0	183	0	OK		0
 opbasic/cmp.t	13280	0	13280	0	OK	s470bv: #1221 (b25afbc; 12078/0 at a3d6d8e): 1202 rows that were never produced now run and PASS -- the file is OK	0

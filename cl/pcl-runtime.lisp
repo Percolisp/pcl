@@ -18152,6 +18152,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   "perl's ALIASES field: the alias list joined by single spaces, \"\" if none."
   (format nil "~{~A~^ ~}" aliases))
 
+(defun %p-db-bytes (v who)
+  "V as the BYTE string a host/service/protocol/network lookup takes: every
+   one of them dies \"Wide character in WHO\" for a character above 0xFF
+   (probed 5.40.3 for all six by-name/by-addr builtins; t/op/ver.t's
+   `Non-bytes leak to gethostbyaddr' row) — task #2093."
+  (let ((s (to-string v)))
+    (when (find-if (lambda (c) (> (char-code c) 255)) s)
+      (p-die (format nil "Wide character in ~A" who)))
+    s))
+
 (defun %p-protocol-result (entry scalar-slot)
   "perl's return shape: (NAME, ALIASES, NUMBER) in list context; in SCALAR
    context \"you get the name, unless the lookup WAS by name, in which case you
@@ -18170,7 +18180,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl getprotobyname(NAME) — looked up in /etc/protocols by name or alias.
    perl matches exactly: \"TCP\" hits tcp's alias, \"Tcp\" is a miss."
   (unless *p-protocols-by-name* (%p-load-protocols))
-  (%p-protocol-result (gethash (to-string name) *p-protocols-by-name*)
+  (%p-protocol-result (gethash (%p-db-bytes name "getprotobyname") *p-protocols-by-name*)
                       :number))
 
 (defun p-getprotobynumber (number)
@@ -18234,11 +18244,12 @@ buffer's fill-pointer; everything else falls back to file-length."
                   'simple-vector)))
   *p-services*)
 
-(defun %p-service-find (proto match)
+(defun %p-service-find (proto match who)
   "The first services entry MATCH accepts whose protocol is PROTO — an empty
    or undef PROTO accepts any protocol (probed 5.40.3: getservbyname('ssh','')
-   is ssh/tcp).  Names and protocols compare EXACTLY, case included."
-  (let ((p (to-string proto)))
+   is ssh/tcp).  Names and protocols compare EXACTLY, case included.  WHO
+   names the builtin for the wide-character death."
+  (let ((p (%p-db-bytes proto who)))
     (find-if (lambda (e)
                (and (funcall match e)
                     (or (string= p "") (string= p (fourth e)))))
@@ -18258,18 +18269,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-getservbyname (name proto)
   "Perl getservbyname NAME, PROTO — by service name or alias."
-  (let ((n (to-string name)))
+  (let ((n (%p-db-bytes name "getservbyname")))
     (%p-service-result
      (%p-service-find proto (lambda (e) (or (string= n (first e))
                                             (member n (second e)
-                                                    :test #'string=))))
+                                                    :test #'string=)))
+                      "getservbyname")
      :port)))
 
 (defun p-getservbyport (port proto)
   "Perl getservbyport PORT, PROTO — PORT in host order, as perl takes it."
   (let ((pn (truncate (to-number port))))
     (%p-service-result
-     (%p-service-find proto (lambda (e) (= pn (third e))))
+     (%p-service-find proto (lambda (e) (= pn (third e))) "getservbyport")
      :name)))
 
 (defun p-getservent ()
@@ -18364,12 +18376,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-gethostbyname (name)
   "Perl gethostbyname NAME — gethostbyname(3), IPv4, as perl."
-  (%p-host-result (%p-hostent-fields (%c-gethostbyname (to-string name)))
+  (%p-host-result (%p-hostent-fields (%c-gethostbyname (%p-db-bytes name "gethostbyname")))
                   :addr))
 
 (defun p-gethostbyaddr (addr addrtype)
   "Perl gethostbyaddr ADDR, ADDRTYPE — ADDR a packed byte string."
-  (let* ((s (to-string addr))
+  (let* ((s (%p-db-bytes addr "gethostbyaddr"))
          (v (make-array (length s) :element-type '(unsigned-byte 8))))
     (dotimes (i (length s))
       (setf (aref v i) (logand (char-code (char s i)) #xff)))
@@ -18441,7 +18453,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-getnetbyname (name)
   "Perl getnetbyname NAME — getnetbyname(3)."
-  (%p-net-result (%c-getnetbyname (to-string name)) :net))
+  (%p-net-result (%c-getnetbyname (%p-db-bytes name "getnetbyname")) :net))
 
 (defun p-getnetbyaddr (net addrtype)
   "Perl getnetbyaddr NET, ADDRTYPE — NET a number in host order."
