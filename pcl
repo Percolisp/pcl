@@ -54,9 +54,13 @@ my $RUNTIME = "$ROOT/cl/pcl-runtime.lisp";
 my ($inline, $check_only, $make_core, $clear_cache, $verbose, $want_help);
 my ($cache_info, $want_version, $no_cache);
 my (@inc_dirs, @use_mods, $warnings_flag);
+my ($inline_flag, $check, $check_stdin, $check_keep);   # --check (task #2194)
 
 GetOptions(
-  'e|E=s'       => \$inline,         # inline code; -E is a plain alias of -e
+  # inline code; -E is a plain alias of -e.  Two entries only so that --check
+  # can hand perl the spelling the user wrote (perl's -E is not its -e).
+  'e=s'         => sub { $inline = "$_[1]"; $inline_flag = 'e' },
+  'E=s'         => sub { $inline = "$_[1]"; $inline_flag = 'E' },
   'I=s@'        => \@inc_dirs,        # prepend dir(s) to @INC
   'M=s@'        => \@use_mods,        # `use Module` before the script
   'c'           => \$check_only,      # syntax-check only
@@ -68,6 +72,9 @@ GetOptions(
   'version'     => \$want_version,
   'v|verbose'   => \$verbose,
   'h|help'      => \$want_help,
+  'check'         => \$check,         # run under perl AND pcl, compare (#2194)
+  'check-stdin=s' => \$check_stdin,
+  'check-keep=s'  => \$check_keep,
 ) or die usage();
 
 print(usage()), exit 0 if $want_help;
@@ -83,6 +90,19 @@ if ($make_core)    { make_core();   exit 0 }
 # ---- figure out the source + the script's own @ARGV ----------------------
 my $source = (!defined $inline && @ARGV) ? shift(@ARGV) : undef;
 my @script_args = @ARGV;          # everything left belongs to the script
+
+# ---- pcl --check (task #2194): the comparison lives in tools/lib/PCLCheck.pm
+# and is loaded only here, so a plain run pays nothing for it.  It decides
+# "cannot check" itself (a missing script is its exit 2, not the die below).
+if ($check) {
+  require PCLCheck;
+  exit PCLCheck::run_check(
+    root => $ROOT, inline => $inline, inline_flag => $inline_flag,
+    source => $source, args => \@script_args, inc => \@inc_dirs,
+    mods => \@use_mods, warnings => $warnings_flag, no_cache => $no_cache,
+    verbose => $verbose, check_only => $check_only,
+    stdin => $check_stdin, keep => $check_keep);
+}
 
 die usage() unless defined $inline || defined $source;
 if (defined $source && !-f $source) {
@@ -553,6 +573,39 @@ Options:
   -v, --verbose  print the underlying sbcl command pcl runs
   --version      print the PCL, cache-generation, SBCL and PPI versions
   -h, --help     this message
+  --check        run the program under perl AND under PCL and say whether
+                 they agree (below)
+
+Checking a program against perl (--check):
+  pcl --check [options] script.pl [args...]
+  pcl --check [options] -e 'CODE' [args...]
+
+  Runs the program TWICE -- once under the perl that runs pcl itself, once
+  under PCL exactly as a plain `pcl` run would -- and compares what they
+  printed on STDOUT (byte for byte) and whether each succeeded (exit 0),
+  failed (any other exit status) or was killed by a signal.  The first line
+  says IDENTICAL, SAME FAILURE, DIFFERENT OUTPUT (with the first differing
+  line from each side), ONLY PERL FAILED / ONLY PCL FAILED, DIFFERENT FAILURE,
+  or "cannot check".  STDERR is not compared -- error and warning TEXTS may
+  differ -- but its line count is shown for each side.  -I, -M and -w are
+  given to perl too; each side sees PCL_CHECK_SIDE=perl or PCL_CHECK_SIDE=pcl
+  in its environment.
+
+  * THE PROGRAM RUNS TWICE.  Do not use --check on a program whose side
+    effects must happen once (it sends mail, charges a card, deletes or
+    rewrites its input).  Files the program writes are not compared.
+  * Output that depends on hash order, the clock, process ids or random
+    numbers differs between ANY two runs, even two perl runs, and is not a
+    PCL bug -- sort your keys, seed your rand, leave out the time.
+  * STDIN is /dev/null for both runs unless you give --check-stdin FILE;
+    both sides then read their own copy of FILE.
+  * Exit status: 0 = the two agree (IDENTICAL or SAME FAILURE), 1 = they
+    differ, 2 = the check could not be made.
+
+  --check-stdin FILE   give FILE to both runs as STDIN
+  --check-keep DIR     keep the four captured files (perl.out, perl.err,
+                       pcl.out, pcl.err) in DIR.  Without it they are kept
+                       only when the two differ, in a temp dir that is named.
 
 Caches:
   PCL caches three things, all purely for speed and none able to change a

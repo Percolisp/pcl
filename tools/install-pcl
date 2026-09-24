@@ -191,7 +191,9 @@ sub module_version {
 
 # The runtime subset, in repo-relative form.  Everything else in the checkout
 # (Pl/t, perl-tests, docs, the other tools) is development material.
-my @TREE = (@COMMANDS, qw(Pl lib cl tools/lib));
+# README.md travels because `pcl --check` reads the project's issues URL from it
+# (tools/lib/PCLCheck.pm issues_url: the URL is written in ONE place, #2194).
+my @TREE = (@COMMANDS, qw(Pl lib cl tools/lib README.md));
 
 sub copy_tree {
     my ($src, $dst) = @_;

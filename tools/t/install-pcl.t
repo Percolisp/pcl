@@ -101,6 +101,13 @@ my $run = `$prefix/bin/runpcl $src 2>&1`;
 is($run, $perl_out, 'the installed runpcl prints exactly what perl prints')
     or diag($run);
 
+# `pcl --check` (#2194) runs through the installed tree: PCLCheck.pm from the
+# installed tools/lib, the issues URL from the installed README.md.
+my $chk = `$prefix/bin/pcl --check $src 2>&1`;
+is($?, 0, 'the installed pcl --check agrees with perl on the fixture') or diag($chk);
+like($chk, qr/^pcl --check: IDENTICAL /, 'and says IDENTICAL');
+ok(-f "$prefix/lib/pcl/README.md", 'README.md is installed (pcl --check reads the issues URL from it)');
+
 # --- (f) what is installed is the three commands and what they need ----------
 # Never the development runners: they are not part of a PCL, they are part of
 # working ON PCL, and shipping them would put a script that expects
