@@ -5,6 +5,17 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-25: **`pcl --check` — does PCL agree with perl on your program?**
+  (#2194)  `pcl --check prog.pl ARGS` (or `-e CODE`) runs the program under
+  the perl that runs `pcl` AND under PCL, compares STDOUT byte for byte and
+  the exit status by class (success / failure / signal), and says
+  `IDENTICAL`, `SAME FAILURE`, or where they part: the first differing line
+  from each side with unprintable bytes escaped, both exit statuses, both
+  stderr line counts (stderr text is not compared).  Exit 0 = agree, 1 =
+  differ, 2 = could not check.  `--check-stdin FILE`, `--check-keep DIR`.
+  The program runs twice — not for programs with once-only side effects.
+  `docs/pcl-check.md`.
+
 - 2026-09-17: **the script you run is cached like a module.**  `pcl FILE`
   keeps the program's transpile and compiled code under
   `~/.pcl-cache/scripts/`, keyed on the path, the `-I` list, the compiler

@@ -90,6 +90,12 @@ observable difference is.  The big items:
 
 ## Known sharp edges
 
+* **A wrong answer is usually silent — check YOUR program.**  Most programs
+  PCL gets wrong still exit 0 with nothing on stderr.  `pcl --check prog.pl
+  ARGS` runs it under perl AND under PCL and says `IDENTICAL`, or prints the
+  first line where they differ ([`pcl-check.md`](pcl-check.md)); its output
+  is most of a good bug report (`CONTRIBUTING.md`).  It runs the program
+  twice — not for programs whose side effects must happen once.
 * **A statement PCL cannot translate dies when reached**, announced at
   compile time.  So a program runs up to the first such statement; the
   census above says how many there are in the test populations.  Two found

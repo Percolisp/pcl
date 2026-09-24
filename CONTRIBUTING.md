@@ -21,6 +21,12 @@ $ pcl bug.pl
 3,1,2          # <-- wrong
 ```
 
+`pcl --check bug.pl` does both runs for you and prints the first line where
+they differ, perl's beside PCL's (and the two exit statuses) — its output is
+most of a good report ([`docs/pcl-check.md`](docs/pcl-check.md)).  It runs
+the program TWICE, so do not use it on a program whose side effects must
+happen once.
+
 Please include:
 
 * **the smallest program that shows it** (cut everything that still leaves
