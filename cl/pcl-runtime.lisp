@@ -3064,9 +3064,13 @@
 (defvar |$^R| (make-p-box *p-undef*) "Result of last successful (?{...}) regex code block")
 (defvar |$^| (make-p-box "STDOUT_TOP") "FORMAT_TOP_NAME - top-of-page format name (defaults to <handle>_TOP, like Perl)")
 ;; Signal names and numbers, in Perl's own order (Config's sig_name/sig_num on
-;; Linux/glibc).  ONE table serves both consumers: the pre-populated %SIG keys
-;; below and kill()'s name designators (%p-resolve-signal).
-(defparameter *p-signal-numbers*
+;; Linux/glibc).  ONE table serves every consumer: the pre-populated %SIG keys
+;; below, kill()'s name designators (%p-resolve-signal) and the %SIG delivery
+;; machinery (task #2107).  The NUMBERS written here are Linux's and are only
+;; the FALLBACK: *p-signal-numbers* below takes each number from sb-unix /
+;; sb-posix BY NAME wherever SBCL defines the constant, because signal numbers
+;; differ between platforms (USR1 is 10 on Linux and 30 on macOS).
+(defparameter *p-signal-numbers-linux*
   '(("ZERO" . 0)   ("HUP" . 1)    ("INT" . 2)    ("QUIT" . 3)   ("ILL" . 4)
     ("TRAP" . 5)   ("ABRT" . 6)   ("BUS" . 7)    ("FPE" . 8)    ("KILL" . 9)
     ("USR1" . 10)  ("SEGV" . 11)  ("USR2" . 12)  ("PIPE" . 13)  ("ALRM" . 14)
@@ -3081,7 +3085,46 @@
     ("NUM55" . 55) ("NUM56" . 56) ("NUM57" . 57) ("NUM58" . 58) ("NUM59" . 59)
     ("NUM60" . 60) ("NUM61" . 61) ("NUM62" . 62) ("NUM63" . 63) ("RTMAX" . 64)
     ("IOT" . 6)    ("CLD" . 17)   ("POLL" . 29))
-  "Perl signal name -> signal number (Config sig_name/sig_num, Linux/glibc).")
+  "Perl signal name -> signal number (Config sig_name/sig_num, Linux/glibc).
+   The FALLBACK numbers; read *p-signal-numbers*, never this.")
+
+(defun %p-platform-signal-number (name fallback)
+  "NAME's signal number on THIS platform: sb-unix's (or sb-posix's) SIG<NAME>
+   constant when SBCL defines one, else FALLBACK (the Linux number)."
+  (let ((sym (or (find-symbol (concatenate 'string "SIG" name) "SB-UNIX")
+                 (find-symbol (concatenate 'string "SIG" name) "SB-POSIX"))))
+    (if (and sym (boundp sym) (integerp (symbol-value sym)))
+        (symbol-value sym)
+        fallback)))
+
+(defparameter *p-signal-numbers*
+  (mapcar (lambda (e) (cons (car e) (%p-platform-signal-number (car e) (cdr e))))
+          *p-signal-numbers-linux*)
+  "Perl signal name -> this platform's signal number, in perl's name order.")
+
+;;; What the program has STORED in each signal's %SIG slot (task #2107).  A
+;;; signal key of %SIG is a MAGIC box (the %! pattern: a real table whose
+;;; VALUES carry the magic), so keys / exists / each stay ordinary hash
+;;; operations and only the element read and write are computed: the read
+;;; answers from this table, the write goes through %p-sig-set, which
+;;; qualifies a handler NAME and installs the OS disposition.  Reset per
+;;; process by %p-signals-boot (a saved core must not carry the build's values).
+(defvar *p-sig-stored* (make-hash-table :test 'equal)
+  "Signal NAME -> the value $SIG{NAME} holds (a function, a string, or undef).")
+
+(defun %p-sig-cell-box (name)
+  "The %SIG value box for signal NAME: reads *p-sig-stored*, writes through
+   %p-sig-set (defined with the delivery machinery)."
+  (make-p-box (make-p-magic-cell
+               :getter (lambda () (gethash name *p-sig-stored* *p-undef*))
+               :setter (lambda (v) (%p-sig-set name v))
+               :kind :signal)))
+
+(defun %p-signal-cell-box-p (v)
+  "True for a %SIG signal-slot box (the magic %p-sig-cell-box makes)."
+  (and (p-box-p v)
+       (let ((c (p-box-value v)))
+         (and (p-magic-cell-p c) (eq (p-magic-cell-kind c) :signal)))))
 
 ;; %SIG: signal/exception handler hash
 ;; __WARN__ and __DIE__ keys hold Perl callbacks invoked by warn/die.
@@ -3095,9 +3138,32 @@
     (loop for entry in *p-signal-numbers*
           for name = (car entry)
           unless (string= name "ZERO")
-          do (setf (gethash name h) (make-p-box *p-undef*)))
+          do (setf (gethash name h) (%p-sig-cell-box name)))
     h)
   "Perl %SIG - signal handlers")
+
+;;; Held-back SIGCHLD (task #2107): the variables and the macro live here, before
+;;; the process code that uses them; the delivery machinery is further down.
+(defvar *p-chld-deferred* nil
+  "True while PCL itself waits for a run-program child (system, qx): a Perl
+   $SIG{CHLD} handler is held back and run when the wait is over.  perl blocks
+   SIGCHLD around system() for this reason.  (Around qx perl does NOT, and a
+   reaping handler leaves $? at -1 there; under PCL SBCL's own handler reaps a
+   run-program child before any Perl handler runs, so qx keeps its status —
+   docs/not-supported.md \"%SIG\".)")
+
+(defvar *p-chld-pending* nil
+  "A SIGCHLD arrived while *p-chld-deferred* was true.")
+
+(defmacro %p-with-chld-deferred (&body body)
+  "Run BODY — PCL waiting for a child — with a Perl $SIG{CHLD} handler held
+   back; a SIGCHLD that arrived meanwhile is delivered once BODY returns."
+  (let ((outer (gensym "OUTER")))
+    `(let ((,outer *p-chld-deferred*))
+       (multiple-value-prog1 (let ((*p-chld-deferred* t)) ,@body)
+         (when (and (not ,outer) *p-chld-pending*)
+           (setf *p-chld-pending* nil)
+           (%p-sig-deliver sb-unix:sigchld))))))
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -13045,10 +13111,20 @@ which is one of #1140's escape spellings (probed)."
              (when (and sym (fboundp sym))
                (fmakunbound sym)))))
        (multiple-value-bind (v found) (gethash k h)
-         (remhash k h)
-         (if found
-             (%p-hash-unbox-elem v)
-             *p-undef*))))))
+         (cond
+           ;; A %SIG signal slot (#2107): perl's delete is its clear-magic —
+           ;; the old value comes back and the signal returns to its default
+           ;; disposition.  The magic slot itself stays, so a later store is
+           ;; still installed; `exists' therefore stays true where perl's
+           ;; turns false (docs/not-supported.md, "%SIG").
+           ((%p-signal-cell-box-p v)
+            (prog1 (%p-hash-unbox-elem v)
+              (box-set v *p-undef*)))
+           (t
+            (remhash k h)
+            (if found
+                (%p-hash-unbox-elem v)
+                *p-undef*))))))))
 
 (defun p-delete-array (arr idx)
   "Perl delete function for arrays.
@@ -16558,7 +16634,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (%p-flush-all-output)
         (let* ((out-buffering (when (sb-sys:fd-stream-p sb-sys:*stdout*)
                                 (sb-impl::fd-stream-buffering sb-sys:*stdout*)))
-               (pid (sb-posix:fork)))
+               (pid (%p-fork-process)))
           (cond
             ((> pid 0)                    ; ---- parent
              (let ((stream
@@ -16626,6 +16702,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (progn
           (remhash v *p-pipe-pids*)
           (handler-case
+              ;; NOT held back from a Perl $SIG{CHLD} handler: perl's pipe
+              ;; close does not block SIGCHLD either, and a handler that reaps
+              ;; with waitpid(-1, …) takes this child's status — close then
+              ;; answers -1, in perl as here (probed 5.40.3, task #2107).
               (multiple-value-bind (rpid status) (sb-posix:waitpid pid 0)
                 (declare (ignore rpid))
                 (%p-set-status status)
@@ -20339,33 +20419,408 @@ buffer's fill-pointer; everything else falls back to file-length."
          (slept (%p-sleep-seconds n)))
     (if (< slept n) (values (floor slept)) n)))
 
-(defvar *p-alarm-handler-installed* nil
-  "Whether the SIGALRM Unix handler has been installed yet (lazy, on first alarm).")
+;;; ── SIGNALS: %SIG, perl's default dispositions, and delivery (task #2107) ──
+;;; The normative contract is docs/ir-spec.md §8 "%SIG".  In short:
+;;;
+;;;  * A signal slot of %SIG is a magic box (%p-sig-cell-box).  STORING into it
+;;;    installs the OS disposition at once (%p-sig-set -> %p-sig-apply): a code
+;;;    ref or a sub NAME installs ONE dispatcher, "IGNORE" ignores, undef /
+;;;    "" / "DEFAULT" restores perl's default.  The dispatcher looks the
+;;;    handler up AT DELIVERY, so reassigning a handler needs no re-install.
+;;;  * At boot (%p-signals-boot, load time AND sb-ext:*init-hooks* — a saved
+;;;    core must not carry the build's state) the program gets PERL's
+;;;    dispositions, not SBCL's: INT, TERM and ALRM kill BY THE SIGNAL, quietly
+;;;    (SBCL's INT printed a backtrace and exited 1, its TERM exited 0 — a
+;;;    supervisor read success), and PIPE is SIG_DFL, so `pcl prog | head -1`
+;;;    stops the producer (SBCL ignores PIPE).
+;;;  * The signals the SBCL runtime CATCHES when the process boots are its own
+;;;    (the garbage collector's stop signal, the fault handlers, …) — a closed
+;;;    DENY list DERIVED from the running image, never written down, because it
+;;;    differs by platform and SBCL version.  A perl handler for one of them
+;;;    ANNOUNCES once on stderr and is not installed (rule 12, effect-only).
+;;;    INT TERM ALRM CHLD are caught by SBCL too but PCL takes them over;
+;;;    CHLD CHAINS to SBCL's handler, which run-program's bookkeeping needs.
+;;;  * DELIVERY: a signal SBCL defers (its `deferrable' set: HUP INT QUIT ALRM
+;;;    TERM CHLD WINCH …) runs the Lisp handler DIRECTLY — SBCL holds it back
+;;;    while the heap is inconsistent.  A signal SBCL does NOT defer (USR1 above
+;;;    all) must never run Lisp in signal context — measured: a USR1 handler
+;;;    under allocation load kills SBCL with "Handling pending interrupt in
+;;;    pseudo atomic" — so it is BLOCKED in every thread and a RELAY thread
+;;;    sigwait()s for it and hands it to the main thread with
+;;;    sb-thread:interrupt-thread, SBCL's own safe cross-thread interruption.
+;;;    Both routes end in %p-sig-deliver, and a handler that RETURNS ends a
+;;;    running `sleep` early (task #2002).
 
-(defun %p-ensure-alarm-handler ()
-  "Install a SIGALRM handler (once) that dispatches to the Perl $SIG{ALRM} handler.
-   Done lazily so programs that never call alarm keep SBCL's default signal disposition."
-  (unless *p-alarm-handler-installed*
-    (setf *p-alarm-handler-installed* t)
-    (sb-sys:enable-interrupt
-     sb-unix:sigalrm
-     (lambda (signo info ctx)
-       (declare (ignore signo info ctx))
-       (let ((handler (gethash "ALRM" %SIG)))
-         (when (and handler (functionp (unbox handler)))
-           ;; Perl passes the signal name as $_[0]; the handler may die, which
-           ;; unwinds out of any blocking syscall (read) interrupted by the signal.
-           (funcall (unbox handler) (make-p-box "ALRM"))
-           ;; A handler that RETURNS still ends a sleep, with the seconds
-           ;; slept so far (task #2002).
+(defparameter +p-sig-taken-over+ '("INT" "TERM" "ALRM" "CHLD")
+  "Signals the SBCL runtime catches at boot whose PERL meaning PCL implements:
+   INT / TERM / ALRM get perl's default (death by the signal) or the program's
+   handler; CHLD gets the program's handler CHAINED to SBCL's.  Every OTHER
+   signal SBCL catches at boot is runtime-owned (*p-sig-runtime-owned*).")
+
+(defvar *p-sig-runtime-owned* nil
+  "Signal NUMBERS the SBCL runtime owns in this process: caught by SBCL when
+   the process booted, minus +p-sig-taken-over+.  Derived by %p-signals-boot.")
+
+(defvar *p-sig-main-thread* nil
+  "The thread Perl handlers run in (the program's thread).")
+
+(defun %p-signal-number (name)
+  "NAME's (\"USR1\") signal number on this platform, or NIL."
+  (cdr (assoc name *p-signal-numbers* :test #'string=)))
+
+(defun %p-signal-name (signo)
+  "The canonical perl NAME of SIGNO: the first name in perl's order (so CHLD,
+   not its alias CLD), or NIL."
+  (car (find signo (rest *p-signal-numbers*) :key #'cdr)))
+
+(defun %p-sig-disposition (signo)
+  "SIGNO's disposition in this process: :default, :ignore, :caught, or :invalid
+   when the kernel refuses the number.  Asked with sigaction(2) and a NULL new
+   action.  The handler is the FIRST member of struct sigaction on Linux, macOS
+   and the BSDs alike, so one pointer-sized word at offset 0 of a generously
+   sized buffer answers without knowing the struct's layout; SIG_DFL is 0 and
+   SIG_IGN is 1 on all of them.  No /proc: this is the portable question."
+  (sb-alien:with-alien ((buf (array (sb-alien:unsigned 64) 64)))
+    (let ((sap (sb-alien:alien-sap buf)))
+      (dotimes (i 64) (setf (sb-sys:sap-ref-64 sap (* i 8)) 0))
+      (if (/= 0 (sb-alien:alien-funcall
+                 (sb-alien:extern-alien "sigaction"
+                                        (function sb-alien:int sb-alien:int
+                                                  sb-alien:system-area-pointer
+                                                  sb-alien:system-area-pointer))
+                 signo (sb-sys:int-sap 0) sap))
+          :invalid
+          (case (sb-sys:sap-ref-word sap 0)
+            (0 :default)
+            (1 :ignore)
+            (t :caught))))))
+
+(defun %p-sig-kind (value)
+  "What a stored %SIG VALUE asks for: :handler, :ignore or :default."
+  (let ((v (unbox value)))
+    (cond ((functionp v) :handler)
+          ((or (null v) (eq v *p-undef*)) :default)
+          ((stringp v)
+           (cond ((string= v "IGNORE") :ignore)
+                 ((or (string= v "DEFAULT") (string= v "")) :default)
+                 (t :handler)))
+          (t :handler))))
+
+(defun %p-sig-qualify (value)
+  "perl's set-magic on a handler NAME: an unqualified name gets `main::'
+   (always main — probed 5.40.3, even under `package P'); IGNORE, DEFAULT, the
+   empty string and a name holding `::' or `'' are stored as given (#1029)."
+  (let ((v (unbox value)))
+    (if (and (stringp v)
+             (plusp (length v))
+             (not (member v '("IGNORE" "DEFAULT") :test #'string=))
+             (not (search "::" v))
+             (not (find #\' v)))
+        (concatenate 'string "main::" v)
+        value)))
+
+(defun %p-sig-current-value (name)
+  "The value $SIG{NAME} holds right now.  Read through %SIG itself, not the
+   stored table, so a `local %SIG' or a wholesale `%SIG = (...)' still answers."
+  (let ((b (gethash name %SIG)))
+    (if b (unbox b) *p-undef*)))
+
+(defun %p-sig-set (name value)
+  "The STORE half of a %SIG signal slot: qualify a handler name, remember it,
+   and make the OS disposition match (task #2107, #1029)."
+  (let ((v (%p-sig-qualify value)))
+    (setf (gethash name *p-sig-stored*) v)
+    (%p-sig-apply name)
+    v))
+
+;;; ── Delivery ────────────────────────────────────────────────────────────
+(defun %p-sig-named-sub (name)
+  "The function a handler NAME (\"main::h\") denotes, or NIL when no such sub
+   is defined — perl then does nothing (it warns only under `use warnings')."
+  (let ((sym (%p-resolve-sub-symbol name)))
+    (and sym (fboundp sym) (symbol-function sym))))
+
+(defun %p-sig-die-by-default (signo)
+  "Take SIGNO's DEFAULT action now, as the kernel would have: reset the
+   disposition, unblock the signal in this thread and raise it.  Returns only
+   when the default action does not end the process (CHLD, WINCH, CONT, …)."
+  (sb-sys:enable-interrupt signo :default)
+  (%p-sig-mask :unblock (list signo))
+  (sb-posix:kill (sb-posix:getpid) signo)
+  nil)
+
+(defun %p-sig-deliver (signo)
+  "Run the Perl side of SIGNO: the handler $SIG{NAME} holds NOW, called with
+   the signal NAME as $_[0].  A handler that returns ends a running sleep
+   early (task #2002); one that dies unwinds from wherever the program was,
+   which is how the `alarm' timeout idiom leaves a blocking read."
+  (if (and *p-chld-deferred* (eql signo sb-unix:sigchld))
+      (setf *p-chld-pending* t)
+      (let* ((name (%p-signal-name signo))
+             (value (if name (%p-sig-current-value name) *p-undef*)))
+        (ecase (%p-sig-kind value)
+          (:handler
+           (let ((fn (if (functionp value)
+                         value
+                         (%p-sig-named-sub (to-string value)))))
+             (when fn
+               (funcall fn (make-p-box name))))
            (when *p-sleep-wakeup*
-             (throw *p-sleep-wakeup* nil))))))))
+             (throw *p-sleep-wakeup* nil)))
+          (:ignore nil)
+          (:default (%p-sig-die-by-default signo))))))
+
+(defun %p-sig-direct-handler (signo info context)
+  "The Lisp handler installed for a signal SBCL defers (see the header)."
+  (declare (ignore info context))
+  (%p-sig-deliver signo))
+
+(defun %p-sig-chld-handler (signo info context)
+  "SIGCHLD with a Perl handler: SBCL's own handler FIRST (run-program's child
+   bookkeeping reaps the children it started and records their statuses), then
+   the Perl handler — which therefore never steals a status PCL is waiting
+   for."
+  (sb-unix::sigchld-handler signo info context)
+  (%p-sig-deliver signo))
+
+;;; ── Signal masks and the relay thread ───────────────────────────────────
+(defparameter *p-sig-mask-how*
+  (cond ((member :linux *features*) '(:block 0 :unblock 1))
+        ((or (member :darwin *features*) (member :bsd *features*))
+         '(:block 1 :unblock 2))
+        (t nil))
+  "pthread_sigmask's HOW argument per platform (SIG_BLOCK / SIG_UNBLOCK are
+   not the same numbers on Linux and on macOS / the BSDs, and SBCL exports
+   neither).  NIL on a platform not listed: then no signal can be relayed, and
+   a handler that needs the relay announces instead (%p-sig-relay).")
+
+(defun %p-sigset-fill (sap signos)
+  "Make the sigset_t at SAP hold exactly SIGNOS (sigemptyset + sigaddset)."
+  (sb-alien:alien-funcall
+   (sb-alien:extern-alien "sigemptyset"
+                          (function sb-alien:int sb-alien:system-area-pointer))
+   sap)
+  (dolist (s signos)
+    (sb-alien:alien-funcall
+     (sb-alien:extern-alien "sigaddset"
+                            (function sb-alien:int sb-alien:system-area-pointer
+                                      sb-alien:int))
+     sap s))
+  sap)
+
+(defun %p-sig-mask (how signos)
+  "Block (HOW :block) or unblock (:unblock) SIGNOS in the CALLING thread."
+  (let ((code (getf *p-sig-mask-how* how)))
+    (when (and code signos)
+      ;; 256 bytes is at least twice any platform's sigset_t (glibc: 128).
+      (sb-alien:with-alien ((set (array (sb-alien:unsigned 64) 32)))
+        (sb-alien:alien-funcall
+         (sb-alien:extern-alien "pthread_sigmask"
+                                (function sb-alien:int sb-alien:int
+                                          sb-alien:system-area-pointer
+                                          sb-alien:system-area-pointer))
+         code (%p-sigset-fill (sb-alien:alien-sap set) signos) (sb-sys:int-sap 0))))))
+
+(defun %p-sig-deferred-by-sbcl-p (signo)
+  "True when SBCL DEFERS SIGNO while its heap is inconsistent (the runtime's
+   own deferrable_sigset), so a Lisp handler for it is safe.  Asked of the
+   running image, not assumed.  PIPE is treated as deferred: it is raised
+   SYNCHRONOUSLY by a write, i.e. while the thread sits in a system call."
+  (or (eql signo sb-unix:sigpipe)
+      (let ((addr (sb-sys:find-foreign-symbol-address "deferrable_sigset")))
+        (and addr
+             (= 1 (sb-alien:alien-funcall
+                   (sb-alien:extern-alien "sigismember"
+                                          (function sb-alien:int
+                                                    sb-alien:system-area-pointer
+                                                    sb-alien:int))
+                   (sb-sys:int-sap addr) signo))))))
+
+(defvar *p-sig-relayed* nil
+  "Signal numbers whose Perl handler runs through the relay thread.")
+(defvar *p-sig-relay-thread* nil)
+(defvar *p-sig-relay-stop* nil
+  "Set before the relay thread is woken to make it leave its loop.")
+
+(defun %p-sig-relay-loop (signos main)
+  "The relay thread: sigwait() for SIGNOS (blocked in every thread) and hand
+   each one to MAIN, where it runs like any interruption."
+  (sb-alien:with-alien ((set (array (sb-alien:unsigned 64) 32))
+                        (sig sb-alien:int))
+    (let ((sap (%p-sigset-fill (sb-alien:alien-sap set) signos)))
+      (loop
+       (let ((rc (sb-alien:alien-funcall
+                  (sb-alien:extern-alien "sigwait"
+                                         (function sb-alien:int
+                                                   sb-alien:system-area-pointer
+                                                   (* sb-alien:int)))
+                  sap (sb-alien:addr sig))))
+         (when *p-sig-relay-stop* (return))
+         (when (zerop rc)
+           (let ((s sig))
+             (ignore-errors
+               (sb-thread:interrupt-thread main (lambda () (%p-sig-deliver s)))))))))))
+
+(defun %p-sig-relay-stop ()
+  "Stop the relay thread (a fork needs a single-threaded process).  It is
+   woken with a thread-directed instance of a signal it waits for."
+  (let ((th *p-sig-relay-thread*))
+    (when (and th (sb-thread:thread-alive-p th) *p-sig-relayed*)
+      (setf *p-sig-relay-stop* t)
+      (sb-alien:alien-funcall
+       (sb-alien:extern-alien "pthread_kill"
+                              (function sb-alien:int sb-alien:unsigned-long
+                                        sb-alien:int))
+       (sb-thread::thread-os-thread th) (first *p-sig-relayed*))
+      (sb-thread:join-thread th :default nil :timeout 5))
+    (setf *p-sig-relay-thread* nil
+          *p-sig-relay-stop* nil)))
+
+(defun %p-sig-relay-start ()
+  "Start the relay thread for *p-sig-relayed*, after blocking those signals in
+   this thread.  The finalizer thread is restarted so it inherits the block: a
+   process-directed signal goes to ANY thread that does not block it, and
+   there its default action would end the process."
+  (when *p-sig-relayed*
+    (setf *p-sig-main-thread* sb-thread:*current-thread*)
+    (%p-sig-mask :block *p-sig-relayed*)
+    (when (and (fboundp 'sb-impl::finalizer-thread-stop)
+               (fboundp 'sb-impl::finalizer-thread-start))
+      (funcall 'sb-impl::finalizer-thread-stop)
+      (funcall 'sb-impl::finalizer-thread-start))
+    (let ((signos (copy-list *p-sig-relayed*))
+          (main sb-thread:*current-thread*))
+      (setf *p-sig-relay-thread*
+            (sb-thread:make-thread (lambda () (%p-sig-relay-loop signos main))
+                                   :name "pcl signal relay")))))
+
+(defun %p-fork-process ()
+  "sb-posix:fork for PCL's forks (fork, the forking pipe open).  SBCL refuses
+   to fork a multi-threaded process, so the relay thread is stopped first and
+   restarted afterwards in BOTH processes (the child keeps the parent's
+   handlers, as in perl)."
+  (let ((relaying (and *p-sig-relay-thread* t)))
+    (when relaying (%p-sig-relay-stop))
+    (unwind-protect (sb-posix:fork)
+      (when relaying (%p-sig-relay-start)))))
+
+(defun %p-sig-relay (signo name)
+  "Run SIGNO's Perl handler through the relay thread."
+  (cond ((null *p-sig-mask-how*)
+         (%p-announce-unsupported
+          "%SIG" (format nil "$SIG{~A}" name)
+          "this platform has no signal relay; the handler is not installed"))
+        ((member signo *p-sig-relayed*) nil)
+        (t
+         (%p-sig-relay-stop)
+         (push signo *p-sig-relayed*)
+         (sb-sys:enable-interrupt signo :default)
+         (%p-sig-relay-start))))
+
+(defun %p-sig-unrelay (signo)
+  "Stop relaying SIGNO (its handler was replaced by IGNORE or DEFAULT)."
+  (when (member signo *p-sig-relayed*)
+    (%p-sig-relay-stop)
+    (setf *p-sig-relayed* (remove signo *p-sig-relayed*))
+    (%p-sig-mask :unblock (list signo))
+    (%p-sig-relay-start)))
+
+;;; ── Applying a stored value ─────────────────────────────────────────────
+(defun %p-sig-install (signo kind name)
+  "Give an ordinary (not runtime-owned, not CHLD) signal the disposition KIND."
+  (ecase kind
+    (:handler
+     (if (%p-sig-deferred-by-sbcl-p signo)
+         (sb-sys:enable-interrupt signo #'%p-sig-direct-handler)
+         (%p-sig-relay signo name)))
+    (:ignore
+     (%p-sig-unrelay signo)
+     (sb-sys:enable-interrupt signo :ignore))
+    (:default
+     (%p-sig-unrelay signo)
+        (sb-sys:enable-interrupt signo :default))))
+
+(defun %p-sig-apply-chld (kind name)
+  "SIGCHLD: SBCL's own handler stays in force in every case (run-program
+   needs it); a Perl handler is CHAINED after it."
+  (cond ((not (fboundp 'sb-unix::sigchld-handler))
+         (unless (eq kind :default)
+           (%p-announce-unsupported
+            "%SIG" (format nil "$SIG{~A}" name)
+            "this SBCL has no SIGCHLD handler to chain to; the handler is not installed")))
+        ((eq kind :handler)
+         (sb-sys:enable-interrupt sb-unix:sigchld #'%p-sig-chld-handler))
+        (t
+         (when (eq kind :ignore)
+           (%p-announce-unsupported
+            "%SIG" "$SIG{CHLD} = 'IGNORE'"
+            "children are NOT reaped automatically (run-program needs SIGCHLD)"))
+         (sb-sys:enable-interrupt sb-unix:sigchld #'sb-unix::sigchld-handler))))
+
+(defun %p-sig-catchable-p (signo)
+  "Whether SIGNO can be given a disposition at all (never KILL / STOP, and
+   not a number the C library reserves for itself)."
+  (and (plusp signo)
+       (not (eql signo sb-unix:sigkill))
+       (not (eql signo sb-unix:sigstop))
+       (not (eq (%p-sig-disposition signo) :invalid))))
+
+(defun %p-sig-apply (name)
+  "Make signal NAME's OS disposition match the value $SIG{NAME} holds now."
+  (let ((signo (%p-signal-number name)))
+    (when (and signo (%p-sig-catchable-p signo))
+      (let ((kind (%p-sig-kind (%p-sig-current-value name))))
+        (cond ((member signo *p-sig-runtime-owned*)
+               (unless (eq kind :default)
+                 (%p-announce-unsupported
+                  "%SIG" (format nil "$SIG{~A}" name)
+                  "the SBCL runtime uses this signal itself; the handler is NOT installed")))
+              ((eql signo sb-unix:sigchld) (%p-sig-apply-chld kind name))
+              (t (%p-sig-install signo kind name)))))))
+
+;;; ── Boot ────────────────────────────────────────────────────────────────
+(defun %p-sig-boot-scan ()
+  "Read every signal's disposition as the process booted, BEFORE PCL touches
+   one: the caught ones (minus +p-sig-taken-over+) become the runtime-owned
+   deny list, and an inherited SIG_IGN (`nohup', a shell's background job) is
+   what perl reports as $SIG{NAME} eq 'IGNORE'.  PIPE is left out of the
+   second half: SBCL ignores it itself, so an IGN there says nothing."
+  (let ((taken (mapcar #'%p-signal-number +p-sig-taken-over+))
+        (owned nil))
+    (dolist (e (rest *p-signal-numbers*))
+      (let* ((signo (cdr e))
+             (d (if (%p-sig-catchable-p signo) (%p-sig-disposition signo) :invalid)))
+        (case d
+          (:caught (unless (member signo taken) (pushnew signo owned)))
+          (:ignore (unless (eql signo sb-unix:sigpipe)
+                     (setf (gethash (car e) *p-sig-stored*) "IGNORE"))))))
+    owned))
+
+(defun %p-signals-boot ()
+  "Per PROCESS: forget the build's %SIG, derive the deny list, and put perl's
+   default dispositions where SBCL installed its own (see the header)."
+  (setf *p-sig-main-thread* sb-thread:*current-thread*
+        *p-sig-relayed* nil
+        *p-sig-relay-thread* nil
+        *p-sig-relay-stop* nil
+        *p-chld-pending* nil)
+  (clrhash *p-sig-stored*)
+  (setf *p-sig-runtime-owned* (%p-sig-boot-scan))
+  (dolist (name '("INT" "TERM" "ALRM" "PIPE"))
+    (sb-sys:enable-interrupt (%p-signal-number name) :default))
+  nil)
+
+(%p-signals-boot)
+(push (lambda () (%p-signals-boot)) sb-ext:*init-hooks*)
 
 (defun p-alarm (&optional secs)
   "Perl alarm - schedule SIGALRM after SECS seconds (0 cancels a pending alarm).
-   When it fires, $SIG{ALRM} is invoked.  Returns the number of seconds that were
-   remaining on any previously-scheduled alarm (Perl semantics)."
-  (%p-ensure-alarm-handler)
+   When it fires, $SIG{ALRM} is invoked; with no handler the process dies by
+   SIGALRM, as perl's does.  Returns the seconds that were remaining on any
+   previously-scheduled alarm.  The disposition is re-derived from the value
+   $SIG{ALRM} holds NOW, so a handler reached through `local %SIG = (…)' —
+   which replaces the magic slot with a plain one — is installed too."
+  (%p-sig-apply "ALRM")
   (sb-posix:alarm (if secs (truncate (to-number secs)) 0)))
 
 (defun p-evalbytes (s)
@@ -20814,20 +21269,25 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-system-run (cmd prog-args)
   "Spawn for p-system and return the raw wait status.  PROG-ARGS nil means the
-   one-argument form, which perl hands to the shell."
-  (let ((proc (if prog-args
-                  (sb-ext:run-program cmd prog-args
-                                      :search t
-                                      :input nil
-                                      :output *standard-output*
-                                      :error *error-output*
-                                      :wait t)
-                  (sb-ext:run-program "/bin/sh" (list "-c" cmd)
-                                      :input nil
-                                      :output *standard-output*
-                                      :error *error-output*
-                                      :wait t))))
-    (ash (sb-ext:process-exit-code proc) 8)))
+   one-argument form, which perl hands to the shell.  A child KILLED by a
+   signal is the signal number, not number << 8 — the one decoder
+   %p-process-wait-status, which qx and the pipe close already use.  A Perl
+   $SIG{CHLD} handler is held back until the child's status is read (perl
+   blocks SIGCHLD around system for the same reason)."
+  (%p-with-chld-deferred
+   (let ((proc (if prog-args
+                   (sb-ext:run-program cmd prog-args
+                                       :search t
+                                       :input nil
+                                       :output *standard-output*
+                                       :error *error-output*
+                                       :wait t)
+                   (sb-ext:run-program "/bin/sh" (list "-c" cmd)
+                                       :input nil
+                                       :output *standard-output*
+                                       :error *error-output*
+                                       :wait t))))
+     (%p-process-wait-status proc))))
 
 (defun p-system (&rest args)
   "Perl system - execute a shell command.
@@ -20865,7 +21325,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    single-threaded Perl fork/exec and fork/exit works.)"
   (%p-flush-all-output)                  ; perl flushes EVERY handle, not just the std three
   (handler-case
-      (let ((pid (sb-posix:fork)))       ; 0 in child, >0 in parent
+      (let ((pid (%p-fork-process)))     ; 0 in child, >0 in parent
         ;; perl REFRESHES $$ in the child (task #2094).  Leaving the parent's
         ;; pid there is silent and dangerous: `kill SIG, $$` in the child hits
         ;; the PARENT, and "/tmp/x.$$" collides between the two.  The pipe-open
@@ -20970,8 +21430,15 @@ buffer's fill-pointer; everything else falls back to file-length."
          (n 0))
     (loop for pt across targets do
           (let ((p (truncate (to-number (if (p-box-p pt) (unbox pt) pt)))))
-            (handler-case (progn (sb-posix:kill p sig) (incf n))
-              (error () (%pcl-save-errno)))))
+            (if (and (member sig *p-sig-relayed*) (eql p (sb-posix:getpid)))
+                ;; A RELAYED signal sent to this process itself (#2107): perl
+                ;; runs the handler before `kill' returns — as the kernel does
+                ;; for a directly handled one — so it is delivered here and now
+                ;; rather than round the relay thread, which would let the
+                ;; statements after the kill run first.
+                (progn (%p-sig-deliver sig) (incf n))
+                (handler-case (progn (sb-posix:kill p sig) (incf n))
+                  (error () (%pcl-save-errno))))))
     n))
 
 (defun %p-resolve-signal (signal)
@@ -21045,10 +21512,11 @@ buffer's fill-pointer; everything else falls back to file-length."
           (%pcl-save-errno)
           (%p-set-status -1)
           (if (eq *wantarray* t) (make-array 0 :adjustable t :fill-pointer 0) ""))
-        (let ((output (with-output-to-string (s)
-                        (loop for c = (read-char (sb-ext:process-output proc) nil nil)
-                              while c do (write-char c s)))))
-          (sb-ext:process-wait proc)
+        (let ((output (%p-with-chld-deferred
+                       (prog1 (with-output-to-string (s)
+                                (loop for c = (read-char (sb-ext:process-output proc) nil nil)
+                                      while c do (write-char c s)))
+                         (sb-ext:process-wait proc)))))
           ;; `$?` IS THE COMMAND'S STATUS, in both contexts (task #2101).  It was
           ;; left untouched, so `my $out = `cmd`; die if $?;` read whatever an
           ;; earlier `system` had put there — and with no earlier `system` a
@@ -27090,9 +27558,16 @@ buffer's fill-pointer; everything else falls back to file-length."
         (sb-posix:unsetenv kv)
         (vector :env old syn))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
-        ;; Install fresh undef box so body assignments don't clobber saved box.
-        (setf (gethash kv hv) (make-p-box nil))
-        (vector :hash old-ex old-bx))))
+        (if (%p-signal-cell-box-p old-bx)
+            ;; A %SIG signal slot keeps its MAGIC box (#2107): the VALUE is
+            ;; saved and cleared through the setter, so the disposition follows
+            ;; the local and the restore reinstalls the saved handler.
+            (prog1 (vector :magic (unbox old-bx) old-bx)
+              (box-set old-bx *p-undef*))
+            (progn
+              ;; Install fresh undef box so body assignments don't clobber saved box.
+              (setf (gethash kv hv) (make-p-box nil))
+              (vector :hash old-ex old-bx))))))
 
 (defun %p-lhe-restore (hv kv saved)
   "Restore hash[key] after local exits."
@@ -27102,7 +27577,9 @@ buffer's fill-pointer; everything else falls back to file-length."
           (setf *p-runtime-env-hidden* (aref saved 2)))
         (if old (sb-posix:setenv kv old 1) (sb-posix:unsetenv kv)))
       (let ((old-ex (aref saved 1)) (old-bx (aref saved 2)))
-        (if old-ex (setf (gethash kv hv) old-bx) (remhash kv hv)))))
+        (cond ((eq (aref saved 0) :magic) (box-set old-bx old-ex))
+              (old-ex (setf (gethash kv hv) old-bx))
+              (t (remhash kv hv))))))
 
 (defun %p-lhe-init (hv kv init-val)
   "Save hash[key] and install init-val. Returns saved state vector.
@@ -27121,10 +27598,14 @@ buffer's fill-pointer; everything else falls back to file-length."
         (if s (sb-posix:setenv kv s 1) (sb-posix:unsetenv kv))
         (vector :env old syn))
       (multiple-value-bind (old-bx old-ex) (gethash kv hv)
-        (let ((bx (make-p-box nil)))
-          (box-set bx init-val)
-          (setf (gethash kv hv) bx))
-        (vector :hash old-ex old-bx))))
+        (if (%p-signal-cell-box-p old-bx)
+            ;; %SIG signal slot: see %p-lhe-save.
+            (prog1 (vector :magic (unbox old-bx) old-bx)
+              (box-set old-bx init-val))
+            (let ((bx (make-p-box nil)))
+              (box-set bx init-val)
+              (setf (gethash kv hv) bx)
+              (vector :hash old-ex old-bx))))))
 
 (defmacro p-local-hash-elem (hash-var key-form &body body)
   "Save/restore one hash entry. Like Perl's local $hash{key}.
