@@ -453,6 +453,19 @@ sub _fix_spaced_sigils {
 sub _desugar_loop_modifiers {
   my ($doc) = @_;
   my $changed = 0;
+  # A SUB NAMED LIKE THE KEYWORD (`state sub for() { 3 }` … `$t += for for
+  # 1..2;`, t/op/lexsub.t's shapes, task #374(b)) makes the same word a TERM
+  # in some positions — the lexsub rename decides which, position by
+  # position, AFTER this pass.  A document that declares one keeps the old
+  # route for that modifier word.
+  my %kw_sub;
+  for my $w (@{ $doc->find(sub {
+                 $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }) || [] }) {
+    my $n = $w->snext_sibling;
+    $kw_sub{ $n->content } = 1
+      if $n && $n->isa('PPI::Token::Word')
+         && $n->content =~ /^(?:for|foreach|while|until)$/;
+  }
   # INNERMOST FIRST (reverse document order): a statement nested inside
   # another one's EXPR is rewritten before the outer one reads its text.
   # A `local …` statement is a Statement::Variable to PPI; `my`/`our`/`state`
@@ -472,7 +485,7 @@ sub _desugar_loop_modifiers {
     } 0 .. $#ch;
     next if !defined $mi;
     my $mod = $ch[$mi]->content;
-    next if $mod !~ /^(?:for|foreach|while|until)$/;
+    next if $mod !~ /^(?:for|foreach|while|until)$/ || $kw_sub{$mod};
     my @expr = @ch[0 .. $mi - 1];
     my @rest = @ch[$mi + 1 .. $#ch];
     my $semi = (@rest && $rest[-1]->isa('PPI::Token::Structure')
@@ -500,7 +513,10 @@ sub _desugar_loop_modifiers {
     my $etext = join '', map { $_->content } @expr;
     my ($body, $gap) = $etext =~ /^(.*?)(\s*)\z/s;
     my @toks = $st->tokens;
-    $toks[0]->set_content("$mod $list { $body;$gap }");
+    # The statement's own `;` stays after the block: PPI's lexer reads a `*`
+    # right after a block's `}` as MULTIPLICATION, so the next statement
+    # `*{"name"} = …` (Moo::Role:71) would lex as `} * {…}` without it.
+    $toks[0]->set_content("$mod $list { $body;$gap }" . ($semi ? ';' : ''));
     $_->set_content('') for @toks[1 .. $#toks];
     $changed = 1;
   }

@@ -210,9 +210,11 @@ diag "";
 diag "-------- Regression tests (session 5):";
 
 # Regression: for/foreach statement modifier should use p-foreach, not p-for
-# "EXPR for LIST" is foreach, not C-style for
+# "EXPR for LIST" is foreach, not C-style for.  Since s494p (#2098) the
+# modifier IS its block loop, so a bare range takes the counted foreach
+# (was `(p-foreach ($_ (p-.. 1 3)) …)`, the v1 statement fallback).
 output_contains('push @foo, $_ for 1..3;',
-                '(p-foreach ($_ (p-.. 1 3)) (p-push @foo $_))',
+                '(p-foreach-range-raw ($_ 1 3) (p-push @foo $_))',
                 'Regression: for statement modifier uses p-foreach');
 
 # Regression: our %hash = (...) should generate p-hash-= with vector (not progn)
