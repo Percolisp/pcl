@@ -2016,6 +2016,35 @@ so `copy`/`move`/`cp` did not exist under PCL at all.  Guard rows in
 
 ---
 
+## 33. A `*` right after a BLOCK's `}` is lexed as MULTIPLICATION when the block's last statement ends in a hash subscript  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 installs the glob, `x()` prints 7):
+
+```perl
+for (1) { $h{$_}; }
+*{"main::x"} = sub { 7 };
+```
+
+**PPI 1.291 tokens**: `… Structure[}] Structure[;] Structure[}] Operator[*] Structure[{] …`
+— the `*` that starts the second statement is an **Operator**.
+**Expected**: `Cast[*]`, as PPI itself answers when the block's last statement
+does not end in a subscript (`for (1) { f($_); }` → `Cast[*]`) or has no `;`
+(`for (1) { $h{$_} }` → `Cast[*]`).  The `}` that closes a compound
+statement's block ends the statement, so the next `*` is in TERM position;
+PPI's operator-vs-cast guess evidently looks at the tokens before the `}`
+(the `}` of `$h{$_}`) instead of at what the `}` closes.
+
+**PCL's workaround** (s494p, task #2098): `Pl::Parser::_desugar_loop_modifiers`
+rewrites `EXPR for LIST;` into `for (LIST) { EXPR; }` and KEEPS the statement's
+own `;` after the block (`for (LIST) { EXPR; };`) — the `;` puts the next `*`
+back in term position.  Found by the full gate: Moo::Role line 68–71
+(`_install_tracked $target => $_ => $install{$_} for sort keys %install;`
+followed by `*{_getglob("${target}::meta")} = …`) made every Moo test die.
+Source that is WRITTEN with this shape still mis-lexes (not seen in any
+population yet).  Upstream row: `docs/ppi-bug-report.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

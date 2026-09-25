@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 82;
+use Test::More tests => 83;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -969,4 +969,15 @@ for my $c (
     my ($tok) = grep { $_->content eq '$(' } $doc->tokens;
     is( ref($tok), 'PPI::Token::Magic',
         '`$(` under the same feature is a Token::Magic (control)' );
+}
+
+# §33 -- a `*` right after a compound statement's block is lexed as an
+# OPERATOR when the block's last statement ends in a hash subscript, although
+# the `}` ends the statement and the `*` starts a glob assignment.
+{
+    my $src = qq{for (1) { \$h{\$_}; }\n*{"main::x"} = sub { 7 };\n};
+    my $doc = PPI::Document->new(\$src);
+    my ($tok) = grep { $_->content eq '*' } $doc->tokens;
+    is( ref($tok), 'PPI::Token::Cast',
+        '`*` after a block ending in `$h{$_};` is a Token::Cast' );
 }
