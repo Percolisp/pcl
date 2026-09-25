@@ -274,6 +274,20 @@ my @benches = (
   # against: before it, every one of these evaluations re-ran the perl->ppcre
   # pattern translation and rebuilt the scanner-cache key.
   ['subste',    "$HN my \@w = map { \"field-\$_ value\" } 1..20; my \$c = 0; for (1..\$n) { for my \$s (\@w) { my \$u = \$s; \$u =~ s/([aeiou])/uc(\$1)/ge; \$u =~ s/\\s+/_/g; \$c += length(\$u) } } print \"\$c\\n\";", 3000, 0],
+  # ---- THE COMPLEXITY-CLASS ROWS (task #2098, s494p) ----------------------
+  # Each was QUADRATIC before round 35 and is amortized linear after it; a row
+  # that turns slow again means its lever regressed (the array WINDOW for the
+  # first three, the loop-modifier desugar / append spelling for the last two).
+  ['shiftq',    "$HN my \@a = (1..\$n); my \$s = 0; \$s += shift \@a while \@a; print \"\$s\\n\";", 2_000_000, 0],
+  ['unshiftq',  "$HN my \@a; unshift \@a, \$_ for 1..\$n; print scalar(\@a), \" \$a[0] \$a[-1]\\n\";", 1_000_000, 0],
+  ['splice0',   "$HN my \@a = (1..\$n); my \$s = 0; while (\@a) { my (\$x) = splice(\@a, 0, 1); \$s += \$x } print \"\$s\\n\";", 1_000_000, 0],
+  ['catmod',    "$HN my \$s = ''; \$s .= 'xy' for 1..\$n; print length(\$s), \"\\n\";", 10_000_000, 0],
+  ['catself',   "$HN my \$s = ''; for my \$i (1..\$n) { \$s = \$s . 'xy' } print length(\$s), \"\\n\";", 10_000_000, 0],
+  # The two `map` shapes of task #2198: a block returning TWO elements (every
+  # element takes %p-map-copy-scalar's fresh box since #2005) and its
+  # one-element control.
+  ['mapmulti',  "$HN my \$s = 0; for (1..\$n) { my \@p = map { (\$_, \$_ * 2) } 1 .. 200; \$s += \@p } print \"\$s\\n\";", 60_000, 0],
+  ['mapsingle', "$HN my \$s = 0; for (1..\$n) { my \@p = map { \$_ * 2 } 1 .. 400; \$s += \@p } print \"\$s\\n\";", 60_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------

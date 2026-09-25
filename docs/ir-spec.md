@@ -221,7 +221,12 @@ every use is a *transient* stringify/boolean read may further become a
 **str-buffer** (S1): the slot holds an adjustable fill-pointer string,
 plain writes replace it via `(%pcl-str-buffer V)`, and `.=` appends in
 place via `(%pcl-str-append $s V)` — O(1) amortized instead of a fresh
-concatenation per append.  **Consumer contract: the buffer object never
+concatenation per append.  `$s = $s . REST` IS that append (perl compiles
+both to the same in-place concatenation): on a licensed slot it emits
+`(%pcl-str-append $s REST)` too, when REST binds tighter than `.` at depth
+0 (`x * / % ** -> =~ !~` only; `$s = $s . $a + 1` is `($s . $a) + 1` and
+is not an append) — ONE predicate, `Pl::VarAnnotator::append_rest`, read by
+the verdict and the emitter (s494p, task #2098).  **Consumer contract: the buffer object never
 crosses the IR boundary.**  Every escape channel — sub return, call
 argument, store into a box/container, package var, hash key (the table
 retains the key object) — is an opaque/retaining use that disqualifies
@@ -387,6 +392,34 @@ writes, and growth via `$#a`) checks the fill pointer and raises perl's
 `Modification of a read-only value attempted`.  A port that has no equivalent
 of "fixed-size vector" needs an explicit per-array flag consulted at those same
 points; nothing else in this spec changes.
+
+**The storage WINDOW (normative, s494p, task #2098).**  An array's elements
+live in a data vector, and the array names a WINDOW of it: `shift`,
+`splice(@a, 0, K)` with no replacement list, and `unshift` into room in
+front move the window's START instead of moving the elements, so each is
+amortized O(1) per element (perl keeps the same kind of offset; a drain of
+200k elements was 166 s when shift copied every element down).  What a
+consumer of the runtime may and may not assume:
+
+* the array OBJECT never changes identity — every holder of the array (a
+  reference, an `@_` alias, an `each` iterator) sees the shift;
+* element *i* is element *i* of the array (`aref`, `length`, every
+  sequence function), **never** slot *i* of its data vector: a shifted array
+  is DISPLACED into its data vector, and the one accessor that hands out
+  the data vector, `%p-vec-data`, answers NIL for it (its contract: NIL =
+  "use the ordinary path", same answer) — a fast path that indexed the data
+  vector directly would read from the wrong origin;
+* growth (`push` past capacity, `adjust-array`) and a drain to empty put the
+  window back at slot 0, and the fast paths return;
+* an array of at most 16 elements that is not already displaced shifts and
+  unshifts by COPYING through its data vector instead, so a short `@_`
+  stays undisplaced (`my $self = shift; my %o = @_` keeps the bulk copy).
+Example: `my @q = (1 .. 40); my $r = \@q; shift @q; shift @q;` leaves
+`$r->[0] == 3` and `@$r == 38`, with `@q` displaced by 2 into the same data
+vector.  The window is set with SBCL's `set-array-header`; a runtime that
+finds it misbehaving at load (a self-test) falls back to the copying arm
+and says so once on stderr — the answers are identical, only the
+complexity class differs.
 
 **Hole aliasing (defelem, s316e):** when a hole slot is *aliased* — by a
 foreach/grep/map `$_` binding or by spreading the array into `@_` — the
@@ -2023,6 +2056,20 @@ body…)`), `p-foreach ((VAR LIST) body…)` and its read-only twin
 `:label NAME` (must be first key) and `:continue (progn …)`.  The foreach
 family additionally accepts `:my t` (after `:label`, before the body) —
 see "Loop variable: lexical or localized" below.
+
+**A loop statement MODIFIER is its block loop (normative, s494p, task
+#2098).**  `EXPR for LIST;` / `EXPR foreach LIST;` compile exactly as
+`for (LIST) { EXPR; }`, and `EXPR while COND;` / `EXPR until COND;` as
+`while (COND) { EXPR; }` / `until (COND) { EXPR; }` — the same `$_`
+aliasing, `last`/`next`, statement value and licences (counted range, raw
+slot, str-buffer) as the block spelling; a modifier's `local` is restored
+once per iteration, which is the block's scope and perl's rule.  Kept on
+the older per-statement route: a statement containing `my`/`our`/`state`
+(the block would scope the declaration), `do BLOCK while COND` (the body
+runs first), a heredoc, a leading label, and a LIST/COND that spans lines
+(reordering would move EXPR's line numbers).  The TOPIC loop binds the
+global `$_` dynamically; it is not a lexical, so a string eval in its body
+does not capture it.
 
 The compiled shape per iteration: an outer named block (the loop's exit
 target), a `tagbody` with a `:next` label (the continue target). Loop
