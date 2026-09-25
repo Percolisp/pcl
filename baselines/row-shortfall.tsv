@@ -78,6 +78,9 @@
 #   touched -- t/op/attrs.t 14 (the attribute protocol, #322) and t/uni/gv.t 118
 #   (#1664, the typeglob model: the file aborts in the proxy-constant-subroutine
 #   block).  UNEXPLAINED, t/ half: 101 files / 63,028 rows -> 99 / 62,896.
+# s494g (2026-09-25, Opus): TWO rows DELETED (fixed, measured `--jobs 1`, A/B dc20a721):
+#   t/op/sigdispatch.t 2 -> 0 and t/op/sigsystem.t 4 -> 0 (#2107: the INT handler / the CHLD
+#   reaper run).  ONE row ADDED: t/lib/croak.t 225, a first measurement (#2266).
 # s484d (2026-09-14): NINE rows DELETED -- the shortfall is fixed, measured.
 #   The four missing perl-tests/t/test.pl helpers (#1652 run_multiple_progs,
 #   #1585 _create_runperl, #1584 todo_skip, #1590's unlink_all/
@@ -169,6 +172,7 @@ t/io/semctl.t	2	NS:DynaLoader / XS binary extensions -- IPC::SysV is XS
 t/io/shm.t	19	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
 t/io/socket.t	45	#1705 -- the file skip_alls on `$Config{d_getpbyname} undefined`; sockets themselves are fully implemented (docs/socket-impl-plan.md)
 t/io/socketpair.t	8	#1705 -- the file skip_alls on `$Config{extensions} =~ /\bSocket\b/`, and lib/Config.pm has `extensions => ''`
+t/lib/croak.t	225	#2266 -- `caller` at the top level of a required file answers the empty list, so t/lib/common.pl dies before its first row (s494g first measurement; same on dc20a721)
 t/mro/basic.t	9	XDIFF: not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
 t/mro/basic_utf8.t	9	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/complex_c3.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
@@ -234,10 +238,8 @@ t/op/readline.t	4	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's 
 t/op/ref.t	15	#1826 — `$foo = doit $object "FOO";` (indirect object, scalar invocant WITH arguments) is a ruled DROP at line 335 and the drop aborts the form; NS:Indirect object syntax (#399)
 t/op/require_37033.t	4	#1935 -- the file closes STDIN and then `require`s a fixture module, asserting the module's own handle does not reuse fd 0.  PCL cannot find the fixture (`Can't locate test_use_14937.pm in @INC`): the @INC the file builds from its own directory does not reach the require
 t/op/rt119311.t	9	NS:`DESTROY` called by garbage collector + NS:`format` / `write` report formatting -- the file needs a DESTROY to run at the exact moment a die/last/next/redo/goto unwinds the stack, and its second half does it from inside `format` templates.  The runner's own abort is `Can't find label test` (a `goto LABEL` out of a sub into file scope, NS:Computed goto)
-t/op/sigdispatch.t	2	#1928 -- %SIG lookups are not NUL-clean and `$SIG{"__DIE__\0whoops"}` must be "No such hook"; the two never-produced rows need a deferred-signal model (a signal raised inside a handler)
 t/op/signame_canonical.t	15	#1927 -- the file plans `scalar @duplicate_signals * 5` rows from the signal names %Config lists twice (CHLD/CLD, POLL/IO, ABRT/IOT), sends each with `kill $name, $$` under a `local $SIG{$name}` and asserts the handler sees the CANONICAL name.  %Config has sig_name/sig_num here (probed s473t6c), so the plan is computable, but PCL produces NO rows
 t/op/signatures.t	35	XDIFF: not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error...
-t/op/sigsystem.t	4	XDIFF: not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the p...
 t/op/smartmatch.t	3	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl ...
 t/op/state.t	74	not-supported.md §`given`/`when` — the file’s ONE `given` block (line 350).  The refusal is STATEMENT-level since s466 (#1037), so the file runs to it and its 88 rows before it pass; the tail of the enclosing TOP-LEVEL form goes with the die (ir-spec §9.3, sizing task #1055).  aborted-forms:1, and that one form IS the refusal.  The twin perl-tests/state.t row (78) carries the same cause.
 t/op/sub_lval.t	114	not-supported.md §Lvalue subroutines -- 9 of the file's aborted top-level forms are `LVSUB = VALUE` assignments ("Can't modify non-lvalue subroutine call in assignment"); the residue is one "Bug. Fell through. Missing case" on `sub x : lvalue {…} continue {…}` and one "Cannot dereference non-reference: undef".  Was 116: s473t5a's #1650 (an all-digit ARRAY name is now forward-declared) un-aborted the two forms that read `@119797`, measured 31/64 -> 33/64 on the base extraction vs this tree

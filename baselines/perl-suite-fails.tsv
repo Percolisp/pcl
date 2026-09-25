@@ -3,6 +3,13 @@
 # answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
 # files were blessed as COUNTS only, so #964's failing row sat inside op/sub.t's
 # "12 not ok" for months with nothing naming it.
+# s494g (2026-09-25, Opus) -- SIX rows removed BY EDIT, ONE added; A/B'd `--jobs 1` against a
+#   dc20a721 extraction (scratch/s494g/companion-base2-movers.log vs companion-rebased.log):
+#     io/pipe.t         []  (the SIGPIPE row: string handler 'broken_pipe' now runs)  #2107 + #1029
+#     io/pipe.t         status unaffected by implicit close   s495f (dc20a721 passes it; 40da28bd did not) -- not s494g's
+#     op/fork.t  x2     [at t/op/fork.t line 18] (progs 2 + 25: child's INT / TERM handler runs)   #2107
+#     op/sigdispatch.t  [line 167] + [line 168] (`kill 'INT', $$` with a local handler)        #2107
+#   ADDED: lib/croak.t *summary* -- a first measurement, cause #2266 (not a regression: same on dc20a721).
 # s492b (2026-09-21, Opus) -- FIVE rows removed BY EDIT, each because this batch
 #   made it pass, each A/B verified `--jobs 1` against a 5ce155cb extraction:
 #     io/crlf.t           [at t/io/crlf.t line 29]                    #2006(a)
@@ -2010,7 +2017,6 @@ io/pipe.t	0	(none)	extra [PCL #26]	*extra* no exception from PerlIO	#1710
 io/pipe.t	0	(none)	extra [PCL #23]	*extra* output	#1710
 io/pipe.t	0	(none)	extra [PCL #24]	*extra* status unaffected by implicit close	#1710
 io/pipe.t	0	(none)	renumbered	*summary*	#1710
-io/pipe.t	10	ok	(missing)	[]	#1710
 io/pipe.t	27	ok	not ok	but we did get the exception from die	#1710
 io/pipe.t	14	ok	not ok	errno	#1710
 io/pipe.t	18	ok	not ok	errno	#1710
@@ -2018,7 +2024,6 @@ io/pipe.t	21	ok	not ok	errno	#1710
 io/pipe.t	22	ok	not ok	missing command in piped open input	#1710
 io/pipe.t	23	ok	not ok	output	#1710
 io/pipe.t	17	ok	not ok	status	#1710
-io/pipe.t	24	ok	not ok	status unaffected by implicit close	#1710
 io/print.t	23	ok	not ok	printf with %n (got a5c)	#1710
 io/pvbm.t	16	ok	not ok	close(PVBM) fails	#1710
 io/pvbm.t	12	ok	not ok	lstat(PVBM) fails	#1710
@@ -2085,6 +2090,7 @@ io/utf8.t	27	ok	not ok	[at t/io/utf8.t line 178]	NS:Warnings-gated diagnostics a
 io/utf8.t	32	ok	not ok	[at t/io/utf8.t line 251]	#1710 -- PARKED: io/utf8.t:251 `isnt(defined $@, !0)` after `no warnings 'utf8'`; three probes vs perl 5.40.3 all MATCH (undef $@, a wide print to a byte handle, `no warnings` itself), so the cause is upstream in the file's state and was not found in s473t5d's budget
 io/utf8.t	16	ok	not ok	[at t/io/utf8.t line 83]	NS:`use bytes` -- byte view of upgraded strings (the PRAGMA half; `bytes::length` itself works since #1698)
 io/utf8.t	61	ok	not ok	getc returning non-utf8 after utf8	#1710
+lib/croak.t	0	ok*	(no TAP)	*summary*	#2266 -- `caller` with no argument at the TOP LEVEL of a required file answers the empty list (perl: the require frame), so t/lib/common.pl's `my (undef, $file) = caller` dies "Can't identify pragma to test from file name ''" before the first row; identical on a dc20a721 extraction (s494g first measurement)
 op/aassign.t	180	ok	not ok	RT \#130132 scalar derefffed 1	NS:Error compatibility for invalid Perl input -- `($$x) = ...` and `undef = ...` are rejected by perl; the rows read the message
 op/aassign.t	181	ok	not ok	RT \#130132 scalar derefffed 2	NS:Error compatibility for invalid Perl input -- `($$x) = ...` and `undef = ...` are rejected by perl; the rows read the message
 op/aassign.t	182	ok	not ok	RT \#130132 scalar undef 1	NS:Error compatibility for invalid Perl input -- `($$x) = ...` and `undef = ...` are rejected by perl; the rows read the message
@@ -3928,13 +3934,11 @@ op/for-many.t	45	ok	not ok	for our code generated error	NS:Error compatibility f
 op/for-many.t	56	ok	not ok	padded with literal undef	NS:Error compatibility for invalid Perl input -- `foreach` over a literal / an rvalue / `our` in the n-at-a-time form is a compile-time or run-time fatal in perl and the rows assert its text
 op/for-many.t	57	ok	not ok	padded with literal undef threw the correct exception	NS:Error compatibility for invalid Perl input -- `foreach` over a literal / an rvalue / `our` in the n-at-a-time form is a compile-time or run-time fatal in perl and the rows assert its text
 op/for-many.t	58	ok	not ok	side effects observed	NS:`@_` argument aliasing -- PARTIAL (plain `my` lexicals only) -- the n-at-a-time `foreach my ($a,$b)` aliases its loop variables to the list's ELEMENTS
-op/fork.t	2	ok	not ok	[at t/op/fork.t line 18]	#1770
 op/fork.t	14	ok	not ok	[at t/op/fork.t line 18]	#1770
 op/fork.t	15	ok	not ok	[at t/op/fork.t line 18]	#1770
 op/fork.t	16	ok	not ok	[at t/op/fork.t line 18]	#1770
 op/fork.t	18	ok	not ok	[at t/op/fork.t line 18]	#1770
 op/fork.t	22	ok	not ok	[at t/op/fork.t line 18]	#1770
-op/fork.t	25	ok	not ok	[at t/op/fork.t line 18]	#1770
 op/fork.t	27	ok	not ok	[at t/op/fork.t line 18]	#1770
 op/fresh_perl_utf8.t	1	ok	not ok	"Can't localize lexical" error is in UTF-8	NS:Error message text and format -- the row asserts that the "Can't localize lexical variable" message is UTF-8 encoded
 op/getppid.t	0	ok*	(no TAP)	*summary*	#271 (RULED s373: BEHIND #153's FOLD) -- `pipe my ($r, $w)`: a `my (LIST)` in an argument run contributes ONE vector argument instead of N, so `(p-pipe (vector $r $w))` fails to compile and the top-level form is aborted.  The file's three `pipe my (...)` calls are its whole body
@@ -5407,8 +5411,6 @@ op/select.t	4	ok	not ok	the ref returned references the right referent	#1664 -- 
 op/sigdispatch.t	26	ok	not ok	Arbitrary signal lookup through %SIG is clean	#1928 -- %SIG lookups are not NUL-clean and `$SIG{"__DIE__\0whoops"}` must be "No such hook"; the file also needs a deferred-signal model for its last two rows.  See also #1924 -- PCL's `%Config` is a 108-key hand-written subset (lib/Config.pm) where perl's is 1,253 keys, so a key perl always defines reads UNDEF here and a guard written against it takes the other branch.  Measured s473t6c over this round's 90 files: 7 files ask for a key PCL does not have -- lfs.t `lseeksize` (its own `skip_all('no 64-bit file offsets')` fires, so the file produces NO rows), glob.t `usecrosscompile`, hexfp.t `d_long_double_style_ieee_extended`, inc.t `d_long_double_style_ieee_doubledouble`, infnan.t `usequadmath`, range.t `d_nv_preserves_uv`, sigdispatch.t `d_sigprocmask` (`d_sigprocmask`)
 op/sigdispatch.t	24	ok	not ok	Fetching %SIG hooks with an extra trailing nul is nul-clean	#1928 -- %SIG lookups are not NUL-clean and `$SIG{"__DIE__\0whoops"}` must be "No such hook"; the file also needs a deferred-signal model for its last two rows.  See also #1924 -- PCL's `%Config` is a 108-key hand-written subset (lib/Config.pm) where perl's is 1,253 keys, so a key perl always defines reads UNDEF here and a guard written against it takes the other branch.  Measured s473t6c over this round's 90 files: 7 files ask for a key PCL does not have -- lfs.t `lseeksize` (its own `skip_all('no 64-bit file offsets')` fires, so the file produces NO rows), glob.t `usecrosscompile`, hexfp.t `d_long_double_style_ieee_extended`, inc.t `d_long_double_style_ieee_doubledouble`, infnan.t `usequadmath`, range.t `d_nv_preserves_uv`, sigdispatch.t `d_sigprocmask` (`d_sigprocmask`)
 op/sigdispatch.t	25	ok	not ok	[at t/op/sigdispatch.t line 147]	#1928 -- %SIG lookups are not NUL-clean and `$SIG{"__DIE__\0whoops"}` must be "No such hook"; the file also needs a deferred-signal model for its last two rows.  See also #1924 -- PCL's `%Config` is a 108-key hand-written subset (lib/Config.pm) where perl's is 1,253 keys, so a key perl always defines reads UNDEF here and a guard written against it takes the other branch.  Measured s473t6c over this round's 90 files: 7 files ask for a key PCL does not have -- lfs.t `lseeksize` (its own `skip_all('no 64-bit file offsets')` fires, so the file produces NO rows), glob.t `usecrosscompile`, hexfp.t `d_long_double_style_ieee_extended`, inc.t `d_long_double_style_ieee_doubledouble`, infnan.t `usequadmath`, range.t `d_nv_preserves_uv`, sigdispatch.t `d_sigprocmask` (`d_sigprocmask`)
-op/sigdispatch.t	28	ok	(missing)	[at t/op/sigdispatch.t line 167]	#1928 -- %SIG lookups are not NUL-clean and `$SIG{"__DIE__\0whoops"}` must be "No such hook"; the file also needs a deferred-signal model for its last two rows.  See also #1924 -- PCL's `%Config` is a 108-key hand-written subset (lib/Config.pm) where perl's is 1,253 keys, so a key perl always defines reads UNDEF here and a guard written against it takes the other branch.  Measured s473t6c over this round's 90 files: 7 files ask for a key PCL does not have -- lfs.t `lseeksize` (its own `skip_all('no 64-bit file offsets')` fires, so the file produces NO rows), glob.t `usecrosscompile`, hexfp.t `d_long_double_style_ieee_extended`, inc.t `d_long_double_style_ieee_doubledouble`, infnan.t `usequadmath`, range.t `d_nv_preserves_uv`, sigdispatch.t `d_sigprocmask` (`d_sigprocmask`)
-op/sigdispatch.t	29	ok	(missing)	[at t/op/sigdispatch.t line 168]	#1928 -- %SIG lookups are not NUL-clean and `$SIG{"__DIE__\0whoops"}` must be "No such hook"; the file also needs a deferred-signal model for its last two rows.  See also #1924 -- PCL's `%Config` is a 108-key hand-written subset (lib/Config.pm) where perl's is 1,253 keys, so a key perl always defines reads UNDEF here and a guard written against it takes the other branch.  Measured s473t6c over this round's 90 files: 7 files ask for a key PCL does not have -- lfs.t `lseeksize` (its own `skip_all('no 64-bit file offsets')` fires, so the file produces NO rows), glob.t `usecrosscompile`, hexfp.t `d_long_double_style_ieee_extended`, inc.t `d_long_double_style_ieee_doubledouble`, infnan.t `usequadmath`, range.t `d_nv_preserves_uv`, sigdispatch.t `d_sigprocmask` (`d_sigprocmask`)
 op/signame_canonical.t	0	ok*	(no TAP)	*summary*	#1927 -- the file plans `scalar @duplicate_signals * 5` rows from the signal names %Config lists twice (CHLD/CLD, POLL/IO, ABRT/IOT), sends each with `kill`, and asserts the handler is invoked under the CANONICAL name.  PCL produces NO rows: %Config has sig_name/sig_num, so the plan is computable, but the file stops before its first assertion
 op/smartkve.t	18	ok	not ok	Errors: each $hash, @stuff throws error	NS:Error compatibility for invalid Perl input -- every row evals `keys $undef` / `values CONSTANT` / `each qr/foo/` / `keys $h, @s` and asserts $@.  Probed s473t6c: perl rejects them at COMPILE time ("Experimental keys on scalar is now forbidden", "Type of arg 1 to keys must be hash or array"); PCL compiles and runs them, so $@ is empty (CLAUDE.md principle 9: PCL is a transpiler for valid Perl)
 op/smartkve.t	14	ok	not ok	Errors: each $undef throws error	NS:Error compatibility for invalid Perl input -- every row evals `keys $undef` / `values CONSTANT` / `each qr/foo/` / `keys $h, @s` and asserts $@.  Probed s473t6c: perl rejects them at COMPILE time ("Experimental keys on scalar is now forbidden", "Type of arg 1 to keys must be hash or array"); PCL compiles and runs them, so $@ is empty (CLAUDE.md principle 9: PCL is a transpiler for valid Perl)

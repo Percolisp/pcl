@@ -1,4 +1,8 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s494g (2026-09-25, Opus) -- FOUR rows spliced by hand + ONE first measurement, every mover
+#   A/B'd `--jobs 1` against a dc20a721 extraction (scratch/s494g/companion-base2-movers.log)
+#   and this tree (companion-rebased.log); cause in each row's sig column.  lib/croak.t is
+#   a FIRST measurement (#2266, identical on dc20a721), not a regression.
 # s492b (2026-09-21, Opus) -- SIX rows spliced by hand, every one UPWARD and every
 #   one A/B'd `--jobs 1` against a 5ce155cb `git archive` extraction before it was
 #   touched (scratch/s492b/log-movers-{base,tree}.txt, log-pat-{base,tree}.txt,
@@ -1676,7 +1680,7 @@ io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT 
 io/perlio_fail.t	15	0	11	4	DIFF	s471a: 6/9 -> 11/4, PRE-EXISTING and MEASURED, not this batch -- a `git archive ed302e13` extraction of main gives the SAME 11/4 with the same five fixed rows (serial re-run agrees on both trees), so the blessed row was stale, not moved.  The five rows left baselines/perl-suite-fails.tsv by EDIT in the same commit; the four `Got warning` rows still fail (PCL emits no warnings-gated diagnostic, #221).	0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	10	0	OK		0
-io/pipe.t	27	0	19	13	DIFF	s492c #2062: 20/12 -> 19/13 -- 'child reaped if piped program cannot be executed' was passing BY ACCIDENT.  The row's `wait` BLOCKS under PCL (a child of an earlier test is still unreaped where perl has none), its `local $SIG{ALRM} = sub { die }` fires at 2 s, and p-wait's blanket host-error guard SWALLOWED that die, so wait answered -1 and the row read as a pass.  The die now propagates, as perl's does, and $child stays 0.  Measured: with p-wait's old guard restored the file reads 20/12 again, twice.  The real gap -- a child PCL leaves unreaped -- is #2068 | s492b: 19/13 -> 20/12, #2006(a) -- the implicit close REAPS the child, so "child reaped if piped program cannot be executed" (`$child = wait` = -1) passes.  Measured --jobs 1 on a 5ce155cb extraction: 19/13 there, 20/12 here  |  s488a: 18/14 -> 19/13 at 5fe48176 (s473f member 2, #1307/#1246: close's FALSE is a defined "" and closedir's is undef) -- "close failure for... umm, something" passes; residue #1710	0
+io/pipe.t	27	0	22	11	DIFF	s494g: 19/13 -> 22/11 -- #2107 + #1029 (+1): the SIGPIPE row (`$SIG{PIPE} = 'broken_pipe'`, a string handler qualified to main:: and run on delivery); s495f (+2, not spliced at its merge): 'status unaffected by implicit close' + the renumbering it undoes -- A/B `--jobs 1`: 40da28bd 19/13, dc20a721 21/11, s494g 22/11 | s492c #2062: 20/12 -> 19/13 -- 'child reaped if piped program cannot be executed' was passing BY ACCIDENT.  The row's `wait` BLOCKS under PCL (a child of an earlier test is still unreaped where perl has none), its `local $SIG{ALRM} = sub { die }` fires at 2 s, and p-wait's blanket host-error guard SWALLOWED that die, so wait answered -1 and the row read as a pass.  The die now propagates, as perl's does, and $child stays 0.  Measured: with p-wait's old guard restored the file reads 20/12 again, twice.  The real gap -- a child PCL leaves unreaped -- is #2068 | s492b: 19/13 -> 20/12, #2006(a) -- the implicit close REAPS the child, so "child reaped if piped program cannot be executed" (`$child = wait` = -1) passes.  Measured --jobs 1 on a 5ce155cb extraction: 19/13 there, 20/12 here  |  s488a: 18/14 -> 19/13 at 5fe48176 (s473f member 2, #1307/#1246: close's FALSE is a defined "" and closedir's is undef) -- "close failure for... umm, something" passes; residue #1710	0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	23	5	DIFF	s473 (Fable): 20/8 -> 23/5 on d348dcea (serial; 22/6 on the 637fc58e extraction): the 3 FIXED rows are stat/lstat/truncate(PVBM ref) -- #1043 (s470bx, stat/lstat answer their context) for the last one; the known pvbm flapper (DECIDED s437/s438) reads 23/5 alone, the number memory records	0
 io/read.t	2	0	2	0	OK		0
@@ -1691,6 +1695,8 @@ io/socketpair.t	8	0	0	0	DIFF		0
 io/tell.t	36	0	36	0	OK		0
 io/through.t	942	0	942	0	OK		0
 io/utf8.t	62	0	53	9	DIFF		0
+# s494g first measurement
+lib/croak.t	225	0	0	0	DIFF	aborted-forms:1: Can't identify pragma to test from file name '' at common.pl line N. | #2266 (caller at the top level of a required file answers the empty list)	0
 mro/basic.t	66	0	35	22	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ISACLEAR'  | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions	0
 mro/basic_01_c3.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/basic_01_c3_utf8.t	4	0	1	3	XDIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276.  The mro registration STAYS (only SOME rows stopped diverging); its ROWS were re-blessed by --bless-rows on the 21 files, 41 rows removed | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
@@ -1829,7 +1835,7 @@ op/filetest_t.t	7	0	7	0	OK		0
 op/flip.t	14	0	12	2	DIFF		0
 op/for-many.t	71	0	63	8	DIFF		0
 op/for.t	148	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-op/fork.t	28	0	20	8	DIFF	crash:sb-sys:interactive-interrupt	0
+op/fork.t	28	0	22	6	DIFF	s494g #2107: 20/8 -> 22/6 -- progs 2 (child's $SIG{INT} = sub { exit }) and 25 (child's $SIG{TERM} handler, then `sleep 10` interrupted) now run their handlers; A/B dc20a721 20/8	0
 op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
 op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
 op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
@@ -1923,10 +1929,10 @@ op/rt119311.t	22	0	11	2	DIFF	aborted-forms:2: Can't find label test at rtN.t lin
 op/runlevel.t	24	0	8	16	DIFF		0
 op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0
-op/sigdispatch.t	29	0	24	3	DIFF	crash:sb-sys:interactive-interrupt: Interactive interrupt at #xNBNEANEBB.	0
+op/sigdispatch.t	29	0	26	3	DIFF	s494g #2107: 24/3 -> 26/3 -- [perl #45173] `local $SIG{INT}` + `kill 'INT', $$`: the handler runs and $@ is untouched (rows 28/29, were never produced: the file died by interactive-interrupt); A/B dc20a721 24/3.  Residue: #1928 (NUL-clean lookups)	0
 op/signame_canonical.t	15	0	0	0	DIFF		0
 op/signatures.t	1245	1	915	296	DIFF	aborted-forms:1: PCL: statement not supported at signatures.t line N: f() = "X"; -- PCL: Can't modify non-l | NOT fully registered: 5 unregistered diverging row(s): No warnings emitted within scope of no warnings "experime...; Signatured subroutine permits attributed scalar; `\&SUB` warns of experimental @_; +2 more | not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. All former fix-target rows are FIXED: t151/152/156 parenless list-op swallow (t017, s316s) + t021-family. t276-296 state-in-default re-init FIXED (task #134, s316r).	1
-op/sigsystem.t	4	0	0	0	XDIFF	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.	0
+op/sigsystem.t	4	0	4	0	OK	s494g #2107: XDIFF 0/0 -> OK 4/0 -- the $SIG{CHLD} reaper runs (chained to SBCL's own CHLD handler), so 'Reaped only one process' / 'Reaped the right process.' pass; A/B dc20a721 2/2.  Its perl-suite-expected.tsv row left by edit (STALE)	0
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	55	295	XDIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at smartmatch.t line N  | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	0
