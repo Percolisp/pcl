@@ -425,6 +425,88 @@ sub _fix_spaced_sigils {
   return $changed;
 }
 
+# A LOOP STATEMENT MODIFIER IS ITS BLOCK LOOP (s494p, task #2098 member 3).
+# `EXPR for LIST;` is perl's `for (LIST) { EXPR; }`, and `EXPR while COND;` /
+# `EXPR until COND;` are `while (COND) { EXPR; }` / `until (COND) { EXPR; }`
+# — same `$_` aliasing, same `last`/`next`, same statement value (probed
+# 5.40.3: `sub f { $_ for 1..3 }` and `sub g { for (1..3) { $_ } }` return the
+# same list in both contexts).  PCL compiled the two spellings through
+# DIFFERENT routes: the block went native (Parser2's foreach / while arms, with
+# the raw-slot, str-buffer and foreach-range licences), the modifier went
+# whole-statement through the v1 seam — so every variable the modifier body
+# wrote was BOXED, and `$s .= "ab" for 1 .. $n` stayed QUADRATIC (200k
+# appends 30 s) where the block spelling is linear.  Normalising the modifier
+# into the block spelling HERE, once, gives both routes one compiler (rule 11)
+# and needs no second emitter.
+#
+# Declined (the statement keeps its old route, which is always correct):
+#   * a `my` / `our` / `state` anywhere in it — the block would SCOPE the
+#     declaration.  `local` IS desugared: perl restores a modifier's `local`
+#     once per iteration (probed: `our $p = "o"; local $p = $_ for 1, 2` leaves
+#     $p "o"), which is exactly the block's scope — the old route DROPPED it;
+#   * `do BLOCK while COND` / any statement starting with `do` — the body
+#     runs BEFORE the first test;
+#   * a heredoc (its body is attached to the LINE, which reordering breaks);
+#   * a LIST / COND that spans lines — the EXPR moves after it, so its line
+#     numbers (`die` messages, `__LINE__`, caller) would shift;
+#   * a leading label, and any statement PPI did not class as plain.
+sub _desugar_loop_modifiers {
+  my ($doc) = @_;
+  my $changed = 0;
+  # INNERMOST FIRST (reverse document order): a statement nested inside
+  # another one's EXPR is rewritten before the outer one reads its text.
+  # A `local …` statement is a Statement::Variable to PPI; `my`/`our`/`state`
+  # ones are declined below anyway.
+  my $plain = sub {
+    my $r = ref $_[1];
+    return 1 if $r eq 'PPI::Statement';
+    return 0 if $r ne 'PPI::Statement::Variable';
+    my $w = $_[1]->schild(0);
+    return $w && $w->isa('PPI::Token::Word') && $w->content eq 'local' ? 1 : 0;
+  };
+  for my $st (reverse @{ $doc->find($plain) || [] }) {
+    my @ch = $st->children;
+    my ($mi) = grep {
+      $ch[$_]->isa('PPI::Token::Word')
+        && Pl::PExpr::Config::is_statement_modifier($ch[$_]->content)
+    } 0 .. $#ch;
+    next if !defined $mi;
+    my $mod = $ch[$mi]->content;
+    next if $mod !~ /^(?:for|foreach|while|until)$/;
+    my @expr = @ch[0 .. $mi - 1];
+    my @rest = @ch[$mi + 1 .. $#ch];
+    my $semi = (@rest && $rest[-1]->isa('PPI::Token::Structure')
+                && $rest[-1]->content eq ';') ? pop @rest : undef;
+    my @es = grep { $_->significant } @expr;
+    my @rs = grep { $_->significant } @rest;
+    next if !@es || !@rs;
+    next if $es[0]->isa('PPI::Token::Label');
+    next if $es[0]->isa('PPI::Token::Word') && $es[0]->content eq 'do';
+    next if $st->find_first(sub {
+      ($_[1]->isa('PPI::Token::Word')
+         && $_[1]->content =~ /^(?:my|our|state)$/)
+        || $_[1]->isa('PPI::Token::HereDoc')
+    });
+    my $list = join '', map { $_->content } @rest;
+    next if $list =~ /\n/;
+    $list =~ s/^\s+//;
+    $list =~ s/\s+$//;
+    # A LIST already in parentheses keeps them: `for ((1..3))` would hide the
+    # range from the foreach-range split.
+    $list = "($list)"
+      if !(@rs == 1 && $rs[0]->isa('PPI::Structure::List'));
+    # EXPR keeps its own text AND the whitespace / comments that followed it,
+    # so its tokens stay on their lines.
+    my $etext = join '', map { $_->content } @expr;
+    my ($body, $gap) = $etext =~ /^(.*?)(\s*)\z/s;
+    my @toks = $st->tokens;
+    $toks[0]->set_content("$mod $list { $body;$gap }");
+    $_->set_content('') for @toks[1 .. $#toks];
+    $changed = 1;
+  }
+  return $changed;
+}
+
 # PPI's `->symbol` — the ONE question 40 sites in this compiler ask a Symbol
 # token, "which variable is this" — answers `%a` for the `$a` in `*$a{SCALAR}`.
 # Its rule is "a `{…}` after a `$`-symbol means the symbol is really `%a`,
@@ -720,7 +802,8 @@ sub _ppi_parse {
                | _brace_glob_slot_symbol($doc)
                | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc)
-               | _rewrite_current_sub($doc))) {
+               | _rewrite_current_sub($doc)
+               | _desugar_loop_modifiers($doc))) {
     my $fixed = $doc->serialize;
     my $redo  = _ppi_new($fixed, %opt);   # the seed applies to the reparse too
     if ($redo) {

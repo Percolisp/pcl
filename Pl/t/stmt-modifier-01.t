@@ -79,7 +79,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 44;
+plan tests => 45;
 
 # Fixture modules built by the HARNESS (real perl), with their directory
 # interpolated into the generated program: the require rows then depend on
@@ -209,15 +209,20 @@ print "ver:ok\\n";
    'require "literal" / require VERSION under a modifier are runtime-gated');
 
 # ── 3. what must NOT change ─────────────────────────────────────────────────
-# A loop modifier on `local` is still refused LOUDLY.  perl restores the
-# localization at the end of each implicit iteration, so the value does not
-# survive the statement; PCL's open let cannot say that, and a silent
-# mis-lowering would be worse than the drop.
+# A loop modifier on `local`: perl restores the localization at the end of
+# each implicit iteration, so the value does not survive the statement.  An
+# open let could not say that, so this row used to assert the LOUD DROP.
+# Since s494p (task #2098, Pl::Parser::_desugar_loop_modifiers) the statement
+# IS its block loop, `for (1,2) { local $p = 5; }`, whose own scope is exactly
+# perl's per-iteration restore — so it now lowers and answers perl's
+# `<u>` (probed 5.40.3: $p is left undefined, as it was before the loop).
 {
     my ($cl, $err, $rc) =
       PCLCore::transpile_raw("$pl2cl " . write_pl(q{our $p; local $p = 5 for (1,2);}));
-    like($err, qr/^PCL: statement dropped/m,
-         'a LOOP modifier on `local` still drops loudly, it is not mis-lowered');
+    unlike($err, qr/^PCL: statement dropped/m,
+           'a LOOP modifier on `local` lowers (as its block loop), not dropped');
+    is(run_cl(q{our $p; local $p = 5 for (1,2); print "<", (defined $p ? $p : "u"), ">\n";}),
+       "<u>\n", '... and restores per iteration, as perl does');
 }
 
 # `local *glob = RHS if COND` uses the same splitter now; it worked before and

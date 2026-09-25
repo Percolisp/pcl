@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-1980
+;;; pcl: pipeline=v2 gen=v2-2080
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -701,10 +701,8 @@
                         (p-if (p-< (p-+ $si $k) $slen) (p-ord (p-substr $s (p-+ $si $k) 1)) 0)))))))
             (p-if $signed
               (progn
-                (p-let (($max :box (make-p-box nil)))
-                  (p-my-= $max 1)
-                  ;; $max *= 256 for 1 .. $nbytes
-(p-foreach ($_ (p-.. 1 $nbytes)) (p-*= $max 256))
+                (p-let (($max :scalar 1))
+                  (p-foreach-range-raw ($_ 1 $nbytes) (p-*=-raw $max 256 :numeric))
                   (p-if (p->= $v (p-/ $max 2)) (p-decf $v $max)))))
             (p-caller-ctx (p-tail-value $v))))))))
 
@@ -3105,10 +3103,9 @@
                                 0
                                 0
                                 1)))
-                          (p-let (($mod :box (make-p-box nil)))
-                            (p-my-= $mod 1)
-                            ;; $mod *= 2 for 1 .. $checksum_width
-(p-foreach ($_ (p-.. 1 $checksum_width)) (p-*= $mod 2))
+                          (p-let (($mod :scalar 1))
+                            (p-foreach-range-raw ($_ 1 $checksum_width)
+                              (p-*=-raw $mod 2 :numeric))
                             (p-let (($q :box (make-p-box nil)))
                               (p-my-= $q (p-int (p-/ $checksum $mod)))
                               (p-if (p-> (p-* $q $mod) $checksum) (p-post-- $q))

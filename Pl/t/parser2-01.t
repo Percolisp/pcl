@@ -534,11 +534,15 @@ is(paren_balance($loc), 0, 'raw_wrap closes balance the local open');
 my $loclen = Pl::Parser2->parse_code(q{my @a = (1,2,3); local $#a = 1; print "$a[1]\n";});
 is(paren_balance($loclen), 0, 'local $#a (no scope opened) stays balanced');
 
-# while/until/for/foreach statement modifiers route through the per-statement
-# fallback; the written var stays boxed (fallback writes are box-ops).
+# A for/foreach/while/until statement MODIFIER is its block loop (s494p, task
+# #2098 member 3, Pl::Parser::_desugar_loop_modifiers): `EXPR foreach 1..3` is
+# `foreach (1..3) { EXPR; }`, so it takes the native foreach arm and its
+# licences (the counted range, the raw slot) exactly like the block spelling.
+# Until s494p it went through the per-statement v1 fallback and every var it
+# wrote stayed boxed, which these two rows asserted; perl prints 6 either way.
 my $fe = Pl::Parser2->parse_code(q{my $t = 0; $t = $t + $_ foreach 1..3; print "$t\n";});
-like($fe, qr/\(p-foreach \(\$_ \(p-\.\. 1 3\)\) \(p-my-= \$t/, 'foreach modifier via per-statement fallback');
-unlike($fe, qr/\(p-let \(\(\$t :scalar 0\)\)/, 'modifier-written var stays boxed');
+like($fe, qr/\(p-foreach-range-raw \(\$_ 1 3\) \(setf \$t \(p-\+ \$t \$_\)\)\)/, 'foreach modifier lowers as the native block loop');
+like($fe, qr/\(p-let \(\(\$t :scalar 0\)\)/, 'modifier-written var takes the raw slot, like the block spelling');
 my $dw = Pl::Parser2->parse_code(q{my $x = 5; do { $x--; } while ($x > 3); print "$x\n";});
 like($dw, qr/p-do-while/, 'do-while via per-statement fallback');
 

@@ -132,6 +132,45 @@ my %RAW_COMPOUND = (
 
 sub raw_compound_macro { $RAW_COMPOUND{ $_[0] } }
 
+# THE APPEND SPELLING `$s = $s . REST;` (s494p, task #2098 member 3).  perl
+# compiles it to the same in-place concatenation as `$s .= REST`, so on a
+# str-buffer slot it IS the append — without this, `for … { $s = $s . "ab" }`
+# stayed quadratic (200k appends 24 s) while the `.=` spelling of the same
+# loop is linear.  ONE predicate, asked by BOTH halves over the same
+# statement tokens: this walk counts the write as a `.=` (the str-buffer
+# licence input), Parser2 emits %pcl-str-append for it when — and only when —
+# the verdict licensed the slot; an unlicensed slot keeps its ordinary
+# assignment, so an object / tied / overloaded `$s` is never reached.
+#
+# REST must bind TIGHTER than `.` at depth 0, or the statement is not
+# `$s . (REST)`: `$s = $s . $a + 1` is `($s . $a) + 1`, and `$s = $s . "a" .
+# $obj` calls an overloaded `.` in a different order.  Only the ops above the
+# additive level are accepted; anything else (another `.`, `+`, a comma, `?:`)
+# declines, which is the safe direction.  Returns REST's tokens, or ().
+my %APPEND_REST_OK = map { $_ => 1 } qw(x * / % ** -> =~ !~);
+sub append_rest {
+  my ($parts) = @_;
+  my @p = grep { $_->significant } @$parts;
+  return () if @p < 5;
+  my ($l, $eq, $r, $dot, @rest) = @p;
+  return () if !($l->isa('PPI::Token::Symbol') && $l->content =~ /^\$\w+$/
+    && $eq->isa('PPI::Token::Operator') && $eq->content eq '='
+    && $r->isa('PPI::Token::Symbol') && $r->content eq $l->content
+    && $dot->isa('PPI::Token::Operator') && $dot->content eq '.');
+  # `$s = $s . $x[0]` — a subscript after `$s` would make $r an element read
+  # of `@s`, not the scalar; PPI hands that over as a Symbol + Subscript, so
+  # $dot is then not the operator and the test above already declined.
+  pop @rest if @rest && $rest[-1]->isa('PPI::Token::Structure')
+            && $rest[-1]->content eq ';';
+  return () if !@rest;
+  for my $t (@rest) {
+    return () if $t->isa('PPI::Token::Operator') && !$APPEND_REST_OK{ $t->content };
+    return () if $t->isa('PPI::Token::Word')
+              && $t->content =~ /^(?:and|or|xor|not|if|unless|while|until|for|foreach)$/;
+  }
+  return @rest;
+}
+
 # The compound ops whose RAW twin HONOURS the `:numeric' marker — i.e. the
 # ones whose runtime template threads `numericp` into %compound-arith-form
 # (task #1183).  Kept here, beside %RAW_COMPOUND, because it is the same kind
@@ -1248,6 +1287,10 @@ sub _tw_stmt_expr {
   # the write went to a raw slot through p-my-= — storing nothing at all.
   $native_root = 0
     if $native_root && Pl::Parser2::_tail_below_assign_prec(\@parts);
+  # The append spelling (append_rest): the root `=` arm below counts it as a
+  # `.=` write, so the str-buffer verdict sees the same writes Parser2 emits.
+  local $ctx->{append_root} =
+    ($native_root && append_rest(\@parts)) ? $parts[0]->content : undef;
   _tw_expr_parse($ctx, \@parts, $native_root, $uctx);
 }
 
@@ -1535,6 +1578,10 @@ sub _tw_walk {
         # an OBJECT when an operand is overloaded (`$x = $a + $obj`), which is
         # exactly the value this licence promises can never be in the slot.
         $ctx->{numlit_bad}{$name} = 1 unless _tw_num_literal($xo, $kids->[1]);
+        # `$s = $s . REST` at the statement root IS an append (append_rest).
+        $ctx->{write_ops}{$name}{'.='}++
+          if $root_native && defined $ctx->{append_root}
+          && $ctx->{append_root} eq $name;
       }
       else {
         # Everything else — a container element ($h{$k} = …), a deref chain,

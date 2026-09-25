@@ -10279,6 +10279,13 @@ sub _lower_stmt {
       && $expr->[1]->isa('PPI::Token::Operator') && $expr->[1]->content eq '='
       && !_tail_below_assign_prec($expr)) {
     my $name = $expr->[0]->content;
+    # `$s = $s . REST` on a str-buffer slot IS the append — the same
+    # predicate VarAnnotator counted as the slot's `.=` write (s494p, #2098).
+    if ($vi->{$name} && $vi->{$name}{strbuf}) {
+      my @rest = Pl::VarAnnotator::append_rest($expr);
+      return ['%pcl-str-append', $name, $self->_lower_expr(\@rest, $stmt)]
+        if @rest;
+    }
     my $rhs = [@$expr[2 .. $#$expr]];
     if ($vi->{$name} && $vi->{$name}{unboxable}) {
       return ['setf', $name,
@@ -10976,7 +10983,14 @@ sub _lower_compound {
     # cmpchain.t).  _seg_lex keeps it (forward-decl).
     my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
     my %saved_lex = %{ $self->{_live_lex} // {} };
-    $self->_reg_lex($name);
+    # The TOPIC loop binds the GLOBAL `$_` dynamically — it is not a lexical,
+    # and registering it put `(cons "$_" $_)` into every string eval's capture
+    # alist in the body, so the eval's OWN inner `for (7) { … $_ … }` read the
+    # captured outer box instead of its loop value (`for (1,2) { eval 'for (7)
+    # { print $_ }' }` printed 1 2, perl 7 7).  v1 always excluded it for the
+    # same reason (Pl::Parser's foreach: `$cl_loop_var ne '$_'`); s494p found
+    # the difference when the modifier spelling started taking this arm.
+    $self->_reg_lex($name) if $name ne '$_';
     my @body = $self->_lower_scope([$block->schildren], $vi);
     my @cont = $self->_continue_keys(\@k, $vi);
     $self->{_let_bound_vars} = \%saved_lb;
