@@ -7236,6 +7236,211 @@
         (vector-push-extend item arr)))
   arr)
 
+;;; ------------------------------------------------------------
+;;; THE ARRAY WINDOW (s494p, task #2098): shift / unshift / splice(@a, 0, K)
+;;; in amortized O(1).
+;;;
+;;; A PCL array is an ARRAY HEADER over a simple-vector (see %P-VEC-DATA
+;;; above).  The header names a WINDOW of that data vector: it starts at the
+;;; header's DISPLACEMENT and is DIMENSION slots long, and the fill pointer
+;;; counts the live elements inside it.  `shift' used to copy every element
+;;; down one slot (O(length) per call, so draining a queue was QUADRATIC:
+;;; 200k shifts 166-189 s against perl's 0.01 s).  It now moves the window's
+;;; START one slot right instead — the same thing perl does with its AvARRAY
+;;; offset — and `unshift' moves it back left when there is room in front.
+;;;
+;;; THE INVARIANTS (what makes this safe):
+;;;   * A window that does not start at slot 0 has DISPLACED-P set.  That is
+;;;     the flag %P-VEC-DATA / %P-STR-DATA read to answer NIL, so every fast
+;;;     path in this file declines to its ordinary path for a shifted array —
+;;;     by their own contract, "the answer is identical either way".  With the
+;;;     flag clear, they would index the data vector from slot 0 = a SILENT
+;;;     WRONG.  A window moved back to slot 0 clears the flag again, so the
+;;;     fast paths return.
+;;;   * The array OBJECT never changes: every holder of `\@a', every alias,
+;;;     every each-iterator key sees the shift, as perl requires.
+;;;   * A vacated slot is cleared (so the shifted-out element is not
+;;;     retained), and a window that becomes EMPTY is reset to the whole data
+;;;     vector at slot 0 (a drained queue gets its capacity back and its fast
+;;;     paths with it).
+;;;   * GROWTH needs nothing from us: VECTOR-PUSH-EXTEND / ADJUST-ARRAY past
+;;;     the window's end allocate fresh data and reset the displacement to 0.
+;;;   * SHORT arrays keep the old copy-down (through the data vector, memmove
+;;;     speed): `my $self = shift;' on a 1–4 element @_ is the hottest shift
+;;;     there is, and copying three slots keeps @_ undisplaced, so the
+;;;     `my %args = @_' after it keeps its bulk fast path.
+;;;
+;;; The one call that moves a window is SB-KERNEL:SET-ARRAY-HEADER, which is
+;;; SBCL-INTERNAL.  It is checked when the runtime loads (the #1461 pattern:
+;;; the install matrix runs different SBCL versions, floor 2.5.2): its lambda
+;;; list, and a scratch array driven through advance / retreat / reset /
+;;; growth.  Any wrong answer turns the window OFF and shift / unshift copy
+;;; through the data vector instead (O(length), still ~13x faster than the old
+;;; element loop), announced ONCE on stderr at the first large shift.
+;;; Normative statement: docs/ir-spec.md §2.3 (array storage).
+;;; ------------------------------------------------------------
+(defconstant +p-array-copy-limit+ 16
+  "An undisplaced array this short (or shorter) shifts and unshifts by
+   copying through its data vector rather than by moving its window.")
+
+(declaim (inline %p-array-window-data))
+(defun %p-array-window-data (arr)
+  "The simple-vector under ARR's window, displaced or not — or NIL when ARR is
+   not an array header over a simple-vector (a read-only array, a string, a
+   specialised vector), which then takes the portable path."
+  (and (sb-kernel:array-header-p arr)
+       (array-has-fill-pointer-p arr)
+       (let ((d (sb-kernel:%array-data arr)))
+         (and (simple-vector-p d) d))))
+
+(declaim (inline %p-array-set-window))
+(defun %p-array-set-window (arr data off dim fill)
+  "Point ARR's header at DIM slots of DATA starting at OFF, FILL of them live.
+   DISPLACED-P is set exactly when OFF is not 0 (the %P-VEC-DATA contract)."
+  (sb-kernel:set-array-header arr data dim fill off dim (/= off 0) nil)
+  arr)
+
+(defun %p-array-window-selftest ()
+  "T when SET-ARRAY-HEADER behaves as the window needs on THIS SBCL: the
+   expected lambda list, and a scratch array that answers every question the
+   runtime asks of a moved window (AREF, LENGTH, %P-VEC-DATA = NIL while
+   displaced, growth resetting the displacement, the reset to slot 0)."
+  (ignore-errors
+    (and (equal (mapcar #'symbol-name
+                        (sb-kernel:%fun-lambda-list #'sb-kernel:set-array-header))
+                '("ARRAY" "DATA" "LENGTH" "FILL-POINTER" "DISPLACEMENT"
+                  "DIMENSIONS" "DISPLACEDP" "NEWP"))
+         (let ((a (make-array 6 :adjustable t :fill-pointer 0)))
+           (dotimes (i 6) (vector-push-extend i a))
+           (let ((d (sb-kernel:%array-data a)))
+             (%p-array-set-window a d 2 4 4)
+             (and (eql (aref a 0) 2) (eql (aref a 3) 5) (= (length a) 4)
+                  (null (%p-vec-data a))
+                  (= (sb-kernel:%array-displacement a) 2)
+                  (progn (%p-array-set-window a d 1 5 5)
+                         (setf (aref a 0) :x)
+                         (and (eq (svref d 1) :x) (eql (aref a 1) 2)))
+                  (progn (dotimes (i 20) (vector-push-extend i a))
+                         (and (= (length a) 25) (eq (aref a 0) :x)
+                              (eql (aref a 24) 19)
+                              (= (sb-kernel:%array-displacement a) 0)
+                              (%p-vec-data a) t))
+                  (let* ((d2 (sb-kernel:%array-data a))
+                         (n (array-dimension a 0)))
+                    (%p-array-set-window a d2 0 n 0)
+                    (and (= (length a) 0) (eq (%p-vec-data a) d2)))))))))
+
+(sb-ext:defglobal *p-array-window-ok* (%p-array-window-selftest)
+  "T when shift / unshift may move an array's WINDOW (see the block above).")
+
+(sb-ext:defglobal *p-array-window-announced* nil
+  "Set once the window-unavailable fallback has said so on stderr.")
+
+(defun %p-array-window-unavailable ()
+  "The fallback's one announcement.  An EFFECT-ONLY degradation (rule 12's
+   boundary, s329): the answer is identical, only the complexity class
+   differs, so it announces and continues."
+  (unless *p-array-window-announced*
+    (setf *p-array-window-announced* t)
+    (format *error-output*
+            "PCL: array window unavailable on this SBCL (~A); shift and unshift are O(n)~%"
+            (lisp-implementation-version))
+    (force-output *error-output*)))
+
+(defun %p-array-shift-front (arr)
+  "Remove and return ARR's first element (ARR is non-empty and writable)."
+  (let ((data (%p-array-window-data arr)))
+    (if (null data)
+        (let ((first (aref arr 0)))
+          (replace arr arr :start1 0 :start2 1)
+          (vector-pop arr)
+          first)
+        (let* ((off (sb-kernel:%array-displacement arr))
+               (dim (array-dimension arr 0))
+               (len (fill-pointer arr))
+               (first (svref data off)))
+          (declare (type fixnum off dim len))
+          (setf (svref data off) 0)
+          (cond
+            ((= len 1)
+             (%p-array-set-window arr data 0 (+ off dim) 0))
+            ((and *p-array-window-ok*
+                  (or (/= off 0) (> len +p-array-copy-limit+)))
+             (%p-array-set-window arr data (1+ off) (1- dim) (1- len)))
+            (t
+             (when (> len +p-array-copy-limit+) (%p-array-window-unavailable))
+             (replace data data :start1 off :start2 (1+ off) :end2 (+ off len))
+             (setf (svref data (+ off len -1)) 0)
+             (setf (fill-pointer arr) (1- len))))
+          first))))
+
+(defun %p-array-drop-front (arr k)
+  "Remove ARR's first K elements (0 < K <= length) by moving the window: the
+   splice(@a, 0, K) arm.  NIL when ARR cannot move its window, and the caller
+   then takes its ordinary path."
+  (let ((data (%p-array-window-data arr)))
+    (when (and data *p-array-window-ok*)
+      (let* ((off (sb-kernel:%array-displacement arr))
+             (dim (array-dimension arr 0))
+             (len (fill-pointer arr)))
+        (declare (type fixnum off dim len k))
+        (fill data 0 :start off :end (+ off k))
+        (if (= k len)
+            (%p-array-set-window arr data 0 (+ off dim) 0)
+            (%p-array-set-window arr data (+ off k) (- dim k) (- len k)))
+        t))))
+
+(defun %p-array-unshift-front (arr src k)
+  "Put SRC's first K elements (already stored the way an element slot holds
+   them) in front of ARR's elements.  O(K) when the window has room in front;
+   otherwise ONE reallocation with front AND back slack proportional to the
+   length, so an unshift loop — or a deque mixing push / unshift / shift /
+   pop — is amortized O(1) per element."
+  (declare (type fixnum k))
+  (let ((data (%p-array-window-data arr)))
+    (cond
+      ((zerop k))
+      ((and data *p-array-window-ok*
+            (>= (sb-kernel:%array-displacement arr) k))
+       (let* ((off (- (sb-kernel:%array-displacement arr) k)))
+         (replace data src :start1 off :end2 k)
+         (%p-array-set-window arr data off (+ (array-dimension arr 0) k)
+                              (+ (fill-pointer arr) k))))
+      ((and data *p-array-window-ok*
+            (> (+ (fill-pointer arr) k) +p-array-copy-limit+))
+       (%p-array-unshift-realloc arr data src k))
+      (t
+       (when (and data (not *p-array-window-ok*)
+                  (> (+ (fill-pointer arr) k) +p-array-copy-limit+))
+         (%p-array-window-unavailable))
+       (%p-array-unshift-copy arr src k)))
+    arr))
+
+(defun %p-array-unshift-realloc (arr data src k)
+  "The no-room-in-front arm: a fresh data vector with SLACK slots free on
+   each side of the TOTAL elements, installed through the window."
+  (let* ((off (sb-kernel:%array-displacement arr))
+         (len (fill-pointer arr))
+         (total (+ len k))
+         (slack (max total +p-array-copy-limit+))
+         (new (make-array (+ slack total slack) :initial-element 0)))
+    (declare (type fixnum off len total slack))
+    (replace new src :start1 slack :end2 k)
+    (replace new data :start1 (+ slack k) :start2 off :end2 (+ off len))
+    (%p-array-set-window arr new slack (+ total slack) total)))
+
+(defun %p-array-unshift-copy (arr src k)
+  "The short / portable arm: grow at the END, move the elements up K slots,
+   write the new ones in front — through the data vector when there is one."
+  (let ((len (length arr)))
+    (dotimes (i k) (vector-push-extend 0 arr))
+    (let ((data (%p-vec-data arr)))
+      (if data
+          (progn (replace data data :start1 k :end2 len)
+                 (replace data src :end2 k))
+          (progn (replace arr arr :start1 k :end2 len)
+                 (replace arr src :end2 k))))))
+
 (declaim (inline %p-storable-raw))
 (defun %p-storable-raw (value)
   "The RAW value to park in an element slot for VALUE — or NIL when VALUE needs
@@ -12004,12 +12209,8 @@ which is one of #1140's escape spellings (probed)."
   (%p-check-array-writable arr)              ; task #159
   (cond
     ((and (vectorp arr) (> (length arr) 0))
-     (let ((first (aref arr 0)))
-       ;; Shift elements down
-       (loop for i from 0 below (1- (length arr))
-             do (setf (aref arr i) (aref arr (1+ i))))
-       (vector-pop arr)
-       first))
+     ;; Amortized O(1): the array WINDOW (#2098, block above %p-storable-raw).
+     (%p-array-shift-front arr))
     ((consp arr)
      (car arr))
     (t *p-undef*)))
@@ -12034,17 +12235,19 @@ which is one of #1140's escape spellings (probed)."
            (loop for elem across val do (%p-array-store-scalar flat-arr elem)))
           ;; Regular value - preserve bless class
           (t (%p-array-store-scalar flat-arr item)))))
-    (let ((nitems (length flat-arr)))
-      ;; Make room with placeholder boxes
-      (dotimes (i nitems)
-        (vector-push-extend (make-p-box *p-undef*) arr))
-      ;; Shift existing elements up
-      (loop for i from (1- (length arr)) downto nitems
-            do (setf (aref arr i) (aref arr (- i nitems))))
-      ;; Insert new items at front (already properly boxed)
-      (loop for i from 0 below nitems
-            do (setf (aref arr i) (aref flat-arr i)))
-      (length arr))))
+    ;; The items are already stored the way a slot holds them; putting them
+    ;; in front is the array WINDOW's job (#2098) — amortized O(1).
+    (%p-array-unshift-front arr (or (%p-vec-data flat-arr) flat-arr)
+                            (length flat-arr))
+    (length arr)))
+
+(defun %p-splice-result (removed)
+  "splice's value: the removed elements in list context, else the last one."
+  (if (eq *wantarray* t)
+      removed
+      (if (> (length removed) 0)
+          (aref removed (1- (length removed)))
+          *p-undef*)))
 
 (defmacro p-splice (arr &rest args)
   "Perl splice - auto-declares array if unbound (handles @Foo::ISA etc.)"
@@ -12080,6 +12283,16 @@ which is one of #1140's escape spellings (probed)."
     ;; Copy removed elements (keep boxes as-is for reference/bless preservation)
     (loop for i from 0 below len
           do (setf (aref removed i) (aref a (+ off i))))
+    ;; splice(@a, 0, K) with NO replacement list removes from the FRONT: the
+    ;; array WINDOW moves instead of every remaining element (#2098).  A short
+    ;; undisplaced array keeps the copying path below (%p-array-shift-front's
+    ;; threshold, for the same reason).
+    (when (and (= off 0) (> len 0) (null replacements)
+               (or (> alen +p-array-copy-limit+)
+                   (and (sb-kernel:array-header-p a)
+                        (sb-kernel::%array-displaced-p a)))
+               (%p-array-drop-front a len))
+      (return-from p-splice-impl (%p-splice-result removed)))
     ;; Flatten replacement items (arrays get flattened in Perl)
     (let ((flat-rep (make-array 8 :adjustable t :fill-pointer 0)))
       (dolist (r replacements)
@@ -12109,11 +12322,7 @@ which is one of #1140's escape spellings (probed)."
         (loop for i from off
               for j from 0 below nrep
               do (setf (aref a i) (aref flat-rep j)))))
-    (if (eq *wantarray* t)
-        removed
-        (if (> (length removed) 0)
-            (aref removed (1- (length removed)))
-            *p-undef*))))
+    (%p-splice-result removed)))
 
 ;;; ============================================================
 ;;; Data Structures - Hashes
