@@ -3040,6 +3040,23 @@ convert at the top level, and must be able to tell a *perl* die from an
 internal error of its own — PCL gives the two the condition classes
 `p-exception` (a die with an object) and `p-die-error` (a die with a string).
 
+**What an uncaught die PRINTS** (normative, s494g, task #2108).  A STRING
+payload prints as itself.  A REFERENCE or OBJECT payload prints its ordinary
+perl STRINGIFICATION -- `HASH(0x…)`, `Class=HASH(0x…)`, or the class's `""`
+overload -- with NOTHING appended (no ` at FILE line N.`, no newline); if that
+overload itself dies, its die text is printed instead.  A host's own printer
+(`#S(p-box …)`) is never an answer.  **Perl's own RUN-TIME FATALS that the
+runtime raises** (`Not a HASH reference`, `Modification of a read-only value
+attempted`, `Can't take log of 0`, `Too few arguments for subroutine …`, …)
+are perl dies too: catchable by `eval`, and uncaught they are one line and
+status 255 -- never the host's "unhandled condition, exit 1".  An internal
+invariant of the host stays loud.
+
+```perl
+package E; use overload q{""} => sub { "E: custom failure" };
+package main; die bless {}, "E";      # stderr: E: custom failure   (no newline), exit 255
+```
+
 ### 7.5b Spawning a child NEVER raises: a child that cannot start is a VALUE (normative, s473t6c)
 
 perl's `system` and `exec` report a failed spawn through their return value
