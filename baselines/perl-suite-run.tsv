@@ -1875,14 +1875,14 @@ op/lex_assign.t	353	0	350	3	DIFF		0
 op/lexsub.t	156	0	78	63	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.; aborted-forms:11: Undefined subroutine &main::d called	1
 op/lfs.t	17	0	0	0	DIFF		0
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run	-1
-op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|	0
+op/local.t	316	3	302	17	DIFF	s494g #1029 (via #2107's %SIG store seam): 300/19 -> 302/17 -- the two `local $SIG{...}` read-back rows (lines 550, 556) now read 'main::foo'; A/B dc20a721 300/19 | undef-fn:main::|pl-main::|	0
 op/localref.t	64	0	63	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t64 needs refcount-deterministic DESTROY at local-restore	0
 op/lock.t	5	0	0	0	DIFF	aborted-forms:5: invalid number of arguments: N	0
 op/loopctl.t	66	1	64	3	DIFF		0
 op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
-op/magic.t	207	1	174	31	DIFF	s473t6d: 176/31 -> 174/31 by #1954 in this round -- magic.t:591 `foreach (['powie::!','Errno'])` ran TWICE with $_ bound to each ELEMENT, so PCL printed FOUR rows `Referencing %{""} doesn't load ` where perl prints TWO; the two surplus rows padded C_ok and appeared at the tail as `*extra*`.  It now runs ONCE with perl's own descriptions, the numbering offset drops from 82 rows to 7, and the file produces 205 rows to perl's 208 (shortfall 1 -> 3).  Measured --jobs 1 + serial re-run, and 176/31 on a `git archive 268d7e00` extraction	0
+op/magic.t	207	1	176	29	DIFF	s494g #1029 (via #2107's %SIG store seam): 174/31 -> 176/29 -- 'Can assign to INT' / 'Can delete from INT' read back 'main::int'; A/B dc20a721 174/31 | s473t6d: 176/31 -> 174/31 by #1954 in this round -- magic.t:591 `foreach (['powie::!','Errno'])` ran TWICE with $_ bound to each ELEMENT, so PCL printed FOUR rows `Referencing %{""} doesn't load ` where perl prints TWO; the two surplus rows padded C_ok and appeared at the tail as `*extra*`.  It now runs ONCE with perl's own descriptions, the numbering offset drops from 82 rows to 7, and the file produces 205 rows to perl's 208 (shortfall 1 -> 3).  Measured --jobs 1 + serial re-run, and 176/31 on a `git archive 268d7e00` extraction	0
 op/method.t	163	0	103	23	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b; s473f: 103/22 -> 103/23 with aborted-forms 3 -> 2 and shortfall 38 -> 37 -- #1074/#1434: `*glob->method` RUNS instead of dying (a raw typeglob invocant is auto-referenced), which un-drops one statement; `SUPER->method` and `method{}@array` now pass, `[line 386]` and `method{@array}$more_args` now fail on the SUPER:: edge shapes	1
 op/mkdir.t	17	0	17	0	OK		0
 op/multideref.t	65	0	53	12	DIFF	s473t1 #1431: `exists +(EXPR)->[..]{..}` lowered to a ONE-argument (p-exists VALUE) and the raw CL arity error aborted the file's whole top-level form at test 52, so 13 rows never ran (exists: general, the six delete:*, the six !exists:*).  12 of the 13 now PASS; `delete: const indices` fails on the pre-existing `local`-not-restored rows above it (not-supported.md '`local` on hash/array elements and typeglobs').  Was: s470bv: BISECTED over 19d42836..614c6af (8 steps) to 0d1b5c18 = s470bk #1058.  The two rows are "RT #130727 array not autovivified" and its part 2 -- an ACCEPTED DIVERGENCE (DECIDED s470, not-supported.md "local on hash/array elements and typeglobs", cl/skip-registry.lisp) that used to pass by ACCIDENT.  No task | aborted-forms:1: invalid number of arguments: N	0
@@ -2078,7 +2078,7 @@ re/uniprops10.t	26334	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/Tes
 re/user_prop_race_thr.t	0	0	0	3	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 run/cloexec.t	22	0	16	6	DIFF		0
 run/dtrace.t	0	0	0	0	NOTAP		0
-run/exit.t	17	0	14	3	DIFF		0
+run/exit.t	17	0	12	5	DIFF	s494g #2107: the snapshot's 14/3 was STALE (40da28bd and dc20a721 both read 10/7: the ${^CHILD_ERROR_NATIVE} rows, #1710); s494g 10/7 -> 12/5 -- 'Term by signal' / 'Term by signal $?' pass (the `kill 15, $$` child dies BY the signal)	0
 run/fresh_perl.t	91	0	61	30	XDIFF	s488a: 60/31 -> 61/30 at 6aa2f358 (s473e member 1, #1161/#1244(a): a `continue` block joins the dynamic-exit frame).  t/run/fresh_perl.t:524 is `sub f { my $a = 1; ...; next } my $x = "foo"; { f } continue { print $x, "\n" }` -- probed directly: at the parent c60336e6 PCL dies `Can't "next" outside a loop block`, at 6aa2f358 it prints `foo` as perl does.  Its perl-suite-expected-rows.tsv registration was STALE and was removed in this commit (which is what the runner's STALE verdict asked for)	0
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0

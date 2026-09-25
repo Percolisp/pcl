@@ -10,6 +10,11 @@
 #     op/fork.t  x2     [at t/op/fork.t line 18] (progs 2 + 25: child's INT / TERM handler runs)   #2107
 #     op/sigdispatch.t  [line 167] + [line 168] (`kill 'INT', $$` with a local handler)        #2107
 #   ADDED: lib/croak.t *summary* -- a first measurement, cause #2266 (not a regression: same on dc20a721).
+# s494g, second splice (after the --all --quick, A/B'd on dc20a721 AND 40da28bd): SIX more rows
+#   removed -- op/local.t [line 550] + [line 556] (`local $SIG{...}` read back 'main::foo', #1029),
+#   op/magic.t Can assign/delete to INT (#1029), run/exit.t Term by signal + Term by signal $? (#2107:
+#   the `kill 15, $$` child dies BY the signal) -- and FOUR run/exit.t rows ADDED that fail on both
+#   bases too (the snapshot's 14/3 was stale): WEXITSTATUS, WIFEXITED, WIFSIGNALED, WTERMSIG (#1710).
 # s492b (2026-09-21, Opus) -- FIVE rows removed BY EDIT, each because this batch
 #   made it pass, each A/B verified `--jobs 1` against a 5ce155cb extraction:
 #     io/crlf.t           [at t/io/crlf.t line 29]                    #2006(a)
@@ -4867,8 +4872,6 @@ op/lfs.t	0	ok*	(no TAP)	*summary*	#1924 -- PCL's `%Config` is a 108-key hand-wri
 op/local.t	260	ok	not ok	Underscore 'Assignment'	NS:`local` on hash/array elements and typeglobs -- `local $_` seen by chop / a filetest / an assignment through the implicit-$_ builtins
 op/local.t	258	ok	not ok	Underscore 'Chop'	NS:`local` on hash/array elements and typeglobs -- `local $_` seen by chop / a filetest / an assignment through the implicit-$_ builtins
 op/local.t	259	ok	not ok	Underscore 'Filetest'	NS:`local` on hash/array elements and typeglobs -- `local $_` seen by chop / a filetest / an assignment through the implicit-$_ builtins
-op/local.t	237	ok	not ok	[at t/op/local.t line 550]	NS:`local` on hash/array elements and typeglobs -- `local $SIG{TERM}` and `local %ENV` restore through the element/typeglob path
-op/local.t	240	ok	not ok	[at t/op/local.t line 556]	NS:`local` on hash/array elements and typeglobs -- `local $SIG{TERM}` and `local %ENV` restore through the element/typeglob path
 op/local.t	251	ok	not ok	[at t/op/local.t line 592]	NS:`local` on hash/array elements and typeglobs -- `local $SIG{TERM}` and `local %ENV` restore through the element/typeglob path
 op/local.t	264	ok	not ok	[at t/op/local.t line 642]	NS:`local` on hash/array elements and typeglobs
 op/local.t	21	ok	not ok	[at t/op/local.t line 75]	NS:Error compatibility for invalid Perl input -- `local $$ref` is "Can't localize through a reference" at compile time
@@ -4895,9 +4898,7 @@ op/magic.t	110	ok	not ok	.. and the UTF-8 version is written	NS:Assigning `$0` d
 op/magic.t	109	ok	not ok	.. and the warning is about a wide character	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row matches the text of that warning
 op/magic.t	106	ok	not ok	/proc cmdline shows as expected (compare to UTF8-flagged)	NS:Assigning `$0` does not change the OS process name
 op/magic.t	107	ok	not ok	/proc cmdline shows as expected (compare to non-UTF8-flagged)	NS:Assigning `$0` does not change the OS process name
-op/magic.t	139	ok	not ok [PCL #141]	Can assign to INT	#1873
 op/magic.t	135	ok	not ok [PCL #137]	Can assign to __WARN__	#1873
-op/magic.t	140	ok	not ok [PCL #142]	Can delete from INT	#1873
 op/magic.t	136	ok	not ok [PCL #138]	Can delete from __WARN__	#1873
 op/magic.t	191	ok	not ok [PCL #193]	ENV key store warns about wide characters	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts a wide-character warning on an %ENV key store
 op/magic.t	185	ok	not ok [PCL #187]	ENV store downgrades utf8 in SV	NS:Unicode semantics differences -- measured s473t6d: `%ENV` store must DOWNGRADE a utf8-flagged SV to bytes
@@ -10376,9 +10377,11 @@ run/cloexec.t	12	ok	(missing)	parent open fd=4 ($^F=3)	#1707
 run/cloexec.t	16	ok	(missing)	parent open fd=4 ($^F=4)	#1707
 run/cloexec.t	13	ok	(missing)	tmpfile 'tmp_TMPFILE' exists	#1707
 run/cloexec.t	17	ok	(missing)	tmpfile 'tmp_TMPFILE' exists	#1707
-run/exit.t	3	ok	not ok	Normal exit ${^CHILD_ERROR_NATIVE}	NS:`fork` caveat 2 -- a fork-then-continue child is an SBCL process, so `$? & 127` reads 0 where perl shows the signal number; ${^CHILD_ERROR_NATIVE} is absent
-run/exit.t	10	ok	not ok	Term by signal	NS:`fork` caveat 2 -- a fork-then-continue child is an SBCL process, so `$? & 127` reads 0 where perl shows the signal number; ${^CHILD_ERROR_NATIVE} is absent
-run/exit.t	12	ok	not ok	Term by signal $?	NS:`fork` caveat 2 -- a fork-then-continue child is an SBCL process, so `$? & 127` reads 0 where perl shows the signal number; ${^CHILD_ERROR_NATIVE} is absent
+run/exit.t	3	ok	not ok	Normal exit ${^CHILD_ERROR_NATIVE}	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
+run/exit.t	9	ok	not ok	WEXITSTATUS	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
+run/exit.t	14	ok	not ok	WIFEXITED	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
+run/exit.t	15	ok	not ok	WIFSIGNALED	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
+run/exit.t	16	ok	not ok	WTERMSIG	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
 run/locale.t	0	ok*	(no TAP)	*summary*	#1705
 run/noswitch.t	2	ok	not ok	read from aliased DATA filehandle	#1702
 run/runenv_hashseed.t	278	ok	not ok	mode = DETERMINISTIC same key order with different seed no more than 2 times	#1588
