@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-2080
+;;; pcl: pipeline=v2 gen=v2-2280
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -355,10 +355,11 @@
                   ($got_le :box (make-p-box nil))
                   ($got_bang :box (make-p-box nil)))
                 (p-scalar-ctx (p-list-= (vector $got_be $got_le $got_bang) (vector 0 0 0)))
-                (p-while (p-< (p-cast-$ $ti_ref) $tlen)
+                (p-while (p-< (p-cast-$ $ti_ref :strict) $tlen)
                   (p-let
                     (($m :str
-                        (%pcl-to-string-strict (p-substr $tmpl (p-cast-$ $ti_ref) 1) "$m")))
+                        (%pcl-to-string-strict (p-substr $tmpl (p-cast-$ $ti_ref :strict-lv) 1)
+                          "$m")))
                     (p-if (p-str-eq $m "!")
                       (progn
                         (p-if (p-! (p->= (p-index $CAN_SHRIEK $ch) 0))
@@ -574,21 +575,24 @@
         (p-void-ctx
           (p-let (($tlen :num (%pcl-to-number-strict (p-length $tmpl) "$tlen")))
             (p-if
-              (p-&& (p-< (p-cast-$ $ti_ref) $tlen)
-                (p-str-eq (p-substr $tmpl (p-cast-$ $ti_ref) 1) "*"))
+              (p-&& (p-< (p-cast-$ $ti_ref :strict) $tlen)
+                (p-str-eq (p-substr $tmpl (p-cast-$ $ti_ref :strict-lv) 1) "*"))
               (progn (p-post++ (p-cast-$ $ti_ref))
                 ;; return (1, undef, 1)
 (p-return 1 (p-undef) 1)))
             (p-if
-              (p-&& (p-< (p-cast-$ $ti_ref) $tlen)
-                (p-str-eq (p-substr $tmpl (p-cast-$ $ti_ref) 1) "["))
+              (p-&& (p-< (p-cast-$ $ti_ref :strict) $tlen)
+                (p-str-eq (p-substr $tmpl (p-cast-$ $ti_ref :strict-lv) 1) "["))
               (progn (p-post++ (p-cast-$ $ti_ref))
-                (p-let (($start :num (%pcl-to-number-strict (p-cast-$ $ti_ref) "$start")))
+                (p-let
+                  (($start :num (%pcl-to-number-strict (p-cast-$ $ti_ref :strict) "$start")))
                   (p-let (($depth :scalar 1))
-                    (p-while (p-&& (p-< (p-cast-$ $ti_ref) $tlen) (p-> $depth 0))
+                    (p-while (p-&& (p-< (p-cast-$ $ti_ref :strict) $tlen) (p-> $depth 0))
                       (p-let
                         (($c :str
-                            (%pcl-to-string-strict (p-substr $tmpl (p-cast-$ $ti_ref) 1) "$c")))
+                            (%pcl-to-string-strict
+                              (p-substr $tmpl (p-cast-$ $ti_ref :strict-lv) 1)
+                              "$c")))
                         (p-post++ (p-cast-$ $ti_ref))
                         (p-if (p-str-eq $c "[")
                           (progn (p-incf-raw $depth :numeric))
@@ -599,7 +603,7 @@
                         (p-esc "No group ending character ']' found in template\\n")))
                     (p-let (($inner :box (make-p-box nil)))
                       (p-my-= $inner
-                        (p-substr $tmpl $start (p-- (p-- (p-cast-$ $ti_ref) $start) 1)))
+                        (p-substr $tmpl $start (p-- (p-- (p-cast-$ $ti_ref :strict) $start) 1)))
                       (p-if
                         (p-scalar-ctx
                           (p-=~ $inner (p-regex :pat "^\\d+$" :flags "" :tier :native)))
@@ -626,19 +630,20 @@
                         ;; return (0, $n, $n)
 (p-return 0 $n $n)))))))
             (p-if
-              (p-&& (p-< (p-cast-$ $ti_ref) $tlen)
+              (p-&& (p-< (p-cast-$ $ti_ref :strict) $tlen)
                 (p-scalar-ctx
-                  (p-=~ (p-substr $tmpl (p-cast-$ $ti_ref) 1)
+                  (p-=~ (p-substr $tmpl (p-cast-$ $ti_ref :strict-lv) 1)
                     (p-regex :pat "\\d" :flags "" :tier :native))))
               (progn
                 (p-let (($n :box (make-p-box nil)))
                   (p-my-= $n 0)
                   (p-while
-                    (p-&& (p-< (p-cast-$ $ti_ref) $tlen)
+                    (p-&& (p-< (p-cast-$ $ti_ref :strict) $tlen)
                       (p-scalar-ctx
-                        (p-=~ (p-substr $tmpl (p-cast-$ $ti_ref) 1)
+                        (p-=~ (p-substr $tmpl (p-cast-$ $ti_ref :strict-lv) 1)
                           (p-regex :pat "\\d" :flags "" :tier :native))))
-                    (p-my-= $n (p-+ (p-* $n 10) (p-substr $tmpl (p-cast-$ $ti_ref) 1)))
+                    (p-my-= $n
+                      (p-+ (p-* $n 10) (p-substr $tmpl (p-cast-$ $ti_ref :strict-lv) 1)))
                     (p-post++ (p-cast-$ $ti_ref)))
                   ;; return (0, $n, $n)
 (p-return 0 $n $n))))
@@ -751,7 +756,7 @@
                         (p-for ()
                           ((p-< $k $len))
                           ((p-incf-raw $k :numeric))
-                          (p-.= (p-cast-$ $result_ref)
+                          (p-.= (p-cast-$ $result_ref :strict-lv)
                             (p-if (p-< $k $slen) (p-substr $arg $k 1) (p-chr 0))))))))
                 (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "A"))
                   (setf --pcl-if-ret--0
@@ -762,7 +767,7 @@
                           (p-for ()
                             ((p-< $k $len))
                             ((p-incf-raw $k :numeric))
-                            (p-.= (p-cast-$ $result_ref)
+                            (p-.= (p-cast-$ $result_ref :strict-lv)
                               (p-if (p-< $k $slen) (p-substr $arg $k 1) " ")))))))
                   (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "Z"))
                     (setf --pcl-if-ret--0
@@ -778,9 +783,10 @@
                                       (p-for ()
                                         ((p-< $k $body))
                                         ((p-incf-raw $k :numeric))
-                                        (p-.= (p-cast-$ $result_ref)
+                                        (p-.= (p-cast-$ $result_ref :strict-lv)
                                           (p-if (p-< $k $slen) (p-substr $arg $k 1) (p-chr 0)))))
-                                    (p-caller-ctx (p-.= (p-cast-$ $result_ref) (p-chr 0))))))
+                                    (p-caller-ctx
+                                      (p-.= (p-cast-$ $result_ref :strict-lv) (p-chr 0))))))
                               nil)
                             --pcl-if-ret--1))))
                     (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "b"))
@@ -804,7 +810,7 @@
                                           (p-&& (p-< $idx $slen)
                                             (p-str-eq (p-substr $arg $idx 1) "1"))
                                           (p-bit-or= $byte (p-<< 1 $bit))))))
-                                  (p-.= (p-cast-$ $result_ref) (p-chr $byte))))))))
+                                  (p-.= (p-cast-$ $result_ref :strict-lv) (p-chr $byte))))))))
                       (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "B"))
                         (setf --pcl-if-ret--0
                           (progn
@@ -826,7 +832,7 @@
                                             (p-&& (p-< $idx $slen)
                                               (p-str-eq (p-substr $arg $idx 1) "1"))
                                             (p-bit-or= $byte (p-<< 1 (p-- 7 $bit)))))))
-                                    (p-.= (p-cast-$ $result_ref) (p-chr $byte))))))))
+                                    (p-.= (p-cast-$ $result_ref :strict-lv) (p-chr $byte))))))))
                         (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "H"))
                           (setf --pcl-if-ret--0
                             (progn
@@ -844,7 +850,7 @@
                                           (p-if (p-< (p-+ $k 1) $slen)
                                             (p-hex (p-substr $arg (p-+ $k 1) 1))
                                             0))
-                                        (p-.= (p-cast-$ $result_ref)
+                                        (p-.= (p-cast-$ $result_ref :strict-lv)
                                           (p-chr (p-bit-or (p-<< $hi 4) $lo))))))))))
                           (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "h"))
                             (setf --pcl-if-ret--0
@@ -863,7 +869,7 @@
                                             (p-if (p-< (p-+ $k 1) $slen)
                                               (p-hex (p-substr $arg (p-+ $k 1) 1))
                                               0))
-                                          (p-.= (p-cast-$ $result_ref)
+                                          (p-.= (p-cast-$ $result_ref :strict-lv)
                                             (p-chr (p-bit-or (p-<< $hi 4) $lo))))))))))
                             (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "u"))
                               (setf --pcl-if-ret--0
@@ -901,7 +907,7 @@
                                               (($clen :num
                                                   (%pcl-to-number-strict (p-length $chunk)
                                                     "$clen")))
-                                              (p-.= (p-cast-$ $result_ref)
+                                              (p-.= (p-cast-$ $result_ref :strict-lv)
                                                 (p-chr (p-+ 32 $clen)))
                                               (p-let (($k :scalar 0))
                                                 (p-for ()
@@ -957,7 +963,8 @@
                                                                             (p-if (p-== $c 32)
                                                                               96
                                                                               $c)))))))))
-                                                            (p-.= (p-cast-$ $result_ref)
+                                                            (p-.=
+                                                              (p-cast-$ $result_ref :strict-lv)
                                                               (p-.
                                                                 (p-.
                                                                   (p-.
@@ -982,7 +989,8 @@
                                                                   (p-scalar-ctx
                                                                     (p-funcall-ref $uu
                                                                       (p-bit-and $cm 63)))))))))))))
-                                              (p-.= (p-cast-$ $result_ref) (p-esc "\\n"))))))))))
+                                              (p-.= (p-cast-$ $result_ref :strict-lv)
+                                                (p-esc "\\n"))))))))))
                               nil))))))))
               --pcl-if-ret--0)))))))
 
@@ -995,24 +1003,24 @@
         (p-scalar-ctx (p-list-= (vector $code $r) @_))
         (p-void-ctx
           (p-if (p-< $code #x80)
-            (progn (p-caller-ctx (p-.= (p-cast-$ $r) (p-chr $code))))
+            (progn (p-caller-ctx (p-.= (p-cast-$ $r :strict-lv) (p-chr $code))))
             (p-if (p-< $code #x800)
               (progn
                 (p-caller-ctx
-                  (p-.= (p-cast-$ $r)
+                  (p-.= (p-cast-$ $r :strict-lv)
                     (p-. (p-chr (p-bit-or #xC0 (p->> $code 6)))
                       (p-chr (p-bit-or #x80 (p-bit-and $code #x3F)))))))
               (p-if (p-< $code #x10000)
                 (progn
                   (p-caller-ctx
-                    (p-.= (p-cast-$ $r)
+                    (p-.= (p-cast-$ $r :strict-lv)
                       (p-.
                         (p-. (p-chr (p-bit-or #xE0 (p->> $code 12)))
                           (p-chr (p-bit-or #x80 (p-bit-and (p->> $code 6) #x3F))))
                         (p-chr (p-bit-or #x80 (p-bit-and $code #x3F)))))))
                 (progn
                   (p-caller-ctx
-                    (p-.= (p-cast-$ $r)
+                    (p-.= (p-cast-$ $r :strict-lv)
                       (p-.
                         (p-.
                           (p-. (p-chr (p-bit-or #xF0 (p->> $code 18)))
@@ -1047,7 +1055,8 @@
               "cl/pack-impl.pl line 419"
               (p-esc "Too deeply nested ()-groups in pack\\n")))
           (p-let
-            (($nargs :num (%pcl-to-number-strict (p-scalar (p-cast-@ $args_ref)) "$nargs")))
+            (($nargs :num
+                (%pcl-to-number-strict (p-scalar (p-cast-@ $args_ref :strict)) "$nargs")))
             (p-let (($ti :box (make-p-box nil)))
               (p-my-= $ti 0)
               (p-let (($tlen :num (%pcl-to-number-strict (p-length $tmpl) "$tlen")))
@@ -1160,9 +1169,12 @@
                                                   (progn
                                                     (p-let (($darg :box (make-p-box nil)))
                                                       (p-my-= $darg
-                                                        (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                                        (p-if
+                                                          (p-< (p-cast-$ $ai_ref :strict)
+                                                            $nargs)
                                                           (p-aref-deref $args_ref
-                                                            (p-post++ (p-cast-$ $ai_ref)))
+                                                            (p-post++ (p-cast-$ $ai_ref))
+                                                            :strict)
                                                           ""))
                                                       (p-if (p-! (p-defined $darg))
                                                         (p-my-= $darg ""))
@@ -1185,7 +1197,9 @@
                                                                 (pl-_pack_type_info $ch $bang))))
                                                           (p-if $nb
                                                             (progn
-                                                              (p-.= (p-cast-$ $result_ref)
+                                                              (p-.=
+                                                                (p-cast-$ $result_ref
+                                                                  :strict-lv)
                                                                 (pl-_pack_emit_int $actual_count
                                                                   $nb
                                                                   $sig
@@ -1223,7 +1237,8 @@
                                                                         (progn
                                                                           (p-.=
                                                                             (p-cast-$
-                                                                              $result_ref)
+                                                                              $result_ref
+                                                                              :strict-lv)
                                                                             (p-chr 0)))
                                                                         (progn
                                                                           (p-let
@@ -1244,7 +1259,8 @@
                                                                                     :numeric))
                                                                                 (p-.=
                                                                                   (p-cast-$
-                                                                                    $result_ref)
+                                                                                    $result_ref
+                                                                                    :strict-lv)
                                                                                   (p-chr
                                                                                     (p-bit-or
                                                                                       (p-aref
@@ -1253,7 +1269,8 @@
                                                                                       #x80)))))
                                                                             (p-.=
                                                                               (p-cast-$
-                                                                                $result_ref)
+                                                                                $result_ref
+                                                                                :strict-lv)
                                                                               (p-chr
                                                                                 (p-aref @bytes
                                                                                   -1))))))))))))
@@ -1267,7 +1284,8 @@
                                                       (p-let
                                                         (($remaining :box (make-p-box nil)))
                                                         (p-my-= $remaining
-                                                          (p-- $nargs (p-cast-$ $ai_ref)))
+                                                          (p-- $nargs
+                                                            (p-cast-$ $ai_ref :strict)))
                                                         (p-if (p-|| (p-! $had_dcount) $dstar2)
                                                           (progn
                                                             (p-my-= $actual_count $remaining))
@@ -1286,7 +1304,9 @@
                                                                 (pl-_pack_type_info $ch $bang))))
                                                           (p-if $nb
                                                             (progn
-                                                              (p-.= (p-cast-$ $result_ref)
+                                                              (p-.=
+                                                                (p-cast-$ $result_ref
+                                                                  :strict-lv)
                                                                 (pl-_pack_emit_int $actual_count
                                                                   $nb
                                                                   $sig
@@ -1324,7 +1344,8 @@
                                                                         (progn
                                                                           (p-.=
                                                                             (p-cast-$
-                                                                              $result_ref)
+                                                                              $result_ref
+                                                                              :strict-lv)
                                                                             (p-chr 0)))
                                                                         (progn
                                                                           (p-let
@@ -1345,7 +1366,8 @@
                                                                                     :numeric))
                                                                                 (p-.=
                                                                                   (p-cast-$
-                                                                                    $result_ref)
+                                                                                    $result_ref
+                                                                                    :strict-lv)
                                                                                   (p-chr
                                                                                     (p-bit-or
                                                                                       (p-aref
@@ -1354,7 +1376,8 @@
                                                                                       #x80)))))
                                                                             (p-.=
                                                                               (p-cast-$
-                                                                                $result_ref)
+                                                                                $result_ref
+                                                                                :strict-lv)
                                                                               (p-chr
                                                                                 (p-aref @bytes
                                                                                   -1))))))))))))
@@ -1367,7 +1390,9 @@
                                                             (p-let (($i :scalar 0))
                                                               (p-for ()
                                                                 ((p-&& (p-< $i $actual_count)
-                                                                    (p-< (p-cast-$ $ai_ref)
+                                                                    (p-<
+                                                                      (p-cast-$ $ai_ref
+                                                                        :strict)
                                                                       $nargs)))
                                                                 ((p-incf-raw $i :numeric))
                                                                 (p-let
@@ -1376,8 +1401,11 @@
                                                                   (p-my-= $val
                                                                     (p-aref-deref $args_ref
                                                                       (p-post++
-                                                                        (p-cast-$ $ai_ref))))
-                                                                  (p-.= (p-cast-$ $result_ref)
+                                                                        (p-cast-$ $ai_ref))
+                                                                      :strict))
+                                                                  (p-.=
+                                                                    (p-cast-$ $result_ref
+                                                                      :strict-lv)
                                                                     (pl-_pack_emit_int $val
                                                                       $dnb
                                                                       $dsig
@@ -1387,7 +1415,8 @@
                                                         (p-let
                                                           (($remaining :box (make-p-box nil)))
                                                           (p-my-= $remaining
-                                                            (p-- $nargs (p-cast-$ $ai_ref)))
+                                                            (p-- $nargs
+                                                              (p-cast-$ $ai_ref :strict)))
                                                           (p-my-= $actual_count
                                                             (p-if
                                                               (p-|| (p-! $had_dcount) $dstar2)
@@ -1406,7 +1435,9 @@
                                                                     $bang))))
                                                             (p-if $nb
                                                               (progn
-                                                                (p-.= (p-cast-$ $result_ref)
+                                                                (p-.=
+                                                                  (p-cast-$ $result_ref
+                                                                    :strict-lv)
                                                                   (pl-_pack_emit_int
                                                                     $actual_count
                                                                     $nb
@@ -1423,7 +1454,8 @@
                                                                     (p-if (p-== $v 0)
                                                                       (progn
                                                                         (p-.=
-                                                                          (p-cast-$ $result_ref)
+                                                                          (p-cast-$ $result_ref
+                                                                            :strict-lv)
                                                                           (p-chr 0)))
                                                                       (progn
                                                                         (p-let
@@ -1444,7 +1476,8 @@
                                                                                   :numeric))
                                                                               (p-.=
                                                                                 (p-cast-$
-                                                                                  $result_ref)
+                                                                                  $result_ref
+                                                                                  :strict-lv)
                                                                                 (p-chr
                                                                                   (p-bit-or
                                                                                     (p-aref
@@ -1453,14 +1486,17 @@
                                                                                     #x80)))))
                                                                           (p-.=
                                                                             (p-cast-$
-                                                                              $result_ref)
+                                                                              $result_ref
+                                                                              :strict-lv)
                                                                             (p-chr
                                                                               (p-aref @bytes
                                                                                 -1))))))))))
                                                             (p-let (($i :scalar 0))
                                                               (p-for ()
                                                                 ((p-&& (p-< $i $actual_count)
-                                                                    (p-< (p-cast-$ $ai_ref)
+                                                                    (p-<
+                                                                      (p-cast-$ $ai_ref
+                                                                        :strict)
                                                                       $nargs)))
                                                                 ((p-incf-raw $i :numeric))
                                                                 (p-let
@@ -1469,12 +1505,14 @@
                                                                     (p-+
                                                                       (p-aref-deref $args_ref
                                                                         (p-post++
-                                                                          (p-cast-$ $ai_ref)))
+                                                                          (p-cast-$ $ai_ref))
+                                                                        :strict)
                                                                       0))
                                                                   (p-if (p-== $v 0)
                                                                     (progn
                                                                       (p-.=
-                                                                        (p-cast-$ $result_ref)
+                                                                        (p-cast-$ $result_ref
+                                                                          :strict-lv)
                                                                         (p-chr 0)))
                                                                     (progn
                                                                       (p-let
@@ -1493,14 +1531,16 @@
                                                                                 :numeric))
                                                                             (p-.=
                                                                               (p-cast-$
-                                                                                $result_ref)
+                                                                                $result_ref
+                                                                                :strict-lv)
                                                                               (p-chr
                                                                                 (p-bit-or
                                                                                   (p-aref @bytes
                                                                                     $k)
                                                                                   #x80)))))
                                                                         (p-.=
-                                                                          (p-cast-$ $result_ref)
+                                                                          (p-cast-$ $result_ref
+                                                                            :strict-lv)
                                                                           (p-chr
                                                                             (p-aref @bytes -1)))))))))))))))
                                                 (p-next))))))))))
@@ -1528,14 +1568,15 @@
                                                 (p-esc "()-group starts with a count in pack\\n"))))))
                                       (p-if $star
                                         (progn
-                                          (p-while (p-< (p-cast-$ $ai_ref) $nargs)
+                                          (p-while (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                             (p-let
                                               (($ai_before :num
-                                                  (%pcl-to-number-strict (p-cast-$ $ai_ref)
+                                                  (%pcl-to-number-strict
+                                                    (p-cast-$ $ai_ref :strict)
                                                     "$ai_before")))
                                               (p-let (($iter_base :box (make-p-box nil)))
                                                 (p-my-= $iter_base
-                                                  (p-length (p-cast-$ $result_ref)))
+                                                  (p-length (p-cast-$ $result_ref :strict-lv)))
                                                 (pl-_pack_tmpl $inner
                                                   $ai_ref
                                                   $args_ref
@@ -1544,7 +1585,8 @@
                                                   $le
                                                   $iter_base
                                                   (p-+ $depth 1))
-                                                (p-if (p-== (p-cast-$ $ai_ref) $ai_before)
+                                                (p-if
+                                                  (p-== (p-cast-$ $ai_ref :strict) $ai_before)
                                                   (p-last))))))
                                         (progn
                                           (p-let (($r :scalar 0))
@@ -1553,7 +1595,7 @@
                                               ((p-incf-raw $r :numeric))
                                               (p-let (($iter_base :box (make-p-box nil)))
                                                 (p-my-= $iter_base
-                                                  (p-length (p-cast-$ $result_ref)))
+                                                  (p-length (p-cast-$ $result_ref :strict-lv)))
                                                 (pl-_pack_tmpl $inner
                                                   $ai_ref
                                                   $args_ref
@@ -1570,13 +1612,15 @@
                                       (p-let (($n :box (make-p-box nil)))
                                         (p-my-= $n (p-if (p-> $nrep 0) $nrep 1))
                                         (p-let (($cur :box (make-p-box nil)))
-                                          (p-my-= $cur (p-length (p-cast-$ $result_ref)))
+                                          (p-my-= $cur
+                                            (p-length (p-cast-$ $result_ref :strict-lv)))
                                           (p-let
                                             (($pad :scalar (p-% (p-- $n (p-% $cur $n)) $n)))
-                                            (p-.= (p-cast-$ $result_ref)
+                                            (p-.= (p-cast-$ $result_ref :strict-lv)
                                               (p-str-x (p-chr 0) $pad))))))
                                     (progn
-                                      (p-.= (p-cast-$ $result_ref) (p-str-x (p-chr 0) $nrep))))
+                                      (p-.= (p-cast-$ $result_ref :strict-lv)
+                                        (p-str-x (p-chr 0) $nrep))))
                                   (p-next)))
                               (p-if (p-str-eq $ch "X")
                                 (progn
@@ -1585,17 +1629,19 @@
                                       (p-let (($n :box (make-p-box nil)))
                                         (p-my-= $n (p-if (p-> $nrep 0) $nrep 1))
                                         (p-let (($cur :box (make-p-box nil)))
-                                          (p-my-= $cur (p-length (p-cast-$ $result_ref)))
-                                          (p-setf (p-cast-$ $result_ref)
-                                            (p-substr (p-cast-$ $result_ref)
+                                          (p-my-= $cur
+                                            (p-length (p-cast-$ $result_ref :strict-lv)))
+                                          (p-setf (p-cast-$ $result_ref :strict-lv)
+                                            (p-substr (p-cast-$ $result_ref :strict-lv)
                                               0
                                               (p-* (p-int (p-/ $cur $n)) $n))))))
                                     (progn
                                       (p-let
                                         (($fp :scalar
-                                            (p-- (p-length (p-cast-$ $result_ref)) $nrep)))
-                                        (p-setf (p-cast-$ $result_ref)
-                                          (p-substr (p-cast-$ $result_ref)
+                                            (p-- (p-length (p-cast-$ $result_ref :strict-lv))
+                                              $nrep)))
+                                        (p-setf (p-cast-$ $result_ref :strict-lv)
+                                          (p-substr (p-cast-$ $result_ref :strict-lv)
                                             0
                                             (p-if (p-< $fp 0) 0 $fp))))))
                                   (p-next)))
@@ -1608,26 +1654,30 @@
                                           (%pcl-to-number-strict
                                             (p-if $bang $n (p-+ $out_base $n))
                                             "$t")))
-                                      (p-if (p-< (p-length (p-cast-$ $result_ref)) $t)
+                                      (p-if
+                                        (p-< (p-length (p-cast-$ $result_ref :strict-lv)) $t)
                                         (progn
-                                          (p-.= (p-cast-$ $result_ref)
+                                          (p-.= (p-cast-$ $result_ref :strict-lv)
                                             (p-str-x (p-chr 0)
-                                              (p-- $t (p-length (p-cast-$ $result_ref))))))
-                                        (p-if (p-> (p-length (p-cast-$ $result_ref)) $t)
+                                              (p-- $t
+                                                (p-length (p-cast-$ $result_ref :strict-lv))))))
+                                        (p-if
+                                          (p-> (p-length (p-cast-$ $result_ref :strict-lv)) $t)
                                           (progn
-                                            (p-setf (p-cast-$ $result_ref)
-                                              (p-substr (p-cast-$ $result_ref) 0 $t)))))
+                                            (p-setf (p-cast-$ $result_ref :strict-lv)
+                                              (p-substr (p-cast-$ $result_ref :strict-lv) 0 $t)))))
                                       (p-next)))))
                               (p-if (p-str-eq $ch ".")
                                 (progn
                                   (p-let (($tgt :box (make-p-box nil)))
                                     (p-my-= $tgt
-                                      (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                      (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                         (p-int
                                           (p-+
                                             (p-//
                                               (p-aref-deref $args_ref
-                                                (p-post++ (p-cast-$ $ai_ref)))
+                                                (p-post++ (p-cast-$ $ai_ref))
+                                                :strict)
                                               0)
                                             0))
                                         0))
@@ -1637,15 +1687,18 @@
                                             (p-if $star $tgt (p-+ $out_base $tgt))
                                             "$abs_tgt")))
                                       (p-let (($cur :box (make-p-box nil)))
-                                        (p-my-= $cur (p-length (p-cast-$ $result_ref)))
+                                        (p-my-= $cur
+                                          (p-length (p-cast-$ $result_ref :strict-lv)))
                                         (p-if (p-< $cur $abs_tgt)
                                           (progn
-                                            (p-.= (p-cast-$ $result_ref)
+                                            (p-.= (p-cast-$ $result_ref :strict-lv)
                                               (p-str-x (p-chr 0) (p-- $abs_tgt $cur))))
                                           (p-if (p-> $cur $abs_tgt)
                                             (progn
-                                              (p-setf (p-cast-$ $result_ref)
-                                                (p-substr (p-cast-$ $result_ref) 0 $abs_tgt)))))
+                                              (p-setf (p-cast-$ $result_ref :strict-lv)
+                                                (p-substr (p-cast-$ $result_ref :strict-lv)
+                                                  0
+                                                  $abs_tgt)))))
                                         (p-next))))))
                               (p-if
                                 (p-|| (p-|| (p-str-eq $ch "p") (p-str-eq $ch "P"))
@@ -1656,7 +1709,8 @@
                                     (p-string-concat "Invalid type '"
                                       $ch
                                       (p-esc "' in pack\\n")))))
-                              (p-if $star (p-my-= $nrep (p-- $nargs (p-cast-$ $ai_ref))))
+                              (p-if $star
+                                (p-my-= $nrep (p-- $nargs (p-cast-$ $ai_ref :strict))))
                               (p-let
                                 (($nb :box (make-p-box nil))
                                   ($sig :box (make-p-box nil))
@@ -1674,10 +1728,11 @@
                                           ((p-incf-raw $r :numeric))
                                           (p-let (($v :box (make-p-box nil)))
                                             (p-my-= $v
-                                              (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                              (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                                 (p-//
                                                   (p-aref-deref $args_ref
-                                                    (p-post++ (p-cast-$ $ai_ref)))
+                                                    (p-post++ (p-cast-$ $ai_ref))
+                                                    :strict)
                                                   0)
                                                 0))
                                             (p-let (($nv :box (make-p-box nil)))
@@ -1693,7 +1748,7 @@
                                                     (p-. "Cannot pack "
                                                       (p-if (p-< $nv 0) "-Inf" "Inf"))
                                                     (p-esc " in pack\\n"))))
-                                              (p-.= (p-cast-$ $result_ref)
+                                              (p-.= (p-cast-$ $result_ref :strict-lv)
                                                 (pl-_pack_emit_int (p-list-ctx (p-int $nv))
                                                   $nb
                                                   $sig
@@ -1709,13 +1764,14 @@
                                           ((p-incf-raw $r :numeric))
                                           (p-let (($v :box (make-p-box nil)))
                                             (p-my-= $v
-                                              (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                              (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                                 (p-//
                                                   (p-aref-deref $args_ref
-                                                    (p-post++ (p-cast-$ $ai_ref)))
+                                                    (p-post++ (p-cast-$ $ai_ref))
+                                                    :strict)
                                                   0)
                                                 0))
-                                            (p-.= (p-cast-$ $result_ref)
+                                            (p-.= (p-cast-$ $result_ref :strict-lv)
                                               (pl-_pack_float32 $v $be2)))))
                                       (p-next))))
                                 (p-if (p-|| (p-str-eq $ch "d") (p-str-eq $ch "F"))
@@ -1728,13 +1784,14 @@
                                           ((p-incf-raw $r :numeric))
                                           (p-let (($v :box (make-p-box nil)))
                                             (p-my-= $v
-                                              (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                              (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                                 (p-//
                                                   (p-aref-deref $args_ref
-                                                    (p-post++ (p-cast-$ $ai_ref)))
+                                                    (p-post++ (p-cast-$ $ai_ref))
+                                                    :strict)
                                                   0)
                                                 0))
-                                            (p-.= (p-cast-$ $result_ref)
+                                            (p-.= (p-cast-$ $result_ref :strict-lv)
                                               (pl-_pack_float64 $v $be2)))))
                                       (p-next))))
                                 (p-if
@@ -1753,10 +1810,11 @@
                                   (progn
                                     (p-let (($arg :box (make-p-box nil)))
                                       (p-my-= $arg
-                                        (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                        (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                           (p-//
                                             (p-aref-deref $args_ref
-                                              (p-post++ (p-cast-$ $ai_ref)))
+                                              (p-post++ (p-cast-$ $ai_ref))
+                                              :strict)
                                             "")
                                           ""))
                                       (pl-_pack_str_one $ch $arg $nrep $star $result_ref)
@@ -1769,10 +1827,11 @@
                                         ((p-incf-raw $r :numeric))
                                         (p-let (($v :box (make-p-box nil)))
                                           (p-my-= $v
-                                            (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                            (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                               (p-//
                                                 (p-aref-deref $args_ref
-                                                  (p-post++ (p-cast-$ $ai_ref)))
+                                                  (p-post++ (p-cast-$ $ai_ref))
+                                                  :strict)
                                                 0)
                                               0))
                                           (p-let (($nv :box (make-p-box nil)))
@@ -1799,10 +1858,11 @@
                                         ((p-incf-raw $r :numeric))
                                         (p-let (($v :box (make-p-box nil)))
                                           (p-my-= $v
-                                            (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                            (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                               (p-//
                                                 (p-aref-deref $args_ref
-                                                  (p-post++ (p-cast-$ $ai_ref)))
+                                                  (p-post++ (p-cast-$ $ai_ref))
+                                                  :strict)
                                                 0)
                                               0))
                                           (p-let (($nv :box (make-p-box nil)))
@@ -1818,7 +1878,8 @@
                                                   (p-. "Cannot pack "
                                                     (p-if (p-< $nv 0) "-Inf" "Inf"))
                                                   (p-esc " in pack\\n"))))
-                                            (p-.= (p-cast-$ $result_ref) (p-chr (p-int $nv)))))))
+                                            (p-.= (p-cast-$ $result_ref :strict-lv)
+                                              (p-chr (p-int $nv)))))))
                                     (p-next)))
                                 (p-if (p-str-eq $ch "w")
                                   (progn
@@ -1828,10 +1889,11 @@
                                         ((p-incf-raw $r :numeric))
                                         (p-let (($raw :box (make-p-box nil)))
                                           (p-my-= $raw
-                                            (p-if (p-< (p-cast-$ $ai_ref) $nargs)
+                                            (p-if (p-< (p-cast-$ $ai_ref :strict) $nargs)
                                               (p-//
                                                 (p-aref-deref $args_ref
-                                                  (p-post++ (p-cast-$ $ai_ref)))
+                                                  (p-post++ (p-cast-$ $ai_ref))
+                                                  :strict)
                                                 0)
                                               0))
                                           (p-let (($orig_s :box (make-p-box nil)))
@@ -1874,7 +1936,9 @@
                                                     "Can only compress unsigned integers in pack\\n")))
                                               (p-my-= $v (p-int $v))
                                               (p-if (p-== $v 0)
-                                                (progn (p-.= (p-cast-$ $result_ref) (p-chr 0))
+                                                (progn
+                                                  (p-.= (p-cast-$ $result_ref :strict-lv)
+                                                    (p-chr 0))
                                                   (p-next)))
                                               (p-let
                                                 ((@bytes :array
@@ -1886,9 +1950,9 @@
                                                   (p-for ()
                                                     ((p-< $k (p-array-last-index @bytes)))
                                                     ((p-incf-raw $k :numeric))
-                                                    (p-.= (p-cast-$ $result_ref)
+                                                    (p-.= (p-cast-$ $result_ref :strict-lv)
                                                       (p-chr (p-bit-or (p-aref @bytes $k) #x80)))))
-                                                (p-.= (p-cast-$ $result_ref)
+                                                (p-.= (p-cast-$ $result_ref :strict-lv)
                                                   (p-chr (p-aref @bytes -1)))))))))
                                     (p-next)))
                                 (p-if (p-str-eq $ch "/")
@@ -1979,9 +2043,9 @@
         (p-scalar-ctx (p-list-= (vector $s $si_ref) @_))
         (p-void-ctx
           (p-let (($slen :num (%pcl-to-number-strict (p-length $s) "$slen")))
-            (p-if (p->= (p-cast-$ $si_ref) $slen) (p-return 0))
+            (p-if (p->= (p-cast-$ $si_ref :strict) $slen) (p-return 0))
             (p-let (($b0 :box (make-p-box nil)))
-              (p-my-= $b0 (p-ord (p-substr $s (p-cast-$ $si_ref) 1)))
+              (p-my-= $b0 (p-ord (p-substr $s (p-cast-$ $si_ref :strict-lv) 1)))
               (p-let (($nb :box (make-p-box nil)) ($code :box (make-p-box nil)))
                 (p-if (p-< $b0 #x80)
                   (progn (setf $nb 1) (p-my-= $code $b0))
@@ -1994,11 +2058,12 @@
                   (p-for ()
                     ((p-< $k $nb))
                     ((p-incf-raw $k :numeric))
-                    (p-if (p-< (p-+ (p-cast-$ $si_ref) $k) $slen)
+                    (p-if (p-< (p-+ (p-cast-$ $si_ref :strict) $k) $slen)
                       (p-my-= $code
                         (p-bit-or (p-<< $code 6)
-                          (p-bit-and (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $k) 1)) #x3F))))))
-                (p-incf (p-cast-$ $si_ref) $nb)
+                          (p-bit-and (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref :strict) $k) 1))
+                            #x3F))))))
+                (p-incf (p-cast-$ $si_ref :strict-lv) $nb)
                 (p-caller-ctx (p-tail-value $code))))))))))
 
 (p-sub pl-_unpack_str
@@ -2026,14 +2091,14 @@
                 (setf --pcl-if-ret--2
                   (progn
                     (p-let (($n :box (make-p-box nil)))
-                      (p-my-= $n (p-if $all (p-- $slen (p-cast-$ $si_ref)) $nrep))
+                      (p-my-= $n (p-if $all (p-- $slen (p-cast-$ $si_ref :strict)) $nrep))
                       (p-if (p-< $n 0) (p-my-= $n 0))
                       (p-let (($raw :box (make-p-box nil)))
                         (p-my-= $raw
-                          (p-if (p-< (p-cast-$ $si_ref) $slen)
-                            (p-substr $s (p-cast-$ $si_ref) $n)
+                          (p-if (p-< (p-cast-$ $si_ref :strict) $slen)
+                            (p-substr $s (p-cast-$ $si_ref :strict-lv) $n)
                             ""))
-                        (p-incf (p-cast-$ $si_ref) $n)
+                        (p-incf (p-cast-$ $si_ref :strict-lv) $n)
                         (p-if (p-str-eq $ch "A")
                           (p-=~ $raw
                             (p-subst :pat "[ \\x00]+$" :rep "" :flags "" :tier :native)))
@@ -2044,7 +2109,8 @@
                   (setf --pcl-if-ret--2
                     (progn
                       (p-let (($n :box (make-p-box nil)))
-                        (p-my-= $n (p-if $all (p-* 2 (p-- $slen (p-cast-$ $si_ref))) $nrep))
+                        (p-my-= $n
+                          (p-if $all (p-* 2 (p-- $slen (p-cast-$ $si_ref :strict))) $nrep))
                         (p-let (($hex :box (make-p-box nil)))
                           (p-my-= $hex "")
                           (p-let (($i :scalar 0))
@@ -2056,18 +2122,19 @@
                                     (make-p-box nil)
                                     :perl "$b" :why :exception-global))
                                 (p-my-= $b__excl__0
-                                  (p-if (p-< (p-+ (p-cast-$ $si_ref) $i) $slen)
-                                    (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $i) 1))
+                                  (p-if (p-< (p-+ (p-cast-$ $si_ref :strict) $i) $slen)
+                                    (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref :strict) $i) 1))
                                     0))
                                 (p-.= $hex (p-sprintf "%02x" $b__excl__0)))))
                           (p-my-= $hex (p-substr $hex 0 $n))
-                          (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $n 1) 2)))
+                          (p-incf (p-cast-$ $si_ref :strict-lv) (p-int (p-/ (p-+ $n 1) 2)))
                           (p-caller-ctx (p-funcall-ref $push_val $hex))))))
                   (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "h"))
                     (setf --pcl-if-ret--2
                       (progn
                         (p-let (($n :box (make-p-box nil)))
-                          (p-my-= $n (p-if $all (p-* 2 (p-- $slen (p-cast-$ $si_ref))) $nrep))
+                          (p-my-= $n
+                            (p-if $all (p-* 2 (p-- $slen (p-cast-$ $si_ref :strict))) $nrep))
                           (p-let (($hex :box (make-p-box nil)))
                             (p-my-= $hex "")
                             (p-let (($i :scalar 0))
@@ -2079,22 +2146,22 @@
                                       (make-p-box nil)
                                       :perl "$b" :why :exception-global))
                                   (p-my-= $b__excl__1
-                                    (p-if (p-< (p-+ (p-cast-$ $si_ref) $i) $slen)
-                                      (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $i) 1))
+                                    (p-if (p-< (p-+ (p-cast-$ $si_ref :strict) $i) $slen)
+                                      (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref :strict) $i) 1))
                                       0))
                                   (p-.= $hex
                                     (p-sprintf "%x%x"
                                       (p-bit-and $b__excl__1 #xF)
                                       (p-bit-and (p->> $b__excl__1 4) #xF))))))
                             (p-my-= $hex (p-substr $hex 0 $n))
-                            (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $n 1) 2)))
+                            (p-incf (p-cast-$ $si_ref :strict-lv) (p-int (p-/ (p-+ $n 1) 2)))
                             (p-caller-ctx (p-funcall-ref $push_val $hex))))))
                     (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "B"))
                       (setf --pcl-if-ret--2
                         (progn
                           (p-let (($nbits :box (make-p-box nil)))
                             (p-my-= $nbits
-                              (p-if $all (p-* 8 (p-- $slen (p-cast-$ $si_ref))) $nrep))
+                              (p-if $all (p-* 8 (p-- $slen (p-cast-$ $si_ref :strict))) $nrep))
                             (p-if $checksum_p
                               (progn
                                 (p-let (($i :scalar 0))
@@ -2107,11 +2174,14 @@
                                       (($b__excl__2 :num
                                           (%pcl-to-number-strict
                                             (p-if
-                                              (p-< (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
+                                              (p-<
+                                                (p-+ (p-cast-$ $si_ref :strict)
+                                                  (p-int (p-/ $i 8)))
                                                 $slen)
                                               (p-ord
                                                 (p-substr $s
-                                                  (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
+                                                  (p-+ (p-cast-$ $si_ref :strict)
+                                                    (p-int (p-/ $i 8)))
                                                   1))
                                               0)
                                             "$b__excl__2")
@@ -2129,11 +2199,14 @@
                                         (($b__excl__3 :num
                                             (%pcl-to-number-strict
                                               (p-if
-                                                (p-< (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
+                                                (p-<
+                                                  (p-+ (p-cast-$ $si_ref :strict)
+                                                    (p-int (p-/ $i 8)))
                                                   $slen)
                                                 (p-ord
                                                   (p-substr $s
-                                                    (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
+                                                    (p-+ (p-cast-$ $si_ref :strict)
+                                                      (p-int (p-/ $i 8)))
                                                     1))
                                                 0)
                                               "$b__excl__3")
@@ -2145,13 +2218,16 @@
                                             "0")))))
                                   (p-funcall-ref $push_val $bits))))
                             (p-caller-ctx
-                              (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $nbits 7) 8)))))))
+                              (p-incf (p-cast-$ $si_ref :strict-lv)
+                                (p-int (p-/ (p-+ $nbits 7) 8)))))))
                       (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "b"))
                         (setf --pcl-if-ret--2
                           (progn
                             (p-let (($nbits :box (make-p-box nil)))
                               (p-my-= $nbits
-                                (p-if $all (p-* 8 (p-- $slen (p-cast-$ $si_ref))) $nrep))
+                                (p-if $all
+                                  (p-* 8 (p-- $slen (p-cast-$ $si_ref :strict)))
+                                  $nrep))
                               (p-if $checksum_p
                                 (progn
                                   (p-let (($i :scalar 0))
@@ -2164,11 +2240,14 @@
                                         (($b__excl__4 :num
                                             (%pcl-to-number-strict
                                               (p-if
-                                                (p-< (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
+                                                (p-<
+                                                  (p-+ (p-cast-$ $si_ref :strict)
+                                                    (p-int (p-/ $i 8)))
                                                   $slen)
                                                 (p-ord
                                                   (p-substr $s
-                                                    (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
+                                                    (p-+ (p-cast-$ $si_ref :strict)
+                                                      (p-int (p-/ $i 8)))
                                                     1))
                                                 0)
                                               "$b__excl__4")
@@ -2187,11 +2266,12 @@
                                               (%pcl-to-number-strict
                                                 (p-if
                                                   (p-<
-                                                    (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
+                                                    (p-+ (p-cast-$ $si_ref :strict)
+                                                      (p-int (p-/ $i 8)))
                                                     $slen)
                                                   (p-ord
                                                     (p-substr $s
-                                                      (p-+ (p-cast-$ $si_ref)
+                                                      (p-+ (p-cast-$ $si_ref :strict)
                                                         (p-int (p-/ $i 8)))
                                                       1))
                                                   0)
@@ -2203,19 +2283,20 @@
                                               "0")))))
                                     (p-funcall-ref $push_val $bits))))
                               (p-caller-ctx
-                                (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $nbits 7) 8)))))))
+                                (p-incf (p-cast-$ $si_ref :strict-lv)
+                                  (p-int (p-/ (p-+ $nbits 7) 8)))))))
                         (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "u"))
                           (setf --pcl-if-ret--2
                             (progn
                               (p-let (($decoded :box (make-p-box nil)))
                                 (p-my-= $decoded "")
-                                (p-while (p-< (p-cast-$ $si_ref) $slen)
+                                (p-while (p-< (p-cast-$ $si_ref :strict) $slen)
                                   :dyn
                                   t
                                   (p-let
                                     (($lc :num
                                         (%pcl-to-number-strict
-                                          (p-ord (p-substr $s (p-cast-$ $si_ref) 1))
+                                          (p-ord (p-substr $s (p-cast-$ $si_ref :strict-lv) 1))
                                           "$lc")))
                                     (p-let
                                       (($nb :num
@@ -2245,7 +2326,7 @@
                                                         (p-void-ctx
                                                           (p-let
                                                             (($i :scalar
-                                                                (p-+ (p-cast-$ $si_ref)
+                                                                (p-+ (p-cast-$ $si_ref :strict)
                                                                   (p-aref @_ 0))))
                                                             (p-caller-ctx
                                                               (p-if (p-< $i $slen)
@@ -2284,10 +2365,11 @@
                                                     (p-chr (p-bit-and (p->> $cm 8) #xFF))))
                                                 (p-if (p-< (p-+ (p-* $k 3) 2) $nb)
                                                   (p-.= $decoded (p-chr (p-bit-and $cm #xFF))))))))
-                                        (p-incf (p-cast-$ $si_ref) (p-* $ng 4))
+                                        (p-incf (p-cast-$ $si_ref :strict-lv) (p-* $ng 4))
                                         (p-if
-                                          (p-&& (p-< (p-cast-$ $si_ref) $slen)
-                                            (p-str-eq (p-substr $s (p-cast-$ $si_ref) 1)
+                                          (p-&& (p-< (p-cast-$ $si_ref :strict) $slen)
+                                            (p-str-eq
+                                              (p-substr $s (p-cast-$ $si_ref :strict-lv) 1)
                                               (p-esc "\\n")))
                                           (p-post++ (p-cast-$ $si_ref)))))))
                                 (p-caller-ctx (p-funcall-ref $push_val $decoded)))))
@@ -2299,7 +2381,8 @@
                                   (p-let (($done :box (make-p-box nil)))
                                     (p-my-= $done 0)
                                     (p-while
-                                      (p-&& (p-< $done $n) (p-< (p-cast-$ $si_ref) $slen))
+                                      (p-&& (p-< $done $n)
+                                        (p-< (p-cast-$ $si_ref :strict) $slen))
                                       :dyn
                                       t
                                       (p-funcall-ref $push_val
@@ -2310,10 +2393,11 @@
                                 (progn
                                   (p-let (($n :box (make-p-box nil)))
                                     (p-my-= $n
-                                      (p-if $all (p-- $slen (p-cast-$ $si_ref)) $nrep))
+                                      (p-if $all (p-- $slen (p-cast-$ $si_ref :strict)) $nrep))
                                     (p-let (($i :scalar 0))
                                       (p-for ()
-                                        ((p-&& (p-< $i $n) (p-< (p-cast-$ $si_ref) $slen)))
+                                        ((p-&& (p-< $i $n)
+                                            (p-< (p-cast-$ $si_ref :strict) $slen)))
                                         ((p-incf-raw $i :numeric))
                                         :dyn
                                         t
@@ -2327,7 +2411,7 @@
                                       (p-my-= $done 0)
                                       (p-while
                                         (p-&& (p-|| $all (p-< $done $nrep))
-                                          (p-< (p-cast-$ $si_ref) $slen))
+                                          (p-< (p-cast-$ $si_ref :strict) $slen))
                                         :dyn
                                         t
                                         (p-let
@@ -2336,7 +2420,7 @@
                                           (p-scalar-ctx
                                             (p-list-= (vector $v $more) (vector 0 1)))
                                           (p-while $more
-                                            (p-if (p->= (p-cast-$ $si_ref) $slen)
+                                            (p-if (p->= (p-cast-$ $si_ref :strict) $slen)
                                               (p-die :loc
                                                 "cl/pack-impl.pl line 884"
                                                 (p-esc
@@ -2467,7 +2551,8 @@
                                         (progn
                                           (p-let (($be2 :box (make-p-box nil)))
                                             (p-my-= $be2 (p-if $be 1 (p-if $le 0 $dbe)))
-                                            (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen)
+                                            (p-if
+                                              (p-> (p-+ (p-cast-$ $si_ref :strict) $nb) $slen)
                                               (progn (p-if (p-! (p-> $depth 0)) (p-last))
                                                 (p-die :loc
                                                   "cl/pack-impl.pl line 936"
@@ -2475,17 +2560,17 @@
                                                     "length/code after end of string in unpack\\n"))))
                                             (p-my-= $slash_n
                                               (pl-_unpack_read_int $s
-                                                (p-cast-$ $si_ref)
+                                                (p-cast-$ $si_ref :strict-lv)
                                                 $nb
                                                 $be2
                                                 $sig))
-                                            (p-incf (p-cast-$ $si_ref) $nb)))
+                                            (p-incf (p-cast-$ $si_ref :strict-lv) $nb)))
                                         (p-if (p-str-eq $ch "w")
                                           (progn
                                             (p-let (($more :box (make-p-box nil)))
                                               (p-my-= $more 1)
                                               (p-while $more
-                                                (p-if (p->= (p-cast-$ $si_ref) $slen)
+                                                (p-if (p->= (p-cast-$ $si_ref :strict) $slen)
                                                   (p-die :loc
                                                     "cl/pack-impl.pl line 943"
                                                     (p-esc
@@ -2510,7 +2595,7 @@
                                                     (%pcl-to-number-strict
                                                       (p-index $s
                                                         (p-esc "\\u0000")
-                                                        (p-cast-$ $si_ref))
+                                                        (p-cast-$ $si_ref :strict-lv))
                                                       "$end")))
                                                 (p-if (p-< $end 0)
                                                   (progn
@@ -2519,24 +2604,28 @@
                                                 (p-let (($raw :box (make-p-box nil)))
                                                   (p-my-= $raw
                                                     (p-substr $s
-                                                      (p-cast-$ $si_ref)
-                                                      (p-- $end (p-cast-$ $si_ref))))
-                                                  (p-setf (p-cast-$ $si_ref) (p-+ $end 1))
-                                                  (p-if (p-> (p-cast-$ $si_ref) $slen)
-                                                    (p-setf (p-cast-$ $si_ref) $slen))
+                                                      (p-cast-$ $si_ref :strict-lv)
+                                                      (p-- $end (p-cast-$ $si_ref :strict))))
+                                                  (p-setf (p-cast-$ $si_ref :strict-lv)
+                                                    (p-+ $end 1))
+                                                  (p-if (p-> (p-cast-$ $si_ref :strict) $slen)
+                                                    (p-setf (p-cast-$ $si_ref :strict-lv)
+                                                      $slen))
                                                   (p-my-= $slash_n (p-+ $raw 0)))))
                                             (progn
                                               (p-let (($n :box (make-p-box nil)))
                                                 (p-my-= $n
                                                   (p-if $all
-                                                    (p-- $slen (p-cast-$ $si_ref))
+                                                    (p-- $slen (p-cast-$ $si_ref :strict))
                                                     $nrep))
                                                 (p-let (($raw :box (make-p-box nil)))
                                                   (p-my-= $raw
-                                                    (p-if (p-< (p-cast-$ $si_ref) $slen)
-                                                      (p-substr $s (p-cast-$ $si_ref) $n)
+                                                    (p-if (p-< (p-cast-$ $si_ref :strict) $slen)
+                                                      (p-substr $s
+                                                        (p-cast-$ $si_ref :strict-lv)
+                                                        $n)
                                                       ""))
-                                                  (p-incf (p-cast-$ $si_ref) $n)
+                                                  (p-incf (p-cast-$ $si_ref :strict-lv) $n)
                                                   (p-if (p-str-eq $ch "A")
                                                     (p-=~ $raw
                                                       (p-subst :pat "[ \\x00]+$"
@@ -2601,7 +2690,9 @@
                                                                 1
                                                                 (p-if $dle2 0 $ddbe)))
                                                             (p-if
-                                                              (p-> (p-+ (p-cast-$ $si_ref) $dnb)
+                                                              (p->
+                                                                (p-+ (p-cast-$ $si_ref :strict)
+                                                                  $dnb)
                                                                 $slen)
                                                               (p-die :loc
                                                                 "cl/pack-impl.pl line 980"
@@ -2609,11 +2700,13 @@
                                                                   "length/code after end of string in unpack\\n")))
                                                             (p-my-= $slash_n
                                                               (pl-_unpack_read_int $s
-                                                                (p-cast-$ $si_ref)
+                                                                (p-cast-$ $si_ref :strict-lv)
                                                                 $dnb
                                                                 $dbe3
                                                                 $dsig))
-                                                            (p-incf (p-cast-$ $si_ref) $dnb)))
+                                                            (p-incf
+                                                              (p-cast-$ $si_ref :strict-lv)
+                                                              $dnb)))
                                                         (p-if (p-str-eq $dch "w")
                                                           (progn (p-my-= $slash_n 0)
                                                             (p-let
@@ -2621,7 +2714,8 @@
                                                               (p-my-= $more 1)
                                                               (p-while $more
                                                                 (p-if
-                                                                  (p->= (p-cast-$ $si_ref)
+                                                                  (p->=
+                                                                    (p-cast-$ $si_ref :strict)
                                                                     $slen)
                                                                   (p-last))
                                                                 (p-let
@@ -2646,13 +2740,16 @@
                                                               (($raw2 :box (make-p-box nil)))
                                                               (p-my-= $raw2
                                                                 (p-if
-                                                                  (p-< (p-cast-$ $si_ref)
+                                                                  (p-<
+                                                                    (p-cast-$ $si_ref :strict)
                                                                     $slen)
                                                                   (p-substr $s
-                                                                    (p-cast-$ $si_ref)
+                                                                    (p-cast-$ $si_ref
+                                                                      :strict-lv)
                                                                     $slash_n)
                                                                   ""))
-                                                              (p-incf (p-cast-$ $si_ref)
+                                                              (p-incf
+                                                                (p-cast-$ $si_ref :strict-lv)
                                                                 $slash_n)
                                                               (p-if (p-str-eq $dch "A")
                                                                 (p-=~ $raw2
@@ -2679,7 +2776,9 @@
                                                               (p-for ()
                                                                 ((p-&& (p-< $i $slash_n)
                                                                     (p-<=
-                                                                      (p-+ (p-cast-$ $si_ref)
+                                                                      (p-+
+                                                                        (p-cast-$ $si_ref
+                                                                          :strict)
                                                                         $dnb)
                                                                       $slen)))
                                                                 ((p-incf-raw $i :numeric))
@@ -2687,11 +2786,13 @@
                                                                 t
                                                                 (p-funcall-ref $push_val
                                                                   (pl-_unpack_read_int $s
-                                                                    (p-cast-$ $si_ref)
+                                                                    (p-cast-$ $si_ref
+                                                                      :strict-lv)
                                                                     $dnb
                                                                     $dbe3
                                                                     $dsig))
-                                                                (p-incf (p-cast-$ $si_ref)
+                                                                (p-incf
+                                                                  (p-cast-$ $si_ref :strict-lv)
                                                                   $dnb)))))
                                                         (p-if
                                                           (p-||
@@ -2745,7 +2846,8 @@
                                                                         (($iter_base :box
                                                                             (make-p-box nil)))
                                                                         (p-my-= $iter_base
-                                                                          (p-cast-$ $si_ref))
+                                                                          (p-cast-$ $si_ref
+                                                                            :strict))
                                                                         (pl-_unpack_tmpl $inner
                                                                           $s
                                                                           $si_ref
@@ -2782,13 +2884,14 @@
                                                   "()-group starts with a count in unpack\\n"))))))
                                       (p-if $all
                                         (progn
-                                          (p-while (p-< (p-cast-$ $si_ref) $slen)
+                                          (p-while (p-< (p-cast-$ $si_ref :strict) $slen)
                                             (p-let
                                               (($si_before :num
-                                                  (%pcl-to-number-strict (p-cast-$ $si_ref)
+                                                  (%pcl-to-number-strict
+                                                    (p-cast-$ $si_ref :strict)
                                                     "$si_before")))
                                               (p-let (($iter_base :box (make-p-box nil)))
-                                                (p-my-= $iter_base (p-cast-$ $si_ref))
+                                                (p-my-= $iter_base (p-cast-$ $si_ref :strict))
                                                 (pl-_unpack_tmpl $inner
                                                   $s
                                                   $si_ref
@@ -2798,7 +2901,8 @@
                                                   $checksum_p
                                                   $iter_base
                                                   (p-+ $depth 1))
-                                                (p-if (p-== (p-cast-$ $si_ref) $si_before)
+                                                (p-if
+                                                  (p-== (p-cast-$ $si_ref :strict) $si_before)
                                                   (p-last))))))
                                         (progn
                                           (p-let (($r :scalar 0))
@@ -2806,7 +2910,7 @@
                                               ((p-< $r $nrep))
                                               ((p-incf-raw $r :numeric))
                                               (p-let (($iter_base :box (make-p-box nil)))
-                                                (p-my-= $iter_base (p-cast-$ $si_ref))
+                                                (p-my-= $iter_base (p-cast-$ $si_ref :strict))
                                                 (pl-_unpack_tmpl $inner
                                                   $s
                                                   $si_ref
@@ -2823,11 +2927,16 @@
                                     (progn
                                       (p-let (($n :box (make-p-box nil)))
                                         (p-my-= $n (p-if (p-> $nrep 0) $nrep 1))
-                                        (p-incf (p-cast-$ $si_ref)
-                                          (p-% (p-- $n (p-% (p-cast-$ $si_ref) $n)) $n))))
+                                        (p-incf (p-cast-$ $si_ref :strict-lv)
+                                          (p-% (p-- $n (p-% (p-cast-$ $si_ref :strict) $n)) $n))))
                                     (p-if $all
-                                      (progn (p-setf (p-cast-$ $si_ref) $slen))
-                                      (progn (p-incf (p-cast-$ $si_ref) $nrep))))
+                                      (progn (p-setf (p-cast-$ $si_ref :strict-lv) $slen))
+                                      (progn
+                                        (p-if (p-> (p-+ (p-cast-$ $si_ref :strict) $nrep) $slen)
+                                          (p-die :loc
+                                            "cl/pack-impl.pl line 1060"
+                                            (p-esc "'x' outside of string in unpack\\n")))
+                                        (p-incf (p-cast-$ $si_ref :strict-lv) $nrep))))
                                   (p-next)))
                               (p-if (p-str-eq $ch "X")
                                 (progn
@@ -2835,17 +2944,20 @@
                                     (progn
                                       (p-let (($n :box (make-p-box nil)))
                                         (p-my-= $n (p-if (p-> $nrep 0) $nrep 1))
-                                        (p-setf (p-cast-$ $si_ref)
-                                          (p-* (p-int (p-/ (p-cast-$ $si_ref) $n)) $n))))
-                                    (progn (p-decf (p-cast-$ $si_ref) $nrep)
-                                      (p-if (p-< (p-cast-$ $si_ref) 0)
-                                        (p-setf (p-cast-$ $si_ref) 0))))
+                                        (p-setf (p-cast-$ $si_ref :strict-lv)
+                                          (p-* (p-int (p-/ (p-cast-$ $si_ref :strict) $n)) $n))))
+                                    (progn
+                                      (p-if (p-> $nrep (p-cast-$ $si_ref :strict))
+                                        (p-die :loc
+                                          "cl/pack-impl.pl line 1071"
+                                          (p-esc "'X' outside of string in unpack\\n")))
+                                      (p-decf (p-cast-$ $si_ref :strict-lv) $nrep)))
                                   (p-next)))
                               (p-if (p-str-eq $ch "@")
                                 (progn
                                   (p-let (($n :box (make-p-box nil)))
                                     (p-my-= $n (p-if (p-defined $count) $count 0))
-                                    (p-setf (p-cast-$ $si_ref)
+                                    (p-setf (p-cast-$ $si_ref :strict-lv)
                                       (p-if $bang $n (p-+ $group_base $n)))
                                     (p-next))))
                               (p-if (p-|| (p-str-eq $ch "%") (p-str-eq $ch "!"))
@@ -2855,21 +2967,24 @@
                                   (p-str-eq $ch "D"))
                                 (progn
                                   (p-die :loc
-                                    "cl/pack-impl.pl line 1076"
+                                    "cl/pack-impl.pl line 1083"
                                     (p-string-concat "Invalid type '"
                                       $ch
                                       (p-esc "' in unpack\\n")))))
                               (p-if (p-str-eq $ch ".")
                                 (progn
                                   (p-if $all
-                                    (progn (p-funcall-ref $push_val (p-cast-$ $si_ref)))
+                                    (progn
+                                      (p-funcall-ref $push_val (p-cast-$ $si_ref :strict-lv)))
                                     (p-if (p-&& (p-defined $count) (p-== $count 0))
                                       (progn (p-funcall-ref $push_val 0))
                                       (p-if (p-&& (p-defined $count) (p->= $count 2))
-                                        (progn (p-funcall-ref $push_val (p-cast-$ $si_ref)))
                                         (progn
                                           (p-funcall-ref $push_val
-                                            (p-- (p-cast-$ $si_ref) $group_base))))))
+                                            (p-cast-$ $si_ref :strict-lv)))
+                                        (progn
+                                          (p-funcall-ref $push_val
+                                            (p-- (p-cast-$ $si_ref :strict) $group_base))))))
                                   (p-next)))
                               (p-let
                                 (($nb :box (make-p-box nil))
@@ -2885,7 +3000,8 @@
                                       (p-let (($n :box (make-p-box nil)))
                                         (p-my-= $n
                                           (p-if $all
-                                            (p-int (p-/ (p-- $slen (p-cast-$ $si_ref)) $nb))
+                                            (p-int
+                                              (p-/ (p-- $slen (p-cast-$ $si_ref :strict)) $nb))
                                             $nrep))
                                         (p-let (($i :scalar 0))
                                           (p-for ()
@@ -2893,15 +3009,16 @@
                                             ((p-incf-raw $i :numeric))
                                             :dyn
                                             t
-                                            (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen)
+                                            (p-if
+                                              (p-> (p-+ (p-cast-$ $si_ref :strict) $nb) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
                                               (pl-_unpack_read_int $s
-                                                (p-cast-$ $si_ref)
+                                                (p-cast-$ $si_ref :strict-lv)
                                                 $nb
                                                 $be2
                                                 $sig))
-                                            (p-incf (p-cast-$ $si_ref) $nb)))
+                                            (p-incf (p-cast-$ $si_ref :strict-lv) $nb)))
                                         (p-next)))))
                                 (p-if (p-str-eq $ch "f")
                                   (progn
@@ -2910,7 +3027,8 @@
                                       (p-let (($n :box (make-p-box nil)))
                                         (p-my-= $n
                                           (p-if $all
-                                            (p-int (p-/ (p-- $slen (p-cast-$ $si_ref)) 4))
+                                            (p-int
+                                              (p-/ (p-- $slen (p-cast-$ $si_ref :strict)) 4))
                                             $nrep))
                                         (p-let (($i :scalar 0))
                                           (p-for ()
@@ -2918,11 +3036,13 @@
                                             ((p-incf-raw $i :numeric))
                                             :dyn
                                             t
-                                            (p-if (p-> (p-+ (p-cast-$ $si_ref) 4) $slen)
+                                            (p-if (p-> (p-+ (p-cast-$ $si_ref :strict) 4) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (pl-_unpack_float32 $s (p-cast-$ $si_ref) $be2))
-                                            (p-incf (p-cast-$ $si_ref) 4)))
+                                              (pl-_unpack_float32 $s
+                                                (p-cast-$ $si_ref :strict-lv)
+                                                $be2))
+                                            (p-incf (p-cast-$ $si_ref :strict-lv) 4)))
                                         (p-next)))))
                                 (p-if (p-|| (p-str-eq $ch "d") (p-str-eq $ch "F"))
                                   (progn
@@ -2931,7 +3051,8 @@
                                       (p-let (($n :box (make-p-box nil)))
                                         (p-my-= $n
                                           (p-if $all
-                                            (p-int (p-/ (p-- $slen (p-cast-$ $si_ref)) 8))
+                                            (p-int
+                                              (p-/ (p-- $slen (p-cast-$ $si_ref :strict)) 8))
                                             $nrep))
                                         (p-let (($i :scalar 0))
                                           (p-for ()
@@ -2939,11 +3060,13 @@
                                             ((p-incf-raw $i :numeric))
                                             :dyn
                                             t
-                                            (p-if (p-> (p-+ (p-cast-$ $si_ref) 8) $slen)
+                                            (p-if (p-> (p-+ (p-cast-$ $si_ref :strict) 8) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (pl-_unpack_float64 $s (p-cast-$ $si_ref) $be2))
-                                            (p-incf (p-cast-$ $si_ref) 8)))
+                                              (pl-_unpack_float64 $s
+                                                (p-cast-$ $si_ref :strict-lv)
+                                                $be2))
+                                            (p-incf (p-cast-$ $si_ref :strict-lv) 8)))
                                         (p-next)))))
                                 (p-if
                                   (p-||
@@ -2977,10 +3100,10 @@
                                     (p-next)))
                                 (p-if (p-str-eq $ch "/")
                                   (p-die :loc
-                                    "cl/pack-impl.pl line 1135"
+                                    "cl/pack-impl.pl line 1142"
                                     (p-esc "'/' must follow a numeric type in unpack\\n")))
                                 (p-die :loc
-                                  "cl/pack-impl.pl line 1136"
+                                  "cl/pack-impl.pl line 1143"
                                   (p-string-concat "Invalid type '"
                                     $ch
                                     (p-esc "' in unpack\\n")))))))))))))))))))

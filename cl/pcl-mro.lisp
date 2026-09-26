@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-2080
+;;; pcl: pipeline=v2 gen=v2-2280
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -115,7 +115,8 @@
       (p-let (($class :box (make-p-box nil)) ($seen :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $class $seen) @_))
         (p-void-ctx
-          (p-my-= $seen (make-p-box (p-hash (p-cast-% (p-|| $seen (make-p-box (p-hash)))))))
+          (p-my-= $seen
+            (make-p-box (p-hash (p-cast-% (p-|| $seen (make-p-box (p-hash))) :rvalue))))
           (p-if (p-post++ (p-gethash-deref-box $seen $class))
             (progn
               (p-die :loc
@@ -124,7 +125,7 @@
                   $class
                   (p-esc "'\\n")))))
           (p-let ((@parents :array (make-array 0 :adjustable t :fill-pointer 0)))
-            (p-array-= @parents (p-cast-@ (p-string-concat $class "::ISA")))
+            (p-array-= @parents (p-cast-@ (p-string-concat $class "::ISA") :rvalue))
             (p-if (p-! @parents) (p-return (make-p-box (p-array-init $class))))
             (p-let ((@seqs :array (make-array 0 :adjustable t :fill-pointer 0)))
               (p-array-= @seqs
@@ -132,14 +133,15 @@
                   (p-map
                     (lambda ($_)
                       (make-p-box
-                        (p-array-init (p-cast-@ (p-list-ctx (mro::pl-_c3_linearize $_ $seen))))))
+                        (p-array-init
+                          (p-cast-@ (p-list-ctx (mro::pl-_c3_linearize $_ $seen)) :rvalue))))
                     @parents)))
               (p-push @seqs (make-p-box (p-array-init @parents)))
               (p-let ((@result :array (make-array 0 :adjustable t :fill-pointer 0)))
                 (p-array-= @result (vector $class))
                 (p-while 1
                   (p-array-= @seqs
-                    (p-list-ctx (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
+                    (p-list-ctx (p-grep (lambda ($_) (p-scalar (p-cast-@ $_ :rvalue))) @seqs)))
                   (p-if (p-! @seqs) (p-last))
                   (p-let (($cand :box (make-p-box nil)))
                     (p-foreach ($seq @seqs)
@@ -168,7 +170,8 @@
                     (p-foreach ($seq @seqs)
                       :my
                       t
-                      (p-if (p-&& (p-cast-@ $seq) (p-str-eq (p-aref-deref $seq 0) $cand))
+                      (p-if
+                        (p-&& (p-cast-@ $seq :rvalue) (p-str-eq (p-aref-deref $seq 0) $cand))
                         (p-shift (p-cast-@ $seq))))))
                 (p-caller-ctx (p-tail-value (p-backslash @result)))))))))))
 
