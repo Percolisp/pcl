@@ -5,6 +5,21 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-26: **Unicode properties in patterns work — from perl's own
+  tables.**  (#2060)  `\p{…}`, `\pM`, `\P{…}` used to reach the regex engine
+  as the letter `p` and silently never match; core `Text::Wrap` (whose loop
+  is `\PM\pM*`) died on every `wrap()`.  Every General_Category, Script,
+  Script_Extensions, Block and Age value and every binary / POSIX / perl
+  class is now perl's set code point for code point, generated from
+  `Unicode::UCD` by `tools/rebuild-uniprops` into `cl/pcl-uniprops.lisp` and
+  loaded only by programs that use a property; loose names, `\p{^…}`, /i
+  (including perl's caseless equivalents) and user-defined `\p{IsFoo}`
+  properties behave as in perl.  `\X` now takes a base character with its
+  combining marks.  **A pattern that cannot compile now DIES, trappably**
+  (#2372) — an unknown property, `\p{}`, an unbalanced paren — where it used
+  to warn and quietly answer no-match (a split answered the whole string, an
+  `s///` did nothing).  `docs/regex-unicode-properties.md`.
+
 - 2026-09-25: **`pcl --check` — does PCL agree with perl on your program?**
   (#2194)  `pcl --check prog.pl ARGS` (or `-e CODE`) runs the program under
   the perl that runs `pcl` AND under PCL, compares STDOUT byte for byte and
