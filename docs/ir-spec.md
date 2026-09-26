@@ -3297,7 +3297,8 @@ backtrace, and EXITS 0 on SIGTERM — a supervisor then reads success.
   stores into the slot — on every signal, including the ones the host resets
   at start-up (the dispositions are read BEFORE the host installs its own) —
   except CHLD, which perl itself resets to the default.  A write that fails
-  (EPIPE with PIPE ignored) returns false and DISCARDS its unwritten buffer;
+  (EPIPE with PIPE ignored) returns false and DISCARDS its unwritten buffer; the
+  handle keeps an error flag, so its `close` answers false;
   when the final flush of STDOUT at exit fails, `Unable to flush stdout:
   <strerror>` goes to STDERR and an exit status of 0 becomes 1.
 - **Delivery.**  A handler runs as soon as the program is at a safe point; a
@@ -3311,7 +3312,8 @@ backtrace, and EXITS 0 on SIGTERM — a supervisor then reads success.
   descriptor takes no byte), where the handler runs at once, so `alarm` +
   `die` still leaves a print into a stalled pipe.  (Without the hold a handler
   that printed wrote the interrupted line twice: `print "ready\n"` then TERM
-  gave `ready\nready\ncaught TERM\n`.)
+  gave `ready\nready\ncaught TERM\n`.)  `kill SIG => $$` reaches the calling thread, so
+  self-signals are handled in the order they are sent.
   Handlers survive `fork` in both processes; a program started by `system`,
   qx or `exec` starts with default dispositions.
 - **CHLD** is also the host's own (child bookkeeping): the Perl handler runs
