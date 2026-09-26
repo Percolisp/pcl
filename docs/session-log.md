@@ -32,6 +32,24 @@ push waits for the CI fix.  s497b (strict refs, vivification, `$SIG{__DIE__}`)
 launched with its last member unblocked by s494g, and s496a (Unicode properties
 in regexes) took the slot s494p freed.
 
+s498c came back merge-ready at 13:47 with both causes reproduced on this box.
+Row 11 was the inherited SIGPIPE ignore, captured now before SBCL's own signal
+start-up by wrapping that function in the saved core.  Rows 9 and 10 were a race
+the runner's load exposed: a handler could run inside SBCL's stdout flush and
+print "ready" twice, or run on a background thread whose `exit` took only that
+thread down and left the process hanging — on the base, 60 TERM runs under load
+gave 34 right, 16 doubled, 10 hung.  Handlers are now held across a stream write
+and delivered on the program's thread, and the same 60 runs came back clean for
+TERM, USR1 and HUP.  The SBCL build was not a factor.  Perl's exit rules came with
+the fix: a failed final flush of stdout prints "Unable to flush stdout" and turns
+exit 0 into 1, a failed write empties the buffer and makes `close` false.  Fable's
+review: cold gate 265/8756 on the sha, the sweep on the merged main clean at
+18690, and 33 probe rows identical to perl, four of which the base got wrong.
+Merged by fast-forward to `3dba9a7d`; the container install test passed on the merged tree, and the tree was pushed so the next CI run answers the fix.  `tools/ci-step` now
+publishes every failed row's diag lines, so the next red run can be read from the
+public annotations.
+
+
 ## Session 497 (Fable, 2026-09-25 late / 2026-09-26) — s494g signals MERGED (EVERYDAY 101 of 122), perf round 35 launched, two briefs ready
 
 USER: "Please continue. Start two Opus 5.5 subjobs at a time." — later "No more subjobs, will close session soon."  Main `3e8bff3e` → **`f6a2348b`** + this records commit; gen v2-1980 (runtime-only batch); gate 262/8675 → **263/8696**; sweep TOTAL 18686 → **18690**; **`EVERYDAY: 100 → 101 of 122 (82.8 %)`** (`index/proc`, the USR1 handler runs).
