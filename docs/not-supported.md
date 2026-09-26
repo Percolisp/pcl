@@ -101,7 +101,8 @@ The handful most likely to matter to a program that is otherwise portable:
   [`use vN` and default warnings](#use-vn-does-not-toggle-default-warnings),
   [control-character glob names](#control-character-glob-names-mordor-v-strings)
 * [NUL bytes (and other control characters) in identifiers](#nul-bytes-and-other-control-characters-in-identifiers)
-* [Unicode case folding and property tables — DEFERRED, owner #1036](#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036) — the ~370,000-row class ruled out of scope for v0.2
+* [Unicode case folding and case mapping — DEFERRED, owner #1036](#unicode-case-folding-and-case-mapping--deferred-ruled-s465-owner-1036) — the ~370,000-row class ruled out of scope for v0.2 (regex PROPERTIES left it in s496a)
+* [Unicode properties PCL does not generate](#unicode-properties-pcl-does-not-generate-s496a-task-2060) — `\p{ea=W}` `\p{lb=AL}` `\p{nv=1}` … die with perl's own "Can't find" text
 
 ### Regexes
 
@@ -529,10 +530,6 @@ diverge from Perl in several respects:
   (Armenian ligature) titlecase expansion differs.  CL-PPCRE may not apply
   context-sensitive sigma lowercasing (`\x{3C2}` vs `\x{3C3}`).
 
-- **`\p{IsWord}` and Unicode properties in CL-PPCRE**: `\p{IsWord}` does not
-  reliably match non-ASCII word characters in cl-ppcre, whereas Perl's regex
-  engine handles the full Unicode word-character set.
-
 - **`use bytes`**: Perl's `use bytes` pragma forces byte-level string operations.
   PCL does not implement `use bytes`.
 
@@ -670,18 +667,27 @@ names.
 
 ---
 
-## Unicode case folding and property tables — [DEFERRED] (RULED s465, owner #1036)
+## Unicode case folding and case mapping — [DEFERRED] (RULED s465, owner #1036)
 
-**Perl behaviour.** `lc`/`uc`/`ucfirst`/`lcfirst`/`fc`, `/i` matching and
-`\p{…}` properties follow perl's own Unicode tables (`lib/unicore`, the
-Unicode version perl was built with), including full case folding, special
-casing (`ß` → `SS`, `ǅ` titlecase), and every property perl's tables carry.
+**Perl behaviour.** `lc`/`uc`/`ucfirst`/`lcfirst`/`fc` and `/i` matching
+follow perl's own Unicode tables (`lib/unicore`, the Unicode version perl was
+built with), including full case folding and special casing (`ß` → `SS`,
+`ǅ` titlecase).
 
 **PCL behaviour.** Case mapping and folding go through SBCL's `sb-unicode`
-(its own Unicode version, simple mappings), and regex properties through
-cl-ppcre's property support.  The common ASCII and simple-mapping cases are
-right; the full-table behaviour is not, and the files that test it row by row
-abort early or produce no rows at all.
+(simple mappings; SBCL 2.6.0 carries the same Unicode 15.0 as perl 5.40.3),
+and cl-ppcre folds a character by `char-downcase`/`char-upcase`.  The common
+ASCII and simple-mapping cases are right; the full-table behaviour is not,
+and the files that test it row by row abort early or produce no rows at all.
+
+**Regex PROPERTIES are no longer in this class (s496a, task #2060).**
+`\p{…}` / `\pX` / `\P{…}` are answered from perl's OWN tables — the inversion
+lists `Unicode::UCD::prop_invlist` hands out, generated into
+`cl/pcl-uniprops.lisp` by `tools/rebuild-uniprops` — so every General_Category,
+Script, Script_Extensions, Block, Age / Present_In value and every binary and
+POSIX/perl class is perl's set, code point for code point, including perl's
+caseless equivalents under `/i` (`docs/regex-unicode-properties.md`).  What
+stays here is case FOLDING and case MAPPING.
 
 **Rationale.** RULED by the USER s465 (plan-test-audit §5.2): this is ONE
 class of ~370,000 perl rows (uni/fold.t 18,072, uni/lower.t 11,720,
@@ -695,9 +701,42 @@ in the shortfall baseline — a member whose first error is not a table gap
 leaves the class and becomes an ordinary fix target.
 
 **Affected tests:** the companion files above (`baselines/perl-suite-run.tsv`
-statuses DIFF-with-0-rows / XDIFF); the sweep's `lc.t` shortfall (82 of
-2,659 planned rows produced) is in this class too.  See task #1036 and
+statuses DIFF-with-0-rows / XDIFF); the sweep's `lc.t` shortfall (85 of
+2,662 planned rows produced since s496a restored its three `\p{IsWord}` rows) is in this class too.  See task #1036 and
 `docs/plan-test-audit-s464.md` §2d.
+
+## Unicode properties PCL does not generate (s496a, task #2060)
+
+**Perl behaviour.** `\p{…}` accepts every property in perl's Unicode tables,
+including the enumerated ones: East_Asian_Width `\p{ea=W}`, Line_Break
+`\p{lb=AL}`, Numeric_Value `\p{nv=1}`, Bidi_Class `\p{bc=L}`,
+Canonical_Combining_Class `\p{ccc=0}`, Decomposition_Type `\p{dt=…}`,
+Grapheme/Word/Sentence_Break `\p{gcb=…}` `\p{wb=…}` `\p{sb=…}`,
+Hangul_Syllable_Type, Joining_Type / Joining_Group, Indic_Syllabic_Category /
+Indic_Positional_Category, Numeric_Type, Vertical_Orientation,
+Bidi_Paired_Bracket_Type, the NF*_QC quick-checks, Identifier_Status /
+Identifier_Type, and the wildcard forms `\p{name=/…/}` / `\p{gc=:…:}`.
+
+**PCL behaviour.** `tools/rebuild-uniprops` generates General_Category, Script,
+Script_Extensions, Block, Age and Present_In (every value, every alias), every
+binary property and every POSIX / perl class — 8,996 spellings, 713 inversion
+lists.  A property outside that set **dies at the pattern's compile** with
+perl's own text for an unknown name — `Can't find Unicode property definition
+"ea=W" in regex; marked by <-- HERE in m/…/` — trappable by `eval`, never a
+silent no-match and never another property's set (approximating one property
+by another is a silent wrong).
+
+**Rationale.** Sized from the census (`docs/uniprops-census-s496.tsv`): of the
+146 distinct spellings in perl's `t/`, the core library and `perl-tests/`, the
+generated set answers every one perl accepts except the `name=` wildcards and
+the `_Perl_*` internals (a census spelling of an otherwise ungenerated property
+-- `lb=cr`, `bc=AL` -- is stored as that one spelling); the enumerated properties add roughly as many
+lists again for no program we have seen.  Adding one is a one-line change to
+`@ENUM_PROPS` in the tool.
+
+**Also:** perl rejects a lowercase `is` before a `name=value` form
+(`\p{isgc=punct}`, while `\p{Isgc=Punct}` and `\p{isword}` work); PCL's loose
+matching lowercases first and so ACCEPTS it — valid-input only (principle 9).
 
 ## `$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 
@@ -3764,33 +3803,33 @@ value:
 
 ## Regex escapes that are still passed through untranslated
 
-The escape rewriter (`%pcl-expand-hv-escapes`) translates `\h \H \v \V \R`
-and, since s492c (task #2050), `\X` and `\N`.  An AUDIT of the dispatch against
+The escape rewriter (`%pcl-expand-hv-escapes`) translates `\h \H \v \V \R`,
+since s492c (task #2050) `\X` and `\N`, and since s496a (task #2060) the
+Unicode properties `\pX` `\p{…}` `\PX` `\P{…}`.  An AUDIT of the dispatch against
 perl 5.40.3 found the rest, and every one of them SILENTLY NEVER MATCHES
 rather than saying so — which is rule 12's worst case, and the reason it is
 written down here:
 
 | escape | perl | PCL |
 |---|---|---|
-| `\X` | one grapheme cluster | one character or a CRLF pair (see below) |
+| `\X` | one grapheme cluster (UAX #29) | a base character with its combining marks, or a CRLF pair (see below) |
 | `\N` | any character but newline | same |
 | `\K` | keep (drop what is before it from `$&`) | never matches |
-| `\p{…}` / `\P{…}` / `\pM` | Unicode properties | never matches |
+| `\p{…}` / `\P{…}` / `\pM` | Unicode properties | perl's own sets (s496a); an ungenerated enumerated property DIES (above) |
 | `\g{-1}` | relative backreference | never matches |
 | `\b{wb}` etc. | boundary variants | never matches |
 
-**`\X` is an APPROXIMATION.** perl's is UAX #29 — a base character plus its
-combining marks, Hangul syllables, emoji ZWJ sequences, regional indicators.
-The legacy approximation `(?>\r\n|\P{M}\p{M}*|\p{M}+)` needs `\p{M}`, which
-this engine does not answer, so PCL uses `(?>\r\n|(?s:.))` and a combining
-mark is its own cluster.  What changed is that `\X` MATCHES at all.
+**`\X` is an APPROXIMATION.** perl's is UAX #29 extended grapheme clusters.
+Since s496a PCL uses the legacy rule `(?>\r\n|\P{M}\p{M}*|\p{M}+)` — a base
+character with its combining marks — which the property support made
+possible (it was one character or a CRLF pair before).  Still different from
+perl: a regional-indicator PAIR, a Hangul L+V(+T) syllable sequence and an
+emoji ZWJ sequence are ONE cluster in perl and several here — task #2381.
 
-**The `\p{…}` row is the DEFERRED Unicode-property class** (above, owner
-#1036) and it is what still blocks core `Text::Wrap` under perl 5.40.3: that
-version's main loop is `\PM\pM*`, not the `\X` an older one used.  cl-ppcre
-HAS the hook for it — `cl-ppcre:*property-resolver*` — and PCL never sets it;
-`sb-unicode:general-category` is the primitive.  Task #2060 carries the
-measurement.
+**The `\p{…}` row left this table's "never matches" column in s496a** (task
+#2060): the properties come from perl's own tables, and core `Text::Wrap`
+5.40.3 (whose main loop is `\PM\pM*`) works.  See
+`docs/regex-unicode-properties.md`.
 
 ---
 

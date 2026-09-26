@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [weak-keyword override](#71a-a-weak-keyword-is-displaced-by-a-sub-the-package-has-at-compile-time-normative-s492c-task-18701992) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -4281,15 +4281,56 @@ perl says):
 | escape | meaning | PCL |
 |---|---|---|
 | `\N` | any character but a newline — perl's own definition | EXACT (`[^\n]`).  `\N{NAME}` is a different construct, resolved earlier, and is DECLINED here |
-| `\X` | an extended grapheme cluster (UAX #29) | APPROXIMATED as a CRLF pair or one character: the legacy rule needs `\p{M}`, which this engine does not answer |
+| `\X` | an extended grapheme cluster (UAX #29) | APPROXIMATED by the legacy rule `(?>\r\n\|\P{M}\p{M}*\|\p{M}+)` — a base character with its combining marks, or a CRLF pair (since s496a, §10-prop; before, a CRLF pair or one character).  A regional-indicator pair, a Hangul syllable sequence and an emoji ZWJ sequence stay several clusters (task #2381) |
 
 The rule the family exists for is rule 12's: **a regex escape the translator
 does not implement must not be passed to the engine as a literal letter.**
 `\X` was, so every `\X` match silently never matched — the worst failure mode,
 because nothing says so.  The audit of the dispatch against perl 5.40.3 found
-seven escapes in that state; two are answered here, and the remaining five
-(`\K`, `\p{...}`, `\pM`, `\g{-1}`, `\b{wb}`) are named in `not-supported.md`
-with their owners.
+seven escapes in that state; two are answered here, the properties
+(`\p{...}`, `\pM`) by §10-prop since s496a, and the remaining three (`\K`,
+`\g{-1}`, `\b{wb}`) are named in `not-supported.md` with their owners.
+
+### 10-prop. Unicode properties are answered from PERL'S OWN tables; an unknown one DIES at compile (normative, s496a, tasks #2060 #2372)
+
+`\p{NAME}` `\pX` `\P{NAME}` `\PX` in a pattern match exactly the code points
+perl's own `Unicode::UCD::prop_invlist(NAME)` lists for the Unicode version the
+artifact is stamped with (`cl/pcl-uniprops.lisp` line 1, `unicode=15.0.0`,
+generated by `tools/rebuild-uniprops`; no `gen=` — it is data, not compiler
+output).  NAME is matched loosely, as perl does (case, whitespace, `-` and `_`
+ignored; `:` ≡ `=`; `Is` and `In` prefixes; numeric values canonical), and
+`\p{^NAME}` ≡ `\P{NAME}`.  The generated set is every General_Category,
+Script, Script_Extensions, Block, Age and Present_In value and every binary and
+POSIX/perl class; any other name is a **pattern compile error**.
+
+* **Unknown name → DIE, never a no-match.**  A pattern that cannot compile —
+  an unknown property, `\p{}`, an unbalanced paren, any cl-ppcre rejection —
+  dies trappably at the match / split / substitution that first compiles it
+  (task #2372): `Can't find Unicode property definition "X" in regex; marked
+  by <-- HERE in m/… <-- HERE /`.  (perl dies earlier for a LITERAL pattern,
+  at program compile; PCL compiles every pattern at first use.  A `qr//`
+  object compiles at its first USE, not at the `qr`.)
+* **/i: fold FIRST, complement AFTER.**  Outside a bracket class a property is
+  rewritten to a class of its own — `\p{X}` → `[\p{X}]`, `\P{X}` → `[^\p{X}]`
+  — so the fold applies to the property and the complement to the folded
+  answer: `"a" =~ /\P{Lu}/i` is false.  And under /i perl answers a few
+  properties from a CASELESS EQUIVALENT (`\p{Lu}`/`\p{Ll}` → `\p{LC}`,
+  `\p{Upper}`/`\p{Lower}`/`\p{Lt}` → `\p{Cased}`, `\p{PosixUpper}` →
+  `\p{PosixAlpha}`), measured per spelling against perl by the generator.
+* **User-defined properties.**  A name whose last component starts with `In`
+  or `Is` is first looked up as a SUB (current package unless qualified),
+  called once per pattern compile with one argument (true under /i); its
+  returned lines (`hhhh`, `hhhh<ws>hhhh`, `+`/`!`/`-`/`&NAME`, `#` comments)
+  define the set, and it wins over a perl property of the same spelling.  No
+  such sub and no such property: `Unknown user-defined property name
+  \p{PKG::NAME}`.
+
+Example:
+
+    "\x{301}" =~ /\pM/      # true  (U+0301 is a Mark)
+    "a" =~ /\P{Lu}/i        # false (fold, then complement)
+    my $p = "\\p{ea=W}";
+    eval { "a" =~ /$p/ };   # dies: Can't find Unicode property definition "ea=W" …
 
 ### 10-tier. The regex literal's `:tier` — which ENGINE a target needs (normative, s470bq, task #1211)
 

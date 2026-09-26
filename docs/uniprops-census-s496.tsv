@@ -7,7 +7,7 @@
 M	37	perl-accepts	answered
 IsMyRuntimeProperty	19	perl-rejects	dies
 	13	perl-rejects	dies
-IsWord	11	perl-accepts	answered
+IsWord	8	perl-accepts	answered
 S	8	perl-accepts	answered
 Lowercase	7	perl-accepts	answered
 Uppercase	7	perl-accepts	answered
@@ -17,7 +17,7 @@ LowercaseLetter	6	perl-accepts	answered
 TitlecaseLetter	6	perl-accepts	answered
 UppercaseLetter	6	perl-accepts	answered
 isSpace	6	perl-accepts	answered
-lb=cr	6	perl-accepts	dies
+lb=cr	6	perl-accepts	answered
 {#	6	perl-rejects	dies
 Any	5	perl-accepts	answered
 C	5	perl-accepts	answered
@@ -79,9 +79,9 @@ A::B::Intersection	1	perl-rejects	dies
 AHEX=FALSE	1	perl-accepts	answered
 AHEX=False	1	perl-accepts	answered
 Arabic	1	perl-accepts	answered
-BC :ArabicLetter	1	perl-accepts	dies
-BidiClass: AL	1	perl-accepts	dies
-BidiClass: ArabicLetter	1	perl-accepts	dies
+BC :ArabicLetter	1	perl-accepts	answered
+BidiClass: AL	1	perl-accepts	answered
+BidiClass: ArabicLetter	1	perl-accepts	answered
 Bidi_Mirrored	1	perl-accepts	answered
 Blk=Tibetan	1	perl-accepts	answered
 Block=Hangul_Syllables	1	perl-accepts	answered
@@ -131,7 +131,7 @@ _Perl_Charname_Begin	1	perl-accepts	dies
 _Perl_Charname_Continue	1	perl-accepts	dies
 _Perl_IDCont	1	perl-accepts	dies
 __::Is0	1	perl-rejects	dies
-bc=AL	1	perl-accepts	dies
+bc=AL	1	perl-accepts	answered
 gc=:(?-m)L:	1	perl-rejects	dies
 gc=:(?a)L:	1	perl-rejects	dies
 gc=:(?d)L:	1	perl-rejects	dies
@@ -148,5 +148,5 @@ nv:NAnq	1	perl-rejects	dies
 nv:qnan	1	perl-rejects	dies
 nv=:(?g)10:	1	perl-rejects	dies
 upper:]	1	perl-rejects	dies
-utf8::_perl_surrogate	1	perl-accepts	dies
+utf8::_perl_surrogate	1	perl-accepts	answered
 utf8::perl x	1	perl-rejects	dies

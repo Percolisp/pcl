@@ -13,9 +13,15 @@ itself.  The current set:
 | `pcl-mro` | `cl/pcl-mro.lisp` | **transpiled** from `lib/mro.pm` | the always-available `mro::` API (`get_linear_isa`, …) |
 | `pcl-warnings` | `cl/pcl-warnings.lisp` | **transpiled** from `lib/warnings.pm` | the `warnings::` query/emit API (`enabled`, `warnif`, …) |
 | `pcl-xs` | `cl/pcl-xs.lisp` | hand-written CL | the pclxs XS-bridge host side (`XSLoader::load` path) |
+| `pcl-uniprops` | `cl/pcl-uniprops.lisp` | **generated** from perl's own Unicode tables by `tools/rebuild-uniprops` | the inversion lists behind `\p{…}` / `\pX` / `\P{…}` (task #2060; loaded by the regex property resolver at the first property a program compiles, not by a stub) |
 
-Three of the four are **written in Perl and compiled by PCL** — the checked-in
-`.lisp` files are build artifacts (see "Regenerating", below).
+Three of the five are **written in Perl and compiled by PCL** — the checked-in
+`.lisp` files are build artifacts (see "Regenerating", below).  A fourth,
+`cl/pcl-uniprops.lisp`, is a generated artifact of a different kind: DATA
+from perl's `Unicode::UCD`, not compiler output, so it carries no `gen=`
+stamp (its line 1 names the Unicode version and the perl that built it) and
+`Pl/t/artifact-staleness-01.t` does not adopt it; `Pl/t/uniprops-01.t`
+regenerates it and compares the bytes instead.
 
 ## How extensions are loaded: lazily, via self-loading stubs
 
@@ -102,6 +108,7 @@ stamp against `*pcl-cache-generation*` and fails the same session.
 tools/rebuild-pack                                  # cl/pcl-pack.lisp (pack-impl.pl + appendix)
 ./pl2cl --extension lib/mro.pm      > cl/pcl-mro.lisp      && tools/tag-license cl/pcl-mro.lisp
 ./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp && tools/tag-license cl/pcl-warnings.lisp
+tools/rebuild-uniprops                             # cl/pcl-uniprops.lisp (perl's Unicode tables; only when perl's Unicode version or the tool changes)
 ```
 
 (The license tag lands on line 2; the gen stamp stays line 1.
