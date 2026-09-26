@@ -5964,13 +5964,14 @@
 (defun p-chomp-one (var)
   "Chomp a single variable (helper for p-chomp)."
   (cond
-    ;; Box: chomp its value
+    ;; Box: chomp its value — through the box's own protocol (unbox /
+    ;; box-set), so a magic box answers: a read-only literal dies even when
+    ;; there is nothing to remove, as in perl (#2103, `for ("x\n") { chomp }`).
     ((p-box-p var)
-     (let* ((s (to-string (p-box-value var)))
+     (let* ((s (to-string (unbox var)))
             (result (p-chomp-single s)))
-       (when (> (cdr result) 0)
-         (setf (p-box-value var) (car result)
-               (p-box-sv-ok var) nil))
+       (when (or (> (cdr result) 0) (p-magic-cell-p (p-box-value var)))
+         (box-set var (car result)))
        (cdr result)))
     ;; Vector (array): chomp each element in place
     ((and (vectorp var) (not (stringp var)))
@@ -6021,12 +6022,13 @@
 (defun p-chop-one (var)
   "Chop a single variable (helper for p-chop)."
   (cond
-    ;; Box: chop its value
+    ;; Box: chop its value — READ and WRITE through the box's own protocol
+    ;; (unbox / box-set), so a magic box answers: a read-only literal dies
+    ;; (#2103, `for ("abc") { chop }`), a tied or lvalue cell is honoured.
     ((p-box-p var)
-     (let* ((s (to-string (p-box-value var)))
+     (let* ((s (to-string (unbox var)))
             (result (p-chop-single s)))
-       (setf (p-box-value var) (car result)
-             (p-box-sv-ok var) nil)
+       (box-set var (car result))
        (cdr result)))
     ;; Vector (array): chop each element in place
     ((and (vectorp var) (not (stringp var)))
@@ -14276,6 +14278,44 @@ Cost: one closure per iteration, and only for a loop that is BOTH framed and
 carries a continue block.  Every other foreach is emitted exactly as before."
     (when cont-fn `(setf ,cont-fn (lambda () ,continue-form)))))
 
+;;; ── A LITERAL IN A FOREACH LIST IS READ-ONLY (#1391, #2103) ─────────────────
+;;; perl: `for my $x (1) { $x = 2 }`, `$_++ for (1, 2)` and `for ("abc") { chop }`
+;;; all die "Modification of a read-only value attempted" — the loop variable
+;;; ALIASES the constant.  PCL's box model has no read-only flag on a box, but
+;;; a MAGIC CELL is a box whose writes go through a setter, and a setter can be
+;;; perl's fatal.  So the promoting loop (p-foreach — never the read-only twin,
+;;; which by its own verdict never writes) wraps each LITERAL of its list form
+;;; in such a box, at MACROEXPANSION: the emission is unchanged and only a
+;;; literal element pays (one small allocation, a getter per read).  The three
+;;; list shapes the emitter produces are read: a lone literal, `(vector …)`,
+;;; and `(p-flatten-args (list …))`; anything else is left as it is (a literal
+;;; hidden deeper stays writable — the pre-#2103 behaviour, never worse).
+(defun %p-ro-box (value)
+  "A read-only scalar box holding VALUE: reads answer VALUE, a write is perl's
+   `Modification of a read-only value attempted`."
+  (make-p-box (make-p-magic-cell
+               :getter (lambda () value)
+               :setter (lambda (new) (declare (ignore new))
+                         (%p-readonly-modification)))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-ro-literal-p (f)
+    (or (numberp f) (stringp f) (and (consp f) (eq (car f) 'p-esc))))
+
+  (defun %p-ro-wrap (f)
+    (if (%p-ro-literal-p f) `(%p-ro-box ,f) f))
+
+  (defun %p-ro-literal-list-form (list)
+    "LIST with each literal element wrapped read-only (see the note above)."
+    (cond ((%p-ro-literal-p list) `(vector (%p-ro-box ,list)))
+          ((and (consp list) (eq (car list) 'vector))
+           `(vector ,@(mapcar #'%p-ro-wrap (cdr list))))
+          ((and (consp list) (eq (car list) 'p-flatten-args)
+                (consp (second list)) (eq (car (second list)) 'list))
+           `(p-flatten-args (list ,@(mapcar #'%p-ro-wrap (cdr (second list))))
+                            ,@(cddr list)))
+          (t list))))
+
 (defun %expand-foreach (rawp var list body-and-keys env)
   "Shared expander for p-foreach / p-foreach-raw.  RAWP selects the loop-var
 binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
@@ -14290,6 +14330,11 @@ drift apart the way two copies would."
   ;; take it: the read-only (raw) verdict is about the loop VARIABLE, and perl
   ;; vivifies even when the body never touches it (probed, empty body).
   (setf list (or (%p-aliasing-slice-list-form list) list))
+  ;; A LITERAL in the list is READ-ONLY (#1391 / #2103): the promoting (boxed)
+  ;; loop binds it as a read-only box, so a write through the loop variable
+  ;; dies as perl's does.  The read-only twin never writes, so it is left alone
+  ;; and pays nothing.
+  (unless rawp (setf list (%p-ro-literal-list-form list)))
   (multiple-value-bind (label continue-form body myp dynp arraysp)
       (parse-loop-keys body-and-keys)
     ;; `:arrays` binds the slot AS IT STANDS, which is the read-only verdict's
