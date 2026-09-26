@@ -5,6 +5,17 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-26: **errors fail in the same places as perl** (#2103, #2341,
+  #1554).  `use strict 'refs'` is enforced — lexically, so a `{ no strict
+  'refs'; … }` block keeps working: `my @a = @$undef`, `"@$undef"`,
+  `if (@$undef)`, `$string->[0]`, `@$string` die as in perl, while
+  `push @$undef, …`, `for (@$undef)`, `keys %$undef` still vivify.  A
+  never-assigned `my $list;` can be vivified again (`push @$list, $x`
+  used to die).  `$SIG{__DIE__}` is called for every die, inside `eval`
+  too.  `for my $x (1) { $x = 2 }` dies "Modification of a read-only
+  value attempted"; `bless "str"` and `unpack` past the end of the
+  string die.
+
 - 2026-09-26: **Unicode properties in patterns work — from perl's own
   tables.**  (#2060)  `\p{…}`, `\pM`, `\P{…}` used to reach the regex engine
   as the letter `p` and silently never match; core `Text::Wrap` (whose loop
