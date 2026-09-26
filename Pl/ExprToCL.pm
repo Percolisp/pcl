@@ -4043,7 +4043,12 @@ sub _elem_container_key {
 
   my $container;
   if ($kind =~ /_ref_acc$/) {
-    $container = ['unbox', $self->gen_node_form($kids->[0])];
+    # The reference is DEREFERENCED, so an undef one vivifies — `exists
+    # $u->{k}` / `delete $u->{k}` leave ref($u) HASH in perl (#2341; a bare
+    # `(unbox …)` handed exists NIL, and delete died on it).  The ONE
+    # vivifying resolver, which also reads a string as its symbolic name.
+    $container = [($kind =~ /^h/ ? 'p-ensure-hashref' : 'p-ensure-arrayref'),
+                  $self->gen_node_form($kids->[0])];
   }
   else {
     my $c_node = $self->expr_o->get_a_node($kids->[0]);

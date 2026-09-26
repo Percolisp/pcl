@@ -29010,6 +29010,11 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; The variable/wrapper write stays as the cache box-set copies
        ;; around (fast "is this an object" checks read it).
        (when (p-box-p ref) (setf (p-box-class ref) class-name)))
+      ;; A NON-reference — undef, a string, a number — is perl's fatal (#2103;
+      ;; `bless "str", "K"` used to hand back a box that ref() called K).  Only
+      ;; this arm can see one: a hash or a box payload is a reference already.
+      ((or (null inner) (eq inner *p-undef*) (stringp inner) (numberp inner))
+       (%p-die-error nil "Can't bless non-reference value"))
       (t
        ;; Array, code, or other ref type - store class on the box
        (if (p-box-p ref)

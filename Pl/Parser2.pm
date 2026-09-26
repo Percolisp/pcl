@@ -128,7 +128,8 @@ sub _build_fallback_parser {
 # first token).  Empty in file mode — a file's own pragmas are in its text.
 sub _eval_feature_seed {
   my ($self) = @_;
-  my @feats = @{ $self->eval_features // [] } or return ();
+  my @feats = grep { $_ ne 'strict_refs' } @{ $self->eval_features // [] }
+    or return ();
   return (feature_mods => { map +($_ => 'perl'), @feats });
 }
 
@@ -146,10 +147,16 @@ sub _eval_feature_seed {
 sub _scan_eval_site_features {
   my ($doc) = @_;
   my %by_stmt;
+  # #2103: `strict 'refs'` is inherited by the eval'd code exactly as a
+  # feature is, so it rides the same list as the pseudo-feature `strict_refs`
+  # (never handed to PPI — _eval_feature_seed filters it).
+  my $sr = Pl::Parser::strict_refs_regions_of($doc);
   for my $w (@{ $doc->find(sub {
                   $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
-    my $f = eval { $w->presumed_features } or next;
+    my $f = eval { $w->presumed_features } // {};
     my @on = sort grep { $f->{$_} } keys %$f;
+    push @on, 'strict_refs'
+      if Pl::Parser::strict_refs_at($sr, $w->location);
     next if !@on;
     for (my $p = $w->parent; $p; $p = $p->parent) {
       next if !$p->isa('PPI::Statement');
@@ -1447,6 +1454,12 @@ sub parse {
   # published per statement below.
   $self->fallback_parser->lex_home->{_strict_refs_regions} =
     Pl::Parser::strict_refs_regions_of($doc);
+  # A string eval compiled at a strict-refs site INHERITS it (perl): an
+  # explicit region over the whole eval text, which the text's own
+  # `no strict` statements still override (they start later).
+  unshift @{ $self->fallback_parser->lex_home->{_strict_refs_regions} },
+    [[0, 0], [1e9, 1e9], 1, 1]
+    if grep { $_ eq 'strict_refs' } @{ $self->eval_features // [] };
   $self->fallback_parser->lex_home->{_strict_refs_doc} = refaddr($doc);
 
   # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort

@@ -9467,8 +9467,10 @@ sub _use_version_implies_strict {
   my ($stmt) = @_;
   my $v = $stmt->version // '';
   return 0 if $v eq '';
-  if ($v =~ /^v?(\d+)\.(\d+)(?:\.\d+)?$/ && $v =~ /^v|\..*\./) {   # v-string
-    return ($1 > 5 || ($1 == 5 && $2 >= 11)) ? 1 : 0;
+  my $is_vstring = ($v =~ /^v/ || $v =~ /\..*\./) ? 1 : 0;
+  if ($is_vstring && $v =~ /^v?(\d+)\.(\d+)(?:\.\d+)?$/) {
+    my ($maj, $min) = ($1, $2);
+    return ($maj > 5 || ($maj == 5 && $min >= 11)) ? 1 : 0;
   }
   (my $n = $v) =~ s/_//g;
   return ($n =~ /^[\d.]+$/ && $n >= 5.011) ? 1 : 0;

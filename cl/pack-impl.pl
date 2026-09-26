@@ -1055,7 +1055,11 @@ sub _unpack_tmpl {
                 my $n = $nrep > 0 ? $nrep : 1;
                 $$si_ref += ($n - ($$si_ref % $n)) % $n;
             } elsif ($all) { $$si_ref = $slen }
-            else { $$si_ref += $nrep }
+            else {
+                # #2103: past the end is perl's fatal, not a clamp
+                die "'x' outside of string in unpack\n" if $$si_ref + $nrep > $slen;
+                $$si_ref += $nrep;
+            }
             next;
         }
         if ($ch eq 'X') {
@@ -1063,7 +1067,10 @@ sub _unpack_tmpl {
                 # X!N: back up to N-byte alignment
                 my $n = $nrep > 0 ? $nrep : 1;
                 $$si_ref = int($$si_ref / $n) * $n;
-            } else { $$si_ref -= $nrep; $$si_ref = 0 if $$si_ref < 0 }
+            } else {
+                die "'X' outside of string in unpack\n" if $nrep > $$si_ref;   # #2103
+                $$si_ref -= $nrep;
+            }
             next;
         }
         # @N: relative to group's base position. @!N: absolute byte position.
