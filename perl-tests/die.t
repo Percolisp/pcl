@@ -7,11 +7,11 @@ BEGIN {
 }
 
 # PCL: plan reduced from 26 - removed tests that:
-# - use $SIG{__DIE__} (PCL does not call __DIE__ handlers)
+# - (the $SIG{__DIE__} rows are restored: PCL calls the handler since s497b, #1554)
 # - check exact "at FILE line N" / "...propagated at" message format
 # - use string eval (PCL stub is minimal)
 # - use runperl subprocess
-plan tests => 3;
+plan tests => 7;   # the stub test.pl isa_ok prints an UNNUMBERED row, so the 7 isa_ok rows are not counted
 
 use utf8;
 
@@ -22,8 +22,7 @@ use utf8;
 # like($@, qr/\.{3}propagated at/, '... and appends a phrase');
 
 {
-    # PCL: $SIG{__DIE__} handler not supported — inner isa_ok commented out
-    #local $SIG{__DIE__} = sub { is( $_[0], "[\000]\n", 'Embedded null passed to signal handler' )};
+    local $SIG{__DIE__} = sub { is( $_[0], "[\000]\n", 'Embedded null passed to signal handler' )};
 
     $err = "[\000]\n";
     eval {
@@ -32,18 +31,44 @@ use utf8;
     is( $@, $err, 'Embedded null passed back into $@' );
 }
 
-# PCL: entire $SIG{__DIE__} + PROPAGATE block commented out — needs __DIE__ handler
-# {
-#     local $SIG{__DIE__} = sub { isa_ok($_[0],'ARRAY',...); $_[0]->[0]++ };
-#     $x = [3]; eval { die $x };
-#     is($x->[0], 4, 'actual array, not a copy, passed to signal handler');
-#     eval { eval { die [5] }; die if $@ };
-#     is($@->[0], 7, 'die with no arguments propagates $@, but leaves references alone');
-#     eval { eval { die bless [7],"Error" }; isa_ok($@,'Error','$@ is an Error object'); die if $@ };
-#     isa_ok($@,'Out','returning a different object than what was passed in, via PROPAGATE');
-#     is($@->[0], 9, 'reference returned correctly');
-# }
-# package Error { sub PROPAGATE { bless [$_[0]->[0]], "Out" } }
+{
+    local $SIG{__DIE__} = sub {
+	isa_ok( $_[0], 'ARRAY', 'pass an array ref as an argument' );
+	$_[0]->[0]++;
+    };
+    $x = [3];
+    eval { die $x; };
+
+    is( $x->[0], 4, 'actual array, not a copy, passed to signal handler' );
+
+    eval {
+        eval {
+            die [ 5 ];
+        };
+        die if $@;
+    };
+
+    is($@->[0], 7, 'die with no arguments propagates $@, but leaves references alone');
+
+    eval {
+	eval {
+	    die bless [ 7 ], "Error";
+	};
+	isa_ok( $@, 'Error', '$@ is an Error object' );
+	die if $@;
+    };
+
+    isa_ok( $@, 'Out', 'returning a different object than what was passed in, via PROPAGATE' );
+    is($@->[0], 9, 'reference returned correctly');
+}
+
+{
+    package Error;
+
+    sub PROPAGATE {
+	bless [$_[0]->[0]], "Out";
+    }
+}
 
 {
     # die/warn and utf8

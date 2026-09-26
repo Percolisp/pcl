@@ -15107,8 +15107,52 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    (b)), so it arms the uncaught-die hook exactly as p-die does: uncaught, they
    are one line and perl's exit status, not a Lisp backtrace and exit 1."
   (%p-arm-uncaught-die-hook)
+  (when (%p-die-hook)
+    (%p-call-die-hook
+     (%p-die-text (apply #'format nil control args))))
   (error (or class 'p-die-error)
          :format-control control :format-arguments args))
+
+;;; ── $SIG{__DIE__} (task #1554; docs/ir-spec.md §7.6) ────────────────────────
+;;; perl calls the handler INSIDE the die, before anything unwinds — for a
+;;; trapped die too (inside eval, $^S true) — with the value the die will carry:
+;;; the message with its ` at FILE line N.` tail, or the reference itself.  A
+;;; handler that RETURNS lets the die go on; one that DIES replaces it (the
+;;; Carp-in-handler idiom).  The handler is not re-entered for a die raised
+;;; inside it (perl disables it for the call — perldoc -f die), the same rule
+;;; and the same shape as $SIG{__WARN__}'s *p-in-warn-handler*.  The two raise
+;;; sites are %p-die-error (every STRING die: p-die's and the runtime's own
+;;; fatals) and p-die's OBJECT branch; nothing on the non-die path pays.
+(defvar *p-in-die-handler* nil
+  "True while a $SIG{__DIE__} handler runs: a die inside it skips the handler.")
+
+(defun %p-die-text (msg)
+  "The STRING a die carries: MSG as is when it ends in a newline, else with
+   perl's ` at FILE line N.` from the location register — the one reading
+   %p-caught-perl-value and the __DIE__ hook share (rule 11)."
+  (if (and (> (length msg) 0)
+           (char= (char msg (1- (length msg))) #\Newline))
+      msg
+      (format nil "~A at ~A.~%" msg (or (%p-loc-string) "(eval 0) line 0"))))
+
+(defun %p-die-hook ()
+  "The $SIG{__DIE__} handler to call now as a CL function, or NIL: none set,
+   DEFAULT / IGNORE / empty, or already inside one."
+  (unless *p-in-die-handler*
+    (let* ((cell (gethash "__DIE__" %SIG))
+           (h (and cell (unbox cell))))
+      (cond ((functionp h) h)
+            ((and (stringp h) (string/= h "")
+                  (string/= h "DEFAULT") (string/= h "IGNORE"))
+             (p-get-coderef h))
+            (t nil)))))
+
+(defun %p-call-die-hook (payload)
+  "Call the $SIG{__DIE__} handler with PAYLOAD as $_[0]."
+  (let ((h (%p-die-hook)))
+    (when h
+      (let ((*p-in-die-handler* t))
+        (funcall h (if (p-box-p payload) payload (make-p-box payload)))))))
 
 (defun %p-perl-die-p (condition)
   "Whether CONDITION is a PERL-level die — an object one (p-exception) or a
@@ -15292,8 +15336,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                     (functionp inner)
                                     (p-box-p inner)
                                     (p-typeglob-p inner))))))))
-          ;; Object exception - preserve for $@
-          (error 'p-exception :object (car args))
+          ;; Object exception - preserve for $@.  $SIG{__DIE__} sees the
+          ;; reference itself first (#1554).
+          (progn (%p-call-die-hook (car args))
+                 (error 'p-exception :object (car args)))
           ;; String exception
           (let ((msg (or msg0 (apply #'p-string-concat args))))
             ;; "~A", never (error msg): the message is DATA, and `(error msg)`
@@ -15694,21 +15740,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    ONE definition, shared by the two places a Perl program can see a caught
    error: `eval {}` (p-eval-block, which puts it in $@) and `try/catch`
    (p-try, which binds it to the catch variable)."
+  ;; The location register (task #1240): the statement that was executing
+  ;; when the condition was signalled.  `(eval 0) line 0' is what this said
+  ;; before the register existed — a placeholder no perl program ever prints,
+  ;; although real programs match on this text (`$@ =~ /at \Q$0\E line (\d+)/`)
+  ;; — and it is still the answer when the `line-track` emission is off and no
+  ;; location was ever recorded.  %p-die-text is that rule, shared with the
+  ;; $SIG{__DIE__} hook (#1554) so the handler sees what $@ will hold.
   (if (typep e 'p-exception)
       (p-exception-object e)
-      (let ((msg (format nil "~A" e)))
-        (if (and (> (length msg) 0)
-                 (char= (char msg (1- (length msg))) #\Newline))
-            msg
-            ;; The location register (task #1240): the statement that was
-            ;; executing when the condition was signalled.  `(eval 0) line 0'
-            ;; is what this said before the register existed — a placeholder no
-            ;; perl program ever prints, although real programs match on this
-            ;; text (`$@ =~ /at \Q$0\E line (\d+)/`) — and it is still the
-            ;; answer when the `line-track` emission is off and no location was
-            ;; ever recorded.
-            (format nil "~A at ~A.~%" msg
-                    (or (%p-loc-string) "(eval 0) line 0"))))))
+      (%p-die-text (format nil "~A" e))))
 
 ;;; p-eval-block: Execute code catching errors (Perl's eval { })
 ;;; Sets $@ to error message on failure, empty string on success.
