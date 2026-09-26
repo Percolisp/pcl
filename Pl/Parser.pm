@@ -9441,6 +9441,7 @@ sub strict_refs_regions_of {
   for my $stmt (@{ $doc->find('PPI::Statement::Include') || [] }) {
     my $loc = $stmt->location or next;
     my $type = $stmt->type // 'use';
+    next if $type ne 'use' && $type ne 'no';      # `require strict` enables nothing
     my ($val, $explicit);
     if (($stmt->module // '') eq 'strict') {
       my @args = map { $_->can('literal') ? $_->literal : $_->string }

@@ -3867,6 +3867,16 @@ sub _strict_elem_marker {
   my $xo = $self->expr_o;
   my $id = $kids->[0];
   my $n  = $xo->get_a_node($id);
+  # Only a REFERENCE-shaped base is a dereference: a plain `$x`, or an element
+  # / deref chain.  `(LIST)[i]` — a list slice, `(caller 0)[1]` — lowers to the
+  # same op over a LIST and is no dereference at all (an empty list there is
+  # not "an undefined value used as an ARRAY reference").
+  if ($xo->is_internal_node_type($n)) {
+    return () if ($n->{type} // '') !~ /^(?:[ah]_acc|[ah]_ref_acc)$/;
+  }
+  elsif (!(ref($n) eq 'PPI::Token::Symbol' && $n->content =~ /^\$/)) {
+    return ();
+  }
   while ($xo->is_internal_node_type($n)) {          # the base's first token
     my $k = $xo->get_node_children($id) || [];
     last unless @$k;

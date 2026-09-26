@@ -3386,6 +3386,10 @@
       (let ((plain (if (p-box-p value) (unbox value) value)))
         (return-from box-set (%p-tie-store box current value plain))))
     (when (p-magic-cell-p current)
+      ;; `$x = $x` is perl's sv_setsv(sv, sv): a no-op before any magic or the
+      ;; read-only check — `for my $x (7) { $x = $x }` lives (probed; closure.t
+      ;; row 267 relies on it) while `$x = 7` there dies.
+      (when (eq value box) (return-from box-set value))
       (return-from box-set
         (funcall (p-magic-cell-setter current)
                  ;; keep a BLESSED box intact so the setter's stringification
@@ -26655,6 +26659,21 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((target (make-p-box nil)))
          (box-set val (p-backslash target))
          (box-set target new-value)))
+      ;; `$$qr = 'Bad'`: perl writes the REGEXP SV itself, which stays an
+      ;; object of its class and now stringifies `Regexp=SCALAR(0x…)`
+      ;; (t/op/qr.t).  PCL merges a Regexp ref and its referent into one
+      ;; struct, so the variable becomes a ref to a fresh scalar holding the
+      ;; value, blessed into the class it had.  The arm below used to write the
+      ;; string into the VARIABLE — so `$$d` then read `${"Bad"}`, which under
+      ;; strict refs (#2103) is perl's fatal.  Another variable still holding
+      ;; the same regex (`$d1 = $d` before the write) does not see the change.
+      ((and (p-box-p val) (p-regex-match-p inner))
+       (let ((class (p-ref val))
+             (target (make-p-box nil)))
+         (box-set target new-value)
+         (box-set val (p-backslash target))
+         (p-bless val class)
+         new-value))
       ;; val itself is the scalar container (blessed scalar in tie methods)
       ((p-box-p val)
        (box-set val new-value))
