@@ -419,6 +419,22 @@ my $r = eval { $n = ($s =~ s/$p/Q/); 1 };
 print defined $r ? "survived" : "died", " ", ($@ =~ /in regex/ ? "regex" : "?"), " $n $s\n";
 PL
 
+# Two perl-VALID spellings the #2372 die surfaced (they used to warn and never
+# match; now they would die where perl does not): the USELESS inline flags
+# c g o (perl warns "Useless (?c)" and ignores them) and perl 5.38's
+# OPTIMISTIC code block `(*{…})`, stripped like `(?{…})`.  s496a.
+subst_agrees(<<'PL', 'useless (?c)/(?g)/(?o) flags are ignored and (*{...}) is stripped, as (?{...}) is (#2372)');
+no warnings;
+my @r;
+for my $p ('(?c)a', '(?-c)a', '(?g-o)a', '(?ogc)a', '(?ic:A)', '(?o-cg)a', '(?i-c)A', 'x(?c:y)') {
+  push @r, eval { ("xa" =~ /$p/ || "xy" =~ /$p/) ? 1 : 0 } // "died";
+}
+my $count = 0;
+push @r, (('aaa') =~ /(.*)(*{ $count++ })[bc]/) ? 1 : 0;
+push @r, ("\\(?c)" =~ /\\\(\?c\)/) ? 1 : 0;
+print "@r\n";
+PL
+
 # The emission promises, in both directions: a `$1`-only replacement stays a
 # STRING (the runtime's backref rewrite, no lambda per match), and a
 # single-quoted one is a lambda over a constant — never that string, because

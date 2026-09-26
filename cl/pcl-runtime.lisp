@@ -29871,7 +29871,9 @@ buffer's fill-pointer; everything else falls back to file-length."
     (t open-delim)))  ; Non-paired delimiters use same char
 
 (defun %pcl-strip-regex-code-blocks (pattern)
-  "Remove `(?{code})` / `(??{code})` from PATTERN — cl-ppcre has no mid-match
+  "Remove `(?{code})` / `(??{code})` — and perl 5.38's OPTIMISTIC `(*{code})`, the
+   same construct without the backtracking guard (s496a: unstripped it reached
+   cl-ppcre, which since #2372 is a DIE) — from PATTERN.  cl-ppcre has no mid-match
    callback into perl (docs/not-supported.md 'Regex code blocks'), and it hangs
    on the construct, so the match runs without the block.
 
@@ -29891,7 +29893,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    task #874, together with the `(*SKIP)`/`(*FAIL)` control verbs.  The whole
    `(?{` population is perl's own regex tests and six perl-tests files; ZERO
    CPAN modules (measured), which is what makes waiting for that affordable."
-  (cl-ppcre:regex-replace-all "\\(\\?\\??\\{[^}]*\\}\\)" pattern ""))
+  (cl-ppcre:regex-replace-all "\\((?:\\?\\??|\\*)\\{[^}]*\\}\\)" pattern ""))
 
 ;;; ----- POSIX bracket classes: [:name:] and [:^name:] --------------------
 ;;;
@@ -30414,7 +30416,10 @@ buffer's fill-pointer; everything else falls back to file-length."
         (get-output-stream-string out))))
 
 (defun %pcl-strip-charset-flags (pat)
-  "Drop perl's CHARSET letters (a aa d l u) from inline modifier groups.
+  "Drop perl's CHARSET letters (a aa d l u) from inline modifier groups, and
+   the USELESS letters c g o (perl warns \"Useless (?c) - use /gc modifier\" and
+   ignores them; cl-ppcre rejected the whole pattern, which since #2372 is a
+   DIE — t/re/pat_advanced.t lost 1,220 rows to one `(?c)`, s496a).
    `(?a:X)` -> `(?:X)`, `(?ai:X)` -> `(?i:X)`, `(?a-i:X)` -> `(?-i:X)`, and
    the flag-only `(?a)` -> nothing at all, which is what ignoring it means.
    Only a run made ENTIRELY of perl's modifier letters followed by `:` or `)`
@@ -30426,17 +30431,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    rejects the pattern in its own words, exactly as it does today, which is
    the loud answer rather than a wrong one."
   (cl-ppcre:regex-replace-all
-   "(?<!\\\\)\\(\\?([adlupimsnx]*)((?:-[imsnx]+)?)([:)])"
+   "(?<!\\\\)\\(\\?([adlupimsnxcgo]*)((?:-[imsnxcgo]+)?)([:)])"
    pat
    (lambda (match flags neg close)
-     (let ((kept (remove-if (lambda (c) (member c '(#\a #\d #\l #\u))) flags)))
+     (let* ((kept (remove-if (lambda (c) (member c '(#\a #\d #\l #\u #\c #\g #\o))) flags))
+            (kept-neg (let ((n (remove-if (lambda (c) (member c '(#\c #\g #\o))) neg)))
+                        (if (string= n "-") "" n))))
        (cond
-         ;; nothing was a charset letter: leave the group byte-identical, so a
-         ;; pattern without one is untouched by this pass.
-         ((= (length kept) (length flags)) match)
-         ;; a flag-only group whose flags were ALL charset letters disappears.
-         ((and (string= close ")") (zerop (length kept)) (zerop (length neg))) "")
-         (t (concatenate 'string "(?" kept neg close)))))
+         ;; nothing was dropped: leave the group byte-identical, so a pattern
+         ;; without such a letter is untouched by this pass.
+         ((and (= (length kept) (length flags)) (= (length kept-neg) (length neg))) match)
+         ;; a flag-only group whose flags were ALL dropped disappears.
+         ((and (string= close ")") (zerop (length kept)) (zerop (length kept-neg))) "")
+         (t (concatenate 'string "(?" kept kept-neg close)))))
    :simple-calls t))
 
 (defun perl-regex-to-ppcre (pattern)
