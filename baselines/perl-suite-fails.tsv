@@ -6221,7 +6221,6 @@ op/tr.t	224	ok	not ok [PCL #222]	doesn't stringify its argument	NS:Scalar copy d
 op/tr.t	161	ok	not ok [PCL #159]	reversed range check	NS:Error compatibility for invalid Perl input -- measured s473t6d: a reversed range must be `Invalid range "m-d"`
 op/tr.t	257	ok	not ok [PCL #255]	tr// of \N{name} works for upper-Latin1	NS:Unicode case folding and property tables -- measured s473t6d: `tr//` of a `\N{name}` upper-Latin1 character; PCL answers the raw byte
 op/tr.t	154	ok	not ok [PCL #152]	tr/a-z-9//	NS:Error compatibility for invalid Perl input -- measured s473t6d: `tr/a-z-9//` must be `Ambiguous range in transliteration operator`
-op/tr.t	250	ok	not ok [PCL #248]	tr/a/b/ fails on zero-length ro string	#936 -- measured s473t6d: `tr/a/b/` on a ZERO-LENGTH read-only string must die `Modification of a read-only value attempted`; PCL accepts it
 op/tr.t	251	ok	not ok [PCL #249]	tr/a/b/ fails on zero-length ro string	#936 -- measured s473t6d: same read-only residue through the other spelling
 op/tr_latin1.t	2	ok	not ok	gh\#17227	NS:Unicode semantics differences -- gh#17227: `tr` on a Latin-1 string
 op/try.t	0	(none)	renumbered	*summary*	#1942 -- the try/catch residue after #340: a `try` block must be INVISIBLE to caller(), `try` must not be usable in a :lvalue sub's return, and `catch` without (VAR) is a compile-time parse error (NS:Error compatibility for invalid Perl input).  The *summary* row is the file's two never-produced rows

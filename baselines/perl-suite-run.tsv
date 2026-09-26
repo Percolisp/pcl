@@ -1982,7 +1982,7 @@ op/tiehandle.t	67	0	11	32	DIFF	s473t6b (#1850): the harness's TAP reaches disk R
 op/tiehash.t	27	0	20	7	DIFF		0
 op/time.t	72	0	72	0	OK		0
 op/time_loop.t	2	0	2	0	OK		0
-op/tr.t	317	0	270	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i	0
+op/tr.t	317	0	271	44	DIFF	s497b: 270/45 -> 271/44, the literal "" of `for ("", nullrocow) { tr/a/b/ }` is a read-only box now (#1391/#2103); the use-constant iteration still writes | aborted-forms:1: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i	0
 op/tr_latin1.t	2	0	1	1	DIFF		0
 op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	33	4	DIFF	aborted-forms:1: Undefined subroutine &main::z called	0
