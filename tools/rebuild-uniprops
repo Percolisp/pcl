@@ -61,7 +61,7 @@ my $root = "$RealBin/..";
 my $out = "$root/cl/pcl-uniprops.lisp";
 my $census_file = "$root/docs/uniprops-census-s496.tsv";
 my ($do_census, $stats) = (0, 0);
-while (@ARGV) {
+while (!caller && @ARGV) {
   my $a = shift @ARGV;
   if ($a eq '-o') { $out = shift @ARGV // die "-o needs a path\n" }
   elsif ($a eq '--census') { $do_census = 1 }
@@ -385,6 +385,10 @@ sub census {
   print STDERR "census: ", scalar(@rows), " distinct spellings; ",
     join(', ', map { "$_ $tally{$_}" } sort keys %tally), "\n";
 }
+
+# Required as a library (Pl/t/uniprops-01.t compares `norm` with the Lisp
+# normalizer), the tool does nothing.
+return 1 if caller;
 
 my ($key, $lists, $tried, $rejected, $caseless) = build();
 if ($do_census) { census($key); exit 0 }
