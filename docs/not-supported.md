@@ -107,6 +107,8 @@ The handful most likely to matter to a program that is otherwise portable:
 ### Regexes
 
 * [Regex code blocks: `(?{code})` and `(??{code})`](#regex-code-blocks-code-and-code)
+* [Regex recursion `(?R)` `(?1)` `(?&name)` — DIES at the first match (#2382)](#regex-recursion-r-1-1--1-name-pname-task-2382)
+* [Unicode properties PCL does not generate](#unicode-properties-pcl-does-not-generate-s496a-task-2060)
 * [Regex encoding modifiers (`/a`, `/d`, `/l`, `/u`)](#regex-encoding-modifiers-a-d-l-u)
 * [Regex `/n` modifier — non-capturing groups](#regex-n-modifier--non-capturing-groups)
 * [Regex script-run assertions `(*script_run:…)`](#regex-script-run-assertions-script_run--sr-and-the-atomic-pair)
@@ -719,7 +721,7 @@ Identifier_Type, and the wildcard forms `\p{name=/…/}` / `\p{gc=:…:}`.
 
 **PCL behaviour.** `tools/rebuild-uniprops` generates General_Category, Script,
 Script_Extensions, Block, Age and Present_In (every value, every alias), every
-binary property and every POSIX / perl class — 8,996 spellings, 713 inversion
+binary property and every POSIX / perl class — 9,000 spellings, 717 inversion
 lists.  A property outside that set **dies at the pattern's compile** with
 perl's own text for an unknown name — `Can't find Unicode property definition
 "ea=W" in regex; marked by <-- HERE in m/…/` — trappable by `eval`, never a
@@ -1003,11 +1005,33 @@ measured and rejected.
 engine and the Perl interpreter.  They are rarely used in CPAN modules and
 have no clean mapping to CL-PPCRE's interface.
 
+**Also stripped, since s496a:** perl 5.38's OPTIMISTIC block `(*{code})`
+(announced like `(?{…})`) — unstripped it reached cl-ppcre, which since task
+#2372 is a DIE.  **Not strippable:** a code block used as a CONDITION,
+`(?(?{code})yes|no)` — removing the block leaves `(?yes|no)`, which is not a
+pattern, so it DIES at its first match (task #2383; t/re/pat.t stops there,
+C_ok 245 → 206).
+
 **Affected tests:** `perl-tests/study.t` (tests using `(?{...})`);
 `t/re/pat.t` and `t/re/pat_advanced.t`, whose `1 while /…(?{…})…/g` counting
 loops became honest failures when #872 stopped dropping the statement.
 The regex CONTROL VERBS `(*SKIP)` / `(*FAIL)` / `(*MARK:name)` are a DIFFERENT
 gap, with the opposite answer — see the next section.
+
+---
+
+## Regex recursion: `(?R)`, `(?1)`, `(?+1)`, `(?-1)`, `(?&name)`, `(?P>name)` (task #2382)
+
+**Perl behaviour:** a group may call itself or another group recursively —
+`/^(<(?:[^<>]+|(?1))*>)$/` matches balanced angle brackets.
+
+**PCL behaviour:** cl-ppcre has no recursion.  The pattern **DIES at its first
+match, trappably** (`Character '1' may not follow '(?' in regex; …`) since
+s496a (task #2372); before, it was a stderr warning and a silent no-match.
+Measured: t/re/pat_advanced.t's top-level `(?1)` at line 1122 aborts the file,
+C_ok 1262 → 698 (the rows past it ran on the old no-match).  Owner #2382, which
+has the fix options (a bounded expansion that dies at its bound, a
+`:filter` sub-matcher, or the PCRE2 spike).
 
 ---
 
@@ -1023,7 +1047,11 @@ side effects" loop.
 Removing `(*FAIL)` would INVERT the meaning of the match it appears in, which
 is worse than failing: the pattern would start succeeding where the author
 wrote "always fail here".  So the verb is left in the pattern and cl-ppcre
-rejects it, in cl-ppcre's own words.
+rejects it, in cl-ppcre's own words — and **since s496a (task #2372) that
+rejection is a trappable DIE at the pattern's first match**, where it used to
+be a stderr warning and a silent no-match.  `(*:NAME)` (the MARK shorthand) is
+announced as `(*MARK)`.  Measured: t/re/pat_rt_report.t stops at its line 872
+(`s/(*:B)A/…/`), C_ok 2459 → 2431.
 
 Because a `(?{…})` beside it has already been stripped by then, cl-ppcre's
 message names a **position in a pattern the program never wrote**, which is

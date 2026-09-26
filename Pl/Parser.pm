@@ -11689,13 +11689,13 @@ sub _regex_gap_hits {
                'cl-ppcre has no mid-match callback, so the match runs WITHOUT '
              . 'the block and its side effects never happen '
              . '(docs/not-supported.md "Regex code blocks")']
-    if $content =~ /(?<!\\)\(\?\??\{/;
+    if $content =~ /(?<!\\)\((?:\?\??|\*)\{/;       # (*{...}) too: stripped alike (s496a)
   my %verbs;
-  while ($content =~ /(?<!\\)\(\*([A-Za-z_]+)/g) { $verbs{$1} = 1 }
+  while ($content =~ /(?<!\\)\(\*([A-Za-z_]+|:)/g) { $verbs{$1 eq ':' ? 'MARK' : $1} = 1 }
   push @hits, ['control verb (*' . join('/', sort keys %verbs) . ') is NOT supported',
                'it is left in the pattern on purpose -- removing (*FAIL) would '
-             . 'INVERT the match -- so cl-ppcre rejects the pattern in its own '
-             . 'words (docs/not-supported.md "Regex control verbs")']
+             . 'INVERT the match -- so cl-ppcre rejects the pattern and it DIES at its '
+             . 'first match (#2372; docs/not-supported.md "Regex control verbs")']
     if %verbs;
   return @hits;
 }

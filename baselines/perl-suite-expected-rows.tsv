@@ -2515,7 +2515,6 @@ run/fresh_perl.t	BEGIN { die "phooey\n" }
 run/fresh_perl.t	BEGIN { undef = 0 }
 run/fresh_perl.t	[perl \#112312] crash on syntax error
 run/fresh_perl.t	[perl \#112312] crash on syntax error - another test
-run/fresh_perl.t	[perl \#20667] unicode regex vs non-unicode regex
 run/fresh_perl.t	\# [ID 20001202.002 (\#4821)] and change \#8066 added...
 run/fresh_perl.t	\# core dump in 20000716.007 (\#3516)
 run/fresh_perl.t	for ("ABCDE") {
