@@ -1,4 +1,9 @@
 # taken-at: 5323d9e 2026-08-15
+# s496a (2026-09-26, Opus, EDITED BY HAND -- one row): lc.t 82/0 -> 85/0, planned
+#   2659 -> 2662.  Cause: #2060 -- perl-tests/lc.t's three `\p{IsWord}` rows had been
+#   COMMENTED OUT ("PCL: \p{IsWord} ... Skip") because properties never matched;
+#   restored VERBATIM from t/op/lc.t (rule 5) and they pass on the property
+#   support.  method.t reads 76/23 on this tree AND on a b6560c21 extraction.
 # s494g (2026-09-25, Opus, EDITED BY HAND -- two rows): local.t 300/13 -> 302/11 and
 #   magic.t 156/31 -> 158/29.  Cause: #2107's %SIG store seam qualifies a bare handler
 #   NAME with main:: (#1029) -- magic.t `Can assign to INT` / `Can delete from INT`
@@ -441,7 +446,7 @@ isa.t	OK	14	0	14
 join.t	OK	43	0	43
 kvaslice.t	OK	17	0	17
 kvhslice.t	OK	22	2	39
-lc.t	OK	82	0	2659
+lc.t	OK	85	0	2662
 length.t	PARTIAL	35	3	49
 lex.t	OK	45	0	53
 local.t	OK	302	11	319
