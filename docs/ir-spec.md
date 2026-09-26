@@ -238,6 +238,21 @@ operation respects the fill pointer.
 stores its element **count** (Perl array-in-scalar-context); assigning a
 box created by `\` (is-ref) stores the reference value, not the wrapper.
 
+**A lexical scalar with NO write that is ever DEREFERENCED is a box**
+(normative, s497b, task #2341).  Such a slot can hold nothing but undef at
+the dereference — a `\$x` would already have boxed it — so it is always a
+vivification TARGET, and a raw slot has no place to put the array or hash
+the dereference creates.  Its first vivifying dereference writes the new
+reference INTO the box:
+
+    my $list; push @$list, $x;     # (p-let (($list :box (make-p-box nil))) (p-push (p-cast-@ $list) $x))
+
+The rule is keyed on ZERO writes of any kind; a written scalar keeps its
+verdict (a parameter, `my $r = shift`, stays a raw slot — boxing every
+dereferenced root cost an accessor loop +97 %, s473b), so a raw slot that
+was WRITTEN undef is still not vivified by a single-level read (#1350's
+residue).  VarAnnotator's reason is `deref-of-unwritten` (`PCL_B_DEBUG`).
+
 ### 2.2b Tied scalars — the raw slot behind the magic
 
 `tie $x, 'Class'` replaces the box's `value` with a **`p-tie-proxy`**
@@ -1284,8 +1299,8 @@ The kind of the created aggregate is decided by the NEXT subscript's sigil:
 `$h{a}{b}` makes `$h{a}` a HASH ref, `$h{a}[0]` an ARRAY ref.  A level whose
 slot already holds something DEFINED is *not* a vivification site: a
 reference is used, a STRING is a symbolic reference to the package variable
-it names (PCL never enforces `strict refs`; see `docs/not-supported.md`), and
-a referent of the wrong kind is perl's fatal.  **A NUMBER in HASH or ARRAY
+it names (outside `strict refs` — §3.2f), and a referent of the wrong kind is
+perl's fatal.  **A NUMBER in HASH or ARRAY
 container position is a symbolic reference too** (normative, s491a, task
 #1846): perl stringifies it first, so `no strict; my $n = 7; $n->{k}` reads
 `%main::7` and answers undef, and so does `$$->{k}` with the pid.  The SCALAR
@@ -1312,8 +1327,10 @@ writes.
 
 The ROOT of a chain rooted in a scalar (`$r->{p}{q}`) vivifies through its
 PLACE, so a backend that unboxes read-only locals must still be able to
-assign to one.  NOT modelled: a SINGLE-level deref (`$r->{b}`) does not yet
-vivify `$r` (task #1350).
+assign to one.  A SINGLE-level read (`$r->{b}`, `$$r[0]`, `$#$r`, `exists
+$r->{k}`, `delete $r->{k}`) vivifies `$r` when `$r` is a BOX (s497b, #2341;
+§2.2's rule makes every never-written dereferenced `my $r` one); a raw slot
+that was written undef is the residue of task #1350.
 
 ### 3.2d A SLICE vivifies when its consumer ALIASES its elements (normative, s473b)
 
@@ -1388,6 +1405,47 @@ element, `delete @arr[2,3]` the last one.  The count reading is not merely a
 wrong number: a count is always true, so `delete %j{'q'}` on a ZERO value read
 as TRUE.  The ELEMENT deletes (`delete $h{k}`, `delete $a[i]`) return ONE
 value and are not wrapped.
+
+### 3.2f `strict refs` is a LEXICAL fact the dereference SITE carries (normative, s497b, task #2103)
+
+`use strict 'refs'` is a compile-time, lexically scoped hint, so the compiler
+decides it per SITE and the site says so: the deref ops take a KEYWORD in
+their optional site slot.
+
+| marker | where | undef | a string / a number |
+|---|---|---|---|
+| `:strict` | an RVALUE `@$x` / `%$x` / `$$x` / `"@$x"` under strict refs | dies `Can't use an undefined value as an ARRAY reference` | dies `Can't use string ("x") as an ARRAY ref while "strict refs" in use` |
+| `:strict-lv` | any other cast under strict refs (push, foreach, keys, `\@$x`, an assignment target, a sub argument) | vivifies (a box) | dies, the same text |
+| `:rvalue` | an RVALUE cast OUTSIDE strict refs | the EMPTY symbolic `@{""}`; vivifies NOTHING | the symbolic name |
+| (none) | a vivifying cast outside strict refs | vivifies | the symbolic name |
+
+    use strict;  my @a = @$u;   ->  (p-array-= @a (p-cast-@ $u :strict))
+    use strict;  push @$u, 1;   ->  (p-push (p-cast-@ $u :strict-lv) 1)
+    use strict;  $s->[0]        ->  (p-aref-deref $s 0 :strict)
+
+The element READS `p-aref-deref` / `p-gethash-deref` take `:strict` too: a
+string or a number dies, an undef BOX vivifies (an element read vivifies its
+container in perl, strict or not), a RAW undef dies.  **The PLACE is
+normative; the message text is not** (USER s494).
+
+**What is an RVALUE site** (`Pl::ExprToCL::_deref_is_rvalue`, perl-probed):
+the operand of an operator other than an assignment's target, of `!`/`not`/
+unary `-`, of `join sort reverse scalar print say printf sprintf die warn`, an
+interpolation, an anonymous `[…]`/`{…}` constructor, a ternary's condition;
+parentheses, comma lists and a ternary's branches pass the question up; at the
+expression root the statement decides (a scalar initialiser / assignment RHS,
+an `if`/`while`/`for(;;)` condition, `return`, a sub's tail value).  It is a
+WHITELIST: a site it does not name keeps the vivifying form, so a gap can only
+fail to die where perl dies, never die where perl lives.
+
+**Where strict refs is in force** (`Pl::Parser::strict_refs_regions_of`): from
+`use strict` (bare or naming `refs`) / `no strict` (bare or naming `refs`) /
+`use VERSION` >= 5.011 to the end of the enclosing block (or file).  An
+EXPLICIT statement beats a `use VERSION` whichever comes first (perlfunc).  A
+string eval inherits its site's answer.  NOT modelled: a module that imports
+strict into its caller (`use Moo`, …) — task #2406.  The write path through a
+string (`$str->{k} = 1`, a vivifying chain `exists $h->{k}{j}` over a string,
+`&$str()`) is not strict-checked — task #2403.
 
 ### 3.3 `p-true-p` (truthiness)
 
@@ -2289,6 +2347,17 @@ body may write the loop variable, and where the compiler proved that variable
 unboxable the write is an ordinary `setf` of the binding, which only a closure
 over it can see (`for my $i (1..3) { $i = 99 } continue { print $i }` prints 99
 three times).
+
+**A LITERAL in a foreach list is READ-ONLY** (normative, s497b, tasks #1391 /
+#2103): `for my $x (1) { $x = 2 }`, `$_++ for (1, 2)` and `for ("abc") { chop }`
+die `Modification of a read-only value attempted`, as in perl.  The promoting
+loop (`p-foreach`, never `p-foreach-raw`, whose variable provably never
+writes) wraps each literal of its list form — a lone literal, `(vector …)`,
+`(p-flatten-args (list …))` — in a read-only box at MACROEXPANSION (a magic
+cell whose setter is the fatal), so the emission does not change and only a
+literal element pays.  A range, an array, a variable and a `map` result stay
+writable.  NOT modelled: the mark does not propagate through `sort` /
+`reverse` / `grep` (the rest of #1391).
 ### 6.3 Exceptions: `die` / `eval { }` / `$@`
 
 `die` signals a `p-exception` carrying either a string or an arbitrary
@@ -2414,6 +2483,26 @@ the emission is switchable: `PCL_OPT=line-track` turns it on (it is currently
 DEFAULT OFF, see `Pl/Passes.pm`).  With it off, no location is recorded and a
 caught runtime die reports the placeholder `at (eval 0) line 0.`, which is
 what every PCL release before this said.
+
+### 6.3c `$SIG{__DIE__}` runs INSIDE the die (normative, s497b, task #1554)
+
+Every perl-level die — `die LIST`, and every run-time fatal the runtime raises
+(`Illegal division by zero`, `Can't call method … on an undefined value`, the
+strict-refs fatals) — calls the `$SIG{__DIE__}` handler at the RAISE site,
+before anything unwinds, for a die inside `eval {}` too.  `$_[0]` is the value
+the die will carry: the message WITH its ` at FILE line N.` tail (the same
+text `$@` receives), or the reference itself for `die $ref`.  A handler that
+returns lets the die proceed unchanged; a handler that dies REPLACES the
+exception; a die inside the handler does not re-enter it.  A code ref or a sub
+NAME is called; `DEFAULT`, `IGNORE`, `""` and undef mean no handler.
+
+    $SIG{__DIE__} = sub { print "H: $_[0]" };
+    eval { my $u; $u->m };   # prints "H: Can't call method "m" on an undefined value at … line N."
+                             # then $@ holds the same text
+
+The two raise sites are `%p-die-error` (every string die) and `p-die`'s object
+branch; a host condition that is not a perl die (an internal error) does not
+call it.  Nothing on the non-die path pays.
 
 ### 6.4 goto
 

@@ -3725,7 +3725,7 @@ sub gen_array_access_form {
 my %PCL_EXPORTED_GLOBALS = map { $_ => 1 }
   qw($_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %ENV %INC %SIG);
 
-# ── strict refs at a dereference site (task #2103; docs/ir-spec.md §3.2c) ────
+# ── strict refs at a dereference site (task #2103; docs/ir-spec.md §3.2f) ────
 # `use strict 'refs'` is LEXICAL, so the question is asked per SITE: the
 # regions come from Pl::Parser::strict_refs_regions_of (a source-location
 # pre-pass Parser2 publishes before any lowering, the `use open` shape).  A

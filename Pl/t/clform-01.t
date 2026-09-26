@@ -103,9 +103,9 @@ EOT
 
 like($ix, qr/\(p-exists %h "a"\)/,          'exists $h{k} → (p-exists %h key)');
 like($ix, qr/\(p-exists-array \@a 0\)/,      'exists $a[i] → (p-exists-array @a i)');
-like($ix, qr/\(p-exists \(unbox \$r\) "x"\)/, 'exists $r->{k} → (p-exists (unbox ref) key)');
-like($ix, qr/\(p-exists-array \(unbox \$ar\) 0\)/,
-     'exists $ar->[i] → (p-exists-array (unbox ref) i)');
+like($ix, qr/\(p-exists \(p-ensure-hashref \$r\) "x"\)/, 'exists $r->{k} → (p-exists (p-ensure-hashref ref) key) — the ref vivifies, #2341');
+like($ix, qr/\(p-exists-array \(p-ensure-arrayref \$ar\) 0\)/,
+     'exists $ar->[i] → (p-exists-array (p-ensure-arrayref ref) i) — the ref vivifies, #2341');
 like($ix, qr/\(p-sub-exists "main" "foo"\)/, 'exists &sub → (p-sub-exists pkg name)');
 like($ix, qr/\(p-delete %h "a"\)/,           'delete $h{k} → (p-delete %h key)');
 like($ix, qr/\(p-delete-array \@a 0\)/,       'delete $a[i] → (p-delete-array @a i)');
@@ -113,7 +113,7 @@ like($ix, qr/\(p-delete-hash-slice %h "a" "b"\)/,
      'delete @h{...} → (p-delete-hash-slice %h keys)');
 like($ix, qr/\(p-delete-array-slice \@a 0 1\)/,
      'delete @a[...] → (p-delete-array-slice @a idxs)');
-like($ix, qr/\(p-delete \(unbox \$r\) "x"\)/, 'delete $r->{k} → (p-delete (unbox ref) key)');
+like($ix, qr/\(p-delete \(p-ensure-hashref \$r\) "x"\)/, 'delete $r->{k} → (p-delete (p-ensure-hashref ref) key) — the ref vivifies, #2341');
 like($ix, qr/\(p-sub-defined "main" "foo"\)/, 'defined &sub → (p-sub-defined pkg name)');
 like($ix, qr/\(p-defined-fh 'FILE\)/,         'defined BAREWORD → (p-defined-fh name)');
 

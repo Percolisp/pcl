@@ -2380,7 +2380,7 @@
 ;;; ---------------------------------------------------------------------------
 ;;; KIND is the kind the source asked for: "ARRAY" / "HASH" / "SCALAR" / "CODE".
 ;;; SITE is the deref site's optional argument, and a KEYWORD there is the
-;;; strict-refs marker (docs/ir-spec.md §3.2c) — the compiler emits it only
+;;; strict-refs marker (docs/ir-spec.md §3.2f) — the compiler emits it only
 ;;; inside a `use strict 'refs'` scope; a `no strict 'refs'` site is unmarked
 ;;; and keeps every symbolic arm:
 ;;;   :strict     an RVALUE dereference (`my @a = @$u`, `"@$u"`, `if (@$u)`,
@@ -15158,7 +15158,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (error (or class 'p-die-error)
          :format-control control :format-arguments args))
 
-;;; ── $SIG{__DIE__} (task #1554; docs/ir-spec.md §7.6) ────────────────────────
+;;; ── $SIG{__DIE__} (task #1554; docs/ir-spec.md §6.3c) ────────────────────────
 ;;; perl calls the handler INSIDE the die, before anything unwinds — for a
 ;;; trapped die too (inside eval, $^S true) — with the value the die will carry:
 ;;; the message with its ` at FILE line N.` tail, or the reference itself.  A
