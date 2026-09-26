@@ -21206,10 +21206,13 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-sig-inherited-ignore-p (signo d)
   "True when SIGNO was SIG_IGN when the process started.  With a start-up
    capture that is the whole answer; without one only D, the disposition NOW,
-   is known — and PIPE's IGN then says nothing (SBCL ignores PIPE itself)."
-  (if (listp *p-sig-inherited*)
-      (and (member signo *p-sig-inherited*) t)
-      (and (eq d :ignore) (not (eql signo sb-unix:sigpipe)))))
+   is known — and PIPE's IGN then says nothing (SBCL ignores PIPE itself).
+   CHLD never: perl resets an inherited CHLD ignore to the default at start-up
+   (probed 5.40.3: `$SIG{CHLD}' reads empty under it), and SBCL's own CHLD
+   handler must stay in force anyway."
+  (cond ((eql signo sb-unix:sigchld) nil)
+        ((listp *p-sig-inherited*) (and (member signo *p-sig-inherited*) t))
+        (t (and (eq d :ignore) (not (eql signo sb-unix:sigpipe))))))
 
 (defun %p-sig-boot-scan ()
   "Read every signal's disposition as the process booted, BEFORE PCL touches
@@ -21230,9 +21233,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-signals-boot ()
   "Per PROCESS: forget the build's %SIG, derive the deny list, and put perl's
    dispositions where SBCL installed its own (see the header): the default, or
-   SIG_IGN when the process inherited the ignore.  CHLD keeps SBCL's handler
-   either way (run-program needs it); an inherited ignore there only reads
-   back as 'IGNORE' (docs/not-supported.md \"%SIG\")."
+   SIG_IGN when the process inherited the ignore (CHLD excepted, as in perl:
+   %p-sig-inherited-ignore-p)."
   (setf *p-sig-main-thread* sb-thread:*current-thread*
         *p-sig-relayed* nil
         *p-sig-relay-thread* nil

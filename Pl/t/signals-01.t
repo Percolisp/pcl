@@ -272,11 +272,11 @@ same_as_perl('inh-pipe', 'print "line $_\n" for 1 .. 200000; print STDERR "reach
              'SIGPIPE ignored by the parent: print into a closed pipe fails, the program runs on, "Unable to flush stdout" exits 1',
              head => 1, inherit => ['PIPE']);
 
-same_as_perl('inh-readback', <<'PERL', 'inherited ignores read back as IGNORE and a self-kill of each is survived',
-$| = 1; print join(",", map { "$_=" . ($SIG{$_} // "undef") } qw(HUP INT TERM ALRM PIPE USR1)), "\n";
+same_as_perl('inh-readback', <<'PERL', 'inherited ignores read back as IGNORE and a self-kill of each is survived (CHLD: perl resets it)',
+$| = 1; print join(",", map { "$_=" . ($SIG{$_} // "undef") } qw(HUP INT TERM ALRM PIPE CHLD USR1)), "\n";
 kill HUP => $$; kill INT => $$; kill TERM => $$; kill PIPE => $$; alarm 1; sleep 2; print "survived\n";
 PERL
-             inherit => [qw(HUP INT TERM ALRM PIPE)]);
+             inherit => [qw(HUP INT TERM ALRM PIPE CHLD)]);
 
 same_as_perl('inh-bg-int', '$| = 1; print "ready\n"; my $t = time; select(undef, undef, undef, 0.05) while time - $t < 2; print "INT=$SIG{INT}, survived\n";',
              "a shell's background job ignores INT: an external INT does nothing",
