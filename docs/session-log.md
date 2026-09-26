@@ -49,6 +49,18 @@ Merged by fast-forward to `3dba9a7d`; the container install test passed on the m
 publishes every failed row's diag lines, so the next red run can be read from the
 public annotations.
 
+The session ended at 14:00 with the USER's "don't start new subjobs after these
+3" standing and three agents in flight: s498c polling the CI run on `cbb683de`
+(green closes it; red means it rebases and fixes from the annotations it made
+readable), s497b (strict refs, vivification, `$SIG{__DIE__}`; twelve commits,
+every member done, everyday 101 → 102 reported, rebased on `ccb64cd7`, bars
+owed) and s496a (Unicode properties from perl's own tables plus four regex gaps
+its new die surfaced; thirteen commits, bars owed).  Both rebase once more onto
+`cbb683de` at the end.  Everything merged this session went through the same
+review: a cold gate on the sha, the sweep on the merged tree, and probes against
+perl through a harness-faithful driver.
+
+
 
 ## Session 497 (Fable, 2026-09-25 late / 2026-09-26) — s494g signals MERGED (EVERYDAY 101 of 122), perf round 35 launched, two briefs ready
 
