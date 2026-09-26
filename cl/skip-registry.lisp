@@ -83,8 +83,12 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("LHS bad on updating tr"
                  :principle9
                  "tr/// updating a bad lvalue must die — error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
-                ;; ("fails on zero-length ro string" …) LEFT in s497b: a literal in a
-                ;; foreach list is a read-only box now (#1391 / #2103), so the row passes.
+                ;; "fails on zero-length ro string" runs TWICE (tr.t:1089, `for ("",
+                ;; nullrocow)`).  NARROWED s497b to the second iteration, by number: the
+                ;; literal "" is a read-only box now (#1391 / #2103) and row 248 passes;
+                ;; `nullrocow` is a `use constant` VALUE, which is still writable.
+                (249 :read-only
+                     "tr/// on a zero-length read-only CONSTANT (a `use constant` value) must die 'Modification of a read-only value' — a constant sub's value is not read-only. not-supported.md: 'A LITERAL reached through sort / reverse / grep in a foreach list is writable' (#1391).")
                 )
 
 ;; undef.t 16 and 18 are UNNAMED (no description) -> keyed by test number.
