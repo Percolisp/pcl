@@ -17,15 +17,15 @@ BEGIN {
 
 use feature qw( fc );
 
-# PCL: plan reduced from 139 to 82.
+# PCL: plan reduced from 139 to 85.
 # Removed: test 7 (fc exception needs 'no feature' semantics),
 # tests 57/59 (multichar uc/fc of sharp_s), tests 61/63 (ligature titlecase/foldcase),
-# test 66 (sigma context-sensitive ucfirst), tests 71/73/74 (\p{IsWord} non-ASCII),
+# test 66 (sigma context-sensitive ucfirst),
 # tests 77/78 (v-string unicode chop+s///e), tests 89-121 ([perl #38619] /\G + grow loops),
 # tests 127-131 (use bytes), test 132 (fresh_perl_like subprocess),
 # tests 133-134 (bless/overload uc), tests 135-139 (List::Util SKIP).
 # See docs/not-supported.md for rationale.
-plan tests => 82 + 2 * (5 * 256) + 17;
+plan tests => 85 + 2 * (5 * 256) + 17;
 
 is(lc(undef),	   "", "lc(undef) is ''");
 is(lcfirst(undef), "", "lcfirst(undef) is ''");
@@ -186,19 +186,17 @@ my $c;
 ($c = $b) =~ s/(\w+)/lc($1)/ge;
 is($c , $a, "Using s///e to change case.");
 
-# PCL: \p{IsWord} in cl-ppcre does not match non-ASCII word chars (Greek sigma). Skip.
-# ($c = $a) =~ s/(\p{IsWord}+)/uc($1)/ge;
-# is($c , $b, "Using s///e to change case.");
+($c = $a) =~ s/(\p{IsWord}+)/uc($1)/ge;
+is($c , $b, "Using s///e to change case.");
 
 ($c = $a) =~ s/(\p{IsWord}+)/fc($1)/ge;
 is($c , $a, "Using s///e to foldcase.");
 
-# PCL: \p{IsWord} doesn't match non-ASCII in cl-ppcre. Skip.
-# ($c = $b) =~ s/(\p{IsWord}+)/lcfirst($1)/ge;
-# is($c , "\x{3c3}FOO.bAR", "Using s///e to change case.");
+($c = $b) =~ s/(\p{IsWord}+)/lcfirst($1)/ge;
+is($c , "\x{3c3}FOO.bAR", "Using s///e to change case.");
 
-# ($c = $a) =~ s/(\p{IsWord}+)/ucfirst($1)/ge;
-# is($c , "\x{3a3}foo.Bar", "Using s///e to change case.");
+($c = $a) =~ s/(\p{IsWord}+)/ucfirst($1)/ge;
+is($c , "\x{3a3}foo.Bar", "Using s///e to change case.");
 
 # #18931: perl5.8.0 bug in \U..\E processing
 # Test case from Nicholas Clark.
