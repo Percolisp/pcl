@@ -4336,8 +4336,17 @@
                                   (cond ((getf mods :xx) "xx")
                                         ((getf mods :x)  "x")
                                         (t "")))))
-       (format nil "(?^~A:~A)" mod-str (or (p-regex-match-source v)
-                                           (p-regex-match-pattern v)))))
+       (let ((body (or (p-regex-match-source v) (p-regex-match-pattern v))))
+         ;; perl ends the body with a NEWLINE when /x left it inside a `#`
+         ;; comment (regcomp's run-on comment), or interpolating the qr into a
+         ;; bigger pattern would comment out the wrapper's own `)` — measured
+         ;; s496a: `qr/ A B C # D E/x` inside `/($R)/` died at compile once a
+         ;; bad pattern stopped being a silent no-match (#2372).
+         (format nil "(?^~A:~A~A)" mod-str body
+                 (if (and (or (getf mods :x) (getf mods :xx))
+                          (%pcl-regex-ends-in-comment-p body))
+                     (string #\Newline)
+                     "")))))
     ;; Lists (from return lists, etc.) - join with spaces like Perl's @array interpolation
     ((listp v) (format nil "~{~A~^ ~}" (mapcar #'to-string v)))
     ;; CL's T from comparison operators - Perl true stringifies to "1"
@@ -29869,6 +29878,25 @@ buffer's fill-pointer; everything else falls back to file-length."
     (#\{ #\})
     (#\< #\>)
     (t open-delim)))  ; Non-paired delimiters use same char
+
+(defun %pcl-regex-ends-in-comment-p (pat)
+  "Does /x pattern text PAT END inside a `#' comment (one no newline closed)?
+   Escapes and bracket classes are skipped — a `#' there is a literal — and
+   so is a `(?#…)' group.  qr// stringification appends perl's newline then."
+  (let ((i 0) (n (length pat)) (in-class nil))
+    (loop
+     (when (>= i n) (return nil))
+     (let ((c (char pat i)))
+       (cond ((char= c #\\) (incf i 2))
+             (in-class (when (char= c #\]) (setf in-class nil)) (incf i))
+             ((char= c #\[) (setf in-class t) (incf i))
+             ((and (char= c #\() (< (+ i 2) n) (char= (char pat (1+ i)) #\?)
+                   (char= (char pat (+ i 2)) #\#))
+              (setf i (1+ (or (position #\) pat :start i) (1- n)))))
+             ((char= c #\#)
+              (let ((nl (position #\Newline pat :start i)))
+                (if nl (setf i (1+ nl)) (return t))))
+             (t (incf i)))))))
 
 (defun %pcl-strip-regex-code-blocks (pattern)
   "Remove `(?{code})` / `(??{code})` — and perl 5.38's OPTIMISTIC `(*{code})`, the

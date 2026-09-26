@@ -63,7 +63,7 @@ Upper	2	perl-accepts	answered
 XIDS	2	perl-accepts	answered
 Zl	2	perl-accepts	answered
 Zp	2	perl-accepts	answered
-_Perl_IDStart	2	perl-accepts	dies
+_Perl_IDStart	2	perl-accepts	answered
 foo	2	perl-rejects	dies
 isAlpha	2	perl-accepts	answered
 main::IsA	2	perl-rejects	dies
@@ -127,9 +127,9 @@ Word	1	perl-accepts	answered
 XIDC	1	perl-accepts	answered
 XIDStart	1	perl-accepts	answered
 XPosixSpace	1	perl-accepts	answered
-_Perl_Charname_Begin	1	perl-accepts	dies
-_Perl_Charname_Continue	1	perl-accepts	dies
-_Perl_IDCont	1	perl-accepts	dies
+_Perl_Charname_Begin	1	perl-accepts	answered
+_Perl_Charname_Continue	1	perl-accepts	answered
+_Perl_IDCont	1	perl-accepts	answered
 __::Is0	1	perl-rejects	dies
 bc=AL	1	perl-accepts	answered
 gc=:(?-m)L:	1	perl-rejects	dies

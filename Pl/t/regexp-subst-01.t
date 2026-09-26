@@ -435,6 +435,17 @@ push @r, ("\\(?c)" =~ /\\\(\?c\)/) ? 1 : 0;
 print "@r\n";
 PL
 
+# A /x qr whose text ENDS inside a `#` comment stringifies with perl's trailing
+# newline, or interpolating it comments out the wrapper's own `)` (a compile
+# error that #2372 made a die: t/re/pat_advanced.t line 753).  s496a.
+subst_agrees(<<'PL', 'a /x qr ending in a # comment stringifies with a newline and interpolates (#2372)');
+my $R = qr / A B C # D E/x;
+print "[$R]\n";
+print join(" ", ("ABCDE" =~ /($R)/ && $1 eq "ABC") ? 1 : 0, ("ABCDE" =~ m/$R/ && $& eq "ABC") ? 1 : 0), "\n";
+my $T = qr/a [#] b/x; my $U = qr/a \# b/x; my $V = qr/a (?#c) b/x; my $S = qr/a#b/;
+print "[$T][$U][$V][$S]\n";
+PL
+
 # The emission promises, in both directions: a `$1`-only replacement stays a
 # STRING (the runtime's backref rewrite, no lambda per match), and a
 # single-quoted one is a lambda over a constant — never that string, because

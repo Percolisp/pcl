@@ -129,6 +129,18 @@ sub list_agrees {
   return '';
 }
 
+sub scan_invlist {
+  my ($s) = @_;
+  no warnings;
+  my $re = qr/\p{$s}/;
+  my @l; my $in = 0;
+  for my $cp (0 .. 0x10FFFF) {
+    my $m = (chr($cp) =~ $re) ? 1 : 0;
+    if ($m != $in) { push @l, $cp; $in = $m }
+  }
+  return @l;
+}
+
 sub member {
   my ($l, $cp) = @_;
   my ($lo, $hi) = (0, scalar @$l);
@@ -260,8 +272,13 @@ sub build {
     next if $s =~ /^\s*\^/;                       # negation is the resolver's
     unless (perl_accepts($s)) { $rejected++; print STDERR "rejected: $s\n" if $stats; next }
     my @l = prop_invlist($s);
-    # A spelling perl compiles but prop_invlist cannot answer (a user-defined
-    # name in the census, say) is not ours to store.
+    # perl's INTERNAL properties (`_Perl_IDStart` & co. — t/uni/variables.t
+    # asks `\p{_Perl_IDStart}` of every code point) have no prop_invlist
+    # answer, so their list is MEASURED from perl's regex engine at every code
+    # point — perl's own answer, still nothing derived by hand.
+    @l = scan_invlist($s) if !@l && $s =~ /^_perl_/i;
+    # Any other spelling perl compiles but prop_invlist cannot answer (a
+    # user-defined name in the census, a wildcard form) is not ours to store.
     next unless @l || $s =~ /^(?:is)?(?:cn|unassigned)$/i;
     my $k = norm($s);
     my $v = intern_list(\@l);
