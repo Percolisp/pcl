@@ -394,6 +394,31 @@ my $h = `echo X${\"L"}Y`; chomp $h;
 print "a=$a b=$b c=$c d=$d e=$e f=$f g=$g h=$h\n";
 PL
 
+# Task #2372: a pattern that cannot COMPILE is a trappable DIE at each of the
+# three ops -- it used to be a warning plus a VALUE (match: no-match, split:
+# the whole string as one field, s///: "no substitution"), and the program
+# carried on with it.  The pattern is interpolated, so perl too dies at the op
+# (a literal one dies at perl's compile time, before anything prints).  Only
+# the PLACE is asserted -- the message text is free (USER s494) -- plus that
+# $@ names the regex and the program goes on after the eval.
+subst_agrees(<<'PL', 'a bad pattern DIES at the match, trappably (#2372)');
+my $p = "(";
+my $r = eval { "a(" =~ /$p/; 1 };
+print defined $r ? "survived" : "died", " ", ($@ =~ /in regex/ ? "regex" : "?"), " after\n";
+PL
+subst_agrees(<<'PL', 'a bad pattern DIES at split, trappably (#2372)');
+my $p = "[a";
+my @f = ("untouched");
+my $r = eval { @f = split /$p/, "x[ay"; 1 };
+print defined $r ? "survived" : "died", " ", ($@ =~ /in regex/ ? "regex" : "?"), " @f\n";
+PL
+subst_agrees(<<'PL', 'a bad pattern DIES at s///, trappably (#2372)');
+my $p = "a)";
+my $s = "xa)y"; my $n = "unset";
+my $r = eval { $n = ($s =~ s/$p/Q/); 1 };
+print defined $r ? "survived" : "died", " ", ($@ =~ /in regex/ ? "regex" : "?"), " $n $s\n";
+PL
+
 # The emission promises, in both directions: a `$1`-only replacement stays a
 # STRING (the runtime's backref rewrite, no lambda per match), and a
 # single-quoted one is a lambda over a constant — never that string, because

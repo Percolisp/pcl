@@ -25396,15 +25396,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                            ;; empty match at the field's own start, and where a
                            ;; longer match is available there perl takes it —
                            ;; `split /|x/, "xax"` is ("", "a"), not ("x","a","x").
-                           (handler-case
-                               (let ((scanner (%pcl-create-scanner pat ppcre-options)))
-                                 (cl-ppcre:split
-                                  (%p-global-scanner scanner (cons pat ppcre-options)
-                                                     nil t)
-                                  s :limit ppcre-limit :with-registers-p t))
-                             (cl-ppcre:ppcre-syntax-error (e)
-                               (warn "Regex syntax error in split: ~A" e)
-                               (list s))))))
+                           (let ((scanner (%pcl-create-scanner pat ppcre-options)))
+                             (cl-ppcre:split
+                              (%p-global-scanner scanner (cons pat ppcre-options)
+                                                 nil t)
+                              s :limit ppcre-limit :with-registers-p t)))))
            (dolist (p parts)
              (vector-push-extend (or p *p-undef*) result))))
         ;; Special whitespace splitting: " " splits on runs of whitespace and strips
@@ -30978,14 +30974,38 @@ buffer's fill-pointer; everything else falls back to file-length."
                       (< (+ i 3) len)
                       (char= (char pattern (+ i 3)) #\<)))))))
 
+(defun %pcl-regex-compile-die (e)
+  "A pattern that cannot COMPILE is a perl DIE (task #2372): trappable, one
+   line, carrying the pattern text.  E is the cl-ppcre:ppcre-syntax-error the
+   engine (or the Unicode property resolver, #2060) signalled.  It used to be
+   a `warn' plus a VALUE at each of the three ops -- a match answered
+   no-match, split the whole string as one field, s/// \"no substitution\" --
+   where perl dies (rule 12: the value flowed onward).  The text is perl's
+   SHAPE, not its words (USER s494): the reason, then the pattern as the
+   ENGINE saw it, with `<-- HERE' at the engine's position when it has one.
+   Every scanner is built through %pcl-create-scanner, so this is the one
+   place a compile error becomes a die."
+  (let* ((reason (string-right-trim
+                  "."
+                  (apply #'format nil (simple-condition-format-control e)
+                         (simple-condition-format-arguments e))))
+         (str (or (cl-ppcre:ppcre-syntax-error-string e) ""))
+         (pos (cl-ppcre:ppcre-syntax-error-pos e))
+         (cut (if (and (integerp pos) (<= 0 pos (length str))) pos (length str))))
+    (%p-die-error nil "~A in regex; marked by <-- HERE in m/~A <-- HERE ~A/"
+                  reason (subseq str 0 cut) (subseq str cut))))
+
 (defun %pcl-create-scanner (pattern options)
   "Memoized %pcl-build-scanner.  Returns (values scanner reg-names closers);
-   CLOSERS is the %pcl-capture-closer-positions vector for $^N."
+   CLOSERS is the %pcl-capture-closer-positions vector for $^N.  A pattern
+   that cannot compile DIES here, perl-shaped (%pcl-regex-compile-die)."
   (let* ((key (format nil "~A~C~{~A~^ ~}" pattern #\Nul options))
          (hit (gethash key *pcl-scanner-cache*)))
     (if hit
         (values (first hit) (second hit) (cddr hit))
-        (multiple-value-bind (scanner reg-names) (%pcl-build-scanner pattern options)
+        (multiple-value-bind (scanner reg-names)
+            (handler-case (%pcl-build-scanner pattern options)
+              (cl-ppcre:ppcre-syntax-error (e) (%pcl-regex-compile-die e)))
           (let ((closers (%pcl-capture-closer-positions
                           pattern (getf options :extended-mode))))
             (setf (gethash key *pcl-scanner-cache*)
@@ -31540,150 +31560,146 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; scalar m//g loop, because the (length str) each /g step makes is
     ;; otherwise a full call into the generic sequence function (task #1804).
     (declare (type simple-string str))
-    (handler-case
-        (let* ((c (%p-regex-compiled op))
-               (scanner    (svref c 0))
-               (reg-names  (svref c 1))
-               (closers    (svref c 2))
-               (anchored-g (svref c 3))
-               (global-p   (svref c 4))
-               (cont-p     (svref c 5))
-               (minend-key (svref c 6)))
-          ;; NOTE (task #1804): perl does NOT clear %+/%- on a FAILED attempt —
-          ;; probed 5.40.3, `"ab" =~ /(?<f>a)(?<s>b)/; "zz" =~ /(q)/` leaves
-          ;; both keys in %+, exactly as it leaves $1 alone.  PCL used to
-          ;; clrhash them here on every attempt, which was two hash-table-count
-          ;; calls per match AND the wrong answer; both hashes are now derived
-          ;; from the last SUCCESSFUL match's record, which gives perl's rule
-          ;; for free.
-          (cond
-            ;; /\G.../g in list context: contiguous anchored matches from pos
-            ((and global-p (eq *wantarray* t) anchored-g)
-             (prog1
-                 (%pcl-scan-anchored-list scanner minend-key str reg-names
-                                          (or (%p-match-pos-state string) 0)
-                                          closers)
-               ;; Perl resets pos() after a list-context /g match exhausts.  This
-               ;; path STARTS from pos, so leaving a stale pos would make a
-               ;; `while (pos < len) { @m = /\G.../g }` loop never terminate;
-               ;; clearing it matches Perl (pos() becomes undef).
-               (remhash string *p-match-pos*)))
-            ;; /g in list context: every match FROM pos, at once.
-            ;; :void is NOT list context — only (eq *wantarray* t) is list context.
-            ;; IT STARTS AT pos AND RESETS IT (task #2001, perlop): a preceding
-            ;; scalar `//g` or a `pos() =` assignment positions the scan, and on
-            ;; completion pos goes back to undef unless /c keeps it.  PCL started
-            ;; at 0 and never touched pos, so after `$t =~ /;/g` the list match
-            ;; `my %h = $t =~ /(\w+)=(\w+)/g` collected k1 as well as k2 and k3.
-            ;; The anchored \G arm above has always read pos and cleared it; this
-            ;; is the same rule for the ordinary spelling.
-            ((and global-p (eq *wantarray* t))
-             (let ((all-results nil)
-                   (last-rs nil) (last-re nil) (last-ms nil) (last-me nil)
-                   ;; perl's own loop, not cl-ppcre's do-scans: the advance rule
-                   ;; is %p-global-scan's (task #1719).
-                   (pos (or (%p-match-pos-state string) 0))
-                   (slen (length str)) (empty nil))
-               (loop
-                (multiple-value-bind (ms me rs re)
-                    (%p-global-scan scanner minend-key str pos slen empty)
-                  (unless ms (return))
-                  (setf last-rs rs last-re re last-ms ms last-me me
-                        empty (= ms me) pos me)
-                  (if (> (length rs) 0)
-                      (dotimes (i (length rs))
-                        ;; An unmatched group is perl UNDEF, never raw nil: raw
-                        ;; nil means "empty list" to %p-flatten-list, so a list
-                        ;; ASSIGNMENT would silently shift every later capture
-                        ;; up one slot (see the no-/g branch below).
-                        (push (if (and (aref rs i) (aref re i))
-                                  (subseq str (aref rs i) (aref re i))
-                                  *p-undef*)
-                              all-results))
-                      (push (subseq str ms me) all-results))))
-               (let* ((items (nreverse all-results))
-                      (result (make-array (length items) :adjustable t :fill-pointer t)))
-                 (loop for item in items for i from 0 do (setf (aref result i) item))
-                 (when items
-                   (%p-match-record str last-ms last-me last-rs last-re closers reg-names))
-                 ;; perl resets pos() when a list-context /g finishes — on a hit
-                 ;; and on a miss alike — unless /c, which leaves it where the
-                 ;; last match ended (probed 5.40.3).
-                 (if cont-p
-                     (when items (%p-set-match-pos string last-me (= last-ms last-me)))
-                     (remhash string *p-match-pos*))
-                 result)))
-            ;; /g in scalar/void context: iterate from current pos
-            ((and global-p (not (eq *wantarray* t)))
-             (multiple-value-bind (pos0 empty) (%p-match-pos-state string)
-               (let ((start (or pos0 0)))
-                 (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                     ;; The iterator's state is pos() PLUS whether the match that
-                     ;; set it was zero-length — perl's MGf_MINMATCH (task #1719).
-                     ;; Without the second half this loop repeated the same empty
-                     ;; match for ever: `while ($s =~ /(\\w*)/g)` never terminated.
-                     (%p-global-scan scanner minend-key str start (length str)
-                                     empty)
-                   ;; \G: the match must begin exactly at the start position.
-                   (when (and anchored-g match-start (/= match-start start))
-                     (setf match-start nil))
-                   (if match-start
-                       (progn
-                         (%p-set-match-pos string match-end
-                                           (= match-start match-end))
-                         (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
-                         t)
-                       (progn
-                         (unless cont-p
-                           (remhash string *p-match-pos*))
-                         ;; scalar/void /g no-match → Perl's '' (defined false)
-                         ""))))))
-            ;; No /g: single match.  With \G, anchor at the current pos.
-            (t
-             (let ((start (if anchored-g (or (%p-match-pos-state string) 0) 0)))
-               (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                   (%p-ppcre-scan scanner str start)
-                 (when (and anchored-g match-start (/= match-start start))
-                   (setf match-start nil))
-                 (if match-start
-                     (progn
-                       (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
-                       (if (eq *wantarray* t)
-                           (let* ((num-groups (length reg-starts))
-                                  (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
-                             (if (zerop num-groups)
-                                 ;; No capture groups: Perl returns (1) in list context on success
-                                 (setf (aref captures 0) 1)
-                                 (dotimes (i num-groups)
-                                   ;; An unmatched group is perl UNDEF.  It was
-                                   ;; raw nil, which %p-flatten-list drops as
-                                   ;; "empty list" — so `my ($d,$f) = $p =~
-                                   ;; m{^(.*/)?(.*)}` put the FILENAME in $d and
-                                   ;; undef in $f whenever the path had no slash.
-                                   ;; That is the shape File::Basename::fileparse
-                                   ;; uses, so dirname("c.txt") answered "c.txt".
-                                   (setf (aref captures i)
-                                         (if (and (aref reg-starts i) (aref reg-ends i))
-                                             (subseq str (aref reg-starts i) (aref reg-ends i))
-                                             *p-undef*))))
-                             captures)
-                           t))
-                     ;; No match: scalar/void context returns Perl's '' (defined
-                     ;; false), not undef; list context returns the EMPTY LIST.
-                     ;; The empty list is spelled as a zero-length VECTOR, not
-                     ;; raw nil (tasks #962/#459).  Raw nil is the runtime's
-                     ;; "empty list" only to %p-flatten-list; every OTHER list
-                     ;; consumer reads it as one slot — p-array-fill preserves
-                     ;; it as an array HOLE, p-flatten-args spreads it as one
-                     ;; argument — so `f(/nomatch/, "d")' handed the callee two
-                     ;; arguments where perl hands one, and every later
-                     ;; argument shifted.  A vector is what the SUCCESS arm and
-                     ;; the /g list arm already return, so all four consumers
-                     ;; splice it to nothing with no arm of their own.
-                     (if (eq *wantarray* t) (%p-empty-list) "")))))))
-      (cl-ppcre:ppcre-syntax-error (e)
-        (warn "Regex syntax error: ~A" e)
-        nil))))
+    (let* ((c (%p-regex-compiled op))
+           (scanner    (svref c 0))
+           (reg-names  (svref c 1))
+           (closers    (svref c 2))
+           (anchored-g (svref c 3))
+           (global-p   (svref c 4))
+           (cont-p     (svref c 5))
+           (minend-key (svref c 6)))
+      ;; NOTE (task #1804): perl does NOT clear %+/%- on a FAILED attempt —
+      ;; probed 5.40.3, `"ab" =~ /(?<f>a)(?<s>b)/; "zz" =~ /(q)/` leaves
+      ;; both keys in %+, exactly as it leaves $1 alone.  PCL used to
+      ;; clrhash them here on every attempt, which was two hash-table-count
+      ;; calls per match AND the wrong answer; both hashes are now derived
+      ;; from the last SUCCESSFUL match's record, which gives perl's rule
+      ;; for free.
+      (cond
+        ;; /\G.../g in list context: contiguous anchored matches from pos
+        ((and global-p (eq *wantarray* t) anchored-g)
+         (prog1
+             (%pcl-scan-anchored-list scanner minend-key str reg-names
+                                      (or (%p-match-pos-state string) 0)
+                                      closers)
+           ;; Perl resets pos() after a list-context /g match exhausts.  This
+           ;; path STARTS from pos, so leaving a stale pos would make a
+           ;; `while (pos < len) { @m = /\G.../g }` loop never terminate;
+           ;; clearing it matches Perl (pos() becomes undef).
+           (remhash string *p-match-pos*)))
+        ;; /g in list context: every match FROM pos, at once.
+        ;; :void is NOT list context — only (eq *wantarray* t) is list context.
+        ;; IT STARTS AT pos AND RESETS IT (task #2001, perlop): a preceding
+        ;; scalar `//g` or a `pos() =` assignment positions the scan, and on
+        ;; completion pos goes back to undef unless /c keeps it.  PCL started
+        ;; at 0 and never touched pos, so after `$t =~ /;/g` the list match
+        ;; `my %h = $t =~ /(\w+)=(\w+)/g` collected k1 as well as k2 and k3.
+        ;; The anchored \G arm above has always read pos and cleared it; this
+        ;; is the same rule for the ordinary spelling.
+        ((and global-p (eq *wantarray* t))
+         (let ((all-results nil)
+               (last-rs nil) (last-re nil) (last-ms nil) (last-me nil)
+               ;; perl's own loop, not cl-ppcre's do-scans: the advance rule
+               ;; is %p-global-scan's (task #1719).
+               (pos (or (%p-match-pos-state string) 0))
+               (slen (length str)) (empty nil))
+           (loop
+            (multiple-value-bind (ms me rs re)
+                (%p-global-scan scanner minend-key str pos slen empty)
+              (unless ms (return))
+              (setf last-rs rs last-re re last-ms ms last-me me
+                    empty (= ms me) pos me)
+              (if (> (length rs) 0)
+                  (dotimes (i (length rs))
+                    ;; An unmatched group is perl UNDEF, never raw nil: raw
+                    ;; nil means "empty list" to %p-flatten-list, so a list
+                    ;; ASSIGNMENT would silently shift every later capture
+                    ;; up one slot (see the no-/g branch below).
+                    (push (if (and (aref rs i) (aref re i))
+                              (subseq str (aref rs i) (aref re i))
+                              *p-undef*)
+                          all-results))
+                  (push (subseq str ms me) all-results))))
+           (let* ((items (nreverse all-results))
+                  (result (make-array (length items) :adjustable t :fill-pointer t)))
+             (loop for item in items for i from 0 do (setf (aref result i) item))
+             (when items
+               (%p-match-record str last-ms last-me last-rs last-re closers reg-names))
+             ;; perl resets pos() when a list-context /g finishes — on a hit
+             ;; and on a miss alike — unless /c, which leaves it where the
+             ;; last match ended (probed 5.40.3).
+             (if cont-p
+                 (when items (%p-set-match-pos string last-me (= last-ms last-me)))
+                 (remhash string *p-match-pos*))
+             result)))
+        ;; /g in scalar/void context: iterate from current pos
+        ((and global-p (not (eq *wantarray* t)))
+         (multiple-value-bind (pos0 empty) (%p-match-pos-state string)
+           (let ((start (or pos0 0)))
+             (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                 ;; The iterator's state is pos() PLUS whether the match that
+                 ;; set it was zero-length — perl's MGf_MINMATCH (task #1719).
+                 ;; Without the second half this loop repeated the same empty
+                 ;; match for ever: `while ($s =~ /(\\w*)/g)` never terminated.
+                 (%p-global-scan scanner minend-key str start (length str)
+                                 empty)
+               ;; \G: the match must begin exactly at the start position.
+               (when (and anchored-g match-start (/= match-start start))
+                 (setf match-start nil))
+               (if match-start
+                   (progn
+                     (%p-set-match-pos string match-end
+                                       (= match-start match-end))
+                     (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
+                     t)
+                   (progn
+                     (unless cont-p
+                       (remhash string *p-match-pos*))
+                     ;; scalar/void /g no-match → Perl's '' (defined false)
+                     ""))))))
+        ;; No /g: single match.  With \G, anchor at the current pos.
+        (t
+         (let ((start (if anchored-g (or (%p-match-pos-state string) 0) 0)))
+           (multiple-value-bind (match-start match-end reg-starts reg-ends)
+               (%p-ppcre-scan scanner str start)
+             (when (and anchored-g match-start (/= match-start start))
+               (setf match-start nil))
+             (if match-start
+                 (progn
+                   (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
+                   (if (eq *wantarray* t)
+                       (let* ((num-groups (length reg-starts))
+                              (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                         (if (zerop num-groups)
+                             ;; No capture groups: Perl returns (1) in list context on success
+                             (setf (aref captures 0) 1)
+                             (dotimes (i num-groups)
+                               ;; An unmatched group is perl UNDEF.  It was
+                               ;; raw nil, which %p-flatten-list drops as
+                               ;; "empty list" — so `my ($d,$f) = $p =~
+                               ;; m{^(.*/)?(.*)}` put the FILENAME in $d and
+                               ;; undef in $f whenever the path had no slash.
+                               ;; That is the shape File::Basename::fileparse
+                               ;; uses, so dirname("c.txt") answered "c.txt".
+                               (setf (aref captures i)
+                                     (if (and (aref reg-starts i) (aref reg-ends i))
+                                         (subseq str (aref reg-starts i) (aref reg-ends i))
+                                         *p-undef*))))
+                         captures)
+                       t))
+                 ;; No match: scalar/void context returns Perl's '' (defined
+                 ;; false), not undef; list context returns the EMPTY LIST.
+                 ;; The empty list is spelled as a zero-length VECTOR, not
+                 ;; raw nil (tasks #962/#459).  Raw nil is the runtime's
+                 ;; "empty list" only to %p-flatten-list; every OTHER list
+                 ;; consumer reads it as one slot — p-array-fill preserves
+                 ;; it as an array HOLE, p-flatten-args spreads it as one
+                 ;; argument — so `f(/nomatch/, "d")' handed the callee two
+                 ;; arguments where perl hands one, and every later
+                 ;; argument shifted.  A vector is what the SUCCESS arm and
+                 ;; the /g list arm already return, so all four consumers
+                 ;; splice it to nothing with no arm of their own.
+                 (if (eq *wantarray* t) (%p-empty-list) "")))))))))
 
 (defun perl-to-ppcre-replacement (str)
   "Convert Perl-style backreferences ($1, $2, ...) to CL-PPCRE style (\\1, \\2, ...)"
@@ -31779,102 +31795,97 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; its overloaded string as perl does, never its raw print form (#119).
   (let* ((str (to-string string-box))
          (raw-replacement (p-subst-op-replacement op)))
-    (handler-case
-        ;; INSIDE the handler-case, because building the record is where the
-        ;; pattern reaches cl-ppcre: a bad pattern must warn and answer 0 here,
-        ;; exactly as it did when the scanner was built per call.  A record is
-        ;; only stored on success, so a retry re-signals rather than caching a
-        ;; half-built one.
-        (let* ((c (%p-subst-compiled op))
-               (replacement       (svref c 1))
-               (scanner           (svref c 2))
-               (eval-p            (svref c 3))
-               (global-p          (svref c 4))
-               (non-destructive-p (svref c 5))
-               (reg-names         (svref c 6))
-               (closers           (svref c 7))
-               (minend-key        (svref c 8))
-               (count 0)
-               (result nil))
-          (if eval-p
-              ;; s///e (and an interpolated replacement, which is compiled to
-              ;; the same lambda): call it per match with the match state in
-              ;; place.  cl-ppcre's NON-simple call form hands over the
-              ;; OFFSETS, which is what the match variables are made of —
-              ;; :simple-calls t gave only the matched strings, so this arm
-              ;; had its own hand-rolled $1..$9 + %+/%- block and could set
-              ;; nothing else: `$\`` / `$'` / `$+` / `$^N` / `@-` / `@+` were
-              ;; all EMPTY inside an s/// replacement (task #520), while the
-              ;; m// path beside it had been calling the shared setters all
-              ;; along.  One pair of calls now, the same two the m// path
-              ;; makes (rule 11) — and they cover $10..$20 and @{^CAPTURE}
-              ;; too, which the copy never did.
-              (let ((rep-fn (lambda (target start end match-start match-end
-                                     reg-starts reg-ends)
-                              (declare (ignore start end))
-                              (incf count)
-                              (%p-match-record target match-start match-end reg-starts reg-ends closers reg-names)
-                              (to-string (funcall raw-replacement)))))
-                (setf result
-                      (if global-p
-                          ;; /g: cl-ppcre drives the loop, so it gets a scanner
-                          ;; that advances the way perl does (task #1719).
-                          (cl-ppcre:regex-replace-all
-                           (%p-global-scanner scanner minend-key) str rep-fn)
-                          (cl-ppcre:regex-replace scanner str rep-fn))))
-              ;; Normal s///: string replacement
-              (progn
-                ;; First, set capture groups from the match
-                (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                    (cl-ppcre:scan scanner str)
-                  (when match-start
-                    (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)))
-                ;; Perform the substitution.  /g: perl's advance rule, and the
-                ;; count comes back from the scanner that did the loop instead
-                ;; of a second whole scan of the subject (task #1719).
-                (if global-p
-                    (let ((n (list 0)))
-                      (setf result (cl-ppcre:regex-replace-all
-                                    (%p-global-scanner scanner minend-key n)
-                                    str replacement))
-                      (when (stringp result) (setf count (car n))))
-                    (progn
-                      (setf result (cl-ppcre:regex-replace scanner str replacement))
-                      (when (and (stringp result) (cl-ppcre:scan scanner str))
-                        (setf count 1))))))
-          ;; /r: return modified copy, leave original unchanged
-          (if non-destructive-p
-              (make-p-box (if (stringp result) result str))
-              ;; Normal: update the boxed string in place, return count.
-              ;; ONLY on a match: perl leaves the variable untouched when
-              ;; nothing matched -- writing the (stringified) original
-              ;; back would replace a blessed object held in the variable
-              ;; with its own print form (concat2.t 3: `$path =~ s|/\z||`
-              ;; on an overloaded object must leave the object alone).
-              (progn
-                (when (and (stringp result) (plusp count))
-                  (if (p-box-p string-box)
-                      (%p-write-match-target string-box result)
-                      ;; No box to write to, and the guard above says a
-                      ;; write IS needed — which is exactly where perl
-                      ;; croaks (task #911, #873's third slot).  It used to
-                      ;; warn and carry on, so `$1 =~ s/b/z/` silently did
-                      ;; nothing where perl dies.  The `(plusp count)`
-                      ;; guard is what keeps `s/zzz/q/` (no match) legal,
-                      ;; which perl also allows — perl decides this at RUN
-                      ;; time and a compile-time refusal was tried in s460ap
-                      ;; and reverted for moving four blessed tr.t rows.
-                      (%p-readonly-modification)))
-                ;; perl returns the COUNT on a match and PL_sv_no on a miss
-                ;; -- the dualvar ("" , 0), so `print "<$n>"` shows <> and
-                ;; not <0> (task #416).  "" is false and numifies to 0, so
-                ;; every arithmetic and boolean consumer is unchanged; only
-                ;; a STRING consumer could see the difference, and there
-                ;; perl's answer is the empty string.
-                (if (plusp count) count ""))))
-      (cl-ppcre:ppcre-syntax-error (e)
-        (warn "Regex syntax error in s///: ~A" e)
-        0))))
+    ;; Building the record is where the pattern reaches cl-ppcre: a bad
+    ;; pattern DIES there (%pcl-create-scanner, task #2372 -- it used to
+    ;; warn and answer 0).  A record is only stored on success, so a retry
+    ;; re-signals rather than caching a half-built one.
+    (let* ((c (%p-subst-compiled op))
+           (replacement       (svref c 1))
+           (scanner           (svref c 2))
+           (eval-p            (svref c 3))
+           (global-p          (svref c 4))
+           (non-destructive-p (svref c 5))
+           (reg-names         (svref c 6))
+           (closers           (svref c 7))
+           (minend-key        (svref c 8))
+           (count 0)
+           (result nil))
+      (if eval-p
+          ;; s///e (and an interpolated replacement, which is compiled to
+          ;; the same lambda): call it per match with the match state in
+          ;; place.  cl-ppcre's NON-simple call form hands over the
+          ;; OFFSETS, which is what the match variables are made of —
+          ;; :simple-calls t gave only the matched strings, so this arm
+          ;; had its own hand-rolled $1..$9 + %+/%- block and could set
+          ;; nothing else: `$\`` / `$'` / `$+` / `$^N` / `@-` / `@+` were
+          ;; all EMPTY inside an s/// replacement (task #520), while the
+          ;; m// path beside it had been calling the shared setters all
+          ;; along.  One pair of calls now, the same two the m// path
+          ;; makes (rule 11) — and they cover $10..$20 and @{^CAPTURE}
+          ;; too, which the copy never did.
+          (let ((rep-fn (lambda (target start end match-start match-end
+                                 reg-starts reg-ends)
+                          (declare (ignore start end))
+                          (incf count)
+                          (%p-match-record target match-start match-end reg-starts reg-ends closers reg-names)
+                          (to-string (funcall raw-replacement)))))
+            (setf result
+                  (if global-p
+                      ;; /g: cl-ppcre drives the loop, so it gets a scanner
+                      ;; that advances the way perl does (task #1719).
+                      (cl-ppcre:regex-replace-all
+                       (%p-global-scanner scanner minend-key) str rep-fn)
+                      (cl-ppcre:regex-replace scanner str rep-fn))))
+          ;; Normal s///: string replacement
+          (progn
+            ;; First, set capture groups from the match
+            (multiple-value-bind (match-start match-end reg-starts reg-ends)
+                (cl-ppcre:scan scanner str)
+              (when match-start
+                (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)))
+            ;; Perform the substitution.  /g: perl's advance rule, and the
+            ;; count comes back from the scanner that did the loop instead
+            ;; of a second whole scan of the subject (task #1719).
+            (if global-p
+                (let ((n (list 0)))
+                  (setf result (cl-ppcre:regex-replace-all
+                                (%p-global-scanner scanner minend-key n)
+                                str replacement))
+                  (when (stringp result) (setf count (car n))))
+                (progn
+                  (setf result (cl-ppcre:regex-replace scanner str replacement))
+                  (when (and (stringp result) (cl-ppcre:scan scanner str))
+                    (setf count 1))))))
+      ;; /r: return modified copy, leave original unchanged
+      (if non-destructive-p
+          (make-p-box (if (stringp result) result str))
+          ;; Normal: update the boxed string in place, return count.
+          ;; ONLY on a match: perl leaves the variable untouched when
+          ;; nothing matched -- writing the (stringified) original
+          ;; back would replace a blessed object held in the variable
+          ;; with its own print form (concat2.t 3: `$path =~ s|/\z||`
+          ;; on an overloaded object must leave the object alone).
+          (progn
+            (when (and (stringp result) (plusp count))
+              (if (p-box-p string-box)
+                  (%p-write-match-target string-box result)
+                  ;; No box to write to, and the guard above says a
+                  ;; write IS needed — which is exactly where perl
+                  ;; croaks (task #911, #873's third slot).  It used to
+                  ;; warn and carry on, so `$1 =~ s/b/z/` silently did
+                  ;; nothing where perl dies.  The `(plusp count)`
+                  ;; guard is what keeps `s/zzz/q/` (no match) legal,
+                  ;; which perl also allows — perl decides this at RUN
+                  ;; time and a compile-time refusal was tried in s460ap
+                  ;; and reverted for moving four blessed tr.t rows.
+                  (%p-readonly-modification)))
+            ;; perl returns the COUNT on a match and PL_sv_no on a miss
+            ;; -- the dualvar ("" , 0), so `print "<$n>"` shows <> and
+            ;; not <0> (task #416).  "" is false and numifies to 0, so
+            ;; every arithmetic and boolean consumer is unchanged; only
+            ;; a STRING consumer could see the difference, and there
+            ;; perl's answer is the empty string.
+            (if (plusp count) count ""))))))
 
 (defun expand-tr-chars (str)
   "Expand character ranges in tr/// like 'a-z' to 'abcdefghijklmnopqrstuvwxyz'"
