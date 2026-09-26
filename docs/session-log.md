@@ -2,6 +2,36 @@
 
 Append new entries at the top. One section per session.
 
+## Session 498 (Fable, 2026-09-26) — s494p perf round 35 merged; CI found red on the s494g push and a fix agent launched; three agents in flight
+
+The session opened on the USER's "run 2 parallel jobs", raised minutes later to
+"run three subjobs at a time".  Two things were waiting: the s494p perf agent had
+been cut off between its gate and its bars, and the first CI run on the s494g
+signals push had never been read.  It was RED — `Pl/t/signals-01.t` rows 9–11 fail
+on the GitHub runner while the local gate and the container test pass.  The job
+log needs admin rights, so the only evidence was `tools/ci-step`'s annotation,
+which carries the step's last 40 lines: enough to name the rows (an external
+USR1 through the relay thread, an external HUP interrupting `sleep`, and SIGPIPE
+default under `| head -1`), not their diag output.  The prime suspect is task
+#2263, which s494g filed as a known blind spot: a .NET runner starts its steps
+with SIGPIPE ignored, the ignore survives exec, and SBCL's reinit overwrites the
+inherited dispositions before any PCL hook runs, so PCL puts PIPE at SIG_DFL where
+perl keeps the ignore.  The second suspect is the sbcl.org 2.6.0 binary CI
+installs versus Debian's build of the same version.  Agent s498c got both as
+cheap discriminators, plus the diagnosability fix (ci-step re-emits the failing
+rows' diag lines) so the next red run is readable.
+
+s494p was resumed by a fresh pinned Opus in its existing worktree from STOP.md
+and its commits, and reached MERGE-READY in twenty minutes.  Fable's review:
+cold gate PASS 265/8751 on the sha, the sweep on the merged tree clean at TOTAL
+18690, and 72 probe rows identical across perl, base and tree — the array
+window keeps element identity through references across a shift, the append
+licence survives self-append and shared copies, and `do {} while` still runs
+its body first.  Merged by fast-forward to `b6560c21`; not pushed, because the
+push waits for the CI fix.  s497b (strict refs, vivification, `$SIG{__DIE__}`)
+launched with its last member unblocked by s494g, and s496a (Unicode properties
+in regexes) took the slot s494p freed.
+
 ## Session 497 (Fable, 2026-09-25 late / 2026-09-26) — s494g signals MERGED (EVERYDAY 101 of 122), perf round 35 launched, two briefs ready
 
 USER: "Please continue. Start two Opus 5.5 subjobs at a time." — later "No more subjobs, will close session soon."  Main `3e8bff3e` → **`f6a2348b`** + this records commit; gen v2-1980 (runtime-only batch); gate 262/8675 → **263/8696**; sweep TOTAL 18686 → **18690**; **`EVERYDAY: 100 → 101 of 122 (82.8 %)`** (`index/proc`, the USR1 handler runs).
