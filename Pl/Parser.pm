@@ -9417,6 +9417,77 @@ sub open_layers_at {
   return ($in, $out);
 }
 
+# Every `strict 'refs'` REGION in a document, as source-location spans (task
+# #2103) — the `use open` shape above, for the same reason: the pragma is
+# LEXICAL, and a named sub's BODY is lowered before the in-stream include
+# statement is reached, so a scope-stack pragma set when the statement
+# processes would be invisible inside every sub.  A FILE-level reading (the
+# strict_subs pre-seed in Pl::Parser2) is not usable here: a file that says
+# `use strict` and then `{ no strict 'refs'; *{"..."} = ... }` — the idiom
+# every symbol-table-writing module lives on — would die in its own block.
+#
+# A region runs from the statement to the end of its ENCLOSING BLOCK (or of the
+# document).  Each carries the value it sets (1 = strict refs on, 0 = off) and
+# whether it is EXPLICIT (`use strict` / `no strict` naming refs, or bare) or
+# IMPLIED by `use VERSION` >= 5.011.  perl: "any explicit use of use strict or
+# no strict overrides use VERSION, even if it comes before it" (perlfunc use;
+# probed: `no strict "refs"; use v5.12;` leaves refs OFF).  Statements that do
+# not touch refs (`use strict 'subs'`, `no strict 'vars'`) make no region.
+#
+# Returns an ARRAY of [START, END, VALUE, EXPLICIT]; START/END are [line, col].
+sub strict_refs_regions_of {
+  my ($doc) = @_;
+  my @regions;
+  for my $stmt (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    my $loc = $stmt->location or next;
+    my $type = $stmt->type // 'use';
+    my ($val, $explicit);
+    if (($stmt->module // '') eq 'strict') {
+      my @args = map { $_->can('literal') ? $_->literal : $_->string }
+                 grep { $_->isa('PPI::Token::Quote')
+                        || $_->isa('PPI::Token::QuoteLike::Words') }
+                 $stmt->children;
+      @args = map { split ' ', (ref $_ ? join(' ', @$_) : $_) } @args;
+      next if @args && !grep { $_ eq 'refs' } @args;
+      ($val, $explicit) = ($type eq 'no' ? 0 : 1, 1);
+    }
+    elsif ($type eq 'use' && _use_version_implies_strict($stmt)) {
+      ($val, $explicit) = (1, 0);
+    }
+    else { next }
+    push @regions, [ [ $loc->[0], $loc->[1] ], _open_region_end($stmt),
+                     $val, $explicit ];
+  }
+  return \@regions;
+}
+
+# `use VERSION` with VERSION >= 5.011 (perl: "5.12.0 or greater" enables
+# strict; 5.011 is the development series that introduced it, probed).
+sub _use_version_implies_strict {
+  my ($stmt) = @_;
+  my $v = $stmt->version // '';
+  return 0 if $v eq '';
+  if ($v =~ /^v?(\d+)\.(\d+)(?:\.\d+)?$/ && $v =~ /^v|\..*\./) {   # v-string
+    return ($1 > 5 || ($1 == 5 && $2 >= 11)) ? 1 : 0;
+  }
+  (my $n = $v) =~ s/_//g;
+  return ($n =~ /^[\d.]+$/ && $n >= 5.011) ? 1 : 0;
+}
+
+# Is `strict 'refs'` in force at LOC?  The latest-starting EXPLICIT region
+# that contains LOC decides; with none, the latest `use VERSION` one does.
+sub strict_refs_at {
+  my ($regions, $loc) = @_;
+  return 0 unless $regions && @$regions && $loc;
+  my ($ex, $im);
+  for my $r (@$regions) {
+    next unless _loc_lt($r->[0], $loc) && _loc_lt($loc, $r->[1]);
+    if ($r->[3]) { $ex = $r if !$ex || _loc_lt($ex->[0], $r->[0]) }
+    else         { $im = $r if !$im || _loc_lt($im->[0], $r->[0]) }
+  }
+  return $ex ? $ex->[2] : $im ? $im->[2] : 0;
+}
+
 # Process use/require statements
 sub _process_include_statement {
 

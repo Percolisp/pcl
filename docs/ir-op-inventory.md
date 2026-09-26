@@ -199,8 +199,8 @@ ir-spec §10 row **elements** — reads unbox scalars, keep reference boxes (§2
 | `p-aref` | function | `(arr idx)` | insensitive | num | none | yes | no | no | none |
 | `p-aref-argbox` | function | `(arr idx)` | — | — | — | — | — | — | — |
 | `p-aref-box` | function | `(arr idx)` | insensitive | num | none | yes | no | no | none |
-| `p-aref-deref` | function | `(ref idx)` | — | — | — | — | — | — | — |
-| `p-aref-deref-box` | function | `(ref idx)` | — | — | — | — | — | — | — |
+| `p-aref-deref` | function | `(ref idx &optional site)` | — | — | — | — | — | — | — |
+| `p-aref-deref-box` | function | `(ref idx &optional site)` | — | — | — | — | — | — | — |
 | `p-aslice` | function | `(arr &rest indices)` | insensitive | num | none | yes | no | no | none |
 | `p-delete` | function | `(hash key)` | insensitive | str | none | yes | no | no | none |
 | `p-delete-array` | function | `(arr idx)` | insensitive | num | none | yes | no | no | none |
@@ -211,8 +211,8 @@ ir-spec §10 row **elements** — reads unbox scalars, keep reference boxes (§2
 | `p-gethash` | function | `(hash key)` | insensitive | str | none | yes | no | no | none |
 | `p-gethash-argbox` | function | `(hash key)` | — | — | — | — | — | — | — |
 | `p-gethash-box` | function | `(hash key)` | insensitive | str | none | yes | no | no | none |
-| `p-gethash-deref` | function | `(ref key)` | — | — | — | — | — | — | — |
-| `p-gethash-deref-box` | function | `(ref key)` | — | — | — | — | — | — | — |
+| `p-gethash-deref` | function | `(ref key &optional site)` | — | — | — | — | — | — | — |
+| `p-gethash-deref-box` | function | `(ref key &optional site)` | — | — | — | — | — | — | — |
 | `p-hslice` | function | `(hash &rest keys)` | insensitive | str | none | yes | no | no | none |
 | `p-kv-aslice` | function | `(arr &rest indices)` | insensitive | num | none | yes | no | no | none |
 | `p-kv-hslice` | function | `(hash &rest keys)` | insensitive | str | none | yes | no | no | none |

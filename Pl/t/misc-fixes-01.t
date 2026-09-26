@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 133;
+plan tests => 134;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -929,11 +929,29 @@ test_cl('keys %{"Pkg::"} includes child namespaces (orig-case)',
 # only doing the @ISA check (p-isa), so unblessed refs and blessed-vs-reftype
 # came back false. Fix is in UNIVERSAL::pl-isa, so the method form $obj->isa
 # (which dispatches there) gets it too.
+# TODO since s497b: this row PASSED ON A BUG.  `my $a` does not survive the
+# top-level `package D; … package main;` switch — PCL reads the package $a
+# (#2401) — and ref() of that undef global answered ARRAY (`(listp nil)`, the
+# p-ref arm #2341 fixed), so isa($a,"ARRAY") was 1 by accident.  The assertion
+# is unchanged; it passes again when #2401 closes.
+TODO: {
+  local $TODO = '#2401: a file-level `my $a` is lost across a top-level package switch';
 test_cl('UNIVERSAL::isa reftype special case (function + @ISA + non-ref)',
     'my $a=[1]; package D; sub new { bless {}, shift } package main;'
     . ' my $d=D->new;'
     . ' print join("", map { $_ ? 1 : 0 }'
     . '   UNIVERSAL::isa($a,"ARRAY"), UNIVERSAL::isa($a,"HASH"),'
+    . '   UNIVERSAL::isa($d,"HASH"),  UNIVERSAL::isa($d,"D"),'
+    . '   UNIVERSAL::isa("x","ARRAY")), "\n";',
+    "10110\n");
+}
+# The same isa row with a lexical name that DOES survive the switch — the
+# reftype special case itself, guarded while #2401 is open.
+test_cl('UNIVERSAL::isa reftype special case (lexical not named $a)',
+    'my $ar=[1]; package D; sub new { bless {}, shift } package main;'
+    . ' my $d=D->new;'
+    . ' print join("", map { $_ ? 1 : 0 }'
+    . '   UNIVERSAL::isa($ar,"ARRAY"), UNIVERSAL::isa($ar,"HASH"),'
     . '   UNIVERSAL::isa($d,"HASH"),  UNIVERSAL::isa($d,"D"),'
     . '   UNIVERSAL::isa("x","ARRAY")), "\n";',
     "10110\n");

@@ -163,6 +163,19 @@ sub _scan_eval_site_features {
   return \%by_stmt;
 }
 
+# #2103: publish whether `strict 'refs'` is in force at STMT, for the deref
+# sites ExprToCL cannot place by their own token (a fragment re-parse — an
+# interpolated string — has no location in this document).  Set on every
+# statement, like _eval_site_features, so a site only ever sees its OWN
+# statement's answer.
+sub _publish_strict_refs {
+  my ($self, $stmt) = @_;
+  my $lh  = $self->fallback_parser->lex_home;
+  my $loc = (ref $stmt && $stmt->can('location')) ? $stmt->location : undef;
+  $lh->{_strict_refs_stmt} =
+    Pl::Parser::strict_refs_at($lh->{_strict_refs_regions}, $loc);
+}
+
 sub parse_file { my ($class, $fn, %opts) = @_; return $class->new(filename => $fn)->parse }
 sub parse_code {
   my ($class, $code, %opts) = @_;
@@ -845,6 +858,9 @@ sub _seg_is_pkg_switch {
 # and no qualifying `no strict` does (a file that mixes both keeps today's
 # lenient default, exactly what its no-strict regions require).  The
 # in-stream statement fallbacks still re-set the flag at their positions.
+# `strict 'refs'` is deliberately NOT pre-seeded here: a file-level reading
+# would make every `{ no strict 'refs'; *{"..."} = ... }` block die — it is
+# read per SITE from Pl::Parser::strict_refs_regions_of instead (#2103).
 sub _premerge_strict_pragma {
   my ($self, $doc) = @_;
   my ($use_strict, $no_strict);
@@ -1422,6 +1438,16 @@ sub parse {
   # lex_home, which is how _eval_site_features already reaches ExprToCL.
   $self->fallback_parser->lex_home->{_open_regions} =
     Pl::Parser::open_regions_of($doc);
+
+  # `strict 'refs'`, as source-location spans, by the same clock and through
+  # the same seam (task #2103): ExprToCL asks it at each dereference site.
+  # The DOCUMENT is published beside it so a site can tell a token of THIS
+  # document from a fragment re-parse's (an interpolated string), whose
+  # locations are the fragment's own — such a site asks the statement answer
+  # published per statement below.
+  $self->fallback_parser->lex_home->{_strict_refs_regions} =
+    Pl::Parser::strict_refs_regions_of($doc);
+  $self->fallback_parser->lex_home->{_strict_refs_doc} = refaddr($doc);
 
   # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort
   # comparator counts: "Can't goto out of a pseudo block") — when no such
@@ -9013,6 +9039,7 @@ sub _lower_block_1 {
   # can only ever see its OWN site's answer.
   $self->fallback_parser->lex_home->{_eval_site_features} =
     $self->{_eval_features_by_stmt}{ refaddr $first };
+  $self->_publish_strict_refs($first);        # #2103, same clock
 
   # #1140: publish THIS region's VarAnnotator verdicts for _lower_expr to hand
   # ExprToCL (the Kind-A `local-push` rule reads the ARRAY entries).  Same two
@@ -9094,7 +9121,7 @@ sub _lower_block_1 {
         }
         my $init_end = defined $lp ? $lp - 1 : $#sk;
         my $assign = $name =~ /^\$/
-          ? ['box-set', $cl, $self->_lower_expr([@sk[3 .. $init_end]], $first)]
+          ? ['box-set', $cl, $self->_lower_expr([@sk[3 .. $init_end]], $first, undef, 1)]
           : $self->_lower_expr([@sk[1 .. $#sk]], $first);
         push @forms, ['unless', $flag, $assign, ['setf', $flag, 't']];
         if (defined $tail_op) {
@@ -9207,7 +9234,7 @@ sub _lower_block_1 {
               ($lowprec_run
                 ? ($self->_lower_expr($lowprec_run, $first, ':void'))
                 : defined $init
-                  ? (['p-scalar-=', cl_sym($name), $self->_lower_expr($init, $first)]) : ()),
+                  ? (['p-scalar-=', cl_sym($name), $self->_lower_expr($init, $first, undef, 1)]) : ()),
               @reg,
               $self->_lower_block(\@rest, $vi, $tail_ctx),
               ($decl_tail ? (cl_sym($name)) : ()));
@@ -9224,7 +9251,7 @@ sub _lower_block_1 {
               ($lowprec_run
                 ? ($self->_lower_expr($lowprec_run, $first, ':void'))
                 : defined $init
-                  ? (['p-my-=', cl_sym($name), $self->_lower_expr($init, $first)]) : ()),
+                  ? (['p-my-=', cl_sym($name), $self->_lower_expr($init, $first, undef, 1)]) : ()),
               $self->_lower_block(\@rest, $vi2, $tail_ctx));
     }
     if ($name) {
@@ -9253,7 +9280,7 @@ sub _lower_block_1 {
       my $self_init;
       if (defined $init && !$imod
           && join('', map { $_->content } @$init) =~ /\Q$name\E\b/) {
-        $self_init = ['p-box-init', $self->_lower_expr($init, $first)];
+        $self_init = ['p-box-init', $self->_lower_expr($init, $first, undef, 1)];
       }
       # #298: a self-referential init whose only depth-0 low-prec token is a
       # LIST-OPERATOR argument separator (`my $c = bless $c, "C3"`) has no
@@ -9291,7 +9318,7 @@ sub _lower_block_1 {
       # A conditional init MUST keep $c boxed (the assignment writes through the
       # box; a false cond leaves it undef) — never the unboxable raw-slot path.
       if (!$imod && $vi->{$name} && $vi->{$name}{unboxable}) {
-        my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
+        my $initform = defined $init ? $self->_lower_expr($init, $first, undef, 1) : '(p-undef)';
         $initform = _wrap_freeze($vi->{$name}, $name, $initform);
         return (@declmod_eval,
                 _decl_let([_decl_entry($name, _slot_class($vi->{$name}), $initform, $vi)],
@@ -9305,7 +9332,7 @@ sub _lower_block_1 {
       }
       my @assign;
       if (defined $init) {
-        my $set = ['p-my-=', cl_sym($name), $self->_lower_expr($init, $first)];
+        my $set = ['p-my-=', cl_sym($name), $self->_lower_expr($init, $first, undef, 1)];
         # `my $x = INIT if COND` — the FOURTH site that applies a statement
         # modifier, and it used to spell the `p-if` itself.  Routed through
         # _apply_modifier so the untaken-value rule reaches it too (#920:
@@ -10111,6 +10138,7 @@ sub _lower_stmt {
   # reach here on their own (a compound's parts, a for-head's init/step).
   $self->fallback_parser->lex_home->{_eval_site_features} =
     $self->{_eval_features_by_stmt}{ refaddr $stmt };
+  $self->_publish_strict_refs($stmt);         # #2103, same clock
   local $self->{_cur_vi} = $vi;      # #1140, same pairing (see _lower_block)
 
   # `class NAME ;` in a file that has actually switched the feature on: the
@@ -10201,7 +10229,7 @@ sub _lower_stmt {
                      && $self->{_body_tail_stmt} == refaddr($stmt)) ? 1 : 0;
       if ($tail_ok && Pl::Passes::enabled('tail-return')) {
         my $tform = @$expr
-          ? ['p-tail-value', $self->_lower_expr($expr, $stmt, 'inherit')]
+          ? ['p-tail-value', $self->_lower_expr($expr, $stmt, 'inherit', 1)]
           : ['p-return-empty'];
         return Pl::Passes::fact('tail-return', 1,
           $self->environment->wa_void_active
@@ -10214,7 +10242,7 @@ sub _lower_stmt {
       # (p-undef))` would wrongly yield a 1-element list in list context
       # (v1 emits the bare `(p-return)` — sub.t check_ret(-1) list).
       my $form = @$expr
-        ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit')]
+        ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit', 1)]
         : ['p-return'];
       $form = Pl::Passes::fact('tail-return', $tail_ok, $form);
       return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
@@ -10263,7 +10291,7 @@ sub _lower_stmt {
     # this site's lowering order is unchanged; the shape itself is
     # _modifier_ret_form, shared with _apply_modifier (task #920).
     my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
-    my $condform = $self->_lower_expr($cond, $stmt);
+    my $condform = $self->_lower_expr($cond, $stmt, undef, 1);
     return $self->_restore_caller_wa($tail_ctx,
            _modifier_ret_form($mod, $ret, $condform,
                               $self->_lower_expr($expr, $stmt, $tail_ctx)));
@@ -10289,10 +10317,10 @@ sub _lower_stmt {
     my $rhs = [@$expr[2 .. $#$expr]];
     if ($vi->{$name} && $vi->{$name}{unboxable}) {
       return ['setf', $name,
-              _wrap_freeze($vi->{$name}, $name, $self->_lower_expr($rhs, $stmt))];
+              _wrap_freeze($vi->{$name}, $name, $self->_lower_expr($rhs, $stmt, undef, 1))];
     }
     if ($self->{_let_bound_vars}{$name}) {
-      return ['p-my-=', cl_sym($name), $self->_lower_expr($rhs, $stmt)];
+      return ['p-my-=', cl_sym($name), $self->_lower_expr($rhs, $stmt, undef, 1)];
     }
   }
 
@@ -10610,7 +10638,7 @@ sub _lower_compound {
       my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
       my $chain = 'nil';
       for my $c (reverse @clauses) {
-        my $test = ['setf', $ret, $self->_lower_expr([_cond_parts($c->{cond})], $stmt)];
+        my $test = ['setf', $ret, $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1)];
         $test = ['p-!', $test] if $c->{kw} eq 'unless';
         $chain = ['p-if', $test,
                   ['setf', $ret, ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)]],
@@ -10628,7 +10656,7 @@ sub _lower_compound {
         $form = ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)];
       }
       while (my $c = pop @clauses) {
-        my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt);
+        my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1);
         $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
         $form = ['p-if', $cond,
                  ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)],
@@ -10669,7 +10697,7 @@ sub _lower_compound {
     # with it: HTTP::Tiny's `_do_timeout` writer loop is one such statement and
     # cost the dist 31 of its 32 test files (#1607's measurement, s481b).
     my @cond_parts = _cond_parts($cond_s);
-    my $cond = @cond_parts ? $self->_lower_expr(\@cond_parts, $stmt) : 't';
+    my $cond = @cond_parts ? $self->_lower_expr(\@cond_parts, $stmt, undef, 1) : 't';
     # Perl loop conditions whose value comes from each/readline/readdir/glob
     # terminate on *undef*, not false-but-defined ("0" line, each's index 0),
     # and a bare `<FH>` implicitly assigns to $_ — v1's _auto_defined_cond,
@@ -10741,7 +10769,7 @@ sub _lower_compound {
       my $initform = ['list', $self->_lower_expr([_strip_semi($init_s->schildren)], $stmt)];
       my $cond = $cond_s
         ? ['list', $self->_auto_defined_raw(
-                     $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt))]
+                     $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt, undef, 1))]
         : ['list', 't'];
       my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
       my @body = $self->_lower_scope([$block->schildren], $vi);
@@ -10813,7 +10841,7 @@ sub _lower_compound {
     }
     my $cond = $cond_s
       ? ['list', $self->_auto_defined_raw(
-                   $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt))]
+                   $self->_lower_expr([_strip_semi($cond_s->schildren)], $stmt, undef, 1))]
       : ['list', 't'];
     my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
     my @body = $self->_lower_scope([$block->schildren], $vi);
@@ -11861,7 +11889,7 @@ sub _embed_hook {
 # the token snapshot/restore around it, the string context encoding and the
 # native/fallback census went with it.
 sub _lower_expr {
-  my ($self, $parts, $stmt, $ctx) = @_;
+  my ($self, $parts, $stmt, $ctx, $rvalue) = @_;
   my @parts = _strip_semi(@$parts);
   die "Parser2: empty expression" unless @parts;
   $self->_seam_note_expr(\@parts) if _seam_census();
@@ -11888,6 +11916,11 @@ sub _lower_expr {
     # The embedded-block hook is live for this whole parse: every block
     # PExpr meets is answered by lower_embedded_block.
     local $p->{_v2_embed} = $self->_embed_hook;
+    # #2103: whether the expression's ROOT is an rvalue (a scalar initialiser,
+    # an assignment RHS, a condition) — ExprToCL::_deref_is_rvalue asks it for
+    # a dereference that IS the root.  Set on every lowering (0 by default), so
+    # an embedded block's own expressions never inherit their host's answer.
+    local $p->lex_home->{_deref_rvalue_root} = $rvalue ? 1 : 0;
     # E2.final root flip: the form entry (gen_node_form) — the tree's raw
     # residue is only the genuinely-declining subtrees.  The two facts are
     # what the Kind-A rules in ExprToCL read.
@@ -12508,7 +12541,7 @@ sub _modifier_ret_form {
 sub _apply_modifier {
   my ($form, $mod, $cond, $self, $stmt, $tail_ctx) = @_;
   return $form unless $mod;
-  my $condform = $self->_lower_expr($cond, $stmt);
+  my $condform = $self->_lower_expr($cond, $stmt, undef, 1);
   # TAIL position: the statement's value is the block's, so an untaken
   # modifier must yield the CONDITION (see _modifier_ret_form).  Anywhere else
   # the value is discarded and the plain `p-if` is what it has always been —

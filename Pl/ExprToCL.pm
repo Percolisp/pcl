@@ -1854,7 +1854,15 @@ sub gen_string_concat {
 sub gen_array_str_interp {
   my ($self, $node, $node_id, $kids) = @_;
   return '""' unless @$kids;
-  return ['p-join', '|$"|', _cast_form('p-cast-@', $self->gen_node_form($kids->[0]))];
+  # #2103: an interpolation is an RVALUE deref; under strict refs `"@$u"`
+  # dies on undef.  `"@{[ … ]}"` builds a fresh array, never undef — unmarked.
+  my $k = $self->expr_o->get_a_node($kids->[0]);
+  my $strict = ($self->expr_o->is_internal_node_type($k)
+                && ($k->{type} // '') eq 'arr_init') ? undef
+             : $self->_strict_refs_here(ref($k) && !$self->expr_o->is_internal_node_type($k) ? $k : undef)
+               ? ':strict' : ':rvalue';
+  return ['p-join', '|$"|',
+          _cast_form('p-cast-@', $self->gen_node_form($kids->[0]), $strict)];
 }
 
 
@@ -3583,7 +3591,10 @@ sub gen_prefix_op_form {
   }
   # Sigil cast operators (dereference).
   if ($op eq '@' || $op eq '%' || $op eq '$') {
-    return _cast_form("p-cast-$op", $operand);
+    # #2103: the strict-refs marker, placed by the Cast token itself.
+    return _cast_form("p-cast-$op", $operand,
+      $self->_strict_deref_marker($node_id,
+                                  $self->expr_o->get_a_node($kids->[0])));
   }
   # & Cast: &{expr} / &$var with no argument list — a CALL with the current
   # @_ (the coderef-mention parents intercept before this, as in the text
@@ -3714,6 +3725,158 @@ sub gen_array_access_form {
 my %PCL_EXPORTED_GLOBALS = map { $_ => 1 }
   qw($_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %ENV %INC %SIG);
 
+# ── strict refs at a dereference site (task #2103; docs/ir-spec.md §3.2c) ────
+# `use strict 'refs'` is LEXICAL, so the question is asked per SITE: the
+# regions come from Pl::Parser::strict_refs_regions_of (a source-location
+# pre-pass Parser2 publishes before any lowering, the `use open` shape).  A
+# token of THIS document is placed by its own location; a token of a fragment
+# re-parse (an interpolated string) has the fragment's locations, so it takes
+# the answer Parser2 published for the statement being lowered.
+sub _strict_refs_here {
+  my ($self, $tok) = @_;
+  my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
+                && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+  return 0 unless $parser;
+  my $lh = $parser->lex_home;
+  my $regions = $lh->{_strict_refs_regions};
+  return 0 unless $regions && @$regions;
+  if (Scalar::Util::blessed($tok) && $tok->can('top') && $tok->can('location')) {
+    my $top = $tok->top;
+    if ($top && Scalar::Util::refaddr($top) == ($lh->{_strict_refs_doc} // -1)) {
+      my $loc = $tok->location;
+      return Pl::Parser::strict_refs_at($regions, $loc) if $loc;
+    }
+  }
+  return $lh->{_strict_refs_stmt} ? 1 : 0;
+}
+
+# The PARENT of each node of the current expression tree, built once per tree
+# (the tree has child links only).  A node the map does not know — one added
+# after the build — answers "unknown", which every caller reads as "not an
+# rvalue": the safe direction (no marker, today's behaviour).
+sub _expr_parent {
+  my ($self, $id) = @_;
+  my $xo = $self->expr_o;
+  my $root = $xo->root;
+  my $key = Scalar::Util::refaddr($xo) . ":$root";
+  if (($self->{_pmap_key} // '') ne $key) {
+    my %p;
+    my @work = ($root);
+    while (defined(my $n = pop @work)) {
+      for my $k (@{ $xo->get_node_children($n) || [] }) {
+        next if !defined $k || exists $p{$k};
+        $p{$k} = $n;
+        push @work, $k;
+      }
+    }
+    $self->{_pmap} = \%p;
+    $self->{_pmap_key} = $key;
+  }
+  return $self->{_pmap}{$id};
+}
+
+# The builtins whose operands perl evaluates as plain RVALUES — a deref of
+# undef there is "Can't use an undefined value" under strict refs (probed,
+# 5.40.3, scratch s497b p-rv.pl).  Deliberately a WHITELIST: a builtin that is
+# not here keeps the vivifying/unmarked form, so a miss can only fail to die
+# where perl dies (today's behaviour), never die where perl lives.  The
+# vivifying ones (push unshift splice pop shift keys values each map grep
+# defined exists delete, and every user sub / method: their arguments are
+# lvalues) are exactly the ones absent.
+my %RVALUE_DEREF_FN = map { $_ => 1 }
+  qw(join sort reverse scalar print say printf sprintf die warn);
+my %COMPOUND_ASSIGN_OP = map { $_ => 1 }
+  Pl::PExpr::TokenUtils::compound_assign_ops();          # #140: the one set
+
+# Is the dereference at node ID in an RVALUE position?  Walks up through the
+# value-transparent wrappers (parens, comma lists, a ternary's branches,
+# unary +) to the first node that decides.  At the ROOT the caller decides:
+# Parser2 sets `_deref_rvalue_root` around the lowerings whose whole
+# expression is an rvalue (a scalar initialiser / assignment RHS, a
+# condition).  ONE answer for every deref spelling that asks.
+sub _deref_is_rvalue {
+  my ($self, $id) = @_;
+  my $xo = $self->expr_o;
+  while (1) {
+    my $pid = $self->_expr_parent($id);
+    if (!defined $pid) {
+      return 0 if $id != $xo->root;              # unknown node: unmarked
+      my $parser = ($xo->can('has_parser') && $xo->has_parser)
+                   ? $xo->parser : undef;
+      return ($parser && $parser->lex_home->{_deref_rvalue_root}) ? 1 : 0;
+    }
+    my $p     = $xo->get_a_node($pid);
+    my $pkids = $xo->get_node_children($pid) || [];
+    my ($idx) = grep { $pkids->[$_] == $id } 0 .. $#$pkids;
+    if ($xo->is_internal_node_type($p)) {
+      my $t = $p->{type} // '';
+      if ($t eq 'tree_val' || $t eq 'progn') { $id = $pid; next }
+      if ($t eq 'ternary') {
+        return 1 if ($idx // -1) == 0;           # the condition
+        $id = $pid; next;                        # a branch: its value passes on
+      }
+      return 1 if $t eq 'string_concat' || $t eq 'array_str_interp'
+               || $t eq 'arr_init' || $t eq 'hash_init';
+      if ($t eq 'prefix_op') {
+        my $op = $xo->get_a_node($pkids->[0]);
+        my $c  = ref($op) ? ($op->content // '') : '';
+        return 1 if $c eq '!' || $c eq 'not' || $c eq '-' || $c eq '~';
+        if ($c eq '+') { $id = $pid; next }
+        return 0;
+      }
+      if ($t eq 'funcall') {
+        my $f = $xo->get_a_node($pkids->[0]);
+        my $name = ref($f) eq 'PPI::Token::Word' ? $f->content : '';
+        return $RVALUE_DEREF_FN{$name} ? 1 : 0;
+      }
+      return 0;
+    }
+    if (ref($p) eq 'PPI::Token::Operator') {
+      my $op = $p->content // '';
+      return 0 if ($op eq '=' || $COMPOUND_ASSIGN_OP{$op})
+               && ($idx // -1) == 0;             # an assignment TARGET
+      return 0 if $op eq '=~' || $op eq '!~';
+      return 1;
+    }
+    return 0;
+  }
+}
+
+# The deref-site marker for a dereference at node ID (whose own token, for
+# placing it, is TOK): under strict refs :strict for an rvalue site and
+# :strict-lv for every other (a vivifying position still dies on a string);
+# outside strict refs :rvalue for an rvalue site — perl reads the symbolic
+# `@{""}` there and VIVIFIES NOTHING — and undef (unmarked) for the rest.
+sub _strict_deref_marker {
+  my ($self, $id, $tok) = @_;
+  my $rv = $self->_deref_is_rvalue($id);
+  return $self->_strict_refs_here($tok) ? ($rv ? ':strict' : ':strict-lv')
+       : $rv                           ? ':rvalue'
+       :                                  undef;
+}
+
+# The strict-refs marker of an ELEMENT READ `$r->[i]` / `$r->{k}` (#2103) —
+# as a LIST, empty outside strict refs and on the lvalue `-box` accessors
+# (the write path is not marked: `$str->{k} = 1` under strict is a residue,
+# task #2403).  An element read vivifies an undef BOX in perl with or without
+# strict, so the one marker `:strict` means here: a string or a number dies,
+# and so does a raw undef (`f()->[0]` when f returns undef).
+sub _strict_elem_marker {
+  my ($self, $func, $kids) = @_;
+  return () if $func =~ /-box$/;
+  my $xo = $self->expr_o;
+  my $id = $kids->[0];
+  my $n  = $xo->get_a_node($id);
+  while ($xo->is_internal_node_type($n)) {          # the base's first token
+    my $k = $xo->get_node_children($id) || [];
+    last unless @$k;
+    $id = $k->[0];
+    $n  = $xo->get_a_node($id);
+  }
+  my $tok = $xo->is_internal_node_type($n) ? undef : $n;
+  return $self->_strict_refs_here($tok) ? (':strict') : ();
+}
+
 # ── The Kind-A `symref-const` emission (task #1180) ──────────────────────────
 # ONE builder for every `(p-cast-$ …)` / `(p-cast-@ …)` / `(p-cast-% …)` form
 # (rule 11: five emitters used to spell the two-element list themselves, and a
@@ -3735,7 +3898,15 @@ my %PCL_EXPORTED_GLOBALS = map { $_ => 1 }
 # NON-constant operand — `${"${pkg}::x"}` — keeps today's generic path, which
 # is what #812's name memo is for.
 sub _cast_form {
-  my ($head, $operand) = @_;
+  my ($head, $operand, $strict) = @_;
+  # #2103: a deref-site marker takes the site slot.  A STRICT one never needs
+  # the symref cache — under strict refs a name there is perl's fatal, not a
+  # lookup.  The no-strict `:rvalue` one is about UNDEF, which a literal name
+  # can never be, so a literal keeps its cache and drops the marker.
+  $strict = undef
+    if ($strict // '') eq ':rvalue'
+    && !ref($operand) && $operand =~ /\A"/;
+  return [$head, $operand, $strict] if $strict;
   # THE FACT (a compile-time literal name with no escape) is computed BEFORE
   # the switch is consulted, so `--facts` can print the licence even with the
   # emission turned off by PCL_OPT (task #1213).
@@ -4102,7 +4273,7 @@ sub gen_array_ref_access_form {
     if !$paren_scalar_base;
   my $idx = $self->gen_node_form($kids->[1]);
   my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
-  my $form = [$func, $ref, $idx];
+  my $form = [$func, $ref, $idx, $self->_strict_elem_marker($func, $kids)];
   # A LIST SLICE IN SCALAR CONTEXT YIELDS ITS LAST SELECTED ELEMENT (perl's
   # comma-operator rule): `$foo = ('a'..'f')[0,2,4]` is 'e', not the count.
   # The index list is a LIST (task #2004 annotates it so, which is what makes
@@ -4134,7 +4305,7 @@ sub gen_hash_ref_access_form {
     if !$paren_scalar_base;
   my $key = $self->_hash_key_form($kids->[1]);
   my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
-  return [$func, $ref, $key];
+  return [$func, $ref, $key, $self->_strict_elem_marker($func, $kids)];
 }
 
 # The index/key operands of a slice node — children 1.. of $kids, each put in

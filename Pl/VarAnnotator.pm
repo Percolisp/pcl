@@ -58,6 +58,20 @@ package Pl::VarAnnotator;
 #                              the text scan never covered)
 #       handle-viv-arg   open/opendir/sysopen/pipe/socket/socketpair/accept (D26)
 #       foreach-alias    foreach loop variable (my and plain)
+#       deref-of-unwritten  (a VERDICT reason, not a walk event — #2341) the
+#                        name is the BASE of a dereference (`@$x`, `%$x`,
+#                        `$$x`, `$#$x`, `$x->[`/`->{`, `@$x[…]`, "@$x") and
+#                        is NEVER WRITTEN in the region.  Such a slot can
+#                        hold nothing but undef at the deref, which is
+#                        exactly a vivification TARGET — and a raw slot has
+#                        no place to vivify into (`my $u; push @$u, 1`
+#                        died).  Boxing it costs nothing: its first deref
+#                        makes it a reference, i.e. a box, anyway.  The
+#                        walk records the fact in `deref_base`; the verdict
+#                        turns it into this reason only when _name_touched
+#                        says there is no write of any kind (a WRITTEN
+#                        scalar keeps its verdict — the s473b trap: boxing
+#                        every chain root cost Text::CSV_PP +97 %).
 #     Region facts (not per-event): string-eval reachability = an `eval` WORD
 #     token (comments/string innards no longer false-fire — the flagship win);
 #     nested-sub capture = $names inside anon-sub blocks, from Symbol tokens
@@ -559,6 +573,8 @@ sub _analyze_tree {
     _tw_region_facts($ctx, $stmt);
   }
   _tw_stmts($ctx, \@stmts);
+  # #2341: text the tree walk never parsed still names deref bases
+  _text_deref_bases($ctx, $_) for @{ $ctx->{fallback_texts} // [] };
 
   my %vi;
   # Kind-A gates (Pl::Passes; PCL_OPT): 'raw-numeric' is the B-regime freeze
@@ -604,6 +620,13 @@ sub _analyze_tree {
     push @reasons, sort keys %{ $ctx->{ev}{$name} // {} };
     push @reasons, map { "fallback:$_" }
       map { _text_gate_tags($name, $_, 1) } @{ $ctx->{fallback_texts} };
+    # #2341: a NEVER-WRITTEN name that is dereferenced is a vivification
+    # target and needs a place — see `deref-of-unwritten` in the legend.  A
+    # loop variable is not a `my $x;` declaration (its slot is the loop's).
+    push @reasons, 'deref-of-unwritten'
+      if $ctx->{deref_base}{$name} && !$fe_only{$name}
+      && !$ctx->{foreach_my_alias}{$name} && !$ctx->{foreach_var}{$name}
+      && !_name_touched($ctx, $name);
 
     # B-regime (scan-licensed freeze verdicts, docs/raw-numeric-verdict.md):
     # when the ONLY thing keeping $name boxed is an unproven write shape
@@ -863,6 +886,31 @@ sub _ev {
   $ctx->{ev}{$name}{$event}++;
 }
 
+# #2341: record that plain `$name` is the BASE of a dereference.  NOT an
+# event (an event is a boxing reason by itself); the verdict loop reads it
+# together with _name_touched — see `deref-of-unwritten` in the legend.
+sub _deref_base {
+  my ($ctx, $name) = @_;
+  return unless defined $name && $name =~ /^\$\w+$/;
+  $ctx->{deref_base}{$name}++;
+}
+
+# The same fact read off SOURCE TEXT, for the places the tree walk does not
+# reach: a nested anon sub's body, a parse-failure fallback text, a regex /
+# heredoc / backtick leaf.  Text-shaped and therefore over-firing, which is
+# the safe direction here: the fact can only box a name that has NO write,
+# and such a slot holds undef whichever way it is stored.
+sub _text_deref_bases {
+  my ($ctx, $text) = @_;
+  return unless defined $text;
+  _deref_base($ctx, '$' . $1)
+    while $text =~ /\$(\w+)\s*->\s*[\[\{\@\%\$]/g;
+  _deref_base($ctx, '$' . $1)
+    while $text =~ /(?:[\@\%]|\$\#?)\$(\w+)/g;
+  _deref_base($ctx, '$' . $1)
+    while $text =~ /(?:[\@\%]|\$\#?)\{\s*\$(\w+)\s*\}/g;
+}
+
 # Is a foreach LIST exactly one range expression `A..B` / `A...B`?  Takes the
 # TOP-LEVEL PPI token list (structures like parens are single nested elements,
 # so scanning the list IS the depth-0 scan).  Returns ([FROM tokens], [TO
@@ -990,6 +1038,7 @@ sub _tw_region_facts {
       }
     }
     next unless %cap;
+    _text_deref_bases($ctx, $b->content);                       # #2341
     my $body = $capture_needs_event ? $b->content : undef;
     for my $n (keys %cap) {
       $ctx->{nested_sub}{$n} += $cap{$n};
@@ -1481,6 +1530,15 @@ sub _tw_walk {
         _tw_walk($ctx, $xo, $kids->[$ex_i], 0, undef, 1);
         return;
       }
+      if ($opc =~ /^(?:[\@\%\$]|\$\#)$/
+          && ref($op) && $op->isa('PPI::Token::Cast')) {
+        # `@$x` / `%$x` / `$$x` / `$#$x` (and their `@{$x}` / `->@*`
+        # spellings, which parse to the same node): $x is a deref base (#2341)
+        my $ex  = $xo->get_a_node($kids->[$ex_i]);
+        my $exk = $xo->get_node_children($kids->[$ex_i]) || [];
+        _deref_base($ctx, $ex->content)
+          if ref($ex) eq 'PPI::Token::Symbol' && !@$exk;
+      }
       if ($opc eq '\\') {
         # \$h{$k} refs the ELEMENT — the key is a read (#995); every other
         # operand shape still marks the WHOLE subtree, which is what covers
@@ -1533,6 +1591,17 @@ sub _tw_walk {
                ($xo->is_internal_node_type($xo->get_a_node($kids->[0])) // '') }) {
         _tw_mark_lvalue($ctx, $xo, $kids->[0], 'write-deref-viv', 1);
       }
+      # #2341: a plain `$x` base of a REF access (`$x->[0]`, `$$x{k}`) or of
+      # a slice (`@$x[…]`, `@{$x}{…}`, `%$x{…}` — a slice of the container
+      # itself has an `@`/`%` base) is dereferenced.  The deref-chain root is
+      # known HERE, which is why the fact is recorded here and not in the
+      # lvalue marker's read-vivify mode (that mode must stay scalar-blind).
+      if (@$kids && ($t =~ /_ref_acc$/ || $t =~ /slice/)) {
+        my $b = $xo->get_a_node($kids->[0]);
+        _deref_base($ctx, $b->content)
+          if ref($b) eq 'PPI::Token::Symbol'
+          && !@{ $xo->get_node_children($kids->[0]) || [] };
+      }
       _tw_walk($ctx, $xo, $kids->[0], 0, undef, 1) if @$kids;
       my $key_uctx = $ACCESS_NODE{$t};
       _tw_walk($ctx, $xo, $_, 0, $key_uctx, 1) for @$kids[1 .. $#$kids];
@@ -1553,6 +1622,13 @@ sub _tw_walk {
     # they are given, so an array in one is a read.  Every other type here
     # hands the array to code this walk cannot see (a method's @_, a
     # closure, a code-ref call) — the default, which escapes.
+    # #2341: `"@$x"` / `"@{$x}"` interpolate a dereference of $x
+    if ($t eq 'array_str_interp' && @$kids == 1) {
+      my $b = $xo->get_a_node($kids->[0]);
+      _deref_base($ctx, $b->content)
+        if ref($b) eq 'PPI::Token::Symbol'
+        && !@{ $xo->get_node_children($kids->[0]) || [] };
+    }
     my $kid_aread = $ARR_TRANSPARENT{$t} ? $aread : $ARR_COPYING{$t} ? 1 : 0;
     _tw_walk($ctx, $xo, $_, 0, undef, $kid_aread) for @$kids;
     return;
@@ -1735,6 +1811,7 @@ sub _tw_scan_quote_leaf {
     $i++;
   }
   pos($c) = undef;        # the /g loops below must start at 0, not at my pos()
+  _text_deref_bases($ctx, $c);                                   # #2341
   # #1140: a plain `"@a"` interpolation only STRINGIFIES the array, but a
   # BLOCK deref `"@{[ … ]}"` carries arbitrary code this walk never sees (it
   # is compiled by StringInterpolation, not by the tree), so every array named

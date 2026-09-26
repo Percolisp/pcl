@@ -305,7 +305,7 @@ my @d = @$r;
 print "$n @d";
 EOT
 like($ci, qr/\(p-array-last-index \@a\)/, '$#arr → (p-array-last-index @a)');
-like($ci, qr/\(p-cast-\@ \$r\)/,          '@$ref cast child lowers (p-cast-@ $r)');
+like($ci, qr/\(p-cast-\@ \$r :rvalue\)/,  '@$ref cast child lowers (p-cast-@ $r :rvalue) — an rvalue site, #2103');
 
 # --- converted: arr_init / hash_init form handlers (E2.1 internal nodes) -----
 
@@ -475,7 +475,7 @@ like($pf, qr/\(p-bit-not \$x\)/,           'bit complement → (p-bit-not $x)');
 like($pf, qr/\(p-not \$x\)/,               'low-prec not → (p-not $x)');
 like($pf, qr/\(p-array-last-index \@a\)/,  '$#a → (p-array-last-index @a)');
 like($pf, qr/\(p-array-last-index \$ref\)/,'$#{$ref} → (p-array-last-index $ref)');
-like($pf, qr/\(p-cast-@ \$ref\)/,          '@$ref → (p-cast-@ $ref)');
+like($pf, qr/\(p-cast-@ \$ref :rvalue\)/,  '@$ref → (p-cast-@ $ref :rvalue) — an rvalue site, #2103');
 # declines: the text emitter still owns these (byte-identical fallback).
 like($pf, qr/\(p-backslash \$x\)/,         '\\$x declines → text (p-backslash $x)');
 like($pf, qr/\(p-pre\+\+ \$x\)/,           '++$x declines → text (p-pre++ $x)');

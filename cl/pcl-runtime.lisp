@@ -2376,6 +2376,58 @@
   (%p-die-error nil "Not ~A ~A reference" (if (char= (char kind 0) #\A) "an" "a") kind))
 
 ;;; ---------------------------------------------------------------------------
+;;; Dereferencing a NON-reference: undef, a string, a number (#2341, #2103).
+;;; ---------------------------------------------------------------------------
+;;; KIND is the kind the source asked for: "ARRAY" / "HASH" / "SCALAR" / "CODE".
+;;; SITE is the deref site's optional argument, and a KEYWORD there is the
+;;; strict-refs marker (docs/ir-spec.md §3.2c) — the compiler emits it only
+;;; inside a `use strict 'refs'` scope; a `no strict 'refs'` site is unmarked
+;;; and keeps every symbolic arm:
+;;;   :strict     an RVALUE dereference (`my @a = @$u`, `"@$u"`, `if (@$u)`,
+;;;               `$u->[0]` as a read): undef, a string and a number all die.
+;;;   :strict-lv  a VIVIFYING dereference (`push @$u`, `for (@$u)`, `\@$u`, an
+;;;               assignment target): a string or a number dies, undef
+;;;               vivifies as it does without strict.
+;;;   :rvalue     an RVALUE dereference OUTSIDE strict refs: undef is the empty
+;;;               symbolic `@{""}` and vivifies nothing; a string or a number
+;;;               is the symbolic name it spells.
+;;; An unmarked site is a vivifying one outside strict refs (today's form).
+(defun %p-deref-article (kind)
+  (if (char= (char kind 0) #\A) "an" "a"))
+
+(defun %p-deref-undef (kind site)
+  "An UNDEF value reached a deref site with no place to vivify into (a RAW
+   undef: a sub's return value, `@{ undef }`).  At a :STRICT site perl dies.
+   Otherwise perl's no-strict answer is the symbolic name \"\" — an EMPTY
+   container, never a one-element list (the fallback used to hand back undef
+   itself, which every list consumer read as ONE element: `my @e = @$d` was 1
+   under PCL, 0 under perl).  A fresh container each time: nothing written
+   into it is visible afterwards, which is what `@{\"\"}` looks like to a
+   program that only reads it."
+  (when (eq site :strict)
+    (%p-die-error nil "Can't use an undefined value as ~A ~A reference"
+                  (%p-deref-article kind)
+                  (if (string= kind "CODE") "subroutine" kind)))
+  (cond ((string= kind "ARRAY") (make-array 0 :adjustable t :fill-pointer 0))
+        ((string= kind "HASH") (make-hash-table :test 'equal))
+        ((string= kind "SCALAR") *p-undef*)
+        (t (error "PCL internal: %p-deref-undef has no arm for kind ~S" kind))))
+
+(defun %p-deref-strict-string (kind v site)
+  "A STRING or NUMBER V reached a deref site: at a :STRICT site perl's fatal
+   (`Can't use string (\"x\") as an ARRAY ref while \"strict refs\" in use` —
+   perl shows at most 32 characters, then `...`).  Anywhere else it is a
+   symbolic reference and the caller resolves it; this returns NIL."
+  (when (or (eq site :strict) (eq site :strict-lv))
+    (let* ((s (to-string v))
+           (shown (if (> (length s) 32)
+                      (concatenate 'string (subseq s 0 32) "\"...")
+                      (concatenate 'string s "\""))))
+      (%p-die-error nil "Can't use string (\"~A) as ~A ~A ref while \"strict refs\" in use"
+                    shown (%p-deref-article kind)
+                    (if (string= kind "CODE") "subroutine" kind)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Read-only arrays — Internals::SvREADONLY(@a, 1)   (task #159)
 ;;; ---------------------------------------------------------------------------
 ;;; A read-only array is stored as an ADJUSTABLE vector WITH NO FILL POINTER:
@@ -11508,8 +11560,10 @@ per element."
       (setf arr flat)))
   arr)
 
-(defun p-aref-deref (ref idx)
+(defun p-aref-deref (ref idx &optional site)
   "Perl array ref access $ref->[idx] - unbox the reference first.
+   SITE :strict = the read sits under `use strict 'refs'` (#2103): a string,
+   a number or a RAW undef is perl's fatal there instead of a symbolic name.
    When idx is a vector (range result), returns a slice instead of a single element.
    When ref is a string, treat as symbolic reference to @name."
   (let ((arr (%p-listslice-array (unbox ref))))
@@ -11528,6 +11582,7 @@ per element."
       ;; into one — used as an array name (no strict refs); %p-symref-name is
       ;; the one reading of that.
       ((%p-symref-name arr)
+       (%p-deref-strict-string "ARRAY" arr site)
        (when (find #\Nul (%p-symref-name arr))
          (return-from p-aref-deref *p-undef*))
        (let ((sym-arr (p-ensure-arrayref ref)))
@@ -11558,6 +11613,17 @@ per element."
       ;; p-box-p guard as in p-gethash-deref: an ordinary `$aref->[0]` has a
       ;; raw vector here and never runs the walk.
       ((and (p-box-p arr) (%p-scalar-referent-p ref)) (%p-not-a-ref "ARRAY"))
+      ;; An RVALUE element read VIVIFIES its container in perl: after `my $x;
+      ;; my $e = $x->[0]` ref($x) is ARRAY (with or without strict).  Only a
+      ;; BOX has a place to put the new array (#2341).
+      ((and (p-box-p ref) (or (null arr) (eq arr *p-undef*)))
+       (let ((a (p-ensure-arrayref ref)))
+         (if (and (vectorp idx) (not (stringp idx)))
+             (p-aslice a idx)
+             (p-aref a idx))))
+      ;; A RAW undef under strict refs (`f()->[0]`, f returning undef) dies.
+      ((and (eq site :strict) (or (null arr) (eq arr *p-undef*)))
+       (%p-deref-undef "ARRAY" site))
       (t (p-aref arr idx)))))
 
 (defun p-array-last-index (arr)
@@ -11572,6 +11638,10 @@ per element."
     (cond
       ((and (vectorp v) (not (stringp v))) (1- (length v)))
       ((stringp v) (1- (length (%p-symref-array v))))
+      ;; `$#$u` VIVIFIES an undef $u into an array ref in perl (#2341) —
+      ;; when there is a box to put it in.
+      ((and (p-box-p arr) (or (null v) (eq v *p-undef*)))
+       (1- (length (p-ensure-arrayref arr))))
       (t -1))))
 
 (defun p-set-array-length (arr new-last-index)
@@ -12841,8 +12911,9 @@ which is one of #1140's escape spellings (probed)."
            (,arr-var ,(expand-autoviv-for-array hash-chain)))
        (p-array-set ,arr-var ,idx ,val-var))))
 
-(defun p-gethash-deref (ref key)
+(defun p-gethash-deref (ref key &optional site)
   "Perl hash ref access $ref->{key} - unbox the reference first.
+   SITE :strict = under `use strict 'refs'` (#2103): see p-aref-deref.
    Returns undef if ref is undef (nil box); write path auto-vivifies via (setf p-gethash-deref).
    When ref is a string, treats as symbolic reference to %name."
   (let ((h (unbox ref)))
@@ -12854,11 +12925,18 @@ which is one of #1140's escape spellings (probed)."
       ;; hoisting it is semantics-preserving -- and it turns five type tests
       ;; into one on the path every hash deref takes.
       ((hash-table-p h) (p-gethash h key))
-      ((or (null h) (eq h *p-undef*)) *p-undef*)
+      ;; undef: an RVALUE element read VIVIFIES the container in perl (`my $u;
+      ;; my $v = $u->{k}` leaves ref($u) HASH) — when there is a box to put
+      ;; it in (#2341).  A raw undef temporary reads undef.
+      ((or (null h) (eq h *p-undef*))
+       (cond ((p-box-p ref) (p-gethash (p-ensure-hashref ref) key))
+             ((eq site :strict) (%p-deref-undef "HASH" site))
+             (t *p-undef*)))
       ;; Symbolic reference: a string — or a NUMBER, which perl stringifies
       ;; into one — used as a hash name (no strict refs); %p-symref-name is the
       ;; one reading of that.
       ((%p-symref-name h)
+       (%p-deref-strict-string "HASH" h site)
        (when (find #\Nul (%p-symref-name h))
          (return-from p-gethash-deref *p-undef*))
        (let ((sym-hash (p-ensure-hashref ref)))
@@ -12874,24 +12952,35 @@ which is one of #1140's escape spellings (probed)."
       ((p-typeglob-p h) (p-gethash (p-ensure-hashref ref) key))
       (t (p-gethash h key)))))
 
-(defun (setf p-gethash-deref) (value ref key)
-  "Setf expander for p-gethash-deref - autovivify ref to hash if undef, then set key"
+(defun (setf p-gethash-deref) (value ref key &optional site)
+  "Setf expander for p-gethash-deref - autovivify ref to hash if undef, then set key.
+   SITE is the read form's strict marker, accepted so the READ form stays a
+   valid place (a `$r->{k}++` expands through it); the write path is not
+   strict-checked (task #2403)."
+  (declare (ignore site))
   (setf (p-gethash (p-ensure-hashref ref) key) value))
 
-(defun (setf p-aref-deref) (value ref idx)
-  "Setf expander for p-aref-deref - autovivify ref to array if undef, then set element"
+(defun (setf p-aref-deref) (value ref idx &optional site)
+  "Setf expander for p-aref-deref - autovivify ref to array if undef, then set
+   element.  SITE: see (setf p-gethash-deref)."
+  (declare (ignore site))
   (setf (p-aref (p-ensure-arrayref ref) idx) value))
 
-(defun p-gethash-deref-box (ref key)
+(defun p-gethash-deref-box (ref key &optional site)
   "Live BOX at $ref->{key} — for \\$ref->{k} refgen and l-value ops, so a
    reference to a hashref element tracks later writes to that slot (unlike
    p-gethash-deref, which returns a snapshot value).  Autovivifies the ref to a
    hashref if undef, then returns the live box at key (like p-gethash-box does
-   for a direct %hash element)."
+   for a direct %hash element).  SITE (a strict-refs marker a READ form carried
+   before an lvalue rewrite swapped its head — #2103) is accepted and ignored:
+   the write path is not strict-checked (task #2403)."
+  (declare (ignore site))
   (p-gethash-box (p-ensure-hashref ref) key))
 
-(defun p-aref-deref-box (ref idx)
-  "Live BOX at $ref->[idx] — the array-ref analogue of p-gethash-deref-box."
+(defun p-aref-deref-box (ref idx &optional site)
+  "Live BOX at $ref->[idx] — the array-ref analogue of p-gethash-deref-box
+   (SITE likewise ignored)."
+  (declare (ignore site))
   (p-aref-box (p-ensure-arrayref ref) idx))
 
 ;;; The KEY / INDEX list of a slice or slice-delete, flattened (#387 family
@@ -22100,7 +22189,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-2080"
+(defparameter *pcl-cache-generation* "v2-2280"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -25948,9 +26037,17 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Typeglob (from *{EXPR} or a glob ref): the glob's ARRAY slot
       ((p-typeglob-p v)
        (%p-glob-slot-place v "@" (make-array 0 :adjustable t :fill-pointer 0)))
-      ;; Symbolic reference: @{"pkg::var"} — look up/create the package variable
-      ((stringp v)
-       (%p-symref-array v site))
+      ;; Symbolic reference: @{"pkg::var"} — look up/create the package
+      ;; variable.  A NUMBER is one too (perl stringifies it, %p-symref-name);
+      ;; at a strict-refs site both are perl's fatal (#2103).
+      ((%p-symref-name v)
+       (%p-deref-strict-string "ARRAY" v site)
+       (%p-symref-array (%p-symref-name v) site))
+      ;; An RVALUE deref of undef never vivifies (#2103): under strict refs it
+      ;; dies, otherwise it is the empty symbolic `@{""}`.  Before the vivify
+      ;; arm, which is for the unmarked (vivifying) positions.
+      ((and (or (eq site :strict) (eq site :rvalue)) (or (null v) (eq v *p-undef*)))
+       (%p-deref-undef "ARRAY" site))
       ;; val is an lvalue box containing undef: auto-vivify as array ref.
       ;; Store (make-p-box new-arr) so box-set sees a reference (not raw vector)
       ;; and preserves it instead of coercing to length.
@@ -25958,6 +26055,8 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
          (box-set val (make-p-box new-arr))
          new-arr))
+      ;; A RAW undef (a temporary, `@{ f() }`): no place to vivify into (#2341).
+      ((or (null v) (eq v *p-undef*)) (%p-deref-undef "ARRAY" site))
       ;; Wrong kind of referent (@$hashref, keys @$coderef): perl's fatal.
       ;; Previously fell into the catch-all below and the caller (p-keys,
       ;; foreach, push) silently saw an empty list.
@@ -25966,8 +26065,9 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; referent rule; see p-ensure-hashref).  This used to return the
       ;; referent BOX and the caller treated it as a one-element list.
       ((%p-scalar-referent-p val) (%p-not-a-ref "ARRAY"))
-      ;; Fallback: return whatever we have (may be *p-undef* if no box to write back)
-      (t (or v *p-undef*)))))
+      ;; Fallback: whatever else we have (undef no longer reaches here — the
+      ;; two undef arms above answer it).
+      (t v))))
 
 (defun p-cast-% (val &optional site)
   "Perl hash dereference %{$ref} - unbox to get the hash.
@@ -25993,15 +26093,17 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Typeglob (from *{EXPR} or a glob ref): the glob's HASH slot
       ((p-typeglob-p v)
        (%p-glob-slot-place v "%" (make-hash-table :test 'equal)))
-      ((and (stringp v)
-            (>= (length v) 2)
-            (string= (subseq v (- (length v) 2)) "::"))
-       (p-stash (subseq v 0 (- (length v) 2))))
       ;; Symbolic reference: %{"pkg::var"} — look up/create the package hash.
       ;; Mirrors p-cast-@'s %p-symref-array; without this a string fell through to
       ;; (t v) and \%{"Pkg::H"} backslashed the *string* (ref → SCALAR, not HASH),
       ;; which broke Exporter::Heavy's `*{...}=\%{"$pkg\::$name"}` %hash export.
-      ((stringp v) (%p-symref-hash v site))
+      ;; A NUMBER is a name too, and at a strict-refs site both die (#2103).
+      ((%p-symref-name v)
+       (%p-deref-strict-string "HASH" v site)
+       (%p-cast-%-symbolic (%p-symref-name v) site))
+      ;; An RVALUE deref of undef never vivifies (#2103) — the p-cast-@ twin.
+      ((and (or (eq site :strict) (eq site :rvalue)) (or (null v) (eq v *p-undef*)))
+       (%p-deref-undef "HASH" site))
       ;; val is an lvalue box containing undef: auto-vivify as hash ref — the
       ;; MISSING TWIN of p-cast-@'s arm (task #720).  Store (make-p-box new-h)
       ;; for the same reason the array arm does: box-set must see a REFERENCE,
@@ -26016,12 +26118,24 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((new-h (make-hash-table :test 'equal)))
          (box-set val (make-p-box new-h))
          new-h))
+      ;; A RAW undef (a temporary, `%{ f() }`): no place to vivify into (#2341).
+      ((or (null v) (eq v *p-undef*)) (%p-deref-undef "HASH" site))
       ;; Wrong kind of referent (%$aryref, keys %$aryref): perl's fatal.
       ;; Previously fell through to (t v) and the caller silently saw no keys.
       ((%p-wrong-referent-p "HASH" v) (%p-not-a-ref "HASH"))
       ;; %$scalarref — see p-ensure-hashref's arm (#163's referent rule).
       ((%p-scalar-referent-p val) (%p-not-a-ref "HASH"))
       (t v))))
+
+(defun %p-cast-%-symbolic (name site)
+  "p-cast-%'s symbolic arm: a name ending in \"::\" is a STASH reference
+   (%{\"Pkg::\"} / %{\"main::\"} — a read-only snapshot of the package's subs,
+   so keys/values/exists over a symbol table work: Class::Inspector etc.);
+   any other name is the package hash it spells."
+  (let ((n (length name)))
+    (if (and (>= n 2) (string= (subseq name (- n 2)) "::"))
+        (p-stash (subseq name 0 (- n 2)))
+        (%p-symref-hash name site))))
 
 ;;; The symbol a symbolic reference names (#387 family 42, s413 — the prologue
 ;;; the four %p-symref-* readers/writers each spelled).  NAME-STR is perl's
@@ -26223,6 +26337,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    it goes through #812's name memo.  ONE entry point for both, so the cached
    and uncached readings cannot drift (rule 11): every %p-symref-* reader and
    writer below calls this."
+  ;; A KEYWORD in the site slot is the strict-refs marker (#2103), never a
+  ;; cache: a marked site dies on a string before it resolves one, and this
+  ;; guard keeps any path that did not from reading a keyword as a vector.
+  (when (keywordp site) (setf site nil))
   (if (and site
            (let ((p (svref site 0)))
              (and p (or (eq p t)
@@ -26242,7 +26360,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; checked (Pl::ExprToCL::_symref_const_site).  So `(null site)` gates it.
 (declaim (inline %p-symref-nul-p))
 (defun %p-symref-nul-p (name-str site)
-  (and (null site) (find #\Nul name-str) t))
+  (and (or (null site) (keywordp site)) (find #\Nul name-str) t))
 
 (defun %p-symref-box (name-str &optional site)
   "Resolve Perl symbolic scalar reference NAME-STR to a CL box.
@@ -26402,7 +26520,13 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((stringp inner)
        ;; Symbolic reference: ${"varname"} — see the note above %p-symref-
        ;; scalar-value for why a NUMBER is not one here (task #505/#551).
+       ;; At a strict-refs site it is perl's fatal instead (#2103).
+       (%p-deref-strict-string "SCALAR" inner site)
        (%p-symref-scalar-value inner site))
+      ;; undef: an rvalue `$$u` under strict refs dies (#2103); unmarked, it
+      ;; reads the symbolic `${""}`, i.e. undef, and vivifies nothing.
+      ((or (null inner) (eq inner *p-undef*))
+       (%p-deref-undef "SCALAR" site))
       ;; ${qr//}: perl's REGEXP sv stringifies as "(?^:...)" and numifies
       ;; through that string (0).  PCL merges the Regexp ref and its referent
       ;; into one struct (which numifies as an address, correct for the REF
@@ -26434,7 +26558,17 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; Symbolic reference: ${"varname"} = val.  A NUMERIC name is NOT one
        ;; here either — same ambiguity, same reason (task #505/#551): the
        ;; (p-box-p val) arm below is the collapsed hard ref's write path.
+       ;; Under strict refs it is perl's fatal instead (#2103).
+       (%p-deref-strict-string "SCALAR" inner site)
        (%p-symref-scalar-set inner new-value site))
+      ;; `my $u; $$u = 1`: a scalar holding undef is VIVIFIED into a SCALAR
+      ;; ref, then the write lands in the fresh referent (perl, with or
+      ;; without strict).  This arm used to be missing, so the arm below
+      ;; wrote 1 into $u ITSELF and ref($u) stayed "" (#2341's probe table).
+      ((and (p-box-p val) (or (null inner) (eq inner *p-undef*)))
+       (let ((target (make-p-box nil)))
+         (box-set val (p-backslash target))
+         (box-set target new-value)))
       ;; val itself is the scalar container (blessed scalar in tie methods)
       ((p-box-p val)
        (box-set val new-value))
@@ -26474,7 +26608,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    fallback."
   (let* ((raw (if (p-box-p val) (p-box-value val) val))
          (cell (if (stringp raw)
-                   (%p-symref-cell raw site)
+                   ;; `\${"name"}` under strict refs is perl's fatal (#2103)
+                   (progn (%p-deref-strict-string "SCALAR" raw site)
+                          (%p-symref-cell raw site))
                    (%p-scalar-ref-referent val))))
     (if cell
         (p-backslash cell)
@@ -26951,8 +27087,12 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Old-format hash reference (autovivified, single-boxed) — and \%ENV /
       ;; \%INC, whose referent IS the marker symbol (task #736).
       ((or (hash-table-p inner) (%p-hash-marker-p inner)) "HASH")
-      ;; Old-format array reference (autovivified, single-boxed)
-      ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
+      ;; Old-format array reference (autovivified, single-boxed).  CONSP, not
+      ;; LISTP: NIL is a list, and NIL is what a fresh `(make-p-box nil)` holds
+      ;; — `my $w; my $r = \$w; ref($w)` answered ARRAY for a never-assigned
+      ;; scalar (#2341 made every never-written dereferenced `my $x;` a box,
+      ;; which is what exposed it; the undef payload is not a reference).
+      ((or (consp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
       ((functionp inner) "CODE")
       ;; Typeglob payload.  A glob VALUE is not a reference at all in perl —

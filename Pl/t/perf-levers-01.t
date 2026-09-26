@@ -99,10 +99,10 @@ like($sr_def, qr/\(p-cast-\@ "main::ga" \(p-symref-site\)\)/,
 like($sr_def, qr/\(p-cast-% "main::gh" \(p-symref-site\)\)/,
      'symref-const: the HASH sigil');
 # NEGATIVE 1 — the name is built at run time, so no site may be attached.
-like($sr_def, qr/\(p-cast-\$ \(p-string-concat \$pk "::g"\)\)/,
+like($sr_def, qr/\(p-cast-\$ \(p-string-concat \$pk "::g"\) :rvalue\)/,   # #2103: an rvalue deref site
      'symref-const NEGATIVE: a name built at run time keeps the generic path');
 # NEGATIVE 2 — a hard reference is not a name at all.
-like($sr_def, qr/\(p-cast-\$ \$r\)/,
+like($sr_def, qr/\(p-cast-\$ \$r :rvalue\)/,   # #2103: an rvalue deref site
      'symref-const NEGATIVE: a hard reference operand gets no site');
 
 # NEGATIVE 3 — the switch: every site goes back to the two-element form.
@@ -454,7 +454,7 @@ PERL
          'foreach-arrays: a LABELLED loop keeps its label and takes the run');
     # NEGATIVES — every one of them is a shape the run must not take.
     like($fa_def, qr/\(p-aslice \@a 0 1\)/,      'foreach-arrays NEGATIVE: a SLICE is not a bare array');
-    like($fa_def, qr/p-flatten-args \(list \(p-cast-\@ \$ar\)/, 'foreach-arrays NEGATIVE: a DEREF is not a bare array');
+    like($fa_def, qr/p-flatten-args \(list \(p-cast-\@ \$ar :strict-lv\)/, 'foreach-arrays NEGATIVE: a DEREF is not a bare array');
     like($fa_def, qr/p-flatten-args \(list \@a 99\)/,           'foreach-arrays NEGATIVE: a scalar in the list');
     like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@w \@v\)/, 'foreach-arrays NEGATIVE: an array WRITTEN in the body (#1140)');
     like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@p \@q\)/, 'foreach-arrays NEGATIVE: a WRITTEN loop variable declines the raw arm outright');
@@ -529,7 +529,7 @@ PERL
       or diag("negs=$negs");
     like($one, qr/\(p-foreach-raw \(\$x \(p-aslice \@a 0 1\)\)/,
          '#1409 NEGATIVE: a lone SLICE is read-only but not a bare array — no run');
-    like($one, qr/\(p-foreach-raw \(\$x \(p-cast-\@ \$r\)\)/,
+    like($one, qr/\(p-foreach-raw \(\$x \(p-cast-\@ \$r :strict-lv\)\)/,
          '#1409 NEGATIVE: a lone DEREF is read-only but not a bare array — no run');
     # NEGATIVE — the switch.
     unlike(transpile_with($fa1, '-foreach-arrays'), qr/:arrays/,
