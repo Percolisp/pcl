@@ -4,8 +4,8 @@
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
-# ci-step — run one CI step; if it fails, re-emit the tail of its output as
-# a GitHub Actions `::error::` annotation.
+# ci-step — run one CI step; if it fails, re-emit what explains the failure as
+# GitHub Actions `::error::` annotations.
 #
 # Why: a workflow's job LOG is readable only by repository admins (the API
 # answers 403 to everyone else), while check-run ANNOTATIONS are public.  The
@@ -13,19 +13,71 @@
 # without admin rights could read; with this, the cause is on the run page
 # and in `GET /repos/OWNER/REPO/check-runs/ID/annotations`.
 #
+# Two kinds of annotation (s498c, task #2376):
+#   * "failed rows" — every `not ok` line and every `#   Failed test` block of
+#     a TAP run, WITH the `#` diagnostic lines that follow it (got/expected,
+#     the test's own diag).  A gate step prints those minutes before its end,
+#     so the tail alone showed only the summary ("Failed tests: 9-11") and not
+#     WHY (CI run 36192024430).  Split over at most four annotations.
+#   * "tail" — the last ~40 lines, as before (a non-TAP step's error is there).
+# Each message is capped near GitHub's limit (~3000 bytes after encoding).
+#
 # Usage (in .github/workflows/ci.yml):   tools/ci-step COMMAND [ARGS...]
 # Outside GitHub Actions it is a transparent wrapper with the same exit status
-# (the annotation line is just a line of output there).
+# (the annotation lines are just lines of output there).  Test:
+# tools/t/ci-step.t.
 set -uo pipefail
 log="${RUNNER_TEMP:-/tmp}/ci-step.$$.log"
 "$@" 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 if [ "$status" -ne 0 ]; then
-    # One annotation, the last ~40 lines, newlines encoded the way the
-    # workflow-command syntax wants them.  GitHub truncates very long
-    # messages, so the tail is capped.
-    tail=$(tail -n 40 "$log" | tail -c 3000 | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
-    echo "::error title=${1##*/} failed (exit $status)::${tail}"
+    perl -e '
+        use strict; use warnings;
+        my ($log, $status, $name) = @ARGV;
+        open(my $fh, "<", $log) or exit 0;
+        my @lines = <$fh>;
+        chomp @lines;
+        my $cap = 3000;
+        sub enc { my $s = shift; $s =~ s/%/%25/g; $s =~ s/\r/%0D/g; $s =~ s/\n/%0A/g; $s }
+        # The failed rows: a `not ok` line or a `#   Failed test` line starts a
+        # block; the `#` lines right after it belong to it.
+        my @blocks;
+        for (my $i = 0; $i < @lines; $i++) {
+            next if $lines[$i] !~ /^\s*(?:not ok\b|#\s+Failed test\b)/;
+            my @b = ($lines[$i]);
+            while ($i + 1 < @lines && $lines[$i + 1] =~ /^\s*#/
+                   && $lines[$i + 1] !~ /^\s*#\s+Failed test\b/) {
+                push @b, $lines[++$i];
+            }
+            push @blocks, join("\n", @b) . "\n";
+        }
+        my @msgs = ("");
+        for my $b (@blocks) {
+            my $e = enc($b);
+            if (length($e) > $cap) {
+                $e = substr($e, 0, $cap - 20);
+                $e =~ s/%[0-9A-F]?$//;
+                $e .= "%0A[... cut]%0A";
+            }
+            push @msgs, "" if length($msgs[-1]) + length($e) > $cap;
+            $msgs[-1] .= $e;
+        }
+        @msgs = grep { length } @msgs;
+        my $n = @msgs;
+        if ($n > 4) { splice(@msgs, 4); }
+        my $k = 0;
+        for my $m (@msgs) {
+            $k++;
+            print "::error title=$name: failed rows ($k of $n)::$m\n";
+        }
+        my $start = @lines > 40 ? @lines - 40 : 0;
+        my $tail = enc(join("\n", @lines[$start .. $#lines]) . "\n");
+        if (length($tail) > $cap) {
+            $tail = substr($tail, length($tail) - $cap);
+            $tail =~ s/^.*?%0A//;
+        }
+        print "::error title=$name failed (exit $status)::$tail\n";
+    ' "$log" "$status" "${1##*/}"
 fi
 rm -f "$log"
 exit "$status"

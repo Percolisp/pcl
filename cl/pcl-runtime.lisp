@@ -2054,6 +2054,22 @@
 ;;     44, `$? = 256` exits 0).
 ;; exit and the uncaught-die hook record the status in *p-exit-status* (via
 ;; %p-exit-process) before SBCL runs this hook; NIL means the natural end.
+(defun %p-flush-stdout-at-exit ()
+  "perl_destruct's own STDOUT flush, after the END blocks: when it FAILS perl
+   prints `Unable to flush stdout: <strerror>' on STDERR and turns an exit
+   status of 0 into 1 (probed 5.40.3: `perl prog | head -1' with SIGPIPE
+   ignored — inherited, task #2263 — exits 1).  errno is read the way
+   %p-guarded-write reads it, right after the failed write.  A STDOUT the
+   program closed is not flushed (perl's `*stdo' test)."
+  (handler-case (when (open-stream-p (%p-stream-target *standard-output*))
+                  (finish-output *standard-output*))
+    (stream-error ()
+      (let ((errno (sb-alien:get-errno)))
+        (when (plusp errno)
+          (%p-diag "Unable to flush stdout: ~A~%" (sb-int:strerror errno)))
+        (when (zerop (logand (%p-status) 255))
+          (%p-set-status 1))))))
+
 (defun %p-run-end-phase ()
   "The exit hook: run the END blocks, flush every handle, exit with $?."
   (let ((pending (or *p-exit-status* 0)))
@@ -2067,6 +2083,7 @@
             (catch '%p-end-exit (funcall fn))
           (error (e)
             (%p-diag "Error in END block: ~A~%" e)))))
+    (%p-flush-stdout-at-exit)
     (%p-flush-all-output)
     ;; Only now, with every END run and every handle flushed, does a status
     ;; an END block changed become the process's.  A nested sb-ext:exit
@@ -2508,6 +2525,41 @@
            (or (eq ef :latin-1) (and (consp ef) (eq (car ef) :latin-1))))
          t)))
 
+;;; ── Signals HELD across a stream write (task #2375) ─────────────────────
+;;; A Perl %SIG handler runs from a Lisp signal handler or from the relay
+;;; thread's interrupt-thread — wherever SBCL allows interrupts, which includes
+;;; the middle of a write into an SBCL stream's buffer.  SBCL's flush is not
+;;; re-entrant: between write(2) returning and the buffer being reset, a
+;;; handler that prints to the same stream — or exits, which flushes it —
+;;; writes the flushed bytes AGAIN (measured s498c: `print "ready\n"`, then
+;;; TERM, printed "ready\nready\ncaught TERM\n" under load).  perl never runs a
+;;; handler inside an op.  So the stream operations of the print family HOLD a
+;;; signal that arrives meanwhile and deliver it the moment the operation is
+;;; over (docs/ir-spec.md §8 "The %SIG contract").  ONE exception keeps the
+;;; timeout idiom (`alarm` + `die` around a print into a stalled pipe) alive:
+;;; a write whose descriptor cannot take a byte is BLOCKED in the kernel, and
+;;; there the handler runs at once, as perl's does (%p-sig-write-blocked-p).
+(defvar *p-sig-hold-write* nil
+  "The stream the program's thread is writing into right now, or NIL.")
+
+(defvar *p-sig-pending* nil
+  "Signal numbers that arrived while HELD — by a write, or CHLD while PCL
+   waits for a child — newest first.  %p-sig-release delivers them.")
+
+(defvar *p-sig-any-handler* nil
+  "True once any signal has had a Perl handler installed in this process;
+   until then no write pays for the hold.")
+
+(defmacro %p-with-signals-held ((stream) &body body)
+  "Run BODY — one operation on STREAM's buffer — with Perl signal handlers
+   held until it is over (see the header above)."
+  (let ((s (gensym "STREAM")))
+    `(let ((,s ,stream))
+       (if (or (not *p-sig-any-handler*) *p-sig-hold-write*)
+           (progn ,@body)
+           (unwind-protect (let ((*p-sig-hold-write* ,s)) ,@body)
+             (when *p-sig-pending* (%p-sig-release)))))))
+
 (defun %p-out-string (s stream site)
   "Write string S to STREAM under perl's rule for characters a BYTE handle
    cannot hold.  perl decides per STRING, not per character: an SV whose UTF8
@@ -2530,13 +2582,14 @@
    %p-with-wide-upgrade's handler is the BACKSTOP for writes that do NOT come
    through here (the harness's own `format t`, a die message): it is signalled
    per character and can only fix the character it is given, so anything that
-   can be decided whole is decided here."
-  (write-string
-   (cond ((not (%p-wide-char-p s)) s)
-         ((not (%p-byte-stream-p stream)) s)
-         (t (when site (p-warn (format nil "Wide character in ~A" site)))
-            (%p-utf8-octets s)))
-   stream))
+   can be decided whole is decided here.  The write itself holds Perl signal
+   handlers (%p-with-signals-held); the warning, which runs Perl code, does not."
+  (let ((out (cond ((not (%p-wide-char-p s)) s)
+                   ((not (%p-byte-stream-p stream)) s)
+                   (t (when site (p-warn (format nil "Wide character in ~A" site)))
+                      (%p-utf8-octets s)))))
+    (%p-with-signals-held (stream)
+                          (write-string out stream))))
 
 (defun %p-diag (control &rest args)
   "Write one of PCL's OWN diagnostic lines to stderr — a rule-12 announcement,
@@ -2936,10 +2989,11 @@
    rest.  Weak keys: an abandoned handle must not be pinned here.")
 
 (defun %p-maybe-autoflush (stream)
-  "Flush STREAM if its $| is on."
+  "Flush STREAM if its $| is on (signal handlers held: %p-with-signals-held)."
   (when (and (plusp (hash-table-count *p-autoflush-handles*))
              (gethash stream *p-autoflush-handles*))
-    (ignore-errors (finish-output stream))))
+    (%p-with-signals-held (stream)
+                          (ignore-errors (finish-output stream)))))
 
 (defmacro %p-guarded-write (site &body body)
   "Run BODY — a write to a filehandle — and answer the way PERL answers a write
@@ -2971,7 +3025,21 @@
    pass."
   (declare (ignorable site))
   `(handler-case (%p-with-wide-upgrade ,@body)
-     (stream-error () (%pcl-save-errno) *p-undef*)))
+     (stream-error (c) (%pcl-save-errno) (%p-drop-unwritten-output c) *p-undef*)))
+
+(defun %p-drop-unwritten-output (c)
+  "perl's buffer flush EMPTIES the buffer when the write fails (PerlIOBuf_flush
+   resets it after setting the error), so the bytes are gone and the next
+   flush has nothing to retry.  SBCL keeps them and retries at every later
+   flush — so `$| = 1; print` into a closed pipe with SIGPIPE ignored failed
+   AGAIN at exit, `Unable to flush stdout' and status 1, where perl's exit
+   flush has nothing left and exits 0 (task #2263)."
+  (let ((s (%p-stream-target (stream-error-stream c))))
+    (when (sb-sys:fd-stream-p s)
+      (let ((obuf (sb-impl::fd-stream-obuf s)))
+        (when obuf
+          (setf (sb-impl::buffer-head obuf) 0
+                (sb-impl::buffer-tail obuf) 0))))))
 
 (defvar |$\|| (make-p-box
                (make-p-magic-cell
@@ -3152,18 +3220,16 @@
    run-program child before any Perl handler runs, so qx keeps its status —
    docs/not-supported.md \"%SIG\".)")
 
-(defvar *p-chld-pending* nil
-  "A SIGCHLD arrived while *p-chld-deferred* was true.")
-
 (defmacro %p-with-chld-deferred (&body body)
   "Run BODY — PCL waiting for a child — with a Perl $SIG{CHLD} handler held
-   back; a SIGCHLD that arrived meanwhile is delivered once BODY returns."
+   back; a SIGCHLD that arrived meanwhile is delivered once BODY returns.
+   The held signal waits in *p-sig-pending*, the one list a held WRITE uses
+   too (%p-with-signals-held)."
   (let ((outer (gensym "OUTER")))
     `(let ((,outer *p-chld-deferred*))
        (multiple-value-prog1 (let ((*p-chld-deferred* t)) ,@body)
-         (when (and (not ,outer) *p-chld-pending*)
-           (setf *p-chld-pending* nil)
-           (%p-sig-deliver sb-unix:sigchld))))))
+         (when (and (not ,outer) *p-sig-pending*)
+           (%p-sig-release))))))
 
 (defun get-input-record-separator ()
   "Get the current value of $/ (unboxed).
@@ -20666,7 +20732,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;;    dispositions, not SBCL's: INT, TERM and ALRM kill BY THE SIGNAL, quietly
 ;;;    (SBCL's INT printed a backtrace and exited 1, its TERM exited 0 — a
 ;;;    supervisor read success), and PIPE is SIG_DFL, so `pcl prog | head -1`
-;;;    stops the producer (SBCL ignores PIPE).
+;;;    stops the producer (SBCL ignores PIPE).  A signal the process INHERITED
+;;;    as ignored stays ignored (task #2263, "Boot" below).
 ;;;  * The signals the SBCL runtime CATCHES when the process boots are its own
 ;;;    (the garbage collector's stop signal, the fault handlers, …) — a closed
 ;;;    DENY list DERIVED from the running image, never written down, because it
@@ -20683,7 +20750,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;;    sigwait()s for it and hands it to the main thread with
 ;;;    sb-thread:interrupt-thread, SBCL's own safe cross-thread interruption.
 ;;;    Both routes end in %p-sig-deliver, and a handler that RETURNS ends a
-;;;    running `sleep` early (task #2002).
+;;;    running `sleep` early (task #2002).  %p-sig-deliver runs the handler in
+;;;    the PROGRAM's thread (a delivery to another thread is forwarded) and
+;;;    HOLDS it while that thread is inside a stream write (task #2375,
+;;;    %p-with-signals-held).
 
 (defparameter +p-sig-taken-over+ '("INT" "TERM" "ALRM" "CHLD")
   "Signals the SBCL runtime catches at boot whose PERL meaning PCL implements:
@@ -20707,22 +20777,31 @@ buffer's fill-pointer; everything else falls back to file-length."
    not its alias CLD), or NIL."
   (car (find signo (rest *p-signal-numbers*) :key #'cdr)))
 
-(defun %p-sig-disposition (signo)
+(defun %p-sig-disposition (signo &optional sigaction)
   "SIGNO's disposition in this process: :default, :ignore, :caught, or :invalid
    when the kernel refuses the number.  Asked with sigaction(2) and a NULL new
    action.  The handler is the FIRST member of struct sigaction on Linux, macOS
    and the BSDs alike, so one pointer-sized word at offset 0 of a generously
    sized buffer answers without knowing the struct's layout; SIG_DFL is 0 and
-   SIG_IGN is 1 on all of them.  No /proc: this is the portable question."
+   SIG_IGN is 1 on all of them.  No /proc: this is the portable question.
+   SIGACTION, when given, is the function's ADDRESS: the start-up capture runs
+   before SBCL has rebuilt its foreign linkage, where the linked call faults."
   (sb-alien:with-alien ((buf (array (sb-alien:unsigned 64) 64)))
     (let ((sap (sb-alien:alien-sap buf)))
       (dotimes (i 64) (setf (sb-sys:sap-ref-64 sap (* i 8)) 0))
-      (if (/= 0 (sb-alien:alien-funcall
-                 (sb-alien:extern-alien "sigaction"
-                                        (function sb-alien:int sb-alien:int
-                                                  sb-alien:system-area-pointer
-                                                  sb-alien:system-area-pointer))
-                 signo (sb-sys:int-sap 0) sap))
+      (if (/= 0 (if sigaction
+                    (sb-alien:alien-funcall
+                     (sb-alien:sap-alien (sb-sys:int-sap sigaction)
+                                         (function sb-alien:int sb-alien:int
+                                                   sb-alien:system-area-pointer
+                                                   sb-alien:system-area-pointer))
+                     signo (sb-sys:int-sap 0) sap)
+                    (sb-alien:alien-funcall
+                     (sb-alien:extern-alien "sigaction"
+                                            (function sb-alien:int sb-alien:int
+                                                      sb-alien:system-area-pointer
+                                                      sb-alien:system-area-pointer))
+                     signo (sb-sys:int-sap 0) sap)))
           :invalid
           (case (sb-sys:sap-ref-word sap 0)
             (0 :default)
@@ -20783,13 +20862,68 @@ buffer's fill-pointer; everything else falls back to file-length."
   (sb-posix:kill (sb-posix:getpid) signo)
   nil)
 
+(defun %p-sig-write-blocked-p (stream)
+  "True when STREAM's descriptor cannot take a byte right now, i.e. a write
+   into it is (or is about to be) BLOCKED in the kernel.  There a Perl handler
+   must run at once, as perl's does: `alarm' + `die' is how a program leaves a
+   print into a stalled pipe or socket.  poll(2) with a zero timeout; the
+   struct is {int fd; short events; short revents} and POLLOUT is 4 on Linux,
+   macOS and the BSDs.  A stream with no descriptor never blocks."
+  (let ((fd (%p-fd-of-stream stream)))
+    (and fd
+         (sb-alien:with-alien ((pfd (array (sb-alien:unsigned 32) 2)))
+           (let ((sap (sb-alien:alien-sap pfd)))
+             (setf (sb-sys:signed-sap-ref-32 sap 0) fd
+                   (sb-sys:sap-ref-16 sap 4) 4
+                   (sb-sys:sap-ref-16 sap 6) 0)
+             (zerop (sb-alien:alien-funcall
+                     (sb-alien:extern-alien "poll"
+                                            (function sb-alien:int
+                                                      sb-alien:system-area-pointer
+                                                      sb-alien:unsigned-long
+                                                      sb-alien:int))
+                     sap 1 0)))))))
+
+(defun %p-sig-held-p (signo)
+  "True when SIGNO's Perl handler must wait: CHLD while PCL waits for its own
+   child (%p-with-chld-deferred), any signal while the program's thread is
+   inside a stream write that is not blocked (%p-with-signals-held)."
+  (or (and *p-chld-deferred* (eql signo sb-unix:sigchld))
+      (and *p-sig-hold-write*
+           (not (%p-sig-write-blocked-p *p-sig-hold-write*)))))
+
+(defun %p-sig-release ()
+  "Deliver the signals held so far, oldest first.  Each goes through
+   %p-sig-deliver again, so one that is STILL held (CHLD inside system while a
+   write ends) waits on.  The list is taken with interrupts off: a signal
+   arriving during the swap lands on the fresh list, not in a lost one."
+  (let ((held (sb-sys:without-interrupts
+                  (shiftf *p-sig-pending* nil))))
+    (dolist (s (reverse held))
+      (%p-sig-deliver s))))
+
 (defun %p-sig-deliver (signo)
   "Run the Perl side of SIGNO: the handler $SIG{NAME} holds NOW, called with
    the signal NAME as $_[0].  A handler that returns ends a running sleep
    early (task #2002); one that dies unwinds from wherever the program was,
-   which is how the `alarm' timeout idiom leaves a blocking read."
-  (if (and *p-chld-deferred* (eql signo sb-unix:sigchld))
-      (setf *p-chld-pending* t)
+   which is how the `alarm' timeout idiom leaves a blocking read.  A HELD
+   signal (%p-sig-held-p) waits in *p-sig-pending* for %p-sig-release.
+
+   Perl handlers run in the PROGRAM's thread.  The kernel may hand a
+   process-directed signal to any thread that does not block it — SBCL's
+   finalizer thread, the relay thread — and a handler run THERE raced the
+   program's own writes and, when it exited, took only that thread down: the
+   process hung (measured s498c, 10 of 60 runs under load).  Such a delivery
+   is forwarded to the program's thread with sb-thread:interrupt-thread, as
+   SBCL's own SIGINT handler forwards to its foreground thread."
+  (let ((main *p-sig-main-thread*))
+    (when (and main
+               (not (eq main sb-thread:*current-thread*))
+               (sb-thread:thread-alive-p main))
+      (sb-thread:interrupt-thread main (lambda () (%p-sig-deliver signo)))
+      (return-from %p-sig-deliver nil)))
+  (if (%p-sig-held-p signo)
+      (pushnew signo *p-sig-pending*)
       (let* ((name (%p-signal-name signo))
              (value (if name (%p-sig-current-value name) *p-undef*)))
         (ecase (%p-sig-kind value)
@@ -20964,6 +21098,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Give an ordinary (not runtime-owned, not CHLD) signal the disposition KIND."
   (ecase kind
     (:handler
+     (setf *p-sig-any-handler* t)
      (if (%p-sig-deferred-by-sbcl-p signo)
          (sb-sys:enable-interrupt signo #'%p-sig-direct-handler)
          (%p-sig-relay signo name)))
@@ -20983,6 +21118,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             "%SIG" (format nil "$SIG{~A}" name)
             "this SBCL has no SIGCHLD handler to chain to; the handler is not installed")))
         ((eq kind :handler)
+         (setf *p-sig-any-handler* t)
          (sb-sys:enable-interrupt sb-unix:sigchld #'%p-sig-chld-handler))
         (t
          (when (eq kind :ignore)
@@ -21013,35 +21149,103 @@ buffer's fill-pointer; everything else falls back to file-length."
               (t (%p-sig-install signo kind name)))))))
 
 ;;; ── Boot ────────────────────────────────────────────────────────────────
+;;; An INHERITED SIG_IGN (`nohup', a non-interactive shell's background job,
+;;; `trap "" PIPE', a .NET parent such as the GitHub Actions runner) survives
+;;; exec, and perl keeps it: the slot reads 'IGNORE' and the signal stays
+;;; ignored until the program stores into $SIG{NAME} (task #2263).  SBCL's own
+;;; start-up (sb-kernel:signal-cold-init-or-reinit, called by REINIT before
+;;; any init hook) installs its handlers over INT TERM ALRM CHLD and ignores
+;;; PIPE, so a scan from an init hook cannot see what the process inherited.
+;;; The runtime therefore ENCAPSULATES that function: the wrapper records
+;;; every signal that is SIG_IGN, then lets SBCL run.  The encapsulation is
+;;; saved with the core, so it fires at every boot of a saved core (the gate's,
+;;; the cached one, an installed pcl.core, an executable).  Loaded from source
+;;; into a running SBCL (PCL_NO_CORE=1) the boot is long past: no capture, and
+;;; the scan falls back to what the current dispositions can tell.
+(defvar *p-sig-inherited* :unknown
+  "The signal NUMBERS that were SIG_IGN when this process started, captured
+   before SBCL installed its own handlers — or :unknown when no capture ran.")
+
+(defun %p-sig-early-sigaction ()
+  "sigaction(2)'s address, found the way SBCL's own foreign-reinit finds
+   symbols — its dlopen/dlsym routines, which work before the linkage table is
+   rebuilt because SBCL needs them to rebuild it.  NIL when this SBCL does not
+   have them (then no capture: *p-sig-inherited* stays :unknown).  RTLD_NOW is
+   2 on Linux, macOS and the BSDs."
+  (let ((dlopen (find-symbol "DLOPEN" "SB-ALIEN"))
+        (dlsym (find-symbol "DLSYM" "SB-ALIEN")))
+    (when (and dlopen dlsym (fboundp dlopen) (fboundp dlsym))
+      (let* ((handle (funcall dlopen nil 2))
+             (addr (and (not (zerop (sb-sys:sap-int handle)))
+                        (sb-sys:sap-int (funcall dlsym handle "sigaction")))))
+        (and addr (plusp addr) addr)))))
+
+(defun %p-sig-capture-inherited ()
+  "Record the signals this process inherited as SIG_IGN (see above)."
+  (let ((sigaction (%p-sig-early-sigaction)))
+    (setf *p-sig-inherited*
+          (if sigaction
+              (loop for e in (rest *p-signal-numbers*)
+                    for signo = (cdr e)
+                    when (and signo (eq (%p-sig-disposition signo sigaction) :ignore))
+                    collect signo)
+              :unknown))))
+
+(let ((init (find-symbol "SIGNAL-COLD-INIT-OR-REINIT" "SB-KERNEL")))
+  (cond ((and init (fboundp init))
+         (unless (sb-int:encapsulated-p init 'pcl-inherited-signals)
+           (sb-int:encapsulate init 'pcl-inherited-signals
+                               (lambda (f &rest args)
+                                 (%p-sig-capture-inherited)
+                                 (apply f args)))))
+        (t
+         (%p-announce-unsupported
+          "%SIG" "an inherited SIG_IGN on INT TERM ALRM CHLD PIPE"
+          "this SBCL has no sb-kernel:signal-cold-init-or-reinit to capture it before; those signals start at perl's default"))))
+
+(defun %p-sig-inherited-ignore-p (signo d)
+  "True when SIGNO was SIG_IGN when the process started.  With a start-up
+   capture that is the whole answer; without one only D, the disposition NOW,
+   is known — and PIPE's IGN then says nothing (SBCL ignores PIPE itself)."
+  (if (listp *p-sig-inherited*)
+      (and (member signo *p-sig-inherited*) t)
+      (and (eq d :ignore) (not (eql signo sb-unix:sigpipe)))))
+
 (defun %p-sig-boot-scan ()
   "Read every signal's disposition as the process booted, BEFORE PCL touches
    one: the caught ones (minus +p-sig-taken-over+) become the runtime-owned
-   deny list, and an inherited SIG_IGN (`nohup', a shell's background job) is
-   what perl reports as $SIG{NAME} eq 'IGNORE'.  PIPE is left out of the
-   second half: SBCL ignores it itself, so an IGN there says nothing."
+   deny list, and an inherited SIG_IGN is what perl reports as $SIG{NAME} eq
+   'IGNORE' (%p-sig-inherited-ignore-p)."
   (let ((taken (mapcar #'%p-signal-number +p-sig-taken-over+))
         (owned nil))
     (dolist (e (rest *p-signal-numbers*))
       (let* ((signo (cdr e))
              (d (if (%p-sig-catchable-p signo) (%p-sig-disposition signo) :invalid)))
-        (case d
-          (:caught (unless (member signo taken) (pushnew signo owned)))
-          (:ignore (unless (eql signo sb-unix:sigpipe)
-                     (setf (gethash (car e) *p-sig-stored*) "IGNORE"))))))
+        (when (and (eq d :caught) (not (member signo taken)))
+          (pushnew signo owned))
+        (when (and (not (eq d :invalid)) (%p-sig-inherited-ignore-p signo d))
+          (setf (gethash (car e) *p-sig-stored*) "IGNORE"))))
     owned))
 
 (defun %p-signals-boot ()
   "Per PROCESS: forget the build's %SIG, derive the deny list, and put perl's
-   default dispositions where SBCL installed its own (see the header)."
+   dispositions where SBCL installed its own (see the header): the default, or
+   SIG_IGN when the process inherited the ignore.  CHLD keeps SBCL's handler
+   either way (run-program needs it); an inherited ignore there only reads
+   back as 'IGNORE' (docs/not-supported.md \"%SIG\")."
   (setf *p-sig-main-thread* sb-thread:*current-thread*
         *p-sig-relayed* nil
         *p-sig-relay-thread* nil
         *p-sig-relay-stop* nil
-        *p-chld-pending* nil)
+        *p-sig-pending* nil
+        *p-sig-any-handler* nil)
   (clrhash *p-sig-stored*)
   (setf *p-sig-runtime-owned* (%p-sig-boot-scan))
   (dolist (name '("INT" "TERM" "ALRM" "PIPE"))
-    (sb-sys:enable-interrupt (%p-signal-number name) :default))
+    (sb-sys:enable-interrupt (%p-signal-number name)
+                             (if (equal (gethash name *p-sig-stored*) "IGNORE")
+                                 :ignore
+                                 :default)))
   nil)
 
 (%p-signals-boot)

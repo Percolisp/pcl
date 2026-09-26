@@ -37,9 +37,48 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 21;
 
 my $workdir = tempdir(CLEANUP => 1);
+
+# The environment on the record, once (task #2376): which SBCL, what the
+# runtime derived from it, and what THIS process inherited.  CI run
+# 36192024430 failed rows 9-11 on a machine whose SBCL build and inherited
+# signal state nobody could see; the annotation now carries both.
+{
+    my $ver = `sbcl --version 2>&1`; chomp $ver;
+    my $form = '(progn (format t "owned:~{ ~A~}~%inherited-ignore:~{ ~A~}~%"'
+             . ' (mapcar (quote pcl::%p-signal-name) (sort (copy-list pcl::*p-sig-runtime-owned*) (quote <)))'
+             . ' (let ((i (and (boundp (quote pcl::*p-sig-inherited*)) (symbol-value (quote pcl::*p-sig-inherited*)))))'
+             . ' (if (listp i) (mapcar (quote pcl::%p-signal-name) i) (list i)))))';
+    my $derived = `sbcl @sbcl_rt --eval '$form' --eval '(sb-ext:exit)' 2>&1`;
+    $derived =~ s/\n+\z//;
+    $derived = substr($derived, 0, 400);
+    diag("$ver; runtime-derived: " . join('; ', split /\n/, $derived));
+    diag("this test process: " . signal_state());
+}
+
+# SigIgn / SigBlk / SigCgt of THIS process (Linux /proc; elsewhere "n/a") plus
+# the disposition of each signal NAMEd — a test's diagnostic, not the runtime.
+sub signal_state {
+    my (@names) = @_;
+    my $s = 'no /proc';
+    if (-r '/proc/self/status') {
+        open(my $fh, '<', '/proc/self/status') or die;
+        my %f = map { /^(\w+):\s*(\S+)/ ? ($1 => $2) : () } <$fh>;
+        $s = join ' ', map { "$_=" . ($f{$_} // '?') } qw(SigIgn SigBlk SigCgt);
+    }
+    my %seen;
+    for my $n (grep { !$seen{$_}++ } @names) {
+        my $num = eval "POSIX::SIG$n()";
+        next if !defined $num;
+        my $old = POSIX::SigAction->new;
+        POSIX::sigaction($num, undef, $old);
+        my $h = $old->handler;
+        $s .= " $n=" . (ref $h ? 'handler' : $h);
+    }
+    return $s;
+}
 
 sub status_str {
     my ($st) = @_;
@@ -59,9 +98,17 @@ sub prepare {
 
 # Run ARGV to completion: (stdout, stderr, wait status).  Optionally signal it
 # once it printed "ready\n" (SIG), or read only ONE line and close the pipe
-# (HEAD => 1, the `| head -1` shape).
+# (HEAD => 1, the `| head -1` shape).  INHERIT => [NAMES] starts it with those
+# signals SIG_IGN, the way `nohup`, a shell's background job or a .NET parent
+# (the GitHub Actions runner ignores PIPE) hands them over across exec.
+# Reading is bounded (30 s): a program that never exits must fail its row, not
+# hang the file.
 sub run_one {
     my ($argv, %o) = @_;
+    if ($o{inherit}) {
+        $argv = [$^X, '-e', 'my $n = shift; $SIG{$_} = "IGNORE" for splice(@ARGV, 0, $n); exec @ARGV or die "exec: $!"',
+                 scalar(@{$o{inherit}}), @{$o{inherit}}, @$argv];
+    }
     pipe(my $r, my $w) or die;
     my $errf = "$workdir/err.$$." . int(rand(1e9));
     my $pid = fork // die;
@@ -73,15 +120,24 @@ sub run_one {
     }
     close $w;
     my $out = '';
-    if ($o{sig}) {
-        my $ready = <$r>;
-        kill $o{sig}, $pid;
-    }
-    if ($o{head}) {
-        my $l = <$r>; $out = $l // ''; close $r;
-    } else {
-        local $/; $out .= <$r> // ''; close $r;
-    }
+    my $read_ok = eval {
+        local $SIG{ALRM} = sub { die "read timeout\n" };
+        alarm 30;
+        if ($o{sig}) {
+            my $ready = <$r>;
+            kill $o{sig}, $pid;
+        }
+        if ($o{head}) {
+            my $l = <$r>; $out = $l // '';
+        } else {
+            local $/; $out .= <$r> // '';
+        }
+        alarm 0;
+        1;
+    };
+    alarm 0;
+    close $r;
+    if (!$read_ok) { kill 'KILL', $pid; $out .= "[no end of output after 30 s]\n" }
     my $st;
     for (1 .. 300) {
         my $k = waitpid($pid, WNOHANG);
@@ -98,9 +154,11 @@ sub run_one {
 sub same_as_perl {
     my ($tag, $body, $desc, %o) = @_;
     my ($perl, $pcl) = prepare($tag, $body);
-    my ($po, undef, $ps) = run_one($perl, %o);
+    my ($po, $pe, $ps) = run_one($perl, %o);
     my ($co, $ce, $cs) = run_one($pcl, %o);
-    is("$cs\n$co", "$ps\n$po", $desc) or diag("PCL stderr: $ce");
+    is("$cs\n$co", "$ps\n$po", $desc)
+        or diag("perl: $ps, stderr [$pe]\nPCL:  $cs, stderr [$ce]\n"
+                . "test process: " . signal_state($o{sig} // 'PIPE', @{$o{inherit} // []}));
 }
 
 # 1-2: self-signals, deterministic.
@@ -203,3 +261,34 @@ PERL
     my ($o, undef, $st) = run_one(["$project_root/runpcl", $src]);
     is("$st|$o", 'signal 15|', './runpcl reports a signal death as one (PCLSbcl::exit_like)');
 }
+
+# 17-21: INHERITED ignores (task #2263).  A signal ignored when the process
+# started stays ignored and reads back 'IGNORE'; any store into its slot
+# replaces the ignore.  SBCL resets INT TERM ALRM CHLD PIPE at start-up, so
+# PCL captures the dispositions BEFORE that (cl/pcl-runtime.lisp, "Boot").
+# Row 17 is CI run 36192024430's row 11: the GitHub runner is a .NET process,
+# and .NET ignores SIGPIPE for every child it starts.
+same_as_perl('inh-pipe', 'print "line $_\n" for 1 .. 200000; print STDERR "reached the end\n";',
+             'SIGPIPE ignored by the parent: print into a closed pipe fails, the program runs on, "Unable to flush stdout" exits 1',
+             head => 1, inherit => ['PIPE']);
+
+same_as_perl('inh-readback', <<'PERL', 'inherited ignores read back as IGNORE and a self-kill of each is survived',
+$| = 1; print join(",", map { "$_=" . ($SIG{$_} // "undef") } qw(HUP INT TERM ALRM PIPE USR1)), "\n";
+kill HUP => $$; kill INT => $$; kill TERM => $$; kill PIPE => $$; alarm 1; sleep 2; print "survived\n";
+PERL
+             inherit => [qw(HUP INT TERM ALRM PIPE)]);
+
+same_as_perl('inh-bg-int', '$| = 1; print "ready\n"; my $t = time; select(undef, undef, undef, 0.05) while time - $t < 2; print "INT=$SIG{INT}, survived\n";',
+             "a shell's background job ignores INT: an external INT does nothing",
+             sig => 'INT', inherit => ['INT']);
+
+same_as_perl('inh-store', <<'PERL', 'a store replaces an inherited ignore: a handler runs, DEFAULT kills',
+$| = 1; $SIG{INT} = sub { print "caught $_[0]\n" }; kill INT => $$;
+$SIG{PIPE} = "DEFAULT"; print "pipe=$SIG{PIPE}\n";
+$SIG{TERM} = "DEFAULT"; kill TERM => $$; sleep 1; print "NOT REACHED\n";
+PERL
+             inherit => [qw(INT TERM PIPE)]);
+
+same_as_perl('inh-pipe-default', '$SIG{PIPE} = "DEFAULT"; print "line $_\n" for 1 .. 200000; print STDERR "reached the end\n";',
+             '$SIG{PIPE} = "DEFAULT" under an inherited ignore: the producer dies by SIGPIPE again',
+             head => 1, inherit => ['PIPE']);
