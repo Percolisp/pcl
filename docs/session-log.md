@@ -77,7 +77,7 @@ USER at the start: "Please continue." then the two queued questions answered -- 
 
 **Member 1 (diagnosability).**  `tools/ci-step` adds up to four `::error` annotations holding every `not ok` / `#   Failed test` block WITH its `#` lines (guard `tools/t/ci-step.t`, 10 rows, 7 fail on the base).  signals-01.t prints `sbcl --version`, the derived deny list + captured ignores and the test process's SigIgn/SigBlk/SigCgt once; a failing row prints both sides' status and stderr and the signal's disposition; reads are bounded (an ignored INT used to hang the perl side forever).  Rows 17-21 run both sides under inherited ignores (17-19 fail on 24422497).
 
-**Bars** (logs in `scratch/s498c/`): see the report; print-loop bench within noise (`bench.log`).  Tasks: #2263 CLOSED, #2375 #2376 DONE, #2377 filed.  Platform-touching (signals): macOS NOT TESTED (#2196).
+**Bars** (on the tree rebased onto `ccb64cd7`; logs in the agent scratch): gate twice PASS 265/8756; the CI rehearsal (official sbcl.org 2.6.0 binary + inherited PIPE ignore + ci-step) PASS; sweep TOTAL 18690 (+0) GATE clean; companion 8 signal/pipe files identical before/after; EVERYDAY 101 of 122 (NEW 0); ir-conform 324/0/21/0 stale; print-loop bench within noise (`bench.log`).  Tasks: #2263 CLOSED, #2375 #2376 DONE, #2377 filed.  Platform-touching (signals): macOS NOT TESTED (#2196).
 
 ## Session s494p (Opus agent, 2026-09-25/26; resumed in s498 after a reboot) -- perf round 35: three QUADRATIC everyday operations become linear (shift drain, unshift, `.=` under a loop modifier / `$s = $s . X`)
 
