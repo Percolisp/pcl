@@ -39,7 +39,7 @@ by hand** (DO-NOT-RETRY: mapping Word/Alpha/Space/Punct/… onto `sb-unicode`
 predicates — each is a perl-specific formula).  perl's internal `_Perl_*`
 properties have no prop_invlist answer; their lists are scanned from perl's own
 regex engine at every code point (t/uni/variables.t asks `\p{_Perl_IDStart}`
-of every code point: TIMEOUT 1,300 ok → 20,750 ok).  Every stored spelling is one
+of every code point: TIMEOUT 1,300 ok → 8,272–20,750 ok, load-dependent).  Every stored spelling is one
 perl accepts in a match (`"a" =~ /\p{S}/` — a match, not a `qr`, because an
 unknown `Is…` name is only looked up then), and each distinct list is
 spot-checked against perl's regex engine.  The tool is deterministic:

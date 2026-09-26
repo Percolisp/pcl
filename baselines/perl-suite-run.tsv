@@ -1,4 +1,9 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s496a (2026-09-26, Opus) -- SEVEN rows spliced by hand, every mover A/B'd `--jobs 1` against a
+#   b6560c21 `git archive` extraction (scratch/s496a/comp-base.tsv vs comp-final.tsv); cause in each
+#   row's sig column: four UP (#2060 properties), three DOWN where #2372 turned a silent no-match into a
+#   die (#2382 recursion, #2383 code-block condition, a control verb).  NOT spliced: uni/variables.t
+#   (TIMEOUT 1300 -> 8272 ok, load-dependent row count, up on \p{_Perl_IDStart}), re/speed.t (TIMEOUT noise).
 # s494g (2026-09-25, Opus) -- FOUR rows spliced by hand + ONE first measurement, every mover
 #   A/B'd `--jobs 1` against a dc20a721 extraction (scratch/s494g/companion-base2-movers.log)
 #   and this tree (companion-rebased.log); cause in each row's sig column.  lib/croak.t is
@@ -1867,7 +1872,7 @@ op/join.t	43	0	43	0	OK	s492a: 41/2 -> 43/0 (#1991, a REFERENCE in a list operato
 op/kill0.t	9	0	6	3	DIFF		0
 op/kvaslice.t	38	0	25	13	DIFF	s473t6c #1923: a kv-slice in SCALAR context is its LAST value, not the COUNT of the flattened key/value list -- gen_kv_array_slice_form was one of the two slice emitters that did not call _slice_in_context_form.  C 23/15 -> 25/13, 2 FIXED ROWS ("last element in scalar context", "correct value"), 0 NEW.  Was: s457ai #818 (the KV-slice VALUE half is an alias, so the write-through rows pass)	0
 op/kvhslice.t	39	0	22	17	DIFF	s473t6c #1923: the hash twin of the kv-slice scalar-context fix.  C 21/18 -> 22/17, 1 FIXED ROW ("correct value"), 0 NEW.  Was: s473t1 #1024 (a lone BAREWORD key in a kv-slice was compiled as a SUB CALL)	0
-op/lc.t	2716	0	2685	31	DIFF		0
+op/lc.t	2716	0	2688	28	DIFF	s496a #2060: 2685/31 -> 2688/28 -- the three \p{IsWord} s///e rows pass on properties from perl's own tables (A/B: b6560c21 extraction 2685/31)	0
 op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
@@ -2012,14 +2017,14 @@ re/keep_tabs.t	14	0	14	0	OK		0
 re/no_utf8_pm.t	1	0	1	0	OK		0
 re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
 re/overload.t	87	0	3	0	TIMEOUT	timeout	0
-re/pat.t	1263	4	245	124	DIFF	s492b: 231/138 -> 245/124 (233/136 measured on a 5ce155cb extraction -- +2 of the 14 are PRE-EXISTING snapshot drift, +12 are this batch), #2004 -- t/re/pat.t:45's `eval sprintf 'is $%d, "%s", q($%d = %s); 1', ($n, substr(...))x2` gives sprintf a LIST where the call's own SCALAR context used to leak in, so the twelve `$1 = A` .. `$12 = L` rows pass.  Positional TAP diff of the two runs: exactly those 12 flipped, nothing flipped the other way (scratch/s492b/keep-{base,tree}/re_pat.t.out).  aborted-forms:1: Failed to match at pat.t line N.	0
-re/pat_advanced.t	1678	0	1258	422	DIFF		0
+re/pat.t	1263	4	206	99	DIFF	s496a #2372 -> #2383: 245/124 -> 206/99 -- a code-block CONDITION (?(?{...})...) was a silent no-match; a pattern that cannot compile now DIES, and the file stops there (A/B: b6560c21 245/124)	0
+re/pat_advanced.t	1678	0	698	142	DIFF	s496a #2372 -> #2382: 1262/418 -> 698/142 -- regex RECURSION (?1) at line 1122 was a silent no-match and now DIES, the rows past it ran on the no-match (A/B: b6560c21 1262/418; the snapshot's 1258/422 was +4 PRE-EXISTING at b6560c21, cause not this batch)	0
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_psycho.t	15	0	15	0	OK		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_re_eval.t	527	0	65	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-re/pat_rt_report.t	2513	1	2459	51	DIFF	s492b: 2458/52 -> 2459/51, #2001 -- "pos() works with () = m//; Bug 20010814.004 (#7526)": a LIST-context `//gc` now starts at pos and, with /c, leaves it at the end of the last match, so `join ":", /b./gc` then `join ":", /a./gc` then `pos` is "ba:ba ad:ae 10".  Positional TAP diff: exactly that one row flipped.  Measured --jobs 1 on a 5ce155cb extraction: 2458/52 there	0
+re/pat_rt_report.t	2513	1	2431	26	DIFF	s496a #2372: 2459/51 -> 2431/26 -- the control verb (*:B) at line 872, ruled "left in, rejected" (not-supported.md), now DIES instead of silently no-matching (A/B: b6560c21 2459/51)	0
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_special_cc.t	9	0	9	0	OK		0
 re/pat_special_cc_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
@@ -2053,7 +2058,7 @@ re/regexp_qr.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_qr_embed.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_qr_embed_thr.t	0	0	242	1787	NOTAP	aborted-forms:3: The function main::pl-useithreads is undefined.; s490 review of s473t6b (#1850): the harness's TAP is on disk row by row, so a file the runner KILLS keeps every row that ran, not only the rows that had flushed -- NOTAP 202/1656 -> NOTAP 242/1787, parallel and serial agreeing (perl skips the file: no threads)	0
 re/regexp_trielist.t	2167	2	795	110	TIMEOUT	timeout	0
-re/regexp_unicode_prop.t	1110	0	778	332	DIFF		0
+re/regexp_unicode_prop.t	1110	0	1003	107	DIFF	s496a #2060: 778/332 -> 1003/107 -- \p{...} answered from perl's tables; the remaining rows are user-defined IsMyRuntimeProperty ordering + ungenerated properties (A/B: b6560c21 778/332)	0
 re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/rt122747.t	3	0	3	0	OK		0
 re/rxcode.t	42	0	26	15	DIFF		0
@@ -2079,7 +2084,7 @@ re/user_prop_race_thr.t	0	0	0	3	NOTAP	aborted-forms:1: This Perl not built to su
 run/cloexec.t	22	0	16	6	DIFF		0
 run/dtrace.t	0	0	0	0	NOTAP		0
 run/exit.t	17	0	12	5	DIFF	s494g #2107: the snapshot's 14/3 was STALE (40da28bd and dc20a721 both read 10/7: the ${^CHILD_ERROR_NATIVE} rows, #1710); s494g 10/7 -> 12/5 -- 'Term by signal' / 'Term by signal $?' pass (the `kill 15, $$` child dies BY the signal)	0
-run/fresh_perl.t	91	0	61	30	XDIFF	s488a: 60/31 -> 61/30 at 6aa2f358 (s473e member 1, #1161/#1244(a): a `continue` block joins the dynamic-exit frame).  t/run/fresh_perl.t:524 is `sub f { my $a = 1; ...; next } my $x = "foo"; { f } continue { print $x, "\n" }` -- probed directly: at the parent c60336e6 PCL dies `Can't "next" outside a loop block`, at 6aa2f358 it prints `foo` as perl does.  Its perl-suite-expected-rows.tsv registration was STALE and was removed in this commit (which is what the runner's STALE verdict asked for)	0
+run/fresh_perl.t	91	0	62	29	XDIFF	s496a #2060: 61/30 -> 62/29 -- [perl #20667] unicode regex row passes; its registration left perl-suite-expected-rows.tsv by --bless-rows	0
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -2106,7 +2111,7 @@ uni/attrs.t	35	0	8	26	DIFF		0
 uni/bless.t	84	0	83	1	DIFF		0
 uni/caller.t	18	0	7	12	DIFF		0
 uni/chomp.t	446	0	446	0	OK		0
-uni/class.t	12	0	0	12	DIFF		0
+uni/class.t	12	0	12	0	OK	s496a #2060: 0/12 -> OK 12/0 -- user-defined and perl properties in character classes (A/B: b6560c21 0/12)	0
 uni/eval.t	5	0	5	0	OK		0
 uni/fold.t	19128	104	928	232	DIFF	aborted-forms:3: Can't locate loadable object for module Storable in @INC While evaluating the form startin	0
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
