@@ -317,6 +317,17 @@ sub subst_agrees {
     is($got, $exp, "$desc (perl: $exp)");
 }
 
+sub subst_agrees_stdout {
+    my ($program, $desc) = @_;
+    my $root = "$RealBin/../..";
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $program;
+    close $fh;
+    chomp(my $exp = `perl $file 2>/dev/null`);
+    chomp(my $got = `$root/runpcl $file 2>/dev/null`);
+    is($got, $exp, "$desc (perl: $exp)");
+}
+
 subst_agrees(<<'PL', 's/// replacement: the punctuation magics are live (#520)');
 my $a = "xAy";  $a =~ s/A/[$&]/;
 my $b = "xAy";  $b =~ s/A/[$`|$']/;
@@ -423,7 +434,8 @@ PL
 # match; now they would die where perl does not): the USELESS inline flags
 # c g o (perl warns "Useless (?c)" and ignores them) and perl 5.38's
 # OPTIMISTIC code block `(*{…})`, stripped like `(?{…})`.  s496a.
-subst_agrees(<<'PL', 'useless (?c)/(?g)/(?o) flags are ignored and (*{...}) is stripped, as (?{...}) is (#2372)');
+# STDOUT only: the strip is ANNOUNCED on the transpile's stderr (#874), as for (?{...}).
+subst_agrees_stdout(<<'PL', 'useless (?c)/(?g)/(?o) flags are ignored and (*{...}) is stripped, as (?{...}) is (#2372)');
 no warnings;
 my @r;
 for my $p ('(?c)a', '(?-c)a', '(?g-o)a', '(?ogc)a', '(?ic:A)', '(?o-cg)a', '(?i-c)A', 'x(?c:y)') {
