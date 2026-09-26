@@ -30291,17 +30291,16 @@ buffer's fill-pointer; everything else falls back to file-length."
              (notany (lambda (f) (funcall f c)) excludes)
              (every (lambda (f) (funcall f c)) intersects))))))
 
-(defparameter +p-grapheme-text+ "(?>\\r\\n|(?s:.))"
-  "perl's \\X (extended grapheme cluster), APPROXIMATED as \"a CRLF pair or one
-   character\" (task #2050).  perl's own definition is UAX #29 -- a base
-   character plus its combining marks, Hangul syllables, emoji ZWJ sequences,
-   regional indicators -- and the legacy approximation
-   `(?>\\r\\n|\\P{M}\\p{M}*|\\p{M}+)` needs \\p{M}, which this engine does not
-   answer (measured: `\"\\x{301}\" =~ /\\p{M}/` is false here and true in perl).
-   So a combining mark is its own cluster under PCL.  What matters is that \\X
-   MATCHES: it used to be passed through untouched and NEVER matched anything,
-   which made core Text::Wrap's whole main loop fail and every wrap()/fill()
-   die \"This shouldn't happen\".  docs/not-supported.md carries the residue.")
+(defparameter +p-grapheme-text+ "(?>\\r\\n|[^\\p{M}][\\p{M}]*|[\\p{M}]+)"
+  "perl's \\X (extended grapheme cluster), APPROXIMATED by the legacy rule
+   `(?>\\r\\n|\\P{M}\\p{M}*|\\p{M}+)`: a CRLF pair, or a base character with
+   its combining marks, or a run of marks with no base (task #2060; it was
+   \"a CRLF pair or one character\" while \\p{M} did not work, #2050).  It is
+   spelled here in the form %pcl-property-escape-text would give it — the
+   classes already made — because this text is inserted BY that scan and is
+   not re-scanned.  STILL NOT UAX #29: Hangul syllable sequences, emoji ZWJ
+   sequences and regional-indicator pairs are each several clusters here and
+   one in perl (docs/not-supported.md, task #2381).")
 
 (defun %pcl-property-escape-end (pat i)
   "PAT has `\\p' or `\\P' at I.  The index just past the property it spells —

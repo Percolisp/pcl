@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 sub run_cl {
     my ($code) = @_;
@@ -134,10 +134,11 @@ test_cl('charset strip keeps real flags and leaves an escaped paren alone',
 # state -- \X \N \K \p{...} \g{-1} \b{wb} -- and these are the two that can be
 # said exactly or nearly so here:
 #   \N  is "any character but a newline", perl's own definition: EXACT.
-#   \X  is an extended grapheme cluster, APPROXIMATED as a CRLF pair or one
-#       character, because the legacy approximation needs \p{M} and this
-#       engine has no property support (docs/not-supported.md; that class is
-#       DEFERRED, owner #1036).
+#   \X  is an extended grapheme cluster, APPROXIMATED.  Here (s492c) as a CRLF
+#       pair or one character, because the legacy approximation needs \p{M};
+#       since s496a (#2060, properties from perl's own tables) it IS the legacy
+#       rule -- a base character with its combining marks -- see the #2060 row
+#       below and Pl/t/uniprops-01.t.
 # The rest stay silent for now and are named in docs/not-supported.md.
 test_cl('#2050: \X matches one character (it used to match NOTHING)',
         q{my $s = "abc"; print $s =~ /^(\X{0,5})/ ? "[$1]" : "no", "\n";},
@@ -150,6 +151,10 @@ test_cl('... and \X is ATOMIC over a CRLF pair, as perl is',
 test_cl('... and inside a bracket class it is the LETTER X, as perl says',
         q{print "X" =~ /^[\X]$/ ? "letter" : "no", "\n";},
         "letter\n");
+
+test_cl('#2060: \X takes a base character WITH its combining marks (legacy rule)',
+        qq{my \$n = () = "e\\x{301}f\\x{301}\\x{300}" =~ /\\X/g; print "\$n ", ("\\x{301}" =~ /^\\X\$/ ? 1 : 0), "\\n";},
+        "2 1\n");
 
 test_cl('#2050: \N is any character but a newline',
         qq{print "a\\nb" =~ /^(\\N+)/ ? "[\$1]" : "no", "\\n";},
