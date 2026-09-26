@@ -38,7 +38,7 @@ modules/IPC-Open2-Open3	DIFF	1	#2082 open2/open3 with a LIST command; the handle
 modules/Math-BigInt-BigFloat	DIFF	1	#2083 Math::BigFloat->bdiv(3, 20) exhausts the binding stack
 modules/Scalar-Util	DIFF	1	#2084 (3) isweak is always false after weaken; openhandle/readonly stubs
 modules/Sys-Hostname-Env-English	DIFF	1	#2084 (5) `use Env qw(HOME @PATH)` needs tie on scalars-by-name and arrays (#155)
-modules/Text-Wrap-ParseWords-Abbrev	DIFF	1	#2060 \pM / \PM never match (cl-ppcre's property resolver is never set): core Text::Wrap 5.40.3's loop is built on them, not on \X, so EVERY wrap()/fill() call still dies (re-attributed s495 review; #2050 is closed)
+modules/Text-Wrap-ParseWords-Abbrev	DIFF	4	#2085 `%{{ abbrev(...) }}` (a hash deref of an anonymous-hash constructor holding a CALL) is a whole-statement refusal at line 9 -- re-attributed s496a: #2060 made core Text::Wrap work (the wrap() lines 1-3 now match perl) and the program runs to this line
 modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not implemented
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
