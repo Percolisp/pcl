@@ -3292,12 +3292,26 @@ backtrace, and EXITS 0 on SIGTERM — a supervisor then reads success.
   END blocks and no buffer flush, as perl; PIPE's default is also death, so a
   producer writing into a closed pipe (`prog | head -1`) stops.  With
   `$SIG{PIPE} = "IGNORE"` the write returns false and `$!` is EPIPE.  An
-  INHERITED ignore (`nohup`'s HUP) reads back as `"IGNORE"` and stays in force.
+  INHERITED ignore (`nohup`'s HUP, a background job's INT, a parent's
+  `trap "" PIPE`) reads back as `"IGNORE"` and stays in force until the program
+  stores into the slot — on every signal, including the ones the host resets
+  at start-up (the dispositions are read BEFORE the host installs its own) —
+  except CHLD, which perl itself resets to the default.  A write that fails
+  (EPIPE with PIPE ignored) returns false and DISCARDS its unwritten buffer;
+  when the final flush of STDOUT at exit fails, `Unable to flush stdout:
+  <strerror>` goes to STDERR and an exit status of 0 becomes 1.
 - **Delivery.**  A handler runs as soon as the program is at a safe point; a
   signal a process sends ITSELF (`kill USR1 => $$`) is handled before `kill`
   returns.  A handler that RETURNS ends a running `sleep` early (it returns the
   seconds slept); one that DIES unwinds to the nearest `eval` from wherever the
   program was.  A signal arriving inside a handler waits until it returns.
+  Handlers run in the PROGRAM's thread, never inside a write into a stream's
+  buffer: a signal arriving during `print` / `printf` / `say` is held and
+  handled when that write is over — unless the write is BLOCKED (the
+  descriptor takes no byte), where the handler runs at once, so `alarm` +
+  `die` still leaves a print into a stalled pipe.  (Without the hold a handler
+  that printed wrote the interrupted line twice: `print "ready\n"` then TERM
+  gave `ready\nready\ncaught TERM\n`.)
   Handlers survive `fork` in both processes; a program started by `system`,
   qx or `exec` starts with default dispositions.
 - **CHLD** is also the host's own (child bookkeeping): the Perl handler runs

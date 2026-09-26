@@ -1440,10 +1440,17 @@ process BY the signal (the normative contract is `docs/ir-spec.md` §8, "The
 - **A wholesale `%SIG = (...)` or `local %SIG` holds PLAIN slots** for its
   extent: a handler stored through them is not installed (task #2264), except
   ALRM, which `alarm` installs from whatever `$SIG{ALRM}` holds.
-- **An inherited SIG_IGN on a signal SBCL resets at start-up** (INT TERM ALRM
-  CHLD PIPE — the background job of a non-interactive shell ignores INT) is
-  invisible: those start at perl's default (task #2263).  Inherited ignores on
-  every other signal (`nohup`'s HUP) are seen and kept.
+- **An inherited SIG_IGN on INT TERM ALRM PIPE is invisible in SOURCE MODE
+  only** (`PCL_NO_CORE=1`, a development switch): those signals start at
+  perl's default there.  Every saved core (the cached one, an installed
+  `pcl.core`, an executable) captures the inherited dispositions before SBCL's
+  start-up resets them and keeps the ignore, as perl does (task #2263, closed
+  s498c); an SBCL without `sb-kernel:signal-cold-init-or-reinit` says so once
+  at load (`PCL: %SIG: …`).
+- **An inherited BLOCKED signal mask is cleared at start-up** (SBCL unblocks
+  every signal when it boots): perl keeps the mask, so a signal the parent
+  blocked stays pending and no handler runs; under PCL the handler runs
+  (task #2377).
 - **Signal NAMES are Linux's.**  `%SIG`'s key set is perl's Linux `sig_name`
   list; the NUMBERS come from SBCL's constants by name, so `kill USR1` sends
   the right signal on macOS, but a macOS-only name (`INFO`, `EMT`) is not a key.
