@@ -3027,14 +3027,21 @@
   `(handler-case (%p-with-wide-upgrade ,@body)
      (stream-error (c) (%pcl-save-errno) (%p-drop-unwritten-output c) *p-undef*)))
 
+(defvar *p-write-failed* (make-hash-table :test 'eq :weakness :key)
+  "Streams a write FAILED on since they were opened: perl's PerlIO error flag.
+   close answers false for them (probed: `print $fh` to /dev/full, then
+   `close $fh`, is false even though nothing is left to flush).")
+
 (defun %p-drop-unwritten-output (c)
   "perl's buffer flush EMPTIES the buffer when the write fails (PerlIOBuf_flush
-   resets it after setting the error), so the bytes are gone and the next
-   flush has nothing to retry.  SBCL keeps them and retries at every later
+   resets it after setting the handle's ERROR flag), so the bytes are gone and
+   the next flush has nothing to retry; the flag is what makes a later close
+   false (*p-write-failed*).  SBCL keeps the bytes and retries at every later
    flush — so `$| = 1; print` into a closed pipe with SIGPIPE ignored failed
    AGAIN at exit, `Unable to flush stdout' and status 1, where perl's exit
    flush has nothing left and exits 0 (task #2263)."
   (let ((s (%p-stream-target (stream-error-stream c))))
+    (setf (gethash s *p-write-failed*) t)
     (when (sb-sys:fd-stream-p s)
       (let ((obuf (sb-impl::fd-stream-obuf s)))
         (when obuf
@@ -17628,7 +17635,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
        ;; CL `close' does not distinguish it — it returns T for a stream it
        ;; closed and for one that was closed already.
        (if (open-stream-p (%p-stream-target v))
-           (let ((ok (%p-close-maybe-pipe v)))
+           (let ((ok (and (%p-close-maybe-pipe v)
+                          (not (remhash (%p-stream-target v) *p-write-failed*)))))
              (%p-forget-fh fh)
              ;; A close that FAILED with the handle open (a fork-pipe child
              ;; that exited non-zero, a final flush the OS refused) leaves $!
@@ -21877,9 +21885,28 @@ buffer's fill-pointer; everything else falls back to file-length."
                 ;; rather than round the relay thread, which would let the
                 ;; statements after the kill run first.
                 (progn (%p-sig-deliver sig) (incf n))
-                (handler-case (progn (sb-posix:kill p sig) (incf n))
+                (handler-case (progn (%p-kill-one p sig) (incf n))
                   (error () (%pcl-save-errno))))))
     n))
+
+(defun %p-kill-one (pid sig)
+  "Send SIG to PID.  To THIS process it goes to the CALLING thread
+   (pthread_kill), which the kernel delivers before the call returns — perl's
+   `kill SIG => $$` order.  A process-directed kill may land on another thread
+   (SBCL's finalizer thread), whose delivery is forwarded to the program's
+   thread ASYNCHRONOUSLY, so `kill INT => $$; kill TERM => $$` ran TERM's
+   handler first (measured s498c, task #2375).  The default action of a
+   thread-directed signal still ends the whole process."
+  (if (eql pid (sb-posix:getpid))
+      (let ((rc (sb-alien:alien-funcall
+                 (sb-alien:extern-alien "pthread_kill"
+                                        (function sb-alien:int sb-alien:unsigned-long
+                                                  sb-alien:int))
+                 (sb-thread::thread-os-thread sb-thread:*current-thread*) sig)))
+        (unless (zerop rc)
+          (setf (sb-alien:extern-alien "errno" sb-alien:int) rc)
+          (error "pthread_kill: ~D" rc)))
+      (sb-posix:kill pid sig)))
 
 (defun %p-resolve-signal (signal)
   "Coerce a Perl kill() signal designator (number or name) to an integer."
