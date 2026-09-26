@@ -1,4 +1,14 @@
 # taken-at: 5323d9e 2026-08-15
+# s497b (2026-09-26, Opus, EDITED BY HAND -- six rows, TOTAL 18693 -> 18714 on top of s496a):
+#   die.t 3 -> 7: its $SIG{__DIE__} rows are restored (#1554, the handler is
+#   called now; plan 3 -> 7 -- the stub test.pl's isa_ok prints unnumbered).
+#   local.t 302 -> 305: see fail-baseline's s497b note (chop through the box).
+#   postfixderef.t 102 -> 103 (row 75) and ref.t 188/189 "PVBM is not a
+#   SCALAR/ARRAY ref": strict refs is enforced (#2103).  ref.t 220-223 and
+#   tr.t 248 "fails on zero-length ro string": a literal in a foreach list is
+#   read-only (#1391/#2103; both skip-registry entries narrowed/removed).
+#   qr.t 23 -> 29: `$$qr = v` keeps the Regexp object (rows 11 13 14 16 17 18).
+#   Every mover A/B'd against a 24422497 extraction (scratch/s497b/base).
 # s496a (2026-09-26, Opus, EDITED BY HAND -- one row): lc.t 82/0 -> 85/0, planned
 #   2659 -> 2662.  Cause: #2060 -- perl-tests/lc.t's three `\p{IsWord}` rows had been
 #   COMMENTED OUT ("PCL: \p{IsWord} ... Skip") because properties never matched;
@@ -419,7 +429,7 @@ crypt.t	OK	5	0	6
 defined.t	OK	5	0	5
 defins.t	OK	27	0	27
 delete.t	OK	53	3	56
-die.t	OK	3	0	3
+die.t	OK	7	0	7
 die_exit.t	OK	17	0	17
 do.t	OK	65	3	73
 # s445/s446k (#479): the readline-in-ternary cascade repair makes <FOO> // and <$foo> // compile —
@@ -449,7 +459,7 @@ kvhslice.t	OK	22	2	39
 lc.t	OK	85	0	2662
 length.t	PARTIAL	35	3	49
 lex.t	OK	45	0	53
-local.t	OK	302	11	319
+local.t	OK	305	8	319
 loopctl.t	OK	64	0	67
 lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
@@ -502,12 +512,12 @@ parent.t	OK	7	2	9
 pos.t	OK	15	15	30
 # s446j (#517): postfixderef.t 95 -> 96 EDITED BY HAND — the same `ref(\&{""})` row as ref.t's
 #   ([perl #94476]); it left fail-baseline.tsv by EDIT in the same commit.
-postfixderef.t	PARTIAL	102	19	128
+postfixderef.t	PARTIAL	103	18	128
 pow.t	OK	268	0	268
 print.t	OK	3	0	3
 push.t	OK	32	0	32
 qq.t	OK	30	0	30
-qr.t	OK	23	14	37
+qr.t	OK	29	8	37
 quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
 readline.t	PARTIAL	25	5	36
@@ -525,7 +535,7 @@ recurse.t	OK	26	2	28
 #   here) and by the sweep serially ("Still losing rows after a serial re-run: magic.t").  The
 #   file's 31 failing rows are the SAME 31 (their numbers shift by 2), so fail-baseline.tsv is
 #   unchanged; baselines/row-shortfall.tsv perl-tests/magic.t 19 -> 21 in the same commit.
-ref.t	PARTIAL	195	16	245
+ref.t	PARTIAL	201	14	245
 reset.t	OK	22	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
@@ -541,7 +551,7 @@ study.t	OK	43	0	43
 sub.t	OK	54	2	65
 substr.t	PARTIAL	351	0	397
 time.t	OK	72	0	72
-tr.t	PARTIAL	239	3	317
+tr.t	PARTIAL	240	3	317
 translate.t	OK	257	0	257
 undef.t	OK	31	0	35
 unshift.t	OK	19	0	19

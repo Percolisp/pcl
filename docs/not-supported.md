@@ -83,7 +83,7 @@ The handful most likely to matter to a program that is otherwise portable:
 ### Values, scalars and the data model
 
 * [Interned boolean constants (`!0` / `!1` identity)](#interned-boolean-constants-0--1-identity)
-* [A LITERAL in a `foreach` list is writable, not read-only](#a-literal-in-a-foreach-list-is-writable-not-read-only)
+* [A LITERAL reached through `sort` / `reverse` / `grep` in a `foreach` list is writable](#a-literal-reached-through-sort--reverse--grep-in-a-foreach-list-is-writable)
 * [Read-only constants via `\undef` stash tricks](#read-only-constants-via-undef-stash-tricks)
 * [Scalar copy does not preserve reference/SV identity](#scalar-copy-does-not-preserve-referencesv-identity)
 * [Sparse arrays (holes), element aliasing, and SV identity](#sparse-arrays-holes-element-aliasing-and-sv-identity)
@@ -160,7 +160,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [A single generated top-level form above 64k characters](#a-single-generated-top-level-form-above-64k-characters)
 * [Pathological expression nesting depth (≥ ~10k) — DEFERRED](#pathological-expression-nesting-depth--10k--deferred--revisit-after-release-1)
 * [Lexical compile-time hints (`$^H` / `%^H` scoping)](#lexical-compile-time-hints-h--h-scoping)
-* [`use strict 'refs'` is not enforced — every dereference is the `no strict` one](#use-strict-refs-is-not-enforced--every-dereference-is-the-no-strict-one)
+* [`use strict 'refs'` — what is still not enforced (the write path, module imports, code refs)](#use-strict-refs--what-is-still-not-enforced-the-write-path-module-imports-code-refs)
 * [Source filters (`Filter::Util::Call`, `Filter::Simple`, …)](#source-filters-filterutilcall-filtersimple-use-switch-)
 
 ### Errors, warnings and diagnostics
@@ -230,37 +230,17 @@ global constant table besides.
 
 ---
 
-## A LITERAL in a `foreach` list is writable, not read-only
+## A LITERAL reached through `sort` / `reverse` / `grep` in a `foreach` list is writable
 
-**Perl behaviour:** a constant in a foreach list is a read-only scalar, and the
-loop variable aliases it — so `for (3) { $_++ }` and `for ($x, 3) { $_++ }`
-both die *"Modification of a read-only value attempted"* (after the writable
-elements before the literal have already been modified).
+**Mostly IMPLEMENTED since s497b (tasks #1391 / #2103)**: a literal in the
+LIST of a promoting foreach — `for my $x (1) { $x = 2 }`, `$_++ for (1, 2)`,
+`for ("abc") { chop }` — is a read-only box and a write dies *"Modification of
+a read-only value attempted"*, while a range, an array, a variable and a `map`
+result stay writable (`docs/ir-spec.md` §6.2).
 
-**PCL behaviour:** the literal becomes an ordinary box like any other element,
-so the write silently lands on a copy and the loop runs to completion.  Every
-non-literal element in the same list is written correctly.
-
-**Rationale:** same missing mechanism as the two entries around this one — a
-read-only **scalar** has nowhere to carry the flag in PCL's box model (task
-#159 gave read-only *arrays* a real representation because there the storage
-itself is fixed-size).  This is not new to #267's multi-element aliasing: the
-single-element spelling `for (3) { $_++ }` has always behaved this way, probed
-live against perl in s370.  Nothing consumes a wrong value — the program keeps
-running where perl stops — so it is an accepted divergence, not a silent-wrong
-in the rule-12 sense.
-
-**Sized s473h, task #1391** (18 shapes vs perl 5.40.3): perl dies in 8 of
-them, and the property is per **element** (`("a", $v)` writes the second and
-refuses the first), propagates through `sort`/`reverse`/`grep`, and does NOT
-propagate through `map` (which copies).  "A flag on literal boxes" is not
-available: a literal in the emitted list is a RAW value in `(vector "a" "b")`,
-and `%p-foreach-elt` PROMOTES it — while raw slots of a real array must keep
-being promoted, so raw-vs-boxed cannot stand in for literal-vs-variable.  What
-it would take is in #1391: the compiler marks the literal SLOTS, the aliasing
-binder refuses to promote a marked slot (the fatal already exists, from #159),
-and the aliasing operators propagate the mark.  The check then sits at the
-BINDER, not in `box-set`, which is what makes it worth trying.
+**Still missing:** the read-only mark does not PROPAGATE through `sort` /
+`reverse` / `grep` (`for my $x (sort "b", "a") { $x .= "!" }` still modifies)
+— the rest of #1391, owner of ir-conform `272-sort`.
 
 ---
 
@@ -742,15 +722,18 @@ matching lowercases first and so ACCEPTS it — valid-input only (principle 9).
 
 ## `$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 
-**Perl behaviour:** `die` invokes any `$SIG{__DIE__}` handler; `warn` invokes
-any `$SIG{__WARN__}` handler.
+**IMPLEMENTED since s497b (task #1554)**: `pl-warn` invokes `$SIG{__WARN__}`,
+and every perl-level die — `die LIST` and the runtime's own fatals — calls
+`$SIG{__DIE__}` at the raise site, before unwinding, inside `eval {}` too
+(`docs/ir-spec.md` §6.3c).
 
-**PCL behaviour:** `pl-warn` invokes `$SIG{__WARN__}` correctly.  `pl-die`
-does NOT invoke `$SIG{__DIE__}` — implementing this requires CL condition
-restarts and is deferred.
-
-**Affected tests:** `perl-tests/die.t` tests using `$SIG{__DIE__}` are
-commented out.
+**Still missing:** a string eval's COMPILE error (`eval '1+;'`, `eval
+'$undeclared'` under strict vars) is reported without a perl die, so the
+handler is not called for it (op/eval.t "nested eval … calls sig die as
+expected", op/die.t 21-25) — task #2409.  Other rows that cite this section
+have their own causes and are to be re-cited: op/die_keeperr.t is `DESTROY`
+("`(in cleanup)`" warnings), op/warn.t 24/26 is a TIED `$@`, op/die.t 7/8/10/12
+are the stub test.pl's unnumbered `isa_ok` (#1953).
 
 ---
 
@@ -3658,40 +3641,31 @@ exit site — the two halves must agree, since with no frame there is nothing to
 throw to.  It is the one Kind-A gate whose OFF arm is not semantics-preserving,
 and it says so in the registry.
 
-## `use strict 'refs'` is not enforced — every dereference is the `no strict` one
+## `use strict 'refs'` — what is still not enforced (the write path, module imports, code refs)
 
-**Perl behaviour:** under `use strict 'refs'` (which `use strict` turns on), a
-dereference of a plain STRING is a compile-scope fatal — `Can't use string
-("foo") as a HASH ref while "strict refs" in use`.  Under `no strict 'refs'`
-the same expression is a SYMBOLIC reference: it names the package variable
-that string spells, so `my @a = ('foo'); $a[0]{k} = 13;` inside `package P`
-writes `$P::foo{k}`.
+**Enforced since s497b (task #2103)**: `strict refs` is a LEXICAL fact the
+compiler reads per dereference site (`docs/ir-spec.md` §3.2f) — an rvalue
+`@$x` / `%$x` / `$$x` / `"@$x"` of undef, and every cast or element READ of a
+string or a number, dies as perl does; `no strict 'refs'` blocks keep the
+symbolic arms; `use VERSION` >= 5.011 implies it; a string eval inherits it.
+perl's own `t/lib/strict/refs` cases: 26 of 33 agree died/lived (13 before).
 
-**PCL behaviour:** always the second one.  PCL tracks no `strict` state (it is
-a lexical compile-time hint, the same gap as `$^H`/`%^H` above), and every
-site that resolves a string in reference position — `p-ensure-hashref`,
-`p-ensure-arrayref`, `p-cast-%`, `p-cast-@`, `p-cast-$` — goes to the package
-variable.  So the `no strict 'refs'` half of a program is RIGHT and the
-`use strict 'refs'` half does not die.
+**Still NOT enforced** — each lives where perl dies, the safe direction:
 
-**Why it is now visible where it was not (s473b, task #1241):** before, the
-intermediate level of a chain whose slot held a defined non-reference was
-CLOBBERED — `$a[0]{k} = 13` replaced the string `'foo'` with a fresh hash,
-which is neither of perl's two answers, and the resulting `%P::foo` stayed
-empty.  The clobber is gone (the two entry paths now share
-`p-ensure-hashref`), so the no-strict answer is right and the strict answer is
-honestly wrong instead of quietly wrong.  `perl-tests/multideref.t` records
-exactly that trade: `no strict refs, exist` moved from fail to pass and
-`strict refs, not exist` from pass to fail, TOTAL unchanged.
+* **the WRITE / vivifying-chain path through a string** — `$str->{k} = 1`,
+  `push @{ $h->{list} }, …` over a string, `exists $h->{k}{j}{i}` through a
+  non-reference (the `p-ensure-hashref` family has no site slot) — task #2403;
+* **code and glob derefs** — `&$str()`, `*{"name"}` — task #2403;
+* **a module that imports strict into its caller** (`use Moo`, `use Moose`,
+  `use Mojo::Base`, `use Modern::Perl`, `use common::sense`) — the file reads as
+  non-strict unless it says `use strict` itself — task #2406;
+* **an rvalue site the whitelist does not name** (`Pl::ExprToCL::_deref_is_rvalue`)
+  keeps the vivifying form;
+* **`strict vars` and the compile-time half of `strict subs`** (a perl COMPILE
+  error: `Global symbol "$x" requires explicit package name`) — the same
+  missing hints model as the warnings (#221); comp/use.t's four remaining
+  "ver decl enables vars/subs" rows are these.
 
-**What would lift it:** a `strict`-hints model, the same shape task #221
-sketches for warnings — one compiled-per-lexical-scope boolean the reference
-resolvers consult (a SITE argument, not a dynamic variable: strict is lexical,
-so a dynamic binding would leak into called subs), plus perl's message text.
-Not scheduled; **task #1390** owns it and carries the nine-spelling
-measurement (s473h) — `$s->{k}`, `exists`, `delete`, `keys %$s`, the ARRAY
-spellings and the write all diverge together, so `exists` is not a singleton.
-`ir-conform/known-fail.tsv` row `253-string` is owned by #1390.
 
 ## `undef *GLOB` leaves an EMPTY aggregate slot where perl REMOVES it — a READ does not re-vivify it, and a write is noticed at the next read (#1117)
 

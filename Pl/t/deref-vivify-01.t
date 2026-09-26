@@ -202,16 +202,16 @@ for my $i (0 .. $#want) {
 }
 is(scalar(@got), scalar(@want), 'run: no extra output lines');
 
-# ---- no-strict RVALUE deref of an undef BOX still vivifies it --------------
-# perl never vivifies on these (it reads the symbolic `@{""}`); PCL's cast
-# cannot tell an rvalue site from a vivifying one without the strict-refs
-# marker, which is only emitted under `use strict 'refs'` (#2103).
+# ---- no-strict RVALUE deref of an undef BOX -----------------------------------
+# perl never vivifies on these (it reads the symbolic `@{""}`).  The rvalue
+# site carries `:rvalue` (#2103), so the box is left undef; what is still
+# wrong is the SCALAR count of that empty symbolic array: perl says undef.
+is(run_cl('sub r29 { my $u; my $s = "[@$u]"; print "r29 $s ", ref($u), "\n" } r29();'),
+   "r29 [] \n", 'no-strict rvalue "@$undef": no vivification');
 TODO: {
-    local $TODO = '#2419: a no-strict rvalue deref of an undef box vivifies it';
-    my $got = run_cl('sub r29 { my $u; my $s = "[@$u]"; print "r29 $s ", ref($u), "\n" }'
-                   . ' sub r31 { my $u; my $n = @$u; print "r31 [$n]\n" }'
-                   . ' r29(); r31();');
-    is($got, "r29 [] \nr31 []\n", 'no-strict rvalue @$undef: no vivification, undef count');
+    local $TODO = '#2408: a no-strict scalar(@$undef) is 0, perl says undef';
+    is(run_cl('sub r31 { my $u; my $n = @$u; print "r31 [$n]\n" } r31();'),
+       "r31 []\n", 'no-strict scalar(@$undef): undef');
 }
 
 done_testing();

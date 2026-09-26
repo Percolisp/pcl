@@ -3867,12 +3867,12 @@ sub _strict_elem_marker {
   my $xo = $self->expr_o;
   my $id = $kids->[0];
   my $n  = $xo->get_a_node($id);
-  # Only a REFERENCE-shaped base is a dereference: a plain `$x`, or an element
-  # / deref chain.  `(LIST)[i]` — a list slice, `(caller 0)[1]` — lowers to the
-  # same op over a LIST and is no dereference at all (an empty list there is
-  # not "an undefined value used as an ARRAY reference").
+  # `(LIST)[i]` — a list slice, `(caller 0)[1]` — lowers to the same op over a
+  # PARENTHESISED base and is no dereference at all (an empty list there is not
+  # "an undefined value used as an ARRAY reference"), so a paren/list base is
+  # never marked; a call's result (`f()->[0]`, `$o->m->[0]`) is a deref.
   if ($xo->is_internal_node_type($n)) {
-    return () if ($n->{type} // '') !~ /^(?:[ah]_acc|[ah]_ref_acc)$/;
+    return () if ($n->{type} // '') =~ /^(?:tree_val|progn)$/;
   }
   elsif (!(ref($n) eq 'PPI::Token::Symbol' && $n->content =~ /^\$/)) {
     return ();
@@ -4057,8 +4057,15 @@ sub _elem_container_key {
     # $u->{k}` / `delete $u->{k}` leave ref($u) HASH in perl (#2341; a bare
     # `(unbox …)` handed exists NIL, and delete died on it).  The ONE
     # vivifying resolver, which also reads a string as its symbolic name.
-    $container = [($kind =~ /^h/ ? 'p-ensure-hashref' : 'p-ensure-arrayref'),
-                  $self->gen_node_form($kids->[0])];
+    # Under `strict refs` the container is the strict CAST instead (#2103):
+    # the same vivification of an undef box, and a string or a number dies
+    # (`exists $str->{k}` / `delete $str->[0]`, #1390's spellings).
+    my @strict = $self->_strict_elem_marker('p-aref-deref', $kids);
+    $container = @strict
+      ? [($kind =~ /^h/ ? 'p-cast-%' : 'p-cast-@'),
+         $self->gen_node_form($kids->[0]), ':strict-lv']
+      : [($kind =~ /^h/ ? 'p-ensure-hashref' : 'p-ensure-arrayref'),
+         $self->gen_node_form($kids->[0])];
   }
   else {
     my $c_node = $self->expr_o->get_a_node($kids->[0]);

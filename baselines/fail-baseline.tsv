@@ -1,3 +1,10 @@
+# s497b (2026-09-26, Opus, EDITED BY HAND -- eight rows): local.t 258/259/260
+#   Underscore 'Chop' / 'Filetest' / 'Assignment' LEAVE -- they pass.  Cause:
+#   chop/chomp now read and write through the box protocol (unbox / box-set),
+#   so `chop` on the TIED $_ runs FETCH/STORE (dies, as the row wants) instead
+#   of writing a string over the tie proxy -- which is what untied $_ and made
+#   the two rows after it live.  sprintf.t 147/155/158/441/442: same rows, the
+#   got text changes from `> MISSING<` to `><` (the note on each row).
 # s470bl (task #1022 half (b), 2026-09-05): the row `loopctl.t 41 dynamically
 #   scoped` stays OUT of this file, and now for the right reason -- it RUNS
 #   and it PASSES.  s470bi removed it BY EDIT when half (a) made the file abort
@@ -232,9 +239,6 @@ hexfp.t	104		undef	^Hexadecimal float: mantissa overflow	NS:Hex floating-point l
 length.t	34		''	undef	#1482 CATALOG length.t "test 34"
 length.t	42	uninit warning for stringifying as undef	''	uninitialized	#221 (NS:Warnings-gated diagnostics are absent)
 local.t	264		''	Modification of a read-only value attempted	NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars in the box model)
-local.t	260	Underscore 'Assignment'			#1483 CATALOG local.t "local $_ with filetest/match"
-local.t	258	Underscore 'Chop'			#1483 CATALOG local.t "local $_ with filetest/match"
-local.t	259	Underscore 'Filetest'			#1483 CATALOG local.t "local $_ with filetest/match"
 local.t	306	[perl #52740]	' The function main::|pl-main::| is undefined.'	^ok$	#1459 item 1 (${::}{NAME}, the main-stash shorthand, is emitted as a CALL)
 local.t	275	localised sub via stash			#1484 CATALOG local.t "local *{$pkg}{method} not supported"
 local.t	278	localised sub via stash slice			#1484 CATALOG local.t "local *{$pkg}{method} not supported"
@@ -289,8 +293,8 @@ multideref.t	24	local const indices 3	'19'	'15'	#1190 (local-element family: the
 multideref.t	33	local general 3	'25'	'15'	#1190 (local-element family: the RESTORE of a NESTED element never happens)
 multideref.t	30	local lexical indices 3	'23'	'15'	#1190 (local-element family: the RESTORE of a NESTED element never happens)
 multideref.t	27	local pkg indices 3	'21'	'15'	#1190 (local-element family: the RESTORE of a NESTED element never happens)
-multideref.t	1	strict refs	''	Can't use string	PCL does not model `use strict refs` (not-supported.md 'use strict refs is not enforced'), so the deref of the string 'foo' does not die.  Cause CORRECTED s473b: it is no longer #1456 ('a string in an element slot is not a symbolic ref') -- that IS fixed, the write is symbolic now -- it is the missing strict-hints model.
-multideref.t	2	strict refs, not exist	''	''	PCL does not model `use strict refs` (not-supported.md 'use strict refs is not enforced'): s473b closed #1456, so $a[0]{k}=7 with $a[0] eq 'foo' now writes $strict_refs::foo{k} SYMBOLICALLY as perl does under `no strict`, instead of clobbering the slot -- perl DIES here under strict and %foo stays empty.  The paired row `no strict refs, exist` left this file by EDIT in the same commit (it PASSES now); TOTAL passing unchanged.
+multideref.t	1	strict refs	''	Can't use string	PCL does not model `use strict refs` (not-supported.md 'use strict refs -- what is still not enforced': the WRITE path, #2403), so the deref of the string 'foo' does not die.  Cause CORRECTED s473b: it is no longer #1456 ('a string in an element slot is not a symbolic ref') -- that IS fixed, the write is symbolic now -- it is the missing strict-hints model.
+multideref.t	2	strict refs, not exist	''	''	PCL does not model `use strict refs` (not-supported.md 'use strict refs -- what is still not enforced': the WRITE path, #2403): s473b closed #1456, so $a[0]{k}=7 with $a[0] eq 'foo' now writes $strict_refs::foo{k} SYMBOLICALLY as perl does under `no strict`, instead of clobbering the slot -- perl DIES here under strict and %foo stays empty.  The paired row `no strict refs, exist` left this file by EDIT in the same commit (it PASSES now); TOTAL passing unchanged.
 multideref.t	40	delete: const indices	'25'	'15'	s473t1 #1431: multideref.t:131 `delete $a[3]{foo}[1]{c}`, expected 15.  It never RAN before (the `exists +(...)` arity crash aborted the file's whole top-level form at test 52) and now runs and fails with '25' -- a CONSEQUENCE of the four blessed rows above it (`local const/pkg/lexical/general indices 3`, all `got '19'/'21'/'23'/'25' expected '15'`): the element is never RESTORED at scope exit, so it still holds the last `local ... = 25` when delete reads it.  not-supported.md '`local` on hash/array elements and typeglobs'
 or.t	10	|| propagates lvaluish context to its lhs	'1'	'2'	#165
 or.t	9	|| propagates lvaluish context to its rhs	''	'1'	#165
@@ -466,7 +470,7 @@ sprintf.t	540	>%*1073741819$v2d< >''< > MISSING< >%*1073741819$v2d INVALID< 			#
 sprintf.t	553	>%*2$d< >123< >123 MISSING< >123< 			#1472 CATALOG sprintf.t "INVALID / REDUNDANT / MISSING warning markers"
 sprintf.t	165	>%+-v*d< >[3, "\01\02\03"]< >+1 .2  .3  < >+1 .+2 .+3 < cf perl #83194			#1474 CATALOG sprintf.t "reordered positional+vector"
 sprintf.t	157	>%+-v3d< >"\01\02\03"< >+1 .2  .3  < >+1 .+2 .+3 < 			#1474 CATALOG sprintf.t "reordered positional+vector"
-sprintf.t	158	>%+-v3d< >[version::qv("1.2.3")]< >+1 .2  .3  < > MISSING< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
+sprintf.t	158	>%+-v3d< >[version::qv("1.2.3")]< >+1 .2  .3  < >< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task) [s497b: the got text is `><` now -- the failing `eval $data` (version::qv is missing, #1471) yields ONE undef element, perl's answer, so no MISSING warning]
 sprintf.t	235	>%.0g< >-0.0< >-0< >0< C99 standard mandates minus sign but C89 does not			#1475 CATALOG sprintf.t "%.0g float edges"
 sprintf.t	227	>%.0hf< >1< >%.0hf INVALID< >1< 'h' should be rejected			#1472 CATALOG sprintf.t "INVALID / REDUNDANT / MISSING warning markers"
 sprintf.t	169	>%0*v*d< >['-', 2, version::qv("0.7.11")]< >00-07-11< > MISSING< cf perl #83194			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
@@ -477,15 +481,15 @@ sprintf.t	273	>%s< >no warnings; sprintf('%s%n', chr(256)x5, $n),$n< >5< >abc< U
 sprintf.t	271	>%s< >sprintf('%%n%n %d', $n, $n)< >%n 2< >%n%n 0< Slight sneakiness to test %n			#143 (printf/sprintf %n unimplemented)
 sprintf.t	494	>%v#x< >''< >%v#x INVALID< >< 			#1472 CATALOG sprintf.t "INVALID / REDUNDANT / MISSING warning markers"
 sprintf.t	482	>%v%,%d< >[63, 64, 65]< >%v%,63 INVALID INVALID< >%v%,63 INVALID< 			#1472 CATALOG sprintf.t "INVALID / REDUNDANT / MISSING warning markers"
-sprintf.t	155	>%v.3d< >[version::qv("1.2.3")]< >001.002.003< > MISSING< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
+sprintf.t	155	>%v.3d< >[version::qv("1.2.3")]< >001.002.003< >< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task) [s497b: the got text is `><` now -- the failing `eval $data` (version::qv is missing, #1471) yields ONE undef element, perl's answer, so no MISSING warning]
 sprintf.t	150	>%vd< >[version->new("1.002")]< >1.2< >49.46.48.48.50< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
 sprintf.t	149	>%vd< >[version->new("1.02")]< >1.2< >49.46.48.50< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
 sprintf.t	148	>%vd< >[version->new("1.2")]< >1.2< >49.46.50< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
 sprintf.t	151	>%vd< >[version->new("1048576.5")]< >1048576.5< >49.48.52.56.53.55.54.46.53< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
 sprintf.t	152	>%vd< >[version->new("50")]< >50< >53.48< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
-sprintf.t	147	>%vd< >[version::qv("1.2.3")]< >1.2.3< > MISSING< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
-sprintf.t	441	>%vx< >[version::qv("1.2.3")]< >1.2.3< > MISSING< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
-sprintf.t	442	>%vx< >[version::qv("1.20.300")]< >1.14.12c< > MISSING< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task)
+sprintf.t	147	>%vd< >[version::qv("1.2.3")]< >1.2.3< >< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task) [s497b: the got text is `><` now -- the failing `eval $data` (version::qv is missing, #1471) yields ONE undef element, perl's answer, so no MISSING warning]
+sprintf.t	441	>%vx< >[version::qv("1.2.3")]< >1.2.3< >< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task) [s497b: the got text is `><` now -- the failing `eval $data` (version::qv is missing, #1471) yields ONE undef element, perl's answer, so no MISSING warning]
+sprintf.t	442	>%vx< >[version::qv("1.20.300")]< >1.14.12c< >< 			#1471 CATALOG sprintf.t "version->new / version::qv objects in %vd/%vx" (no task) [s497b: the got text is `><` now -- the failing `eval $data` (version::qv is missing, #1471) yields ONE undef element, perl's answer, so no MISSING warning]
 sprintf2.t	1534		'0x1.1p+0'	'0x1.0p+0'	#1477 CATALOG sprintf2.t (error text + %a rounding)
 sprintf2.t	1578	%n	''	Missing argument for %n in sprintf	#143 (printf/sprintf %n unimplemented)
 sprintf2.t	1673	croak for very large numeric format results	'Integer overflow in format string for sprintf %7000000000E at (eval 0) line 0. '	^Numeric format result too large at 	NS:Error message text and format CATALOG sprintf2.t (error text + %a rounding)

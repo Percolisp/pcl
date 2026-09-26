@@ -83,9 +83,8 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("LHS bad on updating tr"
                  :principle9
                  "tr/// updating a bad lvalue must die — error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'.")
-                ("fails on zero-length ro string"
-                 :read-only
-                 "tr/// on a zero-length read-only string must die 'Modification of a read-only value'. not-supported.md: read-only scalars / Internals.")
+                ;; ("fails on zero-length ro string" …) LEFT in s497b: a literal in a
+                ;; foreach list is a read-only box now (#1391 / #2103), so the row passes.
                 )
 
 ;; undef.t 16 and 18 are UNNAMED (no description) -> keyed by test number.
@@ -219,9 +218,11 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("via the correct name works"
                  :utf8
                  "symbolic ref to a stash entry with a NUL/UTF-8 name — Unicode/NUL stash lookup not supported. not-supported.md: 'Unicode semantics differences'.")
-                ;; Assigning through a value aliased to a read-only literal, or
-                ;; weakening a read-only ref, must die "Modification of a read-only".
-                ("read-only ref|aliased to literal"
+                ;; Weakening a read-only ref must die "Modification of a read-only".
+                ;; NARROWED s497b: the "aliased to literal" alternative (rows 220-223)
+                ;; passes now — a literal in a foreach list is a read-only box
+                ;; (#1391 / #2103).
+                ("read-only ref"
                  :read-only
                  "assignment to a literal-aliased value / weaken of a read-only ref must die 'Modification of a read-only value' — read-only scalars not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' / 'Internals::* C-level introspection'."))
 

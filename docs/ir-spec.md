@@ -1425,7 +1425,10 @@ their optional site slot.
 
 The element READS `p-aref-deref` / `p-gethash-deref` take `:strict` too: a
 string or a number dies, an undef BOX vivifies (an element read vivifies its
-container in perl, strict or not), a RAW undef dies.  **The PLACE is
+container in perl, strict or not), a RAW undef dies.  `exists` / `delete` of an element
+through a reference take the strict CAST as their container under strict refs
+(`(p-exists (p-cast-% $r :strict-lv) "k")`), `p-ensure-hashref` / `-arrayref`
+outside it — both vivify an undef box.  **The PLACE is
 normative; the message text is not** (USER s494).
 
 **What is an RVALUE site** (`Pl::ExprToCL::_deref_is_rvalue`, perl-probed):

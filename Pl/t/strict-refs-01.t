@@ -157,6 +157,10 @@ t("str ->[0]",           sub { my $s = "x"; my $v = $s->[0] });
 t("str ->{k}",           sub { my $s = "x"; my $v = $s->{k} });
 t("num ->[0]",           sub { my $n = 5; my $v = $n->[0] });
 t("num \@\$n",           sub { my $n = 5; my @a = @$n });
+t("str exists ->{k}",    sub { my $s = "x"; my $v = exists $s->{k} });
+t("str delete ->[0]",    sub { my $s = "x"; my $v = delete $s->[0] });
+t("rv call result",      sub { my $v = (sub { undef })->()->[0] });
+t("list slice empty",    sub { my @e = (); my $w = (@e)[1]; die "no\n" if defined $w });
 # --- no strict 'refs' in a block: the symbolic idiom lives ---
 t("block no strict",     sub { no strict 'refs'; my $n = "x"; my @a = @{"main::$n"}; die "no\n" if "@a" ne "1 2" });
 t("block no strict \$",  sub { no strict 'refs'; my $v = ${"main::x"}; die "no\n" if $v != 7 });
@@ -218,6 +222,10 @@ str ->[0]: died: Can't use string ("x") as an ARRAY ref while "strict refs" in u
 str ->{k}: died: Can't use string ("x") as a HASH ref while "strict refs" in use
 num ->[0]: died: Can't use string ("5") as an ARRAY ref while "strict refs" in use
 num @$n: died: Can't use string ("5") as an ARRAY ref while "strict refs" in use
+str exists ->{k}: died: Can't use string ("x") as a HASH ref while "strict refs" in use
+str delete ->[0]: died: Can't use string ("x") as an ARRAY ref while "strict refs" in use
+rv call result: died: Can't use an undefined value as an ARRAY reference
+list slice empty: lived
 block no strict: lived
 block no strict $: lived
 block glob install: lived
