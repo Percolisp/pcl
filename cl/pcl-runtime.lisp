@@ -30067,7 +30067,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     h))
 
 (defun %pcl-uniprops-install (unicode keys lists caseless)
-  "Install the generated tables (called by cl/pcl-uniprops.lisp).  KEYS and
+  "Install the generated tables (%pcl-uniprop-data's four values).  KEYS and
    CASELESS are flat vectors of spelling / code pairs, LISTS a vector of
    inversion lists."
   (setf *pcl-uniprop-lists*
@@ -30139,13 +30139,16 @@ buffer's fill-pointer; everything else falls back to file-length."
          :format-control control :format-arguments args))
 
 (defun %pcl-uniprop-tables ()
-  "The loaded key table, loading cl/pcl-uniprops.lisp on first use.  A tree
-   without the artifact DIES (rule 12) — a property must never quietly fail
-   to match again."
+  "The loaded key table, installing it on first use from %pcl-uniprop-data —
+   a self-loading stub (see %pcl-def-ext-stub below) whose first call loads
+   cl/pcl-uniprops.lisp, which defines the real function over it.  A tree
+   without the artifact DIES in the stub (rule 12) — a property must never
+   quietly fail to match again."
   (or *pcl-uniprop-keys*
-      (progn (p-load-extension "pcl-uniprops") *pcl-uniprop-keys*)
+      (progn (multiple-value-call #'%pcl-uniprops-install (%pcl-uniprop-data))
+             *pcl-uniprop-keys*)
       (error "PCL: the Unicode property tables (cl/pcl-uniprops.lisp) did ~
-              not load; regenerate them with tools/rebuild-uniprops")))
+              not install; regenerate them with tools/rebuild-uniprops")))
 
 (defun %pcl-uniprop-test (code)
   "The character test for table entry CODE (2*LIST-INDEX + NEGATED)."
@@ -32371,6 +32374,11 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (%pcl-def-ext-stub p-pack "pcl-pack")
 (%pcl-def-ext-stub p-unpack "pcl-pack")
+
+;;; The Unicode property tables (task #2060): the resolver's data, generated
+;;; from perl's own Unicode::UCD by tools/rebuild-uniprops.  See
+;;; %pcl-uniprop-tables.
+(%pcl-def-ext-stub %pcl-uniprop-data "pcl-uniprops")
 
 ;;; ============================================================
 ;;; mro — always-available core facility (perl >= 5.10)

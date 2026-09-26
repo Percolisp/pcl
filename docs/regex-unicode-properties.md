@@ -23,7 +23,8 @@ artifact:
   — **no `gen=`**: it is perl's data, not compiler output, so
   `Pl/t/artifact-staleness-01.t` (which discovers artifacts by
   `^;;;\s*pcl:\s*pipeline=… gen=`) does not adopt it;
-* one call `(%pcl-uniprops-install UNICODE KEYS LISTS CASELESS)`: KEYS maps a
+* one function `%pcl-uniprop-data` answering four values — UNICODE, KEYS,
+  LISTS, CASELESS (the runtime's `%pcl-uniprops-install` builds the hashes): KEYS maps a
   normalized spelling to `2*LIST-INDEX + NEGATED` (a list and its complement
   are stored once), LISTS are the inversion lists, CASELESS is the /i map
   (below).  8,996 keys, 713 lists, 77,178 integers, ~668 KB of text.
@@ -44,8 +45,9 @@ cross-checks the 38 General_Category lists against SBCL's own
 `sb-unicode:general-category` at all 1,114,112 code points (zero
 disagreements — perl 5.40.3 and SBCL 2.6.0 both carry Unicode 15.0).
 
-**Loaded lazily.**  The resolver calls `(p-load-extension "pcl-uniprops")` at
-the first property a program compiles (FASL-cached like `pack`, #1202:
+**Loaded lazily.**  `%pcl-uniprop-data` is a self-loading stub in the runtime
+(`%pcl-def-ext-stub`, the one mechanism every extension entry uses), called
+at the first property a program compiles (FASL-cached like `pack`, #1202:
 0.004 s on a hit), so a program without `\p` never pays for it.
 
 **The resolver** (`%pcl-property-resolver` in `cl/pcl-runtime.lisp`) is

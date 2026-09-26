@@ -13,7 +13,7 @@ itself.  The current set:
 | `pcl-mro` | `cl/pcl-mro.lisp` | **transpiled** from `lib/mro.pm` | the always-available `mro::` API (`get_linear_isa`, …) |
 | `pcl-warnings` | `cl/pcl-warnings.lisp` | **transpiled** from `lib/warnings.pm` | the `warnings::` query/emit API (`enabled`, `warnif`, …) |
 | `pcl-xs` | `cl/pcl-xs.lisp` | hand-written CL | the pclxs XS-bridge host side (`XSLoader::load` path) |
-| `pcl-uniprops` | `cl/pcl-uniprops.lisp` | **generated** from perl's own Unicode tables by `tools/rebuild-uniprops` | the inversion lists behind `\p{…}` / `\pX` / `\P{…}` (task #2060; loaded by the regex property resolver at the first property a program compiles, not by a stub) |
+| `pcl-uniprops` | `cl/pcl-uniprops.lisp` | **generated** from perl's own Unicode tables by `tools/rebuild-uniprops` | the inversion lists behind `\p{…}` / `\pX` / `\P{…}` (task #2060; its one entry `%pcl-uniprop-data` is a self-loading stub, first called when a program compiles its first property) |
 
 Three of the five are **written in Perl and compiled by PCL** — the checked-in
 `.lisp` files are build artifacts (see "Regenerating", below).  A fourth,
