@@ -226,7 +226,7 @@ both to the same in-place concatenation): on a licensed slot it emits
 `(%pcl-str-append $s REST)` too, when REST binds tighter than `.` at depth
 0 (`x * / % ** -> =~ !~` only; `$s = $s . $a + 1` is `($s . $a) + 1` and
 is not an append) — ONE predicate, `Pl::VarAnnotator::append_rest`, read by
-the verdict and the emitter (s494p, task #2098).  **Consumer contract: the buffer object never
+the verdict and the emitter (s494p, task #2098; guard `Pl/t/loop-modifier-01.t`).  **Consumer contract: the buffer object never
 crosses the IR boundary.**  Every escape channel — sub return, call
 argument, store into a box/container, package var, hash key (the table
 retains the key object) — is an opaque/retaining use that disqualifies
@@ -419,7 +419,8 @@ Example: `my @q = (1 .. 40); my $r = \@q; shift @q; shift @q;` leaves
 vector.  The window is set with SBCL's `set-array-header`; a runtime that
 finds it misbehaving at load (a self-test) falls back to the copying arm
 and says so once on stderr — the answers are identical, only the
-complexity class differs.
+complexity class differs.  Guard: `Pl/t/array-window-01.t` (semantic rows vs
+perl + one 4N/N ratio row per operation).
 
 **Hole aliasing (defelem, s316e):** when a hole slot is *aliased* — by a
 foreach/grep/map `$_` binding or by spreading the array into `@_` — the
@@ -2069,7 +2070,7 @@ the older per-statement route: a statement containing `my`/`our`/`state`
 runs first), a heredoc, a leading label, and a LIST/COND that spans lines
 (reordering would move EXPR's line numbers).  The TOPIC loop binds the
 global `$_` dynamically; it is not a lexical, so a string eval in its body
-does not capture it.
+does not capture it.  Guard: `Pl/t/loop-modifier-01.t`.
 
 The compiled shape per iteration: an outer named block (the loop's exit
 target), a `tagbody` with a `:next` label (the continue target). Loop

@@ -735,6 +735,68 @@ against a 1.14 s signal, so a lever on that row must be A/B'd with a control
 pair in the same window; a board-to-board comparison cannot see less than ~10 %
 on it.
 
+### 0.2q Round 35 movers (2026-09-26) — the complexity-class round (s494p, #2098)
+
+(Named 0.2q because §0.2p is already the s490 quiet-box board.)  Round 35
+changed COST CURVES, not constant factors: `shift`, `splice(@a, 0, K)` and
+`unshift` move the array's storage WINDOW (runtime), and `.=` under a loop
+modifier or spelled `$s = $s . X` reaches the S1 str-buffer append
+(emission, v2-2080).  Logs under the agent's `scratch/s494p/`.  Shared box:
+ratios, not board numbers.
+
+scaling.pl, the three rows flagged BEFORE (N, then 4N; perl flags none):
+
+```
+row            N         BEFORE N   BEFORE 4N  ratio     AFTER N  AFTER 4N
+str .= loop    100000    4.01 s     117.63 s   x29.3     0.00 s   0.01 s
+unshift loop   12500     0.54 s       8.16 s   x15.2     0.00 s   0.00 s
+shift drain    50000     8.52 s     139.58 s   x16.4     0.00 s   0.00 s
+```
+
+append-shapes.pl (N = 50k, then 200k):
+
+```
+shape                                     BEFORE              AFTER
+$s .= "ab" for 1..N (anon sub)            1.75 / 40.74 s      0.00 / 0.01 s
+while ($i++ < N) { $s .= "ab" }           1.36 / 32.56 s      0.82 / 18.19 s   (#2114: list decl)
+$s = $s . "ab"                            1.10 / 23.32 s      0.00 / 0.01 s
+$h{k} .= "ab"                             1.02 / 22.71 s      0.84 / 18.76 s   (general path, #2115)
+our $g .= "ab"                            1.04 / 22.50 s      0.90 / 19.03 s   (general path, #2115)
+shift @a while @a                         7.96 / 124.21 s     0.00 / 0.00 s
+unshift @a, $_                            7.94 / 125.62 s     0.00 / 0.03 s
+splice(@a, 0, 1) drain                    8.62 / 145.17 s     0.00 / 0.01 s
+queue: push 1, shift 1 (steady size)      0.04 / 0.14 s       0.00 / 0.01 s
+deque: push/unshift/shift/pop mix         —                   0.00 / 0.02 s
+```
+
+The short-array threshold (shift on a small `@_`-sized array, best of 5):
+
+```
+old copy-down loop         1.378 s
+shipped (copy <= 16)       1.221 s   12.8 % faster
+always window              1.473 s    6.5 % slower
+```
+
+The whole tree against 3e8bff3e (BENCH_K=5, interleaved, load 1.6–3.3;
+`tree/base` negative = faster; the three rows at the top re-run):
+
+```
+bench          perl(s)    base(s)    tree(s) tree/base
+gcdret          0.1887     0.0966     0.0795    -17.7%
+textproc        0.4320     1.1017     1.0181     -7.6%
+gcdrec          0.1891     0.1008     0.0941     -6.6%
+fib(27)x        1.4438     0.4299     0.4237     -1.4%
+sortnum         0.0241     0.0367     0.0364     -0.8%
+strcat          0.2944     0.2806     0.2826     +0.7%
+subret          0.2017     0.0807     0.0808     +0.1%   (rerun)
+methret         0.0867     0.0936     0.0955     +2.0%   (rerun; layout band ±9 %)
+fhread          0.0303     0.1094     0.1106     +1.1%   (rerun)
+```
+
+New bench rows (verified against perl): `shiftq` 0.36x, `unshiftq` 1.98x,
+`splice0` 1.47x, `catmod` 2.80x, `catself` 2.33x, `mapmulti` 2.18x,
+`mapsingle` 1.32x (#2198).
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and

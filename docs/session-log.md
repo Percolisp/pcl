@@ -39,6 +39,18 @@ USER at the start: "Please continue." then the two queued questions answered -- 
 * **s495f (EVERYDAY ROUND A) MERGED** (ff `25d7fede`) after Fable's review: probes 8 of 11 identical, gate 262 / 8675 PASS, everyday `100 of 122` re-run, container install test PASS.  `EVERYDAY: 92 -> 100 of 122 (82.0 %)`.  Its HIGH finding #2341 (raw-slot: a never-assigned `my $u` cannot be vivified through a deref) is the next correctness candidate.  USER late in the session: no new subtasks; one read-only Opus README review + an Opus README rewrite were USER-asked exceptions -- README.md in the checkout is now that draft, uncommitted, for the USER to judge.
 
 
+## Session s494p (Opus agent, 2026-09-25/26; resumed in s498 after a reboot) -- perf round 35: three QUADRATIC everyday operations become linear (shift drain, unshift, `.=` under a loop modifier / `$s = $s . X`)
+
+**Member 1 (measure).**  scaling.pl flagged exactly three rows perl does not: `str .=` x29.3, `unshift` x15.2, `shift drain` x16.4.  The S1 declines were a ROUTE accident (a modifier reached the annotator through the v1 per-statement fallback), a list declaration (#2114) and `$s = $s . X` missing from the write set — none a safety condition.  `shift @_` only reaches `p-shift` in general subs; raw-params subs bind without it.
+
+**Member 2 (the array WINDOW, runtime).**  One helper moves the SBCL array header's window; shift / `splice(@a,0,K)` / unshift into front room are O(1), a drain resets to slot 0, unshift with no room reallocates once with geometric front slack.  Short arrays (<= 16) keep copying: 12.8 % faster than the old loop, where always-window was 6.5 % slower.  Slide-in-place for a steady queue was never cheaper than growth.  A load-time self-test falls back to the copying arm and says so once.  33 guard rows, 13 fail on the base.
+
+**Member 3 (`.=` licence, emission, v2-2080).**  Loop modifiers desugar to their block loop; `$s = $s . REST` is the append through `append_rest`.  corpus-diff 38/111 by seven classes, compile +2.0 %.  The full gate caught two follow-ups (keyword-named subs keep the old route; the `;` stays after the desugared block because PPI 1.291 lexes a `*` after some `}` as multiply — ppi-upstream-bugs §33, bug-report row 83).
+
+**Member 4 (general path).**  Census only (in #2098): the ownership invariant a general in-place append needs cannot be closed by reading sites, and the in-memory filehandle already breaks it (#2111, a silent wrong with hash-key corruption).  Step 2 filed as #2115.
+
+**Numbers.**  scaling AFTER flags no row (shift drain 8.52 s -> 0.00 at N=50k; unshift 0.54 -> 0.00; `.=` 4.01 -> 0.00).  Tree A/B vs 3e8bff3e (K=5, load 1.6-3.3): gcdret -17.7 %, textproc -7.6 %, gcdrec -6.6 % faster; subret +0.1, methret +2.0, fhread +1.1 on the rerun (the layout discriminator shows methret's ±9 % band).  Bars on 60ca4ae0 (main 24422497): gate PASS 265/8751, sweep TOTAL 18690 (+0) GATE clean, ir-conform 324/0/21/0, companion 10 files byte-identical to base, **EVERYDAY 101 of 122 -> 101 of 122** (NEW 0, MOVED 0).  Filed #2110-#2115.
+
 ## Session s494g (Opus agent, 2026-09-25) -- #2107 SIGNALS + #2108: a `$SIG{INT}` / TERM / HUP / USR1 / CHLD handler runs, ^C and SIGTERM kill by the signal, `prog | head -1` stops; an uncaught object die prints its stringification
 
 Launched on 40da28bd, rebased onto dc20a721 (s495f) and 3e8bff3e (docs-only); stopped mid-gate when the box was switched off and FINISHED by a fresh agent from STOP.md + the seven commits.  Runtime-only (generation unchanged, corpus-diff IDENTICAL).
