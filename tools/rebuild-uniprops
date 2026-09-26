@@ -1,0 +1,396 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# rebuild-uniprops — regenerate cl/pcl-uniprops.lisp, PCL's Unicode property
+# tables, from PERL'S OWN tables (task #2060, s496a).
+#
+#   tools/rebuild-uniprops              write cl/pcl-uniprops.lisp
+#   tools/rebuild-uniprops -o PATH      write PATH instead (the checker's form)
+#   tools/rebuild-uniprops --census     re-measure docs/uniprops-census-s496.tsv
+#                                       (every \p / \P spelling in perl's t/,
+#                                       the core lib and perl-tests/) and exit
+#   tools/rebuild-uniprops --stats      print what was generated, to stderr
+#
+# WHAT IT WRITES.  `\p{NAME}` in a regex is answered by the runtime resolver
+# %pcl-property-resolver (cl/pcl-runtime.lisp) from two tables this tool
+# emits: KEYS (a normalized spelling -> 2*LIST + NEGATED) and LISTS (inversion
+# lists: sorted code points at which membership flips).  Nothing is derived
+# by hand.  Every stored spelling is one this perl ACCEPTS in a pattern
+# (`qr/\p{SPELLING}/` compiles), its list is `Unicode::UCD::prop_invlist`'s
+# answer for that spelling, and each distinct list is spot-checked against the
+# regex engine itself.  A spelling perl rejects is never stored, so the
+# resolver's miss is perl's miss.
+#
+# THE GENERATED SET (#2060's design): every value of General_Category,
+# Script, Script_Extensions, Block, Age and Present_In, under every alias perl
+# lists for the property and for the value; every bare name in perl's own
+# regex keyword table (unicore/uni_keywords.pl — the binary properties, the
+# POSIX / XPosix / Perl classes, bare scripts and blocks); `=Y/=N` forms of
+# the binary properties; the `Is` prefix of all of these; and every spelling
+# in the checked-in census that perl accepts.  Enumerated properties outside
+# that set (ea= lb= nv= bc= ccc= …) are NOT generated, and the resolver dies
+# for them in perl's words (docs/not-supported.md lists them).
+#
+# LOOSE MATCHING.  Keys are stored NORMALIZED by `norm` below, and the Lisp
+# resolver applies the same normalization (%pcl-uniprop-normalize) to what a
+# pattern spells.  The two must agree: Pl/t/uniprops-01.t checks the Lisp
+# normalizer against this one over the census.  Two spellings that normalize
+# to the same key with DIFFERENT meanings are a fatal error here, so the
+# normalization can never silently merge two properties.
+#
+# DETERMINISM: same perl, same census -> byte-identical output
+# (Pl/t/uniprops-01.t regenerates into a temp file and compares).
+#
+# The artifact carries NO `gen=` stamp: it depends on perl's Unicode data, not
+# on the compiler, so Pl/t/artifact-staleness-01.t must not (and does not)
+# discover it.  Its stamp names the Unicode version and the perl that built it.
+
+use strict;
+use warnings;
+use FindBin qw($RealBin);
+use lib "$RealBin/lib";
+use PCLLicense;
+use PCLPaths;
+use Config;
+use Unicode::UCD qw(prop_invlist prop_aliases prop_values prop_value_aliases);
+
+my $root = "$RealBin/..";
+my $out = "$root/cl/pcl-uniprops.lisp";
+my $census_file = "$root/docs/uniprops-census-s496.tsv";
+my ($do_census, $stats) = (0, 0);
+while (@ARGV) {
+  my $a = shift @ARGV;
+  if ($a eq '-o') { $out = shift @ARGV // die "-o needs a path\n" }
+  elsif ($a eq '--census') { $do_census = 1 }
+  elsif ($a eq '--stats') { $stats = 1 }
+  else { die "usage: tools/rebuild-uniprops [-o PATH] [--census] [--stats]\n" }
+}
+
+# The properties whose every value is generated, by the name perl's
+# prop_aliases answers first.
+my @ENUM_PROPS = qw(gc sc scx blk age in);
+
+# ---------------------------------------------------------------------------
+# norm: the loose-matching normalization.  MUST equal the runtime's
+# %pcl-uniprop-normalize.
+#   * lowercase; drop whitespace, `-` and `_`; `:` means `=`;
+#   * `L&` / `L_` (any run of & and _ after a lone L, perl's Cased_Letter
+#     spellings) -> "l_", with or without a leading `is` -- plain stripping
+#     would make them `L`, which perl does not;
+#   * a numeric VALUE (Age=011, Age=2.0) -> its canonical number: leading
+#     zeros dropped, a `.0` fraction dropped.
+sub norm {
+  my ($s) = @_;
+  $s = lc $s;
+  $s =~ s/\s+//g;
+  return 'l_' if $s =~ /^(?:is)?l[&_]+$/;
+  $s =~ s/[-_]//g;
+  $s =~ s/:/=/;
+  if ($s =~ /^([^=]*)=0*(\d+)(?:\.(\d+))?$/) {
+    my ($p, $int, $frac) = ($1, $2, $3);
+    $int = '0' if $int eq '';
+    $s = "$p=$int" . ((defined $frac && $frac ne '0') ? ".$frac" : '');
+  }
+  return $s;
+}
+
+# ---------------------------------------------------------------------------
+# Does perl accept SPELLING in a pattern?  (Deprecation warnings are perl's
+# business; a user-defined lookup of an undefined name dies, which is a no.)
+sub perl_accepts {
+  my ($s) = @_;
+  local $SIG{__WARN__} = sub { };
+  return eval { my $m = ("a" =~ /\p{$s}/); 1 } ? 1 : 0;   # a MATCH: an unknown Is-name is only looked up then
+}
+
+sub complement_of {
+  my ($l) = @_;
+  return @$l && $l->[0] == 0 ? [ @$l[1 .. $#$l] ] : [ 0, @$l ];
+}
+
+# Spot-check LIST against the regex engine at its first boundaries (each
+# boundary and the code point before it) plus a fixed spread of code points.
+my @SPREAD = map { $_ * 4099 } 0 .. 271;
+sub list_agrees {
+  my ($s, $l, $neg) = @_;
+  no warnings;
+  my $re = qr/\p{$s}/;
+  my @cps = (@SPREAD, map { ($_, $_ - 1) } grep { $_ > 0 && $_ < 0x110000 } @$l[0 .. ($#$l < 15 ? $#$l : 15)]);
+  for my $cp (@cps) {
+    next if $cp >= 0x110000;
+    my $in = member($l, $cp) ? 1 : 0;
+    $in = 1 - $in if $neg;
+    my $got = (chr($cp) =~ $re) ? 1 : 0;
+    return "cp $cp: list says $in, regex says $got" if $in != $got;
+  }
+  return '';
+}
+
+sub member {
+  my ($l, $cp) = @_;
+  my ($lo, $hi) = (0, scalar @$l);
+  while ($lo < $hi) { my $m = ($lo + $hi) >> 1; if ($l->[$m] <= $cp) { $lo = $m + 1 } else { $hi = $m } }
+  return $lo % 2;    # $lo = count of boundaries <= cp; odd means inside
+}
+
+# ---------------------------------------------------------------------------
+# Candidates.
+sub candidates {
+  my %c;
+  my $add = sub { $c{$_} = 1 for @_ };
+  for my $p (@ENUM_PROPS) {
+    my @pa = prop_aliases($p);
+    for my $v (prop_values($p)) {
+      my @va = prop_value_aliases($p, $v);
+      @va = ($v) unless @va;
+      for my $pa (@pa) { $add->("$pa=$_") for @va }
+      next if $p eq 'age' || $p eq 'in';
+      $add->(@va);                                   # bare gc / script / block
+      $add->(map { "In$_" } @va) if $p eq 'blk';     # In + block
+    }
+  }
+  # perl's own regex keyword table: every bare name it answers directly
+  no warnings q(once);
+  do "unicore/uni_keywords.pl" or die "cannot load unicore/uni_keywords.pl: $@$!";
+  for my $k (sort keys %Unicode::UCD::uni_prop_ptrs_indices) {
+    next if $k =~ /^_/ || $k =~ /=/;
+    $add->($k);
+    my @pa = prop_aliases($k);
+    next unless @pa;
+    $add->(@pa);
+    my @vals = prop_values($pa[0]);
+    if (join(',', sort grep { defined } @vals) eq 'N,Y') {     # binary
+      for my $pa (@pa) {
+        $add->(map { "$pa=$_" } qw(Y Yes T True N No F False));
+      }
+    }
+  }
+  # the census
+  if (open my $fh, '<:raw', $census_file) {
+    while (my $l = <$fh>) {
+      next if $l =~ /^#/;
+      my ($sp) = split /\t/, $l;
+      $add->($sp) if defined $sp && length $sp;
+    }
+  }
+  # Is + everything
+  $add->(map { "Is$_" } keys %c);
+  return sort keys %c;
+}
+
+# ---------------------------------------------------------------------------
+my (@lists, %list_ix);
+
+# The code (2*INDEX + NEGATED) for inversion list L, storing it — or its
+# complement's index with the NEGATED bit — only once.
+sub intern_list {
+  my ($l) = @_;
+  my $sig = join ',', @$l;
+  return 2 * $list_ix{$sig} if defined $list_ix{$sig};
+  my $csig = join ',', @{ complement_of($l) };
+  return 2 * $list_ix{$csig} + 1 if defined $list_ix{$csig};
+  push @lists, [@$l];
+  $list_ix{$sig} = $#lists;
+  return 2 * $#lists;
+}
+
+sub code_member {
+  my ($code, $cp) = @_;
+  my $in = member($lists[$code >> 1], $cp);
+  return ($code & 1) ? 1 - $in : $in;
+}
+
+# UNDER /i perl answers a few properties from a CASELESS EQUIVALENT
+# (%Unicode::UCD::caseless_equivalent: Lu/Ll/Lt -> LC, Upper/Lower/Title ->
+# Cased, PosixUpper/PosixLower -> PosixAlpha), not by folding the
+# property's own set: "a" =~ /[\P{Lu}]/i is false in perl because \P{Lu}
+# becomes \P{LC}.  Which of OUR keys that applies to is MEASURED, never
+# assumed: a key whose set is one of those properties' sets is matched /i by
+# perl over a sample, and the sample picks the one target whose set explains
+# every answer — or the key stays unmapped when plain case folding of its own
+# set already does.  A key neither explains is fatal.
+my @CASELESS_TARGETS = ('gc=LC', 'Cased', 'Cased=N', 'PosixAlpha');
+my @CASELESS_SAMPLE = (0x00 .. 0x24F, 0x2B0 .. 0x2FF, 0x370 .. 0x3FF, 0x1E00 .. 0x1EFF,
+                       0x2100 .. 0x218F, 0x24B6 .. 0x24E9, 0x10400 .. 0x1044F);
+sub caseless_map {
+  my ($key, $from) = @_;
+  my %source;
+  for my $pk (keys %Unicode::UCD::caseless_equivalent) {
+    my @l = prop_invlist($pk);
+    next unless @l;
+    my $c = intern_list(\@l);
+    $source{$c} = 1;
+    $source{$c ^ 1} = 1;
+  }
+  my @targets = map { my @l = prop_invlist($_); die "no list for $_\n" unless @l;
+                      [$_, intern_list(\@l)] } @CASELESS_TARGETS;
+  my %map;
+  for my $k (sort keys %$key) {
+    next unless $source{ $key->{$k} };
+    my $s = $from->{$k};
+    my $re = qr/\p{$s}/i;
+    my @perl = map { (chr($_) =~ $re) ? 1 : 0 } @CASELESS_SAMPLE;
+    my $fold_ok = 1;
+    for my $j (0 .. $#CASELESS_SAMPLE) {
+      my $ch = chr $CASELESS_SAMPLE[$j];
+      my $f = 0;
+      for my $v ($ch, lc $ch, uc $ch) {
+        $f ||= code_member($key->{$k}, ord $v) if length($v) == 1;
+      }
+      if ($f != $perl[$j]) { $fold_ok = 0; last }
+    }
+    next if $fold_ok;
+    my @hit = grep { my $t = $_->[1];
+                     !grep { code_member($t, $CASELESS_SAMPLE[$_]) != $perl[$_] } 0 .. $#perl
+                   } @targets;
+    die "rebuild-uniprops: no caseless equivalent explains /i for '$s'\n" unless @hit;
+    $map{$k} = $hit[0][1];
+  }
+  return \%map;
+}
+
+sub build {
+  my (%key, %from);
+  my ($tried, $rejected) = (0, 0);
+  for my $s (candidates()) {
+    $tried++;
+    next if $s =~ /^\s*\^/;                       # negation is the resolver's
+    unless (perl_accepts($s)) { $rejected++; print STDERR "rejected: $s\n" if $stats; next }
+    my @l = prop_invlist($s);
+    # A spelling perl compiles but prop_invlist cannot answer (a user-defined
+    # name in the census, say) is not ours to store.
+    next unless @l || $s =~ /^(?:is)?(?:cn|unassigned)$/i;
+    my $k = norm($s);
+    my $v = intern_list(\@l);
+    if (exists $key{$k} && $key{$k} != $v) {
+      die "rebuild-uniprops: '$s' and '$from{$k}' both normalize to '$k' but mean different sets\n";
+    }
+    $key{$k} = $v; $from{$k} //= $s;
+  }
+  # spot-check every list once, through the first spelling that reached it
+  my %checked;
+  for my $k (sort keys %key) {
+    my $ix = $key{$k} >> 1;
+    next if $checked{$ix}++;
+    my $why = list_agrees($from{$k}, $lists[$ix], $key{$k} & 1);
+    die "rebuild-uniprops: prop_invlist disagrees with the regex engine for '$from{$k}': $why\n" if $why;
+  }
+  { no warnings q(once); prop_invlist("Lu"); }
+  my $caseless = caseless_map(\%key, \%from);
+  return (\%key, \@lists, $tried, $rejected, $caseless);
+}
+
+sub lisp_string {
+  my ($s) = @_;
+  $s =~ s/(["\\])/\\$1/g;
+  return qq{"$s"};
+}
+
+sub write_artifact {
+  my ($key, $lists, $caseless) = @_;
+  my $uv = Unicode::UCD::UnicodeVersion();
+  my $pv = sprintf "%vd", $^V;
+  my @o;
+  push @o, ";;; pcl-uniprops unicode=$uv perl=$pv tool=tools/rebuild-uniprops\n";
+  push @o, map { ";;;; $_\n" } @PCLLicense::TAG_LINES;
+  push @o, <<"EOT";
+
+;;; GENERATED by tools/rebuild-uniprops from perl's own Unicode tables
+;;; (Unicode::UCD::prop_invlist).  Do not edit: regenerate.  Loaded lazily by
+;;; %pcl-property-resolver at the first \\p{...} a program compiles (task
+;;; #2060).  KEYS: a normalized spelling, then 2*LIST-INDEX + NEGATED.
+;;; LISTS: inversion lists (code points where membership flips).  CASELESS:
+;;; the keys perl answers from a caseless equivalent under /i, and its code.
+
+(in-package :pcl)
+
+(%pcl-uniprops-install
+ "$uv"
+EOT
+  # keys, several per line
+  my @kv = map { lisp_string($_) . " " . $key->{$_} } sort keys %$key;
+  push @o, " #(";
+  my $line = '';
+  for my $i (0 .. $#kv) {
+    if (length($line) + length($kv[$i]) > 90) { push @o, "$line\n   "; $line = '' }
+    $line .= ($line eq '' ? '' : ' ') . $kv[$i];
+  }
+  push @o, "$line)\n";
+  push @o, " #(";
+  for my $i (0 .. $#$lists) {
+    my @n = @{ $lists->[$i] };
+    my $t = '#(';
+    my $cur = '';
+    my @lines;
+    for my $n (@n) {
+      if (length($cur) + length($n) > 88) { push @lines, $cur; $cur = '' }
+      $cur .= ($cur eq '' ? '' : ' ') . $n;
+    }
+    push @lines, $cur;
+    $t .= join("\n     ", @lines) . ')';
+    push @o, ($i == 0 ? '' : "\n   ") . $t;
+  }
+  push @o, ")\n";
+  # the caseless map: key, then the code perl answers it by under /i
+  push @o, " #(" . join(" ", map { lisp_string($_) . " " . $caseless->{$_} } sort keys %$caseless) . "))\n";
+  my $tmp = "$out.tmp.$$";
+  open my $fh, '>:raw', $tmp or die "cannot write $tmp: $!\n";
+  print $fh @o;
+  close $fh or die "cannot write $tmp: $!\n";
+  rename $tmp, $out or die "cannot rename $tmp to $out: $!\n";
+}
+
+# ---------------------------------------------------------------------------
+# The census: every \p / \P spelling in perl's own t/, the core lib and
+# perl-tests/, one line per distinct spelling with its count and verdicts.
+sub census {
+  my ($key) = @_;
+  my @roots = (PCLPaths::perl_suite_t(), $Config{privlib}, "$root/perl-tests");
+  my %n;
+  require File::Find;
+  for my $r (@roots) {
+    next unless defined $r && -d $r;
+    File::Find::find({ no_chdir => 1, wanted => sub {
+      return unless -f $_ && /\.(?:t|pm|pl)$/;
+      return if m{/unicore/};
+      open my $fh, '<:raw', $_ or return;
+      local $/; my $t = <$fh>; close $fh;
+      while ($t =~ /\\[pP](\{[^}\n]*\}|[A-Z])/g) {
+        my $sp = $1; $sp =~ s/^\{//; $sp =~ s/\}$//;
+        next if $sp =~ /[\$\@\\]/;                  # interpolated / escaped
+        $n{$sp}++;
+      }
+    } }, $r);
+  }
+  my @rows;
+  for my $sp (sort { $n{$b} <=> $n{$a} || $a cmp $b } keys %n) {
+    my $bare = $sp; $bare =~ s/^\s*\^//;
+    my $p = perl_accepts($bare) ? 'perl-accepts' : 'perl-rejects';
+    my $pcl = exists $key->{ norm($bare) } ? 'answered' : 'dies';
+    push @rows, join("\t", $sp, $n{$sp}, $p, $pcl) . "\n";
+  }
+  open my $fh, '>:raw', $census_file or die "cannot write $census_file: $!\n";
+  print $fh "# uniprops census (tools/rebuild-uniprops --census, s496a #2060): every \\p{...} / \\pX\n";
+  print $fh "# spelling in perl's t/, the core lib and perl-tests/, with its occurrence count,\n";
+  print $fh "# whether THIS perl compiles it, and whether cl/pcl-uniprops.lisp answers it.\n";
+  print $fh "# perl-accepts + dies = a user-defined property the file defines itself, or an\n";
+  print $fh "# enumerated property outside the generated set (docs/not-supported.md).\n";
+  print $fh "# spelling\tcount\tperl\tpcl\n";
+  print $fh @rows;
+  close $fh;
+  my %tally; $tally{ (split /\t/)[2] . '/' . (split /\t/)[3] =~ s/\n//r }++ for @rows;
+  print STDERR "census: ", scalar(@rows), " distinct spellings; ",
+    join(', ', map { "$_ $tally{$_}" } sort keys %tally), "\n";
+}
+
+my ($key, $lists, $tried, $rejected, $caseless) = build();
+if ($do_census) { census($key); exit 0 }
+write_artifact($key, $lists, $caseless);
+if ($stats) {
+  my $ints = 0; $ints += @$_ for @$lists;
+  printf STDERR "uniprops: %d candidates, %d rejected by perl, %d keys, %d lists, %d integers -> %s\n",
+    $tried, $rejected, scalar(keys %$key), scalar(@$lists), $ints, $out;
+}

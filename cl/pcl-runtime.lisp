@@ -30029,6 +30029,268 @@ buffer's fill-pointer; everything else falls back to file-length."
         (concatenate 'string "[" (if negated "^" "")
                      (%pcl-class-ranges-text ranges) "]"))))
 
+;;; ----- \p{...} / \P{...}: Unicode properties from PERL'S OWN tables ------
+;;;
+;;; cl-ppcre reads `\p{NAME}` only when *property-resolver* is set, and PCL
+;;; never set it — so every property in every pattern silently never matched,
+;;; and core Text::Wrap (whose main loop is `\PM\pM*`) died on every wrap()
+;;; (task #2060).  The answer is perl's own data: tools/rebuild-uniprops asks
+;;; perl's Unicode::UCD for the inversion list of every spelling it accepts
+;;; and writes cl/pcl-uniprops.lisp, a checked-in artifact loaded lazily at
+;;; the first property a program compiles — nothing here derives a class by
+;;; hand.  docs/regex-unicode-properties.md has the design; ir-spec §10-prop
+;;; the semantics.
+
+(defvar *pcl-uniprop-keys* nil
+  "Normalized property spelling -> 2*LIST-INDEX + NEGATED (an EQUAL hash),
+   installed by cl/pcl-uniprops.lisp; NIL until the first \\p{...}.")
+
+(defvar *pcl-uniprop-lists* nil
+  "The inversion lists the keys index: a simple-vector of
+   (simple-array fixnum (*)), each the sorted code points where membership
+   flips (perl's prop_invlist shape).")
+
+(defvar *pcl-uniprop-unicode* nil
+  "The Unicode version the loaded tables were generated from.")
+
+(defvar *pcl-uniprop-caseless* nil
+  "Normalized spelling -> the code perl answers it by UNDER /i (a caseless
+   equivalent: \\p{Lu}/i is \\p{LC}, \\p{Upper}/i is \\p{Cased}), for the few
+   keys where that differs from folding the key's own set — MEASURED against
+   perl by tools/rebuild-uniprops, never assumed.")
+
+(defun %pcl-pairs-hash (pairs)
+  "An EQUAL hash from a flat vector of key / value PAIRS."
+  (let ((h (make-hash-table :test 'equal :size (max 16 (ceiling (length pairs) 2)))))
+    (loop for i from 0 below (length pairs) by 2
+          do (setf (gethash (aref pairs i) h) (aref pairs (1+ i))))
+    h))
+
+(defun %pcl-uniprops-install (unicode keys lists caseless)
+  "Install the generated tables (called by cl/pcl-uniprops.lisp).  KEYS and
+   CASELESS are flat vectors of spelling / code pairs, LISTS a vector of
+   inversion lists."
+  (setf *pcl-uniprop-lists*
+        (map 'simple-vector
+             (lambda (v) (coerce v '(simple-array fixnum (*))))
+             lists)
+        *pcl-uniprop-unicode* unicode
+        *pcl-uniprop-caseless* (%pcl-pairs-hash caseless)
+        *pcl-uniprop-keys* (%pcl-pairs-hash keys))
+  t)
+
+(declaim (inline %pcl-invlist-member-p))
+(defun %pcl-invlist-member-p (cp list)
+  "Is code point CP in the set inversion list LIST describes?  Binary search
+   for the number of boundaries <= CP; an odd count means inside."
+  (declare (type fixnum cp) (type (simple-array fixnum (*)) list)
+           (optimize (speed 3) (safety 0)))
+  (let ((lo 0) (hi (length list)))
+    (declare (type fixnum lo hi))
+    (loop while (< lo hi)
+          do (let ((m (ash (+ lo hi) -1)))
+               (declare (type fixnum m))
+               (if (<= (aref list m) cp)
+                   (setf lo (1+ m))
+                   (setf hi m))))
+    (oddp lo)))
+
+(defun %pcl-uniprop-canon-number (value)
+  "VALUE (a property value, already lowercased and squeezed) as perl compares
+   a NUMERIC one: leading zeros and a `.0' fraction dropped (Age=011 and
+   Age=11.0 are Age=11).  Any other VALUE is returned unchanged."
+  (let ((dot (position #\. value)))
+    (if (and (plusp (length value))
+             (every (lambda (c) (or (digit-char-p c) (char= c #\.))) value)
+             (<= (count #\. value) 1)
+             (digit-char-p (char value 0)))
+        (let* ((int (string-left-trim "0" (subseq value 0 (or dot (length value)))))
+               (frac (and dot (subseq value (1+ dot)))))
+          (concatenate 'string (if (string= int "") "0" int)
+                       (if (and frac (string/= frac "0")) "." "")
+                       (if (and frac (string/= frac "0")) frac "")))
+        value)))
+
+(defun %pcl-uniprop-normalize (name)
+  "perl's loose matching of a property NAME, as the KEYS were stored — this
+   MUST equal `norm' in tools/rebuild-uniprops (Pl/t/uniprops-01.t compares
+   them): lowercase; whitespace, `-' and `_' dropped; `:' means `='; `L&' /
+   `L_' (with or without `Is') is \"l_\" (Cased_Letter — plain stripping
+   would make it L); a numeric value canonical (%pcl-uniprop-canon-number)."
+  (let ((s (remove-if (lambda (c) (member c '(#\Space #\Tab #\Newline #\Return #\Page)))
+                      (string-downcase name))))
+    (if (let ((start (if (and (>= (length s) 2) (string= "is" s :end2 2)) 2 0)))
+          (and (> (length s) (1+ start))
+               (char= (char s start) #\l)
+               (every (lambda (c) (member c '(#\& #\_))) (subseq s (1+ start)))))
+        "l_"
+        (let* ((sq (substitute #\= #\: (remove-if (lambda (c) (member c '(#\- #\_))) s)
+                               :count 1))
+               (eq (position #\= sq)))
+          (if eq
+              (concatenate 'string (subseq sq 0 (1+ eq))
+                           (%pcl-uniprop-canon-number (subseq sq (1+ eq))))
+              sq)))))
+
+(defun %pcl-uniprop-signal (control &rest args)
+  "Refuse a property the way cl-ppcre refuses a pattern, so it takes the one
+   compile-error path (%pcl-regex-compile-die, task #2372) and dies trappably."
+  (error 'cl-ppcre:ppcre-syntax-error
+         :format-control control :format-arguments args))
+
+(defun %pcl-uniprop-tables ()
+  "The loaded key table, loading cl/pcl-uniprops.lisp on first use.  A tree
+   without the artifact DIES (rule 12) — a property must never quietly fail
+   to match again."
+  (or *pcl-uniprop-keys*
+      (progn (p-load-extension "pcl-uniprops") *pcl-uniprop-keys*)
+      (error "PCL: the Unicode property tables (cl/pcl-uniprops.lisp) did ~
+              not load; regenerate them with tools/rebuild-uniprops")))
+
+(defun %pcl-uniprop-test (code)
+  "The character test for table entry CODE (2*LIST-INDEX + NEGATED)."
+  (let ((list (svref *pcl-uniprop-lists* (ash code -1))))
+    (declare (type (simple-array fixnum (*)) list))
+    (if (oddp code)
+        (lambda (c) (not (%pcl-invlist-member-p (char-code c) list)))
+        (lambda (c) (%pcl-invlist-member-p (char-code c) list)))))
+
+(defun %pcl-property-resolver (name)
+  "cl-ppcre's *property-resolver*: NAME (the text between `\\p{' and `}') to a
+   unary character test.  `^' first complements.  A name the tables do not
+   know is a user-defined property (%pcl-user-property-test) when perl would
+   look one up, and otherwise a compile error in perl's words.  NEVER returns
+   NIL: cl-ppcre would store it and fail at MATCH time with a Lisp error."
+  (let ((spec (string-trim '(#\Space #\Tab) name)))
+    (cond
+      ((zerop (length spec)) (%pcl-uniprop-signal "Empty \\p{}"))
+      ((char= (char spec 0) #\^)
+       (let ((test (%pcl-property-resolver (subseq spec 1))))
+         (lambda (c) (not (funcall test c)))))
+      ((%pcl-user-property-test spec))
+      (t
+       (let* ((key (%pcl-uniprop-normalize spec))
+              (code (gethash key (%pcl-uniprop-tables))))
+         (when (and code (%pcl-regex-caseless-p))
+           (setf code (gethash key *pcl-uniprop-caseless* code)))
+         (cond
+           (code (%pcl-uniprop-test code))
+           ((%pcl-user-property-shaped-p spec)
+            (%pcl-uniprop-signal "Unknown user-defined property name \\p{~A}"
+                                 (%pcl-user-property-qualified spec)))
+           (t (%pcl-uniprop-signal
+               "Can't find Unicode property definition \"~A\"" spec))))))))
+
+;; Installed for EVERY pattern, once: in perl `\p` is never the letter p, and
+;; the runtime's own internal cl-ppcre patterns never spell it (grepped), so a
+;; per-scanner binding would be a second mechanism for nothing.  The resolver
+;; runs when a pattern COMPILES — once per distinct pattern, because scanners
+;; are memoized (*pcl-scanner-cache*) — never per match.
+(setf cl-ppcre:*property-resolver* '%pcl-property-resolver)
+
+(defun %pcl-text-lines (text)
+  "TEXT split at newlines (the last line need not end in one)."
+  (loop with start = 0
+        for nl = (position #\Newline text :start start)
+        collect (subseq text start (or nl (length text)))
+        while nl
+        do (setf start (1+ nl))))
+
+;;; ----- user-defined properties: \p{IsFoo} calls sub IsFoo ----------------
+;;;
+;;; perlunicode "User-Defined Character Properties": a name whose last
+;;; component begins with `In' or `Is' is looked up as a SUB in the current
+;;; package (or the one it names) when the pattern compiles; the sub is called
+;;; once, with one argument (true under /i), and returns lines — `hhhh', a
+;;; range `hhhh<ws>hhhh', or `+NAME' include / `!NAME' include-the-complement
+;;; / `-NAME' exclude / `&NAME' intersect, where `utf8::NAME' is a perl
+;;; property and any other NAME another user property; `#' starts a comment.
+;;; A user-defined name WINS over a perl property of the same spelling.
+
+(defun %pcl-user-property-shaped-p (spec)
+  "Does SPEC name a user-defined property — its last `::' component starts
+   with In or Is (case-sensitive, as in perl) followed by word characters?"
+  (let* ((sep (search "::" spec :from-end t))
+         (bare (if sep (subseq spec (+ sep 2)) spec)))
+    (and (> (length bare) 2)
+         (or (string= "In" bare :end2 2) (string= "Is" bare :end2 2))
+         (every (lambda (c) (or (alphanumericp c) (char= c #\_))) bare))))
+
+(defun %pcl-user-property-sub (spec)
+  "The function SPEC names as a sub (in the current package unless SPEC is
+   qualified), or NIL."
+  (let ((sym (%p-resolve-sub-symbol spec)))
+    (and sym (fboundp sym) (symbol-function sym))))
+
+(defun %pcl-user-property-qualified (spec)
+  "SPEC as perl names it in the unknown-property message: package-qualified."
+  (if (search "::" spec) spec (format nil "~A::~A" *pcl-current-package* spec)))
+
+(defun %pcl-regex-caseless-p ()
+  "Is the pattern being converted under /i right now?  cl-ppcre keeps its
+   ism flags in its own special FLAGS during conversion (case-insensitivity
+   first); a user property's sub is told, as perl tells it."
+  (and (boundp 'cl-ppcre::flags) (first (symbol-value 'cl-ppcre::flags)) t))
+
+(defun %pcl-user-property-test (spec &optional (depth 0))
+  "The character test for user-defined property SPEC, or NIL when SPEC is not
+   a user-defined name or no such sub exists."
+  (when (> depth 50)
+    (%pcl-uniprop-signal "Infinite recursion in user-defined property \\p{~A}" spec))
+  (let ((fn (and (%pcl-user-property-shaped-p spec) (%pcl-user-property-sub spec))))
+    (when fn
+      (%pcl-user-property-from-text
+       (to-string (let ((*wantarray* nil))
+                    (funcall fn (if (%pcl-regex-caseless-p) 1 ""))))
+       spec depth))))
+
+(defun %pcl-user-property-ref (name spec depth)
+  "The test a `+NAME' style line refers to: utf8::X is perl's property X,
+   anything else another user-defined property (which must exist)."
+  (if (and (> (length name) 6) (string= "utf8::" name :end2 6))
+      (%pcl-property-resolver (subseq name 6))
+      (or (%pcl-user-property-test name (1+ depth))
+          (%pcl-uniprop-signal "Unknown user-defined property name \\p{~A} in \\p{~A}"
+                               (%pcl-user-property-qualified name) spec))))
+
+(defun %pcl-user-property-range (line spec)
+  "A `hhhh' or `hhhh<ws>hhhh' line as (LO . HI); anything else DIES."
+  (let* ((ws (position-if (lambda (c) (member c '(#\Space #\Tab))) line))
+         (lo (parse-integer line :end ws :radix 16 :junk-allowed t))
+         (hi (if ws
+                 (parse-integer (string-left-trim '(#\Space #\Tab) (subseq line ws))
+                                :radix 16 :junk-allowed t)
+                 lo)))
+    (unless (and lo hi)
+      (%pcl-uniprop-signal "Can't parse \"~A\" in user-defined property \\p{~A}"
+                           line spec))
+    (cons lo hi)))
+
+(defun %pcl-user-property-from-text (text spec depth)
+  "Build the test for the definition TEXT a user property's sub returned:
+   (the ranges or an include) and no exclude and every intersect."
+  (let ((ranges '()) (includes '()) (excludes '()) (intersects '()))
+    (dolist (raw (%pcl-text-lines text))
+      (let* ((hash (position #\# raw))
+             (line (string-trim '(#\Space #\Tab #\Return) (subseq raw 0 hash))))
+        (when (plusp (length line))
+          (let ((kind (char line 0)))
+            (if (find kind "+-!&")
+                (let ((test (%pcl-user-property-ref
+                             (string-trim '(#\Space #\Tab) (subseq line 1)) spec depth)))
+                  (case kind
+                    (#\+ (push test includes))
+                    (#\! (push (lambda (c) (not (funcall test c))) includes))
+                    (#\- (push test excludes))
+                    (#\& (push test intersects))))
+                (push (%pcl-user-property-range line spec) ranges))))))
+    (lambda (c)
+      (let ((cp (char-code c)))
+        (and (or (some (lambda (r) (<= (car r) cp (cdr r))) ranges)
+                 (some (lambda (f) (funcall f c)) includes))
+             (notany (lambda (f) (funcall f c)) excludes)
+             (every (lambda (f) (funcall f c)) intersects))))))
+
 (defparameter +p-grapheme-text+ "(?>\\r\\n|(?s:.))"
   "perl's \\X (extended grapheme cluster), APPROXIMATED as \"a CRLF pair or one
    character\" (task #2050).  perl's own definition is UAX #29 -- a base
@@ -30041,13 +30303,46 @@ buffer's fill-pointer; everything else falls back to file-length."
    which made core Text::Wrap's whole main loop fail and every wrap()/fill()
    die \"This shouldn't happen\".  docs/not-supported.md carries the residue.")
 
+(defun %pcl-property-escape-end (pat i)
+  "PAT has `\\p' or `\\P' at I.  The index just past the property it spells —
+   `\\pX' (one letter) or `\\p{…}' — or NIL when it spells neither (a lone
+   `\\p', an unterminated brace), which is left for cl-ppcre to refuse."
+  (let ((n (length pat)))
+    (cond ((>= (+ i 2) n) nil)
+          ((char= (char pat (+ i 2)) #\{)
+           (let ((close (position #\} pat :start (+ i 3))))
+             (and close (1+ close))))
+          ((alpha-char-p (char pat (+ i 2))) (+ i 3))
+          (t nil))))
+
+(defun %pcl-property-escape-text (pat i end in-class)
+  "The rewrite of the property escape PAT[I..END).  The one-letter form gets
+   its braces (cl-ppcre reads only `\\p{…}'); a leading `^' inside the braces
+   is folded into the escape's own sense.  OUTSIDE a bracket class the
+   property becomes a class of its own — `[\\p{X}]', and `\\P{X}' becomes
+   `[^\\p{X}]' — because cl-ppcre case-folds only inside a class, and perl
+   under /i folds FIRST and complements AFTER (`\"a\" =~ /\\P{Lu}/i' is false in
+   perl; cl-ppcre's own inverted property would complement first).  Inside a
+   class the escape is kept, braced."
+  (let* ((braced (char= (char pat (+ i 2)) #\{))
+         (name (if braced (subseq pat (+ i 3) (1- end)) (subseq pat (+ i 2) end)))
+         (trim (string-left-trim '(#\Space #\Tab) name))
+         (caret (and (plusp (length trim)) (char= (char trim 0) #\^)))
+         (neg (if caret
+                  (not (char= (char pat (1+ i)) #\P))
+                  (char= (char pat (1+ i)) #\P)))
+         (name (if caret (subseq trim 1) name)))
+    (cond (in-class (concatenate 'string (if neg "\\P{" "\\p{") name "}"))
+          (neg (concatenate 'string "[^\\p{" name "}]"))
+          (t (concatenate 'string "[\\p{" name "}]")))))
+
 (defun %pcl-has-hv-escape (pat)
-  "Does PAT contain a backslash followed by h H v V R X or N?  A cheap
+  "Does PAT contain a backslash followed by h H v V R X N p or P?  A cheap
    pre-test: almost no pattern does, and the rewrite below is a full copying
    scan."
   (loop for i from 0 below (max 0 (1- (length pat)))
         thereis (and (char= (char pat i) #\\)
-                     (find (char pat (1+ i)) "hHvVRXN") t)))
+                     (find (char pat (1+ i)) "hHvVRXNpP") t)))
 
 (defun %pcl-expand-hv-escapes (pat)
   "Rewrite \\h \\H \\v \\V and \\R into forms cl-ppcre reads.  ONE forward
@@ -30072,6 +30367,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (cond
                        ((and nx (find nx "hHvV"))
                         (write-string (%pcl-hv-class-text nx in-class) out))
+                       ;; \pX \p{…} \PX \P{…} — a Unicode property (#2060).
+                       ((and nx (find nx "pP") (%pcl-property-escape-end pat i))
+                        (let ((end (%pcl-property-escape-end pat i)))
+                          (write-string (%pcl-property-escape-text pat i end in-class) out)
+                          (setf i (- end 2))))
                        ((and nx (char= nx #\R) (not in-class))
                         (write-string +p-linebreak-text+ out))
                        ;; \X — one grapheme cluster, approximated (task #2050).
@@ -30974,7 +31274,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                       (< (+ i 3) len)
                       (char= (char pattern (+ i 3)) #\<)))))))
 
-(defun %pcl-regex-compile-die (e)
+(defun %pcl-regex-compile-die (e pattern)
   "A pattern that cannot COMPILE is a perl DIE (task #2372): trappable, one
    line, carrying the pattern text.  E is the cl-ppcre:ppcre-syntax-error the
    engine (or the Unicode property resolver, #2060) signalled.  It used to be
@@ -30982,14 +31282,17 @@ buffer's fill-pointer; everything else falls back to file-length."
    no-match, split the whole string as one field, s/// \"no substitution\" --
    where perl dies (rule 12: the value flowed onward).  The text is perl's
    SHAPE, not its words (USER s494): the reason, then the pattern as the
-   ENGINE saw it, with `<-- HERE' at the engine's position when it has one.
+   ENGINE saw it (PATTERN when the error carries none -- a property name
+   is resolved after cl-ppcre has dropped its copy), with `<-- HERE' at the
+   engine's position when it has one.
    Every scanner is built through %pcl-create-scanner, so this is the one
    place a compile error becomes a die."
   (let* ((reason (string-right-trim
                   "."
                   (apply #'format nil (simple-condition-format-control e)
                          (simple-condition-format-arguments e))))
-         (str (or (cl-ppcre:ppcre-syntax-error-string e) ""))
+         (str (let ((s (cl-ppcre:ppcre-syntax-error-string e)))
+                (if (and (stringp s) (plusp (length s))) s pattern)))
          (pos (cl-ppcre:ppcre-syntax-error-pos e))
          (cut (if (and (integerp pos) (<= 0 pos (length str))) pos (length str))))
     (%p-die-error nil "~A in regex; marked by <-- HERE in m/~A <-- HERE ~A/"
@@ -31005,7 +31308,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (values (first hit) (second hit) (cddr hit))
         (multiple-value-bind (scanner reg-names)
             (handler-case (%pcl-build-scanner pattern options)
-              (cl-ppcre:ppcre-syntax-error (e) (%pcl-regex-compile-die e)))
+              (cl-ppcre:ppcre-syntax-error (e) (%pcl-regex-compile-die e pattern)))
           (let ((closers (%pcl-capture-closer-positions
                           pattern (getf options :extended-mode))))
             (setf (gethash key *pcl-scanner-cache*)
