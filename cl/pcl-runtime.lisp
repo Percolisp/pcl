@@ -25681,6 +25681,26 @@ buffer's fill-pointer; everything else falls back to file-length."
             (p-warn (format nil "Use of uninitialized value in join or string~%")))
           (list val)))))))
 
+(defun %p-join-strings (sep strs)
+  "The strings STRS with SEP between each pair, as one fresh string: the total
+   length is summed first and each piece REPLACEd into place (task #2511).
+   p-join used to hand FORMAT a control string built at run time from SEP —
+   the directive parser ran on every call (31 % of a join-bound program) and a
+   separator containing `~' was read as a directive: `join(\"~\", @a)' died
+   with a host format-error."
+  (let ((total 0) (n 0) (slen (length sep)))
+    (declare (type fixnum total n slen))
+    (dolist (x strs) (incf total (length (the string x))) (incf n))
+    (when (> n 1) (incf total (* slen (1- n))))
+    (let ((out (make-string total)) (pos 0) (first t))
+      (declare (type fixnum pos))
+      (dolist (x strs out)
+        (if first
+            (setf first nil)
+            (progn (replace out sep :start1 pos) (incf pos slen)))
+        (replace out (the string x) :start1 pos)
+        (incf pos (length (the string x)))))))
+
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
    Handles both (join SEP @array) and (join SEP elem1 elem2 ...).
@@ -25712,8 +25732,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (elements (loop for item in items nconc (%p-join-args item))))
     (declare (ignore _))
     (if s
-        (format nil (concatenate 'string "~{~A~^" s "~}")
-                (mapcar #'to-string elements))
+        (%p-join-strings s (mapcar #'to-string elements))
         (if elements (to-string (car elements)) ""))))
 
 (defun %perl-space-char-p (c)

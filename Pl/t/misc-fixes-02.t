@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 136;
+plan tests => 137;
 
 sub run_cl {
     my ($code) = @_;
@@ -1395,3 +1395,13 @@ test_cl('#2005 negative: map still ALIASES $_ to the element it reads',
     'my @d = (1, 2); my @e = map { $_ *= 2; $_ } @d; print "@d|@e\n";'
   . ' my @c = (1, 2); $_ .= "!" for map { $_ } @c; print "@c\n";',
     "2 4|2 4\n1 2\n");
+
+# #2511 (s500p): join used a FORMAT control string built from the separator,
+# so a separator containing `~` was read as a directive and died with a host
+# format-error; join now concatenates.  Expected text is perl 5.40.3's.
+test_cl('#2511 join with a separator containing ~ is literal text',
+    'my @a = (1, 2, 3); print join("~", @a), "|", join("~%", @a), "|",'
+  . ' join("~A~", "x", "y"), "|", join("~^", @a), "|", join("", @a), "|",'
+  . ' join(",", ()), "|", join(",", "one"), "\n";'
+  . ' { local $" = "~}"; print "@a\n"; }',
+    "1~2~3|1~%2~%3|x~A~y|1~^2~^3|123||one\n1~}2~}3\n");
