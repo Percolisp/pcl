@@ -385,7 +385,16 @@ s316b: 5635 pass / 90 fail).  It was found at gen v2-30 against a v2-71
 compiler — 40 generations of drift, which made every pack.t run a test of
 the *old* emitter (and again at s396: v2-136 vs v2-147, eleven generations).
 `cl/pcl-mro.lisp` comes from `lib/mro.pm` the same way, and so does
-**`cl/pcl-warnings.lisp` from `lib/warnings.pm`** — there are THREE.
+**`cl/pcl-warnings.lisp` from `lib/warnings.pm`** — there are THREE compiler-built
+ones, plus a FOURTH that is DATA (s496a, task #2060): **`cl/pcl-uniprops.lisp`**,
+perl's own Unicode property tables (`Unicode::UCD::prop_invlist`), written by
+**`tools/rebuild-uniprops`** under the oracle perl (`tools/rebuild-uniprops &&
+tools/tag-license cl/pcl-uniprops.lisp`).  Its line-1 stamp is `;;; pcl-uniprops
+unicode=15.0.0 perl=5.40.3 tool=tools/rebuild-uniprops` — NO `gen=`, because it
+depends on perl's Unicode version, not on the compiler, so a generation bump never
+makes it stale; `Pl/t/artifact-staleness-01.t` discovers artifacts by the `;;; pcl:
+pipeline=… gen=` stamp and does not adopt it — `Pl/t/uniprops-01.t` guards it instead
+(regenerates and compares bytes; checks the stamp's Unicode version against perl's).
 **The drift is now a GATE**: `Pl/t/artifact-staleness-01.t` compares each
 artifact's line-1 `gen=` stamp against `*pcl-cache-generation*`, so bumping
 the generation without regenerating fails a row the same session (s399,
