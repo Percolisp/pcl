@@ -47,8 +47,6 @@ sub run_cl {
 # Rows PCL still answers wrong, each with the task that owns it.
 my %TODO = (
   'require false-returning file'   => '#1688 (require never enforces a true value)',
-  'invalid regex at run time'      => '#2372 (a regex compile error is a warn + a wrong value)',
-  'invalid quantifier regex'       => '#2372',
   'exists on non-element'          => '#2403 (strict refs on the vivifying chain / write path)',
   'local on lexical-free special'  => '#2405 (`$/ = \0` is accepted; needs a store hook on $/)',
 );
