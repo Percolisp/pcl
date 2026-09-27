@@ -5811,7 +5811,7 @@ sub _process_dq_escape {
 # (`\U` `\L` `\u` `\l` `\Q` `\F` `\E`) are commands in that same token stream
 # -- never in-band markers in decoded text, which is how `"C:\\Users"` used to
 # print `C:SERS` (the decode turned `\\U` into `\U`, then a second pass over
-# the decoded text read it as \U).  ir-spec §3.2c.
+# the decoded text read it as \U).  ir-spec §3.2g.
 sub _apply_case_escapes {
   my $src = shift;
   my @tokens;   # [cmd => 'U'] or [text => '...'], in source order
@@ -5838,7 +5838,7 @@ sub _apply_case_escapes {
         $pending = $val;
       } else {
         # perl's toke.c: a \U \L \F while a U/L/F is open first closes modes
-        # from the top until none is left (a \Q above it goes too), ir-spec §3.2c.
+        # from the top until none is left (a \Q above it goes too), ir-spec §3.2g.
         pop @modes while $val ne 'Q' && grep { $_ ne 'Q' } @modes;
         push @modes, $val;
       }

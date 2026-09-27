@@ -169,7 +169,7 @@ sub parse_interpolated_string {
           # the group closes, and clear it so it doesn't leak onto the contents.
           # perl's toke.c: a \U \L \F while a U/L/F group is open first closes
           # groups from the top until none is left (a \Q above it goes too) --
-          # "\LAB\LCD\EEF" is abcdEF (ir-spec §3.2c, #2441).
+          # "\LAB\LCD\EEF" is abcdEF (ir-spec §3.2g, #2441).
           if ($case_cmd ne 'Q') {
             $close_group->(1) while grep { $_->{mode} ne 'Q' } @case_stack;
           }

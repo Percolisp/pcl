@@ -20,14 +20,14 @@ design ruling; `sNNN` names an internal working session.
 * [1. Reading the output](#1-reading-the-output) — file shape, naming conventions
 * [2. The data model](#2-the-data-model) — [undef](#21-undef) · [scalars and raw slots](#22-scalars-boxes-and-raw-slots) · [tied scalars](#22b-tied-scalars--the-raw-slot-behind-the-magic) · [arrays](#23-arrays) · [hashes](#24-hashes) · [references](#25-references) · [blessed objects](#26-blessed-objects-strings-numbers)
 * [2b. Declarations, scoping, and the rename families](#2b-declarations-scoping-and-the-rename-families) — [the tension](#2b1-the-fundamental-tension) · [declaration forms](#2b2-the-declaration-forms) · [rename families](#2b3-the-rename-families) · [guard rails](#2b4-the-guard-rails-when-renaming-refuses)
-* [3. Coercion](#3-coercion--the-heart-of-perl-semantics) — [numification](#31-to-number-numification) · [stringification](#32-to-string-stringification) · [interpolation extent](#32b-interpolation-extent--which-text-belongs-to-a--reference-inside-a-dq-string-regex-or-heredoc-normative-s426) · [truthiness](#33-p-true-p-truthiness) · [what ops return](#34-what-ops-return)
+* [3. Coercion](#3-coercion--the-heart-of-perl-semantics) — [numification](#31-to-number-numification) · [stringification](#32-to-string-stringification) · [interpolation extent](#32b-interpolation-extent--which-text-belongs-to-a--reference-inside-a-dq-string-regex-or-heredoc-normative-s426) · [case/quote modifiers read from the source](#32g-the-casequote-modifiers-of-a-dq-string-are-read-from-its-source-normative-s499h-task-2441) · [truthiness](#33-p-true-p-truthiness) · [what ops return](#34-what-ops-return)
 * [4. Context (scalar / list / void)](#4-context-scalar--list--void) — [argument context is the callee's signature](#41-a-calls-argument-context-is-a-fact-of-the-callees-signature-normative-s492b-task-2004)
 * [5. Calling convention](#5-calling-convention) — [definition](#51-definition) · [arguments](#52-arguments--two-body-shapes) · [return](#53-return) · [comparator frames](#54-comparator-frames--p-sort-cmp)
 * [6. Control flow](#6-control-flow) — [conditionals](#61-conditionals) · [loops](#62-loops-and-loop-control) · [exceptions](#63-exceptions-die--eval----) · [goto](#64-goto)
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [weak-keyword override](#71a-a-weak-keyword-is-displaced-by-a-sub-the-package-has-at-compile-time-normative-s492c-task-18701992) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [counted quantifiers, `{,n}`](#10-count-a-counted-quantifier-is-perl-534s-grammar-0n-is-00n-blanks-allowed-normative-s499h-task-2444) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -1449,6 +1449,21 @@ string eval inherits its site's answer.  NOT modelled: a module that imports
 strict into its caller (`use Moo`, …) — task #2406.  The write path through a
 string (`$str->{k} = 1`, a vivifying chain `exists $h->{k}{j}` over a string,
 `&$str()`) is not strict-checked — task #2403.
+
+### 3.2g The case/quote modifiers of a dq string are read from its SOURCE (normative, s499h, task #2441)
+
+In a double-quoted string (`"…"`, `qq{}`, `<<"EOT"`, an s/// replacement, a
+string-eval'd string) the modifiers `\U \L \F \Q \E \u \l` are commands in
+the ONE scan of the source that also decodes every other escape, and each
+`\X` is one unit: an escaped backslash is the text `\`, and the character
+after it is a plain letter, never a modifier (`"C:\\Users"` is `C:\Users`).
+The applied text is the DECODED text (`"\Q\x41.\E"` is `A\.`).  The modifier
+stack follows perl's toke.c: `\U` `\L` `\F` while a U/L/F is open first close
+modes from the top until none is left (a `\Q` above it goes too); `\Q` just
+pushes; `\E` pops one; the end of the string closes everything; `\u`/`\l`
+change the first character of what follows (of a group's OUTPUT when it
+opens one: `"\u\LAB\E"` is `Ab`).  Example: `"\LAB\LCD\EEF"` is `abcdEF`, and
+`"\Uab\Qc.\Ld.e\Ef.g"` is `ABC\.d.ef.g`.
 
 ### 3.3 `p-true-p` (truthiness)
 
@@ -4423,6 +4438,18 @@ quantifier follows (`a++*`): those are copied, and a spelling perl refuses as
 `"aaa" =~ /a++a/` is false (the atom gives nothing back) where `/a+a/` is
 true.  Under `/x` a blank between the atom and the quantifier is not yet
 skipped (`/a ++/x` dies; task #2443).  The `:tier` stays `:pcre` (§10-tier).
+
+### 10-count. A COUNTED quantifier is perl 5.34+'s grammar: `{,n}` is `{0,n}`, blanks allowed (normative, s499h, task #2444)
+
+Outside a class and not after a backslash, `{` MIN? (`,` MAX?)? `}` with
+blanks (space, tab) around each number and the comma, and at least one
+number, is a quantifier: `{n}` `{n,}` `{n,m}` `{ 2 , 3 }` `{ 2}` and `{,n}`,
+which means `{0,n}`.  `{,}` `{}` `{a}` `\{,2}` and `[{,2}]` are literal text.
+The same one forward scan (§10-esc) writes a counted quantifier blank-free
+with `0` for an absent minimum before the engine sees it, so `{,n}?` is lazy
+and `{,n}+` possessive (§10-poss) like any other.  Example: `"xx" =~
+/^x{,2}$/` is true and `"x{,2}" =~ /^x{,2}$/` is false.  The rewrite is
+local, so a `{,n}` does not change a literal's `:tier` (§10-tier).
 
 ### 10-prop. Unicode properties are answered from PERL'S OWN tables; an unknown one DIES at compile (normative, s496a, tasks #2060 #2372)
 
