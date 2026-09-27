@@ -7,6 +7,10 @@
 #   MEMBER 7 (s499, Fable review ruling: qr// compiles EAGERLY): re/pat_rt_report.t re-spliced 2431/26 -> 110/4
 #   (A/B `--jobs 1` vs a 0ab64a45 extraction, scratch/s496a/comp7-before.tsv vs comp7-after.tsv; op/qr.t,
 #   re/reg_mesg.t, re/regexp.t identical).  The earlier die place: line 401's qr/(\x{100}++)/ is a POSSESSIVE (#2380).
+#   Then (member 7 follow-ups, 1ae1f247; the 27-file leg re-run --jobs 1 vs comp-final.tsv = the 0ab64a45 tree):
+#   re/regexp_unicode_prop.t 1003/107 -> 1014/96 UP, re/pat_advanced.t 698/142 -> 699/137 (the aborting form moves
+#   from line 1122's recursion to line 1106's qr/(??{...})/), re/regex_sets.t XDIFF 4/84 -> 0/0 (every statement
+#   dies at its unsupported qr/(?[...])/; rows re-blessed for that ONE file, same registered reason).
 # s494g (2026-09-25, Opus) -- FOUR rows spliced by hand + ONE first measurement, every mover
 #   A/B'd `--jobs 1` against a dc20a721 extraction (scratch/s494g/companion-base2-movers.log)
 #   and this tree (companion-rebased.log); cause in each row's sig column.  lib/croak.t is
@@ -2021,7 +2025,7 @@ re/no_utf8_pm.t	1	0	1	0	OK		0
 re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
 re/overload.t	87	0	3	0	TIMEOUT	timeout	0
 re/pat.t	1263	4	206	99	DIFF	s496a #2372 -> #2383: 245/124 -> 206/99 -- a code-block CONDITION (?(?{...})...) was a silent no-match; a pattern that cannot compile now DIES, and the file stops there (A/B: b6560c21 245/124)	0
-re/pat_advanced.t	1678	0	698	142	DIFF	s496a #2372 -> #2382: 1262/418 -> 698/142 -- regex RECURSION (?1) at line 1122 was a silent no-match and now DIES, the rows past it ran on the no-match (A/B: b6560c21 1262/418; the snapshot's 1258/422 was +4 PRE-EXISTING at b6560c21, cause not this batch)	0
+re/pat_advanced.t	1678	0	699	137	DIFF	s496a #2372 -> #2382, then member 7: 1262/418 -> 698/142 -> 699/137 -- the one aborting top-level form stops at line 1106's qr/^((??{ $brackets }))/ (a (??{code}) postponed subpattern, not-supported.md §Regex code blocks) which now dies AT THE qr, instead of at line 1122's recursion (?1) (#2382) in a match (A/B: b6560c21 1262/418, 0ab64a45 698/142)	0
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_psycho.t	15	0	15	0	OK		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
@@ -2050,7 +2054,7 @@ re/reg_nc_tie.t	37	0	14	18	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-STORE; ab
 re/reg_nocapture.t	25	0	14	11	DIFF		0
 re/reg_pmod.t	88	0	58	30	DIFF		0
 re/reg_posixcc.t	2560	0	2560	0	OK	
-re/regex_sets.t	96	0	4	84	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it	0
+re/regex_sets.t	96	0	0	0	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it.  s496a member 7: 4/84 -> 0/0 -- every like/unlike statement now dies at its qr/(?[...])/ (qr compiles eagerly, as perl), so no TAP; the 4 lost rows were accidental passes (unlike on a pattern that could not compile); rows re-blessed for this file only (A/B: 0ab64a45 4/84)	0
 re/regex_sets_compat.t	2167	2	1755	274	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
 re/regexp.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_noamp.t	2169	0	796	109	TIMEOUT	timeout	0
@@ -2061,7 +2065,7 @@ re/regexp_qr.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_qr_embed.t	2167	2	795	110	TIMEOUT	timeout	0
 re/regexp_qr_embed_thr.t	0	0	242	1787	NOTAP	aborted-forms:3: The function main::pl-useithreads is undefined.; s490 review of s473t6b (#1850): the harness's TAP is on disk row by row, so a file the runner KILLS keeps every row that ran, not only the rows that had flushed -- NOTAP 202/1656 -> NOTAP 242/1787, parallel and serial agreeing (perl skips the file: no threads)	0
 re/regexp_trielist.t	2167	2	795	110	TIMEOUT	timeout	0
-re/regexp_unicode_prop.t	1110	0	1003	107	DIFF	s496a #2060: 778/332 -> 1003/107 -- \p{...} answered from perl's tables; the remaining rows are user-defined IsMyRuntimeProperty ordering + ungenerated properties (A/B: b6560c21 778/332)	0
+re/regexp_unicode_prop.t	1110	0	1014	96	DIFF	s496a #2060 + member 7: 778/332 -> 1003/107 -> 1014/96 -- \p{...} from perl's tables; then the eager qr made the file's user-defined forward references (qr in BEGIN before the sub) defer as in perl, a -hhhh line excludes (#2387 pt 1) and a user property's sub is called once per name; residue #2387 (/i fold, package scope), error-message text, ungenerated properties (A/B: b6560c21 778/332, 0ab64a45 1003/107)	0
 re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/rt122747.t	3	0	3	0	OK		0
 re/rxcode.t	42	0	26	15	DIFF		0
