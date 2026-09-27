@@ -41,9 +41,9 @@ cached core`), and a one-liner can trigger that build too.
 
 | option | meaning |
 |---|---|
-| `-e CODE`, `-E CODE` | run inline code, like `perl -e`. The two are the same, and both enable `say` |
-| `-I DIR` | prepend DIR to `@INC` (repeatable); it also applies to the compile of every module the program loads |
-| `-M MODULE` | `use MODULE` before running (repeatable; `-MList::Util=sum` imports) |
+| `-e CODE`, `-E CODE` | run inline code, like `perl -e`. The two are the same, and both enable `say`. `$0` and `__FILE__` are `-e`, and `die` says `at -e line N` |
+| `-I DIR` | prepend DIR to `@INC` (repeatable, in command-line order, ahead of `PERL5LIB`); it also applies to the compile of every module the program loads |
+| `-M MODULE` | `use MODULE` before running (repeatable; `-MList::Util=sum` imports). The script keeps its own name and line numbers: `$0`, `__FILE__`, `warn`/`die` locations and `FindBin` are what perl reports |
 | `-c` | compile only, print `syntax OK`, exit |
 | `-w` | accepted for compatibility |
 | `-v`, `--verbose` | print the `sbcl` command line `pcl` runs |
@@ -86,6 +86,7 @@ once.
 | `--emit-sexp` | print the lowered tree as portable S-expressions ([`ir-spec.md`](ir-spec.md) §12b) |
 | `--facts` | annotate the emission with every optimization licence that held |
 | `--deps FILE` | write the dependency manifest the runtime uses to decide whether a cache entry is still valid |
+| `--as NAME` | compile the file AS the program NAME: `$0`, `__FILE__` and `die`/`warn` locations say NAME (what `pcl -e` and `pcl -M` use) |
 
 To run the output by hand:
 
@@ -139,11 +140,18 @@ details.
 
 ## Modules, and how they are compiled
 
-A `use` or `require` is resolved through `@INC` (the directories perl
-searches, plus `-I` and `PERL5LIB`), and — as in perl 5.26 and later —
-neither the current directory nor the script's own directory is on it: a
-module beside your script is found through `use lib`, `FindBin` or `-I`, as
-under perl.  The module's source is compiled the same way as
+A `use` or `require` is resolved through `@INC`, in perl's order: the `-I`
+directories, then `PERL5LIB`, then PCL's own `lib/` (its replacements for
+modules perl implements in C), then perl's own library directories.  As in
+perl 5.26 and later, neither the current directory nor the script's own
+directory is on it: a module beside your script is found through `use lib`,
+`FindBin` or `-I`, as under perl.  A few of PCL's replacements are found
+BEFORE `@INC` is searched, because perl's own copy cannot run under PCL
+(`List::Util`, `POSIX`, `Carp` and the others listed in
+[`shipped-modules.md`](shipped-modules.md)): a `PERL5LIB` that holds perl's
+real `List/Util.pm`, as a local::lib often does, does not break a program.
+`use lib` is perl's own `lib.pm`, so it removes duplicates as perl does.
+The module's source is compiled the same way as
 your program, then **cached** as its transpiled Lisp plus a compiled `.fasl`
 under `~/.pcl-cache/modules/`. Only the first run pays. The program you run
 gets an entry of the same kind under `~/.pcl-cache/scripts/`, keyed on its

@@ -3529,14 +3529,44 @@ Generated files are loaded form-by-form; a `use`/`require` triggers
 transpilation (or cache lookup) of the target module and loads it inline,
 recursively.
 
-**`@INC` at program start is PCL's shim `lib/`, then the transpiling perl's
-own `@INC` — and never `"."` nor the script's directory (normative, s499g,
-task #2442).** The preamble pushes those two groups and nothing else; the
-perl group already carries `-I` (`pcl -I DIR`) and `PERL5LIB`, as in perl.
-perl 5.26+ has no `"."` and never had the script's directory; a program asks
-for them the perl way — `use lib`, `FindBin`, `-I`, `PERL5LIB`. `use lib LIST`
-evaluates its LIST as an ordinary expression at compile time and unshifts it
-in ONE call (source order kept). A `require`/`do` of a FILE path is used as
+**`@INC` at program start is perl's, in perl's ORDER: the `-I` entries
+(command-line order), then `PERL5LIB`, then PCL's shim `lib/`, then perl's own
+directories — and never `"."`, the script's directory, nor the PCL tree
+(normative; s499g task #2442, s499j task #2462).** ONE derivation,
+`PCLPaths::program_inc`, builds it for the preamble, for the transpiler's
+module resolver and for `pcl`'s script-cache seed: the transpiling perl's
+`@INC` with the shim inserted in front of the first `%Config` library
+directory and every ABSOLUTE entry naming the PCL root or its `tools/lib`
+removed (so `require Pl::Parser` from a program dies "Can't locate", as in
+perl).  perl 5.26+ has no `"."` and never had the script's directory; a
+program asks for them the perl way — `use lib`, `FindBin`, `-I`, `PERL5LIB`.
+
+**A shim that wins by NAME (normative, s499j, task #2462).** A `lib/` shim
+whose first 60 lines hold `# pcl-shim: must-win` is found BEFORE `@INC` is
+searched (runtime `%p-must-win-shim`, transpiler `Pl::Parser::must_win_shim`
+— both read the marker, so a module is parsed from the file it is loaded
+from).  The marker is DATA in `lib/` (rule 9a) and belongs on a shim whose
+real module cannot run under PCL: the XS modules (`List::Util`,
+`Scalar::Util`, `Sub::Util`, `POSIX`, `Fcntl`, `Socket`, `Cwd`,
+`Time::HiRes`, `MIME::Base64`, `IO`, `mro`, `version`), `Test::More` (the
+runtime supplies it and never loads a `Test/More.pm`), and two pure-Perl
+modules MEASURED to fail when perl's own copy is on `PERL5LIB` — `Carp`
+(croak undefined, #2491) and `Math::BigInt::Calc` (hangs).  Every other shim
+follows the order above, so a user's `-I` copy of it wins, as in perl.
+
+```perl
+# PERL5LIB=<dir holding perl's real List/Util.pm>:
+use List::Util qw(sum); print sum(1,2);   # 3 -- the shim, not the XS module
+# pcl -I mine prog.pl, mine/File/Spec/Functions.pm exists: that copy loads
+```
+
+**`use lib LIST` is `lib->import(LIST)` with perl's own `lib.pm`
+(normative, s499j, task #2464)** — the LIST is evaluated as an ordinary
+expression at compile time; the import unshifts it in one step (source order
+kept), puts an existing `$dir/$archname` etc. in front, and removes later
+DUPLICATES (a directory already on `@INC` moves to the front).  `no lib
+LIST` is `lib->unimport(LIST)` (`p-unimport`): every instance leaves `@INC`.
+A `require`/`do` of a FILE path is used as
 given when it is absolute or starts with `./` or `../`
 (`%p-explicit-path-p`, perl's `path_is_searchable`); any other name is
 searched in `@INC` only — the cwd is not consulted.
@@ -3993,15 +4023,18 @@ task #1860). A name that starts resolving to a *different file* changes the
 emission exactly as an edit does, and neither the content hashes nor the
 `missing` re-check can see it: the recorded file still exists and still hashes
 as read. This side cannot simply re-resolve the name, because **the
-transpiler's search list is not `@INC`** — it is [the file's own `use lib`
-directories, PCL's shim `lib/`, then the child perl's `@INC`], and emulating
+transpiler's search list is not `@INC`** — it is [a must-win shim; else the
+file's own `use lib` directories, then the child perl's `@INC` in
+`program_inc` order with PCL's shim `lib/` placed before perl's own
+directories], and emulating
 that order from the runtime is the endless-re-transpile trap (every shim
 dependency would read stale for ever). So the manifest is **self-describing**:
 `pl2cl --deps` records, per resolved `mod` dependency, one `tried` line per
 directory its resolver probed **before** the hit (absolute; a relative
 `use lib 't/lib'` is `rel2abs`'d at record time) and one `resolve` line saying
-whether the hit was in the **head** of that list (a `use lib` directory or the
-shim `lib/`) or in the **base** (the child's `@INC` part). The runtime then
+whether the hit was in the **head** of that list (a `use lib` directory, the
+shim `lib/`, or a must-win shim — recorded with no `tried` lines) or in the
+**base** (the child's `@INC` part, whatever its position; s499j). The runtime then
 checks facts rather than re-deriving them:
 
 - **R1** — no recorded `tried` directory holds the dependency's file now. The

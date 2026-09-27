@@ -71,6 +71,15 @@ not-supported.md → only then probe.*
 - **s495f MERGED (ff `25d7fede`, pushed): `EVERYDAY: 92 -> 100 of 122` (82.0 %) confirmed by Fable's own run (buckets 0); Fable's own gate on the sha 262 / 8675 PASS; container install test PASS (platform-touching: sb-alien gethostby*/getnetby*/setpriority; macOS NOT TESTED, #2196); review probes 8 of 11 identical to perl, the three differing explained (formline dies by ruling; #2103 strict-dependent, not shipped; stderr ORDER under runpcl's plain load).**  Records nit: its session-log section says gate 8674, the count is 8675.  **#2341 (HIGH, pre-existing, filed by the agent) = the next correctness candidate**: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref -- `push @$u, 1` dies, `$u->[0]` / `for (@$u)` / `keys %$u` leave it undef; right under `PCL_OPT=-raw-slot`.
 
 
+## s499j (2026-09-27, Opus) -- @INC in perl's ORDER with the PCL tree out (#2462); shims that win by NAME; `use lib` = perl's lib.pm (#2464); `$0`/`__FILE__` under `pcl -e` (#2461) and `pcl -M` (#2460)
+
+- **@INC order (#2462): -I, PERL5LIB, PCL lib/, perl's own; never the PCL root or tools/lib** — ONE derivation `PCLPaths::program_inc` (pl2cl preamble, `Pl::Parser` inc_paths, `pcl` seed); `pcl` no longer passes `-I $ROOT`; ir-spec §9.
+- **Must-win shims: header line `# pcl-shim: must-win` = found BEFORE @INC** (runtime `%p-must-win-shim`, transpiler `Pl::Parser::must_win_shim`; the marker is the data, rule 9a) — on the 12 XS shims + Test::More + Carp (#2491) + Math::BigInt::Calc (hangs), the last two MEASURED; every other shim yields to a user's -I copy; shipped-modules.md.
+- **#1860 HEAD/BASE is now membership, not position** — BASE = the child perl's @INC part (`%_base_dirs`), a must-win hit is HEAD with no tried dirs.
+- **`use lib LIST` = `(p-use "lib" :import-args LIST)` = perl's REAL lib.pm (#2464)**; `no lib LIST` = `(p-unimport "lib" LIST)` (was a no-op).
+- **`pl2cl --as NAME`: the program's name for the source** — $0, `__FILE__`, die/warn locations, drop announcements; `pcl -e` passes `-e`; `pcl -M` puts the use-lines on the script's first code line (after `=cut` for a POD-first file) and passes the script as given, so line numbers and FindBin hold (#2460/#2461).
+- **caller()'s FILE/LINE under PCL still name the .lisp** — pre-existing for every file (#233 family), not fixed here.
+
 ## s499h (2026-09-27, Opus) -- a dq string's case/quote modifiers are read from the SOURCE (#2441); `{,n}` is `{0,n}` (#2444); uniprops byte row runs only under the stamp's perl
 - **uniprops-01.t row 3 (CI red)**: the regenerate-and-compare-bytes row runs only when the running perl equals the artifact stamp's `perl=`; otherwise it SKIPS naming both versions; the `unicode=` row runs everywhere (on main as 59859d7a).
 - **#2441 dq modifiers**: `\U \L \F \Q \E \u \l` are commands in the ONE scan of the source that decodes every escape (`ExprToCL::_apply_case_escapes`); an escaped backslash is text (`"C:\\Users"` = `C:\Users`); never in-band markers in decoded text.  ir-spec §3.2g.

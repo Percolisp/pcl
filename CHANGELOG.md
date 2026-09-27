@@ -5,6 +5,18 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-27: **`@INC` in perl's order, and `$0` under `-e` and `-M`**
+  (#2462, #2464, #2461, #2460).  `-I` directories now come first, then
+  `PERL5LIB`, then PCL's `lib/`, then perl's own — PCL's `lib/` used to sit
+  ahead of all of them, together with the PCL installation directory itself,
+  which made PCL's own compiler modules loadable by a program.  The
+  replacements for modules perl implements in C (`List::Util`, `POSIX`, …),
+  plus `Carp`, are still used when a `PERL5LIB` holds perl's real copies, so
+  a local::lib does not break a program.  `use lib` is perl's own `lib.pm`
+  (duplicates removed, an existing directory moves to the front) and `no lib`
+  works.  `pcl -e` reports `$0` and `__FILE__` as `-e`; `pcl -M Mod script.pl`
+  keeps the script's name and line numbers, so `FindBin` works under `-M`.
+
 - 2026-09-27: **no `.` and no script directory on `@INC`** (#2442).  PCL
   put both there, so a stray `Foo.pm` in the current directory — or, for
   `pcl -e`, in the temp directory the program was written to — shadowed the

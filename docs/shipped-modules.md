@@ -20,11 +20,20 @@ Checked in this order (`p-use` in `cl/pcl-runtime.lisp`):
    internals, so `use Test::More` loads PCL's own TAP implementation,
    `cl/pcl-test.lisp`, the first time a program asks for it
    (`*p-pcl-provided-modules*`).
-4. **Everything else** is looked up on `@INC`. PCL's `lib/` is searched
-   before perl's own library directories, so a replacement there wins over
-   the installed module of the same name. The file found is compiled and
+4. **A replacement marked `# pcl-shim: must-win`** in its header is used
+   without searching `@INC` at all. The marker is on the replacements whose
+   real module cannot run under PCL: every XS module in the first table
+   below, `Test::More`, and `Carp` and `Math::BigInt::Calc` (perl's own
+   copies were measured failing under PCL: `croak` undefined, and a hang).
+   So a `PERL5LIB` holding perl's real `List/Util.pm`, which a local::lib
+   often does, cannot break a program.
+5. **Everything else** is looked up on `@INC`, which has perl's order: the
+   `-I` directories, then `PERL5LIB`, then PCL's `lib/`, then perl's own
+   library directories. A replacement in `lib/` therefore wins over the
+   installed module of the same name, and a user's own `-I` copy wins over
+   the replacement, as it would under perl. The file found is compiled and
    cached like the program itself ([`caching.md`](caching.md) §2).
-5. **An XS module with no replacement** (its `.pm` is found, but it needs a
+6. **An XS module with no replacement** (its `.pm` is found, but it needs a
    compiled `.so`) fails the way a missing module fails in perl: with
    "Can't locate ...", which is what optional-XS wrappers on CPAN expect. The
    experimental XS bridge can build some real XS distributions; see
