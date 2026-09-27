@@ -13,10 +13,10 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **737**
+* names exported: **739**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 737
-* UNCLASSIFIED (no family rule matches): **7**
+* with a machine-readable `Contract:` tail: **69** of 739
+* UNCLASSIFIED (no family rule matches): **8**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -646,7 +646,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-esc` | macro | `(payload)` | insensitive | none | none | no | no | no | none |
 | `p-fact` | macro | `(licence form)` | insensitive | none | none | no | no | no | none |
 
-## magic-global (136)
+## magic-global (137)
 
 *No ir-spec §10 row.*  the magic globals themselves — ir-spec §8
 
@@ -732,6 +732,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `%^` | variable | `` | — | — | — | — | — | — | — |
 | `%^h` | variable | `` | — | — | — | — | — | — | — |
 | `%_args` | name-only | `` | — | — | — | — | — | — | — |
+| `%p-scope-close` | function | `(fh)` | — | — | — | — | — | — | — |
 | `%~` | variable | `` | — | — | — | — | — | — | — |
 | `*p-errno-table*` | variable | `` | — | — | — | — | — | — | — |
 | `@!` | variable | `` | — | — | — | — | — | — | — |
@@ -1154,7 +1155,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 # UNCLASSIFIED
 
-## UNCLASSIFIED (7)
+## UNCLASSIFIED (8)
 
 *No ir-spec §10 row and no note.*
 
@@ -1164,6 +1165,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-default-layers` | macro | `((in-layers out-layers) &body body)` | — | — | — | — | — | — | — |
 | `p-defclass` | macro | `(name supers slots)` | — | — | — | — | — | — | — |
 | `p-import-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
+| `p-scope-close` | macro | `((&rest handles) &body body)` | — | — | — | — | — | — | — |
 | `p-symref-site` | macro | `nil` | insensitive | none | none | no | no | no | none |
 | `p-unimport-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
 | `p-use-open` | function | `(&rest args)` | — | — | — | — | — | — | — |
