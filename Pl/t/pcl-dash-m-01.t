@@ -56,4 +56,16 @@ SKIP: {
          '-MData::Dump=dump imports dump()');
 }
 
+# #526: `use Test::More` printed "# PCL Test library loaded" on STDOUT ahead
+# of the TAP -- but only when the TAP layer was loaded at RUN time (a warm
+# script cache, every `pcl -e` after the first); a cold MISS loaded it while
+# compiling, with stdout muffled.  So each spelling runs TWICE: the second run
+# is the warm one.  --check compares STDOUT byte for byte against perl.
+for my $pass (1, 2) {
+    my $out = `$pcl --check -e 'use Test::More tests => 1; ok(1, "one")' 2>&1`;
+    like($out, qr/^pcl --check: IDENTICAL/m,
+         "#526 pcl --check on a Test::More one-liner is IDENTICAL (run $pass)")
+        or diag $out;
+}
+
 done_testing();

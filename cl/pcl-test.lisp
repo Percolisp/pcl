@@ -1314,4 +1314,3 @@
        (declare (ignore self args))
        (make-p-box "STDOUT"))
 
-(%tap-out "# PCL Test library loaded~%")

@@ -66,7 +66,6 @@ sub run_cl {
     my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
     $output =~ s/^;.*\n//gm;
     $output =~ s/^PCL Runtime loaded\n//gm;
-    $output =~ s/^# PCL Test library loaded\n//gm;
     $output =~ s/^\s*\n//gm;
     return $output;
 }

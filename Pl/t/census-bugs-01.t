@@ -159,8 +159,7 @@ my $l = <$fh>;
 printf "print=%d defined=%d\n", $p, (defined $l ? 1 : 0);
 PL
 
-my $tap_banner = "# PCL Test library loaded\n";
-test_cl('#1178 the task reproducer: ok((open my $fh, "+>", undef))', <<'PL', $tap_banner . "1..1\nok 1 - opened\n");
+test_cl('#1178 the task reproducer: ok((open my $fh, "+>", undef))', <<'PL', "1..1\nok 1 - opened\n");
 use Test::More tests => 1;
 ok((open my $fh, "+>", undef), "opened");
 PL

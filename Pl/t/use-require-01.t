@@ -911,10 +911,8 @@ PL
 # interface PCL supplies itself), and each used to leave %INC empty.  The
 # entry's VALUE is perl's too: the file that would have been loaded.
 #
-# Differential against real perl.  The one thing filtered out is PCL's own
-# "# PCL Test library loaded" banner, which the TAP layer prints on demand —
-# perl prints nothing there; it is pre-existing stdout noise, not part of what
-# these rows assert.
+# Differential against real perl, byte for byte (the TAP layer's load banner
+# that used to be filtered here is gone, task #526).
 sub inc_agrees {
   my ($name, $code) = @_;
   my ($fh, $pl_file) = tempfile(SUFFIX => '.pl');
@@ -922,7 +920,6 @@ sub inc_agrees {
   close $fh;
   my $expected = `perl $pl_file 2>&1`;
   my $got = run_pl($code);
-  $got =~ s/^# PCL Test library loaded\n//m;
   chomp $expected; chomp $got;
   unlink $pl_file;
   is($got, $expected, $name) or diag "perl=[$expected] pcl=[$got]";

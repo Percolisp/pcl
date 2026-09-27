@@ -42,7 +42,6 @@ sub run_cl {
     $output =~ s/^compilation unit.*\n//gm;
     $output =~ s/^\s*Undefined.*\n//gm;
     $output =~ s/^PCL Runtime loaded\n//gm;
-    $output =~ s/^# PCL Test library loaded\n//gm;
     $output =~ s/^WARNING:.*\n//gm;
     $output =~ s/^\s*\n//gm;
     return $output;
