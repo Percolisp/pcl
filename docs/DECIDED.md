@@ -60,6 +60,12 @@ not-supported.md → only then probe.*
 - **s495f MERGED (ff `25d7fede`, pushed): `EVERYDAY: 92 -> 100 of 122` (82.0 %) confirmed by Fable's own run (buckets 0); Fable's own gate on the sha 262 / 8675 PASS; container install test PASS (platform-touching: sb-alien gethostby*/getnetby*/setpriority; macOS NOT TESTED, #2196); review probes 8 of 11 identical to perl, the three differing explained (formline dies by ruling; #2103 strict-dependent, not shipped; stderr ORDER under runpcl's plain load).**  Records nit: its session-log section says gate 8674, the count is 8675.  **#2341 (HIGH, pre-existing, filed by the agent) = the next correctness candidate**: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref -- `push @$u, 1` dies, `$u->[0]` / `for (@$u)` / `keys %$u` leave it undef; right under `PCL_OPT=-raw-slot`.
 
 
+## s499e (2026-09-27, Opus) -- possessive quantifiers are perl's atomic group (#2380); t/re/pat_rt_report.t 110 -> 2432 ok
+
+- **#2380: `X++` `X*+` `X?+` `X{n,m}+` -> `(?>X+)` … in the ONE runtime rewrite scan** (`%pcl-expand-hv-escapes` renamed `%pcl-rewrite-scan`, now a struct + short helpers; pre-test `%pcl-has-possessive`, cache MISS only); atom = char / full escape extent / class / balanced group; no atom or a following quantifier = copied (`a++*` dies as perl's "Nested quantifiers"); ir-spec §10-poss.
+- **Rule 11 kept: no second in-class tracker** — the existing scan hosts the arm; its output became a fill-pointer buffer so `(?>` can be inserted before an atom already written, and an escape is consumed through its lexer extent (`\c[` `\x{5d}` inside a class no longer desync it).
+- **Residues filed**: #2443 (under /x a blank before the possessive `+` still dies — the scan does not know /x), #2444 (`{,n}` quantifier matched literally, SILENT WRONG); `"\\Q"` in a dq string = #2441, `/\N{U+41}/` = #2199 (both pre-existing).
+
 ## s497b (2026-09-26, Opus) -- fail in the same places: #2341 never-written deref'd lexical = box, #2103 strict refs enforced lexically, #1554 `$SIG{__DIE__}`, read-only literals
 - **raw-slot / #2341**: a lexical scalar with ZERO writes that is ever DEREFERENCED is a box (VarAnnotator reason `deref-of-unwritten`; a written scalar keeps its verdict -- the s473b accessor trap); ir-spec §2.2.
 - **ref() of a box holding CL NIL is ""** (p-ref's array arm is `consp`, not `listp`) -- every never-assigned boxed scalar answered ARRAY.
