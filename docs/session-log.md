@@ -123,11 +123,49 @@ as commits in its worktree (`agent-a8950a9b856e81d81`, HEAD `be7c7b59`, four
 commits on `9febb602`, no emission change; sizing table in its STOP.md: #2424
 -43 % on Mian-Chowla, #2425 -16 %, #2198 -12 to -21 %; guard
 `Pl/t/perf-levers-06.t`, 116 rows) and step 3 owed (inverse guard, gate,
-sweep, ir-conform, everyday + record, bench A/B, records).  It is resumed next
-session from STOP.md as s497b and s496a were today.  The docs pass stays
+sweep, ir-conform, everyday + record, bench A/B, records).  It was resumed the same evening and merged (below).  The docs pass stays
 uncommitted until the USER has read it.  Fable's cold gate + sweep on the final
 main `9febb602`: gate `Result: PASS` 269 files / 9001 rows (`~/pcl-agent-scratch/s499/review/gate-merge3-9febb602.log`), sweep GATE clean, TOTAL 18714 (+0), drops 5 = census (`sweep-merge3-9febb602.log`).
 
+
+The evening (USER: "run 3 subjobs at a time", then "Don't start more subjobs"
+at 22:30): the USER decided the docs pass's seventeen items and s499d applied
+them (numbers dated 2026-09-27; the Unicode-identifiers "partial" row and the
+commit hash dropped; caching's measured section and key discussion moved last;
+the old shipped-modules proposal to `docs/history/`; the license badge
+REMOVED — GitHub cannot classify Artistic-1.0-Perl OR GPL-1.0, perl5's own
+repository reads "Other"; the pack row set to the board's 1,035×; the
+not-supported index repaired; CHANGELOG left as it was; the speed note kept
+verbatim) — merged `cf173ef6`.  CI had been RED since the first push of the
+day on ONE row: `Pl/t/uniprops-01.t`'s regenerate-and-compare-bytes row, which
+can never pass under CI's stock perl 5.38 because the artifact's stamp names
+the oracle 5.40.3; s499h's member 0 made the row run only under the stamp's
+perl (skip with both versions otherwise), cherry-picked as `59859d7a` — GREEN.
+Four more batches, each with an in-tree fix the USER ordered from the docs
+pass's side findings or from a merge's residue: s499g `da10ea22` (no "." and
+no script directory in `@INC` (#2442, "a traditional security hole"), the
+Test::More banner off stdout (#526), the `tie *FH` noun; it found REGRESSION
+#2465, `... for ();` a transpile death since s494p member 3, 1,884 companion
+rows), s499i `61571685` (#2465: one condition in `_desugar_loop_modifiers`
+wraps an empty modifier list to `(())`; io/through.t + crlf_through.t back
+to 942/0), s499h `937e7b65` (#2441: the dq-string case-escape scan reads the
+SOURCE once, plus perl's auto-close rule for a new `\U`/`\L`/`\F`; #2444
+`{,n}` = `{0,n}`), s499j `e7239b39` (#2462 `@INC` in perl's ORDER through one
+builder `PCLPaths::program_inc`, the tree root OUT, the shims that replace XS
+modules winning by a `# pcl-shim: must-win` header marker — data in `lib/`,
+fifteen shims incl. Carp and Math::BigInt::Calc whose perl copies fail under
+PCL; #2464 `use lib` runs perl's lib.pm; #2461/#2460 `pl2cl --as NAME` for
+`$0`/`__FILE__`/lines/FindBin under `-e` and `-M`), s499k `e51abda1` (#2470
+backslash-newline in dq strings via one shared escape regex; #2471 `\N{n,m}`
+is a quantifier; #2443 the /x flag reaches the regex rewrite scan; `(*FAIL)`
+→ `(?!)`).  Every merge: Fable probes on the sha (perl → base → tree), a cold
+gate on the merged main, the container install test, a push, and the CI run
+read GREEN (7 of 7 today).  Generation v2-2280 → v2-2980; gate 269 files /
+9,001 → 9,043 rows; sweep TOTAL 18714 throughout; EVERYDAY 102 of 122.
+Filed tonight by the agents: #2460–#2465, #2470–#2471, #2491–#2492,
+#2500–#2501; by Fable: #2440–#2442.  Owed: #2389 (row-level companion
+baselines behind the day's merges), s499k's bench control on a quiet box
+(regexg/subste/textproc, load was 3–5).  s499f itself was RESUMED in the evening and MERGED as the last batch, `08660c57`: #2424 Mian-Chowla 5.42 -> 2.49 s (PCL now faster than perl`s 3.99 s), #2425 -12 to -20 % on the two `**` programs, #2198 mapmulti 1.13 s (below its pre-#2005 1.18 s), gate 270 files / 9,159 rows, generation unchanged.
 
 Lessons: an agent that arms a monitor and stops may never wake (s497b sat idle
 for an hour after Fable's gate finished — a SendMessage resumed it); `pkill -f`
