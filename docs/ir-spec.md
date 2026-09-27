@@ -2129,7 +2129,11 @@ once per iteration, which is the block's scope and perl's rule.  Kept on
 the older per-statement route: a statement containing `my`/`our`/`state`
 (the block would scope the declaration), `do BLOCK while COND` (the body
 runs first), a heredoc, a leading label, and a LIST/COND that spans lines
-(reordering would move EXPR's line numbers).  The TOPIC loop binds the
+(reordering would move EXPR's line numbers).  An EMPTY list or condition
+is the block spelling's `(())`, never `()` (s499i, #2465): `EXPR for ();`
+runs EXPR never, `EXPR while ();` never, `EXPR until ();` forever — e.g.
+`$n++ for ();` ≡ `for (()) { $n++; }` → `(p-foreach ($_ (vector)) …)`.
+The TOPIC loop binds the
 global `$_` dynamically; it is not a lexical, so a string eval in its body
 does not capture it.  Guard: `Pl/t/loop-modifier-01.t`.
 

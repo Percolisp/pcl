@@ -71,6 +71,10 @@ not-supported.md → only then probe.*
 - **s495f MERGED (ff `25d7fede`, pushed): `EVERYDAY: 92 -> 100 of 122` (82.0 %) confirmed by Fable's own run (buckets 0); Fable's own gate on the sha 262 / 8675 PASS; container install test PASS (platform-touching: sb-alien gethostby*/getnetby*/setpriority; macOS NOT TESTED, #2196); review probes 8 of 11 identical to perl, the three differing explained (formline dies by ruling; #2103 strict-dependent, not shipped; stderr ORDER under runpcl's plain load).**  Records nit: its session-log section says gate 8674, the count is 8675.  **#2341 (HIGH, pre-existing, filed by the agent) = the next correctness candidate**: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref -- `push @$u, 1` dies, `$u->[0]` / `for (@$u)` / `keys %$u` leave it undef; right under `PCL_OPT=-raw-slot`.
 
 
+## s499i (2026-09-27, Opus) -- a loop statement modifier over an EMPTY list desugars to `(())` (#2465 regression fixed)
+
+- **`EXPR for ();` / `while ();` / `until ();` desugar to the block spelling with `(())`, never `()`** — `for () {…}` is a perl syntax error and killed the transpile since s494p (t/io/through.t + crlf_through.t 942 rows each); ir-spec §6 (modifier paragraph), guard `Pl/t/loop-modifier-01.t`.
+
 ## s499g (2026-09-27, Opus) -- no "." and no script directory on @INC (#2442); the TAP load banner gone (#526); `tie *FH` announced as "a filehandle"
 
 - **@INC contract (#2442): PCL's lib/, then the transpiling perl's @INC (carries -I, PERL5LIB); never "." nor the script dir** — as perl 5.26+; a program uses `use lib`/FindBin/-I; ir-spec §9.

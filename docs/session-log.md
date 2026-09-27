@@ -2,6 +2,12 @@
 
 Append new entries at the top. One section per session.
 
+## Session s499i (Opus agent, 2026-09-27) -- a loop statement modifier over an EMPTY list desugars to `(())`; t/io/through.t + crlf_through.t get their 942 rows back (#2465)
+
+**#2465.** s494p member 3 (`203ac798`) desugars `EXPR for LIST;` into `for (LIST) { EXPR; }` and keeps a LIST that is already parenthesised, so `EXPR for ();` became `for () { EXPR; }` -- a perl SYNTAX error the native arm could not lower ("Parser2: empty expression"), and the whole file died at transpile.  The `while ()` modifier was already right by accident: PPI hands its `()` over as a Condition, not a List, so it got wrapped to `(())`.  Fix: an empty List is wrapped too (one condition in `_desugar_loop_modifiers`); `(())` gives perl's semantics for all four (for/foreach never, while never, until forever).  Probes perl -> da10ea22 extraction -> tree: the reproducer, `print for ()`, `f() for ( )`, the comma statement, in a sub / eval string / top level, `for (())`, `for ((),())`, `foreach ()`, `for (undef)` (1 iteration), `for (@empty)`, a trailing comment, `until ()` -- all perl-identical on the tree, transpile deaths on the base; block `for (()) {}` / `while (()) {}` / `until (()) {}` identical before and after; the licence shapes (`$s .= "x" for 1..3`, `$s .= $_ for @a`, `push @p, $_ for (3, 4)`, while/until) byte-identical emission.  Guard `Pl/t/loop-modifier-01.t` +4 rows (1 shape, 3 answers), inverse-verified.
+
+**Bars.** Gen v2-2680, three artifacts regenerated (stamp line only).  corpus-diff IDENTICAL 111 + 6 shapes (no perl-tests file has the shape), silent drops 5; emission-ab lib 29 SAME, RCDIFF 0; ir-host-leak identical to the base; ir-conform 325/0/20/0 stale.  Gate 269 / 9020 PASS (9016 + 4).  Sweep TOTAL 18714 (+0), GATE clean, drops 5.  Companion `--jobs 1`: io/through.t TRANSPILE 0/0 -> OK 942/0, io/crlf_through.t DIFF 0/0 -> OK 942/0 (the snapshot rows already read 942/0; nothing to splice).  EVERYDAY 102 -> 102 of 122, buckets 0.
+
 ## Session 499 (Fable, 2026-09-27) — three batches merged, the speed review answered by the USER, README adopted, perf round 36 launched under a new ranking rule
 
 The session opened on the USER's "keep 3 subjobs with Opus 5.5 working" with two
