@@ -497,10 +497,10 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  "re-declaring a constant with `sub constant1;` must warn 'Constant subroutine redefined' twice -- PCL emits no warnings-gated diagnostic. not-supported.md: 'Warnings-gated diagnostics are absent'.")
                 ("^RT124156 plain$"
                  :tie
-                 "a tied-hash DELETE that dies while `local $a{foo}` unwinds must replace the inner die -- `tie %hash` is not implemented (announced, task #155), so nothing ties and the inner die stands. not-supported.md: 'tie on an ARRAY or HASH'.")
+                 "a tied-hash DELETE that dies while `local $a{foo}` unwinds must replace the inner die -- `tie %hash` is not implemented (announced, task #155), so nothing ties and the inner die stands. not-supported.md: 'tie on an ARRAY, HASH or filehandle'.")
                 ("^RT124156 depth$"
                  :tie
-                 "same as 'RT124156 plain' one closure deeper -- `tie %hash` is not implemented (announced, task #155). not-supported.md: 'tie on an ARRAY or HASH'.")
+                 "same as 'RT124156 plain' one closure deeper -- `tie %hash` is not implemented (announced, task #155). not-supported.md: 'tie on an ARRAY, HASH or filehandle'.")
                 ("^RT124156 freed cv$"
                  :destroy-gc
                  "DESTROY must fire when the blessed coderef is freed during the unwind -- PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
@@ -545,7 +545,7 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                     "must die 'Undefined sort subroutine \"CORE::revers\" called' -- PCL dies with 'Undefined subroutine &main::revers' (the CORE:: qualification and the sort-specific wording are lost; the unqualified spelling is correct, probed). not-supported.md: 'Error message text and format'.")
                 ("EXTEND was called with an argument of 3"
                  :tie
-                 "pp_sort must call the tied array's EXTEND with the element count -- `tie @array` is not implemented (announced, task #155). not-supported.md: 'tie on an ARRAY or HASH'.")
+                 "pp_sort must call the tied array's EXTEND with the element count -- `tie @array` is not implemented (announced, task #155). not-supported.md: 'tie on an ARRAY, HASH or filehandle'.")
                 ("^goto subr outside subr$"
                  :principle9
                  "`goto &sub` outside a sub must die 'Can't goto subroutine outside a subroutine' -- PCL does not raise it. not-supported.md: 'Error compatibility for invalid Perl input'.")

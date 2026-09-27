@@ -28711,18 +28711,27 @@ buffer's fill-pointer; everything else falls back to file-length."
    program runs on an UNTIED container and every FETCH/STORE the test was
    written to observe simply never happens.  A die was rejected for R1 (it
    converts mid-file tie users into crashes); see docs/not-supported.md
-   'tie on an ARRAY or HASH'.
+   'tie on an ARRAY, HASH or filehandle'.
 
    EFFECT-ONLY, so it routes through the shared %p-announce-unsupported helper
    (ruled docs/fable-answers-s337.md §5b) — the CLASS rides in the OPERAND,
    which keeps the old per-(kind, class) dedup with no table of its own."
+  ;; The text is for the USER: the operand names what was tied, and the tail
+  ;; points at the not-supported.md section by NAME (the project's form) --
+  ;; never a task number.  A glob (`tie *FH`) or a lexical handle (`tie *$fh`,
+  ;; which p-dynamic-typeglob hands over as the stream itself) is a
+  ;; FILEHANDLE; it used to fall into a `(t "a non-lvalue")` arm.  Anything
+  ;; else is named by its type rather than swallowed (rule 12).
   (let ((kind (cond ((hash-table-p value) "a HASH")
                     ((and (vectorp value) (not (stringp value))) "an ARRAY")
-                    (t "a non-lvalue")))
+                    ((or (p-typeglob-p value) (streamp value) (%p-socket-p value))
+                     "a filehandle")
+                    (t (format nil "an operand of type ~(~A~)" (type-of value)))))
         (name (if (stringp classname) classname (format nil "~A" classname))))
-    (%p-announce-unsupported "tie"
-                             (format nil "~A (class ~A)" kind name)
-                             "the container is left untied (task #155)")))
+    (%p-announce-unsupported
+     "tie" (format nil "~A (class ~A)" kind name)
+     (format nil "it is left untied (see docs/not-supported.md ~
+                  \"tie on an ARRAY, HASH or filehandle\")"))))
 
 (defun p-tie (box classname &rest args)
   "Perl tie - bind a scalar variable to a class implementing TIESCALAR.

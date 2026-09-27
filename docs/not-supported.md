@@ -70,7 +70,7 @@ is the eval, which is what perl's compile error covers too).
 The handful most likely to matter to a program that is otherwise portable:
 
 * [`@_` argument aliasing](#_-argument-aliasing--partial-plain-my-lexicals-only) — partial: `$_[0] = 42` writes back to the caller's variable, array element or hash element; an element reached through a reference (`f($r->{k})`) gets a copy, and so can a number-only variable passed to a code reference or a method.
-* [`tie` on an ARRAY or HASH](#tie-on-an-array-or-hash--interim--announced-not-silent-scalar-tie-works) — scalar `tie` works; the other two are announced, not silent.
+* [`tie` on an ARRAY, HASH or filehandle](#tie-on-an-array-hash-or-filehandle--interim--announced-not-silent-scalar-tie-works) — scalar `tie` works; the other three are announced, not silent.
 * [Regex code blocks `(?{…})`](#regex-code-blocks-code-and-code) — CL-PPCRE has no equivalent.
 * [`DESTROY` at GC time](#destroy-called-by-garbage-collector) — no deterministic finalizer timing on a GC'd host.
 * [Warnings-gated diagnostics](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled) — `use warnings` is not modelled yet.
@@ -142,7 +142,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`DESTROY` called by garbage collector](#destroy-called-by-garbage-collector)
 * [Perl 5.38 `class` / `field` / `method` syntax — DEFERRED](#perl-538-class--field--method-syntax--deferred--future-version)
 * [Indirect object syntax with a SCALAR invocant — MAYBE LATER](#indirect-object-syntax-with-a-scalar-invocant-method-obj-list--maybe-later--user-decision-s425)
-* [`tie` on an ARRAY or HASH — INTERIM](#tie-on-an-array-or-hash--interim--announced-not-silent-scalar-tie-works)
+* [`tie` on an ARRAY, HASH or filehandle — INTERIM](#tie-on-an-array-hash-or-filehandle--interim--announced-not-silent-scalar-tie-works)
 * [`mro` pragma — DFS default, ordering switch, full API](#mro-pragma--dfs-default-ordering-switch-and-full-api)
 
 ### Packages, globs and the symbol table
@@ -2269,7 +2269,7 @@ adversarial code.  No CPAN module in scope uses it.
 **Affected tests:** `perl-tests/eval.t` — the block using `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 is commented out (6 tests).
 
-## `tie` on an ARRAY or HASH  [INTERIM — announced, not silent; scalar tie works]
+## `tie` on an ARRAY, HASH or filehandle  [INTERIM — announced, not silent; scalar tie works]
 
 **Perl behaviour:** `tie @a, 'Tie::StdArray'` / `tie %h, 'Tie::StdHash'` route
 every element read and write through the tie object's `FETCH`/`STORE`/
@@ -2280,10 +2280,14 @@ untied aggregate.  As of s320 this is no longer silent: `p-tie` prints one
 loud line to stderr —
 
 ```
-PCL: tie: a HASH (class Tie::StdHash) is not implemented — the container is left untied (task #155)
+PCL: tie: a HASH (class Tie::StdHash) is not implemented — it is left untied (see docs/not-supported.md "tie on an ARRAY, HASH or filehandle")
 ```
 
-— once per (kind, class) per process, and returns as before.  (The line comes
+— once per (kind, class) per process, and returns as before.  The same holds
+for a **filehandle** — `tie *FH, 'T'`, `tie *STDOUT, 'T'`, `tie *$fh, 'T'`
+(perl calls `TIEHANDLE`): PCL announces `a filehandle (class T)` and the
+handle stays untied (until s499g the noun was a misleading "a non-lvalue" and
+the line ended in a task number).  (The line comes
 from the shared `%p-announce-unsupported` helper since s339, which is why the
 class rides in the operand: that is what keeps the per-class dedup.)  **`tie` on a
 SCALAR is fully implemented** (`p-tie-proxy`: `unbox` dispatches `FETCH`,
