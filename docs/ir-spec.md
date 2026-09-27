@@ -4308,8 +4308,11 @@ POSIX/perl class; any other name is a **pattern compile error**.
   dies trappably at the match / split / substitution that first compiles it
   (task #2372): `Can't find Unicode property definition "X" in regex; marked
   by <-- HERE in m/… <-- HERE /`.  (perl dies earlier for a LITERAL pattern,
-  at program compile; PCL compiles every pattern at first use.  A `qr//`
-  object compiles at its first USE, not at the `qr`.)
+  at program compile; PCL compiles every pattern at first use.)  **A `qr//`
+  compiles AT THE `qr`** (s496a member 7): `my $q = eval { qr/$bad/ }` answers
+  undef with `$@` set and the program goes on — never an object that dies
+  later at a match outside the eval — and a user-defined property named in a
+  `qr` is resolved in the package current at the `qr`.
 * **/i: fold FIRST, complement AFTER.**  Outside a bracket class a property is
   rewritten to a class of its own — `\p{X}` → `[\p{X}]`, `\P{X}` → `[^\p{X}]`
   — so the fold applies to the property and the complement to the folded
@@ -4331,6 +4334,8 @@ Example:
     "a" =~ /\P{Lu}/i        # false (fold, then complement)
     my $p = "\\p{ea=W}";
     eval { "a" =~ /$p/ };   # dies: Can't find Unicode property definition "ea=W" …
+    my $bad = "(";
+    my $q = eval { qr/$bad/ };  # undef, $@ set: it dies AT THE qr
 
 ### 10-tier. The regex literal's `:tier` — which ENGINE a target needs (normative, s470bq, task #1211)
 
