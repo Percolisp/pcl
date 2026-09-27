@@ -2,6 +2,18 @@
 
 Append new entries at the top. One section per session.
 
+## Session s499k (Opus agent, 2026-09-27) -- four residues of the string/regex scans: backslash-NEWLINE in dq (#2470), `\N{3,4}` (#2471), the rewrite scan knows /x (#2443), `(*FAIL)` = `(?!)` (#2386 cheap half)
+
+**#2470.** The three dq decoders (`_take_dq_escape`, `_apply_case_escapes`, `StringInterpolation::unescape_string`) carried three copies of one escape alternation, two of them without `/s`, so backslash-NEWLINE matched no escape and the backslash stayed.  Now ONE `$Pl::ExprToCL::DQ_ESCAPE_RX` (`/s`) read by all three (`unescape_string` through a runtime `require` -- the s438f trap bit once: `Pl/t/string-interp-01.t` loads StringInterpolation without ExprToCL).  Probes (dq, `qq{}`, both heredocs, a `\U` span, interpolation, string eval, s/// replacements, CRLF source, `"a\\<NL>b"`, `'a\<NL>b'`) all = perl; the interpolated s/// replacement was a second wrong spelling on the base.  Population: 32 files end a line in an odd backslash run (mro ASCII-art comments, single quotes) -- emission SAME in all 62 A/B files; corpus-diff IDENTICAL 111.
+
+**#2471.** `%pcl-rx-escape-end` / `%pcl-rx-escape-text` ask `%pcl-rx-counted-end` at `\N{`: a valid counted quantifier makes `\N` `[^\n]` and the braces the quantifier (blank-free, `{,n}` = `{0,n}`), so `\N{3,4}+` and `\N{3,4}?` compose.  Named characters stay unresolved (#2199, unchanged); `[\N{3}]` `\N{a}` `\N{,}` are compile errors in perl (principle 9).  Companion: t/re/regexp.t re_tests rows 31-40 (`\N{1}`, `\N{3,4}`, `\N{ 3 , 4 }`) pass, 817/88 -> 824/81, serial re-run agrees -- spliced.
+
+**#2443.** `perl-regex-to-ppcre` takes `&optional extended` (the four call sites pass /x); the scan keeps the /x state and a per-group stack, reads `(?x)` `(?x:` `(?-x:` `(?^…:` headers through the existing `%pcl-parse-x-flag-group`, and under /x copies a blank or `#…` comment without making it the atom, so `/a ++b/x` `/a+ +b/x` `/a + +b/x` are `(?>a +)b`.  The `(?^` removal and the charset-letter strip now run AFTER the scan (it reads the headers).  Residue filed: #2500 -- the `(?^` reset itself is dropped, so `qr/a b/` inside `/x|$r/x` matches "ab" (pre-existing); #2501 -- runtime `\Q` in pattern text.
+
+**#2386 (cheap half).** Bare `(*FAIL)`/`(*F)` -> `(?!)` in the scan's group opener (literal in a class, after a backslash); the transpile-time #874 announcement skips them; `(*FAIL:NAME)` and the other verbs still die trappably (guard row 55).  Two stale guards re-pointed at `(*SKIP)` (gate-cost-01.t reproducer, transpile-test-10.t expectation).  Companion: pat_rt_report.t still stops at line 872's `(*:B)`, no row moves; pat_advanced.t unchanged.
+
+**Bars (rebased on e7239b39, gen v2-2980, artifacts regenerated):** gate PASS 269/9043 (9037 + 6); sweep TOTAL 18714 (+0), GATE clean, drops 5 = census; `EVERYDAY: 102 of 122` (83.6 %), NEW 0 FIXED 0 MOVED 0 (no everyday program uses these shapes); corpus-diff IDENTICAL 111 + 6 shapes vs e7239b39, drops 5; emission-ab 62 SAME RCDIFF 0; ir-conform 325/0/20/0; ir-host-leak 31 = base; companion re/ + op/qr.t identical to the base but regexp.t (+7, above); bench control regexg/subste/textproc ratios within noise (load 3.3-4.6, another agent's legs running).
+
 ## Session s499j (Opus agent, 2026-09-27) -- @INC in perl's order with the PCL tree out (#2462), shims that win by name, `use lib` = perl's lib.pm (#2464), `$0`/`__FILE__` under `pcl -e` (#2461) and `pcl -M` (#2460)
 
 **Records repair first.** Tasks #2460/#2461/#2462/#2464 had a double-quoted `"@INC"` interpolated into the writer's own @INC path list; rewritten with the literal (9 occurrences), every other word kept.
