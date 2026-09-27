@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [weak-keyword override](#71a-a-weak-keyword-is-displaced-by-a-sub-the-package-has-at-compile-time-normative-s492c-task-18701992) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [counted quantifiers, `{,n}`](#10-count-a-counted-quantifier-is-perl-534s-grammar-0n-is-00n-blanks-allowed-normative-s499h-task-2444) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [`(*FAIL)` is `(?!)`, other control verbs die](#10-verb-fail-and-f-are--every-other-control-verb-dies-normative-s499k-task-2386) · [counted quantifiers, `{,n}`](#10-count-a-counted-quantifier-is-perl-534s-grammar-0n-is-00n-blanks-allowed-normative-s499h-task-2444) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -1463,7 +1463,10 @@ modes from the top until none is left (a `\Q` above it goes too); `\Q` just
 pushes; `\E` pops one; the end of the string closes everything; `\u`/`\l`
 change the first character of what follows (of a group's OUTPUT when it
 opens one: `"\u\LAB\E"` is `Ab`).  Example: `"\LAB\LCD\EEF"` is `abcdEF`, and
-`"\Uab\Qc.\Ld.e\Ef.g"` is `ABC\.d.ef.g`.
+`"\Uab\Qc.\Ld.e\Ef.g"` is `ABC\.d.ef.g`.  An UNKNOWN escape is its character
+without the backslash, and backslash-NEWLINE is one of them: `"a\<newline>b"`
+is `a<newline>b` (s499k, task #2470; a single-quoted string keeps the
+backslash).
 
 ### 3.3 `p-true-p` (truthiness)
 
@@ -4442,7 +4445,7 @@ perl says):
 
 | escape | meaning | PCL |
 |---|---|---|
-| `\N` | any character but a newline — perl's own definition | EXACT (`[^\n]`).  `\N{NAME}` is a different construct, resolved earlier, and is DECLINED here |
+| `\N` | any character but a newline — perl's own definition | EXACT (`[^\n]`).  `\N{NAME}` is a different construct (a named character; unresolved in a pattern, #2199) and is DECLINED here — EXCEPT when the `{` opens a VALID counted quantifier (§10-count's grammar): `\N{3,4}` `\N{ 3 , 4 }` `\N{,2}` are `\N` QUANTIFIED, never a name (s499k, task #2471) |
 | `\X` | an extended grapheme cluster (UAX #29) | APPROXIMATED by the legacy rule `(?>\r\n\|\P{M}\p{M}*\|\p{M}+)` — a base character with its combining marks, or a CRLF pair (since s496a, §10-prop; before, a CRLF pair or one character).  A regional-indicator pair, a Hangul syllable sequence and an emoji ZWJ sequence stay several clusters (task #2381) |
 
 The rule the family exists for is rule 12's: **a regex escape the translator
@@ -4469,8 +4472,22 @@ something that is no atom (`^+`, `(?+1)`, a lazy `a+?+`), or when another
 quantifier follows (`a++*`): those are copied, and a spelling perl refuses as
 "Nested quantifiers" dies from the engine as it does in perl.  Example:
 `"aaa" =~ /a++a/` is false (the atom gives nothing back) where `/a+a/` is
-true.  Under `/x` a blank between the atom and the quantifier is not yet
-skipped (`/a ++/x` dies; task #2443).  The `:tier` stays `:pcre` (§10-tier).
+true.  Under `/x` (and `/xx`, and inside an inline `(?x)` / `(?x:…)` scope —
+not inside `(?-x:…)`) an unescaped blank or a `#…` comment is NO atom: a
+quantifier after it applies to the atom before it, and a `+` after blanks is
+still possessive (`/a ++b/x` and `/a+ +b/x` are both `a++b`; s499k, task
+#2443); an escaped blank and a class stay atoms.  The `:tier` stays `:pcre`
+(§10-tier).
+
+### 10-verb. `(*FAIL)` and `(*F)` are `(?!)`; every other control verb DIES (normative, s499k, task #2386)
+
+perlre defines the bare `(*FAIL)` / `(*F)` as `(?!)`, and the same forward
+scan (§10-esc) writes exactly that; inside a class or after a backslash it is
+literal text.  Every other control verb — `(*SKIP)` `(*PRUNE)` `(*COMMIT)`
+`(*THEN)` `(*ACCEPT)` `(*MARK:NAME)` `(*:NAME)` `(*FAIL:NAME)` — reaches the
+engine unchanged and the pattern DIES trappably at its first compile (#2372),
+announced at transpile time (`not-supported.md` "Regex control verbs").
+Example: `"b" =~ /a(*FAIL)|b/` is true, and `"ab" =~ /a(*SKIP)b/` dies.
 
 ### 10-count. A COUNTED quantifier is perl 5.34+'s grammar: `{,n}` is `{0,n}`, blanks allowed (normative, s499h, task #2444)
 

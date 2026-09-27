@@ -2056,7 +2056,7 @@ re/reg_pmod.t	88	0	58	30	DIFF		0
 re/reg_posixcc.t	2560	0	2560	0	OK	
 re/regex_sets.t	96	0	0	0	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it.  s496a member 7: 4/84 -> 0/0 -- every like/unlike statement now dies at its qr/(?[...])/ (qr compiles eagerly, as perl), so no TAP; the 4 lost rows were accidental passes (unlike on a pattern that could not compile); rows re-blessed for this file only (A/B: 0ab64a45 4/84)	0
 re/regex_sets_compat.t	2167	2	1755	274	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
-re/regexp.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp.t	2167	2	824	81	TIMEOUT	s499k #2471: re_tests rows 31-40 (\N{1}, \N{3,4}, \N{ 3 , 4 }) now pass -- 817/88 -> 824/81 on this box, serial re-run agrees; the TIMEOUT total is load-dependent (#326) | timeout	0
 re/regexp_noamp.t	2169	0	796	109	TIMEOUT	timeout	0
 re/regexp_nonull.t	2167	2	0	0	DIFF		0
 re/regexp_normal.t	2169	0	2021	8	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N

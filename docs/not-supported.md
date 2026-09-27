@@ -1035,8 +1035,13 @@ the current attempt to fail, `(*MARK:name)` names a position.  Together with
 `(?{code})` they are how perl writes a "find every non-overlapping match with
 side effects" loop.
 
-**PCL behaviour:** not supported, and — unlike a code block — **not stripped**.
-Removing `(*FAIL)` would INVERT the meaning of the match it appears in, which
+**PCL behaviour:** the bare `(*FAIL)` and `(*F)` ARE supported since s499k
+(task #2386): perlre defines them as `(?!)`, and the runtime writes exactly
+that (ir-spec §10-verb), so they are neither announced nor fatal.
+`(*FAIL:NAME)` and every other verb are not supported, and — unlike a code
+block — **not stripped**.
+Removing a verb would change the meaning of the match it appears in (removing
+`(*FAIL)` would INVERT it), which
 is worse than failing: the pattern would start succeeding where the author
 wrote "always fail here".  So the verb is left in the pattern and cl-ppcre
 rejects it, in cl-ppcre's own words — and **since s496a (task #2372) that
@@ -1050,10 +1055,11 @@ message names a **position in a pattern the program never wrote**, which is
 why a compile-time line says whose gap it is first (task #874, s459an):
 
 ```
-PCL: regex control verb (*FAIL/SKIP) is NOT supported at FILE line N -- it is
-left in the pattern on purpose -- removing (*FAIL) would INVERT the match --
-so cl-ppcre rejects the pattern in its own words
+PCL: regex control verb (*SKIP) is NOT supported at FILE line N -- it is
+left in the pattern on purpose -- removing a verb would change the match --
+so cl-ppcre rejects the pattern and it DIES at its first match (#2372; ...)
 ```
+(Owner of the remaining verbs: #2386's engine half.)
 
 Same channel and same limits as the code-block announcement above: the
 transpile's stderr, once per construct per site, literal patterns only, silent

@@ -71,6 +71,14 @@ not-supported.md → only then probe.*
 - **s495f MERGED (ff `25d7fede`, pushed): `EVERYDAY: 92 -> 100 of 122` (82.0 %) confirmed by Fable's own run (buckets 0); Fable's own gate on the sha 262 / 8675 PASS; container install test PASS (platform-touching: sb-alien gethostby*/getnetby*/setpriority; macOS NOT TESTED, #2196); review probes 8 of 11 identical to perl, the three differing explained (formline dies by ruling; #2103 strict-dependent, not shipped; stderr ORDER under runpcl's plain load).**  Records nit: its session-log section says gate 8674, the count is 8675.  **#2341 (HIGH, pre-existing, filed by the agent) = the next correctness candidate**: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref -- `push @$u, 1` dies, `$u->[0]` / `for (@$u)` / `keys %$u` leave it undef; right under `PCL_OPT=-raw-slot`.
 
 
+## s499k (2026-09-27, Opus) -- backslash-NEWLINE in a dq string (#2470); `\N{3,4}` is `\N` quantified (#2471); the rewrite scan knows /x (#2443); `(*FAIL)` = `(?!)` (#2386 cheap half)
+- **#2470 dq backslash-NEWLINE**: an unknown escape, the backslash goes (`"a\<NL>b"` = `a<NL>b`); the three dq decoders read ONE alternation `$Pl::ExprToCL::DQ_ESCAPE_RX` (`/s`) -- `_take_dq_escape`, `_apply_case_escapes`, `unescape_string` (runtime `require`).  ir-spec §3.2g.
+- **#2471 `\N{…}`**: a `{` after `\N` that opens a VALID counted quantifier (`%pcl-rx-counted-end`) makes it `[^\n]` quantified; only otherwise a named character (still unresolved = #2199).  ir-spec §10-esc2.
+- **#2443 /x in the rewrite scan**: `perl-regex-to-ppcre` takes `&optional extended` (4 call sites); under /x a blank or `#…` comment is no atom and a possessive `+` may follow blanks; inline `(?x)`/`(?x:`/`(?-x:`/`(?^…:` scopes tracked through `%pcl-parse-x-flag-group`.  ir-spec §10-poss.
+- **Pass order (#2443)**: the `(?^` removal and the charset-letter strip run AFTER the rewrite scan (the scan reads group headers; a `\Q`-quoted header is no header).
+- **#2386 cheap half**: bare `(*FAIL)`/`(*F)` -> `(?!)` in the scan, no longer announced; `(*FAIL:NAME)` and every other verb still reach cl-ppcre and DIE trappably (row guards it).  ir-spec §10-verb; not-supported "Regex control verbs" narrowed.
+- **Filed**: #2500 (a `(?^…)` group's flag RESET is dropped -- qr/a b/ inside a /x pattern matches "ab"), #2501 (`\Q…\E` in RUNTIME pattern text is quotemeta'd; perl reads the letter Q).
+
 ## s499j (2026-09-27, Opus) -- @INC in perl's ORDER with the PCL tree out (#2462); shims that win by NAME; `use lib` = perl's lib.pm (#2464); `$0`/`__FILE__` under `pcl -e` (#2461) and `pcl -M` (#2460)
 
 - **@INC order (#2462): -I, PERL5LIB, PCL lib/, perl's own; never the PCL root or tools/lib** — ONE derivation `PCLPaths::program_inc` (pl2cl preamble, `Pl::Parser` inc_paths, `pcl` seed); `pcl` no longer passes `-I $ROOT`; ir-spec §9.
