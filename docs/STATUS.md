@@ -1,39 +1,42 @@
-# PCL status — what runs, what does not
+# PCL status: what runs, what does not
 
-The measured compatibility state.  Every number below comes from a named,
-re-runnable measurement; nothing here is estimated.
+This page gives the measured state of PCL's compatibility with perl. Every
+number on it comes from a command you can run yourself (the last column of
+each table), and nothing is estimated.
 
-**Last full re-measure: 2026-09-18** (main `67781634`, generation v2-1480) —
-the gate, the extracted perl suite, the CPAN board, the drop census and the
-execution benchmarks ([`faster-codegen-suggestions.md`](faster-codegen-suggestions.md)
-§0.2p is the table, taken on a quiet box) on that commit; the in-place perl `t/` counts from the same day's `--all --quick` run on `158be071`, two merges earlier (the later merge changed only the module cache and was re-checked on the 33 files that exercise the search path, zero movers).
+**Each number carries its own date.** The regression suite and the
+extracted perl tests were measured on 2026-09-27; the run of perl's full
+`t/` tree, the CPAN board, the untranslatable-statement count and the
+failure causes are from 2026-09-18 (the full `t/` figures are refreshed at
+each release). The speed numbers are in
+[`faster-codegen-suggestions.md`](faster-codegen-suggestions.md).
 
-**Contents:** [what runs](#what-runs) · [what deliberately does not](#what-deliberately-does-not-work) · [known sharp edges](#known-sharp-edges) · [XS](#xs)
+**Contents:** [what runs](#what-runs) · [what deliberately does not](#what-deliberately-does-not-work) · [known sharp edges](#known-sharp-edges) · [speed](#speed) · [XS](#xs)
 
 ## What runs
 
 | measurement | result | how to reproduce |
 |---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **253 files, 8,542 assertions, all passing.**  Three of the files are the XS-bridge tests, parked (`plan skip_all`) while the experimental [pclxs](#xs) sibling is mid-change; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
-| perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.40's `t/op`, `t/base`, …) | **18,687 assertions pass / 674 fail (96.5 %)**; **60 files pass completely**; 96 files run to the end, 12 abort part-way, none fails to compile.  (The fail count is higher than the 649 of 2026-09-04 although 105 more assertions pass: files that used to stop early now run further and show rows that always failed) | `perl tools/sweep-perl-tests.pl --jobs 8` |
-| perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **107 files identical to perl**; **105** differ for a registered, explained reason (`baselines/perl-suite-expected.tsv` — perl-internals probes, threads, taint, …); **258** differ and are the bug queue; 9 do not compile; 3 time out; 31 produce no TAP; 12 are too slow for the `--quick` form and are listed as NOT-RUN; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| pure-Perl CPAN modules: a 14-distribution board, 183 test files | **85 files PASS / 48 PARTIAL / 50 FAIL; 2,274 assertions ok / 338 not ok** (the board of 2026-09-18, with its four Moo-family distributions re-run on 2026-09-19: Safe-Isa `safe_isa.t` PARTIAL 67/1 → PASS 68/0, the other 64 files unchanged) (a PARTIAL file ran most of its suite; FAIL is "zero ok", which also counts the seven files perl itself skips — they carry the cause `PERL-SKIP`).  The BLESSED snapshot is still [`../baselines/cpan-board14-s473w.tsv`](../baselines/cpan-board14-s473w.tsv) of 2026-09-09 (84 / 50 / 49; 2,213 / 353, every failing row with a cause); today's run differs from it in six files — three gained rows (Data-Dump `dump.t` to PASS, Safe-Isa `safe_does.t` 6 → 20 rows, Scalar-List-Utils `reftype.t`), Safe-Isa `safe_isa.t` now runs 68 rows instead of 8 and shows one failing row (#1912), `openhan.t` lost two rows that had been passing on nothing (#1571), and Text-Balanced `05_extmul.t` exhausts the 1 GB heap and produces no rows (#1512) — and attributing those movers and re-blessing is task #1913.  The ROW-level file [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv) is the board's answer to the sweep's `fail-baseline.tsv`: one line per failing assertion with its got/expected and its cause, compared by `tools/cpan-scoreboard.pl --diff` (task #1502) | the command below |
-| statements the compiler cannot translate, counted over six populations (the two suites above, the CPAN board, PCL's shipped `lib/`, the examples, the `Pl/t` fixtures) | **62 statements in 19 files** (re-counted 2026-09-18, row for row the blessed census), every one classified with an owning task; zero in PCL's own shipped module tree | `tools/drop-census.pl` vs [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
-| XS bridge conformance corpus (pclxs, real perl as oracle) | 398 pass / 0 fail at the last measurement (2026-08-03); `Digest::MD5`'s own `md5-aaa.t` passed 256/256 under PCL.  Not re-run since — pclxs is under separate development | `tools/pcl-conform` |
+| PCL's own regression suite (`Pl/t/`) | **269 files, 9,001 assertions, all passing** (2026-09-27). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
+| perl's own tests, extracted (`perl-tests/`: 108 files from perl 5.40's `t/op`, `t/base` and others) | **18,714 assertions pass, 659 fail (96.6 %)** (2026-09-27). 60 files pass completely; 96 run to the end, 12 stop part-way, and all 108 compile. | `perl tools/sweep-perl-tests.pl --jobs 8` |
+| perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **107 files identical to perl** (2026-09-18). 105 differ for a registered, explained reason (probes of perl's internals, threads, taint and so on; listed in `baselines/perl-suite-expected.tsv`); 258 differ and are the bug queue; 9 do not compile; 3 time out; 31 produce no test output; 12 are too slow for the `--quick` form and are listed as not run; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
+| pure-Perl CPAN distributions: 14 of them, 183 test files | **85 files pass, 48 partly pass, 50 fail; 2,274 assertions ok, 338 not ok** (2026-09-18; the four Moo-family distributions re-run on 2026-09-19). A partial file ran most of its suite; a failing file has zero passing assertions, and that count includes seven files perl itself skips. Every failing assertion, with its cause, is in [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv). The last blessed snapshot, [`../baselines/cpan-board14-s473w.tsv`](../baselines/cpan-board14-s473w.tsv) of 2026-09-09 (84 / 50 / 49), differs from this run in six files and has not been re-blessed yet | the [board command](#the-cpan-board-command) below |
+| statements the compiler cannot translate, counted over six populations (the two perl test sets above, the CPAN board, PCL's shipped `lib/`, the examples and the regression-suite fixtures) | **62 statements in 19 files** (2026-09-18), each classified with its cause; none in PCL's own shipped modules | `tools/drop-census.pl`, compared against [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
+| XS bridge conformance corpus (real perl as the oracle) | 398 pass, 0 fail at its last run (2026-08-03), and `Digest::MD5`'s own `md5-aaa.t` passed 256 of 256 under PCL. Not re-run since: the bridge is being reworked separately | `tools/pcl-conform` |
 
-Failures are tracked row by row in blessed baselines
-(`baselines/fail-baseline.tsv`, `baselines/pass-baseline.tsv`,
-`baselines/perl-suite-fails.tsv`, `baselines/row-shortfall.tsv`).  A change
-that breaks a previously passing assertion, or that makes a file stop
-before rows it used to produce, fails the run — so the numbers above can
-only move honestly.
+**The numbers can only move honestly.** Failures are tracked assertion by
+assertion in blessed baselines (`baselines/fail-baseline.tsv`,
+`baselines/pass-baseline.tsv`, `baselines/perl-suite-fails.tsv`,
+`baselines/row-shortfall.tsv`). A change that breaks a passing assertion,
+or makes a file stop before rows it used to produce, fails the run.
 
-**And every blessed row carries a CAUSE, so the failures can be split into
-what is a bug and what is the deliberate edge of the language PCL
-implements.**  One rule, six classes, one command
-(`tools/cause-census.pl --markdown`, rule and reconciliation in
-[`failure-cause-classes.md`](failure-cause-classes.md)) — measured
-2026-09-18 against the sweep of 2026-09-18 on `67781634`:
+### Why the failures fail
+
+Every blessed failing row carries a cause, so the failures split into bugs
+and the deliberate edges of the language PCL implements. The rule and the
+reconciliation are in [`failure-cause-classes.md`](failure-cause-classes.md);
+the command is `tools/cause-census.pl --markdown`. Measured 2026-09-18
+against that day's run:
 
 | population | rows | not-supported | parked | bug | other | unexplained | perl-skip | not-supported + parked |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -45,94 +48,131 @@ implements.**  One rule, six classes, one command
 | shortfall: perl's t/ | 443,859 | 55,432 | 417 | 387,706 | 0 | 304 | 0 | 12.6% |
 | **all populations** | **471,383** | **64,200** | **574** | **393,704** | **10** | **12,888** | **7** | **13.7%** |
 
-`not-supported` = the cause names a [`not-supported.md`](not-supported.md)
-section; `parked` = a scheduling decision; `bug` = a filed task; `perl-skip`
-= perl skips the file too (excluded from the share's denominator);
-`unexplained` = not yet attributed — the audit's own queue, counted on every
-run so it cannot grow unnoticed.  **Read the per-population rows, not the
-total**: the total is dominated by the `t/` shortfall's few enormous
-generated files.  The `perl-tests` sweep is the population PCL is measured
-against on every change, and **58 % of its failing rows are deliberate
-non-support or parked, not bugs**.  Rows the skip registry relabels as
-skips are not-supported failures too, and they sit OUTSIDE the sweep row:
-198 rows in 24 files on the same sweep (the `(198 by the registry)` in its
-TOTAL line).  Counting them, the sweep's honest not-supported share is
+The classes: `not-supported` means the cause names a section of
+[`not-supported.md`](not-supported.md); `parked` is a scheduling decision;
+`bug` is a filed bug; `perl-skip` means perl skips the file too (left out of
+the share's denominator); `unexplained` is not attributed yet, and is counted
+on every run so it cannot grow unnoticed. A "shortfall" row is an assertion
+the file should have produced and did not, because the file stopped early.
+
+Read the per-population rows, not the total: a few enormous generated files
+in perl's `t/` tree dominate the total. The `perl-tests` sweep is the
+population every change is measured against, and **58 % of its failing rows
+are deliberate non-support or parked, not bugs.** The skip registry relabels
+another 198 rows in 24 files as skips; they are not-supported failures too,
+but sit outside that row. Counting them, the sweep's not-supported share is
 (319 + 69 + 198) / (670 + 198) = 67.5 %.
 
-**Untranslatable statements are never silent.**  One the compiler cannot
-lower is announced on stderr at compile time
-(`PCL: statement dropped at FILE line N: …`) and, when the program reaches
-it, dies perl-shaped and trappable (in `eval STRING` the die lands in `$@`).
-A deliberately unsupported construct dies the same way, naming its entry in
+### Untranslatable statements are never silent
+
+A statement the compiler cannot translate is announced on stderr at compile
+time (`PCL: statement dropped at FILE line N: …`). If the program reaches it,
+it dies with a normal Perl exception that `eval` can catch (inside
+`eval STRING`, the error lands in `$@`). A construct that is deliberately
+unsupported dies the same way, naming its entry in
 [`not-supported.md`](not-supported.md).
 
 ## What deliberately does not work
 
-The full list with rationale and edge cases is
-[`not-supported.md`](not-supported.md) — each entry says *why* and what the
-observable difference is.  The big items:
+The full list, with the reason and the observable difference for each entry,
+is [`not-supported.md`](not-supported.md). The main items:
 
 | feature | status |
 |---|---|
-| XS / compiled C extensions | experimental via the separate [pclxs](#xs) bridge; not part of the core |
-| `@_` argument aliasing | args are copies; `$_[0] = 42` does not write back (plain lexical parameters work) |
-| `DESTROY` | never called: memory is reclaimed by the garbage collector, there is no scope-exit destructor |
-| `tie` on arrays, hashes and filehandles | announced and ignored; scalar `tie` works |
-| regex code blocks `(?{…})`, `(??{…})` | not supported (CL-PPCRE has no equivalent); the block is stripped with an announcement |
+| XS / compiled C extensions | experimental, through the separate [XS bridge](#xs); not part of PCL itself |
+| `@_` argument aliasing | partial: `$_[0] = 42` changes the caller's variable, array element or hash element for a named sub. An element reached through a reference (`f($r->{k})`) gets a copy, and so can an argument passed to a code reference or a method |
+| `DESTROY` | never called: memory is reclaimed by the garbage collector, and there is no scope-exit destructor. For now, close filehandles explicitly |
+| `tie` on arrays, hashes and filehandles | announced on stderr and ignored; scalar `tie` works |
+| regex code blocks `(?{…})`, `(??{…})` | removed from the pattern with a warning at compile time (cl-ppcre has no equivalent); the rest of the match runs |
 | `given`/`when`, smart match `~~` | refused with a message (removed in perl 5.42 anyway) |
-| `format`/`write` | refused |
+| `format`/`write` | refused with a message |
 | perl 5.38 `class`/`field`/`method` | refused when the feature is provably in use; planned |
-| taint mode | not implemented |
-| warnings-gated diagnostics | PCL emits no warnings at all; `use warnings` is accepted and inert |
+| taint mode | not supported |
+| warnings | PCL emits no warnings-gated diagnostics; `use warnings` is accepted and has no effect |
 | exact error-message text | not a goal; error *behaviour* (`die`, `$@`, exit status) is |
-| unicode identifiers in stashes/globs | partial (task #418 family) |
-| indirect object syntax with a SCALAR invocant (`method $obj LIST`) | maybe later; the `new Foo(…)` class-name spellings work, `method $obj …` is dropped loudly |
+| indirect object syntax with a scalar invocant (`method $obj LIST`) | maybe later; `new Foo(...)` with a class name works, `method $obj ...` is dropped with a message |
 
 ## Known sharp edges
 
-* **A wrong answer is usually silent — check YOUR program.**  Most programs
-  PCL gets wrong still exit 0 with nothing on stderr.  `pcl --check prog.pl
-  ARGS` runs it under perl AND under PCL and says `IDENTICAL`, or prints the
-  first line where they differ ([`pcl-check.md`](pcl-check.md)); its output
-  is most of a good bug report (`CONTRIBUTING.md`).  It runs the program
-  twice — not for programs whose side effects must happen once.
-* **A statement PCL cannot translate dies when reached**, announced at
-  compile time.  So a program runs up to the first such statement; the
-  census above says how many there are in the test populations.  Two found
-  while writing the current README, both filed: under
-  `use feature 'signatures'` (so under `use v5.36`) the output-field
-  separator `$,` is mis-tokenized (task #1059 — `local $, = …` silently
-  binds nothing useful, `$, = …` is dropped loudly), and
-  `pl2cl --executable` runs the program at build time and produces a binary
-  that does nothing (task #1060).
-* **Compile happens on the first run after an edit.**  A large program pays
-  its transpile and SBCL-compile cost once (about six seconds for 1,200
-  lines) and then starts from its cache entry in 0.04 s; module transpiles
-  are cached the same way (`~/.pcl-cache`), as is the runtime itself (a
-  saved SBCL core, keyed on the runtime's source).  `pcl -e` one-liners are
-  not cached.  See
-  [`caching.md`](caching.md) for what is cached, where, and how to clear
-  or disable it.
+* **A wrong answer is usually silent, so check *your* program.** Most
+  programs PCL gets wrong still exit 0 with nothing on stderr.
+  `pcl --check prog.pl ARGS` runs the program under perl and under PCL and
+  prints `IDENTICAL`, or the first line where they differ
+  ([`pcl-check.md`](pcl-check.md)); its output is most of a good bug report
+  ([`CONTRIBUTING.md`](../CONTRIBUTING.md)). It runs the program twice, so do
+  not use it on a program whose side effects must happen only once.
+* **A statement PCL cannot translate dies when reached**, and is announced
+  at compile time, so a program runs up to the first such statement. The
+  table above counts how many there are in the test populations. One known
+  case (checked 2026-09-27): under `use feature 'signatures'`, and so under
+  `use v5.36` and later, the output field separator `$,` is misread.
+  `$, = "+"` is dropped with a message, and `local $, = "-"` silently has no
+  effect.
+* **The first run after an edit compiles.** A large program pays its
+  compile once (about six seconds for 1,200 lines) and then starts from its
+  cache entry in about 0.04 seconds. Modules and the runtime itself are
+  cached the same way, under `~/.pcl-cache`; `pcl -e` one-liners are not.
+  [`caching.md`](caching.md) says what is cached, where, and how to clear or
+  disable it.
 * **Signatures are read as signatures whenever the feature could be on.**
-  A `sub f ($x)` before the pragma is an old-style prototype in perl; PCL
-  follows the pragma's region rules but see `not-supported.md`
-  "Signature syntax".
+  In perl, a `sub f ($x)` before the pragma is an old-style prototype. PCL
+  follows the pragma's region rules; see "Signature syntax" in
+  [`not-supported.md`](not-supported.md).
+
+## Speed
+
+The speed table in the README measures the work a program does, with
+start-up subtracted; every measurement behind it is in
+[`faster-codegen-suggestions.md`](faster-codegen-suggestions.md). For a
+short, ordinary program, start-up is most of the time, and **start-up has
+deliberately not been optimized yet.** Measured 2026-09-27, over 101
+ordinary programs whose output matches perl's:
+
+* **A warm run** (the program already compiled and cached) takes 48 ms at
+  the median, about ten times perl's time; a one-line program takes 43 ms
+  under PCL and 1.4 ms under perl. About 40 ms of a typical run is fixed
+  cost, and about 34 ms of that is the `pcl` launcher: a Perl script that,
+  on every run, loads its modules, starts `sbcl --version`, and hashes the
+  1.5 MB runtime source to find the right saved core. SBCL itself, booting
+  PCL's saved core, takes 3 to 7 ms.
+* **The first run after an edit** is dominated by building the program's
+  compiled file, because that build loads every module the program `use`s
+  from source, even when the module's compiled file already exists. A
+  script using Getopt::Long takes 5.3 seconds on its first run; the 101
+  programs' first runs take 85 seconds together.
+* **Code created by string `eval`** is compiled by SBCL's full compiler
+  every time it runs. The common case is a Moo class's set-up: one small
+  program that defines a Moo class spends 2.7 seconds a run, most of it
+  here.
+
+Only about 5 % of these programs spend most of their time running their
+own code. The three costs above are planned as **later extensions for
+faster start-up**:
+
+* a faster launcher: a native one, or one that remembers the saved core's
+  name and hashes the runtime only when the runtime file has changed;
+* a first run that reuses modules' existing compiled files instead of
+  loading their source;
+* a cheaper compile for code created by string `eval`, and cached compiled
+  `eval` strings.
 
 ## <a name="xs"></a>XS
 
-XS support lives in a separate experimental project (**pclxs** — a
-`libperl` shim that lets unmodified XS `.so` files talk to PCL's runtime).
-One real module (`Digest::MD5`) has been validated end to end, and the
-398-case conformance corpus was green at its last run, but pclxs is **not
-bundled** and is currently mid-change (the 14 bridge rows in PCL's gate
-fail against its present state).  The core PCL distribution is
-pure-Perl-only: any module that needs compiled C fails to load.
+XS support lives in a separate experimental project, **pclxs**: a `libperl`
+shim that lets unmodified XS `.so` files talk to PCL's runtime. One real
+module (`Digest::MD5`) has been validated end to end, and the 398-case
+conformance corpus passed at its last run (2026-08-03). pclxs is **not
+bundled**, and it is being reworked: PCL's three bridge test files are
+parked until it works again. PCL itself is pure Perl only, so a module that
+needs compiled C fails to load.
 
-The board command (the `--no-dist-lib` flag applies to every dist after it;
-Scalar-List-Utils must not put its own unbuilt XS `lib/` on `@INC`):
+## The CPAN board command
+
+The `--no-dist-lib` flag applies to every distribution after it:
+Scalar-List-Utils must not put its own unbuilt XS `lib/` on `@INC`.
 
 ```
-perl tools/cpan-scoreboard.pl --jobs 8 --timeout 120 --tsv baselines/cpan-board14-sNNN.tsv \
+perl tools/cpan-scoreboard.pl --jobs 8 --timeout 120 --tsv baselines/cpan-board14-NAME.tsv \
   ~/.cpan/build/{Algorithm-Diff-1.201-0,Capture-Tiny-0.50-0,Class-Inspector-1.36-0,Class-Method-Modifiers-2.15-0,Data-Dump-1.25-0,File-Which-1.27-0,Mojo-DOM58-3.002-0,Role-Tiny-2.002004-0,Safe-Isa-1.000010-0,Sort-Versions-1.62-0,Sub-Uplevel-0.2800-0,Text-Balanced-2.07-0,Try-Tiny-0.32-0} \
   --no-dist-lib ~/.cpan/build/Scalar-List-Utils-1.70-0
 ```

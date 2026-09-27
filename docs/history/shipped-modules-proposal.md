@@ -1,0 +1,222 @@
+> **History.** This is `docs/shipped-modules.md` as it stood until
+> 2026-09-27 (first written 2026-05-31). Its provider registry
+> (`*pcl-module-providers*`) and its `cl/modules/` directory were **never
+> built**, and its list of `lib/` modules is out of date. The current page
+> is [`../shipped-modules.md`](../shipped-modules.md). This copy is kept for
+> the design reasoning.
+
+# Shipped & Overridden Modules
+
+How PCL provides implementations for the standard/CPAN modules a Perl program
+pulls in with `use`/`require` — and how `use Foo` decides *which* implementation
+to load.
+
+This is the architecture behind "Test::More is hardly the last case": every core
+module PCL needs to supply (especially the XS ones) should slot into **one
+convention and one registry**, not a new special case each time.
+
+---
+
+## 1. Two homes, split by implementation language
+
+A module PCL ships lives in exactly one of two places, chosen by *how it has to
+be implemented*:
+
+| If the CPAN module is… | Ship it as… | Home | Loaded by |
+|---|---|---|---|
+| pure Perl, or has a pure-Perl fallback | a `.pm`, transpiled like any module | `lib/` | normal `@INC` transpile path |
+| XS, or needs runtime/host integration | hand-written Common Lisp | `cl/modules/` | `p-load-extension` |
+
+This split already exists in practice — it just isn't named:
+
+- **`lib/`** (pure-Perl shims, transpiled on demand): `Config`, `POSIX`,
+  `Errno`, `version`, `File::Spec`, `File::Spec::Functions`,
+  `Scalar::Util`, `List::Util`, `Carp`, `Sub::Util`, `Fcntl`, `mro`,
+  `File::Basename` (**a WORKAROUND, not a shim by choice** — core's file is
+  correct Perl that PCL mis-runs: `_strip_trailing_sep` writes through `$_[0]`,
+  which does not reach a plain `my` lexical, so `dirname` kept the trailing
+  slash.  Our copy is core's file with that one sub also RETURNING the value.
+  Delete it when task #189 lands),
+  `Math::BigInt::Calc`, `Test::More` (prototype-only),
+  `Time::HiRes` and `MIME::Base64` (**both XS upstream, both plain Perl here**
+  — s492c: the first over four `builtin::` primitives, the second the whole
+  RFC 4648 transform, so `use MIME::Base64;` stops dying),
+  `IO` (**the XS half of `IO::Handle` written in plain Perl** — core's `IO.pm`
+  is only a loader plus `XSLoader::load 'IO'`, and without that half
+  `use IO::Handle` died "Can't locate loadable object for module IO".  Ours
+  supplies the constants, `flush`, `getline`/`getlines`, `setbuf`/`setvbuf`
+  and the error/taint answers, and CROAKS by name for `sync`/`blocking`/
+  `ungetc`, which need fsync/fcntl/pushback PCL does not have.  Task #197),
+  `IO::Handle` (**a WORKAROUND, not a shim by choice** — core's file with
+  exactly `autoflush` and `printflush` rewritten to save/restore the selected
+  handle explicitly instead of via `SelectSaver`, which restores from DESTROY
+  and PCL never calls DESTROY.  Delete it when task #198 lands).
+  (`Cwd` and `Test::Simple` shims were **removed** session 259 — the real CPAN
+  `Cwd` works under PCL, and `Test::Simple` is supplied by the internal TAP
+  layer (`cl/pcl-test.lisp`), so neither shim was needed. Verified: full gate
+  3480/3480, sweep 66 fully-passing held.)
+- **CL-backed** (today flat in `cl/`, to move under `cl/modules/`):
+  `cl/pcl-pack.lisp` (`pack`/`unpack`), `cl/pcl-test.lisp`
+  (`Test::More`/`Test::Simple` TAP).
+
+### The "which home?" heuristic
+
+1. **Is it pure Perl on CPAN (or does it have a `PP` fallback)?** → `lib/` as a
+   `.pm`. Cheapest: it rides the existing transpiler, no CL to maintain.
+   (`List::Util`/`Scalar::Util` are XS on CPAN but have pure-Perl forms, so they
+   live in `lib/`.)
+2. **Is it XS with no pure-Perl form, or does it need to reach the host** (TAP +
+   `$?` + exit for testing, raw memory for `pack`)? → `cl/modules/NAME.lisp`,
+   hand-written CL.
+
+   **CORRECTION (s492c, 2026-09-21): `cl/modules/` was never created and
+   `Time::HiRes` is NOT in it.** "Needs the host" is almost never the whole
+   module: the heuristic's own example turned out to be one clock and one
+   sleep. `Time::HiRes` now ships as `lib/Time/HiRes.pm` — plain Perl (home #1)
+   over four primitives on the blessed `builtin::` shim-dispatch seam
+   (`hires_time`, `hires_sleep`, `hires_clock`, `hires_clock_res`; task
+   #1992).  **That is the pattern to copy**: split the module into the part no
+   Perl can say — which is small — and write the rest as a shim.
+3. **Is it XS and out of scope?** → no implementation; a registry `:xs` entry so
+   `use` fails cleanly (see §3).
+
+Prefer home #1 whenever a pure-Perl form is feasible — CL-backed modules are more
+work to write and maintain.
+
+---
+
+## 2. The engine already exists — `p-load-extension`
+
+CL-backed modules are not a new mechanism; they are **extensions**, already
+documented in `docs/extensions.md`:
+
+- `p-load-extension "NAME"` loads `NAME.lisp` relative to
+  `*pcl-runtime-directory*` (captured from `*load-truename*` at runtime load),
+  once, recording it in `*pcl-loaded-extensions*` so repeats are no-ops.
+- Files must start with `(in-package :pcl)` and export their symbols.
+- Eager-load lines at the bottom of `pcl-runtime.lisp` pull in built-ins
+  (`(p-load-extension "pcl-pack")`); self-loading stubs are the lazy fallback.
+
+The only structural change is to give these files a folder — `cl/modules/` — and
+to teach `p-load-extension` (or the registry below) to look there.
+
+---
+
+## 3. The missing piece — one provider registry
+
+Today three things decide what `use Foo` does, and they're scattered:
+
+- `*p-xs-only-modules*` — a skip-list of XS modules to refuse;
+- the eager `p-load-extension` list at the bottom of the runtime;
+- `cl/pcl-test.lisp`, loaded *only by the sweep*, invisible to user scripts.
+
+Collapse all three into a single table that `p-use` consults first:
+
+```lisp
+;; Perl module name → how to satisfy `use`/`require` of it.
+;;   :cl   NAME  → (p-load-extension "NAME")   ; cl/modules/NAME.lisp
+;;   :perl       → fall through to the lib/ + @INC transpile path
+;;   :xs         → no implementation; clean "unavailable" error/skip
+(defparameter *pcl-module-providers*
+  '(("Test::More"        :cl   "test-more")
+    ("Test::Simple"      :cl   "test-more")
+    ("Test2::Bundle::More" :cl "test-more")
+    ("List::Util"        :perl)          ; lib/List/Util.pm
+    ("Scalar::Util"      :perl)          ; lib/Scalar/Util.pm
+    ("Storable"          :cl   "storable")
+    ("Time::HiRes"       :perl)          ; lib/Time/HiRes.pm since s492c
+    ("Socket"            :xs)))           ; out of scope → clean error
+```
+
+### Resolution order in `p-use`
+
+```
+use Foo;
+  ├─ 1. provider registry says :cl NAME  → (p-load-extension NAME), register
+  │                                          preloaded, run Foo->import
+  ├─ 2. provider registry says :perl, OR no entry
+  │        → normal path: lib/ shim if present, else user @INC (transpile+cache)
+  └─ 3. provider registry says :xs (no impl) → clean "Foo is not available
+            under PCL (XS module)" error / sweep-skip
+```
+
+This is a strict generalisation of what `p-use` does now: step 1 absorbs the
+eager extension list and the Test::More special-case; step 3 absorbs
+`*p-xs-only-modules*`; step 2 is unchanged.
+
+### Why this answers "Test::More is hardly the last case"
+
+With the registry in place, **a new CL-backed core module is one file plus one
+row** — `cl/modules/storable.lisp` + `("Storable" :cl "storable")` — and it is
+immediately visible to user scripts *and* to PCL's own suite, through the same
+code path. No new special-casing, ever.
+
+---
+
+## 4. Relationship to the FASL cache
+
+CL-backed modules load through `p-load-extension`, so they compile/cache like any
+extension. A `:perl` shim in `lib/` is an ordinary transpiled module and so
+appears in a script's **`use`-closure** — meaning the `.deps` manifest from
+`docs/fasl-caching-design.md` already covers it for `--cache`/`--fasl`
+freshness. No additional caching machinery is needed for shipped modules.
+
+CL-backed (`:cl`) modules are *part of PCL*, not user code: their freshness is
+tied to the PCL install/core, not the per-script `.deps` manifest. Rebuild the
+saved core (`pcl --make-core`) after editing one, exactly as for the runtime.
+
+---
+
+## 5. Migration (mechanical, low risk)
+
+1. `mkdir cl/modules/`; move `cl/pcl-pack.lisp` → `cl/modules/pack.lisp`,
+   `cl/pcl-test.lisp` → `cl/modules/test-more.lisp` (keep `(in-package :pcl)` +
+   exports). Update the eager-load lines / `*pcl-runtime-directory*` join to look
+   in `cl/modules/`.
+2. Add `*pcl-module-providers*` and the step-1/step-3 lookups in `p-use`.
+3. Fold the current `*p-xs-only-modules*` entries in as `:xs` rows; delete the
+   standalone list (or keep it as the data source for the `:xs` rows).
+4. Add the `("Test::More" :cl "test-more")` rows — this is the change that lets a
+   user script `use Test::More` under plain `pcl` (see the rollout plan, the
+   "run your own tests" phase).
+
+Order matters only in that step 2 should land before step 4 relies on it.
+
+---
+
+## 6. Summary
+
+- **Two homes:** pure-Perl shims in `lib/` (transpiled), CL-backed overrides in
+  `cl/modules/` (via `p-load-extension`). Prefer Perl when feasible.
+- **One registry** (`*pcl-module-providers*`) makes `use Foo` resolution
+  deterministic and unifies the three current ad-hoc mechanisms.
+- **Extensible by construction:** each future core/XS module = one file + one row.
+- **Caching is already handled:** `:perl` shims via the `use`-closure manifest;
+  `:cl` modules via the PCL install/core.
+
+## See also
+
+- `docs/extensions.md` — the `p-load-extension` mechanism this builds on.
+- `docs/fasl-caching-design.md` — why `:perl` shims are covered by the `.deps`
+  manifest and `:cl` modules by the core.
+- `docs/pcl-command-plan.md` — the `pcl`/`pclbuild` commands.
+- `docs/pcl-rollout-plan.md` — the phased build order (this registry is a phase).
+- `cl/pcl-runtime.lisp` — `p-use`, `p-load-extension`, `*pcl-loaded-extensions*`,
+  `*p-xs-only-modules*`, `*pcl-runtime-directory*`.
+
+## 7. Shims that exist to dodge a PCL *semantic* gap (not just XS)
+
+Most `lib/` shims stand in for XS or for a module too entangled to transpile.
+A second, distinct category exists: shims that are **near-verbatim copies of the
+real pure-Perl module, patched only to avoid a place where PCL's semantics
+differ from native perl**. Each entry below records the *exact* divergence so a
+future session can delete the shim once PCL closes the gap.
+
+| Shim | Divergence it dodges | Patch | Delete when |
+|------|----------------------|-------|-------------|
+| `lib/Math/BigInt/Calc.pm` | Stock Calc's `BEGIN` auto-detects the platform base length with two precision-rollover probe loops: an empty-condition `for(;;)` that exits **only** when `"9"x$e * "9"x$e` loses native precision. PCL integers are **arbitrary-precision bignums**, so the product is always exact, `last` never fires → **infinite loop / hang at load**. (This is what made `perl-tests/pack.t` time out: its `eval q{ use Math::BigInt }` pulls in Calc.) | Replace the two probe loops with the values stock perl computes on this platform (`MAX_EXP_F = MAX_EXP_I = 9` ⇒ `BASE_LEN = 9`, `USE_INT = 1`). Correct at any base because PCL arithmetic is exact. Full header comment in the file. | PCL gains a native-precision "rollover" mode, OR Math::BigInt is reworked not to probe. |
+
+**General rule:** any CPAN module that probes the platform's native numeric
+precision via a rollover loop (multiply until inexact, shift until zero, etc.)
+will hang under PCL's unlimited-precision integers. See `docs/not-supported.md`
+("arbitrary-precision integers") — the shim is the per-module escape hatch.

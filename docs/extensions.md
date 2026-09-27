@@ -1,148 +1,121 @@
-# PCL Extensions
+# PCL extensions
 
-*(Rewritten 2026-08-25 to match the current tree; the 2026-05 version of
-this file described an eager-load model that no longer exists.)*
+An extension is a Common Lisp file that implements a Perl built-in too
+large or too specialised to live in `cl/pcl-runtime.lisp` itself. It loads
+into a running program the first time the program needs it. This page says
+what the extensions are, how they load, and how to regenerate or add one.
+There are five:
 
-PCL supports optional extension modules — CL files that implement Perl
-built-ins too large or too specialised to live in `cl/pcl-runtime.lisp`
-itself.  The current set:
-
-| extension | file | source of truth | what it provides |
+| extension | file | written in | what it provides |
 |---|---|---|---|
-| `pcl-pack` | `cl/pcl-pack.lisp` | **transpiled** from `cl/pack-impl.pl` (Perl) + a hand-written appendix | `pack` / `unpack` |
-| `pcl-mro` | `cl/pcl-mro.lisp` | **transpiled** from `lib/mro.pm` | the always-available `mro::` API (`get_linear_isa`, …) |
-| `pcl-warnings` | `cl/pcl-warnings.lisp` | **transpiled** from `lib/warnings.pm` | the `warnings::` query/emit API (`enabled`, `warnif`, …) |
-| `pcl-xs` | `cl/pcl-xs.lisp` | hand-written CL | the pclxs XS-bridge host side (`XSLoader::load` path) |
-| `pcl-uniprops` | `cl/pcl-uniprops.lisp` | **generated** from perl's own Unicode tables by `tools/rebuild-uniprops` | the inversion lists behind `\p{…}` / `\pX` / `\P{…}` (task #2060; its one entry `%pcl-uniprop-data` is a self-loading stub, first called when a program compiles its first property) |
+| `pcl-pack` | `cl/pcl-pack.lisp` | Perl (`cl/pack-impl.pl`), compiled by PCL, plus a hand-written appendix | `pack` and `unpack` |
+| `pcl-mro` | `cl/pcl-mro.lisp` | Perl (`lib/mro.pm`), compiled by PCL | the always-available `mro::` functions (`get_linear_isa` and the rest) |
+| `pcl-warnings` | `cl/pcl-warnings.lisp` | Perl (`lib/warnings.pm`), compiled by PCL | the `warnings::` query and emit functions (`enabled`, `warnif` and the rest) |
+| `pcl-xs` | `cl/pcl-xs.lisp` | hand-written Lisp | PCL's side of the experimental XS bridge (the `XSLoader::load` path) |
+| `pcl-uniprops` | `cl/pcl-uniprops.lisp` | data, generated from perl's own Unicode tables by `tools/rebuild-uniprops` | the tables behind `\p{…}`, `\pX` and `\P{…}`; its one entry point is a self-loading stub, first called when a program compiles its first property |
 
-Three of the five are **written in Perl and compiled by PCL** — the checked-in
-`.lisp` files are build artifacts (see "Regenerating", below).  A fourth,
-`cl/pcl-uniprops.lisp`, is a generated artifact of a different kind: DATA
-from perl's `Unicode::UCD`, not compiler output, so it carries no `gen=`
-stamp (its line 1 names the Unicode version and the perl that built it) and
-`Pl/t/artifact-staleness-01.t` does not adopt it; `Pl/t/uniprops-01.t`
-regenerates it and compares the bytes instead.
+Three of the five are **written in Perl and compiled by PCL**: the
+checked-in `.lisp` files are build output, regenerated as described below.
+A fourth, `cl/pcl-uniprops.lisp`, is generated too, but it is data from
+perl's `Unicode::UCD`, not compiler output: it carries no `gen=` stamp (its
+line 1 names the Unicode version and the perl that built it), and
+`Pl/t/uniprops-01.t` regenerates it and compares the bytes.
 
-## How extensions are loaded: lazily, via self-loading stubs
+## How extensions load: lazily, through stubs
 
-There are **no eager loads**.  Every public entry point of an extension has a
+Nothing is loaded eagerly. Every public entry point of an extension has a
 *self-loading stub* in `pcl-runtime.lisp`: the first call loads the
-extension's `.lisp` file and then delegates to the real definition the load
-just installed over the stub.  `p-pack`/`p-unpack` are hand-written stubs;
-the `mro::`/`warnings::` families use the `%pcl-def-ext-stub` macro.
+extension's file, and then calls the real definition that the load
+installed over the stub. `p-pack` and `p-unpack` are hand-written stubs;
+the `mro::` and `warnings::` functions use the `%pcl-def-ext-stub` macro.
 
-`p-load-extension NAME` does the actual work: it looks for `NAME.lisp` in
-`*pcl-runtime-directory*` (the directory `pcl-runtime.lisp` was loaded from),
-loads it once, and records it in `*pcl-loaded-extensions*` so later calls are
-no-ops.  It returns `nil` (and the stub signals a clear error) when the file
-is absent.
+`p-load-extension NAME` does the work. It looks for `NAME.lisp` in the
+directory `pcl-runtime.lisp` was loaded from (`*pcl-runtime-directory*`),
+loads it once, and records it in `*pcl-loaded-extensions*`, so later calls
+do nothing. It returns `nil`, and the stub signals a clear error, when the
+file is missing.
 
-Two consequences of the lazy model:
+Two consequences of loading lazily:
 
-* **Extensions are NOT baked into the saved runtime core.**  Every runner
-  starts SBCL from a content-keyed saved core of `pcl-runtime.lisp` alone
-  (`~/.pcl-cache/core/`, USER s439); extensions load from the tree at first
-  use, through the compiled-extension cache below.  A program that never
-  calls `pack` never pays for it — not even the hash of a file it never
-  loads, since `p-load-extension` does nothing at all until something asks.
-* **An extension may install definitions and nothing else.**  It is `load`ed
-  *into a running program*, so a PROGRAM preamble (the `@INC` reset, the
-  `*pcl-pl2cl-path*` setup) would clobber that program's state — that was
-  task #349's silent bug.  `pl2cl --extension` therefore emits no preamble,
-  and `p-load-extension` **dies** (rule 12) on an artifact that carries one
-  (`%pcl-check-extension-clean`).  The check reads the program's load state
-  *after* the load, whichever form ran it, so a compiled extension smuggles
-  nothing past it either — `tools/t/ext-fasl.t` has that row on both paths.
+* **Extensions are not part of the saved runtime core.** Every run starts
+  SBCL from a saved core of `pcl-runtime.lisp` alone (see
+  [`caching.md`](caching.md) §1). An extension loads from the tree at first
+  use, through its own compiled cache (below). A program that never calls
+  `pack` never pays for it.
+* **An extension may install definitions and nothing else.** It is loaded
+  *into a running program*, so a program preamble (resetting `@INC`,
+  setting the compiler path) would overwrite that program's state; for
+  instance, `push @INC, "/tmp/mylib"; pack("N", 42)` would lose the push.
+  `pl2cl --extension` therefore writes no preamble, and `p-load-extension`
+  **dies**, naming the file, on an artifact that has one
+  (`%pcl-check-extension-clean`). The check reads the program's state
+  *after* the load, whichever way the file was loaded, so a compiled
+  extension cannot get past it either; `tools/t/ext-fasl.t` tests both
+  paths.
 
-## The compiled-extension cache (task #1202)
+## The compiled-extension cache
 
-An extension used to be `load`ed as **text**, so SBCL recompiled the whole
-artifact on every run that reached it: `cl/pcl-pack.lisp` costs **4.26 s** to
-load that way and **0.004 s** as a fasl (measured s1202).  And that cost was
-not paid by `pack` users — `Sub::Quote`'s top-level code calls `pack("F",0)`
-and Moo loads `Sub::Quote` for any `has`, so **every Moo class with one
-attribute** paid the whole pack recompile, every run (task #1910).
-
-So `p-load-extension` now goes through the **module fasl machinery**
-(`docs/caching.md` §2): `%p-build-module-fasl` with its `*pcl-fasl-build*`
-discipline, `%p-load-module-fasl`, the same temp + `rename(2)` publication,
-the same `.failed` marker, the same 30-day prune.  One thing differs, and
-only because an extension is not a transpile:
-
-> **The key is the extension file's own BYTES**, plus `*pcl-runtime-identity*`
-> (this runtime's source hash + this SBCL).  The entry is
-> `<cache>/ext/<name>-<content stem>-<runtime identity>.fasl`.
-
-A module entry is keyed by its *path* and validated against a dependency
-manifest; an extension has no source to be out of date with, so there is no
-validity question left to ask. **A stale extension fasl is not unlikely, it is
-unreachable**: regenerate `cl/pcl-pack.lisp` and the next run computes a
-different name and builds a new entry — and the superseded entry *for this
-runtime* is deleted at that build (entries for a different runtime identity
-are left alone; they belong to another tree and age out).
-
-Notes:
-
-* `--no-cache` / `PCL_NO_CACHE` does **not** turn this off, deliberately.
-  That switch answers "is it the cache?" about a *transpile* of your code; an
-  extension is a checked-in file compiled against this runtime and keyed by
-  its bytes — which is exactly what the saved core is, and `--no-cache` does
-  not disable that either (`PCL_NO_CORE` does).  **`PCL_NO_FASL_CACHE=1`** is
-  the switch, and it turns off every fasl in the image at once.
-* `PCL_FASL_DEBUG=1` names the path taken per extension: `FASL HIT`,
-  `fasl-build`, or `TEXT`.
-* Every failure — unreadable file, refused build, broken fasl — ends in the
-  text load, so the worst case is the speed PCL had before this task.
-* `pcl --cache-info` counts `ext/` as its own population; `pcl --clear-cache`
-  removes it.
+Each extension is compiled once and cached under `~/.pcl-cache/ext/`, keyed
+by the extension file's own bytes plus the runtime identity. Loading
+`cl/pcl-pack.lisp` as text takes 4.26 seconds; loaded compiled, it takes
+0.004 seconds (measured 2026-09-20). Because the key is the file's content,
+a regenerated extension can never reach an old entry.
+`PCL_NO_FASL_CACHE=1` turns the cache off (`--no-cache` does not), and
+`PCL_FASL_DEBUG=1` shows which path each load took. Any failure falls back
+to loading the text. The full description is in
+[`caching.md`](caching.md) §4.
 
 ## Regenerating the transpiled artifacts
 
-The three transpiled artifacts are checked into the tree and stamped on line
-1 with the `gen=` cache generation that built them.  **After any
-emission-changing commit they must be regenerated**, or they keep running on
-the old codegen — `Pl/t/artifact-staleness-01.t` (in the gate) compares each
-stamp against `*pcl-cache-generation*` and fails the same session.
+The three transpiled artifacts are checked into the tree, and line 1 of
+each carries the cache generation (`gen=`) of the compiler that built it.
+**After any change to the compiler's output they must be regenerated**, or
+they keep running on the old compiler's code. The test
+`Pl/t/artifact-staleness-01.t` compares each stamp with the current
+generation (`*pcl-cache-generation*`) and fails until you do.
 
 ```bash
 tools/rebuild-pack                                  # cl/pcl-pack.lisp (pack-impl.pl + appendix)
 ./pl2cl --extension lib/mro.pm      > cl/pcl-mro.lisp      && tools/tag-license cl/pcl-mro.lisp
 ./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp && tools/tag-license cl/pcl-warnings.lisp
-tools/rebuild-uniprops                             # cl/pcl-uniprops.lisp (perl's Unicode tables; only when perl's Unicode version or the tool changes)
+tools/rebuild-uniprops                              # cl/pcl-uniprops.lisp: only when perl's Unicode version or the tool changes
 ```
 
-(The license tag lands on line 2; the gen stamp stays line 1.
-`Pl/t/license-tag-01.t` fails without the tag.)
+The licence header lands on line 2, and the generation stamp stays on
+line 1. `Pl/t/license-tag-01.t` fails without the header.
 
 ## Adding a new extension
 
-1. Implement it — in Perl under `lib/` (preferred; transpile with
-   `pl2cl --extension`) or hand-written CL.  The file must be loadable into
-   the `:pcl` package world (`(in-package :pcl)` for hand-written CL;
-   transpiled output handles this itself).
+1. Implement it, preferably in Perl under `lib/` (compile it with
+   `pl2cl --extension`), or in hand-written Lisp. The file must load into
+   the `:pcl` package: hand-written Lisp starts with `(in-package :pcl)`,
+   and the transpiled output handles this itself.
 2. Add self-loading stubs for the public entry points in
-   `pcl-runtime.lisp` — one `%pcl-def-ext-stub` line per function (create
+   `pcl-runtime.lisp`: one `%pcl-def-ext-stub` line per function (create
    the package first with `p-defpackage` if it is a new `Foo::` namespace).
-3. Run `tools/tag-license` on any new file; keep the paren checker green
-   (`sbcl --script tools/check-parens.lisp FILE.lisp`).
+3. Run `tools/tag-license` on any new file, and keep the parenthesis
+   checker passing (`sbcl --script tools/check-parens.lisp FILE.lisp`).
 
 ## Distribution
 
-`tools/install-pcl` copies the whole runtime tree (including `cl/*.lisp`
-extensions) in its repo-relative shape and builds the saved core at install
-time, so the lazy loads find their files on the installed machine exactly as
-in a checkout.
+`tools/install-pcl` copies the whole runtime tree, including the
+`cl/*.lisp` extensions, in the same relative layout as the repository, and
+builds the saved core at install time, so the lazy loads find their files
+on the installed machine exactly as in a checkout.
 
-For a **standalone binary** (`sb-ext:save-lisp-and-die :executable t`), note
-the lazy model: an extension is in the image only if something already
-called into it (or you `(pcl::p-load-extension "pcl-pack")` explicitly)
-before saving.  Load the extensions your program needs before the save, or
-ship the `cl/` directory beside the binary so the stubs can find the files.
+A standalone binary made with `pl2cl --executable` does **not** embed the
+extensions yet: it reads them from the PCL tree at run time, so it needs
+that tree on the machine ([`single-binary-plan.md`](single-binary-plan.md)).
+If you save an image yourself (`sb-ext:save-lisp-and-die :executable t`),
+an extension is in the image only if something called into it before the
+save; load the ones your program needs first (for example
+`(pcl::p-load-extension "pcl-pack")`), or ship the `cl/` directory beside
+the binary so the stubs can find the files.
 
 ## See also
 
-* `docs/shipped-modules.md` — how `use Foo` decides between a `lib/` pure-Perl
-  shim (transpiled like user code) and CL-backed functionality; extensions
-  are the engine behind the CL-backed side.
-* `docs/xs-artifact-cache.md` / `docs/xs-shim-design.md` — the `pcl-xs`
-  extension's own world.
+* [`shipped-modules.md`](shipped-modules.md): how `use Foo` finds PCL's
+  pure-Perl replacements in `lib/`, which are transpiled like user code.
+* [`xs-artifact-cache.md`](xs-artifact-cache.md) and
+  [`xs-shim-design.md`](xs-shim-design.md): the `pcl-xs` extension's own
+  world.

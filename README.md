@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/Percolisp/pcl/actions/workflows/ci.yml/badge.svg)](https://github.com/Percolisp/pcl/actions/workflows/ci.yml)
 [![Latest tag](https://img.shields.io/github/v/tag/Percolisp/pcl)](https://github.com/Percolisp/pcl/tags)
-[![License](https://img.shields.io/github/license/Percolisp/pcl)](LICENSE)
 
 Percolisp (PCL) compiles Perl 5 programs to Common Lisp and runs them
 with the [SBCL](https://www.sbcl.org/) native-code compiler. The goal is
@@ -290,7 +289,7 @@ was measured and how to reproduce it are in
 
 These are microbenchmarks for different Perl features, measured
 2026-09-18 on a quiet machine (best of five runs, startup time
-subtracted for both; the `pack` row was re-measured on 2026-09-20). A
+subtracted for both). A
 ratio below 1.00× means PCL is faster.
 
 | benchmark | what it measures | PCL / perl |
@@ -303,7 +302,7 @@ ratio below 1.00× means PCL is faster.
 | regexg | `while ($x =~ /./g)` over a 200 kB string | 1.25× |
 | ovlsub | `use overload` arithmetic and stringification on objects | 3.37× |
 | moo-objs | Moo objects: constructor, accessors, a method building another object | 28× |
-| pack | `pack` with two templates | ~150× |
+| pack | `pack` with two templates | 1,035× |
 
 Plain loops, arithmetic and array work are several times faster than
 perl, because the compiler proves when a variable is always an integer
@@ -312,9 +311,22 @@ calls are level with perl. Overloading, regex matching and Moo object
 construction are slower: nothing about them can be proved at compile
 time, the regex engine is [cl-ppcre](https://edicl.github.io/cl-ppcre/)
 rather than perl's C one, and Moo generates code with string `eval` at
-run time. `pack`/`unpack` is written in Perl and is over a hundred
+run time. `pack`/`unpack` is written in Perl and is about a thousand
 times slower; it will be redone. The full table over time is in
 [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).
+
+**Start-up is slow, and not optimized yet.** The table above leaves
+start-up out, but for a short program it is most of the time: measured
+2026-09-27, a one-line program takes 43 ms under PCL against 1.4 ms under
+perl, and about 34 ms of a typical run is the `pcl` launcher itself, a
+Perl script (SBCL with PCL's runtime boots in 3 to 7 ms). The first run
+after an edit is slower again, because building the program's compiled
+file loads every module it uses from source (5.3 seconds for a script
+using Getopt::Long), and code made with string `eval`, such as a Moo class's
+set-up, is compiled from scratch on every run. All three are planned as
+later extensions for faster start-up: a faster launcher, reusing modules'
+compiled files on a first run, and a cheaper compile for `eval` strings
+([details](docs/STATUS.md#speed)).
 
 ## How it works
 
