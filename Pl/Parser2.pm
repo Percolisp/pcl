@@ -9864,8 +9864,9 @@ sub _lower_block_1 {
       if (!$vetoed) {
         $self->_reg_lex(@emb);
         return (_decl_let([map { _decl_fresh($_, $vi) } @emb],
-                 $self->_lower_stmt($first, $vi, $first_tail),
-                 $self->_lower_block(\@rest, $vi, $tail_ctx)));
+                 $self->_fh_scope_close($first, $vi, \@emb,
+                   $self->_lower_stmt($first, $vi, $first_tail),
+                   $self->_lower_block(\@rest, $vi, $tail_ctx))));
       }
     }
   }
@@ -13336,6 +13337,29 @@ sub _cond_my_names {
     }
   }
   return @names;
+}
+
+# THE SCOPE-EXIT CLOSE of a lexical handle (task #2006 (b); ir-spec §7.5b;
+# Kind-A `fh-scope-close', which `PCL_OPT=none' keeps: it changes WHEN bytes
+# reach a file and how many descriptors are open, so it is not an
+# optimisation).  @BODY is everything the `p-let' binding @$names covers — the
+# declaring statement and the rest of its block — and the names VarAnnotator
+# licensed (`fh_close': every use a handle slot or a test, see %FH_SLOT_FN
+# there) are closed when that code is left, however it is left:
+#   (p-scope-close ($fh) BODY…) = (unwind-protect (progn BODY…) (%p-scope-close $fh))
+# The binding's symbol is cl_sym(name), the same one `_decl_fresh' binds.  A
+# FILE-level handle is not wrapped: its scope ends at program exit, where every
+# handle is flushed already.
+sub _fh_scope_close {
+  my ($self, $stmt, $vi, $names, @body) = @_;
+  my @h = grep { $vi && $vi->{$_} && $vi->{$_}{fh_close} } @$names;
+  return @body if !@h;
+  my $up = $stmt->parent;
+  return @body if !$up || $up->isa('PPI::Document');
+  return Pl::Passes::fact('fh-scope-close', 1, ['progn', @body])
+    if !Pl::Passes::enabled('fh-scope-close');
+  return Pl::Passes::fact('fh-scope-close', 1,
+           ['p-scope-close', ['list', map { cl_sym($_) } @h], @body]);
 }
 
 # Wrap a lowered construct FORM in a fresh let binding boxed cells for the

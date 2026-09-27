@@ -86,7 +86,8 @@ our %KIND_A = (
   # is a speed decision that its own measurement did not authorise.  Turn it
   # on with `PCL_OPT=line-track`.
   'line-track'     => "Parser2 _lower_block + cl/pcl-runtime.lisp's location register: every statement writes its LINE to *p-src-line* (and every sub body its FILE to *p-src-file-id*, an index into *p-src-files*), so a die raised BY THE RUNTIME reports `at FILE line N.` as perl does instead of the placeholder `(eval 0) line 0.`",
-  'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
+  'fh-scope-close' => "VarAnnotator handle licence (task #2006 (b)): a `my \$fh' declared only by `open(my \$fh, ...)' whose every use is a core I/O builtin's handle slot or a truth/defined test -- never returned, assigned, referenced, passed, captured, select()ed, interpolated, with no string eval in the region -- is closed when its block exits: (p-scope-close (\$fh) BODY...) = unwind-protect + %p-scope-close.  NOT an optimisation (it is perl's semantics), so %NOT_OFF_BY_NONE keeps it under PCL_OPT=none",
+  'foreach-raw'    =>'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 
 my @PASSES;          # [name, coderef] in registration order (Kind B)
@@ -167,7 +168,12 @@ our %DEFAULT_OFF = ('line-track' => 1);
 # and a CORRECTNESS mechanism is part of that form, not an optimization of it.
 # Keep this set at one or two entries: a growing exemption list would make
 # `none` mean nothing.
-our %NOT_OFF_BY_NONE = ();
+#
+# `fh-scope-close' (task #2006 (b)) is the first: closing a non-escaping
+# lexical handle at its block's exit is perl's semantics (the bytes are in the
+# file when the next step reads it; the descriptor is free), so the general
+# form has it too.  `PCL_OPT=-fh-scope-close' remains the A/B switch.
+our %NOT_OFF_BY_NONE = ('fh-scope-close' => 1);
 
 sub enabled {
   my ($name) = @_;

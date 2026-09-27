@@ -291,6 +291,29 @@ my %MUTATING_FN   = map { $_ => 1 } qw(chomp chop undef read sysread recv
 
 my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
                                        socketpair accept);
+# THE HANDLE LICENCE (task #2006 (b), Kind-A `fh-scope-close`; ir-spec §7.5b).
+# A `my $fh` declared inside `open(my $fh, …)` whose EVERY occurrence in the
+# region is a use of the handle that cannot keep it alive is closed when its
+# block exits, as perl closes it.  The walk classifies each occurrence with the
+# same use-class mechanism the B-regimes read, in three classes of its own —
+# none of which any other verdict accepts, so for them each is `opaque':
+#   fh-open   the handle slot of `open' itself (the declaring site)
+#   fh        the handle slot of a core I/O builtin: print/printf/say's
+#             filehandle (both spellings), `<$fh>', and the FIRST argument of
+#             %FH_SLOT_FN below
+#   defined   the argument of `defined' (a test, like `bool')
+# `bool' (a truth test) is the fourth accepted class.  EVERYTHING else is an
+# escape — DEFAULT DENY: a `return $fh', an assignment from or to it, `\$fh',
+# `*$fh', an argument of any other callee (a method call ON it included),
+# `select($fh)' (it RETAINS the handle, probed), interpolation, a nested sub
+# (named or anonymous) naming it, a string eval or `goto &sub' in the region.
+# The verdict is per NAME per region (like every verdict here), so every
+# declaration of the name must be an `open(my …)' one.
+my %FH_SLOT_FN = map { $_ => 1 } qw(readline eof close binmode seek tell read
+                                    sysread syswrite sysseek truncate flock
+                                    fileno getc write stat lstat);
+my %FH_USE_OK  = map { $_ => 1 } qw(fh fh-open bool defined);
+
 # tie attaches magic to the BOX — a tied variable must stay boxed forever
 # (a raw slot would bypass FETCH/STORE).  Found via case-invert-01.t during
 # W12 bring-up; the text scan had no tie gate either (live bug on
@@ -771,6 +794,11 @@ sub _analyze_tree {
   # closure body, therefore conservative in the OVER direction -- which is the
   # safe one for every consumer, and is stated as such in ir-spec.
   $vi{$_}{captured} = 1 for grep { $ctx->{nested_sub}{$_} } keys %vi;
+  # THE HANDLE LICENCE (task #2006 (b)): a FACT, computed whatever PCL_OPT
+  # says; Parser2's emission asks Pl::Passes::enabled('fh-scope-close').
+  $vi{$_}{fh_close} = 1
+    for grep { $vi{$_} && _fh_close_verdict($ctx, $_) }
+        keys %{ $ctx->{fh_open_decl} // {} };
   if ($no_raw_slot) {
     for my $v (values %vi) {
       next if $v->{array};               # #1140: not a storage verdict
@@ -786,9 +814,9 @@ sub _analyze_tree {
         join(',', @{ $vi{$name}{reasons} // [] });
     }
     for my $name (sort grep { !$vi{$_}{array} } keys %vi) {
-      warn sprintf "B-DEBUG %s unboxable=%d coerce=%s strbuf=%d reasons=[%s] uses={%s}\n",
+      warn sprintf "B-DEBUG %s unboxable=%d coerce=%s strbuf=%d fh_close=%d reasons=[%s] uses={%s}\n",
         $name, $vi{$name}{unboxable}, $vi{$name}{coerce} // '-',
-        $vi{$name}{strbuf} // 0,
+        $vi{$name}{strbuf} // 0, $vi{$name}{fh_close} // 0,
         join(',', @{ $vi{$name}{reasons} // [] }),
         join(',', map { "$_=$ctx->{use_class}{$name}{$_}" }
                   sort keys %{ $ctx->{use_class}{$name} // {} });
@@ -878,6 +906,43 @@ sub _use {
   my ($ctx, $name, $class) = @_;
   return unless defined $name && $name =~ /^\$\w+$/;
   $ctx->{use_class}{$name}{$class // 'opaque'}++;
+}
+
+# The handle licence's declaration count: `open(my $fh, …)' — the first
+# argument is the Symbol whose previous significant token is `my'.  The
+# licence requires every declaration of the name in the region to be one.
+sub _fh_open_decl {
+  my ($ctx, $n) = @_;
+  return unless ref($n) eq 'PPI::Token::Symbol' && $n->content =~ /^\$\w+$/;
+  my $prev = $n->sprevious_sibling;
+  $ctx->{fh_open_decl}{ $n->content }++
+    if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'my';
+}
+
+# The handle licence (see %FH_SLOT_FN): may `my $name' — declared only by
+# `open(my $name, …)' — be closed when its block exits?  Every occurrence
+# must carry one of the accepted use classes and no event but the two the
+# handle slots themselves raise; anything this walk did not classify denies.
+sub _fh_close_verdict {
+  my ($ctx, $name) = @_;
+  my $decls = $ctx->{fh_open_decl}{$name} or return 0;
+  return 0 if $decls != ($ctx->{decl_count}{$name} // 0);
+  return 0 if $ctx->{has_str_eval} || $ctx->{has_goto_sub};
+  return 0 if $ctx->{fh_nested}{$name} || $ctx->{nested_sub}{$name};
+  return 0 if grep { /\Q$name\E(?!\w)/ } @{ $ctx->{fallback_texts} };
+  # open/read/sysread mark their handle argument as written; a handle slot is
+  # what the use classes below prove that occurrence was.
+  return 0 if grep { $_ ne 'handle-viv-arg' && $_ ne 'mutating-builtin-arg' }
+              keys %{ $ctx->{ev}{$name} // {} };
+  # native writes leave FACTS, not events: `$fh = …' in any spelling
+  return 0 if $ctx->{write_fam}{$name} || $ctx->{init_bad}{$name}
+           || $ctx->{write_obj}{$name} || $ctx->{incdec_root}{$name}
+           || $ctx->{write_ops}{$name} || $ctx->{deref_base}{$name}
+           || $ctx->{foreach_var}{$name} || $ctx->{foreach_my_alias}{$name};
+  my $uc = $ctx->{use_class}{$name} // {};
+  return 0 if !$uc->{'fh-open'};
+  return 0 if grep { !$FH_USE_OK{$_} } keys %$uc;
+  return 1;
 }
 
 sub _ev {
@@ -982,14 +1047,17 @@ sub _tw_region_facts {
   # run as a Structure::Block, never a hash Constructor (probed s456af over
   # nine spellings).
   my $block_eval_free = Pl::Passes::enabled('raw-block-eval');
-  $ctx->{has_eval} = 1
-    if @{ $stmt->find(sub {
-            return '' unless $_[1]->isa('PPI::Token::Word')
-                          && $_[1]->content eq 'eval';
-            return 1 unless $block_eval_free;
-            my $next = $_[1]->snext_sibling;
-            return !($next && $next->isa('PPI::Structure::Block'));
-          }) || [] };
+  # The same walk answers the handle licence's own question, "is there a
+  # STRING eval here", which must not depend on `raw-block-eval' (#2006 (b)).
+  $stmt->find(sub {
+    return '' unless $_[1]->isa('PPI::Token::Word')
+                  && $_[1]->content eq 'eval';
+    my $next = $_[1]->snext_sibling;
+    my $str  = !($next && $next->isa('PPI::Structure::Block'));
+    $ctx->{has_str_eval} = 1 if $str;
+    $ctx->{has_eval}     = 1 if $str || !$block_eval_free;
+    return '';
+  });
 
   # Names captured by nested anon subs (`sub { … }` blocks): Symbol tokens
   # plus $names inside interpolatable quote-likes ("…", qq, regexes,
@@ -1073,7 +1141,17 @@ sub _tw_region_facts {
     my $c = $b->content;
     _arr_esc($ctx, $1, 'nested-sub')       while $c =~ /(\@\w+)/g;
     _arr_esc($ctx, '@' . $1, 'nested-sub') while $c =~ /\$(\w+)\s*\[/g;
+    # The handle licence (#2006 (b)): a nested sub — named OR anonymous —
+    # that so much as mentions `$name' may hold the handle past the block.
+    # Text-shaped, over-firing: the safe direction for a deny.
+    $ctx->{fh_nested}{'$' . $1}++ while $c =~ /\$\{?\s*(\w+)/g;
   }
+  # The handle licence's region denials, both independent of every PCL_OPT
+  # switch (the licence is not an optimisation, so `none' must not move it):
+  # a STRING eval anywhere in the region (its capture alist could carry the
+  # handle — a block eval is plain control flow; `has_str_eval', set by the
+  # eval walk at the top of this function) and a `goto &sub'.
+  $ctx->{has_goto_sub} = 1 if $stmt->content =~ /\bgoto\s*&/;
 }
 
 # ---------------------------------------------------------- statement walk
@@ -1357,6 +1435,11 @@ sub _tw_expr_parse {
   for my $b (@{ _tw_top_blocks(\@parts) }) {
     my $prev = $b->sprevious_sibling;
     next if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+    # `print {$fh} …' — the block is the FILEHANDLE, and the tree walk below
+    # meets its content in the `filehandle' node (the handle licence's `fh'
+    # class, #2006 (b)); walking it here as a statement would record the same
+    # `$fh' as an opaque read.  Only the lone-scalar spelling is skipped.
+    next if _print_fh_block_scalar($b);
     local $ctx->{seam} = 1;
     _tw_stmts($ctx, [$b->schildren]);
   }
@@ -1413,6 +1496,25 @@ sub _tw_expr_parse {
 
   push @{ $ctx->{fallback_texts} }, join(' ', map { $_->content } @parts)
     unless $ok;
+}
+
+# Is block $b the `{$fh}' of `print {$fh} …' / `printf' / `say' (bare or
+# parenthesised), holding nothing but one plain scalar?
+my %PRINT_FN = map { $_ => 1 } qw(print printf say);
+sub _print_fh_block_scalar {
+  my ($b) = @_;
+  my @in = map { $_->isa('PPI::Statement') ? $_->schildren : $_ } $b->schildren;
+  return 0 unless @in == 1 && $in[0]->isa('PPI::Token::Symbol')
+               && $in[0]->content =~ /^\$\w+$/;
+  my $prev = $b->sprevious_sibling;
+  if (!$prev) {                         # print({$fh} …): first in the parens
+    my $st = $b->parent;
+    my $list = $st && $st->parent;
+    return 0 unless $list && $list->isa('PPI::Structure::List')
+                 && $st->schild(0) == $b;
+    $prev = $list->sprevious_sibling;
+  }
+  return $prev && $prev->isa('PPI::Token::Word') && $PRINT_FN{ $prev->content } ? 1 : 0;
 }
 
 # Top-most Structure::Block descendants of the expression parts (blocks
@@ -1492,6 +1594,22 @@ sub _tw_walk {
           for @$kids[1 .. $#$kids];
       }
       _tw_walk_funcall_args($ctx, $xo, $fname, $kids, $aread);
+      return;
+    }
+    if ($t eq 'filehandle' || $t eq 'readline') {
+      # `print $fh …' / `print {$fh} …' / `<$fh>': a plain $scalar here is a
+      # HANDLE SLOT (the handle licence's `fh' class — opaque to every other
+      # verdict, exactly the class it had before); anything else is walked
+      # as it always was.
+      for my $k (@$kids) {
+        my $kn = $xo->get_a_node($k);
+        if (ref($kn) eq 'PPI::Token::Symbol' && $kn->content =~ /^\$\w+$/
+            && !@{ $xo->get_node_children($k) || [] }) {
+          _use($ctx, $kn->content, 'fh');
+          next;
+        }
+        _tw_walk($ctx, $xo, $k, 0);
+      }
       return;
     }
     if ($t eq '=~') {
@@ -1860,6 +1978,15 @@ sub _tw_walk_funcall_args {
     my $class = !$spec     ? undef
               : !ref $spec ? 'str'          # 'str-all'
               :              $spec->[$argi];
+    # The handle licence's classes (see %FH_SLOT_FN): each is `opaque' to
+    # every other verdict, so only the fh-scope-close licence reads them.
+    if ($argi == 0) {
+      $class = $fname eq 'open'      ? 'fh-open'
+             : $FH_SLOT_FN{$fname}   ? 'fh'
+             : $fname eq 'defined'   ? 'defined'
+             :                         $class;
+      _fh_open_decl($ctx, $n) if $fname eq 'open';
+    }
     _arr_mark_target($ctx, $xo, $kid) if $arr_write && $argi == 0;
     # The generic leaf handler records this escape too, under its own
     # position-blind name; this arm adds the CALLEE, which is the only thing

@@ -245,6 +245,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
+   #:p-scope-close #:%p-scope-close
    #:p-open #:p-sysopen #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
    #:p-use-open #:p-default-layers
@@ -17480,6 +17481,34 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (%p-set-status saved))
        (%p-forget-fh fh))))
   (values))
+
+(defun %p-scope-close (fh)
+  "The SCOPE-EXIT close of a lexical handle the compiler proved does not
+   escape its block (task #2006 (b); docs/ir-spec.md §7.5b).  perl frees such a
+   handle when its block exits -- normally, by `return', `next'/`last', or a
+   die unwinding through it -- and freeing it closes (and flushes) the stream.
+   The close is the implicit one of %p-close-previous-stream (half (a)): only a
+   demonstrably OPEN stream or socket is closed, a pipe's child is still
+   waited for, and `$?' is left as it was (probed 5.40.3: an implicit pipe
+   close does not publish the child's status).  `$!' is saved and restored as
+   well -- an implicit close is invisible to the program.  A handle that is
+   already closed, or was never opened, costs nothing.  It runs as an
+   `unwind-protect' cleanup, so it must never signal: the close path itself
+   catches a failing final flush (task #590)."
+  (let ((errno *p-stored-errno*))
+    (%p-close-previous-stream fh)
+    (setf *p-stored-errno* errno))
+  (values))
+
+(defmacro p-scope-close ((&rest handles) &body body)
+  "(p-scope-close (H ...) BODY...) runs BODY and, however it is left, closes
+   each non-escaping lexical handle H with %p-scope-close (task #2006 (b);
+   docs/ir-spec.md §7.5b).  The compiler puts it directly inside the `p-let'
+   that binds H.  `unwind-protect' returns BODY's values, so the block's value
+   -- a sub's implicit return included -- and a `return' expression are
+   computed BEFORE the close, which is perl's order."
+  `(unwind-protect (progn ,@body)
+     ,@(mapcar (lambda (h) `(%p-scope-close ,h)) handles)))
 
 (defun %p-dup-src-name (have-val val name-str)
   "The handle NAME a dup-open's source designator spells, when it spells one:
