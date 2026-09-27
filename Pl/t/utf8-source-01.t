@@ -101,7 +101,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 41;
+plan tests => 46;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -619,4 +619,24 @@ PROG
        "do: v=42 len=1\nreq: v=42 len=1\n",
        'a `use utf8` file reaches the pragma through do FILE too (#1084)');
     unlink $u1, $u2;
+}
+
+# #2192 (s494u): `use utf8` is found as a STATEMENT, never as a mention.  A
+# comment, a POD synopsis, a string and text after __END__ that merely say
+# "use utf8" used to decode the whole file, so the literal's UTF-8 bytes C3 A9
+# became ONE char (printed as the single byte E9).  Written with \x escapes so
+# the rows do not depend on how THIS file is decoded.
+{
+    my $lit = "print \"lit \xC3\xA9\\n\";\n";
+    for my $case (["# this file does not use utf8;\n", 'a comment', 0],
+                  ["my \$s = \"x\"; # use utf8;\n", 'a trailing comment', 0],
+                  ["\n=head1 SYNOPSIS\n\n  use utf8;\n\n=cut\n\n", 'a POD block', 0],
+                  ["__END__\nuse utf8;\n", 'text after __END__', 1]) {
+        my ($text, $what, $after) = @$case;
+        my $src = $after ? $lit . $text : $text . $lit;
+        like(transpile_bytes($src), qr/"lit \x{C3}\x{A9}/,
+             "a mention of `use utf8` in $what does not decode the source (#2192)");
+    }
+    like(transpile_bytes("# a comment first\nuse strict; use utf8;\n" . $lit), qr/"lit \x{E9}/,
+         'a real `use utf8;` statement still decodes, after a comment and a `;` (#2192)');
 }

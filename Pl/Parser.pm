@@ -239,11 +239,36 @@ sub _maybe_decode_utf8 {
   # question — is every character a byte value? — and yields the octet string
   # when it is; a genuinely decoded source (any character above 255) fails it
   # and is left alone, as before.
-  return $src unless defined $src && $src =~ /\buse\s+utf8\b/;
+  return $src unless defined $src && _source_says_use_utf8($src);
   my $copy = $src;
   return $src unless utf8::downgrade($copy, 1);
   utf8::decode($copy) and return $copy;     # leaves $src on invalid bytes
   return $src;
+}
+
+# Does the SOURCE contain a `use utf8` STATEMENT (task #2192)?  The decode
+# must happen before PPI parses, so this stays a textual scan — but of CODE
+# only: POD blocks and everything after `__END__` / `__DATA__` are skipped,
+# a full-line `#` comment is skipped, a trailing ` # …` comment is cut, and
+# the pragma must stand where a statement starts (line start, or after `;`
+# or `{`).  A comment, a POD SYNOPSIS or a string that merely MENTIONS it
+# used to decode the whole file, turning a literal's UTF-8 bytes into single
+# chars printed as one Latin-1 byte.  Still fooled, knowingly: a heredoc body
+# or multi-line string holding such a line, and a ` #` inside a string
+# before a real pragma on the same line.
+sub _source_says_use_utf8 {
+  my ($src) = @_;
+  return 0 if $src !~ /\buse\s+utf8\b/;
+  my $pod = 0;
+  for my $line (split /\n/, $src) {
+    if ($pod) { $pod = 0 if $line =~ /^=cut\b/; next }
+    if ($line =~ /^=[a-zA-Z]/) { $pod = 1; next }
+    last if $line =~ /^__(?:END|DATA)__\b/;
+    next if $line =~ /^\s*#/;
+    (my $code = $line) =~ s/\s#.*//;
+    return 1 if $code =~ /(?:^|[;{])\s*use\s+utf8\b/;
+  }
+  return 0;
 }
 
 sub _preprocess_source {
