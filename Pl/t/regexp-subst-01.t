@@ -585,4 +585,26 @@ my $x = "aXbXXc"; (my $y = $x) =~ s/\N{2}/-/g;
 print "$y ", join("|", split /\N{2}/, "abcdefg"), "\n";
 PL
 
+# Task #2443: under /x a blank or a `#` comment is no atom, so a quantifier
+# after it applies to the atom before it -- `/a ++b/x` and `/a+ +b/x` are both
+# `a++`.  The possessive rewrite read the blank as the atom (`a(?> +)`) and the
+# match died.  The /x state follows inline scopes: `(?x)` `(?x:…)` turn it on,
+# `(?-x:…)` off (there the blank IS the atom); a class or an escaped blank is
+# an atom under /x; without /x nothing changes (the breaking cases).
+subst_agrees(<<'PL', 'under /x a blank or comment before a possessive + is not an atom; inline x scopes; no-x unchanged (#2443)');
+no warnings;
+sub t { my ($s, $p, $f) = @_;
+  my $r = eval { my $re = $f eq 'x' ? qr/$p/x : $f eq 'xx' ? qr/$p/xx : qr/$p/; $s =~ $re ? "1($&)" : 0 };
+  defined $r ? $r : "died" }
+print join(",", t("aab", '^a ++b', 'x'), t("aab", '^a+ +b', 'x'), t("aab", '^a + +b', 'x'),
+    t("aab", "^a+ # c\n +b", 'x'), t("aab", "^a+ # (c[\n +b", 'x'), t("aab", '(?x)^a ++b', ''),
+    t("aab", '^a ++b', 'xx'), t("aaa", '^a ++a', 'x'), t("aab", '^(?x: a ++ )b', ''),
+    t("aab", '^(?x:a) ++b', 'x')), "\n";
+print join(",", t("a  b", '^(?-x:a ++)b', 'x'), t("aab", '^(?-x:a ++)b', 'x'),
+    t("a  b", '^a[ ]++b', 'x'), t("a  b", '^a\ ++b', 'x'), t("a  b", '^a ++b', ''),
+    t("aab", '^a ++b', ''), t("aa b", '^a+ +b', ''), t("a  b", '(?x) ^ (?-x)a ++b', '')), "\n";
+print(("aab" =~ /^a ++b/x) ? "1" : "0", ("aab" =~ /^a+ +b/x) ? "1" : "0", "\n");
+my $s = "aaab"; $s =~ s/a + +/X/x; print "$s ", join("|", split / a ++ /x, "baaacab"), "\n";
+PL
+
 done_testing();

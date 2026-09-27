@@ -30729,13 +30729,38 @@ buffer's fill-pointer; everything else falls back to file-length."
         thereis (and (char= (char pat i) #\\)
                      (find (char pat (1+ i)) "hHvVRXNpP") t)))
 
-(defun %pcl-has-possessive (pat)
+(defun %pcl-rx-x-blank-p (c)
+  "Is C whitespace that /x makes insignificant in a pattern?  The one set
+   %pcl-normalize-extended and the rewrite scan both use."
+  (member c '(#\Space #\Tab #\Newline #\Return #\Page)))
+
+(defun %pcl-rx-insignificant-end (pat i x)
+  "Under /x (X true), the index after the run of blanks and `#…' comments
+   that starts at PAT[I] — a comment runs through its newline; else I."
+  (let ((n (length pat)))
+    (loop while (and x (< i n))
+          do (let ((c (char pat i)))
+               (cond ((%pcl-rx-x-blank-p c) (incf i))
+                     ((char= c #\#)
+                      (setf i (let ((nl (position #\Newline pat :start i)))
+                                (if nl (1+ nl) n))))
+                     (t (return)))))
+    i))
+
+(defun %pcl-has-possessive (pat &optional x)
   "Does PAT contain a `+' right after `*' `+' `?' or `}'?  The cheap pre-test
    for a POSSESSIVE quantifier (task #2380).  It also answers yes for `\\++'
-   and `a+++', which the scan then copies unchanged."
-  (loop for i from 1 below (length pat)
-        thereis (and (char= (char pat i) #\+)
-                     (find (char pat (1- i)) "+*?}") t)))
+   and `a+++', which the scan then copies unchanged.  Under /x (X true) blanks
+   may stand between the two (`a+ +' is possessive, task #2443), and a pattern
+   with a `#' comment and a `+' is always scanned."
+  (or (loop for i from 1 below (length pat)
+            thereis (and (char= (char pat i) #\+)
+                         (let ((j (if x
+                                      (position-if-not #'%pcl-rx-x-blank-p pat
+                                                       :end i :from-end t)
+                                      (1- i))))
+                           (and j (find (char pat j) "+*?}") t))))
+      (and x (find #\# pat) (find #\+ pat) t)))
 
 ;;; The state of ONE forward scan over a pattern (%pcl-rewrite-scan): the
 ;;; input and the position in it, the output built so far (a fill-pointer
@@ -30743,14 +30768,16 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; is already written), whether the position is inside a bracket class, the
 ;;; output index where the most recent complete ATOM starts (NIL when there
 ;;; is none: after `(' `|' `^' `$' or a quantifier), and the output index of
-;;; every group still open.
+;;; every group still open; whether /x is in force at the position, and the
+;;; /x state each open group restores at its `)' (task #2443).
 (defstruct (pcl-rx-scan (:conc-name rxs-)
                         (:constructor %make-pcl-rx-scan
-                                      (pat &aux (n (length pat))
+                                      (pat &optional x
+                                           &aux (n (length pat))
                                            (out (make-array n :element-type 'character
                                                             :fill-pointer 0
                                                             :adjustable t)))))
-  pat n out (i 0) (in-class nil) (atom nil) (groups nil))
+  pat n out (i 0) (in-class nil) (atom nil) (groups nil) (x nil) (xstack nil))
 
 (defun %rxs-emit (s x)
   "Append the character or string X to the scan's output."
@@ -30890,15 +30917,18 @@ buffer's fill-pointer; everything else falls back to file-length."
    possessive, so the atom is wrapped (task #2380).  Not when there is no
    atom (`^+', `(?+1)', `a+?+') or when another quantifier follows (`a++*'):
    the text is copied, and cl-ppcre refuses it as perl does (\"Nested
-   quantifiers\")."
-  (let ((pat (rxs-pat s)) (atom (rxs-atom s)))
+   quantifiers\").  Under /x blanks and comments may stand before the `+'
+   (`a+ +' is `a++', task #2443); they are copied inside the group."
+  (let* ((pat (rxs-pat s)) (atom (rxs-atom s)) (x (rxs-x s))
+         (p (%pcl-rx-insignificant-end pat qend x)))
     (%rxs-emit s text)
     (setf (rxs-i s) qend (rxs-atom s) nil)
-    (when (and atom (%pcl-rx-at pat qend #\+)
-               (not (%pcl-rx-quantifier-end pat (1+ qend))))
+    (when (and atom (%pcl-rx-at pat p #\+)
+               (not (%pcl-rx-quantifier-end pat (%pcl-rx-insignificant-end pat (1+ p) x))))
+      (%rxs-copy s p)
       (%rxs-insert s atom "(?>")
       (%rxs-emit s #\))
-      (setf (rxs-i s) (1+ qend)))))
+      (setf (rxs-i s) (1+ p)))))
 
 (defun %pcl-rx-scan-open-class (s)
   "A `[' outside a class: copied, then a leading `^' and a leading `]', which
@@ -30911,15 +30941,27 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %pcl-rx-scan-open-group (s)
   "A `(' outside a class.  A `(?#…)' comment is copied whole and changes no
-   state (a `[' or `(' inside it opens nothing); any other group pushes its
-   output index, and at its `)' the whole group becomes the atom."
+   state (a `[' or `(' inside it opens nothing).  A flag-only group `(?x)'
+   `(?-x)' is copied whole and sets the /x state of the enclosing scope;
+   any other group pushes its output index and the /x state its `)'
+   restores — a `(?x:…)' `(?^…:' header is copied whole and sets the group's
+   own — and at its `)' the whole group becomes the atom (task #2443)."
   (let* ((pat (rxs-pat s)) (i (rxs-i s))
          (close (and (%pcl-rx-at pat (1+ i) #\?) (%pcl-rx-at pat (+ i 2) #\#)
                      (position #\) pat :start (+ i 3)))))
-    (cond (close (%rxs-copy s (1+ close)))
-          (t (push (fill-pointer (rxs-out s)) (rxs-groups s))
-             (setf (rxs-atom s) nil)
-             (%rxs-copy s (1+ i))))))
+    (multiple-value-bind (flag-p end emit term newx)
+        (and (not close) (%pcl-parse-x-flag-group pat i (rxs-x s)))
+      (declare (ignore emit))
+      (cond (close (%rxs-copy s (1+ close)))
+            ((and flag-p (char= term #\)))
+             (setf (rxs-x s) newx (rxs-atom s) nil)
+             (%rxs-copy s end))
+            (t (push (fill-pointer (rxs-out s)) (rxs-groups s))
+               (push (rxs-x s) (rxs-xstack s))
+               (setf (rxs-atom s) nil)
+               (if flag-p
+                   (progn (setf (rxs-x s) newx) (%rxs-copy s end))
+                   (%rxs-copy s (1+ i))))))))
 
 (defun %pcl-rx-scan-step (s)
   "Advance the scan by one unit: an escape, a POSIX `[:name:]' or a
@@ -30946,14 +30988,20 @@ buffer's fill-pointer; everything else falls back to file-length."
              (%rxs-copy s (1+ i)))
             ((char= c #\[) (%pcl-rx-scan-open-class s))
             ((char= c #\() (%pcl-rx-scan-open-group s))
+            ;; Under /x a blank or a `#…' comment is no atom: copied, and the
+            ;; atom before it stays the one a quantifier after it applies to.
+            ((and (rxs-x s) (or (%pcl-rx-x-blank-p c) (char= c #\#)))
+             (%rxs-copy s (%pcl-rx-insignificant-end pat i t)))
             (qend (%pcl-rx-scan-quantifier s qend qtext))
             (t (setf (rxs-atom s)
-                     (cond ((char= c #\)) (pop (rxs-groups s)))
+                     (cond ((char= c #\))
+                            (when (rxs-xstack s) (setf (rxs-x s) (pop (rxs-xstack s))))
+                            (pop (rxs-groups s)))
                            ((find c "|^$") nil)
                            (t (fill-pointer (rxs-out s)))))
                (%rxs-copy s (1+ i)))))))
 
-(defun %pcl-rewrite-scan (pat)
+(defun %pcl-rewrite-scan (pat &optional x)
   "The ONE forward rewrite scan over a pattern (it tracks whether each
    position is inside a bracket class, and where the last ATOM starts):
    \\h \\H \\v \\V \\R \\X \\N and the property escapes become forms cl-ppcre
@@ -30962,11 +31010,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    quantifier is written blank-free with `{,n}' as `{0,n}' (task #2444).
    Everything else is copied verbatim, so a `\\h' or `a++' that the \\Q pass
    already quoted stays literal.  Only a pattern that passes one of the three
-   cheap pre-tests is scanned at all."
-  (if (not (or (%pcl-has-hv-escape pat) (%pcl-has-possessive pat)
+   cheap pre-tests is scanned at all.  X true = the pattern is /x: blanks and
+   `#…' comments are no atoms, and inline (?x) scopes are tracked (task #2443)."
+  (if (not (or (%pcl-has-hv-escape pat) (%pcl-has-possessive pat (or x (%pcl-has-x-modifier pat)))
                (%pcl-has-loose-counted pat)))
       pat
-      (let ((s (%make-pcl-rx-scan pat)))
+      (let ((s (%make-pcl-rx-scan pat x)))
         (loop while (< (rxs-i s) (rxs-n s)) do (%pcl-rx-scan-step s))
         (coerce (rxs-out s) 'simple-string))))
 
@@ -31001,14 +31050,16 @@ buffer's fill-pointer; everything else falls back to file-length."
          (t (concatenate 'string "(?" kept kept-neg close)))))
    :simple-calls t))
 
-(defun perl-regex-to-ppcre (pattern)
+(defun perl-regex-to-ppcre (pattern &optional extended)
   "Convert Perl regex escape sequences to cl-ppcre compatible form.
    cl-ppcre does not handle \\x{HHHH} (Perl hex escapes with braces).
    Convert \\x{HHHH} to the literal Unicode character.
    Also strips (?{...}) and (??{...}) code blocks (not supported by cl-ppcre
    and cause infinite loops).
    Also converts \\Q...\\E metachar-quoting blocks (not supported by cl-ppcre)
-   by applying ppcre:quote-meta-chars to the content."
+   by applying ppcre:quote-meta-chars to the content.
+   EXTENDED true = the pattern is compiled under /x (or /xx): the rewrite
+   scan must know it (task #2443)."
   ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these.
   ;; The stripper ANNOUNCES; see %pcl-strip-regex-code-blocks.
   (let* ((pat (%pcl-strip-regex-code-blocks pattern))
@@ -31032,24 +31083,6 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (declare (ignore match))
                  (concatenate 'string "\\k<" (substitute #\- #\_ name) ">"))
                :simple-calls t))
-         ;; Perl's (?^flags:...) is the stringified form of qr//.
-         ;; The '^' means "reset all flags to defaults".  CL-PPCRE uses (?flags:...)
-         ;; without '^'.  Simply remove the '^'; at the top level (no enclosing flags)
-         ;; the semantics are identical.
-         (pat (cl-ppcre:regex-replace-all "\\(\\?\\^" pat "(?"
-                                          :simple-calls t))
-         ;; The CHARSET letters in an inline modifier group — perl's `(?a:…)`
-         ;; `(?aa:…)` `(?u:…)` `(?l:…)` `(?d:…)` and the flag-only `(?a)` —
-         ;; are not cl-ppcre flags, and cl-ppcre does not merely ignore them:
-         ;; it rejects the whole pattern ("Character 'a' may not follow '(?'"),
-         ;; so `"0" =~ /(?a:\d)/` was 0 where perl says 1, plus a warning on
-         ;; stderr.  The MODIFIERS themselves stay ignored — that is the blessed
-         ;; entry docs/not-supported.md "Regex encoding modifiers (/a, /d, /l,
-         ;; /u)", and cl-ppcre always matches with /u semantics — but "ignored"
-         ;; has to mean the pattern still compiles, which is what that entry
-         ;; already claims and what the trailing spelling `/a` already does.
-         ;; See %pcl-strip-charset-flags for the two shapes.
-         (pat (%pcl-strip-charset-flags pat))
          ;; Convert \Q...\E: quote all regex metacharacters in the enclosed text.
          ;; \E is optional — \Q extends to end of pattern if \E is absent.
          (pat (cl-ppcre:regex-replace-all
@@ -31076,7 +31109,28 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; left to confuse the in-class scan).  The same scan turns a POSSESSIVE
          ;; quantifier into the atomic group perl defines it as (task #2380).
          ;; See %pcl-rewrite-scan.
-         (pat (%pcl-rewrite-scan pat)))
+         (pat (%pcl-rewrite-scan pat extended))
+         ;; The two flag-group passes run AFTER the scan (task #2443): the scan
+         ;; reads each group's (?^…) / (?x…) header to track /x scopes, and a
+         ;; group quoted by \Q is no header for either of them.
+         ;; Perl's (?^flags:...) is the stringified form of qr//.
+         ;; The '^' means "reset all flags to defaults".  CL-PPCRE uses (?flags:...)
+         ;; without '^'.  Simply remove the '^'; at the top level (no enclosing flags)
+         ;; the semantics are identical.
+         (pat (cl-ppcre:regex-replace-all "\\(\\?\\^" pat "(?"
+                                          :simple-calls t))
+         ;; The CHARSET letters in an inline modifier group — perl's `(?a:…)`
+         ;; `(?aa:…)` `(?u:…)` `(?l:…)` `(?d:…)` and the flag-only `(?a)` —
+         ;; are not cl-ppcre flags, and cl-ppcre does not merely ignore them:
+         ;; it rejects the whole pattern ("Character 'a' may not follow '(?'"),
+         ;; so `"0" =~ /(?a:\d)/` was 0 where perl says 1, plus a warning on
+         ;; stderr.  The MODIFIERS themselves stay ignored — that is the blessed
+         ;; entry docs/not-supported.md "Regex encoding modifiers (/a, /d, /l,
+         ;; /u)", and cl-ppcre always matches with /u semantics — but "ignored"
+         ;; has to mean the pattern still compiles, which is what that entry
+         ;; already claims and what the trailing spelling `/a` already does.
+         ;; See %pcl-strip-charset-flags for the two shapes.
+         (pat (%pcl-strip-charset-flags pat)))
     (cl-ppcre:regex-replace-all
      "\\\\x\\{([0-9a-fA-F]+)\\}"
      pat
@@ -31159,7 +31213,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; after, so it pays nothing; a failed compile caches nothing.
           (or (gethash (list mods raw) *p-regex-op-cache*)
               (let ((op (make-p-regex-match
-                         :pattern (perl-regex-to-ppcre raw)
+                         :pattern (perl-regex-to-ppcre raw (find #\x mods))
                          :source raw
                          :modifiers (parse-regex-modifiers mods))))
                 (%p-regex-compile-eagerly op)
@@ -31285,7 +31339,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (or (gethash (list flags raw) *p-regex-op-cache*)
       (setf (gethash (list (%pcl-memo-key flags) (%pcl-memo-key raw))
                      *p-regex-op-cache*)
-            (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
+            (make-p-regex-match :pattern (perl-regex-to-ppcre raw (find #\x flags))
                                 :source raw
                                 :modifiers (parse-regex-modifiers flags)))))
 
@@ -31328,7 +31382,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    scanner-cache lookup (a real compile once per distinct pattern text).  A
    user-defined \\p{IsFoo} is resolved in the package current AT THE qr."
   (%p-regex-compile-eagerly
-   (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
+   (make-p-regex-match :pattern (perl-regex-to-ppcre raw (find #\x flags))
                        :source raw
                        :modifiers (parse-regex-modifiers flags))))
 
@@ -31522,7 +31576,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (cond
                    ;; /xx: unescaped whitespace inside [...] is insignificant.
                    ((and (curxx)
-                         (member c '(#\Space #\Tab #\Newline #\Return #\Page)))
+                         (%pcl-rx-x-blank-p c))
                     (incf i))
                    (t
                     (write-char c out)
@@ -31561,7 +31615,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (when (cdr xxstack) (pop xxstack)))
                 ((curx)
                  (cond
-                   ((member c '(#\Space #\Tab #\Newline #\Return #\Page)) (incf i))
+                   ((%pcl-rx-x-blank-p c) (incf i))
                    ((char= c #\#)
                     (loop while (and (< i n) (not (char= (char pat i) #\Newline))) do (incf i)))
                    (t (write-char c out) (incf i))))
@@ -32662,7 +32716,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    proved the pattern and flags constant, and a fresh cons otherwise."
   (let ((holder (p-subst-op-%compiled op)))
     (or (car holder)
-        (let* ((pattern (perl-regex-to-ppcre (p-subst-op-pattern op)))
+        (let* ((pattern (perl-regex-to-ppcre (p-subst-op-pattern op)
+                                                 (member :x (p-subst-op-modifiers op))))
                (raw-replacement (p-subst-op-replacement op))
                (modifiers (p-subst-op-modifiers op))
                (eval-p (and (or (member :e modifiers) (functionp raw-replacement)) t))
