@@ -996,6 +996,42 @@
       (%p-check-facts "p-let" name facts *p-let-fact-keys*)
       (list name init)))
 
+  ;; `my %h = %src' PRESIZES %h (task #2424, s499f).  The declaration binds a
+  ;; FRESH table and the next form fills it from %src, so a table created at the
+  ;; default size regrows from empty on every copy -- grow-hash-table + rehash
+  ;; were 20 % of a program that copies a hash per iteration.  When the body's
+  ;; FIRST form is that fill, from a plain variable other than the ones this
+  ;; p-let binds, the init asks %src's count instead.  A size is only a hint:
+  ;; the fill itself is unchanged, and every other shape keeps the fresh table.
+  (defun %p-hash-copy-source (form names)
+    "The source VARIABLE when FORM is (p-hash-= VAR SRC) -- bare or in one
+     context wrapper -- for a VAR in NAMES and a SRC symbol that is not; else NIL."
+    (when (and (consp form)
+               (member (car form) '(p-scalar-ctx p-void-ctx p-list-ctx))
+               (consp (cdr form)) (null (cddr form)))
+      (setf form (second form)))
+    (and (consp form) (eq (car form) 'p-hash-=)
+         (consp (cdr form)) (consp (cddr form)) (null (cdddr form))
+         (symbolp (third form)) (third form)
+         (not (member (third form) names))
+         (third form)))
+
+  (defun %p-let-presize (bindings body)
+    "BINDINGS with the fresh-hash INIT of the one the body's first form fills
+     from a variable replaced by a table presized to that variable's count."
+    (let* ((names (mapcar #'first bindings))
+           (src (and body (%p-hash-copy-source (first body) names)))
+           (target (and src (let ((f (first body)))
+                              (second (if (eq (car f) 'p-hash-=) f (second f)))))))
+      (if (null src)
+          bindings
+          (mapcar (lambda (b)
+                    (if (and (eq (first b) target) (eq (second b) :hash)
+                             (equal (third b) '(make-hash-table :test 'equal)))
+                        (list* (first b) :hash `(%p-make-hash-like ,src) (cdddr b))
+                        b))
+                  bindings))))
+
   (defun %p-param-name (p)
     "One p-raw-params entry (NAME CLASS . FACTS) -> NAME.  The class is the
      compiler's verdict about the parameter's slot and FACTS its rename
@@ -4508,7 +4544,7 @@
    No type declaration is derived from the class: the runtime runs
    at (speed 3), where a wrong declaration is undefined behaviour.  Before s466
    this name was the dead v1 \"every binding is a box\" macro."
-  `(let ,(mapcar #'%p-let-binding bindings) ,@body))
+  `(let ,(mapcar #'%p-let-binding (%p-let-presize bindings body)) ,@body))
 
 (defun p-$ (box)
   "Perl scalar dereference $$ref - get value from the referenced box.
@@ -8246,12 +8282,42 @@ per element."
            (p-array-fill ,place ,val)))))
 
 
+;;; A WHOLE-HASH COPY `%a = %b' (task #2424, s499f).  The general path below
+;;; flattens the source into a temporary vector -- a fresh BOX per key -- and
+;;; re-reads every key out of it with to-string: 97 % of a program that copies a
+;;; hash per iteration, most of it that boxing and the target's regrowth.  A
+;;; source that is itself a table needs neither: its keys are already the
+;;; strings the target stores, and each value takes the construction arm of the
+;;; write rule (%p-make-hash-entry) exactly as the general path gives it.  The
+;;; self-copy `%h = %h' keeps the general path: its snapshot is what makes
+;;; clearing the target before reading the source safe.
+(defun %p-hash-fill-from-hash (place src)
+  "Clear PLACE and copy every user key of the table SRC into it.  Returns the
+   element count (2 per pair).  PLACE and SRC are distinct hash tables."
+  (let ((cnt 0))
+    (clrhash place)
+    (maphash (lambda (k v)
+               (when (%p-real-hash-key-p k)
+                 (incf cnt 2)
+                 (setf (gethash (to-string k) place) (%p-make-hash-entry v))))
+             src)
+    cnt))
+
+(defun %p-make-hash-like (src)
+  "A fresh perl hash table, presized to SRC's count when SRC is a table (the
+   `my %h = %src' declaration, %p-let-presize)."
+  (if (and (hash-table-p src) (> (hash-table-count src) 16))
+      (make-hash-table :test 'equal :size (hash-table-count src))
+      (make-hash-table :test 'equal)))
+
 (defun p-hash-fill (place value)
   "Clear hash PLACE and repopulate it from VALUE (flattened to k-v pairs; an odd
    trailing key gets an undef value).  Returns the number of input elements (the
    scalar-context value of a hash assignment).  Shared by the p-hash-= macro and
    the closure-capture lexical hash-init path (which can't use p-hash='s
    boundp/proclaim-special guard)."
+  (when (and (hash-table-p value) (hash-table-p place) (not (eq place value)))
+    (return-from p-hash-fill (%p-hash-fill-from-hash place value)))
   (let* ((flat (cond
                  ((hash-table-p value)
                   (let ((r (make-array (* 2 (hash-table-count value))
