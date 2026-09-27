@@ -140,6 +140,7 @@ The handful most likely to matter to a program that is otherwise portable:
 ### Objects and OO
 
 * [`DESTROY` called by garbage collector](#destroy-called-by-garbage-collector)
+* [A filehandle that ESCAPES its block is closed at exit, not at its last reference](#a-filehandle-that-escapes-its-block-is-closed-at-exit-not-at-its-last-reference) — owner #2006 PART 2
 * [Perl 5.38 `class` / `field` / `method` syntax — DEFERRED](#perl-538-class--field--method-syntax--deferred--future-version)
 * [Indirect object syntax with a SCALAR invocant — MAYBE LATER](#indirect-object-syntax-with-a-scalar-invocant-method-obj-list--maybe-later--user-decision-s425)
 * [`tie` on an ARRAY, HASH or filehandle — INTERIM](#tie-on-an-array-hash-or-filehandle--interim--announced-not-silent-scalar-tie-works)
@@ -1977,6 +1978,30 @@ perl when the last reference is overwritten at line 304), and line 440's
 same way (Shemp / Larry / Curly / Moe, printed by four `*::DESTROY` subs at
 scope exit).  Probed: with `sub DESTROY` and a last-reference overwrite, perl
 prints the destructor's line and PCL prints nothing.
+
+---
+
+## A filehandle that ESCAPES its block is closed at exit, not at its last reference
+
+**Perl behaviour:** a lexical handle is freed — closed and flushed — when its
+last reference goes: for `open(my $fh, …)` in a block that is the block's
+exit; for a handle passed to a helper, stored, returned or captured by a
+closure it is whenever the LAST holder lets go.
+
+**PCL behaviour (task #2006 (b), s494h):** a handle that does NOT escape its
+block is closed at the block's exit exactly as perl does (normal exit,
+`return`, `next`/`last`, a die unwinding through it; a condition-`my` handle
+at the ENCLOSING block's exit; `undef $fh` / `$fh = undef` right there) —
+`docs/ir-spec.md` §6.5.  A filehandle that ESCAPES the block that opened it —
+passed to a sub, stored, returned, captured, `select`ed, a method called on
+it, or declared in a region with a string eval — is closed when the program
+exits, not at its last reference.  Close it explicitly when another step of
+the same program reads the file.  A file-level `open(my $fh, …)` is closed
+at exit, which is also perl's answer for a file-scope lexical.  No data is
+lost either way: every open handle is flushed at exit.
+
+**Owner:** #2006 PART 2 (a finalizer on the handle object holding the stream,
+plus an EMFILE retry) — designed, not built.
 
 ---
 

@@ -13362,7 +13362,7 @@ sub _cond_my_names {
   return @names;
 }
 
-# THE SCOPE-EXIT CLOSE of a lexical handle (task #2006 (b); ir-spec §7.5b;
+# THE SCOPE-EXIT CLOSE of a lexical handle (task #2006 (b); ir-spec §6.5;
 # Kind-A `fh-scope-close', which `PCL_OPT=none' keeps: it changes WHEN bytes
 # reach a file and how many descriptors are open, so it is not an
 # optimisation).  @BODY is everything the `p-let' binding @$names covers — the

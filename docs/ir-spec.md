@@ -2644,6 +2644,42 @@ Perl's own restrictions (may not jump *into* a construct, nor into a
 different sub) are assumed, not checked — PCL compiles valid Perl (§design
 rule 9).
 
+### 6.5 A non-escaping lexical handle is closed when its block exits (normative, s494h, task #2006 (b))
+
+`(p-scope-close (H …) BODY…)` evaluates BODY and, however control leaves it —
+falling off the end, `return`, `next`/`last`/`redo`, a `die` unwinding
+through it — calls `(%p-scope-close H)` for each H.  It is `unwind-protect`,
+so its value is BODY's (a sub's implicit return included) and a `return`
+expression is computed BEFORE the close, which is perl's order.
+`%p-scope-close` closes H only when H is a box holding an OPEN stream or
+socket, through the implicit close of §7.5a (a pipe's child is still waited
+for); it leaves `$?` AND `$!` as they were — an implicit close is invisible
+(perl, probed: an implicit pipe close does not publish the child's status).
+A never-opened or already-closed handle costs nothing.
+
+The compiler emits it (Kind-A `fh-scope-close`, which `PCL_OPT=none` KEEPS —
+it is semantics, not an optimisation) only for a `my $fh` whose every
+declaration in the region is `open(my $fh, …)` and whose every use is the
+handle slot of a core I/O builtin, a truth / `defined` test, or the whole
+statement `undef $fh;` / `$fh = undef;` (which drops the only reference, so
+the close is emitted AHEAD of that statement).  Anything else — returned,
+assigned, referenced, passed to any other callee (a method call on it
+included), `select`ed, interpolated, named in a nested sub, a string eval or
+`goto &sub` in the region — is an ESCAPE and keeps the handle open until exit
+(`docs/not-supported.md`).  A file-level handle is never wrapped.  The wrap
+sits directly inside the `p-let` that binds H; a handle declared in an
+`if`/`unless`/`while`/`until` CONDITION is closed at the exit of the
+ENCLOSING block (perl's answer, probed), through a hidden cell the enclosing
+block binds and the construct's own `let` stores into:
+
+```lisp
+;; { open(my $o, ">", $f) or die; print $o "x"; }
+(p-let (($o :box (make-p-box nil)))
+  (p-scope-close ($o)
+    (p-or (p-open $o ">" $f) (p-die))
+    (p-print :fh $o "x")))
+```
+
 ## 7. Packages, variables, and OO
 
 ### 7.1 Namespaces and case

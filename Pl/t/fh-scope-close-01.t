@@ -6,7 +6,7 @@
 
 # fh-scope-close-01.t — task #2006 (b): a lexical filehandle that does not
 # ESCAPE its block is closed (and flushed) when the block exits, as perl
-# closes it (Kind-A `fh-scope-close', docs/ir-spec.md §7.5b).
+# closes it (Kind-A `fh-scope-close', docs/ir-spec.md §6.5).
 #
 #   1. SEMANTIC rows: one program, run by perl and by PCL, compared line by
 #      line — the acceptance table of the design (normal exit, `return' with

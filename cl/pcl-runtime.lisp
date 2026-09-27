@@ -17484,7 +17484,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defun %p-scope-close (fh)
   "The SCOPE-EXIT close of a lexical handle the compiler proved does not
-   escape its block (task #2006 (b); docs/ir-spec.md §7.5b).  perl frees such a
+   escape its block (task #2006 (b); docs/ir-spec.md §6.5).  perl frees such a
    handle when its block exits -- normally, by `return', `next'/`last', or a
    die unwinding through it -- and freeing it closes (and flushes) the stream.
    The close is the implicit one of %p-close-previous-stream (half (a)): only a
@@ -17507,7 +17507,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 (defmacro p-scope-close ((&rest handles) &body body)
   "(p-scope-close (H ...) BODY...) runs BODY and, however it is left, closes
    each non-escaping lexical handle H with %p-scope-close (task #2006 (b);
-   docs/ir-spec.md §7.5b).  The compiler puts it directly inside the `p-let'
+   docs/ir-spec.md §6.5).  The compiler puts it directly inside the `p-let'
    that binds H.  `unwind-protect' returns BODY's values, so the block's value
    -- a sub's implicit return included -- and a `return' expression are
    computed BEFORE the close, which is perl's order."

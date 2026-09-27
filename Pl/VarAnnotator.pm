@@ -291,7 +291,7 @@ my %MUTATING_FN   = map { $_ => 1 } qw(chomp chop undef read sysread recv
 
 my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
                                        socketpair accept);
-# THE HANDLE LICENCE (task #2006 (b), Kind-A `fh-scope-close`; ir-spec §7.5b).
+# THE HANDLE LICENCE (task #2006 (b), Kind-A `fh-scope-close`; ir-spec §6.5).
 # A `my $fh` declared inside `open(my $fh, …)` whose EVERY occurrence in the
 # region is a use of the handle that cannot keep it alive is closed when its
 # block exits, as perl closes it.  The walk classifies each occurrence with the
