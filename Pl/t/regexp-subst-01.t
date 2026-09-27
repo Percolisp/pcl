@@ -607,4 +607,29 @@ print(("aab" =~ /^a ++b/x) ? "1" : "0", ("aab" =~ /^a+ +b/x) ? "1" : "0", "\n");
 my $s = "aaab"; $s =~ s/a + +/X/x; print "$s ", join("|", split / a ++ /x, "baaacab"), "\n";
 PL
 
+# Task #2386 (cheap half): the control verb `(*FAIL)` / `(*F)` IS `(?!)`
+# (perlre), and cl-ppcre has `(?!)`.  It used to reach cl-ppcre as written and
+# the match DIED.  Inside a class it is literal text, escaped it is literal.
+subst_agrees(<<'PL', '(*FAIL) and (*F) match as (?!) in m//, s///, split; literal in a class (#2386)');
+sub t { my ($s, $p) = @_; my $r = eval { $s =~ /$p/ ? "1($&)" : 0 }; defined $r ? $r : "died" }
+print join(",", t("b", 'a(*FAIL)|b'), t("ab", 'a(*FAIL)|b'), t("abc", '(*F)'), t("", '(*FAIL)'),
+    t("y", '(?:x(*FAIL))?y'), t("xy", '^(?:x(*FAIL))?y'), t("*", '[(*FAIL)]'),
+    t("L", '[(*FAIL)]'), t("(*F)", '\(\*F\)'), t("b", 'a (*F) | b')), "\n";
+print(("b" =~ /a(*FAIL)|b/) ? "1" : "0", ("ab" =~ /^a(*F)|b$/) ? $& : "0", "\n");
+my $s = "abcabc"; $s =~ s/b(*FAIL)|c/X/g; print "$s ", join("|", split /,(*F)|;/, "a,b;c"), "\n";
+PL
+
+# ...and every OTHER verb still has no translation: it must DIE trappably at the
+# match (#2372), never match silently wrong.  perl answers 1 for each of these;
+# when #2386's engine half lands, this row fails and is rewritten to agree.
+{
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh 'for my $p (\'a(*SKIP)b\', \'a(*ACCEPT)b\', \'(*:B)a\', \'a(*FAIL:x)|b\') {'
+            . ' my $r = eval { "ab" =~ /$p/ ? 1 : 0 }; print defined $r ? "lived " : ($@ ? "died " : "silent ") }'
+            . ' print "\n";';
+    close $fh;
+    chomp(my $got = `$RealBin/../../runpcl $file 2>/dev/null`);
+    is($got, 'died died died died ', 'the untranslated control verbs still die trappably (#2386, #2372)');
+}
+
 done_testing();

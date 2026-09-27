@@ -141,9 +141,11 @@ PL
 
     # a regex control verb: a `print STDERR` from a SUCCESSFUL transpile, and
     # announce-once-per-process, so it is the stderr row AND the state probe.
+    # (*SKIP), not (*FAIL): since s499k (#2386) the bare (*FAIL) is translated
+    # to (?!) and no longer announced -- swap again if (*SKIP) ever is.
     my $verb = $write_pl->('verb.pl', <<'PL');
 my $s = "abc";
-print "yes\n" if $s =~ /a(*FAIL)/;
+print "yes\n" if $s =~ /a(*SKIP)/;
 print "done\n";
 PL
 

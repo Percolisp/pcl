@@ -1102,9 +1102,10 @@ PERL
 }
 
 # ── #874: the CONTROL VERBS are the other half, and get the opposite answer ──
-# `(*FAIL)` must NOT be stripped — removing it INVERTS the match — so it
-# reaches cl-ppcre, which rejects the pattern in its own words, naming a
-# position in a pattern the program never wrote (the code block beside it has
+# A verb must NOT be stripped — removing `(*FAIL)` INVERTS the match — so it
+# is either translated (the bare `(*FAIL)`/`(*F)` IS `(?!)`, s499k #2386, and
+# is therefore no longer announced) or it reaches cl-ppcre, which rejects the
+# pattern in its own words, naming a position in a pattern the program never wrote (the code block beside it has
 # already been stripped).  The compile-time line is what says whose gap that is.
 {
     my $prog = <<'PERL';
@@ -1116,8 +1117,8 @@ PERL
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $prog; close $fh;
     my $terr = `$pl2cl $pl_file 2>&1 >/dev/null`;
-    like($terr, qr/^PCL: regex control verb \(\*FAIL\/SKIP\) is NOT supported at .* line 3 --/m,
-         '#874: a control verb is announced at compile time, both verbs named');
+    like($terr, qr/^PCL: regex control verb \(\*SKIP\) is NOT supported at .* line 3 --/m,
+         '#874: a control verb is announced at compile time; the translated (*FAIL) is not named (#2386)');
     like($terr, qr/^PCL: regex code block/m,
          '#874: …and the stripped block on the same pattern is announced too');
 }

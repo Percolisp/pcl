@@ -30939,6 +30939,20 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (%pcl-rx-at (rxs-pat s) (rxs-i s) lit)
       (%rxs-copy s (1+ (rxs-i s))))))
 
+(defun %pcl-rx-fail-verb-end (pat i)
+  "If the control verb `(*FAIL)' or `(*F)' — the bare forms, no `:NAME' —
+   opens at PAT[I], the index after it; else NIL.  perlre: `(*FAIL)' \"is
+   equivalent to (?!)\" (task #2386); every other verb has no cl-ppcre
+   counterpart and is left to die at the compile."
+  (loop for verb in '("(*FAIL)" "(*F)")
+        for e = (+ i (length verb))
+        when (and (<= e (length pat)) (string= verb pat :start2 i :end2 e))
+        return e))
+
+(defun %pcl-has-fail-verb (pat)
+  "The cheap pre-test for %pcl-rx-fail-verb-end: does `(*F' occur in PAT?"
+  (and (search "(*F" pat) t))
+
 (defun %pcl-rx-scan-open-group (s)
   "A `(' outside a class.  A `(?#…)' comment is copied whole and changes no
    state (a `[' or `(' inside it opens nothing).  A flag-only group `(?x)'
@@ -30948,11 +30962,15 @@ buffer's fill-pointer; everything else falls back to file-length."
    own — and at its `)' the whole group becomes the atom (task #2443)."
   (let* ((pat (rxs-pat s)) (i (rxs-i s))
          (close (and (%pcl-rx-at pat (1+ i) #\?) (%pcl-rx-at pat (+ i 2) #\#)
-                     (position #\) pat :start (+ i 3)))))
+                     (position #\) pat :start (+ i 3))))
+         (fail-end (%pcl-rx-fail-verb-end pat i)))
     (multiple-value-bind (flag-p end emit term newx)
-        (and (not close) (%pcl-parse-x-flag-group pat i (rxs-x s)))
+        (and (not close) (not fail-end) (%pcl-parse-x-flag-group pat i (rxs-x s)))
       (declare (ignore emit))
       (cond (close (%rxs-copy s (1+ close)))
+            ;; `(*FAIL)' `(*F)' IS `(?!)' (perlre), which cl-ppcre has (#2386).
+            (fail-end (setf (rxs-atom s) nil (rxs-i s) fail-end)
+                      (%rxs-emit s "(?!)"))
             ((and flag-p (char= term #\)))
              (setf (rxs-x s) newx (rxs-atom s) nil)
              (%rxs-copy s end))
@@ -31009,11 +31027,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    atomic group perl defines it as (%pcl-rx-scan-quantifier), and a counted
    quantifier is written blank-free with `{,n}' as `{0,n}' (task #2444).
    Everything else is copied verbatim, so a `\\h' or `a++' that the \\Q pass
-   already quoted stays literal.  Only a pattern that passes one of the three
-   cheap pre-tests is scanned at all.  X true = the pattern is /x: blanks and
-   `#…' comments are no atoms, and inline (?x) scopes are tracked (task #2443)."
-  (if (not (or (%pcl-has-hv-escape pat) (%pcl-has-possessive pat (or x (%pcl-has-x-modifier pat)))
-               (%pcl-has-loose-counted pat)))
+   already quoted stays literal.  Only a pattern that passes one of the four
+   cheap pre-tests is scanned at all; `(*FAIL)' `(*F)' become `(?!)' (#2386).
+   X true = the pattern is /x: blanks and `#…' comments are no atoms,
+   and inline (?x) scopes are tracked (task #2443)."
+  (if (not (or (%pcl-has-hv-escape pat)
+               (%pcl-has-possessive pat (or x (%pcl-has-x-modifier pat)))
+               (%pcl-has-loose-counted pat) (%pcl-has-fail-verb pat)))
       pat
       (let ((s (%make-pcl-rx-scan pat x)))
         (loop while (< (rxs-i s) (rxs-n s)) do (%pcl-rx-scan-step s))
@@ -32717,7 +32737,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((holder (p-subst-op-%compiled op)))
     (or (car holder)
         (let* ((pattern (perl-regex-to-ppcre (p-subst-op-pattern op)
-                                                 (member :x (p-subst-op-modifiers op))))
+                                             (member :x (p-subst-op-modifiers op))))
                (raw-replacement (p-subst-op-replacement op))
                (modifiers (p-subst-op-modifiers op))
                (eval-p (and (or (member :e modifiers) (functionp raw-replacement)) t))

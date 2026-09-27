@@ -11822,10 +11822,14 @@ sub _regex_gap_hits {
              . '(docs/not-supported.md "Regex code blocks")']
     if $content =~ /(?<!\\)\((?:\?\??|\*)\{/;       # (*{...}) too: stripped alike (s496a)
   my %verbs;
-  while ($content =~ /(?<!\\)\(\*([A-Za-z_]+|:)/g) { $verbs{$1 eq ':' ? 'MARK' : $1} = 1 }
+  while ($content =~ /(?<!\\)\(\*([A-Za-z_]+|:)(\))?/g) {
+    # The bare (*FAIL) / (*F) IS (?!) and the runtime translates it (#2386).
+    next if defined $2 && ($1 eq 'FAIL' || $1 eq 'F');
+    $verbs{$1 eq ':' ? 'MARK' : $1} = 1;
+  }
   push @hits, ['control verb (*' . join('/', sort keys %verbs) . ') is NOT supported',
-               'it is left in the pattern on purpose -- removing (*FAIL) would '
-             . 'INVERT the match -- so cl-ppcre rejects the pattern and it DIES at its '
+               'it is left in the pattern on purpose -- removing a verb would '
+             . 'change the match -- so cl-ppcre rejects the pattern and it DIES at its '
              . 'first match (#2372; docs/not-supported.md "Regex control verbs")']
     if %verbs;
   return @hits;
