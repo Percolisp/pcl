@@ -103,13 +103,56 @@ has environment => (
   is        => 'lazy',
 );
 
-# @INC paths for module lookup (transpile-time)
-# Computed at compile time: project_root/lib + Perl's @INC
-my $_pcl_lib_dir = File::Spec->catdir(dirname(dirname(abs_path(__FILE__))), 'lib');
+# @INC paths for module lookup (transpile-time): the program's own @INC in
+# perl's order -- PCLPaths::program_inc, the ONE derivation pl2cl's preamble
+# also uses (task #2462): -I and PERL5LIB, then PCL's shim lib/, then perl's
+# own directories, never the PCL tree root.  A file's own `use lib` dirs are
+# unshifted in front as the walk meets them.
+my $_pcl_root    = dirname(dirname(abs_path(__FILE__)));
+my $_pcl_lib_dir = File::Spec->catdir($_pcl_root, 'lib');
+my $_paths_loaded;
+sub _program_inc {
+  if (!$_paths_loaded) {
+    local @INC = (@INC, "$_pcl_root/tools/lib");
+    require PCLPaths;
+    $_paths_loaded = 1;
+  }
+  return PCLPaths::program_inc($_pcl_root, @INC);
+}
+# The BASE of the list (task #1860's HEAD/BASE split): the directories the
+# child perl's @INC contributed, i.e. the program_inc list minus the shim.  A
+# hit anywhere else -- a `use lib` dir, the shim -- is HEAD.
+my %_base_dirs;
 has inc_paths => (
   is        => 'rw',
-  default   => sub { [$_pcl_lib_dir, @INC] },  # Include project lib/ + Perl's @INC
+  default   => sub {
+    my @inc = _program_inc();
+    $_base_dirs{$_} = 1 for grep { $_ ne $_pcl_lib_dir } @inc;
+    return \@inc;
+  },
 );
+
+# THE SHIMS THAT WIN BY NAME (task #2462 ruling 2, ir-spec §9).  A shim in
+# PCL's lib/ whose header carries the line `# pcl-shim: must-win` replaces a
+# module whose real copy cannot run under PCL (an XS module); it is found
+# BEFORE the ordinary @INC walk, so a PERL5LIB (local::lib) holding perl's
+# real List/Util.pm cannot shadow it.  The DATA is the marker in lib/ (rule
+# 9a); the runtime's p-find-module-in-inc reads the same marker.
+my %_must_win;
+sub must_win_shim {
+  my ($file) = @_;                       # "List/Util.pm"
+  return $_must_win{$file} if exists $_must_win{$file};
+  my $path = "$_pcl_lib_dir/$file";
+  my $hit;
+  if (-f $path && open my $fh, '<', $path) {
+    while (my $line = <$fh>) {
+      last if $. > 60;
+      if ($line =~ /^# pcl-shim: must-win\b/) { $hit = $path; last }
+    }
+    close $fh;
+  }
+  return $_must_win{$file} = $hit;
+}
 
 # Track modules currently being parsed (cycle detection)
 has _parsing_modules => (
@@ -10161,17 +10204,19 @@ sub _process_use_lib {
 # ask it: this list is not the runtime's @INC.  It is
 #
 #   [ the file's own `use lib` dirs (unshifted, so AHEAD of everything),
-#     PCL's shim lib/,                      <-- $_pcl_lib_dir, the HEAD/BASE line
-#     the child perl's @INC (the -I list the runtime handed it, PERL5LIB,
-#     perl's own directories) ]
+#     the child perl's @INC in perl's order, with PCL's shim lib/ placed
+#     ahead of perl's own directories (PCLPaths::program_inc, task #2462) ]
+#
+# -- and before any of it, a must-win shim (must_win_shim above), which is
+# returned with nothing tried.
 #
 # so the manifest is made SELF-DESCRIBING instead: per resolved module it
 # records every directory probed BEFORE the hit (the runtime re-probes exactly
 # those — a file appearing in one of them is a dependency that has MOVED) and
 # whether the hit was in the HEAD or in the BASE (only a BASE hit can be moved
-# by a change to the runtime's own search path).  A hit at or before the shim
-# counts as HEAD; if the shim is not on the list at all nothing is BASE, which
-# errs towards checking less rather than towards a false stale.
+# by a change to the runtime's own search path).  BASE is the child perl's
+# part of the list (%_base_dirs, recorded when the list is built); a hit in a
+# `use lib` dir or in the shim is HEAD.
 sub _find_module_file {
   my ($self, $module) = @_;
 
@@ -10180,11 +10225,16 @@ sub _find_module_file {
   $file =~ s/::/\//g;
   $file .= '.pm';
 
+  if (my $shim = must_win_shim($file)) {
+    # Nothing was probed before it, and it is HEAD: no search path can move it.
+    Pl::ProtoCache::note_resolution($module, $shim, [], 1);
+    return $shim;
+  }
   my @tried;
-  my $head = 1;
   for my $inc (@{$self->inc_paths}) {
     my $path = "$inc/$file";
     if (-f $path) {
+      my $head = (ref $inc || !$_base_dirs{$inc}) ? 1 : 0;
       Pl::ProtoCache::note_resolution($module, $path, \@tried, $head);
       return $path;
     }
@@ -10192,7 +10242,6 @@ sub _find_module_file {
     # (the runtime's own -I derivation skips it for the same reason).
     next if ref $inc || !defined $inc || !length $inc;
     push @tried, $inc;
-    $head = 0 if $inc eq $_pcl_lib_dir;
   }
 
   return undef;

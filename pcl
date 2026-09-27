@@ -169,9 +169,23 @@ sub _use_line_for_M {
     # quoted args so the module's import() sees the same list.
     my @args = split /,/, $imports, -1;
     my $list = join(', ', map { my $a = $_; $a =~ s/(['\\])/\\$1/g; "'$a'" } @args);
-    return "$verb $mod ($list);\n";
+    return "$verb $mod ($list); ";
   }
-  return "$verb $spec;\n";
+  return "$verb $spec; ";
+}
+
+# Put the -M use-lines IN FRONT OF the program's first code line, on that same
+# line, so that every line keeps its own number (task #2460): perl compiles
+# -M into a preamble that has no line of its own.  A program that starts with
+# POD gets them on the first line after its first `=cut`.
+sub _prefix_first_code_line {
+  my ($prefix, $text) = @_;
+  return $text if $prefix eq '';
+  if ($text =~ /\A=/) {
+    return $text if $text =~ s/(^=cut\b[^\n]*\n)/$1$prefix/m;
+    return "$text\n$prefix\n";
+  }
+  return $prefix . $text;
 }
 
 # Transpile $source (a file) or $inline (a code string), honouring -M.
@@ -194,18 +208,25 @@ sub transpile {
   my @inc_args = map { ("-I", $_) } inc_dirs_for_transpile();
 
   my $src_path;          # the .pl file we hand to pl2cl
+  my @as;                # --as NAME: the program's name for it ($0, __FILE__)
   my @cleanup;
   if (defined $inline) {
+    # `pcl -e CODE`: $0 and __FILE__ are "-e", as under perl (task #2461).
     $src_path = mktmp('.pl');
-    write_file($src_path, $use_prefix . $inline . "\n");
+    write_file($src_path, _prefix_first_code_line($use_prefix, $inline) . "\n");
     push @cleanup, $src_path;
+    @as = ('--as=-e');
   }
   elsif ($use_prefix ne '') {
-    # File + -M: prepend the use-lines into a temp copy.  The script's own
-    # directory is NOT put on @INC (task #2442): perl does not either.
+    # File + -M: the use-lines go into a temp copy, on the script's first code
+    # line, and pl2cl compiles it AS the script (task #2460): $0, __FILE__,
+    # line numbers, die/warn locations and FindBin name the script as given.
+    # The script's own directory is NOT put on @INC (task #2442): perl does
+    # not either.
     $src_path = mktmp('.pl');
-    write_file($src_path, $use_prefix . slurp($source));
+    write_file($src_path, _prefix_first_code_line($use_prefix, slurp($source)));
     push @cleanup, $src_path;
+    @as = ("--as=$source");
   }
   else {
     $src_path = $source;
@@ -216,7 +237,7 @@ sub transpile {
   # into the preamble); forwarding it is the whole implementation — a second
   # mechanism here would be a second answer to the same question (rule 11).
   my $rc = run('perl', @inc_args, $PL2CL, ($no_cache ? '--no-cache' : ()),
-               $src_path, { stdout => $tmp });
+               @as, $src_path, { stdout => $tmp });
   unlink @cleanup;
 
   if ($rc != 0) {
@@ -232,8 +253,10 @@ sub transpile {
 # on the command line, and the script cache puts them in its KEY and hands
 # them to the runtime, which passes the same list to the same pl2cl on a miss.
 # They must be the same list or a cached entry would be keyed on one search
-# path and built with another.
-sub inc_dirs_for_transpile { return ($ROOT, @inc_dirs) }
+# path and built with another.  The PCL tree root is NOT on it (task #2462):
+# pl2cl finds Pl/ through its own `use lib`, and a root on the child's @INC
+# would land in the program's @INC and make Pl::* requireable by the program.
+sub inc_dirs_for_transpile { return @inc_dirs }
 
 # The form that asks the RUNTIME to run $source from its cache entry
 # (task #1841).  Three arguments, because a cache MISS spawns pl2cl before any
@@ -253,8 +276,12 @@ sub script_cache_form {
   # is the load-bearing part, measured: with perl's own library directories
   # ahead of PCL's lib/, the compile-time `use Carp` found perl's REAL Carp.pm
   # instead of PCL's shim and cached a transpile of it.
-  my $seed = cl_list("$ROOT/lib", inc_dirs_for_transpile(),
-                     grep { defined $_ && !ref $_ && -d $_ } @INC);
+  #
+  # Since task #2462 the preamble's list is PCLPaths::program_inc (perl's
+  # order: -I, PERL5LIB, PCL's lib/, perl's own), so the seed is that same
+  # derivation over what this perl sees; Carp and the rest of the shims still
+  # precede perl's own directories, and the must-win shims answer by name.
+  my $seed = cl_list(PCLPaths::program_inc($ROOT, inc_dirs_for_transpile(), @INC));
   return '(pcl::p-run-script-cached "' . cl_escape($src) . '" "'
        . cl_escape($PL2CL) . '" ' . $dirs . ' ' . $seed . ')';
 }

@@ -45,6 +45,11 @@ use Pl::CLForm qw(raw raw_wrap cl_sym cl_pkg);
 use Pl::GlobalPartition qw(global_decl_form);
 
 has filename => (is => 'ro', predicate => 1);
+# The name the PROGRAM calls this source (`pl2cl --as NAME`, tasks #2460/#2461):
+# what __FILE__, a die/warn location and the drop announcement say.  `pcl -e`
+# transpiles a temp file AS "-e", and a file run with -M prefixes a temp copy
+# AS the script the user named.  Absent = the file name itself.
+has source_name => (is => 'ro', predicate => 1);
 has code     => (is => 'ro', predicate => 1);
 
 # E3 eval-mode (docs/v2-opus48-execution-plan.md §E3): set when transpiling a
@@ -92,7 +97,8 @@ has environment => (is => 'lazy');
 sub _build_environment {
   my $self = shift;
   return Pl::Environment->new(
-    source_file => $self->has_filename ? $self->filename : '-');
+    source_file => $self->has_source_name ? $self->source_name
+                 : $self->has_filename    ? $self->filename : '-');
 }
 
 # The original parser, used purely as the expression-codegen engine.
@@ -183,7 +189,12 @@ sub _publish_strict_refs {
     Pl::Parser::strict_refs_at($lh->{_strict_refs_regions}, $loc);
 }
 
-sub parse_file { my ($class, $fn, %opts) = @_; return $class->new(filename => $fn)->parse }
+sub parse_file {
+  my ($class, $fn, %opts) = @_;
+  return $class->new(filename => $fn,
+                     (defined $opts{source_name} ? (source_name => $opts{source_name}) : ()),
+                    )->parse;
+}
 sub parse_code {
   my ($class, $code, %opts) = @_;
   return $class->new(
@@ -13374,7 +13385,8 @@ sub _seam_note_expr {
 
 sub _seam_census_dump {
   my ($self) = @_;
-  my $tag = $self->has_filename ? $self->filename : '-';
+  my $tag = $self->has_source_name ? $self->source_name
+          : $self->has_filename    ? $self->filename : '-';
   print STDERR join("\t", 'pcl-seam', 'totals', $tag,
                     'expr='      . ($self->{_seam_expr} // 0),
                     'seam-stmt=' . _hist_total($self->{_seam_stmt})), "\n";

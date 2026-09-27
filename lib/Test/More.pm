@@ -3,6 +3,10 @@
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
+# pcl-shim: must-win -- the runtime supplies Test::More itself and never loads any Test/More.pm; this file is only read for prototypes.  This shim is found BEFORE @INC is
+# searched, so a PERL5LIB or -I copy of the real module cannot shadow it
+# (task #2462, docs/ir-spec.md 9, docs/shipped-modules.md).
+
 # Test::More — PROTOTYPE-ONLY shim for PCL.
 #
 # PCL provides the actual Test::More TAP implementation INTERNALLY: `use

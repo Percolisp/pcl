@@ -2,6 +2,10 @@
 # This is free software; you can redistribute it and/or modify it under the
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# pcl-shim: must-win -- the real module is XS.  This shim is found BEFORE @INC is
+# searched, so a PERL5LIB or -I copy of the real module cannot shadow it
+# (task #2462, docs/ir-spec.md 9, docs/shipped-modules.md).
 #
 # MIME::Base64 without XS (task #2079-family, s492c).  The real module is XS,
 # so `use MIME::Base64;` died "Can't locate MIME/Base64.pm in @INC (the module

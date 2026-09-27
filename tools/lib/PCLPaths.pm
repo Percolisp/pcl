@@ -31,7 +31,7 @@ use Config;
 use Cwd ();
 use File::Basename qw(dirname);
 use Exporter 'import';
-our @EXPORT_OK = qw(perl_suite_t cache_root root root_of);
+our @EXPORT_OK = qw(perl_suite_t cache_root root root_of program_inc perl_builtin_inc_dirs);
 
 # The t/ directory of the perl BUILD tree matching the running perl.
 #   1. $PCL_PERL_SUITE_T                      — explicit, always wins
@@ -218,6 +218,62 @@ sub ensure_cache_root {
         if $problem;
     $CHECKED = 1;
     return $root;
+}
+
+# ── THE @INC A PCL PROGRAM STARTS WITH (task #2462, ir-spec §9) ─────────────
+# perl's ORDER: the -I entries (command-line order), then PERL5LIB, then
+# PCL's shim lib/ (it plays the part of perl's own library for the modules it
+# replaces), then perl's own directories.  The PCL TREE itself is not a
+# library: its root (which pl2cl puts on its own @INC to find Pl/) and
+# tools/lib are removed, so `require Pl::Parser` from a user program dies as
+# it does under perl.  ONE derivation for its three readers: pl2cl's program
+# preamble, the transpiler's module resolver (Pl::Parser inc_paths), and
+# `pcl`'s script-cache seed -- they must agree or a module is parsed from one
+# file and loaded from another.
+#
+# @INC is the caller's own (the perl that runs pl2cl sees -I and PERL5LIB in
+# perl's order already).  "perl's own directories" are the %Config ones
+# (perl_builtin_inc_dirs); the shim goes in front of the FIRST of them, or at
+# the end when none is present.  Only an ABSOLUTE entry naming the tree is
+# dropped: `-I .` run from inside a checkout is the user's "." and stays.
+# Entries are kept whether or not they exist (perl keeps them too); a code
+# ref or an empty string has no directory spelling and is skipped.
+sub perl_builtin_inc_dirs {
+    my @d;
+    for my $k (qw(sitearchexp sitelibexp vendorarchexp vendorlibexp
+                  archlibexp privlibexp)) {
+        my $v = $Config{$k};
+        push @d, $v if defined $v && length $v;
+    }
+    push @d, grep { length } split /:/, ($Config{otherlibdirs} // '');
+    return @d;
+}
+
+sub program_inc {
+    my ($root, @inc) = @_;
+    my $shim = "$root/lib";
+    my %tree = map { (_canon_dir($_) => 1) } ($root, $shim, "$root/tools/lib");
+    my %builtin = map { (_canon_dir($_) => 1) } perl_builtin_inc_dirs();
+    my (@out, $placed);
+    for my $d (@inc) {
+        next if !defined $d || ref $d || !length $d;
+        next if $d =~ m{\A/} && $tree{_canon_dir($d)};
+        if (!$placed && $builtin{_canon_dir($d)}) {
+            push @out, $shim if -d $shim;
+            $placed = 1;
+        }
+        push @out, $d;
+    }
+    push @out, $shim if !$placed && -d $shim;
+    return @out;
+}
+
+# A directory's comparison key: its real path when it exists, else the
+# spelling without trailing slashes.
+sub _canon_dir {
+    my ($d) = @_;
+    my $r = -d $d ? Cwd::abs_path($d) : undef;
+    return defined $r ? $r : _trim_slashes($d);
 }
 
 # "/tmp/x/" -> "/tmp/x"; "/" -> "" (so "$root/core" is "/core", not "//core").

@@ -1,5 +1,10 @@
 package Math::BigInt::Calc;
 
+# pcl-shim: must-win -- the real module HANGS under PCL at load (its precision
+# probe loops never end on unbounded integers; measured s499j on PERL5LIB).  This shim is found BEFORE @INC is
+# searched, so a PERL5LIB or -I copy of the real module cannot shadow it
+# (task #2462, docs/ir-spec.md 9, docs/shipped-modules.md).
+
 use 5.006001;
 use strict;
 use warnings;

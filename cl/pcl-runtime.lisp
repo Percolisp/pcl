@@ -22598,13 +22598,46 @@ buffer's fill-pointer; everything else falls back to file-length."
               (when *pcl-runtime-directory*
                 (list (merge-pathnames "../lib/" *pcl-runtime-directory*))))))
 
+(defvar *p-must-win-shims* (make-hash-table :test #'equal)
+  "REL-PATH -> the must-win shim's absolute path, or :NONE (memo of
+   %P-MUST-WIN-SHIM; a shim's header does not change during a run).")
+
+(defun %p-shim-header-marked-p (path)
+  "True when PATH's first 60 lines hold the `# pcl-shim: must-win' marker."
+  (with-open-file (in path :external-format :latin-1 :if-does-not-exist nil)
+    (when in
+      (loop repeat 60
+            for line = (read-line in nil nil)
+            while line
+            thereis (let ((m "# pcl-shim: must-win"))
+                      (and (>= (length line) (length m))
+                           (string= m line :end2 (length m))))))))
+
+(defun %p-must-win-shim (rel-path)
+  "THE SHIMS THAT WIN BY NAME (task #2462, ir-spec §9): the absolute path of
+   PCL's lib/REL-PATH when that shim's header carries `# pcl-shim: must-win'
+   -- it replaces a module whose real copy cannot run under PCL (an XS
+   module), so it is found BEFORE @INC is searched and a PERL5LIB or -I copy
+   of the real module cannot shadow it.  Else NIL.  The DATA is the marker in
+   lib/ (rule 9a); Pl::Parser::must_win_shim reads the same marker for the
+   transpiler, so a module is parsed from the file it is loaded from."
+  (let ((hit (gethash rel-path *p-must-win-shims*)))
+    (unless hit
+      (let* ((shim (%p-shim-lib-dir))
+             (file (and shim (%p-inc-dir-file shim rel-path :pmc nil))))
+        (setf hit (if (and file (%p-shim-header-marked-p file)) file :none))
+        (setf (gethash rel-path *p-must-win-shims*) hit)))
+    (if (eq hit :none) nil hit)))
+
 (defun p-find-module-in-inc (rel-path)
   "Search @INC for module file, return absolute path or nil.
-   The list is %P-INC-SEARCH-DIRS — @INC, then the fallback that stands in for
-   perl's compiled-in default @INC.  A first match over the concatenation is
-   exactly the two-stage search this was written as."
-  (loop for dir in (%p-inc-search-dirs)
-        thereis (%p-inc-dir-file dir rel-path)))
+   A must-win shim (%P-MUST-WIN-SHIM) answers first.  Otherwise the list is
+   %P-INC-SEARCH-DIRS — @INC, then the fallback that stands in for perl's
+   compiled-in default @INC.  A first match over the concatenation is exactly
+   the two-stage search this was written as."
+  (or (%p-must-win-shim rel-path)
+      (loop for dir in (%p-inc-search-dirs)
+            thereis (%p-inc-dir-file dir rel-path))))
 
 ;;; --- Cache Management ---
 

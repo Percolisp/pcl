@@ -3,6 +3,11 @@
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
+# pcl-shim: must-win -- the real Carp.pm cannot run under PCL (measured s499j: perl's own
+# Carp.pm on PERL5LIB leaves `croak` undefined in the importer, task #2491).  This shim is found BEFORE @INC is
+# searched, so a PERL5LIB or -I copy of the real module cannot shadow it
+# (task #2462, docs/ir-spec.md 9, docs/shipped-modules.md).
+
 #
 # PCL shim for Carp.  The real Carp.pm pulls in machinery (utf8, deep
 # caller() introspection) that PCL does not fully model, so we ship a small

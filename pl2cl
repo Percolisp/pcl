@@ -428,7 +428,8 @@ sub parse_source {
   # flag stays ACCEPTED (runpcl / tools/runt / the sweep all pass it) and inert; what it
   # used to paper over now dies naming the file, from Parser2's PPI check.
   delete $opts{lenient_ppi};
-  my %known = (eval_mode => 1, eval_pkg => 1, eval_captures => 1, eval_features => 1);
+  my %known = (eval_mode => 1, eval_pkg => 1, eval_captures => 1, eval_features => 1,
+               source_name => 1);
   my @unknown = sort grep { !$known{$_} } keys %opts;
   die "pl2cl: unknown transpile mode(s): @unknown\n" if @unknown;
   # One process can transpile many sources (`--server` answers every string
@@ -485,6 +486,7 @@ my $manifest_mode = 0;  # Print the per-program manifest as JSON, not the CL
 my $facts_mode = 0;     # Annotate the emission with every Kind-A/B licence
 my $sexp_mode = 0;      # Print the lowered tree as PORTABLE S-expressions
 my $deps_file;          # Write the dependency manifest sidecar here (#1261)
+my $source_name;        # --as NAME: the program's own name for the source (#2460/#2461)
 my $want_help = 0;      # --help; without it GetOptions answered "Unknown option: help"
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
@@ -530,6 +532,10 @@ Options:
                   of the CL (docs/ir-spec.md 12b)
   --facts         Annotate the emission with every optimization licence
                   that held: (p-fact (NAME) FORM)
+  --as NAME       The program's name for the source file: $0, __FILE__ and
+                  every " at FILE line N" say NAME (`pcl -e` passes -e;
+                  `pcl -M ... script` passes the script as given).  Line
+                  numbers are the file's own.
   --deps FILE     Write the dependency manifest sidecar to FILE: every
                   module whose prototypes/exports this parse read, with
                   a content hash (the runtime's cache validity, #1261)
@@ -566,6 +572,7 @@ GetOptions(
   "facts"        => \$facts_mode,    # wrap licensed forms in (p-fact (NAME) FORM)
   "emit-sexp"    => \$sexp_mode,     # print the data form INSTEAD of the CL
   "deps=s"       => \$deps_file,     # write the dependency manifest sidecar
+  "as=s"         => \$source_name,   # $0 / __FILE__ / die locations name NAME
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or do {
   # An EXPLICIT exit code, not `die`: perl's exit status for an uncaught die is
@@ -631,8 +638,12 @@ return;
 # Get path to this script for runtime to use
 my $script_path = abs_path($0);
 
-# Get Perl's @INC (filter to existing directories)
-my @perl_inc = grep { $_ && -d $_ } @INC;
+# The program's @INC, in perl's ORDER (task #2462; ONE derivation,
+# PCLPaths::program_inc, shared with the transpiler's resolver and `pcl`'s
+# seed): this perl's -I entries and PERL5LIB, then PCL's shim lib/, then
+# perl's own directories -- and never the PCL tree root, which is on THIS
+# script's @INC only so that it can find Pl/.
+my @perl_inc = PCLPaths::program_inc($ROOT, @INC);
 
 # Build preamble to inject after (in-package :pcl)
 sub build_preamble {
@@ -667,21 +678,19 @@ sub build_preamble {
   # to) would shadow the module the author meant.  A program asks for them the
   # perl way: `use lib`, FindBin, -I, PERL5LIB.  The contract: ir-spec §9.
 
-  # Add PCL's lib/ directory (for our stub modules like Config.pm)
+  # The program's @INC (see @perl_inc above: -I, PERL5LIB, PCL's lib/,
+  # perl's own).  A shim that replaces an XS module wins by NAME whatever this
+  # order says (the `# pcl-shim: must-win` marker, ir-spec §9).
   my $pcl_lib = "$ROOT/lib";
-  if (-d $pcl_lib) {
-    push @lines, "(vector-push-extend \"$pcl_lib\" pcl::\@INC)";
-  }
-
-  # Add Perl's @INC paths
   my @core_inc;
   push @core_inc, $pcl_lib if -d $pcl_lib;
-  for my $path (@perl_inc) {
+  for my $orig (@perl_inc) {
+    my $path = $orig;
     # Escape backslashes and quotes
     $path =~ s/\\/\\\\/g;
     $path =~ s/"/\\"/g;
     push @lines, "(vector-push-extend \"$path\" pcl::\@INC)";
-    push @core_inc, $path;
+    push @core_inc, $path if $orig ne $pcl_lib;
   }
 
   # Record the "built-in" module paths (PCL lib/ shims + system perl's libs).
@@ -1041,7 +1050,8 @@ if ($bundle_mode || $executable_mode) {
 if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
   my $output = parse_source('parse_file', $source_file,
-    ($lenient_ppi ? (lenient_ppi => 1) : ()));
+    ($lenient_ppi ? (lenient_ppi => 1) : ()),
+    (defined $source_name ? (source_name => $source_name) : ()));
 
   # THE DEPENDENCY MANIFEST SIDECAR (task #1261).  Written BEFORE the emission
   # reaches the caller, because the runtime writes the cached .lisp from what
@@ -1071,7 +1081,7 @@ if (@ARGV && -f $ARGV[0]) {
     # on (see the $Pl::Parser::ANNOUNCE_DROPS note above).
     $output =~ s/(\(in-package :pcl\))/$1\n(p-defpackage :main)\n(in-package :main)/;
   } else {
-    my $preamble = build_preamble($source_file);
+    my $preamble = build_preamble(defined $source_name ? $source_name : $source_file);
     $output =~ s/(\(in-package :pcl\))/$1\n$preamble/;
   }
 
