@@ -306,9 +306,11 @@ my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
 # escape — DEFAULT DENY: a `return $fh', an assignment from or to it, `\$fh',
 # `*$fh', an argument of any other callee (a method call ON it included),
 # `select($fh)' (it RETAINS the handle, probed), interpolation, a nested sub
-# (named or anonymous) naming it, a string eval or `goto &sub' in the region.
-# The verdict is per NAME per region (like every verdict here), so every
-# declaration of the name must be an `open(my …)' one.
+# (named or anonymous) naming it or a string eval IN ITS SCOPE, a `goto &sub'
+# anywhere in the region.  Unlike every other verdict here it is per
+# DECLARATION, not per name (see _fh_open_decl): "every occurrence IN ITS SCOPE".
+# `undef $fh;' / `$fh = undef;' as a whole statement is a fifth accepted use
+# (`fh-drop'), which drops the only reference.
 my %FH_SLOT_FN = map { $_ => 1 } qw(readline eof close binmode seek tell read
                                     sysread syswrite sysseek truncate flock
                                     fileno getc write stat lstat);
@@ -812,9 +814,13 @@ sub _analyze_tree {
   $vi{$_}{captured} = 1 for grep { $ctx->{nested_sub}{$_} } keys %vi;
   # THE HANDLE LICENCE (task #2006 (b)): a FACT, computed whatever PCL_OPT
   # says; Parser2's emission asks Pl::Passes::enabled('fh-scope-close').
-  $vi{$_}{fh_close} = 1
-    for grep { $vi{$_} && _fh_close_verdict($ctx, $_) }
-        keys %{ $ctx->{fh_open_decl} // {} };
+  # Per DECLARATION: `fh_close_at' holds the refaddr of each licensed
+  # `open(my $name, …)' statement, `fh_drop_at' of each drop statement.
+  for my $d (values %{ $ctx->{fh_decl} // {} }) {
+    next unless $vi{ $d->{name} } && _fh_decl_verdict($ctx, $d);
+    $vi{ $d->{name} }{fh_close_at}{ refaddr($d->{stmt}) } = 1;
+    $vi{ $d->{name} }{fh_drop_at}{$_} = 1 for keys %{ $d->{drops} // {} };
+  }
   if ($no_raw_slot) {
     for my $v (values %vi) {
       next if $v->{array};               # #1140: not a storage verdict
@@ -832,7 +838,7 @@ sub _analyze_tree {
     for my $name (sort grep { !$vi{$_}{array} } keys %vi) {
       warn sprintf "B-DEBUG %s unboxable=%d coerce=%s strbuf=%d fh_close=%d reasons=[%s] uses={%s}\n",
         $name, $vi{$name}{unboxable}, $vi{$name}{coerce} // '-',
-        $vi{$name}{strbuf} // 0, $vi{$name}{fh_close} // 0,
+        $vi{$name}{strbuf} // 0, scalar(keys %{ $vi{$name}{fh_close_at} // {} }),
         join(',', @{ $vi{$name}{reasons} // [] }),
         join(',', map { "$_=$ctx->{use_class}{$name}{$_}" }
                   sort keys %{ $ctx->{use_class}{$name} // {} });
@@ -922,42 +928,114 @@ sub _use {
   my ($ctx, $name, $class) = @_;
   return unless defined $name && $name =~ /^\$\w+$/;
   $ctx->{use_class}{$name}{$class // 'opaque'}++;
+  if (my $k = $ctx->{fh_active}{$name}) {                 # the handle licence
+    $ctx->{fh_decl}{$k}{uses}{$class // 'opaque'}++;
+  }
 }
 
-# The handle licence's declaration count: `open(my $fh, …)' — the first
-# argument is the Symbol whose previous significant token is `my'.  The
-# licence requires every declaration of the name in the region to be one.
+# THE HANDLE LICENCE IS PER DECLARATION (task #2006 (b)): "every occurrence
+# of the variable IN ITS SCOPE".  `open(my $fh, …)' opens a DECLARATION KEY
+# for $fh, active in the walk from that point to the end of the enclosing
+# block (a condition-`my' to the end of its construct) — `fh_active' is
+# localized per block by _tw_stmts and per compound by _tw_stmt, so the
+# key's lifetime is the declaration's lexical scope.  Every use / event /
+# write of $fh the walk records while the key is active is ALSO recorded on
+# the key, and the verdict reads only those.  A later `my $fh' that is not an
+# `open' one does not open a key; its uses land on an enclosing open key if
+# one is active, which can only DENY that key — never license anything.
+#
+# The declaration is keyed by its STATEMENT — the one Parser2 lowers: a
+# token's ->statement is the innermost Statement, which for `open(my $fh, …)`
+# is the expression INSIDE the parens, so climb out of every structure that
+# is not a block or a compound's condition / loop head.
+sub _fh_root_stmt {
+  my ($tok) = @_;
+  my $st = ref($tok) && $tok->can('statement') ? $tok->statement : undef;
+  while ($st) {
+    my $up = $st->parent;
+    last if !$up || $up->isa('PPI::Document') || $up->isa('PPI::Structure::Block')
+         || $up->isa('PPI::Structure::Condition') || $up->isa('PPI::Structure::For');
+    my $next = $up->statement or last;
+    last if $next == $st;
+    $st = $next;
+  }
+  return $st;
+}
+
 sub _fh_open_decl {
   my ($ctx, $n) = @_;
   return unless ref($n) eq 'PPI::Token::Symbol' && $n->content =~ /^\$\w+$/;
   my $prev = $n->sprevious_sibling;
-  $ctx->{fh_open_decl}{ $n->content }++
-    if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'my';
+  return unless $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'my';
+  my $stmt = _fh_root_stmt($n) or return;
+  my $k = ++$ctx->{fh_seq};
+  $ctx->{fh_decl}{$k} = { name => $n->content, stmt => $stmt };
+  $ctx->{fh_active}{ $n->content } = $k;
 }
 
-# The handle licence (see %FH_SLOT_FN): may `my $name' — declared only by
-# `open(my $name, …)' — be closed when its block exits?  Every occurrence
-# must carry one of the accepted use classes and no event but the two the
-# handle slots themselves raise; anything this walk did not classify denies.
-sub _fh_close_verdict {
-  my ($ctx, $name) = @_;
-  my $decls = $ctx->{fh_open_decl}{$name} or return 0;
-  return 0 if $decls != ($ctx->{decl_count}{$name} // 0);
-  return 0 if $ctx->{has_str_eval} || $ctx->{has_goto_sub};
-  return 0 if $ctx->{fh_nested}{$name} || $ctx->{nested_sub}{$name};
+# One non-event fact that denies the active declaration key of $name (a
+# native root write, a deref base, …).
+sub _fh_bad {
+  my ($ctx, $name, $why) = @_;
+  return unless defined $name;
+  my $k = $ctx->{fh_active}{$name} or return;
+  $ctx->{fh_decl}{$k}{bad}{$why}++;
+}
+
+# `undef $fh;' / `$fh = undef;' as a whole statement: the licence's one
+# accepted drop, recorded against the statement so Parser2 can emit the close
+# ahead of it (Pl::Parser2::_fh_drop_name).
+sub _fh_drop {
+  my ($ctx, $name, $tok) = @_;
+  my $k = $ctx->{fh_active}{$name} or return;
+  my $stmt = _fh_root_stmt($tok);
+  return _fh_bad($ctx, $name, 'drop-without-statement') if !$stmt;
+  $ctx->{fh_decl}{$k}{drops}{ refaddr($stmt) } = 1;
+}
+
+# Is PPI node $node inside declaration $d's scope: after the declaring
+# statement in the same block (any depth), or — for a condition-`my' —
+# anywhere in the construct?
+sub _fh_in_scope {
+  my ($d, $node) = @_;
+  my $stmt = $d->{stmt};
+  my $up = $stmt->parent;
+  if ($up && ($up->isa('PPI::Structure::Condition')     # condition-my, or
+              || $up->isa('PPI::Structure::For')        # a loop head's
+              || $up->isa('PPI::Structure::List'))) {
+    my $cmp = $up->parent;
+    for (my $p = $node; $p; $p = $p->parent) { return 1 if $p == $cmp }
+    return 0;
+  }
+  return 0 if !$up;
+  my $a = $node;
+  $a = $a->parent while $a && $a->parent && $a->parent != $up;
+  return 0 if !$a || !$a->parent;
+  for my $c ($up->children) {
+    return 1 if $c == $stmt;          # $stmt first (or $a IS $stmt): in scope
+    return 0 if $c == $a;             # $a before the declaration
+  }
+  return 0;
+}
+
+# The verdict for one declaration key: every occurrence it saw carries an
+# accepted use class (%FH_USE_OK), no event but the two the handle slots
+# raise, no denying fact; no string eval and no nested sub naming the handle
+# in its scope; the name in no unparsed statement; no `goto &sub' anywhere.
+sub _fh_decl_verdict {
+  my ($ctx, $d) = @_;
+  my $name = $d->{name};
+  return 0 if $d->{bad} || $ctx->{has_goto_sub};
   return 0 if grep { /\Q$name\E(?!\w)/ } @{ $ctx->{fallback_texts} };
-  # open/read/sysread mark their handle argument as written; a handle slot is
-  # what the use classes below prove that occurrence was.
   return 0 if grep { $_ ne 'handle-viv-arg' && $_ ne 'mutating-builtin-arg' }
-              keys %{ $ctx->{ev}{$name} // {} };
-  # native writes leave FACTS, not events: `$fh = …' in any spelling but the
-  # statement `$fh = undef;' (fh_write_other), a compound or `++' root write
-  return 0 if $ctx->{fh_write_other}{$name} || $ctx->{incdec_root}{$name}
-           || $ctx->{write_ops}{$name} || $ctx->{deref_base}{$name}
-           || $ctx->{foreach_var}{$name} || $ctx->{foreach_my_alias}{$name};
-  my $uc = $ctx->{use_class}{$name} // {};
-  return 0 if !$uc->{'fh-open'};
+              keys %{ $d->{ev} // {} };
+  my $uc = $d->{uses} // {};
+  return 0 if !$uc->{q{fh-open}};
   return 0 if grep { !$FH_USE_OK{$_} } keys %$uc;
+  return 0 if grep { _fh_in_scope($d, $_) } @{ $ctx->{str_eval_toks} // [] };
+  my $re = qr/\$\{?\s*\Q${\ substr($name, 1)}\E\b/;
+  return 0 if grep { $_->[1] =~ $re && _fh_in_scope($d, $_->[0]) }
+              @{ $ctx->{sub_blocks} // [] };
   return 1;
 }
 
@@ -965,6 +1043,9 @@ sub _ev {
   my ($ctx, $name, $event) = @_;
   return unless defined $name && $name =~ /^\$\w+$/;
   $ctx->{ev}{$name}{$event}++;
+  if (my $k = $ctx->{fh_active}{$name}) {                 # the handle licence
+    $ctx->{fh_decl}{$k}{ev}{$event}++;
+  }
 }
 
 # #2341: record that plain `$name` is the BASE of a dereference.  NOT an
@@ -974,6 +1055,7 @@ sub _deref_base {
   my ($ctx, $name) = @_;
   return unless defined $name && $name =~ /^\$\w+$/;
   $ctx->{deref_base}{$name}++;
+  _fh_bad($ctx, $name, 'deref-base');
 }
 
 # The same fact read off SOURCE TEXT, for the places the tree walk does not
@@ -1070,7 +1152,7 @@ sub _tw_region_facts {
                   && $_[1]->content eq 'eval';
     my $next = $_[1]->snext_sibling;
     my $str  = !($next && $next->isa('PPI::Structure::Block'));
-    $ctx->{has_str_eval} = 1 if $str;
+    push @{ $ctx->{str_eval_toks} }, $_[1] if $str;
     $ctx->{has_eval}     = 1 if $str || !$block_eval_free;
     return '';
   });
@@ -1158,15 +1240,15 @@ sub _tw_region_facts {
     _arr_esc($ctx, $1, 'nested-sub')       while $c =~ /(\@\w+)/g;
     _arr_esc($ctx, '@' . $1, 'nested-sub') while $c =~ /\$(\w+)\s*\[/g;
     # The handle licence (#2006 (b)): a nested sub — named OR anonymous —
-    # that so much as mentions `$name' may hold the handle past the block.
-    # Text-shaped, over-firing: the safe direction for a deny.
-    $ctx->{fh_nested}{'$' . $1}++ while $c =~ /\$\{?\s*(\w+)/g;
+    # IN A DECLARATION'S SCOPE that so much as mentions the handle's name may
+    # hold it past the block (_fh_decl_verdict asks, text-shaped: over-firing
+    # is the safe direction for a deny).
+    push @{ $ctx->{sub_blocks} }, [$b, $c];
   }
-  # The handle licence's region denials, both independent of every PCL_OPT
-  # switch (the licence is not an optimisation, so `none' must not move it):
-  # a STRING eval anywhere in the region (its capture alist could carry the
-  # handle — a block eval is plain control flow; `has_str_eval', set by the
-  # eval walk at the top of this function) and a `goto &sub'.
+  # The handle licence's facts, all independent of every PCL_OPT switch (the
+  # licence is not an optimisation, so `none' must not move it): the STRING
+  # evals (`str_eval_toks', collected by the eval walk at the top of this
+  # function — a block eval is plain control flow) and a `goto &sub'.
   $ctx->{has_goto_sub} = 1 if $stmt->content =~ /\bgoto\s*&/;
 }
 
@@ -1175,7 +1257,11 @@ sub _tw_region_facts {
 # $uctx: use-class for the statements' root expressions ('bool' inside
 # if/while/unless conditions) — consumed by the B-regime read classifier.
 sub _tw_stmts {
-  my ($ctx, $stmts, $uctx) = @_;
+  my ($ctx, $stmts, $uctx, $same_scope) = @_;
+  # A statement list is a BLOCK unless the caller says otherwise (a compound's
+  # condition / loop head): the handle licence's declaration keys opened in
+  # it end with it (see _fh_open_decl).
+  local $ctx->{fh_active} = { %{ $ctx->{fh_active} // {} } } if !$same_scope;
   for my $s (grep { ref $_ && $_->significant } @$stmts) {
     _tw_stmt($ctx, $s, $uctx);
   }
@@ -1193,6 +1279,9 @@ sub _tw_stmt {
          && !$s->isa('PPI::Statement::Scheduled');
 
   if ($s->isa('PPI::Statement::Compound')) {
+    # a condition-`my' handle's declaration key lives exactly as long as the
+    # construct (its close is emitted at the enclosing block's exit)
+    local $ctx->{fh_active} = { %{ $ctx->{fh_active} // {} } };
     my @k = $s->schildren;
     my ($kw) = grep { $_->isa('PPI::Token::Word') } @k;
     if ($kw && $kw->content =~ /^for(?:each)?$/) {
@@ -1277,14 +1366,15 @@ sub _tw_stmt {
       if ($k->isa('PPI::Structure::Condition')) {
         # if/while/unless/until condition: the root expression is truth-
         # tested — 'bool' use class (licenses raw-string, blocks raw-numeric)
-        _tw_stmts($ctx, [$k->schildren], 'bool');
+        _tw_stmts($ctx, [$k->schildren], q{bool}, 1);   # same scope: the construct
       }
       elsif ($k->isa('PPI::Structure::For')
           || $k->isa('PPI::Structure::List')
           || $k->isa('PPI::Structure::Block')) {
         my $open = defined $loop_rid && $k->isa('PPI::Structure::Block');
         push @{ $ctx->{region} }, $loop_rid if $open;
-        _tw_stmts($ctx, [$k->schildren]);
+        _tw_stmts($ctx, [$k->schildren], undef,
+                  !$k->isa(q{PPI::Structure::Block}));   # a loop head is the construct
         pop @{ $ctx->{region} } if $open;
       }
     }
@@ -1653,6 +1743,7 @@ sub _tw_walk {
           # same twin applies — recorded as a 'num' use (which also blocks
           # B-str: ++ on a frozen string cannot magically increment).
           $ctx->{incdec_root}{$ex->content}++;
+          _fh_bad($ctx, $ex->content, q{incdec});   # the handle licence
           _use($ctx, $ex->content, 'num');
           return;  # the incdec IS the bare symbol's use — nothing to walk
         }
@@ -1781,9 +1872,12 @@ sub _tw_walk {
         elsif ($ctx->{cond})   { _ev($ctx, $name, 'write-cond') }
         # The handle licence (#2006 (b)) accepts ONE write: `$fh = undef;' as
         # its own statement, which drops the only reference (perl closes the
-        # handle there; Parser2::_fh_drop_name emits the close).  Any other.
-        $ctx->{fh_write_other}{$name} = 1
-          if !($root_native && !$ctx->{cond} && _tw_is_bare_undef($xo, $kids->[1]));
+        # handle there; Parser2::_fh_drop_name emits the close).  Any other
+        # write denies.
+        if ($root_native && !$ctx->{cond} && _tw_is_bare_undef($xo, $kids->[1])) {
+          _fh_drop($ctx, $name, $l);
+        }
+        else { _fh_bad($ctx, $name, 'write') }
         my $fam = _tw_shape_ok($ctx, $xo, $kids->[1]);
         if ($fam) { $ctx->{write_fam}{$name}{$fam}++ }
         else      { $ctx->{init_bad}{$name} = 1 }
@@ -1825,6 +1919,7 @@ sub _tw_walk {
       if ($raw_ok) {
         $ctx->{write_fam}{$l->content}{ $NUM_COMPOUND{$op} ? 'num' : 'str' }++;
         $ctx->{write_ops}{$l->content}{$op}++;   # str-buffer verdict input
+        _fh_bad($ctx, $l->content, q{compound});   # the handle licence
         # `numonly' (task #1183): a NUMERIC compound op with a compile-time
         # NUMBER on the right takes a number to a number.  Any other delta —
         # `$s += $obj` is the measured one — can put an OBJECT in the slot,
@@ -2011,6 +2106,8 @@ sub _tw_walk_funcall_args {
              : ($fname eq 'undef' && $root_native && @$kids == 2) ? 'fh-drop'
              :                         $class;
       _fh_open_decl($ctx, $n) if $fname eq 'open';
+      _fh_drop($ctx, $n->content, $n)
+        if ($class // q{}) eq q{fh-drop} && ref($n) eq q{PPI::Token::Symbol};
     }
     _arr_mark_target($ctx, $xo, $kid) if $arr_write && $argi == 0;
     # The generic leaf handler records this escape too, under its own

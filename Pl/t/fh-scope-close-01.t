@@ -115,7 +115,14 @@ unlink $f; { open(my $o, ">", $f) or die; if ($o && defined $o) { printf $o "%s"
 sub findit { for my $i (1 .. 3) { open(my $fh, "<", $f) or die; my $l = <$fh>; return "got $i" if $i == 2 } "none" } print "b14 return in loop: ", findit(), "\n";
 sub ctx { open(my $fh, "<", $f) or die; wantarray ? "list" : "scalar" } my @c = ctx(); my $cs = ctx(); print "b15 ctx: $c[0] $cs\n";
 unlink $f; { open(my $o, ">", $f) or die; print $o "a"; undef $o; open($o, ">>", $f) or die; print $o "bc"; } print "b16 drop+reopen: ", sz(), "\n";
-unlink $f;
+# the licence is per DECLARATION: an escaping declaration of the same name in
+# the same sub, or an escaping OUTER handle around a condition-my, stays open
+sub two { { open(my $fh, ">", "$f.1") or die; print $fh "one"; } { open(my $fh, ">", "$f.2") or die; print $fh "two"; return $fh } }
+my $h2 = two(); print "p1 first closed: ", ((-s "$f.1") // 0), "\n"; print $h2 "+more"; close $h2; print "p1 second open after return: ", ((-s "$f.2") // 0), "\n";
+sub g { open(my $o, ">", "$f.3") or die; if (open(my $o, ">", "$f.4")) { print $o "inner" } print $o "outer"; return $o }
+my $g2 = g(); print "p2 inner closed: ", ((-s "$f.4") // 0), "\n"; print $g2 "+x"; close $g2; print "p2 outer open: ", ((-s "$f.3") // 0), "\n";
+my $code = '1'; { open(my $fh, ">", "$f.6") or die; print $fh "evalafter"; } print "p4 eval after the scope: ", ((-s "$f.6") // 0), "\n"; eval $code;
+unlink $f, "$f.1", "$f.2", "$f.3", "$f.4", "$f.6";
 PERL
 $PROG =~ s/\@DIR\@/$dir/g;
 my $pl_file = write_tmp($PROG, '.pl');

@@ -13375,7 +13375,8 @@ sub _cond_my_names {
 # handle is flushed already.
 sub _fh_scope_close {
   my ($self, $stmt, $vi, $names, @body) = @_;
-  my @h = grep { $vi && $vi->{$_} && $vi->{$_}{fh_close} } @$names;
+  my $at = refaddr($stmt);
+  my @h = grep { $vi && $vi->{$_} && $vi->{$_}{fh_close_at}{$at} } @$names;
   return @body if !@h;
   my $up = $stmt->parent;
   return @body if !$up || $up->isa('PPI::Document');
@@ -13409,7 +13410,8 @@ sub _fh_drop_name {
          && $k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'undef') {
     $name = $k[0]->content;
   }
-  return undef unless defined $name && $vi->{$name} && $vi->{$name}{fh_close};
+  return undef unless defined $name && $vi->{$name}
+                   && $vi->{$name}{fh_drop_at}{ refaddr($stmt) };
   return undef if !Pl::Passes::enabled('fh-scope-close');
   my $up = $stmt->parent;
   return undef if !$up || $up->isa('PPI::Document');
@@ -13429,7 +13431,9 @@ sub _fh_cond_late {
   my ($kw) = grep { $_->isa('PPI::Token::Word') } $stmt->schildren;
   return () unless $kw && $kw->content =~ /^(?:if|unless|while|until)$/;
   my @conds = grep { $_->isa('PPI::Structure::Condition') } $stmt->schildren;
-  my @h = grep { $vi->{$_} && $vi->{$_}{fh_close} } $self->_cond_my_names(@conds);
+  my @at = map { refaddr($_) } grep { $_->isa(q{PPI::Statement}) } map { $_->schildren } @conds;
+  my @h = grep { my $v = $vi->{$_}; $v && grep { $v->{fh_close_at}{$_} } @at }
+           $self->_cond_my_names(@conds);
   return () if !@h || !Pl::Passes::enabled('fh-scope-close');
   return map { [$_, '--pcl-fh-late--' . $self->{_if_ret_counter}++,
                 refaddr($stmt) . "\0" . $_] } @h;
