@@ -4310,48 +4310,101 @@
       (svref (the simple-vector *p-small-fixnum-strings*) n)
       (%p-fixnum-string-digits n)))
 
+;;; FLOAT -> DECIMAL DIGITS BY EXACT INTEGER ARITHMETIC (task #2510, s500p).
+;;; A double is exactly M * 2^E (INTEGER-DECODE-FLOAT), so its value scaled
+;;; by 10^K is the ratio (M * 10^K * 2^E) of two INTEGERS, and C's rounding —
+;;; round-half-to-EVEN on the EXACT value, which glibc's printf and therefore
+;;; perl use — is CL's ROUND of that ratio.  This replaces SBCL's ~F (the
+;;; shortest-digits generator with a bignum dragon, 28 % of a float-printing
+;;; program's run) and the RATIONAL arithmetic whose every product normalised
+;;; through GCD.  The operands stay small: M < 2^53 and 10^K for the usual K,
+;;; so the work is a two-word multiply and a shift.  Same exact value, same
+;;; rounding, so the digits cannot differ — the probe table in Pl/t/float-
+;;; string-01.t holds every class (ties, carries, powers of ten, denormals).
+
+(defparameter *p-pow10*
+  (let ((v (make-array 360)))
+    (dotimes (i 360 v) (setf (svref v i) (expt 10 i))))
+  "10^0 .. 10^359 — every scale a double's %.Ng / %.Nf can need for N <= 40.")
+
+(declaim (inline %p-pow10))
+(defun %p-pow10 (k)
+  (if (< k 360) (svref (the simple-vector *p-pow10*) k) (expt 10 k)))
+
+(defun %p-scaled-round (m e k)
+  "round-half-to-even of the exact value M * 2^E * 10^K (M, E from
+   INTEGER-DECODE-FLOAT; K any integer), as an integer."
+  (declare (type unsigned-byte m) (type fixnum e k))
+  (let ((num (if (>= k 0) (* m (%p-pow10 k)) m)))
+    (cond
+      ((and (>= k 0) (>= e 0)) (ash num e))
+      ((>= k 0)
+       ;; Divide by 2^-E: the quotient is a shift, the tie test a mask.
+       (let* ((s (- e))
+              (q (ash num (- s)))
+              (r (ldb (byte s 0) num))
+              (half (ash 1 (1- s))))
+         (if (or (> r half) (and (= r half) (oddp q))) (1+ q) q)))
+      ((>= e 0) (values (round (ash num e) (%p-pow10 (- k)))))
+      (t (values (round num (ash (%p-pow10 (- k)) (- e))))))))
+
+(defun %p-float-digits (a prec)
+  "The PREC significant decimal digits of the positive finite double A, rounded
+   the way C's `%.<PREC>e' / `%.<PREC>g' round them, and the decimal exponent
+   of the ROUNDED value: (values DIGITS EXP10), 10^(PREC-1) <= DIGITS < 10^PREC,
+   A ~= DIGITS * 10^(EXP10 - PREC + 1).
+
+   The exponent is the ROUNDED one because C chooses %g's style from it, and it
+   is computed EXACTLY, not by (floor (log a 10)):
+   * `(log 1d15 10.0d0)' is 14.999999999999998, so FLOOR said 14 and 1e15
+     printed 1000000000000000 where perl prints 1e+15 (#1012) — here the log is
+     only the first guess, corrected against the digit count, at most one step;
+   * the rounding carry is load-bearing: 999999999999999.9 rounds up to 1e15
+     and perl prints `1e+15', 9.999999999999999e-5 prints `0.0001'."
+  (multiple-value-bind (m e) (integer-decode-float a)
+    (let ((lo (%p-pow10 (1- prec)))
+          (hi (%p-pow10 prec))
+          (p (floor (log a 10.0d0))))
+      (loop
+       (let ((d (%p-scaled-round m e (- (1- prec) p))))
+         (cond ((< d lo) (decf p))
+               ((> d hi) (incf p))
+               ((= d hi) (return (values lo (1+ p))))
+               ;; D = 10^(PREC-1) is ambiguous: either P is right, or P is one
+               ;; too HIGH and the value just below 10^P rounded UP to it
+               ;; (9.99999999999999e-5, whose log said -4).  One digit finer
+               ;; decides: if that also carries, P stands.
+               ((= d lo)
+                (let ((d2 (%p-scaled-round m e (- prec p))))
+                  (return (if (>= d2 hi) (values lo p) (values d2 (1- p))))))
+               (t (return (values d p)))))))))
+
 (defun %p-decimal-exponent (a prec)
   "The decimal exponent C's `%.<PREC>g' — and therefore perl's `%.15g'
    stringification — branches on: the exponent of the positive real A after it
-   has been ROUNDED TO PREC SIGNIFICANT DIGITS, computed exactly.
+   has been ROUNDED TO PREC SIGNIFICANT DIGITS, computed exactly (see
+   %p-float-digits, whose second value it is)."
+  (nth-value 1 (%p-float-digits a prec)))
 
-   BOTH halves are load-bearing, and each has a divergence behind it.
-
-   * The obvious `(floor (log a 10d0))' is wrong AT the powers of ten:
-     `(log 1d15 10.0d0)' is 14.999999999999998, so FLOOR gave 14, the test
-     `(< 14 15)' passed, and 1e15 printed 1000000000000000 where perl prints
-     1e+15 (#1012).  The log is only a starting point here; the two loops
-     correct it against exact rational powers of ten and run at most once.
-   * The ROUNDING is not decoration: C chooses the style from the exponent of
-     the CONVERTED value, so 999999999999999.9 rounds up to 1e15 and perl
-     prints `1e+15' while 999999999999999.0 prints its own digits, and
-     9.999999999999999e-5 prints `0.0001' rather than an exponential form."
-  (let* ((r (rational a))
-         (e (floor (log a 10.0d0))))
-    (loop while (< r (expt 10 e)) do (decf e))
-    (loop while (>= r (expt 10 (1+ e))) do (incf e))
-    (if (>= (round r (expt 10 (- e (1- prec)))) (expt 10 prec)) (1+ e) e)))
-
-(defun %p-exponential-15 (v exp10)
-  "perl's `%.15g' EXPONENTIAL form for the non-zero float V, whose exact
-   decimal exponent is EXP10: 15 significant digits, trailing zeros stripped,
-   `e+NN' with at least two exponent digits.
-
-   The mantissa is rounded in RATIONALS rather than by `~,14E', because SBCL's
-   ~E does NOT renormalise a mantissa that rounds up to 10: it renders
-   999999999999999.9 as `10.00000000000000d+14', which cleaned up to `10e+14'
-   where perl prints `1e+15'.  The old code carried a comment claiming ~E
-   bumped the exponent; it does not, and nothing noticed because such values
-   used to take the fixed branch (#1012).  EXP10 already accounts for that
-   carry — see %p-decimal-exponent — so the rounding here yields exactly 15
-   digits."
-  (let* ((digits (round (abs (rational v)) (expt 10 (- exp10 14))))
-         (s (write-to-string digits))
-         (tail (string-right-trim "0" (subseq s 1)))
-         (mant (if (string= tail "") (subseq s 0 1)
-                   (concatenate 'string (subseq s 0 1) "." tail))))
-    (format nil "~:[~;-~]~Ae~:[+~;-~]~2,'0D"
-            (minusp v) mant (minusp exp10) (abs exp10))))
+(defun %p-float-g15-string (v)
+  "perl's `%.15g' text of the non-zero finite double V: 15 significant digits,
+   trailing zeros stripped; FIXED notation when the rounded exponent is in
+   [-4, 15), else `D.DDDe+NN' with at least two exponent digits."
+  (multiple-value-bind (d p) (%p-float-digits (abs v) 15)
+    (let* ((s (%p-fixnum-string-digits d))          ; 15 digits, fresh
+           (n (1+ (or (position #\0 s :test #'char/= :from-end t) 0)))
+           (neg (minusp v)))
+      (cond
+        ((and (>= p 0) (< p 15))
+         (if (<= n (1+ p))
+             (if neg (concatenate 'string "-" (subseq s 0 (1+ p))) (subseq s 0 (1+ p)))
+             (concatenate 'string (if neg "-" "") (subseq s 0 (1+ p)) "." (subseq s (1+ p) n))))
+        ((and (< p 0) (>= p -4))
+         (concatenate 'string (if neg "-0." "0.")
+                      (make-string (- (1+ p)) :initial-element #\0) (subseq s 0 n)))
+        (t
+         (format nil "~:[~;-~]~A~:[~;.~]~Ae~:[+~;-~]~2,'0D"
+                 neg (char s 0) (> n 1) (subseq s 1 n) (minusp p) (abs p)))))))
 
 (defun stringify-value (v)
   "Convert a raw value to string"
@@ -4370,20 +4423,12 @@
                (if (plusp v) "Inf" "-Inf"))
        #+sbcl ((sb-ext:float-nan-p v) "NaN")
        ((zerop v) "0")
-       (t
-        ;; Perl's %.15g: use fixed notation when -4 <= exp < 15, else exponential
-        (let* ((abs-v (abs v))
-               (exp10 (%p-decimal-exponent abs-v 15)))
-          (if (and (>= exp10 -4) (< exp10 15))
-              ;; Fixed notation, %.15g: 15 significant digits total, so the
-              ;; number of fraction digits is (15 - 1 - exp10).  Without an
-              ;; explicit precision, ~F prints the full round-trip form
-              ;; (0.1+0.2 -> 0.30000000000000004 instead of Perl's 0.3).
-              (let* ((digits (max 0 (- 14 exp10)))
-                     (s (format nil "~,VF" digits v))
-                     (c (string-right-trim "." (string-right-trim "0" s))))
-                (if (or (string= c "") (string= c "-")) "0" c))
-              (%p-exponential-15 v exp10))))))
+       ;; An INTEGRAL double below 1e15 prints as its integer (%.15g keeps
+       ;; every digit and there is no fraction) — the common case, no digit
+       ;; generation at all.
+       ((and (< (abs v) 1d15) (= v (ffloor v)))
+        (%p-fixnum-string-digits (truncate v)))
+       (t (%p-float-g15-string v))))
     ((numberp v) (write-to-string v))
     ;; A box in a RAW slot: the same reference box-sv would print, so it must
     ;; print the same word and the same (referent) address — #163.
@@ -6435,10 +6480,13 @@
    so '%.0f' of 2.5 gave 3 and of 0.5 gave 1; C/Perl give 2 and 0.)  Using
    (rational num) makes the scale-by-10^prec exact, so ROUND — which is itself
    round-half-to-even — produces the C result without float-multiply error."
+  ;; The exact scale-and-round is %p-scaled-round on the decoded double: the
+  ;; same value as (round (* (rational num) 10^prec)) without the ratio's GCD
+  ;; normalisation (task #2510).
   (let* ((prec    (or precision 6))
-         (exact   (rational (abs num)))      ; exact rational value of the double
-         (scale   (expt 10 prec))
-         (rounded (round (* exact scale))))  ; CL ROUND = round-half-to-even
+         (scale   (%p-pow10 prec))
+         (rounded (multiple-value-bind (m e) (integer-decode-float (abs num))
+                    (%p-scaled-round m e prec))))
     (if (zerop prec)
         (format nil "~D" rounded)
         (multiple-value-bind (int frac) (floor rounded scale)
