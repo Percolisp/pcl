@@ -4468,6 +4468,8 @@
      ;; a qr from what was written.
      (let* ((mods (p-regex-match-modifiers v))
             (mod-str (concatenate 'string
+                                  (cond ((getf mods :aa) "aa") ((getf mods :a) "a")
+                                        ((getf mods :u) "u") ((getf mods :l) "l") (t ""))
                                   (if (getf mods :m) "m" "")
                                   (if (getf mods :s) "s" "")
                                   (if (getf mods :i) "i" "")
@@ -6089,21 +6091,106 @@
         ;; 2 or 3 arg form: extract
         (subseq s (min st slen) end-pos))))
 
-(defun p-lc (str)
-  "Perl lc - lowercase
-   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
-  (string-downcase (to-string str)))
+;;; ---- Case mapping by REGIME (task #2092; docs/ir-spec.md §3.2h) ---------
+;;;
+;;; perl maps chars 128-255 by one of two regimes.  Under `unicode_strings`
+;;; (`use v5.12`+, `use feature 'unicode_strings'`) every string gets Unicode
+;;; rules — the emitter passes REGIME :u at such a site.  Everywhere else
+;;; (REGIME nil, perl's /d) a char 128-255 gets Unicode rules only when the
+;;; string carries perl's UTF-8 flag, which PCL does not keep (#1389), so the
+;;; flag is APPROXIMATED from the data: a string whose high chars all sit in
+;;; well-formed UTF-8 sequences is undecoded BYTES and gets ASCII rules (its
+;;; high chars are left alone), anything else is decoded text and gets Unicode
+;;; rules.  Raw UTF-8 bytes lowercased at a /d site therefore stay valid UTF-8,
+;;; as in perl; the two known errors are in not-supported.md "The per-scalar
+;;; UTF-8 flag".  ONE mapping function for the five builtins and the \L \U \l
+;;; \u \F escapes (which lower to the same calls).
 
-(defun p-uc (str)
-  "Perl uc - uppercase
-   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
-  (string-upcase (to-string str)))
+(defun %p-bytes-look-utf8-p (s &optional (start 0))
+  "Do the chars of S from START on read as well-formed UTF-8 BYTES?  True when
+   every char >= #x80 is a byte (<= #xFF) that sits in a complete, shortest-
+   form UTF-8 sequence encoding a scalar value (no overlong, no surrogate,
+   <= U+10FFFF).  A truncated tail is NOT valid.  Chars below #x80 are
+   skipped; START lets a caller skip an ASCII prefix it already scanned."
+  (let ((n (length s)) (i start))
+    (declare (fixnum n i))
+    (loop
+     (when (>= i n) (return t))
+     (let ((c (char-code (char s i))))
+       (cond
+         ((< c #x80) (incf i))
+         ((> c #xFF) (return nil))
+         (t
+          (let ((need (cond ((<= #xC2 c #xDF) 1)
+                            ((<= #xE0 c #xEF) 2)
+                            ((<= #xF0 c #xF4) 3)
+                            (t (return nil))))
+                (cp 0))
+            (declare (fixnum need cp))
+            (when (>= (+ i need) n) (return nil))
+            (setf cp (logand c (case need (1 #x1F) (2 #x0F) (t #x07))))
+            (loop for k from 1 to need
+                  for b = (char-code (char s (+ i k)))
+                  do (if (<= #x80 b #xBF)
+                         (setf cp (logior (ash cp 6) (logand b #x3F)))
+                         (return-from %p-bytes-look-utf8-p nil)))
+            (when (or (< cp (case need (1 #x80) (2 #x800) (t #x10000)))
+                      (<= #xD800 cp #xDFFF)
+                      (> cp #x10FFFF))
+              (return nil))
+            (incf i (1+ need)))))))))
 
-(defun p-fc (str)
-  "Perl fc - fold case for case-insensitive comparison.
-   Uses string-downcase as approximation (full Unicode folding would need ICU).
+(defun %p-case-unicode-p (s regime first-only)
+  "Does this call map S by Unicode rules?  REGIME :u always; REGIME nil (/d)
+   when S's high chars do NOT read as UTF-8 bytes.  FIRST-ONLY: only the
+   first char is mapped, so a string whose first char is ASCII never needs
+   the sniff.  Any other REGIME is a compiler bug and DIES (rule 12)."
+  (case regime
+    (:u t)
+    ((nil)
+     (let ((hi (if first-only
+                   (and (plusp (length s)) (>= (char-code (char s 0)) #x80) 0)
+                   (position-if (lambda (c) (>= (char-code c) #x80)) s))))
+       (and hi (not (%p-bytes-look-utf8-p s hi)))))
+    (t (error "PCL: case-mapping regime ~S is not :u or nil" regime))))
+
+(defun %p-case-map (str op regime)
+  "lc/uc/fc/lcfirst/ucfirst (OP :lc :uc :fc :lcfirst :ucfirst) of STR under
+   REGIME (see the section comment).  Always a fresh string."
+  (let* ((s (to-string str))
+         (first-only (or (eq op :lcfirst) (eq op :ucfirst)))
+         (up (or (eq op :uc) (eq op :ucfirst))))
+    (if (%p-case-unicode-p s regime first-only)
+        (cond ((not first-only) (if up (string-upcase s) (string-downcase s)))
+              ((zerop (length s)) s)
+              (t (concatenate 'string
+                              (if up (string-upcase (subseq s 0 1))
+                                  (string-downcase (subseq s 0 1)))
+                              (subseq s 1))))
+        (let* ((r (copy-seq s))
+               (end (if first-only (min 1 (length r)) (length r))))
+          (declare (fixnum end))
+          (dotimes (i end r)
+            (let ((c (char r i)))
+              (if up
+                  (when (char<= #\a c #\z) (setf (char r i) (code-char (- (char-code c) 32))))
+                  (when (char<= #\A c #\Z) (setf (char r i) (code-char (+ (char-code c) 32)))))))))))
+
+(defun p-lc (str &optional regime)
+  "Perl lc — lowercase, by REGIME (:u = unicode_strings site; nil = /d).
    Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
-  (string-downcase (to-string str)))
+  (%p-case-map str :lc regime))
+
+(defun p-uc (str &optional regime)
+  "Perl uc — uppercase, by REGIME (:u = unicode_strings site; nil = /d).
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
+  (%p-case-map str :uc regime))
+
+(defun p-fc (str &optional regime)
+  "Perl fc — fold case, by REGIME (:u = unicode_strings site; nil = /d).
+   The Unicode arm is the simple lowercase mapping (full folding: #1036).
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
+  (%p-case-map str :fc regime))
 
 (defun p-chomp-single (s)
   "Chomp a single string, returns (new-string . removed-count).
@@ -6398,21 +6485,15 @@
       ;; default -> octal
       (t (or (parse-integer (%strip-underscores s) :radix 8 :junk-allowed t) 0)))))
 
-(defun p-lcfirst (str)
-  "Perl lcfirst - lowercase first character
+(defun p-lcfirst (str &optional regime)
+  "Perl lcfirst — lowercase the first character, by REGIME (see p-lc).
    Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
-  (let ((s (to-string str)))
-    (if (> (length s) 0)
-        (concatenate 'string (string-downcase (subseq s 0 1)) (subseq s 1))
-        s)))
+  (%p-case-map str :lcfirst regime))
 
-(defun p-ucfirst (str)
-  "Perl ucfirst - uppercase first character
+(defun p-ucfirst (str &optional regime)
+  "Perl ucfirst — uppercase the first character, by REGIME (see p-lc).
    Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
-  (let ((s (to-string str)))
-    (if (> (length s) 0)
-        (concatenate 'string (string-upcase (subseq s 0 1)) (subseq s 1))
-        s)))
+  (%p-case-map str :ucfirst regime))
 
 (defun p-quotemeta (str)
   "Perl quotemeta - escape non-word characters.
@@ -22554,7 +22635,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-3080"
+(defparameter *pcl-cache-generation* "v2-3180"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -30489,13 +30570,16 @@ buffer's fill-pointer; everything else falls back to file-length."
    `xx` is its own modifier, not `x` written twice: /xx additionally ignores
    unescaped whitespace INSIDE bracketed character classes (task #179).  The
    per-character loop below cannot see that — a second x just re-sets :x — so
-   count them and set :xx as well."
-  (let ((result nil) (x-count 0))
+   count them and set :xx as well.  `aa` likewise (task #2092): it must
+   survive into a qr's stringification, where perl prints two a's."
+  (let ((result nil) (x-count 0) (a-count 0))
     (loop for c across mod-string
           do (when (char= c #\x) (incf x-count))
+          (when (char= c #\a) (incf a-count))
           (let ((mod (intern (string-upcase (string c)) :keyword)))
             (setf (getf result mod) t)))
     (when (>= x-count 2) (setf (getf result :xx) t))
+    (when (>= a-count 2) (setf (getf result :aa) t))
     result))
 
 (defun get-closing-delim (open-delim)
@@ -31086,12 +31170,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; /x state each open group restores at its `)' (task #2443).
 (defstruct (pcl-rx-scan (:conc-name rxs-)
                         (:constructor %make-pcl-rx-scan
-                                      (pat &optional x
+                                      (pat &optional x a
                                            &aux (n (length pat))
                                            (out (make-array n :element-type 'character
                                                             :fill-pointer 0
                                                             :adjustable t)))))
-  pat n out (i 0) (in-class nil) (atom nil) (groups nil) (x nil) (xstack nil))
+  ;; A / ASTACK: the /a charset state and what each open group restores
+  ;; (task #2092), kept exactly like X / XSTACK.
+  pat n out (i 0) (in-class nil) (atom nil) (groups nil) (x nil) (xstack nil)
+  (a nil) (astack nil))
 
 (defun %rxs-emit (s x)
   "Append the character or string X to the scan's output."
@@ -31286,14 +31373,69 @@ buffer's fill-pointer; everything else falls back to file-length."
             (fail-end (setf (rxs-atom s) nil (rxs-i s) fail-end)
                       (%rxs-emit s "(?!)"))
             ((and flag-p (char= term #\)))
-             (setf (rxs-x s) newx (rxs-atom s) nil)
+             (setf (rxs-x s) newx (rxs-atom s) nil
+                   (rxs-a s) (%pcl-rx-group-a-flag pat i (rxs-a s)))
              (%rxs-copy s end))
             (t (push (fill-pointer (rxs-out s)) (rxs-groups s))
                (push (rxs-x s) (rxs-xstack s))
+               (push (rxs-a s) (rxs-astack s))
                (setf (rxs-atom s) nil)
                (if flag-p
-                   (progn (setf (rxs-x s) newx) (%rxs-copy s end))
+                   (progn (setf (rxs-x s) newx
+                                (rxs-a s) (%pcl-rx-group-a-flag pat i (rxs-a s)))
+                          (%rxs-copy s end))
                    (%rxs-copy s (1+ i))))))))
+
+(defun %pcl-rx-group-a-flag (pat i cur-a)
+  "The /a state a MODE group header at PAT[I] (`(?a:' `(?^:' `(?u)' …, one
+   %pcl-parse-x-flag-group accepted) selects: an `a' among the ON flags sets
+   it, a `d' `u' or `l' clears it, a `^' resets to the default (clear)
+   before the flags are read; otherwise CUR-A is kept (task #2092)."
+  (let ((a (if (%pcl-rx-at pat (+ i 2) #\^) nil cur-a)))
+    (loop for j from (+ i 2) below (length pat)
+          for c = (char pat j)
+          until (find c "-:)")
+          do (cond ((char= c #\a) (setf a t))
+                   ((find c "dul") (setf a nil))))
+    a))
+
+(defun %pcl-rx-ascii-escape-text (pat i in-class)
+  "Under /a, the rewrite of the escape at PAT[I] when it is \\w \\W \\s \\S
+   \\b or \\B (ASCII-only classes, perlre /a), else NIL.  Inside a class the
+   negated two need a complement cl-ppcre can hold in a class, so they are
+   perl's own POSIX properties; \\b there is a backspace and is left alone,
+   and so is `\\b{…}' (a boundary type, not /a's business).  \\d is not here:
+   cl-ppcre's \\d is already ASCII."
+  (let ((c (and (< (1+ i) (length pat)) (char pat (1+ i))))
+        (w "A-Za-z0-9_")
+        (sp "\\t\\n\\x0B\\f\\r\\x20"))
+    (flet ((bound (same other)
+             (format nil "(?:(?<=[~A])(?~A[~A])|(?<![~A])(?~A[~A]))"
+                     w same w w other w)))
+      (case c
+        (#\w (if in-class w (format nil "[~A]" w)))
+        (#\W (if in-class "\\P{PosixWord}" (format nil "[^~A]" w)))
+        (#\s (if in-class sp (format nil "[~A]" sp)))
+        (#\S (if in-class "\\P{PosixSpace}" (format nil "[^~A]" sp)))
+        (#\b (and (not in-class) (not (%pcl-rx-at pat (+ i 2) #\{)) (bound "!" "=")))
+        (#\B (and (not in-class) (not (%pcl-rx-at pat (+ i 2) #\{)) (bound "=" "!")))
+        (t nil)))))
+
+(defun %pcl-has-a-flag-group (pat)
+  "Does PAT contain an inline mode group that turns /a on (`(?a' `(?^a'
+   `(?ia:' …)?  The cheap pre-test for the /a arm of the rewrite scan."
+  (loop for i from 0 below (max 0 (1- (length pat)))
+        thereis (and (char= (char pat i) #\() (char= (char pat (1+ i)) #\?)
+                     (loop for j from (+ i 2) below (length pat)
+                           for c = (char pat j)
+                           while (or (char= c #\^) (find c "imsxnpdula"))
+                           thereis (char= c #\a)))))
+
+(defun %pcl-has-ascii-class-escape (pat)
+  "Does PAT contain \\w \\W \\s \\S \\b or \\B -- what /a rewrites?"
+  (loop for i from 0 below (max 0 (1- (length pat)))
+        thereis (and (char= (char pat i) #\\)
+                     (find (char pat (1+ i)) "wWsSbB") t)))
 
 (defun %pcl-rx-scan-step (s)
   "Advance the scan by one unit: an escape, a POSIX `[:name:]' or a
@@ -31307,9 +31449,12 @@ buffer's fill-pointer; everything else falls back to file-length."
         (and (not (rxs-in-class s)) (%pcl-rx-quantifier-end pat i))
       (cond ((char= c #\\)
              (unless (rxs-in-class s) (setf (rxs-atom s) (fill-pointer (rxs-out s))))
-             (multiple-value-bind (text end) (%pcl-rx-escape-text pat i (rxs-in-class s))
-               (%rxs-emit s text)
-               (setf (rxs-i s) end)))
+             (let ((ascii (and (rxs-a s) (%pcl-rx-ascii-escape-text pat i (rxs-in-class s)))))
+               (if ascii
+                   (progn (%rxs-emit s ascii) (setf (rxs-i s) (+ i 2)))
+                   (multiple-value-bind (text end) (%pcl-rx-escape-text pat i (rxs-in-class s))
+                     (%rxs-emit s text)
+                     (setf (rxs-i s) end)))))
             ;; An inner `[:name:]' is ONE unit: its brackets neither open nor
             ;; close a class.  The POSIX pass has already replaced every valid
             ;; name, so what reaches here is invalid Perl — but mis-tracking it
@@ -31328,12 +31473,13 @@ buffer's fill-pointer; everything else falls back to file-length."
             (t (setf (rxs-atom s)
                      (cond ((char= c #\))
                             (when (rxs-xstack s) (setf (rxs-x s) (pop (rxs-xstack s))))
+                            (when (rxs-astack s) (setf (rxs-a s) (pop (rxs-astack s))))
                             (pop (rxs-groups s)))
                            ((find c "|^$") nil)
                            (t (fill-pointer (rxs-out s)))))
                (%rxs-copy s (1+ i)))))))
 
-(defun %pcl-rewrite-scan (pat &optional x)
+(defun %pcl-rewrite-scan (pat &optional x a)
   "The ONE forward rewrite scan over a pattern (it tracks whether each
    position is inside a bracket class, and where the last ATOM starts):
    \\h \\H \\v \\V \\R \\X \\N and the property escapes become forms cl-ppcre
@@ -31344,12 +31490,16 @@ buffer's fill-pointer; everything else falls back to file-length."
    already quoted stays literal.  Only a pattern that passes one of the four
    cheap pre-tests is scanned at all; `(*FAIL)' `(*F)' become `(?!)' (#2386).
    X true = the pattern is /x: blanks and `#…' comments are no atoms,
-   and inline (?x) scopes are tracked (task #2443)."
+   and inline (?x) scopes are tracked (task #2443).
+   A true = the pattern is /a (or /aa): \\w \\W \\s \\S \\b \\B are ASCII-only
+   (%pcl-rx-ascii-escape-text), and inline (?a) / (?^…) scopes are tracked
+   the same way (task #2092)."
   (if (not (or (%pcl-has-hv-escape pat)
                (%pcl-has-possessive pat (or x (%pcl-has-x-modifier pat)))
-               (%pcl-has-loose-counted pat) (%pcl-has-fail-verb pat)))
+               (%pcl-has-loose-counted pat) (%pcl-has-fail-verb pat)
+               (and (or a (%pcl-has-a-flag-group pat)) (%pcl-has-ascii-class-escape pat))))
       pat
-      (let ((s (%make-pcl-rx-scan pat x)))
+      (let ((s (%make-pcl-rx-scan pat x a)))
         (loop while (< (rxs-i s) (rxs-n s)) do (%pcl-rx-scan-step s))
         (coerce (rxs-out s) 'simple-string))))
 
@@ -31384,7 +31534,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (t (concatenate 'string "(?" kept kept-neg close)))))
    :simple-calls t))
 
-(defun perl-regex-to-ppcre (pattern &optional extended)
+(defun perl-regex-to-ppcre (pattern &optional extended ascii)
   "Convert Perl regex escape sequences to cl-ppcre compatible form.
    cl-ppcre does not handle \\x{HHHH} (Perl hex escapes with braces).
    Convert \\x{HHHH} to the literal Unicode character.
@@ -31393,7 +31543,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    Also converts \\Q...\\E metachar-quoting blocks (not supported by cl-ppcre)
    by applying ppcre:quote-meta-chars to the content.
    EXTENDED true = the pattern is compiled under /x (or /xx): the rewrite
-   scan must know it (task #2443)."
+   scan must know it (task #2443).
+   ASCII true = the pattern is compiled under /a (or /aa): so must the
+   rewrite scan (task #2092)."
   ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these.
   ;; The stripper ANNOUNCES; see %pcl-strip-regex-code-blocks.
   (let* ((pat (%pcl-strip-regex-code-blocks pattern))
@@ -31443,7 +31595,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; left to confuse the in-class scan).  The same scan turns a POSSESSIVE
          ;; quantifier into the atomic group perl defines it as (task #2380).
          ;; See %pcl-rewrite-scan.
-         (pat (%pcl-rewrite-scan pat extended))
+         (pat (%pcl-rewrite-scan pat extended ascii))
          ;; The two flag-group passes run AFTER the scan (task #2443): the scan
          ;; reads each group's (?^…) / (?x…) header to track /x scopes, and a
          ;; group quoted by \Q is no header for either of them.
@@ -31547,7 +31699,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; after, so it pays nothing; a failed compile caches nothing.
           (or (gethash (list mods raw) *p-regex-op-cache*)
               (let ((op (make-p-regex-match
-                         :pattern (perl-regex-to-ppcre raw (find #\x mods))
+                         :pattern (perl-regex-to-ppcre raw (find #\x mods) (find #\a mods))
                          :source raw
                          :modifiers (parse-regex-modifiers mods))))
                 (%p-regex-compile-eagerly op)
@@ -31673,7 +31825,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (or (gethash (list flags raw) *p-regex-op-cache*)
       (setf (gethash (list (%pcl-memo-key flags) (%pcl-memo-key raw))
                      *p-regex-op-cache*)
-            (make-p-regex-match :pattern (perl-regex-to-ppcre raw (find #\x flags))
+            (make-p-regex-match :pattern (perl-regex-to-ppcre raw (find #\x flags) (find #\a flags))
                                 :source raw
                                 :modifiers (parse-regex-modifiers flags)))))
 
@@ -31716,7 +31868,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    scanner-cache lookup (a real compile once per distinct pattern text).  A
    user-defined \\p{IsFoo} is resolved in the package current AT THE qr."
   (%p-regex-compile-eagerly
-   (make-p-regex-match :pattern (perl-regex-to-ppcre raw (find #\x flags))
+   (make-p-regex-match :pattern (perl-regex-to-ppcre raw (find #\x flags) (find #\a flags))
                        :source raw
                        :modifiers (parse-regex-modifiers flags))))
 
@@ -33051,7 +33203,8 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((holder (p-subst-op-%compiled op)))
     (or (car holder)
         (let* ((pattern (perl-regex-to-ppcre (p-subst-op-pattern op)
-                                             (member :x (p-subst-op-modifiers op))))
+                                             (member :x (p-subst-op-modifiers op))
+                                             (member :a (p-subst-op-modifiers op))))
                (raw-replacement (p-subst-op-replacement op))
                (modifiers (p-subst-op-modifiers op))
                (eval-p (and (or (member :e modifiers) (functionp raw-replacement)) t))

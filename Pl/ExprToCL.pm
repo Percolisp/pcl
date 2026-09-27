@@ -2168,6 +2168,9 @@ sub _class_name_bareword {
 # that is the point.
 my %LAYER_SENSITIVE_OPS = map { $_ => 1 } qw(p-open p-backtick);
 
+# The ops whose chars 128-255 map by the site's REGIME (task #2092).
+my %CASE_MAP_OPS = map { $_ => 1 } qw(p-lc p-uc p-lcfirst p-ucfirst p-fc);
+
 # Wrap CALL in the layers a `use open` puts in force AT THIS SITE, or hand it
 # back untouched.  The pragma is LEXICAL and compile-time, so the Environment's
 # scope stack already carries it (set by the `use open` arm in Pl::Parser,
@@ -2900,6 +2903,12 @@ sub gen_funcall_form {
   # `use open`'s layers are LEXICAL, so they go on THIS site (task #1222).
   $call = $self->_wrap_default_layers($cl_func, $call,
                                       $self->expr_o->get_a_node($kids->[0]));
+  # The case-mapping REGIME is lexical too (task #2092; ir-spec §3.2h): a
+  # `unicode_strings` site passes :u, every other site is perl's /d and
+  # emits the call unchanged.
+  push @$call, ':u'
+    if $CASE_MAP_OPS{$cl_func} && @args == 1
+    && $self->_unicode_strings_here($self->expr_o->get_a_node($kids->[0]));
 
   # 'my'/'our' in expression context is an identity.
   if (($func_name eq 'my' || $func_name eq 'our') && @args == 1) {
@@ -3734,11 +3743,29 @@ my %PCL_EXPORTED_GLOBALS = map { $_ => 1 }
 # the answer Parser2 published for the statement being lowered.
 sub _strict_refs_here {
   my ($self, $tok) = @_;
+  return $self->_lexical_region_here($tok, '_strict_refs');
+}
+
+# The same question for `unicode_strings` (task #2092; ir-spec §3.2h): the
+# case-mapping regime of the site.  Regions from
+# Pl::Parser::unicode_strings_regions_of, published beside strict refs.
+sub _unicode_strings_here {
+  my ($self, $tok) = @_;
+  return $self->_lexical_region_here($tok, '_unicode_strings');
+}
+
+# ONE reading of a lexical-region pragma at a site, for the two published
+# region sets (KEY `_strict_refs` / `_unicode_strings`: lex_home carries
+# KEY_regions and KEY_stmt).  A token of THIS document (the one whose
+# refaddr is `_strict_refs_doc`) is placed by its own location; any other
+# (a fragment re-parse, a synthesized Word) takes the statement's answer.
+sub _lexical_region_here {
+  my ($self, $tok, $key) = @_;
   my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
                 && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
   return 0 unless $parser;
   my $lh = $parser->lex_home;
-  my $regions = $lh->{_strict_refs_regions};
+  my $regions = $lh->{"${key}_regions"};
   return 0 unless $regions && @$regions;
   if (Scalar::Util::blessed($tok) && $tok->can('top') && $tok->can('location')) {
     my $top = $tok->top;
@@ -3747,7 +3774,7 @@ sub _strict_refs_here {
       return Pl::Parser::strict_refs_at($regions, $loc) if $loc;
     }
   }
-  return $lh->{_strict_refs_stmt} ? 1 : 0;
+  return $lh->{"${key}_stmt"} ? 1 : 0;
 }
 
 # The PARENT of each node of the current expression tree, built once per tree
@@ -5820,8 +5847,16 @@ sub _process_dq_escape {
 # -- never in-band markers in decoded text, which is how `"C:\\Users"` used to
 # print `C:SERS` (the decode turned `\\U` into `\U`, then a second pass over
 # the decoded text read it as \U).  ir-spec §3.2g.
+#
+# UNICODE true = a `unicode_strings` site (task #2092, ir-spec §3.2h).  The
+# fold is the compile-time twin of the runtime's %p-case-map and applies the
+# SAME rule to the literal's decoded text: Unicode rules at a unicode_strings
+# site; elsewhere (perl's /d) ASCII rules when the literal's chars 128-255
+# all read as well-formed UTF-8 bytes (_looks_utf8_bytes), Unicode otherwise.
+# (Not the transpiling perl's own flag: source text reaches here flagged or
+# not by accident of how it was read, which folded raw bytes -- measured.)
 sub _apply_case_escapes {
-  my $src = shift;
+  my ($src, $unicode) = @_;
   my @tokens;   # [cmd => 'U'] or [text => '...'], in source order
   while ($src =~ /\G(?:\\([ULulQFE])|\\($DQ_ESCAPE_RX)|(\\|[^\\]+))/gc) {
     if (defined $1) {
@@ -5832,6 +5867,9 @@ sub _apply_case_escapes {
       else { push @tokens, [text => $text] }
     }
   }
+  # ONE verdict for the whole literal (perl's flag is per STRING).
+  my $uni = $unicode
+    || !_looks_utf8_bytes(join '', map { $_->[0] eq 'text' ? $_->[1] : () } @tokens);
   my $result  = '';
   my @modes   = ();     # stack: 'U', 'L', 'Q', 'F'
   my $pending = undef;  # 'u' or 'l' -- single-char transform for next char
@@ -5853,24 +5891,51 @@ sub _apply_case_escapes {
     } elsif ($pending && length $val) {
       # The pending \u/\l applies to the FIRST character only, overriding the
       # current mode stack for that one char.
-      $result .= $pending eq 'u' ? uc(substr($val, 0, 1)) : lc(substr($val, 0, 1));
+      $result .= _case_fold($pending eq 'u' ? 'U' : 'L', substr($val, 0, 1), $uni);
       $pending = undef;
-      $result .= _apply_mode(\@modes, substr($val, 1)) if length($val) > 1;
+      $result .= _apply_mode(\@modes, substr($val, 1), $uni) if length($val) > 1;
     } else {
-      $result .= _apply_mode(\@modes, $val);
+      $result .= _apply_mode(\@modes, $val, $uni);
     }
   }
   return $result;
 }
 
+# Do TEXT's chars 128-255 all sit in well-formed UTF-8 sequences (and none is
+# above 255)?  The Perl twin of the runtime's %p-bytes-look-utf8-p: shortest
+# form, no surrogates, <= U+10FFFF, a truncated tail is NOT valid.
+sub _looks_utf8_bytes {
+  my ($text) = @_;
+  return 0 if $text =~ /[^\x00-\xFF]/;
+  return $text =~ /\A(?:[\x00-\x7F]
+                      |[\xC2-\xDF][\x80-\xBF]
+                      |\xE0[\xA0-\xBF][\x80-\xBF]
+                      |[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}
+                      |\xED[\x80-\x9F][\x80-\xBF]
+                      |\xF0[\x90-\xBF][\x80-\xBF]{2}
+                      |[\xF1-\xF3][\x80-\xBF]{3}
+                      |\xF4[\x80-\x8F][\x80-\xBF]{2})*\z/x ? 1 : 0;
+}
+
+# One case mode (U, or L/F: fc ~ lc, #1036) over TEXT: Unicode rules when UNI
+# (the flag is forced on a copy so the transpiling perl applies them), ASCII
+# rules otherwise (chars 128-255 left alone).
+sub _case_fold {
+  my ($mode, $text, $uni) = @_;
+  if ($uni) {
+    utf8::upgrade($text);
+    return $mode eq 'U' ? uc($text) : lc($text);
+  }
+  if ($mode eq 'U') { $text =~ tr/a-z/A-Z/ } else { $text =~ tr/A-Z/a-z/ }
+  return $text;
+}
+
 # Apply the current mode stack to a piece of text
 sub _apply_mode {
-  my ($modes, $text) = @_;
+  my ($modes, $text, $uni) = @_;
   return $text unless @$modes && length($text);
   for my $mode (@$modes) {
-    if ($mode eq 'U') { $text = uc($text); }
-    elsif ($mode eq 'L') { $text = lc($text); }
-    elsif ($mode eq 'F') { $text = lc($text); }  # fc ≈ lc for ASCII
+    if ($mode eq 'U' || $mode eq 'L' || $mode eq 'F') { $text = _case_fold($mode, $text, $uni); }
     elsif ($mode eq 'Q') { $text = quotemeta($text); }
   }
   return $text;
@@ -5943,7 +6008,8 @@ sub convert_perl_string_form {
   }
 
   # Escapes and the case-changing escapes, in ONE scan of the source (#2441)
-  $content = _apply_case_escapes($content);
+  $content = _apply_case_escapes($content,
+    $content =~ /\\[ULulF]/ ? $self->_unicode_strings_here(undef) : 0);
 
   return _cl_string_literal_form($content);
 }

@@ -9540,6 +9540,53 @@ sub strict_refs_at {
   return $ex ? $ex->[2] : $im ? $im->[2] : 0;
 }
 
+# Every `unicode_strings` REGION in a document (task #2092; docs/ir-spec.md
+# §3.2h) — the strict-refs shape above, because the feature is LEXICAL in the
+# same way and is asked at a SITE (a case-mapping call) that may sit in a sub
+# body lowered before the pragma's statement is reached.  Each region runs to
+# the end of its enclosing block and sets the feature on (1) or off (0); the
+# LATEST-starting region containing a site decides (every region is marked
+# explicit, so strict_refs_at's rule reads it unchanged).  perl's spellings,
+# probed 5.40.3:
+#   use VERSION            — REPLACES the feature set: on iff VERSION >= 5.011
+#                            (`use feature "unicode_strings"; use 5.006;` is OFF)
+#   use feature LIST       — `unicode_strings`, `:all`, a `:5.NN` bundle, NN >= 11
+#   no feature LIST        — the same names turn it off; a bare `no feature`
+#                            resets to the default bundle (off); `:5.10` and
+#                            `:default` do not touch it
+sub unicode_strings_regions_of {
+  my ($doc) = @_;
+  my @regions;
+  for my $stmt (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    my $loc = $stmt->location or next;
+    my $type = $stmt->type // 'use';
+    next if $type ne 'use' && $type ne 'no';
+    my $val;
+    my $v = $stmt->version // '';
+    if ($type eq 'use' && $v ne '') {
+      my $n = _perl_version_number($v);
+      next if !defined $n;
+      $val = $n >= 5.011 ? 1 : 0;
+    }
+    elsif (($stmt->module // '') eq 'feature') {
+      my @args = _include_string_args($stmt);
+      my $hit = !@args && $type eq 'no';
+      for my $w (map { split ' ' } @args) {
+        $hit = 1 if $w eq 'unicode_strings' || $w eq ':all'
+                 || ($w =~ /^:5\.0*(\d+)/ && $1 >= 11);
+      }
+      next if !$hit;
+      $val = $type eq 'use' ? 1 : 0;
+    }
+    else { next }
+    push @regions, [ [ $loc->[0], $loc->[1] ], _open_region_end($stmt), $val, 1 ];
+  }
+  return \@regions;
+}
+
+# Is `unicode_strings` in force at LOC?  The latest-starting region wins.
+sub unicode_strings_at { return strict_refs_at(@_) }
+
 # Process use/require statements
 sub _process_include_statement {
 
