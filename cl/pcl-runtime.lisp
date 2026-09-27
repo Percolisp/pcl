@@ -30782,7 +30782,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    its character, `\\1' `\\012' every digit, `\\g1' `\\g-1' the number;
    anything else is the backslash and one character.  The whole escape is
    ONE unit: `\\c[' opens no class and the `{100}' of `\\x{100}' is no
-   counted quantifier.  An unterminated brace is the pair alone."
+   counted quantifier.  An unterminated brace is the pair alone.  But `\\N'
+   followed by a VALID counted quantifier is `\\N' alone — perl reads
+   `\\N{3,4}' as \"not a newline\" quantified, never a named character
+   (task #2471; the counted grammar is %pcl-rx-counted-end's)."
   (let ((n (length pat)) (k (+ i 2)))
     (if (>= (1+ i) n)
         n
@@ -30793,7 +30796,9 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (or (position-if-not (lambda (ch) (digit-char-p ch radix)) pat
                                         :start (min from n))
                        n)))
-            (cond ((and (< k n) (find c "xoNgkpP") (char= (char pat k) #\{))
+            (cond ((and (char= c #\N) (%pcl-rx-at pat k #\{) (%pcl-rx-counted-end pat k))
+                   k)
+                  ((and (< k n) (find c "xoNgkpP") (char= (char pat k) #\{))
                    (through #\}))
                   ((and (< k n) (char= c #\k) (find (char pat k) "<'"))
                    (through (if (char= (char pat k) #\<) #\> #\')))
@@ -30808,8 +30813,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    \\h \\H \\v \\V become classes (a bare element list inside a class); a
    property escape is braced and, outside a class, made a class of its own;
    outside a class \\R is the linebreak group, \\X the grapheme
-   approximation (task #2050) and \\N — not \\N{…}, the named character,
-   handled before this pass — perl's own definition `[^\\n]'.  Inside a
+   approximation (task #2050) and \\N — perl's own definition `[^\\n]'; a
+   `\\N{…}' named character is copied (unresolved, #2199), except that
+   `\\N{3,4}' — a VALID counted quantifier — is \\N quantified (task #2471).  Inside a
    class \\R and \\X are left alone, and that IS perl's answer: there they
    are unrecognised escapes, the LETTERS R and X (probed 5.40.3 — `[\\R]'
    matches \"R\" and not \"\\r\").  Every other escape is copied VERBATIM
@@ -30822,7 +30828,8 @@ buffer's fill-pointer; everything else falls back to file-length."
           (prop-end (values (%pcl-property-escape-text pat i prop-end in-class) prop-end))
           ((and nx (char= nx #\R) (not in-class)) (values +p-linebreak-text+ (+ i 2)))
           ((and nx (char= nx #\X) (not in-class)) (values +p-grapheme-text+ (+ i 2)))
-          ((and nx (char= nx #\N) (not in-class) (not (%pcl-rx-at pat (+ i 2) #\{)))
+          ((and nx (char= nx #\N) (not in-class)
+                (or (not (%pcl-rx-at pat (+ i 2) #\{)) (%pcl-rx-counted-end pat (+ i 2))))
            (values "[^\\n]" (+ i 2)))
           (t (let ((e (%pcl-rx-escape-end pat i))) (values (subseq pat i e) e))))))
 

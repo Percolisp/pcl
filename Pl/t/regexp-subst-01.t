@@ -570,4 +570,19 @@ my $n = 2; (my $s = "xxxxx") =~ s/x{,$n}/Y/g;
 print "$s ", t("xx", qr/^x{,$n}$/), " ", join("|", split /,{,2}/, "a,b,,c,,,d"), "\n";
 PL
 
+# Task #2471: after `\N`, a `{` that opens a VALID counted quantifier makes `\N`
+# the "not a newline" escape, quantified -- `\N{3,4}` is never a named
+# character.  PCL read the braces as a name and never matched.  Literal and
+# interpolated patterns, s///, split; the possessive and lazy forms compose.
+subst_agrees(<<'PL', '\N followed by a counted quantifier is \N quantified, never a named character (#2471)');
+sub t { my ($s, $p) = @_; my $r = eval { $s =~ /$p/ ? "$&|$+[0]" : 0 }; defined $r ? $r : "died" }
+print join(",", t("abbbbc", '\N{3,4}'), t("abbbbc", '\N{ 3 , 4 }'), t("ab\ncd", '\N{2}'),
+    t("abc", '\N{,2}'), t("abbbbc", '\N{3,4}+c'), t("abbbbc", '\N{3,4}?'),
+    t("abbbbc", '^\N{3,}$'), t("a\nb", '\N')), "\n";
+print(("abbbbc" =~ /\N{3,4}/) ? "$&\n" : "0\n");
+print(("ab\nc" =~ /^\N{2}$/m) ? "$&\n" : "0\n");
+my $x = "aXbXXc"; (my $y = $x) =~ s/\N{2}/-/g;
+print "$y ", join("|", split /\N{2}/, "abcdefg"), "\n";
+PL
+
 done_testing();
