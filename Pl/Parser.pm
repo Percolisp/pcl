@@ -506,8 +506,14 @@ sub _desugar_loop_modifiers {
     $list =~ s/\s+$//;
     # A LIST already in parentheses keeps them: `for ((1..3))` would hide the
     # range from the foreach-range split.
+    # An EMPTY one does not: the block spelling `for () {…}` is a perl SYNTAX
+    # error (and `while () {…}` loops forever), while the modifier `EXPR for
+    # ()` / `EXPR while ()` runs EXPR never — `(())` is the block spelling of
+    # that empty list, exactly what a `while ()` modifier (a Condition, not a
+    # List, to PPI) already got here (s499i, #2465).
     $list = "($list)"
-      if !(@rs == 1 && $rs[0]->isa('PPI::Structure::List'));
+      if !(@rs == 1 && $rs[0]->isa('PPI::Structure::List')
+           && $rs[0]->schildren);
     # EXPR keeps its own text AND the whitespace / comments that followed it,
     # so its tokens stay on their lines.
     my $etext = join '', map { $_->content } @expr;

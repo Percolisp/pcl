@@ -95,6 +95,12 @@ like($e6, qr/\(p-incf-raw \$t \$_\)/, 'a numeric accumulator under a for MODIFIE
     like($cl, qr/\(p-foreach \(\$_ \(vector 1 2\)\)/, '... it lowers as the block loop');
 }
 
+# #2465 (s499i): an EMPTY modifier list is the empty foreach — the block
+# spelling `for () {…}` is a perl syntax error, so the desugar writes `(())`.
+my $e9 = emitted(q{sub f { my $n = 0; $n++ for (); $n } print f(), "\n";});
+like($e9, qr/\(p-foreach \(\$_ \(vector\)\) \(p-incf-raw \$n :numeric\)\)/,
+     '`EXPR for ();` lowers as the native foreach over an empty list (#2465)');
+
 my $e8 = emitted(q{for (1, 2) { eval 'print $_' }});
 unlike($e8, qr/\(cons "\$_" \$_\)/, 'the topic loop does not put the GLOBAL $_ in a string eval capture alist');
 
@@ -135,6 +141,17 @@ my @cases = (
   ['string eval inside a topic loop runs its OWN inner topic loop',
    'for (1, 2) { eval q{print "[$_]"; for (7) { print "<$_>" } print "{$_}"} } eval q{print "[$_]"; for (8) { print "<$_>" } print "{$_}"} for 3, 4; print "\n";',
    "[1]<7>{1}[2]<7>{2}[3]<8>{3}[4]<8>{4}\n"],
+  # #2465 (s499i): t/io/through.t:26-28 — a COMMA expression over two lines
+  # and an EMPTY list killed the whole transpile ("Parser2: empty expression").
+  ['#2465: a multi-line comma EXPR for () never runs and leaves $_ alone',
+   "my \$t1 = { d => 1 }; \$_ = 'keep';\n\$_->{a} = 1,\n  \$_->{b} = 2\n    for (); # \$t1\nprint \"ok \$_ \", join(',', sort keys %\$t1), \"\\n\";",
+   "ok keep d\n"],
+  ['#2465: every empty-list modifier spelling runs its EXPR never',
+   'sub ef { print "F" } my $n = 0; ef() for (); print "x" for ( ); $n++ foreach (); $n++, $n++ for (()); $n++ for ((), ()); $n++ while (); sub eg { my $k = 0; $k++ for (); "g$k" } my $ev = eval q{ my $k = 0; $k++ for (); "e$k" }; my @em; $n++ for (@em); my $u = 0; $u++ for (undef); print "$n ", eg(), " $ev u$u\n";',
+   "0 g0 e0 u1\n"],
+  ['#2465: `EXPR until ()` loops (an empty condition is false)',
+   'my $i = 0; eval { (++$i > 3 and die "stop\n") until () }; print "$i $@";',
+   "4 stop\n"],
 );
 
 my $prog = "no warnings;\n";
