@@ -161,6 +161,19 @@ test_case('escaped backslash then U in an s/// replacement and in a string eval'
     'my $v = "a.b"; (my $r = "abc") =~ s/b/\\\\U$v/; (my $r2 = "abc") =~ s/b/\\\\Ux/;'
   . ' print "$r $r2 ", eval q{"\\\\\\\\Uab $v"}, " ", eval q{"\\\\\\\\Uab"}, "\n";');
 
+# --- backslash-NEWLINE in a dq context is an unknown escape: the backslash goes,
+# the newline stays (#2470).  The breaking cases: an ESCAPED backslash before a
+# newline is two characters, and a single-quoted string keeps its backslash.
+my $BNL = '\\' . "\n";
+test_case('backslash-newline in dq, qq{}, heredocs, a U span, interpolation and eval (#2470)',
+    "print \"a${BNL}b|${BNL}c\", \"[${BNL}]\", qq{q${BNL}r}, \"\\n\";"
+  . " my \$w = 'W'; print \"\$w${BNL}z|\\U a${BNL}b\\E|\", eval \"\\\"e\\\\${BNL}f\\\"\", \"\\n\";"
+  . " print <<\"E\";\nh${BNL}i\nE\nprint <<E;\nj${BNL}k\nE\n");
+test_case('escaped backslash then newline is two characters; single quotes keep it; s/// replacements (#2470)',
+    "print \"a\\\\${BNL}b|\", 'c${BNL}d', \"\\n\";"
+  . " my \$s = 'xy'; \$s =~ s/x/p${BNL}q/; my \$v = 'V'; my \$t = 'xy'; \$t =~ s/x/\$v${BNL}q/;"
+  . " print \"\$s|\$t\\n\";");
+
 # --- mixed-case MODULE function calls (Internals::SvREADONLY/SvREFCNT) ---------
 # A module sub with a mixed-case name (SvREADONLY) is interned by the codegen
 # under :invert as the case-preserved symbol Internals::pl-SvREADONLY.  The

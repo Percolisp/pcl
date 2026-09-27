@@ -705,8 +705,13 @@ sub unescape_string {
   my $self      = shift;
   my $str       = shift;
 
-  # Single-pass escape processing (reuses _process_dq_escape from ExprToCL)
-  $str =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
+  # Single-pass escape processing: ExprToCL's ONE dq-escape alternation
+  # (backslash-NEWLINE included, #2470) decoded by its _process_dq_escape.
+  # A RUNTIME require: some callers load this file without ExprToCL, and a
+  # compile-time `use` would be circular (the s438f trap).
+  require Pl::ExprToCL;
+  my $esc = Pl::ExprToCL::dq_escape_rx();
+  $str =~ s!\\($esc)!
     Pl::ExprToCL::_process_dq_escape($1)
   !ge;
 

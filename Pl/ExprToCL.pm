@@ -5356,13 +5356,21 @@ sub gen_substitution_form {
           _cl_string_literal_form($s), @tail];
 }
 
-# One dq-escape token starting at the backslash at position I of STR — the
-# same alternation StringInterpolation::unescape_string feeds to
-# _process_dq_escape.  Returns (processed-characters, source-length).
+# THE body of one double-quoted escape (the text after its backslash) -- ONE
+# copy, read by all three dq decoders: _take_dq_escape, _apply_case_escapes
+# and StringInterpolation::unescape_string (through dq_escape_rx).  Its last
+# alternative `.` runs under /s, so backslash-NEWLINE is an escape like any
+# other unknown one: perl drops the backslash and keeps the newline (#2470).
+our $DQ_ESCAPE_RX =
+  qr/x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|./s;
+sub dq_escape_rx { return $DQ_ESCAPE_RX }
+
+# One dq-escape token starting at the backslash at position I of STR.
+# Returns (processed-characters, source-length).
 sub _take_dq_escape {
   my ($str, $i) = @_;
   my $rest = substr($str, $i + 1);
-  if ($rest =~ /^(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)/s) {
+  if ($rest =~ /^($DQ_ESCAPE_RX)/) {
     my $tok = $1;
     return (_process_dq_escape($tok), 1 + length($tok));
   }
@@ -5815,7 +5823,7 @@ sub _process_dq_escape {
 sub _apply_case_escapes {
   my $src = shift;
   my @tokens;   # [cmd => 'U'] or [text => '...'], in source order
-  while ($src =~ /\G(?:\\([ULulQFE])|\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)|(\\|[^\\]+))/gc) {
+  while ($src =~ /\G(?:\\([ULulQFE])|\\($DQ_ESCAPE_RX)|(\\|[^\\]+))/gc) {
     if (defined $1) {
       push @tokens, [cmd => $1];
     } else {
