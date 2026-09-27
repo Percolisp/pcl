@@ -4,6 +4,9 @@
 #   row's sig column: four UP (#2060 properties), three DOWN where #2372 turned a silent no-match into a
 #   die (#2382 recursion, #2383 code-block condition, a control verb).  NOT spliced: uni/variables.t
 #   (TIMEOUT 1300 -> 8272 ok, load-dependent row count, up on \p{_Perl_IDStart}), re/speed.t (TIMEOUT noise).
+#   MEMBER 7 (s499, Fable review ruling: qr// compiles EAGERLY): re/pat_rt_report.t re-spliced 2431/26 -> 110/4
+#   (A/B `--jobs 1` vs a 0ab64a45 extraction, scratch/s496a/comp7-before.tsv vs comp7-after.tsv; op/qr.t,
+#   re/reg_mesg.t, re/regexp.t identical).  The earlier die place: line 401's qr/(\x{100}++)/ is a POSSESSIVE (#2380).
 # s494g (2026-09-25, Opus) -- FOUR rows spliced by hand + ONE first measurement, every mover
 #   A/B'd `--jobs 1` against a dc20a721 extraction (scratch/s494g/companion-base2-movers.log)
 #   and this tree (companion-rebased.log); cause in each row's sig column.  lib/croak.t is
@@ -2024,7 +2027,7 @@ re/pat_psycho.t	15	0	15	0	OK		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_re_eval.t	527	0	65	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-re/pat_rt_report.t	2513	1	2431	26	DIFF	s496a #2372: 2459/51 -> 2431/26 -- the control verb (*:B) at line 872, ruled "left in, rejected" (not-supported.md), now DIES instead of silently no-matching (A/B: b6560c21 2459/51)	0
+re/pat_rt_report.t	2513	1	110	4	DIFF	s496a member 7 (qr compiles eagerly, s499): 2431/26 -> 110/4 -- line 401's qr/(\x{100}++)/ is a POSSESSIVE quantifier (#2380, no cl-ppcre translation) and now dies AT THE qr, outside the harness's eval, so the file aborts there (A/B: 0ab64a45 2431/26); before that, s496a #2372: 2459/51 -> 2431/26 -- the control verb (*:B) at line 872 (#2386) died at its match	0
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_special_cc.t	9	0	9	0	OK		0
 re/pat_special_cc_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0

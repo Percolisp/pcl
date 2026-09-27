@@ -18,7 +18,8 @@ sessions); dates are development-time, not release-time.
   combining marks.  **A pattern that cannot compile now DIES, trappably**
   (#2372) — an unknown property, `\p{}`, an unbalanced paren — where it used
   to warn and quietly answer no-match (a split answered the whole string, an
-  `s///` did nothing).  `docs/regex-unicode-properties.md`.
+  `s///` did nothing); a `qr//` dies at the `qr` itself, as in perl, so
+  `eval { qr/$pattern/ }` catches a bad pattern.  `docs/regex-unicode-properties.md`.
 
 - 2026-09-25: **`pcl --check` — does PCL agree with perl on your program?**
   (#2194)  `pcl --check prog.pl ARGS` (or `-e CODE`) runs the program under
