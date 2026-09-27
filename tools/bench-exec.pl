@@ -288,6 +288,11 @@ my @benches = (
   # one-element control.
   ['mapmulti',  "$HN my \$s = 0; for (1..\$n) { my \@p = map { (\$_, \$_ * 2) } 1 .. 200; \$s += \@p } print \"\$s\\n\";", 60_000, 0],
   ['mapsingle', "$HN my \$s = 0; for (1..\$n) { my \@p = map { \$_ * 2 } 1 .. 400; \$s += \@p } print \"\$s\\n\";", 60_000, 0],
+  # Round 36 (s499f): a WHOLE-HASH copy per iteration, as a `my` declaration and
+  # as an assignment to an existing hash (task #2424, the Mian-Chowla shape),
+  # and `**' on the digits of a number (task #2425, the Digit-fifth-powers shape).
+  ['hashcopy',  "$HN my \%b = map { (\"k\$_\" => \$_) } 1 .. 1000; my (\%a, \$t); for my \$i (1..\$n) { my \%c = \%b; \%a = \%c; \$t += \$a{'k' . (\$i % 1000 + 1)} } print \"\$t\\n\";", 4_000, 0],
+  ['powdigit',  "$HN my \$s = 0; for my \$k (1..\$n) { for my \$d (split '', \$k) { \$s += \$d ** 5 } } print \"\$s\\n\";", 400_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
