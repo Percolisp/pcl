@@ -267,7 +267,7 @@ my %FAMILY;
                    p-getpwent p-setpwent p-endpwent p-getpwuid p-getpwnam
                    p-getlogin)],
   'env' => [qw(%ENV p-env-get p-env-set)],
-  'module-system' => [qw(p-use p-require p-require-parent p-require-file
+  'module-system' => [qw(p-use p-require p-unimport p-require-parent p-require-file
                          p-require-version p-note-inc)],
   'refaliasing' => [qw(p-alias-scalar-target p-alias-array-target
                        p-alias-hash-target p-alias-code-target p-alias-hash-slot
