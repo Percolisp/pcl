@@ -66,7 +66,7 @@ NIL**: cl-ppcre would store it and fail at MATCH time with "The function
 COMMON-LISP:NIL is undefined".
 
 **The pre-rewrite** lives in the ONE forward escape scan,
-`%pcl-expand-hv-escapes` (its pre-test `%pcl-has-hv-escape` gained `p P`):
+`%pcl-expand-hv-escapes` (its pre-test `%pcl-has-hv-escape` gained `p P`; renamed `%pcl-rewrite-scan` in s499e, when the same scan took the possessive quantifiers, #2380):
 
 | pattern | outside a class | inside a class |
 |---|---|---|
@@ -197,4 +197,4 @@ value: regex RECURSION `(?1)` (#2382; pat_advanced.t line 1122, C_ok
 1262 → 698) and a code block used as a CONDITION `(?(?{…})…)` (#2383; pat.t,
 245 → 206).  The control verbs `(*SKIP)` `(*FAIL)` `(*:NAME)` were already
 ruled "left in, rejected" and now die (pat_rt_report.t line 872, 2459 → 2431);
-possessive quantifiers `a++` are #2380.
+possessive quantifiers `a++` were #2380 (translated since s499e, ir-spec §10-poss).

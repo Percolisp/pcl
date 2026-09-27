@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [weak-keyword override](#71a-a-weak-keyword-is-displaced-by-a-sub-the-package-has-at-compile-time-normative-s492c-task-18701992) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -4382,6 +4382,25 @@ because nothing says so.  The audit of the dispatch against perl 5.40.3 found
 seven escapes in that state; two are answered here, the properties
 (`\p{...}`, `\pM`) by §10-prop since s496a, and the remaining three (`\K`,
 `\g{-1}`, `\b{wb}`) are named in `not-supported.md` with their owners.
+
+### 10-poss. A POSSESSIVE quantifier is perl's own ATOMIC GROUP (normative, s499e, task #2380)
+
+perl DEFINES `X*+` `X++` `X?+` `X{n}+` `X{n,}+` `X{n,m}+` as `(?>X*)`
+`(?>X+)` `(?>X?)` `(?>X{n})` `(?>X{n,})` `(?>X{n,m})` (perlre "Possessive
+quantifiers"), and PCL rewrites them into exactly that, in the same one
+forward scan as §10-esc, before the engine sees the pattern.  X is the ATOM
+as perl's lexer reads it: one character; one escape through its full extent
+(`\x{100}`, `\x41`, `\cX`, `\12`, `\k<n>`, `\p{L}`, `\N{U+41}`); a bracketed
+class (a leading `]` or `^]`, `\]` and `[:name:]` inside it included); or a
+group, balanced, whose `)` makes the whole group the atom.  A `+` is NOT
+possessive inside a class (`[a++]` is three literals), after an escaped plus
+(`\++` is `\+` quantified), inside `\Q…\E` text or a `(?#…)` comment, after
+something that is no atom (`^+`, `(?+1)`, a lazy `a+?+`), or when another
+quantifier follows (`a++*`): those are copied, and a spelling perl refuses as
+"Nested quantifiers" dies from the engine as it does in perl.  Example:
+`"aaa" =~ /a++a/` is false (the atom gives nothing back) where `/a+a/` is
+true.  Under `/x` a blank between the atom and the quantifier is not yet
+skipped (`/a ++/x` dies; task #2443).  The `:tier` stays `:pcre` (§10-tier).
 
 ### 10-prop. Unicode properties are answered from PERL'S OWN tables; an unknown one DIES at compile (normative, s496a, tasks #2060 #2372)
 

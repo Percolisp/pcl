@@ -3805,7 +3805,7 @@ value:
 
 ## Regex escapes that are still passed through untranslated
 
-The escape rewriter (`%pcl-expand-hv-escapes`) translates `\h \H \v \V \R`,
+The escape rewriter (`%pcl-rewrite-scan`, named `%pcl-expand-hv-escapes` until s499e) translates `\h \H \v \V \R`,
 since s492c (task #2050) `\X` and `\N`, and since s496a (task #2060) the
 Unicode properties `\pX` `\p{…}` `\PX` `\P{…}`.  An AUDIT of the dispatch against
 perl 5.40.3 found the rest, and every one of them SILENTLY NEVER MATCHES
