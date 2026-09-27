@@ -13379,8 +13379,10 @@ sub _fh_scope_close {
   return @body if !@h;
   my $up = $stmt->parent;
   return @body if !$up || $up->isa('PPI::Document');
-  return Pl::Passes::fact('fh-scope-close', 1, ['progn', @body])
-    if !Pl::Passes::enabled('fh-scope-close');
+  if (!Pl::Passes::enabled('fh-scope-close')) {   # the A/B switch: general form
+    return @body if !Pl::Passes::facts_enabled();
+    return Pl::Passes::fact('fh-scope-close', 1, ['progn', @body]);
+  }
   return Pl::Passes::fact('fh-scope-close', 1,
            ['p-scope-close', ['list', map { cl_sym($_) } @h], @body]);
 }
