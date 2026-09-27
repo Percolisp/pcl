@@ -551,4 +551,23 @@ print join(",", map { t($_) } sub { "+++" =~ /^\++$/ }, sub { "++" =~ /^[+]+$/ }
     sub { "\e\e" =~ /^\c[++$/ }, sub { "]a]" =~ /^[]a]++$/ }, sub { "aa" =~ /^a{2}+$/ }), "\n";
 PL
 
+# Task #2444: perl 5.34+ reads `X{,n}` as `X{0,n}`, and allows blanks around
+# the numbers and the comma inside a counted quantifier (`{ 2 , 3 }`).  cl-ppcre
+# read both as LITERAL text -- a silent no-match.  The runtime's one rewrite
+# scan writes them blank-free with `0` for the absent minimum; `{,}` `{a}` and
+# an escaped or in-class brace stay literal, as in perl (probed 5.40.3).
+subst_agrees(<<'PL', 'the {,n} quantifier is {0,n}; blanks inside counted braces; lazy/possessive/x compose; literal forms stay literal (#2444)');
+no warnings;
+sub t { my ($s, $re) = @_; ($s =~ $re) ? "1($&)" : 0 }
+print join(",", t("xx", qr/^x{,2}$/), t("xxx", qr/^x{,2}$/), t("", qr/^x{,2}$/),
+    t("x{,2}", qr/^x{,2}$/), t("xxx", qr/x{,2}?/), t("xxx", qr/^x{,2}+x$/),
+    t("xx", qr/^x{,3}+x$/), t("xx", qr/^x{ ,2}$/), t("xx", qr/^x{ , 2 }$/),
+    t("xxx", qr/^x{ 2 , 3 }$/), t("xx", qr/^x{ 2}$/), t("xx", qr/^x { , 2 } $/x),
+    t("abab", qr/^(ab){,2}$/), t("aa", qr/^[a]{,2}$/), t("", qr/^a{,0}$/)), "\n";
+print join(",", t("x{,}", qr/^x{,}$/), t("xx", qr/^x{,}$/), t("x{,2}", qr/^x\{,2}$/),
+    t(",", qr/^[{,2}]$/), t("x{,a}", qr/^x{,a}$/), t("x{,2}", qr/^\Qx{,2}\E$/)), "\n";
+my $n = 2; (my $s = "xxxxx") =~ s/x{,$n}/Y/g;
+print "$s ", t("xx", qr/^x{,$n}$/), " ", join("|", split /,{,2}/, "a,b,,c,,,d"), "\n";
+PL
+
 done_testing();

@@ -30779,23 +30779,57 @@ buffer's fill-pointer; everything else falls back to file-length."
            (values "[^\\n]" (+ i 2)))
           (t (let ((e (%pcl-rx-escape-end pat i))) (values (subseq pat i e) e))))))
 
-(defun %pcl-rx-quantifier-end (pat i)
-  "If a quantifier starts at PAT[I] — `*' `+' `?' or a COUNTED `{n}' `{n,}'
-   `{n,m}' — its end; else NIL.  Any other `{' is a literal in perl."
-  (let ((n (length pat)))
-    (when (< i n)
-      (case (char pat i)
-        ((#\* #\+ #\?) (1+ i))
-        (#\{ (let ((a (or (position-if-not #'digit-char-p pat :start (1+ i)) n)))
-               (when (> a (1+ i))
-                 (let ((b (if (%pcl-rx-at pat a #\,)
-                              (or (position-if-not #'digit-char-p pat :start (1+ a)) n)
-                              a)))
-                   (and (%pcl-rx-at pat b #\}) (1+ b))))))
-        (t nil)))))
+(defun %pcl-rx-counted-end (pat i)
+  "If a COUNTED quantifier opens at the `{' at PAT[I], its end and its text as
+   cl-ppcre reads it: (values END TEXT); else NIL, and the `{' is a literal.
+   perl 5.34+'s grammar (probed 5.40.3): `{' MIN? (`,' MAX?)? `}' with blanks
+   (space, tab) allowed around each number and the comma, and at least one
+   number — `{n}' `{n,}' `{n,m}' and `{,n}', which means `{0,n}' (task #2444);
+   `{,}' `{a}' `{}' are literals.  TEXT is the blank-free form, with `0' for
+   an absent MIN, so `x{ ,2}' is `x{0,2}' to cl-ppcre."
+  (let ((n (length pat)) (j (1+ i)))
+    (flet ((blanks () (loop while (and (< j n) (find (char pat j) '(#\Space #\Tab)))
+                            do (incf j)))
+           (digits () (let ((e (or (position-if-not #'digit-char-p pat :start (min j n)) n)))
+                        (prog1 (subseq pat j e) (setf j e)))))
+      (blanks)
+      (let ((lo (digits)) (comma nil) (hi ""))
+        (blanks)
+        (when (%pcl-rx-at pat j #\,)
+          (setf comma t)
+          (incf j)
+          (blanks)
+          (setf hi (digits))
+          (blanks))
+        (when (and (%pcl-rx-at pat j #\})
+                   (or (plusp (length lo)) (and comma (plusp (length hi)))))
+          (values (1+ j)
+                  (if comma
+                      (concatenate 'string "{" (if (plusp (length lo)) lo "0") "," hi "}")
+                      (concatenate 'string "{" lo "}"))))))))
 
-(defun %pcl-rx-scan-quantifier (s qend)
-  "The quantifier from the scan position to QEND, outside a class.  Followed
+(defun %pcl-rx-quantifier-end (pat i)
+  "If a quantifier starts at PAT[I] — `*' `+' `?' or a COUNTED one
+   (%pcl-rx-counted-end) — its end and its text as cl-ppcre reads it:
+   (values END TEXT); else NIL.  Any other `{' is a literal in perl."
+  (when (< i (length pat))
+    (case (char pat i)
+      ((#\* #\+ #\?) (values (1+ i) (string (char pat i))))
+      (#\{ (%pcl-rx-counted-end pat i))
+      (t nil))))
+
+(defun %pcl-has-loose-counted (pat)
+  "Does PAT contain a counted quantifier cl-ppcre would not read as one —
+   `{,n}' or blanks inside the braces (task #2444)?  The cheap pre-test for
+   the counted-quantifier rewrite; only a `{' is looked at."
+  (loop for i from 0 below (length pat)
+        thereis (and (char= (char pat i) #\{)
+                     (multiple-value-bind (end text) (%pcl-rx-counted-end pat i)
+                       (and end (string/= text pat :start2 i :end2 end))))))
+
+(defun %pcl-rx-scan-quantifier (s qend text)
+  "The quantifier from the scan position to QEND, outside a class, written
+   as TEXT (a counted one blank-free, `{,n}' as `{0,n}' — task #2444).  Followed
    by `+' it is POSSESSIVE, which perl DEFINES as an atomic group (perlre
    \"Possessive quantifiers\"): `X++' = `(?>X+)', `X*+' = `(?>X*)', `X?+' =
    `(?>X?)', `X{n,m}+' = `(?>X{n,m})'.  cl-ppcre has atomic groups and no
@@ -30804,8 +30838,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    the text is copied, and cl-ppcre refuses it as perl does (\"Nested
    quantifiers\")."
   (let ((pat (rxs-pat s)) (atom (rxs-atom s)))
-    (%rxs-copy s qend)
-    (setf (rxs-atom s) nil)
+    (%rxs-emit s text)
+    (setf (rxs-i s) qend (rxs-atom s) nil)
     (when (and atom (%pcl-rx-at pat qend #\+)
                (not (%pcl-rx-quantifier-end pat (1+ qend))))
       (%rxs-insert s atom "(?>")
@@ -30840,40 +30874,43 @@ buffer's fill-pointer; everything else falls back to file-length."
    makes its group the atom)."
   (let* ((pat (rxs-pat s)) (i (rxs-i s)) (c (char pat i))
          (posix (and (rxs-in-class s) (char= c #\[) (%pcl-rx-at pat (1+ i) #\:)
-                     (search ":]" pat :start2 (+ i 2))))
-         (qend (and (not (rxs-in-class s)) (%pcl-rx-quantifier-end pat i))))
-    (cond ((char= c #\\)
-           (unless (rxs-in-class s) (setf (rxs-atom s) (fill-pointer (rxs-out s))))
-           (multiple-value-bind (text end) (%pcl-rx-escape-text pat i (rxs-in-class s))
-             (%rxs-emit s text)
-             (setf (rxs-i s) end)))
-          ;; An inner `[:name:]' is ONE unit: its brackets neither open nor
-          ;; close a class.  The POSIX pass has already replaced every valid
-          ;; name, so what reaches here is invalid Perl — but mis-tracking it
-          ;; would desynchronise IN-CLASS and mangle a later \h.
-          (posix (%rxs-copy s (+ posix 2)))
-          ((rxs-in-class s)
-           (when (char= c #\]) (setf (rxs-in-class s) nil))
-           (%rxs-copy s (1+ i)))
-          ((char= c #\[) (%pcl-rx-scan-open-class s))
-          ((char= c #\() (%pcl-rx-scan-open-group s))
-          (qend (%pcl-rx-scan-quantifier s qend))
-          (t (setf (rxs-atom s)
-                   (cond ((char= c #\)) (pop (rxs-groups s)))
-                         ((find c "|^$") nil)
-                         (t (fill-pointer (rxs-out s)))))
-             (%rxs-copy s (1+ i))))))
+                     (search ":]" pat :start2 (+ i 2)))))
+    (multiple-value-bind (qend qtext)
+        (and (not (rxs-in-class s)) (%pcl-rx-quantifier-end pat i))
+      (cond ((char= c #\\)
+             (unless (rxs-in-class s) (setf (rxs-atom s) (fill-pointer (rxs-out s))))
+             (multiple-value-bind (text end) (%pcl-rx-escape-text pat i (rxs-in-class s))
+               (%rxs-emit s text)
+               (setf (rxs-i s) end)))
+            ;; An inner `[:name:]' is ONE unit: its brackets neither open nor
+            ;; close a class.  The POSIX pass has already replaced every valid
+            ;; name, so what reaches here is invalid Perl — but mis-tracking it
+            ;; would desynchronise IN-CLASS and mangle a later \h.
+            (posix (%rxs-copy s (+ posix 2)))
+            ((rxs-in-class s)
+             (when (char= c #\]) (setf (rxs-in-class s) nil))
+             (%rxs-copy s (1+ i)))
+            ((char= c #\[) (%pcl-rx-scan-open-class s))
+            ((char= c #\() (%pcl-rx-scan-open-group s))
+            (qend (%pcl-rx-scan-quantifier s qend qtext))
+            (t (setf (rxs-atom s)
+                     (cond ((char= c #\)) (pop (rxs-groups s)))
+                           ((find c "|^$") nil)
+                           (t (fill-pointer (rxs-out s)))))
+               (%rxs-copy s (1+ i)))))))
 
 (defun %pcl-rewrite-scan (pat)
   "The ONE forward rewrite scan over a pattern (it tracks whether each
    position is inside a bracket class, and where the last ATOM starts):
    \\h \\H \\v \\V \\R \\X \\N and the property escapes become forms cl-ppcre
    reads (%pcl-rx-escape-text), and a POSSESSIVE quantifier becomes the
-   atomic group perl defines it as (%pcl-rx-scan-quantifier).  Everything
-   else is copied verbatim, so a `\\h' or `a++' that the \\Q pass already
-   quoted stays literal.  Only a pattern that passes one of the two cheap
-   pre-tests is scanned at all."
-  (if (not (or (%pcl-has-hv-escape pat) (%pcl-has-possessive pat)))
+   atomic group perl defines it as (%pcl-rx-scan-quantifier), and a counted
+   quantifier is written blank-free with `{,n}' as `{0,n}' (task #2444).
+   Everything else is copied verbatim, so a `\\h' or `a++' that the \\Q pass
+   already quoted stays literal.  Only a pattern that passes one of the three
+   cheap pre-tests is scanned at all."
+  (if (not (or (%pcl-has-hv-escape pat) (%pcl-has-possessive pat)
+               (%pcl-has-loose-counted pat)))
       pat
       (let ((s (%make-pcl-rx-scan pat)))
         (loop while (< (rxs-i s) (rxs-n s)) do (%pcl-rx-scan-step s))
