@@ -30188,6 +30188,13 @@ buffer's fill-pointer; everything else falls back to file-length."
         (lambda (c) (not (%pcl-invlist-member-p (char-code c) list)))
         (lambda (c) (%pcl-invlist-member-p (char-code c) list)))))
 
+(defvar *pcl-regex-eager-compile* nil
+  "True while %p-regex-compile-eagerly compiles a qr at the qr.  The property
+   resolver then DEFERS a user-defined property whose sub has no body yet
+   (throw to %pcl-regex-deferred) instead of dying: perl resolves such a
+   forward reference at the first MATCH (t/re/regexp_unicode_prop.t builds
+   `qr/\\p{IsFoo}/` in a BEGIN before `sub IsFoo` exists).")
+
 (defun %pcl-property-resolver (name)
   "cl-ppcre's *property-resolver*: NAME (the text between `\\p{' and `}') to a
    unary character test.  `^' first complements.  A name the tables do not
@@ -30209,6 +30216,8 @@ buffer's fill-pointer; everything else falls back to file-length."
          (cond
            (code (%pcl-uniprop-test code))
            ((%pcl-user-property-shaped-p spec)
+            (when *pcl-regex-eager-compile*
+              (throw '%pcl-regex-deferred nil))
             (%pcl-uniprop-signal "Unknown user-defined property name \\p{~A}"
                                  (%pcl-user-property-qualified spec)))
            (t (%pcl-uniprop-signal
@@ -30253,7 +30262,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "The function SPEC names as a sub (in the current package unless SPEC is
    qualified), or NIL."
   (let ((sym (%p-resolve-sub-symbol spec)))
-    (and sym (fboundp sym) (symbol-function sym))))
+    (and sym (%p-sub-has-body-p sym) (symbol-function sym))))
 
 (defun %pcl-user-property-qualified (spec)
   "SPEC as perl names it in the unknown-property message: package-qualified."
@@ -30633,7 +30642,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                          :pattern (perl-regex-to-ppcre raw)
                          :source raw
                          :modifiers (parse-regex-modifiers mods))))
-                (%p-regex-compiled op)
+                (%p-regex-compile-eagerly op)
                 (setf (gethash (list (%pcl-memo-key mods) (%pcl-memo-key raw))
                                *p-regex-op-cache*)
                       op)))))))
@@ -30774,6 +30783,18 @@ buffer's fill-pointer; everything else falls back to file-length."
           `(%p-op-once ,call)
           call))))
 
+(defun %p-regex-compile-eagerly (op)
+  "Compile match op OP now, as perl compiles a qr AT THE qr (s496a member 7):
+   a pattern that cannot compile dies HERE, trappably.  The compile is the one
+   a match of OP does (%p-regex-compiled caches it on OP and in
+   *pcl-scanner-cache*), so a later match pays nothing.  A user-defined
+   property whose sub is not defined yet is DEFERRED, as in perl: OP stays
+   uncompiled and resolves the name at its first match."
+  (catch '%pcl-regex-deferred
+    (let ((*pcl-regex-eager-compile* t))
+      (%p-regex-compiled op)))
+  op)
+
 (defun %p-qr-parts (raw flags)
   "A fresh Regexp OBJECT for qr// — never memoized: two evaluations of `qr/a/`
    are distinct references in perl (ir-spec §10 compiled-regex row).
@@ -30786,11 +30807,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    extra; a qr that is only interpolated into a bigger pattern pays one
    scanner-cache lookup (a real compile once per distinct pattern text).  A
    user-defined \\p{IsFoo} is resolved in the package current AT THE qr."
-  (let ((obj (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
-                                 :source raw
-                                 :modifiers (parse-regex-modifiers flags))))
-    (%p-regex-compiled obj)
-    obj))
+  (%p-regex-compile-eagerly
+   (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
+                       :source raw
+                       :modifiers (parse-regex-modifiers flags))))
 
 (defmacro p-qr (&rest args)
   "A qr// literal: (p-qr :pat PATTERN :flags LETTERS :tier TIER).  Answers a

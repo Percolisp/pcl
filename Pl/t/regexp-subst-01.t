@@ -499,4 +499,14 @@ package main;
 print join(",", ("abc" =~ $Foo::fq ? 1 : 0), ("abd" =~ $Foo::fq ? 1 : 0)), "\n";
 PL
 
+subst_agrees(<<'PL', 'a qr naming a user-defined property whose sub is not defined YET is deferred to its first match, as in perl (#2372 member 7)');
+my $q;
+BEGIN { $q = qr/^\p{IsLaterProp}+$/; }
+my $u;
+BEGIN { $u = qr/\p{IsNeverProp}/; }
+print "made ", join(",", ("abc" =~ $q ? 1 : 0), ("abd" =~ $q ? 1 : 0)), "\n";
+print eval { "a" =~ $u; 1 } ? "lived\n" : "died " . ($@ =~ /IsNeverProp/ ? "names it" : "?") . "\n";
+sub IsLaterProp { "0061\t0063\n" }
+PL
+
 done_testing();
