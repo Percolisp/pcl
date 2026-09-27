@@ -4322,7 +4322,9 @@ POSIX/perl class; any other name is a **pattern compile error**.
   `\p{PosixAlpha}`), measured per spelling against perl by the generator.
 * **User-defined properties.**  A name whose last component starts with `In`
   or `Is` is first looked up as a SUB (current package unless qualified),
-  called once per pattern compile with one argument (true under /i); its
+  called ONCE per name and /i-ness for the program (its answer is cached),
+  with one argument (true under /i) — a sub not defined yet when a `qr`
+  compiles is looked up again at the first match, as perl does; its
   returned lines (`hhhh`, `hhhh<ws>hhhh`, `+`/`!`/`-`/`&NAME`, `#` comments)
   define the set, and it wins over a perl property of the same spelling.  No
   such sub and no such property: `Unknown user-defined property name
