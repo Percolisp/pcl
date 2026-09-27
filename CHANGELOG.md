@@ -5,6 +5,17 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-27: **no `.` and no script directory on `@INC`** (#2442).  PCL
+  put both there, so a stray `Foo.pm` in the current directory — or, for
+  `pcl -e`, in the temp directory the program was written to — shadowed the
+  module the author meant, where perl 5.26+ dies "Can't locate".  A module
+  beside the script is found the perl way: `use lib`, `FindBin`, `-I`,
+  `PERL5LIB`.  `use lib $FindBin::Bin` (any non-literal `use lib`) used to be
+  silently ignored and now works; `use lib qw(a b)` keeps perl's order;
+  `require "x.pl"` no longer looks in the current directory.  Also: `use
+  Test::More` no longer prints `# PCL Test library loaded` on STDOUT (#526),
+  and `tie *FH` is announced as "a filehandle".
+
 - 2026-09-26: **errors fail in the same places as perl** (#2103, #2341,
   #1554).  `use strict 'refs'` is enforced — lexically, so a `{ no strict
   'refs'; … }` block keeps working: `my @a = @$undef`, `"@$undef"`,

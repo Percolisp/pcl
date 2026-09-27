@@ -71,6 +71,14 @@ not-supported.md → only then probe.*
 - **s495f MERGED (ff `25d7fede`, pushed): `EVERYDAY: 92 -> 100 of 122` (82.0 %) confirmed by Fable's own run (buckets 0); Fable's own gate on the sha 262 / 8675 PASS; container install test PASS (platform-touching: sb-alien gethostby*/getnetby*/setpriority; macOS NOT TESTED, #2196); review probes 8 of 11 identical to perl, the three differing explained (formline dies by ruling; #2103 strict-dependent, not shipped; stderr ORDER under runpcl's plain load).**  Records nit: its session-log section says gate 8674, the count is 8675.  **#2341 (HIGH, pre-existing, filed by the agent) = the next correctness candidate**: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref -- `push @$u, 1` dies, `$u->[0]` / `for (@$u)` / `keys %$u` leave it undef; right under `PCL_OPT=-raw-slot`.
 
 
+## s499g (2026-09-27, Opus) -- no "." and no script directory on @INC (#2442); the TAP load banner gone (#526); `tie *FH` announced as "a filehandle"
+
+- **@INC contract (#2442): PCL's lib/, then the transpiling perl's @INC (carries -I, PERL5LIB); never "." nor the script dir** — as perl 5.26+; a program uses `use lib`/FindBin/-I; ir-spec §9.
+- **`use lib LIST` = an ordinary expression unshifted in ONE call** — non-literal `use lib $FindBin::Bin` was SILENTLY DROPPED (hidden by the script-dir accident); qw order was reversed.
+- **`require`/`do` FILE: absolute, `./`, `../` are explicit; any other name searches @INC ONLY** (`%p-explicit-path-p`); the cwd fallback is gone.
+- **#526: the `# PCL Test library loaded` banner is deleted** — visible only on a warm script-cache HIT (a MISS loads the TAP layer at compile time with stdout muffled); nothing read it.
+- **A user-visible announcement names a not-supported.md SECTION, never a task number**; tie's section is now "tie on an ARRAY, HASH or filehandle".
+
 ## s499e (2026-09-27, Opus) -- possessive quantifiers are perl's atomic group (#2380); t/re/pat_rt_report.t 110 -> 2432 ok
 
 - **#2380: `X++` `X*+` `X?+` `X{n,m}+` -> `(?>X+)` … in the ONE runtime rewrite scan** (`%pcl-expand-hv-escapes` renamed `%pcl-rewrite-scan`, now a struct + short helpers; pre-test `%pcl-has-possessive`, cache MISS only); atom = char / full escape extent / class / balanced group; no atom or a following quantifier = copied (`a++*` dies as perl's "Nested quantifiers"); ir-spec §10-poss.

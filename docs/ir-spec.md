@@ -3510,6 +3510,24 @@ Generated files are loaded form-by-form; a `use`/`require` triggers
 transpilation (or cache lookup) of the target module and loads it inline,
 recursively.
 
+**`@INC` at program start is PCL's shim `lib/`, then the transpiling perl's
+own `@INC` — and never `"."` nor the script's directory (normative, s499g,
+task #2442).** The preamble pushes those two groups and nothing else; the
+perl group already carries `-I` (`pcl -I DIR`) and `PERL5LIB`, as in perl.
+perl 5.26+ has no `"."` and never had the script's directory; a program asks
+for them the perl way — `use lib`, `FindBin`, `-I`, `PERL5LIB`. `use lib LIST`
+evaluates its LIST as an ordinary expression at compile time and unshifts it
+in ONE call (source order kept). A `require`/`do` of a FILE path is used as
+given when it is absolute or starts with `./` or `../`
+(`%p-explicit-path-p`, perl's `path_is_searchable`); any other name is
+searched in `@INC` only — the cwd is not consulted.
+
+```perl
+# prog.pl beside Foo.pm, run from that directory:
+eval { require Foo; 1 }                     # false under perl and PCL alike
+use FindBin; use lib $FindBin::Bin; use Foo; # found
+```
+
 **`%INC` records every successful `use`/`require`, including the ones PCL
 does not actually load (normative, s443h/task #511).** Perl's key is the
 relative path (`strict.pm`, `File/Basename.pm`) and its value is the file

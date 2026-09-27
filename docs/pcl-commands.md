@@ -140,7 +140,10 @@ details.
 ## Modules, and how they are compiled
 
 A `use` or `require` is resolved through `@INC` (the directories perl
-searches, plus `-I`), and the module's source is compiled the same way as
+searches, plus `-I` and `PERL5LIB`), and — as in perl 5.26 and later —
+neither the current directory nor the script's own directory is on it: a
+module beside your script is found through `use lib`, `FindBin` or `-I`, as
+under perl.  The module's source is compiled the same way as
 your program, then **cached** as its transpiled Lisp plus a compiled `.fasl`
 under `~/.pcl-cache/modules/`. Only the first run pays. The program you run
 gets an entry of the same kind under `~/.pcl-cache/scripts/`, keyed on its

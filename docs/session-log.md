@@ -185,6 +185,48 @@ USER at the start: "Please continue." then the two queued questions answered -- 
 * **s495f (EVERYDAY ROUND A) MERGED** (ff `25d7fede`) after Fable's review: probes 8 of 11 identical, gate 262 / 8675 PASS, everyday `100 of 122` re-run, container install test PASS.  `EVERYDAY: 92 -> 100 of 122 (82.0 %)`.  Its HIGH finding #2341 (raw-slot: a never-assigned `my $u` cannot be vivified through a deref) is the next correctness candidate.  USER late in the session: no new subtasks; one read-only Opus README review + an Opus README rewrite were USER-asked exceptions -- README.md in the checkout is now that draft, uncommitted, for the USER to judge.
 
 
+## Session s499g (Opus agent, 2026-09-27) -- no "." and no script directory on @INC (#2442), the TAP load banner gone (#526), `tie *FH` says "a filehandle"
+
+**#2442.** The preamble pushed the script's directory and "." ahead of PCL's
+lib/ and perl's @INC; both are gone (pl2cl), and so are pcl's two copies of the
+accident (the -M branch's `-I dirname(script)` and the script-cache seed list).
+Removing them EXPOSED a silent drop they hid: `use lib EXPR` lowered only a
+quoted string or a qw() and dropped every other spelling, so `use lib
+$FindBin::Bin` did nothing and the sibling was found through the script dir.
+`use lib LIST` now goes through the expression path in ONE unshift (which also
+fixes qw order: `qw(a b)` put b first).  Runtime: `require "x.pl"` looked in the
+cwd before @INC; now absolute / `./` / `../` are explicit and anything else is
+@INC-only (`%p-explicit-path-p`, shared with `do`, which gains `../`).  No site in
+the tree relied on the accident (gate, sweep, companion, everyday, install test
+all unmoved).  Guards use-require-01.t (7 rows fail on 7b74e399).  ir-spec §9.
+
+**#526.** The banner was visible only on a WARM script-cache hit: a MISS loads the
+TAP layer while compile-filing the program with stdout muffled, and it stays
+loaded -- so a file's first run was clean and its second was not (`pcl -e` looked
+different only because its entry is warm after one run).  Deleted; the seven
+Pl/t helpers that filtered it and census-bugs-01's expectation went with it.
+Guard pcl-dash-m-01.t rows 4-5 (`pcl --check -e` IDENTICAL, twice).
+
+**tie.** A glob or lexical handle target fell into `(t "a non-lvalue")`; it is now
+"a filehandle", any other operand is named by type, and the line points at the
+not-supported.md section ("tie on an ARRAY, HASH or filehandle", renamed) instead
+of "(task #155)".  Guards tie-01.t rows 25-30; transpile-test-07's absence row
+widened to any tie noun but HASH/ARRAY.
+
+**Bars.** Gen v2-2480, three artifacts regenerated.  corpus-diff 111/111 + 6
+shapes differ in ONE line class (the "." push; silent drops 5 unchanged);
+emission-ab lib + shapes 30 DIFF, preamble lines only, RCDIFF 0; ir-host-leak
+identical to the base but for the 2-line shift; ir-conform 325/0/20/0 stale.
+Gate 269 / 9016 PASS (9001 + 15).  Sweep TOTAL 18714 (+0), GATE clean, drops 5.
+Companion --all --quick: 15 snapshot movers, ALL identical on a 7b74e399
+extraction (serial A/B) -- none is this batch's: io/through.t + io/crlf_through.t
+(942 rows each) bisected to 203ac798 (s494p member 3), filed HIGH as #2465; the
+other 13 are today's merges' pending set (#2389).  install-pcl.t PASS.
+EVERYDAY 102 -> 102 of 122, buckets 0.  Filed #2460 (-M temp copy: $0/FindBin),
+#2461 (-e $0), #2462 (@INC order: shim lib + tree root ahead of -I), #2463 (tie
+with no TIESCALAR is silent where perl dies), #2464 (use lib does not dedupe),
+#2465.
+
 ## Session s499e (Opus agent, 2026-09-27) -- possessive quantifiers translated to perl's atomic group (#2380); pat_rt_report.t gets its 2,321 rows back
 
 **#2380.** perl defines `X++` as `(?>X+)` (and `*+` `?+` `{n,m}+` alike); cl-ppcre has atomic groups but no possessive, so every possessive pattern died (since #2372) and, since s496a member 7's eager qr, `t/re/pat_rt_report.t` aborted at line 401's `qr/(\x{100}++)/`.  The arm lives in the existing one forward scan (renamed `%pcl-rewrite-scan`, a `pcl-rx-scan` struct and helpers each under 30 lines), which already tracked the bracket class; it now also tracks the last ATOM's output index and a stack of open groups, and consumes each escape through its lexer extent.  Probe table (65 rows, perl -> base -> tree): every possessive row `died` on base and equals perl on the tree, incl. the breaking cases `\++` `[+]+` `[a++]` `\Q a++ \E` `(?#a++)` `a+ +` `^+` and the died pair `a++*` `a+?+`; semantic pair `"aaa" =~ /a++a/` 0 vs `/a+a/` 1.  Not equal to perl, all filed or pre-existing: `/a ++/x` (#2443), `x{,2}` (#2444), `/\N{U+41}/` (#2199).  Guards `Pl/t/regexp-subst-01.t` rows 49-50, inverse-verified on a 2b2db885 extraction.

@@ -2329,8 +2329,9 @@ design lands.  Tracked as task #155, ruled in `docs/fable-answers-s318.md` §1.
 scope table (E9) deliberately left tied and magic containers OUT: they keep the
 fully-boxed representation, and the tie hook itself is still unimplemented, so
 this entry stands and #155 stays open.  The same announcement covers a
-FILEHANDLE tie — `tie *FH, 'Class'` prints
-`PCL: tie: a non-lvalue (class Class) is not implemented — the container is left untied (task #155)`
+FILEHANDLE tie — `tie *FH, 'Class'` prints (since s499g; it used to say "a
+non-lvalue")
+`PCL: tie: a filehandle (class Class) is not implemented — it is left untied (see docs/not-supported.md "tie on an ARRAY, HASH or filehandle")`
 and `print FH …` goes to the untied handle (probed s467).  Only a SCALAR tie is
 implemented.
 
