@@ -1024,19 +1024,33 @@ sub _fh_in_scope {
 # in its scope; the name in no unparsed statement; no `goto &sub' anywhere.
 sub _fh_decl_verdict {
   my ($ctx, $d) = @_;
+  my $why = _fh_decl_denial($ctx, $d);
+  warn sprintf "F-DEBUG %s line %s %s\n", $d->{name}, $d->{stmt}->line_number // '?',
+    $why // 'CLOSED' if $ENV{PCL_B_DEBUG};
+  return defined $why ? 0 : 1;
+}
+
+# Why declaration $d is NOT licensed (undef = licensed).  The reason is only
+# for PCL_B_DEBUG's F-DEBUG line; the verdict reads its definedness.
+sub _fh_decl_denial {
+  my ($ctx, $d) = @_;
   my $name = $d->{name};
-  return 0 if $d->{bad} || $ctx->{has_goto_sub};
-  return 0 if grep { /\Q$name\E(?!\w)/ } @{ $ctx->{fallback_texts} };
-  return 0 if grep { $_ ne 'handle-viv-arg' && $_ ne 'mutating-builtin-arg' }
-              keys %{ $d->{ev} // {} };
+  return 'fact:' . join(',', sort keys %{ $d->{bad} }) if $d->{bad};
+  return 'goto-sub-in-region' if $ctx->{has_goto_sub};
+  return 'unparsed-statement' if grep { /\Q$name\E(?!\w)/ } @{ $ctx->{fallback_texts} };
+  my @ev = grep { $_ ne 'handle-viv-arg' && $_ ne 'mutating-builtin-arg' }
+           keys %{ $d->{ev} // {} };
+  return 'event:' . join(',', sort @ev) if @ev;
   my $uc = $d->{uses} // {};
-  return 0 if !$uc->{q{fh-open}};
-  return 0 if grep { !$FH_USE_OK{$_} } keys %$uc;
-  return 0 if grep { _fh_in_scope($d, $_) } @{ $ctx->{str_eval_toks} // [] };
+  return 'no-open-use' if !$uc->{q{fh-open}};
+  my @bad = grep { !$FH_USE_OK{$_} } keys %$uc;
+  return 'use:' . join(',', sort @bad) if @bad;
+  return 'string-eval-in-scope'
+    if grep { _fh_in_scope($d, $_) } @{ $ctx->{str_eval_toks} // [] };
   my $re = qr/\$\{?\s*\Q${\ substr($name, 1)}\E\b/;
-  return 0 if grep { $_->[1] =~ $re && _fh_in_scope($d, $_->[0]) }
-              @{ $ctx->{sub_blocks} // [] };
-  return 1;
+  return 'nested-sub-in-scope'
+    if grep { $_->[1] =~ $re && _fh_in_scope($d, $_->[0]) } @{ $ctx->{sub_blocks} // [] };
+  return undef;
 }
 
 sub _ev {
