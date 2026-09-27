@@ -509,4 +509,15 @@ print eval { "a" =~ $u; 1 } ? "lived\n" : "died " . ($@ =~ /IsNeverProp/ ? "name
 sub IsLaterProp { "0061\t0063\n" }
 PL
 
+subst_agrees(<<'PL', 'user-defined properties: a -hhhh line excludes, the sub is called ONCE per name, and a not-yet-defined sub wins over a same-spelled perl property at the first match (#2372 member 7, #2387)');
+our $calls;
+my $q;
+BEGIN { $q = qr/\p{InLatin1}/; }
+sub InLatin1 { "0100\t10FFFF\n" }
+sub IsDigitsBut5 { $calls++; "0030\t0039\n-0035\n" }
+print join(",", ("\x{100}" =~ $q ? 1 : 0), ("\x{e9}" =~ $q ? 1 : 0)), "\n";
+print join(",", ("4" =~ /\p{IsDigitsBut5}/ ? 1 : 0), ("5" =~ /\p{IsDigitsBut5}/ ? 1 : 0),
+                ("5" =~ /\P{IsDigitsBut5}/ ? 1 : 0)), " calls=$calls\n";
+PL
+
 done_testing();

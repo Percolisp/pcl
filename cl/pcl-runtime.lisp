@@ -30208,6 +30208,12 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((test (%pcl-property-resolver (subseq spec 1))))
          (lambda (c) (not (funcall test c)))))
       ((%pcl-user-property-test spec))
+      ;; perl DEFERS a user-shaped name whose sub is not defined yet -- even
+      ;; one that also spells a perl property (t/re/regexp_unicode_prop.t's
+      ;; InLatin1): the first MATCH looks the sub up again, and only then
+      ;; falls back to the property.  Only an eager qr compile defers.
+      ((and *pcl-regex-eager-compile* (%pcl-user-property-shaped-p spec))
+       (throw '%pcl-regex-deferred nil))
       (t
        (let* ((key (%pcl-uniprop-normalize spec))
               (code (gethash key (%pcl-uniprop-tables))))
@@ -30216,8 +30222,6 @@ buffer's fill-pointer; everything else falls back to file-length."
          (cond
            (code (%pcl-uniprop-test code))
            ((%pcl-user-property-shaped-p spec)
-            (when *pcl-regex-eager-compile*
-              (throw '%pcl-regex-deferred nil))
             (%pcl-uniprop-signal "Unknown user-defined property name \\p{~A}"
                                  (%pcl-user-property-qualified spec)))
            (t (%pcl-uniprop-signal
@@ -30274,17 +30278,29 @@ buffer's fill-pointer; everything else falls back to file-length."
    first); a user property's sub is told, as perl tells it."
   (and (boundp 'cl-ppcre::flags) (first (symbol-value 'cl-ppcre::flags)) t))
 
+(defvar *pcl-user-property-cache* (make-hash-table :test 'equal)
+  "(QUALIFIED-NAME . CASELESS) -> the test built from that user property's
+   definition.  perl calls a user-defined property's sub ONCE per name and
+   /i-ness for the life of the program and reuses its answer (perlunicode;
+   t/re/regexp_unicode_prop.t's IsMyUpper dies if called twice), so two
+   patterns naming it -- \\p{IsFoo} and \\P{IsFoo} -- share one call.")
+
 (defun %pcl-user-property-test (spec &optional (depth 0))
   "The character test for user-defined property SPEC, or NIL when SPEC is not
-   a user-defined name or no such sub exists."
+   a user-defined name or no such sub exists.  Memoized per (qualified name,
+   /i) in *pcl-user-property-cache*, as perl memoizes it."
   (when (> depth 50)
     (%pcl-uniprop-signal "Infinite recursion in user-defined property \\p{~A}" spec))
   (let ((fn (and (%pcl-user-property-shaped-p spec) (%pcl-user-property-sub spec))))
     (when fn
-      (%pcl-user-property-from-text
-       (to-string (let ((*wantarray* nil))
-                    (funcall fn (if (%pcl-regex-caseless-p) 1 ""))))
-       spec depth))))
+      (let* ((caseless (%pcl-regex-caseless-p))
+             (key (cons (%pcl-user-property-qualified spec) caseless)))
+        (or (gethash key *pcl-user-property-cache*)
+            (setf (gethash key *pcl-user-property-cache*)
+                  (%pcl-user-property-from-text
+                   (to-string (let ((*wantarray* nil))
+                                (funcall fn (if caseless 1 ""))))
+                   spec depth)))))))
 
 (defun %pcl-user-property-ref (name spec depth)
   "The test a `+NAME' style line refers to: utf8::X is perl's property X,
@@ -30308,6 +30324,13 @@ buffer's fill-pointer; everything else falls back to file-length."
                            line spec))
     (cons lo hi)))
 
+(defun %pcl-user-property-hex-line-p (text)
+  "Is TEXT a range body -- hex digits, optionally whitespace and more hex?"
+  (let ((s (string-trim '(#\Space #\Tab) text)))
+    (and (plusp (length s))
+         (digit-char-p (char s 0) 16)
+         (every (lambda (c) (or (digit-char-p c 16) (member c '(#\Space #\Tab)))) s))))
+
 (defun %pcl-user-property-from-text (text spec depth)
   "Build the test for the definition TEXT a user property's sub returned:
    (the ranges or an include) and no exclude and every intersect."
@@ -30317,7 +30340,10 @@ buffer's fill-pointer; everything else falls back to file-length."
              (line (string-trim '(#\Space #\Tab #\Return) (subseq raw 0 hash))))
         (when (plusp (length line))
           (let ((kind (char line 0)))
-            (if (find kind "+-!&")
+            (if (and (find kind "+-!&")
+                     ;; `-hhhh' / `-hhhh<ws>hhhh' REMOVES a range (perlunicode);
+                     ;; only a NAME after the sign is a property reference.
+                     (not (and (char= kind #\-) (%pcl-user-property-hex-line-p (subseq line 1)))))
                 (let ((test (%pcl-user-property-ref
                              (string-trim '(#\Space #\Tab) (subseq line 1)) spec depth)))
                   (case kind
@@ -30325,7 +30351,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (#\! (push (lambda (c) (not (funcall test c))) includes))
                     (#\- (push test excludes))
                     (#\& (push test intersects))))
-                (push (%pcl-user-property-range line spec) ranges))))))
+                (if (char= kind #\-)
+                    (let ((r (%pcl-user-property-range
+                              (string-left-trim '(#\Space #\Tab) (subseq line 1)) spec)))
+                      (push (lambda (c) (<= (car r) (char-code c) (cdr r))) excludes))
+                    (push (%pcl-user-property-range line spec) ranges)))))))
     (lambda (c)
       (let ((cp (char-code c)))
         (and (or (some (lambda (r) (<= (car r) cp (cdr r))) ranges)
