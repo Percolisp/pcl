@@ -5099,6 +5099,36 @@
                  sb-ext:double-float-negative-infinity
                  sb-ext:double-float-positive-infinity)))))))
 
+;;; THE SMALL-INTEGER ARM OF `**' (task #2425, s499f).  `$d ** 5' over the
+;;; digits of a number is the shape real programs reach (26 % of two Rosetta
+;;; programs), and %p-pow-int answers it through GENERIC arithmetic -- a
+;;; doubles loop for a power-of-2 base, EXPT on untyped integers otherwise.
+;;; With both operands small FIXNUMS the same two answers are cheap: a
+;;; power-of-2 base's NV is exact whenever the result is below 2**53, so it is
+;;; the integer power converted once (identical to pp_pow's repeated squaring,
+;;; which is exact there too); any other base is EXPT on fixnums inside the
+;;; bound %p-pow-int already uses.  Everything outside the bounds answers NIL
+;;; and takes %p-pow-int unchanged, so the spelling of every answer is pp_pow's.
+(declaim (inline %p-pow-small))
+(defun %p-pow-small (na nb)
+  "NA**NB for a (signed-byte 32) NA and an NB in [0, 64], spelled as
+   %p-pow-int spells it -- or NIL when it is outside the cheap bounds."
+  (declare (type (signed-byte 32) na) (type (integer 0 64) nb))
+  (let* ((base (abs na))
+         (len (integer-length base)))
+    (cond
+      ((zerop (logand base (1- base)))     ; 0, 1 or a power of 2: an NV
+       (let ((bits (* nb (max 0 (1- len)))))
+         (and (< bits 53)
+              (let ((d (float (ash 1 bits) 1d0)))
+                (cond ((zerop base) (if (zerop nb) 1d0 0d0))
+                      ((and (minusp na) (oddp nb)) (- d))
+                      (t d))))))
+      ((<= (* nb len) 62)                  ; the exact integer fits a fixnum
+       (let ((r (expt base nb)))
+         (if (and (minusp na) (oddp nb)) (- r) r)))
+      (t nil))))
+
 (defun p-** (a b)
   "Perl exponentiation with use overload '**' dispatch.
 
@@ -5106,12 +5136,15 @@
    SURE, and everything else comes back as an NV — which is why `2**63' is
    9.22337203685478e+18 and not the exact 9223372036854775808 (#1248(b)).
    The three regimes are in %p-pow-int and %p-pow-float; a negative exponent
-   goes straight to pow().
+   goes straight to pow().  %p-pow-small answers the small-integer case of
+   %p-pow-int first, identically and cheaply (task #2425).
    Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (%with-binary-overload ("**" a b)
                          (let ((na (to-number a))
                                (nb (to-number b)))
-                           (or (and (integerp na) (integerp nb) (>= nb 0)
+                           (or (and (typep na '(signed-byte 32)) (typep nb '(integer 0 64))
+                                    (%p-pow-small na nb))
+                               (and (integerp na) (integerp nb) (>= nb 0)
                                     (%p-pow-int (abs na) nb (minusp na)))
                                (%p-pow-float na nb)))))
 
