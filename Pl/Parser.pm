@@ -9551,6 +9551,10 @@ sub _process_include_statement {
 
   # Handle 'no' statements
   if ($type eq 'no') {
+    if ($module eq 'lib') {
+      $self->_process_use_lib($stmt, $perl_code, 'no');
+      return;
+    }
     # 'no integer' - turn off integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 0);
@@ -10097,34 +10101,40 @@ sub _process_use_overload {
 }
 
 
-# Process 'use lib' statements
+# Process 'use lib' / 'no lib' statements
 sub _process_use_lib {
-  my ($self, $stmt, $perl_code) = @_;
+  my ($self, $stmt, $perl_code, $type) = @_;
+  $type //= 'use';
 
   # use lib is compile-time @INC manipulation — route to definitions bucket
   # so it appears before any 'require' or 'use' in the same section
   $self->_with_bucket('definitions', sub {
     $self->_emit(";; $perl_code");
-    $self->_emit("(p-eval-always");
 
+    # `use lib LIST` IS `BEGIN { require lib; lib->import(LIST) }`, and PCL
+    # runs perl's OWN lib.pm (task #2464): its import unshifts the list in one
+    # step (`use lib qw(a b)` leaves a, b, ... in that order), puts an existing
+    # arch/version subdirectory in front of each entry, and removes the later
+    # DUPLICATES -- `use lib "/x"; use lib "/x"` leaves /x once, and a
+    # directory already on @INC MOVES to the front.  `no lib LIST` is its
+    # unimport, which removes every instance (it used to be a no-op here).
     # The argument LIST goes through the ordinary expression path, the way
-    # perl evaluates it (lib->import(LIST) at compile time), and is unshifted
-    # in ONE call so `use lib qw(a b)` leaves @INC = (a, b, ...) as perl does.
-    # It used to handle only a quoted string or a qw() token and SILENTLY
-    # DROP every other spelling -- `use lib $FindBin::Bin`, `use lib
-    # "$FindBin::Bin/lib"` joined by `.`, a function call -- which the old
-    # script-directory entry on @INC hid for the FindBin idiom (task #2442).
-    # Never $child->string wrapped in CL quotes: `use lib "$ENV{HOME}/lib"`
-    # is INTERPOLATED by perl (task #235).
+    # perl evaluates it at compile time -- `use lib $FindBin::Bin`,
+    # `"$FindBin::Bin/lib"`, a function call (task #2442); never
+    # $child->string wrapped in CL quotes: `use lib "$ENV{HOME}/lib"` is
+    # INTERPOLATED by perl (task #235).
     my @arg_tokens = $self->_use_import_arg_tokens($stmt);
-    if (@arg_tokens) {
-      my $args_cl = $self->_parse_expression(\@arg_tokens, $stmt, 1);
-      $self->_emit("  (p-unshift \@INC $args_cl)")
-        if defined $args_cl && $args_cl ne '';
+    my $args_cl = @arg_tokens ? $self->_parse_expression(\@arg_tokens, $stmt, 1) : undef;
+    $args_cl = undef if defined $args_cl && $args_cl eq '';
+    if ($type eq 'no') {
+      $self->_emit("(p-eval-always (p-unimport \"lib\" " . ($args_cl // '(vector)') . "))");
+    } else {
+      $self->_emit("(p-eval-always (p-use \"lib\""
+                   . (defined $args_cl ? " :import-args $args_cl" : '') . "))");
     }
-    $self->_emit(")");  # Close eval-when
     $self->_emit("");
   });
+  return if $type eq 'no';
 
   # Also add to transpiler's inc_paths for module finding
   for my $child ($stmt->schildren) {

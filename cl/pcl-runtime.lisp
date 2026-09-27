@@ -287,7 +287,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file #:p-require-version #:p-note-inc
+   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-unimport #:p-require-parent #:p-require-file #:p-require-version #:p-note-inc
    #:p-import-builtins #:p-unimport-builtins
    ;; Functions
    ;; Reference aliasing (use feature 'refaliasing'): p-setf's \-cast place
@@ -22285,7 +22285,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-2780"
+(defparameter *pcl-cache-generation* "v2-2880"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -24784,6 +24784,20 @@ buffer's fill-pointer; everything else falls back to file-length."
    would re-run the module's import into the current package, which (for modules
    like Moo::Role whose import has a guard) is both wrong and can be fatal."
   (p-use module-name :do-import nil))
+
+(defun p-unimport (module-name args)
+  "Perl `no MODULE LIST` = BEGIN { require MODULE; MODULE->unimport(LIST) }.
+   ARGS is the evaluated LIST (a vector, as p-use's :import-args).  Emitted for
+   `no lib` (task #2464): lib.pm's unimport removes every instance of each
+   named directory from @INC.  A module with no unimport method is a no-op,
+   as in perl (UNIVERSAL has none, and perl skips the call)."
+  (p-use module-name :do-import nil)
+  (when (p-true-p (ignore-errors (p-can module-name "unimport")))
+    (apply #'p-method-call module-name "unimport"
+           (if (and (vectorp args) (not (stringp args)))
+               (coerce args 'list)
+               (list args))))
+  t)
 
 (defun p-require-parent (module-name)
   "Implicit require performed by `use parent`/`use base` (Perl does

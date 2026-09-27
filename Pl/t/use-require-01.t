@@ -132,7 +132,9 @@ note "-------- Transpilation Tests:";
 # Test: use lib modifies @INC
 {
   my $result = Pl::Parser2->parse_code('use lib "mylib";');
-  like($result, qr/p-unshift \@INC "mylib"/, 'use lib modifies @INC');
+  # `use lib` is perl's own lib->import (task #2464): lib.pm dedupes and adds
+  # arch dirs, which a bare unshift did not.
+  like($result, qr/\(p-use "lib" :import-args "mylib"\)/, 'use lib modifies @INC (via lib->import)');
 }
 
 # Test: use lib with multiple paths via qw()
@@ -142,16 +144,16 @@ note "-------- Transpilation Tests:";
   # (one unshift per path) passed the two rows below and left lib2 FIRST
   # (task #2442; the run-time order is guarded in the #2442 block at the end).
   my $result = Pl::Parser2->parse_code('use lib qw(lib1 lib2);');
-  like($result, qr/p-unshift \@INC \(vector "lib1" "lib2"\)/, 'use lib qw() - first path');
+  like($result, qr/\(p-use "lib" :import-args \(vector "lib1" "lib2"\)\)/, 'use lib qw() - first path');
   like($result, qr/lib2/, 'use lib qw() - second path');
-  is(() = $result =~ /p-unshift/g, 1, 'use lib qw() - ONE unshift, in source order');
+  is(() = $result =~ /p-use "lib"/g, 1, 'use lib qw() - ONE lib->import, in source order');
 }
 
 # `use lib EXPR` of ANY shape reaches @INC (task #2442): only a quoted string
 # or a qw() used to, and `use lib $FindBin::Bin` was SILENTLY DROPPED.
 {
   my $result = Pl::Parser2->parse_code('use lib $FindBin::Bin;');
-  like($result, qr/p-unshift \@INC FindBin::\$Bin/, 'use lib $var reaches @INC');
+  like($result, qr/\(p-use "lib" :import-args FindBin::\$Bin\)/, 'use lib $var reaches @INC');
 }
 
 # Test: no strict is a compile-time no-op — no runtime load emitted
@@ -1077,6 +1079,43 @@ $main::ran2442 = '';
 do "./sib2442.pl"; print "do-explicit:$main::ran2442\n";
 print "do-bare:", (defined(do "sib2442.pl") ? "ran" : "undef"), "\n";
 print "req-bare:", (eval { require "sib2442.pl"; 1 } ? "ran" : "died"), "\n";
+PL
+}
+
+# ── #2464: `use lib` IS lib->import (perl's own lib.pm) ────────────────────
+# It dedupes (a second `use lib "/x"` leaves /x once), MOVES a directory that
+# is already on @INC to the front, and `no lib` removes every instance -- the
+# old `(p-unshift @INC LIST)` did none of the three and `no lib` was a no-op.
+# Printed at BEGIN time so each row sees @INC as that statement left it.
+{
+  my $dir = tempdir(CLEANUP => 1);
+  my $run_both = sub {
+    my ($name, $code) = @_;
+    open my $h, '>', "$dir/prog2464.pl" or die "$!"; print $h $code; close $h;
+    my $expected = `cd '$dir' && perl prog2464.pl 2>/dev/null`;
+    my $cl = PCLCore::transpile(qq{$pl2cl --no-cache '$dir/prog2464.pl'});
+    my ($cfh, $cl_file) = tempfile(SUFFIX => '.lisp');
+    print $cfh $cl; close $cfh;
+    my $got = `cd '$dir' && sbcl @sbcl_rt --load '$cl_file' 2>/dev/null`;
+    unlink $cl_file;
+    $got =~ s/^;.*\n//gm;
+    is($got, $expected, $name) or diag "perl=[$expected] pcl=[$got]";
+  };
+  $run_both->('#2464 use lib de-duplicates, across statements and within one', <<'PL');
+use lib "/x2464"; use lib "/x2464";
+BEGIN { print "twice:", scalar(grep { $_ eq "/x2464" } @INC), "\n" }
+use lib "/y2464", "/y2464";
+BEGIN { print "one-stmt:", scalar(grep { $_ eq "/y2464" } @INC), " $INC[0]\n" }
+PL
+  $run_both->('#2464 use lib of a directory already on @INC moves it to the front', <<'PL');
+my $last;
+BEGIN { $last = $INC[-1] }
+use lib $last;
+BEGIN { print "front:", ($INC[0] eq $last ? 1 : 0), " count:", scalar(grep { $_ eq $last } @INC), "\n" }
+PL
+  $run_both->('#2464 no lib removes every instance', <<'PL');
+use lib "/z2464"; no lib "/z2464";
+BEGIN { print "no-lib:", scalar(grep { $_ eq "/z2464" } @INC), "\n" }
 PL
 }
 
