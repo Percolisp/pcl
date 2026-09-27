@@ -370,12 +370,12 @@ ir-spec §10 row **string ops** — stringify operands (§3.2), return raw strin
 | `p-chop` | function | `(&rest vars)` | — | — | — | — | — | — | — |
 | `p-chr` | function | `(n)` | insensitive | num | none | no | no | no | none |
 | `p-crypt` | function | `(plaintext salt)` | insensitive | str | none | yes | no | no | posix |
-| `p-fc` | function | `(str)` | insensitive | str | none | no | no | no | none |
+| `p-fc` | function | `(str &optional regime)` | insensitive | str | none | no | no | no | none |
 | `p-hex` | function | `(str)` | — | — | — | — | — | — | — |
 | `p-index` | function | `(str substr &optional start)` | insensitive | str,num | none | no | no | no | none |
 | `p-join` | function | `(sep &rest items)` | insensitive | str | none | no | no | no | none |
-| `p-lc` | function | `(str)` | insensitive | str | none | no | no | no | none |
-| `p-lcfirst` | function | `(str)` | insensitive | str | none | no | no | no | none |
+| `p-lc` | function | `(str &optional regime)` | insensitive | str | none | no | no | no | none |
+| `p-lcfirst` | function | `(str &optional regime)` | insensitive | str | none | no | no | no | none |
 | `p-length` | function | `(val)` | insensitive | str | none | no | no | no | none |
 | `p-literal-string` | function | `(&rest parts)` | insensitive | none | none | no | no | no | none |
 | `p-oct` | function | `(str)` | — | — | — | — | — | — | — |
@@ -387,8 +387,8 @@ ir-spec §10 row **string ops** — stringify operands (§3.2), return raw strin
 | `p-str-x` | function | `(str count)` | insensitive | str,num | none | no | no | no | none |
 | `p-string-concat` | function | `(&rest args)` | insensitive | str | none | no | no | no | none |
 | `p-substr` | function | `(str start &optional len replacement)` | insensitive | str,num | none | yes | no | no | none |
-| `p-uc` | function | `(str)` | insensitive | str | none | no | no | no | none |
-| `p-ucfirst` | function | `(str)` | insensitive | str | none | no | no | no | none |
+| `p-uc` | function | `(str &optional regime)` | insensitive | str | none | no | no | no | none |
+| `p-ucfirst` | function | `(str &optional regime)` | insensitive | str | none | no | no | no | none |
 | `p-unparsable-quote` | function | `(text)` | — | — | — | — | — | — | — |
 | `p-unrepresentable-char` | function | `(code)` | — | — | — | — | — | — | — |
 | `p-version-string` | function | `(&rest code-points)` | — | — | — | — | — | — | — |

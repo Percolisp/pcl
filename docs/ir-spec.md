@@ -1474,6 +1474,31 @@ without the backslash, and backslash-NEWLINE is one of them: `"a\<newline>b"`
 is `a<newline>b` (s499k, task #2470; a single-quoted string keeps the
 backslash).
 
+### 3.2h Case mapping of chars 128-255 follows the SITE's REGIME (normative, s494u, task #2092)
+
+`p-lc` `p-uc` `p-fc` `p-lcfirst` `p-ucfirst` — and the `\L \U \F \l \u`
+escapes, which lower to the same calls (a constant literal folds at compile
+time by the same rule) — take an optional second operand, the REGIME.
+`:u` = the call sits under `unicode_strings` (`use v5.12`+, `use feature
+'unicode_strings'`, a `:5.12`+ / `:all` bundle; lexical, found by source
+region like §3.2f, inherited by a string eval compiled there): every char
+maps by Unicode rules.  Absent = perl's /d: a char 128-255 maps by Unicode
+rules only if the STRING is decoded text.  PCL keeps no UTF-8 flag (#1389),
+so /d decides from the data: a string whose chars >= 128 ALL sit in
+well-formed UTF-8 byte sequences (shortest form, no surrogate, <= U+10FFFF,
+no truncated tail; no char > 255) is undecoded bytes and maps by ASCII rules
+(its high chars are left alone); any other string maps by Unicode rules.
+The two known errors are not-supported.md "The per-scalar UTF-8 flag".
+Example: with no pragma, `lc "\xC3\x80B"` is `"\xC3\x80b"` (raw UTF-8 of
+"ÀB" stays valid UTF-8, as in perl) and `lc` of the decoded "ÀB" is "àb";
+under `use v5.12` the first is `"\xE3\x80b"` (perl corrupts it too).
+
+The regex `/a` modifier (and `/aa`, and inline `(?a)` `(?a:…)`, and a
+`qr//a` interpolated) makes `\w \W \s \S \b \B` ASCII-only (`\s` =
+`[\t\n\x0B\f\r ]`); `\d` and the POSIX classes are ASCII in every regime.
+Regex classes at a /d site are NOT regime-dependent yet (#2092 phase 2):
+they match by Unicode rules for every string.
+
 ### 3.3 `p-true-p` (truthiness)
 
 False: the number 0 (but **NaN is true**), the strings `""` and `"0"`,

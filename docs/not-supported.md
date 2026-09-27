@@ -432,8 +432,11 @@ diverge from Perl in several respects:
 > UTF-8 before parsing (`_maybe_decode_utf8` in `Pl/Parser.pm`), so multi-byte
 > sequences in string literals — and UTF-8 *identifiers* (`my $café`, `*ワルド`)
 > — are single characters: `use utf8; length("café")` is `4`, `substr`/`index`
-> are character-based.  Without the pragma, high bytes stay Latin-1 (byte
-> semantics), matching Perl.  The items below are the *remaining* divergences.
+> are character-based.  Without the pragma, the source's high bytes stay
+> single chars (byte semantics) for `length`/`substr`/`index`, matching Perl.
+> CASE MAPPING and CHARACTER CLASSES are a different question, answered by
+> perl's REGIMES — see "The per-scalar UTF-8 flag" below (task #2092).  The
+> items below are the *remaining* divergences.
 >
 > **Caveat — `use utf8` is whole-file, not lexically scoped.**  Perl's `use
 > utf8` is a *lexical* pragma: only literals/identifiers inside its block are
@@ -460,6 +463,30 @@ diverge from Perl in several respects:
   `utf8::upgrade` likewise has no representation to change; it answers perl's
   OCTET COUNT so a program that uses the return value gets a number of the
   right shape, but a subsequent `is_utf8` still says 1 either way.
+
+  > **Case mapping of chars 128-255 (s494u, task #2092; ir-spec §3.2h).**
+  > perl maps them by REGIME.  Under `unicode_strings` (`use v5.12`+, `use
+  > feature 'unicode_strings'`) every string gets Unicode rules — PCL is exact
+  > there (lexical, per site, inherited by a string eval).  Everywhere else
+  > (perl's /d) a char 128-255 gets Unicode rules only if the string carries
+  > the flag, and PCL APPROXIMATES the flag from the data: a string whose high
+  > chars all sit in well-formed UTF-8 byte sequences is undecoded bytes and
+  > gets ASCII rules (`lc` of raw UTF-8 leaves it valid UTF-8, as perl does);
+  > anything else is treated as decoded text and gets Unicode rules.  This
+  > covers `lc uc lcfirst ucfirst fc` and the `\L \U \l \u \F` escapes.  The
+  > two known errors, both non-corrupting:
+  > (i) decoded text that happens to be valid UTF-8 as bytes (a decoded
+  > "CAF\x{C9}\x{BB}" — C9 BB is a well-formed pair) is not folded where perl
+  > folds it — rare;
+  > (ii) a genuine Latin-1 byte or `chr(0xC9)` alone at a /d site IS folded
+  > (`lc chr(0xC9)` is `chr(0xE9)`; perl leaves it) — what a Latin-1 script's
+  > author wanted.
+  > **Regex classes are NOT regime-dependent yet** (#2092 phase 2, a
+  > measurement): at a /d site `\w \s \b`, the POSIX classes and `/i` still
+  > match chars 128-255 by Unicode rules for every string, so
+  > `s/\W+/_/g` over undecoded UTF-8 text eats the continuation bytes and
+  > leaves the lead bytes behind (perl: `caf\xC3\xA9 x` → `caf_x`; PCL:
+  > `caf\xC3_x`, invalid UTF-8).  Decode first, or use `/a`.
 
   > **NARROWED s492a (task #1995): only a STRING answers 1.**  The ruling below
   > is about strings, and answering 1 for a value that is not a string at all —
@@ -1532,9 +1559,15 @@ Unicode semantics to use:
 - `/l` — locale-dependent character class matching.
 - `/u` — full Unicode semantics (the default on `use utf8` source).
 
-**PCL behaviour:** These modifiers are accepted in the source but silently
-ignored.  CL-PPCRE always uses Unicode semantics (roughly equivalent to
-`/u`).
+**PCL behaviour:** `/a` and `/aa` are IMPLEMENTED (s494u, task #2092;
+ir-spec §3.2h): `\w \W \s \S \b \B` are ASCII-only under the trailing
+modifier, an inline `(?a)` / `(?a:…)` scope, and a `qr//a` interpolated into a
+bigger pattern (its stringification carries the `a`).  `/aa`'s extra rule —
+no ASCII/non-ASCII match under `/i` (KELVIN SIGN vs `k`) — holds because
+cl-ppcre never makes that fold at all (which is itself the separate `/i`
+multi-char/cross-script folding gap, #1036).  `/d`, `/u` and `/l` remain
+accepted and ignored: CL-PPCRE matches with Unicode semantics (roughly `/u`)
+for every string — the regex half of #2092 (phase 2).
 
 **"Ignored" was not true of the INLINE spelling until s473t5e (task #1715).**
 `(?a:…)` `(?aa:…)` `(?u:…)` `(?l:…)` `(?d:…)` and the flag-only `(?a)` are not
@@ -1543,9 +1576,10 @@ whole pattern (`Regex syntax error: Character 'a' may not follow '(?'`), so
 `"0" =~ /(?a:\d)/` was **0** where perl says 1, with a warning on stderr.
 `%pcl-strip-charset-flags` now drops just the charset letters from an inline
 modifier group, keeping any real flag (`(?ai:x)` → `(?i:x)`, `(?a-i:x)` →
-`(?-i:x)`, `(?a)` → nothing).  What remains ignored is the SEMANTICS, which is
-this entry: `"\x{100}" =~ /(?a:\w)/` is 1 in PCL and 0 in perl.  Guard
-`Pl/t/regex-extended-mode-01.t`.
+`(?-i:x)`, `(?a)` → nothing).  The SEMANTICS of `(?a…)` arrived in s494u
+(`"\x{100}" =~ /(?a:\w)/` is 0, as in perl): the rewrite scan applies the
+ASCII classes inside the scope before the letters are stripped.  Guards
+`Pl/t/regex-extended-mode-01.t`, `Pl/t/case-regime-01.t`.
 
 **Rationale:** The difference between `/a` and `/u` matters for
 `\d`/`\s`/`\w` on non-ASCII text, which is uncommon in real CPAN code.

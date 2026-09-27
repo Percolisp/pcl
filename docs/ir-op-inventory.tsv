@@ -376,7 +376,7 @@ p-exists-array	function	elements	(arr idx)	insensitive	num	none	yes	no	no	none		
 p-exit	function	process	(&optional code)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl exit - terminate program with exit code. exit during the COMPILE phase (inside BEGIN/UNITCHECK/CHECK) still runs the remaining UNITCHECK/CHECK blocks befor
 p-exp	function	math	(val)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl exp - e^x
 p-fact	macro	ir-literal	(licence form)	insensitive	none	none	no	no	no	none		FORM, annotated with the compiler LICENCE (a list: name and optional detail) that permitted its shape. Expands to FORM; the annotation is for a consumer of the 
-p-fc	function	string	(str)	insensitive	str	none	no	no	no	none		Perl fc - fold case for case-insensitive comparison. Uses string-downcase as approximation (full Unicode folding would need ICU).
+p-fc	function	string	(str &optional regime)	insensitive	str	none	no	no	no	none		Perl fc — fold case, by REGIME (:u = unicode_strings site; nil = /d). The Unicode arm is the simple lowercase mapping (full folding: #1036).
 p-fcntl	macro	io	(fh func arg)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl fcntl — bareword filehandle is auto-quoted, like fileno's.
 p-file	macro	source-location	(path)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Set the current source FILE (task #1240). Emitted at a file's run bucket and at every sub body's head; p-sub-frame restores the caller's on return.
 p-fileno	macro	io	(fh)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl fileno — bareword filehandle is auto-quoted.
@@ -465,8 +465,8 @@ p-kv-aslice	function	elements	(arr &rest indices)	insensitive	num	none	yes	no	no
 p-kv-hslice	function	elements	(hash &rest keys)	insensitive	str	none	yes	no	no	none		Perl KV hash slice %hash{keys} - returns vector of key-value pairs. Handles individual keys, lists, and vectors (from range operator). Strings are vectors in CL
 p-last	macro	control-flow	(&optional label)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl last (break) - optionally with label to exit specific loop. Labeled form uses throw so it works across function calls (like p-next/p-redo).
 p-last-dynamic	function	control-flow	(label-name)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Dynamic (cross-function) labeled last: throws to LAST-<LABEL> catch tag. Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP).
-p-lc	function	string	(str)	insensitive	str	none	no	no	no	none		Perl lc - lowercase
-p-lcfirst	function	string	(str)	insensitive	str	none	no	no	no	none		Perl lcfirst - lowercase first character
+p-lc	function	string	(str &optional regime)	insensitive	str	none	no	no	no	none		Perl lc — lowercase, by REGIME (:u = unicode_strings site; nil = /d).
+p-lcfirst	function	string	(str &optional regime)	insensitive	str	none	no	no	no	none		Perl lcfirst — lowercase the first character, by REGIME (see p-lc).
 p-length	function	string	(val)	insensitive	str	none	no	no	no	none		Perl length function - returns undef for undef input. Stringifies via to-string on the original (boxed) value so that a blessed object's overloaded '' handler f
 p-let	macro	declaration	(bindings &body body)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		THE DECLARATION FORM of a perl `my' (task #1035, s466; docs/ir-spec.md §2b.2a): (p-let ((NAME CLASS INIT . FACTS) ...) BODY...) binds each NAME to INIT exactly 
 p-line	macro	source-location	(n)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Set the current statement's LINE (task #1240). One store; see the header above for why this is a defglobal and not a special.
@@ -660,8 +660,8 @@ p-typeglob	class	typeglob		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	U
 p-typeglob-name	function	typeglob	(sb-kernel:instance)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	setf	
 p-typeglob-p	function	typeglob	(sb-kernel::object)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		
 p-typeglob-package	function	typeglob	(sb-kernel:instance)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	setf	
-p-uc	function	string	(str)	insensitive	str	none	no	no	no	none		Perl uc - uppercase
-p-ucfirst	function	string	(str)	insensitive	str	none	no	no	no	none		Perl ucfirst - uppercase first character
+p-uc	function	string	(str &optional regime)	insensitive	str	none	no	no	no	none		Perl uc — uppercase, by REGIME (:u = unicode_strings site; nil = /d).
+p-ucfirst	function	string	(str &optional regime)	insensitive	str	none	no	no	no	none		Perl ucfirst — uppercase the first character, by REGIME (see p-lc).
 p-umask	function	file-ops	(&optional mode)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl umask [EXPR] — set the file-creation mask and return the PREVIOUS value. With no argument, return the current mask without changing it (sb-posix:umask alwa
 p-undef	function	box	(&optional val)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Return Perl's undef value, or undefine a variable. (p-undef) → undef (p-undef @arr) → clear array, return undef (p-undef %hash) → clear hash, return undef (p-un
 p-undef-sub	function	introspection	(pkg-str name-str)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl undef &funcname — remove sub body; sub still 'exists' afterward.
