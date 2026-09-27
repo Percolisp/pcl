@@ -69,7 +69,7 @@ is the eval, which is what perl's compile error covers too).
 
 The handful most likely to matter to a program that is otherwise portable:
 
-* [`@_` argument aliasing](#_-argument-aliasing--partial-plain-my-lexicals-only) — arguments are copies, so `$_[0] = 42` does not write back.
+* [`@_` argument aliasing](#_-argument-aliasing--partial-plain-my-lexicals-only) — partial: `$_[0] = 42` writes back to the caller's variable, array element or hash element; an element reached through a reference (`f($r->{k})`) gets a copy, and so can a number-only variable passed to a code reference or a method.
 * [`tie` on an ARRAY or HASH](#tie-on-an-array-or-hash--interim--announced-not-silent-scalar-tie-works) — scalar `tie` works; the other two are announced, not silent.
 * [Regex code blocks `(?{…})`](#regex-code-blocks-code-and-code) — CL-PPCRE has no equivalent.
 * [`DESTROY` at GC time](#destroy-called-by-garbage-collector) — no deterministic finalizer timing on a GC'd host.
@@ -88,8 +88,8 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Scalar copy does not preserve reference/SV identity](#scalar-copy-does-not-preserve-referencesv-identity)
 * [Sparse arrays (holes), element aliasing, and SV identity](#sparse-arrays-holes-element-aliasing-and-sv-identity)
 * [Writing to `$a`/`$b` inside a sort comparator](#writing-to-ab-inside-a-sort-comparator)
-* [Integers are unbounded: PCL has no 64-bit boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary) — no overflow to NV, no `use integer` wrap, no `%u`/`%d` clamp
-* [`**` returns an exact integer where Perl returns a float (NV)](#-returns-an-exact-integer-where-perl-returns-a-float-nv) — **FIXED s473d (#1248(b))**; heading kept as a pointer for older citations
+* [Integers are unbounded: PCL has no 64-bit boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary--by-design--user-2026-09-07-revisit-pointer-task-1513) — no overflow to NV, no `use integer` wrap, no `%u`/`%d` clamp
+* [`**` returns an exact integer where Perl returns a float (NV)](#-returns-an-exact-integer-where-perl-returns-a-float-nv--fixed-s473d--task-1248b) — **FIXED s473d (#1248(b))**; heading kept as a pointer for older citations
 * [`use integer` — large shift / overflow edge cases](#use-integer--large-shift--overflow-edge-cases) — pointer into the section above
 * [Hex floating-point literals (`0x1.8p+1`)](#hex-floating-point-literals-0x18p1)
 
@@ -114,6 +114,8 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Regex script-run assertions `(*script_run:…)`](#regex-script-run-assertions-script_run--sr-and-the-atomic-pair)
 * [Regex extended character classes `(?[ … ])`](#regex-extended-character-classes---)
 * [`reset()` for one-match `?pattern?` and named captures](#reset-for-one-match-pattern-and-named-captures)
+* [Regex control verbs: `(*SKIP)`, `(*FAIL)`, `(*MARK:name)`, `(*PRUNE)`, …](#regex-control-verbs-skip-fail-markname-prune-)
+* [Regex escapes that are still passed through untranslated](#regex-escapes-that-are-still-passed-through-untranslated)
 
 ### Subroutines, arguments and closures
 
@@ -133,7 +135,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Computed goto (`goto EXPR`)](#computed-goto-goto-expr)
 * [`given`/`when` / smart match (`~~`)](#givenwhen--smart-match-)
 * [`defer { … }` blocks — DEFERRED](#defer----blocks--deferred--implementable-not-rejected)
-* [An unlabelled `last`/`next`/`redo` whose loop is not lexically here](#an-unlabelled-lastnextredo-whose-loop-is-not-lexically-here) — INTERIM, owner #1022 half (b)
+* [An unlabelled `last`/`next`/`redo` through an indirect call, a string eval, or across compilation units](#an-unlabelled-lastnextredo-through-an-indirect-call-a-string-eval-or-across-compilation-units) — INTERIM, owner #1022 half (b)
 
 ### Objects and OO
 
@@ -151,6 +153,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`sort` comparator `$a`/`$b` re-homing after an inline `package` switch](#sort-comparator-ab-re-homing-after-an-inline-package-switch)
 * [An `our` alias whose requalified region contains a nested `package`](#an-our-alias-whose-requalified-region-contains-a-nested-package-statement-or-an-inner-scope-re-declaration)
 * [A SYMBOLIC spelling of a package variable does not demote an identity-promoted lexical](#a-symbolic-spelling-of-a-package-variable-does-not-demote-an-identity-promoted-lexical-470)
+* [`undef *GLOB` leaves an EMPTY aggregate slot where perl REMOVES it](#undef-glob-leaves-an-empty-aggregate-slot-where-perl-removes-it--a-read-does-not-re-vivify-it-and-a-write-is-noticed-at-the-next-read-1117)
 
 ### The compile model, `eval` and pragmas
 
@@ -186,13 +189,19 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`Hash::Util` bucket statistics](#hashutil-bucket-statistics)
 * [`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`](#max_nested_eval_begin_blocks)
 * [`use English` — everything works except `@ARG` inside a sub](#use-english--everything-works-except-arg-inside-a-sub)
+* [`%SIG`](#sig)
+* [`fcntl` with a packed-structure argument (`F_GETLK`, `F_SETLK`, …)](#fcntl-with-a-packed-structure-argument-f_getlk-f_setlk-)
+* [Time::HiRes: the signal-driven timers (`ualarm`, `setitimer`, `getitimer`)](#timehires-the-signal-driven-timers-ualarm-setitimer-getitimer)
+* [POSIX: the classes and the syscalls that need a real libc](#posix-the-classes-and-the-syscalls-that-need-a-real-libc)
+* [Builtin override: only the COMPILE-TIME spellings perl can be shown](#builtin-override-only-the-compile-time-spellings-perl-can-be-shown)
+* [Builtins ruled out: SysV IPC, `syscall`, `ioctl`, `chroot`, `dbmopen`, `dump`](#builtins-ruled-out-sysv-ipc-syscall-ioctl-chroot-dbmopen-dump)
 
 ### Perl's own internals, and C extensions
 
 * [`Internals::*` C-level introspection](#internals-c-level-introspection)
 * [Readouts of perl's own internals: `B::`, `re::optimization`, `XS::APItest`](#readouts-of-perls-own-internals-b-optree-inspection-reoptimization-xsapitest)
 * [DynaLoader / XS binary extensions](#dynaloader--xs-binary-extensions)
-* [`caller()` fidelity — DEFERRED for now (task #233)](#caller-fidelity--deferred-for-now-task-233) — the whole family: 3-vs-4 fields, filename/line, `$0`, `#line`, frame hiding, `CORE::GLOBAL::caller`; USER 2026-09-17
+* [`caller()` fidelity — DEFERRED for now (task #233)](#caller-fidelity--deferred-for-now--task-233) — the whole family: 3-vs-4 fields, filename/line, `$0`, `#line`, frame hiding, `CORE::GLOBAL::caller`; USER 2026-09-17
 
 ### No longer limitations — kept for the record
 
@@ -2561,7 +2570,7 @@ overflow edge cases](#use-integer--large-shift--overflow-edge-cases).  That
 heading is kept as a pointer so older citations still resolve.
 
 **It used to absorb a second, [`**` returns an exact
-integer](#-returns-an-exact-integer-where-perl-returns-a-float-nv), and that
+integer](#-returns-an-exact-integer-where-perl-returns-a-float-nv--fixed-s473d--task-1248b), and that
 was WRONG — measured, s473d.**  perl returns an NV from `**` for results that
 fit an IV (`2**52` is `4.5035996273705e+15`, `6**24` is
 `4.73838133832162e+18`), so the `**` divergence was never this boundary; it
@@ -2718,7 +2727,7 @@ above, so an implementation of the boundary trips it deliberately.
 ## `use integer` — large shift / overflow edge cases
 
 **See [Integers are unbounded: PCL has no 64-bit
-boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary)** — this heading
+boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary--by-design--user-2026-09-07-revisit-pointer-task-1513)** — this heading
 is kept so older citations resolve; `use integer` not wrapping is one face of
 that one mechanism, and the large-shift corners are the same C-ABI detail.
 
@@ -2734,7 +2743,7 @@ prints the exact `11398895185373143`, all as perl does.
 
 **AND IT WAS NEVER THE 64-BIT BOUNDARY**, which is what makes fixing it
 compatible with the ruling in [Integers are unbounded: PCL has no 64-bit
-boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary).  The
+boundary](#integers-are-unbounded-pcl-has-no-64-bit-boundary--by-design--user-2026-09-07-revisit-pointer-task-1513).  The
 discriminating measurement: perl returns an NV from `**` for results that fit
 an IV comfortably — `2**52` is `4.5035996273705e+15`, `6**24` is
 `4.73838133832162e+18`, `5**27` is `7.45058059692383e+18` — because pp_pow
