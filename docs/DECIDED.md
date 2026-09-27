@@ -71,6 +71,13 @@ not-supported.md → only then probe.*
 - **s495f MERGED (ff `25d7fede`, pushed): `EVERYDAY: 92 -> 100 of 122` (82.0 %) confirmed by Fable's own run (buckets 0); Fable's own gate on the sha 262 / 8675 PASS; container install test PASS (platform-touching: sb-alien gethostby*/getnetby*/setpriority; macOS NOT TESTED, #2196); review probes 8 of 11 identical to perl, the three differing explained (formline dies by ruling; #2103 strict-dependent, not shipped; stderr ORDER under runpcl's plain load).**  Records nit: its session-log section says gate 8674, the count is 8675.  **#2341 (HIGH, pre-existing, filed by the agent) = the next correctness candidate**: under the raw-slot emission a never-assigned `my $u` cannot be vivified through a deref -- `push @$u, 1` dies, `$u->[0]` / `for (@$u)` / `keys %$u` leave it undef; right under `PCL_OPT=-raw-slot`.
 
 
+## s499h (2026-09-27, Opus) -- a dq string's case/quote modifiers are read from the SOURCE (#2441); `{,n}` is `{0,n}` (#2444); uniprops byte row runs only under the stamp's perl
+- **uniprops-01.t row 3 (CI red)**: the regenerate-and-compare-bytes row runs only when the running perl equals the artifact stamp's `perl=`; otherwise it SKIPS naming both versions; the `unicode=` row runs everywhere (on main as 59859d7a).
+- **#2441 dq modifiers**: `\U \L \F \Q \E \u \l` are commands in the ONE scan of the source that decodes every escape (`ExprToCL::_apply_case_escapes`); an escaped backslash is text (`"C:\\Users"` = `C:\Users`); never in-band markers in decoded text.  ir-spec §3.2g.
+- **toke.c stack rule, both dq scans**: a new `\U`/`\L`/`\F` while a U/L/F is open closes modes from the top until none is left (a `\Q` above it too); `\E` pops ONE (`"\LAB\LCD\EEF"` = `abcdEF`).  ir-spec §3.2g.
+- **#2444 counted quantifiers**: perl 5.34+'s grammar -- `{,n}` = `{0,n}`, blanks allowed around numbers and comma; `{,}` `{a}` `\{` and in-class stay literal; written blank-free by the ONE rewrite scan (`%pcl-rx-counted-end`, third pre-test), so `{,n}?`/`{,n}+` compose.  ir-spec §10-count.
+- **Filed**: #2470 (backslash-NEWLINE in a dq string keeps the backslash), #2471 (`\N{3,4}` = `\N` quantified, never matches).
+
 ## s499i (2026-09-27, Opus) -- a loop statement modifier over an EMPTY list desugars to `(())` (#2465 regression fixed)
 
 - **`EXPR for ();` / `while ();` / `until ();` desugar to the block spelling with `(())`, never `()`** — `for () {…}` is a perl syntax error and killed the transpile since s494p (t/io/through.t + crlf_through.t 942 rows each); ir-spec §6 (modifier paragraph), guard `Pl/t/loop-modifier-01.t`.
