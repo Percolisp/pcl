@@ -10101,28 +10101,20 @@ sub _process_use_lib {
     $self->_emit(";; $perl_code");
     $self->_emit("(p-eval-always");
 
-    # Extract path arguments from the statement
-    for my $child ($stmt->schildren) {
-      if ($child->isa('PPI::Token::Quote')) {
-        # Through the ordinary expression path, never $child->string wrapped in
-        # CL quotes: `use lib "$ENV{HOME}/lib"` is INTERPOLATED by perl at
-        # compile time, and the raw text put the literal characters
-        # `$ENV{HOME}/lib` on @INC — which surfaces much later as
-        # "Can't locate X.pm in @INC" with the un-interpolated path in the
-        # message, the way this was found (task #235).  The same seam also
-        # escapes a quote or a backslash inside the path, which the raw wrap
-        # did not.
-        $self->_emit("  (p-unshift \@INC " . $self->_parse_expression([$child], $stmt) . ")");
-      }
-      elsif ($child->isa('PPI::Token::QuoteLike::Words')) {
-        # qw(path1 path2)
-        my $content = $child->content;
-        $content =~ s/^qw\s*[\(\[\{<]//;
-        $content =~ s/[\)\]\}>]$//;
-        for my $path (split /\s+/, $content) {
-          $self->_emit("  (p-unshift \@INC \"$path\")") if $path;
-        }
-      }
+    # The argument LIST goes through the ordinary expression path, the way
+    # perl evaluates it (lib->import(LIST) at compile time), and is unshifted
+    # in ONE call so `use lib qw(a b)` leaves @INC = (a, b, ...) as perl does.
+    # It used to handle only a quoted string or a qw() token and SILENTLY
+    # DROP every other spelling -- `use lib $FindBin::Bin`, `use lib
+    # "$FindBin::Bin/lib"` joined by `.`, a function call -- which the old
+    # script-directory entry on @INC hid for the FindBin idiom (task #2442).
+    # Never $child->string wrapped in CL quotes: `use lib "$ENV{HOME}/lib"`
+    # is INTERPOLATED by perl (task #235).
+    my @arg_tokens = $self->_use_import_arg_tokens($stmt);
+    if (@arg_tokens) {
+      my $args_cl = $self->_parse_expression(\@arg_tokens, $stmt, 1);
+      $self->_emit("  (p-unshift \@INC $args_cl)")
+        if defined $args_cl && $args_cl ne '';
     }
     $self->_emit(")");  # Close eval-when
     $self->_emit("");

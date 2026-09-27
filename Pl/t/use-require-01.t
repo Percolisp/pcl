@@ -137,9 +137,21 @@ note "-------- Transpilation Tests:";
 
 # Test: use lib with multiple paths via qw()
 {
+  # ONE unshift of the whole list, so the paths keep their ORDER: perl's
+  # `use lib qw(lib1 lib2)` leaves @INC = (lib1, lib2, ...).  The old emission
+  # (one unshift per path) passed the two rows below and left lib2 FIRST
+  # (task #2442; the run-time order is guarded in the #2442 block at the end).
   my $result = Pl::Parser2->parse_code('use lib qw(lib1 lib2);');
-  like($result, qr/p-unshift \@INC "lib1"/, 'use lib qw() - first path');
-  like($result, qr/p-unshift \@INC "lib2"/, 'use lib qw() - second path');
+  like($result, qr/p-unshift \@INC \(vector "lib1" "lib2"\)/, 'use lib qw() - first path');
+  like($result, qr/lib2/, 'use lib qw() - second path');
+  is(() = $result =~ /p-unshift/g, 1, 'use lib qw() - ONE unshift, in source order');
+}
+
+# `use lib EXPR` of ANY shape reaches @INC (task #2442): only a quoted string
+# or a qw() used to, and `use lib $FindBin::Bin` was SILENTLY DROPPED.
+{
+  my $result = Pl::Parser2->parse_code('use lib $FindBin::Bin;');
+  like($result, qr/p-unshift \@INC FindBin::\$Bin/, 'use lib $var reaches @INC');
 }
 
 # Test: no strict is a compile-time no-op — no runtime load emitted
@@ -1013,6 +1025,61 @@ print "ret:", (defined \$r ? \$r : "U"), " err:", (\$\@ ? 1 : 0),
       " inc:", (exists \$INC{"$dies"} ? 1 : 0), "\\n";
 my \$s = do "$dir/nope1116.pl";
 print "missing:", (exists \$INC{"$dir/nope1116.pl"} ? 1 : 0), "\\n";
+PL
+}
+
+# ── #2442: NO "." AND NO SCRIPT DIRECTORY ON @INC ─────────────────────────
+# perl 5.26+ has neither; a program asks for them with `use lib`, FindBin,
+# -I or PERL5LIB.  The script and a sibling module live in one directory and
+# both sides RUN FROM that directory, so the cwd and the script's directory
+# are the same place -- one sibling covers both accidents.  Every row compares
+# against perl itself.
+{
+  my $dir = tempdir(CLEANUP => 1);
+  my $w = sub { my ($f, $s) = @_; open my $h, '>', "$dir/$f" or die "$f: $!";
+                print $h $s; close $h };
+  $w->('Sib2442.pm', "package Sib2442; sub hi { 'sib' } 1;\n");
+  $w->('sib2442.pl', "\$main::ran2442 = 'ran'; 1;\n");
+  my $run_both = sub {
+    my ($name, $code) = @_;
+    $w->('prog2442.pl', $code);
+    my $expected = `cd '$dir' && perl prog2442.pl 2>/dev/null`;
+    my $cl = PCLCore::transpile(qq{$pl2cl --no-cache '$dir/prog2442.pl'});
+    my ($cfh, $cl_file) = tempfile(SUFFIX => '.lisp');
+    print $cfh $cl; close $cfh;
+    my $got = `cd '$dir' && sbcl @sbcl_rt --load '$cl_file' 2>/dev/null`;
+    unlink $cl_file;
+    $got =~ s/^;.*\n//gm;
+    is($got, $expected, $name) or diag "perl=[$expected] pcl=[$got]";
+  };
+  $run_both->('#2442 @INC holds neither "." nor the script directory', <<'PL');
+use Cwd qw(getcwd);
+my $cwd = getcwd();
+print "dot:", (scalar grep { $_ eq "." } @INC), "\n";
+print "dir:", (scalar grep { $_ eq $cwd } @INC), "\n";
+PL
+  $run_both->('#2442 a sibling module is NOT found through the cwd / script dir', <<'PL');
+print eval { require Sib2442; 1 } ? "loaded\n" : "died\n";
+PL
+  $run_both->('#2442 use lib $FindBin::Bin finds the sibling (the perl way)', <<'PL');
+use FindBin;
+use lib $FindBin::Bin;
+use Sib2442;
+print Sib2442::hi(), "\n";
+PL
+  $run_both->('#2442 use lib "."; and use lib qw(a b) keep perl\'s order', <<'PL');
+use lib qw(/a2442 /b2442);
+use lib ".";
+print "@INC[0..2]\n";
+require Sib2442;
+print Sib2442::hi(), "\n";
+PL
+  $run_both->('#2442 require/do: an explicit ./ path loads, a bare name searches @INC only', <<'PL');
+require "./sib2442.pl"; print "req-explicit:$main::ran2442\n";
+$main::ran2442 = '';
+do "./sib2442.pl"; print "do-explicit:$main::ran2442\n";
+print "do-bare:", (defined(do "sib2442.pl") ? "ran" : "undef"), "\n";
+print "req-bare:", (eval { require "sib2442.pl"; 1 } ? "ran" : "died"), "\n";
 PL
 }
 

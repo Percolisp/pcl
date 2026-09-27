@@ -661,16 +661,11 @@ sub build_preamble {
   push @lines, ";; Initialize \@INC from Perl";
   push @lines, "(setf pcl::\@INC (make-array 0 :adjustable t :fill-pointer 0))";
 
-  # Add source file directory first (like Perl does)
-  if ($source_file && -f $source_file) {
-    my $source_dir = File::Spec->rel2abs(
-      (File::Spec->splitpath($source_file))[1] || '.'
-    );
-    push @lines, "(vector-push-extend \"$source_dir\" pcl::\@INC)";
-  }
-
-  # Add current directory
-  push @lines, "(vector-push-extend \".\" pcl::\@INC)";
+  # NEITHER the script's directory NOR "." (task #2442): perl has never put
+  # the script's directory on @INC, and dropped "." in 5.26 -- a stray Foo.pm
+  # in the cwd (or, for `pcl -e`, in the temp directory the program is written
+  # to) would shadow the module the author meant.  A program asks for them the
+  # perl way: `use lib`, FindBin, -I, PERL5LIB.  The contract: ir-spec §9.
 
   # Add PCL's lib/ directory (for our stub modules like Config.pm)
   my $pcl_lib = "$ROOT/lib";

@@ -15447,6 +15447,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                   *default-pathname-defaults*
                                   :as-directory as-directory))
 
+(defun %p-explicit-path-p (name)
+  "True when a `do FILE' / `require FILE' NAME bypasses @INC: an absolute
+   path, or one starting with `./' or `../' (perl's path_is_searchable).
+   Any other name is searched in @INC ONLY -- never in the cwd, which is
+   what perl 5.26 removed along with \".\" (task #2442, ir-spec §9)."
+  (let ((n (length name)))
+    (or (and (>= n 1) (char= (char name 0) #\/))
+        (and (>= n 2) (string= name "./" :end1 2))
+        (and (>= n 3) (string= name "../" :end1 3)))))
+
 ;;; p-do - Perl's do FILE (block form is inlined by codegen as (progn ...))
 ;;; Called only for do EXPR where EXPR is not a bare block.
 
@@ -15493,13 +15503,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Binds *pcl-caller-wantarray* so wantarray() in the do-file sees the calling context."
   (let* ((*pcl-caller-wantarray* *wantarray*)
          (filename (to-string (unbox filename-val)))
-         ;; Search: absolute/relative path → use directly; else search @INC
+         ;; Search: an explicit path is used directly; else search @INC
          (abs-path
-          (if (or (and (plusp (length filename))
-                       (char= (char filename 0) #\/))
-                  (and (>= (length filename) 2)
-                       (char= (char filename 0) #\.)
-                       (char= (char filename 1) #\/)))
+          (if (%p-explicit-path-p filename)
               (let ((fp (%p-literal-path filename)))
                 (when (probe-file fp) (truename fp)))
               (loop for dir-box across @INC
@@ -22279,7 +22285,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-2280"
+(defparameter *pcl-cache-generation* "v2-2480"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -24867,16 +24873,18 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; the VALUE.
         (%p-note-inc-path path-str)
         (return-from p-require-file t)))
-    ;; Non-.pm: literal file load (e.g. ./test.pl), cwd-relative, @INC fallback.
-    (let ((abs-path (if (char= (char path-str 0) #\/)
-                        (%p-literal-path path-str)
-                        (let ((cwd-path (merge-pathnames
-                                         (%p-literal-path path-str)
-                                         (truename *default-pathname-defaults*))))
-                          (if (probe-file cwd-path)
-                              cwd-path
-                              (or (p-find-module-in-inc path-str) cwd-path))))))
-      (unless (probe-file abs-path)
+    ;; Non-.pm: an explicit path (/x, ./test.pl, ../x) is loaded as given,
+    ;; cwd-relative; any other name is searched in @INC ONLY -- the cwd is not
+    ;; consulted, as in perl 5.26+ (task #2442).
+    (let ((abs-path (cond
+                      ((char= (char path-str 0) #\/)
+                       (%p-literal-path path-str))
+                      ((%p-explicit-path-p path-str)
+                       (merge-pathnames (%p-literal-path path-str)
+                                        (truename *default-pathname-defaults*)))
+                      (t
+                       (p-find-module-in-inc path-str)))))
+      (unless (and abs-path (probe-file abs-path))
         ;; ENOENT, as perl's own search leaves it, and p-die for the same
         ;; reason as p-use's twin above (#1247 (b)).
         (%p-io-errno-fail 2)

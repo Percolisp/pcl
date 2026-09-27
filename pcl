@@ -201,11 +201,10 @@ sub transpile {
     push @cleanup, $src_path;
   }
   elsif ($use_prefix ne '') {
-    # File + -M: prepend the use-lines into a temp copy, but keep the original
-    # directory on @INC (-I) so the script's own `use`/`do` still resolve.
+    # File + -M: prepend the use-lines into a temp copy.  The script's own
+    # directory is NOT put on @INC (task #2442): perl does not either.
     $src_path = mktmp('.pl');
     write_file($src_path, $use_prefix . slurp($source));
-    push @inc_args, "-I", dirname(abs_path($source));
     push @cleanup, $src_path;
   }
   else {
@@ -254,8 +253,7 @@ sub script_cache_form {
   # is the load-bearing part, measured: with perl's own library directories
   # ahead of PCL's lib/, the compile-time `use Carp` found perl's REAL Carp.pm
   # instead of PCL's shim and cached a transpile of it.
-  my $srcdir = dirname(abs_path($src));
-  my $seed = cl_list($srcdir, '.', "$ROOT/lib", inc_dirs_for_transpile(),
+  my $seed = cl_list("$ROOT/lib", inc_dirs_for_transpile(),
                      grep { defined $_ && !ref $_ && -d $_ } @INC);
   return '(pcl::p-run-script-cached "' . cl_escape($src) . '" "'
        . cl_escape($PL2CL) . '" ' . $dirs . ' ' . $seed . ')';
