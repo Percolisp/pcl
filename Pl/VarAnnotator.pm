@@ -312,7 +312,23 @@ my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
 my %FH_SLOT_FN = map { $_ => 1 } qw(readline eof close binmode seek tell read
                                     sysread syswrite sysseek truncate flock
                                     fileno getc write stat lstat);
-my %FH_USE_OK  = map { $_ => 1 } qw(fh fh-open bool defined);
+my %FH_USE_OK  = map { $_ => 1 } qw(fh fh-open fh-drop bool defined);
+
+# Is node $id the bare word `undef' (no argument)?  The RHS of the one write
+# the handle licence accepts, `$fh = undef;'.
+sub _tw_is_bare_undef {
+  my ($xo, $id) = @_;
+  return 0 if !defined $id;
+  my $n = $xo->get_a_node($id);
+  my $kids = $xo->get_node_children($id) || [];
+  if ($xo->is_internal_node_type($n)) {          # PExpr: funcall(undef)
+    return 0 unless ($n->{type} // '') eq 'funcall' && @$kids == 1;
+    $n    = $xo->get_a_node($kids->[0]);
+    $kids = $xo->get_node_children($kids->[0]) || [];
+  }
+  return 0 if @$kids;
+  return ref($n) eq 'PPI::Token::Word' && $n->content eq 'undef' ? 1 : 0;
+}
 
 # tie attaches magic to the BOX — a tied variable must stay boxed forever
 # (a raw slot would bypass FETCH/STORE).  Found via case-invert-01.t during
@@ -934,9 +950,9 @@ sub _fh_close_verdict {
   # what the use classes below prove that occurrence was.
   return 0 if grep { $_ ne 'handle-viv-arg' && $_ ne 'mutating-builtin-arg' }
               keys %{ $ctx->{ev}{$name} // {} };
-  # native writes leave FACTS, not events: `$fh = …' in any spelling
-  return 0 if $ctx->{write_fam}{$name} || $ctx->{init_bad}{$name}
-           || $ctx->{write_obj}{$name} || $ctx->{incdec_root}{$name}
+  # native writes leave FACTS, not events: `$fh = …' in any spelling but the
+  # statement `$fh = undef;' (fh_write_other), a compound or `++' root write
+  return 0 if $ctx->{fh_write_other}{$name} || $ctx->{incdec_root}{$name}
            || $ctx->{write_ops}{$name} || $ctx->{deref_base}{$name}
            || $ctx->{foreach_var}{$name} || $ctx->{foreach_my_alias}{$name};
   my $uc = $ctx->{use_class}{$name} // {};
@@ -1593,7 +1609,7 @@ sub _tw_walk {
         _tw_mark_lvalue($ctx, $xo, $_, 'arg-to-writer')         # #995
           for @$kids[1 .. $#$kids];
       }
-      _tw_walk_funcall_args($ctx, $xo, $fname, $kids, $aread);
+      _tw_walk_funcall_args($ctx, $xo, $fname, $kids, $aread, $root_native);
       return;
     }
     if ($t eq 'filehandle' || $t eq 'readline') {
@@ -1763,6 +1779,11 @@ sub _tw_walk {
         my $name = $l->content;
         if (!$root_native)     { _ev($ctx, $name, 'write-embedded') }
         elsif ($ctx->{cond})   { _ev($ctx, $name, 'write-cond') }
+        # The handle licence (#2006 (b)) accepts ONE write: `$fh = undef;' as
+        # its own statement, which drops the only reference (perl closes the
+        # handle there; Parser2::_fh_drop_name emits the close).  Any other.
+        $ctx->{fh_write_other}{$name} = 1
+          if !($root_native && !$ctx->{cond} && _tw_is_bare_undef($xo, $kids->[1]));
         my $fam = _tw_shape_ok($ctx, $xo, $kids->[1]);
         if ($fam) { $ctx->{write_fam}{$name}{$fam}++ }
         else      { $ctx->{init_bad}{$name} = 1 }
@@ -1945,7 +1966,7 @@ sub _tw_scan_quote_leaf {
 # nodes (print $fh …) never consume an arg position and their innards are
 # opaque (a handle-carrying scalar must stay boxed).
 sub _tw_walk_funcall_args {
-  my ($ctx, $xo, $fname, $kids, $aread) = @_;
+  my ($ctx, $xo, $fname, $kids, $aread, $root_native) = @_;
   my $spec = $USE_FN{$fname};
   # #1140: the ARRAY licence of each argument position.  %ARRAY_READ_FN
   # copies its arguments; %ARRAY_WRITE_FN writes its FIRST and copies the
@@ -1984,6 +2005,10 @@ sub _tw_walk_funcall_args {
       $class = $fname eq 'open'      ? 'fh-open'
              : $FH_SLOT_FN{$fname}   ? 'fh'
              : $fname eq 'defined'   ? 'defined'
+             # `undef $fh;' as its OWN statement drops the only reference:
+             # perl closes the handle there, and so does the emission
+             # (Parser2::_fh_drop_name).  Any other `undef $fh' is opaque.
+             : ($fname eq 'undef' && $root_native && @$kids == 2) ? 'fh-drop'
              :                         $class;
       _fh_open_decl($ctx, $n) if $fname eq 'open';
     }

@@ -17495,9 +17495,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    already closed, or was never opened, costs nothing.  It runs as an
    `unwind-protect' cleanup, so it must never signal: the close path itself
    catches a failing final flush (task #590)."
-  (let ((errno *p-stored-errno*))
-    (%p-close-previous-stream fh)
-    (setf *p-stored-errno* errno))
+  ;; FH is the handle's BOX.  A condition-`my' handle is closed through a hidden
+  ;; cell of the enclosing block (see Pl::Parser2::_fh_cond_late) that still
+  ;; holds NIL when the statement never stored into it — nothing to close.
+  (when (p-box-p fh)
+    (let ((errno *p-stored-errno*))
+      (%p-close-previous-stream fh)
+      (setf *p-stored-errno* errno)))
   (values))
 
 (defmacro p-scope-close ((&rest handles) &body body)

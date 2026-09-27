@@ -10003,6 +10003,27 @@ sub _lower_block_1 {
     }
   }
 
+  # -- a licensed handle declared in an if/unless/while/until CONDITION
+  # (`if (open(my $fh, …)) {…}`) is freed at the exit of the ENCLOSING block,
+  # not at the end of the statement (perl, probed: task #2006 (b)).  Its `let`
+  # covers the statement only, so the enclosing block carries a hidden cell
+  # the statement stores the handle box into, and the close is on that cell.
+  if (my @late = $self->_fh_cond_late($first, $vi)) {
+    local @{ $self->{_fh_late} }{ map { $_->[2] } @late } = @late;
+    my $stmt_forms = [$self->_lower_stmt($first, $vi, $first_tail)];
+    return (['let', ['list', map { ['list', $_->[1], 'nil'] } @late],
+             ['p-scope-close', ['list', map { $_->[1] } @late],
+              @$stmt_forms, $self->_lower_block(\@rest, $vi, $tail_ctx)]]);
+  }
+
+  # -- `undef $fh;' / `$fh = undef;' on a licensed handle drops its only
+  # reference: perl closes it right there (task #2006 (b)).
+  if (defined(my $drop = $self->_fh_drop_name($first, $vi))) {
+    return (['%p-scope-close', cl_sym($drop)],
+            $self->_lower_stmt($first, $vi, $first_tail),
+            $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
+
   # -- everything else appends a form and continues at the same depth.
   return ($self->_lower_stmt($first, $vi, $first_tail), $self->_lower_block(\@rest, $vi, $tail_ctx));
 }
@@ -10692,7 +10713,8 @@ sub _lower_compound {
     if (@cond_mys) {
       $self->{_live_lex} = \%sv_live;
       $self->{_let_bound_vars} = \%sv_lb;
-      $result = $self->_wrap_cond_mys($result, @cond_mys);
+      $result = $self->_wrap_cond_mys(
+                  $self->_fh_late_store($stmt, $result, @cond_mys), @cond_mys);
     }
     return $result;
   }
@@ -10736,7 +10758,8 @@ sub _lower_compound {
     if (@cond_mys) {
       $self->{_live_lex} = \%sv_live;
       $self->{_let_bound_vars} = \%sv_lb;
-      $result = $self->_wrap_cond_mys($result, @cond_mys);
+      $result = $self->_wrap_cond_mys(
+                  $self->_fh_late_store($stmt, $result, @cond_mys), @cond_mys);
     }
     return $result;
   }
@@ -13360,6 +13383,64 @@ sub _fh_scope_close {
     if !Pl::Passes::enabled('fh-scope-close');
   return Pl::Passes::fact('fh-scope-close', 1,
            ['p-scope-close', ['list', map { cl_sym($_) } @h], @body]);
+}
+
+# The statement `undef $fh;' / `undef($fh);' / `$fh = undef;' on a handle the
+# licence closes at scope exit: returns its name (the close is emitted ahead of
+# the statement), else undef.  VarAnnotator accepts exactly these shapes as
+# the licence's `fh-drop' use, and only as a whole statement.
+sub _fh_drop_name {
+  my ($self, $stmt, $vi) = @_;
+  return undef unless $vi && ref($stmt) eq 'PPI::Statement';
+  my @k = _strip_semi($stmt->schildren);
+  my $name;
+  if (@k == 2 && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'undef') {
+    my $arg = $k[1];
+    if ($arg->isa('PPI::Structure::List')) {
+      my @in = map { $_->isa('PPI::Statement') ? $_->schildren : $_ } $arg->schildren;
+      $arg = @in == 1 ? $in[0] : undef;
+    }
+    $name = $arg->content if $arg && $arg->isa('PPI::Token::Symbol');
+  }
+  elsif (@k == 3 && $k[0]->isa('PPI::Token::Symbol')
+         && $k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '='
+         && $k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'undef') {
+    $name = $k[0]->content;
+  }
+  return undef unless defined $name && $vi->{$name} && $vi->{$name}{fh_close};
+  return undef if !Pl::Passes::enabled('fh-scope-close');
+  my $up = $stmt->parent;
+  return undef if !$up || $up->isa('PPI::Document');
+  return $name;
+}
+
+# The CONDITION-my half of the same licence: which handles declared in the
+# condition(s) of if/unless/while/until compound $stmt are licensed?  Returns
+# one [name, hidden-cell symbol, key] per handle; the key is what
+# _fh_late_store looks up when the construct's own `let' is built, so a
+# nested construct declaring the same name never takes the outer's cell.
+sub _fh_cond_late {
+  my ($self, $stmt, $vi) = @_;
+  return () unless $vi && $stmt->isa('PPI::Statement::Compound');
+  my $up = $stmt->parent;
+  return () if !$up || $up->isa('PPI::Document');
+  my ($kw) = grep { $_->isa('PPI::Token::Word') } $stmt->schildren;
+  return () unless $kw && $kw->content =~ /^(?:if|unless|while|until)$/;
+  my @conds = grep { $_->isa('PPI::Structure::Condition') } $stmt->schildren;
+  my @h = grep { $vi->{$_} && $vi->{$_}{fh_close} } $self->_cond_my_names(@conds);
+  return () if !@h || !Pl::Passes::enabled('fh-scope-close');
+  return map { [$_, '--pcl-fh-late--' . $self->{_if_ret_counter}++,
+                refaddr($stmt) . "\0" . $_] } @h;
+}
+
+# Inside the construct's condition-my `let': store each licensed handle box
+# into the enclosing block's hidden cell (see _fh_cond_late), ahead of FORM.
+sub _fh_late_store {
+  my ($self, $stmt, $form, @names) = @_;
+  my @set = map { ['setf', $_->[1], cl_sym($_->[0])] }
+            grep { defined }
+            map { $self->{_fh_late}{ refaddr($stmt) . "\0" . $_ } } @names;
+  return @set ? ['progn', @set, $form] : $form;
 }
 
 # Wrap a lowered construct FORM in a fresh let binding boxed cells for the
