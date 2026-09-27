@@ -472,4 +472,31 @@ test_codegen('s/(a)/[$&]/',
              '(p-=~ $_ (p-subst :pat "(a)" :rep (lambda () (p-string-concat "[" |$&| "]")) :flags "" :tier :native))',
              'a punctuation magic takes the lambda path (#520)');
 
+# s496a member 7 (Fable review ruling, s499): qr// compiles EAGERLY, as perl
+# does -- a bad pattern dies AT THE qr, so `eval { qr/$p/ }` answers undef with
+# $@ set and the program goes on; it used to hand back an object that died
+# later at the match, outside the eval.  A good qr keeps its flags, and a
+# user-defined property is resolved in the package current at the qr.
+subst_agrees(<<'PL', 'a bad interpolated qr DIES at the qr, trappably; the program goes on (#2372 member 7)');
+my $p = "(";
+my $q = eval { qr/$p/ };
+print defined $q ? "object" : "undef", " ", ($@ =~ /in regex/ ? "regex" : "?"), "\n";
+my $never = eval { my $unused = qr/a$p/; 1 };
+print defined $never ? "survived" : "died", " unused\n";
+print "b" =~ /b/ ? "after\n" : "no\n";
+PL
+subst_agrees(<<'PL', 'an eagerly compiled qr keeps its flags i/x/s/m and interpolates into a bigger pattern (#2372 member 7)');
+my $t = "i";
+my $i = qr/a${t}c/i; my $x = qr/a b  c/x; my $s = qr/a.b/s; my $m = qr/^b/m;
+print join(",", ("AIC" =~ $i ? 1 : 0), ("abc" =~ $x ? 1 : 0), ("a\nb" =~ $s ? 1 : 0),
+                ("a\nb" =~ $m ? 1 : 0), ("xAICy" =~ /^x${i}y$/ ? 1 : 0)), "\n";
+PL
+subst_agrees(<<'PL', 'a qr naming a user-defined property resolves it in the package current AT THE qr (#2372 member 7)');
+package Foo;
+sub IsFooProp { "0061\t0063\n" }
+our $fq = qr/^\p{IsFooProp}+$/;
+package main;
+print join(",", ("abc" =~ $Foo::fq ? 1 : 0), ("abd" =~ $Foo::fq ? 1 : 0)), "\n";
+PL
+
 done_testing();

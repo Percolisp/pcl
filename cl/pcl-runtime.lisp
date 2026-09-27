@@ -30623,13 +30623,20 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; string keys in the shared table.
         (let* ((raw (to-string pattern))
                (mods (to-string modifiers)))
+          ;; COMPILED on a cache miss, before the op is cached (s496a member
+          ;; 7): this is also `qr/$p/`, and perl compiles a qr AT THE qr, so a
+          ;; bad $p dies here, trappably, never later at a match outside the
+          ;; eval (ir-spec §10-prop).  An m// compiles the same op right
+          ;; after, so it pays nothing; a failed compile caches nothing.
           (or (gethash (list mods raw) *p-regex-op-cache*)
-              (setf (gethash (list (%pcl-memo-key mods) (%pcl-memo-key raw))
-                             *p-regex-op-cache*)
-                    (make-p-regex-match
-                     :pattern (perl-regex-to-ppcre raw)
-                     :source raw
-                     :modifiers (parse-regex-modifiers mods))))))))
+              (let ((op (make-p-regex-match
+                         :pattern (perl-regex-to-ppcre raw)
+                         :source raw
+                         :modifiers (parse-regex-modifiers mods))))
+                (%p-regex-compiled op)
+                (setf (gethash (list (%pcl-memo-key mods) (%pcl-memo-key raw))
+                               *p-regex-op-cache*)
+                      op)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE REGEX LITERAL, STRUCTURED (task #1210; ir-spec §10 regex row,
@@ -30769,10 +30776,21 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-qr-parts (raw flags)
   "A fresh Regexp OBJECT for qr// — never memoized: two evaluations of `qr/a/`
-   are distinct references in perl (ir-spec §10 compiled-regex row)."
-  (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
-                      :source raw
-                      :modifiers (parse-regex-modifiers flags)))
+   are distinct references in perl (ir-spec §10 compiled-regex row).
+   COMPILED EAGERLY (s496a member 7): perl compiles the pattern AT THE qr, so
+   a pattern that cannot compile dies HERE, trappably — `eval { qr/$p/ }`
+   with a bad $p answers undef with $@ set, never an object that dies later
+   at the match outside the eval (ir-spec §10-prop, task #2372).  The compile
+   is the one a direct match of this object does (%p-regex-compiled, cached
+   on the object and in *pcl-scanner-cache*), so a matched qr pays nothing
+   extra; a qr that is only interpolated into a bigger pattern pays one
+   scanner-cache lookup (a real compile once per distinct pattern text).  A
+   user-defined \\p{IsFoo} is resolved in the package current AT THE qr."
+  (let ((obj (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
+                                 :source raw
+                                 :modifiers (parse-regex-modifiers flags))))
+    (%p-regex-compiled obj)
+    obj))
 
 (defmacro p-qr (&rest args)
   "A qr// literal: (p-qr :pat PATTERN :flags LETTERS :tier TIER).  Answers a
