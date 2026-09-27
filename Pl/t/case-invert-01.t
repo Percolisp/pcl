@@ -141,6 +141,26 @@ test_case('backslash-l backslash-U composes as lcfirst(uc(...))',
 test_case('plain backslash-u and U-span unaffected',
     'my $a = "hELLo"; print "[", "\u$a", "][", "\U$a\E-x", "]\n";');
 
+# --- an ESCAPED backslash before Q/U/L/E/u/l/F is text, not a modifier (#2441) --
+# The case/quote scan must read the SOURCE, where `\\` is one unit: "C:\\Users"
+# is C:\Users, never C:SERS; "x\\Qy]: " quotemetas nothing.  The real modifiers
+# beside it must keep working (the breaking cases).
+test_case('escaped backslash then Q/U/L/E/u/l/F in a plain dq literal is text',
+    'print "C:\\\\Users\\\\Eve\\\\Q|", "x\\\\Qy]: z|", "\\\\Q|\\\\E|\\\\U\\\\Lx|\\\\Uab|\\\\n|",'
+  . ' "\\\\Q\\\\pM\\\\E|\\\\u.\\\\l.\\\\Lab\\\\Fab|\\\\\\\\Q|\\\\", "\n";');
+test_case('escaped backslash beside interpolation, qq{}, heredoc; real modifiers still apply',
+    'my $v = "a.b"; print "\\\\Q$v|\\\\u$v|\\\\\\Qx.y\\E|\\\\\\U$v\\E|\\Q$v\\E|\\u\\LhELLO|\\LABC\\Edef|\\Q\\Ux.y\\E|q\\E|ab\\U|\\Q\\\\x\\E\n";'
+  . ' print qq{\\\\Uab $v \\\\Lx\n}; print <<"EOT";' . "\n"
+  . 'h \\\\Uab $v \\\\Qx.y \\Uup\\E' . "\nEOT\n");
+# perl's toke.c: a \U \L \F while a U/L/F is open first closes modes from the top
+# until none is left (a \Q above it goes too); \E pops ONE (#2441's probes).
+test_case('a new U/L/F modifier closes the open U/L/F (and a Q above it); E pops one',
+    'my $v = "Vv"; print "\\Uab\\Qc.\\Ld.e\\Ef.g|$v\\Uab\\Qc.\\Ld.e\\Ef.g|$v\\Qa.\\Ub.\\Lc.\\Ed.\\Ee.|",'
+  . ' "$v\\u\\LAB\\UcD\\Eef|$v\\LAB\\LCD\\EEF|\\LAB\\LCD\\EEF|\\Qa.\\Qb.\\Ec.|$v\\Fab\\LCD\\Ueg\\E!\n";');
+test_case('escaped backslash then U in an s/// replacement and in a string eval',
+    'my $v = "a.b"; (my $r = "abc") =~ s/b/\\\\U$v/; (my $r2 = "abc") =~ s/b/\\\\Ux/;'
+  . ' print "$r $r2 ", eval q{"\\\\\\\\Uab $v"}, " ", eval q{"\\\\\\\\Uab"}, "\n";');
+
 # --- mixed-case MODULE function calls (Internals::SvREADONLY/SvREFCNT) ---------
 # A module sub with a mixed-case name (SvREADONLY) is interned by the codegen
 # under :invert as the case-preserved symbol Internals::pl-SvREADONLY.  The

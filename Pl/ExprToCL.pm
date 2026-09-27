@@ -5793,67 +5793,65 @@ sub _octal_brace_escape {
   return chr(oct($oct));
 }
 
-# Single-pass escape sequence processor for double-quoted strings: the shared
-# decoder, plus the case-changing escapes kept as markers (`\U` `\L` `\u` `\l`
-# `\Q` `\F` `\E`) for _apply_case_escapes.
+# One escape of a double-quoted string: the shared decoder, with a
+# case-changing escape (`\U` `\L` `\u` `\l` `\Q` `\F` `\E`) passed through as
+# its two source characters.  Its callers hand it text in which a case escape
+# was already split off (StringInterpolation's scan; a replacement with no case
+# shift); a whole dq literal goes through _apply_case_escapes, which never
+# re-reads decoded text (#2441).
 sub _process_dq_escape {
   my $esc = shift;
   return "\\$esc" if $esc =~ /^[ULulQFE]$/;
   return _decode_escape($esc);
 }
 
-# Apply \U, \L, \u, \l, \Q, \F ... \E case transformations to a string
-# These are processed after escape sequences, on the final text
+# Decode a double-quoted string's SOURCE text in ONE scan (task #2441): each
+# `\X` escape is ONE unit, so an escaped backslash is literal text and the
+# character after it is never re-read as an escape.  The case-changing escapes
+# (`\U` `\L` `\u` `\l` `\Q` `\F` `\E`) are commands in that same token stream
+# -- never in-band markers in decoded text, which is how `"C:\\Users"` used to
+# print `C:SERS` (the decode turned `\\U` into `\U`, then a second pass over
+# the decoded text read it as \U).  ir-spec §3.2c.
 sub _apply_case_escapes {
-  my $str = shift;
-  # Quick check: if no case escapes, return unchanged
-  return $str unless $str =~ /\\/;
-
-  my $result  = '';
-  my @modes   = ();  # stack: 'U', 'L', 'Q', 'F'
-  my $pending = undef;  # 'u' or 'l' — single-char transform for next char
-
-  while (length $str) {
-    if ($str =~ s/^\\([ULulQFE])//) {
-      my $cmd = $1;
-      if ($cmd eq 'E') {
-        # \E cancels any pending single-char transform
-        $pending = undef;
-        # Pop the innermost mode.  If it was U or L, also remove all other
-        # U/L modes (they're mutually exclusive case transforms).
-        if (@modes) {
-          my $popped = pop @modes;
-          if ($popped eq 'U' || $popped eq 'L') {
-            @modes = grep { $_ ne 'U' && $_ ne 'L' } @modes;
-          }
-        }
-      } elsif ($cmd eq 'u' || $cmd eq 'l') {
-        $pending = $cmd;
-      } else {
-        # \U, \L, \Q, \F — push onto mode stack
-        push @modes, $cmd;
-      }
-    } elsif ($str =~ s/^((?:[^\\]|\\(?![ULulQFE]))+)//) {
-      # Consume a run of literal text (non-case-escape content).
-      # \\(?![ULulQFE]) matches \ not followed by a case-escape char,
-      # including a lone trailing backslash at end-of-string.
-      my $text = $1;
-      if ($pending && length $text) {
-        # The pending \u/\l applies to the FIRST character only,
-        # overriding the current mode stack for that one char.
-        my $first = $pending eq 'u' ? uc(substr($text, 0, 1))
-                                    : lc(substr($text, 0, 1));
-        $pending = undef;
-        $result .= $first;
-        $result .= _apply_mode(\@modes, substr($text, 1)) if length($text) > 1;
-      } else {
-        $result .= _apply_mode(\@modes, $text);
-      }
+  my $src = shift;
+  my @tokens;   # [cmd => 'U'] or [text => '...'], in source order
+  while ($src =~ /\G(?:\\([ULulQFE])|\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)|(\\|[^\\]+))/gc) {
+    if (defined $1) {
+      push @tokens, [cmd => $1];
     } else {
-      last;  # shouldn't happen
+      my $text = defined $2 ? _decode_escape($2) : $3;
+      if (@tokens && $tokens[-1][0] eq 'text') { $tokens[-1][1] .= $text }
+      else { push @tokens, [text => $text] }
     }
   }
-
+  my $result  = '';
+  my @modes   = ();     # stack: 'U', 'L', 'Q', 'F'
+  my $pending = undef;  # 'u' or 'l' -- single-char transform for next char
+  for my $tok (@tokens) {
+    my ($kind, $val) = @$tok;
+    if ($kind eq 'cmd') {
+      if ($val eq 'E') {
+        # \E cancels any pending single-char transform and pops ONE mode.
+        $pending = undef;
+        pop @modes;
+      } elsif ($val eq 'u' || $val eq 'l') {
+        $pending = $val;
+      } else {
+        # perl's toke.c: a \U \L \F while a U/L/F is open first closes modes
+        # from the top until none is left (a \Q above it goes too), ir-spec §3.2c.
+        pop @modes while $val ne 'Q' && grep { $_ ne 'Q' } @modes;
+        push @modes, $val;
+      }
+    } elsif ($pending && length $val) {
+      # The pending \u/\l applies to the FIRST character only, overriding the
+      # current mode stack for that one char.
+      $result .= $pending eq 'u' ? uc(substr($val, 0, 1)) : lc(substr($val, 0, 1));
+      $pending = undef;
+      $result .= _apply_mode(\@modes, substr($val, 1)) if length($val) > 1;
+    } else {
+      $result .= _apply_mode(\@modes, $val);
+    }
+  }
   return $result;
 }
 
@@ -5936,12 +5934,7 @@ sub convert_perl_string_form {
     return ['p-unparsable-quote', _cl_string_literal_form($shown)];
   }
 
-  # Process Perl escape sequences in single pass to handle \\ correctly
-  $content =~ s!\\(x\{[^}]*\}|x[0-9A-Fa-f]{1,2}|x|o\{[^}]*\}|N\{[^}]*\}|[0-7]{1,3}|c.|[ntreafd"\\\$\@]|.)!
-    _process_dq_escape($1)
-  !ge;
-
-  # Apply \U, \L, \u, \l, \Q, \F ... \E transformations (non-interpolated strings)
+  # Escapes and the case-changing escapes, in ONE scan of the source (#2441)
   $content = _apply_case_escapes($content);
 
   return _cl_string_literal_form($content);

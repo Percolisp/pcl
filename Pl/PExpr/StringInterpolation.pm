@@ -98,6 +98,27 @@ sub parse_interpolated_string {
   my $cur_parts = \@parts;
   # Pending single-char transform: 'u' or 'l' (applies to next part only)
   my $pending_char_transform;
+  # Close the innermost case group: wrap its parts and hand the result to the
+  # enclosing list.  A \u/\l that opened before the group (\u\L...\E) applies
+  # to the group's output; so does one still pending here, which appeared with
+  # no following content inside the group -- unless KEEP_PENDING: a group
+  # closed because a new \U/\L/\F opens leaves a pending \u/\l to that one.
+  my $close_group = sub {
+    my ($keep_pending) = @_;
+    my $group = pop @case_stack;
+    $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
+    my $wrapped = $self->_wrap_case_group($parser, $group);
+    my $oc = $group->{outer_char};
+    if (!$oc && !$keep_pending && $pending_char_transform) {
+      $oc = $pending_char_transform;
+      $pending_char_transform = undef;
+    }
+    if ($oc) {
+      $wrapped = $self->_wrap_case_func($parser,
+        $oc eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
+    }
+    push @$cur_parts, $wrapped;
+  };
 
   # Process the string, looking for variables and case-changing escapes
   while ($pos < length($content)) {
@@ -125,22 +146,7 @@ sub parse_interpolated_string {
       if (defined $case_cmd) {
         if ($case_cmd eq 'E') {
           # Close the current case group
-          if (@case_stack) {
-            my $group = pop @case_stack;
-            $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
-            # Wrap group's parts in the appropriate function
-            my $wrapped = $self->_wrap_case_group($parser, $group);
-            # A \u/\l that opened before this group (\u\L...\E) applies to the
-            # group's output.  A \u/\l still pending here appeared with no
-            # following content inside the group; apply it to the output too.
-            my $oc = $group->{outer_char} || $pending_char_transform;
-            if ($oc) {
-              $wrapped = $self->_wrap_case_func($parser,
-                $oc eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
-              $pending_char_transform = undef;
-            }
-            push @$cur_parts, $wrapped;
-          }
+          $close_group->() if @case_stack;
           # \E also cancels any pending \u or \l with no content
           $pending_char_transform = undef;
         } elsif ($case_cmd eq 'u' || $case_cmd eq 'l') {
@@ -161,6 +167,12 @@ sub parse_interpolated_string {
           # to the first element inside it: "\u\L$a" is ucfirst(lc($a)), not
           # lc(ucfirst($a)).  Stash it on the group so it wraps the result when
           # the group closes, and clear it so it doesn't leak onto the contents.
+          # perl's toke.c: a \U \L \F while a U/L/F group is open first closes
+          # groups from the top until none is left (a \Q above it goes too) --
+          # "\LAB\LCD\EEF" is abcdEF (ir-spec §3.2c, #2441).
+          if ($case_cmd ne 'Q') {
+            $close_group->(1) while grep { $_->{mode} ne 'Q' } @case_stack;
+          }
           my $new_parts = [];
           push @case_stack, { mode => $case_cmd, parts => $new_parts,
                               outer_char => $pending_char_transform };
@@ -203,17 +215,8 @@ sub parse_interpolated_string {
   }
 
   # Close any unclosed case groups (implicit \E at end of string)
-  while (@case_stack) {
-    my $group = pop @case_stack;
-    $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
-    my $wrapped = $self->_wrap_case_group($parser, $group);
-    # Apply a \u/\l that opened before this group (\u\L$a with no closing \E).
-    if ($group->{outer_char}) {
-      $wrapped = $self->_wrap_case_func($parser,
-        $group->{outer_char} eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
-    }
-    push @$cur_parts, $wrapped;
-  }
+  # (a \u/\l that opened before a group still applies: \u\L$a with no \E)
+  $close_group->(1) while @case_stack;
   
   # If no parts, return empty string
   if (@parts == 0) {
