@@ -30665,72 +30665,202 @@ buffer's fill-pointer; everything else falls back to file-length."
         thereis (and (char= (char pat i) #\\)
                      (find (char pat (1+ i)) "hHvVRXNpP") t)))
 
-(defun %pcl-expand-hv-escapes (pat)
-  "Rewrite \\h \\H \\v \\V and \\R into forms cl-ppcre reads.  ONE forward
-   scan, because the answer depends on whether the escape sits inside a
-   bracket class: `\\h` becomes a class outside one and a bare element list
-   inside one.  Every other escape pair is copied VERBATIM, so `\\\\h` stays
-   an escaped backslash followed by the letter h, and a `\\h` that the \\Q
-   pass already quoted stays literal.
-   \\R inside a class is left alone, and that IS perl's answer: there it is an
-   unrecognised escape, which perl warns about and passes through as the
-   LETTER R (probed 5.40.3 -- `[\\R]` matches \"R\" and not \"\\r\"; cl-ppcre
-   reads the untouched text the same way)."
-  (if (not (%pcl-has-hv-escape pat))
+(defun %pcl-has-possessive (pat)
+  "Does PAT contain a `+' right after `*' `+' `?' or `}'?  The cheap pre-test
+   for a POSSESSIVE quantifier (task #2380).  It also answers yes for `\\++'
+   and `a+++', which the scan then copies unchanged."
+  (loop for i from 1 below (length pat)
+        thereis (and (char= (char pat i) #\+)
+                     (find (char pat (1- i)) "+*?}") t)))
+
+;;; The state of ONE forward scan over a pattern (%pcl-rewrite-scan): the
+;;; input and the position in it, the output built so far (a fill-pointer
+;;; string, because a possessive quantifier INSERTS `(?>' before an atom that
+;;; is already written), whether the position is inside a bracket class, the
+;;; output index where the most recent complete ATOM starts (NIL when there
+;;; is none: after `(' `|' `^' `$' or a quantifier), and the output index of
+;;; every group still open.
+(defstruct (pcl-rx-scan (:conc-name rxs-)
+                        (:constructor %make-pcl-rx-scan
+                                      (pat &aux (n (length pat))
+                                           (out (make-array n :element-type 'character
+                                                            :fill-pointer 0
+                                                            :adjustable t)))))
+  pat n out (i 0) (in-class nil) (atom nil) (groups nil))
+
+(defun %rxs-emit (s x)
+  "Append the character or string X to the scan's output."
+  (let ((out (rxs-out s)))
+    (if (characterp x)
+        (vector-push-extend x out)
+        (loop for c across x do (vector-push-extend c out)))))
+
+(defun %rxs-copy (s end)
+  "Copy the input from the scan position to END verbatim."
+  (%rxs-emit s (subseq (rxs-pat s) (rxs-i s) end))
+  (setf (rxs-i s) end))
+
+(defun %rxs-insert (s pos text)
+  "Insert TEXT into the scan's output at index POS."
+  (let* ((out (rxs-out s)) (old (fill-pointer out)) (k (length text)))
+    (dotimes (j k) (vector-push-extend #\Space out))
+    (replace out out :start1 (+ pos k) :start2 pos :end2 old)
+    (replace out text :start1 pos)))
+
+(defun %pcl-rx-at (pat i ch)
+  "Is PAT[I] the character CH?"
+  (and (< i (length pat)) (char= (char pat i) ch)))
+
+(defun %pcl-rx-escape-end (pat i)
+  "The end of the escape at PAT[I] (a backslash) as perl's LEXER reads it:
+   `\\x{…}' `\\o{…}' `\\N{…}' `\\g{…}' `\\k{…}' `\\p{…}' through the brace,
+   `\\k<n>' `\\k'n'' through the name, `\\xHH' up to two hex digits, `\\cX'
+   its character, `\\1' `\\012' every digit, `\\g1' `\\g-1' the number;
+   anything else is the backslash and one character.  The whole escape is
+   ONE unit: `\\c[' opens no class and the `{100}' of `\\x{100}' is no
+   counted quantifier.  An unterminated brace is the pair alone."
+  (let ((n (length pat)) (k (+ i 2)))
+    (if (>= (1+ i) n)
+        n
+        (let ((c (char pat (1+ i))))
+          (flet ((through (close)
+                   (let ((e (position close pat :start (1+ k)))) (if e (1+ e) k)))
+                 (digits (from &optional (radix 10))
+                   (or (position-if-not (lambda (ch) (digit-char-p ch radix)) pat
+                                        :start (min from n))
+                       n)))
+            (cond ((and (< k n) (find c "xoNgkpP") (char= (char pat k) #\{))
+                   (through #\}))
+                  ((and (< k n) (char= c #\k) (find (char pat k) "<'"))
+                   (through (if (char= (char pat k) #\<) #\> #\')))
+                  ((char= c #\x) (min (digits k 16) (+ k 2)))
+                  ((char= c #\c) (min n (1+ k)))
+                  ((digit-char-p c) (digits k))
+                  ((char= c #\g) (digits (if (%pcl-rx-at pat k #\-) (1+ k) k)))
+                  (t k)))))))
+
+(defun %pcl-rx-escape-text (pat i in-class)
+  "The rewrite of the escape at PAT[I], and its end: (values TEXT END).
+   \\h \\H \\v \\V become classes (a bare element list inside a class); a
+   property escape is braced and, outside a class, made a class of its own;
+   outside a class \\R is the linebreak group, \\X the grapheme
+   approximation (task #2050) and \\N — not \\N{…}, the named character,
+   handled before this pass — perl's own definition `[^\\n]'.  Inside a
+   class \\R and \\X are left alone, and that IS perl's answer: there they
+   are unrecognised escapes, the LETTERS R and X (probed 5.40.3 — `[\\R]'
+   matches \"R\" and not \"\\r\").  Every other escape is copied VERBATIM
+   through its lexer extent, so `\\\\h' stays an escaped backslash and the
+   letter h."
+  (let* ((n (length pat))
+         (nx (and (< (1+ i) n) (char pat (1+ i))))
+         (prop-end (and nx (find nx "pP") (%pcl-property-escape-end pat i))))
+    (cond ((and nx (find nx "hHvV")) (values (%pcl-hv-class-text nx in-class) (+ i 2)))
+          (prop-end (values (%pcl-property-escape-text pat i prop-end in-class) prop-end))
+          ((and nx (char= nx #\R) (not in-class)) (values +p-linebreak-text+ (+ i 2)))
+          ((and nx (char= nx #\X) (not in-class)) (values +p-grapheme-text+ (+ i 2)))
+          ((and nx (char= nx #\N) (not in-class) (not (%pcl-rx-at pat (+ i 2) #\{)))
+           (values "[^\\n]" (+ i 2)))
+          (t (let ((e (%pcl-rx-escape-end pat i))) (values (subseq pat i e) e))))))
+
+(defun %pcl-rx-quantifier-end (pat i)
+  "If a quantifier starts at PAT[I] — `*' `+' `?' or a COUNTED `{n}' `{n,}'
+   `{n,m}' — its end; else NIL.  Any other `{' is a literal in perl."
+  (let ((n (length pat)))
+    (when (< i n)
+      (case (char pat i)
+        ((#\* #\+ #\?) (1+ i))
+        (#\{ (let ((a (or (position-if-not #'digit-char-p pat :start (1+ i)) n)))
+               (when (> a (1+ i))
+                 (let ((b (if (%pcl-rx-at pat a #\,)
+                              (or (position-if-not #'digit-char-p pat :start (1+ a)) n)
+                              a)))
+                   (and (%pcl-rx-at pat b #\}) (1+ b))))))
+        (t nil)))))
+
+(defun %pcl-rx-scan-quantifier (s qend)
+  "The quantifier from the scan position to QEND, outside a class.  Followed
+   by `+' it is POSSESSIVE, which perl DEFINES as an atomic group (perlre
+   \"Possessive quantifiers\"): `X++' = `(?>X+)', `X*+' = `(?>X*)', `X?+' =
+   `(?>X?)', `X{n,m}+' = `(?>X{n,m})'.  cl-ppcre has atomic groups and no
+   possessive, so the atom is wrapped (task #2380).  Not when there is no
+   atom (`^+', `(?+1)', `a+?+') or when another quantifier follows (`a++*'):
+   the text is copied, and cl-ppcre refuses it as perl does (\"Nested
+   quantifiers\")."
+  (let ((pat (rxs-pat s)) (atom (rxs-atom s)))
+    (%rxs-copy s qend)
+    (setf (rxs-atom s) nil)
+    (when (and atom (%pcl-rx-at pat qend #\+)
+               (not (%pcl-rx-quantifier-end pat (1+ qend))))
+      (%rxs-insert s atom "(?>")
+      (%rxs-emit s #\))
+      (setf (rxs-i s) (1+ qend)))))
+
+(defun %pcl-rx-scan-open-class (s)
+  "A `[' outside a class: copied, then a leading `^' and a leading `]', which
+   are literal.  The class is ONE atom."
+  (setf (rxs-atom s) (fill-pointer (rxs-out s)) (rxs-in-class s) t)
+  (%rxs-copy s (1+ (rxs-i s)))
+  (dolist (lit '(#\^ #\]))
+    (when (%pcl-rx-at (rxs-pat s) (rxs-i s) lit)
+      (%rxs-copy s (1+ (rxs-i s))))))
+
+(defun %pcl-rx-scan-open-group (s)
+  "A `(' outside a class.  A `(?#…)' comment is copied whole and changes no
+   state (a `[' or `(' inside it opens nothing); any other group pushes its
+   output index, and at its `)' the whole group becomes the atom."
+  (let* ((pat (rxs-pat s)) (i (rxs-i s))
+         (close (and (%pcl-rx-at pat (1+ i) #\?) (%pcl-rx-at pat (+ i 2) #\#)
+                     (position #\) pat :start (+ i 3)))))
+    (cond (close (%rxs-copy s (1+ close)))
+          (t (push (fill-pointer (rxs-out s)) (rxs-groups s))
+             (setf (rxs-atom s) nil)
+             (%rxs-copy s (1+ i))))))
+
+(defun %pcl-rx-scan-step (s)
+  "Advance the scan by one unit: an escape, a POSIX `[:name:]' or a
+   character inside a class, a class or group opening, a quantifier, or one
+   character outside a class (an atom, except `|' `^' `$', and `)', which
+   makes its group the atom)."
+  (let* ((pat (rxs-pat s)) (i (rxs-i s)) (c (char pat i))
+         (posix (and (rxs-in-class s) (char= c #\[) (%pcl-rx-at pat (1+ i) #\:)
+                     (search ":]" pat :start2 (+ i 2))))
+         (qend (and (not (rxs-in-class s)) (%pcl-rx-quantifier-end pat i))))
+    (cond ((char= c #\\)
+           (unless (rxs-in-class s) (setf (rxs-atom s) (fill-pointer (rxs-out s))))
+           (multiple-value-bind (text end) (%pcl-rx-escape-text pat i (rxs-in-class s))
+             (%rxs-emit s text)
+             (setf (rxs-i s) end)))
+          ;; An inner `[:name:]' is ONE unit: its brackets neither open nor
+          ;; close a class.  The POSIX pass has already replaced every valid
+          ;; name, so what reaches here is invalid Perl — but mis-tracking it
+          ;; would desynchronise IN-CLASS and mangle a later \h.
+          (posix (%rxs-copy s (+ posix 2)))
+          ((rxs-in-class s)
+           (when (char= c #\]) (setf (rxs-in-class s) nil))
+           (%rxs-copy s (1+ i)))
+          ((char= c #\[) (%pcl-rx-scan-open-class s))
+          ((char= c #\() (%pcl-rx-scan-open-group s))
+          (qend (%pcl-rx-scan-quantifier s qend))
+          (t (setf (rxs-atom s)
+                   (cond ((char= c #\)) (pop (rxs-groups s)))
+                         ((find c "|^$") nil)
+                         (t (fill-pointer (rxs-out s)))))
+             (%rxs-copy s (1+ i))))))
+
+(defun %pcl-rewrite-scan (pat)
+  "The ONE forward rewrite scan over a pattern (it tracks whether each
+   position is inside a bracket class, and where the last ATOM starts):
+   \\h \\H \\v \\V \\R \\X \\N and the property escapes become forms cl-ppcre
+   reads (%pcl-rx-escape-text), and a POSSESSIVE quantifier becomes the
+   atomic group perl defines it as (%pcl-rx-scan-quantifier).  Everything
+   else is copied verbatim, so a `\\h' or `a++' that the \\Q pass already
+   quoted stays literal.  Only a pattern that passes one of the two cheap
+   pre-tests is scanned at all."
+  (if (not (or (%pcl-has-hv-escape pat) (%pcl-has-possessive pat)))
       pat
-      (let ((out (make-string-output-stream)) (i 0) (n (length pat))
-            (in-class nil))
-        (loop while (< i n) do
-              (let ((c (char pat i)))
-                (cond
-                  ((char= c #\\)
-                   (let ((nx (and (< (1+ i) n) (char pat (1+ i)))))
-                     (cond
-                       ((and nx (find nx "hHvV"))
-                        (write-string (%pcl-hv-class-text nx in-class) out))
-                       ;; \pX \p{…} \PX \P{…} — a Unicode property (#2060).
-                       ((and nx (find nx "pP") (%pcl-property-escape-end pat i))
-                        (let ((end (%pcl-property-escape-end pat i)))
-                          (write-string (%pcl-property-escape-text pat i end in-class) out)
-                          (setf i (- end 2))))
-                       ((and nx (char= nx #\R) (not in-class))
-                        (write-string +p-linebreak-text+ out))
-                       ;; \X — one grapheme cluster, approximated (task #2050).
-                       ;; Inside a class perl treats it as the LETTER X, like
-                       ;; \R, so only the outside spelling is rewritten.
-                       ((and nx (char= nx #\X) (not in-class))
-                        (write-string +p-grapheme-text+ out))
-                       ;; \N — "any character but a newline", perl's own
-                       ;; definition.  \N{...} is the NAMED character and is a
-                       ;; different construct, handled before this pass.
-                       ((and nx (char= nx #\N) (not in-class)
-                             (not (and (< (+ i 2) n) (char= (char pat (+ i 2)) #\{))))
-                        (write-string "[^\\n]" out))
-                       (t (write-char c out)
-                          (when nx (write-char nx out))))
-                     (incf i (if nx 2 1))))
-                  ;; An inner `[:name:]` is ONE unit: its brackets neither open
-                  ;; nor close a class.  The POSIX pass has already replaced
-                  ;; every valid name, so what reaches here is invalid Perl —
-                  ;; but mis-tracking it would desynchronise IN-CLASS and
-                  ;; mangle a later \h.
-                  ((and in-class (char= c #\[) (< (1+ i) n)
-                        (char= (char pat (1+ i)) #\:)
-                        (search ":]" pat :start2 (+ i 2)))
-                   (let ((e (+ 2 (search ":]" pat :start2 (+ i 2)))))
-                     (write-string (subseq pat i e) out)
-                     (setf i e)))
-                  ((and (not in-class) (char= c #\[))
-                   (write-char c out) (incf i) (setf in-class t)
-                   ;; a leading `^`, and then a leading `]`, are literal
-                   (when (and (< i n) (char= (char pat i) #\^))
-                     (write-char #\^ out) (incf i))
-                   (when (and (< i n) (char= (char pat i) #\]))
-                     (write-char #\] out) (incf i)))
-                  ((and in-class (char= c #\]))
-                   (write-char c out) (incf i) (setf in-class nil))
-                  (t (write-char c out) (incf i)))))
-        (get-output-stream-string out))))
+      (let ((s (%make-pcl-rx-scan pat)))
+        (loop while (< (rxs-i s) (rxs-n s)) do (%pcl-rx-scan-step s))
+        (coerce (rxs-out s) 'simple-string))))
 
 (defun %pcl-strip-charset-flags (pat)
   "Drop perl's CHARSET letters (a aa d l u) from inline modifier groups, and
@@ -30835,8 +30965,10 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; \h \H \v \V \R — six escapes are all cl-ppcre knows, so these
          ;; matched the LETTER.  AFTER the \Q pass (so a quoted `\h` stays
          ;; literal) and AFTER the POSIX pass (so no `[:name:]` brackets are
-         ;; left to confuse the in-class scan).  See %pcl-expand-hv-escapes.
-         (pat (%pcl-expand-hv-escapes pat)))
+         ;; left to confuse the in-class scan).  The same scan turns a POSSESSIVE
+         ;; quantifier into the atomic group perl defines it as (task #2380).
+         ;; See %pcl-rewrite-scan.
+         (pat (%pcl-rewrite-scan pat)))
     (cl-ppcre:regex-replace-all
      "\\\\x\\{([0-9a-fA-F]+)\\}"
      pat

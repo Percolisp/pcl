@@ -520,4 +520,35 @@ print join(",", ("4" =~ /\p{IsDigitsBut5}/ ? 1 : 0), ("5" =~ /\p{IsDigitsBut5}/ 
                 ("5" =~ /\P{IsDigitsBut5}/ ? 1 : 0)), " calls=$calls\n";
 PL
 
+# Task #2380 (s499e): a POSSESSIVE quantifier is perl's own atomic group --
+# `X++` = `(?>X+)`, `X*+` = `(?>X*)`, `X?+` = `(?>X?)`, `X{n,m}+` =
+# `(?>X{n,m})` (perlre).  cl-ppcre has no possessive, so the runtime's rewrite
+# scan wraps the quantified ATOM (a character, an escape, a class, a group).
+# It used to DIE at the match (since #2372; before that it never matched), and
+# at the qr since s496a member 7 -- t/re/pat_rt_report.t lost 2,321 rows to
+# one `qr/(\x{100}++)/`.  The semantic pair: "aaa" =~ /a++a/ is 0, /a+a/ is 1.
+subst_agrees(<<'PL', 'possessive quantifiers match as perl\'s atomic group, on every atom shape (#2380)');
+sub t { my $r = eval { $_[0]->() ? 1 : 0 }; defined $r ? $r : "died" }
+print join(",", map { t($_) } sub { "aab" =~ /^a++b/ }, sub { "aab" =~ /^[a]++b/ },
+    sub { "aa" =~ /^a++a/ }, sub { "ab" =~ /^\w++$/ }, sub { "aaa" =~ /a++a/ },
+    sub { "aaa" =~ /a+a/ }, sub { "abc" =~ /^.*+c/ }, sub { "a" =~ /^a?+a/ },
+    sub { "xxx" =~ /^x{2,}+x/ }, sub { "xxxx" =~ /^x{2,3}+x$/ }, sub { "abab" =~ /^(?:a|b)*+b/ },
+    sub { "abab" =~ /^(ab)++$/ && $1 eq "ab" }, sub { "ab" =~ /^\p{L}++$/ },
+    sub { "aa" =~ /^(?=a++a)/ }, sub { "AAb" =~ /^a++b/i }, sub { "a)ba)b" =~ /^(a[)]b)++$/ },
+    sub { "aaa" =~ /^(a)\1++$/ }), "\n";
+my $q = qr/(\x{100}++)/;
+print "made ", ("\x{100}\x{100}" =~ $q ? length $1 : "no"), "\n";
+my $s = "aaab"; $s =~ s/a++/X/;
+print "$s ", join("|", split /,++/, "a,,b,c"), "\n";
+PL
+subst_agrees(<<'PL', 'what is NOT possessive stays as perl reads it: an escaped or in-class plus, quoted text, a comment; a nested quantifier dies (#2380)');
+no warnings;
+sub t { my $r = eval { $_[0]->() ? 1 : 0 }; defined $r ? $r : "died" }
+my ($p1, $p2, $p3) = ("a++*", "a+?+", "a+ +");
+print join(",", map { t($_) } sub { "+++" =~ /^\++$/ }, sub { "++" =~ /^[+]+$/ },
+    sub { "+" =~ /^[a++]$/ }, sub { " a++ " =~ /^\Q a++ \E$/ }, sub { "a" =~ /^a(?#a++)$/ },
+    sub { "aa" =~ /$p1/ }, sub { "aa" =~ /$p2/ }, sub { "aa" =~ /$p3/ },
+    sub { "\e\e" =~ /^\c[++$/ }, sub { "]a]" =~ /^[]a]++$/ }, sub { "aa" =~ /^a{2}+$/ }), "\n";
+PL
+
 done_testing();
