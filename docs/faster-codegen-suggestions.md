@@ -855,6 +855,69 @@ is in the tree.  The agent could not write its REPORT.md (harness rule) -- this 
 **USER RULINGS (2026-09-27, after reading this):** the start-up, first-run and string-eval costs are DOCUMENTED speed problems with later extensions (a faster launcher; compiled-module reuse on a first run; cached compiled eval strings) and are NOT optimized now (#2420 #2421 #2422 #2423 parked); optimizations are prioritized BY MEASURED GAIN (round 36 = s499f: #2198 / #2424 / #2425 sized first).  README and docs/STATUS.md carry the user-facing note.
 
 
+### 0.2s Round 36 movers (2026-09-27) — the run-phase levers from real programs (s499f; #2424, #2425, #2198)
+
+Round 36 is the first round ranked by the USER's 2026-09-27 rule: **size every lever first, then ship in descending order of measured real-program gain**. All three are runtime-only. `pl2cl`'s output is unchanged, and so is the generation. Logs are under the agent's `scratch/s499f/`. The Rosetta programs are timed from a local copy and are not checked in.
+
+SIZING TABLE. Each lever was measured alone as a patched saved core against the base core, through `pcl` with a warm cache, interleaved best-of-5, with a byte-identical A' control in the same window (the A' controls read within ±0.9 %). Load was 0.9–1.2.
+
+```
+lever                          row                          before   after   faster   perl
+#2424 hash->hash arm           hcopy micro                  0.503    0.258   -48.8 %  0.682
+#2424                          Mian-Chowla (Rosetta)        5.360    3.037   -43.3 %  4.071
+#2424 + presize (hand A/B)     Mian-Chowla                  3.437    2.61    -24 % more
+#2425 %p-pow-small             powdigit micro               0.284    0.204   -28.1 %  0.170
+#2425                          Digit-fifth-powers           4.575    3.827   -16.4 %  1.873
+#2425                          Disarium-numbers             3.500    3.020   -13.7 %  1.355
+#2198 map raw copy             mapmulti micro               1.422    1.152   -19.0 %  0.630
+#2198                          everyday %h = map {…} 200k   0.452    0.355   -21.4 %  0.601
+#2198                          Perfect-shuffle              0.718    0.630   -12.2 %  0.216
+```
+
+ORDER: #2424, then #2425, then #2198. Every lever cleared the 5 % bar, so all three shipped.
+
+WHOLE TREE vs main `e51abda1`, through each tree's own `pcl` on a warm cache, best-of-5. A' is the base re-run in the same loop. Load was 1.7–2.2.
+
+```
+program                   before    after    change    perl     A' ctl
+Mian-Chowla               5.424 s   2.487 s  -54.2 %   3.986 s  +1.1 %
+Disarium-numbers          3.524 s   2.811 s  -20.2 %   1.363 s  -0.7 %
+Digit-fifth-powers        4.510 s   3.949 s  -12.4 %   1.888 s  +1.3 %
+Perfect-shuffle           0.735 s   0.648 s  -11.9 %   0.218 s  +0.5 %
+everyday %h = map {…}     0.461 s   0.375 s  -18.8 %   0.620 s  +2.7 %
+```
+
+Mian-Chowla now runs faster under PCL than under perl.
+
+bench-exec, `BENCH_K=5`, A = main `e51abda1`, B = the tree. Load was 1.1–1.9. The two new rows were checked against perl by the tool's BROKEN rule.
+
+```
+bench          perl(s)    pclA(s)    pclB(s)       B/A    B/perl
+hashcopy        0.6669     0.4813     0.1883    -60.9%    0.28x   (new row)
+powdigit        0.1551     0.2269     0.1633    -28.1%    1.05x   (new row)
+mapmulti        0.6266     1.3965     1.1272    -19.3%    1.80x
+mapsingle       0.9240     1.2185     1.2279     +0.8%
+intloop+=       0.0667     0.0219     0.0203     -7.3%
+arrhash         0.1328     0.0846     0.0796     -5.9%
+arrhash-k       0.0599     0.0621     0.0636     +2.4%   (rerun K=7 -1.7 %)
+fib(27)x        1.4583     0.4213     0.4461     +5.9%   (rerun +6.3 %; AA +2.3 %)
+fibret          1.5052     0.4428     0.4354     -1.7%
+methret         0.0898     0.0999     0.1010     +1.1%
+strcat          0.2956     0.2915     0.2986     +2.4%   (rerun -0.9 %)
+slices          0.0682     0.1164     0.1153     -1.0%
+sortnum         0.0252     0.0386     0.0394     +2.0%   (rerun +0.1 %)
+fhread          0.0317     0.1185     0.1249     +5.5%   (rerun -4.8 %)
+textproc        0.4350     1.0190     1.0045     -1.4%
+regexg          0.3636     0.4235     0.4237     +0.0%
+subste          0.0551     0.1809     0.1796     -0.7%
+```
+
+The control band comes from an AA run, where the same runtime is on both sides: arrhash-k +5.0 %, strcat -6.3 %.
+
+One control row is flagged. **fib(27)x** reads +3.8 % to +6.3 % on the final runtime. The fib rows call none of the three changed functions. The same code, before its five rebases, read -4.4 % and -3.2 %. A per-commit run moves the excess between fib(27)x and fibret (M1 -1.8/+3.5, M2 -2.0/+5.9, M3 +3.8/+2.6). This is the core-layout band §0.2q already records for methret, not a lever.
+
+The #2198 regression is paid back: mapmulti was 1.18 s before #2005, 1.40 s after it, and is 1.13 s now. The compile-time per-position licence that the task sketched was not needed.
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and
