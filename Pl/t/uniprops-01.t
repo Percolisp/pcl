@@ -16,7 +16,8 @@
 #
 # The rows:
 #   1-4  the ARTIFACT: stamped with the oracle perl's Unicode version, current
-#        (regenerate + compare bytes), no `gen=` stamp (so the compiler-
+#        (regenerate + compare bytes -- only under the perl the stamp names,
+#        skipped with both versions elsewhere, e.g. CI's stock 5.38), no `gen=` stamp (so the compiler-
 #        staleness gate does not adopt it), and its 38 General_Category lists
 #        agree with SBCL's own sb-unicode at EVERY code point (two independent
 #        copies of Unicode 15.0 — this proves the generator's plumbing).
@@ -54,12 +55,26 @@ like($line1, qr/^;;; pcl-uniprops unicode=\Q$uv\E perl=\S+ tool=tools\/rebuild-u
 unlike($line1, qr/gen=/,
        'the artifact carries no gen= stamp (it is perl data, not compiler output)');
 
-my (undef, $regen) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
-system("$root/tools/rebuild-uniprops", '-o', $regen) == 0
-  or die "tools/rebuild-uniprops failed";
-my $same = do { local $/; open my $a, '<:raw', $art; open my $b, '<:raw', $regen; <$a> eq <$b> };
-ok($same, 'cl/pcl-uniprops.lisp is current: regenerating it gives the same bytes')
-  or diag("regenerate with tools/rebuild-uniprops (and read its --stats)");
+# Row 3 regenerates the artifact and compares BYTES.  The artifact is written
+# under the ORACLE perl its stamp names (perl=...), and the stamp carries the
+# generating perl's version, so under any other perl the regeneration can
+# never be byte-identical: the comparison would test the ENVIRONMENT, not the
+# artifact (CI's stock Ubuntu perl is 5.38 -- s499h).  Row 1's unicode= check
+# above is the property-data contract and runs everywhere; the byte comparison
+# runs only under the stamp's perl and SKIPS, naming both versions, elsewhere.
+my ($stamp_perl) = $line1 =~ /\bperl=(\S+)/;
+my $running_perl = sprintf "%vd", $^V;
+SKIP: {
+    skip("byte comparison runs only under the oracle perl the stamp names "
+         . "(perl=" . ($stamp_perl // '?') . "); this is perl $running_perl", 1)
+      if !defined $stamp_perl || $stamp_perl ne $running_perl;
+    my (undef, $regen) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    system("$root/tools/rebuild-uniprops", '-o', $regen) == 0
+      or die "tools/rebuild-uniprops failed";
+    my $same = do { local $/; open my $a, '<:raw', $art; open my $b, '<:raw', $regen; <$a> eq <$b> };
+    ok($same, 'cl/pcl-uniprops.lisp is current: regenerating it gives the same bytes')
+      or diag("regenerate with tools/rebuild-uniprops (and read its --stats)");
+}
 
 # --- 4. the gc cross-check against sb-unicode --------------------------------
 sub run_lisp {
