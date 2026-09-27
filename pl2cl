@@ -214,7 +214,7 @@ BEGIN {
     my @nonflag;
     for (my $i = 0; $i < @ARGV; $i++) {
       my $a = $ARGV[$i];
-      if ($a =~ /^-/) { $i++ if $a eq '--deps'; next }
+      if ($a =~ /^-/) { $i++ if $a eq '--deps' || $a eq '--as'; next }
       push @nonflag, $a;
     }
     last XCLIENT if @nonflag != 1 || !-f $nonflag[0];
