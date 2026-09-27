@@ -37,6 +37,14 @@ replaced, one core, interleaved series, best-of-K, a byte-identical control pair
 window); one perf agent per round; the merged tree's sweep is the correctness bar; a row that
 gets slower anywhere is a stop.
 
+
+**Amended 2026-09-27 (USER, s499):** the ranking is BY MEASURED GAIN -- how much faster the
+program gets -- sized before shipping; ease no longer carries half the weight.  Start-up (the
+`pcl` launcher, #2422), the first-run fasl build (#2420, #2423) and the string-eval compile
+policy (#2421) are DOCUMENTED speed problems with later extensions, deliberately not optimized
+now ("Don`t optimize the startup right now").  The s499 measurement (`docs/faster-codegen-
+suggestions.md` §0.2r) is the population this rule was made on.
+
 ### A.1 The cheap round first, the yardstick beside it
 
 Because ease carries half the weight, the FIRST perf round is the three small levers whose

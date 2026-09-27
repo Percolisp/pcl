@@ -797,6 +797,64 @@ New bench rows (verified against perl): `shiftq` 0.36x, `unshiftq` 1.98x,
 `splice0` 1.47x, `catmod` 2.80x, `catself` 2.33x, `mapmulti` 2.18x,
 `mapsingle` 1.32x (#2198).
 
+### 0.2r Where ORDINARY programs spend their time (s499, 2026-09-27, main `1b0baa7c`, gen v2-2080) -- the measurement the USER`s two rulings were made on
+
+Measured by agent s499a on main 1b0baa7c (data: ~/pcl-agent-scratch/s499/s499a/: everyday-times.tsv,
+rosetta-times.tsv, leg2.log, profiles/, exp*.log).  Every timed program's output was checked against perl
+first; a differing program is excluded, never timed.  Fable spot-checked the two biggest numbers on the
+same box (load 2.6-6): a warm `pcl FILE` of a one-line program = 42.7 ms (perl 1.4 ms); a bare SBCL boot
+with the 53 MB PCL core = 6.8 ms (the agent: 3 ms on a quiet box).
+
+#### The headline
+
+| population | timed | perl s | pcl s warm | of pcl: start-up | module load | run | median pcl/perl |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| everyday (122) | 101 | 2.6 | 10.3 | 56 % | 9 % | 33 % (1) | 10.1x |
+| Rosetta (655) | 499 | 29.9 | 71.7 | 38 % | 2 % | 60 % (2) | 10.2x |
+| everyday FIRST run after an edit | 101 | | 78.6 | transpile 26 % | fasl build 61 % | rest 13 % | |
+
+(1) 2.07 of the 3.42 run-seconds are ONE program (moo-class), 89 % of that SBCL compiling string-eval'd
+code; another 1.0 s is a `sleep 1`.  (2) 37 of 43 run-seconds are 23 programs; the other 475 average 0.06 s.
+
+**Warm, an ordinary program is bound by the fixed start-up: median 48 ms, ~40 ms fixed, ~34 ms of it the
+Perl `pcl` launcher** (perl start-up + 7 module loads + a `sbcl --version` spawn + a SHA-1 of the 1.5 MB
+runtime source on EVERY run; SBCL itself boots in 3-7 ms).  **On its first run a program is bound by
+building its compiled file**, because that build loads every `use`d module from TEXT even when the module's
+fasl exists (the guard against nesting compile-file also refuses to LOAD a finished fasl).  Only ~5 % of
+programs are run-bound, and none of the present list's items reaches 3 % of any measured program
+(#2114/#2115 `.=` paths, #2190, sortnum, methret, §7 dispatch, A.2 rows 2-7).  The list is right for the
+bench rows; it is not where ordinary programs spend their time.
+
+#### What is missing from the list (filed by s499a, ease first)
+
+| task | lever | ease | measured |
+|---|---|---|---|
+| #2422 | the `pcl` launcher: remember the core name (hash only when the runtime's mtime/size changed), skip the `sbcl --version` spawn, lazy module loads | S | up to ~30 ms of every run = ~60 % of a median program (everyday 3.0 of 10.3 s; Rosetta 15 of 72 s) |
+| #2420 | a script's fasl build LOADS existing module/extension fasls instead of their text | S | everyday first runs 84.8 -> 37.3 s (-56 %), output identical 101/101; Getopt::Long 5.3 -> 0.34 s |
+| #2421 | a cheap SBCL compile policy around string-eval'd code | S | moo-class 2.65 -> 0.54 s; Moo class set-up -1.3 s per run, per-object cost unchanged |
+| #2425 | `**` fast path (overload check + two coercions per call today) | S | 26 % of two Rosetta programs |
+| #2424 | `%a = %b` whole-hash copy (every key boxed, table never presized) | M | 97 % of one 6.2 s program |
+| #2423 | pl2cl: 0.17 s fixed + ~3 ms per LINE, a fresh perl per run-time transpile | L | first runs only: everyday 20 s, Rosetta 122 s |
+
+Already on the list and confirmed by the profiles: #1862 (`-e` runs are never cached: 169 vs 38 ms),
+#2191 (a repeated cached eval recompiles, 0.54 ms each), #1410 (eval text -> fasl), the regex engine
+(A.2 row 11, parked: one Rosetta program at 49.8x perl), #2198 (map/split allocation).
+
+#### Recommendation
+One perf round, one Opus agent, the standard bars (hand-replaced A/B, bench control rows, everyday
+--record, gate + sweep): **#2422 -> #2420 -> #2421**, each a few dozen lines in one place; #2422 must keep
+the core key EXACT (the s439 rule: a stale core is impossible) -- an mtime+size memo of the hash, hash on a
+miss.  Expected: a median warm program 48 -> ~15 ms, first runs -56 %, Moo set-up -80 %.  #2425 as the
+round's filler; #2424 and #2423 wait for the next round.
+
+#### Caveats
+Legs 3 and 6 ran beside s497b's CPAN board (load 2-11; every row carries its load; controls within 5 %).
+Three everyday programs have no phase split.  Rosetta programs are third-party (GFDL): nothing from them
+is in the tree.  The agent could not write its REPORT.md (harness rule) -- this file is the record.
+
+**USER RULINGS (2026-09-27, after reading this):** the start-up, first-run and string-eval costs are DOCUMENTED speed problems with later extensions (a faster launcher; compiled-module reuse on a first run; cached compiled eval strings) and are NOT optimized now (#2420 #2421 #2422 #2423 parked); optimizations are prioritized BY MEASURED GAIN (round 36 = s499f: #2198 / #2424 / #2425 sized first).  README and docs/STATUS.md carry the user-facing note.
+
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and

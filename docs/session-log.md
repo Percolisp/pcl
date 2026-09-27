@@ -1,6 +1,92 @@
-0# PCL Session Log
+# PCL Session Log
 
 Append new entries at the top. One section per session.
+
+## Session 499 (Fable, 2026-09-27) — three batches merged, the speed review answered by the USER, README adopted, perf round 36 launched under a new ranking rule
+
+The session opened on the USER's "keep 3 subjobs with Opus 5.5 working" with two
+batches stopped on their last bars (s497b strict refs / vivification /
+`$SIG{__DIE__}`; s496a Unicode properties from perl's own tables + the #2372
+regex-compile die) and the s498 directive to review where real programs spend
+their time.  Both batches were resumed as fresh Opus agents in their existing
+worktrees from STOP.md, and a third agent (s499a) measured the everyday and
+Rosetta corpora whole-program against perl with a phase split, the constants,
+and sb-sprof over the run-bound programs.  Fable's review probes were written
+before reading either batch's diff and run perl → base → tree (13 files, 528
+rows, `~/pcl-agent-scratch/s499/review/`); both trees matched perl on
+everything their briefs claimed.  Two pre-existing silent-wrongs surfaced on
+the side and were filed: #2441 (a double-quoted string's `\Q \U \L \E` scan
+runs on the escape-processed text, so `"C:\\Users"` prints `C:SERS`) and
+#2440 (`\d` and `[[:digit:]]` are ASCII-only, `\s`/`\w` miss Unicode classes
+on wide strings); #2442 (`@INC` starts with the script's directory and `.`)
+came from the docs pass.
+
+One ruling went back into s496a in-batch: `qr//` compiles EAGERLY, because
+the lazy form let `eval { qr/$user/ }` return an object and die later outside
+the eval — the validation idiom #2372 exists for.  The price was measured
+honestly: an untranslated construct in a qr now dies at the qr, and
+t/re/pat_rt_report.t fell from 2431 to 110 rows behind ONE possessive
+quantifier.  A bounded follow-up agent (s499e, #2380: `X++` → `(?>X+)`,
+perl's own definition, inside the one forward scan) restored it to 2432/25
+within an hour.
+
+Merges, each a fast-forward after a Fable review (probes on the sha, a cold
+gate on the merged main, the sweep on the merged tree): s496a `577a09a4`
+(gate 266/8777 — the agent's 8778 was glob-01.t's #2384 flake emitting one
+extra row; Fable's CLAUDE.md commit `2b2db885` makes the checked-in artifacts
+FOUR, the fourth being data with no `gen=`), s497b `bd0c38e3` (gate 269/8999;
+sweep TOTAL 18714 = 18693 + 21 edited rows, GATE clean, drops 5 = census;
+EVERYDAY 101 → 102 of 122), s499e `9febb602` (gate 269/9001; Fable's cold gate
++ sweep numbers below).
+
+The USER adopted the s496 Opus README rewrite ("a step up from previous",
+committed `07610d76`) and asked for the same pass over the documents it links
+to: agent s499d rewrote the seven user-facing pages (STATUS, CONTRIBUTING,
+pcl-commands, pcl-check, caching, extensions, shipped-modules) UNCOMMITTED in
+its worktree with before/after/diff copies under
+`~/pcl-agent-scratch/s499/docs-review/`, reviewed the five internal references
+read-only, and diagnosed the license badge (GitHub cannot classify
+Artistic-1.0-Perl OR GPL-1.0 — perl5's own repository reads "Other"; the fix
+is a static shields badge, the line is in its DECISIONS file).  The USER reads
+it all before anything is committed.
+
+The speed review (`~/pcl-agent-scratch/s499/speed-review-s499.md`, record in
+faster-codegen-suggestions §0.2r): a warm ordinary program is START-UP-bound
+(median 48 ms, ~34 ms of it the Perl `pcl` launcher; SBCL boots in 3–7 ms),
+a first run after an edit is FASL-BUILD-bound (modules loaded from text even
+when their fasl exists), only ~5 % of programs are run-bound, and no item on
+the present list reaches 3 % of any measured program.  The USER ruled: the
+start-up, first-run and string-eval costs are DOCUMENTED speed problems with
+later extensions (a faster launcher, compiled-module reuse on a first run,
+cached compiled eval strings) — not optimized now, the note goes into README
+and STATUS (s499d wrote it, uncommitted with the rest) — and optimizations are
+prioritized BY HOW MUCH FASTER THE PROGRAM GETS, superseding A.0's ease-first
+weighting.  Perf round 36 (s499f) was launched on that rule: #2198 map result
+copies, #2424 whole-hash copy, #2425 `**`, sized by A/B first and shipped in
+gain order.
+
+The session ended on the USER's "let the last task finish and then end the session":
+the USER stopped s499f while it was on its bars, with all three levers shipped
+as commits in its worktree (`agent-a8950a9b856e81d81`, HEAD `be7c7b59`, four
+commits on `9febb602`, no emission change; sizing table in its STOP.md: #2424
+-43 % on Mian-Chowla, #2425 -16 %, #2198 -12 to -21 %; guard
+`Pl/t/perf-levers-06.t`, 116 rows) and step 3 owed (inverse guard, gate,
+sweep, ir-conform, everyday + record, bench A/B, records).  It is resumed next
+session from STOP.md as s497b and s496a were today.  The docs pass stays
+uncommitted until the USER has read it.  Fable's cold gate + sweep on the final
+main `9febb602`: gate `Result: PASS` 269 files / 9001 rows (`~/pcl-agent-scratch/s499/review/gate-merge3-9febb602.log`), sweep GATE clean, TOTAL 18714 (+0), drops 5 = census (`sweep-merge3-9febb602.log`).
+
+
+Lessons: an agent that arms a monitor and stops may never wake (s497b sat idle
+for an hour after Fable's gate finished — a SendMessage resumed it); `pkill -f`
+with a pattern that appears in the caller's own command line kills the caller
+(use the `patter[n]` bracket trick); the harness's shell wrappers carry the
+command text, so `pgrep -af prove` matches wrappers — match the tool's own
+process (`perl tools/sweep-perl-tests.pl`); the row-level companion baselines
+(`perl-suite-fails.tsv`, `row-shortfall.tsv`) are ~600 NEW / ~420 FIXED rows
+behind three batches (#2389) and get one read-then-bless at the next full
+`--all` companion run.
+
 
 ## Session 498 (Fable, 2026-09-26) — s494p perf round 35 merged; CI found red on the s494g push and a fix agent launched; three agents in flight
 
