@@ -42,5 +42,4 @@ modules/Text-Wrap-ParseWords-Abbrev	DIFF	4	#2085 `%{{ abbrev(...) }}` (a hash de
 modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not implemented
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
-programs/resource-idioms	DIFF	1	#2006 (b) a lexical filehandle is not closed at scope exit
 programs/tied-scalar-hash	DIFF	2	#155 tie on HASH is announced, not implemented
