@@ -25107,13 +25107,23 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Copy a simple scalar box to prevent aliasing in map results.
    When a map block ends with an lvalue like ($y .= $x), it returns the box $y.
    If we store the box itself, later mutations to $y corrupt the map result.
-   Reference types (hash/array/code) and blessed objects are NOT copied."
+   Reference types (hash/array/code) and blessed objects are NOT copied.
+
+   THE COPY IS RAW WHERE IT CAN BE (task #2198, s499f).  A copy's only job is
+   to stop sharing the variable's box, and a plain number or string needs no
+   box at all to do that: map's result is an intermediate list, whose elements
+   may be raw (ir-spec §2.3), and every consumer -- a list assignment, foreach,
+   an argument list -- already reads and promotes raw elements.  So the value
+   is parked raw by the element rule (%p-storable-raw) and only the kinds that
+   carry identity on the container (undef, a dualvar, a magic or tied cell)
+   still get a fresh box.  One allocation per element fewer: the
+   `map { ($_, $_ * 2) }' shape was +19 % slower after #2005 for that box."
   (if (and (p-box-p r)
            (not (p-box-class r))
            (let ((v (p-box-value r)))
              (not (or (hash-table-p v) (and (vectorp v) (not (stringp v))) (functionp v)
                       (p-box-p v) (p-typeglob-p v)))))
-      (make-p-box (unbox r))
+      (or (%p-storable-raw r) (make-p-box (unbox r)))
       r))
 
 (defun p-grep (fn &rest items)

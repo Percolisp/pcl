@@ -22,6 +22,9 @@
 #     base, [0,64] exponent case exactly as %p-pow-int spells it -- an NV for a
 #     power-of-2 base, an exact integer otherwise -- on FIXNUM arithmetic, in
 #     front of the generic path, which keeps every case outside those bounds.
+#   #2198 map: the per-element copy that stops a block's VARIABLE being shared
+#     (#2005) is RAW for a plain number or string (%p-storable-raw), not a
+#     fresh box -- one allocation per element fewer on `map { ($_, $_ * 2) }'.
 #
 # EVERY EXPECTED LINE BELOW IS PERL 5.40.3's OWN OUTPUT, probed by running the
 # same program under perl (scratch/s499f/probes/ in the s499f worktree).
@@ -279,6 +282,98 @@ numify overload: 16
 digits: 1024 1 3125 0 sum=4150
 big: 1000000000000000 10000000000000000 1e+20 -1e+19
 concat: 1024|27|0.5
+EXPECTED
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #2198 map's result copy is RAW where it can be.  MECHANISM: %p-map-copy-scalar
+# answers a plain number or string box with the bare value (no fresh box), and
+# still a FRESH box for undef, a numified string (the cached numeric half) and a
+# dualvar; a blessed box is returned itself, as before.
+# ─────────────────────────────────────────────────────────────────────────────
+my $mapmech = run_lisp(<<'LISP');
+(in-package :pcl)
+(let ((n (make-p-box 5)) (s (make-p-box "str")) (u (make-p-box nil))
+      (o (make-p-box (make-hash-table) "K")))
+  (format t "mc-num ~a ~a~%" (p-box-p (%p-map-copy-scalar n)) (%p-map-copy-scalar n))
+  (format t "mc-str ~a ~a~%" (p-box-p (%p-map-copy-scalar s)) (%p-map-copy-scalar s))
+  (let ((c (%p-map-copy-scalar u)))
+    (format t "mc-undef ~a ~a~%" (p-box-p c) (eq c u)))
+  (format t "mc-obj ~a~%" (eq (%p-map-copy-scalar o) o))
+  (let ((ns (make-p-box "12")))
+    (to-number ns)
+    (let ((c (%p-map-copy-scalar ns)))
+      (format t "mc-numstr ~a ~a~%" (p-box-p c) (eq c ns)))))
+LISP
+like($mapmech, qr/^mc-num NIL 5$/mi,   '#2198: a number box is copied RAW (no fresh box)');
+like($mapmech, qr/^mc-str NIL str$/mi, '#2198: a plain string box is copied RAW');
+like($mapmech, qr/^mc-undef T NIL$/mi, '#2198: undef still gets a FRESH box (NIL is the hole marker)');
+like($mapmech, qr/^mc-obj T$/mi,       '#2198: a blessed box is not copied (unchanged)');
+like($mapmech, qr/^mc-numstr T NIL$/mi,
+     '#2198: a string with a cached numeric half keeps a fresh box (the element rule)');
+
+my $mapout = run_pl(<<'PERL');
+use strict; use warnings;
+my $i = 0; my %idx = map { $_ => ++$i } qw(a b c); print "idx: ", join(",", map { "$_=$idx{$_}" } sort keys %idx), "\n";
+my @a = (1, 2, 3);
+my @d = map { ($_, $_) } @a; $d[0] = 9; print "dup: @d | a: @a\n";
+for (map { ($_, $_) } @a) { $_ = 0 } print "for-over-map: @a\n";
+my @r = map { \$_ } @a; ${$r[1]} = 20; print "refs: @a\n";
+my %h = (x => 1, y => 2); my @hv = map { $h{$_} } sort keys %h; $hv[0] = 5; print "helem: @hv | $h{x}\n";
+my $x = 3; my $rr = \$x; my @dr = map { $$rr } 1 .. 2; $x = 4; print "deref: @dr\n";
+my $v = "v"; my @mix = map { ($v, $_ * 10, $v . "!") } 1 .. 2; $v = "w"; print "mix: @mix\n";
+my $cnt = map { ($_, $_) } 1 .. 4; print "scalar ctx: $cnt\n";
+my @n = map { my $o = $_; map { "$o$_" } qw(p q) } 1 .. 2; print "nested: @n\n";
+my @u = map { (undef, $_) } 1 .. 2; print "undef: ", join(",", map { defined $_ ? $_ : "U" } @u), "\n";
+my @s = map { ("s$_", "t") } 1 .. 2; $s[0] .= "X"; print "str: @s\n";
+my @m = map { $_ } @a; $m[0] = 100; print "single var: @m | @a\n";
+my $y = 1; my @yy = map { $y++ ; ($y, $y) } 1 .. 3; print "var twice: @yy\n";
+my @nums = map { ($_ + 0.5, "$_") } 1 .. 2; print "num/str: @nums ", $nums[0] * 2, " ", $nums[1] . "z", "\n";
+my @ob = map { (bless({}, 'K'), $_) } 1 .. 1; print "obj: ", ref($ob[0]), "\n";
+my @big = map { ($_, $_ * 2) } 1 .. 1000; print "big: ", scalar(@big), " $big[-1] $big[-2]\n";
+my %hh = map { $_ => [$_] } 1 .. 3; push @{$hh{1}}, 9; print "aref vals: @{$hh{1}} @{$hh{2}}\n";
+my @sp = map { (split //, $_) } qw(ab cd); print "split: @sp\n";
+my @w = map { lc } qw(A B); print "lc: @w\n";
+sub f { return ($_[0], $_[0] * 2) } my @fr = map { f($_) } 1 .. 2; print "call: @fr\n";
+my @dv = map { ("3abc" + 0, $_) } 1; print "numified: @dv\n";
+our @g = (7, 8); my @gg = map { ($_, 1) } @g; $gg[0] = 0; print "global: @g @gg\n";
+"abc" =~ /(b)/; my @cap = map { ($1, $_) } 1 .. 2; print "capture: @cap\n";
+my @e = map { () } 1 .. 3; print "empty: ", scalar(@e), "\n";
+my $kvr = { map { ($_ => $_ ** 2) } 1 .. 3 }; my @kv = %$kvr; print "kv: ", scalar(@kv), "\n";
+my @chained = grep { $_ % 2 } map { ($_, $_ + 1) } 1 .. 3; print "grep-map: @chained\n";
+my @sorted = sort { $b <=> $a } map { ($_, -$_) } 1 .. 3; print "sort-map: @sorted\n";
+my ($p, $q) = map { ($_, $_) } 5; $p++; print "list assign: $p $q\n";
+PERL
+
+lines_like($mapout, <<'EXPECTED', '#2198 map');
+idx: a=1,b=2,c=3
+dup: 9 1 2 2 3 3 | a: 1 2 3
+for-over-map: 1 2 3
+refs: 1 20 3
+helem: 5 2 | 1
+deref: 3 3
+mix: v 10 v! v 20 v!
+scalar ctx: 8
+nested: 1p 1q 2p 2q
+undef: U,1,U,2
+str: s1X t s2 t
+single var: 100 20 3 | 1 20 3
+var twice: 2 2 3 3 4 4
+num/str: 1.5 1 2.5 2 3 1z
+obj: K
+big: 2000 2000 1000
+aref vals: 1 9 2
+split: a b c d
+lc: a b
+call: 1 2 2 4
+numified: 3 1
+global: 7 8 0 1 8 1
+capture: b 1 b 2
+empty: 0
+kv: 6
+grep-map: 1 3 3
+sort-map: 3 2 1 -1 -2 -3
+list assign: 6 5
 EXPECTED
 
 done_testing();
