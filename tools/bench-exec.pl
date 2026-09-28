@@ -306,6 +306,8 @@ my @benches = (
   # s494u (#2092): lc/uc/ucfirst at a /d site over lines holding raw UTF-8
   # bytes -- the path that pays the well-formedness sniff; the checksum folds
   # in the high bytes, so a regime slip changes the output and the row BREAKS.
+  # ... and the pure-ASCII path it must NOT slow: many short uc/lc calls.
+  ['ucshort',   "$HN my \@v = ('e', 'Ab', 'oXo', 'word'); my \$c = 0; for my \$i (1..\$n) { my \$w = \$v[\$i % 4]; \$c += length(uc(\$w)) + ord(lc(\$w)) } print \"\$c\\n\";", 2_000_000, 0],
   ['lcbytes',   "$HN my \@l = map { \"Ligne \\xC3\\xA9t\\xC3\\xA9 NO \$_ CAF\\xC3\\x89 fin\" } 1 .. 200; my \$c = 0; for (1..\$n) { for my \$s (\@l) { my \$t = lc(\$s) . uc(\$s) . ucfirst(\$s); \$c += ord(substr(\$t, 7, 1)) + length(\$t) } } print \"\$c\\n\";", 2_000, 0],
 );
 

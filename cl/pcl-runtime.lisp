@@ -6140,41 +6140,63 @@
               (return nil))
             (incf i (1+ need)))))))))
 
-(defun %p-case-unicode-p (s regime first-only)
-  "Does this call map S by Unicode rules?  REGIME :u always; REGIME nil (/d)
-   when S's high chars do NOT read as UTF-8 bytes.  FIRST-ONLY: only the
-   first char is mapped, so a string whose first char is ASCII never needs
-   the sniff.  Any other REGIME is a compiler bug and DIES (rule 12)."
+(declaim (inline %p-first-high-char %p-case-bytes-p %p-case-map))
+(defun %p-first-high-char (s)
+  "The index of the first char of S at or above #x80, or NIL.  The typed
+   loop is the hot path: a pure-ASCII string pays one pass and then takes
+   string-downcase/upcase exactly as before (bench textproc, s494u).  A
+   simple-base-string holds only base chars, which SBCL keeps below #x80."
+  (declare (optimize speed))
+  (typecase s
+    (simple-base-string nil)
+    ((simple-array character (*))
+     (let ((n (length s)))
+       (dotimes (i n nil)
+         (when (>= (char-code (schar s i)) #x80) (return i)))))
+    (t (position-if (lambda (c) (>= (char-code c) #x80)) s))))
+
+(defun %p-case-bytes-p (s regime first-only)
+  "Does this call map S by ASCII rules because S is undecoded UTF-8 BYTES?
+   Only REGIME nil (/d) asks, and only when S has a char >= #x80 where the
+   mapping looks (FIRST-ONLY: the first char).  REGIME :u never.  Any other
+   REGIME is a compiler bug and DIES (rule 12).  A string with no high char
+   answers NIL: Unicode and ASCII rules agree on it."
   (case regime
-    (:u t)
+    (:u nil)
     ((nil)
      (let ((hi (if first-only
                    (and (plusp (length s)) (>= (char-code (char s 0)) #x80) 0)
-                   (position-if (lambda (c) (>= (char-code c) #x80)) s))))
-       (and hi (not (%p-bytes-look-utf8-p s hi)))))
+                   (%p-first-high-char s))))
+       (and hi (%p-bytes-look-utf8-p s hi))))
     (t (error "PCL: case-mapping regime ~S is not :u or nil" regime))))
+
+(defun %p-case-map-ascii (s up first-only)
+  "S with ASCII letters case-mapped (UP: to upper), every other char --
+   chars 128-255 included -- left alone; FIRST-ONLY: the first char only."
+  (let* ((r (copy-seq s))
+         (end (if first-only (min 1 (length r)) (length r))))
+    (declare (fixnum end))
+    (dotimes (i end r)
+      (let ((c (char r i)))
+        (if up
+            (when (char<= #\a c #\z) (setf (char r i) (code-char (- (char-code c) 32))))
+            (when (char<= #\A c #\Z) (setf (char r i) (code-char (+ (char-code c) 32)))))))))
 
 (defun %p-case-map (str op regime)
   "lc/uc/fc/lcfirst/ucfirst (OP :lc :uc :fc :lcfirst :ucfirst) of STR under
-   REGIME (see the section comment).  Always a fresh string."
+   REGIME (see the section comment).  Always a fresh string.  INLINE, so each builtin
+   folds its constant OP and a pure-ASCII call costs one typed scan over
+   today's string-downcase/upcase (bench ucshort, s494u)."
   (let* ((s (to-string str))
          (first-only (or (eq op :lcfirst) (eq op :ucfirst)))
          (up (or (eq op :uc) (eq op :ucfirst))))
-    (if (%p-case-unicode-p s regime first-only)
-        (cond ((not first-only) (if up (string-upcase s) (string-downcase s)))
-              ((zerop (length s)) s)
-              (t (concatenate 'string
-                              (if up (string-upcase (subseq s 0 1))
-                                  (string-downcase (subseq s 0 1)))
-                              (subseq s 1))))
-        (let* ((r (copy-seq s))
-               (end (if first-only (min 1 (length r)) (length r))))
-          (declare (fixnum end))
-          (dotimes (i end r)
-            (let ((c (char r i)))
-              (if up
-                  (when (char<= #\a c #\z) (setf (char r i) (code-char (- (char-code c) 32))))
-                  (when (char<= #\A c #\Z) (setf (char r i) (code-char (+ (char-code c) 32)))))))))))
+    (cond ((%p-case-bytes-p s regime first-only) (%p-case-map-ascii s up first-only))
+          ((not first-only) (if up (string-upcase s) (string-downcase s)))
+          ((zerop (length s)) s)
+          (t (concatenate 'string
+                          (if up (string-upcase (subseq s 0 1))
+                              (string-downcase (subseq s 0 1)))
+                          (subseq s 1))))))
 
 (defun p-lc (str &optional regime)
   "Perl lc — lowercase, by REGIME (:u = unicode_strings site; nil = /d).
