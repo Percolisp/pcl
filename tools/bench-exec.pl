@@ -293,6 +293,16 @@ my @benches = (
   # and `**' on the digits of a number (task #2425, the Digit-fifth-powers shape).
   ['hashcopy',  "$HN my \%b = map { (\"k\$_\" => \$_) } 1 .. 1000; my (\%a, \$t); for my \$i (1..\$n) { my \%c = \%b; \%a = \%c; \$t += \$a{'k' . (\$i % 1000 + 1)} } print \"\$t\\n\";", 4_000, 0],
   ['powdigit',  "$HN my \$s = 0; for my \$k (1..\$n) { for my \$d (split '', \$k) { \$s += \$d ** 5 } } print \"\$s\\n\";", 400_000, 0],
+  # Round 37 (s500p): a double stringified and sprintf'd per iteration (task
+  # #2510, the Heronian `sprintf("%.0f", $h) eq $h` shape); join over an
+  # array and an interpolated slice (#2511, Self-describing-numbers); grep in
+  # scalar context over an array (#2512, Permutation-test); arithmetic, a
+  # comparison, `&` and `>>=` on still-BOXED scalars (a list declaration
+  # declines the raw verdict, #2513, the Fusc shape).
+  ['fprint',    "$HN my \$c = 0; for my \$i (1..\$n) { my \$x = sqrt(\$i) * 1.5; \$c++ if sprintf('%.0f', \$x) eq \$x; \$c += length(\"\$x\") } print \"\$c\\n\";", 300_000, 0],
+  ['joinarr',   "$HN my \@a = (1 .. 8); my \$c = 0; for (1..\$n) { my \$s = join(',', \@a); my \$t = \"\@a[0..3]\"; \$c += length(\$s) + length(\$t) } print \"\$c\\n\";", 300_000, 0],
+  ['grepcnt',   "$HN my \@p = map { \$_ % 3 ? 1 : 0 } 1 .. 20; my \$c = 0; for (1..\$n) { my \$k = grep \$_, \@p; \$c += \$k } print \"\$c\\n\";", 200_000, 0],
+  ['boxarith',  "$HN my \$t = 0; for my \$k (1..\$n) { my (\$p, \$q, \$i) = (0, 1, \$k); while (\$i) { if (\$i & 1) { \$p += \$q } else { \$q += \$p } \$i >>= 1 } \$t += \$p > 1000 ? 1 : \$p } print \"\$t\\n\";", 200_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
