@@ -11,6 +11,13 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s500 (2026-09-28, Fable, short) -- three agents launched (s494h #2006(b), s494u #2092 phase 1, s500p perf round 37 runtime-only), none merged; the USER: no more subjobs this session
+- **Perf round 37 is RUNTIME-ONLY by construction**: two emission agents in flight ⇒ no `Pl/` lever in the perf slot (#2114 waits for round 38); corpus-diff IDENTICAL is its bar.
+- **PPI 1.291 Float/Exp/Hex number tokenizers swallow a following `-N`** (`1.5-0.5` DROPS the statement; `-1.5**2` = +2.25 silent) -- #2530; the fix is the `_ends_term` repair family (§15`s sibling) + widening PExpr`s negative-literal-before-`**` split to every Number subclass (rule 11).
+- **The Archive::Tar everyday row is run-time `prototype()`, not the stash walk** -- #2533 supersedes #2084 (4): classic prototypes, `use constant` subs (`''`) and anon `sub (1000 4 24 27 30 46 100 115 1000` never reach the registry; not-supported`s "do it deliberately, with a sweep" condition is met (core Archive::Tar::Constant reads them back).
+- **Review probes precede reports** (standing): `~/pcl-agent-scratch/s500/review/` perl → base written at launch; a batch`s review is the diff against NOTES.md`s must-move / must-stay rows.
+- Filed s500: #2530 #2531 (`%.17g`) #2532 (-0.0 sign, `4.9e-324`) #2533; #2450 widened (`+ - *` SvIV_please); KELVIN `/i` = #1036 (ruled deferred, nothing new).  Everyday-singles brief READY `~/pcl-agent-scratch/s500/s500a/prompt.md` (+4 rows), launch next session.
+
 ## s499 (2026-09-27, Fable) -- three merges (s496a 577a09a4, s497b bd0c38e3, s499e 9febb602), README adopted, the speed review RULED by the USER, perf round 36 launched
 - **README.md ADOPTED (USER): the s496 Opus rewrite committed 07610d76** ("a step up"); the USER`s further edits follow; the license badge = a STATIC shields badge (GitHub cannot classify Artistic-1.0-Perl OR GPL-1.0 -- perl5`s own repo reads "Other"): the line is in `~/pcl-agent-scratch/s499/docs-review/DECISIONS-for-USER.md` (s499d`s docs pass, uncommitted until the USER has read it).
 - **`qr//` COMPILES EAGERLY (Fable ruling, s496a member 7)**: a bad pattern dies AT THE qr, so `eval { qr/$user/ }` answers undef with $@ set as in perl (USER bar s494: fail in the same places); the price -- an UNTRANSLATED construct in a qr dies at the qr, outside the eval that trapped it at the match (pat_rt_report.t 2431 -> 110 rows behind one possessive) -- was paid back by s499e (#2380: `X++` -> `(?>X+)`, perl`s own definition; pat_rt_report.t 2432/25).
