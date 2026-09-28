@@ -25190,14 +25190,30 @@ buffer's fill-pointer; everything else falls back to file-length."
    wrapping one is an array REFERENCE and is a single element."
   (and (vectorp item) (not (stringp item))))
 
+(defun %p-collect-list-size (items)
+  "How many elements %p-collect-list will push for ITEMS — exact for every
+   shape but a raw %hash, where it is the table's count doubled (an estimate:
+   vector-push-extend still grows the result if it is short)."
+  (let ((n 0))
+    (declare (type fixnum n))
+    (dolist (item items n)
+      (incf n (cond ((p-flatten-marker-p item) (length (p-flatten-marker-array item)))
+                    ((%p-spread-vector-p item) (length item))
+                    ((hash-table-p item) (* 2 (hash-table-count item)))
+                    (t 1))))))
+
 (defun %p-collect-list (&rest items)
   "Collect &rest args into a flat vector.
    RAW vectors (@arrays) are flattened into individual elements; a vector
    inside a p-box is an array REFERENCE and stays one element
    (%p-spread-vector-p).
    p-flatten-markers (from ->import/->unimport empty returns) contribute 0 elements.
-   Used by p-map and p-grep to handle both (fn @arr) and (fn a b c) forms."
-  (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
+   Used by p-map and p-grep to handle both (fn @arr) and (fn a b c) forms.
+   The result is allocated at the size the items SPREAD to (task #2512), so
+   the pushes below never grow it — the growth path (extend-vector +
+   reallocation) was 11 % of a grep-bound program."
+  (let ((result (make-array (max 1 (%p-collect-list-size items))
+                            :adjustable t :fill-pointer 0)))
     (dolist (item items)
       (cond
         ((p-flatten-marker-p item)
@@ -25253,7 +25269,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl grep - fn receives item as $_ parameter.
    Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
   (let* ((arr (apply #'%p-collect-list items))
-         (result (make-array 0 :adjustable t :fill-pointer 0)))
+         (result (make-array (length arr) :adjustable t :fill-pointer 0)))
     ;; $_ must be a stable box so \$_ aliases consistently within an iteration
     ;; ([perl #78194]). Array/ref elements are already boxes; a literal-scalar
     ;; element (from the (fn a b c) form) is raw — box it once per iteration.
