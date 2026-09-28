@@ -2016,7 +2016,7 @@ re/alpha_assertions.t	2279	0	1951	78	DIFF	aborted-forms:2: PCL: string literal: 
 re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 re/begin-once.t	2	0	1	1	DIFF		0
 re/bigfuzzy_not_utf8.t	1	0	1	0	OK	s470bv: #1115 (already 1/0 OK at a3d6d8e)	0
-re/charset.t	8328	0	5224	328	DIFF	
+re/charset.t	8328	0	5344	208	DIFF	s494u #2092: 5224/328 -> 5344/208 -- /a and /aa make \w \s \b ASCII-only (60 /a + 60 /aa rows; A/B: 209e7533 extraction 5224/328)
 re/fold_grind_8.t	213	0	0	0	DIFF		0
 re/fold_grind_T.t	0	0	0	0	NOTAP		0
 re/fold_grind_a.t	31	0	0	0	DIFF		0
@@ -2077,7 +2077,7 @@ re/script_run.t	185	0	0	185	XDIFF	not-supported.md §Regex script-run assertions
 re/speed.t	59	0	1	0	TIMEOUT	timeout	0
 re/speed_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/stclass_threads.t	0	0	5	1	NOTAP		0
-re/subst.t	281	0	206	66	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
+re/subst.t	281	0	208	64	DIFF	s494u #2092: 206/66 -> 208/64 -- the two `\b ... /a` rows (A/B: 209e7533 extraction 206/66); aborted-forms:3: Undefined subroutine &constant::_CAN_PCS called	2
 re/substT.t	0	0	0	0	NOTAP		0
 re/subst_amp.t	13	0	1	12	DIFF		0
 re/subst_wamp.t	281	0	0	0	DIFF		0

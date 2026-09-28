@@ -303,6 +303,10 @@ my @benches = (
   ['joinarr',   "$HN my \@a = (1 .. 8); my \$c = 0; for (1..\$n) { my \$s = join(',', \@a); my \$t = \"\@a[0..3]\"; \$c += length(\$s) + length(\$t) } print \"\$c\\n\";", 300_000, 0],
   ['grepcnt',   "$HN my \@p = map { \$_ % 3 ? 1 : 0 } 1 .. 20; my \$c = 0; for (1..\$n) { my \$k = grep \$_, \@p; \$c += \$k } print \"\$c\\n\";", 200_000, 0],
   ['boxarith',  "$HN my \$t = 0; for my \$k (1..\$n) { my (\$p, \$q, \$i) = (0, 1, \$k); while (\$i) { if (\$i & 1) { \$p += \$q } else { \$q += \$p } \$i >>= 1 } \$t += \$p > 1000 ? 1 : \$p } print \"\$t\\n\";", 200_000, 0],
+  # s494u (#2092): lc/uc/ucfirst at a /d site over lines holding raw UTF-8
+  # bytes -- the path that pays the well-formedness sniff; the checksum folds
+  # in the high bytes, so a regime slip changes the output and the row BREAKS.
+  ['lcbytes',   "$HN my \@l = map { \"Ligne \\xC3\\xA9t\\xC3\\xA9 NO \$_ CAF\\xC3\\x89 fin\" } 1 .. 200; my \$c = 0; for (1..\$n) { for my \$s (\@l) { my \$t = lc(\$s) . uc(\$s) . ucfirst(\$s); \$c += ord(substr(\$t, 7, 1)) + length(\$t) } } print \"\$c\\n\";", 2_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
