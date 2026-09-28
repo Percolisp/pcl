@@ -225,7 +225,7 @@ p-//=	macro	compound-assignment	(place value)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSI
 p-/=	macro	compound-assignment	(place value)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl /= (divide-assign). Delegate to p-/ so an exact CL ratio is coerced to a float (7/2 -> 3.5, not the leaked ratio "7/2") and overload '/' dispatches.
 p-/=-raw	macro	compound-assignment	(var &rest %args)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl /= (divide-assign). Delegate to p-/ so an exact CL ratio is coerced to a float (7/2 -> 3.5, not the leaked ratio "7/2") and overload '/' dispatches.
 p-<	function	numeric-compare	(a b)	insensitive	num	none	no	no	no	none		Perl < with numberp fast path (returns 1 / "")
-p-<<	function	bitwise	(a b)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl left shift — clamp shift count to prevent SBCL bignum explosion
+p-<<	function	bitwise	(a b)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl left shift — clamp shift count to prevent SBCL bignum explosion. Two plain FIXNUMS skip the overload test and both coercions, which are identities on them 
 p-<<-int	function	bitwise	(a b)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl left shift under 'use integer' — signed 64-bit arithmetic.
 p-<<=	macro	compound-assignment	(place value)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl <<= (left-shift-assign)
 p-<<=-raw	macro	compound-assignment	(var &rest %args)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl <<= (left-shift-assign)
@@ -235,7 +235,7 @@ p-==	function	numeric-compare	(a b)	insensitive	num	none	no	no	no	none		Perl == 
 p-=~	function	regex	(string operation)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl =~ binding operator. Dispatches based on operation type: - p-regex-match: perform match, return t/nil - p-subst-op: perform substitution, modify string, re
 p->	function	numeric-compare	(a b)	insensitive	num	none	no	no	no	none		Perl > with numberp fast path (returns 1 / "")
 p->=	function	numeric-compare	(a b)	insensitive	num	none	no	no	no	none		Perl >= with numberp fast path (returns 1 / "")
-p->>	function	bitwise	(a b)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl right shift — clamp shift count to prevent SBCL bignum explosion
+p->>	function	bitwise	(a b)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl right shift — clamp shift count to prevent SBCL bignum explosion. Two plain FIXNUMS skip the overload test and both coercions (task #2513).
 p->>-int	function	bitwise	(a b)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl right shift under 'use integer' — signed 64-bit arithmetic.
 p->>=	macro	compound-assignment	(place value)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl >>= (right-shift-assign)
 p->>=-raw	macro	compound-assignment	(var &rest %args)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl >>= (right-shift-assign)
