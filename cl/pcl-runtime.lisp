@@ -5216,6 +5216,20 @@
          (if (and (minusp na) (oddp nb)) (- r) r)))
       (t nil))))
 
+(declaim (inline %p-iv-please))
+(defun %p-iv-please (n)
+  "perl's SvIV_please on a numeric operand (task #2450): a DOUBLE whose value
+   is an integer of magnitude below 2^53 is that INTEGER; anything else — a
+   fraction, NaN, an infinity, a double at or beyond 2^53 — is N unchanged.
+   The 2^53 bound is sv_2iv's own (NV_PRESERVES_UV_BITS): past it the NV gets
+   only IOKp, SvIV_please answers false and pp_pow stays in pow().  -0.0 is
+   the integer 0 (I_V(-0.0) is 0 and 0.0 == -0.0)."
+  (if (and (typep n 'double-float)
+           (< (abs n) 9007199254740992d0)
+           (= n (ftruncate n)))
+      (truncate n)
+      n))
+
 (defun p-** (a b)
   "Perl exponentiation with use overload '**' dispatch.
 
@@ -5227,8 +5241,8 @@
    %p-pow-int first, identically and cheaply (task #2425).
    Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (%with-binary-overload ("**" a b)
-                         (let ((na (to-number a))
-                               (nb (to-number b)))
+                         (let ((na (%p-iv-please (to-number a)))
+                               (nb (%p-iv-please (to-number b))))
                            (or (and (typep na '(signed-byte 32)) (typep nb '(integer 0 64))
                                     (%p-pow-small na nb))
                                (and (integerp na) (integerp nb) (>= nb 0)

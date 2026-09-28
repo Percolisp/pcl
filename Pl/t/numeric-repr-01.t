@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 14;
 
 sub run_cl {
     my ($code) = @_;
@@ -632,4 +632,58 @@ PL
 26.7266235351562|26.7266|26.7|27|26.73|26.7266235352
 0.628555297851562|0.628555|0.629|1|0.63|0.6285552979
 9.99999999999999e-05|0.0001|0.0001|0|0.00|0.0001000000
+OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G — #2450 (s500p).  `**' decides "integer operand" the way pp_pow does, by
+# SvIV_please: a double whose value is an integer below 2^53 IS that integer,
+# so `1e3 ** 5' takes the integer branch and prints 1000000000000000 (PCL
+# printed 1e+15).  The breaking cases ride along: power-of-2 bases stay NVs,
+# 1e16 and 2^53 stay NVs (sv_2iv gives them only IOKp), fractions, NaN, Inf,
+# negative exponents and -0.0 keep pow()'s or the integer branch's answer.
+# Expected text is perl 5.40.3's output.
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('2450 an integral double below 2^53 is an integer operand of **',
+        <<'PL', <<'OUT');
+no warnings;
+my @c = ([1e3, 5], ["1e3", 5], [1000.0, 5], [2.0, 60], ["8.0", 20], [10/2, 22], [2.0, 3], [-8.0, 3], [1.5, 2],
+    [1e20, 1], [1e15, 1], [1e16, 1], [9007199254740992.0, 1], [9007199254740991.0, 1], [-0.0, 3], [2, 0.5],
+    [2, -1], [0, 0], [-2, 0.5], [3, 3.0], [7.0, 19], [-3.0, 3], [9**9**9, 2], [-sin(9**9**9), 2], [10.0, 16],
+    [0.0, -1], [-1.0, 1e15], [3.0, -2.0], ["5.0", "2.0"], [4.0, 0.5], [1e5, 3]);
+print join(" ", map { $_->[0] ** $_->[1] } @c), "\n";
+PL
+1000000000000000 1000000000000000 1000000000000000 1.15292150460685e+18 1.15292150460685e+18 2.38418579101562e+15 8 -512 2.25 1e+20 1000000000000000 1e+16 9.00719925474099e+15 9007199254740991 0 1.4142135623731 0.5 1 NaN 27 11398895185373143 -27 Inf NaN 10000000000000000 Inf 1 0.111111111111111 25 2 1000000000000000
+OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# H — #2513 (s500p).  The operators' slow paths take a first arm for a BOXED
+# plain number (%p-plain-num): a list declaration keeps these scalars boxed.
+# A speed change, so this row holds what the arm must NOT change: NaN / Inf /
+# -0.0 answers, string operands, `use overload' handlers on every rewritten
+# operator, `nomethod', a dualvar's numeric half, and a tied scalar's FETCH
+# count (once per read).  Expected text is perl 5.40.3's output.
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('2513 boxed plain operands keep overload, nomethod, dualvar, tie and NaN answers',
+        <<'PL', <<'OUT');
+no warnings;
+use Scalar::Util qw(dualvar);
+package Ov { use overload '+' => sub { "OV+" }, '<' => sub { "OV<" }, '&' => sub { "OV&" }, '>>' => sub { "OV>>" },
+    '%' => sub { "OV%" }, 'bool' => sub { 0 }, '""' => sub { "ov" }; sub new { bless {}, shift } }
+package Nm { use overload 'nomethod' => sub { "NM($_[3])" }, '""' => sub { "nm" }; sub new { bless {}, shift } }
+package Ti { sub TIESCALAR { my ($c, $v) = @_; bless \$v, $c } sub FETCH { $main::fetch++; ${$_[0]} } sub STORE { ${$_[0]} = $_[1] } }
+package main;
+our $fetch = 0;
+my ($i, $d, $s, $nan, $inf, $nz) = (7, 2.5, "12", -sin(9**9**9), 9**9**9, -0.0);
+print join(",", $i + $d, $i - $s, $i * $nan, $d / $i, $i % 3, -$i % 3, $i < $d, $nan < $i, $nan != $nan, $inf > $i,
+           $i & 3, $i | 8, $i ^ 5, $i << 2, $i >> 1, ($nz ? "T" : "F"), ($nan ? "T" : "F"), ($s ? "T" : "F")), "\n";
+my ($o, $n, $p) = (Ov->new, Nm->new, 5);
+print join(",", $o + $p, $p < $o, $o & $p, $p >> $o, $o % $p, ($o ? "T" : "F"), $n + $p, $p == $n, $n & $p, $n << $p), "\n";
+my ($dd) = (dualvar(5, "seven")); print join(",", $dd + 1, $dd < 6 ? 1 : 0, $dd & 4, $dd >> 1, "$dd"), "\n";
+tie my $tv, 'Ti', 6; my ($k, $l, $m, $q, $w) = ($tv + 1, $tv & 3, $tv < 7, $tv >> 1, $tv ? 1 : 0);
+print "$k $l $m $q $w fetch=$fetch\n";
+PL
+9.5,-5,NaN,0.357142857142857,1,2,,,1,1,3,15,2,28,3,F,T,T
+OV+,OV<,OV&,OV>>,OV%,F,NM(+),NM(==),NM(&),NM(<<)
+6,1,4,2,seven
+7 2 1 3 1 fetch=5
 OUT

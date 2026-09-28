@@ -1202,6 +1202,12 @@ decimal exponent X of the value *after rounding to 15 significant digits* is
 
 The same reading serves `sprintf "%g"` with its own precision.
 
+**The 15th digit rounds HALF-TO-EVEN on the EXACT value of the double**
+(normative, s500p #2510), as glibc's printf does: `26.72662353515625` (exact
+in binary) prints `26.7266235351562`.  A host formatter that rounds a tie
+half-away (SBCL's `~F`) prints `...563`.  PCL computes the digits as
+`round(M * 2^E * 10^K)` over integers (`%p-scaled-round`).
+
 **The residue a host without an IV/NV distinction keeps:** perl holds an
 integral *arithmetic* result as an IV and prints its digits, while the same
 value written as a float literal is an NV and goes through `%.15g` — `1e14*10`
@@ -1582,6 +1588,14 @@ which branch fired is **visible in the answer's spelling** (§3.2's `%.15g`):
   exact 11398895185373143; `3**40` (80) and `4**31` (93) are floats.
 * everything else — a negative exponent, a non-integer operand, an infinity,
   a NaN: C's `pow`.
+
+**"Integer" means SvIV_please, not the representation** (normative, s500p
+#2450): an operand that is a double whose value is an integer of magnitude
+below 2^53 counts as that integer for the branch choice above (sv_2iv sets IOK
+only below NV_PRESERVES_UV_BITS; at or past 2^53 it stays an NV).  So
+`1e3 ** 5`, `"1e3" ** 5` and `1000.0 ** 5` all print `1000000000000000`,
+`7.0 ** 19` is the exact 11398895185373143, `1e16 ** 1` stays `1e+16`, and
+`-0.0 ** 3` is the integer branch's `0`.
 
 `pow`'s edges are C's, and a host must not substitute its own: a **finite
 negative** base with a **finite non-integer** exponent is **NaN** (CL's `expt`
