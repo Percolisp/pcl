@@ -6153,7 +6153,10 @@
      (let ((n (length s)))
        (dotimes (i n nil)
          (when (>= (char-code (schar s i)) #x80) (return i)))))
-    (t (position-if (lambda (c) (>= (char-code c) #x80)) s))))
+    ;; a fill-pointer buffer or a displaced capture: scan its data vector
+    (t (sb-kernel:with-array-data ((v s) (start 0) (end (length s)))
+         (loop for i from start below end
+               when (>= (char-code (char v i)) #x80) return (- i start))))))
 
 (defun %p-case-bytes-p (s regime first-only)
   "Does this call map S by ASCII rules because S is undecoded UTF-8 BYTES?
