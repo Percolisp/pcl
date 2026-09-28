@@ -1,4 +1,8 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s494h (2026-09-28, Opus) -- ONE row spliced by hand: io/perlio_leaks.t 0/12 -> 12/0 UP, A/B `--jobs 1`
+#   against a 209e7533 `git archive` extraction over the 29 emission-changed files (scratch/s494h/comp-base.tbl vs
+#   comp-tree.tbl; every other file identical): #2006(b) closes the loop's `open my $fh` at each iteration's exit,
+#   so the next open reuses its descriptor and `is fileno($fh), $base_fd` holds (perl itself fails 4 as TODO).
 # s496a (2026-09-26, Opus) -- SEVEN rows spliced by hand, every mover A/B'd `--jobs 1` against a
 #   b6560c21 `git archive` extraction (scratch/s496a/comp-base.tsv vs comp-final.tsv); cause in each
 #   row's sig column: four UP (#2060 properties), three DOWN where #2372 turned a silent no-match into a
@@ -1690,7 +1694,7 @@ io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	46	2	OK	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 io/perlio_fail.t	15	0	11	4	DIFF	s471a: 6/9 -> 11/4, PRE-EXISTING and MEASURED, not this batch -- a `git archive ed302e13` extraction of main gives the SAME 11/4 with the same five fixed rows (serial re-run agrees on both trees), so the blessed row was stale, not moved.  The five rows left baselines/perl-suite-fails.tsv by EDIT in the same commit; the four `Got warning` rows still fail (PCL emits no warnings-gated diagnostic, #221).	0
-io/perlio_leaks.t	8	4	0	12	DIFF		0
+io/perlio_leaks.t	8	4	12	0	DIFF	s494h #2006(b) scope-exit close: the fd is reused	0
 io/perlio_open.t	10	0	10	0	OK		0
 io/pipe.t	27	0	22	11	DIFF	s494g: 19/13 -> 22/11 -- #2107 + #1029 (+1): the SIGPIPE row (`$SIG{PIPE} = 'broken_pipe'`, a string handler qualified to main:: and run on delivery); s495f (+2, not spliced at its merge): 'status unaffected by implicit close' + the renumbering it undoes -- A/B `--jobs 1`: 40da28bd 19/13, dc20a721 21/11, s494g 22/11 | s492c #2062: 20/12 -> 19/13 -- 'child reaped if piped program cannot be executed' was passing BY ACCIDENT.  The row's `wait` BLOCKS under PCL (a child of an earlier test is still unreaped where perl has none), its `local $SIG{ALRM} = sub { die }` fires at 2 s, and p-wait's blanket host-error guard SWALLOWED that die, so wait answered -1 and the row read as a pass.  The die now propagates, as perl's does, and $child stays 0.  Measured: with p-wait's old guard restored the file reads 20/12 again, twice.  The real gap -- a child PCL leaves unreaped -- is #2068 | s492b: 19/13 -> 20/12, #2006(a) -- the implicit close REAPS the child, so "child reaped if piped program cannot be executed" (`$child = wait` = -1) passes.  Measured --jobs 1 on a 5ce155cb extraction: 19/13 there, 20/12 here  |  s488a: 18/14 -> 19/13 at 5fe48176 (s473f member 2, #1307/#1246: close's FALSE is a defined "" and closedir's is undef) -- "close failure for... umm, something" passes; residue #1710	0
 io/print.t	24	0	23	1	DIFF		0

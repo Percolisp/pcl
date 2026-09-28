@@ -2002,14 +2002,6 @@ io/perlio_fail.t	5	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absen
 io/perlio_fail.t	8	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/perlio_fail.t	11	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/perlio_fail.t	14	ok	not ok	Got warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
-io/perlio_leaks.t	10	ok	not ok	:crlf	#1710
-io/perlio_leaks.t	11	ok	not ok	:crlf	#1710
-io/perlio_leaks.t	12	ok	not ok	:crlf	#1710
-io/perlio_leaks.t	7	ok	not ok	:perlio	#1710
-io/perlio_leaks.t	8	ok	not ok	:perlio	#1710
-io/perlio_leaks.t	9	ok	not ok	:perlio	#1710
-io/perlio_leaks.t	4	ok	not ok	:stdio	#1710
-io/perlio_leaks.t	1	ok	not ok	:unix	#1710
 io/pipe.t	0	(none)	extra [PCL #27]	*extra* but we did get the exception from die	#1710
 io/pipe.t	0	(none)	extra [PCL #25]	*extra* child reaped if piped program cannot be executed	#1710
 io/pipe.t	0	(none)	extra [PCL #22]	*extra* missing command in piped open input	#1710
