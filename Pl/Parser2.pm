@@ -1399,6 +1399,11 @@ sub parse {
     $_->delete for @words[1 .. $#words];
   }
 
+  # A named sub with a plain signature is the classic `my (PARAMS) = @_`
+  # spelling plus an arity check — normalise it INTO that spelling here, before
+  # every name-keyed and scope pass, so all of them see one shape (#2514).
+  $self->_normalize_signature_subs($doc);
+
   # `my sub NAME {…}` / `state sub NAME {…}` are LEXICALS, but every named sub
   # compiles to a PACKAGE sub — so two same-named lexical subs in different
   # scopes clobbered each other and every reference resolved to the LAST one,
@@ -1987,6 +1992,18 @@ sub parse {
                   @{ $child->find('PPI::Statement::Sub') || [] });
       for my $sub (@subs) {
         next unless $sub->name && !$sub->isa('PPI::Statement::Scheduled');
+        # A signature _normalize_signature_subs rewrote into the classic
+        # spelling (#2514): its CALL SITES keep the record the signature made
+        # (so no call parses differently), and its DEFINITION is now a plain
+        # sub's — declared, with sub_info, below.
+        my $sig_rec;
+        if (defined(my $orig = $self->{_sig_normalized}{ refaddr $sub })) {
+          my $fp = $self->fallback_parser;
+          $sig_rec = $fp->capture_v1(
+            sub { $fp->parse_prototype_or_signature($orig, $sub) })->{result};
+          $self->environment->add_prototype($sub->name, $sig_rec,
+                                            $self->_effective_pkg($sub, $seg->{pkg}));
+        }
         # A prototype/signature changes how CALL SITES parse (arity, imposed
         # context like `($)` → scalar, block-form `(&@)`).  Register it so the
         # fallback PExpr parses call sites correctly; the DEFINITION is lowered
@@ -2035,7 +2052,7 @@ sub parse {
         # :prototype-attribute proto (from_attr) is compile-time in perl —
         # never clobber it with the default.
         my $prev_proto = $self->environment->get_prototype($sub->name);
-        if (!($prev_proto && $prev_proto->{from_attr})) {
+        if (!$sig_rec && !($prev_proto && $prev_proto->{from_attr})) {
           $self->environment->add_prototype($sub->name,
                                             { params => [], min_params => -1, is_proto => 0 },
                                             $self->_effective_pkg($sub, $seg->{pkg}));
@@ -5850,6 +5867,98 @@ sub _normalize_null_statements {
 }
 
 # `tie my $y, ARGS;` → `my $y; tie $y, ARGS;` (see the parse() comment).
+# ── A PLAIN SIGNATURE IS THE CLASSIC SPELLING PLUS AN ARITY CHECK (task #2514) ──
+# perlsub: a signature's parameters are COPIES of the arguments, bound in
+# order, the slurpy one taking the rest — which is exactly
+# `my ($x, $y, @rest) = @_;`, with one addition: the arity check (too few /
+# too many / odd name-value count), which perl makes before binding.  v1 owns
+# every signature sub (_fallback_stmt), and its binding is all-BOXED — so a
+# signature sub got none of the raw verdicts (p-raw-params, raw p-let slots)
+# the classic spelling of the SAME sub gets: 0041-Air-mass, every sub a
+# signature, ran 1.50 s where the `my (...) = @_` spelling ran 1.08 s.
+#
+# So the definition is rewritten, IN THE TREE, into the classic spelling — the
+# signature node removed and `my (PARAMS) = @_;` made the block's first
+# statement — and the arity is recorded against the sub for _lower_sub_inner,
+# which adds the check (%_sig_arity).  Every later pass (rename, capture,
+# VarAnnotator, sub_info) then sees one shape.  The call-site prototype
+# record the signature produced is kept (_sig_normalized), so no CALL parses
+# differently.
+#
+# ONLY the shapes whose meaning IS that rewrite; anything else keeps v1's
+# lowering (today's path):
+#   - `sub NAME SIGNATURE BLOCK` exactly: no attribute, no `my`/`state` sub, a
+#     PPI::Structure::Signature (the #455 same-line Token::Prototype keeps v1);
+#   - every part a plain named parameter, distinct, at most one slurpy and
+#     only last; the empty `()` keeps v1 (its prototype record makes a call a
+#     zero-argument TERM, and `my () = @_` is not a spelling);
+#   - no DEFAULT, no placeholder (`$`, `$=`, `@`) — their binding is v1's;
+#   - one line (removing a multi-line signature would move every body line);
+#   - a body that never observes @_ (@_, $_[, shift, pop, goto, `&name;`, a
+#     string eval): inside a signature sub @_ still ALIASES the caller in perl
+#     where the classic spelling's @_ does too, and PCL's answer there stays
+#     v1's (review probe r501q-sig row 14);
+#   - no `state` (the state pre-pass has already exempted signature subs).
+sub _normalize_signature_subs {
+  my ($self, $doc) = @_;
+  return unless Pl::Passes::enabled('sig-classic');
+  for my $sub (@{ $doc->find('PPI::Statement::Sub') || [] }) {
+    my $plan = $self->_signature_normal_plan($sub) or next;
+    my ($sig, $block, $params, $arity) = @$plan;
+    my $frag = Pl::Parser::fragment_doc('my (' . join(', ', @$params) . ') = @_;')
+      or next;
+    my $decl = $frag->schild(0);
+    next unless $decl && $decl->isa('PPI::Statement::Variable');
+    $decl->remove;
+    my $first = $block->schild(0);
+    my $ok = $first ? $first->insert_before($decl) : $block->add_element($decl);
+    next unless $ok;
+    $self->{_sig_normalized}{ refaddr $sub } = $sig->content;
+    $sig->delete;
+    $self->{_sig_arity}{ refaddr $sub } = $arity;
+  }
+  return;
+}
+
+# The rewrite plan for one Statement::Sub: [SIGNATURE, BLOCK, [PARAMS],
+# [MIN MAX FLEX HASH-START]] (the p-check-arity arguments v1 computes), or
+# undef when the sub is not one of _normalize_signature_subs' shapes.
+sub _signature_normal_plan {
+  my ($self, $sub) = @_;
+  return undef if $sub->isa('PPI::Statement::Scheduled') || !$sub->name;
+  my @k = $sub->schildren;
+  return undef unless @k == 4
+    && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'sub'
+    && $k[1]->isa('PPI::Token::Word')
+    && _is_signature_node($k[2])
+    && $k[3]->isa('PPI::Structure::Block');
+  my ($sig, $block) = @k[2, 3];
+  my $text = $sig->content;
+  # PPI's Token::Prototype spelling is a SIGNATURE only under v1's own rule
+  # (Pl::Parser::_sub_head, #455): named parameters and an enabling pragma
+  # at or before the statement — otherwise it is an old-style prototype.
+  return undef if $sig->isa('PPI::Token::Prototype')
+    && !(Pl::Parser::proto_text_has_named_params($text)
+         && $self->fallback_parser->_signatures_enabled_at($sub));
+  return undef if $text =~ /\n/;
+  my @parts = _signature_parts($text);
+  my (@params, %dup, $slurpy);
+  for my $i (0 .. $#parts) {
+    return undef unless $parts[$i] =~ /^\s*([\$\@\%])(\w+)\s*$/;
+    my ($sigil, $name) = ($1, $2);
+    return undef if $dup{"$sigil$name"}++ || $slurpy;
+    $slurpy = $sigil if $sigil ne '$';
+    push @params, "$sigil$name";
+  }
+  return undef unless @params;
+  return undef if $block->content =~ /\bstate\b/;
+  return undef if _body_observes_args([$block->schildren]);
+  my $min = $slurpy ? @params - 1 : scalar @params;
+  return [$sig, $block, \@params,
+          [$min, ($slurpy ? 'nil' : $min), ($slurpy ? 't' : 'nil'),
+           (($slurpy // '') eq '%' ? $min : 'nil')]];
+}
+
 sub _normalize_tie_my {
   my ($self, $doc) = @_;
   my $changed = 0;
@@ -8622,13 +8731,15 @@ sub _lower_sub_inner {
       # take p-raw-params' no-allocation fast path.
       return $self->_sub_form($clname, $sub,
               ['p-raw-params', ['list', map { _param_entry($_, $vi) } @$params],
+                $self->_sig_arity_forms($sub, ':arity'),
                 ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi),
                   ($tail_param ? (cl_sym($tail_param)) : ())]]);
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;
     return $self->_sub_form($clname, $sub,
-            ['p-args-body', ['block', 'nil',
+            ['p-args-body', $self->_args_copy_mark(\@body_stmts),
+              $self->_sig_arity_forms($sub), ['block', 'nil',
               _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @$params],
                 Pl::CLForm::ctx_bind('nil',
                   ['p-list-=', ['vector', map { cl_sym($_) } @$params], '@_']),
@@ -8638,7 +8749,69 @@ sub _lower_sub_inner {
 
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
   return $self->_sub_form($clname, $sub,
-          ['p-args-body', ['block', 'nil', $self->_lower_body_regime(\@stmts, $vi)]]);
+          ['p-args-body',
+            (_is_args_copy_decl($stmts[0])
+              ? $self->_args_copy_mark([@stmts[1 .. $#stmts]]) : ()),
+            $self->_sig_arity_forms($sub),
+            ['block', 'nil', $self->_lower_body_regime(\@stmts, $vi)]]);
+}
+
+# THE `args-copy' LICENCE (task #2515 (i); Pl/Passes.pm).  `:copy' — the
+# p-args-body marker that builds @_ from the argument VALUES — or () when the
+# body REST (everything after the leading copy of @_) may observe @_: by name,
+# by element, by the ops that default to it (shift/pop), by passing it on
+# (goto &sub, `&name;'), or invisibly (a string eval).  A textual scan, and
+# deliberately an over-firing one: a miss here only keeps today's aliasing @_.
+# ONE predicate: the signature normalisation asks it too, because the classic
+# spelling it produces is only the signature's meaning when the body does not
+# observe @_ (see _normalize_signature_subs).
+sub _body_observes_args {
+  my ($stmts) = @_;
+  my $txt = join("\n", map { ref $_ ? $_->content : '' } @$stmts);
+  return 1 if $txt =~ /\@_|\$_\[|\bshift\b|\bpop\b|\bgoto\b|&\s*[\$\w:]+\s*[;}]/;
+  for my $s (@$stmts) {
+    next unless ref $s && $s->isa('PPI::Node');
+    for my $w (@{ $s->find(sub { $_[1]->isa('PPI::Token::Word')
+                                 && $_[1]->content eq 'eval' }) || [] }) {
+      my $nx = $w->snext_sibling;
+      return 1 unless $nx && $nx->isa('PPI::Structure::Block');
+    }
+  }
+  return 0;
+}
+
+sub _args_copy_mark {
+  my ($self, $rest) = @_;
+  return () unless Pl::Passes::enabled('args-copy');
+  return () if _body_observes_args($rest);
+  return (':copy');
+}
+
+# `my (LIST) = @_;` — a statement whose only use of @_ is to COPY it.
+sub _is_args_copy_decl {
+  my ($stmt) = @_;
+  return 0 unless $stmt && $stmt->isa('PPI::Statement::Variable');
+  my @k = _strip_semi($stmt->schildren);
+  return @k == 4
+    && $k[0]->content eq 'my'
+    && $k[1]->isa('PPI::Structure::List')
+    && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='
+    && $k[3]->isa('PPI::Token::Magic') && $k[3]->content eq '@_' ? 1 : 0;
+}
+
+# The ARITY CHECK of a signature _normalize_signature_subs rewrote (#2514) —
+# v1's own `(p-check-arity "PKG::NAME" (length @_) MIN MAX FLEX HASH-START)`,
+# the same message and the same point (before any binding) — or () for every
+# other sub.  Inside p-raw-params the check is its `(:arity …)` clause, which
+# the macro runs on the FLATTENED arguments before it binds them.
+sub _sig_arity_forms {
+  my ($self, $sub, $raw) = @_;
+  my $a = $self->{_sig_arity}{ refaddr $sub } or return ();
+  my $pkg = $self->environment->current_package // 'main';
+  my $bn  = $sub->name;
+  my $q   = $bn =~ /::/ ? $bn : "${pkg}::$bn";
+  return (['list', ':arity', "\"$q\"", @$a]) if $raw;
+  return (['p-check-arity', "\"$q\"", ['length', '@_'], @$a]);
 }
 
 # THE ONE SUB-DEFINITION PRINTER (task #1035, step 3).
