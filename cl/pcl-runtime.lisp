@@ -6235,18 +6235,64 @@
        (and hi (%p-bytes-look-utf8-p s hi))))
     (t (error "PCL: case-mapping regime ~S is not :u or nil" regime))))
 
+;;; ONE PASS, NOT FOUR (task #2535, s501q).  The bytes arm used to copy S
+;;; (REPLACE) and then map the copy -- after %p-first-high-char and the UTF-8
+;;; validation had each walked it: four passes for `lc' of an undecoded
+;;; UTF-8 line (bench lcbytes, -26 % at s494u).  The copy and the map are now
+;;; one loop over the source's own data vector, and a SHORT pure-ASCII string
+;;; skips the scan too (%p-case-map-short).  The RULE is untouched: every
+;;; char below #x80 maps by ASCII arithmetic -- the answer string-upcase /
+;;; string-downcase give for it, so a pure-ASCII string maps the same under
+;;; both regimes -- and the regime decision for a high char is made exactly
+;;; where it was.
+(declaim (inline %p-ascii-case-char))
+(defun %p-ascii-case-char (c up)
+  "C mapped by ASCII rules (UP: to upper); any other char is itself."
+  (declare (character c))
+  (if up
+      (if (char<= #\a c #\z) (code-char (- (char-code c) 32)) c)
+      (if (char<= #\A c #\Z) (code-char (+ (char-code c) 32)) c)))
+
 (defun %p-case-map-ascii (s up first-only)
   "S with ASCII letters case-mapped (UP: to upper), every other char --
-   chars 128-255 included -- left alone; FIRST-ONLY: the first char only."
-  (let* ((r (replace (make-string (length s)) s))
-         (end (if first-only (min 1 (length r)) (length r))))
-    (declare (type (simple-array character (*)) r) (fixnum end)
+   chars 128-255 included -- left alone; FIRST-ONLY: the first char only.
+   One pass: the result is written as the source is read."
+  (let* ((n (length s))
+         (r (make-string n))
+         (end (if first-only (min 1 n) n)))
+    (declare (type (simple-array character (*)) r) (fixnum n end)
              (optimize speed))
-    (dotimes (i end r)
-      (let ((c (schar r i)))
-        (if up
-            (when (char<= #\a c #\z) (setf (schar r i) (code-char (- (char-code c) 32))))
-            (when (char<= #\A c #\Z) (setf (schar r i) (code-char (+ (char-code c) 32)))))))))
+    (sb-kernel:with-array-data ((v s) (off 0) (lim n))
+      (declare (ignore lim) (fixnum off))
+      (if (typep v '(simple-array character (*)))
+          (dotimes (i n)
+            (let ((c (schar v (+ off i))))
+              (setf (schar r i) (if (< i end) (%p-ascii-case-char c up) c))))
+          (dotimes (i n)
+            (let ((c (char v (+ off i))))
+              (setf (schar r i) (if (< i end) (%p-ascii-case-char c up) c))))))
+    r))
+
+(defun %p-case-map-short (s up)
+  "A SHORT pure-ASCII S (a simple string of at most 16 chars) case-mapped in
+   ONE pass, or NIL the moment a char at or above #x80 is met -- the caller
+   then takes the regime path, which decides that char exactly as before.
+   string-upcase / string-downcase on such a string pay a scan of their own
+   plus the Unicode-table dispatch; this is the arithmetic alone (bench
+   ucshort, s501q)."
+  (declare (optimize speed))
+  (let* ((n (length s))
+         (r (make-string n)))
+    (declare (type (simple-array character (*)) r) (fixnum n))
+    (typecase s
+      ((simple-array character (*))
+       (dotimes (i n r)
+         (let ((c (schar s i)))
+           (when (>= (char-code c) #x80) (return nil))
+           (setf (schar r i) (%p-ascii-case-char c up)))))
+      (simple-base-string
+       (dotimes (i n r)
+         (setf (schar r i) (%p-ascii-case-char (schar s i) up)))))))
 
 (defun %p-case-map (str op regime)
   "lc/uc/fc/lcfirst/ucfirst (OP :lc :uc :fc :lcfirst :ucfirst) of STR under
@@ -6256,7 +6302,10 @@
   (let* ((s (to-string str))
          (first-only (or (eq op :lcfirst) (eq op :ucfirst)))
          (up (or (eq op :uc) (eq op :ucfirst))))
-    (cond ((%p-case-bytes-p s regime first-only) (%p-case-map-ascii s up first-only))
+    (cond ((and (not first-only) (<= (length s) 16)
+                (typep s '(or (simple-array character (*)) simple-base-string))
+                (%p-case-map-short s up)))
+          ((%p-case-bytes-p s regime first-only) (%p-case-map-ascii s up first-only))
           ((not first-only) (if up (string-upcase s) (string-downcase s)))
           ((zerop (length s)) s)
           (t (concatenate 'string

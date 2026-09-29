@@ -124,6 +124,7 @@ print $lfh <<'LISP';
          (string-downcase (prin1-to-string (funcall (compiler-macro-function 'p-map)
                                    '(p-map (lambda ($_) $_) (p-aslice @d 0 1)) nil))))
        t))
+(format t "short ~a~%" (and (fboundp '%p-case-map-short) (equal (%p-case-map-short "aBc1" t) "ABC1") (null (%p-case-map-short (coerce (list #\a (code-char 233)) 'string) t)) t))
 (format t "nottail ~a~%"
   (and (search "%p-aslice-copy"
          (string-downcase (prin1-to-string (funcall (compiler-macro-function 'p-map)
@@ -135,6 +136,7 @@ my $mech = `sbcl @sbcl_rt --load $lfile 2>&1`;
 like($mech, qr/^blk T$/mi,  '#2515 (ii): a map block whose value is a slice reads it with %p-aslice-copy');
 like($mech, qr/^item T$/mi, 'control: a slice among the map ITEMS still vivifies (#1010)');
 like($mech, qr/^nottail NIL$/mi, '#2515 (ii): a slice that is not the block value is left alone');
+like($mech, qr/^short T$/mi, '#2535: the short pure-ASCII one-pass map exists, maps, and declines at a high char');
 
 my $LD = <<'PERL';
 my ($s, $i) = ("", 0);
@@ -326,6 +328,36 @@ PERL
 19 1 2
 25 cxxy 2
 32 1 2 3
+EXPECTED
+
+# #2535: lc/uc in one pass — the answers of every shape the fast paths meet:
+# short and long ASCII, a buffer (`.=` slot) and a capture (displaced) as the
+# SOURCE, undecoded UTF-8 bytes (ASCII rules) vs decoded text, the empty
+# string, a high char only at the end, the first-only pair, fc, and the
+# interpolation escapes that lower to the same calls.  Rows 4 and 6 (decoded text at a /d site)
+# are the ruled divergence "The per-scalar UTF-8 flag" (not-supported.md): they
+# are checked only for PCL_OPT=none agreement, not against perl.
+answers(<<'PERL', <<'EXPECTED', '#2535 case map');
+no warnings; use feature "fc";
+my $buf = ""; $buf .= "MiXeD" for 1 .. 2; print "1 ", lc($buf), " ", uc($buf), "\n";
+"Hello World and more text here" =~ /(\w+ \w+)/; print "2 ", uc($1), " ", lc($1), "\n";
+my $bytes = "h\xc3\xa9llo W\xc3\xb6rld"; print "3 ", join(",", map { sprintf "%vd", $_ } lc($bytes), uc($bytes)), "\n";
+my $text = "h\x{e9}llo W\x{f6}rld"; print "4 ", join(",", map { sprintf "%vd", $_ } lc($text), uc($text)), "\n";
+print "5 [", lc(""), "][", uc(""), "][", ucfirst(""), "]\n";
+print "6 ", join(",", map { sprintf "%vd", $_ } uc("abc\x{e9}"), lc("ABC\x{c9}"), uc("ab\xc3\xa9")), "\n";
+print "7 ", ucfirst("abc"), " ", lcfirst("ABC"), " ", (ucfirst("zt\x{e9}") eq "Zt\x{e9}" ? "u" : "b"), "\n";
+print "8 ", fc("HeLLo"), " ", "\LABC\E \Uabc\E \labc \uxyz \FDEF", "\n";
+my $long = "The Quick Brown Fox Jumps Over The Lazy Dog 0123456789"; print "9 ", uc($long), "\n";
+print "10 ", join("", map { lc } qw(A b C)), uc("a1-b2_c3"), "\n";
+PERL
+1 mixedmixed MIXEDMIXED
+2 HELLO WORLD hello world
+3 104.195.169.108.108.111.32.119.195.182.114.108.100,72.195.169.76.76.79.32.87.195.182.82.76.68
+5 [][][]
+7 Abc aBC u
+8 hello abc ABC abc Xyz def
+9 THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789
+10 abcA1-B2_C3
 EXPECTED
 
 done_testing();
