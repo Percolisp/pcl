@@ -3948,10 +3948,17 @@ sub handle_subcalls {
       $self->add_child_to_node($top_id, $c_id);
     }
 
+    # A WORD AFTER `->` IS A METHOD NAME (#2083): `$x->length()` calls the
+    # METHOD with no arguments -- none of the builtin rewrites below (split's
+    # pattern, the `$_`/`@_` default, the named-unary comma collapse) may
+    # touch it.  Math::BigFloat's `$mant->length()` arrived with `$_` as an
+    # extra argument and BigInt::length carped "Rounding is not supported".
+    my $is_method_name = $self->_word_is_method_name($e, $i);
+
     # Special handling for split: ensure pattern and string are always provided
     # split()        -> split(" ", $_)
     # split(/pat/)   -> split(/pat/, $_)
-    if ($func_name eq 'split') {
+    if ($func_name eq 'split' && !$is_method_name) {
       my $arg_count = scalar(@$c_ids);
       if ($arg_count == 0) {
         # No args: add " " pattern and $_
@@ -3970,8 +3977,10 @@ sub handle_subcalls {
     }
 
     # Add implicit $_ if function defaults to it
-    $self->add_implicit_default_param($func_name, $top_id);
-    $self->collapse_extra_unary_params($func_name, $top_id);
+    if (!$is_method_name) {
+      $self->add_implicit_default_param($func_name, $top_id);
+      $self->collapse_extra_unary_params($func_name, $top_id);
+    }
 
     # So it is marked as finished.
     $e->[$i]    = $top_node;

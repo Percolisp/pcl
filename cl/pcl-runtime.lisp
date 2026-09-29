@@ -30213,7 +30213,7 @@ buffer's fill-pointer; everything else falls back to file-length."
              (return-from p-method-call
                (cond
                  ((string-equal meth-part "can")  (apply #'%p-can-answer resolved-obj args))
-                 ((string-equal meth-part "isa")  (apply #'p-isa  resolved-obj args))
+                 ((string-equal meth-part "isa")  (apply #'%p-isa-mro  resolved-obj args))
                  ((string-equal meth-part "DOES") (apply #'p-isa  resolved-obj args))
                  (t (when target-pkg
                       (let ((fn (find-symbol (%pcl-cl-sub-name meth-part)
@@ -30309,7 +30309,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (find-in-u "UNIVERSAL" nil)))
             ;; Not found in any class in MRO - check UNIVERSAL fallbacks, then AUTOLOAD
             (cond
-              ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
+              ((string-equal method-name "isa") (apply #'%p-isa-mro resolved-obj args))
               ((string-equal method-name "can") (apply #'%p-can-answer resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return
               ;; nothing — the empty list in list context, undef otherwise.
@@ -30383,7 +30383,7 @@ buffer's fill-pointer; everything else falls back to file-length."
               (find-in-class "UNIVERSAL" nil))
             ;; Not found anywhere in @ISA chain - check UNIVERSAL fallbacks, then AUTOLOAD
             (cond
-              ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
+              ((string-equal method-name "isa") (apply #'%p-isa-mro resolved-obj args))
               ((string-equal method-name "DOES") (apply #'p-isa resolved-obj args))
               ((string-equal method-name "can") (apply #'%p-can-answer resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return nothing
@@ -30495,7 +30495,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((fn (%pcl-find-method-in-chain "UNIVERSAL" sub-name)))
     (when fn (return-from %pcl-super-fallback (apply fn obj args))))
   (cond
-    ((string-equal method-name "isa")  (apply #'p-isa obj args))
+    ((string-equal method-name "isa")  (apply #'%p-isa-mro obj args))
     ((string-equal method-name "DOES") (apply #'p-isa obj args))
     ((string-equal method-name "can")  (apply #'%p-can-answer obj args))
     ((or (string-equal method-name "import") (string-equal method-name "unimport"))
@@ -30672,27 +30672,41 @@ buffer's fill-pointer; everything else falls back to file-length."
 
    Callers must therefore ask P-TRUE-P, never a bare CL `if`: \"\" is true to
    CL and false to perl."
-  (let* ((check-class (to-string class-name))
-         (obj-class (%pcl-invocant-class invocant)))
+  (let ((obj-class (%pcl-invocant-class invocant)))
     (unless obj-class
       (return-from p-isa ""))
-
     ;; If the object's class defines a custom isa() method (PL-ISA), call it.
-    ;; Perl's infix isa operator delegates to ->isa if the class overrides it.
-    (let* ((pkg (find-package (%pcl-invert-case obj-class)))
-           (custom-isa (when pkg (find-symbol "PL-ISA" pkg))))
-      (when (and custom-isa (eq (symbol-package custom-isa) pkg) (fboundp custom-isa))
-        (return-from p-isa (funcall custom-isa invocant check-class))))
+    ;; Perl's infix isa operator delegates to ->isa if the class overrides it
+    ;; (sv_isa_sv).  ONLY this entry delegates: the UNIVERSAL::isa function and
+    ;; the method-dispatch fallbacks answer through %p-isa-mro, because
+    ;; UNIVERSAL::isa IS the base implementation an override calls — delegating
+    ;; there recursed forever (Math::BigFloat's `sub isa { … UNIVERSAL::isa(@_)
+    ;; }`, #2083).
+    (let ((custom-isa (%p-isa-override obj-class)))
+      (if custom-isa
+          (funcall custom-isa invocant (to-string class-name))
+          (%p-isa-mro invocant class-name)))))
 
-    ;; A class is-a any class in its linearized @ISA ancestry (which includes
-    ;; itself and the implicit UNIVERSAL parent).  Uses the same @ISA walk as
-    ;; p-can / p-method-call — reflects runtime @ISA and never touches an
-    ;; unfinalized CLOS class.
-    (let ((want (%pcl-normalize-pkg check-class)))
-      (if (member want (%pcl-isa-ancestry obj-class)
-                  :test (lambda (a b) (string-equal a (%pcl-normalize-pkg b))))
-          1
-          ""))))
+(defun %p-isa-override (obj-class)
+  "The `isa` METHOD class OBJ-CLASS resolves to — its own or an inherited one —
+   or NIL when it has none and UNIVERSAL::isa answers.  The one lookup behind
+   the delegating spellings (infix isa, DOES), #2083."
+  (%pcl-find-method-in-chain obj-class "PL-ISA"))
+
+(defun %p-isa-mro (invocant class-name)
+  "UNIVERSAL::isa's own answer, 1 or \"\" (see p-isa): INVOCANT's class is-a
+   every class in its linearized @ISA ancestry (itself and the implicit
+   UNIVERSAL parent included).  Uses the same @ISA walk as p-can /
+   p-method-call — reflects runtime @ISA and never touches an unfinalized
+   CLOS class.  NEVER calls an overriding isa method (#2083)."
+  (let ((obj-class (%pcl-invocant-class invocant)))
+    (if (null obj-class)
+        ""
+        (let ((want (%pcl-normalize-pkg (to-string class-name))))
+          (if (member want (%pcl-isa-ancestry obj-class)
+                      :test (lambda (a b) (string-equal a (%pcl-normalize-pkg b))))
+              1
+              "")))))
 
 ;;; ============================================================
 ;;; Regex Support (using CL-PPCRE)
@@ -34512,12 +34526,20 @@ buffer's fill-pointer; everything else falls back to file-length."
     (cond
       ((and (stringp rt) (plusp (length rt)) (string= rt (to-string class)))
        (make-p-box 1))
-      ((and (stringp rt) (plusp (length rt))) (p-isa obj class))
+      ((and (stringp rt) (plusp (length rt))) (pcl::%p-isa-mro obj class))
       (t (let ((uv (unbox obj)))
            (if (and (stringp uv) (plusp (length uv)))
-               (p-isa obj class)
+               (pcl::%p-isa-mro obj class)
                nil))))))
-(defun pl-DOES (obj class  &rest args) (declare (ignore args)) (pl-isa obj class))
+;; DOES is `$obj->isa($role)` in perl (sv_does_sv calls the isa METHOD), so an
+;; overriding isa answers it; without one it is UNIVERSAL::isa (#2083).
+(defun pl-DOES (obj class &rest args)
+  (declare (ignore args))
+  (let* ((cls (pcl::%pcl-invocant-class obj))
+         (fn  (and cls (pcl::%p-isa-override cls))))
+    (if fn
+        (funcall fn obj (pcl::to-string class))
+        (pl-isa obj class))))
 
 ;;; UNIVERSAL::VERSION — the method every class inherits (tasks #1743/#1818).
 ;;; It was a stub that always answered undef and never performed the check, so

@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 17;
 
 sub write_pl {
     my ($code) = @_;
@@ -172,3 +172,17 @@ both_agree($BLK . 'print blk { 5 } 1, 2, "\n";',
 
 both_agree($BLK . 'print( (many { 5 }, 1, 2)[0]->n, "\n");',
            'inverse: a comma still ends the slurp');
+
+# s501b (task #2083): a METHOD whose name is a named-unary builtin, called
+# WITH parens.  `$x->length()` got the builtin's `$_` default as an argument
+# (and `$o->shift()` its @ARGV, `$o->length(1,2)` the comma collapse), so
+# Math::BigInt::length saw a stray argument and carped "Rounding is not
+# supported"; Math::BigFloat's bdiv printed it on every call.
+both_agree('package Foo; sub new { bless {}, shift }'
+         . ' sub length { print "length n=", scalar(@_), " last=", (ref $_[-1] ? "obj" : $_[-1]), "\n"; 3 }'
+         . ' sub lc { print "lc n=", scalar(@_), "\n" } sub shift { print "shift n=", scalar(@_), "\n" }'
+         . ' sub split { print "split n=", scalar(@_), "\n" }'
+         . ' package main; $_ = "dflt"; my $o = Foo->new;'
+         . ' $o->length(); $o->length; $o->lc(); $o->shift(); $o->split(); $o->length(1, 2); Foo->length();'
+         . ' print length(), " ", length("abcd"), "\n";',
+           '#2083: $o->length() / ->lc() / ->shift() / ->split() get no builtin default or collapse');

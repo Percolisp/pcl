@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 7;
 
 sub write_pl {
     my ($code) = @_;
@@ -228,4 +228,43 @@ PL
     is(run_cl($prog), run_perl($prog),
        '#1743/#1818: ->VERSION reads $VERSION, compares as a VERSION OBJECT '
      . 'and raises perl\'s own two diagnostics (perl oracle, 13 rows)');
+}
+
+# ── s501b (task #2083): UNIVERSAL::isa is the BASE implementation ──────────
+# An overriding `isa` method that calls UNIVERSAL::isa (Math::BigFloat's own
+# `sub isa { … UNIVERSAL::isa($self, $class) }`) recursed until the binding
+# stack ran out: the function spelling delegated back to the override.  Only
+# the infix `isa` operator and DOES delegate (sv_isa_sv / sv_does_sv); the
+# function, `->SUPER::isa` and `->UNIVERSAL::isa` answer from @ISA.  Both
+# programs are compared with the live perl answer.
+{
+    my $prog = <<'PL';
+package Base; sub new { bless {}, shift }
+package Foo; our @ISA = ('Base');
+my $n = 0;
+sub isa { my ($self, $class) = @_; return if $class =~ /^Nope/; die "loop" if ++$n > 50; UNIVERSAL::isa($self, $class) }
+package main;
+my $o = Foo->new;
+print "a ", (Foo->isa("Base") ? 1 : 0), "\n";
+print "b ", ($o->isa("Foo") ? 1 : 0), "\n";
+print "c ", (UNIVERSAL::isa($o, "Base") ? 1 : 0), "\n";
+print "d ", (UNIVERSAL::isa("Foo", "Base") ? 1 : 0), "\n";
+print "e ", (Foo->isa("Nope") ? 1 : 0), "\n";
+print "n=$n\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#2083: an isa override calling UNIVERSAL::isa does not recurse (perl oracle)');
+}
+{
+    my $prog = <<'PL';
+package Base; sub new { bless {}, shift }
+package Foo; our @ISA = ("Base"); my $n = 0;
+sub isa { my ($s, $c) = @_; die "loop" if ++$n > 50; return 0 if $c eq "Nope"; $s->SUPER::isa($c) }
+package main; use feature "isa"; no warnings;
+my $o = Foo->new;
+print(($o isa Base) ? 1 : 0, " ", ($o isa Nope) ? 1 : 0, " ", $o->DOES("Base") ? 1 : 0, " ",
+      $o->DOES("Nope") ? 1 : 0, " ", $o->UNIVERSAL::isa("Nope") ? 1 : 0, " n=$n\n");
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#2083: infix isa and DOES delegate to the override, ->SUPER::isa and ->UNIVERSAL::isa do not (perl oracle)');
 }
