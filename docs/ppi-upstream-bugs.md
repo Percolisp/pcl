@@ -2045,6 +2045,47 @@ population yet).  Upstream row: `docs/ppi-bug-report.t`.
 
 ---
 
+## 34. After a FLOAT / EXP / HEX / OCTAL / BINARY number, `-N` is lexed as a NEGATIVE NUMBER — the subtraction operator disappears  [CONFIRMED 1.291]
+
+The sibling of §15 (`)` then `-1`), from the other side: here the term that
+ends before the minus is itself a number.  PPI's plain-integer tokenizer
+consults the previous token before taking a sign; the Float / Exp / Hex /
+Octal / Binary tokenizers do not.
+
+**Minimal repro** (perl 5.40.3 prints `1 999 15`):
+
+    print 1.5-0.5, " ", 1e3-1, " ", 0x10-1, "\n";
+
+**PPI 1.291 token stream** (whitespace omitted) vs expected:
+
+    1.5-0.5   => Number::Float<1.5> Number::Float<-0.5>     expected Float<1.5> Operator<-> Float<0.5>
+    1.5 -0.5  => Number::Float<1.5> Number::Float<-0.5>     (a space BEFORE the minus: same)
+    1.5- 0.5  => Number::Float<1.5> Operator<-> Number::Float<0.5>   (a space AFTER it: right)
+    1e3-1     => Number::Exp<1e3> Number<-1>
+    0.5-1     => Number::Float<0.5> Number<-1>
+    3.-1      => Number::Float<3.> Number<-1>
+    0x10-1    => Number::Hex<0x10> Number<-1>
+    2-0.5     => Number<2> Operator<-> Number::Float<0.5>   (an INTEGER before: right)
+    1.5+0.5   => Number::Float<1.5> Operator<+> Number::Float<0.5>   (`+`: right)
+
+A second consequence is not a PPI bug but rides on the same token: `-1.5**2`
+arrives as `Number::Float<-1.5> ** 2`, exactly as `-2**2` arrives as
+`Number<-2> ** 2`, and perl's unary minus binds LOOSER than `**`.
+
+**PCL's workaround (s500a, task #2530):** `Pl::PExpr::_fix_ppi_negative_number_bug`
+— the §15 repair — tested `ref($token) eq 'PPI::Token::Number'` for both the
+negative literal and the term before it, so it repaired only the integer
+spellings.  It now asks one predicate, `_is_number_token` (any Number
+subclass), and splits the literal into `-` + the unsigned number of the SAME
+class.  Unblocked: every `FLOAT-N` / `EXP-N` / `HEX-N` statement was a whole
+statement DROP ("Bug. Fell through. Missing case: [Number::Exp<1e15>,
+Number::Float<-0.5>]"); `-1.5**2`, `-2.0**2`, `-1e1**2`, `-0x10**2` answered
+the SQUARE (+2.25 …) where perl answers its negation — a silent wrong.
+Guards: `Pl/t/minus-word-01.t` rows (the drop spellings), the arithmetic rows
+beside them; canary `Pl/t/misc-fixes-02.t`.  Upstream row: `docs/ppi-bug-report.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

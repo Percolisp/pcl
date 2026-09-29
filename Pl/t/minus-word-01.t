@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 24;
 
 sub write_pl {
     my ($code) = @_;
@@ -158,3 +158,22 @@ both_agree('my $x = "A"; print $x .5, "\n"; print "done\n";',
 
 both_agree('print STDOUT .5, "\n";',
            'negative: `print STDOUT .5` writes 0.5');
+
+# ---- #2530 (s500a, ppi-upstream-bugs.md §34): after a Float / Exp / Hex /
+# Octal / Binary number PPI lexes `-N` as a NEGATIVE NUMBER; the §15 repair
+# tested the plain Number class only, so these statements were DROPPED ---------
+
+both_agree('print 1e15-0.5, " ", 1e3-1, " ", 1.5-0.5, " ", 1.5 -0.5, " ", 1e-3-1e-4, "\n";',
+           '#2530 FLOAT-N / EXP-N: a subtraction, not a negative literal');
+
+both_agree('print 0.5-1, " ", 0x10-1, " ", 3.-1, " ", 1_000.5-1, " ", 017-1, " ", 0b11-1, "\n";',
+           '#2530 HEX-N / OCTAL-N / BINARY-N and the trailing-dot float');
+
+# ...and the SILENT WRONG riding on the same token: a negative literal of any
+# subclass before `**` is a unary minus on the power (perl -2.25 -4 -100).
+# The negatives: a key, a list element, a literal after an operator.
+both_agree('print join(" ", -2**2, -1.5**2, -2.0**2, -1e1**2, -0x10**2, -0b11**2, -017**2, -1.5 ** 2 + 1, "@{[ -1.5**2 ]}"), "\n";',
+           '#2530 -FLOAT**N is -(FLOAT**N) for every Number subclass');
+
+both_agree('my %h = ("-1.5" => "k"); my @a = (1.5, -0.5); print join(" ", $h{-1.5}, "@a", 2 ** -1.5 < 1 ? "y" : "n", -2**-1, 4 * -2 ** 2), "\n";',
+           '#2530 negatives: $h{-1.5} is a key, (1.5, -0.5) two elements, 2 ** -1.5 a power');

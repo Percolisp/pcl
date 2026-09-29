@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 83;
+use Test::More tests => 85;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -980,4 +980,16 @@ for my $c (
     my ($tok) = grep { $_->content eq '*' } $doc->tokens;
     is( ref($tok), 'PPI::Token::Cast',
         '`*` after a block ending in `$h{$_};` is a Token::Cast' );
+}
+
+# §34 -- after a Float / Exp / Hex number, `-N` is taken as a negative NUMBER
+# although the previous token ends a term (the integer tokenizer gets it right:
+# `2-0.5` has its Operator).  perl: `1.5-0.5` is 1, `1e3-1` is 999.
+{
+    for my $src ('1.5-0.5;', '1e3-1;') {
+        my $doc = PPI::Document->new(\$src);
+        my @ops = grep { $_->isa('PPI::Token::Operator') && $_->content eq '-' }
+                  $doc->tokens;
+        is( scalar @ops, 1, "`$src` has a subtraction Operator token" );
+    }
 }

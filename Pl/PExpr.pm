@@ -6567,6 +6567,14 @@ sub _fix_ppi_logical_xor_bug {
   return @result;
 }
 
+# A PPI number token of ANY subclass (Number, ::Float, ::Exp, ::Hex, ::Octal,
+# ::Binary, ::Version) — the one predicate the negative-number split asks,
+# for the token itself and for the term it follows.
+sub _is_number_token {
+  my ($t) = @_;
+  return ref($t) =~ /\APPI::Token::Number(?:::\w+)?\z/ ? 1 : 0;
+}
+
 sub _fix_ppi_negative_number_bug {
   my $self   = shift;
   my $tokens = shift;
@@ -6575,8 +6583,14 @@ sub _fix_ppi_negative_number_bug {
   for (my $i = 0; $i < @$tokens; $i++) {
     my $token = $tokens->[$i];
 
-    # Check if this is a negative number
-    if (ref($token) eq 'PPI::Token::Number' && $token->content =~ /^-(.+)$/) {
+    # Check if this is a negative number -- of ANY Number subclass (#2530,
+    # s500a): PPI's Float / Exp / Hex / Octal / Binary tokenizers take a
+    # following `-N` as a negative literal WITHOUT looking at the previous
+    # token (`1.5-0.5` => Float<1.5> Float<-0.5>; docs/ppi-upstream-bugs.md
+    # §34), and `-1.5**2` arrives as Float<-1.5> ** 2.  An exact-class test
+    # here repaired only the plain-integer spelling: the Float/Exp ones
+    # DROPPED the statement, and `-1.5**2` answered +2.25 (perl -2.25).
+    if (_is_number_token($token) && $token->content =~ /^-(.+)$/) {
       my $positive_part = $1;
 
       # ** has higher precedence than unary minus in Perl.
@@ -6603,7 +6617,7 @@ sub _fix_ppi_negative_number_bug {
           $prev_ref eq 'PPI::Token::Symbol'          ||  # $foo
           ($prev_ref eq 'PPI::Token::Word'
            && !$prev_is_named_unary)                 ||  # bareword/const (not named unary)
-          $prev_ref eq 'PPI::Token::Number'          ||  # number
+          _is_number_token($prev)                   ||  # number, any subclass
           $prev_ref eq 'PPI::Token::Quote::Double'   ||  # "string"
           $prev_ref eq 'PPI::Token::Quote::Single'   ||  # 'string'
           $prev_ref =~ /^PPI::Token::Quote/               # other quotes
@@ -6613,7 +6627,7 @@ sub _fix_ppi_negative_number_bug {
       if ($is_expr_end || $next_is_pow) {
         # Split into minus operator and positive number
         my $minus_op = bless { content => '-' }, 'PPI::Token::Operator';
-        my $pos_num  = bless { content => $positive_part }, 'PPI::Token::Number';
+        my $pos_num  = bless { content => $positive_part }, ref($token);
         push @result, $minus_op, $pos_num;
         next;
       }

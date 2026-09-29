@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 137;
+plan tests => 138;
 
 sub run_cl {
     my ($code) = @_;
@@ -982,6 +982,12 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
     ok( $doc && grep { $_->isa('PPI::Token::Number') && $_->content eq '-1' } $doc->tokens,
         'CANARY: PPI still swallows `)-1` into a negative Number — if this '
       . 'FAILS, drop _fix_ppi_negative_number_bug (ppi-upstream-bugs.md §15)' );
+}
+{
+    my $doc = PPI::Document->new(\'my $x = 1.5-0.5;');
+    ok( $doc && grep { $_->isa('PPI::Token::Number::Float') && $_->content eq '-0.5' } $doc->tokens,
+        'CANARY: PPI still swallows `FLOAT-N` into a negative Number — if this '
+      . 'FAILS, _fix_ppi_negative_number_bug\'s Number-subclass half may go (ppi-upstream-bugs.md §34)' );
 }
 {
     my $doc = PPI::Document->new(\'print $fh -e $f;');
