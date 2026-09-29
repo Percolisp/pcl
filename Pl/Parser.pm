@@ -239,7 +239,7 @@ sub _maybe_decode_utf8 {
   # question — is every character a byte value? — and yields the octet string
   # when it is; a genuinely decoded source (any character above 255) fails it
   # and is left alone, as before.
-  return $src unless defined $src && _source_says_use_utf8($src);
+  return $src if !(defined $src && _source_says_use_utf8($src));
   my $copy = $src;
   return $src unless utf8::downgrade($copy, 1);
   utf8::decode($copy) and return $copy;     # leaves $src on invalid bytes
