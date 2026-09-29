@@ -4610,6 +4610,49 @@ sub _rename_captured_file_lexicals {
       $promote->($decl, $csym, $bare);
     }
   }
+  # EXPRESSION-EMBEDDED declarations (#2534): `open(my $h, …)`,
+  # `foo(my $v)`, `read($fh, my $buf, N)` — a `my` inside a PLAIN statement's
+  # arguments, which _scan_lex_facts never offers as a top-level decl (its
+  # Statement::Variable, when PPI builds one at all, sits inside the call's
+  # List).  Unpromoted, such a decl captured by a named sub fell to
+  # _lower_block's embedded-`my` VETO — one forward-defvar'd global for the
+  # NAME — so every same-name `open(my $h …)` in another block re-opened the
+  # sub's handle (perl `1 5 5`, PCL `1 0 5`).  Promoted here, it takes the
+  # route a statement-level captured `my` takes: renamed `$h__file__N`, the
+  # sub reads the cell, and the siblings (no longer vetoed, the sub no longer
+  # names `$h`) get their own `p-let`.  The candidates are the ONE embedded-
+  # decl reading the lowering uses (_embedded_my_syms), so the promoter and
+  # the veto cannot disagree about what a declaration is.  Runs after the
+  # statement-level loops, so their __file__N numbering is unchanged.
+  for my $cand ($self->_embedded_decl_candidates($stmts)) {
+    my ($top, $sym) = @$cand;
+    my $canon = $sym->content;
+    (my $bare = $canon) =~ s/^[\$\@\%]//;
+    next if $self->{_file_lex_renamed}{$canon};
+    $self->_promote_captured($stmts, \@subs, $top, $canon, $bare, 0, $sym);
+  }
+}
+
+# (#2534) Every PLAIN statement at the top level of its lexical extent — the
+# segment, or any Block under it — paired with each declarator symbol of an
+# expression-embedded `my` it carries, in document order.  "Plain" is the
+# lowering's own test (_lower_block's embedded-`my` arm: a bare
+# PPI::Statement or ::Expression), and the symbols are _embedded_my_syms's.
+sub _embedded_decl_candidates {
+  my ($self, $stmts) = @_;
+  my @tops;
+  for my $st (@$stmts) {
+    next unless ref $st && $st->isa('PPI::Statement');
+    push @tops, $st, @{ $st->find(sub {
+      $_[1]->isa('PPI::Statement') && $_[1]->parent
+        && $_[1]->parent->isa('PPI::Structure::Block') }) || [] };
+  }
+  my @out;
+  for my $top (@tops) {
+    next unless ref($top) eq 'PPI::Statement' || ref($top) eq 'PPI::Statement::Expression';
+    push @out, map { [$top, $_] } $self->_embedded_my_syms($top);
+  }
+  return @out;
 }
 
 # The segment-top-level my/state declarations whose post-decl runtime
@@ -4699,7 +4742,12 @@ sub _caprefuse {
 # the rewrite skips its scope (_symbol_is_declarator + _ref_shadowed).  No-op
 # when the guards fail (→ the file keeps its capture gate → v1).
 sub _promote_captured {
-  my ($self, $stmts, $subs, $decl, $canon, $bare, $force) = @_;
+  # $emb_sym (#2534): $decl is a PLAIN statement carrying an expression-
+  # embedded `my`, and this is its declarator symbol (see
+  # _embedded_decl_candidates).  Such a promotion never takes the identity
+  # branch or the string-eval waivers: both leave the name as it is, which
+  # for an embedded decl is exactly the veto path's shared cell today.
+  my ($self, $stmts, $subs, $decl, $canon, $bare, $force, $emb_sym) = @_;
   my $sig    = substr($canon, 0, 1);
   my $extent = _enclosing_block($decl);                     # block, or undef = segment
   my $estmts = $extent ? [ grep { $_->isa('PPI::Statement') } $extent->schildren ]
@@ -4735,6 +4783,9 @@ sub _promote_captured {
   # takes the `$name__file__N` mangle below, eval guard included.
   if (!$extent && ($self->{_file_decl_count}{$bare} // 0) == 1
       && !$self->{_file_pkg_global}{$canon}) {
+    # An embedded decl here is already right on the veto path (one cell under
+    # the original name, which is what identity means) — keep its emission.
+    return if $emb_sym && _caprefuse($canon, 'embedded decl: identity = veto path');
     $self->{_file_lex_renamed}{$canon} = 1;
     $self->_reg_captures($canon, \@cap_subs);
     return 1;
@@ -4827,7 +4878,12 @@ sub _promote_captured {
         && _caprefuse($canon, 'string eval names the lexical');
     }
   }
-  my ($dsym) = grep { $_->content eq $canon }
+  # The eval waivers above rest on the decl LOWERING to its defvar (M-F), and
+  # an embedded decl lowers inside its statement instead — refuse (#2534).
+  return if $emb_sym && ($post_eval || $site_pair)
+    && _caprefuse($canon, 'embedded decl with a later string eval');
+  my ($dsym) = $emb_sym ? ($emb_sym)
+             : grep { $_->content eq $canon }
                @{ $decl->find('PPI::Token::Symbol') || [] };
   return if !$dsym && _caprefuse($canon, 'decl symbol not found');
   my $newbare = $bare . '__file__' . $self->{_file_lex_counter}++;
@@ -4843,9 +4899,13 @@ sub _promote_captured {
   # variable), then every post-declaration use, skipping shadow scopes.
   _reg_rename($canon, $sig . $newbare, ':captured');
   $self->_reg_captures($sig . $newbare, \@cap_subs);
-  $self->_rename_decl_within($decl, $dsym, $sig . $newbare);
+  # An embedded decl's whole STATEMENT is evaluated before the name exists
+  # (perl introduces a `my` after the statement), so only its declarator is
+  # renamed there — the override names that region.
+  $self->_rename_decl_within($decl, $dsym, $sig . $newbare, $emb_sym ? $decl : undef);
   $self->_rewrite_var_uses(\@post, $canon, $newbare, $extent, $skip);
   $self->{_file_lex_renamed}{ $sig . $newbare } = 1;             # drives the defvar lowering
+  $self->{_emb_promoted}{ $sig . $newbare } = 1 if $emb_sym;     # its cell: _lower_block's embedded arm
   # M-F backstop: the eval refusals above were waived on the promise that
   # _reg_eval_capture runs when this decl lowers to its defvar.  If the decl
   # instead lowers inside a v1-seam expression (do-block, anon-sub body, …)
@@ -9880,6 +9940,12 @@ sub _lower_block_1 {
   # would strand the sub's reference (the statement's own enclosing sub does
   # not veto — its body IS the let's scope).
   if (ref($first) eq 'PPI::Statement' || ref($first) eq 'PPI::Statement::Expression') {
+    # A PROMOTED embedded decl (#2534, _promote_captured's $emb_sym) binds no
+    # `let`: it publishes its package cell exactly as the promoted
+    # Statement::Variable branches do, and the statement then writes the cell.
+    for my $n (grep { delete $self->{_emb_promoted}{$_} } $self->_embedded_my_names($first)) {
+      push @{ $self->{_captured_decls} }, _decl_cell($n, _fresh_container($n));
+    }
     my @emb = grep { !$self->{_file_lex_renamed}{$_}
                   && !$self->{_let_bound_vars}{$_} }
               $self->_embedded_my_names($first);

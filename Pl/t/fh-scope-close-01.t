@@ -166,6 +166,70 @@ for my $why (sort keys %ESCAPE) {
     unlike(shape($ESCAPE{$why}), qr/p-scope-close/, "shape: escape ($why) is NOT scope-closed");
 }
 
+# --- 2b. #2534 (s501b): a named sub capturing an EMBEDDED `open(my $h …)` ----
+# The captured declaration is renamed `$h__file__N` like a statement-level
+# captured `my`; every same-name `open(my $h …)` in another block is its own
+# variable with its own `p-let` (and so its own scope close).  Before, one
+# forward-defvar'd `$h` served every block: the second block re-opened the
+# sub's handle and the sub's output was lost (perl `1 5 5`, PCL `1 0 5`).
+# The family is "an embedded `my` in a plain statement": opendir, pipe (two
+# decls), read's buffer, chomp(my $l = …), a user sub's argument, sysopen.
+my $PROG2534 = <<'PERL';
+use strict; use warnings;
+my $f = "@DIR@/c.txt";
+{ open(my $h, ">", "$f.n") or die; sub usesh { print $h "named" } sub closeh { close $h } }
+{ open(my $h, ">", $f) or die; print $h "other"; close $h; }
+usesh(); closeh();
+print "c1 sibling-block: ", -s "$f.n", " ", -s $f, "\n";
+{ open(my $h, ">", "$f.v") or die; sub usesv { print $h "named" } usesv(); }
+for my $i (1..2) { open(my $h, ">", $f) or die; print $h "loop$i"; }
+print "c2 loop sibling: ", -s $f, "\n";
+if (1) { open(my $h, ">", $f) or die; print $h "if"; }
+print "c3 if sibling: ", -s $f, "\n";
+{ opendir(my $d, "@DIR@") or die; sub dget { scalar grep { /^c\.txt\.n$/ } readdir($d) } }
+{ opendir(my $d, "/") or die; closedir $d; }
+print "c4 opendir: ", dget(), "\n";
+{ pipe(my $r, my $w) or die; sub pw { print $w "p\n"; close $w; scalar <$r> } }
+{ pipe(my $r, my $w) or die; close $r; close $w; }
+print "c5 pipe: ", pw();
+{ chomp(my $l = "line\n"); sub gl { $l } }
+{ chomp(my $l = "other\n"); print "c6 chomp sibling: $l\n"; }
+print "c7 chomp captured: ", gl(), "\n";
+{ foo(my $v); sub gv { $v } }
+{ foo(my $v); $v .= "!"; print "c8 user-sub sibling: $v\n"; }
+print "c9 user-sub captured: ", gv(), "\n";
+sub foo { $_[0] = "set" }
+unlink $f, "$f.n", "$f.v";
+PERL
+$PROG2534 =~ s/\@DIR\@/$dir/g;
+{
+    my @w = split /\n/, scalar `$^X @{[write_tmp($PROG2534, '.pl')]} 2>&1`;
+    my @g = split /\n/, run_pcl($PROG2534);
+    for my $i (0 .. $#w) {
+        my ($tag) = $w[$i] =~ /^(\S+)/;
+        is($g[$i], $w[$i], "#2534 semantic $tag = perl");
+    }
+    is(scalar(@g), scalar(@w), '#2534 semantic: same number of lines as perl');
+}
+# The handle licence and the emission agree: every `F-DEBUG … CLOSED` verdict
+# is an emitted `(p-scope-close`, and the captured one is NOT closed.
+{
+    local $ENV{PCL_B_DEBUG} = 1;
+    my $pl = write_tmp($PROG2534, '.pl');
+    my ($efh, $err) = tempfile(SUFFIX => '.err', UNLINK => 1);
+    close $efh;
+    my $cl = `$pl2cl $pl 2>$err`;
+    open my $eh, '<', $err or die;
+    my $closed = grep { /F-DEBUG.*CLOSED/ } <$eh>;
+    my $emitted = () = $cl =~ /\(p-scope-close\b/g;
+    is($emitted, $closed, "#2534: licence verdicts ($closed CLOSED) = emitted p-scope-close forms");
+    like($cl, qr/\(p-defcell \$h__file__0\b/, '#2534: the captured embedded decl is a renamed cell');
+}
+# The breaking case: a FILE-level `open(my $h …)` captured by a named sub with
+# NO same-name sibling keeps its emission (one cell under the original name).
+unlike(shape('open(my $h, ">", "/dev/null") or die; sub w { print $h "x" } w();'),
+       qr/__file__/, '#2534 inverse: a lone file-level captured embedded decl is not renamed');
+
 # --- 3. the flag -----------------------------------------------------------
 like(shape($LICENSED, PCL_OPT => 'none'), qr/\(p-scope-close \(\$fh\)/,
      'PCL_OPT=none keeps fh-scope-close (it is semantics, not an optimisation)');
