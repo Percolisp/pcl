@@ -10297,8 +10297,6 @@ re/subst.t	234	ok	(missing)	locking target in $hash{key} =~ s//.../e	#1664 (perl
 re/subst.t	235	ok	(missing)	err msg: Modification of a read-only value attempted at t/re/subst.t line 993.	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
 re/subst.t	236	ok	not ok [PCL #229]	vivifying stash elem in $that::{elem} =~ s//.../e	#1719
 re/subst.t	237	ok	not ok [PCL #230]	read-only COW =~ s/does not match// should croak	#1719
-re/subst.t	239	ok	not ok [PCL #232]	\b matches Latin1 before string, mid, and end, /a	#1719
-re/subst.t	240	ok	not ok [PCL NS:caller() fidelity [DEFERRED, USER s488] + #233]	\b matches above-Latin1 before string, mid, and end, /a	#1719
 re/subst.t	245	ok	not ok [PCL #238]	\b matches Latin1 before string, mid, and end, /d	#1719
 re/subst.t	270	ok	not ok [PCL #263]	\#RT 126260 gofs	#1719
 re/subst.t	272	ok	not ok [PCL #265]	RT \#23624	#1719
