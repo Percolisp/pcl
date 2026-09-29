@@ -1046,7 +1046,19 @@
         (error "p-raw-params: unknown declaration class ~S for ~S -- the set is closed: ~S"
                class name *p-let-classes*))
       (%p-check-facts "p-raw-params" name facts *p-let-fact-keys*)
-      name)))
+      name))
+
+  (defun %p-param-init (p value-form)
+    "The initform binding the p-raw-params entry P to VALUE-FORM.  Every class
+     binds the value as it stands EXCEPT :str-buffer, whose slot the body
+     appends to in place (%pcl-str-append) and which therefore must start as
+     a fresh buffer -- the declaration's own store discipline (_wrap_freeze).
+     A param with that verdict used to be bound to the raw argument and died
+     at its first `.=' (task #2571, s501q: `sub f { my ($x, $y) = @_; $x .=
+     \"!\"; \"$x$y\" }' -- 'is not an array with a fill pointer')."
+    (if (eq (second p) :str-buffer)
+        `(%pcl-str-buffer ,value-form)
+        value-form)))
 
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
@@ -1142,9 +1154,17 @@
    BODY.  Both @_ and %_args are symbols exported from :pcl and inherited into
    every generated user package, so `(p-sub NAME (&rest %_args) (p-args-body …))`
    binds and reads the SAME symbols here regardless of *package* — no
-   expansion-time package resolution needed."
-  `(let ((@_ (p-flatten-args %_args)))
-     ,@body))
+   expansion-time package resolution needed.
+   A leading :copy is the compiler's `args-copy' licence (task #2515 (i),
+   ir-spec §5.1): the body reads @_ only by COPYING it (`my (LIST) = @_;' and a
+   signature's arity check) and never observes it otherwise, so @_ is built from
+   the argument VALUES (%p-flatten-arg-values) and the caller's raw element
+   slots are not promoted to cells nobody can reach."
+  (if (eq (first body) :copy)
+      `(let ((@_ (%p-flatten-arg-values %_args)))
+         ,@(rest body))
+      `(let ((@_ (p-flatten-args %_args)))
+         ,@body)))
 
 (defun %p-args-need-flatten (args)
   "True when the raw &rest ARGS list holds an aggregate that Perl's argument
@@ -1165,13 +1185,22 @@
    Unlike a plain &optional lambda list this HONOURS the uniform calling
    convention — callers pass containers raw and the CALLEE spreads aggregates
    (f(@args) / f(@_) delegation; task #80 broke Moo through exactly that) —
-   while the common all-scalar call takes a no-allocation type-scan fast path."
-  `(let ((%_args (if (%p-args-need-flatten %_args)
-                     (coerce (p-flatten-args %_args) 'list)
-                     %_args)))
-     (let* ,(loop for p in params
-                  collect `(,(%p-param-name p) (if %_args (pop %_args) (p-undef))))
-       ,@body)))
+   while the common all-scalar call takes a no-allocation type-scan fast path.
+   An optional leading clause (:arity \"PKG::NAME\" MIN MAX FLEX HASH-START) is
+   a SIGNATURE's arity check (task #2514, ir-spec §5.1): p-check-arity on the
+   FLATTENED argument count, before any parameter is bound -- exactly where
+   v1's signature binding makes it."
+  (let ((arity (and (consp (first body)) (eq (first (first body)) :arity)
+                    (rest (pop body)))))
+    `(let ((%_args (if (%p-args-need-flatten %_args)
+                       (coerce (%p-flatten-arg-values %_args) 'list)
+                       %_args)))
+       ,@(when arity
+           `((p-check-arity ,(first arity) (length %_args) ,@(rest arity))))
+       (let* ,(loop for p in params
+                    collect `(,(%p-param-name p)
+                               ,(%p-param-init p '(if %_args (%p-param-copy (pop %_args)) (p-undef)))))
+         ,@body))))
 
 ;;; p-declare-sub: Forward-declare a Perl sub as a no-op stub.
 ;;; Perl subs can be called before definition; CL resolves names at load time.
@@ -7946,6 +7975,54 @@ per element."
              v
              (setf (gethash k h) (make-p-box v))))))
 
+;;; A p-raw-params PARAMETER IS A COPY (task #2570, s501q).  `my ($x) = @_`
+;;; copies: a later write to the caller's variable must not show through $x.
+;;; The raw path bound the argument AS IT CAME -- and a variable argument comes
+;;; as the caller's own BOX (@_ aliases), so `sub f { my ($x) = @_; $g = 8; $x }
+;;; f($g)' answered 8 where perl answers the value $g had at the call (probed
+;;; 5.40.3; the same through `f(@a)' and `my $x = shift').  The copy is the
+;;; construction arm's (%p-storable-raw: a plain number or string lives raw),
+;;; else p-copy-scalar-arg's fresh box -- the signature binding's own copy.  A
+;;; raw argument (a literal, a computed value) is already a value.
+(declaim (inline %p-param-copy))
+(defun %p-param-copy (v)
+  "The value a copying parameter binds for the argument V."
+  (if (p-box-p v)
+      (or (%p-storable-raw v) (p-copy-scalar-arg v))
+      v))
+
+;;; ...and so the ARGUMENT LIST need not alias either (task #2515 (i)).  The
+;;; general @_ builder, p-flatten-args, hands a callee the caller's element
+;;; CELLS so `$_[0] = …' writes through -- promoting every raw slot of an
+;;; array passed whole to a box, in place and for good.  A p-raw-params body
+;;; provably never observes @_ (the compiler's licence for the form) and binds
+;;; every parameter through the copy above, so the cells are dead the moment
+;;; they are made: read the VALUES instead, with no promotion.  Same list, same
+;;; order, same hole and hash-pair answers as p-flatten-args (a hole reads
+;;; undef, a hash spreads key/value pairs, a blessed hash is one argument, a
+;;; %ENV/%INC marker spreads its pairs).
+(defun %p-flatten-arg-values (args)
+  "The flattened argument vector of ARGS as VALUES: p-flatten-args without the
+   element-cell promotion, for a callee that only copies it (p-raw-params, and
+   `(p-args-body :copy …)').  Each element is the caller's slot content as it
+   stands -- a raw value or the slot's existing box -- and the callee's copy
+   (%p-param-copy / the list assignment's construction arm) makes it a value."
+  (let ((result (make-array (length args) :adjustable t :fill-pointer 0)))
+    (dolist (arg args result)
+      (cond
+        ((and (vectorp arg) (not (stringp arg)))
+         (loop for e across arg
+               do (vector-push-extend (if (null e) (p-undef) e) result)))
+        ((and (hash-table-p arg) (not (gethash :__class__ arg)))
+         (maphash (lambda (k v)
+                    (vector-push-extend k result)
+                    (vector-push-extend v result))
+                  arg))
+        ((%p-hash-marker-p arg)
+         (loop for x across (%p-marker-pairs arg)
+               do (vector-push-extend x result)))
+        (t (vector-push-extend arg result))))))
+
 (defun %p-array-store-scalar (arr item)
   "Store a scalar ITEM into ARR, preserving blessed objects and references.
    THE ARRAY CONSTRUCTION ARM of the write rule: push / unshift / splice /
@@ -8502,7 +8579,37 @@ per element."
                             (cond (v (setf any t) v)
                                   (t i))))
                         items))
-      (and any new))))
+      (and any new)))
+
+  ;; A SLICE THAT IS A MAP BLOCK'S VALUE IS READ AS VALUES (task #2515 (ii),
+  ;; s501q).  p-map COPIES every value its block returns (%p-map-copy-scalar,
+  ;; perl's pp_mapwhile copy -- probed 5.40.3: `$_++ for map { @a[0,1] } 1`
+  ;; leaves @a alone, and `map { @b[0,5] } 1` does not grow @b), so the
+  ;; slice's ALIASES are thrown away one call later -- but building them
+  ;; promoted every slot they named to a box, which is MONOTONE and made the
+  ;; container pay box indirection forever (1009-Perfect-shuffle: p-aslice
+  ;; 26 % of the program).  That is #1205's rule with p-map as the copying
+  ;; consumer: the block's TAIL form, when it IS an rvalue slice, takes the
+  ;; copying read %p-copying-slice-form names.  Only the tail: a slice
+  ;; anywhere else in the block is not the block's value.  The descent
+  ;; through the block is a CLOSED set of heads whose value is their last
+  ;; form; any other head keeps today's read (a miss is the status quo).
+  (defun %p-copying-tail-form (form)
+    "FORM with its value-position rvalue slice rewritten to the copying read,
+     or NIL when its value is not (syntactically) a slice."
+    (or (%p-copying-slice-form form)
+        (and (consp form)
+             (member (car form) '(progn let let* block))
+             (consp (last form))
+             (let ((tail (%p-copying-tail-form (car (last form)))))
+               (and tail (append (butlast form) (list tail)))))))
+
+  (defun %p-map-copying-block (fn)
+    "The map block FN -- a literal `(lambda (ARG) BODY…)' -- with its value
+     slice read by the copying read, or NIL when FN is anything else."
+    (and (consp fn) (eq (car fn) 'lambda) (consp (cddr fn))
+         (let ((tail (%p-copying-tail-form (car (last fn)))))
+           (and tail (append (butlast fn) (list tail)))))))
 
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
@@ -12613,23 +12720,34 @@ create the key on a read-only call, which perl does not."
    Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
   `(> (length ,args) ,index))
 
+;;; A signature's slurpy parameter is a COPY (task #2536, s501q).  perlsub: "the
+;;; remaining arguments are copied into the array", exactly as `my (@r) = @_`
+;;; copies -- and ARGS here is @_, whose elements ALIAS the caller's.  Pushing
+;;; those boxes into the new array let `sub f ($x, @r) { $r[0] = 1 } f(@a)`
+;;; write $a[1].  Each element therefore takes the CONSTRUCTION ARM of the
+;;; write rule the list assignment itself uses (%p-array-store-scalar /
+;;; %p-make-hash-entry): the same copy, by the same code, so the two spellings
+;;; cannot drift apart again.  A reference keeps its referent (a copy of the
+;;; container, not of the thing it points at).
 (defun p-sig-rest-array (args start)
-  "Slurpy @rest signature parameter: a fresh adjustable Perl array holding the
-   flattened ARGS from index START onward."
+  "Slurpy @rest signature parameter: a fresh Perl array holding COPIES of the
+   flattened ARGS from index START onward (the `my (@r) = @_` copy)."
   (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
     (when (and (vectorp args) (< start (length args)))
       (loop for i from start below (length args)
-            do (vector-push-extend (aref args i) out)))
+            do (%p-array-store-scalar out (aref args i))))
     out))
 
 (defun p-sig-rest-hash (args start)
   "Slurpy %rest signature parameter: a hash built from the flattened ARGS
-   key/value pairs from index START onward."
+   key/value pairs from index START onward; every value is a COPY (the
+   `my (%h) = @_` copy, %p-make-hash-entry)."
   (let ((h (make-hash-table :test 'equal)))
     (when (vectorp args)
       (loop for i from start below (length args) by 2
             do (setf (gethash (to-string (aref args i)) h)
-                     (if (< (1+ i) (length args)) (aref args (1+ i)) *p-undef*))))
+                     (%p-make-hash-entry
+                      (if (< (1+ i) (length args)) (aref args (1+ i)) *p-undef*)))))
     h))
 
 (defun p-flatten (arr)
@@ -25599,8 +25717,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     result))
 
 (define-compiler-macro p-map (&whole form fn &rest items)
-  (let ((new (%p-aliasing-slice-args items)))
-    (if new `(p-map ,fn ,@new) form)))
+  ;; Two rewrites, one per side of the map (both are p-map's own consumer
+  ;; knowledge): a slice among the ITEMS is aliased by $_ and vivifies
+  ;; (#1010); a slice that is the BLOCK'S VALUE is copied and reads values
+  ;; (#2515 (ii), %p-map-copying-block).
+  (let ((new (%p-aliasing-slice-args items))
+        (blk (%p-map-copying-block fn)))
+    (if (or new blk)
+        `(p-map ,(or blk fn) ,@(or new items))
+        form)))
 
 (defun %p-glob-code (glob)
   "The CODE slot of typeglob GLOB, unboxed, or NIL."
