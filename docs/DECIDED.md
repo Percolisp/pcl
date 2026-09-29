@@ -44,6 +44,7 @@ not-supported.md → only then probe.*
 - **Regex classes at /d sites stay Unicode (phase 2 = a measurement for Fable)**; quotemeta/`\Q` regime = #2215.
 - **#2192: `use utf8` is a STATEMENT in CODE** (`_source_says_use_utf8`: POD, `__END__`, `#` comments skipped; statement position); a heredoc body can still fool it.
 - **Filed #2216**: seven re/regexp_*.t files are 0/0 at 209e7533 (a BEGIN-time write of a file lexical in a `do FILE` hits the caller's read-only-aliased package var) — pre-existing, NOT spliced.
+- **Cost of the /d case path FLAGGED, not shaved further (one bounded shave spent, s501)**: vs base ucshort -4..-10 %, lcbytes -27 % (the bytes path base answered wrong); textproc/subste within the control band -- numbers in session-log `## Session s494u`.
 
 ## s499 (2026-09-27, Fable) -- three merges (s496a 577a09a4, s497b bd0c38e3, s499e 9febb602), README adopted, the speed review RULED by the USER, perf round 36 launched
 - **README.md ADOPTED (USER): the s496 Opus rewrite committed 07610d76** ("a step up"); the USER`s further edits follow; the license badge = a STATIC shields badge (GitHub cannot classify Artistic-1.0-Perl OR GPL-1.0 -- perl5`s own repo reads "Other"): the line is in `~/pcl-agent-scratch/s499/docs-review/DECISIONS-for-USER.md` (s499d`s docs pass, uncommitted until the USER has read it).
