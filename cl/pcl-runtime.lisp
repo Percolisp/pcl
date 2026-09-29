@@ -6112,11 +6112,21 @@
    form UTF-8 sequence encoding a scalar value (no overlong, no surrogate,
    <= U+10FFFF).  A truncated tail is NOT valid.  Chars below #x80 are
    skipped; START lets a caller skip an ASCII prefix it already scanned."
-  (let ((n (length s)) (i start))
-    (declare (fixnum n i))
+  (sb-kernel:with-array-data ((v s) (off 0) (n (length s)))
+    (etypecase v
+      (simple-base-string t)            ; base chars are all below #x80
+      ((simple-array character (*))
+       (%p-utf8-bytes-scan v (+ off start) n)))))
+
+(defun %p-utf8-bytes-scan (v i n)
+  "The scan of %P-BYTES-LOOK-UTF8-P over a character data vector V, from I
+   below N (typed: the lcbytes bench row, s494u)."
+  (declare (type (simple-array character (*)) v) (fixnum i n)
+           (optimize speed))
+  (progn
     (loop
      (when (>= i n) (return t))
-     (let ((c (char-code (char s i))))
+     (let ((c (char-code (schar v i))))
        (cond
          ((< c #x80) (incf i))
          ((> c #xFF) (return nil))
@@ -6130,10 +6140,10 @@
             (when (>= (+ i need) n) (return nil))
             (setf cp (logand c (case need (1 #x1F) (2 #x0F) (t #x07))))
             (loop for k from 1 to need
-                  for b = (char-code (char s (+ i k)))
+                  for b = (char-code (schar v (+ i k)))
                   do (if (<= #x80 b #xBF)
                          (setf cp (logior (ash cp 6) (logand b #x3F)))
-                         (return-from %p-bytes-look-utf8-p nil)))
+                         (return-from %p-utf8-bytes-scan nil)))
             (when (or (< cp (case need (1 #x80) (2 #x800) (t #x10000)))
                       (<= #xD800 cp #xDFFF)
                       (> cp #x10FFFF))
@@ -6176,14 +6186,15 @@
 (defun %p-case-map-ascii (s up first-only)
   "S with ASCII letters case-mapped (UP: to upper), every other char --
    chars 128-255 included -- left alone; FIRST-ONLY: the first char only."
-  (let* ((r (copy-seq s))
+  (let* ((r (replace (make-string (length s)) s))
          (end (if first-only (min 1 (length r)) (length r))))
-    (declare (fixnum end))
+    (declare (type (simple-array character (*)) r) (fixnum end)
+             (optimize speed))
     (dotimes (i end r)
-      (let ((c (char r i)))
+      (let ((c (schar r i)))
         (if up
-            (when (char<= #\a c #\z) (setf (char r i) (code-char (- (char-code c) 32))))
-            (when (char<= #\A c #\Z) (setf (char r i) (code-char (+ (char-code c) 32)))))))))
+            (when (char<= #\a c #\z) (setf (schar r i) (code-char (- (char-code c) 32))))
+            (when (char<= #\A c #\Z) (setf (schar r i) (code-char (+ (char-code c) 32)))))))))
 
 (defun %p-case-map (str op regime)
   "lc/uc/fc/lcfirst/ucfirst (OP :lc :uc :fc :lcfirst :ucfirst) of STR under
