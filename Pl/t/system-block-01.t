@@ -8,10 +8,12 @@
 # exec { PROG } LIST, in both the bare and paren-wrapped shapes.
 #
 # Perl's `system { PROG } argv0, args...` runs PROG with the LIST as argv (so
-# argv[0] can differ from PROG).  PCL lowers this to the ordinary list form
-# system(PROG, LIST) — the argv[0]-override nuance is dropped, but the program
-# and its arguments are correct.  Before this fix the leading brace block fell
-# through the parser with "Missing case: [".
+# argv[0] can differ from PROG).  PCL marks the call (p-system :program PROG
+# LIST) and runs PROG with LIST[1..] as its arguments, never through the shell
+# (#2082; before s501b LIST[0] was passed as an extra ARGUMENT -- the rows
+# below said "echo hello world" where perl prints "hello world").  The argv[0]
+# override itself is not expressible through SBCL's spawn.  Before the first
+# fix the leading brace block fell through the parser with "Missing case: [".
 
 use v5.30;
 use strict;
@@ -52,16 +54,16 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 37;
+plan tests => 44;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
-     qr/\(p-system "\/bin\/echo" "argv0" "x"\)/,
-     'bare block form lowers to (p-system PROG LIST)';
+     qr/\(p-system :program "\/bin\/echo" "argv0" "x"\)/,
+     'bare block form lowers to (p-system :program PROG LIST)';
 
 like transpile('my $rc = system({ "/bin/echo" } "argv0", "x");'),
-     qr/\(p-system "\/bin\/echo" "argv0" "x"\)/,
-     'paren block form lowers to (p-system PROG LIST)';
+     qr/\(p-system :program "\/bin\/echo" "argv0" "x"\)/,
+     'paren block form lowers to (p-system :program PROG LIST)';
 
 unlike transpile('system { "/bin/echo" } "a";'),
        qr/PARSE ERROR/,
@@ -69,11 +71,11 @@ unlike transpile('system { "/bin/echo" } "a";'),
 
 # --- runtime: the program actually runs and prints its arguments ---
 is run_cl('system { "/bin/echo" } "echo", "hello", "world"; print "done\n";'),
-   "echo hello world\ndone\n",
-   'bare block form runs /bin/echo with the LIST as argv';
+   "hello world\ndone\n",
+   'bare block form runs /bin/echo with LIST as argv (LIST[0] is argv[0], not an argument; perl-probed)';
 
 is run_cl('my $rc = system({ "/bin/echo" } "p", "a", "b"); print "rc=$rc\n";'),
-   "p a b\nrc=0\n",
+   "a b\nrc=0\n",
    'paren block form runs and returns 0';
 
 # ── #369: every qx spelling is the same term as the backtick form ────────────
@@ -331,3 +333,47 @@ PL
 is run_cl($HD_ALRM),
    "sys=die qx=die wpid=die start=minus1:errno\n",
    '#2062: an ALRM handler that dies during system / qx / waitpid unwinds, and a child that cannot START is still -1 with $!';
+
+
+# ── s501b (task #2082): exec/system LIST, open's LIST, the forced-main glob ──
+# IPC::Open2/Open3 with a LIST command printed a /bin/sh syntax error: four
+# runtime gaps on one path, each probed against perl 5.40.3.  (1) exec/system
+# did not FLATTEN (`exec @_` ran the array's stringification through the
+# shell); (2) open's arguments after MODE are a LIST (`open $_[0], $_[1],
+# @_[2..$#_]`); (3) `\*STDIN` in a non-main package is *main::STDIN (gv.c's
+# forced-main names), so re-opening it re-points descriptor 0; (4) an
+# emulated exec must release every descriptor, and pipe() gives its ends
+# FD_CLOEXEC like every other opener — else the parent's read on the
+# exec-status pipe never sees EOF.
+my $OPEN23 = <<'PL';
+use strict; use warnings; use IPC::Open2; use IPC::Open3; use Symbol qw(gensym);
+my $pid = open2(my $out, my $in, "tr", "a-z", "A-Z"); print $in "hello\n"; close $in; my $up = <$out>; waitpid($pid, 0); chomp $up;
+my $err = gensym; my $pid3 = open3(my $w, my $r, $err, "sh", "-c", "echo out; echo err 1>&2; exit 4"); close $w; my $o = <$r>; my $e = <$err>; waitpid($pid3, 0); chomp($o, $e); print "$up $o $e rc=", $? >> 8, "\n";
+PL
+is run_cl($OPEN23), "HELLO out err rc=4\n",
+   '#2082: open2/open3 with a LIST command (both output streams, the exit status)';
+
+is run_cl('my @a = ("/bin/echo", "x(y"); system @a; my $p = fork; if (!$p) { exec @a; exit 9 } waitpid($p, 0); print "rc=$?\n";'),
+   "x(y\nx(y\nrc=0\n",
+   '#2082: system @a / exec @a flatten the array; two elements never use the shell';
+
+is run_cl(q{system { "/bin/sh" } "zzz", "-c", "echo ok"; print "done\n";}),
+   "ok\ndone\n",
+   '#2082: system { PROG } LIST passes LIST[1..] as the arguments, no shell';
+
+is run_cl('my $r = system("exit 3"); print "a=$r\n"; $r = system("exit 3;"); print "b=", $r >> 8, "\n"; system("/bin/echo   a   b");'),
+   "a=-1\nb=3\na b\n",
+   '#2082: one string without metacharacters is split and exec\'d directly (perl: -1 for "exit 3"), with one it goes to /bin/sh';
+
+is run_cl(q{my $f = "/tmp/pcl-s501b-$$"; open(my $o, ">", $f) or die; print $o "slice\n"; close $o;
+sub xo { open $_[0], $_[1], @_[2..$#_] or die "xo: $!" } xo(my $h, "<", $f); print scalar <$h>; unlink $f;}),
+   "slice\n",
+   '#2082: open FH, MODE, LIST flattens an array slice after MODE';
+
+is run_cl('package Foo; print *STDIN, " ", *STDERR, "\n";'),
+   "*main::STDIN *main::STDERR\n",
+   '#2082: *STDIN in a non-main package is *main::STDIN (forced-main name)';
+
+is run_cl('use Fcntl; pipe(R, W) or die; print((fcntl(R, F_GETFD, 0) & FD_CLOEXEC) ? "cx" : "no", "\n");'),
+   "cx\n",
+   '#2082: pipe() ends carry FD_CLOEXEC like every other descriptor perl opens';

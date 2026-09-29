@@ -3376,8 +3376,10 @@ sub handle_subcalls {
       my $func_name = $now->content();
       # Paren-wrapped indirect-object block form:
       #   system({ PROG } LIST) / exec({ PROG } argv...)
-      # The leading brace block is the program path, the rest is argv.  Lower to
-      # the ordinary list form system(PROG, LIST) (argv[0]-override nuance lost).
+      # The leading brace block is the program path, the rest is argv.  The
+      # funcall is marked `indirect_program`: the emitter spells it
+      # (p-system :program PROG LIST...) so the runtime never uses the shell
+      # and LIST[0] is argv[0], not an argument (#2082).
       if ($func_name eq 'system' || $func_name eq 'exec') {
         my @outer_ch = grep { ref($_) !~ /Whitespace/ } $next->children();
         my @inner_ch;
@@ -3399,6 +3401,7 @@ sub handle_subcalls {
           }
 
           my($top_node, $top_id) = $self->make_node_insert('funcall');
+          $top_node->{indirect_program} = 1;
           my $node_id = $self->make_node($now);
           $self->add_child_to_node($top_id, $node_id);
 
@@ -3577,10 +3580,12 @@ sub handle_subcalls {
       # Indirect-object block form: system { PROG } LIST / exec { PROG } LIST.
       # Here the brace block is NOT a code block — it is the real program path,
       # while LIST supplies the argv (whose first element may differ from PROG,
-      # a nuance we drop).  Lower to the ordinary list form system(PROG, LIST)
-      # so the builtin's normal arg machinery handles it.
+      # a nuance the spawn cannot express).  The funcall is marked
+      # `indirect_program`, which the emitter spells (p-exec :program PROG
+      # LIST...) — never the shell, LIST[0] not an argument (#2082).
       if ($func_name eq 'system' || $func_name eq 'exec') {
         my($top_node, $top_id) = $self->make_node_insert('funcall');
+        $top_node->{indirect_program} = 1;
         my $node_id = $self->make_node($now);
         $self->add_child_to_node($top_id, $node_id);
 

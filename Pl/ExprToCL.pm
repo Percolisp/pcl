@@ -1177,6 +1177,10 @@ sub gen_symbol_form {
     my $name = $1;
     my $pkg  = $self->environment ? $self->environment->current_package : 'main';
     $pkg //= 'main';
+    # perl's forced-main names (gv.c): `\*STDIN` in package Foo IS
+    # *main::STDIN — IPC::Open3 re-opens the child's STDIN through exactly
+    # that glob ref, and a Foo::STDIN glob left descriptor 0 closed (#2082).
+    $pkg = 'main' if Pl::Environment::fh_forced_main_name($name);
     return ['p-make-typeglob', "\"$pkg\"", "\"$name\""];
   }
   # Handle package stash access: $Pkg::Sub:: or %Pkg::Sub::
@@ -2340,6 +2344,16 @@ sub gen_funcall_form {
     $cl_func = !defined $target      ? 'p-backtick'
              : $target eq $pkg       ? $cl_func
              : $self->cl_name("${target}::readpipe", 1, 1);
+  }
+
+  # `system { PROG } LIST` / `exec { PROG } LIST` — PExpr marks the funcall
+  # `indirect_program`; the leading :program keyword tells the runtime that
+  # the first argument is the program and the LIST is argv (#2082).  Only the
+  # builtin gets it: a `use subs` override (cl_func not p-…) keeps the plain
+  # argument list.
+  if ($node->{indirect_program} && $cl_func =~ /^p-(?:system|exec)$/) {
+    return [$cl_func, ':program',
+            map { $self->gen_node_form($_) } @{$kids}[1 .. $#$kids]];
   }
 
   # ---- converted special branches (same order as the text emitter; a

@@ -18088,6 +18088,17 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           (%p-autoviv-failed-handle fh)))
     (if stream t nil)))
 
+(defun %p-open-spread-args (filename more)
+  "open's LIST after MODE (#2082): when FILENAME or any of MORE is a raw list
+   (an array, a slice — a non-string vector), flatten them all and answer
+   (values FIRST REST); an empty LIST gives undef as the filename, as perl's
+   `open FH, MODE, @empty` does.  The common all-scalar call is untouched."
+  (flet ((listy (x) (and (vectorp x) (not (stringp x)))))
+    (if (or (listy filename) (some #'listy more))
+        (let ((flat (coerce (%p-flatten-list (cons filename more)) 'list)))
+          (values (if flat (car flat) *p-undef*) (cdr flat)))
+        (values filename more))))
+
 (defmacro p-open (fh mode &optional filename &rest more)
   "Perl open - open file with given mode.
    2-arg: (p-open FH expr) - mode is parsed from expr
@@ -18100,9 +18111,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    MORE is the LIST form's extra arguments (task #1697).  The macro used to
    take three parameters, so `open($fh,'-|',$prog,'-e',$code)` — perl's
    documented way to spawn a program WITHOUT a shell — was a macroexpansion
-   ARITY ERROR: the whole top-level form failed to compile."
+   ARITY ERROR: the whole top-level form failed to compile.
+
+   perl's open is `open FH, MODE, LIST`: the arguments after MODE are a LIST
+   and FLATTEN — IPC::Open3's `open $_[0], $_[1], @_[2..$#_]` hands the fd over
+   as an array SLICE (#2082).  %p-open-spread-args does it."
   (if filename
-      `(%p-open-impl (%p-fh-install-arg ,fh) ,mode ,filename t (list ,@more))
+      `(multiple-value-bind (%file %more)
+           (%p-open-spread-args ,filename (list ,@more))
+         (%p-open-impl (%p-fh-install-arg ,fh) ,mode %file t %more))
       `(let ((%parsed (%p-open-parse-2arg ,mode)))
          (%p-open-impl (%p-fh-install-arg ,fh) (car %parsed) (cdr %parsed)))))
 
@@ -22162,6 +22179,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    READ-FH receives the read end, WRITE-FH the write end.  Each target may be a
    p-box (lexical $fh) or a symbol (bareword FH).  Streams are unbuffered so a
    syswrite is immediately visible to a readline on the other end (same process)."
+  ;; Both ends are INSTALLED the way every other opener installs (#2082):
+  ;; %p-install-fh gives a descriptor above $^F FD_CLOEXEC, as perl does — the
+  ;; flag is what lets IPC::Open3's parent see EOF on its exec-status pipe —
+  ;; and it attaches the stream to a GLOB target (a gensym) instead of
+  ;; overwriting the box that holds the glob.
   (handler-case
       (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
         (let ((read-stream (sb-sys:make-fd-stream read-fd
@@ -22172,12 +22194,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                                                    :output t
                                                    :buffering :none
                                                    :external-format *p-default-out-ef*)))
-          (if (p-box-p read-fh)
-              (box-set read-fh read-stream)
-              (setf (gethash read-fh *p-filehandles*) read-stream))
-          (if (p-box-p write-fh)
-              (box-set write-fh write-stream)
-              (setf (gethash write-fh *p-filehandles*) write-stream))
+          (%p-install-fh read-fh read-stream)
+          (%p-install-fh write-fh write-stream)
           t))
     (error () (%pcl-save-errno) nil)))
 
@@ -22318,15 +22336,64 @@ buffer's fill-pointer; everything else falls back to file-length."
        (error (,c)
          (if (%p-perl-die-p ,c) (error ,c) ,failure)))))
 
-(defun %p-system-run (cmd prog-args)
-  "Spawn for p-system and return the raw wait status.  PROG-ARGS nil means the
-   one-argument form, which perl hands to the shell.  A child KILLED by a
+(defun %p-shell-command-p (cmd)
+  "Does perl hand the ONE-STRING command CMD to /bin/sh?  doio.c's do_exec3
+   rule: a leading `. ` or `exec `, an `=` in the first word (VAR=val), or
+   any of the shell metacharacters $&*(){}[]'\";\\|?<>~` and newline.
+   Otherwise perl splits CMD on whitespace and execvp's the words itself."
+  (let* ((s (string-left-trim '(#\Space #\Tab #\Newline) cmd))
+         (w (position-if (lambda (c) (member c '(#\Space #\Tab))) s)))
+    (or (and (>= (length s) 2) (string= ". " s :end2 2))
+        (and (>= (length s) 5) (string= "exec " s :end2 5))
+        (find #\= s :end (or w (length s)))
+        (find-if (lambda (c) (or (char= c #\Newline) (find c "$&*(){}[]'\";\\|?<>~`")))
+                 s))))
+
+(defun %p-command-words (args)
+  "Perl's exec/system argument rule, one reading for both builtins (#2082).
+   Answers (values PROGRAM ARGV SHELL-CMD): SHELL-CMD non-nil means run it
+   under /bin/sh -c; otherwise PROGRAM is execvp'd (PATH search) with ARGV.
+   ARGS is flattened first — `exec @_` is a LIST (IPC::Open3's own call).
+   A LIST of more than one element NEVER goes through the shell; ONE string
+   does only when %p-shell-command-p says so, else it is split on whitespace.
+   The indirect-object form `exec { PROG } LIST` arrives as :PROGRAM PROG LIST
+   and never uses the shell; its LIST[0] is perl's argv[0], which the spawn
+   cannot override (run-program sets argv[0] to PROGRAM) — so it is dropped
+   and LIST[1..] are the arguments.  NIL PROGRAM = nothing to run (ENOENT)."
+  (flet ((strs (xs)
+           (map 'list (lambda (a) (to-string (if (p-box-p a) (unbox a) a)))
+                (%p-flatten-list xs))))
+    (if (eq (car args) :program)
+        (let ((prog (to-string (if (p-box-p (second args)) (unbox (second args))
+                                   (second args))))
+              (argv (strs (cddr args))))
+          (values (and (plusp (length prog)) prog) (cdr argv) nil))
+        (let ((words (strs args)))
+          (cond ((null words) (values nil nil nil))
+                ((cdr words) (values (car words) (cdr words) nil))
+                ((%p-shell-command-p (car words)) (values nil nil (car words)))
+                (t (let ((split (%p-split-whitespace (car words))))
+                     (values (car split) (cdr split) nil))))))))
+
+(defun %p-split-whitespace (s)
+  "S split on runs of space/tab/newline, empty fields dropped."
+  (let ((out nil) (start nil))
+    (dotimes (i (length s))
+      (if (member (char s i) '(#\Space #\Tab #\Newline))
+          (when start (push (subseq s start i) out) (setf start nil))
+          (unless start (setf start i))))
+    (when start (push (subseq s start) out))
+    (nreverse out)))
+
+(defun %p-system-run (cmd prog-args &optional shell-p)
+  "Spawn for p-system and return the raw wait status.  SHELL-P means CMD is
+   handed to /bin/sh -c; otherwise CMD is execvp'd with PROG-ARGS.  A child KILLED by a
    signal is the signal number, not number << 8 — the one decoder
    %p-process-wait-status, which qx and the pipe close already use.  A Perl
    $SIG{CHLD} handler is held back until the child's status is read (perl
    blocks SIGCHLD around system for the same reason)."
   (%p-with-chld-deferred
-   (let ((proc (if prog-args
+   (let ((proc (if (not shell-p)
                    (sb-ext:run-program cmd prog-args
                                        :search t
                                        :input nil
@@ -22356,12 +22423,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    `system { \"lskdfj\" } \"lskdfj\"`).  p-exec already had this handler;
    this is the same rule for its sibling."
   (%p-flush-all-output)
-  (if (null args)
-      -1
-      (let ((cmd (to-string (car args)))
-            (prog-args (mapcar #'to-string (cdr args))))
+  (multiple-value-bind (prog argv shell-cmd) (%p-command-words args)
+    (if (not (or prog shell-cmd))
+        (progn (setf *p-stored-errno* 2) (%p-set-status -1) -1)   ; ENOENT
         (%p-child-host-error (progn (%pcl-save-errno) (%p-set-status -1) -1)
-                             (let ((wait-status (%p-system-run cmd prog-args)))
+                             (let ((wait-status (if shell-cmd
+                                                    (%p-system-run shell-cmd nil t)
+                                                    (%p-system-run prog argv))))
                                (%p-set-status wait-status)
                                wait-status)))))
 
@@ -22532,25 +22600,49 @@ buffer's fill-pointer; everything else falls back to file-length."
    PERL_FLUSHALL_FOR_CHILD first, and BEFORE the child runs: the exec'd program
    writes to the same descriptors, so anything still in PCL's buffers would
    come out after its output instead of before it."
-  (when (null args)
-    (setf *p-stored-errno* 2) (return-from p-exec *p-undef*))  ; ENOENT
-  (%p-flush-all-output)
-  (let* ((strs (mapcar (lambda (a) (to-string (if (p-box-p a) (unbox a) a))) args))
-         (shell-p (and (= (length strs) 1)
-                       (find-if (lambda (c) (find c "|&;<>()$`\\\"'*?[]{}~ "))
-                                (first strs)))))
-    (handler-case
-        (let ((proc (if shell-p
-                        (sb-ext:run-program "/bin/sh" (list "-c" (first strs))
-                                            :input t :output t :error t :wait t)
-                        (sb-ext:run-program (first strs) (rest strs)
-                                            :search t :input t :output t
-                                            :error t :wait t))))
-          (%p-flush-all-output)          ; :abort t skips the exit hooks
-          (sb-ext:exit :code (or (sb-ext:process-exit-code proc) 0) :abort t))
-      (error ()
-        (%pcl-save-errno)
-        *p-undef*))))
+  (multiple-value-bind (prog argv shell-cmd) (%p-command-words args)
+    (when (not (or prog shell-cmd))
+      (setf *p-stored-errno* 2) (return-from p-exec *p-undef*))  ; ENOENT
+    (%p-flush-all-output)
+    (let ((proc (handler-case
+                    (if shell-cmd
+                        (%p-exec-spawn "/bin/sh" (list "-c" shell-cmd) nil)
+                        (%p-exec-spawn prog argv t))
+                  (error ()
+                    (%pcl-save-errno)
+                    (return-from p-exec *p-undef*)))))
+      (%p-exec-become proc))))
+
+(defun %p-exec-inherited-fds ()
+  "The descriptors above 2 an exec would carry into the new program: every open
+   one WITHOUT FD_CLOEXEC.  perl gives each descriptor it opens the flag
+   (%p-set-cloexec), so this is what a program deliberately handed down — an
+   fd whose flag it cleared, or one raised under $^F."
+  (loop for fd from 3 below 1024
+        for flags = (handler-case (sb-posix:fcntl fd sb-posix:f-getfd)
+                      (error () nil))
+        when (and flags (zerop (logand flags +p-fd-cloexec+)))
+        collect fd))
+
+(defun %p-exec-spawn (program args search)
+  "Start PROGRAM for p-exec with stdio and the inherited descriptors (see
+   %p-exec-inherited-fds) passed through; do not wait."
+  (sb-ext:run-program program args
+                      :search search :input t :output t :error t :wait nil
+                      :preserve-fds (%p-exec-inherited-fds)))
+
+(defun %p-exec-become (proc)
+  "The rest of an emulated exec (#2082).  SBCL cannot replace its own image,
+   so the program runs as a child — and THIS process must then hold nothing:
+   a real exec closes every FD_CLOEXEC descriptor and hands the rest to the
+   program, so a parent waiting for EOF on a pipe (IPC::Open3's exec-status
+   pipe, a child's stdin) sees it when the program alone lets go.  Every
+   descriptor is closed here, then the program's status becomes this
+   process's exit status.  Never returns."
+  (dotimes (fd 1024)
+    (sb-unix:unix-close fd))
+  (sb-ext:process-wait proc)
+  (sb-ext:exit :code (or (sb-ext:process-exit-code proc) 0) :abort t))
 
 (defun p-backtick (cmd)
   "Perl backticks / qx / readpipe — run the command and capture its stdout.
@@ -22694,7 +22786,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-3280"
+(defparameter *pcl-cache-generation* "v2-3380"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
