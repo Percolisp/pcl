@@ -85,6 +85,24 @@ sub sub_in_eval   { eval 'sub cgc9 { my $s9 = shift; return sub { $s9 } }'; retu
 # s304: a package global used ONLY inside eval strings must persist across
 # evals (p-eval-lex-lookup installs the autovivified container).
 sub cross_eval    { eval '$xg9 = 5'; return eval '$xg9 + 1'; }
+# s501b (#2285): a `package` statement inside the eval'd text does not re-home
+# a CAPTURED lexical -- core Benchmark builds exactly pkg_bench's string.  The
+# last row is the inverse: a name the eval does NOT capture still goes to X.
+sub pkg_amp       { my $c = sub { "ran" }; my $s = eval 'sub { package main; &$c; }'; return $s->(); }
+sub pkg_arrow     { my $c = sub { "ran" }; my $s = eval 'sub { package main; $c->(); }'; return $s->(); }
+sub pkg_other     { my $c = sub { "ran" }; my $s = eval 'sub { package Other; &$c; }'; return $s->(); }
+sub pkg_bench     { my $r = ""; my $c = sub { $r .= "b" }; my ($n, $pack) = (2, "main");
+                    my $s = eval "sub { for (1 .. $n) { local \$_; package $pack; &\$c; } }"; $s->(); return $r; }
+sub pkg_scalar    { my $x = "lex"; $Foo::x = "foo"; my $s = eval 'sub { package Foo; $x }'; return $s->(); }
+sub pkg_array     { my @arr = (1,2,3); my $s = eval 'sub { package Foo; scalar(@arr) . $arr[1] . $#arr }'; return $s->(); }
+sub pkg_global    { my $s = eval 'sub { package Foo; $yy9 = 7; $Foo::yy9 }'; return $s->(); }
+print "pkg_amp=",       (eval { pkg_amp() } // "DIED"),       "\n";
+print "pkg_arrow=",     (eval { pkg_arrow() } // "DIED"),     "\n";
+print "pkg_other=",     (eval { pkg_other() } // "DIED"),     "\n";
+print "pkg_bench=",     (eval { pkg_bench() } // "DIED"),     "\n";
+print "pkg_scalar=",    (eval { pkg_scalar() } // "DIED"),    "\n";
+print "pkg_array=",     (eval { pkg_array() } // "DIED"),     "\n";
+print "pkg_global=",    (eval { pkg_global() } // "DIED"),    "\n";
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -154,6 +172,13 @@ my %expect = (
     eval_in_sort  => '1,2,3',
     sub_in_eval   => 'good',
     cross_eval    => '6',
+    pkg_amp       => 'ran',
+    pkg_arrow     => 'ran',
+    pkg_other     => 'ran',
+    pkg_bench     => 'bb',
+    pkg_scalar    => 'lex',
+    pkg_array     => '322',
+    pkg_global    => '7',
 );
 
 plan tests => scalar(keys %expect);

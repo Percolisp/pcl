@@ -28,7 +28,7 @@ idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
 modules/Archive-Tar-Compress	DIFF	1	#155 tie on a FILEHANDLE is announced, not implemented: IO::Zlib->new ties *$fh, so reading the tar back dies "Can't call method "open" on an undefined value" -- re-attributed s500a: #2533 made Archive::Tar::Constant export its constants (run-time prototype()) and the `$entry->$_()` method-by-$_ fix let it write the archive
-modules/Benchmark-Memoize	DIFF	1	#2285 a `package` statement inside a string-eval'd sub loses the captured lexicals
+modules/Benchmark-Memoize	DIFF	1	#2084(1) memoize("slow") has no effect (6 calls where perl makes 2); Benchmark timeit now runs -- re-attributed s501b from #2285
 modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
 modules/File-Temp	DIFF	1	#2056 File::Temp->new dies "Cannot dereference non-reference: #<fd-stream>" (the glob-as-object idiom); tempdir() and tempfile() work since s492c's #2007 (re-attributed s495 review)
 modules/IO-Select-Socket	DIFF	1	#1998 a circular `use` of a mid-load module skips its import

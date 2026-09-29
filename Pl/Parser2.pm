@@ -614,6 +614,14 @@ sub _binding_at {
     my $b = $self->_head_binding($p, $canon);
     return $b if defined $b;
   }
+  # A STRING EVAL's outermost scope is the CALLER's: a name the capture alist
+  # carries is a lexical in scope at the eval site (the #296-B1 rule), so a
+  # `package X;` inside the eval text does not re-home it — perl's
+  # `eval 'sub { package main; &$c }'` calls the caller's `my $c`.  Without
+  # this the requalifier rewrote it to `$main::c`, an empty global, and core
+  # Benchmark's timing loop died "Undefined subroutine &main::" (#2285).
+  return 'lex' if $self->eval_mode
+               && grep { $_ eq $canon } @{ $self->eval_captures // [] };
   return undef;
 }
 
