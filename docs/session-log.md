@@ -2,6 +2,22 @@
 
 Append new entries at the top. One section per session.
 
+## Session 501 (Fable, 2026-09-29/30) — the three paused batches resumed on Opus 5.5, reviewed and merged; two everyday-singles batches and perf round 38 launched
+
+The USER opened with "Please continue.  Run 3 subtasks at a time.  Always use Opus 5.5, not Opus 5."  CI was green on `558cc5a0`; the box had rebooted (`/tmp` cleared).  The three s500 batches were resumed with FRESH agents in their EXISTING worktrees from their `STOP.md` (briefs `~/pcl-agent-scratch/s501/resume-<label>.md` + `SHARED-BOX.md`); each wrote its model id first (`claude-opus-5-5`, all five agents of the session).
+
+Fable's review ran while the agents finished their bars: the s500 probes on each code-complete tree, plus three new ones — `r494h-escape3.pl` (56 rows: live holders, value and context through the close, non-local exits, error variables, builtins on the handle), `r494u-break.pl` (32 rows: decoded text and the whole `/a` family) and a 699-field float-printing table.  Results: no close under a live holder; every casing and `/a` row the design names turned `same`; float printing identical to perl on base and tree; `**` rows now perl's.  One finding went back to an agent (s500p's runtime comment cited a guard file that did not exist — the agent created `Pl/t/float-string-01.t`), one became a task (**#2534**, a pre-existing scoping silent wrong exposed by a name collision in the probe itself).
+
+Merged, each after Fable's own gate and full sweep on the sha (`~/pcl-agent-scratch/s501/review/<label>/`), all fast-forward, all pushed:
+
+| batch | sha | gate | sweep TOTAL | EVERYDAY | gen |
+|---|---|---|---|---|---|
+| s500p perf round 37 (runtime-only) | `e86cc8c5` | 271 files / 9171 rows | 18714 (+0) | 102 of 122 | v2-2980 |
+| s494h #2006(b) part 1 | `1bae682b` | 272 / 9231 | 18714 (+0) | 103 of 122 | v2-3080 |
+| s494u #2092 phase 1 + #2192 | `2528f5cc` | 273 / 9273 | 18714 (+0) | 104 of 122 | v2-3180 |
+
+The USER ruled on the two flagged items ("Keep them, :-(") and asked for the one-pass case-mapping idea to be tried (#2535).  Launched into freed slots: **s500a** (everyday singles 1: #2287 #2085 #2533 Scalar::Util #2530; gen v2-3280), **s501b** (everyday singles 2: #2082 #2083 #2285 #2534 #2056-measure, IO::Socket row re-attributed; gen v2-3380) and **s501q** (perf round 38: #2514 #2515 #2114 + the #2535 filler; gen v2-3480).  Owed: #2389 (one quiet full `--all` companion run); s494h's proposed README/STATUS sentence on filehandles is the USER's to place.
+
 ## Session s499f (Opus agent, 2026-09-27; resumed by a fresh agent for its bars, rebased five times onto e51abda1) -- perf round 36: whole-hash copy (#2424), `**` (#2425), map result copies (#2198), sized first and shipped by measured gain
 
 **Sizing (the USER's ruling: rank by how much faster the program gets).** Each lever was measured as a runtime A/B before any was shipped: a saved core with the patch loaded, every row run through `pcl` on a warm cache, interleaved best-of-5 with an A' control. #2424 Mian-Chowla 5.36 -> 3.04 s (-43.3 %), #2425 Digit-fifth-powers 4.58 -> 3.83 s (-16.4 %) and Disarium 3.50 -> 3.02 s (-13.7 %), #2198 Perfect-shuffle 0.72 -> 0.63 s (-12.2 %), with the everyday `%h = map { $_ => f($_) }` at -21.4 %. All three cleared the 5 % bar, so they shipped in that order. The table is in faster-codegen §0.2s.
