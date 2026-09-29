@@ -27,17 +27,15 @@
 idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector -- DESTROY is never called at scope exit
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
-modules/Archive-Tar-Compress	DIFF	1	#2084 (4) Archive::Tar::Constant builds @EXPORT by walking its own stash
+modules/Archive-Tar-Compress	DIFF	1	#155 tie on a FILEHANDLE is announced, not implemented: IO::Zlib->new ties *$fh, so reading the tar back dies "Can't call method "open" on an undefined value" -- re-attributed s500a: #2533 made Archive::Tar::Constant export its constants (run-time prototype()) and the `$entry->$_()` method-by-$_ fix let it write the archive
 modules/Benchmark-Memoize	DIFF	1	#2285 a `package` statement inside a string-eval'd sub loses the captured lexicals
 modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
-modules/File-Compare-Copy	DIFF	1	#2287 File::Copy's forward goto lowers to a bare (go :tag) with no tag
 modules/File-Temp	DIFF	1	#2056 File::Temp->new dies "Cannot dereference non-reference: #<fd-stream>" (the glob-as-object idiom); tempdir() and tempfile() work since s492c's #2007 (re-attributed s495 review)
 modules/IO-Select-Socket	DIFF	1	#1998 a circular `use` of a mid-load module skips its import
 modules/IPC-Open2-Open3	DIFF	1	#2082 open2/open3 with a LIST command; the handles never open
 modules/Math-BigInt-BigFloat	DIFF	1	#2083 Math::BigFloat->bdiv(3, 20) exhausts the binding stack
-modules/Scalar-Util	DIFF	1	#2084 (3) isweak is always false after weaken; openhandle/readonly stubs
+modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)
 modules/Sys-Hostname-Env-English	DIFF	1	#2084 (5) `use Env qw(HOME @PATH)` needs tie on scalars-by-name and arrays (#155)
-modules/Text-Wrap-ParseWords-Abbrev	DIFF	4	#2085 `%{{ abbrev(...) }}` (a hash deref of an anonymous-hash constructor holding a CALL) is a whole-statement refusal at line 9 -- re-attributed s496a: #2060 made core Text::Wrap work (the wrap() lines 1-3 now match perl) and the program runs to this line
 modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not implemented
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
