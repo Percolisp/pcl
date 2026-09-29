@@ -918,6 +918,73 @@ One control row is flagged. **fib(27)x** reads +3.8 % to +6.3 % on the final run
 
 The #2198 regression is paid back: mapmulti was 1.18 s before #2005, 1.40 s after it, and is 1.13 s now. The compile-time per-position licence that the task sketched was not needed.
 
+### 0.2t Round 37 movers (2026-09-29) — boxed plain numbers, join, float -> text, collect presize (s500p; #2513, #2511, #2510, #2512, #2450)
+
+Round 37 is RUNTIME-ONLY (two emission agents were in flight): `pl2cl`'s output is unchanged (corpus-diff IDENTICAL over 111 files) and so is the generation.  Ranked by the USER's 2026-09-27 rule: every lever sized alone first, shipped in descending order of measured real-program gain.  Logs are under the agent's `scratch/s500p/`; the Rosetta programs are timed from a local copy and are not checked in.
+
+SIZING TABLE.  Each lever alone as a patched runtime against the base (main 209e7533), through `pcl` on a warm cache, interleaved best-of-K, with a byte-identical control arm in the same window.  These were taken under LOAD (sibling agents' legs); the ratios are the ranking, the whole-tree table below is the re-take.
+
+```
+lever                          row                  before   after   faster   control   load
+#2513 boxed plain-number arms  Fusc-sequence        2.266    0.836   -63 %    +-4 %     4-10
+#2513                          Air-mass             1.824    1.643   -10 %
+#2513                          m-box micro                           -49 %
+#2511 join                     Self-describing      0.432    0.293   -32 %    +-1.5 %   3
+#2511                          Pancake-numbers      2.866    2.430   -15 %
+#2511                          m-join micro                          -55 %
+#2510 float -> text            Heronian-triangles   2.478    1.736   -30 %    +-0.5 %   1.5-2
+#2510                          Mandelbrot-set       0.831    0.590   -29 %
+#2510                          m-fprint micro                        -54 %
+#2512 collect presize          Permutation-test     1.290    1.169   -9.3 %   +-1.6 %   1.5-3.5
+#2512                          m-grep micro                          -20 %
+```
+
+ORDER: #2513, #2511, #2510, #2512; all cleared the 5 % bar.  #2450 (`**` SvIV_please) rode along as a semantic filler.  NOT levers: Pancake's remaining 39 % is `gethash`/`equal` (a pure-SBCL replica runs 0.9-1.2 s; no cheap runtime fix); Air-mass's boxes are signature subs without a raw-numeric verdict (#2514) and Perfect-shuffle's are `@_` / slice alias boxes (#2515) -- both round-38 EMISSION items.
+
+WHOLE TREE vs base (209e7533 runtime; the tree = 558cc5a0 + the round), `pcl` warm, interleaved best-of-5, control = a second identical base extraction.  Load 1.6 at start, 2.5-3.9 during (a sibling's light legs) -- a loaded reading; perl beside is the quiet Step-0 measurement.
+
+```
+program                   before    after    change    perl     ctl
+Fusc-sequence             1.611 s   0.794 s  -50.7 %   0.738 s  -8.9 %  (noisy ctl)
+Heronian-triangles        2.759 s   1.753 s  -36.5 %   0.860 s  +1.4 %
+Self-describing-numbers   0.437 s   0.294 s  -32.6 %   0.103 s  +5.3 %
+Mandelbrot-set            0.837 s   0.571 s  -31.7 %   0.292 s  -0.7 %
+Permutation-test          1.377 s   1.163 s  -15.6 %   0.525 s  -1.8 %
+Pancake-numbers           2.669 s   2.295 s  -14.0 %   1.506 s  -0.3 %
+Air-mass                  1.591 s   1.494 s   -6.1 %   0.599 s  +1.6 %
+```
+
+bench-exec, `BENCH_K=5`, before = the base runtime, after = the tree, on a QUIET box (load 0.13 before, 2.46 at the end = the bench itself).  The four new rows were checked against perl by the tool's BROKEN rule.
+
+```
+bench          perl(s)    before     after    change   after/perl
+fprint          0.1360    1.1334    0.2989   -73.6 %   2.20x   (new row, #2510)
+joinarr         0.0674    0.5928    0.2342   -60.5 %   3.47x   (new row, #2511)
+boxarith        0.1686    0.2925    0.1481   -49.4 %   0.88x   (new row, #2513)
+grepcnt         0.0553    0.1603    0.1188   -25.9 %   2.15x   (new row, #2512)
+methret         0.0952    0.1146    0.0996   -13.1 %
+mapmulti        0.7225    1.2348    1.1492    -6.9 %
+intloop+=       0.0638    0.0197    0.0198    +0.5 %
+intloop=        0.0648    0.0180    0.0185    +2.8 %   (rerun K=7 -4.9 %)
+arrhash         0.1290    0.0798    0.0813    +1.9 %   (rerun -0.5 %)
+arrhash-k       0.0563    0.0599    0.0587    -2.0 %
+fib(27)x        1.4620    0.4697    0.4848    +3.2 %   (rerun +1.0 %)
+fibret          1.5708    0.4761    0.4622    -2.9 %
+strcat          0.3248    0.2950    0.2933    -0.6 %
+slices          0.0739    0.1178    0.1157    -1.8 %
+sortnum         0.0266    0.0401    0.0404    +0.7 %   (reruns +2.2, +3.6, -2.0 %)
+fhread          0.0344    0.1177    0.1190    +1.1 %
+textproc        0.4411    1.0371    1.0471    +1.0 %   (reruns +4.8, +1.8, +1.3 %)
+regexg          0.4064    0.4951    0.4953    +0.0 %
+subste          0.0622    0.2007    0.1991    -0.8 %
+hashcopy        0.7647    0.2060    0.2067    +0.3 %
+powdigit        0.1736    0.1776    0.1766    -0.6 %
+```
+
+One control row is FLAGGED: **textproc** reads 1.0-4.8 % slower in four runs (median 1.6 %).  The core-layout discriminator (the base runtime plus never-called copies of the round's new functions, §A.1) reads textproc +1.0 %, fib(27)x -3.2 % and fibret +2.0 % against the base with no behaviour changed, so the band is layout; no member was bisected.
+
+The #2510 digit generator was checked on 51,674 doubles given by bit pattern x 18 conversions (perl -> base -> tree): 76 fields fixed (15th-digit ties), 0 regressed.
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and
