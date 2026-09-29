@@ -5205,6 +5205,13 @@ sub _rename_lexical_subs {
     # of its uses changes, see _lexsub_spelling.
     $d->{new}   = $d->{our} ? $d->{name}
                 : sprintf '%s__lexsub__%d', $d->{name}, ++$self->{_lexsub_counter};
+    # A `:prototype(…)` attribute's record (from_attr, left by the pre-pass
+    # under the SOURCE name) travels with the rename: sub_proto_text reads it
+    # by the definition's name to print the p-sub `:prototype` fact (#2533,
+    # s500a — t/op/attrproto.t `my sub lexsub1(bar) : prototype(baz)`).
+    my $attr_rec = $self->environment->get_prototype($d->{name});
+    $self->environment->add_prototype($d->{new}, $attr_rec)
+      if $d->{new} ne $d->{name} && $attr_rec && $attr_rec->{from_attr};
   }
   # A sibling redeclaration in the SAME scope ends the earlier one's claim
   # (#296-B2).  It ends it AT the declarator, not after the statement: unlike
