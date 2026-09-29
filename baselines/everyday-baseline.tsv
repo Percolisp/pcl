@@ -31,9 +31,7 @@ modules/Archive-Tar-Compress	DIFF	1	#155 tie on a FILEHANDLE is announced, not i
 modules/Benchmark-Memoize	DIFF	1	#2084(1) memoize("slow") has no effect (6 calls where perl makes 2); Benchmark timeit now runs -- re-attributed s501b from #2285
 modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
 modules/File-Temp	DIFF	1	#2056 File::Temp->new dies "Cannot dereference non-reference: #<fd-stream>" (the glob-as-object idiom); tempdir() and tempfile() work since s492c's #2007 (re-attributed s495 review)
-modules/IO-Select-Socket	DIFF	1	#1998 a circular `use` of a mid-load module skips its import
-modules/IPC-Open2-Open3	DIFF	1	#2082 open2/open3 with a LIST command; the handles never open
-modules/Math-BigInt-BigFloat	DIFF	1	#2083 Math::BigFloat->bdiv(3, 20) exhausts the binding stack
+modules/IO-Select-Socket	DIFF	1	#2559 4-arg select never reports a ready fd and sysread blocks for the full LENGTH (can_read returns nothing); PF_UNSPEC added to lib/Socket.pm s501b -- re-attributed s501b from #1998 (completed)
 modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)
 modules/Sys-Hostname-Env-English	DIFF	1	#2084 (5) `use Env qw(HOME @PATH)` needs tie on scalars-by-name and arrays (#155)
 modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not implemented

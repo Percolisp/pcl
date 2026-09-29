@@ -21,7 +21,7 @@ use strict;
 use Exporter q{import};
 
 our @EXPORT = qw(
-    PF_INET PF_INET6 PF_UNIX AF_INET AF_INET6 AF_UNIX AF_UNSPEC
+    PF_INET PF_INET6 PF_UNIX PF_UNSPEC AF_INET AF_INET6 AF_UNIX AF_UNSPEC
     SOCK_STREAM SOCK_DGRAM SOCK_RAW
     SOL_SOCKET SO_REUSEADDR SO_KEEPALIVE SO_BROADCAST SO_ERROR
     SO_RCVBUF SO_SNDBUF SO_TYPE SO_LINGER
@@ -43,6 +43,7 @@ use constant AF_INET   => 2;
 use constant AF_INET6  => 10;
 use constant AF_UNIX   => 1;
 use constant AF_UNSPEC => 0;
+use constant PF_UNSPEC => 0;   # socketpair($a, $b, AF_UNIX, SOCK_STREAM, PF_UNSPEC): the doc idiom
 
 # --- Socket types -----------------------------------------------------------
 use constant SOCK_STREAM => 1;
