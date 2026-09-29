@@ -1396,7 +1396,16 @@ that is not a slice, and it descends through the value wrappers the emitter
 may have put in between (`p-list-scalar` for a `($)` prototype, the context
 binds).  A backend may implement it as one vivifying slice reader.  A
 consumer this rule does not reach keeps the plain aliasing read, which is
-the status quo, never a wrong value.  NOT modelled: a deref-rooted slice
+the status quo, never a wrong value.
+
+**A slice that is a `map` block's VALUE reads values (normative, s501q,
+#2515).**  `p-map` copies every value its block returns (perl's
+`pp_mapwhile` copy: `$_++ for map { @a[0,1] } 1` leaves `@a` alone and `map {
+@b[0,5] } 1` does not grow `@b`, probed 5.40.3), so the `p-map` compiler
+macro rewrites a block whose value form — its last form, looking through
+`progn` / `let` / `let*` / `block` — IS `p-aslice` / `p-hslice` into the
+COPYING read `%p-aslice-copy` / `%p-hslice-copy` (#1205's rule, with `p-map`
+as the copying consumer): no element cell is promoted.  NOT modelled: a deref-rooted slice
 whose root is an unboxed read-only local (`my $r; for (@$r{'a'})`) does not
 vivify the ROOT (task #1352, the §3.2c root question over again).
 
@@ -1858,9 +1867,73 @@ arguments `undef` — from the enclosing `p-sub`'s `&rest %_args`, and it does
 the callee-side flattening the uniform calling convention requires (a plain
 `&optional` lambda list would misbind every `f(@args)` / `f(@_)` delegation).
 Extra arguments are silently ignored.  Each entry's CLASS is the declaration
-class of §2b.2a, carried for a reader and ignored at run time.  The two body
-shapes are call-compatible — every call site just applies the function to the
-flattened values.
+class of §2b.2a, carried for a reader and ignored at run time — except
+`:str-buffer`, whose slot starts as a fresh buffer of the argument's string
+(`%pcl-str-buffer`, the declaration's own store discipline; #2571).  The two
+body shapes are call-compatible — every call site just applies the function
+to the flattened values.
+
+**A parameter is a COPY taken at the call (normative, s501q, #2570).**
+`p-raw-params` binds each parameter to the argument's VALUE: a plain number
+or string raw; undef, a dualvar or a magic scalar (`$1`) as a fresh box
+(`p-copy-scalar-arg`).  So a later write to the caller's variable is not seen
+through the parameter — `my $g = 7; sub h { my ($x) = @_; $g = 8; $x } h($g)`
+is 7.  ONE kind is shared, by measured choice: a box holding a REFERENCE or an
+OBJECT is bound as it came (copying it is an allocation per method call's
+`$self`, methret +15..18 %); the residual is a caller variable REASSIGNED
+during the call and read through the parameter afterwards (#2575).  Its argument list
+is built from VALUES too (`%p-flatten-arg-values`): no element slot of an
+array passed whole is promoted to a cell, since the body cannot observe `@_`.
+
+**The licence for both body shapes' @_-free forms is ONE predicate**
+(`_body_observes_args`): after the leading copy, the body mentions none of
+`@_`, `$_[`, `shift`, `pop` (both default to `@_` in a sub), `goto`, `&name;`
+/ `&$code;` (pass the current `@_`), or a string `eval`.  (#2572: the raw path
+used to miss `&name;` and `pop`.)
+
+**`(p-args-body :copy …)` (normative, s501q, Kind-A `args-copy`, #2515).**  A
+body whose only reading of `@_` is a leading `my (LIST) = @_;` (and a
+signature's arity check) gets the `:copy` marker: `@_` is built from the
+argument values (`%p-flatten-arg-values`) instead of the caller's element
+cells (`p-flatten-args`).  Same list, same order, a hole reads undef; nothing
+of the caller is promoted.  Without the marker `@_` aliases as below.
+
+```lisp
+(p-sub pl-shuffle (&rest %_args) FACTS
+  (p-args-body :copy
+    (block nil (p-let ((@deck :array …)) (p-array-= @deck @_) …))))
+```
+
+**A SIGNATURE is the classic spelling plus its arity check (normative,
+s501q, Kind-A `sig-classic`, #2514).**  A named sub whose signature is only
+plain named parameters — scalars, then at most one slurpy `@`/`%` — with no
+default and no placeholder, on one line, whose body does not observe `@_`
+(the predicate above) and declares no `state`, is lowered exactly as the same
+sub written `{ my (PARAMS) = @_; … }`, plus perl's arity check before any
+binding: `(p-check-arity "PKG::NAME" (length @_) MIN MAX FLEX HASH-START)` as
+the first form of `p-args-body`, or — on the raw path, where there is no
+`@_` — the clause `(:arity "PKG::NAME" MIN MAX FLEX HASH-START)` as the first
+body form of `p-raw-params`, which runs `p-check-arity` on the flattened
+argument count.  The messages are v1's (perl's `Too few/Too many arguments
+for subroutine 'PKG::NAME' (got N; expected M)`, `Odd name/value argument
+…`).  The call sites keep the prototype RECORD the signature makes, so no
+call parses differently.  Every other signature (defaults, placeholders, the
+empty `()`, a body using `@_`) keeps the v1 binding: `p-args-body` +
+`p-check-arity` + a `let*` of `p-copy-scalar-arg` / `p-sig-rest-array` /
+`p-sig-rest-hash`.
+
+```lisp
+;; sub height ($a, $z, $d) { … }
+(p-raw-params (($a__excl__1 :scalar …) ($z :scalar) ($d :scalar))
+  (:arity "main::height" 3 3 nil nil)
+  (block nil …))
+```
+
+**A signature's slurpy parameter is a COPY (normative, s501q, #2536).**
+`p-sig-rest-array` / `p-sig-rest-hash` build the array/hash through the list
+assignment's construction arm (`%p-array-store-scalar` /
+`%p-make-hash-entry`), exactly as `my (@r) = @_` does: `sub f ($x, @r) {
+$r[0] = 1 } f(@a)` leaves `@a` alone, as in perl.
 
 **Flattening:** Perl has no argument structure — at every call, array and
 hash arguments splice into one flat value list (`p-flatten-args`). A hash

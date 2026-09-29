@@ -308,7 +308,14 @@ my @benches = (
   # in the high bytes, so a regime slip changes the output and the row BREAKS.
   # ... and the pure-ASCII path it must NOT slow: many short uc/lc calls.
   ['ucshort',   "$HN my \@v = ('e', 'Ab', 'oXo', 'word'); my \$c = 0; for my \$i (1..\$n) { my \$w = \$v[\$i % 4]; \$c += length(uc(\$w)) + ord(lc(\$w)) } print \"\$c\\n\";", 2_000_000, 0],
-  ['lcbytes',   "$HN my \@l = map { \"Ligne \\xC3\\xA9t\\xC3\\xA9 NO \$_ CAF\\xC3\\x89 fin\" } 1 .. 200; my \$c = 0; for (1..\$n) { for my \$s (\@l) { my \$t = lc(\$s) . uc(\$s) . ucfirst(\$s); \$c += ord(substr(\$t, 7, 1)) + length(\$t) } } print \"\$c\\n\";", 2_000, 0],
+  # s501q (perf round 38): a SIGNATURE sub's arithmetic (#2514 -- the classic
+  # spelling's raw verdicts), an array passed WHOLE to a copying callee whose
+  # map block's value is a slice (#2515, the Perfect-shuffle shape), and a
+  # literal LIST declaration feeding `.=` (#2114, the str-buffer licence).
+  ['sigarith',  "use feature 'signatures'; no warnings; sub f (\$a, \$b) { my \$s = 0; my \$d = 0; while (\$d < 10) { \$s += \$d * \$a + \$b; \$d += 1 } \$s } $HN my \$t = 0; for my \$i (1..\$n) { \$t += f(\$i, 2) } print \"\$t\\n\";", 200_000, 0],
+  ['passarr',   "sub ps { my (\@d) = \@_; my \$m = \@d / 2; map { \@d[\$_, \$_ + \$m] } 0 .. \$m - 1 } $HN my \@a = (1 .. 40); my \$c = 0; for (1..\$n) { \@a = ps(\@a); \$c += \$a[1] } print \"\$c\\n\";", 50_000, 0],
+  ['listdeclcat', "$HN my \$c = 0; for (1..\$n) { my (\$s, \$i) = ('', 0); while (\$i++ < 200) { \$s .= 'ab' } \$c += length \$s } print \"\$c\\n\";", 20_000, 0],
+  ['lcbytes',"$HN my \@l = map { \"Ligne \\xC3\\xA9t\\xC3\\xA9 NO \$_ CAF\\xC3\\x89 fin\" } 1 .. 200; my \$c = 0; for (1..\$n) { for my \$s (\@l) { my \$t = lc(\$s) . uc(\$s) . ucfirst(\$s); \$c += ord(substr(\$t, 7, 1)) + length(\$t) } } print \"\$c\\n\";", 2_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------

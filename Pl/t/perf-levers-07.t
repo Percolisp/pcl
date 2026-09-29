@@ -124,7 +124,7 @@ print $lfh <<'LISP';
          (string-downcase (prin1-to-string (funcall (compiler-macro-function 'p-map)
                                    '(p-map (lambda ($_) $_) (p-aslice @d 0 1)) nil))))
        t))
-(format t "short ~a~%" (and (fboundp '%p-case-map-short) (equal (%p-case-map-short "aBc1" t) "ABC1") (null (%p-case-map-short (coerce (list #\a (code-char 233)) 'string) t)) t))
+(format t "asciichar ~a~%" (and (fboundp '%p-ascii-case-char) (equal (%p-case-map-ascii (coerce (list #\a (code-char 233) #\B) 'string) t nil) (coerce (list #\A (code-char 233) #\B) 'string)) t))
 (format t "nottail ~a~%"
   (and (search "%p-aslice-copy"
          (string-downcase (prin1-to-string (funcall (compiler-macro-function 'p-map)
@@ -136,7 +136,7 @@ my $mech = `sbcl @sbcl_rt --load $lfile 2>&1`;
 like($mech, qr/^blk T$/mi,  '#2515 (ii): a map block whose value is a slice reads it with %p-aslice-copy');
 like($mech, qr/^item T$/mi, 'control: a slice among the map ITEMS still vivifies (#1010)');
 like($mech, qr/^nottail NIL$/mi, '#2515 (ii): a slice that is not the block value is left alone');
-like($mech, qr/^short T$/mi, '#2535: the short pure-ASCII one-pass map exists, maps, and declines at a high char');
+like($mech, qr/^asciichar T$/mi, '#2535: the bytes arm maps in one loop (%p-ascii-case-char) and keeps a high char');
 
 my $LD = <<'PERL';
 my ($s, $i) = ("", 0);

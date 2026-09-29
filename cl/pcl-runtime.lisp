@@ -6239,12 +6239,13 @@
 ;;; (REPLACE) and then map the copy -- after %p-first-high-char and the UTF-8
 ;;; validation had each walked it: four passes for `lc' of an undecoded
 ;;; UTF-8 line (bench lcbytes, -26 % at s494u).  The copy and the map are now
-;;; one loop over the source's own data vector, and a SHORT pure-ASCII string
-;;; skips the scan too (%p-case-map-short).  The RULE is untouched: every
-;;; char below #x80 maps by ASCII arithmetic -- the answer string-upcase /
-;;; string-downcase give for it, so a pure-ASCII string maps the same under
-;;; both regimes -- and the regime decision for a high char is made exactly
-;;; where it was.
+;;; one loop over the source's own data vector.  The RULE is untouched: every
+;;; char below #x80 maps by ASCII arithmetic, every other char is kept, and the
+;;; regime decision is made exactly where it was.  NOT DONE, measured: a
+;;; one-pass map for a SHORT pure-ASCII string (<= 16 chars) instead of the
+;;; scan + string-upcase -- a pure-SBCL replica ran it as fast as
+;;; string-upcase, but inside the runtime the ucshort bench row read +21 % in
+;;; two interleaved pairs (see task #2535); SBCL's string-upcase stays.
 (declaim (inline %p-ascii-case-char))
 (defun %p-ascii-case-char (c up)
   "C mapped by ASCII rules (UP: to upper); any other char is itself."
@@ -6273,27 +6274,6 @@
               (setf (schar r i) (if (< i end) (%p-ascii-case-char c up) c))))))
     r))
 
-(defun %p-case-map-short (s up)
-  "A SHORT pure-ASCII S (a simple string of at most 16 chars) case-mapped in
-   ONE pass, or NIL the moment a char at or above #x80 is met -- the caller
-   then takes the regime path, which decides that char exactly as before.
-   string-upcase / string-downcase on such a string pay a scan of their own
-   plus the Unicode-table dispatch; this is the arithmetic alone (bench
-   ucshort, s501q)."
-  (declare (optimize speed))
-  (let* ((n (length s))
-         (r (make-string n)))
-    (declare (type (simple-array character (*)) r) (fixnum n))
-    (typecase s
-      ((simple-array character (*))
-       (dotimes (i n r)
-         (let ((c (schar s i)))
-           (when (>= (char-code c) #x80) (return nil))
-           (setf (schar r i) (%p-ascii-case-char c up)))))
-      (simple-base-string
-       (dotimes (i n r)
-         (setf (schar r i) (%p-ascii-case-char (schar s i) up)))))))
-
 (defun %p-case-map (str op regime)
   "lc/uc/fc/lcfirst/ucfirst (OP :lc :uc :fc :lcfirst :ucfirst) of STR under
    REGIME (see the section comment).  Always a fresh string.  INLINE, so each builtin
@@ -6302,10 +6282,7 @@
   (let* ((s (to-string str))
          (first-only (or (eq op :lcfirst) (eq op :ucfirst)))
          (up (or (eq op :uc) (eq op :ucfirst))))
-    (cond ((and (not first-only) (<= (length s) 16)
-                (typep s '(or (simple-array character (*)) simple-base-string))
-                (%p-case-map-short s up)))
-          ((%p-case-bytes-p s regime first-only) (%p-case-map-ascii s up first-only))
+    (cond ((%p-case-bytes-p s regime first-only) (%p-case-map-ascii s up first-only))
           ((not first-only) (if up (string-upcase s) (string-downcase s)))
           ((zerop (length s)) s)
           (t (concatenate 'string
@@ -8030,15 +8007,30 @@ per element."
 ;;; as the caller's own BOX (@_ aliases), so `sub f { my ($x) = @_; $g = 8; $x }
 ;;; f($g)' answered 8 where perl answers the value $g had at the call (probed
 ;;; 5.40.3; the same through `f(@a)' and `my $x = shift').  The copy is the
-;;; construction arm's (%p-storable-raw: a plain number or string lives raw),
-;;; else p-copy-scalar-arg's fresh box -- the signature binding's own copy.  A
-;;; raw argument (a literal, a computed value) is already a value.
+;;; construction arm's (%p-storable-raw: a plain number or string lives raw,
+;;; which costs nothing), else p-copy-scalar-arg's fresh box -- the signature
+;;; binding's own copy -- for undef, a dualvar, a magic cell ($1 read after the
+;;; callee's own match must be the CALL's value).  A raw argument (a literal, a
+;;; computed value) is already a value.
+;;;
+;;; ONE KIND IS STILL SHARED, deliberately: a box that holds a REFERENCE or an
+;;; OBJECT (a class, the is-ref flag, an aggregate or code value).  Copying it
+;;; is a box allocation per call, and that is the `$self' of every method:
+;;; measured, methret +15..+18 % in two interleaved pairs.  What stays wrong is
+;;; the rare shape where the caller's variable is REASSIGNED during the call and
+;;; the callee reads its parameter afterwards (`sub f { my ($o) = @_; $g =
+;;; undef; ref $o } f($g)' -- task #2575); the referent itself is shared in perl
+;;; too, so writes THROUGH the reference were never the issue.
 (declaim (inline %p-param-copy))
 (defun %p-param-copy (v)
   "The value a copying parameter binds for the argument V."
-  (if (p-box-p v)
-      (or (%p-storable-raw v) (p-copy-scalar-arg v))
-      v))
+  (cond ((not (p-box-p v)) v)
+        ((%p-storable-raw v))
+        ((or (p-box-class v) (p-box-is-ref v)
+             (let ((x (p-box-value v)))
+               (or (hash-table-p x) (and (vectorp x) (not (stringp x))) (functionp x))))
+         v)
+        (t (p-copy-scalar-arg v))))
 
 ;;; ...and so the ARGUMENT LIST need not alias either (task #2515 (i)).  The
 ;;; general @_ builder, p-flatten-args, hands a callee the caller's element
