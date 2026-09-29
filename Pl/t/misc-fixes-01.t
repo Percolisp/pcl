@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 134;
+plan tests => 135;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -465,6 +465,17 @@ test_cl('method call via string name dispatches by name',
      my $o = Foo->new; my $n = "hi";
      print $o->$n("x"), "\n";',
     "HI:x\n");
+
+# s500a (found behind #2533): the method name in `$_` -- a PPI::Token::Magic,
+# which the dynamic-method test compared by ref-eq with Symbol -- called a
+# method literally named "$_" (core Archive::Tar: `map { $entry->$_() } qw[...]`).
+test_cl('method call via $_ (map / for / no-parens) dispatches by name',
+    'package Foo; sub new { bless {}, shift } sub a { "A" } sub b { "B" . ($_[1] // "") }
+     package main;
+     my $o = Foo->new;
+     print join(",", map { $o->$_() } qw(a b)), " ", join(",", map { $o->$_ } qw(a b)), "\n";
+     for (qw(b)) { print $o->$_(1), "\n" }',
+    "A,B A,B\nB1\n");
 
 # Method arguments flatten like any Perl call: $o->isa(@a) spreads @a.
 test_cl('method arguments flatten (array arg spread)',

@@ -1759,7 +1759,9 @@ calls it.
 position after the lambda list — **always present, possibly `()`** — holding
 what the compiler PROVED about this sub and used to throw away at emission.  A
 consumer reads the slot by POSITION, never by shape, and may drop it entirely:
-it changes no behaviour and the macro ignores it.  The key set is CLOSED at
+it changes no behaviour and the macro ignores it — with ONE exception,
+`:prototype`, a DECLARED fact perl exposes at run time, which the macro
+registers (below).  The key set is CLOSED at
 both ends (an unknown key is an error at macroexpansion):
 
 | key | value | meaning |
@@ -1769,12 +1771,12 @@ both ends (an unknown key is an error at macroexpansion):
 | `:writes-args` | `t` / `nil` | does the sub write through `@_` into its caller's variables (#189, §5.2)?  **Both directions**: the scan answers 1 on any doubt, so `nil` is a real proof that the arguments may be passed by value |
 | `:string-eval` | `t` | the body contains a string `eval`.  True-only, and conservative: `->eval`, `eval =>` and a hash key spelled `eval` over-fire harmlessly |
 | `:captures` | a list of cell names | the promoted package cells this hoisted sub closes over, recorded by the promotion that PROVED the capture (§2b.3's `:captured` / `:spanning` families) |
-| `:prototype` | the text (`"$$"`) | an OLD-STYLE prototype.  A signature is not a prototype and prints nothing.  This is the SUB's prototype; `prototype("CORE::NAME")` is a different question, answered by the runtime's generated `%pcl-core-prototypes` table (perl's own strings, `tools/gen-core-protos.pl`) — a keyword's string, NIL for the ~70 control-flow words, and the fatal `Can't find an opnumber for "NAME"` for a non-keyword, with the empty name `CORE::` undef rather than fatal (normative, s484a / #1586) |
+| `:prototype` | the text (`"$$"`) | the sub's PROTOTYPE as perl's `prototype(\&f)` reports it: the characters between the parens, whitespace kept — a classic `sub f ($$)`, `sub f ()` (`""`), a `:prototype(…)` attribute (which wins over a signature beside it), and every `use constant` sub (`""`).  A signature — any paren list where the feature is in force — is not a prototype and prints nothing.  **The one fact with run-time meaning (normative, s500a / #2533):** the `p-sub` expansion calls `(p-__pcl_set_prototype FN TEXT)` right after installing the function, so the registry `prototype()` reads holds it from the definition on (an anonymous `sub ($) {…}` reaches the same registrar through a `__pcl_set_prototype` call around its lambda).  Example: `use constant K => 1` → `(p-sub pl-K (&rest %_args) (:prototype "") (progn %_args 1))`, and `prototype(\&K)` is `''`.  This is the SUB's prototype; `prototype("CORE::NAME")` is a different question, answered by the runtime's generated `%pcl-core-prototypes` table (perl's own strings, `tools/gen-core-protos.pl`) — a keyword's string, NIL for the ~70 control-flow words, and the fatal `Can't find an opnumber for "NAME"` for a non-keyword, with the empty name `CORE::` undef rather than fatal (normative, s484a / #1586) |
 | `:needs` | a list of class keywords | the OBLIGATION classes this sub's BODY exercises, in §10b's own class names (`:nonlocal_exit.die`, `:dynamic_scope.local`, `:io`, `:regex.native` …) — task #1214.  **The one key here that is a COMPLETE answer rather than a proof-if-present**, so it is always printed and `()` is a real fact: nothing in this sub can throw, so a target needs no frame; nothing localizes, so it needs no save/restore stack (`docs/plan-speed-and-ir-s470.md` §B.3).  It also lets a backend compile a program PARTIALLY — every sub whose classes it implements — and refuse the rest with §9.3b's shape.  Computed by the same walk `pl2cl --manifest` uses, scoped to the body, so the two answers cannot drift |
 
-`()` is common and means exactly "nothing proven": 155 of the perl-tests
-corpus's 661 `p-sub` forms print it, most of them `use constant` definitions,
-which are lowered by a path that computes none of these facts.
+`()` is common and means exactly "nothing proven" (a `use constant`
+definition, lowered by a path that proves none of these facts, prints
+`(:prototype "")` since s500a — the declared text, not a proof).
 
 The plist is what the compiler proved **under the configuration that emitted
 the file**: `PCL_OPT` switches off Kind-A rules, and a fact whose analysis a

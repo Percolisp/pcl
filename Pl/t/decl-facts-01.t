@@ -253,14 +253,19 @@ PERL
 
 {
     # ALWAYS printed, possibly empty: a consumer reads the slot by POSITION,
-    # never by shape.  `use constant` is lowered by v1's constant emitter,
-    # which proves none of the facts -- 155 of the corpus's 661 p-sub forms
-    # print the empty plist for that reason.
-    my $cl = cl_of('use constant NADA => 5; print NADA, "\n";');
-    like($cl, qr/\(p-sub pl-NADA \(&rest %_args\) \(\) /,
+    # never by shape.  A signature sub is lowered by v1's sub printer, which
+    # proves none of the facts and has no prototype, so it prints the empty
+    # plist.  (Until s500a this row used a `use constant` sub; that now carries
+    # `:prototype ""` -- perl's prototype(\&CONST) is '' -- task #2533.)
+    my $src = 'use feature "signatures"; no warnings; sub sg ($x) { $x } print sg(5), "\n";';
+    my $cl = cl_of($src);
+    like($cl, qr/\(p-sub pl-sg \(&rest %_args\) \(\)\s/,
          '#1035: a sub the compiler proved nothing about still prints ()');
-    is(run_cl('use constant NADA => 5; print NADA, "\n";'), "5\n",
+    is(run_cl($src), "5\n",
        '#1035: ... and it still answers');
+    like(cl_of('use constant NADA => 5; print NADA, "\n";'),
+         qr/\(p-sub pl-NADA \(&rest %_args\) \(:prototype ""\) /,
+         '#2533: a use-constant sub prints its empty prototype as its one fact');
 }
 
 # ── the two properties that make it free ─────────────────────────────────────

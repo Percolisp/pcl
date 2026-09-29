@@ -1194,19 +1194,18 @@ sub _extract_prototype_attributes {
       # swallowing) must see it — the runtime registry alone is invisible
       # to the parser.  Marked from_attr so the definition's later default
       # registration knows not to clobber it (both pipelines).
-      if ($self->environment) {
-        my $si = $self->parse_prototype_or_signature($proto, $stmt);
-        $si->{from_attr} = 1;
-        $self->environment->add_prototype($name, $si);
-      }
+      # The RUN-TIME half travels on the same record: `attr_text` is what
+      # sub_proto_text hands both p-sub printers for the `:prototype` fact,
+      # which the p-sub macro registers AT DEFINITION (perl applies the
+      # attribute at compile time, so a BEGIN or an earlier statement sees
+      # it) — task #2533.  Until s500a this spliced a
+      # `__pcl_set_prototype(\&f, '…')` STATEMENT after the sub, a second
+      # path that ran only when control reached it.
+      my $si = $self->parse_prototype_or_signature($proto, $stmt);
+      $si->{from_attr} = 1;
+      $si->{attr_text} = $proto;          # raw: perl keeps the whitespace
+      $self->environment->add_prototype($name, $si);
       _delete_attribute_and_colon($attr);
-      my $text = " __pcl_set_prototype(\\&$name, '$quoted');";
-      my $ndoc = fragment_doc($text) or next;
-      my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }
-               $ndoc->children;
-      $_->remove for @el;
-      my $anchor = $stmt;
-      for my $e (@el) { $anchor->insert_after($e); $anchor = $e; }
       $changed = 1;
     }
     else {
@@ -8542,6 +8541,41 @@ sub _sub_head {
   return ($name, $prototype, $is_signature_syntax, $block);
 }
 
+# THE prototype TEXT a named definition carries at run time — what perl's
+# `prototype(\&f)` answers — or undef (task #2533).  ONE reading, asked by
+# both p-sub printers (Parser2's _sub_facts, v1's _process_sub_statement)
+# for the `:prototype` fact the p-sub macro registers:
+#   * a `:prototype(…)` attribute (the from_attr record the pre-pass left,
+#     its text with whitespace removed) wins — it is perl's prototype even
+#     when the parenthesised list after it is a signature;
+#   * else the head's Token::Prototype text (prototype_token_text: parens off,
+#     whitespace KEPT as perl does, `()` → ''), unless it is a SIGNATURE: with the feature
+#     in force at this statement (#455's boundary) EVERY paren list is one;
+#   * a Structure::Signature, or no parens at all, is no prototype: undef.
+sub sub_proto_text {
+  my ($self, $stmt) = @_;
+  my $name = $stmt->name;
+  if (defined $name && $self->environment) {
+    my $rec = $self->environment->get_prototype($name);
+    return $rec->{attr_text} if $rec && $rec->{from_attr} && defined $rec->{attr_text};
+  }
+  my ($tok) = grep { $_->isa('PPI::Token::Prototype') } $stmt->children;
+  return undef unless $tok;
+  return undef if $self->_signatures_enabled_at($stmt);
+  return prototype_token_text($tok);
+}
+
+# The prototype TEXT of a PPI::Token::Prototype exactly as perl reports it:
+# the characters between the parens, WHITESPACE KEPT (probed 5.40.3:
+# `sub f ( $ ; $ )` answers ' $ ; $ ' -- PPI's own ->prototype strips it).
+# Also asked by PExpr for an anonymous `sub ($) {…}`.
+sub prototype_token_text {
+  my ($tok) = @_;
+  (my $c = $tok->content) =~ s/\A\(//;
+  $c =~ s/\)\z//;
+  return $c;
+}
+
 # The sub's prototype RECORD (the sig_info every caller reads through
 # get_prototype), from its head.  Default: -1 = "unknown/list" — the sub
 # takes any number of args; only an explicit prototype/signature narrows it.
@@ -8576,7 +8610,10 @@ sub _register_sub_prototype {
   return unless $name;
   my $prev = $self->environment->get_prototype($name);
   my $pkg  = $self->environment->current_package();
-  if (!($prev && $prev->{from_attr} && !$prototype && !$is_signature_syntax)) {
+  # A `:prototype(…)` attribute IS the prototype, even beside an inline one
+  # or a signature (perl: "Prototype '$$' overridden by attribute") — never
+  # overwrite its record (s500a, #2533: the signature spelling used to).
+  if (!($prev && $prev->{from_attr})) {
     # The declaring package goes with the prototype as it goes with the
     # declaration below (task #421).
     $self->environment->add_prototype($name, $sig_info, $pkg);
@@ -8844,8 +8881,9 @@ sub _process_sub_statement {
 
   # The facts plist sits at a FIXED position after the lambda list (task
   # #1035 step 3, ir-spec 2b.2a): v1 proves none of those facts, so it prints
-  # the empty plist -- a consumer reads the slot by position, never by shape.
-  $self->_emit("(p-sub $cl_sub_name ($params_cl)" . _sub_facts_slot());
+  # the empty plist -- a consumer reads the slot by position, never by shape --
+  # plus the DECLARED `:prototype` text, which the macro registers (#2533).
+  $self->_emit("(p-sub $cl_sub_name ($params_cl)" . _sub_facts_slot($self->sub_proto_text($stmt)));
   $self->indent_level($self->indent_level + 1);
 
   # Number of wrapper forms ((let ...)/(let* ...)) opened for a signature sub,
@@ -11158,7 +11196,7 @@ sub _emit_constant {
   # references %_args so it ignores (and silences the unused-var warning on)
   # the arguments while still returning the constant value.
   my $cl_sub_name = $self->_qualified_sub_to_cl($name);
-  $self->_emit("(p-sub $cl_sub_name (&rest %_args)" . _sub_facts_slot()
+  $self->_emit("(p-sub $cl_sub_name (&rest %_args)" . _sub_facts_slot('')
                 . " (progn %_args $cl_value))");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
@@ -11169,10 +11207,17 @@ sub _emit_constant {
 
 
 # Compile a constant's value expression to CL
-# The `p-sub` facts slot as v1 prints it: always empty (v1 computes none of
-# the per-sub facts), and absent entirely under the IR verification switch,
-# whose ONE reading is Pl::CLForm::ir_plain.
-sub _sub_facts_slot { return Pl::CLForm::ir_plain() ? '' : ' ()' }
+# The `p-sub` facts slot as v1 prints it: empty except for `:prototype` (v1
+# proves none of the other per-sub facts; the prototype TEXT is declared, not
+# proved, and the p-sub macro registers it -- task #2533), and absent entirely
+# under the IR verification switch, whose ONE reading is Pl::CLForm::ir_plain.
+# $proto: the text from sub_proto_text ('' for a `use constant` sub), or undef.
+sub _sub_facts_slot {
+  my ($proto) = @_;
+  return '' if Pl::CLForm::ir_plain();
+  return ' ()' if !defined $proto;
+  return ' (:prototype ' . Pl::ExprToCL::cl_string_datum($proto) . ')';
+}
 
 sub _compile_constant_value {
   my $self  = shift;

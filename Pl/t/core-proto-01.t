@@ -40,7 +40,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -139,18 +139,50 @@ SKIP: {
       or diag($arity);
 }
 
-# ── the classic-prototype gap is UNCHANGED (docs/not-supported.md) ───────────
-# `sub f ($$)` prototypes are consumed at transpile time and still report
-# undef; only the CORE:: half moved.  This row is the inverse guard: a fix that
-# accidentally routed a user sub through the CORE table would break it.
+# ── a user sub answers ITS OWN prototype, never the CORE table's ─────────────
+# Until s500a (#2533) a classic `sub f ($$)` reported undef here and this row
+# asserted that gap; it now asserts perl's text (probed 5.40.3: "$$ undef\n
+# undef\n").  Still the inverse guard it was: a fix that routed a user sub
+# through the CORE table would answer `abs2` as "_" and fail it.
 test_cl('a user sub is not looked up in the CORE table',
     'sub p3 ($$) { 1 } sub plain { 1 }'
-  . 'print +(defined prototype("p3") ? "def" : "undef"), " ",'
+  . 'print +(defined prototype("p3") ? prototype("p3") : "undef"), " ",'
   . '      (defined prototype(\&plain) ? "def" : "undef"), "\n";'
   . 'sub abs2 { 1 } print +(defined prototype("abs2") ? "def" : "undef"), "\n";',
-    "undef undef\nundef\n");
+    "\$\$ undef\nundef\n");
 
 test_cl('a sub NAMED like a keyword is still the sub, not the keyword',
     'print +(defined prototype("length") ? "def" : "undef"), "\n";'
   . 'print prototype("CORE::length"), "\n";',
     "undef\n_\n");
+
+# ── #2533 (s500a): run-time prototype() for EVERY definition spelling ────────
+# Until s500a only the `:prototype(...)` attribute registered; a classic
+# `sub f ($$)`, `sub e0 ()`, every `use constant` sub (perl: '') and an
+# anonymous `sub ($) {}` all answered undef -- core Archive::Tar::Constant
+# filters its @EXPORT by `defined prototype($sub) and not length ...`, so
+# under PCL it exported nothing.  Expected strings are perl 5.40.3's.
+my $pv = 'no warnings; sub pv { my $p = prototype($_[0]); defined $p ? "\x27$p\x27" : "undef" }';
+
+test_cl('#2533 every use-constant spelling reports the empty prototype',
+    $pv . ' use constant SC => 5; use constant LI => (1, 2); use constant CR => sub { 1 };'
+  . ' use constant { HA => 1, HB => 2 };'
+  . ' print join(" ", map { pv(\&{$_}) } qw(SC LI CR HA HB)), "\n";',
+    "'' '' '' '' ''\n");
+
+test_cl('#2533 named classic prototypes: text as written, by ref taken early and by name',
+    $pv . ' my $early = \&late; print pv("late"), " ", pv($early), "\n"; sub late ($;@) { 1 }'
+  . ' sub p2 ($$) { 1 } sub e0 () { 1 } sub pl { 1 } sub at :prototype(\@) { 1 } sub sp ( $ ; $ ) { 1 }'
+  . ' print join(" ", map { pv($_) } qw(p2 e0 pl at sp)), "\n";'
+  . ' { package Q; sub qp (&@) { 1 } } print pv(Q->can("qp")), " ", pv("Q::qp"), "\n";',
+    "'\$;\@' '\$;\@'\n'\$\$' '' undef '\\\@' ' \$ ; \$ '\n'&\@' '&\@'\n");
+
+test_cl('#2533 anonymous subs: sub ($) and sub () carry their prototype, sub {} none',
+    $pv . ' my $an = sub ($) { 1 }; my $an0 = sub () { 2 }; my $pl = sub { 3 };'
+  . ' print join(" ", pv($an), pv($an0), pv($pl), $an0->()), "\n";',
+    "'\$' '' undef 2\n");
+
+test_cl('#2533 the Archive::Tar::Constant filter: defined and empty = a constant',
+    'no strict "refs"; use constant SC => 5; use constant LI => (1, 2); sub e0 () { 1 } sub pl { 1 } sub p2 ($$) { 1 }'
+  . ' print join(",", grep { defined prototype(\&{"main::$_"}) && !length prototype(\&{"main::$_"}) } qw(SC LI e0 pl p2)), "\n";',
+    "SC,LI,e0\n");

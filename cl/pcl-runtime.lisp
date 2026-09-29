@@ -1086,8 +1086,12 @@
 (defmacro p-sub (name params facts &body body)
   ;; FACTS is the compiler's proven-facts plist (task #1035 step 3), at a FIXED
   ;; position after the lambda list so a consumer reads it by position: always
-  ;; present, possibly ().  IGNORED at run time -- checked against the closed
-  ;; key set and dropped -- so the expansion is exactly what it was.
+  ;; present, possibly ().  Checked against the closed key set; every key is
+  ;; IGNORED at run time EXCEPT :prototype, the one fact perl itself exposes
+  ;; at run time -- `prototype(\&f)` -- which the install registers in the
+  ;; ONE registry p-prototype reads (task #2533, s500a: a classic `sub f ($$)`,
+  ;; a `:prototype(...)` attribute and every `use constant` sub ('') all
+  ;; arrive here; ir-spec 2b.2a).
   ;; Leading (declare ...) forms are lifted to the lambda head (before the
   ;; bookkeeping let*), e.g. the v2 pipeline's (declare (ignore %_args)
   ;; (dynamic-extent %_args)) for subs that never touch @_.
@@ -1095,6 +1099,9 @@
   (let* ((decls (loop while (and (consp (first body))
                                  (eq (first (first body)) 'declare))
                       collect (pop body)))
+         (proto (getf facts :prototype))
+         (register (when proto
+                     `((p-__pcl_set_prototype (symbol-function local-sym) ,proto))))
          (install
           `(let ((local-sym (%p-reserve-sub-name ',name))
                  ;; Per-sub constants, computed ONCE at definition:
@@ -1115,7 +1122,8 @@
                             (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
                             (*pcl-caller-wantarray* *wantarray*))
                        (p-sub-frame
-                        ,@body)))))))
+                        ,@body))))
+             ,@register)))
     (if *pcl-fasl-build*
         ;; Building a module fasl: the compile pass reserves the NAME (the
         ;; reader needs it) and nothing else, so the body is compiled once —
@@ -29531,13 +29539,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    A `CORE::NAME` argument answers perl's own prototype for that builtin, from
    the generated %pcl-core-prototypes table (task #1586) — every one of them
    used to read undef, and `prototype(\"CORE::nosuchthing\")` used not to die.
-   Otherwise: only prototypes declared via the :prototype(...) attribute (or
-   Sub::Util::set_prototype) are tracked; classic `sub f ($$)` prototypes are
-   consumed at transpile time and report undef here."
+   Otherwise the registry answers (task #2533): every named definition whose
+   p-sub facts carry :prototype (a classic `sub f ($$)`, a `:prototype(...)`
+   attribute, a `use constant` sub = \"\"), an anonymous `sub ($) {...}` (the
+   parser wraps it in __pcl_set_prototype), and Sub::Util::set_prototype.  A
+   sub without one -- plain, or a signature -- is undef, as in perl.  A code
+   ref taken BEFORE its definition is a late-binding trampoline; it answers
+   for the sub its name reaches now."
   (let ((v (unbox ref)))
     (when (and (stringp v) (>= (length v) 6) (string= v "CORE::" :end1 6))
       (return-from p-prototype (%p-core-prototype (subseq v 6)))))
   (let* ((fn (%p-code-function ref))
+         (target (and fn (gethash fn *p-lazy-coderef-target*)))
+         (fn (if (and target (fboundp target)) (symbol-function target) fn))
          (proto (and fn (gethash fn %pcl-sub-prototypes))))
     (or proto *p-undef*)))
 

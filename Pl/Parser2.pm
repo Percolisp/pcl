@@ -2008,9 +2008,13 @@ sub parse {
             sub { $fp->parse_prototype_or_signature($proto, $sub) })->{result};
           # The DECLARING package goes with the prototype, exactly as it goes
           # with the declaration below it: two packages may declare the same
-          # bare name with different prototypes (task #421).
+          # bare name with different prototypes (task #421).  A `:prototype(…)`
+          # attribute's record (from_attr) IS the prototype even beside a
+          # signature — never overwritten (the v1 twin: _register_sub_prototype).
+          my $prev_attr = $self->environment->get_prototype($sub->name);
           $self->environment->add_prototype($sub->name, $sig_info,
-                                            $self->_effective_pkg($sub, $seg->{pkg}));
+                                            $self->_effective_pkg($sub, $seg->{pkg}))
+            if !($prev_attr && $prev_attr->{from_attr});
           $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
                                              Pl::PExpr::TokenUtils::decl_site($sub));
           next;
@@ -8610,9 +8614,11 @@ sub _sub_facts {
     push @f, ':captures',
       ['list', map { cl_sym($_) } grep { !$seen{$_}++ } @$caps];
   }
-  my $proto = $self->environment->get_prototype($sub->name);
-  push @f, ':prototype', Pl::ExprToCL::cl_string_datum($proto->{proto_string})
-    if $proto && $proto->{is_proto} && defined $proto->{proto_string};
+  # The prototype TEXT this definition carries at run time (task #2533) — the
+  # ONE reading both p-sub printers ask; the p-sub macro registers it.
+  my $ptext = $self->fallback_parser->sub_proto_text($sub);
+  push @f, ':prototype', Pl::ExprToCL::cl_string_datum($ptext)
+    if defined $ptext;
   # The obligation classes, from Pl::Manifest's ONE walk applied to the body
   # the caller has just built (no second table, no second scan — rule 11).
   push @f, ':needs', ['list', Pl::Manifest::needs_of_form($body)]

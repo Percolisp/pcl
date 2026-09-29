@@ -3327,11 +3327,23 @@ sub handle_subcalls {
     # below fire.  Without the ATTRIBUTE half, `sub :lvalue { … }` in
     # expression position fell through to "Missing case: [" and the whole
     # statement was replaced by a PARSE ERROR comment (op/sub_lval.t, #268).
+    # A CLASSIC prototype on an anonymous sub (`sub ($) { … }`) is kept as
+    # TEXT: perl's `prototype($anon)` answers it, so the func_ref built below
+    # is wrapped in `__pcl_set_prototype(…, 'TEXT')` — the same registrar the
+    # anonymous `:prototype(…)` attribute's pre-pass wrap calls (task #2533).
+    # A paren list where signatures are in force is a signature, not this.
+    my $anon_proto;
     if ($now->content() eq 'sub') {
       my $drop = 0;
       while ($i + 1 + $drop < scalar(@$e)) {
         my $t = $e->[$i + 1 + $drop];
-        if (ref($t) eq 'PPI::Token::Prototype') { $drop++; next }
+        if (ref($t) eq 'PPI::Token::Prototype') {
+          $anon_proto = Pl::Parser::prototype_token_text($t)
+            if $drop == 0 && $self->has_parser
+            && !$self->parser->_signatures_enabled_at($t->statement // $t);
+          $drop++;
+          next;
+        }
         last unless ref($t) eq 'PPI::Token::Operator' && $t->content eq ':'
           && $i + 2 + $drop < scalar(@$e)
           && ref($e->[$i + 2 + $drop]) eq 'PPI::Token::Attribute';
@@ -3749,6 +3761,16 @@ sub handle_subcalls {
           # the parser answers with the whole lambda form.
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
           $ref_node->{lambda_form} = $self->_embedded_block($next, 'sub');
+          if (defined $anon_proto) {
+            my ($fc_node, $fc_id) = $self->make_node_insert('funcall');
+            $self->add_child_to_node($fc_id,
+              $self->make_node(PPI::Token::Word->new('__pcl_set_prototype')));
+            $self->add_child_to_node($fc_id, $ref_id);
+            (my $q = $anon_proto) =~ s/([\\'])/\\$1/g;
+            $self->add_child_to_node($fc_id,
+              $self->make_node(PPI::Token::Quote::Single->new("'$q'")));
+            $ref_node = $fc_node;
+          }
 
           # Replace sub { } with the function reference (4-arg splice preserves comma)
           splice @$e, $i, 2, $ref_node;

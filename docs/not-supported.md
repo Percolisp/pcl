@@ -1841,27 +1841,36 @@ loses 35 assertions to one drop, because a file-level `my` makes the enclosing
 
 ---
 
-## `prototype()` — returns only registered prototypes (attribute / Sub::Util)
+## `prototype()` — every definition spelling is registered (s500a); the residue
 
 **Perl behaviour:** `prototype(\&foo)` returns the prototype string for `&foo`
 (e.g. `"\$a"` for `sub foo ($a) { }` without `use feature 'signatures'`), or
 `undef` if the sub has no prototype.
 
-**PCL behaviour (since s316o):** a runtime registry (`%pcl-sub-prototypes`,
-keyed on the function object) backs `prototype()`.  It is populated by the
-`:prototype(...)` attribute (named and anonymous subs — desugared at the
-shared PPI entry into `__pcl_set_prototype` calls) and by
-`Sub::Util::set_prototype`, and `prototype()` accepts coderefs, blessed
-coderefs and symbolic names.  CLASSIC prototypes (`sub foo ($$) {…}`) are
-still consumed at transpile time only — `prototype()` reports `undef` for
-them, where perl reports the string.  (For how PCL reads a `($a)`-shaped
-parameter list at all, see *Signature syntax is read as a signature even
-with the feature off*, below.)
+**PCL behaviour (since s500a, task #2533): perl-exact for every spelling
+probed.**  A runtime registry (`%pcl-sub-prototypes`, keyed on the function
+object, weak) backs `prototype()`, and ONE registrar (`p-__pcl_set_prototype`)
+fills it from: every NAMED definition whose `p-sub` facts carry `:prototype`
+(a classic `sub f ($$)`, `sub e0 ()`, a `:prototype(...)` attribute, and
+every `use constant` sub, which reports `''`) — the p-sub macro registers it
+AT DEFINITION, so an earlier statement or a code ref taken before the `sub`
+sees it; an ANONYMOUS `sub ($) {…}` (wrapped in `__pcl_set_prototype` by the
+anonymous-sub handler in PExpr) and an anonymous `sub :prototype($) {…}` (the
+attribute pre-pass's wrap); and `Sub::Util::set_prototype`.  The text is
+perl's: the characters between the parens, whitespace KEPT (`sub f ( $ ; $ )`
+answers `' $ ; $ '`).  A plain sub and a signature (any paren list where the
+feature is in force) answer `undef`.  The measurement that closed the old gap:
+core Archive::Tar::Constant builds `@EXPORT` with `defined prototype($sub) and
+not length prototype($sub)`, so it exported NOTHING under PCL; Memoize,
+Test2::Mock, Fatal/autodie and Net::Ping also read prototypes back (all now
+get perl's text).
 
-**Rationale for the classic-prototype gap:** registering every prototyped
-sub is easy but changes `defined prototype(...)` guards in code that works
-today; do it deliberately (with a sweep) or not at all.  No maintained CPAN
-module reads its own classic prototypes back at runtime.
+**Residue:** (1) the prototype RECORD is keyed by the BARE sub name (#421's
+per-package table settles most collisions), so a `:prototype(...)` attribute
+on `A::f` can be read for an unrelated `B::f` of the same name in the same
+file — probed only by construction, no population hit; (2) perl's "Prototype
+mismatch" warning on a redefinition is not emitted (the new definition's
+prototype does apply, as in perl).
 
 **`prototype("CORE::NAME")` IS supported (task #1586, s484a)** and is a
 different mechanism: perl's own prototype strings are LANGUAGE data, so they
@@ -1873,8 +1882,8 @@ control-flow words, and the fatal `Can't find an opnumber for "NAME"` for a
 name that is not a keyword.  `prototype("CORE::")` — the empty name — is
 `undef`, not a fatal, as in perl.  A *user* sub is never looked up there.
 
-**Affected tests:** `perl-tests/signatures.t` rows reading classic
-prototypes back.
+**Affected tests:** none known (the commented-out `perl-tests/signatures.t:19`
+row, `is prototype(\&t000), "\$a"`, would now pass).
 
 ---
 

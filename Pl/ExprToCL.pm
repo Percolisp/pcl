@@ -3309,7 +3309,11 @@ sub gen_methodcall_form {
   # --- method name (generated once, per dynamic/static branch) ---
   my $method_node = $self->expr_o->get_a_node($kids->[1]);
   my $is_dynamic_method = 0;
-  if (ref($method_node) eq 'PPI::Token::Symbol' && $method_node->content() =~ /^\$/) {
+  # isa, not ref-eq: `$obj->$_()` names the method by a PPI::Token::Magic
+  # (a Symbol subclass) — core Archive::Tar's `map { $entry->$_() } qw[...]`
+  # called a method literally named "$_" (s500a, found behind #2533).
+  if (Scalar::Util::blessed($method_node) && $method_node->isa('PPI::Token::Symbol')
+      && $method_node->content() =~ /^\$/) {
     $is_dynamic_method = 1;
   } elsif ($self->expr_o->is_internal_node_type($method_node)) {
     $is_dynamic_method = 1;
