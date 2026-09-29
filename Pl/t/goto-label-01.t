@@ -62,7 +62,7 @@ sub test_transpile {
     is(run_cl($cl), run_perl($code), $name);
 }
 
-plan tests => 9;
+plan tests => 13;
 
 # Forward error-goto inside a sub, jumped to from inside an if branch.
 test_transpile('forward goto to error label inside sub',
@@ -108,3 +108,38 @@ test_transpile('top-level forward goto skips statements',
 # Backward goto through the same label machinery still re-executes.
 test_transpile('backward goto at top level still lexical',
     'my $n = 0; AGAIN: $n++; goto AGAIN if $n < 3; print "n=$n\n";');
+
+# ── #2287 (s500a): core File::Copy's `copy` -- an `or goto LABEL` inside an
+# if/else that precedes a later `my` at the same block level, several labels.
+# The catches used to open one `my`-level down, AFTER the first goto, which
+# then lowered to a BARE (go :fail_open1): SBCL "attempt to GO to nonexistent
+# tag" at every compile, and a Lisp backtrace when the branch ran.
+test_transpile('#2287 goto before a later my, several labels (File::Copy shape)',
+    'sub cp1 { my ($f1, $f2) = @_; my $closefrom = 0; local($\) = ""; my $from_h;'
+  . ' if (0) { $from_h = 1 } else { $f1 and goto fail_open1; $closefrom = 1; }'
+  . ' my $to_h; if (0) { $to_h = 1 } else { $f2 and goto fail_open2; }'
+  . ' for (my $i = 0; $i < 2; $i++) { my $t = $i; $t == 5 and goto fail_inner; }'
+  . ' return "ok:$closefrom"; fail_inner: return "inner"; fail_open2: return "open2:$closefrom";'
+  . ' fail_open1: return "open1:" . (defined $to_h ? "d" : "u"); }'
+  . ' print join(" ", cp1(0,0), cp1(1,0), cp1(0,1)), "\n";');
+
+# The general wrap with declarations between the gotos and the labels (was the
+# "forward goto to a standalone label" refusal).
+test_transpile('#2287 crossing gotos with hoisted my decls',
+    'sub s3 { my $v = shift; my $a1 = 1; $v == 1 and goto L2; my $b1 = 2; $v == 2 and goto L1;'
+  . ' return "n$a1$b1"; L1: return "L1" . ($b1 // "u"); L2: return "L2" . ($b1 // "u"); }'
+  . ' print join(" ", s3(0), s3(1), s3(2)), "\n";');
+
+# A statement BEFORE the hoisted `my $q` reads the OUTER $q: the hoisted
+# binding must not shadow it (was silently "" -- the #126 selection had no
+# such check).
+test_transpile('#2287 hoist never shadows an earlier outer read',
+    'our $q = "outer"; sub s4 { my $v = shift; my $r = "$q"; if ($v) { goto E; }'
+  . ' my $q = "inner"; return "$r/$q"; E: return "E$r"; } print join(" ", s4(0), s4(1)), "\n";');
+
+# The second cause of the everyday row: `my $a` (an exception-partition name,
+# renamed to $a__excl__N) read AFTER an embedded `my` in the same statement --
+# `open(my $o, ">", $a)` -- was left on the special $a (the file went to "").
+test_transpile('#2287 renamed my $a read after an embedded my',
+    'my $a = "/tmp/pcl-goto-label-01-$$"; open(my $o, ">", $a) or die; print $o "x"; close $o;'
+  . ' print -e $a ? "exists" : "missing", "\n"; unlink $a;');

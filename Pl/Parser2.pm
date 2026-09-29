@@ -7674,12 +7674,13 @@ sub _is_lexical_decl_name {
   my @k = $st->schildren;
   return 0 unless @k && $k[0]->isa('PPI::Token::Word')
                      && $k[0]->content =~ /^(?:my|state)$/;
-  for my $k (@k) {
-    last if $k->isa('PPI::Token::Operator') && $k->content eq '=';
-    return 1 if $k == $sym;
-    return 1 if $k->isa('PPI::Node') && $k->find_first(sub { $_[1] == $sym });
-  }
-  return 0;
+  # WHICH tokens the statement declares is _declarator_syms' question (rule
+  # 11, the #593 fix's third copy): the old "every Symbol before the `=`" loop
+  # called `$a` in `open(my $o, ">", $a)` a DECLARATION — PPI wraps that paren
+  # list in a Statement::Variable with no `=` — so _rename_decl_within left it
+  # on the special `$a` while `my $a` became `$a__excl__0` (#2287's everyday
+  # row: File-Compare-Copy wrote its file to "").
+  return scalar grep { $_ == $sym } _declarator_syms($st);
 }
 
 # #296: a `my`/`state` declaring an EXCEPTION-partition name.
@@ -8975,27 +8976,9 @@ sub _lower_block_1 {
       # perl's jumped-over-my behaviour.  Anything outside the subset keeps
       # the standalone-label forward-goto gate as the safety net.
       elsif (!$cross && $has_goto) {
-        my (%seen, @hoist);
-        my $ok = 1;
-        for my $st (@prefix) {
-          next unless $st->isa('PPI::Statement::Variable')
-                   || $self->_is_local_stmt($st);
-          if ($self->_is_local_stmt($st)) { $ok = 0; last }
-          my $kw = $st->schild(0);
-          if (!$kw || $kw->content ne 'my') { $ok = 0; last }
-          my ($nm, $init, $dmc) = $self->_single_scalar_decl($st);
-          if (!$nm || $dmc || $seen{$nm}++) { $ok = 0; last }
-          # a promoted file lexical is a DEFVAR — a let binding here would
-          # dynamically rebind the special; leave it to its own branch
-          if ($self->{_file_lex_renamed}{$nm}) { $ok = 0; last }
-          if (defined $init) {
-            my (undef, $imod) = _split_modifier($init);
-            if (defined $imod) { $ok = 0; last }
-            if (join('', map { $_->content } @$init) =~ _reads_name_rx($nm)) { $ok = 0; last }
-          }
-          push @hoist, $nm;
-        }
-        if ($ok && @hoist) {
+        my $hoist = $self->_goto_hoist_decls(\@prefix);
+        my @hoist = $hoist ? @$hoist : ();
+        if (@hoist) {
           my $tag = ':' . cl_sym('pcl-goto-' . $lbl);
           my @pre_forms = do {
             local $self->{_catch_labels}{$lbl} = $tag;
@@ -9046,7 +9029,18 @@ sub _lower_block_1 {
         my $decl_stmt = grep {
           $_->isa('PPI::Statement::Variable') || $self->_is_local_stmt($_)
         } @s[0 .. $labels[-1][0] - 1];
-        if (!$dup && !$backward && $any_goto && !$decl_stmt) {
+        # #2287: declarations before the last label are HOISTED when they
+        # are all in the #126 subset (core File::Copy's `copy`: `my $from_h;
+        # if (…) { open … or goto fail_open1 } … my $to_h; …` — without the
+        # hoist this level declined, `my $from_h` nested the remainder, and
+        # the catches opened one level down, AFTER the first goto, which then
+        # lowered to a bare (go) with no tag).  The let opens around the
+        # whole catch nest; each decl lowers in place as its assignment.
+        my $ghoist = $decl_stmt
+          ? $self->_goto_hoist_decls([ @s[0 .. $labels[-1][0] - 1] ]) : [];
+        if (!$dup && !$backward && $any_goto && $ghoist && (@$ghoist || !$decl_stmt)) {
+          my @gh = @$ghoist;
+          my $gvi = @gh ? { %$vi, map { $_ => { unboxable => 0 } } @gh } : $vi;
           my @tags = map { ':' . cl_sym('pcl-goto-' . $_->[1]) } @labels;
           my (@segs, $start);
           $start = 0;
@@ -9058,13 +9052,16 @@ sub _lower_block_1 {
           my ($wrap, @tail_forms);
           {
             local @{ $self->{_catch_labels} }{ map { $_->[1] } @labels } = @tags;
-            $wrap = ['catch', $tags[0], $self->_lower_block($segs[0], $vi, undef)];
+            local $self->{_goto_hoisted} = @gh ? { map { $_ => 1 } @gh } : $self->{_goto_hoisted};
+            $wrap = ['catch', $tags[0], $self->_lower_block($segs[0], $gvi, undef)];
             $wrap = ['catch', $tags[$_], $wrap,
-                     $self->_lower_block($segs[$_], $vi, undef)]
+                     $self->_lower_block($segs[$_], $gvi, undef)]
               for 1 .. $#labels;
-            @tail_forms = $self->_lower_block($segs[-1], $vi, $tail_ctx);
+            @tail_forms = $self->_lower_block($segs[-1], $gvi, $tail_ctx);
           }
-          return ($wrap, @tail_forms);
+          return ($wrap, @tail_forms) if !@gh;
+          return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @gh],
+                           $wrap, @tail_forms));
         }
       }
     }
@@ -13250,6 +13247,40 @@ sub _init_reads_scalar {
     }
   }
   return 0;
+}
+
+# The forward-goto DECL-HOIST selection (#126, shared by the #252 general
+# wrap since #2287): the top-level declarations among $stmts that a
+# forward-goto catch-wrap may pre-bind as nil boxes in ONE let opened around
+# the whole wrap.  Returns the names in source order, or undef when any
+# declaration is outside the subset — a `local`, anything but `my`, a
+# non-single-scalar or modified decl, a re-declaration, a promoted file
+# lexical (a DEFVAR: a let would rebind the special), a self-reading init,
+# or a name that an EARLIER statement of $stmts reads (perl resolves that
+# read to the OUTER variable, which the hoisted binding would shadow).
+sub _goto_hoist_decls {
+  my ($self, $stmts) = @_;
+  my (%seen, @hoist);
+  for my $i (0 .. $#$stmts) {
+    my $st = $stmts->[$i];
+    next unless $st->isa('PPI::Statement::Variable')
+             || $self->_is_local_stmt($st);
+    return undef if $self->_is_local_stmt($st);
+    my $kw = $st->schild(0);
+    return undef if !$kw || $kw->content ne 'my';
+    my ($nm, $init, $dmc) = $self->_single_scalar_decl($st);
+    return undef if !$nm || $dmc || $seen{$nm}++;
+    return undef if $self->{_file_lex_renamed}{$nm};
+    my $rx = _reads_name_rx($nm);
+    if (defined $init) {
+      my (undef, $imod) = _split_modifier($init);
+      return undef if defined $imod;
+      return undef if join('', map { $_->content } @$init) =~ $rx;
+    }
+    return undef if grep { $_->content =~ $rx } @$stmts[0 .. $i - 1];
+    push @hoist, $nm;
+  }
+  return \@hoist;
 }
 
 sub _single_scalar_decl {
