@@ -8815,8 +8815,13 @@ sub _lower_sub_inner {
   $self->_reg_lex(@{ $params // [] });
 
   if ($params) {
+    # The raw path drops @_ entirely, so the body must not observe it by ANY
+    # route — _body_observes_args, the one predicate (task #2572: the old
+    # inline test missed `&name;` and a bare `pop`, so `sub f { my ($x) = @_;
+    # &g; }` passed g an EMPTY @_).  wantarray rides along, as before.
     my $rest_txt = join("\n", map { $_->content } @body_stmts);
-    my $body_uses_args = $rest_txt =~ /\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/;
+    my $body_uses_args = _body_observes_args(\@body_stmts)
+                      || $rest_txt =~ /\bwantarray\b/;
     my $vi = Pl::VarAnnotator->analyze(\@body_stmts, $params, $self->_cur_sub_info, $self);
     if (!$body_uses_args && !grep { !$vi->{$_}{unboxable} } @$params) {
       # Signature fast path (#3): my ($a,$b) = @_ untouched afterwards, params
@@ -9207,15 +9212,8 @@ sub _leading_shift_params {
   return () unless $n;
   my @rest = @$stmts[$n .. $#$stmts];
   my $rest_txt = join("\n", map { ref $_ ? $_->content : '' } @rest);
-  return () if $rest_txt =~ /\@_|\$_\[|\bshift\b|\bgoto\b|\bwantarray\b/;
-  for my $s (@rest) {
-    next unless ref $s && $s->isa('PPI::Node');
-    for my $w (@{ $s->find(sub { $_[1]->isa('PPI::Token::Word')
-                                 && $_[1]->content eq 'eval' }) || [] }) {
-      my $nx = $w->snext_sibling;
-      return () unless $nx && $nx->isa('PPI::Structure::Block');
-    }
-  }
+  return () if $rest_txt =~ /\bwantarray\b/;
+  return () if _body_observes_args(\@rest);
   return (\@params, $n);
 }
 
