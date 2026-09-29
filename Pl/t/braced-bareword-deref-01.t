@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -106,3 +106,27 @@ test_cl('"$#$ref" (sigil form) interpolates last index',
 
 test_cl('"$#{$h->{list}}" nested deref last index',
     'my $h = { list => [1,2,3,4] }; print "li=$#{$h->{list}}\n";', "li=3\n");
+
+# ── #2085 (s500a): a brace group OPENING a deref block is an anonymous HASH
+# (perl: always, whatever it holds; the block-shaped spellings are syntax
+# errors).  PPI makes it a bare block when it starts with a call / map /
+# variable, and the statement was refused "Handle single node of unknown type".
+test_cl('%{{ map ... }} is the anon-hash uniq idiom',
+    'my @l = qw(a b a c); print join(",", sort keys %{{ map { $_ => 1 } @l }}), "\n";',
+    "a,b,c\n");
+
+test_cl('%{ { map ... } } spaced spelling',
+    'my @l = qw(b a b); print join(",", sort keys %{ { map { $_ => 1 } @l } }), "\n";',
+    "a,b\n");
+
+test_cl('%{{ CALL }} -- a sub call inside the brace group',
+    'sub g { map { $_ => 1 } @_ } my %h = %{{ g(qw(x y x)) }}; print join(",", sort keys %h), "\n";',
+    "x,y\n");
+
+test_cl('@{{ g(...) }}{...} hash slice through the anon hash',
+    'sub g { map { $_ => 1 } @_ } print join(",", @{{ g(qw(a b)) }}{qw(a b)}), "\n";',
+    "1,1\n");
+
+test_cl('%{{ %h, extra => 1 }} and %{{ @pairs }}',
+    'my %h = (x => 1); my @p = (p => 2); print join(",", sort(keys %{{ %h, extra => 1 }}), sort(keys %{{ @p }})), "\n";',
+    "extra,x,p\n");

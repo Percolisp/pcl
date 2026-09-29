@@ -785,7 +785,13 @@ sub parse {
       # answers the map/grep/(&@) BODY question, where a bare `{}` is not valid
       # perl at all (`map {} (1,2)` is a syntax error), so widening it would be
       # a claim about input principle 9 says we do not have to read.
-      if (_block_is_hash_constructor($e1) || _block_is_empty($e1)) {
+      # #2085: a brace group OPENING the deref block (`%{{ map … }}`,
+      # `@{{ g(@l) }}{…}`) — PPI structures it as a bare block statement,
+      # perl as an anonymous hash; the classifier is asked with the position.
+      my $inner = _deref_inner_brace($e1);
+      $e1 = $inner if $inner && _block_is_hash_constructor($inner, 'deref');
+      if ($inner && $e1 == $inner
+          || _block_is_hash_constructor($e1) || _block_is_empty($e1)) {
         my @list    = $e1->children();
         if (@list == 1 && ref($list[0]) eq 'PPI::Statement') {
           @list = $list[0]->children();
@@ -2816,8 +2822,19 @@ sub _embedded_block {
   return $self->parser->embed_block($block, $kind);
 }
 
+# Is the brace group $block an anonymous-hash constructor rather than a BLOCK?
+# $pos names the position, because perl's rule is not the same everywhere:
+#   (none)   a map/grep/(&@) body or a lone term brace group: a hash only when
+#            it opens with `WORD =>` (the intuit_more-style guess).
+#   'deref'  the brace group that OPENS a deref block — `%{{ map … }}`,
+#            `@{{ g(@l) }}{…}`, `%{ { … } }` (#2085): ALWAYS a hash.  Probed vs
+#            perl 5.40.3: every content (a map, a call, `%h`, `@pairs`, a
+#            literal list) builds an anon hash, and the block-shaped spellings
+#            (`%{ { my $x = 1; (a => $x) } }`, `%{ {} }`) are compile-time
+#            syntax errors, so no valid program reads a block there.
 sub _block_is_hash_constructor {
-  my $block = shift;
+  my ($block, $pos) = @_;
+  return 1 if ($pos // '') eq 'deref';
   my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
   if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
     @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
@@ -2838,6 +2855,20 @@ sub _block_is_empty {
     @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
   }
   return scalar(@ch) == 0;
+}
+
+# The brace group that OPENS a deref block, as PPI hands it over: the deref
+# Block's only statement is a Statement::Compound holding nothing but a bare
+# Structure::Block (`%{{ map … }}`).  Returns that inner Block, or undef.
+# (PPI already makes `%{{ a => 1 }}` a Constructor; this is the shape it
+# guesses wrong — a call, a map, a variable first.)
+sub _deref_inner_brace {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  return undef unless @ch == 1 && ref($ch[0]) eq 'PPI::Statement::Compound';
+  my @in = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  return undef unless @in == 1 && ref($in[0]) eq 'PPI::Structure::Block';
+  return $in[0];
 }
 
 # #153 FOLD chunk 2 — perl's intuit_curly boundary for a brace group after
