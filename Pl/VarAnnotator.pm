@@ -324,7 +324,7 @@ sub _tw_is_bare_undef {
   my $n = $xo->get_a_node($id);
   my $kids = $xo->get_node_children($id) || [];
   if ($xo->is_internal_node_type($n)) {          # PExpr: funcall(undef)
-    return 0 unless ($n->{type} // '') eq 'funcall' && @$kids == 1;
+    return 0 if !(($n->{type} // '') eq 'funcall' && @$kids == 1);
     $n    = $xo->get_a_node($kids->[0]);
     $kids = $xo->get_node_children($kids->[0]) || [];
   }
@@ -817,7 +817,7 @@ sub _analyze_tree {
   # Per DECLARATION: `fh_close_at' holds the refaddr of each licensed
   # `open(my $name, …)' statement, `fh_drop_at' of each drop statement.
   for my $d (values %{ $ctx->{fh_decl} // {} }) {
-    next unless $vi{ $d->{name} } && _fh_decl_verdict($ctx, $d);
+    next if !($vi{ $d->{name} } && _fh_decl_verdict($ctx, $d));
     $vi{ $d->{name} }{fh_close_at}{ refaddr($d->{stmt}) } = 1;
     $vi{ $d->{name} }{fh_drop_at}{$_} = 1 for keys %{ $d->{drops} // {} };
   }
@@ -964,9 +964,9 @@ sub _fh_root_stmt {
 
 sub _fh_open_decl {
   my ($ctx, $n) = @_;
-  return unless ref($n) eq 'PPI::Token::Symbol' && $n->content =~ /^\$\w+$/;
+  return if !(ref($n) eq 'PPI::Token::Symbol' && $n->content =~ /^\$\w+$/);
   my $prev = $n->sprevious_sibling;
-  return unless $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'my';
+  return if !($prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'my');
   my $stmt = _fh_root_stmt($n) or return;
   my $k = ++$ctx->{fh_seq};
   $ctx->{fh_decl}{$k} = { name => $n->content, stmt => $stmt };
@@ -977,7 +977,7 @@ sub _fh_open_decl {
 # native root write, a deref base, …).
 sub _fh_bad {
   my ($ctx, $name, $why) = @_;
-  return unless defined $name;
+  return if !(defined $name);
   my $k = $ctx->{fh_active}{$name} or return;
   $ctx->{fh_decl}{$k}{bad}{$why}++;
 }
@@ -1162,8 +1162,8 @@ sub _tw_region_facts {
   # The same walk answers the handle licence's own question, "is there a
   # STRING eval here", which must not depend on `raw-block-eval' (#2006 (b)).
   $stmt->find(sub {
-    return '' unless $_[1]->isa('PPI::Token::Word')
-                  && $_[1]->content eq 'eval';
+    return '' if !($_[1]->isa('PPI::Token::Word')
+                && $_[1]->content eq 'eval');
     my $next = $_[1]->snext_sibling;
     my $str  = !($next && $next->isa('PPI::Structure::Block'));
     push @{ $ctx->{str_eval_toks} }, $_[1] if $str;
@@ -1624,14 +1624,14 @@ my %PRINT_FN = map { $_ => 1 } qw(print printf say);
 sub _print_fh_block_scalar {
   my ($b) = @_;
   my @in = map { $_->isa('PPI::Statement') ? $_->schildren : $_ } $b->schildren;
-  return 0 unless @in == 1 && $in[0]->isa('PPI::Token::Symbol')
-               && $in[0]->content =~ /^\$\w+$/;
+  return 0 if !(@in == 1 && $in[0]->isa('PPI::Token::Symbol')
+             && $in[0]->content =~ /^\$\w+$/);
   my $prev = $b->sprevious_sibling;
   if (!$prev) {                         # print({$fh} …): first in the parens
     my $st = $b->parent;
     my $list = $st && $st->parent;
-    return 0 unless $list && $list->isa('PPI::Structure::List')
-                 && $st->schild(0) == $b;
+    return 0 if !($list && $list->isa('PPI::Structure::List')
+               && $st->schild(0) == $b);
     $prev = $list->sprevious_sibling;
   }
   return $prev && $prev->isa('PPI::Token::Word') && $PRINT_FN{ $prev->content } ? 1 : 0;

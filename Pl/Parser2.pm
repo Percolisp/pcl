@@ -13394,7 +13394,7 @@ sub _fh_scope_close {
 # the licence's `fh-drop' use, and only as a whole statement.
 sub _fh_drop_name {
   my ($self, $stmt, $vi) = @_;
-  return undef unless $vi && ref($stmt) eq 'PPI::Statement';
+  return undef if !($vi && ref($stmt) eq 'PPI::Statement');
   my @k = _strip_semi($stmt->schildren);
   my $name;
   if (@k == 2 && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'undef') {
@@ -13410,8 +13410,8 @@ sub _fh_drop_name {
          && $k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'undef') {
     $name = $k[0]->content;
   }
-  return undef unless defined $name && $vi->{$name}
-                   && $vi->{$name}{fh_drop_at}{ refaddr($stmt) };
+  return undef if !(defined $name && $vi->{$name}
+                 && $vi->{$name}{fh_drop_at}{ refaddr($stmt) });
   return undef if !Pl::Passes::enabled('fh-scope-close');
   my $up = $stmt->parent;
   return undef if !$up || $up->isa('PPI::Document');
@@ -13425,11 +13425,11 @@ sub _fh_drop_name {
 # nested construct declaring the same name never takes the outer's cell.
 sub _fh_cond_late {
   my ($self, $stmt, $vi) = @_;
-  return () unless $vi && $stmt->isa('PPI::Statement::Compound');
+  return () if !($vi && $stmt->isa('PPI::Statement::Compound'));
   my $up = $stmt->parent;
   return () if !$up || $up->isa('PPI::Document');
   my ($kw) = grep { $_->isa('PPI::Token::Word') } $stmt->schildren;
-  return () unless $kw && $kw->content =~ /^(?:if|unless|while|until)$/;
+  return () if !($kw && $kw->content =~ /^(?:if|unless|while|until)$/);
   my @conds = grep { $_->isa('PPI::Structure::Condition') } $stmt->schildren;
   my @at = map { refaddr($_) } grep { $_->isa(q{PPI::Statement}) } map { $_->schildren } @conds;
   my @h = grep { my $v = $vi->{$_}; $v && grep { $v->{fh_close_at}{$_} } @at }
