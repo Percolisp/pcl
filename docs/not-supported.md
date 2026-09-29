@@ -252,6 +252,35 @@ result stay writable (`docs/ir-spec.md` §6.2).
 `reverse` / `grep` (`for my $x (sort "b", "a") { $x .= "!" }` still modifies)
 — the rest of #1391, owner of ir-conform `272-sort`.
 
+**`Scalar::Util::readonly` answers 0 for everything (#1391, measured s500a).**
+perl: `readonly("lit")`, `readonly(5)`, `readonly(undef)` are 1, a variable or
+a temporary 0.  A literal ARGUMENT reaches a PCL sub as a raw CL value, and so
+does a temporary (`$x . "a"`) and a variable the compiler proved unboxable
+(`my $x = "abc"` binds `:scalar` raw) — at run time the three are the same
+object kind, so no run-time test can separate them.  The fix is compile-time:
+a literal argument of a user-sub call passed as a read-only box (a
+`load-time-value` constant box per site, so no allocation per call), which is
+also perl's `sub { $_[0] .= "!" }->("a")` die — a call-convention change for
+every call with a literal argument, sized in #1391, not a Scalar::Util fix.
+
+---
+
+## Weak references: `weaken` sets the flag, it does not free (s500a)
+
+**Perl behaviour:** `weaken($ref)` makes that SCALAR's reference not count, so
+the referent is freed (and every weak copy becomes undef) when the last strong
+reference goes; `isweak` reports the flag, a COPY of a weak reference is
+strong, and any store into the scalar clears it.
+
+**PCL behaviour:** the FLAG is modelled exactly — `weaken` marks the variable
+box (also an array/hash element), `isweak` reads it, a copy is strong, a store
+clears it (box-set's general path; asked only once a program has weakened
+something), `unweaken` clears it.  The referent's LIFETIME is not: there is no
+refcount, so a weakened reference never turns undef — the GC frees the object
+when nothing at all reaches it.  A variable the compiler kept UNBOXED cannot
+carry the mark (weaken sees only the reference value, marks nothing, and
+isweak stays false).  Same family as *`DESTROY` called by garbage collector*.
+
 ---
 
 ## Read-only constants via `\undef` stash tricks

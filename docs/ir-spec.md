@@ -775,6 +775,15 @@ deliberate exception is a value a program can legitimately branch on, e.g.
 the seeded `rand` sequence, where PCL reproduces perl's drand48 exactly
 (`p-srand`/`p-rand`).
 
+**The WEAK flag belongs to the variable, not the reference (normative,
+s500a).**  `p-weaken` marks the VARIABLE box it is handed (a key of the
+weak-key table `*p-weak-boxes*`; never an is-ref wrapper, which every copy
+shares), `p-isweak` reads the mark, and `box-set`'s general path removes it on
+every store — perl's sv_setsv clearing SvWEAKREF.  So a copy is strong and
+`$w = $r` makes `$w` strong again, as in perl.  The referent's lifetime is NOT
+modelled (no refcount; docs/not-supported.md).  Example: `my $w = $r;
+weaken($w); isweak($w)` is 1, `my $c = $w; isweak($c)` is "".
+
 ### 2.6 Blessed objects, strings, numbers
 
 `bless` records the class on the thing all aliases share, mirroring

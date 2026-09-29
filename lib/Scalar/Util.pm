@@ -35,8 +35,13 @@ sub reftype {
     return builtin::reftype($_[0]);
 }
 
-sub weaken { }
-sub isweak { 0 }
+# The WEAK flag (s500a): weaken marks the VARIABLE $_[0] aliases (the caller's
+# box), a copy is strong, and a store into it clears the mark -- the runtime
+# owns the flag (builtin::weaken / is_weak).  No refcount: the referent's
+# lifetime is unchanged (docs/not-supported.md).
+sub weaken   { builtin::weaken($_[0]); return }
+sub isweak   { return builtin::is_weak($_[0]) ? 1 : !1 }
+sub unweaken { builtin::unweaken($_[0]); return }
 
 # Perl's grok_number: what the CORE numeric conversion would accept without a
 # warning.  Three things this must get right that a naive /^\d+$/ does not:
@@ -76,7 +81,9 @@ sub dualvar {
 # blessed/reftype/dualvar already use.
 sub isdual    { return builtin::is_dual($_[0]) }
 sub isvstring { return builtin::is_vstring($_[0]) }
-sub openhandle { $_[0] }
+# Open-stream test (s500a, #1571): $_[0] when it is an OPEN handle (a glob,
+# a glob ref, a lexical handle), else undef -- never a NAME lookup.
+sub openhandle { return builtin::openhandle($_[0]) }
 sub set_prototype { }
 
 # refaddr($ref) — the address of the referent, or undef for a non-ref.
@@ -89,10 +96,5 @@ sub refaddr {
     return undef unless ref $r;
     return 0 + $r;
 }
-
-# Not yet implemented in PCL — exported as a dying stub so `use Scalar::Util
-# qw(unweaken)` succeeds (the real Exporter hard-dies on a missing export,
-# which kills the whole importing file); only an actual CALL fails.
-sub unweaken { die "Scalar::Util::unweaken is not yet implemented in PCL\n" }
 
 1;

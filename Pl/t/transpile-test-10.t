@@ -1265,4 +1265,37 @@ print "7 ", (eval { [1]->isa("X"); 1 } ? "lived" : "died"), " ", (eval { my $u; 
 print Dumper(qr/ab+c/i, bless(qr/y/, "Foo"));
 });
 
+# s500a (#2084(3)): Scalar::Util::isweak reads the WEAK mark weaken set on the
+# VARIABLE -- a copy is strong, an array/hash ELEMENT can be weakened, a store
+# into the variable (even of the same referent) drops the mark, unweaken
+# clears it.  (No refcount: the referent's lifetime does not change.)
+# INVERSE: the strong original and a pre-weaken copy stay strong.
+test_transpile("isweak: the weak mark on the variable, copies strong, a store clears it (s500a)", q{
+use Scalar::Util qw(weaken isweak unweaken);
+my $r = { a => 1 }; my $w = $r; my $s = $r; weaken($w);
+print "1 ", (isweak($w) ? 1 : 0), (isweak($s) ? 1 : 0), (isweak($r) ? 1 : 0), "\n";
+my $c = $w; print "2 ", (isweak($c) ? 1 : 0), " ", $w->{a}, "\n";
+my @a = ($r); weaken($a[0]); my %h = (k => $r); weaken($h{k});
+print "3 ", (isweak($a[0]) ? 1 : 0), (isweak($h{k}) ? 1 : 0), "\n";
+$w = $r; print "4 ", (isweak($w) ? 1 : 0), "\n";
+weaken($s); unweaken($s); print "5 ", (isweak($s) ? 1 : 0), "\n";
+});
+
+# s500a (#1571): Scalar::Util::openhandle is its argument when that is an
+# OPEN handle (glob, glob ref, lexical, in-memory, *FH{IO}) and undef
+# otherwise -- a never-opened glob, a CLOSED handle, a dirhandle, undef, a
+# plain string (perl never resolves a NAME here) or a non-glob ref.
+test_transpile("openhandle: open handles only, never a name (s500a, #1571)", q{
+use Scalar::Util qw(openhandle); no warnings 'once';
+sub oh { openhandle($_[0]) ? 1 : 0 }
+my $f = "/tmp/pcl-tt10-oh-$$"; open(my $wr, ">", $f) or die; print $wr "x\n"; close $wr;
+print "a ", oh(\*STDOUT), oh(\*NOPE), oh(*STDERR), oh("STDIN"), oh(\*STDIN), oh(*STDOUT{IO}), "\n";
+open(my $fh, "<", $f) or die; print "b ", oh($fh); close $fh; print oh($fh), oh(undef), oh("x"), oh(\"x"), oh([]), "\n";
+open(FH, "<", $f) or die; print "c ", oh(\*FH), oh(*FH), oh("FH"); close FH; print oh(\*FH), oh(*FH), "\n";
+opendir(my $dh, ".") or die; print "d ", oh($dh), "\n";
+open(my $mem, "<", \"abc") or die; print "e ", oh($mem); close $mem; print oh($mem), "\n";
+print "f ", ref(openhandle(\*STDOUT)), " ", (defined(openhandle(\*NOPE)) ? "def" : "undef"), "\n";
+unlink $f;
+});
+
 done_testing();

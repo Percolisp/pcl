@@ -2177,6 +2177,15 @@
   (class nil)
   (is-ref nil))
 
+;;; THE WEAK MARK (Scalar::Util::weaken / isweak, s500a, #2084(3)).  perl's
+;;; weaken sets SvWEAKREF on the SCALAR that holds the reference; a COPY of it
+;;; is strong, and a store into it (sv_setsv) clears the flag.  PCL has no
+;;; refcount, so the referent's LIFETIME is unchanged (the GC keeps it while
+;;; anything reaches it) -- only the observable flag is modelled: the VARIABLE
+;;; box that weaken was handed is a key here (weak on the key, so a dead box
+;;; drops out), and box-set's general path removes it on every store.
+(defvar *p-weak-boxes* (make-hash-table :test 'eq :weakness :key))
+
 (defun make-p-box (value &optional class)
   "Create a p-box, pre-caching if value is already typed"
   (let ((box (%make-p-box :value value :class class)))
@@ -3482,6 +3491,12 @@
           (p-box-sv-ok box) nil)
     ;; Perl: assigning to a scalar resets pos()
     (remhash box *p-match-pos*)
+    ;; ...and drops a WEAK reference's weakness (sv_setsv clears SvWEAKREF,
+    ;; #2084(3), s500a).  Asked only when some program called weaken -- the
+    ;; pos() table's own trick -- so a program that never weakens pays one
+    ;; count test on this (general, not the fast) path.
+    (unless (zerop (hash-table-count *p-weak-boxes*))
+      (remhash box *p-weak-boxes*))
     ;; Preserve class from blessed boxes — but ONLY when the assigned value
     ;; is itself a reference: perl's stash is attached to the source SV, so
     ;; copying a plain VALUE out of a blessed scalar referent (`my $y = $$r`
@@ -27758,14 +27773,40 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; PCL uses a tracing GC; true weak refs require trivial-garbage integration.
 ;;; weaken() is a no-op (object stays alive); isweak() always returns false.
 (defun p-weaken (ref)
-  "Scalar::Util::weaken / builtin::weaken — no-op stub."
-  (declare (ignore ref))
+  "Scalar::Util::weaken / builtin::weaken: mark the VARIABLE holding a
+   reference weak (*p-weak-boxes*, see its note).  The referent's lifetime is
+   unchanged -- PCL has no refcount (docs/not-supported.md).  A REF WRAPPER
+   (is-ref) is not a variable: it is the reference value itself, shared by
+   every copy, so marking it would make the copies weak too; that happens
+   only when the caller's variable reached here unboxed, and then nothing is
+   marked (isweak stays false, as before)."
+  (when (and (p-box-p ref) (not (p-box-is-ref ref))
+             (plusp (length (p-ref ref))))
+    (setf (gethash ref *p-weak-boxes*) t))
   *p-undef*)
 
 (defun p-isweak (ref)
-  "Scalar::Util::isweak / builtin::isweak — always false in PCL."
-  (declare (ignore ref))
-  "")
+  "Scalar::Util::isweak / builtin::is_weak: the mark p-weaken set, until the
+   next store into that variable."
+  (if (and (p-box-p ref) (gethash ref *p-weak-boxes*)) 1 ""))
+
+(defun p-openhandle (x)
+  "Scalar::Util::openhandle (s500a, #1571): X itself when it is a handle whose
+   stream is OPEN, else undef.  perl never resolves a NAME here --
+   openhandle(\"STDIN\") is undef -- so a string, a number, undef and a
+   non-glob reference answer undef.  A glob, a glob reference and a lexical
+   handle resolve to their stored stream, and OPEN is the fact the implicit
+   close reads (%p-close-previous-stream): a socket, or a stream whose target
+   is open-stream-p.  A closed handle, a never-opened glob and a dirhandle are
+   not open."
+  (let* ((v (if (p-box-p x) (p-box-value x) x))
+         (h (cond ((or (streamp v) (%p-socket-p v)) v)
+                  ((p-typeglob-p v) (%p-resolve-fh v))
+                  (t nil))))
+    (if (or (%p-socket-p h)
+            (and (streamp h) (open-stream-p (%p-stream-target h))))
+        x
+        *p-undef*)))
 
 ;;; ------------------------------------------------------------
 ;;; builtin:: namespace (core pragma, Perl 5.36+; user is on 5.40)
@@ -27840,8 +27881,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     (def "FALSE"    (lambda (&rest a) (declare (ignore a)) (make-p-box "")))
     (def "IS_BOOL"  (lambda (&rest a) (declare (ignore a)) (make-p-box "")))
     (def "WEAKEN"   (lambda (r) (p-weaken r)))
-    (def "UNWEAKEN" (lambda (r) (declare (ignore r)) *p-undef*))
+    (def "UNWEAKEN" (lambda (r) (remhash r *p-weak-boxes*) *p-undef*))
     (def "IS_WEAK"  (lambda (r) (p-isweak r)))
+    ;; PCL's own name (perl's builtin has none): Scalar::Util::openhandle's
+    ;; open-stream question, which no plain Perl can ask (s500a, #1571).
+    (def "OPENHANDLE" (lambda (x) (p-openhandle x)))
     (def "DUALVAR"  (lambda (num str) (p-dualvar num str)))
     ;; Companions to DUALVAR: both ask a question about the SCALAR'S OWN
     ;; REPRESENTATION that no amount of plain Perl can answer — whether the box
