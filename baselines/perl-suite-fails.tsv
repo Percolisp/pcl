@@ -570,7 +570,6 @@ comp/parser_run.t	70	ok	not ok	many blank lines doesn't crash	PARKED: one row --
 comp/parser_run.t	67	ok	not ok	use after free (\#131836)	NS:Error compatibility for invalid Perl input + NS:Error message text and format -- the file is `fresh_perl_is` over programs perl REJECTS ($00 / ${001} / $09324 are names perl refuses, "Identifier too long", "Unrecognized character"), and asserts the diagnostic text
 comp/proto.t	102	ok	not ok [PCL #104]	#102	#1682
 comp/proto.t	13	ok	not ok	#13	#1682
-comp/proto.t	14	ok	not ok	#14	#1682
 comp/proto.t	141	ok	(missing)	#141	#1682
 comp/proto.t	142	ok	(missing)	#142	#1682
 comp/proto.t	143	ok	(missing)	#143	#1682
@@ -626,32 +625,21 @@ comp/proto.t	211	ok	(missing)	#211	#1682
 comp/proto.t	212	ok	(missing)	#212	#1682
 comp/proto.t	213	ok	(missing)	#213	#1682
 comp/proto.t	214	ok	(missing)	#214	#1682
-comp/proto.t	22	ok	not ok	#22	#1682
 comp/proto.t	29	ok	not ok	#29	#1682
-comp/proto.t	34	ok	not ok	#34	#1682
 comp/proto.t	41	ok	not ok	#41	#1682
-comp/proto.t	46	ok	not ok	#46	#1682
 comp/proto.t	52	ok	not ok	#52	#1682
 comp/proto.t	53	ok	not ok	#53	#1682
 comp/proto.t	54	ok	not ok	#54	#1682
-comp/proto.t	58	ok	not ok	#58	#1682
 comp/proto.t	63	ok	not ok	#63	#1682
 comp/proto.t	64	ok	not ok	#64	#1682
 comp/proto.t	65	ok	not ok	#65	#1682
 comp/proto.t	66	ok	not ok	#66	#1682
 comp/proto.t	67	ok	not ok	#67	#1682
-comp/proto.t	69	ok	not ok	#69	#1682
-comp/proto.t	7	ok	not ok	#7	#1682
 comp/proto.t	74	ok	not ok	#74	#1682
 comp/proto.t	76	ok	not ok	#76	#1682
 comp/proto.t	78	ok	not ok	#78	#1682
-comp/proto.t	79	ok	not ok	#79	#1682
-comp/proto.t	81	ok	not ok	#81	#1682
-comp/proto.t	84	ok	not ok	#84	#1682
-comp/proto.t	87	ok	not ok	#87	#1682
 comp/proto.t	90	ok	not ok	#90	#1682
 comp/proto.t	91	ok	not ok	#91	#1682
-comp/proto.t	92	ok	not ok	#92	#1682
 comp/proto.t	95	ok	not ok	#95	#1682
 comp/proto.t	0	(none)	extra [PCL #110]	*extra* star "FOO"	#1682
 comp/proto.t	0	(none)	extra [PCL #108]	*extra* star FOO	#1682
@@ -2150,7 +2138,6 @@ op/attrproto.t	24	ok	not ok	Attempting to redeclare triggers prototype mismatch 
 op/attrproto.t	16	ok	not ok	Attempting to redeclare triggers prototype mismatch warning against first prototype	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	9	ok	not ok	First warning is Prototype overridden	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	3	ok	not ok	First warning is bad prototype - bar	NS:Warnings-gated diagnostics are absent (#221)
-op/attrproto.t	27	ok	not ok	Last prototype declared wins	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	2	ok	not ok	MODIFY_CODE_ATTRIBUTES called, but not for prototype(..)	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	8	ok	not ok	MODIFY_CODE_ATTRIBUTES called, but not for prototype(..)	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	12	ok	not ok	MODIFY_CODE_ATTRIBUTES called, but not for prototype(..)	NS:Warnings-gated diagnostics are absent (#221)
@@ -4779,7 +4766,6 @@ op/lexsub.t	3	ok	not ok	calling our sub from another package	#376 + #377 + #374 
 op/lexsub.t	4	ok	not ok	calling our sub from another package (amper)	#376 + #377 + #374 — the LEXICAL SUB family (`my sub` / `state sub` / `our sub`): the forward declaration, the lexical alias, the per-invocation clone and the rename's uncovered spellings
 op/lexsub.t	153	ok	not ok [PCL #138]	check recursively defined lexical sub is lexical	#376 + #377 + #374 — the LEXICAL SUB family (`my sub` / `state sub` / `our sub`): the forward declaration, the lexical alias, the per-invocation clone and the rename's uncovered spellings
 op/lexsub.t	155	ok	not ok [PCL #140]	check some more	#376 + #377 + #374 — the LEXICAL SUB family (`my sub` / `state sub` / `our sub`): the forward declaration, the lexical alias, the per-invocation clone and the rename's uncovered spellings
-op/lexsub.t	98	ok	not ok [PCL #90]	check the prototypes actually match	#376 + #377 + #374 — the LEXICAL SUB family (`my sub` / `state sub` / `our sub`): the forward declaration, the lexical alias, the per-invocation clone and the rename's uncovered spellings
 op/lexsub.t	149	ok	not ok [PCL #135]	constant undefinition warnings for lexical subs do not crash	NS:Warnings-gated diagnostics are absent (#221) — the lexical-sub WARNINGS ("Subroutine … masks earlier declaration", "Variable will not stay shared", "Subroutine … redefined", the unavailability warnings, deep recursion)
 op/lexsub.t	148	ok	not ok [PCL #134]	deep recursion warnings for lexical subs do not crash	NS:Warnings-gated diagnostics are absent (#221) — the lexical-sub WARNINGS ("Subroutine … masks earlier declaration", "Variable will not stay shared", "Subroutine … redefined", the unavailability warnings, deep recursion)
 op/lexsub.t	132	ok	(missing)	defining my sub body via package sub declaration	#376 + #377 + #374 — the LEXICAL SUB family (`my sub` / `state sub` / `our sub`): the forward declaration, the lexical alias, the per-invocation clone and the rename's uncovered spellings

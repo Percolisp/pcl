@@ -1,4 +1,8 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s500a (2026-09-30, Opus) -- FOUR rows spliced by hand, every mover A/B'd `--jobs 1` against a 1bae682b
+#   `git archive` extraction over 18 prototype/goto/Scalar::Util files (scratch/s500a/companion-before.log vs
+#   companion-after2.log; the other 14 identical): all four UP on #2533 (run-time prototype()).  comp/proto.t's
+#   78/38 snapshot was already stale at 558cc5a0 (63/32 there) -- #2543.
 # s494h (2026-09-28, Opus) -- ONE row spliced by hand: io/perlio_leaks.t 0/12 -> 12/0 UP, A/B `--jobs 1`
 #   against a 209e7533 `git archive` extraction over the 29 emission-changed files (scratch/s494h/comp-base.tbl vs
 #   comp-tree.tbl; every other file identical): #2006(b) closes the loop's `open my $fh` at each iteration's exit,
@@ -1659,7 +1663,7 @@ comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to d
 comp/package_block.t	7	0	0	7	DIFF		0
 comp/parser.t	191	0	51	47	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: PCL: statement not supported at parser.t line N: "${; =pod =cut }"; -- Bug. Fell through.	5
 comp/parser_run.t	70	0	33	37	DIFF	unbound:$00	0
-comp/proto.t	216	0	78	38	DIFF	s473t5c: #1681 (`\(&NAME)` is the sub slot) removed the `Undefined subroutine &main::1` abort -- 47/14 -> 78/38, shortfall 155 -> 100, measured --jobs 1 with the #366 serial re-run agreeing.  The residue is #1682 | aborted-forms:1: Undefined subroutine &main::FOO called	0
+comp/proto.t	216	0	75	20	DIFF	s500a: #2533 run-time prototype() -- 12 rows UP (prototype-string rows #7 #14 #22 #34 #46 #58 #69 #79 #81 #84 #87 #92), A/B --jobs 1 vs a 1bae682b extraction (63/32 -> 75/20).  The C_ok 78 -> 75 against the OLD snapshot is NOT s500a: a 558cc5a0 extraction already reads 63/32 with the abort `Can't use string ("a") as an ARRAY ref` -- 21 rows lost before this session, not bisected, #2543 | aborted-forms:1: Can't use string ("a") as an ARRAY ref while "strict refs" in use	0
 comp/redef.t	20	0	1	19	DIFF		0
 comp/require.t	1750	0	911	836	DIFF	s497b: 910/837 -> 911/836 is PRE-EXISTING -- identical on a 24422497 extraction; one row fixed ("require ignores I/O layers") and one new, #2407 | s469bf: PRE-EXISTING and multi-step, NOT a round-23 mover -- 910/837 in five readings (s465az, s466, s468 parallel+serial, s469bf parallel+serial); the 909/835 it replaces was last confirmed at s396 and this QUICK-CAPPED file is reached only by a full --all.  s440's tree reads 906/836 and round 19's TIMEOUTs at 868/795 inside the 450 s allowance, so the drift is multi-step and partly a speed effect; the moved rows are past the 500-row log cap (#1051) and cannot be named without raising it.	0
 comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0
@@ -1797,7 +1801,7 @@ op/arith2.t	9	0	9	0	OK		0
 op/array.t	195	0	171	24	DIFF	s471a: 170/25 -> 171/24 = #1273 -- `eval '$a[-1] = 0'` now dies perl's `Modification of non-creatable array value attempted, subscript -1` (%p-non-creatable-index), so test 82's `like $@` matches.  ONE row, measured --jobs 1 and re-run ALONE by the #366 serial pass (both 171/24); the row left baselines/perl-suite-fails.tsv by EDIT.  s457ai boxed-aggregates phase 3: p-exists-array stopped reading "is a box" as "exists" -- test 127 (&PL_sv_undef elem) passes honestly and left the skip registry	0
 op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.	0
 op/attrhand.t	4	0	0	0	DIFF	aborted-forms:1: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle	0
-op/attrproto.t	48	0	17	31	DIFF		0
+op/attrproto.t	48	0	18	30	DIFF	s500a: #2533 -- row 27 "Last prototype declared wins" UP, A/B --jobs 1 vs 1bae682b (17/31 -> 18/30)	0
 op/attrs.t	157	2	37	108	DIFF	aborted-forms:2: The function attributes::pl-_guess_stash is undefined.	0
 op/auto.t	47	0	47	0	OK		0
 op/avhv.t	40	0	39	1	DIFF		0
@@ -1888,7 +1892,7 @@ op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC 
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0
-op/lexsub.t	156	0	78	63	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.; aborted-forms:11: Undefined subroutine &main::d called	1
+op/lexsub.t	156	0	80	61	DIFF	s500a: #2533 -- rows 97/98 UP (lexical sub prototypes read back), A/B --jobs 1 vs 1bae682b (78/63 -> 80/61) | crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.; aborted-forms:11: Undefined subroutine &main::d called	1
 op/lfs.t	17	0	0	0	DIFF		0
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run	-1
 op/local.t	316	3	305	14	DIFF	s497b: 302/17 -> 305/14, chop/chomp through the box protocol: `chop` on a TIED $_ runs FETCH/STORE (Underscore 'Chop'/'Filetest'/'Assignment') | s494g #1029 (via #2107's %SIG store seam): 300/19 -> 302/17 -- the two `local $SIG{...}` read-back rows (lines 550, 556) now read 'main::foo'; A/B dc20a721 300/19 | undef-fn:main::|pl-main::|	0
@@ -1947,7 +1951,7 @@ op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0
 op/sigdispatch.t	29	0	26	3	DIFF	s494g #2107: 24/3 -> 26/3 -- [perl #45173] `local $SIG{INT}` + `kill 'INT', $$`: the handler runs and $@ is untouched (rows 28/29, were never produced: the file died by interactive-interrupt); A/B dc20a721 24/3.  Residue: #1928 (NUL-clean lookups)	0
 op/signame_canonical.t	15	0	0	0	DIFF		0
-op/signatures.t	1245	1	915	296	DIFF	aborted-forms:1: PCL: statement not supported at signatures.t line N: f() = "X"; -- PCL: Can't modify non-l | NOT fully registered: 5 unregistered diverging row(s): No warnings emitted within scope of no warnings "experime...; Signatured subroutine permits attributed scalar; `\&SUB` warns of experimental @_; +2 more | not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. All former fix-target rows are FIXED: t151/152/156 parenless list-op swallow (t017, s316s) + t021-family. t276-296 state-in-default re-init FIXED (task #134, s316r).	1
+op/signatures.t	1245	1	916	295	DIFF	s500a: #2533 -- row 1 `is prototype(\&t000), "$a"` UP (a classic prototype before the feature), A/B --jobs 1 vs 1bae682b (915/296 -> 916/295) | aborted-forms:1: PCL: statement not supported at signatures.t line N: f() = "X"; -- PCL: Can't modify non-l | NOT fully registered: 5 unregistered diverging row(s): No warnings emitted within scope of no warnings "experime...; Signatured subroutine permits attributed scalar; `\&SUB` warns of experimental @_; +2 more | not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. All former fix-target rows are FIXED: t151/152/156 parenless list-op swallow (t017, s316s) + t021-family. t276-296 state-in-default re-init FIXED (task #134, s316r).	1
 op/sigsystem.t	4	0	4	0	OK	s494g #2107: XDIFF 0/0 -> OK 4/0 -- the $SIG{CHLD} reaper runs (chained to SBCL's own CHLD handler), so 'Reaped only one process' / 'Reaped the right process.' pass; A/B dc20a721 2/2.  Its perl-suite-expected.tsv row left by edit (STALE)	0
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
