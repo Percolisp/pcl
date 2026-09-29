@@ -96,6 +96,13 @@ sub pkg_bench     { my $r = ""; my $c = sub { $r .= "b" }; my ($n, $pack) = (2, 
 sub pkg_scalar    { my $x = "lex"; $Foo::x = "foo"; my $s = eval 'sub { package Foo; $x }'; return $s->(); }
 sub pkg_array     { my @arr = (1,2,3); my $s = eval 'sub { package Foo; scalar(@arr) . $arr[1] . $#arr }'; return $s->(); }
 sub pkg_global    { my $s = eval 'sub { package Foo; $yy9 = 7; $Foo::yy9 }'; return $s->(); }
+# ...and a FILE lexical a named sub captures (promoted to a package cell under
+# its own name) is still a lexical to the eval'd text: scalar, array, and a
+# `package` statement at the START of the eval string defining a named sub.
+my $cap9 = sub { "cap(@_)" }; my @arr9 = (4, 5);
+sub use_cap9      { return ($cap9, @arr9) }
+sub pkg_promoted  { my $s = eval 'sub { package Other; $cap9->(1) . scalar(@arr9) }'; return $s->(); }
+sub pkg_made      { eval 'package Made9; sub mk { __PACKAGE__ . ":" . $cap9->(2) } 1' or return "ERR"; return Made9::mk(); }
 print "pkg_amp=",       (eval { pkg_amp() } // "DIED"),       "\n";
 print "pkg_arrow=",     (eval { pkg_arrow() } // "DIED"),     "\n";
 print "pkg_other=",     (eval { pkg_other() } // "DIED"),     "\n";
@@ -103,6 +110,8 @@ print "pkg_bench=",     (eval { pkg_bench() } // "DIED"),     "\n";
 print "pkg_scalar=",    (eval { pkg_scalar() } // "DIED"),    "\n";
 print "pkg_array=",     (eval { pkg_array() } // "DIED"),     "\n";
 print "pkg_global=",    (eval { pkg_global() } // "DIED"),    "\n";
+print "pkg_promoted=",  (eval { pkg_promoted() } // "DIED"),  "\n";
+print "pkg_made=",      (eval { pkg_made() } // "DIED"),      "\n";
 
 print "basic_read=",    basic_read(),    "\n";
 print "write_back=",    write_back(),    "\n";
@@ -179,6 +188,8 @@ my %expect = (
     pkg_scalar    => 'lex',
     pkg_array     => '322',
     pkg_global    => '7',
+    pkg_promoted  => 'cap(1)2',
+    pkg_made      => 'Made9:cap(2)',
 );
 
 plan tests => scalar(keys %expect);

@@ -3599,16 +3599,13 @@ sub handle_subcalls {
         my $prog_id   = $self->parse($prog_expr);
         $self->add_child_to_node($top_id, $prog_id);
 
-        # Parse the remaining elements (the LIST → argv) and append them.
-        if ($i + 2 < scalar(@$e)) {
-          my @rest = @$e[$i + 2 .. $#$e];
-          my $rest_list = $self->cleanup_for_parsing(\@rest);
-          my $rest_ids = $self->parse_list($rest_list);
-          $self->add_child_to_node($top_id, $_) for @$rest_ids;
-        }
-
-        splice @$e, $i, scalar(@$e) - $i;
-        $e->[$i] = $top_node;
+        # The remaining elements are the LIST (argv), and it ends where every
+        # paren-less list operator's does — before a same-level and/or/xor:
+        # `exec { "sh" } "n", "-c", $cmd or die` is (exec … ) or die in perl.
+        # This site used to take EVERYTHING to the end, so the `or die` became
+        # an argv element and the program ran with a die in its argument list
+        # (#2082 review probe).  _take_rest_as_args is the one copy of that rule.
+        $self->_take_rest_as_args($e, $i, $top_id, $top_node);
         next;
       }
 

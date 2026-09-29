@@ -4170,16 +4170,12 @@ sub _rename_spanning_lexicals {
     # shadow wins by assoc order).  The package-QUALIFIED spelling is valid
     # in every segment (same symbol the later-segment token rewrite uses).
     # `//=` keeps the innermost instance's cell where extents overlap (the
-    # instance loop runs innermost-first).  Identity renames need no pair:
-    # the unchanged name resolves to the defvar'd global (see the $unique
-    # comment above).
-    if (!$unique) {
-      my $pkg = $segments->[$di]{pkg};
-      my $cl_pkg = cl_pkg($pkg);
-      for my $j ($di .. $hi) {
-        $segments->[$j]{eval_span_captures}{"\$$bare"} //= "${cl_pkg}::" . cl_sym("\$$newbare");
-      }
-    }
+    # instance loop runs innermost-first).  IDENTITY renames get the pair too
+    # (#2285): their VALUE would reach an eval through the defvar'd global
+    # anyway, but the eval's compiler learns that a name is LEXICAL only from
+    # the capture list, and without it a `package X;` in the eval text
+    # re-homed the name to `$X::name` (the helper below).
+    _publish_span_pair($segments, $di, $hi, "\$$bare", "\$$newbare");
     }   # per-declaration instance
   }
 
@@ -4286,8 +4282,24 @@ sub _rename_spanning_lexicals {
       }
     }
     $self->{_file_lex_renamed}{$csym} = 1;
+    _publish_span_pair($segments, $di, $hi, $csym, $csym);   # #2285, as for scalars
     }   # per-declaration instance
   }
+}
+
+# M-F + #2285: record ORIGINAL -> CELL for a span-promoted file lexical on
+# every segment of its extent; the section driver publishes the current
+# segment's map and _eval_lexical_alist appends the pairs after the let-bound
+# ones (a live shadow wins by assoc order).  The package-QUALIFIED cell
+# spelling is valid in every segment.  `//=` keeps the innermost instance's
+# cell where extents overlap (the instance loops run innermost-first).
+sub _publish_span_pair {
+  my ($segments, $di, $hi, $orig, $cell) = @_;
+  my $cl_pkg = cl_pkg($segments->[$di]{pkg});
+  for my $j ($di .. $hi) {
+    $segments->[$j]{eval_span_captures}{$orig} //= "${cl_pkg}::" . cl_sym($cell);
+  }
+  return;
 }
 
 # Sigil-aware rename of every use of ONE variable within @$stmts.  $canon is the
@@ -4631,6 +4643,19 @@ sub _rename_captured_file_lexicals {
     next if $self->{_file_lex_renamed}{$canon};
     $self->_promote_captured($stmts, \@subs, $top, $canon, $bare, 0, $sym);
   }
+  # An IDENTITY-promoted file lexical (one declaration file-wide, promoted
+  # under its own name) is still a LEXICAL to every string eval in the
+  # segment, named subs' evals included.  Its value reaches an eval through
+  # the global fall-through (the cell IS the original-name global), but the
+  # eval's COMPILER only learns a name is lexical from the capture list — so
+  # `eval 'sub { package Other; $c->() }'` re-homed `$c` to `$Other::c`,
+  # empty, and died "Undefined subroutine &Other::" (#2285, core Benchmark's
+  # timing loop and every package-switching eval'd sub).  Publish the pair
+  # beside the span cells: the thunk binds the SAME box the fall-through
+  # would have found, so the only change is the compiler's knowledge.
+  for my $canon (sort keys %{ delete $self->{_identity_eval_caps} // {} }) {
+    $seg->{eval_span_captures}{$canon} //= cl_sym($canon);
+  }
 }
 
 # (#2534) Every PLAIN statement at the top level of its lexical extent — the
@@ -4787,6 +4812,7 @@ sub _promote_captured {
     # the original name, which is what identity means) — keep its emission.
     return if $emb_sym && _caprefuse($canon, 'embedded decl: identity = veto path');
     $self->{_file_lex_renamed}{$canon} = 1;
+    $self->{_identity_eval_caps}{$canon} = 1;    # published below (#2285)
     $self->_reg_captures($canon, \@cap_subs);
     return 1;
   }

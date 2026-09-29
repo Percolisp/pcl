@@ -54,7 +54,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 44;
+plan tests => 45;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -377,3 +377,7 @@ is run_cl('package Foo; print *STDIN, " ", *STDERR, "\n";'),
 is run_cl('use Fcntl; pipe(R, W) or die; print((fcntl(R, F_GETFD, 0) & FD_CLOEXEC) ? "cx" : "no", "\n");'),
    "cx\n",
    '#2082: pipe() ends carry FD_CLOEXEC like every other descriptor perl opens';
+
+is run_cl(q{my $pid = fork(); if (!$pid) { exec { "sh" } "n11", "-c", q{echo in; exit 4} or die } waitpid($pid, 0); print "rc ", $? >> 8, "\n";}),
+   "in\nrc 4\n",
+   '#2082: exec { PROG } LIST or die -- the argument list ends before the low-precedence or (was: or die inside argv)';
