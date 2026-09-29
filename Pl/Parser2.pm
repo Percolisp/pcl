@@ -1404,6 +1404,11 @@ sub parse {
   # every name-keyed and scope pass, so all of them see one shape (#2514).
   $self->_normalize_signature_subs($doc);
 
+  # `my ($s, $i) = ("", 0);` with an all-LITERAL right side is the same two
+  # declarations written apart — split it here so every later pass (the
+  # VarAnnotator verdicts above all) sees the per-variable shape (#2114).
+  $self->_split_literal_list_decls($doc);
+
   # `my sub NAME {…}` / `state sub NAME {…}` are LEXICALS, but every named sub
   # compiles to a PACKAGE sub — so two same-named lexical subs in different
   # scopes clobbered each other and every reference resolved to the LAST one,
@@ -5957,6 +5962,99 @@ sub _signature_normal_plan {
   return [$sig, $block, \@params,
           [$min, ($slurpy ? 'nil' : $min), ($slurpy ? 't' : 'nil'),
            (($slurpy // '') eq '%' ? $min : 'nil')]];
+}
+
+# ── A LITERAL LIST DECLARATION IS ITS DECLARATIONS WRITTEN APART (task #2114) ──
+# `my ($s, $i) = ("", 0);` declares and initialises exactly what
+# `my $s = ""; my $i = 0;` does — when the right side is all LITERALS.  But
+# the list form is lowered through the list-assignment box machinery (D11),
+# which cannot store into a raw slot, so VarAnnotator boxes every name in it
+# (reason `write-list`) and the str-buffer licence never applies: the shapes
+# row `while ($i++ < N) { $s .= "ab" }` is QUADRATIC after the list spelling
+# (200k appends: 29 s) and linear after the split one (0.03 s).
+#
+# The literal restriction is what makes the rewrite exact: with any other
+# element the split would let a later element see an EARLIER new variable
+# (`my ($a, $b) = (1, $a)` reads the OUTER $a — perl evaluates the whole
+# right side first).  Only the statement shape whose value nobody reads:
+#   - a Statement::Variable that is exactly `my ( $A, $B … ) = ( L1, L2 … ) ;`
+#     directly in a block or the file, and NOT its block's last statement (a
+#     sub's or an eval's value would be the list assignment's);
+#   - plain distinct scalars, the same count on both sides (no padding, no
+#     dropped extras, no `undef` placeholder, no array or hash);
+#   - every element a number, a non-interpolating string, or `undef`.
+sub _split_literal_list_decls {
+  my ($self, $doc) = @_;
+  return unless Pl::Passes::enabled('list-decl-split');
+  for my $stmt (@{ $doc->find('PPI::Statement::Variable') || [] }) {
+    my $pairs = _literal_list_decl_pairs($stmt) or next;
+    my $frag = Pl::Parser::fragment_doc(
+      join(' ', map { "my $_->[0] = $_->[1];" } @$pairs)) or next;
+    my @new = $frag->schildren;
+    next unless @new == @$pairs
+      && !grep { !$_->isa('PPI::Statement::Variable') } @new;
+    $_->remove for @new;
+    for my $n (@new) {
+      $stmt->insert_before($n)
+        or die "PCL: internal -- could not split the list declaration at line "
+             . ($stmt->line_number // '?') . "\n";
+    }
+    $stmt->delete;
+  }
+  return;
+}
+
+# [[NAME, LITERAL-TEXT] …] for a statement _split_literal_list_decls may
+# rewrite, else undef.
+sub _literal_list_decl_pairs {
+  my ($stmt) = @_;
+  my $parent = $stmt->parent or return undef;
+  return undef unless $parent->isa('PPI::Structure::Block')
+                   || $parent->isa('PPI::Document');
+  my @sib = $parent->schildren;
+  return undef if $sib[-1] == $stmt;
+  my @k = $stmt->schildren;
+  return undef unless @k == 5
+    && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
+    && $k[1]->isa('PPI::Structure::List')
+    && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='
+    && $k[3]->isa('PPI::Structure::List')
+    && $k[4]->isa('PPI::Token::Structure') && $k[4]->content eq ';';
+  my @names = _comma_items($k[1]) or return undef;
+  my @vals  = _comma_items($k[3]) or return undef;
+  return undef unless @names == @vals;
+  my %dup;
+  for my $n (@names) {
+    return undef unless $n->isa('PPI::Token::Symbol')
+                     && $n->content =~ /^\$\w+$/ && !$dup{ $n->content }++;
+  }
+  for my $v (@vals) {
+    next if $v->isa('PPI::Token::Number');
+    next if $v->isa('PPI::Token::Quote::Single');
+    next if $v->isa('PPI::Token::Quote::Double') && $v->content !~ /[\$\@\\]/;
+    next if $v->isa('PPI::Token::Word') && $v->content eq 'undef';
+    return undef;
+  }
+  return [map { [$names[$_]->content, $vals[$_]->content] } 0 .. $#names];
+}
+
+# The comma-separated ITEMS of a parenthesised list, each exactly one token,
+# or () when an item is anything else (an expression, a nested list).
+sub _comma_items {
+  my ($list) = @_;
+  my @kids = $list->schildren;
+  return () unless @kids == 1 && $kids[0]->isa('PPI::Statement::Expression');
+  my @t = $kids[0]->schildren;
+  my @items;
+  for my $i (0 .. $#t) {
+    if ($i % 2) {
+      return () unless $t[$i]->isa('PPI::Token::Operator') && $t[$i]->content eq ',';
+    } else {
+      push @items, $t[$i];
+    }
+  }
+  return () if @t % 2 == 0;    # a trailing comma
+  return @items;
 }
 
 sub _normalize_tie_my {
