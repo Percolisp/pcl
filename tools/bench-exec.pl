@@ -292,6 +292,11 @@ my @benches = (
   # as an assignment to an existing hash (task #2424, the Mian-Chowla shape),
   # and `**' on the digits of a number (task #2425, the Digit-fifth-powers shape).
   ['hashcopy',  "$HN my \%b = map { (\"k\$_\" => \$_) } 1 .. 1000; my (\%a, \$t); for my \$i (1..\$n) { my \%c = \%b; \%a = \%c; \$t += \$a{'k' . (\$i % 1000 + 1)} } print \"\$t\\n\";", 4_000, 0],
+  # s501t (#155): a TIED hash and array, read and written in a loop -- the
+  # feature's own cost against perl's (every access is a method call on both
+  # sides).  A runtime without aggregate tie prints a different sum, so an A/B
+  # against such a runtime reads BROKEN on this row by design.
+  ['tiehash',   "$HN require Tie::Hash; require Tie::Array; my (\%h, \@a); tie \%h, 'Tie::StdHash'; tie \@a, 'Tie::StdArray'; my \$s = 0; for my \$i (1..\$n) { \$h{k} = \$i; \$a[1] = \$i; \$s += \$h{k} + \$a[1]; push \@a, 1 if \$i % 100 == 0 } print \"\$s \", scalar(\@a), \"\\n\";", 200_000, 0],
   ['powdigit',  "$HN my \$s = 0; for my \$k (1..\$n) { for my \$d (split '', \$k) { \$s += \$d ** 5 } } print \"\$s\\n\";", 400_000, 0],
   # Round 37 (s500p): a double stringified and sprintf'd per iteration (task
   # #2510, the Heronian `sprintf("%.0f", $h) eq $h` shape); join over an
