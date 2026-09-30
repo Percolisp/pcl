@@ -4769,6 +4769,9 @@
    (p-undef @arr) → clear array, return undef
    (p-undef %hash) → clear hash, return undef
    (p-undef $scalar) → set scalar to undef, return undef"
+  (%p-when-tied (r val)                 ; undef @tied / %tied: CLEAR (#155)
+    (if (eq (p-tie-rec-kind r) :array) (%p-ta-fill r #()) (%p-th-fill r #()))
+    (return-from p-undef *p-undef*))
   (when val
     (cond
       ((and (vectorp val) (not (stringp val)))
@@ -6428,6 +6431,9 @@
 
 (defun p-chomp-one (var)
   "Chomp a single variable (helper for p-chomp)."
+  (%p-when-tied (r var)                 ; chomp @tied: each element's box (#155)
+    (return-from p-chomp-one
+      (loop for b across (%p-tie-view r) sum (p-chomp-one b))))
   (cond
     ;; Box: chomp its value — through the box's own protocol (unbox /
     ;; box-set), so a magic box answers: a read-only literal dies even when
@@ -6435,7 +6441,12 @@
     ((p-box-p var)
      (let* ((s (to-string (unbox var)))
             (result (p-chomp-single s)))
-       (when (or (> (cdr result) 0) (p-magic-cell-p (p-box-value var)))
+       ;; a magic cell is written even when nothing was removed (a read-only
+       ;; literal dies) -- but not a tied element, which perl STOREs only on a
+       ;; change (probed, task #155)
+       (when (or (> (cdr result) 0)
+                 (let ((v (p-box-value var)))
+                   (and (p-magic-cell-p v) (not (eq (p-magic-cell-kind v) :tielem)))))
          (box-set var (car result)))
        (cdr result)))
     ;; Vector (array): chomp each element in place
@@ -6486,6 +6497,11 @@
 
 (defun p-chop-one (var)
   "Chop a single variable (helper for p-chop)."
+  (%p-when-tied (r var)                 ; chop @tied: each element's box (#155)
+    (return-from p-chop-one
+      (let ((last ""))
+        (loop for b across (%p-tie-view r) do (setf last (p-chop-one b)))
+        last)))
   (cond
     ;; Box: chop its value — READ and WRITE through the box's own protocol
     ;; (unbox / box-set), so a magic box answers: a read-only literal dies
@@ -7290,7 +7306,7 @@
   ;; which Perl flattens into argument lists.
   ;; Blessed arrays (p-box with class) must NOT be flattened — they are
   ;; overloadable scalar values (e.g. objects that stringify via "").
-  (let ((args (loop for arg in args
+  (let ((args (loop for arg in (%p-tie-views args)   ; a tied container: its view
                     nconcing (let ((v (unbox arg)))
                                (if (and (vectorp v) (not (stringp v))
                                         (not (and (p-box-p arg) (p-box-class arg))))
@@ -13856,7 +13872,7 @@ which is one of #1140's escape spellings (probed)."
    Stores values in boxes for l-value semantics.
    Flattens vectors (e.g. from %arr[...] kv-slice) and hash-tables
    (e.g. from %existing_hash used in list context) in the pair list."
-  (let ((flat (loop for item in pairs
+  (let ((flat (loop for item in (%p-tie-views pairs)  ; tied: its view (#155)
                     if (and (vectorp item) (not (stringp item)))
                     append (coerce item 'list)
                     else if (hash-table-p item)
@@ -13879,6 +13895,8 @@ which is one of #1140's escape spellings (probed)."
   (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
     (labels ((add-element (e)
                (cond
+                 ;; A tied container: its FETCHed values (task #155)
+                 ((%p-tied e) (add-element (%p-tie-copy (%p-tied e))))
                  ;; String - wrap in box and add
                  ((stringp e)
                   (vector-push-extend (make-p-box e) result))
@@ -14957,7 +14975,8 @@ container.  Do not widen this arm without asking that question again."
          (total 0))
     (declare (type fixnum total))
     (dotimes (k n)
-      (let ((v (aref vecs k)))
+      ;; a tied array runs over its view (task #155) -- one COUNT test per array
+      (let ((v (%p-tie-view-of (aref vecs k))))
         (unless (and (vectorp v) (not (stringp v)))
           (error "PCL internal: p-foreach :arrays over a ~A — the `foreach-arrays'~
                   emission is licensed only for bare named arrays" (type-of v)))
@@ -15235,7 +15254,13 @@ what changes is that the element is the raw counter rather than a fresh box."
 
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
-  (%p-when-tied (r val) (setf val (%p-tie-copy r)))   ; `return @tied` (#155)
+  ;; `return @tied` / `return %tied` (#155): in LIST context a plain copy (its
+  ;; values FETCHed); in scalar context the count, as FETCHSIZE / SCALAR say.
+  (%p-when-tied (r val)
+    (if (eq *wantarray* t)
+        (setf val (%p-tie-copy r))
+        (return-from p-return-value
+          (if (eq (p-tie-rec-kind r) :array) (%p-ta-size r) (%p-th-scalar r)))))
   (cond
     ;; Not a box - handle arrays context-sensitively
     ((not (p-box-p val))
@@ -26377,7 +26402,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (nreverse result))
       ;; Scalar context: join all items into a string and reverse characters
       (let ((str (with-output-to-string (s)
-                   (dolist (item items)
+                   (dolist (item (%p-tie-views items))   ; tied: its view (#155)
                      (if (%p-spread-vector-p item)
                          (loop for x across item do (write-string (to-string x) s))
                          (write-string (to-string item) s))))))
@@ -26926,6 +26951,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                                          result))))
              (add-ref (item)
                (cond
+                 ;; A tied container: refs to its element proxies (#155)
+                 ((%p-tied item)
+                  (loop for b across (%p-tie-view (%p-tied item))
+                        do (vector-push-extend (p-backslash b) result)))
                  ((p-flatten-marker-p item)
                   (let ((src (p-flatten-marker-array item)))
                     (dotimes (j (length src)) (add-slot-ref src j))))
@@ -26942,6 +26971,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (t
                   (vector-push-extend (p-backslash item) result)))))
       (cond
+        ((%p-tied val) (add-ref val))
         ((and (vectorp val) (not (stringp val)))
          (dotimes (j (length val)) (add-slot-ref val j)))
         ((listp val)
@@ -29580,9 +29610,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    Flattens nested adjustable vectors exactly like p-array-= does, so that
    'local @a = (X, @a, Y)' correctly interpolates the old @a contents."
   (let ((result (make-array 0 :adjustable t :fill-pointer 0))
-        (raw (cond ((and (vectorp src) (not (stringp src))) src)
-                   ((null src) nil)
-                   (t (unbox src)))))
+        (raw (%p-tie-view-of          ; a tied source: its view (#155)
+              (cond ((and (vectorp src) (not (stringp src))) src)
+                    ((null src) nil)
+                    (t (unbox src))))))
     (labels ((add-items (x)
                (cond
                  ((null x))
@@ -29611,10 +29642,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Create a fresh copy of a hash for 'local %h = expr' semantics.
    Handles both hash-table input (direct copy) and vector/list input
    (interpreted as flat k-v pairs, like p-hash-=)."
-  (let* ((raw (if (or (hash-table-p h)
-                      (and (vectorp h) (not (stringp h))))
-                  h
-                  (unbox h)))
+  (let* ((raw (%p-tie-view-of         ; a tied source: its view (#155)
+               (if (or (hash-table-p h)
+                       (and (vectorp h) (not (stringp h))))
+                   h
+                   (unbox h))))
          (copy (make-hash-table :test 'equal)))
     (cond
       ((hash-table-p raw)
@@ -29778,6 +29810,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (val nil))
     (setf (p-box-value box)
           (make-p-magic-cell
+           :kind :tielem
            :getter (lambda ()
                      (if have
                          val
