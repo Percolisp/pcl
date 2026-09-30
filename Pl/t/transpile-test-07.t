@@ -704,11 +704,22 @@ print "no-tz-fields=", scalar(@n), "\n";
 #   * SCALAR tie is IMPLEMENTED and must stay silent AND working (the warning
 #     must not have swallowed the working path),
 #   * the untied aggregate must still behave like a plain hash afterwards.
+#
+# s501t (task #155 IMPLEMENTED the aggregate tie): the announcement is GONE for
+# an ARRAY / HASH, so these rows were rewritten under the four-conjunct rule
+# (perl-probed text; the diff is exactly that divergence; the edit
+# strengthens; the guard is Pl/t/tie-aggregate-01.t).  T::Agg gained the
+# STORE/FETCH a real tie class has -- without them perl itself dies at
+# `$h{k} = 'plain'` ("Can't locate object method "STORE""), and PCL now does
+# too -- and the rows assert NO announcement, the tied hash round-tripping
+# through the class (the row count is unchanged: the file is closed).
 {
     my $out = run_cl(<<'PERL');
 package T::Agg;
 sub TIEHASH  { bless {}, shift }
 sub TIEARRAY { bless {}, shift }
+sub STORE    { $_[0]{$_[1]} = $_[2] }
+sub FETCH    { $_[0]{$_[1]} }
 package T::Scalar;
 sub TIESCALAR { my ($c, $v) = @_; bless \$v, $c }
 sub FETCH     { my $s = shift; "FETCHED:$$s" }
@@ -727,13 +738,13 @@ print "scalar=$s\n";
 $s = 'set';
 print "scalar2=$s\n";
 PERL
-    my $hash_warns  = () = $out =~ /^PCL: tie: a HASH \(class T::Agg\) is not implemented/mg;
-    my $array_warns = () = $out =~ /^PCL: tie: an ARRAY \(class T::Agg\) is not implemented/mg;
-    is($hash_warns,  1, 'aggregate tie on a HASH announces itself exactly once (deduped)');
-    is($array_warns, 1, 'aggregate tie on an ARRAY announces itself exactly once');
-    unlike($out, qr/PCL: tie: (?!a HASH |an ARRAY )/,
+    my $hash_warns  = () = $out =~ /^PCL: tie: a HASH \(class T::Agg\)/mg;
+    my $array_warns = () = $out =~ /^PCL: tie: an ARRAY \(class T::Agg\)/mg;
+    is($hash_warns,  0, 'an IMPLEMENTED tie on a HASH is not announced (#155)');
+    is($array_warns, 0, 'an IMPLEMENTED tie on an ARRAY is not announced (#155)');
+    unlike($out, qr/PCL: tie: /,
            'implemented SCALAR tie is not announced as unimplemented');
-    like($out, qr/^hash=plain$/m,   'the ignored aggregate tie leaves a working plain hash');
+    like($out, qr/^hash=plain$/m,   'the tied hash round-trips through STORE/FETCH (perl: hash=plain)');
     like($out, qr/^scalar=FETCHED:init$/m, 'SCALAR tie still FETCHes');
     like($out, qr/^scalar2=FETCHED:set$/m, 'SCALAR tie still STOREs');
 }
