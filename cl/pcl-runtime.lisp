@@ -12420,28 +12420,41 @@ lands in the (now detached) box only."
     (setf (p-box-value box)
           (make-p-magic-cell
            :kind :defelem
-           :getter (lambda () *p-undef*)
+           ;; the array may have been TIED since the alias was taken (tie.t
+           ;; "Defelem pointing to nonexistent element of tied array"): the
+           ;; element is then FETCHed / STOREd through its methods (#155)
+           :getter (lambda ()
+                     (let ((r (%p-tied vec)))
+                       (if (and r (< i (%p-ta-size r))) (%p-ta-fetch r i) *p-undef*)))
            :setter (lambda (new)
-                     (setf (p-box-value box) nil
-                           (p-box-nv-ok box) nil
-                           (p-box-sv-ok box) nil)
-                     (cond
-                       ;; In bounds: vivify the hole in place.  LENGTH, not
-                       ;; FILL-POINTER — a read-only array (task #159) has no
-                       ;; fill pointer, and perl allows the ELEMENT write.
-                       ((< i (length vec))
-                        (when (null (aref vec i))
-                          (setf (aref vec i) box)))
-                       ((and (adjustable-array-p vec)
-                             (array-has-fill-pointer-p vec))
-                        ;; Past-the-end index (p-aref-argbox on w($a[10])):
-                        ;; perl's defelem store av_fetches with lval=TRUE,
-                        ;; extending the array — mirror that here.
-                        (loop while (< (fill-pointer vec) i)
-                              do (vector-push-extend nil vec))
-                        (vector-push-extend box vec)))
-                     (box-set box new))))
+                     (let ((r (%p-tied vec)))
+                       (if r
+                           (%p-ta-store r i new)
+                           (%p-defelem-vivify box vec i new))))))
     box))
+
+(defun %p-defelem-vivify (box vec i new)
+  "The first WRITE through an untied defelem alias BOX: de-magic it, store it
+   into VEC's slot I (extending an adjustable VEC), then assign NEW."
+  (setf (p-box-value box) nil
+        (p-box-nv-ok box) nil
+        (p-box-sv-ok box) nil)
+  (cond
+    ;; In bounds: vivify the hole in place.  LENGTH, not
+    ;; FILL-POINTER — a read-only array (task #159) has no
+    ;; fill pointer, and perl allows the ELEMENT write.
+    ((< i (length vec))
+     (when (null (aref vec i))
+       (setf (aref vec i) box)))
+    ((and (adjustable-array-p vec)
+          (array-has-fill-pointer-p vec))
+     ;; Past-the-end index (p-aref-argbox on w($a[10])):
+     ;; perl's defelem store av_fetches with lval=TRUE,
+     ;; extending the array — mirror that here.
+     (loop while (< (fill-pointer vec) i)
+           do (vector-push-extend nil vec))
+     (vector-push-extend box vec)))
+  (box-set box new))
 
 (defun %p-defelem-p (slot)
   "True when SLOT is an UNVIVIFIED deferred-element box (%p-defelem-box) —
@@ -29953,7 +29966,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    new value (undef without an initializer).  The saved state for the restore."
   (let* ((existed (p-true-p (%p-tie-call rec "EXISTS" key)))
          (old (and existed (%p-tie-call rec "FETCH" key))))
-    (%p-tie-call rec "STORE" key (if init-p init *p-undef*))
+    ;; perl stores undef over an EXISTING element only; a missing one is left
+    ;; missing until assigned (probed: `local $h{nokey}` = EXISTS, then DELETE
+    ;; on exit; tie.t's SAVEt_DELETE rows have no STORE method at all)
+    (when (or init-p existed)
+      (%p-tie-call rec "STORE" key (if init-p init *p-undef*)))
     (vector existed old)))
 
 (defun %p-tie-local-restore (rec key saved)
@@ -30137,7 +30154,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    too (perl's hv_clear clears both).  Returns the number of RHS elements."
   (let ((flat (%p-tie-copy-values (%p-flatten-list pairs))))
     (%p-tie-call rec "CLEAR")
-    (setf (p-tie-rec-saved rec) (make-hash-table :test 'equal))
+    (setf (p-tie-rec-saved rec) (make-hash-table :test 'equal)
+          (p-tie-rec-iter rec) nil)   ; CLEAR ends an each() in progress
     (loop for (k v) on flat by #'cddr
           do (%p-tie-call rec "STORE" (to-string (unbox k)) (if (null v) *p-undef* v)))
     (length flat)))
@@ -30245,13 +30263,17 @@ buffer's fill-pointer; everything else falls back to file-length."
                (apply #'p-method-call classname
                       (if (eq kind :hash) "TIEHASH" "TIEARRAY") args)))
         (old (gethash c **p-tie-table**)))
+    ;; a tie object that IS the container (`bless \%c` returned for %c)
+    (when (eq (unbox obj) c)
+      (%p-die-error nil "Self-ties of arrays and hashes are not supported"))
     (if old
         (setf (p-tie-rec-obj old) obj
               (p-tie-rec-iter old) nil)
         (progn
           (setf (gethash c **p-tie-table**)
                 (%make-p-tie-rec obj kind (%p-tie-empty-shell c kind)))
-          (incf **p-tie-count**)))
+          (incf **p-tie-count**)
+          (%p-reset-each-iterator c)))
     obj))
 
 (defun %p-untie-aggregate (c rec)
@@ -30259,7 +30281,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     (%p-tie-call rec "UNTIE"))
   (remhash c **p-tie-table**)
   (decf **p-tie-count**)
-  (%p-tie-restore-shell c rec))
+  (%p-tie-restore-shell c rec)
+  (%p-reset-each-iterator c))
+
+(defun %p-reset-each-iterator (c)
+  "tie and untie both reset the container's own each() iterator (perl's
+   hv_iterinit on the magic change -- t/op/tiehash.t, 'tie/untie on a hash
+   resets the iterator')."
+  (remhash c *hash-iterators*)
+  (remhash c *array-iterators*))
 
 (defun %p-tie-container-kind (c)
   (cond ((hash-table-p c) :hash)

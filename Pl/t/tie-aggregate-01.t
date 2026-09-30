@@ -122,6 +122,8 @@ sub FIRSTKEY { push @main::LOG, "FIRSTKEY"; $IT{$_[0]} = [sort keys %{$_[0]}]; s
 sub NEXTKEY  { push @main::LOG, "NEXTKEY($_[1])"; shift @{$IT{$_[0]}} }
 sub SCALAR   { push @main::LOG, "SCALAR"; scalar %{$_[0]} }
 sub UNTIE    { push @main::LOG, "UNTIE" }
+package SelfT;
+sub TIEHASH { bless $_[1], $_[0] }
 package main;
 my %pre = (old => 1);
 op("h:tie", sub { my $o = tie %pre, 'LH', 'x'; ref $o });
@@ -156,6 +158,8 @@ op("h:ref-elem", sub { my $r = \$pre{n}; $$r = "r"; () });
 op("h:ref-elem-read", sub { my $r = \$pre{n}; $$r });
 op("h:local-elem", sub { { local $pre{m} = "L"; push @main::LOG, "--"; } () });
 op("h:delete-local", sub { { delete local $pre{m}; push @main::LOG, "--"; } () });
+op("h:local-missing", sub { { local $pre{nokey}; push @main::LOG, "--"; } () });
+op("h:self-tie", sub { my %c; tie %c, 'LH'; untie %c; my $o = eval { no warnings; tie %c, 'SelfT', \%c; 1 }; $@ =~ /^(Self-ties of arrays and hashes are not supported)/ ? $1 : "no die" });
 op("h:tied", sub { ref tied(%pre) });
 op("h:map-read", sub { join ",", map { $pre{$_} } qw(m n) });
 op("h:delete-slice", sub { join ",", map { $_ // "u" } delete @pre{qw(m zz)} });
@@ -257,6 +261,7 @@ op("a:each", sub { my @x; tie @x, 'LA'; @x = (1, 2); my @p; while (my ($i, $v) =
 op("a:negative-indices", sub { my @x; tie @x, 'NI'; $x[-2] });
 op("a:return", sub { my @x; tie @x, 'LA'; @x = (1, 2); my $f = sub { return @x }; my @c = $f->(); my $s = $f->(); "@c|$s" });
 op("a:anon-copy", sub { my @x; tie @x, 'LA'; @x = (3); my $c = [@x]; "@$c" });
+op("a:defelem-then-tie", sub { our @g; my $r = sub { tie @g, 'LA'; $#g = 20; $g[10] = "crumpets"; "$_[0]" }->($g[10]); $r });
 op("a:range-fill", sub { my @x; tie @x, 'LA'; @x = 1 .. 3; "@x" });
 op("a:reverse-inplace", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3, 4); delete $x[1]; @x = reverse @x; join ",", map { exists $x[$_] ? $x[$_] : "-" } 0 .. 3 });
 op("a:list-assign-list", sub { my @x; tie @x, 'LA'; my @r = ((my $f), @x) = (1, 2, 3); scalar(@r) . ":@x" });
