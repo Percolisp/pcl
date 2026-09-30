@@ -987,6 +987,13 @@
                    ,l)
            ,l))))
 
+(defmacro %p-tie-refuse (c what)
+  "Rule 12 for a container operation with no tied form: on a tied C, die
+   naming WHAT (perl-shaped, trappable) instead of acting on the empty shell."
+  `(when (%p-tied ,c)
+     (%p-die-error nil (format nil "PCL: ~A on a tied ~A is not supported"
+                               ,what (if (hash-table-p ,c) "HASH" "ARRAY")))))
+
 (defmacro %p-array-count (a)
   "The element count of array A: its length, or FETCHSIZE when A is tied."
   (let ((v (gensym "A")) (r (gensym "R")))
@@ -8924,20 +8931,23 @@ per element."
          (setf (symbol-value ',place) (make-hash-table :test 'equal)))
        (let ((,cnt (p-hash-fill ,place ,val)))
          (if (eq *wantarray* t)
-             ;; List context: return hash contents as flat vector
-             (let ((,ret (make-array (* 2 (hash-table-count ,place))
-                                     :adjustable t :fill-pointer 0)))
-               ;; Perl's hash assignment yields the hash's own contents as
-               ;; LVALUES (`$_++ foreach %h = (1,2,1,4)` increments the stored
-               ;; values), so the VALUE half is the slot's cell — promoted if
-               ;; raw.  The KEY half is a copy, as everywhere else.
-               (maphash (lambda (k v)
-                          (declare (ignore v))
-                          (when (%p-real-hash-key-p k)
-                            (vector-push-extend (make-p-box k) ,ret)
-                            (vector-push-extend (%p-hash-elem-cell ,place k) ,ret)))
-                        ,place)
-               ,ret)
+             ;; List context: return hash contents as flat vector (a tied
+             ;; hash: its view, task #155)
+             (if (%p-tied ,place)
+                 (%p-tie-view (%p-tied ,place))
+               (let ((,ret (make-array (* 2 (hash-table-count ,place))
+                                       :adjustable t :fill-pointer 0)))
+                 ;; Perl's hash assignment yields the hash's own contents as
+                 ;; LVALUES (`$_++ foreach %h = (1,2,1,4)` increments the stored
+                 ;; values), so the VALUE half is the slot's cell — promoted if
+                 ;; raw.  The KEY half is a copy, as everywhere else.
+                 (maphash (lambda (k v)
+                            (declare (ignore v))
+                            (when (%p-real-hash-key-p k)
+                              (vector-push-extend (make-p-box k) ,ret)
+                              (vector-push-extend (%p-hash-elem-cell ,place k) ,ret)))
+                          ,place)
+                 ,ret))
              ;; Scalar/void: return count of input elements
              ,cnt)))))
 
@@ -9702,6 +9712,7 @@ per element."
         (items (%p-flatten-list refs)))
     (unless (and (vectorp v) (not (stringp v)))
       (%p-die-error nil "Not an ARRAY reference"))
+    (%p-tie-refuse v "refaliasing \\(@a) = LIST")
     (%p-check-array-writable v)
     (setf (fill-pointer v) 0)
     (loop for r across items
@@ -9716,6 +9727,7 @@ per element."
         (box (p-alias-scalar-target ref)))
     (unless (hash-table-p h)
       (%p-die-error nil "Not a HASH reference"))
+    (%p-tie-refuse h "refaliasing \\$h{k} = REF")
     (setf (gethash (to-string key) h) box)))
 
 (defun p-alias-array-slot (arr idx ref)
@@ -9725,6 +9737,7 @@ per element."
          (box (p-alias-scalar-target ref)))
     (unless (and (vectorp a) (not (stringp a)))
       (%p-die-error nil "Not an ARRAY reference"))
+    (%p-tie-refuse a "refaliasing \\$a[i] = REF")
     (let ((n (%p-array-index a idx)))
       (when (< n 0) (%p-non-creatable-index idx))
       (loop while (>= n (length a)) do (vector-push-extend nil a))
@@ -29563,7 +29576,16 @@ buffer's fill-pointer; everything else falls back to file-length."
          (dolist (kv ,saved) (setf (gethash (car kv) ,h) (cdr kv)))))))
 
 (defun %p-local-array-slice-nested (arr vec pos thunk)
-  "Helper: save/restore arr[idx] for each idx in vec[pos..end], then call thunk."
+  "Helper: save/restore arr[idx] for each idx in vec[pos..end], then call thunk.
+   A TIED array localizes each element through its methods (task #155)."
+  (%p-when-tied (r arr)
+    (return-from %p-local-array-slice-nested
+      (if (>= pos (length vec))
+          (funcall thunk)
+          (let* ((k (%p-ta-index r (aref vec pos) t))
+                 (s (%p-tie-local-save r k nil nil)))
+            (unwind-protect (%p-local-array-slice-nested arr vec (1+ pos) thunk)
+              (%p-tie-local-restore r k s))))))
   (if (>= pos (length vec))
       (funcall thunk)
       (let* ((raw-idx (truncate (to-number (aref vec pos))))
