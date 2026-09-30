@@ -384,8 +384,12 @@ print "list:", join('|', @copy), " interp:$l{x}\n";
 PERL
 
 # ── the ANNOUNCEMENT names what was tied (s499g) ───────────────────────────
-# perl ties all five; PCL ties the scalar and ANNOUNCES the other four (rule
-# 12's s329 boundary: effect-only).  A glob -- `tie *FH`, `tie *STDOUT`, and a
+# perl ties all five; PCL ties the scalar, the ARRAY and the HASH (task #155,
+# s501t) and ANNOUNCES the two filehandles (rule 12's s329 boundary:
+# effect-only).  s501t rewrote the ARRAY/HASH rows under the four-conjunct
+# rule: they asserted the announcement a tied container no longer makes, and
+# now assert what perl prints -- `tied` answers the object (perl-probed) --
+# and that no announcement is made for them.  A glob -- `tie *FH`, `tie *STDOUT`, and a
 # lexical handle's `tie *$fh` -- used to be called "a non-lvalue", and the
 # line ended in a task number where the project points at a not-supported.md
 # section by NAME.
@@ -400,18 +404,16 @@ tie *FH, "T";
 open my $fh, "<", $0 or die;
 tie *$fh, "T";
 tie my $s, "T"; print "s:", (tied($s) ? "tied" : "untied"), "\n";
-my @a; tie @a, "T";
-my %h; tie %h, "T";
+my @a; tie @a, "T"; print "a:", ref(tied(@a)), "\n";
+my %h; tie %h, "T"; print "h:", ref(tied(%h)), "\n";
 PERL
     my @lines = grep { /^PCL: tie:/ } split /\n/, $out;
-    my $sect = qr/\(see docs\/not-supported\.md "tie on an ARRAY, HASH or filehandle"\)(?=\n|\z)/;
+    my $sect = qr/\(see docs\/not-supported\.md "tie on a filehandle"\)(?=\n|\z)/;
     like($out, qr/^PCL: tie: a filehandle \(class T\) is not implemented — it is left untied $sect/m,
          'tie *FH / tie *$fh announce "a filehandle"');
-    like($out, qr/^PCL: tie: an ARRAY \(class T\) is not implemented — it is left untied $sect/m,
-         'tie @a announces "an ARRAY" with the section pointer');
-    like($out, qr/^PCL: tie: a HASH \(class T\) is not implemented — it is left untied $sect/m,
-         'tie %h announces "a HASH" with the section pointer');
-    is(scalar(@lines), 3, 'three announcements: filehandle (deduped), ARRAY, HASH')
+    like($out, qr/^a:T$/m, 'tie @a is IMPLEMENTED: tied(@a) answers the object (perl: a:T)');
+    like($out, qr/^h:T$/m, 'tie %h is IMPLEMENTED: tied(%h) answers the object (perl: h:T)');
+    is(scalar(@lines), 1, 'one announcement: the filehandle (deduped); no ARRAY / HASH line')
         or diag $out;
     unlike($out, qr/non-lvalue|task #/, 'no "non-lvalue" noun and no task number');
     like($out, qr/^s:tied$/m, 'the scalar tie is not announced and works');

@@ -30138,17 +30138,18 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; ============================================================
 ;;; Tie / Untie / Tied — scalar implementation
 ;;; ============================================================
-;;; tie() installs a p-tie-proxy into the box's value slot.
-;;; unbox() intercepts reads (FETCH); box-set() intercepts writes (STORE).
-;;; Phase 1: scalars only.  Arrays/hashes require boxing those types first.
+;;; tie() on a SCALAR installs a p-tie-proxy into the box's value slot:
+;;; unbox() intercepts reads (FETCH), box-set() writes (STORE).  An ARRAY or
+;;; HASH is tied through the side table (the "Tied ARRAYS and HASHES" section
+;;; above, task #155).  What is left unimplemented is the FILEHANDLE.
 
 (defun %p-warn-aggregate-tie (value classname)
-  "Announce an aggregate tie that PCL is about to DROP (task #155).
-   Silent-wrong is the failure mode CLAUDE.md rule 12 exists to stop: the
-   program runs on an UNTIED container and every FETCH/STORE the test was
-   written to observe simply never happens.  A die was rejected for R1 (it
-   converts mid-file tie users into crashes); see docs/not-supported.md
-   'tie on an ARRAY, HASH or filehandle'.
+  "Announce a tie that PCL is about to DROP: a FILEHANDLE (TIEHANDLE), or an
+   operand of no tieable kind.  Silent-wrong is the failure mode CLAUDE.md
+   rule 12 exists to stop: the program runs on an UNTIED handle and every
+   PRINT/READLINE the test was written to observe simply never happens.  A
+   die was rejected for R1 (it converts mid-file tie users into crashes); see
+   docs/not-supported.md 'tie on a filehandle'.
 
    EFFECT-ONLY, so it routes through the shared %p-announce-unsupported helper
    (ruled docs/fable-answers-s337.md §5b) — the CLASS rides in the OPERAND,
@@ -30159,16 +30160,14 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; which p-dynamic-typeglob hands over as the stream itself) is a
   ;; FILEHANDLE; it used to fall into a `(t "a non-lvalue")` arm.  Anything
   ;; else is named by its type rather than swallowed (rule 12).
-  (let ((kind (cond ((hash-table-p value) "a HASH")
-                    ((and (vectorp value) (not (stringp value))) "an ARRAY")
-                    ((or (p-typeglob-p value) (streamp value) (%p-socket-p value))
+  (let ((kind (cond ((or (p-typeglob-p value) (streamp value) (%p-socket-p value))
                      "a filehandle")
                     (t (format nil "an operand of type ~(~A~)" (type-of value)))))
         (name (if (stringp classname) classname (format nil "~A" classname))))
     (%p-announce-unsupported
      "tie" (format nil "~A (class ~A)" kind name)
      (format nil "it is left untied (see docs/not-supported.md ~
-                  \"tie on an ARRAY, HASH or filehandle\")"))))
+                  \"tie on a filehandle\")"))))
 
 (defun p-tie (box classname &rest args)
   "Perl tie - bind a scalar variable to a class implementing TIESCALAR.
