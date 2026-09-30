@@ -204,6 +204,23 @@ PERL
 d n n n s
 EXPECTED
 
+# An EMPTY-bodied signature sub returns nothing (() / undef), so sig-classic
+# declines it: the inserted `my (PARAMS) = @_;` would become its value (the
+# full sweep caught it, perl-tests/signatures.t t116/t117, s502).
+answers(<<'PERL', <<'EXPECTED', 'empty signature body');
+use feature 'signatures'; no warnings;
+sub t116 (@a) { }
+sub e1 ($x) { }
+sub e2 ($x, $y) { ; }
+my @l = t116(333); print "a ", scalar(@l), " ", (defined(scalar(t116(333))) ? "def" : "undef"), "\n";
+@l = e1(5); print "b ", scalar(@l), " ", (defined(scalar(e1(5))) ? "def" : "undef"), "\n";
+@l = e2(5, 6); print "c ", scalar(@l), " ", (defined(scalar(e2(5, 6))) ? "def" : "undef"), "\n";
+PERL
+a 0 undef
+b 0 undef
+c 0 undef
+EXPECTED
+
 # #2571: a :str-buffer parameter starts as a buffer.
 answers(<<'PERL', <<'EXPECTED', '#2571 str-buffer parameter');
 my @a = (1, 2, 3);

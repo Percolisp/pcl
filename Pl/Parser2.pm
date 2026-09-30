@@ -5943,6 +5943,12 @@ sub _signature_normal_plan {
     && _is_signature_node($k[2])
     && $k[3]->isa('PPI::Structure::Block');
   my ($sig, $block) = @k[2, 3];
+  # An EMPTY body keeps v1: perl's empty signature sub returns nothing
+  # (() in list, undef in scalar context), while the classic spelling's
+  # inserted `my (PARAMS) = @_;` would become its value (perl-tests
+  # signatures.t t116/t117: `scalar(t116(333))` is undef, not 1).
+  return undef
+    unless grep { !$_->isa('PPI::Statement::Null') } $block->schildren;
   my $text = $sig->content;
   # PPI's Token::Prototype spelling is a SIGNATURE only under v1's own rule
   # (Pl::Parser::_sub_head, #455): named parameters and an enabling pragma
