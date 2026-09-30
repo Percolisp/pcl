@@ -2869,13 +2869,18 @@
    be its own mutable box — mutating it ($x = ...) must not write through to the
    caller's variable (p-flatten-args keeps the caller's boxes as-is in @_).
    Reads through tie/magic are FETCHed via unbox; the reference flag and blessed
-   class are preserved so a ref/blessed arg copies its container, not its referent."
-  (if (p-box-p val)
+   class are preserved so a ref/blessed arg copies its container, not its referent.
+   A genuine dualvar ($!, Scalar::Util::dualvar) keeps BOTH halves -- the
+   construction arm's own rule (%p-array-store-scalar); before s501q the
+   signature route dropped the numeric half."
+  (cond
+    ((not (p-box-p val)) (make-p-box val))
+    ((%pcl-dualvar-p val) (%p-dualvar-copy val))
+    (t
       (let ((b (make-p-box (unbox val))))
         (setf (p-box-is-ref b) (p-box-is-ref val)
               (p-box-class b)  (p-box-class val))
-        b)
-      (make-p-box val)))
+        b))))
 
 ;;; Boxed special variables (must be after make-p-box definition)
 ;;; Default variable ($_) - p-box so p-scalar-= / box-set work correctly

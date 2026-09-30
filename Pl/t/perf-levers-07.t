@@ -189,6 +189,21 @@ PERL
 4 1
 EXPECTED
 
+# A parameter copy keeps a DUALVAR's two halves ($! here): the raw path's
+# %p-param-copy and the signature route's p-copy-scalar-arg both copy it by
+# the construction arm's rule (s501q; the signature route lost the numeric
+# half before, and the raw path shared the caller's box, #2570).
+answers(<<'PERL', <<'EXPECTED', 'param copy keeps a dualvar');
+use feature 'signatures'; no warnings;
+sub d1 ($x) { $x + 0 > 0 ? "n" : "lost" }
+sub d2 ($x, $y = 1) { $x + 0 > 0 ? "n" : "lost" }
+sub d3 { my ($x) = @_; $x + 0 > 0 ? "n" : "lost" }
+open(my $fh, '<', '/nonexistent/pcl-zz') or 1;
+print "d ", d1($!), " ", d2($!), " ", d3($!), " ", (length("$!") > 0 ? "s" : "nos"), "\n";
+PERL
+d n n n s
+EXPECTED
+
 # #2571: a :str-buffer parameter starts as a buffer.
 answers(<<'PERL', <<'EXPECTED', '#2571 str-buffer parameter');
 my @a = (1, 2, 3);
