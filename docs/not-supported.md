@@ -2405,80 +2405,55 @@ adversarial code.  No CPAN module in scope uses it.
 **Affected tests:** `perl-tests/eval.t` — the block using `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 is commented out (6 tests).
 
-## `tie` on an ARRAY, HASH or filehandle  [INTERIM — announced, not silent; scalar tie works]
+## `tie` on a filehandle  [announced, not silent; SCALAR, ARRAY and HASH tie work]
 
-**Perl behaviour:** `tie @a, 'Tie::StdArray'` / `tie %h, 'Tie::StdHash'` route
-every element read and write through the tie object's `FETCH`/`STORE`/
-`EXISTS`/`DELETE`/… methods.
+**Perl behaviour:** `tie *FH, 'T'`, `tie *STDOUT, 'T'`, `tie *$fh, 'T'` call
+`T->TIEHANDLE`, and from then on `print FH ...`, `<FH>`, `printf`, `read`,
+`getc`, `eof`, `close`, `binmode`, `fileno`, `seek`, `tell`, `open` on the
+handle are method calls (`PRINT`, `READLINE`, ...).
 
-**PCL behaviour:** the tie is **ignored**, and the program continues on the
-untied aggregate.  As of s320 this is no longer silent: `p-tie` prints one
-loud line to stderr —
+**PCL behaviour:** the tie is **ignored** and the handle stays untied, loudly:
+`p-tie` prints one line to stderr, once per (kind, class) per process --
 
 ```
-PCL: tie: a HASH (class Tie::StdHash) is not implemented — it is left untied (see docs/not-supported.md "tie on an ARRAY, HASH or filehandle")
+PCL: tie: a filehandle (class T) is not implemented — it is left untied (see docs/not-supported.md "tie on a filehandle")
 ```
 
-— once per (kind, class) per process, and returns as before.  The same holds
-for a **filehandle** — `tie *FH, 'T'`, `tie *STDOUT, 'T'`, `tie *$fh, 'T'`
-(perl calls `TIEHANDLE`): PCL announces `a filehandle (class T)` and the
-handle stays untied (until s499g the noun was a misleading "a non-lvalue" and
-the line ended in a task number).  (The line comes
-from the shared `%p-announce-unsupported` helper since s339, which is why the
-class rides in the operand: that is what keeps the per-class dedup.)  **`tie` on a
-SCALAR is fully implemented** (`p-tie-proxy`: `unbox` dispatches `FETCH`,
-`box-set` dispatches `STORE`) and is unaffected.
+-- and returns undef.  (The line comes from the shared
+`%p-announce-unsupported` helper; the class rides in the operand, which keeps
+the dedup.)  An operand of no tieable kind is announced the same way, named by
+its type.
 
-**Why:** a scalar carries a `p-box` — a place with slots for `sv-ok`, `nv-ok`,
-class, magic — and installing a tie proxy is just writing that box's value
-slot.  An aggregate carries *nothing*: it arrives at `p-tie` as a raw CL
-hash-table or vector, with nowhere to hang the proxy.  (Read-only *arrays*
-escaped that limit — task #159 encodes the flag in the STORAGE rather than on
-the container, which works because "read-only" is exactly "fixed size"; a tie
-proxy has no such representation trick available.)  The fix here is the
-boxed-aggregate data model, which changes the representation every array/hash
-access compiles against.  That is an E5-era design item (Target A: it costs an indirection on
-the hottest paths), deliberately **not** started pre-R1.
+**What IS implemented:** `tie` on a SCALAR (`p-tie-proxy`, since phase 1) and,
+since s501t (task #155), on an ARRAY and a HASH -- the side-table
+representation, the census of every site and the method-call table against
+perl are in [`tie-aggregates.md`](tie-aggregates.md).  Core `Tie::Array`,
+`Tie::Hash`, `Tie::StdArray`, `Tie::StdHash`, `Env` work as they are.
 
-**What it costs, measured (s473h, task #1429).**  `t/op/tiearray.t` reads
-26/29 with 20 rows never produced, and every one of them is this entry, not a
-separate bug: the file's `NegIndex` block ties an array whose class sets
-`$NEGATIVE_INDICES`, and since the tie is dropped the block runs against an
-ORDINARY array — `$n[-2] = 'a'` then dies "Modification of non-creatable array
-value attempted, subscript -2", which is *perl's own answer for an untied
-array of that size*, and the die takes the rest of the block with it.  A
-nineteen-shape probe vs perl 5.40.3 is in #1429: the only three shapes that
-agree are the three that involve no tie.  perl's `NEGATIVE_INDICES` rule (a
-tied array whose class sets the variable receives negative indices unchanged
-instead of normalised through `FETCHSIZE`) is a clause of the tied-array
-implementation, not something that can be added before it.
+**Why the handle is different:** a handle is a glob / fd stream, not a
+container, so the "empty shell + side table" trick has no miss branch to ride
+in -- every I/O builtin would need its own entry test, and `print` / `<>` are
+the hottest paths PCL has.  Its own task (filed s501t) carries the method
+inventory `t/op/tiehandle.t` needs (TIEHANDLE PRINT PRINTF WRITE READLINE GETC
+READ EOF CLOSE BINMODE FILENO SEEK TELL OPEN UNTIE) and the measurement: 12/32
+with 23 rows never produced, because the file's assertions live INSIDE the tie
+methods.
 
-**Interim, not final.**  A `die` was considered and rejected for R1: it would
-turn files that tie a container mid-run (`op/avhv.t`, 38/2 today) into crashes,
-i.e. trade an announced wrong answer for an un-registrable one days before a
-release.  Announced-wrong is the CLAUDE.md rule 12 minimum; TAP output is
-unaffected by the stderr line.  Revisit die-vs-support when the boxed-aggregate
-design lands.  Tracked as task #155, ruled in `docs/fable-answers-s318.md` §1.
+**Also not done, by ruling:**
 
-**Status s467 (2026-09-04).**  The boxed-aggregate model SHIPPED in rounds
-14–16 (s455e–s459, [`boxed-aggregates-design-s455.md`](boxed-aggregates-design-s455.md)), and its
-scope table (E9) deliberately left tied and magic containers OUT: they keep the
-fully-boxed representation, and the tie hook itself is still unimplemented, so
-this entry stands and #155 stays open.  The same announcement covers a
-FILEHANDLE tie — `tie *FH, 'Class'` prints (since s499g; it used to say "a
-non-lvalue")
-`PCL: tie: a filehandle (class Class) is not implemented — it is left untied (see docs/not-supported.md "tie on an ARRAY, HASH or filehandle")`
-and `print FH …` goes to the untied handle (probed s467).  Only a SCALAR tie is
-implemented.
+* **DESTROY** of a tie object is never called (USER ruling, permanent):
+  `t/op/tiearray.t`'s three "... freed" rows fail for it.
+* The tied-aggregate LOG differences (an extra or a missing `FETCHSIZE` /
+  `FETCH` in six named shapes, results identical) are listed in
+  [`tie-aggregates.md`](tie-aggregates.md) §4.
+* Refaliasing INTO a tied container (`\(@tied) = LIST`, `\$tied{k} = REF`,
+  `\$tied[i] = REF`) dies `PCL: refaliasing ... on a tied ARRAY/HASH is not
+  supported` (rule 12: it has no tied form).
 
-**Costed s473t1: `perl-tests/magic.t`'s whole 3-row hole.**  The file ties a
-LEXICAL array purely to compute test numbers for five sub-process rows —
-`sub FETCH { $next_test + pop } tie my @tn, __PACKAGE__;` — so with the tie
-ignored `$tn[4]` interpolates EMPTY and the child programs print `ok ` and
-`not ok ` with no number.  Two such lines reach the harness and match no TAP
-row regex; the other three rows are never printed at all.  `curr_test()` is
-then advanced by 5 regardless, so the numbering resumes correctly and nothing
-else in the file notices.
+**History.**  s320 made the old ARRAY / HASH / filehandle drop LOUD (it had
+been silent); s473h measured that `t/op/tiearray.t`'s 20 missing rows were
+this entry (#1429's `$NEGATIVE_INDICES`); s501 designed the aggregate half and
+s501t built it (tiearray.t 26/29 -> see the session log).
 
 ## Sparse arrays (holes), element aliasing, and SV identity
 

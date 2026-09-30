@@ -18,7 +18,7 @@ design ruling; `sNNN` names an internal working session.
 
 * [0. The one-paragraph model](#0-the-one-paragraph-model) — start here
 * [1. Reading the output](#1-reading-the-output) — file shape, naming conventions
-* [2. The data model](#2-the-data-model) — [undef](#21-undef) · [scalars and raw slots](#22-scalars-boxes-and-raw-slots) · [tied scalars](#22b-tied-scalars--the-raw-slot-behind-the-magic) · [arrays](#23-arrays) · [hashes](#24-hashes) · [references](#25-references) · [blessed objects](#26-blessed-objects-strings-numbers)
+* [2. The data model](#2-the-data-model) — [undef](#21-undef) · [scalars and raw slots](#22-scalars-boxes-and-raw-slots) · [tied scalars](#22b-tied-scalars--the-raw-slot-behind-the-magic) · [arrays](#23-arrays) · [hashes](#24-hashes) · [tied arrays and hashes](#24a-tied-arrays-and-hashes--the-empty-shell-and-the-side-table-normative-s501t-task-155) · [references](#25-references) · [blessed objects](#26-blessed-objects-strings-numbers)
 * [2b. Declarations, scoping, and the rename families](#2b-declarations-scoping-and-the-rename-families) — [the tension](#2b1-the-fundamental-tension) · [declaration forms](#2b2-the-declaration-forms) · [rename families](#2b3-the-rename-families) · [guard rails](#2b4-the-guard-rails-when-renaming-refuses)
 * [3. Coercion](#3-coercion--the-heart-of-perl-semantics) — [numification](#31-to-number-numification) · [stringification](#32-to-string-stringification) · [interpolation extent](#32b-interpolation-extent--which-text-belongs-to-a--reference-inside-a-dq-string-regex-or-heredoc-normative-s426) · [case/quote modifiers read from the source](#32g-the-casequote-modifiers-of-a-dq-string-are-read-from-its-source-normative-s499h-task-2441) · [truthiness](#33-p-true-p-truthiness) · [what ops return](#34-what-ops-return)
 * [4. Context (scalar / list / void)](#4-context-scalar--list--void) — [argument context is the callee's signature](#41-a-calls-argument-context-is-a-fact-of-the-callees-signature-normative-s492b-task-2004)
@@ -527,6 +527,46 @@ sites and must not get one.  (A blessed ARRAY carries its class on the
 enclosing box rather than in the vector, so the array side never had the
 question.)  A port that keeps the class inside the container must make the
 same argument about its own class slot before aliasing elements.
+
+### 2.4a Tied arrays and hashes — the empty shell and the side table (normative, s501t, task #155)
+
+`tie @a, 'Class', …` / `tie %h, …` hand `p-tie` the CONTAINER itself, and the
+container stays **the same object, EMPTIED**: its contents move into the tie
+record (perl hides them while tied and `untie` restores them) and the tie
+lives in a runtime side table — a weak `EQ` table container → record {object,
+kind, saved contents, `each` iterator} — guarded by a global count of live
+ties.  A port must keep both properties:
+
+1. **Identity**: every alias of the container (`\@a` taken before the tie,
+   `tie @$r`, `@_`, a symbolic or glob name) sees the tie, because nothing was
+   rebound.
+2. **Every container operation asks "is this tied?" before it trusts the
+   storage**, and a tied container is answered by the METHOD perl calls:
+   an element read that MISSES (always, on an empty shell) is `FETCH`; an
+   element store is `STORE` (a raw aggregate value is first its count — a
+   scalar assignment); size is `FETCHSIZE` / `STORESIZE`; `exists` / `delete`
+   are `EXISTS` / `DELETE`; `push` / `pop` / `shift` / `unshift` / `splice`
+   are the same-named methods; a whole-container assignment is `CLEAR`
+   (`+ EXTEND(n)` for an array when `n > 0`) and a `STORE` per element — and
+   it clears the hidden contents too; `keys` / `each` walk `FIRSTKEY` /
+   `NEXTKEY`; `scalar(%h)` is `SCALAR`, or when the class has none, "an
+   `each` is in progress, or `FIRSTKEY` finds a key".  A negative subscript is
+   rebased on `FETCHSIZE` unless the class's `$NEGATIVE_INDICES` is true.  An
+   operation with no tied form DIES naming itself; it never reads the empty
+   shell as "no elements".
+
+An element handed out as an lvalue (foreach alias, `\$h{k}`, `@_`, `values`,
+an element proxy's `++`) is a **fresh box holding a `:tielem` magic cell**:
+getter `FETCH(key)` (kept until the next write, so one operator reading its
+operand twice FETCHes once), setter `STORE(key, v)`.  A LIST-context use reads
+the container's **view**: its element proxies in index order, or for a hash
+its keys (all `FIRSTKEY`/`NEXTKEY` first) each followed by its value proxy.
+`DESTROY` is never called.  The census of sites and perl's method-call table
+are [`docs/tie-aggregates.md`](tie-aggregates.md).
+
+Example — `my %h; tie %h, 'Tie::StdHash'; $h{a}++` calls `FETCH(a)` then
+`STORE(a, 1)`, exactly perl's two calls; `%h` stays an empty hash-table
+throughout.
 
 ### 2.5 References
 
