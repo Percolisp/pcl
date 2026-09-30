@@ -2,7 +2,7 @@
 
 Append new entries at the top. One section per session.
 
-## Session s500a (Opus agent, 2026-09-30) -- everyday singles 1: forward goto before a `my` (#2287), `%{{ … }}` (#2085), run-time prototype() (#2533), Scalar::Util isweak/openhandle, the PPI number sign (#2530); EVERYDAY 103 -> 105 of 122 measured on the 1bae682b-based tree (expected +4: two rows stop at the next cause; the final-tree run on 77212b1f is OWED)
+## Session s500a (Opus agent, 2026-09-30) -- everyday singles 1: forward goto before a `my` (#2287), `%{{ … }}` (#2085), run-time prototype() (#2533), Scalar::Util isweak/openhandle, the PPI number sign (#2530); EVERYDAY 104 -> 106 of 122 (main c0edaf75 record -> the rebased tree bba2ba80, buckets 0; expected +4: two rows stop at the next cause)
 
 **#2287.** Two causes behind the File-Compare-Copy row.  The #252 forward-goto wrap declined when a `my` sat between the gotos and the labels, so the catches opened one `my`-level down, after File::Copy's first `open … or goto fail_open1` (a bare `(go)`); it now hoists #126-subset declarations through ONE selector `_goto_hoist_decls`, which also refuses a name an earlier statement reads (that read is perl's OUTER variable -- #126 printed "" there, a pre-existing silent wrong).  Second: `_is_lexical_decl_name` called the `$a` of `open(my $o, ">", $a)` a declaration (#593's third copy), so a renamed `my $a` was read as the special `$a`; it asks `_declarator_syms` now.
 **#2085.** perl reads a brace group that opens a deref block as an anon hash, always (the block spellings are syntax errors); `_block_is_hash_constructor($b, 'deref')` + `_deref_inner_brace` for PPI's Compound(bare Block) shape; 22/22 probe rows = perl.  The term-position sibling `[ { g() } ]` is #2540.
