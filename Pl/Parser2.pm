@@ -8882,7 +8882,10 @@ sub _lower_sub_inner {
 sub _body_observes_args {
   my ($stmts) = @_;
   my $txt = join("\n", map { ref $_ ? $_->content : '' } @$stmts);
-  return 1 if $txt =~ /\@_|\$_\[|\bshift\b|\bpop\b|\bgoto\b|&\s*[\$\w:]+\s*[;}]/;
+  # `pop` observes @_ only BARE: `pop @$x` / `pop(@a)` name their array, and
+  # `pop(@_)` is the @_ arm (emission-ab caught `pop @$x` declining
+  # Math::BigInt::Calc's raw path).  `shift` keeps the old over-firing test.
+  return 1 if $txt =~ /\@_|\$_\[|\bshift\b|\bpop\b(?!\s*\(?\s*[\@\$])|\bgoto\b|&\s*[\$\w:]+\s*[;}]/;
   for my $s (@$stmts) {
     next unless ref $s && $s->isa('PPI::Node');
     for my $w (@{ $s->find(sub { $_[1]->isa('PPI::Token::Word')

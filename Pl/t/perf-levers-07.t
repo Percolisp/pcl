@@ -231,6 +231,11 @@ PERL
 a!
 EXPECTED
 
+# ...but `pop @$x` names its array: the raw path stays (Math::BigInt::Calc's
+# `_dec`, which the first #2572 predicate declined -- emission-ab, s502).
+like(transpile('sub dec { my ($c, $x) = @_; pop @$x if @$x > 1; $x } my $r = dec(0, [1, 2]); print "@$r\n";'),
+     qr/\(p-sub pl-dec.*?\(p-raw-params \(\(\$c /s, '#2572: `pop @$x` does not observe @_ (raw path kept)');
+
 # #2572: a body that reaches @_ IMPLICITLY (`&name;`, a bare `pop`) is not on
 # the raw path that drops @_.
 answers(<<'PERL', <<'EXPECTED', '#2572 implicit @_');
