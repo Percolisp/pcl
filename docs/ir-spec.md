@@ -1085,6 +1085,7 @@ rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
 | `$x__shadow__N` | v2 seam-shadow rename (W8.5) | a `my $x` *inside a block that lowers through the v1 seam* (`map { my $x = … }`, `do { my $x … }`) while an outer lexical `$x` is live. Unrenamed, the seam's defvar-based handling would write through the outer variable (the v1 bug); renamed, the inner block gets its own unique cell |
 | `$x__cond__N` | v2 poisoned-condition rename (W8.5) | `if (my $x = …)` / `for (my $x…)` where the *same bare name* is also used outside the construct as a package global. The construct's lexical takes the fresh name so the global keeps `$x` and gets its forward defvar |
 | `$x__emb__N` | v2 embedded-`my` rename (W8.5, #265) | an *expression-embedded* `my` **inside a named sub** (`++my $x->{k}`, `open my $fh, …`, `… if my $x = …`) whose bare name is also mentioned by another named sub in the segment. Unrenamed, the let-hoist refuses the decl (it cannot tell that other sub apart from one sharing a file-level cell) and the `my` writes the package GLOBAL — persisting across calls. Renamed, the sub gets its per-call `let` AND the global keeps `$x` and its forward defvar |
+| `$x__file__N` from an embedded `my` | v2 file-cell promotion (s501b, #2534) | an *expression-embedded* `my` at file or block level (`open(my $h, …)`, `read($fh, my $buf, N)`, `pipe(my $r, my $w)`) **captured by a named sub** is promoted exactly like a statement-level captured `my`: renamed `$h__file__N`, published as a package cell before its statement, and only its declarator is renamed inside that statement (perl introduces the name after the statement).  Every same-name embedded `my` in another block then keeps its own `p-let`.  Before this, the captured decl fell to the embedded-`my` veto — ONE forward-defvar'd global for the name — and every sibling `open(my $h …)` re-opened the sub's handle (perl `1 5 5`, PCL `1 0 5`).  The identity case and a decl with a later string eval naming it decline (they keep the veto path's single cell) |
 | `$x__lex__N` | v1 closure-capture rename | v1's fix for defvar-poisoned closures: a block `my` captured by a nested sub becomes a fresh, never-defvar'd name so its `let` stays truly lexical. Appears in v2 output too, inside seam-lowered map/grep bodies |
 | `$x__state__N` (+ `…__init`) | v2 state cells (s277c) | a named sub's `state` variable promoted to a per-sub package cell + raw once-flag (see the declarations table above); same blockers as the other renames |
 | `$state__<sub>__<name>__N` (+ `…__init`) | v1 state cells | same idea, v1's spelling — seen in v1-dialect files |
@@ -1150,6 +1151,12 @@ refusal (`eval_ok`):
 2. A **defvar'd package cell** (`__file__` span/capture promotions) is
    reached through the alias rule (`p-alias-eval-cell`) plus the
    cross-package span pairs (§9.1).
+   IDENTITY promotions (one declaration file-wide, the cell keeps the
+   source name) publish their pair as well (s501b, #2285): the eval
+   compiler learns that a name is LEXICAL only from the capture list, and
+   the package-switch requalifier answers "lexical" for any capture-list
+   name — so `eval 'sub { package Other; $c->() }'` calls the caller's
+   `my $c`, never `$Other::c`.
 3. A cell reachable by **neither** mechanism keeps a hard refusal:
    today `state`'s `__state__` cells (separate per-instance machinery)
    and container promotions with a post-decl eval.
@@ -3026,6 +3033,14 @@ var ⇒ plain lexical binding, no localization at all).
   `!SvOK(X) || !(SvROK(X) || (SvPOKp(X) && SvCUR(X)))` — so `isa(undef,Y)`,
   `isa(42,Y)` and `isa("",Y)` are undef while `isa("str",Y)` and `isa([],Y)`
   are `""`.  Guard `Pl/t/census-bugs-01.t`.
+- **`UNIVERSAL::isa` NEVER calls an overriding `isa` method; the infix `isa`
+  operator and `DOES` DO** (normative, s501b, task #2083).  An override is
+  written in terms of the base (`sub isa { … UNIVERSAL::isa(@_) }`, as
+  Math::BigFloat does), so the function spelling, `->isa` resolving to
+  UNIVERSAL, and every dispatch fallback answer from the linearized @ISA
+  (`%p-isa-mro`); only `$x isa C` (perl's `sv_isa_sv`) and `->DOES`
+  (`sv_does_sv`) delegate to the class's own-or-INHERITED `isa` method
+  (`%p-isa-override`).  Delegating from the base recursed forever.
 - PCL always linearizes with C3 (stock Perl defaults to DFS; documented
   divergence — `docs/not-supported.md` §mro).
 
@@ -3322,9 +3337,38 @@ The consequence is bigger than the value: PCL's whole top-level form died on
 the signal, so **every statement after the failed `system` was lost** —
 `t/op/exec.t` produced 16 fewer rows than perl for that one reason (#1920).
 A translator that maps `system` onto a signalling primitive owes the same
-conversion.  *(PCL still sends a one-string `system` through the shell
-unconditionally, where perl execs the words directly when the string carries
-no shell metacharacter; that is the remaining divergence, recorded in #1920.)*
+conversion.
+
+**Which program runs, and with which argv (normative, s501b, task #2082).**
+`system` and `exec` share ONE reading of their arguments (`%p-command-words`):
+the argument list is FLATTENED first (`exec @_` is a LIST); a LIST of more
+than one element NEVER goes through a shell and its first element is execvp'd
+with PATH search; ONE string goes to `/bin/sh -c` only when perl's `do_exec3`
+rule says so (a leading `. ` or `exec `, an `=` in the first word, or one of
+`$&*(){}[]'";\|?<>~` and backquote or newline), otherwise it is split on
+whitespace and execvp'd directly.  The indirect-object form
+`exec { PROG } LIST` / `system { PROG } LIST` is emitted `(p-exec :program PROG
+LIST…)`: PROG is the program, never the shell, and LIST[0] is perl's argv[0]
+— which the host spawn cannot set (argv[0] is always PROG; divergence in
+`docs/not-supported.md`), so LIST[1..] are the arguments.  The LIST ends
+before a same-level `or`/`and` like every paren-less list operator's:
+`exec { "sh" } "sh", "-c", $cmd or die` is `(exec …) or die`.
+
+An EMULATED `exec` (SBCL cannot replace its image) runs the program as a child
+and must then HOLD NOTHING: every descriptor of the PCL process is closed before
+it waits, so a parent waiting for EOF on a pipe (IPC::Open3's exec-status pipe,
+the child's stdin) sees it exactly when the program lets go; descriptors
+WITHOUT `FD_CLOEXEC` are handed to the program (`:preserve-fds`).  `pipe` installs both
+ends through the one installer, so they are `FD_CLOEXEC` above `$^F` as in perl.
+`open FH, MODE, LIST` flattens its LIST (`open $_[0], $_[1], @_[2..$#_]`), and
+`\*STDIN`/`*STDOUT`/`*STDERR` (perl's forced-main names) are `*main::…` in
+every package.
+
+```perl
+package Foo; exec { "/bin/echo" } "ignored-argv0", "a b";   # prints: a b
+system(q{echo $HOME});     # has `$` -> /bin/sh -c
+system("echo", q{$HOME});  # LIST -> echo prints the literal $HOME
+```
 
 **But the conversion is for HOST errors only — a PERL DEATH raised while the
 child runs propagates (normative, s495, task #2062).**  A signal handler is

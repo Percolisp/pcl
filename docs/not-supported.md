@@ -179,6 +179,7 @@ The handful most likely to matter to a program that is otherwise portable:
 
 * [`format` / `write` report formatting](#format--write-report-formatting)
 * [Assigning `$0` does not change the OS process name](#assigning-0-does-not-change-the-os-process-name)
+* [`exec { PROG } LIST` cannot set argv[0]; an emulated `exec` keeps a parent](#exec--prog--list-cannot-set-argv0-an-emulated-exec-keeps-a-parent)
 * [`fork` — supported, with two narrow caveats](#fork--supported-with-two-narrow-caveats-not-a-general-gap)
 * [Runtime `$ENV{TZ}` changes not reflected in `localtime`](#runtime-envtz-changes-not-reflected-in-localtime)
 * [`glob` in SCALAR context — iterator keyed by pattern, not call site](#glob-in-scalar-context-the-iterator-is-keyed-by-the-pattern-perl-keys-it-by-the-call-site--accepted-divergence-for-v01--task-489)
@@ -1275,6 +1276,30 @@ accident** — `$0` was not writable, so it still held the process name and the
 comparison was one unchanged value against itself; making the write real made
 it an honest failure, in exchange for tests 104/105/110 (`compare $0 to
 UTF8-flagged` and friends), which now pass.  Net magic.t 150/39 → 152/37.
+
+---
+
+## `exec { PROG } LIST` cannot set argv[0]; an emulated `exec` keeps a parent
+
+**Perl behaviour:** the indirect-object form runs PROG with LIST as its WHOLE
+argv, so LIST[0] is what the program sees as its own name:
+`exec { "sh" } "myname", "-c", 'echo $0'` prints `myname`.  `exec` replaces
+the process image, so the program keeps perl's PID.
+
+**PCL behaviour (s501b, task #2082):** PROG runs with LIST[1..] as its
+arguments (never through a shell), but argv[0] is always PROG — the probe
+prints `sh`.  SBCL cannot replace its own image, so `exec` is EMULATED: the
+program runs as a child of the PCL process, which closes every descriptor it
+holds (so pipes see EOF exactly when the program lets go), waits, and exits
+with the program's status.  The program's PID is therefore not `$$`.
+
+**Rationale:** SBCL's `run-program` always passes the program name as argv[0]
+and offers no override, and there is no `execve` in its image model.  Both
+would need a small C spawn helper; a program that depends on either is rare
+(argv[0] spoofing, `exec` to keep a PID for a supervisor).
+
+**Affected tests:** none known in the gate or the sweep; review probe
+`r501b-exec` rows for argv[0] (two rows).
 
 ---
 
