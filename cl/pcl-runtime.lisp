@@ -317,7 +317,7 @@
    #:%p-sort-classic
    #:p-join #:p-split #:p-funcall-ref #:p-bareword-value
    ;; Dereferencing (sigil cast operations)
-   #:p-cast-@ #:p-cast-% #:p-cast-$
+   #:p-cast-@ #:p-cast-% #:p-cast-$ #:p-cast-$-box
    #:p-symref-site           ; the `symref-const' emission's per-site cache
    #:p-hash-deref-= #:p-array-deref-=
    ;; OO
@@ -3597,7 +3597,7 @@
                (vectorp v)
                (not (stringp v))
                (adjustable-array-p v))
-      (setf v (length v)))
+      (setf v (%p-array-count v)))
     ;; Perl 5.26+: %hash in scalar context gives key count.
     ;; A raw hash-table (bare %hash) in a scalar assignment becomes the count.
     ;; But (make-p-box ht) = hash ref must stay as-is.
@@ -5591,7 +5591,7 @@
     ((stringp val) (parse-perl-number val))
     ((p-vstring-p val) (parse-perl-number (p-vstring-s val)))
     ;; Adjustable vector = Perl @array in scalar context → array length
-    ((and (vectorp val) (adjustable-array-p val)) (length val))
+    ((and (vectorp val) (adjustable-array-p val)) (%p-array-count val))
     ;; Perl 5.26+: plain %hash in numeric context → key count
     ((hash-table-p val) (%p-hash-user-count val))
     ;; Compiled regex in numeric context → object address (like a reference)
@@ -5854,7 +5854,7 @@
          ;; `unbox` above is the operand's ONE read: stringify what it
          ;; produced, not the place again (a tie FETCH fires once, #1813).
          (s (if (and (vectorp v) (not (stringp v)) (adjustable-array-p v))
-                (write-to-string (length v))
+                (write-to-string (%p-array-count v))
                 (to-string (%p-read-operand str v))))
          (nc (to-number count))
          (n (if (and (floatp nc)
@@ -5882,7 +5882,7 @@
   (cond
     ;; Adjustable vector (Perl @array) - flatten its contents
     ((and (vectorp val) (not (stringp val)) (adjustable-array-p val))
-     (loop for elem across val
+     (loop for elem across (%p-tie-view-of val)
            append (if (and (vectorp elem) (not (stringp elem)))
                       (coerce elem 'list)
                       (list elem))))
@@ -6003,7 +6003,7 @@
    hash-table its user key count.  Boxes (array/hash REFS) and every other
    value pass through untouched."
   (cond
-    ((and (vectorp v) (not (stringp v)) (adjustable-array-p v)) (length v))
+    ((and (vectorp v) (not (stringp v)) (adjustable-array-p v)) (%p-array-count v))
     ((hash-table-p v) (%p-hash-user-count v))
     (t v)))
 
@@ -12751,6 +12751,7 @@ create the key on a read-only call, which perl does not."
    flattening it keeps the value's TYPE, so no consumer sees a shape change;
    internal keys (:__class__ and friends) are carried across untouched, and a
    BLESSED table or an %ENV/%INC marker is an object/alias, never a copy."
+  (%p-when-tied (r v) (return-from %p-leavesub-aggregate (%p-tie-copy r)))
   (cond
     ((and (vectorp v) (not (stringp v))) (%p-leavesub-vector v))
     ;; A DEFERRED aggregate: the emitter writes a comma list as
@@ -13845,7 +13846,7 @@ which is one of #1140's escape spellings (probed)."
     (let ((result (make-array (* 2 n) :adjustable t :fill-pointer 0)))
       (dotimes (j n result)
         (let* ((i (truncate (to-number (svref flat j))))
-               (i (if (< i 0) (max 0 (+ (length arr) i)) i)))
+               (i (if (< i 0) (max 0 (+ (%p-array-count arr) i)) i)))
           (%p-vpush (make-p-box i) result)
           ;; VALUE half is an alias, the index half a copy (p-kv-hslice's rule)
           (%p-vpush (%p-alias-aelem arr i) result))))))
@@ -14257,6 +14258,13 @@ which is one of #1140's escape spellings (probed)."
   (let ((h (unbox hash)))
     (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
       (when (zerop n) (return-from p-delete-hash-slice nil))
+      (%p-when-tied (r h)                ; DELETE per key, in order (#155)
+        (return-from p-delete-hash-slice
+          (let ((result (make-array n :adjustable t :fill-pointer 0)))
+            (dotimes (i n result)
+              (vector-push-extend
+               (%p-tie-value (%p-tie-call r "DELETE" (to-string (svref flat i))))
+               result)))))
       ;; Wrong kind of referent (delete @{$aryref}{…}): perl's fatal.  The loop
       ;; below calls GETHASH directly rather than going through p-gethash, so it
       ;; needs its own guard (task #154; t/op/avhv.t t30).
@@ -14274,6 +14282,13 @@ which is one of #1140's escape spellings (probed)."
   (let ((h (unbox hash)))
     (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
       (when (zerop n) (return-from p-delete-kv-hash-slice nil))
+      (%p-when-tied (r h)                ; DELETE per key, in order (#155)
+        (return-from p-delete-kv-hash-slice
+          (let ((result (make-array (* 2 n) :adjustable t :fill-pointer 0)))
+            (dotimes (i n result)
+              (let ((k (to-string (svref flat i))))
+                (vector-push-extend k result)
+                (vector-push-extend (%p-tie-value (%p-tie-call r "DELETE" k)) result))))))
       ;; Wrong kind of referent: perl's fatal (task #154) — this loop calls
       ;; GETHASH directly rather than through p-gethash.
       (when (%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
@@ -14295,6 +14310,11 @@ which is one of #1140's escape spellings (probed)."
   ;; vector itself as an index, i.e. deleted element 0)
   (multiple-value-bind (flat n) (%p-flatten-slice-args indices)
     (when (zerop n) (return-from p-delete-array-slice nil))
+    (%p-when-tied (r (unbox arr))        ; DELETE per index, in order (#155)
+      (return-from p-delete-array-slice
+        (let ((result (make-array n :adjustable t :fill-pointer 0)))
+          (dotimes (j n result)
+            (vector-push-extend (p-delete-array arr (svref flat j)) result)))))
     (%p-check-array-writable (unbox arr))                ; task #159
     (let* ((a (unbox arr))
            ;; `delete @a[@a]` — the index vector may BE the array this loop
@@ -14326,6 +14346,12 @@ which is one of #1140's escape spellings (probed)."
    writability check — as p-delete-array-slice above."
   (multiple-value-bind (flat n) (%p-flatten-slice-args indices) ; task #394, as above
     (when (zerop n) (return-from p-delete-kv-array-slice nil))
+    (%p-when-tied (r (unbox arr))        ; DELETE per index, in order (#155)
+      (return-from p-delete-kv-array-slice
+        (let ((result (make-array (* 2 n) :adjustable t :fill-pointer 0)))
+          (dotimes (j n result)
+            (vector-push-extend (make-p-box (truncate (to-number (svref flat j)))) result)
+            (vector-push-extend (p-delete-array arr (svref flat j)) result)))))
     (%p-check-array-writable (unbox arr))                ; task #159
     (let* ((a (unbox arr))
            ;; the index vector may BE the array this loop empties: snapshot
@@ -15209,6 +15235,7 @@ what changes is that the element is the raw counter rather than a fresh box."
 
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
+  (%p-when-tied (r val) (setf val (%p-tie-copy r)))   ; `return @tied` (#155)
   (cond
     ;; Not a box - handle arrays context-sensitively
     ((not (p-box-p val))
@@ -27521,6 +27548,21 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; STRING spelling — `${"5"}`, `${$n}` with $n = "5", every magic name — is
 ;;; fixed below, which is the reachable half.  Residue: task #551.
 
+(defun p-cast-$-box (val &optional site)
+  "The BOX a scalar dereference `${EXPR}` names, for the operators that act
+   on the variable rather than its value -- tie / untie / tied (task #155
+   phase 3; core Env.pm ties `${\"${pkg}::$name\"}`).  A symbolic NAME gives
+   the package scalar's box, vivified as perl's rv2sv vivifies it; a hard
+   reference gives its referent box; anything else is p-cast-$'s answer."
+  (let ((inner (unbox val)))
+    (cond
+      ((p-box-p inner) inner)
+      ((stringp inner)
+       (%p-deref-strict-string "SCALAR" inner site)
+       (or (%p-symref-box inner site)
+           (setf (%p-symref-box inner site) (make-p-box nil))))
+      (t (p-cast-$ val site)))))
+
 (defun p-cast-$ (val &optional site)
   "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
    If val unboxes to a string or a number, treat as symbolic reference."
@@ -27679,6 +27721,9 @@ buffer's fill-pointer; everything else falls back to file-length."
                    new-h)))))
     (unless (hash-table-p h)
       (setf h (make-hash-table :test 'equal)))
+    (%p-when-tied (r h)                    ; %$tied = (…) (task #155)
+      (%p-th-fill r value)
+      (return-from p-hash-deref-= h))
     (clrhash h)
     (let ((flat (%p-flatten-list value)))
       (loop for i from 0 below (length flat) by 2
@@ -27706,6 +27751,9 @@ buffer's fill-pointer; everything else falls back to file-length."
                      new-arr)))))
     (unless (and (vectorp arr) (not (stringp arr)))
       (setf arr (make-array 0 :adjustable t :fill-pointer 0)))
+    (%p-when-tied (r arr)                  ; @$tied = (…) (task #155)
+      (%p-ta-fill r value)
+      (return-from p-array-deref-= arr))
     (%p-check-array-writable arr)          ; @$ref = (…) on a read-only array, task #159
     (setf (fill-pointer arr) 0)
     (let ((flat (%p-flatten-list value)))
@@ -29787,8 +29835,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; ---- array subscripts -----------------------------------------------------
 
 (defun %p-ta-size (rec)
-  "FETCHSIZE."
-  (%p-tie-int (%p-tie-call rec "FETCHSIZE")))
+  "FETCHSIZE -- a negative answer is perl's croak."
+  (let ((n (%p-tie-int (%p-tie-call rec "FETCHSIZE"))))
+    (when (minusp n) (p-die "FETCHSIZE returned a negative value"))
+    n))
 
 (defun %p-ta-negative-ok-p (rec)
   "True when the tie class sets $NEGATIVE_INDICES: perl then hands a negative
@@ -29872,6 +29922,21 @@ buffer's fill-pointer; everything else falls back to file-length."
     (dotimes (i (length keys) out)
       (setf (aref out i) (%p-tie-elem-box rec (aref keys i))))))
 
+(defun %p-tie-copy (rec)
+  "A plain, UNTIED copy of the tied container behind REC, its values FETCHed
+   in perl's order: what a copying consumer (a sub's return value) wants, in
+   the container's own shape, so scalar context still counts it."
+  (let ((view (%p-tie-view rec)))
+    (if (eq (p-tie-rec-kind rec) :array)
+        (let ((out (make-array (length view) :adjustable t :fill-pointer 0)))
+          (loop for b across view do (vector-push-extend (unbox b) out))
+          out)
+        (let ((out (make-hash-table :test 'equal)))
+          (loop for i from 0 below (length view) by 2
+                do (setf (gethash (unbox (svref view i)) out)
+                         (unbox (svref view (1+ i)))))
+          out))))
+
 (defun %p-tie-copy-values (items)
   "ITEMS (a list or vector of RHS values) with every element COPIED -- a lazy
    tied element FETCHed now.  A list assignment into a tied container CLEARs it
@@ -29938,12 +30003,14 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-ta-push (rec items &optional front)
   "push / unshift: PUSH or UNSHIFT with the flattened, copied list, then
-   FETCHSIZE for the new length -- unless the call is in VOID context, where
-   perl asks for no length (pp_push)."
-  (let ((flat (%p-tie-copy-values (%p-flatten-list items)))
-        (void (eq *wantarray* :void)))
+   FETCHSIZE for the new length.  perl skips the FETCHSIZE in VOID context;
+   PCL cannot tell (*wantarray* at a call's ARGUMENT is the enclosing
+   statement's, e.g. `is(push(@t, 4), 3)` runs under void) -- so one extra
+   FETCHSIZE in void context is a known, named difference
+   (docs/tie-aggregates.md)."
+  (let ((flat (%p-tie-copy-values (%p-flatten-list items))))
     (apply #'%p-tie-call rec (if front "UNSHIFT" "PUSH") flat)
-    (if void 0 (%p-ta-size rec))))
+    (%p-ta-size rec)))
 
 (defun %p-ta-splice (rec args)
   "splice(@tied, ARGS...): SPLICE with the offset / length / list as given."

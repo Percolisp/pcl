@@ -2584,6 +2584,25 @@ sub gen_funcall_form {
   # p-tie with a raw string and took the announce-and-drop arm, so `tied
   # $h{foo}` read undef (task #1950).  The box spellings are `tied`'s and
   # `pos`'s own, shared through _elem_box_form.
+  # tie/untie/tied on a SCALAR DEREFERENCE -- `tie ${"${pkg}::$name"}, …`,
+  # core Env.pm's own spelling (task #155 phase 3) -- need the scalar's BOX,
+  # and p-cast-$ answers a symbolic name with its VALUE: p-cast-$-box is the
+  # same resolver answering the (vivified) package scalar's box.
+  if (($func_name eq 'tie' || $func_name eq 'untie' || $func_name eq 'tied')
+      && @$kids >= 2) {
+    my $t = $self->gen_node_form($kids->[1]);
+    if (ref $t eq 'ARRAY' && ($t->[0] // '') eq 'p-cast-$') {
+      my $box = ['p-cast-$-box', @{$t}[1 .. $#$t]];
+      return ['p-untie', $box] if $func_name eq 'untie';
+      return ['p-tied', $box]  if $func_name eq 'tied';
+      if (@$kids >= 3) {
+        my $class_arg = $self->_class_name_bareword($kids->[2])
+                     // $self->gen_node_form($kids->[2]);
+        my @rest = map { $self->gen_node_form($kids->[$_]) } 3 .. $#$kids;
+        return ['p-tie', $box, $class_arg, @rest];
+      }
+    }
+  }
   if (($func_name eq 'tie' || $func_name eq 'untie') && @$kids >= 2) {
     if (my $box = $self->_elem_box_form($kids->[1])) {
       return ['p-untie', $box] if $func_name eq 'untie';
