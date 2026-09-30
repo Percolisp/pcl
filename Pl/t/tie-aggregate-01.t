@@ -170,6 +170,8 @@ op("h:tie-alias-before", sub { my %x; my $r = \%x; tie %x, 'LH'; $r->{k} = 4; $x
 op("h:tie-in-eval", sub { my $r = eval q{ my %e; tie %e, 'LH'; $e{e} = 5; $e{e} }; $r });
 op("h:nested-autoviv", sub { my %x; tie %x, 'LH'; $x{a}{b} = 1; ref $x{a} });
 op("h:return", sub { my %x; tie %x, 'LH'; %x = (a => 1); my $f = sub { %x }; my %c = $f->(); join ",", %c });
+op("h:push-autoviv", sub { my %x; tie %x, 'LH'; push @{$x{l}}, 1, 2; scalar @{$x{l}} });
+op("h:store-count", sub { my %x; tie %x, 'LH'; my @q = (1, 2, 3); $x{c} = @q; $x{c} });
 op("h:anon-copy", sub { my %x; tie %x, 'LH'; $x{a} = 1; my $c = {%x}; join ",", %$c });
 PERL
 

@@ -13227,7 +13227,10 @@ which is one of #1140's escape spellings (probed)."
   ;; A tied hash: STORE (census class c -- the one COUNT test on the store
   ;; path, measured in docs/tie-aggregates.md).
   (let ((r (%p-tied h)))
-    (when r (return-from %p-gethash-store (%p-tie-store-elem r k value))))
+    ;; an ELEMENT store is a scalar assignment: a raw @a / %h VALUE is its
+    ;; count, exactly as the untied write rule's box-set makes it
+    (when r (return-from %p-gethash-store
+              (%p-tie-store-elem r k (%pcl-scalar-collapse value)))))
   (multiple-value-bind (existing found) (gethash k h)
     (if (and found (p-box-p existing))
         (box-set existing value)
@@ -27131,7 +27134,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((and (p-box-p val) (or (null v) (eq v *p-undef*)))
        (let ((new-arr (make-array 0 :adjustable t :fill-pointer 0)))
          (box-set val (make-p-box new-arr))
-         new-arr))
+         (%p-viv-result val new-arr)))
       ;; A RAW undef (a temporary, `@{ f() }`): no place to vivify into (#2341).
       ((or (null v) (eq v *p-undef*)) (%p-deref-undef "ARRAY" site))
       ;; Wrong kind of referent (@$hashref, keys @$coderef): perl's fatal.
@@ -27194,7 +27197,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((and (p-box-p val) (or (null v) (eq v *p-undef*)))
        (let ((new-h (make-hash-table :test 'equal)))
          (box-set val (make-p-box new-h))
-         new-h))
+         (%p-viv-result val new-h)))
       ;; A RAW undef (a temporary, `%{ f() }`): no place to vivify into (#2341).
       ((or (null v) (eq v *p-undef*)) (%p-deref-undef "HASH" site))
       ;; Wrong kind of referent (%$aryref, keys %$aryref): perl's fatal.
@@ -29821,6 +29824,16 @@ buffer's fill-pointer; everything else falls back to file-length."
                      new)))
     box))
 
+(defun %p-viv-result (box new)
+  "The container a vivifying dereference of BOX goes on with, after it stored
+   NEW there: NEW -- unless BOX is a TIED element, whose STORE may keep
+   something else; perl FETCHes it back (probed), and so does this."
+  (let ((v (p-box-value box)))
+    (if (and (p-magic-cell-p v) (eq (p-magic-cell-kind v) :tielem))
+        (let ((got (unbox box)))
+          (if (p-box-p got) (unbox got) got))
+        new)))
+
 (defun %p-tie-autoviv (rec key hash-p)
   "$tied{KEY}{...} / $tied[I][...]: the element as a HASH (HASH-P) or ARRAY
    container -- FETCH, and when it is undef STORE a new one and FETCH again
@@ -29862,7 +29875,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   (%p-tie-value (%p-tie-call rec "FETCH" key)))
 
 (defun %p-tie-store-elem (rec key value)
-  (%p-tie-call rec "STORE" key value)
+  "STORE(KEY, VALUE).  A RAW container VALUE here is a REFERENCE that the box
+   protocol already peeled (a magic cell's setter receives the unboxed value):
+   it is re-wrapped, because a raw vector or table in a method's argument list
+   would be SPREAD into its elements (`push @{$tied{k}}, …` vivifies through
+   this path)."
+  (%p-tie-call rec "STORE" key
+               (if (or (hash-table-p value)
+                       (and (vectorp value) (not (stringp value))))
+                   (make-p-box value)
+                   value))
   value)
 
 ;;; ---- array subscripts -----------------------------------------------------
@@ -29900,8 +29922,8 @@ buffer's fill-pointer; everything else falls back to file-length."
     (if i (%p-tie-fetch-elem rec i) *p-undef*)))
 
 (defun %p-ta-store (rec idx value)
-  "$tied[IDX] = VALUE."
-  (%p-tie-store-elem rec (%p-ta-index rec idx t) value))
+  "$tied[IDX] = VALUE (a raw aggregate VALUE is its count: scalar assignment)."
+  (%p-tie-store-elem rec (%p-ta-index rec idx t) (%pcl-scalar-collapse value)))
 
 (defun %p-ta-elem-box (rec idx)
   "\\$tied[IDX] / an lvalue use."
