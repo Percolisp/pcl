@@ -204,8 +204,10 @@ like($brk, qr/p-last/, 'last lowers');
 
 # my @a / my %h / my (LIST) let-bind fresh containers; the assignment lowers
 # through the original expression machinery (p-array-= / p-hash-= / p-list-=).
+# ($q's initializer is NOT a literal: since s501q an all-literal list
+# declaration is split into its declarations, Kind-A list-decl-split, #2114.)
 my $agg = Pl::Parser2->parse_code(
-  'my @a = (1,2,3); my %h = (x => 9); my ($p, $q) = (4, 5); print $a[0]+$h{x}+$p+$q, "\n";');
+  'my @a = (1,2,3); my %h = (x => 9); my ($p, $q) = (4, $a[1] + 3); print $a[0]+$h{x}+$p+$q, "\n";');
 like($agg, qr/\(p-let \(\(\@a :array \(make-array 0 :adjustable t :fill-pointer 0\)\)\)/,
      'my @a binds a fresh adjustable vector');
 like($agg, qr/\(p-array-= \@a \(vector 1 2 3\)\)/, 'array init via p-array-=');

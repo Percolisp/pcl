@@ -2006,8 +2006,13 @@ sub parse {
           my $fp = $self->fallback_parser;
           $sig_rec = $fp->capture_v1(
             sub { $fp->parse_prototype_or_signature($orig, $sub) })->{result};
+          # A `:prototype(…)` attribute's record (from_attr) IS the prototype
+          # even beside a signature -- never overwritten (the guard the
+          # unnormalized branch below carries; s500a #2533).
+          my $prev_attr = $self->environment->get_prototype($sub->name);
           $self->environment->add_prototype($sub->name, $sig_rec,
-                                            $self->_effective_pkg($sub, $seg->{pkg}));
+                                            $self->_effective_pkg($sub, $seg->{pkg}))
+            if !($prev_attr && $prev_attr->{from_attr});
         }
         # A prototype/signature changes how CALL SITES parse (arity, imposed
         # context like `($)` → scalar, block-form `(&@)`).  Register it so the

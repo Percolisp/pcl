@@ -256,8 +256,10 @@ PERL
     # never by shape.  A signature sub is lowered by v1's sub printer, which
     # proves none of the facts and has no prototype, so it prints the empty
     # plist.  (Until s500a this row used a `use constant` sub; that now carries
-    # `:prototype ""` -- perl's prototype(\&CONST) is '' -- task #2533.)
-    my $src = 'use feature "signatures"; no warnings; sub sg ($x) { $x } print sg(5), "\n";';
+    # `:prototype ""` -- perl's prototype(\&CONST) is '' -- task #2533.)  Since
+    # s501q (#2514, Kind-A sig-classic) a PLAIN signature takes the classic
+    # lowering and proves facts; a signature with a DEFAULT keeps v1's printer.
+    my $src = 'use feature "signatures"; no warnings; sub sg ($x, $y = 0) { $x + $y } print sg(5), "\n";';
     my $cl = cl_of($src);
     like($cl, qr/\(p-sub pl-sg \(&rest %_args\) \(\)\s/,
          '#1035: a sub the compiler proved nothing about still prints ()');
