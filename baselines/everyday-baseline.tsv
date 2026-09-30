@@ -33,8 +33,6 @@ modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions 
 modules/File-Temp	DIFF	1	#2056 File::Temp->new dies "Cannot dereference non-reference: #<fd-stream>" (the glob-as-object idiom); tempdir() and tempfile() work since s492c's #2007 (re-attributed s495 review)
 modules/IO-Select-Socket	DIFF	1	#2559 4-arg select never reports a ready fd and sysread blocks for the full LENGTH (can_read returns nothing); PF_UNSPEC added to lib/Socket.pm s501b -- re-attributed s501b from #1998 (completed)
 modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)
-modules/Sys-Hostname-Env-English	DIFF	1	#2084 (5) `use Env qw(HOME @PATH)` needs tie on scalars-by-name and arrays (#155)
-modules/Tie-Hash-Array-Scalar	DIFF	1	#155 tie on ARRAY/HASH is announced, not implemented
+modules/Sys-Hostname-Env-English	DIFF	1	#2084 (2) `use English; local $LIST_SEPARATOR = "-"; "@l"` still joins with a space -- re-attributed s501t: #155 made `use Env qw(HOME @PATH)` work (tie ${"pkg::NAME"} and tie @{"pkg::NAME"}), so the first difference is now the English alias
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
-programs/tied-scalar-hash	DIFF	2	#155 tie on HASH is announced, not implemented
