@@ -72,6 +72,7 @@ my %RESULT_ONLY = (
   'a:assign-count'  => 'scalar(@t = LIST): PCL counts through FETCHSIZE, perl counts the RHS',
   'a:push-void'     => 'PCL cannot see VOID context at a call argument, so it always asks FETCHSIZE',
   'a:untie-restores' => 'the push inside it asks FETCHSIZE (a:push-void\'s reason)',
+  'a:list-assign-list' => 'the list-context value of the assignment reads the tied target through its view, which asks FETCHSIZE',
 );
 
 sub compare_program {
@@ -112,8 +113,8 @@ require Tie::Hash;
 our @ISA = ('Tie::StdHash');
 our %IT;
 sub TIEHASH  { my $c = shift; push @main::LOG, "TIEHASH(" . main::_a(@_) . ")"; bless {}, $c }
-sub FETCH    { push @main::LOG, "FETCH($_[1])"; $_[0]->SUPER::FETCH($_[1]) }
-sub STORE    { push @main::LOG, "STORE($_[1]," . main::_a($_[2]) . ")"; $_[0]->SUPER::STORE($_[1], $_[2]) }
+sub FETCH    { push @main::LOG, "FETCH(" . main::_a($_[1]) . ")"; $_[0]->SUPER::FETCH($_[1]) }
+sub STORE    { push @main::LOG, "STORE(" . main::_a($_[1]) . "," . main::_a($_[2]) . ")"; $_[0]->SUPER::STORE($_[1], $_[2]) }
 sub EXISTS   { push @main::LOG, "EXISTS($_[1])"; $_[0]->SUPER::EXISTS($_[1]) }
 sub DELETE   { push @main::LOG, "DELETE($_[1])"; $_[0]->SUPER::DELETE($_[1]) }
 sub CLEAR    { push @main::LOG, "CLEAR"; $_[0]->SUPER::CLEAR() }
@@ -172,6 +173,9 @@ op("h:nested-autoviv", sub { my %x; tie %x, 'LH'; $x{a}{b} = 1; ref $x{a} });
 op("h:return", sub { my %x; tie %x, 'LH'; %x = (a => 1); my $f = sub { %x }; my %c = $f->(); join ",", %c });
 op("h:push-autoviv", sub { my %x; tie %x, 'LH'; push @{$x{l}}, 1, 2; scalar @{$x{l}} });
 op("h:store-count", sub { my %x; tie %x, 'LH'; my @q = (1, 2, 3); $x{c} = @q; $x{c} });
+op("h:ref-key-store", sub { my %x; tie %x, 'LH'; my $k = \"s"; $x{$k} = 1; () });
+op("h:undef-key-fetch", sub { my %x; tie %x, 'LH'; no warnings; () = $x{+undef}; () });
+op("h:refhash", sub { require Tie::RefHash; tie my %x, 'Tie::RefHash'; my $k = [1]; $x{$k} = 5; ref((keys %x)[0]) . ":" . $x{$k} });
 op("h:anon-copy", sub { my %x; tie %x, 'LH'; $x{a} = 1; my $c = {%x}; join ",", %$c });
 PERL
 
@@ -253,6 +257,9 @@ op("a:each", sub { my @x; tie @x, 'LA'; @x = (1, 2); my @p; while (my ($i, $v) =
 op("a:negative-indices", sub { my @x; tie @x, 'NI'; $x[-2] });
 op("a:return", sub { my @x; tie @x, 'LA'; @x = (1, 2); my $f = sub { return @x }; my @c = $f->(); my $s = $f->(); "@c|$s" });
 op("a:anon-copy", sub { my @x; tie @x, 'LA'; @x = (3); my $c = [@x]; "@$c" });
+op("a:range-fill", sub { my @x; tie @x, 'LA'; @x = 1 .. 3; "@x" });
+op("a:reverse-inplace", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3, 4); delete $x[1]; @x = reverse @x; join ",", map { exists $x[$_] ? $x[$_] : "-" } 0 .. 3 });
+op("a:list-assign-list", sub { my @x; tie @x, 'LA'; my @r = ((my $f), @x) = (1, 2, 3); scalar(@r) . ":@x" });
 op("a:deref-assign", sub { my @x; tie @x, 'LA'; my $r = \@x; @$r = (5, 6); "@x" });
 PERL
 

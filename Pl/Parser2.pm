@@ -1269,6 +1269,12 @@ sub parse {
   # (modules, string eval) are caught at runtime by the strict write
   # coercers — the designed backstop, loud die instead of silent corruption.
   $self->{_overload_in_file} = 1 if $src =~ /\buse\s+overload\b/;
+  # A TIED HASH's methods receive the key AS GIVEN -- a reference stays a
+  # reference (Tie::RefHash), undef stays undef -- so a key variable frozen to
+  # a string (the 'strkey' B-regime use) would hand STORE/FETCH the wrong
+  # thing.  A file that ties a hash BY NAME (`tie %h`, `tie my %h`, `tie %$r`,
+  # `tie %{…}`) therefore gets no strkey freeze (VarAnnotator, task #155).
+  $self->{_tie_hash_in_file} = 1 if $src =~ /\btie\s*\(?\s*(?:my\s+|our\s+)?%/;
 
   # Declaration decorations — the typed-lexical class word (`my Dog $spot;`)
   # and the attribute list (`my $x : shared = 1;`).  Both sit between the

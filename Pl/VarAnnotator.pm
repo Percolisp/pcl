@@ -702,7 +702,11 @@ sub _analyze_tree {
       my $coerce;
       if (@cls) {
         if    (!grep { $_ ne 'num' } @cls) { $coerce = 'num' }
-        elsif (!grep { $_ ne 'str' && $_ ne 'bool' && $_ ne 'strkey' } @cls) {
+        # strkey is freeze-safe unless the file ties a hash (task #155: a tied
+        # hash's methods see the key AS GIVEN; Parser2 sets the flag)
+        elsif (!grep { $_ ne 'str' && $_ ne 'bool'
+                       && ($_ ne 'strkey' || ($host && $host->{_tie_hash_in_file})) }
+                     @cls) {
           $coerce = 'str';    # strkey = stringify use; freeze-safe (simple string)
         }
       }

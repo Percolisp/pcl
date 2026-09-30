@@ -8766,6 +8766,19 @@ per element."
          (let ((tail (%p-copying-tail-form (car (last fn)))))
            (and tail (append (butlast fn) (list tail)))))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-self-reverse-form-p (place value)
+    "True when VALUE is `reverse PLACE` -- `(p-reverse PLACE)`, possibly under
+     p-list-ctx -- for a symbol PLACE: perl's in-place reverse (task #155)."
+    (let ((v (if (and (consp value) (eq (first value) 'p-list-ctx)
+                      (= (length value) 2))
+                 (second value)
+                 value)))
+      (and (symbolp place)
+           (consp v) (eq (first v) 'p-reverse)
+           (= (length v) 2)
+           (eq (second v) place)))))
+
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
    Flattens nested vectors (but not strings), wraps elements in boxes.
@@ -8811,15 +8824,30 @@ per element."
              (unless (boundp ',place)
                (%p-ensure-storage (quote ,place))
                (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
-             (let* ,(nreverse binds)
-               (%p-array-fill-start ,place)
-               ,@(nreverse fills)
-               ,place)))
-        `(let ((,val (let ((*wantarray* t)) ,(or copy value))))
-           (unless (boundp ',place)
-             (%p-ensure-storage (quote ,place))
-             (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
-           (p-array-fill ,place ,val)))))
+             ;; the segment fill writes the STORAGE; a tied array (#155) takes
+             ;; the general fill, which CLEARs and STOREs through its methods
+             (if (%p-tied ,place)
+                 (p-array-fill ,place (let ((*wantarray* t)) ,value))
+                 (let* ,(nreverse binds)
+                   (%p-array-fill-start ,place)
+                   ,@(nreverse fills)
+                   ,place))))
+        (let ((general
+                `(let ((,val (let ((*wantarray* t)) ,(or copy value))))
+                   (unless (boundp ',place)
+                     (%p-ensure-storage (quote ,place))
+                     (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
+                   (p-array-fill ,place ,val))))
+          ;; `@a = reverse @a` is perl's IN-PLACE reverse (OPpREVERSE_INPLACE),
+          ;; and on a TIED array it swaps through the methods keeping deleted
+          ;; positions deleted (task #155; reverse.t's tie rows).  Only that
+          ;; exact form, and only when tied at run time; everything else is the
+          ;; general path unchanged.
+          (if (%p-self-reverse-form-p place value)
+              `(if (and (boundp ',place) (%p-tied ,place))
+                   (progn (%p-ta-reverse-in-place (%p-tied ,place)) ,place)
+                   ,general)
+              general)))))
 
 
 ;;; A WHOLE-HASH COPY `%a = %b' (task #2424, s499f).  The general path below
@@ -9339,14 +9367,18 @@ per element."
              (cond
                ((and (symbolp var)
                      (char= (char (symbol-name var) 0) #\%))
-                (push `(maphash (lambda (k v)
-                                  (vector-push-extend (make-p-box k) ,result-var)
-                                  (vector-push-extend v ,result-var))
-                                ,var) collect-forms))
+                (push `(unless (%p-collect-tied-lhs ,var ,result-var)
+                         (maphash (lambda (k v)
+                                    (vector-push-extend (make-p-box k) ,result-var)
+                                    (vector-push-extend v ,result-var))
+                                  ,var))
+                      collect-forms))
                ((and (symbolp var)
                      (char= (char (symbol-name var) 0) #\@))
-                (push `(loop for v across ,var
-                             do (vector-push-extend v ,result-var)) collect-forms))
+                (push `(unless (%p-collect-tied-lhs ,var ,result-var)
+                         (loop for v across ,var
+                               do (vector-push-extend v ,result-var)))
+                      collect-forms))
                ((symbolp var)
                 (push `(vector-push-extend ,var ,result-var) collect-forms))))
 
@@ -9433,10 +9465,11 @@ per element."
                ;; Collect: push array elements as LVALUES — perl yields the
                ;; LHS containers themselves, so a raw slot promotes (design E4)
                (let ((j (gensym "J")))
-                 (push `(dotimes (,j (length ,var))
-                          (vector-push-extend
-                           (if (aref ,var ,j) (%p-elem-cell ,var ,j) (p-undef))
-                           ,result-var))
+                 (push `(unless (%p-collect-tied-lhs ,var ,result-var)
+                          (dotimes (,j (length ,var))
+                            (vector-push-extend
+                             (if (aref ,var ,j) (%p-elem-cell ,var ,j) (p-undef))
+                             ,result-var)))
                        collect-forms)))
              (setf greedy-done t))
 
@@ -9448,13 +9481,15 @@ per element."
                (push `(let ((*wantarray* :void))
                         (p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec))))) forms)
                ;; Collect: push hash k-v pairs (deduplicated by the hash itself)
-               (push `(maphash (lambda (k v)
-                                 (declare (ignore v))
-                                 (vector-push-extend (make-p-box k) ,result-var)
-                                 ;; the VALUE half is an LVALUE (design E4)
-                                 (vector-push-extend (%p-hash-elem-cell ,var k)
-                                                     ,result-var))
-                               ,var) collect-forms))
+               (push `(unless (%p-collect-tied-lhs ,var ,result-var)
+                        (maphash (lambda (k v)
+                                   (declare (ignore v))
+                                   (vector-push-extend (make-p-box k) ,result-var)
+                                   ;; the VALUE half is an LVALUE (design E4)
+                                   (vector-push-extend (%p-hash-elem-cell ,var k)
+                                                       ,result-var))
+                                 ,var))
+                     collect-forms))
              (setf greedy-done t))
 
             ;; Scalar variable - auto-declare and assign
@@ -12903,8 +12938,32 @@ create the key on a read-only call, which perl does not."
    inline, which put CL's `>` in the IR as a head (task #1175, family 2: 86
    occurrences in perl-tests/signatures.t alone).  A MACRO, so the emission
    costs exactly what the inline form cost.
+   A TIED @_ (`tie @_, …` inside a default, perl-tests/signatures.t t151:
+   task #155) answers through FETCHSIZE, and the supplied element is STAGED
+   for the `(aref @_ N)` the signature reads next -- see %p-sig-arg-avail.
    Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
-  `(> (length ,args) ,index))
+  (let ((a (gensym "ARGS")))
+    `(let ((,a ,args))
+       (if (plusp (the fixnum **p-tie-count**))
+           (%p-sig-arg-avail ,a ,index)
+           (> (length ,a) ,index)))))
+
+(defun %p-sig-arg-avail (args index)
+  "p-arg-supplied-p while some container is tied.  An untied ARGS answers as
+   the macro does.  A TIED @_ answers from FETCHSIZE, and a supplied element
+   is FETCHed and written into the shell's storage at INDEX BEYOND its fill
+   pointer: the signature's next form is a plain `(aref @_ INDEX)` (AREF
+   ignores the fill pointer), while the shell's LENGTH -- what every other
+   path reads -- stays 0.  This is the one place a tied container's storage
+   holds anything, and only past its end."
+  (let ((r (%p-tied args)))
+    (if (null r)
+        (> (length args) index)
+        (when (< index (%p-ta-size r))
+          (when (<= (array-dimension args 0) index)
+            (adjust-array args (1+ index) :fill-pointer (fill-pointer args)))
+          (setf (aref args index) (%p-tie-fetch-elem r index))
+          t))))
 
 ;;; A signature's slurpy parameter is a COPY (task #2536, s501q).  perlsub: "the
 ;;; remaining arguments are copied into the array", exactly as `my (@r) = @_`
@@ -12917,7 +12976,9 @@ create the key on a read-only call, which perl does not."
 ;;; container, not of the thing it points at).
 (defun p-sig-rest-array (args start)
   "Slurpy @rest signature parameter: a fresh Perl array holding COPIES of the
-   flattened ARGS from index START onward (the `my (@r) = @_` copy)."
+   flattened ARGS from index START onward (the `my (@r) = @_` copy; a tied @_:
+   its FETCHed values)."
+  (%p-when-tied (r args) (setf args (%p-tie-copy r)))
   (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
     (when (and (vectorp args) (< start (length args)))
       (loop for i from start below (length args)
@@ -12927,7 +12988,8 @@ create the key on a read-only call, which perl does not."
 (defun p-sig-rest-hash (args start)
   "Slurpy %rest signature parameter: a hash built from the flattened ARGS
    key/value pairs from index START onward; every value is a COPY (the
-   `my (%h) = @_` copy, %p-make-hash-entry)."
+   `my (%h) = @_` copy, %p-make-hash-entry; a tied @_: its FETCHed values)."
+  (%p-when-tied (r args) (setf args (%p-tie-copy r)))
   (let ((h (make-hash-table :test 'equal)))
     (when (vectorp args)
       (loop for i from start below (length args) by 2
@@ -13218,7 +13280,7 @@ which is one of #1140's escape spellings (probed)."
       ((hash-table-p h)
        (multiple-value-bind (val found) (gethash k h)
          (if (not found)
-             (%p-hash-miss h k)
+             (%p-hash-miss h (%p-tie-key key))
              (%p-hash-unbox-elem val))))
       ;; Wrong kind of referent ($aryref->{k}): perl's fatal, not SBCL's.
       ;; This arm replaces a bare (t …) that handed a non-hash to GETHASH —
@@ -13264,6 +13326,10 @@ which is one of #1140's escape spellings (probed)."
    and `to-string` are both identities."
   (when (and (hash-table-p hash) (stringp key))
     (return-from p-gethash (%p-gethash-store hash key value)))
+  ;; a tied hash's STORE gets the key AS GIVEN (a ref stays a ref: Tie::RefHash)
+  (%p-when-tied (r (unbox hash))
+    (return-from p-gethash
+      (%p-tie-store-elem r (%p-tie-key key) (%pcl-scalar-collapse value))))
   (let* ((h (unbox hash))
          (k (to-string key)))
     (cond
@@ -13330,7 +13396,7 @@ which is one of #1140's escape spellings (probed)."
     ;; Special markers don't support boxing
     (when (%p-hash-marker-p h)
       (return-from p-gethash-box (make-p-box *p-undef*)))
-    (%p-when-tied (r h) (return-from p-gethash-box (%p-tie-elem-box r k)))
+    (%p-when-tied (r h) (return-from p-gethash-box (%p-tie-elem-box r (%p-tie-key key))))
     ;; The slot's CELL — %p-hash-elem-cell is the one promotion (design §4.2),
     ;; and this accessor is the EAGER one, so an ABSENT key is CREATED with an
     ;; undef box (perl's lvalue autovivification).  p-gethash-argbox is the lazy
@@ -14160,7 +14226,7 @@ which is one of #1140's escape spellings (probed)."
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (%p-when-tied (r h)
-      (return-from %p-exists-p (p-true-p (%p-tie-call r "EXISTS" k))))
+      (return-from %p-exists-p (p-true-p (%p-tie-call r "EXISTS" (%p-tie-key key)))))
     (cond
       ((eq h '%ENV-MARKER%) (or (not (null (sb-posix:getenv k)))
                                 ;; the synthetic entry (task #1529)
@@ -14190,7 +14256,7 @@ which is one of #1140's escape spellings (probed)."
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (%p-when-tied (r h)
-      (return-from p-delete (%p-tie-value (%p-tie-call r "DELETE" k))))
+      (return-from p-delete (%p-tie-value (%p-tie-call r "DELETE" (%p-tie-key key)))))
     (cond
       ((eq h '%ENV-MARKER%)
        (let ((old (or (sb-posix:getenv k)
@@ -29526,7 +29592,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    is fatal."
   (let ((inner (unbox val)))
     (if (and inner (stringp inner))
-        (%p-symref-array inner)
+        (let ((a (%p-symref-array inner)))
+          (%p-tie-refuse a "local @{NAME}")      ; no tied form (#155)
+          a)
         (p-die "Can't localize through a reference"))))
 
 (defun %p-local-deref-resolve-hash (val)
@@ -29534,7 +29602,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    is fatal."
   (let ((inner (unbox val)))
     (if (and inner (stringp inner))
-        (%p-symref-hash inner)
+        (let ((h (%p-symref-hash inner)))
+          (%p-tie-refuse h "local %{NAME}")      ; no tied form (#155)
+          h)
         (p-die "Can't localize through a reference"))))
 
 (defmacro p-local-deref-scalar (ref-form &body body)
@@ -29951,7 +30021,17 @@ buffer's fill-pointer; everything else falls back to file-length."
   "\\$tied[IDX] / an lvalue use."
   (%p-tie-elem-box rec (%p-ta-index rec idx t)))
 
-(defun %p-th-key (key) (to-string key))
+(defun %p-tie-key (key)
+  "A hash subscript as a tied hash's methods receive it: AS GIVEN, not
+   stringified -- a reference stays a reference (Tie::RefHash) and undef stays
+   undef (perl-tests/hash.t, probed).  A plain scalar box gives its value."
+  (cond
+    ((not (p-box-p key)) (or key *p-undef*))
+    ((let ((v (p-box-value key)))
+       (or (p-box-p v) (hash-table-p v) (functionp v)
+           (and (vectorp v) (not (stringp v)))))
+     key)
+    (t (or (unbox key) *p-undef*))))
 
 ;;; ---- whole-container operations -------------------------------------------
 
@@ -29962,10 +30042,12 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Every key, FIRSTKEY then NEXTKEY(last) until undef, as a list of strings.
    Resets each()'s iterator (perl's keys does)."
   (setf (p-tie-rec-iter rec) nil)
-  (loop with k = (%p-tie-call rec "FIRSTKEY")
+  ;; a key is what FIRSTKEY / NEXTKEY return, NOT stringified: Tie::RefHash
+  ;; hands back references and perl's `keys` answers them as such (probed)
+  (loop with k = (%p-tie-value (%p-tie-call rec "FIRSTKEY"))
         until (%p-tie-undef-p k)
-        collect (to-string (unbox k))
-        do (setf k (%p-tie-call rec "NEXTKEY" (to-string (unbox k))))))
+        collect k
+        do (setf k (%p-tie-value (%p-tie-call rec "NEXTKEY" k)))))
 
 (defun %p-tie-view (rec)
   "The container's LIST-context value, as a fresh vector of lazy element
@@ -30014,6 +30096,36 @@ buffer's fill-pointer; everything else falls back to file-length."
                          (unbox (svref view (1+ i)))))
           out))))
 
+(defun %p-ta-reverse-in-place (rec)
+  "`@tied = reverse @tied`: perl's in-place swap through the methods (pp.c,
+   pp_reverse's OPpREVERSE_INPLACE arm for a magical array): an element that
+   does not EXIST stays deleted at its mirrored position."
+  (let ((i 0) (j (1- (%p-ta-size rec))))
+    (loop while (< i j)
+          do (let ((ei (p-true-p (%p-tie-call rec "EXISTS" i)))
+                   (ej (p-true-p (%p-tie-call rec "EXISTS" j))))
+               (cond
+                 ((and (not ei) ej)
+                  (%p-tie-call rec "STORE" i (%p-tie-call rec "DELETE" j)))
+                 ((and ei (not ej))
+                  (%p-tie-call rec "STORE" j (%p-tie-call rec "DELETE" i)))
+                 ((and ei ej)
+                  (let ((a (%p-tie-fetch-elem rec i))
+                        (b (%p-tie-fetch-elem rec j)))
+                    (%p-tie-call rec "STORE" i b)
+                    (%p-tie-call rec "STORE" j a))))
+               (incf i)
+               (decf j)))))
+
+(defun %p-collect-tied-lhs (c result)
+  "A list assignment's LIST-context value, for a TIED container target C:
+   push its view (element proxies = the lvalues perl hands back) onto RESULT
+   and answer T; NIL for an untied C (the caller walks the storage)."
+  (let ((r (%p-tied c)))
+    (when r
+      (loop for x across (%p-tie-view r) do (vector-push-extend x result))
+      t)))
+
 (defun %p-tie-copy-values (items)
   "ITEMS (a list or vector of RHS values) with every element COPIED -- a lazy
    tied element FETCHed now.  A list assignment into a tied container CLEARs it
@@ -30061,7 +30173,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (if (%p-tie-undef-p k)
         (progn (setf (p-tie-rec-iter rec) nil)
                (if (eq *wantarray* t) (vector) *p-undef*))
-        (let ((key (to-string (unbox k))))
+        (let ((key (%p-tie-value k)))   ; as returned (a ref stays a ref)
           (setf (p-tie-rec-iter rec) key)
           (if (eq *wantarray* t)
               (vector key (%p-tie-fetch-elem rec key))
