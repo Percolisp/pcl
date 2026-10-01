@@ -8,7 +8,7 @@ edited row by row) and the failure causes, class by class, in
 `docs/STATUS.md` ("Why the failures fail", `tools/cause-census.pl`).**
 Sweep total: **18,714 passing / 659 failing (96.6 %)** across 108 files,
 60 fully-passing files, 96 run to the end, 12 stop part-way (main
-`2284d58d`, 2026-10-01).  At the s301 header (2026-07-20) it was 18,386 /
+`6757ddfe`, 2026-10-01).  At the s301 header (2026-07-20) it was 18,386 /
 666 with 66 fully-passing files.
 
 Run: `perl tools/sweep-perl-tests.pl --jobs 8` from the repo root

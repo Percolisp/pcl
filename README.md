@@ -288,21 +288,21 @@ was measured and how to reproduce it are in
 ## Speed
 
 These are microbenchmarks for different Perl features, measured
-2026-09-18 on a quiet machine (best of five runs, startup time
+2026-10-01 on a quiet machine (best of five runs, startup time
 subtracted for both). A
 ratio below 1.00× means PCL is faster.
 
 | benchmark | what it measures | PCL / perl |
 |---|---|---:|
 | collatz | `while` loop with integer arithmetic | 0.18× |
-| fib(27) | recursion | 0.29× |
-| feread | read-only `foreach` over a 1000-element array | 0.30× |
-| strcat | `$s .= 'x'`, twenty million times | 0.85× |
-| methret | a method call on a blessed hash, `$o->bump` | 1.05× |
-| regexg | `while ($x =~ /./g)` over a 200 kB string | 1.25× |
-| ovlsub | `use overload` arithmetic and stringification on objects | 3.37× |
-| moo-objs | Moo objects: constructor, accessors, a method building another object | 28× |
-| pack | `pack` with two templates | 1,035× |
+| fib(27) | recursion | 0.31× |
+| feread | read-only `foreach` over a 1000-element array | 0.31× |
+| strcat | `$s .= 'x'`, twenty million times | 0.95× |
+| methret | a method call on a blessed hash, `$o->bump` | 1.12× |
+| regexg | `while ($x =~ /./g)` over a 200 kB string | 1.21× |
+| ovlsub | `use overload` arithmetic and stringification on objects | 2.52× |
+| moo-objs | Moo objects: constructor, accessors, a method building another object | 26× |
+| pack | `pack` with two templates | 140× |
 
 Plain loops, arithmetic and array work are several times faster than
 perl, because the compiler proves when a variable is always an integer
@@ -311,7 +311,7 @@ calls are level with perl. Overloading, regex matching and Moo object
 construction are slower: nothing about them can be proved at compile
 time, the regex engine is [cl-ppcre](https://edicl.github.io/cl-ppcre/)
 rather than perl's C one, and Moo generates code with string `eval` at
-run time. `pack`/`unpack` is written in Perl and is about a thousand
+run time. `pack`/`unpack` is written in Perl and is about 140
 times slower; it will be redone. The full table over time is in
 [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).
 

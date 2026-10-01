@@ -2,6 +2,22 @@
 
 Append new entries at the top. One section per session.
 
+## Session 503 (Fable, 2026-10-01) — s501b and perf round 38 finished, reviewed and merged (EVERYDAY 108 of 122); USER: no new subjobs; the md statistics refreshed
+
+**Start (~08:19, box rebooted 08:18):** main = origin = `02370eab`, CI green; three checkpointed worktrees.  Under the standing two-subjob default **s501b** (everyday singles 2) and **s501q** (perf round 38) were RESUMED with fresh Opus 5.5 agents in their existing worktrees (briefs `~/pcl-agent-scratch/s503/resume-<label>.md`, protocol `SHARED-BOX.md` with a new bench reservation file and the ruling that a docs-only rebase re-opens no bar).  The box was quiet after the reboot, so s501b took its owed bench at once.  Fable ACCEPTED s501t's rewrite of the five stale rows in the closed `transpile-test-07.t` (perl and its tree print the same three lines).
+
+**USER ~08:31: "Don't start new subjobs."** -> s501t (#155 tie) was not resumed and everyday singles 3 was not launched; the two running agents finished.
+
+**s501b MERGED + PUSHED ~08:52: main = `2284d58d`** (11 commits; gen v2-3380).  Fable's legs on the sha: gate PASS 273 files / 9,328 rows, sweep GATE clean TOTAL 18,714 (+0), container install test PASS 17 rows (platform-touching; macOS NOT TESTED, #2196).  `EVERYDAY: 106 -> 108 of 122 (88.5 %)`.  25 new review rows + the four older files: tree == perl except documented or pre-existing rows; **#2630** filed.  The agent's flag (string-eval probe +1.29 % pooled, inside the base band) is merged and reported.
+
+**USER ~09:35: "Please update the md files with any new statistics."** -> step 1 pushed as `0571fe49` (STATUS.md, README.md, CLAUDE.md, everyday-battery.md, test-failures-categorized.md) together with `7dfff32c`: the CI run for `2284d58d` had gone RED because the SBCL download from SourceForge failed (curl exit 22), so `ci.yml` now retries it.  Step 2 followed the perf merge (below).
+
+**s501q MERGED + PUSHED ~10:17: main = `6757ddfe`** (15 commits; gen v2-3480).  Fable's legs on the sha: gate PASS 274 files / 9,428 rows, sweep GATE clean TOTAL 18,714 (+0).  The levers: sigarith -79.8 %, passarr -37.3 %, listdeclcat -50.7 %, lcbytes -7.3 %; real programs Air-mass -24.9 %, Perfect-shuffle -29.6 %, Sub-unit-squares -22.9 %; compile time +0.4 %.  FLAGGED: fibret +4.3 .. +5.4 % in bench-exec, cause not found (emission identical; not the parameter copy).  46 new review rows: tree == perl except three rows wrong on the base too; **#2631** and **#2632** filed.  The agent's `io/through.t` "times out on the base too" was measured: slow, not regressed (102 s wall on both sides of the s501b merge) -> a 120 s allowance in `baselines/perl-suite-timeouts.tsv`.
+
+**Statistics, step 2 (this commit):** STATUS.md gate 274 / 9,428 and the failure-cause table re-counted against the day's sweep; README's nine speed rows from two quiet runs on `6757ddfe` -- `pack` reads 140x, not 1,035x, because the old row charged the pack extension's one-time compile to the loop (faster-codegen §0.2v).
+
+**Next session:** ASK the USER before launching anything.  Waiting: s501t (#155 tie; first the op/tiehandle.t TIMEOUT bisect, brief ready), everyday singles 3 (brief ready), #2389 (one quiet full companion run), the fibret flag (round 39 candidate beside #2539), and from 2026-10-07 task #1833.  Fable free IDs 2633+.
+
 ## Session 502 (Fable, 2026-09-30/10-01) — s500a reviewed and merged (EVERYDAY 106 of 122); s501b and perf round 38 resumed; #155 tie launched; everyday singles 3 designed; the session ended with three agents checkpointed
 
 **Start (~21:30, box rebooted ~21:24):** main = origin = `c0edaf75`, CI green on it; the three s501 worktrees intact with their STOP.md files.  Under the standing two-subjob default, two of the checkpointed batches were RESUMED with fresh Opus 5.5 agents in their existing worktrees (briefs `~/pcl-agent-scratch/s502/resume-<label>.md`, protocol `SHARED-BOX.md`): **s500a** (everyday singles 1, only final bars owed) and **s501b** (everyday singles 2) -- with the Fable ruling that s501b's ungated member 5 (#2056 glob-as-object WIP) leaves the batch under the brief's own stop rule (patch preserved, findings into the task).

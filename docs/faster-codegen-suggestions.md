@@ -1037,6 +1037,26 @@ load (1-min, start..end) per run: after-1 1.31..1.59; after-2 1.20..1.20; before
 
 The control column spans -9.3 .. +6.3 % (base against itself), so single rows inside that band are noise.  Two rows the build itself had made slower were corrected before this table: methret (+15..18 % when a reference/object argument was copied -- it is now shared, residual #2575) and ucshort (+21..22 % from the short-string one-pass case map -- removed; replica 0.046 vs 0.048 s had passed).  **FLAGGED: fibret** reads +4.3 % here and +4.9 / +5.0 / +5.4 % in three more interleaved pairs at `BENCH_K=7` (its own control -2.3 %).  Its emission is byte-identical base vs tree; a runtime whose parameter copy is the identity is NOT faster (2.766 vs 2.714 s, 200 x fib(27)), and whole-program `pcl` timing of the same program reads +0.6..2.6 % (N = 30..200) -- the cause is not #2570 and was not found (core layout is the candidate, cf. §A.1).  Compile time: +0.4 % wall over the 111 perl-tests files.
 
+### 0.2v The README's nine rows re-measured (s503, 2026-10-01, main `6757ddfe`, gen v2-3480) — and why `pack` is 140×, not 1,035×
+
+Two runs of `BENCH_K=5 perl tools/bench-exec.pl collatz fib feread strcat methret regexg ovlsub moo-objs pack` on the merged main, no agent on the box (logs `~/pcl-agent-scratch/s503/review/main-stats/bench-readme{,-2}.log`; 1-min load 2.28 → 1.35 for run 1, which started 30 s after a sweep ended, and 1.13 → 1.10 for run 2).  The README table carries run 2.
+
+```
+bench          perl(s)   pcl(s) run 2   pcl/perl run 1   run 2   README 2026-09-18
+collatz         1.9383     0.3535          0.18x          0.18x       0.18x
+fib(27)x        1.4823     0.4532          0.30x          0.31x       0.29x
+feread          0.4202     0.1283          0.30x          0.31x       0.30x
+strcat          0.3052     0.2902          0.98x          0.95x       0.85x
+methret         0.0882     0.0986          1.09x          1.12x       1.05x
+regexg          0.3729     0.4524          1.17x          1.21x       1.25x
+ovlsub          0.0408     0.1027          2.64x          2.52x       3.37x
+moo-objs        0.0392     1.0067         26.24x         25.69x      28x
+pack            0.0041     0.5711        152.06x        140.28x    1,035x
+packunpk        0.0037     0.5696        145.37x        153.18x       —
+```
+
+**`pack` did not get seven times faster — the old row measured something else.**  The row's small iteration count is 0, so the small run never calls `pack` and never loads the pack extension, while the big run does: until s493 (#1202) that load COMPILED `cl/pcl-pack.lisp` on every run (~3–4 s), and `exec = t(big) − t(small)` charged the whole compile to the 20,000-iteration loop (3.4–5.1 s in every table above this one).  Since the extension is compiled once into `~/.pcl-cache/ext/`, the row measures the loop: 0.57 s, about 140–150× perl.  STANDING: a bench row whose small N is 0 does not cancel what the big run loads lazily — read such a row's history across a caching change before quoting a trend.  Against §0.2p's raw columns (2026-09-18): `strcat` 0.85× → 0.95× is BOTH columns — perl 0.323 → 0.305 s, PCL 0.276 → 0.290 s (+5 %; the row read 0.312 s at `209e7533` and 0.278 s just before round 38, so it has moved both ways between rounds; NOT attributed) — `methret` 1.05× → 1.12× is perl's column alone (PCL 0.0988 → 0.0986 s), `ovlsub` is PCL getting faster (0.131 → 0.103 s), `moo-objs` 1.093 → 1.007 s, `regexg` 0.471 → 0.452 s.
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and

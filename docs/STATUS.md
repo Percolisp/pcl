@@ -6,9 +6,10 @@ each table), and nothing is estimated.
 
 **Each number carries its own date.** The regression suite and the
 extracted perl tests were measured on 2026-10-01; the run of perl's full
-`t/` tree, the CPAN board, the untranslatable-statement count and the
-failure causes are from 2026-09-18 (the full `t/` figures are refreshed at
-each release). The speed numbers are in
+`t/` tree, the CPAN board and the untranslatable-statement count are from
+2026-09-18 (the full `t/` figures are refreshed at each release); the
+failure causes were re-counted on 2026-10-01 against that day's sweep and
+the blessed baselines of the other populations. The speed numbers are in
 [`faster-codegen-suggestions.md`](faster-codegen-suggestions.md).
 
 **Contents:** [what runs](#what-runs) · [what deliberately does not](#what-deliberately-does-not-work) · [known sharp edges](#known-sharp-edges) · [speed](#speed) · [XS](#xs)
@@ -17,7 +18,7 @@ each release). The speed numbers are in
 
 | measurement | result | how to reproduce |
 |---|---|---|
-| PCL's own regression suite (`Pl/t/`) | **273 files, 9,328 assertions, all passing** (2026-10-01). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
+| PCL's own regression suite (`Pl/t/`) | **274 files, 9,428 assertions, all passing** (2026-10-01). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
 | perl's own tests, extracted (`perl-tests/`: 108 files from perl 5.40's `t/op`, `t/base` and others) | **18,714 assertions pass, 659 fail (96.6 %)** (2026-10-01). 60 files pass completely; 96 run to the end, 12 stop part-way, and all 108 compile. | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **107 files identical to perl** (2026-09-18). 105 differ for a registered, explained reason (probes of perl's internals, threads, taint and so on; listed in `baselines/perl-suite-expected.tsv`); 258 differ and are the bug queue; 9 do not compile; 3 time out; 31 produce no test output; 12 are too slow for the `--quick` form and are listed as not run; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | pure-Perl CPAN distributions: 14 of them, 183 test files | **85 files pass, 48 partly pass, 50 fail; 2,274 assertions ok, 338 not ok** (2026-09-18; the four Moo-family distributions re-run on 2026-09-19). A partial file ran most of its suite; a failing file has zero passing assertions, and that count includes seven files perl itself skips. Every failing assertion, with its cause, is in [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv). The last blessed snapshot, [`../baselines/cpan-board14-s473w.tsv`](../baselines/cpan-board14-s473w.tsv) of 2026-09-09 (84 / 50 / 49), differs from this run in six files and has not been re-blessed yet | the [board command](#the-cpan-board-command) below |
@@ -35,18 +36,19 @@ or makes a file stop before rows it used to produce, fails the run.
 Every blessed failing row carries a cause, so the failures split into bugs
 and the deliberate edges of the language PCL implements. The rule and the
 reconciliation are in [`failure-cause-classes.md`](failure-cause-classes.md);
-the command is `tools/cause-census.pl --markdown`. Measured 2026-09-18
-against that day's run:
+the command is `tools/cause-census.pl --markdown`. Measured 2026-10-01
+(the sweep rows against that day's run; the other populations against their
+blessed baselines, which are edited row by row as failures are fixed):
 
 | population | rows | not-supported | parked | bug | other | unexplained | perl-skip | not-supported + parked |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| perl-tests sweep | 670 | 319 | 69 | 275 | 7 | 0 | 0 | 57.9% |
-| companion (perl's own t/) | 11,736 | 5,464 | 88 | 5,440 | 3 | 741 | 0 | 47.3% |
+| perl-tests sweep | 654 | 315 | 68 | 267 | 4 | 0 | 0 | 58.6% |
+| companion (perl's own t/) | 11,620 | 5,884 | 88 | 5,541 | 2 | 105 | 0 | 51.4% |
 | CPAN board (14 dists) | 389 | 203 | 0 | 179 | 0 | 0 | 7 | 53.1% |
-| companion XDIFF rows | 2,516 | 2,515 | 0 | 0 | 0 | 1 | 0 | 100.0% |
-| shortfall: perl-tests | 12,213 | 267 | 0 | 104 | 0 | 11,842 | 0 | 2.2% |
-| shortfall: perl's t/ | 443,859 | 55,432 | 417 | 387,706 | 0 | 304 | 0 | 12.6% |
-| **all populations** | **471,383** | **64,200** | **574** | **393,704** | **10** | **12,888** | **7** | **13.7%** |
+| companion XDIFF rows | 2,423 | 2,421 | 0 | 0 | 0 | 2 | 0 | 99.9% |
+| shortfall: perl-tests | 12,208 | 265 | 0 | 103 | 0 | 11,840 | 0 | 2.2% |
+| shortfall: perl's t/ | 444,035 | 55,618 | 417 | 387,997 | 0 | 3 | 0 | 12.6% |
+| **all populations** | **471,329** | **64,706** | **573** | **394,087** | **6** | **11,950** | **7** | **13.9%** |
 
 The classes: `not-supported` means the cause names a section of
 [`not-supported.md`](not-supported.md); `parked` is a scheduling decision;
@@ -57,11 +59,11 @@ the file should have produced and did not, because the file stopped early.
 
 Read the per-population rows, not the total: a few enormous generated files
 in perl's `t/` tree dominate the total. The `perl-tests` sweep is the
-population every change is measured against, and **58 % of its failing rows
+population every change is measured against, and **59 % of its failing rows
 are deliberate non-support or parked, not bugs.** The skip registry relabels
-another 198 rows in 24 files as skips; they are not-supported failures too,
+another 191 rows in 23 files as skips; they are not-supported failures too,
 but sit outside that row. Counting them, the sweep's not-supported share is
-(319 + 69 + 198) / (670 + 198) = 67.5 %.
+(315 + 68 + 191) / (654 + 191) = 67.9 %.
 
 ### Untranslatable statements are never silent
 
