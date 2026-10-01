@@ -46,6 +46,7 @@ not-supported.md → only then probe.*
 - **`_body_observes_args` counts only a BARE `pop`** (s502 fix): `pop @$x` names its array, `shift` keeps the over-firing test (Math::BigInt::Calc `_dec` had left the raw path); no file in perl-tests + lib + everyday has fewer `p-raw-params` than base.
 - **`sig-classic` keeps a `:prototype` attribute's record** (s502 fix, s500a #2533 interplay): the attribute's prototype wins over the signature's, as on the v1 route.
 - **#2539 (the unguarded pos() remhash on the general store path) is ROUND 39's**, not round 38's.
+- **FLAGGED (final bench, s503): fibret +4..5 % in bench-exec** (own-row control -2.3 %); not the parameter copy (an identity copy is not faster), direct timing +0.6..2.6 %; cause not found -- faster-codegen §0.2u.
 - Filed s501q: #2575 (a reference/object argument is still SHARED by a raw parameter: the caller reassigning it mid-call shows through), #2573 (PCL_OPT=none changes `$_[0]=` inside a signature sub -- pre-existing, the none answer is perl's), #2574 (a constant sort comparator orders unlike perl's mergesort).
 
 ## s501b (2026-09-29/30, Opus; resumed s502 and finished s503 by fresh agents; docs-only rebase onto 02370eab) -- everyday singles 2: exec/system LIST (#2082), UNIVERSAL::isa vs an override (#2083), a package switch inside eval text keeps the captured lexicals (#2285), an embedded captured `my` is promoted (#2534); #2056 measured, NOT shipped; EVERYDAY 106 -> 108 of 122

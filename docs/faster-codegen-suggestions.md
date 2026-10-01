@@ -985,6 +985,58 @@ One control row is FLAGGED: **textproc** reads 1.0-4.8 % slower in four runs (me
 
 The #2510 digit generator was checked on 51,674 doubles given by bit pattern x 18 conversions (perl -> base -> tree): 76 fields fixed (15th-digit ties), 0 regressed.
 
+### 0.2u Round 38 movers (2026-10-01) — signature subs, @_ built from values, literal list declarations, lc/uc bytes (s501q; #2514, #2515, #2114, #2535)
+
+Round 38 takes the three EMISSION levers round 37 could not: a plain signature sub is lowered as its `my (PARAMS) = @_;` spelling plus the arity check (Kind-A `sig-classic`), a callee that only copies `@_` builds it from values so `f(@a)` promotes nothing (`args-copy`) and a `map` block's value slice reads values, and an all-literal list declaration is split into its declarations (`list-decl-split`).  `#2535` (lc/uc in one pass) shipped only its bytes arm.  Logs under the agent's `scratch/s501q/`; the Rosetta programs are timed from a local copy and are not checked in.
+
+SIZING (step 0, hand-edited emission, whole program, interleaved): #2514 Air-mass 1.499 -> 1.081 s (-27.9 %); #2515 Perfect-shuffle 0.606 -> 0.483 s (-20.3 %, loaded); #2114 `while ($i++ < 200000) { $s .= "ab" }` after `my ($s, $i) = ("", 0);` 29.07 -> 0.033 s (the declaration declined the str-buffer licence: quadratic -> linear).
+
+REAL PROGRAMS, final tree (71bd29ef) vs its base (main 2284d58d), `pcl` warm, interleaved best-of-5, control = the base twice, load 0.8-1.0:
+
+```
+program              before    after    change   ctl      perl
+Air-mass             1.303 s   0.979 s  -24.9 %  -0.1 %   0.618 s
+Perfect-shuffle      0.620 s   0.437 s  -29.6 %  +0.4 %   0.216 s
+Sub-unit-squares     0.425 s   0.327 s  -22.9 %  -0.0 %   0.199 s
+```
+
+bench-exec, `BENCH_K=5`, two interleaved passes (before / after / control / 209e7533 on the case rows), min over the passes, QUIET box (load 0.8-1.7).  The four new rows were checked against perl by the tool's BROKEN rule.
+
+```
+bench            perl   before    after   change    pass1    pass2      ctl 209e7533  af/perl
+intloop+=      0.0653   0.0212   0.0207    -2.4%    +4.7%    -2.4%    -4.7%        -    0.32x
+intloop=       0.0656   0.0185   0.0179    -3.2%    -1.0%    -3.2%    -9.3%        -    0.27x
+arrhash        0.1293   0.0814   0.0811    -0.4%    -0.4%    -0.4%    -3.7%        -    0.63x
+arrhash-k      0.0557   0.0632   0.0592    -6.3%   -11.5%    -4.3%    -4.5%        -    1.06x
+fib(27)x       1.4483   0.4427   0.4476    +1.1%    +0.8%    +1.1%    -1.5%        -    0.31x
+fibret         1.4410   0.4216   0.4396    +4.3%    +2.6%    +5.3%    -2.3%        -    0.31x
+methret        0.0869   0.0955   0.0974    +2.0%    -0.7%    +2.1%    -3.0%        -    1.12x
+strcat         0.2940   0.2783   0.2820    +1.3%    +0.3%    +1.3%    -2.5%   0.3117    0.96x
+slices         0.0672   0.1093   0.1087    -0.5%    +1.0%    -0.5%    +1.8%        -    1.62x
+sortnum        0.0247   0.0361   0.0362    +0.3%    -1.4%    +2.5%    +4.9%        -    1.47x
+fhprint        0.0609   0.2170   0.2172    +0.1%    +0.1%    +0.0%    +1.1%        -    3.57x
+fhread         0.0306   0.1103   0.1136    +3.0%    +8.7%    +0.4%    +6.3%        -    3.71x
+moo-objs       0.0379   0.9692   0.9830    +1.4%    -2.4%    +1.8%    +3.4%        -   25.94x
+textproc       0.4326   1.0384   0.9986    -3.8%    -7.6%    -3.0%    +0.2%   1.0728    2.31x
+regexg         0.3602   0.4279   0.4215    -1.5%    -9.6%    -0.2%    -8.1%   0.4320    1.17x
+subste         0.0543   0.1821   0.1797    -1.3%    -3.9%    -0.9%    +3.5%   0.1874    3.31x
+mapmulti       0.6323   1.0385   1.0474    +0.9%    +0.9%    +6.2%    +1.8%        -    1.66x
+hashcopy       0.6659   0.1864   0.1872    +0.4%    -1.0%    +1.1%    -0.1%        -    0.28x
+powdigit       0.1511   0.1622   0.1658    +2.2%   +10.5%    +0.5%    +0.4%        -    1.10x
+fprint         0.1342   0.2955   0.3059    +3.5%    +6.5%    +3.5%    -0.8%        -    2.28x
+joinarr        0.0679   0.2324   0.2345    +0.9%    +2.7%    +0.5%    +0.8%        -    3.45x
+grepcnt        0.0544   0.1174   0.1208    +2.9%    +4.9%    +2.9%    +0.4%        -    2.22x
+boxarith       0.1690   0.1471   0.1497    +1.8%    +2.4%    +1.8%    -0.5%        -    0.89x
+ucshort        0.1444   0.1074   0.1077    +0.3%    +1.2%    -0.7%    +1.2%   0.1046    0.75x
+sigarith       0.1065   0.1163   0.0235   -79.8%   -79.0%   -80.0%    +3.7%        -    0.22x
+passarr        0.0947   0.2683   0.1683   -37.3%   -34.2%   -37.3%    -1.0%        -    1.78x
+listdeclcat    0.1104   0.4491   0.2213   -50.7%   -50.4%   -52.0%    -0.2%        -    2.00x
+lcbytes        0.0441   0.1534   0.1422    -7.3%    -7.0%    -8.2%    +1.1%   0.1134    3.22x
+load (1-min, start..end) per run: after-1 1.31..1.59; after-2 1.20..1.20; before-1 1.37..1.31; before-2 1.72..1.20; ctl-1 1.59..1.55; old209-1 1.55..1.72
+```
+
+The control column spans -9.3 .. +6.3 % (base against itself), so single rows inside that band are noise.  Two rows the build itself had made slower were corrected before this table: methret (+15..18 % when a reference/object argument was copied -- it is now shared, residual #2575) and ucshort (+21..22 % from the short-string one-pass case map -- removed; replica 0.046 vs 0.048 s had passed).  **FLAGGED: fibret** reads +4.3 % here and +4.9 / +5.0 / +5.4 % in three more interleaved pairs at `BENCH_K=7` (its own control -2.3 %).  Its emission is byte-identical base vs tree; a runtime whose parameter copy is the identity is NOT faster (2.766 vs 2.714 s, 200 x fib(27)), and whole-program `pcl` timing of the same program reads +0.6..2.6 % (N = 30..200) -- the cause is not #2570 and was not found (core layout is the candidate, cf. §A.1).  Compile time: +0.4 % wall over the 111 perl-tests files.
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and
