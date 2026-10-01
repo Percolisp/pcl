@@ -5,7 +5,7 @@ number on it comes from a command you can run yourself (the last column of
 each table), and nothing is estimated.
 
 **Each number carries its own date.** The regression suite and the
-extracted perl tests were measured on 2026-09-27; the run of perl's full
+extracted perl tests were measured on 2026-10-01; the run of perl's full
 `t/` tree, the CPAN board, the untranslatable-statement count and the
 failure causes are from 2026-09-18 (the full `t/` figures are refreshed at
 each release). The speed numbers are in
@@ -17,8 +17,8 @@ each release). The speed numbers are in
 
 | measurement | result | how to reproduce |
 |---|---|---|
-| PCL's own regression suite (`Pl/t/`) | **269 files, 9,001 assertions, all passing** (2026-09-27). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
-| perl's own tests, extracted (`perl-tests/`: 108 files from perl 5.40's `t/op`, `t/base` and others) | **18,714 assertions pass, 659 fail (96.6 %)** (2026-09-27). 60 files pass completely; 96 run to the end, 12 stop part-way, and all 108 compile. | `perl tools/sweep-perl-tests.pl --jobs 8` |
+| PCL's own regression suite (`Pl/t/`) | **273 files, 9,328 assertions, all passing** (2026-10-01). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
+| perl's own tests, extracted (`perl-tests/`: 108 files from perl 5.40's `t/op`, `t/base` and others) | **18,714 assertions pass, 659 fail (96.6 %)** (2026-10-01). 60 files pass completely; 96 run to the end, 12 stop part-way, and all 108 compile. | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **107 files identical to perl** (2026-09-18). 105 differ for a registered, explained reason (probes of perl's internals, threads, taint and so on; listed in `baselines/perl-suite-expected.tsv`); 258 differ and are the bug queue; 9 do not compile; 3 time out; 31 produce no test output; 12 are too slow for the `--quick` form and are listed as not run; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | pure-Perl CPAN distributions: 14 of them, 183 test files | **85 files pass, 48 partly pass, 50 fail; 2,274 assertions ok, 338 not ok** (2026-09-18; the four Moo-family distributions re-run on 2026-09-19). A partial file ran most of its suite; a failing file has zero passing assertions, and that count includes seven files perl itself skips. Every failing assertion, with its cause, is in [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv). The last blessed snapshot, [`../baselines/cpan-board14-s473w.tsv`](../baselines/cpan-board14-s473w.tsv) of 2026-09-09 (84 / 50 / 49), differs from this run in six files and has not been re-blessed yet | the [board command](#the-cpan-board-command) below |
 | statements the compiler cannot translate, counted over six populations (the two perl test sets above, the CPAN board, PCL's shipped `lib/`, the examples and the regression-suite fixtures) | **62 statements in 19 files** (2026-09-18), each classified with its cause; none in PCL's own shipped modules | `tools/drop-census.pl`, compared against [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |

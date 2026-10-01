@@ -4,8 +4,11 @@
 right?*  One number, printed as the last line of every run:
 
 ```
-EVERYDAY: 85 of 122 identical to perl (69.7 %) -- 98313c26 gen v2-1740
+EVERYDAY: 108 of 122 identical to perl (88.5 %) -- a0a13ad6 gen v2-3380
 ```
+
+That is the line of 2026-10-01.  The first run, on 2026-09-21, read 85 of 122
+(69.7 %); every recorded run since is a row in `baselines/everyday-history.tsv`.
 
 **Why it exists** (task #1994 → #2099; USER, s493: *"Yes, run on demand"*, and at
 the end of s494: build it early and **steer by its number**, goal **> 90 %**).

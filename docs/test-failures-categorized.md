@@ -1,12 +1,15 @@
 # Perl op/ Test Suite — Categorized Failure Analysis
 
-Last updated: 2026-07-20 (session 301) — header/totals only; the
+Last updated: 2026-10-01 (session 503) — header/totals only; the
 per-category analysis below is a session-156 snapshot.  **Current
 per-file status lives in `.faillog/_status.tsv` (regression watchdog
-baseline: `baselines/fail-baseline.tsv`, re-blessed s301) and the bug
-groupings in `docs/sweep-bug-catalog.md`.**
-Sweep total: **18386 passing / 666 failing**, 66 fully-passing files
-(incl. closure.t 257+0/258 as of s301; E1 complete, census 111/0).
+baselines: `baselines/fail-baseline.tsv` + `baselines/pass-baseline.tsv`,
+edited row by row) and the failure causes, class by class, in
+`docs/STATUS.md` ("Why the failures fail", `tools/cause-census.pl`).**
+Sweep total: **18,714 passing / 659 failing (96.6 %)** across 108 files,
+60 fully-passing files, 96 run to the end, 12 stop part-way (main
+`2284d58d`, 2026-10-01).  At the s301 header (2026-07-20) it was 18,386 /
+666 with 66 fully-passing files.
 
 Run: `perl tools/sweep-perl-tests.pl --jobs 8` from the repo root
 

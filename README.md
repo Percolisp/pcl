@@ -265,7 +265,7 @@ a program whose side effects must happen only once. See
 
 PCL is tested against its own regression suite, perl 5.40's own test
 suite and a set of pure-Perl CPAN distributions. On the tests extracted
-from perl's suite, 96.5 % of assertions pass (measured 2026-09-20). A
+from perl's suite, 96.6 % of assertions pass (measured 2026-10-01). A
 large part of the remaining failures are deliberate non-support (no XS,
 different error text); the rest are the bug queue. Every number, how it
 was measured and how to reproduce it are in
