@@ -1876,7 +1876,8 @@ to the flattened values.
 **A parameter is a COPY taken at the call (normative, s501q, #2570).**
 `p-raw-params` binds each parameter to the argument's VALUE: a plain number
 or string raw; undef, a dualvar or a magic scalar (`$1`) as a fresh box
-(`p-copy-scalar-arg`).  So a later write to the caller's variable is not seen
+(`p-copy-scalar-arg`; a dualvar keeps BOTH halves, so `$!` passed in still
+numifies to its errno).  So a later write to the caller's variable is not seen
 through the parameter — `my $g = 7; sub h { my ($x) = @_; $g = 8; $x } h($g)`
 is 7.  ONE kind is shared, by measured choice: a box holding a REFERENCE or an
 OBJECT is bound as it came (copying it is an allocation per method call's
@@ -1887,7 +1888,7 @@ array passed whole is promoted to a cell, since the body cannot observe `@_`.
 
 **The licence for both body shapes' @_-free forms is ONE predicate**
 (`_body_observes_args`): after the leading copy, the body mentions none of
-`@_`, `$_[`, `shift`, `pop` (both default to `@_` in a sub), `goto`, `&name;`
+`@_`, `$_[`, `shift`, a BARE `pop` (both default to `@_` in a sub; `pop @$x` names its own array and does not count), `goto`, `&name;`
 / `&$code;` (pass the current `@_`), or a string `eval`.  (#2572: the raw path
 used to miss `&name;` and `pop`.)
 
@@ -1908,7 +1909,8 @@ of the caller is promoted.  Without the marker `@_` aliases as below.
 s501q, Kind-A `sig-classic`, #2514).**  A named sub whose signature is only
 plain named parameters — scalars, then at most one slurpy `@`/`%` — with no
 default and no placeholder, on one line, whose body does not observe `@_`
-(the predicate above) and declares no `state`, is lowered exactly as the same
+(the predicate above) and declares no `state` and is not EMPTY (an empty body returns nothing in
+perl; the inserted copy would be its value), is lowered exactly as the same
 sub written `{ my (PARAMS) = @_; … }`, plus perl's arity check before any
 binding: `(p-check-arity "PKG::NAME" (length @_) MIN MAX FLEX HASH-START)` as
 the first form of `p-args-body`, or — on the raw path, where there is no
@@ -1916,8 +1918,9 @@ the first form of `p-args-body`, or — on the raw path, where there is no
 body form of `p-raw-params`, which runs `p-check-arity` on the flattened
 argument count.  The messages are v1's (perl's `Too few/Too many arguments
 for subroutine 'PKG::NAME' (got N; expected M)`, `Odd name/value argument
-…`).  The call sites keep the prototype RECORD the signature makes, so no
-call parses differently.  Every other signature (defaults, placeholders, the
+…`).  The call sites keep the prototype RECORD the signature makes (a
+`:prototype(…)` attribute's record wins, as on the v1 route), so no call
+parses differently.  Every other signature (defaults, placeholders, the
 empty `()`, a body using `@_`) keeps the v1 binding: `p-args-body` +
 `p-check-arity` + a `let*` of `p-copy-scalar-arg` / `p-sig-rest-array` /
 `p-sig-rest-hash`.
