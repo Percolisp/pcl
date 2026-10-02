@@ -1007,6 +1007,22 @@
   `(let ((,rec (%p-tied ,c)))
      (when ,rec ,@body)))
 
+(defmacro %p-when-tied-kind ((rec c kind) &body body)
+  "%p-when-tied for an operation only one container KIND has (:hash -- an
+   element store, exists / delete / autovivify through `$r->{k}`; :array --
+   their `$r->[i]` twins): a container of the OTHER kind reaching it is perl's
+   \"Not a HASH / ARRAY reference\" further down, never its tie (t/op/avhv.t).
+   The kind is read from the tie RECORD, after the count test, so an untied
+   program pays nothing more than %p-when-tied."
+  `(let ((,rec (%p-tied ,c)))
+     (when (and ,rec (eq (p-tie-rec-kind ,rec) ,kind)) ,@body)))
+
+(defmacro %p-when-tied-hash ((rec c) &body body)
+  `(%p-when-tied-kind (,rec ,c :hash) ,@body))
+
+(defmacro %p-when-tied-array ((rec c) &body body)
+  `(%p-when-tied-kind (,rec ,c :array) ,@body))
+
 ;;; A blessed HASH ref stores its class in the hash under the keyword key
 ;;; :__class__ (so it survives unboxing).  Real Perl hash keys are always
 ;;; strings, so this internal key must be hidden from keys/values/each and the
@@ -12086,7 +12102,7 @@ per element."
       (return-from p-aref *p-undef*))
     ;; A tied array (task #155): FETCH.  The fast arm above met it in its miss
     ;; branch; this is the general path's one COUNT test.
-    (%p-when-tied (r a) (return-from p-aref (%p-ta-fetch r idx)))
+    (%p-when-tied-array (r a) (return-from p-aref (%p-ta-fetch r idx)))
     ;; A bare string here is a SYMBOLIC array reference (@{$str}[i] under
     ;; no-strict-refs), not a char-vector to index — resolve it to the package
     ;; array.  A NUL in the name is inaccessible (Perl gives nothing), so undef.
@@ -12174,7 +12190,7 @@ per element."
       (return-from p-aref
         (setf (p-aref (p-ensure-arrayref arr) idx) value)))
     a)
-  (%p-when-tied (r (unbox arr)) (return-from p-aref (%p-ta-store r idx value)))
+  (%p-when-tied-array (r (unbox arr)) (return-from p-aref (%p-ta-store r idx value)))
   (let* ((a (unbox arr))
          (actual-idx (%p-array-index a idx)))
     (cond
@@ -12209,7 +12225,7 @@ per element."
       (if (p-box-p arr)
           (setf a (p-ensure-arrayref arr))
           (return-from p-aref-box (make-p-box *p-undef*))))
-    (%p-when-tied (r a) (return-from p-aref-box (%p-ta-elem-box r idx)))
+    (%p-when-tied-array (r a) (return-from p-aref-box (%p-ta-elem-box r idx)))
     (let ((actual-idx (%p-array-index a idx)))
       (when (and (vectorp a) (>= actual-idx 0))
         ;; Auto-extend array if needed (intermediate slots are nil = non-existent)
@@ -12552,7 +12568,7 @@ costs TWO hash lookups, not four — a hash slice pays this per element."
   (let ((h (unbox hash)))
     (if (hash-table-p h)
         (let ((k (to-string key)))
-          (or (%p-when-tied (r h) (%p-tie-elem-box r k))
+          (or (%p-when-tied-hash (r h) (%p-tie-elem-box r k))
               (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))
         (p-gethash hash key))))
 
@@ -12569,7 +12585,7 @@ create the key on a read-only call, which perl does not."
         ;; keep plain value semantics, no aliasing.  A BLESSED hash is NOT in
         ;; this set — see the note on %p-alias-helem above (task #841).
         (make-p-box (p-gethash hash key))
-        (or (%p-when-tied (r h) (%p-tie-elem-box r k))
+        (or (%p-when-tied-hash (r h) (%p-tie-elem-box r k))
             (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))))
 
 ;; MEASURED AND REJECTED (s460ao, task #883): pre-sizing RESULT from the
@@ -13345,7 +13361,7 @@ which is one of #1140's escape spellings (probed)."
   (when (and (hash-table-p hash) (stringp key))
     (return-from p-gethash (%p-gethash-store hash key value)))
   ;; a tied hash's STORE gets the key AS GIVEN (a ref stays a ref: Tie::RefHash)
-  (%p-when-tied (r (unbox hash))
+  (%p-when-tied-hash (r (unbox hash))
                 (return-from p-gethash
                   (%p-tie-store-elem r (%p-tie-key key) (%pcl-scalar-collapse value))))
   (let* ((h (unbox hash))
@@ -13414,7 +13430,7 @@ which is one of #1140's escape spellings (probed)."
     ;; Special markers don't support boxing
     (when (%p-hash-marker-p h)
       (return-from p-gethash-box (make-p-box *p-undef*)))
-    (%p-when-tied (r h) (return-from p-gethash-box (%p-tie-elem-box r (%p-tie-key key))))
+    (%p-when-tied-hash (r h) (return-from p-gethash-box (%p-tie-elem-box r (%p-tie-key key))))
     ;; The slot's CELL — %p-hash-elem-cell is the one promotion (design §4.2),
     ;; and this accessor is the EAGER one, so an ABSENT key is CREATED with an
     ;; undef box (perl's lvalue autovivification).  p-gethash-argbox is the lazy
@@ -13558,7 +13574,7 @@ which is one of #1140's escape spellings (probed)."
 (defun p-autoviv-gethash (hash key)
   "The slot at KEY of hash HASH, as a HASH — vivified when absent or undef.
    Handles boxes in hash values."
-  (%p-when-tied (r (unbox hash))
+  (%p-when-tied-hash (r (unbox hash))
                 (return-from p-autoviv-gethash (%p-tie-autoviv r (to-string key) t)))
   (let* ((h (unbox hash))
          (k (to-string key)))
@@ -13580,7 +13596,7 @@ which is one of #1140's escape spellings (probed)."
 (defun p-autoviv-gethash-for-array (hash key)
   "The slot at KEY of hash HASH, as an ARRAY — vivified when absent or undef.
    Handles boxes in hash values."
-  (%p-when-tied (r (unbox hash))
+  (%p-when-tied-hash (r (unbox hash))
                 (return-from p-autoviv-gethash-for-array (%p-tie-autoviv r (to-string key) nil)))
   (let* ((h (unbox hash))
          (k (to-string key)))
@@ -13599,7 +13615,7 @@ which is one of #1140's escape spellings (probed)."
 (defun p-autoviv-aref-for-hash (arr idx)
   "Get array element, autovivifying to empty hash if missing.
    Handles boxes in array elements."
-  (%p-when-tied (r (unbox arr))
+  (%p-when-tied-array (r (unbox arr))
                 (return-from p-autoviv-aref-for-hash
                   (%p-tie-autoviv r (%p-ta-index r idx t) t)))
   (let* ((a (unbox arr))
@@ -13634,7 +13650,7 @@ which is one of #1140's escape spellings (probed)."
 (defun p-autoviv-aref-for-array (arr idx)
   "Get array element, autovivifying to empty array if missing.
    Handles boxes in array elements."
-  (%p-when-tied (r (unbox arr))
+  (%p-when-tied-array (r (unbox arr))
                 (return-from p-autoviv-aref-for-array
                   (%p-tie-autoviv r (%p-ta-index r idx t) nil)))
   (let* ((a (unbox arr))
@@ -14243,7 +14259,7 @@ which is one of #1140's escape spellings (probed)."
   "The CL-boolean half of p-exists, so the perl-value wrapper is stated once."
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
-    (%p-when-tied (r h)
+    (%p-when-tied-hash (r h)
                   (return-from %p-exists-p (p-true-p (%p-tie-call r "EXISTS" (%p-tie-key key)))))
     (cond
       ((eq h '%ENV-MARKER%) (or (not (null (sb-posix:getenv k)))
@@ -14273,7 +14289,7 @@ which is one of #1140's escape spellings (probed)."
    Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
-    (%p-when-tied (r h)
+    (%p-when-tied-hash (r h)
                   (return-from p-delete (%p-tie-value (%p-tie-call r "DELETE" (%p-tie-key key)))))
     (cond
       ((eq h '%ENV-MARKER%)
@@ -14320,7 +14336,7 @@ which is one of #1140's escape spellings (probed)."
    Sets element to nil (deleted marker) and returns the old value.
    Trims trailing nil slots (Perl shrinks array when last element deleted).
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
-  (%p-when-tied (r (%p-designator-array arr))
+  (%p-when-tied-array (r (%p-designator-array arr))
                 (return-from p-delete-array
                   (let ((i (%p-ta-index r idx nil)))
                     (if i (%p-tie-value (%p-tie-call r "DELETE" i)) *p-undef*))))
@@ -14352,7 +14368,7 @@ which is one of #1140's escape spellings (probed)."
    `exists` = FALSE (Pl/t/delete-01.t rows 4/10 caught it at the flip).
    Answers 1 or the DEFINED empty string, never undef — see p-exists (#1173).
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
-  (%p-when-tied (r (%p-designator-array arr))
+  (%p-when-tied-array (r (%p-designator-array arr))
                 (return-from p-exists-array
                   (p-bool (let ((i (%p-ta-index r idx nil)))
                             (and i (p-true-p (%p-tie-call r "EXISTS" i)))))))
@@ -14376,7 +14392,7 @@ which is one of #1140's escape spellings (probed)."
   (let ((h (unbox hash)))
     (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
       (when (zerop n) (return-from p-delete-hash-slice nil))
-      (%p-when-tied (r h)                ; DELETE per key, in order (#155)
+      (%p-when-tied-hash (r h)                ; DELETE per key, in order (#155)
                     (return-from p-delete-hash-slice
                       (let ((result (make-array n :adjustable t :fill-pointer 0)))
                         (dotimes (i n result)
@@ -14400,7 +14416,7 @@ which is one of #1140's escape spellings (probed)."
   (let ((h (unbox hash)))
     (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
       (when (zerop n) (return-from p-delete-kv-hash-slice nil))
-      (%p-when-tied (r h)                ; DELETE per key, in order (#155)
+      (%p-when-tied-hash (r h)                ; DELETE per key, in order (#155)
                     (return-from p-delete-kv-hash-slice
                       (let ((result (make-array (* 2 n) :adjustable t :fill-pointer 0)))
                         (dotimes (i n result)
@@ -14428,7 +14444,7 @@ which is one of #1140's escape spellings (probed)."
   ;; vector itself as an index, i.e. deleted element 0)
   (multiple-value-bind (flat n) (%p-flatten-slice-args indices)
     (when (zerop n) (return-from p-delete-array-slice nil))
-    (%p-when-tied (r (unbox arr))        ; DELETE per index, in order (#155)
+    (%p-when-tied-array (r (unbox arr))        ; DELETE per index, in order (#155)
                   (return-from p-delete-array-slice
                     (let ((result (make-array n :adjustable t :fill-pointer 0)))
                       (dotimes (j n result)
@@ -14464,7 +14480,7 @@ which is one of #1140's escape spellings (probed)."
    writability check — as p-delete-array-slice above."
   (multiple-value-bind (flat n) (%p-flatten-slice-args indices) ; task #394, as above
     (when (zerop n) (return-from p-delete-kv-array-slice nil))
-    (%p-when-tied (r (unbox arr))        ; DELETE per index, in order (#155)
+    (%p-when-tied-array (r (unbox arr))        ; DELETE per index, in order (#155)
                   (return-from p-delete-kv-array-slice
                     (let ((result (make-array (* 2 n) :adjustable t :fill-pointer 0)))
                       (dotimes (j n result)
@@ -27863,7 +27879,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                    new-h)))))
     (unless (hash-table-p h)
       (setf h (make-hash-table :test 'equal)))
-    (%p-when-tied (r h)                    ; %$tied = (…) (task #155)
+    (%p-when-tied-hash (r h)                    ; %$tied = (…) (task #155)
                   (%p-th-fill r value)
                   (return-from p-hash-deref-= h))
     (clrhash h)

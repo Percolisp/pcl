@@ -113,6 +113,11 @@ slurpies over a tied @_ -- they moved out of the "not a site" row),
 view arms as `p-flatten-args`), `%p-defelem-box` (a deferred element of an
 array tied later FETCHes), the `p-cast-@` / `p-cast-%` vivify arms, and the
 `local` of a dereferenced tied element (refused, rule 12).
+An entry that only ONE container kind has (an element store, `exists`, `delete`,
+an element box or autovivification through `$r->{k}`, and their `$r->[i]`
+twins) asks `%p-when-tied-kind`: the tie of the OTHER kind is never consulted,
+so `$tied_array_ref->{k} = 1` stays perl's "Not a HASH reference" (t/op/avhv.t).
+The kind is read from the record after the count test -- no cost untied.
 
 ## 4. The method-call table (perl's answers first)
 

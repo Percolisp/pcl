@@ -286,6 +286,16 @@ op("a:sig-exact", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_sig_exact(@x) });
 # an undef operand is an LVALUE and vivifies a SCALAR ref, and a hard ref names
 # the referent variable itself (so `tied $x` sees `tie $$rx`)
 op("s:tie-deref-viv", sub { require Tie::Scalar; my $s; my $o = tie $$s, 'Tie::StdScalar'; $$s = 4; ref($o) . "|" . ref(tied $$s) . "|" . ref($s) . "|$$s" });
+# s504 (t/op/avhv.t): a HASH operation through a reference to a TIED ARRAY (and
+# the array operation through a reference to a TIED HASH) is perl's "Not a HASH
+# / ARRAY reference" -- the tie of the other kind is never consulted
+sub _nr { ($@ =~ /^(Not an? \w+ reference)/)[0] // "lived" }
+op("a:not-a-hash", sub { my @x; tie @x, 'LA'; @x = (1); my $r = \@x; my @o;
+  eval { $r->{k} = 1 }; push @o, _nr(); eval { my $e = exists $r->{k} }; push @o, _nr();
+  eval { delete $r->{k} }; push @o, _nr(); eval { my $v = \$r->{k} }; push @o, _nr(); "@o" });
+op("h:not-an-array", sub { require Tie::Hash; my %x; tie %x, 'Tie::StdHash'; my $r = \%x; my @o;
+  eval { my $v = $r->[0] }; push @o, _nr(); eval { $r->[0] = 1 }; push @o, _nr();
+  eval { my $e = exists $r->[0] }; push @o, _nr(); eval { delete $r->[0] }; push @o, _nr(); "@o" });
 op("s:tie-deref-ref", sub { require Tie::Scalar; my $x; my $rx = \$x; tie $$rx, 'Tie::StdScalar'; $x = 6; ref(tied $x) . "|$$rx" });
 PERL
 
