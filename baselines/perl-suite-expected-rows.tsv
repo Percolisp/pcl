@@ -2227,18 +2227,10 @@ re/script_run.t	... but not in combination with real ARABIC digits
 re/script_run.t	... but not in combination with real ARABIC digits
 re/script_run.t	... but not in combination with real ARABIC digits
 re/script_run.t	... but not in combination with real ARABIC digits
-re/script_run.t	... even if first in the sequence
-re/script_run.t	... even if first in the sequence
-re/script_run.t	... even if first in the sequence
-re/script_run.t	... even if first in the sequence
 re/script_run.t	... in either order
 re/script_run.t	... in either order
 re/script_run.t	... in either order
 re/script_run.t	... in either order
-re/script_run.t	... likewise if the digits come first
-re/script_run.t	... likewise if the digits come first
-re/script_run.t	... likewise if the digits come first
-re/script_run.t	... likewise if the digits come first
 re/script_run.t	... nor when the ARABIC digits come before them
 re/script_run.t	... nor when the ARABIC digits come before them
 re/script_run.t	... nor when the ARABIC digits come before them
@@ -2247,58 +2239,10 @@ re/script_run.t	... nor with a digit following
 re/script_run.t	... nor with a digit following
 re/script_run.t	... nor with a digit following
 re/script_run.t	... nor with a digit following
-re/script_run.t	0-9 are the digits for Deseret
-re/script_run.t	0-9 are the digits for Deseret
-re/script_run.t	0-9 are the digits for Deseret
-re/script_run.t	0-9 are the digits for Deseret
-re/script_run.t	A bunch of narrowing down of multiple possible scripts
-re/script_run.t	A bunch of narrowing down of multiple possible scripts
-re/script_run.t	A bunch of narrowing down of multiple possible scripts
-re/script_run.t	A bunch of narrowing down of multiple possible scripts
-re/script_run.t	A script containing only inherited characters matches
-re/script_run.t	A script containing only inherited characters matches
-re/script_run.t	A script containing only inherited characters matches
-re/script_run.t	A script containing only inherited characters matches
-re/script_run.t	A single unassigned code point is a script run
-re/script_run.t	A single unassigned code point is a script run
-re/script_run.t	A single unassigned code point is a script run
-re/script_run.t	A single unassigned code point is a script run
-re/script_run.t	ARABIC with a Shia digit is a script run
-re/script_run.t	ARABIC with a Shia digit is a script run
-re/script_run.t	ARABIC with a Shia digit is a script run
-re/script_run.t	ARABIC with a Shia digit is a script run
-re/script_run.t	All Latin is a script run
-re/script_run.t	All Latin is a script run
-re/script_run.t	All Latin is a script run
-re/script_run.t	All Latin is a script run
-re/script_run.t	Also when they aren't in the initial position
-re/script_run.t	Also when they aren't in the initial position
-re/script_run.t	Also when they aren't in the initial position
-re/script_run.t	Also when they aren't in the initial position
-re/script_run.t	An empty string is a script run
-re/script_run.t	An empty string is a script run
-re/script_run.t	An empty string is a script run
-re/script_run.t	An empty string is a script run
-re/script_run.t	An inherited script matches others
-re/script_run.t	An inherited script matches others
-re/script_run.t	An inherited script matches others
-re/script_run.t	An inherited script matches others
-re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
-re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
-re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
-re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
 re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
 re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
 re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
 re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
-re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
-re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
-re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
-re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
-re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
-re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
-re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
-re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
 re/script_run.t	Arabic-Thaana digits followed by an Arabic digit from a different sequence isn't a script run
 re/script_run.t	Arabic-Thaana digits followed by an Arabic digit from a different sequence isn't a script run
 re/script_run.t	Arabic-Thaana digits followed by an Arabic digit from a different sequence isn't a script run
@@ -2307,43 +2251,15 @@ re/script_run.t	But not more than one
 re/script_run.t	But not more than one
 re/script_run.t	But not more than one
 re/script_run.t	But not more than one
-re/script_run.t	Common then Latin is a script run
-re/script_run.t	Common then Latin is a script run
-re/script_run.t	Common then Latin is a script run
-re/script_run.t	Common then Latin is a script run
-re/script_run.t	Common then Sinhala (which has its own 0) is a script run
-re/script_run.t	Common then Sinhala (which has its own 0) is a script run
-re/script_run.t	Common then Sinhala (which has its own 0) is a script run
-re/script_run.t	Common then Sinhala (which has its own 0) is a script run
 re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
 re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
 re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
 re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
-re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
-re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
-re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
-re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
-re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
-re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
-re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
-re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
 re/script_run.t	Doesn't skip parts of exact matches
-re/script_run.t	Fullwidth digits may be digits for Deseret
-re/script_run.t	Fullwidth digits may be digits for Deseret
-re/script_run.t	Fullwidth digits may be digits for Deseret
-re/script_run.t	Fullwidth digits may be digits for Deseret
-re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
-re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
-re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
-re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
 re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
 re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
 re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
 re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
-re/script_run.t	Hebrew then Common is a script run
-re/script_run.t	Hebrew then Common is a script run
-re/script_run.t	Hebrew then Common is a script run
-re/script_run.t	Hebrew then Common is a script run
 re/script_run.t	Hebrew then Latin isn't a script run
 re/script_run.t	Hebrew then Latin isn't a script run
 re/script_run.t	Hebrew then Latin isn't a script run
@@ -2352,14 +2268,6 @@ re/script_run.t	Latin followed by Greek isn't a script run
 re/script_run.t	Latin followed by Greek isn't a script run
 re/script_run.t	Latin followed by Greek isn't a script run
 re/script_run.t	Latin followed by Greek isn't a script run
-re/script_run.t	Latin then Common is a script run
-re/script_run.t	Latin then Common is a script run
-re/script_run.t	Latin then Common is a script run
-re/script_run.t	Latin then Common is a script run
-re/script_run.t	Mixed Hiragana and Han
-re/script_run.t	Mixed Hiragana and Han
-re/script_run.t	Mixed Hiragana and Han
-re/script_run.t	Mixed Hiragana and Han
 re/script_run.t	Nested asr works to exclude some things
 re/script_run.t	Non-ASCII Common digits work with Greek
 re/script_run.t	Non-ASCII Common digits work with Greek
@@ -2373,20 +2281,12 @@ re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
 re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
 re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
 re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
-re/script_run.t	Permic followed by Permic-Arabic is Permic
-re/script_run.t	Permic followed by Permic-Arabic is Permic
-re/script_run.t	Permic followed by Permic-Arabic is Permic
-re/script_run.t	Permic followed by Permic-Arabic is Permic
 re/script_run.t	Script with own zero works with ASCII digits
 re/script_run.t	Script without own zero works with ASCII digits
 re/script_run.t	Thai digit followed by '1'
 re/script_run.t	Thai digit followed by '1'
 re/script_run.t	Thai digit followed by '1'
 re/script_run.t	Thai digit followed by '1'
-re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
-re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
-re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
-re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
 re/script_run.t	Two code points each in multiple scripts that don't intersect aren't a script run
 re/script_run.t	Two code points each in multiple scripts that don't intersect aren't a script run
 re/script_run.t	Two code points each in multiple scripts that don't intersect aren't a script run
@@ -2395,10 +2295,6 @@ re/script_run.t	Two digits in same extended script but from different sets of 10
 re/script_run.t	Two digits in same extended script but from different sets of 10
 re/script_run.t	Two digits in same extended script but from different sets of 10
 re/script_run.t	Two digits in same extended script but from different sets of 10
-re/script_run.t	[0-9] work for Arabic
-re/script_run.t	[0-9] work for Arabic
-re/script_run.t	[0-9] work for Arabic
-re/script_run.t	[0-9] work for Arabic
 re/script_run.t	[perl \#133997]
 re/uniprops01.t	*summary*
 re/uniprops02.t	*summary*

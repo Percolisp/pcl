@@ -92,6 +92,7 @@
 #   = 543 rows.  The verdicts and the per-row attributions are in
 #   baselines/perl-suite-run.tsv and baselines/perl-suite-fails.tsv.
 # taken-at: 3ac9394f 2026-09-18 (6 companion file(s) re-measured)
+# taken-at: s504 2026-10-02 (29 companion file(s) re-measured)
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -160,7 +161,7 @@ t/comp/form_scope.t	12	NS:format / write report formatting -- the file produces 
 t/comp/hints.t	2	XDIFF: not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile...
 t/comp/our.t	7	#1583 -- `our $y = $y;` inside a block where a `my $y` is in scope refuses; perl reads the my on the RHS
 t/comp/parser.t	93	#1694 -- FIVE #138 drops in the file's `#line`-tracking section (a `=pod` inside "${...}", a quoted sub NAME, three bare `<<HEREDOC;` statements) take the interpolated `check_line` calls with them and the recovery load abandons the rest of the form
-t/comp/proto.t	100	#1682 -- was 155; s473t5c's #1681 (`\(&NAME)` is the sub slot) removed the `&main::1` abort and the file went 47/14 -> 78/38, 61 -> 116 of 216 rows.  The residue is a SECOND abort at `sub star (*&)`: `star FOO` with nothing declaring FOO is CALLED where perl reads the bareword
+t/comp/proto.t	121	#1682 -- was 155; s473t5c's #1681 (`\(&NAME)` is the sub slot) removed the `&main::1` abort and the file went 47/14 -> 78/38, 61 -> 116 of 216 rows.  The residue is a SECOND abort at `sub star (*&)`: `star FOO` with nothing declaring FOO is CALLED where perl reads the bareword; s504 #2389: 100 -> 121, the #2543 loss (measured 63/32 on 558cc5a0, 75/20 since s500a) finally recorded
 t/comp/require.t	3	NS:Error message text and format -- perl plans 1750 rows and PCL 1747. Two of the three are `RT #24404` and `[perl #24482] require CORE::foo`, where `require $scalar` / `require CORE::lc "..."` must die "Can't locate threads in @INC"; PCL's message differs, the file takes its `else` branch, and THAT branch prints a TAP line with no test number (the test file's own bug), so the row is never produced
 t/io/crlf.t	3	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 t/io/dup.t	19	#1703 -- closing a `>&=` (fdopen) handle closes the shared descriptor, so dup.t:65 takes STDOUT out and dup.t:68 fails EBADF, losing every row after it
@@ -231,7 +232,7 @@ t/op/my_stash.t	2	#1664 -- the TYPEGLOB MODEL: `my Dog $spot` looks the class up
 t/op/numconvert.t	1446	s474b/s473a: the file SKIPS ITSELF (`1..0 # Skip unsigned perl arithmetic is not sane`): its preamble computes `sprintf "%u", $max_uv1 ** 6` and `do { use integer; $max_uv1 * 16 }`, both exact bignums in PCL where perl clamps to UV_MAX and wraps to -16.  CAUSE: not-supported.md §Integers are unbounded: PCL has no 64-bit boundary (registered s473a; revisit pointer #1513, USER-ruled DOCUMENT-not-implement 2026-09-07).  All 1446 rows are the one skip, not 1446 failures.
 t/op/numify_chkflags.t	14	NS:Readouts of perl's own internals -- `use Devel::Peek` + `Dump()`: every row parses Devel::Peek's SV dump for the IOK/NOK/POK flags a PV->NV conversion left.  PCL has no SV flags to dump
 t/op/override.t	14	#1870
-t/op/pos.t	3	#1922 -- `pos` is kept on a SCALAR only: `pos($h{k})`, `pos($a[0])` and `pos($_[0])` all read UNDEF after a `//g` match on that very place where perl reads 2 (probed s473t6c).  The three never-produced rows are the re-eval block that reads pos through a defelem
+t/op/pos.t	4	#1922 -- `pos` is kept on a SCALAR only: `pos($h{k})`, `pos($a[0])` and `pos($_[0])` all read UNDEF after a `//g` match on that very place where perl reads 2 (probed s473t6c).  The three never-produced rows are the re-eval block that reads pos through a defelem; s504 #2389: 3 -> 4 since s496a, one more row behind a form that aborts at an eager qr with a (?{...}) code block (NS)
 t/op/postfixderef.t	7	#1436 (3 rows) + NS:`DESTROY` called by garbage collector (4 rows) -- measured s473t6d (CHECK 1, probes/p1.pl + p2.pl).  The three aborted forms are `"@{[foo->@*]}"` / `->@[0,1]` / `->@{foo}` at postfixderef.t:345-347: a BAREWORD invocant of a postfix deref is a SYMBOLIC REFERENCE in perl and a SUB CALL in PCL, so the file dies `Undefined subroutine &main::foo called` (#1436).  The other four rows (Shemp/Larry/Curly/Moe) are DESTROY at scope exit.  NOT #1877, which t6b attributed them to and which is a different postfix spelling
 t/op/readline.t	4	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's tail opens a file for WRITE and reads its layers back; the runner's abort is `The function PerlIO::pl-get_layers is undefined`
 t/op/ref.t	15	#1826 — `$foo = doit $object "FOO";` (indirect object, scalar invocant WITH arguments) is a ruled DROP at line 335 and the drop aborts the form; NS:Indirect object syntax (#399)
@@ -268,14 +269,18 @@ t/re/fold_grind_l.t	113	PARKED: no locale support -- `locales_enabled` is a harn
 t/re/fold_grind_u.t	213	NS:DynaLoader / XS binary extensions -- Encode, via fold_grind.pl; the blessed #1036 was STALE
 t/re/opt.t	656	XDIFF: not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimiz...
 t/re/overload.t	87	PARKED: TIMEOUT, in the #326 quick-skip set ("HANG measured s404")
-t/re/pat.t	898	#1720 -- the file's own `Failed to match at pat.t line N` die
-t/re/pat_rt_report.t	4	#1721
+t/re/pat.t	962	#1720 -- the file's own `Failed to match at pat.t line N` die; s504 #2389: 898 -> 962 since s496a (#2383: the code-block condition (?(?{..})..) dies since #2372)
+t/re/pat_advanced.t	842	NS:Regex code blocks: `(?{code})` and `(??{code})` -- ONE top-level form aborts at line 1106's qr/(??{...})/, which dies AT THE qr since s496a member 7 (qr// compiles eagerly); before that the abort was line 1122's recursion (#2382).  s504 #2389: 0 -> 842, measured on b7ec0093 and identical on every extraction since 577a09a4
+t/re/pat_re_eval.t	499	XDIFF: not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 u...
+t/re/pat_rt_report.t	57	#2380 + #1721 -- s504 #2389: 4 -> 57 since s496a member 7: the POSSESSIVE qr/(\x{100}++)/ at line 401 dies at the eager qr and aborts its form (before: #2386's (*:B) at line 872)
 t/re/reg_email.t	13	#1716 -- `seek DATA,0,0` rewinds the DATA TEXT, where perl rewinds the source FILE
 t/re/reg_eval_scope.t	49	NS:Regex code blocks -- `(?{...})` is STRIPPED and the transpile refuses the file
 t/re/reg_fold.t	6891	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/reg_mesg.t	3348	#1590 -- the missing perl-tests/t/test.pl helper `display_rx` (adding it tips re/pat_advanced.t over SBCL's 1 GB heap)
 t/re/reg_nc_tie.t	5	#1717 -- Tie::Hash::NamedCapture
-t/re/regex_sets.t	8	XDIFF: not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); per...
+t/re/reg_nocapture.t	14	NS:Regex `/n` modifier -- non-capturing groups -- the inline `(?n:...)` dies at the eager qr since s496a (#2372) and its form aborts.  s504 #2389: 0 -> 14
+t/re/reg_pmod.t	60	#2635 -- an inline `(?p)` flag is rejected by the regex compiler (perl accepts it; /p is a no-op since 5.20); since s496a (#2372) the compile error dies and the form aborts.  s504 #2389: 0 -> 60
+t/re/regex_sets.t	96	XDIFF: not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); per...
 t/re/regex_sets_compat.t	140	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
 t/re/regexp.t	1264	#1714
 t/re/regexp_noamp.t	1264	#1714
@@ -285,7 +290,8 @@ t/re/regexp_notrie.t	1264	#1714
 t/re/regexp_qr.t	1264	#1714
 t/re/regexp_qr_embed.t	1264	#1714
 t/re/regexp_trielist.t	1264	#1714
-t/re/rxcode.t	1	NS:Regex code blocks: `(?{code})` and `(??{code})`
+t/re/rxcode.t	3	NS:Regex code blocks: `(?{code})` and `(??{code})` -- s504 #2389: 1 -> 3 since s496a (the eager qr)
+t/re/script_run.t	12	XDIFF: not-supported.md §Regex script-run assertions -- s504 #2389: since s496a (#2372) the eval that builds each pattern dies and twelve rows inside the forms that then abort are never produced
 t/re/speed.t	4	PARKED: TIMEOUT -- the engine's own speed corpus; see #1714 for the backtracking family
 t/re/subst.t	9	#1664 -- perl's constant.pm sets $constant::{_CAN_PCS} to a SCALAR REF (a constant sub)
 t/re/subst_wamp.t	281	#1664 -- via re/subst.t; under `do FILE` that abort costs the WHOLE file (no per-form recovery)
