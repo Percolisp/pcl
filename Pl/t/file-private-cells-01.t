@@ -145,4 +145,52 @@ PL
     's11a=e1 s11b=e1 v=gv',
 );
 
+# ---- MODULE-MODE units: `require "PATH"` and `use Module` -----------------
+write_file($D, 'm2.pl', <<'PL');
+my $count = 0;
+sub bump { $count++ }
+sub b { $count }
+1;
+PL
+# Two modules reopening ONE package, each with its own `my $n`.
+write_file($D, 'ShA.pm', <<'PL');
+package Shared; my $n = "A"; sub ga { $n } 1;
+PL
+write_file($D, 'ShB.pm', <<'PL');
+package Shared; my $n = "B"; sub gb { $n } 1;
+PL
+# The module's file lexical is ALSO spelled `$ModC::v` by its USER: two
+# variables in perl.
+write_file($D, 'ModC.pm', <<'PL');
+package ModC; my $v = "lex"; sub gv { $v } 1;
+PL
+# A module compiled into the PROGRAM's package, with the program's own
+# captured file lexical of the same name.
+write_file($D, 'ModF.pm', <<'PL');
+package main; my $count2 = 7; sub fcount { $count2 } 1;
+PL
+
+check_lines('module-mode', <<"PL",
+use lib "$D";
+my \$count = 10;
+sub a { \$count }
+require "$D/m2.pl";
+bump(); bump();
+print "a=", a(), " b=", b(), "\\n";
+use ShA; use ShB;
+print "ga=", Shared::ga(), " gb=", Shared::gb(), "\\n";
+use ModC;
+\$ModC::v = "user";
+print "gv=", ModC::gv(), " v=\$ModC::v\\n";
+my \$count2 = 1; sub mc { \$count2 }
+use ModF;
+\$main::count2 = "g";
+print "mc=", mc(), " f=", fcount(), " g=\$main::count2\\n";
+PL
+    'a=10 b=2',
+    'ga=A gb=B',
+    'gv=lex v=user',
+    'mc=1 f=7 g=g',
+);
+
 done_testing();

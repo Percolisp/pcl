@@ -185,9 +185,9 @@
 (p-defcell @result (make-array 0 :adjustable t :fill-pointer 0))
 (p-defcell @stk (make-array 0 :adjustable t :fill-pointer 0))
 
-(p-defcell $CAN_ENDIAN (make-p-box nil))
-(p-defcell $CAN_SHRIEK (make-p-box nil))
-(p-defcell $MAX_GROUP_DEPTH (make-p-box nil))
+(p-defcell $CAN_ENDIAN__file__669662421000 (make-p-box nil) :perl "$CAN_ENDIAN" :why :captured)
+(p-defcell $CAN_SHRIEK__file__669662421001 (make-p-box nil) :perl "$CAN_SHRIEK" :why :captured)
+(p-defcell $MAX_GROUP_DEPTH__file__669662421002 (make-p-box nil) :perl "$MAX_GROUP_DEPTH" :why :captured)
 (p-defcell $pcl_pack_comma_warned (make-p-box nil))
 
 (p-eval-always (p-note-inc "strict"))
@@ -329,7 +329,7 @@
 (p-sub pl-_pack_parse_mods
   (&rest %_args)
   (:writes-args nil
-    :captures ($CAN_ENDIAN $CAN_SHRIEK)
+    :captures ($CAN_ENDIAN__file__669662421000 $CAN_SHRIEK__file__669662421001)
     :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :nonlocal_exit.return))
   (p-args-body :copy (block nil
       (p-let
@@ -358,11 +358,11 @@
                               "$m")))
                         (p-if (p-str-eq $m "!")
                           (progn
-                            (p-if (p-! (p->= (p-index $CAN_SHRIEK $ch) 0))
+                            (p-if (p-! (p->= (p-index $CAN_SHRIEK__file__669662421001 $ch) 0))
                               (p-die :loc
                                 "cl/pack-impl.pl line 139"
                                 (p-string-concat "'!' allowed only after types "
-                                  $CAN_SHRIEK
+                                  $CAN_SHRIEK__file__669662421001
                                   " in "
                                   $ctx
                                   (p-esc "\\n"))))
@@ -381,11 +381,12 @@
                             (progn
                               (p-if
                                 (p-!
-                                  (p-|| (p->= (p-index $CAN_ENDIAN $ch) 0) (p-str-eq $ch "(")))
+                                  (p-|| (p->= (p-index $CAN_ENDIAN__file__669662421000 $ch) 0)
+                                    (p-str-eq $ch "(")))
                                 (p-die :loc
                                   "cl/pack-impl.pl line 144"
                                   (p-string-concat "'>' allowed only after types "
-                                    $CAN_ENDIAN
+                                    $CAN_ENDIAN__file__669662421000
                                     " in "
                                     $ctx
                                     (p-esc "\\n"))))
@@ -420,12 +421,12 @@
                               (progn
                                 (p-if
                                   (p-!
-                                    (p-|| (p->= (p-index $CAN_ENDIAN $ch) 0)
+                                    (p-|| (p->= (p-index $CAN_ENDIAN__file__669662421000 $ch) 0)
                                       (p-str-eq $ch "(")))
                                   (p-die :loc
                                     "cl/pack-impl.pl line 151"
                                     (p-string-concat "'<' allowed only after types "
-                                      $CAN_ENDIAN
+                                      $CAN_ENDIAN__file__669662421000
                                       " in "
                                       $ctx
                                       (p-esc "\\n"))))
@@ -1031,7 +1032,7 @@
 (p-sub pl-_pack_tmpl
   (&rest %_args)
   (:writes-args nil
-    :captures ($MAX_GROUP_DEPTH)
+    :captures ($MAX_GROUP_DEPTH__file__669662421002)
     :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.literal :regex.native))
   (p-args-body :copy (block nil
       (p-let
@@ -1049,7 +1050,7 @@
             @_))
         (p-void-ctx (p-if (p-! (p-defined $out_base)) (p-my-= $out_base 0))
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
-          (p-if (p-> $depth $MAX_GROUP_DEPTH)
+          (p-if (p-> $depth $MAX_GROUP_DEPTH__file__669662421002)
             (p-die :loc
               "cl/pack-impl.pl line 419"
               (p-esc "Too deeply nested ()-groups in pack\\n")))
@@ -2489,7 +2490,7 @@
 (p-sub pl-_unpack_tmpl
   (&rest %_args)
   (:writes-args nil
-    :captures ($MAX_GROUP_DEPTH)
+    :captures ($MAX_GROUP_DEPTH__file__669662421002)
     :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :regex.literal :regex.subst :regex.native))
   (p-args-body
     (block nil
@@ -2509,7 +2510,7 @@
             @_))
         (p-void-ctx (p-if (p-! (p-defined $group_base)) (p-my-= $group_base 0))
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
-          (p-if (p-> $depth $MAX_GROUP_DEPTH)
+          (p-if (p-> $depth $MAX_GROUP_DEPTH__file__669662421002)
             (p-die :loc
               "cl/pack-impl.pl line 900"
               (p-esc "Too deeply nested ()-groups in unpack\\n")))
@@ -3333,11 +3334,11 @@
 
 (p-run-compile-phase-blocks)
 
-(p-scalar-= $CAN_ENDIAN "sSiIlLqQjJfFdDpP")
+(p-scalar-= $CAN_ENDIAN__file__669662421000 "sSiIlLqQjJfFdDpP")
 
-(p-scalar-= $CAN_SHRIEK "sSiIlLnNvVxX.@")
+(p-scalar-= $CAN_SHRIEK__file__669662421001 "sSiIlLnNvVxX.@")
 
-(p-scalar-= $MAX_GROUP_DEPTH 100)
+(p-scalar-= $MAX_GROUP_DEPTH__file__669662421002 100)
 
 (p-scalar-= $pcl_pack_comma_warned 0)
 

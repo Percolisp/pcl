@@ -437,7 +437,7 @@ sub parse_source {
   # used to paper over now dies naming the file, from Parser2's PPI check.
   delete $opts{lenient_ppi};
   my %known = (eval_mode => 1, eval_pkg => 1, eval_captures => 1, eval_features => 1,
-               source_name => 1);
+               source_name => 1, module_unit => 1);
   my @unknown = sort grep { !$known{$_} } keys %opts;
   die "pl2cl: unknown transpile mode(s): @unknown\n" if @unknown;
   # One process can transpile many sources (`--server` answers every string
@@ -1059,7 +1059,10 @@ if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
   my $output = parse_source('parse_file', $source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()),
-    (defined $source_name ? (source_name => $source_name) : ()));
+    (defined $source_name ? (source_name => $source_name) : ()),
+    # #2633: a module / extension is not the PROGRAM unit — its promoted file
+    # lexicals take unit-unique cells, never the identity spelling.
+    (($is_module || $is_extension) ? (module_unit => 1) : ()));
 
   # THE DEPENDENCY MANIFEST SIDECAR (task #1261).  Written BEFORE the emission
   # reaches the caller, because the runtime writes the cached .lisp from what

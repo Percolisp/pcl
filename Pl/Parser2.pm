@@ -60,6 +60,10 @@ has code     => (is => 'ro', predicate => 1);
 # `package` statements) die → the per-eval v1 retry (kept until E4).
 has eval_mode => (is => 'ro', default => sub { 0 });
 has eval_pkg  => (is => 'ro', default => sub { undef });
+# #2633: this FILE is not the program — a module-mode unit (`pl2cl --module`,
+# a `use`/`require`d file; `--extension`, the checked-in artifacts).  ONE fact,
+# read by _program_unit; the emission is otherwise a program file's.
+has module_unit => (is => 'ro', default => sub { 0 });
 # #296-B1: the names of the caller's in-scope lexicals (the capture alist's
 # keys, sent by p-transpile-string).  Read by exactly one pass —
 # _rename_free_eval_captures — which needs to know whether a free `$a` in this
@@ -202,6 +206,7 @@ sub parse_file {
   my ($class, $fn, %opts) = @_;
   return $class->new(filename => $fn,
                      (defined $opts{source_name} ? (source_name => $opts{source_name}) : ()),
+                     ($opts{module_unit} ? (module_unit => 1) : ()),
                     )->parse;
 }
 sub parse_code {
@@ -1204,7 +1209,7 @@ sub _source {
 # not be named by the lexical's own name.
 sub _program_unit {
   my $self = shift;
-  return !$self->eval_mode;
+  return !$self->eval_mode && !$self->module_unit;
 }
 
 # The FIRST number a unit's `$name__file__N` cells take.  The program counts
