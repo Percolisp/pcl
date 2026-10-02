@@ -282,6 +282,11 @@ op("a:copy-sub", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_copy_sub(@x) });
 op("a:shift-sub", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_shift_sub(@x) });
 op("a:sig-sub", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_sig_sub(@x) });
 op("a:sig-exact", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_sig_exact(@x) });
+# s504 (op/gmagic.t:87): `tie ${EXPR}` names the scalar's BOX (p-cast-$-box) --
+# an undef operand is an LVALUE and vivifies a SCALAR ref, and a hard ref names
+# the referent variable itself (so `tied $x` sees `tie $$rx`)
+op("s:tie-deref-viv", sub { require Tie::Scalar; my $s; my $o = tie $$s, 'Tie::StdScalar'; $$s = 4; ref($o) . "|" . ref(tied $$s) . "|" . ref($s) . "|$$s" });
+op("s:tie-deref-ref", sub { require Tie::Scalar; my $x; my $rx = \$x; tie $$rx, 'Tie::StdScalar'; $x = 6; ref(tied $x) . "|$$rx" });
 PERL
 
 compare_program('hash', $hash_prog);

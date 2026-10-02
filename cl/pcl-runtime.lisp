@@ -27686,11 +27686,23 @@ buffer's fill-pointer; everything else falls back to file-length."
    reference gives its referent box; anything else is p-cast-$'s answer."
   (let ((inner (unbox val)))
     (cond
-      ((p-box-p inner) inner)
+      ;; a reference box: its referent is the scalar's box when that is a box
+      ;; (the variable `\$x` points at), else INNER is the container itself --
+      ;; the same reading (setf p-cast-$) makes
+      ((p-box-p inner)
+       (let ((target (p-box-value inner)))
+         (if (p-box-p target) target inner)))
       ((stringp inner)
        (%p-deref-strict-string "SCALAR" inner site)
        (or (%p-symref-box inner site)
            (setf (%p-symref-box inner site) (make-p-box nil))))
+      ;; `my $s; tie $$s, ...`: the operand is an LVALUE, so perl VIVIFIES
+      ;; $s into a SCALAR ref and ties the fresh referent (t/op/gmagic.t:87)
+      ;; -- the same arm (setf p-cast-$) has for `$$u = 1`.
+      ((and (p-box-p val) (or (null inner) (eq inner *p-undef*)))
+       (let ((target (make-p-box nil)))
+         (box-set val (p-backslash target))
+         target))
       (t (p-cast-$ val site)))))
 
 (defun p-cast-$ (val &optional site)
