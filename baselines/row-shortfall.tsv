@@ -25,6 +25,8 @@
 #   methods), t/op/magic.t 3 -> 0 (`tie my @tn` numbers the child rows, so the five rows paired by number
 #   were a renumbering artifact) -- both rows REMOVED by edit; t/op/tiehandle.t cause re-pointed at #2590.
 #   t/op/gmagic.t 26 -> 14 (left to s501t by Fable s504; cause #2595).
+#   perl-tests/sort.t 17 -> 16 and perl-tests/sub.t 9 -> 7 (s501t: the :tie registry rows now assert; the rest stays UNEXPLAINED);
+#   perl-tests/magic.t 21 -> 19 (two child rows numbered by `tie my @tn`).
 # s470bk 2026-09-05: t/op/closure.t 1 -> 0.  Its last unproduced row (276,
 #   "cloning closure proto with no CvOUTSIDE") needed `do "./op/closure_test.pl"`
 #   and PCL's do-FILE path died on the U+2019 in that file's header comment;
@@ -123,7 +125,7 @@ perl-tests/length.t	11	s473t1: 2 lost + 9 registered skips.  Both lost rows are 
 perl-tests/lex.t	8	UNEXPLAINED
 perl-tests/local.t	6	UNEXPLAINED
 perl-tests/loopctl.t	3	UNEXPLAINED
-perl-tests/magic.t	21	s473t1: 3 lost + 16 registered skips (see below).  s473t6d: 19 -> 21, caused by #1954 IN THIS ROUND and edited by hand -- magic.t:591 `foreach (['powie::!','Errno'])` used to run TWICE with $_ bound to each ELEMENT, so the block emitted FOUR rows whose descriptions interpolated to `Referencing %{""} doesn't load ` (measured A/B on a 268d7e00 extraction: four rows there, two here).  It now runs ONCE and emits perl's own two rows, so the file produces two fewer rows and 158 -> 156 passing.  The two that went were rows the double iteration invented.  ORIGINAL NOTE: the 3 are `tie my @tn, __PACKAGE__` with `sub FETCH { $next_test + pop }` (magic.t:126) -- an ARRAY tie is not implemented (not-supported.md '`tie` on an ARRAY or HASH', task #155), so `$tn[4]`/`$tn[5]` interpolate EMPTY: two child programs print `ok `/`not ok ` with no number (uncountable) and three more rows are never printed.  curr_test() is advanced by 5 regardless, so nothing else in the file shifts.
+perl-tests/magic.t	19	s501t (#155): 21 -> 19 -- `tie my @tn` makes two child rows numbered (one fails, #2594) | s473t1: 3 lost + 16 registered skips (see below).  s473t6d: 19 -> 21, caused by #1954 IN THIS ROUND and edited by hand -- magic.t:591 `foreach (['powie::!','Errno'])` used to run TWICE with $_ bound to each ELEMENT, so the block emitted FOUR rows whose descriptions interpolated to `Referencing %{""} doesn't load ` (measured A/B on a 268d7e00 extraction: four rows there, two here).  It now runs ONCE and emits perl's own two rows, so the file produces two fewer rows and 158 -> 156 passing.  The two that went were rows the double iteration invented.  ORIGINAL NOTE: the 3 are `tie my @tn, __PACKAGE__` with `sub FETCH { $next_test + pop }` (magic.t:126) -- an ARRAY tie is not implemented (not-supported.md '`tie` on an ARRAY or HASH', task #155), so `$tn[4]`/`$tn[5]` interpolate EMPTY: two child programs print `ok `/`not ok ` with no number (uncountable) and three more rows are never printed.  curr_test() is advanced by 5 regardless, so nothing else in the file shifts.
 perl-tests/method.t	64	s473t1: 35 + 26 + 2 + 1 + 1.  35 = the ONE indirect-object drop at line 72 (`is((method $obj "a","b","c"), ...)`, not-supported.md 'Indirect object syntax with a SCALAR invocant', USER s425) dying inside the top-level `p-let` that binds the file-level `my $obj` at line 66 -- that form spans source lines 66-199 (SBCL-reader-verified), so one drop takes 35 assertions: task #1433.  26 = `skip_if_miniperl('file handles as methods requires loading IO::File', 26)`, which PCL skips unconditionally (task #1439 -- and running them costs 25 MORE rows, measured).  2 = STALE PLAN (plan 163, real perl runs 161; task #1438).  1 = `*glob->method` dies (#1434).  1 = `DESTROY` without a leading `sub` (#1435).  s473f: 65 -> 64 -- #1074's handle-class dispatch makes `*glob->method` RUN instead of dying, so the 1 for #1434 is gone (the row now fails honestly on #437, `\*foo == \*foo` being false: two p-backslash wrappers, two addresses).
 perl-tests/multideref.t	2	s473t1 (#1431 FIXED, was 15): `exists +($r//0)->[$i]{$k}[$j+$z]{$k2}` (line 125) lowered to a ONE-argument (p-exists VALUE) because _elem_container_key did not see through the unary `+`, and the raw CL "invalid number of arguments: 1" aborted the file's single big top-level form at test 52 -- 13 rows.  The file is now OK 65/65.  The 2 left are the registered skips (rows 47/49, the RT #130727 quirk, cl/skip-registry.lisp; not-supported.md `local` section) -- they were ACCIDENTAL passes before s470bk's #1058.
 perl-tests/not.t	4	UNEXPLAINED
@@ -137,12 +139,12 @@ perl-tests/ref.t	30	s497b: 34 -> 30, rows 220-223 run (the literal-aliased regis
 perl-tests/reset.t	23	UNEXPLAINED
 perl-tests/scalar.t	12	UNEXPLAINED
 perl-tests/signatures.t	1	UNEXPLAINED
-perl-tests/sort.t	17	UNEXPLAINED
+perl-tests/sort.t	16	UNEXPLAINED
 perl-tests/split.t	35	UNEXPLAINED
 perl-tests/sprintf.t	2	UNEXPLAINED
 perl-tests/sprintf2.t	36	UNEXPLAINED
 perl-tests/state.t	78	not-supported.md §`given`/`when` — one `given` block at line 350, inside a foreach at file scope; the refusal is STATEMENT-level since s466 (#1037) so the file runs to it, and the tail of the enclosing top-level form goes with the die (ir-spec §9.3; sizing = #1055).  Was NOT MEASURED (-1) while the refusal killed the transpile.
-perl-tests/sub.t	9	UNEXPLAINED
+perl-tests/sub.t	7	UNEXPLAINED
 perl-tests/substr.t	46	s473t1: 44 lost + 2 skips.  TWO lvalue-sub drops, each dying at run time and taking the rest of its top-level form: line 697 `bar = "XXX"` (after `sub bar: lvalue { substr $krunch, 0 }`) costs 40 rows, line 900 `ta_tindex() = 23` costs 4.  not-supported.md 'Lvalue subroutines', task #930 (USER-deferred).
 perl-tests/tr.t	74	s497b: 75 -> 74, row 248 runs (its registry entry left, #1391/#2103).  s473t1: 2 lost + 73 registered skips.  The 2 are `RT #132608 len=0x12000` and its count row: tr.t:494 builds a 73,801-char string eval, over the 64,000-char single-top-level-form limit, and the ruled F6 refusal (`PCL: unsupported: a single generated top-level form of 73801 chars exceeds the 64000-char limit`) aborts that form.  Ruled s346/s356; already accounted for in fail-baseline as tr.t 241 -> 239.
 perl-tests/undef.t	4	UNEXPLAINED

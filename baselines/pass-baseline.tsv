@@ -1,4 +1,10 @@
 # taken-at: 5323d9e 2026-08-15
+# s501t (2026-10-03, Opus, EDITED BY HAND -- seven rows, TOTAL 18714 -> 18728, #155 tie on ARRAY/HASH):
+#   aassign.t 175 -> 181 (tied fixture), caller.t 26 -> 27, hash.t 7 -> 9, sort.t 182 -> 184 (overload sort result + the
+#   :tie registry entry EXTEND, now passing and deleted), sub.t 54 -> 56 (the two RT124156 :tie registry entries now
+#   pass), eval.t 131 -> 132 (row 107 no longer carries the ARRAY-tie announcement in its TAP text); magic.t pass
+#   unchanged, fail 29 -> 31 (tie my @tn numbers two child rows that were unnumbered, #2594 family).  method.t's 22 -> 23
+#   fail is MAIN's (b7ec0093 measures 76/23 too) and is left as it is.
 # s497b (2026-09-26, Opus, EDITED BY HAND -- six rows, TOTAL 18693 -> 18714 on top of s496a):
 #   die.t 3 -> 7: its $SIG{__DIE__} rows are restored (#1554, the handler is
 #   called now; plan 3 -> 7 -- the stub test.pl's isa_ok prints unnumbered).
@@ -397,7 +403,7 @@
 #   `bop.t 144 <no description>` key and sweep-diff correctly reads 0/0.
 #   REBASED over main 5eb87b01: the sweep TOTAL is 18681 -> 18686 there (this
 #   +5 on top of s484d's anonsub.t +5 (merged as s486c)), re-measured GATE clean, +0.
-aassign.t	OK	175	13	189
+aassign.t	OK	181	7	189
 anonsub.t	OK	6	4	10
 append.t	OK	13	0	13
 args.t	OK	22	1	23
@@ -410,7 +416,7 @@ bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
 bop.t	PARTIAL	485	24	510
-caller.t	OK	26	85	112
+caller.t	OK	27	84	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
 chop.t	OK	144	0	148
@@ -438,14 +444,14 @@ dor.t	OK	31	1	34
 each.t	OK	49	2	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	131	29	169
+eval.t	PARTIAL	132	28	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14
 for.t	OK	130	0	132
 grent.t	OK	3	0	3
 grep.t	OK	71	0	77
-hash.t	OK	7	7	14
+hash.t	OK	9	5	14
 hashassign.t	OK	305	4	309
 hexfp.t	OK	107	14	125
 if.t	OK	2	0	2
@@ -465,7 +471,7 @@ lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
 # argv rename from SBCL, docs/not-supported.md) added to fail-baseline in the same commit.
-magic.t	PARTIAL	158	29	208
+magic.t	PARTIAL	158	31	208
 # s449 (#564, agent S): `local *{EXPR} = sub {…}` has a lowering, so the four rows of the
 # `local *1 = sub {123}` loop at method.t:38 PASS — 72/26 -> 76/22, verified SERIALLY on both
 # this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the
@@ -541,14 +547,14 @@ reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
-sort.t	OK	182	6	205
+sort.t	OK	184	5	205
 splice.t	OK	34	0	34
 split.t	OK	178	6	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
 state.t	PARTIAL	88	0	166
 study.t	OK	43	0	43
-sub.t	OK	54	2	65
+sub.t	OK	56	2	65
 substr.t	PARTIAL	351	0	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	240	3	317

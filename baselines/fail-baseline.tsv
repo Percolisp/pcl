@@ -1,3 +1,7 @@
+# s501t (2026-10-03, Opus, EDITED BY HAND -- ten rows LEAVE, #155 tie on ARRAY/HASH): aassign.t 57-62 (the
+#   fixture ties an ARRAY), caller.t 35 (@DB::args is still tied), hash.t 3 + 13 (a tied hash FETCH sees the key AS
+#   GIVEN; magic keys), sort.t 163 (overload sort result -- the comparator reads a tied array).  Sweep
+#   scratch/s501t/sweep3.log on the rebased tree: 0 new, 10 fixed, GATE clean, TOTAL 18714 -> 18728.
 # s497b (2026-09-26, Opus, EDITED BY HAND -- eight rows): local.t 258/259/260
 #   Underscore 'Chop' / 'Filetest' / 'Assignment' LEAVE -- they pass.  Cause:
 #   chop/chomp now read and write through the box protocol (unbox / box-set),
@@ -67,12 +71,6 @@ aassign.t	182	RT #130132 scalar undef 1	undef	'2'	#1452 (a) (LHS lvalues must be
 aassign.t	183	RT #130132 scalar undef 2	'1'	undef	#1452 (a) (LHS lvalues must be resolved before the assignment)
 aassign.t	19	lvalue sub on RHS returns array	''	'1 2 3'	NS:Lvalue subroutines + #930
 aassign.t	20	lvalue sub on RHS returns scalars	':'	'1:2'	NS:Lvalue subroutines + #930
-aassign.t	61	tied both first	'a'	'b'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
-aassign.t	62	tied both second	'b'	'a'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
-aassign.t	57	tied left first	'a'	'b'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
-aassign.t	58	tied left second	'b'	'a'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
-aassign.t	59	tied right first	'a'	'b'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
-aassign.t	60	tied right second	'b'	'a'	#155 (NS:tie on an ARRAY or HASH — the fixture ties an ARRAY)
 aassign.t	176	undef as lvalue	'21:10:20'	'21:11:20'	#1452 (b) (`undef` on the LHS must make the RHS element the lvalue)
 anonsub.t	4				#1771 (the collapsed unnamed key: rows 4, 6 and 7, the three failing run_multiple_progs records -- 4 fails only on the child's SBCL compiler noise (#1773), 6 and 7 on absent warnings-gated diagnostics (owner #221))
 anonsub.t	9	undef &anon giving it a freed GV			#1771 (perl renders the freed GV's name; the record runs)
@@ -134,7 +132,6 @@ bop.t	30	str var | const str again	'0'	'{yt'	#1028 (bitwise ops numify a ref/glo
 bop.t	462	string overload can't use |			#972 (DECIDED s463f: the three prerequisites of #960(a))
 caller.t	30	@DB::args doesn't leak with $^P = 0	''	\s*0 1 DESTROY 0 0\s*	#1450 (@DB::args is never populated) + NS:`DESTROY` called by garbage collector
 caller.t	31	@DB::args doesn't leak with $^P = 1	''	\s*0 1 DESTROY 0 0\s*	#1450 (@DB::args is never populated) + NS:`DESTROY` called by garbage collector
-caller.t	35	@DB::args is still tied			#1450 (@DB::args is never populated) + #155 (NS:tie on an ARRAY or HASH)
 caller.t	62	BEGIN block sees correct caller filename	undef	'virtually/op/caller.t'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	63	BEGIN block sees correct caller line	undef	'12345'	NS:`caller()` filename and line number [DEFERRED] + #233
 caller.t	64	BEGIN block sees correct caller package	undef	'RT129239'	NS:`caller()` filename and line number [DEFERRED] + #233
@@ -227,8 +224,6 @@ flip.t	11				#221 (NS:Warnings-gated diagnostics are absent) + CATALOG flip.t
 hash.t	5	deleting the current iterator in void context frees the val			NS:`DESTROY` called by garbage collector
 hash.t	6	freed hash elems are not visible to DESTROY			NS:`DESTROY` called by garbage collector
 hash.t	2	Timely hash destruction with lvalue keys	'0'	'1'	NS:`DESTROY` called by garbage collector
-hash.t	13	magic keys	'a:x:b:y'	'x:y'	#155 (NS:`tie` on an ARRAY or HASH) CATALOG hash.t "magic keys"
-hash.t	3	ref hash keys are not stringified during compilation	'ARRAY'	'SCALAR'	#155 (NS:`tie` on an ARRAY or HASH) CATALOG hash.t "ref hash keys at compile"
 hash.t	8	the destructor was called	''	'1'	NS:`DESTROY` called by garbage collector
 hash.t	9	weak refs to pad hashes go stale on scope exit	'HASH(0x2)'	undef	NS:`DESTROY` called by garbage collector
 hashassign.t	219		undef	^Odd number of elements in hash assignment	#221 (NS:Warnings-gated diagnostics are absent; DECIDED s399: #221's trigger HAS FIRED)
@@ -542,7 +537,6 @@ kvhslice.t	28		undef	'a'	#1024 (bareword key in a kv-slice is not autoquoted)
 kvhslice.t	29		undef	'A'	#1024 (bareword key in a kv-slice is not autoquoted)
 sort.t	26	redefinition should not take effect during the sort			#1491 CATALOG sort.t "in-file interaction only -- does not reproduce in isolation (review s464 §1c)"
 sort.t	162	overload compare called once	'0'	'1'	#1021 (sort default comparator ignores an overloaded cmp)
-sort.t	163	overload sort result	' '	'1 2'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	164	overload string called twice	'0'	'2'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	174	Match vars do not leak from one plain sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 sort.t	175	Match vars do not leak from one $$ sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
