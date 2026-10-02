@@ -297,7 +297,7 @@ t/re/regexp_trielist.t	1264	#1714
 t/re/rxcode.t	3	NS:Regex code blocks: `(?{code})` and `(??{code})` -- s504 #2389: 1 -> 3 since s496a (the eager qr)
 t/re/script_run.t	12	XDIFF: not-supported.md §Regex script-run assertions -- s504 #2389: since s496a (#2372) the eval that builds each pattern dies and twelve rows inside the forms that then abort are never produced
 t/re/speed.t	4	PARKED: TIMEOUT -- the engine's own speed corpus; see #1714 for the backtracking family
-t/re/subst.t	9	#1664 -- perl's constant.pm sets $constant::{_CAN_PCS} to a SCALAR REF (a constant sub)
+t/re/subst.t	7	s501t (#155): 9 -> 7 (RT #23624 `tie my %pre` + one row behind it now produced) | #1664 -- perl's constant.pm sets $constant::{_CAN_PCS} to a SCALAR REF (a constant sub)
 t/re/subst_wamp.t	281	#1664 -- via re/subst.t; under `do FILE` that abort costs the WHOLE file (no per-form recovery)
 t/re/uniprops01.t	39811	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/re/uniprops02.t	39961	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)

@@ -3,6 +3,9 @@
 #   (scratch/s501t/companion-main-b7ec0093.log vs companion-after-s504.log, 15 files): op/tie.t op/tiearray.t op/tiehash.t
 #   op/sort.t op/magic.t op/hash.t UP; the other nine identical.  op/tiehandle.t 11/32 both (its TIMEOUT needs an OPEN stdin, #2592).
 #   op/gmagic.t 50/2 -> 61/3 (left to s501t by Fable s504: main 60/1 + one form; causes per row in perl-suite-fails.tsv).
+#   --all --quick movers, A/B vs b7ec0093: op/runlevel.t re/subst.t op/caller.t op/eval.t op/sub.t op/aassign.t UP, op/tie.t 52/43 -> 53/42.
+#   NOT spliced: op/gv.t + uni/gv.t (TIMEOUT both sides, +1 row each), io/crlf_through.t (TIMEOUT on main too: load), the
+#   #2633 regexp wrappers and mro/method_caching_utf8.t (#2634) -- not s501t's.
 # s504 (2026-10-02, Fable) -- EIGHTEEN rows spliced by hand (task #2389): the movers of ONE quiet FULL companion run on
 #   main b7ec0093 (~/pcl-agent-scratch/s504/companion/run.log; serial re-run agreed on every one), each ATTRIBUTED to the
 #   merge that moved it by running it on 22 `git archive` extractions of main's merge points (s504/attrib/table.txt);
@@ -1811,7 +1814,7 @@ mro/vulcan_c3_utf8.t	1	0	1	0	OK	s470bv: stale at 614c6af, before the s470 batche
 mro/vulcan_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/vulcan_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 op/64bitint.t	425	0	425	0	OK		0
-op/aassign.t	188	1	175	14	DIFF		0
+op/aassign.t	188	1	181	8	DIFF	s501t #155: 175/14 -> 181/8 (the six tied-fixture rows)	0
 op/alarm.t	5	0	5	0	OK	reaped 12 orphan(s)	0
 op/anonconst.t	7	0	1	6	DIFF		0
 op/anonsub.t	14	1	6	9	DIFF		0
@@ -1829,7 +1832,7 @@ op/bless.t	116	2	111	6	DIFF		0
 op/blocks.t	25	1	16	10	DIFF		0
 op/bool.t	8	0	8	0	OK		0
 op/bop.t	510	0	474	23	DIFF	aborted-forms:1: Invalid type 'P' in pack ; s473t6a: 469/28 -> 474/23 (#1813, an operator reads its operand ONCE).  The file's "double magic tests" block counts a tied scalar's FETCHes per op: 14 rows that read `got 2 want 1` for a PLAIN `|`/`&`/`^`/`~` now pass, and 9 rows that asserted `fetches($x) == 2` after a COMPOUND `|=`/`&=`/`^=` now fail, because PCL's old DOUBLE read made that 2 by accident -- perl's second FETCH there is the OUTER assignment reading the lvalue a compound assignment returns (probed: `$x |= $y;` in VOID context is 1 FETCH in perl AND in PCL; `my $a = ($x |= $y)` is 2 in perl, 1 in PCL).  That residue is task #1840.  Net -5 failing; measured --jobs 1 with the #366 serial re-run agreeing, and 469/28 on a `git archive 2f9cc300` extraction	0
-op/caller.t	111	1	28	84	DIFF		0
+op/caller.t	111	1	29	83	DIFF	s501t #155: 28/84 -> 29/83 (@DB::args is still tied)	0
 op/catch.t	12	0	10	2	DIFF		0
 op/chars.t	34	0	34	0	OK		0
 op/chdir.t	44	0	42	2	FIXTURE	Task #172 (s319): the shadow t/ SYMLINKS op/, and getcwd(3) returns the PHYSICAL path, so the test's `"$Cwd/op"` can never equal the post-chdir cwd. perl runs in the real tree, PCL in the shadow. Probed identical in both: bare chdir() honouring HOME *and* LOGDIR, delete $ENV{}, cwd() tracking a chdir, rel2abs(curdir), and chdir-into-a-symlink resolving to the physical path. Nothing in PCL is wrong; the two sides run in different trees.	0
@@ -1862,7 +1865,7 @@ op/dor.t	34	0	31	3	DIFF		0
 op/dump.t	0	0	0	0	NOTAP		0
 op/each.t	65	0	37	10	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: Can't locate loadable object for module this module in @INC	0
 op/each_array.t	65	0	65	0	OK		0
-op/eval.t	169	0	133	35	DIFF	s473h: 131/37 -> 133/35, the two rows are t/op/eval.t:75-76 (`my @b = eval @a; is("@b",'4'); is($@,'')`) -- `eval EXPR` imposes SCALAR context on its operand (task #1249(4)); the old undef-fn:main::pl-ARRAY signature WAS this bug, PCL stringifying the raw vector as ARRAY(0x..)	0
+op/eval.t	169	0	134	34	DIFF	s501t #155: 133/35 -> 134/34 (eval and last: the row's TAP no longer carries the ARRAY-tie announcement) | s473h: 131/37 -> 133/35, the two rows are t/op/eval.t:75-76 (`my @b = eval @a; is("@b",'4'); is($@,'')`) -- `eval EXPR` imposes SCALAR context on its operand (task #1249(4)); the old undef-fn:main::pl-ARRAY signature WAS this bug, PCL stringifying the raw vector as ARRAY(0x..)	0
 op/evalbytes.t	9	0	7	2	DIFF	s473f: 5/4 -> 7/2 -- #1074 gives a handle its class, and this file's two utf8-in-evalbytes rows depend on it (serial re-run; io/open.t, op/method.t, op/readdir.t, op/universal.t moved in the same run and are spliced with it)	0
 op/exec.t	41	0	37	4	DIFF	s473t6c: C 24/1 -> 37/4 and the 16-row shortfall -> 0.  #1920 -- `system` must not DIE when the child cannot be started (perl returns -1, sets $? to -1 and $! from the failed exec); sb-ext:run-program SIGNALS instead, so `system { "lskdfj" } "lskdfj"` at line 109 aborted the top-level form.  #1921 -- a rename inside a PPI full-quote token left its SECTION RECORD stale, so `system qq{$Perl -le "print q{ok $tnum - ..."}}` lost its tail.  14 FIXED ROWS, 0 NEW; the 4 that stay are the `Too many arguments for` compile-time diagnostics	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
@@ -1966,7 +1969,7 @@ op/require_override.t	10	0	7	3	DIFF		0
 op/reset.t	45	0	26	19	DIFF		0
 op/reverse.t	25	0	25	0	OK		0
 op/rt119311.t	22	0	11	2	DIFF	aborted-forms:2: Can't find label test at rtN.t line N.	0
-op/runlevel.t	24	0	8	16	DIFF		0
+op/runlevel.t	24	0	10	14	DIFF	s501t #155: 8/16 -> 10/14 (the `tie my @bar` / `tie %h` child programs)	0
 op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0
 op/sigdispatch.t	29	0	26	3	DIFF	s494g #2107: 24/3 -> 26/3 -- [perl #45173] `local $SIG{INT}` + `kill 'INT', $$`: the handler runs and $@ is untouched (rows 28/29, were never produced: the file died by interactive-interrupt); A/B dc20a721 24/3.  Residue: #1928 (NUL-clean lookups)	0
@@ -1991,7 +1994,7 @@ op/stat_errors.t	638	0	636	2	DIFF		0
 op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
-op/sub.t	64	1	55	10	DIFF	s484b (#1117): 54/11 -> 55/10, ONE row FIXED ("goto &xsub when @_ does not exist") -- `undef *_` now leaves the ARRAY slot ABSENT, so *_{ARRAY} is undef as perl says; `--jobs 1` before/after on an a217cb49 extraction, and the #366 serial re-run agrees (parallel 55/10, serial 55/10)	0
+op/sub.t	64	1	57	8	DIFF	s501t #155: 55/10 -> 57/8 (RT124156 plain / depth) | s484b (#1117): 54/11 -> 55/10, ONE row FIXED ("goto &xsub when @_ does not exist") -- `undef *_` now leaves the ARRAY slot ABSENT, so *_{ARRAY} is undef as perl says; `--jobs 1` before/after on an a217cb49 extraction, and the #366 serial re-run agrees (parallel 55/10, serial 55/10)	0
 op/sub_lval.t	211	0	33	64	DIFF	aborted-forms:9: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	351	3	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
@@ -2003,7 +2006,7 @@ op/sysio.t	45	0	45	0	OK		0
 op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/threads-dirh.t	0	0	0	1	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support threads ; reaped 4 orphan(s)	0
-op/tie.t	94	1	52	43	DIFF	s501t #155: 17/78 -> 52/43 (tie on ARRAY/HASH works; 35 rows left perl-suite-fails by edit) | s473t6a: 14/81 -> 15/80 (#1813).  DATA record 44, "Bug 68192 - numeric ops not calling mg_get when tied scalar holds a ref", whose own comment reads `make sure FETCH is called once per op`, now matches perl.  Measured --jobs 1 with the #366 serial re-run agreeing, and 14/81 on a `git archive 2f9cc300` extraction (main's own s486c measurement) | s473t6d: 15/80 -> 17/78 by #1950 in this round -- DATA records 25 (`tie $a->{foo}` + untie() from within FETCH) and 43 (RT 5475, `tie $a[0]` / `tie $h{foo}` FETCH counts) are ties on an ELEMENT.  Measured --jobs 1 + serial re-run, and 15/80 on a `git archive 268d7e00` extraction	0
+op/tie.t	94	1	53	42	DIFF	s501t #155: 17/78 -> 53/42 (the p-cast-$-box referent fix adds tie.t:18; tie on ARRAY/HASH works; 35 rows left perl-suite-fails by edit) | s473t6a: 14/81 -> 15/80 (#1813).  DATA record 44, "Bug 68192 - numeric ops not calling mg_get when tied scalar holds a ref", whose own comment reads `make sure FETCH is called once per op`, now matches perl.  Measured --jobs 1 with the #366 serial re-run agreeing, and 14/81 on a `git archive 2f9cc300` extraction (main's own s486c measurement) | s473t6d: 15/80 -> 17/78 by #1950 in this round -- DATA records 25 (`tie $a->{foo}` + untie() from within FETCH) and 43 (RT 5475, `tie $a[0]` / `tie $h{foo}` FETCH counts) are ties on an ELEMENT.  Measured --jobs 1 + serial re-run, and 15/80 on a `git archive 268d7e00` extraction	0
 op/tie_fetch_count.t	343	0	139	2	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N; s473 (Fable): 76/65 -> 129/12, PRE-EXISTING at fcf076f1 AND 637fc58e: the 55 FIXED rows are the -X $tied_glob / -X filetest rows (the s470bs filetest operand resolver, #1031/#1049/#1048/#1033/#1047); the 2 NEW rows ($tied.."a", "a"..$tied: FETCH called twice) = task #1430; s473h: 129/12 -> 131/10, the 2 rows are task #1430 FIXED (the segment fill classified the range and then called p-.. for the STRING arm, which classified AGAIN -- and classification unboxes, which for a tied scalar is a second FETCH); serial re-run agrees, 0 NEW ROW; s473t6a: #1813 (an operator reads its operand ONCE -- nine operators called a tied scalar's FETCH twice because they INSPECTED the operand and then COERCED the place again).  131/10 -> 139/2, 8 blessed rows FIXED (unary -, x, post ++, post --, &, ^, |, ~), measured --jobs 1 with the #366 serial re-run agreeing, ROW DIFF 0 NEW / 8 FIXED.  The residue is 2 rows of #1814 (the ZERO-FETCH half: `@a = ($tied) x 1` and `<$tied_glob>` never FETCH at all) plus the 202 rows the ruled smart-match refusal at line 169 takes with its form	0
 op/tiearray.t	75	0	70	5	DIFF	s501t #155: 26/29 -> 70/5 (left: 3 DESTROY "freed" rows, USER ruling; 2 :lvalue rows #930) | aborted-forms:1: Modification of non-creatable array value attempted, subscript -N PCL: tie: an ARRAY (class NegIndex); s473 (Fable): 40/35 -> 26/29, PRE-EXISTING at fcf076f1 AND 637fc58e (extractions, serial): the #1273 rule-12 fatal (s471a) fires on a TIED array whose class sets $NEGATIVE_INDICES -- task #1429 (20 rows never produced, 15 NEW fails at t/op/tiearray.t lines 273-284)	0
 op/tiehandle.t	67	0	11	32	DIFF	s473t6b (#1850): the harness's TAP reaches disk ROW BY ROW, so a NON-TAP write with no trailing newline GLUES to the next TAP row and that row stops being parseable -- perl with `$| = 1` glues the same way.  The write exists only because something upstream already diverges (here "sometext" printed on the REAL handle because `tie *$fh` is DROPPED, #155).  A/B --jobs 1: f26282db extraction 12/32, this tree 11/32	0
@@ -2101,7 +2104,7 @@ re/script_run.t	185	0	104	69	XDIFF	s504 #2389: 0/185 -> 104/69 at 577a09a4 (s496
 re/speed.t	59	0	1	0	TIMEOUT	timeout	0
 re/speed_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/stclass_threads.t	0	0	5	1	NOTAP		0
-re/subst.t	281	0	208	64	DIFF	s494u #2092: 206/66 -> 208/64 -- the two `\b ... /a` rows (A/B: 209e7533 extraction 206/66); aborted-forms:3: Undefined subroutine &constant::_CAN_PCS called	2
+re/subst.t	281	0	211	63	DIFF	s501t #155: 208/64 -> 211/63 (RT #23624: `tie my %pre`, and the two Issue #20690 rows behind it) | s494u #2092: 206/66 -> 208/64 -- the two `\b ... /a` rows (A/B: 209e7533 extraction 206/66); aborted-forms:3: Undefined subroutine &constant::_CAN_PCS called	2
 re/substT.t	0	0	0	0	NOTAP		0
 re/subst_amp.t	13	0	1	12	DIFF		0
 re/subst_wamp.t	281	0	0	0	DIFF		0
