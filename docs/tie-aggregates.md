@@ -91,23 +91,37 @@ entry (rule 12): a container operation with no tied form DIES naming itself
 | (d) `local` | `%p-lhe-save` / `%p-lhe-init` / `%p-lhe-restore` (`local $h{k}`), `p-local-array-elem` / `-init` (macros; body expanded once through an FLET), `%p-local-array-slice-nested` | EXISTS, FETCH if it exists, STORE (undef or the initializer); on exit STORE the old value or DELETE |
 | (e) emitted RAW shapes | `foreach-arrays` (`:arrays t` -> `%p-make-array-run`: one count test per array, the tied one runs over its view); `local-push` (`%p-push1`, above); `elem-setf` (CL `setf` of `p-gethash` / `p-aref` = classes b/c); `p-hash-=`'s list-context value (macro: the view when tied); `p-setf` / `p-list-=` slice and element targets (expand to `(setf p-aref)` / `(setf p-gethash)`) | the runtime entry's answer; no Kind-A shape reads container storage without passing one of the entries above |
 | DIES (rule 12: no tied form) | `p-alias-array-elements` (`\(@a) = LIST`), `p-alias-hash-slot` (`\$h{k} = REF`), `p-alias-array-slot` (`\$a[i] = REF`) | `PCL: refaliasing ... on a tied ARRAY/HASH is not supported` (perl-shaped, trappable) |
-| not a user-container site | the array WINDOW internals (`%p-array-shift-front` / `-drop-front` / `-unshift-*`, reached only after the entry test), bulk-fill / store helpers behind `p-array-fill` / `p-push-impl` (`%p-array-store-scalar`, `%p-array-bulk-*`, `%p-array-fill-*`, `%p-snapshot-array-rhs`, `%p-flatten-grow`, `%p-flatten-vector-*`, `%p-vpush`, `%p-extend-to`, `%p-aref-store`), readonly-array flags, overload / class tables, MRO and method caches, stream and record readers, glob expansion, regex engine, import / export lists, signal boot, capture buffers, `%p-sort-collect-plain` (after `%p-sort-values`' views), `%p-join-args` (after `p-join`'s views), `p-sig-rest-*` (build from @_), `%p-listslice-array` / `p-list-scalar` (list temporaries), `p-cast-@` / `p-cast-%` / `p-backslash` / `p-bless` / `p-ref` (identity -- the shell IS the container) | -- |
+| not a user-container site | the array WINDOW internals (`%p-array-shift-front` / `-drop-front` / `-unshift-*`, reached only after the entry test), bulk-fill / store helpers behind `p-array-fill` / `p-push-impl` (`%p-array-store-scalar`, `%p-array-bulk-*`, `%p-array-fill-*`, `%p-snapshot-array-rhs`, `%p-flatten-grow`, `%p-flatten-vector-*`, `%p-vpush`, `%p-extend-to`, `%p-aref-store`), readonly-array flags, overload / class tables, MRO and method caches, stream and record readers, glob expansion, regex engine, import / export lists, signal boot, capture buffers, `%p-sort-collect-plain` (after `%p-sort-values`' views), `%p-join-args` (after `p-join`'s views), `%p-listslice-array` / `p-list-scalar` (list temporaries), `p-cast-@` / `p-cast-%` / `p-backslash` / `p-bless` / `p-ref` (identity -- the shell IS the container) | -- |
 
-**The VarAnnotator gate the design allowed for was not needed**: `tie @a` was
+**Container shapes needed no VarAnnotator gate**: `tie @a` was
 already an array ESCAPE event (#1140), which denies `local-push` and
 `foreach-arrays` for an array the same file ties by name, and every other
 container shape goes through a runtime entry that now takes the test -- so a
 container tied ELSEWHERE is right too (probe `shapes2.pl`: a package array
 tied through a symbolic name in a sub, then iterated).  No emission changed
-except `tie ${"name"}` (§5).
+except `tie ${"name"}` (§5) -- and ONE type gate: a file that ties a HASH
+(`_tie_hash_in_file`, set by Parser2) does not freeze a `strkey` variable to a
+string, because a tied hash's methods see the key AS GIVEN (Tie::RefHash, an
+undef key).
+
+Sites added after the census (sweep, companion and rebase findings):
+`p-array-=` (segment fill, `@t = reverse @t` in place through the methods),
+the `p-list-=` collect forms (`%p-collect-tied-lhs`: the list-context value),
+`p-arg-supplied-p` and `p-sig-rest-array` / `-hash` (signature defaults and
+slurpies over a tied @_ -- they moved out of the "not a site" row),
+`%p-flatten-arg-values` (s501q's args-copy / `p-raw-params` path: the same
+view arms as `p-flatten-args`), `%p-defelem-box` (a deferred element of an
+array tied later FETCHes), the `p-cast-@` / `p-cast-%` vivify arms, and the
+`local` of a dereferenced tied element (refused, rule 12).
 
 ## 4. The method-call table (perl's answers first)
 
 `Pl/t/tie-aggregate-01.t` runs a logging `Tie::StdHash` / `Tie::StdArray`
-subclass through 104 operations (50 hash, 54 array) and compares every line
+subclass through 118 operations (56 hash, 62 array) and compares every line
 -- the methods called, their order and count, and the result -- with perl
-5.40.3.  **96 are identical.**  Eight differ in the LOG only (the results are
-identical; `a:untie-restores` is the void-push row again):
+5.40.3.  **108 are identical.**  Ten differ in the LOG only (the results are
+identical; `a:untie-restores` is the void-push row again, `a:list-assign-list`
+the assign-count row):
 
 | operation | perl | PCL | why |
 |---|---|---|---|
@@ -117,6 +131,7 @@ identical; `a:untie-restores` is the void-push row again):
 | `for (@a) { ... }` (alias and read) | FETCHSIZE before every iteration | FETCHSIZE once | the loop takes the size once |
 | `scalar(@a = LIST)` | no FETCHSIZE | one FETCHSIZE | PCL counts the array, perl the RHS |
 | `push @$r, 1` in void context | PUSH | PUSH FETCHSIZE | `*wantarray*` at a call ARGUMENT is the enclosing statement's (`is(push(@t, 4), 3)` runs under void), so PCL cannot skip the length |
+| `my ($x, $y) = @_` over a tied array passed whole | FETCH of EVERY element (1..N-1, then 0) | FETCH of the bound parameters only | the copying callee (s501q's args-copy lever) binds from the argument view and copies only what it binds |
 
 A consequence of the second-to-last class: a loop that grows or shrinks the
 tied array it iterates sees the size it started with.
