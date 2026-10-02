@@ -73,6 +73,7 @@ my %RESULT_ONLY = (
   'a:push-void'     => 'PCL cannot see VOID context at a call argument, so it always asks FETCHSIZE',
   'a:untie-restores' => 'the push inside it asks FETCHSIZE (a:push-void\'s reason)',
   'a:list-assign-list' => 'the list-context value of the assignment reads the tied target through its view, which asks FETCHSIZE',
+  'a:copy-sub'      => q{perl's `my ($x, $y) = @_` copies ALL of @_ (FETCH 1..N-1, then 0); PCL's copy FETCHes only the parameters it binds},
 );
 
 sub compare_program {
@@ -181,6 +182,10 @@ op("h:ref-key-store", sub { my %x; tie %x, 'LH'; my $k = \"s"; $x{$k} = 1; () })
 op("h:undef-key-fetch", sub { my %x; tie %x, 'LH'; no warnings; () = $x{+undef}; () });
 op("h:refhash", sub { require Tie::RefHash; tie my %x, 'Tie::RefHash'; my $k = [1]; $x{$k} = 5; ref((keys %x)[0]) . ":" . $x{$k} });
 op("h:anon-copy", sub { my %x; tie %x, 'LH'; $x{a} = 1; my $c = {%x}; join ",", %$c });
+# s504 seam (s501q args-copy lever): a NAMED sub that only copies @_ binds its
+# parameters from the flattened argument VALUES -- a tied hash must spread there too
+sub h_copy_sub { my (%o) = @_; join ",", map { "$_=$o{$_}" } sort keys %o }
+op("h:copy-sub", sub { my %x; tie %x, 'LH'; $x{a} = 1; $x{b} = 2; h_copy_sub(%x) });
 PERL
 
 my $array_prog = $common . <<'PERL';
@@ -266,6 +271,17 @@ op("a:range-fill", sub { my @x; tie @x, 'LA'; @x = 1 .. 3; "@x" });
 op("a:reverse-inplace", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3, 4); delete $x[1]; @x = reverse @x; join ",", map { exists $x[$_] ? $x[$_] : "-" } 0 .. 3 });
 op("a:list-assign-list", sub { my @x; tie @x, 'LA'; my @r = ((my $f), @x) = (1, 2, 3); scalar(@r) . ":@x" });
 op("a:deref-assign", sub { my @x; tie @x, 'LA'; my $r = \@x; @$r = (5, 6); "@x" });
+# s504 seam (s501q args-copy / sig-classic levers): a tied array passed to a
+# NAMED copying sub and to a signature sub spreads through its methods
+sub a_copy_sub { my ($x, $y) = @_; "$x,$y" }
+sub a_shift_sub { my $x = shift; my $y = shift; "$x,$y" }
+use feature "signatures"; no warnings "experimental::signatures";
+sub a_sig_sub ($x, $y = "d", @r) { "$x,$y,@r" }
+sub a_sig_exact ($x, $y, $z) { "$z,$y,$x" }
+op("a:copy-sub", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_copy_sub(@x) });
+op("a:shift-sub", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_shift_sub(@x) });
+op("a:sig-sub", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_sig_sub(@x) });
+op("a:sig-exact", sub { my @x; tie @x, 'LA'; @x = (1, 2, 3); a_sig_exact(@x) });
 PERL
 
 compare_program('hash', $hash_prog);
