@@ -2,6 +2,7 @@
 # s501t (2026-10-02, Opus; #155) -- SIX rows spliced by hand, A/B --jobs 1 < /dev/null against a b7ec0093 extraction
 #   (scratch/s501t/companion-main-b7ec0093.log vs companion-after-s504.log, 15 files): op/tie.t op/tiearray.t op/tiehash.t
 #   op/sort.t op/magic.t op/hash.t UP; the other nine identical.  op/tiehandle.t 11/32 both (its TIMEOUT needs an OPEN stdin, #2592).
+#   op/gmagic.t 50/2 -> 61/3 (left to s501t by Fable s504: main 60/1 + one form; causes per row in perl-suite-fails.tsv).
 # s504 (2026-10-02, Fable) -- EIGHTEEN rows spliced by hand (task #2389): the movers of ONE quiet FULL companion run on
 #   main b7ec0093 (~/pcl-agent-scratch/s504/companion/run.log; serial re-run agreed on every one), each ATTRIBUTED to the
 #   merge that moved it by running it on 22 `git archive` extractions of main's merge points (s504/attrib/table.txt);
@@ -1879,7 +1880,7 @@ op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
 op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
 op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
 op/glob.t	18	0	14	4	DIFF		0
-op/gmagic.t	78	0	50	2	DIFF	s473t6d: 31/2 -> 50/2 (+19 passing, 0 new fails) by #1950 in this round -- `tie $h{foo}` / `tie $_{elem}` handed p-tie the element VALUE and took its announce-and-drop arm, so `tied` read undef and `$obj->init` died.  Measured --jobs 1 with the runner's own serial re-run agreeing, and 31/2 on a `git archive 268d7e00` extraction | aborted-forms:4: Can't call method init on an undefined value	0
+op/gmagic.t	78	0	61	3	DIFF	s501t (s504, left to it by Fable): 50/2 -> 61/3 = main 60/1 since bd0c38e3 (s497b) + one form s501t's p-cast-$-box vivify (`tie $$s` on an undef $s) now runs; the 3 not ok = #2595 x2 (rows 90-91, autoviv through a tied scalar) + #2596 (chomp of an overloaded ref) | s473t6d: 31/2 -> 50/2 (+19 passing, 0 new fails) by #1950 in this round -- `tie $h{foo}` / `tie $_{elem}` handed p-tie the element VALUE and took its announce-and-drop arm, so `tied` read undef and `$obj->init` died.  Measured --jobs 1 with the runner's own serial re-run agreeing, and 31/2 on a `git archive 268d7e00` extraction | aborted-forms:4: Can't call method init on an undefined value	0
 op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/goto_xs.t	11	0	11	0	OK	s492b: DIFF 10/1 -> OK 11/0, #2004 residue -- the file's non-XS fallback is `*mycroak = sub { die @_ }`, and `die LIST` now CONCATENATES its flattened list instead of stringifying the array as ARRAY(0x..), so "[perl #35878] croak in XS after goto segfaulted" gets "boo1\nboo2\nboo3\nboo4\n".  Measured --jobs 1 on a 5ce155cb extraction: 10/1 there	0
 op/grent.t	3	0	3	0	OK		0
