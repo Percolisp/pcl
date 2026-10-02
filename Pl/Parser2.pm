@@ -1197,6 +1197,48 @@ sub _source {
   return scalar <$fh>;
 }
 
+# FILE-PRIVATE CELLS (#2633, ir-spec §2b).  The PROGRAM is the one unit that
+# owns the identity spelling of a promoted file lexical; every other unit — a
+# string eval or `do FILE` (eval mode), a `use`/`require`d file (module mode) —
+# shares its packages with the program and with each other, so its cells must
+# not be named by the lexical's own name.
+sub _program_unit {
+  my $self = shift;
+  return !$self->eval_mode;
+}
+
+# The FIRST number a unit's `$name__file__N` cells take.  The program counts
+# from 0 (unchanged); a non-program unit counts from a base derived from a
+# digest of its SOURCE TEXT — never a path: an eval has none, and the emission
+# must be the same on every machine — so two units compiled into one package
+# never mint the same cell, while one text always emits the same names (the
+# eval / module caches stay keyed by text).  Every cell of a unit shares the
+# base, so the `__file__N` ordering rules inside a unit are unchanged.
+sub _unit_cell_base {
+  my ($self, $src) = @_;
+  return 0 if $self->_program_unit;
+  require Digest::MD5;
+  my $bytes = $src;
+  utf8::encode($bytes) if utf8::is_utf8($bytes);
+  my $n = hex(substr(Digest::MD5::md5_hex($bytes), 0, 8)) % 1_000_000_000;
+  return 1000 * (1 + $n);
+}
+
+# PCL_FILECELL_LOG=PATH: append one line per promotion DECISION about an
+# identity-eligible file lexical (#2633's measurement) — a FILE, never stderr
+# (a sweep child's stderr is part of what it is compared on); env-gated, never
+# on by default.
+sub _filecell_note {
+  my ($self, $site, $canon, $what) = @_;
+  my $log = $ENV{PCL_FILECELL_LOG} or return;
+  my $kind = $self->eval_mode ? 'eval' : $self->_program_unit ? 'program' : 'module';
+  my $src = $self->has_filename ? $self->filename : '-';
+  open my $fh, '>>', $log or return;
+  print $fh join("\t", $kind, $site, $canon, $what, $src), "\n";
+  close $fh;
+  return;
+}
+
 # D7 (extended): a PExpr parse mutates shared PPI state in TWO ways — token
 # CONTENT (the fat-comma `=>` → `,` rewrite) and ad-hoc parse-state keys
 # stored on the PPI elements themselves.  `_bareword_string` is the toxic
@@ -1250,6 +1292,7 @@ sub parse {
   # it and the fallback were removed at E4.1 step 2, #242: with one pipeline
   # there is nothing to bisect against.)
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
+  $self->{_unit_cell_base} = $self->_unit_cell_base($src);   # #2633
   # Route through v1's _ppi_parse so the shared PPI-bug workarounds apply — most
   # importantly _fix_modulo_magic (`7%-3` mis-tokenized as the magic hash %-,
   # dropping the modulo → PARSE ERROR).  A bare PPI::Document->new skipped it.
@@ -1682,7 +1725,7 @@ sub parse {
     }
     push @{ $segments[-1]{stmts} }, $child;
   }
-  $self->{_file_lex_counter} = 0;
+  $self->{_file_lex_counter} = $self->{_unit_cell_base} // 0;   # #2633: unit-unique
   $self->{_file_lex_renamed} = {};
   # M-F: renamed-cell declarations emit a p-alias-eval-cell only when the
   # file contains a string eval somewhere — the alias can only be observed
@@ -4005,8 +4048,14 @@ sub _rename_spanning_lexicals {
     # #470: … and the file must not ALSO spell the name as a package global
     # ($main::x / $::x / our $x / an interpolated qualified read), or the
     # identity cell would be shared by two Perl variables.  Sigil-exact.
-    my $unique = (($cf->{decl_count}{$bare} // 0) == 1)
+    # #2633: … and the unit must be the PROGRAM.  Any other unit shares its
+    # packages with the program and with other units, so the identity cell
+    # would be one variable for all of them; there the mangle (with its
+    # unit-unique number) is taken instead — this path has no refusal of its
+    # own that the identity spelling would have avoided.
+    my $id_ok = (($cf->{decl_count}{$bare} // 0) == 1)
       && !$self->{_file_pkg_global}{"\$$bare"};
+    my $unique = $id_ok && $self->_program_unit;
     my $refuse = sub {
       warn "SPANREFUSE $bare\@seg$di: $_[0]\n" if $ENV{PCL_SPAN_DEBUG};
       return 1;
@@ -4106,6 +4155,8 @@ sub _rename_spanning_lexicals {
 
     my $newbare = $unique ? $bare
                           : $bare . '__file__' . $self->{_file_lex_counter}++;
+    $self->_filecell_note('span', "\$$bare", $unique ? 'identity' : 'mangle')
+      if $id_ok;
     # A use inside a shadowing scope (block-nested re-decl of the same bare
     # name — a DISTINCT variable) must keep its original name (M3): skip the
     # shadow decl's own declarator symbol and every use _ref_shadowed
@@ -4315,6 +4366,10 @@ sub _rename_spanning_lexicals {
       }
     }
     $self->{_file_lex_renamed}{$csym} = 1;
+    # #2633: a container span has no mangled spelling, so a non-program unit
+    # keeps the identity cell here — a counted FALLBACK (PCL_FILECELL_DEBUG).
+    $self->_filecell_note('cspan', $csym,
+      $self->_program_unit ? 'identity' : 'fallback:container-span-identity-only');
     _publish_span_pair($segments, $di, $hi, $csym, $csym);   # #2285, as for scalars
     }   # per-declaration instance
   }
@@ -4686,8 +4741,11 @@ sub _rename_captured_file_lexicals {
   # timing loop and every package-switching eval'd sub).  Publish the pair
   # beside the span cells: the thunk binds the SAME box the fall-through
   # would have found, so the only change is the compiler's knowledge.
-  for my $canon (sort keys %{ delete $self->{_identity_eval_caps} // {} }) {
-    $seg->{eval_span_captures}{$canon} //= cl_sym($canon);
+  # (#2633: in a non-program unit the same decl takes the mangle, and the
+  # pair names that cell — the value is the CELL, the key the perl name.)
+  my $idcaps = delete $self->{_identity_eval_caps} // {};
+  for my $canon (sort keys %$idcaps) {
+    $seg->{eval_span_captures}{$canon} //= cl_sym($idcaps->{$canon});
   }
 }
 
@@ -4839,27 +4897,50 @@ sub _promote_captured {
   # our $x / an interpolated qualified read), or the promoted lexical and the
   # package variable share one cell.  Sigil-exact; when it fires the decl
   # takes the `$name__file__N` mangle below, eval guard included.
-  if (!$extent && ($self->{_file_decl_count}{$bare} // 0) == 1
-      && !$self->{_file_pkg_global}{$canon}) {
+  # #2633: … and the unit must be the PROGRAM.  In any other unit the identity
+  # cell is shared with the program and every other unit compiled into the
+  # package, so the decl tries the MANGLE first (as a #470 name does), with a
+  # unit-unique number; identity is only the FALLBACK where the mangle path
+  # below would refuse — so nothing that promotes today stops promoting.
+  my $id_ok = !$extent && ($self->{_file_decl_count}{$bare} // 0) == 1
+    && !$self->{_file_pkg_global}{$canon};
+  my $identity = sub {
     # An embedded decl here is already right on the veto path (one cell under
     # the original name, which is what identity means) — keep its emission.
     return if $emb_sym && _caprefuse($canon, 'embedded decl: identity = veto path');
     $self->{_file_lex_renamed}{$canon} = 1;
-    $self->{_identity_eval_caps}{$canon} = 1;    # published below (#2285)
+    $self->{_identity_eval_caps}{$canon} = $canon;    # published below (#2285)
     $self->_reg_captures($canon, \@cap_subs);
     return 1;
+  };
+  if ($id_ok && $self->_program_unit) {
+    $self->_filecell_note('cap', $canon, 'identity');
+    return $identity->();
   }
+  # A refusal on the mangle path: the identity fallback where it is eligible
+  # (a non-program unit), else the ordinary refusal.  Returns the promotion's
+  # result, so every refusal below reads `return $refuse->(WHY) if COND`.
+  my $refuse = sub {
+    my ($why) = @_;
+    if ($id_ok) {
+      $self->_filecell_note('cap', $canon, "fallback:$why");
+      return $identity->();
+    }
+    _caprefuse($canon, $why);
+    return;
+  };
   # From here on the promotion RENAMES, and a signature that PPI handed over
   # as ONE TOKEN (Token::Prototype — the feature pragma on the sub's own
   # line, #455) carries no Symbol for `_rewrite_var_uses` to rename: a
   # capture through such a signature's DEFAULT would keep reading the old
   # name, silently.  Refuse instead, exactly like the `${x}` deref-block text
   # shape below.  The identity branch above renames nothing, so it is safe
-  # for both PPI spellings and has already returned.
+  # for both PPI spellings (the program has already taken it; a non-program
+  # unit falls back to it here).
   for my $psub (@psubs) {
     next unless grep { $_->isa('PPI::Token::Prototype') } $psub->schildren;
-    return if $self->_signature_captures_name($psub, $bare, { $canon => 1 })
-      && _caprefuse($canon, 'signature default in an unrewritable Token::Prototype');
+    return $refuse->('signature default in an unrewritable Token::Prototype')
+      if $self->_signature_captures_name($psub, $bare, { $canon => 1 });
   }
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
@@ -4872,7 +4953,7 @@ sub _promote_captured {
   # family variable (token rewrites key on ->symbol), so `my $x` beside
   # `my %x` does not block promoting %x (array.t bug-70171 block).
   my $hard = $self->_hard_decl_count($estmts, $bare, $sig eq '$' ? undef : $sig);
-  return if $hard != 1 && _caprefuse($canon, "hard-decls=$hard in extent");
+  return $refuse->("hard-decls=$hard in extent") if $hard != 1;
   # (#254 A-iv, s365: the blanket "family use (@x/%x/$#x) in extent" refusal
   # for a SCALAR promotion is GONE.  It predated the sigil-exact rewriter and
   # duplicated its knowledge as a veto: `$x` and `@x` are two variables, and
@@ -4893,8 +4974,8 @@ sub _promote_captured {
   # The `${x}` deref-block refusal below still stands: that shape is a
   # *text* form the token rewrites cannot reach at all, shadows or not.)
   my $etxt = $extent ? $extent->content : join("\n", map { $_->content } @$stmts);
-  return if $etxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/          # ${x}/@{x}/%{x} deref-block → can't rewrite
-    && _caprefuse($canon, '${x} deref-block');
+  # ${x}/@{x}/%{x} deref-block → can't rewrite
+  return $refuse->('${x} deref-block') if $etxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
   # M-F: a promoted SCALAR cell becomes eval-visible when its renamed decl
   # LOWERS — _reg_eval_capture at the defvar branches emits the alias call
   # (p-alias-eval-cell, ir-spec §9.1) at the decl's run position, and string
@@ -4932,19 +5013,19 @@ sub _promote_captured {
       my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
             : $nx->isa('PPI::Structure::List')
               ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
-      return if !@q && _caprefuse($canon, 'dynamic string eval after decl');
-      return if (grep { $_->content =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/ } @q)
-        && _caprefuse($canon, 'string eval names the lexical');
+      return $refuse->('dynamic string eval after decl') if !@q;
+      return $refuse->('string eval names the lexical')
+        if grep { $_->content =~ /[\$\@\%]\s*\{?\s*\Q$bare\E\b/ } @q;
     }
   }
   # The eval waivers above rest on the decl LOWERING to its defvar (M-F), and
   # an embedded decl lowers inside its statement instead — refuse (#2534).
-  return if $emb_sym && ($post_eval || $site_pair)
-    && _caprefuse($canon, 'embedded decl with a later string eval');
+  return $refuse->('embedded decl with a later string eval')
+    if $emb_sym && ($post_eval || $site_pair);
   my ($dsym) = $emb_sym ? ($emb_sym)
              : grep { $_->content eq $canon }
                @{ $decl->find('PPI::Token::Symbol') || [] };
-  return if !$dsym && _caprefuse($canon, 'decl symbol not found');
+  return $refuse->('decl symbol not found') if !$dsym;
   my $newbare = $bare . '__file__' . $self->{_file_lex_counter}++;
   my $sp = $extent
     // (map { $_->parent } grep { ref $_ && $_->isa('PPI::Node') } @$stmts)[0];
@@ -4964,6 +5045,13 @@ sub _promote_captured {
   $self->_rename_decl_within($decl, $dsym, $sig . $newbare, $emb_sym ? $decl : undef);
   $self->_rewrite_var_uses(\@post, $canon, $newbare, $extent, $skip);
   $self->{_file_lex_renamed}{ $sig . $newbare } = 1;             # drives the defvar lowering
+  # #2633: a decl that would have been an identity cell (a non-program unit's
+  # top-level file lexical) is still a LEXICAL to the segment's string evals —
+  # published through the SAME #2285 pair, now naming the mangled cell.
+  if ($id_ok) {
+    $self->{_identity_eval_caps}{$canon} = $sig . $newbare;
+    $self->_filecell_note('cap', $canon, 'mangle');
+  }
   $self->{_emb_promoted}{ $sig . $newbare } = 1 if $emb_sym;     # its cell: _lower_block's embedded arm
   # M-F backstop: the eval refusals above were waived on the promise that
   # _reg_eval_capture runs when this decl lowers to its defvar.  If the decl
