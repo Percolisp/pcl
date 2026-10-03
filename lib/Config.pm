@@ -53,6 +53,7 @@ our %Config = (
     archname  => 'x86_64-linux',
     osvers    => '6.17.0-8-generic',
     myuname   => 'linux pcl 6.0.0 x86_64',
+    path_sep  => ':',         # $ENV{PATH} separator on every Unix (Env::Array splits on it)
 
     # Features - what PCL/SBCL supports
     useithreads    => '',          # No threading in PCL

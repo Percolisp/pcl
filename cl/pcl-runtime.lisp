@@ -4880,7 +4880,12 @@
         ((p-vstring-p val) (p-true-p (p-vstring-s val)))
         ;; bare @array / %hash in boolean context: true iff non-empty
         ((and (vectorp val) (not (stringp val))) (> (%p-array-count val) 0))
-        ((hash-table-p val) (> (%p-hash-user-count val) 0))
+        ;; A TIED hash is the TRUTH of its SCALAR (perl: "yes" and "0 but true"
+        ;; are true) -- %p-hash-user-count NUMIFIES it, for the count callers.
+        ((hash-table-p val)
+         (%p-when-tied (r val)
+                       (return-from %p-true-p-slow (p-true-p (%p-th-scalar r))))
+         (> (%p-hash-user-count val) 0))
         (t t))))
 
 (declaim (inline p-true-p))
@@ -12216,6 +12221,7 @@ per element."
    Creates box if needed, auto-extends array. Returns the box itself.
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((a (unbox arr)))
+    (when (p-box-p a) (setf a (%p-tielem-container arr a)))
     ;; THE INTERMEDIATE VIVIFICATION (#1058, s470bk) — the array twin of the
     ;; rule spelled out in p-gethash-box: an undef container that IS a writable
     ;; place is vivified into an array (perl's lvalue autovivification), so
@@ -12493,7 +12499,9 @@ when it does not.  Read-only use must never vivify or extend, which is
 why p-aref-box (the eager lvalue accessor) is wrong here."
   (let ((a (unbox arr)))
     (if (not (and (vectorp a) (not (stringp a))))
-        (make-p-box *p-undef*)
+        (if (and (p-box-p a) (%p-tielem-box-p arr))
+            (p-aref-argbox a idx)
+            (make-p-box *p-undef*))
         (let* ((len (length a))
                (actual-idx (%p-array-index a idx)))
           (cond
@@ -12584,7 +12592,9 @@ create the key on a read-only call, which perl does not."
         ;; undef container / special markers / symbolic-ref strings:
         ;; keep plain value semantics, no aliasing.  A BLESSED hash is NOT in
         ;; this set — see the note on %p-alias-helem above (task #841).
-        (make-p-box (p-gethash hash key))
+        (if (and (p-box-p h) (%p-tielem-box-p hash))
+            (p-gethash-argbox h key)
+            (make-p-box (p-gethash hash key)))
         (or (%p-when-tied-hash (r h) (%p-tie-elem-box r k))
             (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))))
 
@@ -13411,6 +13421,7 @@ which is one of #1140's escape spellings (probed)."
    Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((h (unbox hash))
          (k (to-string key)))
+    (when (p-box-p h) (setf h (%p-tielem-container hash h)))
     ;; THE INTERMEDIATE VIVIFICATION (#1058, s470bk).  An undef CONTAINER that
     ;; is a writable place is dereferenced-and-created, exactly as perl does:
     ;; `$h{a}{b}++` lowers to (p-gethash-box (p-gethash-box %h "a") "b"), and
@@ -28271,6 +28282,9 @@ buffer's fill-pointer; everything else falls back to file-length."
        (p-box-class val))
       ((and (hash-table-p inner) (gethash :__class__ inner))
        (gethash :__class__ inner))
+      ;; A TIED element proxy whose FETCH answered a reference: INNER is that
+      ;; reference's wrapper, and ref() of the element is ref() of it.
+      ((and (p-box-p inner) (%p-tielem-box-p val)) (p-ref inner))
       ;; Reference box: inner is a p-box - check what it wraps (ARRAY/HASH/SCALAR)
       ((p-box-p inner)
        ;; THE CLASS SLOT OF `inner` IS NOT READ HERE (#1619).  Every reading
@@ -29940,6 +29954,34 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; getter is FETCH(key) and whose setter is STORE(key, v): the scalar tie's
 ;;; two chokepoints (unbox, box-set) serve it with no new case.
 
+(defun %p-tie-elem-value (box got)
+  "The element proxy BOX's getter answer for GOT, a FETCH result read as an
+   element (%p-tie-value): GOT itself -- a reference stays its WRAPPER box, so
+   a coercion (box-nv / box-sv, overloading) reads it as a reference -- and
+   BOX takes the wrapper's CLASS, as an untied slot holding that reference
+   (which IS the wrapper) carries it: ref() and a method call on the element
+   read it there.  An accessor whose CONTAINER operand is such a proxy goes on
+   with the wrapper's container (%p-tielem-container)."
+  (when (p-box-p got)
+    (setf (p-box-class box) (p-box-class got)))
+  got)
+
+(defun %p-tielem-box-p (x)
+  "Is X an element proxy of a tied container (a box holding a :tielem cell)?"
+  (and (p-box-p x)
+       (let ((v (p-box-value x)))
+         (and (p-magic-cell-p v) (eq (p-magic-cell-kind v) :tielem)))))
+
+(defun %p-tielem-container (place v)
+  "The container an element accessor goes on with when V, the unbox of its
+   container operand PLACE, is a BOX: when PLACE is a tied element proxy, V is
+   the reference FETCH answered (its wrapper) and the container is what it
+   points at -- `f($tied{r}{k})`, `\$tied[1][0]`, `$tied{r}{c}++` (perl's
+   `$tied{r}->{k}`).  Any other box stays V: the caller's own rules (a scalar
+   ref used as a hash dies) are untouched."
+  (if (%p-tielem-box-p place) (unbox v) v))
+
+
 (defun %p-tie-elem-box (rec key)
   "A fresh box aliasing element KEY of the tied container behind REC.
    The first read FETCHes and the value is kept until a write, so one
@@ -29955,9 +29997,13 @@ buffer's fill-pointer; everything else falls back to file-length."
            :getter (lambda ()
                      (if have
                          val
-                         (progn (setf val (%p-tie-fetch-elem rec key) have t) val)))
+                         (progn (setf val (%p-tie-elem-value
+                                           box (%p-tie-fetch-elem rec key))
+                                      have t)
+                                val)))
            :setter (lambda (new)
-                     (setf have nil)
+                     (setf have nil
+                           (p-box-class box) nil)
                      (%p-tie-store-elem rec key new)
                      new)))
     box))
@@ -30888,7 +30934,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     ((p-box-p invocant)
      (or (p-get-class invocant)
          (let ((uv (unbox invocant)))
-           (when (stringp uv) uv))
+           (cond ((stringp uv) uv)
+                 ;; a TIED element proxy: UV is the reference FETCH
+                 ;; answered (its wrapper), and the class is ITS class
+                 ((and (p-box-p uv) (%p-tielem-box-p invocant))
+                  (%pcl-invocant-class uv))))
          (%p-value-invocant-class invocant)))
     (t (%p-value-invocant-class invocant))))
 

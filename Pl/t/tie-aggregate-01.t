@@ -297,6 +297,26 @@ op("h:not-an-array", sub { require Tie::Hash; my %x; tie %x, 'Tie::StdHash'; my 
   eval { my $v = $r->[0] }; push @o, _nr(); eval { $r->[0] = 1 }; push @o, _nr();
   eval { my $e = exists $r->[0] }; push @o, _nr(); eval { delete $r->[0] }; push @o, _nr(); "@o" });
 op("s:tie-deref-ref", sub { require Tie::Scalar; my $x; my $rx = \$x; tie $$rx, 'Tie::StdScalar'; $x = 6; ref(tied $x) . "|$$rx" });
+# s505 review (F1): a NESTED element through a tied container's element proxy
+# (argument position, `\`, `++`, a write through @_, ref() and a method call on
+# the element) reads the reference FETCH answered -- never a raw Lisp type error
+package NObj; sub new { bless [$_[1]], $_[0] } sub m { "m$_[0][0]" } package main;
+sub _f { $_[0] } sub _g { $_[0] = "set" } sub _m { $_[0]->m } sub _rf { ref $_[0] }
+op("h:nested-arg", sub { require Tie::Hash; my %x; tie %x, 'Tie::StdHash'; $x{r} = { k => "v", n => { z => 5 } }; $x{o} = NObj->new(1);
+  my $q = \$x{r}{k}; $x{r}{c}++; _g($x{r}{new});
+  join ",", _f($x{r}{k}), _f($x{r}{n}{z}), $$q, $x{r}{c}, $x{r}{new}, _rf($x{r}), _rf($x{o}), _m($x{o}), (_f($x{r}) == $x{r} ? "same" : "diff") });
+op("a:nested-arg", sub { my @x; tie @x, 'LA'; @x = ({ k => "v" }, [7, [8, 9]], NObj->new(2)); @main::LOG = ();
+  my $q = \$x[1][0]; $x[1][2]++; _g($x[0]{new});
+  join ",", _f($x[0]{k}), _f($x[1][1][1]), $$q, $x[1][2], $x[0]{new}, _rf($x[1]), _rf($x[2]), _m($x[2]) });
+# s505 review (F2): boolean context of a tied hash is the TRUTH of its SCALAR
+package BS; require Tie::Hash; our @ISA = ('Tie::StdHash'); our $ans; sub SCALAR { $ans } package main;
+op("h:bool-scalar", sub { require Tie::Hash; my %x; tie %x, 'BS'; $x{a} = 1; my @o;
+  for my $ans ("yes", 0, "", "0 but true") { $BS::ans = $ans; push @o, (%x ? "t" : "f") . (!%x ? "t" : "f") . (%x && 1 ? "t" : "f") }
+  "@o" });
+# s505 review (F3): `use Env qw(@NAME)` splits on $Config{path_sep} (lib/Config.pm)
+op("s:env-array", sub { local $ENV{PCLT_LIST} = "a:b:c"; require Env; Env->import(qw(@PCLT_LIST));
+  my @o = (scalar(@main::PCLT_LIST), "@main::PCLT_LIST"); push @main::PCLT_LIST, "d"; push @o, $ENV{PCLT_LIST};
+  $main::PCLT_LIST[0] = "z"; push @o, $ENV{PCLT_LIST}; "@o" });
 PERL
 
 compare_program('hash', $hash_prog);
