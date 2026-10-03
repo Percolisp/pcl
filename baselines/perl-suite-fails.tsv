@@ -11,6 +11,11 @@
 #   --all --quick companion movers (A/B --jobs 1 vs b7ec0093, scratch/s501t/movers-{main,tree}.log): 16 more rows removed --
 #   op/aassign.t 6, op/caller.t 1, op/eval.t 1, op/runlevel.t 2 (`tie my @bar` / `tie %h` children), op/sub.t 2, op/tie.t 1,
 #   re/subst.t 3 (RT #23624 `tie my %pre` + the two rows behind it).
+# s504c (2026-10-03, Opus) -- #2633 FIXED: the eight re/regexp.t wrappers produce rows again (full companion on 93369a10,
+#   scratch/s504c/companion.log in that worktree).  NO row edited, on purpose: re/regexp_normal.t 148 rows = 148 (0 NEW /
+#   0 FIXED); re/regex_sets_compat.t 414 rows all still failing + 63 NEW that are #2646 (pre-dates #2633: byte-identical
+#   fail set at fca715fb), left reported, never blessed; the five TIMEOUT wrappers are not row-comparable (load-dependent
+#   cut-off, #326); _nonull skips itself (XS::APItest).
 # s504 (2026-10-02, Fable) -- the OWED bookkeeping of task #2389, from ONE quiet FULL companion run on main
 #   b7ec0093 (~/pcl-agent-scratch/s504/companion/run.log: ROW DIFF 492 NEW / 1878 FIXED / 16 LOST) and an
 #   attribution of every mover over 22 `git archive` extractions of main's merge points (s504/attrib/table.txt).

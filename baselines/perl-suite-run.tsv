@@ -14,7 +14,9 @@
 #   NOT spliced, ON PURPOSE -- a regression is FIXED, never blessed over, so every full run keeps reporting it:
 #     the eight re/regexp.t WRAPPERS (re/regexp_normal.t, _noamp.t, _notrie.t, _qr.t, _qr_embed.t, _trielist.t,
 #     _nonull.t, re/regex_sets_compat.t): 0 rows since aa657c6b (2026-09-26) = 7,752 passing rows LOST, task #2633
-#     (a promoted file lexical is a package cell shared across files; fix in flight, s504c);
+#     (a promoted file lexical is a package cell shared across files).  s504c (2026-10-03, Opus): FIXED by #2633 --
+#     regexp_normal back at 2021/8, the five TIMEOUT wrappers spliced UP to their restored counts (row by row, cause
+#     in each sig), _nonull unchanged (XS::APItest), regex_sets_compat left at its snapshot: its -63 is #2646;
 #     mro/method_caching_utf8.t XDIFF 21/7 -> DIFF 17/4 since bd0c38e3, task #2634 (`%{Pkg::}` dies under strict).
 #   NOT spliced, other reasons: op/gmagic.t (50/2 here, 60/1 measured -- a tie file, s501t re-measures and splices it);
 #     re/speed.t and uni/variables.t (TIMEOUT, load-dependent counts); io/crlf_through.t and op/fork.t (contention in
@@ -2086,16 +2088,16 @@ re/reg_nocapture.t	25	0	6	5	DIFF	s504 #2389: 14/11 -> 6/5 DOWN at 577a09a4 (s496
 re/reg_pmod.t	88	0	4	24	DIFF	s504 #2389: 58/30 -> 4/24 DOWN at 577a09a4 (s496a #2372): an inline (?p) flag is rejected and the form aborts -- FILED #2635 (perl accepts it) | aborted-forms:1: Character 'p' may not follow '(?' in regex; marked by <-- HERE in m/(? <-- HERE p)N/	0
 re/reg_posixcc.t	2560	0	2560	0	OK	
 re/regex_sets.t	96	0	0	0	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it.  s496a member 7: 4/84 -> 0/0 -- every like/unlike statement now dies at its qr/(?[...])/ (qr compiles eagerly, as perl), so no TAP; the 4 lost rows were accidental passes (unlike on a pattern that could not compile); rows re-blessed for this file only (A/B: 0ab64a45 4/84)	0
-re/regex_sets_compat.t	2167	2	1755	274	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
+re/regex_sets_compat.t	2167	2	1755	274	DIFF	s504c: #2633 restores this file to 1692/337 (0/0 since aa657c6b); the -63 below this pre-regression snapshot is NOT #2633's -- the fail set is byte-identical at fca715fb, before aa657c6b -- it is #2646 (bisect 97190ddc..fca715fb), so the counts stay here on purpose (a regression is fixed, never blessed over) | aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
 re/regexp.t	2167	2	824	81	TIMEOUT	s499k #2471: re_tests rows 31-40 (\N{1}, \N{3,4}, \N{ 3 , 4 }) now pass -- 817/88 -> 824/81 on this box, serial re-run agrees; the TIMEOUT total is load-dependent (#326) | timeout	0
-re/regexp_noamp.t	2169	0	796	109	TIMEOUT	timeout	0
+re/regexp_noamp.t	2169	0	826	79	TIMEOUT	s504c #2633 (file-private cells, A 91f2d821): 0/0 since aa657c6b -> restored; base b7ec0093 0/0, tree 93369a10: full companion and a single-file --jobs 1 run agree; the gain over the pre-regression snapshot (796/109) is s499k #2471 (re_tests rows 31-40), as re/regexp.t's row records | timeout	0
 re/regexp_nonull.t	2167	2	0	0	DIFF		0
 re/regexp_normal.t	2169	0	2021	8	DIFF	aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N
-re/regexp_notrie.t	2167	2	795	110	TIMEOUT	timeout	0
-re/regexp_qr.t	2167	2	795	110	TIMEOUT	timeout	0
-re/regexp_qr_embed.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp_notrie.t	2167	2	824	81	TIMEOUT	s504c #2633 (file-private cells, A 91f2d821): 0/0 since aa657c6b (the do-file wrapper's BEGIN wrote the caller's foreach alias through a shared identity cell) -> restored; base b7ec0093 0/0, tree 93369a10: full companion and a single-file --jobs 1 run agree; the gain over the pre-regression snapshot (795/110) is s499k #2471 (re_tests rows 31-40), the same move re/regexp.t's row records | timeout	0
+re/regexp_qr.t	2167	2	824	81	TIMEOUT	s504c #2633 (file-private cells, A 91f2d821): 0/0 since aa657c6b (the do-file wrapper's BEGIN wrote the caller's foreach alias through a shared identity cell) -> restored; base b7ec0093 0/0, tree 93369a10: full companion and a single-file --jobs 1 run agree; the gain over the pre-regression snapshot (795/110) is s499k #2471 (re_tests rows 31-40), the same move re/regexp.t's row records | timeout	0
+re/regexp_qr_embed.t	2167	2	824	81	TIMEOUT	s504c #2633 (file-private cells, A 91f2d821): 0/0 since aa657c6b (the do-file wrapper's BEGIN wrote the caller's foreach alias through a shared identity cell) -> restored; base b7ec0093 0/0, tree 93369a10: full companion and a single-file --jobs 1 run agree; the gain over the pre-regression snapshot (795/110) is s499k #2471 (re_tests rows 31-40), the same move re/regexp.t's row records | timeout	0
 re/regexp_qr_embed_thr.t	0	0	242	1787	NOTAP	aborted-forms:3: The function main::pl-useithreads is undefined.; s490 review of s473t6b (#1850): the harness's TAP is on disk row by row, so a file the runner KILLS keeps every row that ran, not only the rows that had flushed -- NOTAP 202/1656 -> NOTAP 242/1787, parallel and serial agreeing (perl skips the file: no threads)	0
-re/regexp_trielist.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp_trielist.t	2167	2	824	81	TIMEOUT	s504c #2633 (file-private cells, A 91f2d821): 0/0 since aa657c6b (the do-file wrapper's BEGIN wrote the caller's foreach alias through a shared identity cell) -> restored; base b7ec0093 0/0, tree 93369a10: full companion and a single-file --jobs 1 run agree; the gain over the pre-regression snapshot (795/110) is s499k #2471 (re_tests rows 31-40), the same move re/regexp.t's row records | timeout	0
 re/regexp_unicode_prop.t	1110	0	1014	96	DIFF	s496a #2060 + member 7: 778/332 -> 1003/107 -> 1014/96 -- \p{...} from perl's tables; then the eager qr made the file's user-defined forward references (qr in BEGIN before the sub) defer as in perl, a -hhhh line excludes (#2387 pt 1) and a user property's sub is called once per name; residue #2387 (/i fold, package scope), error-message text, ungenerated properties (A/B: b6560c21 778/332, 0ab64a45 1003/107)	0
 re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/rt122747.t	3	0	3	0	OK		0
