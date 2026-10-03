@@ -946,6 +946,14 @@ What still COPIES:
   method dispatch, and cross-file callees** (the fact is same-file today).
   The runtime's "Cannot modify non-boxed value" warning is the loud backstop
   for exactly these, and must not be removed.
+  **The backstop is SILENT when the argument is a sub's own `my` parameter
+  (probed s505, task #2636):** the callee receives a fresh box holding the
+  copy, so `$_[0] .= "x"` or `for (@_) { $_ .= … }` succeeds — into the copy —
+  and nothing warns.  A package-QUALIFIED call to a same-file sub
+  (`T::fix($self, $rec)`) copies too.  Real victim: core `Tie::File`, whose
+  `STORE` appends the record separator through `$self->_fixrecs($rec)` — under
+  PCL `$lines[1] = "x"` writes the record WITHOUT its separator (the file on
+  disk is corrupted, silently).
 - deref elements (`f($ref->{k})`) and prototype-`$`-imposed element args
   (extendable via the same argbox accessors if real code needs them).
   **Probed and quantified s458ak (task #860)**: `sub w { $_[0] .= "!" }
