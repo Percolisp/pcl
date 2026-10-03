@@ -564,6 +564,10 @@ getter `FETCH(key)` (kept until the next write, so one operator reading its
 operand twice FETCHes once), setter `STORE(key, v)`.  A LIST-context use reads
 the container's **view**: its element proxies in index order, or for a hash
 its keys (all `FIRSTKEY`/`NEXTKEY` first) each followed by its value proxy.
+`tie` / `tied` / `untie` on a scalar dereference `${EXPR}` take the scalar's
+BOX (`p-cast-$-box`): a symbolic name gives the vivified package scalar, a
+hard reference its REFERENT box (`tied $x` sees `tie $$rx`), and an undef
+operand is vivified into a SCALAR reference first.
 `DESTROY` is never called.  The census of sites and perl's method-call table
 are [`docs/tie-aggregates.md`](tie-aggregates.md).
 
@@ -1928,6 +1932,8 @@ OBJECT is bound as it came (copying it is an allocation per method call's
 during the call and read through the parameter afterwards (#2575).  Its argument list
 is built from VALUES too (`%p-flatten-arg-values`): no element slot of an
 array passed whole is promoted to a cell, since the body cannot observe `@_`.
+A TIED container passed whole spreads through its view (§2.4a) on this path
+exactly as on `p-flatten-args`' — never as the empty shell.
 
 **The licence for both body shapes' @_-free forms is ONE predicate**
 (`_body_observes_args`): after the leading copy, the body mentions none of
