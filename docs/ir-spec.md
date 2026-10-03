@@ -553,7 +553,10 @@ ties.  A port must keep both properties:
    `each` is in progress, or `FIRSTKEY` finds a key".  A negative subscript is
    rebased on `FETCHSIZE` unless the class's `$NEGATIVE_INDICES` is true.  An
    operation with no tied form DIES naming itself; it never reads the empty
-   shell as "no elements".
+   shell as "no elements".  An operation only one KIND has (a hash
+   element store, `exists`, `delete` through `$r->{k}`; the array twins)
+   never consults a tie of the OTHER kind: `$tied_array_ref->{k}` stays
+   perl's "Not a HASH reference".
 
 An element handed out as an lvalue (foreach alias, `\$h{k}`, `@_`, `values`,
 an element proxy's `++`) is a **fresh box holding a `:tielem` magic cell**:
