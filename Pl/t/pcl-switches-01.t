@@ -219,6 +219,8 @@ row('-xDIR changes to DIR first', q{-xxd x3.pl}, "in xd\n", '', 0);
 row('-E: say, state, fc, __SUB__, the builtin bundle; strict stays off',
     q{-E 'say "hi"; say reftype([]); state $x = 1; say fc("A"); my $f = sub { __SUB__ }; say ref $f->(); $zz = 1; say $zz'},
     "hi\nARRAY\na\nCODE\n1\n", '', 0);
+row('-E: try/catch is on (the :5.40 bundle holds it)',
+    q{-E 'try { die "x\n" } catch ($e) { print "caught $e" }'}, "caught x\n", '', 0);
 row('-CS: a :utf8 layer on STDOUT, ${^UNICODE} = 7', q{-CS -e 'print chr(233), " ${^UNICODE}\n"'},
     "\xc3\xa9 7\n", '', 0);
 row('-C alone is SDL (95)', q{-C -e 'print "${^UNICODE}\n"'}, "95\n", '', 0, env => 'LANG=en_US.UTF-8 LC_ALL=');

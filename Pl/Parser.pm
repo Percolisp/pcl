@@ -683,8 +683,26 @@ sub _pcl_feature_include_cb {
   # something about signatures (which is exactly PPI's bug here).
   my $on = $type eq 'use' ? 'perl' : 0;
   my %mods;
-  for my $name (_include_string_args($inc)) {
-    $mods{$name} = $on if exists $PCL_FEATURE_BUNDLE{$name};
+  my @names = map { split ' ' } _include_string_args($inc);
+  # A bare `no feature;` resets the scope to the default bundle (task #2692).
+  if (!@names && $type eq 'no' && $module eq 'feature') {
+    return { map +($_ => 0), keys %PCL_FEATURE_BUNDLE };
+  }
+  for my $name (@names) {
+    if (exists $PCL_FEATURE_BUNDLE{$name}) { $mods{$name} = $on; next }
+    next if $module ne 'feature';
+    # A BUNDLE NAME (task #2692): `:5.40` (a third component is ignored, as
+    # perl does), `:all`, `:default`.  It ADDS (or with `no`, removes) the
+    # bundle's features, exactly the set `use v5.NN` of that version holds,
+    # read off the same thresholds -- unlike `use v5.NN` it does not reset
+    # the rest of the scope's features.  `:default` holds none of these.
+    my $n = $name eq ':all' ? 9e9
+          : $name =~ /^:5\.0*(\d+)(?:\.\d+)?\z/ ? 5 + $1 / 1000
+          : undef;
+    next if !defined $n;
+    for my $f (keys %PCL_FEATURE_BUNDLE) {
+      $mods{$f} = $on if $n >= $PCL_FEATURE_BUNDLE{$f};
+    }
   }
   # An EMPTY answer, not undef: this table owns both pragmas outright, and
   # "you asked for a feature I do not model" must mean "nothing changes".

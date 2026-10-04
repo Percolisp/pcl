@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 33;
+plan tests => 43;
 
 # ---- 1. the table is perl's -----------------------------------------------
 
@@ -103,6 +103,23 @@ is(mods_for('require v5.40;'), undef, 'require enables nothing');
 is_deeply(mods_for(q{use experimental 'defer';}), {},
     'a feature outside the table changes NOTHING — falling through to PPI here '
   . 'would answer signatures => 0 and silently disable signatures');
+
+# A feature BUNDLE NAME (#2692): `:5.NN`, `:all`, `:default` add (or remove)
+# exactly what `use v5.NN` of that version holds, and reset nothing else.
+is_deeply(mods_for(q{use feature ':5.40';}), { signatures => 'perl', try => 'perl' },
+    'use feature :5.40 enables try and signatures (the -E prefix)');
+is_deeply(mods_for(q{use feature ':5.36';}), { signatures => 'perl' },
+    'use feature :5.36 enables signatures and says NOTHING about try');
+is_deeply(mods_for(q{use feature ':5.40.1';}), { signatures => 'perl', try => 'perl' },
+    'a third version component is ignored, as perl does');
+is_deeply(mods_for(q{use feature ':all';}), { signatures => 'perl', try => 'perl' },
+    'use feature :all');
+is_deeply(mods_for(q{use feature ':default';}), {},
+    ':default holds neither');
+is_deeply(mods_for(q{no feature ':5.40';}), { signatures => 0, try => 0 },
+    'no feature :5.40 turns both off');
+is_deeply(mods_for(q{no feature;}), { signatures => 0, try => 0 },
+    'a bare no feature resets to the default bundle');
 
 # ---- 3. end to end, against perl -------------------------------------------
 
@@ -159,6 +176,10 @@ test_src('use experimental "try" + try/catch',
     qq{use experimental 'try';\nno warnings;\n$TRY});
 test_src('use feature "try" + try/catch (the spelling that already worked)',
     qq{use feature 'try';\nno warnings;\n$TRY});
+test_src('use feature ":5.40" + try/catch (#2692: was a whole-statement DROP)',
+    qq{use feature ':5.40';\nno warnings;\n$TRY});
+test_src('use feature ":5.40" in a BLOCK: outside it try is a sub call again',
+    qq{{ use feature ':5.40'; no warnings;\n$TRY}\nsub try { print "subtry\\n" } try();\n});
 
 # The INVERSE: with the feature off, `try`/`catch` are ordinary subs.
 my $TINY = qq{use Try::Tiny;\ntry { die "boom\\n" } catch { print "caught: \$_" };\nprint "after\\n";\n};
@@ -187,6 +208,13 @@ PERL
 
 test_src('…and inherits it from a version bundle', <<'PERL', "r=[caught:boom\n] err=[]\n");
 use v5.40;
+no warnings;
+my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };
+print "r=[$r] err=[$@]\n";
+PERL
+
+test_src('…and from a feature BUNDLE NAME (#2692)', <<'PERL');
+use feature ':5.40';
 no warnings;
 my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };
 print "r=[$r] err=[$@]\n";
