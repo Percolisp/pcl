@@ -1425,6 +1425,26 @@ my $s = { fh => $h }; print "13 ", ref($s->{fh}), "\n";
 unlink $f;
 });
 
+# s507b (#2688): a REFERENCE to a glob dereferences with `$` to the GLOB
+# itself (`$$gr` is *main::foo, fileno($$sr) works, `*{$$gr} = ...` assigns
+# the glob); only a glob VALUE (`${*foo}`, `${*$gr}`, `my $g = *foo; $$g`)
+# reads the glob's SCALAR slot.  INVERSE: main 08de9e4f answers rows 01 / 04
+# / 05 / 06 / 10 with the scalar slot.
+test_transpile("\$\$globref is the glob, \${*glob} its scalar slot (s507b, #2688)", q{
+our $foo = "sv"; our @foo = (1, 2);
+my $gr = \*foo;
+print "01 [$$gr] ", length($$gr), "\n";
+print "02 [${*foo}] [${*{$gr}}] [${*$gr}]\n";
+my $g = *foo; print "03 [$g] [", ref(\$g), "] [", ref($gr), "] [$$g]\n";
+print "04 [${$gr}] [@{*$gr}] [@{*foo}]\n";
+my $copy = $$gr; print "05 [$copy] ", (ref(\$copy)), "\n";
+*{$$gr} = \"new"; print "06 [$foo]\n";
+my $tf = "/tmp/pcl-s507b-globref-$$"; open(my $fh, '>', $tf) or die; ${*$fh} = "p"; ${*$fh}{k} = "v"; print "07 [${*$fh}] [${*$fh}{k}]\n";
+my $sr = \*STDOUT; print {$$sr} "08 via \$\$sr\n"; print {*$sr} "09 via *\$sr\n";
+print "10 ", (defined(fileno($$sr)) ? "fileno" : "nofileno"), " ", ($$sr eq "*main::STDOUT" ? "name" : "other:" . $$sr), "\n";
+close $fh; unlink $tf;
+});
+
 # s502e (#2056): File::Temp->new is an object of class File::Temp whose
 # filename, stringification and print/flush/close work.
 test_transpile("File::Temp->new: the OO constructor (s502e, #2056)", q{

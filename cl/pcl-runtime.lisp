@@ -27814,6 +27814,15 @@ buffer's fill-pointer; everything else falls back to file-length."
          target))
       (t (p-cast-$ val site)))))
 
+(declaim (inline %p-glob-value-operand-p))
+(defun %p-glob-value-operand-p (val inner)
+  "True when the `$` / `${…}` operand VAL (unboxed: INNER) is a glob VALUE —
+   a raw glob (`${*foo}`, `${*$fh}`) or a scalar holding one (`my $g = *foo`)
+   — and NOT a reference to a glob, whose box carries is-ref (#2688; the
+   discriminator is %p-glob-value-box-p's)."
+  (and (p-typeglob-p inner)
+       (not (and (p-box-p val) (p-box-is-ref val)))))
+
 (defun p-cast-$ (val &optional site)
   "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
    If val unboxes to a string or a number, treat as symbolic reference."
@@ -27849,8 +27858,11 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; above is perl's fatal for a CODE referent too (#1592).  What DOES
       ;; reach here through Sub::Quote's `${$_[1]->{'$t'}}` is the capture's
       ;; scalar BOX, which the (p-box-p inner) arm answers.
-      ;; `${*$fh}`: a GLOB's SCALAR slot (#2056).
-      ((p-typeglob-p inner) (p-box-value (%p-glob-scalar-box inner)))
+      ;; `${*$fh}`: a GLOB's SCALAR slot (#2056) — for a glob VALUE only.  A
+      ;; REFERENCE to a glob (`$gr = \*foo`, is-ref set) dereferences to the
+      ;; glob itself, the `t` arm: `$$gr` is *main::foo (#2688).
+      ((%p-glob-value-operand-p val inner)
+       (p-box-value (%p-glob-scalar-box inner)))
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val &optional site)
@@ -27902,8 +27914,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; val itself is the scalar container (blessed scalar in tie methods)
       ((p-box-p val)
        (box-set val new-value))
-      ;; `${*$fh} = $path`: a GLOB's SCALAR slot (#2056, core File::Temp).
-      ((p-typeglob-p inner)
+      ;; `${*$fh} = $path`: a GLOB's SCALAR slot (#2056, core File::Temp) —
+      ;; the same glob-VALUE test as the reader (#2688); a box never reaches
+      ;; here (the arm above), so this is the raw-glob operand.
+      ((%p-glob-value-operand-p val inner)
        (box-set (%p-glob-scalar-box inner) new-value))
       (t (error "Cannot dereference non-reference: ~A" inner)))))
 
