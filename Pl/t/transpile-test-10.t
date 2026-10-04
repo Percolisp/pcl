@@ -1493,4 +1493,38 @@ close $in; unlink $f;
 });
 
 
+# s502e (#2084 item 1): core Memoize installs `Scalar::Util::set_prototype(sub
+# {...}, prototype $orig)` -- the wrapper is set_prototype's RETURN value, so
+# the #2538 stub (returning nothing) installed nothing and memoize() had no
+# effect.  INVERSE: a code ref taken BEFORE memoize still calls the original.
+test_transpile("Memoize: memoize installs the caching wrapper (s502e, #2084(1) via #2538)", q{
+use strict; use warnings; use Memoize;
+my $calls = 0; sub slow { $calls++; $_[0] * 2 }
+my $before = \&slow;
+memoize("slow");
+print "same-ref ", (\&slow == $before ? 1 : 0), "\n";
+slow(2) for 1..5; slow(3);
+print "calls $calls\n";
+$before->(2); print "orig-ref $calls\n";
+});
+
+# s502e (#2084 item 1): the breaking cases -- a qualified name, another
+# package, list context, the prototype carried over, unmemoize, flush_cache,
+# an anonymous sub and a NORMALIZER.
+test_transpile("Memoize: qualified names, packages, unmemoize, flush, normalizer (s502e, #2084(1))", q{
+use strict; use warnings; use Memoize qw(memoize unmemoize flush_cache);
+my $n = 0;
+{ package Pkg; sub f { $n++; $_[0] + 1 } sub g { $n++; ($_[0], $_[0]) } }
+memoize('Pkg::f'); Pkg::f(1) for 1..3; print "qual $n\n";
+package Other; sub h { $n++; $_[0] * 3 } main::memoize('h'); h(2) for 1..3; print "other $n\n";
+package main;
+my @l = Pkg::g(5); memoize('Pkg::g'); @l = Pkg::g(5) for 1..3; my $s = Pkg::g(5); print "list $n @l s=$s\n";
+my $c = 0; sub p ($) { $c++; $_[0] } memoize('p'); print "proto ", (defined prototype(\&p) ? prototype(\&p) : "undef"), "\n";
+unmemoize('Pkg::f'); Pkg::f(1) for 1..2; print "unmemo $n\n";
+my $k = 0; sub fl { $k++; 1 } memoize('fl'); fl(); fl(); flush_cache('fl'); fl(); print "flush $k\n";
+my $cr = memoize(sub { $k += 10; $_[0] }); $cr->(1); $cr->(1); print "anon $k\n";
+my $nm = 0; sub norm { $nm++; join "", @_ } memoize('norm', NORMALIZER => sub { lc $_[0] }); norm("A"); norm("a"); print "normalizer $nm\n";
+});
+
+
 done_testing();
