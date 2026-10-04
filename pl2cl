@@ -222,6 +222,7 @@ BEGIN {
     my @nonflag;
     for (my $i = 0; $i < @ARGV; $i++) {
       my $a = $ARGV[$i];
+      if ($a eq '--') { push @nonflag, @ARGV[$i + 1 .. $#ARGV]; last }  # #2693
       if ($a =~ /^-/) { $i++ if $a eq '--deps' || $a eq '--as' || $a eq '--switches'; next }
       push @nonflag, $a;
     }

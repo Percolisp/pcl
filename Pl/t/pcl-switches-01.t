@@ -221,6 +221,11 @@ row('-E: say, state, fc, __SUB__, the builtin bundle; strict stays off',
     "hi\nARRAY\na\nCODE\n1\n", '', 0);
 row('-E: try/catch is on (the :5.40 bundle holds it)',
     q{-E 'try { die "x\n" } catch ($e) { print "caught $e" }'}, "caught x\n", '', 0);
+put('-dash.pl', qq{print "dash \@ARGV \$0\\n";\n});
+row('-- then a program named -dash.pl: it runs (the script cache path)',
+    q{-- -dash.pl a}, "dash a -dash.pl\n", '', 0);
+row('... and with a source-changing switch (the transpile path)',
+    q{-l -- -dash.pl b}, "dash b -dash.pl\n\n", '', 0);
 row('-E: __SUB__ outside any sub is undef', q{-E 'say __SUB__ // "undef"'}, "undef\n", '', 0);
 row('-CS: a :utf8 layer on STDOUT, ${^UNICODE} = 7', q{-CS -e 'print chr(233), " ${^UNICODE}\n"'},
     "\xc3\xa9 7\n", '', 0);

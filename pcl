@@ -254,7 +254,7 @@ sub transpile {
   # into the preamble); forwarding it is the whole implementation — a second
   # mechanism here would be a second answer to the same question (rule 11).
   my $rc = run('perl', @inc_args, $PL2CL, ($no_cache ? '--no-cache' : ()),
-               @as, @switches, $src_path, { stdout => $tmp });
+               @as, @switches, '--', $src_path, { stdout => $tmp });
   unlink @cleanup;
 
   if ($rc != 0) {

@@ -24692,7 +24692,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (list (namestring *pcl-pl2cl-path*))
                     (when (eq mode :module) (list "--module"))
                     (when deps-path (list "--deps" (namestring deps-path)))
-                    (list (if (stringp source-path)
+                    ;; `--`: a program named `-file.pl` is a PATH, never
+                    ;; one of pl2cl's options (task #2693).
+                    (list "--"
+                          (if (stringp source-path)
                               source-path
                               (namestring source-path))))
                    :output s
