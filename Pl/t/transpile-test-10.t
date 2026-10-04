@@ -1364,6 +1364,19 @@ print "chain ", prototype(set_prototype(sub { 2 }, ';$')), "\n";
 print "chain2 ", prototype(&set_prototype(sub { 2 }, '\@')), "\n";
 });
 
+# s502e review (Fable s507, e2-proto row 09): both set_prototypes DIE for a
+# non-reference and for a reference that is not CODE, as the XS does; the
+# message text up to " at" is perl's.  A code ref still passes.
+test_transpile("set_prototype dies for a non-reference / non-CODE ref (s502e, #2538)", q{
+use Scalar::Util (); use Sub::Util ();
+for my $bad ('notref', [1], \my $x, undef, sub { 1 }) {
+  my $ok = eval { &Scalar::Util::set_prototype($bad, '$'); 1 };
+  (my $e = $@) =~ s/ at .*//s; chomp $e; print "SU ", ($ok ? "ok" : "died: $e"), "\n";
+  $ok = eval { Sub::Util::set_prototype('$', $bad); 1 };
+  ($e = $@) =~ s/ at .*//s; chomp $e; print "SubU ", ($ok ? "ok" : "died: $e"), "\n";
+}
+});
+
 
 # s502e (#2056): bless on a LEXICAL filehandle marks the handle itself (perl:
 # the glob $fh refers to), so every COPY -- `my $c = $fh`, `return $fh`, a

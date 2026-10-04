@@ -87,7 +87,13 @@ sub openhandle { return builtin::openhandle($_[0]) }
 # set_prototype(\&code, $proto) (s502e, #2538): Scalar::Util's order is the
 # CODE REF first -- the reverse of Sub::Util's -- and it returns the code ref;
 # an undef $proto clears the prototype.  The one runtime registrar.
-sub set_prototype { my ($code, $proto) = @_; return __pcl_set_prototype($code, $proto) }
+sub set_prototype {
+    my ($code, $proto) = @_;
+    # The XS dies on a bad first argument (s502e review, probed vs perl).
+    if (!ref $code) { require Carp; Carp::croak("set_prototype: not a reference") }
+    if (builtin::reftype($code) ne 'CODE') { require Carp; Carp::croak("set_prototype: not a subroutine reference") }
+    return __pcl_set_prototype($code, $proto);
+}
 
 # refaddr($ref) — the address of the referent, or undef for a non-ref.
 # In Perl numifying a ref yields its address; PCL routes ref-numification
