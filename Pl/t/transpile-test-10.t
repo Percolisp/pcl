@@ -1527,4 +1527,13 @@ my $nm = 0; sub norm { $nm++; join "", @_ } memoize('norm', NORMALIZER => sub { 
 });
 
 
+# s502e (#2559): 4-arg select FETCHes a tied timeout exactly once (perl
+# RT#120102) and dies on a wide character in a mask.
+test_transpile("4-arg select: a tied timeout is fetched once; a wide mask dies (s502e, #2559)", q{
+{ package TT; my $count = 0; sub TIESCALAR { bless [] } sub FETCH { $count++; 0.05 } sub n { $count } }
+tie my $sleep, "TT"; select(undef, undef, undef, $sleep); print "fetch ", TT::n(), "\n";
+my $w = chr(300); eval { select($w, undef, undef, 0) }; print "wide ", ($@ =~ /^Wide character/ ? "died" : "lived:$@"), "\n";
+});
+
+
 done_testing();
