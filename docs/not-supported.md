@@ -197,6 +197,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [POSIX: the classes and the syscalls that need a real libc](#posix-the-classes-and-the-syscalls-that-need-a-real-libc)
 * [Builtin override: only the COMPILE-TIME spellings perl can be shown](#builtin-override-only-the-compile-time-spellings-perl-can-be-shown)
 * [Builtins ruled out: SysV IPC, `syscall`, `ioctl`, `chroot`, `dbmopen`, `dump`](#builtins-ruled-out-sysv-ipc-syscall-ioctl-chroot-dbmopen-dump)
+* [Perl's command-line switches: what `pcl` does not do](#perls-command-line-switches-what-pcl-does-not-do-s506f) — taint, `-d`/`-u`, `-C` i/o scope, a `#!` without `perl`
 
 ### Perl's own internals, and C extensions
 
@@ -3984,3 +3985,42 @@ qw(dump); dump($x)` must keep reaching the imported sub.
 answer (struct layouts, syscall numbers, IPC keys) or none at all in a
 garbage-collected image (`dump`).  The IPC family would be a `IPC::SysV`-style shim over libc if a
 program ever needs it.
+
+## Perl's command-line switches: what `pcl` does not do (s506f)
+
+`pcl` takes perl's switches by perl's argv grammar, and a program's own
+`#!perl -SWITCHES` line by perl's rules (`docs/pcl-commands.md` has the
+table; one parser, `tools/lib/PCLSwitches.pm`).  What remains different:
+
+* **Taint (`-T`, `-t`).**  PCL does not model taint.  Both switches are
+  accepted on the command line and on a `#!` line, the program RUNS, and one
+  STDERR line says so: `pcl: taint checks (-T) are not applied: PCL does not
+  model taint` (a security-relevant absence is never silent;
+  `PCL_TAINT_QUIET=1` silences the line).  `${^TAINT}` reads 0.  perl's
+  death `"-T" is on the #! line, it must also be used on the command line` is
+  NOT mirrored: it guards a state PCL never enters.
+* **The debugger and core dumps (`-d`, `-u`).**  Refused with one line and
+  exit 2 (`pcl: the perl debugger (-d) is not supported`).  On a `#!` line,
+  `-d -u -v -h -?` are refused in one line with exit 255: perl prints a
+  version or usage text, or enters the debugger, where running the program
+  would be the wrong thing.  `-D` prints perl's own non-debugging message
+  and the program runs, as on a perl built without `-DDEBUGGING`.
+* **`-C` `i`/`o`/`D`** (the default layers of `open()`) are `use open`, which
+  is LEXICAL in PCL as in perl: they reach the main program's opens, not a
+  module's (perl's `-C` is global).  Under `L` they apply whatever the
+  locale (`L` does govern `I`/`O`/`E`/`S`/`A`).  `a` (perl's UTF-8 cache
+  self-check) has no effect to mirror.
+* **A `#!` line without `perl`** (`#!/bin/sh`): perl EXECS the named
+  interpreter instead; `pcl` compiles the file as Perl, the line a comment.
+* **`-w`** sets `$^W` (command line and `#!` line) and nothing else: PCL has
+  no warnings model to switch on ([Warnings-gated diagnostics are
+  absent](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled),
+  task #221).  `-W` and `-X` are accepted and change nothing.
+* **The exit status of a switch error** (`Unrecognized switch`, the `-M`/`-e`
+  errors, `-S`'s "Can't find") is 25.  perl's is whatever `errno` it finds
+  (25 on every probe here, 29 once).
+* **`-V` and `-V:name`** answer from PCL's own `%Config` (`lib/Config.pm`),
+  which holds a subset of perl's keys: a key it does not hold is
+  `name='UNKNOWN';`, never an invented value.
+* **`PERL5OPT`** is not read by `pcl` (task #2663; the harness wrapper
+  `tools/pclperl-for-tests` does read it).
