@@ -278,6 +278,12 @@ sub shebang_events {
     for my $e (@events) {
       return (undef, ['!', "Can't emulate -$e->[0] on #! line at $file line 1.\n", 255])
         if $SHEBANG_REFUSED{$e->[0]};
+      # perl honours these on a #! line by printing and exiting (-v -h -?) or
+      # entering the debugger / dumping core (-d -u); pcl cannot from inside
+      # the program, and RUNNING it instead would be the wrong thing -- so it
+      # refuses, in one line.
+      return (undef, ['!', "pcl: -$e->[0] on the #! line is not supported (at $file line 1)\n", 255])
+        if $e->[0] =~ /^[vh?du]\z/;
     }
   }
   return \@events;
@@ -519,7 +525,17 @@ sub expand_program {
   $prefix = 'BEGIN { chdir ' . _lit($st->{chdir}) . ' or die "Can\'t chdir to '
           . _escape_dq($st->{chdir}) . ': $!\n" } ' . $prefix
     if defined $st->{chdir};
+  # perl's non-debugging -D message, for a -D on the #! line (the command
+  # line's is the driver's to print).
+  $prefix = 'BEGIN { print STDERR "Recompile perl with -DDEBUGGING to use -D switch (did you mean -d ?)\n" } '
+          . $prefix if grep { $_->[0] eq 'D' } @$sh;
   my $suffix = _suffix(\%loop);
+  # -c (command line or #! line): perl compiles -- BEGIN blocks and `use`
+  # imports run -- and says "NAME syntax OK" on STDERR instead of running.  A
+  # BEGIN at the END of the program does exactly that: every earlier BEGIN has
+  # run, nothing at run time has, and no END block runs (POSIX::_exit).
+  $suffix .= ';BEGIN { print STDERR "' . _escape_dq($file) . ' syntax OK\n"; close STDOUT; require POSIX;'
+           . ' POSIX::_exit(0) }' . "\n" if grep { $_->[0] eq 'c' } @$cmd, @$sh;
   if ($suffix ne '') {
     die "PCLSwitches: end_of_code callback required for -n/-p\n" if !$o{end_of_code};
     my $at = $o{end_of_code}->($text);
@@ -562,7 +578,7 @@ sub decode_events {
 # one-line announcement).
 # -I is not one (pcl passes it as -I to pl2cl and the runtime); -e is the
 # text itself.
-my %SOURCE_AFFECTING = map { $_ => 1 } qw(n p a F l 0 g i s x E M m w C T t);
+my %SOURCE_AFFECTING = map { $_ => 1 } qw(n p a F l 0 g i s x E M m w C T t c);
 sub source_events {
   my ($events) = @_;
   return [ grep { $SOURCE_AFFECTING{ $_->[0] } } @$events ];

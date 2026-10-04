@@ -185,15 +185,17 @@ if (defined $source && !-f $source) {
 #   * --no-cache / PCL_NO_CACHE: one switch turns every cache off, and it also
 #     CHANGES the emission (pl2cl writes `(setf *pcl-skip-cache* t)` into the
 #     preamble), so a cached entry could not be shared with a normal run.
-#   * -c: it must transpile and NOT run, which is the one thing this path
-#     cannot do.
+#   * -c: a source-changing switch like the others -- the expansion ends the
+#     program with a BEGIN that says "NAME syntax OK" and exits, so the
+#     compile phase runs (BEGIN blocks, `use` imports) and nothing else, as
+#     under perl.
 #
 # TO MAKE THE CACHE OPT-IN instead of default-on, this is the one line:
 #     my $use_script_cache = $ENV{PCL_SCRIPT_CACHE} && defined($source) && ...
 # nothing else moves, because the runtime entry point is reached only here.
 my $cache_off = $no_cache || $ENV{PCL_NO_CACHE};
 my $use_script_cache = defined($source) && !defined($inline) && !@$source_events
-                       && !$check_only && !$cache_off;
+                       && !$cache_off;
 
 if ($use_script_cache) {
   exec_sbcl(script_cache_form($source), \@script_args);   # never returns
@@ -201,14 +203,6 @@ if ($use_script_cache) {
 
 # ---- transpile to a temp .lisp (Tier 0) ----------------------------------
 my $lisp = transpile($source, $inline);
-
-if ($check_only) {
-  # perl's shape: "NAME syntax OK" on STDERR, exit 0.
-  my $name = defined $source ? $source : $as_name;
-  print STDERR "$name syntax OK\n";
-  unlink $lisp;
-  exit 0;
-}
 
 # ---- run --------------------------------------------------------------------
 exec_sbcl(quiet_load_form($lisp), \@script_args);   # never returns
@@ -617,7 +611,7 @@ it.
 Perl's switches:
   -0[octal|xHEX] record separator $/ (-0 = "\0", -00 paragraph, -0777 slurp)
   -a             autosplit into @F under -n/-p (-F implies -a implies -n)
-  -c             check syntax only: compile, print "NAME syntax OK" on STDERR
+  -c             check syntax only: compile (BEGIN runs), "NAME syntax OK" on STDERR
   -C[flags]      Unicode features (see docs/pcl-commands.md for what applies)
   -d -u          NOT supported (the debugger; dumping core): refused
   -D[flags]      warns as a non-debugging perl does, then runs the program

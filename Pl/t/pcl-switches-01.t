@@ -234,6 +234,16 @@ row('-W -X -U -f are accepted and the program runs', q{-W -X -U -f -e 'print "ok
 row('-T runs the program and says taint checks are not applied',
     q{-T -e 'print "taint ${^TAINT}\n"'}, "taint 0\n",
     "pcl: taint checks (-T) are not applied: PCL does not model taint\n", 0);
+row('-c runs the compile phase (BEGIN) and not the program',
+    q{-c -e 'BEGIN { print "B\n" } print "run\n"; END { print "E\n" }'}, "B\n", "-e syntax OK\n", 0);
+put('sc.pl', qq{#!perl -c\nBEGIN { print "B\\n" }\nprint "run\\n";\nEND { print "E\\n" }\n});
+row('#!perl -c: the same', q{sc.pl}, "B\n", "sc.pl syntax OK\n", 0);
+put('sd.pl', qq{#!perl -D\nprint "body\\n";\n});
+row('#!perl -D: perl\'s non-debugging message, then the program', q{sd.pl}, "body\n",
+    "Recompile perl with -DDEBUGGING to use -D switch (did you mean -d ?)\n", 0);
+put('sv.pl', qq{#!perl -v\nprint "body\\n";\n});
+row('#!perl -v is refused in one line (perl prints its version; running would be wrong)',
+    q{sv.pl}, '', "pcl: -v on the #! line is not supported (at sv.pl line 1)\n", 255);
 row('PCL_TAINT_QUIET=1 silences it', q{-t -e 'print "ok\n"'}, "ok\n", '', 0, env => 'PCL_TAINT_QUIET=1');
 
 done_testing();

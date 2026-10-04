@@ -51,7 +51,7 @@ unshift @args, split(' ', $ENV{PERL5OPT}) if defined $ENV{PERL5OPT} && length $E
 # a harness child and a `pcl` run of the same command line compile the same
 # program.  An unknown switch now DIES as perl's does (it used to be ignored).
 my $sw = PCLSwitches::parse_argv(\@args);
-my ($opt_c, @incs);
+my @incs;
 for my $e (@{ $sw->{events} }) {
   my ($k, $arg, $status) = @$e;
   if ($k eq '!') { print STDERR $arg; exit $status }
@@ -61,7 +61,6 @@ for my $e (@{ $sw->{events} }) {
   if ($k eq 'D') {
     print STDERR "Recompile perl with -DDEBUGGING to use -D switch (did you mean -d ?)\n";
   }
-  $opt_c = 1 if $k eq 'c';
   push @incs, $arg if $k eq 'I';
 }
 my @rest = @{ $sw->{args} };
@@ -108,10 +107,8 @@ if ($tr != 0) {
   print STDERR do { local $/; <$efh> // '' } if $efh;
   exit 255;                                       # perl's compile-error exit
 }
-if ($opt_c) {
-  print STDERR "$progname syntax OK\n";
-  exit 0;
-}
+# (-c is a source-changing switch: the expansion ends the program with a BEGIN
+# that says "NAME syntax OK" and exits, so the compile phase runs, as perl's.)
 
 # --- Run --------------------------------------------------------------------
 # Stdout passes through untouched; stderr is captured and scrubbed of
