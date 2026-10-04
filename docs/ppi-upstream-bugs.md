@@ -2086,6 +2086,31 @@ beside them; canary `Pl/t/misc-fixes-02.t`.  Upstream row: `docs/ppi-bug-report.
 
 ---
 
+## 35. A filetest right after a `BEGIN { … }` block on the same line is split into `-` + WORD  [CONFIRMED 1.291]
+
+The statement-start sibling of §21 (a filetest after a SCALAR/BLOCK
+filehandle).  **Minimal repro** (valid perl; perl 5.40.3 prints `x`):
+
+```perl
+BEGIN { 1 } -e _; print "x\n";
+```
+
+**PPI 1.291 tokens**: `Word[BEGIN] Structure[{] Number[1] Structure[}]
+Operator[-] Word[e] Magic[_] Structure[;] …` — the filetest became a
+subtraction of a call to sub `e`.  **Expected**: `Operator[-e]`: the `}` of a
+`BEGIN` block ends a statement (no `;` needed), so `-e` starts a new one in
+term position, where it can only be the filetest.  The same with `$f` for `_`.
+
+**PCL's workaround** (s506f, s507 review): `PCLSwitches::prefix_first_code_line`
+ends a switch prefix that closes with a block (`BEGIN { $^W = 1; }`,
+`CHECK {…}`) with `; ` — the program's first statement then starts a
+statement.  Found by the companion's op/filetest.t ("no uninit warnings from -T
+with no preceding stat": `runperl(prog => '-T _', switches => ['-w'])` died
+"Undefined subroutine &main::T").  Source WRITTEN with the shape still mis-lexes
+in PCL (task #2670).  Upstream row: `docs/ppi-bug-report.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

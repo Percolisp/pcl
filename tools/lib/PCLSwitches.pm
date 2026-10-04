@@ -477,6 +477,11 @@ sub _suffix {
 sub prefix_first_code_line {
   my ($prefix, $text) = @_;
   return $text if $prefix eq '';
+  # A prefix that ENDS in a block (`BEGIN { … } `) gets a `;`: the program's
+  # first statement must start a statement.  Without it PPI reads `} -e _`
+  # as a binary minus -- `pcl -w -e '-T _'` called a sub T (s507; the bare
+  # `BEGIN {} -T _` spelling is #2670, pre-existing).
+  $prefix =~ s/\}\s*\z/}; /;
   if ($text =~ /\A=[a-zA-Z]/) {
     return $text if $text =~ s/(^=cut\b[^\n]*\n)/$1$prefix/m;
     return "$text\n$prefix\n";

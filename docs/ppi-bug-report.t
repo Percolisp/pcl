@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 85;
+use Test::More tests => 86;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -992,4 +992,16 @@ for my $c (
                   $doc->tokens;
         is( scalar @ops, 1, "`$src` has a subtraction Operator token" );
     }
+}
+
+# §35 -- a filetest right after a `BEGIN { … }` block is split into Operator(-)
+# + Word, although the block's `}` ends the statement and `-e` starts a new
+# one.  perl: `BEGIN { 1 } -e _; print "x\n"` prints x.
+{
+    my $doc = PPI::Document->new(\'BEGIN { 1 } -e _; print "x\n";');
+    my @ops = grep { $_->isa('PPI::Token::Operator') } $doc->tokens;
+    ok( (grep { $_->content eq '-e' } @ops),
+        'a filetest after a BEGIN block should lex as one `-e` operator' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
 }

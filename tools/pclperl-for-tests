@@ -43,6 +43,11 @@ my $pl2cl   = "$root/pl2cl";
 my $runtime = "$root/cl/pcl-runtime.lisp";
 
 my @args = @ARGV;
+# A harness child compares its stderr BYTE FOR BYTE with perl's (fresh_perl
+# with 2>&1), so pcl's one-line taint announcement (-T/-t, which PCL does not
+# model) is silenced here -- the ONE documented switch for it.  Measured: it
+# cost op/utftaint.t two verified rows (s507).
+$ENV{PCL_TAINT_QUIET} = 1;
 unshift @args, split(' ', $ENV{PERL5OPT}) if defined $ENV{PERL5OPT} && length $ENV{PERL5OPT};
 
 # --- perl's argv grammar: tools/lib/PCLSwitches.pm, the ONE parser (s506f) --

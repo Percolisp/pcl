@@ -3996,7 +3996,10 @@ table; one parser, `tools/lib/PCLSwitches.pm`).  What remains different:
   accepted on the command line and on a `#!` line, the program RUNS, and one
   STDERR line says so: `pcl: taint checks (-T) are not applied: PCL does not
   model taint` (a security-relevant absence is never silent;
-  `PCL_TAINT_QUIET=1` silences the line).  `${^TAINT}` reads 0.  perl's
+  `PCL_TAINT_QUIET=1` silences the line; the test-harness wrapper
+  `tools/pclperl-for-tests` sets it, because a `fresh_perl` child's stderr is
+  compared byte for byte -- the line cost op/utftaint.t two rows).
+  `${^TAINT}` reads 0.  perl's
   death `"-T" is on the #! line, it must also be used on the command line` is
   NOT mirrored: it guards a state PCL never enters.
 * **The debugger and core dumps (`-d`, `-u`).**  Refused with one line and
@@ -4009,7 +4012,10 @@ table; one parser, `tools/lib/PCLSwitches.pm`).  What remains different:
   is LEXICAL in PCL as in perl: they reach the main program's opens, not a
   module's (perl's `-C` is global).  Under `L` they apply whatever the
   locale (`L` does govern `I`/`O`/`E`/`S`/`A`).  `a` (perl's UTF-8 cache
-  self-check) has no effect to mirror.
+  self-check) has no effect to mirror.  **`-C0` (and any `-C` without `A`)
+  cannot take back the decoding of `@ARGV`**: PCL's `@ARGV` already arrives
+  DECODED from UTF-8 (pre-existing, task #2685), so `length $ARGV[0]` of
+  `é` is 1 under `pcl -C0` where perl says 2.
 * **A `#!` line without `perl`** (`#!/bin/sh`): perl EXECS the named
   interpreter instead; `pcl` compiles the file as Perl, the line a comment.
 * **`-w`** sets `$^W` (command line and `#!` line) and nothing else: PCL has

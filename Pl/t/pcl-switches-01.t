@@ -263,6 +263,12 @@ row('local on another caret variable ($^P) binds the runtime\'s symbol too',
 # (F2, #2492 -- the SBCL load context in front of a -e program's die -- is NOT
 # fixed here: routing the temp program through the script cache's fasl loader
 # exposes #2686 to every -e run; measured, see #2492.)
+# A switch prefix that ends in a block (`BEGIN { $^W = 1; }`) is followed by
+# `;`: PPI splits a filetest right after a `}` into minus + a sub call
+# (docs/ppi-upstream-bugs.md §35; op/filetest.t found it).
+row('-w: a program that starts with a filetest', q{-w -e '-T _; print "w\n"'}, "w\n", '', 0);
+row('-l: a program that starts with a filetest', q{-l -e '-e _; print "l"'}, "l\n", '', 0);
+row('-c: a program that starts with a filetest', q{-c -e '-e _'}, '', "-e syntax OK\n", 0);
 # F3: no argument at all after -M is perl's "Missing argument"; an EMPTY one
 # is "Module name required" (row above).
 row('-M with nothing after it', q{-M}, '', "Missing argument to -M.\n", 25);
