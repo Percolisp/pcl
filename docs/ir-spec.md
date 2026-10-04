@@ -1856,6 +1856,15 @@ both ends (an unknown key is an error at macroexpansion):
 definition, lowered by a path that proves none of these facts, prints
 `(:prototype "")` since s500a — the declared text, not a proof).
 
+**A list-valued `use constant` (normative, s502e / #2537)** is perl's
+`sub () { @list }`: a value that is a comma list of two or more elements
+(`=> (1, 2)`, `=> qw(a b)`) is compiled in LIST context and its body returns
+that vector when `*wantarray*` is true and its LENGTH otherwise — never the
+comma operator's last element.  A single value (`=> (1 + 2)`, `=> qw(z)`) and
+the empty `=> ()` keep the scalar body.  Example: `use constant L => (1, 2)` →
+`(progn %_args (let ((%const-list (vector 1 2))) (if *wantarray* %const-list
+(length %const-list))))`; `my @f = L` is `(1, 2)`, `scalar(L)` is 2.
+
 The plist is what the compiler proved **under the configuration that emitted
 the file**: `PCL_OPT` switches off Kind-A rules, and a fact whose analysis a
 switched-off rule pays for (`:returns`, the #77 family) is then simply absent.

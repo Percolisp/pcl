@@ -1298,4 +1298,54 @@ print "f ", ref(openhandle(\*STDOUT)), " ", (defined(openhandle(\*NOPE)) ? "def"
 unlink $f;
 });
 
+# s502e (#2537): a LIST-valued `use constant` is perl's `sub () { @list }`
+# (constant.pm): the whole list in list context, its COUNT in scalar context.
+# INVERSE: a one-value constant, a parenthesised single expression `(1 + 2)`,
+# a one-word qw and the empty `()` keep the scalar shape; `L + 1` is a term.
+test_transpile("use constant: a list value is the list, scalar is its count (s502e, #2537)", q{
+use constant LIST => (1, 2); use constant NAMES => qw(a b c);
+use constant Q => qw(a b); use constant X => (1 + 2); use constant E => ();
+use constant ONE => 7; use constant Q1 => qw(z); my @a = (5, 6);
+use constant MIX => (0, "x");
+my @f = LIST; print "f @f | ", scalar(@f), "\n";
+my @n = NAMES; print "n @n | ", scalar(@n), "\n";
+print "direct ", join(",", LIST), " ", join(",", NAMES), "\n";
+my @m = (LIST, 3); print "m @m\n";
+for my $x (NAMES) { print "it $x\n" }
+print "cnt ", scalar(() = NAMES), "\n";
+print "idx ", (NAMES)[1], "\n";
+print "sq ", scalar(Q), " sl ", scalar(LIST), "\n";
+my $s = Q; print "s $s\n";
+print "x ", X, " ", scalar(X), " ", X + 1, "\n";
+my @e = E; print "e ", scalar(@e), " [", (defined(scalar(E)) ? "def" : "undef"), "]\n";
+print "one ", ONE, " ", ONE + 1, " q1 ", Q1, " ", scalar(Q1), "\n";
+my @mx = MIX; print "mix @mx ", scalar(MIX), "\n";
+print "term ", NAMES + 1, "\n";
+print "proto [", prototype(\&LIST), "]\n";
+my @h = (LIST) x 2; print "rep @h\n";
+my %hh = (LIST); print "hash ", join(",", %hh), "\n";
+print "ref ", scalar(@{[ NAMES ]}), "\n";
+});
+
+# s502e (#2537): the same through a package-qualified name, a nested paren list,
+# a list with a call in it, BEGIN, map, a negative slice and an aref.
+test_transpile("use constant: list constants across packages, BEGIN and nested lists (s502e, #2537)", q{
+package Foo;
+sub two { (8, 9) }
+use constant L2 => (1, (2, 3));
+use constant LF => (1, two());
+use constant SEP => ("$0" ne "" ? "a" : "b", "c");
+package main;
+BEGIN { my @b = Foo::L2; print "begin @b\n" }
+my @x = Foo::L2; print "l2 @x ", scalar(Foo::L2), "\n";
+my @y = Foo::LF; print "lf @y ", scalar(Foo::LF), "\n";
+my @z = Foo::SEP; print "sep @z\n";
+my @l = map { $_ * 2 } Foo::L2; print "map @l\n";
+print "last ", (Foo::L2)[-1], "\n";
+my $r = [Foo::L2]; print "aref @$r\n";
+print "str " . Foo::L2 . "\n";
+if (Foo::L2) { print "true\n" }
+});
+
+
 done_testing();

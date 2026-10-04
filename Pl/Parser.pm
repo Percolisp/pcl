@@ -11260,12 +11260,45 @@ sub _compile_constant_value {
         $self->environment->expression_our_vars->{ $self->_our_var_cl_name($pkg, $var) } = $1;
       }
     }
+    # A LIST-valued constant (`=> (1, 2)`, `=> qw(a b)`: a comma list of two
+    # or more elements) is perl's `sub () { @list }` (constant.pm): the whole
+    # list in list context, its COUNT in scalar context -- never the comma
+    # operator's last element (task #2537).  The value is compiled in LIST
+    # context through the same gen_progn_form an ordinary list return takes;
+    # the count is the length of that vector.  A single value -- `(1 + 2)` is
+    # one element behind a transparent paren -- and the empty `()` keep the
+    # scalar shape below.
+    my $list_kids = _constant_list_arity($expr_o, $node_id);
     my $gen = $self->_expr_generator($expr_o);
-    $result = $gen->generate($node_id);
+    if ($list_kids >= 2) {
+      $expr_o->annotate_contexts($node_id, 1);      # LIST_CTX
+      my $vec = $gen->generate($node_id);
+      $result = "(let ((%const-list $vec))"
+              . " (if *wantarray* %const-list (length %const-list)))";
+    }
+    else {
+      $result = $gen->generate($node_id);
+    }
   };
 
   die $@ if $@ && $@ =~ /^PCL:/;
   return $result // '0';  # Fallback
+}
+
+# How many top-level comma elements a constant's value tree has: the root,
+# seen through single-child paren layers, is a comma list (`progn`) -> its
+# child count; anything else -> 1.  Used only to pick the list shape (#2537).
+sub _constant_list_arity {
+  my ($expr_o, $node_id) = @_;
+  while (1) {
+    my $node = $expr_o->get_a_node($node_id);
+    return 1 if !ref($node) || !$expr_o->is_internal_node_type($node);
+    my @kids = @{ $expr_o->get_node_children($node_id) };
+    my $type = $node->{type} // '';
+    return scalar(@kids) if $type eq 'progn';
+    return 1 if $type ne 'tree_val' || @kids != 1;
+    $node_id = $kids[0];
+  }
 }
 
 
