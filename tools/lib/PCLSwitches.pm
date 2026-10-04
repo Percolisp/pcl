@@ -177,11 +177,10 @@ sub parse_argv {
   my @w = @$argv;
   my (%r, @events, @words);
   $r{pcl} = {};
-  my $has_code = 0;
   while (@w) {
     my $a = $w[0];
     last if $a !~ /^-/;
-    if ($a eq '-') { shift @w; $r{program} = '-'; last }
+    last if $a eq '-';     # the program on STDIN -- or, after -e, an @ARGV word
     if ($a eq '--') { shift @w; last }
     if ($a =~ /^--([^=]+)(?:=(.*))?\z/s && $PCL_LONG{$1}) {
       my ($name, $val) = ($1, $2);
@@ -195,7 +194,6 @@ sub parse_argv {
       next;
     }
     shift @w;
-    my $start = @words;
     push @words, $a;
     my $err = _parse_cluster(substr($a, 1), \@events, sub {
       return undef if !@w;
@@ -203,9 +201,8 @@ sub parse_argv {
       return shift @w;
     });
     if ($err) { push @events, $err; last }
-    $has_code ||= grep { $_->[0] eq 'e' || $_->[0] eq 'E' } @events;
   }
-  $has_code = grep { $_->[0] eq 'e' || $_->[0] eq 'E' } @events;
+  my $has_code = grep { $_->[0] eq 'e' || $_->[0] eq 'E' } @events;
   $r{program} = shift @w
     if !$has_code && !defined $r{program} && @w
        && !(@events && $events[-1][0] eq '!');

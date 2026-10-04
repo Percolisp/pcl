@@ -93,6 +93,7 @@ row('-mMod=a imports a', q{-mList::Util=sum -e 'print sum(1,2), "\n"'}, "3\n", '
 row('-M\'Mod qw(a)\' takes the rest verbatim', q{'-MList::Util qw(sum)' -e 'print sum(1,2), "\n"'}, "3\n", '', 0);
 row('after -e a word that is not a switch starts @ARGV',
     q{-e 'print "@ARGV\n"' a -b}, "a -b\n", '', 0);
+row('after -e, a lone - is an @ARGV word', q{-e 'print "[@ARGV]\n"' - a}, "[- a]\n", '', 0);
 row('`--` ends the switches', q{-e 'print "@ARGV\n"' -- -x y}, "-x y\n", '', 0);
 row('-I takes the next word', q{-I /tmp/qq -e 'print $INC[0], "\n"'}, "/tmp/qq\n", '', 0);
 row('-d is refused with one tidy line', q{-d -e 1}, '', "pcl: the perl debugger (-d) is not supported\n", 2);
