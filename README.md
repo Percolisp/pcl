@@ -65,6 +65,7 @@ Linux. Other Unix systems should work but are not tested.
 These commands set up PCL on a fresh Ubuntu 24.04 machine (in a
 container where you are already root, leave out `sudo`):
 
+<!-- doc-example: Pl/t/pcl-doc-examples-01.t runs the pcl line below -->
 ```bash
 sudo apt-get update
 sudo apt-get install -qy perl cpanminus make gcc curl ca-certificates bzip2 git
@@ -126,6 +127,19 @@ pcl -I lib script.pl            # extra @INC directory
 pcl -c script.pl                # compile only, then "syntax OK"
 pcl --check script.pl arg1      # run under perl and under PCL, compare the output
 ```
+
+Perl's own switches work too, so one-liners run as under perl:
+
+<!-- doc-example: Pl/t/pcl-doc-examples-01.t runs this -->
+```console
+$ printf 'a b c\nd e f\n' | pcl -lane 'print $F[1]'
+b
+e
+```
+
+A script's own `#!perl -w` line counts as well.
+[`docs/pcl-commands.md`](docs/pcl-commands.md) lists every switch and
+where `pcl` differs from perl.
 
 `pl2cl` is the compiler. It reads Perl and writes Common Lisp:
 
