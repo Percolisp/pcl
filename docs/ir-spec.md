@@ -3348,6 +3348,8 @@ follows from that one sentence, and a translator must make all of it agree:
 | `defined($fh)`, truthiness | 1, true |
 | `ref(\$fh)` | `REF` (a ref to a scalar that holds a ref) |
 | `my $b = $fh` | the SAME handle — a copy of the box's value |
+| `bless $fh, "C"` (normative, s502e / #2056) | marks the HANDLE (the stream), not the variable: every copy — `my $b = $fh`, `return $fh` — answers `ref` C, `blessed` C, `reftype` GLOB |
+| `${*$fh}{K}`, `@{*$fh}`, `${*$fh}` (s502e / #2056) | the slots of ONE anonymous glob made for that stream on its first `*` dereference — the glob-as-object idiom of core File::Temp / IO::Socket; print and readline never reach it |
 
 `open` in perl **creates the handle before it attempts to open it**, so the
 place is written whether the open succeeds or fails:

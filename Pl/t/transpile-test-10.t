@@ -1365,4 +1365,65 @@ print "chain2 ", prototype(&set_prototype(sub { 2 }, '\@')), "\n";
 });
 
 
+# s502e (#2056): bless on a LEXICAL filehandle marks the handle itself (perl:
+# the glob $fh refers to), so every COPY -- `my $c = $fh`, `return $fh`, a
+# list return -- is the same object; reftype stays GLOB.  INVERSE: an
+# unblessed copy stays GLOB / unblessed and dispatches to the handle class.
+test_transpile("bless on a lexical handle survives copies and returns (s502e, #2056)", q{
+open(my $fh, "<", "/etc/hostname") or die;
+bless $fh, "Clex";
+my $c = $fh; print "copy ", ref($c), "\n";
+sub mk { open(my $g, "<", "/etc/hostname") or die; bless $g, "Cret"; return $g }
+my $r = mk(); print "ret ", ref($r), "\n";
+sub mk2 { open(my $g, "<", "/etc/hostname") or die; bless $g, "Cret2"; $g }
+my $r2 = mk2(); print "ret2 ", ref($r2), "\n";
+my @l = ($fh); print "list ", ref($l[0]), "\n";
+my %h = (k => $fh); print "hash ", ref($h{k}), "\n";
+sub mk3 { open(my $g, "<", "/etc/hostname") or die; bless $g, "Cret3"; return ($g, 1) }
+my ($r3) = mk3(); print "ret3 ", ref($r3), "\n";
+print "isa ", ($fh->isa("Clex") ? 1 : 0), "\n";
+});
+
+# s502e (#2056): the glob-as-object idiom (`${*$fh}{KEY}`, `@{*$fh}`,
+# `${*$fh}`) on a lexical handle -- the per-handle state core File::Temp,
+# IO::Socket and Archive::Tar keep -- plus bless/reftype/blessed through copies.
+test_transpile("glob-as-object slots on a lexical handle (s502e, #2056)", q{
+use Scalar::Util qw(blessed reftype);
+my $f = "/tmp/pcl-s502e-glob1-$$";
+open(my $fh, ">", $f) or die;
+print "1 ", ref(\*$fh), "\n";
+${*$fh}{k} = 1; ${*$fh}{k2} = 2;
+print "2 ", ${*$fh}{k}, " ", join(",", sort keys %{*$fh}), "\n";
+push @{*$fh}, 7; print "3 ", scalar(@{*$fh}), "\n";
+${*$fh} = "sv"; print "4 ", ${*$fh}, "\n";
+print "5 ", (fileno(*$fh) == fileno($fh) ? "fd" : "nofd"), "\n";
+print {*$fh} "x";
+bless $fh, "Clex"; print "6 ", ref($fh), " ", ${*$fh}{k} + ${*$fh}{k2}, "\n";
+my $c = $fh; print "7 ", ref($c), " ", blessed($c), " ", reftype($c), "\n";
+print $c "y"; close $c; print "8 ", -s $f, "\n";
+bless $c, "Other"; print "9 ", ref($fh), "\n";
+open(my $u, "<", $f) or die; my $u2 = $u;
+print "10 [", ref($u2), "] [", (defined blessed($u2) ? "b" : "undef"), "]\n";
+my $line = $u2->getline; print "11 $line\n";
+{ package Clex; sub hello { "hello " . ref($_[0]) } }
+open(my $h, "<", $f) or die; bless $h, "Clex"; my @l = ($h); my $h2 = $l[0];
+print "12 ", $h2->hello, " ", ($h2->isa("Clex") ? 1 : 0), "\n";
+my $s = { fh => $h }; print "13 ", ref($s->{fh}), "\n";
+unlink $f;
+});
+
+# s502e (#2056): File::Temp->new is an object of class File::Temp whose
+# filename, stringification and print/flush/close work.
+test_transpile("File::Temp->new: the OO constructor (s502e, #2056)", q{
+use strict; use warnings; use File::Temp qw(tempdir);
+my $dir = tempdir(CLEANUP => 1);
+my $tmp = File::Temp->new(DIR => $dir, SUFFIX => ".dat");
+print "1 ", ref($tmp), " ", ($tmp->isa("IO::Handle") ? "ioh" : "noioh"), "\n";
+print $tmp "data"; $tmp->flush;
+print "2 ", -s "$tmp", " ", -s $tmp->filename, " ", ($tmp->filename =~ /\.dat$/ ? "suffix" : "nosuffix"), "\n";
+my $copy = $tmp; print "3 ", ref($copy), " ", ("$copy" eq $tmp->filename ? "str" : "nostr"), "\n";
+close $tmp; print "4 ", (-e $tmp->filename ? "exists" : "gone"), "\n";
+});
+
+
 done_testing();

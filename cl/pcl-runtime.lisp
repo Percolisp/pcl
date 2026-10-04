@@ -27767,6 +27767,8 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; above is perl's fatal for a CODE referent too (#1592).  What DOES
       ;; reach here through Sub::Quote's `${$_[1]->{'$t'}}` is the capture's
       ;; scalar BOX, which the (p-box-p inner) arm answers.
+      ;; `${*$fh}`: a GLOB's SCALAR slot (#2056).
+      ((p-typeglob-p inner) (p-box-value (%p-glob-scalar-box inner)))
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val &optional site)
@@ -27818,7 +27820,18 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; val itself is the scalar container (blessed scalar in tie methods)
       ((p-box-p val)
        (box-set val new-value))
+      ;; `${*$fh} = $path`: a GLOB's SCALAR slot (#2056, core File::Temp).
+      ((p-typeglob-p inner)
+       (box-set (%p-glob-scalar-box inner) new-value))
       (t (error "Cannot dereference non-reference: ~A" inner)))))
+
+(defun %p-glob-scalar-box (glob)
+  "The SCALAR slot of GLOB — the cell `${*FH}` reads and writes (#2056), made
+   on first use like any package scalar."
+  (let ((sym (intern (%p-slot-name "$" (p-typeglob-name glob)) (p-typeglob-package glob))))
+    (if (and (boundp sym) (p-box-p (symbol-value sym)))
+        (symbol-value sym)
+        (setf (symbol-value sym) (make-p-box nil)))))
 
 (defun %p-symref-cell (name-str site)
   "The package CELL — the box itself — that the symbolic scalar name NAME-STR
@@ -28163,6 +28176,15 @@ buffer's fill-pointer; everything else falls back to file-length."
       (let ((r (and w (p-box-value w))))
         (and (p-box-p r) r)))))
 
+(defvar *p-handle-stash* (make-hash-table :test 'eq :weakness :key)
+  "A FILEHANDLE'S STASH: the class `bless $fh, \"C\"` gives a lexical handle,
+   keyed by the STREAM (or socket) the scalar holds (task #2056).  perl's
+   `open my $fh` puts a reference to a GLOB in $fh and bless marks that GLOB,
+   so every copy of $fh -- a `return $fh`, `my $c = $fh` -- is the same object
+   of class C.  PCL's payload IS that glob, so the class goes on the payload,
+   never only on the variable's box (a copy reads the payload, not the box).
+   Weak by key: the entry goes with the stream.")
+
 (defvar *p-sv-stash* (make-hash-table :test 'eq :weakness :key)
   "A SCALAR'S OWN STASH: the class `bless \\$x, \"C\"` writes on the SV $x
    itself, keyed by $x's BOX (task #1619).
@@ -28258,6 +28280,8 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; made ref(\\$obj) answer the object's class instead of REF).
       ((p-box-p v) (or (%p-referent-class box)
                        (and (not (p-box-is-ref box)) (p-box-class v))))
+      ;; A filehandle payload IS the glob perl blesses (#2056).
+      ((%p-handle-payload-p v) (gethash v *p-handle-stash*))
       (t nil))))
 
 (defun p-ref (val)
@@ -28408,6 +28432,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                                        "SCALAR"
                                        "REF"))
                   ((p-typeglob-p inner) "GLOB")
+                  ;; A blessed filehandle: its payload IS the glob (#2056).
+                  ((%p-handle-payload-p inner) "GLOB")
                   (t r)))))))))
 
 ;;; Scalar::Util / builtin — weak reference stubs
@@ -28826,6 +28852,31 @@ buffer's fill-pointer; everything else falls back to file-length."
   (multiple-value-bind (pkg uname) (%p-glob-dynamic-target name-box)
     (%p-glob-assign-slots pkg uname rhs)))
 
+(defvar *p-stream-globs* (make-hash-table :test 'eq :weakness :key)
+  "STREAM -> the anonymous glob `*$fh` names for a LEXICAL handle (#2056).")
+
+(defvar *p-stream-glob-seq* 0
+  "Counter for the anonymous globs of lexical handles: the NAME carries the
+   uniqueness, because %p-resolve-fh finds a glob's handle by NAME.")
+
+(defun %p-stream-glob (stream)
+  "The glob a lexical handle's `*$fh` / `*{$fh}` names (#2056).  perl's
+   `open(my $fh, …)` stores a reference to a fresh anonymous GLOB, so
+   `${*$fh}{KEY}`, `@{*$fh}` and `${*$fh}` are that glob's own slots — the
+   glob-as-object idiom core File::Temp, IO::Socket and Archive::Tar keep their
+   per-handle state in.  PCL's `$fh` holds the stream itself, so the glob is
+   made on first use, once per stream (a weak table: it goes with the stream),
+   and registered as a handle designator so `*$fh{IO}`, `fileno(*$fh)` and
+   `print {*$fh}` still reach the stream.  The print/readline fast path never
+   comes here — only a `*` dereference does."
+  (or (gethash stream *p-stream-globs*)
+      (let* ((pkg (or (find-package "PCL-ANONIO")
+                      (make-package "PCL-ANONIO" :use '(:cl :pcl))))
+             (name (format nil "__ANONIO__~D" (incf *p-stream-glob-seq*)))
+             (glob (make-p-typeglob pkg name)))
+        (setf (gethash (intern name pkg) *p-filehandles*) stream)
+        (setf (gethash stream *p-stream-globs*) glob))))
+
 (defun p-dynamic-typeglob (name-box)
   "Rvalue *{EXPR} — return a typeglob object.  EXPR is a NAME string (\"Pkg::name\")
    or a glob REFERENCE (\\*{...}); a glob ref unboxes to a p-typeglob, which we
@@ -28839,7 +28890,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; itself.  Hand the HANDLE through — `p-glob-slot` answers its IO and
       ;; GLOB slots from it (task #1047).  Stringifying it into a glob NAME
       ;; (which is what this used to do) made `*$fh{IO}` undef.
-      ((or (streamp inner) (%p-socket-p inner)) inner)
+      ((or (streamp inner) (%p-socket-p inner)) (%p-stream-glob inner))
       (t
        ;; Unqualified → the package in effect: %p-glob-dynamic-name, the one
        ;; reading every dynamic-glob path shares.
@@ -30836,6 +30887,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((or (null inner) (eq inner *p-undef*) (stringp inner) (numberp inner))
        (%p-die-error nil "Can't bless non-reference value"))
       (t
+       ;; A filehandle: the class goes on the payload, which is the glob
+       ;; perl blesses (#2056) -- and on the box below, as for any ref.
+       (when (%p-handle-payload-p inner)
+         (setf (gethash inner *p-handle-stash*) class-name))
        ;; Array, code, or other ref type - store class on the box
        (if (p-box-p ref)
            (setf (p-box-class ref) class-name)
@@ -30863,6 +30918,8 @@ buffer's fill-pointer; everything else falls back to file-length."
          (and (p-box-class obj)
               (%p-ref-shaped-p (p-box-value obj))
               (p-box-class obj))))
+    ;; A raw filehandle payload: its own stash (#2056).
+    ((%p-handle-payload-p obj) (gethash obj *p-handle-stash*))
     (t nil)))
 
 (defparameter +p-handle-class+ "IO::Handle"
