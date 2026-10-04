@@ -242,8 +242,8 @@ The [IR manual](docs/ir-spec.md) documents every form.
   scope-exit destructor. Code that relies on one for cleanup (guard
   objects, temporary files) does not get it. The same goes for
   filehandles: for now, close your filehandles explicitly.
-* **`tie` on an array, hash or filehandle** is announced on stderr and
-  ignored, for now (scalar ties work).
+* **`tie` on a filehandle** is announced on stderr and ignored, for now
+  (`tie` on scalars, arrays and hashes works).
 * **Regex code blocks** `(?{ })` are removed from the pattern with a
   warning at compile time. The match runs without them.
 * **`format`/`write`**, **perl 5.38 `class`/`field`/`method`** and
@@ -281,7 +281,7 @@ was measured and how to reproduce it are in
   a beta version. It will be for verifying that the IR really works, and
   it will also be good for testing when trying to implement XS.
 * **Planned, not rejected:** live symbol-table hashes (`%Foo::`), full
-  `caller()` fidelity, perl 5.38 classes, `tie` on aggregates, `format`,
+  `caller()` fidelity, perl 5.38 classes, `tie` on filehandles, `format`,
   indirect object syntax with a scalar invocant, and a `use warnings`
   model. See [`docs/not-supported.md`](docs/not-supported.md).
 

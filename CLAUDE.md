@@ -318,7 +318,7 @@ plus the targeted files the change names.
 **THE NUMBER THE PROJECT STEERS BY (USER, end of s494; instrument #2099,
 s495):** the `EVERYDAY:` line — ordinary programs whose STDOUT + exit status
 are byte-identical to perl's — not the suite pass rate.  Goal **> 90 %**
-(**108 of 122 = 88.5 % at s503, 2026-10-01**; 85 of 122 = 69.7 % at the first
+(**110 of 122 = 90.2 % at s506, 2026-10-04**; 85 of 122 = 69.7 % at the first
 run, s495 — the trend is `baselines/everyday-history.tsv`).  The baseline's cause column is the steering
 input: the task that holds the most programs is the next correctness batch.
 It is a steering number, never a compatibility percentage
@@ -506,13 +506,13 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s503, 2026-10-01, main `6757ddfe`, gen v2-3480 — measured on
+- **CURRENT NUMBERS (s506, 2026-10-04, main `ddb959d2`, gen v2-3780 — measured on
   that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **274 files / 9,428 rows** (134 s wall with
+  stale):** gate `Result: PASS`, **276 files / 9,576 rows** (143 s wall with
   `tools/prove-core`); full `perl-tests/` sweep GATE clean, **TOTAL passing
-  18,714**, 659 failing (96.6 %), 60 of 108 files fully passing, 96 run to the
-  end and 12 stop part-way, drops 5 = census; `EVERYDAY: 108 of 122 identical to
-  perl (88.5 %)`; `tools/t/install-container.t` PASS 17 rows.  The user-facing
+  18,728**, 650 failing (96.6 %), 60 of 108 files fully passing, 96 run to the
+  end and 12 stop part-way, drops 5 = census; `EVERYDAY: 110 of 122 identical to
+  perl (90.2 %)`; `tools/t/install-container.t` PASS 17 rows (s503, not re-run).  The user-facing
   copy of these numbers is `docs/STATUS.md` — update both together.
 - **The three xs files are PARKED (USER decision, s485, 2026-09-14): `Pl/t/xs-01/02/03.t`
   `plan skip_all` at the top until the pclxs project (the XS bridge, a separate
