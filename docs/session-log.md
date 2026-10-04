@@ -22,6 +22,8 @@ Append new entries at the top. One section per session.
 
 **Launched at the end (USER):** s507d, the documentation of the `pcl` command for a user, README included (its README edits in a commit of their own, for the USER to read first), and s507b, the fix batch: #2688, then #2680, #2661, #2686 with #2492, #2687 with #2684, #2084 (2).
 
+**s507d merged (`faeb6792`, ~23:55).**  Twenty minutes of agent time plus one round of small fixes.  The USER read the README diff (one sentence, one checked one-liner, a pointer) and approved it.  Gate 278 files / 9,730 rows.  The pass ran every command it printed and found four things the documents had claimed or implied that the code does not do; the one that matters is #2690: `pcl -c` can say "syntax OK" for a program whose later `use` fails, because a CHECK block ahead of a module `use` runs too early.  The reference says so in its differences table.
+
 ## Session 506 (Fable, 2026-10-04) — the tie batch and the file-private-cells batch reviewed and merged (EVERYDAY 110 of 122, 90.2 %); everyday singles 3 and a new batch for perl's command-line switches launched and checkpointed
 
 **Start (~14:52, box just rebooted):** main = origin = `e5d72352`, CI green.  Two checkpointed worktrees intact: s501t (#155 tie on ARRAY / HASH, code finished and reviewed, final bars owed) and s504c (#2633 file-private cells, phase 1 done).  **USER: "Please continue."** -> s501t resumed with a fresh Opus 5.5 agent.  **USER: "Please run three at a time in the background."** -> s504c's light phase 2A and everyday singles 3 (s502e, the batch approved in s502 and never launched) started beside it.

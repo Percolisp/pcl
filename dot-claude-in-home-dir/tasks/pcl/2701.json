@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s507b (Opus, 2026-10-04) from member 1's (#2680) breaking-case probes; PRE-EXISTING on main 08de9e4f.\n\nREPRODUCER:\n  sub bb { {; } }  my @bb = (bb(), 1);  print scalar(@bb), \"\\n\";\n  perl: 1   (perlfunc map / perlref: a `{` followed by `;` is always a BLOCK)\n  PCL : 2   (emission `(p-args-body (block nil (make-p-box (p-hash))))` -- a hash ref)\n`sub nest { { } }` IS an anon hash in perl too (2 elements, matched by PCL); `sub b0 { { (); } }` is a block (1 element,\nmatched since s507b).  The `{;` spelling is the documented way to force a block (`map {; \"$_\" => 1 } @l` is the\ncanonical case) -- probe that one too: it is far more common than this reproducer.\nCHEAP MEASUREMENT (not taken): `./pl2cl` on `my @l = map {; \"$_\" => 1 } 1, 2; print scalar(@l)` -- if it emits a\nhash constructor, the brace classifier (Pl::PExpr::_block_is_hash_constructor / _block_is_empty, or PPI's own\nStructure::Constructor vs Block choice) ignores a leading `;`.  If PPI hands back a Constructor, it is a PPI bug for\ndocs/ppi-upstream-bugs.md (rule 13).\n",
+   "id" : "2701",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (PRE-EXISTING): `{;` -- perl's explicit BLOCK disambiguator -- is read as an anonymous HASH: `sub f { {; } }` returns a hash ref where perl returns the empty list"
+}

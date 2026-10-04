@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "Found by s507d while checking what `-E` enables.  perl 5.40.3:\n  perl -E 'say __SUB__ // \"undef\"'     -> undef\n  pcl  -E 'say __SUB__ // \"undef\"'     -> __SUB__\n  printf 'use feature \"current_sub\";\\nprint __SUB__ // \"undef\", \"\\n\";\\nmy $f = sub { __SUB__ }; print ref($f->()), \"\\n\";\\n' > sub1.pl\n  perl sub1.pl -> undef / CODE;   pcl sub1.pl -> __SUB__ / CODE\nNot switch-specific (the file form shows the same).  At file level __SUB__ with the feature on is undef (perlfunc: \"outside of a subroutine, __SUB__ returns undef\").  The docs for -E do not list __SUB__ among its features until this is fixed.\n",
+   "id" : "2691",
+   "status" : "pending",
+   "subject" : "LOW (found by s507d, on main 50dbd195): `__SUB__` outside any sub is the STRING \"__SUB__\" under PCL (perl: undef) -- `pcl -E 'say __SUB__ // \"undef\"'` prints __SUB__; also in a file with `use feature \"current_sub\"`; inside an anon sub it is right"
+}

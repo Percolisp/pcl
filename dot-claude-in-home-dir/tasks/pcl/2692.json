@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "Found by s507d checking what -E enables.  perl 5.40.3 vs pcl on main 50dbd195:\n  printf \"use feature ':5.40';\\ntry { die \\\"x\\\\\\\\n\\\" } catch (\\$e) { print \\\"caught \\$e\\\" }\\n\" > t2.pl\n  perl t2.pl -> caught x\n  pcl  t2.pl -> PCL: statement dropped at t2.pl line 2: try ... -- Bug. Fell through. Missing case ...\n                then dies \"PCL: statement not supported at t2.pl line 2\"\nThe same with `pcl -E 'try {...} catch ($e) {...}'`, because -E IS `use feature ':5.40'; use builtin ':5.40';` in front of the program (PCLSwitches::_prefix).\nWorks: `use v5.40;` before the try, `use feature 'try';`, and `pcl -E 'use feature \"try\"; try ...'` on one line.\nLikely the PPI feature-include callback (the #360 family) recognises the bundle of `use v5.NN` but not the `:5.NN` bundle names of `use feature`.  The fix belongs to that callback in Pl/, not to -E.  docs/pcl-commands.md notes the workaround under -E until it is fixed.\n",
+   "id" : "2692",
+   "status" : "pending",
+   "subject" : "`try`/`catch` is not recognised under `use feature ':5.40'` (a feature BUNDLE), so `pcl -E 'try { die \"x\\n\" } catch ($e) { print \"caught $e\" }'` drops the statement and dies \"statement not supported\" (perl: caught x); `use v5.40` and `use feature 'try'` work (found by s507d, main 50dbd195)"
+}

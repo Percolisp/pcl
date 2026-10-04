@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "Found by s507d checking the `--` row of docs/pcl-commands.md.  perl 5.40.3 vs pcl on main 50dbd195:\n  printf 'print \"dash file @ARGV\\n\";\\n' > ./-file.pl\n  perl -- -file.pl a  -> dash file a, exit 0\n  pcl  -- -file.pl a  -> Unknown option: file.pl / Usage: pl2cl [options] <file.pl> ..., exit 255\nPCLSwitches::parse_argv takes `-file.pl` as the program correctly; the path then reaches pl2cl's Getopt (on the script-cache miss and on the transpile path) as a bare word.  Fix: pass `--` before the path wherever pcl or the runtime spawns pl2cl, or `./`-prefix a relative path that starts with `-`.  Rare; the docs do not show the case.\n",
+   "id" : "2693",
+   "status" : "pending",
+   "subject" : "LOW (found by s507d, main 50dbd195): a program file whose name starts with `-` cannot be run: `pcl -- -file.pl a` prints pl2cl's \"Unknown option: file.pl\" and its usage, exit 255 (perl: runs it); the path reaches pl2cl's option parser unprotected"
+}
