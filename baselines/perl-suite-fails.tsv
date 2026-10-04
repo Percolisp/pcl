@@ -320,6 +320,7 @@
 # taken-at: 158be071 2026-09-18 (3 file(s) re-measured)
 # taken-at: 00577107 2026-09-21 (1 file(s) re-measured)
 # taken-at: s504 2026-10-02 (26 file(s) re-measured)
+# taken-at: 590109b5 2026-10-04 (15 file(s) re-measured)
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -1987,13 +1988,9 @@ io/iofile.t	3	ok	not ok	IO::File now loaded	#1710
 io/iprefix.t	2	ok	not ok	backup file contents stay the same	#1710
 io/iprefix.t	1	ok	not ok	file contents properly replaced	#1710
 io/layers.t	0	ok*	(no TAP)	*summary*	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
-io/nargv.t	0	(none)	extra [PCL #3]	*extra* (unnamed)	#1710
-io/nargv.t	0	(none)	extra [PCL #4]	*extra* (unnamed)	#1710
-io/nargv.t	0	(none)	extra [PCL #5]	*extra* (unnamed)	#1710
-io/nargv.t	0	(none)	extra [PCL #2]	*extra* (unnamed)	#1710
-io/nargv.t	0	(none)	extra [PCL #7]	*extra* check fd leak	#1710
-io/nargv.t	0	(none)	extra [PCL #6]	*extra* check setuid mode preserved	#1710
 io/nargv.t	0	(none)	renumbered	*summary*	#1710
+io/nargv.t	5	ok	not ok [PCL #6]	#5	s506f F1 (#2669): `local $^I` now takes effect (it bound a down-cased dead symbol, so these rows printed to STDOUT and passed); the NESTED in-place edit (other() with its own local *ARGV/*ARGVOUT) then loses the outer loop's output file
+io/nargv.t	6	ok	(missing)	check setuid mode preserved	s506f F1 (#2669): as row 5 -- the in-place edit is now real; with it the setuid row produces no TAP (its file goes to the nested loop's output)
 io/open.t	132	ok	not ok	<...> line 1 when $/ is set to a glob	#1710
 io/open.t	156	ok	not ok	also on chmod	#1710
 io/open.t	158	ok	not ok	also on chmod	#1710
@@ -3829,18 +3826,19 @@ op/delete.t	54	ok	not ok	a b c also equivalent	NS:`DESTROY` called by garbage co
 op/delete.t	26	ok	not ok	a b c equivalent	NS:`DESTROY` called by garbage collector -- the rows watch for a DESTROY when `delete` drops the last reference
 op/die.t	11	ok	(missing)	$@ is an Error object isa Error	#1953 -- measured s473t6d: the row IS produced, but the harness stub's own `sub isa_ok` (perl-tests/t/test.pl:658) shadows the runtime's `pl-isa_ok` and prints `ok - $@ is an Error object` -- no test NUMBER and without perl's ` isa Error` suffix -- so the row can never join
 op/die.t	0	(none)	renumbered	*summary*
-op/die.t	23	ok	not ok [PCL #15]	The __DIE__ handler should have seen this message	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
-op/die.t	24	ok	not ok [PCL #16]	The eval error in '$ should contain this message	NS:Error compatibility for invalid Perl input -- measured s473t6d: the row matches perl's `Global symbol "$intentionally_missing" requires explicit package name` in $@; PCL compiles the program
-op/die.t	25	ok	not ok [PCL #17]	__DIE__ handler and $@ should be the same	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 op/die.t	9	ok	(missing)	die with no arguments propagates $@, but leaves references alone	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the value is the one the handler increments on the way through (PCL 5, perl 7)
-op/die.t	21	ok	not ok [PCL #13]	eval should return undef	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: `eval` must return undef when a `__DIE__` handler re-dies
-op/die.t	7	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body (`isa_ok($_[0],'ARRAY',...)`), which PCL never calls, so the row is never produced
 op/die.t	8	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body, never called
 op/die.t	10	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body, never called
 op/die.t	12	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body, never called
 op/die.t	13	ok	(missing)	returning a different object than what was passed in, via PROPAGATE isa Out	#1953 -- measured s473t6d: the row IS produced, unnumbered and without perl's ` isa Out` suffix, by the stub's shadowing `sub isa_ok`
-op/die.t	18	ok	not ok [PCL #10]	utf8 symbol names show up in $@	NS:Error messages: no "at FILE line N" location info -- measured s473t6d: the row matches `Global symbol "$α"` in a compile-time diagnostic PCL does not produce
-op/die.t	22	ok	not ok [PCL #14]	we should have captured 1 error via __DIE__	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
+op/die.t	26	not ok	ok [PCL #19]	RT \#4821: output from die qr{x} # TODO RT #4821: die qr{x} does not check termination	s506f member 6: a TODO row that now PASSES (perl: not ok) -- fresh_perl's prog is named -e, so the `die qr{x}` output text matches; perl's own row is a known TODO failure
+op/die.t	23	ok	not ok [PCL #16]	The __DIE__ handler should have seen this message	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
+op/die.t	24	ok	not ok [PCL #17]	The eval error in '$ should contain this message	NS:Error compatibility for invalid Perl input -- measured s473t6d: the row matches perl's `Global symbol "$intentionally_missing" requires explicit package name` in $@; PCL compiles the program
+op/die.t	25	ok	not ok [PCL #18]	__DIE__ handler and $@ should be the same	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
+op/die.t	21	ok	not ok [PCL #14]	eval should return undef	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: `eval` must return undef when a `__DIE__` handler re-dies
+op/die.t	7	ok	(missing)	pass an array ref as an argument isa ARRAY	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- measured s473t6d: the assertion IS the handler body, never called
+op/die.t	18	ok	not ok [PCL #11]	utf8 symbol names show up in $@	NS:Error messages: no "at FILE line N" location info -- measured s473t6d: the row matches `Global symbol "$α"` in a compile-time diagnostic PCL does not produce
+op/die.t	22	ok	not ok [PCL #15]	we should have captured 1 error via __DIE__	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 op/die_keeperr.t	8	ok	not ok	[at t/op/die_keeperr.t line 27]	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- every row asserts the "\t(in cleanup) ..." warning perl raises when a DESTROY or an END dies while $@ already holds an exception
 op/die_keeperr.t	10	ok	not ok	[at t/op/die_keeperr.t line 27]	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- every row asserts the "\t(in cleanup) ..." warning perl raises when a DESTROY or an END dies while $@ already holds an exception
 op/die_keeperr.t	12	ok	not ok	[at t/op/die_keeperr.t line 27]	NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation -- every row asserts the "\t(in cleanup) ..." warning perl raises when a DESTROY or an END dies while $@ already holds an exception
@@ -5192,7 +5190,6 @@ op/readline.t	28	ok	not ok	tell returns -1 after last gv is unglobbed	#1664 -- t
 op/readline.t	29	ok	not ok	unglobbery of last gv nullifies PL_last_in_gv	#1664 -- the TYPEGLOB MODEL: a glob VALUE in a stash slot IS `*{name}`, `*x{IO}` / `*x{FORMAT}` / `*$io_ref` are missing, a slot holding a string is a PROTOTYPE and one holding a scalar ref is a CONSTANT SUB.  Every row here reads or writes a glob through the symbol table -- `readline` records the last handle READ FROM in a glob slot (PL_last_in_gv), which `tell`/`eof` with no argument then use
 op/recurse.t	27	ok	not ok	64K deep recursion - no output expected	#1929 -- 64K-deep recursion exhausts SBCL's BINDING stack (`sb-kernel::binding-stack-exhausted`) where perl runs it; the runner records `crash:` for the file.  PCL binds a dynamic variable per call frame, so the binding stack is the limit, not the control stack
 op/recurse.t	28	ok	not ok	64K deep recursion - no coredump expected	#1929
-op/ref.t	0	ok	not ok	UNIVERSAL::AUTOLOAD called when freeing qr//	#2407 -- PRE-EXISTING, identical on a 24422497 extraction (s497b)
 op/ref.t	120	ok	not ok [PCL #125]	#120	#1826 — the unnamed rows #120/#121 sit on the same `doit $object "FOO"` block's state
 op/ref.t	121	ok	not ok [PCL #126]	#121	#1826 — the unnamed rows #120/#121 sit on the same `doit $object "FOO"` block's state
 op/ref.t	137	ok	(missing)	#137	#1826 — `my $x = doit $object "FOO";` (indirect object with a SCALAR invocant AND arguments) is a ruled DROP at ref.t line 335, and the drop aborts the form: perl rows 131-141 and 255-257 are never produced.  NS:Indirect object syntax (#399)
@@ -5229,9 +5226,6 @@ op/ref.t	135	ok	(missing)	[at t/op/ref.t line 502]	#1826 — `my $x = doit $obje
 op/ref.t	134	ok	(missing)	[at t/op/ref.t line 503]	#1826 — `my $x = doit $object "FOO";` (indirect object with a SCALAR invocant AND arguments) is a ruled DROP at ref.t line 335, and the drop aborts the form: perl rows 131-141 and 255-257 are never produced.  NS:Indirect object syntax (#399)
 op/ref.t	136	ok	(missing)	[at t/op/ref.t line 503]	#1826 — `my $x = doit $object "FOO";` (indirect object with a SCALAR invocant AND arguments) is a ruled DROP at ref.t line 335, and the drop aborts the form: perl rows 131-141 and 255-257 are never produced.  NS:Indirect object syntax (#399)
 op/ref.t	141	ok	(missing)	[at t/op/ref.t line 517]	#1826 — `my $x = doit $object "FOO";` (indirect object with a SCALAR invocant AND arguments) is a ruled DROP at ref.t line 335, and the drop aborts the form: perl rows 131-141 and 255-257 are never produced.  NS:Indirect object syntax (#399)
-op/ref.t	208	ok	not ok [PCL #205]	[at t/op/ref.t line 697]	#1240 — a RUNTIME die inside `map`/`grep`/`sort` must report its own file and line ("Died at -e line 1."); PCL reports `at (eval 0) line 0.`
-op/ref.t	209	ok	not ok [PCL #206]	[at t/op/ref.t line 698]	#1240 — a RUNTIME die inside `map`/`grep`/`sort` must report its own file and line ("Died at -e line 1."); PCL reports `at (eval 0) line 0.`
-op/ref.t	210	ok	not ok [PCL #207]	[at t/op/ref.t line 699]	#1240 — a RUNTIME die inside `map`/`grep`/`sort` must report its own file and line ("Died at -e line 1."); PCL reports `at (eval 0) line 0.`
 op/ref.t	162	ok	not ok [PCL #159]	defined via the correct name works	NS:NUL bytes (and other control characters) in identifiers — the block's names are `"\0Chalk"` / `"\0Cheese"`, and that section already records "a NUL in a symbolic reference string is a silent no-op": the WRITE through `$$name1` goes nowhere, so the read back is undef.  All five spellings (scalar, array element, array slice, hash element, hash slice) diverge together
 op/ref.t	168	ok	not ok [PCL #165]	defined via the correct name works	NS:NUL bytes (and other control characters) in identifiers — the block's names are `"\0Chalk"` / `"\0Cheese"`, and that section already records "a NUL in a symbolic reference string is a silent no-op": the WRITE through `$$name1` goes nowhere, so the read back is undef.  All five spellings (scalar, array element, array slice, hash element, hash slice) diverge together
 op/ref.t	174	ok	not ok [PCL #171]	defined via the correct name works	NS:NUL bytes (and other control characters) in identifiers — the block's names are `"\0Chalk"` / `"\0Cheese"`, and that section already records "a NUL in a symbolic reference string is a silent no-op": the WRITE through `$$name1` goes nowhere, so the read back is undef.  All five spellings (scalar, array element, array slice, hash element, hash slice) diverge together
@@ -5243,6 +5237,7 @@ op/ref.t	93	ok	not ok	ref() for ref to format	NS:format / write report formattin
 op/ref.t	96	ok	not ok	stringify for IO refs	#1453 — `*FH{IO}` yields the GLOB, not an IO::File object, so `ref` and stringification both differ
 op/ref.t	94	ok	not ok	stringify for ref to format	NS:format / write report formatting + #1823 — `ref \*FOO{FORMAT}` and its stringification; PCL has no FORMAT slot
 op/ref.t	230	ok	not ok [PCL #227]	weaken refuses to weaken a read-only ref	#1825 — a value ALIASED TO A LITERAL is READ-ONLY in perl: probed, `for (1) { $_ = 2 }` and `my $r = \(1); $$r = 2` both die "Modification of a read-only value attempted" in perl 5.40.3 and both LIVE in PCL (probes/misc1.pl D1/D2), which has no read-only scalars
+op/ref.t	142	ok	not ok [PCL #139]	UNIVERSAL::AUTOLOAD called when freeing qr//	#2407 -- PRE-EXISTING, identical on a 24422497 extraction (s497b)
 op/repeat.t	48	ok	not ok	(1) x ~1	NS:Integers are unbounded: PCL has no 64-bit boundary (USER 2026-09-07) -- `(1) x ~1` asks for a list repeated 2**64-1 times, which perl rejects on its integer range
 op/repeat.t	46	ok	not ok	[perl \#78194] \$_[0] == \$_[1] when @_ aliases elems repeated by x	NS:`@_` argument aliasing -- PARTIAL (plain `my` lexicals only)
 op/repeat.t	47	ok	not ok	list repetition propagates lvalue cx to its lhs	NS:Lvalue subroutines [DEFERRED] (#930)
@@ -5347,6 +5342,7 @@ op/reset.t	28	ok	not ok	resetting a hash	#1925 -- `reset` is a NO-OP stub (`p-re
 op/reset.t	30	ok	not ok	resetting a hash in the same gv as a ro scalar	#1925 -- `reset` is a NO-OP stub (`p-reset` ignores its argument and returns 1) where perl (a) clears every package variable whose name begins with one of the listed letters -- scalars to undef, arrays and hashes to empty -- and (b) re-arms every `?pattern?` one-match search in the current package.  Probed s473t6c: `$aa="abc"; @ab=(1,2,3); %ac=(k=>1); reset "a"` leaves all three untouched here and empties all three in perl.  Half (b) is already NS:`reset()` for one-match `?pattern?` and named captures; half (a) is this task
 op/reset.t	27	ok	not ok	resetting an array	#1925 -- `reset` is a NO-OP stub (`p-reset` ignores its argument and returns 1) where perl (a) clears every package variable whose name begins with one of the listed letters -- scalars to undef, arrays and hashes to empty -- and (b) re-arms every `?pattern?` one-match search in the current package.  Probed s473t6c: `$aa="abc"; @ab=(1,2,3); %ac=(k=>1); reset "a"` leaves all three untouched here and empties all three in perl.  Half (b) is already NS:`reset()` for one-match `?pattern?` and named captures; half (a) is this task
 op/reset.t	29	ok	not ok	resetting array in the same gv as a ro scalar	#1925 -- `reset` is a NO-OP stub (`p-reset` ignores its argument and returns 1) where perl (a) clears every package variable whose name begins with one of the listed letters -- scalars to undef, arrays and hashes to empty -- and (b) re-arms every `?pattern?` one-match search in the current package.  Probed s473t6c: `$aa="abc"; @ab=(1,2,3); %ac=(k=>1); reset "a"` leaves all three untouched here and empties all three in perl.  Half (b) is already NS:`reset()` for one-match `?pattern?` and named captures; half (a) is this task
+op/reset.t	42	ok	not ok	check $^W has been zeroed	s506f: passed only because `$^W = 1` was silently LOST ($^W was a raw 0); with $^W a box the row reads 1 and fails on #1925 (`reset` is a no-op stub)
 op/rt119311.t	0	(none)	renumbered	*summary*	NS:`DESTROY` called by garbage collector -- the rows require a DESTROY to run at the exact moment a die/last/next/redo/goto unwinds the stack; the `goto` row also needs NS:Computed goto (`goto EXPR`) (the file aborts at "Can't find label test", a `goto LABEL` out of a sub into file scope)
 op/rt119311.t	15	ok	(missing)	die triggering DESTROY directly inside format	NS:`format` / `write` report formatting -- the file's second half builds `format` templates whose bodies call a sub whose DESTROY re-enters them
 op/rt119311.t	11	ok	(missing)	die triggering DESTROY that calls outer format	NS:`format` / `write` report formatting -- the file's second half builds `format` templates whose bodies call a sub whose DESTROY re-enters them
@@ -5418,7 +5414,6 @@ op/sort.t	164	ok	not ok	overload string called twice	NS:`tie` on an ARRAY or HAS
 op/sort.t	26	ok	not ok	redefinition should not take effect during the sort	NS:Error compatibility for invalid Perl input -- measured s473t6d: redefining the comparator DURING the sort; PCL neither dies nor keeps the old body
 op/sort.t	184	ok	not ok	sort block modifying $a and $b	NS:Writing to `$a`/`$b` inside a sort comparator
 op/sort.t	149	ok	not ok	undef active subr	NS:Error message text and format -- measured s473t6d: `undef &active_sub` must be `Can't undef active subroutine`; PCL's child prints nothing
-op/split.t	32	ok	not ok	[at t/op/split.t line 99]	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the rows read perl's optree (a `const(IV(3))` in the split's B:: dump) and count compile-time vs run-time re-evals of an embedded code block
 op/split.t	149	ok	not ok	assignment to split-to-array (pmtarget/package array)	#1933 -- `my @a = split ...` has a PMTARGET optimisation in perl: the split writes the array in place.  The rows assert the array is the SAME one afterwards
 op/split.t	151	ok	not ok	assignment to split-to-array (stacked)	#1933 -- `my @a = split ...` has a PMTARGET optimisation in perl: the split writes the array in place.  The rows assert the array is the SAME one afterwards
 op/split.t	150	ok	not ok	assignment to split-to-array (targ/lexical)	#1933 -- `my @a = split ...` has a PMTARGET optimisation in perl: the split writes the array in place.  The rows assert the array is the SAME one afterwards
@@ -7801,53 +7796,29 @@ re/pat_rt_report.t	2482	ok	(missing)	utf8::SWASHNEW doesn't cause capture leaks;
 re/qr.t	3	ok	not ok	/$qr/ with $'_ aliased to a match var	#1725
 re/qr_gc.t	1	ok	not ok	destroyed regexp	#1722
 re/qr_gc.t	2	ok	not ok	destroyed regexp with closure capture	#1722
-re/recompile.t	1	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	2	ok	not ok	simple	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	3	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	4	ok	not ok	simple qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	5	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	6	ok	not ok	literal utf8	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	7	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	8	ok	not ok	literal utf8 qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	9	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	10	ok	not ok	longjmp literal utf8	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	11	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	12	ok	not ok	longjmp literal utf8 qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	13	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	14	ok	not ok	utf8	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	15	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	16	ok	not ok	utf8 qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	17	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	18	ok	not ok	longjmp utf8	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	19	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	20	ok	not ok	longjmp utf8	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	21	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	22	ok	not ok	mixed utf8	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	23	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	24	ok	not ok	mixed utf8 qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	25	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	26	ok	not ok	runtime code	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	27	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	28	ok	not ok	runtime code qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	29	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	30	ok	not ok	embedded code	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	31	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	32	ok	not ok	embedded code qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	33	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	34	ok	not ok	mixed code	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	35	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	36	ok	not ok	mixed code qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	37	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	38	ok	not ok	embedded code qr	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	39	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	40	ok	not ok	(??{"constant"})	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	41	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	42	ok	not ok	(??{"folded"."constant"})	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	43	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	44	ok	not ok	(??{$preused_scalar})	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	45	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	46	ok	not ok	(??{number})	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
-re/recompile.t	47	ok	not ok	skip -Dr not compiled in	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/recompile.t	48	ok	not ok	(??{$pvlv_regexp})	NS:Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest -- the file counts the engine's recompilations
 re/reg_email.t	0	ok*	(no TAP)	*summary*	#1716
 re/reg_fold.t	0	ok*	(no TAP)	*summary*	NS:DynaLoader / XS binary extensions -- Storable; plus NS:Internals::* (Internals::SvREADONLY)
@@ -9180,32 +9151,18 @@ run/runenv_randseed.t	3	ok	not ok	Test randomness with PERL_RAND_SEED=2	#1236
 run/runenv_randseed.t	4	ok	not ok	Test randomness with PERL_RAND_SEED=2	#1236
 run/runenv_randseed.t	7	ok	not ok	Works as expected with forks.	#1236
 run/runenv_randseed.t	9	ok	not ok	Works as expected with forks.	#1236
-run/switch0.t	1	ok	not ok	$/ set to 0 via switch	#1702
-run/switchC.t	2	ok	not ok	-C2: no warning on UTF-8 output	#1272
-run/switchC.t	3	ok	not ok	-CI: read in UTF-8 input	#1272
-run/switchC.t	1	ok	not ok	-CO: no warning on UTF-8 output	#1272
-run/switchC.t	6	ok	not ok	-Ci: auto-UTF-8 open for input	#1272
-run/switchC.t	7	ok	not ok	-Ci: auto-UTF-8 open for input affects the current file	#1272
-run/switchC.t	5	ok	not ok	-Co: auto-UTF-8 open for output	#1272
-run/switchC.t	10	ok	not ok	\#!perl -C	#1272
 run/switchC.t	14	ok	not ok	\#!perl -C but not command line	#1272
-run/switchC.t	11	ok	not ok	\#!perl -C followed by another switch	#1272
 run/switchC.t	13	ok	not ok	\#!perl -C with different -C on command line	#1272
-run/switchC.t	12	ok	not ok	\#!perl -C<num> followed by another switch	#1272
 run/switchC.t	15	ok	not ok	perl -C00 [perl \#123991]	#1272
-run/switchF.t	1	ok	not ok	line 1	#1702
-run/switchF.t	2	ok	(missing)	line 2	#1702
+run/switchF.t	0	ok*	(no TAP)	*summary*	s506f #2666: the -F loop now RUNS but reads nothing -- the file does `BEGIN { *ARGV = *DATA }` and PCL's <> does not follow the aliased ARGV
 run/switchI.t	3	ok	not ok	-I	#1708
 run/switchI.t	4	ok	not ok	-I with colons	#1708
-run/switchI.t	1	ok	not ok	Identified entry in @INC	#1702
-run/switchI.t	2	ok	not ok	Identified entry in @INC with double colons	#1702
 run/switchM.t	1	ok	not ok	Ensure -Irun/flib produces correct filename in warnings	#1708
 run/switchM.t	4	ok	not ok	Ensure -Irun/flib loads pmc	#1708
 run/switchM.t	2	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings	#1708
 run/switchM.t	5	ok	not ok	Ensure -Irun/flib/ loads pmc	#1708
 run/switchM.t	3	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings with space after -M	#1708
-run/switcha.t	2	ok	(missing)	testing split of string 'not ok 3'	#1702
-run/switcha.t	1	ok	not ok	testing split of string 'not ok'	#1702
+run/switcha.t	0	ok*	(no TAP)	*summary*	s506f #2666: as run/switchF.t -- the -a loop runs over an ARGV aliased to DATA and reads nothing
 run/switchd-78586.t	1	ok	not ok	[at t/run/switchd-78586.t line 31]	#1706
 run/switchd-78586.t	2	ok	not ok	[at t/run/switchd-78586.t line 39]	#1706
 run/switchd.t	16	ok	not ok	%DB::lsub is not vivified	#1706
@@ -9227,130 +9184,28 @@ run/switchd.t	18	ok	not ok	UTF8 length caches on $DB::sub are flushed	#1706
 run/switchd.t	5	ok	not ok	\#!perl -d:whatever does not throw line numbers off	#1706
 run/switchd.t	21	ok	not ok	putenv does not interfere with PERL5OPT parsing	#1706
 run/switchd.t	17	ok	not ok	setting breakpoints without *DB::dbline aliased	#1706
-run/switches.t	7	ok	not ok	$/ set at compile-time	#1709
-run/switches.t	1	ok	not ok	-0	#1709
-run/switches.t	2	ok	not ok	-0 after a -l	#1709
-run/switches.t	3	ok	not ok	-0 before a -l	#1709
-run/switches.t	5	ok	not ok	-00 (paragraph mode)	#1709
-run/switches.t	6	ok	not ok	-0777 (slurp mode)	#1709
-run/switches.t	80	ok	not ok	-1 correctly unknown	#1709
-run/switches.t	81	ok	not ok	-1 unrecognised on \#! line	#1702
-run/switches.t	82	ok	not ok	-2 correctly unknown	#1709
-run/switches.t	83	ok	not ok	-2 unrecognised on \#! line	#1702
-run/switches.t	84	ok	not ok	-3 correctly unknown	#1709
-run/switches.t	85	ok	not ok	-3 unrecognised on \#! line	#1702
-run/switches.t	86	ok	not ok	-4 correctly unknown	#1709
-run/switches.t	87	ok	not ok	-4 unrecognised on \#! line	#1702
-run/switches.t	88	ok	not ok	-5 correctly unknown	#1709
-run/switches.t	89	ok	not ok	-5 unrecognised on \#! line	#1702
-run/switches.t	90	ok	not ok	-6 correctly unknown	#1709
-run/switches.t	91	ok	not ok	-6 unrecognised on \#! line	#1702
-run/switches.t	92	ok	not ok	-7 correctly unknown	#1709
-run/switches.t	93	ok	not ok	-7 unrecognised on \#! line	#1702
-run/switches.t	94	ok	not ok	-8 correctly unknown	#1709
-run/switches.t	95	ok	not ok	-8 unrecognised on \#! line	#1702
-run/switches.t	96	ok	not ok	-9 correctly unknown	#1709
-run/switches.t	97	ok	not ok	-9 unrecognised on \#! line	#1702
+run/switchd.t	19	ok	not ok	-d does not conflict with sort optimisations	s506f D4: -d is REFUSED (one line, exit 2); the row passed only because the old harness wrapper IGNORED -d
 run/switches.t	35	ok	not ok	-? looks okay	#1709
-run/switches.t	36	ok	not ok	-A correctly unknown	#1709
-run/switches.t	37	ok	not ok	-A unrecognised on \#! line	#1702
-run/switches.t	38	ok	not ok	-B correctly unknown	#1709
-run/switches.t	39	ok	not ok	-B unrecognised on \#! line	#1702
-run/switches.t	135	ok	not ok	-E does not enable strictures	#1709
-run/switches.t	133	ok	not ok	-E enables 'reftype' builtin	#1709
-run/switches.t	132	ok	not ok	-E enables 'say' feature	#1709
-run/switches.t	103	ok	not ok	-E on \#! line	#1702
-run/switches.t	134	ok	not ok	-E works outside of the block created by -n	#1709
-run/switches.t	42	ok	not ok	-G correctly unknown	#1709
-run/switches.t	43	ok	not ok	-G unrecognised on \#! line	#1702
-run/switches.t	44	ok	not ok	-H correctly unknown	#1709
-run/switches.t	45	ok	not ok	-H unrecognised on \#! line	#1702
-run/switches.t	46	ok	not ok	-J correctly unknown	#1709
-run/switches.t	47	ok	not ok	-J unrecognised on \#! line	#1702
-run/switches.t	50	ok	not ok	-K correctly unknown	#1709
-run/switches.t	51	ok	not ok	-K unrecognised on \#! line	#1702
-run/switches.t	54	ok	not ok	-L correctly unknown	#1709
-run/switches.t	55	ok	not ok	-L unrecognised on \#! line	#1702
 run/switches.t	15	ok	not ok	-M	#1709
 run/switches.t	16	ok	not ok	-M with import parameter	#1709
-run/switches.t	24	ok	not ok	-M- not allowed	#1709
 run/switches.t	20	ok	not ok	-M:Foo not allowed	#1709
-run/switches.t	56	ok	not ok	-N correctly unknown	#1709
-run/switches.t	57	ok	not ok	-N unrecognised on \#! line	#1702
-run/switches.t	58	ok	not ok	-O correctly unknown	#1709
-run/switches.t	59	ok	not ok	-O unrecognised on \#! line	#1702
-run/switches.t	62	ok	not ok	-P correctly unknown	#1709
-run/switches.t	63	ok	not ok	-P unrecognised on \#! line	#1702
-run/switches.t	64	ok	not ok	-Q correctly unknown	#1709
-run/switches.t	65	ok	not ok	-Q unrecognised on \#! line	#1702
-run/switches.t	68	ok	not ok	-R correctly unknown	#1709
-run/switches.t	69	ok	not ok	-R unrecognised on \#! line	#1702
-run/switches.t	104	ok	not ok	-S on \#! line	#1702
-run/switches.t	27	ok	not ok	-V generates 20+ lines	#1709
 run/switches.t	28	ok	not ok	-V looks okay	#1709
-run/switches.t	105	ok	not ok	-V on \#! line	#1702
 run/switches.t	137	ok	not ok	-W	#1709
 run/switches.t	138	ok	not ok	-W with no warnings	#1709
-run/switches.t	72	ok	not ok	-Y correctly unknown	#1709
-run/switches.t	73	ok	not ok	-Y unrecognised on \#! line	#1702
-run/switches.t	76	ok	not ok	-Z correctly unknown	#1709
-run/switches.t	77	ok	not ok	-Z unrecognised on \#! line	#1702
-run/switches.t	98	ok	not ok	-_ correctly unknown	#1709
-run/switches.t	99	ok	not ok	-_ unrecognised on \#! line	#1702
-run/switches.t	40	ok	not ok	-b correctly unknown	#1709
-run/switches.t	41	ok	not ok	-b unrecognised on \#! line	#1702
-run/switches.t	9	ok	not ok	-c	#1709
-run/switches.t	100	ok	not ok	-e on \#! line	#1702
-run/switches.t	101	ok	not ok	-f on \#! line	#1702
-run/switches.t	8	ok	not ok	-g undefines $/ at compile-time	#1709
 run/switches.t	34	ok	not ok	-h looks okay	#1709
-run/switches.t	48	ok	not ok	-j correctly unknown	#1709
-run/switches.t	49	ok	not ok	-j unrecognised on \#! line	#1702
-run/switches.t	52	ok	not ok	-k correctly unknown	#1709
-run/switches.t	53	ok	not ok	-k unrecognised on \#! line	#1702
 run/switches.t	18	ok	not ok	-m with import parameters	#1709
-run/switches.t	23	ok	not ok	-m- not allowed	#1709
-run/switches.t	22	ok	not ok	-m-Foo:Bar not allowed	#1709
-run/switches.t	21	ok	not ok	-mFoo:Bar not allowed	#1709
-run/switches.t	60	ok	not ok	-o correctly unknown	#1709
-run/switches.t	61	ok	not ok	-o unrecognised on \#! line	#1702
-run/switches.t	66	ok	not ok	-q correctly unknown	#1709
-run/switches.t	67	ok	not ok	-q unrecognised on \#! line	#1702
-run/switches.t	70	ok	not ok	-r correctly unknown	#1709
-run/switches.t	71	ok	not ok	-r unrecognised on \#! line	#1702
-run/switches.t	13	ok	not ok	-s on the shebang line	#1709
 run/switches.t	12	ok	not ok	-s switch parsing	#1709
-run/switches.t	14	ok	not ok	-sn on the shebang line	#1709
 run/switches.t	33	ok	not ok	-v looks okay	#1709
-run/switches.t	102	ok	not ok	-x on \#! line	#1702
-run/switches.t	74	ok	not ok	-y correctly unknown	#1709
-run/switches.t	75	ok	not ok	-y unrecognised on \#! line	#1702
-run/switches.t	78	ok	not ok	-z correctly unknown	#1709
-run/switches.t	79	ok	not ok	-z unrecognised on \#! line	#1702
-run/switches.t	136	ok	not ok	Spaces on the \#! line (\#30660)	#1702
-run/switches.t	26	ok	not ok	\#!perl -M	#1702
-run/switches.t	25	ok	not ok	\#!perl -m	#1702
 run/switches.t	130	ok	not ok	fail final rename	#1709
 run/switches.t	126	ok	not ok	file successfully saved after fork	#1709
 run/switches.t	124	ok	not ok	fork while in-place editing	#1709
-run/switches.t	29	ok	not ok	perl -V:osname	#1709
-run/switches.t	31	ok	not ok	perl -V:re got a result	#1709
-run/switches.t	30	ok	not ok	perl -V:unknown var	#1709
 run/switches.t	131	ok	not ok	skip Testing without *at functions	#1709
-run/switches.t	108	ok	not ok	warning when no files given	#1709
 run/switchn.t	0	(none)	renumbered	*summary*	#1702
-run/switchn.t	1	ok	not ok	Checking line 1	#1702
 run/switchn.t	2	ok	(missing)	Checking line 2	#1702
+run/switchn.t	1	ok	(missing)	Checking line 1	s506f #2666: the #! -n loop now runs (#1702 done) but reads nothing -- BEGIN *ARGV = *DATA
 run/switchp.t	1	ok	(missing)	-p switch first iteration	#1702
 run/switchp.t	2	ok	(missing)	-p switch second iteration	#1702
 run/switchx.t	8	ok	not ok	-x and -e gives expected error	#1702
-run/switchx.t	1	ok	(missing)	Correct line number	#1702
-run/switchx.t	5	ok	(missing)	Second test file utilized	#1702
-run/switchx.t	2	ok	(missing)	Test file exists	#1702
-run/switchx.t	3	ok	(missing)	Test file utilized	#1702
-run/switchx.t	7	ok	not ok	Test program dies	#1702
-run/switchx.t	6	ok	(missing)	Test the error message when -x can't find a \#!perl line	#1702
-run/switchx.t	4	ok	(missing)	perl -l option tested	#1702
 uni/attrs.t	0	(none)	renumbered	*summary*	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	31	ok	not ok [PCL #30]	Calling closure proto with (no) args	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	32	ok	not ok [PCL #31]	Calling closure proto with no @_ that returns a lexical	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)

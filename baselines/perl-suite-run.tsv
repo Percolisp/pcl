@@ -1722,7 +1722,7 @@ io/iofile.t	3	0	2	1	DIFF	s488a: 1/2 -> 2/1 at a31369fc (s473f member 5, #1074: a
 io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
-io/nargv.t	7	0	11	2	DIFF		0
+io/nargv.t	7	0	5	1	DIFF	s506f F1 (#2669): 11/2 -> 5/1, `local $^I` now takes effect (it was a dead down-cased binding, the rows passed printing to STDOUT); the nested in-place edit then loses the outer output file	0
 io/open.t	188	0	152	36	DIFF	s488a: 154/34 -> 152/36 at 4bdde171 (s473w member 4, #1507: `use overload` is a compile-phase member -- perl's `use` is a BEGIN).  io/open.t builds its NUL-path object at line 443 and declares `use overload '""'` at line 523, so before the fix the object stringified as `OverloadTest=SCALAR(0x..)` and open/chmod failed on a path that did not exist -- the two rows passed for the wrong reason.  They now really stringify to "$temp\0.overload" and join #1710's NUL-in-a-pathname family (PCL accepts a NUL where perl 5.18+ refuses it); their `glob` twin was already failing	0
 io/openpid.t	10	0	10	0	OK	s501b #2082: DIFF 8/2 -> OK 10/0 -- 'message from first/second process': pipe() installs both ends through %p-install-fh (FD_CLOEXEC) and the emulated exec releases every fd, so the reader sees EOF; A/B a0899ba6 8/2 --jobs 1 (scratch/s501b/companion-ab-{base,tree}.log)	0
 io/paragraph_mode.t	80	0	80	0	OK		0
@@ -1862,7 +1862,7 @@ op/defer.t	28	0	4	8	XDIFF	aborted-forms:13: Undefined subroutine &main::defer ca
 op/defined.t	5	0	5	0	OK		0
 op/defins.t	27	0	27	0	OK		0
 op/delete.t	56	0	53	3	DIFF		0
-op/die.t	25	1	19	7	DIFF	s497b: 9/11 -> 19/7, $SIG{__DIE__} is called (#1554): the handler rows run and pass | s473t6b: `die` with no arguments REUSES $@ (PROPAGATE / a reference re-thrown unchanged / "\t...propagated at F line N.\n" / "Died" only when $@ is empty), and $@ is CLEARED on the way INTO an eval (perl's CLEAR_ERRSV), which is what made the reuse rule well-defined	0
+op/die.t	25	1	20	6	DIFF	s506f member 6: 19/7 -> 20/6, the RT #4821 TODO row passes (fresh_perl prog named -e) | s497b: 9/11 -> 19/7, $SIG{__DIE__} is called (#1554): the handler rows run and pass | s473t6b: `die` with no arguments REUSES $@ (PROPAGATE / a reference re-thrown unchanged / "\t...propagated at F line N.\n" / "Died" only when $@ is empty), and $@ is CLEARED on the way INTO an eval (perl's CLEAR_ERRSV), which is what made the reuse rule well-defined	0
 op/die_except.t	12	0	12	0	OK		0
 op/die_exit.t	17	0	17	0	OK		0
 op/die_keeperr.t	24	0	15	9	DIFF		0
@@ -1966,14 +1966,14 @@ op/read.t	2116	0	2116	0	OK		0
 op/readdir.t	16	0	11	5	DIFF	s473f: 13/3 -> 11/5 -- #1309: `opendir($fh[0],...)` / `opendir($fh{abc},...)` now INSTALL into the element, so rows 57-58 (`isnt("$fh", "$fh[0]")`) stop passing on nothing: all three dirhandles used to differ only because two were undef.  PCL's dirhandle payload is a `(index . names)` CONS, which the box model reads as a LIST, so `ref` is ARRAY and the three stringify identically -- task #1428, whose fix is worth +5 rows here	0
 op/readline.t	35	1	25	7	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
 op/recurse.t	28	0	26	2	DIFF	s504 #2389: 27/1 -> 26/2 DOWN at 8d41b6b6 (s492c): the SECOND 64K-deep-recursion row ("no coredump expected") fails with the first -- #1929, binding stack exhausted | crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.	0
-op/ref.t	257	0	207	35	DIFF	s497b: 202/40 -> 207/35 = +6 mine (PVBM SCALAR/ARRAY: strict refs #2103; four "aliased to literal": read-only literal #1391/#2103) and -1 PRE-EXISTING "UNIVERSAL::AUTOLOAD called when freeing qr//" (201/41 on a 24422497 extraction, #2407) | s470bv: TWO steps, both measured: #1221 (b25afbc) 199/43 -> 201/41, then s470bs #1048 (row "IO slot of the temporary glob is set correctly") -> 202/40 at 424cabc | aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
+op/ref.t	257	0	210	32	DIFF	s506f member 6: 207/35 -> 210/32, rows at ref.t 697-699 (fresh_perl prog named -e) | s497b: 202/40 -> 207/35 = +6 mine (PVBM SCALAR/ARRAY: strict refs #2103; four "aliased to literal": read-only literal #1391/#2103) and -1 PRE-EXISTING "UNIVERSAL::AUTOLOAD called when freeing qr//" (201/41 on a 24422497 extraction, #2407) | s470bv: TWO steps, both measured: #1221 (b25afbc) 199/43 -> 201/41, then s470bs #1048 (row "IO slot of the temporary glob is set correctly") -> 202/40 at 424cabc | aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
 op/require_37033.t	10	0	5	1	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linu	0
 op/require_errors.t	73	0	5	68	DIFF		0
 op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
-op/reset.t	45	0	26	19	DIFF		0
+op/reset.t	45	0	25	20	DIFF	s506f: 26/19 -> 25/20, "check $^W has been zeroed" passed on a LOST `$^W = 1` ($^W was a raw 0); #1925	0
 op/reverse.t	25	0	25	0	OK		0
 op/rt119311.t	22	0	11	2	DIFF	aborted-forms:2: Can't find label test at rtN.t line N.	0
 op/runlevel.t	24	0	10	14	DIFF	s501t #155: 8/16 -> 10/14 (the `tie my @bar` / `tie %h` child programs)	0
@@ -1988,7 +1988,7 @@ op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	55	295	XDIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at smartmatch.t line N  | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	0
 op/sort.t	205	0	185	20	DIFF	s501t #155: 183/22 -> 185/20 (overload sort result; EXTEND by pp_sort on a tied array)	0
 op/splice.t	34	0	34	0	OK		0
-op/split.t	219	0	213	6	DIFF		0
+op/split.t	219	0	214	5	DIFF	s506f: 213/6 -> 214/5, split.t line 99 (-D: perl's non-debugging message)	0
 op/split_unicode.t	147	0	107	40	DIFF		0
 op/sprintf.t	559	0	534	25	DIFF		0
 op/sprintf2.t	1704	0	1679	25	DIFF		0
@@ -2079,7 +2079,7 @@ re/qr-72922.t	14	0	14	0	OK		0
 re/qr.t	4	0	3	1	DIFF		0
 re/qr_gc.t	2	0	0	2	DIFF		0
 re/qrstack.t	1	0	1	0	OK		0
-re/recompile.t	48	0	0	48	DIFF		0
+re/recompile.t	48	0	24	24	DIFF	s506f: 0/48 -> 24/24, the -Dr children print perl's non-debugging -D message ("-Dr not compiled in" skips)	0
 re/reg_60508.t	1	0	1	0	OK	s470bv: #1221 (b25afbc; 0/1 at a3d6d8e)	0
 re/reg_email.t	13	0	0	0	DIFF		0
 re/reg_email_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
@@ -2136,22 +2136,22 @@ run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 run/runenv_hashseed.t	278	0	274	4	DIFF		0
 run/runenv_randseed.t	9	0	3	6	DIFF	s473 (Fable): 2/7 -> 3/6, OURS: task #1236 (s470bx) -- rand is auto-seeded from entropy on first use, so two runs differ; measured 2/7 on the 637fc58e extraction and 3/6 on d348dcea	0
 run/script.t	3	0	3	0	OK		0
-run/switch0.t	1	0	0	1	DIFF		0
-run/switchC.t	15	0	3	12	DIFF	s470bv: #1115 -3 / +1 and #1221 +1, both bisected: rows 3/5/6 (-CI,-Co,-Ci) passed only because PCL decoded EVERYTHING by default, i.e. -C was permanently on by accident; row 8 started passing because bytes is right without the switch; row 4 (-CE) passes since #1221 makes utf8::encode real.  PCL implements -C nowhere -- task #1272	0
+run/switch0.t	1	0	1	0	OK	s506f #1702: 0/1 -> 1/0, the #! -0 switch is honoured	0
+run/switchC.t	15	0	12	3	DIFF	s506f: 3/12 -> 12/3, -C flags mapped (S/I/O/E/A/i/o/L) | s470bv: #1115 -3 / +1 and #1221 +1, both bisected: rows 3/5/6 (-CI,-Co,-Ci) passed only because PCL decoded EVERYTHING by default, i.e. -C was permanently on by accident; row 8 started passing because bytes is right without the switch; row 4 (-CE) passes since #1221 makes utf8::encode real.  PCL implements -C nowhere -- task #1272	0
 run/switchDx.t	0	0	0	0	NOTAP		0
-run/switchF.t	2	0	0	1	DIFF		0
+run/switchF.t	2	0	0	0	DIFF	s506f #2666: 0/1 -> 0/0, the -F loop now runs but reads nothing (BEGIN *ARGV = *DATA)	0
 run/switchF1.t	5	0	5	0	OK		0
 run/switchF2.t	5	0	5	0	OK		0
-run/switchI.t	4	0	0	4	DIFF		0
+run/switchI.t	4	0	2	2	DIFF	s506f #1702: 0/4 -> 2/2, #! -I prepends each in turn	0
 run/switchM.t	5	0	0	5	DIFF	s488a: 2/3 -> 0/5 at ec8ac8c0 (s473u member 2, #1545: one transpile server per test process), measured 2/3 at its parent f6db155b.  The two "Ensure -Irun/flib loads pmc" rows are the file's .pmc-preference half; #1708 owns the file and had recorded this drift as PRE-EXISTING and unattributed	0
-run/switcha.t	2	0	0	1	DIFF		0
-run/switchd-78586.t	2	0	0	2	DIFF		0
-run/switchd.t	21	0	2	19	DIFF	undef-fn:main::pl-ARRAY	0
-run/switches.t	140	0	29	111	DIFF	s504 #2389: 28/112 -> 29/111 UP at 8d41b6b6 (s492c): `fail backup rename` passes (#1709)	0
-run/switchn.t	3	0	1	1	DIFF		0
+run/switcha.t	2	0	0	0	DIFF	s506f #2666: 0/1 -> 0/0, as run/switchF.t	0
+run/switchd-78586.t	2	0	0	0	TRANSPILE	s506f D4: 0/2 -> TRANSPILE, its #! line carries -d:Mod, refused (perl enters the debugger)	0
+run/switchd.t	21	0	1	20	DIFF	s506f D4: 2/19 -> 1/20, -d refused (the row passed because the old wrapper IGNORED -d) | undef-fn:main::pl-ARRAY	0
+run/switches.t	140	0	125	15	DIFF	s506f (#2097 #1709, #2033): 29/111 -> 125/15, perl's switches in the harness wrapper; residue #2667 | s504 #2389: 28/112 -> 29/111 UP at 8d41b6b6 (s492c): `fail backup rename` passes (#1709)	0
+run/switchn.t	3	0	1	0	DIFF	s506f #1702/#2666: 1/1 -> 1/0, the #! -n loop runs but reads nothing (BEGIN *ARGV = *DATA)	0
 run/switchp.t	3	0	1	0	DIFF		0
 run/switcht.t	0	0	9	4	NOTAP		0
-run/switchx.t	8	0	0	2	DIFF	s486c merge review (Fable, 2026-09-17): 0/3 -> 0/2 -- #1652's progfile plumbing makes the -x child RUN; its output is #1702's (the shebang's -l is not honoured, so `1..8` arrives without a newline and glues `not ok 6` to the plan); the child is byte-identical on main 2ac855aa, only the harness changed	0
+run/switchx.t	8	0	7	1	DIFF	s506f: 0/2 -> 7/1, -x and the #! -l are honoured | s486c merge review (Fable, 2026-09-17): 0/3 -> 0/2 -- #1652's progfile plumbing makes the -x child RUN; its output is #1702's (the shebang's -l is not honoured, so `1..8` arrives without a newline and glues `not ok 6` to the plan); the child is byte-identical on main 2ac855aa, only the harness changed	0
 uni/attrs.t	35	0	8	26	DIFF		0
 uni/bless.t	84	0	83	1	DIFF		0
 uni/caller.t	18	0	7	12	DIFF		0
