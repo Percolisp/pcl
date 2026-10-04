@@ -1568,5 +1568,43 @@ tie my $sleep, "TT"; select(undef, undef, undef, $sleep); print "fetch ", TT::n(
 my $w = chr(300); eval { select($w, undef, undef, 0) }; print "wide ", ($@ =~ /^Wide character/ ? "died" : "lived:$@"), "\n";
 });
 
+# s507b (#2680): an EMPTY-valued body -- `sub f { }`, a last statement `()`,
+# `do { }`, `eval { }`, an empty taken if/unless branch, `use constant E =>
+# ()` -- is the EMPTY LIST in list context (zero elements) and undef in scalar
+# context, like a bare `return;`.  INVERSE: main 08de9e4f made each one ONE
+# undef element.  The rows that must NOT move: a false bare-if / a loop as the
+# last statement (perl returns the condition's value), `{ }` (an anon hash).
+test_transpile("an empty-valued sub / block contributes no element to a list (s507b, #2680)", q{
+sub e3 { } sub e0 { () } sub e00 { (()) } sub cnt { scalar(@_) } sub one { 1 }
+my @b = (e3()); my @c = (e3(), 1); my @d; push @d, e3(), e0();
+print "1 ", scalar(@b), scalar(@c), scalar(@d), cnt(e3()), cnt(e3(), 1), cnt(e00()), "\n";
+my $n = 0; $n++ for e3(); print "2 $n [", join(",", e3(), 1), "] ", scalar(my @e = (one(), e3(), one())), "\n";
+my $o = bless {}, 'K'; sub K::hook { } sub K::lst { () } my @m = ($o->hook, $o->lst, 1); push @d, $o->hook; print "3 ", scalar(@m), scalar(@d), "\n";
+my $cr = \&e3; my @r = ($cr->(), 1); my @r2 = (&e3, 1); my @r3 = (sub { }->(), 1); print "4 ", scalar(@r), scalar(@r2), scalar(@r3), "\n";
+my @r8 = (do { }, 1); my @r9 = (do { () }, 1); my @ev = (eval { }, 1); my $ds = do { }; print "5 ", scalar(@r8), scalar(@r9), scalar(@ev), (defined $ds ? "d" : "u"), "\n";
+my $s = e3(); my $s0 = e0(); print "6 ", (defined $s ? "d" : "u"), (defined $s0 ? "d" : "u"), (e3() ? "t" : "f"), scalar(() = e3()), "\n";
+sub e5 { my $x = shift; (); } sub e6 { if ($_[0]) { () } else { (1, 2) } } sub ie { if ($_[0]) { } } sub ul { unless ($_[0]) { } }
+print "7 ", scalar(my @a5 = (e5(1), 9)), scalar(my @a6 = (e6(1), 9)), scalar(my @a7 = (e6(0), 9)), scalar(my @a8 = (ie(1), 9)), scalar(my @a9 = (ie(0), 9)), scalar(my @aa = (ul(0), 9)), "\n";
+sub e10 { my $x = 1; if ($x > 5) { return 7 } } sub e11 { for my $i (1 .. 2) { } } sub nest { { } } sub b0 { { (); } } sub md { 1 if $_[0] }
+print "8 ", scalar(my @b1 = (e10(), 1)), scalar(my @b2 = (e11(), 1)), scalar(my @b3 = (nest(), 1)), scalar(my @b4 = (b0(), 1)), scalar(my @b5 = (md(0), 9)), "\n";
+my @mp = map { e3() } 1 .. 3; my @mp2 = map { e3(), $_ } 1 .. 3; my @gp = grep { e3() } 1 .. 3; my @so = sort { $a <=> $b } (3, e3(), 1);
+print "9 ", scalar(@mp), scalar(@mp2), scalar(@gp), scalar(@so), "\n";
+{ package D; sub new { bless {}, shift } sub DESTROY { } sub import { } sub BUILD { } }
+{ my $dd = D->new; } D->import; my @bd = (D->new->BUILD, 1); print "10 ", scalar(@bd), "\n";
+use constant E => (); my @ce = (E, 1); print "11 ", scalar(@ce), " [", join(",", E, 2), "]\n";
+});
+
+# s507b (#752): a SIGNATURE sub with an empty body returns the empty list --
+# its parameter binding is not the body's value (named, with a default, a
+# slurpy, and anonymous).  INVERSE: main 08de9e4f returned one element.
+test_transpile("an empty-bodied signature sub returns the empty list (s507b, #752)", q{
+use feature 'signatures'; no warnings;
+sub sg ($x) { } sub sgd ($x, $y = 2) { } sub sgs ($x, @r) { } sub sgb ($x) { $x }
+my $sa = sub ($x) { }; my $sb = sub ($x, $y = 3) { };
+my @a = (sg(7), 9); my @b = (sgd(7), 9); my @c = (sgs(1, 2, 3), 9); my @d = (sgb(7), 9);
+my @e = ($sa->(1), 9); my @f = ($sb->(1), 9); my $s = sg(7);
+print scalar(@a), scalar(@b), scalar(@c), scalar(@d), scalar(@e), scalar(@f), " ", (defined $s ? "d" : "u"), "\n";
+});
+
 
 done_testing();

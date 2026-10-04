@@ -2120,6 +2120,20 @@ must be computed in the CALLER's context — which is what `p-return`'s own
 `*pcl-caller-wantarray*` rebind used to supply.  A single-statement body never
 rebinds `*wantarray*`, so it needs no wrap.
 
+**A body whose value is "nothing" is the empty list (normative, s507b, task
+#2680).**  An EMPTY sub body, `do { }` / `eval { }` block, taken if/unless
+branch or tail bare block, a body whose last statement is `()`, and
+`use constant E => ()` all end in `(p-return-empty)` — the empty list in list
+context, undef in scalar — never raw `nil`, which a list site keeps as ONE
+undef element.  A signature's parameter binding is not the body's value
+(`sub f ($x) { }` returns the empty list too, #752).  `p-return-empty` does not
+throw, so it carries no `:nonlocal_exit.return` obligation.
+
+```lisp
+(p-sub pl-hook (&rest %_args) (:writes-args nil :needs ())
+  (p-args-body (block nil (p-return-empty))))     ; sub hook { }  →  (hook(), 1) has 1 element
+```
+
 Everything else still throws: a `return` under a statement modifier, a
 multi-element `return (A, B)`, a `return` nested in a compound or a loop, and a
 `return` inside `eval { }` or a sort comparator (whose frame is a different

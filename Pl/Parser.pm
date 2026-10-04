@@ -1343,6 +1343,13 @@ sub _desugar_anon_signatures_once {
 
     my $prologue = $self->_anon_signature_prologue($text);
     next unless defined $prologue;
+    # The prologue BINDS; it is not the body's value.  An empty body
+    # (`sub ($x) { }`) returns the empty list, so it gets the explicit `()`
+    # tail the lowering turns into that value (#752 / #2680) — without it the
+    # synthesized `my (…) = @_` was the tail and its value was returned.
+    $prologue .= ' ();'
+      if !grep { $_->significant && !$_->isa('PPI::Statement::Null') }
+                $block->schildren;
 
     my $pdoc = fragment_doc($prologue) or next;
     my @pel  = $pdoc->children;
@@ -9008,6 +9015,12 @@ sub _process_sub_statement {
     $self->_with_declarations($block, sub {
       $self->_process_block($block);
     }, 1);  # is_sub_body=1: enable two-phase scoped block
+    # An EMPTY body (`sub f ($x) { }`) is the empty list in list context, undef
+    # in scalar — a bare `return;`'s value, read in the CALLER's context because
+    # the :void regime is bound here (#2680 / #752; Parser2::_empty_value_form
+    # is the v2 twin).
+    $self->_emit("(p-return-empty *pcl-caller-wantarray*)")
+      if !grep { $_->significant && !$_->isa('PPI::Statement::Null') } $block->schildren;
     # Restore package stack in case of inline package switches inside the sub
     $self->environment->package_stack($saved_pkg_stack);
     $self->environment->state_var_renames($saved_renames);
@@ -11191,8 +11204,14 @@ sub _emit_constant {
   my $name        = shift;
   my $value_parts = shift;
 
-  # Compile the value expression to CL
-  my $cl_value = $self->_compile_constant_value($value_parts);
+  # Compile the value expression to CL.  `use constant E => ()` is the empty
+  # list — a bare `return;`'s value, not the (progn) = NIL that one undef
+  # element in a list (#2680; Parser2::_empty_value_form is the v2 twin).
+  my @vp = grep { ref $_ && $_->significant } @$value_parts;
+  my $cl_value = (@vp == 1 && $vp[0]->isa('PPI::Structure::List')
+                  && !grep { $_->significant } $vp[0]->schildren)
+               ? '(p-return-empty)'
+               : $self->_compile_constant_value($value_parts);
 
   # Emit as a function (Perl implements constants as subs)
   # Use p-sub for compile-time visibility (BEGIN blocks can use constants)

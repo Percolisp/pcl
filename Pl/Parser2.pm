@@ -8943,6 +8943,11 @@ sub _lower_sub_inner {
     $tail_param = undef;
   }
   $self->_reg_lex(@{ $params // [] });
+  # The fast paths below CONSUME the body's leading `my (…) = @_` / shift run,
+  # so an empty remainder is not an empty body -- except for a SIGNATURE sub,
+  # whose synthesized unpack is a binding, not a statement: `sub f ($x) { }`
+  # returns the empty list (#752).
+  my $keep_nil = !($self->{_sig_normalized}{ refaddr $sub } && !$tail_param);
 
   if ($params) {
     # The raw path drops @_ entirely, so the body must not observe it by ANY
@@ -8965,7 +8970,7 @@ sub _lower_sub_inner {
       return $self->_sub_form($clname, $sub,
               ['p-raw-params', ['list', map { _param_entry($_, $vi) } @$params],
                 $self->_sig_arity_forms($sub, ':arity'),
-                ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi),
+                ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi, $keep_nil),
                   ($tail_param ? (cl_sym($tail_param)) : ())]]);
     }
     # Old convention with boxed params + synthesized list-assign binding.
@@ -8976,7 +8981,7 @@ sub _lower_sub_inner {
               _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @$params],
                 Pl::CLForm::ctx_bind('nil',
                   ['p-list-=', ['vector', map { cl_sym($_) } @$params], '@_']),
-                $self->_lower_body_regime(\@body_stmts, $vi),
+                $self->_lower_body_regime(\@body_stmts, $vi, $keep_nil),
                 ($tail_param ? (cl_sym($tail_param)) : ()))]]);
   }
 
@@ -9156,8 +9161,13 @@ sub _sub_facts {
 # statements at any depth, so the regime would be two pure-overhead dynamic
 # binds per call (accessors!) — it keeps the direct per-expression scheme.
 sub _lower_body_regime {
-  my ($self, $stmts, $vi) = @_;
+  my ($self, $stmts, $vi, $keep_nil) = @_;
   my @live = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
+  # An EMPTY body's value is the empty list (#2680).  $keep_nil: the caller
+  # has consumed the body's REAL statements (the `my (…) = @_` fast paths) and
+  # supplies the value itself — an empty remainder there is not an empty body.
+  return ($self->_p_file_form, ['p-return-empty'])
+    if !@live && !$keep_nil;
   # THE SUB BODY'S LAST STATEMENT, by identity (task #994).  A `return` there
   # is in TAIL position -- nothing stands between it and the sub frame's
   # `catch :p-return`, so its value IS the frame's value.  Recorded here
@@ -9225,6 +9235,13 @@ sub _lower_scope {
   $self->environment->push_scope;
   my @forms = $self->_lower_block($stmts, $vi, $tail_ctx);
   $self->environment->pop_scope;
+  # An EMPTY block whose value is read — a taken if/unless branch, a bare
+  # block in tail position — is the empty list (#2680).  Asked here, at the
+  # scope's ENTRY, because _lower_block recurses with an empty remainder after
+  # every block's last statement.
+  @forms = ($self->_empty_value_form($tail_ctx))
+    if defined $tail_ctx && "$tail_ctx" eq 'inherit'
+    && !grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
   $self->{_live_lex} = \%saved;
   $self->{_let_bound_vars} = \%saved_lb;
   return @forms;
@@ -10855,6 +10872,12 @@ sub _lower_stmt {
   # through v1, which owns their loop/do-while semantics.
   return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
 
+  # `()` as the value of its body (`sub f { … ; () }`): the empty list, not
+  # raw NIL (#2680, _empty_value_form).
+  return $self->_empty_value_form($tail_ctx)
+    if !$mod && defined $tail_ctx && "$tail_ctx" eq 'inherit'
+    && _is_empty_list_expr($expr);
+
   # A postfix `EXPR if/unless COND` whose value is the sub's return ($tail_ctx
   # defined) yields the COND value when the body is skipped (`sub f { 5 if 0 }`
   # → 0), like a block bare-if — same ret-var transform as the block form.
@@ -11044,6 +11067,32 @@ sub _restore_caller_wa {
     unless defined $tail_ctx && "$tail_ctx" eq 'inherit'
     && $self->environment->wa_void_active && @forms;
   return Pl::CLForm::ctx_bind('*pcl-caller-wantarray*', @forms);
+}
+
+# ── A VALUE OF "NOTHING" (task #2680, ir-spec §5) ─────────────────────────────
+# perl's value of an EMPTY body — a sub, a `do`/`eval` block, a taken if/unless
+# branch, a bare block — and of a body whose last statement is the empty list
+# `()`, is the EMPTY LIST in list context and undef in scalar context: exactly
+# what a bare `return;` yields (rule 11: the sibling), without the throw.  The
+# body used to end in nothing / `(progn)`, i.e. raw NIL, which a list site
+# keeps as ONE undef element (`(e3(), 1)` had 2 elements where perl has 1).
+# Only for an 'inherit' tail — the value's context is the reader's: map's
+# LIST tail already treats NIL as zero elements, and statement position has no
+# value.  The form reads *wantarray*; under the sub-body :void regime the
+# caller's context is restored first, as for every tail.
+sub _empty_value_form {
+  my ($self, $tail_ctx) = @_;
+  return ($self->_restore_caller_wa($tail_ctx, ['p-return-empty']))[0];
+}
+
+# `()`, `( )`, `(())` — a parenthesised list with nothing in it, at any depth.
+sub _is_empty_list_expr {
+  my ($expr) = @_;
+  return 0 unless @$expr == 1 && $expr->[0]->isa('PPI::Structure::List');
+  my @in = $expr->[0]->schildren;
+  return 1 unless @in;
+  return 0 unless @in == 1 && $in[0]->isa('PPI::Statement');
+  return _is_empty_list_expr([_strip_semi($in[0]->schildren)]);
 }
 
 # True if the statement contains an `m//g` match (list-vs-scalar context
@@ -12137,7 +12186,14 @@ sub _lower_embedded_body {
   }
   my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
               $block->schildren;
-  return ['nil'] unless @stmts;
+  # An empty `do { }` / `eval { }` is the empty list in list context (#2680,
+  # _empty_value_form's value, read in the block's OWN context — the enclosing
+  # sub's :void regime does not reach in here, see wa_void_active below); map's
+  # LIST tail and a grep/sort test read NIL correctly as it is.
+  if (!@stmts) {
+    return [ ($for_func eq 'do' || $for_func eq 'eval')
+             ? ['p-return-empty'] : 'nil' ];
+  }
 
   # A `package` statement ANYWHERE in the block: v1's machinery wraps the
   # body in the (*package* / *pcl-current-package*) revert let — the native
@@ -12241,17 +12297,16 @@ sub _lower_embedded_anon {
   my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
               $block->schildren;
   if (!@stmts) {
-    # Empty sub {}: v1's wrapper with the empty :void body (a body-less let
-    # prints "(let ((*wantarray* :void)))" — same nil value, whitespace-only
-    # vs v1's text).  Normalized structurally per task #78 E2.final.
+    # Empty sub {}: v1's wrapper, whose body's value is the empty list (#2680
+    # — _lower_body_regime's empty-body answer; it used to be an empty :void
+    # let, i.e. raw NIL, one undef element in a list).
     return ['lambda', ['list', '&rest', '%_args'],
             ['let', ['list',
                      ['list', '@_', ['p-flatten-args', '%_args']],
                      $self->_anon_home_pkg_binding,
                      ['list', '*pcl-caller-wantarray*', '*wantarray*']],
              ['p-sub-frame',
-              ['block', 'nil',
-               Pl::CLForm::ctx_bind(':void')]]]];
+              ['block', 'nil', ['p-return-empty']]]]];
   }
 
   # Same conservative declines as the block form: package switches need v1's

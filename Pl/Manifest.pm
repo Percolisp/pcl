@@ -97,8 +97,10 @@ my %OBLIGATION = (
        p-local-array-slice p-local-deref-scalar p-local-deref-array
        p-local-deref-hash p-box-for-local)),
   # non-local exit: an exception, a longjmp, or a labelled break
+  # `p-return-empty' is NOT here: it is the empty-list VALUE (a bare tail
+  # `return;`, an empty body, a tail `()` — #2680), with no throw; a non-tail
+  # bare `return;` is `(p-return)', which carries the class itself.
   'p-return'        => 'nonlocal_exit.return',
-  'p-return-empty'  => 'nonlocal_exit.return',
   'p-last'          => 'nonlocal_exit.loop_control',
   'p-last-dynamic'  => 'nonlocal_exit.loop_control',
   'p-next'          => 'nonlocal_exit.loop_control',
