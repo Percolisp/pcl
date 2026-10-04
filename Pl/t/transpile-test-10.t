@@ -1627,5 +1627,39 @@ my $bp = '('; my @b2 = eval { split($bp, "a(b") }; print "badvar [", ($@ ? "died
 $_ = "p.q.r"; my @d = split '\.'; show("default", @d);
 });
 
+# s507b (#2687): `require "./M.pm"` -- an EXPLICIT path (./ ../ /) is used as
+# given whatever its suffix, never searched in @INC; %INC keys the string as
+# given; a second require is a no-op; BEGIN-time and eval-trapped spellings.
+# INVERSE: main 08de9e4f died "Can't locate ./M2.pm in @INC".
+test_transpile("require \"./M.pm\" loads the file as given (s507b, #2687)", q{
+my $d = "/tmp/pcl-s507b-req-$$"; mkdir $d; mkdir "$d/sub"; chdir $d or die;
+for (["M2.pm", "package M2; our \$n++; sub v { 7 } 1;"], ["sub/M5.pm", "package M5; sub y { 5 } 1;"], ["M4.pm", "package M4; sub x { 4 } 1;"]) {
+  open my $f, ">", $_->[0] or die; print $f $_->[1], "\n"; close $f }
+require './M2.pm'; require "./M2.pm"; print "1 ", M2::v(), " n=$M2::n ", (exists $INC{"./M2.pm"} ? "key" : "nokey"), (exists $INC{"M2.pm"} ? " bare" : " nobare"), "\n";
+require "./sub/M5.pm"; require "../" . (split m{/}, $d)[-1] . "/sub/M5.pm"; print "2 ", M5::y(), "\n";
+print "3 ", (eval { require "./M4.pm"; 1 } ? "ok" : "fail"), " ", (eval { require "./Nope.pm"; 1 } ? "ok" : "fail"), " ", (eval { require "M2.pm"; 1 } ? "ok" : "fail"), "\n";
+unlink "M2.pm", "M4.pm", "sub/M5.pm"; rmdir "sub"; chdir "/"; rmdir $d;
+});
+
+# s507b (#2684): an explicit `close ARGV` resets `$.` (perlfunc's `close ARGV
+# if eof` idiom numbers each file from 1); the implicit move to the next file
+# does not; a refilled @ARGV counts from 1 again; close mid-file skips to the
+# next file.  INVERSE: main 08de9e4f numbered on (f2:3:c) and close answered "".
+test_transpile("close ARGV resets \$. and moves <> to the next file (s507b, #2684)", q{
+my $d = "/tmp/pcl-s507b-argv-$$"; mkdir $d;
+my %c = (f1 => "a\nb\n", f2 => "c\n", f3 => "d\ne\n");
+for (sort keys %c) { open my $f, ">", "$d/$_" or die; print $f $c{$_}; close $f }
+@ARGV = map { "$d/$_" } qw(f1 f2 f3);
+while (<>) { (my $n = $ARGV) =~ s{.*/}{}; print "$n:$.:$_"; close ARGV if eof }
+print "after loop [$.]\n";
+@ARGV = map { "$d/$_" } qw(f1 f2);
+while (<>) { (my $n = $ARGV) =~ s{.*/}{}; print "B $n:$.:$_" }
+print "B after [$.]\n";
+@ARGV = map { "$d/$_" } qw(f1 f2 f3);
+my $l = <>; print "C1 $.:$l"; my $c = close(ARGV); print "C close=[$c] dot=[$.]\n";
+$l = <>; print "C2 $.:$l";
+unlink map { "$d/$_" } keys %c; rmdir $d;
+});
+
 
 done_testing();

@@ -18752,6 +18752,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    GLOB (IO::Handle->new / \\*FH), so close() quietly did nothing and the
    buffered output was lost.
    Returns perl's 1 or +P-CLOSE-FALSE+ — never T/NIL, see that constant."
+  (when (%p-argv-handle-p fh) (return-from %p-close-impl (%p-close-argv)))
   (let ((v (%p-resolve-fh fh)))
     (cond
       ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh) 1)
@@ -21119,8 +21120,13 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Scalar-context <> : read one record across the @ARGV file sequence."
   (loop
    (unless *p-argv-stream*
+     ;; An in-place edit still open (an explicit `close ARGV' leaves ARGVOUT
+     ;; selected until the next file opens, as perl does) is committed first.
+     (%p-inplace-finish)
      (setf *p-argv-stream* (%p-argv-open-next))
-     (unless *p-argv-stream* (return nil))
+     ;; Every file consumed: `$.' keeps its last value, but a LATER pass of <>
+     ;; (a refilled @ARGV) counts from 1 again — perl's IOf_START (#2684).
+     (unless *p-argv-stream* (setf *p-argv-last-count* 0) (return nil))
      ;; Seed the new file's $. with the cumulative count from prior files.
      (setf (gethash *p-argv-stream* *p-fh-lines*) *p-argv-last-count*))
    (let ((line (%p-readline-impl *p-argv-stream*)))   ; sets last-handle, bumps $.
@@ -21141,6 +21147,27 @@ buffer's fill-pointer; everything else falls back to file-length."
        (if line
            (vector-push-extend (make-p-box line) result)
            (return result))))))
+
+(defun %p-close-argv ()
+  "An EXPLICIT `close ARGV' (task #2684): close the file <> is reading and
+   RESET `$.' — perlfunc's `close ARGV if eof' idiom numbers each file from 1.
+   The implicit move to the next file does not reset it (%p-readline-argv).
+   The next <> opens the next @ARGV file; an in-place edit stays the selected
+   output until then, as perl's ARGVOUT does.  Perl's answer: 1, or \"\"
+   when no file is open."
+  (let ((s *p-argv-stream*))
+    (cond
+      ((null s) (%p-io-errno-fail 9) +p-close-false+)
+      (t (unless (eq s *standard-input*) (ignore-errors (close s)))
+         (setf (gethash s *p-fh-lines*) 0
+               *p-argv-last-count* 0
+               *p-argv-stream* nil)
+         1))))
+
+(defun %p-argv-handle-p (fh)
+  "True when FH (a resolved handle argument) is the bareword ARGV -- the handle
+   <> reads; the same spelling test as %p-readline-argv-form-p."
+  (and (symbolp fh) fh (string-equal (symbol-name fh) "ARGV")))
 
 (defun %p-readline-argv-form-p (form)
   "True if FORM is the diamond marker (quote ARGV) emitted by codegen for <ARGV>."
@@ -25983,7 +26010,12 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (gethash path-str *p-inc-table*)
       (return-from p-require-file t))
     ;; A `.pm` path is a module require — delegate to the bareword machinery.
-    (when (and (>= (length path-str) 3)
+    ;; NOT an explicit path (`./M.pm`, `../lib/M.pm`, `/abs/M.pm`): perl's rule
+    ;; is about the PATH, not the suffix, and such a name is used as given,
+    ;; never searched in @INC — the arm below, with %INC keyed by the string
+    ;; as given (#2687).
+    (when (and (not (%p-explicit-path-p path-str))
+               (>= (length path-str) 3)
                (string= path-str ".pm" :start1 (- (length path-str) 3)))
       (let* ((bare (subseq path-str 0 (- (length path-str) 3)))
              (module-name (with-output-to-string (s)
