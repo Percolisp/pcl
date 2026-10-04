@@ -73,8 +73,10 @@ sub examples {
         }
         else { die "marker at line " . ($i + 1) . ": a ```$lang block cannot be checked\n" }
     }
-    s{^\./pcl }{pcl } for map { $_->[0] } @ex;
-    s{&& \./pcl }{&& pcl }g for map { $_->[0] } @ex;
+    for my $e (@ex) {
+        $e->[0] =~ s{^\./pcl }{pcl };
+        $e->[0] =~ s{&& \./pcl }{&& pcl }g;
+    }
     return @ex;
 }
 
