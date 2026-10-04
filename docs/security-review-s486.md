@@ -44,6 +44,10 @@ What CAN be a PCL finding:
   `END`); `-e` code is written to such a file; `-I` directories are passed to
   `pl2cl` as separate `-I` arguments.  `pcl --version` shells out with
   `\Q…\E`-quoted paths.
+- **SUPERSEDED s506f (2026-10-04): `pcl -c` now does what `perl -c` does —
+  `BEGIN`/`CHECK` blocks and `use` imports RUN, then `NAME syntax OK` on
+  STDERR (docs/pcl-commands.md).  `pl2cl FILE` is still a pure translation.**
+  What this review verified at the time:
 - **`pcl -c` executes nothing from the file.**  It transpiles, prints
   `syntax OK` and exits without loading the Lisp — unlike `perl -c`, which runs
   `BEGIN` blocks and `use`d modules.  `pl2cl FILE` is likewise a pure
@@ -156,7 +160,8 @@ how this session's own registry-stale count read 19 where the sweep says 7.
 - Fix #1798 (`File::Temp` + list forms in `runpcl`/`runt`/`clt`) — the one
   real cross-user exposure, small.
 - Add to the README/`docs/pcl-commands.md`: `pcl -c` and `pl2cl` run nothing
-  from the file; never `sudo -E pcl`; `PCL_XSERVER` must be a private path.
+  from the file (the `pcl -c` half SUPERSEDED s506f: it runs BEGIN/`use` as
+  `perl -c` does); never `sudo -E pcl`; `PCL_XSERVER` must be a private path.
 - #1799 marker for `--clear-cache`; #1800 `*read-eval*` NIL + one-line drop
   comment; the eval-cache sentence in `docs/caching.md`.
 - Optional hardening for the harness server: `SO_PEERCRED` uid check on
