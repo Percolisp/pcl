@@ -1,4 +1,10 @@
 # taken-at: 5323d9e 2026-08-15
+# s506f (2026-10-04, Opus, EDITED BY HAND -- three rows, TOTAL 18728 -> 18731, perl's switches in pcl):
+#   reset.t 22 -> 21 (row 42 "check $^W has been zeroed" passed ON NOTHING: $^W was a raw 0 and
+#   `local $^W = 1` was silently lost; $^W is now a box, and reset() is a no-op -- not-supported.md
+#   "reset() for one-match"); split.t 178 -> 179 (row 32: the harness's -D now prints perl's
+#   non-debugging message); ref.t 201 -> 204 (rows 196-198: a runperl `prog` is named -e, as perl's).
+#   Sweep scratch/s506f/sweep.log; each mover A/B'd on a 618db500 extraction (scratch/s506f/refcmp.sh).
 # s501t (2026-10-03, Opus, EDITED BY HAND -- seven rows, TOTAL 18714 -> 18728, #155 tie on ARRAY/HASH):
 #   aassign.t 175 -> 181 (tied fixture), caller.t 26 -> 27, hash.t 7 -> 9, sort.t 182 -> 184 (overload sort result + the
 #   :tie registry entry EXTEND, now passing and deleted), sub.t 54 -> 56 (the two RT124156 :tie registry entries now
@@ -541,15 +547,15 @@ recurse.t	OK	26	2	28
 #   here) and by the sweep serially ("Still losing rows after a serial re-run: magic.t").  The
 #   file's 31 failing rows are the SAME 31 (their numbers shift by 2), so fail-baseline.tsv is
 #   unchanged; baselines/row-shortfall.tsv perl-tests/magic.t 19 -> 21 in the same commit.
-ref.t	PARTIAL	201	14	245
-reset.t	OK	22	0	45
+ref.t	PARTIAL	204	11	245
+reset.t	OK	21	1	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
 sort.t	OK	184	5	205
 splice.t	OK	34	0	34
-split.t	OK	178	6	219
+split.t	OK	179	5	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
 state.t	PARTIAL	88	0	166

@@ -1,3 +1,6 @@
+# s506f (2026-10-04, Opus, EDITED BY HAND -- one row JOINS, one LEAVES): reset.t 42 "check $^W has
+#   been zeroed" JOINS (it passed only because an assignment to $^W was lost; reset() is a no-op);
+#   split.t 32 LEAVES (the runperl `-Dt` child now prints perl's non-debugging message).
 # s501t (2026-10-03, Opus, EDITED BY HAND -- ten rows LEAVE, #155 tie on ARRAY/HASH): aassign.t 57-62 (the
 #   fixture ties an ARRAY), caller.t 35 (@DB::args is still tied), hash.t 3 + 13 (a tied hash FETCH sees the key AS
 #   GIVEN; magic keys), sort.t 163 (overload sort result -- the comparator reads a tied array).  Sweep
@@ -454,7 +457,6 @@ signatures.t	948	multiline1: $b	undef	line 4,	#221 (NS:Warnings-gated diagnostic
 signatures.t	949	multiline1: $c	undef	line 5,	#221 (NS:Warnings-gated diagnostics are absent: no uninitialized-value warning at all)
 signatures.t	950	multiline1: $d	undef	line 7,	#221 (NS:Warnings-gated diagnostics are absent: no uninitialized-value warning at all)
 signatures.t	951	multiline1: $e	undef	line 8,	#221 (NS:Warnings-gated diagnostics are absent: no uninitialized-value warning at all)
-split.t	32				#1459 note (runperl `-Dt`: tools/pclperl-for-tests ignores -D, so the child prints neither DEBUGGING nor an op dump)
 split.t	149	assignment to split-to-array (pmtarget/package array)	'a b c'	'1 2 3'	#1492 CATALOG split.t "Chained list-assignment-as-lvalue"
 split.t	151	assignment to split-to-array (stacked)	'a b c'	'1 2 3'	#1492 CATALOG split.t "Chained list-assignment-as-lvalue"
 split.t	150	assignment to split-to-array (targ/lexical)	'a b c'	'1 2 3'	#1492 CATALOG split.t "Chained list-assignment-as-lvalue"
@@ -541,3 +543,4 @@ sort.t	164	overload string called twice	'0'	'2'	#1021 (sort default comparator i
 sort.t	174	Match vars do not leak from one plain sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 sort.t	175	Match vars do not leak from one $$ sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 bop.t	465	|= doesn't break string overload	'0'	'z'	#972 (DECIDED s463f: the three prerequisites of #960(a))
+reset.t	42	check $^W has been zeroed	'1'	'0'	NS:`reset()` for one-match `?pattern?` and named captures (s506f: exposed when $^W became assignable)
