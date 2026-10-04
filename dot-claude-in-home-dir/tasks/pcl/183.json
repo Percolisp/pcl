@@ -1,0 +1,9 @@
+{
+  "id": "183",
+  "subject": "NEXT SESSION: re-run the CPAN scoreboard vs baseline, then widen it (the #25 CPAN half)",
+  "description": "DONE by s323+s325: the widened board ran in s323 (23/17/61 → 29/24/48 over 101 t-files, cause-list driven); the four-dist baseline re-run happened in the s325 R1 checklist pass (0 regressions, Try-Tiny 00-report-prereqs FAIL→PASS via #193, baseline advanced at dc6ce64). Further widening is the post-R1 worklist — first item the IO/IO::Handle shim (fable-answers-s323.md §7 item 4).",
+  "activeForm": "Re-running and widening the CPAN scoreboard",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

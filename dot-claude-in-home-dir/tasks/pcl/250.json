@@ -1,0 +1,8 @@
+{
+  "id": "250",
+  "subject": "Pre-existing: eval-in-print-args reads a promoted cell AFTER later args ran (in=42 vs perl 41)",
+  "description": "Found s353 while probing M5; identical at clean HEAD with NO block involved, so pre-existing in the segment-level promoted-cell path (not an M5 regression).\n\nReproducer (scratchpad m5b0.pl):\n  my $x = 5;\n  sub bump { $x++ }\n  eval q{$x = 40};\n  bump();\n  print \"in=\", eval q{$x}, \" direct=\", bump() - 1, \"\\n\";\nperl: in=41 direct=40.  PCL (HEAD and s353): in=42 direct=40 — the first eval's read reflects the SECOND bump, i.e. the print-argument evaluation order (or the eval's read timing) differs from perl's left-to-right for the promoted-cell shape.  Suspect: the emission wraps print args in per-arg wantarray lets — check whether the eval arg is deferred/reordered relative to the later funcall arg, or whether p-eval's lookup happens after both args evaluate.  The discriminating measurement: transpile the reproducer and read the p-print form's argument order + any hoisting.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

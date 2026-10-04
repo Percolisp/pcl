@@ -1,0 +1,9 @@
+{
+  "id": "102",
+  "subject": "pclxs ABI 5: PerlIO (read/write consumers + diagnostic printf) — layers are Tier X",
+  "description": "Census-measured: 30 dists touch IO across the corpus, in four distinct shapes. Group A (handle consumers: Digest-MD5 addfile, Digest-SHA, Storable, Sys-Hostname) needs read/write/eof/error/fileno/flush. Group B (diagnostic printf to stderr/stdout: DynaLoader 79 calls, Devel-Peek, POSIX, threads-shared) needs only a std-stream write. Group C (layer implementors: PerlIO-encoding/-mmap/-via, Filter) is Tier X — implementing a perl IO layer means being perl's IO system. Ship A+B as ABI 5 vtable entries + conformance suite; refuse C with a compile error naming PerlIO_define_layer/PerlIO_funcs.",
+  "activeForm": "Implementing ABI 5 PerlIO",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

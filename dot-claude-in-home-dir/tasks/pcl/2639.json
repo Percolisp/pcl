@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s506 (Fable, 2026-10-04) from a review probe of s501t (#155 tie on ARRAY/HASH), tree 1882aa12 (= code 3b90d0aa rebased onto e5d72352).  NOT a merge blocker: every boolean / numeric use is identical to perl; only the TEXT of the value differs.\n\nPROBE (~/pcl-agent-scratch/s506/review/r506-nested2.pl row 36; class TH has no SCALAR method):\n  my %e; tie %e, \"TH\";\n  my $e1 = %e ? \"T\" : \"F\"; $e{a} = 1; my $e2 = %e ? \"T\" : \"F\"; my $e3 = scalar(%e); delete $e{a}; my $e4 = %e ? \"T\" : \"F\"; my $e5 = scalar(%e);\n  perl 5.40.3: F T 1 F \"\"      PCL (s501t tree): F T 1 F 0\nperl`s rule (mg.c Perl_magic_scalarpack): no SCALAR method -> if the hash is mid-iteration answer PL_sv_yes; else call FIRSTKEY and answer PL_sv_yes / PL_sv_no.  So the empty answer is the empty string, not 0, and the non-empty answer is 1 whatever the key count.\nFIX SHAPE: the no-SCALAR arm of %p-th-scalar answers \"\" instead of 0 (one line; check the mid-iteration clause against perl with an `each` in flight).  cl/ change -> sweep + the tie companion files (op/tie.t, op/tiehash.t) + the guard Pl/t/tie-aggregate-01.t gains one row.\nRelated: #2590 (TIEHANDLE), #2636, #2637.",
+   "id" : "2639",
+   "status" : "pending",
+   "subject" : "tie residue (after #155 merges): `scalar(%tied)` on a class WITHOUT a SCALAR method answers 0 for an empty tied hash where perl answers \"\" (PL_sv_no; 1 when FIRSTKEY finds a key) -- boolean and numeric uses agree, only the printed text differs"
+}

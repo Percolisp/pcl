@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FOUND s496a (Opus, 2026-09-26): a FLAKY gate row, pre-existing (reproduced on a b6560c21 extraction).\n\nPl/t/glob-01.t rows 29-30 ('glob result can be filtered with grep') build `grep { /\\/a\\.txt$/ } <$tmpdir/*.txt>` with File::Temp's RANDOM directory name.  When that name contains a digit followed by m / s / y / q (a quote-like operator letter) -- e.g. /tmp/IxJITznB9m -- PPI 1.291 lexes the `<` after the grep BLOCK's `}` as a less-than OPERATOR, then `/tmp/IxJITznB` as a MATCH, `9` as a Number and `m/*.txt>;` as another match, and PCL drops the statement (\"Bug. Fell through. Missing case: [..., 'Token::Number<9>']\").  The gate reads FAIL on those runs (measured once in s496a's final gate; four re-runs passed).\n\nMinimal reproducer (no randomness):\n    my @f = grep { /x/ } </tmp/a9m/*.txt>; print scalar(@f), \"\\n\";\n  perl: 0      PCL: \"PCL: statement dropped ...\" then dies\n  Probed: a9m a2m x9m a9s drop; a9x a9mb aB9 a9b ab a1 do not.  `my @f = </tmp/aB9m/*.txt>;` (no grep block) does not drop.\n\nTWO things to do: (1) the PPI mis-lex -- log it in docs/ppi-upstream-bugs.md + docs/ppi-bug-report.t (CLAUDE.md rule 13) and repair it in the token-repair pass (a `<` right after a BLOCK-arg `}` of grep/map/sort that closes with `>` before the statement end is a glob); (2) the test's non-determinism -- until (1) lands the row passes or fails by the random name, so no single gate run tells either way.\n",
+   "id" : "2384",
+   "status" : "pending",
+   "subject" : "FLAKY gate row (pre-existing): Pl/t/glob-01.t 29-30 fail when File::Temp`s random dir name has a digit then m/s/y/q -- PPI lexes `grep { ... } </tmp/a9m/*.txt>` as < operator + regex + number + m//, and the statement drops"
+}

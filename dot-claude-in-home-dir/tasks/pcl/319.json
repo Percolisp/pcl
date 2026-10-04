@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "From docs/suite-decreases-s393.md (#315 diagnosis).  Every packagev.t row that validates a version string via version::is_strict dies with undef-fn.\n\nLAYER: lib/version.pm shim (CLAUDE.md 9a) — module behavior, NOT runtime.  Implement is_strict (and check its sibling is_lax while there — same regex family, perl distributes both in version/regex.pm).\n\nBAR: probe against real perl on the strings packagev.t feeds it; re-run op/packagev.t and splice its snapshot row with the cause; corpus-diff (expect identical — lib/ change makes the sweep NON-OPTIONAL per s377 rule); gate.\n\n=== DONE s395d.  lib/version.pm gained is_strict and is_lax, each as ONE literal pattern (perl composes them from qr-in-qr in version/regex.pm, which PCL would have to compile as qr objects).  Verified against the real version:: over all 40 strings op/packagev.t feeds them plus 12 more -- every answer agrees, both predicates.  op/packagev.t 5 -> 198 ok (+193).  Guard: new Pl/t/version-shim-01.t, 2 rows, 3 s.\n",
+   "id" : "319",
+   "status" : "completed",
+   "subject" : "version shim lacks is_strict — op/packagev.t loses 17 rows (undef-fn:version::pl-is_strict)"
+}

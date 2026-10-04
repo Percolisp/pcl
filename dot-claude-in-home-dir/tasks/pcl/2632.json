@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-01",
+   "description" : "Found by Fable`s s503 review probes of s501q (`~/pcl-agent-scratch/s503/review/shadow2.pl` rows i, j; `r503q-levers.pl` row 27).  PRE-EXISTING: base 2284d58d and the s501q tree answer the same.\n\nperl: `&name;` (no parens) calls name with the CURRENT @_ -- the very same array, so the callee`s `shift`, `pop`, `push @_, ...`, `@_ = ()` change the caller`s @_.  PCL emits `(pl-name @_)` (ir-spec.md, the `&foo;` rule): the callee gets the ELEMENTS (element aliasing works) but its own argument array, so structural changes are lost: `sub u1 { shift } sub u2 { &u1; scalar(@_) }` -> 3 (perl 2); `sub v1 { push @_, 9 } sub v2 { &v1; scalar(@_) }` -> 3 (perl 4).\n\nWhere it matters: the argument-parsing idiom `sub opts { &_parse_opts; ... }` and AUTOLOAD / wrapper trampolines that `shift` the invocant in a helper.  Census NOT taken: the cheap one is `grep -a -n -E \"&[A-Za-z_][A-Za-z_0-9:]*;\"` over lib/ + the CPAN board + perl`s lib, then reading which callees shift/pop/push.\n\nDesign note: s501q`s `_body_observes_args` predicate (one reading of \"this body touches @_ itself\": bare shift/pop, `&name;`, goto &sub) is the licence the raw-params levers ask; a fix here must keep `&name;` on the general path (it already counts as observing) and pass the caller`s argument VECTOR itself rather than its elements.  Check `goto &name` (which already carries @_ -- row 26 of the probe is right) for the mechanism to reuse.\n\nBar: the probe rows + guard rows; `cl/` + `Pl/` => gate, corpus-diff, sweep, companion op/sub.t op/goto.t comp/; bench rows fibret methret (the general call path must not slow).\n",
+   "id" : "2632",
+   "status" : "pending",
+   "subject" : "`&name;` does not SHARE @_ with the callee (pre-existing): the callee`s `shift` / `push @_` are not seen by the caller -- `sub u1 { shift } sub u2 { &u1; scalar(@_) } u2(1,2,3)` answers 3, perl 2"
+}

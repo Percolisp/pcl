@@ -1,0 +1,8 @@
+{
+  "id": "50",
+  "subject": "E1.2: block-scoped container capture — v1-fallback silent miscompiles (s282b edge probes)",
+  "description": "Three pre-existing v1-fallback divergences found by the s282b guard-edge battery (all byte-identical at pre-E1.1 HEAD, so not E1.1 regressions). All print the WRONG VALUE silently — no die, no gate:\n\n1. Two blocks each declaring `my @dup` captured by a named sub → both subs see an empty array:\n   { my @dup = (\"a\"); package E2A; sub g2a { $dup[0] } }\n   { my @dup = (\"b\"); package E2B; sub g2b { $dup[0] } }\n   print E2A::g2a(), E2B::g2b();   # perl: ab, PCL: (empty)\n\n2. Block-scoped container capture returns the file-level global instead of the block lexical:\n   our @blist = (\"global\");\n   { my @blist = (\"lex\"); package E4; sub g4 { $blist[0] } }\n   print E4::g4();   # perl: lex, PCL: global\n\n3. Symbolic deref `@{$n}` sees the defvar'd file lexical (known v1 defvar artifact, may be a deliberate divergence — check docs before treating as a bug):\n   my @dlist = (7); my $n = \"dlist\";\n   { no strict \"refs\"; print scalar(@{$n}); }   # perl: 0, PCL: 1\n\nItems 1–2 are the container siblings of the scalar block-static idiom that v2's extent-scoped _promote_captured already handles — the fix direction is to make v2 native-lower these (extent-scoped container promotion inside package-switching blocks) rather than patch v1. Part of the E1.2 capture-refusal burn-down (docs/v2-endgame-plan.md).",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

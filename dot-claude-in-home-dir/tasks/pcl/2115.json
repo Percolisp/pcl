@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [
+      "2111"
+   ],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "Found/split in s494p (perf round 35, #2098 member 4).  Reproducer (perl 5.40.3 linear, PCL quadratic):\n    my %h; $h{k} .= \"ab\" for 1 .. 200000; print length $h{k}, \"\\n\";     # probed s498: perl 0.00 s, PCL (60ca4ae0) 22.5 s wall\n    our $g; $g .= \"ab\" for 1 .. 200000; print length $g, \"\\n\";\nShapes table AFTER s494p (append-shapes.pl, N=50k then 200k): `$h{k} .= \"ab\"` 0.84 s -> 18.76 s (x22.4), `our $g .= \"ab\"` 0.90 -> 19.03 (x21.2).\nThe design question and the census are in #2098 (=== THE GENERAL-PATH CENSUS (s494p) ===): an in-place append is safe only under an ownership invariant (one slot owns an adjustable buffer; every retaining store takes a simple-string snapshot).  Step order ruled by the census: (1) #2111 first (the in-memory FH already breaks the invariant); (2) a non-simple-string test in the p-box CONSTRUCTOR + %p-storable-raw + ONE hash-key helper, cost MEASURED (box-set's fast path alone: +0.4 ns / string store, ~8 %); (3) an audit mode (assert at each retaining store) run over gate + sweep + everyday until green; only then the general `p-.=` appends in place.  Do NOT ship (3)'s append before (3)'s audit is green: it is a program-wide #2111.\n",
+   "id" : "2115",
+   "status" : "pending",
+   "subject" : "PERF (quadratic `.=` on the GENERAL path): `$h{k} .= X`, `our $g .= X`, `$self->{buf} .= $chunk` still copy the whole string per append -- the s494p census step 2 (constructor test + audit mode) is owed before any in-place append"
+}

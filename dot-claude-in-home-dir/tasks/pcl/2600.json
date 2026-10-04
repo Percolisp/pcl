@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "Found by s501t (s505) probing F1's siblings.  Pre-existing on main a33ce274 (scalar tie, not the s501t aggregate tie).\n\nReproducer (perl prints `A a3`):\n  require Tie::Scalar; package A; sub new { bless [$_[1]], $_[0] } sub m { \"a\" . $_[0][0] } package main;\n  tie my $s, 'Tie::StdScalar'; $s = A->new(3); print ref($s), \" \", $s->m, \"\\n\";\nPCL: ref is \"\" and the method call dies \"Can't locate object method m via package main\".  A blessed HASH works (its class lives in the table); an ARRAY's class lives on the reference's wrapper box, which the tie-proxy's unbox peels away.  The s501t element proxy solved the same thing for tied ARRAY/HASH elements by copying the wrapper's class onto the proxy box (%p-tie-elem-value) and reading ref() / the invocant class through the wrapper -- the scalar proxy wants the same.\n",
+   "id" : "2600",
+   "status" : "pending",
+   "subject" : "A tied SCALAR holding a BLESSED ARRAY ref: `ref $s` answers \"\" and `$s->m` dies (perl: the class, the method runs) -- pre-existing on main\n"
+}

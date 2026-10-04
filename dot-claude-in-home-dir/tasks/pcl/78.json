@@ -1,0 +1,13 @@
+{
+  "id": "78",
+  "subject": "E2 last chunk, PROMOTED to E4.1 pre-work (s345): inline_lambda re-host + E2.final — removes the v1-seam hoist that the #26 gate guards",
+  "description": "DONE s346 (gen v2-106). The E4.1 pre-work half: a `&`-prototype block-form arg (try/catch, first, reduce) no longer routes through v1's parse_block_as_function with $return_lambda=0 (which emitted a top-level --anon-block-N-- defun that the expression seam hoisted OUT of the lexical let — the #26 gate's subject). Two edits in Pl/PExpr.pm's block-proto branch: (1) ask _v2_embedded_body($block,'sub') first, exactly as the anon-`sub {}` sibling does → lambda_form on the func_ref, hosted at the call site inside the let; (2) when the hook DECLINES — or is absent, which is the case inside the seam's discarded native attempt, since _lower_expr localizes the hook off — ask v1 for a LAMBDA ($return_lambda=1), not a defun. (2) was essential: without it the discarded native parse left a DEAD defun in the bucket whose TEXT still tripped the gate (the last F3 event, S-L-U reduce.t, matched by the gate's sigil-blind scan of live `@a` against the block's `$a`).\n\nMeasured: F3 live-v1 CPAN board events 8 -> 0; corpus-diff emission identical across 111 files; gate 131 files/4633 PASS; full sweep 0 new/0 fixed/0 LOST, TOTAL 18498 = baseline; four-dist board identical to the s343 snapshot except S-L-U reduce.t 21 ok/11 -> 23 ok/9 (t25, t32 — v1 defects, both now agree with perl; docs/cpan-scoreboard.tsv edited for that row).\n\nThe #26 gate STAYS as an unreached backstop (probed: package stmt / named sub / `use` in the block all lower in place and match perl, so nothing produces a drained defun). Its deletion belongs to E4.1 step 3's reachability pass with the three proofs.\n\nE2.final REMAINDER (unchanged, still E4.1-gated): 310 raw_wrap + ~160 _fallback_stmt/_lower_local echoes + 22 PARSE-ERROR roots + 20 expression raws tied to the v1 statement surface. Deletion of the text printer + raw/raw_wrap happens WITH E4.1 (v1 deletion) / E5.2.",
+  "activeForm": "Re-hosting inline_lambda into structured lowering",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "parked": "Resumes at E5.2 (v2-opus5-execution-plan.md §6: 'This is task #78's tail — read its history first'). in_progress is deliberate — do NOT pick this up before E5.2; the queue until then is #222 → E4.1 → #153.",
+    "s345": "Promoted to E4.1 pre-work by fable-answers-s345.md §3: the #26 block-form capture gate (F3, 8 CPAN-board files on v1) guards the v1-seam HOIST of --anon-block-N-- defuns out of their lexical let; the re-host makes that path dead. First item in the queue: #78 → #226 → #230 → E4.1 steps 1–4."
+  }
+}

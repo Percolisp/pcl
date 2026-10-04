@@ -1,0 +1,9 @@
+{
+  "id": "229",
+  "subject": "E4.1 v1-dependency F5: two perl CORE modules still gate to v1 (CPAN::Meta::Requirements::Range, ExtUtils::MM_Unix)",
+  "description": "Found by the s342 rule-2 audit (docs/v1-live-share-audit.md, family F5) — invisible to the s341 sweep-only audit because only the CPAN board loads these.\n\n1. `CPAN/Meta/Requirements/Range.pm` — \"Parser2 TODO: poisoned condition-my $err (string eval)\" (3 events).\n   SAME SHAPE as the Math::BigInt blocker cleared in s342b: the cond-my poison test still has at least one false positive. The s342b narrowing taught the test that a `foreach my $NAME` BINDS the name; `$err` in Range.pm is poisoned by some other binding form. Start by finding which uses of $err the poison test counts as \"outside all binding constructs\" — the narrowing helper is `_foreach_my_constructs` in Pl/Parser2.pm.\n\n2. `ExtUtils/MM_Unix.pm` — \"Parser2 TODO: self-referential my-init with a below-assignment tail\":\n   `my $attrs = join \" \", map { qq[$_=\"$attrs{$_}\"] } sort keys %attrs;`\n   (the initialiser mentions %attrs, a DIFFERENT variable that merely shares the name stem). 2 events.\n\nBoth are perl core modules loaded at runtime, so §5a.2 is not satisfied while they gate. Same \"every hit is pre-work\" rule as Exporter.pm/Math::BigInt.",
+  "activeForm": "Clearing the two core-module v1 gates",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

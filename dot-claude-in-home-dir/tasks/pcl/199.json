@@ -1,0 +1,9 @@
+{
+  "id": "199",
+  "subject": "NEXT (Opus, RULED s327 — before #189): Capture-Tiny string-eval pair — eval'd prototyped sub never installed + p-eval-thunk→push arity",
+  "description": "RULED s327 (DECIDED.md §s327): runs BEFORE #189 — this pair is the COMPLETION of post-R1 item 1, whose justification was Capture-Tiny's 23 board FAILs (still red after the s326 shim).\n\nBug (a), fix FIRST — the API-existence bug, a silent-nothing: a prototyped sub defined by string eval is never installed. Minimal repro (verified s326): for-loop over a hash doing eval \"sub $name(&;@) {unshift \\@_, $args; return ...}\" then calling name(sub{1}) — perl prints the result, PCL prints NOTHING (no error, no output). Capture::Tiny builds its ENTIRE public API this way (capture/capture_stdout/.../tee_merged, all `eval \"sub $sub(&;@) {unshift \\@_, $args; goto \\\\&_capture_tee;}\"`), so 01-Capture-Tiny.t reports \"method(s) not found\" for all 8.\n\nBug (b): a p-eval-thunk (string-eval form) reaches CL's `push` with too many arguments — \"Error while parsing arguments to defmacro push: too many elements in ((lambda () (let (($. (make-p-box nil)) ($@ ...)\". Emission bug: an eval-thunk in argument position gets spliced instead of passed as one form. Kills 02-capture.t and the other 22 files at compile.\n\nBoth are #79's area (eval-mode on v2, p-eval-thunk shape); docs: eval-string-plan.md. STOP-RULE: if a trace lands in PExpr's $end_pars region, STOP — that fix is #153 _reduce_term (task #142 records the burned attempts). Exit criterion: re-run `tools/cpan-scoreboard.pl ~/.cpan/build/Capture-Tiny-0.50-0` and capture per-file causes for whatever remains (a status without a cause is worthless). Full sweep before commit per feedback_sweep_cadence. After this: #189 writes_args (+ delete lib/File/Basename.pm), then #163.",
+  "activeForm": "Fixing the Capture-Tiny string-eval pair",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

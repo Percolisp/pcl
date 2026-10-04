@@ -1,0 +1,8 @@
+{
+  "id": "219",
+  "subject": "v2 lowering: void-position comma-expr emits BOTH context arms + empty my-list init emits a no-op assignment (CPAN readability, s335)",
+  "description": "Two small v2 lowering fixes from the s335 CPAN transpile review (docs/generated-cl-ir-review.md §4c.3/§4c.4, probes: Data::Dump and Try::Tiny through pl2cl at v2-100). (1) A statement-position comma expression (`$n++, last if $cond;`) lowers to `(if *wantarray* (vector <ops>) (progn <ops>))` — the same side-effects duplicated under a RUNTIME context test in a position that is statically VOID; emit the progn arm only. (2) `my ($x, @y);` with no initializer emits the correct let-binding PLUS `(let ((*wantarray* nil)) (p-list-= (vector $x @y) (vector)))` — an assignment of an empty list to fresh boxes; drop the init entirely when the RHS is empty. Both are emission changes: generation bump + corpus-diff (expect only these shapes to move) + full sweep per cadence. Related but owned elsewhere: expression-position lambdas print flat (#78 tail — verify after inline_lambda re-host), p-lambda/p-my-params vocabulary (#75), v1-raw double-spacing (dies with E5.2).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

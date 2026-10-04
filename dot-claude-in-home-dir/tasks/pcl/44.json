@@ -1,0 +1,8 @@
+{
+  "id": "44",
+  "subject": "Remaining capture de-gates: multi-scalar, block-shadow decl_count, hoist-scan",
+  "description": "DONE s280 (Fable): block-extent decl_count (229cb94, do.t+delete.t); hoist-scan → shadow-aware _block_captures_name (c58a77d, wantarray.t); multi-scalar + interp-following rename (1f49c3d, push.t + Test::Tester module de-gate). Census 80. Container SPANNING remains → #39/#40.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

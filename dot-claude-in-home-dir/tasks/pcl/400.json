@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s415 with #371's measurement.\n\nThe Track A refusal for given/when costs exactly two files their whole run,\nbecause a transpile-time die yields no TAP at all:\n  perl-tests/state.t   158 passing -> 0   (one `given` block at line 350 of 616)\n  t/op/state.t         126 passing -> 0   (the same file in perl's own t/)\nEverything else the five families touch was already unproductive\n(t/op/switch.t 27 C_ok of 169 rows, t/class/*.t 0-1, t/op/defer.t 0,\nt/op/coreamp.t 0, the format files 0).\n\nThis cost is NOT caused by Track A: at the end of Option B phase 2 the emitters\nflip from announce to DIE for EVERY remaining drop (fable-answers-s400.md Â§6.4),\nand `given` will still not be implemented then -- so state.t was going to refuse\neither way.  Track A only brings it forward, and it buys the honest answer for\nevery USER program that uses the removed feature.\n\nRows left docs/pass-baseline.tsv ROW BY ROW in s415 with this cause; the\ncompanion snapshot rows are registered as expected divergences.\n\nREVISIT ONLY IF: a third file with real coverage joins them, or a CPAN\ndistribution PCL needs uses given/when (none does -- it is removed in 5.42).\nImplementing given/when as a lowering (given = a topicalizing block binding $_,\nwhen = a smart-match-free equality test + implicit `last`) is possible but would\nalso require the smart-match semantics `when` implies, which is the actual\nreason perl removed it.\n",
+   "id" : "400",
+   "status" : "pending",
+   "subject" : "state.t (both populations) loses every row to the #371 given/when refusal -- the trade recorded; revisit only if a third file with real coverage appears"
+}

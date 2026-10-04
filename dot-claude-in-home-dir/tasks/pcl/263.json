@@ -1,0 +1,9 @@
+{
+  "id": "263",
+  "subject": "Statement-modifier foreach over an ELEMENT does not alias: `$_ = \"w\" for ($h{k})` writes nothing",
+  "description": "DONE s365 (3df21d0). The two lowering sites peeled DIFFERENT wrappers off the foreach list, so the AST verdict never fired for the modifier spelling. One shared peeler (Pl::Parser::_foreach_list_unwrap) now serves the alias rewrite, the single-scalar wrap and VarAnnotator's veto; the applier (_apply_foreach_alias_rewrite) is anchored at the outermost call so a wrong head guess is a no-op, not an inner box.\n\nWidened beyond the filed scope, in the same helper: element access THROUGH a ref ($r->{k}, $$r{k}, ${$r}{k} -> p-gethash-deref-box / p-aref-deref-box) and subscript CHAINS ($h{a}{b}, $r->{a}[0], $a[0][1] -> the outer access's plain box head) — shapes NEITHER spelling aliased before.\n\nTests: 4 rows + an inverse guard in Pl/t/foreach-aliasing-01.t (15 rows, 17 s).\nRemaining gap: MULTI-element element lists, both spellings -> #267.",
+  "activeForm": "Filing the element-modifier foreach alias gap",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

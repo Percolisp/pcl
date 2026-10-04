@@ -1,0 +1,8 @@
+{
+  "id": "42",
+  "subject": "CORE:: declarator prefix normalization (de-gates for.t)",
+  "description": "Strip CORE::my/our/state/local at source level in _preprocess_source (pre-PPI, since PPI mis-structures for CORE::my). Guarded str_re + lookbehind/lookahead. for.t → v2-native (census 76). Fixes v1 too. Commit 23e101a.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

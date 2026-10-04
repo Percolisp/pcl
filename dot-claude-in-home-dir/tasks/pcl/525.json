@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent H (s443h) probes; PRE-EXISTING (wrong for NAMED subs too, so not #515 residue).  The unqualified symbolic VARIABLE resolver reads *package* (the CL reader's package -- MAIN after a file's last in-package), not *pcl-current-package*: `package X; our $v = \"X-value\"; sub g { no strict 'refs'; ${\"v\"} }` called from main -> perl X-value, PCL main-value.  Cause: %p-symref-symbol (cl/pcl-runtime.lisp ~13536).  The typeglob paths (p-glob-assign-dynamic, p-dynamic-typeglob) already read *pcl-current-package*, so *{\"n\"} and ${\"n\"} DISAGREE about the stash today.  Fix is one line, same shape as #503's.  Bar: named + anon + string-eval package region + qualified inverse + ${\"n\"}/*{\"n\"} agreement + @/%/glob-assign; cl/ change -> full sweep + companion.  ir-spec Â§7.1 records it as the one exception.",
+   "id" : 525,
+   "status" : "pending",
+   "subject" : "pcl"
+}

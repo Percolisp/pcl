@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND s501q (b2514 probe row 2).  PRE-EXISTING for the classic spelling on 77212b1f; s501q's #2514 makes the SIGNATURE spelling `sub sa ($a, $b) {â¦}` take the classic answer (base v1 route answered a third way).\n    sub sa { my ($a, $b) = @_; my @s = sort { $a <=> $b } (3, 1, 2); \"@s\" } print sa(9, 8);\n        perl: 2 1 3 (warns '\"my $a\" used in sort comparison')    PCL: 3 1 2    (v1 signature route: 1 2 3)\nA constant comparator is pathological; perl's answer is its mergesort's order for \"always 1\".  Low priority -- file so nobody re-derives it.\n",
+   "id" : "2574",
+   "status" : "pending",
+   "subject" : "sort with a comparator that reads LEXICAL $a/$b (`my ($a, $b) = @_; sort { $a <=> $b } â¦`, a constant comparator) orders differently from perl's mergesort"
+}

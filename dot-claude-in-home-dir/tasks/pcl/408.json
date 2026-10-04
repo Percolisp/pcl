@@ -1,0 +1,7 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s418.  Surfaced by the #343 ceiling fix: perl-tests/bless.t:179\n(`is ref $untied, \"main\", q(blessing through tied refs) or diag $@`) was a\nDROPPED statement since the census began; it now runs and FAILS honestly â\nentered docs/fail-baseline.tsv by edit with this task as owner.\n\n    sub TIESCALAR { bless \\(my $thing = pop), shift }\n    sub FETCH { ${$_[0]} }\n    tie $tied, main => $untied = [];\n    eval { bless $tied };\n    is ref $untied, \"main\";     # perl: \"main\"   PCL: \"ARRAY\"\n\nperl: `bless $tied` FETCHes the tied scalar (get-magic on the operand), so\nthe blessing lands on $untied (the []).  PCL blesses without invoking FETCH,\nso the referent never gets the package.  The general question is WHICH\nbuiltins apply get-magic to their operands â bless here; see the tie roadmap\n([[project_tie_status_and_roadmap_decisions]]) before hand-fixing one site\n(reference_box_magic_hook is the mechanism).",
+   "status" : "open",
+   "title" : "bless through a tied scalar does not FETCH â get-magic missing on bless operand"
+}

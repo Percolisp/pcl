@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473w (Opus, 2026-09-09) while probing #1507 (`use overload` is a BEGIN).\nPRE-EXISTING: identical on `0ece3088` and on the #1507 tree, so #1507 did not\ncause it and does not fix it.\n\n`no overload 'OP'` is IGNORED.  perl's `overload::unimport` REMOVES the named\nhandler, after which the operator falls back (with `fallback => 1`) to the\nremaining ones.  PCL keeps the handler.\n\nREPRODUCER (probed vs perl 5.40.3):\n\n    { package F;\n      use overload '\"\"' => sub { \"F<\".${$_[0]}.\">\" }, '0+' => sub { 42 },\n                   fallback => 1;\n      no overload '0+';\n      sub new { my ($c,$v)=@_; bless \\$v, $c } }\n    my $f = F->new(3);\n    print \"$f\", \" \", ($f+0), \"\\n\";\n\n    perl:  F<3> 0     # the 0+ handler is gone; fallback numifies \"F<3>\" -> 0\n    PCL:   F<3> 42    # the 0+ handler is still installed\n\nWHERE: `Pl/Parser.pm::_process_use_overload` handles the `use` side only; the\n`no` side reaches the generic pragma path and emits nothing.  The runtime has\n`p-register-overloads` and no un-register.  The fix is one runtime entry point\n(remove the named keys from the package's table) plus the `no overload` arm in\nthe same v1 routine â and it must land in the same COMPILE-phase bucket #1507\nput the `use` side in, since perl's `no` is a BEGIN too and their relative\nsource order is what decides the result.\n\nSIZE: small, but no board or sweep row is known to sit behind it â found by a\nprobe, filed on its own merits.  Related but different: DECIDED s464 records\nthat `nomethod` is ignored and the BITWISE ops have no overload dispatch\n(#972); this is a third hole in the same model.\n",
+   "id" : 1569,
+   "status" : "pending",
+   "subject" : "`no overload OP` is ignored â the handler stays installed where perl removes it and falls back (probed; a third hole beside #972 nomethod and the bitwise ops)"
+}

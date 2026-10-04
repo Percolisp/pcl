@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-22",
+   "description" : "FILED s431 (Opus 5) by the P1 flip re-census.  #410 (completed s420) named 21 drops over 7 files; 17 are gone and FOUR remain, in two files #410 itself listed:\n\n    t/uni/readline.t:24,26   is($a .= <NON-ASCII-FH>, 3, '#21628 - $a .= <A> , A eof');\n    t/uni/method.t:193,194   ++${\"\\xff::foo\"} if $::IS_ASCII;\n\nThe readline pair is a non-ASCII BAREWORD FILEHANDLE inside angle brackets (the `<...>` reader, not the Cast+Word repair #410 fixed); the method pair is a SYMBOLIC REF (`++${\"...\"}`) whose package name is a non-ASCII BYTE -- the same spelling as t/op/universal.t:112 `++${\"23::foo\"}`, which is ASCII and drops too.  So the symbolic-ref half is really `++${STRING}` (an increment through a symbolic scalar ref), not a Unicode question, and it is 3 census rows.\n\nPROBE (s431): `++${\"23::foo\"}; print \"v=\", ${\"23::foo\"}, \"\\n\";` -- perl v=1, PCL drops the increment and prints `v=` (silent wrong).\n\nROW COST TODAY: uni/readline.t 4 passing rows, uni/method.t 23, op/universal.t 75.\n\nBAR: the four census rows + the ASCII symbolic-ref probe above vs perl; the #410 repair site is the model; guards in Pl/t/utf8-source-01.t and a punctuation/symref file.\n",
+   "id" : 461,
+   "status" : "pending",
+   "subject" : "#410 RESIDUE: 4 census drops of the non-ASCII-identifier family survive its close -- a non-ASCII bareword filehandle in `<...>` (t/uni/readline.t x2) and `++${\"\\xff::foo\"}` (t/uni/method.t x2)"
+}

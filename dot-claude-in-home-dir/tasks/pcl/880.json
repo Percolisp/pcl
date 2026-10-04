@@ -1,0 +1,7 @@
+{
+   "created" : "2026-08-31",
+   "description" : "FOUND + FIXED s459am while diagnosing #814.  `p-str-x` computed string\nrepetition as `(apply #'concatenate 'string (make-list n :initial-element s))`,\ni.e. it passed N ARGUMENTS to concatenate and consed an N-element list first.\nMEASURED on SBCL's 2 MB default control stack: `'a' x 50000` fine, `'a' x\n200000` dead with `Control stack exhausted` before any of the program's own\nwork ran.  On the 512 MB stack every PCL runner uses it survived, which is why\nit had never been seen -- it took a runner that did NOT use PCLSbcl (#814,\ntools/bench-exec.pl) to expose it.\nFIX: one allocation, one pass -- `(make-string (* n len))` + `replace` per\ncopy.  Same result type ((simple-array character) either way), no list, no\nargument spray, and O(1) stack.  `p-list-x` was checked and does NOT have the\nshape (it uses `loop repeat n append`).\nBar met: gate PASS 191/6416, sweep GATE clean TOTAL 18340 (+0), companion op/\nleg, Pl/t/foreach-raw-01.t + the existing string rows.\n",
+   "id" : 880,
+   "status" : "done",
+   "subject" : "p-str-x built its result with (apply #'concatenate 'string (make-list N)) â N arguments, so `'a' x 200000` exhausted the control stack"
+}

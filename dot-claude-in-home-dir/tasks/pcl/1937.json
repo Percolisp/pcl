@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10), after #1923 (a kv-slice in scalar context is\nits LAST value) fixed 3 of the two files' rows.\n\nWHAT IS LEFT, read off the row descriptions:\n  * \"correct hash\" / \"correct array\" -- the round trip `%h = %h{keys %h}`.\n  * `delete %h{...}` -- the kv form of delete returns the key/value pairs it\n    removed.\n  * a kv-slice whose base is a REFERENCE (`%$hr{...}` / `$hr->%{...}`) in the\n    rows the s473t1 #1024 fix did not reach.\n  * the \"hash reference is error\" / \"hash slice reference is error\" rows, which\n    are NS:Error compatibility for invalid Perl input and stay.\n\n#1440 owns the KEY half of the array form (perl echoes the index EXPRESSION,\n`%a[-1]` keying -1 and `%a[1.7]` keying 1.7, where p-kv-aslice reports the\nnormalised integer).\n\nGuard file: Pl/t/kvaslice-01.t (18 rows as of s473t6c).\n",
+   "id" : 1937,
+   "status" : "pending",
+   "subject" : "The kv-slice residue after #1923: delete %h{...}, a kv-slice of a REFERENCE, and the round-trip rows (op/kvhslice.t 14, op/kvaslice.t 10)"
+}

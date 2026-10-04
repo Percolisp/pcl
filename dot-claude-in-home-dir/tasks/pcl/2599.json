@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "Found by s501t (s505) writing a guard row.  Pre-existing on main a33ce274.\n\nReproducer (perl prints `ok Tie::StdHash`):\n  BEGIN { package BS; require Tie::Hash; our @ISA = (\"Tie::StdHash\"); } print \"ok @BS::ISA\\n\";\nPCL: `Unhandled sb-c::input-error-in-load ... read error during load: Package Tie::StdHash does not exist` -- the WHOLE program is lost (a raw backtrace).\nThe emission puts `(p-require \"Tie::Hash\")` and `(p-defclass BS::plc-bs (|Tie::StdHash|::plc-tie-stdhash) ())` inside ONE top-level form (the BEGIN block), and the CL reader reads the whole form before the require runs.  The same statements at top level (no BEGIN) work.  in-package / reader-time package rule: CLAUDE memory reference_in_package_is_read_time.\n",
+   "id" : "2599",
+   "status" : "pending",
+   "subject" : "`BEGIN { package P; require Tie::Hash; our @ISA = (\"Tie::StdHash\") }` is a READ ERROR at load (\"Package Tie::StdHash does not exist\"): the p-defclass naming the parent is in the same top-level form as the p-require that creates its package -- pre-existing on main\n"
+}

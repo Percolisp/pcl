@@ -1,0 +1,9 @@
+{
+  "id": "38",
+  "subject": "Optional saved-core fast path for test suite",
+  "description": "PCLCore.pm consumer + tools/prove-core (fresh core every run) + retrofit 57 big Pl/t files. Verify gate passes both source-load and core modes; README updated. Commit.",
+  "activeForm": "Wiring optional test-suite core",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-31",
+   "description" : "FILED s458al (agent AL, round 15), measured while probing #840.\n\ncl/pcl-runtime.lisp:\n\n    (defvar |$]| (make-p-box \"5.030000\") \"Perl version number\")\n    ... :display \"v5.30.0\")  ;; $^V, \"Payload 5.30.0 matches $] = 5.030000.\"\n\nbut everything else in the project targets 5.40: `Pl::Parser::%PCL_FEATURE_BUNDLE`\nanswers `use v5.40` bundles, `Pl/t/feature-pragma-01.t` re-derives the\nthresholds from a 5.40 perl, and #840's `%feature::feature` / `%warnings::Offsets`\nare 5.40.3's tables.\n\nCONSEQUENCE MEASURED: the real experimental.pm compares `$]` against\n`%min_version` -- with $] = 5.030000 a feature whose minimum is 5.34 would\ncroak \"Need perl 5.34.0 or later\" if it ever reached that arm (it does not\nfor `try`, which is caught by the earlier warnings-category arm; it WOULD for\nany feature perl 5.40 has and %warnings::Offsets does not name).\n\nNOT a free edit: `%p-parse-require-version` reads `$]`, so raising it changes\nwhat `use v5.36;` / `use 5.038;` do, and perl-tests / companion rows that\nbranch on the version move with it.  MEASURE FIRST: grep both populations for\n`$]` and `$^V` and count the rows that would flip, then decide.  Related\n#870 (version.pm's compare is wrong independently of which number $] holds).\n",
+   "id" : 871,
+   "status" : "pending",
+   "subject" : "PCL reports $] = 5.030000 / $^V = v5.30.0 while targeting perl 5.40 semantics"
+}

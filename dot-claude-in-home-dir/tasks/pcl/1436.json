@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s473t1 (Opus, the 13-file early-stop triage).  PRE-EXISTING.\n\nREPRO (scratch/s473t1/probe/bareword-postderef.pl):\n\n    no strict 'refs';\n    our @foo = (7,8,9); our %foo = (foo=>'oof'); our $foo = 43;\n    print join(' ', foo->@*), \"\\n\";        # perl: 7 8 9\n                                           # PCL : dies, Undefined subroutine &main::foo\n\nEvery spelling agrees in perl and every one dies in PCL:\n    foo->@*        7 8 9\n    \"@{[foo->@*]}\" 7 8 9\n    \"foo\"->@*      7 8 9\n    foo->@[0,1]    7 8\n    foo->@{foo}    oof\n\nThe bareword before `->` is a CLASS-NAME string, and `->@*` postfix-derefs\nthat string as a symbolic array ref.  PCL's callable classifier (#266 family)\nanswers \"call\" where it should answer \"string\": `foo` is not a declared sub\nhere.  It is NOT an interpolation bug -- the direct form fails too.\n\nCOST: perl-tests/postfixderef.t rows 133-135 ('->@* inside \"@{...}\"',\n'->@[ inside \"@{...}\"', '->@{ inside \"@{...}\"'), 3 of the file's 7 missing\nrows; the other 4 are the DESTROY family.  Three top-level forms abort:\n\"; PCL recovery: top-level form aborted (recovered): Undefined subroutine\n&main::foo called\" x3.",
+   "id" : 1436,
+   "status" : "pending",
+   "subject" : "A BAREWORD invocant of a postfix deref (`foo->@*`) is compiled as a SUB CALL; perl treats it as a symbolic reference under `no strict refs`"
+}

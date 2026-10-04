@@ -1,0 +1,9 @@
+{
+  "id": "200",
+  "subject": "DONE s329b: rename ./runpl → ./runpcl (clean cut, no symlink; USER ruling)",
+  "description": "USER note (2026-08-02, s328): the `./runpl` helper script should be renamed to `./runpcl` — it runs Perl through PCL, and the current name reads like \"run perl\".\n\nScope when done: rename the script; update every reference (CLAUDE.md, docs/*.md, tools/*, Pl/t/*.t helpers, memory files, session-log conventions). Decide whether to keep a `runpl` symlink for one release or cut it clean — ask the user if unclear. Sibling scripts `./runt` and `./clt` may deserve the same look while in there.",
+  "activeForm": "Renaming runpl to runpcl",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

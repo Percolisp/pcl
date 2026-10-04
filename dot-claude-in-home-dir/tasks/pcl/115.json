@@ -1,0 +1,9 @@
+{
+  "id": "115",
+  "subject": "PCL: implement pclxs ABI 6 magic_set/magic_get (unblocks XS OO / Digest::MD5)",
+  "description": "DONE (s315c, 985b4df): xs-magic-set/xs-magic-get in cl/pcl-xs.lisp (weak eq table on box identity). Exposed + fixed two own bugs: xs-ref-target returned the is-ref wrapper not the referent (SvRV identity is what magic+blessing key on); fixed 64-slot argv in p-xs-invoke (perl has no arity cap). Digest::MD5 OO works; md5-aaa.t 256/256 under PCL; conformance 370/0; guard Pl/t/xs-03.t. Follow-up: #117 (io capability group for addfile/files.t).",
+  "activeForm": "Implementing pclxs magic_set/magic_get in the PCL adapter",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

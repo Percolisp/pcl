@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "FOUND s504c while restoring the eight regexp.t wrappers (#2633).  With #2633 fixed the wrapper runs to the end again: re/regex_sets_compat.t 2167/2 perl, PCL 1692/337 (s504c tree 93369a10, --jobs 1, scratch wrap-regex_sets_compat-B.log).  An extraction of fca715fb (the last commit before aa657c6b, the #2633 regression) gives 1692/337 with a byte-identical fail set (cut -f1-4 | sort), so the 63-row drop is older than #2633 and is not s504c's.  The snapshot row 1755/274 was written by 97190ddc (s473t5e, 2026-09-13); 297 first-parent commits to fca715fb (2026-09-27).  The 63 NEW rows are all `n` lines with brackets (re_tests 104 `.[b].`, 107, 118, 120, 121, 169 `[\\w]`, 170, 173, 174, 1279, 1280, 1489, 1631, 1729, 1733, ...).  Probe: `\"aBd\" =~ /.(?[ [ b ] ])./` -- perl nomatch, PCL dies \"Character '[' may not follow '(?'\".  So a die used to count as a no-match pass for an `n` test and no longer does (or vice versa): bisect 97190ddc..fca715fb on this one file to find the commit, then decide whether the old pass was honest.  The snapshot row and its fail rows were left as they are by s504c.",
+   "id" : "2646",
+   "status" : "pending",
+   "subject" : "re/regex_sets_compat.t is 1692/337, not its snapshot 1755/274: the 63 rows are `n` (no-match) re_tests lines whose [bracketed] class the wrapper turns into (?[ ]), which PCL does not compile (\"Character [ may not follow (?\") -- the fail SET is identical at fca715fb (before #2633`s regression), so it moved between 97190ddc (the snapshot) and fca715fb, not in s504c"
+}

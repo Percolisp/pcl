@@ -1,0 +1,8 @@
+{
+  "id": "107",
+  "subject": "pclxs 2c part 2: the full Task::Kensho closure — needs a container",
+  "description": "A few hundred dists: cpanm --local-lib-contained --auto-cleanup 0 --notest Task::Kensho, reduce to the XS minority, xs-survey + xs-classify, then step 4 (each dist's own t/ under a host, baselined against real perl first). Procedure is unchanged in docs/measuring-the-limit.md and xs-classify is ready. User: Docker is a later problem.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

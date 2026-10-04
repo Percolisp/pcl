@@ -1,0 +1,8 @@
+{
+  "id": "116",
+  "subject": "Sweep drift group (pre-existing at 91af32a): bless.t t29-32, join.t t36/40 tied-$, blocks.t t24 INIT — plus stale baseline (blocks.t 12 now-pass rows)",
+  "description": "DONE (s315d, 810df31). (1) Class-model target-first reads: %p-target-class + %p-ref-shaped-p in p-ref/p-get-class/box-sv; p-bless restamps the target through a variable; plain-payload fast exit made the hot paths FASTER than HEAD (pack.t 65-70s vs 68s solo). (2) $TODO honored again — :invert interns \"$todo\", %current-todo now uses %pcl-invert-case; every TODO test in the suite had silently degraded to real fails. (3) No-match s/// no longer writes back (was destroying blessed objects; concat2.t 3). bless.t/join.t/concat2.t fully pass; sweep 63 fully-passing, 0 new, baseline re-blessed at 712 fails (--timeout 150 for pack.t). Follow-ups: #119 (match-source overload), #114 (range.t) still open.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

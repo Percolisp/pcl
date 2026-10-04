@@ -1,0 +1,8 @@
+{
+  "id": "85",
+  "subject": "cl_name %RUNTIME_NAMES collision: user sub named like an internal p-* helper (aslice, gethash, box, incf, …) bare-calls the runtime helper",
+  "description": "Found s305 while writing regression tests: `sub aslice { ... } aslice();` compiles the call to (p-aslice) — invalid-arg crash — because cl_name (Pl/ExprToCL.pm) prefers %RUNTIME_NAMES over user subs, and that table mixes REAL Perl builtins with internal runtime helper names (aslice, hslice, gethash, box, incf, flatten, backtick, …). Pre-existing at HEAD, both pipelines (the v2 seam uses cl_name too). CAUTION before fixing: the builtin preference may be load-bearing for lib/ shims whose subs intentionally share runtime names (e.g. Scalar::Util weaken → p-weaken) — census the shims first, then split the table into real-builtins (Config known_no_of_params is the language surface; ExprToCL2's direct-call gate already uses it, s305) vs internal helpers, and let user subs win for the latter. Repro guard candidate: sub named `aslice` bare-called.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,10 @@
+{
+  "id": "295",
+  "subject": "#290 flip BLOCKER (RE-DIAGNOSED s382h): a sub DEFINED INSIDE a string eval loses the eval's captured lexicals — its own eval reads the package global",
+  "description": "RULED + FIXED s383 (Fable, commit 8a273fe on main). Ruling: NO third capture route — the proposed definition-time dynamic rebind cannot work (p-eval binds the alist by REPLACEMENT, so the first inner eval site clobbers it) and is the same scope-leak family as the reverted s382h fix. Instead the pad chain is LEXICALIZED through route 1: the compiled eval body binds %p-eval-env% once at body entry to the entry value of *p-eval-lex-alist*; every eval site emitted in eval mode appends it after its own let-bound pairs (_eval_lexical_alist, the ONE shared builder); named subs close over it; nesting threads for free. Runtime untouched; file-mode emission byte-identical (corpus-diff, 111 files); no cache-generation bump needed.\n\nMeasured: zz2.pl repro 1/1 both calls = perl; eval.t 114 (pre-flip baseline) → 121 passing, fail set row-identical to the blessed baseline; Pl/t 138/5092 PASS; full sweep GATE clean, TOTAL 18498 → 18506 (+8). Normative: ir-spec §9.1 \"pad-chain continuation\" block; DECIDED.md line; guard row in Pl/t/transpile-test-10.t (fred1/fred2/nested + my-$fact factorial with local-of-global in eval mode).",
+  "activeForm": "Ruling on and fixing the #295 eval-defined-sub capture blocker",
+  "owner": "Fable s383",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

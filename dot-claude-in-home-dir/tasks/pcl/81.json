@@ -1,0 +1,10 @@
+{
+  "id": "81",
+  "subject": "Moo residue: trigger fires once with empty value at construction when attr absent from args (v2 only; v1 correct)",
+  "description": "Found s304 after fixing task #80. Repro: has w => (is=>'rw', trigger=>sub{...}); Tw->new (no w arg) fires the trigger once with an empty/undef value before BUILD (\"t:,\" prefix in history); real perl and PCL_V1=1 do not fire it. Tw->new(w=>'init') is correct. The generated constructor is Sub::Quote string code compiled through the (now v2-native, E3) string-eval path — suspect the exists-check branch in the quoted constructor or an eval-mode context issue. Repro script shape preserved in the s304 session-log entry. Also in the same family: lib/Sub/Util.pm's `CORE::prototype($code)` emits a SELF-call (pl-prototype) under v2 — latent infinite recursion, CORE::-prefix resolution should map to the builtin (p-prototype) like v1; nothing in the Moo chain calls it today.",
+  "activeForm": "Fixing the Moo trigger-at-construction residue",
+  "owner": "fable-s305",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

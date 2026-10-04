@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-16",
+   "description" : "FOUND s486 (Fable, docs/security-review-s486.md §2.1).  runpcl writes /tmp/runpcl_$$.lisp, /tmp/runpcl_$$.err, /tmp/runpcl_$$.runerr; tools/runt and tools/clt write /tmp/<name>.lisp, /tmp/<name>.out, /tmp/<name>.pl2cl.err (no pid).  All are created by shell redirection with the caller's umask (0002 on the dev box -> world-readable), so the transpiled PROGRAM and its OUTPUT are readable by every local user for the run's duration, and a pre-created file/symlink at the predictable name is the classic /tmp race (clobber; a swapped .lisp between transpile and load = code execution as the victim).  The input file name and every path are interpolated into system(\"...\") / backtick strings (runpcl:44, runpcl:98, runt:38, clt:32; PCLSbcl::sbcl_prefix_str quote => 0), so a file named `x;rm -rf ~.pl` runs the command.  Mitigations today: fs.protected_regular=2 + fs.protected_symlinks=1 (this box), and the injection needs the user to name the file -- but runpcl is in the README as a user command.\n\nFIX: one File::Temp::tempdir per run (0700) for all three files; list-form system/open (or PCLSbcl::sbcl_prefix as a LIST + IPC::Open3/pipe open) keeping task #504's two-streams contract (stdout byte-exact, stderr filtered); same for runt/clt.  The sweep's /tmp/pcl-sweep-$$.out + quote => 0 string is the same shape in a dev-only runner -- fold in if cheap.  Guard: tools/t/runpcl-streams.t gains a row that the temp files are not in a shared directory and not world-readable; a file name with a shell metacharacter transpiles and runs.",
+   "id" : "1798",
+   "status" : "pending",
+   "subject" : "runpcl / tools/runt / tools/clt: predictable /tmp names, shell-string commands, world-readable transpile and output (security review s486 §2.1)"
+}

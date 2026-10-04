@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-16",
+   "description" : "FOUND s486 (Fable, docs/security-review-s486.md §2.2).  pcl::clear_cache unlinks glob(\"$cache_dir/modules/*\"), glob(\"$cache_dir/*.fasl\"), glob(\"$cache_dir/*.lisp\") (the pre-#1261 flat layout) plus PCLSbcl::clear_cached_cores + Pl::ProtoCache::clear.  A user who points PCL_CACHE_DIR at a directory that also holds their own .lisp/.fasl files loses them.\n\nFIX: write a marker (e.g. <root>/.pcl-cache-root, content = the generation) when PCLPaths::ensure_cache_root CREATES the root; --clear-cache refuses a root without it (naming the fix: create the marker by hand, or unset PCL_CACHE_DIR); delete only inside PCL's own subdirectories (modules/ evals/ proto/ core/ xs/); retire the flat glob after one release with a notice.  Guard row in tools/t (a tempdir with a stray foo.lisp survives --clear-cache; a marker-less root is refused).",
+   "id" : "1799",
+   "status" : "pending",
+   "subject" : "pcl --clear-cache deletes *.lisp / *.fasl / modules/* under whatever PCL_CACHE_DIR names -- require a marker, delete only inside PCL's subdirectories (security review s486 §2.2)"
+}

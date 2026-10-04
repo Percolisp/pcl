@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p21-misc.pl.\n\nROWS BEHIND IT (baselines/fail-baseline.tsv, 3 rows):\n  split.t 149 `assignment to split-to-array (pmtarget/pmreplroot)`\n  split.t 150 `assignment to split-to-array (targ/lexical)`\n  split.t 151 `assignment to split-to-array (stacked)`\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n    my @a;  (@a       = split //, \"abc\") = 1..10;  print \"149=[@a]\\n\";\n    our @b; (local @b = split //, \"abc\") = 1..10;  print \"150=[@b]\\n\";\n    my @c;  (@{\\@c}   = split //, \"abc\") = 1..10;  print \"151=[@c]\\n\";\n  perl: 149=[1 2 3]  150=[1 2 3]  151=[1 2 3]\n  PCL : 149=[a b c]  150=[a b c]  151=[a b c]\n\nMECHANISM (perlop, \"Assignment Operators\"): a list assignment used as an\nLVALUE yields the list of element SLOTS it just assigned -- here 3 of them,\nbecause the inner RHS produced 3 elements.  The outer `= 1..10` therefore\nfills exactly those 3 and discards the rest.  PCL evaluates the inner\nassignment for its VALUE and the outer assignment writes nowhere, so `@a`\nkeeps the split result and no error is raised.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md split.t, \"Chained\nlist-assignment-as-lvalue (tests 149-151) - catalog mislabeled these\n'package-qualified array'; they are not.\"  (That correction stands; this task\ncarries the reproducer and the three row keys.)\n\nFAMILY: lvalue semantics; adjacent to #1452 (list assignment does not resolve\nits LHS lvalues first).\n",
+   "id" : 1492,
+   "status" : "open",
+   "subject" : "BUG (list assignment as an lvalue): `(@a = split //, \"abc\") = 1..10` fills only the inner assignment's N slots in perl (`1 2 3`); PCL treats the inner result as a whole-array lvalue and the outer assignment is a no-op (`a b c`)"
+}

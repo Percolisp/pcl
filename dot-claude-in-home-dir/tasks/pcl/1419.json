@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09), by a #1309 probe.  PRE-EXISTING.\n\n    sub id { my $v = shift; return defined $v ? \"[$v]\" : \"undef\" }\n    open(my $c, \"<\", \"/etc/hostname\") or die;\n    printf \"c=%s\\n\", id(scalar readline($c));\n    printf \"h=%s\\n\", id(scalar glob(\"/etc/hostname\"));\n\n    perl : c=[bernpad]        h=[/etc/hostname]\n    PCL  : c=[1]              h=[1]\n\nThe value is the COUNT of the list the builtin produced in list context.\n\nCAUSE, located: `%WANTARRAY_SENSITIVE` in Pl/ExprToCL.pm:203 lists\n`reverse localtime gmtime caller unpack each splice readdir getprotobyname\ngetprotobynumber readpipe stat lstat` -- and NOT `readline` or `glob`.  So\n`scalar FUNC(...)` in a list-context slot emits `(p-scalar (p-readline ...))`\nINSIDE a `(p-list-ctx ...)`, i.e. the call runs in list context and `p-scalar`\nthen takes the LENGTH of the vector.\n\n`scalar <$fh>` (the ANGLE spelling) is RIGHT -- a different node type, which is\nwhy the bug is invisible in the common idiom.  `my $x = scalar readline($fh)`\nis also right (the assignment imposes scalar context first); only an argument\nslot / a print list is wrong.\n\nThe fix is presumably two words in that table, but it is EMISSION-CHANGING\n(corpus-diff + a full sweep), which is why s473f filed it rather than riding it\nin on a runtime-only batch.\n\nProbes: scratch/s473f/p1i-scalarctx.pl, scratch/s473f/p1h-scalararg.pl.\n",
+   "id" : 1419,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `scalar readline($fh)` and `scalar glob($p)` in a LIST-context slot return the COUNT, not the value"
+}

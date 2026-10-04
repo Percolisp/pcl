@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p20-readline.pl.\n\nROWS BEHIND IT (baselines/fail-baseline.tsv, 2 rows):\n  readline.t 26 `<> does not autovivify`\n  readline.t 27 `readline does not autovivify`\n  -- perl-tests/readline.t:256-263 (bug #97482)\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n    my $yunk = \"brumbo_s473t3\";\n    <$yunk>;\n    print \"26 defined *\\$yunk = \", (defined *$yunk ? 1 : 0), \"\\n\";\n    readline($yunk);\n    print \"27 defined *\\$yunk = \", (defined *$yunk ? 1 : 0), \"\\n\";\n  perl: 26 0   27 0\n  PCL : 26 1   27 1\n\nMECHANISM: reading from a SCALAR that holds a string is a symbolic\nfilehandle lookup.  perl looks the glob up WITHOUT creating it (the read\nfails, the symbol table is untouched); PCL's handle resolution vivifies the\nglob as a side effect, so a later `defined *$name` / stash walk sees a symbol\nperl never created.  Fix area: the handle-resolution path used by\n`p-readline` in `cl/pcl-runtime.lisp`.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md readline.t, \"`<>`\nautovivification (tests 26-27): `<>` and `readline` should not autovivify a\nscalar when the filehandle doesn't exist.\"\n\nFAMILY: autovivification side effects (#1241, #1246, #1271 are the container\nand open-handle members).\n",
+   "id" : 1489,
+   "status" : "open",
+   "subject" : "BUG (readline): `<$str>` and `readline($str)` AUTOVIVIFY the glob named by the string -- `defined *$yunk` is 0 in perl and 1 in PCL afterwards"
+}

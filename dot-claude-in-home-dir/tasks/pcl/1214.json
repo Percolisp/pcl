@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "DONE (s470bq, Opus, 2026-09-05).  ir-spec Â§5.1's facts table gained the row.\n\n`p-sub`'s facts plist gains `:needs (CLASSESâ¦)`: the obligation classes the\nsub's BODY exercises, spelled with Â§10b's own class names\n(`:nonlocal_exit.die`, `:dynamic_scope.local`, `:io`, `:regex.native` â¦) so\nthe per-sub and per-program answers cannot drift.\n\nIT IS THE ONE KEY THAT IS A COMPLETE ANSWER rather than a proof-if-present, so\nit is ALWAYS printed, possibly `()`.  That is the point: the ABSENCE is what a\ntarget uses -- nothing can throw, so no frame; nothing localizes, so no\nsave/restore stack (plan Â§B.3's table); and a backend can compile a program\nPARTIALLY, taking every sub whose classes it implements and refusing the rest\nwith Â§9.3b's shape.\n\nMECHANISM: `Pl::Manifest`'s walk was made REENTRANT (every count lives in an\naccumulator the walk is handed) and `needs_of_form` walks ONE sub body into a\nfresh accumulator.  Same table, same walk, two scopes -- the alternative was a\nsecond walk with its own copy of %OBLIGATION, which is the drift rule 11\nforbids.  `*p-sub-fact-keys*` in the runtime gained `:needs` (the set is\nclosed at both ends).\n\nCost: one walk of the body the emitter has just built, no second\nrepresentation.\n",
+   "id" : 1214,
+   "status" : "completed",
+   "subject" : ":needs on p-sub â the obligation classes a sub body exercises, from Pl::Manifest's own walk made reentrant (Part B item B3)"
+}

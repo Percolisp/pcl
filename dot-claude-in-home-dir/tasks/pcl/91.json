@@ -1,0 +1,9 @@
+{
+  "id": "91",
+  "subject": "#25 s310g: UNITCHECK/CHECK/INIT phase order (p-run-compile-phase-blocks) — blocks.t family",
+  "description": "p-CHECK was an eval-when (:load-toplevel) that NEVER ran under source load; INIT ran at source position. Now: thunk collectors (END pattern) + p-run-compile-phase-blocks at the compile->run boundary in BOTH assemblers (v1 _assemble_output + Parser2). Perl-exact: UNITCHECK/CHECK reverse, INIT source order, eval = too-late. Gen v2-64. Verify: guard, blocks.t, corpus-diff, gate, commit.",
+  "activeForm": "Implementing special-block phase order",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

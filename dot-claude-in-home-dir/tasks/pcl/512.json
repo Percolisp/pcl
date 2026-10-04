@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent B's #466 report (pre-existing). perl: assigning $0 changes the process name shown by ps (best effort) AND the value read back. PCL's $0 is a constant box? Make it an ordinary writable box initialised to the script name. Bar: write + read back, `local $0`, `$0` inside a sub, the `print $0 LIST` symbolic-handle shape vs perl; a Pl/t guard row.",
+   "id" : 512,
+   "status" : "pending",
+   "subject" : "`$0` is not writable: `$0 = \"X\"; print $0` perl X, PCL sbcl -- consequence: `$0 = \"STDOUT\"; print $0 \"K\\n\"` prints K in perl (symbolic handle by name), nothing in PCL"
+}

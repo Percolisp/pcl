@@ -1,0 +1,9 @@
+{
+  "id": "43",
+  "subject": "Consolidate lexical-promotion passes; add container/multi capture",
+  "description": "Reduce the 4-pass house-of-cards: shared sigil-aware rewrite helper + container facts/lowering (from parked W10-ext-3), route spanning+capture through it. Stage A: inert facts+lowering (parity). Stage B: shared _rewrite_var_uses helper. Stage C: container capture+spanning via helper. Keep method.t gated (add indirect-method gate = start of #40).",
+  "activeForm": "Consolidating lexical-promotion passes",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

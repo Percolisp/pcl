@@ -26,3 +26,6 @@ docs
 baselines
 ir-conform
 Pl/t
+# The task store and Claude's notes (dot-claude-in-home-dir/README.md): the
+# development record, not part of an installation.
+dot-claude-in-home-dir

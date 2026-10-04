@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473w (Opus, 2026-09-09) from the #1502 CPAN-board census.\n\n`IO::Socket::UNIX` calls `AF_UNIX` (imported from Socket) and PCL dies\n\n    Undefined subroutine &IO::Socket::UNIX::AF_UNIX called\n\nso any program that so much as LOADS IO::Socket::UNIX is lost.  On the board\nthat is Data-Dump t/glob.t, FAIL 0/0 where perl gives 6 rows â the file merely\ndumps a socket handle among its globs.\n\nREPRODUCE:\n    tools/run-dist-t.pl ~/.cpan/build/Data-Dump-1.25-0 t/glob.t\nand, smaller:\n    perl -e 'use IO::Socket::UNIX; print \"loaded\\n\"'   # perl: loaded\n    ./runpcl <the same as a file>                      # PCL: dies\n\nLAYER (CLAUDE.md 9a): `Socket` is a core module with an XS half, and PCL has\n`lib/Socket.pm` as a shim.  The constant is a MODULE FACT, so the fix is in\nthat shim's export list / constant table, not in the parser or runtime.  Check\nwhat `lib/Socket.pm` exports today against what `IO::Socket::UNIX` imports\n(`AF_UNIX`, `PF_UNIX`, `SOCK_STREAM`, `SOCK_DGRAM`, `SOMAXCONN`, â¦) and add the\nmissing ones with their platform values â the same way the shim already\ncarries the AF_INET family.\n\nCHEAP AND WORTH IT: one shim edit, one guard row, six board rows.\n",
+   "id" : 1574,
+   "status" : "pending",
+   "subject" : "lib/Socket.pm does not export AF_UNIX, so loading IO::Socket::UNIX dies \"Undefined subroutine &IO::Socket::UNIX::AF_UNIX\" â one shim edit; Data-Dump glob.t is FAIL 0/0 behind it (perl 6/0)"
+}

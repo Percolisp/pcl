@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s473t1 (Opus, the 13-file early-stop triage).  PRE-EXISTING.\n\nperl-tests/method.t has a row named exactly \"DESTROY without a leading sub is\nlegal and gets called\"; perl produces it, PCL does not produce it at all.\nperl-tests/ref.t:307 uses the same spelling:\n\n    DESTROY {\n        return unless $string;\n        main::is ($string, 'good');\n        main::isnt (ref shift, 'HASH');\n    }\n\nperl parses a bare `NAME BLOCK` at statement level as a sub definition for the\nhandful of names that take it (DESTROY, BEGIN-like slots); PCL does not, so\nthe method is never installed.\n\nNote the OTHER half of the same rows: even when DESTROY IS defined with `sub`,\nPCL never fires it (docs/not-supported.md '`DESTROY` called by garbage\ncollector'), so ref.t's rows at lines 310/313/440 are missing for that reason\nwhichever spelling is used -- probed with a `sub DESTROY` reproducer, perl\nprints \"DESTROY fired\", PCL prints nothing.  Fixing this task alone recovers\nnothing there; it is method.t's one row and the correctness of the parse.",
+   "id" : 1435,
+   "status" : "pending",
+   "subject" : "`DESTROY { ... }` written WITHOUT a leading `sub` is legal perl and is not installed as a method by PCL"
+}

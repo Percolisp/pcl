@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s506f (Opus, s507 resume, 2026-10-04) from the F1 review probe (scratch/s506f/s507/f1.pl).\n\nPROBE (perl 5.40.3):\n    perl -e '$^W=5; print \"$^W\\n\"; $^W=\"abc\"; print \"$^W\\n\"; $^W=undef; print \"[$^W]\\n\"; $^W=0.5; print \"$^W\\n\"; $^W=-1; print \"$^W\\n\"'\n    -> 1 / 0 (+ \"isn't numeric\" warning) / [0] / 0 / 1\n    perl -e '$^W=1; { local $^W; print defined $^W ? \"[$^W]\" : \"undef\" }'  -> [0]\nPCL (s506f tree): 5 / abc / [] / 0.5 / -1, and `local $^W;` -> undef.\n\nWHY IT MATTERS LITTLE: every gate on $^W is a truth test (`warn … if $^W`), and the truth of what PCL stores\nequals perl's in all but the \"abc\"/0.5 shapes (true in PCL, 0 in perl).  The visible difference is printing it.\n\nSHAPE: $^W became a plain p-box in s506f (it was a raw 0 and an assignment was silently lost).  perl's shape is\nSET MAGIC (mg.c: PL_dowarn from SvIV).  PCL has the mechanism — a p-magic-cell box like |$.| / |$!| (getter +\nsetter) — but `local $^W` binds a NEW box (p-box-for-local), so a magic cell needs its own local form (like\np-local-dot).  Cost/benefit: small; do it only together with any other $^W work (#221 warnings model).\n",
+   "id" : "2668",
+   "status" : "pending",
+   "subject" : "$^W stores whatever is assigned; perl's $^W is magic and stores the TRUTH of the integer value (5 -> 1, \"abc\" -> 0, undef -> 0, 0.5 -> 0, -1 -> 1), and `local $^W;` reads 0 in perl, undef in PCL"
+}

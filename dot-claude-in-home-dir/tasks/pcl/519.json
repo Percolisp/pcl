@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent E (s443e, #470) review probes; PRE-EXISTING (identical at 29c2cf3) and LOUD, not silent.  `my $y = 7; { our $y; $y = 3; } print \"[$y]\"; print \"[$main::y]\";` -- perl prints [7][3]; PCL refuses the WHOLE file: `Parser2 TODO: our '$y' shadows a my-lexical` (Pl/Parser2.pm ~9988).  The SAME shape WITH a sub capture now works (s443e made `our` mask in _ref_shadowed, guarded in Pl/t/parser2-01.t), which leaves the plain no-capture spelling the odd remaining refusal.  FIX SHAPE: the refusal site should ask the same masking resolver (_stmt_binding) the rename path now asks -- an `our` in an inner block masks the file lexical for its scope and needs no rename at all when nothing captures.  Bar: the repro + the write-through-our + interpolated spellings vs perl; guard rows beside the s443e ones; this narrows a refusal, so the gate-SET scan over both populations applies (s372 rule).",
+   "id" : 519,
+   "status" : "pending",
+   "subject" : "pcl"
+}

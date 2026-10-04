@@ -1,0 +1,10 @@
+{
+  "id": "247",
+  "subject": "E4.1 M1 (RULED s353): widen #226's collapse with a WHITELIST leading-my predicate — Sub::Quote's 15 gate events",
+  "description": "DONE s353 — Sub::Quote's my-then-package eval regions lower NATIVELY: moo-01.t 15/15, gate audit events 15 → 0. Implementation per the ruling (docs/fable-answers-s352.md §1.2) + one discovery: the REAL Sub::Quote eval wraps everything in a bare block with a trailing `1;`, so a SECOND collapse arm accepts the T-A1-flattened 4-segment spelling ([empty main | blk leading-my | pkg X | restore + literal-only tail via _eval_literal_only_stmts]). Whitelist = _eval_safe_leading_stmts (single-scalar `my`, init tokens only earlier-own scalars/Magic/literals-no-live-sigil/operators/casts/structure; Magic tested BEFORE Symbol — Magic ISA Symbol). Plus: `&name` for subs DEFINED in the eval is excluded from the thunk free-name set (was binding an empty caller cell over X::sub). All six ruling probes run; both INVERSE shapes still refuse (their v1 fallback errs identically at HEAD — pre-existing, becomes a perl-shaped refusal at step 2). Pre-existing #163-family divergences surfaced and recorded in docs/e41-m-work-handoff-s353.md §2 (literal \\\\$x deref, \\&callersub free name, use constant in region).",
+  "status": "completed",
+  "blocks": [
+    "242"
+  ],
+  "blockedBy": []
+}

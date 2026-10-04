@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-08",
+   "description" : "FILED AND FIXED s473h (Opus, 2026-09-08), pre-existing at a9f2a264.  Found\nwhile wiring #1529 (the synthetic $ENV{_PCL_RUNTIME_} entry), because that\nchange made `keys %ENV` and `scalar(%ENV)` have to agree.\n\nPROBE (scratch/s473h/probe/m10c.pl, perl 5.40.3 vs PCL at a9f2a264):\n\n    my $k = scalar(keys %ENV);\n    my $s = scalar(%ENV);\n    print \"keys=$k scalar=$s\\n\";\n\n    perl   keys=78 scalar=78\n    PCL    keys=78 scalar=HASH(0x1)\n\nSame for `scalar(%INC)`.\n\nTHE CAUSE.  Since #736 the %ENV and %INC markers ARE the hash â every hash\nprimitive knows the symbol.  `p-scalar` did not: its `hash-table-p` arm could\nnot see a marker, so the symbol fell through to the catch-all `(t v)` and was\nstringified as a hash REFERENCE.  Perl 5.26+ gives a plain `%hash` in scalar\ncontext its KEY COUNT.\n\nTHE FIX: one arm beside the hash-table one, counting through `p-keys` â the\nONE walk of those two containers (#736, rule 11) â so `scalar(%ENV)` and\n`keys %ENV` cannot disagree.  `scalar(\\%ENV)` is unchanged and still the\nreference (the arm carries the same `(not (p-box-p val))` guard the\nhash-table arm has).\n\nGUARDS: Pl/t/pcl-runtime-env-01.t rows 10-12 (count agrees with keys for\n%ENV; the same for %INC; the `\\%ENV` negative), inverse-verified â 10 and 11\nfail on the a9f2a264 extraction, 12 passes there and must keep passing.\n\n=== DONE (s473h) ===\n",
+   "id" : 1392,
+   "status" : "completed",
+   "subject" : "FIXED s473h: `scalar(%ENV)` / `scalar(%INC)` answered HASH(0x1) instead of the key count -- p-scalar had no arm for the %ENV/%INC MARKER, which IS the hash (#736)"
+}

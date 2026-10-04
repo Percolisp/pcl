@@ -1,0 +1,12 @@
+{
+   "blockedBy" : [
+      "349"
+   ],
+   "blocks" : [
+      "277"
+   ],
+   "description" : "Installation/packaging: the checked-in transpiled artifacts (cl/pcl-pack.lisp, cl/pcl-mro.lisp) embed build-machine absolute paths in their preambles (*pcl-pl2cl-path*, @INC pushes, perlbrew dirs) — regenerate on the target at install time, or make the preamble RELOCATABLE first (user note s335). Live evidence the paths are hostile to measurement too: s372's worktree compare reported EVERY file changed on ROOT alone. PROMOTED s375c to the v0.1 release track: this is the keystone under #277 (the installer, which per USER ruling also COMPILES the runtime + saved core at install, XS-model). Preference: make the preamble relocatable (derive from FindBin/runtime lookup) so the artifacts stay checked in and byte-comparable; the installer then only needs to VERIFY, not regenerate.\n\nRE-SCOPED s401 (Fable, docs/fable-answers-s400.md Â§9): the artifacts embed\nthe build machine's paths BECAUSE they carry a PROGRAM preamble an extension\nnever needed â and that preamble RESETS @INC when the artifact loads (task\n#349, silent wrong).  Resolution: `pl2cl --extension` omits the preamble;\nthe artifacts become machine-independent; #277 item 2 (regenerate at\ninstall) is deleted.  This task CLOSES with #349.  User-file emission keeps\nits preamble (per-machine output, correct).\n\n\nCLOSED s404 by #349 (commit d1ecafc): the artifacts carried a PROGRAM\npreamble they never needed, which is where the build machine's absolute paths\ncame from.  `pl2cl --extension` emits none; all three artifacts now contain\nzero absolute paths and Pl/t/no-hardcoded-paths-01.t scans them like any\nhand-written file instead of excluding them.  #277's item 2 (regenerate at\ninstall) is deleted.\n",
+   "id" : "217",
+   "status" : "completed",
+   "subject" : "Installation/packaging: checked-in transpiled artifacts embed build-machine absolute paths — regenerate (or relocate) at install time"
+}

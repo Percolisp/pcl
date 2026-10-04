@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499k (Opus, 2026-09-27) probing #2443.  PRE-EXISTING (identical on main 937e7b65).\n\nReproducer (perl 5.40.3 vs PCL):\n    my $r2 = qr/a b/; print \"ab\" =~ /x|$r2/x ? 1 : 0, \"\\n\";      # perl 0   PCL 1\n    my $p = '(?^:^a ++b)'; print eval { \"a  b\" =~ /$p/x ? 1 : 0 } // \"died\", \"\\n\";   # perl 1   PCL died\n\nCAUSE: perl-regex-to-ppcre turns `(?^FLAGS:` into `(?FLAGS:` (\"at the top level the semantics are identical\"), but `^` RESETS every flag to the default first, so a qr// interpolated into a bigger /x pattern keeps /x OFF inside its own group.  With the `^` gone cl-ppcre applies the outer /x inside the group: `a b` loses its blank (silent wrong: matches \"ab\"), and `a ++` loses the blank the possessive applies to (dies).  The same holds for /i /m /s in principle (`qr/a/` inside `/x$r/i`), though the lone-qr spelling `/$re/i` is right because the object is used as is (#181).\n\nFIX SHAPE (not tried): translate `(?^FLAGS:` to `(?FLAGS-<imsx not in FLAGS>:` — cl-ppcre supports inline negated flags, and a `-x` makes %pcl-has-x-modifier route the pattern through %pcl-normalize-extended, which already honours the caret (%pcl-parse-x-flag-group).  Since s499k the rewrite scan runs BEFORE the `(?^` removal and already reads the caret for its own /x tracking, so the scan is not the blocker.  Probe /i /m /s /x and the qr stringification round trip; ir-spec §10 compiled-regex row.\n",
+   "id" : "2500",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (pre-existing): a qr// interpolated into a /x pattern takes the OUTER /x inside its (?^:...) group -- the caret reset is dropped (qr/a b/ in /x|$r/x matches \"ab\")"
+}

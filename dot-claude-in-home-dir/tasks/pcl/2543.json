@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND s500a (Opus, 2026-09-30) while splicing the #2533 companion movers.  t/comp/proto.t's snapshot row in baselines/perl-suite-run.tsv says C 78/38 (s473t5c, abort \"Undefined subroutine &main::FOO called\"); measured `tools/run-perl-suite.pl --jobs 1 comp/proto.t` on git-archive extractions:\n\n    558cc5a0 (main at s500 start)   C 63/32   abort: Can't use string (\"a\") as an ARRAY ref while \"strict refs\" in use\n    1bae682b (main after s500p+s494h) C 63/32   same abort\n    s500a tree (#2533)               C 75/20   same abort (12 prototype rows UP; spliced with this note)\n\nSo 21 rows (116 -> 95 produced; the runner's SHORTFALL line \"100 -> 121 NEVER PRODUCED\") were lost BEFORE 558cc5a0, at an unknown commit, and the file now aborts on a different statement.  The runner's ROW DIFF lists the rows that went missing/failing (NEW ROW comp/proto.t #96 #97 #99 #100 #101, \"$1 containing CORE::Foo\", star \"FOO\" / star $star / star(\"FOO\") / star($star) / star(FOO) / star2 FOO, BAR) -- they are NEW on the base too.\nTO DO: bisect with the same one-file command over the snapshot's s473t5c commit .. 558cc5a0 (git archive extractions; ~1 min per step), find the commit, attribute, fix or file; then re-splice the row.  Note \"pre-existing is WHEN, not WHY\" -- the s500a splice records WHEN only.\n",
+   "id" : 2543,
+   "status" : "pending",
+   "subject" : "t/comp/proto.t lost 21 rows BEFORE 558cc5a0 (snapshot 78/38, measured 63/32 on 558cc5a0 and 1bae682b; the file now aborts on `Can't use string (\"a\") as an ARRAY ref`) -- not bisected"
+}

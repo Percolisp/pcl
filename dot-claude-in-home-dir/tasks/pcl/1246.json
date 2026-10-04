@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s470bt (Opus, 2026-09-06) by the B6 IR conformance corpus (3 cases).\n#1271 (completed) fixed the LEXICAL spelling: `open(my $fh, ...)` that FAILS\nnow leaves $fh defined, because perl creates the handle before it opens.  The\nELEMENT spellings were not covered.\n\nPROBE (perl 5.40.3 vs PCL main cd34df72):\n\n  my @a; my $ok  = open($a[0], \"<\", \"/nonexistent\")?1:0;\n  printf \"arr ok=%s defined=%s\\n\", $ok, (defined $a[0]?1:0);\n  my %h; my $ok2 = open($h{k}, \"<\", \"/nonexistent\")?1:0;\n  printf \"hsh ok=%s defined=%s\\n\", $ok2, (defined $h{k}?1:0);\n\n  perl   arr ok=0 defined=1 / hsh ok=0 defined=1\n  PCL    arr ok=0 defined=0 / hsh ok=0 defined=0\n\nAnd the value `close` returns on such a handle:\n\n  my $fh; open($fh, \"<\", \"/nonexistent\"); my $r = close($fh);\n  printf \"close=[%s]\\n\", (defined $r ? $r : \"undef\");\n\n  perl   close=[]       (a defined empty string -- the false perl returns)\n  PCL    close=[undef]\n\nCORPUS CASES: 299-sprintf 308-sprintf 309-sprintf.\n\n=== DONE (s473f) ===\nBoth halves.  The ELEMENT half fell out of #1309's place fix: with a box in the\nplace, %p-autoviv-failed-handle (#1271) has something to vivify, so a failed\n`open($a[3],...)` leaves a closed glob there and grows the array to four\nelements, as perl does.  The CLOSE half is #1307's: perl's false from `close`\nis a DEFINED EMPTY STRING.  Corpus rows 299-io / 308-io / 309-io left\nir-conform/known-fail.tsv.  Commits a3d13bce + 5a952fce.\n",
+   "id" : 1246,
+   "status" : "completed",
+   "subject" : "SILENT WRONG (residue of #1271, found by the ir-conform corpus): a FAILED `open` into an ARRAY or HASH ELEMENT does not autovivify the handle, and `close` on a failed handle returns undef where perl returns ''"
+}

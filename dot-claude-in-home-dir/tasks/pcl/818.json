@@ -1,0 +1,7 @@
+{
+   "created" : "2026-08-30",
+   "description" : "FOUND s455d by the same probe battery: perl sl=10 20 3, PCL sl=1 2 3 on `my @c=(1,2,3); for (@c[0,1]) { $_ *= 10 }`. Pre-existing at 90da9e8. Same mechanism family as #817: the slice list builder hands copies to foreach where perl hands aliases (E12). Direct-array foreach and @_ aliasing are CORRECT (probed fe/ar in the same battery) -- the miss is exactly the intermediate-list builders. One fix shape for both siblings; check lvalue slices (  = ...) are unaffected (different path, already correct).  [CLOSED s457ai, commit 9c0cf75: the fix is at the LIST-BUILDER layer -- p-values / p-aslice / p-hslice / p-kv-aslice / p-kv-hslice hand out the container's own slots via %p-alias-aelem / %p-alias-helem (p-aref-argbox / p-gethash-argbox with a fallback for containers that cannot hold a slot box). The right layer was proved by probing TWELVE copy positions: a plain @a in list context has ALWAYS handed out its slot boxes and every copy consumer already unboxes, so the builders were put in that same shape rather than a second one. The sweep then caught the other half: @a[0,1] = @a[1,0] needs perl's read-the-whole-RHS-first rule, which PCL had inside %p-flatten-list and the slice-assign arms never ran -- extracted as %p-assign-snapshot. Guard: Pl/t/elem-alias-01.t (E1-E12 vs real perl).]",
+   "id" : 818,
+   "status" : "done",
+   "subject" : "for (@a[0,1]) { $_ *= 10 } does NOT write through -- perl aliases slice elements in foreach, PCL copies (SILENT WRONG, pre-existing, sibling of #817)"
+}

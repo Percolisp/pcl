@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent G (s443g).  pl2cl's die EXIT CODE is errno-dependent: perl's die takes its status from $! when nonzero, so any filesystem probe before any die moves the exit code (measured: a Parser2 TODO refusal flipping rc 255 <-> rc 2/ENOENT with byte-identical output).  s443g contained the one loud source (local $! in _premerge_include_prototypes) -- three files flipped BACK to the deterministic 255 (op/goto.t, op/svleak.t, Text-CSV 90_csv.t).  Residue: make the top-level failure exit deterministic (e.g. $! = 0 before the die, or an explicit exit code).  Benign today -- runners test only zero/non-zero (and 124).",
+   "id" : 524,
+   "status" : "pending",
+   "subject" : "pcl"
+}

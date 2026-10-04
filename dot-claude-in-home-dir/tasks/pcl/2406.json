@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FILED s497b (sized, not shipped).  perl: `use Moo;` alone makes the file strict (probed: `use Moo; my $s = \"x\"; my @a = eval { @$s }` dies).  s497b's strict_refs_regions_of reads only `use strict` / `no strict` / `use VERSION` >= 5.011.\nWHAT IT WOULD TAKE (rule 9a -- never a module NAME in Pl/): a pragma-EXPORT fact the shim or the module declares and the parser reads generically -- e.g. the prototype-scan machinery (_extract_module_prototypes) learning that a module's `import` calls `strict->import` (Moo's does it through Moo::_Utils; Mojo::Base through its own import), and a region from the `use` statement to the end of the block.  The scan reads the module's SOURCE at transpile time, so the answer depends on the installed module -- a transpile-cache key question as well.\nPOPULATION: count the corpus files that say `use Moo`/`use Moose`/`use Mojo::Base` WITHOUT their own `use strict` before shipping; each is a file whose strict-refs deaths are missed today (the safe direction).",
+   "id" : "2406",
+   "status" : "pending",
+   "subject" : "SIZE: a module that imports strict into its CALLER (`use Moo`, `use Moose`, `use Mojo::Base`, `use Modern::Perl`, `use common::sense`, `use strictures`) -- PCL reads such a file as NOT strict, so its rvalue derefs of undef live"
+}

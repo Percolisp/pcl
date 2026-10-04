@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s496a (Opus resume agent s499, 2026-09-27) from the Fable s499 review probes (~/pcl-agent-scratch/s499/review/p496-*.pl, outputs under out/: perl -> rv-base -> rv-s496a).  FILED, not fixed (Fable ruling s499).\n\nFound while probing s496a member 7 (qr compiles eagerly: `my $q = eval { qr/$bad/ }` now leaves $q undef as in perl, and the next `\"a\" =~ $q` reaches this).  PRE-EXISTING on base 1b0baa7c.\n\nREPRODUCER:\n  my $u; print \"r=\", (\"a\" =~ $u ? 1 : 0), \"\\n\"; \"zz\" =~ /z/; print \"r2=\", (\"a\" =~ $u ? 1 : 0), \"\\n\";\n  perl 5.40.3: r=1 r2=0     base + tree: r=0 r2=0, plus two lines 'warning: Unknown regex operation type: keyword' on stdout/stderr\n\nperlop: an empty pattern // re-uses the last SUCCESSFULLY matched pattern; with none it matches.  An undef operand stringifies to '' and takes that rule.  The runtime's match dispatch has no arm for the undef/keyword operand -- rule 12 says it must not fall through to a warning + a value; it should coerce to string and take the empty-pattern path (check the existing empty-pattern handling of a literal //).",
+   "id" : "2388",
+   "status" : "pending",
+   "subject" : "matching against an UNDEF scalar pattern (`\"a\" =~ $u` with $u undef) warns 'Unknown regex operation type: keyword' and answers 0 -- perl uses the EMPTY pattern, i.e. the last successful pattern (or matches everywhere when there is none)"
+}

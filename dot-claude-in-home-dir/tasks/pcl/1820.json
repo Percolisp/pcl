@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-16",
+   "description" : "FILED s473t6a (Opus, 2026-09-17) by #1501 ROUND 8 (t6a), CHECK 2 of\nt/op/universal.t.  PRE-EXISTING.  5 blessed rows (the RT66112 block).\n\nThe block the rows come from defines its OWN `isa` in two packages, each of\nwhich mutates `@ISA` and then delegates upwards:\n\n    package RT66112::B;\n    sub isa { my $self = shift; @RT66112::C::ISA = qw/RT66112::A/;\n              return $self->SUPER::isa(@_) }\n\nPROBED and NARROWED (scratch/s473t6a/probes/isa-override.pl) â the override\nitself DISPATCHES fine in PCL; what fails is the delegation:\n\n    package P; sub isa { print \"P::isa called\\n\"; $_[0]->SUPER::isa(@_[1..$#_]) }\n    package Q; our @ISA = ('P');\n    package main;\n    print Q->isa('P') ? 1 : 0;\n\n    perl 5.40.3: P::isa called / 1\n    PCL        : P::isa called / 0\n\nSo `SUPER::isa` from a package with no `@ISA` must fall through to\n`UNIVERSAL::isa` and answer perl's truth; PCL's SUPER:: resolution does not\nreach UNIVERSAL and the call answers false.  The same question applies to\n`SUPER::can` and `SUPER::DOES`.\n\nRows: t/op/universal.t tests 133, 134, 135, 136, 138 (\"modify @ISA in isa\n(RT66112::TN isa RT66112::X)\"), now carrying this task.  Test 137 (`T5 not isa\nD`, the NEGATIVE) passes by accident, since false is what PCL answers anyway.\n\nNOT the same as #1737 (isa/DOES answering perl's FALSE `\"\"`) â that is the\nVALUE; this is the LOOKUP.  Read `docs/caller-implementation.md`-era notes on\nthe CLOS class graph before designing: `p-method-call`'s SUPER:: arm walks the\ndeclared parents, and UNIVERSAL is not one of them.\n",
+   "id" : 1820,
+   "status" : "pending",
+   "subject" : "SUPER::isa from a package with no \\@ISA does not reach UNIVERSAL::isa and answers false -- 5 rows in t/op/universal.t's RT66112 block"
+}

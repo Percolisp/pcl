@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/flip.t row 11 is `ok(scalar(15..0))` -- and it passes in perl because in\nSCALAR context `..` is the FLIP-FLOP operator, whose constant operands are\nimplicitly compared against `$.` (the input line number).  With nothing read,\n`$.` is undef, so 15 is false, 0 is false, and the flip-flop's own state makes\nthe expression true in the way the row expects.\n\nPCL evaluates `15..0` as a RANGE even in scalar context, so the row fails.\n\nThe other causeless row of the file is NS:Warnings-gated diagnostics (#221)\n(it counts two \"isn't numeric\" warnings).\n\nperlop: \"If either operand of scalar `..` is a constant expression, that\noperand is considered true if it is equal (`==`) to the current input line\nnumber (the `$.` variable).\"  That is the rule to implement; the range half\nmust not change.\n",
+   "id" : 1941,
+   "status" : "pending",
+   "subject" : "`scalar(15..0)` : a flip-flop whose operands are CONSTANTS compares them against $., so with no input read it is FALSE (op/flip.t row 11)"
+}

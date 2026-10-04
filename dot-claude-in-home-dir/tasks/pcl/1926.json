@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/lock.t is five rows and PCL produces NONE of them: each of\n    is \\lock $foo, \\$foo\n    is  lock @foo, \\@foo\n    is  lock %foo, \\%foo\n    is  lock &foo, \\&foo\n    is  lock &eulavl, \\&eulavl     # sub eulavl : lvalue { $x }\nreaches the runtime with the wrong arity (\"invalid number of arguments: N\") and\naborts its top-level form -- the runner records `aborted-forms:5:`.\n\nIn a perl built without threads, `lock` is a NO-OP whose value is a REFERENCE\nto its argument, and that is exactly what the file tests.  So the whole file is\none small runtime function plus the `(\\[$@%&*];)` prototype shape that lets\n`lock @foo` take the ARRAY rather than its elements.\n\nThe last row also needs NS:Lvalue subroutines [DEFERRED] (#930), so four of the\nfive are reachable.\n",
+   "id" : 1926,
+   "status" : "pending",
+   "subject" : "`lock` is not implemented: in a non-threaded perl it is a no-op that RETURNS A REF to its argument; PCL aborts the form (op/lock.t, all 5 rows + 5 shortfall)"
+}

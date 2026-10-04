@@ -1,0 +1,10 @@
+{
+   "blockedBy" : [],
+   "blocks" : [
+      "282"
+   ],
+   "description" : "1. README: drop the stale \"being reworked... uploads will wait a few weeks\" note (E4.1-era; the rework landed s356); refresh examples and numbers to current verified state.\n2. NEW user-facing STATUS/compatibility page distilled from docs/not-supported.md + the live baselines: what runs (18499/~19400 perl-test assertions, 65 files fully green, gate 133 files, XS via pclxs conformance 398/0, Digest::MD5 256/256) and what deliberately does not (tie on aggregates, (?{...}) regex code blocks, warnings categories, taint, ...). Honest tables, no adjectives.\n3. CHANGELOG distilled from docs/session-log.md; tag v0.1 (R1 stays an internal milestone name).\nPENDING USER DECISIONS: public NAME (\"PCL\" collides with Portable Common Loops + Practical Common Lisp; percolisp org exists), LICENSE body check (dual Perl/Artistic intended?), pclxs bundling (recommend: mention as experimental sibling), hosting/remote (repo currently has NO remote).\n\nDONE s419b (98159c7): README refreshed from measured state (all three examples re-run), docs/STATUS.md written (user-facing compatibility page), CHANGELOG.md distilled.  NO v0.1 tag -- precondition (#282 green + phase 4) not met; also see the s419 schedule finding (flip blocked; USER decides tag-vs-flip coupling).  Name spelled PCL (Percolisp) per the s416 ruling.",
+   "id" : "280",
+   "status" : "completed",
+   "subject" : "v0.1: README/STATUS refresh + CHANGELOG + version tag prep"
+}

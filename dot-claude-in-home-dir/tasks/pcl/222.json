@@ -1,0 +1,9 @@
+{
+  "id": "222",
+  "subject": "s338+1 small-items batch: #215 both halves + tie-warning fold + getprotobyname via /etc/protocols + pcl-xs rule-12 grep",
+  "description": "DONE s339 (commit 2fff5c4). All four ruled items shipped and verified:\n\n1. #215 both halves + the CAUSE the ruling did not have (non-atomic .lisp cache write; see #215).\n2. §5(b) tie warning folded into %p-announce-unsupported — class in the operand keeps the per-(kind, class) dedup; new text \"PCL: tie: a HASH (class Foo) is not implemented — the container is left untied (task #155)\"; not-supported.md + task #155 requoted in the same commit; guard row updated in transpile-test-07.t.\n3. §4-secondary getprotobyname + NEW getprotobynumber read /etc/protocols lazily (4-entry table only when unreadable). Both wantarray-sensitive; byte-identical to perl on 11 probes incl. the two asymmetries (EXACT name-or-alias match, \"Tcp\" misses; scalar = number by name / NAME by number). Guard row in transpile-test-09.t (file still ~20 s). Cache gen -> v2-101.\n4. §3.1 rule-12 grep over cl/pcl-xs.lisp: 11 dispatch sites read, 2 fixed (xs-ref-type's (t 1) now enumerates SCALAR/LVALUE + announces anything else; xs-get-iv NaN arm), 9 justified in the ask doc. STRUCTURAL FINDING: rule 12's DIE ending does not exist inside a callback — with-xs-guard converts every condition to the on-error constant by design (pclxs rule O4), so the announce IS the loud ending there. Recorded in DECIDED.md.\n\nGate 131/4595 PASS; cold-cache full sweep 18498/681, 0 new / 0 LOST; XS conformance 398/0.\nAsks for Fable: docs/opus5-review-requests-s339.md (5 items; §5(e) near-green filler NOT started).",
+  "activeForm": "Working the s338+1 small-items batch",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

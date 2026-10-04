@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FILED s492c (Opus, 2026-09-21) as the residue of #1870.\n\nMember 1 routed the GENERIC funcall path and the readpipe/backtick path\nthrough `Pl::Environment::builtin_override_target`, which took\nt/op/override.t from 3 ok / 17 not-ok to 9/13 (six rows fixed, shortfall\n16 -> 14).  The 28 rows still failing are three constructs that have their\nown emission sites and never consult the registry:\n\n  * `require` -- and it is the interesting one: perl calls the override with\n    the FILENAME it computed, so `require Foo::Bar` passes \"Foo/Bar.pm\" and\n    `require 5.006` passes \"5.006\".  PCL's `require BAREWORD` emission already\n    computes the module path, so the fix is to emit\n    `(|CORE::GLOBAL|::pl-require \"Foo/Bar.pm\")` there.  8 rows, plus the\n    `local *CORE::GLOBAL::require` rows, which also need the override lookup\n    to be a RUNTIME read of the glob rather than a compile-time constant.\n  * `readline` / `<FH>` / `<$fh>` / rcatline -- 8 rows.\n  * `do FILE` and the `sub CORE::GLOBAL::do;` forward-declaration stub form.\n\nAlso unrouted: `*{q|CORE::GLOBAL::readpipe|} = ...` (the BLOCK spelling of a\nglob name, as opposed to the bareword `*CORE::GLOBAL::readpipe`), which\nop/override.t uses inside `runperl` sub-programs.\n\nThe registry and its one reader are in place, so each of these is \"call\n`builtin_override_target` at this site and emit the qualified name\", not a\nnew mechanism.\n",
+   "id" : 2054,
+   "status" : "pending",
+   "subject" : "`*CORE::GLOBAL::require` / `::do` / `::readline` are separate EMISSION SITES and are not routed through the override registry -- 28 of t/op/override.t`s rows"
+}

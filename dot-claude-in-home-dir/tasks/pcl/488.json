@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FOUND s438i (Opus 5) as the named residue of #450, whose task text asked for\nexactly this check before writing the no-wildcard predicate.\n\n    perl                        PCL\n    glob(\"{a,b}\")   -> a, b     (empty)\n    glob(\"x{1,2}y\") -> x1y x2y  (empty)\n\nbsd_glob implements csh-style brace expansion BEFORE any filesystem matching,\nand the words it produces need not exist -- `{a,b}` yields the literal strings\n`a` and `b`.  PCL's p-glob--expand has no brace pass, so the pattern reaches\nthe directory matcher, matches nothing, and answers empty.\n\nUNCHANGED BY #450, deliberately: that fix returns a pattern with no\nMETACHARACTER as itself, and `{` is counted as a metacharacter precisely so\n`{a,b}` does NOT take that path -- answering the literal `{a,b}` would be\nfurther from perl than the empty result.  `%p-glob--wildcard-p` is the one\nplace to change when this is implemented.\n\nFIX SHAPE: a brace pass in front of `%p-glob--expand-one`, expanding\ninnermost-first and cross-producting nested groups, then each result word goes\nthrough the existing pipeline (tilde -> no-metachar literal -> matcher).\nPerl's own edge cases to probe first: an UNMATCHED `{` is literal\n(`glob(\"{a\")`), a comma-less group is literal (`glob(\"{a}\")` -- probe, csh and\nbsd_glob differ here), nesting (`{a,{b,c}}`), and a brace inside a character\nclass (`[{]`).\n\nBAR: the probe table above plus those edge cases; a row in\nPl/t/punct-array-glob-01.t beside #450's; `cl/` change, so the full sweep is\nthe gate (invisible to corpus-diff) plus the io/ and op/ companion dirs.",
+   "id" : 488,
+   "status" : "pending",
+   "subject" : "glob does not do csh BRACE EXPANSION: `glob(\"{a,b}\")` is empty where perl gives a, b -- the one row of #450's probe table still diverging"
+}

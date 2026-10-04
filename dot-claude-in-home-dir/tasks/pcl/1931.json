@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/filehandle.t is four rows.  PCL produces two of them; rows 2 and 3\n(\"after 'seek' and 'tell', got expected current fh position\" / \"still got\nexpected content\") are never produced and row 4 (\"no errors after 'seek' or\n'tell'\") fails.\n\nThe file opens a handle with the TWO-ARGUMENT `open(FH, \"<$file\")` spelling,\nseeks inside it and reads back.  Reproduce it directly before assuming the\n2-arg spelling is the cause -- the file also uses a bareword handle and\n`*{$fh}{IO}`, both of which are the #1664 typeglob-model family.  One `runt`\nrun of the file with stderr on prints the answer.\n",
+   "id" : 1931,
+   "status" : "pending",
+   "subject" : "`seek`/`tell` on a handle opened with the 2-argument open(FH, \"<file\") spelling (op/filehandle.t: 2 rows never produced, 1 fails)"
+}

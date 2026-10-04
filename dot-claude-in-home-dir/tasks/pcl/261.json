@@ -1,0 +1,8 @@
+{
+  "id": "261",
+  "subject": "`$_[N] =~ /\\G…/` does not use the ARG BOX, so pos set through a defelem is invisible (pos.t t21)",
+  "description": "EXPOSED s361 by the prototype-arity fix (1279be6), which corrected the parse of `ok $_[3] =~ /\\Ge/, 'desc'`. It is NOT a new bug — the row had been passing under a WRONG parse.\n\nBefore: `ok ($;$)`'s prototype made the site \"strictly single\", so the statement parsed as\n    (ok($_[3])) =~ /\\Ge/, 'desc'\nand the emitted CL was `(p-=~ (pl-ok (p-scalar (p-aref-argbox @_ 3))) (p-regex …))` — the match ran on ok()'s RETURN VALUE, and the row scored \"pass\" for a reason unrelated to what it tests.\nAfter: `(pl-ok (p-scalar (p-=~ (p-aref @_ 3) (p-regex \"/\\\\Ge/\"))) \"…\")` — which is what perl does.\n\nWith the correct parse the row fails, and the cause is visible in the same diff: the =~ target is `(p-aref @_ 3)` — a COPY — where the old (wrong) path happened to use `p-aref-argbox`, the defelem alias.  pos() lives on the box, so `pos $h{n} = 1` cannot be seen by a later `$_[3] =~ /\\G…/` when the match reads a copy.\n\nFamily: this is the #131 defelem-aliasing family one step further along (there: writes to $_[0] lost; here: the match TARGET must be the alias box so pos/\\G travel with it). Likely fix area: whatever decides argbox-vs-copy for a `$_[N]` used as a regex-bind target.\n\nBaseline: the row `pos.t 21 \\G works with defelem scalars` was added to docs/fail-baseline.tsv by EDIT in s361 with this cause, and docs/pass-baseline.tsv's pos.t row went 16/14 → 15/15.</description>\n</invoke>\n",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s496a (Opus resume agent s499, 2026-09-27) from the Fable s499 review probes (~/pcl-agent-scratch/s499/review/p496-*.pl, outputs under out/: perl -> rv-base -> rv-s496a).  FILED, not fixed (Fable ruling s499).\n\nREPRODUCER (probed perl 5.40.3):\n  my $p = '(?|a|b)'; print eval { \"a\" =~ /$p/ ? 1 : 0 } // 'died', \"\\n\";\n  perl: 1   base (1b0baa7c): 0 (warning)   s496a tree: died\n\nperl's branch reset numbers each alternative's groups from the same start: /(?|(a)|(b))/ sets $1 on either branch.  cl-ppcre has no (?| form.  A translation is possible for the capture-less case (?|a|b) == (?:a|b); with captures the group numbering must be remapped (each alternative's k-th group -> one shared register), which cl-ppcre cannot express directly -- candidates: rewrite to (?:(a)|(b)) and fold the registers after the match in %p-match-record, or a filter.  Not on any other task (the 'branch reset' hit in the store is #672, unrelated).  Related family: #2380 (possessive), #2382 (recursion), #2383 (code-block condition), #2386 (control verbs); measurement #1528.",
+   "id" : "2385",
+   "status" : "pending",
+   "subject" : "regex BRANCH RESET (?|a|b) has no cl-ppcre counterpart: a silent no-match before #2372, a DIE at the match since -- perl matches"
+}

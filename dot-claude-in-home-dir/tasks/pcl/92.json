@@ -1,0 +1,9 @@
+{
+  "id": "92",
+  "subject": "pclxs: push to GitHub (percolisp/pclxs) — DEFERRED by user until pclxs proves itself; don't prompt for gh",
+  "description": "User decision 2026-07-25: the repo goes public when it works well enough to be worth looking at (\"for vanity\" :-), not on tooling readiness. Do NOT prompt for apt install gh / gh auth login until the user raises it. Meanwhile the technical pre-push items in pclxs docs/plan.md (\"Going public — the pre-push gate\") should be done so the eventual push is one command: census provenance scrub (R18), CI drift-check teeth (R19), /home/ grep clean, xs-shim-prereview.md moved to docs/.",
+  "activeForm": "Pushing pclxs to GitHub",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

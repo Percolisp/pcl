@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent F (s443f); PRE-EXISTING, IMPROVED by #491 from load-abort to trappable.  STDOUT->autoflush(1) (io/iofile.t) now dies perl-shaped \"Can't locate object method autoflush via package STDOUT\" inside its own eval (before: unbound variable killed the whole file).  perl: works.  Needs the bareword-handle -> IO::Handle object bridge (method dispatch on a handle name/glob).  Sizeable; measure which suite rows sit behind it first.",
+   "id" : 531,
+   "status" : "pending",
+   "subject" : "pcl"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "94",
+  "subject": "pclxs Phase 3: AV/HV group + refs/bless + get_global → Digest::MD5 builds and passes its own tests",
+  "description": "Per pclxs/docs/plan.md Phase 3, plus the two Phase-1 carryovers to do first: (a) t/lib/Pclxs/Conform.pm — factor the case lists out of 20-arith.t and 50-coerce.t so any host adapter can run them (the TCK shape); (b) bench/xs-call.pl for the §8 perf target. Then: AV/HV vtable group + macro layer including the av_len off-by-one (perl's av_len is the TOP INDEX, the vtable's av_count is the count) and the SV** slot lifetime rule O3; refs/bless, sv_isa (exact class) vs sv_derived_from (@ISA walk) mapping; sv_setref_pv for the T_PTROBJ C-object pattern; get_sv/av/hv/cv through get_global. Acceptance: an unmodified Digest::MD5 dist builds via xs-build and its own t/*.t pass; t/aggregate.t covers empty / one-element / trailing-hole arrays.",
+  "activeForm": "Building pclxs Phase 3",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "239",
+  "subject": "DONE s378: `package X;` inside ANY block now re-homes unqualified globals (source-level requalification)",
+  "description": "DONE s378.  `_requalify_block_globals_after_pkg_switch` in Pl/Parser2.pm —\na sibling pre-pass beside the `our` one, run right after it, requalifying a\npackage-switched block region's variables at the SOURCE level through the\nshared `_rewrite_var_uses` family rewriter.\n\nWIDER THAN THE TITLE: probed across nine block kinds — eval, do, named sub,\nBEGIN, if, while, labelled, anon sub, sort — ALL were wrong; only the plain\nbare block was right, and only because D1-lite splits that one shape into\nseparate top-level CL forms.\n\nResolver = the ruled four-way (lexical / in-scope `our` → declaring package /\nalready qualified / else → X), off the existing scope walk; unreadable\ndeclarator DIES.  The s377 §9.1 `our`-alias guard probe is FIXED by the same\npass, not filed as a companion.\n\nVerification: gate 133/4787 PASS; full sweep GATE clean (0 new/0 fixed,\nTOTAL 18498 → 18499); corpus-diff 8 of 111, all one mechanism; CPAN board\nbyte-identical to s376; die-scan zero over lib/ (21) and the board (324);\ngen v2-126 → v2-127 with both transpiled artifacts regenerated.\n\nThree latent bugs fixed on the way: last-declaration-wins in the scope walk;\n\"$Foo::bar\" is one qualified name to `_interp_canon` and `_interp_fixer`\n(unbraced arms gained `(?!::)`); `local` excluded from the declarator test\nvia a new keyword-regex argument on `_symbol_is_declarator`.\n\nRESIDUE → task #287 (the new ask the call-shape probe surfaced): `$a`/`$b`\nare immune, which is exactly what keeps Sort-Versions versions.t at 65/31.\nMeasured both ways — see #287.",
+  "activeForm": "Fixing in-block package globals (#239)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

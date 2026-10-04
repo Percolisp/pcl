@@ -1,0 +1,9 @@
+{
+  "id": "131",
+  "subject": "Defelem gap: $h{key}/$a[i] passed as sub args don't alias — writes to $_[0] are lost",
+  "description": "sub { $_[0] = 3 }->($h{k}) leaves $h{k} undef under PCL (perl vivifies via defelem magic). Array element args same. The s316e hole-aliasing covered @_ flattening of array holes, not element args at call sites. Affects op/ver.t t51 (defelems can pass vstrings) and likely other sweeps. Fix direction: arg emission for element lvalues at call sites should pass an aliasing/defelem box (hash analog of %p-defelem-box); watch call-site perf.",
+  "activeForm": "Fixing defelem arg-aliasing through @_",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

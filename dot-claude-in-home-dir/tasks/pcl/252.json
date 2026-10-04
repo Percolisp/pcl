@@ -1,0 +1,8 @@
+{
+  "id": "252",
+  "subject": "POST-FLIP coverage loss: USER ruled SPLIT — phase 1 (Text::Balanced) SHIPPED s358 (+933 board rows); phase 2 = #254 (APPROVED s360, Opus); residue registration in #254 §4 (own sign-off pending)",
+  "description": "CLOSED s366 with #254 (Fable ruling, docs/fable-answers-s365.md §5): phase 1 (Text::Balanced) shipped s358; phase 2 = #254 done; residue registration landed s365 (docs/perl-suite-timeouts.tsv + perl-suite-run-s365.tsv snapshot).",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

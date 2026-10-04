@@ -1,0 +1,8 @@
+{
+  "id": "206",
+  "subject": "UNIVERSAL::isa must honour the reftype rule (isa_ok([], 'ARRAY') passes in perl, fails in PCL)",
+  "description": "Found by the #202 harness audit (docs/tap-assertion-audit.md, \"Not changed\").\n\nperl: `$thing->isa($class)` is true when $class equals the REFTYPE of the referent, blessed or not — `isa_ok([], 'ARRAY')` and `isa_ok(bless([],'Foo'), 'ARRAY')` both PASS under Test::More. PCL's p-isa (cl/pcl-runtime.lisp ~14235) resolves %pcl-invocant-class and walks @ISA only, so an unblessed ref has no class at all and both rows FAIL.\n\nProbe: scratch p6.pl in the s330 audit — rows 4 and 6 are the two shapes.\nFamily: #163 (referent-kind tag on the box) — the reftype is exactly what that tag would carry, so do this WITH #163, not before.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

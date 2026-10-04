@@ -1,0 +1,9 @@
+{
+  "id": "36",
+  "subject": "T-A1: fix join.t package-block miscompile + full parity",
+  "description": "Package-aware forward-decl exclusion fixes join.t 43/43 under PKGBLOCK. Verify parity on all 18 package-in-block files (each >= v1), then deflag PCL_V2_PKGBLOCK (default on), bump cache generation, re-run census.",
+  "activeForm": "Completing T-A1 (package-in-block flattening)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

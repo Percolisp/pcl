@@ -1,0 +1,9 @@
+{
+  "id": "23",
+  "subject": "Bench v2 vs perl, startup subtracted (post-W12)",
+  "description": "Re-run the canonical bench shapes (intloop, fib, shift-fib, arrhash, C-for carve-out, strbuild) under the new tree-annotator default; compare v2 vs perl with startup time subtracted, per docs/parser2-prototype.md bench table method.",
+  "activeForm": "Benchmarking v2 vs perl",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FOUND s473t5e (#1501 round 6, `re/` CHECK 1).  t/re/pat.t is DIFF 231/138 with\nONE aborted top-level form whose message is the FILE'S OWN die:\n\n    aborted-forms:1: Failed to match at pat.t line N.\n\nso 898 of perl's 1,267 rows are never produced -- the single biggest remaining\n`re/` shortfall outside the registered classes.\n\nWHAT IS KNOWN: the message comes from pat.t itself, not from PCL, i.e. one of\nthe file's guarded assertions (`... or die \"Failed to match at pat.t line \" .\n__LINE__`) failed and took the rest of the top-level form with it.  The row\ncount says the stop is around perl row 370.\n\nWHAT IS NOT KNOWN, and is the first job: WHICH line.  `PCL_SUITE_KEEP=DIR\ntools/run-perl-suite.pl --jobs 1 re/pat.t` keeps `<DIR>/re_pat.t.out`; the\nrecovery line there carries the real line number (the runner normalises digits\nto N in the `sig` column, which is why the blessed text reads \"line N\").  Then\nread that assertion and probe it alone -- it is one regex, and the 898 rows\nbehind it make it worth a session on its own.\n\nDO NOT assume the 898 rows all share the cause: the s473t5a rule is that a\nrecovery line proves an abort, never that the abort cost the rows that follow\nit.  pat.t's 138 blessed fail rows are a separate, scattered population (the\nfile is perl's own regex grab-bag).\n",
+   "id" : 1720,
+   "status" : "pending",
+   "subject" : "t/re/pat.t dies at its own `Failed to match at pat.t line N` and loses 898 of 1,267 rows -- the abort is ONE assertion inside an `ok(...) or die` guard"
+}

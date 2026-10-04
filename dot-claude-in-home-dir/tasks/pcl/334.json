@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s398 (Fable, #153 FOLD chunk 3 review probes; occurs in NO population — filler).  PRE-EXISTING: identical on main (13bcef4).\n\nPROBED vs perl 5.40.3 (scratchpad probes/can.pl):\n    sub x { 42 }\n    __PACKAGE__->can(\"main::x\")   perl: true    PCL: false\n    __PACKAGE__->can(\"x\")         perl: true    PCL: true\n    main->can(\"main::x\")          perl: true    PCL: false\n\nperl: UNIVERSAL::can looks the name up with gv_fetchmethod, which accepts a fully-qualified name (`Pkg::name`) and resolves it directly in that package (also `SUPER::name`), returning the code ref.  PCL's runtime can only tries the invocant's MRO with the literal string as the method name.\n\nFIX SHAPE: in the runtime `can` (cl/pcl-runtime.lisp, the UNIVERSAL::can implementation), when the name contains `::`, split off the package and look the sub up there directly (the same lookup a qualified method CALL `$o->Pkg::name` uses — reuse that resolver, CLAUDE.md 11), falling back to the MRO walk only for unqualified names.  Guard row in a Pl/t OO test (probe vs perl first).  BAR: gate; runtime change → full sweep (s377 rule).\n",
+   "id" : 334,
+   "status" : "pending",
+   "subject" : "`->can(\"Pkg::name\")` with a QUALIFIED method name returns false (perl resolves it)"
+}

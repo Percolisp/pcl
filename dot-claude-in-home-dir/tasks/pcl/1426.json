@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09), while measuring #1247 (b).  PRE-EXISTING.\n\n    $? = 256; print \"q=$?\\n\";\n    perl : q=256\n    PCL  : q=0\n\nThe emission is `(p-scalar-= $? 256)` and `$?` is a plain `(defvar $? 0)`, not\na box, so the assignment does not land where the reader looks.  A status set by\n`system`/backticks DOES work (the runtime setfs $? directly), so only the\nprogram's own assignment is lost.\n\nIt matters beyond cosmetics: perl's uncaught-die exit status is\n`$! || ($? >> 8) || 255`, so the middle branch is reachable in PCL only from a\nreal child's status.  Row 13 of Pl/t/die-exit-status-01.t asserts PCL's current\nanswer with this task named, so closing this FAILS that row rather than passing\nunnoticed.\n\n\n=== DONE (s495f, 2026-09-25) ===\nFixed with #2009 (one seam): $? is a magic integer box; see #2009 DONE for the design, probes and guards (Pl/t/die-exit-status-01.t rows 13 and 14-23).\n",
+   "id" : 1426,
+   "status" : "completed",
+   "subject" : "SILENT WRONG: `$? = N` does not stick -- an explicit assignment to $? is lost"
+}

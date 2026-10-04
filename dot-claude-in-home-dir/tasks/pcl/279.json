@@ -1,0 +1,10 @@
+{
+   "blockedBy" : [],
+   "blocks" : [
+      "282"
+   ],
+   "description" : "The repo root has 54 entries: 29 loose planning .md files (BEGIN-note-*.md, SESSION_47_STATUS.md, FINAL_STRETCH.md, REMAINING.md, EXPR_CODEGEN_PLAN.md, ...) mostly superseded by docs/, plus THREE literal junk files named 'REF(0x...)' (accidental writes — delete; check whether tracked). Sweep: delete the junk; move still-true content into docs/; archive the rest under docs/history/ (git keeps full history either way). Audit .gitignore (.faillog/, caches, cores). USER DECISION RULED s401: \"this is open source\" â the process docs (docs/session-log.md, DECIDED.md, the fable-answers-*/opus5-review-requests-* series) stay in the public repo AS-IS under docs/; no docs/history/ for them, no pruning.  This task is now pure mechanics: delete the REF(0x...) junk, move still-true root planning content into docs/, archive the superseded root .md files under docs/history/ (git keeps history either way), audit .gitignore.\n\nDONE s419b (98159c7): junk deleted, 24 planning .mds + memory session reports -> docs/history/, CODEGEN/MOO_MOOSE designs -> docs/, tracked .suitelog-* untracked, references grep-passed, hook path $CLAUDE_PROJECT_DIR-relative, .gitignore audited.  Gate after: 155/5598, only the 13 pclxs xs rows.",
+   "id" : "279",
+   "status" : "completed",
+   "subject" : "v0.1: repo hygiene sweep — root junk + 29 loose planning docs + .gitignore audit"
+}

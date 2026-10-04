@@ -1,0 +1,8 @@
+{
+  "id": "156",
+  "subject": "op/avhv.t t13/t39: RULED s320 — park behind the #155 warning; half-session cap",
+  "description": "Fable ruling (fable-answers-s318.md §5): the tie observation is almost certainly the answer — both rows sit past the point where the container is tied, and aggregate tie is a no-op, so the value under test is not what the test built. Once the #155 loud warning lands (S1), one avhv.t run answers it for free: warning fires before t13/t39 → annotate \"blocked on aggregate tie — retest after boxed aggregates\" and PARK. Only if the warning does NOT fire is there a real context/lowering question — then stop at the half-session cap and write up findings rather than chasing pre-R1. Scheduled into S2's leftover half-session.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent H (s443h), #511's deliberate residue.  `use constant` / vars / lib / base / parent / overload / if record NO %INC entry (perl records constant.pm, vars.pm, ...).  Each is one _emit_inc_note call in its own branch, but each needs its own probe and the no-load precondition argued per branch -- and `no Module` must never be routed (the module would never load; p-use's already-loaded guard).  ir-spec Â§9 names the gap.  Bar per branch: exists + value shape vs perl; use-require-01.t rows.",
+   "id" : 528,
+   "status" : "pending",
+   "subject" : "pcl"
+}

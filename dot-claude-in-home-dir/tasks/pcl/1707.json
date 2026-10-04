@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t5d (Opus, 2026-09-13) by #1501 round 5 CHECK 2.\n\nt/run/cloexec.t is 26 blessed fail rows over ONE fact: perl's `$^F`\n($SYSTEM_FD_MAX) decides which descriptors survive an `exec` -- a descriptor at\nor below `$^F` is NOT marked FD_CLOEXEC and the exec'd child inherits it, above\nit is.  The file opens a temp file, notes `fileno`, sets `$^F` above and below\nit, and has a child `exec`'d program read the descriptor back.\n\nMEASURED (s473t5d, `--jobs 1`): PCL's child reads ONE line where perl's reads\nTWO --\n\n  not ok 8  - child stdout: has 2 newlines      got 1, expected 2\n  not ok 9  - child stdout: split into 2 lines  got 1, expected 2\n  not ok 11 - child stdout: line 1              got undef\n\n-- while the rows about the PARENT's own view (`parent open fd=5 ($^F=4)`,\n`tmpfile ... exists`, `child stdout: fd`) all PASS.  So the parent side of the\nmodel is right and the INHERITANCE is not.  The file also renumbers (PCL emits\n11 extra TAP rows), which is why 11 of the 26 are `(none) -> extra`.\n\nWHERE TO LOOK: PCL sets FD_CLOEXEC on the descriptors it opens (task #592 notes\nthe fdopen exception), and `$^F` is where perl's policy lives.  The open path\nmust consult `$^F` -- ONE reading, like `%p-output-buffering` is for buffering\n-- rather than a fixed choice.  Probe the shape that would BREAK: PCL's own\ninternal descriptors (the saved core, the module cache, the sweep's own\nplumbing) must stay close-on-exec whatever a program sets `$^F` to.\n\nROWS: 26 blessed fail rows (11 `ok -> (missing)`, 11 `extra`, the rest not ok);\nno registered shortfall.\n",
+   "id" : 1707,
+   "status" : "pending",
+   "subject" : "a descriptor above $^F is not inherited across exec: t/run/cloexec.t's child sees one line where perl sees two"
+}

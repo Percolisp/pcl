@@ -1,0 +1,8 @@
+{
+  "id": "198",
+  "subject": "DESTROY at scope exit — delete lib/IO/Handle.pm when it lands",
+  "description": "PCL never calls DESTROY (deliberate, docs/not-supported.md \"DESTROY called by garbage collector\"). SelectSaver's whole contract is restore-on-DESTROY, so core's IO::Handle::autoflush/printflush switch the selected output handle and never switch it back — every later plain print goes to the wrong handle. Worked around in s326 by shipping lib/IO/Handle.pm: core's file with exactly those two subs rewritten to explicit select save/restore (header records the deletion condition). Same shape as the lib/File/Basename.pm workaround. DELETE lib/IO/Handle.pm when DESTROY-at-scope-exit lands; core's own file is then correct and a copy here can only drift. Also unblocks Try::Tiny (needs DESTROY, project_cpan_pureperl_findings) and Scope::Guard/File::Temp.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

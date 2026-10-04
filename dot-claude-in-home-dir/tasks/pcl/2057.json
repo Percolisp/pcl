@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FILED s492c (Opus, 2026-09-21), as #2007's \"measure first\" half.\n\n#2007 asked whether the real (pure-Perl) File::Spec::Unix could replace the\nshim, judged by PathTools' own t/Spec.t.  It could not be measured here:\n\n  * `Pl::Parser`'s inc_paths BEGINS with PCL's shim lib/ (and the runtime's\n    %p-shim-lib-dir-p says so in as many words), so a `use lib` pointing at\n    perl's own lib cannot shadow `lib/File/Spec.pm` -- the shim wins, and the\n    real module never loads even when it is on the path.\n  * Running PathTools' t/Spec.t in the dist directory does not help either:\n    `-Ilib` there puts the DIST's own `lib/Cwd.pm` (the XS one) first, so the\n    file dies \"Can't locate Cwd.pm in @INC (the module is XS...)\" before it\n    reaches File::Spec at all.  That is the row the s492c modtests BEFORE\n    table shows (PathTools 76 of 823).\n\nWHAT THE MEASUREMENT NEEDS: a way to ask for a specific module file\nregardless of the shim -- either an env switch that drops the shim dir from\ninc_paths for one run, or copying the real File/Spec*.pm into a directory and\ntranspiling them by path rather than by module name.  Either is ten minutes;\nneither existed, and inventing one inside a correctness batch was the wrong\ntrade.\n\nMeanwhile #2007 fixed the shim function by function against the real\nFile::Spec::Unix's source (catdir, catfile, abs2rel, case_tolerant), which is\nthe task's own fallback.\n",
+   "id" : 2057,
+   "status" : "pending",
+   "subject" : "The `replace lib/File/Spec.pm with the real File::Spec::Unix` measurement cannot be taken: PCL`s shim lib/ wins module RESOLUTION over any `use lib`, so the real module cannot be loaded to compare"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "138",
+  "subject": "Shared low-prec statement splitter: my-decl init, state init, _extract_params all fold/drop a depth-0 comma tail (silent code deletion in one case)",
+  "description": "DONE s316u (6c95f99, gen v2-89). One table in Pl::PExpr::TokenUtils::lowprec_idx/lowprec_split_safe; six consumers (two statement fast paths, my-decl init, state init peel, _state_init_end, single-my C-for init, v1 local); _extract_params made exact-arity. Fixed: silent g() deletion, my/state/for/local comma+or folds. RESIDUAL (new task if pursued): an AMBIGUOUS comma in a state init (`state $s = f 1, $t = 2`) still folds — needs PExpr arity knowledge, i.e. the read-only classifier that is the E5 endpoint. The return-list comma gate deliberately NOT routed through the table (different question; would over-gate).",
+  "activeForm": "Building the shared low-prec statement splitter (W0, #138)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

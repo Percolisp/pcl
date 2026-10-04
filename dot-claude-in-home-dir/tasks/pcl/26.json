@@ -1,0 +1,9 @@
+{
+  "id": "26",
+  "subject": "Gate block-form-arg bodies that capture a live lexical (Try-Tiny catch bug)",
+  "description": "v2 hoists block-form-prototype anon-block defuns to _captured_decls outside the lexical lets; a body referencing a live lexical ($caught) reads an unbound global. Add the _hoist_nested_sub capture scan to the drain in _lower_expr; die \"Parser2 TODO\" → v1. Guard in parser2-02.t.",
+  "activeForm": "Gating block-form-arg lexical captures",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

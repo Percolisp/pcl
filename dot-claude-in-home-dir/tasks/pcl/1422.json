@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09).  PRE-EXISTING.\n\n    open(my $p, \"-|\", \"/bin/sh\", \"-c\", \"exit 3\") or die;\n\n    perl : runs /bin/sh with those arguments, no shell in between\n    PCL  : compile-time death --\n             Error while parsing arguments to defmacro p-open:\n               too many elements in ($p \"-|\" \"/bin/sh\" \"-c\" \"exit 3\")\n               to satisfy lambda list (fh mode &optional filename):\n               between 2 and 3 expected, but got 5\n\n`p-open`'s lambda list is (fh mode &optional filename).  perl's LIST form is\nthe SAFE spelling of a pipe open -- it is what code uses to avoid the shell --\nso the failure mode is that safety-conscious code does not compile.  The same\nquestion applies to `open(FH, \"|-\", LIST)`.\n\nFound while probing #1247 (b): the probe had to fall back to a single shell\nstring.  Minimal repro above.\n",
+   "id" : 1422,
+   "status" : "pending",
+   "subject" : "`open(FH, \"-|\", LIST)` -- the multi-argument (no-shell) pipe open -- is an ARITY error in p-open"
+}

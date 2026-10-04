@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-02",
+   "description" : "Found s504 by s501t (t/op/avhv.t probes).  PRE-EXISTING: identical on main b7ec0093 and for an UNTIED array (not a tie question).\n\nReproducer (perl: every line `[Not a HASH reference ...]`):\n    my $a = [1];\n    eval { my @k = keys %$a };  print \"4 [$@]\\n\";   # PCL: 4 []        (silent: keys of an ARRAY ref through %$)\n    eval { $a->{x}{y} = 1 };    print \"5 [$@]\\n\";   # PCL: The value #() is not of type hash-table\n    eval { $a->{q}[0] = 1 };    print \"9 [$@]\\n\";   # PCL: same raw CL type error\nThe single-level forms (`$a->{k} = 1`, `exists`, `delete`, slices, `%$a = LIST`) die perl's way.  Two sites: p-cast-% on an array referent (keys/values/each read it as a container) and the autoviv chain (expand-autoviv / p-autoviv-set) reaching gethash with a vector.  Rule 12 / \"errors fail in the same places as perl and are TIDY\" (USER).  Layer: runtime, the %p-wrong-referent-p predicate the single-level paths already use.\n",
+   "id" : "2597",
+   "status" : "pending",
+   "subject" : "`keys %$aref` does not die \"Not a HASH reference\", and `$aref->{k}{x} = 1` / `$aref->{k}[0] = 1` die with a raw CL type error (`The value #() is not of type hash-table`) instead of perl's message\n"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-04",
+   "description" : "Newly VISIBLE (not newly broken) in s468bc: until #1037 made a ruled refusal a\nstatement-level event, `t/op/coreamp.t` refused at transpile and produced no\nrows at all.  It now produces 9 pass / 46 fail of perl's 778, and what it\nproduces exposes two unowned things:\n\n(a) `aborted-forms:15: Undefined subroutine &File::Spec::Functions called`.\n    The file does `use File::Spec::Functions;` and then calls its imports; PCL\n    resolves the CALL to a sub named after the MODULE.  Fifteen top-level\n    forms die on it.\n\n(b) 46 failing rows, all in the `&CORE::` family -- `&CORE::close with no\n    args`, `&CORE::foo with too many args`, `&CORE::closedir in list context`,\n    plus `__FILE__ / __LINE__ / __PACKAGE__ does check its caller`.\n\nBecause of (b) the file LOST its expected-divergence registration in s468bc\n(the registration bar is all-or-nothing and the reason cited `CORE::given`,\nwhich explains neither (a) nor (b)).  Its rows are now gated one by one in\n`baselines/perl-suite-fails.tsv` -- 501 of them, and the file is the one that\nexceeds the runner's 500-row log cap, so its row baseline is PARTIAL (#1051).\nIts 723-row shortfall is deliberately UNEXPLAINED in\n`baselines/row-shortfall.tsv`, with the mixture written into the cause.\n\nAttribution before fixing: measure how many of the 723 belong to (a) and how\nmany to the refusal, rather than assuming.\n",
+   "id" : 1073,
+   "status" : "pending",
+   "subject" : "t/op/coreamp.t: `Undefined subroutine &File::Spec::Functions called` aborts 15 forms, and 46 &CORE:: rows fail"
+}

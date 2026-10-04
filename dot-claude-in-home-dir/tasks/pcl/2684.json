@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s507 (Fable, 2026-10-04) from the review probes of s506f (perl's switches in `pcl`): the one-liner `perl -ne 'print \"$ARGV:$.:$_\"; close ARGV if eof' f1 f2` is this bug, and it is in the RUNTIME, not in the switch handling -- the same loop as a FILE on main:\n\n  f1 = \"a\\nb\\n\", f2 = \"c\\n\";   while (<>) { print \"$ARGV:$.:$_\"; close ARGV if eof }\n  perl:  f1:1:a  f1:2:b  f2:1:c\n  PCL :  f1:1:a  f1:2:b  f2:3:c          (main 2e71d4aa and the s506f tree alike)\n\nperl's rule (perlfunc eof / close): an explicit `close` resets `$.`; the IMPLICIT close when <> moves to the next file does not -- which is exactly why the idiom exists.  Probe both halves: without the `close ARGV`, perl prints f2:3:c too.\nFix site: p-close on the ARGV handle (cl/pcl-runtime.lisp) -- the line counter of the magic ARGV stream; check what an explicit `close $fh` on an ordinary handle does to `$.` today (perl: reset when that handle is the last-read one).\nBREAKING CASES: `eof` vs `eof()` (the last file); `$.` after the loop ends; `close ARGV` followed by more `<>` reads continuing with the next file; `-i` in-place editing (the same ARGV machinery, s506f's `-i.orig` rows).\nProbe files: ~/pcl-agent-scratch/s507/review/sw.pl case `files-eof`, tmp/x/w.pl.\n",
+   "id" : "2684",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (found by a s507 review probe, PRE-EXISTING on main 2e71d4aa): `close ARGV` does not reset `$.` -- perlfunc's own idiom `while (<>) { print \"$ARGV:$.:$_\"; close ARGV if eof }` numbers the second file's lines on from the first's (perl: each file from 1)"
+}

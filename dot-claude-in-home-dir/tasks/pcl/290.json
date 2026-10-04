@@ -1,0 +1,15 @@
+{
+  "id": "290",
+  "subject": "#289 step 2 — THE FLIP: emit symbol-macro globals, route local through p-local-cell",
+  "description": "DONE s383 — MERGED to main (ff, head 8a273fe: a2947b9 flip + 8a273fe #295 fix). All gates green:\n- Pl/t: 138 files / 5092 tests PASS (prove-core; +1 = the #295 guard row in transpile-test-10.t).\n- Full sweep: GATE clean, 0 new / 0 fixed, TOTAL 18498 → 18506 (+8, all eval.t-family); method.t UNSTABLE churn re-run serially at exactly baseline 93+38/163 (load noise, s335 rule).\n- corpus-diff: byte-identical, 111 files (the #295 fix is eval-mode-only).\n- bench-exec: no flip regression on any row; pack/packunpk ≈ recorded #74 numbers; `local` cost concern answered by the partition (hot locals are magic vars, still defvar).\n- 14-dist CPAN board vs s343 TSV: ok 1794 → 2071, not-ok 674 → 385; the only two moved-DOWN rows (Role-Tiny stub.t 2/2, Text-Balanced 05_extmul.t rc=124 timeout) reproduce IDENTICALLY on main a0732cf — pre-existing drift (#208), not the flip.\n- IR invariant: sb-* = 0 (corpus unchanged; both cell macros hide host symbols).\nThe one regression (#295) was ruled + fixed by Fable — see that task. Rollback if ever needed: revert both commits + gen bump (plan §5).",
+  "activeForm": "Flipping globals to symbol-macro cells",
+  "owner": "",
+  "status": "completed",
+  "blocks": [
+    "291",
+    "289"
+  ],
+  "blockedBy": [
+    "237"
+  ]
+}

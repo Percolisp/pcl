@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p06-sprintf2.pl.\n\nROWS BEHIND IT (baselines/fail-baseline.tsv, 4 rows):\n  sprintf2.t 1509 `subnormal 3e-322 %a 0x1.e8p-1069 got 0x1.ep-1069`\n  sprintf2.t 1513 `subnormal 7e-321 %a 0x1.624p-1064 got 0x1.62p-1064`\n  sprintf2.t 1514 `subnormal 7e-322 %a 0x1.1cp-1067 got 0x1.1ap-1067`\n  sprintf2.t 1519 `subnormal 3e-322 %.4a 0x1.e800p-1069 got 0x1.e000p-1069`\n\nMEASURED (perl 5.40.3 vs ./runpcl):\n    printf(\"%a|%a|%a|%.4a\\n\", 3e-322, 7e-321, 7e-322, 3e-322)\n  perl: 0x1.e8p-1069|0x1.624p-1064|0x1.1cp-1067|0x1.e800p-1069\n  PCL : 0x1.ep-1069 |0x1.62p-1064 |0x1.1ap-1067|0x1.e000p-1069\nCONTROL: `%a` of 1.5 is `0x1.8p+0` in BOTH -- normal doubles are right.\n\nMECHANISM: the `%a` arm builds its hex digits from `integer-decode-float`,\nwhose significand for a DENORMAL is not the 53-bit normalized one; the low\nbits are dropped (1514 shows an actual wrong digit, `1a` for `1c`, not just a\ntruncation).  Fix area: the `(#\\a)` arm of `sprintf-one` in\n`cl/pcl-runtime.lisp` -- renormalize a denormal before extracting digits.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md sprintf2.t,\n\"subnormal/denormal `%a` last-hexdigit rounding (~17t)\".  The note calls it\nrounding; measured, the SIGNIFICAND is wrong, which is a different fault from\n#1477.\n\nFAMILY: float formatting; siblings #1475, #1477.\n",
+   "id" : 1476,
+   "status" : "open",
+   "subject" : "BUG (sprintf `%a`): the significand of a SUBNORMAL double loses its low hex digits -- `sprintf \"%a\", 3e-322` is `0x1.e8p-1069` in perl and `0x1.ep-1069` in PCL, and `%.4a` pads with zeros instead of the real bits"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "141",
+  "subject": "Scalar-context flip-flop: constant operands must compare against $. per-operand",
+  "description": "DECIDED s317 (fable-answers-s316v.md §2): the classifier lives at the existing codegen p-flipflop/p-flipflop-num SELECTION point, extended to per-operand — classify each operand independently as constant-expression (literal number/string/folded constant, using PExpr's existing constant knowledge; no new evaluator) → that operand compiles to a `== $.` compare; non-constant → boolean test. Runtime grows per-operand variants/flags, not a third whole-form guess. NOT Config.pm, NOT a new PExpr pass. Post-R1 (W2.5 queue).\n\nperlop: \"if either operand of scalar `..` is a constant expression, that operand is considered true if it is == the current line number ($.)\". PCL applies this only when BOTH operands are numeric (p-flipflop-num); a mixed case takes the boolean p-flipflop and diverges.\n\nProbe: `my $a = (\"x\" .. 3); print $a` — perl 1, PCL 1E0. PCL treats left \"x\" as boolean-true and right 3 as boolean-true, so it turns on AND off immediately and appends the final-value E0 marker. Perl compares \"x\"==$. (0==0, true → on) and 3==$. (false → stays on) → plain \"1\".\n\nDownstream symptoms found in the #140 probes: `for ($x |= \"a\" .. 3)` gives 0 vs perl 1; `for ($y |.= \"a\" .. 3)` leaks a stringified ARRAY ref. Probes in scratchpad w0/q1,q2,q4.\n\nSite: cl/pcl-runtime.lisp p-flipflop / p-flipflop-num (~5061); operand classification is on the codegen side. NOT pre-R1 — the classifier change has real regression risk; the E0 suffix itself is correct perl.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

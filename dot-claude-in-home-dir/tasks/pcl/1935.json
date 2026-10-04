@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/require_37033.t closes STDIN and then `require`s a fixture module,\nasserting the module's own handle does not reuse fd 0.  PCL's abort is\n    Can't locate test_use_14937.pm in @INC (@INC contains: op . lib pcl ...)\nso four of the ten rows are never produced and one fails.\n\n`op` IS in that @INC, which says the file's own `set_up_inc`-style push happened\n-- but the fixture lives beside the .t file and is written by the test at run\ntime (`open my $fh, '>', \"test_use_$$.pm\"`), so the miss is about the CWD the\nrequire resolves against, not about @INC's contents.  Check what\n`tools/run-perl-suite.pl` sets as the child's cwd versus what perl's own\nharness does (perl runs t/ files from `t/`).\n\nCheap first measurement: run the file under `tools/runt` from the perl t/\ndirectory and see whether the require succeeds there.\n",
+   "id" : 1935,
+   "status" : "pending",
+   "subject" : "op/require_37033.t: the child require cannot find the test fixture -- @INC does not carry the test directory (4 rows never produced, 1 fails)"
+}

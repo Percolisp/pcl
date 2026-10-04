@@ -1,0 +1,9 @@
+{
+  "id": "181",
+  "subject": "The (?^flags:...) qr wrapper is mishandled two ways: /xx loses an x, and qr/$re/ double-wraps (re/qr-72922.t)",
+  "description": "DONE s322 (34cbd2f). re/qr-72922.t 12/2 -> 14/0 OK.\n\nThe two diagnosed defects were real but neither was the cause. ROOT: the VarAnnotator froze the qr VARIABLE to its string form (B-regime raw-slot verdict; all uses \"stringy\" = interpolation + regex interpolation), so the object was already text before any regex saw it. Three fixes:\n 1. Pl/VarAnnotator.pm: `write-object` reason — a root write whose RHS is a PPI::Token::QuoteLike::Regexp is never liftable by the B regime.\n 2. p-regex-from-parts: returns the object itself when the pattern IS one interpolated regex (perl's rule), merging only the MATCH-time flags /g /c /e /r from the outer modifier string.\n 3. p-regex-match gains a `source` slot (perl-side text); to-string prints (?^flags:SOURCE) and /xx prints both x's.\n\nTRAP FOR THE FUTURE (cost one gate run): /g /c /e /r are flags of the MATCH OPERATION, not the compiled pattern. The first version returned the qr verbatim and `while ($t =~ /$re/g)` became an infinite loop (heap exhaustion) — Pl/t/regex-gpos-01.t t6.\n\nGuard: Pl/t/transpile-test-09.t case 3, 15 rows incl. inverse guards. Spec: docs/ir-spec.md §10 regex rows; index line in DECIDED.md.",
+  "activeForm": "Fixing the qr wrapper family",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

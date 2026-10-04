@@ -1,0 +1,9 @@
+{
+  "id": "236",
+  "subject": "TAP `explain()` stringifies instead of dumping — every is_deeply failure on the board is undiagnosable",
+  "description": "DONE s374 (3d1b917). cl/pcl-test.lisp's pl-explain now renders every ref with a Data::Dumper equivalent (Indent 1, Terse 1, Sortkeys 1) and passes a non-ref through, reusing test-deeply-equal's shape test so anything is_deeply can WALK, explain can PRINT. Cycles and shared refs print Dumper's $VAR1 back-reference instead of recursing.\n\nTwo deliberate deviations, both commented at the code and raised as ask 4 in docs/opus5-review-requests-s374.md: no trailing newline (pl-diag would emit a bare `# ` line), and integer-vs-quoted decided by the CL type (matches perl on every probe; Dumper's XS reads SV flags).\n\nGuard: three rows in Pl/t/tap-assert-01.t (16 -> 19), each compared against the LIVE Dumper text.",
+  "activeForm": "Making explain() dump structures",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FILED s497b from the #2103 fatals battery (row \"local on lexical-free special\").  perl 5.40.3: `local $/ = \\0` dies \"Setting $/ to a reference to zero is forbidden\", `\\-1` \"... to a negative integer is forbidden\", a ref to a non-number likewise.  PCL stores it and get-input-record-separator reads a non-positive record length as slurp.\nNOT SHIPPED in s497b because the die must happen at the ASSIGNMENT (the USER bar: fail in the same place); dying at the next readline is a different place, and turning |$/| into a magic box would put a setter on every `local $/` (the commonest slurp idiom) -- measure first.\nREPRODUCER: eval { local $/ = \\0; 1 } or print \"died\\n\";   perl: died.  PCL: nothing.  Pl/t/fatals-01.t carries it as a TODO naming this task.",
+   "id" : "2405",
+   "status" : "pending",
+   "subject" : "`local $/ = \\0` (and `$/ = \\-1`, `\\\"abc\"`) is ACCEPTED where perl dies `Setting $/ to a reference to zero is forbidden` -- $/ is a plain box with no store hook"
+}

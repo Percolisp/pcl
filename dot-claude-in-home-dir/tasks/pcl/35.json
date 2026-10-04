@@ -1,0 +1,9 @@
+{
+  "id": "35",
+  "subject": "Write the Opus 4.8 handoff doc with census data embedded",
+  "description": "Update docs/v2-transfer-plan.md (or a companion handoff doc) with measured seam histogram, gate classification, T-A1 spec, and step-by-step execution order for Opus 4.8.",
+  "activeForm": "Writing handoff doc",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

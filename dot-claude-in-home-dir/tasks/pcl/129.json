@@ -1,0 +1,8 @@
+{
+  "id": "129",
+  "subject": "Anon subs with SIGNATURES in expression position: `*t201 = sub ($x) {}` inside a package block parse-errors (op/signatures.t killer)",
+  "description": "s316j finding, investigation stopped mid-way (user ended session). SYMPTOM: `use feature \"signatures\"; package T200 { sub foo ($x) {} *t201 = sub ($x) {} }` — the WHOLE package block becomes \"PARSE ERROR: Fell through. Missing case\" and every sub in it vanishes (op/signatures.t crash sig undef-fn:T200::pl-t201). KEY CLUES: (1) PPI tokenizes anon signatures and old prototypes IDENTICALLY ([Word sub][Prototype ($x)][Structure {…]), and PExpr.pm ~line 2477 already STRIPS Token::Prototype after `sub` in handle_subcalls — dropping a signature there silently loses param binding even when it parses. (2) The minimal case `my $c = sub ($x) { $x };` WITHOUT a preceding `use feature \"signatures\"; no warnings;` line transpiles clean (0 parse errors, but params unbound — silent wrong); WITH those pragma lines it PARSE-ERRORS — so the failure needs the pragma prefix or the package-block context; bisect which. FIX DIRECTION: desugar at token level where the strip now happens — when the Prototype content is a SIGNATURE (the `_is_pure_prototype` discriminator from #126: /[\\$\\@\\%]\\w/ = named params), rewrite `sub (SIG) { BODY }` to `sub { my (PARAMS) = @_; <defaults>; BODY }` by injecting tokens into the block instead of dropping the signature; reuse parse_prototype_or_signature/_parse_signature (Pl/Parser.pm:8092) for param/default extraction. Perl arity-die texts are error-fidelity (not a goal). Guard target: op/signatures.t + a transpile-test-07/08 oracle case with defaults and slurpy tail.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

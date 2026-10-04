@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09).  PRE-EXISTING (identical on 0ece3088).\n\n    open(my $fh, \">\", $F) or die;\n    my $r = print {$$fh} \"x\\n\";\n\n    perl : 1, and \"x\\n\" is written\n    PCL  : undef, nothing written\n\n`fileno($$fh)` and `binmode($$fh)` both reach the handle, so the deref itself\nresolves; the `:fh` slot of print is the divergent half.  Found while making\nlib/IO/Handle.pm's `binmode` stop dereferencing (#1074): core's IO::Handle\nwrites `$$fh` throughout because its objects are blessed glob REFS, so any\nfuture shim that keeps that spelling will hit this.\n\nProbe scratch/s473f/p5d-deref.pl row 05.\n",
+   "id" : 1425,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `print {$$fh} ...` writes nothing -- a dereferenced handle in the `:fh` slot"
+}

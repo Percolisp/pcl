@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FOUND s496a (Opus, 2026-09-26) while measuring #2372 on the companion.\n\nA code block used as a regex CONDITION -- `(?(?{ CODE })YES|NO)` -- cannot be handled by the code-block STRIP (%pcl-strip-regex-code-blocks removes `(?{ CODE })` and leaves `(?YES|NO)`, which is not a pattern).  Before #2372: a warning and a no-match; since #2372: a DIE at the first match (cl-ppcre: \"Character ' ' may not follow '(?'\").  perl evaluates CODE and takes a branch.\n\nMinimal reproducer:\n    my $c = 1;\n    my $r = eval { (\"ab\" =~ /a(?(?{ $c })b|c)/) ? \"match\" : \"no\" } // \"died\";\n    print \"$r\\n\";\n  perl: match      PCL b6560c21: no (+ warning)      PCL s496a: died\n\nCOST MEASURED: t/re/pat.t's top-level `(?(?{ $c }) ...` pattern aborts the file: C_ok 245 -> 206.\n\nThis is the #874 / \"Regex code blocks\" family (docs/not-supported.md): PCL has no mid-match callback into perl.  A condition whose CODE is a plain variable could be evaluated ONCE at compile time only if nothing in the pattern can change it -- not generally true.  Until code blocks exist, the die is the honest answer; the strip should at least make the error name the construct (e.g. signal \"regex code-block CONDITION (?(?{...})) is not supported\") instead of cl-ppcre's position in a pattern the program never wrote.\n",
+   "id" : "2383",
+   "status" : "pending",
+   "subject" : "a code block used as a regex CONDITION (?(?{ CODE })YES|NO) is stripped into a non-pattern: a silent no-match before #2372, a DIE since (with cl-ppcre naming a position the program never wrote) -- t/re/pat.t aborts at it (C_ok 245 -> 206)"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "118",
+  "subject": "FUTURE: perl's own pack()/unpack() as an XS through pclxs — maybe more core builtins",
+  "description": "User idea (2026-07-27), explicitly NOT now: instead of chasing full parity in the Lisp pack (cl/pack-impl.pl is the oracle; pack-failure-groups.md tracks the gap; \"pack-oracle\" is sanctioned Target-A slack), compile perl's own pp_pack.c-equivalent implementation as an XS module through pclxs and route pack/unpack (and possibly other hairy core builtins: sprintf %a?, crypt?) through the bridge. Gets exact perl semantics by construction. Open questions when picked up: extracting pp_pack into an XSUB shell (Perl core code is not an XS module — needs a carrier dist), perf of crossing per pack() call vs Lisp impl (P1 #74 memoization may matter), which builtins clear the cost/benefit bar. Related: docs/pack-failure-groups.md, task #74, Target A slack list in project_product_targets_speed_and_ir.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

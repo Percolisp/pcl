@@ -1,0 +1,9 @@
+{
+  "id": "48",
+  "subject": "E1.5: block-form nested package (index.t) + pre-pass sub pkg attribution",
+  "description": "Handle `package o { ... }` inside a sub (index.t 226/278): v1-shape inline (p-defpackage)+(defclass plc-)+(p-set-current-package), push/lower children/restore. Also make the sub pre-pass (add_declared_sub keyed by seg pkg) compute the effective package for named subs nested after a nested package statement (bless.t F::test).",
+  "activeForm": "Handling block-form nested package",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-10T15:30:00Z",
+   "description" : "=== DONE (s481a) ===\n\nCHANGELOG.md's `## v0.1.0 -- 2026-08-23` section gained a pasteable opening --\nwhat PCL is in three sentences, four measured facts taken from docs/STATUS.md\nrather than restated (loops 3-5x faster; 18,581 pass / 649 fail = 96.6 % of the\nextracted perl suite, 58 of 108 files complete; the CPAN board 84 / 50 / 49 of\n183; the output is meant to be read), the honest \"an experiment until the\ncritical infrastructure runs\" hedge, and how to try it -- marked with an HTML\ncomment saying where the Release text ends.  The tag's own install sentence is\nleft TRUE FOR THE TAG: v0.1.0 predates the vendored cl-ppcre and still needs it\nfrom ASDF, and the block says so in one sentence.  This batch is an Unreleased\nentry; Unreleased is otherwise untouched.\n\nDECISION FOR THE USER (on the checklist): publish v0.1.0 as it is, or cut\nv0.1.1 from main once this batch is pushed -- the second fires container.yml so\nthe release and the image appear together and the README's install lines are\ntrue of the tag people land on.  Recommended.\n\nThe empty untracked memory/ at the repo root is removed (rmdir; zero entries).\nIt lives in the main checkout, not in an agent worktree, so the removal happened\nthere; the only thing in the tree naming it was a comment in PCLLicense.pm,\ncorrected.\n",
+   "id" : 1603,
+   "status" : "completed",
+   "subject" : "P3: a pasteable v0.1.0 block in CHANGELOG.md for the GitHub Release form, an Unreleased entry for this batch, and the empty untracked root memory/ removed"
+}

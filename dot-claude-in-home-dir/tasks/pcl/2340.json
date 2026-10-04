@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s495f (task #2051's breaking-case probes, scratch/s495f/p-qr5.pl), PRE-EXISTING (identical on 3d9b3712).\n    package Over; use overload '\"\"' => sub { \"OVER\" }; package main;\n    my $o = bless qr/z/, \"Over\";\n    print \"$o \", (\"xzx\" =~ $o ? \"match\" : \"nomatch\"), \" \", (\"OVER\" =~ $o ? \"match\" : \"nomatch\"), \"\\n\";\n  perl 5.40.3:  OVER nomatch match      (the pattern used is the overloaded stringification \"OVER\")\n  PCL:          OVER match nomatch      (the compiled regex is used directly)\nRare shape (an overloaded class wrapping a qr).  WHERE: the match-operand path takes a p-regex-match payload as the pattern without asking the invocant's `\"\"` overload -- the sibling of #119/#402 (s///, tr/// match SOURCES run the `\"\"` overload).  A fix must not put a class check on the hot match path: ask only when the box carries a class (the slot is nil for every unblessed qr).  Low priority.\n",
+   "id" : "2340",
+   "status" : "pending",
+   "subject" : "EDGE (pre-existing): a qr// object re-blessed into a class with a `\"\"` overload is matched as its REGEX; perl matches against the OVERLOADED STRING"
+}

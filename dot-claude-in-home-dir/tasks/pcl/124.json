@@ -1,0 +1,9 @@
+{
+  "id": "124",
+  "subject": "#25 s316: goto LABEL into a labeled loop/bare block + %SIG pre-population",
+  "description": "Two general bugs found via the perl-suite `(go :Arg_loop)` family (io/msg.t, io/sem.t, io/shm.t, all via sigtrap.pm):\n1. `goto LABEL` where the label is glued by PPI onto a LOOP or BARE BLOCK (`LBL: while(){}`, `LBL: {}`) emitted a bare `(go :LBL)` with no tagbody — hard crash on BOTH pipelines. Fixed in Parser2::_lower_block by opening `(tagbody :LBL …)` at the labeled statement (value-position variant uses the task-#64 setf-RET regime).\n2. `%SIG` was an empty hash; perl pre-populates every signal name (67 keys on Linux) so `exists $SIG{HUP}` is true. sigtrap.pm's import loop spins forever without it. Fixed with one `*p-signal-numbers*` table also feeding %p-resolve-signal (which previously answered 15 for WINCH/SEGV/etc).",
+  "activeForm": "Fixing labeled-loop goto + %SIG population",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

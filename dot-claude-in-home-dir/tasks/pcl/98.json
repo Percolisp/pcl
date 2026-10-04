@@ -1,0 +1,8 @@
+{
+  "id": "98",
+  "subject": "pclxs: JSON::XS's seven cheap symbols + gv_fetchmethod_autoload for the next ABI bump",
+  "description": "Seven DONE (pclxs 5dd08d2): PL_hexdigit, Perl_pow family, SvIsUV (real flag+accessors), SvIsCOW_shared_hash (permanently false and correct), CvNODEBUG_on, sv_chop (memmove, not OOK), sv_cmp (compares CHARACTERS — upgrades across an encoding mismatch). 28 conformance cases in t/97-strings.t, all matching perl, and all 28 pass through PCL too. Also fixed: xs-build never linked -lm, so any math-using dist failed at dlopen with \"undefined symbol: pow\". JSON::XS now needs only PL_curcop (Tier X) + gv_fetchmethod_autoload (new vtable entry, ABI 4) — that last one is still open, tracked in the plan's next-list item 1.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

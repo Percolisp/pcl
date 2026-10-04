@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/grep.t's causeless rows are \"grep void post\", \"grep scalar post\",\n\"grep list post\", \"block map void 2\", \"block map void 3\" and \"proper error on\nvariable as block\".\n\nThe last one is NS:Error compatibility for invalid Perl input (`grep $coderef,\n@list` is a compile-time error in perl).  The other five are context: a\n`grep`/`map` used as a STATEMENT, or with a postfix `for`/`if`, must still\nevaluate its block the right number of times and yield nothing in void context.\n\nMeasure first with a counter in the block; the failure may be that PCL builds\nthe result list in void context (a cost as well as a divergence), which would\nmake this a Target-A item too.\n",
+   "id" : 1939,
+   "status" : "pending",
+   "subject" : "`grep` / `map` in VOID and in postfix context: the block runs, but the row asserts what it returns and how often (op/grep.t, 6 rows)"
+}

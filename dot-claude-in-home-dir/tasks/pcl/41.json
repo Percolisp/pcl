@@ -1,0 +1,8 @@
+{
+  "id": "41",
+  "subject": "v2 native self-referential container init + p-copy-hash box-sharing fix",
+  "description": "my @a=(@a,…)/my %h=(%h,…) native via init-in-let-binding (p-copy-array/-hash); list & nested-declarator forms still v1. Fixed pre-existing p-copy-hash shallow box sharing (also v1 local %h=%h). gen v2-17. Committed bd56e56.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

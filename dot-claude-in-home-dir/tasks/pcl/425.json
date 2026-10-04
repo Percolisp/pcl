@@ -1,0 +1,8 @@
+{
+   "created" : "2026-08-22",
+   "description" : "FILED s422 (probe residue of #419; LOUD, not silent-wrong).\n\nA pattern holding a code point above U+10FFFF cannot be compiled by cl-ppcre,\nand PCL prints cl-ppcre's own message on stderr and treats the match as\nfalse:\n\n    no warnings;\n    print \"m:\", (\"\\x{41}\" =~ /\\x{4000000}/ ? 1 : 0), \"\\n\";\n\n  perl:  m:0\n  PCL:   warning: Regex syntax error: Unknown token question-mark in parse tree.\n         m:0\n\nThe VALUE agrees with perl in every probed shape (s422: the bare pattern\nabove; `qr/[\\x{4000001}\\x{4000003}\\x{4000005}]+/` against \"x\" — compiles\nsilently and answers 0, as perl does; `/a[\\x{110000}]?bc/` against \"abc\" — 1\nin both), and it cannot diverge on a MATCH, because after #419 no PCL string\ncan hold such a character to match against.  So this is a message-quality\nitem, not a correctness one:\n\n  * the text is cl-ppcre's, not PCL's — it does not say which pattern, does\n    not carry the `PCL:` prefix the rule-12 announce family uses\n    (%p-announce-unsupported), and is not deduped, so a pattern inside a loop\n    prints once per compile;\n  * a stderr line fails a row under the #355 stderr-aware Pl/t helper.\n\nFix shape: where the regex compiler catches cl-ppcre's parse failure, route\nthe report through %p-announce-unsupported (\"regex\", the pattern) with a\ndocs/not-supported.md pointer to \"Code points above U+10FFFF\", keeping the\nfalse result.  Filler-sized; the s366 filler rule applies.\n",
+   "id" : 425,
+   "session" : "s422",
+   "status" : "pending",
+   "title" : "A >U+10FFFF code point in a PATTERN leaks cl-ppcre's own warning instead of a PCL announce"
+}

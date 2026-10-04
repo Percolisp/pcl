@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent D's #503 report (pre-existing, loud, unrelated to #503). Repro: `print \"c3 [\", (sub { return \"x\" })->(), \"\\n\";`. The parenthesised anon-sub term takes the LIST path (a vector) before the `->()` postfix; the `->(` on a parenthesised single expression must unwrap to the expression itself (the #411 elided-arrow family / `(EXPR)->()` shape). Bar: the repro + `(sub {...})->(1,2)` + `(sub {...})->()->()` + `(\\&f)->()` + `(sub{...}, sub{...})[1]->()` vs perl; a row in the anon-sub topical file.\n\nDONE s443h (Opus, agent H round 4), commits 57c9859/8d468b7, ff-merged s444.  `->(` joins ExprToCL's paren-scalar-base family (the fourth member; it never asked _is_paren_scalar_base), so `(sub {...})->()` in LIST context stopped dying.  Fable re-probed the four bar shapes incl. (\\&f)->() and the slice form -- identical to perl.  RESIDUE = #527 (multi-element paren base, all four family members).",
+   "id" : 516,
+   "status" : "completed",
+   "subject" : "`(sub { ... })->()` -- an immediately-called anon-sub LITERAL -- dies \"Not a CODE reference\" and kills the whole file: the emission is `(p-funcall-ref (vector (lambda ...)))` and %p-wrong-referent-p rejects the vector (`my $c = sub {...}; $c->()` works)"
+}

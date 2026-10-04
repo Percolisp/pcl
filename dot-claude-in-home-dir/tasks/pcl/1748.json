@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t5f (#1501 round 7, uni/, 2026-09-13).  PRE-EXISTING; ASCII-probed.\n\n`\\$!` takes a reference to the MAGIC scalar, so every read THROUGH the\nreference re-runs get-magic and sees the CURRENT errno.  PCL's `\\$!` captures\nthe VALUE at the moment the reference is taken:\n\n    $! = 2;  my $r = \\$!;  $! = 1;\n    print \"${$r}\", \" | \", \"$!\", \"\\n\";\n\n    perl: Operation not permitted | Operation not permitted\n    PCL : No such file or directory | Operation not permitted\n\nThe direct read of `$!` is right on both -- it is only the path through the\nreference that is frozen.  Blessing the reference (`bless \\$!, 'Ff'`) makes no\ndifference, which is the shape the live row uses.\n\nWHAT IT COSTS: `t/uni/bless.t` row 81 -- its \"ref is ref to magic\" block,\n`$! = 2; $f1 = bless \\$!, \"á¸\"; $! = 1; $f1->test;` where `test` asserts\n`${$_[0]}` is errno 1's string.  ONE row, and it is the file's only failure.\n\nTHE FAMILY: this is the magic-scalar half of the box model -- the same\nquestion `reference_box_magic_hook` (memory) and the tie FETCH work answer for\nother paths.  `$!` already has a getter on the direct path (PCL prints the\nright string for `\"$!\"`), so what is missing is that `p-backslash` on a magic\nscalar must produce a reference that DEFERS to that getter rather than a\nreference to a snapshot box.  Every magic scalar with a getter has the same\nhole (`$0`, `$@` after a later die, the `$^`-family), so a fix here is one\nmechanism, not one variable -- probe two more before designing.\n",
+   "id" : 1748,
+   "status" : "pending",
+   "subject" : "a reference to a MAGIC scalar freezes its value: `$!=2; $r=\\$!; $!=1; ${$r}` is errno 1 in perl and errno 2 in PCL -- t/uni/bless.t row 81, and the same hole for every magic scalar with a getter"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "97",
+  "subject": "pclxs ABI 3 SHIPPED: SV flag model (public vs cached) + scalar_flags; PCL adapter updated",
+  "description": "DONE (pclxs 44e046a, PCL 5929ec3). Public flags say what a value IS, private PCLXS_SVc_* say what is cached — perl's split, pinned case-by-case by t/96-flags.t. New vtable entry scalar_flags (ABI 2→3), answered by inspection never coercion. PCL: xs-scalar-flags added, xs-pin at abi 3, Pl/t/xs-01.t 6/6. Also fixed aTHX outside an XSUB (perl's XSUB.h:488 rule) → Params::Util builds and answers identically to perl.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/unlink.t's last two rows are\n    $_ = $tmpfile;  my $r = unlink;\n    is($r, 1, \"retval of unlink with no args\");\n    ok(!-e $tmpfile, \"unlink with no arg unlinked \\$_\");\n`unlink` with no argument is one of perl's `$_`-defaulting list operators, and\nPCL's has no default, so it unlinks nothing and returns 0.\n\nThis is the named-unary/list-operator `$_`-default family CLAUDE.md rule 11\nnames: `Pl/PExpr/Config.pm`'s `known_no_of_params` already carries the\n\"defaults to $_\" spec ([1,-2] and friends) for uc/lc/length/..., and `unlink`\nneeds the LIST form of it (perl: `unlink` with no args is `unlink $_`, not\n`unlink @_`).  Check `rmdir`, `stat`, `lstat` and `chdir` in the same pass --\nthey share the rule -- and add the negative probe (a call WITH arguments must\nnot gain a $_).\n",
+   "id" : 1930,
+   "status" : "pending",
+   "subject" : "`unlink` with no argument must unlink $_ and return the count (op/unlink.t rows 5-6)"
+}

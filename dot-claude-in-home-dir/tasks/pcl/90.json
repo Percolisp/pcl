@@ -1,0 +1,9 @@
+{
+  "id": "90",
+  "subject": "#25 s310f: pclperl-for-tests SHIPPED (0fac4b9) — full-sweep re-baseline + triage new honest failures",
+  "description": "fresh_perl/runperl children now run under PCL. Full old-sweep measurement in flight; then: re-bless fail-baseline deliberately, triage the biggest new divergence families (runenv PERL5OPT semantics, blocks.t BEGIN/END-in-child, stderr interleaving cases). PCL_FRESH_PERL=real = comparison mode.",
+  "activeForm": "Measuring post-pclperl baseline",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

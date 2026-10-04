@@ -1,0 +1,9 @@
+{
+  "id": "72",
+  "subject": "Sub return aliases the live cell box — GENERAL (plain `sub { $x }` too, not just ++/--): return-convention copy at the seam",
+  "description": "RESCOPED s305: the aliasing is NOT specific to pre/post-increment. Probe: `my $x=1; my $g=sub{ $x }; my @r=($g->(), do { $x=9; $g->() });` — perl [1 9], PCL [9 9]. Any sub whose tail (or p-return arg) is a box-valued form returns the LIVE p-box; list-context consumers (p-print, list-assign RHS) unbox lazily at consumption, so held results track later mutations. post++ appears correct only because it must copy the OLD value; pre++/pre-- return the live box (print $f->(), $f->() → final value twice; s299 state-01.t t28 shape).\n\nFix direction: Perl sub-return is COPY semantics for scalars — unbox (p-box → p-box-value) at the RETURN SEAM, not in the operators (lvalue uses of ++$x must keep the box). Two choke points: the implicit tail of p-sub/p-args-body (and p-raw-params fast path), and the p-return/:p-return throw value. Perf-sensitive (every sub return gains a box-p branch; R1/R2 fast paths and sub_info direct calls must get the same treatment) — coordinate with task #77 (return-family transfer), which reasons about the same seam and could subsume this: a returns=>num/str verdict implies raw (unboxed) returns, making the copy free on proven subs. Also audit: list returns of containers (sub { @x } — does the returned vector alias?), method calls, goto &sub, AUTOLOAD. Session-sized; do not patch in the operators.",
+  "activeForm": "Filing pre++ return aliasing bug",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

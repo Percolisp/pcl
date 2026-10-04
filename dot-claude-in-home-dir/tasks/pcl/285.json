@@ -1,0 +1,8 @@
+{
+  "id": "285",
+  "subject": "Perl's no-plan ending diagnostic: stderr \"# Tests were run but no plan...\" + exit 254 — the last #202 spelling",
+  "description": "FILED s377 (Fable ruling on s376 Ask 2, docs/fable-answers-s376.md §2). The #275 plan fix left one spelling of \"a stream a harness cannot judge must say so\": a file that ran tests with neither a plan nor done_testing.\n\nPROBED (s377): real perl prints to STDERR: `# Tests were run but no plan was declared and done_testing() was not seen.` and exits 254.\n\nImplementation: at process end in cl/pcl-test.lisp, when tests ran with no plan and no done_testing, emit the stderr comment + exit 254, both matching perl. The stderr text adds no TAP rows (sweep/board row counts cannot move from it); the EXIT-CODE half is detection-widening — the s372 Ask-2 standing bar applies: both-population scan of what the new exit code flips in every consumer that reads exit status (sweep runner, board runner, Pl/t harness), corpus-diff, sweep TOTAL/LOST.\n\nFiller-sized; interleave; behind nothing.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

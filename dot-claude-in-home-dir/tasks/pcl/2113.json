@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494p (Opus, 2026-09-25) re-running the #2098 scaling battery row by row: the last row, `my $f; $f = sub { $_[0] ? 1 + $f->($_[0] - 1) : 0 }; $f->(20000)`, ends the SBCL process with \"INFO: Binding stack guard page reprotected\" (rc=1) on 3e8bff3e; s493's first run of the battery ended the same way (its log stops with rc=1 at that row).  perl: 20000 levels in 0.02 s (with the `Deep recursion` warning).\n\nEvery PCL sub frame dynamically binds several specials (@_, *pcl-current-package*, *pcl-caller-wantarray*, *wantarray*, p-sub-frame's own), so the BINDING stack (not the 512 MB control stack) is what runs out: its size is SBCL's default unless the runners set --dynamic-space / thread binding-stack size.  Measure first: the depth at which it dies, and how many bindings one frame pushes (a named sub vs an anon sub vs a raw-params sub).  Fix shapes: a larger binding stack in tools/lib/PCLSbcl.pm's ONE command-line builder (portable: `--tls-limit`? check what SBCL 2.5.2 offers) and/or fewer specials per frame.  Separately: a stack exhaustion must end as a perl-shaped die, never a raw SBCL abort (rule: errors fail in the same places and are TIDY).",
+   "id" : "2113",
+   "status" : "pending",
+   "subject" : "CRASH: 20,000-deep recursion of an anonymous sub exhausts SBCL's BINDING stack (\"Binding stack guard page\", not trappable) where perl runs it (the scaling battery's `recursion depth` row, 4N = 20000)"
+}

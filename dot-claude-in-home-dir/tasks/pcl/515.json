@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent D's #503 report (pre-existing; ir-spec sec. 7.1 records it as the residual gap). Named subs bind *pcl-current-package* on entry (p-sub); the anon-sub lambda should bind it to its DEFINING package the same way (a compile-time constant the emitter knows). Bar: the repro + an anon sub returned from one package and called from another + nested anon subs + `__PACKAGE__` inside (already right?) vs perl; a row in decl-ordering-02.t.\n\nDONE s443h (Opus, agent H round 4), commit 8cdaeef, ff-merged s444.  The emitter supplies the anon sub's DEFINING package as a compile-time constant in the wrapper's parallel let -- the SAME binding p-sub makes for named subs, in BOTH wrapper spellings (Parser2 + the v1 text twin).  map/grep/sort BLOCKS deliberately get nothing (not subs in perl); an in-body `package` still wins.  Inheriting the caller was wrong in BOTH directions (intoX probe).  Cost unmeasurable over 2M calls.  ir-spec Â§7.1 updated; guard decl-ordering-02.t 28->30 + parser2-02.t t87 repaired (stale-guard rule).  Fable re-probed 3 spellings vs base -- exact #515 divergence, fixed.  NOTE: a probe spelling `our $c` in X read from main crashes -- that is #475 (pre-existing, verified identical on the pre-H tree).  Sweep + companion owed (run s444 over the merged batch).",
+   "id" : 515,
+   "status" : "completed",
+   "subject" : "An ANON sub does not rebind *pcl-current-package*: `package X; our $c = sub { my $s = \"xf\"; &$s(5) }` called from main resolves `main::xf` (perl: `X::xf`) -- the symbolic-call resolver reads the Perl-level current package, which the anon sub's body does not set"
+}

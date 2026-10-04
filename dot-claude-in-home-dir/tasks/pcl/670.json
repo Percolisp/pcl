@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s450t (Opus, agent T of round 8) while shipping #561's %! half.  Both\nare SMALL and both are the price of the ruled design (a REAL hash table whose\nVALUES are magic, rather than perl's tied hash).  Neither changes truthiness.\n\nPROBED, perl 5.40.3 vs PCL at s450t:\n\n  (a) an errno name the platform does not have\n        print defined $!{NOSUCHERRNONAME} ? 1 : 0, \" [\", $!{NOSUCHERRNONAME}, \"]\";\n      perl: 1 []       (Errno::FETCH returns \"\" for an unknown name)\n      PCL:  0 []       (the key is simply absent, so the read is undef)\n      `exists` agrees in BOTH (0), and both values are FALSE -- only `defined`\n      differs.\n\n  (b) scalar(%!)\n      perl: 1          (Errno's tie has no SCALAR method shape that counts)\n      PCL:  134        (a real table, so scalar() is the key count)\n      Both TRUE, so `if (%!)` agrees; a program that prints scalar(%!) sees\n      a different number.\n\nWHY NOT FIXED HERE: (a) needs a per-hash \"absent key answers ''\" rule, which\nis a tie-shaped behaviour the box model does not have for an ordinary table;\n(b) needs the same.  Adding an %ENV-style marker for %! would buy both and\ncost an arm at every hash chokepoint -- explicitly REJECTED by the s449\ndesign (docs/computed-magic-design-s449.md SS4).\n\nBAR IF PICKED UP: the two shapes above vs perl, plus the eight rows of\nPl/t/errno-magic-01.t staying green.\n",
+   "id" : 670,
+   "status" : "pending",
+   "subject" : "%! residue: an ABSENT key reads \"\" (DEFINED) in perl but undef in PCL, and scalar(%!) is 1 in perl (tied SCALAR) vs the key count here"
+}

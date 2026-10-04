@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FILED s492c (Opus, 2026-09-21) beside the new lib/MIME/Base64.pm.\n\n`lib/MIME/Base64.pm` (plain Perl, s492c) takes the dist's own t/ from 0 to 437\nof 495 rows.  The residue is t/quoted-print.t (58 rows): core\nMIME/QuotedPrint.pm is a thin Perl wrapper whose two functions are XS in\nMIME::Base64's Base64.xs, so `use MIME::QuotedPrint` loads and then dies\n\"Undefined subroutine &MIME::QuotedPrint::encode_qp called\".\n\nIt is ~40 lines of plain Perl (RFC 2045 Â§6.7): encode everything outside\n33-60 and 62-126 (plus tab and space, except at end of line) as `=XX`, soft\nline breaks `=\\n` at 76 columns, `$eol` replacing \"\\n\", binary mode encoding\n\"\\n\" too and implied by an empty `$eol`; decode reversing that and stripping\ntrailing whitespace per line.  perl is the oracle and t/quoted-print.t is the\nacceptance.\n",
+   "id" : 2059,
+   "status" : "pending",
+   "subject" : "MIME::QuotedPrint (encode_qp / decode_qp) is absent -- the last 58 rows of the MIME-Base64 dist, and what PerlIO::via::QuotedPrint needs"
+}

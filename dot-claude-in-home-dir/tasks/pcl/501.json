@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent C's #468 report. The wrapper also intern'd \"PL-AUTOLOAD\", which is not the symbol %pcl-cl-sub-name \"AUTOLOAD\" produces (\"pl-AUTOLOAD\", mixed case => not inverted), so its dispatch could never have fired. Repro: `my @l=(3,1,2); eval { my @s = sort nonexistent @l; 1 } or print \"died\"` -> perl died; PCL (before #468) ok=1 silently. Bar: the repro vs perl (dies both); `sort by_num @l` with a defined sub unchanged; `sort $var @l` unchanged; corpus-diff + emission-ab over the four populations (every sort NAME site changes shape -- explain the diff family once); generation bump + artifacts; a Pl/t guard row. docs/ir-spec.md sec. 5.1 already says the wrapper is dead (s441c).\n\nDONE s442d (agent D; merged by Fable s440 as 6c928dd). Verified dead first: with #468 in place every sort-NAME shape is byte-identical before and after, and `sort nonexistent LIST` already died. perl DOES reach AUTOLOAD for a sort comparator name (probed; [perl #30661]) -- %p-call-of-undefined-sub produces it. gen v2-200 (renumbered v2-201 on the merged tree) + three artifacts; corpus-diff = sort.t only (32 sites, one family); emission-ab 28/28 SAME. Guard sort-01.t 18 -> 21 (19-20 inverse). RESIDUE filed as #514: perl resolves the sort sub EAGERLY -- `sort nonexistent (7)` / `sort nonexistent ()` die in perl, succeed here.",
+   "id" : 501,
+   "status" : "completed",
+   "subject" : "DONE s442d: DELETE the dead `sort NAME` AUTOLOAD wrapper in Pl/ExprToCL.pm (~line 3617): a THIRD copy of the undefined-sub dispatch whose no-AUTOLOAD arm returned nil -- `sort nonexistent LIST` was SILENT WRONG (compared everything equal; perl dies); #468 fixed the behaviour at the call, the wrapper is now dead code; an EMISSION change (gen bump + four-population A/B)"
+}

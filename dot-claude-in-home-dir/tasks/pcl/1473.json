@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p03-sprintf-missing.pl.\n\nROWS BEHIND IT (baselines/fail-baseline.tsv, 2 rows):\n  sprintf.t 550  `>%3$*4$v*2$.*1$x< >[3, 4, \"\\x11\\x22\\x33\", \"/\"]<\n                  > 011/ 022/ 033< >four reordered args<`\n  sprintf.t 540  `>%*1073741819$v2d< >''< > MISSING<`\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n    printf(\"D=[%3\\$*4\\$v*2\\$.*1\\$x]\\n\", 3, 4, \"\\x11\\x22\\x33\", \"/\");\n  perl: D=[ 011/ 022/ 033]           (no warning)\n  PCL : D=[%3$*4$v*2$.*1$x]          + `Invalid conversion in sprintf: \"v\"`\n\n  and\n    printf(\"C=[%*1073741819\\$v2d]\\n\", '');\n  perl: C=[] + `Missing argument in sprintf`\n  PCL : C=[%*1073741819$v2d] + `Invalid conversion in sprintf: \"v\"`\n\nMECHANISM: `%sprintf-star-positional` (added s216) handles `%*N$` and `%.*N$`\nfor the plain conversions, and the `%v` vector arm handles `%v*d`; the two\nhave never been combined, so the spec parser hits `v` after a positional\nprefix, calls it an invalid conversion and emits the whole spec verbatim.\n`%v*d` alone and `%*N$d` alone both WORK (measured).\nFix area: `p-sprintf` / `sprintf-vector` in `cl/pcl-runtime.lisp`.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md sprintf.t, \"reordered\npositional+vector (482/540/543/546)\" -- the row numbers in that note are\nstale, and 482 is #1472, not this.\n\nFAMILY: sprintf spec parsing.  Sibling: #1472 (warning accounting), #1474\n(vector flag application).\n",
+   "id" : 1473,
+   "status" : "open",
+   "subject" : "BUG (sprintf): a POSITIONAL argument specifier (`N$`) combined with the vector flag `%v` is not parsed at all -- `sprintf(\"%3$*4$v*2$.*1$x\", 3, 4, \"\\x11\\x22\\x33\", \"/\")` is ` 011/ 022/ 033` in perl and the SPEC VERBATIM in PCL"
+}

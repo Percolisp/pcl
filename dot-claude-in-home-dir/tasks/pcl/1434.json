@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s473t1 (Opus, the 13-file early-stop triage).  PRE-EXISTING.\n\nperl-tests/method.t:589-591\n\n    sub IO::Handle::self { $_[0] }\n    is *stdout2->self, (\\*stdout2)->self,\n       '*glob->method is equiv to (\\*glob)->method';\n\nPCL: the top-level form aborts with\n\n    ; PCL recovery: top-level form aborted (recovered):\n      Can't call method self on unblessed reference\n\nso the row is never produced (method.t 124/163; this is 1 of its 37 missing\nassertions).  perl produces it and it passes: a typeglob and a ref to one both\ndispatch as IO handles.\n\nThe two rows either side of it (`method call on typeglob ignores package`,\n`$pvlv_glob->method`) are already blessed FAILS in\nbaselines/fail-baseline.tsv, so the family is known; this spelling is the one\nthat DIES instead of answering.",
+   "id" : 1434,
+   "status" : "pending",
+   "subject" : "`*glob->method` and `(\\*glob)->method` die \"Can't call method self on unblessed reference\" -- perl dispatches both through the IO::Handle class"
+}

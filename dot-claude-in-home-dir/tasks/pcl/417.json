@@ -1,0 +1,9 @@
+{
+   "closed" : "2026-08-21",
+   "created" : "2026-08-21",
+   "description" : "FOUND + FIXED s420, while implementing #412 (the two live in the same runtime\nfunction, set-match-vars).\n\nperl sizes the two magic offset arrays DIFFERENTLY, and t/re/pat.t asserts it:\n\n    \"ab\" =~ /(a)(x)?(y)?/;   perl: $#+ = 3, $#- = 1\n    \"ab\" =~ /(a)(b)/;        perl: $#+ = 2, $#- = 2\n\n$#+ is \"the number of capture groups in the last successful match\" — the\nPATTERN's group count, with a present undef for a group that did not\nparticipate — while $#- stops after the last group that DID participate.\nPCL truncated BOTH at the last participating group, so $#+ (and scalar @+)\nunder-reported whenever a trailing group was optional and missed.\n\nFixed: two loops instead of one in set-match-vars.  Four shapes probed\nidentical to perl.  Guard: Pl/t/match-vars-01.t row 27.\n",
+   "id" : 417,
+   "session" : "s420",
+   "status" : "completed",
+   "title" : "@+ is sized by the pattern, @- by participation — $#+ was wrong"
+}

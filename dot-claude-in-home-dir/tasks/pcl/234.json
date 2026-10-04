@@ -1,0 +1,9 @@
+{
+  "id": "234",
+  "subject": "SILENT WRONG: `( -f => 4, … )` — a filetest letter before => is parsed as the operator and eats the next element",
+  "description": "DONE s374 (5b0e112). Perl autoquotes a `-BAREWORD` in the two positions that autoquote at all — before `=>` and inside a hash subscript — and the STRING reading wins over the operator one. PPI hands a SINGLE-letter `-f` over as the FILETEST operator token, so neither site recognised it (`-foo`/`-1` tokenize differently and were always right), the `$_` default took over, and the filetest's result ATE the next element.\n\nFixed at the three sites that own an autoquote decision:\n  * cleanup_for_parsing's fat-comma rewrite (the one place that knows \"`=>` quotes what is on its left\" — NOT the `$_`-default pre-pass, which by then sees the element already split with no `=>` to key on);\n  * _subscript_autoquote_text — NEW shared answer for the two subscript paths (_subscript_to_cl_str and _parse_subscript_ix), which had drifted into two copies of the Word case;\n  * the string-interpolation key regex (text-based, cannot call the token-side twin; comment-linked).\n\nProbed incl. the breaking cases: `f(-e $file => 1)` keeps its filetest, array subscripts stay numeric, `$h{-1}` stays a number. corpus-diff IDENTICAL over 111 files. Guard: four rows (two inverse) in Pl/t/bareword-call-01.t.",
+  "activeForm": "Fixing the -f => autoquote silent-wrong",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

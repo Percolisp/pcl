@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499g.  `perl -e 'print \"$0\\n\"'` prints `-e`; `pcl -e` prints `/tmp/pcl_NNN_XXXX.pl`.  pl2cl's preamble takes $0 from its source-file argument (task #512) and pcl -e writes the code to a temp file.  FIX SHAPE: a pl2cl option naming the $0 to emit (shared with #2460).\n\n=== DONE (s499j) ===\nNew pl2cl option `--as NAME` (Parser2 source_name -> Environment source_file, preamble $0, drop tag); pcl -e/-E pass --as=-e. $0, __FILE__ and die/warn locations say -e, identical to perl. Guards Pl/t/pcl-dash-m-01.t rows 6-7 (inverse-verified). Residue filed: #2492 (die under pcl -e prints SBCL's \"While evaluating the form\" wrapper, pre-existing).",
+   "id" : 2461,
+   "status" : "completed",
+   "subject" : "`pcl -e CODE`: $0 is the runner's temp file path (/tmp/pcl_NNN.pl) where perl says \"-e\""
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/split.t's rows \"assignment to split-to-array (pmtarget/package array)\",\n\"(targ/lexical)\" and \"(stacked)\" assert that\n    @a = split ...;\nwrites the SAME array object rather than replacing it -- perl compiles the\nsplit with the target array attached to the op (PMTARGET) and pushes straight\ninto it, so a reference taken BEFORE the split still sees the new contents.\n\nPCL builds a fresh list and assigns, so `\\@a` taken earlier still points at the\nold contents.  It is the SV-identity family (NS:Scalar copy does not preserve\nreference/SV identity) seen from the array side; it may also be a SPEED lever\nworth measuring, since the copy is proportional to the field count.\n\nThe file's other causeless rows are perl-internals readouts (the B:: dump and\nthe compile-time/run-time re-eval counts).\n",
+   "id" : 1933,
+   "status" : "pending",
+   "subject" : "`my @a = split ...` : perl writes the array IN PLACE (the PMTARGET optimisation) and the rows assert it is the same array (op/split.t, 3 rows)"
+}

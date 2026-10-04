@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nSource: perl-tests/blocks.t 190-256.\n\nROWS BEHIND IT: perl-tests/blocks.t 13 (\"BEGIN{die} should exit\"), 15\n(\"UNITCHECK{die}\"), 17 (\"CHECK{die}\"), 20 (\"INIT{die}\"), 26 (\"GH Issue #16300:\nModule::Install::DSL workaround\") = 5 rows.\n\nTHE PROGRAM (blocks.t's $testblocks, one line):\n    BEGIN { $| = 1; } BEGIN { print \"begin\\n\"; } UNITCHECK { print \"unitcheck\\n\"; }\n    CHECK { print \"check\\n\"; } INIT { print \"init\\n\"; } END { print \"end\\n\"; }\n    print \"main\\n\";\nplus one extra `BEGIN { die; }`.\n\nperl:  begin / Died at - line 1. / BEGIN failed--compilation aborted at - line 1. /\n       unitcheck / check / end\nPCL :  begin end Died at - line 1.\ni.e. PCL aborts at the die and runs ONLY END; perl still runs the UNITCHECK and\nCHECK blocks that were already queued, and prints the \"<PHASE> failed\" line.\nThe `exit 0` / `exit 1` siblings of these rows (12, 14, 16, 18, 19) PASS, so the\nphase machinery itself is right -- only the die path is not.\n\nRow 26 is the same family's diagnostic: perl prints\n  Treating Module::Install::DSL::INIT block as BEGIN block as workaround at (eval 1) line 1.\nbefore running the block; PCL runs the block (\"INIT fired in eval\") and prints\nnothing.  That is a MANDATORY warning, not a warnings-gated one, so it is not\n#221.\n",
+   "id" : 1449,
+   "status" : "open",
+   "subject" : "BUG: a `die` inside BEGIN / UNITCHECK / CHECK / INIT stops the whole phase sequence -- perl runs the remaining QUEUED phase blocks and prints \"<PHASE> failed--compilation aborted\" (perl-tests/blocks.t, 5 blessed rows)"
+}

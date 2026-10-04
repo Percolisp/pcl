@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 (Fable, #73 probe); PRE-EXISTING (identical on the pre-fix runtime, verified head-to-head).  p-super-call does not fall back to UNIVERSAL: `package main; $obj->SUPER::isa('Base')` dies \"No SUPER::isa found from main\" where perl finds UNIVERSAL::isa (UNIVERSAL is the implicit tail of every SUPER walk, same as normal dispatch -- p-method-call already tries UNIVERSAL after MRO, p-super-call does not).  Also note the die is a raw simple-error, not a perl-shaped trappable message.  Bar: SUPER::isa / SUPER::can from a package with empty @ISA + from a real subclass + a genuinely missing SUPER method (perl-shaped \"Can't locate object method\") vs perl; a row in a method topical Pl/t file.\n\nDONE s446m (Opus, agent M; commit 73ecc30).  Probed perl 5.40.3 first (11 rows): the order is parents -> UNIVERSAL and UNIVERSAL's OWN @ISA -> the isa/can/DOES built-ins -> import/unimport as no-ops -> AUTOLOAD in the PARENTS -> a trappable p-die \"Can't locate object method X via package CURRENT\" (perl names the CURRENT class, not the parent), and a parent that defines its own isa outranks UNIVERSAL's.  Three helpers: %pcl-find-method-in-chain (one reading of \"this name anywhere up this class's @ISA\", a walk p-method-call spelled inline), %pcl-super-autoload (searched from the PARENTS only -- SUPER:: skips the current class's own AUTOLOAD -- and setting $AUTOLOAD to perl's Current::SUPER::method, where PCL set the bare method name), and %pcl-super-fallback, shared by ALL THREE arms of p-super-call including the third, which used to die \"Can't find class X for SUPER:: call\" and so hid even SUPER::isa.  Guard Pl/t/method-dispatch-01.t rows 4-6 (3 of its 6); the inverse is on record -- the same programs died \"No SUPER::isa found from Solo\" before the commit.",
+   "id" : 533,
+   "status" : "completed",
+   "subject" : "pcl"
+}

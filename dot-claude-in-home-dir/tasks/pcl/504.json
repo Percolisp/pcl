@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent C's #468 report. Repro: `print \"1\\n\"; eval { my $x = 1/0; }; print \"2\\n\";` -> through runpcl an extra blank line between 1 and 2; the emitted CL run directly is clean. Fix in runpcl (and runt/clt?): keep stderr separate (or strip the whole compilation-unit block, not just `^;` lines). Bar: the repro byte-identical to perl through runpcl; a tools/t row. Tools are out of the dup-census scope (USER s413) but a runner that falsifies byte-compares is a measurement bug.",
+   "id" : 504,
+   "status" : "pending",
+   "subject" : "`runpcl` merges SBCL stderr into stdout and strips only `^;` lines, so a compilation NOTE leaves blank separator lines in the program output -- falsifies a byte-compare vs perl through runpcl (the s386 fix's class, still open); tool-level"
+}

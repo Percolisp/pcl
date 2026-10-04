@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FOUND s492a (Opus, 2026-09-20) while measuring #1998 (the circular-`use`\nimport fix).  With #1998 fixed, IO::Socket, IO::Socket::INET, IO::Socket::UNIX\nand HTTP::Tiny all LOAD; IPC::Cmd still does not, and the cause is unrelated\nto circularity.  PRE-EXISTING on main 268d7e00.\n\nREPRODUCER (probed vs perl 5.40.3; scratch/s492a/probes/m4-modload.pl in the\ns492a worktree):\n  use IPC::Cmd ();            perl: loads\n  ./runpcl <same>             PCL:  FAIL\n     IO::Seekable::getpos missing at .../lib/5.40.3/FileHandle.pm line 60\n\nFileHandle.pm line 60 is\n    Exporter::export(q(IO::Seekable), $pkg, qw(getpos setpos));\nso the fact wanted is that IO::Seekable DEFINES getpos/setpos.  Core\nIO::Seekable gets them from the XS IO module; PCL ships a pure-Perl shim and\nthe shim does not define them.\n\nLAYER (CLAUDE.md 9a): module behaviour -- it belongs in the lib/ shim, never\nin Pl/ or cl/.  Both are thin wrappers and perl's own IO::Seekable documents\nthem: getpos returns an opaque position token (tell), setpos seeks back to\none (seek POS, 0).\n\nWHY IT MATTERS: IPC::Cmd is one of the 73 modules in the everyday battery\n(#1994) and is the portable way to run a subprocess.  core FileHandle.pm is\n`use`d by much more than IPC::Cmd, so anything that reaches FileHandle takes\nthis.\n\nBAR: a lib/ shim change => full sweep + the companion io/ leg + guard rows in\nan existing Pl/t io file (a getpos/setpos round trip on a temp file with perl\nas the oracle).\n",
+   "id" : 2010,
+   "status" : "pending",
+   "subject" : "EVERYDAY: IPC::Cmd does not load -- IO::Seekable::getpos / setpos are missing from the IO shim (core FileHandle.pm line 60 exports them)"
+}

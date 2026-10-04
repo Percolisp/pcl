@@ -1,0 +1,9 @@
+{
+   "activeForm" : "Filing the nesting-quadratic emission task",
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "Target-A compile-time: statement-nesting makes emission quadratic — 94% of a nested file's CL is leading whitespace, and _lower_block/_flat recurse per statement.\n\nMEASURED s386 (docs/compiler-duplication-review-s386.md §3, full-corpus call trace): CLForm::_flat ×1.24M calls per corpus transpile — direct evidence for the quadratic diagnosis. Also on the hot list for this task's session: Parser2::_elem_within ×219k, Parser::_find_all_declarations ×175k, _interp_token_candidate ×110k (per-token/per-node scans called per-statement; caching candidates). Accessor churn measured too (PExpr::token_utils ×8.0M, node_tree ×3.1M, OpcodeTree::nodes ×3.1M) — R2 material, only touch if free. PExpr::DEBUG 4.3M-call fix is task #303 step 0, not here.\n=== NOTE s403 (Fable) ===\nPerl's \"Deep recursion on subroutine Pl::CLForm::_flat\" fires 3193 times on\nt/comp/parser.t = 3193 separate descents past depth 100 — _flat recurses along\nLINEAR structure.  Same hot spot as the ×1.24M call count already here; when\nthis task is worked, an iterative _flat over the list spine is the shape.\n",
+   "id" : "213",
+   "status" : "pending",
+   "subject" : "Target-A: statement-nesting makes emission quadratic — 94% of a nested file's CL is leading whitespace, and _lower_block/_flat recurse per statement"
+}

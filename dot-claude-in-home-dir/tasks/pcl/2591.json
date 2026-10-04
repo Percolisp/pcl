@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-01",
+   "description" : "FOUND s501t (Opus, 2026-10-01) by a #155 probe; PRE-EXISTING on an UNTIED array (not a tie bug).\n\nReproducer (perl 5.40.3 prints x3; PCL prints xARRAY(0x1)):\n    my @a = (1, 2, 3); my $s = \"x\" . @a; print \"$s\\n\";\nEmission: `(p-. \"x\" @a)` -- the raw adjustable vector reaches %p-.-slow's to-string, whose vector arm stringifies it as an ARRAY reference.  perl's `.` puts its operands in SCALAR context, so `@a` is its element count.  Same family: any binary string operator handed a bare @a / %h (check `x` on the left is already right via %p-str-x-plain's count arm; check `lt`/`eq`/`cmp`, sprintf's `%s` is a list op and is right).\nWhere to fix: the emitter (an `@name` operand of a scalar-context operator is `(p-scalar @a)`), or the operator's operand read (%pcl-scalar-collapse, which already counts through FETCHSIZE for a tied array).  Probe both sides (perl -> base -> tree) and grep for a second copy (the numeric operators ARE right: %to-number-raw counts).\n",
+   "id" : "2591",
+   "status" : "pending",
+   "subject" : "\"x\" . @a stringifies @a as ARRAY(0x..) instead of its element count (scalar context of `.` operands) -- pre-existing, untied arrays too\n"
+}

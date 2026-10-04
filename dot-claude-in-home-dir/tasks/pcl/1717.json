@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FOUND s473t5e (#1501 round 6, `re/` CHECK 1 + CHECK 2).  t/re/reg_nc_tie.t\nreads DIFF 14/18 with FIVE aborted top-level forms:\n\n    undef-fn:|Tie::Hash::NamedCapture|::pl-STORE\n    aborted-forms:5: The function |Tie::Hash::NamedCapture|::pl-FETCH is undefined\n\nperl implements `%+` and `%-` as tied hashes whose class is\n`Tie::Hash::NamedCapture`, and the file tests that interface directly --\n`tied(%+)`, `Tie::Hash::NamedCapture->TIEHASH`, `FETCH`, `STORE`, `EXISTS`,\n`FIRSTKEY`/`NEXTKEY`, and the `all => 1` variant that is `%-`.  PCL implements\nthe two hashes NATIVELY (set_capture_groups populates them), so the VALUES are\nright and the TIE is not there at all.\n\nROWS: 33 blessed fail rows + 5 rows short.\n\nLAYER (CLAUDE.md 9a): a `lib/Tie/Hash/NamedCapture.pm` shim.  Everything the\nclass does is expressible in plain Perl over the native `%+`/`%-` -- TIEHASH\nrecords the `all` flag, FETCH/EXISTS/FIRSTKEY/NEXTKEY read `%+` or `%-`, STORE\nand DELETE are perl's own fatals (\"Modification of a read-only value\") -- so\nNOTHING belongs in `Pl/` or `cl/` for it.  What may be needed in the runtime is\nthat `tied(%+)` answer an object of that class; measure whether the file's rows\nneed `tied` at all before touching the runtime, since the shim alone may carry\nthem.\n\nCHECK WHEN DOING IT: `keys %+` order (perl's is the tie's FIRSTKEY/NEXTKEY\nwalk), and that a plain `$+{name}` read does NOT start going through the shim\n-- that would put a Perl-level method call on the hot capture path for no gain.\n",
+   "id" : 1717,
+   "status" : "pending",
+   "subject" : "`Tie::Hash::NamedCapture` is absent, so `%+`/`%-` cannot be reached through the tie interface -- t/re/reg_nc_tie.t aborts five forms and loses 33 + 5 rows"
+}

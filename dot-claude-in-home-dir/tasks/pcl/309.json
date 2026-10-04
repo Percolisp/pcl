@@ -1,0 +1,9 @@
+{
+  "id": "309",
+  "subject": "pclxs: xs-build harvester's third R30 spelling — an INTERPOLATED literal (`INC => \"-I$dir\"`)",
+  "description": "Found by review s15 (2026-08-14) of the s14 batch, by reproducing the SHIPPED harvester against synthetic right-hand sides rather than reasoning about the regex:\n\n    INC => '-I' . catfile(\".\",\"Encode\"),  ->  DYNAMIC   (the s14 bug, fixed)\n    INC => '-I.';                         ->  -I.       (the near-miss it warns about, correct)\n    INC => \"-I$dir\",                      ->  -I$dir    <- STILL WRONG\n\nA double-quoted literal containing a variable is a COMPLETE quoted string, so tools/xs-build's continuation test (a `.` concatenation, or no quoted literal at all) passes it straight through as a value. harvested_flags() cannot lock it either — its guard is /^-[ILDl]$/, and `-I$dir` is longer than two characters.\n\nSymptom is milder than s14's and therefore likelier to survive: gcc silently ignores a nonexistent include directory literally named `-I$dir`, so you get a missing-header failure, not the phantom \"undefined reference to `main'\" link.\n\nFIX: one clause in harvest() — a `$` or `@` inside the captured literal means dynamic_metadata, exactly as a trailing `.` already does. Keep the probe (a perl one-liner over the real sub) as the way it is verified; do not hand-reason about the regex.\n\nRegistered in docs/plan.md (cross-cutting section) and folded into R30, which now names both spellings under one cause: the regex saw a string and assumed it was an answer.",
+  "activeForm": "Fixing the xs-build interpolated-literal harvest hole",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

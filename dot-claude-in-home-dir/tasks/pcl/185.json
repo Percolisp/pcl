@@ -1,0 +1,8 @@
+{
+  "id": "185",
+  "subject": "XDIFF rows column in perl-suite-expected.tsv — machine-checked like FIXTURE",
+  "description": "DONE s336 (commit c4a128e). XDIFF is granted per ROW, all-or-nothing like FIXTURE.\n\nDEVIATION from the task text (flagged in docs/opus5-review-requests-s336.md):\nthe rows live in a SIDECAR, docs/perl-suite-expected-rows.tsv, not as a column\nin perl-suite-expected.tsv — 1720 generated rows inside the reason registry\nwould drown its 108 hand-written reasons. Same enforcement either way.\n\nShape: one line per diverging row, `rel<TAB>rowkey`. rowkey = PERL's test\nDESCRIPTION (#177), with \"#N\" for unnamed tests, \"*extra* <desc>\" for a\nPCL-only TAP row, \"*summary*\", \"*no-log*\". Compared as a MULTISET.\nUnregistered diverging row -> file stays DIFF and names the intruder;\nregistered row that stops diverging -> STALE. `--bless-rows` regenerates,\ntouching only files the run measured. Both directions verified by deliberately\nbreaking the baseline (op/crypt.t).\n\nStability measured over 4 full runs of the 108 files: A/B agree on 107.\nmro/package_aliases_utf8.t is nondeterministic two ways (PCL-only rows\n54/34/34, one run TIMEOUT not DIFF) and holds the one *rows-unstable* opt-out\n(hand-placed only; --bless-rows never invents or overwrites it). Verification\nrun D: 108 files / 108 XDIFF / 0 UNEXPLAINED.\n\nAlso fixed: unnamed rowkeys are perl's \"[at <file> line N]\" marker and baked\nthe build-machine path into the artifact (#217 family) — $tdir stripped to t/.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

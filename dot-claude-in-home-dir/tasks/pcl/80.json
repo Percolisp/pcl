@@ -1,0 +1,9 @@
+{
+  "id": "80",
+  "subject": "E4-BLOCKING: Moo broken on the v2 default (works under PCL_V1=1) — use Moo installs no subs; bisect the module chain",
+  "description": "FIXED s304 (a0cb062, gen v2-46): two general v2 bugs — (1) &optional signature fast path broke the flatten calling convention → p-raw-params runtime macro; (2) use strict invisible to ahead-of-stream lowering → _premerge_strict_pragma. Moo battery 17/18 = perl; guards Pl/t/moo-01.t + transpile-test-04b shapes; gate 117/4304 PASS; zero sweep regressions. Residue → task #81.",
+  "activeForm": "Bisecting the Moo module chain for the v2 gap",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

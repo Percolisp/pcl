@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-31",
+   "description" : "FILED s457aj (Opus agent AJ, round 14).  PRE-EXISTING; newly REACHABLE because\n#850 un-dropped t/io/open.t's line 267, so the file now runs past line 362.\n\nt/io/open.t:362:\n\n    eval { open $99, \"foo\" };\n    like($@, qr/Modification of a read-only value attempted/, 'readonly fh');\n\nperl: `$99` is a regex capture variable, which is read-only, so `open` fails\nat run time with \"Modification of a read-only value attempted\" -- trappable,\nwhich is what the row asserts.\n\nPCL: `$99` is emitted as an ordinary (never-declared) variable reference, so\nthe file carries an unbound-variable diagnostic -- the companion runner\nrecords it as this file's `sig`, `unbound:$99` -- and row 140 fails because\n`$@` does not carry perl's message.\n\nTHE FAMILY: `$1`..`$N` are read-only in perl and PCL treats a HIGH-numbered\none (past any group the file's patterns define) as an ordinary global.  Two\nhalves, and the second is the useful one:\n  (a) a capture variable that no pattern in the file defines still READS as\n      undef, which is right;\n  (b) it must not be WRITABLE -- `open $99, â¦`, `$1 = 5`, `chop $1` are all\n      \"Modification of a read-only value attempted\" in perl.\nProbe (a) and (b) separately before deciding the layer: (b) is a box-level\nread-only flag on the capture cells, which is runtime, not parser.\n\nBAR: t/io/open.t row 140 (\"readonly fh\"), and the `sig` column for that file\nreturns to empty.  A `cl/` change makes the sweep non-optional.\n",
+   "id" : 851,
+   "status" : "pending",
+   "subject" : "A CAPTURE variable used as a filehandle (`eval { open $99, \"foo\" }`) is a read-only error in perl; PCL emits an unbound reference"
+}

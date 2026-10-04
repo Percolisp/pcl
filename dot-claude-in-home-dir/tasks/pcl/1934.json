@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/sselect.t's rows `select \"a\" $blank $blank 0` (and the two positions\nafter it) hand 4-argument `select` an ordinary string as the read / write /\nexception bit vector.  perl accepts it -- a bit vector IS a string -- and\nreturns 0 ready descriptors; PCL fails the row.\n\nThe three wide-character rows of the same file are separate and already\nNS:Unicode semantics differences (perl croaks on a bit vector holding a\ncharacter above 0xFF).\n\n`perl-tests`' op/lex_assign.t row 106 (\"sselect\") is the same call and moves\nwith it.\n\nRead `%p-select-4arg` (cl/pcl-runtime.lisp): the fdmask read/writeback pair is\nalready there, so this is about what it ACCEPTS, not about the select itself.\n",
+   "id" : 1934,
+   "status" : "pending",
+   "subject" : "4-argument `select` rejects a plain string where perl accepts it as a bit vector (op/sselect.t, 3 rows; op/lex_assign.t 1)"
+}

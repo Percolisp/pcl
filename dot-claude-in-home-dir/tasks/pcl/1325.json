@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FOUND s470bz (Opus, 2026-09-07) while proving the #1302 root resolver: every\nprocess that loads tools/lib/PCLProc.pm emits two lines on stderr AT COMPILE\nTIME, before doing anything:\n\n    Statement unlikely to be reached at tools/lib/PCLProc.pm line 58.\n            (Maybe you meant system() when you said exec()?)\n\nReproduce: `perl -c tools/lib/PCLProc.pm`, or just run\n`perl tools/sweep-perl-tests.pl --no-gate perl-tests/loopctl.t 2>&1 | head -2`.\nPresent on b5e9f845 and on every tree since PCLProc landed (#367), so it is old\nnoise, not a regression.\n\nCAUSE, run_isolated (PCLProc.pm:56-59):\n\n    exec('/bin/sh', '-c', $cmd);\n    POSIX::_exit(127);\n\nThe `_exit` is a deliberate belt for a failing exec, and perl warns because a\nstatement after exec is normally dead code.  perl's own documented spelling of\n\"I meant it\" is to make the fallback the RHS of an operator:\n\n    exec('/bin/sh', '-c', $cmd) or POSIX::_exit(127);\n\nWHY IT MATTERS ENOUGH TO FILE: the sweep and the companion runner both load\nthis module, so two lines of unrelated warning sit at the top of every one of\ntheir stderr captures.  This project compares runner stderr byte for byte (the\nRUNNERS row of CLAUDE.md's WHAT-TO-RUN-WHEN table, and the #339 drop\nannouncement is read out of exactly that stream); noise there is the thing\nthose comparisons have to be taught to ignore.\n\nNOT FIXED HERE deliberately: it is a runner change, so it owes the RUNNERS\nrow's full bar (one sweep, verdicts compared file by file), and s470bz was\nalready paying that bar for a different change â mixing the two would have made\nneither attributable.\n",
+   "id" : 1325,
+   "status" : "pending",
+   "subject" : "tools/lib/PCLProc.pm:58 prints \"Statement unlikely to be reached\" on the stderr of every sweep and companion run"
+}

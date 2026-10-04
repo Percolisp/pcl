@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FOUND s495 (Fable, 2026-09-21), review probe ~/pcl-agent-scratch/s495/review/s492b/r2006a.pl row 6 (perl 5.40.3 -> base 99868bb1 -> s492b tree 91488c42):\n  open(FH, \"<\", $one_line_file); my @all = <FH>; print $.;   # 1 everywhere\n  open(FH, \"<\", $other_file); my $first = <FH>; print $.;     perl 2     base 0     s492b tree 1\nThe base was wrong in a different way (0: the reopen without close did not count the new read at all); s492b's #2006(a) made the opener CLOSE what the handle holds first, which is right for flushing and fd reuse, and that implicit close now resets the line counter as an EXPLICIT close does.  perl's rule is the documented exception: the implicit close inside `open` does NOT reset `$.`; only an explicit `close` does (that is why `while (<>)` numbers lines continuously across ARGV files unless you `close ARGV if eof`).\nFIX SHAPE: in the opener's close-first path (the one #2006(a) added), preserve the handle's line counter across the implicit close -- one saved/restored slot, beside the `$?` save/restore that path already does.  PROBE THE BREAKING CASE: an EXPLICIT close then open resets to 0 (keep); `close ARGV if eof` idiom; a bareword and a lexical handle; `$.` after reopening a DIFFERENT handle is that handle's own count (last-read-handle rule).\nBAR: `cl/` runtime => full sweep + io/ companion leg; guard row in Pl/t/fileio-02.t (where #2006(a)'s rows are), inverse-verified.",
+   "id" : "2197",
+   "status" : "pending",
+   "subject" : "SMALL (pre-existing, found by the s492b review probe): `$.` is RESET when an open handle is REOPENED without an intervening close -- perl keeps counting (perlvar: \"$. is reset when the filehandle is closed, but not when an open filehandle is reopened without an intervening close()\")"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "241",
+  "subject": "E4.1 step 1: port bundle mode off Pl::Parser->parse_file",
+  "description": "pl2cl do_bundle called Pl::Parser->parse_file directly — the one v1-only bypass. Route through parse_with_fallback. Verify --bundle (fasl) and --executable both build and run. Full quadruple, own commit (guardrail §5a.5).",
+  "activeForm": "Porting bundle mode to the shared parser entry",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-16",
+   "description" : "FOUND s486 (Fable, docs/security-review-s486.md §2.3).  Generated programs are loaded with *read-eval* = T (SBCL default): a `#.(...)` reaching the reader OUTSIDE a string or a one-line comment would execute at read time.  Probed s486: strings, heredocs, hash keys and single-quoted literals carrying \" \\\\ #.(sb-ext:quit) |x| ;; #| |# )( all round-trip byte-identically (p-esc + cl_string_literal), and the `;; PARSE ERROR: $error` comment (Pl/Parser.pm:11132) was observed single-line for every census shape incl. the `Dump:` one -- so nothing reaches the reader today, but the invariant is enforced nowhere.  Not an escalation (only the program's author can put #. there), but cheap to make structural.\n\nFIX: (a) bind *read-eval* nil around pcl's (load ...) of the transpiled script, pcl::p-load-with-recovery, the module compile-file path (%p-compile-module / the fasl compile in cl/pcl-runtime.lisp ~20998), --bundle/--executable's compile-file, and the eval server's read of the transpiled eval -- the runtime's own three `#.(` uses are read when the core is built, never afterwards; (b) `$error =~ s/\\n/ /g` in the drop emitter (and the refusal emitter) so a comment is one line by construction; (c) a Pl/t guard: a string with `#.(sb-ext:quit)` prints itself; a program whose dropped statement text spans lines still loads.  Measure the gate + sweep after (a): a module that legitimately needed #. would fail to compile -- there is none (grep).",
+   "id" : "1800",
+   "status" : "pending",
+   "subject" : "Defence in depth for the Lisp reader: bind *read-eval* to NIL around every load/compile of GENERATED code, and keep the ;; PARSE ERROR comment single-line (security review s486 §2.3)"
+}

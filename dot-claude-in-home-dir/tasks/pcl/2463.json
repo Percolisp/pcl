@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499g probing the tie announcement.  `package T; sub new {bless {}, shift} package main; eval { tie my $s, \"T\"; 1 }` -- perl 5.40.3: dies (Can't locate object method \"TIESCALAR\" via package \"T\"); PCL: the eval returns 1, nothing tied, no message.  p-tie's docstring says \"Falls back gracefully if the tie class or method is not available\" -- a rule-12 silent fall-through; tie's value (the object) flows onward, so this should DIE with perl's text.  Same for TIEARRAY/TIEHASH once aggregates tie, and TIEHANDLE.",
+   "id" : 2463,
+   "status" : "pending",
+   "subject" : "tie SCALAR with a class that has no TIESCALAR: perl dies \"Can't locate object method TIESCALAR\", PCL leaves the scalar untied SILENTLY"
+}

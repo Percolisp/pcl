@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "FIXED s470br (Opus, 2026-09-05) -- filed and closed in the same session because\nit was the cause of a merge-blocking regression, not a finding to carry.\n\nPERL DOES NOT RE-ENTER A $SIG{__WARN__} HANDLER for a warning raised inside it.\nProbed 5.40.3:\n\n    my $n = 0;\n    $SIG{__WARN__} = sub { $n++; warn \"nested: $_[0]\" };\n    warn \"outer\\n\";\n    print \"handler calls: $n\\n\";\n\n  perl:  \"nested: outer\" ON STDERR, then \"handler calls: 1\"\n\nSo the handler runs ONCE and the nested `warn` takes the DEFAULT action.  PCL\nre-entered it, which makes the commonest handler idiom in perl's own suite an\nINFINITE LOOP:\n\n    $SIG{__WARN__} = sub { ... } elsif ... else { warn $_[0] };   # substr.t:13\n\nIt blew the binding stack and HUNG perl-tests/substr.t (351 passing rows -> 0,\nstatus TIMEOUT).  The bug is old; #1115 is what made it reachable, by giving PCL\nits first warning that a handler can provoke (`Wide character in print`).\n\nFIX: `*p-in-warn-handler*` in cl/pcl-runtime.lisp -- `p-warn` looks the handler\nup only when the flag is clear and binds it around the call, so a nested warn\nfalls through to the default arm.  Guard rows in Pl/t/io-layers-01.t assert BOTH\nhalves (called once AND the nested text reaches stderr); both fail on a\n`git archive 027ba9c` extraction.\n\nNOT DONE, and worth its own look: perl has the SAME rule for $SIG{__DIE__}, and\nPCL's die path was not audited here.\n",
+   "id" : 1223,
+   "status" : "completed",
+   "subject" : "perl does NOT re-enter a $SIG{__WARN__} handler for a warning raised inside it; PCL did, so the `else { warn $_[0] }` idiom looped and hung perl-tests/substr.t (351 rows -> 0, TIMEOUT)"
+}

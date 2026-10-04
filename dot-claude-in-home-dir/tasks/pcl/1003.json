@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-02",
+   "description" : "FILED s464aw (found by a #972 review probe; PRE-EXISTING -- identical on an\n80b715c worktree).\n\n    package S1; use overload q(\"\") => sub { \"AB\" }; sub new { bless {}, shift }\n    my $a = S1->new; my $b = S1->new;\n    \"$a$b\"     perl ABAB   PCL ABAB      <- two DISTINCT objects: fine\n    \"$a $a\"    perl \"AB AB\" PCL \"AB AB\"  <- separated by a literal: fine\n    \"$a$a\"     perl ABAB   PCL AB        <- SAME object, ADJACENT: ONE COPY\n\nso the collapse needs the same BOX twice with nothing between them.  `print\n$a, $a' is correct, and `$a . $a' is correct, so it is the interpolation\nlowering, not the concat.\n\nSUSPECT: `p-string-concat''s argument list is built from the interpolation\nscan, and two adjacent identical pieces are being deduplicated somewhere\nbetween `Pl::InterpScan' and the emitted `(p-string-concat $a $a)' -- read\nthe EMITTED form first (`./pl2cl' on the three-line reproducer), which\ndistinguishes a codegen collapse from a runtime one in one command.\n\nBAR: the three rows above vs perl; whichever of corpus-diff / the sweep the\nlayer turns out to need; a guard row.\n",
+   "id" : 1003,
+   "status" : "pending",
+   "subject" : "the SAME box interpolated twice ADJACENTLY yields one copy (\"$a$a\")"
+}

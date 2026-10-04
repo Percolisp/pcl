@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "Found s505 by s504c (#2633) measuring compile time.  Since #2633 a promoted file lexical in a non-program unit takes the mangle, and the mangle renames every use through Pl::Parser2::_rewrite_var_uses (line ~4565), which for EACH renamed name walks EVERY statement of the region with three PPI finds (Token::Symbol, Token, Token::ArrayIndex) -- O(names x document).  The identity branch needed no rename, so modules did not pay it before.\n\nMEASURED (quiet box, load 1.2, min of 3 interleaved, scratch/s504c/ctime-s505.log): cpan-tests/modules/Text-CSV-2.04/lib/Text/CSV_PP.pm pl2cl --module base b7ec0093 6.49 s -> tree 93369a10 7.60 s (+17 %; user time 6.2-6.4 -> 7.6-8.0 s).  NYTProf (scratch/s504c/prof/{base,tree}.top): _promote_captured inclusive 5.3 -> 12.2 s (profiled), _rewrite_var_uses 4.2 s inclusive over 10 calls (absent from base top), PPI::Node::find calls 15,878 -> 21,320.  NOT the digest (one MD5 per unit).  Within the 50 % compile budget and paid once per module (module cache), so not blocking.\n\nFIX SHAPE (perf, compiler-only): collect the region tokens ONCE and rename all names of one promotion pass in a single walk (a canon -> new-name map), instead of three finds per statement per name.  Bar: emission byte-identical (corpus-diff + module-mode emission-ab), compile time measured before/after.",
+   "id" : "2647",
+   "status" : "pending",
+   "subject" : "the mangle path renames a promoted file lexical with three whole-statement PPI finds per statement PER NAME (_rewrite_var_uses) -- since #2633 every module pays it: Text::CSV_PP --module 6.49 -> 7.60 s (+17 %)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-27",
+   "description" : "FILED s448o (Opus, agent O of round 6), found probing #571.  Tiny and almost\ncertainly unreachable in real code, but it is a silent VALUE divergence.\n\nREPRO:\n    for my $v (0, 1, 2, 5, -3, \"x\", \"\") { $^C = $v; print \"set=[$v] got=[$^C]\\n\" }\n  perl: 0 1 1 1 1 0 0\n  PCL:  0 1 2 5 -3 x \"\"\n\nperl's $^C is PL_minus_c, a C flag, and its magic set is (bool)SvIV(sv) -- so\nthe stored value is the NUMIFIED value's truth, which is why \"x\" (numifies to\n0) stores 0 while -3 stores 1.  PCL (task #571) gives it an ordinary\n`(defvar |$^C| (make-p-box 0))`, which stores whatever it is handed.\n\nThe same question applies to the other flag-shaped caret cells that PCL keeps\nas plain boxes -- $^D, $^F, $^P, $^W -- and each has its own perl coercion\n($^W is also a bool, $^F an int).  Measure them together before writing code.\n\nWHY IT IS FILED AND NOT FIXED: PCL never sets $^C itself (no -c mode) and a\nprogram assigning anything but 0/1 to it is doing nothing meaningful.  The fix\nneeds a p-magic-cell (a getter/setter pair) on the box, which puts an\nindirection on every READ of the variable for a value nobody reads -- so it\nshould only be done if it can be done as a shared \"flag-shaped caret cell\"\nmechanism for the whole family, not as a one-off.\n\nBAR: the seven-value probe above for each name in the family, vs perl; a row in\nPl/t/caret-vars-01.t; cl/ change so the merge review's sweep covers it.\n",
+   "id" : 601,
+   "status" : "pending",
+   "subject" : "assignment to $^C is a BOOL in perl ((bool)SvIV) and a plain store in PCL: $^C = 5 reads 5, perl reads 1"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d member 4 (Opus, 2026-09-20, finished s493), found by the t/op/magic.t\nrow that #1954 re-aligned.\n\nperl's `$^S` is THREE-valued: undef while COMPILING (inside any BEGIN block), 0 at\nrun time, 1 inside an eval.  cl/pcl-runtime.lisp has only the last two\n(`(defvar |$^S| 0 \"Perl $^S - eval state: 0 runtime, 1 inside eval\")`, and the two\nbinding sites bind it to 1), so the compile-phase state is missing.\n\nREPRO (scratchpad p-caretS.pl):\n\n    print \"runtime: \", (defined($^S) ? \"defined=$^S\" : \"undef\"), \"\\n\";\n    eval { print \"in eval: \", (defined($^S) ? \"defined=$^S\" : \"undef\"), \"\\n\" };\n    eval ' BEGIN { print \"BEGIN in string eval: \", (defined($^S) ? \"defined=$^S\" : \"undef\"), \"\\n\" } ';\n    BEGIN { print \"BEGIN at file level: \", (defined($^S) ? \"defined=$^S\" : \"undef\"), \"\\n\" }\n\n    perl                        PCL\n    BEGIN at file level: undef  BEGIN at file level: defined=0\n    runtime: defined=0          runtime: defined=0\n    in eval: defined=1          in eval: defined=1\n    BEGIN in string eval: undef BEGIN in string eval: defined=1\n\nROWS BEHIND IT: t/op/magic.t perl row 124, `eval \" BEGIN { ok ! defined \\$^S } \"`\n(magic.t:615) -- one blessed companion fail row, now carrying this number.\n\nSHAPE OF THE FIX: bind `|$^S|` to the undef box around every compile-phase body\n(the eval-when :compile-toplevel BEGIN lowering, and the string-eval compile\nphase), the same way the eval sites bind it to 1.  Cheap; the only question is\nwhether every BEGIN path goes through one place.\n",
+   "id" : 1968,
+   "status" : "pending",
+   "subject" : "`$^S` is not UNDEF during compilation: PCL answers 0 in a file-level BEGIN and 1 in a string eval's BEGIN, where perl answers undef in both"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "225",
+  "subject": "E4.1 pre-work: finish the rule-2 live-v1 audit (CPAN board half + eval-mode fallbacks)",
+  "description": "DONE s342c. The audit is complete and its OUTPUT is docs/v1-live-share-audit.md + tasks #226-#230.\n\nMETHOD FIX: the s341 cache-grep is blind to every v1 route whose output never becomes a cache entry (eval-strings, fresh_perl children, temp .t transpiles) — which is most of them. Replaced with a file side-channel at the single fallback point in pl2cl: PCL_V2_AUDIT_LOG=<path> appends one line per v1 route (class/method/subject/error), classified TODO (a real v2 gap, began \"Parser2 TODO:\") vs DIE (v2 correctly raising a Perl-level error, which the fallback then pointlessly retries on v1).\n\nRESULT: cold-cache full sweep = 24 v1 events; cold-cache four-dist CPAN board = 36. SEVEN families, six of them real gaps:\n  F1 eval-mode multi-segment package statement (24)  -> #226\n  F2 eval-mode trailing my/our decl (10)             -> #227\n  F3 block-form arg body captures live lexical (8)   -> #230 (deliberate gate #26)\n  F4 PPI parse failed on fresh_perl children (6)     -> #228 (guardrail §5a.4)\n  F5 two perl CORE modules (5)                       -> #229\n  F6 oversized top-level run form (1)                -> #230\n  F7 PCL's own Perl-error dies mis-retried (5)       -> no work; DIE class, self-resolves at the flip\n\n§5a.2 IS NOT SATISFIED: the live v1 share is six families, not zero. The counts are events not files, and the board is only four dists, so seven is a FLOOR.\n\nAlso measured in the same session (attribution, not audit): the four-dist board is BYTE-IDENTICAL between 1e2e6ef and 46f8a38, so s342/s342b moved nothing; the 8-row delta vs docs/cpan-scoreboard.tsv is entirely the pre-existing #208 drift.",
+  "activeForm": "Finishing the rule-2 live-v1 audit",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

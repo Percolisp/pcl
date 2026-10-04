@@ -1,0 +1,8 @@
+{
+  "id": "288",
+  "subject": "Bareword CALL in a package-switched region resolves to the enclosing package's sub instead of dying",
+  "description": "Pre-existing (probed s379 on both 5d94161 and c99ca41, identical): `sub hello { print \"main hello\\n\" } sub t { package P; hello(); } t();` — perl dies \"Undefined subroutine &P::hello called\"; PCL calls main::hello and prints. The s378 review-request claim \"bareword CALLS inside such a region are ALREADY homed to X correctly\" holds only for the direction where the sub EXISTS in X; when it does not, PCL falls back to the enclosing/main sub — a silent wrong-callee, not just error-text divergence. Suspect the runtime's sub-resolution fallback chain (or the lowering resolving the callee at read time in the section package). Discriminating measurement to carry: transpile the probe and read whether the emitted call is `(pl-hello)` interned in the SECTION package (reader problem, sibling of #239's variable half) or a runtime name lookup with a main fallback (runtime problem). Fix at whichever layer diverges; probe the exists-in-P direction as the inverse guard. Filed from the s379 Fable review (probe p4c in docs/fable-answers-s378.md).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

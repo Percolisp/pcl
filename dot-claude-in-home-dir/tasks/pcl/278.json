@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [],
+   "blocks" : [
+      "282",
+      "283"
+   ],
+   "description" : "grep -rn '/home/bernt' (and perlbrew paths) over Pl/ tools/ cl/ lib/ must end EMPTY. Known cases: #207's which_perl hard-codes a perlbrew path (and run_perl always returns undef — fix or make it announce); the artifact preambles (#217's half). Anything found either derives the path at runtime (FindBin, %Config) or moves to install-time configuration (#277's installer). Cheap, mechanical, must-hold-forever: add a guard test or CI check that greps for it so it cannot regress.\n\nDONE s400 (89cf15f) for everything except the artifacts: PCLPaths.pm derives\nperl's t/ tree, the three tools use it, which_perl is fixed (#207), and\nPl/t/no-hardcoded-paths-01.t is in the gate (reads BYTES, excludes the three\ntranspiled artifacts by their gen stamp AND counts them).  The remaining 27\nhits are those artifacts' preambles = task #217, an emission change.\nNB the survey itself was falsified by a plain grep: 22 hits visible, 31 real\n(cl/pcl-pack.lisp is binary to grep).",
+   "id" : "278",
+   "status" : "completed",
+   "subject" : "v0.1: hard-coded path sweep to ZERO over Pl/ tools/ cl/ lib/ (incl. #207 which_perl)"
+}

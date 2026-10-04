@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-02",
+   "description" : "Found s504 by s501t while bisecting the op/tiehandle.t \"11/32 -> TIMEOUT 1/5\" companion mover.\n\nMEASURED (2026-10-02, load ~2.5):\n- s501t tree f027754a, `tools/run-perl-suite.pl --jobs 1 op/tiehandle.t` with stdin = the tool's (closed/empty): C 11/32 DIFF, three runs.\n- same tree, `sleep 200 | tools/run-perl-suite.pl --jobs 1 op/tiehandle.t`: TIMEOUT 1/5.\n- BASE a0899ba6 extraction, same `sleep 200 |` spelling: TIMEOUT 1/5 too.\nSo it is NOT a regression of s501t; the s501t \"after\" companion run (2026-10-01 01:42) was taken with an open stdin, the \"before\" with a closed one.\n\nCAUSE: the PCL child inherits the runner's stdin.  op/tiehandle.t line 298 ties *ARGV (`local *ARGV; @ARGV=('haha'); tie *ARGV,'Implement'`); PCL leaves a filehandle untied (#2590, announced), so the following `eof()` / `eof` consult the real ARGV chain -> STDIN, which blocks until the timeout when stdin is an open pipe.  The PCL TAP up to row 44 was on disk (44 rows), but the TIMEOUT path counts 1/5.\n\nFIX OPTIONS: (a) the runner spawns the PCL (and perl) children with `< /dev/null` -- perl's own harness reads tests with a terminal/none; a runner change => re-run the runner once and compare verdicts file by file (WHAT-TO-RUN-WHEN \"runners\" row).  (b) nothing until #2590 lands (then the tie is real and STDIN is never read).\nUntil then: run companion legs with `< /dev/null`.\n",
+   "id" : "2592",
+   "status" : "pending",
+   "subject" : "run-perl-suite.pl hands its OWN stdin to the PCL child: op/tiehandle.t blocks reading real STDIN (dropped tie *ARGV, #2590) and TIMEOUTs whenever the runner stdin is an open pipe\n"
+}

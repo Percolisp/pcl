@@ -1,0 +1,8 @@
+{
+  "id": "216",
+  "subject": "s335 (Fable): review s334 commit b3ede60 + rule on the s333/s334 asks + ship the two byte-identical compile-time fixes",
+  "description": "Review of Opus 5's #184 fix (verified correct: guard 2 calls, pack.t transpile ~5.5 s, corpus clean). Found and fixed two more compile-time quadratics the review surfaced: (1) CLForm::_ends_in_comment full char-scan of the accumulated subtree text at every nesting level — 93% of nest-200's wall, fixed with a rindex/index guard (4.7 s → 0.40 s); (2) the two W10 spanning-rename loops still called _ref_shadowed per PPI::Token — the exact #184 pattern one grep away (span-200: 86.6 s → 0.98 s; span-400: >300 s → 3.0 s), converted to the _interp_token_candidate + skip-handed-down mechanism. Both byte-identical: corpus-diff 111/111, gate PASS, shadow probes match perl. Rulings in docs/fable-answers-s334.md: s333 §1 no-ref-kind-slot CONFIRMED, §2 no-sv-cache ACCEPTED, §3 #211 parked behind #153, §4 gate policy (0)+(2) → #215; s334 §1 #213 re-scoped (a cosmetic/b E5/c rejected), §2 \"suspect X carries the measurement\" adopted into CLAUDE.md. Guards: parser2-02.t +4 rows.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

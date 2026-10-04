@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s449q (Opus round-7 agent Q), from the #590 probes.  The RESIDUE of #590:\n`close` now returns FALSE where perl returns false, and the program survives;\nonly the DEFINEDNESS of that false differs.\n\nREPRODUCER (needs a write that fails at the OS -- /dev/full is the portable one):\n\n    open(my $fu, '>', \"/dev/full\") or die;\n    print $fu \"tiny\";                 # buffered, succeeds\n    my $c = close $fu;                # the flush fails, ENOSPC\n    printf \"close=%s\\n\", (defined $c ? ($c ? 1 : \"defined-false\") : \"undef\");\n\n        perl  close=defined-false     (\"\" -- perl's false is an empty string)\n        PCL   close=undef\n\nSame for every other false close (a pipe whose child exited non-zero, a handle\nthat is not a stream): `%p-close-maybe-pipe` and `%p-close-impl` return CL NIL,\nwhich the box model reads as undef.\n\nWHY IT IS NOT OBVIOUSLY WORTH FIXING: CL NIL as perl's false-and-undef is the\nruntime's general convention, not a close-specific slip, so a fix here either\nmakes ONE builtin inconsistent with the rest of the io family or opens the\nquestion for all of them.  `defined(close $fh)` is also exotic Perl.\n\nIF IT IS DONE: the discriminator is perl's -- a builtin that FAILED returns \"\"\n(defined), a builtin that had no value returns undef -- so the survey is \"which\nio builtins does perl answer with a defined false\", and `print` is NOT one of\nthem (probed: a failed print returns undef in perl too, and PCL matches).  Bar:\nprobe close / print / printf / syswrite / seek / binmode / eof for definedness\nof their false, then one change per builtin that diverges, with rows in\nPl/t/fileio-02.t.\n",
+   "id" : 632,
+   "status" : "pending",
+   "subject" : "A false `close` returns undef where perl returns a DEFINED empty string, so `defined(close $fh)` disagrees"
+}

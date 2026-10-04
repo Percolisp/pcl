@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499g (probed perl 5.40.3 vs PCL at 53ca4e46).  `pcl -MData::Dumper sub/zero.pl` where zero.pl is `print \"$0 \", __FILE__, \" \", __LINE__, \"\\n\";` prints `/tmp/pcl_NNN.pl /tmp/pcl_NNN.pl 2` where perl prints `sub/zero.pl sub/zero.pl 1`; with `use FindBin` the run DIES `Cannot find current script '/tmp/pcl_NNN.pl'` (the temp copy is unlinked before the run).  CAUSE: pcl's File+-M branch prepends the use-lines into a temp copy and hands THAT to pl2cl.  FIX SHAPE: tell pl2cl the as-given name (the preamble's $0 already comes from its source-file argument) and emit the -M lines on line 0 / via a #line directive, or have pl2cl take the -M list itself.  Until s499g the same branch also put the script's directory on @INC with -I (removed with #2442), which is not the fix for this.\n\n=== DONE (s499j) ===\npcl -M: the use-lines go onto the script's FIRST code line of the temp copy (after the first =cut for a POD-first script), and pl2cl compiles it --as=<script as given>. $0, __FILE__, __LINE__, warn/die \" at FILE line N.\" and FindBin identical to perl for sub/zero.pl run from elsewhere with -MData::Dumper (and -M with -e). NOT fixed: caller()'s file/line name the .lisp -- for EVERY program, not just -M (pre-existing, #233 family). Guards Pl/t/pcl-dash-m-01.t rows 8-9 (inverse-verified).",
+   "id" : 2460,
+   "status" : "completed",
+   "subject" : "`pcl -MMod script.pl`: $0, __FILE__ and line numbers name the TEMP copy pcl writes, so FindBin dies \"Cannot find current script\""
+}

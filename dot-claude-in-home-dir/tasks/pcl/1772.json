@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-14",
+   "description" : "FILED s484d (2026-09-14).  t/op/stat.t produced NO rows until this session\n(#1590's `is_linux_container` was an undef-fn abort at its first call).  It now\nproduces all 111 of perl's rows, 94 passing -- **full row parity** -- and the\n14 failures are the file's real content.  From\nscratch/s484d/keep-cons/op_stat.t.out:\n\n  rows 37, 38  `ls and -c agreeing on /dev (195 197)` / `-S (0 1)`: stat's\n    st_rdev and st_blocks.  PCL answers 195 and 0 where the device says 197\n    and 1.  Known ground: sb-posix has no stat-blksize/stat-blocks\n    (project memory), so these two fields have no source today.\n  rows 52, 53, 66, 68, 72  `-B`, `!-T`, `at EOF`, `now -B`, `-f() \"`: the\n    -T/-B text-vs-binary heuristic (perl reads the first block and counts\n    odd characters; PCL's answer differs), including its behaviour at EOF.\n  row 73  `stat returns full 13 elements` -- got 1, expected 13.  A `stat`\n    whose result is compared in a context PCL flattens to a count.\n  rows 75, 76, 77  `lstat *_ croaks after stat` / `lstat \\*_` / `-l _`:\n    perl croaks \"The stat preceding lstat() wasn't an lstat\"; PCL returns\n    ''.  The `_` handle's kind is not remembered.\n  rows 90, 91  `-T _ doesn't break the statbuffer` / `... lstat for\n    unreadable file`: a filetest on `_` must not disturb the cached buffer.\n  row 106  `stat inside stat gets scalar context` -- got '1-2-3--4-5-6'.\n\nEach cluster is independent; the two cheapest are row 73 and row 106 (context),\nand the `_`-cache trio is one fact.  The file is now a good measuring\ninstrument: every row it has is produced.\n",
+   "id" : 1772,
+   "status" : "pending",
+   "subject" : "op/stat.t's 14 rows -- the file runs all 111 of perl's rows for the first time; six clusters (rdev/blocks, -T/-B heuristics, the `_` cache croaks, stat in scalar context)"
+}

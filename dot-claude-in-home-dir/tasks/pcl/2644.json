@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "FOUND s504c (probed first, it reproduces).  Repro /home/bernt/pcl/.claude/worktrees/agent-a41c97e5832f266e1/scratch/s504c/probes/q10.pl + q10d.pl: q10.pl `$cnt=\"gc\"; do \"./q10d.pl\"; do \"./q10d.pl\"; print \"main: $cnt\"`, q10d.pl `my $cnt; sub inc10 { ++$cnt } inc10(); print \"inc10=\", inc10(), \"\\n\"; 1;`.  perl: inc10=2 / inc10=2 / main: gc.  s504c: inc10=2 / inc10=4 / main: gc (base b7ec0093 was worse: inc10=ge / gg, main: gg).  The decl `my $cnt;` lowers to a p-defcell whose init is guarded by boundp (define-once, right for BEGIN-stored values) and no run-time reset.  Fix shape: the RUN position of a no-initialiser promoted decl stores a fresh undef box unless a BEGIN in the unit wrote it (the read-only/BEGIN case of #2633 must keep working: b2.pl).",
+   "id" : "2644",
+   "status" : "pending",
+   "subject" : "A file-level `my $x;` with NO initialiser keeps its OLD value when the same unit runs twice (`do FILE` twice, or the same eval text twice): perl 2/2, PCL 2/4 -- the unit-unique cell is per TEXT, and the p-defcell decl does not reset it"
+}

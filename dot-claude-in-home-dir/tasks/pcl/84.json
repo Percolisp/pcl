@@ -1,0 +1,9 @@
+{
+  "id": "84",
+  "subject": "Container (@/%) file-lexical spanning package boundary: v2 gates (scalar-only instance path), v1 fallback is silently WRONG (per-package defvars split the variable)",
+  "description": "Found s305 while working #81's lexical-@history variant. Repro: `package Tw; my @h; sub add { push @h, $_[0] } package main; Tw::add(\"x\"); print \"@h\"` — perl prints x, PCL prints nothing on BOTH pipelines. Mechanism: _rename_spanning_lexicals (Pl/Parser2.pm) enumerates only scalar_decl instances (SPANREFUSE h: sdecls=0 dc=1) → _check_my_spanning dies \"Parser2 TODO: my-lexical 'h' spans a package boundary\" → whole-file v1; v1 defvars file lexicals in each package section unqualified, so Tw::@h and main::@h are DIFFERENT symbols (silent wrong-value class). Scalars are handled (identity-unmangle + cross-package interp fix to $Pkg::x — verified). Fix direction: extend the instance/rename path to @/% decls (container_decl facts + sigil-aware qualified rewrite + interp fixer already sigil-aware in _interp_canon). This also fixes the Moo trigger repro variant where trigger/BUILD push to a file-lexical @history read from main (all pushes invisible). E4-relevant: silent wrong-value on the v1 fallback, and the gate blocks E4.1 v1 deletion for such files. Repro scripts preserved: scratchpad lex.pl/lex2.pl/trig.pl shapes are in the s305 session-log entry.",
+  "owner": "fable-s305",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

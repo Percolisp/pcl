@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-08",
+   "description" : "FILED s478 (Fable, 2026-09-08) from the s473c review probes.  PRE-EXISTING (main c709804a, and 472f17c8).  Error-text fidelity is not a goal unless cheap (USER, s316d) -- this one is: cl/pcl-runtime.lisp lines ~23974 / ~23986 / ~23988 say `\"Can't call method ~A on ...\"`; perl's is `Can't call method \"~A\" on ...` (the 24354 site already quotes).\n\nREPRODUCER (perl 5.40.3 vs PCL): `eval { my $u; $u->m }; print $@;` -> perl `Can't call method \"m\" on an undefined value at F line 1.`, PCL `Can't call method m on an undefined value at ... line ...`.  Also `my $r=[]; $r->m` -> perl `Can't call method \"m\" on unblessed reference`.\n\nFIX: quote in the three format strings; guard row in an existing Pl/t file that asserts the exact text (grep Pl/t for `Can.t call method` first -- a guard may assert the OLD bare text and must be strengthened in the same commit, s416 rule); companion op/method.t + op/universal.t before/after.",
+   "id" : 1555,
+   "status" : "pending",
+   "subject" : "`Can't call method NAME on an undefined value` / `on unblessed reference` / `on non-blessed reference`: PCL prints the method name BARE where perl QUOTES it (`Can't call method \"m\" on an undefined value`) -- three format strings in cl/pcl-runtime.lisp"
+}

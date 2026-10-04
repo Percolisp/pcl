@@ -1,0 +1,8 @@
+{
+  "id": "66",
+  "subject": "Forward-decl scan false positives: %x from sprintf format string, $i from lambda-local my, our-decl duplicate defvar",
+  "description": "REMAINING after s304 (%x-in-format-string class fixed by _blank_string_innards) — s305 analysis: (2) `$i` class: _forward_global_decls scans the EMITTED section text; a v1-seam lambda's `my $i` emits `(let (($i …))` innards that %seg_lex (top-level _reg_lex only) doesn't cover → phantom defvar. NOT a correctness bug today: closure-captured lexicals are renamed `__lex__N` (excluded), so the stray defvar only proclaims an uncaptured lambda-local special (noise + slower dynamic binding). Fix at the right layer: have the v1 fallback record a CUMULATIVE per-section set of every name it let-binds while lowering (v1's _with_declarations knows; _let_bound_vars has re-scoped by assembly time) and subtract it in _forward_global_decls — do NOT text-scan for let binders (can't attribute uses; skipping a name that is ALSO a genuine top-level global in the same section would under-declare = unbound-variable crash, worse than noise). Beware the documented per-section rule (a name let-bound in ANOTHER section still needs this section's defvar). (3) our-dup class: did not reproduce in a minimal probe s305 (single defvar emitted); re-verify against cl/pcl-pack.lisp regeneration before assuming it still exists. Likely obsoleted by E2.final/#78 killing the raw seam text anyway — consider folding into #78 acceptance.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

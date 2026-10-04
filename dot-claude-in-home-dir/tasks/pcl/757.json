@@ -1,0 +1,6 @@
+{
+   "description" : "FILED s453 (Fable), from the s453 diagnostics survey (docs/single-binary-plan.md par.5, probed on e43ef48).  Close the SILENT classes of unsupported-feature diagnostics at the ANNOUNCE level (never by implementing the feature).  Measured: 3 of 5 diagnostic classes are loud (hard refusal ~~/class; drop-die lvalue; announce-and-continue tie-array/computed-goto), 2 are SILENT: (a) format block stripped at source level with NO trace + p-write returns 1 silently; (b) sub DESTROY defined but never GC-called -- nothing said anywhere; (c) regex (?{...})/(??{...}) blocks are variable-INTERPOLATED then STRIPPED by the runtime (pcl-runtime.lisp ~17715) and the match proceeds without them, silently.  Fix shape (all one-line WARNs at existing sites, s329 rule-12 effect-only boundary: the sin is the silence): format strip announces once per file at transpile; p-write announces once per run (the tie-array pattern); a sub DESTROY definition announces at transpile citing not-supported.md; (?{ in a pattern announces at transpile.  The binary plan par.3.6 portability report consumes the same scan.  ALSO fixed in the filing commit: CLAUDE.md stale claim that use experimental try does not work (#360 is completed; probed working).",
+   "id" : 757,
+   "status" : "pending",
+   "subject" : "pcl"
+}

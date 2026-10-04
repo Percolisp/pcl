@@ -1,0 +1,9 @@
+{
+  "id": "96",
+  "subject": "XSLoader::load hook — `use Digest::MD5` finds a shim-built .so automatically",
+  "description": "DONE (PCL 6c009e6). tools/pcl-xs-install builds a dist into ~/.pcl-cache/xs/abi-N/auto/Foo/Bar/Bar.so; %p-xs-artifact-path derives the same path from a module name; XSLoader::load boots it or fails with perl's exact message so dual-life fallback still works. Design + alternatives + revisit triggers in docs/xs-artifact-cache.md. Digest::MD5::md5_hex reached by module name alone gives perl's answer. Pl/t/xs-02.t covers both halves. Gate 4368 green, sweep 62 files (baseline unchanged).",
+  "activeForm": "Wiring XSLoader::load to the shim",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

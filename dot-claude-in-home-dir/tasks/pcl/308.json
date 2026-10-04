@@ -1,0 +1,8 @@
+{
+  "id": "308",
+  "subject": "pclxs: lvalue SvRV — DECIDED s16 (D12); implementation folds into #312",
+  "description": "Clone-0.47 is two items from building (measured s13): (1) PERL_MAGIC_UTF8_CACHESIZE, a constant (perl's value is 2; the branch is dead here since no shim SV carries perl's utf8-cache magic) — trivial, land it with this item so the item has a visible effect; (2) `SvRV(clone) = x` as an LVALUE — Clone re-targets an existing RV in place (cycle handling pins SV identity, newRV cannot substitute; it first SvREFCNT_dec(SvRV(clone)) then assigns). Perl's SvRV is a struct field, ours is a function. Corpus-wide demand: exactly 2 sites (Clone.xs:361, Storable.xs:5338 — Storable is 21 symbols away regardless).\n\nThis is a DECISION, not a grind item (plan.md says so): either a referent slot on the shim SV with reconciliation at a chokepoint (D9's publish pattern; beware the proxy-cache trap from session 9), or a documented refusal with a clear compile/diagnostic story naming SvRV_set as the supported spelling. Discuss with the user or write the ADR before any code. Do NOT improvise in a grind session.\n\nContext: docs/plan.md A-grind queue (session-13 entry), docs/session-log.md session 13 §4.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

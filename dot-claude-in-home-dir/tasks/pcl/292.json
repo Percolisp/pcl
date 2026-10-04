@@ -1,0 +1,13 @@
+{
+  "id": "292",
+  "subject": "DONE s388h: #289 step 4 net — pass-baseline re-blessed, fuzzer clean, companion suite clean OF #291 (snapshot debt → #304)",
+  "description": "SHIPPED s388g (89317f0) + s388h (e1a8a32).  All three parts done.\n\nPART 1 — pass-baseline re-bless (the s383 debt, whose .faillog was clobbered\nbefore save-status could take it).  Taken from #291's gate-clean sweep.\n#223 procedure followed: per-file audit BEFORE blessing — no file missing from\nthe run, no status change (the four PARTIAL files stay PARTIAL), no pass-count\ndecrease.  108 files / 18532 rows, stamped '# taken-at: 297b5e4 2026-08-12'\n(was 18498 at 6e2c9fb).  Gate re-verified: 0 new / 0 fixed / TOTAL +0.\n\nPART 2 — difftest-ops fuzz: 1060 valid, 1056 match, 4 mismatches in the same\n2 blessed clusters as the s336 standing clean result (`**` exact-bignum x3,\n`ctx-count split` x1).  Byte-for-byte the recorded result — NO new divergence\nfrom the direction-D flip or #291.  docs/difftest-fuzzer.md now records the\ns388b re-verification beside the s336 one.\n\nPART 3 — perl-suite companion sweep (--all --jobs 8): 523 files, 88 OK /\n30 NOTAP / 100 XDIFF / 1 FIXTURE / 304 UNEXPLAINED.  vs docs/perl-suite-run.tsv\nit shows 44 C_ok decreases and 36 status changes — ALL PRE-EXISTING, proved by\ntranspiling the 21 TRANSPILE files at 66bdb93 (main before #291) and comparing\nnormalized first error lines: 19 identical, 2 artefacts.  The snapshot is 191\ncommits stale (s323e, before E4.1's hard-error flip) → filed as #304 with the\nfull analysis and the per-file audit plan.\n\nTwo STALE registrations cleared BY HAND (not --bless-rows, which would rewrite\nall 1740 rowkeys from a drifted run): mro/inconsistent_c3_utf8.t out of\nperl-suite-expected.tsv (now OK), rowkey 'regex distillation 4' out of\nperl-suite-expected-rows.tsv (reg_eval.t back to clean XDIFF).  Both re-run and\nverified.</description>\n</invoke>\n",
+  "activeForm": "Running #292's extra net",
+  "status": "completed",
+  "blocks": [
+    "289"
+  ],
+  "blockedBy": [
+    "291"
+  ]
+}

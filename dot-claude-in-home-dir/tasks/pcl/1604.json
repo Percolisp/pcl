@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-10T15:30:00Z",
+   "description" : "=== DONE (s481a) ===\n\nThe list is in the s481a session-log section of docs/session-log.md (the durable\ncopy) and in the agent worktree's scratch/s481a/USER-github-settings.md (the\nlong form, with the reasoning per item).  Everything on it needs repository-admin\nrights or a registry login, so none of it could be done from the session.\n\n1. Description: \"Perl 5 compiled to native code through SBCL -- a Perl compiler\n   with a documented IR, written in Perl\".  Topics: perl perl5 common-lisp sbcl\n   compiler transpiler.  Homepage: none.  Tick Releases and Packages in About.\n2. After the first `container` workflow run: Packages -> pcl -> Package settings\n   -> visibility Public.  Nothing to configure before that run (GITHUB_TOKEN).\n3. The v0.1.0 Release from the CHANGELOG block -- with the v0.1.0-vs-v0.1.1\n   decision in #1603.\n4. The licence badge, if wanted -- the remedy and the re-check command in #1601.\n5. Branch protection on main requiring the CI check; install-matrix and\n   container are dispatchable from the Actions tab.\n",
+   "id" : 1604,
+   "status" : "completed",
+   "subject" : "P3: the USER's GitHub-settings checklist (description, topics, making the ghcr.io package public, the Release, the licence-badge decision, branch protection)"
+}

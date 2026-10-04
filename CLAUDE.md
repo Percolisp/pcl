@@ -666,6 +666,7 @@ Example: `*wantarray*` must be in the `:export` list, otherwise `(let ((*wantarr
 
 When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
+0a. `dot-claude-in-home-dir/README.md` - **the TASK STORE and Claude's MEMORY NOTES live IN THE REPO** (s507, USER 2026-10-04, task #1833): `~/.claude/tasks/pcl` and `~/.claude/projects/-home-USER-pcl/memory` are SYMLINKS into `dot-claude-in-home-dir/{tasks/pcl,memory}`, so a clone is the whole project and every `#NNNN` in the docs is a file there.  It is PUBLISHED with the repo: a task or a note holds technical content and work decisions only, nothing personal.  In an agent WORKTREE the directory is a stale checkout — tasks are always read and written through `~/.claude/tasks/pcl` (the main checkout's copy) and committed on main by the reviewing session.
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. **The per-session review records -- `docs/fable-answers-sNNN.md` (rulings) and
    `docs/opus5-review-requests-sNNN.md` (asks) -- were REMOVED from the tree in s440

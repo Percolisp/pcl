@@ -1,0 +1,9 @@
+{
+  "id": "266",
+  "subject": "Undeclared qualified bareword should STRINGIFY (perl no-strict) — PCL emits empty",
+  "description": "DONE s374 (151fdcb). One shared _bareword_callable_here, THREE-valued: 'yes' / 'not-yet' (this file declares it BELOW — positive knowledge, reads as the string anywhere) / 'no' (nothing visible — an ABSENCE of knowledge, keeps answering CALL outside operator context, because PCL cannot see every name perl can). Declaration sites ride on declared_subs via TokenUtils::decl_site/site_precedes; two documents are incomparable and answer callable. Control-flow words (last/next/redo/goto/return) are callable everywhere via Config::control_flow_ops.\n\nMeasured, not guessed: treating 'no' as a string made all 12 grid cases match perl but turned `next`, `goto again` and File::Spec's `curdir` into strings (corpus-diff 20/111 files); the narrowed rule moves 2, both FIXES (exists_sub.t `defined P1::tmc` now calls; loopctl.t `$n-- && redo` was emitting the STRING \"redo\").\n\nVerified: 12-case grid + 11 breaking-case probes vs live perl; full sweep GATE clean (0 new/0 fixed, TOTAL 18499, no LOST). Guard Pl/t/bareword-call-01.t.\n\nKNOWN RESIDUE (unchanged from HEAD, probe-documented): mutual recursion by bareword — `sub a { b } sub b { 1 }` — perl reads the string \"b\", PCL calls. Closing it needs the $i==0 widening that the corpus vetoed. Raised as ask 1 in docs/opus5-review-requests-s374.md.",
+  "activeForm": "Fixing #266 undeclared qualified bareword stringification",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

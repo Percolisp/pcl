@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-01",
+   "description" : "FOUND s461aq while fixing the unary-PLUS half of the same arm (that half WAS\na silent wrong and is fixed â see `Pl::VarAnnotator::_tw_shape_ok`).  This\nhalf is a LABEL imprecision, not a silent wrong, which is why it is filed\ninstead of fixed in the same commit.\n\n    my $s = \"abc\"; my $f = -$s;   # perl: \"-abc\"\n\n`_tw_shape_ok`'s prefix arm answers 'num' for `-` and `!`.  For `-` over a\nnon-numeric string the VALUE is still raw (p-- returns a fresh string), so\nthe write proof itself holds and nothing aliases â what is wrong is the\nFAMILY, and the family feeds two things:\n  - the `write-incdec-root` gate (`grep { $_ ne 'num' }`), which allows a raw\n    root `$x++` on a slot the oracle called num.  perl's ++ on a\n    non-numeric string is the MAGICAL increment (\"aa\" -> \"ab\"), which the\n    numeric -raw twin cannot do â so `my $x = -$s; $x++;` is the shape to\n    probe first;\n  - `_mark_strbuf` (S1), which keys on the str family.\n\nMEASUREMENT THAT WOULD SIZE IT: how many corpus sites have BOTH a `-$x` root\nwrite and a root `++`.  `tools/emission-ab.pl --env` over the four\npopulations with the arm narrowed answers it in one run.\n",
+   "id" : "921",
+   "status" : "pending",
+   "subject" : "The raw-write family oracle labels `-$str` num, but perl's unary minus on a non-numeric string yields a STRING"
+}

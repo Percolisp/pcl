@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s451z, seen while closing #711.  PRE-EXISTING; cosmetic-looking but it\nis a WRITE that did not happen.\n\n    use File::Temp qw(tempfile);\n    my (undef, $f) = tempfile(OPEN => 0);\n\n        PCL prints on stderr:  warning: Cannot modify non-boxed value in s///\n\nThe s/// runtime declines to write back when its target is not a box and\nannounces instead of dying (which is right -- rule 12's effect-only boundary\ndoes not apply here, the value IS consumed).  What is not known is WHICH\ns/// in File::Temp it is and what the missed write costs; the visible output\nof the probe is correct, so the substitution is either a no-op in this path or\nits result is discarded.\n\nNEXT STEP (cheap, and this is the discriminating measurement): run the probe\nwith the announcement carrying its FILE and LINE -- the announcer already has\nthe information at the call site -- or bisect by instrumenting a copy of\nFile/Temp.pm under `use lib`.  Do not guess at the s///; there are 20-odd in\nthat module.\n\nBAR: the announcement gone for the right reason (the target is boxed), or a\ntask filed for whatever the real gap is with its own repro.\n",
+   "id" : 735,
+   "status" : "pending",
+   "subject" : "\"warning: Cannot modify non-boxed value in s///\" on stderr from a plain File::Temp::tempfile run"
+}

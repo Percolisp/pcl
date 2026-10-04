@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09).\n\nperl: `my $u; print {$u} \"x\"` dies \"Can't use an undefined value as a symbol\nreference\"; a CLOSED handle returns undef instead.  PCL returns undef for both.\n\n%p-out-fh-or-fail's docstring recorded this as UNIMPLEMENTABLE, and named the\nreason: \"%p-forget-fh leaves the variable UNDEFINED after close, so\n`print $closed_fh ...` and `my $u; print {$u} ...` arrive here identical.\nSeparating them needs close() to leave a closed-handle value behind instead of\nnothing -- a representation change, not a dispatch fix.\"\n\nTHAT IS EXACTLY WHAT #1233 DID (s473f): a closed lexical keeps its closed\nstream, so the two shapes are now distinguishable.  The docstring has been\nupdated to point here.\n\nWHY IT WAS NOT DONE IN s473f: it is a NEW DIE, so it needs the gate-SET scan\nover both populations (the s372 bar) -- a program that today prints nothing and\ncarries on would start dying.  Check `perl-tests/` and the cpan board for\n`print {$undef}` shapes first.\n",
+   "id" : 1421,
+   "status" : "pending",
+   "subject" : "`print {$u} ...` on an UNDEF designator should DIE as perl does -- #1233 removed the blocker"
+}

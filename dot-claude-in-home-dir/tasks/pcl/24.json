@@ -1,0 +1,9 @@
+{
+  "id": "24",
+  "subject": "Run CPAN module suites under post-W12 default",
+  "description": "Re-run the CPAN module test suites previously exercised (see project_cpan_module_log / project_cpan_test_suites: Data::Dumper, JSON::PP, Try::Tiny, List::Util etc.) under the new default; compare against known status.",
+  "activeForm": "Running CPAN module suites",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

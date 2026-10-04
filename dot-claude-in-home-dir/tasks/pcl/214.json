@@ -1,0 +1,9 @@
+{
+  "id": "214",
+  "subject": "Run the fuzzer (tools/difftest-ops.pl) — not run since s324-era; verify only the 4 known-cluster mismatches remain",
+  "description": "DONE s336 (2026-08-03). Full run: **1060 valid snippets, 1056 match, 4 MISMATCH in 2 clusters** — exactly the expected clean result, no new divergence after #137/#138/#140/#142/#163/#184/#189/#193/#199.\n\nEvery mismatch triaged to a cause (probed live, not read off the cluster label):\n- 3 rows (`2 ** 3 ** 4`, `2**53`, `2**53 + 1`) = ONE cause: perl's `**` is always\n  an NV (C pow → %.15g), PCL's `p-**` returns an exact bignum. User-parked\n  2026-06-26; now written up in docs/not-supported.md §\"`**` returns an exact\n  integer where Perl returns a float (NV)\" (it previously existed only in the\n  memory file project_power_op_float_divergence).\n- 1 row (`ctx-count split /,/, $s` perl=1 pcl=3) = the implicit LHS-arity LIMIT,\n  already docs/not-supported.md §split. Probe confirms `() = @list` counts 3 on\n  both sides — only a directly-assigned split differs.\n\ndocs/difftest-fuzzer.md's \"Typical output\" was stale (761 snippets; length-plus\nand 0.1+0.2 have since been FIXED and now match) — replaced with the real s336\noutput, labelled as the standing clean result to compare against.",
+  "activeForm": "Running the differential fuzzer",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

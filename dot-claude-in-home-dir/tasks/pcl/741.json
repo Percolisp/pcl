@@ -1,0 +1,6 @@
+{
+   "description" : "FILED s452aa (Opus agent AA, measured while closing #738).  PRE-EXISTING and\nunrelated to that fix.\n\n    $ cat ex7.pl\n    print \"x\\n\";\n    exit 7;\n\n    $ perl ex7.pl   ; echo rc=$?      ->  rc=7\n    $ ./runpcl ex7.pl ; echo rc=$?    ->  rc=0\n\nThe EMITTED program is right: run the same file's CL through SBCL directly\n(`sbcl --control-stack-size 512 --load cl/pcl-runtime.lisp --load prog.lisp`)\nand the process exits 7.  The loss is in `runpcl`, which does not propagate its\nchild's status.\n\nWHY IT MATTERS AND WHY IT IS NOT URGENT: no measurement runner reads runpcl's\nstatus (the sweep and the companion spawn SBCL themselves and read TAP), so\nthis has never falsified a count.  It DOES falsify any hand probe of the form\n`./runpcl p.pl; echo $?`, and that is how it was found -- the #738 END-block\nexit-code check read 0 from runpcl and 7 from SBCL for the same program.\n\nBAR: `./runpcl` exits with the program's status for a top-level `exit N`, for\nan `exit N` inside an END block (perl: the LAST such status wins, task #738),\nand for a die (perl: 255-ish; measure rather than assume).  `./runt` and `./clt`\nare the siblings to check in the same pass.",
+   "id" : 741,
+   "status" : "pending",
+   "subject" : "`./runpcl` always exits 0 -- the program status is not propagated (the emitted CL is right)"
+}

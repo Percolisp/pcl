@@ -1,0 +1,9 @@
+{
+   "closed" : "2026-08-21",
+   "created" : "2026-08-21",
+   "description" : "FILED s419 (Fable) by the flip re-census (docs/drop-census-s419-flip-gate.md\nfamily 9).  re/pat.t lines 758/767/804/818/831 all drop:\n\n  is($#{^CAPTURE}, -1, $message);\n\n`@{^CAPTURE}` is the 5.26+ named capture array; `$#{^CAPTURE}` is its last\nindex.  PCL handles `@{^CAPTURE}`? â VERIFY FIRST (the cheap discriminating\nmeasurement): probe `\"abc\" =~ /(a)(b)/; print scalar @{^CAPTURE}, \" \",\n$#{^CAPTURE};` vs perl.  If the array itself works, the gap is only the\n`$#{BLOCK}` spelling with a caret name inside (the $# last-index operator\nover a block deref whose content is a caret variable); if the array is also\nabsent, this is the ^CAPTURE feature, a different (runtime) layer.\nBlocks the announce->DIE flip.\n\nDONE s420.  Both halves were real: `@{^CAPTURE}` had no runtime variable at\nall (the emitter passed the name through BARE, and a bare all-caps token reads\nDOWN-cased under :invert, so the file aborted unbound), and `$#{^CAPTURE}` —\nthe one spelling PPI hands over as Cast + Block — was dropped whole.\nShipped: the runtime array beside @-/@+ (set-capture-groups fills it with the\ngroup VALUES, truncated after the last participating group, undef inside that\nrange); %{^CAPTURE} and %{^CAPTURE_ALL} map onto %+ and %- (perl SYNONYMS, so\nno new state); _block_caret_name in PExpr collapses the Cast+Block spelling\n(which also fixed the SPACED `$ {^XY}` form, t/base/lex.t); and both\nArrayIndex leaf emitters now share one container helper that consults\n%SPECIAL_VARS.  re/pat.t 8 drops -> 3.  Guard: Pl/t/match-vars-01.t row 26.\nFound on the way: #417 (@+ is sized by the pattern, @- by participation).\n",
+   "id" : "412",
+   "session" : "s419",
+   "status" : "completed",
+   "title" : "$#{^CAPTURE} â last-index of a caret-name array through block deref (5 drops, re/pat.t)"
+}

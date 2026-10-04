@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND s501q.  PRE-EXISTING on main 77212b1f (not moved by s501q: the #2514 normalisation declines any body that observes @_, so this sub keeps v1's lowering).\n    use feature 'signatures'; no warnings;\n    sub ali ($x) { $_[0] = \"changed\" if @_; $x } my $w = \"orig\"; ali($w); print $w;\n        perl: changed     PCL default: orig     PCL_OPT=none: changed\n(Fable's review probe ~/pcl-agent-scratch/s501/review/r501q-sig.pl row 14.)  The registry's rule is that PCL_OPT=none runs identically; here it does not, and the none answer is perl's.  Owner to bisect which Kind-A gate changes the call's argument passing (insensitive-call is the first suspect: the discriminating measurement is PCL_OPT=-insensitive-call on this program, one run).  Brief says keep PCL's default answer for now.\n",
+   "id" : "2573",
+   "status" : "pending",
+   "subject" : "PCL_OPT=none is a CORRECTNESS switch for `$_[0] = â¦` inside a SIGNATURE sub: default leaves the caller alone, none writes it through (perl writes it)"
+}

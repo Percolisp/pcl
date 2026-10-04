@@ -1,0 +1,9 @@
+{
+  "id": "264",
+  "subject": "SILENT WRONG: a code-level `${x}` deref of a file lexical across a package boundary reads empty",
+  "description": "DONE s363 (36b4d7f). ONE helper `_brace_name_refs` (Pl/Parser2.pm) resolves a CODE-level `${x}`/`@{x}`/`%{x}`/`$#{x}` (Cast + Block-holding-one-Word) to its canonical variable, and BOTH the span DETECTOR (`_canon_refs_in`) and the span RENAMER consume it — they have to agree about what a use is. The renamer sets the Word inside the Block (`${x}` → `${x__file__N}` in the declaring segment, `${Pkg::x__file__N}` in later ones). `_has_code_brace_deref` is now a filter over the same helper, and the `${x} deref-block` REFUSAL is deleted: the shape it guarded is handled, and the other sigils it also refused are different canonical variables that renaming `$x` never touches.\n\nMEASURED (the risk was that adding detection turns silently-wrong files into DYING ones): gate SET diffed file-by-file across both populations (111 corpus + 604 perl t/) with scratchpad xstat.pl — 30 failures before, the same 30 after, same files and causes. Zero new gates. Corpus emission identical; gate 132/4728; rows + inverse guards in Pl/t/transpile-test-09.t; gen v2-117.\n\nBreaking-case probes: `${ $ref }` (holds a Symbol, not a Word), `@{[ … ]}`, `${main::g}`, and a `my $s` shadow inside a sub — all identical to perl. The two container gates the probe also tripped (`@{a}`, `${h}{k}`) were verified PRE-EXISTING at 683ef04 (#84 family).",
+  "activeForm": "Filing the code-level brace-deref spanning silent wrong",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

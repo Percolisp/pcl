@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 2 on t/op/eval.t:730-753).\n\nperl: `UNITCHECK { ... }` runs just after the COMPILATION UNIT that contains\nit has been compiled -- for a string eval, right after that eval's own\ncompilation, before it runs.  PCL never runs it; the block's body simply does\nnot execute.\n\nREPRODUCER (perl 5.40.3 vs PCL):\n\n    perl -e 'eval \"UNITCHECK { print q(A-) }\"; print \"ok\"'\n    perl: A-ok\n    PCL:  ok\n\nROWS: baselines/perl-suite-fails.tsv op/eval.t 149, 150, 151, 152, 163, 164\n(the file's \"No segfault\" set, which asserts the block RAN by printing `A-`).\nRows 163/164 nest it inside `INIT { ... }` and PCL prints `0A-ok` / `ok`.\n\nSHAPE: PCL has BEGIN and END phases (`p-eval-always`, the compile-phase block\nrunner) and INIT; UNITCHECK is the one phase with no arm.  Its unit is the\nFILE for file-level code and the EVAL for `eval STRING`, which is what makes\nit different from INIT and what the rows above test.  CHECK is the sibling to\naudit at the same time (not measured here).\n",
+   "id" : 1959,
+   "status" : "pending",
+   "subject" : "UNITCHECK blocks are never run (6 rows of t/op/eval.t)"
+}

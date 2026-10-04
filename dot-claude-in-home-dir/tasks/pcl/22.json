@@ -1,0 +1,9 @@
+{
+  "id": "22",
+  "subject": "W12: swap default, keep text annotator behind PCL_W12_OLD, gates",
+  "description": "Swap default to tree annotator; keep text scan behind PCL_W12_OLD=1 for one session. Acceptance: parser2-01/02.t guards re-pointed (not weakened), census must not drop, parity sweep exact, Pl/t full gate green. Bump *pcl-cache-generation* if emission changes. Update docs/parser2-prototype.md + v2-completion-plan.md + session-log.md; commit.",
+  "activeForm": "Swapping W12 tree annotator to default",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

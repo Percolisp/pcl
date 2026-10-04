@@ -1,0 +1,8 @@
+{
+  "id": "109",
+  "subject": "pclxs A-grind: 9→16 built. Next: newCONSTSUB, then HTML::Parser's MGVTBL free callback",
+  "description": "Queue for the next stretch, cheapest first. (1) newCONSTSUB — Encode needs it and plan item 2b predicts it reclaims Socket/Fcntl/POSIX too, since ppport.h's fallback is what drags them into Tier X. Implementable with define_xsub plus a shim-side constant table; no ABI bump. (2) Encode's PL_op — blame it per function first, it may be one XSUB. (3) HTML::Parser installs its own MGVTBL with a free callback: \"call me when this SV dies\" for an unblessed SV, past the storage-only magic model (design §5) and NOT tier A as the classifier had it — needs a decision, possibly D10. (4) sv_rvweaken/SvWEAKREF (Clone, Hash::Util::FieldHash) — the classifier calls these A but weak references are a host question.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

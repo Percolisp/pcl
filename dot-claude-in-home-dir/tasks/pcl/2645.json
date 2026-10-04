@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "FOUND s504c while probing #2633's breaking cases.  Repro /home/bernt/pcl/.claude/worktrees/agent-a41c97e5832f266e1/scratch/s504c/probes/q02p.pl: `my $x = \"X\"; sub f2 { \"${x}-\" . ${x} } print \"f2=\", f2(), \"\\n\";`  perl `f2=X-X`, PCL (base and s504c) `f2=-`.  In a do-file (/home/bernt/pcl/.claude/worktrees/agent-a41c97e5832f266e1/scratch/s504c/probes/q02.pl) it reads the CALLER's global instead.  Parser2::_promote_captured refuses on the regex `[$@%]\\{\\s*x\\s*\\}` (the '${x} deref-block' reason), but the span pass learned to rewrite the Cast+Block Word in #264 (_brace_name_refs) -- the capture path's _rewrite_var_uses should use the same helper and the refusal can go.",
+   "id" : "2645",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a code-level `${x}` of a file lexical inside a NAMED sub reads EMPTY (the capture promotion refuses on the `${x}` text and the sub then reads the package global) -- `my $x = \"X\"; sub f2 { \"${x}-\" . ${x} }` perl X-X, PCL `-`"
+}

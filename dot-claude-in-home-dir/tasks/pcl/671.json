@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s450t (Opus, agent T of round 8), found finishing #561.  PRE-EXISTING\nand nothing to do with #561/#602 -- it is a term-grammar gap.\n\nREPRO (no eval needed):\n    our %h = (k => 'v');\n    my $x = *h{HASH}{k};\n    print \"1=[\", (defined $x ? $x : 'U'), \"]\\n\";\n  perl: 1=[v]\n  PCL:  PCL: statement dropped ... -- Bug. Fell through. Missing case:\n        [glob_slot(HASH), 'Structure::Block<{k}>']\n        then the run DIES at the drop site (post-flip).\n\n`*h{HASH}` alone works and returns the hash ref; what is missing is the\npostfix chain CONTINUING through a glob_slot node.  The array twin\n`*a{ARRAY}[0]` is presumably the same shape (not probed).\n\nWHERE IT BITES: t/re/reg_namedcapture.t test 1 is\n    *X = *-;  'X'=~/(?<X>X)/;  print eval '*X{HASH}{X} || 1' ? ...\nso the file is 1 ok / 1 notok after #561 (was 0/2); this drop is the whole\nremaining row.  The drop happens inside a STRING EVAL there, so it surfaces\nas a trapped die rather than a transpile-time census entry.\n\nRELATED, and needed for the same row to pass on VALUE as well as on shape:\ntask #672 (%- values must be ARRAYREFS).\n",
+   "id" : 671,
+   "status" : "pending",
+   "subject" : "A SUBSCRIPT on a glob-slot access is a DROP: `*h{HASH}{k}` / `*X{HASH}{X}` dies \"Missing case: glob_slot\" (t/re/reg_namedcapture.t test 1 sits on it)"
+}

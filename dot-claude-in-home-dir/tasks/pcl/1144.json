@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "FILED s470bj.  #1140's `escapes` fact records \"the list of a foreach whose\nvariable is not PROVEN read-only\" as an escape, and for a PLAIN (non-`my`) loop\nvariable -- the topic form `for (@a) {...}` and the statement modifier `EXPR for\n@a` -- there is no proof available, because `$_` is a dynamically-scoped global\na callee can write.  So `for (@list) { print }` escapes `@list` today.\n\nCOST: only an optimization, and none was measured in the four populations at\nfiling (no `local-push` site and no `p-foreach-raw` loop was lost to it) --\nbecause a topic loop never had `p-foreach-raw` in the first place (that arm\nrequires `:my`), and the loss only shows when the SAME array also carries a\npush or a `my`-variable loop.\n\nTHE FIX IS THE SAME MECHANISM AS #1142: run the shared per-name gate list\n`Pl::VarAnnotator::_text_gate_tags('$_', <body source>, 1)` over the loop BODY,\nand treat a clean answer as a read.  The residue that must stay an escape: a\nbody containing any CALL (the callee can write `$_`, and in perl that write\nreaches the element), and `$_` being localized/aliased further in.\n\nDo #1142 first -- they share the oracle, and #1142 has a measured mover.\n",
+   "id" : 1144,
+   "status" : "pending",
+   "subject" : "A foreach/topic loop over @a whose loop variable is $_ escapes the array â prove $_ read-only from the body instead"
+}

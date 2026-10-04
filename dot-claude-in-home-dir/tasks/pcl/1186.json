@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "FILED s470bn (Opus, 2026-09-05), found building the `textproc` macro row.\n\nREPRODUCER:\n    use Text::Wrap qw(wrap);\n    $Text::Wrap::columns = 40;\n    print wrap('', '  ', join(' ', map { \"word$_\" } 1..40)), \"\\n\";\n  perl: wraps.  PCL: dies\n    This shouldn't happen at .../5.40.3/Text/Wrap.pm line 78.\n\nWrap.pm:78 is inside the main `while` loop's `else` branch â the one it reaches\nwhen none of its three regex alternatives matched the remaining text, i.e. a\nregex in Wrap.pm answers differently under PCL.  The module is core and pure\nperl, so this is a PCL regex or `pos`/`substr` divergence with a small\nreproducer waiting inside it: bisect Wrap.pm's own three matches\n(`\\G([^\\n]{0,$ll})($lbrk|\\z)`, the greedy `\\G([^\\n]{$ll})`, and the\n`\\G([^\\n]*)` tail) against perl on the same input.\n\nCONSEQUENCE FOR THE BENCH: `textproc` wraps by hand instead (the plan named\nText::Wrap as the example, not the requirement).\n",
+   "id" : 1186,
+   "status" : "pending",
+   "subject" : "Text::Wrap::wrap dies \"This shouldn't happen\" at Wrap.pm:78 under PCL"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-01",
+   "description" : "FOUND s461ar, PRE-EXISTING, and it is why `re/pat.t` still reads C 0/0 in\nbaselines/perl-suite-run.tsv after #931 removed its census drop.\n\ntools/lib/PCLSbcl.pm sets --control-stack-size but NOT --dynamic-space-size, so\nevery runner uses SBCL's default 1 GB dynamic space.  `t/re/pat.t` emits a\n236 KB .lisp file and SBCL dies COMPILING it:\n\n    Heap exhausted during garbage collection: 0 bytes available, 64 requested.\n    ... bytes_allocated = 1026030592 [95.6% of 1073741824 max]\n    0: SB-REGALLOC::GROW-SC  1: SB-REGALLOC::PACK-TN  ... 4: SB-C::%COMPILE-COMPONENT\n\nGiven `--dynamic-space-size 6144` the same file COMPILES and then dies at load\nfor a DIFFERENT reason (task #933's `require threads`), so this is the first of\ntwo blockers, not the only one.\n\nWHY IT IS NOT JUST \"RAISE THE NUMBER\": the scope note in CLAUDE.md says\n`--all --jobs 8` can already OOM the 10 GB budget because each worker reserves\na 512 MB control stack AND runs a perl side; multiplying the dynamic space by\nsix across four to eight workers is exactly the wrong direction.  Measure the\ngate's and the sweep's PEAK first (the same measurement the prove-core\nMemoryMax filler wants), then decide between: a per-file allowance like\nbaselines/perl-suite-timeouts.tsv (a `perl-suite-heap.tsv`), a global raise\nwith a matching jobs cap, or reducing what the compiler emits for a file this\nsize (pat.t is 1263 perl rows; the emitted top-level form for run_tests is\nenormous).\n\nA runner change means the runner row of the what-to-run-when table: run the\nchanged runner once and compare verdicts file by file, plus PCL_SHOW_SBCL=1\nbefore and after.\n",
+   "id" : 935,
+   "status" : "pending",
+   "subject" : "t/re/pat.t cannot even COMPILE at the runners' 1 GB SBCL heap: \"Heap exhausted\" during %COMPILE-COMPONENT"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-02",
+   "description" : "Found s504 by s501t: t/op/magic.t row #66 (`print $? & 0xFF ? \"ok $tn[4]\" : \"not ok $tn[4]\"` after a child that kills itself with SIGINT) became a NUMBERED `not ok` once `tie my @tn` worked (#155); under main the same line printed an unnumbered `not ok` (the untied @tn gave no number).  PRE-EXISTING: same answer on main b7ec0093.\n\nReproducer (perl prints `status=2 sig=2`; PCL prints `status=512 sig=0`, on main and on the s501t tree):\n    open(CMDPIPE, \"|-\", \"perl\") or die;\n    print CMDPIPE '$SIG{INT} = \"DEFAULT\"; kill \"INT\", $$; sleep 1;';\n    close CMDPIPE;\n    printf \"status=%d sig=%d\\n\", $?, $? & 0xFF;\n\n`system(LIST)` is right (s501t probe: a PCL or perl child killed by SIGINT gives sig=2), so it is the piped-open CLOSE path that converts the wait status -- most likely it waits through a shell or reads the process's exit CODE (128+N folded, or SBCL's process-exit-code) instead of the raw wait status.  Layer: runtime (close of a pipe handle); sibling of #2101 (backticks $?), #1770.  Guard: a Pl/t row with the reproducer above.\n",
+   "id" : "2594",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: close() on a piped open (\"|-\" / \"-|\") reports a child KILLED BY A SIGNAL as an exit status ($? = N<<8, $? & 0xFF = 0) -- t/op/magic.t #66\n"
+}

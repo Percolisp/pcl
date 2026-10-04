@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-29",
+   "description" : "DIVERGENCE (pre-existing, found by the s500p rule-12 review of #2513's shift arms; NOT caused by it -- base 209e7533 prints the same).\n\nperl's << and >> work on the operand as a UV (unless `use integer`): a NEGATIVE operand is its 64-bit two's complement, and << wraps at 64 bits.  PCL's p-<< / p->> call %pcl-uv-coerce, which is the IDENTITY on an integer (it only handles floats), so a negative operand shifts as a signed bignum and << never wraps.\n\nRepro (perl 5.40.3 vs PCL, both base 209e7533 and s500p's tree agree with each other):\n  my ($x,$y) = (-1, 1); print $x << $y      # perl 18446744073709551614   PCL -2\n  my $z = -8; print $z >> 1                 # perl 9223372036854775804    PCL -4\n  my @a=(3); print $a[0] << 63              # perl 9223372036854775808    PCL 27670116110564327424\n  my $u = \"-1\"; print $u << 1               # perl 18446744073709551614   PCL -2\nEvery spelling (raw literal, boxed, hash element, sub return, string) diverges the same way.\n\nFIX SHAPE: in p-<< / p->> (and whatever inline raw path the emission uses for them), coerce the left operand with (ldb (byte 64 0) n) for an integer, and mask the << result to 64 bits; `use integer` keeps its signed semantics (check which op it emits).  Probe also 1<<64, 1<<-1, -1>>64, 2**63<<1.  Guard in Pl/t/numeric-repr-01.t or a bit-op file.  The s500p fast arm in p-<< / p->> must take the same coercion (it is currently exactly the base's semantics, i.e. identity).\n",
+   "id" : 2516,
+   "status" : "pending",
+   "subject" : "DIVERGENCE: << and >> treat a NEGATIVE operand as signed and << never wraps at 64 bits -- perl: -1 << 1 = 18446744073709551614, -8 >> 1 = 9223372036854775804, 3 << 63 = 9223372036854775808; PCL -2, -4, 27670116110564327424"
+}

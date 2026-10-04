@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent B's #464 report (pre-existing). Runtime module load (p-use / p-require by NAME) must set $INC{\"Foo/Bar.pm\"} to the path it loaded (a pragma like strict: perl sets it to the real strict.pm path). Bar: `require strict`, `use strict`, `use POSIX ()`, `require Foo::Bar` for a lib/ shim and for a user module via `use lib`, vs perl (exists + the value's shape -- a path); `%INC` after a failed require unchanged; a Pl/t guard row in use-require-01.t.\n\nDONE s443h (Opus, agent H round 4), commit 8cdaeef, ff-merged s444.  ONE mechanism: %p-note-inc-path records-if-absent and resolves through @INC (p-note-inc = module-name face; exported); p-use's three no-load exits call it; p-require-file NOTES instead of clobbering (it used to overwrite p-use's absolute path with the relative one).  Codegen emits (p-note-inc ...) for pragmas via ONE predicate _never_loaded_pragma (the use arm and no arm used to disagree).  p-note-inc loads NOTHING -- hard constraint (would satisfy p-use's already-loaded guard); `no Moose` deliberately not routed, guarded.  Fable re-probed require strict / require \"File/Basename.pm\" abs-path / failed-require-clean -- identical to perl.  DELIBERATE residue = #528 (constant/vars/lib/base/parent/overload/if record no %INC entry).",
+   "id" : 511,
+   "status" : "completed",
+   "subject" : "`%INC` is not populated by a BAREWORD `require Foo` / `use Foo` -- `require strict; print exists $INC{\"strict.pm\"} ? 1 : 0` perl 1, PCL 0 (the path form is right); silently breaks the `require Foo unless $INC{\"Foo.pm\"}` idiom in the other direction"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t5d (Opus, 2026-09-13) by #1501 round 5 CHECK 1.\n\n`lib/IO.pm:147` is\n\n  sub ungetc { Carp::croak('IO::Handle::ungetc is not implemented under PCL') }\n\nand t/io/scalar_ungetc.t calls it on its second row, so 17 of the file's 19\nrows never run.\n\nWHAT THE FILE ASKS FOR (perl 5.40.3):\n  open my $io, '<', \\$s;  getc $io;\n  $io->ungetc(ord 'A')  returns the ORD it was given (not 1, not the handle)\n  getc($io)             is then chr(65)\n  $s                    is UNCHANGED (\"foo\") -- the pushback is in the handle,\n                        not in the scalar\n  and then ELEVEN ungetc calls in a row, each returning its own ord, followed\n  by eleven getc calls that read them back in reverse.\n\nSO IT IS A PUSHBACK STACK, and that is why CL's `unread-char` is not the answer:\nit allows ONE character and only immediately after a read-char.  The shape is a\nper-handle pushback vector that `%p-getc`/`p-read`/`p-readline` drain before\ntouching the stream -- i.e. a handle-level facility, not an IO::Handle method\nbody, with `lib/IO.pm`'s `ungetc` becoming a thin call into it (rule 9a: the\npushback is core handle state, the method is module surface).\n\nALSO IN THE FILE, and not this task's: row 1 asserts\n`Internals::SvREADONLY($s,1)` makes `$s = 'bar'` die \"Modification of a\nread-only value\" -- that is NS:`Internals::*` C-level introspection, announced\nalready (\"PCL: Internals::SvREADONLY: a SCALAR is not implemented ? ignored\").\n\nROWS: t/io/scalar_ungetc.t 18 blessed fail rows + 17 shortfall.\n",
+   "id" : 1704,
+   "status" : "pending",
+   "subject" : "`IO::Handle::ungetc` is an explicit croak in lib/IO.pm; t/io/scalar_ungetc.t loses 17 rows, and the shape needs a pushback STACK, not CL unread-char"
+}

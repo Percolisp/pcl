@@ -1,0 +1,8 @@
+{
+  "id": "218",
+  "subject": "Target-B: if/elsif chains lower as nested p-if — flatten to one multi-arm form (pcl-pack.lisp readability finding, s335)",
+  "description": "Found reviewing cl/pcl-pack.lisp for human readability (USER ask, s335). A flat Perl if/elsif chain lowers as one nested (p-if c a (p-if c2 a2 (p-if ...))) per arm, so _pack_type_info's ~25-arm character dispatch — 3 columnar lines per arm in the source — becomes a staircase marching past column 80 in the emitted CL, with each arm's body at a different depth. Unfindable by eye, and the nesting also feeds the same per-arm recursion depth family as #213. Fix: lower elsif chains to a single flat multi-arm form (p-cond-style: (p-cond (test body...) (test body...) (:else body...))), one arm per line-group at ONE depth. Emission flag-day (generation bump + corpus-diff); shape belongs to the Target-B macro vocabulary (#75) but can ship before the full flag-day since it is one construct. NOT in generated-cl-ir-review.md's friction list — add it there when picked up. Related but distinct: #213 (b) covers my-decl let-nesting; this covers elsif nesting.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

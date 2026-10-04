@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FOUND s470bw (2026-09-06), probing #1261's reproducer against perl 5.40.3.\n\nREPRO (B2.pm and A2.pm in one directory, PERL5LIB pointing at it):\n\n  package B2;\n  use Exporter 'import';\n  our @EXPORT = qw(blk);\n  sub blk { return ref($_[0]) . \":\" . scalar(@_) }   # NO prototype\n  1;\n\n  package A2;\n  use B2;\n  sub go { return blk { 42 } }\n  1;\n\n  perl : HASH:1     -- `{ 42 }` is an anonymous hash constructor, so blk gets\n                       one argument, a HASH ref\n  PCL  : :1         -- ref($_[0]) is \"\" : the emission is `(A2::pl-blk 42)`,\n                       i.e. the BLOCK'S VALUE, and the hash is never built\n\nSame family as #478 (which was about a `(&)`/`(&@)` prototype not crossing a\n`use`, so a block-form call got the block's value instead of a code ref).  This\nis the OTHER half: with no prototype at all, perl does not make a block-form\ncall â it parses `{ â¦ }` as a TERM, an anon hash â and PCL still unwraps it.\n\nWITH a `(&@)` prototype PCL is right (`CODE:1`, probed on the same fixture), and\nwith an EMPTY `()` prototype the term rule is right too (#365/#453, probed:\n`zap + 1` is 8 with `sub zap ()` and 107 without, both matching perl).  So the\ngap is exactly \"declared sub, no prototype, followed by a brace block\".\n\nNot fixed in s470bw: it is a PExpr term-grammar question, not a cache one, and\n#1261's acceptance rows use the `()`-prototype and export facts instead (both\nperl-equal on both sides).  The `(&@)` fixture is preserved in that session's\nscratch reproducer (scratch/s470bw/repro) as the demonstration.\n",
+   "id" : 1285,
+   "status" : "pending",
+   "subject" : "A DECLARED sub with NO prototype followed by a block: perl builds an anonymous HASH (`blk { 42 }` == blk({42})), PCL passes the BLOCK'S VALUE (`(pl-blk 42)`) -- silent wrong, the #478 residue with no prototype at all"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494p (Opus, 2026-09-25) while probing member 3's raw-slot emission (the cl/pcl-pack.lisp `$mod *= 2 for 1 .. $checksum_width` diff).  PRE-EXISTING: the 3e8bff3e base gives the same wrong answers, on the boxed (`p-*=`) AND the raw (`p-*=-raw`) path and on plain `*`.\n\nReproducer (scratch/s494p/mul2.pl, mul3.pl in the s494p worktree):\n    my $a = 4611686018427387904; my $b = $a * 4; print \"$b\\n\";   # perl 1.84467440737096e+19   PCL 18446744073709551616\n    my $q = 3; $q *= 3 for 1..40; print \"$q\\n\";                    # perl 3.64729963771708e+19   PCL 36472996377170786403\n    my $m = 1; $m *= 2 for 1..70; print \"$m\\n\";                    # perl 1.18059162071741e+21   PCL 1180591620717411303424\n(`$m *= 2 for 1..64` = 2**64 is also wrong: perl prints 1.84467440737096e+19.)  `+` is right at the IV/UV edge (9223372036854775807 + 1 prints 9223372036854775808 in both); `2**62 * 4` is right because `**` already yields a float.\n\nperl's rule: an integer multiply whose result does not fit IV/UV is done in NV.  PCL's integer multiply lets CL promote to a bignum.  Where: the multiply arm of the arithmetic family (p-* and %compound-arith-form's `*`) — probably the same UV-range test `+` already has.  BAR: the probes above vs perl + op/ companion (op/64bitint.t, op/numconvert.t, op/arith2.t) + sweep.",
+   "id" : "2110",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an integer `*` / `*=` whose product exceeds the UV range stays an exact BIGNUM in PCL where perl gives an NV (`my $q = 3; $q *= 3 for 1..40` prints 36472996377170786403, perl 3.64729963771708e+19)"
+}

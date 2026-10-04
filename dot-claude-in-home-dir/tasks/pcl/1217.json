@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "FILED s470bq (Opus, 2026-09-05) as the DECLARED gap of #1215; stated in\ndocs/ir-spec.md Â§12b so a backend author reads it there.\n\nThe data form carries the LOWERED forms -- everything that reaches\n`Pl::Passes::run`.  `Pl::Parser2::_assemble_sections` also pushes ~18 kinds of\nhand-written TEXT line into the output, and those are not trees, so they are\nnot in the data form:\n\n    ;;; package Foo            (a comment -- the data form has none)\n    (p-defpackage :Foo) (in-package :Foo) (defclass â¦ () ())\n    (p-register-pkg-name :Foo \"Foo\")\n    (defvar $a (make-p-box nil))  (defvar $b â¦)\n    the section's forward-global (p-defcell â¦) declarations\n    the `package Foo 1.5` $VERSION block\n    (p-run-compile-phase-blocks)\n    (p-set-current-package :Foo \"Foo\")\n\nMost are derivable by a consumer from the `(|p-bucket| SECTION :BUCKET\n:PHASE)` markers plus Â§7.1 and Â§9, and Â§12b says so.  Two are NOT purely\nbookkeeping and are the reason this is a task and not a note: the\nforward-global `p-defcell` declarations (a program's undeclared package\nglobals) and `p-run-compile-phase-blocks` (the compileârun boundary, Â§9).\n\nTHE FIX IS THE RIGHT ONE STRUCTURALLY: express those lines as CLForm trees at\nthe assembly, which is review Â§3.1's \"make CLForm the total carrier\" for the\nlast part of the file that is still text.  It is emission-RISKY (the printed\nbytes must not move), so it wants its own session with corpus-diff as the bar\n-- byte-identical output while the assembly stops being a string join.\n",
+   "id" : 1217,
+   "status" : "pending",
+   "subject" : "--emit-sexp omits the assembly's own text lines (in-package, p-defpackage, the $a/$b and forward-global defvars, p-run-compile-phase-blocks, p-set-current-package)"
+}

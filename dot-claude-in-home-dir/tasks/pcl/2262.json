@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494g (Opus, 2026-09-25).  perl's pp_system sets SIGINT and SIGQUIT to SIG_IGN in the PARENT for the wait (after the fork), and restores them afterwards; ^C in a terminal goes to the whole foreground process group, so perl survives and reads the child's death in $?.  Before s494g PCL printed SBCL's backtrace on ^C; since s494g INT's default is death by the signal, so the PCL program dies with its child.  WHY NOT DONE: run-program forks internally, and a SIG_IGN set before it is INHERITED across exec by the child (ignored dispositions survive exec), which would make the child immune to ^C -- the ignore must be set AFTER the fork, which run-program does not expose.  Options: spawn through sb-posix:fork + execvp (p-system's own spawn), or ignore only in the parent via a sigaction installed after run-program returns the process object for :wait nil + process-wait.  Probe: `perl -e 'system(\"sleep 5\"); print \"after $?\\n\"'` + ^C.",
+   "id" : "2262",
+   "status" : "pending",
+   "subject" : "EDGE (found by #2107): `system` does not IGNORE INT and QUIT in the parent while the child runs -- perl does, so ^C during system() kills only the child in perl and now kills the PCL program too"
+}

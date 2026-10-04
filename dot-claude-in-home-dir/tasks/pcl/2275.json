@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FILED s494k (2026-09-25, found while building `pcl --check`, #2194).  The `pcl` driver does not honour `--` the way perl(1) does: its Getopt::Long parse uses `pass_through`, which KEEPS a `--` in @ARGV instead of consuming it.\n\nREPRODUCERS (perl 5.40.3 vs ./pcl at 3d9b3712):\n  ./pcl -e 'print \"@ARGV\\n\"' -- -x y      ->  `-- -x y`     perl: `-x y`\n  ./pcl -- x.pl                            ->  pcl: can't open script \"--\": No such file or directory (exit 2)     perl: runs x.pl\n  (`pcl x.pl -- -x` is RIGHT: after the script both keep `--` as a script argument.)\n\nWHY IT MATTERS: `--` is how a user passes an argument that starts with `-` to a one-liner (`perl -e ... -- -n 3`); under pcl the program sees an extra `--` in @ARGV — silent wrong output.\n\nFIX SHAPE (driver only, `pcl`): after GetOptions, when the element that ended the option parse was a literal `--` (i.e. $ARGV[0] eq '--' before the source is taken, in both the -e and the script case), shift it once — perl consumes exactly one.  Guard: a tools/t row (tools/t/pcl-check.t can carry it: `pcl --check -e 'print \"@ARGV\\n\"' -- -x y` must say IDENTICAL; today it says DIFFERENT OUTPUT, which is how `--check` surfaced it — PCLCheck's perl side deliberately keeps the user's `--` so the difference is visible).\n",
+   "id" : "2275",
+   "status" : "pending",
+   "subject" : "pcl driver keeps a literal `--` in @ARGV (pcl -e CODE -- -x prints \"-- -x\"; pcl -- x.pl cannot find script \"--\"); perl consumes it"
+}

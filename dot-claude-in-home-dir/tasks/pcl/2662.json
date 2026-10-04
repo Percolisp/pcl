@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FOUND s506f (Opus, 2026-10-04).  `pcl -e` compiles a temp file `--as=-e` (task #2461), and $0, __FILE__\nand die/warn locations say -e -- but the compiler's own drop / refusal announcement (and, per its comment,\nthe run-time die the PARSE ERROR emitters carry, which names the same site) still names the TEMP FILE.\n\nREPRODUCER (618db500 and s506f):\n  pcl -e 'print \"x\" if 1 ~~ 2'\n  -> PCL: refused statement at /tmp/pcl_163798_D5Fl.pl line 1: print \"x\" if 1 ~~ 2 -- smart match ...\n  (perl names the program -e)\n\nCAUSE: Pl/Parser.pm `_drop_site` and `_announce_regex_gaps` take `$self->filename` (the v1 seam parser's\nfile), not the program's name; Parser2's Environment already carries it (`source_file` = `--as` NAME).\nFIX: read the name from `$self->environment->source_file` at both sites (one helper).  The harness\nwrapper (tools/pclperl-for-tests) rewrites the temp path in stderr, so this shows only under `pcl`.\n",
+   "id" : "2662",
+   "status" : "pending",
+   "subject" : "`pcl -e`: the compiler's drop/refusal announcement names the temp file (/tmp/pcl_NNN.pl), not -e (`--as` reaches $0/__FILE__ but not Pl/Parser.pm _drop_site)"
+}

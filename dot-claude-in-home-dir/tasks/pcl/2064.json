@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "The companion population (baselines/perl-suite-run.tsv) has ZERO rows for\nperl's t/lib/ directory -- 0 of 256 snapshot rows.  s495 ran two of them\nbecause the s492c brief asked for the lib/ files that use POSIX / File::Spec /\nFile::Temp / Carp:\n\n  lib/deprecate.t   perl 10/0   PCL 4/6    (IDENTICAL on a 5ce155cb extraction)\n  lib/no_load.t     perl  2/0   PCL 2/0    OK\n\nThe six failing rows are \"archlibexp - message\", \"archlibexp - location\",\n\"privlibexp - message\", \"privlibexp - location\" and the two \"use if - message\"\nrows: deprecate.pm warns that a module has moved, and the test matches the\nwarning TEXT and the \"at FILE line N\" location.  That is the warn-location /\nwarnings-gated-diagnostic family (#1361, #221), not a deprecate.pm bug.\n\nNOT SPLICED into the baselines on purpose: t/lib is not in the companion's\nstanding population, so blessing rows for it would make every later `--all`\nrun report them LOST.  If t/lib is ever added to the scan, these two files are\nits first two measurements, taken at s495 on both the base and the tree.\n",
+   "id" : 2064,
+   "status" : "pending",
+   "subject" : "FIRST MEASUREMENT: lib/deprecate.t is 4/10 under PCL (the deprecation warning's message and location)"
+}

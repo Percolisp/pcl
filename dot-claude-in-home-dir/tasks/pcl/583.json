@@ -1,0 +1,9 @@
+{
+  "id": "583",
+  "subject": "Emitter loses indentation around a source-echo comment in the generated CL",
+  "description": "FOUND s446 (README review, while producing a generated-code exhibit for the README).  Cosmetic, not a correctness bug — but it is visible in the first output anyone pastes, and the README now claims the emission is legible.\n\nREPRO (this tree, gen v2-290):\n\n  printf 'my $n = shift // 10;\\nmy @sq = map { $_ * $_ } 1 .. $n;\\nprint \"sum=\", eval { my $t = 0; $t += $_ for @sq; $t }, \"\\n\";\\n' > /tmp/ex.pl\n  ./pl2cl /tmp/ex.pl\n\nThe `eval { ... }` body emits:\n\n            (p-my-= $t 0)\n            ;; $t += $_ for @sq\n  (p-foreach ($_ @sq) (p-incf $t $_))\n            $t)))\n\nThe `;;` source-echo comment AND the `(p-foreach ...)` form after it are both\nwritten at column 0, inside a block whose surrounding forms are indented to\ndepth.  Everything else in the file indents correctly, so it looks like the\ncomment node resets the printer's current indent and the next form inherits\nthe reset.\n\nWHERE TO LOOK: the CLForm printer (Pl/CLForm.pm) and whatever emits the\nstatement-echo comment for a statement-modifier `for` inside an eval block.\nNote task #132 (\"source-echo comments in v2 output\") is the related open\nquestion about whether these comments should exist at all — if that is\nanswered \"drop them\", this closes with it.\n\nBAR: the exhibit in README.md (the `my $n` / `my @sq` snippet) plus this\nrepro both indent by depth; no other emission change (corpus-diff IDENTICAL\napart from whitespace).",
+  "activeForm": "Filing the emitter indentation bug",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

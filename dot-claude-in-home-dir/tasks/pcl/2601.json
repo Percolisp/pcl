@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "Found by s501t (s505) probing F3 (Env): `my @o = ($PCLT_ONE, ...)` read the tied scalar's LATER value.  Pre-existing on main a33ce274.\n\nReproducer (perl prints `one 1 two`):\n  require Tie::Scalar; tie my $s, 'Tie::StdScalar'; $s = \"one\";\n  my @o = ($s, 1); $s = \"two\"; my @p = ($s); $s = \"three\"; print \"@o @p\\n\";\nPCL (main and the s501t tree): `three 1 three` -- the array keeps the proxy BOX, so every later read FETCHes again.  A list assignment copies VALUES (perl FETCHes once at the assignment).\n",
+   "id" : "2601",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a tied SCALAR in a list assignment is stored as an ALIAS: `my @o = ($s, 1); $s = \"two\"; print \"@o\"` prints `two 1` (perl `one 1`) -- pre-existing on main\n"
+}

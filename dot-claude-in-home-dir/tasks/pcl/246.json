@@ -1,0 +1,8 @@
+{
+  "id": "246",
+  "subject": "eval-string: a LOWERCASE bareword array subscript is stringified, not called (both pipelines)",
+  "description": "Probed s352 (E4.1 pre-work, while retiring the F8 gate). In perl a bareword in an ARRAY subscript is always a sub call when a sub of that name is visible at the eval's compile time — and the enclosing program's subs ARE visible there. PCL only keeps ALL-CAPS barewords callable inside eval strings (Pl/PExpr.pm:4814 `_bareword_subscript_autoquotes`, the constant-naming convention), so a lowercase name stringifies to index 0.\n\n  use constant P_FOUR => 4;  sub two_idx { 2 }\n  eval q{ $a[two_idx] = \"lc\"; $self->{PROPS}->[P_FOUR] = \"uc\"; 1 };\n  perl : a2=lc a0=undef p4=uc\n  PCL  : a2=undef a0=lc p4=uc     (IDENTICAL under v2 and under PCL_V1=1)\n\nSILENT WRONG (writes the wrong slot), but PRE-EXISTING IN BOTH PIPELINES — it is not an E4.1 dependency and the flip does not change it.\n\nLikely fix: in eval mode resolve at RUNTIME instead of guessing at transpile time — call the sub if one of that name exists, else use the string index. That reproduces perl's compile-time decision faithfully, because inside a string eval \"visible at compile time\" means \"exists now\". Probe what it would break first (a bareword with no such sub, relying on the string→0 index, is a strict-subs error in real perl).</description>\n<parameter name=\"activeForm\">Filing the lowercase bareword-subscript divergence",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "FILED s470bj from a #996-A3 licence probe (it had to prove a read-only array can\nnever reach `%p-push1`; it cannot -- the call receives `@a` whole, so #1140's\nescape fact keeps `p-push-impl`).  The divergence found on the way is\nPRE-EXISTING and unrelated: identical on `e73038f` and identical under\n`PCL_OPT=none`.\n\nREPRODUCER (scratch/s470bj/probe/ro2.pl):\n\n    my @a=(1,2);\n    print \"A\", scalar(@a), \"\\n\";\n    Internals::SvREADONLY(@a,1);\n    print \"B\", scalar(@a), \"\\n\";\n\n    perl 5.40.3   A2 / B2\n    PCL           A2 / B12      <-- \"12\" is the two ELEMENTS printed, not a count\n\nSo after the SvREADONLY call `scalar(@a)` stops answering the count.  The\nemitted form is `(Internals::pl-SvREADONLY @a 1)` -- an ordinary sub CALL -- not\nthe `Internals::SvREADONLY` MACRO whose docstring in cl/pcl-runtime.lisp\n(`%p-array-set-readonly`, task #159) says \"the caller ... stores the result back\ninto the variable's cell -- which is why the macro needs the variable, not its\nvalue\".  Start by finding out which of the two paths actually runs for this\nspelling: the macro may simply not be reached, in which case the array keeps its\nadjustable storage AND something else answers `scalar` wrongly.\n\nThe write side is RIGHT either way (`push` after the call dies \"Modification of\na read-only value\" in both engines), which is why no baseline row moved.\n",
+   "id" : 1143,
+   "status" : "pending",
+   "subject" : "Internals::SvREADONLY(@a,1) leaves scalar(@a) reading the ELEMENTS, not the count (pre-existing)"
+}

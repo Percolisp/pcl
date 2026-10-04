@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s450v (Opus round 9 agent V), from the #541 range probes.  PRE-EXISTING, and\npresent in BOTH the unconditional and the `if COND` spelling.\n\nREPRODUCER (perl 5.40.3):\n\n    our @a; @a = (1,2,3,4);\n    { local @a[1..2] = (7,8); print \"in=@a\\n\"; }\n    print \"out=@a\\n\";\n        perl  in=1 7 8 4   out=1 2 3 4\n        PCL   in=8 2 3 4   out=1 2 3 4\n\nCAUSE: `_subscript_key_groups` splits on COMMAS, so `1..2` is ONE key group and\n`@key_cls == 1`.  `_process_local_declaration`'s element branch then takes the\n\"single element with initializer\" arm and emits\n`(p-local-array-elem-init @a (p-.. 1 2) (vector 7 8))` -- the -init macro has no\nslice arm at all, so `(to-number <vector>)` is 0 and the whole slice collapses\nonto index 0 with the LAST value.  The comma spelling `local @a[1,2] = (7,8)` is\nright, because two key groups take the SLICE arm (tmp + nested opens +\n`(p-setf (p-aslice ...) tmp)`).\n\nSHAPE OF A FIX: `@key_cls == 1` is the wrong test -- it should be \"one SCALAR\nkey\".  A key group containing a `..` at top level is a SLICE and must take the\nslice arm, whose `p-aslice` place already handles a vector index.  (The\nno-initializer range spelling `local @a[1..2]` was fixed in s450v by dropping\n`p-local-array-slice`'s spurious `adjustable-array-p` test -- that macro's slice\narm is the model.)\n\nBAR: the four spellings (range/list x with/without initializer) vs perl, plus\nthe `if COND` twin of each; rows in Pl/t/stmt-modifier-01.t Â§7 or local-elem-02.t.\n",
+   "id" : 690,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `local @a[1..2] = (7,8)` treats the RANGE key group as ONE element and writes the last value to index 0 -- perl assigns 7,8 to elements 1,2"
+}

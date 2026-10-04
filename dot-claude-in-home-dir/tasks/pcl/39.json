@@ -1,0 +1,8 @@
+{
+  "id": "39",
+  "subject": "W10-ext-3: container spanning (clears method.t)",
+  "description": "Extend the W10 spanning-lexical rename to containers (%h/@a). method.t's only blocker is `my %methods` spanning a package boundary. Mechanism mostly exists: `_lower_our_decl` already lowers `our %h` via `_fresh_container` as a defvar container; renamed scalar decls lower as defvar boxes at Parser2.pm:1760. Need: (1) container_decl fact alongside scalar_decl in _scan_lex_facts (currently containers are disq'd), (2) parallel rename branch in _rename_spanning_lexicals emitting defvar container + sigil-aware qualified symbol rewrite (%main::methods__file__N, $main::methods__file__N{k}), (3) block-decl lowering recognizing renamed container. Blast radius = shared rename core (all 8 spanning files) → verify parity on ALL of them, esp. sort.t (@list/@output) and scalar.t. Also dents sort/scalar/ref.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

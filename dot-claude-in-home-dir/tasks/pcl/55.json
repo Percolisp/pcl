@@ -1,0 +1,9 @@
+{
+  "id": "55",
+  "subject": "E1-b M-E single: chdir.t BEGIN sub-existence introspection (my.t label DONE s287)",
+  "description": "CLOSED s300b (commit b835e82). chdir.t de-gated via the structural fix: BEGIN/END interleave with sub defs at source position (parallel def_lines/sched_lines + stable merge in section assembly; _src_pos line·1e5+col). Text-pattern introspection gate bypassed under interleave. DEFAULT since s300b after the full testable-first battery (switch-off byte-identical corpus-wide; switch-on 50 purely-positional + chdir pipeline-switch + 0 unexplained; both prove-core gates 4236/4238 green; full sweep off-vs-on: only chdir.t moves, 2+1crash@t22 → 25+0/44 complete). Census 109/2, gen v2-40.\n\nFOLLOW-UP (later cleanup, E5 down-payment): once the flip survives a full session/sweep cycle, delete PCL_SCHED_OLD + the old defs-then-sched assembly branch + the bypassed text-pattern gate in the Scheduled branch (Parser2). Known pre-existing wrinkle (unchanged by #55): prototyped/signatured subs lower via v1 into _captured_decls, which assembles BEFORE the interleaved stream — a BEGIN still sees LATER prototyped subs (no corpus file depends on it).",
+  "activeForm": "Clearing M-E single gates",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

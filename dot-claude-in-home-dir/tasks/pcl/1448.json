@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nProbe scratch/s473t2/probes/p5-magic.pl.\n\nROWS BEHIND IT: perl-tests/magic.t 161 (\"${^LAST_FH} after tell\"), 162 (\"after\nanother tell\"), 163 (\"referencing lexical coercible glob\") = 3 rows.\n\nPROBE (perl 5.40.3 vs ./runpcl):\n    print \"A: \", (defined ${^LAST_FH} ? \"def\" : \"undef\"), \"\\n\";\n    tell(STDOUT); print \"B: \", (${^LAST_FH} == \\*STDOUT ? \"STDOUT\" : \"other\"), \"\\n\";\n    tell(STDIN);  print \"C: \", (${^LAST_FH} == \\*STDIN  ? \"STDIN\"  : \"other\"), \"\\n\";\n  perl: A: undef  B: STDOUT  C: STDIN\n  PCL : A: undef  B: undef   C: undef\n\nSITE: Pl/ExprToCL.pm:322 maps '${^LAST_FH}' => ['p-undef'] -- a deliberate stub\n(\"last filehandle used (Perl internal)\").  magic.t row 164 (\"${^LAST_FH} is undef\nwhen PL_last_in_gv is NULL\") PASSES today for the wrong reason: it is undef\nalways.\n\nCOST NOTE before implementing: perl sets PL_last_in_gv on readline/eof/tell, so\na naive implementation writes a special variable on every read.  Measure before\nshipping (Target A) -- a per-read store in the hot path is exactly the kind of\nchange the speed target rejects; a lazily-computed slot on the io object is the\nshape to look at first.  It is also a WEAK reference in perl (row 164's comment).\n",
+   "id" : 1448,
+   "status" : "open",
+   "subject" : "BUG: `${^LAST_FH}` is hardwired to `p-undef` in Pl/ExprToCL.pm -- perl sets it to a reference to the last handle that was read or told (perl-tests/magic.t 161/162/163)"
+}

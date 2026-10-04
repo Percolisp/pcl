@@ -1,0 +1,9 @@
+{
+  "id": "89",
+  "subject": "#25 s310d: process-credential specials $< $> $( $) — read-error family (op/groups, uni/caller, uni/stash)",
+  "description": "Bare $( / $) unbalance emitted forms → whole-file read errors. Added %SPECIAL_VARS pipe-quoted entries + runtime defvars (getuid/geteuid; gid strings via alien getgroups, byte-identical to perl). Gen v2-63. Verify family files + corpus + gate, guard, commit.",
+  "activeForm": "Adding credential specials",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

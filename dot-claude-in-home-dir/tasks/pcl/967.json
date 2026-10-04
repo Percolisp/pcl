@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-01",
+   "description" : "FILED s463f (Fable review of AU/#960, 2026-09-01).  Pre-existing, identical on 6e6f191 and AU's tree (probe scratchpad probes/au960c.pl, perl 5.40.3):\n    my $u = \"u\"; my $rv = substr($u, 0, 1) = \"V\"; print \"$rv $u\";   perl: V V    PCL: u V\n  The write lands ($u is V), so this is the assignment EXPRESSION's value: perl's `=` yields its LEFT operand (the lvalue, which now reads V); PCL's p-setf place arm for p-substr returns p-substr's 4-arg RESULT, which is the REPLACED part (perl's 4-arg substr does return the old text -- but the `=` spelling does not).  Sibling family: #971 (a COMPOUND assignment through a magic-lvalue window writes nowhere) -- both are the p-setf magic-lvalue arms disagreeing with perl about what the assignment IS; fix them together, one arm each for substr/vec/pos, the value = a re-read of the window (or the RHS, which is what perl's pp_sassign leaves on the stack for a plain scalar).\n\nBAR: `$rv = substr(...) = V`, `(substr(...) = V) =~ s///` (perl substitutes in the window), `vec(...) = N` value, `pos(...) = N` value vs perl; #971's rows; corpus-diff + emission-ab if the emitter moves, full sweep if the runtime arm moves; guard rows in Pl/t/lvalue-ref-01.t inverse-verified.  Region: p-setf magic-lvalue arms -- correctness slot, round 21 pool, with #971.",
+   "id" : 967,
+   "status" : "pending",
+   "subject" : "the VALUE of `substr($u,0,1) = \"V\"` is the OLD text in PCL (\"u\"), the new lvalue in perl (\"V\") -- `my $rv = substr(...) = ...` and chained forms read one write behind"
+}

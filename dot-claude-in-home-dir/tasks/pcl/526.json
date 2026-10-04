@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent H (s443h); PRE-EXISTING (verified at 57c9859).  `require Test::More` in a NON-test program prints `# PCL Test library loaded` on stdout; perl prints nothing.  TAP-shaped so invisible in .t files, but pollutes an ordinary program's stdout and any byte-compare.  Fix shape: the load banner goes to stderr or goes away (check what reads it first).  Filtered in use-require-01.t's helper with the reason stated -- remove the filter when fixed.\n\n=== DONE (s499g) ===\nThe banner line in cl/pcl-test.lisp is deleted.  WHY -e showed it and a fresh file did not: it was CACHE STATE, not -e vs file.  A script-cache MISS compile-files the program with *standard-output* muffled, and the `use Test::More` runs at compile time -- so the TAP layer loaded (banner swallowed) and stayed loaded; a warm HIT loads the layer at RUN time and the banner reached stdout (a file's SECOND run shows it too).  Nothing read the banner: seven Pl/t helpers filtered it and census-bugs-01.t expected it -- all removed in the same commit.  Guard Pl/t/pcl-dash-m-01.t rows 4-5 (`pcl --check -e 'use Test::More tests=>1; ok(1,\"one\")'` IDENTICAL, run twice for the warm path; fail on 7b74e399).",
+   "id" : 526,
+   "status" : "completed",
+   "subject" : "`require Test::More` prints `# PCL Test library loaded` on STDOUT"
+}

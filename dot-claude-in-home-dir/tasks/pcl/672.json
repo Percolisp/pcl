@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s450t (Opus, agent T of round 8), probed while finishing #561.\nPRE-EXISTING.\n\nperlvar: %+ maps a capture NAME to its (last) captured string, %- maps it to\nan ARRAY REF of every capture with that name, in group order.\n\nPROBE (perl 5.40.3 vs PCL at s450t):\n    'X' =~ /(?<X>X)/;\n    print \"plus=[\", $+{X}, \"] minus=[\", (ref($-{X}) || $-{X}), \"]\\n\";\n    print \"elem=[\", (ref($-{X}) eq 'ARRAY' ? $-{X}[0] : 'NOTARRAY'), \"]\\n\";\n  perl: plus=[X] minus=[ARRAY]   elem=[X]\n  PCL:  plus=[X] minus=[X]       elem=[NOTARRAY]\n\nSo %- is currently a SECOND COPY of %+ rather than the array-of-captures\nhash.  The runtime builds both in set-match-vars (cl/pcl-runtime.lisp); the\nfix is per-name accumulation into an adjustable vector wrapped as an array\nref, with the SAME ordering rule as the group numbering.\n\nNOTE the interaction: %{^CAPTURE_ALL} is mapped onto %- by the emitter\n(task #412), so this fixes both spellings at once.\n\nBAR: the probe above, plus a duplicate-name pattern\n`\"ab\" =~ /(?<n>a)(?<n>b)/` (perl needs `use re 'eval'`-free branch reset or\ntwo identical names -- probe the exact legal spelling first), and a row in\nan existing regex guard file.\n",
+   "id" : 672,
+   "status" : "pending",
+   "subject" : "%- values must be ARRAYREFS of every capture for that name; PCL stores the string, so `$-{X}` is \"X\" where perl gives ARRAY(0x..)"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "69",
+  "subject": "E1 M-F: span-mangled lexicals visible to string eval via capture alist (de-gates eval.t/ref.t)",
+  "description": "DONE (s295, commit c83a5d6) — E1 M-F shipped via the ALIAS RULE (normative spec: ir-spec §9.1; s294's registry design replaced — its stale-shadow regression was structural). eval.t de-gated v2-native 126+34/163 (BEATS v1 121+39, strict-subset fail set: fixes t27/28/81/84/97); ref.t 183+19/245 identical fail set. Census 104/7, gen v2-35, v2 gate ALL PASS 115/4064, PCL_V1 gate = known 7 v2-only set, v1 corpus byte-identical. Remaining M-F residue → #56 (state/signatures/lfs) + closure.t (per-iteration binding + own decl gate). Full detail: session-log §295.",
+  "activeForm": "Fixing eval-cell registry shadow-poisoning regression",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

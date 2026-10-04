@@ -1,0 +1,9 @@
+{
+  "id": "99",
+  "subject": "PCL: scalar-ref bless recorded on the wrapper, not the referent (XS sees no class)",
+  "description": "Found by pclxs conformance (tools/pcl-conform, 70-aggregate.t case 25 — the only failure, 215/216). p-bless marks :__class__ on the inner hash for HASH refs (matches perl) but sets p-box-class on the WRAPPER box for scalar refs (cl/pcl-runtime.lisp ~12426, deliberate, commented). Perl blesses the referent — which is why SvSTASH(SvRV(rv)) reads the class and why two refs to one hash are both objects. So XS code asking the referent gets nothing. Hash/array-based objects unaffected; T_PTROBJ works today only because Digest::MD5 reads SvIV(SvRV(...)), not the stash. Fix is a runtime-core change (where a scalar-ref blessing lives + box-set propagation): own session, wide blast radius.",
+  "activeForm": "Moving scalar-ref blessing to the referent",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

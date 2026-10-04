@@ -1,0 +1,10 @@
+{
+  "id": "197",
+  "subject": "POST-R1 item 1: IO/IO::Handle shim with real fd-dup and tee plumbing (_open $fh, \"&=STDOUT\") — 23 of 48 widened-board FAILs, all of Capture-Tiny",
+  "description": "DONE s326 (5ad21fa). lib/IO.pm supplies the XS half of IO::Handle in plain Perl; lib/IO/Handle.pm is core's file with autoflush/printflush rewritten off SelectSaver (workaround, delete per #198). Seven core fixes were needed underneath: symbolic-designator exists/delete, `delete $ref->[i]` arity crash, exit/fork flush of every handle, real select(), per-handle $| with flush-on-set and autoflush-on-write, open() on a glob handle no longer destroying the object (+ close resolving every shape), `use Foo ()` skipping import, and `require Foo if COND` honoring the modifier. Guard: Pl/t/io-shim-01.t (16 rows). NOT closed by this: Capture-Tiny's 23 FAILs move onto two string-eval causes → task #199. Gate PASS 126/4495; sweep 0-new; corpus-diff identical; gen v2-96.",
+  "activeForm": "Building the IO/IO::Handle shim",
+  "owner": "opus5",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

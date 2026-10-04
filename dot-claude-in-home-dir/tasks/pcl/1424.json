@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09), as the measured residue of #1308.\n\n    open(my $fh, \">\", $F) or die;\n    my $g = *$fh;\n    ref(\\$g)      perl: GLOB     PCL: REF   (was SCALAR before #1308)\n\nFor a TYPEGLOB the discriminator is the BOX's is-ref flag (#163's rule, see\n%p-glob-value-box-p): `$g = *foo` is a glob VALUE (ref \"\" ), `$g = \\*foo` is a\nglob REF (ref \"GLOB\").  A FILEHANDLE payload carries no such flag -- `open` box-\nsets the raw stream -- so #1308 had to choose one answer for both spellings and\nchose GLOB, which is right for the COMMON shapes (`ref($fh)`, `my $b = $fh;\nref($b)`, `ref($a[0])` on an element handle) and wrong for this one.\n\nSetting is-ref at %p-install-fh would need the flag to PROPAGATE on copy, which\nfor typeglobs is spelled out across box-set, %p-flatten-list,\n%p-array-store-scalar, p-aref-unbox-elem, p-flatten-args and p-return-value --\na wide change for one exotic shape.  Measure the population before doing it.\n\nRelated: `\"$$fh\"` is `*main::$fh` in perl (the anonymous glob's NAME) and\nGLOB(0x...) in PCL; PCL has no anonymous glob to name.\n",
+   "id" : 1424,
+   "status" : "pending",
+   "subject" : "PCL cannot tell a glob VALUE from a glob REF for a FILEHANDLE: `my $g = *$fh; ref(\\$g)` is REF where perl says GLOB"
+}

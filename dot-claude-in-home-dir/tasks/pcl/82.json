@@ -1,0 +1,9 @@
+{
+  "id": "82",
+  "subject": "E4.0: strengthen difftest-ops.pl — call-shape, pragma-visibility, rename/capture/interp, eval-mode, and two-file module axes; fuzz and fix",
+  "description": "SHIPPED s304 (57013d7): axes 18-22 (call shapes, pragma visibility, rename shapes, eval-mode, two-file module mode); 1060 snippets; one new root cause fixed (_premerge_glob_const_prototypes for *NAME = sub () {...}); steady state 1053/1060 with all 7 residuals known (parked **-float, () = split, task #83 stash-visibility pair). Gate 117/4307 PASS.",
+  "activeForm": "Strengthening the differential fuzzer (E4.0)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

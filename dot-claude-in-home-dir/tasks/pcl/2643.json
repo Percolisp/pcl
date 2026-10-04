@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "FOUND s504c (out of #2633's batch by the brief).  Repro /home/bernt/pcl-agent-scratch/s504/review/p1.pl + p2.pl.  perl: `do-file sees x: undef`; PCL (base b7ec0093 and s504c): `do-file sees x: 5`.  p-do is p-eval of the file text, so the unit is compiled as an eval and its free $x falls through to the global = the program's identity cell (#2642's cell).  A do FILE must compile with NO captures and resolve free names as package globals of the current package.",
+   "id" : "2643",
+   "status" : "pending",
+   "subject" : "A `do FILE` sees the CALLING program`s file lexicals: p1.pl `my $x = 5; sub f { $x } do \\\"./p2.pl\\\"` with p2.pl printing $x -- perl `undef` (a do-file does not see the caller`s lexicals), PCL `5` (the eval of the file text inherits the identity cell through the global fall-through)"
+}

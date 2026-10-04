@@ -1,0 +1,9 @@
+{
+  "id": "272",
+  "subject": "Embedded `my` inside an ANON sub body: veto still scope-blind — global read → type-error crash",
+  "description": "DONE s372 (cbac668): `_enclosing_named_sub` → `_enclosing_sub_body` — the embedded-`my` rename now fires inside an ANON sub body too (the anon-`sub` block recogniser `_state_decl_route` already used). The old predicate had one caller and is deleted, so there is still ONE test.\n\nProbed vs perl: the crash shape (`my $f = sub { ++my $x->{foo} }` after another sub wrote the global) now matches (`1 1`, global 7) where PCL used to die in P-GETHASH-BOX; five inverse guards match too (file-level #199 shared cell; anon nested in a named sub; map BLOCK; BEGIN; no-veto anon).\n\nMeasured: gate SET HEAD-vs-tree over 751 sources (528 suite + 223 board) = 0 changed; corpus-diff identical across 111; gate 132/4747; full sweep COLD GATE clean, 0 new / 0 fixed / 0 LOST, TOTAL 18499 (baseline 18498). Guard row in Pl/t/transpile-test-09.t.",
+  "activeForm": "Filing anon-sub embedded-my residue",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

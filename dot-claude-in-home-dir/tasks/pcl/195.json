@@ -1,0 +1,10 @@
+{
+  "id": "195",
+  "subject": "PRE-R1 step 1: suite TIMEOUT recovery — re-run the 7 TIMEOUT files at --timeout 300, stamp taken-at: into perl-suite-run.tsv",
+  "description": "First task of the next Opus session (fable-answers-s323.md §4/§7). The s323e snapshot regeneration left 7 files TIMEOUT that were DIFF at the same 90s timeout in s321 (re/regexp_noamp.t, re/regexp_notrie.t, re/regexp_qr.t, uni/fold.t, uni/lower.t, uni/title.t, uni/upper.t) — borderline-slow files whose wall time swings with load (#180); a TIMEOUT file contributes no rows so they are currently UNVERIFIED. Re-run them at --timeout 300 (positional t-relative paths to tools/run-perl-suite.pl) and merge into docs/perl-suite-run.tsv. While in there: add a `# taken-at: <commit>` header line so staleness is a one-look answer (git log taken-at..HEAD). The snapshot must NOT be quoted as a release number before this pass. Standing staleness rule: a crash-fixing commit adds a one-line \"suite snapshot stale (crash fix)\" note to its session-log entry; regeneration is required at quote points (review round / release number / R1 call), not per commit.",
+  "activeForm": "Re-running the 7 TIMEOUT suite files at --timeout 300",
+  "owner": "fable-s325",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-17",
+   "description" : "FILED s488 (Fable, 2026-09-17) from the s473v merge-review probes (the #1804 match record).  PRE-EXISTING: identical on main 5eb87b01 and on the s473v tree; #1804 did not touch it.\n\nperlvar: \"If multiple distinct capture groups have the same name, then $+{NAME} will refer to the leftmost defined group in the match.\"  Probe (perl 5.40.3 vs PCL), scratchpad probes/p-dupnames.pl:\n\n  \"ab\" =~ /(?<l>a)(?<l>b)/            perl $+{l}=a   PCL b     (@{$-{l}} = a b on both)\n  \"b\"  =~ /(?<l>a)?(?<l>b)/           perl b         PCL b     (leftmost DEFINED: the first is undef)\n  \"ac\" =~ /(?<l>a)(?<l>b)?(?<l>c)/    perl a         PCL c\n  \"xy\" =~ /(?<l>x)|(?<l>y)/           perl x         PCL x\n  \"y\"  =~ /(?<l>x)|(?<l>y)/           perl y         PCL y\n\nSo `%-` (all groups of the name, in order, undef for non-participants) is right and `%+` takes the wrong end of that list.  FIX SHAPE: wherever the record materialises `%+` (cl/pcl-runtime.lisp, the #1804 symbol-macro materialiser; before #1804 the eager set-match-vars), the value for a name is the FIRST defined entry of the name's group list, not the last write -- one `find-if` over the same list `%-` builds, so the two stay one reading (rule 11).  Also check `$+{l}` inside a `(?{ })` / the `\\g{l}` backreference use the same rule (perl's \\k<l> refers to the leftmost defined group too -- probe it).  Guard: rows in Pl/t/named-capture-01.t (the s473v file), inverse-verified.  Bar: the sweep (cl/ change) + the re/ companion leg (re/pat_advanced.t has the dup-name rows; read which ones are blessed fails with a #-less cause).",
+   "id" : 1848,
+   "status" : "pending",
+   "subject" : "`%+` with DUPLICATE group names answers the LAST defined group; perl answers the LEFTMOST defined one (`\"ab\" =~ /(?<l>a)(?<l>b)/` -> $+{l} is `b`, perl `a`) -- silent wrong; `%-` is already right"
+}

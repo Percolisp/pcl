@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-30",
+   "description" : "FILED s454ad (Opus round 12, agent AD) -- the parse-shape residue of #732.\n\n#732 made the EMISSION route a `use subs`-overridden weak builtin to the user\nsub (gen_funcall_form asks builtin_is_overridden before cl_name).  But the\nPARSER still classifies the name from the builtin table, so a paren-less call\nkeeps the builtin's operand extent:\n\n    package p3;\n    use subs qw(length);\n    sub length { return \"L(\" . join(\"|\", @_) . \")\" }\n    print length(\"a\", \"b\");   # perl L(a|b)   PCL L(a|b)   OK (parens)\n    print length \"a\", \"b\";    # perl L(a|b)   PCL L(a)     WRONG (named unary took 1)\n    print length \"a\" . \"b\";   # perl L(ab)    PCL L(ab)    OK\n\nperl re-parses an overridden name as a plain list-op call with the SUB's\nprototype; PCL's named-unary machinery grabs one operand and the comma splits\nthe statement.  Same family would affect any overridden named unary\n(uc/lc/chr/ord/...) called paren-less with a list.\n\nFIX SHAPE (not designed): the parse-time classifier (is_named_unary /\nknown_no_of_params consumers) should ask the same\nEnvironment::builtin_is_overridden + builtin_is_overridable pair at the\nuse-site position and fall back to the DECLARED-SUB parse (prototype-driven)\nwhen overridden.  Careful: that is the #453 single-predicate territory --\nroute through _proto_parse_spec, do not add a second table.\n\nBAR: the three rows above; an overridden chdir/uc paren-less with a trailing\nlist; a NON-overridden named unary unchanged (corpus-diff IDENTICAL is the\ncheap proof); the #732 guard file Pl/t/use-subs-override-01.t stays green.\n",
+   "id" : 781,
+   "status" : "pending",
+   "subject" : "A use-subs-overridden named unary keeps the BUILTIN's operand extent: `length \"a\", \"b\"` passes ONE arg to the user sub where perl passes both (#732 residue)"
+}

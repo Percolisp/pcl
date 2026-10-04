@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s413 (Fable) reviewing the two escape decoders (_process_dq_escape / _process_tr_escape) for their merge â #387 family 44: tr/// HAD the \\b arm, dq did not, and that was the ONE real difference between the two 19-line tables (probed row by row vs perl 5.40.3, s413: every other escape agrees).\n\nREPRO (perl 5.40.3):\n  my $s = \"a\\bc\"; print join(\",\", map { ord } split //, $s);   # perl 97,8,99 â PCL 97,98,99\n  (my $r = \"aXc\") =~ s/X/\\b/;  # same via _take_dq_escape (the s/// replacement path)\n  qq{p\\bq}, <<\"E\" heredocs, \"a\\b$x\" (interpolated) â every path reaches the same decoder.\n\nFIX (s413): one arm in Pl::ExprToCL::_process_dq_escape (now the shared _decode_escape): return \"\\b\" if $esc eq \"b\".  Guard row: Pl/t/transpile-test-10.t \"#393: \\b is backspace â¦\" exercising all five paths + tr.  Corpus-neutral (no perl-tests file carries a dq \\b â the one grep hit, magic.t:643 \"a$\\b\", is $\\ interpolated followed by b).  The regex path is NOT this decoder (InterpScan/_gen_interp_regex_pattern keep \\b as a word boundary â checked before fixing).\n\nDONE s413 (`s413h`): fixed on main; family 44 merged the decoders on top (`s413i`); guard row transpile-test-10.t; gate green; sweep GATE clean TOTAL 18513.",
+   "id" : 393,
+   "status" : "done",
+   "subject" : "\"\\b\" in double-quoted context (dq, qq, heredoc, backticks, s/// replacement) is BACKSPACE (0x08) in perl â PCL emitted a plain \"b\" (the dq escape decoder had no \\b arm; unknown \\X â X).  Silent wrong.  FIXED s413 in the same session it was found"
+}

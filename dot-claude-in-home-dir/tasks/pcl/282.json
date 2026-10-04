@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [
+      "277",
+      "278",
+      "279",
+      "280"
+   ],
+   "blocks" : [],
+   "description" : "Clone into a clean container/VM with no perlbrew, no Quicklisp preinstalled beyond what the README says to install. Follow ONLY the README + installer (#277). The Pl/t gate must go green (expect the xs rows to plan-skip cleanly without pclxs: 4770-ish rows, 132-133 files). Every failure is a release blocker with a filed cause — this is the tag precondition for v0.1, together with the big bug hunt (ruled s360 as the E5 exit gate; the public release is what it was deferred FOR).\n\nS419 PROGRESS: no container runtime on this machine, so the clean-VM form cannot run here.  A sanitized-fresh-HOME rehearsal ran GREEN end-to-end (empty HOME; quicklisp+cl-ppcre per README; install-pcl built the 44 MB core and self-verified; installed runpcl ran a program from a foreign cwd).  NOT covered: system perl (lacks PPI locally) and the OS image -- exactly what CI (#283) covers, so the container half of this task = the first green CI run after the push.  The v0.1 tag precondition is unchanged (this task green + phase 4).\n\nDONE s440 (2026-08-23, Fable): CI run 32650698636 on 7e6d1eb is GREEN on the stock ubuntu runner -- installer, wrapper, installer test and the full gate. The first run (32648385694) was RED on a non-core Data::Dump import in Pl/ (fixed s440; see DECIDED s440). This is the fresh-machine property.  CONTAINER HALF CLOSED s459f (2026-08-31, #876): install-matrix.yml green on ubuntu:22.04/24.04 + debian:12/13 containers (per-image SBCL pin: 2.5.2 floor on the older two, whose glibc is under the 2.6.0 binary's 2.38 requirement).",
+   "id" : "282",
+   "status" : "completed",
+   "subject" : "v0.1 RELEASE GATE: fresh-machine install test — clean container, README only, gate green"
+}

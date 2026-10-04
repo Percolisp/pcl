@@ -1,0 +1,9 @@
+{
+  "id": "232",
+  "subject": "goto LABEL: a `go` is emitted outside its tagbody when the same label is targeted from inside AND outside a loop",
+  "description": "MEASURED s344 (#231, docs/cpan-board14-partials-s344.md §B1). Costs Text-Balanced 07_exttag (86 rows) + 09_gentag (69 rows) on the CPAN board.\n\nMinimal repro (perl prints F; PCL crashes):\n  sub f { my $n=shift;\n          if($n==0){goto failed}                        # site 1: outside a loop\n          while(1){ if($n==2){goto failed} else {last} } # site 2: inside a loop\n          short: return \"s\";                            # an INTERVENING label\n          failed: return \"F\"; }\n  print f(0), \"\\n\";\n=> Execution of a form compiled with errors. Form: (go :failed)\n   Compile-time error: attempt to GO to nonexistent tag: :failed\n\nALL THREE ingredients are required — probed 12 neighbouring shapes, all fine:\n - drop the loop-internal goto  -> compiles (S1)\n - drop the intervening `short:` label -> compiles (R4/S4)\n - drop the loop entirely -> compiles (S4)\nSo the trigger is: a label targeted from BOTH inside a loop body and outside it,\nwith another label between the loop and the target.\n\nLATENT, which is the dangerous part: SBCL compiles the bad form and only signals\nwhen that branch EXECUTES. `print f(1)` on the same file is silent and correct;\nonly f(0) crashes. Any file with this shape is a time bomb, not a load error.\n\nOwner area: the label/tagbody machinery (#63 dynamic goto, #124 goto into a\nlabeled loop, #126 watchdog forward-goto). Add a Pl/t regression with BOTH the\ncrashing and the neighbouring passing shapes (inverse guard).",
+  "activeForm": "Fixing the two-site goto tagbody bug",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

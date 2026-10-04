@@ -1,0 +1,11 @@
+{
+  "id": "248",
+  "subject": "E4.1 M-work: M3/M6/M2/M1/M5 DONE s353 — REMAINING: M4 → three-population zero → #242 (docs/e41-m-work-handoff-s353.md)",
+  "description": "DONE s354 (5250db2). All six M-families shipped: M3/M6/M2/M1 (s353), M5 (s353c), M4 (s354).\n\nM4 = the spanning rename resolves variables canonically like the checker, at TWO bare-name sites: (1) _hard_decl_count's sigil-conflated mode, so `my %mix` counted as a re-declaration of `$mix` -> refuse -> checker died -> whole-file v1; (2) the %spanning bare-name TEXT pre-filter, so a sibling `my @x` in a later segment renamed `$x` gratuitously. Both now go through ->symbol / _canon_refs_in.\n\nThree-population re-measure (the step after M4) is DONE and is 2/3 green:\n - Pl/t gate CLEAN: 131/4656 PASS, 7 events = 5 DIE + the 2 deliberate transpile-test-09.t inverse guards.\n - Sweep CLEAN: GATE clean, TOTAL 18498 = baseline (+0), 17 events all named, ONE BETTER than the blessed 18 (M1 absorbed the sweep's lone multi-switch).\n - CPAN board NOT clean: one unnamed TODO family -> task #251, which now blocks #242.\n\nSuccessor: #251, then #242 -> #243 -> #244 -> STOP.",
+  "activeForm": "Implementing M5 (block lexical captured by nested named sub)",
+  "status": "completed",
+  "blocks": [
+    "242"
+  ],
+  "blockedBy": []
+}

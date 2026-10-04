@@ -1,0 +1,11 @@
+{
+  "id": "62",
+  "subject": "Perf S1+N1 (Target A tier 1): raw-string append buffer + raw-numeric verdict incl. += arith writes",
+  "description": "Target A items A-1/A-2 (docs/v2-endgame-plan.md §6) — THE first speed block; unblocked (counting-loop prereq shipped s286b). RELEASE GATING (§7, user 2026-07-20): N1 is REQUIRED for R2 (general benches can't beat perl without it); S1 MAY slip past R2 as a documented TODO (already recorded in docs/todo-features.md §Perf) — it stays high-value regardless (O(n²) complexity class). Design: docs/raw-numeric-verdict.md (incl. §Scope-boundary two-regime raw slot + §Checked coercion); measured ceilings + before/after shapes: docs/faster-codegen-suggestions.md §3, §4, §11.1–11.3. (1) S1 raw-string append: my $s string-only-used with .=-shaped writes → adjustable fill-pointer buffer, .= → vector-push-extend (named macro, e.g. p-append!, per Target B) — O(n²)→O(n), bench strcat 2525×→~1×. (2) N1 raw-numeric: add +=/-=/*= to the annotator arith-write set (~13×: intloop+= 3.4×→~1×, intloop= 4.0×, collatz 2.0×); numeric-string freeze (~8.5×, cfor); $_ raw when body doesn't s///-or-chomp it. (3) N2 rider: in-place box write (~1.3×, cuts GC). Boxed fallback everywhere; die-loud checked coercion; scoreboard = bench-exec.pl + full gate/sweep.",
+  "activeForm": "Implementing raw-numeric/raw-string verdicts (task #62)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": [
+    "61"
+  ]
+}

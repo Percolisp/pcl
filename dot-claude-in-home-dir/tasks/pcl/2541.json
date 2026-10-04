@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND s500a (Opus, 2026-09-30) by the #2530 probe table (scratch/s500a/probes/numsign3.pl).  PRE-EXISTING on main 1bae682b (base and tree identical).  Probed vs perl 5.40.3:\n\n    print +(1)[0]-1, \"\\n\";        perl 0      PCL: WHOLE STATEMENT DROPPED -- \"Bug. Fell through. Missing case: [bless( {'id' => 5,'type' => ... }), Number<-1>]\"\n    print +(1)[0]-0.5, \"\\n\";      perl 0.5    PCL: same drop\n    print +(5)[0] - 1, \"\\n\";      perl 4      PCL 4   (with a space after the minus PPI lexes an Operator -- fine)\n\nTHE MECHANISM: PPI hands `)[0]-1` over as List Subscript Number<-1> (§15's shape, ppi-upstream-bugs.md).  Pl::PExpr::_fix_ppi_negative_number_bug splits a negative literal when the PREVIOUS token ends a term -- but by the time it runs on this stream the list slice `(1)[0]` has already been folded into a PExpr NODE (a blessed hash, not a PPI class), and the expression-end test knows only PPI classes (Structure::List/Subscript/Block, Symbol, Word, Number, Quote).  So the split does not happen and the term walker sees NODE NUMBER juxtaposed.\nFIX DIRECTION (not attempted, s500a kept to #2530's scope): a PExpr internal node that yields a value (list_slice and its siblings) ends a term -- the predicate should ask PExpr's own node type, or the split should run before the slice folding.  Probe the breaking cases first (a node that does NOT end a term: a prefix op already reduced?).\n",
+   "id" : 2541,
+   "status" : "pending",
+   "subject" : "DROP (pre-existing): a LIST SLICE followed by an adjacent `-N` -- `print +(1)[0]-1` -- drops the whole statement: PExpr folds the slice into a NODE before _fix_ppi_negative_number_bug runs, and its term-end test knows only PPI classes"
+}

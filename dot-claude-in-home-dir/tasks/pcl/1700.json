@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "=== DONE (s473t5d) ===\nFOUND + FIXED s473t5d (Opus, 2026-09-13) by #1501 round 5 CHECK 1.\n\nt/run/switches.t aborted at\n\n  run/switches.t: Failed to open 'tmpswitches.bak': No such file or directory\n\n35 rows short.  The cause is the harness wrapper: `tools/pclperl-for-tests`\nlisted `-i[ext]` among the switches it \"accepts and IGNORES\" -- it consumed the\nextension and did nothing -- so `runperl(switches => ['-pi.bak'], ...)` edited\nnothing and wrote no backup.\n\nperl's `-i` IS `$^I = \"ext\"` and nothing else, and PCL's `<>` already implements\nin-place editing from that variable BYTE FOR BYTE (probed: two files, `$^I =\n'.bak'`, `while(<>){s/foo/bar/} continue {print}` -- the main files and the\nbackups match perl exactly).  So the switch is ONE prelude line, which is the\nrule-11 answer: reuse the mechanism, do not write a second one.\n\nRESULT: t/run/switches.t 6/99 -> 28/112, shortfall 35 -> 11 (the residue is a\nSECOND abort, #1699, fixed in the same batch, and then the file runs to its end).\nGuard tools/t/harness-switches.t rows 1+2 (`-i.bak` leaves a backup, bare `-i`\ndoes not); both FAIL on a `git archive 2ff53f8d` extraction.\n",
+   "id" : 1700,
+   "status" : "completed",
+   "subject" : "`tools/pclperl-for-tests -i[ext]` consumed the extension and did nothing; perl's -i IS `$^I = \"ext\"`, which PCL's <> already honours byte for byte"
+}

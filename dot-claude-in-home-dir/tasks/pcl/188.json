@@ -1,0 +1,9 @@
+{
+  "id": "188",
+  "subject": "DONE s323: an UNMATCHED capture group was raw nil, so a list assignment shifted every later capture up a slot",
+  "description": "FIXED s323 (cl/pcl-runtime.lisp, two sites).\n\nSYMPTOM: `my ($dir,$file) = $path =~ m{^(.*/)?(.*)}s;` put the FILENAME in $dir and undef in $file whenever the path had no slash.  Silent, and the shape is verbatim what File::Basename::fileparse uses — so `dirname(\"c.txt\")` answered \"c.txt\" instead of \".\".\n\nCAUSE: the list-context match built its captures vector with raw CL `nil` for an unmatched group.  `%p-flatten-list` — which `p-list-=` (the parenthesised-scalar-list target) flattens through — deliberately DROPS raw nil, because raw nil there means \"the empty list\" (an iterator at EOF, an array hole).  So the undef vanished and everything after it shifted.  `p-array-=` (`my @a = ...`) does not flatten that way, which is why the array form was always correct and the bug looked impossible.\n\nFIX: an unmatched group stores `*p-undef*` — perl undef — at BOTH capture-collection sites (the no-/g branch and the /g list-context branch; the second copy again).\n\nGuard: Pl/t/transpile-test-09.t \"an unmatched capture is undef, not an empty list (#189)\", 10 rows incl. the array-target inverse guard and the /g copy.\n\nRELATED, not fixed: the same File::Basename triage found #188 (`$_[0] =~ s///` does not reach a plain `my` lexical), for which lib/File/Basename.pm is now a shim.",
+  "activeForm": "Fixing unmatched-capture undef",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "25",
+  "subject": "R1 RELEASE GATE / E4.0b: re-run perl t/ dirs not in sweep (t/mro, t/class next) + CPAN module suites vs baselines before v1 deletion",
+  "description": "CLOSED s325: R1 CALLED by the user 2026-08-02, tag R1 at dc6ce64 (DECIDED.md §R1; numbers in session-log s325). The gate's two halves both ran and passed: perl t/ suite via run-perl-suite.pl (snapshot current, taken-at stamped, TIMEOUT rows re-verified per #195) and the four-dist CPAN board (zero regressions, baseline advanced one improved row). v1 deletion (E4.1) is now its own post-R1 work item, after the ruled backlog — see #197 for the post-R1 runway.",
+  "activeForm": "Running uncopied perl t/ tests",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

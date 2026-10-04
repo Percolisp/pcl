@@ -1,0 +1,8 @@
+{
+  "id": "40",
+  "subject": "method.t v2 cascade: indirect method syntax SUPER::m{@a}",
+  "description": "De-gating method.t to v2 (via W10-ext-3 container spanning) exposes a cascade of v2 gaps. #1 (Foo->can/isa/DOES on undeclared package) is FIXED (fafd0f9). OPEN: test 122 stop — indirect/block method-call syntax `SUPER::m{@a}` / `SUPER::m{}@a` / `SUPER::m{@a}\"more\"` (method.t lines 536-546), an exotic expression-seam form. Also unmeasured gaps between test 123 and v1's stop at 157. Fixing this cascade until native v2 method.t >= v1 (157) is the precondition to apply docs/w10-ext-3-container-spanning.patch. Blocks task #39.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-02",
+   "description" : "Found s504 by s501t (seam probes, scratch/s501t/probes/seam2.pl case 18).  PRE-EXISTING: same answer on base a0899ba6 and on main b7ec0093; not tie-specific.\n\nReproducer (perl 5.40.3 prints `1+2`; PCL prints `+`):\n    push my @a, 1, 2;\n    package K; sub m2 { my ($s, $x, $y) = @_; \"$x+$y\" }\n    package main;\n    print K::m2('K', @a), \"\\n\";\n\nEmission (main b7ec0093):\n    (p-defcell @a (make-array 0 :adjustable t :fill-pointer 0))\n    ...\n    (p-let ((@a :array (make-array 0 ...))) (p-push @a 1 2))   ; the embedded my's own let, closed at the section end\n    ...\n    (p-print (p-list-ctx (K::pl-m2 \"K\" @a)) ...)               ; reads the EMPTY defcell\nA statement-level `my @a; push @a, 1, 2;` is right (defcell only).  Same with `tie my @a, 'Tie::StdArray'; @a = (1, 2);` (the s501t spelling): the tie lands on the let-bound array, the later section reads the untied empty cell.\nFamily: #2534 (captured embedded my promotion) / #2200; this one has NO capture -- the file lexical's let ends at the package-section boundary while the defcell the later section reads was never written.  Layer: Parser2 file-lexical promotion of an expression-embedded `my` (ir-spec §2b.3).\n",
+   "id" : "2593",
+   "status" : "pending",
+   "subject" : "A FILE-level expression-embedded `my` (`push my @a, 1, 2;`, `tie my @a, ...;`) is invisible after a later `package` section: the read there gets the EMPTY p-defcell, silently\n"
+}

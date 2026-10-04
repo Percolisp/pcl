@@ -1,0 +1,9 @@
+{
+  "id": "54",
+  "subject": "E1-a M-E: foreach over aliasable lvalue element (chop/substr/aassign/sub) + loopctl continue + array list-self-ref",
+  "description": "Plan §2 E1-a in docs/v2-opus48-execution-plan.md. Native foreach must bind the loop var as an ALIAS to a live container slot (for ($h{k}), for ($a[$i]), for (substr(...))) — port v1's p-aref-box/p-gethash-box/p-magic-cell binding into Parser2's foreach lowering. Clears 4 files at once. Same session if time: loopctl.t while/until continue-block (+last/redo from continue), array.t list-form self-ref init my (undef,@bee)=@bee.",
+  "activeForm": "Implementing foreach lvalue-alias lowering",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

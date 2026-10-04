@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s412 (Fable) from a Phase C probe (docs/plan-one-compiler-s411.md; the Include-tail decline was lifted in _lower_embedded_body).  PRE-EXISTING: HEAD before Phase C (v1's parse_block_to_cl_string route) answers the same 7.\n\nREPRO (perl 5.40.3):\n  sub f { 7 }\n  my $a = eval { f(); no warnings; };  # perl 7, PCL 7\n  my @b = eval { f(); use strict; };   # perl (), PCL (7)\n  my @e = do   { f(); no warnings; };  # perl (), PCL (7)\n  my @d = eval { f(); require POSIX; }; # both: require's value (a tail `require` IS a runtime statement)\n\nWHY: perl evaluates `f();` in VOID context (it is not the syntactic tail) â in list context nothing is left on the stack; in scalar context the last SV is.  PCL lowers the block as a progn whose last runtime form is f()'s call (the use/no emits no runtime form), so both contexts see 7.  Perl documents the value of a block ending in a non-expression loosely; matching it exactly means: when a block's syntactic tail is a use/no, evaluate the previous statement in VOID and yield () in list context / that value in scalar.  Rare in real code (a `no warnings` as the LAST statement of an eval/do body).  Low priority; owner = the E5.3 Include-family port (use/no/require, ~378/corpus).",
+   "id" : 392,
+   "status" : "pending",
+   "subject" : "A block whose LAST statement is `use`/`no` (a compile-time-only statement) has NO list-context value in perl (`my @b = eval { f(); no warnings }` is empty; scalar context gives f()'s value 7) â PCL yields the previous statement's value in both contexts (7)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "Found by s501t (s505) while sweeping the siblings of Fable's review finding F1.  Pre-existing on main a33ce274 with NO tie involved.\n\nReproducer (perl 5.40.3 prints `1` then `9`):\n  my %h; $h{r}{n}{z} = 9; sub f { $_[0] } { local $h{r}{n}{z} = 1; print f($h{r}{n}{z}), \"\\n\" } print $h{r}{n}{z}, \"\\n\";\nPCL (main and the s501t tree): `Unhandled simple-type-error` at load, a raw Lisp backtrace (USER: errors are tidy, one line -- and this one is not even perl's error, perl succeeds).\nThe same shape through a tied hash (`local $tied{r}{n}{z}`) dies the same way -- fix the untied path first, then re-probe the tied one (s501t's %p-tielem-container is the container rule for a tied element proxy).\nProbe file: s501t scratch f1b.pl field 18.\n",
+   "id" : "2598",
+   "status" : "pending",
+   "subject" : "CRASH (raw Lisp backtrace): `local` of a NESTED hash element (`local $h{r}{n}{z} = 1`) dies with an unhandled SIMPLE-TYPE-ERROR -- untied, pre-existing on main a33ce274\n"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "258",
+  "subject": "`\\@a[0,1]` does not distribute the ref over the slice — one ref instead of one per element",
+  "description": "Found s361 while writing the inverse guards for the foreach-single-scalar fix (scratchpad fe3.pl, row M3). Pre-existing — reproduces at the session-start commit 197dcd9, so it is NOT from that fix.\n\n  my @a = ('a','b','c');\n  my $n = 0;\n  $n++ for (\\@a[0,1]);      # perl: 2 iterations (a ref PER ELEMENT)\n  print $n;                 # PCL:  1\n\nperl's `\\` distributes over a slice (and over a parenthesised list, `\\(@a)`), yielding one reference per element; PCL builds a single reference to the slice. `\\(@a)` itself is CORRECT in PCL (3 = one ref per element, verified s361), so the distribution machinery exists — it is the SLICE operand that misses it.\n\nLow priority (niche), but it is a silent-wrong: the count and the values are both wrong with no diagnostic. The foreach fix's predicate `Pl::Parser::_foreach_single_scalar_p` deliberately DECLINES `\\`-cast-plus-postfix for exactly this reason, so the two do not interact — fixing this one does not need the predicate changed.</description>\n</invoke>\n",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "MEASURED s492c (Opus, 2026-09-21) while checking #1997's warm-cost gate.\n\n`lib/POSIX.pm` grew from 98 to ~430 source lines (1,748 emitted CL lines), and\nthe first measurement looked alarming:\n\n    ./runpcl 'use POSIX; print 1'   base 0.93 s  ->  tree 2.44 s   (+1.5 s)\n    ./runpcl 'print 1'              base 0.18 s  ->  tree 0.19 s\n\nThe whole +1.5 s is SBCL compiling the shim, and the cause is the RUNNER:\n`runpcl` spawns SBCL with `--eval \"(setf pcl::*pcl-skip-cache* t)\"`, so the\nmodule-fasl cache (#1202/#1841's machinery) is switched off and every shim is\nrecompiled per run.  Through `./pcl`, which is what a user runs:\n\n    ./pcl -e 'use POSIX; print 1'   base 0.047 s -> tree 0.052 s   (+5 ms)\n    ./pcl -e 'print 1'              base 0.040 s -> tree 0.039 s\n    PCL_FASL_DEBUG=1 says \"module POSIX.pm -> FASL HIT (0.006s)\".\n\nSo there is no user-visible regression, and the shipped shim is under\n#1997's 0.1 s gate.  What is worth deciding is whether the DEV runner should\nkeep paying it: every `Pl/t` row that goes through a runner with the cache off\npays the compile of every shim its program loads, and that is most of the\ngate's wall time for module-heavy rows.  A first attempt at making PCL's own\nshim lib/ a compile-cached class (like `:extension`, task #1202's argument --\n\"it is PCL's own tree, not a directory the user edits\") was written and\nREVERTED as unnecessary: shims already reach the fasl cache when the cache is\non at all.  The question is only about the runner's switch.\n",
+   "id" : 2055,
+   "status" : "pending",
+   "subject" : "PERF (dev runners): ./runpcl sets *pcl-skip-cache*, so EVERY lib/ shim is transpiled and SBCL-compiled again on every run -- `use POSIX` is 2.4 s under runpcl and 0.05 s under ./pcl"
+}

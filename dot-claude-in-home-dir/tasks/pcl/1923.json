@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND + FIXED s473t6c (#1501 ROUND 10), probed vs perl 5.40.3.\n\n    my %kv = (a=>1, b=>2, c=>3);  my @arr = (10,20,30);\n                       perl   PCL before   PCL after\n    @kv{'a','b'}         2         2          2      (control, always right)\n    @arr[0,1]           20        20         20      (control)\n    %kv{'a','b'}         2         4          2\n    %arr[0,1]           20         4         20\n    %kv{'a'}             1         2          1\n    %arr[0]             10         2         10\n\nA kv-slice is a LIST like every other slice, and perl's scalar-context rule\nfor a list is its LAST element -- which is what `_slice_in_context_form`\nalready does for `@h{...}` and `@a[...]`.  `gen_kv_hash_slice_form` and\n`gen_kv_array_slice_form` were the one pair of slice emitters that did not\ncall it (their own comment said \"no context wrap\"), so the vector reached the\nscalar assignment and was MEASURED instead of indexed.  Rule 11: both now\nroute through the same helper.\n\nList context is untouched (key/value pairs), and a kv-slice has no lvalue path\n(an assignment to one is a compile-time error in perl).\n\nRESULT: t/op/kvhslice.t 21/18 -> 22/17, t/op/kvaslice.t 23/15 -> 25/13 --\n3 FIXED ROWS, 0 NEW.  corpus-diff: 1 of 111 files differs\n(perl-tests/kvhslice.t, the positive control); lib/ byte-identical, so the\nmodule cache cannot go stale and the generation string stands (the s473t5b\nprecedent).  Guard Pl/t/kvaslice-01.t 16 -> 18 rows, inverse-verified.\n\nRESIDUE: #1937 (delete %h{...}, a kv-slice of a reference, the round-trip\nrows) and #1440 (the KEY half of the array form).\n",
+   "id" : 1923,
+   "status" : "completed",
+   "subject" : "FIXED s473t6c: a kv-slice in SCALAR context is its LAST value, not the COUNT of the flattened pair list"
+}

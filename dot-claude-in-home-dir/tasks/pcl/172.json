@@ -1,0 +1,8 @@
+{
+  "id": "172",
+  "subject": "DONE s320: FIXTURE status + docs/perl-suite-fixture.tsv registry (per-row, all-or-nothing)",
+  "description": "SHIPPED s320 (S1 item 1). tools/run-perl-suite.pl gained a FIXTURE status fed by docs/perl-suite-fixture.tsv (file<TAB>rows<TAB>cause). Matching is per TEST NUMBER, read back from the per-test faillog, and ALL-OR-NOTHING: one unregistered failing row keeps the file DIFF and names the intruders; a registered file that fully passes is STALE and fails the run. FIXTURE does not count as UNEXPLAINED. Registered: op/chdir.t rows 25,31 (shadow t/ symlinks op/, getcwd(3) returns the physical path). #151 and #167 were FIXED, not registered — they are in the file's RESOLVED comment list as the worked examples of bar rule 3 (if the fix is in PCL it is not an artifact). Both inverse guards probed end to end: registering only row 25 left op/chdir.t DIFF naming row 31; registering passing op/negate.t flagged STALE; exit 1 in both cases.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

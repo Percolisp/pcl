@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09T19:25:00Z",
+   "description" : "FILED s480 (Fable, 2026-09-09) from the s473f merge-review probes; PRE-EXISTING (identical on main 45fbef09 and on the s473f tree).\n\nPROBE (perl 5.40.3 vs ./runpcl):\n    my %h = (q => \"abc\"); my $x = <{$h{q}}>; print defined $x ? \"[$x]\\n\" : \"undef\\n\";\n    perl:  [abc]          (perlop: <â¦> that is not a simple scalar/bareword is glob(); `{}` interpolates to \"abc\", glob(\"abc\") returns \"abc\")\n    PCL:   Unhandled sb-int:simple-program-error ... invalid number of arguments: 3\n           0: (P-. \"{\" \"abc\" \"}\")\n\nThe lowering treats the angle brackets' content as a string to interpolate and emits a p-. with THREE pieces (`{`, the expression, `}`) -- p-. is binary.  Either route the interpolation through p-string-concat (n-ary) or, better, recognise that `<{â¦}>` is the glob operator over the interpolated text and lower to (p-glob (p-string-concat â¦)).  Rare spelling (found by a probe that meant `readline()`), so LOW priority; but a compiler crash on valid perl is a rule-12 class, not a not-supported class.  Guard row beside the glob rows in Pl/t/punct-array-glob-01.t or glob-01.t.",
+   "id" : 1596,
+   "status" : "pending",
+   "subject" : "COMPILER CRASH on `<{EXPR}>` (the glob operator on a block, valid perl): PExpr lowers it as `(p-. \"{\" EXPR \"}\")` -- a 3-argument string concat -- and SBCL dies `invalid number of arguments: 3` at run time"
+}

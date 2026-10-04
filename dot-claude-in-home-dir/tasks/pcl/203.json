@@ -1,0 +1,9 @@
+{
+  "id": "203",
+  "subject": "s329 (Fable): review s328 commit 599ab90 + rule on the s328 asks",
+  "description": "Probe the seams of the #199 batch (goto tail-call/label, phase-block paren fix, require_ok/use_ok real loading, Test::Builder singleton, embedded-my veto exemption); then write docs/fable-answers-s328.md ruling §1 DIE-vs-ANNOUNCE (gates #152), §2 #201 File::Temp layer, §3 #202-vs-#152 order, §4 sweep TOTAL-passing gate; update DECIDED.md + session-log; commit. #200 runpl rename stays parked (user).",
+  "activeForm": "Reviewing s328 and ruling on its asks",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

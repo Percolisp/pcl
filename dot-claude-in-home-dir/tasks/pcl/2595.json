@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-02",
+   "description" : "Found s504 by s501t (op/gmagic.t, left to s501t by Fable).  PRE-EXISTING (main b7ec0093 dies earlier: `tie $$s` with an undef $s was left untied; s501t fixed that half in p-cast-$-box -- gmagic 60/1 -> 61/3, the file still aborts at the same form).\n\nReproducer (perl prints `A 73 3 2 / B Tie::Monitor / C 73 3 2`):\n    package Tie::Monitor;\n    sub TIESCALAR { my($class, $value) = @_; bless [$value, 0, 0] }\n    sub FETCH { ++$_[0][1]; $_[0][0] }\n    sub STORE { ++$_[0][2]; $_[0][0] = $_[1] }\n    sub init { my ($s) = @_; my @r = @$s[1,2]; @$s[1,2] = (0,0); \"@r\" }\n    package main;\n    my $s; tie $$s, \"Tie::Monitor\"; $$s = undef; $$s->[0] = 73;\n    print \"A \", $$s->[0], \" \", (tied $$s)->init, \"\\n\";\n    my @a; tie $a[0], \"Tie::Monitor\"; print \"B \", ref(tied $a[0]), \"\\n\";\n    $a[0] = undef; $a[0][0] = 73; print \"C $a[0][0] \", (tied $a[0])->init, \"\\n\";\nPCL (s501t tree): `A  3 3` (the vivified array never reaches the tied scalar: the element write lands in a temporary; FETCH/STORE counts 3/3 vs 3/2), `B Tie::Monitor`, then `Can't call method \"init\" on an undefined value` -- `$a[0] = undef` (or the autoviv) REPLACES the tied element's box, so `tied $a[0]` is undef.\nFamily: the scalar-tie proxy (#1950, #1813); perl's rule: an rvalue-deref autoviv of a magical scalar FETCHes, builds the container, STOREs it, FETCHes it back (the same order s501t built for a tied AGGREGATE's element, %p-viv-result).  t/op/gmagic.t rows 90-121 + the five aborted forms are behind it.\n",
+   "id" : "2595",
+   "status" : "pending",
+   "subject" : "Autovivification THROUGH a tied scalar: `$$s->[0] = 73` (FETCH undef -> the new ref must be STOREd back) and `$a[0][0] = 73` on a tied element lose the tie / the STORE -- t/op/gmagic.t aborts at line ~97\n"
+}

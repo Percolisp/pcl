@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499k (Opus, 2026-09-27) probing #2443.  PRE-EXISTING (identical on main 937e7b65).\n\nReproducer (perl 5.40.3 vs PCL):\n    my $p = q(^\\Qa.b\\E$);\n    print \"a.b\" =~ /$p/ ? 1 : 0, \"|\", \"Qa.bE\" =~ /$p/ ? 1 : 0, \"\\n\";   # perl 0|1   PCL 1|0\n\nCAUSE: `\\Q…\\E` is a DOUBLE-QUOTED-string operator, applied when a pattern LITERAL is interpolated (toke.c); in pattern TEXT that reaches the regex compiler at run time (a variable holding a backslash-Q), `\\Q` is an unrecognised escape, the letter Q.  perl-regex-to-ppcre applies quotemeta to `\\Q…\\E` in EVERY pattern it translates, runtime ones included.  Silent wrong, rare (a pattern read from data or built in single quotes).\n\nFIX SHAPE (not tried): the compiler already knows which \\Q belongs to the literal; the runtime pass should only see \\Q that came from a literal — e.g. the literal path applies it at transpile time (as the dq decoder does, ir-spec §3.2g) and the runtime pass is deleted, or the runtime pass is told the pattern is interpolated/literal.  Probe `qr/\\Q$x\\E/` (must still quote $x's value), `m/\\Qa.b/`, a pattern from a variable, split and s///.\n",
+   "id" : "2501",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (pre-existing, rare): \\Q...\\E in RUNTIME pattern text is applied as quotemeta; perl reads it as the letter Q (it is a dq-string operator, not a regex one)"
+}

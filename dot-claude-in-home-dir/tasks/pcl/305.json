@@ -1,0 +1,9 @@
+{
+  "id": "305",
+  "subject": "Multi-cast deref before -> subscript: $$$rrr->{k} silently prints nothing (single-cast limit in BOTH Case 2 and Case 3)",
+  "description": "Found by s389e's probe p15 (pre-existing; NOT introduced by the #211 fix): `my $rrr = \\\\$r; print $$$rrr->{k};` — perl prints the value (9), PCL prints NOTHING (silent). Perl's rule: ALL leading `$` casts bind to the variable before the arrow — `$$$rrr->{k}` == `${${$rrr}}->{k}` (deref twice, THEN arrow-deref).\n\nBoth cast-consuming sites handle exactly ONE leading cast:\n- Case 2 (`$$r->()`, PExpr.pm ~975): checks only `$e->[$i-2]`.\n- Case 3 X[] branch (the s389e #211 fix, ~1200 region): same single-cast condition, deliberately kept at Case-2 parity.\n\nFix shape: generalize BOTH sites to consume a run of consecutive `$` casts backward (base toks = the whole cast run + the Symbol/Block), and generalize the matching cast-removal splices. Shared helper preferred (rule 11) — the two sites answer the same question. Rows in transpile-test-10.t FIRST (triple + quadruple cast, arrow subscript AND arrow call), inverse guards for the no-arrow spellings (`$$$r{k}` stays two derefs + element). Probe file: scratchpad probes/p15.pl (s389 session).\n\nAlso check whether the silent-empty is a PARSE ERROR comment statement-drop (the #138 family) — if so, that path should die/announce regardless of this fix.",
+  "activeForm": "Fixing multi-cast deref before -&gt; (#305)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09).  PRE-EXISTING (identical on 0ece3088).\n\n    open(my $a, \"<\", \"/etc/hostname\") or die;\n    my $d1; open($d1, \"<&\", $a);           # WORKS\n    my $ok = open(my $d2, \"<&\", $a);       # dup fails, $d2 is not a handle\n    my $ok3 = open(my $d3, \"<&\", fileno($a));  # DIES\n\nEmission (the whole story):\n\n    (p-or (p-open $a__excl__0 \"<\" \"/etc/hostname\") (p-die ...))\n    (p-open $d1 \"<&\" $a__excl__0)              <-- renamed, right\n    (p-my-= $ok (p-open $d2 \"<&\" $a))          <-- NOT renamed\n    (p-my-= $ok3 (p-open $d3 \"<&\" (p-fileno $a)))\n\nThe file lexical `$a` was renamed to `$a__excl__0`; the third argument of a dup\nopen inside a statement that also declares `my $d2` keeps the RAW `$a`, which\nis the package variable `$main::a` -- undef.  `\"<&\"` then fails quietly and\n`\"<&=\"` DIES (\"Can't use an undefined value as filehandle reference\", the #513\narm).\n\nIt is a name-resolution bug, not a handle bug: the `_dup_source_handle`\noverride in Pl/ExprToCL.pm (~line 2631) builds the argument from the raw node,\nand the statement shape with an inline `my` in slot 1 evidently takes a lowering\nwhere the rename pass does not reach that argument.  Probe\nscratch/s473f/p3b-dup.pl; the guard Pl/t/handle-place-01.t deliberately uses\nthe PRE-DECLARED spelling and says so.\n",
+   "id" : 1420,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: the inline-`my` spelling of a dup open loses its SOURCE -- `open(my $d, \"<&\", $a)` reads an unrenamed `$a`"
+}

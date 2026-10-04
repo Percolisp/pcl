@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent B's #464 report (pre-existing). The multi-var local LIST lowering binds element targets as locals but the assignment skips them. Bar: the repro + slice + array element + nested element `$h{a}{b}` + the plain `local $h{a} = 6` (right already?) vs perl, restore after the block; a row in Pl/t/stmt-modifier-01.t or the local topical file.",
+   "id" : 509,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an ELEMENT or SLICE target in a `local` LIST is localized/restored but never ASSIGNED -- `our %h; $h{a}=1; our $p; { local($p,$h{a}) = (5,6); print \"$p,$h{a}\" }` perl 5,6, PCL 5,1; same with `@h{'a'}`; with and without a modifier"
+}

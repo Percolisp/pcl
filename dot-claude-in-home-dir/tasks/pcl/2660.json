@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FOUND s506f (Opus, 2026-10-04) by the -n line-number probe.  perl appends `, <FH> line N.` to a die/warn\nlocation when a filehandle has been read (`$.` is live); PCL never does.\n\nREPRODUCER (perl 5.40.3 vs PCL 618db500 and s506f):\n  printf 'a\\n' > one.txt\n  perl -e 'my $l = <STDIN>; warn \"w\"' < one.txt   -> w at -e line 1, <STDIN> line 1.\n  pcl  -e 'my $l = <STDIN>; warn \"w\"' < one.txt   -> w at -e line 1.\n  printf 'a\\nb\\n' | perl -ne 'die \"x\" if $. == 2' -> x at -e line 1, <> line 2.\n  (pcl: \"x at -e line 1.\" -- plus the \"While evaluating the form\" wrapper, #2492)\n\nperl's rule (Perl_mess_sv): when PL_last_in_gv is set and its IoLINES is non-zero, append\n`, <NAME> line N` (`<>` for ARGV reading STDIN/files, `chunk` instead of `line` when $/ is not \"\\n\").\nPre-existing, not switch handling: every program that reads a file and then dies shows it.  STDERR\nonly (the everyday battery compares STDOUT + status), but fresh_perl_is rows with 2>&1 compare it.\n",
+   "id" : "2660",
+   "status" : "pending",
+   "subject" : "die/warn locations lack perl's `, <FH> line N.` suffix after a filehandle read (`x at -e line 1, <> line 2.`)"
+}

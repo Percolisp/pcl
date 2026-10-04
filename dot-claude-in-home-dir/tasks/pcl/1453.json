@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nProbe scratch/s473t2/probes/p10-glob-io.pl.\n\nROWS BEHIND IT: perl-tests/ref.t 92 (blessed number; 95 in the current run --\n\"IO refs are blessed into IO::File\") and perl-tests/postfixderef.t 69 (\"IO slot\nof the temporary glob is set correctly\") = 2 rows.\n\nPROBE (perl 5.40.3 vs ./runpcl):\n    my $ref = *STDOUT{IO};\n    print \"A: refref=[\", ref($ref), \"] str=[$ref]\";\n    print \"B: slot=[\", (eval '$ref->*{IO}') // 'UNDEF', \"]\";\n    open my $fh, '<', '/etc/hostname'; my $io = *$fh{IO};\n    print \"C: blessed=[\", (ref($io)||'-'), \"]\";\n  perl: A: refref=[IO::File] str=[IO::File=IO(0x...)]  B: slot=[IO::File=IO(0x...)]  C: blessed=[IO::File]\n  PCL : A: refref=[]         str=[GLOB(0x1)]           B: slot=[UNDEF]              C: blessed=[-]\n\nSo `*FH{IO}` answers the glob itself.  Two consequences the rows read: `ref` is\nnot 'IO::File', and a round trip back through `->*{IO}` (or `*{$ref}{IO}`) finds\nno IO slot at all, because the value is not an IO thing.  ref.t 93 (the\n`IO::File=IO(0x...)` stringification) is registered non-support today; this task\nis the ref()/slot half, which is a value, not a message.\n",
+   "id" : 1453,
+   "status" : "open",
+   "subject" : "BUG: `*FH{IO}` yields the GLOB, not an IO handle object -- `ref *STDOUT{IO}` is '' where perl says IO::File, and `$ref->*{IO}` is undef (perl-tests/ref.t 92/95 + postfixderef.t 69)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494g (Opus, 2026-09-25).  A signal key of %SIG is a magic box (the %! pattern); `$SIG{X} = ...`, `local $SIG{X}`, `delete $SIG{X}` and slices all keep it (s494g).  A WHOLESALE hash assignment clears the table and builds plain boxes, so `%SIG = (INT => sub {...})` stores the handler where nothing installs it.  perl.t: op/magic.t's `local %SIG = (%SIG, ALRM => sub {})` works only because p-alarm re-derives ALRM's disposition from the current value.  FIX SHAPE: p-hash-= (and the hash `local`) on the %SIG table re-create %p-sig-cell-box slots for the signal names and store through them -- the %ENV-marker precedent for a special hash.  perl then also resets every signal NOT named to its default.",
+   "id" : "2264",
+   "status" : "pending",
+   "subject" : "EDGE (found by #2107): `%SIG = (...)` and `local %SIG` replace the magic signal slots with PLAIN ones -- a handler stored through them is not installed (ALRM excepted: `alarm` installs from whatever $SIG{ALRM} holds)"
+}

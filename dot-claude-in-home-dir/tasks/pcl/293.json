@@ -1,0 +1,9 @@
+{
+  "id": "293",
+  "subject": "${^TAINT} is undef, not 0 — pre-existing value divergence (found by #237's probes)",
+  "description": "PROBED s382f (perl 5.40.3 vs PCL, plain code AND dq string — NOT introduced by #237's regex-interpolation wiring, only newly visible in patterns because `${^TAINT}` now interpolates there as perl does):\n\n  my $t = ${^TAINT};  print \"[\", (defined $t ? $t : \"UNDEF\"), \"]\\n\";\n  print \"dq=[${^TAINT}]\\n\";\n    perl: [0]      dq=[0]\n    PCL:  [UNDEF]  dq=[]\n\nCause: cl/pcl-runtime.lisp:835 `(defvar |${^TAINT}| nil \"Taint mode is not enabled\")` — a raw nil, and not a p-box like the other magic globals.\n\nperl's contract: ${^TAINT} is 0 when taint checks are off, 1 when on, -1 with -t (warnings only). It is READ-ONLY. PCL never taints, so the constant is 0.\n\nFIX (one line + a guard row): make it a p-box holding 0. Check the sibling magic globals for the boxing convention first (some magic scalars are raw values by design — verify which, since a box changes what `\\${^TAINT}` and symbolic reads see). Guard row: a dq-string read (`\"${^TAINT}\"` eq \"0\") beside the existing magic-vars-01.t rows.\n\nNot folded into the #237 commit: different mechanism (a runtime constant's value, not interpolation) — s366 filler rule.",
+  "activeForm": "Fixing ${^TAINT} value",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

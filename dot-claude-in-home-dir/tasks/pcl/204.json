@@ -1,0 +1,9 @@
+{
+  "id": "204",
+  "subject": "sweep-diff LOST bucket: baseline-passing rows the run did not produce (gate: TOTAL must not fall)",
+  "description": "RULED s329 (fable-answers-s328.md §4): the sweep's TOTAL-passing line is a machine-checked gate — it must not fall vs baseline, any fall explained per file. tools/sweep-diff.pl grows a fourth bucket LOST = rows recorded as passing in the baseline that the current run did not produce (per-file pass counts from .faillog totals); non-empty LOST = run NOT clean, same severity as \"new\". Live instance: s328's rule-12 die experiment evaporated 88 state.t rows while sweep-diff said 0 new / 0 fixed. Must land BEFORE #152 (its measurement depends on it). Same asymmetry #185 closes for XDIFF, one level down.",
+  "activeForm": "Implementing the sweep-diff LOST bucket",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

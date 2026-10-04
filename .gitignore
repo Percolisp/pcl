@@ -20,3 +20,9 @@ scratch/*/out/
 # The CORPUS is everyday/ and is tracked; this is where a run puts what it
 # produced (.out/.err/.rc) and the fresh cwd each program gets.
 /.everyday/
+
+# Claude Code's lock file inside the task store, which lives in the repo
+# (dot-claude-in-home-dir/README.md).  The tasks and notes are tracked; the
+# lock is machine state.
+/dot-claude-in-home-dir/tasks/pcl/.lock
+/dot-claude-in-home-dir/tasks/pcl/.s470br-note

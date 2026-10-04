@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/while.t's rows at lines 112 and 121 are\n    while (\"abc\" =~ /(.)/g) { ... }\n    is($` . $& . $', \"abc\");\ni.e. after the loop has ENDED (the last match attempt FAILED), perl's\npre-match / match / post-match variables still describe the LAST SUCCESSFUL\nmatch.  PCL clears or overwrites them with the failed attempt, so the\nconcatenation is not \"abc\".\n\nThis is the same rule s473v wrote down for the derived match variables (#1804,\nir-spec 8): a FAILED match does not change what `%+`, `@-` and friends report.\n`$\\``, `$&` and `$'` must join that rule -- check whether the per-match RECORD\nis updated before the match is known to have succeeded.\n\nThe file's other row is NS:Error compatibility for invalid Perl input\n(`do{}until CONST`).\n",
+   "id" : 1932,
+   "status" : "pending",
+   "subject" : "$` / $& / $' after a `while (/.../g)` loop ends: perl leaves the LAST SUCCESSFUL match, PCL the failed attempt (op/while.t, 4 rows)"
+}

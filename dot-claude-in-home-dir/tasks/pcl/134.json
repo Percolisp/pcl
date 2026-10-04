@@ -1,0 +1,9 @@
+{
+  "id": "134",
+  "subject": "state in a signature default re-initializes per call (op/signatures.t t126/t127)",
+  "description": "`sub f ($c = (state $s = $z++)) {}` — the default expr isn't scanned by the v2 state rename (statement-level only, Parser2 _rename_state_vars), so it lowers to a plain (p-scalar-= $s ...) against a forward-scan defvar'd global: re-inits every defaulted call, and the guarded-once cell/flag shape is missing. Body-level state in the same subs is correct. 5 suite rows (t126 276/277/280, t127 289/296). Fix direction: extend the state scan to signature default_exprs (named path), reusing the same cell+flag lowering; scope also covers `sub f ($a = state $x = 5, $b = $x)` cross-default visibility.",
+  "activeForm": "Fixing state-in-signature-default re-initialization",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

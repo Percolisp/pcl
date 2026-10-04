@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent C's #468 report (pre-existing; identical before and after #468). The string-to-code resolution for `&$name(...)` / `$name->(...)` with an unqualified string must qualify into the CURRENT package (the runtime *package* at the call, or a compile-time argument) -- perl: \"If the string is unqualified, it is looked up in the current package\". Bar: the repro + the `$s->(3)` spelling + a qualified string + `\"main::x\"` from inside NA + `defined &$s` + `exists &{\"...\"}` vs perl; AUTOLOAD in the current package reached (the #468 path); a Pl/t guard row.\n\nDONE s442d (agent D; merged by Fable s440 as 5d72ddd) in %p-resolve-sub-symbol: an unqualified name resolves in *pcl-current-package* (the Perl-level current package), never (package-name *package*) (the CL reader's, = MAIN after the last in-package). No emitter argument needed. The same fix removed a THIRD copy of the resolution in p-get-coderef and the duplicated split in p-funcall-ref's die message, routed a body-less symbolic call to %p-call-of-undefined-sub (perl reaches AUTOLOAD that way -- probed) and bound *pcl-current-package* in p-eval-thunk's region. Also FIXED, both pre-existing and loud: `sort $string_cmp` inside a package CRASHED the file, and a `package X;` string eval's symbolic call died. Guard decl-ordering-02.t 26 -> 28 (one all-fail-on-base row, one inverse). ir-spec sec. 7.1 + 5.1. RESIDUE filed: #515 (an anon sub does not rebind *pcl-current-package*), #517 (`\\&$s` on a body-less name is a SCALAR ref, not a late-bound CODE ref).",
+   "id" : 503,
+   "status" : "completed",
+   "subject" : "DONE s442d: A SYMBOLIC sub-ref call resolves in main, not the current package: `package NA; sub p { my $s = \"nope_sym\"; &$s(3) }` -> PCL \"Undefined subroutine &main::nope_sym\", perl `&NA::nope_sym`"
+}

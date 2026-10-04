@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FOUND s438i (Opus 5), exposed by #450 the same way as #489 -- the pattern has\nno wildcard, so before that fix it answered empty and the text was never seen.\n\n  print glob(q(./\"TEST\")), \"\\n\";\n  # perl: ./TEST          PCL: ./\"TEST\"\n\nperl's glob goes through File::Glob::csh_glob, which follows csh quoting rules:\na double- or single-quoted RUN inside the pattern is unquoted (and its contents\nprotected from splitting and from metacharacter interpretation).  t/op/glob.t\nline 131 has the comment in so many words -- \"Should we strip quotes in\nPerl_vms_start_glob the way csh_glob() does?\" -- so the stripping is csh_glob's\ndocumented behaviour, not an accident.\n\nRELATED, and the reason this is its own task: #450 gave PCL perl's WORD model\n(a glob pattern is a whitespace-separated list), and csh quoting is the other\nhalf of that model -- `glob('\"a b\"')` is ONE word in perl, not two.  Probe that\nbefore implementing: the quote rules and the splitting rules have to land\ntogether or the split will break quoted spaces.\n\nFIX SHAPE: a csh-quoting pass in `%p-glob--split-words` (it already owns the\nword model): walk the pattern, track single/double quote state, split only on\nUNQUOTED whitespace, and drop the quote characters from the emitted word.\nPerl's own edges to probe first: an UNBALANCED quote, a backslash-escaped\nquote, and a quote inside a character class.\n\nBAR: the probe above plus `glob('\"a b\"')`, `glob(\"'a b'\")` and the unbalanced\ncase; a row in Pl/t/punct-array-glob-01.t beside #450's; `cl/` change, so the\nfull sweep plus the io/ and op/ companion dirs.",
+   "id" : 490,
+   "status" : "pending",
+   "subject" : "glob does not strip QUOTES the way csh_glob does: `glob(q(./\"TEST\"))` keeps the double quotes where perl returns ./TEST"
+}

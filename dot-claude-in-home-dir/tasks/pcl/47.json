@@ -1,0 +1,9 @@
+{
+  "id": "47",
+  "subject": "E1.5: %pre pre-declare gap — nested-declared packages missing p-defpackage",
+  "description": "v2's %pre only unions section pkgs + _referenced_pkgs + get_undeclared_packages; a package DECLARED by a nested `package` statement (e.g. inside BEGIN via v1 fallback — Moo M::G::Accessor idiom) gets qualified symbols emitted but no p-defpackage → read error at load (case-begin repro). Fix: PPI-scan doc for Statement::Package namespaces, union into %pre.",
+  "activeForm": "Fixing pre-declare gap for nested packages",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

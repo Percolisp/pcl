@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 2 on t/op/eval.t:185).\n\nperl: the lexical search an `eval STRING` performs stops at the boundary of\nthe sub it is written in.  A free name that is not a lexical of THAT sub is\nthe package variable, never the caller's lexical.\n\nREPRODUCER (perl 5.40.3 vs PCL):\n\n    $main::r = \"good\";\n    sub terminal { eval '$r . q{!}' }\n    print do { my $r = \"bad\"; eval 'terminal($r)' }, \"\\n\";\n\n    perl: good!      ($r inside `terminal` is $main::r)\n    PCL:  !          ($r is undef -- neither the caller's lexical nor the global)\n\nSo PCL gets the SCOPING right (it does not leak the caller's `my $r`) and the\nFALLBACK wrong: the free name resolves to nothing instead of to the package\nvariable.  The run-time free-name resolution in `p-eval-thunk` is the place\nthat already answers \"unqualified -> current package\" (the #240 step-2 work),\nso the miss is that the capture alist's absence is not falling through to it\non this path.\n\nROWS: baselines/perl-suite-fails.tsv op/eval.t 40 `lexical search terminates\ncorrectly at subroutine boundary`.\n",
+   "id" : 1957,
+   "status" : "pending",
+   "subject" : "a STRING EVAL inside a sub whose free name matches no lexical does not fall back to the PACKAGE variable -- perl's lexical search stops at the sub boundary"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "108",
+  "subject": "pclxs D9 divergence: \\$_ identity — a bound global is a copy, not an alias",
+  "description": "Later in the week. Under perl, `\\$_` inside a block IS the caller's SV; under pclxs the binding is published/read-back, so identity is lost — a block that compares refaddr, or stashes \\$_ and writes through it later, diverges. Asserted against perl in t/89-gvsv.t (the `identity=captured` case) so it cannot change quietly. Copying cannot fix it: it needs a host that can genuinely alias a variable to a value it is handed, at which point D9 becomes a capability group like `io` with the copy path as fallback. Open question to answer first: does anything in a real closure actually rely on it? Nothing measured so far does.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

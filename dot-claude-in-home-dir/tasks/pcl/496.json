@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s439 (Fable) from s438 ask 10.  Five changes in a row (#453, #365, #454,\n#455, #435) were emission-IDENTICAL over all four populations (corpus-diff 111,\nlib 22, cpan 402, perl t/ 604) and were guarded only by `both_agree` rows plus\nan inverse run on a worktree -- the s371 rule working as intended, and also\nfive real bugs living in shapes no population contains.\n\nRULED: a small corpus -- `Pl/t/shapes/*.pl` (or `docs/shapes/`), ONE file per\nfamily (operand grammar, sub heads, bareword handles, interpolation,\nglob/readline, punctuation arrays) -- that `tools/corpus-diff.pl` and\n`tools/emission-ab.pl --list` accept as a POPULATION, so that a change which\nis identical over the four real populations is still A/B'd over the shapes\nthat exist only to exercise the grammar.  It does NOT replace the rows (a row\nasserts perl's answer; an A/B asserts only \"unchanged\") and it must not grow\ninto a second test suite.  ADMISSION RULE: a shape that moved a fix in some\nsession and occurs in no population -- the s438 guard files\n(user-unary-01.t, imported-term-01.t, sig-param-shadow-01.t,\npunct-array-glob-01.t, utf8-source-01.t) are the seed; lift their perl\nsnippets out as files, do not duplicate the rows.\n\nBar: the tools accept the population (a `--shapes` flag or the list file);\n`tools/corpus-diff.pl` prints it as its own line (never mixed into the\n111-file IDENTICAL verdict); one session, Opus; no emission change.\n",
+   "id" : 496,
+   "status" : "pending",
+   "subject" : "A SHAPES corpus for the emission A/B: deliberately-awkward files that exist only to exercise grammar no real population contains (ask 10 of s438, ruled s439 YES)"
+}

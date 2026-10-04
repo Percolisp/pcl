@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t5f (#1501 round 7, 2026-09-13).  PRE-EXISTING.\n\n`UNIVERSAL::DOES` has its OWN guard in perl, different from\n`UNIVERSAL::isa`'s: XS_UNIVERSAL_DOES croaks on an unblessed invocant where\nisa quietly answers '':\n\n    perl -e 'eval { UNIVERSAL::DOES([], \"foo\") }; print $@'\n    Can't call method \"DOES\" on unblessed reference at -e line 1.\n\n    perl -e 'no warnings; printf \"[%s]\\n\", UNIVERSAL::isa([], \"foo\")'\n    []\n\nPCL's `UNIVERSAL::pl-DOES` is `(pl-isa obj class)` -- one line, no guard -- so\nthe call RUNS and answers ''.\n\nTHIS IS A LIVE BASELINE ROW: t/uni/universal.t test 85, \"DOES call error\nmessage says DOES, not isa\", `like($@, qr/Can't call method \"DOES\" on\nunblessed reference/)`.  It is the ONE row of that file this round does not\nattribute to #1736/#1737, and its cause is this.  (The METHOD spelling\n`$unblessed_ref->DOES(...)` already dies correctly -- probed -- so only the\nFUNCTION spelling is missing the check.)\n\nFIX: in cl/pcl-runtime.lisp's UNIVERSAL package, `pl-DOES` checks that the\ninvocant is a BLESSED reference (p-get-class / the blessed predicate the\nmethod dispatch uses) and otherwise dies perl-shaped, naming DOES.  Note the\nmethod arms (`(string-equal method-name \"DOES\") (apply #'p-isa ...)`) must be\nleft alone: they are reached only after the dispatch has already resolved a\nclass, so they cannot see this case and must not grow a second copy of the\ncheck (rule 11).\n",
+   "id" : 1740,
+   "status" : "pending",
+   "subject" : "UNIVERSAL::DOES on an unblessed ref dies in perl and RUNS in PCL -- pl-DOES has no guard of its own; t/uni/universal.t test 85"
+}

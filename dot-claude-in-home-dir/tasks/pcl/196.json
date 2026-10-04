@@ -1,0 +1,10 @@
+{
+   "blockedBy" : [],
+   "blocks" : [
+      "269"
+   ],
+   "description" : "Found in s325 (task #195 TIMEOUT recovery). The three string-eval regexp drivers used to abort at ~test 905 with unbound:$1y (s321); an s322/s323 fix removed that abort and they now reach re_tests lines ~906-910 — the .X(.+)+X / .X(.+)+XX family against bbbbXcXaaa... subjects — where cl-ppcre backtracks exponentially (probed: a one-line $s =~ /.X(.+)+X/ hangs >20s under PCL, perl answers instantly). The chronic TIMEOUTs re/regexp.t, re/regexp_trielist.t, re/regexp_qr_embed.t stop at the same 793/112 point in both the s321 and s323e snapshots — same cause, never had the abort in front of it. Options: (a) the #71 PCRE2-backend investigation covers it wholesale; (b) a cl-ppcre-level mitigation (it has no superlinear-backtracking cache). Also worth a small probe someday: which s322/s323 commit fixed the $1y abort (not important, it was progress). Rows annotated in docs/perl-suite-run.tsv; survey section \"TIMEOUT recovery (s325)\".\n\n=== s473q (2026-09-07) ===\nThe PCRE2 spike (task #71, docs/pcre2-spike-s473q.md §4) replayed perl`s re_tests through both engines: cl-ppcre HANGS (>5 s) on exactly the 18 rows of this block (`.X(.+)+X`, `.X(.+)+XX`, `.XX(.+)+X`, `.X(.+)+[X]` and friends) and PCRE2 returns from all of them -- #71 IS this task`s fix, and it is the only one measured: cl-ppcre has no super-linear cache and none was found to add.  #71 is PARKED on portability (3 of the 4 install-matrix images ship PCRE2 10.39-10.42 against gains measured on 10.46; no macOS CI leg) -- a USER decision, s476.  Until then this task stays as it is: a registered timeout, not a fix target.",
+   "id" : "196",
+   "status" : "pending",
+   "subject" : "re/regexp_{noamp,notrie,qr}.t hang at the re_tests catastrophic-backtracking block (~line 906, .X(.+)+X) — cl-ppcre exponential where perl's optimizer is linear"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nProbe scratch/s473t2/probes/p11-misc.pl B and C.\nNamed as a #964-class candidate in docs/blessed-fails-review-s464.md §4c item 1;\nthis is its probe and its owner.\n\nROWS BEHIND IT: perl-tests/aassign.t 176 (\"undef as lvalue\"), 180, 181\n(\"RT #130132 scalar derefffed 1/2\"), 182, 183 (\"RT #130132 scalar undef 1/2\")\n= 5 rows.\n\nPROBE (a) -- LHS lvalues are resolved BEFORE any assignment (RT #130132):\n    my $x = 1; my $sref = \\$x;\n    ($sref, $$sref) = (2, 3);\n    print \"sref=[$sref] x=[$x]\";\n  perl: sref=[2] x=[3]      PCL: sref=[3] x=[1]\nPCL assigns left to right, so `$$sref` is dereferenced AFTER `$sref` has become\n2 -- the write lands somewhere else entirely and $x keeps its old value.  With a\nshort RHS (`($sref, $$sref) = (2)`) perl leaves $x undef; PCL leaves it 1 and\ngives $sref 1 (rows 182/183).\n\nPROBE (b) -- `undef` on the LHS uses the RHS element as the lvalue:\n    my ($p,$q,$z) = (0,10,20);\n    $_++ for ((undef, $p) = ($q, $z));\n    print \"[$p:$q:$z]\";\n  perl: 21:11:20            PCL: 21:10:20\nThe list assignment's result list must contain the RHS element that the `undef`\nslot consumed, as an lvalue; PCL returns a copy, so `$q` is not incremented.\n\nBoth are the ordering/aliasing contract of aassign; adjacent to round 21's\nreturn protocol (#964) and to the s464 §4c list.\n",
+   "id" : 1452,
+   "status" : "open",
+   "subject" : "BUG: a list assignment does not resolve its LHS lvalues before assigning, and `undef` on the LHS does not make the RHS element the lvalue (perl-tests/aassign.t, 5 blessed rows -- s464 review §4c item 1, now probed)"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "49",
+  "subject": "Fix do-block package leak: parse_block_as_function push_package never popped",
+  "description": "PRE-EXISTING bug found by s281 edge-case testing (repro: scratchpad min1.pl/min2.pl — `sub f5{1} print f5(),\"\\n\"; my $r = do { package X8; 1 };` emits (X8::pl-f5) for calls BEFORE and AFTER the do-stmt; runtime: undefined function). Trace: PExpr::handle_subcalls:417 → Parser::parse_block_as_function:2658 → _process_package_statement:6519 pushes X8, never pops; the do-block gets parsed multiple times (3× — pre-passes) so the leak lands before statement lowering. Pre-existing at d7cac4f (not caused by E1.5); v1 leaks only AFTER the statement (ExprToCL:297 qualifies user calls against current_package when ne main). Fix idea: save/restore environment package_stack around parse_block_as_function (or around the fallback expression parse), then corpus byte-diff + edge2.pl probes (caller/bless1/eval/do-tail/compound/reopen — all still unverified vs perl).",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

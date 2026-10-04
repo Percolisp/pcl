@@ -1,0 +1,9 @@
+{
+  "id": "52",
+  "subject": "E1 M-C step 1: CAPREFUSE diagnostics in _promote_captured",
+  "description": "Add SPANREFUSE-style refusal diagnostics (under PCL_SPAN_DEBUG) to _promote_captured and its caller loop skips (family/interp/deref-block/decl-count), so M-C hypotheses become a verified worklist.",
+  "activeForm": "Adding CAPREFUSE diagnostics",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

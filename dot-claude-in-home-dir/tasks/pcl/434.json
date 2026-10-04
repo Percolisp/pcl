@@ -1,0 +1,8 @@
+{
+   "created" : "2026-08-22",
+   "description" : "FILED s425 (Fable) from the s423/#418 review, docs/opus5-review-requests-s423.md ask 2.\n\nPl/ExprToCL.pm gen_leaf's PPI::Token::Word branch carries two kinds of content: a perl bareword (a filehandle, a class name) AND text that an earlier pass (Parser::_qualified_sub_to_cl) rewrote IN PLACE into a qualified CL symbol (|ï¼¦ï¼¯ï¼¯|::pl-two) and that is later handed BACK to cl_name as if it were a perl name.  s423 therefore could not apply the #418 spelling (cl_sym) to every Word â a blanket cl_sym there split |ï¼¦ï¼¯ï¼¯::f| on :: into the unbalanced package token |ï¼¦ï¼¯ï¼¯ and the file no longer READ â and gated it on environment->is_filehandle() instead (ruled s425: the narrow gate STANDS).\n\nThe clean-up: stop overwriting a PPI token's content with CL text; carry the CL spelling out-of-band (an annotation, or emit at the rewrite site) so the leaf sees perl names only.  E5/#243-shaped (the v1 seam's remnants); do it when that seam is touched, not as a filler.  Acceptance: the is_filehandle gate in gen_leaf becomes a plain cl_sym; emission A/B byte-identical over the four populations.\n",
+   "id" : 434,
+   "session" : "s425",
+   "status" : "pending",
+   "title" : "gen_leaf's Word branch is a MIXED site: a PPI Word whose content was overwritten in place with a qualified CL symbol is fed back to cl_name as a perl name (B/s423 ask 2)"
+}

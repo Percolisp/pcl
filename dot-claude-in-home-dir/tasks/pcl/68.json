@@ -1,0 +1,9 @@
+{
+  "id": "68",
+  "subject": "E2.1 (OPUS 4.8 material): convert remaining gen_funcall branches to CLForm — mechanical, per §E2.0 recipe",
+  "description": "DONE s304: all gen_funcall branches + s///+tr/// leaves + Symbol/Magic compounds + \\(LIST) family + -bareword/SUPER:: heads + eval branch converted at byte parity; %FUNCALL_FORM_DECLINES deleted. Remaining E2 surface moved to the inline_lambda re-host task.",
+  "activeForm": "Converting gen_funcall to CLForm",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "60",
+  "subject": "E2 prereq: hoist v2 per-statement void-wrap (wa_void_active)",
+  "description": "v2 wraps every void stmt in its own (let ((*wantarray* :void))) — 425 in substr.t vs v1's 30 — exhausting the sweep's 1GB compile heap; blocks large-file de-gates (substr.t stays gated). Fix = mirror v1: bind :void once around sub body + set environment->wa_void_active so _ctx_wrap skips per-stmt wraps + tail-restore caller ctx + reset at do/eval/map/grep/sort. Delicate wantarray work (CLAUDE.md #8); do early in E2. See memory project_v2_per_statement_void_wrap. Then re-de-gate substr.t (also needs scalar force-boxed for magic-lvalue foreach-alias + 1 user :lvalue-sub test is not-supported).",
+  "activeForm": "Hoisting v2 per-statement void-wrap",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

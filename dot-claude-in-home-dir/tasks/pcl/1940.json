@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/die_unwind.t's rows are\n  * \"$@ false at start of 'end' block inside 'eval' block\"\n  * \"true value assigned to $@ before 'end' block inside 'eval' block\"\n  * two `is($uerr, \"t3\\n\")` rows (unnamed, lines 55 and 68)\n  * \"package Foo; sub DESTROY { die ... }\"\n\ns473t6b's #1878 established the entry rule (perl's CLEAR_ERRSV: $@ is cleared\non the way INTO an eval) and the bare-`die` reuse rule.  These rows are the\nNEXT layer: what $@ holds while an END block or a DESTROY runs INSIDE an eval\nthat is already unwinding, and what a die inside that leaves for the outer\neval.\n\nProbe each row standalone against perl before designing anything -- #1878's\nown negatives are what found its entry clear, and this file is the same shape\none level deeper.  The last row also needs NS:`DESTROY` called by garbage\ncollector, so it may not be reachable.\n",
+   "id" : 1940,
+   "status" : "pending",
+   "subject" : "$@ at the START of an eval block that an END or a DESTROY re-enters, and the value a nested die leaves (op/die_unwind.t, 5 rows)"
+}

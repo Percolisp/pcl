@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-02",
+   "description" : "FILED s464aw (found by a #972 guard-row probe; PRE-EXISTING -- identical on an\n80b715c worktree, and it is why that guard's fixture is `bless {}').\n\n    my $u = bless [], 'Plain';\n    \"$u\"        both  Plain=ARRAY(0xâ¦)         <- stringification is fine\n    $u x 2      perl  Plain=ARRAY(0x1)Plain=ARRAY(0x1)\n                PCL   \"\"                        <- the reference is GONE\n\n    package A; use overload q(\"\") => sub {\"AB\"}; sub new { bless [], shift }\n    A->new x 2  perl  ABAB     PCL  00\n\n    # the other two payload kinds are correct:\n    $hashref  x 2   both  the stringification twice\n    $scalarref x 2  both  the stringification twice\n\nSo `x' with an ARRAY-payload box on the left is being treated as perl's LIST\nrepetition (`(LIST) x N') instead of string repetition: a box holding a\nvector is a REFERENCE and `x' must stringify it.  perl decides list-vs-string\nrepetition SYNTACTICALLY (the left operand must be a parenthesised list or a\n`qw'), never from the operand's runtime type.\n\nThe `00' in the overloaded case is the same thing seen through a `\"\"'\nhandler: the empty array repeats to nothing and the surrounding numeric\ncoercion prints 0 twice.\n\nSUSPECT: `p-str-x' (or the codegen that chooses between `p-str-x' and a\nlist-repeat form) branches on the operand's payload being a vector.  The\ndiscriminating measurement is one `./pl2cl' of `my $r=[]; print $r x 2;' --\nif the emitted form is already the list-repeat one the bug is in the codegen,\nif it is `p-str-x' it is in the runtime.\n\nBAR: the six rows above vs perl; the layer's own bar (corpus-diff if codegen,\nthe sweep either way); a guard row.\n",
+   "id" : 1007,
+   "status" : "pending",
+   "subject" : "$aryref x N is LIST repetition -- the reference is lost (blessed or not)"
+}

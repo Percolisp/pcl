@@ -1,0 +1,8 @@
+{
+  "id": "104",
+  "subject": "pclxs 2d SHIPPED: MULTICALL implemented as call_sv (D7); LEAVE scope bug fixed",
+  "description": "Session 9. dMULTICALL/PUSH_MULTICALL/MULTICALL/POP_MULTICALL + CvISXSUB + SvSetMagicSV in perl.h; MULTICALL names out of xs-build's %TIER_X; t/91-multicall.t (10 cases, oracle leg). Found and fixed: pclxs_enter recorded nothing and pclxs_leave unwound the whole save stack (R26). refhost: get_cv now consults the sub table, one stable CODE value per sub, main::tick native. 396 tests pass.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

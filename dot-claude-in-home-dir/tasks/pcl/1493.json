@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p25-tr.pl.\n\nROWS BEHIND IT (baselines/fail-baseline.tsv, 2 rows):\n  tr.t 223 `non-modifying tr/// on a scalar ref`   (got '0', expected '2')\n  tr.t 224 `    doesn't stringify its argument`    (got '',  expected 'SCALAR')\n  -- perl-tests/tr.t:955-957\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n    my $x = \\\"foo\";\n    my $n = ($x =~ tr/A/A/);\n    print \"count=[$n] ref=[\", ref($x), \"]\\n\";\n  perl: count=[2] ref=[SCALAR]\n  PCL : count=[2] ref=[]\n  (The COUNT agrees standalone -- both count the two `A`s in the address text\n  of `SCALAR(0x...)`.  Row 223's blessed `got '0'` is the in-file\n  consequence: `$x` has already been stringified by the time that row runs,\n  so there is no longer an address to count.  Fixing row 224 fixes 223.)\n\nMECHANISM: a `tr///` with no `r` modifier and an empty replacement is\nnon-modifying (it only counts), so perl stringifies its operand for the count\nWITHOUT writing the string back.  PCL's `do-tr` coerces the operand box to a\nstring and stores the coerced value, destroying the reference.\nFix area: `do-tr` in `cl/pcl-runtime.lisp` -- write back only when the\ntransliteration actually changed something.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md tr.t, \"Tests 223-224:\nnon-modifying tr/// on a scalar ref (shouldn't stringify the ref)\", which\nfiles them under \"mostly error/warning detection (principle 9)\".  They are\nNOT principle 9: this is a silent write to a live variable.\n",
+   "id" : 1493,
+   "status" : "open",
+   "subject" : "SILENT WRONG (tr///): a non-modifying `tr/A/A/` on a SCALAR REF stringifies its argument in place -- `my $x = \\\"foo\"; $x =~ tr/A/A/;` leaves `ref $x` as `SCALAR` in perl and `''` in PCL"
+}

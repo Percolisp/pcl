@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent F (s443f) probes; PRE-EXISTING, unqualified too (not #491).  fileno on a CLOSED or never-opened bareword handle returns -1; perl returns undef.  `open(W,\">\",$f); close(W); defined(fileno(W))` -> perl undef, PCL [-1].  Same family as #220 (closed-handle value) and #403 (defined-but-false filetest).  Bar: closed / never-opened / open (inverse) vs perl; a punct-array-glob-01.t or io row.\n--- DONE s448n (Opus round-6 agent N), commit 4437396 ---\n\nperl has TWO negative answers and they are DIFFERENT FACTS (probed 5.40.3, all\nseventeen shapes): **undef** when the handle is not open -- never opened,\nclosed, an empty lexical, a closed glob, a closed handle NAME in a scalar --\nand **-1** only for an OPEN in-memory (scalar) handle, which has no descriptor\nto name.  PCL answered -1 to both.\n\nConsequence found while fixing it: `IO::Handle::opened` in lib/IO/Handle.pm is\nliterally `defined fileno($_[0])`, so it could never say no.\n\n%p-fileno-impl asks `open-stream-p` before it asks for a descriptor.  A\nDIRHANDLE keeps answering -1 (perl gives the real dirfd, PCL has none, and -1\npreserves the definedness perl's callers test) -- that is a deliberate\nnon-change, not an oversight.\n\nBar met: closed / never-opened / open, bareword AND lexical AND glob AND glob\nref AND name-in-a-scalar, plus the in-memory pair and the three standard\nhandles, all identical to perl.  Gate 178/6007 PASS; sweep TOTAL 18321,\nunchanged by this commit.  Guard Pl/t/std-handle-open-01.t rows 6-7 (the real\nfd is folded to \"fd\": its NUMBER is not perl's, since SBCL holds descriptors of\nits own, and the number is not what the rows are about).\n",
+   "id" : 529,
+   "status" : "done",
+   "subject" : "pcl"
+}

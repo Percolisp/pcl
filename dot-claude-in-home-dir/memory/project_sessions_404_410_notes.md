@@ -1,0 +1,14 @@
+---
+name: project_sessions_404_410_notes
+description: The compressed "Previous" session notes for s404–s410 (Opus 5 + Fable review sessions) that used to sit in MEMORY.md — the traps and findings worth remembering; full narratives are in docs/session-log.md
+metadata:
+  type: project
+---
+
+Moved out of MEMORY.md at s412 (size limit).  Detail for every session: `docs/session-log.md`.
+
+- **s410 (Opus 5, `03cc639`…`1484246`)** #378 anon `__SUB__` = self-reference rewrite at the PPI entry (op/sub.t 52/13).  **PPI OVERLOADS STRINGIFICATION TO CONTENT** — a hash keyed by a PPI object is keyed by TEXT (collides, goes stale; use refaddr); a pass over anon-sub signatures must run LAST in `_ppi_parse`.  An `our` statement's TAIL was lost in both pipelines (`our $c++`, `our $V ||= 7`) — fixed; remainder #380.  #377 (a PROMOTED name takes no param binding; `_scan_lex_facts` N=1 IS N=k), #376 (three lexsub spellings), #341 CLOSED (op/lexsub.t rows are behind indirect-object `h F`, #381), #342 piece 2 (heredoc in `${\ }` in `s///e`; residue #382).  #281 items 1+2+6 BEGUN AND REVERTED — resume there when the queue reaches it (`docs/opus5-review-requests-s410.md` §6.2; sort.t's ten `(defvar $a …)` are ten DIFFERENT symbols).
+- **s409 (Fable)** s408 approved (`docs/fable-answers-s408.md`, `docs/plan-post-s408.md`): a census INCREASE is legal when a crash-form becomes a counted drop; compare a gate count against the SAME tree (xs files produce 0–14 rows); an eval-mode drop DIES; fragment mini-parse = established; #374(b) corrected (position-aware renaming).
+- **s406 (Opus 5)** #348 (`which_perl` children run PCL — zero rows moved; io/crlf_through.t's jump is a WARNING, both ends share the `:crlf` no-op, #139), #355 (`PCLCore::transpile` judges transpile stderr — a drop announcement FAILS the row), **#128 CLOSED** (`my $walk; $walk = sub {…$walk->(…)}` = a REFERENCE CYCLE, ~8.5 kB/transpile = the 6 GB server; `__SUB__` fixes it; found by ARENA CENSUS), #361 (every ALL-CAPS bareword after `print` was read as a FILEHANDLE — **a bareword before an operator is a TERM only if DECLARED one**).  **A companion row that moved is NOT a finding until re-run ALONE** (22 of 36 were contention).
+- **s405 (Opus 5)** #358 (`open FH,"<&=N"` on a CLOSED fd spun on EBADF — **for a hang read `/proc/<pid>/status`: State R = spin, S = blocked**), #340 try/catch/finally (`p-try`; PPI leaves `finally` OUT of the try Compound), #277 `tools/install-pcl`, #347 (a PROMOTED lexical is legitimately captured).  **NEVER edit the compiler while a measurement runs.**
+- **s404 (Opus 5)** #345 `--quick` + the HANG-vs-SLOW split, #349 (closes #217), #350, #353; #354+#351 (two PPI operator-vs-term mis-lexes; `pl2cl < file` held a bare `local $/` across the parse and PPI tokenization DEPENDS on it); rule-13 audit.  **s403 (Fable)** s402 approved (`docs/fable-answers-s402.md`).

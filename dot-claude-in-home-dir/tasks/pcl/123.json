@@ -1,0 +1,9 @@
+{
+  "id": "123",
+  "subject": "pclxs: record the Phase 3 exit — Digest::MD5's own t/*.t under a host",
+  "description": "plan.md still has this open with \"when it runs, record the result here — it is the real Phase 3 exit\". Session 11 has the numbers from the PCL host (md5-aaa.t 256/256, clone.t 6/6, align.t 1/1, bits.t 2/2; files.t blocked on the host's io group, PCL task #117).",
+  "activeForm": "Recording the Phase 3 exit",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

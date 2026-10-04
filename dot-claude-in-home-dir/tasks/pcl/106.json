@@ -1,0 +1,8 @@
+{
+  "id": "106",
+  "subject": "pclxs 2c part 1 DONE: 13-dist CPAN sample; limit = DBI, Moose, naming a sub",
+  "description": "census/CPAN.tsv + tools/xs-classify (tiers A/B/C/D + --blame) + first-sample write-up in docs/measuring-the-limit.md. Fixed two instrument under-reports: .xs discovery below the top level (3 of 13 dists were invisible) and the XSUB stack macros missing from xs-build's API-name pattern. Not done: the ratio (needs a resolved closure) and the `works` row (needs a host with a Perl).",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FILED s497b.  After #2341 a raw undef reaching p-cast-@ / p-cast-% answers a fresh EMPTY container (perl's no-strict rvalue answer, the symbolic @{\"\"}), which is right for an rvalue site but wrong for a vivifying one: perl dies there even without strict (probed 5.40.3: push/foreach/keys over @{ f() } all die, `my @a = @{ f() }` lives).  Before s497b the same sites died with PCL's own message (push) or iterated ONE undef (foreach) -- both wrong too.\n\nREPRODUCER:  sub f { undef } push @{ f() }, 1; print \"lived\\n\";   perl: dies;  PCL: lived.\nSHAPE: the unmarked (vivifying) cast site would need its own marker so the runtime can tell it from the no-strict rvalue one; the :rvalue marker exists already, so an unmarked site with a RAW undef could die -- but only once the rvalue whitelist is complete, or a missed rvalue site dies where perl lives.  Measure the population first.",
+   "id" : "2404",
+   "status" : "pending",
+   "subject" : "A RAW undef temporary in a VIVIFYING deref position lives: `push @{ f() }, 1` (f returns undef) pushes into a throw-away array where perl dies `Can't use an undefined value as an ARRAY reference` (with or without strict)"
+}

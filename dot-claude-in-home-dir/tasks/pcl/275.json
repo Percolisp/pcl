@@ -1,0 +1,9 @@
+{
+  "id": "275",
+  "subject": "`use Test::More tests => N` emits NO `1..N` plan line — a TAP file no harness can judge",
+  "description": "Found by an s374 probe while working #236.\n\n  perl:  use Test::More tests => 2; ok(1,\"a\"); ok(1,\"b\");   ->  1..2 / ok 1 / ok 2\n  PCL :  same source                                        ->  ok 1 / ok 2   (NO plan line)\n  PCL :  use Test::More; plan tests => 2; ...                ->  1..2 / ok 1 / ok 2  (correct)\n\nSo only the IMPORT-ARG spelling of the plan is dropped.  A TAP stream with no\nplan and no `done_testing` is one a harness cannot judge — the #202 family\n(\"a claim that cannot be evaluated must say so\").  It has never shown in our\nown measurements because sweep-perl-tests.pl counts rows itself rather than\nreading the plan.\n\nWhere: cl/pcl-test.lisp's import handling (pl-plan is correct; the import path\nnever calls it).  Descriptions/plan lines are join keys for the skip-registry\nand tools/sweep-diff.pl — check nothing keys off the ABSENCE of the line\nbefore fixing.\n\nRaised as ask 5.1 in docs/opus5-review-requests-s374.md.",
+  "activeForm": "Filing the missing import-form TAP plan line",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

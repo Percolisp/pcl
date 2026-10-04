@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s417 (Fable), found by the Track B1 (#372) probe sweep.  PRE-EXISTING:\nemission is byte-identical before and after B1, so this is not a B1 regression\nâ B1 fixed the un-parenthesised spelling and this one is the residue.\n\nPERL, by deparse â the parens are TRANSPARENT for stacking:\n\n    $ perl -MO=Deparse -e 'my $z = -e (-f \"/etc/passwd\");'\n    my $z = -e -f '/etc/passwd';        <- ONE stacked run\n\n    $ perl -e 'print ((-e (-f \"/etc/passwd\")) ? \"T\" : \"F\")'\n    T\n\nPCL nests instead: `-e` applied to `-f`'s 1, i.e. \"does the file named 1\nexist?\", and answers F.  SILENT WRONG.\n\nINVERSE that must keep working (perl does NOT stack through a VARIABLE):\n\n    my $t = -f \"/etc/passwd\"; print ((-e $t) ? \"T\" : \"F\");   # perl: F\n\nSo the rule is syntactic â a filetest whose operand is syntactically another\nfiletest stacks, parens or not â and it is NOT \"a filetest applied to a\nfiletest's value\".\n\nWHERE: Pl/PExpr.pm.  B1's chain lowering keys on a MARK set by the prefix-op\nreduction (`_filetest_prefix_node` / `_is_filetest_reduction`), and a\nparenthesised group reduces to a different node (the `()`âtree_val wrapper),\nwhich carries no mark.  The likely fix is to let the mark travel through a\nsingle-expression paren wrapper; the acceptance is the deparse table above\nplus the variable inverse.\n\nSIZE: small, but it is a term-grammar question, so check it against Option B\nphase 2 (#343) before widening anything in the $end_pars region.\n",
+   "id" : 404,
+   "status" : "pending",
+   "subject" : "perl STACKS filetests through parentheses (`-e (-f $x)` == `-e -f $x`); PCL nests, so the value is wrong"
+}

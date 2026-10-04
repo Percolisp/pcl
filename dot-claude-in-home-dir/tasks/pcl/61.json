@@ -1,0 +1,11 @@
+{
+  "id": "61",
+  "subject": "Perf: counting-loop range foreach SHIPPED s286b (2.8× faster than perl); regression question RESOLVED (none)",
+  "description": "Regression half DONE (s286): emission byte-identical s276b↔HEAD, equal speed under both cores, canonical shapes still beat perl 2-3.5×. Remaining: (1) counting-loop lowering `for [my $v] (A..B)` → endpoints-once, no vector (perl range elems read-only; keep last/next/redo/labels/continue); (2) annotator: `+=`/`-=` numeric → raw slot. See docs/bench-exec-investigation.md §top.",
+  "activeForm": "Implementing counting-loop lowering for literal-range foreach",
+  "status": "completed",
+  "blocks": [
+    "62"
+  ],
+  "blockedBy": []
+}

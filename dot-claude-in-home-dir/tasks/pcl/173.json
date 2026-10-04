@@ -1,0 +1,8 @@
+{
+  "id": "173",
+  "subject": "DONE s320: op/chr.t above-U+10FFFF blessed; file is now XDIFF",
+  "description": "SHIPPED s320 (S1 item 2). docs/not-supported.md §Unicode gained \"### Code points above U+10FFFF (perl's extended UTF-8)\" — SBCL char-code-limit = 1114112 (re-measured), so #x10FFFF is the largest character a CL string can hold and (code-char #x110000) yields no character; U+FFFD is the answer. The existing \"### use bytes\" subsection was extended to name op/chr.t t10-13. op/chr.t registered in perl-suite-expected.tsv and VERIFIED XDIFF (38/7 vs perl 45/0; t10-13 use bytes + t40-42 above-Unicode = all 7 rows). Noted: ord() still round-trips the number, only the character/encoded form is lost.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

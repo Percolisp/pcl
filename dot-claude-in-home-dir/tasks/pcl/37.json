@@ -1,0 +1,9 @@
+{
+  "id": "37",
+  "subject": "T-A W10: AST-based span detection (replace text scan)",
+  "description": "Replace _check_my_spanning's ->content regex with PPI canonical-symbol detection (_canon_refs_in/_collect_lexical_canon). Clears sigil-conflation false gates (each.t etc.) soundly. Measure, parity sweep, Pl/t.",
+  "activeForm": "Making span detection AST-based",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

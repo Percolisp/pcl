@@ -1,0 +1,9 @@
+{
+  "id": "20",
+  "subject": "W12: implement tree annotator behind PCL_W12_DIFF dual-run",
+  "description": "Implement the OpcodeTree-walk annotator; add PCL_W12_DIFF=1 that runs BOTH annotators in analyze() and prints one line per verdict difference (file, name, text-verdict, tree-verdict, reason). Text annotator stays the effective verdict during bring-up.",
+  "activeForm": "Implementing tree annotator + diff harness",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

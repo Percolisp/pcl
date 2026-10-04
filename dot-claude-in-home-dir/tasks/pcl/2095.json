@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FOUND s493 (Fable, 2026-09-20) by the DOCUMENTATION parse-acceptance run: it is the FIRST code example of perlfaq4 (`print int(0.6/0.2-2), \"\\n\";`).  ~/pcl-agent-scratch/s493/probes/floatminus.pl + divminus.pl:\n\n    print 0.5-1, \"\\n\";        perl -0.5     PCL: statement dropped ... Missing case: ['Token::Number::Float<0.5>','Token::Number<-1>']\n    print $x*0.5-1;  print 2.5-0.5;         dropped too\n    $x/2-1   3-1   1e3-1   0x10-1            all fine (an INTEGER / exp / hex literal before `-1` is lexed right)\n    PPI dump of `print 0.5-1;`:  Word<print> Number::Float<0.5> Number<-1> Structure<;>      expected: Float<0.5> Operator<-> Number<1>\n\nSibling of docs/ppi-upstream-bugs.md §15 (`)` followed by `-1`: the operator is swallowed into a negative number) -- the same repair family (`_repair_*` in the `_ppi_parse` token passes: a Number whose content starts with `-`/`+` and whose previous significant token ENDS A TERM is split into Operator + Number); check that §15's repair keys on \"previous token ends a term\" and simply lacks Number::Float in its term-ender set (then the fix is one class name), and probe the other literal classes while there: `1.5e3-1`, `.5-1`, `1_000.5-1`, `0.5+1`, version strings `v1.2-1`.  Every fragment re-parse goes through Pl::Parser::fragment_doc (#435).\nRule 13 in the SAME commit: ppi-upstream-bugs.md section, docs/ppi-bug-report.t row (bump tests =>), canary in Pl/t/misc-fixes-02.t.\n",
+   "id" : "2095",
+   "status" : "pending",
+   "subject" : "NEW PPI 1.291 MIS-LEX (rule 13 owed), LOUD and everyday: a FLOAT literal followed by `-DIGIT` lexes as two NUMBERS -- `0.5-1`, `$x*0.5-1`, `int(0.6/0.2-2)` => whole statement DROPPED, the program dies \"statement not supported\""
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FOUND s497b: Pl/t/misc-fixes-01.t's UNIVERSAL::isa row PASSED ON A BUG -- the `my $a` let is closed at the `package D;` section boundary (`:why :exception-global`), the statements after `package main;` read `main::$a` (the global, undef), and ref() of that undef box answered ARRAY because p-ref's array arm tested (listp nil).  s497b fixed p-ref (consp), so the row now fails honestly; it is in a TODO block naming this task.\n\nREPRODUCER (perl 5.40.3 vs PCL):\n    my $a=[1]; package D; package main; print ref($a), \"|\\n\";\n  perl: ARRAY|     PCL: |\nA lexical with any other name works (`my $x`), so it is the $a/$b sort-variable special case (the exception-global partition) meeting the section split.\nBAR: the misc-fixes-01.t TODO row passes; a guard row with $a and $b; corpus-diff.",
+   "id" : "2401",
+   "status" : "pending",
+   "subject" : "BUG (pre-existing, exposed s497b): a file-level `my $a` / `my $b` does not survive a TOP-level package switch -- `my $a=[1]; package D; package main; ref($a)` reads the package $a (PCL \"\", perl ARRAY)"
+}

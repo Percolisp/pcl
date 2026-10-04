@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499e (Opus, 2026-09-27) while probing #2380 (x{,2}+ row).\n\nperl 5.40.3 vs PCL:\n    print((\"xx\" =~ /^x{,2}$/) ? 1 : 0, (\"x{,2}\" =~ /^x{,2}$/) ? 1 : 0, \"\\n\");\n  perl: 10     PCL: 01\n\nperl 5.34 added `{,n}` as a quantifier meaning `{0,n}` (perlre: \"{,n}  Match at most n times\"); also `{ 2 , 3 }` with blanks inside the braces is a quantifier since 5.34.  cl-ppcre reads `{,2}` as literal characters.  The compiler side (Pl::InterpScan, #237) already classifies `{,3}` and `{ 2, 3 }` as quantifiers.\n\nFIX SHAPE: one arm in the runtime's rewrite scan (%pcl-rewrite-scan, which since #2380 recognises counted quantifiers in %pcl-rx-quantifier-end): outside a class, `{,n}` -> `{0,n}` and `{ n , m }` -> `{n,m}`; then extend %pcl-rx-quantifier-end so `x{,2}+` is possessive too.  Probe the literal cases perl keeps (`x{,}`, `x{a}`).\n=== DONE (s499h) ===\n%pcl-rx-counted-end = perl 5.34+'s counted-quantifier grammar ({,n} = {0,n}; blanks around numbers/comma); the one rewrite scan writes it blank-free behind a third pre-test (%pcl-has-loose-counted), so {,n}? and {,n}+ compose.  {,} {a} \\{ and in-class stay literal.  17-row probe (scratch/s499h/q1.pl) = perl.  Guard Pl/t/regexp-subst-01.t row 51, inverse-verified.  Companion re/regexp.t re/pat.t re/pat_rt_report.t op/qr.t before = after (re_tests' {,2} rows sit past the #326 hang).  ir-spec Â§10-count.  Residue: #2471 (\\N{3,4}).\n",
+   "id" : "2444",
+   "status" : "completed",
+   "subject" : "SILENT WRONG: perl 5.34+'s `{,n}` quantifier (`x{,2}` = `x{0,2}`) is matched as LITERAL text by cl-ppcre -- \"xx\" =~ /^x{,2}$/ is 1 in perl, 0 in PCL (and \"x{,2}\" matches)"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "265",
+  "subject": "DONE s368 (a7a8837): embedded `my` in a sub vs same-named package global — renamed to $x__emb__N pre-analysis; op/my.t at snapshot 52/7",
+  "description": "HALF-FIXED s365 (promoter now shares the gate's shadow-aware capture test; embedded-`my` no longer writes the file lexical). REMAINING: the PACKAGE-GLOBAL sub-case (op/my.t t47, 51/8 → snapshot 52/8): the same name is a package global another sub writes, the veto is RIGHT to refuse a plain `let $x` (defvar'd symbol → dynamic rebinding). SHAPE APPROVED s366 (docs/fable-answers-s365.md §9): mint a renamed lexical for the embedded decl, rewrite uses within the enclosing sub via shadow-aware _rename_decl_within (B-ii), interp follows via the M-A fixer, eval route per ir-spec §2b.4 (let-bound → site alist). ORDER: before #267. Bar: op/my.t snapshot C_ok.",
+  "activeForm": "Fixing #265's rename half (embedded my vs package global)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

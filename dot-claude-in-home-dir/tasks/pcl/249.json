@@ -1,0 +1,8 @@
+{
+  "id": "249",
+  "subject": "#163 referent-kind tag implementation: the s353 probe-confirmed residue (literal ref-of-ref deref, \\&callersub eval free name, use constant in eval region)",
+  "description": "The #163 ruling (s320: referent-kind tag on the box, first post-R1 runtime item) is still unimplemented; s353's M1 probes confirmed three live divergences it owns, all pre-existing at HEAD in BOTH pipelines (probes in docs/e41-m-work-handoff-s353.md §2):\n\n1. `my $q = ${$h->{k}}` where the value is a LITERAL `\\\\$x` ref-of-ref: ref($q) answers ARRAY, and `$$q = v` write-back is lost — silent wrong in file mode, subs, and both eval routes. p-cast-$'s own comment records this as the no-tag residue (scalar-ref chains collapse). Real Sub::Quote is unaffected (its ref-of-ref goes through a lexical).\n2. `\\&callersub` as an eval free name crashes (no package region needed) — dr3.pl probe shape: eval q!{ my $q = ...; $$q = \\&hi; } 1;! with hi defined in the CALLER.\n3. `eval 'package X; use constant K => 5; K'` dies \"X::pl-K undefined\" (perl: 5) — loud, #226 residue independent of M1.\n\nNone block E4.1 (each fails identically with and without the v1 fallback). Schedule with the #163 runtime work; also re-check #154's parked shapes and #211 when the tag lands.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

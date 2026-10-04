@@ -1,0 +1,10 @@
+{
+  "id": "223",
+  "subject": "#223 baseline hygiene: audited re-bless of the two stale baselines + taken-at provenance stamp",
+  "description": "First item of the next Opus session (ruled docs/fable-answers-s339.md §5a/§5b). Two sessions of \"+8 / 2 fixed\" drift must not reach three.\n\nProcedure (honours \"never re-bless from a run\" where it applies):\n1. fail-baseline.tsv: remove the two scalar.t FIXED rows by EDITING them out, naming the s333 fix that made them pass in the commit. Never save-regenerated.\n2. pass-baseline.tsv: generated file, so re-bless IS the mechanism — but only from a gate-green run after a per-file audit: diff the run's _status.tsv against docs/pass-baseline.tsv; every changed file must have a named cause and no file may have gone DOWN. The +8 must be fully attributed (scalar.t +2 plus the owner of the other 6) BEFORE save-status runs; an unexplained delta is a finding, stop.\n3. sweep-diff.pl save-status writes a \"# taken-at: <sha> <date>\" header; diff/LOST reader skip # lines. Remember NUL bytes: grep -a or perl on these files.\n\nThen start E4.1 per docs/v2-opus5-execution-plan.md §5.",
+  "activeForm": "Re-blessing the stale baselines with audit + provenance stamp",
+  "owner": "opus-s341",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

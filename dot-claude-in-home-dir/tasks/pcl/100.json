@@ -1,0 +1,9 @@
+{
+  "id": "100",
+  "subject": "XS OO blocker RE-DIAGNOSED: ext-magic doesn't survive the host round trip (was: \"$$obj undef\" — that matches real perl and is correct)",
+  "description": "DONE on the pclxs side (session 10, commit b6018c6): ABI 6 adds the `magic` capability group (magic_set/magic_get, PCLXS_CAP_MAGIC) — the shim's chain head is stored WITH the host object; pclxs_sv_export hands a native SV's chain over at export; pclxs_magic_free frees only the local chain. Second bug found while implementing: newRV_noinc DROPPED the caller's shim reference instead of taking it over, so Digest::MD5's `SV *sv = newSV(0); newRV_noinc(sv); sv_magicext(sv,...)` wrote through a freed struct whose handle had been released — now mortalized. t/85-magic.t green on all six rows vs perl (11,41,1,Mgc,1,2). NOTE for PCL: the bump is ADDITIVE and does not break the adapter — pclxs_vtable_new stamps abi_version and an untouched optional group is off, so PCL relinks and keeps working with magic off. PCL's remaining work (optional, unblocks Digest::MD5 OO): implement magic-set/magic-get keyed on the referent box and add them to *xs-callbacks*. Still open everywhere: the module's magic free hook (DESTROY interlock, D5/D10) and HTML::Parser's MGVTBL free.",
+  "activeForm": "Implementing ABI 6: magic keyed on the host object",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

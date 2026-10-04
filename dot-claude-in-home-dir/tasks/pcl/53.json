@@ -1,0 +1,9 @@
+{
+  "id": "53",
+  "subject": "E1 M-C: shadow-aware decl counting in capture promotion",
+  "description": "Apply the M3 shadow model to _promote_captured/_count_name_decls: block/sub-nested same-name re-decls are distinct shadows, not blockers; rewrite must skip shadowed scopes. Targets: closure.t, my.t, chdir.t, hashassign.t (also extend multi-decl promotion to all-container lists for hashassign).",
+  "activeForm": "Implementing shadow-aware capture promotion",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

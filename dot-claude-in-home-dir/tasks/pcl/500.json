@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent C's #465 report (pre-existing). cl/pcl-runtime.lisp p-say = (apply #'p-print args) then terpri, so a set $\\ is printed AND a newline. perl: say = print with $\\ locally set to \"\\n\". Fix: in p-say bind |$\\| to an undef box around the inner p-print (or pass a flag). Bar: `$\\ = \"<O>\"; say \"x\"` -> \"x\\n\"; `$\\ = \"<O>\"; print \"x\"` -> \"x<O>\" unchanged; `say` with `$,` set; say to a filehandle; companion io/say.t + op/print.t legs; a Pl/t guard row beside sep-vars-01.t. Runtime change -> sweep.\n\nDONE s442d (agent D; merged by Fable s440 as d2424aa). p-say passes \"\\n\" as the terminator to the new shared writer %p-write-list; p-print passes $\\, p-printf nothing. NOT a rebinding of $\\ -- probed: perl does not localize it over say (an overload handler stringifying an argument still reads the program's value). The :fh splitting is deduped into %p-out-target for all three list operators. Guard sep-vars-01.t row 5 (4 -> 5), inverse-verified on 76f5de7's runtime. ir-spec sec. 8.",
+   "id" : 500,
+   "status" : "completed",
+   "subject" : "DONE s442d: SILENT WRONG: `say` appends `$\\` -- perl uses \"\\n\" INSTEAD of it (`$\\ = \"<O>\"; say \"said\"` -> perl `said\\n`, PCL `said<O>\\n`); one-line fix in p-say (bind |$\\| to an undef box around the inner p-print) + companion io/say.t"
+}

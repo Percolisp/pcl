@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FILED s492c (Opus, 2026-09-21) as the residue of #1870/#1992 member 1.\n\nMember 1 made an import list displace a builtin (`use Time::HiRes qw(time)`)\nand made the two BEGIN-time glob-assignment spellings work\n(`*CORE::GLOBAL::NAME`, `*Other::NAME`).  What it cannot see is an import\nwhose NAMES are not in the source:\n\n    { package Clock; sub import { no strict 'refs';\n        *{caller() . \"::sleep\"} = sub { \"slept:$_[0]\" } } }\n    { package B; BEGIN { Clock->import } sub get { sleep(0.25) } }\n    print B::get(), \"\\n\";\n    perl: slept:0.25     PCL: 0   (the builtin)\n\nThat is row (b) of #1992's five-spelling probe\n(~/pcl-agent-scratch/s491/probes/s491a/p-override-spellings.pl).  It is the\nSELF-CONTAINED spelling a probe uses; every real module reaches PCL as a\n`use Module LIST`, which now works.\n\nWHY IT IS NOT A ONE-LINER: the override is a COMPILE-TIME fact in PCL (the\nemission picks the user sub or the builtin at the call site), and the names\nthis spelling installs are only known after the BEGIN block RUNS, which is in\nthe generated CL, after the compiler is gone.  The honest options are (a) a\nruntime dispatch for overridable builtins in any package whose BEGIN blocks\ncontain an unresolvable import -- a per-call cost #1870 explicitly rejected\nfor the general case but maybe acceptable when scoped to those packages -- or\n(b) leaving it, which is what docs/not-supported.md now says.\n",
+   "id" : 2053,
+   "status" : "pending",
+   "subject" : "The `BEGIN { Some::Module->import }` builtin-override spelling is invisible: PCL decides the override from the `use` statement`s own import LIST, which that spelling does not have"
+}

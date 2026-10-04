@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FOUND s473t5e (#1501 round 6, `re/` CHECK 2).  t/re/begin-once.t is DIFF 1/1:\n\n    not ok 1 - /o done at begin is preserved and a new string does not match\n    ok 2     - /o done at begin is preserved and the original string matches\n\nperl's `/o` compiles an interpolated pattern ONCE, at first execution, and\nnever again -- so a later change to the interpolated variable does NOT change\nwhat the pattern matches.  PCL memoises a regex by its SOURCE TEXT\n(`*p-regex-op-cache*`), which is the opposite rule: when the interpolated text\nchanges, the pattern changes.\n\nROWS: 1, and this is the only file that tests it.  Its value is not the row --\nit is that `/o` is a documented perl modifier PCL silently ignores, and a CPAN\nmodule that relies on it (the idiom is `/$re/o` inside a loop) gets a\nDIFFERENT MATCH, not merely a slower one.\n\nSHAPE: `/o` is a property of the match SITE, so the memo key has to be the site\nrather than the text -- which the emitter can give it (a per-site cell, the way\n`state` is lowered) without the runtime guessing.  Decide first whether it is\nworth it: the pragmatic alternative is a `docs/not-supported.md` entry saying\n`/o` is ignored, which is honest and costs this one row.  Do NOT half-do it by\nkeying the existing text cache differently: that changes every non-/o pattern's\nidentity as well.\n",
+   "id" : 1723,
+   "status" : "pending",
+   "subject" : "the `/o` (compile-once) modifier is not honoured: a pattern compiled at BEGIN recompiles for a new interpolated string, so t/re/begin-once.t's one assertion fails"
+}

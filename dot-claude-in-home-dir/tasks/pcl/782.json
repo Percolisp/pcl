@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-30",
+   "description" : "FILED s454ad (Opus round 12, agent AD), exposed when #755 removed the wild-\npathname abort that sat EARLIER in t/op/filetest.t; PRE-EXISTING (the base\ntree emits the same form -- it just never got to run it).\n\n    -f 'TEST';        # a whole statement: perl runs the filetest for its\n                      # side effect (primes the `_` stat buffer)\n\nt/op/filetest.t:159 is exactly this, priming `_` for line 160's\n`is(-f _, 1, '_ is bareword after filetest operator')`.  PCL emits\n\n    (p-- (p-scalar-ctx (pl-f \"TEST\")))\n\n= unary minus of a call to user sub f -- \"Undefined subroutine &main::f\ncalled\", which ABORTS the file's remaining forms (aborted-forms:1 in the\nsuite row; op/filetest.t currently 181/253).\n\nThe parenthesised and expression positions are fine; only the bare-statement\nposition mis-parses, so this is the #372/#476 filetest-at-statement-start\nfamily (the statement path never hands `-f` to the filetest machinery).\nSibling on the next line: `sub _ { \"this is not a file name\" } is(-f _, ...)`\non ONE line is a counted DROP (\"Missing case: Token::Magic<_> ...\").\n\nBAR: `-f 'TEST';` and `-e $f;` as void statements prime `_` (probe with a\nfollowing `-f _` read vs perl); op/filetest.t's aborted-forms goes 1 -> 0 and\nrows 37-38 (\"_ is bareword after filetest operator\") return; re-splice the\nsnapshot row with the cause.\n",
+   "id" : 782,
+   "status" : "pending",
+   "subject" : "`-f 'TEST';` as a VOID STATEMENT emits (p-- (pl-f \"TEST\")) -- a negated CALL to sub f; it is t/op/filetest.t's remaining aborted form"
+}

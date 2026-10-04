@@ -1,0 +1,9 @@
+{
+  "id": "29",
+  "subject": "Write translator's manual for the generated CL (semantics)",
+  "description": "docs/ir-spec.md — normative semantics of the CL output for compiling to other environments: data model (box/undef/aggregates), coercion/truthiness, context protocol, calling convention, control flow/non-local exits, OO dispatch, magic globals/local, load model, op families with family rules. Verified against cl/pcl-runtime.lisp.",
+  "activeForm": "Writing IR semantics manual",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

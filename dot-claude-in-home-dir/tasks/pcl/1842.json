@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-17",
+   "description" : "FILED s488 (Fable, 2026-09-17) from the t6a merge-review probe (scratchpad probes/p1813-fetch.pl, direct-variable shape; identical on main 5eb87b01 and on the t6a tree 61151938 -- #1813 did not touch it).\n\n  tie my $x, 'Cnt', 3;  sprintf \"%03d\", $x     perl FETCH 1   PCL 2\n\nEvery other operator in the probe agrees with perl after #1813 except two where PERL reads twice (`-$tied` on a STRING value and `++$tied`, both perl's own quirks -- leave them) and `($x) x 2` (#1814's aggregate-copy shape).  The sprintf rows of t/op/tie_fetch_count.t (tests 195-220, `FETCH called just once using 'sprintf ...'`) are all `(missing)` behind the file's ruled smart-match abort at line 169 (NS cause), so the suite cannot see this; the guard has to be a Pl/t row (add to Pl/t/tie-fetch-once-01.t, the s473t6a file, inverse-verified).\n\nFIX SHAPE: the same `%p-read-operand` rule (cl/pcl-runtime.lisp, #1813): find the site in p-sprintf's argument handling that first INSPECTS the argument (a numberp/stringp classification, or a `defined` test) and then COERCES the place again with to-number/to-string; hand the already-read value to the coercion.  Check `printf` (same formatter) and the `%s`/`%d`/`%.1s` arms separately -- each format letter may take a different path.  Probe vs perl per letter before and after; bar = the sweep (cl/ change) + the op/ companion leg for tie_fetch_count.t.",
+   "id" : 1842,
+   "status" : "pending",
+   "subject" : "`sprintf` reads a TIED argument twice (FETCH count 2, perl 1) -- the #1813 'one read per operator' family's residue, invisible in the suite because t/op/tie_fetch_count.t's 26 sprintf rows sit behind the smart-match abort"
+}

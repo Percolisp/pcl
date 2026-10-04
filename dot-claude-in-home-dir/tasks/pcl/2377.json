@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FOUND s498c (Opus, 2026-09-26), member 0's blocked-mask variant.\nReproducer: `perl -MPOSIX -e 'POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new(SIGUSR1)); exec @ARGV' -- perl -e '$|=1; $SIG{USR1} = sub { print \"caught\\n\" }; kill USR1 => $$; print \"end\\n\"'` prints `end` (the signal stays pending); the same under ./runpcl prints `caught` then `end`.\nCause: sb-kernel:signal-cold-init-or-reinit ends by UNBLOCKING every signal (it undoes the C runtime's block_blockable_signals).  The #2263 capture point (the encapsulation of that function) could also record the inherited mask and re-block it after SBCL's start-up, excluding the signals SBCL needs (the deny list; SIGURG for interrupt-thread).  Rare in practice (a parent that execs with signals blocked); not-supported \"%SIG\" names it.",
+   "id" : "2377",
+   "status" : "pending",
+   "subject" : "EDGE: an inherited BLOCKED signal mask is cleared at SBCL start-up; perl keeps it (a blocked USR1 never runs perl's handler, PCL runs it)"
+}

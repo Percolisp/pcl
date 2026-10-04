@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FOUND s496a (Opus, 2026-09-26) while measuring #2372 (a pattern that cannot compile DIES) on the companion.\n\nRegex RECURSION -- `(?R)`, `(?0)`, `(?1)`, `(?+1)`, `(?-1)`, `(?&name)`, `(?P>name)` -- has no cl-ppcre counterpart.  Before #2372 such a pattern was a stderr warning plus a NO-MATCH (silently wrong); since #2372 it DIES at its first match, trappably.  perl matches it.\n\nMinimal reproducer (perl 5.40.3 vs PCL):\n    my $r = eval { (\"<a<b>>\" =~ /^(<(?:[^<>]+|(?1))*>)$/) ? \"match\" : \"no\" } // \"died: $@\";\n    print \"$r\\n\";\n  perl:            match\n  PCL b6560c21:    no   (+ \"Regex syntax error\" warning)\n  PCL s496a:       died: Character '1' may not follow '(?' in regex; ...\n\nCOST MEASURED: t/re/pat_advanced.t's top-level `ok /^(<((?:(?>[^<>]+)|(?1))*)>(?{push @stack, $2 }))$/` (line 1122) now aborts the file: C_ok 1262 (b6560c21) -> 698 (s496a).  The rows past it are unrelated; they ran on the old no-match.\n\nFIX SHAPE: cl-ppcre has no recursion.  Options: (a) a bounded expansion (inline the group N levels deep -- perl-incorrect past the bound, so it must DIE at the bound, never no-match); (b) a :filter-based sub-matcher calling the group's own scanner recursively at the position (cl-ppcre's :filter can consume input); (c) the PCRE2 spike (APPROVED, LOW priority, USER 2026-09-06).  Measure the population first: `grep -a -r -E '\\(\\?(R|[0-9+-]|&|P>)' ` over the corpora.  docs/not-supported.md \"Regex recursion\" names this task.\n",
+   "id" : "2382",
+   "status" : "pending",
+   "subject" : "regex RECURSION ((?R) (?1) (?+1) (?&name) (?P>name)) has no cl-ppcre counterpart: a silent no-match before #2372, a DIE at the first match since -- t/re/pat_advanced.t:1122 now aborts the file (C_ok 1262 -> 698)"
+}

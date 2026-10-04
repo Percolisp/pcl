@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s452ab (Opus, round 11 agent AB) from the #734 probes.  PRE-EXISTING\n(identical before and after that work) and unrelated to it.\n\n    sub cxt { my $c = wantarray ? \"list\" : defined(wantarray) ? \"scalar\" : \"void\";\n              return \"printf '$c\\n'\" }\n    print \"bts=[\", scalar(`${\\ cxt() }`), \"]\\n\";\n        perl: bts=[list]        PCL: bts=[scalar]\n\n`\\ EXPR` propagates LIST context to EXPR (`\\` applied to a list yields a list\nof references), so a `${\\ f() }` interpolation calls f in LIST context.  PCL\nlowers the interpolated `${\\ ...}` block with a SCALAR context.  Measured\ninside a backtick body, but the mechanism is the interpolation of `${\\ ...}`,\nnot the backtick: probe the same shape in a plain double-quoted string first.\n\nThe idiom matters because `${\\ f() }` is the standard way to interpolate a\nCALL into a string, and t/op/exec.t rows 31-32 use its literal form\n(`${\\\"hello\"}`, which is context-insensitive and works).\n\nBAR: the row above in a dq string, in a backtick body and in a heredoc; the\nlist form `@{[ f() ]}` (which is already list context -- check it did not\nregress); an f() that returns a LIST (perl takes the last ref); emission A/B.\n",
+   "id" : 754,
+   "status" : "pending",
+   "subject" : "an interpolated backslash-ref block calls its EXPR in SCALAR context; perl propagates LIST context"
+}

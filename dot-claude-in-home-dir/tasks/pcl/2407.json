@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FOUND s497b while splicing its companion movers: both readings reproduce on a `git archive 24422497` extraction (scratch/s497b/companion-base-1.log), so they were already in main at launch -- a mover some earlier batch did not splice.  s497b spliced the numbers (baselines/perl-suite-run.tsv sig column names this task) and added the two NEW rows to baselines/perl-suite-fails.tsv citing this task, so the files read clean; the CAUSE is not located.\nTo do: bisect over main's recent merges (s494g / s495f) with the two files, attribute, and re-cite the rows.",
+   "id" : "2407",
+   "status" : "pending",
+   "subject" : "Companion snapshot drift that is NOT s497b: comp/require.t 910/837 -> 911/836 (row \"require ignores I/O layers\" fixed, one (AA) module_true row new) and op/ref.t -1 (\"UNIVERSAL::AUTOLOAD called when freeing qr//\" newly failing) -- identical on a 24422497 extraction"
+}

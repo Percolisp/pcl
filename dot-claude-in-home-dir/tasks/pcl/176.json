@@ -1,0 +1,9 @@
+{
+  "id": "176",
+  "subject": "pack.t is INVISIBLE to the sweep gate: 0 baseline rows because it always TIMEOUTs",
+  "description": "DONE s322. Measurement fix shipped: sweep-perl-tests.pl retries a TIMEOUT once at 3x the timeout at the END of the queue (--no-retry disables); both inverse guards probed (still-too-slow retries exactly once and lands TIMEOUT; --no-retry restores the single attempt).\n\nMEASURED s322: pack.t times out at 90s, retries at 270s, completes in 166s -> 5636 pass / 89 fail, and those failures are IDENTICAL to the blessed baseline (52 unique descriptions both sides) -> sweep-diff 0 new / 0 fixed.\n\nPREMISE CORRECTION: the task's original claim \"0 baseline rows\" was FALSE. docs/fail-baseline.tsv has always carried 58 pack.t rows; the claim came from grepping a TSV that contains NUL bytes, which makes grep treat the file as binary and print nothing. The real hole was narrower but still real: a timing-out file's baseline rows are reported \"DID NOT RUN - unverified\", so a regression inside it is invisible while the headline still reads \"0 new\". That hole is now closed.\n\nNothing left to bless post-R1 (Fable's step 2 is moot - the rows were already blessed). What remains is ordinary near-green triage of those 52 known failures, and the separate slowdown task #184.",
+  "activeForm": "Implementing the sweep TIMEOUT retry",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499a (Opus, 2026-09-27, measurement only), ~/pcl-agent-scratch/s499/s499a/REPORT.md.\n\nMEASURED (min of 3, ~/pcl-agent-scratch/s499/s499a/sizes/): a generated ordinary program (N subs of hashes/regex/sprintf, bin/gen-prog.pl), under pcl with the script cache cold (source touched; modules warm):\n  gen100 (99 lines):   transpile 0.36 s, compile 0.08 s, warm run 0.045 s\n  gen1000 (999 lines): transpile 2.52 s, compile 0.66 s, warm run 0.058 s (perl 0.011 s)\n  standalone: `perl pl2cl one-line.pl` 0.171 s (`perl -MPPI -e1` 0.051 s), `pl2cl gen1000.pl` 3.50 s, `PPI::Document->new(gen1000.pl)` 0.221 s.\nSo about 3 s of the 3.5 s is PCL's own compiler (Parser2/PExpr/emission), ~3 ms per line, and ~0.12 s per spawn is loading it.  p-transpile-file (cl/pcl-runtime.lisp) runs `perl pl2cl` per script/module transpile; the `pl2cl --server` the string-eval path keeps is not used for them.\nWHO PAYS: first runs only (the script cache hides it after): everyday first runs spend 20.4 s of 78.6 s transpiling (101 programs), Rosetta 122 s of 470 s (499 programs).  No task found on pl2cl throughput itself (the '50 % compile budget' rule guards regressions, not the level).  Next measurement owed: a Devel::NYTProf of pl2cl on gen1000 to name the hot subs.",
+   "id" : "2423",
+   "status" : "pending",
+   "subject" : "PERF (first run / after an edit): pl2cl costs ~0.17 s fixed + ~2.5-3 ms per LINE -- a 1000-line program transpiles in 2.5-3.5 s (PPI's parse is 0.17 s of it); every script/module transpile at run time spawns a fresh `perl pl2cl`"
+}

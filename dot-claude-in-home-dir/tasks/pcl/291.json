@@ -1,0 +1,18 @@
+{
+  "id": "291",
+  "subject": "DONE s388b (merged 297b5e4): poisoned-`my` family deleted — enabler + 3 families; #205 closes; TOTAL +34",
+  "description": "SHIPPED s388b, merged to main at 297b5e4.  #205 closes with it.\n\nReplayed the four s384 commits the full sweep had rejected, once all four\nblockers they exposed were closed (#294 a311943, #298 a1e3814, #297 e3616eb,\n#296 66bdb93).  Branch wip/s388-291, four commits, each independently gated:\n\n 62d88e2  enabler: _forward_global_decls stops excluding _seg_lex names in\n          FILE mode (`my $lb = $free_out ? ($seg_lex // {}) : {}`); EVAL mode\n          keeps the exclusion, because there the list is the p-eval-thunk's\n          capture PARAMETERS from the caller, not declarations.  #205 CLOSES.\n          Gate 5109.\n 2817d96  delete __shadow__ (nested bare block).  Gate 5110.\n 9e2760d  delete __cond__ (if/while/C-for head).  Gate 5117.\n 781f3f8  delete __emb__ — REPLACED BY NARROWING THE VETO.  Gate 5118.\n\nWHY THE ENABLER IS FIRST: the renames had TWO causes and the plan named only\none.  Cause A (removed by the #290 flip): a defvar proclaims its symbol\nspecial, so declaring a name the section also let-binds turned that `let` into\na dynamic rebind.  Cause B: _forward_global_decls SKIPS any _seg_lex name, so a\nnested `my $x` cost the global $x its declaration.  Probed: deleting\n_rename_poisoned_block_mys alone drops `(p-defcell @a …)` and file-level @a\ncrashes.\n\nFAMILY 3 IS THE REAL FIX, not a deletion.  _lower_block's let-hoist VETO\npresumes another named sub shares the forward-declared global as this decl's\ncell — true at FILE level (#199), false inside a sub body (#265, #272).  s368\ncould not narrow it because the `let` suppressed the GLOBAL's declaration; the\nenabler removed that, so the narrowing IS the fix.  11 lines added, 96 removed.\n\nRESULT: corpus rename bindings 716/128/5 -> 36/0/0, ~345 lines out of\nParser2.pm + ExprToCL.pm.  The 36 survivors are _gate_seam_my_shadow, a v1-seam\nmechanism with a live cause, gone with #153.\n\nFULL SWEEP: GATE clean after the baseline edit — 0 new / 0 fixed, 2 unstable\n(postfixderef.t, ref.t, known PARTIAL).  TOTAL passing 18498 -> 18532 (+34),\nper file: closure.t +14, eval.t +13 (9 of them #296-B1's), method.t +4,\nfor.t +2, my.t +1.\n\nFOUR new closure.t rows edited into docs/fail-baseline.tsv by hand with causes\n(newly REACHABLE, not new breakage — the file used to die at load and drop a\nwhole top-level form): t264 RT #1028, t265 RT #10085, t270 (unnamed,\nis($flag,1) at closure.t:653) = DESTROY at scope exit (#198); t272 'cloneable\nwith //ee' = an anon sub is not cloned per statement-modifier `for` iteration.\n\nGOTCHAS WORTH KEEPING (also in DECIDED s388c/s388d):\n - A replay of reverted work is NOT a cherry-pick: every Parser2.pm hunk\n   conflicted because #296's two passes now sit INSIDE families 1 and 2's\n   deletion spans, sharing their comment headers.\n - Twice the s384 hunk tried to shorten _eval_lexical_alist's strip list back\n   to its s384 shape and would have taken `__excl__` (#296) with the dead\n   suffixes.  A suffix leaves that list only when its MINTER leaves.\n - corpus-diff carries no signal for a change like this (emission moves for\n   nearly every file by construction); the sweep is the measurement.</description>\n</invoke>\n",
+  "activeForm": "Deleting the poisoned-my machinery (#291)",
+  "status": "completed",
+  "blocks": [
+    "292",
+    "289"
+  ],
+  "blockedBy": [
+    "290",
+    "296",
+    "297",
+    "298",
+    "299"
+  ]
+}

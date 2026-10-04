@@ -1,0 +1,9 @@
+{
+  "id": "67",
+  "subject": "E1 M-A: interpolated-text rewrite for rename passes (pack.t, yadayada.t, sub.t)",
+  "description": "Generalize _rewrite_var_uses's interpolation rewriter (shadow-aware) into _rename_decl_within so the cond-my rename and shadow rename passes stop refusing on interpolated uses. Clears pack.t (poisoned condition-my $base) + yadayada.t (my-shadow $err). sub.t already v2-native (s285 — the M-A table entry was stale). Prerequisite for M-B (ref.t/scalar.t).",
+  "activeForm": "Implementing M-A interp rewrite",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

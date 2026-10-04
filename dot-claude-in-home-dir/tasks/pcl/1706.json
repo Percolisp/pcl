@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t5d (Opus, 2026-09-13) by #1501 round 5 CHECK 2.\n\n`tools/pclperl-for-tests` accepts `-d` / `-d:Module` and IGNORES it, which is\nthe right thing for the harness (the child must not crash) but means every\nassertion about the debugger fails with empty output.\n\nWHAT THE 21 ROWS ASK FOR (t/run/switchd.t, t/run/switchd-78586.t): `DB::DB`\ncalled per statement under `-d`, `$DB::sub`, `%DB::sub`, `%DB::lsub`,\n`*DB::dbline` aliasing, `${\"_<-e\"}` (the source-line array per file),\n`DB::goto`, subroutine redefinition visible to the debugger, and\n`-d:whatever` not throwing line numbers off.\n\nThis is perl's debugger HOOK MODEL, not a switch: `-d` sets `$^P` and makes the\ncompiler emit a `DB::DB` call before each statement and populate `%DB::sub` and\n`@{\"_<$filename\"}`.  PCL has none of it, and adding it is a compile-model\nfeature (an emission mode), so this is a SIZE-FIRST task, not a filler.\n\nRelated: #1702 (the `#!perl -d:...` spellings reach it through the shebang\nline, so that task's rows overlap two of these).\n\nROWS: 19 + 2 blessed fail rows; no shortfall (both files run to their end).\n",
+   "id" : 1706,
+   "status" : "pending",
+   "subject" : "the `-d` debugger is absent: t/run/switchd.t (19 rows) and t/run/switchd-78586.t (2) assert DB::DB / %DB::sub / ${\"_<FILE\"} behaviour that PCL has no model for"
+}

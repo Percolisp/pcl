@@ -1,0 +1,11 @@
+{
+  "id": "269",
+  "subject": "PARKED behind #196 (measured s372, confirmed s373): re/reg_eval_scope.t's gate names a real capture; C_ok=5, all 47 assertions are (?{ }) — de-gating buys ~0 rows",
+  "description": "re/reg_eval_scope.t's remaining gate: \"Parser2 TODO: lexical 'r' possibly captured by nested sub f2\". RULED s366 §11.4 PROBE FIRST; s368 probe found the capture is REAL (not blind) and the general block-my-captured-by-named-sub mechanism already works.\n\nMEASURED s372 (the s369 §3 / s371 §6 precondition — DO NOT spend a session on the gate):\n - live: the file still transpile-FAILS on that single gate (0 rows produced).\n - the file's `docs/perl-suite-run.tsv` snapshot is **C_ok = 5** against perl's\n   48/1 — so the ratified bar for de-gating this file is 5 rows.\n - and those 5 are the ceiling only in principle: the file is 385 lines with\n   **73 occurrences of `(?{ … })` and all 47 assertions exercising regex-embedded\n   code blocks** (22 of them through fresh_perl_is).  PCL does not run `(?{ })`\n   at all (s368 probe: `{ my $s; my $r = qr/(?{ $s = 1 })/; sub f2 { \"\" =~ $r }\n   f2(); print $s }` -> perl 1, PCL undef, NO gate fired).  That is the #196\n   regex-engine axis, not capture/promotion.\n\nVERDICT: de-gating buys ~0 verified rows until the regex-engine axis moves.\nPark behind #196; re-open only when `(?{ })` blocks execute.  The gate itself is\nNOT known-wrong — the capture it names is real.",
+  "activeForm": "Filing the nested-sub capture residue",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [
+    "196"
+  ]
+}

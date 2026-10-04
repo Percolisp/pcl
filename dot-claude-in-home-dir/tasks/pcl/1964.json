@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 2 on t/op/each.t:319-330).\n\nThe rows:\n\n    use feature 'refaliasing'; no warnings 'experimental::refaliasing';\n    $a = 7;  my %h2;  \\$h2{f} = \\$a;  ($a, $b) = (each %h2);\n    is \"$a $b\", \"f 7\", 'each in list assignment';        # PCL: \" 7\"\n    ...  ($c, $d) = (values %h3);\n    is \"$c $d\", \"3 7\", 'values in list assignment';      # PCL: \" 7\"\n\nMEASURED, and this is the finding: the same code IN ISOLATION agrees with\nperl 5.40.3 exactly (probes/p9.pl rows 6-8 -- `each` after a refalias gives\n`f 7`, `values` gives `3 `, a plain `each` gives `k 9`; PCL byte for byte the\nsame as perl on all three).  So the divergence inside `t/op/each.t` is\nDOWNSTREAM STATE of the file, in the s473t6a sense (\"a row that agrees in\nisolation is downstream state and the cause must say so\"), and it is NOT\nisolated further here.\n\nWhat the file does before these rows that the probe does not: it runs 63\nearlier rows including the Unicode-key block whose keys COLLIDE under PCL\n(the file's rows 35/36/38, `NS:Unicode semantics differences` in this same\npass), a `keys`-assignment block, and `%ENV` iteration.  `$a`/`$b` are the\nsort globals and are written by earlier `sort` calls in the file.\n\nNEXT STEP when this is picked up: bisect the file rather than the statement --\nrun `t/op/each.t` with the blocks before line 319 removed one at a time until\nthe two rows agree, and only then write a mechanism.  Do NOT assume `each`,\nthe refalias or the list assignment: all three are measured innocent on their\nown.\n",
+   "id" : 1964,
+   "status" : "pending",
+   "subject" : "t/op/each.t rows 64/65 (`each`/`values` in list assignment) REPRODUCE PERL IN ISOLATION -- downstream state in the file, not isolated further"
+}

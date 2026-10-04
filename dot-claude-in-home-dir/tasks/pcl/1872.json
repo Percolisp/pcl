@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-17",
+   "description" : "FILED s473t6b (Opus, 2026-09-17) by #1501 round 9.\n\nPERL: `${^LAST_FH}` is a read-only GLOB REFERENCE to the handle most recently\nread from or written to -- set by `readline`, `print`, `tell`, `eof`, `seek`\nand friends.  For a bareword handle it is a ref to that glob; for a lexical\nhandle it is a ref to the SCALAR holding the glob (\"referencing lexical\ncoercible glob\").\n\nPCL: `${^LAST_FH}` is undef, always; nothing sets it.\n\nREPRODUCER (perl 5.40.3 vs PCL, probes/p3.pl H2):\n\n    open my $fh, '<', 'p3.pl' or die;\n    my $t = tell $fh;\n    printf \"lastfh=%s isref=%s\\n\",\n      (defined ${^LAST_FH} ? 'def' : 'undef'), (ref(${^LAST_FH}) || '(none)');\n\n    perl: lastfh=def isref=GLOB\n    PCL:  lastfh=undef isref=(none)\n\nROWS: baselines/perl-suite-fails.tsv op/magic.t 159 `${^LAST_FH} after tell`,\n160 `${^LAST_FH} after another tell`, 161 `${^LAST_FH} referencing lexical\ncoercible glob`.\n\nSHAPE: one place to write it -- the handle resolution every IO op already goes\nthrough (`%p-out-target` for the write side, the readline/tell/eof side's own\nresolver) -- plus a read-only magic cell for the name.  The cost is one store\nper IO op, which is why it wants to be set where the handle object is already\nin hand rather than in each op.  The `ref` answer has to be a GLOB ref for a\nbareword and a SCALAR ref for a lexical handle, which is #1664's typeglob\nmodel; the two rows that ask for the bareword spelling are behind it.\n\nLow value on its own (3 rows) -- a filler, or free once #1664 lands.\n",
+   "id" : 1872,
+   "status" : "pending",
+   "subject" : "${^LAST_FH} is undef in PCL -- nothing sets it; perl makes it a glob ref to the handle most recently read from or written to (3 op/magic.t rows)"
+}

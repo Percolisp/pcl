@@ -1,0 +1,8 @@
+{
+  "id": "101",
+  "subject": "PCL: get_global callback fails (\"form compiled with errors\") — new pclxs t/98-globals.t skips PCL entirely",
+  "description": "DONE (PCL d5b7125). Two bugs stacked: (1) `(declare (ignorable create))` inside with-xs-guard — the guard wraps its body in PROGN and a declaration in a progn is a compile-time ERROR, so SBCL signalled at first call and the guard turned it into 0; (2) underneath, GV_ADD must vivify the stash as well as the variable, and p-xs-global-symbol only did find-package. 12/12 of pclxs t/98-globals.t pass through PCL now.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

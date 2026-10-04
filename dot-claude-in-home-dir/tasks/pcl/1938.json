@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10), probed vs perl 5.40.3.\n\nWHAT ALREADY WORKS in PCL (probed, identical to perl): `ref(qr/foo/)` is\nRegexp; `$$qr` is the pattern text `(?^:foo)`; `bless \\(my $x='Bad'), 'Regexp'`\nthen `$$d` is 'Bad' and `\"$d\"` is `Regexp=SCALAR(0x...)`.\n\nWHAT FAILS (t/op/qr.t, 14 blessed rows):\n  * re-blessing a REAL qr// into another class -- \"The object isa Pie\",\n    \"The object isa Stew\", and `\"$e\"` afterwards;\n  * `ref` / the referent of a COPY of a qr (\"copying a regexpvlv\", \"PVLVs\",\n    \"stored regexp\", \"REGEXP RV leak\");\n  * two rows that are NS:Warnings-gated diagnostics (#221) -- \"produces\n    non-numeric warning\".\n\nSo the gap is the qr object's IDENTITY under bless and copy, not its\nconstruction: in perl a qr// is a REGEXP SV that a blessed scalar ref points\nat, and blessing the ref does not replace the referent.  Read `p-qr` and the\n`Regexp` class beside NS:Scalar copy does not preserve reference/SV identity.\n",
+   "id" : 1938,
+   "status" : "pending",
+   "subject" : "A qr// object re-BLESSED into another class, stored in a PVLV, or copied: `ref` and the referent (op/qr.t, 14 rows)"
+}

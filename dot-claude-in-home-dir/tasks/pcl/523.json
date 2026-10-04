@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent G (s443g; found via the nohup gate flake).  PRE-EXISTING divergence: %SIG does not reflect an INHERITED disposition.  Under nohup/setsid (SIGHUP ignored by the parent), perl reports $SIG{HUP} eq 'IGNORE'; PCL reports undef.  Any PCL program launched with an inherited-ignored signal disagrees with perl about %SIG.  Fix shape: at %SIG read (or image init), query the actual disposition (sigaction) and report IGNORE for SIG_IGN.  Bar: probe under ( trap '' HUP; ... ) vs plain launch, both vs perl; transpile-test-06 t37 is the existing row that sees it.",
+   "id" : 523,
+   "status" : "pending",
+   "subject" : "pcl"
+}

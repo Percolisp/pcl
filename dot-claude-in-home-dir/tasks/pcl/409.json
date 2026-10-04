@@ -1,0 +1,7 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s418c from a live observation (USER): during a full sweep, one\n`perl pl2cl --server` process reached ~10 GB RSS before ending normally.\nThe run was unharmed (sweep GATE clean), but a transpile server that big is\neither (a) MONOTONIC GROWTH across requests â PPI documents / OpcodeTree\nnode trees / Environment state retained per file and never freed, so a long\nsweep accumulates hundreds of files worth â or (b) one pathological file\n(the op/cond.t family is excluded for exactly that).  (a) is the likely\none for a server.\n\nTHE CHEAP DISCRIMINATING MEASUREMENT (do this first, ~10 min): start one\nserver, feed it the same SMALL file N times, and read RSS after each â flat\nmeans (b) and the task retargets at finding the file; growing means (a) and\nthe fix is freeing per-request state (find what holds the reference: the\nPPI Document, the node tree, a memo table keyed by file).  Note perl rarely\nreturns freed memory to the OS, so measure growth BETWEEN requests of equal\ninput, not absolute size.\n\nContext: the sweep runs 108+ files through server transpiles; 10 GB on a\n13.5 GB box is close to the OOM line the --jobs guidance already respects\n(#160, s399).  A leak fix would also speed the sweep (less paging).",
+   "status" : "open",
+   "title" : "pl2cl --server reached 10 GB RSS during a sweep â measure: leak-per-request or one file?"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s491.  s473t6c named it and did not splice it (not its own); Fable re-measured it at the s491a review: `tools/run-perl-suite.pl --jobs 1 comp/require.t` on main 9e323b30 and on the s491a tree give the SAME verdict (DIFF 911/836, REAL MOVE, both runs agree) and the SAME row pair, so it predates both batches -- the #1834 class (a mover nobody attributed when it happened).  The file is QUICK-CAPPED (registered allowance 450 s, task #326), so an `--all --quick` run never measures it and the drift can sit unseen.\n\nTODO: bisect the two rows over the commits since the snapshot row was last spliced (s488a touched this block; `git log -S'comp/require.t' -- baselines/perl-suite-run.tsv`), give each its CAUSE, splice the snapshot row and the two fail-baseline rows BY EDIT (per-file bless flags, #1835).  Logs: ~/pcl-agent-scratch/s491/review/s491a-companion.log and s491a-companion-MAIN.log.\n\nAlso seen in the same leg, NOT a drift: lib/overload_fallback.t and lib/overload_nomethod.t have NO row in perl-suite-run.tsv (lib/ is outside the blessed population), so their one failing TODO row reads as NEW on every tree -- either add their first-measurement rows or keep them out of legs.",
+   "id" : 1993,
+   "status" : "pending",
+   "subject" : "Companion SNAPSHOT drift, not caused by any batch of s491: t/comp/require.t reads 911/836 where baselines/perl-suite-run.tsv says 910/837 -- one row FIXED (`require ignores I/O layers`), one NEW (`(AA) use feature \":5.38\" ... via $^P = 10; require mtt...`), IDENTICAL on 4c6565e5 (measured by s473t6c), 9e323b30 (main) and the s491a tree (Fable, --jobs 1, parallel and serial agree)"
+}

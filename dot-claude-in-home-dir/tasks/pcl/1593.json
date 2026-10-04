@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-08",
+   "description" : "FILED s479 (Fable, 2026-09-08) from the s473h merge-review probes.  PRE-EXISTING: identical on main a9f2a264 and on the s473h tree c8e8a848.\n\nPROBE (perl 5.40.3 vs ./runpcl):\n    my $sr = \\\"q\"; my $v = eval { $#{$sr} }; print defined $v ? $v : \"undef\", \" err=[$@]\\n\";\n    perl:  undef err=[Not an ARRAY reference at ...]\n    PCL:   -1 err=[]                  <- an empty-array answer for a referent that is not an array\n\nMECHANISM: s473h member 2 routed `$#{\"name\"}` (symbolic) through `%p-symref-array`, and member 1 made `${$aryref}` the fatal through the REFERENT rule (`%p-ref-referent`); `p-array-last-index` on a REFERENCE operand still decides by the unboxed value`s shape (a non-array referent reads as \"no elements\").  Same family: probe `$#{$hashref}` (perl: Not an ARRAY reference), `$#{$coderef}`, `$#{undef}` under strict refs (perl: Can`t use an undefined value as an ARRAY reference) and the WRITE side `$#{$sr} = 3`.\n\nFIX: one referent check at the last-index accessor (read and write), sharing member 1`s predicate (rule 11 -- do not add a second type test); guard rows in Pl/t/ref-to-ref-01.t or symref-package-01.t beside the s473h rows, inverse-verified.  `cl/` change -> the full sweep + companion op/ref.t + op/array.t.  SIZE: S.",
+   "id" : 1593,
+   "status" : "pending",
+   "subject" : "`$#{$scalarref}` / `$#$scalarref` answers -1 where perl dies \"Not an ARRAY reference\" -- the last-index accessor is the `$#` sibling of the s473h referent rule and still type-sniffs"
+}

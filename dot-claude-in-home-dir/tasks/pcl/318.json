@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "Found by the s394 review probe of s393d/#314 F-A1 (the \"new axes are filed\" half of the s369 filler rule).  NOT introduced by F-A1: the scalar spelling had it since the lead-decl branch shipped; F-A1 extends the same lowering to containers.\n\nREPRODUCERS (perl oracle first, PCL second):\n\n    $x = 9; my $x, $b1 = $x + 1; print \"$main::b1\\n\";\n    # perl: 10    PCL: 1\n\n    @x = (1,2); my @x, @y = @x; print scalar(@main::y), \"\\n\";\n    # perl: 2     PCL: 0\n\nCAUSE: _lower_block lead-decl branch (Pl/Parser2.pm, _lead_decl_with_expr_tail shape) lowers the whole `VAR <trailing>` tail INSIDE the fresh let.  Perl rule: a `my` variable is not visible until the statement AFTER the declaration, so every read of VAR in the tail sees the OLD binding (package global or outer lexical).\n\nFIX SKETCH: evaluate the tail with the old binding still in scope â e.g. lower the tail void-expression BEFORE the let.  The lead VAR operand itself is the fresh lvalue in perl, but in this shape it is a bare VAR in void context, so its value is unobservable without overload; the observable part is reads of VAR in the REST of the tail.  Probe the `my $a . $foo` non-comma shape too.\n\nRARITY: needs non-strict code whose tail side-effect READS the declared name â occurs nowhere in the corpus or the companion suite (opbasic/cmp.t is 12078/12078 without it).  Low priority.\n\nBAR: both reproducers + the non-comma shape vs perl; corpus-diff; gate; guard rows (my-decl-tail-01.t is 14 s â check wall time before adding, else start -02).",
+   "id" : "318",
+   "status" : "pending",
+   "subject" : "`my VAR, <tail>;` â the tail reads the FRESH binding where perl reads the OLD one (both sigil spellings)"
+}

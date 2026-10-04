@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s439 (Fable) as a pointer record so the next Q7 session does not\nre-derive; CLOSE when its three pointers are closed.\n\n * `use Math::Trig; printf \"%.4f\", -pi` prints 0.0000 (perl -3.1416): the\n   IMPORTED `()`-sub spelling of #476 (`-NAME` with a DECLARED sub is a negated\n   CALL in perl, the string in PCL).  #476 owns it; its fix must ask the same\n   term predicate #365 made cross the `use` (`Pl::Environment::proto_is_zero_arg`\n   on the imported record) -- add this row to #476's acceptance.\n * `sub u (_) {...}; $_ = \"dflt\"; print u` -> perl u(dflt), PCL u(): #260,\n   pre-existing, unchanged by #453 -- #453 routed the PARSE right; the call-site\n   `$_` default is still missing.  Not a new filing.\n * #484 (`pi / 2 + pi / 4` repaired to a match and dropped) -- ruled s439:\n   measure shape (a), a second post-repair pre-merge; `docs/fable-answers-s439.md`.\n",
+   "id" : 493,
+   "status" : "pending",
+   "subject" : "Pointer record from the s439 review probes: `-pi` (imported `()` sub) is #476; the `(_)` call-site `$_` default is #260; #484 is ruled shape (a) -- no new bug"
+}

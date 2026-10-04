@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494p (Opus, 2026-09-25) while probing the loop-modifier desugar (member 3) — PRE-EXISTING on 3e8bff3e in BOTH spellings, so not caused by the desugar.\n\nReproducer (scratch/s494p/loc2.pl in the s494p worktree):\n    our $r = \"o\"; sub rr { $r } my @s; (local $r = $_), push(@s, rr()) for 1..2; print \"@s $r\\n\";\n    our $t = \"o\"; sub tt { $t } my @u; for (1..2) { (local $t = $_), push(@u, tt()); } print \"@u $t\\n\";\nperl:  1 2 o   /   1 2 o\nPCL:   1 2 2   /   1 2 2\nA statement-initial `local $x = …;` works (it opens a scope over the rest of the block); a `local` that is only a SUB-expression of the statement is lowered without its restore.  Perl restores at the end of the enclosing BLOCK (here: the loop body = each iteration).  Low frequency (the idiom is rare), but silent.  Where: the local machinery's statement-level entry (Pl::Parser `_is_local_stmt` / `_process_local_declaration`) only recognises a LEADING local; an embedded one needs the same save/restore around the rest of its block.",
+   "id" : "2112",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a `local` EMBEDDED in an expression statement (`(local $r = $_), push(@s, f()) for 1..2;` or the same inside a block loop body) is never RESTORED at the end of its scope — the global keeps the last value (perl: restored)"
+}

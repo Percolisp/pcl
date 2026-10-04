@@ -1,0 +1,9 @@
+{
+   "activeForm" : "Verifying the ternary-label PPI workaround",
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s404 (Opus 5) during the rule-13 audit of every PPI workaround in the\ntree against docs/ppi-upstream-bugs.md.\n\n`Pl::PExpr::_fix_ppi_ternary_label_bug` (PExpr.pm ~5808, called from\ncleanup_for_parsing ~5636) exists because \"PPI parses `word :` in a ternary as\na Label instead of Word + Operator\".  On PPI 1.291 that does NOT reproduce —\nsix spellings all lex correctly (Word, Operator(:), Word):\n\n    my $r = $c ? foo : bar;      $c ? foo : bar;        print $c ? foo : bar;\n    f($c ? foo : bar);           $x = $c ? FOO : BAR;   $x = $c?foo:bar;\n\nSo either the trigger is narrower than the comment says (find it) or PPI fixed\nit (drop the workaround).  Both outcomes need the same first step.\n\nDO:\n 1. find a shape that still produces a PPI::Token::Label in a ternary — try a\n    ternary inside a hash constructor, after a fat comma, inside a heredoc-ish\n    interpolation, and with a package-qualified word (Foo::bar :);\n 2. if found: log it as its own ppi-upstream-bugs.md section with the dump,\n    add the ppi-bug-report.t row and a canary keyed on it (that is what the\n    rest of the workarounds now have);\n 3. if NOT found: delete the workaround, with the usual bar — corpus-diff over\n    both populations must be IDENTICAL (it should be a no-op if the trigger\n    never fires), gate, and a canary row that goes RED if PPI ever regresses.\n\nCONTEXT: the audit also logged three previously-undocumented PPI bugs whose\nworkarounds ARE live (§15 `)-1` negative-number split, §16 perl 5.40 `^^`,\n§17 subscript-after-deref / KV-slice structure class), plus §14 (the readline\nafter a list operator).  This is the only workaround left whose bug could not\nbe reproduced.\n",
+   "id" : 357,
+   "status" : "pending",
+   "subject" : "PPI ternary-label workaround may be OBSOLETE — find the shape or drop it"
+}

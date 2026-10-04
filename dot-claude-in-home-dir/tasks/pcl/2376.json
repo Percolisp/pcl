@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "s498c (Opus, 2026-09-26).  CI run 36192024430's public annotation showed `Failed tests: 9-11` and nothing about WHY -- the rows' got/expected were minutes earlier in an admin-only log.\ntools/ci-step: besides the 40-line tail, every `not ok` line and every `#   Failed test` block WITH the `#` lines after it, split over at most four `::error` annotations capped near 3000 bytes each.  Guard tools/t/ci-step.t (10 rows, 7 fail against the base ci-step).\nPl/t/signals-01.t: prints `sbcl --version`, the runtime-derived deny list + captured inherited ignores, and the test process's SigIgn/SigBlk/SigCgt once; a failing row prints both sides' status + stderr and the row signal's disposition; reads are bounded at 30 s (an inherited ignore used to HANG the file: the perl reference never exits when INT is ignored).\n=== DONE (s498c) ===\nCI GREEN on cbb683de (run 36237155154, 2026-09-26): job `gate`, every step success, incl. \"Test gate (prove, fresh saved core)\" -- the runner that failed signals-01.t rows 9-11 on 24422497 (run 36192024430).",
+   "id" : "2376",
+   "status" : "completed",
+   "subject" : "CI annotations carried only the step tail: tools/ci-step re-emits every failed TAP row with its diagnostics; signals-01.t prints the environment"
+}

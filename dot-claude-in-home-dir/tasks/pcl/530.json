@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-24",
+   "description" : "FILED s444 from agent F (s443f) probes; PRE-EXISTING.  A registered bareword handle used as a WORD inside an ordinary expression emits a bare CL symbol -> unbound variable: `open(G,\"<\",...); print G . \"x\";` -> perl Gx (string \"G\" dot x), PCL dies \"The variable G is unbound\" (emission (p-. G \"x\")).  gen_leaf emits a handle name unquoted because the %p-fh-arg slots quote it themselves; outside such a slot nothing does.  Fix shape: outside a handle slot the Word is a STRING (strict-subs notwithstanding, principle 9).  This blocks running the close-G-dot inverse live (guarded on emitted shape today).\n\n=== s449r (Opus round-7 agent R, 2026-08-29): ATTEMPTED, MEASURED, BACKED OUT.\nThe bug is re-probed and unchanged (five spellings crash: `my $s = G`,\n`\"x\" . G`, `(G, 1)`, `G eq \"G\"`, `$s .= G`).  The attempt -- mark the Word\n`_bareword_string` at handle_subcalls' registry exit and let\n`_read_star_slot_bareword` claim it back -- FIXED all five and BROKE six\nhandle slots (chdir.t, closure.t, eval.t, flip.t and both shapes files), because\nthat helper reaches only ALL-CAPS names in a `*`-prototype funcall slot.\nThe finding: at that exit the token run for `close(G)` and for `my $s = G` are\nthe SAME (`G` alone), and for `pipe(READ, WRITE)` and `(G, 1)` the same again --\nthe discriminator is the PARENT slot, which the scan does not have.  Full\nrecord, the six diff hunks and the three ways out: task #641.  Do not retry the\nmarker-plus-claim-back shape as written.\n",
+   "id" : 530,
+   "status" : "pending",
+   "subject" : "pcl"
+}

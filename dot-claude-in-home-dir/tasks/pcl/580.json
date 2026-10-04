@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-25",
+   "description" : "FILED s446m (Opus, agent M, from the #73 ref()/stringification probes); PRE-EXISTING, nothing in s446m touched it.  `bless {}, \"main::Bar\"` reports ref() = \"main::Bar\" in PCL; real perl reports \"Bar\" WHEN a stash named Bar already exists (perl resolves main::Bar to the SAME stash and ref() answers its HvNAME), and \"main::Bar\" when it does not -- so PCL agrees in the second case and diverges in the first.  Probe (m-probe2.pl): `package Bar; sub who {...} package main; my $o = bless {}, \"main::Bar\"; print ref($o)` -> perl \"Bar\", PCL \"main::Bar\"; the METHOD call works in both (PCL strips the root-stash prefix when it resolves the package).  Consequence: `ref($o) eq ref($p)` is false in PCL for two objects perl calls the same class.  Fix shape: bless would have to canonicalise the class name to the name of the stash it resolves to (a p-bless-time normalisation, NOT a dispatch-time one) -- which is exactly what a stash POINTER in the box would give for free (see #73).  Bar: the four spellings (Foo / main::Foo with and without an existing package / ::Foo) vs perl, and the ref-equality row; a row in Pl/t/bless-01.t or method-dispatch-01.t.",
+   "id" : 580,
+   "status" : "pending",
+   "subject" : "pcl"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "76",
+  "subject": "Suite fixture: shadow t/ with PCL test.pl stub in run-perl-suite.pl",
+  "description": "Shadow t/ dir (symlinked real tree + PCL stubs test.pl/charset_tools.pl/loc_tools.pl overlaid), transpile+SBCL CWD=shadow, testlib in saved core, scan filter relaxed to @INC-only. Smoke-tested OK; full --all sweep running in background (b66dhe6bs). Remaining: digest sweep results, update docs/perl-test-suite-survey.md + docs/perl-suite-run.tsv, commit.",
+  "activeForm": "Adding test.pl fixture route to suite runner",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

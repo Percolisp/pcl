@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "Found by the #202 harness audit (docs/tap-assertion-audit.md, \"Not changed\").\n\ncl/pcl-test.lisp:\n - `pl-which_perl` returns the literal \"/home/bernt/perl5/perlbrew/perls/perl-5.40.3/bin/perl\" — machine-specific, and it names REAL perl where the sweep's policy since #90 is that child interpreters run under PCL via tools/pclperl-for-tests ($ENV{PCLPERL}). Users: closure.t, pack.t.\n - `pl-run_perl` ignores its args and returns undef, so every row behind it fails with no cause. User: each.t:340.\n\nNeither is an assertion, so #202 left them alone; both are values a test then judges. perl-tests/test.pl defines neither (our copy has drifted — see #150), so these stubs are the only definition.\n\nShape of the fix: which_perl → $ENV{PCLPERL} when set, else the running interpreter, and die if neither resolves; run_perl → a real child launch through the same wrapper fresh_perl uses.\n\nDONE s400 (732ba36), HALF BY DESIGN: which_perl returns $^X (derived,\nbyte-identical here, zero rows move) and run_perl's silent undef is now a\nrule-12 die (unreachable: zero files call it without requiring test.pl).\nThe $PCLPERL half was implemented and measured and is HELD as task #348 â\nUSER call, because it costs two measurement holes (#346, #347).",
+   "id" : "207",
+   "status" : "completed",
+   "subject" : "Harness stubs whose claim is unverified: which_perl hard-codes a perlbrew path, run_perl always returns undef"
+}

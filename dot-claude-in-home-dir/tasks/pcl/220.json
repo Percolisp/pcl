@@ -1,0 +1,8 @@
+{
+  "id": "220",
+  "subject": "Closed-handle value: close() leaves a defined not-writable value behind (buys never-opened-vs-closed distinction)",
+  "description": "RULED s338 (fable-answers-s337.md §4): YES, queued BEHIND #153/E4.1.\n\nToday %p-forget-fh leaves the variable UNDEFINED after close(), so `print $closed_fh ...` and `my $u; print {$u} ...` arrive at %p-out-fh-or-fail identical — which is why the \"Can't use an undefined value as a symbol reference\" die for a never-opened handle was measured-and-reverted in s337c (the measurement is recorded in %p-out-fh-or-fail's docstring; do not retry it without this task).\n\nFix shape: close() leaves a defined closed-handle value (glob/fh object marked closed). Then:\n- undef designator -> die \"Can't use an undefined value as a symbol reference\" (perl-correct);\n- closed handle -> current behavior (EBADF, no output, return false) stays;\n- fileno/-t/eof diagnostics on a closed handle become answerable.\n\nSame magic-cell family as #144 (\\$! aliasing) — implement with an eye on sharing the mechanism. Interaction: #198 (IO::Handle DESTROY at scope exit) fires on exactly this value, so landing #220 first makes #198 smaller.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

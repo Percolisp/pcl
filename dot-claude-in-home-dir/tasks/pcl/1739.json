@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t5f (#1501 round 7, 2026-09-13).  PRE-EXISTING; found by the #1737\nprobe table.\n\nperl's INFIX `isa` operator (feature 'isa', 5.32+) requires a BLESSED\nREFERENCE on the left.  Everything else is FALSE -- including a class NAME,\nwhich the METHOD spelling accepts:\n\n    use feature 'isa'; package Bar; sub new { bless {}, shift }\n    package main; my $b = Bar->new;\n    $b isa Bar      -> 1        Bar->isa(\"Bar\")      -> 1\n    \"Bar\" isa Bar   -> ''  <==  PCL answers 1\n    [] isa Bar      -> ''       (PCL: '' since #1737)\n    42 isa Zed      -> ''       (PCL: '' since #1737)\n    undef isa Zed   -> ''       (PCL: '' since #1737)\n\nSo after #1737 nine of the ten probed shapes agree and this is the tenth.\n\nWHERE: `Pl/ExprToCL.pm:1527` emits `(p-isa $left $right)` for the infix\noperator -- the SAME runtime function the method spelling uses, and the two\nhave different rules about a non-ref invocant.  perl's pp_isa calls\n`sv_derived_from_sv` only after `SvROK(left) && SvOBJECT(SvRV(left))`.\n\nTHE FIX SHAPE: not \"another arm in p-isa\" -- the discriminator is which\nSPELLING was written, which only the emitter knows.  Either emit a distinct\n`p-isa-infix` (one line, one new runtime function that checks blessedness then\ncalls p-isa), or pass a flag.  Read #1737's docstring first: p-isa is the\npredicate BOTH the method arms and the infix operator call, and its contract\nis \"1 or '', never undef\".\n\nSIZE: no baseline row today (t/uni/universal.t does not use the infix\noperator).  It is a silent wrong for code that writes `$maybe_class isa Foo`.\n",
+   "id" : 1739,
+   "status" : "pending",
+   "subject" : "the INFIX isa operator wants a BLESSED REFERENCE on the left -- \"Bar\" isa Bar is \"\" in perl and 1 in PCL, because the emitter routes it to the same p-isa the METHOD spelling uses"
+}

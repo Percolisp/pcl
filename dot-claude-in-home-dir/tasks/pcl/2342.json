@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s495f while running its companion legs (scratch/s495f/companion.log, base A/B scratch/s495f/companion-base.log).  NOT caused by s495f: each file below gives IDENTICAL counts AND an identical per-row fail list on a 3d9b3712 extraction and on the s495f tree, so the snapshot / row baselines were already stale when s495f started (\"pre-existing\" is WHEN -- the cause is some earlier merge; not bisected here).\n\n  run/exit.t     snapshot DIFF, 4 more passing rows than today: NEW failing rows WEXITSTATUS / WIFEXITED / WIFSIGNALED / WTERMSIG (POSIX's W* wait-status macros -- likely the s492c \"POSIX as a real module\" change; #2199 lists POSIX residues)\n  op/ref.t       -1 passing row vs snapshot: NEW \"UNIVERSAL::AUTOLOAD called when freeing qr//\"\n  op/coreamp.t   NEW \"&uc\", FIXED \"&bless in list context\" (file exceeds the 500-row log cap: row baseline PARTIAL)\n  op/universal.t FIXED 5 rows (t/op/universal.t lines 125-138) not yet edited out of baselines/perl-suite-fails.tsv\n  lib/deprecate.t has NO row in baselines/perl-suite-run.tsv (4/6 today) -- needs its first-measurement splice\n\nWHAT TO DO: bisect the run/exit.t and op/ref.t moves to their commit (git worktree per candidate, `tools/run-perl-suite.pl --jobs 1 FILE`), then edit baselines/perl-suite-run.tsv + baselines/perl-suite-fails.tsv ROW BY ROW with the cause; splice lib/deprecate.t's first measurement.  A real regression among them (run/exit.t's four W* rows are the candidate) gets its own task.\n",
+   "id" : "2342",
+   "status" : "pending",
+   "subject" : "COMPANION SNAPSHOT DRIFT (pre-existing, found s495f): run/exit.t -4 rows (POSIX W* macros), op/ref.t -1, op/coreamp.t, op/universal.t +5 unedited, lib/deprecate.t no snapshot row -- identical on 3d9b3712, so the baselines were stale before s495f"
+}

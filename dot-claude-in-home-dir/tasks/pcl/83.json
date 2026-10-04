@@ -1,0 +1,10 @@
+{
+  "id": "83",
+  "subject": "Stash-visibility divergences (E4.0 fuzzer): import-into-caller glob-install invisible cross-file; bare `*alias = \\&sub` alias not callable as bareword",
+  "description": "Two related known divergences the E4.0 fuzzer pins (both pipelines, pre-existing): (1) a module's import() doing *{caller().\"::gift\"} = sub{} installs a sub the caller's transpiled code cannot see (defined &gift false, bareword call unresolved) — caller() returns the right package but the glob write and the caller's compiled references don't meet; fuzzer snippet 'module import-into-caller' (perl=G8, pcl=missing). (2) BEGIN { *ali = \\&real } then bare `ali . \"!\"` — perl resolves via live stash (calls), PCL strings it; no prototype to premerge (fuzzer 'pragma */alias-bare', perl=R8!, pcl=ali8!). Both are the runtime-stash-vs-transpile-time-knowledge class; the general fix direction is stash-aware bareword resolution or extending the premerge family to `*name = \\&other` aliases of in-file subs. Rare in real code (Moo chain unaffected after #80); fuzzer clusters keep them visible.",
+  "activeForm": "Fixing stash-visibility divergences",
+  "owner": "fable-s305",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

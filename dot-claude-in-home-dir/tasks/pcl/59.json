@@ -1,0 +1,9 @@
+{
+  "id": "59",
+  "subject": "E1 M-E singles: loopctl continue + array list-self-ref",
+  "description": "docs/e1-remainder.md M-E. (1) loopctl.t: extend native `:continue` lowering (_continue_keys, works for foreach) to while/until + correct last/redo from inside continue (lines 59/84). (2) array.t: extend self-ref LIST-form init `my (undef,@bee) = @bee` (s282b did single-container). Verify with the triple.",
+  "activeForm": "Working on loopctl continue + array list-self-ref de-gates",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

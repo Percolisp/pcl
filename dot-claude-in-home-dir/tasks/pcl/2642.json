@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "FOUND s504c.  Repro (/home/bernt/pcl/.claude/worktrees/agent-a41c97e5832f266e1/scratch/s504c/probes/x1.pl + x1d.pl): x1.pl `my $x = \"lex\"; sub gx { $x } do \"./x1d.pl\" or die $@; print \"gx=\", gx(), \"\\n\";`  x1d.pl `$main::x = \"glob\"; print \"d sees main::x=$main::x\\n\"; 1;`  perl `gx=lex`, PCL (base and s504c) `gx=glob`.  #470 covers the SAME-file spelling only.  s504c's mechanism (mangle with a unit number) would fix it for the program too, at the cost of renaming every program's captured file lexicals (77 distinct identity promotions in the perl-tests sweep alone) -- a corpus-wide emission change and a bench question; needs a ruling.",
+   "id" : "2642",
+   "status" : "pending",
+   "subject" : "A PROGRAM`s identity-promoted file lexical IS the package global of that name, so ANOTHER unit writing $main::x (a do-file, a module) overwrites the program`s lexical -- perl gx=lex, PCL gx=glob (the program half of #2633, deliberately left out of s504c: the program unit`s emission had to stay byte-identical)"
+}

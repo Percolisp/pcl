@@ -1,0 +1,9 @@
+{
+  "id": "87",
+  "subject": "#25 s310b: %INC/%ENV whole-hash assignment markers + require VERSION runtime check",
+  "description": "comp/require.t crashes: (1) %INC = () → p-hash-fill lacked marker arms (added %INC-MARKER%/%ENV-MARKER% dispatch); (2) require $ver numeric / literal version requires — new p-require-version + %p-parse-require-version, codegen emits it instead of the no-op comment (gen v2-61). Verify require.t + corpus + gate, add guards, commit.",
+  "activeForm": "Fixing %INC assignment + require VERSION",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "46",
+  "subject": "E1.5 D1-lite: nested package statement in _lower_block (v1-shape)",
+  "description": "Handle statement-form `package X;` nested in blocks/subs by transplanting v1's mechanism: Environment push scoped to remainder of enclosing block (recursive _lower_block handler), emit (p-set-current-package ...) inline + restore at block end, register pkg for pre-declare. Covers reset.t/bless.t/magic.t/local.t + Carp/Sub::Uplevel `package DB;` idiom.",
+  "activeForm": "Implementing nested package statement lowering",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

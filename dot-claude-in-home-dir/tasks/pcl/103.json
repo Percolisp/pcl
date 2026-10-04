@@ -1,0 +1,9 @@
+{
+  "id": "103",
+  "subject": "pclxs DESTROY: an exported entry point, not a vtable callback",
+  "description": "13 corpus dists define a DESTROY XSUB (Compress-Raw-*, Digest-*, DB_File, IO-Compress-Brotli, Unicode-LineBreak) — all the T_PTROBJ shape where the C object leaks without it. Key design finding: the shim does not need to IMPLEMENT DESTROY, because a DESTROY is just an XSUB the host must call when a blessed ref is finalized. That is a host->shim call, which travels through the exported pclxs_* API, not the shim->host vtable — so DESTROY needs NO ABI bump. Add pclxs_run_destroy(ctx, handle, class, classlen) which looks up Class::DESTROY among registered XSUBs and invokes it, plus the rule that it must never propagate a die.",
+  "activeForm": "Implementing DESTROY entry point",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

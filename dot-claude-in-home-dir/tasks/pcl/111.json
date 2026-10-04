@@ -1,0 +1,8 @@
+{
+  "id": "111",
+  "subject": "pclxs 2b: Socket/Fcntl/POSIX Tier-X cause — ANSWERED (own perl-5.6 block, 9fdad5e); demote semantics RULED s16 (D12) → #312",
+  "description": "newCONSTSUB is implemented and both dists dropped the symbol, but neither changed column — plan item 2b's \"4-6 dists reclaimed\" prediction is measured and wrong. What is left is CvROOT/CvSTART/op_free/CvXSUBANY, which the item assumed arrived with ppport.h's newCONSTSUB fallback. They come from a different fallback; read the ppport.h that ships with those dists and find which #ifndef fires, then decide whether the trigger is answerable. Also still queued: HTML::Parser's MGVTBL free callback (a real finding — \"call me when this SV dies\" for an unblessed SV, past the storage-only magic model, may need a D10); sv_rvweaken/SvWEAKREF (classifier calls these A, but weak references are a host question); and Encode's PL_op, which should be blamed per XSUB first.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

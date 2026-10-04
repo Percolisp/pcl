@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s450v (Opus round 9 agent V), from the #522 probes.  PRE-EXISTING, in the\nDQ-STRING path (the s/// replacement inherits it by routing there).\n\nREPRODUCER (perl 5.40.3):\n\n    my $t = \"A\"; print \"[\\LX\\U$t\\E Y\\E]\\n\";\n        perl  [xA Y]      (\\E pops back to the enclosing \\L)\n        PCL   [xa y]      (\\E ends ALL case shifting)\n    my $x = \"mAn\"; $x =~ s/(A)/[\\LX\\U$1\\E Y\\E]/;   -- same divergence\n\nCONSTANT-ONLY spans are RIGHT, which is the discriminator:\n\n    print \"[\\LX\\UaB\\E cD\\E]\\n\";   both  [xAB cD]\n    print \"[\\UX\\Lab\\E CD\\E]\\n\";   both  [Xab CD]\n\nso the compile-time folding of a constant run keeps the stack and the\ninterpolating path does not.  (Pl/t/transpile-test-01.t:280 guards the\nconstant-only nesting and passes.)\n\nCAUSE (not yet located): the dq-string interpolator applies case shifts as a\nFLAT state rather than a stack once a reference splits the text into parts.\nPerl's model is a stack: `\\U`/`\\L`/`\\Q` push, `\\E` pops one.\n\nBAR: the four rows above plus `\\Q` nested in `\\U`, in a dq string AND in an\ns/// replacement (they are one path since s450v); rows in\nPl/t/transpile-test-01.t beside the existing constant-only nesting row.\n",
+   "id" : 692,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a NESTED case shift around an interpolated variable does not pop back -- `\"\\LX\\U$t\\E Y\\E\"` gives `xa y` where perl gives `xA Y`"
+}

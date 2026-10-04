@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nSource: perl-tests/caller.t 160-230 and 375-395.\n\nROWS BEHIND IT: perl-tests/caller.t 30, 31 (\"@DB::args doesn't leak with $^P = 0/1\"),\n32 (\"caller does not leak @DB::args elems when AvREAL\"), 34 (\"caller dies with tie\n@DB::args\"), 35 (\"@DB::args is still tied\"), 65 (\"no freed scalars\") = 6 rows.\n\nPERL'S RULE: inside package DB (or with $^P set), a `caller(N)` call fills\n@DB::args with the arguments of the frame it reports.  perl also has two\ndefensive behaviours the rows test: it dies \"Cannot set tied @DB::args\" if the\narray is tied, and it must not leave freed SVs in the array.\n\nPCL: caller() never touches @DB::args, so\n  - row 34's eval does not die and row 35's `tied @args` is false (that half is\n    also #155, tie on an ARRAY);\n  - row 65 reads `$DB::args[0]` / `[1]` as 'fwib=ARRAY(0x1)' and '' where perl\n    reads '' and 'B';\n  - rows 30/31/32 additionally need DESTROY at refcount zero\n    (docs/not-supported.md '`DESTROY` called by garbage collector'), so they\n    cannot pass on this alone.\n\nRelated but NOT this: #233 (caller() fidelity family) owns the frame CONTENTS.\nThis is the separate @DB::args side channel.\n",
+   "id" : 1450,
+   "status" : "open",
+   "subject" : "BUG: `@DB::args` is never populated by `caller()` -- 6 blessed rows in perl-tests/caller.t, and the whole perl-debugger argument protocol is absent"
+}

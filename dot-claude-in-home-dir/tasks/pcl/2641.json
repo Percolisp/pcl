@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-03",
+   "description" : "FOUND s504c (#2633).  Counted with PCL_FILECELL_LOG (Parser2::_filecell_note): every fallback seen over lib/ (0), the cpan modules (6 decisions: 'dynamic string eval after decl', e.g. Test::Builder %cmp_ok_bl), the perl-tests sweep (2 distinct: perl-tests/t/test.pl %backslash_escape, %tempfiles) and the everyday corpus (1: Moo::_Utils %EXPORTS) is the container + later-string-eval refusal.  The container-span path (Parser2 _rename_spanning_lexicals' container loop) has no mangled spelling at all and is logged as 'fallback:container-span-identity-only' (0 seen).\nRepro: /home/bernt/pcl/.claude/worktrees/agent-a41c97e5832f266e1/scratch/s504c/probes/q05.pl + q05d.pl: main `$s=\"gs\"; @a=(7); %h=(a=>\"g\"); do \"./q05d.pl\"; print \"main: $s @a $h{a}\"`, q05d.pl `my $s=1; my @a=(1,2); my %h=(a=>3); sub g5 { eval q{\"$s @a $h{a}\"} } print g5(); 1;`  perl `main: gs 7 g`, PCL `main: 1 1 2 3` ($s is #2640's alias; @a/%h are this task).\nNEXT: carry container cells in the eval capture alist (the reason the mangle refuses: 'only scalar cells are aliased/alist-carried'), then drop the refusal for non-program units.",
+   "id" : "2641",
+   "status" : "pending",
+   "subject" : "The #2633 FALLBACKS: in a non-program unit a promoted file lexical keeps the IDENTITY cell (shared with the program and every other unit of the package) where the mangle path refuses -- a CONTAINER with a later dynamic/naming string eval, and every container that SPANS a package boundary (identity-only path) -- perl `main: gs 7 g`, PCL clobbers @main::a / %main::h"
+}

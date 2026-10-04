@@ -1,0 +1,8 @@
+{
+  "id": "311",
+  "subject": "s391 (Fable): review the s390 batch + rule on the #303 judgment items",
+  "description": "DONE s391. Independently verified the five s390 commits (cold gate 138/5128 with only the 8 user-ignored pclxs-ABI-drift xs rows; fresh 13-row #305 probe file byte-identical to perl 5.40 incl. mixed sigils and five bare-$$ PID inverses; sweep verdict recomputed from the s390 .faillog artifacts — 0 new / 0 fixed, TOTAL 18532→18535; every deleted name re-grepped clean; the s390a \"inserted\" helpers verified as MOVES pre-existing at dc60298). All five commits APPROVED as shipped.\n\nRuled the #303 open items (rulings on task #303 + docs/fable-answers-s390.md §2): DEBUG→constant GO (the blocking SET_DEBUG(4) is inside `if (0) {}`); W12 text annotator + _gen_interp_replacement_simple = DELETE + rule-12 DIE, measurement-first under the s373 gate-SET bar; gen_anon_sub_form delete-but-keep-%NAMED_TYPE-row; ExprToCL2::generate delete after polymorphic-receiver audit; OpcodeTree::extras settle writer+reader as a pair; _tok_run_desc KEEP (handoff corrected — it is _term_probe's helper); v1 state handlers stay with #153's FOLD.\n\nQueue confirmed: Opus next = #304 (per-file audit, never --bless-rows), then #303 cheapest-first. Fable: FOLD chunk 3, #271, #281, boxed aggregates.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FOUND s473t5e (#1501 round 6, `re/` CHECK 2).  t/re/pat_rt_report.t is DIFF\n2458/52 with 58 blessed fail rows over **56 distinct assertion shapes** -- the\n`op/`-shaped population (1.04 rows per cluster), not the `re/`-shaped one, so\nit has no single fact and it is the one `re/` file the round's \"name the fact\nonce per file\" rule does not fit.\n\nThe shapes that repeat, and the classes visible in one reading of the log:\n  * `Match UTF-8 char in presence of (??{ })` -- NS:Regex code blocks\n  * `$c =~ /$c/i : chr (N) : u_str = N u_pat = N` -- #1036 (case folding)\n  * `Ill-formed UTF-8 doesn't match NUL in class` -- malformed-UTF-8 handling\n  * `Optimizer doesn't prematurely reject match` (x2),\n    `Correct pmop flags checked when empty pattern` (x2) -- engine internals\n  * `Propagated modifier; in multiline regexp - with /m` -- `(missing)`, i.e.\n    behind the file's own stop\n\nWHAT TO DO WITH IT: not a fix target as a file.  Treat it the way `op/` is\ntreated -- when another task closes one of the classes above, its rows here\nclose with it.  Before spending a session, count how many of the 58 fall to\n#1036 and to NS:Regex code blocks; if that is most of them, the file needs no\ntask of its own and this one closes as SUPERSEDED.\n",
+   "id" : 1721,
+   "status" : "pending",
+   "subject" : "t/re/pat_rt_report.t is 58 rows over 56 distinct assertions -- perl's regex bug-report grab-bag; no single fact, and the clusters that do repeat are (??{ }) code blocks and /i case folding"
+}

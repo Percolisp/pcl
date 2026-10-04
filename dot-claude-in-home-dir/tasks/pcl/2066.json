@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "Board mover, s495, CAUSED BY s492c member 7 and legitimate: with no\nMIME::Base64 the dist's t/quote.t took its `else { skip(\"MIME::Base64\nmissing\", 1) }` branch, so row 12 was a SKIP.  The shim makes\n`eval { require MIME::Base64 }` succeed, the row RUNS, and it fails:\n\n  Data-Dump-1.25-0 quote.t PASS 16/0 (base 5ce155cb) -> PARTIAL 16/1 (s492c)\n\nPROBED (scratchpad dd.pl, `local $Data::Dump::TRY_BASE64 = 1;\ndump(join(\"\", map chr($_), 0..255))`):\n\n  perl 5.40.3   402 chars, `do {\\n  require MIME::Base64;\\n  MIME::Base64::decode(\"AAEC...`\n  PCL           525 chars, `pack(\"H*\",\"000102...`   <- the NON-base64 branch\n\nSo the module loads and Data::Dump still does not choose base64.  Its rule is\nin Data::Dump::_dump: with $TRY_BASE64 set and the string long enough and\nmostly binary, it compares the two renderings' LENGTHS and takes the shorter.\nNext step is to instrument that comparison under PCL -- the suspects are the\n`length` of the base64 text, the `$TRY_BASE64` read across packages (#475's\nfamily), and the `eval { require MIME::Base64 }` inside Data::Dump itself\nsucceeding but its `MIME::Base64::encode_base64` call not.\n\nThis is the s438h shape once more: a fix that makes a VALUE real exposes what\nwas passing on nothing.  The row is an honest failure and is NOT a regression\nof the base64 shim itself (its own dist t/ is 437 of 495).\n",
+   "id" : 2066,
+   "status" : "pending",
+   "subject" : "Data::Dump's TRY_BASE64 branch is reachable now that MIME::Base64 loads -- and PCL still emits the pack(\"H*\") form"
+}

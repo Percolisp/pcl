@@ -73,6 +73,13 @@ detail. It is written as instructions for the AI sessions that do much of
 the development, so it is dense reading, but it is an honest account of how
 changes are made and verified here.
 
+The task list those sessions work from, and the notes they keep between
+sessions, are in the repository too, in
+[`dot-claude-in-home-dir/`](dot-claude-in-home-dir/README.md): every `#NNNN` in
+the documentation is a file there.  Its README says how to read a task and how
+to link the directory into your own `~/.claude/` if you take up the work with
+Claude Code.
+
 ## License
 
 PCL is free software under the same terms as Perl itself: the Artistic

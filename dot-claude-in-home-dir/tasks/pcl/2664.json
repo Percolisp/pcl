@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FOUND s506f (Opus, 2026-10-04) attributing the one-liner battery's misses (ol-062/ol-064,\n`perl -Mbignum=bpi -le 'print bpi(n)'`, perl1line.txt).\n\nREPRODUCER (perl 5.40.3 vs PCL 618db500 / s506f):\n  perl -e 'sub foo { \"[$_[0]]\" } print foo(n), \"\\n\";'   -> [n]\n  pcl  -e 'sub foo { \"[$_[0]]\" } print foo(n), \"\\n\";'   -> dies: Undefined subroutine &main::n called\n                                                           (inside SBCL's \"While evaluating the form\" wrapper, #2492)\nperl's rule: under `no strict 'subs'`, a bareword that is not a known sub, filehandle or class and is\nnot followed by `(` is a STRING.  PCL calls it.  (#266's callable classifier is the family: \"a bare\nNAME is a CALL only where it is CALLABLE\"; here the name is not declared anywhere.)  Under\n`use strict` perl refuses it at compile time (\"Bareword \"n\" not allowed while \"strict subs\" in use\").\nTwo battery one-liners (ol-062 bpi(n), ol-064 bexp(1,n+1)).\n",
+   "id" : "2664",
+   "status" : "pending",
+   "subject" : "without `use strict`, an undeclared bareword used as an ARGUMENT (`foo(n)`, `bpi(n)`) is called as a sub and dies \"Undefined subroutine &main::n\"; perl passes the string \"n\""
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-28",
+   "description" : "LEVER (b), s500p perf round 37 (RUNTIME-ONLY).  %p-collect-list (map/grep/sort/reverse's argument collector) started every result at 8 slots and grew it; p-grep's own result started at 0.\n\nPROFILE LINES (s500p Step 0, main 209e7533): 1013-Permutation-test: %p-collect-list 20.5 % total, extend-vector 11.4 %, prepare-vector-push-extend 13.6 %, reallocate-vector-with-widetag 6.6 % (`grep $_, @$pattern` in scalar context, twice per iteration).  Also Derangements 11 %, Vampire 9 %, Summarize 6.6 % in extend-vector.\n\nFIX: %p-collect-list-size counts what the items spread to (exact for every shape but a raw %hash, estimated as 2 x hash-table-count) and the result is allocated at that size; p-grep's result is allocated at the input's length.\n\nSIZED (interleaved best-of-7, control pair +/-1.6 %, load 1.5-3.5, scratch/s500p/sizing-b2.txt): Permutation-test 1.290 -> 1.169 s (-9.3 %); m-grep micro -20 %; Derangements, Vampire, Summarize flat (their extend-vector is elsewhere).\n\n\n=== DONE (s500p) ===\nShipped: %p-collect-list-size presize + p-grep result at input length (every push is still vector-push-extend, so an estimate that is short only grows).  Commit 3e3169fe.  WHOLE TREE (s501, K=5): Permutation-test 1.377 -> 1.163 (-15.6 %, includes #2513; lever alone -9.3 %; perl 0.525).  bench grepcnt (new row) 0.1603 -> 0.1188 s (-25.9 %).  Companion op/grep.t 71/6 before == after, row-identical.\n",
+   "id" : "2512",
+   "status" : "completed",
+   "subject" : "SPEED: map/grep collected their arguments into a vector that started at 8 slots and grew (grep result at 0) -- Permutation-test 20 % in %p-collect-list, extend-vector 11 %"
+}

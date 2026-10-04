@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND AND FIXED s501q (perf round 38), while sizing #2515.  PRE-EXISTING on main 77212b1f.\n    my @a = (1, 2); sub f { my ($x) = @_; $a[0] = 5; $x + 0 } print f(@a);     perl 1   base 5\n    my $g = 7; sub h { my ($x, $y) = @_; $g = 8; $x * 1 } print h($g, 1);      perl 7   base 8\n    my @b = (3, 4); sub k { my $x = shift; $b[0] = 9; $x + 0 } print k(@b);    perl 3   base 9\n    my %h = (a => 1); sub m1 { my ($k, $v) = @_; $h{a} = 2; $v + 0 } m1(%h);   perl 1   base 2\nCAUSE: the raw fast path (p-raw-params, `my (...) = @_` / leading `my $x = shift` run whose params are unboxable) bound each parameter to the argument AS IT CAME -- and a variable argument arrives as the caller's own box (@_ aliases).  A later write to the caller's variable showed through the \"copy\".\nFIX (cl/pcl-runtime.lisp): p-raw-params binds each parameter through %p-param-copy -- the construction arm's raw value (%p-storable-raw) for a plain number/string, else p-copy-scalar-arg's fresh box; a raw argument is already a value.  RESIDUAL (measured choice): a box holding a REFERENCE or OBJECT is still bound as it came -- copying it costs a box per method call (methret +15..18 %); the reassign-during-call shape for refs is #2575.  Guard: Pl/t/perf-levers-07.t block \"#2570 raw parameter copy\" (fails on 77212b1f).\n=== DONE (s501q) ===\n",
+   "id" : "2570",
+   "status" : "completed",
+   "subject" : "SILENT WRONG (fixed s501q): a p-raw-params parameter bound the caller's BOX -- `sub f { my ($x) = @_; $g = 8; $x } f($g)` answered 8, perl 7 (the copy was an alias)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 2 on t/op/sprintf.t).\n\nTWO measured facts, one conversion family.\n\n(a) A `version` OBJECT as the argument of `%vd` / `%vx` / `%v.3d` / `%0*v*d`.\n    perl formats the version's own components; PCL either prints ` MISSING`\n    (the object contributes no argument at all) or formats the ORDINALS OF\n    ITS STRINGIFICATION:\n\n        sprintf \"%vd\", version::qv(\"1.2.3\")    perl 1.2.3    PCL  MISSING\n        sprintf \"%vd\", version->new(\"1.2\")     perl 1.2      PCL 49.46.50\n        sprintf \"%vx\", version::qv(\"1.20.300\") perl 1.14.12c PCL  MISSING\n\n    49/46/50 are the code points of \"1\", \".\" and \"2\" -- `%vd` applied to the\n    STRING the object stringifies to.  Which of the two answers appears\n    depends on the spelling, so the object is reaching the formatter in two\n    different shapes.\n\n(b) The `+` flag on a vector conversion applies to the FIRST component only:\n\n        sprintf \"%+-v3d\", \"\\01\\02\\03\"          perl \"+1 .2  .3  \"\n                                               PCL  \"+1 .+2 .+3 \"\n        sprintf \"%+-v*d\", 3, \"\\01\\02\\03\"       same divergence\n\nROWS: baselines/perl-suite-fails.tsv op/sprintf.t 147 148 149 150 151 152 155\n158 169 441 442 (half a) and 157 165 (half b).\n\nSHAPE: (b) is one line in the vector loop -- apply the sign flag to component\n0 only.  (a) needs the argument to arrive as the version object (probe what\n`%vd`'s argument reader does with a blessed operand before assuming it is\n`lib/version.pm`'s problem; the ` MISSING` answer says the reader dropped it,\nwhich is a formatter fact, not a module one).\n",
+   "id" : 1961,
+   "status" : "pending",
+   "subject" : "the `%v` VECTOR conversion family: a `version` object contributes NO argument, and `%+-v3d` signs EVERY component (13 rows of t/op/sprintf.t)"
+}

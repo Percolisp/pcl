@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-16",
+   "description" : "FOUND s486 (Fable, docs/security-review-s486.md §1, probe scratch/probe-shell.pl).  `my $name = \"echo X|\"; if (open(my $h, $name)) { print \"opened\\n\" }` -- no read, $h goes out of scope / is closed: perl prints nothing on stderr; PCL prints `/bin/sh: 1: echo: echo: I/O error`.  The child's stdout is not a live pipe when it writes (read end already closed, or not the pipe at all).  Probe the 3-arg list form `open(my $p, '-|', 'echo', 'X')` without reading too, and `close` vs scope-exit vs program-exit.  Semantics only -- the list/string shell distinction itself matches perl (probed s486).",
+   "id" : "1801",
+   "status" : "pending",
+   "subject" : "A pipe-open whose reader never reads makes the child report `echo: I/O error` under PCL; perl is silent (found by the s486 shell probe)"
+}

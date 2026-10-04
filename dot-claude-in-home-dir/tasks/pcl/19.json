@@ -1,0 +1,9 @@
+{
+  "id": "19",
+  "subject": "W12: design tree-walk event collector for VarAnnotator",
+  "description": "Decide architecture per prep note (docs/v2-completion-plan.md §W12): VarAnnotator::analyze runs its own parse_expr_to_tree per statement/expression region, with D7 token snapshot/restore and D14 _ppi_parse entry. Study PExpr tree node types (internal node types, operator nodes, symbol nodes) to map the event vocabulary: decl, decl-self-ref, write, write-list, write-cond, write-compound, write-incdec, ref-taken, magic-ref, regex-target, local, pos-arg, mutating-builtin-arg, handle-viv-arg, foreach-alias, nested-sub-ref, eval-string-in-region, seam-shadow-my. RHS classification (arith-rooted/single-literal/other) computed on tree.",
+  "activeForm": "Designing W12 tree-walk collector",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

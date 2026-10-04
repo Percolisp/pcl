@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s473t1 (Opus), found by the probes for task #1024's fix.  PRE-EXISTING\nand independent of it (the -1 and 1.7 spellings never went through the\nbareword path).  SILENT WRONG.\n\nREPRO (scratch/s473t1/probe/kva-key.pl):\n\n    our @a = (10,20,30);\n    print join(',', %a[-1]),  \"\\n\";   # perl: -1,30    PCL: 2,30\n    print join(',', %a[1.7]), \"\\n\";   # perl: 1.7,20   PCL: 1,20\n    print join(',', %a[\"1\"]), \"\\n\";   # perl: 1,20     PCL: 1,20   (agree)\n    print join(',', %a[zzz]), \"\\n\";   # perl: zzz,10   PCL: 0,10\n\nperl's `%a[EXPR]` yields (EXPR, $a[EXPR]) -- the key half is the index\nexpression's VALUE, unconverted.  cl/pcl-runtime.lisp's p-kv-aslice pushes\n`(make-p-box i)` after truncating and wrapping:\n\n    (let* ((i (truncate (to-number (svref flat j))))\n           (i (if (< i 0) (max 0 (+ (length arr) i)) i)))\n      (%p-vpush (make-p-box i) result)\n\nFIX SHAPE: keep the ORIGINAL element for the key half and use the normalized\n`i` only to reach the value.  One line; the reason it is filed rather than\nfixed is that it is a runtime change with its own sweep (perl-tests/kvaslice.t\n+ the companion op/ leg), outside this session's triage scope.\n\nPl/t/kvaslice-01.t's third s473t1 row deliberately asserts only the VALUE half\nand cites this task, so the guard does not encode the bug.",
+   "id" : 1440,
+   "status" : "pending",
+   "subject" : "A kv-ARRAY slice reports the NORMALIZED integer as its key half; perl echoes the index EXPRESSION (`%a[-1]` keys -1, `%a[1.7]` keys 1.7)"
+}

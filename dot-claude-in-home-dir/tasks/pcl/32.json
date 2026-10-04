@@ -1,0 +1,9 @@
+{
+  "id": "32",
+  "subject": "T0.2: instrument seam counters + run seam census over corpus",
+  "description": "Counters on _fallback_stmt and _lower_expr fallback branch, per-head histogram under PCL_V2_VERBOSE=1; run over perl-tests + Pl/t; produce the ranked T-C worklist. This is the key de-risking measurement.",
+  "activeForm": "Running seam census",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

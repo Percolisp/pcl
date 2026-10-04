@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "DONE (s470bq, Opus, 2026-09-05).  docs/js-target-plan.md Â§II.8 item 3 (settled\ns460f) implemented; grammar and the per-tier construct table in\ndocs/ir-spec.md Â§10-tier.\n\n`Pl::RegexTier::tier(PATTERN, FLAGS)` answers `native` / `pcre` / `refused`,\nplus `dynamic` when the pattern is not known at compile time (an interpolated\none) -- a DECLARED absence, never a guess.  It is a single left-to-right scan\ntracking exactly two states a construct test can be fooled by: a backslash\nescape and a bracketed character class.\n\nTHE ONE BUG IT HAD, and the reason `}`-possessive needs the counted test:\n`\\p{L}+` read its `}+` as a possessive quantifier and called every `\\p{â¦}+`\npattern `pcre`.  The `}` arm now scans back to the matching `{` and requires\n`{n}` / `{n,}` / `{n,m}`.  31 probes in the module's own test path.\n\nRULED HERE (and stated in the spec): an unrecognised MODIFIER letter answers\n`pcre`, not an error.  Rule 12's die boundary (DECIDED s329) is \"die when the\nmissing case produces a value the program consumes\"; nothing here reaches the\nprogram, so the conservative answer -- \"this target needs the bigger engine\" --\nis right and a wrong `native` would be the harmful one.\n\nTHIS TARGET IGNORES THE TIER: cl-ppcre runs everything cl-ppcre runs and the\nkeyword is read and discarded by the macro.  What it buys is that\n`pl2cl --manifest`'s `needs.regex.tier` stops printing the word `unclassified`\nand prints a histogram over the four classes, each present with a zero\n(ir-spec Â§10b; the stale manifest-01.t row was repaired in the same commit).\n",
+   "id" : 1211,
+   "status" : "completed",
+   "subject" : "Pl::RegexTier â the three-tier regex classifier as ONE pure function; every literal carries :tier and pl2cl --manifest histograms it"
+}

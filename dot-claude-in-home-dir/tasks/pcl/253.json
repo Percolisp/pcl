@@ -1,0 +1,8 @@
+{
+  "id": "253",
+  "subject": "DONE s358: op/for.t is an upstream PPI 1.291 LEXER bug (`for ${*$f} (LIST){}` — \"Illegal state in 'for' compound statement\"), NOT a PCL regression — the s323e rows were --lenient-ppi truncation (retired by ruling s356). Registered in docs/ppi-upstream-bugs.md §6; suite registration folds into #254 §4",
+  "description": "NOT a flip loss (measured s357: at pre-flip 26ce393 it already produced no output). The suite snapshot (taken-at 1e7c4d7, s323e) has op/for.t producing rows; somewhere before s355 PPI parsing of the file started failing at Pl/Parser.pm line 786. Bisect via ./pl2cl on the suite file (cheap — transpile only), locate the PPI-level cause (compare docs/ppi-upstream-bugs.md families), fix or register. Suite file: /home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/op/for.t.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

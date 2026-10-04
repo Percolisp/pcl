@@ -1,0 +1,9 @@
+{
+  "id": "121",
+  "subject": "pclxs: ref_target must be identity-stable and referent-true (contract note)",
+  "description": "PCL's ref_target returned the ref WRAPPER, not the referent, so magic_set and magic_get keyed different identities. Magic is the first consumer that notices (blessing survived it via a fallback arm). State the requirement in pclxs_host.h at ref_target and in docs/porting-a-host.md.",
+  "activeForm": "Documenting the ref_target identity contract",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

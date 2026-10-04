@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FOUND s493 by the one-liner battery (noted in #2097 as \"List::Util max on non-numeric strings returns\nthe first of equals, perl the last\"), FILED s506f (Opus, 2026-10-04) because no task carried it.\n\nREPRODUCER (perl 5.40.3 vs PCL):\n  perl -MList::Util=max -e 'print max(\"The\",\"quick\",\"dog\"), \" \", max(\"a\",\"b\"), \"\\n\"'   -> dog b\n  pcl  -MList::Util=max -e 'print max(\"The\",\"quick\",\"dog\"), \" \", max(\"a\",\"b\"), \"\\n\"'   -> The a\n  (min(\"a\",\"b\") is \"a\" in both)\nBattery row ol-052: `perl -MList::Util=max -alne 'print max @F'`.\n\nProbe perl's XS (ListUtil.xs min/max: the `magic` / numeric-compare path; with every value numifying\nto 0 it keeps replacing on `>=`?) before fixing lib/List/Util.pm -- the shim is the right layer\n(rule 9a).\n",
+   "id" : "2665",
+   "status" : "pending",
+   "subject" : "List::Util max over strings that numify EQUAL returns a different element than perl's XS max (`max(\"a\",\"b\")`: perl \"b\", PCL \"a\")"
+}

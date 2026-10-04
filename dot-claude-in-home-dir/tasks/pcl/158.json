@@ -1,0 +1,8 @@
+{
+  "id": "158",
+  "subject": "DONE s320 (re-scoped, NO fix): `do subname()` is principle 9 — do.t t63-t66 registered",
+  "description": "CLOSED s320 per fable-answers-s318.md §4: no parser change, nothing near $end_pars. `do SUBNAME(LIST)` was valid Perl before 5.20 and meant call-the-sub, so PCL's behaviour IS the historical semantics; modern perl's syntax error is rejection-of-invalid-Perl = CLAUDE.md principle 9.\n\nRegistration (S1 item 3), measured s320: the family is FOUR rows, t63-t66 — one `foreach my $mode (qw(subname(\"arg\") subname() $subref(\"arg\") $subref()))` loop, each row asserting $@ =~ /\\Asyntax error/. Fable named t63/t65 as exemplars; all four are the same assertion. ALSO established: do.t's \"2 PCL-only extra test numbers\" are those same rows' fail() guard firing when PCL calls the sub — NOT a separate defect.\n\nop/do.t gets NO perl-suite-expected.tsv row (registration bar is all-or-nothing) and stays DIFF at 65/8. Its remaining unexplained rows, i.e. the S3 near-green targets: t67 (result of delete(helem) is copied), t68 (RT 124248, DESTROY-by-GC — likely covered by the blessed §DESTROY section), t70 ($@ must be false on `do DIR`). Indexed in DECIDED.md.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

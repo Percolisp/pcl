@@ -1,0 +1,6 @@
+{
+   "description" : "FILED s456af (found by a #761 probe; PRE-EXISTING, identical under PCL_OPT=none, so it is nothing to do with the topic-loop work).  A foreach alias over a LITERAL list is READ-ONLY in perl and writable in PCL.  Repro: `for (\"cat\",\"dog\") { s/o/0/; print \"$_ \" }` -- perl dies \"Modification of a read-only value attempted\"; PCL prints \"cat d0g\".  Same for `$_ = ...` and chomp over a literal list.  perl's rule: a foreach alias to a constant is read-only, to a variable/array element is writable (and `for (1..3) { $_ = $_*2 }` is ALSO allowed in perl -- probed, so the rule is about literal LIST elements, not about ranges).  PCL builds the list into a vector of boxes and writes through them.  Cost of fixing: the vector elements would need a read-only flag the write path checks -- i.e. it rides on the boxed-aggregate design, so do NOT attempt it standalone.  Loud-vs-silent: perl DIES, PCL silently succeeds, so this is a silent-wrong of the mild kind (the program continues with a value perl would never have produced).  Reproducer kept in the header of Pl/t/raw-verdict-coverage-01.t as the \"NOT asserted here\" note.",
+   "id" : 810,
+   "status" : "pending",
+   "subject" : "pcl"
+}

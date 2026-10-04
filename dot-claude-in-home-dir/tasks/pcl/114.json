@@ -1,0 +1,8 @@
+{
+  "id": "114",
+  "subject": "Sweep drift: range.t test 162 (RT #130841 huge-range overflow) fails — fully-passing 62→61, pre-dates s314 referent work",
+  "description": "range.t test 162 expects \"ok 1 ok 2\" from a child running `1 .. 9223372036854775806` and gets \"unexpected err status: [Integer overflow in range (1 .. 9223372036854775806): range too large at (eval 0) line 0.] ok 2\" — the range-too-large die fires where perl survives (RT #130841 is about lazy ranges/foreach not allocating). s314 verified by A/B (HEAD runtime vs referent-work runtime, same machine/session): both fail identically, so this drifted between s308 (range.t blessed fully-passing after the IV-range endpoint check in %p-range-classify) and s314 — suspects: the s308 endpoint check itself being too eager on the counting-loop path for N-1 of IV_MAX, or a pclperl-for-tests (s310f) child-run change surfacing the die differently. Bisect via CODEGEN not ./runt (glob CWD-flaky, see memory). Baseline count: 61 fully passing until fixed.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

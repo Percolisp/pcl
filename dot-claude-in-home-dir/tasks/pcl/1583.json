@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t4 (#1501 CHECK 1 round 1, 2026-09-13).  t/comp/our.t is TRANSPILE-FAIL: P 7/0, C 0/0 -- the whole file.\n\n    $ ./pl2cl < t/comp/our.t\n    Parser2 TODO: our '$y' shadows a my-lexical\n\nTHE SITE, t/comp/our.t:68-73:\n    $y = 1;\n    {\n        my $y = 2;\n        {\n            our $y = $y;\n            is($y, 2, 'our shouldnt be visible until introduced')\n\nMINIMAL REPRODUCER (probed vs perl 5.40.3):\n    use strict; use warnings;\n    our $y;\n    $y = 1;\n    { my $y = 2;\n      { our $y = $y;\n        print \"inner=$y\\n\"; } }\n    print \"outer=$main::y\\n\";\n    perl: \"our\" variable $y redeclared at ... line 7.   (a warning)\n                  (Did you mean \"local\" instead of \"our\"?)\n          inner=2\n          outer=2\n    pcl : Transpile failed: Parser2 TODO: our '$y' shadows a my-lexical\n\nPERL'S RULE, and the point of the test: an `our $y = EXPR` introduces the package alias AFTER the statement, so the `$y` on the RIGHT is still the enclosing `my $y` (2).  The assignment therefore writes 2 into $main::y, and the inner block's `$y` reads the package alias (also 2).  The whole file is seven rows testing exactly this ordering.\n\nPCL refuses the shape outright.  It is the same \"a declaration is not visible inside its own statement\" rule as #1582 -- one rule, two refusals, two whole files (7 + 106 rows).  Consider fixing them together.\n\nRound t5c (comp/).\n",
+   "id" : 1583,
+   "status" : "pending",
+   "subject" : "`our $y = $y;` inside a block where a `my $y` is in scope DIES \"our shadows a my-lexical\" -- perl reads the MY on the RHS and rebinds the package name; comp/our.t loses all 7 rows"
+}

@@ -1,0 +1,13 @@
+{
+   "blockedBy" : [
+      "217"
+   ],
+   "blocks" : [
+      "282",
+      "283"
+   ],
+   "description" : "USER ruling s375c (2026-08-09): the runtime is COMPILED AT INSTALL on the target machine — same model as the XS bridge (compile happens at install time, like perl; never at first use). One bootstrap script (tools/install or similar) that:\n1. Checks deps: perl 5.20+, PPI 1.291+, Moo, Test::More; SBCL 2.5.2+; cl-ppcre via Quicklisp (handle the ~/.sbclrc trap the README documents by hand — --script skips ~/.sbclrc so Quicklisp-installed cl-ppcre goes invisible).\n2. Regenerates the checked-in transpiled artifacts on the target (cl/pcl-pack.lisp via tools/rebuild-pack, cl/pcl-mro.lisp) — depends on #217 making the preamble relocatable OR does the regeneration itself.\n3. COMPILES the runtime + builds the saved core (the tools/prove-core core, promoted from speed-cache to install product).\n4. Runs a smoke gate (a fast Pl/t subset) and reports PASS/FAIL loudly.\n5. Documents/creates ~/.pcl-cache.\nBlocked by #217. Release gate = #282 (fresh-machine test).\n\nUPDATED s401: item 2 (regenerate the artifacts at install) is DELETED once\n#349 lands â the artifacts become machine-independent (pl2cl --extension,\nno program preamble); the installer only WARNS when the checkout's compiler\ngeneration is newer than the artifact stamps (Pl/t/artifact-staleness-01.t\nis the same check).  Absorb the quoting unification of tools/lib/PCLSbcl.pm\n(`quote => 0` -> quoted everywhere; fable-answers-s400.md Â§7.1) in this\nsession.  Session E of docs/plan-post-s400.md.\n\n\nSHIPPED s405c (a90b481): tools/install-pcl + tools/t/install-pcl.t -- the runtime and its core compiled at install, self-verifying.  Status corrected to completed in s439 (Fable): the record had stayed pending after the work landed.",
+   "id" : "277",
+   "status" : "completed",
+   "subject" : "v0.1 installer: deps check + artifact regen + runtime/core COMPILED AT INSTALL + smoke gate"
+}

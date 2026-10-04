@@ -1,0 +1,9 @@
+{
+   "activeForm" : "Fixing open on a closed descriptor",
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s404 (Opus 5), found while fixing #346's fd leak.\n\n    perl -e 'my $ok = open(my $t, \"<&=9\"); print $ok ? \"SUCCEEDED\" : \"failed ($!)\"'\n        perl: failed (Bad file descriptor)\n        PCL : SUCCEEDED\n\nPCL's open does not validate the descriptor in the `<&=N` (fdopen) spelling —\nit hands back a filehandle for a descriptor that is not open.  A program that\nuses the failure as its signal reads PCL's answer as \"inherited\" no matter\nwhat, and t/run/cloexec.t is exactly that program: it opens fd 3, spawns a\nchild, and asks whether the child can still open it.\n\nLAYER: the runtime (cl/pcl-runtime.lisp, p-open's fd path), not the parser.\nRule 12 in its die-vs-announce form: an open that cannot be satisfied must FAIL\nlike perl and set $!, not succeed with a handle nothing can read.\n\nBAR: the probe above identical to perl for (a) a never-opened fd, (b) an open\none, (c) one opened and then closed; a Pl/t row; and re-run run/cloexec.t under\nPERL=tools/pclperl-for-tests (task #346) to see what it scores once open()\ntells the truth.\n\nNOTE the ordering: #346's fd-leak fix removed the reason fd 3 was open in a PCL\nchild, so this bug is now the REMAINING reason cloexec.t cannot measure what it\nmeans to measure.\n\n\nCLOSED s405 (8609e38): one fcntl(F_GETFD) in %p-open-dup.  Guard rows in Pl/t/fileio-02.t.",
+   "id" : 358,
+   "status" : "completed",
+   "subject" : "SILENT WRONG: open(FH, \"<&=N\") SUCCEEDS on a closed descriptor (perl fails EBADF)"
+}

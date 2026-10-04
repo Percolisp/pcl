@@ -1,0 +1,8 @@
+{
+  "id": "30",
+  "subject": "Make bare print;/say; emit (p-print $_) explicitly — remove the one runtime-side $_ default",
+  "description": "ir-spec.md documents that the tree is explicit except bare (p-print)/(p-say), which default to $_ inside p-print at runtime. Normalize: have the parser insert $_ like the named-unary family (add_implicit_default_param), then delete the runtime default. Care: `print FH;` (:fh + no list) must also get $_; `print { } ;` empty-block form. Emission-changing → cache gen bump + parity sweep. User: can wait.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

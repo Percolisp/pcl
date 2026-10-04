@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s507 (Fable, 2026-10-04) from the review probes of s506f (sw.pl cases `C0`, `CA`; tmp/x/d2.pl).  PRE-EXISTING: main and the s506f tree alike.\n\n  perl  -e 'print length($ARGV[0])' été      5        perl -CA ...   3        perl -C0 ...   5\n  pcl   -e 'print length($ARGV[0])' été      3        pcl  -CA ...   3        pcl  -C0 ...   3\n\nPRINTING the argument back is byte-identical either way (PCL encodes the 3 characters as the same 5 bytes), so most programs never see it; what differs is `length`, `substr`, a character class, `ord`, `sprintf '%-10s'` column widths, and `utf8::decode($ARGV[0])` on an already-decoded string (returns false / double-decodes a Latin-1-range argument?) -- PROBE that last one first, it is the silent-wrong candidate: the common `use Encode; $arg = decode('UTF-8', $ARGV[0])` idiom.\nThe same question exists for %ENV values, readdir / glob results and STDIN without a layer -- where does PCL stand on \"strings from the OS are bytes\" (not-supported.md's Unicode section; ir-spec data model)?  This task is the measurement: a table of those five sources, perl vs PCL, for a non-ASCII value, with and without the decode idiom applied -- then a ruling.  Do not change @ARGV alone.\ns506f's `-CA` is therefore a no-op that happens to be right, and its `-C0` cannot be honoured (noted in its not-supported entry? check).\n",
+   "id" : "2685",
+   "status" : "pending",
+   "subject" : "LOW / design question (found by a s507 review probe, PRE-EXISTING on main 2e71d4aa): @ARGV elements arrive DECODED as UTF-8 characters -- `pcl -e 'print length($ARGV[0])' été` prints 3 where perl prints 5 (bytes; 3 only under -CA) -- so perl's default byte semantics for command-line arguments, and `-C0`, are not reproducible"
+}

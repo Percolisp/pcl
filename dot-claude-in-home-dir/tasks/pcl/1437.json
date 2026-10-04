@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s473t1 (Opus, the 13-file early-stop triage).  PRE-EXISTING.\n\nREPRO (scratch/s473t1/probe/local-stdout.pl):\n\n    print \"before\\n\";\n    { local *STDOUT; no strict \"subs\"; print \"SHOULD-NOT-APPEAR\"; }\n    print \"after\\n\";\n\n    perl 5.40.3:  before / after            (the glob is emptied: the print\n                                             goes to an unopened handle)\n    PCL        :  before / SHOULD-NOT-APPEARafter\n\nCOST: perl-tests/yadayada.t, its whole 1-row shortfall.  The file's last loop\nevaluates each of four one-line programs inside\n`eval qq { {local *STDOUT; no strict \"subs\"; $line;} pass $mess; 1 }`.  For\n`print 'D' ... 'A';` PCL writes DEFGHIJKLMNOPQRSTUVWXYZ to real stdout, and\nthe harness's next line comes out as\n\n    DEFGHIJKLMNOPQRSTUVWXYZok 32 - Parsing '...' in \"print 'D' ... 'A';\" ...\n\nwhich matches no TAP row regex, so the assertion PASSED and was still counted\nas missing (planned 34, produced 33).  This is the TAP-interleave hard rule\n(fable-answers-s331): output that is not line-atomic costs a verdict.\n\nThe range answer itself is right (perl also gives DEFGHIJKLMNOPQRSTUVWXYZ for\n`'D' ... 'A'` in list context) -- only the handle is wrong.",
+   "id" : 1437,
+   "status" : "pending",
+   "subject" : "`local *STDOUT` does not detach the handle -- the block's output still reaches real STDOUT and GLUES itself to the next TAP line, costing the row its verdict"
+}

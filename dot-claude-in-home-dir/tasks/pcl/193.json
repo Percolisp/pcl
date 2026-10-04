@@ -1,0 +1,9 @@
+{
+  "id": "193",
+  "subject": "DONE s324 (Fable): strict-subs bareword before a binary operator is a CALL — plus the readdir/opendir silent-wrong family and the ternary-lvalue scalar assignment under it",
+  "description": "Fable ruling (fable-answers-s323.md §2): principle-9 reading CONFIRMED — under strict subs a bareword that compiles is a CALL or an enumerable earlier-decided quote context (fat-comma LHS, hash subscript, use/no import lists, filehandle slots, sort SUBNAME, labels). Trace order: (1) does _premerge_strict_pragma fire on the --module path; (2) does the bareword fallthrough consult strict at all. Fix AT THE FALLTHROUGH POINT, gated on strict-subs. HARD STOP-RULE: if the trace lands in the #142 region (PExpr $end_pars/named-unary operand machinery ~2600-3700), STOP — that fix is #153 _reduce_term. Verify: tools/corpus-diff.pl with EVERY changed row examined; probe the quote contexts as breaking cases. Time-boxed: unexplained collateral ⇒ park + report, don't narrow the gate ad hoc. Repro: File/Path.pm _IS_VMS/_IS_MSWIN32 barewords (8 sites) emit as always-true strings → remove_tree takes the VMS branch on Linux.",
+  "activeForm": "Fixing #193 strict-subs bareword fallthrough",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

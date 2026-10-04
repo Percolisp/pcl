@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FOUND s506f (Opus, 2026-10-04): with #1702 the -n/-a/-F loops of t/run/switch{n,a,F}.t now RUN, and read\nnothing, because each file does `BEGIN { ...; *ARGV = *DATA; }` and reads the loop's `<>`.\n\nREPRODUCER (perl 5.40.3 vs PCL 618db500 and s506f):\n  printf 'BEGIN { *ARGV = *DATA; }\\nprint \"[\", scalar(<>), \"]\\\\n\";\\n__DATA__\\nd1\\nd2\\n' > ad.pl\n  perl ad.pl </dev/null   -> [d1\\n]\n  pcl  ad.pl </dev/null   -> []          (also with <ARGV>)\n  The same assignment at RUN time works (`*ARGV = *DATA; while (<>) {...}` -> both lines).\n\nCAUSE (suspected, measure first): at BEGIN time DATA is not open yet (perl opens it when the parser\nreaches __DATA__, but the GLOB alias makes ARGV and DATA one glob, so the later open is seen through\nARGV).  PCL's glob assignment copies the handle VALUE at assignment time.  Discriminating probe:\n`BEGIN { *X = *DATA } print scalar(<X>)` -- if that fails too, it is the glob-value copy, not <>.\n\nROWS: run/switchn.t (2 rows: the loop reads nothing), run/switcha.t (2), run/switchF.t (2),\nrun/noswitch.t row 2.  Since s506f these files' rows are SHORTFALL (never produced), where before the\nbody ran once outside any loop and produced one failing row.\n",
+   "id" : "2666",
+   "status" : "pending",
+   "subject" : "`*ARGV = *DATA` in a BEGIN block does not alias: `<>` later reads nothing (at run time the same assignment works) -- t/run/switchn.t, switcha.t, switchF.t, noswitch.t"
+}

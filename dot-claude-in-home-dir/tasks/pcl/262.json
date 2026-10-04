@@ -1,0 +1,8 @@
+{
+  "id": "262",
+  "subject": "Statement-modifier foreach over a bare scalar does not alias: `$_ = \"w\" for ($s)` never writes back",
+  "description": "DONE s363 (70e6e5c). One helper `_ev_foreach_alias_list` in Pl/VarAnnotator.pm owns the `foreach-alias-list` veto; BOTH spellings call it (block form from _tw_stmt, statement-modifier form from _tw_stmt_expr's modifier branch). Widened from one operand to every top-level comma slot that is a lone bare `$name` — `for ($p,$q){$_=\"w\"}` had the same silent wrong in BOTH forms (probe-confirmed the mechanism was only the missing veto: with `\\$x` forcing a box, HEAD already wrote through).\n\nGate 132/4720 PASS. Corpus: exactly one file moved, qq.t, and it IS the fix (its own `is()` does `foreach ($left,$right){ s/…/…/ }` then prints them — escaping was discarded). Gen v2-116. Rows in Pl/t/transpile-test-09.t.\n\nResidue → #263 (element in modifier spelling; v1 seam emits p-gethash, Parser2 p-gethash-box — different mechanism).</description>\n</invoke>\n",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

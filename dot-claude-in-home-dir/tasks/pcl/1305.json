@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s471a (Opus, 2026-09-06).  PRE-EXISTING: the stale flag fires on a\n`git archive ed302e13` extraction of main too, so it is not this batch's.\n\n`cl/skip-registry.lisp`'s array.t block registers the pattern\n\n    (\"\\\\@_ alias to nonexistent\" :alias \"â¦\")\n\nwhich matches BOTH `@_ alias to nonexistent elem within array` (test 130) and\n`@_ alias to nonexistent neg index within array` (test 131).  Test 130 now\nPASSES, so every run of perl-tests/array.t prints\n\n    # REGISTRY-STALE: array.t test 130 now passes; drop skip-registry pattern\n    \"\\\\@_ alias to nonexistent\"\n\nwhile test 131 still fails and still needs its skip.  The entry cannot simply\nbe dropped: it has to be SPLIT so the pattern matches only the row that still\ndiverges (anchor on `neg index`), or the residue re-probed.\n\nThe entry's own text already says the reason was CORRECTED in s464ay (\"the\nnamed primitive WORKS â¦ this row therefore fails for an as-yet-unidentified\nreason and its registration is provisional -- re-probe it against the file\nbefore trusting this line\"), so splitting it is also the moment to find out\nwhat test 131 actually diverges on.\n\nMEASURE FIRST: `./runt array | grep -n 'REGISTRY-STALE\\|alias to nonexistent'`\non this tree and on a base extraction; then split the pattern and re-run the\nfull sweep (a skip-registry edit is the harness row of the WHAT-TO-RUN-WHEN\ntable).  Splitting is COUNT-NEUTRAL for test 130 (a registry entry only\nrelabels a FAILING row) and must stay count-neutral for 131.\n",
+   "id" : 1305,
+   "status" : "pending",
+   "subject" : "STALE-ON-BOTH-TREES: array.t's `\\@_ alias to nonexistent` skip-registry entry covers TWO rows and only one still fails, so the registry flags it stale on every run"
+}

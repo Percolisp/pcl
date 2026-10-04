@@ -1,0 +1,9 @@
+{
+  "id": "88",
+  "subject": "#25 s310c: sysseek builtin (4-edit family) + runner stderr capture for in-harness read-errors",
+  "description": "op/sysio.t unbound:I = sysseek missing from %RUNTIME_NAMES/impl/:export (Config.pm spec exists). Then add stderr capture to tools/run-perl-suite.pl so the 5 in-harness read-error files can be diagnosed.",
+  "activeForm": "Adding sysseek + runner stderr capture",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

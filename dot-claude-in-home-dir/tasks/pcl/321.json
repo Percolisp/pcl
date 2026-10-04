@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "Found s395 while fixing #314 family F-B.  With `our $count++` lowering,\nop/inccode.t COMPILES (TRANSPILE-FAIL -> runs) but dies at its test 2:\n\n    crash: The value #<function (lambda (&rest %_args) ...)> is not of type ...\n\nThat file is `# Tests for the coderef-in-@INC feature` end to end (89 perl\nrows), so the whole remaining gap is one feature: an @INC element that is not\na directory string.  Perl accepts three hook shapes there and PCL accepts none:\n\n  1. a CODE ref            -- called as $hook->($hook, $filename)\n  2. an ARRAY ref whose [0] is a coderef (called with the array as $hook)\n  3. a blessed object with an INC method -- $hook->INC($filename)\n\nThe hook returns, in order of preference: a filehandle to read the module\nsource from, a coderef generating lines, or a (filehandle, coderef) pair; an\nundef/empty return means \"not found, keep searching @INC\".\n\nLAYER: this is `require`'s search loop -- genuine core semantics, so the\nruntime (the module loader in cl/pcl-runtime.lisp), NOT a lib/ shim.  The\ninteraction to settle first is PCL's module CACHE: a hook-produced source has\nno stable path key, so it must not be cached under one.\n\nBAR: probe each of the three hook shapes against perl (return-a-filehandle and\nreturn-a-coderef); re-run op/inccode.t and op/inccode-tie.t (the tie variant is\nseparately blocked on \"multiple package sections\" in string eval) and splice\ntheir snapshot rows; gate; corpus-diff (expect identical -- a runtime change\nmakes the full sweep NON-OPTIONAL, s377 rule).\n",
+   "id" : 321,
+   "status" : "pending",
+   "subject" : "coderef-in-@INC hooks unsupported - op/inccode.t compiles but dies at test 2 (89 rows)"
+}

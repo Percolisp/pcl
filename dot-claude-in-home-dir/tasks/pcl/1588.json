@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t4 (#1501 CHECK 1 round 1, 2026-09-13), found by FIXING the file that hid it: t/run/runenv_hashseed.t aborted at 9 of 278 rows on the missing test.pl helper `unlink_tempfiles`; with the helper (shipped this session) it runs all 278 and FOUR fail honestly:\n\n    59   mode = NO same key order with different seed no more than 2 times\n    68   mode = RANDOM same key order no more than 2 times\n    69   mode = RANDOM same key order with different seed no more than 2 times\n    278  mode = DETERMINISTIC same key order with different seed no more than 2 times\n\nAll four are the same fact: the file runs the same program twice with different PERL_HASH_SEED / PERL_PERTURB_KEYS settings and asserts the key order DIFFERS more often than not.  PCL's hashes are CL hash tables whose iteration order is stable for a given insertion sequence and unaffected by any environment variable, so the two runs always agree and \"no more than 2 times\" fails.\n\nNote the shape: the three rows that assert the order is the SAME (the DETERMINISTIC / seed-reuse cases) PASS, and they pass for the wrong reason -- PCL is deterministic unconditionally.\n\nVERDICT PROPOSED: a docs/not-supported.md section (\"Hash order is not randomised; PERL_HASH_SEED and PERL_PERTURB_KEYS are inert\"), not a fix -- perl randomises specifically so that programs cannot depend on key order, and PCL's order is already an implementation detail nothing may rely on.  The section is the cause for these four rows.  A user-visible consequence worth writing down: a program that sorts its keys is portable; one that does not will see a DIFFERENT but STABLE order under PCL.\n",
+   "id" : 1588,
+   "status" : "pending",
+   "subject" : "PCL has no hash-order randomisation: PERL_HASH_SEED / PERL_PERTURB_KEYS change nothing, so `keys` returns the same order every run -- t/run/runenv_hashseed.t 4 rows"
+}

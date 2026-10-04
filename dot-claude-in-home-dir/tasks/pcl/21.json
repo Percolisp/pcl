@@ -1,0 +1,9 @@
+{
+  "id": "21",
+  "subject": "W12: diff over census corpus + Pl/t, justify every text-boxed→tree-unboxable",
+  "description": "Run PCL_W12_DIFF=1 over census corpus + Pl/t. Every text-boxed → tree-unboxable diff needs written justification (expected wins: eval-in-comment, \"$x\"-only names, ++ on same-named var in sibling scope). tree-boxed where text-unboxable = free. Zero unexplained diffs required before default swap.",
+  "activeForm": "Running W12 verdict diff",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,8 @@
+{
+  "id": "312",
+  "subject": "pclxs D12 grind (Opus, ABI 8): lvalue macros + checkout ledger",
+  "description": "Implement D12 (docs/decisions.md) per the grind item under plan.md 2b — read the ADR in full first; the semantics are oracle-pinned there.\n\nOne ABI bump (7→8, rule 6: conformance suite updated in the same change):\n- ref_retarget(ref, new_target) vtable verb, optional group PCLXS_CAP_RETARGET; a DETECTED retarget on a host without it croaks naming SvRV_set.\n- undefine_xsub(token) — required entry; host's `defined &name` must go false after sync and its AUTOLOAD fallback arms.\n- PS_NO_SUB status from pclxs_invoke_xsub when the registration record's fnptr is NULL — host behaves exactly as calling a never-defined name.\n\nShim side: checkout ledger (slot, snapshot) reconciled at frame boundaries + pclxs_sv_export; the ->h audit rule from D12 (no RV's ->h reaches the host except through the reconciling path). CvXSUB(cv) = registration record fnptr slot; CvXSUBANY(cv) = existing XSANY slot; CvCONST_on/off/CvCONST flag ops; lvalue SvRV via per-RV referent cell + SvRV_set immediate spelling; PERL_MAGIC_UTF8_CACHESIZE (=2). refhost implements the three additions.\n\nConformance t/ per rule 5: ProxySubs demote-then-call dies through the host AUTOLOAD path (\"Your vendor has not defined Socket macro X\" shape — oracle-pinned), defined &missing false after boot, Clone-shaped retarget with RV identity pinned across the write + bless-in-same-frame.\n\nThen re-survey the FULL corpus (also refreshes stale pre-D13 PL_op mentions in SURVEY.tsv rows). Expected movers: Socket, Socket-2.040-0, Fcntl, POSIX, File-Glob, Sys-Syslog, Clone, Storable.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

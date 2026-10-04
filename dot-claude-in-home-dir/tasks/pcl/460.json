@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-22",
+   "description" : "FILED s431 (Opus 5) by the P1 flip census: the four remaining t/op/lexsub.t drops (448, 751, 836, 851) are all this family, and it has no OPEN owner (#361 and #376 are completed).\n\nPROBES (perl 5.40.3):\n\n    { my sub x { 7 } print x, \"\\n\"; }        perl 7      PCL 7        (right)\n    { my sub x { 7 } x; print \"called\\n\"; }  perl called PCL DROP  (and the print is inside the dropped text)\n    { my sub y { 8 } print y, \"\\n\"; }        perl 8      PCL 0        <- SILENT WRONG\n\nPPI lexes a Word `x` as the repetition operator and `y` as the transliteration operator (docs/ppi-upstream-bugs.md section 19 covers `x` after a LIST OPERATOR only).  s430/B3.3 made a lexical sub named after a STATEMENT MODIFIER (`if`) position-aware in the renamer; a QUOTE-LIKE operator name is the sibling case and was not covered -- `y` additionally swallows source as a transliteration, which is how `print y, \"\\n\"` becomes 0.\n\nCENSUS ROWS OWNED: t/op/lexsub.t 448 (`x` as a whole statement), 751 (`x();`), 836 (`x`), 851 (`is y, 43, ...` -- PPI's `y` swallows the following two blocks, including `my sub UTF8NAME`).  op/lexsub.t passes 9 of 156 rows today; #381 (indirect object) is the other thing that file sits behind.\n\nBAR: the three probes + the inverse (a REAL `x`/`y` operator next to a lexical sub of that name: `my sub x {7}; print \"a\" x 3;`), the s430 position classifier as the model, gate-SET scan over both populations, corpus-diff, guards in Pl/t/lexical-sub-0*.t.\n",
+   "id" : 460,
+   "status" : "pending",
+   "subject" : "A lexical sub named `y` is SILENT WRONG (`{ my sub y {8} print y, \"\\n\" }` prints 0, perl 8) and a bare `x;` statement-position call DROPS -- the two quote-like-operator names #361/#376 did not cover"
+}

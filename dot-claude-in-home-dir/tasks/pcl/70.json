@@ -1,0 +1,9 @@
+{
+  "id": "70",
+  "subject": "t/io pipe-open: fork-pipe open (\"|-\"/\"-|\", bare + command forms) + dup-open (\">&FH\") — de-gates closure.t, unblocks openpid/pipe",
+  "description": "SHIPPED s301 (commit ac20055): fork-pipe open (\"|-\"/\"-|\" bare+command), dup-open (\">&FH\"/\"<&FH\" + fdopen \">&=\"/\"<&=\" incl. numeric fd + in-memory stream-alias), close-reaps-child $?. closure.t de-gated → 257+0/258 FULL PASS v2-native; census 111/0 — E1 COMPLETE. Root causes fixed along the way: (1) scalar.t \"t128 abort\" was really the \">&=FILE\" EBADF die at line 394 (sweep recovery masked it); (2) magic.t fork-child END plan-check → pid guard in pl-plan/exit-hook; (3) closure.t heredoc \\$ bug = PExpr escape-only-heredoc routing + make_string_literal_node sigil re-encoding (ExprToCL2 re-interpolated fake literals); (4) perl-tests/t/test.pl real-perl TAP fallback (guarded by defined &main::is; pcl-test.lisp registers TAP subs :defined). Follow-up targets (NOT this task): t/io pipe.t 6/27 crash:sb-int:broken-pipe, openpid.t 8/10.",
+  "activeForm": "Implementing fork-pipe open",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "=== DONE (s473t5d) ===\nFOUND + FIXED s473t5d (Opus, 2026-09-13) by #1501 round 5.\n\nt/io/inplace.t failed ALL SIX of its rows on\n\n  Can't open /tmp/pcl-test-N-1: No such file or directory\n\nThe fixtures are built by\n\n  runperl( prog => 'print qq(foo\\n);', args => ['>', $file] );\n\ni.e. the SHELL redirects the child's stdout into the file.  PCL's stub did\n\n  my $argv = join(' ', map { quotemeta($_) } @{$opts{args} // []});\n\nso the `>` became `\\>` -- a literal argument -- and the file was never created.\n\nThe REAL t/test.pl appends `args` RAW: its `_quote_args` adds double quotes\nonly on VMS, and `_create_runperl` then does\n`$runperl = _quote_args($runperl, $args{args})`.  One line, matching perl.\n\nBLAST RADIUS, measured rather than assumed: nine files in perl's t/ pass\n`args =>` to runperl (io/inplace.t io/iprefix.t op/caller.t op/sprintf2.t\nrun/locale.t run/switchC.t run/switchd.t run/switches.t run/switchx.t) and none\nof their values needs quoting (plain words, filenames, `>`, `chr(256)`).  In the\nSWEEP population only perl-tests/caller.t passes `args =>` to runperl (its\nvalues are `qw()` words, where quotemeta is the identity) -- perl-tests/\nsprintf2.t's `args =>` is its own sprintf data -- so the sweep cannot move from\nthis change, and it did not.\n\nRESULT: t/io/inplace.t 2/6 -> 6/2 (4 blessed rows left the baseline by EDIT).\nThe residue is 2 rows (`die shouldn't touch file`, `last should update file`) --\nthe in-place edit's behaviour on an ABNORMAL exit; #1710 carries them.\nGuard tools/t/harness-switches.t rows 3+4.\n",
+   "id" : 1701,
+   "status" : "completed",
+   "subject" : "perl-tests/t/test.pl's run_perl() quotemeta'd `args`, where the real t/test.pl appends them RAW -- so `args => [\">\", $file]` became a literal argument instead of a shell redirect and the fixtures were never written"
+}

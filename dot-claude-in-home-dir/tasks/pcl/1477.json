@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p06-sprintf2.pl.\n\nROW BEHIND IT (baselines/fail-baseline.tsv, 1 row):\n  sprintf2.t 1534 (unnamed row; got '0x1.1p+0', expected '0x1.0p+0')\n  -- the source is perl-tests/sprintf2.t:844,\n     `is(sprintf(\"%.1a\", 1.03125), \"0x1.0p+0\");`\n\nMEASURED (perl 5.40.3 vs ./runpcl):\n    printf(\"%.1a|%.1a\\n\", 1.03125, 1.0625)\n  perl: 0x1.0p+0|0x1.1p+0\n  PCL : 0x1.1p+0|0x1.1p+0\n  1.03125 is 0x1.08p+0 -- EXACTLY halfway between 0x1.0 and 0x1.1, so the\n  tie rule decides.  1.0625 is 0x1.1p+0 exactly and both agree, which is the\n  control that isolates the tie.\n\nMECHANISM: PCL rounds the discarded hex digits half-away-from-zero; C's\n`%a` (and therefore perl's) rounds half-to-even.  Fix area: the `(#\\a)` arm\nof `sprintf-one` in `cl/pcl-runtime.lisp`.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md sprintf2.t, \"subnormal /\ndenormal `%a` last-hexdigit rounding\" -- this row is the ROUNDING half (a\nnormal double); #1476 is the subnormal-significand half.\n\nFAMILY: float formatting; siblings #1475, #1476.\n",
+   "id" : 1477,
+   "status" : "open",
+   "subject" : "BUG (sprintf `%a`): rounding at an EXACT tie goes half-away-from-zero where perl goes half-to-even -- `sprintf \"%.1a\", 1.03125` (= 0x1.08p+0) is `0x1.0p+0` in perl and `0x1.1p+0` in PCL"
+}

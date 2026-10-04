@@ -1,0 +1,8 @@
+{
+  "id": "45",
+  "subject": "postfixderef.t v2 cascade: unbound-@a fwd-decl gap, nested-sub ordering, interp postderef",
+  "description": "CLOSED s300 (commit 6dc0f22). postfixderef.t de-gated: 83+36 crash@t119 → 94+27 to-EOF both pipelines; census 108/3, gen v2-39. Shipped: interp postderef (postderef_qq lexical feature lookup, shared interp layer), implicit-arrow ->(){k}/->()[i] subscript retag, {bareword} autoquote in plain-Statement subscripts, array_str_interp child=LIST_CTX (zero corpus footprint outside postfixderef.t — the s299 blast-radius guess was wrong; all 23 diffs were _rename_poisoned_block_mys renames/fwd-decls, behavior-swept identical vs HEAD), _rename_poisoned_block_mys. 8 new tests in transpile-test-04b.t; t-02.t t64 guard flipped to v2-native. Full gate 4236 green.\n\nREMAINING postfixderef.t gaps (NOT blockers, → #66/future): bareword symbolic deref `foo->@*` in code, '.'-overload not dispatched through interp concat (t107), utf8/symref family (t42-59), PVBM.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

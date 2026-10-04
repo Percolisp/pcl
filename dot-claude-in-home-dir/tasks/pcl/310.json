@@ -1,0 +1,9 @@
+{
+  "id": "310",
+  "subject": "pclxs: three `failed`/ZERO-symbol SURVEY rows survive the s14 -I fix (Clone, HTML-Parser, Hash-Util-FieldHash)",
+  "description": "Found by review s15 (2026-08-14). census/SURVEY.tsv still carries three rows with status `failed` and nsyms 0:\n\n    Clone-0.47-0            failed  0\n    HTML-Parser-3.83-0      failed  0\n    Hash-Util-FieldHash     failed  0\n\nThat is exactly the verdict commit 028d6bc's own message says this tool exists never to produce. SURVEY.tsv was regenerated TWICE during s14 after the -I fix and all three rows are byte-identical (verified: `git diff ed966db~1 HEAD -- census/SURVEY.tsv` shows one changed row, version-0.9933-0, and none of these), so the fix did not reach them.\n\nTheir causes ARE hand-blamed in docs/plan.md prose — Clone wants lvalue SvRV + PERL_MAGIC_UTF8_CACHESIZE (task #308); FieldHash's \"1 symbol\" was a first-error mask; HTML::Parser is filed \"one utf8 helper away\". The finding is not that the causes are unknown, it is that the BOARD is silent for three dists while the diagnosis lives in paragraphs nobody greps while reading a column.\n\nSTART WITH HTML::Parser: it was filed \"one utf8 helper away\" and s14 shipped a pile of utf8 helpers (uv width table, the 8 names Encode's encode.h builds from) WITHOUT re-running its blame. It may already be closer than the row says.\n\nThen make the tool say why for the other two, rather than leaving `failed 0`.\n\nRegistered in docs/plan.md, cross-cutting section.",
+  "activeForm": "Re-blaming the three zero-symbol failed rows",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

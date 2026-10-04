@@ -1,0 +1,9 @@
+{
+  "id": "86",
+  "subject": "#25 families s310: nil-not-real (qr-whitespace) + builtin arity DONE; now p-box-in-@INC / core-shim fallback (runenv*/switchM)",
+  "description": "Suite triage family \"type-error: The value nil is not of type real\" (4 files). Root cause found in op/inc.t: `$_ = ${qr //}` — Perl allows whitespace between m/qr operator and delimiter; p-qr/p-regex assume delimiter at fixed index → end-delim nil → nil-not-real. Fix _parse_regex_content (ExprToCL) + p-qr/p-regex (runtime), verify remaining family files.",
+  "activeForm": "Fixing qr-whitespace nil-not-real family",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

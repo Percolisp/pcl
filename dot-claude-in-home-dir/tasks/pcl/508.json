@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent B's #464 report (pre-existing). The `$init_idx < 0` branch of the local lowering (no RHS) does not take the modifier; fixable with the same `$keep` machinery #464 added for `local(LIST)=RHS if C` but needs `(if COND <empty> <current>)` per binding. Bar: the repro (both branches), `local($a,$b) if/unless`, inside a sub, the inverse (`local $p;` plain, `local $p = 5 if 0` already right); a row in Pl/t/stmt-modifier-01.t.",
+   "id" : 508,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a bare `local X if COND` (no assignment) IGNORES the modifier -- `our $p; $p=1; { local $p if 0; print defined($p)?$p:\"U\" }` perl 1, PCL U (localised anyway); same for `local($a,$b) if 0`"
+}

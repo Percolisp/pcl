@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nPRE-EXISTING.  perl-tests/scalar.t lines 400-480 ([perl #109828]).\n\nROWS BEHIND IT (baselines/fail-baseline.tsv): perl-tests/scalar.t 88, 89, 91, 92,\n104, 106, 111, 112, 114 = 9 rows; plus 94 and 116 which are the WARNING half and\nbelong to #221 as well.\n\nPERL'S RULE: PerlIO::scalar maps BYTES.  `open($fh, \"<\", \\$content)` where\n$content holds a character above 0xFF FAILS, sets $! = EINVAL (22), and under\n`use warnings \"utf8\"` warns\n    Strings with code points over 0xFF may not be mapped into in-memory file handles\nA read or a print through an already-open handle whose target BECOMES\nnon-downgradable fails the same way.  A merely utf8-UPGRADED but downgradable\ntarget (e.g. \"12\\xA1\") opens and reads the downgraded bytes -- PCL gets that\nhalf right (scalar.t rows 95-99 pass).\n\nPCL: the open succeeds, $! stays 0, read() returns the character, print()\nsucceeds.  Rows read got='' / '1' / '0' against exp='' fail / EINVAL / undef.\n\nThe root is the missing per-SV utf8 flag (docs/not-supported.md 'Unicode\nsemantics differences'), but the OBSERVABLE here is not a flag readout: it is an\nopen that must fail and an errno that must be set, so it is a bug, not that\nentry's ruled non-support.  A \"does this string hold a code point > 0xFF\"\npredicate is all the decision needs.\n",
+   "id" : 1447,
+   "status" : "open",
+   "subject" : "BUG (in-memory filehandle): a target with code points > 0xFF is accepted; perl refuses it with EINVAL (and warns under `use warnings \"utf8\"`) -- 9 blessed rows in perl-tests/scalar.t"
+}

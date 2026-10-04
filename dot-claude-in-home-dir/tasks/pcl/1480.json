@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p08-arylen-residue.pl.\n\nROW BEHIND IT (baselines/fail-baseline.tsv, 1 row):\n  array.t 172 `assigning to arylen aliased in foreach(scalar $#arylen)`\n  -- perl-tests/array.t:563-564\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n    our @foo;\n    for (scalar $#foo) { $_ = 3 }\n    print \"[$#foo]\\n\";\n  perl: [3]\n  PCL : [-1]      (the write vanishes, no error)\n\nMECHANISM: `foreach` aliases `$_` to each list element.  `scalar $#foo` is\nan arylen-magic lvalue; PCL's foreach list builder copies its VALUE into the\nalias slot instead of aliasing the magic cell, so the write lands in a\ndetached box.  Note `\\$#array` write-through itself WORKS (session 218,\n`p-arylen-ref` + `p-magic-cell`) -- it is the foreach aliasing path that does\nnot carry the cell.  Fix area: the foreach list lowering in\n`Pl/Parser2.pm` / `p-foreach` in `cl/pcl-runtime.lisp`.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md array.t, \"**172** (arylen\naliased in foreach): separate magic-interaction sub-problems.\"\n\nFAMILY: element aliasing (`docs/not-supported.md` \"Sparse arrays (holes),\nelement aliasing, and SV identity\"); this shape is NOT covered there -- the\ntarget is a magic cell, not an array element.\n",
+   "id" : 1480,
+   "status" : "open",
+   "subject" : "SILENT WRONG (arylen magic): a `foreach` alias to `scalar $#array` does not write through -- `for (scalar $#foo) { $_ = 3 } print $#foo` is 3 in perl and -1 in PCL"
+}

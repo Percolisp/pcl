@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND s501b (Opus, 2026-09-30) by the breaking-case probe for #2285.  PRE-EXISTING (base 1bae682b gives the same wrong answer).  SILENT WRONG.\n\nREPRODUCER (scratch/s501b/p/ev2.pl row 3 in the s501b worktree):\n    our $o = \"main-o\"; $Foo::o = \"foo-o\";\n    my $r3 = eval 'sub { package Foo; $o }'; print $r3->(), \"\\n\";\nperl: main-o  (an `our` is a LEXICALLY scoped alias; the eval's text is compiled in the caller's scope, so $o is main's)\nPCL:  foo-o\n\nCAUSE: #2285 (s501b) made a name in the eval's CAPTURE ALIST bind as a lexical in the package-switch requalifier (_binding_at's eval-mode tail).  An `our` alias is not in the capture alist (the alist carries my/state containers), so the requalifier's four-way resolver answers \"(d) global of X\" and rewrites $o to $Foo::o.  The eval site would have to hand the compiler its in-scope `our` aliases (name -> declaring package), the way it hands the capture names and the feature list (#364), and _binding_at would answer that package for them (its (a)-our arm).  The same missing fact probably breaks `our $o; eval '$o'` inside a `package Other;` section of the CALLER -- measure that first (cheap: one line each way).\n\nBAR: Pl/ => corpus-diff + the eval cache key must include whatever new input the compiler reads (the s387 rule); guard rows in Pl/t/eval-capture-01.t.",
+   "id" : "2557",
+   "status" : "pending",
+   "subject" : "A caller's `our $o` alias is not seen by a string eval whose text switches package: `our $o = \"m\"; eval 'sub { package Foo; $o }'` reads $Foo::o, perl reads $main::o"
+}

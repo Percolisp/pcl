@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent C's #465 report (pre-existing). Repro: `use English; print defined($ORS) ? \"d\" : \"u\";` -> PCL: \"PCL: statement not supported at .../English.pm line 155: *LAST_PAREN_MATCH = *+ ;\". Either the glob-value family (#463 items 3-5: `*X = *-`, `local *a = *1`, `*^R = ...`) gets implemented -- measure the glob representation first, as #463 says -- or a lib/English.pm shim (right layer: a module's behaviour) aliases the English names onto the runtime's punctuation cells with the mechanism PCL HAS (`*ORS = \\$\\`-style scalar-ref aliases per name; the glob-alias spelling is what dies). Bar: the repro + $ARG/$MATCH/$PREMATCH/$POSTMATCH/$INPUT_RECORD_SEPARATOR/$OUTPUT_FIELD_SEPARATOR/$LIST_SEPARATOR/@ARG/$EVAL_ERROR/$OS_ERROR/$PROCESS_ID vs perl, read AND write through the alias; `use English qw(-no_match_vars)`; a Pl/t guard file.",
+   "id" : 502,
+   "status" : "pending",
+   "subject" : "`use English` does not work at all: core English.pm dies at transpile (`*LAST_PAREN_MATCH = *+ ;` -- a glob alias to a PUNCTUATION glob, the #463 items 3-5 family), so every English alias ($ORS $OFS $ARG $MATCH ...) is unreachable"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FOUND s473t5e (#1501 round 6, `re/` CHECK 2).  t/re/reg_pmod.t is DIFF 58/30\nand every one of its 30 blessed rows names one of the three caret variables:\n\n    s/$r/p: ^MATCH is '345'          /$r/p: ^MATCH length\n    s/345/p: ^PREMATCH is '012-'     s/$r/p: ^PREMATCH length\n    s/345/p: ^POSTMATCH is '-6789'   /$r/p: ^POSTMATCH length\n\nperl 5.10 added `/p` (\"preserve\"), which makes `${^MATCH}`, `${^PREMATCH}` and\n`${^POSTMATCH}` hold what `$&`, `` $` `` and `$'` hold, for the match that was\ncompiled with it.  PCL has `$&`/`` $` ``/`$'` and none of the three caret\nspellings.\n\nROWS: 30 blessed fail rows, one file.\n\nSHAPE: PCL keeps the match data unconditionally (there is no\n\"copy the subject only under /p\" optimisation to model), so the three variables\nare ALIASES of the three punctuation ones and `/p` is a no-op modifier to\naccept.  That makes this a small, self-contained runtime item: three magic\nglobals beside `$&` in the same table, each pipe-quoted (a caret variable of\nany sigil must be -- DECIDED Â§s420), and `p` added to the accepted modifier\nletters.\n\nCHECK WHEN DOING IT: perl leaves the three UNDEF when the LAST successful match\nwas compiled WITHOUT /p, which an unconditional alias gets wrong in the other\ndirection; measure whether reg_pmod.t asserts that (it has rows named\n\"without /p\") before choosing between the alias and a per-match flag.\n",
+   "id" : 1718,
+   "status" : "pending",
+   "subject" : "the `/p` modifier and `${^MATCH}` / `${^PREMATCH}` / `${^POSTMATCH}` are absent -- t/re/reg_pmod.t, 30 rows"
+}

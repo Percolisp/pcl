@@ -1,0 +1,9 @@
+{
+  "id": "51",
+  "subject": "E1 M-B session 3: scalar.t divergence + drop STAGED interp refusal (sort.t DONE s290; ref.t → eval family)",
+  "description": "M-B core shipped s290 (6787b9b): sort.t de-gated at exact parity via per-declaration span instances + canon-exact container promotion + unreachable-goto rewrite + per-section forward-decl exclusion (_seg_lex) + on-demand declare-sub stub sweep. REMAINING: (1) debug scalar.t divergence — dropping the STAGED \"interpolated use\" refusal in _rename_spanning_lexicals (marked STAGED in comment; the M-A interp fixer wiring below it is already in place and inert) de-gates scalar.t at 78+36/128 PARTIAL (early stop after t126, new fail t64 \"new value preserved\") vs v1 baseline 81/35/12 complete; suspect the $fh mangled rename + readline interp rewrite around the in-memory-filehandle/tie-proxy tests; (2) after parity, drop the refusal and re-run the verification triple. ref.t is NOT this task: re-triaged to the M-F eval family (string eval names the lexical; needs s250 capture alist carrying orig-name → renamed-cell pairs). See s290 session-log entry for the full trail.",
+  "activeForm": "Implementing per-declaration span tracking",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

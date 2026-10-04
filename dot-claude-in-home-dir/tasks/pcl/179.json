@@ -1,0 +1,9 @@
+{
+  "id": "179",
+  "subject": "DONE s321: /xx implemented (re/keep_tabs.t 12/2 -> 14/0 OK) + the TAP layer's duplicate scanner fixed",
+  "description": "SHIPPED a389ab9. Two bugs, the second found because the first fix made the file worse before it made it better.\n\n(1) /xx is its own modifier. cl/pcl-runtime.lisp: parse-regex-modifiers counts x's and sets :xx; build-ppcre-options carries :pcl-xx-mode (PCL-private — cl-ppcre has no /xx, so xx must always take the self-normalising path); %pcl-build-scanner strips that option and passes the state down; %pcl-normalize-extended keeps a parallel xx stack and skips unescaped whitespace in the in-class branch; %pcl-parse-x-flag-group learns `(?xx:` is two x's and that -x cancels xx. Escaped whitespace survives via the backslash branch, per perl.\n\n(2) THE ONE THAT MATTERED: pl-like/pl-unlike in cl/pcl-test.lisp built their own scanner with raw ppcre:create-scanner, bypassing %pcl-build-scanner. So like/unlike judged patterns by DIFFERENT rules than =~ did — no cl-ppcre extended-mode workaround — and the new option made create-scanner throw, with the handler-case converting the error into a quiet test FAILURE (12/2 -> 8/6). Both now route through %pcl-create-scanner. Recorded in DECIDED.md as a rule: the TAP layer must not build its own scanner.\n\nGuard: Pl/t/transpile-test-09.t (NEW file — -07 was closed by the user), one snippet, 3 s, inverse guards inline (/x keeps class whitespace; escaped whitespace survives /xx; (?xx:) vs (?x:) differ; xx with no class unaffected).\n\nVerified: gate 124/4468 PASS; sweep 0 new / 0 fixed vs 689 — which is the real test of the pcl-test.lisp change, since every like/unlike row in the corpus now uses the corrected path.\n\nFOLLOW-UP: #181 (qr stringification drops the second x).",
+  "activeForm": "Implementing /xx class-whitespace handling",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

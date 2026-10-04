@@ -1,0 +1,9 @@
+{
+  "id": "75",
+  "subject": "Target B: IR macro vocabulary flag-day (post-E5) — obvious macros for all CL-specific machinery",
+  "description": "Target B (docs/v2-endgame-plan.md §6, user requirement 2026-07-20): the generated IR must read clearly, every CL-specific mechanism behind an obviously-named macro from the closed ir-spec.md vocabulary. Worklist = generated-cl-ir-review.md §4 items 2–6: constructor + context macros (p-new-av/hv/sv, p-vlist, p-scalar-ctx/p-list-ctx instead of bare (let ((*wantarray* …)) …)), structured regex literals (no un-parsed Perl source), p-esc for control chars, dedupe/asymmetry cleanups, canonical re-print. Plus: any new fast shapes from Target A land pre-wrapped in named macros (p-append!, p-call-cached, …). Emission-changing → full parity discipline + cache-gen bump per item; zero behavior change is the test. Schedule the flag-day AFTER E4/E5 (one pipeline = cheap); doc-side prep anytime.",
+  "activeForm": "Macro-ifying the IR vocabulary",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

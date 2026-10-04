@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p04-sprintf-vecflags.pl.\n\nROWS BEHIND IT (baselines/fail-baseline.tsv, 2 rows):\n  sprintf.t 157  `>%+-v3d< >\"\\01\\02\\03\"< >+1 .2  .3  <`\n  sprintf.t 165  `>%+-v*d< >[3, \"\\01\\02\\03\"]< >+1 .2  .3  <`\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n    printf(\"plusv=[%+vd]\\n\",   \"\\01\\02\\03\");\n    printf(\"157=[%+-v3d]\\n\",   \"\\01\\02\\03\");\n  perl: plusv=[+1.2.3]      157=[+1 .2  .3  ]\n  PCL : plusv=[+1.+2.+3]    157=[+1 .+2 .+3 ]\n\nCONTROLS THAT AGREE (measured in the same probe): `%v3d`, `%-v3d`, `%v*d`,\n`%0*v*d` are byte-identical in perl and PCL.  So the ONLY divergence is the\n`+`/space sign flag: perl applies it to the FIRST element only (it is a sign\nflag on the whole conversion), PCL passes it down to each element's\nper-element format.\n\nFix area: `sprintf-vector` in `cl/pcl-runtime.lisp` -- strip `+`/space from\nthe per-element spec and apply it once to the joined result.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md sprintf.t, \"reordered\npositional+vector\" (the note is wrong for these two rows -- there is no\npositional specifier in either).\n\nFAMILY: sprintf spec parsing; siblings #1472, #1473.\n",
+   "id" : 1474,
+   "status" : "open",
+   "subject" : "SILENT WRONG (sprintf): the `+` (and space) flag with `%v` is applied to EVERY vector element instead of once to the whole result -- `sprintf \"%+vd\", \"\\01\\02\\03\"` is `+1.2.3` in perl and `+1.+2.+3` in PCL"
+}

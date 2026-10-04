@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s450t (Opus, agent T of round 8).  Named as a separate task by the\nruled design, docs/computed-magic-design-s449.md SS4 last bullet, on rule 9a:\n`%!` itself is CORE (perl auto-loads Errno for it; PCL just defines it, done\nin #561), but `use POSIX qw(ENOENT)` / `use Errno qw(ENOENT)` and\n`Errno::ENOENT()` are one MODULE's exports and belong in a shim.\n\nSHAPE: lib/Errno.pm declares each constant as a zero-prototype sub reading\nthe ONE runtime table *p-errno-table* through a single builtin (the\n`builtin::` seam is blessed for exactly this -- docs/DECIDED.md s377), so the\nname list is not duplicated.  @EXPORT_OK is every name in the table, and\n`use Errno;` exports nothing by default (perl exports on request only --\nPROBE this before writing it).\n\nDO NOT hardcode a second name list: the runtime table is the source, and a\nshim with its own copy is the drift #561's comment warns about.\n\nBAR: `use Errno qw(ENOENT); print ENOENT;` and `Errno::EACCES()` vs perl;\n`$!{ENOENT}` unaffected; a row in the errno guard set\n(Pl/t/errno-magic-01.t).\n",
+   "id" : 673,
+   "status" : "pending",
+   "subject" : "lib/Errno.pm shim: export the errno constants over the runtime's *p-errno-table* (the #561 design's named follow-on, module layer)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent B's #466 report (pre-existing). The dup modes `>&`, `<&`, `>&=`, `<&=` with a glob ref, a bareword (`open(F, \">&STDOUT\")`), a lexical handle and a numeric fd must create a second handle on the same stream (write-through, close independent). Bar: each spelling vs perl (output interleaving through both handles; `close $dup` leaves STDOUT open); a Pl/t guard row in fileio-01.t or the open topical file; a perl-shaped failure for an unknown source handle.",
+   "id" : 513,
+   "status" : "pending",
+   "subject" : "`open($fh, \">&\", \\*STDOUT)` (filehandle DUP) fails in PCL in every spelling (`print $fh`, `print {$fh}`) -- an SBCL error, not a perl-shaped one"
+}

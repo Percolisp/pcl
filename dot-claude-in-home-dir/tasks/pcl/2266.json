@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494g (Opus, 2026-09-25) while splicing the companion (t/lib/croak.t produced 0 of perl's 225 rows: `aborted-forms:1: Can't identify pragma to test from file name '' at common.pl`).  NOT caused by s494g: identical on a dc20a721 extraction (probed).\n\nREPRODUCER (perl 5.40.3 vs PCL):\n\n    # a.pl\n    require \"./b.pl\"; print \"done\\n\";\n    # b.pl\n    my @c = caller;\n    print scalar(@c), \" [\", join(\"|\", map { defined ? $_ : \"U\" } @c), \"]\\n\";\n    1;\n\n  perl: 3 [main|a.pl|1]\n  PCL : 0 []\n\n`caller` with no argument at the TOP LEVEL of a required file must answer the frame of the `require` (package, requiring file, line).  PCL answers the empty list (a caller inside a sub in the same file works).  t/lib/common.pl reads `my (undef, $file) = caller;` to derive the pragma name from the .t file name, so every t/lib/*.t driver that uses common.pl (croak.t; likely others, never measured -- t/lib/ is outside the --all population) aborts at its first line.  Member of the caller() fidelity family (#233, USER s488: bug queue) but a distinct mechanism: the require frame is not a sub frame.\nRow cost: t/lib/croak.t 225 rows (snapshot row spliced s494g as a first measurement; baselines/row-shortfall.tsv t/lib/croak.t carries this task).\n",
+   "id" : 2266,
+   "status" : "pending",
+   "subject" : "caller with no argument at the top level of a REQUIRED file returns the empty list (perl: the require frame) -- t/lib/common.pl drivers abort, t/lib/croak.t 0 of 225 rows"
+}

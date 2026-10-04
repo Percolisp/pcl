@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s451z, from the #703 probes.  PRE-EXISTING.\n\n    my @c = readpipe(\"printf 'm\\nn\\n'\");\n        perl  runs the shell, 2 lines\n        PCL   Undefined subroutine &main::readpipe called\n\nperl spells every command capture `readpipe EXPR`, and the NAMED form is a\nfirst-class builtin (t/op/exec.t rows 21-26 test it in both contexts, with the\ndefault `$_` argument, and its argument's context).  PCL implements only the\n`` `â¦` ``/`qx`/`` <<`` `` TERM (`p-backtick`); the name itself is unknown.\n\nFIX SHAPE: `readpipe` is `p-backtick` with a spec of [0,1] in\n`Pl/PExpr/Config.pm` and the `$_`-default family's -2 marker (`readpipe` with\nno argument reads $_ -- exec.t:139).  Its LIST behaviour is #731, so land that\nfirst or the new name inherits the same wrong answer.\n\nBAR: t/op/exec.t rows 21-26 (scalar, list, default argument in both, and the\nargument's own context); an overriding package (#703) must still win, because\n`use subs \"readpipe\"` displaces the NAMED form too.\n",
+   "id" : 734,
+   "status" : "completed",
+   "subject" : "`readpipe` is not a PCL builtin -- an explicit `readpipe(CMD)` call in a package with no such sub dies \"Undefined subroutine\""
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-14",
+   "description" : "FILED s484d (2026-09-14).  t/op/anonsub.t produced 6 rows until this session\n(#1652); it now runs all 15 of perl's, 6 passing.  Of the 9 failures, FOUR are\nalready-blessed principle-9 rows (`'sub;' is illegal` and its three siblings:\nPCL does not reject invalid perl -- docs/not-supported.md \"Error compatibility\nfor invalid Perl input\"), and one is perl's own TODO row.  The rest:\n\n  * record 4 -- `sub X; sub X { my $n = \"ok 1\\n\"; eval 'sub Y {...}'; Y(sub {\n    print $n }) }`.  PCL's child prints the answer AND an SBCL style-warning\n    block (\"undefined function: main::pl-Y\"), because the sub defined inside\n    the string eval is not visible to the compilation of the enclosing sub.\n    The warning text is #1773 (it should never reach the compared output);\n    whether the CALL then works is the real question -- measured, the child\n    does print `ok 1`, so this row fails ONLY on the noise.  Re-measure it\n    after #1773.\n  * records 6 and 7 -- \"Useless use of anonymous subroutine in void context\"\n    and its sibling: warnings-gated diagnostics are absent\n    (docs/not-supported.md, owner #221).\n  * row 9 `undef &anon giving it a freed GV` -- perl's answer after `undef\n    &$anon` is a specific `__ANON__` rendering.\n\nSo this file's honest residue is small and two thirds of it belongs to #1773\nand #221.\n",
+   "id" : 1771,
+   "status" : "pending",
+   "subject" : "op/anonsub.t's 4 record rows: a sub defined in a STRING EVAL is not visible to the enclosing compilation, and __ANON__/freed-GV naming"
+}

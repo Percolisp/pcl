@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nProbe scratch/s473t2/probes/p9-local-comma.pl.\n\nROWS BEHIND IT: perl-tests/multideref.t 48 (\"RT #130727 part 2: error\") and 52\n(\"RT #134045 assertion on the OP_SCALAR\") = 2 rows.\n\nPROBE (perl 5.40.3 vs ./runpcl):\n    my @x; eval { @{1, local $x[0][0]} = 1; }; print \"A: [\", ($@ || 'NO-DIE'), \"]\";\n  perl: Can't use an undefined value as an ARRAY reference at ... line 2.\n  PCL : Undefined subroutine &main::local called at (eval 0) line 0.\n\nEMITTED CL (./pl2cl on that file):\n    (p-cast-@ (progn 1 (p-scalar-ctx (pl-local (p-aref-argbox (p-aref-argbox @x 0) 0)))))\n-- `local` reached the generic funcall arm.  The LEADING spellings work:\n`local $x[0][0]` as a statement, `\\(local $y)` and `(1, local $y)` in a list all\nlower correctly (probe p8-local-expr.pl), so it is specifically `local` that is\nnot the first term of the expression it sits in.\n\nNB the VALUE half of multideref.t 46/48 is a ruled accepted divergence\n(docs/not-supported.md '`local` on hash/array elements and typeglobs', the\nRT #130727 quirk): PCL localizes+vivifies where perl dies.  This task is only\nthe emission bug -- a `local` PCL cannot lower must not become a call to a\nfunction that does not exist.\n",
+   "id" : 1451,
+   "status" : "open",
+   "subject" : "BUG (rule 12, loud): `local` in a NON-LEADING expression position lowers to a call to a nonexistent `pl-local` -- `@{1, local $x[0][0]} = 1` and `0for%{scalar local$0[0]}` die \"Undefined subroutine &main::local\""
+}

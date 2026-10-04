@@ -1,0 +1,9 @@
+{
+  "id": "125",
+  "subject": "#25 s316b: shadow-aware interp rewrite — de-gate \"file lexical captured by sub\" when a shadow exists",
+  "description": "_promote_captured refused whenever an interpolated use of the name met any same-name shadow declaration (\"interpolated use with shadows\"), because _rewrite_var_uses applied its $skip predicate only to Symbol tokens, not to interpolated text. Fix: run the same position-based $skip over interp tokens (it is meaningful for any node — _ref_shadowed climbs parents, _symbol_is_declarator answers 0 for a string), then drop the refusal. Motivating case: perl's own t/test.pl gates on `my $tmpfile` captured by fresh_perl (a second `my $tmpfile` lives inside another sub) — and the v1 fallback then MISCOMPILES its forward `goto WATCHDOG_VIA_ALARM` into a tagless (go), which v2 lowers correctly.",
+  "activeForm": "De-gating the shadowed-interp capture promotion",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

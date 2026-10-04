@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-30",
+   "description" : "FILED s454ad (Opus round 12, agent AD), found by a #755 probe; PRE-EXISTING\n(identical on the 154f4a9 base worktree).\n\n    mkdir \"/tmp/d\"; chdir \"/tmp/d\";\n    my @names = (\"plain_a\", \"plain_b\");\n    for my $n (@names) { open my $f, \">\", $n or die; close $f }\n    open my $f, \">\", \"plain_c\" or die; close $f;\n    my $cnt = unlink @names, \"plain_c\";\n    print \"count=$cnt\\n\";\n        perl: count=3\n        PCL:  count=1        (only plain_c is deleted; the files in @names stay)\n\nCAUSE (emission, not runtime): the funcall lowers to (p-unlink @n \"c\") -- the\npl-array VECTOR is passed as ONE &rest argument, never flattened, and\np-unlink's (to-string (unbox f)) on a vector is not a filename.  The whole\nfamily emits the same shape (probed):\n\n    unlink(@n, \"c\")   -> (p-unlink @n \"c\")\n    chmod 0644, @n    -> (p-chmod #o644 @n)\n    utime 1, 2, @n    -> (p-utime 1 2 @n)\n    kill 9, @n        -> (p-kill 9 @n)\n\n(chown presumably too -- same &rest runtime shape.)  Other list builtins get\np-flatten-args; these do not.  FIX SHAPE (not designed): decide the seam --\neither these calls' emission flattens like the other list builtins, or the\n&rest runtime family maps p-flatten-args over its arguments itself (ONE\nhelper, rule 11).  Runtime-side flattening also fixes the shape reached\nthrough indirect calls.\n\nBAR: the probe above vs perl for unlink, chmod (mode preserved), utime,\nkill (count + delivery), chown; a hash in the list (perl flattens\nkeys+values); an empty array contributes nothing.\n",
+   "id" : 780,
+   "status" : "pending",
+   "subject" : "unlink/chmod/utime/kill @array: the array reaches the runtime UNFLATTENED -- one vector argument instead of its elements (perl counts 3, PCL counts 1)"
+}

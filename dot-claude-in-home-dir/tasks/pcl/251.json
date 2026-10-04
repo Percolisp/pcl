@@ -1,0 +1,12 @@
+{
+  "id": "251",
+  "subject": "E4.1 M7: board's last unnamed v1 route — \"re-declaration of 'ISA' after in-block our-alias\" (Role-Tiny subclass.t)",
+  "description": "DONE s355 (26ce393). RULED AND EXECUTED AS A FIX, not a refusal: the gate was refusing ordinary idiomatic Perl (one bare block declaring `our @ISA` in each of four successive packages — the compact MI-hierarchy idiom), and perl runs Role-Tiny/subclass.t 6/6 while PCL scored 0. Declaring that unsupported would have been a real CPAN incompatibility (CLAUDE.md principle 4).\n\nThe rule _requalify_block_our_after_pkg_switch could not express: an `our` alias runs to the end of its block OR to the next declaration of the same name. A re-declaration ENDS the alias; it does not defeat it.\n\nTWO FIXES, both the M4 lesson one file over:\n 1. TRUNCATE instead of refusing — the requalified region stops at a block-level PPI::Statement::Variable for the name (its binding runs to the block's end, so it partitions cleanly; the tail gets its own turn with its own decl_pkg).\n 2. SIGIL-EXACT re-declaration test — `foreach my $d` binds the SCALAR and must not end an `@d` alias. The old sigil-blind [\\$\\@\\%] refused there and the v1 fallback printed the empty list where perl gives (1,2).\n\nSURVIVING REFUSAL (correct, and now on #242's step-2 rephrase list): a re-declaration NESTED in an inner block or sub — the alias RESUMES after the inner scope, which a truncation cannot express. Its v1 fallback is silently wrong today, so the flip improves it.\n\nMEASURED: board Moo/accessor-default.t FAIL 0/0/0 -> PASS 40 ok (a SECOND file behind the same gate, previously unattributed) and Role-Tiny/subclass.t FAIL 0/0/0 -> PARTIAL 4 ok/1 not-ok; no other board row moved; board TODO 2 -> 1 (survivor = ruled true-multi-switch). corpus emission identical across 111 files; gate 131/4658 PASS audit unchanged; sweep GATE clean TOTAL 18498 = baseline. Gen v2-111.\n\nCONSEQUENCE: all three §5a.2 populations (Pl/t, sweep, CPAN board) are at zero unexplained TODO events. #242 unblocked.\n\nGuards: two rows in Pl/t/transpile-test-04b.t.",
+  "activeForm": "Naming the board's last unnamed v1 route",
+  "owner": "opus5",
+  "status": "completed",
+  "blocks": [
+    "242"
+  ],
+  "blockedBy": []
+}

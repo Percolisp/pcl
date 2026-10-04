@@ -1,0 +1,10 @@
+{
+  "id": "287",
+  "subject": "DONE s380 (0061f3c): sort binds the $a/$b pair of the package it was COMPILED in",
+  "description": "Both ruled halves (fable-answers-s378.md §2) in ONE commit 0061f3c.\n\n1. $a/$b out of %PKG_SWITCH_IMMUNE_VARS — ordinary globals, #239's requalifier re-homes them.\n2. Sort lowering binds the pair the comparator body READS: Pl::Parser2::_pkg_region_at (\"was this node requalified\" — BLOCK-level `package X;` only, same condition as _requalify_block_globals_after_pkg_switch, sharing _pkg_in_effect_at's one walk via the extracted _pkg_stmt_in_effect_at). FILE-level `package X;` is already its own top-level form, so deliberately NOT a region — that is why corpus-diff moved 1 file. Pl::PExpr::_sort_pair feeds all four sort-lambda sites; ExprToCL reads $node->{params}.\n\nperl's rule: sort sets the $a/$b of the package the SORT was compiled in, never the comparator's. Matching it REMOVED three PCL divergences, added none.\n\nLOAD-BEARING: a qualified pair needs (declare (special X::$a X::$b)) — the region's defvar is emitted INSIDE the enclosing top-level form, so the symbol is not proclaimed special when the lambda compiles and the parameter binds LEXICALLY (probed in bare SBCL, interpreted + compile-file). Bare pair needs none ⇒ unswitched sorts byte-identical.\n\nVerified: Pl/t gate 133/4789 PASS cold (gen v2-128→v2-129); corpus-diff 1 of 111 (sort.t only); full sweep gate clean (0 new/0 fixed/0 LOST, TOTAL 18498→18499); 18 probes vs perl all match, 5 previously diverged; Sort-Versions versions.t 65/31 → 96/0. pcl-pack.lisp/pcl-mro.lisp need no regen (no `sort` in either source).\n\nRULE LEARNED (in DECIDED.md): a guard row must not make a claim the SORT ALGORITHM answers — a constant NON-ZERO comparator prints perl's mergesort merge order vs the runtime's stable-sort. Print what the comparator OBSERVED. Guards: Pl/t/transpile-test-09.t \"package-switched sort binds the region's $a/$b pair (#287)\".",
+  "activeForm": "Implementing #287 package-aware sort pair",
+  "owner": "opus-s380",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

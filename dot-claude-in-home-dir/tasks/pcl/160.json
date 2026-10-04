@@ -1,0 +1,8 @@
+{
+  "id": "160",
+  "subject": "op/list.t 10 GB OOM: QUARANTINED s320 (NOT-RUN rows); diagnosis POST-R1 after user re-authorizes",
+  "description": "S1 item 4 DONE s320: %QUARANTINE in tools/run-perl-suite.pl holds op/list.t and op/pack.t. This is a SEPARATE mechanism from %HEAVY (which only runs a file solo, and could not help here — op/list.t OOMed a 10 GB cgroup at --jobs 1). Quarantined files are never run and each gets a NOT-RUN row carrying its reason; NOT-RUN is an UNEXPLAINED status, so they still fail the run and still appear in the tsv as a hole in the release signal. Verified: both rows print, summary says \"2 of those UNEXPLAINED are QUARANTINED\", exit 1.\n\nSTILL OPEN (post-R1, needs user re-authorization to run these files): split compile vs run (compile-file the emitted .lisp, then separately load the fasl), then binary-search by halving the statement list, under `systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0`. Fable's prime suspect: SBCL COMPILE time — a macroexpansion or type-derivation blowup superlinear in list length/nesting, in the list-assignment/slice macro family. The transpiler is innocent (pl2cl: 1.23 s, 64 MB, 564 lines of CL).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

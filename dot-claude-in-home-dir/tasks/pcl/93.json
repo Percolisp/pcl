@@ -1,0 +1,9 @@
+{
+  "id": "93",
+  "subject": "pclxs Phase 2: tools/xs-build (xsubpp + %Config compile) + perl-format printf + t/coerce.t",
+  "description": "Per pclxs/docs/plan.md Phase 2: (1) tools/xs-build — harvest dist metadata, run xsubpp under the system perl, compile/link with %Config flags, --suffix/--out as parameters never defaults; (2) rebuild Arith from a real .xs through xsubpp and pass typemaps T_IV/T_NV/T_PV/T_SV; (3) the perl-format printf in src/sv.c (%SVf, IVdf, UVuf, UVxf, NVgf + UTF-8 variants) used by croak/warn/newSVpvf/sv_catpvf — vsnprintf cannot do it, ~150 lines plus a differential t/ case per conversion; (4) t/coerce.t full nasty-input table diffed against real perl; (5) Tier X detection reported by the build tool (List::Util as the case). Also finish the Phase 1 leftovers: t/lib/Pclxs/Conform.pm (host-parameterized case list) and coerce seed cases.",
+  "activeForm": "Building pclxs Phase 2",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

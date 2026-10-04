@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FILED s497b.  perl 5.40.3, no strict: `my $u; my $n = @$u; defined $n` is FALSE -- rv2av of undef in scalar rvalue context is undef, not a count.  PCL's :rvalue site answers an EMPTY array (the symbolic @{\"\"}), whose count is 0.  Before s497b the never-written raw slot happened to answer \"\" through p-cast-@'s old fallback (which in turn made `my @e = @$u` ONE element -- the bigger wrong s497b fixed).\nREPRODUCER: my $u; my $n = @$u; print defined $n ? \"def\" : \"undef\";   perl: undef;  PCL: def.\nGuard: Pl/t/deref-vivify-01.t TODO row naming this task.  Under `use strict` the site dies, which is perl's answer.",
+   "id" : "2408",
+   "status" : "pending",
+   "subject" : "No-strict `scalar(@$undef)` / `my $n = @$undef` answers 0 where perl answers UNDEF"
+}

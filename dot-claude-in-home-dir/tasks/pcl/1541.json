@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s477 (Fable, 2026-09-07) from the s473d review probes.  PRE-EXISTING: identical on main 37b7e83b and on the s473d tree (0c90e681); s473d's #1230/#1245 change (the :DUAL marker) did not move it, because the errno-0 read never builds the dualvar box in the first place.\n\nReproducer (perl 5.40.3 vs PCL):\n  use Scalar::Util qw(isdual);\n  $! = 2; print isdual($!) ? \"dual\" : \"plain\";   # dual on both\n  $! = 0; print isdual($!) ? \"dual\" : \"plain\";   # perl: dual   PCL: plain\n  my $c = $!; print isdual($c) ? \"dual\" : \"plain\";   # perl: dual   PCL: plain\n\nCause (read, not yet probed at the line): p-errno-string builds the :dual box under a condition that skips errno 0 (the hunk at cl/pcl-runtime.lisp ~1615 sits inside a branch), so the errno-0 read hands back a plain \"\" / 0.  Perl's $! magic sets both IV and PV on every get, so isdual is true for every errno including 0.\n\nFix shape: build the dualvar box for errno 0 too (nv 0, sv \"\"), i.e. make the :dual marker unconditional at that ONE writer; guard row beside numeric-repr-01.t's dualvar rows (isdual($!) at errno 0 and its copy), inverse-verified.  Low priority: only Scalar::Util::isdual observes it; `$!+0`, `\"$!\"` and boolean tests of an errno-0 `$!` already agree with perl.\n",
+   "id" : "1541",
+   "status" : "pending",
+   "subject" : "Scalar::Util::isdual($!) is FALSE in PCL when errno is 0 (perl: true -- $! is ALWAYS a dualvar, \"\" / 0), and a copy `my $c = $!` of the errno-0 value is plain too; with errno 2 both agree"
+}

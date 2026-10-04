@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/require_gh20577.t puts a CODE ref in @INC that hands `require` a\nfilehandle over an in-memory string (the FatPacker shape) and then checks\n%INC's entries and that the same object is in @INC afterwards.  All five rows\nfail.\n\nThis is #1815 exactly -- `%p-inc-dir-file` calls `namestring` on every @INC\nelement, so a CODE ref / ARRAY ref / blessed object leaks a raw host error --\nseen from a second file.  #1815 already carries op/inccode.t (76 rows) and\nop/require_errors.t (17); add these 5 to its count.\n\nRule 12 first: announce and SKIP a non-string @INC element rather than calling\n`namestring` on it.  That alone does not pass these rows (they need the hook to\nbe CALLED), but it stops the raw error.\n",
+   "id" : 1936,
+   "status" : "pending",
+   "subject" : "An @INC HOOK that returns a FILEHANDLE (the FatPacker shape) -- the #1815 family (op/require_gh20577.t, 5 rows)"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "149",
+  "subject": "#149 error-text registry: per-ROW reading CONFIRMED s320; interleave only, never a campaign",
+  "description": "Fable ruling (fable-answers-s318.md §3): (a) the strict reading is confirmed — a row asserting a side-effect did not happen, or any behaviour/value of VALID Perl, never registers under the error-text category, even inside a qualifying family (§6d's \"checks a value\" extends to \"checks a behaviour\"). Boundary note: do.t t63/t65 register anyway, but on principle-9 grounds (the INPUT is invalid modern Perl) — see #158. (b) The remaining ~45 candidate rows: register them when already in the file for other reasons; no dedicated scanning sessions — near-green silent-wrong work outranks this bookkeeping.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

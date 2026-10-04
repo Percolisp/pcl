@@ -1,0 +1,9 @@
+{
+  "id": "306",
+  "subject": "pclxs: weak refs (sv_rvweaken/SvWEAKREF) — ADR first, then Clone + FieldHash",
+  "description": "Head of the A-grind queue (docs/plan.md). Measured: Clone propagates weakness (SvWEAKREF on an incoming ref → sv_rvweaken on the clone it builds); FieldHash weakens a fresh newRV_inc as a magic trigger. Two boundary directions: import (\"is this host ref weak?\" — scalar_flags bit or new entry) and export (\"make this host ref weak\" — host callback). Plan flags these as B-tier in A clothing: a host question about weak references. ADR (D11) before code; check what the current vtable can already say (D5/D7/D9 precedent). refhost counts the ref→referent edge since session 8, so real weak semantics (ref becomes undef on referent death) may be conformance-testable. Runtime refusal (R5 shape) when the host lacks the capability, like perl's \"weak references are not implemented\".",
+  "activeForm": "Designing weak references (ADR D11)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

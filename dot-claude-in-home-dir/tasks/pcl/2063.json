@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "baselines/perl-suite-run.tsv says op/coreamp.t is 9 ok / 58 not-ok, measured at\ns488a.  s495 measured 10/57 on the s492c tree AND 10/57 on a 5ce155cb\nextraction of main -- so the move is PRE-EXISTING and unattributed; nothing in\ns492c touched it (probed: the `&uc` and `&uc with too many args` rows are\n\"(missing)\" on both sides, byte for byte).\n\nThe row-level churn it reports (NEW `&uc`, FIXED `&bless in list context`) is\nthe 500-row LOG CAP the snapshot's own note already warns about: the file logs\n501 of its 778 rows, so two rows leave the log as two enter it whenever the\nfile's row count shifts.\n\nWHAT THIS NEEDS: a bisect of the range s488a..5ce155cb for the one row, or a\ndecision to re-bless the row with \"cap artifact\" as the cause.  It is NOT a\nregression and it is not worth a batch on its own -- it is here so the next\nsession that sees op/coreamp.t as a \"mover\" can stop in one grep.\n",
+   "id" : 2063,
+   "status" : "pending",
+   "subject" : "The op/coreamp.t snapshot row is STALE: 9/58 blessed, 10/57 measured on BOTH the base and the tree (s495)"
+}

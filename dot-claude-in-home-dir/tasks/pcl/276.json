@@ -1,0 +1,9 @@
+{
+  "id": "276",
+  "subject": "An empty `{}` as a list-operator argument parses as an empty ARRAY, not a hashref",
+  "description": "Found by an s374 probe while working #236 (the explain() renderer).\n\n  perl: explain {}      -> {}          (hashref)\n  PCL : explain {}      -> []          (empty array)\n\n  perl: explain {a=>1}  -> { 'a' => 1 }   PCL: same          — already right\n  perl: ref({})         -> HASH          PCL: HASH           — already right\n  perl: sub f {ref $_[0]} f({})  -> HASH  PCL: HASH          — already right\n\nSo this is ONLY the empty-brace disambiguation after a list operator with no\nparens: with content, the braces are read as a hash constructor; empty, they\nare read as a block/empty list.  Perl's own heuristic reads an empty `{}` in\nterm position as an anonymous HASH.\n\nNot a regression (pre-dates s374) and orthogonal to #236 — the renderer prints\n`{}` correctly for every hashref that reaches it (probed with a variable, with\n\\%h, and with a non-empty literal).\n\nRaised as ask 5.2 in docs/opus5-review-requests-s374.md.",
+  "activeForm": "Filing the empty-brace list-operator argument bug",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

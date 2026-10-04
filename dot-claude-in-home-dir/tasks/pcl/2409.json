@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FILED s497b (the residue of #1554).  s497b calls $SIG{__DIE__} at the ONE raise site of perl-level dies (%p-die-error + p-die's object branch).  A string eval whose TEXT does not compile never raises there: the compile failure is turned into $@ by the eval machinery.  perl calls the handler for it (op/eval.t rows 165-169 \"test that nested eval '...' calls sig die as expected\"; op/die.t 21-25 is the strict-vars flavour, which also needs strict vars itself).\nREPRODUCER: my $n = 0; local $SIG{__DIE__} = sub { $n++ }; eval '1+;'; print \"$n\\n\";   perl: 1;  PCL: 0.\nSHAPE: route the eval-compile failure through %p-die-text + %p-call-die-hook at the point $@ is set (p-eval's compile-error arm).",
+   "id" : "2409",
+   "status" : "pending",
+   "subject" : "`$SIG{__DIE__}` is not called for a string eval's COMPILE error (`eval '1+;'`, `eval '$undeclared'` under strict vars): PCL reports it in $@ without a perl die"
+}

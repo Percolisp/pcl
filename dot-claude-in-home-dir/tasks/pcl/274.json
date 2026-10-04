@@ -1,0 +1,9 @@
+{
+  "id": "274",
+  "subject": "RULED s371 (ask 2): k=1 foreach-alias anchor-miss must DIE like k>1 — measurement-first filler",
+  "description": "docs/fable-answers-s370.md §2. The sole-element caller of Pl::Parser::_apply_alias_head currently keeps a silent no-op on a failed anchor (`// $list_cl`); the multi-element caller dies. RULING: a failed anchor is ALWAYS a compiler self-inconsistency — either the verdict was right and the write silently lands on a copy (the #262/#263 silent-wrong itself), or the verdict and the lowering disagree about the same tokens. Both are bugs; flip k=1 to die with the same wording as the k>1 site.\n\nMEASUREMENT FIRST (this is a live path with a real population — `$_ = … for ($h{k})` exists in the wild): own commit carrying the gate SET diffed over BOTH populations (CPAN board 232 + perl-suite 605, with the stderr line-number normalization `ROOT/(Pl|tools)/\\S+ line \\d+`) plus the full sweep with TOTAL/LOST. This is the \"adding detection can turn a silently-wrong file into a DYING one\" shape. If anything dies: each hit is a #263-family silent-wrong made loud — fix the head prediction or file it with the emission attached; never re-silence.\n\nALSO FOLD IN (s371 §3): paired invariant comments at the two comma walks — Pl::Parser::_foreach_scalar_elements and Pl::VarAnnotator::_ev_foreach_alias_list — each naming the other, stating (a) on every QUALIFYING list (only depth-0 `,`/`=>`, same _foreach_list_unwrap input) the two walks provably agree, and (b) the veto is deliberately a SUPERSET on non-qualifying lists (the only safe direction for a veto). A third comma walk in this family reopens the shared-primitive question.",
+  "activeForm": "Flipping the k=1 anchor-miss to a die + measuring both populations",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

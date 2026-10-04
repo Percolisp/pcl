@@ -1,0 +1,9 @@
+{
+   "closed" : "2026-08-21",
+   "created" : "2026-08-21",
+   "description" : "FILED s419 (Fable), found by the #119 probe sweep.  PRE-EXISTING, not a\n#119 regression (the fix changed which string is matched, not the return).\n\n  my $q = \"abc\";\n  my $n = ($q =~ s/zzz/x/);\n  print \"got: <$n>\\n\";     # perl: <>   (empty string, numerically 0)\n                           # PCL:  <0>  (the number zero)\n\nperl documents s/// as returning the number of substitutions \"or false\" --\nand its false is PL_sv_no, the dualvar (\"\", 0).  PCL returns integer 0,\nwhich prints as \"0\".  Same question for tr/// with no matches (perl returns\n0 there -- a count -- so tr is probably NOT affected; probe first) and for\nm// in scalar context (PCL already returns nil/\"\" -- verify).\n\nFIX SHAPE: return \"\" (or the shared false constant the runtime uses for\nboolean ops) from do-regex-subst when count is 0 and not /r.  CHECK USES:\narithmetic consumers (\"\" + 1 == 1, same as 0 + 1) are safe; string\nconsumers print differently, which is the divergence.  A sweep TOTAL/LOST\nrun is the bar (some baseline rows may assert the current \"0\").\nDONE s420.  do-regex-subst returns \"\" instead of 0 when no substitution\nhappened (and not /r).  Probed 9 shapes against perl: tr/// really does return\na count of 0 there (NOT affected), m// already answered \"\", and every\narithmetic/boolean consumer is unchanged (\"\" numifies to 0 and is false).\nSweep: 0 new, 0 fixed.  Guard: Pl/t/match-vars-01.t row 28.\n",
+   "id" : "416",
+   "session" : "s419",
+   "status" : "completed",
+   "title" : "s/// (and tr///?) no-match returns 0 where perl returns \"\" (empty string)"
+}

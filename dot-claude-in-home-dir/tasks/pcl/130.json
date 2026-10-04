@@ -1,0 +1,9 @@
+{
+  "id": "130",
+  "subject": "#25 op/ver.t: v-string family — underscore crash, VSTRING ref type, $^V/$] consistency, vX poetry",
+  "description": "op/ver.t DIFF 35/7 + crash at t42. Fixed: v1.2_3 underscore crash (ExprToCL strips _). Remaining: ref(\\$v) VSTRING via p-vstring struct value (flattening via s///·y/// automatic), $^V eq \"$]\" numeric/string consistency (t40/41), poetry optimization sub v77 precedence (t5), sprintf %vd edge cases t21/23/25 (use bytes 4-component, %vX, %*vb custom join).",
+  "activeForm": "Fixing op/ver.t v-string family",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "192",
+  "subject": "DONE s323c: an unqualified DYNAMIC glob name installed into main, not the package in effect",
+  "description": "FIXED s323c (cl/pcl-runtime.lisp: p-glob-assign-dynamic + p-dynamic-typeglob).\n\n`*{\"NAME\"} = …` with an UNQUALIFIED name hardcoded the package to \"main\".  Perl resolves an unqualified symbolic name in the package IN EFFECT.  perl's own File::Path does\n\n    BEGIN { for (qw(VMS MacOS MSWin32 os2)) { *{\"_IS_\\U$_\"} = $^O eq $_ ? sub(){1} : sub(){0} } }\n\nso every one of those constants landed in main::, and the very next line of the same BEGIN block (`!(_IS_MSWIN32())`) died with \"The function |File::Path|::pl-_IS_MSWIN32 is undefined\" — the cause line on three `00-report-prereqs.t` files of the widened CPAN board.  Both the assign and the rvalue (`*{EXPR}` as a glob) now use `*pcl-current-package*`.\n\nVerified: `use File::Path; make_path(...)` gets past the load and creates the tree (it used to die at load).  The main-package case (a dynamic install at file scope) is unchanged — probed.\n\nFOLLOW-ON EXPOSED, filed as #192: `remove_tree` then dies in a VMS branch, because 8 call sites of those same constants emit the BAREWORD AS A STRING (`(p-if \"_IS_VMS\" …)`), and a non-empty string is TRUE.",
+  "activeForm": "Fixing dynamic glob package resolution",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

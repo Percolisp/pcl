@@ -1,0 +1,9 @@
+{
+  "id": "235",
+  "subject": "`use lib \"$ENV{HOME}/x\"` — a double-quoted `use` argument is not interpolated",
+  "description": "DONE s374 (cbf6d71). SCOPE ANSWERED (the task asked): only TWO hand-rolled sites wrapped a token's RAW text in CL quotes — _process_use_lib and _compile_constant_value. A general `use Module LIST` already compiles its import args through _parse_expression.\n\nEach was broken four ways at once, not just interpolation (probed):\n  use lib \"$ENV{HOME}/x\"  -> the literal chars on @INC (surfacing later as \"Can't locate X.pm in @INC\" with the un-interpolated path — how it was found)\n  use constant X => \"a\\nb\" -> CL reads \\n as n  -> \"anb\"  (silent wrong)\n  use constant X => 'a\\b'  -> CL eats the \\     -> \"ab\"   (silent wrong)\n  use constant X => 'a\"b'  -> emits \"a\"b\" — UNREADABLE CL, whole file dies at load\n\nBoth now use the ordinary expression path; the single-quote-token short-circuit in _compile_constant_value is DELETED (its own comment already said why NUMBERS must not be short-circuited — strings were the same trap one type over).\n\ncorpus-diff identical; the five constant-using lib/ shims byte-identical. Cache generation bumped to v2-125. Guard: five rows in Pl/t/use-require-01.t.",
+  "activeForm": "Fixing use-argument interpolation",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

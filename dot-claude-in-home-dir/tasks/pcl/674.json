@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s450t (Opus, agent T of round 8).  NOT A BUG -- an available\nsimplification whose blocking reason has just gone away.\n\nlib/English.pm ties $OS_ERROR / $ERRNO / $EXTENDED_OS_ERROR because, as the\nshim's own comment and docs/not-supported.md said, \"$! is a call into C\nerrno, not a variable at all\" and \"$^E is the errno ACCESSOR, not a cell, so\n\\$^E would take a reference to a temporary box instead of aliasing\".\n\nSince #561 (s450t) both statements are false: |$!| and |$^E| are defvar'd\ncanonical boxes holding a p-magic-cell over p-errno-string, so\n`*OS_ERROR = \\$!` would be a live alias in both directions, exactly like the\nother punctuation names the shim already aliases.\n\nWHY NOT DONE IN s450t: a lib/ change makes the full perl-tests sweep\nnon-optional (CLAUDE.md's what-to-run table, ruled s377), and s450t's own\nbar was the runtime.  The doc text was corrected in the same session; the\ncode was not.\n\nBAR: the English rows of Pl/t/english-01.t byte-identical to perl before and\nafter, the sweep, and the files that `use English` in the companion suite.\nKeep the tie for $& $` $' $+ $^N $ARG -- those reasons still stand.\n",
+   "id" : 674,
+   "status" : "pending",
+   "subject" : "lib/English.pm may drop the $!/$^E TIES for plain scalar-slot aliases now that #561 gives them canonical magic boxes"
+}

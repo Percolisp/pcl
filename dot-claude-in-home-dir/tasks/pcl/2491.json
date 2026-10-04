@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499j (probed perl 5.40.3 vs PCL at 5145fb1c, before the must-win marker was added to lib/Carp.pm).  Reproducer: `mkdir -p d && cp \"$(perl -MCarp -e 'print $INC{\"Carp.pm\"}')\" d/ && PERL5LIB=d pcl -e 'use Carp; eval { croak \"boom\" }; print $@'` -- perl prints `boom at -e line 1.`; PCL printed `Undefined subroutine &main::croak called at (eval 0) line 0.`  So the real Carp.pm transpiles and loads but its export of croak into the importer never happens.\n\nWHY IT MATTERS: Carp is dual-life, and a local::lib PERL5LIB often carries a newer Carp.pm; task #2462 (s499j) put PERL5LIB AHEAD of PCL's lib/ (perl's order), so without a by-name exception every such program would break.  s499j therefore marked lib/Carp.pm `# pcl-shim: must-win` (it wins by name over @INC order, like the XS shims) -- that is the workaround, and its header says why.\n\nWHEN THIS CLOSES: find why perl's Carp.pm leaves croak undefined in the importer (its import is Exporter's, with an export_fail hook), fix the mechanism, then consider dropping the must-win marker from lib/Carp.pm (perl's order would then let a user's Carp win, as in perl).  Probe: the command above, with the marker removed from lib/Carp.pm.",
+   "id" : 2491,
+   "status" : "pending",
+   "subject" : "perl's REAL Carp.pm does not run under PCL: loaded from PERL5LIB/-I, `use Carp; croak \"x\"` dies \"Undefined subroutine &main::croak\" (the lib/Carp.pm shim is must-win because of it)"
+}

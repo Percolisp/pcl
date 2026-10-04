@@ -1,0 +1,9 @@
+{
+  "id": "33",
+  "subject": "T0.3: CPAN suite module-gate census",
+  "description": "Re-run Try-Tiny, Scalar-List-Utils, Role-Tiny suites recording which module transpiles gate to v1 and on what first gate.",
+  "activeForm": "Censusing CPAN module gates",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

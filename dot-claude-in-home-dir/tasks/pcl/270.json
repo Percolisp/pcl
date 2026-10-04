@@ -1,0 +1,9 @@
+{
+  "id": "270",
+  "subject": "DONE s367: `sub :prototype($)` silent statement drop — raw-token source repair + loud decline + PExpr announce guard",
+  "description": "Found by Fable s366 review probes (docs/fable-answers-s365.md §10). Any anon-sub prototype attribute whose text ends in `$` (`($)`, `(;$)`, `($;$)` — including the most common prototype there is) hits a SECOND layer of PPI §7's mis-lex: `$)` tokenizes as the magic variable, the attribute's parens never close, and the sub's block is swallowed into them as a Structure::Subscript. `_normalize_anon_sub_attrs`'s block-check then declines SILENTLY and the statement drops with a PARSE-ERROR comment, exit 0.\n\nProbes: `my @l = (sub :prototype($) { 42 }); print $l[0]->(0);` — perl 42, PCL NOTHING/exit 0, no announce. Same in a `for` list: announce fires then dies \"Parser2 TODO: foreach without list\". `($$)`/`(\\@)` work (verified).\n\nRuled fix (Opus, half-session): (1) the decline path must DIE naming the shape — a `sub :`-Label was positively identified, so a run not ending at a Block is known-mangled, never silent; (2) extend the repair to the `$)` swallow — hoist the real block out of the Subscript, then announce+drop as today; must also clear the for-list \"foreach without list\" die (same mangled structure); (3) fold in the ask-8 guard: PExpr's strip warns when dropping an Attribute matching ^prototype\\( (covers _extract_prototype_attributes' silent `next` bail-outs); (4) regression rows incl. inverse guard (`($$)` still announces and runs). Verification: gate + gate SET diff over both populations (a checker widens).",
+  "activeForm": "Fixing the :prototype($) silent statement drop",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

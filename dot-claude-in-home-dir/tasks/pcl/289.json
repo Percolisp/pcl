@@ -1,0 +1,13 @@
+{
+  "id": "289",
+  "subject": "DONE s388h: Direction D COMPLETE — symbol-macro globals + local re-lowering + poisoned-my family deleted + the net",
+  "description": "UMBRELLA CLOSED s388h.  All four steps shipped and merged to main.\n\n step 1  partition (Pl::GlobalPartition), s382g\n step 2  #290 THE FLIP — symbol-macro globals, local via p-local-cell\n step 3  #291 delete the poisoned-my family (s388b, merged 297b5e4);\n         #205 closed with the enabler\n step 4  #292 the extra net (s388g/s388h): pass-baseline re-bless, fuzzer,\n         companion suite\n\nFINAL STATE: corpus rename bindings 716/128/5 -> 36/0/0 (the 36 survivors are\n_gate_seam_my_shadow, a v1-seam mechanism with a live cause, gone with #153).\n~345 lines out of Parser2.pm + ExprToCL.pm.  Pl/t gate 138 files / 5118 tests\nPASS.  Full sweep GATE clean, TOTAL passing 18498 -> 18532 (+34).  Fuzzer at\nthe standing clean result.  Cache generation v2-142.\n\nBlockers found and closed along the way: #294 (foreach my binds a lexical),\n#295 (sub defined inside a string eval), #296 (exception-named my rename, two\nhalves), #297 (every loop-head my gets its own let), #298 (self-referential\nmy-init), #299 (answered: the enabler UNBLOCKS 19 rows).\n\nResidue filed, not silently dropped: #300 (a loop-head my is bound once for the\nwhole loop), #304 (companion-suite snapshot 191 commits stale).</description>\n</invoke>\n",
+  "activeForm": "Implementing symbol-macro globals (direction D)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": [
+    "290",
+    "291",
+    "292"
+  ]
+}

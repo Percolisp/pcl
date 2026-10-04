@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nSource: perl-tests/pos.t 23-25, 59-60, 129-135.\n\nROWS BEHIND IT: perl-tests/pos.t 4 (\"pos() set inside //g\"), 12 (\"pos *glob\nworks\"), 26 (\"no assertion failure when getting pos clobbers ref with undef\")\n= 3 rows.  NOT the same as #396 / #966 / #261, which own `pos` on an AGGREGATE\nELEMENT (pos.t 15/16/18/19/20/21, already attributed).\n\n(a) pos inside the replacement of s///g (pos.t:24):\n      $x = \"test string?\"; $x =~ s/\\w/pos($x)/eg; print $x;\n    perl: 0123 5678910?          PCL: \" ?\"  (the replacement is empty every time)\n(b) pos on a glob (pos.t:59-60):\n      eval 'pos *a = 1'; print eval 'pos *a';\n    perl: 1                      PCL: undef\n(c) a foreach alias to pos() as an lvalue (pos.t:129-135):\n      for my $one (pos $x) { for my $two (pos $x) { $one = \\1; $two = undef;\n        print defined $one ? \"$one\" : 'undef' } }\n    perl: undef                  PCL: SCALAR(0x1)\n    -- the two aliases are not the same place, so clobbering through $two is not\n    seen through $one.\n",
+   "id" : 1457,
+   "status" : "open",
+   "subject" : "BUG (pos residue): `pos()` is not set during an `s///eg` replacement, `pos *glob` is undef, and a `foreach` alias to `pos $x` does not write through (perl-tests/pos.t 4/12/26)"
+}

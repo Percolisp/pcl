@@ -1,0 +1,9 @@
+{
+  "id": "120",
+  "subject": "pclxs: many-argument callback conformance case (the host argv-cap trap)",
+  "description": "Session 11 (PCL side) hit a fixed 64-slot argv in the host's invoke marshaling; Digest::MD5's own md5-aaa.t found it with `->add(split //, $msg)` and 250+ args. Perl has no argv cap. Turn that into a conformance case so the corpus finds it instead of a dist's test suite, and record the rule in docs/porting-a-host.md.",
+  "activeForm": "Writing the many-argument conformance case",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

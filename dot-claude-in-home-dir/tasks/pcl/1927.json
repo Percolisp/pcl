@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/signame_canonical.t plans `scalar @duplicate_signals * 5` rows from the\nsignal names %Config lists twice (CHLD/CLD, POLL/IO, ABRT/IOT on Linux), and for\neach pair it does:\n    local $SIG{$dupe} = \\&handler_is;\n    is($SIG{$dupe}, $SIG{$canonical_name}, \"Both handlers ... are set\");\n    kill $dupe, $$;  kill $canonical_name, $$;   # the handler asserts the name\n    # then, after the local scope: both are undef again\nPCL produces NO TAP AT ALL, and the runner records no aborted form.\n\nNOT the cause (measured s473t6c): %Config has `sig_name` and `sig_num` here, so\n`@duplicate_signals` is computable and `plan tests => 15` is reachable.\n\nSo the file stops somewhere between `watchdog(25)` and its first `is`.  Start by\nrunning it under `tools/runt` and reading stderr; the candidates are\n`watchdog()` (it forks a process that kills the parent after N seconds),\n`$SIG{$name}` assignment by NAME through a `local`, and `kill NAME, $$` (a\nSIGNAL NAME rather than a number).\n\nRelated: #1928 (%SIG lookups are not NUL-clean, op/sigdispatch.t).\n",
+   "id" : 1927,
+   "status" : "pending",
+   "subject" : "op/signame_canonical.t produces ZERO rows: the duplicate-signal-name handler matrix never reaches its first assertion (15 shortfall rows)"
+}

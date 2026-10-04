@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FILED s494g (Opus, 2026-09-25).  perl: SIG_IGN on CHLD makes the kernel reap children automatically (no zombies) and `system` returns -1.  PCL keeps SBCL's SIGCHLD handler (run-program's child bookkeeping needs it) and announces once: `PCL: %SIG: $SIG{CHLD} = 'IGNORE' is not implemented â children are NOT reaped automatically`.  A daemon that forks workers under this setting accumulates zombies.  POSSIBLE SHAPE: keep SBCL's handler and, when the stored value is IGNORE, reap after it every exited child that is NOT one of sb-impl::*active-processes* -- peek with waitid(WNOHANG|WNOWAIT) so a run-program child is never taken.  docs/not-supported.md \"%SIG\".",
+   "id" : "2265",
+   "status" : "pending",
+   "subject" : "NOT-SUPPORTED (announced) since #2107: `$SIG{CHLD} = \"IGNORE\"` does not auto-reap children -- SBCL's own SIGCHLD handler must stay in force for run-program"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "58",
+  "subject": "pclxs session 0: GitHub bootstrap + Phase 0 census (owner percolisp, Perl dual license; user runs gh auth)",
+  "description": "Execute docs/xs-shim-repo-plan.md §5: apt install gh libperl-dev (ask first); user runs `! gh auth login`; gh repo create percolisp/pclxs --public; initial commit (README, docs/design.md host-neutral adaptation, pclxs_host.h verbatim from design §5, header stubs with #error pattern, LICENSE = Perl dual Artistic-1.0-Perl OR GPL-1.0-or-later copied from pcl, CONTRIBUTING, CI workflow, %Config-driven build); wire pcl via sibling checkout ../pclxs + PCLXS_DIR resolver + pcl/xs-pin + tools/build-pclxs (plan §4 — NOT a submodule); then Phase 0 census (tools/xs-api-census.pl over ladder modules built against real perl, results in census/). t/ must be host-parameterized from Phase 1 (plan §11.2 conformance suite). Remaining user decisions: public day-1 (rec yes), PCL attribution wording.",
+  "activeForm": "Bootstrapping pclxs repo + Phase 0 census",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

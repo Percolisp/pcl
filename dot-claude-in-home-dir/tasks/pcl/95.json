@@ -1,0 +1,9 @@
+{
+  "id": "95",
+  "subject": "pclxs Phase 4: call flags + eval_string + buffer building; then the PCL host adapter (cl/pcl-xs.lisp)",
+  "description": "Per pclxs/docs/plan.md Phase 4 + the survey's remaining worklist (census/SURVEY.tsv): full `call` flags (G_VOID/G_SCALAR/G_LIST/G_DISCARD/G_NOARGS/G_EVAL/G_KEEPERR), call_method, eval_pv/eval_sv (survey: Perl_call_sv/Perl_call_method block 4 dists each); hash iteration hv_iterinit/hv_iternext/hv_iterkeysv + the hv_*_ent HE variants (5 and 4 dists); SvGROW/SvPVX/SvCUR_set buffer building hardened with the proxy->native conversion; bench/xs-call.pl for the §8 perf target. THEN the pcl side, which has not started: cl/pcl-xs.lisp (handle table + ~55 alien callables + the p-sub trampoline), XSLoader::load integration per xs-shim-design.md §7.4, Pl/t/xs-01.t. Note pclxs is at ABI 2 and pcl/xs-pin records it.",
+  "activeForm": "Building pclxs Phase 4 and the PCL host adapter",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

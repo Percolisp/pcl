@@ -1,0 +1,11 @@
+{
+   "blockedBy" : [
+      "277",
+      "278"
+   ],
+   "blocks" : [],
+   "description" : "Once a remote exists: a workflow that installs deps (perl+PPI+Moo, SBCL, Quicklisp cl-ppcre — reuse #277's installer, which IS the point: CI is the fresh-machine test running forever), builds the core, runs prove -j Pl/t/ and tools/corpus-diff.pl against the PR base. Also the #278 hard-coded-path grep as a checked invariant. Expect the xs rows to plan-skip (no pclxs sibling in CI). Sizing: one session once #277/#278 are done.\n\nAUTHORED s419c (ba9045f): .github/workflows/ci.yml -- apt perl deps, pinned SBCL 2.6.0 binary, Quicklisp+cl-ppcre, tools/install-pcl (self-verifying), prove tools/t/install-pcl.t, tools/prove-core, corpus-diff vs PR base on PRs.  YAML validated; CANNOT run until the deferred FULL-HISTORY push (week of 2026-08-24).  Remaining: watch the first run, fix image-specific breakage (expected candidates: sourceforge redirect for the SBCL tarball, apt package names).\n\nDONE s440 (2026-08-23, Fable): CI run 32650698636 on 7e6d1eb is GREEN on the stock ubuntu runner -- installer, wrapper, installer test and the full gate. The first run (32648385694) was RED on a non-core Data::Dump import in Pl/ (fixed s440; see DECIDED s440). This is the fresh-machine property.",
+   "id" : "283",
+   "status" : "completed",
+   "subject" : "v0.1: CI — GitHub Actions running the Pl/t gate + corpus-diff on PRs"
+}

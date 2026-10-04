@@ -1,0 +1,13 @@
+{
+  "id": "242",
+  "subject": "E4.1 step 2: flip gates to hard errors (delete parse_with_fallback/PCL_V1)",
+  "description": "DONE s356 (1e891d0). PCL has ONE pipeline.\n\nREMOVED: PCL_V1, PCL_V1_FILES, parse_with_fallback, PCL_V2_AUDIT_LOG/KEEP. pl2cl has a single `parse_source` that WHITELISTS modes (unknown mode = loud error, not a silently-dropped option — how lenient_ppi used to disappear). Pl::Parser still LOADED (v1's expression seam runs inside v2); only the file-level entry is gone → #243.\n\nSAME COMMIT, per plan §5:\n (a) Four ruled refusals rephrased perl-shaped, each verified to reach $@ as a trappable Perl error with perl's own \"at (eval N) line M.\" suffix and execution continuing; each with a docs/not-supported.md entry: multi-switch, trailing-declaration, F6 oversized run form, M7 our-alias residue. ALSO removed a \"pl2cl server:\" host prefix that was leaking into that $@.\n (b) --lenient-ppi accepted-and-inert; the PPI failure now DIES NAMING THE FILE (§5a.4).\n (c) #228 [perl #129069] registration.\n (d) Cache-key pipeline component frozen to literal \"v2\".\n\nVERIFIED: corpus emission IDENTICAL across 111 files; gate 131/4658 PASS; sweep GATE clean.\nSweep moved 3 files, net +1, all pre-authorized, baselines edited with causes (#223):\n - eval.t 110→114 (+4): trailing-decl refusal makes the four `my $$x`-family rows fail as perl does — DECIDED predicted exactly this; the 4 left fail-baseline (683→679).\n - tr.t 241→239 (−2): tr.t:494's 73,769-char eval string = the single F6 event; fable-answers-s346.md §2.3 ruled eval-string source ⇒ no pre-flip fix, ruled refusal, baseline row edited.\n - lex.t 46→45 (−1): #228 registration; its pass was an accident of --lenient-ppi truncating NUL source.\n\nTwo parser2-02.t guard rows updated from the old refusal text to the new (assertion unchanged). Gen v2-112, artifacts marker-only.\n\nNEXT: #243 (delete v1's unreachable file-level chunks, ~550 lines — three proofs per sub, guardrail §5a.6), then #244, then STOP.",
+  "activeForm": "Flipping the v2 gates to hard errors",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": [
+    "247",
+    "248",
+    "251"
+  ]
+}

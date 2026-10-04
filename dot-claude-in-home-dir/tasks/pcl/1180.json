@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "SHIPPED s470bn (Opus, 2026-09-05), commit `d8c1a0d`.\n\n`${\"main::g\"}` / `@{\"Pkg::ISA\"}` / `%{\"Pkg::H\"}` name the same variable at every\nexecution of their site, so the SYMBOL belongs in a cell the site owns.  #812's\nmemo had removed the name arithmetic; what it still paid per access was a string\nsxhash + an `equal` gethash + a list walk + the O(n) NUL scan each reader runs\nfirst.\n\nKind-A name `symref-const`.  The emitted form keeps its HEAD and gains a third\nargument, `(p-symref-site)` â a macro over `load-time-value` â so p-setf's place\ntables, %p-accessor-place-p and the four ++/-- macros keep matching on\n`p-cast-$`.  ONE entry point in the runtime, `%p-symref-sym`; five ExprToCL\nemitters now go through `_cast_form`, which is where the licence is asked.\n\nWHAT THE SITE MAY CACHE = what #812's memo may cache: the SYMBOL, never the box\nor the container (`local $main::g` installs a FRESH box; %p-symref-array\nreplaces a non-vector binding).  An unqualified name records the package it\nresolved under; a name with an explicit `::` records T.  Only a HIT is cached.\n\n=== DONE (s470bn) ===\nHand-replaced ceiling -87.1 %; SHIPPED -60.1 % (0.0583 -> 0.0233 s at\nN=200 000, best-of-7, control pair +0.2 %).  Gate 205/6948 (xs only);\ncorpus-diff 4 of 111 files, every changed line the site argument or a re-wrap;\nPCL_OPT=none byte-identical over 111 + 6 shapes; emission-ab wide 1035 pairs\nSAME 1011 / DIFF 24 / RCDIFF 0, all 24 verified; companion op/gv.t 134/57 and\nop/local.t 300/19 = their snapshot rows.  Guard `Pl/t/perf-levers-01.t`.\n",
+   "id" : 1180,
+   "status" : "completed",
+   "subject" : "symref-const: a CONSTANT-name symbolic dereference resolves its symbol ONCE per site (-60 % of the symref loop)"
+}

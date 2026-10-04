@@ -1,0 +1,9 @@
+{
+  "id": "122",
+  "subject": "pclxs: sv_reftype truncates a long class name into a static buffer",
+  "description": "src/sv.c pclxs_sv_reftype copies the stash name into a `static char classbuf[256]` — truncating a class name >=255 chars into a silently wrong answer (the newCONSTSUB shape again), and the static means two calls in one expression alias each other. Perl returns HvNAME(SvSTASH(sv)), stable and unbounded. Fix with an oracle case.",
+  "activeForm": "Fixing sv_reftype's static buffer",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

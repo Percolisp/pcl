@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-09",
+   "description" : "FILED s473f (Opus, 2026-09-09).  PRE-EXISTING.\n\n    open(*Foo::STDOUT, '>', $F) or die;\n    print \"to-real-stdout\\n\";\n    print {*Foo::STDOUT} \"to-foo\\n\";\n\n    perl : the file holds \"to-foo\\n\"; stdout holds \"to-real-stdout\\n\"\n    PCL  : the file is EMPTY and BOTH lines went to stdout\n\n%p-resolve-fh's typeglob arm looks the glob's NAME up with\n`(find-symbol NAME :pcl)` and only falls back to a scan of *p-filehandles*.\nFor `*Foo::STDOUT` that finds pcl::stdout -- the STANDARD handle -- so a glob\nin another package resolves to the wrong stream.  %p-install-fh's twin arm\ninterns in `(p-typeglob-package glob)`, but `intern` finds an INHERITED symbol\ntoo (every user package :uses :pcl), so the two sides can agree on the wrong\nsymbol as easily as on the right one.\n\ns473f's #1220 fix made %p-std-slot stop treating `*Foo::STDOUT` as STDOUT (that\nhalf is fixed and guarded, row 09 of the std-handle cases); the READ side is\nthis task.  The fix is presumably \"ask the glob's OWN package first, with a\nsymbol that is not merely inherited\", which needs a probe of what PCL's package\ngraph makes reachable.  Probe scratch/s473f/p4b-stdpkg.pl row 01.\n",
+   "id" : 1423,
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a typeglob's PACKAGE is dropped when it is resolved as a filehandle -- `*Foo::STDOUT` reaches the standard handle"
+}

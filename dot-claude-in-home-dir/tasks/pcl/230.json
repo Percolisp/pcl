@@ -1,0 +1,9 @@
+{
+  "id": "230",
+  "subject": "E4.1 F3/F6 — RULED s345: F3 routes through #78 (no new mechanism); F6 = SPLIT the oversized run form",
+  "description": "RULED s345: F3 routes through #78 (DONE s346). F6 re-scoped s346c/s347 §2: locate first — the audited sweep (PCL_V2_AUDIT_LOG=<path> perl sweep-perl-tests.pl --jobs 8) is the next action, before any design. If top-level-my-swallows-remainder shape → extend _oversized_top_decls (reuse); if eval/fresh_perl source → NO pre-flip fix, ruled refusal under the s347 §1.4 amendment. $RUN_FORM_MAX never raised.\n\nADDED s349 (docs/fable-answers-s348.md §2d): the SAME audited sweep also carries the p-eval-lex-lookup miss-path instrumentation for #240 step 2 (log name + *package* + whether a region package is in effect, across sweep AND the CPAN board) — one run serves both queue items. Hand the miss-path listing to #240 step 2.",
+  "activeForm": "Locating F6 and measuring the #240 step-2 instrumentation",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

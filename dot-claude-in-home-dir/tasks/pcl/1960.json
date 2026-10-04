@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 2 on t/op/lex.t:211).\n\nperl: an `@` inside an interpolating string is a literal `@` unless what\nfollows can START an identifier.  A DIGIT never can -- fullwidth or not.\n\nREPRODUCER (perl 5.40.3 vs PCL, probes/p4.pl):\n\n    my $r = eval \"qq'\\@\\x{ff13}'\";\n    printf \"eval=[%s] err=[%s]\\n\", (defined $r ? $r : 'UNDEF'), $@;\n    my $q = qq'@\\x{ff13}';\n    printf \"qq=[%s]\\n\", $q;\n\n    perl: eval=[@<U+FF13>] err=[]      qq=[@<U+FF13>]\n    PCL:  eval=[UNDEF]                 qq=[@<U+FF13>]\n          err=[The variable |@<U+FF13>| is unbound. at (eval 1) line 1.]\n\nSo the DIRECT spelling is right and the STRING EVAL path is not: the fragment\nre-parse takes the fullwidth digit as an identifier character after `@` and\nemits a reference to an array of that name, which is unbound at load.\n\nROWS: baselines/perl-suite-fails.tsv op/lex.t 25 `\"@<fullwidth digit>\"\n[perl #123963]`.\n\nSHAPE: the identifier-START rule, not the identifier-CHARACTER rule.  The two\npaths disagree, so the fix is to make the eval path ask the same predicate the\ndirect path asks (rule 11 -- find the direct path's reading of \"can this start\nan identifier\" before adding one).  Neighbours to probe at the same time:\n`@` before an ASCII digit, before a space, and at end of string.\n",
+   "id" : 1960,
+   "status" : "pending",
+   "subject" : "SILENT WRONG inside a STRING EVAL: `@` before a non-identifier-START character (a fullwidth digit) is read as an ARRAY NAME; the direct spelling is right"
+}

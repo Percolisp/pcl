@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND AND FIXED s501q (a PCL_OPT=none difference in a #2515 probe).  PRE-EXISTING on main 77212b1f.\n    sub w0 { $_[0] = 9 } sub am { my ($x) = @_; &w0; $x } my @a = (1, 2); am(@a); print \"@a\";   perl 9 2   base 1 2 (PCL_OPT=none: 9 2)\n    sub pp { my ($x) = @_; my $l = pop; \"$x$l\" } print pp(1, 2);                                    perl 12    base 1\nCAUSE: _lower_sub_inner's raw-path test and _leading_shift_params each carried their OWN inline \"@_ is observed\" regex, neither knowing `&name;` (passes the current @_) or `pop` (defaults to @_ in a sub).\nFIX: ONE predicate, Parser2::_body_observes_args (@_, $_[, shift, pop, goto, `&name;`, a string eval), asked by the raw path, the leading-shift run, the new args-copy licence and the signature normalisation.  Guard: perf-levers-07.t \"#2572 implicit @_\".\n=== DONE (s501q) ===\n",
+   "id" : "2572",
+   "status" : "completed",
+   "subject" : "SILENT WRONG (fixed s501q): the raw-params / leading-shift licence missed `&name;` and a bare `pop` -- `sub f { my ($x) = @_; &g; }` passed g an EMPTY @_"
+}

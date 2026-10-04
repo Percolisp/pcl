@@ -1,0 +1,9 @@
+{
+  "id": "28",
+  "subject": "Write review doc: generated CL as an IR (clarity, portability)",
+  "description": "Review the compiler's generated CL as an intermediate representation: how to make it clearer and easier to parse/translate to other environments while keeping speed. Audience: AIs and people. Deliverable: docs/ file.",
+  "activeForm": "Writing generated-CL IR review",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

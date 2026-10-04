@@ -1,0 +1,12 @@
+{
+  "id": "211",
+  "subject": "`$$refref->{k}` / `${$rr}->[i]`: the outer deref level is DROPPED at parse — emitted as `$rr->{k}`",
+  "description": "`$$refref->{k}` / `${$rr}->[i]`: the outer deref level is DROPPED at parse — emitted as `$rr->{k}`. RULED s335 (fable-answers-s334.md §s333-3): parked behind #153 (term-machinery region, no guard-patches), unless a real CPAN cause line re-raises it (same standing as #191). Until then #154's ref-to-REF half stays deliberately lenient with the runtime docstring citing this task. Boundary: the leniency covers EXACTLY the two measured spellings — a new shape wanting leniency needs its own probe and its own task; #211 is not a blanket citation.",
+  "activeForm": "Filing the dropped-deref-level finding",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "resolution": "DONE s389e (Fable, 00b8f09): both filed spellings fixed — with $is_reference and a '$' Cast before a Symbol/Block base, the X[] branch parses [Cast, base] together as the ref expression (Case 2's rule for $$r->()); the existing cast-removal then consumes a cast genuinely part of the base instead of swallowing a deref level. Rows + inverse guards in transpile-test-10.t; gate 138/5125; corpus-diff identical 111/111; shape absent from lib/ + perl-tests (censused) — sweep provably cannot move. TRIPLE-cast residue ($$$rrr->{k}) filed as its own task (#305)."
+  }
+}

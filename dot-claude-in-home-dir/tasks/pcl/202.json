@@ -1,0 +1,9 @@
+{
+  "id": "202",
+  "subject": "NEXT (Opus, RULED s329 — before #204/#189): audit cl/pcl-test.lisp for TAP assertions with no reachable failure path",
+  "description": "RULED s329 (fable-answers-s328.md §3): runs FIRST as harness-trust calibration. Accept criterion: every TAP-emitting function in cl/pcl-test.lisp either (a) has a reachable failure path proven by an inverse probe, or (b) dies loudly when its claim cannot be checked. After it lands: re-run the four-dist baseline and RE-VERIFY every PASS containing a previously-fake assertion (File-Which/t/01_use.t explicitly — it is nothing but a use_ok). Fold in: use_ok's TAP description must match Test::More's (\"use Foo;\" with no import list — PCL currently prints \"use List::Util first;\"). Origin: s328 found use_ok/require_ok were literally (test-ok t ...) — #152's bug in the harness.",
+  "activeForm": "Auditing cl/pcl-test.lisp TAP assertions",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

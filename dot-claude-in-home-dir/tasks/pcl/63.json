@@ -1,0 +1,8 @@
+{
+  "id": "63",
+  "subject": "Dynamic goto LABEL (throw-based) — unblocks array.t; v1 crashes on it today",
+  "description": "SHIPPED s295b+c (commit a373547). Dynamic goto LABEL via forward-goto catch-wrap ((catch :pcl-goto-LBL prefix) + throw; backward stays lexical go) — works out of map/grep lambdas; porter spec ir-spec §6.4. Companions: our-alias requalify pre-pass (_requalify_block_our_after_pkg_switch; conservative die on my/our/state re-decl in switched region — local deliberately excluded), p-set-array-length nil-hole growth (runtime, both pipelines, ir-spec §2.3). s295c verification caught: local wrongly in the die list (kept array.t on v1 silently), qualified-slice-LHS misroute to p-array-= (p-aslice|p-hslice added to ExprToCL p-gethash/p-aref guard), deep-recursion stderr. array.t de-gated: 167+15+13skip/195 complete run vs v1 166+16 (strict subset; remaining 15 = arylen family + t178). Census 105/6, gen v2-36. Full battery green: corpus-diff (v2=array.t only, PCL_V1 byte-identical), both gates, full sweep both pipelines vs baseline (only array.t moved).",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

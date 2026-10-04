@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND s500a (Opus, 2026-09-30) by the #2533 lexical-sub probes (scratch/s500a/probes/lexproto.pl, lexproto2.pl).  PRE-EXISTING on main 1bae682b (base emission identical).  Probed vs perl 5.40.3:\n\n    use feature \"lexical_subs\"; my sub ls3 :prototype(&@) { 1 } print prototype(\\&ls3), \"\\n\";\n    perl: &@\n    PCL : (empty) -- the emission names the sub `pl-ls3prototype__lexsub__1` (the NAME and the attribute word are glued: `;; my sub ls3prototype__lexsub__1 :(&@) { ... }`), so `\\&ls3` reaches an undefined pl-ls3 and every CALL of ls3 in the file is to a sub that does not exist.\n\nScope: a FILE-level `my sub NAME :ATTR` (the spaced `my sub NAME : prototype(…)` and the same inside a string eval -- t/op/attrproto.t row \"my sub lexsub1 honors the prototype attribute\" -- work).  Suspect: PPI's structure for `my sub NAME :prototype(...)` (dump it first: is `:prototype` an Attribute token there, or a Label/Word?) and then the lexsub renamer or _extract_prototype_attributes concatenating the name.  Measure with `perl -MPPI::Dumper` before touching the renamer; rule 13 if PPI is the cause.\n",
+   "id" : 2542,
+   "status" : "pending",
+   "subject" : "a FILE-level `my sub NAME :prototype(...)` glues the attribute word onto the NAME (`pl-ls3prototype__lexsub__1`), so calls and \\&NAME reach an undefined sub and prototype() is empty -- pre-existing"
+}

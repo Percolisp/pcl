@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s484 (Fable review of s473t5a, 2026-09-13).  PRE-EXISTING: identical on main 186134ce and on 17d831fe.\n\nPROBE (perl 5.40.3 vs ./runpcl):\n    no strict; %12 = (a=>1); print join(\",\", keys %12), \"\\n\";\n    perl:  a\n    PCL :  PCL: statement dropped at F line 1: %12=(a=>1); -- Handle single node of unknown type   (then the run-time die)\n\nCAUSE, LOCATED: PPI's TOKENIZER.  `PPI::Dumper` on `%12 = (a=>1);` gives\n    PPI::Token::Operator '%'  PPI::Token::Number '12'  Operator '='  Structure::List\nwhile `@119797 = (1,2,3);` gives PPI::Token::Magic '@119797' (one token).  So the `@` spelling reaches PCL as a symbol and the `%` spelling as a modulus operator at TERM position -- perl reads both as containers (#1650's probed rule).  A `%` at term position followed by digits cannot be modulus (nothing to the left), which is the discriminator a token REPAIR in the `_ppi_parse` pre-pass family can key on (the s438 `_merge_punct_array_symbols` / #410 repairs are the siblings -- read them first).\n\nCLAUDE.md rule 13: the fix commit LOGS this in `docs/ppi-upstream-bugs.md` (new section: minimal repro, the dump above vs the expected Magic/Symbol token, PPI version) and adds the failing row to `docs/ppi-bug-report.t` (bump its plan), plus a canary row in `Pl/t/misc-fixes-02.t`.\nBAR: `%12 = (a=>1)` assign + read + `$12{a}` (after #1679) + `keys %12` + a genuine modulus `$x %12` (must stay an operator -- probe `10 %12` and `$x%12` in perl: both are modulus) vs perl; guard row beside #1650's; corpus-diff + full sweep.  SIZE: S.  Exotic name class -- a filler, not a queue item.\n",
+   "id" : 1680,
+   "status" : "pending",
+   "subject" : "PPI 1.291 tokenizes an all-digit HASH name `%12` as Operator `%` + Number `12`, so `%12 = (a=>1)` is a whole-statement DROP (die at run time) -- the hash twin of #1650"
+}

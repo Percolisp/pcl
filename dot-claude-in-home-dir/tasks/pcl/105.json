@@ -1,0 +1,8 @@
+{
+  "id": "105",
+  "subject": "pclxs 2d-next: bind a global to a given SV ($_ / $a / $b) — the block-taking group",
+  "description": "Needs a design + ADR before code. GvSV(gv) = sv is an ALIAS and C cannot hook assignment; plausible shape is a shim-side GV object plus publication at the call boundary (call_sv flushes dirty globals), with SAVESPTR restoring at scope exit. Copy-instead-of-alias is correct for read-only blocks and diverges when the block writes $_. Unblocks List::Util's first/any/all/none/notall/reduce, which now need nothing else. See docs/plan.md item 2d-next.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

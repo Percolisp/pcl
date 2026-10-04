@@ -1,0 +1,8 @@
+{
+  "id": "112",
+  "subject": "XS: get_cv can't find a newxs-registered XSUB by name (98-globals case 13) + stale conform/gate numbers in CLAUDE.md",
+  "description": "Conformance case \"get_cv finds a sub that exists -- this XSUB, by name\" (pclxs t/98-globals.t case 13, added in pclxs f7a6eda) fails: get_cv(\"Glob::cv_missing\", 0) returns NULL under PCL although the XSUB was just registered by newxs. Perl installs XSUBs as real CVs findable by name; PCL's adapter must make newxs-registered subs visible to the get_global/get_cv path (likely xs-get-global's CV branch doesn't consult where xs-newxs registers). Also update stale numbers in CLAUDE.md Test Status: conformance 246/1 → 364/2 (second failure = this case), gate 119 files/4368 → 120/4372.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

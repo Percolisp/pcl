@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FOUND s492b while measuring what an IMPLICIT close does to $? (#2006 (a)).  PRE-EXISTING on 5ce155cb.\n\nPROBE (scratch/s492b/qmark.pl, perl 5.40.3 vs base vs tree -- base and tree identical):\n  $? = 1792; print \"a $?\";                         perl 1792   PCL 0\n  system(\"sh\",\"-c\",\"exit 2\"); print $? >> 8;        perl 2      PCL 2     (control, right)\n  $? = 0; print \"c $?\";                            perl 0      PCL 512\n\nSo the WRITE is lost and every READ answers the last child's wait status.  perl's $? is an ordinary writable magic scalar; programs zero it before a check (`$? = 0; ...; die if $?`), and Test::Harness-style code sets it deliberately.\n\nWHERE: `$?` is a runtime place the generated code assigns through the ordinary scalar path, but the READ side resolves to the child-status register rather than to the assigned cell -- grep `$?` in cl/pcl-runtime.lisp (it is `setf $?` in the waitpid/close paths) and find what the emission of `$? = N` produces.\n\nNOT A BLOCKER for #2006 (a): that fix SAVES AND RESTORES $? around the implicit close, which is perl's behaviour, and the save/restore works (it uses the same register).  What is missing is the user-visible assignment.\nBAR: cl/ change => full sweep + the companion io/ and op/ legs; guard rows beside fileio-02.t's $? row (test 13).\n\n\n=== DONE (s495f, 2026-09-25) ===\nFixed with #2009 (one seam): $? is a magic integer box; see #2009 DONE for the design, probes and guards (Pl/t/die-exit-status-01.t rows 13 and 14-23).\n",
+   "id" : 2031,
+   "status" : "completed",
+   "subject" : "BUG (pre-existing, found by the #2006(a) probes): `$? = N` does not stick -- PCL always reports the LAST CHILD'S status, so `$? = 0` before a check reads the old value and perl-shaped `$?` bookkeeping is impossible"
+}

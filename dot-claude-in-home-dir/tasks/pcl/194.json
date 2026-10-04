@@ -1,0 +1,9 @@
+{
+  "id": "194",
+  "subject": "DONE s323d: getlogin builtin (Data-Dump dd.t)",
+  "description": "FIXED s323d.  Data-Dump's dd.t died with \"The function main::pl-getlogin is undefined\" — the last cheap cause on the widened CPAN board.\n\nFOUR edits, the usual builtin family:\n  cl/pcl-runtime.lisp  — `p-getlogin` defun\n  cl/pcl-runtime.lisp  — `#:p-getlogin` in the :pcl export list\n  Pl/PExpr/Config.pm   — `getlogin => 0` arity\n  Pl/ExprToCL.pm       — the builtin-NAME list (~line 158)\nThe last one is the one that is easy to miss: it decides `p-` vs `pl-` emission.  With only the first three the call still came out as `(pl-getlogin)` — a user-sub call — and still crashed.\n\nIMPLEMENTATION NOTE: perl documents getlogin as unreliable and tells you to prefer `getpwuid($<)`; PCL takes that advice, because SBCL exposes no getlogin(3) and the effective-uid lookup is what real callers want.  undef when the uid has no passwd entry, as in perl.\n\nGate-verified only (125 files / 4476 PASS): no perl-tests file uses getlogin, so the full sweep adds nothing here — it runs with the next batch per the s323 cadence rule.",
+  "activeForm": "Recording the getlogin builtin",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

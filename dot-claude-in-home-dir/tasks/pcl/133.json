@@ -1,0 +1,9 @@
+{
+  "id": "133",
+  "subject": "#25 signatures.t residue: tap_map fix + :prototype attribute family + triage/bless out-of-scope rows",
+  "description": "s316o. (1) run-perl-suite.pl tap_map \\s-eats-newline bug fixed (421 phantom \"(missing)\" rows were unnamed tests). True diff = 387 rows: 262 trailing-comma + 62 error-text + 19 experimental-@_ + ~20 misc out-of-scope; ~24 real. (2) Implement :prototype(...) attribute on named+anon subs via shared PPI pre-pass + runtime prototype registry (p-__pcl_set_prototype, real p-prototype); Sub::Util::set_prototype becomes real. (3) Remaining real rows: t017 list-op default swallow, t122 __SUB__ default, t126/127 state-in-default, t086/87 comments-in-sig, t132/135 nested sig subs. (4) Bless op/signatures.t in docs/perl-suite-expected.tsv citing not-supported once real rows are fixed/triaged.",
+  "activeForm": "Working signatures.t residue",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

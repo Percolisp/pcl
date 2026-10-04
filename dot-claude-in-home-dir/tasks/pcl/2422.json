@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499a (Opus, 2026-09-27, measurement only), ~/pcl-agent-scratch/s499/s499a/REPORT.md.\n\nMEASURED: an ordinary everyday program runs in a median 0.048 s warm under pcl (perl 0.0045 s); the phase log puts ~0.04 s of it OUTSIDE the SBCL program.  Decomposed:\n  sbcl --core <pcl core> --non-interactive --eval '(sb-ext:exit)'   0.003 s (min of 15)\n  the pcl wrapper with its final exec replaced by exit (~/pcl-agent-scratch/s499/s499a/bin/pcl-noexec)   0.034 s (min of 15)\n  Devel::NYTProf of that wrapper (~/pcl-agent-scratch/s499/s499a/cwd/nytprof/): PCLSbcl.pm 10.4 ms exclusive -- `qx{sbcl --version}` 4.1 ms, sha1_hex over the runtime+vendor text 3.6 ms, reading the runtime 1.1 ms (all to derive the core's NAME, every run); Getopt::Long 3.6 ms, File::Temp 3.2 ms, Carp 1.6, Digest::SHA 1.6, File::Path 1.3, Cwd 1.2, ...\n  EXPERIMENT (~/pcl-agent-scratch/s499/s499a/exp3.log, interleaved, min of 15): File::Temp required only on the -e path (the one tempfile() caller): print.pl 0.0426 -> 0.0379 s (-4.7 ms, 11 %), stdout identical.\nWHO PAYS: every run of every program.  Over the everyday corpus (101 identical programs) ~30 ms x 101 = ~3.0 s of 10.3 s warm; over Rosetta 499 x ~30 ms = ~15 s of 72 s.  For the median program it is ~60 % of its wall time.\nCANDIDATE SHAPES (not designed): memo the core decision in a stamp keyed by stat() of the runtime/vendor/sbcl binary (removes the spawn + hash + read, ~9 ms); lazy `require` of modules only some paths need; at the far end a small native launcher.",
+   "id" : "2422",
+   "status" : "pending",
+   "subject" : "PERF (every run): the `pcl` Perl launcher is 34 ms of the ~40 ms warm constant (SBCL itself boots in 3 ms) -- ~18 ms of module loads, a `sbcl --version` spawn (4 ms) and a SHA-1 of the 1.5 MB runtime (3.6 ms) per run to NAME the core"
+}

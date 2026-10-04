@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-16",
+   "description" : "FILED s473t6a (Opus, 2026-09-17) by #1501 ROUND 8 (t6a), CHECK 2 of\nt/op/ref.t.  PRE-EXISTING.  1 blessed row.  A WRONG DIAGNOSIS, not a missing\none -- both perl and PCL die, and only the message differs.\n\nPROBED (scratch/s473t6a/probes/misc1.pl E1, perl 5.40.3 vs PCL 2ac855aa):\n\n    eval { ()[0]{foo} };\n\n    perl: Can't use an undefined value as a HASH reference\n    PCL : Modification of a read-only value attempted\n\nt/op/ref.t line 675 asserts perl's text with `like`, so the row fails.\n\nThe PCL message is the AUTOVIVIFICATION path's: an element access on an\nundefined slice result is treated as an lvalue and the write is refused,\nwhere perl asks the KIND question first.  The row is the one place the two\norders are distinguishable, and it is cheap only if the deref path already\nknows it is in RVALUE position -- which is the same information #1241 and\n#1663 need for the vivification rule, so read those first.\n\nUSER standing: exact fatal-error TEXT is not a goal unless cheap.  What makes\nthis one worth a task rather than a `NS:Error message text and format` row is\nthat PCL is raising the WRONG KIND of error, not a differently-worded one.\n",
+   "id" : 1828,
+   "status" : "pending",
+   "subject" : "()[0]{foo} dies \"Modification of a read-only value attempted\" where perl says \"Can't use an undefined value as a HASH reference\" -- the wrong KIND of error, not wrong wording"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FILED s501q, the residual of #2570 by measured choice.  PRE-EXISTING on main 77212b1f (base answers the same).\n    my $g = [1]; sub f { my ($o) = @_; $g = undef; ref $o } print f($g);              perl ARRAY   PCL \"\"\n    my $h = bless {}, \"K\"; sub k { my ($o) = @_; $h = 5; ref $o } print k($h);    perl K       PCL \"\"\n%p-param-copy (cl/pcl-runtime.lisp) copies plain values and undef/dualvar/magic boxes but binds a box holding a reference, an object or code AS IT CAME: a copy is one box allocation per call, and that is every method's $self (methret +15..18 % in two interleaved bench pairs, s501q).  The wrong answer needs the CALLER's variable to be reassigned while the callee still reads its parameter.  A fix must not cost the method call: e.g. copy-on-reassign is not available; a cheaper box copy (a smaller struct for refs), or proving at the call site that the argument variable is not written during the call (a lexical never captured and never passed by reference), would.\n",
+   "id" : "2575",
+   "status" : "pending",
+   "subject" : "a REFERENCE/OBJECT argument is still shared by a raw parameter: `my $g = [1]; sub f { my ($o) = @_; $g = undef; ref $o } f($g)` answers \"\" (perl ARRAY)"
+}

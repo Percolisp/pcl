@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nProbe scratch/s473t2/probes/p10-glob-io.pl D/E.\n\nROWS BEHIND IT: perl-tests/postfixderef.t 27 (\"glob access syntax\") and its two\nconsequences 28 and 29 (the aliased sub is never installed, so the following\ncall and call-count rows read undef / 2 instead of 2 / 3) = 3 rows.\n\nPROBE (perl 5.40.3 vs ./runpcl):\n    no strict 'refs'; local *mysubalias;\n    my $ok = eval q{'mysubalias'->** = 'mysub'->**->*{CODE}};\n  perl: $ok = 1, and mysubalias() then calls mysub\n  PCL : PCL: statement dropped at (eval) line 1: 'mysubalias'->** = 'mysub'->**->*{\"CODE\"}\n        -- PExpr: unhandled postfix '->' term in (unknown):\n           term='Token::Operator<->>' next='Token::Cast<*>' next2='Structure::Subscript<{\"CODE\"}>'\n\nThe other postfix dereference forms are implemented (`->$*`, `->@*`, `->%*`,\n`->&*`, `->*{NAME}` after a plain scalar all pass in the same file); it is the\nbare `->**` glob form, and the `->**` followed by `->*{...}`, that the term\nwalker does not know.  A census-visible drop: it announces and the statement is\nreplaced by nil.\n",
+   "id" : 1454,
+   "status" : "open",
+   "subject" : "BUG (#138 drop family): the postfix GLOB dereference `EXPR->**` is unparsed -- `'name'->** = 'other'->**->*{CODE}` is a dropped statement, \"PExpr: unhandled postfix '->' term\" (perl-tests/postfixderef.t 27/28/29)"
+}

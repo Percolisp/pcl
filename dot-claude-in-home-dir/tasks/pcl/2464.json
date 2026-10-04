@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-27",
+   "description" : "FOUND s499g.  perl 5.40.3: `use lib \"/x2\"; use lib \"/x2\"; print scalar grep {$_ eq \"/x2\"} @INC` prints 1; PCL prints 2.  lib->import unshifts then removes later duplicates (`@INC = grep { ++$names{$_} == 1 } @INC`) and also adds an existing arch dir.  PCL lowers `use lib` to `(p-unshift @INC LIST)` in Pl/Parser.pm _process_use_lib.  Cosmetic for resolution (first match wins either way); visible to a program that prints/counts @INC.  FIX SHAPE: a lib.pm shim in lib/ (layer rule 9a) whose import does what perl's does, with _process_use_lib routing to it -- or a runtime helper.\n\n=== DONE (s499j) ===\n`use lib LIST` lowers to (p-use \"lib\" :import-args LIST) = perl's REAL lib.pm (dedupe, move-to-front, arch subdirs); `no lib LIST` was a silent no-op and is now (p-unimport \"lib\" LIST) (new exported runtime fn). Probes identical to perl. Guards Pl/t/use-require-01.t (4 stale shape rows rewritten, 3 run rows added, inverse-verified). Known residue: lib/Config.pm says version 5.40.0, so lib.pm's \"$dir/<version>\" subdir differs from perl 5.40.3's (only if such a dir exists).",
+   "id" : 2464,
+   "status" : "completed",
+   "subject" : "`use lib` does not de-duplicate: `use lib \"/x\"; use lib \"/x\"` leaves /x twice on @INC (perl's lib.pm: once)"
+}

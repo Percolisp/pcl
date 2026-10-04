@@ -1,0 +1,6 @@
+{
+   "description" : "FILED s453 (Fable).  PLAN ONLY, USER-requested: compile a Perl program to ONE standalone binary (no perl/SBCL/PCL on the target).  THE PLAN IS docs/single-binary-plan.md -- read it first; do not re-derive.  Headlines: current pl2cl --executable is a demo (top-level runs at BUILD time, saved toplevel only exits; --bundle does not bundle the use-closure).  Steps: (1) #217 relocatable preamble is a PREREQUISITE; (2) --build-mode section-split (compile-phase stays top-level = build time, run-phase moves into pl-__pcl_main__; perl-shaped toplevel: die = message + exit 255, END blocks, @ARGV/%ENV); (3) use-closure PRELOADS at build (= perl compile phase; preloaded registry short-circuits p-use); (4) require-closure + --with-module EMBED as FASL blobs loaded on demand (preserves require RUN-time timing; dynamic/eval-loaded modules are the parameters); (5) extensions embed as text blobs, XS refuses loudly; (6) eval story: works iff pl2cl found on target, else trappable perl-shaped die; --with-module covers the eval-use-Foo guard idiom; (7) build-time portability report (see #757).  Three USER questions open in plan par.6 (eval story, image size/compression, queue rank).  NOT SCHEDULED -- do not start without the USER ordering it.",
+   "id" : 756,
+   "status" : "pending",
+   "subject" : "pcl"
+}

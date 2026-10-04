@@ -1,0 +1,9 @@
+{
+  "id": "34",
+  "subject": "T-A1 analysis: classify the 18 package-in-block files, spec design (a)",
+  "description": "Examine the 18 gated files' actual package-in-block idioms; measure what fraction fits the no-leading-lexicals subset of design (a); write the precise implementation spec for Opus including scope complication handling.",
+  "activeForm": "Analyzing package-in-block gates",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

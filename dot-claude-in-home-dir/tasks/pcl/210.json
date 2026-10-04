@@ -1,0 +1,9 @@
+{
+  "id": "210",
+  "subject": "s332 (Fable): review s330/s331 batch — fix writes_args implicit-$_ + map/grep false negatives, rule on the 8 asks",
+  "description": "Review of Opus's #202/#204/#189 work. Probes confirmed the tr vivification table (all 7 corners match perl) but found three silent-wrong false negatives in _sub_writes_args: (1) `for (@_) { s/b/X/ }` — implicit $_ has no Symbol token so _nodes_write_var misses it; (2) `s/b/X/ for @_` — same, statement-modifier; (3) `map { $_ = uc } @_` / grep — map/grep in %ARG_VALUE_FN despite aliasing $_. Fix + guard rows in writes-args-01.t + cache-gen bump + artifacts + rulings doc docs/fable-answers-s331.md for the s330+s331 asks.",
+  "activeForm": "Reviewing s330/s331 batch and fixing writes_args false negatives",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "178",
+  "subject": "DONE s321: S2 release snapshot regenerated in full — 523 rows, installed at 05e7026",
+  "description": "COMPLETE. docs/perl-suite-run.tsv regenerated in one session, all 11 dirs, per-dir foreground chunks each with its own --faillog, taken at b32825d (after the #177 pairing fix, which mattered: 56 of these files renumber their TAP).\n\nRESULT (old -> new): DIFF 235->291, XDIFF 97->107, OK 51->83, NOTAP 31->31, TIMEOUT 18->7, NOT-RUN 0->2 (the #160 quarantine, WITH the reason), FIXTURE 0->1 (op/chdir.t), TRANSPILE 1->1, TOTAL 433->523. The +90 rows are #150 part 1's unmasked files, so the DIFF rise is coverage, not regression.\n\nop was re-run cleanly after I killed the first attempt (218 rows in 9m52s at --jobs 4): 42 OK, 14 XDIFF, 1 FIXTURE, 149 DIFF, 1 TIMEOUT (op/while.t), 9 NOTAP, 2 quarantined.\n\n#177 CROSS-CHECK DONE for all 11 dirs: 56 files renumber; four are registered at all; only op/do.t makes per-row claims and it was rewritten this session. Correction backlog from #177 is EMPTY.\n\nCAVEAT CARRIED FORWARD (task #180): TIMEOUT 18->7 must NOT be read as an improvement. A pl2cl --server was seen holding 5 GB with the box at 11/12 GB during the slow run, so timeouts here can be machine artifacts. Resolve #180 (and #128) before trusting the 7.\n\nNEXT: S3 near-green work from this snapshot — the mined candidates are in docs/perl-test-suite-survey.md §\"Near-green triage from the s321 snapshot\", with #179 (/xx) diagnosed to the function and ready to implement.",
+  "activeForm": "Resuming the S2 snapshot",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-05",
+   "description" : "FILED s470bn (Opus, 2026-09-05), found building the `json-rt` macro row.\n\nREPRODUCER (scratch/s470bn/jdbg.pl):\n    use JSON::PP; my $j = JSON::PP->new->canonical;\n    print $j->encode({ a => 1, b => \"x\" }), \"\\n\";\n    print $j->encode([1, 2.5, \"s\"]), \"\\n\";\n    print $j->encode({ v => [map { $_ + 1 } 1..3] }), \"\\n\";\n  perl 5.40.3:  {\"a\":1,\"b\":\"x\"} / [1,2.5,\"s\"] / {\"v\":[2,3,4]}\n  PCL:          {\"a\":\"1\",\"b\":\"x\"} / [\"1\",\"2.5\",\"s\"] / {\"v\":[\"2\",\"3\",\"4\"]}\n\nJSON::PP decides number-vs-string by asking whether the SV carries a numeric\nflag (its `value_to_json` looks at the dualvar/POK-IOK state).  PCL's box does\nnot answer that question the way perl's SV does, so every number encodes\nquoted.  A string that LOOKS numeric is correct on both sides (\"x\" stays \"x\"),\nso this is the IV/PV distinction, not a coercion bug.\n\nWHY IT MATTERS BEYOND JSON: any module that branches on \"was this value ever a\nnumber\" sees the same answer.  `docs/ir-spec.md` Â§2.2's box model is where the\ndecision belongs; the `nv-ok` slot already exists and is what %p-storable-raw\nconsults for the dualvar split.\n\nCONSEQUENCE FOR THE BENCH: the `json-rt` macro row's document is ALL STRINGS\ndeliberately, so the two engines do the same work and print the same sum.  Fix\nthis and the row can carry numbers.\n",
+   "id" : 1185,
+   "status" : "pending",
+   "subject" : "JSON::PP under PCL encodes an INTEGER as a STRING: {\"a\":\"1\"} where perl gives {\"a\":1}"
+}

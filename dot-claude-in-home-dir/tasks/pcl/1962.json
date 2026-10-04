@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 2 on t/op/sprintf.t).\n\nFour small, independent conversion facts; one task because they are one\nformatter and none is worth a task alone.  Every line MEASURED vs perl 5.40.3\nthrough the file's own data table (the row's description IS the expected text).\n\n  1. NEGATIVE ZERO.  `sprintf \"%.0g\", -0.0` is `-0` in perl and `0` here.\n     (op/sprintf.t 235; the row's own note says C99 mandates the sign.)\n  2. `#` ON `%g`.  `sprintf \"%#.0g\", 12345.6789` is `1.e+04` in perl (the\n     flag KEEPS the decimal point) and `1e+04` here.  (row 237)\n  3. `%#p`.  perl renders a hex pointer matching `^0x[0-9a-f]+\\s*$`; PCL's\n     answer does not match.  (row 341)\n  4. EXPLICIT INDEX WITH `*`.  `%*2$d` must consume the indexed argument and\n     then report a missing one (`123 MISSING`); PCL prints `123`.\n     `%3$*4$v*2$.*1$x` must format four reordered arguments; PCL rejects the\n     whole directive as invalid.  `%*1073741819$v2d` must be rejected, and\n     PCL rejects a DIFFERENT text.  (rows 553, 550, 540)\n\nROWS: baselines/perl-suite-fails.tsv op/sprintf.t 235 237 341 540 550 553.\n\nSibling tasks that own the rest of this file: #1961 (the `%v` family), #1874\n(`%n`), #1875 (an invalid conversion is copied literally), #1963 (`%a`).\n",
+   "id" : 1962,
+   "status" : "pending",
+   "subject" : "sprintf numeric-format residue: negative zero loses its sign, `%#` does not keep the decimal point, `%#p`, and the explicit-index `%N$` + `*` combinations (6 rows of t/op/sprintf.t)"
+}

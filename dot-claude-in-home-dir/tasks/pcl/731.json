@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-29",
+   "description" : "FILED s451z, from the #702/#703 probes.  PRE-EXISTING (identical before and\nafter that work).\n\n    my @a = `printf 'x\\ny\\n'`;   perl: 2 elements     PCL: 1\n    my @b = qx{printf 'p\\nq\\n'}; perl: 2 elements     PCL: 1\n\nperl's `readpipe` is wantarray-sensitive exactly like `readline`: in list\ncontext the child's output is split on `$/` and each line KEEPS its\nterminator.  `p-backtick` (cl/pcl-runtime.lisp) returns the whole output as\none string in every context.\n\nSEVERITY: silent wrong, and the value flows onward -- `for my $l (`cmd`)`\niterates once over the whole output, and `chomp(my @l = `cmd`)` leaves the\ninner newlines.\n\nFIX SHAPE (not designed): the sibling is `p-readline`, which already reads\n`*wantarray*` and splits on `$/`; `p-backtick` should ask the same question\nthrough the same splitter (rule 11) rather than growing its own.  Note the\n`$/` rule is the same one, including `local $/ = undef` (one element) and\n`local $/ = \"\"` (paragraph mode) -- probe both.\n\nBAR: the two rows above, scalar context unchanged, `$/` set to undef / \"\" /\na custom string, output with no trailing newline, empty output (perl gives an\nEMPTY list in list context and \"\" in scalar), and t/op/exec.t rows 7-13 which\nalready cover the scalar side.\n",
+   "id" : 731,
+   "status" : "completed",
+   "subject" : "A command capture in LIST context returns ONE string -- perl splits it into lines (`my @a = `cmd`` gives 1 element, not 2)"
+}

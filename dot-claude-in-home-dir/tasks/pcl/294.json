@@ -1,0 +1,8 @@
+{
+  "id": "294",
+  "subject": "DONE s384 (a311943): `foreach my $x` binds a lexical — IR states the declaration (:my t); precondition for #291",
+  "description": "Found by #290's foreach guard row (s382h), probed at HEAD (a0732cf) AND after the flip — IDENTICAL, so it is not a direction-D regression.\n\n  our $i = \"before\";\n  sub peek { print \"callee: $i\\n\" }\n  for my $i (99) { peek() }        # perl: \"before\"   PCL: \"99\"\n\nCause: `for my $i` and `for $i` lower to the SAME `(p-foreach ($i …))` — the emitter does not distinguish a lexical loop variable from the package one, so the loop var IS the global symbol. Before the flip the `let` was a dynamic bind (defvar'd name); after it, %p-cell-loop-var-p localizes the cell. Same wrong answer either way; perl gives the callee the untouched global because the loop var is a fresh lexical.\n\nFIX SHAPE (not started): the `my` loop variable needs its own name — either a rename (the __shadow__ family's mechanism) or a lowering that binds a gensym and never touches the global. Sequence AFTER #291, which deletes much of the rename machinery this would otherwise plug into.\n\nGuard row: the shape is deliberately EXCLUDED from Pl/t/transpile-test-10.t's foreach row, with a comment pointing here — put it back when this is fixed.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

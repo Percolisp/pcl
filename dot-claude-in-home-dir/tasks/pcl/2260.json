@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494g (Opus, 2026-09-25) while wiring %SIG (#2107).  Probed perl 5.40.3 vs 40da28bd (unchanged by s494g):\n\n    my $line = 'untouched'; my $after = 0;\n    eval { local $SIG{ALRM} = sub { print \"handler\\n\"; die \"abort\\n\" }; alarm 1; $line = <STDIN>; $after = 1; alarm 0 };\n    print \"err=$@ line=\", (defined $line ? \"[$line]\" : 'undef'), \" after=$after\\n\";     # run as: sleep 3 | prog\n\n  perl: handler / err=abort / line=[] after=0      (the die leaves the read; perl's in-place read had already set the TARGET to \"\")\n  PCL : handler / err=     / line=undef after=1    (the die is SWALLOWED)\n\nMECHANISM: %p-read-record wraps the read in `(handler-case ... (error () (%p-read-fail stream)))`, which catches the p-die-error the handler raises inside read-char.  The #2062 rule (%p-perl-die-p -> re-signal) fixes $@ and control flow -- s494g tried it -- BUT then the assignment is skipped and $line stays 'untouched', where perl leaves \"\" (perl's pp_readline writes into the target before reading).  Pl/t/fileio-02.t row 12 asserts perl's `line=` (it passes TODAY only because the die is swallowed), so the one-line fix turns that gate row red.  Getting both halves needs the assignment to happen before the die, i.e. an emission-side answer (a readline that knows its target) -- a DESIGN question for Fable: (a) keep today's swallow (row green, idiom silently wrong), (b) re-signal (idiom right, row red on the lvalue side), (c) emit readline-into-target.  s494g left (a) and filed this.  Probe files: s494g scratch rl2.pl / rl3.pl / rt.pl.",
+   "id" : "2260",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (pre-existing): a Perl `die` raised by a signal handler while `<FH>` BLOCKS is swallowed -- readline returns undef, the eval completes, $@ is empty; the `alarm` read-timeout idiom never sees its timeout"
+}

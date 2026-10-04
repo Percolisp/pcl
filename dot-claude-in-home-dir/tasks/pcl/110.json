@@ -1,0 +1,8 @@
+{
+  "id": "110",
+  "subject": "pclxs BUG (top priority): ALIAS — every alias in a group runs as the same one",
+  "description": "Silent wrong answer. pclxs_invoke_xsub finds the CV by C function pointer (pclxs_xsub_cv), and every alias in an ALIAS group shares that pointer by construction — so all names run with whichever registration the lookup yields. Measured: a four-name group all return ix==2. In a real dist, Digest::MD5::md5() returns what md5_hex() computes. Reproducer committed as t/87-alias.t, marked TODO. FIX (no ABI change needed): define_xsub hands the host a `void *` the contract already says is opaque, so pass a pointer to the registration record rather than to the C function; invoke then finds the CV exactly. Un-TODO t/87-alias.t when done, and check whether refhost's sub table needs the same treatment.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

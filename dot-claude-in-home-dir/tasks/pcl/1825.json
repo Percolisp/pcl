@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-16",
+   "description" : "FILED s473t6a (Opus, 2026-09-17) by #1501 ROUND 8 (t6a), CHECK 2 of\nt/op/ref.t.  PRE-EXISTING.  5 blessed rows.\n\nperl marks a LITERAL's SV read-only, so anything aliased to one refuses a\nwrite.  PROBED (scratch/s473t6a/probes/misc1.pl D1/D2, perl 5.40.3 vs PCL\n2ac855aa):\n\n    eval { for (1) { $_ = 2 } }          perl DIES \"Modification of a\n    eval { my $r = \\(1); $$r = 2 }        read-only value attempted\"\n                                          PCL  LIVES, both\n\nRows in t/op/ref.t (tests 230, 232-235), now carrying this task:\n  * `assignment to value aliased to literal number`   / `â¦ literal string`\n  * `refgen does not allow assignment to value aliased to literal number`\n    / `â¦ literal string`\n  * `weaken refuses to weaken a read-only ref`\n\nWHAT IT WOULD TAKE: a read-only bit on the p-box, set by the literal\nconstructor and by the foreach aliasing of a literal list, and consulted by\n`box-set` / `p-scalar-=` / the element write paths.  That is a WRITE-PATH\nchange on the hottest sites in the runtime, which is why this is filed rather\nthan fixed in a triage round: measure the cost of one flag test in `box-set`\nbefore designing (the s485 rule -- a new arm on a hot path is MEASURED on the\npath it sits on).\n\nRELATED, already documented: `docs/not-supported.md` \"Read-only constants via\n\\undef stash tricks\" names the same absence for a different spelling, and\n`perl-tests/ref.t`'s registry rows sit on it.  A fix should close both.\n",
+   "id" : 1825,
+   "status" : "pending",
+   "subject" : "A value ALIASED TO A LITERAL is read-only in perl and writable in PCL: for (1) { $_ = 2 } and \\(1) both live -- 5 rows in t/op/ref.t"
+}

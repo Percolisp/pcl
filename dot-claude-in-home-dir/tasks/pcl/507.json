@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-23",
+   "description" : "FILED s440 from agent A's #463 report (pre-existing; occurs in no population file -- the only `$$$$1` is t/uni/variables.t, no census row). Repro: `my $x=5; my $r=\\$x; my $rr=\\$r; $_ = $rr; print $$$_, \"\\n\";` -> perl 5, PCL drops (\"Missing case\"). One-token fix: accept a Magic SCALAR (`$_`, `$1`, `$a`?) as the next token of the cast run. Bar: the repro + `$$$1`-style + the inverse (`$$` followed by a space then `$_` = PID then $_ -- probe perl) vs perl; a row in Pl/t/prefix-incr-deref-01.t.\n\nDONE (s446j, agent J), one word.  _split_pid_magic_cast_run's next-token test read `ref($nxt) eq 'PPI::Token::Symbol'` -- and PPI::Token::Magic IS-A PPI::Token::Symbol, so `isa` is the whole fix (the #466 finding again: a MAGIC scalar is a scalar).  `$$$_` arrives as Magic($$) + Magic($_), failed the `ref` test, was left unrepaired and the statement DROPPED, while the one-cast spelling `$$_` (Cast + Magic) always worked.  The `^\\$` half of the test keeps its meaning: `$$@_` is a SYNTAX ERROR in perl (probed), and `$$$$` IS a deref chain over the PID (perl prints empty, not two pids).  Probed identical to perl: $$$_, $$$_{k}, $$$_[1], $$$$_, $$$1, and the inverses $$ . $_ (PID concat), bare $$, $$_.  Guard: Pl/t/prefix-incr-deref-01.t rows 12-13 (perl oracle + inverse).",
+   "id" : 507,
+   "status" : "completed",
+   "subject" : "`$$$_` is still DROPPED: _split_pid_magic_cast_run's next-token test accepts PPI::Token::Symbol but not a PPI::Token::Magic scalar, so `$$` before `$_` is not repaired"
+}

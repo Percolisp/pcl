@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND AND FIXED s501q while probing #2515's breaking cases.  PRE-EXISTING on main 77212b1f.\n    sub c1 { my ($x, $y) = @_; $x .= \"!\"; \"$x$y\" } print c1(1, 2);   perl 1!2   base: SBCL type error, whole program dies\nCAUSE: VarAnnotator gives a parameter the str-buffer verdict (append-only), p-raw-params' param entry carries the class `:str-buffer`, and the macro IGNORED the class -- so the slot held the argument, and %pcl-str-append met a number/box.\nFIX: %p-param-init wraps a :str-buffer entry's initform in %pcl-str-buffer (the declaration's own store discipline, _wrap_freeze).  #2514 would have made this reachable from every signature sub with an appended parameter.  Guard: perf-levers-07.t \"#2571 str-buffer parameter\".\n=== DONE (s501q) ===\n",
+   "id" : "2571",
+   "status" : "completed",
+   "subject" : "CRASH (fixed s501q): a p-raw-params parameter with the :str-buffer verdict was bound to the raw argument and died at its first `.=` (\"is not an array with a fill pointer\")"
+}

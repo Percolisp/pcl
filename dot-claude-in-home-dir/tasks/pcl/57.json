@@ -1,0 +1,9 @@
+{
+  "id": "57",
+  "subject": "E2.0: dual-run scaffold for ExprToCL emitter→CLForm conversion",
+  "description": "Plan §2 E2 in docs/v2-opus48-execution-plan.md / v2-transfer-plan.md T-C(ii). Build the old-text vs new-form-printed side-by-side diff harness (corpus-wide byte-diff per converted emitter) BEFORE converting any of the 69 emitters. Then convert in frontier order: word:* funcall family first; inline_lambda body_cl LAST; finish by deleting raw/raw_wrap + rename to Pl/EmitCL.pm.",
+  "activeForm": "Building E2.0 dual-run scaffold",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

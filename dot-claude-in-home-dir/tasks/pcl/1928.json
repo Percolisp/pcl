@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-19",
+   "description" : "FOUND s473t6c (#1501 ROUND 10).\n\nt/op/sigdispatch.t's residue is two facts:\n\n (a) `$SIG{\"__DIE__\\0whoops\"}` must be \"No such hook: __DIE__\\0whoops at ...\" --\n     perl treats the %SIG key as a NUL-terminated C string for the LOOKUP but\n     reports the whole key, and a trailing NUL is stripped.  The rows are\n     \"Fetching %SIG hooks with an extra trailing nul is nul-clean\" and\n     \"Arbitrary signal lookup through %SIG is clean\".\n\n (b) the file's last two rows (never produced) raise a signal from INSIDE a\n     handler and assert the deferred dispatch runs it exactly once and that a\n     `die` in the handler reaches the enclosing eval.\n\nBoth are %SIG-model work; (a) is the cheap half and is a message plus a key\nnormalisation, (b) needs a deferred-signal queue.\n\nSee also #1924 (`$Config{d_sigprocmask}` is one of the keys PCL's %Config\nsubset does not have) and #1927 (op/signame_canonical.t).\n",
+   "id" : 1928,
+   "status" : "pending",
+   "subject" : "%SIG lookups are not NUL-clean, and a signal raised inside a handler is not deferred (op/sigdispatch.t, 5 rows + 2 never produced)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s506f (Opus, 2026-10-04) per the s506f brief (D4: PERL5OPT is NOT in that batch).\n\nperl reads PERL5OPT and applies its switches as if they preceded the command line (perlrun):\n\"Command-line options (switches). Switches in this variable are treated as if they were on every Perl\ncommand line. Only the -[CDIMTUWdmtw] switches are allowed.\"  Anything else dies:\n  PERL5OPT=-n perl -e 1   ->  Illegal switch in PERL5OPT: -n\n(re-probe the exact text and status before mirroring; also -T in PERL5OPT enables taint and stops\nfurther PERL5OPT processing).\n\n`pcl` ignores PERL5OPT today.  tools/pclperl-for-tests (the harness \"perl\") DOES prepend it, through\nPCLSwitches::parse_argv, without the allowed-subset check.\n\nFIX SHAPE: one function in tools/lib/PCLSwitches.pm (perl5opt_events) parsing $ENV{PERL5OPT} with the\nsame cluster grammar, refusing a letter outside the subset with perl's message; `pcl` and the wrapper\nboth prepend its events (one implementation).\n\nTHE BREAKING CASE TO PROBE FIRST: an environment that carries `PERL5OPT=-MDevel::Cover` (coverage runs,\nCI images) -- every `pcl` run would then `use Devel::Cover`, an XS module PCL cannot load.  Decide (and\nwrite down) whether pcl honours that too (perl's semantics) or announces and skips a -M it cannot load.\nAlso `PERL5OPT=-w` is common in some CI setups (with -w now = $^W, harmless).\n",
+   "id" : "2663",
+   "status" : "pending",
+   "subject" : "`pcl` does not honour PERL5OPT (perl prepends its switches, a restricted subset -[CDIMTUWdmtw])"
+}

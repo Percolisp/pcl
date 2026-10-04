@@ -1,0 +1,9 @@
+{
+  "id": "126",
+  "subject": "Pure-prototype subs lower natively + watchdog forward-goto (decl-hoist catch-wrap, tail-label RET regime) — DONE s316f, gen v2-73",
+  "description": "A named sub with a prototype/signature routes its DEFINITION through v1's _process_sub_statement, so its body's labels+gotos are v1's _wrap_runtime_labels problem. For perl's t/test.pl `sub watchdog ($;$)` that wrapper fails: the emitted body has `(go :WATCHDOG_VIA_ALARM)` and a bare `:WATCHDOG_VIA_ALARM ;; pcl-label` with no enclosing tagbody -> \"attempt to GO to nonexistent tag\" compile error inside watchdog(). An isolated reconstruction of the same shape (prototype + closure block + decls in the prefix) DOES wrap correctly, so the trigger is something else in that body. v2 lowers the same forward-goto shape natively and correctly (probe verified), so the fix is to stop routing prototyped-sub BODIES through v1 (E2.final / E4.1), not to repair v1's text scanner.",
+  "activeForm": "Tracking the prototyped-sub goto seam",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

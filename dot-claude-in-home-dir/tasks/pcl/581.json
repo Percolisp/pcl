@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-08-25",
+   "description" : "FILED s446m (Opus, agent M, from the #73 probes); PRE-EXISTING silent-wrong.  isa() compares class names CASE-INSENSITIVELY: `package Foo; package FOO;` two distinct classes (distinct in PCL too -- dispatch keeps them apart, probed), but `Foo->new->isa(\"FOO\")` is TRUE in PCL and FALSE in perl (m-probe1.pl row 17).  Cause: p-isa asks %pcl-isa-ancestry with :test (lambda (a b) (string-equal a (%pcl-normalize-pkg b))) and string-equal is case-insensitive; the same string-equal appears in p-method-call's UNIVERSAL/\"CORE\"/import arms, where it is deliberate for the reserved names but wrong for a user class name.  This is the :invert case-sensitivity family (project_case_sensitivity_general_fix): the CL PACKAGE names are already injective (\"Foo\" -> Foo, \"FOO\" -> foo, \"foo\" -> FOO), so only the string COMPARISONS conflate them. Fix: compare class names with string= (after %pcl-normalize-pkg) in p-isa / %pcl-isa-ancestry, leaving the reserved-word tests (UNIVERSAL, CORE, import, DESTROY) on string-equal.  Bar: isa/can/DOES over the three case spellings + the ->isa on a subclass, vs perl; a row in Pl/t/method-dispatch-01.t; the full sweep (a runtime comparison change).",
+   "id" : 581,
+   "status" : "pending",
+   "subject" : "pcl"
+}

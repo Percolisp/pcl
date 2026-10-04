@@ -1,0 +1,8 @@
+{
+  "id": "65",
+  "subject": "Anon-sub (v1-seam) single-statement regime carve-out + raw-text lambda indentation",
+  "description": "Superseded/absorbed by s315 (#78 batch, 6bf0b78): multi-statement anon bodies lower structurally via _lower_embedded_anon since s306b; empty sub {} now emits v1's wrapper form (no more raw_lambda for it); raw-text lambda indentation is moot post-root-flip (structural printer owns layout). Remaining anon declines (package-in-body ×2, embed-unsafe ×2) are tied to the v1 statement surface and die at E4.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

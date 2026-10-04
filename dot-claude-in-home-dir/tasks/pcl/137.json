@@ -1,0 +1,9 @@
+{
+  "id": "137",
+  "subject": "#25 s316t: suite undef-fn family — missing process/file builtins (getpgrp/setpgrp/getpriority/utime/readlink), POSIX WNOHANG, PerlIO::get_layers/:crlf",
+  "description": "DONE s316t (bd89663, gen v2-88): getpgrp/setpgrp/getpriority builtins, one-arg utime, POSIX WNOHANG/Exporter, v2 _tail_below_assign_prec reassociation guard, saved-core $$ init-hook. op/setpgrpstack.t + op/waitpid.t OK; op/lex_assign.t 351/353. The PerlIO::get_layers/:crlf piece (io/crlf.t) spun off to #139 — needs a layer-model design decision, not a drive-by. The my-decl variant of the reassociation bug (both pipelines) is #138.",
+  "activeForm": "Fixing suite undef-fn builtin family",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

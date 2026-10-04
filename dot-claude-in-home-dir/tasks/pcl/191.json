@@ -1,0 +1,9 @@
+{
+  "id": "191",
+  "subject": "DEFERRED (RULED s323): indirect method syntax on $scalar inside ( )/[ ] emits a FUNCALL — re-raise on a real CPAN cause line",
+  "description": "Fable ruling (fable-answers-s323.md §3): leave open. Failure is LOUD (undefined function), indirect syntax is rare/discouraged, common spellings (Foo->m, $obj->m) unaffected. Not worth pre-R1 time. Repro: package Widget; sub show {...}; package main; my $r = [ show $w ]; — perl does $w->show, PCL emits main::show(...). Statement level is fine; only the nested form reaching PExpr's indirect-object pre-pass goes wrong (pre-pass doesn't fire there, or its rewrite is discarded downstream). Pre-existing at HEAD, confirmed not introduced by #190.",
+  "activeForm": "Filing the indirect-method-in-brackets gap",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

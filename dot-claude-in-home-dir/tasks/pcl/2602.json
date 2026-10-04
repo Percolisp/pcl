@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "Found by s501t in the s506 gate: Pl/t/tie-aggregate-01.t hung 9+ min (prove child waiting on its backtick pipe, sbcl already defunct).  Cause: pl2cl _xc_spawn daemonizes the --xserver with STDIN/STDOUT on /dev/null but INHERITED STDERR.  The server lives until its OWNER (the test process) exits.  When the first call for a key comes from under a captured `sbcl ... 2>&1` (the runtime making a `pl2cl --module` call on a module-cache miss; its PCL_* env gives it a key of its own -> a new server), the server holds that pipe and the owner reads it to EOF forever.  Pre-existing on main e5d72352 (latent: needs a cache miss inside a 2>&1 row; the reboot made it visible).\n\nReproducer: PCL_XSERVER=<fresh dir>/s PCL_XSERVER_OWNER=$$ then `$pl2cl a.pl 2>&1` from perl backticks -> never returns (scratch/s501t/xsrv/repro.pl: HANG on main, 1 s fixed).\n\n=== DONE (s501t) ===\nFix: _xc_spawn also reopens STDERR on /dev/null (request stderr travels over the socket; a server that fails to start is announced by the client _xc_down).  Guard Pl/t/gate-cost-01.t row 30 (32 -> 33 rows), inverse-verified FAILING on a main extraction.  tie-aggregate-01.t with a cold PCL_CACHE_DIR: 128/128 in 9 s.",
+   "id" : 2602,
+   "status" : "completed",
+   "subject" : "pl2cl transpile server held its spawner stderr: a gate row under sbcl 2>&1 that misses the module cache DEADLOCKS until killed"
+}

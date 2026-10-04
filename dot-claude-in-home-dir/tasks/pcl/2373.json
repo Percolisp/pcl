@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-26",
+   "description" : "FOUND s497 (Fable, 2026-09-26) reviewing s494g (#2107), on f6a2348b; PRE-EXISTING on 3e8bff3e (the same answer), so not a merge blocker.  Probe `~/pcl-agent-scratch/s497/review/s494g/r9-pipe-ignore.pl`:\n\n    $| = 1; $SIG{PIPE} = \"IGNORE\"; open(my $p, \"|-\", \"true\") or die; sleep 1;\n    my $old = select($p); $| = 1; select($old);\n    my $r = print $p \"hello\\n\"; print \"r=\", ($r ? 1 : 0), \" err=$!\\n\";\n  perl:  r=0 err=Broken pipe        PCL: r=1 err=\n\n`r9b-pipe-big.pl` (a 200 000-byte write) agrees with perl (`big r=0 err=Broken pipe`), and the default PIPE disposition kills both by signal 13 (`r9c-pipe-default.pl`), so #2107's EPIPE path IS wired -- what is missing is that `$|` on a piped-open handle does not make `print` WRITE at once: the data sits in a buffer, the write(2) that fails happens later.  Second half, same probe: after the failed write perl's `close($p)` answers TRUE (the child exited 0; the EPIPE was already reported by the print), PCL's answers FALSE.\nWHERE: the piped-open handle's autoflush (`$|` / `IO::Handle::autoflush`) -- compare with how a FILE handle honours `$|` (fileio Pl/t rows); then the close return.  Perl-probed rows above are the guard.  Family: #2261 (qx STDERR), #2107.",
+   "id" : 2373,
+   "status" : "pending",
+   "subject" : "EDGE (found by the s494g review probes, s497): `print` to a piped-open handle whose reader has EXITED returns TRUE for a small write with `$|` set on that handle -- perl flushes at the print and answers false with $! = EPIPE; PCL surfaces the EPIPE only at a large write or at close (and `close` then answers FALSE where perl answers true, the child having exited 0)"
+}

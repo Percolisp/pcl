@@ -1,0 +1,8 @@
+{
+  "id": "117",
+  "subject": "XS: implement the `io` vtable capability group (addfile/filehandles) — Digest::MD5 files.t blocked on it",
+  "description": "The last optional pclxs group PCL doesn't implement (ABI 5's io_* read/write consumers). Bridge reports it cleanly: \"this host does not implement filehandles (vtable capability group 'io' is absent)\". Blocks Digest::MD5's ->addfile (its files.t) and any XS that reads PerlIO. See docs/xs-abi5-and-destroy.md + pclxs pclxs_host.h io group docs. All-or-nothing group like magic.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

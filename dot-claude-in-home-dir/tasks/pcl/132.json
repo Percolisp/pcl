@@ -1,0 +1,9 @@
+{
+  "id": "132",
+  "subject": "Decide: source-echo comments in v2 output — CLForm has no comment node, v1's `;; perl` echoes silently vanished",
+  "description": "v1 interleaved `;; &lt;perl source&gt;` echoes in its text-stream emission; v2's CLForm tree printer has no comment vocabulary, so echoes disappeared as a byproduct of the rewrite — no flag exists, no decision was made. generated-cl-ir-review.md §\"Source echoes\" still lists them as a KEEP property. Stragglers in cl/pcl-pack.lisp come from surviving v1-side raw-text paths and are misindented to column 0. Options: (a) add a comment node to CLForm and emit statement echoes (zero runtime cost, some transpile/cache-size cost), (b) formally drop and update the review doc. Ties into Target B (#75) readable-IR goal.",
+  "activeForm": "Filing source-echo comment decision",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

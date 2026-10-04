@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FOUND s492c (Opus, 2026-09-21) while attributing a sweep mover: task #2101\nmade `$?` real, and perl-tests/ref.t:530 -- `is($?, 0, 'UNIVERSAL::AUTOLOAD\ncalled when freeing qr//')` -- stopped passing on a stale 0 and started\nreporting its child's REAL exit status, 255.\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n\n    sub UNIVERSAL::AUTOLOAD { qr// } a->p\n\n    perl: exits 0 (the AUTOLOAD in UNIVERSAL is found for the missing method)\n    PCL:  dies \"Can't locate object method \\\"p\\\" via package \\\"a\\\" (perhaps you\n          forgot to load \\\"a\\\"?) at - line 1.\" and exits 2 (255 through the\n          harness)\n\nperl's method resolution, on a miss, walks @ISA for `AUTOLOAD` and then falls\nback to `UNIVERSAL::AUTOLOAD`.  PCL's plain-call path DOES consult AUTOLOAD\n(`%p-call-of-undefined-sub`, task #432), and the METHOD path consults a\nclass's own/inherited AUTOLOAD -- what is missing is the UNIVERSAL fallback,\nwhich is the last step of the same walk.\n\nIt is a small, bounded addition to the method-miss path, and the acceptance\nis the ref.t row above (which is now a blessed failure with #2101 as its\nattributing cause, so fixing this takes it back out BY EDIT).\n",
+   "id" : 2061,
+   "status" : "pending",
+   "subject" : "A package-level `UNIVERSAL::AUTOLOAD` is not consulted on a METHOD MISS -- `sub UNIVERSAL::AUTOLOAD {...} a->p` dies \"Can't locate object method\" where perl calls the AUTOLOAD"
+}

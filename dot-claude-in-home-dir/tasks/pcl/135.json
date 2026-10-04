@@ -1,0 +1,8 @@
+{
+  "id": "135",
+  "subject": "Role::Tiny residual FAILs: subclass (subclassing Role::Tiny), proto (unreadable emission), concrete-methods (stash torture), namespace-clean (XS)",
+  "description": "s316q RE-DIAGNOSED: cluster C's core (with 'Role' installing methods) was ALREADY FIXED — the dist crashes were (1) use-vs-BEGIN compile-stream ordering (%INC seeding idiom) and (2) use-base defclass read-time package dependency, both fixed in 5518570 (Role-Tiny 9/8/6 → 11/8/4). Remaining 4 FAILs: subclass.t = \"Can't locate object method apply_roles_to_package via package RoleExtension\" (methods inherited from the transpiled Role::Tiny class — @ISA dispatch into a module-loaded parent); proto.t = generated CL read error (bad symbol, find it); concrete-methods.t = stash-entry-forms torture (constants/stubs/glob-stored subs enumeration, likely §live-symbol-table territory); namespace-clean.t = XS dependency (expected-divergence material).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

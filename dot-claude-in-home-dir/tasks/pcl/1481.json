@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t3 (Opus triage of the 79 CATALOG-only blessed rows), on main\nd9a2aac0.  PRE-EXISTING.  Probe: scratch/s473t3/probes/p09-delete-addr.pl.\n\nROWS BEHIND IT (baselines/fail-baseline.tsv, 2 rows):\n  delete.t 26 `a b c equivalent`         (hash spelling, perl-tests/delete.t:79)\n  delete.t 54 `a b c also equivalent`    (array spelling, :153)\n\nREPRODUCER (perl 5.40.3 vs ./runpcl):\n    { my %a = ('bar', 33);\n      my ($a) = \\(values %a); my $b = \\$a{bar}; my $c = \\delete $a{bar};\n      printf \"hash: ab=%d bc=%d\\n\", ($a==$b)?1:0, ($b==$c)?1:0; }\n    { my @a = 33;\n      my ($a) = \\(@a);        my $b = \\$a[0];   my $c = \\delete $a[0];\n      printf \"array: ab=%d bc=%d\\n\", ($a==$b)?1:0, ($b==$c)?1:0; }\n  perl: hash: ab=1 bc=1     array: ab=1 bc=1\n  PCL : hash: ab=1 bc=0     array: ab=1 bc=0\n  (`ab=1` on both sides is the control: PCL DOES give `\\(values %h)` and\n  `\\$h{k}` the same identity, so element identity exists -- only the\n  `delete` return value loses it.)\n\nMECHANISM: `p-delete` removes the entry and returns the VALUE it read, so\n`\\` takes a reference to a fresh box.  perl's `delete` returns the removed\nelement's own SV, still addressable.  Fix area: `p-delete` in\n`cl/pcl-runtime.lisp` -- return the element's box.\n\nCATALOG NOTE THIS REPLACES: sweep-bug-catalog.md delete.t, \"`\\delete\n$h{key}` address equality (tests 26, 54) ... PCL's delete returns a copy, not\nthe same slot.\"\n\nFAMILY: `docs/not-supported.md` \"Scalar copy does not preserve\nreference/SV identity\" -- but NOT registered there, because this one is a\ndiscrete fixable slot, not the general copy semantics.\n",
+   "id" : 1481,
+   "status" : "open",
+   "subject" : "BUG (SV identity): `\\delete $h{k}` returns a ref to a COPY -- perl gives the same address as `\\$h{k}` and `\\(values %h)`, PCL gives a fresh box"
+}

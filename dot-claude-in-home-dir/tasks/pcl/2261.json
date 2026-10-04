@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-25",
+   "description" : "FOUND s494g (Opus, 2026-09-25).  `my $x = `echo to-err 1>&2; echo out`; print \"got=$x\";`\n  perl: `to-err` on stderr, got=out     PCL (40da28bd and s494g): got=out, stderr EMPTY.\nMECHANISM: p-backtick runs /bin/sh with `:error nil` (= /dev/null).  perl's readpipe leaves the child's fd 2 alone.  Fix: `:error` = the program's current STDERR stream (as %p-system-run passes *error-output*), probe `2>&1` inside the command and a program that reopened STDERR.  Seen because a child killed by a signal under qx has its shell print `User defined signal 1` in perl and nothing in PCL.",
+   "id" : "2261",
+   "status" : "pending",
+   "subject" : "EVERYDAY (pre-existing): qx / backticks DISCARD the child's STDERR (run-program :error nil) -- perl passes it through to the program's STDERR"
+}

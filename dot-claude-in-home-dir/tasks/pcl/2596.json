@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-02",
+   "description" : "Found s504 by s501t (t/op/gmagic.t row 35 \"number of stores when chomping a ref\", measured while splicing op/gmagic.t for Fable).  PRE-EXISTING: same on main b7ec0093.\n\nReproducer (perl prints `n=1 ref= [foo]`; PCL prints `n=0 ref=o [foo\\n]`):\n    package o { use overload q(\"\") => sub { \"foo\\n\" } }\n    my $c = bless [], \"o\"; my $n = chomp $c; print \"n=$n ref=\", ref($c), \" [$c]\\n\";\nperl's chomp works on the STRING value of the operand (pp_chomp: SvPV_force), so an overloaded object is stringified, the newline removed and the result STORED (a tied scalar sees that second STORE -- gmagic.t:62 expects 1 fetch / 2 stores).  PCL's p-chomp-one treats a reference as having no trailing newline.  Layer: runtime p-chomp-one / p-chop-one (one predicate for both); sibling of #119/#402 (the stringify-instead-of-overload shortcuts).\n",
+   "id" : "2596",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: chomp / chop on a REFERENCE whose class overloads \"\" does not stringify it: `chomp $obj` returns 0 and leaves the object (perl: the string minus newline, ref() becomes \"\")\n"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-30",
+   "description" : "FOUND s501b (Opus, 2026-09-30) while fixing #2082 -- PRE-EXISTING on main 558cc5a0 (probed on the base extraction too), present since the initial import.  SILENT WRONG.\n\nREPRODUCER (scratch/s501b/p/sys1.pl in the s501b worktree):\n    system(\"cat\"); system(\"cat\", \"-\"); print \"rc=$?\\n\";\n`echo hi | perl sys1.pl` prints `hi` / `rc=0`; PCL prints only `rc=0`.\n\nCAUSE: `%p-system-run` spawns with `:input nil` (SBCL: /dev/null), so the child never sees the program's STDIN.  perl's system is fork+exec: the child inherits descriptors 0/1/2.  `p-backtick` has the same `:input nil` AND `:error nil` -- a qx// child's STDERR is thrown away (perl: `my $x = qx(ls /nope)` prints the ls error on the terminal).  p-exec (s501b) already inherits all three (`:input t :output t :error t`).\n\nCHEAP DISCRIMINATING MEASUREMENT: switch `:input nil` -> `:input t` in %p-system-run and run the probe; then `echo hi | ./runpcl` on `my $x = qx(cat); print $x`.  Risk to check: a program whose own STDIN is buffered by the Lisp reader (perl has the same buffering hazard, so matching perl is still the rule); the sweep runs perl-tests with STDIN from /dev/null, so no row should move -- measure it.\n\nBAR: cl/ => full sweep + companion io/ + op/exec.t; guard rows in Pl/t/system-block-01.t.",
+   "id" : "2555",
+   "status" : "pending",
+   "subject" : "system() and qx// do not inherit the program's STDIN (and qx// discards STDERR): `echo hi | pcl -e 'system(\"cat\")'` prints nothing, perl prints hi"
+}

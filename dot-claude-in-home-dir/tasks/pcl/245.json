@@ -1,0 +1,8 @@
+{
+  "id": "245",
+  "subject": "E4.1 pre-work F8: eval-mode bareword array subscript still routes to v1 (in the Pl/t gate)",
+  "description": "Found s352 while starting E4.1. `Pl/Parser2.pm:740` dies \"Parser2 TODO: eval-mode bareword array subscript (out-of-frame constant)\" for `eval q{ $props[P_FOUR] = 1 }` — a use-constant name used as an ARRAY subscript inside a string eval. v1's retry emits the runtime call, v2 strings the bareword to index 0 (silent wrong) so the gate exists.\n\nLIVE in the gate: Pl/t/eval-constant-01.t rows 4-5 (the JSON::PP ->canonical shape). Measured with PCL_V2_AUDIT_LOG:\n  TODO  parse_code  $props[P_FOUR] = 1;  Parser2 TODO: eval-mode bareword array subscript ...\n\nThe s342c audit (docs/v1-live-share-audit.md, F1-F7) never saw it: that audit swept perl-tests + the CPAN board, NOT Pl/t. So the \"live v1 share is zero\" claim of guardrail §5a.2 is not yet true.\n\nNOT one of the ruled refusals (multi-switch, F6) — at the step-2 flip it becomes a user-visible $@ and breaks 2 gate rows. Must be fixed (or ruled) before step 2.\n\nTODO: (a) re-run the whole Pl/t gate under PCL_V2_AUDIT_LOG to enumerate every other live route the audit missed; (b) fix natively — in eval mode a bareword inside an ARRAY subscript must lower as a zero-arg sub call (perl: only HASH subscripts autoquote), which is what v1 emits.</description>\n<parameter name=\"activeForm\">Chasing the eval-mode bareword-subscript v1 route",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

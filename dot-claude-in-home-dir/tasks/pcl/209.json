@@ -1,0 +1,8 @@
+{
+  "id": "209",
+  "subject": "substr as an lvalue / 4-arg substr on an ELEMENT writes nothing (same missing box as s///, one table further)",
+  "description": "Found while building #189 (s330). Sibling of the `=~ s///`-on-element bug fixed there.\n\n  my @a = (\"abc\"); substr($a[0],0,1,\"Q\");     # perl: Qbc — PCL: abc, SILENT\n  my @b = (\"abc\"); substr($b[0],0,1) = \"Z\";   # perl: Zbc — PCL: abc, SILENT\n  sub s4 { substr($_[0],0,1,\"Q\") } my $v=\"abc\"; s4($v);   # same\n\nThe caller side is already right after #189 ($v IS boxed — _sub_writes_args flags substr/vec/pos on $_[N]); the CALLEE lowers substr's target as a VALUE.\n\nCAUSE: Pl/ExprToCL.pm has %lvalue_funcs = qw(chop chomp undef) — TWO copies (~line 2433 and ~3265), and both omit substr (4-arg), vec, read/sysread/recv. Only names in that table get lvalue_context(1), which is what makes _elem_accessor emit p-aref-box / p-gethash-box instead of p-aref / p-gethash. Same \"second copy of a mechanism, both incomplete\" shape as #140.\n\nFIX SHAPE: one shared table (rule 11), consumed by both copies; substr only in its 4-arg form and as an assignment target; vec likewise; read/sysread/recv write their buffer argument. Pl::VarAnnotator::arg_writing_builtin (added in s330) is the membership test the #189 scan already uses — route this through it too so the three consumers cannot drift.\n\nWATCH: adding substr blanket-wise also boxes the target of a 3-arg RVALUE substr — measure the corpus-diff before/after and keep the change gated to the writing forms.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": []
+}

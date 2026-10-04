@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FILED s473t4 (#1501 CHECK 1 round 1, 2026-09-13).  t/op/lvref.t is TRANSPILE-FAIL: P 199/2, C 0/0 -- the whole file, 201 rows.\n\n    $ ./pl2cl < t/op/lvref.t\n    Parser2 TODO: non-scalar state declaration outside a named-sub statement: @a\n\nMINIMAL REPRODUCER (probed vs perl 5.40.3):\n    use strict; use warnings;\n    use feature 'refaliasing', 'state';\n    no warnings 'experimental::refaliasing';\n    sub f {\n      \\state @a = [1..3];\n      print \"@a\\n\";\n    }\n    f(); f();\n    perl: \"1 2 3\" twice\n    pcl : Transpile failed: Parser2 TODO: non-scalar state declaration outside\n          a named-sub statement: @a\n\nTHE SITE in the file is t/op/lvref.t:313-321 (`\\state @a = [1..3]`, `\\state @c = [$_]`, `\\state %y = {1,2}`), i.e. the refaliasing-a-state-container family.\n\nMECHANISM: Pl/Parser2.pm's state handler requires the declaring STATEMENT to be a PPI::Statement::Variable whose parent is a Block or the Document.  In `\\state @a = ...` the `state` word sits inside a Cast-led expression statement, so the walk that looks for the enclosing named sub never starts and the container path dies.  The scalar spelling `\\state $x = \\$y` should be probed in the same pass -- it may take the same route.\n\nRELATED: #1332 / the refaliasing family (grep DECIDED for \"refaliasing\"); the s396 round shipped the parenthesised-array spellings and filed #332 for the ones it did not.  This is an unshipped spelling of the same family, not a new mechanism -- but it is a term-grammar change, so it is round t5a work, not a filler.\n",
+   "id" : 1579,
+   "status" : "pending",
+   "subject" : "`\\state @a = [1..3]` (refaliasing a state array) refuses the WHOLE FILE: \"non-scalar state declaration outside a named-sub statement\" -- op/lvref.t loses all 201 rows"
+}

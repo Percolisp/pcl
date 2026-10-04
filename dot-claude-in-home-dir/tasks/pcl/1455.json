@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-07",
+   "description" : "FILED s473t2 (Opus triage of the 152 causeless blessed sweep rows), on main 0d783d24.\nProbes scratch/s473t2/probes/p11-misc.pl A and p12-evalscope.pl.\n\nROW BEHIND IT: perl-tests/eval.t 40 (\"lexical search terminates correctly at\nsubroutine boundary\") = 1 row.  It reads got='!' where perl reads 'good!'.\n\nTHE SHAPE (perl-tests/eval.t 184-190):\n    $main::r = \"good\";\n    sub terminal { eval '$r . q{!}' }\n    is(do { my $r = \"bad\"; eval 'terminal($r)' }, 'good!', ...);\nPerl: `$r` inside `terminal`'s eval is not in any lexical scope that reaches the\nsub, so it is $main::r = \"good\".  PCL: the file declares `my $r` at eval.t:313,\nAFTER the sub -- and the eval resolves to that (empty) cell, so the answer is '!'.\n\nIN ISOLATION THE SAME THREE LINES AGREE (p11-misc.pl A prints good! on both), so\nit is the LATER file-level `my $r` that does it.  The two-line reproducer of the\ncapture itself REFUSES rather than mis-resolving:\n    $main::r = \"good\"; sub terminal { eval '$r . q{!}' }\n    my $got = do { my $r = \"bad\"; eval 'terminal($r)' }; print $got;\n    my $r = \"later\";\n  perl: good!\n  PCL : Transpile failed: Parser2 TODO: file lexical 'r' captured by sub terminal\nso the file-lexical capture machinery has a path where it refuses and a path\nwhere it silently captures a declaration that is not in scope at the use.  The\nscope question is \"is the declaration BEFORE this use in the file\", the same\nquestion #454 answered for signature parameters.\n",
+   "id" : 1455,
+   "status" : "open",
+   "subject" : "BUG (string-eval capture, #296 family): an unqualified `$name` inside a string eval in a NAMED sub binds a FILE lexical declared LATER in the file instead of the package variable -- perl-tests/eval.t 40"
+}

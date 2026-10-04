@@ -1,0 +1,9 @@
+{
+  "id": "27",
+  "subject": "Delete the PCL_W12_OLD text-annotator escape hatch",
+  "description": "Noted \"delete next session\" in s276. Remove the env check in Pl/VarAnnotator.pm line ~96 and the header comments; decide whether the text-verdict code itself goes (check what !$host path needs).",
+  "activeForm": "Deleting PCL_W12_OLD escape hatch",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

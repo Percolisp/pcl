@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-10T15:30:00Z",
+   "description" : "With cl-ppcre vendored (#1597), no consumer needs Quicklisp.  Remove the step\neverywhere and leave only the FALLBACK mention.\n\n=== DONE (s481a) ===\n\nRemoved: tools/install-matrix/deps.sh's Quicklisp bootstrap + ql:quickload\nblock (a stock image's Lisp side is now `sbcl --version`);\n.github/workflows/ci.yml's \"Install Quicklisp + cl-ppcre\" step, replaced by one\nthat prints the SBCL version and says in the log why there is nothing else;\ntools/t/install-container.t's /etc/sbclrc, which existed ONLY to load Quicklisp\n-- its #1327 note is kept and re-pointed (a core memoising the BUILDER's\nasdf:*user-cache* is still a PCL bug, and with the init file gone legs (c)/(d)\nare what shows nothing re-enters ASDF at startup at all).  The Containerfile's\ntext is part of the image key, so the base image rebuilt rather than reusing a\nstale one -- 38 s, where it used to spend minutes on Quicklisp.\n\n`sbcl --script` was PROBED and now works (it reports the vendored directory), so\nthe README's sentence about --script skipping ~/.sbclrc is FALSE and was deleted\nrather than rewritten.\n\nBAR: `grep -rn -i quicklisp README.md docs/caching.md docs/pcl-commands.md\ntools/ .github/` lists only the fallback (\"if the vendored copy is absent, ASDF's\nordinary search -- distro package, Quicklisp, a ~/.sbclrc\") and the notes saying\nthe step is gone.  prove tools/t/install-container.t 17/17 PASS.\n",
+   "id" : 1598,
+   "status" : "completed",
+   "subject" : "P1(b): remove the Quicklisp step from deps.sh, ci.yml, install-container.t's image and the README -- nothing installs a Lisp library any more"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-13",
+   "description" : "FOUND s473t5e (#1501 round 6, `re/` CHECK 2).  t/re/reg_namedcapture.t is\nDIFF 1/1 and its failing row is the file's first:\n\n    *X = *-;\n    'X' =~ /(?<X>X)/;\n    print eval '*X{HASH}{X} || 1' ? \"\" : \"not \", \"ok 1\\n\";\n\ni.e. alias the glob `X` to the glob `-` (whose HASH slot is `%-`, the\nnamed-capture hash), match, then read the alias's HASH slot.  Its comment says\nwhat it is for: \"This tests whether glob assignment fails to load the tie.\"\nThe second row, the same trick over `*!`/`%!`, PASSES.\n\nThis is #1664's territory -- the TYPEGLOB MODEL (a glob value in a stash slot\nIS `*{name}`; `*x{IO}`/`*x{FORMAT}` missing) -- plus #1717's (perl's `%-` is a\n`Tie::Hash::NamedCapture` tie, PCL's is native).  Filed separately only because\nit names a THIRD slot spelling, `*X{HASH}`, over a PUNCTUATION glob.\n\nROWS: 1.  Close it with #1664 rather than on its own.\n",
+   "id" : 1724,
+   "status" : "pending",
+   "subject" : "`*X = *-` then `*X{HASH}{X}`: a glob assignment does not carry the named-capture hash, and `*X{HASH}` has no slot to read -- #1664's typeglob model, t/re/reg_namedcapture.t"
+}

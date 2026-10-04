@@ -1,0 +1,9 @@
+{
+  "id": "31",
+  "subject": "T0.1: implement pipeline marker header line in emitted CL",
+  "description": "One header line `;;; pcl: pipeline=v2 gen=v2-N` / `pipeline=v1` in every transpiled file, so the corpus dialect mix is auditable. Per docs/v2-transfer-plan.md T0.1 and generated-cl-ir-review.md §4b.2.",
+  "activeForm": "Implementing pipeline marker",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "Found s315d while fixing concat2.t 3: do-regex-subst builds the match source as (to-string (unbox string-box)) — unboxing first skips box-sv's \"\" overload check, so an overloaded object matches against its raw print form (\"HASH(0x1)\") instead of the overloaded string. perl stringifies via the overload (SvPV on the SV). Same pattern likely in the m// match arm and tr///. Fix = (to-string string-box) at the source sites (box-sv handles overload + tie FETCH), verify against perl with an overloaded object on both match and no-match paths + tied variables. Pre-existing (not a s315d regression — behavior unchanged by the count-gate fix).\n\nDONE s419d (79702aa): do-regex-subst and do-tr now (to-string box) -- box-sv runs the \"\" overload + tie FETCH, matching do-regex-match.  Probed 6 rows + tied + no-match vs perl 5.40.3, all identical.  Guard Pl/t/overload-01.t.  Full sweep GATE clean +0; companion legs clean.  Residue filed as #416 (no-match false is 0, perl \"\").",
+   "id" : "119",
+   "status" : "completed",
+   "subject" : "s///&m// match-source stringification skips overload: (to-string (unbox box)) not box-sv"
+}

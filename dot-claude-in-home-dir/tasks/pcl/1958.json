@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 2 on t/op/eval.t:360-392).\n\nperl: a sub whose package is `DB` is the debugger's own frame, and a string\neval inside it searches the pad of the sub that CALLED it, not its own.  It is\nhow `perl -d` evaluates an expression \"in the debugged program's scope\", and\n`t/op/eval.t` asserts it five ways.\n\nREPRODUCER (perl 5.40.3 vs PCL):\n\n    package DB;    sub db3 { eval '$x' }\n    package DB;    sub db5 { my $x = 4; eval '$x' }\n    package main;  sub db1 { eval '$x' }\n    { my $x = 3;\n      print db1(), \" \", DB::db3(), \" \", DB::db5(), \"\\n\";\n    }\n    perl: 2 3 3      (db1 is NOT a DB sub, so it sees the file lexical 2;\n                      db3 and db5 see the CALLER's 3 -- db5's own `my $x=4`\n                      does not win)\n    PCL:  2 2 4      (each sub sees its own)\n\nROWS: baselines/perl-suite-fails.tsv op/eval.t 94, 95, 96, 98, 99 (the last\ntwo are the [GH #19370] lexical-sub and anon-sub call sites).\n\nSHAPE: the eval capture alist is built at the CALL SITE's lowering.  A sub in\npackage `DB` would need the alist of its CALLER instead -- which is a run-time\nfact, not a compile-time one, so this is the caller-frame lexical access\n`caller()` fidelity (#233) asks for from the other side.  Measure how much of\nthat machinery exists before designing; five rows is not worth a new frame\nmodel on its own.\n",
+   "id" : 1958,
+   "status" : "pending",
+   "subject" : "an `eval STRING` inside a sub of package DB sees the CALLER's pad (perl's debugger rule); PCL reads its own lexicals"
+}

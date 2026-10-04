@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-10T15:30:00Z",
+   "description" : "=== DONE (s481a) ===\n\nCONTRIBUTING.md at the root.  Reporting a bug: the smallest program that shows\nit, perl's output beside PCL's (a worked example in the file), `pcl --version`\n(PCL + SBCL + PPI versions), the OS; `pl2cl bug.pl` as optional extra; and the\ntwo files worth checking first (docs/not-supported.md, docs/STATUS.md).  Sending\na change: `tools/prove-core` (the whole gate, what CI runs), a row that fails\nwithout the fix in an existing Pl/t file or a new <topic>-01.t, the WALL-TIME\nrule for a test file, and `tools/corpus-diff.pl` with every differing file\nexplained in the PR (CI runs it against the PR base).  Licence paragraph: the\nsame terms as Perl, contributions offered under them, `tools/tag-license FILE`\nfor a new file.  Linked from README's Contributing section (one sentence).\n",
+   "id" : 1602,
+   "status" : "completed",
+   "subject" : "P3: CONTRIBUTING.md -- how to run the gate, where bugs go, and what a good report carries (one small program, run by perl and by pcl side by side)"
+}

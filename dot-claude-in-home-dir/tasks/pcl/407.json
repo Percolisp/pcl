@@ -1,0 +1,7 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED s418 (Fable), found by the B2 (#343) acceptance probes on the\nsplit.t:503 shape.  PRE-EXISTING and independent of the ceiling fix (a plain\none-liner shows it; no list-operator parse involved).\n\n    perl -e q(print chr(160) =~ /\\s/u ? \"match\" : \"no\")     perl: match\n    the same through PCL                                     PCL:  no\n\nperl: under /u (Unicode rules), \\s matches every White_Space character,\nincluding U+00A0 NBSP (and \\x{85} NEL); since 5.18, \\s and [[:space:]] agree.\nPCL answers \"no\" for NBSP, so its \\s under /u is the ASCII set.\n\nConsequence measured in the sweep population: perl-tests/split.t:503\n(my ($sp) = grep /\\s/u, map chr, reverse 128 .. 255 or skip ...) finds \\xA0\nunder perl and takes the skip branch under PCL.  That skip is the file\nauthors own guard for engines without high-bit whitespace, so the behavior\nis graceful â but any test asserting the /u semantics directly will diverge.\n\nFix belongs in the regex lowering/runtime where \\s is translated (find the\nsibling: how does \\w under /u fare? \\d?).  Check what the CL regex engine\noffers for property classes before hand-rolling a set.",
+   "status" : "open",
+   "title" : "\\s under /u does not match NBSP (U+00A0) â ASCII-only \\s in Unicode mode"
+}

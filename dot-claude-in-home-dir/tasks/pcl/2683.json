@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s507 (Fable, 2026-10-04) from review probes written for s502e (#2559 select).  PRE-EXISTING on main 2e71d4aa (s502e only made 4-arg select real and `select` wantarray-sensitive; its 1-arg rows are unchanged).\n\nPROBE (~/pcl-agent-scratch/s507/review/e6-sel1.pl row 21, e4-select.pl rows 21 / 24 / 25):\n  my $old = select(STDERR); my $cur = select($old); print \"$old $cur\";     perl: main::STDOUT main::STDERR    PCL: main::STDOUT STDERR\n  select((select(STDOUT), $| = 1)[0]); my @x = select(STDOUT); my $prev = select; print $prev;    perl: main::STDOUT    PCL: STDOUT\nSo the INITIAL default handle reads back qualified, but a handle the program selected by BAREWORD reads back as the bare word.  Every round trip (`select($old)`) still works; only a program that PRINTS or string-compares the returned name sees it (`if (select() eq 'main::STDOUT')`).\nperl's rule: the returned name is the glob's full name (package of the glob :: name); a lexical handle returns the glob reference itself (right today: e6 row 26 \"GLOB same\").\nFix site: p-select's 1-arg arm in cl/pcl-runtime.lisp -- qualify at SET time with the package in effect (the special names STDIN/STDOUT/STDERR/ARGV/ENV/INC are always main::), the one reading %p-glob-dynamic-name already shares.\n",
+   "id" : "2683",
+   "status" : "pending",
+   "subject" : "LOW (found by a s507 review probe, PRE-EXISTING on main 2e71d4aa): 1-arg `select` returns the UNQUALIFIED name (\"STDERR\") for a handle that was selected by its bareword; perl returns \"main::STDERR\" -- `my $old = select(STDERR); my $cur = select($old); print $cur`"
+}

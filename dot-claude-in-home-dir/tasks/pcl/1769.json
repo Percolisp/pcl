@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-14",
+   "description" : "FILED s484d (2026-09-14).  t/op/runlevel.t produced NO rows until this session\n(#1652).  It now runs all 24 of perl's: 8 pass, 16 fail.  The file is\nperl's test of run-level exits -- `goto`, `next`/`last` and `die` out of\ntied-variable handlers, sort blocks and nested evals.  Classified from\nscratch/s484d/keep-cons/op_runlevel.t.out:\n\n   7  `tie` announcing \"not implemented\" -- #155 (six announces plus one\n      `PCL: tie TEST->TIESCALAR failed: Can't \"next\" outside a loop block`,\n      which is the two causes at once).\n   2  `Can't find label bar at - line 10.` / `Can't find label bbb at - line\n      16.` -- a `goto LABEL` whose label is in an enclosing block/sub.  The\n      #1244/#1161/#1164 loop-control family closed the in-unit cases; this is\n      the label half.\n   1  `Can't \"next\" outside a loop block` where perl runs the loop control.\n   1  the CHILD's SBCL compiler diagnostics in the compared output (#1773).\n   2  output differs with the mechanism running.\n   3  no GOT captured.\n\nAll 16 rows share one TAP description (`[at t/op/runlevel.t line 15]`), so\nthey share one cause column value pointing here.\n",
+   "id" : 1769,
+   "status" : "pending",
+   "subject" : "op/runlevel.t's 16 rows: 7 are #155, and the rest are loop control and `goto LABEL` from places PCL cannot reach them"
+}

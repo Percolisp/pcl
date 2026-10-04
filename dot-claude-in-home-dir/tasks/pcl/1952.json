@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-20",
+   "description" : "FILED s473t6d (Opus, 2026-09-20) by #1501 round 11 (CHECK 1 on t/op/lex.t's\none-row shortfall).\n\nREPRODUCER (perl 5.40.3 prints `rhubarb`; PCL drops the statement):\n\n    $_ = \"rhubarb\";\n    print ${no strict; \\$_}, \"\\n\";\n\nPCL:\n\n    PCL: statement not supported at t/op/lex.t line 99:\n      is ${no strict; \\$_}, \"rhubarb\", '${no strict; ...}';\n      -- Bug. Fell through. Missing case:\n         ['Statement::Include<no strict;>','Statement<\\$_>']\n\n`${ BLOCK }` is perl's block form of the scalar dereference, and its BLOCK is\nan ordinary block: any number of statements, the LAST one's value being the\nreference.  PCL's `${ â¦ }` lowering accepts a single expression, so a block\nthat opens with a pragma (or with any other statement) falls through to the\ngeneric \"missing case\" and the whole statement is dropped -- a #138 drop that\naborts its top-level form.\n\nROWS: `baselines/perl-suite-fails.tsv` op/lex.t 9 `${no strict; ...}`, and the\nfile's whole 1-row shortfall (`baselines/row-shortfall.tsv t/op/lex.t`).\n\nSHAPE: the same question `@{ BLOCK }` and `%{ BLOCK }` answer -- lower the\ncast's Structure::Block as a BLOCK whose value is its last statement, rather\nthan as a single expression.  Check the sibling casts before adding an arm to\n`$` alone (rule 11).\n",
+   "id" : 1952,
+   "status" : "pending",
+   "subject" : "`${ no strict; EXPR }` -- a scalar-cast BLOCK whose body holds a pragma STATEMENT plus an expression -- is a #138 DROP"
+}

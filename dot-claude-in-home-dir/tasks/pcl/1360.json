@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-08",
+   "description" : "FILED s473c (Opus, 2026-09-08).  PRE-EXISTING: probed identical on main\nc2016433 and with #1240's `line-track` gate both on and off.\n\nPROBE (perl 5.40.3 vs PCL):\n\n    eval \"die 'x'\";  print \"[$@]\";\n\n    perl  [x at (eval 3) line 1.]\n    PCL   [x at - line 1.]\n\nCAUSE: codegen attaches an explicit die's location as a `:loc` marker built\nfrom Pl::Environment's source_file (Pl/ExprToCL.pm, the p-die/p-warn branch).\nIn EVAL MODE there is no file, so source_file is \"-\" and the marker reads\n\"- line 1\".  p-die then uses that marker, so the message already ends in a\nnewline by the time p-eval's error handler sees it, and the handler's\n\"(eval N) line M\" tail is never appended.\n\nA RUNTIME-raised die in the same position is RIGHT once #1240's register is\non -- `eval q{1/0}` reports `at (eval 2) line 1.` exactly as perl does --\nbecause it has no `:loc` and reads the register, which p-eval sets to a\nnegative file id meaning `(eval N)`.  So the fix is to make the EXPLICIT die\ntake the same route: emit no `:loc` in eval mode and let the register answer.\nThat needs the eval-mode fact to reach ExprToCL's die branch (Pl::PExpr\nreaches it as `$self->parser->eval_mode`; ExprToCL has no equivalent today),\nand it must NOT fire for a program read from STDIN, where perl really does\nsay `at - line N.`\n\nRESIDUE OF THE SAME FAMILY: a sub DEFINED inside a string eval and called\nlater reports the CALLER's file, because Parser2::_p_file_form emits nothing\nin eval mode (the eval's own `(eval N)` id is set by p-eval around the\nEVALUATION, and the sub outlives it).  perl names `(eval N)` there too.\n",
+   "id" : 1360,
+   "status" : "pending",
+   "subject" : "an EXPLICIT `die` inside a string eval reports `at - line 1.` where perl reports `at (eval N) line M.`"
+}

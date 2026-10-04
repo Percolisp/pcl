@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FOUND s506f (Opus, 2026-10-04) building -F (perl quotes a plain -F pattern as the STRING q\\0PAT\\0,\nwhich split compiles as a pattern).\n\nREPRODUCER (perl 5.40.3 vs PCL 618db500):\n  pcl  -e 'my @F = split(q{x+}, \"axxb\"); print \"[$F[1]]\\n\"'   -> []      perl: [b]\n  pcl  -e 'my @F = split(q{\\.}, \"a.b\");  print \"[$F[1]]\\n\"'   -> []      perl: [b]\n  pcl  -e 'my $p = q{\\.}; my @F = split($p, \"a.b\"); print \"[$F[1]]\\n\"' -> []  perl: [b]\n  perl -e 'print scalar(my @x = split(\"|\", \"abc\")), \"\\n\"'     -> 3 (an empty alternation splits every char)\n\nCAUSE: cl/pcl-runtime.lisp p-split's last cond arm \";; Literal string pattern\" uses SEARCH on the\nstring; only a p-regex-match object reaches cl-ppcre.  perl (pp_split) compiles any non-regex EXPR\nas a pattern, except the single-space string ' ' (awk mode, already handled).  A pattern string\nWITHOUT metacharacters (`split(',', $s)`, the common case) gives the same answer either way, which is\nwhy this survived.\n\nWORKAROUND in s506f: PCLSwitches emits a plain -F pattern as `split(m'PAT')`, so -F is right\nregardless.  FIX: route the string through the same scanner path (cache the compiled scanner per\nstring); probe `split('.', $s)`, `split('|', $s)`, `split('^', $s)` (perl: /^/m), `split(' ', ...)`\nstays awk mode, `split(q{ }, ...)` too.  cl/ change: sweep + op/split.t companion.\n",
+   "id" : "2661",
+   "status" : "pending",
+   "subject" : "split with a STRING pattern (`split('x+', $s)`, `split($p, $s)`, `split('|', $s)`) splits on the LITERAL text; perl compiles the string as a regex"
+}

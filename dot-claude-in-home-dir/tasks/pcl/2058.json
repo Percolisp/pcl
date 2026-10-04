@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-21",
+   "description" : "FOUND s492c (Opus, 2026-09-21) after #2000 made `use FileHandle` load.\n\n    use IPC::Cmd qw(can_run run);\n\n    perl: loads\n    PCL:  Parser2 TODO: lexical 'pn' possibly captured by nested sub\n          _evaluate_version_line\n          ... Failed to transpile .../Module/Metadata.pm\n\nThat is the capture-refusal family (#296 and its neighbours), in core\nModule/Metadata.pm, reached through IPC::Cmd -> Module::Load::Conditional ->\nModule::Metadata.  IPC::Cmd itself now gets past FileHandle.\n\nThe reproducer is the module file; the minimal shape is the usual one -- a\nfile-level `my` that a named sub's nested sub reads.  Worth measuring against\nthe current refusal set before assuming it is the same case.\n",
+   "id" : 2058,
+   "status" : "pending",
+   "subject" : "`use IPC::Cmd` still fails after #2000: Module::Metadata hits a Parser2 refusal (\"lexical `pn` possibly captured by nested sub _evaluate_version_line\")"
+}

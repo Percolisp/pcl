@@ -1,0 +1,8 @@
+{
+  "id": "215",
+  "subject": "Sweep gate load-noise policy (RULED s335): min MemAvailable beside LOST reports + serial re-run of a LOST file",
+  "description": "DONE s339 (commit 2fff5c4), BOTH halves — plus the upstream cause the ruling did not have.\n\nCAUSE (measured s339, not in the s337c write-up): p-load-module-cached's `.lisp` cache branch — the DEFAULT since s251 — wrote cache-path IN PLACE with :if-exists :supersede, while the FASL branch three lines above already used pid-temp + atomic rename-file. SBCL's :supersede truncates and writes the real file (scratch probe), so a second worker whose p-cache-valid-p saw the fresh mtime `load`ed a half-written module. Both branches atomic now; this fixes every parallel PCL user (prove -j8, CPAN board), not just the sweep.\n\n(1) WARM-FIRST: sweep runs the first file alone, then fans out ($warm_first cleared on the first reap, including a kill, so a hung warm-up cannot serialize the run).\n(2) REPORTING: min MemAvailable sampled 1/s from /proc/meminfo, printed in the summary and beside every LOST report (\"not measured\" where /proc/meminfo is absent); LOST files re-run SERIALLY at 3x timeout, serial verdict REPLACES, both shown, gate re-runs once. A LOST file not in the sweep's file list says so instead of skipping silently.\n\nVERIFIED: forced LOST (arith.t pass-baseline 183->184 for one run, restored) exercised every stage, ending \"Still LOST after a serial re-run: arith.t — NOT load noise\", exit 1. Cold-cache full --jobs 8 sweep (s337c's repro) = do.t 65/3/5, TOTAL 18498, gate 0 new / 0 LOST.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

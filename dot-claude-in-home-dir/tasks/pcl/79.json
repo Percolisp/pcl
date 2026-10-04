@@ -1,0 +1,9 @@
+{
+  "id": "79",
+  "subject": "E3: eval-mode on v2 — Parser2 entry for runtime string-eval (single anonymous segment, p-eval-thunk shape, per-eval v1 retry)",
+  "description": "SHIPPED s304 (7981a56): Parser2 eval_mode/eval_pkg + _assemble_eval_mode; pl2cl server/eval-pkg route v2-first with per-eval v1 retry; three latent bugs fixed (string-innard forward-decl scan, p-eval-lex-lookup autoviv install, eval state-cell source-hash tag). Gates green both pipelines.",
+  "activeForm": "Implementing E3 eval-mode on v2",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

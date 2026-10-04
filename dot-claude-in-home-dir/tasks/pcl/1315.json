@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-09-06",
+   "description" : "FILED s470by (Opus, 2026-09-06) while taking the #1300 SHOW_SBCL bar.\n\nCLAUDE.md Quick Reference says `PCL_SHOW_SBCL=1 <any runner>` prints the exact\ncommand it spawns, and names FIVE runners (the gate, the sweep, the perl suite,\n./runpcl, tools/pclperl-for-tests).  `pcl` -- the user-facing command, and since\n#1300 the one that also answers --version and --cache-info -- is a SIXTH\nSBCL-spawning entry point, and it is the odd one out: it prints its command line\nunder `-v` / `--verbose` only.\n\nMEASURED (this tree, 2026-09-06):\n    PCL_SHOW_SBCL=1 ./pcl -e 1          # prints NOTHING\n    ./pcl -v -e 1                       # prints \"pcl: exec sbcl --core ...\"\n    PCL_SHOW_SBCL=1 ./runpcl prog.pl    # prints \"SBCL[runpcl]: sbcl --core ...\"\n\nNot a semantics bug and not a violation of the five-runner claim (pcl is not one\nof the five), so it was FILED rather than folded into #1300's batch: a one-line\nchange is still a change, and it would have cost that batch a second full gate.\n\nFIX (one line, `pcl` ~211):\n    say STDERR \"pcl: exec @cmd\" if $verbose || $ENV{PCL_SHOW_SBCL};\nGUARD: a row in Pl/t/cache-surface-01.t asserting that `PCL_SHOW_SBCL=1 pcl -e 1`\nprints a line naming the core, beside the existing --cache-info rows.\n",
+   "id" : 1315,
+   "status" : "pending",
+   "subject" : "pcl is the one SBCL-spawning entry point that ignores PCL_SHOW_SBCL (it prints its command line under -v only) -- one line, filed rather than folded into #1300 so that batch would not owe a second gate"
+}
