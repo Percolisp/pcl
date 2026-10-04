@@ -205,10 +205,12 @@ from the cache entry takes 0.037 seconds (measured 2026-09-17).
   still apply: `PCL_NO_FASL_CACHE=1` or a `PCL_NO_COMPILE_DIRS` match leaves
   the entry as readable text, and `--no-cache` or `PCL_NO_CACHE` skips the
   cache entirely.
-- **Not cached:** `pcl -e CODE`, and a file run with `-M` options. `pcl`
-  writes both to a temporary file with a fresh random name, so an entry
-  keyed on the path would leave one dead entry behind per run. `pcl -c` is
-  not cached either: it must transpile and *not* run.
+- **Not cached:** `pcl -e CODE` (written to a temporary file with a fresh
+  random name, so an entry keyed on the path would leave one dead entry
+  behind per run), and a file run with any source-changing switch on the
+  command line (`-n -p -l -0 -a -F -i -s -x -E -M -m -w -C -T -c`): the
+  entry's key does not carry the switches.  A script's OWN `#!` switches
+  are part of its bytes, so it is cached.
 - **A script edited in the same second its entry was written is
   re-transpiled once more,** because validity requires the entry to be
   *strictly* newer than the source. That errs towards doing the work again.

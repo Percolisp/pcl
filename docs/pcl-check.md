@@ -47,8 +47,8 @@ report a difference.)
    real use;
 3. compares the two.
 
-`-I`, `-M` and `-w` are given to perl too, since they mean the same thing
-there; `-E` stays `-E` for perl. STDIN is `/dev/null` for both runs unless
+Every perl switch you give is given to perl too, as you typed it (pcl parses
+perl's switches by perl's rules). STDIN is `/dev/null` for both runs unless
 `--check-stdin FILE` names a file, which each side then reads from the
 start. Each child sees `PCL_CHECK_SIDE=perl` or `PCL_CHECK_SIDE=pcl` in its
 environment (harmless; the tool's own test uses it to make a difference on
