@@ -1219,13 +1219,28 @@ sub _program_unit {
 # never mint the same cell, while one text always emits the same names (the
 # eval / module caches stay keyed by text).  Every cell of a unit shares the
 # base, so the `__file__N` ordering rules inside a unit are unchanged.
+#
+# WIDTH (Fable ruling s505/s506): 52 digest bits.  Two units compiled into one
+# package that promote a same-named lexical and draw the same base would share
+# that cell SILENTLY, and code generators (Sub::Quote, Moo accessors) mint
+# thousands of eval texts capturing the same names: 10,000 units collide with
+# ~5 % odds at 30 bits, ~1e-8 at 52.  The number is built from two hex() calls
+# of at most 7 digits (one hex() of more than 8 raises perl's `portable`
+# warning) in INTEGER arithmetic; 1000 * (1 + n) < 2^62 is exact in a 64-bit
+# IV.  A perl whose IV is narrower keeps the 30-bit base, which is exact in an
+# NV there — narrower odds, never a wrong number.
 sub _unit_cell_base {
   my ($self, $src) = @_;
   return 0 if $self->_program_unit;
   require Digest::MD5;
   my $bytes = $src;
   utf8::encode($bytes) if utf8::is_utf8($bytes);
-  my $n = hex(substr(Digest::MD5::md5_hex($bytes), 0, 8)) % 1_000_000_000;
+  my $md5 = Digest::MD5::md5_hex($bytes);
+  if (~0 > 0xFFFFFFFF) {
+    my $n = (hex(substr($md5, 0, 6)) << 28) | hex(substr($md5, 6, 7));
+    return 1000 * (1 + $n);
+  }
+  my $n = hex(substr($md5, 0, 8)) % 1_000_000_000;
   return 1000 * (1 + $n);
 }
 

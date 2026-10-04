@@ -193,4 +193,31 @@ PL
     'mc=1 f=7 g=g',
 );
 
+# ---- The unit BASE's width (Fable ruling s505/s506) ------------------------
+# The PROPERTY, not the digits: two different unit texts draw different bases,
+# one text always draws the same names (the eval / module caches are keyed by
+# text), and on a 64-bit IV the base carries ~52 digest bits -- more than 13
+# decimal digits -- because a 30-bit base gives thousands of generated eval
+# texts (Sub::Quote, Moo) a real chance of a silently shared cell.  No SBCL.
+{
+    local @INC = ($project_root, @INC);
+    require Pl::Parser2;
+    my $cells = sub {
+        my $cl = Pl::Parser2->parse_code($_[0], eval_mode => 1,
+                                         eval_pkg => 'main');
+        my %u;
+        return join ',', grep { !$u{$_}++ } $cl =~ /(\$n__file__\d+)/g;
+    };
+    my ($c1, $c2, $c1b) = map { $cells->($_) }
+        q{my $n = 1; sub wa { $n } 1}, q{my $n = 2; sub wb { $n } 1},
+        q{my $n = 1; sub wa { $n } 1};
+    my ($digits) = $c1 =~ /__file__(\d+)$/;
+    my $wide = ~0 > 0xFFFFFFFF;
+    ok($c1 ne '' && $c2 ne '' && $c1 ne $c2 && $c1 eq $c1b
+         && (!$wide || length($digits // '') > 13),
+       'unit base: distinct texts -> distinct cells, same text -> same names, '
+         . '> 13 digits on a 64-bit IV')
+        or diag("c1=$c1 c2=$c2 c1b=$c1b");
+}
+
 done_testing();
