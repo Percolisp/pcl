@@ -168,7 +168,7 @@ sub _scan_eval_site_features {
   my $us = Pl::Parser::unicode_strings_regions_of($doc);
   # #2691: `current_sub` too -- the eval text's unowned __SUB__ is undef
   # under the feature and an ordinary bareword without it.
-  my $cs = Pl::Parser::feature_regions_of($doc, 'current_sub', 16);
+  my $cs = Pl::Parser::feature_regions_of($doc, 'current_sub');
   for my $w (@{ $doc->find(sub {
                   $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
     my $f = eval { $w->presumed_features } // {};

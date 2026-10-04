@@ -1088,7 +1088,7 @@ sub _rewrite_current_sub {
       my $on = $word->content =~ /^CORE::/
             || ($in_eval && $in_eval->{current_sub});
       if (!$on) {
-        $regions //= feature_regions_of($doc, 'current_sub', 16);
+        $regions //= feature_regions_of($doc, 'current_sub');
         $on = feature_at($regions, $word->location);
       }
       next if !$on;
@@ -9677,13 +9677,18 @@ sub strict_refs_at {
 #   no feature LIST        — the same names turn it off; a bare `no feature`
 #                            resets to the default bundle (off); `:5.10` and
 #                            `:default` do not touch it
-sub unicode_strings_regions_of { return feature_regions_of($_[0], "unicode_strings", 11) }
+sub unicode_strings_regions_of { return feature_regions_of($_[0], "unicode_strings") }
 
 # The same regions for any FEATURE that perl's bundles hold from 5.SINCE on
-# (unicode_strings 11, current_sub 16 -- task #2691).  One reader, so the
-# spellings above cannot drift between the features that ask.
+# (task #2691).  One reader, so the spellings above cannot drift between the
+# features that ask.  SINCE is the lowest NUMBERED perl bundle holding the
+# feature, read off %feature::feature_bundle (5.40.3): unicode_strings 5.11,
+# current_sub 5.15.  A feature not in the table DIES (rule 12).
+our %FEATURE_SINCE = (unicode_strings => 11, current_sub => 15);
 sub feature_regions_of {
-  my ($doc, $feature, $since) = @_;
+  my ($doc, $feature) = @_;
+  my $since = $FEATURE_SINCE{$feature}
+    // die "feature_regions_of: no bundle threshold for feature '$feature'\n";
   my @regions;
   for my $stmt (@{ $doc->find('PPI::Statement::Include') || [] }) {
     my $loc = $stmt->location or next;

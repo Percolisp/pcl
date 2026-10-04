@@ -57,7 +57,6 @@ comp/hints.t	$^H contains HINT_LOCALIZE_HH while compiling
 comp/hints.t	$^H correct after require
 comp/hints.t	$^H correct before require
 comp/hints.t	$^H{foo} cleared for require
-comp/hints.t	$^H{foo} doesn't exist when compilation complete
 comp/hints.t	$^H{foo} doesn't exist while finishing compilation
 comp/hints.t	$^H{foo} is 'a' at eval-"" time
 comp/hints.t	$^H{foo} restored to 'a'
@@ -762,8 +761,6 @@ op/current_sub.t	& in grep block in sub with forw decl
 op/current_sub.t	& in sort block in sub with forw decl
 op/current_sub.t	*summary*
 op/current_sub.t	__SUB__ returns undef in list context
-op/current_sub.t	__SUB__ returns undef outside of a subroutine
-op/current_sub.t	__SUB__ under use v5.16
 op/current_sub.t	anonymous sub(){__SUB__} returns self ref
 op/current_sub.t	anonymous sub(){eval ""; __SUB__} returns self ref
 op/current_sub.t	in BEGIN block

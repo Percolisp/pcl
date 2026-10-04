@@ -1198,8 +1198,9 @@ print "c:", (eval q{ __SUB__ // "evundef" }), "\n";
 sub g { eval q{ __SUB__ } } print "d:", defined(g()) ? "def" : "undef", "\n";
 my %h = (__SUB__ => 1); $h{__SUB__}++; print "e:", join(",", %h), "\n";
 sub k { my %g = (__SUB__ => 3); join ",", keys %g } print "f:", k(), "\n";
+{ use v5.15; print "g:", __SUB__ // "undef", "\n"; }
 PERL
-    is($out, "a:undef\nb:undef\nc:evundef\nd:undef\ne:__SUB__,2\nf:__SUB__\n",
+    is($out, "a:undef\nb:undef\nc:evundef\nd:undef\ne:__SUB__,2\nf:__SUB__\ng:undef\n",
        '#2691: __SUB__ in no sub (or in an eval text) is undef; autoquoted it is a string');
 }
 
