@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s507b (Opus, 2026-10-04) from member 5's (#2084 (2)) probes; PRE-EXISTING on main 08de9e4f.\n\nREPRODUCER:  $\" = \"-\"; print \"[$\\\"]\\n\";      perl: [-]      PCL: [\"]\nperl's toke.c removes the backslash that escapes the string's own DELIMITER before the string body is scanned for\nvariables (S_tokeq / scan_str), so `\"$\\\"\"` is the two characters `$\"` and interpolates the list separator.  PCL's\ninterpolation scanner sees `$\\` + `\"`.  `\"[$\\,]\"` agrees (both print [,]).\nInterpolation scanning lives in Pl/InterpScan.pm (standing rule): the fix is where the delimiter-escape is undone,\nbefore InterpScan, for every delimiter (qq{..}, qq(..), \"...\"): probe `qq{$\\}}`? (perl: `$}` is not a variable --\nmeasure), `\"$\\\"\"`, `\"@\\\"\"`, and a `\\\"` NOT after a sigil (unchanged).\nProbe file: worktree agent-abf54c6d69793c324 scratch/s507b/m5/i.pl.\n",
+   "id" : "2704",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (PRE-EXISTING): in a double-quoted string, `$\\\"` (the escaped delimiter after `$`) is perl's `$\"` interpolated -- perl strips the backslash before the delimiter first -- PCL prints a literal `\"`"
+}
