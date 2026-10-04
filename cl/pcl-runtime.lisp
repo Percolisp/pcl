@@ -35142,9 +35142,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; CORE::__SUB__ that the PARSE could not resolve.  Both sub shapes are
 ;; rewritten at the shared PPI entry (_rewrite_current_sub): a NAMED sub's
 ;; __SUB__ becomes \&name, an ANONYMOUS sub's becomes a self-reference
-;; variable (task #378).  What is left over reaches here — __SUB__ in no sub
-;; at all (perl: undef) and __SUB__ inside a STRING EVAL, whose enclosing sub
-;; this parse cannot see (perl: the sub containing the eval).
+;; variable (task #378), and one in NO sub (a string eval's text included) to
+;; undef where the feature is on (task #2691).  Nothing the parse produces
+;; should reach here any more; a spelling it does not see still must not
+;; answer a guessed value.
 ;;
 ;; It DIES rather than answering either of those, because the wrong answer is
 ;; a VALUE the program consumes: the first shape this function ever had was a

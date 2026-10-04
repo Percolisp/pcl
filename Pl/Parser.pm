@@ -885,6 +885,9 @@ sub _ppi_parse {
   # %opt is how EVAL-MODE seeds the lexer with the features in effect at the
   # eval SITE (#364): perl's feature pragmas are lexical and a string eval
   # inherits them, but this parse only ever sees the bare eval text.
+  # `in_eval` is OURS, not PPI's: a string eval's text cannot see the sub the
+  # eval sits in, so an unowned __SUB__ there is not "outside any sub".
+  my $in_eval = delete $opt{in_eval};
   my $doc = _ppi_new($src, %opt);
   # PPI GLOBAL-STATE BUG (docs/ppi-upstream-bugs.md §13, task #356): once
   # certain documents have been parsed in a PROCESS, a later document's
@@ -910,7 +913,7 @@ sub _ppi_parse {
                | _brace_glob_slot_symbol($doc)
                | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc)
-               | _rewrite_current_sub($doc)
+               | _rewrite_current_sub($doc, $in_eval)
                | _desugar_loop_modifiers($doc))) {
     my $fixed = $doc->serialize;
     my $redo  = _ppi_new($fixed, %opt);   # the seed applies to the reparse too
@@ -993,6 +996,22 @@ sub _trim_invented_tail {
 # autoquote, no-parens sub call) decide the meaning.  Dotted forms
 # (v1.2 / 1.2.3) always stay v-strings — even when a sub of the leading name
 # exists — and `use`/`require` version statements are never touched.
+# Is TOK in one of perl's two bareword-AUTOQUOTE positions -- the left side
+# of a fat comma, or the sole content of a hash subscript `{…}`?  Then it is
+# a STRING whatever word it is (`__SUB__ => 1`, `$h{v5}`).
+sub _token_autoquoted {
+  my ($tok) = @_;
+  my $next = $tok->snext_sibling;
+  return 1 if $next && $next->isa('PPI::Token::Operator') && $next->content eq '=>';
+  my $parent = $tok->parent;
+  my $gp = $parent && $parent->parent;
+  return 1 if $parent && $parent->isa('PPI::Statement::Expression')
+           && $gp && $gp->isa('PPI::Structure::Subscript')
+           && $gp->start && $gp->start->content eq '{'
+           && scalar(grep { $_->significant } $parent->children) == 1;
+  return 0;
+}
+
 sub _reclassify_bare_vwords {
   my ($doc) = @_;
   my $verts = $doc->find('PPI::Token::Number::Version') || [];
@@ -1007,24 +1026,8 @@ sub _reclassify_bare_vwords {
     next if $c !~ /^v\d+$/;   # dotless vNN only
     my $stmt = $tok->statement;
     next if $stmt && $stmt->isa('PPI::Statement::Include');
-    my $as_word = 0;
-    my $next = $tok->snext_sibling;
-    if ($next && $next->isa('PPI::Token::Operator') && $next->content eq '=>') {
-      $as_word = 1;   # fat-comma LHS autoquotes any bareword
-    }
-    else {
-      my $parent = $tok->parent;
-      my $gp = $parent && $parent->parent;
-      if ($parent && $parent->isa('PPI::Statement::Expression')
-          && $gp && $gp->isa('PPI::Structure::Subscript')
-          && $gp->start && $gp->start->content eq '{'
-          && scalar(grep { $_->significant } $parent->children) == 1) {
-        $as_word = 1;   # single-bareword hash subscript autoquotes
-      }
-      elsif ($subs{$c}) {
-        $as_word = 1;   # declared sub wins over the v-string reading
-      }
-    }
+    my $as_word = _token_autoquoted($tok) || $subs{$c};
+                      # declared sub wins over the v-string reading
     next if !$as_word;
     my $word = PPI::Token::Word->new($c);
     $tok->insert_before($word);
@@ -1059,20 +1062,40 @@ sub _reclassify_bare_vwords {
 #     which cost op/sub.t 26 rows by aborting the file at its [perl #122845]
 #     closure-recursion test.
 sub _rewrite_current_sub {
-  my ($doc) = @_;
+  my ($doc, $in_eval) = @_;
   my $changed = 0;
   my (@blocks, %words_of);            # anon-sub block => its __SUB__ tokens
+  my $regions;                        # current_sub regions, read on demand
 
   for my $word (@{ $doc->find('PPI::Token::Word') || [] }) {
     next unless $word->parent;
     next unless ($word->content // '') =~ /^(?:CORE::)?__SUB__$/;
+    next if _token_autoquoted($word);     # `__SUB__ => 1`, `$h{__SUB__}`: a string
     my ($name, $block) = _current_sub_owner($word);
     if (defined $name) {
       _replace_element($word, "(\\&$name)");
       $changed = 1;
       next;
     }
-    next unless $block;
+    # IN NO SUB AT ALL (task #2691): perl's answer is undef ("outside of a
+    # subroutine, __SUB__ returns undef") wherever the feature is on, and
+    # CORE::__SUB__ needs no feature.  Without the feature the word is an
+    # ordinary bareword and stays one.  A STRING EVAL's text is no sub either:
+    # perl answers undef there even when the eval sits in a sub (probed
+    # 5.40.3), and the feature may come from the eval SITE ($in_eval is the
+    # site's inherited feature set).
+    if (!$block) {
+      my $on = $word->content =~ /^CORE::/
+            || ($in_eval && $in_eval->{current_sub});
+      if (!$on) {
+        $regions //= feature_regions_of($doc, 'current_sub', 16);
+        $on = feature_at($regions, $word->location);
+      }
+      next if !$on;
+      _replace_element($word, 'scalar(undef)');
+      $changed = 1;
+      next;
+    }
     # refaddr, NOT the object: PPI overloads stringification to an element's
     # CONTENT, so a text key would both collide between two identical anon
     # subs and go STALE the moment a nested one is rewritten (measured: the
@@ -9654,8 +9677,13 @@ sub strict_refs_at {
 #   no feature LIST        — the same names turn it off; a bare `no feature`
 #                            resets to the default bundle (off); `:5.10` and
 #                            `:default` do not touch it
-sub unicode_strings_regions_of {
-  my ($doc) = @_;
+sub unicode_strings_regions_of { return feature_regions_of($_[0], "unicode_strings", 11) }
+
+# The same regions for any FEATURE that perl's bundles hold from 5.SINCE on
+# (unicode_strings 11, current_sub 16 -- task #2691).  One reader, so the
+# spellings above cannot drift between the features that ask.
+sub feature_regions_of {
+  my ($doc, $feature, $since) = @_;
   my @regions;
   for my $stmt (@{ $doc->find('PPI::Statement::Include') || [] }) {
     my $loc = $stmt->location or next;
@@ -9666,14 +9694,14 @@ sub unicode_strings_regions_of {
     if ($type eq 'use' && $v ne '') {
       my $n = _perl_version_number($v);
       next if !defined $n;
-      $val = $n >= 5.011 ? 1 : 0;
+      $val = $n >= 5 + $since / 1000 - 1e-9 ? 1 : 0;   # 5.011 vs 5+11/1000
     }
     elsif (($stmt->module // '') eq 'feature') {
       my @args = _include_string_args($stmt);
       my $hit = !@args && $type eq 'no';
       for my $w (map { split ' ' } @args) {
-        $hit = 1 if $w eq 'unicode_strings' || $w eq ':all'
-                 || ($w =~ /^:5\.0*(\d+)/ && $1 >= 11);
+        $hit = 1 if $w eq $feature || $w eq ':all'
+                 || ($w =~ /^:5\.0*(\d+)/ && $1 >= $since);
       }
       next if !$hit;
       $val = $type eq 'use' ? 1 : 0;
@@ -9686,6 +9714,9 @@ sub unicode_strings_regions_of {
 
 # Is `unicode_strings` in force at LOC?  The latest-starting region wins.
 sub unicode_strings_at { return strict_refs_at(@_) }
+
+# Is the feature of a feature_regions_of answer in force at LOC?  The same rule.
+sub feature_at { return strict_refs_at(@_) }
 
 # Process use/require statements
 sub _process_include_statement {

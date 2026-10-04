@@ -68,7 +68,7 @@ the differences.
 | switch | in `pcl` |
 |---|---|
 | `-e CODE` | one line of program. Give several `-e` for several lines. `$0` and `__FILE__` are `-e`, and messages say `at -e line N` |
-| `-E CODE` | like `-e`, with perl 5.40's features (`say`, `state`, `fc`, signatures, `try`/`catch` ...) and builtin functions (`true`, `trim`, `reftype` ...) turned on. `strict` stays off, as in perl. |
+| `-E CODE` | like `-e`, with perl 5.40's features (`say`, `state`, `fc`, `__SUB__`, signatures, `try`/`catch` ...) and builtin functions (`true`, `trim`, `reftype` ...) turned on. `strict` stays off, as in perl. |
 | `programfile` | the script to run; the words after it are `@ARGV` |
 | `-` | read the program from STDIN; `$0` is `-`. After `-e`, a lone `-` is an ordinary word in `@ARGV` |
 | (no program, no `-e`) | read the program from STDIN, as perl does. If STDIN is a terminal, `pcl` prints its usage instead of waiting |

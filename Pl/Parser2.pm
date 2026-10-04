@@ -138,7 +138,8 @@ sub _build_fallback_parser {
 # first token).  Empty in file mode — a file's own pragmas are in its text.
 sub _eval_feature_seed {
   my ($self) = @_;
-  my @feats = grep { $_ ne 'strict_refs' && $_ ne 'unicode_strings' }
+  my @feats = grep { $_ ne 'strict_refs' && $_ ne 'unicode_strings'
+                      && $_ ne 'current_sub' }
                  @{ $self->eval_features // [] }
     or return ();
   return (feature_mods => { map +($_ => 'perl'), @feats });
@@ -165,6 +166,9 @@ sub _scan_eval_site_features {
   # #2092: `unicode_strings` rides the same list, for the same reason (the
   # eval'd code's case mapping inherits the site's regime); never PPI's either.
   my $us = Pl::Parser::unicode_strings_regions_of($doc);
+  # #2691: `current_sub` too -- the eval text's unowned __SUB__ is undef
+  # under the feature and an ordinary bareword without it.
+  my $cs = Pl::Parser::feature_regions_of($doc, 'current_sub', 16);
   for my $w (@{ $doc->find(sub {
                   $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
     my $f = eval { $w->presumed_features } // {};
@@ -173,6 +177,8 @@ sub _scan_eval_site_features {
       if Pl::Parser::strict_refs_at($sr, $w->location);
     push @on, 'unicode_strings'
       if Pl::Parser::unicode_strings_at($us, $w->location);
+    push @on, 'current_sub'
+      if Pl::Parser::feature_at($cs, $w->location);
     next if !@on;
     for (my $p = $w->parent; $p; $p = $p->parent) {
       next if !$p->isa('PPI::Statement');
@@ -1326,7 +1332,10 @@ sub parse {
   # and the run continued on a silently-shortened program.  There is no
   # lenient mode on this pipeline, so the failure has to say WHICH file — an
   # unattributed "PPI parse failed" in a sweep of 100 files is not a report.
-  my $doc = $self->fallback_parser->_ppi_parse($src, $self->_eval_feature_seed)
+  my $doc = $self->fallback_parser->_ppi_parse($src, $self->_eval_feature_seed,
+                                                 ($self->eval_mode
+                                                   ? (in_eval => { map +($_ => 1), @{ $self->eval_features // [] } })
+                                                   : ()))
     or die "PCL: cannot parse " . ($self->has_filename ? $self->filename : "(inline code)")
            . ": PPI failed to tokenize it\n";
 

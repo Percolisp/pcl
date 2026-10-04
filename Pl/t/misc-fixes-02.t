@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 138;
+plan tests => 139;
 
 sub run_cl {
     my ($code) = @_;
@@ -1183,6 +1183,24 @@ sub fact { my $n = shift; $n <= 1 ? 1 : $n * __SUB__->($n-1) }
 print fact(5), "\n";
 PERL
     like($out, qr/^120$/m, '#368: a NAMED sub still recurses through __SUB__');
+}
+{
+    # #2691: in NO sub, __SUB__ is undef (perl: "outside of a subroutine,
+    # __SUB__ returns undef") under the feature, and CORE::__SUB__ always;
+    # a string eval's text is no sub either, even inside one (probed); the
+    # feature reaches the eval text from its site.  `__SUB__ => 1` and
+    # `$h{__SUB__}` are autoquoted STRINGS, in a sub too.
+    my $out = run_cl(<<'PERL');
+use feature 'current_sub'; no warnings;
+print "a:", __SUB__ // "undef", "\n";
+print "b:", CORE::__SUB__ // "undef", "\n";
+print "c:", (eval q{ __SUB__ // "evundef" }), "\n";
+sub g { eval q{ __SUB__ } } print "d:", defined(g()) ? "def" : "undef", "\n";
+my %h = (__SUB__ => 1); $h{__SUB__}++; print "e:", join(",", %h), "\n";
+sub k { my %g = (__SUB__ => 3); join ",", keys %g } print "f:", k(), "\n";
+PERL
+    is($out, "a:undef\nb:undef\nc:evundef\nd:undef\ne:__SUB__,2\nf:__SUB__\n",
+       '#2691: __SUB__ in no sub (or in an eval text) is undef; autoquoted it is a string');
 }
 
 # ── #370: a term-initial `~~` is TWO complements, not the smart match ─────────

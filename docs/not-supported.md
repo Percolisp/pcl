@@ -125,7 +125,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Signature syntax is read as a signature even with the feature off](#signature-syntax-is-read-as-a-signature-even-with-the-feature-off)
 * [`:prototype(...)` on an anonymous sub at the START of an expression](#prototype-on-an-anonymous-sub-at-the-start-of-an-expression)
 * [Attributes on a variable declaration (`my $x : shared`)](#attributes-on-a-variable-declaration-my-x--shared-my-a--foo1)
-* [`__SUB__` (current sub reference) — PARTIAL](#__sub__-current-sub-reference--partial--in-a-sub-it-works-outside-one-it-dies)
+* [`__SUB__` (current sub reference) — PARTIAL](#__sub__-current-sub-reference--partial--works-one-no-feature-residue)
 * [A NAMED sub whose captured lexical is re-created per call or per iteration](#a-named-sub-whose-captured-lexical-is-re-created-per-call-or-per-iteration-perls-will-not-stay-shared)
 * [A lexical sub (`my sub NAME`) reached from outside the token stream](#a-lexical-sub-my-sub-name-reached-from-a-place-that-is-not-the-token-stream)
 * [Lazy argument evaluation / `$SIG{__WARN__}` side effects during argument build](#lazy-argument-evaluation--sig__warn__-side-effects-during-argument-build)
@@ -1706,15 +1706,15 @@ the `reset` / `?pat?` tests fail).
 
 ---
 
-## `__SUB__` (current sub reference)  [PARTIAL — in a sub it works; outside one it DIES]
+## `__SUB__` (current sub reference)  [PARTIAL — works; one no-feature residue]
 
 **Perl behaviour:** `use feature 'current_sub'; __SUB__` returns a
 reference to the currently executing subroutine, enabling anonymous subs
-to recurse without a named variable.
+to recurse without a named variable; outside of a subroutine it is `undef`.
 
-**PCL behaviour:** both sub shapes are resolved at the shared PPI entry
+**PCL behaviour:** every shape is resolved at the shared PPI entry
 (`_rewrite_current_sub` in `Pl/Parser.pm`), so `__SUB__` costs nothing at run
-time and works inside a sub of either kind:
+time:
 
 - a NAMED sub — body or signature default — becomes `(\&name)` (since
   s316o): correct recursion (op/signatures.t t122), late-bound, so a
@@ -1722,29 +1722,19 @@ time and works inside a sub of either kind:
 - an ANONYMOUS sub becomes a source-level SELF-REFERENCE (task #378, s410):
   `sub { … __SUB__ … }` → `do { my $__SUB__N; $__SUB__N = sub { … $__SUB__N
   … }; $__SUB__N }`, innermost enclosing sub wins.  `__SUB__ == $f` holds,
-  because the variable holds the very coderef being built.
+  because the variable holds the very coderef being built;
+- in NO sub, and in a STRING EVAL's text (which perl also treats as no sub,
+  even when the eval sits in one — probed), it is `undef` where the feature is
+  on (`use feature`, a `:5.16`+ bundle, `use v5.16`+, the eval site's own
+  features) and for `CORE::__SUB__` (task #2691); without the feature it stays
+  the bareword it is in perl.  `__SUB__ => …` and `$h{__SUB__}` are autoquoted
+  strings.
 
-**What still dies** — the two shapes the parse cannot resolve:
+**What differs:** inside a sub, a bare `__SUB__` is rewritten whether or not
+the feature is on; perl reads it as a bareword there when it is off.  No real
+code relies on that.
 
-1. `__SUB__` in NO sub at all.  perl gives `undef`; PCL dies naming the shape.
-2. `__SUB__` inside a STRING EVAL.  perl resolves it to the sub containing the
-   eval; that parse sees only the eval text, so the enclosing sub is not
-   visible (the sub-capture protocol of task #373 is where it would come from).
-
-Both die rather than guess, because the answer is a VALUE the program
-consumes — the shape this feature first had was a no-op lambda, and
-
-```perl
-my $f = sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) };
-print $f->(5);          #   perl: 120        PCL was: 0
-```
-
-printed a silently wrong NUMBER.  Rule 12's boundary (s329) is exactly this
-test.  History: #368 (s408) turned the no-op lambda into that die, which cost
-op/sub.t 26 rows by aborting the file at its [perl #122845] closure-recursion
-test; #378 (s410) implemented the feature and got them back.
-
-**Affected tests:** `__SUB__` outside a sub, and inside a string eval.
+**Affected tests:** none known.
 
 ---
 
