@@ -41,8 +41,8 @@ my $MAX_SHOW = 200;     # longest (raw) slice of a line shown in a verdict
 my $DASH = "\xE2\x80\x94";   # an em dash, as UTF-8 bytes (STDOUT has no layer)
 
 # Entry point.  %o comes from the driver's own option parse:
-#   root inline inline_flag(e|E) source args inc mods warnings no_cache
-#   verbose check_only stdin keep
+#   root inline source words args no_cache verbose check_only stdin keep
+# (`words` = the perl switch words as typed, from PCLSwitches::parse_argv)
 # Returns the exit status for `pcl --check`.
 sub run_check {
   my (%o) = @_;
@@ -96,30 +96,25 @@ sub _capture_dir {
 
 # ---- the two command lines -------------------------------------------------
 
-# perl(1) takes -I, -M and -w with the same meaning pcl gives them.  -E keeps
-# its perl meaning here (pcl treats it as -e; perl enables the features).
+# BOTH sides get the switch WORDS the user typed (s506f): pcl parses perl's
+# argv grammar with tools/lib/PCLSwitches.pm, so every perl switch -- -I -M
+# -w -n -l -0 -i -E ... -- means to perl exactly what it means to pcl, and
+# nothing is re-spelled on the way.  The words include any -e CODE.  After
+# them a `--` ends the switches on both sides, so an argument that starts
+# with `-` stays the program's.
 sub _perl_cmd {
   my ($o) = @_;
-  my @cmd = ($^X, map({ "-I$_" } @{ $o->{inc} || [] }),
-             map({ "-M$_" } @{ $o->{mods} || [] }), ($o->{warnings} ? '-w' : ()));
-  my @args = @{ $o->{args} || [] };
-  return (@cmd, '--', $o->{source}, @args) if !defined $o->{inline};
-  # After -e, perl reads a leading `-x` as ITS switch; a `--` ends that.  When
-  # the user typed the `--` themselves it is theirs, and perl strips it.
-  push @cmd, "-$o->{inline_flag}", $o->{inline};
-  return (@cmd, (@args && $args[0] eq '--' ? () : ('--')), @args);
+  my @cmd = ($^X, @{ $o->{words} || [] }, '--');
+  push @cmd, $o->{source} if !defined $o->{inline};
+  return (@cmd, @{ $o->{args} || [] });
 }
 
-# The same driver, the same options, minus --check.  NO `--`: pcl keeps a
-# `--` in @ARGV (pass_through), and the script and its arguments reach pcl's
-# option parse exactly as they did in the --check invocation itself.
+# The same driver, the same switch words, minus --check.
 sub _pcl_cmd {
   my ($o) = @_;
-  my @cmd = ($^X, "$o->{root}/pcl", map({ ('-I', $_) } @{ $o->{inc} || [] }),
-             map({ ('-M', $_) } @{ $o->{mods} || [] }),
-             ($o->{warnings} ? '-w' : ()), ($o->{no_cache} ? '--no-cache' : ()),
-             ($o->{verbose} ? '-v' : ()));
-  push @cmd, defined $o->{inline} ? ('-e', $o->{inline}) : ($o->{source});
+  my @cmd = ($^X, "$o->{root}/pcl", ($o->{no_cache} ? '--no-cache' : ()),
+             ($o->{verbose} ? '--verbose' : ()), @{ $o->{words} || [] }, '--');
+  push @cmd, $o->{source} if !defined $o->{inline};
   return (@cmd, @{ $o->{args} || [] });
 }
 

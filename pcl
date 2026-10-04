@@ -34,7 +34,6 @@
 use v5.20;
 use strict;
 use warnings;
-use Getopt::Long qw(:config pass_through require_order no_ignore_case bundling);
 use File::Basename qw(dirname basename);
 use Cwd qw(abs_path);
 use File::Temp qw(tempfile);
@@ -42,6 +41,7 @@ use FindBin;
 use lib "$FindBin::RealBin/tools/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344; cached core s439)
 use PCLPaths ();  # the ONE Perl-side reading of $PCL_CACHE_DIR (task #1303)
+use PCLSwitches ();  # perl's argv grammar + the #! line: the ONE parser (s506f)
 
 # The ONE root resolver (task #1302).  $FindBin::RealBin above is the
 # BOOTSTRAP — it finds tools/lib so that this line can run; every later path
@@ -51,31 +51,34 @@ my $PL2CL   = "$ROOT/pl2cl";
 my $RUNTIME = "$ROOT/cl/pcl-runtime.lisp";
 
 # ---- options -------------------------------------------------------------
-my ($inline, $check_only, $make_core, $clear_cache, $verbose, $want_help);
-my ($cache_info, $want_version, $no_cache);
-my (@inc_dirs, @use_mods, $warnings_flag);
-my ($inline_flag, $check, $check_stdin, $check_keep);   # --check (task #2194)
+# perl's own argv grammar, from tools/lib/PCLSwitches.pm -- the ONE parser
+# (s506f; it replaced a Getopt::Long block that knew -e -E -I -M -c -w and
+# took every other switch for a script name).  Switches act IN ORDER, as
+# perl's do: an error, -v, -h or -V ends the run at the point perl would.
+my $sw = PCLSwitches::parse_argv(\@ARGV);
+my %long = %{ $sw->{pcl} };
+my ($check_only, @inc_dirs, $path_search, $config_query);
+my ($check, $check_stdin, $check_keep) = @long{qw(check check-stdin check-keep)};
+my ($make_core, $clear_cache, $cache_info, $want_version, $no_cache, $want_help)
+  = @long{qw(make-core clear-cache cache-info version no-cache help)};
+my $verbose = $long{verbose};
 
-GetOptions(
-  # inline code; -E is a plain alias of -e.  Two entries only so that --check
-  # can hand perl the spelling the user wrote (perl's -E is not its -e).
-  'e=s'         => sub { $inline = "$_[1]"; $inline_flag = 'e' },
-  'E=s'         => sub { $inline = "$_[1]"; $inline_flag = 'E' },
-  'I=s@'        => \@inc_dirs,        # prepend dir(s) to @INC
-  'M=s@'        => \@use_mods,        # `use Module` before the script
-  'c'           => \$check_only,      # syntax-check only
-  'w'           => \$warnings_flag,   # accepted; PCL warning behaviour is fixed (no-op)
-  'clear-cache' => \$clear_cache,
-  'cache-info'  => \$cache_info,
-  'no-cache'    => \$no_cache,        # forwarded to pl2cl; there is no second mechanism
-  'make-core'   => \$make_core,
-  'version'     => \$want_version,
-  'v|verbose'   => \$verbose,
-  'h|help'      => \$want_help,
-  'check'         => \$check,         # run under perl AND pcl, compare (#2194)
-  'check-stdin=s' => \$check_stdin,
-  'check-keep=s'  => \$check_keep,
-) or die usage();
+for my $e (@{ $sw->{events} }) {
+  my ($k, $arg, $status) = @$e;
+  if ($k eq '!') { print STDERR $arg; exit $status }
+  if ($k eq 'v') { print version_info(); exit 0 }
+  if ($k eq 'h' || $k eq '?') { print usage(); exit 0 }
+  if ($k eq 'V') { $config_query = $arg; last }
+  if ($k eq 'd') { print STDERR "pcl: the perl debugger (-d) is not supported\n"; exit 2 }
+  if ($k eq 'u') { print STDERR "pcl: -u (dump core) is not supported\n"; exit 2 }
+  # perl without -DDEBUGGING says this and runs the program; so does pcl.
+  if ($k eq 'D') {
+    print STDERR "Recompile perl with -DDEBUGGING to use -D switch (did you mean -d ?)\n";
+  }
+  if ($k eq 'c') { $check_only = 1 }
+  if ($k eq 'I') { push @inc_dirs, $arg }
+  if ($k eq 'S') { $path_search = 1 }
+}
 
 print(usage()), exit 0 if $want_help;
 
@@ -88,18 +91,58 @@ if ($cache_info)   { cache_info();  exit 0 }
 if ($make_core)    { make_core();   exit 0 }
 
 # ---- figure out the source + the script's own @ARGV ----------------------
-my $source = (!defined $inline && @ARGV) ? shift(@ARGV) : undef;
-my @script_args = @ARGV;          # everything left belongs to the script
+# -e/-E texts join with newlines, one line each, as perl's do.  No program and
+# no -e: perl reads the program from STDIN -- and so does pcl, unless STDIN is
+# a terminal, where perl would sit waiting and pcl prints its usage instead.
+my @code = @{ $sw->{code} };
+my $inline = @code ? join("\n", @code) : undef;
+my $source = $sw->{program};
+my @script_args = @{ $sw->{args} };
+my $as_name = @code ? '-e' : undef;   # --as for pl2cl: what $0 / __FILE__ say
+# -V / -V:name are answered BY A PCL PROGRAM, from PCL's own %Config
+# (lib/Config.pm) -- what a program running under pcl sees, never the %Config
+# of the perl that runs this driver.  perl does the same: its -V is the
+# program `use Config; Config::_V()`.
+if (defined $config_query) {
+  if ($config_query =~ /^:(.*)\z/s) {
+    $inline = 'use Config; Config::config_vars(@ARGV)';
+    @script_args = ($1);
+  } else {
+    print version_info();
+    $inline = 'use Config; Config::_V()';
+    @script_args = ();
+  }
+  ($as_name, $source, @code) = ('-e', undef, $inline);
+}
+elsif (!@code && (!defined $source || $source eq '-')) {
+  die usage() if !defined $source && -t STDIN;
+  $inline = do { local $/; my $t = <STDIN>; defined $t ? $t : '' };
+  $as_name = '-';
+  $source = undef;
+}
+# The events that change the program's SOURCE (-n -p -l -0 -a -F -i -s -x -E
+# -M -m): handed to pl2cl, which merges them with the program's own #! line
+# and applies the ONE expansion (PCLSwitches::expand_program).
+my $source_events = PCLSwitches::source_events($sw->{events});
+
+# -S: look the program up along PATH unless its name has a directory part.
+if ($path_search && defined $source && $source !~ m{/}) {
+  require File::Spec;
+  for my $d (File::Spec->path) {
+    my $f = File::Spec->catfile(length $d ? $d : '.', $source);
+    if (-f $f) { $source = $f; last }
+  }
+}
 
 # ---- pcl --check (task #2194): the comparison lives in tools/lib/PCLCheck.pm
 # and is loaded only here, so a plain run pays nothing for it.  It decides
 # "cannot check" itself (a missing script is its exit 2, not the die below).
+# Both sides get the SAME switch words the user typed.
 if ($check) {
   require PCLCheck;
   exit PCLCheck::run_check(
-    root => $ROOT, inline => $inline, inline_flag => $inline_flag,
-    source => $source, args => \@script_args, inc => \@inc_dirs,
-    mods => \@use_mods, warnings => $warnings_flag, no_cache => $no_cache,
+    root => $ROOT, inline => (@code ? $inline : undef), source => $source,
+    words => $sw->{words}, args => \@script_args, no_cache => $no_cache,
     verbose => $verbose, check_only => $check_only,
     stdin => $check_stdin, keep => $check_keep);
 }
@@ -116,10 +159,15 @@ if (defined $source && !-f $source) {
 # and hands over the two things a MISS needs that no preamble has set yet --
 # where pl2cl is, and the -I list to give it.
 #
-# The four shapes that keep the transpile-and-load path:
-#   * -e/-E, and a file run with -M prefixes: `pcl` writes those to a TEMP
+# The shapes that keep the transpile-and-load path:
+#   * -e/-E and a program read from STDIN: `pcl` writes those to a TEMP
 #     source with a fresh random name, so a path-keyed entry would leave one
 #     dead entry per run.  Content-keying them is task #1862.
+#   * any SOURCE-AFFECTING switch on the command line (-n -p -l -0 -a -F -i
+#     -s -x -E -M -m): the entry's key does not carry the switches, so a run
+#     with them must not share (or overwrite) the plain run's entry.  A
+#     script's OWN #! switches do not count: the emission is a function of the
+#     file's bytes, which the key already covers.
 #   * --no-cache / PCL_NO_CACHE: one switch turns every cache off, and it also
 #     CHANGES the emission (pl2cl writes `(setf *pcl-skip-cache* t)` into the
 #     preamble), so a cached entry could not be shared with a normal run.
@@ -130,7 +178,7 @@ if (defined $source && !-f $source) {
 #     my $use_script_cache = $ENV{PCL_SCRIPT_CACHE} && defined($source) && ...
 # nothing else moves, because the runtime entry point is reached only here.
 my $cache_off = $no_cache || $ENV{PCL_NO_CACHE};
-my $use_script_cache = defined($source) && !defined($inline) && !@use_mods
+my $use_script_cache = defined($source) && !defined($inline) && !@$source_events
                        && !$check_only && !$cache_off;
 
 if ($use_script_cache) {
@@ -141,8 +189,9 @@ if ($use_script_cache) {
 my $lisp = transpile($source, $inline);
 
 if ($check_only) {
-  my $name = defined $source ? $source : '-e';
-  say "$name syntax OK";
+  # perl's shape: "NAME syntax OK" on STDERR, exit 0.
+  my $name = defined $source ? $source : $as_name;
+  print STDERR "$name syntax OK\n";
   unlink $lisp;
   exit 0;
 }
@@ -154,40 +203,6 @@ exec_sbcl(quiet_load_form($lisp), \@script_args);   # never returns
 # Helpers
 # ===========================================================================
 
-# Build the `use`/`no` line for one -M argument, matching perl(1) semantics:
-#   Module            → use Module;
-#   Module=a,b        → use Module split(/,/,q{a,b});  (i.e. import a, b)
-#   -Module           → no Module;
-#   -Module=a,b       → no Module split(/,/,q{a,b});
-sub _use_line_for_M {
-  my ($spec) = @_;
-  my $verb = 'use';
-  if ($spec =~ s/^-//) { $verb = 'no'; }
-  if ($spec =~ /^([\w:]+)=(.*)$/s) {
-    my ($mod, $imports) = ($1, $2);
-    # Perl passes the import list as split(/,/, "...").  Emit explicit
-    # quoted args so the module's import() sees the same list.
-    my @args = split /,/, $imports, -1;
-    my $list = join(', ', map { my $a = $_; $a =~ s/(['\\])/\\$1/g; "'$a'" } @args);
-    return "$verb $mod ($list); ";
-  }
-  return "$verb $spec; ";
-}
-
-# Put the -M use-lines IN FRONT OF the program's first code line, on that same
-# line, so that every line keeps its own number (task #2460): perl compiles
-# -M into a preamble that has no line of its own.  A program that starts with
-# POD gets them on the first line after its first `=cut`.
-sub _prefix_first_code_line {
-  my ($prefix, $text) = @_;
-  return $text if $prefix eq '';
-  if ($text =~ /\A=/) {
-    return $text if $text =~ s/(^=cut\b[^\n]*\n)/$1$prefix/m;
-    return "$text\n$prefix\n";
-  }
-  return $prefix . $text;
-}
-
 # Transpile $source (a file) or $inline (a code string), honouring -M.
 # Returns the path to a temp .lisp (cleaned up at exit).
 sub transpile {
@@ -195,15 +210,11 @@ sub transpile {
 
   my $tmp = mktmp('.lisp');
 
-  # -M Module  →  prepend `use Module;` lines. If any are present (or we're in
-  # -e mode), assemble the full source text and transpile that; otherwise
-  # transpile the file directly so line numbers and the source dir are preserved.
-  # Match perl's -M semantics:
-  #   -MModule              → use Module;
-  #   -MModule=arg1,arg2    → use Module split(/,/,q{arg1,arg2});
-  #   -M-Module             → no Module;        (leading '-')
-  #   -M-Module=arg1,arg2   → no Module split(...);
-  my $use_prefix = join('', map { _use_line_for_M($_) } @use_mods);
+  # -M / -m: the use-lines go on the program's first code line
+  # (PCLSwitches::prefix_first_code_line, task #2460), as perl's preamble
+  # does -- no line number moves.
+  my $use_prefix = join('', map { PCLSwitches::use_line_for_M($_->[1], $_->[0]) }
+                            grep { $_->[0] eq 'M' || $_->[0] eq 'm' } @$source_events);
 
   my @inc_args = map { ("-I", $_) } inc_dirs_for_transpile();
 
@@ -211,11 +222,12 @@ sub transpile {
   my @as;                # --as NAME: the program's name for it ($0, __FILE__)
   my @cleanup;
   if (defined $inline) {
-    # `pcl -e CODE`: $0 and __FILE__ are "-e", as under perl (task #2461).
+    # `pcl -e CODE`: $0 and __FILE__ are "-e", as under perl (task #2461); a
+    # program read from STDIN is "-".
     $src_path = mktmp('.pl');
-    write_file($src_path, _prefix_first_code_line($use_prefix, $inline) . "\n");
+    write_file($src_path, PCLSwitches::prefix_first_code_line($use_prefix, $inline) . "\n");
     push @cleanup, $src_path;
-    @as = ('--as=-e');
+    @as = ("--as=$as_name");
   }
   elsif ($use_prefix ne '') {
     # File + -M: the use-lines go into a temp copy, on the script's first code
@@ -224,7 +236,7 @@ sub transpile {
     # The script's own directory is NOT put on @INC (task #2442): perl does
     # not either.
     $src_path = mktmp('.pl');
-    write_file($src_path, _prefix_first_code_line($use_prefix, slurp($source)));
+    write_file($src_path, PCLSwitches::prefix_first_code_line($use_prefix, slurp($source)));
     push @cleanup, $src_path;
     @as = ("--as=$source");
   }
@@ -582,22 +594,50 @@ sub mktmp {
 
 sub usage {
   return <<'USAGE';
-Usage: pcl [options] script.pl [script-args...]
-       pcl [options] -e 'code'  [script-args...]
+Usage: pcl [switches] [--] [programfile] [arguments]
+       pcl [switches] -e 'code' [arguments]
+       pcl [pcl-options] [switches] ...
 
-Runs a Perl script (or inline code) by transpiling it to Common Lisp and
-executing it under SBCL. Works like `perl` for the Perl subset PCL supports.
+Runs a Perl program by transpiling it to Common Lisp and executing it under
+SBCL.  Works like `perl` for the Perl subset PCL supports, and takes perl's
+own switches, parsed by perl's rules: clusters (-lane, -pi.bak, -0777),
+`--` ends the switches, `-` (or no program and no -e) reads the program from
+STDIN.  A program's own `#!perl -SWITCHES` line is honoured as perl honours
+it.
 
-Options:
-  -e CODE        run inline CODE (like perl -e)
-  -E CODE        alias of -e
+Perl's switches:
+  -0[octal|xHEX] record separator $/ (-0 = "\0", -00 paragraph, -0777 slurp)
+  -a             autosplit into @F under -n/-p (-F implies -a implies -n)
+  -c             check syntax only: compile, print "NAME syntax OK" on STDERR
+  -C[flags]      Unicode features (see docs/pcl-commands.md for what applies)
+  -d -u          NOT supported (the debugger; dumping core): refused
+  -D[flags]      warns as a non-debugging perl does, then runs the program
+  -e CODE        one line of program (repeatable: the lines are joined)
+  -E CODE        like -e, with the feature bundle of perl 5.40 enabled
+  -f -U          accepted (perl's sitecustomize / unsafe operations)
+  -F/pattern/    split pattern for -a (//, "" and '' quoting as perl's)
+  -g             slurp: -0777
+  -h, -?         this message
+  -i[extension]  edit <> files in place ($^I), with a backup when given
   -I DIR         prepend DIR to @INC (repeatable)
-  -M MODULE      `use MODULE` before running (repeatable)
-  -c             syntax-check only: transpile, print "syntax OK", exit
-  -w             accepted for compatibility (PCL's warning behaviour is fixed)
-  -v, --verbose  print the underlying sbcl command pcl runs
+  -l[octal]      chomp under -n/-p and set $\ (to $/, or the octal char)
+  -m MODULE      `use MODULE ()` before the program; -M MODULE `use MODULE`
+                 (-MMod=a,b imports a and b; -M-Mod is `no Mod`)
+  -n             wrap the program in `LINE: while (<>) { ... }`
+  -p             like -n, and print every line
+  -s             switch parsing for the program's own -name[=value] args
+  -S             look the program up along PATH
+  -t -T          accepted, but taint checks are NOT applied (said on STDERR)
+  -v             print the version (the --version text)
+  -V, -V:name    PCL's configuration (%Config), in perl's format
+  -w             enable warnings ($^W)
+  -W -X          accepted (PCL's warnings are not switchable)
+  -x[dir]        skip text before the first #!...perl line (chdir to dir)
+
+pcl's own options (before the program):
+  --verbose      print the underlying sbcl command pcl runs
   --version      print the PCL, cache-generation, SBCL and PPI versions
-  -h, --help     this message
+  --help         this message
   --check        run the program under perl AND under PCL and say whether
                  they agree (below)
 
@@ -612,9 +652,9 @@ Checking a program against perl (--check):
   says IDENTICAL, SAME FAILURE, DIFFERENT OUTPUT (with the first differing
   line from each side), ONLY PERL FAILED / ONLY PCL FAILED, DIFFERENT FAILURE,
   or "cannot check".  STDERR is not compared -- error and warning TEXTS may
-  differ -- but its line count is shown for each side.  -I, -M and -w are
-  given to perl too; each side sees PCL_CHECK_SIDE=perl or PCL_CHECK_SIDE=pcl
-  in its environment.
+  differ -- but its line count is shown for each side.  Every perl switch
+  you give is given to perl too, as you typed it; each side sees
+  PCL_CHECK_SIDE=perl or PCL_CHECK_SIDE=pcl in its environment.
 
   * THE PROGRAM RUNS TWICE.  Do not use --check on a program whose side
     effects must happen once (it sends mail, charges a card, deletes or

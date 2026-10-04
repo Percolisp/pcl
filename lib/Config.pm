@@ -153,16 +153,54 @@ our %Config = (
     d_atoll     => 'define',
 );
 
-# config_vars - print config values (used by some tests)
+# config_vars - perl's `-V:name` (perlrun), in perl's format: `name='value';`
+# per name, `name='UNKNOWN';` for a name %Config does not hold, a name with a
+# non-word character is a REGEX over the names (`-V:o.*name`), and perl's two
+# colon decorations: a leading `:` drops the `name=` tag, a trailing `:` ends
+# the line with a space instead of ";\n".  (`pcl -V:name` runs exactly this.)
 sub config_vars {
-    my @vars = @_;
-    for my $var (@vars) {
-        if (exists $Config{$var}) {
-            print "$var='$Config{$var}'\n";
-        } else {
-            print "$var='UNKNOWN'\n";
+    for my $arg (@_) {
+        my ($notag, $qry, $lncont) = $arg =~ /^(:)?(.*?)(:)?$/s;
+        my $lnend = $lncont ? ' ' : ";\n";
+        if ($qry =~ /\W/) {
+            my @m = grep { my $k = $_; eval { $k =~ /^(?:$qry)\z/ } } sort keys %Config;
+            if (!@m) { print "$qry: not found$lnend"; next }
+            for my $k (@m) {
+                my $v = defined $Config{$k} ? $Config{$k} : 'undef';
+                print +($notag ? '' : "$k=") . "'$v'$lnend";
+            }
+            next;
         }
+        my $v = exists $Config{$qry} ? $Config{$qry} : 'UNKNOWN';
+        $v = 'undef' if !defined $v;
+        print +($notag ? '' : "$qry=") . "'$v'$lnend";
     }
+}
+
+# _V - perl's plain `-V`: the configuration summary and @INC, in perl's
+# layout, answered ONLY from what this %Config holds (no invented values).
+sub _V {
+    my ($rev, $ver, $sub) = split /\./, $Config{version};
+    print "Summary of my perl5 (revision $rev version $ver subversion $sub) configuration:\n",
+          "   \n  Platform:\n";
+    for my $k (qw(osname osvers archname)) {
+        print "    $k=$Config{$k}\n" if defined $Config{$k};
+    }
+    print "    uname='$Config{myuname}'\n" if defined $Config{myuname};
+    for my $k (qw(useithreads use64bitint use64bitall uselongdouble usemallocwrap)) {
+        print "    $k=", ($Config{$k} eq 'define' ? 'define' : 'undef'), "\n"
+          if defined $Config{$k};
+    }
+    print "  Compiler:\n";
+    for my $k (qw(cc ccflags intsize longsize ptrsize doublesize byteorder
+                  longdblsize ivtype ivsize nvtype nvsize)) {
+        print "    $k=", ($Config{$k} =~ /\s/ ? "'$Config{$k}'" : $Config{$k}), "\n"
+          if defined $Config{$k};
+    }
+    print "  Linker and Libraries:\n";
+    print "    ld=$Config{ld}\n" if defined $Config{ld};
+    print "    ldflags='$Config{ldflags}'\n" if defined $Config{ldflags};
+    print "  \@INC:\n", map { "    $_\n" } @INC;
 }
 
 # config_re - return keys matching a pattern
