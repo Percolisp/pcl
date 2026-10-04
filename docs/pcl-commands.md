@@ -55,8 +55,9 @@ $ pcl -MList::Util=sum -E 'say sum 1 .. 10'
 
 A script runs as `pcl script.pl arg1 arg2`. Its first run after an edit
 compiles it and stores the result in a cache; later runs start from the
-cache in about 0.04 seconds. A run with switches on the command line is
-compiled each time ([What a run costs](#what-a-run-costs)).
+cache (in 41 ms for a one-line script, measured 2026-10-04). A run with
+`-e`, or with a switch that changes the program, is compiled each time
+([What a run costs](#what-a-run-costs)).
 
 Below is every switch perl 5.40 has and what `pcl` does with it. The
 table [Where pcl differs from perl](#where-pcl-differs-from-perl) sums up
@@ -165,7 +166,7 @@ A `#!` line that does not name perl, such as `#!/bin/sh`, is a comment to
 | `-v`, `-V`, `-h` | perl's texts and `%Config` | `pcl`'s version, PCL's own `%Config`, `pcl`'s usage |
 | no program, STDIN a terminal | waits for the program | prints the usage |
 | `#!` without `perl` | runs that interpreter | compiles the file as Perl |
-| start-up | about 2 ms for a one-liner | about 0.18 seconds for a run with switches or `-e`; see below |
+| start-up (measured 2026-10-04) | 2 ms for `perl -e` | 181 ms for `pcl -e`, 41 ms for a cached one-line script; see below |
 
 ### What a run costs
 
