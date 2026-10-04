@@ -950,9 +950,27 @@
   (print-unreadable-object (r stream :type t :identity t)))
 
 (defmacro %p-tied (c)
-  "The tie record of container C, or NIL.  One fixnum test when nothing is tied."
-  `(and (plusp (the fixnum **p-tie-count**))
-        (gethash ,c **p-tie-table**)))
+  "The tie record of container C, or NIL.  One fixnum test when nothing is tied.
+   While some container IS tied, a NON-EMPTY container is refused before the
+   weak table (#2637): a tied container is an EMPTY SHELL (tie moves its
+   contents aside, §1 of docs/tie-aggregates.md), so only an empty vector, or
+   a hash holding at most its blessing key, can be one.  A non-container
+   (a box, a string, a number) is never in the table either."
+  (let ((v (gensym "C")))
+    `(and (plusp (the fixnum **p-tie-count**))
+          (let ((,v ,c))
+            (and (%p-tie-shell-shape-p ,v)
+                 (gethash ,v **p-tie-table**))))))
+
+(declaim (inline %p-tie-shell-shape-p))
+(defun %p-tie-shell-shape-p (c)
+  "True when C could be a tied shell: an empty non-string vector, or a hash
+   with at most one entry (a blessed shell keeps :__class__)."
+  (typecase c
+    (hash-table (<= (hash-table-count c) 1))
+    (string nil)
+    (vector (zerop (length c)))
+    (t nil)))
 
 (defmacro %p-hash-miss (h key)
   "An element READ that did not find KEY in H: FETCH when H is tied, else
@@ -30767,7 +30785,20 @@ buffer's fill-pointer; everything else falls back to file-length."
           (%p-reset-each-iterator c)))
     obj))
 
+(defun %p-tie-check-shell-empty (c)
+  "untie's invariant check (#2637): %p-tied refuses a NON-EMPTY container
+   before its table, so a path that wrote INTO a tied shell would have made
+   the tie invisible.  Such a path is a runtime bug; say so, never restore over
+   it silently."
+  (when (if (hash-table-p c)
+            (loop for k being the hash-keys of c thereis (%p-real-hash-key-p k))
+            (plusp (length c)))
+    (%p-die-error nil (format nil "PCL internal: the storage of a tied ~A was ~
+                                   written while it was tied"
+                              (if (hash-table-p c) "HASH" "ARRAY")))))
+
 (defun %p-untie-aggregate (c rec)
+  (%p-tie-check-shell-empty c)
   (when (%pcl-truthy-can (p-tie-rec-obj rec) "UNTIE")
     (%p-tie-call rec "UNTIE"))
   (remhash c **p-tie-table**)
