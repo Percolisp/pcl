@@ -3,6 +3,9 @@
 # answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
 # files were blessed as COUNTS only, so #964's failing row sat inside op/sub.t's
 # "12 not ok" for months with nothing naming it.
+# s507 (2026-10-04, Fable) -- TWO rows removed BY EDIT: op/gv.t 90 and uni/gv.t 74 "tied elem assignment preserves globs" (cause #1664)
+#   pass since 618db500 = s501t #155 (each file run ALONE on e5d72352 / 618db500 / main, s507/attrib/run3.out); both are TIMEOUT files,
+#   so no run could mark them FIXED.
 # s501t (2026-10-02, Opus; #155 tie on ARRAY/HASH) -- 95 rows removed BY EDIT (op/tiearray.t 45, op/tie.t 35, op/tiehash.t 7,
 #   op/magic.t 6, op/sort.t 2), ONE added (op/magic.t #66, cause #2594).  A/B --jobs 1 < /dev/null: main b7ec0093
 #   extraction vs the rebased tree; the removal is scratch/s501t/edit-fails.pl (the runner's own key projection, multiset).
@@ -4138,7 +4141,6 @@ op/gv.t	295	ok	(missing)	stub sub with no prototype stored as -1	#1664
 op/gv.t	300	ok	(missing)	stub sub with no prototype stored as -1	#1664
 op/gv.t	199	ok	(missing)	sub cloning does not cause lex handles to lose their names	#1664
 op/gv.t	9	ok	not ok	symbolic *{} returns symtab entry when FAKE	#1664
-op/gv.t	90	ok	not ok	tied elem assignment preserves globs	#1664
 op/gv.t	263	ok	(missing)	try_downgrade does not touch PL_last_in_gv	#1664
 op/gv.t	262	ok	(missing)	try_downgrade does not touch PL_statgv (last stat handle)	#1664
 op/gv.t	264	ok	(missing)	try_downgrade does not touch PL_stderrgv	#1664
@@ -10043,7 +10045,6 @@ uni/gv.t	206	ok	(missing)	no error when gp_free calls a destructor that assigns 
 uni/gv.t	12	ok	not ok	no type coersion when assigning to retval of compile-time *{}	#1664
 uni/gv.t	10	ok	not ok	no type coersion when assigning to retval of symbolic *{}	#1664
 uni/gv.t	9	ok	not ok	symbolic *{} returns symtab entry when FAKE	#1664
-uni/gv.t	74	ok	not ok	tied elem assignment preserves globs	#1664
 uni/labels.t	0	(none)	renumbered	*summary*	#1746 + #1494 + #1747 -- the renumber follows from the rows those three lose
 uni/labels.t	9	ok	not ok [PCL #8]	Latin-1 labels are reachable	#1494 -- `$prog = "redo L\N{LATIN CAPITAL LETTER A WITH ACUTE}BEL"` keeps the escape LITERAL, so the eval is `redo LN{…}BEL`, which the compiler drops; the block therefore runs once instead of twice and $d never reaches 0
 uni/labels.t	10	ok	(missing)	goto UTF-8 LABEL works.	#1747

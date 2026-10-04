@@ -13,18 +13,18 @@
 # session `NEVER` = this file has no measurement on record at all.
 # GENERATED: `tools/run-perl-suite.pl --all --bless-stamps` (a file measured by
 # that run gets the run's session; one it did not measure keeps its old stamp).
-# taken-at: s504 2026-10-02
-comp/require.t	s504	2026-10-02	QUICK-CAPPED: registered allowance 450s > quick cap 120s ... — measured DIFF 911/836
+# taken-at: s507 2026-10-04
+comp/require.t	s507	2026-10-04	QUICK-CAPPED: registered allowance 450s > quick cap 120s ... — measured DIFF 911/836
 op/list.t	NEVER	-	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run
 op/pack.t	NEVER	-	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed
-re/overload.t	s504	2026-10-02	QUICK-SKIP: HANG measured s404 — 3 of perl's 87 rows at... — measured TIMEOUT 3/0
-re/pat_advanced.t	s504	2026-10-02	QUICK-CAPPED: registered allowance 900s > quick cap 120s ... — measured DIFF 699/137
-re/pat_psycho.t	s504	2026-10-02	QUICK-CAPPED: registered allowance 450s > quick cap 120s ... — measured OK 15/0
-re/regexp.t	s504	2026-10-02	QUICK-SKIP: task #326 — hangs at TAP row ~905 (identica... — measured TIMEOUT 824/81
-re/regexp_noamp.t	s504	2026-10-02	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured DIFF 0/0
-re/regexp_notrie.t	s504	2026-10-02	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured DIFF 0/0
-re/regexp_qr.t	s504	2026-10-02	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured DIFF 0/0
-re/regexp_qr_embed.t	s504	2026-10-02	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured DIFF 0/0
-re/regexp_trielist.t	s504	2026-10-02	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured DIFF 0/0
-re/speed.t	s504	2026-10-02	QUICK-SKIP: HANG measured s404 — 1 of perl's 59 rows at... — measured TIMEOUT 25/22
-run/runenv_hashseed.t	s504	2026-10-02	QUICK-CAPPED: registered allowance 900s > quick cap 120s ... — measured DIFF 274/4
+re/overload.t	s507	2026-10-04	QUICK-SKIP: HANG measured s404 — 3 of perl's 87 rows at... — measured TIMEOUT 3/0
+re/pat_advanced.t	s507	2026-10-04	QUICK-CAPPED: registered allowance 900s > quick cap 120s ... — measured DIFF 699/137
+re/pat_psycho.t	s507	2026-10-04	QUICK-CAPPED: registered allowance 450s > quick cap 120s ... — measured OK 15/0
+re/regexp.t	s507	2026-10-04	QUICK-SKIP: task #326 — hangs at TAP row ~905 (identica... — measured TIMEOUT 824/81
+re/regexp_noamp.t	s507	2026-10-04	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 826/79
+re/regexp_notrie.t	s507	2026-10-04	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 824/81
+re/regexp_qr.t	s507	2026-10-04	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 824/81
+re/regexp_qr_embed.t	s507	2026-10-04	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 824/81
+re/regexp_trielist.t	s507	2026-10-04	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 824/81
+re/speed.t	s507	2026-10-04	QUICK-SKIP: HANG measured s404 — 1 of perl's 59 rows at... — measured TIMEOUT 25/25
+run/runenv_hashseed.t	s507	2026-10-04	QUICK-CAPPED: registered allowance 900s > quick cap 120s ... — measured DIFF 274/4
