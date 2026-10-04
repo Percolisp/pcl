@@ -603,41 +603,50 @@ Usage: pcl [switches] [--] [programfile] [arguments]
        pcl [switches] -e 'code' [arguments]
        pcl [pcl-options] [switches] ...
 
-Runs a Perl program by transpiling it to Common Lisp and executing it under
-SBCL.  Works like `perl` for the Perl subset PCL supports, and takes perl's
-own switches, parsed by perl's rules: clusters (-lane, -pi.bak, -0777),
-`--` ends the switches, `-` (or no program and no -e) reads the program from
-STDIN.  A program's own `#!perl -SWITCHES` line is honoured as perl honours
-it.
+Runs a Perl program by compiling it to Common Lisp and running it under
+SBCL.  pcl takes perl's own switches, by perl's rules (clusters such as
+-lane and -pi.bak work), and honours a program's own #! line.  What each
+switch does, and where pcl differs from perl: docs/pcl-commands.md.
 
-Perl's switches:
-  -0[octal|xHEX] record separator $/ (-0 = "\0", -00 paragraph, -0777 slurp)
-  -a             autosplit into @F under -n/-p (-F implies -a implies -n)
-  -c             check syntax only: BEGIN+CHECK run, "NAME syntax OK" on STDERR
-  -C[flags]      Unicode features (see docs/pcl-commands.md for what applies)
-  -d -u          NOT supported (the debugger; dumping core): refused
-  -D[flags]      warns as a non-debugging perl does, then runs the program
-  -e CODE        one line of program (repeatable: the lines are joined)
-  -E CODE        like -e, with the feature bundle of perl 5.40 enabled
-  -f -U          accepted (perl's sitecustomize / unsafe operations)
-  -F/pattern/    split pattern for -a (//, "" and '' quoting as perl's)
-  -g             slurp: -0777
-  -h, -?         this message
-  -i[extension]  edit <> files in place ($^I), with a backup when given
-  -I DIR         prepend DIR to @INC (repeatable)
-  -l[octal]      chomp under -n/-p and set $\ (to $/, or the octal char)
-  -m MODULE      `use MODULE ()` before the program; -M MODULE `use MODULE`
-                 (-MMod=a,b imports a and b; -M-Mod is `no Mod`)
-  -n             wrap the program in `LINE: while (<>) { ... }`
-  -p             like -n, and print every line
-  -s             switch parsing for the program's own -name[=value] args
+Running code:
+  -e CODE        one line of program (several -e for several lines)
+  -E CODE        like -e, with perl 5.40's features and builtins enabled
+  -              read the program from STDIN (so does: no program, no -e)
+  --             end of the switches
+Line loops:
+  -n             assume `LINE: while (<>) { ... }` around the program
+  -p             like -n, and print each line
+  -l[octal]      chomp each line (-n, -p); set $\ to $/ or the octal char
+  -a             split each line into @F (implies -n)
+  -F/pattern/    the split pattern for -a (implies -a and -n)
+  -0[octal]      set $/: -0 NUL, -00 paragraphs, -0777 whole file, -0xHEX
+  -g             read the whole file at once (the same as -0777)
+  -i[extension]  edit the files in place, with a backup if an extension
+Modules and paths:
+  -MModule       `use Module;` first (-MModule=a,b imports; -M-Module: no)
+  -mModule       `use Module ();` first
+  -I DIR         put DIR in front of @INC (several -I allowed)
   -S             look the program up along PATH
-  -t -T          accepted, but taint checks are NOT applied (said on STDERR)
-  -v             print the version (the --version text)
+  -x[dir]        skip text before the first #!...perl line (cd to dir first)
+  -s             set $name from the program's own -name / -name=value args
+Checking and information:
+  -c             run the compile phase only, then say "NAME syntax OK"
+  -v             print pcl's version (also: --version)
   -V, -V:name    PCL's configuration (%Config), in perl's format
-  -w             enable warnings ($^W)
-  -W -X          accepted (PCL's warnings are not switchable)
-  -x[dir]        skip text before the first #!...perl line (chdir to dir)
+  -h, -?         this message
+Warnings, Unicode, taint:
+  -w             set $^W (PCL prints no warnings; -W and -X change nothing)
+  -C[flags]      Unicode: I O E S A L; i o D for the main program's open()
+  -T, -t         accepted, but taint checks are NOT applied (said on STDERR)
+Not supported:
+  -d, -u         refused (the debugger; dumping core)
+  -D[flags]      perl's message for a perl built without -DDEBUGGING; runs
+  -U, -f         accepted; nothing to do
+
+Examples:
+  pcl script.pl arg1 arg2
+  printf 'a b\nc d\n' | pcl -lane 'print $F[1]'
+  pcl -pi.bak -e 's/foo/bar/' notes.txt
 
 pcl's own options (before the program):
   --verbose      print the underlying sbcl command pcl runs
@@ -679,15 +688,16 @@ Checking a program against perl (--check):
 
 Caches:
   PCL caches three things, all purely for speed and none able to change a
-  result: a saved SBCL core with the PCL runtime compiled in (startup ~1 s ->
-  ~0.1 s); per module you `use`, its transpiled Common Lisp plus a compiled
-  fasl; and YOUR SCRIPT ITSELF, the same way (a 1,211-line program: 6.6 s
-  every run before, 0.04 s from its cache entry).  An entry is re-transpiled
-  when its own file changes, and also when any module whose prototypes or
-  exports its parse read changes; a script's entry additionally belongs to the
-  -I list it was built under, because a different search path can resolve the
-  same `use` to a different file.  `pcl -e` and a file run with -M prefixes
-  are NOT cached -- they have a fresh temp path each run.
+  result: a saved SBCL core with the PCL runtime compiled in; per module you
+  `use`, its transpiled Common Lisp plus a compiled fasl; and YOUR SCRIPT
+  ITSELF, the same way, so a large script pays its compile once.  An entry is
+  re-transpiled when its own file changes, and also when any module whose
+  prototypes or exports its parse read changes; a script's entry additionally
+  belongs to the -I list it was built under, because a different search path
+  can resolve the same `use` to a different file.  `pcl -e`, and a script run
+  with a switch that changes the program (-n -p -l -a -M -w -c ...), are NOT
+  cached: they are compiled on every run.  A script's own #! switches do not
+  count; they are part of the file.
   Everything lives under PCL_CACHE_DIR (below), in a directory PCL creates
   with mode 0700 -- a cached entry is code, so PCL refuses to load out of a
   directory anybody else could write to.

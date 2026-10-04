@@ -16,10 +16,10 @@ file with no options.
 ## SYNOPSIS
 
 ```
-pcl [switches] [--] script.pl [args...]
-pcl [switches] -e 'code' [args...]
-pcl [switches] < script.pl
-pcl --check [switches] script.pl [args...]
+pcl [switches] [--] [programfile] [arguments]
+pcl [switches] -e 'code' [arguments]
+pcl [switches] < programfile
+pcl --check [switches] programfile [arguments]
 pcl --version | --cache-info | --make-core | --clear-cache
 
 pl2cl [options] file.pl            # Common Lisp on stdout
@@ -31,55 +31,165 @@ runpcl file.pl
 
 ## pcl: run a program
 
-`pcl` works like `perl` for the Perl that PCL supports: `@ARGV`, `%ENV`,
-`$0`, exit codes, `die` and `END` blocks behave as they do in perl. Your
-script is compiled on its first run after an edit and cached like a module
-(in `~/.pcl-cache/scripts/`), so a large script pauses once before its first
-line; later runs start from the cache in about 0.04 seconds. `-e` code is
-not cached. The runtime core that every run needs is a separate cache,
-built once per runtime change (the message is `compiling the runtime into a
-cached core`), and a one-liner can trigger that build too.
+`pcl` takes the command line you would give `perl`. It compiles the
+program to Common Lisp and runs it under SBCL. `@ARGV`, `%ENV`, `$0`, exit
+codes, `die` and `END` blocks behave as they do in perl, and perl's own
+switches work, one-liners included:
 
-`pcl` takes perl's own switches, parsed by perl's rules (one parser,
-`tools/lib/PCLSwitches.pm`): clusters such as `-lane`, `-pi.bak` and
-`-0777`; `--` ends the switches; `-`, or no program and no `-e`, reads the
-program from STDIN; an unknown switch is perl's error (`Unrecognized switch:
--A  (-h will show valid options).`), never a script name. A program's own
-`#!perl -SWITCHES` line is honoured as perl honours it, merged with the
-command line's. The switches that change the program (`-n -p -a -F -l -0 -g
--i -s -x -E -M -m -w -C -T`) become perlrun's documented source equivalents
-on the program's first line, so no line number moves.
+<!-- doc-example: Pl/t/pcl-doc-examples-01.t runs every command in this block -->
+```console
+$ pcl -e 'print "hello, world\n"'
+hello, world
+$ pcl -le 'print for 1 .. 3'
+1
+2
+3
+$ printf 'a b c\nd e f\n' | pcl -lane 'print $F[1]'
+b
+e
+$ printf '3\n4\n5\n' | pcl -lne '$sum += $_; END { print $sum }'
+12
+$ pcl -MList::Util=sum -E 'say sum 1 .. 10'
+55
+```
+
+A script runs as `pcl script.pl arg1 arg2`. Its first run after an edit
+compiles it and stores the result in a cache; later runs start from the
+cache in about 0.04 seconds. A run with switches on the command line is
+compiled each time ([What a run costs](#what-a-run-costs)).
+
+Below is every switch perl 5.40 has and what `pcl` does with it. The
+table [Where pcl differs from perl](#where-pcl-differs-from-perl) sums up
+the differences.
+
+### Running code
 
 | switch | in `pcl` |
 |---|---|
-| `-e CODE` | one line of program; repeatable, the lines join. `$0` and `__FILE__` are `-e`, and `die` says `at -e line N` |
-| `-E CODE` | like `-e`, with perl 5.40's feature bundle and builtin bundle (`say`, `state`, `fc`, `__SUB__`, `true`, `reftype`, ...); `strict` stays off |
-| `-n`, `-p` | `LINE: while (<>) { ... }`, and `-p`'s `continue { print or die "-p destination: $!\n" }`; the loop closes before `__END__`/`__DATA__` |
-| `-a`, `-F/pattern/` | `our @F = split(' ', $_, 0)`; `-F` takes `//`, `""` and `''` quoting or a plain pattern; `-F` implies `-a` implies `-n` |
-| `-l[octal]` | chomp under `-n`/`-p`, and `$\` = `$/` (or the octal character); order with `-0` matters as in perl |
-| `-0[octal]`, `-0xHEX`, `-g` | `$/`: `-0` = `"\0"`, `-00` paragraph mode, `-0777` and `-g` slurp, set at compile time |
-| `-i[extension]` | in-place editing of the `<>` files (`$^I`), with a backup when an extension is given (`*` in it is the file name) |
-| `-s` | the program's own leading `-name` / `-name=value` arguments set `$main::name`, before the program compiles |
-| `-x[dir]` | skip the text before the first `#!...perl` line (line numbers count from it); `dir` = `chdir` first |
-| `-S` | look the program up along `PATH` |
-| `-I DIR` | prepend DIR to `@INC` (repeatable, in command-line order, ahead of `PERL5LIB`); it also applies to the compile of every module the program loads |
-| `-M MODULE`, `-m MODULE` | `use MODULE` / `use MODULE ()` before the program (`-MList::Util=sum` imports, `-M-Mod` is `no Mod`, `-M'Mod qw(a)'` takes the rest verbatim). The script keeps its own name and line numbers |
-| `-c` | compile only: `BEGIN` and `CHECK` blocks and `use` imports run, then `NAME syntax OK` on STDERR, exit 0 (also on a `#!` line) |
-| `-w` | `$^W = 1` from compile time on (command line and `#!` line) |
-| `-W`, `-X`, `-U`, `-f` | accepted; the program runs (PCL's diagnostics are not switchable) |
-| `-C[flags]` | `I`/`O`/`E`/`S`: a `:utf8` layer on the standard handles; `A`: `@ARGV` decoded; `i`/`o`/`D`: `use open` (the main program's opens); `L`: only under a UTF-8 locale; `${^UNICODE}` reads the number |
-| `-T`, `-t` | accepted, the program runs WITHOUT taint checks and one STDERR line says so (`PCL_TAINT_QUIET=1` silences it); `${^TAINT}` reads 0 |
-| `-D[flags]` | perl's non-debugging message, then the program runs |
-| `-d`, `-u` | refused with one line, exit 2 (the debugger; dumping core) |
-| `-v` | the version: the `--version` text |
-| `-V`, `-V:name` | PCL's own `%Config` (`lib/Config.pm`) in perl's format: `-V:osname` prints `osname='linux';`; `-V` prints the summary and `@INC` |
-| `-h`, `-?` | the usage text |
+| `-e CODE` | one line of program. Give several `-e` for several lines. `$0` and `__FILE__` are `-e`, and messages say `at -e line N` |
+| `-E CODE` | like `-e`, with perl 5.40's features (`say`, `state`, `fc`, signatures ...) and builtin functions (`true`, `trim`, `reftype` ...) turned on. `strict` stays off, as in perl. For now `try`/`catch` also needs `use feature 'try';` in the code |
+| `programfile` | the script to run; the words after it are `@ARGV` |
+| `-` | read the program from STDIN; `$0` is `-`. After `-e`, a lone `-` is an ordinary word in `@ARGV` |
+| (no program, no `-e`) | read the program from STDIN, as perl does. If STDIN is a terminal, `pcl` prints its usage instead of waiting |
+| `--` | ends the switches; the next word is the program, or with `-e` the first word of `@ARGV` |
 
-pcl's own options come before the program:
+### Line loops
+
+| switch | in `pcl` |
+|---|---|
+| `-n` | puts `LINE: while (<>) { ... }` around the program. `BEGIN` and `END` blocks stay outside the loop |
+| `-p` | like `-n`, and prints each line after the program has run on it |
+| `-l[octal]` | with `-n`/`-p`, chomps each line; sets `$\` to `$/`, or to the character with that octal code. `-l` and `-0` read in order, as in perl: `-l -0040` and `-0040 -l` differ |
+| `-a` | splits each line into `@F` (`split ' '`); implies `-n` |
+| `-F pattern` | the pattern for `-a`: `-F:`, `-F,`, `-F'\t'`, `-F/\s*;\s*/`; implies `-a` and `-n` |
+| `-0[octal]`, `-0xHEX` | sets `$/`: `-0` is the NUL character, `-00` paragraph mode, `-0777` the whole file at once, `-0x3B` a `;` |
+| `-g` | the whole file at once (the same as `-0777`) |
+| `-i[extension]` | edits the files named in `@ARGV` in place, keeping a backup when an extension is given. A `*` in the extension stands for the file name: `-i'orig_*'` keeps `orig_notes.txt`. With no file names, perl's warning, then STDIN to STDOUT |
+
+### Modules and paths
+
+| switch | in `pcl` |
+|---|---|
+| `-MModule` | `use Module;` before the program. `-MModule=a,b` imports `a` and `b`, `-M-Module` is `no Module;`, and `-M'Module qw(a b)'` takes the rest as written. The program keeps its own name and line numbers |
+| `-mModule` | `use Module ();`: loaded, nothing imported |
+| `-I DIR` | puts DIR in front of `@INC`. Several `-I` keep their command-line order, all ahead of `PERL5LIB`. They also apply to the modules the program loads |
+| `-S` | looks the program up along `PATH`, with perl's messages when it is missing or not executable |
+| `-x[dir]` | skips the text before the first `#!` line that contains `perl`; line numbers count from that line. With a `dir`, changes to it first |
+| `-s` | the program's own leading `-name` and `-name=value` arguments are taken out of `@ARGV` and set `$main::name`; `--` ends them |
+
+`-Mstrict` loads `strict` as `use strict` does: `strict refs` is enforced,
+but a program that uses an undeclared variable still runs (see
+[`not-supported.md`](not-supported.md)).
+
+### Checking and information
+
+| switch | in `pcl` |
+|---|---|
+| `-c` | runs the compile phase only (`BEGIN` and `CHECK` blocks, `use` lines), then prints `NAME syntax OK` on STDERR and exits 0. It is not a syntax checker: see the table below |
+| `-v` | prints `pcl`'s version: the PCL release, the cache generation, the SBCL and the PPI versions (the same as `--version`) |
+| `-V`, `-V:name` | PCL's own configuration, `%Config`, in perl's format: `pcl -V:osname` prints `osname='linux';`. A name PCL does not hold prints `name='UNKNOWN';` |
+| `-h`, `-?` | `pcl`'s usage text |
+
+### Warnings, Unicode, taint
+
+| switch | in `pcl` |
+|---|---|
+| `-w` | sets `$^W` to 1 from the start of compilation. No warning is printed: PCL has no warning categories, and `use warnings` is accepted and changes nothing |
+| `-W`, `-X` | accepted; they change nothing (under perl, `-W` also sets `$^W`) |
+| `-C[number or letters]` | `I`, `O`, `E` and `S`: a `:utf8` layer on STDIN, STDOUT and STDERR. `A`: `@ARGV` is decoded. `i`, `o` and `D`: the default layers of `open()` in the main program. `L`: all of it only under a UTF-8 locale. A bare `-C` is `-CSDL`. `${^UNICODE}` reads the number |
+| `-T`, `-t` | the program runs WITHOUT taint checks, and one line on STDERR says so (`PCL_TAINT_QUIET=1` silences it). `${^TAINT}` reads 0 |
+
+### Not supported
+
+| switch | in `pcl` |
+|---|---|
+| `-d`, `-dt`, `-d:MOD` | the debugger: refused with one line, exit 2 |
+| `-u` | dump core: refused with one line, exit 2 |
+| `-D[flags]` | prints perl's own message for a perl built without debugging, then runs the program, as such a perl does |
+| `-U`, `-f` | accepted; there is nothing for them to do |
+
+An unknown switch is perl's error, `Unrecognized switch: -A  (-h will show
+valid options).`, with exit status 25. It is never taken for a script name.
+
+### The script's own `#!` line
+
+When line 1 of the program starts with `#!` and contains `perl`, its
+switches count as perl counts them: `#!/usr/bin/perl -w`,
+`#!/usr/bin/env perl -lan` and `#!perl -0777 -n` all work, and they add to
+the command line's switches. A `#!` line that turns on `-n` or `-p`
+rebuilds the loop with the switches in force by then, as in perl.
+
+A few switches cannot be given there, as in perl: `-M` and `-m` are
+`Too late`, and `-x -E -S -V -e -f` are `Can't emulate ... on #! line`,
+both with exit status 255. `-d -u -v -h -?` are refused there too (exit
+255), because perl would start the debugger or print a text instead of
+running the program.
+
+A `#!` line that does not name perl, such as `#!/bin/sh`, is a comment to
+`pcl`: the file is compiled as Perl. perl would run `/bin/sh` on it.
+
+### Where pcl differs from perl
+
+| what | perl | `pcl` |
+|---|---|---|
+| taint, `-T` and `-t` | checks tainted data; `${^TAINT}` is 1 (or -1 for `-t`) | runs the program without taint checks and says so on STDERR; `${^TAINT}` is 0. `-T` on the `#!` line alone is not an error |
+| `-d`, `-u` | start the debugger, dump core | refused, exit 2 |
+| `-w` | turns on warnings | sets `$^W` and nothing else; `-W` and `-X` change nothing |
+| `-C` with `i`, `o` or `D` | sets the default layers for every `open()` | for the main program's `open()` calls only, not a module's |
+| `-C` on the `#!` line | `Too late` unless the command line has it too | applied |
+| `-C0` and `@ARGV` | arguments stay bytes unless `-CA` | arguments arrive decoded from UTF-8, and `-C0` cannot undo that |
+| `PERL5OPT` | its switches are added | not read |
+| a switch error | exit status from `errno`, usually 25 | always 25 |
+| error messages | | the text may differ; the failing place is the same. An uncaught `die` in a run with switches on the command line or with `-e` prints one extra line first, `While evaluating the form ...` |
+| `-c` | a syntax check | runs the compile phase and says `syntax OK`, but PCL assumes the program is valid Perl: a statement it cannot compile is reported on STDERR and the verdict is still `syntax OK`. A known bug: after the first `use` of a module, later `BEGIN` blocks and `use` lines can be skipped, so a missing module may go unnoticed |
+| `-v`, `-V`, `-h` | perl's texts and `%Config` | `pcl`'s version, PCL's own `%Config`, `pcl`'s usage |
+| no program, STDIN a terminal | waits for the program | prints the usage |
+| `#!` without `perl` | runs that interpreter | compiles the file as Perl |
+| start-up | about 2 ms for a one-liner | about 0.18 seconds for a run with switches or `-e`; see below |
+
+### What a run costs
+
+A script you run as `pcl script.pl` is cached: its first run after an edit
+compiles it, and every later run starts from the cache. A script whose own
+`#!` line carries switches is cached the same way, because the switches are
+part of the file.
+
+A run with a switch on the command line that changes the program (`-e -E
+-n -p -l -0 -g -a -F -i -s -x -M -m -w -C -T -t -c`) is not cached: the
+cache entry's key does not carry the switches, so the program is compiled
+every time. Measured 2026-10-04 on a 16-core Linux machine (median of five
+runs): a cached one-line script took 41 ms, `pcl -e` 181 ms, `pcl -l
+script.pl` 184 ms and `pcl -lane ... file` 191 ms; `perl -e` took 2 ms. A
+`-I` alone does not stop the cache; the script gets one entry per `-I`
+list.
+
+### pcl's own options
+
+They come before the program.
 
 | option | meaning |
 |---|---|
-| `--verbose` | print the `sbcl` command line `pcl` runs (before s506f this was also `-v`, which is now perl's version switch) |
+| `--verbose` | print the `sbcl` command line `pcl` runs (`-v` is perl's version switch) |
 | `--check` | run the program under perl and under PCL and compare the output ([`pcl-check.md`](pcl-check.md)); `--check-stdin FILE` gives both runs FILE as STDIN, `--check-keep DIR` keeps the captured output in DIR. Both sides get the same switches |
 | `--version` | print the PCL, cache-generation, SBCL and PPI versions |
 | `--cache-info` | where the cache is, what is in it, which core this run would use, and the compile policy in effect: the one diagnostic for "PCL did not notice my change" |
@@ -88,19 +198,19 @@ pcl's own options come before the program:
 | `--clear-cache` | remove everything PCL made under the cache directory (cached modules, scripts and evals, compiled extensions, prototype facts, saved cores), then exit; XS artifacts are left alone |
 | `--help` | the full text, including the environment variables |
 
-A script run with no source-changing switch on the command line is cached
-(its own `#!` switches are part of its bytes); one run with `-n`, `-M`,
-`-l` ... is not, because the cache entry's key does not carry the switches.
+The runtime core that every run needs is a cache of its own, built once
+per runtime change. The first run after such a change, a one-liner
+included, takes a few seconds longer, and on a terminal it says so on
+STDERR (`PCL: compiling the runtime into a cached core ...`).
 
 Examples:
 
 ```bash
 pcl script.pl arg1 arg2
-pcl -e 'print 1 + 2, "\n"'
-pcl -MList::Util=sum -E 'say sum 1 .. 10'
-pcl -lane 'print $F[0]' file.txt
-pcl -pi.bak -e 's/foo/bar/' *.txt
 pcl -I lib script.pl
+pcl -pi.bak -e 's/foo/bar/' notes.txt
+pcl -F, -lane 'print $F[1]' data.csv
+pcl -0777 -ne 'print scalar(() = /\bperl\b/g), "\n"' notes.txt
 pcl -c script.pl
 pcl --check script.pl arg1
 ```

@@ -4016,6 +4016,14 @@ table; one parser, `tools/lib/PCLSwitches.pm`).  What remains different:
   cannot take back the decoding of `@ARGV`**: PCL's `@ARGV` already arrives
   DECODED from UTF-8 (pre-existing, task #2685), so `length $ARGV[0]` of
   `é` is 1 under `pcl -C0` where perl says 2.
+* **`-C` on a `#!` line** is applied.  perl refuses it (`Too late for "-CS"
+  option`, exit 255) unless the command line carries the same `-C`.
+* **`-U` and `-f`** are accepted and do nothing: PCL has no unsafe-operation
+  checks for `-U` to lift and never runs `sitecustomize.pl`.
+* **`-v`, `-h`, `-?`** print `pcl`'s version and usage texts, not perl's.
+* **No program and no `-e` with STDIN a terminal:** `pcl` prints its usage;
+  perl waits to read the program from the terminal.  From a pipe or a file
+  both read the program from STDIN.
 * **A `#!` line without `perl`** (`#!/bin/sh`): perl EXECS the named
   interpreter instead; `pcl` compiles the file as Perl, the line a comment.
 * **`-w`** sets `$^W` (command line and `#!` line) and nothing else: PCL has

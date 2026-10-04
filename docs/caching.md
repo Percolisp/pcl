@@ -208,9 +208,14 @@ from the cache entry takes 0.037 seconds (measured 2026-09-17).
 - **Not cached:** `pcl -e CODE` (written to a temporary file with a fresh
   random name, so an entry keyed on the path would leave one dead entry
   behind per run), and a file run with any source-changing switch on the
-  command line (`-n -p -l -0 -a -F -i -s -x -E -M -m -w -C -T -c`): the
-  entry's key does not carry the switches.  A script's OWN `#!` switches
-  are part of its bytes, so it is cached.
+  command line (`-n -p -l -0 -g -a -F -i -s -x -E -M -m -w -C -T -t -c`):
+  the entry's key does not carry the switches.  A script's OWN `#!`
+  switches are part of its bytes, so it is cached.  `-I` alone does not
+  stop the cache (the `-I` list is part of the key).  An uncached run
+  compiles the program every time: measured 2026-10-04 (median of five,
+  load 1.4), `pcl -e 'print "hi\n"'` took 181 ms, `pcl -l h.pl` 184 ms
+  and `pcl -lane ... file` 191 ms, against 41 ms for the cached
+  `pcl h.pl` (`h.pl` is the one-line `print "hi\n";`; Appendix B).
 - **A script edited in the same second its entry was written is
   re-transpiled once more,** because validity requires the entry to be
   *strictly* newer than the source. That errs towards doing the work again.
@@ -413,4 +418,5 @@ uses `eval`, to 0.41 seconds.
 | loading `cl/pcl-pack.lisp` | 4.262 s as text | **0.004 s** compiled | 2026-09-20 | the extension cache (the one-time compile costs 4.70 s) |
 | `pcl hello.pl` (1 line) | 0.181 s | **0.033 s** | 2026-09-17 | the script cache (§2c); the first run costs 0.203 s |
 | `pcl cl/pack-impl.pl` (1,211 lines) | 6.571 s | **0.037 s** | 2026-09-17 | the script cache; the first run costs 7.256 s, and perl itself takes 0.006 s |
+| `pcl -e 'print "hi\n"'`, `pcl -l h.pl`, `pcl -lane ... file` (switches on the command line: never cached) | 0.181 s, 0.184 s, 0.191 s | | 2026-10-04 | median of five; the cached `pcl h.pl` took 0.041 s in the same run, `perl -e` 0.002 s |
 | the compiler fingerprint, per process | 1.15 ms | 1.95 ms | 2026-09-17 | the perl and PPI part of the fingerprint (Appendix A) |
