@@ -344,6 +344,33 @@ PL
         or diag("sockets: @sock2 (exit $oc)\nstderr: $oe");
 }
 
+# ---- THE SERVER MUST NOT HOLD ITS SPAWNER'S STDERR (s501t, #2602) ---------
+# The server lives until its OWNER (the test process) exits.  When the first
+# call for a key comes from under a captured `2>&1` -- a gate row's
+# `sbcl … 2>&1` whose runtime makes a `pl2cl --module` call (a module-cache
+# miss; the runtime's PCL_* environment gives it a key of its own) -- an
+# inherited stderr is that pipe, the owner reads it to EOF, and EOF never
+# comes: tie-aggregate-01.t hung the s506 gate this way.  The server daemon
+# reopens stdin, stdout AND stderr on /dev/null.
+{
+    my $d = tempdir(CLEANUP => 1);
+    open my $fh, '>', "$d/a.pl" or die "$d/a.pl: $!";
+    print $fh "print 1;\n";
+    close $fh;
+    local $ENV{PCL_XSERVER}       = "$d/s";
+    local $ENV{PCL_XSERVER_OWNER} = $$;
+    my $out = eval {
+        local $SIG{ALRM} = sub { die "HANG\n" };
+        alarm 30;
+        my $o = `$pl2cl $d/a.pl 2>&1`;
+        alarm 0;
+        $o;
+    };
+    ok(defined $out && $out =~ /pl-print|p-print/,
+       'a server spawned under a captured 2>&1 does not hold the pipe open')
+        or diag(defined $out ? "output: $out" : "error: $@");
+}
+
 # PCLCore is the ONLY place that turns the server on: everything else in the
 # tree — pl2cl itself, the sweep, the suite runner, the installer — must be
 # unaffected unless a gate test process is its ancestor.  A second setter would

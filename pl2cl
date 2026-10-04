@@ -164,6 +164,14 @@ BEGIN {
         POSIX::setsid();
         open(STDIN,  '<', '/dev/null');
         open(STDOUT, '>', '/dev/null');
+        # STDERR too (s501t, task #2602): the server outlives this call and
+        # lives until its OWNER exits, so a stderr inherited from a caller that
+        # captures it (`sbcl … 2>&1` in a gate row, whose runtime makes the
+        # first `pl2cl --module` call for a new key) is a pipe the owner reads
+        # to EOF -- which never comes while the owner is alive.  A deadlock.
+        # Each REQUEST's stderr travels back over the socket (_xserve), and a
+        # server that fails to start is announced by the client (_xc_down).
+        open(STDERR, '>', '/dev/null');
         # `or do {…}`, not a statement after exec(): the latter is what perl
         # warns "Statement unlikely to be reached" about — on EVERY transpile,
         # which would put a line on the stderr this script must keep clean.
