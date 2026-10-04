@@ -162,7 +162,7 @@ A `#!` line that does not name perl, such as `#!/bin/sh`, is a comment to
 | `PERL5OPT` | its switches are added | not read |
 | a switch error | exit status from `errno`, usually 25 | always 25 |
 | error messages | | the text may differ; the failing place is the same. An uncaught `die` in a run with switches on the command line or with `-e` prints one extra line first, `While evaluating the form ...` |
-| `-c` | a syntax check | runs the compile phase and says `syntax OK`, but PCL assumes the program is valid Perl: a statement it cannot compile is reported on STDERR and the verdict is still `syntax OK`. A known bug: after the first `use` of a module, later `BEGIN` blocks and `use` lines can be skipped, so a missing module may go unnoticed |
+| `-c` | a syntax check | runs the compile phase and says `syntax OK`, but PCL assumes the program is valid Perl: a statement it cannot compile is reported on STDERR and the verdict is still `syntax OK`. |
 | `-v`, `-V`, `-h` | perl's texts and `%Config` | `pcl`'s version, PCL's own `%Config`, `pcl`'s usage |
 | no program, STDIN a terminal | waits for the program | prints the usage |
 | `#!` without `perl` | runs that interpreter | compiles the file as Perl |

@@ -2193,12 +2193,47 @@
   (loop while *unitcheck-blocks* do (funcall (pop *unitcheck-blocks*)))
   (loop while *check-blocks* do (funcall (pop *check-blocks*))))
 
+;;; A REQUIRED FILE IS A UNIT, NOT A PROGRAM (task #2690; ir-spec §9.0a).
+;;; Every generated file ends its compile phase with (p-run-compile-phase-
+;;; blocks), a module too.  Perl gives a required file only its own UNITCHECK
+;;; blocks at that point; its CHECK and INIT blocks join the MAIN program's
+;;; queues while the main program is still compiling (a `use`, a BEGIN-time
+;;; require) and are "too late to run" -- dropped -- once it runs.  Before
+;;; this, the first module a program `use`d ran the PROGRAM's queued CHECK and
+;;; INIT blocks at its own boundary: `CHECK {…} use List::Util; BEGIN {…}`
+;;; ran the CHECK first, and `pcl -c` (whose expansion is a first CHECK block
+;;; that exits) said "syntax OK" before a later `use` could fail.
+;;; So the loader gives each unit FRESH queues; the unit's boundary drains its
+;;; UNITCHECKs only; on a normal return its CHECK/INIT blocks are spliced on
+;;; top of the caller's (newest first, like a push) or dropped when the main
+;;; program's boundary has already passed.
+(defvar *p-unit-load* nil
+  "True while a required file (a module, an extension) is being loaded:
+   its (p-run-compile-phase-blocks) is a UNIT boundary, not the program's.")
+
+(defun %p-load-unit (thunk)
+  "Call THUNK (the load of one required file) with the unit's own phase
+   queues; see the note above *p-unit-load*."
+  (let (check init)
+    (multiple-value-prog1
+        (let ((*p-unit-load* t) (*unitcheck-blocks* nil)
+              (*check-blocks* nil) (*init-blocks* nil))
+          (multiple-value-prog1 (funcall thunk)
+            (setf check *check-blocks* init *init-blocks*)))
+      (unless *p-compile-phase-done*
+        (setf *check-blocks* (append check *check-blocks*)
+              *init-blocks* (append init *init-blocks*))))))
+
 (defun p-run-compile-phase-blocks ()
   "The compile->run boundary of the main program: run UNITCHECK blocks
    (reverse order), then CHECK blocks (reverse order), then INIT blocks
    (source order).  Emitted once, before the first runtime section.
    Blocks registered later (a runtime require or eval) are perl's 'too
-   late to run' case — they never fire."
+   late to run' case — they never fire.  Inside a required file it is that
+   UNIT's boundary: its UNITCHECK blocks only (see %p-load-unit)."
+  (when *p-unit-load*
+    (loop while *unitcheck-blocks* do (funcall (pop *unitcheck-blocks*)))
+    (return-from p-run-compile-phase-blocks nil))
   (%p-drain-compile-blocks)
   (setf *p-compile-phase-done* t)
   (setf *init-blocks* (reverse *init-blocks*))
@@ -25339,7 +25374,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    caller would keep reporting the module's file after the require returned.
    p-loc-save restores on a NORMAL return only -- a die during the load must
    still name the module."
-  (p-loc-save (%p-load-module-cached-1 source-path)))
+  (p-loc-save (%p-load-unit (lambda () (%p-load-module-cached-1 source-path)))))
 
 (defun %p-load-module-cached-1 (source-path)
   "p-load-module-cached's body; see it for the contract."
@@ -36032,7 +36067,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (len (length @INC))
                 (pl2cl *pcl-pl2cl-path*)
                 (core-dirs *p-core-inc-dirs*))
-            (%p-load-extension-file name file)
+            (%p-load-unit (lambda () (%p-load-extension-file name file)))
             (%pcl-check-extension-clean name inc len pl2cl core-dirs))
           (setf (gethash name *pcl-loaded-extensions*) t)
           (return-from p-load-extension t)))))

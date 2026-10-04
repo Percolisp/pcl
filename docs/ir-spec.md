@@ -4003,6 +4003,25 @@ string eval (documented divergence). Translators targeting environments
 without a runtime compiler must either bundle one or reject `eval EXPR`
 programs — there is no static escape.
 
+### 9.0a A required file is a UNIT, not a program (normative, s507c, task #2690)
+
+Every generated file, a module's included, ends its compile phase with
+`(p-run-compile-phase-blocks)`.  Only the MAIN program's is the program's
+compile->run boundary.  The loader of a required file (a `use`, a `require`,
+an extension) runs it with fresh UNITCHECK / CHECK / INIT queues
+(`%p-load-unit`), and the file's boundary runs ITS UNITCHECK blocks only.  On
+a normal return the file's CHECK and INIT blocks are placed on top of the
+caller's queues as if pushed there — while the main program is still
+compiling (a `use`, a `BEGIN`-time `require`) they therefore run at the main
+boundary, CHECK newest first, INIT in compile order — and once the main
+boundary has passed they are dropped (perl's "too late to run"; the warning
+itself is warnings-gated and absent).  Example, probed:
+`BEGIN {print "b1\n"} CHECK {print "c1\n"} use M; CHECK {print "c2\n"}` with
+`M` holding `UNITCHECK {print "mu\n"} CHECK {print "mc\n"}` prints
+`b1 mu c2 mc c1`.  A translator that drains the global queues at every file's
+boundary runs the program's CHECK blocks at its first module's boundary, which
+is how `pcl -c` said `syntax OK` before a later `use` could fail.
+
 ### 9.1 The string-eval protocol (normative, s295)
 
 String eval must let the eval'd code *read and write* the enclosing
