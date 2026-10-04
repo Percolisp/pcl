@@ -666,8 +666,10 @@ diag "-------- Unique Parameter Names (Issue: duplicate \$ params):";
   is($proto->{params}[0]{proto_type}, '*', 'first param proto_type is *');
   is($proto->{params}[1]{proto_type}, '@', 'second param proto_type is @');
 
-  # Old-style prototypes use &rest (body accesses @_)
-  like($cl, qr/\(p-sub pl-with_glob \(&rest %_args\)/,
+  # Old-style prototypes use &rest (body accesses @_).  \s+, not one space: the
+  # printer breaks the form onto lines when it is long (s507b: the empty body
+  # now ends in (p-return-empty)), and the lambda list is the claim here.
+  like($cl, qr/\(p-sub pl-with_glob\s+\(&rest %_args\)/,
        '*@ prototype uses &rest pattern for @_ access');
 }
 
