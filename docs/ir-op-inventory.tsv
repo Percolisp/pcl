@@ -65,12 +65,13 @@ $^r	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	U
 $^s	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl $^S - eval state: 0 runtime, 1 inside eval
 $^t	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl $^T - program start time (seconds since Unix epoch)
 $^v	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl version (compatibility). Payload 5.30.0 matches $] = 5.030000.
-$^w	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl $^W - global warnings flag. Inert 0: PCL does not model runtime warning-level switching; reads/writes must simply not crash (run/switcht.t, uni/variables.t
+$^w	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl $^W - global warnings flag: the PROGRAM's variable. `perl -w` (and `pcl -w`, a #!perl -w line) sets it to 1 at compile time; a program reads and assigns it
 $^x	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl executable path
 $_	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl's $_ - default variable
 |$`|	symbol-macro	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		
 $ARGV	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl $ARGV - current filename of the <> diamond operator ("-" for STDIN)
 ${^taint}	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Taint mode is not enabled
+${^unicode}	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl ${^UNICODE} - perl's -C flags as a number; 0 without -C, as perl reads it. `pcl -C...` sets it at compile time (tools/lib/PCLSwitches.pm, s506f).
 |$\||	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Output autoflush flag (magic — per selected handle, writes clamp to 0/1)
 $~	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		FORMAT_NAME - name of current report format for write (defaults to the selected handle's name, like Perl)
 %!	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl %! — one magic value per errno name; true only for the current errno.

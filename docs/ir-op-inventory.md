@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **740**
+* names exported: **741**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 740
+* with a machine-readable `Contract:` tail: **69** of 741
 * UNCLASSIFIED (no family rule matches): **9**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -646,7 +646,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-esc` | macro | `(payload)` | insensitive | none | none | no | no | no | none |
 | `p-fact` | macro | `(licence form)` | insensitive | none | none | no | no | no | none |
 
-## magic-global (137)
+## magic-global (138)
 
 *No ir-spec §10 row.*  the magic globals themselves — ir-spec §8
 
@@ -710,6 +710,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `$^x` | variable | `` | — | — | — | — | — | — | — |
 | `$_` | variable | `` | — | — | — | — | — | — | — |
 | `${^taint}` | variable | `` | — | — | — | — | — | — | — |
+| `${^unicode}` | variable | `` | — | — | — | — | — | — | — |
 | `$~` | variable | `` | — | — | — | — | — | — | — |
 | `%!` | variable | `` | — | — | — | — | — | — | — |
 | `%$` | variable | `` | — | — | — | — | — | — | — |

@@ -38,7 +38,7 @@ my $inst = "$root/tools/install-pcl";
 
 plan skip_all => "install-pcl not executable" unless -x $inst;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
-plan tests => 60;
+plan tests => 61;
 
 my $prefix = tempdir(CLEANUP => 1);
 
@@ -138,6 +138,8 @@ like($shown, qr{--core \Q$full/lib/pcl/pcl.core\E},
 # --- 2. the installed pcl runs ----------------------------------------------
 is(`$full/bin/pcl $src 2>&1`, $perl_out, 'the installed pcl runs a script');
 is(`$full/bin/pcl -e 'print 1+2, "\\n"' 2>&1`, "3\n", 'and inline code');
+is(`printf 'a b\\nc d\\n' | $full/bin/pcl -lane 'print \$F[1]' 2>&1`, "b\nd\n",
+   'and a one-liner with perl\'s switches (-lane): PCLSwitches reached the installation (s506f)');
 
 # --- 3. from another cwd, and through a SYMLINKED bin directory -------------
 # Both are ways of reaching the wrapper by a path that is not the install's:
