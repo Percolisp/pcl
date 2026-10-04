@@ -2451,7 +2451,13 @@ sub _transform_pkg_var {
   }
   # Pipe-quote if the name contains characters CL can't read as a bare symbol
   # (e.g. $" → |$"|, $\ → |$\\|, $| → |$\||, $; → |$;|)
-  if ($var =~ /["|;,()\[\]{}'`\\]/) {
+  # A CARET variable ($^W, $^P, $^O …) is pipe-quoted too: it names the
+  # RUNTIME's symbol (`|$^W|`), and generated code loads under :invert, where
+  # a bare all-caps token reads DOWN-cased — `(let (($^W …)))` bound a
+  # symbol nobody reads, so `local $^W = 0` was lost.  The expression path
+  # has always quoted them (Pl::ExprToCL's %SPECIAL_VARS); this is the same
+  # spelling for the `local` binding (s507 review F1).
+  if ($var =~ /["|;,()\[\]{}'`\\]/ || $var =~ /^[\$\@\%]\^/) {
     (my $inner = $var) =~ s/([|\\])/\\$1/g;
     return "|$inner|";
   }

@@ -249,4 +249,34 @@ row('#!perl -v is refused in one line (perl prints its version; running would be
     q{sv.pl}, '', "pcl: -v on the #! line is not supported (at sv.pl line 1)\n", 255);
 row('PCL_TAINT_QUIET=1 silences it', q{-t -e 'print "ok\n"'}, "ok\n", '', 0, env => 'PCL_TAINT_QUIET=1');
 
+# ---- s507 review fixes ----------------------------------------------------
+# F1: `local $^W = 0` -- the pre-`no warnings` way to quiet a block -- bound a
+# DOWN-cased symbol under :invert, so the program's $^W never changed.  A
+# called sub sees the local value; it comes back after a die out of an eval.
+row('local $^W = 0 takes effect, reaches a called sub, is restored after die',
+    q{-e '$^W = 1; { local $^W = 0; print "in:$^W\n" } print "out:$^W\n"; sub p { print "sub:$^W\n" } { local $^W = 0; p() } eval { local $^W = 0; die "x\n" }; print "die:$^W\n"'},
+    "in:0\nout:1\nsub:0\ndie:1\n", '', 0);
+row('-w + local $^W = 0: the block is quiet', q{-w -e '{ local $^W = 0; print "q:$^W\n" } print "w:$^W\n"'},
+    "q:0\nw:1\n", '', 0);
+row('local on another caret variable ($^P) binds the runtime\'s symbol too',
+    q{-e '{ local $^P = 1; print "P:$^P\n" } print "P:$^P\n"'}, "P:1\nP:0\n", '', 0);
+# (F2, #2492 -- the SBCL load context in front of a -e program's die -- is NOT
+# fixed here: routing the temp program through the script cache's fasl loader
+# exposes #2686 to every -e run; measured, see #2492.)
+# F3: no argument at all after -M is perl's "Missing argument"; an EMPTY one
+# is "Module name required" (row above).
+row('-M with nothing after it', q{-M}, '', "Missing argument to -M.\n", 25);
+row('-m with nothing after it', q{-m}, '', "Missing argument to -m.\n", 25);
+# F4: pl2cl's STDIN path honours a #! line for a PROGRAM only -- never under
+# --module / --extension (perl reads the main program's #! line only).
+{
+    put('M4.pm', "#!perl -l\npackage M4; sub f { 1 } 1;\n");
+    for my $mode ('--module', '--extension') {
+        my $cl = `'$root/pl2cl' $mode < '$dir/M4.pm' 2>&1`;
+        ok($cl !~ /\(p-setf \|\$\\\\\| /, "pl2cl $mode on STDIN ignores the #! line (no -l \$\\)");
+    }
+    my $cl = `'$root/pl2cl' < '$dir/M4.pm' 2>&1`;
+    ok($cl =~ /\(p-setf \|\$\\\\\| /, 'pl2cl on STDIN, a program: the #! -l applies (control)');
+}
+
 done_testing();

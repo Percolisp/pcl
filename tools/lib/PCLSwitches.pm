@@ -148,8 +148,10 @@ sub _check_word_arg {
     return undef;
   }
   return undef if $ch eq 'I';
-  # -M / -m
-  my $spec = defined $arg ? $arg : '';
+  # -M / -m.  NO argument at all is perl's "Missing argument"; an EMPTY one
+  # (`-M ''`) is its "Module name required" (both probed, s507 review F3).
+  return ['!', "Missing argument to -$ch.\n", $SWITCH_ERROR_STATUS] if !defined $arg;
+  my $spec = $arg;
   (my $name = $spec) =~ s/^-//;
   $name =~ s/[= ].*//s;
   return ['!', "Module name required with -$ch option.\n", $SWITCH_ERROR_STATUS]

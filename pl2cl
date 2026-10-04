@@ -1175,7 +1175,9 @@ elsif (!-t STDIN) {
   # DATA handle of every program transpiled through the stdin path — which is
   # how tools/emission-ab.pl feeds files.
   $code = do { local $/; <STDIN> };
-  if (!defined $eval_pkg) {
+  # A PROGRAM only: never an eval string, a module or an extension (the file
+  # path's rule, above; perl reads the #! line of the main program only).
+  if (!defined $eval_pkg && !$is_module && !$is_extension) {
     my $t = program_text($code, defined $source_name ? $source_name : '-');
     $code = $t if defined $t;
   }
