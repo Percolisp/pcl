@@ -304,6 +304,9 @@ my @benches = (
   ['splitcomma', "$HN my \$l = join(',', 1 .. 20); my \$s=0; for (1..\$n) { my \@f = split(',', \$l); \$s += \@f } print \"\$s\\n\";", 300_000, 0],
   ['splitspace', "$HN my \$l = join(' ', 1 .. 20); my \$s=0; for (1..\$n) { my \@f = split(' ', \$l); \$s += \@f } print \"\$s\\n\";", 300_000, 0],
   ['splitstrre', "$HN my \$l = join('.', 1 .. 20); my \$s=0; for (1..\$n) { my \@f = split('\\\\.', \$l); \$s += \@f } print \"\$s\\n\";", 300_000, 0],
+  # s507b (#2084 (2)): `local` on an ordinary package scalar inside a called
+  # sub -- the p-local-cell save/install/restore path that gained a tie test.
+  ['localvar',  "$HN our \$g = 0; sub lv { local \$g = \$_[0]; \$g + 1 } my \$s=0; for my \$i (1..\$n) { \$s += lv(\$i) } print \"\$s\\n\";", 2_000_000, 0],
   # Round 37 (s500p): a double stringified and sprintf'd per iteration (task
   # #2510, the Heronian `sprintf("%.0f", $h) eq $h` shape); join over an
   # array and an interpolated slice (#2511, Self-describing-numbers); grep in
