@@ -22,6 +22,10 @@ use File::Temp qw(tempdir);
 
 my $root = "$RealBin/../..";
 my $pcl  = "$root/pcl";
+# PCL_SWITCHES_ORACLE=perl runs every row under perl instead: how the
+# expected values were probed (the pcl-only rows -- -v, -V, -h, -d, -S's
+# message, --verbose -- then fail, as they should).
+$pcl = 'perl' if ($ENV{PCL_SWITCHES_ORACLE} // '') eq 'perl';
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
 my $dir = tempdir(CLEANUP => 1);
@@ -95,9 +99,60 @@ row('-d is refused with one tidy line', q{-d -e 1}, '', "pcl: the perl debugger 
 row('-D warns as a non-debugging perl does and runs the program',
     q{-Dt -e 'print "D\n"'}, "D\n", "Recompile perl with -DDEBUGGING to use -D switch (did you mean -d ?)\n", 0);
 put('spath.pl', qq{print "found via PATH\\n";\n});
-mkdir "$dir/sbin"; rename "$dir/spath.pl", "$dir/sbin/spath.pl";
+mkdir "$dir/sbin"; rename "$dir/spath.pl", "$dir/sbin/spath.pl"; chmod 0755, "$dir/sbin/spath.pl";
 row('-S looks the program up along PATH', q{-S spath.pl}, "found via PATH\n", '', 0,
     env => "PATH=\"$dir/sbin:\$PATH\"");
+put('sbin/plain.pl', qq{print 1;\n});
+row('-S: found but not executable', q{-S plain.pl}, '', "Can't execute $dir/sbin/plain.pl.\n", 25,
+    env => "PATH=\"$dir/sbin:\$PATH\"");
+row('-S: not on PATH', q{-S nosuch-s506f.pl}, '', "Can't find nosuch-s506f.pl on PATH.\n", 25);
 row('--verbose is the long spelling of the old -v', q{--verbose -e 1}, '', qr/^pcl: exec sbcl /m, 0);
+
+# ---- member 2: the expansion (perlrun's documented equivalents) -----------
+my $IN = "a b c\nd e f\n\ng:h:i\n";
+row('-n', q{-ne 'print if /e/'}, "d e f\n", '', 0, stdin => $IN);
+row('-p', q{-pe 's/a/A/'}, "A b c\nd e f\n\ng:h:i\n", '', 0, stdin => $IN);
+row('-l chomps under -n and sets $\\', q{-lne 'print length'}, "5\n5\n0\n5\n", '', 0, stdin => $IN);
+row('-lane (cluster): -a splits on whitespace', q{-lane 'print $F[1] // "u"'}, "b\ne\nu\nu\n", '', 0, stdin => $IN);
+row('-F: (a plain pattern string)', q{-F: -lane 'print $F[1] // "u"'}, "u\nu\nu\nh\n", '', 0, stdin => $IN);
+row('-F/:/ (slash-quoted)', q{'-F/:/' -lane 'print $F[1] // "u"'}, "u\nu\nu\nh\n", '', 0, stdin => $IN);
+row('-F"X" (double-quoted)', q{'-F"X"' -lane 'print $F[1]'}, "b\n", '', 0, stdin => "aXbXc\n");
+row('-F implies -a implies -n', q{-F: -le 'print $F[2]'}, "c\n", '', 0, stdin => "a:b:c\n");
+row('-00 paragraph mode', q{-00 -ne 'print "<$_>"'}, "<a b c\nd e f\n\n><g:h:i\n>", '', 0, stdin => $IN);
+row('-0777 slurps', q{-0777 -ne 'print length'}, "19", '', 0, stdin => $IN);
+row('-g slurps', q{-g -ne 'print length'}, "19", '', 0, stdin => $IN);
+row('-0xHH: a hexadecimal separator', q{-0x78 -ne 'print "<$_>"'}, "<ax><bx><c>", '', 0, stdin => "axbxc");
+row('-l then -0040: $\\ is the "\\n" -l saw', q{-l -0040 -e 'BEGIN { print STDOUT unpack("H*", $\), "|" }'},
+    "0a|\n", '', 0);
+row('-0040 then -l: $\\ is the space -0 set', q{-0040 -l -e 'BEGIN { print STDOUT unpack("H*", $\), "|" }'},
+    "20| ", '', 0);
+row('$/ from -0 is set at compile time (a BEGIN sees it)',
+    q{-0777 -e 'BEGIN { print defined $/ ? "rs\n" : "slurp at compile time\n" }'}, "slurp at compile time\n", '', 0);
+row('-i with no file names says so as the run starts; $^I visible to BEGIN',
+    q{-i -e 'BEGIN { print defined $^I ? "[$^I]\n" : "u\n" }'}, "[]\n",
+    "-i used with no filenames on the command line, reading from STDIN.\n", 0);
+put('ip.txt', "foo\nbar\n");
+row('-pi.bak edits in place', q{-pi.bak -e 's/foo/X/' ip.txt}, '', '', 0);
+{
+    my $read = sub { local $/; open my $h, '<', "$dir/$_[0]" or return "(missing)"; my $t = <$h>; $t };
+    is($read->('ip.txt'), "X\nbar\n", '-pi.bak: the file is rewritten');
+    is($read->('ip.txt.bak'), "foo\nbar\n", '-pi.bak: the backup holds the original bytes');
+}
+row('line numbers do not move under -n', q{-ne 'print __LINE__, "\n" if $. == 2'}, "1\n", '', 0, stdin => $IN);
+put('mfile.pl', qq{#!perl\nprint "\$0 ", __FILE__, " ", __LINE__, "\\n" if \$. == 1;\n});
+row('a file under -n keeps its name and line numbers', q{-n mfile.pl}, "mfile.pl mfile.pl 2\n", '', 0, stdin => $IN);
+put('nend.pl', qq{print "[\$_]";\n__END__\nignored\n});
+row('-n closes the loop before __END__', q{-n nend.pl}, "[x\n][y\n]", '', 0, stdin => "x\ny\n");
+put('hd.pl', qq{print <<EOT;\nx \$_\n__END__\nEOT\n__END__\nzz\n});
+row('a __END__ line inside a heredoc is not the end', q{-n hd.pl}, "x a\n\n__END__\nx b\n\n__END__\n", '', 0, stdin => "a\nb\n");
+put('pod.pl', qq{print "[\$_]";\n=pod\n\n__END__\n\n=cut\nprint "after pod\\n";\n__DATA__\nd1\n});
+row('a __END__ line inside POD is not the end', q{-n pod.pl}, "[a\n]after pod\n", '', 0, stdin => "a\n");
+put('data.pl', qq{print "[\$_]";\nprint <DATA>;\n__DATA__\nd1\n});
+row('<DATA> still reads after a -n program', q{-n data.pl}, "[a\n]d1\n", '', 0, stdin => "a\n");
+put('mfile2.pl', qq{#!perl\nprint "\$0 ", __FILE__, " ", __LINE__, "\\n";\n});
+row('-M with a file: the script keeps its line numbers', q{-MData::Dumper mfile2.pl},
+    "mfile2.pl mfile2.pl 2\n", '', 0);
+row('-MList::Util=sum -lane', q{-MList::Util=sum -lane 'print sum(map { length } @F)'}, "3\n3\n\n5\n", '', 0, stdin => $IN);
+row('-p with next LINE', q{-lpe 'next LINE if /d/; $_ .= "!"'}, "a b c!\nd e f\n!\ng:h:i!\n", '', 0, stdin => $IN);
 
 done_testing();

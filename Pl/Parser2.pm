@@ -202,11 +202,16 @@ sub _publish_strict_refs {
     Pl::Parser::unicode_strings_at($lh->{_unicode_strings_regions}, $loc);
 }
 
+# `text`: the file's program text as the DRIVER's switches and its own #! line
+# made it (pl2cl's PCLSwitches::expand_program, s506f).  The file is still
+# the source of record -- its name is what __FILE__ and every location say --
+# but the bytes compiled are these.  Absent = the file's own bytes.
 sub parse_file {
   my ($class, $fn, %opts) = @_;
   return $class->new(filename => $fn,
                      (defined $opts{source_name} ? (source_name => $opts{source_name}) : ()),
                      ($opts{module_unit} ? (module_unit => 1) : ()),
+                     (defined $opts{text} ? (code => $opts{text}) : ()),
                     )->parse;
 }
 sub parse_code {

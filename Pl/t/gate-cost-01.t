@@ -412,7 +412,7 @@ PL
             push @value_opts, split /\|/, $1;
         }
     }
-    my %served  = map { $_ => 1 } qw(deps as);
+    my %served  = map { $_ => 1 } qw(deps as switches);
     my %declined = map { $_ => 1 } qw(output o eval-pkg xsock);
     my @unhandled = sort grep { !$served{$_} && !$declined{$_} } @value_opts;
     ok(scalar(@value_opts) >= 4, 'found pl2cl\'s value-taking options')

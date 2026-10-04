@@ -125,12 +125,26 @@ elsif (!@code && (!defined $source || $source eq '-')) {
 # and applies the ONE expansion (PCLSwitches::expand_program).
 my $source_events = PCLSwitches::source_events($sw->{events});
 
-# -S: look the program up along PATH unless its name has a directory part.
+# -S: look the program up along PATH unless its name has a directory part,
+# with perl's three answers (probed): an executable file is the program; a
+# file that is found but not executable is "Can't execute"; none is "Can't
+# find NAME on PATH" (", '.' not in PATH" when ./NAME exists).
 if ($path_search && defined $source && $source !~ m{/}) {
   require File::Spec;
+  my ($exe, $plain);
   for my $d (File::Spec->path) {
     my $f = File::Spec->catfile(length $d ? $d : '.', $source);
-    if (-f $f) { $source = $f; last }
+    next if !-f $f;
+    if (-x _) { $exe = $f; last }
+    $plain //= $f;
+  }
+  if (defined $exe) { $source = $exe }
+  else {
+    my $st = $PCLSwitches::SWITCH_ERROR_STATUS;
+    print(STDERR "Can't execute $plain.\n"), exit $st if defined $plain;
+    print STDERR "Can't find $source on PATH"
+               . (-f $source ? ", '.' not in PATH" : '') . ".\n";
+    exit $st;
   }
 }
 
@@ -203,18 +217,24 @@ exec_sbcl(quiet_load_form($lisp), \@script_args);   # never returns
 # Helpers
 # ===========================================================================
 
-# Transpile $source (a file) or $inline (a code string), honouring -M.
-# Returns the path to a temp .lisp (cleaned up at exit).
+# Transpile $source (a file) or $inline (a code string), honouring the
+# source-changing switches.  Returns the path to a temp .lisp (cleaned up at
+# exit).
 sub transpile {
   my ($source, $inline) = @_;
 
   my $tmp = mktmp('.lisp');
 
-  # -M / -m: the use-lines go on the program's first code line
-  # (PCLSwitches::prefix_first_code_line, task #2460), as perl's preamble
-  # does -- no line number moves.
-  my $use_prefix = join('', map { PCLSwitches::use_line_for_M($_->[1], $_->[0]) }
-                            grep { $_->[0] eq 'M' || $_->[0] eq 'm' } @$source_events);
+  # The source-changing switches (-n -p -l -0 -a -F -i -s -x -E -M -m) go to
+  # pl2cl as they are: it merges them with the program's own #! line and
+  # applies the ONE expansion (PCLSwitches::expand_program), which puts its
+  # text on the program's first code line so no line number moves (#2460).
+  # So a file run with switches is transpiled IN PLACE -- $0, __FILE__,
+  # FindBin and every location name the script as given -- and needs no temp
+  # copy.  The script's own directory is NOT put on @INC (task #2442): perl
+  # does not either.
+  my @switches = @$source_events
+    ? ('--switches=' . PCLSwitches::encode_events($source_events)) : ();
 
   my @inc_args = map { ("-I", $_) } inc_dirs_for_transpile();
 
@@ -225,20 +245,9 @@ sub transpile {
     # `pcl -e CODE`: $0 and __FILE__ are "-e", as under perl (task #2461); a
     # program read from STDIN is "-".
     $src_path = mktmp('.pl');
-    write_file($src_path, PCLSwitches::prefix_first_code_line($use_prefix, $inline) . "\n");
+    write_file($src_path, $inline . "\n");
     push @cleanup, $src_path;
     @as = ("--as=$as_name");
-  }
-  elsif ($use_prefix ne '') {
-    # File + -M: the use-lines go into a temp copy, on the script's first code
-    # line, and pl2cl compiles it AS the script (task #2460): $0, __FILE__,
-    # line numbers, die/warn locations and FindBin name the script as given.
-    # The script's own directory is NOT put on @INC (task #2442): perl does
-    # not either.
-    $src_path = mktmp('.pl');
-    write_file($src_path, PCLSwitches::prefix_first_code_line($use_prefix, slurp($source)));
-    push @cleanup, $src_path;
-    @as = ("--as=$source");
   }
   else {
     $src_path = $source;
@@ -249,7 +258,7 @@ sub transpile {
   # into the preamble); forwarding it is the whole implementation — a second
   # mechanism here would be a second answer to the same question (rule 11).
   my $rc = run('perl', @inc_args, $PL2CL, ($no_cache ? '--no-cache' : ()),
-               @as, $src_path, { stdout => $tmp });
+               @as, @switches, $src_path, { stdout => $tmp });
   unlink @cleanup;
 
   if ($rc != 0) {

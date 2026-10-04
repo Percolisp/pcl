@@ -222,7 +222,7 @@ BEGIN {
     my @nonflag;
     for (my $i = 0; $i < @ARGV; $i++) {
       my $a = $ARGV[$i];
-      if ($a =~ /^-/) { $i++ if $a eq '--deps' || $a eq '--as'; next }
+      if ($a =~ /^-/) { $i++ if $a eq '--deps' || $a eq '--as' || $a eq '--switches'; next }
       push @nonflag, $a;
     }
     last XCLIENT if @nonflag != 1 || !-f $nonflag[0];
@@ -437,7 +437,7 @@ sub parse_source {
   # used to paper over now dies naming the file, from Parser2's PPI check.
   delete $opts{lenient_ppi};
   my %known = (eval_mode => 1, eval_pkg => 1, eval_captures => 1, eval_features => 1,
-               source_name => 1, module_unit => 1);
+               source_name => 1, module_unit => 1, text => 1);
   my @unknown = sort grep { !$known{$_} } keys %opts;
   die "pl2cl: unknown transpile mode(s): @unknown\n" if @unknown;
   # One process can transpile many sources (`--server` answers every string
@@ -495,6 +495,7 @@ my $facts_mode = 0;     # Annotate the emission with every Kind-A/B licence
 my $sexp_mode = 0;      # Print the lowered tree as PORTABLE S-expressions
 my $deps_file;          # Write the dependency manifest sidecar here (#1261)
 my $source_name;        # --as NAME: the program's own name for the source (#2460/#2461)
+my $perl_switches;      # --switches HEX: the driver's source-affecting perl switches (s506f)
 my $want_help = 0;      # --help; without it GetOptions answered "Unknown option: help"
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
@@ -544,6 +545,9 @@ Options:
                   every " at FILE line N" say NAME (`pcl -e` passes -e;
                   `pcl -M ... script` passes the script as given).  Line
                   numbers are the file's own.
+  --switches HEX  perl's source-changing switches (-n -p -l -0 -a -F -i -s
+                  -x -E -M -m), as `pcl` encodes them; merged with the
+                  program's own #! line (tools/lib/PCLSwitches.pm)
   --deps FILE     Write the dependency manifest sidecar to FILE: every
                   module whose prototypes/exports this parse read, with
                   a content hash (the runtime's cache validity, #1261)
@@ -581,6 +585,7 @@ GetOptions(
   "emit-sexp"    => \$sexp_mode,     # print the data form INSTEAD of the CL
   "deps=s"       => \$deps_file,     # write the dependency manifest sidecar
   "as=s"         => \$source_name,   # $0 / __FILE__ / die locations name NAME
+  "switches=s"   => \$perl_switches, # the driver's perl switches (PCLSwitches, s506f)
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or do {
   # An EXPLICIT exit code, not `die`: perl's exit status for an uncaught die is
@@ -1038,6 +1043,57 @@ sub print_manifest {
 # ordinary invocation and from a forked child for each `--xserver` request
 # (task #1545).  The body is left at column 0: it moved into this sub
 # unchanged, and a re-indent would have hidden that in the diff.
+sub slurp_raw {
+  my ($path) = @_;
+  open my $fh, '<:raw', $path or die "pl2cl: cannot read $path: $!\n";
+  local $/;
+  my $t = <$fh>;
+  return defined $t ? $t : '';
+}
+
+# THE ONE SWITCH EXPANSION (s506f; tools/lib/PCLSwitches.pm): a PROGRAM's
+# text with the driver's source-changing switches (`--switches`, from `pcl`
+# or tools/pclperl-for-tests) and its own `#!perl -SWITCHES` line applied --
+# perlrun's documented equivalents, with no line number moved.  Returns undef
+# when nothing applies (the common case: one regex on line 1), so the parser
+# reads the file exactly as before.  A switch error (`Can't emulate -x on #!
+# line`, `Too late for "-M"`, -x's "No Perl script found") is perl's message
+# and perl's exit status.
+sub program_text {
+  my ($text, $name) = @_;
+  return undef if !defined $perl_switches && $text !~ /\A#![^\n]*perl/;
+  { local @INC = (@INC, "$ROOT/tools/lib"); require PCLSwitches; }
+  my ($new, $err) = PCLSwitches::expand_program(
+    $text, PCLSwitches::decode_events($perl_switches),
+    file => $name, end_of_code => \&end_of_code);
+  if ($err) { print STDERR $err->[1]; exit $err->[2] }
+  return $new eq $text ? undef : $new;
+}
+
+# Where a program's CODE ends, for -n/-p's closing brace (the byte offset of
+# the line holding __END__/__DATA__, else of a trailing POD block, else the
+# end).  PPI's answer, because a text scan cannot know that a `__END__` line
+# inside a heredoc or a POD block is not the end (probed under perl, s506f).
+# Called only when -n or -p is in force.
+sub end_of_code {
+  my ($text) = @_;
+  require PPI;
+  my $doc = PPI::Document->new(\$text) or return length $text;
+  my ($end) = grep { $_->isa('PPI::Statement::End') || $_->isa('PPI::Statement::Data') }
+              $doc->children;
+  my @sig = grep { !$_->isa('PPI::Token::Whitespace') } $doc->children;
+  $end = $sig[-1] if !$end && @sig && $sig[-1]->isa('PPI::Token::Pod');
+  return length $text if !$end;
+  my $line = $end->location->[0];
+  my $at = 0;
+  for (2 .. $line) {
+    my $nl = index($text, "\n", $at);
+    return length $text if $nl < 0;
+    $at = $nl + 1;
+  }
+  return $at;
+}
+
 sub _run_cli {
 
 if ($server_mode) {
@@ -1057,8 +1113,15 @@ if ($bundle_mode || $executable_mode) {
 
 if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
+  # A PROGRAM's switches: the driver's and the file's own #! line, one
+  # expansion (s506f).  Never for a module or an extension -- perl examines
+  # the #! line of the main program only.
+  my $text = ($is_module || $is_extension) ? undef
+           : program_text(slurp_raw($source_file),
+                          defined $source_name ? $source_name : $source_file);
   my $output = parse_source('parse_file', $source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()),
+    (defined $text ? (text => $text) : ()),
     (defined $source_name ? (source_name => $source_name) : ()),
     # #2633: a module / extension is not the PROGRAM unit — its promoted file
     # lexicals take unit-unique cells, never the identity spelling.
@@ -1112,6 +1175,10 @@ elsif (!-t STDIN) {
   # DATA handle of every program transpiled through the stdin path — which is
   # how tools/emission-ab.pl feeds files.
   $code = do { local $/; <STDIN> };
+  if (!defined $eval_pkg) {
+    my $t = program_text($code, defined $source_name ? $source_name : '-');
+    $code = $t if defined $t;
+  }
   my $output = parse_source('parse_code', $code,
                  (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 

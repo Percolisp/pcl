@@ -344,6 +344,10 @@ sub _prefix {
   push @begin, _s_switch_code() if $st->{s};
   my $pre = '';
   $pre .= 'BEGIN { ' . join(' ', @begin) . ' } ' if @begin;
+  # perl's -i, given no file to edit, says so as the run starts (after the
+  # compile phase: a BEGIN that empties @ARGV silences it -- probed).
+  $pre .= 'INIT { warn "-i used with no filenames on the command line, reading from STDIN.\n"'
+        . ' if !@ARGV } ' if defined $st->{inplace};
   $pre .= "use feature ':5.40'; use builtin ':5.40'; " if $st->{E};
   $pre .= use_line_for_M($_->[1], $_->[0]) for @{ $st->{mods} };
   if ($loop->{n} || $loop->{p}) {
