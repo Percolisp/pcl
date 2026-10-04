@@ -113,9 +113,15 @@ is [`not-supported.md`](not-supported.md). The main items:
 * **The first run after an edit compiles.** A large program pays its
   compile once (about six seconds for 1,200 lines) and then starts from its
   cache entry in about 0.04 seconds. Modules and the runtime itself are
-  cached the same way, under `~/.pcl-cache`; `pcl -e` one-liners are not.
+  cached the same way, under `~/.pcl-cache`; `pcl -e` one-liners, and a
+  script run with a source-changing switch (`-n`, `-M`, `-l`, ...), are not.
   [`caching.md`](caching.md) says what is cached, where, and how to clear or
   disable it.
+* **`pcl` takes perl's command-line switches** (`-lane`, `-pi.bak`,
+  `-0777`, `-F:`, `-s`, `-x`, `-E`, `-C`, `-w` ...) by perl's rules, and a
+  script's own `#!perl -SWITCHES` line; taint (`-T`) is accepted but not
+  applied, and says so; the debugger (`-d`) is refused
+  ([`pcl-commands.md`](pcl-commands.md)).
 * **Signatures are read as signatures whenever the feature could be on.**
   In perl, a `sub f ($x)` before the pragma is an old-style prototype. PCL
   follows the pragma's region rules; see "Signature syntax" in
