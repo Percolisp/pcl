@@ -225,6 +225,7 @@ my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
   getprotoent getservbyname getservbyport getservent
   gethostbyname gethostbyaddr gethostent
   getnetbyname getnetbyaddr getnetent
+  select
 );
 
 # Only exceptions that need different CL names than p-<perl-op>

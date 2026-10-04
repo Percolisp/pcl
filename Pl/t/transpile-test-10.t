@@ -1426,4 +1426,71 @@ close $tmp; print "4 ", (-e $tmp->filename ? "exists" : "gone"), "\n";
 });
 
 
+# s502e (#2559): 4-arg select hands the kernel real fd_sets -- a ready pipe or
+# socketpair is reported, every defined mask is written back (cleared bits
+# too), list context gives (NFOUND, TIMELEFT).  INVERSE: an empty pipe at
+# timeout 0 and a drained one at a short timeout report 0.
+test_transpile("4-arg select reports ready descriptors and writes the masks back (s502e, #2559)", q{
+alarm 30;  # a regression here BLOCKS (the base hung): fail instead of hanging the gate
+use strict; use warnings; use Socket;
+$| = 1;
+pipe(my $r, my $w) or die;
+my $rin = ''; vec($rin, fileno($r), 1) = 1;
+my $n = select(my $rout = $rin, undef, undef, 0); print "p-empty t0: $n ", vec($rout, fileno($r), 1), " ", length($rout), "\n";
+syswrite($w, "x\n");
+$n = select($rout = $rin, undef, undef, 1); print "p-ready t1: $n ", vec($rout, fileno($r), 1), " ", length($rout), "\n";
+$n = select($rout = $rin, undef, undef, undef); print "p-ready undef: $n\n";
+$n = select($rout = $rin, undef, undef, 0); print "p-ready t0: $n\n";
+my $win = ''; vec($win, fileno($w), 1) = 1;
+$n = select(undef, my $wout = $win, undef, 0); print "p-write: $n ", ($wout eq $win ? "same" : "diff"), "\n";
+my $both = $rin | $win;
+$n = select(my $ro = $rin, my $wo = $win, undef, 0); print "p-both: $n ", (vec($ro, fileno($r), 1)), (vec($wo, fileno($w), 1)), "\n";
+my ($nf, $left) = select(undef, undef, undef, 0.1); print "sleep: $nf ", (defined $left ? "def" : "undef"), "\n";
+sysread($r, my $buf, 10); print "drained [$buf]\n";
+$n = select($rout = $rin, undef, undef, 0.2); print "p-timeout: $n ", (vec($rout, fileno($r), 1) ? "bit" : "nobit"), "\n";
+socketpair(my $a, my $b, AF_UNIX, SOCK_STREAM, PF_UNSPEC) or die "sp: $!";
+my $ain = ''; vec($ain, fileno($a), 1) = 1;
+$n = select(my $ao = $ain, undef, undef, 0); print "s-empty: $n\n";
+syswrite($b, "ping\n");
+$n = select($ao = $ain, undef, undef, 1); print "s-ready: $n ", vec($ao, fileno($a), 1), "\n";
+sysread($a, $buf, 100); print "s-read [$buf]\n";
+close $w; $n = select($rout = $rin, undef, undef, 1); print "p-eof: $n\n";
+my ($c1, $tl) = select(undef, undef, undef, 0.25); printf "tl: %d %s\n", $c1, ($tl >= 0 && $tl < 0.3 ? "range" : "out:$tl");
+my ($c2, $tl2) = select(my $rr = $rin, undef, undef, undef); print "tl-undef: $c2 ", (defined $tl2 ? "def:$tl2" : "undef"), "\n";
+my $bad = ''; vec($bad, 200, 1) = 1; $n = select($bad, undef, undef, 0); print "badfd: $n ", ($n < 0 ? ($!+0 ? "errno" : "noerr") : ""), "\n";
+});
+
+# s502e (#2559): sysread is ONE read(2) -- what is available (a partial count
+# on a pipe or socket), 0 at EOF, undef + $! on a closed handle, OFFSET
+# placement and NUL padding; a regular file fills LEN.
+test_transpile("sysread returns what is available, not LEN (s502e, #2559)", q{
+alarm 30;  # a regression here BLOCKS (the base hung): fail instead of hanging the gate
+use strict; use warnings; use Socket;
+pipe(my $r, my $w) or die;
+syswrite($w, "ping\n");
+my $n = sysread($r, my $buf, 100); print "partial: $n [$buf]\n";
+syswrite($w, "abcdef");
+$n = sysread($r, $buf, 3); print "short: $n [$buf]\n";
+$n = sysread($r, $buf, 10, 2); print "offset: $n [$buf]\n";
+syswrite($w, "zz");
+$buf = "0123456789"; $n = sysread($r, $buf, 10, -3); print "negoff: $n [$buf]\n";
+syswrite($w, "q");
+$buf = "ab"; $n = sysread($r, $buf, 5, 5); print "pad: $n [", join(",", map { ord } split //, $buf), "]\n";
+close $w; $n = sysread($r, $buf, 10); print "eof: $n [$buf]\n";
+$n = sysread($r, $buf, 10); print "eof2: $n\n";
+close $r;
+{ no warnings; $n = sysread($r, $buf, 10); print "closed: ", (defined $n ? $n : "undef"), " ", ($! + 0 ? "errno" : "noerr"), "\n"; }
+socketpair(my $a, my $b, AF_UNIX, SOCK_STREAM, PF_UNSPEC) or die "sp: $!";
+syswrite($b, "hello");
+$n = sysread($a, $buf, 1024); print "sock: $n [$buf]\n";
+syswrite($b, "x" x 10);
+$n = sysread($a, $buf, 4); print "sock-short: $n [$buf]\n";
+$n = sysread($a, $buf, 100); print "sock-rest: $n [$buf]\n";
+my $f = "/tmp/pcl-s502e-sr-$$"; open(my $o, ">", $f) or die; print $o "x" x 5000; close $o;
+open(my $in, "<", $f) or die; $n = sysread($in, $buf, 4096); print "file: $n ", length($buf), "\n";
+$n = sysread($in, $buf, 4096); print "file2: $n\n"; $n = sysread($in, $buf, 4096); print "file3: $n\n";
+close $in; unlink $f;
+});
+
+
 done_testing();

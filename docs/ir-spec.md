@@ -3563,6 +3563,20 @@ Two consequences a translator must implement or lose output:
   whose abort path skips its exit hooks turns a mid-file abort into silent row
   loss, which for a test file is every row it had produced.
 
+### 7.6a `sysread` and 4-arg `select` are the system calls (normative, s502e, task #2559)
+
+* **`sysread` is ONE read(2)**: it returns what is available — at least one
+  character, a partial count on a pipe, socket or tty, 0 at EOF, undef with
+  `$!` on a closed handle — never waits for LEN as `read` does.  A regular file
+  is always ready, so it fills LEN (or to EOF).  Example: after
+  `syswrite($w, "ping\n")`, `sysread($r, $b, 100)` is 5 at once.
+* **4-arg `select` hands the kernel real fd_sets**: perl's `vec()` layout (fd N
+  in byte N>>3, bit N&7) IS the fd_set layout on a little-endian host; nfds is
+  8 × the longest mask; every DEFINED mask is written back whatever the count
+  (cleared bits included); undef timeout blocks; list context is
+  `(NFOUND, TIMELEFT)` (`select` is wantarray-sensitive); a failing select(2)
+  is -1 with `$!` set — never a silent 0.
+
 ### 7.7 I/O layers: a handle carries OCTETS unless told otherwise (normative, s470br, task #1115)
 
 perl's default I/O discipline is BYTES, and it is observable in every

@@ -19201,13 +19201,15 @@ buffer's fill-pointer; everything else falls back to file-length."
           (%p-io-errno-fail errno)))))
   nil)
 
-(defun %p-read-impl (fh buf len &optional offset)
+(defun %p-read-impl (fh buf len &optional offset (reader #'read-sequence))
   "Perl read(FH, BUF, LEN [, OFFSET]) — read up to LEN chars from FH into the
    lvalue BUF, returning the number of chars actually read (0 at EOF, undef on
    error).  BUF is modified in place.  With OFFSET, the read data is placed at
    that position in BUF: a positive offset keeps (NUL-padding to) the first
    OFFSET chars of BUF's old value; a negative offset counts back from the end
-   of BUF's current length.  An unopened handle fails with errno EBADF."
+   of BUF's current length.  An unopened handle fails with errno EBADF.
+   READER fills the temp string and returns the count: read-sequence (perl's
+   buffered read loops until LEN or EOF) or sysread's %p-read-available."
   (let ((stream (%p-live-stream fh)))
     (unless stream
       (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
@@ -19223,7 +19225,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (handler-case
         (let* ((stream (%p-live-stream fh))
                (tmp (make-string n))
-               (got (read-sequence tmp stream))
+               (got (funcall reader tmp stream))
                (data (subseq tmp 0 got)))
           (when (p-box-p buf)
             (if off
@@ -19242,11 +19244,42 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl read — bareword filehandle is auto-quoted."
   `(%p-read-impl (%p-fh-arg ,fh) ,@args))
 
+(defun %p-regular-file-stream-p (stream)
+  "True when STREAM reads a regular file (fstat S_ISREG), which is always
+   ready -- no partial reads to model."
+  (let ((fd (%p-fd-of-stream stream)))
+    (and fd
+         (let ((st (ignore-errors (sb-posix:fstat fd))))
+           (and st (sb-posix:s-isreg (sb-posix:stat-mode st)))))))
+
+(defun %p-read-available (tmp stream)
+  "sysread's reader (task #2559): what ONE read(2) returns -- block for the
+   first character (0 at EOF), then take only what is available without
+   blocking, up to (length TMP).  A regular file is always ready, so it reads
+   in one sequence call; a pipe, socket or tty returns a partial count instead
+   of waiting for LEN characters as read-sequence would."
+  (let ((n (length tmp)))
+    (if (or (zerop n) (%p-regular-file-stream-p stream))
+        (read-sequence tmp stream)
+        (let ((c (read-char stream nil :eof)))
+          (if (eq c :eof)
+              0
+              (let ((got 1))
+                (setf (char tmp 0) c)
+                (loop while (< got n)
+                      do (let ((c2 (read-char-no-hang stream nil :eof)))
+                           (when (or (null c2) (eq c2 :eof)) (return))
+                           (setf (char tmp got) c2)
+                           (incf got)))
+                got))))))
+
 (defun %p-sysread-impl (fh buf len &optional offset)
-  "Perl sysread - low-level read (same as read for now).  IO errors return
-   undef (caught inside %p-read-impl); perl-semantic errors (negative length,
-   offset outside string) die out of it."
-  (%p-read-impl fh buf len offset))
+  "Perl sysread -- read(2) semantics: return what is available (at least one
+   character, 0 at EOF) rather than waiting for LEN (task #2559).  The offset,
+   error and EBADF handling is read's (%p-read-impl with the reader swapped):
+   IO errors return undef, perl-semantic errors (negative length, offset
+   outside string) die."
+  (%p-read-impl fh buf len offset #'%p-read-available))
 
 (defmacro p-sysread (fh &rest args)
   "Perl sysread — bareword filehandle is auto-quoted."
@@ -22701,54 +22734,96 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl pipe - bareword filehandles are auto-quoted; lexical $fh passed as box."
   `(%p-pipe-impl (%p-fh-install-arg ,read-fh) (%p-fh-install-arg ,write-fh)))
 
-(defun %pcl-fdmask-int (v)
-  "Perl 4-arg select bit-mask scalar → integer fd mask.
-   vec() bit order: fd N lives in byte N>>3, bit N&7 — so the integer mask is
-   the string's bytes assembled little-endian.  undef/empty → 0."
-  (let ((mask 0))
-    (unless (or (null v) (eq v :undef))
-      (let ((s (to-string v)))
-        (dotimes (i (length s))
-          (setf mask (logior mask (ash (char-code (char s i)) (* 8 i)))))))
-    mask))
+(defun %pcl-fdmask-bytes (v)
+  "A 4-arg select bit-mask scalar -> its bytes as an octet vector, or NIL for
+   undef (perl passes a NULL set).  The layout needs no conversion: perl's
+   vec() puts fd N in byte N>>3, bit N&7, which IS a C fd_set's layout on a
+   little-endian host (task #2559)."
+  (let ((raw (unbox v)))
+    (unless (or (null raw) (eq raw *p-undef*) (eq raw :undef))
+      (let* ((s (to-string v))
+             (octets (make-array (length s) :element-type '(unsigned-byte 8))))
+        (dotimes (i (length s) octets)
+          (let ((c (char-code (char s i))))
+            (when (> c 255)
+              (p-die "Wide character in subroutine entry"))
+            (setf (aref octets i) c)))))))
 
-(defun %pcl-fdmask-writeback (arg mask nbytes)
-  "Write an integer fd mask back into a select() bit-mask scalar (if a box)."
-  (when (p-box-p arg)
+(defun %pcl-fdset-buffer (octets size)
+  "A zero-filled octet buffer of SIZE bytes holding OCTETS at its start (the
+   kernel reads whole words, so SIZE is rounded up by the caller)."
+  (let ((buf (make-array size :element-type '(unsigned-byte 8)
+                         :initial-element 0)))
+    (when octets (replace buf octets))
+    buf))
+
+(defun %pcl-fdmask-writeback (arg buf nbytes)
+  "Write the first NBYTES of the fd_set BUF back into the select() bit-mask
+   scalar ARG (only when ARG is a writable box -- an undef ARG passed NULL)."
+  (when (and buf (p-box-p arg))
     (let ((s (make-string nbytes :initial-element #\Nul)))
       (dotimes (i nbytes)
-        (setf (char s i) (code-char (ldb (byte 8 (* 8 i)) mask))))
+        (setf (char s i) (code-char (aref buf i))))
       (box-set arg s))))
 
+(defun %pcl-select-timeval (to)
+  "A two-word octet buffer holding the struct timeval for TO seconds (a real),
+   or NIL for an undef timeout (block)."
+  (when to
+    (let* ((tv (make-array 16 :element-type '(unsigned-byte 8) :initial-element 0))
+           (secs (max 0 (floor to)))
+           (usecs (max 0 (floor (* (- to (floor to)) 1000000)))))
+      (setf (sb-kernel:%vector-raw-bits tv 0) secs
+            (sb-kernel:%vector-raw-bits tv 1) usecs)
+      tv)))
+
+(defun %pcl-select-call (nfds rb wb eb tv)
+  "select(2) on the four octet buffers (NIL = NULL).  Returns the raw result."
+  (flet ((sap (b) (if b (sb-sys:vector-sap b) (sb-sys:int-sap 0))))
+    (sb-sys:with-pinned-objects (rb wb eb tv)
+      (sb-alien:alien-funcall
+       (sb-alien:extern-alien "select"
+                              (function sb-alien:int sb-alien:int
+                                        sb-sys:system-area-pointer
+                                        sb-sys:system-area-pointer
+                                        sb-sys:system-area-pointer
+                                        sb-sys:system-area-pointer))
+       nfds (sap rb) (sap wb) (sap eb) (sap tv)))))
+
 (defun %p-select-4arg (rbits wbits ebits timeout)
-  "Perl select RBITS, WBITS, EBITS, TIMEOUT — wait for ready fds / sleep.
-   Timeout is fetched exactly once (tied timeouts, RT#120102).  With no fds in
-   any mask this is a (fractional-second) sleep; with fds it is a real
-   select(2) via sb-unix, and the found masks are written back.  Returns the
-   number of ready fds."
-  (let ((rm (%pcl-fdmask-int rbits))
-        (wm (%pcl-fdmask-int wbits))
-        (em (%pcl-fdmask-int ebits))
-        (to (unless (or (null timeout) (eq timeout :undef))
-              (to-number timeout))))
-    (if (and (zerop rm) (zerop wm) (zerop em))
-        (progn (when (and to (> to 0)) (sleep to)) 0)
-        (handler-case
-            (multiple-value-bind (n rr ww ee)
-                (sb-unix:unix-fast-select (integer-length (logior rm wm em))
-                                          rm wm em
-                                          (and to (truncate to))
-                                          (if to
-                                              (truncate (* (- to (truncate to))
-                                                           1000000))
-                                              0))
-              (when (and n (> n 0))
-                (let ((nbytes (ceiling (integer-length (logior rm wm em)) 8)))
-                  (%pcl-fdmask-writeback rbits (or rr 0) nbytes)
-                  (%pcl-fdmask-writeback wbits (or ww 0) nbytes)
-                  (%pcl-fdmask-writeback ebits (or ee 0) nbytes)))
-              (or n 0))
-          (error () 0)))))
+  "Perl select RBITS, WBITS, EBITS, TIMEOUT -- select(2) (task #2559).
+   Timeout is fetched exactly once (tied timeouts, RT#120102); undef blocks.
+   Each mask is handed to the kernel as a real fd_set (perl's vec() layout is
+   the fd_set layout), nfds is 8 x the longest mask as in perl, and every
+   defined mask is written back -- cleared bits included -- whatever the
+   count.  Returns the number of ready descriptors; in list context
+   (NFOUND, TIMELEFT).  A failing select(2) returns -1 with $! set, as perl
+   does -- never a silent 0 (rule 12)."
+  (let* ((ro (%pcl-fdmask-bytes rbits))
+         (wo (%pcl-fdmask-bytes wbits))
+         (eo (%pcl-fdmask-bytes ebits))
+         (maxlen (max (length ro) (length wo) (length eo)))
+         (size (* 8 (max 1 (ceiling maxlen 8))))
+         (rb (and ro (%pcl-fdset-buffer ro size)))
+         (wb (and wo (%pcl-fdset-buffer wo size)))
+         (eb (and eo (%pcl-fdset-buffer eo size)))
+         (to (unless (or (null timeout) (eq (unbox timeout) *p-undef*)
+                         (null (unbox timeout)))
+               (to-number timeout)))
+         (tv (%pcl-select-timeval to))
+         (n (%pcl-select-call (* 8 maxlen) rb wb eb tv)))
+    (if (< n 0)
+        (%pcl-save-errno)
+        (progn
+          (%pcl-fdmask-writeback rbits rb (length ro))
+          (%pcl-fdmask-writeback wbits wb (length wo))
+          (%pcl-fdmask-writeback ebits eb (length eo))))
+    (if (eq *wantarray* t)
+        (vector n (if tv
+                      (+ (sb-kernel:%vector-raw-bits tv 0)
+                         (/ (sb-kernel:%vector-raw-bits tv 1) 1000000d0))
+                      *p-undef*))
+        n)))
 
 (defun p-select (&optional (fh nil) (wbits nil) (ebits nil) (timeout nil timeout-p))
   "Perl select - the one-arg form makes FH the default output handle for
