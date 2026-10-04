@@ -2405,13 +2405,37 @@
 ;;; drops out), and box-set's general path removes it on every store.
 (defvar *p-weak-boxes* (make-hash-table :test 'eq :weakness :key))
 
+;;; THE OWNERSHIP CHOKEPOINTS (#2115 step (a), s507p).  A string value is
+;;; SHARED by every copy (ir-spec §3.2), so a writer that appends IN PLACE may
+;;; do so only into a buffer no copy can hold.  Every RETAINING store therefore
+;;; keeps a SIMPLE string: a non-simple (adjustable) one arriving here is
+;;; snapshotted first.  The tests sit where they cost nothing on the common
+;;; path -- a SIMPLE-STRING clause takes the place of a STRING clause, and the
+;;; snapshot is the arm only a non-simple string reaches.
+(declaim (inline %p-own-string))
+(defun %p-own-string (v)
+  "V, or a simple-string snapshot of V when V is a NON-simple string."
+  (if (and (stringp v) (not (simple-string-p v)))
+      (subseq v 0)
+      v))
+
+(declaim (inline %p-hash-key))
+(defun %p-hash-key (k)
+  "K as the KEY a hash STORE keeps: its string, never a non-simple one."
+  (%p-own-string (to-string k)))
+
 (defun make-p-box (value &optional class)
-  "Create a p-box, pre-caching if value is already typed"
-  (let ((box (%make-p-box :value value :class class)))
-    (typecase value
-      (number (setf (p-box-nv box) value (p-box-nv-ok box) t))
-      (string (setf (p-box-sv box) value (p-box-sv-ok box) t)))
-    box))
+  "Create a p-box, pre-caching if value is already typed.  A non-simple string
+   is stored as a simple snapshot (the ownership chokepoint above)."
+  (typecase value
+    (number (let ((box (%make-p-box :value value :class class)))
+              (setf (p-box-nv box) value (p-box-nv-ok box) t)
+              box))
+    (simple-string (let ((box (%make-p-box :value value :class class)))
+                     (setf (p-box-sv box) value (p-box-sv-ok box) t)
+                     box))
+    (string (make-p-box (subseq value 0) class))
+    (t (%make-p-box :value value :class class))))
 
 ;;; ============================================================
 ;;; Tie proxy — stored inside a p-box when the variable is tied
@@ -3662,7 +3686,7 @@
   ;; a REMHASH on a table that is empty in any program that never used m//g,
   ;; so it is asked for only when the table has something in it.
   ;; ---------------------------------------------------------------
-  (when (or (numberp value) (stringp value))
+  (when (or (numberp value) (simple-string-p value))
     (let ((old (p-box-value box)))
       (when (or (null old) (numberp old) (stringp old) (eq old *p-undef*))
         (setf (p-box-value box) value)
@@ -3726,7 +3750,8 @@
     (when (and (not (p-box-p value))   ; unwrapped raw hash-table only
                (hash-table-p v))
       (setf v (%p-hash-user-count v)))
-    (setf (p-box-value box) v
+    ;; the ownership chokepoint (#2115 (a)): a non-simple string is snapshotted
+    (setf (p-box-value box) (%p-own-string v)
           (p-box-nv-ok box) nil
           (p-box-sv-ok box) nil)
     ;; Perl: assigning to a scalar resets pos()
@@ -8201,9 +8226,10 @@
              (and (not (p-box-class value))
                   (not (p-box-is-ref value))
                   (or (numberp inner)
-                      (and (stringp inner) (not (p-box-nv-ok value))))
+                      (and (simple-string-p inner) (not (p-box-nv-ok value))))
                   inner))
-           (and (or (numberp value) (stringp value)) value))))
+           ;; a NON-simple string takes a box: box-set snapshots it (#2115 (a))
+           (and (or (numberp value) (simple-string-p value)) value))))
 
 (declaim (inline %p-elem-cell %p-hash-elem-cell))
 (defun %p-elem-cell (vec i)
@@ -8992,7 +9018,7 @@ per element."
     (maphash (lambda (k v)
                (when (%p-real-hash-key-p k)
                  (incf cnt 2)
-                 (setf (gethash (to-string k) place) (%p-make-hash-entry v))))
+                 (setf (gethash (%p-hash-key k) place) (%p-make-hash-entry v))))
              src)
     cnt))
 
@@ -9036,7 +9062,7 @@ per element."
       ((eq place '%INC-MARKER%)
        (clrhash *p-inc-table*)
        (loop for i from 0 below cnt by 2
-             do (setf (gethash (to-string (aref flat i)) *p-inc-table*)
+             do (setf (gethash (%p-hash-key (aref flat i)) *p-inc-table*)
                       (if (< (1+ i) cnt)
                           (to-string (aref flat (1+ i)))
                           ""))))
@@ -9060,7 +9086,7 @@ per element."
       (t
        (clrhash place)
        (loop for i from 0 below cnt by 2
-             do (setf (gethash (to-string (aref flat i)) place)
+             do (setf (gethash (%p-hash-key (aref flat i)) place)
                       ;; The odd trailing key's padded value must be a real
                       ;; ENTRY BOX like every other value, not a bare
                       ;; *p-undef*: `$_++ foreach %h = (1,2,3)` returns the
@@ -9888,7 +9914,7 @@ per element."
     (unless (hash-table-p h)
       (%p-die-error nil "Not a HASH reference"))
     (%p-tie-refuse h "refaliasing \\$h{k} = REF")
-    (setf (gethash (to-string key) h) box)))
+    (setf (gethash (%p-hash-key key) h) box)))
 
 (defun p-alias-array-slot (arr idx ref)
   "`\\$a[i] = REF` — make the slot hold the referent box itself.  See
@@ -13136,7 +13162,7 @@ create the key on a read-only call, which perl does not."
   (let ((h (make-hash-table :test 'equal)))
     (when (vectorp args)
       (loop for i from start below (length args) by 2
-            do (setf (gethash (to-string (aref args i)) h)
+            do (setf (gethash (%p-hash-key (aref args i)) h)
                      (%p-make-hash-entry
                       (if (< (1+ i) (length args)) (aref args (1+ i)) *p-undef*)))))
     h))
@@ -13454,9 +13480,9 @@ which is one of #1140's escape spellings (probed)."
         (box-set existing value)
         (let ((raw (%p-storable-raw value)))
           (if raw
-              (setf (gethash k h) raw)
+              (setf (gethash (%p-own-string k) h) raw)
               (let ((box (make-p-box nil)))
-                (setf (gethash k h) box)
+                (setf (gethash (%p-own-string k) h) box)
                 (box-set box value)))))))
 
 (defun (setf p-gethash) (value hash key)
@@ -13811,7 +13837,7 @@ which is one of #1140's escape spellings (probed)."
    THE STORE IS (setf p-gethash), i.e. %p-gethash-store — the ONE hash element
    write rule (docs/boxed-aggregates-design-s455.md §4.1: an existing slot BOX
    is written through, because it may be someone's live alias).  This used to
-   be a raw (setf (gethash (to-string KEY) H) VAL), the single entry path in
+   be a raw (setf (gethash (%p-hash-key KEY) H) VAL), the single entry path in
    the runtime that replaced the slot instead of writing through it, so
    `$h{a}{b} = 1; $r = \\$h{a}{b}; $h{a}{b} = 2` left $$r at 1 (task #1151).
    Its array twin p-autoviv-aref-set already went through p-array-set, which
@@ -14110,7 +14136,7 @@ which is one of #1140's escape spellings (probed)."
                     collect item))
         (h (make-hash-table :test 'equal)))
     (loop for (k v) on flat by #'cddr
-          do (setf (gethash (to-string k) h) (%p-make-hash-entry v)))
+          do (setf (gethash (%p-hash-key k) h) (%p-make-hash-entry v)))
     h))
 
 (defun p-array-init (&rest elements)
@@ -28250,7 +28276,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let ((flat (%p-flatten-list value)))
       (loop for i from 0 below (length flat) by 2
             when (< (1+ i) (length flat))
-            do (setf (gethash (to-string (aref flat i)) h)
+            do (setf (gethash (%p-hash-key (aref flat i)) h)
                      (%p-make-hash-entry (aref flat (1+ i))))))
     h))
 
@@ -30284,7 +30310,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((and (vectorp raw) (not (stringp raw)))
        (let ((flat (%p-flatten-list raw)))
          (loop for i from 0 below (length flat) by 2
-               do (setf (gethash (to-string (aref flat i)) copy)
+               do (setf (gethash (%p-hash-key (aref flat i)) copy)
                         (if (< (1+ i) (length flat))
                             (%p-make-hash-entry (aref flat (1+ i)))
                             *p-undef*))))))
@@ -31258,7 +31284,8 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let* ((raw-class-val (unbox class))
          ;; Detect Perl undef (nil or *p-undef*): emits 2 warnings
          (is-undef (or (null raw-class-val) (eq raw-class-val *p-undef*)))
-         (raw-class (to-string class))
+         ;; the class name is RETAINED (ownership chokepoint, #2115 (a))
+         (raw-class (%p-own-string (to-string class)))
          ;; Empty string or Perl undef class: default to current package + warn
          (class-name (if (string= raw-class "")
                          (let ((pkg (package-name *package*)))
