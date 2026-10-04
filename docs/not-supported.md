@@ -1918,7 +1918,8 @@ every `use constant` sub, which reports `''`) — the p-sub macro registers it
 AT DEFINITION, so an earlier statement or a code ref taken before the `sub`
 sees it; an ANONYMOUS `sub ($) {…}` (wrapped in `__pcl_set_prototype` by the
 anonymous-sub handler in PExpr) and an anonymous `sub :prototype($) {…}` (the
-attribute pre-pass's wrap); and `Sub::Util::set_prototype`.  The text is
+attribute pre-pass's wrap); `Sub::Util::set_prototype($proto, $code)` and
+`Scalar::Util::set_prototype(\&code, $proto)` (s502e, #2538: it was an empty stub).  The text is
 perl's: the characters between the parens, whitespace KEPT (`sub f ( $ ; $ )`
 answers `' $ ; $ '`).  A plain sub and a signature (any paren list where the
 feature is in force) answer `undef`.  The measurement that closed the old gap:
@@ -1932,7 +1933,11 @@ per-package table settles most collisions), so a `:prototype(...)` attribute
 on `A::f` can be read for an unrelated `B::f` of the same name in the same
 file — probed only by construction, no population hit; (2) perl's "Prototype
 mismatch" warning on a redefinition is not emitted (the new definition's
-prototype does apply, as in perl).
+prototype does apply, as in perl); (3) a prototype set at RUN time
+(`set_prototype` in a BEGIN block) is reported by `prototype()` but does not
+change how LATER calls parse, including calls compiled by a string eval after
+the set -- perl: `BEGIN { set_prototype(\&sp, q($$)) } sp(@l, 5)` passes 2
+arguments, PCL 4 (task #2610).
 
 **`prototype("CORE::NAME")` IS supported (task #1586, s484a)** and is a
 different mechanism: perl's own prototype strings are LANGUAGE data, so they

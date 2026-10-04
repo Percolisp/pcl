@@ -84,7 +84,10 @@ sub isvstring { return builtin::is_vstring($_[0]) }
 # Open-stream test (s500a, #1571): $_[0] when it is an OPEN handle (a glob,
 # a glob ref, a lexical handle), else undef -- never a NAME lookup.
 sub openhandle { return builtin::openhandle($_[0]) }
-sub set_prototype { }
+# set_prototype(\&code, $proto) (s502e, #2538): Scalar::Util's order is the
+# CODE REF first -- the reverse of Sub::Util's -- and it returns the code ref;
+# an undef $proto clears the prototype.  The one runtime registrar.
+sub set_prototype { my ($code, $proto) = @_; return __pcl_set_prototype($code, $proto) }
 
 # refaddr($ref) — the address of the referent, or undef for a non-ref.
 # In Perl numifying a ref yields its address; PCL routes ref-numification

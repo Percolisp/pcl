@@ -1348,4 +1348,21 @@ if (Foo::L2) { print "true\n" }
 });
 
 
+# s502e (#2538): Scalar::Util::set_prototype(\&code, $proto) -- CODE REF first,
+# the reverse of Sub::Util -- registers the prototype prototype() reads, returns
+# the code ref, and an undef $proto clears it.  It was an empty stub.
+test_transpile("Scalar::Util::set_prototype sets, clears and returns the code ref (s502e, #2538)", q{
+use Scalar::Util qw(set_prototype);
+sub sp { scalar(@_) }
+my $r = set_prototype(\&sp, '$$');
+print "set ", defined(prototype(\&sp)) ? "'" . prototype(\&sp) . "'" : "undef", " ", ($r == \&sp ? "same" : "diff"), "\n";
+my $r2 = set_prototype(\&sp, undef);
+print "clr ", defined(prototype(\&sp)) ? "'" . prototype(\&sp) . "'" : "undef", " ", ($r2 == \&sp ? "same" : "diff"), "\n";
+my $r3 = set_prototype(\&sp, '');
+print "empty [", prototype(\&sp), "]\n";
+print "chain ", prototype(set_prototype(sub { 2 }, ';$')), "\n";
+print "chain2 ", prototype(&set_prototype(sub { 2 }, '\@')), "\n";
+});
+
+
 done_testing();
