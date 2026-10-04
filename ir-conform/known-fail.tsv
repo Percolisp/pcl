@@ -31,4 +31,3 @@
 258-io	1249	a pipe with a `:utf8` layer on one end: perl dies, PCL reads the line
 272-sort	1391	`for my $x (sort LITERALS) { $x .= "!" }` must die read-only; PCL modifies -- 8 of 18 shapes measured s473h, per ELEMENT and propagating through sort/reverse/grep; needs a marked literal slot, not a box flag.  Second cause: exit 255 vs 0 (#1247)
 282-loops-exits	1240	`Can't "last" outside a loop block` carries `(eval 0) line 0` -- FIXED behind `PCL_OPT=line-track` (s473c); the gate is DEFAULT OFF, so this row leaves the file with the flip, not before
-345-tie	155	`tie %h` is not implemented — the container is left untied (the runtime announces it)
