@@ -29442,6 +29442,28 @@ buffer's fill-pointer; everything else falls back to file-length."
        (setf (sb-ext:symbol-global-value ',sym) ,init))
      ',sym))
 
+(declaim (inline %p-local-tied-enter))
+(defun %p-local-tied-enter (old new)
+  "`local' on a cell whose box OLD is TIED (task #2084 (2)): perl localizes a
+   tied scalar through the tie — FETCH the value to restore, STORE undef, STORE
+   the new value (NEW, the fresh box the emitter built, holds it).  Returns a
+   non-NIL token carrying the saved value, or NIL when OLD is not tied — then
+   the caller installs NEW in the cell as usual."
+  (when (and (p-box-p old) (p-tie-proxy-p (p-box-value old)))
+    (%p-local-tied-enter-1 old new)))
+
+(defun %p-local-tied-enter-1 (old new)
+  "%p-local-tied-enter's tied arm."
+  (let ((saved (unbox old)))
+    (box-set old nil)
+    (let ((v (p-box-value new)))
+      (when v (box-set old v)))
+    (list saved)))
+
+(defun %p-local-tied-exit (old token)
+  "Restore a tied cell localized by %p-local-tied-enter: STORE the saved value."
+  (box-set old (car token)))
+
 (defmacro p-local-cell (sym init &body body)
   "Direction-D `local` on a SYMBOL-MACRO GLOBAL (task #289, plan
    docs/direction-d-plan.md): save the cell, install INIT (the emitter
@@ -29469,21 +29491,27 @@ buffer's fill-pointer; everything else falls back to file-length."
    Before direction D the parameter was a DYNAMIC binding of a special, so
    parameter and cell were the same storage by construction; this `let`
    restores that agreement in the cell world."
-  (let ((old (gensym "OLD")))
+  (let ((old (gensym "OLD")) (new (gensym "NEW")) (tied (gensym "TIED")))
     ;; The cell may be UNBOUND: a name that is `my`-declared in one block and
     ;; `local`-ed in another gets no forward declaration at all (the
     ;; declaration pass excludes every name the section let-binds — task
     ;; #205's shape, live in perl-tests/sort.t's `local $sortsub`).  Perl
     ;; localizes the package variable there regardless, so save "was unbound"
     ;; and restore it by makunbound rather than reading a cell that has none.
-    `(let ((,old (if (boundp ',sym) (sb-ext:symbol-global-value ',sym) '%p-cell-unbound)))
-       (setf (sb-ext:symbol-global-value ',sym) ,init)
+    ;; A cell whose box is TIED (task #2084 (2)) keeps its box: perl localizes
+    ;; a tied scalar THROUGH the tie (FETCH the old value, STORE, STORE it back
+    ;; at exit) -- %p-local-tied-enter/exit.  That is what makes `local' through
+    ;; a tied ALIAS (lib/English.pm's $LIST_SEPARATOR) reach the variable.
+    `(let* ((,old (if (boundp ',sym) (sb-ext:symbol-global-value ',sym) '%p-cell-unbound))
+            (,new ,init)
+            (,tied (%p-local-tied-enter ,old ,new)))
+       (unless ,tied (setf (sb-ext:symbol-global-value ',sym) ,new))
        (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
                          (declare (ignorable ,sym))
                          ,@body)
-         (if (eq ,old '%p-cell-unbound)
-             (makunbound ',sym)
-             (setf (sb-ext:symbol-global-value ',sym) ,old))))))
+         (cond (,tied (%p-local-tied-exit ,old ,tied))
+               ((eq ,old '%p-cell-unbound) (makunbound ',sym))
+               (t (setf (sb-ext:symbol-global-value ',sym) ,old)))))))
 
 ;;; ── `local TARGET if COND` — the SAVE AND RESTORE are conditional ──────────
 ;;; (task #541.)  perl does not execute the statement AT ALL when the modifier's
@@ -29510,19 +29538,23 @@ buffer's fill-pointer; everything else falls back to file-length."
    function would not see that.  The rebinding is kept in BOTH arms: when the
    condition is false it aliases the box the cell already holds, which is what
    the body would have read anyway."
-  (let ((c (gensym "COND")) (old (gensym "OLD")))
+  (let ((c (gensym "COND")) (old (gensym "OLD")) (new (gensym "NEW"))
+        (tied (gensym "TIED")))
+    ;; A TIED cell is localized through its tie, as in p-local-cell (#2084 (2)).
     `(let* ((,c ,cond-form)
             (,old (if ,c
                       (if (boundp ',sym) (sb-ext:symbol-global-value ',sym) '%p-cell-unbound)
-                      nil)))
-       (when ,c (setf (sb-ext:symbol-global-value ',sym) ,init))
+                      nil))
+            (,new (when ,c ,init))
+            (,tied (when ,c (%p-local-tied-enter ,old ,new))))
+       (when (and ,c (not ,tied)) (setf (sb-ext:symbol-global-value ',sym) ,new))
        (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
                          (declare (ignorable ,sym))
                          ,@body)
          (when ,c
-           (if (eq ,old '%p-cell-unbound)
-               (makunbound ',sym)
-               (setf (sb-ext:symbol-global-value ',sym) ,old)))))))
+           (cond (,tied (%p-local-tied-exit ,old ,tied))
+                 ((eq ,old '%p-cell-unbound) (makunbound ',sym))
+                 (t (setf (sb-ext:symbol-global-value ',sym) ,old))))))))
 
 (defmacro p-local-maybe (cond-form localizer &body body)
   "Run BODY inside LOCALIZER when COND-FORM holds, and BARE otherwise — the

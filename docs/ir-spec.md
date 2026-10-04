@@ -964,6 +964,11 @@ Two consequences a consumer must know:
 - `local` therefore cannot be a `let`: it lowers to `p-local-cell`, which
   saves the cell, installs the new value, and restores under
   `unwind-protect` (§7.2).
+  A cell whose box is TIED keeps its box: `local` goes through the tie
+  (normative, s507b / #2084 (2)) — FETCH the value, STORE undef, STORE the
+  new value, STORE the saved value back at exit — as perl localizes a tied
+  scalar.  Example: `lib/English.pm` ties `$LIST_SEPARATOR` to `$"`, so
+  `{ local $LIST_SEPARATOR = "-"; "@l" }` joins with `-`.
 
 **Exception set** — names that keep `defvar` and the dynamic `let`, decided
 by name alone (`Pl::GlobalPartition`, the one authority both emitters ask):

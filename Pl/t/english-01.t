@@ -56,7 +56,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 15;
 
 sub write_pl {
     my ($code) = @_;
@@ -231,6 +231,37 @@ PL
 
 # ---- THE DOCUMENTED GAP, as a canary --------------------------------------
 #
+# ---- `local` THROUGH an English name (s507b, #2084 (2)) ---------------------
+# The separators and $| are TIED to their punctuation variable, and `local` on
+# a tied scalar goes through the tie (FETCH, STORE, STORE back), so `local
+# $LIST_SEPARATOR` reaches `$"` and a `local $"` is seen through the alias.
+# INVERSE: main 08de9e4f joined with a space and ignored every `local` here.
+
+both_agree(<<'PL', 'local through an English alias reaches the punctuation variable, both ways');
+use English;
+my @l = (1, 2, 3);
+{ local $LIST_SEPARATOR = "-"; print "01 [@l]\n"; } print "02 [@l]\n";
+{ local $" = "+"; print "03 [$LIST_SEPARATOR]\n"; }
+{ local $OFS = ","; print "04", "a"; print "\n"; }
+{ local $ORS = "!\n"; print "05"; }
+{ local $SUBSEP = "#"; my %h; $h{3,4} = 1; print "06 [", join(",", keys %h), "]\n"; }
+{ local $RS = undef; print "07 [", (defined $/ ? "def" : "undef"), "]\n"; }
+{ local $OUTPUT_AUTOFLUSH = 1; print "08 [$|]\n"; } print "09 [$|]\n";
+sub show { print "10 [@l]\n" } { local $LIST_SEPARATOR = "/"; show(); }
+$LIST_SEPARATOR = ":"; print "11 [@l]\n";
+PL
+
+# ...and the mechanism alone: `local` on a TIED package scalar FETCHes, STOREs
+# and STOREs the saved value back (main 08de9e4f replaced the tied box: no
+# STORE ever ran).
+both_agree(<<'PL', 'local on a tied scalar goes through FETCH/STORE');
+package T; sub TIESCALAR { my $v = $_[1]; bless \$v } sub FETCH { print "F\n"; ${$_[0]} } sub STORE { print "S(", (defined $_[1] ? $_[1] : "u"), ")\n"; ${$_[0]} = $_[1] }
+package main;
+our $x; tie $x, "T", "orig";
+{ local $x = "new"; print "in [$x]\n"; }
+print "out [$x]\n";
+PL
+
 # perl's `*ARG = *_` shares one symbol-table entry, and perl swaps the AV in
 # *main::_ on every call, so @ARG inside a sub IS that sub's @_.  PCL binds @_
 # per call and no pure-Perl mechanism reaches the caller's copy (a tied array's

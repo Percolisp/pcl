@@ -110,6 +110,54 @@ sub _readonly {
     sub STORE     { $_ = $_[1]; return }
 }
 
+# The separators and $| are cells, but `local $"` (and its siblings) BINDS the
+# runtime's own variable dynamically, so a value alias neither sees a
+# `local $"` nor reaches `$"` through `local $LIST_SEPARATOR` (task #2084
+# (2)).  Tied, both work: FETCH/STORE see the binding in effect, and `local`
+# on a tied scalar goes through the tie, as in perl.
+{   package English::_ListSep;
+    sub TIESCALAR { my $class = shift; my $x = 0; return bless \$x, $class }
+    sub FETCH     { return $" }
+    sub STORE     { $" = $_[1]; return }
+}
+{   package English::_OFS;
+    sub TIESCALAR { my $class = shift; my $x = 0; return bless \$x, $class }
+    sub FETCH     { return $, }
+    sub STORE     { $, = $_[1]; return }
+}
+{   package English::_ORS;
+    sub TIESCALAR { my $class = shift; my $x = 0; return bless \$x, $class }
+    sub FETCH     { return $\ }
+    sub STORE     { $\ = $_[1]; return }
+}
+{   package English::_SubSep;
+    sub TIESCALAR { my $class = shift; my $x = 0; return bless \$x, $class }
+    sub FETCH     { return $; }
+    sub STORE     { $; = $_[1]; return }
+}
+{   package English::_RS;
+    sub TIESCALAR { my $class = shift; my $x = 0; return bless \$x, $class }
+    sub FETCH     { return $/ }
+    sub STORE     { $/ = $_[1]; return }
+}
+
+{   package English::_Autoflush;
+    sub TIESCALAR { my $class = shift; my $x = 0; return bless \$x, $class }
+    sub FETCH     { return $| }
+    sub STORE     { $| = $_[1]; return }
+}
+
+tie $OUTPUT_AUTOFLUSH,        'English::_Autoflush';
+tie $LIST_SEPARATOR,          'English::_ListSep';
+tie $OUTPUT_FIELD_SEPARATOR,  'English::_OFS';
+tie $OFS,                     'English::_OFS';
+tie $OUTPUT_RECORD_SEPARATOR, 'English::_ORS';
+tie $ORS,                     'English::_ORS';
+tie $SUBSCRIPT_SEPARATOR,     'English::_SubSep';
+tie $SUBSEP,                  'English::_SubSep';
+tie $INPUT_RECORD_SEPARATOR,  'English::_RS';
+tie $RS,                      'English::_RS';
+
 tie $ARG,                  'English::_Arg';
 tie $MATCH,                'English::_Match';
 tie $PREMATCH,             'English::_Prematch';
@@ -137,22 +185,14 @@ tie $EXTENDED_OS_ERROR,    'English::_Errno';
 
 	*INPUT_LINE_NUMBER			= \$.	;
 	    *NR					= \$.	;
-	*INPUT_RECORD_SEPARATOR			= \$/	;
-	    *RS					= \$/	;
 
 # Output.
 
-	*OUTPUT_AUTOFLUSH			= \$|	;
-	*OUTPUT_FIELD_SEPARATOR			= \$,	;
-	    *OFS				= \$,	;
-	*OUTPUT_RECORD_SEPARATOR		= \$\	;
-	    *ORS				= \$\	;
 
 # Interpolation "constants".
-
-	*LIST_SEPARATOR				= \$"	;
-	*SUBSCRIPT_SEPARATOR			= \$;	;
-	    *SUBSEP				= \$;	;
+#   $LIST_SEPARATOR, $SUBSCRIPT_SEPARATOR / $SUBSEP, and the separators above
+#   ($INPUT_RECORD_SEPARATOR / $RS, $OUTPUT_FIELD_SEPARATOR / $OFS,
+#   $OUTPUT_RECORD_SEPARATOR / $ORS) are TIED, not aliased: see the tie section.
 
 # Formats.
 
