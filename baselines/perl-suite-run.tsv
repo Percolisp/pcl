@@ -1993,7 +1993,7 @@ op/split_unicode.t	147	0	107	40	DIFF		0
 op/sprintf.t	559	0	534	25	DIFF		0
 op/sprintf2.t	1704	0	1679	25	DIFF		0
 op/srand.t	10	0	8	2	DIFF		0
-op/sselect.t	23	0	17	6	DIFF		0
+op/sselect.t	23	0	20	3	DIFF	s502e #2559: the mask bytes are checked as octets and a wide character dies (rows 21-23 pass); the RT120102 timeout is FETCHed once; rows 10-12 (a literal mask is read-only) stay #1934	0
 op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	95	16	DIFF	s492b: 94/17 -> 95/16, #2090 -- `() = <FOO>` is a LIST assignment and its RHS is LIST context, so the handle is drained and `ok(eof FOO, "at EOF")` passes; the deleted *p-in-list-assign-rhs* flag had made it read ONE line.  Measured --jobs 1 on a 5ce155cb extraction: 94/17 there	0
