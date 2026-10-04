@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -154,3 +154,24 @@ test_cl('braced caret array + slices through a reference',
       my @d = delete @$hr{'a'};print "G:@d\n";
       @$r[0,1] = (1,2);        print "H:@x\n";},
     "A:a b\nB:a b[0]\nC:1\nD:10 20\nE:HA HB\nF:a=HA\nG:HA\nH:1 2 30\n");
+
+# #2704: perl drops the backslash before the construct's OWN delimiter before
+# it scans the body for variables, so an escaped delimiter right after a `$`
+# is a punctuation VARIABLE: "$\"" is $", qq<$\>> is $>, qq|$\|| is $|.  PCL
+# scanned `$\` + the delimiter.  The last row holds the breaking cases that
+# must not move (passing before the fix too): a `\"` after no sigil, a key
+# written `\"a\"`, an escaped bracket that is not after a sigil, a `\\`
+# before a `\"`, and a block fragment (#521).
+test_cl('"$\"" is $" interpolated (the escaped delimiter after a sigil)',
+    q{$" = "-"; my @a = (1,2); print "1[$\"]\n"; print qq"2[$\"]\n"; print "3[@a$\"@a]\n";},
+    "1[-]\n2[-]\n3[1-2-1-2]\n");
+test_cl('qq<$\>> is $>, qq|$\|| is $|, qq($\)) is $) (a bracketing pair too)',
+    q{print qq<a[$\>]> eq "a[$>]" ? "ok\n" : "no\n"; $| = 0; print qq|b[$\|]|, "\n"; print qq(c[$\)]) eq "c[$)]" ? "ok\n" : "no\n";},
+    "ok\nb[0]\nok\n");
+test_cl('an escaped delimiter NOT after a sigil is unchanged', <<'PL',
+my %h = (a => 1, 'b"c' => 2); my @a = (5);
+print "[\"x\"][$h{\"a\"}][$h{'b\"c'}][\"$a[0]\"][\\\"]\n";
+print qq{[\{$a[0]\}][$h{a}\}]}, "\n";
+print "[${\ \"L\"}]\n";
+PL
+    "[\"x\"][1][2][\"5\"][\\\"]\n[{5}][1}]\n[L]\n");
