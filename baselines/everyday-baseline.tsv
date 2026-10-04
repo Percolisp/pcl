@@ -30,6 +30,5 @@ index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formli
 modules/Archive-Tar-Compress	DIFF	1	#155 tie on a FILEHANDLE is announced, not implemented: IO::Zlib->new ties *$fh, so reading the tar back dies "Can't call method "open" on an undefined value" -- re-attributed s500a: #2533 made Archive::Tar::Constant export its constants (run-time prototype()) and the `$entry->$_()` method-by-$_ fix let it write the archive
 modules/Digest-SHA-MD5	DIFF	1	not-supported.md#dynaloader--xs-binary-extensions -- Digest::MD5/SHA are XS; pclxs is parked
 modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)
-modules/Sys-Hostname-Env-English	DIFF	1	#2084 (2) `use English; local $LIST_SEPARATOR = "-"; "@l"` still joins with a space -- re-attributed s501t: #155 made `use Env qw(HOME @PATH)` work (tie ${"pkg::NAME"} and tie @{"pkg::NAME"}), so the first difference is now the English alias
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")
