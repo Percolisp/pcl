@@ -1606,5 +1606,26 @@ my @e = ($sa->(1), 9); my @f = ($sb->(1), 9); my $s = sg(7);
 print scalar(@a), scalar(@b), scalar(@c), scalar(@d), scalar(@e), scalar(@f), " ", (defined $s ? "d" : "u"), "\n";
 });
 
+# s507b (#2661): split's STRING pattern is a regex (perl compiles any EXPR but
+# ' ' as a pattern): '\.', '|', '^' (/^/m), '\s+', '\t', quantifiers, classes,
+# captures, LIMIT, a variable holding each, a bad pattern dies trappably.
+# Unchanged: a plain ',' / ' ' (awk mode) / '' / qr in a variable.  INVERSE:
+# main 08de9e4f split on the literal text.
+test_transpile("split with a string pattern compiles it as a regex (s507b, #2661)", q{
+no warnings;
+sub show { my $t = shift; print "$t ", scalar(@_), " [", join("|", map { defined $_ ? $_ : "u" } @_), "]\n" }
+show("comma", split(',', "a,b,,c,,")); show("comma-lim", split(',', "a,b,,c,,", -1));
+show("space", split(' ', "  a b\t c  ")); show("qspace", split(q{ }, "  a b\t c  "));
+show("dot", split('.', "a.b.c")); show("bsdot", split('\.', "a.b.c")); show("pipe", split('|', "abc"));
+show("caret", split('^', "a\nb\nc")); show("bss", split('\s+', " a  b c")); show("bst", split('\t', "a\tb\tc"));
+show("empty", split('', "abc")); show("quant", split('x+', "axxbxc")); show("class", split('[,;]', "a,b;c"));
+show("brace", split('x{2}', "axxbxc")); show("dollar", split('$', "a\$b")); show("lim", split('[.]', "a.b.c.d", 2));
+show("caps", split('(,)', "a,b,c")); show("caps-lim", split('(,)', "a,b,c", 2)); show("trail", split('\.', "a.b..."));
+for my $p (',', '.', '|', '^', '\s+', '\t', ' ', '', 'x+', '[,;]', '(,)') { show("var[$p]", split($p, "a,b. c;d|e\tfxxg\nh")); }
+my $qr = qr/[,.]/; show("qr", split($qr, "a,b.c")); my $num = 1.5; show("num", split($num, "a1.5b1x5c"));
+my $bp = '('; my @b2 = eval { split($bp, "a(b") }; print "badvar [", ($@ ? "died" : "lived"), "]\n";
+$_ = "p.q.r"; my @d = split '\.'; show("default", @d);
+});
+
 
 done_testing();

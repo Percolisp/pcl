@@ -26716,13 +26716,32 @@ buffer's fill-pointer; everything else falls back to file-length."
             (= cp #x205F)                              ; MEDIUM MATHEMATICAL SPACE
             (= cp #x3000)))))                          ; IDEOGRAPHIC SPACE
 
+(defun %p-split-string-pattern (p)
+  "The pattern p-split uses for the non-regex operand P (task #2661).  perl's
+   pp_split compiles ANY expression as a pattern — `split('\\.', $s)' splits on
+   a dot, `split('|', $s)' on every character — except the single-space string,
+   awk mode.  A regex object and \" \" come back unchanged; a string holding a
+   regex METACHARACTER becomes the same memoized match op an interpolated
+   `/$p/' builds (%p-regex-parts: compiled once per string, a bad pattern dies
+   there like perl's); a string without one stays a string, whose SEARCH is
+   the same answer at a fraction of the cost (`split(',', $s)' — the common
+   case keeps its fast path)."
+  (cond
+    ((or (p-regex-match-p p) (and (stringp p) (string= p " "))) p)
+    (t (let ((s (to-string p)))
+         (if (find-if (lambda (c) (find c "\\^$.|?*+()[]{")) s)
+             (%p-regex-parts s "")
+             s)))))
+
 (defun p-split (pattern str &optional limit)
   "Perl split - split string by pattern.
    Note: pattern and str are NOT optional here - PExpr.pm adds defaults
    (pattern=' ', str=$_) at parse time so codegen always provides both."
   (let* ((s (to-string str))
-         ;; Unbox pattern (may be stored in a variable as a p-box)
-         (pattern (if (p-box-p pattern) (p-box-value pattern) pattern))
+         ;; Unbox pattern (may be stored in a variable as a p-box); a STRING
+         ;; pattern is a regex in perl (#2661), see %p-split-string-pattern.
+         (pattern (%p-split-string-pattern
+                   (if (p-box-p pattern) (p-box-value pattern) pattern)))
          (limit-num (if limit (truncate (to-number limit)) nil))
          (keep-trailing (and limit-num (/= limit-num 0)))
          (max-fields (if (and limit-num (> limit-num 0)) limit-num nil))

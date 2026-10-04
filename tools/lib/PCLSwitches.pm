@@ -454,14 +454,11 @@ sub _split_code {
   if ($F =~ m{\A([/'"])} && index($F, $1, 1) > 0) {
     return "our \@F = split($F); ";
   }
-  # perl quotes it as q\0...\0, a STRING, which split compiles as a pattern.
-  # Emitted as the uninterpolated match m'...' -- the same pattern -- because
-  # PCL's split takes a string pattern LITERALLY (task #2661); with a `'` in
-  # the pattern, the string is compiled through qr// instead.
-  return "our \@F = split(' '); " if $F eq ' ';     # q\0 \0 is awk mode too
-  return "our \@F = split(m'$F'); " if index($F, "'") < 0;
+  # perl quotes it as q\0...\0, a STRING, which split compiles as a pattern
+  # (and ' ' is awk mode) -- the same string, single-quoted (task #2661 made
+  # PCL's split compile a string pattern as perl's does).
   (my $q = $F) =~ s/([\\'])/\\$1/g;
-  return "our \@F = split(do { my \$pcl_F = '$q'; qr/\$pcl_F/ }); ";
+  return "our \@F = split('$q'); ";
 }
 
 sub _suffix {
