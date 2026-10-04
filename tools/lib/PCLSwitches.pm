@@ -107,7 +107,16 @@ sub _parse_cluster {
     }
     # The attached argument ends at whitespace (perl: `while (*s &&
     # !isSPACE(*s))`); `-F' '` is the pattern `'`, probed.
-    if ($kind eq 'rest') { $c =~ s/^(\S*)//; push @$events, [$ch, $1]; next }
+    if ($kind eq 'rest') {
+      $c =~ s/^(\S*)//;
+      my $arg = $1;
+      if ($ch eq 'C' && $arg !~ /^\d*\z/) {
+        my ($bad) = $arg =~ /([^IOEioSDALa])/;
+        return ['!', "Unknown Unicode option letter '$bad'.\n", $SWITCH_ERROR_STATUS] if defined $bad;
+      }
+      push @$events, [$ch, $arg];
+      next;
+    }
     # num
     if ($ch eq '0') {
       # The switch character IS the number's first digit (perl's grok_oct
@@ -356,8 +365,23 @@ sub _prefix {
   # B first -- probed), unlike the command line's.
   push @begin, 'unshift @INC, ' . _lit($_) . ';' for @{ $o->{shebang_incs} || [] };
   push @begin, _s_switch_code() if $st->{s};
+  # -w IS `$^W = 1` from compile time on (perlrun).  Nothing in PCL's runtime
+  # gates a diagnostic on $^W (it is the program's variable, docs/DECIDED.md
+  # s506f), so honouring it changes exactly what perl's -w changes for code
+  # that reads $^W.
+  push @begin, '$^W = 1;' if $st->{flags}{w};
+  # -T / -t: PCL does not model taint.  The program runs; a security-relevant
+  # absence is never silent, so one line says so (PCL_TAINT_QUIET=1 silences
+  # it -- the harness wrapper sets it, docs/not-supported.md).
+  for my $t (grep { $st->{flags}{$_} } 'T', 't') {
+    push @begin, 'print STDERR "pcl: taint checks (-' . $t
+               . ') are not applied: PCL does not model taint\n" if !$ENV{PCL_TAINT_QUIET};';
+  }
+  my ($ubegin, $uuse) = defined $st->{flags}{C} ? _unicode_code($st->{flags}{C}) : ('', '');
+  push @begin, $ubegin if $ubegin ne '';
   my $pre = '';
   $pre .= 'BEGIN { ' . join(' ', @begin) . ' } ' if @begin;
+  $pre .= $uuse;
   $pre .= "use feature ':5.40'; use builtin ':5.40'; " if $st->{E};
   $pre .= use_line_for_M($_->[1], $_->[0]) for @{ $st->{mods} };
   if ($loop->{n} || $loop->{p}) {
@@ -366,6 +390,43 @@ sub _prefix {
     $pre .= _split_code($loop->{F}) if $loop->{a};
   }
   return $pre;
+}
+
+# -C[number/list] (perlrun): I=1 O=2 E=4 S=7 i=8 o=16 D=24 A=32 L=64 a=256;
+# a bare -C is SDL (95).  Mapped onto mechanisms PCL has: I/O/E are a :utf8
+# layer on STDIN/STDOUT/STDERR, A decodes @ARGV, i/o are the default layers
+# for open() -- `use open`, which in PCL as in perl is LEXICAL, so they reach
+# the main program's opens and not a module's (docs/not-supported.md); L makes
+# all of it conditional on a UTF-8 locale (LC_ALL, LC_CTYPE, LANG -- the first
+# one set); `a` (perl's UTF-8 cache self-check) has no effect to mirror.
+# ${^UNICODE} reads the number.  Returns (BEGIN text, `use` text).
+sub _unicode_code {
+  my ($arg) = @_;
+  my %bit = (I => 1, O => 2, E => 4, S => 7, i => 8, o => 16, D => 24,
+             A => 32, L => 64, a => 256);
+  my $n = 0;
+  if ($arg eq '') { $n = 95 }
+  elsif ($arg =~ /^\d+\z/) { $n = $arg + 0 }
+  else { $n |= $bit{$_} for split //, $arg }
+  my @do;
+  push @do, 'binmode(STDIN, ":utf8");'  if $n & 1;
+  push @do, 'binmode(STDOUT, ":utf8");' if $n & 2;
+  push @do, 'binmode(STDERR, ":utf8");' if $n & 4;
+  push @do, 'utf8::decode($_) for @ARGV;' if $n & 32;
+  my $cond = '';
+  if ($n & 64) {
+    $cond = 'my $pcl_l = $ENV{LC_ALL} || $ENV{LC_CTYPE} || $ENV{LANG} || ""; '
+          . 'if ($pcl_l =~ /UTF-?8/i) ';
+  }
+  my $begin = '${^UNICODE} = ' . $n . ';';
+  $begin .= ' ' . $cond . '{ ' . join(' ', @do) . ' }' if @do;
+  my @open;
+  push @open, 'IN => ":utf8"'  if $n & 8;
+  push @open, 'OUT => ":utf8"' if $n & 16;
+  # (L's condition cannot reach a `use`; i/o under L apply unconditionally --
+  # docs/not-supported.md.)
+  my $use = @open ? 'use open ' . join(', ', @open) . '; ' : '';
+  return ($begin, $use);
 }
 
 # -s: perl's rudimentary switch parsing of the PROGRAM's arguments, done
@@ -495,10 +556,13 @@ sub decode_events {
            split /\0/, $s, -1 ];
 }
 
-# The events that change the PROGRAM'S SOURCE (what a driver hands pl2cl).
+# The events that change the PROGRAM'S SOURCE (what a driver hands pl2cl):
+# perlrun's equivalents of -n -p -a -F -l -0 -g -i -s -x -E -M -m, and the
+# compile-time effects of -w ($^W), -C (layers, ${^UNICODE}) and -T/-t (the
+# one-line announcement).
 # -I is not one (pcl passes it as -I to pl2cl and the runtime); -e is the
 # text itself.
-my %SOURCE_AFFECTING = map { $_ => 1 } qw(n p a F l 0 g i s x E M m);
+my %SOURCE_AFFECTING = map { $_ => 1 } qw(n p a F l 0 g i s x E M m w C T t);
 sub source_events {
   my ($events) = @_;
   return [ grep { $SOURCE_AFFECTING{ $_->[0] } } @$events ];

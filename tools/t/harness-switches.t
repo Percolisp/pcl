@@ -34,7 +34,7 @@ my $pclperl = "$root/tools/pclperl-for-tests";
 plan skip_all => "pclperl-for-tests not found" unless -x $pclperl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 7;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -71,4 +71,21 @@ CODE
     my $got = -e $out ? do { open my $i, '<', $out or die; local $/; <$i> } : "(absent)";
     is($got, "written\n",
        'run_perl(args => [">", $file]) REDIRECTS the child, as the real t/test.pl does');
+}
+
+# ── 4-6. s506f: the wrapper parses with PCLSwitches and expands in pl2cl ────
+# (perl 5.40.3 probed; the wrapper used to IGNORE an unknown switch, and to
+# run a #!perl -n file once, outside the loop -- task #1702.)
+{
+    my $err = `$pclperl -A -e 1 2>&1 >/dev/null`;
+    my $st = $? >> 8;
+    is("$st|$err", "25|Unrecognized switch: -A  (-h will show valid options).\n",
+       'an unknown switch dies with perl\'s message and status');
+    my $f = "$dir/shn.pl";
+    open my $o, '>', $f or die; print $o "#!./perl -n\nprint \"[\$_]\";\n"; close $o;
+    my $out = `printf 'a\\nb\\n' | $pclperl \Q$f\E 2>&1`;
+    is($out, "[a\n][b\n]", 'a #!./perl -n program runs inside the -n loop');
+    open $o, '>', $f or die; print $o "#!perl -x\n1;\n"; close $o;
+    $err = `$pclperl \Q$f\E 2>&1`;
+    is($err, "Can't emulate -x on #! line at $f line 1.\n", 'a refused #! switch: perl\'s message');
 }

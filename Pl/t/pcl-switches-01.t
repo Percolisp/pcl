@@ -199,4 +199,41 @@ row('an eval string\'s #! line is NOT examined',
     q{-e 'eval "#!perl -n\nprint qq{ev ran [\$_]\n};"; print "after\n"'}, "ev ran []\nafter\n", '', 0, stdin => $AB);
 row('a #! line inside -e code IS examined', q{-e '#!perl -l' -e 'print 1'}, "1\n", '', 0);
 
+# ---- member 5: -s -x -E -C -w -T and the inert ones ----------------------
+row('-s: -name sets $main::name, -name=v sets "v", -- ends it',
+    q{-s -e 'print "xyz=$xyz foo=$foo [@ARGV]\n"' -- -xyz -foo=bar a b}, "xyz=1 foo=bar [a b]\n", '', 0);
+row('-s: a lone - stops and stays in @ARGV', q{-s -e 'print "xyz=${xyz} [@ARGV]\n"' -- -xyz - a},
+    "xyz=1 [- a]\n", '', 0);
+row('-s: the variables exist at compile time', q{-s -e 'BEGIN { print "begin xyz=$xyz\n" }' -- -xyz},
+    "begin xyz=1\n", '', 0);
+row('-s: a second -- is the program\'s', q{-s -e 'print "[@ARGV] q=$q\n"' -- -q -- -r}, "[-r] q=1\n", '', 0);
+put('x.pl', qq{garbage\nmore\n#!/usr/bin/perl -l\nprint "x ran";\nwarn "w";\n__END__\nafter\n});
+row('-x: leading text skipped, the #! line\'s switches apply, lines count from it',
+    q{-x x.pl}, "x ran\n", "w at x.pl line 3.\n", 0);
+put('x2.pl', "garbage\n");
+row('-x with no #!perl line', q{-x x2.pl}, '', "No Perl script found in input\n", 255);
+mkdir "$dir/xd";
+put('x3.pl', qq{g\n#!perl\nuse Cwd; print getcwd() =~ m{/xd\$} ? "in xd\\n" : "not\\n";\n});
+row('-xDIR changes to DIR first', q{-xxd x3.pl}, "in xd\n", '', 0);
+row('-E: say, state, fc, __SUB__, the builtin bundle; strict stays off',
+    q{-E 'say "hi"; say reftype([]); state $x = 1; say fc("A"); my $f = sub { __SUB__ }; say ref $f->(); $zz = 1; say $zz'},
+    "hi\nARRAY\na\nCODE\n1\n", '', 0);
+row('-CS: a :utf8 layer on STDOUT, ${^UNICODE} = 7', q{-CS -e 'print chr(233), " ${^UNICODE}\n"'},
+    "\xc3\xa9 7\n", '', 0);
+row('-C alone is SDL (95)', q{-C -e 'print "${^UNICODE}\n"'}, "95\n", '', 0, env => 'LANG=en_US.UTF-8 LC_ALL=');
+row('-CSL under a non-UTF-8 locale: no layer', q{-CSL -e 'print chr(233), " ${^UNICODE}\n"'},
+    "\xe9 71\n", '', 0, env => 'LANG=C LC_ALL= LC_CTYPE=');
+row('-CA decodes @ARGV', qq{-CA -e 'print length(\$ARGV[0]), "\\n"' \xc3\xa9}, "1\n", '', 0);
+row('-C with an unknown letter', q{-CX -e 1}, '', "Unknown Unicode option letter 'X'.\n", 25);
+row('without -C, ${^UNICODE} is 0', q{-e 'print "${^UNICODE}\n"'}, "0\n", '', 0);
+row('-w sets $^W at compile time', q{-w -e 'BEGIN { print "b $^W\n" } print "w $^W\n"'}, "b 1\nw 1\n", '', 0);
+put('w.pl', qq{#!perl -w\nprint "w \$^W\\n";\n});
+row('#!perl -w sets $^W too', q{w.pl}, "w 1\n", '', 0);
+row('$^W is assignable (it was a raw 0: the assignment was lost)', q{-e '$^W = 1; print "$^W\n"'}, "1\n", '', 0);
+row('-W -X -U -f are accepted and the program runs', q{-W -X -U -f -e 'print "ok\n"'}, "ok\n", '', 0);
+row('-T runs the program and says taint checks are not applied',
+    q{-T -e 'print "taint ${^TAINT}\n"'}, "taint 0\n",
+    "pcl: taint checks (-T) are not applied: PCL does not model taint\n", 0);
+row('PCL_TAINT_QUIET=1 silences it', q{-t -e 'print "ok\n"'}, "ok\n", '', 0, env => 'PCL_TAINT_QUIET=1');
+
 done_testing();

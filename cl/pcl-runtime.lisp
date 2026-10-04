@@ -366,7 +366,7 @@
    ;; slots have to exist as variables too or `*Y = *!` copies nothing.
    #:|$!| #:|$^E| #:|%!| #:*p-errno-table*
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|${^UNICODE}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[| #:|$^C|
    ;; Context — the variable and the four macros that name its bindings (#281)
    #:*wantarray*
@@ -1972,10 +1972,6 @@
 ;;; "use feature" hint-transmission tests). Nothing ever writes meaningful data.
 (defvar |$^H| 0 "Perl $^H - lexical hint bits (inert 0 in PCL)")
 (defvar |%^H| (make-hash-table :test 'equal) "Perl %^H - hints hash (inert empty in PCL)")
-(defvar |$^W| 0
-  "Perl $^W - global warnings flag.  Inert 0: PCL does not model runtime
-   warning-level switching; reads/writes must simply not crash (run/switcht.t,
-   uni/variables.t).")
 (defvar |$[| 0
   "Perl $[ - array base.  Always 0 since perl 5.30 removed assigning to it;
    inert here so reads don't crash (uni/variables.t).")
@@ -2010,8 +2006,10 @@
       "perl")
   "Perl executable path")
 
-;;; Taint mode flag (${^TAINT}) - always off in transpiled code
-(defvar |${^TAINT}| nil "Taint mode is not enabled")
+;;; Taint mode flag (${^TAINT}) - always off in transpiled code: 0, as perl
+;;; reads it without -T (s506f: `pcl -T` runs the program without taint
+;;; checks and says so; docs/not-supported.md).
+(defvar |${^TAINT}| 0 "Taint mode is not enabled")
 
 ;;; NB: $^R lives with the other BOXED specials further down (search |$^R|) —
 ;;; it has to, because a magic scalar a program can ASSIGN to must be a p-box:
@@ -3370,6 +3368,15 @@
 (defvar |$)| (make-p-box (%pcl-getgroups-string (sb-posix:getegid)))
   "Effective gid + supplementary groups, space-joined")
 (defvar |$^P| (make-p-box 0)  "PERLDB - internal debugger flag (0 = not debugging)")
+(defvar |$^W| (make-p-box 0)
+  "Perl $^W - global warnings flag: the PROGRAM's variable.  `perl -w` (and
+   `pcl -w`, a #!perl -w line) sets it to 1 at compile time; a program reads
+   and assigns it.  Nothing in the runtime gates a diagnostic on it (PCL does
+   not model warning-level switching, #221).  A BOX, like every writable
+   special: as a raw 0 an assignment `$^W = 1` was silently lost (s506f).")
+(defvar |${^UNICODE}| (make-p-box 0)
+  "Perl ${^UNICODE} - perl's -C flags as a number; 0 without -C, as perl reads
+   it.  `pcl -C...` sets it at compile time (tools/lib/PCLSwitches.pm, s506f).")
 (defvar |$^D| (make-p-box 0)  "DEBUGGING - debugging flags")
 (defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
 (defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")

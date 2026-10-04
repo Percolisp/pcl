@@ -11,17 +11,13 @@
 # child assertion compare perl-to-perl — passing by construction and testing
 # nothing about PCL.  The harness now points those helpers here (via the
 # PCLPERL env var, see perl-tests/t/test.pl), so the child program is
-# transpiled and executed under PCL.  This is NOT a general perl replacement:
-# it supports exactly the switch set the runperl call-site census uses.
+# transpiled and executed under PCL.
 #
-# Supported: -e/-E CODE (repeatable), -I DIR, -M/-m MODULE[=args], -n, -p,
-# -a, -F pattern (implies -a; -a implies -n, perl 5.20 semantics),
-# -l[NNN], -0[NNN], -c (transpile-only check), -x, clustered bundles
-# (-wl, -lXMfeature=:all), `--`, script file or stdin, trailing @ARGV.
-# -i[ext] (in-place: sets $^I, which PCL's <> honours).
-# Accepted and IGNORED (children exercising them fail their assertions but
-# must not crash the harness): -w/-W/-X/-s/-T/-t/-u/-U/-v/-V, -d[:Module]
-# (debugger), -C* (unicode IO layers).
+# The switches are perl's, parsed by tools/lib/PCLSwitches.pm -- the SAME
+# parser `pcl` uses -- and the source-changing ones (-n -p -a -F -l -0 -g -i
+# -s -x -E -M -m) are handed to pl2cl, whose ONE expansion merges them with
+# the program's own #! line (s506f).  -v/-h/-V/-d/-u are answered by `pcl`
+# itself.  An unknown switch dies with perl's message and status.
 # PERL5OPT is honored (switches prepended), matching perl; PERL5LIB reaches
 # the child's @INC for free because the perl that runs pl2cl honors it.
 #
@@ -36,6 +32,7 @@ use lib "$RealBin/../Pl/t";
 use lib "$RealBin/lib";
 use PCLCore;
 use PCLPaths ();   # the ONE root resolver (task #1302)
+use PCLSwitches ();   # perl's argv grammar + the ONE expansion (s506f)
 
 # The two `use lib` lines above are the BOOTSTRAP; the root itself comes from
 # the one resolver, which also honours $PCL_ROOT.  It answers with the
@@ -48,137 +45,63 @@ my $runtime = "$root/cl/pcl-runtime.lisp";
 my @args = @ARGV;
 unshift @args, split(' ', $ENV{PERL5OPT}) if defined $ENV{PERL5OPT} && length $ENV{PERL5OPT};
 
-my (@code, @incs, @uses, @rest);
-my ($opt_n, $opt_p, $opt_a, $opt_l, $opt_c, $opt_x, $opt_F, $l_arg, $zero_arg);
-my $opt_i;   # -i[ext]: perl sets $^I to the extension ("" for a bare -i)
-
-sub _q { my $s = shift // ""; $s =~ s/'/\\'/g; "'$s'" }
-
-while (@args) {
-  my $a = shift @args;
-  if ($a eq '--')     { push @rest, @args; last }
-  if ($a !~ /^-./)    { push @rest, $a, @args; last }
-  $a =~ s/^-//;
-  while (length $a) {
-    my $c = substr($a, 0, 1, '');
-    if ($c eq 'e' || $c eq 'E') {
-      push @code, length($a) ? $a : shift(@args); $a = '';
-    } elsif ($c eq 'I') {
-      push @incs, length($a) ? $a : shift(@args); $a = '';
-    } elsif ($c eq 'M' || $c eq 'm') {
-      my $m = length($a) ? $a : shift(@args); $a = '';
-      next if !defined $m || $m =~ /^-/;          # -M-mod (unimport): skip
-      if ($m =~ s/=(.*)//s) {
-        push @uses, "use $m (" . join(",", map { _q($_) } split /,/, $1) . ");";
-      } else {
-        push @uses, $c eq 'M' ? "use $m;" : "use $m ();";
-      }
-    } elsif ($c eq '0') {
-      ($zero_arg) = $a =~ /^([0-7]*)/; $a =~ s/^[0-7]*//;
-    } elsif ($c eq 'l') {
-      $opt_l = 1; ($l_arg) = $a =~ /^([0-7]+)/; $a =~ s/^[0-7]+//;
-    } elsif ($c eq 'F') {
-      $opt_F = length($a) ? $a : shift(@args); $a = '';
-    } elsif ($c eq 'n') { $opt_n = 1 }
-      elsif ($c eq 'p') { $opt_p = 1 }
-      elsif ($c eq 'a') { $opt_a = 1 }
-      elsif ($c eq 'c') { $opt_c = 1 }
-      elsif ($c eq 'x') { $opt_x = 1 }
-      elsif ($c eq 'd') { $a =~ s/^:\S*//; }      # -d / -d:Module — ignored
-      elsif ($c eq 'C') { $a =~ s/^[A-Za-z0-9]*// }
-      elsif ($c eq 'i') { $opt_i = $a; $a = '' }  # -i[ext] — sets $^I
-      elsif ($c =~ /^[wWXsTtuUvV]$/) { }          # accepted no-ops
-      # anything else: silently ignored (harness must not crash)
+# --- perl's argv grammar: tools/lib/PCLSwitches.pm, the ONE parser (s506f) --
+# This wrapper used to carry its own cluster parser and its own copy of the
+# -n/-p/-a/-F/-l/-0/-i/-x source rewriting; both are now the shared ones, so
+# a harness child and a `pcl` run of the same command line compile the same
+# program.  An unknown switch now DIES as perl's does (it used to be ignored).
+my $sw = PCLSwitches::parse_argv(\@args);
+my ($opt_c, @incs);
+for my $e (@{ $sw->{events} }) {
+  my ($k, $arg, $status) = @$e;
+  if ($k eq '!') { print STDERR $arg; exit $status }
+  # -v -h -? -V -d -u -S: `pcl` answers these exactly (the version and config
+  # texts, the refusals, the PATH search) -- one implementation, not two.
+  if ($k =~ /^[vh?Vdu]\z/) { exec($^X, "$root/pcl", @args) or die "pclperl-for-tests: exec pcl: $!\n" }
+  if ($k eq 'D') {
+    print STDERR "Recompile perl with -DDEBUGGING to use -D switch (did you mean -d ?)\n";
   }
+  $opt_c = 1 if $k eq 'c';
+  push @incs, $arg if $k eq 'I';
 }
+my @rest = @{ $sw->{args} };
 
-# --- Assemble the program source -------------------------------------------
-my ($src, $progname);
-if (@code) {
-  $src = join("\n", @code);
-  $progname = '-e';
-} else {
-  $progname = @rest ? shift(@rest) : '-';
-  if ($progname eq '-') {
-    local $/; $src = <STDIN> // '';
-  } else {
-    open(my $fh, '<', $progname)
-      or do { print STDERR "Can't open perl script \"$progname\": $!\n"; exit 2 };
-    local $/; $src = <$fh>; close $fh;
-  }
-}
-
-# -x: skip leading garbage up to the #!...perl line
-if ($opt_x) {
-  $src =~ s/\A.*?^(#!.*perl.*)$/$1/ms;
-}
-
-# Switch semantics that perl implements by rewriting the program: do the same.
-my @prelude = @uses;
-# -i[ext] IS `$^I = "ext"` — perl's in-place edit is driven by that variable
-# and nothing else, and PCL's `<>` already honours it byte for byte (probed:
-# the main files and the .bak backups match perl exactly).  This used to
-# consume the extension and do nothing, which is what aborted
-# t/run/switches.t at `tmpswitches.bak`.
-if (defined $opt_i) {
-  my $q = $opt_i;
-  $q =~ s/(["\\\$\@])/\\$1/g;
-  push @prelude, qq{\$^I = "$q";};
-}
-if (defined $zero_arg) {
-  push @prelude, !length($zero_arg)      ? '$/ = "\0";'
-               : oct($zero_arg) > 0377   ? 'undef $/;'      # -0777 slurp
-               : oct($zero_arg) == 0     ? '$/ = "";'       # -00 paragraph
-               :                           sprintf('$/ = chr(0%s);', $zero_arg);
-}
-if ($opt_l) {
-  push @prelude, defined $l_arg && length $l_arg
-    ? sprintf('$\ = chr(0%s);', $l_arg)
-    : '$\ = $/;';
-}
-# perl 5.20+: -F implies -a, and -a implies -n (perl #116190).  A repeated
-# -F keeps the LAST pattern, like perl.
-$opt_a = 1 if defined $opt_F;
-$opt_n = 1 if $opt_a && !$opt_p;
-if ($opt_n || $opt_p) {
-  # -F pattern may come wrapped in //, "" or '' (perlrun); strip one layer,
-  # then use it as the split regex.
-  my $split_code = 'our @F = split; ';
-  if (defined $opt_F) {
-    my $pat = $opt_F;
-    if ($pat =~ m{^/(.*)/$}s || $pat =~ /^"(.*)"$/s || $pat =~ /^'(.*)'$/s) {
-      $pat = $1;
-    }
-    $pat =~ s{/}{\\/}g;
-    $split_code = "our \@F = split(/$pat/); ";
-  }
-  my $head = ($opt_l ? "chomp; " : "") . ($opt_a ? $split_code : "");
-  my $cont = $opt_p ? " continue { print }" : "";
-  $src = "LINE: while (<>) { $head\n$src\n}$cont";
-}
-$src = join("\n", @prelude, $src);
-
-# --- Transpile --------------------------------------------------------------
-# When the program is an unmodified FILE, transpile it in place so error
-# locations carry the caller's own path (which test.pl's fresh_perl helpers
-# normalize).  Otherwise (-e, stdin, or any wrapping) write a temp copy and
-# rewrite its path to "-e" in stderr, like perl reports for -e programs.
+# --- the program source ------------------------------------------------------
+# -e text and a program on STDIN go to a temp file compiled `--as` -e / -,
+# so $0, __FILE__ and every location say what perl's do; a program FILE is
+# compiled in place under its own name.  The source-changing switches travel
+# to pl2cl as they are (--switches), where they meet the program's own #! line
+# in the ONE expansion (PCLSwitches::expand_program).
 my $dir  = tempdir(CLEANUP => 1);
 my $lisp = "$dir/prog.lisp";
-my $wrapped = @code || @prelude || $opt_n || $opt_p || $opt_x
-              || !defined $progname || $progname eq '-';
-my $pl;
-if ($wrapped) {
-  $pl = "$dir/prog.pl";
+my ($pl, $progname, @as);
+if (@{ $sw->{code} }) {
+  ($pl, $progname, @as) = ("$dir/prog.pl", '-e', '--as=-e');
   open(my $ofh, '>', $pl) or die "pclperl-for-tests: $pl: $!\n";
-  print $ofh $src; close $ofh;
+  print $ofh join("\n", @{ $sw->{code} }), "\n"; close $ofh;
 } else {
-  $pl = $progname;
+  $progname = defined $sw->{program} ? $sw->{program} : '-';
+  if ($progname eq '-') {
+    ($pl, @as) = ("$dir/prog.pl", '--as=-');
+    local $/; my $src = <STDIN> // '';
+    open(my $ofh, '>', $pl) or die "pclperl-for-tests: $pl: $!\n";
+    print $ofh $src; close $ofh;
+  } else {
+    if (!-f $progname) {
+      print STDERR "Can't open perl script \"$progname\": No such file or directory\n";
+      exit 2;
+    }
+    $pl = $progname;
+  }
 }
+my $source_events = PCLSwitches::source_events($sw->{events});
+my @switches = @$source_events
+  ? ('--switches=' . PCLSwitches::encode_events($source_events)) : ();
 
+# --- Transpile --------------------------------------------------------------
 my @inc_flags = map { "-I$_" } @incs;
 my $tr = system(join(' ',
-  map { "\Q$_\E" } ($^X, @inc_flags, $pl2cl, '--no-cache', '--lenient-ppi', $pl))
+  map { "\Q$_\E" } ($^X, @inc_flags, $pl2cl, '--no-cache', '--lenient-ppi', @as, @switches, $pl))
   . " > \Q$lisp\E 2> \Q$dir\E/terr");
 if ($tr != 0) {
   open(my $efh, '<', "$dir/terr");
@@ -262,7 +185,7 @@ if (open(my $efh, '<', "$dir/err")) {
     # escapes a toplevel form; the second line's tail is the real message.
     next if $line =~ /^While evaluating the form starting at line/;
     $line =~ s/^\s+of #P"[^"]*"://;
-    $line =~ s/\Q$pl\E/-e/g if $wrapped;   # perl reports "-e" for -e programs
+    $line =~ s/\Q$pl\E/$progname/g if $pl ne $progname;   # a temp file is -e or -
     print STDERR $line;
   }
 }
