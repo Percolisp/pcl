@@ -298,6 +298,12 @@ my @benches = (
   # against such a runtime reads BROKEN on this row by design.
   ['tiehash',   "$HN require Tie::Hash; require Tie::Array; my (\%h, \@a); tie \%h, 'Tie::StdHash'; tie \@a, 'Tie::StdArray'; my \$s = 0; for my \$i (1..\$n) { \$h{k} = \$i; \$a[1] = \$i; \$s += \$h{k} + \$a[1]; push \@a, 1 if \$i % 100 == 0 } print \"\$s \", scalar(\@a), \"\\n\";", 200_000, 0],
   ['powdigit',  "$HN my \$s = 0; for my \$k (1..\$n) { for my \$d (split '', \$k) { \$s += \$d ** 5 } } print \"\$s\\n\";", 400_000, 0],
+  # s507b (#2680 / #2661): an EMPTY sub called in scalar and list context, and
+  # split with a plain string (the fast path), awk mode, and a regex STRING.
+  ['emptysub',  "$HN sub nop { } my \$s=0; for my \$i (1..\$n) { nop(\$i); my \@l = (nop(), \$i); \$s += \@l } print \"\$s\\n\";", 2_000_000, 0],
+  ['splitcomma', "$HN my \$l = join(',', 1 .. 20); my \$s=0; for (1..\$n) { my \@f = split(',', \$l); \$s += \@f } print \"\$s\\n\";", 300_000, 0],
+  ['splitspace', "$HN my \$l = join(' ', 1 .. 20); my \$s=0; for (1..\$n) { my \@f = split(' ', \$l); \$s += \@f } print \"\$s\\n\";", 300_000, 0],
+  ['splitstrre', "$HN my \$l = join('.', 1 .. 20); my \$s=0; for (1..\$n) { my \@f = split('\\\\.', \$l); \$s += \@f } print \"\$s\\n\";", 300_000, 0],
   # Round 37 (s500p): a double stringified and sprintf'd per iteration (task
   # #2510, the Heronian `sprintf("%.0f", $h) eq $h` shape); join over an
   # array and an interpolated slice (#2511, Self-describing-numbers); grep in

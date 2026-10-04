@@ -9833,9 +9833,15 @@ sub _process_include_statement {
           # leading args — same mechanism as `use Module` -> shim prototypes.
           my $file_env = $self->_extract_file_prototypes($path);
           $self->_merge_module_prototypes($file_env, undef) if $file_env;
+          # A RUN-time statement (#2686): never `p-eval-always`.  Wrapped, a
+          # compile-file of this program (the script cache's first run, a
+          # module fasl) ran the file's top level at COMPILE time -- its
+          # STDOUT muffled, ahead of the program's own earlier statements --
+          # and the load then found it in %INC.  The prototypes it declares
+          # were learned statically just above; the packages it creates are
+          # declared by the preamble.
           $self->_emit(";; $perl_code");
-          $self->_emit("(p-eval-always");
-          $self->_emit("  (p-require-file \"$path\"))");
+          $self->_emit("(p-require-file \"$path\")");
           $self->_emit("");
           return;
         }

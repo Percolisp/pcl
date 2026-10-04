@@ -52,7 +52,7 @@ plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 my $core = PCLSbcl::cached_core("$root/cl/pcl-runtime.lisp");
 plan skip_all => "no cached core" if !($core && -f $core);
 
-plan tests => 62;
+plan tests => 64;
 
 my $dir   = tempdir(CLEANUP => 1);   # fixtures
 my $cache = tempdir(CLEANUP => 1);   # the cache these rows write
@@ -80,6 +80,7 @@ sub count_glob { my @f = glob($_[0]); return scalar @f }
 # Run `pcl ARGS` with a named cache dir and the ambient core.  %opt:
 #   cache => DIR   (default $cache)
 #   env   => HASH  further environment
+#   cd    => DIR   run from DIR (a `require "./x.pl"` is relative to the cwd)
 sub run_pcl {
     my ($args, %opt) = @_;
     my %env = (PCL_CACHE_DIR => ($opt{cache} // $cache), PCL_CORE => $core,
@@ -88,7 +89,8 @@ sub run_pcl {
     for my $k (sort keys %env) { $saved{$k} = $ENV{$k}; $ENV{$k} = $env{$k} }
     local $ENV{PERL5LIB};
     delete $ENV{PERL5LIB};
-    my $out = `$pcl $args 2>&1`;
+    my $cd  = defined $opt{cd} ? "cd '$opt{cd}' && " : "";
+    my $out = `$cd$pcl $args 2>&1`;
     my $rc  = $?;
     for my $k (sort keys %saved) {
         if (defined $saved{$k}) { $ENV{$k} = $saved{$k} } else { delete $ENV{$k} }
@@ -437,6 +439,40 @@ PM
        'a `use lib` before the `use` does not shrink the child\'s search path');
     is(mod_manifest_lines($ucache, 'ULMid.pm'), 'dep:ULDep',
        '... and that dependency is a dep in the manifest too');
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# THE CACHE-BUILDING RUN PRINTS WHAT EVERY LATER RUN PRINTS (task #2686).
+# A `require "./file.pl"` is a RUN-time statement: its top level runs after
+# the main program's earlier statements (it reads a variable they set), and
+# on the FIRST run too -- the build used to execute it at COMPILE time with
+# STDOUT muffled, so run 1 lost its output and read the variable unset.  (A
+# PRINTING `use`d module body is still lost on run 1: task #2702.)  Both runs
+# are compared with perl's.  INVERSE: main 08de9e4f's run 1 lacks "cfg sees
+# main-set" / "t1 loaded".
+{
+    my $d3 = tempdir(CLEANUP => 1);
+    write_file("$d3/cfg.pl", "print \"cfg sees \$main::X\\n\"; our \$CFG = 'set';"
+                             . " print \"t1 loaded\\n\"; sub t1f { 'f' } 1;\n");
+    write_file("$d3/c2.pl", "print \"c2 loaded\\n\"; 7;\n");
+    write_file("$d3/c3.pl", "print \"c3 loaded\\n\"; sub c3 { 3 } 1;\n");
+    write_file("$d3/LocMod.pm", "package LocMod; sub v { 'v' } 1;\n");
+    my $p3 = write_file("$d3/prog.pl", <<'EOP', 1);
+our $X = "main-set"; print "before\n";
+use lib ".";
+use LocMod;
+require "./cfg.pl";
+print "A ", (defined(&t1f) ? t1f() : "nosub"), " $CFG ", LocMod::v(), "\n";
+my $v = do "./c2.pl"; print "do $v\n";
+sub later { require "./c3.pl"; c3() } print "later ", later(), "\n";
+print "end\n";
+EOP
+    my $want = `cd '$d3' && perl prog.pl 2>&1`;
+    my $rcache = tempdir(CLEANUP => 1);
+    my $first  = run_pcl("'$p3'", cache => $rcache, cd => $d3);
+    my $second = run_pcl("'$p3'", cache => $rcache, cd => $d3);
+    is($first, $want, 'a required file runs at RUN time on the cache-building run (#2686)');
+    is($second, $want, '... and the cached run prints the same');
 }
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -3875,6 +3875,11 @@ A `require`/`do` of a FILE path is used as
 given when it is absolute or starts with `./` or `../`
 (`%p-explicit-path-p`, perl's `path_is_searchable`); any other name is
 searched in `@INC` only — the cwd is not consulted.
+A `require` of a FILE is a RUN-time statement (normative, s507b / #2686): a literal
+path lowers to `(p-require-file "PATH")` in place, never wrapped for the compile
+phase, so the file's top level runs after the program's earlier statements on
+every run, the script cache's fasl-building first run included (its prototypes
+are read statically at transpile time).
 
 ```perl
 # prog.pl beside Foo.pm, run from that directory:
