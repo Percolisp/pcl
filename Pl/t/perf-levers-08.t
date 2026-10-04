@@ -15,6 +15,9 @@
 #   #2637 %p-tied refuses a NON-EMPTY container before the weak tie table
 #         (a tied container is an empty shell), so one live tie no longer
 #         costs every untied container a weak-table lookup.
+#   #2111 an in-memory filehandle owns a PRIVATE buffer; its scalar answers
+#         simple-string snapshots (a :memfh magic cell), so no later print
+#         changes a copy, an element, a hash value or a hash key.
 use v5.30;
 use strict;
 use warnings;
@@ -78,6 +81,12 @@ my $mech = lisp_out(<<'LISP');
   (and (search "%p-tie-shell-shape-p"
                (string-downcase (prin1-to-string (macroexpand-1 '(%p-tied x)))))
        t))
+(format t "memfh ~a~%"
+  (let* ((b (make-p-box "x")) (fh (make-p-box *p-undef*)))
+    (%p-open-memory fh ">" b)
+    (let ((c (p-box-value b)))
+      (list (and (p-magic-cell-p c) (p-magic-cell-kind c))
+            (simple-string-p (unbox b))))))
 (format t "shapes ~a~%"
   (list (%p-tie-shell-shape-p (make-hash-table))
         (%p-tie-shell-shape-p (let ((h (make-hash-table))) (setf (gethash :__class__ h) "C") h))
@@ -92,6 +101,8 @@ like($mech, qr/^clearpos T$/mi,
      '#2539: box-set\'s two pos() resets share %p-clear-match-pos');
 like($mech, qr/^tiedshape T$/mi,
      '#2637: %p-tied asks the shell-shape test before the weak tie table');
+like($mech, qr/^memfh \(MEMFH T\)$/mi,
+     '#2111: a writable in-memory handle owns its buffer; the scalar holds a :memfh cell answering a simple-string snapshot');
 like($mech, qr/^shapes \(T T NIL T NIL NIL NIL\)$/mi,
      '#2637: only an empty vector or a hash of at most one entry can be a tied shell');
 
@@ -155,6 +166,106 @@ blessed tied Bar 4 1
 pre after untie h=9
 ta after untie n=0
 ta2 1 2
+EXPECTED
+
+answers(<<'PERL', <<'EXPECTED', '#2111: an in-memory handle\'s writes never reach a copy, an element, a hash value or KEY');
+use strict; use warnings;
+my $n = 0;
+sub show { my ($tag, @v) = @_; $n++; print "$n $tag: ", join(" | ", map { defined $_ ? "[" . ($_ =~ s{\0}{0}gr) . "]" : "undef" } @v), "\n" }
+
+# 1. the #2111 reproducer
+{ my $buf = ""; open my $fh, ">", \$buf or die; print $fh "a";
+  my $copy = $buf; my @arr = ($buf); my %h = (k => $buf); my %kk; $kk{$buf} = 1;
+  print $fh "b"; close $fh;
+  show("repro", $copy, $arr[0], $h{k}, join(",", keys %kk), (exists $kk{"a"} ? "key-a" : "no-key-a"), $buf); }
+# 2. every mode
+for my $mode (">", ">>", "+<", "+>", "+>>") {
+  my $buf = "XYZ"; open my $fh, $mode, \$buf or die "$mode: $!";
+  print $fh "ab"; my $mid = $buf; print $fh "cd";
+  show("mode $mode", $mid, $buf, tell($fh)); close $fh; show("mode $mode closed", $buf);
+}
+# 3. read mode
+{ my $buf = "l1\nl2\n"; open my $fh, "<", \$buf or die; my $l = <$fh>; $buf = "changed\n"; my $l2 = <$fh>;
+  show("read", $l, $l2, $buf); }
+# 4. reads between prints: length, regex, substr, element, hash key, value
+{ my $buf; open my $fh, ">", \$buf or die; my (@len, @m, @el, %hk, %hv);
+  for my $i (1 .. 4) { print $fh "x$i"; push @len, length $buf; push @m, ($buf =~ /x(\d)$/ ? $1 : "-");
+    push @el, $buf; $hk{$buf} = $i; $hv{$i} = $buf; }
+  show("between", "@len", "@m", "@el", join(",", map { "$_=$hk{$_}" } sort keys %hk), join(",", map { "$_=$hv{$_}" } sort keys %hv));
+  show("hk exists", (exists $hk{"x1"} ? 1 : 0), (exists $hk{"x1x2"} ? 1 : 0)); }
+# 5. seek / tell / truncate
+{ my $buf = ""; open my $fh, "+>", \$buf or die; print $fh "hello world";
+  my $snap = $buf; seek($fh, 0, 0); print $fh "J"; show("seek", $snap, $buf, tell($fh));
+  seek($fh, 0, 2); show("tell end", tell($fh)); seek($fh, 15, 0); print $fh "!"; (my $vis = $buf) =~ s/\0/0/g; show("gap", $vis, length $buf);
+  truncate($fh, 3); ($vis = $buf) =~ s/\0/0/g; show("truncate", $vis, length $buf); }
+# 6. a write through the scalar while the handle is open
+{ my $buf = ""; open my $fh, ">", \$buf or die; print $fh "ab"; $buf .= "x"; print $fh "c"; show("dot-eq", $buf);
+  $buf = ""; print $fh "d"; (my $vis = $buf) =~ s/\0/0/g; show("assign-empty", $vis, length $buf);
+  $buf = "QQQQQQ"; print $fh "e"; show("assign-long", $buf); my $c = $buf; print $fh "f"; show("copy after", $c, $buf); }
+# 7. close and reopen
+{ my $buf = ""; open my $fh, ">", \$buf or die; print $fh "one"; close $fh; my $c1 = $buf;
+  open $fh, ">>", \$buf or die; print $fh "two"; my $c2 = $buf; print $fh "three"; close $fh;
+  show("reopen", $c1, $c2, $buf); }
+# 8. references, ref(), defined, numeric
+{ my $buf; open my $fh, ">", \$buf or die; print $fh "42"; my $r = \$buf; show("ref", ref($r), $$r, defined($buf) ? 1 : 0, $buf + 1);
+  my $sref = $r; print $fh "7"; show("ref after", $$sref, $buf * 2); }
+# 9. printf / say / syswrite / write via select
+{ my $buf = ""; open my $fh, ">", \$buf or die; printf $fh "%03d", 7; my $a = $buf; { local $\ = "\n"; print $fh "z" } my $b = $buf;
+  my $old = select($fh); $| = 1; print "sel"; select($old); show("printf", $a, $b, $buf); }
+# 10. two handles on one scalar
+{ my $buf = ""; open my $f1, ">", \$buf or die; print $f1 "aaa"; open my $f2, ">>", \$buf or die; print $f2 "B"; print $f1 "c";
+  show("two", $buf); }
+# 11. pushed onto an array, sorted, joined, interpolated, passed to a sub that keeps it
+{ my @keep; sub keep { push @keep, $_[0]; my $x = $_[0]; push @keep, $x } my $buf = ""; open my $fh, ">", \$buf or die;
+  print $fh "p"; keep($buf); my $s = "<$buf>"; my $j = join("-", $buf, $buf); print $fh "q";
+  show("kept", @keep, $s, $j, $buf); }
+# 12. chomp / chop / s/// / tr on the scalar while open
+{ my $buf = ""; open my $fh, ">", \$buf or die; print $fh "line\n"; chomp $buf; print $fh "X"; show("chomp", $buf);
+  $buf =~ s/l/L/; print $fh "Y"; show("subst", $buf); (my $t = $buf) =~ tr/a-z/A-Z/; show("tr", $t, $buf); }
+# 13. a closure capturing the scalar, a returned value
+{ my $buf = ""; open my $fh, ">", \$buf or die; my $get = sub { $buf }; print $fh "c1"; my $v1 = $get->();
+  sub ret { return $_[0] } my $rv = ret($buf); print $fh "c2"; show("closure", $v1, $rv, $get->()); }
+our $g = ""; { open my $fh, ">", \$g or die; print $fh "g1"; { local $g = "L"; show("local inside", $g) } print $fh "g2"; show("local after", $g); }
+PERL
+1 repro: [a] | [a] | [a] | [a] | [key-a] | [ab]
+2 mode >: [ab] | [abcd] | [4]
+3 mode > closed: [abcd]
+4 mode >>: [XYZab] | [XYZabcd] | [7]
+5 mode >> closed: [XYZabcd]
+6 mode +<: [abZ] | [abcd] | [4]
+7 mode +< closed: [abcd]
+8 mode +>: [ab] | [abcd] | [4]
+9 mode +> closed: [abcd]
+10 mode +>>: [XYZab] | [XYZabcd] | [7]
+11 mode +>> closed: [XYZabcd]
+12 read: [l1
+] | [nged
+] | [changed
+]
+13 between: [2 4 6 8] | [1 2 3 4] | [x1 x1x2 x1x2x3 x1x2x3x4] | [x1=1,x1x2=2,x1x2x3=3,x1x2x3x4=4] | [1=x1,2=x1x2,3=x1x2x3,4=x1x2x3x4]
+14 hk exists: [1] | [1]
+15 seek: [hello world] | [Jello world] | [1]
+16 tell end: [11]
+17 gap: [Jello world0000!] | [16]
+18 truncate: [Jello world0000!] | [16]
+19 dot-eq: [abc]
+20 assign-empty: [000d] | [4]
+21 assign-long: [QQQQeQ]
+22 copy after: [QQQQeQ] | [QQQQef]
+23 reopen: [one] | [onetwo] | [onetwothree]
+24 ref: [SCALAR] | [42] | [1] | [43]
+25 ref after: [427] | [854]
+26 printf: [007] | [007z
+] | [007z
+sel]
+27 two: [aaac]
+28 kept: [p] | [p] | [<p>] | [p-p] | [pq]
+29 chomp: [line0X]
+30 subst: [Line0XY]
+31 tr: [LINE0XY] | [Line0XY]
+32 closure: [c1] | [c1] | [c1c2]
+33 local inside: [L]
+34 local after: [g1g2]
 EXPECTED
 
 done_testing();

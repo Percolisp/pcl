@@ -1258,6 +1258,19 @@ integers print exactly; floats print in Perl's `%.15g`-equivalent shortest
 form (`0.5` not `0.5d0`; integral floats print without `.0`); references →
 `"TYPE(0xADDR)"`; blessed references → `"Class=TYPE(0xADDR)"`.
 
+**A string VALUE is shared by every copy, so nothing writes into a string a
+reader can hold** (normative, s507p, task #2111).  `to-string` answers a
+string argument itself, and a scalar store, an array slot and a hash KEY keep
+the object they are given.  A writer that grows text in place owns a PRIVATE
+buffer that no scalar holds: an in-memory filehandle (`open $fh, '>', \$buf`,
+every writable mode) appends to its own buffer and puts a magic cell of kind
+`:memfh` in `$buf`'s box, whose getter answers a SIMPLE-STRING snapshot (taken
+once after each write) and whose setter stores the assigned value plainly (the
+handle's next write adopts the scalar's text again; `close` leaves the last
+snapshot as a plain value).  A `<` handle reads the scalar's current text.
+Example: `print $fh "a"; my $c = $buf; $k{$buf} = 1; print $fh "b"` leaves
+`$c` and the key `"a"` and `$buf` `"ab"`, as in perl.
+
 **`%.15g`'s style switch is the exponent of the ROUNDED value, and it must be
 computed exactly** (normative, s473d).  C uses the exponential style when the
 decimal exponent X of the value *after rounding to 15 significant digits* is

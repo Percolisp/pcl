@@ -4554,9 +4554,9 @@
 ;;; (COPY-SEQ first), p-chop/p-chomp (SUBSEQ), p-vec-set (COPY-SEQ or
 ;;; CONCATENATE), p-string-bit-op (fresh MAKE-STRING), %pcl-str-buffer (fresh
 ;;; adjustable buffer + REPLACE), %pcl-str-append (writes its own accumulator,
-;;; reads the source), %psos-put via %psos-buf (rebuilds unless the box already
-;;; holds an ADJUSTABLE fill-pointer string — a table entry is simple, so it
-;;; rebuilds), and the XS bridge (STRING-TO-OCTETS makes a fresh octet vector
+;;; reads the source), %psos-put (writes only the in-memory handle's PRIVATE
+;;; buffer; the scalar answers simple-string snapshots of it, #2111), and the
+;;; XS bridge (STRING-TO-OCTETS makes a fresh octet vector
 ;;; before any SAP is taken).  Nothing writes into a plain simple-string it
 ;;; did not make.  A future in-place string writer MUST copy first.
 (defparameter *p-small-fixnum-strings*
@@ -17122,17 +17122,33 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
        (cons "<" s)))))
 
 ;;; In-memory string filehandles: open my $fh, ">", \$s
-;;; A p-string-output-stream is an SBCL Gray output stream that appends written
-;;; characters directly into the target scalar box's adjustable string, so the
-;;; scalar reflects the output live (matching Perl's PerlIO ":scalar" layer).
-;; Shared state for in-memory string filehandles: a target scalar box and a
-;; current byte offset.  Perl's PerlIO ":scalar" layer tracks a position, so a
-;; seek/tell or a re-assignment of the scalar mid-write does not lose the
-;; place; writes overwrite existing chars and extend past the end; a forward
-;; seek beyond the end zero-fills with NUL.
+;;; A p-string-output-stream is an SBCL Gray output stream over the target
+;;; scalar (perl's PerlIO ":scalar" layer).  It tracks a position, so a
+;;; seek/tell or a re-assignment of the scalar mid-write does not lose the
+;;; place; writes overwrite existing chars and extend past the end; a forward
+;;; seek beyond the end zero-fills with NUL.
+;;;
+;;; THE BUFFER IS THE STREAM'S, NEVER THE SCALAR'S (task #2111, s507p).  A
+;;; writable handle appends into a PRIVATE adjustable string (amortized linear,
+;;; the capture-output idiom) and puts a magic cell of kind :memfh in the
+;;; scalar's box: a READ of the scalar answers a SIMPLE-STRING SNAPSHOT of the
+;;; buffer, taken once after each write and shared until the next one.  The
+;;; runtime shares string values between every copy it makes (box-set's arms,
+;;; an array slot, a hash KEY -- the SHARED-STRINGS note above
+;;; *p-small-fixnum-strings*), so a buffer that a later print mutated in place
+;;; changed `my $copy = $buf`, an element, a hash value and a hash key that
+;;; lived inside an `equal` table -- perl copies there.  A WRITE of the scalar
+;;; (`$buf = ...`, `.=`, chomp, s///) goes through the cell's setter, which
+;;; takes the cell out and stores the value plainly; the handle's next write
+;;; ADOPTS the scalar's current text again (perl's handle sees the write).
+;;; close puts the last snapshot back as a plain value.  A read-only handle
+;;; ("<") owns nothing: it reads the scalar's CURRENT text, as perl does.
 (defclass p-string-stream-mixin ()
   ((target :initarg :target :reader psos-target)
-   (pos    :initarg :pos :initform 0 :accessor psos-pos)))
+   (pos    :initarg :pos :initform 0 :accessor psos-pos)
+   (buf    :initform nil :accessor psos-buf)     ; private adjustable string
+   (cell   :initform nil :accessor psos-cell)    ; the :memfh cell it installs
+   (snap   :initform nil :accessor psos-snap)))  ; snapshot of BUF, NIL = stale
 
 ;; Write-only handle: open my $fh, ">",  \$s   /   ">>", \$s
 (defclass p-string-output-stream
@@ -17155,20 +17171,54 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (p-string-input-stream sb-gray:fundamental-character-output-stream)
   ())
 
+(defun %psos-scalar-text (box)
+  "The current text of the scalar BOX: \"\" for undef, else its string value
+   (a :memfh cell answers its snapshot)."
+  (let ((v (p-box-value box)))
+    (cond ((stringp v) v)
+          ((or (null v) (eq v *p-undef*)) "")
+          (t (to-string box)))))
+
+(defun %psos-make-cell (s)
+  "The :memfh cell writable stream S puts in its target's box."
+  (let ((box (psos-target s)))
+    (make-p-magic-cell
+     :kind :memfh
+     :getter (lambda ()
+               (or (psos-snap s)
+                   (setf (psos-snap s) (subseq (the string (psos-buf s)) 0))))
+     :setter (lambda (v)
+               (setf (p-box-value box) *p-undef*)
+               (box-set box v)))))
+
+(defun %psos-adopt (s text)
+  "Make writable stream S the owner of its scalar: a private adjustable copy
+   of TEXT, and S's cell in the box.  Returns the buffer."
+  (let ((box (psos-target s))
+        (buf (%p-fresh-adjustable-string text))
+        (cell (or (psos-cell s) (setf (psos-cell s) (%psos-make-cell s)))))
+    (setf (psos-buf s) buf
+          (psos-snap s) nil
+          (p-box-value box) cell
+          (p-box-sv-ok box) nil
+          (p-box-nv-ok box) nil)
+    buf))
+
 (defun %psos-buf (s)
-  "Return the target box's value as an adjustable fill-pointer string.  The
-user may have reassigned the scalar with a plain (non-adjustable) string while
-the handle is open; rebuild it from the current contents when that happens so
-writes never fault on a simple-string."
-  (let* ((box (psos-target s))
-         (v   (p-box-value box)))
-    (if (and (stringp v) (adjustable-array-p v) (array-has-fill-pointer-p v))
-        v
-        (let ((buf (%p-fresh-adjustable-string
-                    (if (or (null v) (eq v *p-undef*)) "" (to-string v)))))
-          (setf (p-box-value box) buf
-                (p-box-sv-ok box) nil (p-box-nv-ok box) nil)
-          buf))))
+  "The private buffer of writable stream S.  When the scalar was written since
+   (its box no longer holds S's cell), S adopts the scalar's current text."
+  (let ((cell (psos-cell s))
+        (box (psos-target s)))
+    (if (and cell (eq (p-box-value box) cell))
+        (psos-buf s)
+        (%psos-adopt s (%psos-scalar-text box)))))
+
+(defun %psos-text (s)
+  "The text a READ of S sees: a writable stream's own buffer, a read-only
+   stream's scalar as it is now."
+  (if (output-stream-p s)
+      (%psos-buf s)
+      (%psos-scalar-text (psos-target s))))
 
 (defun %psos-put (s ch)
   "Write CH at the stream's current position: overwrite if within the string,
@@ -17180,8 +17230,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (setf (char buf p) ch)
         (vector-push-extend ch buf))
     (setf (psos-pos s) (1+ p)
-          (p-box-sv-ok (psos-target s)) nil
-          (p-box-nv-ok (psos-target s)) nil)
+          (psos-snap s) nil)
     ch))
 
 (defmethod sb-gray:stream-write-char ((s p-string-stream-mixin) ch)
@@ -17195,6 +17244,17 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defmethod sb-gray:stream-line-column ((s p-string-stream-mixin)) nil)
 
+(defmethod close :after ((s p-string-stream-mixin) &key abort)
+  "Closing a writable in-memory handle leaves its scalar a PLAIN value: the
+   last snapshot replaces the :memfh cell (when the cell is still there)."
+  (declare (ignore abort))
+  (let ((cell (psos-cell s))
+        (box (psos-target s)))
+    (when (and cell (eq (p-box-value box) cell))
+      (setf (p-box-value box) (funcall (p-magic-cell-getter cell))
+            (p-box-sv-ok box) nil
+            (p-box-nv-ok box) nil))))
+
 ;; tell()/seek() on an in-memory handle go through file-position.
 (defmethod sb-gray:stream-file-position
     ((s p-string-stream-mixin) &optional position)
@@ -17202,16 +17262,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (t (setf (psos-pos s)
                  (case position
                    (:start 0)
-                   (:end   (fill-pointer (%psos-buf s)))
+                   (:end   (length (%psos-text s)))
                    (t      position)))
            t)))
 
 ;; --- read side of a readable in-memory handle ("<", "+<", "+>") -----------
 (defmethod sb-gray:stream-read-char ((s p-string-input-stream))
-  (let ((buf (%psos-buf s))
-        (p   (psos-pos s)))
-    (if (< p (fill-pointer buf))
-        (progn (setf (psos-pos s) (1+ p)) (char buf p))
+  (let ((text (%psos-text s))
+        (p    (psos-pos s)))
+    (if (< p (length text))
+        (progn (setf (psos-pos s) (1+ p)) (char text p))
         :eof)))
 
 (defmethod sb-gray:stream-unread-char ((s p-string-input-stream) ch)
@@ -18033,65 +18093,42 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       (values base layers ef bad))))
 
 (defun %p-open-memory (fh mode target-box)
-  "Open an in-memory string filehandle over TARGET-BOX (the scalar behind \\$s)."
+  "Open an in-memory string filehandle over TARGET-BOX (the scalar behind \\$s).
+   A writable mode makes the stream the owner of the scalar's text (the
+   :memfh cell, see the note above p-string-stream-mixin)."
   ;; Layers are stripped for dispatch: the scalar already holds CL characters,
   ;; so an encoding layer has nothing to translate here (task #171).
-  (let ((mode-str (%p-split-open-mode (to-string mode)))
-        (cur (let ((v (p-box-value target-box)))
-               (if (or (null v) (eq v *p-undef*)) "" (to-string v)))))
-    (cond
-      ;; Write/truncate: replace the scalar with a fresh adjustable string the
-      ;; Gray stream grows in place.  Bypass box-set's sv-cache by invalidating.
-      ((string= mode-str ">")
-       (setf (p-box-value target-box) (%p-fresh-adjustable-string)
-             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
-       (%p-install-fh fh (make-instance 'p-string-output-stream :target target-box))
-       t)
-      ;; Read+write, truncate: like ">", but the handle can also be read back.
-      ((string= mode-str "+>")
-       (setf (p-box-value target-box) (%p-fresh-adjustable-string)
-             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
-       (%p-install-fh fh (make-instance 'p-string-io-stream :target target-box))
-       t)
-      ;; Append: seed the adjustable string with the current contents and
-      ;; position the write offset at the end.
-      ((string= mode-str ">>")
-       (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
-             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
-       (%p-install-fh fh (make-instance 'p-string-output-stream
-                                        :target target-box
-                                        :pos (length cur)))
-       t)
-      ;; Read+write, APPEND: keep the contents and position at the END, the
-      ;; same seeding ">>" does but over the read+write class (probed 5.40.3:
-      ;; `$s="abc"; open $m,"+>>",\$s` gives tell() 3 and a print leaves
-      ;; "abcde").
-      ((string= mode-str "+>>")
-       (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
-             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
-       (%p-install-fh fh (make-instance 'p-string-io-stream
-                                        :target target-box
-                                        :pos (length cur)))
-       t)
-      ;; Read+write, keep contents: position at start, reads see the current
-      ;; contents, writes overwrite/extend in place (Perl's "+<" on a scalar).
-      ((string= mode-str "+<")
-       (setf (p-box-value target-box) (%p-fresh-adjustable-string cur)
-             (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
-       (%p-install-fh fh (make-instance 'p-string-io-stream :target target-box))
-       t)
-      ;; Read: an INPUT-ONLY stream positioned at the start, over a snapshot of
-      ;; the scalar.  It shares the mixin, so seek/tell/SEEK_END are the same
-      ;; code; what it does not share is the write side — perl refuses a print
-      ;; on a read handle, and the read+write class used to accept it and
-      ;; overwrite the character the next read would have returned (task #590).
-      ((string= mode-str "<")
-       (%p-install-fh fh (make-instance 'p-string-input-stream
-                                        :target (let ((b (make-p-box
-                                                          (%p-fresh-adjustable-string cur))))
-                                                  b)))
-       t)
-      (t (warn "Unsupported in-memory open mode: ~A" mode-str) nil))))
+  (let* ((mode-str (%p-split-open-mode (to-string mode)))
+         (box (if (p-box-p target-box) target-box (make-p-box target-box)))
+         (cur (%psos-scalar-text box)))
+    (flet ((writable (class text pos)
+             (let ((s (make-instance class :target box :pos pos)))
+               (%psos-adopt s text)
+               (%p-install-fh fh s)
+               t)))
+      (cond
+        ;; Write/truncate: the scalar becomes "" and the handle writes from 0.
+        ((string= mode-str ">") (writable 'p-string-output-stream "" 0))
+        ;; Read+write, truncate: like ">", but the handle can also be read back.
+        ((string= mode-str "+>") (writable 'p-string-io-stream "" 0))
+        ;; Append: keep the contents, write offset at the end.
+        ((string= mode-str ">>") (writable 'p-string-output-stream cur (length cur)))
+        ;; Read+write, APPEND: the same over the read+write class (probed 5.40.3:
+        ;; `$s="abc"; open $m,"+>>",\$s` gives tell() 3 and a print leaves
+        ;; "abcde").
+        ((string= mode-str "+>>") (writable 'p-string-io-stream cur (length cur)))
+        ;; Read+write, keep contents: position at start, reads see the current
+        ;; contents, writes overwrite/extend in place (Perl's "+<" on a scalar).
+        ((string= mode-str "+<") (writable 'p-string-io-stream cur 0))
+        ;; Read: an INPUT-ONLY stream positioned at the start over the scalar
+        ;; ITSELF -- a later write of the scalar is what the next read sees
+        ;; (probed 5.40.3).  It shares the mixin, so seek/tell/SEEK_END are the
+        ;; same code; what it does not share is the write side -- perl refuses
+        ;; a print on a read handle (task #590).
+        ((string= mode-str "<")
+         (%p-install-fh fh (make-instance 'p-string-input-stream :target box))
+         t)
+        (t (warn "Unsupported in-memory open mode: ~A" mode-str) nil)))))
 
 ;;; --- Fork-pipe opens: open FH, "|-" / "-|" [, CMD] (#70) -------------------
 ;;; (*p-pipe-pids* is declared up with the standard-handle helpers, which have
@@ -19135,7 +19172,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "Total length of STREAM for SEEK_END.  In-memory output streams expose their
 buffer's fill-pointer; everything else falls back to file-length."
   (if (typep stream 'p-string-stream-mixin)
-      (fill-pointer (%psos-buf stream))
+      (length (%psos-text stream))
       (file-length stream)))
 
 (defmacro p-seek (fh &rest args)

@@ -1735,7 +1735,7 @@ io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	26	2	DIFF	s504 #2389: 23/5 -> 26/2 UP at 2284d58d (s501b, exec/fd work): close/stat/lstat(PVBM) fail as perl's do (#1710 rows).  26/2 on every run since (the file read 20/8..26/2 under load in earlier sessions)	0
 io/read.t	2	0	2	0	OK		0
 io/say.t	13	0	13	0	OK		0
-io/scalar.t	128	0	98	30	DIFF		0
+io/scalar.t	128	0	100	28	DIFF	s507p #2111: 98/30 -> 100/28 -- 'reading from magic scalars' (a "<" handle now reads the scalar ITSELF, so a tied scalar FETCHes) and 'FETCH only called once' (one FETCH at the open); run alone twice	0
 io/scalar_ungetc.t	19	0	1	1	DIFF	aborted-forms:1: Can't locate object method "ungetc" via package "main" at - line N. 	0
 io/sem.t	22	0	0	0	XDIFF	aborted-forms:2: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/semctl.t	2	0	0	0	DIFF		0

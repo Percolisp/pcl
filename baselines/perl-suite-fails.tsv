@@ -3,6 +3,8 @@
 # answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
 # files were blessed as COUNTS only, so #964's failing row sat inside op/sub.t's
 # "12 not ok" for months with nothing naming it.
+# s507p (2026-10-05, Opus) -- TWO rows removed BY EDIT: io/scalar.t 30 "FETCH only called once" and 25 "reading from magic scalars" (cause #1710);
+#   pass since s507p #2111 (an in-memory "<" handle reads the scalar itself; one FETCH at the open), io/scalar.t run alone twice: 100/28.
 # s507 (2026-10-04, Fable) -- TWO rows removed BY EDIT: op/gv.t 90 and uni/gv.t 74 "tied elem assignment preserves globs" (cause #1664)
 #   pass since 618db500 = s501t #155 (each file run ALONE on e5d72352 / 618db500 / main, s507/attrib/run3.out); both are TIMEOUT files,
 #   so no run could mark them FIXED.
@@ -2046,7 +2048,6 @@ io/pipe.t	17	ok	not ok	status	#1710
 io/print.t	23	ok	not ok	printf with %n (got a5c)	#1710
 io/pvbm.t	7	ok	not ok	pipe(, PVBM ref) fails	#1710
 io/pvbm.t	6	ok	not ok	pipe(PVBM ref, ) fails	#1710
-io/scalar.t	30	ok	not ok	FETCH only called once	#1710
 io/scalar.t	36	ok	not ok	Permission denied	#1710
 io/scalar.t	40	ok	not ok	[at t/io/scalar.t line 195]	#1710
 io/scalar.t	20	ok	not ok	[at t/io/scalar.t line 66]	#1710
@@ -2065,7 +2066,6 @@ io/scalar.t	91	ok	not ok	non byte open should fail (and warn)	NS:Warnings-gated 
 io/scalar.t	88	ok	not ok	non-byte open should fail	#1710
 io/scalar.t	103	ok	not ok	read from scalar with >0xff chars	#1710
 io/scalar.t	106	ok	not ok	read from scalar with >0xff chars	#1710
-io/scalar.t	25	ok	not ok	reading from magic scalars	#1710
 io/scalar.t	93	ok	not ok	should have warned	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/scalar.t	94	ok	not ok	should have warned	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/scalar.t	119	ok	not ok	still a ref after opening for appending	#1710
