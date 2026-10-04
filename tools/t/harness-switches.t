@@ -34,7 +34,7 @@ my $pclperl = "$root/tools/pclperl-for-tests";
 plan skip_all => "pclperl-for-tests not found" unless -x $pclperl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 11;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -88,4 +88,25 @@ CODE
     open $o, '>', $f or die; print $o "#!perl -x\n1;\n"; close $o;
     $err = `$pclperl \Q$f\E 2>&1`;
     is($err, "Can't emulate -x on #! line at $f line 1.\n", 'a refused #! switch: perl\'s message');
+}
+
+# ── 7-10. s506f: perl-tests/t/test.pl's runperl/fresh_perl as perl's ─────────
+# (fresh_perl dropped `args`; runperl with switches only returned "" unrun;
+# `stdin` escapes were written raw; a `prog`'s diagnostics said "-", perl's
+# say "-e".)  Loaded, not re-implemented: the assertions are about that file.
+{
+    local $ENV{PCLPERL} = $pclperl;
+    my $out = `$^X -e '
+        chdir "$root/perl-tests/t" or die;
+        require "./test.pl";
+        print fresh_perl(q{print "[\@ARGV]"}, { args => ["a", "b"] }), "|";
+        print runperl(switches => ["-e", q("print 7")]), "|";
+        print runperl(switches => ["-0"], stdin => q(x\\0y\\0), prog => q(print length while <>)), "|";
+        print runperl(prog => q(#!perl -m), stderr => 1);
+    ' 2>&1`;
+    my @p = split /\|/, $out, -1;
+    is($p[0], '[a b]', 'fresh_perl passes `args` to the child');
+    is($p[1], '7', 'runperl with switches only runs the child');
+    is($p[2], '22', 'runperl `stdin` escapes are interpreted (\\0 is NUL)');
+    is($p[3], qq{Too late for "-m" option at -e line 1.\n}, 'a runperl `prog` is named -e');
 }

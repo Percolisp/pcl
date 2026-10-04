@@ -76,16 +76,21 @@ sub _fresh_perl_run {
     close $fh;
     my $perl = _pcl_child_perl();
     my $sw = join(' ', @switches);
+    # `args` follow the program file, appended RAW as perl's own t/test.pl
+    # does (its runperl, task #1701).  This used to drop them, so
+    # `fresh_perl_is($code, ..., { args => [$file], switches => ['-i'] })` ran
+    # the child with an EMPTY @ARGV (s506f: t/run/switches.t "abs paths").
+    my $args = join(' ', @{$opts->{args} // []});
     my $got;
     if (defined $opts->{stdin}) {
         my $sin = "/tmp/pcl_fp_sin_$$.txt";
         open(my $sf, '>', $sin) or do { unlink $tmpfile; return ""; };
         print $sf $opts->{stdin};
         close $sf;
-        $got = `$perl $sw "$tmpfile" $capture_stderr < "$sin"`;
+        $got = `$perl $sw "$tmpfile" $args $capture_stderr < "$sin"`;
         unlink $sin;
     } else {
-        $got = `$perl $sw "$tmpfile" $capture_stderr`;
+        $got = `$perl $sw "$tmpfile" $args $capture_stderr`;
     }
     unlink $tmpfile;
     $got //= "";
@@ -480,7 +485,12 @@ sub _create_runperl {
 sub run_perl {
     my (%opts) = @_;
     my $progfile = $opts{progfile};
-    my $prog = defined $progfile ? '' : ($opts{prog} // return "");
+    # perl's runperl takes `prog`/`progs` as -e lines; with neither (and no
+    # progfile) the child runs on its SWITCHES alone -- `runperl(switches =>
+    # ['-E', '"say 1"'])` (s506f: this returned "" without running anything).
+    $opts{prog} = join("\n", @{$opts{progs}}) if !defined $opts{prog} && $opts{progs};
+    return _run_perl_switches_only(%opts) if !defined $progfile && !defined $opts{prog};
+    my $prog = defined $progfile ? '' : $opts{prog};
     my @switches = grep { length($_) } @{$opts{switches} // []};
     my $capture_stderr = $opts{stderr} ? '2>&1' : '2>/dev/null';
     my $tmpfile = defined $progfile ? $progfile
@@ -502,10 +512,7 @@ sub run_perl {
     my $argv = join(' ', @{$opts{args} // []});
     my $got;
     if (defined $opts{stdin}) {
-        my $sin = "/tmp/pcl_rp_sin_$$.txt";
-        open(my $sf, '>', $sin) or do { unlink $tmpfile; return ""; };
-        print $sf $opts{stdin};
-        close $sf;
+        my $sin = _run_perl_stdin_file($opts{stdin}) // do { unlink $tmpfile; return ""; };
         $got = `$perl $sw "$tmpfile" $argv $capture_stderr < "$sin"`;
         unlink $sin;
     } else {
@@ -513,10 +520,48 @@ sub run_perl {
     }
     unlink $tmpfile if ! defined $progfile;   # a caller's file is the caller's
     $got //= "";
+    # A `prog` is perl's -e program, so its diagnostics say "-e" (s506f: they
+    # said "-", fresh_perl's name, and `#!perl -m`'s "Too late ... at -e line
+    # 1." could not match); a caller's progfile is named "-" as before.
+    my $as = defined $progfile ? '-' : '-e';
     (my $escaped = $tmpfile) =~ s/[.]/[.]/g;
-    $got =~ s{at\s+$escaped\s+line}{at - line}g;
-    $got =~ s{of\s+$escaped\s+aborted}{of - aborted}g;
+    $got =~ s{at\s+$escaped\s+line}{at $as line}g;
+    $got =~ s{of\s+$escaped\s+aborted}{of $as aborted}g;
     return $got;
+}
+
+# perl's runperl feeds `stdin` through `perl -e 'print qq(STDIN)'`, so its
+# escapes (`\0`, `\n`, `\x{..}`) are INTERPRETED (s506f: written raw, `-0`'s
+# 'foo\0bar\0' reached the child as backslash-zero).  The same qq(), here.
+sub _run_perl_stdin_file {
+    my ($text) = @_;
+    my $sin = "/tmp/pcl_rp_sin_$$" . int(rand(99999)) . ".txt";
+    my $v = eval "qq(" . $text . ")";
+    $v = $text if !defined $v;
+    open(my $sf, '>', $sin) or return undef;
+    binmode $sf;
+    print $sf $v;
+    close $sf;
+    return $sin;
+}
+
+# runperl with no prog, progs or progfile: the child runs on its switches
+# alone (an -e among them, or a program on STDIN).
+sub _run_perl_switches_only {
+    my (%opts) = @_;
+    my $perl = _pcl_child_perl();
+    my $sw = join(' ', grep { length($_) } @{$opts{switches} // []});
+    my $argv = join(' ', @{$opts{args} // []});
+    my $capture_stderr = $opts{stderr} ? '2>&1' : '2>/dev/null';
+    my $in = '< /dev/null';
+    my $sin;
+    if (defined $opts{stdin}) {
+        $sin = _run_perl_stdin_file($opts{stdin}) // return "";
+        $in = qq{< "$sin"};
+    }
+    my $got = `$perl $sw $argv $capture_stderr $in`;
+    unlink $sin if defined $sin;
+    return $got // "";
 }
 
 # runperl - alias for run_perl (legacy name used in some test files)

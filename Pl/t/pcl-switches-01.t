@@ -237,6 +237,8 @@ row('-T runs the program and says taint checks are not applied',
     "pcl: taint checks (-T) are not applied: PCL does not model taint\n", 0);
 row('-c runs the compile phase (BEGIN) and not the program',
     q{-c -e 'BEGIN { print "B\n" } print "run\n"; END { print "E\n" }'}, "B\n", "-e syntax OK\n", 0);
+put('ck.pl', qq{BEGIN { print "b1\\n" }\nCHECK { print "c1\\n" }\nINIT { print "i1\\n" }\nprint "run\\n";\nEND { print "e1\\n" }\n});
+row('-c runs CHECK blocks too, and no INIT', q{-c ck.pl}, "b1\nc1\n", "ck.pl syntax OK\n", 0);
 put('sc.pl', qq{#!perl -c\nBEGIN { print "B\\n" }\nprint "run\\n";\nEND { print "E\\n" }\n});
 row('#!perl -c: the same', q{sc.pl}, "B\n", "sc.pl syntax OK\n", 0);
 put('sd.pl', qq{#!perl -D\nprint "body\\n";\n});

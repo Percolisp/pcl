@@ -527,12 +527,14 @@ sub expand_program {
   $prefix = 'BEGIN { print STDERR "Recompile perl with -DDEBUGGING to use -D switch (did you mean -d ?)\n" } '
           . $prefix if grep { $_->[0] eq 'D' } @$sh;
   my $suffix = _suffix(\%loop);
-  # -c (command line or #! line): perl compiles -- BEGIN blocks and `use`
-  # imports run -- and says "NAME syntax OK" on STDERR instead of running.  A
-  # BEGIN at the END of the program does exactly that: every earlier BEGIN has
-  # run, nothing at run time has, and no END block runs (POSIX::_exit).
-  $suffix .= ';BEGIN { print STDERR "' . _escape_dq($file) . ' syntax OK\n"; close STDOUT; require POSIX;'
-           . ' POSIX::_exit(0) }' . "\n" if grep { $_->[0] eq 'c' } @$cmd, @$sh;
+  # -c (command line or #! line): perl compiles -- BEGIN blocks, `use`
+  # imports and CHECK blocks run -- and says "NAME syntax OK" on STDERR
+  # instead of running (no INIT, no main line, no END).  A CHECK block that is
+  # the program's FIRST does exactly that: CHECK blocks run last-defined-first,
+  # so it runs after every CHECK of the program, before any INIT (probed).
+  $prefix = 'CHECK { print STDERR "' . _escape_dq($file) . ' syntax OK\n"; close STDOUT;'
+          . ' require POSIX; POSIX::_exit(0) } ' . $prefix
+    if grep { $_->[0] eq 'c' } @$cmd, @$sh;
   if ($suffix ne '') {
     die "PCLSwitches: end_of_code callback required for -n/-p\n" if !$o{end_of_code};
     my $at = $o{end_of_code}->($text);

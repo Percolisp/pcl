@@ -613,7 +613,7 @@ it.
 Perl's switches:
   -0[octal|xHEX] record separator $/ (-0 = "\0", -00 paragraph, -0777 slurp)
   -a             autosplit into @F under -n/-p (-F implies -a implies -n)
-  -c             check syntax only: compile (BEGIN runs), "NAME syntax OK" on STDERR
+  -c             check syntax only: BEGIN+CHECK run, "NAME syntax OK" on STDERR
   -C[flags]      Unicode features (see docs/pcl-commands.md for what applies)
   -d -u          NOT supported (the debugger; dumping core): refused
   -D[flags]      warns as a non-debugging perl does, then runs the program

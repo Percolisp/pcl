@@ -64,7 +64,7 @@ on the program's first line, so no line number moves.
 | `-S` | look the program up along `PATH` |
 | `-I DIR` | prepend DIR to `@INC` (repeatable, in command-line order, ahead of `PERL5LIB`); it also applies to the compile of every module the program loads |
 | `-M MODULE`, `-m MODULE` | `use MODULE` / `use MODULE ()` before the program (`-MList::Util=sum` imports, `-M-Mod` is `no Mod`, `-M'Mod qw(a)'` takes the rest verbatim). The script keeps its own name and line numbers |
-| `-c` | compile only: `BEGIN` blocks and `use` imports run, then `NAME syntax OK` on STDERR, exit 0 (also on a `#!` line) |
+| `-c` | compile only: `BEGIN` and `CHECK` blocks and `use` imports run, then `NAME syntax OK` on STDERR, exit 0 (also on a `#!` line) |
 | `-w` | `$^W = 1` from compile time on (command line and `#!` line) |
 | `-W`, `-X`, `-U`, `-f` | accepted; the program runs (PCL's diagnostics are not switchable) |
 | `-C[flags]` | `I`/`O`/`E`/`S`: a `:utf8` layer on the standard handles; `A`: `@ARGV` decoded; `i`/`o`/`D`: `use open` (the main program's opens); `L`: only under a UTF-8 locale; `${^UNICODE}` reads the number |
