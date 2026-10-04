@@ -118,13 +118,24 @@ an element box or autovivification through `$r->{k}`, and their `$r->[i]`
 twins) asks `%p-when-tied-kind`: the tie of the OTHER kind is never consulted,
 so `$tied_array_ref->{k} = 1` stays perl's "Not a HASH reference" (t/op/avhv.t).
 The kind is read from the record after the count test -- no cost untied.
+Review findings (s505, F1-F3): **a tied element proxy whose FETCH answers a
+reference is read AS that reference** wherever a reference is consumed --
+a nested subscript in argument / lvalue position goes on with the referenced
+container (`%p-tielem-container`, in `p-gethash-box` / `p-aref-box` and the
+slow arms of `p-gethash-argbox` / `p-aref-argbox`), `ref()` (`p-ref`) and the
+method invocant's class (`%pcl-invocant-class`) read it, and the proxy carries
+the wrapper's class (`%p-tie-elem-value`, cleared on STORE); **boolean context
+of a tied hash is the truth of SCALAR** (`%p-true-p-slow`'s hash arm -- the
+`scalar(%h)` rule of §1, truth-tested); and `lib/Config.pm` gained `path_sep`
+(core Env.pm splits `@PATH` on it).
 
 ## 4. The method-call table (perl's answers first)
 
 `Pl/t/tie-aggregate-01.t` runs a logging `Tie::StdHash` / `Tie::StdArray`
-subclass through 118 operations (56 hash, 62 array) and compares every line
--- the methods called, their order and count, and the result -- with perl
-5.40.3.  **108 are identical.**  Ten differ in the LOG only (the results are
+subclass through 126 operations (56 hash, 67 array, and 3 scalar-dereference
+rows in the array program) and compares every line -- the methods called,
+their order and count, and the result -- with perl 5.40.3; the file is 128
+rows (one line-count row per program).  **116 are identical.**  Ten differ in the LOG only (the results are
 identical; `a:untie-restores` is the void-push row again, `a:list-assign-list`
 the assign-count row):
 

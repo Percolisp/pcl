@@ -550,7 +550,8 @@ ties.  A port must keep both properties:
    (`+ EXTEND(n)` for an array when `n > 0`) and a `STORE` per element — and
    it clears the hidden contents too; `keys` / `each` walk `FIRSTKEY` /
    `NEXTKEY`; `scalar(%h)` is `SCALAR`, or when the class has none, "an
-   `each` is in progress, or `FIRSTKEY` finds a key".  A negative subscript is
+   `each` is in progress, or `FIRSTKEY` finds a key" — and a tied hash in
+   BOOLEAN context is the truth of that same answer.  A negative subscript is
    rebased on `FETCHSIZE` unless the class's `$NEGATIVE_INDICES` is true.  An
    operation with no tied form DIES naming itself; it never reads the empty
    shell as "no elements".  An operation only one KIND has (a hash
@@ -561,7 +562,12 @@ ties.  A port must keep both properties:
 An element handed out as an lvalue (foreach alias, `\$h{k}`, `@_`, `values`,
 an element proxy's `++`) is a **fresh box holding a `:tielem` magic cell**:
 getter `FETCH(key)` (kept until the next write, so one operator reading its
-operand twice FETCHes once), setter `STORE(key, v)`.  A LIST-context use reads
+operand twice FETCHes once), setter `STORE(key, v)`.  When the FETCHed value
+is a REFERENCE, the proxy IS that reference to every consumer of one: a
+nested subscript (`$h{a}{b}`, `$a[0][1]`, also in argument and lvalue
+position) goes on into the referenced container, `ref()` and a method
+invocant read its class, and the proxy box carries the referent's blessing
+until the next STORE.  A LIST-context use reads
 the container's **view**: its element proxies in index order, or for a hash
 its keys (all `FIRSTKEY`/`NEXTKEY` first) each followed by its value proxy.
 `tie` / `tied` / `untie` on a scalar dereference `${EXPR}` take the scalar's
