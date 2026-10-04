@@ -7,7 +7,7 @@
 # pcl — run a Perl script (or inline code) through PCL, like `perl`.
 #
 #   pcl script.pl [args...]      run a script
-#   pcl -e 'code'  [args...]     run inline code   (-E is an alias of -e)
+#   pcl -e 'code'  [args...]     run inline code   (-E: the same, with the 5.40 features)
 #   pcl -c script.pl             syntax-check only
 #   pcl --clear-cache            wipe the cached compiled modules AND the cached runtime cores, then exit
 #   pcl --make-core              (re)build the cached runtime core now, then exit

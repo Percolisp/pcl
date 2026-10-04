@@ -253,12 +253,13 @@ and it is handy for quick experiments and for reproducing a bug in one file.
 ## The runtime library, and how it is compiled
 
 The runtime is `cl/pcl-runtime.lisp`, one Common Lisp file that every
-compiled program loads. Loading it from source takes about a second, so PCL
-keeps it compiled in a **saved SBCL core**:
+compiled program loads. Loading it from source compiles it, which is slow, so
+PCL keeps it compiled in a **saved SBCL core**:
 
 * **In a checkout**, the first run builds the core under
-  `~/.pcl-cache/core/`, and every later run starts from it (startup drops
-  from about 1 second to about 0.1 seconds). The core's file name is a hash
+  `~/.pcl-cache/core/`, and every later run starts from it. Measured
+  2026-10-04 on a cached one-line script (median of five): 3.3 seconds
+  with `PCL_NO_CORE=1`, 38 ms from the core. The core's file name is a hash
   of the runtime source, the vendored Lisp library beside it, the SBCL
   version and the checkout's path. So editing the runtime, replacing the
   vendored library or upgrading SBCL makes a *new* core rather than a stale

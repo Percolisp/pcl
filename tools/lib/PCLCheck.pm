@@ -67,7 +67,7 @@ sub run_check {
 
 sub _cannot_check_reason {
   my ($o) = @_;
-  return "-c only transpiles; --check needs the program to RUN" if $o->{check_only};
+  return "-c runs only the compile phase (BEGIN, CHECK, use); --check needs the program to RUN" if $o->{check_only};
   return "no script and no -e (usage: pcl --check [options] script.pl [args...])"
     if !defined $o->{inline} && !defined $o->{source};
   return "can't open script \"$o->{source}\": No such file or directory"
