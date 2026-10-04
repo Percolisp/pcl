@@ -3601,6 +3601,14 @@
    zero-length.  The one writer of *p-match-pos*'s encoding."
   (setf (gethash box *p-match-pos*) (if empty-p (- -1 pos) pos)))
 
+(declaim (inline %p-clear-match-pos))
+(defun %p-clear-match-pos (box)
+  "A store into BOX resets its pos().  The table is empty in any program that
+   never set a pos(), so a store there pays one count test, never a REMHASH
+   (#2539: box-set's two store arms share this one predicate)."
+  (unless (zerop (hash-table-count *p-match-pos*))
+    (remhash box *p-match-pos*)))
+
 ;;; ------------------------------------------------------------
 ;;; Box accessors with lazy caching
 ;;; ------------------------------------------------------------
@@ -3643,8 +3651,7 @@
         (if (numberp value)
             (setf (p-box-nv box) value (p-box-nv-ok box) t (p-box-sv-ok box) nil)
             (setf (p-box-sv box) value (p-box-sv-ok box) t (p-box-nv-ok box) nil))
-        (unless (zerop (hash-table-count *p-match-pos*))
-          (remhash box *p-match-pos*))
+        (%p-clear-match-pos box)
         (return-from box-set box))))
   ;; Tied variable: delegate to STORE.  Magic lvalue: delegate to its setter.
   (let ((current (p-box-value box)))
@@ -3705,7 +3712,7 @@
           (p-box-nv-ok box) nil
           (p-box-sv-ok box) nil)
     ;; Perl: assigning to a scalar resets pos()
-    (remhash box *p-match-pos*)
+    (%p-clear-match-pos box)
     ;; ...and drops a WEAK reference's weakness (sv_setsv clears SvWEAKREF,
     ;; #2084(3), s500a).  Asked only when some program called weaken -- the
     ;; pos() table's own trick -- so a program that never weakens pays one
