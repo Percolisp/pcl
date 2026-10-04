@@ -29,3 +29,6 @@ Pl/t
 # The task store and Claude's notes (dot-claude-in-home-dir/README.md): the
 # development record, not part of an installation.
 dot-claude-in-home-dir
+# The agent rulebook, protocol and briefs (briefs-and-rules-for-claude-subagents/README.md):
+# the development process, not part of an installation.
+briefs-and-rules-for-claude-subagents

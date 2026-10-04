@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s506f (Opus, s507 resume, 2026-10-04).  PRE-EXISTING (main 2e71d4aa identical).\n\n    perl -e 'BEGIN { 1 } -e _; print \"x\\n\"'   -> x\n    pcl  -e 'BEGIN { 1 } -e _; print \"x\\n\"'   -> Undefined subroutine &main::e called (status 255)\n\nPPI 1.291 tokens: Word[BEGIN] { Number[1] } Operator[-] Word[e] Magic[_] ;  -- the PPI bug is logged as\ndocs/ppi-upstream-bugs.md §35 + docs/ppi-bug-report.t.  s506f's switch prefix (`BEGIN { $^W = 1; } ` put on the\nprogram's first code line) hit exactly this shape: `pcl -w -e '-T _'` died (op/filetest.t row \"no uninit warnings\nfrom -T with no preceding stat\"); the prefix now ends in `; ` (PCLSwitches::prefix_first_code_line), so the\nSWITCH path is fixed and guarded (Pl/t/pcl-switches-01.t).  What remains is source WRITTEN this way.\nFix shape: a `_repair_*` token pass, keyed like §21's (adjacency `-` + one-letter filetest Word after a `}` that\ncloses a BEGIN/END/INIT/CHECK/UNITCHECK block or a compound statement's block), merging into Operator(-X).\n",
+   "id" : "2670",
+   "status" : "pending",
+   "subject" : "A filetest right after a `BEGIN { … }` block on the same line (`BEGIN { 1 } -e _;`) is compiled as minus a call to sub `e` -- PPI 1.291 splits it (docs/ppi-upstream-bugs.md §35); dies \"Undefined subroutine &main::e\""
+}

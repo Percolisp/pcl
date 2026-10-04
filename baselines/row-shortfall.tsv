@@ -173,6 +173,7 @@ t/io/crlf.t	3	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 t/io/dup.t	19	#1703 -- closing a `>&=` (fdopen) handle closes the shared descriptor, so dup.t:65 takes STDOUT out and dup.t:68 fails EBADF, losing every row after it
 t/io/layers.t	55	#139 -- the whole file is `PerlIO::get_layers`.  Its ABORT is one layer in front: `PerlIO::get_layers(STDIN)` emits a BARE CL symbol and dies "The variable STDIN is unbound" (the #266/#452 bareword-in-an-argument-slot family); see #1710
 t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
+t/io/nargv.t	1	#2669 (nested in-place edit: `local $^I` is real since s506f)
 t/io/scalar_ungetc.t	17	#1704 -- IO::Handle::ungetc is an explicit croak in lib/IO.pm and the file needs a pushback STACK (eleven ungetc calls in a row)
 t/io/sem.t	22	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
 t/io/semctl.t	2	NS:DynaLoader / XS binary extensions -- IPC::SysV is XS
@@ -185,6 +186,7 @@ t/mro/basic_utf8.t	9	XDIFF: not-supported.md §mro — C3-only, no mro:: API / n
 t/mro/complex_c3.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/complex_c3_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
 t/mro/method_caching.t	3	XDIFF: not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)
+t/mro/method_caching_utf8.t	7	#2634 (the braced stash spelling under strict refs aborts the file at its row 22; since s497b, unblessed until s507)
 t/mro/next_NEXT.t	3	XDIFF: not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
 t/mro/next_NEXT_utf8.t	3	XDIFF: not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 t/mro/next_goto.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
@@ -311,12 +313,12 @@ t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/run/locale.t	44	#1705 -- the file skip_alls because `require POSIX; POSIX->import("locale_h")` fails; lib/POSIX.pm exists but has no `locale_h` export tag
 t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
-t/run/switchF.t	1	#1702
-t/run/switcha.t	1	#1702
+t/run/switchF.t	2	#2666 (`*ARGV = *DATA` in a BEGIN block does not alias, so the -F loop reads nothing; was 1 under #1702 until s506f made the #! line take effect)
+t/run/switcha.t	2	#2666 (as t/run/switchF.t; was 1 under #1702)
+t/run/switchd-78586.t	2	not-supported.md#perls-command-line-switches-what-pcl-does-not-do-s506f (its #! line carries -d:Mod, which pcl refuses: the file does not transpile)
 t/run/switches.t	0	s488a BOOKKEEPING, not a move (was 11): the s473t5d splice wrote 11 beside its own verdict row of 28/112 = 140 rows produced of perl's 140, i.e. zero short.  Re-measured 0 on this tree AND on a `git archive f6b56feb` extraction; #1700 + #1699 had already removed both of the file's aborts, and the 11 skip rows it names are rows PCL does produce
-t/run/switchn.t	1	#1702
+t/run/switchn.t	2	#2666 (as t/run/switchF.t; was 1 under #1702)
 t/run/switchp.t	2	#1702
-t/run/switchx.t	6	#1702 -- s486c merge review (Fable, 2026-09-17): was 5; #1652's progfile plumbing makes the -x child RUN and its `1..8` arrives without a newline (#1702: the shebang's own -l is not honoured), gluing the first `not ok` to the plan -- one more perl row never produced
 t/uni/attrs.t	1	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322) -- the 1 missing row sits behind the file's last attribute block
 t/uni/fold.t	18072	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/uni/gv.t	118	#1664 -- the typeglob model: the file aborts in the PROXY CONSTANT SUBROUTINE block (a stash slot holding a string or a SCALAR ref IS a sub in perl), and every row after it is behind that abort

@@ -27,7 +27,17 @@ check that nothing embarrassing is in it before it is published.
   keeps its old path.  An agent in a worktree writes through the link into
   MAIN's working tree — never read `$W/dot-claude-in-home-dir/` in a worktree,
   it is a stale checkout; task changes are committed on main by Fable.
-- **Memory dir and the agent briefs:** see task #1833 for what is done.
+- **Memory dir: MOVED s507** the same way
+  (`~/.claude/projects/-home-bernt-pcl/memory` → `dot-claude-in-home-dir/memory`).
+- **Agent rulebook / protocol / briefs: MOVED s507 (lean set)** into
+  **`~/pcl/briefs-and-rules-for-claude-subagents/`** (layout mirrors
+  `~/pcl-agent-scratch/`; `s473/COMMON.md`, `sNNN/SHARED-BOX.md`, briefs, the
+  current `PAUSE-sNNN.md`).  The old paths are FILE-level symlinks.  WRITE THE
+  REPO PATH: the Edit/Write tools refuse a symlinked file, and `perl -pi` /
+  `sed -i` on the old path would silently replace the link with a copy.  A new
+  session's SHARED-BOX, briefs and PAUSE file are written there under `sNNN/`;
+  `~/pcl-agent-scratch/` keeps only measurement output.  The session HISTORY
+  is `docs/session-log.md` — old briefs/PAUSE files are not copied in.
 - `find ~/.claude/tasks/pcl -name …` does NOT follow the link (add a trailing
   slash or use a glob); `ls`, globs and `grep -r` do.
 

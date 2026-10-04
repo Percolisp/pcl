@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-04",
+   "description" : "FILED s506f (Opus, s507 resume, 2026-10-04) from the companion mover io/nargv.t (C 11/2 -> 5/1).\n\nThe mover is NOT a regression of the switch work: on main `local $^I = '.bak'` bound a DOWN-cased symbol\n(the bare `$^I` token under :invert -- the same bug as F1's `local $^W`), so the in-place edit was never in\neffect and nargv.t's rows \"passed\" by printing to STDOUT.  s506f's F1 fix (`_transform_pkg_var` pipe-quotes a\ncaret variable) makes `local $^I` real, and the file's NESTED in-place edit is then wrong.\n\nMINIMAL PROBE (scratch/s506f/s507/nargv-min.sh in worktree agent-a908d9d2d9fff4ce2):\n    { local *ARGV; local $^I = '.bak'; @ARGV = qw(a b);\n      while (<>) { other() if $. == 2; print \"X$_\"; } }\n    sub other { local *ARGV; local *ARGVOUT; local $_; @ARGV = qw(c);\n      while (<>) { print \"Y$_\" } }\n    a = \"a1\\na2\\n\", b = \"b1\\n\", c = \"c1\\n\"\n  perl:  a = Xa1|Xa2|   b = Xb1|   c = Yc1|   (nothing on STDOUT but \"done\")\n  pcl:   a = Xa1|       b = Xb1|   c = Yc1|   and \"Xa2\" goes to STDOUT\nSo after the inner loop (with its own `local *ARGVOUT`) ends, the OUTER loop's output handle is not\nre-selected: the restored ARGVOUT glob is not the selected handle any more.  perl keeps the in-place\nstate as magic in *ARGVOUT{IO} and re-selects it when the local glob is restored.  io/nargv.t also has\n\"check setuid mode preserved\" (row 6), already failing.\n",
+   "id" : "2669",
+   "status" : "pending",
+   "subject" : "Nested in-place edit: after an inner `while (<>)` with its own `local *ARGV; local *ARGVOUT` returns, the outer $^I loop's prints go to STDOUT instead of the outer file (io/nargv.t 11/2 -> 5/1 now that `local $^I` takes effect)"
+}

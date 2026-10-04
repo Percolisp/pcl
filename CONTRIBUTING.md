@@ -78,7 +78,9 @@ sessions, are in the repository too, in
 [`dot-claude-in-home-dir/`](dot-claude-in-home-dir/README.md): every `#NNNN` in
 the documentation is a file there.  Its README says how to read a task and how
 to link the directory into your own `~/.claude/` if you take up the work with
-Claude Code.
+Claude Code.  The standing rules those sessions give their background agents,
+and the briefs they write for them, are in
+[`briefs-and-rules-for-claude-subagents/`](briefs-and-rules-for-claude-subagents/README.md).
 
 ## License
 

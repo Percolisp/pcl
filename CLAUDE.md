@@ -318,7 +318,7 @@ plus the targeted files the change names.
 **THE NUMBER THE PROJECT STEERS BY (USER, end of s494; instrument #2099,
 s495):** the `EVERYDAY:` line — ordinary programs whose STDOUT + exit status
 are byte-identical to perl's — not the suite pass rate.  Goal **> 90 %**
-(**110 of 122 = 90.2 % at s506, 2026-10-04**; 85 of 122 = 69.7 % at the first
+(**113 of 122 = 92.6 % at s507, 2026-10-04**; 85 of 122 = 69.7 % at the first
 run, s495 — the trend is `baselines/everyday-history.tsv`).  The baseline's cause column is the steering
 input: the task that holds the most programs is the next correctness batch.
 It is a steering number, never a compatibility percentage
@@ -506,13 +506,13 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s506, 2026-10-04, main `ddb959d2`, gen v2-3780 — measured on
+- **CURRENT NUMBERS (s507, 2026-10-04, main `08de9e4f`, gen v2-3980 — measured on
   that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **276 files / 9,576 rows** (143 s wall with
+  stale):** gate `Result: PASS`, **277 files / 9,714 rows** (156 s wall with
   `tools/prove-core`); full `perl-tests/` sweep GATE clean, **TOTAL passing
-  18,728**, 650 failing (96.6 %), 60 of 108 files fully passing, 96 run to the
-  end and 12 stop part-way, drops 5 = census; `EVERYDAY: 110 of 122 identical to
-  perl (90.2 %)`; `tools/t/install-container.t` PASS 17 rows (s503, not re-run).  The user-facing
+  18,731**, 647 failing (96.7 %), 59 of 108 files fully passing, 96 run to the
+  end and 12 stop part-way, drops 5 = census; `EVERYDAY: 113 of 122 identical to
+  perl (92.6 %)`; `tools/t/install-container.t` PASS 17 rows (s507, by the switches batch).  The user-facing
   copy of these numbers is `docs/STATUS.md` — update both together.
 - **The three xs files are PARKED (USER decision, s485, 2026-09-14): `Pl/t/xs-01/02/03.t`
   `plan skip_all` at the top until the pclxs project (the XS bridge, a separate
@@ -667,6 +667,7 @@ Example: `*wantarray*` must be in the `:export` list, otherwise `(let ((*wantarr
 When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 0a. `dot-claude-in-home-dir/README.md` - **the TASK STORE and Claude's MEMORY NOTES live IN THE REPO** (s507, USER 2026-10-04, task #1833): `~/.claude/tasks/pcl` and `~/.claude/projects/-home-USER-pcl/memory` are SYMLINKS into `dot-claude-in-home-dir/{tasks/pcl,memory}`, so a clone is the whole project and every `#NNNN` in the docs is a file there.  It is PUBLISHED with the repo: a task or a note holds technical content and work decisions only, nothing personal.  In an agent WORKTREE the directory is a stale checkout — tasks are always read and written through `~/.claude/tasks/pcl` (the main checkout's copy) and committed on main by the reviewing session.
+0b. `briefs-and-rules-for-claude-subagents/README.md` - **the agent RULEBOOK, the session PROTOCOL and the BRIEFS live in the repo too** (s507): `s473/COMMON.md` (the rules every background agent reads first), `sNNN/SHARED-BOX.md` (which batches run, the merge order, how heavy runs take turns on one machine), `sNNN/<label>-prompt.md` / `resume-<label>.md` (the briefs), `sNNN/PAUSE-sNNN.md` (the reviewing session's running notes — the resume recipe after a cut).  The old `~/pcl-agent-scratch/...` paths are FILE-level symlinks into it; `~/pcl-agent-scratch/` otherwise holds only measurement output and review probes.  WRITE THE REPO PATH (the Edit/Write tools refuse a symlinked file; `perl -pi` / `sed -i` on the old path replaces the link with a copy).  A new session writes its protocol, briefs and notes here under `sNNN/`.
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. **The per-session review records -- `docs/fable-answers-sNNN.md` (rulings) and
    `docs/opus5-review-requests-sNNN.md` (asks) -- were REMOVED from the tree in s440
