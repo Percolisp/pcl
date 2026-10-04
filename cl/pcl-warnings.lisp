@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-3980
+;;; pcl: pipeline=v2 gen=v2-4080
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -45,9 +45,15 @@
 
 (p-eval-always (p-note-inc "strict"))
 
-(p-sub pl-import (&rest %_args) (:writes-args nil :needs ()) (p-args-body (block nil)))
+(p-sub pl-import
+  (&rest %_args)
+  (:writes-args nil :needs ())
+  (p-args-body (block nil (p-return-empty))))
 
-(p-sub pl-unimport (&rest %_args) (:writes-args nil :needs ()) (p-args-body (block nil)))
+(p-sub pl-unimport
+  (&rest %_args)
+  (:writes-args nil :needs ())
+  (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-enabled
   (&rest %_args)
@@ -71,7 +77,7 @@
 
 (p-sub pl-register_categories
   (&rest %_args)
-  (:writes-args nil :needs (:nonlocal_exit.loop_control :nonlocal_exit.return))
+  (:writes-args nil :needs (:nonlocal_exit.loop_control))
   (p-args-body
     (block nil
       (p-void-ctx
