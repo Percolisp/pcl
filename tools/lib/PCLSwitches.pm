@@ -86,6 +86,13 @@ sub _parse_cluster {
   my ($c, $events, $next) = @_;
   while (length $c) {
     my $ch = substr($c, 0, 1);
+    # Whitespace inside one argv word (perl's moreswitches): `-x -y` in one
+    # word continues with -y; anything else after the space is ignored.
+    if ($ch =~ /\s/) {
+      $c =~ s/^\s+//;
+      last if $c !~ s/^-//;
+      next;
+    }
     my $kind = $KIND{$ch};
     return ['!', _unrecognized($c), $SWITCH_ERROR_STATUS] if !defined $kind;
     substr($c, 0, 1, '');
@@ -98,7 +105,9 @@ sub _parse_cluster {
       push @$events, [$ch, defined $arg ? $arg : ''];
       next;
     }
-    if ($kind eq 'rest') { push @$events, [$ch, $c]; $c = ''; next }
+    # The attached argument ends at whitespace (perl: `while (*s &&
+    # !isSPACE(*s))`); `-F' '` is the pattern `'`, probed.
+    if ($kind eq 'rest') { $c =~ s/^(\S*)//; push @$events, [$ch, $1]; next }
     # num
     if ($ch eq '0') {
       # The switch character IS the number's first digit (perl's grok_oct
@@ -339,15 +348,16 @@ sub _prefix {
   push @begin, '$/ = ' . _lit($st->{rs}) . ';' if $st->{rs_set};
   push @begin, '$\\ = ' . _lit($st->{ors}) . ';' if $st->{ors_set};
   push @begin, '$^I = ' . _lit($st->{inplace}) . ';' if defined $st->{inplace};
-  push @begin, 'unshift @INC, ' . join(', ', map { _lit($_) } @{ $o->{shebang_incs} || [] }) . ';'
-    if @{ $o->{shebang_incs} || [] };
+  # perl's -i, given no file to edit on the COMMAND LINE, says so before the
+  # program compiles (a -i on the #! line does not: probed).
+  unshift @begin, 'warn "-i used with no filenames on the command line, reading from STDIN.\n"'
+                . ' if !@ARGV;' if $o->{inplace_cmd};
+  # A #! line's -I dirs are each PREPENDED in turn (`#!perl -IA -IB` leaves
+  # B first -- probed), unlike the command line's.
+  push @begin, 'unshift @INC, ' . _lit($_) . ';' for @{ $o->{shebang_incs} || [] };
   push @begin, _s_switch_code() if $st->{s};
   my $pre = '';
   $pre .= 'BEGIN { ' . join(' ', @begin) . ' } ' if @begin;
-  # perl's -i, given no file to edit, says so as the run starts (after the
-  # compile phase: a BEGIN that empties @ARGV silences it -- probed).
-  $pre .= 'INIT { warn "-i used with no filenames on the command line, reading from STDIN.\n"'
-        . ' if !@ARGV } ' if defined $st->{inplace};
   $pre .= "use feature ':5.40'; use builtin ':5.40'; " if $st->{E};
   $pre .= use_line_for_M($_->[1], $_->[0]) for @{ $st->{mods} };
   if ($loop->{n} || $loop->{p}) {
@@ -378,12 +388,14 @@ sub _split_code {
   if ($F =~ m{\A([/'"])} && index($F, $1, 1) > 0) {
     return "our \@F = split($F); ";
   }
-  for my $d ("\x{1}", "\x{2}", "\x{3}", "\x{4}") {
-    next if index($F, $d) >= 0;
-    return "our \@F = split(q$d$F$d); ";
-  }
+  # perl quotes it as q\0...\0, a STRING, which split compiles as a pattern.
+  # Emitted as the uninterpolated match m'...' -- the same pattern -- because
+  # PCL's split takes a string pattern LITERALLY (task #2661); with a `'` in
+  # the pattern, the string is compiled through qr// instead.
+  return "our \@F = split(' '); " if $F eq ' ';     # q\0 \0 is awk mode too
+  return "our \@F = split(m'$F'); " if index($F, "'") < 0;
   (my $q = $F) =~ s/([\\'])/\\$1/g;
-  return "our \@F = split('$q'); ";
+  return "our \@F = split(do { my \$pcl_F = '$q'; qr/\$pcl_F/ }); ";
 }
 
 sub _suffix {
@@ -441,7 +453,8 @@ sub expand_program {
   if ($x && length $x->[1]) {
     $st->{chdir} = $x->[1];
   }
-  my $prefix = _prefix($st, \%loop, { shebang_incs => \@sh_incs });
+  my $prefix = _prefix($st, \%loop, { shebang_incs => \@sh_incs,
+                                      inplace_cmd => scalar grep { $_->[0] eq 'i' } @$cmd });
   $prefix = 'BEGIN { chdir ' . _lit($st->{chdir}) . ' or die "Can\'t chdir to '
           . _escape_dq($st->{chdir}) . ': $!\n" } ' . $prefix
     if defined $st->{chdir};

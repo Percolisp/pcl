@@ -117,6 +117,9 @@ row('-lane (cluster): -a splits on whitespace', q{-lane 'print $F[1] // "u"'}, "
 row('-F: (a plain pattern string)', q{-F: -lane 'print $F[1] // "u"'}, "u\nu\nu\nh\n", '', 0, stdin => $IN);
 row('-F/:/ (slash-quoted)', q{'-F/:/' -lane 'print $F[1] // "u"'}, "u\nu\nu\nh\n", '', 0, stdin => $IN);
 row('-F"X" (double-quoted)', q{'-F"X"' -lane 'print $F[1]'}, "b\n", '', 0, stdin => "aXbXc\n");
+row('-F\\s+ is a PATTERN, not a literal string', q{'-F\s+' -lane 'print $F[2]'}, "c\n", '', 0, stdin => "a  b\tc\n");
+row('-F\'s argument ends at whitespace (-F\' \' is the pattern \')', q{"-F' '" -lane 'print $F[1]'}, "x  d\n", '', 0,
+    stdin => "c'x  d\n");
 row('-F implies -a implies -n', q{-F: -le 'print $F[2]'}, "c\n", '', 0, stdin => "a:b:c\n");
 row('-00 paragraph mode', q{-00 -ne 'print "<$_>"'}, "<a b c\nd e f\n\n><g:h:i\n>", '', 0, stdin => $IN);
 row('-0777 slurps', q{-0777 -ne 'print length'}, "19", '', 0, stdin => $IN);
@@ -154,5 +157,46 @@ row('-M with a file: the script keeps its line numbers', q{-MData::Dumper mfile2
     "mfile2.pl mfile2.pl 2\n", '', 0);
 row('-MList::Util=sum -lane', q{-MList::Util=sum -lane 'print sum(map { length } @F)'}, "3\n3\n\n5\n", '', 0, stdin => $IN);
 row('-p with next LINE', q{-lpe 'next LINE if /d/; $_ .= "!"'}, "a b c!\nd e f\n!\ng:h:i!\n", '', 0, stdin => $IN);
+
+# ---- member 3: the program's own #! line (#1702) -------------------------
+my $AB = "a b\nc d\n";
+put('sb1.pl', qq{#!/usr/bin/perl -n\nprint "[\$_]";\n});
+row('#!/usr/bin/perl -n runs the body in the loop', q{sb1.pl}, "[a b\n][c d\n]", '', 0, stdin => $AB);
+put('shn.pl', qq{#!perl -n\nprint "[\$_]";\n});
+row('command-line -l + #!perl -n: the loop is rebuilt and chomps', q{-l shn.pl}, "[a b]\n[c d]\n", '', 0, stdin => $AB);
+put('shl.pl', qq{#!perl -l\nprint "[\$_]";\n});
+row('command-line -n + #!perl -l: $\\ is set but the loop does not chomp', q{-n shl.pl}, "[a b\n]\n[c d\n]\n", '', 0, stdin => $AB);
+put('na.pl', qq{#!./perl -na\nprint "\$F[1]\\n";\n});
+row('#!./perl -na', q{na.pl}, "b\nd\n", '', 0, stdin => $AB);
+put('fx.pl', qq{#!./perl -anFx+\nprint "\$F[1]\\n";\n});
+row('#!./perl -anFx+', q{fx.pl}, "b\n", '', 0, stdin => "axxbxc\n");
+put('pp.pl', qq{#!perl -p\ns/a/A/;\n});
+row('#!perl -p', q{pp.pl}, "A b\nc d\n", '', 0, stdin => $AB);
+for my $s (qw(x E S V e f)) {
+    put("ref$s.pl", qq{#!perl -$s\nprint "body\\n";\n});
+    row("#!perl -$s is refused as perl refuses it", "ref$s.pl", '', "Can't emulate -$s on #! line at ref$s.pl line 1.\n", 255);
+}
+put('tlM.pl', qq{#!perl -Mstrict\nprint "body\\n";\n});
+row('#!perl -M is too late', q{tlM.pl}, '', qq{Too late for "-Mstrict" option at tlM.pl line 1.\n}, 255);
+put('tlm.pl', qq{#!perl -m\nprint "body\\n";\n});
+row('#!perl -m is too late', q{tlm.pl}, '', qq{Too late for "-m" option at tlm.pl line 1.\n}, 255);
+put('unA.pl', qq{#!perl -l -A\nprint "body";\n});
+row('an unknown switch on the #! line', q{unA.pl}, '', "Unrecognized switch: -A  (-h will show valid options) at unA.pl line 1.\n", 255);
+put('pdl.pl', qq{#!/usr/bin/perl-l\nprint "dash";\n});
+row('#!/usr/bin/perl-l: no switch after the perl word, nothing applies', q{pdl.pl}, "dash", '', 0);
+put('p5.pl', qq{#!perl5.40 -l\nprint "p5";\n});
+row('#!perl5.40 -l: the switches after the perl word apply', q{p5.pl}, "p5\n", '', 0);
+put('cm.pl', qq{#!perl -l # comment\nprint "a";\n});
+row('#!perl -l # comment: switch words end at the first non-switch', q{cm.pl}, "a\n", '', 0);
+put('ss.pl', qq{#!perl -s\nprint "s: x=\$x [\@ARGV]\\n";\n});
+row('#!perl -s parses the program\'s own switches', q{ss.pl -x a}, "s: x=1 [a]\n", '', 0);
+put('si.pl', qq{#!perl -IFoo::Bar -IBla\nprint "\@INC[0,1]\\n";\n});
+row('#!perl -IA -IB prepends each in turn (B first)', q{si.pl}, "Bla Foo::Bar\n", '', 0);
+put('req1.pl', qq{#!perl -n\nprint "req body ran\\n";\n1;\n});
+row('a require\'d file\'s #! line is NOT examined', q{-e 'require "./req1.pl"; print "after\n"'},
+    "req body ran\nafter\n", '', 0, stdin => $AB);
+row('an eval string\'s #! line is NOT examined',
+    q{-e 'eval "#!perl -n\nprint qq{ev ran [\$_]\n};"; print "after\n"'}, "ev ran []\nafter\n", '', 0, stdin => $AB);
+row('a #! line inside -e code IS examined', q{-e '#!perl -l' -e 'print 1'}, "1\n", '', 0);
 
 done_testing();

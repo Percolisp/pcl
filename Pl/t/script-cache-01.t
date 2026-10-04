@@ -52,7 +52,7 @@ plan skip_all => "sbcl not found" if !`which sbcl 2>/dev/null`;
 my $core = PCLSbcl::cached_core("$root/cl/pcl-runtime.lisp");
 plan skip_all => "no cached core" if !($core && -f $core);
 
-plan tests => 57;
+plan tests => 62;
 
 my $dir   = tempdir(CLEANUP => 1);   # fixtures
 my $cache = tempdir(CLEANUP => 1);   # the cache these rows write
@@ -288,7 +288,21 @@ PL
     is(run_pcl("-MList::Util '$p'", cache => $mcache), "m\n",
        'a file run with -M prefixes runs');
     is(count_glob("$mcache/scripts/*"), 0,
-       '... and is not cached either: `pcl` prepends the use-lines into a temp copy');
+       '... and is not cached either: the entry\'s key does not carry the switches (s506f)');
+
+    # s506f: ANY source-changing command-line switch keeps the run off the
+    # path-keyed entry -- but a script's OWN #! switches do not: its emission
+    # is a function of the file's bytes, which the key covers.
+    my $ncache2 = tempdir(CLEANUP => 1);
+    my $q = write_file("$dir/withn.pl", "print \"[\$_]\";\n");
+    is(run_pcl("-n '$q' '$q'", cache => $ncache2), "[print \"[\$_]\";\n]",
+       'a file run with -n runs inside the -n loop');
+    is(count_glob("$ncache2/scripts/*"), 0, '... and is not cached: -n is a source-changing switch');
+    my $shcache = tempdir(CLEANUP => 1);
+    my $s = write_file("$dir/shebang-l.pl", "#!/usr/bin/perl -l\nprint 'sh';\nprint __LINE__;\n");
+    is(run_pcl("'$s'", cache => $shcache), "sh\n3\n", 'a script\'s own #!perl -l is honoured (cold)');
+    ok(count_glob("$shcache/scripts/*") > 0, '... and the script IS cached (the switches are in its bytes)');
+    is(run_pcl("'$s'", cache => $shcache), "sh\n3\n", '... and the warm run from the entry agrees');
 
     my $ncache = tempdir(CLEANUP => 1);
     is(run_pcl("--no-cache '$p'", cache => $ncache), "m\n", '--no-cache runs');
