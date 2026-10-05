@@ -99,7 +99,6 @@
 #   baselines/perl-suite-run.tsv and baselines/perl-suite-fails.tsv.
 # taken-at: 3ac9394f 2026-09-18 (6 companion file(s) re-measured)
 # taken-at: s504 2026-10-02 (29 companion file(s) re-measured)
-perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
 perl-tests/bop.t	1	s473t1: STALE PLAN, not a lost row -- `plan tests => 510` but session 245 commented out the `pack "P"` block and left the count, so the file holds 509 assertions.  REAL PERL 5.40.3 runs 509 too ("Looks like you planned 510 tests but ran 509").  PCL produces all 509.  Task #1438.

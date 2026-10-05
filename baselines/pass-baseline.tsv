@@ -2,6 +2,10 @@
 # s507p (2026-10-06, Opus, EDITED BY HAND -- two rows, TOTAL 18731 -> 18733, perf round 39): scalar.t 86 -> 88,
 #   rows 25 "reading from magic scalars" and 30 "FETCH only called once" (#1446): #2111 makes a '<'
 #   in-memory handle read its scalar LIVE through the box, so a tied scalar's FETCH fires once, as in perl.
+# s508a (2026-10-05, Opus, EDITED BY HAND -- two rows, TOTAL 18733 -> 18735 after s507p): aassign.t 181 -> 182 (the TODO row
+#   "my (....) = @_" is now ASSERTED: `&f17;` shares the caller's @_, #2632; row-shortfall row removed);
+#   method.t 76 -> 77 ("*glob->method is equiv to (\*glob)->method": \*NAME is ONE glob address, #2682).
+#   Sweep scratch/s508a/sweep.log; method.t A/B'd on a fee16466 extraction (scratch/s508a/method-base.log).
 # s506f (2026-10-04, Opus, EDITED BY HAND -- three rows, TOTAL 18728 -> 18731, perl's switches in pcl):
 #   reset.t 22 -> 21 (row 42 "check $^W has been zeroed" passed ON NOTHING: $^W was a raw 0 and
 #   `local $^W = 1` was silently lost; $^W is now a box, and reset() is a no-op -- not-supported.md
@@ -412,7 +416,7 @@
 #   `bop.t 144 <no description>` key and sweep-diff correctly reads 0/0.
 #   REBASED over main 5eb87b01: the sweep TOTAL is 18681 -> 18686 there (this
 #   +5 on top of s484d's anonsub.t +5 (merged as s486c)), re-measured GATE clean, +0.
-aassign.t	OK	181	7	189
+aassign.t	OK	182	7	189
 anonsub.t	OK	6	4	10
 append.t	OK	13	0	13
 args.t	OK	22	1	23
@@ -486,7 +490,7 @@ magic.t	PARTIAL	158	31	208
 # this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the
 # unrecorded pre-existing `$pvlv_glob->method`).  No fail-baseline rows leave: the four were
 # among this PARTIAL file's unrecorded churn rows, never blessed.
-method.t	PARTIAL	76	22	163
+method.t	PARTIAL	77	22	163
 min_local.t	OK	10	0	10
 # s470bs-merge (2026-09-06, the batch's OWED full sweep) -- TWO ROWS EDITED BY
 #   HAND, both MEASURED on this tree AND on a `git archive 48d8e39` extraction
