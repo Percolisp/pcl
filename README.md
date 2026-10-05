@@ -16,11 +16,10 @@ Lisp is a documented IR (Intermediate Representation),
 someone to fork this as a basis for their own Perl compiler. PCL is
 licensed the same as Perl.
 
-The files Claude Code works from are in this repository too:
-`CLAUDE.md`, `.claude/`, the task list and notes that normally live in
-`~/.claude` (see
+A fork gets the AI working context as well as the code: the rules in
+`CLAUDE.md`, the task list and Claude's notes from `~/.claude` (in
 [`dot-claude-in-home-dir/`](dot-claude-in-home-dir/README.md)), and the
-briefs for background agents.
+[briefs](briefs-and-rules-for-claude-subagents/README.md) for agents.
 
 ## A quick look
 
