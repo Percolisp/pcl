@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-05",
+   "description" : "FOUND s508 (Fable, 2026-10-05) by the review probes for s507c PART ONE; PRE-EXISTING on main fee16466.\n\nREPRODUCER (probe ph-phase in ~/pcl-agent-scratch/s508/review/ph.pl (IMPL TAG [REGEX]; answers in out/ph.perl / ph.base / ph.tree; perl 5.40.3, main fee16466, the s507c tree 0229e0ec)):\n  BEGIN { print \"b:${^GLOBAL_PHASE}\\n\" } CHECK { print \"c:${^GLOBAL_PHASE}\\n\" } INIT { print \"i:${^GLOBAL_PHASE}\\n\" } print \"r:${^GLOBAL_PHASE}\\n\"; END { print \"e:${^GLOBAL_PHASE}\\n\" }\n  perl: b:START / c:CHECK / i:INIT / r:RUN / e:END          PCL: b: / c: / i: / r: / e:\nNo docs/not-supported.md entry, no earlier task.\n\nWHERE IT GOES: the runtime already has every boundary as ONE place each (`p-run-compile-phase-blocks` drains UNITCHECK, CHECK, then INIT -- cl/pcl-runtime.lisp near line 2190; `*p-compile-phase-done*`; the END-block runner; global destruction at exit), so the variable is one special set at five points and read by the `${^GLOBAL_PHASE}` magic.  It is read-only in perl (\"Modification of a read-only value attempted\").  A module being loaded at run time sees RUN; a BEGIN block inside a run-time `require` or string eval sees RUN too (probe it: perl prints RUN there, not START).\n\nWHY IT MATTERS: the common real use is `return if ${^GLOBAL_PHASE} eq 'DESTRUCT';` at the top of DESTROY (Moo, Devel::GlobalDestruction's fast path, many OO modules) -- with the empty string that test is false, which is the right answer everywhere except during global destruction; the `eq \"RUN\"` / `ne \"START\"` guards are wrong today.\n",
+   "id" : 2761,
+   "status" : "pending",
+   "subject" : "`${^GLOBAL_PHASE}` is the empty string in every phase (perl: START in BEGIN, CHECK, INIT, RUN, END, DESTRUCT) -- `return if ${^GLOBAL_PHASE} eq \"DESTRUCT\"` in a DESTROY method and `if (${^GLOBAL_PHASE} eq \"RUN\")` guards read wrong"
+}
