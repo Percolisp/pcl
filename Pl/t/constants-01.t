@@ -15,7 +15,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 22;
+use Test::More tests => 23;
 BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
@@ -90,6 +90,11 @@ diag "-------- Hash-style constant declaration:";
     like($result, qr/\(p-sub pl-LIM \(&rest %_args\) \(:prototype ""\) \(progn %_args 9\)/,
          'Hash-style: its literal sibling keeps the plain body');
 }
+
+# s508a review of its own gate-SET scan: a qq{} value (PPI::Token::Quote::Interpolate,
+# which has no `interpolations` method) must classify, not die (t/uni/lex_utf8.t).
+output_contains('use constant QQ => qq|ab|;', '(p-use-constant pl-QQ "ab")',
+                'a qq|| value classifies (no interpolations method)');
 
 
 # ========================================

@@ -11436,9 +11436,9 @@ sub _constant_literal_token {
   return 1 if $t->isa('PPI::Token::Quote::Single')
               || $t->isa('PPI::Token::Quote::Literal')
               || $t->isa('PPI::Token::QuoteLike::Words');
-  return 1 if ($t->isa('PPI::Token::Quote::Double')
-               || $t->isa('PPI::Token::Quote::Interpolate'))
-              && !$t->interpolations;
+  # Only Quote::Double answers `interpolations`; a qq{} (Quote::Interpolate)
+  # is not taken for a literal (u/lex_utf8.t died on the missing method).
+  return 1 if $t->isa('PPI::Token::Quote::Double') && !$t->interpolations;
   return 1 if $t->isa('PPI::Token::Word') && $t->content eq 'undef';
   return 0;
 }
