@@ -40,6 +40,9 @@ check that nothing embarrassing is in it before it is published.
   is `docs/session-log.md` — old briefs/PAUSE files are not copied in.
 - `find ~/.claude/tasks/pcl -name …` does NOT follow the link (add a trailing
   slash or use a glob); `ls`, globs and `grep -r` do.
+- **CONFIRMED 2026-10-05 (USER): a new Claude Code session loads `MEMORY.md`
+  and the tasks through the symlinks.**  Left in #1833: only a parse / id test
+  row for the task store (task files 407–409 have an empty `id`).
 
 **How to apply:**
 - Anything a successor would need goes into the repo (DECIDED, docs,
