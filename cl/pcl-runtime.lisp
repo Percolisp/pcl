@@ -392,7 +392,7 @@
    #:p-tie-proxy-tie-obj #:p-tie-proxy-saved-value
    #:p-tie #:p-untie #:p-tied
    #:p-weaken #:p-isweak
-   #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
+   #:pl-__SUB__                         ; __SUB__ the parse did not resolve: dies
    ;; Compile-time definition macros (for BEGIN block support)
    #:p-defpackage #:p-defclass #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
@@ -35159,9 +35159,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; then printed 0 where perl prints 120 — silently.  Rule 12's s329 boundary
 ;; says exactly this case dies; an effect-only gap may announce and continue.
 (defun pl-__SUB__ ()
-  (error "PCL: __SUB__ outside any sub, or inside a string eval, is not ~
-          supported (docs/not-supported.md); in a named or anonymous sub ~
-          it works"))
+  ;; A perl-shaped die (one line, newline-ended like the formline refusal: a
+  ;; runtime refusal has no statement location here; trappable by eval,
+  ;; status 255), never a raw Lisp error: the s508 review found the raw
+  ;; ERROR printed an SBCL backtrace for `my $v = __SUB__;` with the
+  ;; feature off (perl: the bareword string).  Answering the string here
+  ;; instead would be silent wrong wherever a spelling the parse does not
+  ;; see (a module that imports the feature) turned current_sub on.
+  (p-die (format nil "PCL: __SUB__ outside any sub without the current_sub ~
+                   feature is not supported~%")))
 
 ;; utf8::unicode_to_native / native_to_unicode map between Unicode and the
 ;; platform's native code point.  On any ASCII (non-EBCDIC) platform — which is

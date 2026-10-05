@@ -227,6 +227,17 @@ row('-- then a program named -dash.pl: it runs (the script cache path)',
 row('... and with a source-changing switch (the transpile path)',
     q{-l -- -dash.pl b}, "dash b -dash.pl\n\n", '', 0);
 row('-E: __SUB__ outside any sub is undef', q{-E 'say __SUB__ // "undef"'}, "undef\n", '', 0);
+# Without the feature perl reads it as the bareword string; PCL refuses
+# (a module may have turned the feature on unseen) -- but as a ONE-line,
+# trappable die with status 255, never an SBCL backtrace.
+# A script file: under -e every uncaught die carries #2492's two SBCL lines.
+put('nosub.pl', qq{print "a\\n"; my \$v = __SUB__; print "not reached\\n";\n});
+row('__SUB__ in no sub without the feature is a one-line refusal (status 255)',
+    q{nosub.pl},
+    "a\n", qr/\APCL: __SUB__ outside any sub without the current_sub feature is not supported\n\z/, 255);
+row('... trappable by eval',
+    q{-e 'my $v = eval { __SUB__ }; print "caught: $@"; print "after\n"'},
+    qr/\Acaught: PCL: __SUB__ [^\n]*\nafter\n\z/, '', 0);
 row('-CS: a :utf8 layer on STDOUT, ${^UNICODE} = 7', q{-CS -e 'print chr(233), " ${^UNICODE}\n"'},
     "\xc3\xa9 7\n", '', 0);
 row('-C alone is SDL (95)', q{-C -e 'print "${^UNICODE}\n"'}, "95\n", '', 0, env => 'LANG=en_US.UTF-8 LC_ALL=');

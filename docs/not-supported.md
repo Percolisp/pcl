@@ -1726,11 +1726,15 @@ time:
 - in NO sub, and in a STRING EVAL's text (which perl also treats as no sub,
   even when the eval sits in one — probed), it is `undef` where the feature is
   on (`use feature`, a `:5.16`+ bundle, `use v5.16`+, the eval site's own
-  features) and for `CORE::__SUB__` (task #2691); without the feature it stays
-  the bareword it is in perl.  `__SUB__ => …` and `$h{__SUB__}` are autoquoted
+  features) and for `CORE::__SUB__` (task #2691).  Without the feature, in no
+  sub, perl reads it as the bareword STRING `"__SUB__"`; PCL REFUSES it with a
+  one-line, `eval`-trappable die (`PCL: __SUB__ outside any sub without the
+  current_sub feature is not supported`, status 255): the feature can be
+  turned on by spellings the parse does not see (a module that imports it),
+  where answering the string would be silently wrong.  `__SUB__ => …` and `$h{__SUB__}` are autoquoted
   strings.
 
-**What differs:** inside a sub, a bare `__SUB__` is rewritten whether or not
+**What differs:** in no sub without the feature, the refusal above.  Inside a sub, a bare `__SUB__` is rewritten whether or not
 the feature is on; perl reads it as a bareword there when it is off.  No real
 code relies on that.
 
