@@ -2412,11 +2412,29 @@
 ;;; snapshotted first.  The tests sit where they cost nothing on the common
 ;;; path -- a SIMPLE-STRING clause takes the place of a STRING clause, and the
 ;;; snapshot is the arm only a non-simple string reaches.
+;;; THE AUDIT (#2115 (b), s507p): with PCL_STRBUF_AUDIT=<file> set, each
+;;; snapshot the two copy arms below take appends one line to <file> -- the
+;;; arm, the string's type and the calling frames.  A non-simple string
+;;; reaching a retaining store means some PRODUCER hands one out (readline
+;;; did, until s507p), which costs a copy at every store: the log names it.
+;;; Off, the arms pay nothing more -- they are the rare arms already.
+(defun %p-strbuf-audit-note (arm v)
+  "Log one snapshot to  when that is set."
+  (let ((file (sb-posix:getenv "PCL_STRBUF_AUDIT")))
+    (when (and file (plusp (length file)))
+      (with-open-file (o file :direction :output :if-exists :append
+                              :if-does-not-exist :create)
+        (let ((*print-pretty* nil))
+          (format o "~A ~S ~{~S~^ < ~}~%" arm (type-of v)
+                  (mapcar (lambda (f) (if (consp f) (car f) f))
+                          (ignore-errors
+                           (subseq (sb-debug:list-backtrace :count 7) 1)))))))))
+
 (declaim (inline %p-own-string))
 (defun %p-own-string (v)
   "V, or a simple-string snapshot of V when V is a NON-simple string."
   (if (and (stringp v) (not (simple-string-p v)))
-      (subseq v 0)
+      (progn (%p-strbuf-audit-note "store" v) (subseq v 0))
       v))
 
 (declaim (inline %p-hash-key))
@@ -2434,7 +2452,8 @@
     (simple-string (let ((box (%make-p-box :value value :class class)))
                      (setf (p-box-sv box) value (p-box-sv-ok box) t)
                      box))
-    (string (make-p-box (subseq value 0) class))
+    (string (%p-strbuf-audit-note "make-p-box" value)
+            (make-p-box (subseq value 0) class))
     (t (%make-p-box :value value :class class))))
 
 ;;; ============================================================
