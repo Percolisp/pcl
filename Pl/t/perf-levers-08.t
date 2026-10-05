@@ -96,6 +96,10 @@ my $mech = lisp_out(<<'LISP');
         (%p-tie-shell-shape-p (make-array 2 :adjustable t :fill-pointer 2))
         (%p-tie-shell-shape-p "")
         (%p-tie-shell-shape-p (make-p-box 1))))
+(format t "records ~a~%"
+  (list (simple-string-p (%p-read-record (make-string-input-stream (format nil "ab~%cd")) (string #\Newline)))
+        (simple-string-p (%p-read-record (make-string-input-stream "abXYcd") "XY"))
+        (simple-string-p (%p-read-record (make-string-input-stream "abcd") nil))))
 LISP
 like($mech, qr/^clearpos T$/mi,
      '#2539: box-set\'s two pos() resets share %p-clear-match-pos');
@@ -105,6 +109,8 @@ like($mech, qr/^memfh \(MEMFH T\)$/mi,
      '#2111: a writable in-memory handle owns its buffer; the scalar holds a :memfh cell answering a simple-string snapshot');
 like($mech, qr/^shapes \(T T NIL T NIL NIL NIL\)$/mi,
      '#2637: only an empty vector or a hash of at most one entry can be a tied shell');
+like($mech, qr/^records \(T T T\)$/mi,
+     '#2115 (a): a readline record is a SIMPLE string (line, multi-char separator, slurp), so a store keeps it without a snapshot');
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ANSWERS (perl's)

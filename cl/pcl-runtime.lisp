@@ -21084,7 +21084,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    SEPARATOR, with the handle bookkeeping ($., *p-last-read-handle*) left to
    %p-readline-impl, which is the only caller that has a handle at all.
      nil        = slurp             \"\"  = paragraph
-     integer    = fixed-size record  else = that string, kept on the record."
+     integer    = fixed-size record  else = that string, kept on the record.
+   A record is a SIMPLE string: a non-simple one would be snapshotted again at
+   every retaining store (the #2115 ownership chokepoints, s507p)."
   (handler-case
       (cond
         ;; Slurp mode: $/ = undef - read entire file
@@ -21094,7 +21096,7 @@ buffer's fill-pointer; everything else falls back to file-length."
            (loop for char = (read-char stream nil nil)
                  while char
                  do (vector-push-extend char content))
-           (if (zerop (length content)) nil (coerce content 'string))))
+           (if (zerop (length content)) nil (subseq content 0))))
 
         ;; Record mode: $/ = \N - read exactly N characters per record.
         ((integerp sep)
@@ -21141,7 +21143,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                  do (vector-push-extend char result)
                  when (char= char sep-char)
                  do (loop-finish))
-           (if (zerop (length result)) nil (coerce result 'string))))
+           (if (zerop (length result)) nil (subseq result 0))))
 
         ;; Multi-character separator
         (t
@@ -21155,7 +21157,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                            (string= result sep
                                     :start1 (- (length result) sep-len)))
                  do (loop-finish))
-           (if (zerop (length result)) nil (coerce result 'string)))))
+           (if (zerop (length result)) nil (subseq result 0)))))
     ;; Any stream error (e.g. reading from a directory) → nil like perl, AND
     ;; `$!` set the way perl sets it: %p-read-fail names EISDIR for a
     ;; directory handle and leaves $! alone for anything else (task #1237).
