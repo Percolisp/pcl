@@ -1271,6 +1271,26 @@ snapshot as a plain value).  A `<` handle reads the scalar's current text.
 Example: `print $fh "a"; my $c = $buf; $k{$buf} = 1; print $fh "b"` leaves
 `$c` and the key `"a"` and `$buf` `"ab"`, as in perl.
 
+**`.=` on a long string appends in place, behind the same kind of cell**
+(normative, s507p, task #2115).  When `.=` on a scalar box, a hash or array
+element or a deref element (`$h{k}`, `$a[i]`, `$r->{k}`, `$r->[i]`, `our $g`)
+produces a string of at least 200 characters, the text moves into a PRIVATE
+adjustable buffer that grows geometrically, and the box holds a magic cell of
+kind `:strbuf`: reads answer a simple-string snapshot taken once after each
+append, a write of the scalar stores plainly (the cell is gone), `length`
+reads the live buffer of a `:strbuf` or `:memfh` cell without a snapshot.  A
+shorter result is the plain concatenation.  The right side of `.=` is
+evaluated BEFORE the left side is read (perl's order).  No runtime store is
+trusted to copy: a raw lexical slot retains a value with a plain SETF, so a
+buffer that a scalar held directly could be kept by one.  Every RETAINING
+store still keeps a SIMPLE string (`make-p-box`, `box-set`,
+`%p-storable-raw`, the hash-key helper `%p-hash-key`, `bless`): a non-simple
+string reaching one is copied, and `PCL_STRBUF_AUDIT=<file>` logs each such
+copy with its caller (a producer that hands out adjustable strings costs a
+copy at every store -- readline did until s507p).  Example: `$h{k} .= "ab"
+for 1 .. 200000` is linear; `my $c = $h{k}; $h{k} .= "x"` leaves `$c`
+unchanged.
+
 **`%.15g`'s style switch is the exponent of the ROUNDED value, and it must be
 computed exactly** (normative, s473d).  C uses the exponential style when the
 decimal exponent X of the value *after rounding to 15 significant digits* is
