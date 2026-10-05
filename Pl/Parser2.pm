@@ -5793,6 +5793,15 @@ sub _lexsub_renamable {
 # text BEFORE the decl (and in the decl's own RHS) on the outer variable.
 # Every caller's blocker guarantees a single declaration of the name in
 # $root, so there is no shadow scope to skip.
+# Is the Structure::List L the name list of a declarator -- `my (…)`,
+# `state (…)`, `our (…)`?
+sub _is_decl_list {
+  my ($l) = @_;
+  my $pv = $l->sprevious_sibling;
+  return $pv && $pv->isa('PPI::Token::Word')
+      && $pv->content =~ /^(?:my|our|state|local)$/ ? 1 : 0;
+}
+
 sub _rename_decl_within {
   my ($self, $root, $sym, $new, $decl_override) = @_;
   my $old  = $sym->content;
@@ -5802,7 +5811,21 @@ sub _rename_decl_within {
   # outer $x), but a caller whose ROOT *is* that statement must say which
   # sub-region to skip instead — a `for my $x (LIST)` roots at the Compound,
   # where the default would skip the whole construct (#296).
-  my $decl = $decl_override // $sym->statement;
+  # A LIST declaration's Symbol sits in the Expression INSIDE `my (…)`, whose
+  # ->statement is that inner Expression -- the whole `my ($p, $q) = ($q, $p)`
+  # is the statement that holds it (task #2631: the skipped region was only
+  # the name list, so the RHS was rewritten to the NEW names and read undef,
+  # where the single-scalar `my $x = $x` already read the outer one).
+  my $decl = $decl_override // do {
+    my $st = $sym->statement;
+    while ($st && $st->isa('PPI::Statement::Expression')
+           && $st->parent && $st->parent->isa('PPI::Structure::List')
+           && $st->parent->parent && $st->parent->parent->isa('PPI::Statement')
+           && _is_decl_list($st->parent)) {
+      $st = $st->parent->statement;
+    }
+    $st;
+  };
   # A NESTED re-declaration of the same name inside $root is a different
   # variable: its own decl target and every use in its scope must keep the
   # original name (#254 B-ii — op/while.t's `while (my $i = …) { … my $i = 0 }`).

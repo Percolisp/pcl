@@ -1738,6 +1738,24 @@ close $fa; print "07 ", ($fa + 0 == hex($hex) ? "kept" : "lost"), "\n";
 my $old = select(STDERR); my $cur = select($old); print "08 $old $cur\n";
 });
 
+# s508a (#2631): the RIGHT side of a LIST declaration reads the variables that
+# exist BEFORE it -- the OUTER pair -- wherever the outer pair is bound (block
+# level, file level under strict + signatures, a loop, a named sub), exactly as
+# the single-scalar `my $x = $x + 1` always did.  INVERSE: main fee16466
+# answered " " for e and the strict/signatures row.
+test_transpile("a list declaration's right side reads the OUTER variables (s508a, #2631)", q{
+use strict; use feature q(signatures); no warnings;
+my ($ox, $oy) = (1, 2);
+sub row ($t, $c) { print "$t: ", $c->(), "\n" }
+row "a single, anon sub" => sub { my $ox = $ox + 10; $ox };
+row "b list, anon sub" => sub { my ($ox, $oy) = ($oy, $ox); "$ox $oy" };
+sub n3 { my ($ox, $oy) = ($oy, $ox); "$ox $oy" } print "c named sub: ", n3(), "\n";
+{ my ($p, $q) = (3, 4); my $f5 = sub { my ($p, $q) = ($q, $p); "$p $q" }; print "e block-level outer: ", $f5->(), "\n"; }
+{ my ($p, $q) = (5, 6); my $f = sub { my ($p, @r) = ($q, $p, 7); "$p @r" }; print "f with an array: ", $f->(), "\n"; }
+for my $i (1) { my $f = sub { my ($ox, $oy) = ($oy, $ox); "$ox $oy" }; print "g loop: ", $f->(), "\n"; }
+my $f7 = sub { my ($ox, $z) = ($ox + 1, 5); "$ox $z" }; print "h self-reference: ", $f7->(), "\n";
+});
+
 
 # s507c (#2700): a body that is ONLY `my (LIST) = @_` returns the list
 # assignment's value -- the params in list context, the @_ COUNT in scalar
