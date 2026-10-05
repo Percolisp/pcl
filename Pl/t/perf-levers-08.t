@@ -326,4 +326,27 @@ PERL
 13 delete: 252:bb12 | [0]
 EXPECTED
 
+answers(<<'PERL', <<'EXPECTED', '#2115 (c): .= evaluates its right side BEFORE reading the element (perl\'s concat order), the key once, and vivifies');
+my %h = (k => "a"); sub f { $h{k} = "Z"; "v" } $h{k} .= f(); print "$h{k}\n";
+my @a = ("a"); sub g { $a[0] = "Y"; "w" } $a[0] .= g(); print "$a[0]\n";
+my $r = { k => "b" }; sub q1 { $r->{k} = "X"; "u" } $r->{k} .= q1(); print "$r->{k}\n";
+my $calls = 0; sub key { $calls++; "k" } $h{key()} .= "1"; print "$h{k} $calls\n";
+my %e; $e{new} .= "x"; print exists $e{new} ? "viv $e{new}\n" : "none\n";
+my @n; $n[3] .= "y"; print scalar(@n), " $n[3]\n"; $n[-1] .= "z"; print "$n[3]\n";
+my $u; $u->{a}{b} .= "deep"; print "$u->{a}{b}\n";
+my %num = (n => 5); $num{n} .= 1; print "$num{n}\n";
+my $big = { b => "q" x 300 }; sub h2 { $big->{b} = "short"; "S" } $big->{b} .= h2(); print length($big->{b}), " ", substr($big->{b}, 0, 6), "\n";
+PERL
+Zv
+Yw
+Xu
+Zv1 1
+viv x
+4 y
+yz
+deep
+51
+6 shortS
+EXPECTED
+
 done_testing();

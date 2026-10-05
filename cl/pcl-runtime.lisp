@@ -11165,7 +11165,7 @@ per element."
 ;;; construction.  COST: the first read after an append copies the string, so
 ;;; a loop that reads the scalar after every append stays O(n) per iteration,
 ;;; as it was.  Short strings keep the plain concatenate (no buffer at all).
-(defparameter +p-strbuf-min+ 200
+(defconstant +p-strbuf-min+ 200
   "A `.=` whose result is at least this long moves the string into a :strbuf
    buffer; below it the append is the plain concatenate.")
 
@@ -11247,77 +11247,102 @@ per element."
                box))))
       (t (box-set box (%p-concat-assign-value box value))))))
 
-(defun %p-elem-strbuf-box (acc cont key)
-  "The element BOX an in-place `.=` appends to, or NIL for the ordinary path.
-   ACC is p-gethash or p-aref; CONT/KEY are the vivified container and key.
-   Answers a box only for a plain (untied) container whose existing element
-   already holds a :strbuf cell or a simple string of at least
-   +p-strbuf-min+ characters -- a raw slot is promoted in place (the
-   element-cell rule, %p-elem-cell)."
-  (let ((c (unbox cont)))
-    (flet ((ok (v)
-             (or (%p-strbuf-of v)
-                 (and (simple-string-p v) (>= (length v) +p-strbuf-min+)))))
-      (cond
-        ((and (eq acc 'p-gethash) (hash-table-p c) (not (%p-tied c)))
-         (let ((k (to-string key)))
-           (multiple-value-bind (v found) (gethash k c)
-             (cond ((not found) nil)
-                   ((p-box-p v) (and (null (p-box-class v)) (ok (p-box-value v)) v))
-                   ((ok v) (%p-hash-elem-cell c k))
-                   (t nil)))))
-        ((and (eq acc 'p-aref) (vectorp c) (not (stringp c)) (not (%p-tied c))
-              (integerp key) (< -1 key (length c)))
-         (let ((v (aref c key)))
-           (cond ((p-box-p v) (and (null (p-box-class v)) (ok (p-box-value v)) v))
-                 ((ok v) (%p-elem-cell c key))
-                 (t nil))))
-        (t nil)))))
+(declaim (inline %p-elem-append))   ; so its two lambdas are inlined, not allocated
+(defun %p-elem-append (cell-fn v store-fn value)
+  "`.=` on an EXISTING element whose current content is V: a box appends
+   through %p-append-box; a raw simple string either stays raw (STORE-FN gets
+   the concatenation) or, past +p-strbuf-min+, is promoted to its cell
+   (CELL-FN) and appended in place.  NIL = not this shape: the caller takes
+   the ordinary path."
+  (cond ((p-box-p v)
+         (and (null (p-box-class v)) (%p-append-box v value)))
+        ((simple-string-p v)
+         (let ((s (to-string value)))
+           (if (< (+ (length v) (length s)) +p-strbuf-min+)
+               (funcall store-fn (concatenate 'string v s))
+               (%p-append-box (funcall cell-fn) s))))
+        (t nil)))
+
+(defun %p-hash-append (cont key value)
+  "`$h{KEY} .= VALUE` with ONE lookup when CONT is a plain hash holding KEY;
+   NIL (do nothing) for every other shape -- the ordinary store runs then."
+  (let ((h (unbox cont)))
+    (when (and (hash-table-p h) (not (%p-tied h))
+               (not (and *p-any-overload-registered*
+                         (p-box-p value) (p-box-class value))))
+      (let ((k (to-string key)))
+        (multiple-value-bind (v found) (gethash k h)
+          (and found
+               (%p-elem-append (lambda () (%p-hash-elem-cell h k)) v
+                               (lambda (s) (setf (gethash k h) s))
+                               value)))))))
+
+(defun %p-array-append (cont idx value)
+  "`$a[IDX] .= VALUE`, %p-hash-append's array twin: a plain array and an
+   in-range non-negative integer index holding a value; NIL otherwise."
+  (let ((a (unbox cont)))
+    (when (and (vectorp a) (not (stringp a)) (not (%p-tied a))
+               (typep idx 'fixnum) (< -1 idx (length a))
+               (not (and *p-any-overload-registered*
+                         (p-box-p value) (p-box-class value))))
+      (%p-elem-append (lambda () (%p-elem-cell a idx)) (aref a idx)
+                      (lambda (s) (setf (aref a idx) s))
+                      value))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-concat-store-form (p v)
+    "The ordinary `.=` store of V into the place P (overload guard included)."
+    `(setf ,p ,(%compound-arith-form
+                '%p-compound-.-slow
+                (lambda (c d) `(concatenate 'string (to-string ,c) (to-string ,d)))
+                p v))))
 
 (defmacro p-.= (place value)
-  "Perl .= (concat-assign).  A scalar box or a hash / array ELEMENT appends in
-   place once its string is long (%p-append-box, the :strbuf note above); a
-   deref place (`$$r .= X`) and every short string keep the ordinary store
-   (%p-.=-store).  VALUE is evaluated BEFORE the place is read: perl's concat
-   reads its left operand after the right one has run."
-  (cond
-    ((and (%p-elem-place-p place) (member (car place) '(p-gethash p-aref)))
-     (let ((v (gensym "V"))
-           (b (gensym "B")))
+  "Perl .= (concat-assign).  A scalar box, a hash / array ELEMENT or a deref
+   element appends IN PLACE once its string is long (the :strbuf note above);
+   a short string keeps the plain concatenate, inline for a scalar box; a
+   `$$r` place keeps the ordinary store (%p-.=-store).  VALUE is evaluated
+   BEFORE the place is read: perl's concat reads its left operand after the
+   right one has run."
+  (let ((v (gensym "V")))
+    (cond
+      ((and (%p-elem-place-p place) (member (car place) '(p-gethash p-aref)))
        (%p-vivified-elem-form
         place
         (lambda (p)
-          `(let* ((,v ,value)
-                  (,b (%p-elem-strbuf-box ',(car p) ,(cadr p) ,(caddr p))))
-             (if ,b
-                 (%p-append-box ,b ,v)
-                 (setf ,p ,(%compound-arith-form
-                            '%p-compound-.-slow
-                            (lambda (c d) `(concatenate 'string (to-string ,c)
-                                                        (to-string ,d)))
-                            p v))))))))
-    ((and (consp place) (member (car place) (quote (p-gethash-deref p-aref-deref))))
-     (let ((r (gensym "R"))
-           (k (gensym "K"))
-           (v (gensym "V"))
-           (b (gensym "B")))
-       (let ((p `(,(car place) ,r ,k ,@(cdddr place))))
+          `(let ((,v ,value))
+             (or (,(if (eq (car p) 'p-gethash) '%p-hash-append '%p-array-append)
+                  ,(cadr p) ,(caddr p) ,v)
+                 ,(%p-concat-store-form p v))))))
+      ((and (consp place) (member (car place) '(p-gethash-deref p-aref-deref)))
+       (let* ((r (gensym "R"))
+              (k (gensym "K"))
+              (p `(,(car place) ,r ,k ,@(cdddr place))))
          `(let* ((,r ,(cadr place))
                  (,k ,(caddr place))
+                 (,v ,value))
+            (or (,(if (eq (car place) 'p-gethash-deref) '%p-hash-append '%p-array-append)
+                 ,r ,k ,v)
+                ,(%p-concat-store-form p v)))))
+      ((or (%p-elem-place-p place) (%p-accessor-place-p place))
+       `(%p-.=-store ,place ,value))
+      (t
+       (let ((b (gensym "B"))
+             (c (gensym "C"))
+             (s (gensym "S")))
+         `(let* ((,b ,place)
                  (,v ,value)
-                 (,b (%p-elem-strbuf-box
-                      (quote ,(if (eq (car place) (quote p-gethash-deref)) (quote p-gethash) (quote p-aref)))
-                      ,r ,k)))
-            (if ,b
-                (%p-append-box ,b ,v)
-                (setf ,p ,(%compound-arith-form
-                           (quote %p-compound-.-slow)
-                           (lambda (c d) `(concatenate (quote string) (to-string ,c)
-                                                       (to-string ,d)))
-                           p v)))))))
-    ((or (%p-elem-place-p place) (%p-accessor-place-p place))
-     `(%p-.=-store ,place ,value))
-    (t `(%p-append-box ,place ,value))))
+                 (,c (and (p-box-p ,b) (p-box-value ,b)))
+                 (,s (cond ((simple-string-p ,v) ,v)
+                           ((and (p-box-p ,v) (null (p-box-class ,v))
+                                 (simple-string-p (p-box-value ,v)))
+                            (p-box-value ,v)))))
+            ;; THE SHORT APPEND, inline: two plain strings whose result stays
+            ;; below the buffer threshold are the old concatenate + box-set.
+            (if (and ,s (simple-string-p ,c) (null (p-box-class ,b))
+                     (< (+ (length ,c) (length ,s)) +p-strbuf-min+))
+                (box-set ,b (concatenate 'string ,c ,s))
+                (%p-append-box ,b ,v))))))))
 
 ;;; `x=` DELEGATES OUTRIGHT — no guard — and that fixes a second bug in the
 ;;; same copy.  Its inlined body was `(apply #'concatenate 'string (make-list
