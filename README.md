@@ -16,6 +16,9 @@ Lisp is a documented IR (Intermediate Representation),
 someone to fork this as a basis for their own Perl compiler. PCL is
 licensed the same as Perl.
 
+All AI configuration files for continuing this should be here
+(including ~/.claude etc).
+
 ## A quick look
 
 Here is an example of a compilation. The original Perl:
