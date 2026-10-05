@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-05",
+   "description" : "FOUND s508a (Opus 5.5, 2026-10-05) while probing #2682's breaking cases; PRE-EXISTING on main fee16466 (the base extraction answers the same).\n\nREPRODUCER (perl 5.40.3 vs PCL):\n  open my $fa, \"<\", $0 or die;\n  { package O; }\n  my $c = 1;\n  print \"[$fa]\\n\";\nperl: [GLOB(0x...)]     PCL: []   (silent: $fa reads an unrelated empty global)\n\nThe emission closes the file-level `p-let` chain that holds $fa at the package block, and the statements after the block run in a NEW chain that does not bind $fa: the trailing print reads the bare symbol $fa, not the lexical.  It needs all three: a `my` EMBEDDED in an expression (`open my $fa, ...`; a plain `my $x = 5;` statement survives), a bare block that switches package (`{ package O; ... }`), and a new `my` declaration after the block.  Same with `my $a = 5; { package O; sub f {1} } print $a` (the sort name $a also loses it, without the trailing `my`).\n  Probes: scratch/s508a/probes/k12.pl, k13.pl (s508a worktree).\n\nWhy it matters: `open my $fh ...; { package Helper; ... }` followed by more file-level code is an ordinary script layout; every later read of the handle is a silent wrong.\nCheap discriminating measurement (not taken): dump the p-let chain boundaries Parser2 emits for k13.pl with and without the embedded `my` -- the chain split is decided where the package block is lowered; find whether the embedded declaration is registered in the scope the split re-opens.\n",
+   "id" : "2780",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a file lexical declared INSIDE an expression (`open my $fa, ...`) is lost after a `{ package X; ... }` block when a new `my` follows -- the later read sees an empty global (pre-existing)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-05",
+   "description" : "FOUND s507p while answering the s508 resume brief's `use English` question (probe scratch/s507p/eng-tied.pl):\n\n    use English; print ref(tied($RS)) || \"not\", \" \", ref(tied($OUTPUT_AUTOFLUSH)) || \"not\", \"\\n\";\n    perl 5.40.3: \"not not\"      PCL (main fee16466 and s507p): \"English::_RS English::_Autoflush\"\n\ns507b made lib/English.pm TIE the separator aliases and $| (so `local $RS` etc. go through to the real variable).  perl's English ALIASES them (*RS = */), so `tied` is false there.  A program that asks tied() on an English name (rare) sees an object perl does not have.  NOT a cost: the scalar ties do not touch **p-tie-count**, so untied containers pay nothing (cost-english-1.log, s507p).  Decide: accept + not-supported note, or answer tied() false for these shim ties.\n",
+   "id" : "2721",
+   "status" : "pending",
+   "subject" : "DIVERGENCE (small): under `use English`, tied($RS) / tied($OUTPUT_AUTOFLUSH) answer the shim's tie object (English::_RS) where perl says not tied -- lib/English.pm ties the aliases since s507b"
+}

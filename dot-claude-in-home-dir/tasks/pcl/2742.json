@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-05",
+   "description" : "FILED s508 (Opus 5.5, s507c resumed) from the #2700 / #2701 \"value of a sub's last statement\" table (scratch/s507c/p2b/lastval.pl in worktree agent-a5c8a09980aa19ae8); PRE-EXISTING on main fee16466.\n\nREPRODUCER (perl 5.40.3 vs PCL):\n  our $g = 3; our @ga = (1, 2);\n  sub lo1 { local $g }            my @l1 = lo1(); my $s1 = lo1();\n  sub lo2 { local $g = 9 }        my @l2 = lo2(); my $s2 = lo2();\n  sub lo3 { local @ga = (7, 8) }  my @l3 = lo3(); my $s3 = lo3();\n  sub lo4 { local ($g) = (5, 6) } my @l4 = lo4(); my $s4 = lo4();\n  print scalar(@l1), \" \", $s1 // \"u\", \"|\", \"@l2 $s2|\", \"@l3 $s3|\", \"@l4 $s4|\", \" g=$g\\n\";\n  perl: 1 u|9 9|7 8 2|5 2| g=3\n  PCL : 0 u| |7 8 2|5 2| g=3\nSo a SCALAR `local` (with or without an assignment) as a sub's last statement returns nothing; the array and the list forms are right.\nCAUSE (read, not measured): the emission is `(p-local-cell $g (p-box-for-local 9))` with an EMPTY body -- the local's scope is the rest of the block, which is empty, and the macro's body value is NIL.  The list form goes through p-list-= whose value survives.\nFIX DIRECTION: when a scalar `local` is the TAIL of a value-returning block, its body is the localized variable (the installed box: the caller copies it before the restore, as perl's mortal copy does).  Probe in list / scalar / void, `local $x` without assignment (undef, one element), and a local through a tied or English-aliased cell (s507b #2084).\n",
+   "id" : "2742",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (PRE-EXISTING): a scalar `local` as a sub's LAST statement returns nothing -- `sub f { local $g = 9 }` gives () / undef where perl gives 9"
+}

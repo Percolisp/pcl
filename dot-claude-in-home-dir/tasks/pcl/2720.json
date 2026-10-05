@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-05",
+   "description" : "FOUND s507p (perf round 39, #2115 (c)), probed vs perl 5.40.3.  `.=` on @_'s element inside a sub that is called once per append stays QUADRATIC -- on fee16466 too, so not a regression of the in-place append, only outside it:\n\n    my $s = \"\"; sub ap { $_[0] .= \"ab\" } ap($s) for 1 .. 100000; print length($s), \"\\n\";   # perl 0.01 s\n    PCL b74d4938: 25k 0.45 s, 100k 3.44 s (x7.6 for x4);  fee16466: 0.42 s / 4.19 s\n\nEmission: (p-sub pl-ap (&rest %_args) (:writes-args t ...) (p-args-body (block nil (p-.= (p-aref @_ 0) \"ab\")))).  The p-.= element arm (%p-array-append) takes the in-place path only when (unbox @_) is a plain vector holding the caller's BOX; evidently it is not here (the old store path runs) -- measure which: the @_ representation under :writes-args, or the caller passing a copy.  Bar: the 25k/100k pair scales ~x4; probes/c-alias.pl (scratch of s507p) stays = perl.\n",
+   "id" : "2720",
+   "status" : "pending",
+   "subject" : "PERF (quadratic, pre-existing): `$_[0] .= X` in a sub called once per append still copies the whole string per call -- 100k calls 3.4 s (fee16466 4.2 s), perl 0.01 s; the #2115 in-place append does not reach @_ there"
+}

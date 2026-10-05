@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-05",
+   "description" : "FOUND s508a (Opus 5.5, 2026-10-05) while probing #2645; PRE-EXISTING on main fee16466 (base extraction answers the same).\n\nREPRODUCER (perl 5.40.3 vs PCL):\n  our $x = \"G\";\n  my $x = \"X\";\n  sub f2 { \"$x-\" . $x }\n  print f2(), \"\\n\";\nperl: X-X      PCL: G-G   (silent)\n\nThe capture promotion runs (PCL_SPAN_DEBUG: `CAPPROMOTE $x -> $x__file__0`, and the p-sub's `:captures` lists `$x__file__0`), but the sub BODY still reads `$x` -- the package variable -- so the rename did not reach the body: the in-scope `our $x` is resolved first.  perl's rule: a later `my $x` in the same scope MASKS the earlier `our $x` (perl warns `\"my\" variable $x masks earlier declaration in same scope` only under -w for my/my; our-then-my is silent).  Probe: scratch/s508a/probes/k33.pl (s508a worktree).\nCheap discriminating measurement (not taken): PCL_SPAN_DEBUG + dump the sub body's tokens after _rewrite_var_uses -- if the Symbol was rewritten and the emission still says `$x`, the our-alias resolver re-maps it at lowering; if it was not rewritten, `$skip` (_ref_shadowed) treats the file `our` as a shadow.\n",
+   "id" : "2781",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `our $x; my $x; sub f { $x }` -- the named sub reads the PACKAGE variable although the file `my $x` masks the `our` (the capture promotion runs, the body is not renamed; pre-existing)"
+}
