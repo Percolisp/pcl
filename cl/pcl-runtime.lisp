@@ -11138,7 +11138,7 @@ per element."
                        `(p-** ,cur ,value))
 
 (%define-compound-pair %p-.=-store p-.=-raw (value)
-                       "Perl .= (concat-assign), the ORDINARY store (p-.= below routes here).  Overload `.` through
+                       "Perl .= (concat-assign), the ordinary concatenate-and-store: the raw twin's, and the boxed p-.= macro's (below) for a `$$r` place.  Overload `.` through
    %p-compound-.-slow when an operand is blessed (perl autogenerates `.` from
    `\"\"`, so a class with only `\"\"` still concatenates); the plain arm is the
    same `concatenate` as ever — see %compound-arith-form.  `.=` is a hot
