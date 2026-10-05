@@ -13837,7 +13837,7 @@ which is one of #1140's escape spellings (probed)."
    THE STORE IS (setf p-gethash), i.e. %p-gethash-store — the ONE hash element
    write rule (docs/boxed-aggregates-design-s455.md §4.1: an existing slot BOX
    is written through, because it may be someone's live alias).  This used to
-   be a raw (setf (gethash (%p-hash-key KEY) H) VAL), the single entry path in
+   be a raw (setf (gethash (to-string KEY) H) VAL), the single entry path in
    the runtime that replaced the slot instead of writing through it, so
    `$h{a}{b} = 1; $r = \\$h{a}{b}; $h{a}{b} = 2` left $$r at 1 (task #1151).
    Its array twin p-autoviv-aref-set already went through p-array-set, which
