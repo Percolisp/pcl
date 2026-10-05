@@ -1756,6 +1756,30 @@ for my $i (1) { my $f = sub { my ($ox, $oy) = ($oy, $ox); "$ox $oy" }; print "g 
 my $f7 = sub { my ($ox, $z) = ($ox + 1, 5); "$ox $z" }; print "h self-reference: ", $f7->(), "\n";
 });
 
+# s508a (#2632): `&name;` calls with the caller's @_ -- the SAME array: the
+# callee's shift / push @_ / `@_ = ()` reach the caller, through a coderef
+# (`&$cr;`), a symbolic `&{"name"}`, a callee whose leading `my $x = shift;`
+# run the compiler coalesced into parameters, and a `goto &name` inside the
+# callee; element aliasing, `&name()` (an EMPTY @_) and a caller's array
+# argument stay as before.  INVERSE: main fee16466 answered 3 / 1 2 3 / 2|3 / 2
+# / 1 2 3 4 / 1 2 3 / 3 / 3 / 3 for rows 01 02 05 06 07 08 10 12 13 14.
+test_transpile("&name; shares the caller's \@_ (s508a, #2632)", q{
+sub u1 { shift } sub u2 { &u1; scalar(@_) }                print "01 ", u2(1, 2, 3), "\n";
+sub v1 { push @_, 9 } sub v2 { &v1; "@_" }                  print "02 ", v2(1, 2, 3), "\n";
+sub w1 { my ($a, $b) = @_; "$a$b" } sub w2 { my $r = &w1; "$r|@_" }   print "03 ", w2(4, 5), "\n";
+sub x1 { $_[0] = "Z" } sub x2 { &x1; "@_" } my $v = "a";    print "04 ", x2($v), " v=$v\n";
+my $cr = sub { shift; scalar(@_) }; sub y2 { my $n = &$cr; "$n|" . scalar(@_) } print "05 ", y2(1, 2, 3), "\n";
+sub z1 { @_ = (); 0 } sub z2 { &z1; scalar(@_) }            print "06 ", z2(1, 2), "\n";
+sub n1 { shift } sub n2 { &n1; &n1; "@_" }                   print "07 ", n2(1, 2, 3, 4), "\n";
+sub m1 { &n1; scalar(@_) } sub m2 { &m1; "@_" }              print "08 ", m2(1, 2, 3), "\n";
+sub o1 { scalar(@_) } sub o2 { my $c = &o1(); my $d = &o1; "$c $d" } print "09 ", o2(7, 8), "\n";
+sub p1 { goto &u1 } sub p2 { &p1; scalar(@_) }               print "10 ", p2(1, 2, 3), "\n";
+sub r1 { my $s = shift; r3(@_); $s } sub r3 { shift } sub r2 { &r1; scalar(@_) } print "12 ", r2(1, 2, 3), "\n";
+sub s1 { &{"u1"}; scalar(@_) }                               print "13 ", s1(1, 2, 3), "\n";
+sub t1 { my $x = shift; "$x" } sub t2 { for (1 .. 2) { &t1 } scalar(@_) } print "14 ", t2(1, 2, 3), "\n";
+sub e1 { &u1; scalar(@_) } my @arr = (1, 2, 3); e1(@arr); print "15 @arr\n";
+});
+
 
 # s507c (#2700): a body that is ONLY `my (LIST) = @_` returns the list
 # assignment's value -- the params in list context, the @_ COUNT in scalar

@@ -396,7 +396,7 @@
    ;; Compile-time definition macros (for BEGIN block support)
    #:p-defpackage #:p-defclass #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
-   #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant
+   #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant #:p-amp-call
    ;; Assignment forms (distinct from p-setf for clarity)
    #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-= #:p-array-fill #:p-hash-fill
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -1285,11 +1285,17 @@
    signature's arity check) and never observes it otherwise, so @_ is built from
    the argument VALUES (%p-flatten-arg-values) and the caller's raw element
    slots are not promoted to cells nobody can reach."
-  (if (eq (first body) :copy)
-      `(let ((@_ (%p-flatten-arg-values %_args)))
-         ,@(rest body))
-      `(let ((@_ (p-flatten-args %_args)))
-         ,@body)))
+  ;; A `(:shifts N)' clause after it: the leading N parameters were bound
+  ;; from `shift's the compiler coalesced, and a `&name;' caller (whose @_
+  ;; this may be) must see them shifted -- %p-shared-shift (task #2632).
+  (let* ((copy (when (eq (first body) :copy) (pop body) t))
+         (shifts (when (and (consp (first body)) (eq (first (first body)) :shifts))
+                   (second (pop body))))
+         (bind (if copy
+                   '(%p-flatten-arg-values %_args)
+                   '(p-flatten-args %_args))))
+    `(let ((@_ ,(if shifts `(%p-shared-shift %_args ,bind ,shifts) bind)))
+       ,@body)))
 
 (defun %p-args-need-flatten (args)
   "True when the raw &rest ARGS list holds an aggregate that Perl's argument
@@ -1315,10 +1321,20 @@
    a SIGNATURE's arity check (task #2514, ir-spec §5.1): p-check-arity on the
    FLATTENED argument count, before any parameter is bound -- exactly where
    v1's signature binding makes it."
-  (let ((arity (and (consp (first body)) (eq (first (first body)) :arity)
-                    (rest (pop body)))))
+  ;; Leading clauses, either order: (:arity …) above, and (:shifts N) -- the
+  ;; first N parameters came from coalesced `shift's, which under a `&name;'
+  ;; caller must really shift ITS @_ (%p-shared-shift, task #2632).  That
+  ;; argument is a whole ARRAY, so the check sits on the flattening branch
+  ;; only: the all-scalar fast path is untouched.
+  (let ((arity nil) (shifts nil))
+    (loop while (and (consp (first body)) (member (first (first body)) '(:arity :shifts)))
+          do (let ((c (pop body)))
+               (if (eq (first c) :arity)
+                   (setf arity (rest c))
+                   (setf shifts (second c)))))
     `(let ((%_args (if (%p-args-need-flatten %_args)
-                       (coerce (%p-flatten-arg-values %_args) 'list)
+                       (prog1 (coerce (%p-flatten-arg-values %_args) 'list)
+                         ,@(when shifts `((%p-shared-shift %_args nil ,shifts))))
                        %_args)))
        ,@(when arity
            `((p-check-arity ,(first arity) (length %_args) ,@(rest arity))))
@@ -13189,6 +13205,45 @@ create the key on a read-only call, which perl does not."
                          (%p-flatten-vector-slow arg result))
                   (%p-flatten-run arg src dst base n))))))))
 
+(defvar *p-shared-args* nil
+  "The caller's @_ vector while a `&name;' call (p-amp-call) is being made:
+   the callee's p-flatten-args answers it AS its @_ instead of a copy, and
+   clears it, so only that one call shares (task #2632).")
+
+(defun %p-shared-shift (args at n)
+  "The leading `my $x = shift;' run of a sub whose parameters the compiler
+   bound positionally (the `(:shifts N)' clause of p-raw-params / p-args-body)
+   really SHIFTED @_ -- and under `&name;' (p-amp-call) that @_ is the CALLER's
+   (task #2632).  ARGS is the callee's %_args, AT the @_ it bound (NIL for
+   p-raw-params).  When the sole argument is the shared vector, drop its first
+   N elements there and answer the callee's own @_: a private COPY when
+   p-flatten-args had adopted the shared vector (the body binds its
+   parameters from it and never reads @_ again), else AT unchanged."
+  (let ((v (and (consp args) (null (cdr args)) (car args))))
+    (flet ((drop () (dotimes (i (min n (length v))) (%p-array-shift-front v))))
+      (cond
+        ((null v) at)
+        ((and at (eq v at))
+         (let ((copy (make-array (length v) :adjustable t
+                                 :fill-pointer (length v))))
+           (replace copy v)
+           (drop)
+           copy))
+        ((eq v *p-shared-args*)
+         (setf *p-shared-args* nil)
+         (drop)
+         at)
+        (t at)))))
+
+(defmacro p-amp-call (call)
+  "Perl `&name;' / `&$code;' -- CALL with the caller's CURRENT @_, the same
+   array (perlsub): the callee's `shift' / `push @_' / `@_ = ()' change the
+   caller's @_.  CALL passes `@_' as its sole argument; the binding tells the
+   callee's p-flatten-args to adopt that vector rather than spread it.  A
+   callee that only COPIES its arguments (p-raw-params, `:copy') never asks,
+   and never changes @_'s shape either."
+  `(let ((*p-shared-args* @_)) ,call))
+
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
    This implements Perl's argument flattening: foo(@arr) and foo(%hash) spread their
@@ -13206,6 +13261,13 @@ create the key on a read-only call, which perl does not."
     (dolist (arg args)
       (cond
         ((and (vectorp arg) (not (stringp arg)))
+         ;; `&name;' (p-amp-call): the callee's @_ IS the caller's -- the
+         ;; very vector, so a `shift'/`push @_' there is seen here (#2632).
+         ;; Asked only on this ARRAY arm, so a scalar-argument call never
+         ;; reads the special.
+         (when (and (null (cdr args)) (eq arg *p-shared-args*))
+           (setf *p-shared-args* nil)
+           (return-from p-flatten-args arg))
          ;; Raw vector = array passed in list context: spread its elements
          ;; (a tied one's lazy element boxes -- perl's PVLVs, task #155).
          (%p-flatten-vector-into (%p-tie-view-of arg) result))
@@ -16064,7 +16126,13 @@ what changes is that the element is the raw counter rather than a fresh box."
                (*pcl-caller-subname-stack*
                 (if *pcl-caller-subname-stack*
                     (cdr *pcl-caller-subname-stack*) *pcl-caller-subname-stack*)))
-           (apply ,target (coerce @_ 'list)))))))
+           ;; This frame's @_ is a `&name;' caller's very array (p-amp-call
+           ;; adopted it, so it is EQ to the sole argument): hand THAT array
+           ;; on, shared, so the target's shift reaches the caller (#2632).
+           ;; Every other goto keeps the plain spread.
+           (if (and (consp %_args) (null (cdr %_args)) (eq @_ (car %_args)))
+               (let ((*p-shared-args* @_)) (funcall ,target @_))
+               (apply ,target (coerce @_ 'list))))))))
 
 (defmacro p-goto-computed (expr)
   "Perl `goto EXPR` — the shape codegen emits when the operand is neither

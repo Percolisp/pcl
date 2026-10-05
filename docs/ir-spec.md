@@ -2113,9 +2113,17 @@ compile-time decision:
   separately for the two halves: `s{A}'[$x]'` has a dq-like pattern and a
   literal replacement.
 
-**`&`-sigil calls without an argument list** re-use the caller's `@_`
-(Perl's `&foo;` rule).  Named form: `&foo;` → `(pl-foo @_)`.  Deref forms:
-`&$ref;` / `&{expr};` / `&{"name"};` → `(p-funcall-ref EXPR @_)`;
+**`&`-sigil calls without an argument list** re-use the caller's `@_` --
+the SAME array, so the callee's `shift` / `push @_` / `@_ = ()` change the
+caller's (Perl's `&foo;` rule; normative, s508a / #2632).  Named form: `&foo;`
+→ `(p-amp-call (pl-foo @_))`.  Deref forms: `&$ref;` / `&{expr};` /
+`&{"name"};` → `(p-amp-call (p-funcall-ref EXPR @_))`.  `p-amp-call` binds
+`*p-shared-args*` to the caller's vector and the callee's `p-flatten-args`
+adopts it as its `@_` instead of spreading it; a callee whose leading `my $x
+= shift;` run was coalesced into parameters carries `(:shifts N)` in its
+`p-raw-params` / `p-args-body` and shifts the shared vector N times
+(`%p-shared-shift`); a `goto &g` from a frame whose `@_` is shared hands that
+vector on.  `&foo()` passes an EMPTY list as before;
 `p-funcall-ref` accepts a code ref OR a symbolic sub-name string
 (no-strict-refs, `'` = `::`).  The closed set of parents that want the
 coderef *mention* rather than a call — `\`, `defined`, `exists`, `undef`,

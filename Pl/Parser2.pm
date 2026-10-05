@@ -9010,6 +9010,7 @@ sub _lower_sub_inner {
   my $params = $self->_extract_params($stmts[0]);
   my @body_stmts = @stmts;
   my $tail_param;
+  my $nshift = 0;     # params bound from coalesced `shift`s (#2632)
   shift @body_stmts if $params;
   if (!$params) {
     # W14: coalesce a contiguous LEADING run of `my $x = shift;` statements
@@ -9020,6 +9021,7 @@ sub _lower_sub_inner {
     my ($sp, $n) = $self->_leading_shift_params(\@stmts);
     if ($sp) {
       $params = $sp;
+      $nshift = scalar @$sp;
       splice(@body_stmts, 0, $n);
       # The run consumed the WHOLE body (`sub f { my $x = shift; }`): the
       # tail decl's statement value — the last param — is the sub's return
@@ -9054,6 +9056,7 @@ sub _lower_sub_inner {
   }
   if ($params && grep { $self->{_file_lex_renamed}{$_} } @$params) {
     $params     = undef;
+    $nshift     = 0;
     @body_stmts = @stmts;
     $tail_param = undef;
   }
@@ -9084,6 +9087,7 @@ sub _lower_sub_inner {
       # take p-raw-params' no-allocation fast path.
       return $self->_sub_form($clname, $sub,
               ['p-raw-params', ['list', map { _param_entry($_, $vi) } @$params],
+                ($nshift ? (['list', ':shifts', $nshift]) : ()),
                 $self->_sig_arity_forms($sub, ':arity'),
                 ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi, $keep_nil),
                   ($tail_param ? (cl_sym($tail_param)) : ())]]);
@@ -9092,6 +9096,7 @@ sub _lower_sub_inner {
     $vi->{$_} = { unboxable => 0 } for @$params;
     return $self->_sub_form($clname, $sub,
             ['p-args-body', $self->_args_copy_mark(\@body_stmts),
+              ($nshift ? (['list', ':shifts', $nshift]) : ()),
               $self->_sig_arity_forms($sub), ['block', 'nil',
               _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @$params],
                 Pl::CLForm::ctx_bind('nil',

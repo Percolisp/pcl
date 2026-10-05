@@ -1203,7 +1203,7 @@ sub gen_symbol_form {
     my $func_name = $1;
     # &NAME (no parens) calls the user sub even when NAME is a builtin.
     my $cl_func = $self->cl_name($func_name, 1, 1);
-    return [$cl_func, '@_'];
+    return ['p-amp-call', [$cl_func, '@_']];   # the SAME @_ (#2632)
   }
   # Check if this var is a state variable that was renamed
   if ($self->environment) {
@@ -3657,7 +3657,7 @@ sub gen_prefix_op_form {
   # @_ (the coderef-mention parents intercept before this, as in the text
   # emitter).
   if ($op eq '&') {
-    return ['p-funcall-ref', $operand, '@_'];
+    return ['p-amp-call', ['p-funcall-ref', $operand, '@_']];   # #2632
   }
   # * Cast: *$var — typeglob ref (distinct marker for lvalue detection).
   if ($op eq '*') {
