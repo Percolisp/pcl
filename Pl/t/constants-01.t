@@ -15,7 +15,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 20;
+use Test::More tests => 22;
 BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
@@ -56,9 +56,12 @@ output_contains('use constant NAME => "hello";',
                 '(p-sub pl-NAME (&rest %_args) (:prototype "") (progn %_args "hello"))',
                 'String constant');
 
+# A NON-literal value is evaluated ONCE, at the `use`, into a cell the sub
+# answers from (s508a, #2681): the value is no longer the sub's BODY, which ran
+# it at every use.  A literal (the two rows above) keeps the plain body.
 output_contains('use constant TWO_PI => 2 * 3.14159;',
-                '(p-sub pl-TWO_PI (&rest %_args) (:prototype "") (progn %_args (p-* 2 3.14159)))',
-                'Expression constant');
+                '(p-use-constant pl-TWO_PI (p-* 2 3.14159))',
+                'Expression constant: evaluated once (p-use-constant)');
 
 
 # ========================================
@@ -76,6 +79,16 @@ diag "-------- Hash-style constant declaration:";
     like($result, qr/\(p-sub pl-WIDTH \(&rest %_args\) \(:prototype ""\) \(progn %_args 100\)/, 'Hash-style: WIDTH defined');
     like($result, qr/\(p-sub pl-HEIGHT \(&rest %_args\) \(:prototype ""\) \(progn %_args 200\)/, 'Hash-style: HEIGHT defined');
     like($result, qr/\(p-sub pl-DEPTH \(&rest %_args\) \(:prototype ""\) \(progn %_args 50\)/, 'Hash-style: DEPTH defined');
+}
+
+# s508a (#2681): a hash-form NON-literal value is evaluated once too, and is ONE
+# scalar (the trailing t); its literal sibling keeps the plain body.
+{
+    my $result = parse_code('use constant { CFG => { a => 1 }, LIM => 9 };');
+    like($result, qr/\(p-use-constant pl-CFG \(make-p-box \(p-hash "a" 1\)\) t\)/,
+         'Hash-style: a non-literal value is evaluated once, as one scalar');
+    like($result, qr/\(p-sub pl-LIM \(&rest %_args\) \(:prototype ""\) \(progn %_args 9\)/,
+         'Hash-style: its literal sibling keeps the plain body');
 }
 
 

@@ -1910,6 +1910,21 @@ the empty `=> ()` keep the scalar body.  Example: `use constant L => (1, 2)` →
 `(progn %_args (let ((%const-list (vector 1 2))) (if *wantarray* %const-list
 (length %const-list))))`; `my @f = L` is `(1, 2)`, `scalar(L)` is 2.
 
+**A `use constant` value is evaluated ONCE, at the `use`, in LIST context
+(normative, s508a / #2681).**  Only a LITERAL value — a number (optionally
+negated), a non-interpolating quote, `qw()`, `undef`, `()`, or a paren list of
+those — keeps the plain `(p-sub NAME … (progn %_args VALUE))` body above,
+because it is its own value.  Every other value is `(p-use-constant NAME
+VALUE [t])`: VALUE runs once, in list context, in the situations of a sub
+INSTALL (so a following BEGIN block or `use constant` sees it, and a cached
+fasl computes it when it is LOADED), its list is copied as `@list = VALUE`
+copies, and the sub answers from that cell by COUNT — one element in both
+contexts, none = a bare `return;`'s value, two or more = a fresh copy of the
+list / its count.  The trailing `t` is the hash form `use constant { A => EXPR
+}`, whose constant is ONE scalar (EXPR's first list element).  Example: `use
+constant T => [1, 2]` → `(p-use-constant pl-T (make-p-box (p-array-init 1
+2)))`; `T == T` is true and `push @{+T}, 3` is kept.
+
 The plist is what the compiler proved **under the configuration that emitted
 the file**: `PCL_OPT` switches off Kind-A rules, and a fact whose analysis a
 switched-off rule pays for (`:returns`, the #77 family) is then simply absent.

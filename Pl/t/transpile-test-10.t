@@ -1661,6 +1661,56 @@ $l = <>; print "C2 $.:$l";
 unlink map { "$d/$_" } keys %c; rmdir $d;
 });
 
+# s508a (#2681): `use constant NAME => EXPR` evaluates EXPR ONCE, at the `use`,
+# in LIST context: a shared ref (the same array every use, writes kept), a
+# counter bumped once, a range / map / slice / list-returning call is the list,
+# a later constant and a BEGIN block read the value, the hash form is one scalar
+# taken in list context.  INVERSE: main fee16466 answered 234 n=4 / diffref / 2
+# / a / an empty range / 0 / 1 / 5 / B2=10 / HB=16 S diff.
+test_transpile("use constant: the value is evaluated once, in list context (s508a, #2681)", q{
+my $n; BEGIN { $n = 0 }
+use constant C => ++$n;
+use constant T => [1, 2];
+use constant H => { a => 1 };
+use constant R => 1 .. 5;
+use constant M => map { $_ * 2 } 1 .. 3;
+use constant LT => (localtime(0))[5, 4];
+sub lst { (4, 5) } sub one { wantarray ? "L" : "S" }
+use constant FC => lst();
+use constant B2 => C * 2;
+use constant { HA => [3], HB => C + 10, HC => one() };
+my $seen; BEGIN { $seen = B2 . ":" . scalar(@{+T}) }
+print "01 ", C, C, C, " n=$n\n";
+print "02 ", (T == T ? "sameref" : "diffref"), "\n";
+push @{+T}, 3; print "03 ", scalar(@{+T}), "\n";
+H->{b} = 2; print "04 ", join(",", sort keys %{+H}), "\n";
+my @r = R; print "05 @r / ", scalar(R), "\n";
+my @m = M; print "06 @m\n";
+my @lt = LT; print "07 ", scalar(@lt), "\n";
+my @fc = FC; print "08 @fc / ", scalar(FC), "\n";
+print "09 ", B2, " $seen\n";
+print "10 ", HA->[0], " ", HB, " ", HC, " ", (HA == HA ? "same" : "diff"), "\n";
+for my $v (R) { $v = 0 } my @r2 = R; print "11 @r2\n";
+my @w = (C, R); print "12 @w\n";
+});
+
+# s508a (#2681): the same once-evaluated value seen through a string eval,
+# another package, a method call and ->can; a value that captures a lexical a
+# BEGIN block set; a constant declared inside a named sub.  INVERSE: main
+# fee16466 answered evdiff 2 / qdiff mdiff cdiff / 42 diff / Z 4.
+test_transpile("use constant: one value across eval, packages, ->can and subs (s508a, #2681)", q{
+use constant T => [1, 2];
+my $x; BEGIN { $x = 5 }
+use constant X5 => $x;
+print "01 ", eval "T == T ? 'evsame' : 'evdiff'", " ", eval "scalar(\@{+T})", "\n";
+print "02 ", (main::T() == T ? "qsame" : "qdiff"), " ", (main->T == T ? "msame" : "mdiff"),
+      " ", (__PACKAGE__->can('T')->() == T ? "csame" : "cdiff"), "\n";
+{ package Foo; use constant K => [42]; }
+print "03 ", Foo::K->[0], " ", (Foo::K == Foo::K ? "same" : "diff"), " ", Foo->K->[0], "\n";
+print "04 ", X5, " [", prototype("T"), "]\n";
+my $c = 0; sub f { use constant Z => ++$c; Z + Z } print "05 ", f(), f(), "\n";
+});
+
 
 # s507c (#2700): a body that is ONLY `my (LIST) = @_` returns the list
 # assignment's value -- the params in list context, the @_ COUNT in scalar

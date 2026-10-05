@@ -396,7 +396,7 @@
    ;; Compile-time definition macros (for BEGIN block support)
    #:p-defpackage #:p-defclass #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
-   #:p-eval-always #:p-BEGIN #:p-CHECK
+   #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant
    ;; Assignment forms (distinct from p-setf for clarity)
    #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-= #:p-array-fill #:p-hash-fill
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)
@@ -9027,6 +9027,56 @@ per element."
                    (progn (%p-ta-reverse-in-place (%p-tied ,place)) ,place)
                    ,general)
               general)))))
+
+
+;;; `use constant NAME => EXPR' with a NON-LITERAL value (task #2681, s508a;
+;;; ir-spec §5.1 "A use constant value is evaluated ONCE").  perl's constant.pm
+;;; receives the `use' line's argument list -- EXPR evaluated ONCE, at the
+;;; `use', in LIST context -- and installs `sub () { $scalar }' for one
+;;; element, `sub () { @list }' for more, `sub () { }' for none.  The cell is
+;;; that list, COPIED by the list-assignment construction arm (p-array-fill),
+;;; and the sub answers from it by COUNT.  A LITERAL value keeps the plain
+;;; `(p-sub NAME ... (progn %_args VALUE))' body: it is its own once-evaluated
+;;; value.  SCALAR-P is the hash form `use constant { A => EXPR }', whose
+;;; constant is always ONE scalar (the first element of EXPR's list).
+(defun %p-const-cell (value scalar-p)
+  "The once-evaluated value of a `use constant' as a simple-vector: VALUE (a
+   list-context value) copied element by element as `@list = VALUE' copies,
+   truncated to its first element (undef when empty) when SCALAR-P."
+  (let ((a (make-array 0 :adjustable t :fill-pointer 0)))
+    (p-array-fill a value)
+    (cond
+      ((not scalar-p) (coerce a 'simple-vector))
+      ((zerop (length a)) (vector nil))
+      (t (vector (aref a 0))))))
+
+(defmacro %p-const-answer (cell)
+  "A `use constant' sub's answer from its CELL (%p-const-cell, a variable):
+   one element in both contexts; none -> a bare `return;'s value
+   (p-return-empty, defined further down -- hence a macro); two or more -> a
+   fresh copy of the list in list context (an alias through foreach must not
+   write the constant) and the COUNT otherwise -- perl's `sub () { @list }'."
+  `(case (length ,cell)
+     (1 (svref ,cell 0))
+     (0 (p-return-empty))
+     (t (if *wantarray* (copy-seq ,cell) (length ,cell)))))
+
+(defmacro p-use-constant (name value &optional scalar-p)
+  "`use constant NAME => VALUE' for a non-literal VALUE: VALUE runs ONCE, in
+   LIST context, where the `use' stands (the situations of a sub INSTALL, so a
+   BEGIN block or a later `use constant' that follows sees it, and a cached
+   fasl computes it when it is LOADED, never at compile time), and the sub
+   NAME answers from that cell.  The name is reserved at top level exactly
+   as p-sub reserves it, because the install below is not a top-level form."
+  `(progn
+     (eval-when (:compile-toplevel :load-toplevel :execute)
+       (%p-reserve-sub-name ',name))
+     (eval-when ,(%p-sub-situations)
+       (let ((%const-cell (%p-const-cell (let ((*wantarray* t)) ,value)
+                                         ,scalar-p)))
+         (p-sub ,name (&rest %_args) (:prototype "")
+                (declare (ignore %_args))
+                (%p-const-answer %const-cell))))))
 
 
 ;;; A WHOLE-HASH COPY `%a = %b' (task #2424, s499f).  The general path below
@@ -23939,7 +23989,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-4281"
+(defparameter *pcl-cache-generation* "v2-4380"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

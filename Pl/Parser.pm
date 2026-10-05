@@ -11233,7 +11233,7 @@ sub _process_constant_hash {
         $i++ if $i < @parts && $parts[$i]->isa('PPI::Token::Operator') && $parts[$i]->content eq ',';
 
         # Process this constant
-        $self->_emit_constant($name, \@value_parts);
+        $self->_emit_constant($name, \@value_parts, 1);
       }
     }
     $self->_emit("");
@@ -11263,6 +11263,22 @@ sub _emit_constant {
   my $self        = shift;
   my $name        = shift;
   my $value_parts = shift;
+  my $hash_form   = shift;        # `use constant { NAME => VALUE, … }`
+
+  my $cl_sub_name = $self->_qualified_sub_to_cl($name);
+
+  # A NON-LITERAL value is evaluated ONCE, at the `use`, in LIST context, and
+  # the sub answers from that cell (task #2681; runtime p-use-constant,
+  # ir-spec §5.1).  Its body used to BE the expression, so `=> [1, 2]` was a
+  # fresh array at every use, `=> time` moved and `=> 1 .. 5` was a
+  # flip-flop.  A literal keeps the plain body below: it is its own value.
+  if (!_constant_value_is_literal($value_parts)) {
+    my $cl = $self->_compile_constant_value($value_parts, 'list');
+    $self->_emit("(p-use-constant $cl_sub_name $cl" . ($hash_form ? " t" : "")
+                 . ")");
+    $self->register_constant_prototype($name);
+    return;
+  }
 
   # Compile the value expression to CL.  `use constant E => ()` is the empty
   # list — a bare `return;`'s value, not the (progn) = NIL that one undef
@@ -11280,7 +11296,6 @@ sub _emit_constant {
   # arity error against a strict 0-arg lambda list.  The `(progn %_args VALUE)`
   # references %_args so it ignores (and silences the unused-var warning on)
   # the arguments while still returning the constant value.
-  my $cl_sub_name = $self->_qualified_sub_to_cl($name);
   $self->_emit("(p-sub $cl_sub_name (&rest %_args)" . _sub_facts_slot('')
                 . " (progn %_args $cl_value))");
 
@@ -11307,6 +11322,7 @@ sub _sub_facts_slot {
 sub _compile_constant_value {
   my $self  = shift;
   my $parts = shift;
+  my $mode  = shift // '';   # 'list': the bare LIST-context value (p-use-constant)
 
   # NOTHING is short-circuited here — every value goes through the same
   # ExprToCL path the rest of the program's expressions use.
@@ -11355,7 +11371,11 @@ sub _compile_constant_value {
     # scalar shape below.
     my $list_kids = _constant_list_arity($expr_o, $node_id);
     my $gen = $self->_expr_generator($expr_o);
-    if ($list_kids >= 2) {
+    if ($mode eq 'list') {
+      $expr_o->annotate_contexts($node_id, 1);      # LIST_CTX
+      $result = $gen->generate($node_id);
+    }
+    elsif ($list_kids >= 2) {
       $expr_o->annotate_contexts($node_id, 1);      # LIST_CTX
       my $vec = $gen->generate($node_id);
       $result = "(let ((%const-list $vec))"
@@ -11384,6 +11404,43 @@ sub _constant_list_arity {
     return 1 if $type ne 'tree_val' || @kids != 1;
     $node_id = $kids[0];
   }
+}
+
+
+# Is a `use constant` VALUE a LITERAL -- its own once-evaluated value, so the
+# sub may keep the plain body (task #2681)?  A number (optionally negated), a
+# non-interpolating quote, `qw()`, `undef`, the empty `()`, or a paren list of
+# those.  Anything else is evaluated once into a cell (p-use-constant).
+sub _constant_value_is_literal {
+  my ($parts) = @_;
+  my @p = grep { ref $_ && $_->significant
+                 && !($_->isa('PPI::Token::Structure') && $_->content eq ';') }
+          @$parts;
+  return 1 if !@p;
+  return 1 if @p == 2 && $p[0]->content eq '-'
+              && $p[1]->isa('PPI::Token::Number');
+  return 0 if @p != 1;
+  my $t = $p[0];
+  return 1 if _constant_literal_token($t);
+  return 0 if !$t->isa('PPI::Structure::List');
+  for my $k (map { $_->schildren } $t->schildren) {
+    next if $k->isa('PPI::Token::Operator') && $k->content =~ /^(?:,|=>)$/;
+    return 0 if !_constant_literal_token($k);
+  }
+  return 1;
+}
+
+sub _constant_literal_token {
+  my ($t) = @_;
+  return 1 if $t->isa('PPI::Token::Number');
+  return 1 if $t->isa('PPI::Token::Quote::Single')
+              || $t->isa('PPI::Token::Quote::Literal')
+              || $t->isa('PPI::Token::QuoteLike::Words');
+  return 1 if ($t->isa('PPI::Token::Quote::Double')
+               || $t->isa('PPI::Token::Quote::Interpolate'))
+              && !$t->interpolations;
+  return 1 if $t->isa('PPI::Token::Word') && $t->content eq 'undef';
+  return 0;
 }
 
 
