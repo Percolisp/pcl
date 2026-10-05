@@ -349,4 +349,20 @@ deep
 6 shortS
 EXPECTED
 
+answers(<<'PERL', <<'EXPECTED', '#2115 (c): $$r .= through a hard reference appends to the referent (evaluated once); symbolic, vivifying, non-scalar and substr-lvalue operands keep their rules');
+my $B = "d" x 250; my $x = $B; my $r = \$x; $$r .= "1"; my $c = $x; $$r .= "2"; ${$r} .= "3"; print length($c), " ", length($x), " ", substr($x, -3), "\n";
+my $u; $$u .= "viv"; print ref($u), " $$u\n";
+our $pkg = $B; { no strict 'refs'; ${"pkg"} .= "S"; } print length($pkg), substr($pkg, -1), "\n";
+my @a = (1); my $ar = \@a; my $ok = eval { $$ar .= "x"; 1 }; print $ok ? "lived\n" : "died: " . ($@ =~ /Not a SCALAR reference/ ? "not scalar ref" : $@) . "\n";
+my $s = "abcdefghij"; my $sr = \substr($s, 2, 3); $$sr .= "XY"; print "$s\n";
+my $calls = 0; sub rr { $calls++; $r } ${rr()} .= "Z"; print "$calls ", substr($x, -1), "\n";
+PERL
+251 253 123
+SCALAR viv
+251S
+died: not scalar ref
+abcdeXYfghij
+1 Z
+EXPECTED
+
 done_testing();

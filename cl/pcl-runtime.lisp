@@ -11289,6 +11289,16 @@ per element."
                       (lambda (s) (setf (aref a idx) s))
                       value))))
 
+(defun %p-deref-append (ref value)
+  "`$$REF .= VALUE` through a HARD scalar reference: the referent box (the
+   one (setf p-cast-$) writes) appends via %p-append-box.  NIL for every
+   other operand (a symbolic name, undef to vivify, a non-scalar referent):
+   the ordinary store runs then, with its own checks."
+  (let ((inner (unbox ref)))
+    (when (and (p-box-p inner) (not (%p-non-scalar-referent-p ref)))
+      (let ((target (p-box-value inner)))
+        (%p-append-box (if (p-box-p target) target inner) value)))))
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-concat-store-form (p v)
     "The ordinary `.=` store of V into the place P (overload guard included)."
@@ -11323,6 +11333,13 @@ per element."
                  (,v ,value))
             (or (,(if (eq (car place) 'p-gethash-deref) '%p-hash-append '%p-array-append)
                  ,r ,k ,v)
+                ,(%p-concat-store-form p v)))))
+      ((and (consp place) (eq (car place) (quote p-cast-$)))
+       (let* ((e (gensym "E"))
+              (p `(p-cast-$ ,e ,@(cddr place))))
+         `(let* ((,e ,(cadr place))
+                 (,v ,value))
+            (or (%p-deref-append ,e ,v)
                 ,(%p-concat-store-form p v)))))
       ((or (%p-elem-place-p place) (%p-accessor-place-p place))
        `(%p-.=-store ,place ,value))
