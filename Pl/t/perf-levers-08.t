@@ -18,6 +18,10 @@
 #   #2111 an in-memory filehandle owns a PRIVATE buffer; its scalar answers
 #         simple-string snapshots (a :memfh magic cell), so no later print
 #         changes a copy, an element, a hash value or a hash key.
+#   #2115 (a) a readline record is a simple string; (c) `.=` on a scalar,
+#         a hash / array element or a deref element appends IN PLACE once the
+#         string is long (a :strbuf cell answering snapshots), so 200k
+#         appends are linear and no copy, key, element or closure changes.
 use v5.30;
 use strict;
 use warnings;
@@ -100,6 +104,12 @@ my $mech = lisp_out(<<'LISP');
   (list (simple-string-p (%p-read-record (make-string-input-stream (format nil "ab~%cd")) (string #\Newline)))
         (simple-string-p (%p-read-record (make-string-input-stream "abXYcd") "XY"))
         (simple-string-p (%p-read-record (make-string-input-stream "abcd") nil))))
+(format t "strbuf ~a~%"
+  (let* ((b (make-p-box (make-string 300 :initial-element #\a))))
+    (%p-append-box b "x")
+    (%p-append-box b "y")
+    (list (p-magic-cell-kind (p-box-value b)) (simple-string-p (unbox b)) (length (unbox b))
+          (p-magic-cell-p (p-box-value (%p-append-box (make-p-box "s") "t"))))))
 LISP
 like($mech, qr/^clearpos T$/mi,
      '#2539: box-set\'s two pos() resets share %p-clear-match-pos');
@@ -111,6 +121,8 @@ like($mech, qr/^shapes \(T T NIL T NIL NIL NIL\)$/mi,
      '#2637: only an empty vector or a hash of at most one entry can be a tied shell');
 like($mech, qr/^records \(T T T\)$/mi,
      '#2115 (a): a readline record is a SIMPLE string (line, multi-char separator, slurp), so a store keeps it without a snapshot');
+like($mech, qr/^strbuf \(STRBUF T 302 NIL\)$/mi,
+     '#2115 (c): a long string appended with .= lives in a :strbuf cell whose reads are simple snapshots; a short one stays plain');
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ANSWERS (perl's)
@@ -272,6 +284,37 @@ sel]
 32 closure: [c1] | [c1] | [c1c2]
 33 local inside: [L]
 34 local after: [g1g2]
+EXPECTED
+
+answers(<<'PERL', <<'EXPECTED', '#2115 (c): copies, keys, elements, closures, pos, local and evaluation order around an in-place .=');
+my $B = "b" x 250; our ($g); my $n = 0;
+sub show { my ($tag, @v) = @_; $n++; print "$n $tag: ", join(" | ", map { !defined $_ ? "undef" : length($_) > 20 ? length($_) . ":" . substr($_, -4) : "[$_]" } @v), "\n" }
+$g = $B; $g .= "1"; my $c2 = $g; $g .= "2"; show("pkg copy", $c2, $g);
+my %h = (k => $B); $h{k} .= "1"; my $c3 = $h{k}; $h{k} .= "2"; show("helem copy", $c3, $h{k});
+my @a = ($B); $a[0] .= "1"; my $c4 = $a[0]; $a[0] .= "2"; show("aelem copy", $c4, $a[0]);
+my $o = { buf => $B }; $o->{buf} .= "1"; my $c5 = $o->{buf}; $o->{buf} .= "2"; show("deref copy", $c5, $o->{buf});
+my %k; $g = $B; $g .= "x"; $k{$g} = 1; push my @keep, $g; $g .= "y"; show("key push", (exists $k{$B . "x"} ? "yes" : "no"), $keep[0], $g);
+my $get = sub { $g }; $g .= "c1"; my $v1 = $get->(); $g .= "c2"; show("closure", $v1, $get->());
+$g = "a" x 220; $g .= "ab"; $g =~ /a/g; my $p1 = pos($g); $g .= "c"; show("pos", $p1, pos($g));
+$g = $B; $g .= "s"; $g .= $g; show("self append", $g);
+sub gb { $g = $B; "W" } $g = "short"; $g .= gb(); show("order", $g);
+$g = $B; $g .= "L"; { local $g = "in"; $g .= "side"; show("local in", $g); } $g .= "M"; show("local out", $g);
+$o->{buf} .= "end\n"; chomp $o->{buf}; $o->{buf} =~ s/d$/D/; show("chomp s///", $o->{buf}, ref(\$o->{buf}));
+my $d = delete $h{k}; show("delete", $d, scalar(keys %h));
+PERL
+1 pkg copy: 251:bbb1 | 252:bb12
+2 helem copy: 251:bbb1 | 252:bb12
+3 aelem copy: 251:bbb1 | 252:bb12
+4 deref copy: 251:bbb1 | 252:bb12
+5 key push: [yes] | 251:bbbx | 252:bbxy
+6 closure: 254:xyc1 | 256:c1c2
+7 pos: [1] | undef
+8 self append: 502:bbbs
+9 order: 251:bbbW
+10 local in: [inside]
+11 local out: 252:bbLM
+12 chomp s///: 255:2enD | [SCALAR]
+13 delete: 252:bb12 | [0]
 EXPECTED
 
 done_testing();

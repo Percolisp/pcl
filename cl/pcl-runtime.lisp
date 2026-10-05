@@ -2554,10 +2554,12 @@
 ;;;   setter : (function (new-value) -> value) — invoked by box-set
 ;;;   kind   : nil -> ref()="SCALAR" (arylen); :lvalue -> ref()="LVALUE"
 ;;;            (\substr / \pos / \vec), matching Perl's reftype.
+;;;   data   : the kind's own state (:strbuf -- the p-strbuf the cell reads).
 (defstruct p-magic-cell
   (getter (error "p-magic-cell: :getter is required") :type function)
   (setter (error "p-magic-cell: :setter is required") :type function)
-  (kind nil))
+  (kind nil)
+  (data nil))
 
 (declaim (inline unbox))
 (defun unbox (val)
@@ -11109,8 +11111,8 @@ per element."
   float (2 ** -1 -> 0.5, not the leaked ratio \"1/2\") and overload '**' dispatches."
                        `(p-** ,cur ,value))
 
-(%define-compound-pair p-.= p-.=-raw (value)
-                       "Perl .= (concat-assign).  Overload `.` through
+(%define-compound-pair %p-.=-store p-.=-raw (value)
+                       "Perl .= (concat-assign), the ORDINARY store (p-.= below routes here).  Overload `.` through
    %p-compound-.-slow when an operand is blessed (perl autogenerates `.` from
    `\"\"`, so a class with only `\"\"` still concatenates); the plain arm is the
    same `concatenate` as ever — see %compound-arith-form.  `.=` is a hot
@@ -11120,6 +11122,176 @@ per element."
                         (lambda (c d) `(concatenate 'string (to-string ,c)
                                                     (to-string ,d)))
                         cur value))
+
+;;; ── IN-PLACE `.=` ON THE GENERAL PATH (#2115 (c), s507p) ───────────────────
+;;; `$h{k} .= X`, `our $g .= X`, `$self->{buf} .= $chunk` built a fresh string
+;;; per append -- 200,000 appends 22 s where perl takes 0.00 s.  A string past
+;;; +p-strbuf-min+ characters now lives in a PRIVATE adjustable buffer that
+;;; grows geometrically, behind a magic cell of kind :strbuf in the scalar's
+;;; box -- M3's :memfh mechanism (#2111), whose reasoning is the same: the
+;;; buffer is never handed out.  A READ answers a simple-string SNAPSHOT taken
+;;; once after each append and shared until the next one; a WRITE of the
+;;; scalar goes through the setter, which stores plainly.  Why a cell and not
+;;; "an adjustable string in the slot, snapshotted at every retaining store":
+;;; a raw lexical slot (`my $t = $g;` lowers to a plain SETF of a let
+;;; variable) retains a value with no runtime store to put a chokepoint in, so
+;;; that invariant cannot be closed -- the cell makes the buffer unreachable by
+;;; construction.  COST: the first read after an append copies the string, so
+;;; a loop that reads the scalar after every append stays O(n) per iteration,
+;;; as it was.  Short strings keep the plain concatenate (no buffer at all).
+(defparameter +p-strbuf-min+ 200
+  "A `.=` whose result is at least this long moves the string into a :strbuf
+   buffer; below it the append is the plain concatenate.")
+
+(defstruct (p-strbuf (:constructor %make-p-strbuf (buf)))
+  (buf "" :type string)          ; adjustable, fill-pointer: the text
+  (snap nil))                    ; simple-string snapshot of BUF, NIL = stale
+
+(defun %p-strbuf-push (sb s)
+  "Append string S to SB's buffer in place (amortized linear)."
+  (declare (type p-strbuf sb) (type string s))
+  (let* ((buf (p-strbuf-buf sb))
+         (fp (fill-pointer buf))
+         (need (+ fp (length s))))
+    (when (> need (array-dimension buf 0))
+      (adjust-array buf (max need (* 2 (array-dimension buf 0)))))
+    (setf (fill-pointer buf) need)
+    (replace buf s :start1 fp)
+    (setf (p-strbuf-snap sb) nil)))
+
+(defun %p-strbuf-install (box text)
+  "Put a :strbuf cell over a private copy of TEXT into BOX."
+  (let* ((n (length text))
+         (buf (make-array (max 256 (* 2 n)) :element-type 'character
+                                            :adjustable t :fill-pointer n))
+         (sb (%make-p-strbuf buf)))
+    (replace buf text)
+    (setf (p-box-value box)
+          (make-p-magic-cell
+           :kind :strbuf
+           :data sb
+           :getter (lambda ()
+                     (or (p-strbuf-snap sb)
+                         (setf (p-strbuf-snap sb)
+                               (subseq (the string (p-strbuf-buf sb)) 0))))
+           :setter (lambda (v)
+                     (setf (p-box-value box) *p-undef*)
+                     (box-set box v)))
+          (p-box-sv-ok box) nil
+          (p-box-nv-ok box) nil)
+    sb))
+
+(declaim (inline %p-strbuf-of))
+(defun %p-strbuf-of (v)
+  "The p-strbuf behind V when V is a :strbuf cell, else NIL."
+  (and (p-magic-cell-p v)
+       (eq (p-magic-cell-kind v) :strbuf)
+       (p-magic-cell-data v)))
+
+(defun %p-concat-assign-value (box value)
+  "The NEW value `BOX .= VALUE` stores on the ordinary path: perl's `.`
+   overload when an operand is blessed, else the two strings concatenated."
+  (if (and *p-any-overload-registered*
+           (or (and (p-box-p box) (p-box-class box))
+               (and (p-box-p value) (p-box-class value))))
+      (%p-compound-.-slow box value)
+      (concatenate 'string (to-string box) (to-string value))))
+
+(defun %p-append-box (box value)
+  "`$x .= VALUE` on the scalar BOX.  Returns BOX (the lvalue)."
+  (when (not (p-box-p box))
+    (return-from %p-append-box (box-set box (%p-concat-assign-value box value))))
+  (let ((cur (p-box-value box))
+        (blessed (and *p-any-overload-registered*
+                      (or (p-box-class box)
+                          (and (p-box-p value) (p-box-class value))))))
+    (cond
+      (blessed (box-set box (%p-concat-assign-value box value)))
+      ((%p-strbuf-of cur)
+       (%p-strbuf-push (%p-strbuf-of cur) (to-string value))
+       (%p-clear-match-pos box)
+       box)
+      ((simple-string-p cur)
+       (let ((s (to-string value)))
+         (if (< (+ (length cur) (length s)) +p-strbuf-min+)
+             (box-set box (concatenate 'string cur s))
+             (progn
+               (%p-strbuf-push (%p-strbuf-install box cur) s)
+               (%p-clear-match-pos box)
+               box))))
+      (t (box-set box (%p-concat-assign-value box value))))))
+
+(defun %p-elem-strbuf-box (acc cont key)
+  "The element BOX an in-place `.=` appends to, or NIL for the ordinary path.
+   ACC is p-gethash or p-aref; CONT/KEY are the vivified container and key.
+   Answers a box only for a plain (untied) container whose existing element
+   already holds a :strbuf cell or a simple string of at least
+   +p-strbuf-min+ characters -- a raw slot is promoted in place (the
+   element-cell rule, %p-elem-cell)."
+  (let ((c (unbox cont)))
+    (flet ((ok (v)
+             (or (%p-strbuf-of v)
+                 (and (simple-string-p v) (>= (length v) +p-strbuf-min+)))))
+      (cond
+        ((and (eq acc 'p-gethash) (hash-table-p c) (not (%p-tied c)))
+         (let ((k (to-string key)))
+           (multiple-value-bind (v found) (gethash k c)
+             (cond ((not found) nil)
+                   ((p-box-p v) (and (null (p-box-class v)) (ok (p-box-value v)) v))
+                   ((ok v) (%p-hash-elem-cell c k))
+                   (t nil)))))
+        ((and (eq acc 'p-aref) (vectorp c) (not (stringp c)) (not (%p-tied c))
+              (integerp key) (< -1 key (length c)))
+         (let ((v (aref c key)))
+           (cond ((p-box-p v) (and (null (p-box-class v)) (ok (p-box-value v)) v))
+                 ((ok v) (%p-elem-cell c key))
+                 (t nil))))
+        (t nil)))))
+
+(defmacro p-.= (place value)
+  "Perl .= (concat-assign).  A scalar box or a hash / array ELEMENT appends in
+   place once its string is long (%p-append-box, the :strbuf note above); a
+   deref place (`$$r .= X`) and every short string keep the ordinary store
+   (%p-.=-store).  VALUE is evaluated BEFORE the place is read: perl's concat
+   reads its left operand after the right one has run."
+  (cond
+    ((and (%p-elem-place-p place) (member (car place) '(p-gethash p-aref)))
+     (let ((v (gensym "V"))
+           (b (gensym "B")))
+       (%p-vivified-elem-form
+        place
+        (lambda (p)
+          `(let* ((,v ,value)
+                  (,b (%p-elem-strbuf-box ',(car p) ,(cadr p) ,(caddr p))))
+             (if ,b
+                 (%p-append-box ,b ,v)
+                 (setf ,p ,(%compound-arith-form
+                            '%p-compound-.-slow
+                            (lambda (c d) `(concatenate 'string (to-string ,c)
+                                                        (to-string ,d)))
+                            p v))))))))
+    ((and (consp place) (member (car place) (quote (p-gethash-deref p-aref-deref))))
+     (let ((r (gensym "R"))
+           (k (gensym "K"))
+           (v (gensym "V"))
+           (b (gensym "B")))
+       (let ((p `(,(car place) ,r ,k ,@(cdddr place))))
+         `(let* ((,r ,(cadr place))
+                 (,k ,(caddr place))
+                 (,v ,value)
+                 (,b (%p-elem-strbuf-box
+                      (quote ,(if (eq (car place) (quote p-gethash-deref)) (quote p-gethash) (quote p-aref)))
+                      ,r ,k)))
+            (if ,b
+                (%p-append-box ,b ,v)
+                (setf ,p ,(%compound-arith-form
+                           (quote %p-compound-.-slow)
+                           (lambda (c d) `(concatenate (quote string) (to-string ,c)
+                                                       (to-string ,d)))
+                           p v)))))))
+    ((or (%p-elem-place-p place) (%p-accessor-place-p place))
+     `(%p-.=-store ,place ,value))
+    (t `(%p-append-box ,place ,value))))
 
 ;;; `x=` DELEGATES OUTRIGHT — no guard — and that fixes a second bug in the
 ;;; same copy.  Its inlined body was `(apply #'concatenate 'string (make-list
