@@ -220,4 +220,37 @@ PL
         or diag("c1=$c1 c2=$c2 c1b=$c1b");
 }
 
+# ---- s508a (#2645): the BRACED spelling `${x}` / `@{x}` / `%{x}` / `$#{x}` /
+# `${x}[i]` / `${x}{k}` of a file lexical inside a NAMED sub, in code and in a
+# string, beside a same-named package variable; a block lexical; a sub's own
+# shadow.  The capture promotion used to refuse the spelling and the sub read
+# the PACKAGE variable.  Program mode, then the same text as a `do` file.
+# INVERSE: main fee16466 printed `01 G-G` / `02 G|G|1|GA||GH|0` / `07 ` (empty).
+my $BRACE = <<'PL';
+$main::x = "G"; @main::a = ("GA"); %main::h = (k => "GH");
+my $x = "X";
+my @a = (1, 2, 3);
+my %h = (k => "HV");
+sub f2 { "${x}-" . ${x} }
+sub f3 { "${ x }|" . ${ x } . "|" . scalar(@{a}) . "|" . join(",", @{a}) . "|" . ${a}[1] . "|" . ${h}{k} . "|" . $#{a} }
+sub f4 { my @k = keys %{h}; "@k|@{a}[0,1]|@{h}{k}|" . join(",", @{a}[0, 1]) . "|" . join(",", @{h}{k}) }
+sub f5 { ${x} = "Y"; ${a}[0] = 9; ${h}{k} = "NV"; "set" }
+my $anon = sub { "${x}+" . ${x} };
+print "01 ", f2(), "\n";
+print "02 ", f3(), "\n";
+print "03 ", f4(), "\n";
+print "04 ", $anon->(), "\n";
+print "05 ", f5(), " $x $a[0] $h{k} / $main::x $main::a[0] $main::h{k}\n";
+print "06 ", f2(), " ", f3(), "\n";
+{ my $y = "BY"; sub g1 { "${y}" . ${ y } } print "07 ", g1(), "\n"; }
+my $z = "Z"; sub g2 { my $z = "inner"; "${z}" . ${z} } print "08 ", g2(), " $z\n";
+PL
+my @BRACE_WANT = ('01 X-X', '02 X|X|3|1,2,3|2|HV|2', '03 k|1 2 3[0,1]|{k}|1,2|HV',
+                  '04 X+X', '05 set Y 9 NV / G GA GH', '06 Y-Y Y|Y|3|9,2,3|2|NV|2',
+                  '07 BYBY', '08 innerinner Z');
+check_lines('braced capture', $BRACE, @BRACE_WANT);
+write_file($D, 'br.pl', $BRACE . "1;\n");
+check_lines('braced capture, do FILE', qq{chdir "$D" or die;\ndo "./br.pl" or die \$@;\n},
+            @BRACE_WANT);
+
 done_testing();

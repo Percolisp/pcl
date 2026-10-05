@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 86;
+use Test::More tests => 87;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1004,4 +1004,15 @@ for my $c (
         'a filetest after a BEGIN block should lex as one `-e` operator' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
+}
+
+# §36 -- the `[1]` of a braced element `${a}[1]` is lexed as an anonymous-array
+# Constructor, while `${h}{k}` gets a Subscript.  perl: `@a = (1, 2, 3);
+# print ${a}[1]` prints 2.
+{
+    my $doc = PPI::Document->new(\q{@a = (1, 2, 3); print ${a}[1];});
+    my ($st) = grep { $_->start && $_->start->content eq q{[} }
+               @{ $doc->find(q{PPI::Structure}) || [] };
+    is( ref($st), q{PPI::Structure::Subscript},
+        q{the `[1]` after `${a}` is a Structure::Subscript} );
 }

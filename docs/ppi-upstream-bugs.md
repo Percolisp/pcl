@@ -2111,6 +2111,31 @@ in PCL (task #2670).  Upstream row: `docs/ppi-bug-report.t`.
 
 ---
 
+## 36. The `[i]` of a braced element `${name}[i]` is lexed as an anonymous-array CONSTRUCTOR  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `2`):
+
+```perl
+@a = (1, 2, 3); print ${a}[1], "\n";
+```
+
+**PPI 1.291 structure**: `Token::Cast[$] Structure::Block[{a}]
+Structure::Constructor[[1]]` — while the hash spelling `${h}{k}` gets
+`Structure::Subscript[{k}]`, and the unbraced `$a[1]` is `Symbol[$a]
+Structure::Subscript[[1]]`.  **Expected**: `Structure::Subscript` — a term
+cannot follow a term, so a `[` right after a deref block can only subscript
+it.
+
+**PCL's workaround** (s508a, task #2645): `Parser2::_brace_name_refs` — the ONE
+reading of which variable a code-level `${name}` / `@{name}` / `%{name}`
+mentions — takes a `[` Constructor after the block as the subscript, so
+`${x}[1]` is attributed to `@x` (not `$x`) and a capture promotion of `@x`
+renames it.  Before, the promotion refused the whole `${x}` spelling and the sub
+read the package `@x`.  The emitter already read the shape right.  Upstream row:
+`docs/ppi-bug-report.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

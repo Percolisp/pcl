@@ -3494,7 +3494,10 @@ sub _canon_text_patterns {
 
 sub _block_captures_name {
   my ($self, $block, $bare, $canons) = @_;
-  my $re = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+  # `(?:\{\s*)?`: the braced spelling `${x}` / `@{x}` / `$#{x}`, in code or in a
+  # string, is a mention too -- without it the early-out answered "no capture"
+  # and the sub silently read the package variable (task #2645).
+  my $re = qr/(?:[\$\@\%]|\$\#)(?:\{\s*)?\Q$bare\E\b/;
   my %canon_pat = %{ _canon_text_patterns($bare, $canons) };
   my @heredocs = @{ $block->find('PPI::Token::HereDoc') || [] };
   # Cheap early-out: the bare name appears nowhere in the text (common case).
@@ -3607,6 +3610,16 @@ sub _block_captures_name {
     }
     return 0;
   };
+
+  # A CODE-level `${x}` / `@{x}` / `%{x}` / `$#{x}`: a Word in a Cast's Block,
+  # no Symbol token -- the ONE helper the span pass and the rewriter read
+  # (task #2645).
+  for my $p (@{ _brace_name_refs($block) }) {
+    my ($w, $canon) = @$p;
+    next unless $canon =~ /^[\$\@\%]\Q$bare\E$/;
+    next if $canons && !$canons->{$canon};
+    return 1 unless $shadowed->($w, $canon);
+  }
 
   for my $t ($block->tokens) {
     if ($t->isa('PPI::Token::Symbol')) {
@@ -4627,6 +4640,16 @@ sub _rewrite_var_uses {
       next if $within && !_elem_within($t, $within);
       _fix_interp_token($t, $interp_fix, $skip);
     }
+    # The same use spelled `${x}` / `@{x}` / `%{x}` / `$#{x}` in CODE: a Word
+    # inside a Cast's Block, invisible to the Symbol loop -- the ONE helper the
+    # span pass already rewrites it through (#264), so the capture promotion
+    # no longer has to refuse that spelling (task #2645).
+    for my $p (@{ _brace_name_refs($stmt) }) {
+      next unless $p->[1] eq $canon;
+      next if $within && !_elem_within($p->[0], $within);
+      next if $skip && $skip->($p->[0]);
+      $p->[0]->set_content($newbare);
+    }
     next unless $sigil eq '@';
     for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
       next if $within && !_elem_within($ai, $within);
@@ -5007,9 +5030,12 @@ sub _promote_captured {
   # interpolated use alongside a shadow no longer refuses the promotion.
   # The `${x}` deref-block refusal below still stands: that shape is a
   # *text* form the token rewrites cannot reach at all, shadows or not.)
-  my $etxt = $extent ? $extent->content : join("\n", map { $_->content } @$stmts);
-  # ${x}/@{x}/%{x} deref-block → can't rewrite
-  return $refuse->('${x} deref-block') if $etxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
+  # (The `${x}` deref-block refusal that sat here is GONE, task #2645: the
+  # rewrite below reaches a code-level `${x}` through _brace_name_refs, the
+  # helper the span pass has used since #264, and the interp fixer already
+  # rewrites the braced spelling inside strings.  It was spelling- and
+  # sigil-blind -- `@{x}` refused a promotion of `$x` -- and on refusal the
+  # sub silently read the PACKAGE variable.)
   # M-F: a promoted SCALAR cell becomes eval-visible when its renamed decl
   # LOWERS — _reg_eval_capture at the defvar branches emits the alias call
   # (p-alias-eval-cell, ir-spec §9.1) at the decl's run position, and string
@@ -5252,10 +5278,24 @@ sub _brace_name_refs {
     my @t = grep { $_->significant } $kids[0]->children;
     next unless @t == 1 && $t[0]->isa('PPI::Token::Word')
              && $t[0]->content =~ /^\w+$/;      # a qualified name is no lexical
-    my $canon = $sig eq '$#' ? '@' . $t[0]->content
-              : $sig =~ /^[\$\@\%]$/ ? $sig . $t[0]->content
-              : next;                            # `\{name}`, `&{name}`: not ours
-    push @out, [ $t[0], $canon ];
+    next if $sig !~ /^(?:\$|\@|%|\$#)$/;         # `\{name}`, `&{name}`: not ours
+    # A SUBSCRIPT after the block names the CONTAINER, exactly as for the
+    # unbraced spelling (task #2645): `${x}[1]` is an element of @x, `${x}{k}`
+    # and `@{x}{k}` of %x, `%{x}[1]` a kv-slice of @x.  Without this, a rename
+    # of `$x` would have rewritten @x's element.
+    # PPI 1.291 lexes the `[1]` of `${x}[1]` as a CONSTRUCTOR (its `{k}` as a
+    # Subscript) -- docs/ppi-upstream-bugs.md §"`${name}[i]`"; a term cannot
+    # follow a term, so a `[` structure there is always the subscript.
+    my $nx  = $b->snext_sibling;
+    my $sub = ($nx && ($nx->isa('PPI::Structure::Subscript')
+                       || ($nx->isa('PPI::Structure::Constructor')
+                           && substr($nx->content, 0, 1) eq '[')))
+            ? substr($nx->content, 0, 1) : '';
+    my $kind = $sig eq '$#'  ? '@'
+             : $sub eq '['   ? '@'
+             : $sub eq '{'   ? '%'
+             : $sig;
+    push @out, [ $t[0], $kind . $t[0]->content ];
   }
   return \@out;
 }
