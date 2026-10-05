@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-05",
+   "description" : "FILED s507c (Opus 5.5, 2026-10-05) from #2704's probe table; PRE-EXISTING on main ac2fec1e.\n\nREPRODUCER (perl 5.40.3; scratch/s507c/m3/e3.pl in the s507c worktree):\n  print \"a[$}]\\n\";                 perl: a[]          PCL: a[$}]\n  *{\"main::}\"} = \\ \"seven\";\n  print \"b[$}]\\n\";                 perl: b[seven]     PCL: dies \"Not a SCALAR reference\" at the glob assignment\n  print qq{c[$\\}]}, \"\\n\";          perl: c[seven]     PCL (after #2704): c[$}]\nCAUSE: Pl/InterpScan.pm's $PUNCT_MAGIC has no `}` (nor `{`), so `$}` is not a reference start; and the symbolic glob `*{\"main::}\"}` does not resolve to the scalar slot.  `$}` is an unused perl variable -- this is the last row of #2704's table that still differs, nothing more.  Rare: no known program spells it.  If fixed, the emission needs a pipe-quoted symbol for the name (Pl::CLForm::needs_pipes) and the scanner change must be probed in REGEX mode too (`/a$}/`).",
+   "id" : "2741",
+   "status" : "pending",
+   "subject" : "The punctuation variable `$}` is not a variable in PCL: `\"[$}]\"` prints the literal `$}` (perl interpolates it, empty), so `qq{[$\\}]}` (the escaped delimiter after a sigil, #2704) prints `[$}]` where perl prints `[]`; and `*{\"main::}\"} = \\\"seven\"; print \"$}\"` dies \"Not a SCALAR reference\" (LOW, PRE-EXISTING, found by s507c)"
+}
