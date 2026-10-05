@@ -6308,6 +6308,13 @@
    object's overloaded '' handler fires (e.g. length($obj) on an object that
    overloads stringification), rather than measuring the raw ref text.
    Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
+  ;; a private-buffer cell (:strbuf, :memfh) answers its LIVE length: length
+  ;; retains nothing, so the snapshot a read would take is not needed (s507p)
+  (when (p-box-p val)
+    (let ((c (p-box-value val)))
+      (when (p-magic-cell-p c)
+        (let ((n (%p-cell-live-length c)))
+          (when n (return-from p-length n))))))
   (let ((v (unbox val)))
     (if (or (eq v *p-undef*) (null v))
         *p-undef*
@@ -17401,12 +17408,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((box (psos-target s)))
     (make-p-magic-cell
      :kind :memfh
+     :data s
      :getter (lambda ()
                (or (psos-snap s)
                    (setf (psos-snap s) (subseq (the string (psos-buf s)) 0))))
      :setter (lambda (v)
                (setf (p-box-value box) *p-undef*)
                (box-set box v)))))
+
+(defun %p-cell-live-length (cell)
+  "The length of the text behind a private-buffer magic CELL -- a :strbuf
+   (#2115) or a :memfh (#2111) -- without the snapshot a read takes; NIL for
+   any other cell.  Only a reader that RETAINS nothing may use it (length)."
+  (case (p-magic-cell-kind cell)
+    (:strbuf (length (the string (p-strbuf-buf (p-magic-cell-data cell)))))
+    (:memfh (length (the string (psos-buf (p-magic-cell-data cell)))))
+    (t nil)))
 
 (defun %psos-adopt (s text)
   "Make writable stream S the owner of its scalar: a private adjustable copy

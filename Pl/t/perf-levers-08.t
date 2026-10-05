@@ -110,6 +110,13 @@ my $mech = lisp_out(<<'LISP');
     (%p-append-box b "y")
     (list (p-magic-cell-kind (p-box-value b)) (simple-string-p (unbox b)) (length (unbox b))
           (p-magic-cell-p (p-box-value (%p-append-box (make-p-box "s") "t"))))))
+(format t "livelen ~a~%"
+  (let* ((b (make-p-box "")) (fh (make-p-box *p-undef*)))
+    (%p-open-memory fh ">" b)
+    (let ((s (p-get-stream fh)))
+      (write-string "abcd" s)
+      (let ((n (p-length b)))
+        (list n (null (psos-snap s)) (p-length (let ((x (make-p-box (make-string 300 :initial-element #\z)))) (%p-append-box x "q"))))))))
 LISP
 like($mech, qr/^clearpos T$/mi,
      '#2539: box-set\'s two pos() resets share %p-clear-match-pos');
@@ -123,6 +130,8 @@ like($mech, qr/^records \(T T T\)$/mi,
      '#2115 (a): a readline record is a SIMPLE string (line, multi-char separator, slurp), so a store keeps it without a snapshot');
 like($mech, qr/^strbuf \(STRBUF T 302 NIL\)$/mi,
      '#2115 (c): a long string appended with .= lives in a :strbuf cell whose reads are simple snapshots; a short one stays plain');
+like($mech, qr/^livelen \(4 T 301\)$/mi,
+     '#2111 / #2115: length() of a :memfh or :strbuf scalar reads the live buffer and takes no snapshot');
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ANSWERS (perl's)
