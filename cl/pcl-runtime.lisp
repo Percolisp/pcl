@@ -26114,8 +26114,16 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; Muffle "package at variance" warnings: a p-defpackage that ran at
           ;; compile time (its situations are kept — the reader needs the
           ;; package) has added shadows that the load-time defpackage sees.
+          ;; The TEXT is loaded from a stream this function opens: SBCL's
+          ;; source loader prints its "While evaluating the form starting at
+          ;; line N … of #P…" herald for every serious condition -- a module's
+          ;; `die', even one a caller's `eval { require M }' catches -- but
+          ;; only on the FORM-TRACKING stream LOAD opens for a pathname (task
+          ;; #2764; SBCL target-load.lisp `condition-herald').  Same forms,
+          ;; same evaluation, no herald.
           (handler-bind ((warning #'muffle-warning))
-            (load lisp-path))
+            (with-open-file (in lisp-path)
+              (load in)))
           t))))
 
 

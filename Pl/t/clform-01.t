@@ -174,8 +174,9 @@ like($do, qr/\(p-let \(\(\$a__excl__\d+ :\w[\w-]* 1 :perl "\$a" :why :exception-
 # s316d: `&$ref` with no parens is a CALL with @_ (perl evaluates `do EXPR`'s
 # EXPR — calling the sub — then does do-FILE on the RESULT; verified vs perl).
 # The old pin `(p-do (p-get-coderef $ref))` never called the sub at all.
-like($do, qr/\(p-do \(p-funcall-ref \$ref \@_\)\)/,
-     'do &$cref → generic tail (p-do (p-funcall-ref $ref @_))');
+# s508a (#2632): the call shares the caller's @_ -- the p-amp-call wrapper.
+like($do, qr/\(p-do \(p-amp-call \(p-funcall-ref \$ref \@_\)\)\)/,
+     'do &$cref → generic tail (p-do (p-amp-call (p-funcall-ref $ref @_)))');
 like($do, qr/\(p-scalar-ctx\s*\(funcall\s*\(lambda/,
      'do block gets its scalar-context wantarray bind');
 

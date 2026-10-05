@@ -478,9 +478,10 @@ diag "-------- Regression tests (session 3):";
 
 # Regression: &subname should generate a function call (not literal &foo).
 # Perl's bare &foo (no parens) re-uses the caller's @_, so it must pass @_.
+# s508a (#2632): the SAME @_ -- p-amp-call makes the callee adopt the vector.
 test_codegen('&foo',
-             '(pl-foo @_)',
-             'Regression: &subname generates funcall passing @_');
+             '(p-amp-call (pl-foo @_))',
+             'Regression: &subname generates funcall passing @_ (shared, p-amp-call)');
 
 # Regression: delete $a[idx] should use p-delete-array
 # Was passing value instead of array+index

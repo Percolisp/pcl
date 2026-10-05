@@ -625,6 +625,13 @@ changes.
 Dereference ops unwrap one level. Reference identity = identity of the
 referenced structure. Stringification of a reference yields
 `"HASH(0x…)"`-style text; numification yields the object address.
+**ONE address per referent, read three ways** (normative, s508a, task #2682):
+`0+$ref`, the hex in `"$ref"` and `refaddr($ref)` are the same number —
+`%p-ref-address` is the one reading for the number and for `builtin::refaddr`
+(which `Scalar::Util::refaddr` calls, and which never runs a `0+` overload).
+A FILEHANDLE (a lexical handle's stream or socket) is a GLOB ref and numifies
+to its address, so two handles compare `!=`.  A TYPEGLOB's address is the
+GLOB's (package + name), not the label object's: `\*STDIN == \*STDIN`.
 
 **WHAT SPREADS IN A LIST IS DECIDED ON THE ITEM AS IT ARRIVES, NEVER ON
 `(unbox item)` (normative, s492a, task #1991).**  A list operator flattens
@@ -765,6 +772,15 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   `bless $r, Foo::Bar` is `(p-bless $r "Foo::Bar")`.  (perl applies the
   ordinary bareword rule in that slot, so a DECLARED sub of that name is
   called; PCL does not — task #2015.)
+- **The SOLE argument of a parenthesised sub or method call is the third
+  `(p-bareword-value "NAME")` site** (normative, s508a, task #2664): under `no
+  strict subs`, `foo(n)` / `$o->m(n)` with nothing callable named `n` at that
+  point passes the string `"n"` (an AUTOLOAD is not consulted for a
+  bareword), and a name imported past the export scan is still called because
+  the image answers.  A registered FILEHANDLE name as a whole element of such a
+  call's argument list (`foo(STDERR)`, `foo(FH, 1)`) is its text.  A BUILTIN
+  callee (`length(abc)`) and a name only a run-time glob assignment creates
+  keep the call reading.  Under `use strict` nothing changes.
 
 - **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
   object** (normative, task #423). Perl distinguishes a glob *value*
@@ -4081,6 +4097,14 @@ string (`docs/eval-lexical-capture.md` is the original design note;
 string eval (documented divergence). Translators targeting environments
 without a runtime compiler must either bundle one or reject `eval EXPR`
 programs — there is no static escape.
+
+**A module loaded from its TEXT is read from a plain stream** (normative,
+s508a, task #2764): a die during the load — caught by the caller's `eval {
+require M }` or not — writes nothing but the program's own output.  (SBCL's
+source loader prints a "While evaluating the form starting at line N" herald
+for every serious condition, but only on the form-tracking stream LOAD opens
+for a pathname.)  A fasl load prints none either; neither path changes which
+modules load compiled.
 
 ### 9.0a A required file is a UNIT, not a program (normative, s507c, task #2690)
 
