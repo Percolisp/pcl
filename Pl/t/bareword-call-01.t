@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 43;
+plan tests => 46;
 
 sub run_cl {
     my ($code) = @_;
@@ -360,3 +360,26 @@ test_cl('a qualified bareword in the CLASS slot of bless/tie is the class',
   . qq{package main;\nmy \$r = {};\nbless \$r, My::Thing;\n}
   . qq{my \$s;\ntie \$s, My::Thing;\nprint ref(\$r), "|", ref(tied \$s), "|\$s\\n";},
     "My::Thing|My::Thing|F\n");
+
+# s508a (#2664): the SOLE argument of a parenthesised sub or method call is
+# perl's TEXT when no sub of that name is callable there (no strict subs) --
+# with an AUTOLOAD present too, which perl does not consult for a bareword --
+# and a registered filehandle name in a user call's argument list is its TEXT,
+# not a handle.  INVERSE: main fee16466 called AUTOLOAD for `n` / `zz` and
+# loaded the bare CL symbol STDERR (unbound variable).
+test_cl('the sole argument of a sub/method call is the string when nothing is callable',
+    qq{sub foo { "[" . join(",", \@_) . "]" }\n}
+  . qq{sub AUTOLOAD { our \$AUTOLOAD; return if \$AUTOLOAD =~ /DESTROY/; "AL" }\n}
+  . qq{my \$o = bless {}, "C"; sub C::m { "m\$_[1]" }\n}
+  . qq{print foo(n), foo(STDERR), foo(STDOUT, 1), foo(Some::Class), \$o->m(zz), "\\n";},
+    "[n][STDERR][STDOUT,1][Some::Class]mzz\n");
+
+# The two readings that must NOT move: a sub declared BELOW is the string
+# without parens and a call with them; an IMPORTED name (File::Spec::Functions'
+# curdir) is still CALLED.
+test_cl('a sub declared below: string without parens, call with them',
+    qq{sub foo { "[" . join(",", \@_) . "]" }\nprint foo(later), foo(later()), "\\n";\nsub later { "L" }},
+    "[later][L]\n");
+test_cl('an imported name as the sole argument is still a call',
+    qq{use File::Spec::Functions;\nsub foo { "[\@_]" }\nprint foo(curdir), "\\n";},
+    "[.]\n");

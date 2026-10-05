@@ -4091,6 +4091,13 @@ sub handle_subcalls {
     # declared already reaches -1 rather than 42.
     if ($self->has_environment && $self->environment->is_filehandle($sub_name)
         && $self->_bareword_callable_here($sub_name, $now) ne 'yes') {
+      # …but as a whole ARGUMENT of a parenthesised sub or method call it is
+      # no handle slot: under `no strict subs` perl passes the TEXT
+      # (`foo(STDERR)` is "STDERR"), where the plain Word emitted the handle's
+      # CL symbol and the load died "unbound variable" (task #2664).
+      $now->{_bareword_string} = 1
+          if !$self->environment->has_pragma('strict_subs')
+             && $self->_is_sole_call_argument($now, 1);
       next;
     }
 
@@ -4597,6 +4604,25 @@ sub handle_subcalls {
     # fail at runtime, which is correct Perl behavior for typo'd sub names).
     if ($end_pars < $i + 1) {
       my $callable_fb = $self->_bareword_callable_here($sub_name, $now);
+      # THE SOLE ARGUMENT of a parenthesised sub or method call, `foo(n)` /
+      # `$o->m(n)` (task #2664): under `no strict subs` perl reads a name it
+      # cannot call there as its own TEXT, so `foo(n)` passes "n".  That is
+      # the no-previous-token case the rule below deliberately does not widen
+      # on `no` (an absence of knowledge -- a sub imported past the export
+      # scan must still be CALLED), so the question goes to the IMAGE, the
+      # same runtime arm a qualified unplaceable name and a whole-statement
+      # bareword already take: call the sub if one exists, else the string.
+      # Upper-case words included (`foo(STDERR)` is the string "STDERR", not a
+      # handle -- the call loaded a bare symbol).  Builtin callees keep today's
+      # reading (their slots -- `close(fh)` -- are handled by name elsewhere).
+      if ($callable_fb eq 'no'
+          && $i == 0
+          && !($self->has_environment
+               && $self->environment->has_pragma('strict_subs'))
+          && $self->_is_sole_call_argument($now)) {
+        $now->{_bareword_runtime} = 1;
+        next;
+      }
       # ALL-CAPS words are filehandles/constants — leave as funcalls.  ASCII
       # only; all_caps_call_guess's header says why (#820).
       my $is_all_caps_fb = Pl::Environment::all_caps_call_guess($sub_name);
@@ -5911,6 +5937,40 @@ sub _bareword_callable_here {
   # qualified name (it is keyed bare), so a qualified unknown is a string.
   return 'yes' if !defined $pkg && $env->has_prototype($name);
   return 'no';
+}
+
+# Is the Word TOK the WHOLE argument list of a parenthesised call to a sub
+# or method -- `foo(n)`, `foo (n)`, `$o->m(n)`, `&foo(n)` -- and not of a
+# builtin or a keyword (task #2664)?  Read from the PPI tree: TOK alone in the
+# Expression of a List whose previous sibling is the callee's Word.  With
+# ANY_ELEMENT, TOK may be any one whole comma-separated element of that list.
+sub _is_sole_call_argument {
+  my ($self, $tok, $any_element) = @_;
+  return 0 unless ref($tok) && $tok->isa('PPI::Token::Word');
+  if ($any_element) {
+    # one whole comma-separated ELEMENT: `foo(STDERR, 1)`, `foo(1, FH)`
+    for my $s ($tok->sprevious_sibling, $tok->snext_sibling) {
+      return 0 if $s && !($s->isa('PPI::Token::Operator') && $s->content eq ',');
+    }
+  }
+  else {
+    return 0 if $tok->sprevious_sibling || $tok->snext_sibling;
+  }
+  my $expr = $tok->parent;
+  return 0 unless $expr && $expr->isa('PPI::Statement::Expression');
+  return 0 if $expr->sprevious_sibling || $expr->snext_sibling;
+  my $list = $expr->parent;
+  return 0 unless $list && $list->isa('PPI::Structure::List');
+  my $callee = $list->sprevious_sibling;
+  return 0 unless $callee && $callee->isa('PPI::Token::Word');
+  my $name = $callee->content;
+  (my $core = $name) =~ s/^CORE::(?:GLOBAL::)?//;
+  return 0 if exists $self->known_no_of_params->{$core};
+  return 0 if $self->control_flow_ops->{$core};
+  return 0 if $core =~ /\A(?:if|elsif|unless|while|until|for|foreach|given|when
+                           |return|my|our|local|state|sub|and|or|not|xor
+                           |qw|eq|ne|lt|gt|le|ge|cmp|x|print|say|printf)\z/x;
+  return 1;
 }
 
 # THE TWO SITES THAT READ AN UNPLACEABLE BAREWORD AS A VALUE — the
