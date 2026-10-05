@@ -95,15 +95,13 @@ sub set_prototype {
     return __pcl_set_prototype($code, $proto);
 }
 
-# refaddr($ref) — the address of the referent, or undef for a non-ref.
-# In Perl numifying a ref yields its address; PCL routes ref-numification
-# through the same stable object-identity (object-address) that ref
-# stringification uses, so `0 + $r` and the hex of `"$r"` agree, and the id is
-# invariant for the referent's lifetime (see object-address in pcl-runtime).
+# refaddr($ref) — the address of the referent, or undef for a non-ref: the
+# number `0 + $r` answers and the hex of `"$r"`, but NEVER through a `0+`
+# overload (File::Temp's own NUMIFY handler IS `refaddr($_[0])`), so it goes
+# through the builtin:: dispatch namespace, the one address reading the
+# runtime shares with numification (task #2682).
 sub refaddr {
-    my ($r) = @_;
-    return undef unless ref $r;
-    return 0 + $r;
+    return builtin::refaddr($_[0]);
 }
 
 1;

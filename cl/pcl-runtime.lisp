@@ -4055,10 +4055,22 @@
 (defvar *p-object-id-counter* 0
   "Monotonic source of ids for *p-object-id-table*.")
 
+(defvar *p-glob-identity-table*
+  (make-hash-table :test 'equal :synchronized t)
+  "(CL package . NAME) -> the FIRST p-typeglob made for that glob: the object
+   whose address every later `\\*NAME' reports (see object-address).")
+
 (defun object-address (obj)
   "Stable unique numeric identity for OBJ — the basis for Perl ref identity
    (refaddr, == on refs) and ref stringification (CODE/HASH/ARRAY(0x..)).
-   Stable across GC relocation and re-boxing, unlike the raw pointer."
+   Stable across GC relocation and re-boxing, unlike the raw pointer.
+   A TYPEGLOB is a label (package + name) made fresh by every `*NAME', so its
+   identity is the GLOB's, not the label object's: `\\*STDIN == \\*STDIN' is
+   true in perl and both print one GLOB(0x…) (task #2682)."
+  (when (p-typeglob-p obj)
+    (let ((key (cons (p-typeglob-package obj) (p-typeglob-name obj))))
+      (setf obj (or (gethash key *p-glob-identity-table*)
+                    (setf (gethash key *p-glob-identity-table*) obj)))))
   #+sbcl
   (or (gethash obj *p-object-id-table*)
       (setf (gethash obj *p-object-id-table*)
@@ -4485,6 +4497,29 @@
 (eval-when (:load-toplevel :execute)
   (setf (symbol-function (intern "pl-Method" "OVERLOAD")) #'p-overload-method))
 
+(defun %p-ref-address (box v)
+  "The NUMBER of BOX, whose value is V, when it is a reference: the address
+   its string form prints, else 0.  THE ONE READING of a reference's address
+   for `0+$ref' (box-nv) and Scalar::Util/builtin refaddr, which must agree
+   (task #2682: a filehandle numified to 0 and refaddr answered 0 for every
+   handle while \"$fh\" printed a distinct GLOB(0x…))."
+  (cond
+    ;; Reference: perl's numeric value is the REFERENT's address, so
+    ;; `\$x == \$x` is true across two separate `\` wrappers (#163).  Same
+    ;; rule as the stringifier, one helper.
+    ((p-box-p v) (object-address (%p-ref-referent box)))
+    ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
+    ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array
+    ((functionp v) (object-address v))  ; code ref: address
+    ((p-regex-match-p v) (object-address v))  ; compiled regex: address
+    ;; Glob REF numifies to its address (matches GLOB(0x..) stringify); a bare
+    ;; glob (is-ref nil) numifies to 0 ("*pkg::name" parses as 0).
+    ((p-typeglob-p v) (if (p-box-is-ref box) (object-address v) 0))
+    ;; A FILEHANDLE (a lexical handle's stream or socket) is a GLOB ref: its
+    ;; number is the address its string prints (#2682).
+    ((%p-handle-payload-p v) (object-address v))
+    (t 0)))
+
 (defun box-nv (box)
   "Get numeric value from box with lazy caching.
    Tied variables: bypass cache and call FETCH."
@@ -4514,18 +4549,9 @@
                    ((eq v t) 1)  ; CL's T from comparisons - Perl true is 1
                    ((stringp v) (parse-perl-number v))
                    ((p-vstring-p v) (parse-perl-number (p-vstring-s v)))
-                   ;; Reference: perl's numeric value is the REFERENT's address,
-                   ;; so `\$x == \$x` is true across two separate `\` wrappers
-                   ;; (#163).  Same rule as the stringifier, one helper.
-                   ((p-box-p v) (object-address (%p-ref-referent box)))
-                   ((hash-table-p v) (object-address v))  ; blessed hash: numeric = address
-                   ((and (vectorp v) (not (stringp v))) (object-address v))  ; blessed array: address
-                   ((functionp v) (object-address v))  ; code ref: address
-                   ((p-regex-match-p v) (object-address v))  ; compiled regex: address
-                   ;; Glob REF numifies to its address (matches GLOB(0x..) stringify);
-                   ;; a bare glob (is-ref nil) numifies to 0 ("*pkg::name" parses as 0).
-                   ((p-typeglob-p v) (if (p-box-is-ref box) (object-address v) 0))
-                   (t 0))))
+                   ;; A reference: its address (%p-ref-address, the ONE reading
+                   ;; refaddr shares), 0 for anything else.
+                   (t (%p-ref-address box v)))))
           ;; Don't cache address-based NV: SBCL's GC can move objects,
           ;; making the cached address stale while a freshly-computed address
           ;; gives a different value for the same logical object.
@@ -4534,7 +4560,8 @@
                       (and (vectorp v) (not (stringp v)))
                       (functionp v)
                       (p-regex-match-p v)
-                      (and (p-typeglob-p v) (p-box-is-ref box)))  ; glob-ref address
+                      (and (p-typeglob-p v) (p-box-is-ref box))  ; glob-ref address
+                      (%p-handle-payload-p v))
             (setf (p-box-nv box) n
                   (p-box-nv-ok box) t))
           n))))
@@ -5779,6 +5806,8 @@
     ;; boxed copy — the missing arm made `\&f == \&f` FALSE (task #362: the
     ;; boxed side numified to the address, this side to 0).
     ((functionp val) (object-address val))
+    ;; A filehandle in a raw slot: its address, as box-nv answers (#2682).
+    ((%p-handle-payload-p val) (object-address val))
     (t 0)))
 
 (declaim (inline to-number))
@@ -23466,8 +23495,25 @@ buffer's fill-pointer; everything else falls back to file-length."
   (if timeout-p
       (%p-select-4arg fh wbits ebits timeout)
       (let ((prev (or *p-selected-out* "main::STDOUT")))
-        (when fh (setf *p-selected-out* fh))
+        (when fh (setf *p-selected-out* (%p-select-glob-name fh)))
         prev)))
+
+(defun %p-select-glob-name (fh)
+  "What `select' hands back later for FH: a handle selected by its BAREWORD
+   is the glob's FULL name, \"main::STDERR\" (task #2683) -- the package in
+   effect, except the names perl forces into main (perlvar: STDIN STDOUT
+   STDERR ARGV ARGVOUT ENV INC SIG).  Anything else (a lexical handle, a name
+   string, a glob) is kept as given; %p-resolve-fh accepts every one."
+  (if (and (symbolp fh) (not (eq fh t)))
+      (let ((name (to-string fh)))
+        (cond
+          ((search "::" name) name)
+          ((member name '("STDIN" "STDOUT" "STDERR" "ARGV" "ARGVOUT"
+                          "ENV" "INC" "SIG")
+                   :test #'string=)
+           (concatenate 'string "main::" name))
+          (t (concatenate 'string *pcl-current-package* "::" name))))
+      fh))
 
 (defun %p-write-impl (&optional fh)
   "Perl write - emit a report via the current `format` (stub).
@@ -29259,8 +29305,14 @@ buffer's fill-pointer; everything else falls back to file-length."
         r)))
 
 (defun %p-builtin-refaddr (x)
-  "builtin::refaddr — integer address of the referent, else undef."
-  (if (string= (p-ref x) "") *p-undef* (object-address (unbox x))))
+  "builtin::refaddr — the referent's address, else undef: the number `0+$ref'
+   answers (box-nv's address arms, the same address the string form prints)
+   but NEVER through a `0+' overload -- File::Temp's NUMIFY handler is
+   itself `refaddr($_[0])' (task #2682)."
+  (cond
+    ((string= (p-ref x) "") *p-undef*)
+    ((p-box-p x) (%p-ref-address x (p-box-value x)))
+    (t (object-address x))))
 
 (defun %p-builtin-reftype (x)
   "builtin::reftype — underlying ref type, else undef (not empty string)."

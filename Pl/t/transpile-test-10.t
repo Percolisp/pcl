@@ -1711,6 +1711,33 @@ print "04 ", X5, " [", prototype("T"), "]\n";
 my $c = 0; sub f { use constant Z => ++$c; Z + Z } print "05 ", f(), f(), "\n";
 });
 
+# s508a (#2682, #2683): a filehandle's NUMBER is the address its string prints
+# (two handles differ, refaddr agrees, a closed handle keeps it), `\*NAME` taken
+# twice is ONE glob, refaddr never calls a `0+` overload (File::Temp's NUMIFY is
+# refaddr itself), and 1-arg select hands back the glob's FULL name.  INVERSE:
+# main fee16466 answered numeq / zero / ra!=hex / ne / 0 / STDERR, and
+# `File::Temp->new == File::Temp->new` exhausted the binding stack.
+test_transpile("a filehandle's numeric identity, \\*NAME, refaddr, select's name (s508a, #2682 #2683)", q{
+use Scalar::Util qw(refaddr);
+use File::Temp;
+my ($fa, $fb); open $fa, '<', '/dev/null' or die; open $fb, '<', '/dev/null' or die;
+my ($hex) = "$fa" =~ /0x([0-9a-f]+)/;
+print "01 ", ($fa == $fb ? "numeq" : "numne"), " ", ($fa == $fa ? "self" : "noself"), " ",
+      ($fa + 0 > 0 ? "pos" : "zero"), "\n";
+print "02 ", ($fa + 0 == hex($hex) ? "num=hex" : "num!=hex"), " ", (refaddr($fa) == $fa + 0 ? "ra=num" : "ra!=num"),
+      " ", (refaddr($fa) != refaddr($fb) ? "rane" : "raeq"), "\n";
+my @hs = ($fa, $fb); my ($i) = grep { $hs[$_] == $fb } 0 .. 1; print "03 $i\n";
+print "04 ", (\*STDIN == \*STDIN ? "eq" : "ne"), " ", (\*STDIN == \*STDOUT ? "eq" : "ne"), " ",
+      ("" . \*STDOUT eq "" . \*STDOUT ? "seq" : "sne"), "\n";
+my $t1 = File::Temp->new; my $t2 = File::Temp->new;
+print "05 ", ($t1 == $t1 ? "self" : "noself"), " ", ($t1 == $t2 ? "eq" : "ne"), " ",
+      (refaddr($t1) == 0 + $t1 ? "ra=num" : "ra!=num"), "\n";
+{ package O; use overload '0+' => sub { 42 }, fallback => 1; }
+my $o = bless [], 'O'; print "06 ", $o + 0, " ", (refaddr($o) != 42 ? "raw" : "ovl"), "\n";
+close $fa; print "07 ", ($fa + 0 == hex($hex) ? "kept" : "lost"), "\n";
+my $old = select(STDERR); my $cur = select($old); print "08 $old $cur\n";
+});
+
 
 # s507c (#2700): a body that is ONLY `my (LIST) = @_` returns the list
 # assignment's value -- the params in list context, the @_ COUNT in scalar
