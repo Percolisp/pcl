@@ -4009,8 +4009,9 @@ Every generated file, a module's included, ends its compile phase with
 `(p-run-compile-phase-blocks)`.  Only the MAIN program's is the program's
 compile->run boundary.  The loader of a required file (a `use`, a `require`,
 an extension) runs it with fresh UNITCHECK / CHECK / INIT queues
-(`%p-load-unit`), and the file's boundary runs ITS UNITCHECK blocks only.  On
-a normal return the file's CHECK and INIT blocks are placed on top of the
+(`%p-load-unit`), and the file's boundary runs ITS UNITCHECK blocks only.  However
+the load is left (a normal return, or a die part-way that an `eval` catches)
+the CHECK and INIT blocks the file compiled are placed on top of the
 caller's queues as if pushed there — while the main program is still
 compiling (a `use`, a `BEGIN`-time `require`) they therefore run at the main
 boundary, CHECK newest first, INIT in compile order — and once the main

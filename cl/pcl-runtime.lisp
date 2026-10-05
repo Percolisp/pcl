@@ -2204,7 +2204,7 @@
 ;;; ran the CHECK first, and `pcl -c` (whose expansion is a first CHECK block
 ;;; that exits) said "syntax OK" before a later `use` could fail.
 ;;; So the loader gives each unit FRESH queues; the unit's boundary drains its
-;;; UNITCHECKs only; on a normal return its CHECK/INIT blocks are spliced on
+;;; UNITCHECKs only; however the load is left its CHECK/INIT blocks are spliced on
 ;;; top of the caller's (newest first, like a push) or dropped when the main
 ;;; program's boundary has already passed.
 (defvar *p-unit-load* nil
@@ -2214,12 +2214,15 @@
 (defun %p-load-unit (thunk)
   "Call THUNK (the load of one required file) with the unit's own phase
    queues; see the note above *p-unit-load*."
+  ;; UNWIND-PROTECT, not a normal-return splice: a unit that dies part-way
+  ;; (`eval { require D }` with D dying after its CHECK/INIT blocks
+  ;; compiled) still leaves those blocks queued, as perl does.
   (let (check init)
-    (multiple-value-prog1
-        (let ((*p-unit-load* t) (*unitcheck-blocks* nil)
-              (*check-blocks* nil) (*init-blocks* nil))
-          (multiple-value-prog1 (funcall thunk)
-            (setf check *check-blocks* init *init-blocks*)))
+    (unwind-protect
+         (let ((*p-unit-load* t) (*unitcheck-blocks* nil)
+               (*check-blocks* nil) (*init-blocks* nil))
+           (unwind-protect (funcall thunk)
+             (setf check *check-blocks* init *init-blocks*)))
       (unless *p-compile-phase-done*
         (setf *check-blocks* (append check *check-blocks*)
               *init-blocks* (append init *init-blocks*))))))

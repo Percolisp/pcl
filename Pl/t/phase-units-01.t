@@ -129,4 +129,22 @@ PL
 row('a run-time require: the module\'s CHECK/INIT never run',
     q{--no-cache p03.pl}, "run1\nmodbegin\nmodunitchk\nmodbody\nran=0\n", '', 0);
 
+# A unit that DIES part-way still leaves the CHECK/INIT blocks it compiled
+# queued (the splice happens however the load is left).  STDOUT and status
+# only: the caught die's stderr is #2764's.
+put('lib/DieMod.pm', <<'PM');
+package DieMod;
+CHECK { print "D:c\n" }
+INIT { print "D:i\n" }
+die "D died\n";
+1;
+PM
+put('p05.pl', <<'PL');
+use lib "lib";
+BEGIN { eval { require DieMod }; print "caught: ", ($@ =~ /^(.*)/)[0], "\n" }
+CHECK { print "c\n" } INIT { print "i\n" } print "run\n";
+PL
+row('a unit that dies at BEGIN time keeps its queued CHECK/INIT blocks',
+    q{--no-cache p05.pl}, "caught: D died\nc\nD:c\nD:i\ni\nrun\n", undef, 0);
+
 done_testing();
