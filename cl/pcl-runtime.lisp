@@ -21076,6 +21076,23 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl getc — bareword filehandle is auto-quoted."
   (if args `(%p-getc-impl (%p-fh-arg ,(car args))) `(%p-getc-impl)))
 
+;;; The line buffer %p-read-record fills one character at a time.  ONE is kept
+;;; between calls (taken out while in use, so a re-entrant read -- a tied
+;;; handle whose READLINE reads another handle -- makes its own): a record
+;;; then costs one SIMPLE-string copy of its own length, not a fresh 256-char
+;;; adjustable array per line (#2115 (a), s507p).
+(defvar *p-record-scratch* nil)
+
+(defmacro %p-with-record-buffer ((var) &body body)
+  "Run BODY with VAR bound to an empty adjustable character buffer."
+  `(let ((,var (or (shiftf *p-record-scratch* nil)
+                   (make-array 256 :element-type (quote character)
+                               :adjustable t :fill-pointer 0))))
+     (setf (fill-pointer ,var) 0)
+     (unwind-protect (progn ,@body)
+       (when (< (array-dimension ,var 0) 65536)
+         (setf *p-record-scratch* ,var)))))
+
 (defun %p-read-record (stream sep)
   "ONE record from STREAM under perl's $/ rule SEP — nil at EOF.
    Perl has exactly one such rule, and it is not readline's private property:
@@ -21135,29 +21152,27 @@ buffer's fill-pointer; everything else falls back to file-length."
 
         ;; Single character separator (common case, optimized)
         ((= (length sep) 1)
-         (let ((sep-char (char sep 0))
-               (result (make-array 256 :element-type 'character
-                                   :adjustable t :fill-pointer 0)))
-           (loop for char = (read-char stream nil nil)
-                 while char
-                 do (vector-push-extend char result)
-                 when (char= char sep-char)
-                 do (loop-finish))
-           (if (zerop (length result)) nil (subseq result 0))))
+         (%p-with-record-buffer (result)
+                                (let ((sep-char (char sep 0)))
+                                  (loop for char = (read-char stream nil nil)
+                                        while char
+                                        do (vector-push-extend char result)
+                                        when (char= char sep-char)
+                                        do (loop-finish))
+                                  (if (zerop (length result)) nil (subseq result 0)))))
 
         ;; Multi-character separator
         (t
-         (let ((result (make-array 256 :element-type 'character
-                                   :adjustable t :fill-pointer 0))
-               (sep-len (length sep)))
-           (loop for char = (read-char stream nil nil)
-                 while char
-                 do (vector-push-extend char result)
-                 when (and (>= (length result) sep-len)
-                           (string= result sep
-                                    :start1 (- (length result) sep-len)))
-                 do (loop-finish))
-           (if (zerop (length result)) nil (subseq result 0)))))
+         (%p-with-record-buffer (result)
+                                (let ((sep-len (length sep)))
+                                  (loop for char = (read-char stream nil nil)
+                                        while char
+                                        do (vector-push-extend char result)
+                                        when (and (>= (length result) sep-len)
+                                                  (string= result sep
+                                                           :start1 (- (length result) sep-len)))
+                                        do (loop-finish))
+                                  (if (zerop (length result)) nil (subseq result 0))))))
     ;; Any stream error (e.g. reading from a directory) → nil like perl, AND
     ;; `$!` set the way perl sets it: %p-read-fail names EISDIR for a
     ;; directory handle and leaves $! alone for anything else (task #1237).
