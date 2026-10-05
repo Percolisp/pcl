@@ -4095,9 +4095,13 @@ sub handle_subcalls {
       # no handle slot: under `no strict subs` perl passes the TEXT
       # (`foo(STDERR)` is "STDERR"), where the plain Word emitted the handle's
       # CL symbol and the load died "unbound variable" (task #2664).
-      $now->{_bareword_string} = 1
-          if !$self->environment->has_pragma('strict_subs')
-             && $self->_is_sole_call_argument($now, 1);
+      # (A fresh token carries the mark: the verdict is this parse's own.)
+      if (!$self->environment->has_pragma('strict_subs')
+          && $self->_is_sole_call_argument($now, 1)) {
+        my $w = PPI::Token::Word->new($now->content);
+        $w->{_bareword_string} = 1;
+        $e->[$i] = $w;
+      }
       next;
     }
 
@@ -4620,7 +4624,13 @@ sub handle_subcalls {
           && !($self->has_environment
                && $self->environment->has_pragma('strict_subs'))
           && $self->_is_sole_call_argument($now)) {
-        $now->{_bareword_runtime} = 1;
+        # A FRESH token carries the mark, never the shared PPI Word: the
+        # verdict is this parse's, and a later parse of the same statement
+        # (after a nested `sub inner` is registered) answers `yes` and must
+        # build the call from an unmarked Word (parser2-01.t row 164).
+        my $w = PPI::Token::Word->new($now->content);
+        $w->{_bareword_runtime} = 1;
+        $e->[$i] = $w;
         next;
       }
       # ALL-CAPS words are filehandles/constants — leave as funcalls.  ASCII
