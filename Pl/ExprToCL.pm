@@ -3004,19 +3004,6 @@ sub gen_funcall_form {
     return $self->_wrap_wantarray_ctx_form($call, $ctx);
   }
 
-  # join always evaluates its list arguments in list context.
-  # THE FACT is `Config::core_arg_context`'s (join's prototype is `$@`: the
-  # separator SCALAR, the tail LIST), and since #2004 that annotation is what
-  # makes a context-sensitive callee in the tail carry its own bind.  This
-  # call-wide bind is nevertheless LOAD-BEARING until #2803: a hash
-  # assignment with a non-literal right-hand side (`join ':', %h = (1) x 8`)
-  # has no context bind of its own and reads the bind from here (measured
-  # s510: without it that row answers 8, perl `1:1`).  Delete it only when
-  # every hash assignment binds its own context.
-  if ($func_name eq 'join') {
-    return Pl::CLForm::ctx_bind('t', $call);
-  }
-
   # do FILE: same ctx-wrap as a user sub (do is a built-in, so it needs an
   # explicit case ahead of the bare built-in return below).
   if ($func_name eq 'do') {

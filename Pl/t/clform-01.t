@@ -75,8 +75,12 @@ EOT
 
 like($fc, qr/\(pl-two \(p-scalar \@a\) 3\)/,
      'funcall form: prototype $-slot imposes (p-scalar @a), literal skipped');
-like($fc, qr/\(p-list-ctx \(p-join "," 1 2\)\)/,
-     'funcall form: join gets its list-context bind');
+# s510c (#2775 member 3): join never reads its context and its tail's LIST
+# context is the argument annotation's (#2004), so the call-wide
+# `(p-list-ctx (p-join …))` bind is gone; perl's `join(",", 1, 2)` is "1,2"
+# and so is PCL's (Pl/t/ctx-bind-01.t carries the behaviour rows).
+like($fc, qr/\(p-my-= \$j\S* \(p-join "," 1 2\)\)/,
+     'funcall form: join is emitted bare (no call-wide list-context bind)');
 like($fc, qr/\(p-print :fh 'STDERR "e"\)/,
      'funcall form: print filehandle marker passes through untouched');
 like($fc, qr/\(p-print \$_\)/,
