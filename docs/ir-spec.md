@@ -779,7 +779,8 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   bareword), and a name imported past the export scan is still called because
   the image answers.  A registered FILEHANDLE name as a whole element of such a
   call's argument list (`foo(STDERR)`, `foo(FH, 1)`) is its text.  A BUILTIN
-  callee (`length(abc)`) and a name only a run-time glob assignment creates
+  callee -- any perl keyword, `length(abc)` as much as `pipe(R, W)`, whose
+  bareword operands are handles -- and a name only a run-time glob assignment creates
   keep the call reading.  Under `use strict` nothing changes.
 
 - **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
