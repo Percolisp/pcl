@@ -1098,6 +1098,9 @@ No row is slower outside the band.  The round's stop rule PASSED on its second m
 
 FLAGS: #2720 (`$_[0] .= X` in a sub called once per append stays quadratic, main too), #2722 (a read other than `length` of a `:memfh` / `:strbuf` cell after each write still copies: the `substr` row above), #2723 (an end-anchored regex on a growing string -- the engine, not the store), #2721 (`tied($RS)` under English answers the shim's object; a divergence, not perf).
 
+### 0.2x Round 40 movers (2026-10-06) -- typed string copy, grep snapshot, unshift raw topic, print shortcut (s510p; #2770, #2772, #2773, #2771 B1)
+Final whole table (`scratch/s510p/bench-final.log`, runtime A/B on 0b401b91's emission, BENCH_K=5 interleaved, load 1.8-2.0; change / its control): catmod -50.8/+1.0, catself -51.5/+0.9, joinarr -44.7/-1.3, listdeclcat -34.1/+1.6, grepcnt -32.0/+4.0, unshiftq -15.0/+2.2 (runtime half only; with the emission -38.9/-3.9), fhprint -9.7/-0.7.  Slower than their control: cfor +7.0/-1.9, pushloc +7.4/+2.3, sortnum +8.0/-10.2, regexg +5.4/+0.5 (none touches the changed code; the table's control spread is up to 17 %, re-measure before reading them as real).  NOT shipped: grep's counting form (context is compile-time only), print B2 (#813), the N-scalar print entry.
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and

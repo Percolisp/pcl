@@ -114,6 +114,8 @@ form (`if (grep { … } @list)`, `my $n = grep …`) is everywhere in ordinary c
 `unshift @a, $_` allocates a box per element (`push` stores it raw) and shifts through generic
 `replace`.  Small; expected −25 % on `unshiftq`.
 
+**Measured by round 40 (s510p):** lever A catmod -51 %, catself -52 %, joinarr -45 %, listdeclcat -34 %, lcbytes no gain; lever C grepcnt -32 %; lever D unshiftq -39 % (the box was the loop's `$_`, fixed on the raw-topic list); lever B B1 fhprint -8..-10 % -- the box in the print profile is the LOOP's `$_` box, and removing it is #813, declined.
+
 ### Found on the way (not a lever, a bug with a cost)
 
 A regex anchored at the END of a string (`/9\n\z/`) scans from the start: appending a line and testing
