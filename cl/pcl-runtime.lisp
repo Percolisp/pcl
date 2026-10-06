@@ -26346,7 +26346,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; fasl identity in the filename, the same `*pcl-fasl-build*` discipline (so
 ;;; compile-file compiles the body WITHOUT running it and the fasl's load runs
 ;;; it once, in source order — the rule that already stops the #1060 "ran the
-;;; program at build time" shape), the same prune.  Three things are new, and
+;;; program at build time" shape), the same prune.  One thing differs from a
+;;; module: the run that BUILDS a script's fasl runs its TEXT and compiles
+;;; after the program has ended (task #2702, %P-RUN-EXIT-BUILD).  Three things are new, and
 ;;; each is a guard row in Pl/t/script-cache-01.t:
 ;;;
 ;;;   1. THE INCLUDE PATH IS IN THE KEY.  A module's key is its path; a
@@ -26437,9 +26439,8 @@ buffer's fill-pointer; everything else falls back to file-length."
        module cache into a script-run population and an everything-else one.
        Measured: `use Carp` from a cached script wrote entries no `pcl -e`
        run could reach.
-     * on a MISS, the program's own `use` statements, which run at
-       COMPILE-FILE time because that is what creates a module's package
-       before the reader meets a symbol in it.
+     * on a MISS, the transpile itself (pl2cl resolves every `use`), and
+       anything the text load reaches before the preamble's own /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3 /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3 form.
 
    So `pcl` hands over the search path its preamble is ABOUT to set, in the
    same order, and it is in force only until the preamble replaces it.  The
@@ -26510,7 +26511,10 @@ buffer's fill-pointer; everything else falls back to file-length."
            (< (sb-kernel:dynamic-usage)
               (* *p-exit-build-heap-fraction* (sb-ext:dynamic-space-size)))))
     (or (room-p)
-        (progn (sb-ext:gc :full t) (room-p)))))
+        (progn (sb-ext:gc :full t) (room-p))
+        (progn (%p-fasl-note "PCL: fasl at exit SKIPPED: ~D of ~D bytes of heap live~%"
+                             (sb-kernel:dynamic-usage) (sb-ext:dynamic-space-size))
+               nil))))
 
 (defun %p-exit-build-allowed-p (spec)
   "Every guard of the deferred build, each from a probe (task #2702):
@@ -26550,10 +26554,11 @@ buffer's fill-pointer; everything else falls back to file-length."
       (let ((*p-in-end-phase* t)
             (*p-end-phase-pid* (sb-posix:getpid))
             (*p-exit-status* *p-exit-status*))
-        (handler-case
-            (catch '%p-end-exit
-              (%p-build-module-fasl (second spec) (third spec)))
-          (serious-condition () nil))))))
+        (%p-fasl-note "PCL: fasl at exit ~:[FAILED~;built~]~%"
+                      (handler-case
+                          (catch '%p-end-exit
+                            (%p-build-module-fasl (second spec) (third spec)))
+                        (serious-condition () nil)))))))
 
 (defun %p-load-script-text (lisp-path)
   "Load a script's cached CL TEXT — the fallback when there is no fasl, or

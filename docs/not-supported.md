@@ -4042,3 +4042,26 @@ table; one parser, `tools/lib/PCLSwitches.pm`).  What remains different:
   `name='UNKNOWN';`, never an invented value.
 * **`PERL5OPT`** is not read by `pcl` (task #2663; the harness wrapper
   `tools/pclperl-for-tests` does read it).
+
+## The first run of a program: a second `import`, and programs that never end ordinarily (s510f, #2702)
+
+`pcl prog.pl` keeps a compiled file per program.  The run that finds none runs
+the program from its transpiled text — every module body, BEGIN block and line
+once, in perl's order — and builds the compiled file after the program has
+ended, in the same process (ir-spec §9, "THE BUILDING RUN RUNS THE TEXT").  Two
+things stay different from perl:
+
+* **An `import` with an external side effect happens twice on that run.**  The
+  build compiles the program's text, and a compile-time `use M` calls
+  `M->import` again (the module itself is already loaded, so its body does not
+  run again).  The second call comes AFTER the program, with STDOUT and STDERR
+  pointed at `/dev/null`, and an `exit` or a die inside it ends the build only.
+  An import that writes a file, takes a lock or reads STDIN does so a second
+  time.  Every later run is perl's.  Owner: #2702.
+* **A program that never ends in an ordinary way is never cached.**  The build
+  runs only at an ordinary exit: the end of the program, `exit N`, or an
+  uncaught run-time die, in the process that started the program, after its
+  compile phase.  A daemon stopped by a signal, a wrapper that always `exec`s,
+  `POSIX::_exit`, a program that always leaves inside BEGIN, or one that holds
+  more than half the heap at exit starts from its text every time — correct,
+  only slower to start.  Owner: #2702.

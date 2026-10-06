@@ -4584,6 +4584,30 @@ must see. Three rules are the script's own:
    switches (`PCL_NO_FASL_CACHE`, a `PCL_NO_COMPILE_DIRS` match,
    `--no-cache`) still apply.
 
+**THE BUILDING RUN RUNS THE TEXT** (normative, s510f, task #2702; design
+`docs/first-run-from-text-design-s510.md`). A run that finds no valid fasl for
+the script transpiles it if needed, then LOADS ITS TEXT (the one text loader,
+`%p-load-text-stream`, from a stream: a die prints no SBCL herald) — so every
+module body, BEGIN block and line of the program runs once, in perl's order.
+The fasl is compiled from that text AFTER the program, in the same image, as
+the last act of the END phase (`%p-run-exit-build`, called from the tail of
+`%p-run-end-phase` — not a separate exit hook, because a nested `sb-ext:exit`
+inside an exit hook skips every later hook, and the END phase exits that way
+whenever an END block changed `$?`). The build happens only when the exit is
+ordinary (end of program, `exit N`, an uncaught run-time die — a signal,
+`POSIX::_exit` and `exec` run no exit hook), in the process that started the
+program (not a fork child), after the main program's compile phase completed
+(`BEGIN { exit }` never loads what perl never loads), and with less than half
+the dynamic space live after a full GC. Before it, every handle is flushed
+and fds 1 and 2 point at `/dev/null` (fd 2 is kept under `PCL_FASL_DEBUG`), so
+a reader on a pipe sees end-of-file when the program is done. It can never
+change the outcome: every serious condition is handled, an `exit` an import
+calls during the compile ends the build only, and the process leaves with
+the program's status. Example: `BEGIN { print "b\n" } use M;` where `M`'s
+body prints `m` prints `b`, `m` on its first run as on every later one.
+`pcl --no-cache`, `-e`, a script from STDIN and `-n`/`-p` run their temporary
+text through the same loader (`%p-load-script-text`).
+
 `pcl -e`, a file run with `-M` prefixes and `pcl -c` are not cached: the
 first two have a fresh temp path per run (content-keying them is task
 #1862), and `-c` must transpile and not run.
