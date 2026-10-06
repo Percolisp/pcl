@@ -16352,9 +16352,32 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (hash-table-p a)
            (%p-hash-marker-p a))))
 
+(defun %p-separator-text (sep)
+  "The text the print separator SEP ($, or $\\ — the variable's box, or say's
+   newline string) contributes, or NIL for none.  perl uses a separator when
+   it is DEFINED and stringifies it (task #2778): `$, = 0` puts \"0\" between
+   the elements and `$\\ = 0` ends the line with \"0\" (probed 5.40.3), where
+   the old STRINGP test treated every number as unset.  An empty string
+   contributes nothing either way.
+
+   The BOX is stringified, not its unboxed value, because an object's class
+   lives on the box: `$, = Ov->new` with a `\"\"` overload separates with the
+   overload's text, the unboxed referent would print HASH(0x…).  A tied or
+   magic separator is read ONCE (one FETCH) and that value is stringified."
+  (let ((v (unbox sep)))
+    (cond ((stringp v) (and (plusp (length v)) v))
+          ((not (%pcl-definedp v)) nil)
+          (t (let ((s (if (and (p-box-p sep)
+                               (let ((raw (p-box-value sep)))
+                                 (or (p-tie-proxy-p raw) (p-magic-cell-p raw))))
+                          (to-string v)
+                          (to-string sep))))
+               (and (plusp (length s)) s))))))
+
 (defun %p-write-list (fh args ors site)
   "Write ARGS — a print/say LIST — to FH: $, between successive elements, then
-   ORS when it is a non-empty string.  `print` passes the current $\\; `say`
+   ORS — each when DEFINED and not empty (%p-separator-text, task #2778: a
+   NUMBER counts).  `print` passes the $\\ box; `say`
    passes \"\\n\", because perl's say appends a newline INSTEAD of $\\, never as
    well as it (task #500, probed s442d: `$\\ = \"<O>\"; say \"x\"` prints \"x\\n\").
    perl does NOT localize $\\ over say — an overload/tie handler that runs while
@@ -16371,16 +16394,16 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
    SITE is the operator name the wide-character warning uses (#1115)."
   (%p-guarded-write site
-                    (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
+                    (let ((ofs (%p-separator-text |$,|))
                           (firstp t))
                       (dolist (arg (if (every #'%p-print-arg-plain-p args)
-                                     args
-                                     (coerce (p-flatten-args args) 'list)))
+                                       args
+                                       (coerce (p-flatten-args args) 'list)))
                         (when (and ofs (not firstp)) (%p-out-string ofs fh site))
                         (setf firstp nil)
                         (%p-out-string (to-string arg) fh site)))
-                    (when (and (stringp ors) (plusp (length ors)))
-                      (%p-out-string ors fh site))
+                    (let ((ors (%p-separator-text ors)))
+                      (when ors (%p-out-string ors fh site)))
                     (%p-maybe-autoflush fh)
                     t))
 
@@ -16389,7 +16412,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (multiple-value-bind (fh rest) (%p-out-target args "print")
     ;; NIL = perl already warned (or died); the write does not happen.
     (unless fh (return-from p-print *p-undef*))
-    (%p-write-list fh rest (unbox |$\\|) "print")))
+    (%p-write-list fh rest |$\\| "print")))
 
 (defun p-say (&rest args)
   "Perl say - print with \"\\n\" appended INSTEAD of $\\ (task #500)"

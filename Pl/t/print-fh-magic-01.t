@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 37;
+plan tests => 38;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -634,3 +634,27 @@ PL
     unlike($plain, qr/'\S*hostname/,
            'a plain open\'s third argument is untouched by the dup rule');
 }
+
+# Task #2778: the output separators $, and $\ are used when DEFINED, and a
+# NUMBER is defined -- `$, = 0` printed "AB" where perl prints "A0B" (the
+# separator was tested with STRINGP).  An object's "" overload is honoured,
+# a reference stringifies, local restores, and printf never reads either.
+# Expected text probed on perl 5.40.3.
+is run_cl(<<'PL'),
+use feature 'say';
+package Ov { use overload '""' => sub { "<ov>" }, fallback => 1; sub new { bless {}, shift } }
+package main;
+for my $v (0, 0.0, 1, 0.5, "0", "", undef) {
+  { local $, = $v; print "[", "A", "B"; print "]\n"; }
+  { local $\ = $v; print "C"; } print "|";
+  { local $, = $v; local $\ = $v; say "I", "J"; }
+}
+{ local $, = Ov->new; local $\ = Ov->new; print "x", "y"; } print "\n";
+{ local $, = [1]; my $s = ""; open my $h, ">", \$s; print $h "a", "b"; close $h; print $s =~ /^aARRAY\(0x[0-9a-f]+\)b$/ ? "ref ok\n" : "ref bad\n"; }
+$, = 0; { local $, = "-"; print "L", "M"; } print "N", "O"; $, = undef; print "\n";
+$\ = 0; { local $\; print "P"; } print "Q"; $\ = undef; print "\n";
+{ local $, = 0; local $\ = 0; printf("%s|%s", "R", "S"); } print "\n";
+PL
+   "[0A0B]\nC0|I0J\n[0A0B]\nC0|I0J\n[1A1B]\nC1|I1J\n[0.5A0.5B]\nC0.5|I0.5J\n"
+ . "[0A0B]\nC0|I0J\n[AB]\nC|IJ\n[AB]\nC|IJ\nx<ov>y<ov>\nref ok\nL-MN0O\nPQ0\nR|S\n",
+   '$, and $\\ are used when DEFINED: the number 0 separates and terminates (#2778)';
