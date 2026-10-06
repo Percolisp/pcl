@@ -1278,9 +1278,16 @@ produces a string of at least 200 characters, the text moves into a PRIVATE
 adjustable buffer that grows geometrically, and the box holds a magic cell of
 kind `:strbuf`: reads answer a simple-string snapshot taken once after each
 append, a write of the scalar stores plainly (the cell is gone), `length`
-reads the live buffer of a `:strbuf` or `:memfh` cell without a snapshot.  A
-shorter result is the plain concatenation.  The right side of `.=` is
-evaluated BEFORE the left side is read (perl's order).  No runtime store is
+reads the live buffer of a `:strbuf` or `:memfh` cell without a snapshot — of a
+scalar and of a hash / array element alike.  A
+shorter result is the plain concatenation.  perl's order holds: the place's
+index / key operand is read FIRST (once — a variable as a value snapshot when the
+right side could change it: `$a[$i] .= ++$i` appends to `$a[0]`), then the right
+side runs, then the element's current value is read and appended.  ONE
+divergence remains: when the right side DELETES the element or replaces the
+whole container, perl appends to the detached element (the hash stays empty,
+the array keeps its new contents) while PCL, whose raw elements have no
+detachable cell, re-reads the slot and stores into the live container.  No runtime store is
 trusted to copy: a raw lexical slot retains a value with a plain SETF, so a
 buffer that a scalar held directly could be kept by one.  Every RETAINING
 store still keeps a SIMPLE string (`make-p-box`, `box-set`,

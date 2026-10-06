@@ -11305,7 +11305,29 @@ per element."
     `(setf ,p ,(%compound-arith-form
                 '%p-compound-.-slow
                 (lambda (c d) `(concatenate 'string (to-string ,c) (to-string ,d)))
-                p v))))
+                p v)))
+
+  (defun %p-.=-operand-form (form value)
+    "FORM, the index / key operand of an element `.=`, as perl reads
+     it: BEFORE VALUE runs.  A plain variable (a symbol) is bound by the
+     caller to a temp, but a temp holding the variable's BOX still reads late
+     -- `$a[$i] .= ++$i` appended to $a[1] -- so when VALUE could change it
+     (anything but a literal or a plain variable read) the operand is taken
+     as a value snapshot.  Every other FORM is returned unchanged (s507p F1)."
+    (if (and (symbolp form) form (not (keywordp form))
+             (not (or (symbolp value) (stringp value) (numberp value)
+                      (and (consp value) (eq (car value) 'p-esc)))))
+        `(%p-operand-snapshot ,form)
+        form)))
+
+(defun %p-operand-snapshot (x)
+  "A box X's current value as a value nothing can change later (a raw value
+   for a plain scalar, a fresh copy for a ref / blessed / dualvar box); a
+   non-box X is already one.  See %p-.=-operand-form."
+  (cond ((not (p-box-p x)) x)
+        ((and (null (p-box-class x)) (not (p-box-is-ref x)) (not (%pcl-dualvar-p x)))
+         (unbox x))
+        (t (p-copy-scalar-arg x))))
 
 (defmacro p-.= (place value)
   "Perl .= (concat-assign).  A scalar box, a hash / array ELEMENT or a deref
@@ -11318,7 +11340,7 @@ per element."
     (cond
       ((and (%p-elem-place-p place) (member (car place) '(p-gethash p-aref)))
        (%p-vivified-elem-form
-        place
+        (list (car place) (cadr place) (%p-.=-operand-form (caddr place) value))
         (lambda (p)
           `(let ((,v ,value))
              (or (,(if (eq (car p) 'p-gethash) '%p-hash-append '%p-array-append)
@@ -11329,7 +11351,7 @@ per element."
               (k (gensym "K"))
               (p `(,(car place) ,r ,k ,@(cdddr place))))
          `(let* ((,r ,(cadr place))
-                 (,k ,(caddr place))
+                 (,k ,(%p-.=-operand-form (caddr place) value))
                  (,v ,value))
             (or (,(if (eq (car place) 'p-gethash-deref) '%p-hash-append '%p-array-append)
                   ,r ,k ,v)

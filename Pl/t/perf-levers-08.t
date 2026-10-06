@@ -398,4 +398,26 @@ PERL
 5
 EXPECTED
 
+answers(<<'PERL', <<'EXPECTED', '#2115 (s509 review F1): PLACE .= VALUE reads a variable index / key BEFORE the value runs, below and above the buffer threshold');
+for my $len (0, 300) {
+  my $p = "p" x $len;
+  my @a = ("${p}z", "${p}y"); my $i = 0; $a[$i] .= ++$i; print length($a[0]), substr($a[0], -2), " ", length($a[1]), substr($a[1], -1), " i=$i\n";
+  my %h = (a => "${p}q", b => "${p}r"); my $key = "a"; $h{$key} .= ($key = "b"); print substr($h{a}, -2), " ", substr($h{b}, -2), "\n";
+  my $r = ["${p}m", "${p}n"]; my $n = 0; $r->[$n] .= ++$n; print substr($r->[0], -2), " ", substr($r->[1], -2), "\n";
+  my @l = ("${p}one\\", "two", "three"); my $j = 0; $l[$j] .= $l[++$j]; print substr($l[0], -5), " $j\n";
+  my %o = (k => "${p}x"); my $kk = "k"; my $v = "V"; $o{$kk} .= $v; $o{$kk} .= "L"; print substr($o{k}, -3), "\n";
+}
+PERL
+2z1 1y i=1
+qb r
+m1 n
+e\two 1
+xVL
+302z1 301y i=1
+qb pr
+m1 pn
+e\two 1
+xVL
+EXPECTED
+
 done_testing();
