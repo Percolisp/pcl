@@ -11942,9 +11942,13 @@ my %TOPIC_RAW_WORD = map { $_ => 1 } qw(
   my our if elsif else unless while until for foreach last next redo return
   and or not xor eq ne lt gt le ge cmp x
   abs int sqrt hex oct ord chr length uc lc ucfirst lcfirst
-  scalar defined exists delete keys values ref reverse push
+  scalar defined exists delete keys values ref reverse push unshift
   sprintf join index rindex sin cos atan2 exp log
 );
+# `unshift` joined `push` in s510p (task #2773): it COPIES each operand into a
+# new slot exactly as push does (the one %p-array-store-scalar rule), so a raw
+# $_ is invisible to it -- and without it `unshift @a, $_ for 1..$n` boxed $_
+# on every iteration (14 % of the unshiftq row).
 # NOT on the list, and each for a reason worth keeping written down:
 #   substr  — 4-arg substr($_,0,1,"x") writes THROUGH its first argument, and
 #             the lvalue spelling only sometimes trips the write-list gate

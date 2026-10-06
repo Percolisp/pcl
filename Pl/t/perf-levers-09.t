@@ -74,6 +74,12 @@ sub lisp_out {
 # ─────────────────────────────────────────────────────────────────────────────
 like(lisp_out(q{(progn (print (not (null (fboundp '%p-concat-2)))) (let ((d (make-string 6 :initial-element #\-))) (%pcl-str-blit d 0 (coerce "ab" 'simple-base-string) 2) (%pcl-str-blit d 2 (make-array 2 :element-type 'character :initial-contents "cd" :adjustable t) 2) (%pcl-str-blit d 4 (copy-seq "ef") 2) (print d)))}), qr/\Q\E\n\Qt \E\n\Q"abcdef" \E/, '#2770: %p-concat-2 exists; %pcl-str-blit copies a base, a non-simple and a character string');
 like(lisp_out(q{(let ((a (make-array 3 :adjustable t :fill-pointer 3 :initial-contents (list 1 nil 3)))) (let ((v (%p-grep-cells a))) (print (list (simple-vector-p v) (p-box-p (aref a 0)) (eq (aref v 0) (aref a 0)) (aref a 1)))))}), qr/\Q\E\n\Q(t t t nil) \E/, '#2772: %p-grep-cells snapshots cells, promotes a raw slot in place, leaves a hole a hole');
+{
+    my $file = src_file('my $n = 3; my @a; unshift @a, $_ for 1 .. $n; print "@a\n";');
+    my $cl = PCLCore::transpile(qq{$pl2cl $file});
+    like($cl, qr/\(p-foreach-range-raw \(\$_ 1 \$n\) \(p-unshift \@a \$_\)\)/,
+         '#2773: `unshift @a, $_ for 1..$n` binds $_ raw (p-foreach-range-raw), as push does');
+}
 answers(<<'END_SRC', <<'END_EXP', '#2770 answers: .=, ., join, interpolation, lc.uc.ucfirst, :strbuf appends, overloaded .');
 use utf8; binmode STDOUT, ':utf8';
 my $s = ''; $s .= 'xy' for 1..5; $s .= "é" x 20; $s .= substr("abcdefghijklmnopqrstuvwxyz0123", 3, 20);
@@ -150,6 +156,40 @@ err=boom
 ret=7
 tied=2
 refs=2
+END_EXP
+answers(<<'END_SRC', <<'END_EXP', '#2773 answers: unshift in raw loops, aliasing, refs, self, tied, local, return value');
+my @a; unshift @a, $_ for 1 .. 5; print "@a\n";
+$_ *= 2 for @a; print "@a\n";
+my @b; for (1 .. 3) { unshift @b, $_ } $b[0] = 'x'; print "@b\n";
+my @c; for (1 .. 3) { unshift @c, $_; $_ = 0 if 0 } my $r = \$c[1]; $$r = 'R'; print "@c\n";
+my @src = (1, 2, 3); my @d; for (@src) { unshift @d, $_ } $src[0] = 9; print "@d | @src\n";
+my @e = (1, 2); unshift @e, @e; print "@e\n";
+my @f; unshift @f; print scalar(@f), "\n";
+my @g; for (1 .. 3) { unshift @g, $_, "s$_", [$_] } print join(',', map { ref $_ ? "[$$_[0]]" : $_ } @g), "\n";
+my @h = (0); for (1 .. 4) { unshift @h, $_ * 1.5 } print "@h\n";
+our @l = (1); sub show { print "@l\n" } { local @l = (); unshift @l, $_ for 1 .. 3; show() } show();
+package T; sub TIEARRAY { bless { a => [] } } sub FETCH { $_[0]{a}[$_[1]] } sub FETCHSIZE { scalar @{$_[0]{a}} }
+sub UNSHIFT { my $s = shift; unshift @{$s->{a}}, map { "t$_" } @_ } sub STORE { $_[0]{a}[$_[1]] = $_[2] } sub STORESIZE {} sub EXTEND {}
+package main; tie my @t, 'T'; unshift @t, $_ for 1 .. 3; print join(',', map { $t[$_] } 0 .. 2), "\n";
+my $cnt = 0; for (1 .. 1000) { unshift @a, $_ } print scalar(@a), " $a[0] $a[-1]\n";
+my @m; for (1 .. 3) { my $x = unshift @m, $_; print "$x " } print "\n";
+my @w = (1); for (1 .. 2) { unshift @w, "$_" . "x" } print "@w\n";
+END_SRC
+5 4 3 2 1
+10 8 6 4 2
+x 2 1
+3 R 1
+3 2 1 | 9 2 3
+1 2 1 2
+0
+3,s3,[3],2,s2,[2],1,s1,[1]
+6 4.5 3 1.5 0
+3 2 1
+1
+t3,t2,t1
+1005 1000 2
+1 2 3 
+2x 1x 1
 END_EXP
 
 done_testing();
