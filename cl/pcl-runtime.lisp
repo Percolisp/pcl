@@ -2423,12 +2423,12 @@
   (let ((file (sb-posix:getenv "PCL_STRBUF_AUDIT")))
     (when (and file (plusp (length file)))
       (with-open-file (o file :direction :output :if-exists :append
-                              :if-does-not-exist :create)
+                         :if-does-not-exist :create)
         (let ((*print-pretty* nil))
           (format o "~A ~S ~{~S~^ < ~}~%" arm (type-of v)
                   (mapcar (lambda (f) (if (consp f) (car f) f))
                           (ignore-errors
-                           (subseq (sb-debug:list-backtrace :count 7) 1)))))))))
+                            (subseq (sb-debug:list-backtrace :count 7) 1)))))))))
 
 (declaim (inline %p-own-string))
 (defun %p-own-string (v)
@@ -11189,7 +11189,7 @@ per element."
   "Put a :strbuf cell over a private copy of TEXT into BOX."
   (let* ((n (length text))
          (buf (make-array (max 256 (* 2 n)) :element-type 'character
-                                            :adjustable t :fill-pointer n))
+                          :adjustable t :fill-pointer n))
          (sb (%make-p-strbuf buf)))
     (replace buf text)
     (setf (p-box-value box)
@@ -11322,7 +11322,7 @@ per element."
         (lambda (p)
           `(let ((,v ,value))
              (or (,(if (eq (car p) 'p-gethash) '%p-hash-append '%p-array-append)
-                  ,(cadr p) ,(caddr p) ,v)
+                   ,(cadr p) ,(caddr p) ,v)
                  ,(%p-concat-store-form p v))))))
       ((and (consp place) (member (car place) '(p-gethash-deref p-aref-deref)))
        (let* ((r (gensym "R"))
@@ -11332,7 +11332,7 @@ per element."
                  (,k ,(caddr place))
                  (,v ,value))
             (or (,(if (eq (car place) 'p-gethash-deref) '%p-hash-append '%p-array-append)
-                 ,r ,k ,v)
+                  ,r ,k ,v)
                 ,(%p-concat-store-form p v)))))
       ((and (consp place) (eq (car place) (quote p-cast-$)))
        (let* ((e (gensym "E"))
@@ -12494,6 +12494,47 @@ per element."
         ;; so an in-range read costs exactly what it did before.
         ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
         (t *p-undef*)))))
+
+;;; `length($h{K})` / `length($a[I])` (s507p, #2115): an element whose slot
+;;; box holds a private-buffer cell (:strbuf, :memfh) answers its LIVE length,
+;;; as p-length does for a scalar box -- reading the element would take a
+;;; snapshot per call, so append + length per iteration was quadratic.  The
+;;; two helpers take p-gethash's / p-aref's FAST ARM verbatim (a plain
+;;; element pays one p-box-p test more) and hand every other shape to the
+;;; ordinary read.  Compiler macro for p-refgen-list's reason: p-length is a
+;;; function.
+(defun %p-slot-live-length (slot)
+  "The live length of a slot BOX holding a private-buffer cell; NIL else."
+  (and (p-box-p slot)
+       (p-magic-cell-p (p-box-value slot))
+       (%p-cell-live-length (p-box-value slot))))
+
+(defun %p-length-helem (hash key)
+  "length(p-gethash HASH KEY), without the snapshot of a buffer cell."
+  (if (and (hash-table-p hash) (stringp key))
+      (multiple-value-bind (val found) (gethash key hash)
+        (if found
+            (or (%p-slot-live-length val) (p-length (%p-hash-unbox-elem val)))
+            (p-length (%p-hash-miss hash key))))
+      (p-length (p-gethash hash key))))
+
+(defun %p-length-aelem (arr idx)
+  "length(p-aref ARR IDX), without the snapshot of a buffer cell."
+  (if (and (typep idx 'fixnum) (>= (the fixnum idx) 0)
+           (vectorp arr) (not (stringp arr))
+           (< (the fixnum idx) (length arr)))
+      (let* ((d (%p-vec-data arr))
+             (e (if d (svref d idx) (aref arr idx))))
+        (or (%p-slot-live-length e) (p-length (p-aref-unbox-elem e))))
+      (p-length (p-aref arr idx))))
+
+(define-compiler-macro p-length (&whole form val)
+  (if (and (consp val) (= (length val) 3))
+      (case (car val)
+        (p-gethash `(%p-length-helem ,@(cdr val)))
+        (p-aref `(%p-length-aelem ,@(cdr val)))
+        (t form))
+      form))
 
 ;;; Make index I valid in adjustable vector A: push nil HOLES (the deleted-
 ;;; element marker — `exists` stays false, a read gives undef, the first write

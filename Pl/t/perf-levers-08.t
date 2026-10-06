@@ -117,6 +117,21 @@ my $mech = lisp_out(<<'LISP');
       (write-string "abcd" s)
       (let ((n (p-length b)))
         (list n (null (psos-snap s)) (p-length (let ((x (make-p-box (make-string 300 :initial-element #\z)))) (%p-append-box x "q"))))))))
+(format t "elemlen ~a~%"
+  (funcall
+   (compile nil
+            '(lambda ()
+              (let ((h (make-hash-table :test 'equal))
+                    (a (make-array 1 :adjustable t :fill-pointer 1 :initial-element "")))
+                (setf (gethash "u" h) (make-string 250 :initial-element #\a))
+                (%p-hash-append h "u" "b")
+                (%p-array-append a 0 (make-string 250 :initial-element #\c))
+                (%p-array-append a 0 "d")
+                (let ((hsb (p-magic-cell-data (p-box-value (gethash "u" h))))
+                      (asb (p-magic-cell-data (p-box-value (aref a 0)))))
+                  (list (p-length (p-gethash h "u")) (null (p-strbuf-snap hsb))
+                        (p-length (p-aref a 0)) (null (p-strbuf-snap asb))
+                        (p-length (p-gethash h "none")) (p-length (p-aref a 5)))))))))
 LISP
 like($mech, qr/^clearpos T$/mi,
      '#2539: box-set\'s two pos() resets share %p-clear-match-pos');
@@ -132,6 +147,8 @@ like($mech, qr/^strbuf \(STRBUF T 302 NIL\)$/mi,
      '#2115 (c): a long string appended with .= lives in a :strbuf cell whose reads are simple snapshots; a short one stays plain');
 like($mech, qr/^livelen \(4 T 301\)$/mi,
      '#2111 / #2115: length() of a :memfh or :strbuf scalar reads the live buffer and takes no snapshot');
+like($mech, qr/^elemlen \(251 T 251 T UNDEF UNDEF\)$/mi,
+     '#2115: length($h{k}) / length($a[i]) of a :strbuf element reads the live buffer and takes no snapshot; a missing element is undef');
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ANSWERS (perl's)
@@ -363,6 +380,22 @@ SCALAR viv
 died: not scalar ref
 abcdeXYfghij
 1 Z
+EXPECTED
+
+answers(<<'PERL', <<'EXPECTED', '#2115: length() of a hash / array ELEMENT that holds a buffer cell is the live length; copies, plain, missing and in-memory-handle elements keep perl\'s answers');
+my %h = (n => 12345, s => "abc", e => ""); my @a = (12345, undef, "xy");
+print join(",", map { defined length($h{$_}) ? length($h{$_}) : "U" } qw(n s e none)), " ",
+      join(",", map { defined length($a[$_]) ? length($a[$_]) : "U" } 0, 1, 2, 9, -1), "\n";
+$h{b} = "q" x 250; $h{b} .= "x" for 1..10; my $c = $h{b}; $h{b} .= "more"; print length($c), " ", length($h{b}), "\n";
+$a[5] = "w" x 250; $a[5] .= "yz" for 1..3; print length($a[5]), " ", length($a[-1]), "\n";
+open my $fh, '>', \$h{m} or die; print $fh "abcdef"; print length($h{m}), " "; print $fh "gh"; print length($h{m}), "\n"; close $fh;
+$h{b} = "short"; print length($h{b}), "\n";
+PERL
+5,3,0,U 5,U,2,U,2
+260 264
+256 256
+6 8
+5
 EXPECTED
 
 done_testing();
