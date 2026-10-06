@@ -127,12 +127,23 @@ built; an uncaught die — status preserved, file built; `END { exit 5 }` — sa
 |---|---|---|---|
 | 60 lines, two `use`s | 1.56 – 1.67 | 0.61 – 0.70 | 0.05 – 0.07 |
 | 1026 lines, two `use`s | 8.39 – 8.61 | 8.87 – 9.64 | 0.06 – 0.07 |
+| 3 lines, `use Getopt::Long` | 6.25 – 7.16 | 0.43 – 0.44 | 0.09 – 0.11 |
 
 The program's output appears at once instead of after the compile; the wait moves to the
 end of the run.  A hot loop is as fast on the first run as on later ones (30 million
 iterations: 0.41 s first run, 0.21 s second, 0.45 s today's first run) — the text path runs
-compiled code.  NOT EXPLAINED: why the small program's first run is faster than today's;
-the implementer explains it from `PCL_FASL_DEBUG` timings before quoting any of this.
+compiled code.
+
+**Why the first run gets FASTER when the program uses modules** (time-stamped with
+`PCL_FASL_DEBUG=1`): today the `use` statements run inside the compile of the program's
+file, and a module loaded there is loaded from its TEXT (`module POSIX.pm -> TEXT`), every
+time, although its compiled file is in the cache.  That is the first-run cost the README
+describes ("5.3 seconds for a script using Getopt::Long") and the parked task #2420.  A
+text run loads modules the ordinary way (`module POSIX.pm -> FASL HIT`), and the build at
+exit finds them loaded.  So the design removes that cost as a side effect, whenever the
+modules' own compiled files exist.  The 1026-line row shows the other side: a program
+that is large itself pays its own compile twice in effect (a cheap text load, then the
+file compile), about +10 %.
 
 **Memory**: programs holding 50 – 230 MB of live strings exit with status 0 and a built
 file under the prototype, as today.  A program that exhausts the 1 GB heap dies either way.
