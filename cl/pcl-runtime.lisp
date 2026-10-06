@@ -246,7 +246,7 @@
    #:p-exception #:p-exception-object
    ;; File I/O
    #:p-scope-close #:%p-scope-close
-   #:p-open #:p-sysopen #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
+   #:p-open #:p-sysopen #:p-close #:p-eof #:p-eof-argv #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
    #:p-use-open #:p-default-layers
    ;; Socket builtins
@@ -18825,7 +18825,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "Perl eof implementation — fh must already be a symbol or stream.
    Argument-less `eof` tests the last filehandle read (Perl semantics), so it
    falls back to *p-last-read-handle* (then STDIN) rather than STDIN directly."
-  (let ((stream (if fh (p-get-stream fh) (or *p-last-read-handle* *standard-input*))))
+  (let ((stream (cond ((%p-argv-designator-p fh) *p-argv-stream*)
+                      (fh (p-get-stream fh))
+                      (t (or *p-last-read-handle* *standard-input*)))))
     ;; eof FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
     (when (and fh stream) (setf *p-last-read-handle* stream))
     ;; A closed stream reads as EOF in Perl (eof on a closed handle is true).
@@ -21154,28 +21156,58 @@ buffer's fill-pointer; everything else falls back to file-length."
               (t (when (%p-inplace-ext) (%p-inplace-begin fname))
                  (return s)))))))))
 
+(defun %p-argv-advance ()
+  "Open the next <> file as *p-argv-stream*; NIL when every file is consumed.
+   Shared by the reader and by eof() (#2703), which looks ahead the same way."
+  ;; An in-place edit still open (an explicit `close ARGV' leaves ARGVOUT
+  ;; selected until the next file opens, as perl does) is committed first.
+  (%p-inplace-finish)
+  (setf *p-argv-stream* (%p-argv-open-next))
+  ;; Every file consumed: `$.' keeps its last value, but a LATER pass of <>
+  ;; (a refilled @ARGV) counts from 1 again — perl's IOf_START (#2684).
+  (cond ((null *p-argv-stream*) (setf *p-argv-last-count* 0) nil)
+        ;; Seed the new file's $. with the cumulative count from prior files.
+        (t (setf (gethash *p-argv-stream* *p-fh-lines*) *p-argv-last-count*)
+           *p-argv-stream*)))
+
+(defun %p-argv-drop-current ()
+  "The current <> file is at EOF: close it (never STDIN), commit an in-place
+   edit, and let the next read or eof() open the next file."
+  (when (not (eq *p-argv-stream* *standard-input*))
+    (ignore-errors (close *p-argv-stream*)))
+  (%p-inplace-finish)
+  (setf *p-argv-stream* nil))
+
 (defun %p-readline-argv ()
   "Scalar-context <> : read one record across the @ARGV file sequence."
   (loop
    (unless *p-argv-stream*
-     ;; An in-place edit still open (an explicit `close ARGV' leaves ARGVOUT
-     ;; selected until the next file opens, as perl does) is committed first.
-     (%p-inplace-finish)
-     (setf *p-argv-stream* (%p-argv-open-next))
-     ;; Every file consumed: `$.' keeps its last value, but a LATER pass of <>
-     ;; (a refilled @ARGV) counts from 1 again — perl's IOf_START (#2684).
-     (unless *p-argv-stream* (setf *p-argv-last-count* 0) (return nil))
-     ;; Seed the new file's $. with the cumulative count from prior files.
-     (setf (gethash *p-argv-stream* *p-fh-lines*) *p-argv-last-count*))
+     (unless (%p-argv-advance) (return nil)))
    (let ((line (%p-readline-impl *p-argv-stream*)))   ; sets last-handle, bumps $.
      (setf *p-argv-last-count* (gethash *p-argv-stream* *p-fh-lines* 0))
      (if line
          (return line)
-         (progn                                        ; current file at EOF
-           (when (not (eq *p-argv-stream* *standard-input*))
-             (ignore-errors (close *p-argv-stream*)))
-           (%p-inplace-finish)                          ; commit in-place edit (if any)
-           (setf *p-argv-stream* nil))))))             ; advance on next turn
+         (%p-argv-drop-current)))))                  ; advance on next turn
+
+(defun %p-argv-designator-p (fh)
+  "True for `eof(ARGV)` / `eof ARGV` while <> is running: the ARGV handle IS
+   the current <> file, which lives in *p-argv-stream* (NIL between files =
+   at its end), not in the filehandle table -- that still held an earlier,
+   closed file, so the explicit spelling answered true on a line that was not
+   the last of its file (Fable review F3 on #2703)."
+  (and *p-argv-started* fh (symbolp fh)
+       (string= (symbol-name fh) (%pcl-invert-case "ARGV"))))
+
+(defun p-eof-argv ()
+  "`eof()` WITH EMPTY PARENS (#2703): the end of the pseudo-file made of every
+   <> file -- true only at the end of the LAST one.  Like perl's nextargv it
+   opens the next file to look (so $ARGV moves), and with an empty @ARGV
+   before the first read it tests STDIN.  Bare `eof` is %p-eof-impl."
+  (loop
+   (cond ((null *p-argv-stream*)
+          (when (null (%p-argv-advance)) (return t)))
+         ((%p-eof-impl *p-argv-stream*) (%p-argv-drop-current))
+         (t (return nil)))))
 
 (defun %p-readline-argv-all ()
   "List-context <> : read every remaining record across @ARGV into a vector."

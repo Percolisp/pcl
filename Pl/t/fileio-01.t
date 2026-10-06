@@ -18,7 +18,7 @@ use lib ".";
 use PPI;
 use PPI::Dumper;
 
-use Test::More tests => 40;
+use Test::More tests => 41;
 
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
@@ -143,9 +143,15 @@ test_codegen('eof($fh)',
             '(p-eof $fh)',
             'eof with filehandle');
 
+# eof() WITH EMPTY PARENS is the end of the LAST <> file (s507c #2703, perl-probed
+# in diamond-01.t row 7); it used to emit (p-eof), bare eof's form.
 test_codegen('eof()',
+            '(p-eof-argv)',
+            'eof() with empty parens is the <> pseudo-file');
+
+test_codegen('eof',
             '(p-eof)',
-            'eof without args');
+            'bare eof is the last-read handle');
 
 
 # ============================================================

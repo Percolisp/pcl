@@ -35,7 +35,7 @@ sub run_cl {
     print $cl_fh $cl_code;
     close $cl_fh;
     my $argstr = join ' ', @args;
-    my $output = `sbcl @sbcl_rt --load $cl_file $argstr 2>&1`;
+    my $output = `sbcl @sbcl_rt --load $cl_file $argstr < /dev/null 2>&1`;
     $output =~ s/^;.*\n//gm;
     $output =~ s/^caught .*\n//gm;
     $output =~ s/^compilation unit.*\n//gm;
@@ -52,7 +52,7 @@ sub test_diamond {
     my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $code;
     close $fh;
-    my $perl_out = `perl $file @args 2>&1`;
+    my $perl_out = `perl $file @args < /dev/null 2>&1`;
     my $cl_out   = run_cl($code, @args);
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
@@ -68,7 +68,7 @@ sub make_file {
 my $f1 = make_file("apple\nbanana\n");
 my $f2 = make_file("cherry\ndate\n");
 
-plan tests => 6;
+plan tests => 8;
 
 # 1: <> reads across @ARGV with cumulative $. and per-file $ARGV.
 test_diamond('<> spans @ARGV files; $. cumulative, $ARGV per-file', <<"PERL");
@@ -128,4 +128,23 @@ while (<>) { s/a/X/g; print; }
 open(my $r, '<', $f) or die; local $/; my $c = <$r>; close $r;
 print "edited=[$c] hasbak=", (-e "$f.bak" ? 1 : 0), "\n";
 unlink $f;
+PERL
+
+# 7 (#2703): `eof()` WITH EMPTY PARENS is the end of the LAST <> file; bare
+# `eof` is the end of each.  eof() looks ahead (opens the next file, so $ARGV
+# moves), skips an empty file, and is true once every file is consumed.
+my $f0 = make_file("");
+test_diamond('eof() is true only at the end of the last <> file; bare eof at each', <<"PERL");
+\@ARGV = ('$f1', '$f0', '$f2');
+while (<>) { chomp; print "\$.:\$_", (eof() ? " LAST" : ""), (eof ? " eof" : ""), "\\n"; }
+print "post:", (eof() ? 1 : 0), "\\n";
+PERL
+
+# 7b (#2703, review F3): `eof(ARGV)` / `eof ARGV` test the CURRENT <> file,
+# like bare `eof` -- not a handle-table entry still holding an earlier, closed
+# file.  INVERSE: the first #2703 build flagged `a1` (not its file's last line).
+my $f3 = make_file("c1\n");
+test_diamond('eof(ARGV) and eof ARGV are the current <> file', <<"PERL");
+\@ARGV = ('$f3', '$f1');
+while (<>) { chomp; print "\$_", (eof(ARGV) ? " E1" : ""), (eof ARGV ? " E2" : ""), (eof ? " E3" : ""), "\\n"; }
 PERL

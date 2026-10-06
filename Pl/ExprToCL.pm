@@ -2244,6 +2244,16 @@ sub gen_funcall_form {
       if ($content =~ /^-[A-Za-z_]\w*$/) {
         return qq{"$content"};
       }
+      # `eof()` WITH EMPTY PARENS is not bare `eof` (#2703): perlfunc --
+      # it tests the pseudo-file of every <> file, true only at the end of
+      # the LAST one; bare `eof` tests the last-read handle.  The parse
+      # keeps no trace of the parens, but the head is the source token,
+      # and its next sibling says it.
+      if ($content =~ /\A(?:CORE::)?eof\z/ && $func_node->can('snext_sibling')) {
+        my $nx = $func_node->snext_sibling;
+        return '(p-eof-argv)'
+          if $nx && $nx->isa('PPI::Structure::List') && !$nx->schildren;
+      }
     }
   }
 
