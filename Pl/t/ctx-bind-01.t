@@ -205,4 +205,36 @@ PU-H1 2
 PU-A1 4
 PROBED
 
+# ── #2800: `eval STRING` is bound by its own context exactly as eval BLOCK
+# is (it used to inherit the surrounding bind: `print 1, eval "(3,4)", 2` printed
+# 142).  E-print, E-subL-scalar, E-arg and E-wa-void FAIL on main before s510c;
+# E-join is the row join's call-wide bind used to hide.
+rows_agree(<<'PL', <<'PROBED', '#2800 eval STRING');
+our $g;
+sub cnt { scalar @_ }
+print "E-print ", 1, eval "(3,4)", 2, "\n";
+sub s1 { my $x = eval "(5,6,7)"; $x } my @r = s1(); print "E-subL-scalar @r\n";
+my @e = eval "(1,2)"; print "E-list ", scalar(@e), "\n";
+my $c = () = eval "(1,2,3)"; print "E-countof $c\n";
+print "E-join ", join(",", eval "(1,2,3)"), "\n";
+$c = cnt(eval "(1,2,3)"); print "E-arg $c\n";
+sub r { return eval "(1,2,9)" } my @x = r(); my $y = r(); print "E-ret ", scalar(@x), " $y\n";
+sub t { eval "(4,5)" } my @z = t(); my $w = t(); print "E-tail ", scalar(@z), " $w\n";
+my $v = eval "wantarray ? 1 : defined(wantarray) ? 0 : 2"; print "E-wa-scalar $v\n";
+my @u = eval "wantarray ? 1 : 0"; print "E-wa-list @u\n";
+eval "\$g = defined(wantarray) ? 1 : 2"; print "E-wa-void $g\n";
+PL
+E-print 1342
+E-subL-scalar 7
+E-list 2
+E-countof 3
+E-join 1,2,3
+E-arg 3
+E-ret 3 9
+E-tail 2 5
+E-wa-scalar 0
+E-wa-list 1
+E-wa-void 2
+PROBED
+
 done_testing();

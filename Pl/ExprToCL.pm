@@ -2416,13 +2416,15 @@ sub gen_funcall_form {
   # lexical-capture alist (docs/eval-lexical-capture.md).
   if ($func_name eq 'eval' && @$kids == 2) {
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
+    # Every spelling -- eval BLOCK and eval STRING (#2800) -- is bound by
+    # the eval node's own context.
+    my $ctx = $self->expr_o->get_node_context($node_id);
+    my $wrap = sub {
+      my ($inner) = @_;
+      return $inner if $ctx == INHERIT_CTX;
+      return $self->_ctx_wrap_form($inner, $ctx);
+    };
     if ($self->expr_o->is_internal_node_type($arg_node)) {
-      my $ctx = $self->expr_o->get_node_context($node_id);
-      my $wrap = sub {
-        my ($inner) = @_;
-        return $inner if $ctx == INHERIT_CTX;
-        return $self->_ctx_wrap_form($inner, $ctx);
-      };
       if ($arg_node->{type} eq 'anon_sub') {
         my $block_kids = $self->expr_o->get_node_children($kids->[1]);
         # empty eval {}: text emits "(p-eval-block )" (trailing space) —
@@ -2445,13 +2447,14 @@ sub gen_funcall_form {
       else {
         # Internal node that is NOT a block form = interpolated/computed
         # STRING — still eval STRING, must carry the capture alist.
-        return $self->_gen_eval_string_form($self->gen_node_form($kids->[1]));
+        # Bound by its context exactly as eval BLOCK is (#2800).
+        return $wrap->($self->_gen_eval_string_form($self->gen_node_form($kids->[1])));
       }
     }
     else {
       # eval STRING (plain string literal) with the caller's in-scope
       # lexicals as an alist (docs/eval-lexical-capture.md).
-      return $self->_gen_eval_string_form($self->gen_node_form($kids->[1]));
+      return $wrap->($self->_gen_eval_string_form($self->gen_node_form($kids->[1])));
     }
   }
 
