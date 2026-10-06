@@ -302,6 +302,12 @@ Each line shortens by ~14 characters, the *concept* gets a searchable name,
 and a translator keys on three heads instead of pattern-matching a `let` of
 a special variable. Macroexpansion-time only.
 
+**Count (s510c, #2775):** a built-in that never reads its context is now
+emitted bare, and `join`'s call-wide bind is gone — context wrappers per 100
+emitted lines fell from 11.2 to 7.2 on the everyday corpus and from 20.2 to
+17.4 on perl-tests (which also gained ~880 correct binds around `eval
+STRING`, #2800).
+
 ### 3.6 Redundant and asymmetric emissions
 
 Small individually; together they teach a reader that the output cannot be

@@ -219,7 +219,6 @@ eval.t	10	eval run-time error in list context	undef	'0'	NS:Context propagation i
 eval.t	9	eval syntax error in list context	undef	'0'	NS:Error message text and format
 eval.t	109	eval syntax error, no warnings	''	^syntax error	NS:Error message text and format
 eval.t	40	lexical search terminates correctly at subroutine boundary	'!'	'good!'	#1455 (string-eval capture binds a FILE lexical declared LATER in the file)
-eval.t	106	string eval void context	'S'	'V'	NS:Context propagation into string eval
 eval.t	160	test that nested eval '1+;' calls sig die as expected	'after eval '	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
 eval.t	161	test that nested eval '1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;1+;' calls sig die as expected	'after eval '	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
 eval.t	163	test that nested eval ']' calls sig die as expected	'after eval '	'after eval X at - line 1.'	NS:Error messages: no "at FILE line N" location info
@@ -504,7 +503,6 @@ tr.t	224	    doesn't stringify its argument	''	'SCALAR'	#1493 CATALOG tr.t "test
 tr.t	307	RT #133880 illegal \N{}	''	Unknown charname	NS:Error compatibility for invalid Perl input (principle 9) CATALOG tr.t "test 257" + NS:Error compatibility for invalid Perl input
 tr.t	223	non-modifying tr/// on a scalar ref	'0'	'2'	#1493 CATALOG tr.t "tests 223-224"
 tr.t	257	tr// of \N{name} works for upper-Latin1	'á'	'A'	#1494 CATALOG tr.t "test 257" + NS:Error compatibility for invalid Perl input
-wantarray.t	11		'S'	'V'	NS:Context propagation into string eval CATALOG wantarray.t (DO NOT FIX - wantarray regression area)
 yadayada.t	30		''	\Asyntax error 	NS:Error compatibility for invalid Perl input (principle 9) + the #138 drop family (the drop announcement is what $@ holds)
 yadayada.t	34	{Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator} (The function main::pl-A is undefined. at (eval 1) line 1.)			NS:Error compatibility for invalid Perl input (principle 9) + the #138 drop family (the drop announcement is what $@ holds)
 quotemeta.t	30	quotemeta Latin1 no unicode_strings quoted	'ß'	'\ß'	#146
@@ -532,7 +530,6 @@ postfixderef.t	73	PVBM is not a GLOB ref			DECIDED s438-era "PCL has no PVBM" (p
 postfixderef.t	75	PVBM is not a SCALAR ref			DECIDED s438-era "PCL has no PVBM" (postfixderef.t 72/73)
 each.t	64	each in list assignment	' 7'	'f 7'	#1027 (refaliasing + each in list assignment, in-file only)
 each.t	65	values in list assignment	' 7'	'3 7'	#1027 (refaliasing + each in list assignment, in-file only)
-kvhslice.t	9	last element in scalar context	'6'	'E'	#1943 (was #1023, whose own reproducer PASSES after s473t6c's #1923): the LAST EXPRESSION of a string eval is emitted in LIST context whatever the call site is, so `scalar eval "%h{'c','d','e'}"` is the pair COUNT.  Probed s473t6c: the PLAIN slice `@h{...}` in an eval is wrong the same way (3 vs E) and both are RIGHT with no eval, so it is the eval's emission context and not a slice fact
 kvhslice.t	11		'0'	'2'	#1943 (was #1023, whose own reproducer PASSES after s473t6c's #1923): the LAST EXPRESSION of a string eval is emitted in LIST context whatever the call site is, so `scalar eval "%h{'c','d','e'}"` is the pair COUNT.  Probed s473t6c: the PLAIN slice `@h{...}` in an eval is wrong the same way (3 vs E) and both are RIGHT with no eval, so it is the eval's emission context and not a slice fact
 kvhslice.t	28		undef	'a'	#1024 (bareword key in a kv-slice is not autoquoted)
 kvhslice.t	29		undef	'A'	#1024 (bareword key in a kv-slice is not autoquoted)

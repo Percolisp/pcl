@@ -3,6 +3,11 @@
 #   (row 34 `is($u, undef)` on a TIED undef: cl/pcl-test.lisp's test-to-scalar now reads a get-magic box once,
 #   closing #1482; the read was needed because a `$`-prototype slot now passes element argboxes).
 #   Sweep scratch/s513a/sweep2.log; 35/3 on a 454342e7 extraction.
+# s510c (2026-10-07, Opus, EDITED BY HAND -- three rows, TOTAL 18736 -> 18740 after the s513 rebase across s513a; was 18735 -> 18739): #2800 (eval STRING bound by its own
+#   context, commit 0aa6fce6) makes kvhslice.t 9 "last element in scalar context", wantarray.t 11 and eval.t 106
+#   "string eval void context" pass (all three were "Context propagation into string eval"); eval.t is PARTIAL and its
+#   pass count moved 132 -> 134 (106 attributed; the second row is one of 107/150/152/154/156, which no longer fail
+#   under their baseline text -- a PARTIAL file, verdict unverified by sweep-diff).
 # s507p (2026-10-06, Opus, EDITED BY HAND -- two rows, TOTAL 18731 -> 18733, perf round 39): scalar.t 86 -> 88,
 #   rows 25 "reading from magic scalars" and 30 "FETCH only called once" (#1446): #2111 makes a '<'
 #   in-memory handle read its scalar LIVE through the box, so a tied scalar's FETCH fires once, as in perl.
@@ -461,7 +466,7 @@ dor.t	OK	31	1	34
 each.t	OK	49	2	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	132	28	169
+eval.t	PARTIAL	134	26	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14
@@ -478,7 +483,7 @@ int.t	OK	19	0	19
 isa.t	OK	14	0	14
 join.t	OK	43	0	43
 kvaslice.t	OK	17	0	17
-kvhslice.t	OK	22	2	39
+kvhslice.t	OK	23	1	39
 lc.t	OK	85	0	2662
 length.t	PARTIAL	36	2	49
 lex.t	OK	45	0	53
@@ -579,7 +584,7 @@ translate.t	OK	257	0	257
 undef.t	OK	31	0	35
 unshift.t	OK	19	0	19
 vec.t	OK	76	0	78
-wantarray.t	OK	27	1	28
+wantarray.t	OK	28	0	28
 warn.t	OK	11	0	11
 while.t	OK	4	0	4
 yadayada.t	PARTIAL	20	13	34
