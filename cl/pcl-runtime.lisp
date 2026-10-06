@@ -1994,22 +1994,45 @@
                   :display "v5.30.0")
   "Perl version (compatibility).  Payload 5.30.0 matches $] = 5.030000.")
 
-;;; Perl executable path ($^X) - point to perl so spawned subprocesses run Perl
-(defvar |$^X|
-  (or (sb-ext:posix-getenv "PERL")
-      (ignore-errors
-        (let ((out (with-output-to-string (s)
-                     (sb-ext:run-program "/bin/sh" (list "-c" "command -v perl 2>/dev/null")
-                                         :output s :error nil))))
-          (let ((trimmed (string-right-trim '(#\Newline #\Return #\Space) out)))
-            (when (> (length trimmed) 0) trimmed))))
-      "perl")
-  "Perl executable path")
+;;; Perl executable path ($^X) - point to perl so spawned subprocesses run Perl.
+;;; RE-READ AT EVERY BOOT (#2689): a defvar's value is baked into the saved
+;;; core, so $^X used to be whatever `perl` was on the PATH of the process that
+;;; happened to BUILD the core -- per worktree, per install -- and $PERL was
+;;; ignored whenever a core ran.  The PATH walk is done here, in Lisp (a few
+;;; probe-file calls), not through /bin/sh: it runs on every start.
+(defun %p-find-perl ()
+  "$PERL, else the first executable `perl` on $PATH, else \"perl\"."
+  (or (let ((e (sb-ext:posix-getenv "PERL"))) (and e (plusp (length e)) e))
+      (loop for dir in (%p-split-path (or (sb-ext:posix-getenv "PATH") ""))
+            for cand = (concatenate 'string (if (plusp (length dir)) dir ".") "/perl")
+            when (ignore-errors
+                   (let ((st (sb-posix:stat cand)))
+                     (and (sb-posix:s-isreg (sb-posix:stat-mode st))
+                          (zerop (sb-posix:access cand sb-posix:x-ok)))))
+              return cand)
+      "perl"))
+
+(defun %p-split-path (s)
+  "Split a $PATH-style string on colons."
+  (loop with start = 0
+        for pos = (position #\: s :start start)
+        collect (subseq s start pos)
+        while pos do (setf start (1+ pos))))
+
+(defvar |$^X| (%p-find-perl) "Perl executable path")
+(push (lambda () (setf |$^X| (%p-find-perl))) sb-ext:*init-hooks*)
 
 ;;; Taint mode flag (${^TAINT}) - always off in transpiled code: 0, as perl
 ;;; reads it without -T (s506f: `pcl -T` runs the program without taint
 ;;; checks and says so; docs/not-supported.md).
 (defvar |${^TAINT}| 0 "Taint mode is not enabled")
+
+;;; ${^GLOBAL_PHASE} (#2761): START while the main program compiles (its BEGIN
+;;; blocks, a `use`d module, UNITCHECK), CHECK, INIT, RUN, then END while END
+;;; blocks run and DESTRUCT after them.  Set at the boundaries the runtime
+;;; already owns: p-run-compile-phase-blocks and %p-run-end-phase.  A module
+;;; required at run time, and a BEGIN inside it, sees RUN, as in perl.
+(defvar |${^GLOBAL_PHASE}| "START" "perl's ${^GLOBAL_PHASE}")
 
 ;;; NB: $^R lives with the other BOXED specials further down (search |$^R|) —
 ;;; it has to, because a magic scalar a program can ASSIGN to must be a p-box:

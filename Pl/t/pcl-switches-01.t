@@ -238,6 +238,10 @@ row('__SUB__ in no sub without the feature is a one-line refusal (status 255)',
 row('... trappable by eval',
     q{-e 'my $v = eval { __SUB__ }; print "caught: $@"; print "after\n"'},
     qr/\Acaught: PCL: __SUB__ [^\n]*\nafter\n\z/, '', 0);
+# $^X is read when the process STARTS (#2689): a saved core used to carry the
+# value of the process that BUILT it, and $PERL was ignored.
+row('$^X follows $PERL at startup, not the core build', q{-e 'print "$^X\n"'},
+    "/nonexistent/fake-perl\n", '', 0, env => 'PERL=/nonexistent/fake-perl');
 row('-CS: a :utf8 layer on STDOUT, ${^UNICODE} = 7', q{-CS -e 'print chr(233), " ${^UNICODE}\n"'},
     "\xc3\xa9 7\n", '', 0);
 row('-C alone is SDL (95)', q{-C -e 'print "${^UNICODE}\n"'}, "95\n", '', 0, env => 'LANG=en_US.UTF-8 LC_ALL=');
