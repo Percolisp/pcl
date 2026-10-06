@@ -1794,6 +1794,15 @@ spelling:
 | `(p-void-ctx BODY…)` | `(let ((*wantarray* :void)) BODY…)` | void context |
 | `(p-caller-ctx BODY…)` | `(let ((*wantarray* *pcl-caller-wantarray*)) BODY…)` | propagate the caller's context (`goto &sub`, tail call) |
 
+**A built-in call is bound only when the built-in is in
+`%WANTARRAY_SENSITIVE`** (`Pl/ExprToCL.pm`, s510c, #2775), which must
+therefore list every runtime built-in that reads `*wantarray*`; any other
+built-in is emitted bare in every slot (`print lc $x` is
+`(p-print (p-lc $x))`).  A user sub call is always bound (unless the
+`insensitive-call` pass licenses its bare form), and an aggregate assignment
+whose value reads the context (`p-list-=`, `p-hash-=`) is bound to the `=`
+node's own context, whatever its right-hand side.
+
 The expansion is exactly the `let` it replaces — same binding, same body,
 identical code after macroexpansion, no runtime cost. There is no fifth
 context: the compiler-side builder (`Pl::CLForm::ctx_bind`) dies on an

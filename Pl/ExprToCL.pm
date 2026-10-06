@@ -1570,17 +1570,12 @@ sub gen_binary_op_form {
     if ($self->expr_o->is_internal_node_type($rhs_node)
         && ($rhs_node->{type} eq 'tree_val' || $rhs_node->{type} eq 'progn')) {
       my $rhs_kids = $self->expr_o->get_node_children($kids->[1]);
-      my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = (@$rhs_kids == 0)
         ? ['p-hash-=', $left,
            ['make-array', '0', ':adjustable', 't', ':fill-pointer', '0']]
         : ['p-hash-=', $left,
            ['vector', map { $self->gen_node_form($_) } @$rhs_kids]];
-      return $ctx == LIST_CTX
-               ? Pl::CLForm::ctx_bind('t', $result)
-           : $ctx == SCALAR_CTX
-               ? Pl::CLForm::ctx_bind('nil', $result)
-           : $result;
+      return $self->_aggregate_assign_value($result, $node_id);
     }
   }
 
@@ -1711,13 +1706,7 @@ sub gen_binary_op_form {
       return ['p-setf', $left, $right];
     }
     if ($left_flat =~ /^\(vector[ )]/) {
-      my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
-      my $result = ['p-list-=', $left, $right];
-      return $ctx == LIST_CTX
-               ? Pl::CLForm::ctx_bind('t', $result)
-           : $ctx == SCALAR_CTX
-               ? Pl::CLForm::ctx_bind('nil', $result)
-           : $result;
+      return $self->_aggregate_assign_value(['p-list-=', $left, $right], $node_id);
     } elsif ($left_flat =~ /^\(p-cast-% /) {
       # %$ref = (list): assign to a dereferenced hash
       return ['p-hash-deref-=', $left, $right];
@@ -1752,7 +1741,7 @@ sub gen_binary_op_form {
     } elsif ($left_flat =~ /(?:^|::)(?:@|\|@(?=[^\W\d]))/) {
       return ['p-array-=', $left, $right];
     } elsif ($left_flat =~ /(?:^|::)(?:%|\|%(?=[^\W\d]))/) {
-      return ['p-hash-=', $left, $right];
+      return $self->_aggregate_assign_value(['p-hash-=', $left, $right], $node_id);
     } elsif ($left_flat =~ /(?:^|::)(?:\$|\|\$(?=[^\W\d]))/) {
       return ['p-scalar-=', $left, $right];
     }
@@ -3051,6 +3040,23 @@ sub gen_funcall_form {
   return $call;
 }
 
+
+# The VALUE of an aggregate assignment whose result depends on its context
+# (`p-list-=` and `p-hash-=` read *wantarray*: list context yields the
+# assigned elements, scalar context the right-hand element COUNT), bound to
+# the `=` node's static context.  ONE emission for every spelling of such an
+# assignment -- the literal-list hash form, the list form and, since s510c
+# (#2803), a hash assignment with any other right-hand side (`%h = (1) x 8`,
+# `%h = f()`), which used to inherit whatever bind surrounded it.
+sub _aggregate_assign_value {
+  my ($self, $result, $node_id) = @_;
+  my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
+  return $ctx == LIST_CTX
+           ? Pl::CLForm::ctx_bind('t', $result)
+       : $ctx == SCALAR_CTX
+           ? Pl::CLForm::ctx_bind('nil', $result)
+       : $result;
+}
 
 # Form variants of _wrap_wantarray_ctx / _ctx_wrap for E2-converted
 # emitters: same logic, CLForm output (flat-prints to the same bytes).

@@ -106,4 +106,103 @@ L-hash 3
 L-inS 3
 PROBED
 
+# ── #2803: a hash assignment binds its OWN context, whatever its right-hand
+# side (the literal-list form always did; `(1) x 8`, `f()`, `@list` did not, so
+# `print %h = (1) x 8` printed the scalar count 8, perl 11).  `@a =` rows are
+# the control.  Rows P-H1..3, S-H1..3 and PU-H1 FAIL on main before s510c.
+rows_agree(<<'PL', <<'PROBED', '#2803 hash assignment');
+sub f { (1) x 6 }
+sub cnt { scalar @_ }
+my (%h, %g, @a, @list);
+@list = (1) x 6;
+%g = (k => 2);
+# H1 %h = (1) x 8      H2 %h = f()      H3 %h = @list
+# H4 %h = (%g, k => 1) H5 %h = ()
+# A1..A5: @a = the same right-hand sides (the control)
+my $c; my $n; my @l;
+print "P-H1 ", %h = (1) x 8, "\n";
+print "P-H2 ", %h = f(), "\n";
+print "P-H3 ", %h = @list, "\n";
+print "P-H4 ", %h = (%g, k => 1), "\n";
+print "P-H5 ", %h = (), "\n";
+print "P-A1 ", @a = (1) x 8, "\n";
+print "P-A2 ", @a = f(), "\n";
+print "J-H1 ", join(":", %h = (1) x 8), "\n";
+print "J-H2 ", join(":", %h = f()), "\n";
+print "J-H3 ", join(":", %h = @list), "\n";
+print "J-H4 ", join(":", %h = (%g, k => 1)), "\n";
+print "J-H5 ", join(":", %h = ()), "\n";
+print "J-A1 ", join(":", @a = (1) x 8), "\n";
+$c = cnt(%h = (1) x 8);       print "S-H1 $c\n";
+$c = cnt(%h = f());           print "S-H2 $c\n";
+$c = cnt(%h = @list);         print "S-H3 $c\n";
+$c = cnt(%h = (%g, k => 1));  print "S-H4 $c\n";
+$c = cnt(%h = ());            print "S-H5 $c\n";
+$c = cnt(@a = (1) x 8);       print "S-A1 $c\n";
+$n = (%h = (1) x 8);          print "N-H1 $n\n";
+$n = (%h = f());              print "N-H2 $n\n";
+$n = (%h = @list);            print "N-H3 $n\n";
+$n = (%h = (%g, k => 1));     print "N-H4 $n\n";
+$n = (%h = ());               print "N-H5 $n\n";
+$n = (@a = (1) x 8);          print "N-A1 $n\n";
+@l = (%h = (1) x 8);          print "L-H1 ", scalar(@l), "\n";
+@l = (%h = f());              print "L-H2 ", scalar(@l), "\n";
+@l = (%h = @list);            print "L-H3 ", scalar(@l), "\n";
+@l = (%h = (%g, k => 1));     print "L-H4 ", scalar(@l), "\n";
+@l = (%h = ());               print "L-H5 ", scalar(@l), "\n";
+@l = (@a = (1) x 8);          print "L-A1 ", scalar(@l), "\n";
+print "B-H1 ", ((%h = (1) x 8) ? "T" : "F"), "\n";
+print "B-H2 ", ((%h = f()) ? "T" : "F"), "\n";
+print "B-H3 ", ((%h = @list) ? "T" : "F"), "\n";
+print "B-H4 ", ((%h = (%g, k => 1)) ? "T" : "F"), "\n";
+print "B-H5 ", ((%h = ()) ? "T" : "F"), "\n";
+print "B-A5 ", ((@a = ()) ? "T" : "F"), "\n";
+sub inS { my $z = (%h = (1) x 8); $z } my @q = inS(); print "U-H1 @q\n";
+sub inL { my @z = (%h = (1) x 8); scalar @z } my $q = inL(); print "V-H1 $q\n";
+my @y; push @y, %h = (3) x 4; print "PU-H1 ", scalar(@y), "\n";
+my @w; push @w, @a = (3) x 4; print "PU-A1 ", scalar(@w), "\n";
+PL
+P-H1 11
+P-H2 11
+P-H3 11
+P-H4 k1
+P-H5 
+P-A1 11111111
+P-A2 111111
+J-H1 1:1
+J-H2 1:1
+J-H3 1:1
+J-H4 k:1
+J-H5 
+J-A1 1:1:1:1:1:1:1:1
+S-H1 2
+S-H2 2
+S-H3 2
+S-H4 2
+S-H5 0
+S-A1 8
+N-H1 8
+N-H2 6
+N-H3 6
+N-H4 4
+N-H5 0
+N-A1 8
+L-H1 2
+L-H2 2
+L-H3 2
+L-H4 2
+L-H5 0
+L-A1 8
+B-H1 T
+B-H2 T
+B-H3 T
+B-H4 T
+B-H5 F
+B-A5 F
+U-H1 8
+V-H1 2
+PU-H1 2
+PU-A1 4
+PROBED
+
 done_testing();
