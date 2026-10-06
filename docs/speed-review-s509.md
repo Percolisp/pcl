@@ -43,6 +43,10 @@ small changes, each in one place, each with a measured gain larger than any run-
 #2420 touches the first-run build path that #2702 (the exactly-once first run) will redesign — do them
 together, not now.
 
+**USER RULING (2026-10-06, after reading this): the start-up items STAY PARKED "for a bit longer. They feel
+risky, we are aiming for sleek functionality and good documentation right now."**  So #2422, #1862, #2421,
+#2420 and #2423 are not scheduled; section 2's run-time levers are unaffected.
+
 ## 2. Run time: the bench table's slow rows, profiled
 
 56 rows; 23 are slower than perl by more than 1.4×.  `pack` / `packunpk` (146–163×; `pack` is written in
@@ -133,5 +137,5 @@ s507p).  Programs that accumulate a buffer and test its end do exactly this.
 One perf round (round 40, one Opus agent, the standard bars — hand-replaced A/B first, control rows,
 gate + sweep, everyday `--record`), in this order: **#2770 (lever A and its sibling sites) → #2772 →
 #2773 → #2771 (with a short design note first)**.  Expected: five rows move by 25–55 %, and `print`
-by 40–50 % if B lands.  And one decision for the USER: whether #2422 / #1862 / #2421 leave the parked
-list — for a person running ordinary scripts they are worth more than everything in section 2 together.
+by 40–50 % if B lands.  The decision put to the USER — whether #2422 / #1862 / #2421 leave the parked
+list — was answered the same day: they stay parked (section 1).
