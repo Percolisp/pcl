@@ -506,11 +506,11 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s510, 2026-10-06, main `c1d9bed7`, gen v2-4281 — measured on
+- **CURRENT NUMBERS (s510, 2026-10-06, main `0b401b91`, gen v2-4281 — measured on
   that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **279 files / 9,782 rows** (170 s wall with
+  stale):** gate `Result: PASS`, **280 files / 9,798 rows** (170 s wall with
   `tools/prove-core`); full `perl-tests/` sweep GATE clean, **TOTAL passing
-  18,731**, 647 failing (96.7 %), 59 of 108 files fully passing, 96 run to the
+  18,733**, 645 failing (96.7 %), 59 of 108 files fully passing, 96 run to the
   end and 12 stop part-way, drops 5 = census; `EVERYDAY: 114 of 122 identical to
   perl (93.4 %)`; `tools/t/install-container.t` PASS 17 rows (s507, by the switches batch).  The user-facing
   copy of these numbers is `docs/STATUS.md` — update both together.

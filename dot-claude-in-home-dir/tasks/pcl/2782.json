@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-06",
+   "description" : "FILED s510 (s508a agent) from the reviewing session's probe ~/pcl-agent-scratch/s510/review/p8b/kw.pl (rows 15 and 30; answers kw.perl / kw.main / kw.tree).  PRE-EXISTING on main a24b1d65 and on the s508a tree alike; both are LOUD (a die), not silent.\n\n1. A METHOD named like a handle-taking builtin, with two bareword arguments, under no strict subs:\n     package C; sub open { shift; join \",\", @_ } package main; my $o = bless {}, \"C\"; print $o->open(zz, yy), \"\\n\";\n   perl: zz,yy      PCL: dies \"The variable zz is unbound\" (the barewords load bare CL symbols).\n   `$o->pipe(zz)` and `$o->m(zz)` (one argument) are right since s508a #2664; the two-argument element arm (`_is_sole_call_argument($tok, 1)`) is asked only for a REGISTERED handle name, so an unregistered word in a multi-element method argument list still emits a bare symbol.\n2. `require(File::Basename)` WITH parentheses:\n     require(File::Basename); print \"ok\\n\";\n   perl: loads the module, prints ok.   PCL: dies \"Undefined subroutine &File::Basename\".  The paren-less `require File::Basename` works.\nFix direction: (1) belongs to the #266/#2664 classifier (a bareword element of a method's argument list with no callable verdict is its text); (2) the require operand parse should treat a parenthesised bareword module name as the module, as the paren-less spelling does.  Guard rows in Pl/t/bareword-call-01.t; re-run kw.pl after.\n",
+   "id" : "2782",
+   "status" : "pending",
+   "subject" : "A method named like a handle builtin with two bareword args ($o->open(zz, yy)) dies 'variable zz is unbound'; require(File::Basename) with parens dies 'Undefined subroutine' -- both pre-existing, loud (kw.pl rows 15, 30)"
+}
