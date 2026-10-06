@@ -1,0 +1,30 @@
+# RESUME s508a (s509) — silent wrongs an ordinary program can hit: seven members are built; owed are the two suspected companion regressions (bisect FIRST), the bench of the `&name;` member, the bars and the records
+
+You are an EXECUTION agent (Opus 5.5) on the PCL project (Perl -> Common Lisp transpiler), a FRESH agent resuming a batch another agent checkpointed.  Read, in this order, through main's checkout:
+1. `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s509/SHARED-BOX.md` (this session's protocol; its FIRST ACTION — your model id into `$W/scratch/s508a/MODEL.txt` — comes before anything else; heavy legs and benches go through `heavy.sh`),
+2. `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s473/COMMON.md` (the rulebook),
+3. `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s508/s508a-prompt.md` (the batch: members, bars, the form of the final report — all still in force),
+4. `$W/scratch/s508a/STOP.md` — its top block ("RESUME RECIPE" … "Heavy legs") is the state; everything below "previous notes below" is history.
+
+`W=/home/bernt/pcl/.claude/worktrees/agent-a587431876e18282b`, HEAD `cfbbcd34`, 14 commits on `16cf9642`.  Task IDs 2780–2799 (2780, 2781 used).  Generation **v2-4380**.  You run NOTHING in `/home/bernt/pcl`.  Although the worktree was created with isolation for the first agent, you were launched WITHOUT it: every command is `env -C "$W" …` / `git -C "$W" …`.
+
+## What changed on main since the checkpoint
+Read `~/pcl-agent-scratch/s509/MAIN-READY-*` (each names a merged sha, main's numbers and what moved).  If one exists when you start, your first `git -C "$W" rebase main` crosses CODE: keep BOTH sides (`cl/pcl-runtime.lisp`, `Pl/Parser.pm`, the baselines, `docs/DECIDED.md`, `docs/session-log.md`, `docs/ir-spec.md`), keep your generation string v2-4380 (it is above main's), regenerate the three artifacts, and re-run your guard files before anything else.  s507c PART ONE (the first to merge) touches `Pl/Parser.pm`'s feature callback, `%p-load-unit` in the runtime, `pcl` / `pl2cl` (`--`), and three companion baseline rows.
+
+## RULED (Fable, s509)
+- **#2740 stays NOT shipped and OPEN**, as you concluded: the ruled direction (the errno of a failed `@INC` probe) is contradicted by perl, and the measurement is in the task.  Nothing more is owed on it in this batch.
+- **#2632 (`&name;` shares `@_`) is FLAGGED until benched** — it adds a special-variable read on `p-flatten-args`'s whole-array arm, a check on every `goto &sub` and a `%p-shared-shift` call at entry to subs with coalesced shifts.  STOP RULE: bench `fibret methret feargs intloop subret passarr` base vs tree, interleaved, K=5, twice, as `heavy.sh s508a bench …`; if any row is slower than the control band by more than 3 % in BOTH runs, make the common path free (the shared-`@_` state must cost nothing where no `&name;` call exists in the program — e.g. decided at compile time per callee or per program) or take the member OUT of the batch and leave #2632 open with the numbers.  Say which you did.
+
+## Owed, in order
+1. Rebase (see above); `env -C "$W" prove Pl/t/pcl-doc-examples-01.t` and your guard files.
+2. **The two suspected regressions, before any other bar:** `io/pipe.t` (base 22 passing → tree 19; new failing rows "SIGPIPE", "[]", "with fh dup") and `op/fork.t` (22 → 21).  Bisect over your member commits in scratch extractions (`git -C "$W" archive <sha> | tar -x -C …`; one warm-up companion file in each fresh extraction first), single-file runs `tools/run-perl-suite.pl --jobs 1 io/pipe.t op/fork.t < /dev/null` (LIGHT), each THREE times — `op/fork.t` has a load-dependent row (#2689) and the box is shared, so a row counts as yours only if it fails 3 of 3 on the tree and 0 of 3 on the base.  A real regression is FIXED with a guard row (first suspects: the handle's numeric identity / `select`'s full name, the plain-stream text load); a row that is not yours is said so with the three-run table.
+3. The #2632 bench and its stop rule (above).
+4. Bars on the final tree, each heavy one through `heavy.sh s508a leg <log> …` (your `run-heavy.pl` is retired): corpus-diff + emission-ab against `fee16466` — or against main's new code sha if a MAIN-READY exists — with every diff classified; `tools/ir-host-leak.pl`; ir-conform; the sweep (GATE clean; your two edited rows; drops 5); the gate-SET scan if step 2 changed the compiler; the CPAN board before / after; the quick companion (`--all --quick --jobs 4`), movers spliced into `baselines/perl-suite-run.tsv` + `perl-suite-fails.tsv` row by row with cause `s508a #NNNN`; everyday BEFORE (main's number in the newest MAIN-READY, else 114 of 122) → AFTER; `tools/tag-license --check`; the full gate ONCE; `tools/everyday-smoke.pl --record` LAST, committed.
+5. Records: `## Session s508a` / `## s508a` (the draft is in `cfbbcd34`), DONE sections for #2681 #2682 #2683 #2664 #2645 #2631 #2632 (or its open state) #2764; #2740 open.
+6. `MERGE-READY: <sha>` as the FIRST line of STOP.md only when every bar's log is on disk and newer than the last code commit.  If you have a SendMessage tool, send one line to `main`: `s508a MERGE-READY <sha>`.
+
+## The reviewing session's probes still to come
+Before the merge Fable probes: constants (a non-literal value across a warm cache and in a module, list constants, a constant whose value expression has a side effect, `use constant` inside a BEGIN-time loop), a handle's identity (numeric compare, `==` with overloads present, as a hash key, `fileno`, `select`'s return used to restore), bareword arguments under `use strict` and without it, `&name;` (with `shift` in the callee, recursion, `goto &name`, a callee that reshapes `@_`, `&$code;`).  A finding reaches you as a message naming a probe file.
+
+## Final report (SHORT)
+As the original brief's "Final report", with: STOP.md's first line; your model id; the bisect's three-run table and verdict per row; the #2632 bench (control band stated) and what you did under the stop rule; per member shipped / not; everything FLAGGED; anything you could NOT do, said plainly.

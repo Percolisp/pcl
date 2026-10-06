@@ -1,0 +1,36 @@
+# RESUME s507c (s509) — PART ONE is three light bars from MERGE-READY: finish it FIRST; then PART TWO from the parked patch, WITHOUT #2702 (its forked first-run build is RULED OUT, measured below)
+
+You are an EXECUTION agent (Opus 5.5) on the PCL project (Perl -> Common Lisp transpiler), a FRESH agent resuming a batch that two earlier agents checkpointed.  Read, in this order, through main's checkout:
+1. `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s509/SHARED-BOX.md` (this session's protocol; its FIRST ACTION — your model id into `$W/scratch/s507c/MODEL.txt` — comes before anything else; heavy legs go through `heavy.sh`),
+2. `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s473/COMMON.md` (the rulebook),
+3. `/home/bernt/pcl/briefs-and-rules-for-claude-subagents/s507/s507c-prompt.md` (the batch: members, bars, the form of the final report) and `s508/resume-s507c.md` (the review findings R1 / R2, both DONE, and the three optional members),
+4. `$W/scratch/s507c/STOP.md` — its top block ("NOT MERGE-READY (s508 CHECKPOINT)" … "Exact next commands") is the state; everything below "(older notes follow)" is history.
+
+`W=/home/bernt/pcl/.claude/worktrees/agent-a5c8a09980aa19ae8`, HEAD `edf5d4f5` (a records commit) on code tip `3c3ef178`, 12 commits on `16cf9642`.  Main is `4fb7fa26` = `16cf9642` + NON-CODE commits.  Task IDs 2740–2759 (2740–2742 used).  You run NOTHING in `/home/bernt/pcl`.
+
+## STEP 1 — PART ONE to MERGE-READY (do nothing else first)
+1. `git -C "$W" rebase main` (no code changes; keep both sides of the records), then `env -C "$W" prove Pl/t/pcl-doc-examples-01.t`.
+2. The bars already on disk for code tip `3c3ef178` STAND across this non-code rebase (corpus-diff3, emission-ab3, ir-conform3, ir-host-leak3, sweep3, companion3 — cite them as they are).  OWED, each through `heavy.sh` where it is heavy:
+   - everyday: `heavy.sh s507c leg $W/scratch/s507c/everyday4.log tools/everyday-smoke.pl --jobs 2` (BEFORE = main's `EVERYDAY: 114 of 122`; quote BEFORE → AFTER; a NEW row is yours to fix or explain);
+   - `tools/tag-license --check` (light);
+   - the FULL gate ONCE: `env -C "$W" PCLXS_DIR="$HOME/pclxs" ~/pcl-agent-scratch/s509/heavy.sh s507c leg "$W/scratch/s507c/gate4.log" tools/prove-core` — `Result: PASS`, and say the file / row count;
+   - `tools/everyday-smoke.pl --record` LAST, from the clean tree (through heavy.sh), and commit the history row.
+3. Add the bars line to `## Session s507c` in `docs/session-log.md`, commit, and write `MERGE-READY (PART ONE): <sha>` as the FIRST line of `$W/scratch/s507c/STOP.md` with every bar's log path under it.  If you have a SendMessage tool, send one line to `main`: `s507c PART ONE MERGE-READY <sha>`.  The reviewing session merges that sha from a scratch worktree; you do NOT wait for it.
+
+## STEP 2 — PART TWO from `scratch/s507c/p2b/dev-all.patch`, with #2702 REMOVED
+**RULED (Fable, s509, measured): the forked first-run build (`%p-build-script-fasl-apart`) is NOT shipped.**  Probes in `~/pcl-agent-scratch/s509/review/fr/` and `…/fr2/` (copy what you cite into `$W/scratch/s507c/p2d/ruling/`), perl → main → your `scratch/s507c/dev`:
+- `fr2/pid.pl` (`use Pid;` where Pid.pm dies "already running" if `run.pid` exists, else writes it and removes it in an END block): perl and MAIN print `working` on run 1 and run 2; `dev` DIES on run 1 (`already running (pidfile run.pid exists)`, plus a stray "While evaluating the form" line) — the child wrote the pidfile and left without its END block, so a program that works on main fails on its first run.
+- `fr2/ask.pl` (`use Ask;` where Ask.pm prompts and re-reads STDIN until it gets a line): in the child STDIN is at EOF, so an uncapped retry loop never ends (my capped copy: 6.3 s → 10.4 s).
+- `fr/s.pl` (side-effect log): `dev` run 1 executes the module's body twice, as you flagged.  For the record, MAIN's run 1 already runs `import` twice and the body before an earlier BEGIN block; that stays as it is.
+A program that works on main and fails on its first run is not a trade this project makes for a first-run ordering fix.  So:
+- Take `%p-build-script-fasl-apart` and everything that exists only for it OUT of the patch, together with the guard rows that assert run 1 == perl for #2702's shapes (keep the rows that guard #2689 and everything else).  #2702 stays OPEN: append to the task (a) your first-run table and what the fork fixed, (b) the two failing shapes above with their outputs, (c) the ruling: an EXACTLY-ONCE first run is the only acceptable fix — a design is owed by the reviewing session, with the two candidate directions recorded as NOT yet designed: running the building run from text and building the cache afterwards in the image that already loaded the modules; or keeping the in-process build and making the import single — whose known counter-example is `sub first {…}` BEFORE `use List::Util 'first'`, where the load pass redefines the sub after a skipped import.
+- If a SMALL part of your #2702 work is exactly-once by construction and helps on its own (it must not double or lose any output or side effect on run 1 or run 2 — show it on `fr/s.pl`, the two `fr2` programs and your table), you may keep it as its own commit and say so; if in doubt, leave it out.
+- Everything else in the patch SHIPS as the brief rules it, one commit per member, generation **v2-4281** at the first emitting commit (regenerate the three artifacts): #2700, #2701 (with the three `unless` in `_is_empty_list_expr` rewritten), #2703, #2666, #2669, #2689 (`$^X` read at every start), #2761.  #2762 and #2763 stay NOT done (your notes go into the tasks).  The first-run cost measurement is no longer owed (nothing on the first-run path ships); #2689's boot-time `$^X` lookup IS on every start, so measure start-up with it (`pcl -e 1`, 10 runs, main vs tree) and flag anything above 2 %.
+- PART TWO's bars on the final tree: corpus-diff + emission-ab against `fee16466` (every diff explained), `tools/ir-host-leak.pl`, ir-conform, the sweep, the quick companion (`--all --quick --jobs 4`; the io/ and run/ directories matter for the ARGV family — splice and explain every mover), everyday BEFORE → AFTER and `--record` last, `tag-license --check`, the full gate once, `ph.pl` (`perl ~/pcl-agent-scratch/s508/review/ph.pl "$W/pcl" tree3` and `cmp-ph.pl base tree3`: no case that is `same` in `out/ph.tree2` may differ).  If PART ONE has been merged by then (`~/pcl-agent-scratch/s509/MAIN-READY-<N>` names your sha), `git -C "$W" rebase main` first.
+- Then `MERGE-READY: <sha>` (the whole batch) as STOP.md's first line.
+
+## Beside you
+**s507p** (perf round 39: `cl/pcl-runtime.lisp`'s scalar store paths, the in-memory filehandle, the tie census, `.=`) runs now; **s508a** (constants, a handle's numeric identity, bareword arguments, `&name;`, the text load of a module) takes the next free slot.  Your #2689 and s508a's #2764 both sit near the loader: different functions — if it merges first, keep both sides.
+
+## Final report (SHORT)
+As the original brief's "Final report", with: STOP.md's first line; your model id; PART ONE's sha and bars; per PART TWO member shipped / not and what killed it; `ph.pl`'s score on the final tree; everything FLAGGED (added complexity, a slow-down, a start-up cost); anything you could NOT do, said plainly.
