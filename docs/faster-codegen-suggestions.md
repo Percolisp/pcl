@@ -1057,6 +1057,47 @@ packunpk        0.0037     0.5696        145.37x        153.18x       —
 
 **`pack` did not get seven times faster — the old row measured something else.**  The row's small iteration count is 0, so the small run never calls `pack` and never loads the pack extension, while the big run does: until s493 (#1202) that load COMPILED `cl/pcl-pack.lisp` on every run (~3–4 s), and `exec = t(big) − t(small)` charged the whole compile to the 20,000-iteration loop (3.4–5.1 s in every table above this one).  Since the extension is compiled once into `~/.pcl-cache/ext/`, the row measures the loop: 0.57 s, about 140–150× perl.  STANDING: a bench row whose small N is 0 does not cancel what the big run loads lazily — read such a row's history across a caching change before quoting a trend.  Against §0.2p's raw columns (2026-09-18): `strcat` 0.85× → 0.95× is BOTH columns — perl 0.323 → 0.305 s, PCL 0.276 → 0.290 s (+5 %; the row read 0.312 s at `209e7533` and 0.278 s just before round 38, so it has moved both ways between rounds; NOT attributed) — `methret` 1.05× → 1.12× is perl's column alone (PCL 0.0988 → 0.0986 s), `ovlsub` is PCL getting faster (0.131 → 0.103 s), `moo-objs` 1.093 → 1.007 s, `regexg` 0.471 → 0.452 s.
 
+### 0.2w Round 39 movers (2026-10-06) — scalar store paths, the in-memory filehandle, in-place `.=` (s507p; #2539, #2637, #2111, #2115)
+
+Round 39 is runtime-only (corpus-diff IDENTICAL, no generation bump).  What shipped: one pos() predicate on box-set's two arms (#2539, a rule-11 repair, no gain claimed); `%p-tied` refuses a NON-EMPTY container before the weak tie table, because a tied container is an empty shell (#2637); an in-memory write handle owns a private buffer behind a `:memfh` magic cell, and `length` of it reads the live length (#2111); every retaining store keeps a SIMPLE string, readline returns one from a reused line buffer, `PCL_STRBUF_AUDIT=<file>` logs every snapshot copy, and `.=` past 200 characters on a scalar box, an element, a deref element or `$$hardref` appends IN PLACE behind a `:strbuf` magic cell (#2115 (a)(b)(c); the cell over a growable slot string was RULED by Fable, s509).  Nothing was built and not shipped.  Logs under the agent's `scratch/s507p/`.
+
+THE SHAPES THE ROUND IS FOR (whole program, wall seconds, not in bench-exec):
+
+```
+shape                                                  main      tree     perl
+200k x `$h{k} .= X`                                   22 s      0.05 s
+in-memory handle, bounded buffer, 200k lines          0.20 s    0.21 s            (M3 before `length` read live: 2.29 s)
+30k appends to a hash element, then (Fable's review, sb.pl):
+  build only                                          1.58      0.05      0.01
+  build, then a //g loop over it                      1.60      0.06      0.01
+  build, then 2000 x `my $t = $h{s}`                  1.68      0.05      0.02
+  2000 prints of the 289 kB string                    2.48      0.86      0.04
+  append + length($h{u}) per iteration                1.99      0.08      0.01   (tree before s509 added length(ELEMENT) live: 1.66; 0.08 from the agent's run, 2.62 -> 0.08)
+  append + substr($h{u}, -2, 1) per iteration         1.88      1.53      0.01   FLAG #2722
+  append + =~ /9\n\z/ per iteration                  11.05     10.80      0.09   NOT this round: #2723 (the regex engine scans from the start)
+```
+
+FINAL WHOLE TABLE (bench-exec rows, `tools/bench-multi.pl`, `BENCH_K=5`, all variants interleaved, each from its own saved core): main = c1d9bed7's runtime in a `git archive` extraction, ctl = a byte-identical copy of it (the control), tree = 08f019fe's runtime.  Load 1.88 at the start, 1.07 at the end (`20:48:40 up 2:26, load average: 1.88, 3.24, 3.54` .. `20:56:52 up 2:34, load average: 1.07, 1.49, 2.52`), no other leg on the box (the lock).  **CONTROL BAND (ctl vs main, rows with main >= 0.05 s): -4.0 % .. +6.4 %**; rows under 0.05 s are noise (their ctl reads up to -14.7 %).
+
+```
+row            perl     main      ctl    ctl%     tree   tree%
+fhread       0.0309   0.1118   0.1125   +0.6%   0.0869  -22.3%   FASTER: readline's reused line buffer (#2115 (a))
+tiehash      0.1558   0.2916   0.2925   +0.3%   0.2207  -24.3%   FASTER: a non-empty container skips the tie table (#2637)
+packunpk     0.0040   0.5634   0.5622   -0.2%   0.5383   -4.5%   at the band's edge -- no measurable gain claimed
+listcopy     0.5076   0.1788   0.1787   -0.1%   0.1709   -4.4%   at the band's edge -- no measurable gain claimed
+lcbytes      0.0448   0.1457   0.1471   +1.0%   0.1392   -4.4%   at the band's edge -- no measurable gain claimed
+regexg       0.3705   0.4141   0.4389   +6.0%   0.4412   +6.5%   its own control reads +6.0 %: no measurable change
+fprint       0.1353   0.3001   0.2983   -0.6%   0.3149   +5.0%   inside the band
+every other row (50) inside the band; full table: scratch/s507p/bars3/bench-final.table
+```
+
+No row is slower outside the band.  The round's stop rule PASSED on its second measurement (the first reading had fhread +7..9 % from one producer -- readline handing out its adjustable buffer, 40,000 snapshot copies for 40,000 lines -- fixed at the producer, then the reused buffer).
+
+**M5, round 38's fibret flag** (§0.2u): NOT REAL -- measured, three interleaved runs of `tools/bench-multi.pl fibret fib(27)x subret` at `BENCH_K=10` (21:00-21:06, load 1.85 -> 1.39), five runtimes each from its own saved core: A (08de9e4f), round 38's base runtime r38b and a BYTE-IDENTICAL copy r38b2, round 38's final runtime r38f and a byte-identical copy r38f2.  fibret vs A: r38b -5.5 / -5.2 / -5.4 %, its identical copy r38b2 -0.9 / -1.1 / -1.0 %; r38f -1.5 / -1.7 / -1.4 %, its copy r38f2 -1.4 / -1.8 / -1.2 %.  The same bytes built twice differ by 4.1-4.6 % -- the size of round 38's flag -- while final vs the base COPY differs by -0.4..-0.6 %.  The flag was the build (core layout, or the first variant's interleave position: r38b is always the first column and the two cannot be separated with this tool), not the code.  Logs scratch/s507p/fibret-{1,2,3}.log.  (The scratch bench-multi.pl loses its variant LABELS -- build_core's `while <$in>` clobbers the map's aliased `$_` -- but the cores are built from the right files; the columns are in BENCH_RTS order.)
+
+
+FLAGS: #2720 (`$_[0] .= X` in a sub called once per append stays quadratic, main too), #2722 (a read other than `length` of a `:memfh` / `:strbuf` cell after each write still copies: the `substr` row above), #2723 (an end-anchored regex on a growing string -- the engine, not the store), #2721 (`tied($RS)` under English answers the shim's object; a divergence, not perf).
+
 ### 0.2p The board on a QUIET box (s490, 2026-09-18, main `67781634`, gen v2-1480)
 
 Taken for the README refresh before the first alpha announcement: no agent and
