@@ -45,7 +45,11 @@ called in the other context).
 **B. Who runs USER code from inside a built-in outside the table?**  An overload handler (`abs $obj`,
 `"$obj"` inside `join` / `sprintf` / `lc`, `==`), a tie method (FETCH / STORE / PRINT / READLINE), a
 `sort` comparator named by a variable, `sprintf('%s', $obj)`, `local $SIG{__WARN__}` / `__DIE__`
-handlers, a `DESTROY`-like callback, `AUTOLOAD`, `import`.  For each: what does `wantarray` answer
+handlers, a `DESTROY`-like callback, `AUTOLOAD`, `import`.  **And a REPLACED built-in** (task #2779:
+`use subs`, an import list, `BEGIN { *CORE::GLOBAL::rand = sub { wantarray ? … : … } }`): the replacement is
+user code reached through the built-in's own call form, so in a LIST slot the fallback bind is what gives it
+list context today — probe all four override spellings in list, scalar and void slots, with and without the bind
+(`~/pcl-agent-scratch/s510/review/foy/i-wantarray.pl`, `j-subs-wantarray.pl` are a start).  For each: what does `wantarray` answer
 inside that user code in perl (list slot / scalar slot / void), in PCL today, and in PCL with the
 fallback gone?  Today's scalar-slot answer is already "whatever the enclosing sub was called in", so a
 difference that exists today in the scalar slot is PRE-EXISTING — file it once, as one task, and say
