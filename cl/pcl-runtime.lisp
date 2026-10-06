@@ -2419,7 +2419,7 @@
 ;;; did, until s507p), which costs a copy at every store: the log names it.
 ;;; Off, the arms pay nothing more -- they are the rare arms already.
 (defun %p-strbuf-audit-note (arm v)
-  "Log one snapshot to  when that is set."
+  "Log one snapshot to the file named by PCL_STRBUF_AUDIT when that is set."
   (let ((file (sb-posix:getenv "PCL_STRBUF_AUDIT")))
     (when (and file (plusp (length file)))
       (with-open-file (o file :direction :output :if-exists :append
