@@ -8279,7 +8279,12 @@
       ((and data *p-array-window-ok*
             (>= (sb-kernel:%array-displacement arr) k))
        (let* ((off (- (sb-kernel:%array-displacement arr) k)))
-         (replace data src :start1 off :end2 k)
+         ;; Typed on both sides when SRC is a simple-vector (p-unshift's
+         ;; staging vector always is): the untyped call was SBCL's GENERIC
+         ;; replace, 21 % of `unshift @a, $_` to move one element (#2773).
+         (if (simple-vector-p src)
+             (replace (the simple-vector data) src :start1 off :end2 k)
+             (replace data src :start1 off :end2 k))
          (%p-array-set-window arr data off (+ (array-dimension arr 0) k)
                               (+ (fill-pointer arr) k))))
       ((and data *p-array-window-ok*
