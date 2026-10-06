@@ -49,8 +49,13 @@ Read through MAIN's checkout, never through your worktree's copy:
 - **s507p** (worktree `/home/bernt/pcl/.claude/worktrees/agent-a55609aa75faa5780`, HEAD `54560f98`; task
   IDs 2720–2739, used to 2723; runtime-only, no generation string).  NOT running yet: it is launched
   when PART TWO is merged, so that its final whole-table bench is taken ONCE, on the rebased tree.
-- **a2775** (analysis only, no code change, low priority; brief `s510/analysis-2775-prompt.md`): takes a
-  slot after the three above.
+- **s510p** (perf round 40: #2770 #2772 #2773, then #2771 after a design note; brief `s510/s510p-prompt.md`;
+  task IDs 2810–2829; generation **v2-4480** if it emits): launched WITH isolation when s507p is merged
+  (one perf agent at a time).
+- **a2775** (analysis only, no code change, low priority; brief `s510/analysis-2775-prompt.md`; task IDs
+  2800–2809): takes the slot s508a frees.
+STATE 20:24: s507c PART TWO is MERGED (`~/pcl-agent-scratch/s510/MAIN-READY-1`: main's code commit is
+`c1d9bed7`, gen v2-4281, gate 279 files / 9,782 rows); s508a and s507p are running.
 MERGE ORDER = READINESS ORDER (s507c PART TWO first).  When a batch is merged, Fable writes
 `~/pcl-agent-scratch/s510/MAIN-READY-<N>` (sha + main's numbers) and tells the running agents; each
 rebases across it KEEPING BOTH sides (`cl/pcl-runtime.lisp`, the baselines, `docs/DECIDED.md`,
