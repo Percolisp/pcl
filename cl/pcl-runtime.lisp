@@ -6338,6 +6338,10 @@
            (type fixnum start n))
   (cond
     ((zerop n))
+    ;; ONE character first, as before #2770: `$s .= 'x'` (strcat) measured
+    ;; +4..6 % slower when it went through the 16-character loop instead.
+    ((and (= n 1) (typep s 'simple-string))
+     (setf (aref data start) (schar s 0)))
     ((typep s '(simple-array character (*)))
      (if (<= n 16)
          (dotimes (i n)
