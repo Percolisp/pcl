@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 46;
+plan tests => 47;
 
 sub run_cl {
     my ($code) = @_;
@@ -383,3 +383,15 @@ test_cl('a sub declared below: string without parens, call with them',
 test_cl('an imported name as the sole argument is still a call',
     qq{use File::Spec::Functions;\nsub foo { "[\@_]" }\nprint foo(curdir), "\\n";},
     "[.]\n");
+
+# s510 (s508a review of its own companion run): a BUILTIN that is in no
+# parameter table -- `pipe(R, W)` -- is not a "sub call", so its bareword
+# operands stay HANDLES; the first #2664 cut turned `W` into the string "W"
+# and io/pipe.t / op/fork.t lost their pipe (perl: "ok").  INVERSE: the
+# unfixed s508a tree prints "no handle" (the write end went to a handle
+# named by the string; a read would block).
+test_cl('a bareword operand of pipe() is a handle, not the sole-argument string',
+    qq{pipe(RDR, WTR) or die \$!;\nif (!defined fileno(WTR)) { print "no handle\\n"; exit }\n}
+  . qq{print WTR "S\\n"; close WTR;\n}
+  . qq{chomp(my \$s = <RDR>); print \$s eq "S" ? "ok\\n" : "bad [\$s]\\n";},
+    "ok\n");

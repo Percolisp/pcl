@@ -5977,6 +5977,13 @@ sub _is_sole_call_argument {
   (my $core = $name) =~ s/^CORE::(?:GLOBAL::)?//;
   return 0 if exists $self->known_no_of_params->{$core};
   return 0 if $self->control_flow_ops->{$core};
+  # Any perl keyword at all, asked of the running perl: `pipe(R, W)` /
+  # `socketpair(…)` are builtins absent from known_no_of_params, and their
+  # bareword operands are HANDLES (io/pipe.t, s510).  A METHOD name is no
+  # keyword (`$o->m(zz)`), so the question is asked of a plain call only.
+  my $arrow = $callee->sprevious_sibling;
+  return 0 if !($arrow && $arrow->isa('PPI::Token::Operator') && $arrow->content eq '->')
+              && Pl::PExpr::Config::is_core_keyword($core);
   return 0 if $core =~ /\A(?:if|elsif|unless|while|until|for|foreach|given|when
                            |return|my|our|local|state|sub|and|or|not|xor
                            |qw|eq|ne|lt|gt|le|ge|cmp|x|print|say|printf)\z/x;
