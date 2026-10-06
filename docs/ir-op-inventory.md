@@ -13,10 +13,10 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **743**
+* names exported: **745**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 743
-* UNCLASSIFIED (no family rule matches): **10**
+* with a machine-readable `Contract:` tail: **69** of 745
+* UNCLASSIFIED (no family rule matches): **12**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -1157,12 +1157,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 # UNCLASSIFIED
 
-## UNCLASSIFIED (10)
+## UNCLASSIFIED (12)
 
 *No ir-spec §10 row and no note.*
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `p-amp-call` | macro | `(call)` | — | — | — | — | — | — | — |
 | `p-bareword-value` | function | `(name)` | — | — | — | — | — | — | — |
 | `p-cast-$-box` | function | `(val &optional site)` | — | — | — | — | — | — | — |
 | `p-default-layers` | macro | `((in-layers out-layers) &body body)` | — | — | — | — | — | — | — |
@@ -1172,4 +1173,5 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-scope-close` | macro | `((&rest handles) &body body)` | — | — | — | — | — | — | — |
 | `p-symref-site` | macro | `nil` | insensitive | none | none | no | no | no | none |
 | `p-unimport-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
+| `p-use-constant` | macro | `(name value &optional scalar-p)` | — | — | — | — | — | — | — |
 | `p-use-open` | function | `(&rest args)` | — | — | — | — | — | — | — |
