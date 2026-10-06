@@ -34,3 +34,4 @@ step's tail as a `::error::` annotation, which IS public
   `tools/prove-core`.  A perl-ORACLE row whose program needs a newer perl
   than the host carries a probed literal (`feature-pragma-01.t` `test_src`).
 - Check the run: `curl -s https://api.github.com/repos/Percolisp/pcl/actions/runs?per_page=3`.
+- s509 (2026-10-06): it happened AGAIN -- three new oracle rows using `use feature ':5.40'` passed every local bar and failed CI (perl 5.38 says "Feature bundle \"5.40\" is not supported", a different message from `use v5.40`'s).  The rule is now in the agent rulebook (`briefs-and-rules-for-claude-subagents/s473/COMMON.md`); when reviewing a batch, grep its new rows for 5.40-only spellings BEFORE the merge.
