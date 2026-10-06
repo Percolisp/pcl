@@ -2043,7 +2043,7 @@
                    (let ((st (sb-posix:stat cand)))
                      (and (sb-posix:s-isreg (sb-posix:stat-mode st))
                           (zerop (sb-posix:access cand sb-posix:x-ok)))))
-              return cand)
+            return cand)
       "perl"))
 
 (defun %p-split-path (s)
@@ -2370,6 +2370,9 @@
     ;; aborts the rest of this hook — which is exactly why it is the LAST
     ;; thing here, and why it runs only when the status really changed.
     (let ((final (logand (%p-status) 255)))
+      ;; A first run's deferred fasl build (task #2702): after every END
+      ;; and every flush, before the one nested exit below can skip it.
+      (%p-run-exit-build)
       (unless (= final (logand pending 255))
         (sb-ext:exit :code final)))))
 
@@ -25941,6 +25944,17 @@ buffer's fill-pointer; everything else falls back to file-length."
       (%p-note-fasl-unreadable fasl-path e)
       nil)))
 
+(defun %p-load-text-stream (lisp-path)
+  "THE one loader for a cached TEXT -- a module's and the main script's
+   (tasks #2764, #2702).  LISP-PATH is loaded from a stream this function
+   opens, never by pathname: SBCL prints its \"While evaluating the form
+   starting at line N … of #P…\" herald for every serious condition -- a
+   perl `die', caught or not -- but only on the FORM-TRACKING stream LOAD
+   opens for a pathname (SBCL target-load.lisp `condition-herald').  Same
+   forms, same evaluation, no herald.  The caller binds the rest."
+  (with-open-file (in lisp-path)
+    (load in)))
+
 ;;; ── PRUNE BY LAST USE (task #1300, F2; #682 folds in) ─────────────────
 ;;; Validity is the dependency manifest and nothing else (P-CACHE-VALID-P).
 ;;; What is left for this code is DISK HYGIENE, and the honest question there
@@ -26316,8 +26330,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; #2764; SBCL target-load.lisp `condition-herald').  Same forms,
           ;; same evaluation, no herald.
           (handler-bind ((warning #'muffle-warning))
-            (with-open-file (in lisp-path)
-              (load in)))
+            (%p-load-text-stream lisp-path))
           t))))
 
 
@@ -26446,6 +26459,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       (sb-ext:exit :code 2 :abort t))
     (%p-run-script-cached-1 abs as-given inc-dirs)))
 
+(defvar *p-exit-build* nil
+  "The deferred build of THIS program's fasl, armed by a run that found none:
+   (PID LISP-PATH FASL-PATH).  %P-RUN-EXIT-BUILD consumes it (task #2702).")
+
 (defun %p-run-script-cached-1 (abs as-given inc-dirs)
   "p-run-script-cached's body; see it for the contract.  The three steps are
    %P-LOAD-MODULE-CACHED-1's, with the script's own paths."
@@ -26466,24 +26483,90 @@ buffer's fill-pointer; everything else falls back to file-length."
       (if (p-cache-valid-p abs lisp deps)
           (%p-note-entry-use (namestring lisp) (list lisp deps fasl))
           (%p-transpile-script as-given inc-dirs lisp deps))
-      ;; 3. Build the fasl from that text and RUN THE FASL, so the program
-      ;;    executes once here too; on any failure, run the text.
-      (%p-fasl-note "PCL: script ~A -> ~:[TEXT~;fasl-build~] (~,3Fs to here)~%"
+      ;; 3. RUN THE TEXT; the fasl is built after the program has ended, in
+      ;;    this image, by the tail of the END phase (task #2702; the design
+      ;;    is docs/first-run-from-text-design-s510.md, ir-spec §9).  Every
+      ;;    module body, BEGIN block and line of the program runs once, in
+      ;;    perl's order -- the compile-then-load run it replaces ran the
+      ;;    `use's before the BEGIN blocks and muffled a module's output.
+      (%p-fasl-note "PCL: script ~A -> TEXT~:[~;, fasl at exit~] (~,3Fs to here)~%"
                     as-given (and fasl t) (%p-secs-since %start))
-      (or (and fasl
-               (%p-build-module-fasl lisp fasl)
-               (%p-load-module-fasl fasl))
-          (%p-load-script-text lisp)))))
+      (when fasl
+        (setf *p-exit-build* (list (sb-posix:getpid) lisp fasl)))
+      (%p-load-script-text lisp))))
+
+(defparameter *p-exit-build-heap-fraction* 1/2
+  "Skip the build when, after a full GC, more than this fraction of the
+   dynamic space is still live.  compile-file of the largest program in the
+   corpora allocates a few hundred MB at its peak, so a heap already half
+   full is the one place the build could exhaust it -- and heap exhaustion
+   is not always recoverable.  The program then simply stays uncached.")
+
+(defun %p-exit-build-heap-ok-p ()
+  "Room for a compile-file after the program?  Cheap in the ordinary case:
+   only a heap that LOOKS full pays for the full GC that tells garbage from
+   live data."
+  (flet ((room-p ()
+           (< (sb-kernel:dynamic-usage)
+              (* *p-exit-build-heap-fraction* (sb-ext:dynamic-space-size)))))
+    (or (room-p)
+        (progn (sb-ext:gc :full t) (room-p)))))
+
+(defun %p-exit-build-allowed-p (spec)
+  "Every guard of the deferred build, each from a probe (task #2702):
+   SAME PROCESS -- a fork child that leaves through `exit' runs the END phase
+   too, and must not build; the main program's COMPILE PHASE COMPLETED --
+   `BEGIN { exit 4 } use Side;' must not load Side at exit, perl never does;
+   the heap has room.  An exit that runs no exit hook at all (a signal,
+   POSIX::_exit, exec) never gets here."
+  (and spec
+       (eql (first spec) (sb-posix:getpid))
+       *p-compile-phase-done*
+       (%p-exit-build-heap-ok-p)))
+
+(defun %p-silence-std-fds ()
+  "Point fd 1 and fd 2 at /dev/null (fd 2 is kept under PCL_FASL_DEBUG), so a
+   reader on a pipe sees end-of-file when the PROGRAM is done, not when the
+   build is.  The caller has flushed every handle."
+  (let ((null (sb-posix:open "/dev/null" sb-posix:o-wronly)))
+    (sb-posix:dup2 null 1)
+    (unless (sb-posix:getenv "PCL_FASL_DEBUG")
+      (sb-posix:dup2 null 2))
+    (sb-posix:close null)))
+
+(defun %p-run-exit-build ()
+  "The deferred build, the LAST thing the END phase does (it is called from
+   the tail of %P-RUN-END-PHASE, not hooked beside it: a nested sb-ext:exit
+   in an exit hook skips every later hook, and the END phase exits that way
+   whenever an END block changed $?).  The build can never change the
+   program's outcome: every serious condition is handled (heap exhaustion is
+   a STORAGE-CONDITION, not an ERROR), and an `exit' an import calls during
+   the compile ends the build only -- p-exit inside the END phase throws to
+   %P-END-EXIT, exactly as it does for an END block."
+  (let ((spec *p-exit-build*))
+    (setf *p-exit-build* nil)
+    (when (%p-exit-build-allowed-p spec)
+      (ignore-errors (%p-silence-std-fds))
+      (let ((*p-in-end-phase* t)
+            (*p-end-phase-pid* (sb-posix:getpid))
+            (*p-exit-status* *p-exit-status*))
+        (handler-case
+            (catch '%p-end-exit
+              (%p-build-module-fasl (second spec) (third spec)))
+          (serious-condition () nil))))))
 
 (defun %p-load-script-text (lisp-path)
   "Load a script's cached CL TEXT — the fallback when there is no fasl, or
    when building or loading one failed.  The bindings are the ones `pcl`'s own
    loader used before this task, so a text run is what it always was: quiet
-   about loading, and the program's own warnings muffled exactly as they were."
+   about loading, and the program's own warnings muffled exactly as they were.
+   `pcl --no-cache` runs its temporary transpile through here too, so a die
+   during ANY text run of a script prints the program's output and nothing of
+   SBCL's (%P-LOAD-TEXT-STREAM; #2492)."
   (let ((*load-verbose* nil) (*load-print* nil)
         (*compile-verbose* nil) (*compile-print* nil))
     (handler-bind ((warning #'muffle-warning))
-      (load lisp-path)))
+      (%p-load-text-stream lisp-path)))
   t)
 
 (defun p-find-module-package (module-name)

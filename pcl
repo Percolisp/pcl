@@ -205,7 +205,7 @@ if ($use_script_cache) {
 my $lisp = transpile($source, $inline);
 
 # ---- run --------------------------------------------------------------------
-exec_sbcl(quiet_load_form($lisp), \@script_args);   # never returns
+exec_sbcl(script_text_form($lisp), \@script_args);   # never returns
 
 # ===========================================================================
 # Helpers
@@ -307,9 +307,17 @@ sub cl_list {
   return '(list ' . join(' ', map { '"' . cl_escape($_) . '"' } @_) . ')';
 }
 
-# Load a .lisp quietly: no loader chatter, and the program's own warnings
-# muffled -- what `pcl` has always done, kept in one named place because the
-# runtime's own text fallback (%p-load-script-text) must match it.
+# Run a PROGRAM's transpiled text (`--no-cache`, a script from STDIN, -n/-p):
+# the runtime's ONE text loader for a script, so a die during the run prints
+# what the cached run prints and none of SBCL's "While evaluating the form"
+# herald (tasks #2702, #2492).
+sub script_text_form {
+  my ($file) = @_;
+  return '(pcl::%p-load-script-text #P"' . cl_escape($file) . '")';
+}
+
+# Load the RUNTIME's source quietly (source mode only): no loader chatter,
+# and its own warnings muffled.
 sub quiet_load_form {
   my ($file) = @_;
   return '(let ((*load-verbose* nil) (*load-print* nil)'
