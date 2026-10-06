@@ -68,7 +68,7 @@ sub make_file {
 my $f1 = make_file("apple\nbanana\n");
 my $f2 = make_file("cherry\ndate\n");
 
-plan tests => 10;
+plan tests => 12;
 
 # 1: <> reads across @ARGV with cumulative $. and per-file $ARGV.
 test_diamond('<> spans @ARGV files; $. cumulative, $ARGV per-file', <<"PERL");
@@ -171,4 +171,32 @@ test_diamond('*ARGV = $fh (a lexical handle) is read by <>, *XX = $fh by <XX>', 
 open(my \$in, '<', '$f2') or die; \@ARGV = ('$f1'); *ARGV = \$in;
 while (<>) { print "A:\$_" }
 open(my \$in2, '<', '$f2') or die; *XX = \$in2; print "X:", scalar(<XX>);
+PERL
+
+# 9 (#2669): an inner `while (<>)` under its own `local *ARGV; local *ARGVOUT`
+# leaves the OUTER in-place edit running: the outer lines after it still go to
+# the outer file, not to STDOUT (io/nargv.t's shape).
+test_diamond('a nested <> with local *ARGV / *ARGVOUT keeps the outer in-place edit', <<'PERL');
+my $d = "/tmp/pcl_nargv_$$"; mkdir $d;
+my %c = (a => "a1\na2\n", b => "b1\n", c => "c1\n");
+for (sort keys %c) { open(my $w, '>', "$d/$_") or die; print $w $c{$_}; close $w }
+{ local *ARGV; local $^I = '.bak'; @ARGV = ("$d/a", "$d/b");
+  while (<>) { other() if $. == 2; print "X$_"; } }
+sub other { local *ARGV; local *ARGVOUT; local $_; @ARGV = ("$d/c");
+  while (<>) { print "Y$_" } }
+for (sort keys %c) { open(my $r, '<', "$d/$_") or die; local $/; my $t = <$r>; $t =~ tr/\n/|/; print "$_=$t\n" }
+unlink glob("$d/*"); rmdir $d;
+print "done\n";
+PERL
+
+# 9b (#2669 + review F4): `local *ARGV = <a lexical handle, a glob ref, a
+# glob>` inside a block, four times in a row: each <> loop reads its own
+# handle and the next block starts afresh.  INVERSE: before #2669 / F4 only
+# the first loop read anything.
+test_diamond('local *ARGV = $fh / \*{$fh} / \*G / *G, four blocks in a row', <<"PERL");
+{ open(my \$in, '<', '$f1') or die; local *ARGV = \$in; while (<>) { print "A:\$_" } }
+{ open(my \$in, '<', '$f1') or die; local *ARGV = \\*{\$in}; while (<>) { print "B:\$_" } }
+{ open(IN2, '<', '$f1') or die; local *ARGV = \\*IN2; while (<>) { print "C:\$_" } }
+{ open(IN3, '<', '$f1') or die; local *ARGV = *IN3; while (<>) { print "D:\$_" } }
+print "done\\n";
 PERL

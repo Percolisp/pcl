@@ -29703,6 +29703,22 @@ buffer's fill-pointer; everything else falls back to file-length."
            (,@localizer (,b))
            (,b)))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-local-glob-io-bindings (pkg-str name-str)
+    "`local *ARGV` / `local *ARGVOUT` (#2669): the state perl keeps IN those
+     globs -- the file <> is reading, the in-place edit and its selected output
+     -- lives in PCL specials, so localizing the glob must bind them too, or an
+     inner `while (<>)` with its own `local *ARGV; local *ARGVOUT` ends the
+     OUTER in-place edit (its output went to STDOUT).  Literal names only."
+    (when (and (stringp pkg-str) (stringp name-str) (string= pkg-str "main"))
+      (cond ((string= name-str "ARGV")
+             '((*p-argv-stream* nil) (*p-argv-started* nil)
+               (*p-argv-last-count* 0) (*p-argv-aliased* nil)))
+            ((string= name-str "ARGVOUT")
+             '((*p-inplace-out* nil) (*p-inplace-orig* nil)
+               (*p-inplace-tmp* nil) (*p-inplace-saved-out* nil)
+               (*standard-output* *standard-output*)))))))
+
 (defmacro p-local-glob (pkg-str name-str rhs-form &body body)
   "`local *pkg::name` and `local *pkg::name = RHS`: save all four slots, clear
    the ones RHS replaces, assign, run BODY, restore on exit.
@@ -29730,7 +29746,9 @@ buffer's fill-pointer; everything else falls back to file-length."
            ,@(if (eq rhs-form :none)
                  nil
                  `((p-glob-assign ,pkg-str ,name-str ,rv)))
-           (unwind-protect (progn ,@body)
+           (unwind-protect
+                ,(let ((io (%p-local-glob-io-bindings pkg-str name-str)))
+                   (if io `(let ,io ,@body) `(progn ,@body)))
              (%p-glob-restore ,sv ,cs ,ss ,as ,hs)))))))
 
 (defmacro p-local-glob-if (cond-form pkg-str name-str rhs-form &body body)
