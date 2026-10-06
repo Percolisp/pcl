@@ -8946,6 +8946,17 @@ sub _lower_sub_inner {
   # (docs/not-supported.md): perl's plain-`sub` twin keeps the FIRST instance,
   # PCL's shared cell reads the last write; for the `my sub` spelling, which
   # is what this shape is written as, the two agree.
+  # #2700: a `my (LIST) = @_` that IS the whole body is the body's VALUE --
+  # the list assignment's (the params in list context, the @_ COUNT in
+  # scalar context).  The fast paths consume it as a binding and leave no tail,
+  # so such a body takes the general path, where it is an ordinary last
+  # statement.  A signature sub is not this case: its synthesized unpack is a
+  # binding, and `sub f ($x) { }` returns the empty list (#752).
+  if ($params && !@body_stmts && !$tail_param
+      && !$self->{_sig_normalized}{ refaddr $sub }) {
+    $params     = undef;
+    @body_stmts = @stmts;
+  }
   if ($params && grep { $self->{_file_lex_renamed}{$_} } @$params) {
     $params     = undef;
     @body_stmts = @stmts;
