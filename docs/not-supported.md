@@ -1383,7 +1383,17 @@ spelling that decides bytes-vs-characters (`:raw`, `:bytes`, `:utf8`,
 `:encoding(NAME)`, and the `use open` defaults), and it is what makes
 `length`/`tell`/`-s`/`read`/`getc` agree with perl.  What it does not model:
 
-* `:crlf` line-ending translation (a no-op on Unix, which is where PCL runs);
+* `:crlf` line-ending translation.  (The old reading "a no-op on Unix" is
+  WRONG for an EXPLICIT `:crlf`: probed perl 5.40.3 on Linux, `binmode($fh,
+  ":crlf"); print $fh "x\n"` writes `78 0d 0a`; PCL writes `78 0a`.  It is a no-op only as perl's
+  Unix DEFAULT stack.  Task #2853, s510b.);
+* `binmode` on a PARTLY-READ handle whose descriptor cannot SEEK (a pipe, a
+  socket, a terminal): perl re-decodes its buffered read-ahead under the new
+  layer; PCL re-reads a seekable handle from its logical position (the same
+  answer) but on a pipe the read-ahead is LOST — probed s510b:
+  `open(my $p, "-|", "printf 'a\\n\\303\\251\\n'"); <$p>; binmode($p, ":utf8");
+  <$p>` is `"\x{e9}\n"` in perl and undef in PCL (before s510b too).  Task
+  #2852;
 * stacking as HISTORY — `binmode(, ':raw')` after `:encoding(UTF-8)` gives
   bytes, which is perl's answer, but there is no stack to pop TO;
 * `PerlIO::get_layers` introspection (task #139, which needs a design call).

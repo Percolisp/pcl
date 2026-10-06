@@ -19791,12 +19791,111 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((fd (and (sb-sys:fd-stream-p stream) (sb-sys:fd-stream-fd stream))))
     (and fd (integerp fd) (<= 0 fd 2) fd)))
 
-(defun %p-rebuild-fd-stream (fh stream ef)
-  "Re-open the ordinary (non-standard) handle FH's STREAM with external format
-   EF and install the replacement.  Returns the new stream.
+(defun %p-ef-in-place-routines ()
+  "The SBCL-internal routines that change a LIVE fd-stream's external format in
+   place, as a vector #(set get canon sync), or NIL when this SBCL's shape is not
+   the one PCL knows.
 
-   SBCL has no `(setf stream-external-format)` — the per-character routines are
-   baked into an fd-stream at construction — so the format is changed the way
+   SBCL's public interface has no `(setf stream-external-format)`, but
+   make-fd-stream installs a stream's per-character routines through
+   SB-IMPL::SET-FD-STREAM-ROUTINES, and that can be called again on a live
+   stream (task #2777).  It is INTERNAL and its argument list is
+   version-specific, so it is used only when every routine is present and the
+   lambda lists are exactly the ones read on SBCL 2.5.2 (the supported floor)
+   and 2.6.0 (CI's pin) — identical on both.  Never an argument order guessed:
+   any other shape answers NIL and binmode keeps the dup-and-rebuild path.
+
+   Decided ONCE, when the runtime loads.  A saved core runs only on the SBCL
+   that built it (the core cache is keyed on `sbcl --version`), so the answer
+   frozen into a core is still this host's answer; nothing is re-decided at
+   boot."
+  (flet ((fn (name)
+           (let ((s (find-symbol name "SB-IMPL")))
+             (and s (fboundp s) (fdefinition s))))
+         (args (f)
+           (ignore-errors (mapcar #'symbol-name (sb-kernel:%fun-lambda-list f)))))
+    (let ((set (fn "SET-FD-STREAM-ROUTINES"))
+          (get (fn "GET-EXTERNAL-FORMAT-OR-LOSE"))
+          (canon (fn "CANONIZE-EXTERNAL-FORMAT"))
+          (sync (fn "FD-STREAM-SYNCHRONIZE-OUTPUT")))
+      (and set get canon sync
+           (equal (args set)
+                  '("FD-STREAM" "ELEMENT-TYPE" "CANONIZED-EXTERNAL-FORMAT"
+                    "EXTERNAL-FORMAT-ENTRY" "INPUT-P" "OUTPUT-P" "BUFFER-P"
+                    "DUAL-CHANNEL-P"))
+           (equal (args get) '("EXTERNAL-FORMAT"))
+           (equal (args canon) '("EXTERNAL-FORMAT" "ENTRY"))
+           (vector set get canon sync)))))
+
+(defparameter *p-ef-in-place* (%p-ef-in-place-routines)
+  "%p-ef-in-place-routines' answer for this SBCL, decided at load.")
+
+(defun %p-reformat-in-place (stream ef routines)
+  "Re-install STREAM's character routines for external format EF on the SAME
+   stream object (task #2777).  ROUTINES is *p-ef-in-place*.
+
+   An output stream is flushed first: the routine resets the output buffer.  It
+   also resets the INPUT buffer, so an input stream's logical position is read
+   before and sought back after — that discards the read-ahead decoded the old
+   way and re-reads it in the new format.  On a descriptor that cannot seek (a
+   pipe, a socket, a terminal) the read-ahead is lost, as it was with the
+   rebuild this replaces.  BUFFER-P is NIL (keep the buffers: T allocates new
+   ones on every call and leaked, measured 200,000 switches 29 -> 84 MB RSS).
+   DUAL-CHANNEL-P only decides whether a read-write stream gets
+   SYNCHRONIZE-OUTPUT, so it is derived from that slot: the stream keeps the
+   value it was built with (a socket NIL, a file T)."
+  (let* ((in (input-stream-p stream))
+         (out (output-stream-p stream))
+         (entry (funcall (svref routines 1) ef))
+         (canon (funcall (svref routines 2) ef entry))
+         (dual (not (funcall (svref routines 3) stream)))
+         (pos (and in (ignore-errors (file-position stream)))))
+    (when out (ignore-errors (finish-output stream)))
+    (funcall (svref routines 0) stream 'character canon entry in out nil dual)
+    (when pos (ignore-errors (file-position stream pos)))
+    stream))
+
+(defun %p-rebuild-fd-stream (fh stream ef)
+  "Put the ordinary (non-standard) handle FH's STREAM under external format EF.
+   Returns the stream that now carries the handle.
+
+   IN PLACE (task #2777): the SAME stream object is re-formatted
+   (%p-reformat-in-place), so every name for the handle — a sub's copy of its
+   argument, `my $g = $fh`, a hash element, an object's slot — keeps writing
+   to the one stream, as perl's copies share one IO object.  Nothing keyed on
+   the stream object ($|, the fork-pipe child's pid, $.) moves.
+
+   FALLBACK, on an SBCL whose internal routine PCL does not recognise or a
+   stream that is not a plain character stream: %p-rebuild-fd-stream-by-dup,
+   which installs a NEW stream in FH only — every other name for the handle is
+   then left on a closed stream.  It is announced once under PCL_FASL_DEBUG."
+  (if (and *p-ef-in-place* (eq (stream-element-type stream) 'character))
+      (%p-reformat-in-place stream ef *p-ef-in-place*)
+      (progn
+        (%p-announce-ef-fallback)
+        (%p-rebuild-fd-stream-by-dup fh stream ef))))
+
+(defvar *p-ef-fallback-announced* nil)
+
+(defun %p-announce-ef-fallback ()
+  "Say ONCE, under PCL_FASL_DEBUG, that binmode is rebuilding instead of
+   re-formatting in place (see %p-rebuild-fd-stream)."
+  (when (and (not *p-ef-fallback-announced*) (sb-posix:getenv "PCL_FASL_DEBUG"))
+    (setf *p-ef-fallback-announced* t)
+    (format *error-output*
+            "PCL: binmode rebuilds the stream (~A): other copies of the handle ~
+             keep the closed one~%"
+            (if *p-ef-in-place*
+                "not a character stream"
+                "this SBCL's set-fd-stream-routines is not the known shape"))))
+
+(defun %p-rebuild-fd-stream-by-dup (fh stream ef)
+  "Re-open the ordinary (non-standard) handle FH's STREAM with external format
+   EF and install the replacement.  Returns the new stream.  The FALLBACK of
+   %p-rebuild-fd-stream: only FH is re-pointed, so every other name for the
+   handle is left on the closed original (task #2777).
+
+   SBCL has no PUBLIC `(setf stream-external-format)`, so the format is changed the way
    %p-line-buffer-if-tty changes BUFFERING: dup the descriptor, build a new
    fd-stream on the dup, and CLOSE the original rather than merely dropping it,
    so no finalizer can later close a descriptor out from under the replacement.

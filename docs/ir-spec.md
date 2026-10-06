@@ -3716,6 +3716,22 @@ are read LEFT TO RIGHT and the last one that names a discipline wins
 standard handles follow the same rule, and `use open qw(:std …)` is what moves
 them.
 
+**A `binmode` changes the discipline of the ONE handle, never which object the
+handle is (normative, s510b, task #2777).**  perl's handle is one IO object
+behind every copy, so a binmode through ANY name — a sub's copy of its
+argument, `my $g = $fh`, a hash or array element, a closure's capture, an
+object's slot, `\*FH`, `*FH{IO}` — is seen by every other name, and the
+handle's `$|`, `$.`, `tell` position and a pipe's child stay with it.  A
+translator must change the format of the existing stream in place, not open a
+replacement and re-point one variable (that leaves every other name on a closed
+stream: `sub w { my ($h) = @_; binmode($h, ":utf8"); print $h "caf\x{e9}\n" }
+w($fh); close $fh` wrote NOTHING).  An input handle keeps its logical position:
+the read-ahead decoded the old way is re-read in the new format.  Only
+`open(my $dup, ">&", $fh)` makes a second handle (a new descriptor) whose
+binmode is its own.  PCL: `%p-rebuild-fd-stream` re-installs the stream's
+routines with SBCL's internal `set-fd-stream-routines`; on an SBCL whose routine
+it does not recognise it keeps the old rebuild, which has the hole.
+
 **THE LAYER-STRING GRAMMAR (normative, s470bv, task #1224) — one reading,
 everywhere a layer list appears.**  perl's `PerlIO_parse_layers` separates
 layers on a RUN of `:` **and whitespace**, and that run may also LEAD the
@@ -3789,7 +3805,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `$^X` | the perl a child process should run: `$PERL`, else the first executable `perl` on `$PATH`, else `perl` — read when the process STARTS (normative, s507c, task #2689), never a value baked into a saved core.  Example: `PERL=/opt/perl pcl -e 'print $^X'` prints `/opt/perl`. |
 | `$a`, `$b` | sort comparator operands (per-package defvars) |
 | `$^W` | the program's warnings flag: a WRITABLE box, 0 unless the program (or `-w` / a `#!perl -w` line, which compile to a leading `BEGIN { $^W = 1; }`) sets it (normative, s506f).  Nothing in the runtime gates a diagnostic on it.  **`local` of any caret variable (`$^W`, `$^I`, `$^A`, …) binds the RUNTIME's symbol** -- the binding place is spelled exactly as a read is (`|$^W|`): under `:invert` a bare `$^W` token names a different, down-cased symbol, and the `local` silently did nothing.  Not modelled: perl's set-magic (`$^W = 5` reads 1, `undef` reads 0; task #2668). |
-| `$\`, `$,` | output record / field separator. **Both are UNDEF until the program sets one** (task #465) — the separator defaults are asymmetric and a translator must copy the asymmetry, not normalize it: `$/` is `"\n"`, `$;` is `"\034"`, `$"` is `" "`, `$!` is the errno dualvar, all DEFINED. An empty string here is invisible on the write side and wrong on the read side (`defined($,)`, `$\ // ","`, `length($\)`), which is what made it silent. `print` treats undef as "print nothing between/after": its readers test *non-empty string*, never `defined`. **`say` appends `"\n"` INSTEAD of `$\`, never as well as it** (task #500), while `$,` still separates its arguments; `printf` appends neither. perl does not *localize* `$\` over the call — an overload or tie handler that runs while an argument stringifies still reads the program's value (probed s442d) — so the terminator is passed to the one writer (`%p-write-list`), not bound over it. |
+| `$\`, `$,` | output record / field separator. **Both are UNDEF until the program sets one** (task #465) — the separator defaults are asymmetric and a translator must copy the asymmetry, not normalize it: `$/` is `"\n"`, `$;` is `"\034"`, `$"` is `" "`, `$!` is the errno dualvar, all DEFINED. An empty string here is invisible on the write side and wrong on the read side (`defined($,)`, `$\ // ","`, `length($\)`), which is what made it silent. `print` treats undef as "print nothing between/after", and a DEFINED separator is stringified and used — a NUMBER included: `local $, = 0; print "A","B"` prints `A0B`, `local $\ = 0` ends with `0`, and an object's `""` overload is its text (task #2778, s510b: the readers had tested *string-ness*, so every number was unset). **`say` appends `"\n"` INSTEAD of `$\`, never as well as it** (task #500), while `$,` still separates its arguments; `printf` appends neither. perl does not *localize* `$\` over the call — an overload or tie handler that runs while an argument stringifies still reads the program's value (probed s442d) — so the terminator is passed to the one writer (`%p-write-list`), not bound over it. |
 
 **The %SIG contract** (normative, s494g, task #2107).  A host that treats
 `%SIG` as a plain hash runs no handler but ALRM's, lets `^C` print its own
