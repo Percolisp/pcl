@@ -1662,4 +1662,35 @@ unlink map { "$d/$_" } keys %c; rmdir $d;
 });
 
 
+# s507c (#2700): a body that is ONLY `my (LIST) = @_` returns the list
+# assignment's value -- the params in list context, the @_ COUNT in scalar
+# context -- where the binding fast path left nothing; a signature sub stays
+# the empty list (#752).  (#2701): `{;` is perl's explicit BLOCK, so `sub f {
+# {;} }` is the empty list; `{ }` stays an anon hash, `map {; ...}` a block.
+# INVERSE: main fee16466 gave (0, undef) and a HASH ref.
+test_transpile("a body of only my (LIST) = @_ is its value; {;} is a block (s507c, #2700 #2701)", q{
+no warnings; use feature 'signatures';
+sub show { my ($n, $c) = @_; my @l = $c->(5, 6); my $s = $c->(5, 6); print "$n ", scalar(@l), "[", join(",", map { defined $_ ? (ref $_ ? ref $_ : $_) : "u" } @l), "] ", (defined $s ? (ref $s ? ref $s : $s) : "u"), "\n" }
+sub la1 { my ($x) = @_ } sub la2 { my ($x, $y) = @_ } sub la3 { my ($x) = @_; } sub la4 { my ($x, @r) = @_ } sub sa1 { my $x = shift }
+show("la1", \&la1); show("la2", \&la2); show("la3", \&la3); show("la4", \&la4); show("sa1", \&sa1);
+sub sg ($x, $y) { } show("sg", \&sg); sub z { my ($p) = @_; } my @z = z(); print "z ", scalar(@z), " ", scalar(z()), "\n";
+sub bb2 { {; } } sub bb3 { {; 4 } } sub bb4 { { } } sub bb6 { {; ; } } sub bb7 { 1; {;} }
+show("bb2", \&bb2); show("bb3", \&bb3); show("bb4", \&bb4); show("bb6", \&bb6); show("bb7", \&bb7);
+my @l = map {; "$_" => 1 } 1, 2; my @e = map {;} 1, 2; my $i = 0; while ($i++ < 3) {;} if (1) {;}
+print "map ", scalar(@l), " ", scalar(@e), " $i\n";
+});
+
+# s507c (review F2 on #2701): `{;` with content after it, STARTING a
+# statement, is a BLOCK too -- `sub f { {; a => 1 } }` returns (a, 1); `{ a =>
+# 1 }` and `+{ a => 1 }` stay hash references.  INVERSE: main fee16466 and the
+# first #2701 build returned a HASH ref for b3 / b4.
+test_transpile("{; LIST } starting a statement is a block, { k => v } a hash (s507c, review F2)", q{
+sub show { my ($n, $c) = @_; my @l = $c->(); my $s = $c->(); print "$n ", scalar(@l), " [", join(",", map { ref $_ ? ref $_ : defined $_ ? $_ : "u" } @l), "] ", (ref $s ? ref $s : defined $s ? $s : "u"), "\n" }
+sub b3 { {; a => 1 } } sub h1 { { a => 1 } } sub h2 { +{ a => 1 } } sub e1 { {; } } sub b4 { {; ; a => 1 } }
+sub b5 { 1; {; a => 2, 3 } } sub b6 { if (1) {; a => 1 } } sub b7 { do {; a => 1 } }
+show(b3 => \&b3); show(h1 => \&h1); show(h2 => \&h2); show(e1 => \&e1); show(b4 => \&b4); show(b5 => \&b5); show(b6 => \&b6); show(b7 => \&b7);
+my @x = map {; "$_" => 1 } 1, 2; print scalar(@x), "\n"; our $z = 7; print ${; "z"}, "\n"; {; print "bare\n" }
+});
+
+
 done_testing();

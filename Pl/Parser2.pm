@@ -5992,6 +5992,38 @@ sub _normalize_null_statements {
   for my $null (@{ $doc->find('PPI::Statement::Null') || [] }) {
     my $p = $null->parent or next;
     next unless $p->isa('PPI::Structure::Block');
+    # `{;}` -- the Null is the ONLY content: deleting it would leave `{}`,
+    # which every term-position classifier reads as an EMPTY ANON HASH,
+    # while perl reads `{;` as a BLOCK always (#2701).  The block's value
+    # is the empty list, so it becomes `{ (); }` (a block by the same
+    # classifiers, s507b's `{ (); }` shape) and the document is reparsed.
+    if (!$p->schildren) {
+      my ($semi) = grep { $_->isa('PPI::Token::Structure') } $null->children;
+      if ($semi && !grep { $_ != $null && $_->isa('PPI::Statement::Null') }
+                          $p->children) {
+        $semi->set_content('();');
+        $rewrote = 1;
+        next;
+      }
+    }
+    # `{; a => 1 }` STARTING a statement -- the same `;` with content after
+    # it: deleting it leaves `{ a => 1 }`, which the statement-start
+    # classifier reads as an anon hash, where perl's `{;` is a BLOCK (Fable
+    # review F2 on #2701).  The `;` becomes `();` (a statement with no
+    # value), so the brace stays a block.  Only a brace that begins its
+    # statement: after `map`/`do`/a cast the brace is a block anyway, and a
+    # deref block (`${; ...}`) keeps the deletion below.
+    if (!$null->sprevious_sibling && $p->schildren
+        && !$p->sprevious_sibling && $p->parent
+        && $p->parent->isa('PPI::Statement')
+        && !$p->parent->isa('PPI::Statement::Compound')) {
+      my ($semi) = grep { $_->isa('PPI::Token::Structure') } $null->children;
+      if ($semi) {
+        $semi->set_content('();');
+        $rewrote = 1;
+        next;
+      }
+    }
     $null->delete;
     my @kids = $p->schildren;
     next unless @kids == 1 && $kids[0]->isa('PPI::Statement');
@@ -11108,10 +11140,10 @@ sub _empty_value_form {
 # `()`, `( )`, `(())` — a parenthesised list with nothing in it, at any depth.
 sub _is_empty_list_expr {
   my ($expr) = @_;
-  return 0 unless @$expr == 1 && $expr->[0]->isa('PPI::Structure::List');
+  return 0 if !(@$expr == 1 && $expr->[0]->isa('PPI::Structure::List'));
   my @in = $expr->[0]->schildren;
-  return 1 unless @in;
-  return 0 unless @in == 1 && $in[0]->isa('PPI::Statement');
+  return 1 if !@in;
+  return 0 if !(@in == 1 && $in[0]->isa('PPI::Statement'));
   return _is_empty_list_expr([_strip_semi($in[0]->schildren)]);
 }
 
