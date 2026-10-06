@@ -492,7 +492,10 @@ my @c = glob("/etc/host*");
 print((grep { $_ eq "/etc/hostname" } @c) ? "found\n" : "missing\n");
 print scalar(glob("")), ":", scalar(my @e = glob("   ")), "\n";
 PL
-    is($out, "found\n0:0\n",
+    # s510c #2801: perl 5.40.3 prints `:0` -- `scalar(glob(""))` is undef
+    # (no words, iterator exhausted).  The old `0:0` encoded the bug that
+    # `glob` ran under the list-only fallback bind inside `scalar(…)`.
+    is($out, "found\n:0\n",
        '#450 inverse: a wildcard still globs; a blank pattern has no words');
 }
 

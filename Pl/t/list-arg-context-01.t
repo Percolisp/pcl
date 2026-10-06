@@ -62,7 +62,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 sub write_pl {
     my ($code) = @_;
@@ -222,9 +222,16 @@ my $cl2 = transpile('my $f = sprintf("%s,%s", (localtime(0))[5,4]);');
 like($cl2, qr/\(vector 5 4\)/,
      "a list slice's INDEX list is a vector, never (progn 5 4)");
 
-my $cl3 = transpile('my @x = (3,1,2); my $s = reverse sort @x;');
-like($cl3, qr/p-reverse \(p-list-ctx \(/,
+# s510c #2775: the callee must READ its context for the bind to be visible
+# (`sort` does not, and a built-in outside %WANTARRAY_SENSITIVE is emitted
+# bare); `localtime` does -- `scalar reverse localtime 0` is perl's 9-element
+# list reversed and joined, not the reversed date string.
+my $cl3 = transpile('my $s = reverse localtime 0;');
+like($cl3, qr/p-reverse \(p-list-ctx \(p-localtime 0\)\)/,
      'reverse is slurpy from argument 0: its first argument runs in list context');
+my $cl3b = transpile('my @x = (3,1,2); my $s = reverse sort @x;');
+like($cl3b, qr/\(p-reverse \(p-sort \@x\S*\)\)/,
+     '... and a context-blind built-in in that slot is emitted bare (#2775)');
 
 # `o`/`n` observe their context, so the bind is emitted rather than elided by
 # Pl::Passes' `insensitive-call` licence.

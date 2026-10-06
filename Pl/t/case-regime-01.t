@@ -80,7 +80,10 @@ like($u, qr/\(p-lc \$b\S* :u\)/, 'lc at a `use v5.12` site passes :u');
 like($u, qr/\(p-uc \$b\S* :u\)/, '... uc');
 like($u, qr/\(p-ucfirst \$b\S* :u\)/, '... ucfirst');
 like($u, qr/\(p-lcfirst \$b\S* :u\)/, '... lcfirst');
-like($u, qr/\(p-list-ctx \(p-lc \$b\S*\)\)\)/, '`no feature "unicode_strings"` in a block turns it back off');
+# s510c #2775: `lc` never reads its context, so it is emitted bare in the
+# print's argument list (no `(p-list-ctx …)` wrapper); the row still asserts
+# what its name says -- no `:u` operand inside the block.
+like($u, qr/\(p-print \(p-lc \$b\S*\)\)/, '`no feature "unicode_strings"` in a block turns it back off');
 my $f = emitted(q{use feature ':5.12'; print lc "x";});
 like($f, qr/\(p-lc "x" :u\)/, 'a `:5.12` feature bundle is a unicode_strings site');
 my $v = emitted(q{use feature 'unicode_strings'; use 5.010; print lc "x";});

@@ -215,8 +215,12 @@ sub _name_is_declared_sub {
 # sub wrongly returns the (k,v) pair).  gen_funcall_form wraps every call to one of
 # these in `(let ((*wantarray* t/nil)) …)` per the node's annotated context.
 #
-# INVARIANT: this set must list EVERY runtime builtin that branches on
-# *wantarray*.  When you add such a builtin to pcl-runtime.lisp, add it here.
+# INVARIANT (load-bearing since s510c, #2775): this set is the ONLY thing
+# that binds a BUILT-IN's context -- a built-in outside it is emitted bare in
+# every slot.  So it must list EVERY runtime builtin that reads *wantarray*
+# (directly or through a helper); when you add such a builtin to
+# pcl-runtime.lisp, add it here.  `readline` and `glob` here are the CALL
+# spellings `readline($fh)` / `glob("...")`.
 # (readline `<FH>` and the file-glob `<pat>` are separate PPI node types, not
 # funcalls — they apply the same wrapper in gen_readline_form / gen_glob_form.)
 my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
@@ -226,6 +230,8 @@ my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
   gethostbyname gethostbyaddr gethostent
   getnetbyname getnetbyaddr getnetent
   select
+  getpwnam getpwuid getpwent getgrnam getgrgid getgrent
+  glob readline
 );
 
 # Only exceptions that need different CL names than p-<perl-op>
@@ -3009,23 +3015,23 @@ sub gen_funcall_form {
   # join always evaluates its list arguments in list context.
   # THE FACT is `Config::core_arg_context`'s (join's prototype is `$@`: the
   # separator SCALAR, the tail LIST), and since #2004 that annotation is what
-  # makes a context-sensitive callee in the tail carry its own bind — this
-  # call-wide bind is therefore redundant for CORRECTNESS.  It is kept as an
-  # EMISSION shape: removing it was measured (s492b) at 12 more corpus files
-  # and one shapes file changing, all of them only losing a `(p-list-ctx …)`
-  # wrapper, so the churn buys nothing.  Do not read it as a second source of
-  # the context fact.
+  # makes a context-sensitive callee in the tail carry its own bind.  This
+  # call-wide bind is nevertheless LOAD-BEARING until #2803: a hash
+  # assignment with a non-literal right-hand side (`join ':', %h = (1) x 8`)
+  # has no context bind of its own and reads the bind from here (measured
+  # s510: without it that row answers 8, perl `1:1`).  Delete it only when
+  # every hash assignment binds its own context.
   if ($func_name eq 'join') {
     return Pl::CLForm::ctx_bind('t', $call);
   }
 
   # do FILE: same ctx-wrap as a user sub (do is a built-in, so it needs an
-  # explicit case ahead of the built-in list-only default below).
+  # explicit case ahead of the bare built-in return below).
   if ($func_name eq 'do') {
     return $self->_ctx_wrap_form($call, $ctx);
   }
 
-  # User sub calls: always bind *wantarray*; built-ins only in list context.
+  # User sub calls: always bind *wantarray*.
   if (!exists $RUNTIME_NAMES{$func_name}) {
     # Kind-A `insensitive-call` (Pl::Passes): a KNOWN user sub whose body
     # never observes its context — no `wantarray`, every `return` scalar-
@@ -3040,9 +3046,9 @@ sub gen_funcall_form {
     return Pl::Passes::fact('insensitive-call', $insens,
                             $self->_ctx_wrap_form($call, $ctx));
   }
-  return $ctx == LIST_CTX
-      ? Pl::CLForm::ctx_bind('t', $call)
-      : $call;
+  # A built-in outside %WANTARRAY_SENSITIVE never observes its context: it
+  # is emitted bare in every slot (#2775).
+  return $call;
 }
 
 
