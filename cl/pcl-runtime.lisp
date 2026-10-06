@@ -5906,7 +5906,7 @@
   "Perl string concatenation operator (.) with stringp fast path.
    Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (if (and (stringp a) (stringp b))
-      (concatenate 'string a b)
+      (%p-concat-2 a b)
       (%p-.-slow a b)))
 (declaim (notinline p-.))
 
@@ -6049,7 +6049,7 @@
    Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (if (and (cdr args) (some #'%pcl-dot-overloaded-p args))
       (reduce #'p-. args)
-      (apply #'concatenate 'string (mapcar #'to-string args))))
+      (%p-join-strings "" (mapcar #'to-string args))))
 
 (defun p-str-x (str count)
   "Perl string repetition operator (x).
@@ -6315,14 +6315,46 @@
    one-character arm is not a micro-taste: `$s .= 'x'` IS the shape (the
    `strcat` bench row, and every `.=` in a template/JSON encoder), and a
    `replace` call to move one character was HALF of that row — 35.9 % in the
-   generic sequence function plus 14.5 % in the bash-copy it dispatches to."
+   generic sequence function plus 14.5 % in the bash-copy it dispatches to.
+
+   THE ONE TYPED STRING COPY (task #2770, s510p): every runtime site that
+   copies a short string into a fresh or buffer string comes here -- the
+   str-buffer append, the :strbuf cell's append, join, and the `.' /
+   interpolation concatenations.  With S declared only `string', `replace'
+   is SBCL's GENERIC sequence function, and that call was 36-39 % of
+   `$s .= 'xy'` (the catmod / catself rows) to move two characters.  Arms:
+   a (simple-array character) source -- what every string the runtime
+   makes is -- copies inline up to 16 characters and through a replace
+   typed on BOTH sides above that (open-coded, no dispatch); a
+   simple-base-string source (a literal the reader made base) copies
+   character by character, typed; any other string (adjustable, displaced)
+   keeps the generic call: same answer, slower."
   (declare (type (simple-array character (*)) data)
            (type fixnum start n))
   (cond
     ((zerop n))
-    ((and (= n 1) (typep s 'simple-string))
-     (setf (aref data start) (schar s 0)))
+    ((typep s '(simple-array character (*)))
+     (if (<= n 16)
+         (dotimes (i n)
+           (setf (schar data (+ start i)) (schar s i)))
+         (replace data s :start1 start :end1 (+ start n) :end2 n)))
+    ((typep s 'simple-base-string)
+     (dotimes (i n)
+       (setf (schar data (+ start i)) (schar s i))))
     (t (replace data s :start1 start :end1 (+ start n) :end2 n))))
+
+(defun %p-concat-2 (a b)
+  "A fresh string of the strings A then B: one allocation, two typed copies
+   (%pcl-str-blit).  `concatenate 'string' on two arguments declared only
+   `string' went through SBCL's generic %concatenate-to-string -- 29 % of the
+   lcbytes row (`lc($s) . uc($s) . ucfirst($s)')."
+  (declare (type string a b))
+  (let* ((la (length a))
+         (lb (length b))
+         (out (make-string (+ la lb))))
+    (%pcl-str-blit out 0 a la)
+    (%pcl-str-blit out la b lb)
+    out))
 
 (defun %pcl-str-append (buf v)
   "In-place `$s .= V` on a str-buffer slot: extend and copy V's string
@@ -11277,7 +11309,10 @@ per element."
     (when (> need (array-dimension buf 0))
       (adjust-array buf (max need (* 2 (array-dimension buf 0)))))
     (setf (fill-pointer buf) need)
-    (replace buf s :start1 fp)
+    (let ((data (%p-str-data buf)))
+      (if data
+          (%pcl-str-blit data fp s (length s))
+          (replace buf s :start1 fp)))
     (setf (p-strbuf-snap sb) nil)))
 
 (defun %p-strbuf-install (box text)
@@ -27409,9 +27444,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       (dolist (x strs out)
         (if first
             (setf first nil)
-            (progn (replace out sep :start1 pos) (incf pos slen)))
-        (replace out (the string x) :start1 pos)
-        (incf pos (length (the string x)))))))
+            (progn (%pcl-str-blit out pos sep slen) (incf pos slen)))
+        (let ((len (length (the string x))))
+          (%pcl-str-blit out pos x len)
+          (incf pos len))))))
 
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
