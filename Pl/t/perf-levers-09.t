@@ -14,6 +14,8 @@
 #         and interpolation;
 #   #2772 grep over ONE untied @array walks a simple-vector snapshot of its
 #         cells (%p-grep-cells), and a boxed fixnum's truth is one compare;
+#   #2771 B1 print/say walk their argument list directly when no argument
+#         spreads (%p-print-arg-plain-p), not through p-flatten-args;
 #   #2773 `unshift` joins `push` on the raw-topic allowlist, so
 #         `unshift @a, $_ for A..B` binds $_ raw (no box per iteration).
 use v5.30;
@@ -74,6 +76,7 @@ sub lisp_out {
 # ─────────────────────────────────────────────────────────────────────────────
 like(lisp_out(q{(progn (print (not (null (fboundp '%p-concat-2)))) (let ((d (make-string 6 :initial-element #\-))) (%pcl-str-blit d 0 (coerce "ab" 'simple-base-string) 2) (%pcl-str-blit d 2 (make-array 2 :element-type 'character :initial-contents "cd" :adjustable t) 2) (%pcl-str-blit d 4 (copy-seq "ef") 2) (print d)))}), qr/\Q\E\n\Qt \E\n\Q"abcdef" \E/, '#2770: %p-concat-2 exists; %pcl-str-blit copies a base, a non-simple and a character string');
 like(lisp_out(q{(let ((a (make-array 3 :adjustable t :fill-pointer 3 :initial-contents (list 1 nil 3)))) (let ((v (%p-grep-cells a))) (print (list (simple-vector-p v) (p-box-p (aref a 0)) (eq (aref v 0) (aref a 0)) (aref a 1)))))}), qr/\Q\E\n\Q(t t t nil) \E/, '#2772: %p-grep-cells snapshots cells, promotes a raw slot in place, leaves a hole a hole');
+like(lisp_out(q{(print (list (not (null (fboundp (quote %p-print-arg-plain-p)))) (%p-print-arg-plain-p "s") (%p-print-arg-plain-p (make-array 1 :adjustable t :fill-pointer 1)) (%p-print-arg-plain-p (make-hash-table))))}), qr/\Q\E\n\Q(t t nil nil) \E/, '#2771 B1: %p-print-arg-plain-p exists and declines what p-flatten-args spreads');
 {
     my $file = src_file('my $n = 3; my @a; unshift @a, $_ for 1 .. $n; print "@a\n";');
     my $cl = PCLCore::transpile(qq{$pl2cl $file});
@@ -190,6 +193,70 @@ t3,t2,t1
 1005 1000 2
 1 2 3 
 2x 1x 1
+END_EXP
+answers(<<'END_SRC', <<'END_EXP', '#2771 B1 answers: print/say with $, and $\ set and unset, empty-list / undef / list / array / hash arguments, overload and tied FETCH counts, return value, closed and in-memory handles, select, $|');
+use feature 'say';
+my $nf = 0; my $nh = 0;
+{ package Ov; use overload '""' => sub { $nf++; "OV$_[0][0]" }; }
+{ package TS; sub TIESCALAR { my $v = $_[1]; bless \$v } sub FETCH { $nh++; ${$_[0]} } }
+{ package TH; sub TIEHANDLE { bless [] } sub PRINT { my $s = shift; push @$s, scalar(@_) . ":" . join("|", map { defined $_ ? $_ : "U" } @_); 1 } }
+sub none { return } sub und { return undef } sub one { return "o" } sub lst { return ("l1", "l2") }
+my @two = ("t1", "t2"); my @empty; my %h = (k => "v");
+sub arr { return @two } sub hsh { return %h }
+my $o = bless [7], 'Ov'; tie my $ts, 'TS', "tv";
+for my $set (0, 1) {
+  ($,, $\) = $set ? (",", "<RS>\n") : (undef, undef);
+  print "one";
+  print "a", "b", 3, 1.5, 2**70, "c";
+  print "a", none(), "b"; print "a", und(), "b"; print "a", one(), "b"; print "a", lst(), "b";
+  print "a", arr(), "b"; print "a", hsh(), "b"; print "a", (), "b"; print @empty; print "a", @two, "b"; print "a", %h, "b";
+  print undef; $_ = "topic"; print; print "x", $o, "y", $o; print "nf=$nf"; print "t", $ts, $ts; print "nh=$nh";
+  my $r = [1]; print "ref ", ($r =~ /^ARRAY\(0x[0-9a-f]+\)$/ ? "ok" : "bad");
+  my $rv = print ""; print "rv=$rv";
+  open(my $cl, '>', '/dev/null'); close $cl; { no warnings; my $rc = print $cl "x"; print "closed=", (defined $rc ? "[$rc]" : "undef"), " errno=", ($!+0) }
+  my $buf = ""; open(my $mh, '>', \$buf); print $mh "m1", "m2"; print {$mh} "m3"; close $mh; print "mem=[$buf]";
+  say "s1", "s2"; say "a", none(), "b"; { local $\ = undef; print "["; say @empty; print "]"; } say "a", @two;
+  print STDOUT "out"; my $old = select(STDOUT); print "sel"; select($old);
+  $| = 1; print "flush"; $| = 0; print "noflush";
+}
+END_SRC
+oneab31.51.18059162071741e+21cababaobal1l2bat1t2bakvbabat1t2bakvbtopicxOV7yOV7nf=2ttvtvnh=2ref okrv=1closed=undef errno=9mem=[m1m2m3]s1s2
+ab
+[
+]at1t2
+outselflushnoflushone<RS>
+a,b,3,1.5,1.18059162071741e+21,c<RS>
+a,b<RS>
+a,,b<RS>
+a,o,b<RS>
+a,l1,l2,b<RS>
+a,t1,t2,b<RS>
+a,k,v,b<RS>
+a,b<RS>
+<RS>
+a,t1,t2,b<RS>
+a,k,v,b<RS>
+<RS>
+topic<RS>
+x,OV7,y,OV7<RS>
+nf=4<RS>
+t,tv,tv<RS>
+nh=4<RS>
+ref ,ok<RS>
+<RS>
+rv=1<RS>
+closed=,undef, errno=,9<RS>
+mem=[m1,m2<RS>
+m3<RS>
+]<RS>
+s1,s2
+a,b
+[
+]a,t1,t2
+out<RS>
+sel<RS>
+flush<RS>
+noflush<RS>
 END_EXP
 
 done_testing();

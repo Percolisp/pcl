@@ -16339,6 +16339,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (values (%p-out-fh-or-fail (second args) site) (cddr args))
       (values (%p-default-out) args)))
 
+(declaim (inline %p-print-arg-plain-p))
+(defun %p-print-arg-plain-p (a)
+  "True when the print/say argument A is ONE element of the list as it stands:
+   none of p-flatten-args's spreading arms applies to it -- not a raw 
+   (a non-string vector), not a %hash of any kind (tied, plain or blessed-raw:
+   the blessed-raw one is an element there too, but declining is always
+   safe), not a hash marker.  Its last arm pushes such an argument unchanged
+   (a NIL included), so walking the &rest list directly is the same list
+   (task #2771 B1, s510p)."
+  (not (or (and (vectorp a) (not (stringp a)))
+           (hash-table-p a)
+           (%p-hash-marker-p a))))
+
 (defun %p-write-list (fh args ors site)
   "Write ARGS — a print/say LIST — to FH: $, between successive elements, then
    ORS when it is a non-empty string.  `print` passes the current $\\; `say`
@@ -16360,7 +16373,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (%p-guarded-write site
                     (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
                           (firstp t))
-                      (dolist (arg (coerce (p-flatten-args args) 'list))
+                      (dolist (arg (if (every #'%p-print-arg-plain-p args)
+                                     args
+                                     (coerce (p-flatten-args args) 'list)))
                         (when (and ofs (not firstp)) (%p-out-string ofs fh site))
                         (setf firstp nil)
                         (%p-out-string (to-string arg) fh site)))
