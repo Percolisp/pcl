@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-06",
+   "description" : "FOUND by a2775 (s510, 2026-10-06) while auditing the context binds (task #2775).  Probe: /home/bernt/pcl/.claude/worktrees/agent-a24e9cbaab6227172/scratch/a2775/probe-a4.pl rows L-evalstr / S-evalstr / SUBL-S-evalstr and /home/bernt/pcl/.claude/worktrees/agent-a24e9cbaab6227172/scratch/a2775/emit1.pl line 3, perl 5.40.3 vs main 597a2bd4.\n\nWHERE: Pl/ExprToCL.pm, the `eval` arm of gen_funcall_form (~lines 2433 and 2439 at 597a2bd4) RETURNS `_gen_eval_string_form(...)` before the context rule at the end of the function is reached, so neither %WANTARRAY_SENSITIVE's both-context bind nor the list-only fallback ever wraps `(p-eval ...)`.  p-eval then binds *pcl-caller-wantarray* from whatever *wantarray* the enclosing statement or call left behind (a statement's p-void-ctx -> the eval text sees scalar/void; an argument of a list-context call -> list).  The eval BLOCK arm uses its own `$wrap` and is right in every probed slot.\n\nMEASURED: list slot at top level -> scalar answer (142 vs 1342); scalar slot inside a sub called in list context -> the list (ARRAY(0x6)).  Unaffected by #2775's change either way (the eval arm never reaches the fallback).  Related: #161 (void-context string eval), #1460 (eval.t's unnamed keys).\n\nSHAPE OF THE FIX (not taken): route the eval STRING result through the same `_ctx_wrap_form` the eval BLOCK arm uses (`$wrap`), so the eval text's `wantarray` and its value follow the SITE's context.  Probe all three slots and the void slot (#161) before and after.",
+   "id" : "2800",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (pre-existing): `eval STRING` gets NO context bind in any slot -- `print 1, eval \"(3,4)\", 2` prints 142 (perl 1342); `my $x = eval \"(5,6,7)\"` inside a sub called in LIST context gives ARRAY(0x..) (perl 7)"
+}

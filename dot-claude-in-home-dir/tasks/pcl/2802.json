@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-06",
+   "description" : "FOUND by a2775 (s510, 2026-10-06) as a side observation: `print join \",\", getpwuid 0` prints root,!*,0,0,,,root,/root,/bin/bash under perl 5.40.3 (run as an ordinary user) and root,x,0,0,... under PCL (/home/bernt/pcl/.claude/worktrees/agent-a24e9cbaab6227172/scratch/a2775/probe-pw.pl, /home/bernt/pcl/.claude/worktrees/agent-a24e9cbaab6227172/scratch/a2775/probe-a5.pl row printarg-pwuid).  Not a context question.  perl's pp_gpwent consults the shadow database (getspnam, HAS_GETSPNAM) and the libc NSS answer; PCL reads sb-posix's passwd struct only.  Measure first what perl does for a non-root user on a box without readable /etc/shadow (the !* may come from systemd-userdb / nss), then decide whether it is worth matching; low priority.",
+   "id" : "2802",
+   "status" : "pending",
+   "subject" : "getpwuid/getpwnam: the PASSWORD field differs from perl -- PCL \"x\" (the /etc/passwd placeholder), perl 5.40.3 \"!*\" for root on this box"
+}

@@ -54,9 +54,11 @@ Read through MAIN's checkout, never through your worktree's copy:
   (one perf agent at a time).
 - **a2775** (analysis only, no code change, low priority; brief `s510/analysis-2775-prompt.md`; task IDs
   2800–2809): takes the slot s508a frees.
-STATE 20:24: s507c PART TWO is MERGED (`~/pcl-agent-scratch/s510/MAIN-READY-1`: main's code commit is
-`c1d9bed7`, gen v2-4281, gate 279 files / 9,782 rows); s508a and s507p are running.
-MERGE ORDER = READINESS ORDER (s507c PART TWO first).  When a batch is merged, Fable writes
+- **s510f** (the first run of a program built from `docs/first-run-from-text-design-s510.md`, #2702; brief
+  `s510/s510f-prompt.md`; task IDs 2830–2849; runtime-only, v2-4580 only if it emits): WITH isolation.
+STATE 23:35: **the USER raised the cap to THREE** ("Please run three parallel").  MERGED today: s507c PART TWO
+(`MAIN-READY-1`), s507p (`MAIN-READY-2`), s508a (`MAIN-READY-3`: main's code commit `597a2bd4`, gen v2-4380, gate
+281 files / 9,832 rows, sweep 18735).  RUNNING: s510p (finishing; merges next = `MAIN-READY-4`), a2775, s510f.
 `~/pcl-agent-scratch/s510/MAIN-READY-<N>` (sha + main's numbers) and tells the running agents; each
 rebases across it KEEPING BOTH sides (`cl/pcl-runtime.lisp`, the baselines, `docs/DECIDED.md`,
 `docs/session-log.md`, `docs/ir-spec.md`), renumbers its generation string above main's if it emits,
