@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-06",
+   "description" : "FOUND s509 (Fable, 2026-10-06) by the review probes for s508a (~/pcl-agent-scratch/s509/review/p8/k.pl row 19); PRE-EXISTING\non main and unchanged by that batch (its `p-use-constant` gives the same answer).\n\nREPRODUCER:\n  my $f = sub { package Other; use constant A => \"other-a\"; package main; join \" \", Other::A, Other->A };\n  print $f->(), \"\\n\";          perl: other-a other-a        PCL: dies \"Undefined subroutine &Other::A called\"\nAt file level (`package Other; use constant A => ...; package main;`) it is right.\n\nLIKELY (not measured): the constant is defined in the package current at the START of the enclosing sub (main), not in\nthe package the in-body `package` statement switched to -- the family of reference_in_package_is_read_time: a package\nswitch inside a block must emit QUALIFIED names.  CHEAP MEASUREMENT: in the reproducer print `main->can(\"A\") ? \"in main\"\n: \"nowhere\"`.\n\nPRIORITY: low (a package switch inside a sub body is rare; it fails LOUDLY).\n",
+   "id" : 2769,
+   "status" : "pending",
+   "subject" : "A `use constant` after a `package` statement INSIDE a sub body defines nothing -- `sub { package Other; use constant A => \"x\"; package main; Other::A }` dies \"Undefined subroutine &Other::A called\" (perl: x)"
+}
