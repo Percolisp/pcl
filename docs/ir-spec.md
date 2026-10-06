@@ -2139,6 +2139,19 @@ throw, so it carries no `:nonlocal_exit.return` obligation.
   (p-args-body (block nil (p-return-empty))))     ; sub hook { }  →  (hook(), 1) has 1 element
 ```
 
+**A body that is ONLY its argument unpack is that list assignment's value
+(normative, s507c, tasks #2700 #2701).**  `sub f { my ($x) = @_ }` returns
+`($x)` in list context and the `@_` COUNT in scalar context, like any list
+assignment in tail position, so it takes the general lowering, never the
+binding fast path (whose unpack leaves no tail).  A signature sub stays the
+empty list (#752); a shift run keeps its last parameter as the tail.  `{;` is
+always a BLOCK: `sub f { {;} }` returns the empty list (the parse rewrites a
+sole `;` to `();`), and `{; LIST }` starting a statement is a block too (`sub f { {; a => 1 } }` returns `(a, 1)`), while `{ }` and `{ a => 1 }` stay anon hashes.
+
+```perl
+sub la { my ($x) = @_ }   my @l = la(5, 6);   # @l = (5); scalar(la(5, 6)) is 2
+```
+
 Everything else still throws: a `return` under a statement modifier, a
 multi-element `return (A, B)`, a `return` nested in a compound or a loop, and a
 `return` inside `eval { }` or a sort comparator (whose frame is a different
