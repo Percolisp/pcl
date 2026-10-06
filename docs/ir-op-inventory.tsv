@@ -70,6 +70,7 @@ $^x	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	U
 $_	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl's $_ - default variable
 |$`|	symbol-macro	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		
 $ARGV	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl $ARGV - current filename of the <> diamond operator ("-" for STDIN)
+${^global_phase}	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		perl's ${^GLOBAL_PHASE}
 ${^taint}	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Taint mode is not enabled
 ${^unicode}	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl ${^UNICODE} - perl's -C flags as a number; 0 without -C, as perl reads it. `pcl -C...` sets it at compile time (tools/lib/PCLSwitches.pm, s506f).
 |$\||	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Output autoflush flag (magic — per selected handle, writes clamp to 0/1)
@@ -362,6 +363,7 @@ p-ensure-hashref	function	elements	(ref)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	
 p-env-get	function	env	(key)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Get environment variable value.
 p-env-set	function	env	(key value)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Set environment variable value.
 p-eof	macro	io	(&rest args)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl eof - check end of file. Bareword filehandle is auto-quoted.
+p-eof-argv	function	UNCLASSIFIED	nil	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		`eof()` WITH EMPTY PARENS (#2703): the end of the pseudo-file made of every <> file -- true only at the end of the LAST one. Like perl's nextargv it opens the n
 p-errno-string	function	magic-global	nil	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	setf	Return $! as dualvar: (to-number ...) = errno, (to-string ...) = strerror. When errno=0, returns "" (falsy) to preserve Perl's !$! truthiness semantics.
 p-esc	macro	ir-literal	(payload)	insensitive	none	none	no	no	no	none		The string literal PAYLOAD denotes, decoded at macroexpansion time.
 p-eval	function	exception	(string &optional lex-alist features)	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Perl eval(STRING): transpile and evaluate a Perl string at runtime. LEX-ALIST carries the caller's in-scope lexicals (name . container) so the eval body can cap

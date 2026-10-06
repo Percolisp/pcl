@@ -13,10 +13,10 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **741**
+* names exported: **743**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 741
-* UNCLASSIFIED (no family rule matches): **9**
+* with a machine-readable `Contract:` tail: **69** of 743
+* UNCLASSIFIED (no family rule matches): **10**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -646,7 +646,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-esc` | macro | `(payload)` | insensitive | none | none | no | no | no | none |
 | `p-fact` | macro | `(licence form)` | insensitive | none | none | no | no | no | none |
 
-## magic-global (138)
+## magic-global (139)
 
 *No ir-spec §10 row.*  the magic globals themselves — ir-spec §8
 
@@ -709,6 +709,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `$^w` | variable | `` | — | — | — | — | — | — | — |
 | `$^x` | variable | `` | — | — | — | — | — | — | — |
 | `$_` | variable | `` | — | — | — | — | — | — | — |
+| `${^global_phase}` | variable | `` | — | — | — | — | — | — | — |
 | `${^taint}` | variable | `` | — | — | — | — | — | — | — |
 | `${^unicode}` | variable | `` | — | — | — | — | — | — | — |
 | `$~` | variable | `` | — | — | — | — | — | — | — |
@@ -1156,7 +1157,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 # UNCLASSIFIED
 
-## UNCLASSIFIED (9)
+## UNCLASSIFIED (10)
 
 *No ir-spec §10 row and no note.*
 
@@ -1166,6 +1167,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-cast-$-box` | function | `(val &optional site)` | — | — | — | — | — | — | — |
 | `p-default-layers` | macro | `((in-layers out-layers) &body body)` | — | — | — | — | — | — | — |
 | `p-defclass` | macro | `(name supers slots)` | — | — | — | — | — | — | — |
+| `p-eof-argv` | function | `nil` | — | — | — | — | — | — | — |
 | `p-import-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
 | `p-scope-close` | macro | `((&rest handles) &body body)` | — | — | — | — | — | — | — |
 | `p-symref-site` | macro | `nil` | insensitive | none | none | no | no | no | none |
