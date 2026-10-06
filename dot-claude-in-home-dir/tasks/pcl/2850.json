@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-07",
+   "description" : "FILED s510b (Opus, 2026-10-07) from the #2778 probe table; perl 5.40.3, tree = s510b.\n  package Tie; my $n=0; sub TIESCALAR { my ($c,$v)=@_; bless \\$v,$c } sub FETCH { $n++; ${$_[0]} } sub STORE { ${$_[0]}=$_[1] }\n  package main; tie $,, 'Tie', 0; print 'A','B','C'; untie $,;     perl: A0B0C, FETCH count 3   PCL: A0B0C, FETCH count 1\n  tie $\\, 'Tie', 0; print 'D'; untie $\\;                           perl: D (no FETCH, nothing appended)   PCL: D0 (one FETCH)\nEdge case, not in any corpus; %p-separator-text reads each separator once per print.  Probe: scratch/s510b/probes/sep.pl of the s510b worktree (rows 'tie').",
+   "id" : "2850",
+   "status" : "pending",
+   "subject" : "A TIED $, is FETCHed once per print (perl: once per separator use) and a tie on $\\ is honoured (perl ignores it -- PL_ors_sv is a copy made at assignment)"
+}

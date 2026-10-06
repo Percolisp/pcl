@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-07",
+   "description" : "FILED s510b (Opus, 2026-10-07); perl 5.40.3.\n  open(my $p, '-|', \"printf 'a\\\\n\\\\303\\\\251\\\\n'\"); my $l1 = <$p>; binmode($p, ':utf8'); my $l2 = <$p>;\n  perl: $l2 = \"\\x{e9}\\n\"     PCL: undef (before s510b too: the old rebuild lost it the same way)\nA seekable handle is right since s510b (the logical position is saved and re-sought).  A descriptor that cannot seek has its bytes in SBCL's ibuf and decoded characters in the ansi-stream cin-buffer; set-fd-stream-routines resets the ibuf.  Direction: before the re-install, take the unconsumed bytes (ibuf head..tail) plus the unconsumed decoded characters re-encoded in the OLD format, and put them back into the reset ibuf.  Measure first whether the cin-buffer survives (buffer-p NIL keeps the array; its in-index is not reset).  Documented in not-supported.md (layer section).",
+   "id" : "2852",
+   "status" : "pending",
+   "subject" : "binmode on a PARTLY-READ pipe / socket loses the read-ahead (perl re-decodes it under the new layer)"
+}

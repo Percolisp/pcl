@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-07",
+   "description" : "FILED s510b (Opus, 2026-10-07) from the #2777 handle-names table; perl 5.40.3.\n  open(my $fh, '>:utf8', $T); binmode($fh, ''); print $fh \"\\x{e9}\";     perl: c3 a9 (still :utf8)   PCL: e9\nSame on input (':utf8' then binmode '' : perl still decodes).  Cause (read): %p-binmode-impl maps only NULL/undef to ':raw', but %p-layer-ef of '' returns the DEFAULT, which binmode passes as the byte format; an empty list names no layer, so perl changes nothing.  Pre-existing (base 3ea47a41 the same).",
+   "id" : "2851",
+   "status" : "pending",
+   "subject" : "`binmode($fh, \"\")` (an EMPTY layer string) pops the handle to bytes in PCL; perl keeps the layers it had"
+}

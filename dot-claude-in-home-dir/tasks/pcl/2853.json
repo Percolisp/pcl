@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-07",
+   "description" : "FILED s510b (Opus, 2026-10-07) from the #2777 handle-names table; perl 5.40.3 on Linux.\n  open(my $fh, '>', $T); binmode($fh, ':crlf'); print $fh \"x\\n\";      perl: 78 0d 0a     PCL: 78 0a\nAlso an open MODE '>:crlf'.  The not-supported.md bullet was corrected in s510b; whether to implement (SBCL has :crlf newline variants of its external formats: (:utf-8 :newline :crlf)) is open.  Input through :crlf not probed.",
+   "id" : "2853",
+   "status" : "pending",
+   "subject" : "`:crlf` is not a no-op on Unix when asked for explicitly: perl writes CR LF through `binmode($fh, ':crlf')`, PCL writes LF (not-supported.md said 'a no-op on Unix')"
+}
