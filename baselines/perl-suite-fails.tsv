@@ -1921,15 +1921,11 @@ comp/utf.t	16	ok	not ok	UTF-16LE 0 1 chrs 0xff	#1693
 comp/utf.t	24	ok	not ok	UTF-16LE 0 1 chrs 0xfff	#1693
 comp/utf.t	32	ok	not ok	UTF-16LE 0 1 chrs 0xffff	#1693
 comp/utf.t	40	ok	not ok	UTF-16LE 0 1 chrs 0xfffff	#1693
-io/argv.t	9	ok	not ok	$. counts <>	#1710
-io/argv.t	0	(none)	extra [PCL #10]	*extra* $. counts <>	#1710
-io/argv.t	0	(none)	extra [PCL #11]	*extra* $. counts <>	#1710
 io/argv.t	0	(none)	renumbered	*summary*	#1710
 io/argv.t	33	ok	not ok	<<>> does not open empty string in ARGV	#1710
 io/argv.t	34	ok	not ok	<<>> does not treat ...| as fork	#1710
 io/argv.t	35	ok	not ok	<<>> does not treat ...| as fork after eof	#1710
 io/argv.t	32	ok	not ok	<> does not open empty string in ARGV	#1710
-io/argv.t	36	ok	not ok	ARGV aliasing and eof()	#1710
 io/argv.t	13	ok	not ok [PCL #15]	[at t/io/argv.t line 119]	#1710
 io/argv.t	25	ok	(missing)	[at t/io/argv.t line 163]	#1710
 io/argv.t	26	ok	(missing)	[at t/io/argv.t line 164]	#1710
@@ -1988,8 +1984,6 @@ io/iofile.t	3	ok	not ok	IO::File now loaded	#1710
 io/iprefix.t	2	ok	not ok	backup file contents stay the same	#1710
 io/iprefix.t	1	ok	not ok	file contents properly replaced	#1710
 io/layers.t	0	ok*	(no TAP)	*summary*	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
-io/nargv.t	0	(none)	renumbered	*summary*	#1710
-io/nargv.t	5	ok	not ok [PCL #6]	#5	s506f F1 (#2669): `local $^I` now takes effect (it bound a down-cased dead symbol, so these rows printed to STDOUT and passed); the NESTED in-place edit (other() with its own local *ARGV/*ARGVOUT) then loses the outer loop's output file
 io/nargv.t	6	ok	(missing)	check setuid mode preserved	s506f F1 (#2669): as row 5 -- the in-place edit is now real; with it the setuid row produces no TAP (its file goes to the nested loop's output)
 io/open.t	132	ok	not ok	<...> line 1 when $/ is set to a glob	#1710
 io/open.t	156	ok	not ok	also on chmod	#1710
@@ -9137,7 +9131,6 @@ run/exit.t	14	ok	not ok	WIFEXITED	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (rea
 run/exit.t	15	ok	not ok	WIFSIGNALED	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
 run/exit.t	16	ok	not ok	WTERMSIG	#1710 -- ${^CHILD_ERROR_NATIVE} is absent (reads empty, perl: the raw wait status); pre-existing: fails identically on 40da28bd and dc20a721 extractions (s494g A/B, scratch/s494g/ab-base40.log, ab-base2.log)
 run/locale.t	0	ok*	(no TAP)	*summary*	#1705
-run/noswitch.t	2	ok	not ok	read from aliased DATA filehandle	#1702
 run/runenv_hashseed.t	278	ok	not ok	mode = DETERMINISTIC same key order with different seed no more than 2 times	#1588
 run/runenv_hashseed.t	59	ok	not ok	mode = NO same key order with different seed no more than 2 times	#1588
 run/runenv_hashseed.t	68	ok	not ok	mode = RANDOM same key order no more than 2 times	#1588
@@ -9151,7 +9144,6 @@ run/runenv_randseed.t	9	ok	not ok	Works as expected with forks.	#1236
 run/switchC.t	14	ok	not ok	\#!perl -C but not command line	#1272
 run/switchC.t	13	ok	not ok	\#!perl -C with different -C on command line	#1272
 run/switchC.t	15	ok	not ok	perl -C00 [perl \#123991]	#1272
-run/switchF.t	0	ok*	(no TAP)	*summary*	s506f #2666: the -F loop now RUNS but reads nothing -- the file does `BEGIN { *ARGV = *DATA }` and PCL's <> does not follow the aliased ARGV
 run/switchI.t	3	ok	not ok	-I	#1708
 run/switchI.t	4	ok	not ok	-I with colons	#1708
 run/switchM.t	1	ok	not ok	Ensure -Irun/flib produces correct filename in warnings	#1708
@@ -9159,7 +9151,6 @@ run/switchM.t	4	ok	not ok	Ensure -Irun/flib loads pmc	#1708
 run/switchM.t	2	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings	#1708
 run/switchM.t	5	ok	not ok	Ensure -Irun/flib/ loads pmc	#1708
 run/switchM.t	3	ok	not ok	Ensure -Irun/flib/ produces correct filename in warnings with space after -M	#1708
-run/switcha.t	0	ok*	(no TAP)	*summary*	s506f #2666: as run/switchF.t -- the -a loop runs over an ARGV aliased to DATA and reads nothing
 run/switchd-78586.t	1	ok	not ok	[at t/run/switchd-78586.t line 31]	#1706
 run/switchd-78586.t	2	ok	not ok	[at t/run/switchd-78586.t line 39]	#1706
 run/switchd.t	16	ok	not ok	%DB::lsub is not vivified	#1706
@@ -9197,11 +9188,6 @@ run/switches.t	130	ok	not ok	fail final rename	#1709
 run/switches.t	126	ok	not ok	file successfully saved after fork	#1709
 run/switches.t	124	ok	not ok	fork while in-place editing	#1709
 run/switches.t	131	ok	not ok	skip Testing without *at functions	#1709
-run/switchn.t	0	(none)	renumbered	*summary*	#1702
-run/switchn.t	2	ok	(missing)	Checking line 2	#1702
-run/switchn.t	1	ok	(missing)	Checking line 1	s506f #2666: the #! -n loop now runs (#1702 done) but reads nothing -- BEGIN *ARGV = *DATA
-run/switchp.t	1	ok	(missing)	-p switch first iteration	#1702
-run/switchp.t	2	ok	(missing)	-p switch second iteration	#1702
 run/switchx.t	8	ok	not ok	-x and -e gives expected error	#1702
 uni/attrs.t	0	(none)	renumbered	*summary*	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	31	ok	not ok [PCL #30]	Calling closure proto with (no) args	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)

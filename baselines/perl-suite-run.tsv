@@ -1701,7 +1701,7 @@ comp/term.t	23	0	23	0	OK		0
 comp/uproto.t	32	0	13	21	DIFF		0
 comp/use.t	87	0	47	40	DIFF	s497b: 42/45 -> 47/40, strict refs enforced (#2103): the five "ver decl enables refs" / "explicit use strict" rows | s492a: 40/47 -> 42/45 (#1999 second half, `use builtin LIST` IMPORTS -- perl aliases each named builtin into the calling package): rows 35 `builtin funcs not removed after use v5.36` and 36 `imported true is eq "1"`.  Rows 33/34, the VERSION-declaration spelling that enables builtins implicitly, still fail (#1690).  This restores the count s488a's #1249(7) change had taken it down from.  Serial re-run, base 5316d666 vs tree.
 comp/utf.t	4216	0	24	4192	DIFF	s470bv: #1115 (already 24/4192 at a3d6d8e, 12/4204 at 614c6af)	0
-io/argv.t	52	1	27	26	DIFF		0
+io/argv.t	52	1	28	23	DIFF	s507c PART TWO #2703/#2666 (eof(), ARGV aliasing): 27/26 -> 28/23	0
 io/binmode.t	9	0	9	0	OK		0
 io/bom.t	3	0	1	2	DIFF		0
 io/closepid.t	3	0	3	0	OK		0
@@ -1722,7 +1722,7 @@ io/iofile.t	3	0	2	1	DIFF	s488a: 1/2 -> 2/1 at a31369fc (s473f member 5, #1074: a
 io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
-io/nargv.t	7	0	5	1	DIFF	s506f F1 (#2669): 11/2 -> 5/1, `local $^I` now takes effect (it was a dead down-cased binding, the rows passed printing to STDOUT); the nested in-place edit then loses the outer output file	0
+io/nargv.t	7	0	6	1	DIFF	s507c PART TWO #2669 (local *ARGV / *ARGVOUT keep the outer in-place edit): 5/1 -> 6/1	0
 io/open.t	188	0	152	36	DIFF	s488a: 154/34 -> 152/36 at 4bdde171 (s473w member 4, #1507: `use overload` is a compile-phase member -- perl's `use` is a BEGIN).  io/open.t builds its NUL-path object at line 443 and declares `use overload '""'` at line 523, so before the fix the object stringified as `OverloadTest=SCALAR(0x..)` and open/chmod failed on a path that did not exist -- the two rows passed for the wrong reason.  They now really stringify to "$temp\0.overload" and join #1710's NUL-in-a-pathname family (PCL accepts a NUL where perl 5.18+ refuses it); their `glob` twin was already failing	0
 io/openpid.t	10	0	10	0	OK	s501b #2082: DIFF 8/2 -> OK 10/0 -- 'message from first/second process': pipe() installs both ends through %p-install-fh (FD_CLOEXEC) and the emulated exec releases every fd, so the reader sees EOF; A/B a0899ba6 8/2 --jobs 1 (scratch/s501b/companion-ab-{base,tree}.log)	0
 io/paragraph_mode.t	80	0	80	0	OK		0
@@ -2044,7 +2044,7 @@ op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A	0
 opbasic/arith.t	183	0	183	0	OK		0
 opbasic/cmp.t	13280	0	13280	0	OK	s470bv: #1221 (b25afbc; 12078/0 at a3d6d8e): 1202 rows that were never produced now run and PASS -- the file is OK	0
 opbasic/concat.t	254	0	250	4	DIFF	s504 #2389: 249/5 -> 250/4 UP at bd0c38e3 (s497b): `$$re = $a . $b` passes	0
-opbasic/magic_phase.t	7	0	0	5	DIFF		0
+opbasic/magic_phase.t	7	0	5	0	DIFF	s507c PART TWO #2761 (${^GLOBAL_PHASE}): 0/5 -> 5/0	0
 opbasic/qq.t	30	0	30	0	OK		0
 re/alpha_assertions.t	2279	0	1942	87	DIFF	s504 #2389: 1951/78 -> 1942/87 DOWN at 577a09a4 (s496a #2372): nine rows that expect NO MATCH were passing on a swallowed regex compile error; the error now dies -- honest | aborted-forms:2: PCL: string literal: code point NxN is not implemented ? above SBCL's char-code-limit (U+N; reaped 1 orphan(s)	0
 re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
@@ -2131,7 +2131,7 @@ run/dtrace.t	0	0	0	0	NOTAP		0
 run/exit.t	17	0	12	5	DIFF	s494g #2107: the snapshot's 14/3 was STALE (40da28bd and dc20a721 both read 10/7: the ${^CHILD_ERROR_NATIVE} rows, #1710); s494g 10/7 -> 12/5 -- 'Term by signal' / 'Term by signal $?' pass (the `kill 15, $$` child dies BY the signal)	0
 run/fresh_perl.t	91	0	62	29	XDIFF	s496a #2060: 61/30 -> 62/29 -- [perl #20667] unicode regex row passes; its registration left perl-suite-expected-rows.tsv by --bless-rows	0
 run/locale.t	44	0	0	0	DIFF		0
-run/noswitch.t	3	0	2	1	DIFF		0
+run/noswitch.t	3	0	3	0	OK	s507c PART TWO #2666 (BEGIN *ARGV = *DATA): 2/1 -> 3/0	0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 run/runenv_hashseed.t	278	0	274	4	DIFF		0
 run/runenv_randseed.t	9	0	3	6	DIFF	s473 (Fable): 2/7 -> 3/6, OURS: task #1236 (s470bx) -- rand is auto-seeded from entropy on first use, so two runs differ; measured 2/7 on the 637fc58e extraction and 3/6 on d348dcea	0
@@ -2139,17 +2139,17 @@ run/script.t	3	0	3	0	OK		0
 run/switch0.t	1	0	1	0	OK	s506f #1702: 0/1 -> 1/0, the #! -0 switch is honoured	0
 run/switchC.t	15	0	12	3	DIFF	s506f: 3/12 -> 12/3, -C flags mapped (S/I/O/E/A/i/o/L) | s470bv: #1115 -3 / +1 and #1221 +1, both bisected: rows 3/5/6 (-CI,-Co,-Ci) passed only because PCL decoded EVERYTHING by default, i.e. -C was permanently on by accident; row 8 started passing because bytes is right without the switch; row 4 (-CE) passes since #1221 makes utf8::encode real.  PCL implements -C nowhere -- task #1272	0
 run/switchDx.t	0	0	0	0	NOTAP		0
-run/switchF.t	2	0	0	0	DIFF	s506f #2666: 0/1 -> 0/0, the -F loop now runs but reads nothing (BEGIN *ARGV = *DATA)	0
+run/switchF.t	2	0	2	0	OK	s507c PART TWO #2666 (BEGIN *ARGV = *DATA): 0/0 -> 2/0	0
 run/switchF1.t	5	0	5	0	OK		0
 run/switchF2.t	5	0	5	0	OK		0
 run/switchI.t	4	0	2	2	DIFF	s506f #1702: 0/4 -> 2/2, #! -I prepends each in turn	0
 run/switchM.t	5	0	0	5	DIFF	s488a: 2/3 -> 0/5 at ec8ac8c0 (s473u member 2, #1545: one transpile server per test process), measured 2/3 at its parent f6db155b.  The two "Ensure -Irun/flib loads pmc" rows are the file's .pmc-preference half; #1708 owns the file and had recorded this drift as PRE-EXISTING and unattributed	0
-run/switcha.t	2	0	0	0	DIFF	s506f #2666: 0/1 -> 0/0, as run/switchF.t	0
+run/switcha.t	2	0	2	0	OK	s507c PART TWO #2666, as run/switchF.t: 0/0 -> 2/0	0
 run/switchd-78586.t	2	0	0	0	TRANSPILE	s506f D4: 0/2 -> TRANSPILE, its #! line carries -d:Mod, refused (perl enters the debugger)	0
 run/switchd.t	21	0	1	20	DIFF	s506f D4: 2/19 -> 1/20, -d refused (the row passed because the old wrapper IGNORED -d) | undef-fn:main::pl-ARRAY	0
 run/switches.t	140	0	125	15	DIFF	s506f (#2097 #1709, #2033): 29/111 -> 125/15, perl's switches in the harness wrapper; residue #2667 | s504 #2389: 28/112 -> 29/111 UP at 8d41b6b6 (s492c): `fail backup rename` passes (#1709)	0
-run/switchn.t	3	0	1	0	DIFF	s506f #1702/#2666: 1/1 -> 1/0, the #! -n loop runs but reads nothing (BEGIN *ARGV = *DATA)	0
-run/switchp.t	3	0	1	0	DIFF		0
+run/switchn.t	3	0	3	0	OK	s507c PART TWO #2666 (the #! -n loop reads DATA): 1/0 -> 3/0	0
+run/switchp.t	3	0	3	0	OK	s507c PART TWO #2666 (-p reads the aliased DATA): 1/0 -> 3/0	0
 run/switcht.t	0	0	9	4	NOTAP		0
 run/switchx.t	8	0	7	1	DIFF	s506f: 0/2 -> 7/1, -x and the #! -l are honoured | s486c merge review (Fable, 2026-09-17): 0/3 -> 0/2 -- #1652's progfile plumbing makes the -x child RUN; its output is #1702's (the shebang's -l is not honoured, so `1..8` arrives without a newline and glues `not ok 6` to the plan); the child is byte-identical on main 2ac855aa, only the harness changed	0
 uni/attrs.t	35	0	8	26	DIFF		0
