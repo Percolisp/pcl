@@ -138,8 +138,9 @@ sub run_cl {
 
 # The ORACLE is the host perl.  Two facts about the HOST, not about PCL, can
 # leave a row without one (the stock-machine rehearsal, s440: CI's perl is
-# 5.38): the program's `use v5.NN` is newer than the host perl, or the
-# program's CPAN fixture (Try::Tiny) is not installed.  A row that needs a
+# 5.38): the program's `use v5.NN` -- or its `use feature ':5.NN'` bundle
+# (s509: the three #2692 rows failed CI on exactly that) -- is newer than the
+# host perl, or the program's CPAN fixture (Try::Tiny) is not installed.  A row that needs a
 # newer perl carries the output PROBED on one ($probed, perl 5.40.3, s440)
 # and is compared against that -- the #360 shape stays asserted on every
 # host; a row whose fixture is missing SKIPS, naming the module (CI installs
@@ -152,7 +153,8 @@ sub test_src {
     my $perl_out = `perl $pl_file 2>&1`;
     my $expected = $perl_out;
     my $via      = 'perl';
-    if ($perl_out =~ /^Perl v([\d.]+) required--this is only v([\d.]+)/m) {
+    if ($perl_out =~ /^Perl v([\d.]+) required--this is only v([\d.]+)/m
+        || $perl_out =~ /^Feature bundle "([\d.]+)" is not supported by Perl ([\d.]+)/m) {
         if (!defined $probed) {
             SKIP: { skip "$name: the host perl is $2, the program needs $1, and no probed output is given", 1 }
             return;
@@ -177,9 +179,10 @@ test_src('use experimental "try" + try/catch',
 test_src('use feature "try" + try/catch (the spelling that already worked)',
     qq{use feature 'try';\nno warnings;\n$TRY});
 test_src('use feature ":5.40" + try/catch (#2692: was a whole-statement DROP)',
-    qq{use feature ':5.40';\nno warnings;\n$TRY});
+    qq{use feature ':5.40';\nno warnings;\n$TRY}, "caught: boom\nafter\n");
 test_src('use feature ":5.40" in a BLOCK: outside it try is a sub call again',
-    qq{{ use feature ':5.40'; no warnings;\n$TRY}\nsub try { print "subtry\\n" } try();\n});
+    qq{{ use feature ':5.40'; no warnings;\n$TRY}\nsub try { print "subtry\\n" } try();\n},
+    "caught: boom\nafter\nsubtry\n");
 
 # The INVERSE: with the feature off, `try`/`catch` are ordinary subs.
 my $TINY = qq{use Try::Tiny;\ntry { die "boom\\n" } catch { print "caught: \$_" };\nprint "after\\n";\n};
@@ -213,7 +216,7 @@ my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };
 print "r=[$r] err=[$@]\n";
 PERL
 
-test_src('…and from a feature BUNDLE NAME (#2692)', <<'PERL');
+test_src('…and from a feature BUNDLE NAME (#2692)', <<'PERL', "r=[caught:boom\n] err=[]\n");
 use feature ':5.40';
 no warnings;
 my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };
