@@ -1,3 +1,5 @@
+# s507p (2026-10-06, Opus, EDITED BY HAND -- two rows LEAVE): scalar.t 25 "reading from magic scalars" and 30
+#   "FETCH only called once" (#1446): #2111 makes a '<' in-memory handle read its tied scalar live (one FETCH).
 # s506f (2026-10-04, Opus, EDITED BY HAND -- one row JOINS, one LEAVES): reset.t 42 "check $^W has
 #   been zeroed" JOINS (it passed only because an assignment to $^W was lost; reset() is a no-op);
 #   split.t 32 LEAVES (the runperl `-Dt` child now prints perl's non-debugging message).
@@ -402,7 +404,6 @@ ref.t	67	stringify for ref to vstring	'SCALAR(0xf)'	^VSTRING\(0x[0-9a-f]+\)$	#14
 ref.t	130	UNIVERSAL::AUTOLOAD called when freeing qr//	'65280'	'0'	#2101 made $? real (s492c): the runperl child dies "Can't locate object method p via package a" (a package UNIVERSAL::AUTOLOAD is not consulted on a method miss, #2061) and exits 255; the row passed on a stale 0 before.
 scalar.t	40		undef	'43'	NS:A LITERAL in a foreach list is writable, not read-only (consequence of 36: the accepted '>' open truncated \43)
 scalar.t	36	Bad file descriptor			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \43 must fail EACCES).  s473f: the DESCRIPTION is $! itself, so it changed with #1307's EBADF for the same reason as row 34.
-scalar.t	30	FETCH only called once	'0'	'1'	#1446 (in-memory handle binds a STRING: FETCH never fires)
 scalar.t	34	[perl #40267] - Bad file descriptor			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \undef must fail).  s473f: the DESCRIPTION now carries "Bad file descriptor" because the test interpolates $! and #1307 made a close with no open handle set EBADF as perl does -- perl's own run never sees it, because there the open FAILS and overwrites $!.
 scalar.t	89	check $! is updated	'0'	'22'	#1447 (a >0xFF target must fail the open with EINVAL)
 scalar.t	92	check $! is updated even when we warn	'0'	'22'	#1447 (a >0xFF target must fail the open with EINVAL)
@@ -414,7 +415,6 @@ scalar.t	37	check we get a read-onlyish error code	'9.0f0'	'13'	NS:Error message
 scalar.t	91	non byte open should fail (and warn)			#1447 (a >0xFF target must fail the open with EINVAL)
 scalar.t	88	non-byte open should fail			#1447 (a >0xFF target must fail the open with EINVAL)
 scalar.t	106	read from scalar with >0xff chars	'1'	undef	#1447 (read from a >0xFF target must return undef)
-scalar.t	25	reading from magic scalars	'#<p-tie-proxy {1202B56153}>'	'shazam'	#1446 (in-memory handle binds a STRING: no tie get-magic; the p-tie-proxy leaks)
 scalar.t	94	should have warned	undef	'Strings with code points over 0xFF may not be mapped into in-memory file handles '	#1447 + #221 (NS:Warnings-gated diagnostics are absent)
 scalar.t	119	still a ref after opening for appending	''	'SCALAR'	#1446 (`>>` on a \$ref target stringifies it at open)
 scalar.t	73	tied actions - read	':O:R:R:R'	':F:S(GHI):O:F:R:F:R:F:R'	#1446 (in-memory handle binds a STRING: no tie FETCH/STORE on read)

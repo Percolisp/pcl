@@ -1,4 +1,7 @@
 # taken-at: 5323d9e 2026-08-15
+# s507p (2026-10-06, Opus, EDITED BY HAND -- two rows, TOTAL 18731 -> 18733, perf round 39): scalar.t 86 -> 88,
+#   rows 25 "reading from magic scalars" and 30 "FETCH only called once" (#1446): #2111 makes a '<'
+#   in-memory handle read its scalar LIVE through the box, so a tied scalar's FETCH fires once, as in perl.
 # s506f (2026-10-04, Opus, EDITED BY HAND -- three rows, TOTAL 18728 -> 18731, perl's switches in pcl):
 #   reset.t 22 -> 21 (row 42 "check $^W has been zeroed" passed ON NOTHING: $^W was a raw 0 and
 #   `local $^W = 1` was silently lost; $^W is now a box, and reset() is a no-op -- not-supported.md
@@ -550,7 +553,7 @@ recurse.t	OK	26	2	28
 ref.t	PARTIAL	204	11	245
 reset.t	OK	21	1	45
 reverse.t	OK	25	0	25
-scalar.t	OK	86	30	128
+scalar.t	OK	88	28	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
 sort.t	OK	184	5	205
