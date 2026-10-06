@@ -16828,6 +16828,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; Filehandle storage - maps symbols to CL streams
 (defvar *p-filehandles* (make-hash-table :test 'eq))
 
+(defvar *p-fh-glob-aliases* (make-hash-table :test 'eq)
+  "`*DST = *SRC` made while SRC had NO open handle (#2666): DST symbol -> SRC
+   symbol.  perl's glob assignment shares the whole glob, so a handle SRC
+   opens LATER is DST's too -- `BEGIN { *ARGV = *DATA }` (DATA is installed
+   when the file loads) is the idiom.  Consulted only on a resolver MISS, so a
+   handle DST opens itself, or a later glob assignment, wins.")
+
 (defun p-install-data-handle (handle text)
   "Register a file's `__DATA__` / `__END__` section as its DATA filehandle,
    TEXT being the section verbatim.  The emitter used to write the pieces of
@@ -16907,7 +16914,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          ;; by-name, so fall back to a by-name lookup; this is what makes
          ;; `print STDERR ...` actually reach *error-output* instead of stdout.
          (let ((canon (find-symbol (symbol-name fh) :pcl)))
-           (and canon (not (eq canon fh)) (gethash canon *p-filehandles*)))))
+           (and canon (not (eq canon fh)) (gethash canon *p-filehandles*)))
+         ;; A glob alias made before its source opened (#2666).
+         (let ((src (gethash fh *p-fh-glob-aliases*)))
+           (and src (gethash src *p-filehandles*)))))
     ((stringp fh)
      ;; A string filehandle name — e.g. print {"STDOUT"} ..., or a scalar
      ;; holding a handle name (my $fh = 'STDOUT'; print $fh ...).  Strip an
@@ -21070,6 +21080,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 (declaim (special @ARGV $ARGV |$^I|))
 (defvar *p-argv-stream* nil "Currently-open <> input stream, or nil before/after.")
 (defvar *p-argv-started* nil "T once <> has begun consuming @ARGV (or chosen STDIN).")
+(defvar *p-argv-aliased* nil
+  "T once <> began on an ALIASED ARGV glob (`*ARGV = *DATA`): perl then reads
+   that handle only, never @ARGV (#2666).")
 (defvar *p-argv-last-count* 0 "Cumulative $. carried from the previous <> file.")
 
 ;;; In-place editing ($^I / perl -i): while <> reads a real file, the default
@@ -21156,13 +21169,29 @@ buffer's fill-pointer; everything else falls back to file-length."
               (t (when (%p-inplace-ext) (%p-inplace-begin fname))
                  (return s)))))))))
 
+(defun %p-argv-glob-stream ()
+  "Before <> has started: a stream the ARGV GLOB already holds -- `*ARGV =
+   *DATA` (in a BEGIN block too, #2666) or `open(ARGV, ...)` -- which <> reads
+   first, as perl's <ARGV> does.  NIL otherwise, and always once started.
+   After an ALIASED handle perl stops (*p-argv-aliased*); after an explicit
+   open(ARGV) it goes on to @ARGV."
+  (when (not *p-argv-started*)
+    (let* ((pkg (%pcl-find-package "main"))
+           (sym (and pkg (find-symbol (%pcl-invert-case "ARGV") pkg)))
+           (s (and sym (%p-live-stream sym))))
+      (when (and s (input-stream-p s))
+        (setf *p-argv-started* t
+              *p-argv-aliased* (and (gethash sym *p-fh-glob-aliases*) t))
+        s))))
+
 (defun %p-argv-advance ()
   "Open the next <> file as *p-argv-stream*; NIL when every file is consumed.
    Shared by the reader and by eof() (#2703), which looks ahead the same way."
   ;; An in-place edit still open (an explicit `close ARGV' leaves ARGVOUT
   ;; selected until the next file opens, as perl does) is committed first.
   (%p-inplace-finish)
-  (setf *p-argv-stream* (%p-argv-open-next))
+  (setf *p-argv-stream* (or (%p-argv-glob-stream)
+                            (and (not *p-argv-aliased*) (%p-argv-open-next))))
   ;; Every file consumed: `$.' keeps its last value, but a LATER pass of <>
   ;; (a refilled @ARGV) counts from 1 again — perl's IOf_START (#2684).
   (cond ((null *p-argv-stream*) (setf *p-argv-last-count* 0) nil)
@@ -28963,6 +28992,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           ((and (vectorp inner) (adjustable-array-p inner)) :array)
           ((hash-table-p inner) :hash)
           ((stringp inner)      :all)
+          ((%p-handle-payload-p inner) :all)
           ((or (null inner) (eq inner *p-undef*)) :none)
           ((functionp rhs)      :code)
           (t                    :none))))
@@ -29003,6 +29033,16 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((hash-table-p inner)
        (setf (symbol-value (intern (%p-slot-name "%" uname) pkg))
              inner))
+
+      ;; *foo = $fh (a lexical handle: PCL's spelling of perl's glob REF,
+      ;; %p-handle-payload-p) -- the handle becomes foo's IO slot, so `local
+      ;; *ARGV = $in; while (<>)` reads $in (Fable review F4 on #2666).  It
+      ;; used to fall through every arm and assign NOTHING.
+      ((%p-handle-payload-p inner)
+       (%p-glob-clear-io-slot pkg uname)
+       (setf (gethash (intern uname pkg) *p-filehandles*) inner)
+       ;; An ALIAS, as `*ARGV = *DATA` is: <> reads it and then stops.
+       (setf (gethash (intern uname pkg) *p-fh-glob-aliases*) inner))
 
       ;; *foo = 'name' — symbolic alias: copy slots from *pkg::name
       ((stringp inner)
@@ -29218,7 +29258,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    `*FH{IO}` undef and a later `print FH` FAIL (probed: it returns undef and
    sets $! to Bad file descriptor), which is what losing the registration
    gives."
-  (remhash (intern uname pkg) *p-filehandles*))
+  (let ((sym (intern uname pkg)))
+    (remhash sym *p-filehandles*)
+    (remhash sym *p-fh-glob-aliases*)))
 
 (defun %p-glob-copy-var-slot (prefix sp sn dst-pkg dst-uname)
   "One VARIABLE slot ($ / @ / %) of a glob-to-glob assignment.
@@ -29274,9 +29316,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    DEREGISTERS the destination's, the #602 rule for this slot."
   (let ((src-sym (intern sn sp)))
     (multiple-value-bind (stream present) (gethash src-sym *p-filehandles*)
-      (if present
-          (setf (gethash (intern dst-uname dst-pkg) *p-filehandles*) stream)
-          (%p-glob-clear-io-slot dst-pkg dst-uname)))))
+      (%p-glob-clear-io-slot dst-pkg dst-uname)
+      (when present
+        (setf (gethash (intern dst-uname dst-pkg) *p-filehandles*) stream))
+      ;; DST follows SRC: a handle SRC opens LATER is DST's too (#2666), and
+      ;; <> knows an aliased ARGV from an opened one.
+      (setf (gethash (intern dst-uname dst-pkg) *p-fh-glob-aliases*) src-sym))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
   "`*DST = *SRC` — REPLACE dst's glob with src's, slot for slot (task #602).

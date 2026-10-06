@@ -68,7 +68,7 @@ sub make_file {
 my $f1 = make_file("apple\nbanana\n");
 my $f2 = make_file("cherry\ndate\n");
 
-plan tests => 8;
+plan tests => 10;
 
 # 1: <> reads across @ARGV with cumulative $. and per-file $ARGV.
 test_diamond('<> spans @ARGV files; $. cumulative, $ARGV per-file', <<"PERL");
@@ -147,4 +147,28 @@ my $f3 = make_file("c1\n");
 test_diamond('eof(ARGV) and eof ARGV are the current <> file', <<"PERL");
 \@ARGV = ('$f3', '$f1');
 while (<>) { chomp; print "\$_", (eof(ARGV) ? " E1" : ""), (eof ARGV ? " E2" : ""), (eof ? " E3" : ""), "\\n"; }
+PERL
+
+# 8 (#2666): `*ARGV = *DATA` -- in a BEGIN block too, where DATA is not open
+# yet -- makes <> read DATA, and only DATA (an aliased ARGV never reaches
+# \@ARGV); an explicit open(ARGV, ...) is read first and THEN \@ARGV.
+test_diamond('*ARGV = *DATA in BEGIN aliases <> to DATA; open(ARGV) then @ARGV', <<"PERL");
+BEGIN { *ARGV = *DATA; }
+\@ARGV = ('$f1');
+while (<>) { print "[\$.:\$_]" }
+print "eof:", (eof() ? 1 : 0), "\\n";
+BEGIN { *Y = *Z; } open(Z, '<', '$f2') or die; print "Y:", scalar(<Y>);
+__DATA__
+d1
+d2
+PERL
+
+# 8b (#2666, review F4): `*NAME = $fh` with a LEXICAL handle (perl's glob ref)
+# makes the handle NAME's IO slot -- and for ARGV an alias: <> reads it, then
+# stops (\@ARGV is not reached).  INVERSE: the first #2666 build assigned
+# nothing, so <> read \@ARGV and <XX> read undef.
+test_diamond('*ARGV = $fh (a lexical handle) is read by <>, *XX = $fh by <XX>', <<"PERL");
+open(my \$in, '<', '$f2') or die; \@ARGV = ('$f1'); *ARGV = \$in;
+while (<>) { print "A:\$_" }
+open(my \$in2, '<', '$f2') or die; *XX = \$in2; print "X:", scalar(<XX>);
 PERL
