@@ -506,9 +506,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s509, 2026-10-06, main `b43188b5`, gen v2-4280 — measured on
+- **CURRENT NUMBERS (s510, 2026-10-06, main `c1d9bed7`, gen v2-4281 — measured on
   that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **279 files / 9,770 rows** (170 s wall with
+  stale):** gate `Result: PASS`, **279 files / 9,782 rows** (170 s wall with
   `tools/prove-core`); full `perl-tests/` sweep GATE clean, **TOTAL passing
   18,731**, 647 failing (96.7 %), 59 of 108 files fully passing, 96 run to the
   end and 12 stop part-way, drops 5 = census; `EVERYDAY: 114 of 122 identical to
@@ -929,6 +929,7 @@ Not relevant now:
 - `docs/xs-abi5-and-destroy.md` - **what pclxs ABI 5 changes here, and what it costs**: nothing is broken (filehandles are the first OPTIONAL vtable capability group, so the pin can stay at abi 4), but DESTROY is now callable and needs no ABI bump — an unimplemented destructor leaks the C side of every T_PTROBJ object, which is bounded in a script and unbounded in a long-lived image. Has the performance section: cache `pclxs_has_destroy` per CLASS or pay a bridge crossing per finalized object.
 - `docs/extensions.md` - **Extension loading**: `p-load-extension`, self-loading stubs, standalone binaries, adding new extensions
 - `docs/speed-review-s509.md` - **Where the remaining speed is, and what is cheap** (s509, the USER's question): start-up re-measured (a warm one-liner is 53 ms, half of it the Perl launcher -- the parked #2422 / #1862 / #2421), thirteen slow bench rows profiled and classified, four run-time levers filed with measurements (#2770 typed string copy: two rows halved by five lines; #2771 `print`; #2772 scalar `grep`; #2773 `unshift`), and what is NOT cheap. Read it before proposing a perf round.
+- `docs/first-run-from-text-design-s510.md` - **The first run of a program (#2702), DESIGN measured with a prototype, nothing built**: today the run that builds a program's compiled file loses a module's load-time output, runs a printing `use` before an earlier BEGIN and imports twice (4 of 13 probe programs match perl; the second run 11 of 13). The design: run that first run from the transpiled TEXT and build the compiled file in the last exit hook, in the same image — every module body exactly once. Has the guards the build needs (same pid, compile phase completed, ordinary exits only), the precondition (#2764's plain-stream loader for the script text), what was decided against (a forked or a fresh builder process) and the bar. Read it before touching `%p-run-script-cached-1`.
 - `docs/everyday-battery.md` - **THE NUMBER THE PROJECT STEERS BY** (#2099, s495): `tools/everyday-smoke.pl` + the checked-in `everyday/` corpus — "N of M ordinary programs identical to perl", with a blessed per-program baseline (`baselines/everyday-baseline.tsv`, rows leave BY EDIT) and a batch-by-batch history (`baselines/everyday-history.tsv`). Read it before quoting the number: it is a steering number, never a compatibility percentage. `--corpus DIR --baseline FILE` measures another population (Rosetta, #2104) with the same tool.
 
 ## Dependencies
