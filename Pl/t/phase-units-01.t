@@ -147,4 +147,23 @@ PL
 row('a unit that dies at BEGIN time keeps its queued CHECK/INIT blocks',
     q{--no-cache p05.pl}, "caught: D died\nc\nD:c\nD:i\ni\nrun\n", undef, 0);
 
+# ${^GLOBAL_PHASE} (#2761): START while compiling (BEGIN, UNITCHECK, a `use`d
+# module's body), CHECK, INIT, RUN (a BEGIN inside a run-time eval too), END.
+# INVERSE: main fee16466 printed the empty string in every phase.
+put('lib/PhaseMod.pm', "package PhaseMod; print \"m:\${^GLOBAL_PHASE}\\n\"; 1;\n");
+put('p06.pl', <<'PL');
+BEGIN { print "b:${^GLOBAL_PHASE}\n" } UNITCHECK { print "u:${^GLOBAL_PHASE}\n" }
+CHECK { print "c:${^GLOBAL_PHASE}\n" } INIT { print "i:${^GLOBAL_PHASE}\n" }
+use lib "lib"; use PhaseMod;
+print "r:${^GLOBAL_PHASE}\n"; eval q{BEGIN { print "eb:${^GLOBAL_PHASE}\n" }};
+END { print "e:${^GLOBAL_PHASE}\n" }
+PL
+row('${^GLOBAL_PHASE} names each phase (#2761)',
+    q{--no-cache p06.pl}, "b:START\nm:START\nu:START\nc:CHECK\ni:INIT\nr:RUN\neb:RUN\ne:END\n", '', 0);
+# The first cached run BUILDS the fasl, and that run still loses a used
+# module's load-time output (task #2702, open) -- so build first, then read
+# the cached fasl.
+run(q{p06.pl});
+row('... and from the cached fasl', q{p06.pl}, "b:START\nm:START\nu:START\nc:CHECK\ni:INIT\nr:RUN\neb:RUN\ne:END\n", '', 0);
+
 done_testing();

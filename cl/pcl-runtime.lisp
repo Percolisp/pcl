@@ -366,7 +366,7 @@
    ;; slots have to exist as variables too or `*Y = *!` copies nothing.
    #:|$!| #:|$^E| #:|%!| #:*p-errno-table*
    ;; Special variables
-   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|${^UNICODE}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
+   #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|${^GLOBAL_PHASE}| #:|${^UNICODE}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[| #:|$^C|
    ;; Context — the variable and the four macros that name its bindings (#281)
    #:*wantarray*
@@ -2260,10 +2260,14 @@
   (when *p-unit-load*
     (loop while *unitcheck-blocks* do (funcall (pop *unitcheck-blocks*)))
     (return-from p-run-compile-phase-blocks nil))
+  (loop while *unitcheck-blocks* do (funcall (pop *unitcheck-blocks*)))
+  (setf |${^GLOBAL_PHASE}| "CHECK")
   (%p-drain-compile-blocks)
   (setf *p-compile-phase-done* t)
+  (setf |${^GLOBAL_PHASE}| "INIT")
   (setf *init-blocks* (reverse *init-blocks*))
-  (loop while *init-blocks* do (funcall (pop *init-blocks*))))
+  (loop while *init-blocks* do (funcall (pop *init-blocks*)))
+  (setf |${^GLOBAL_PHASE}| "RUN"))
 
 ;; Register exit hook to run END blocks, then flush every open Perl output
 ;; handle — perl closes (hence flushes) all handles at exit, so a program that
@@ -2314,6 +2318,7 @@
   "The exit hook: run the END blocks, flush every handle, exit with $?."
   (let ((pending (or *p-exit-status* 0)))
     (%p-set-status pending)
+    (setf |${^GLOBAL_PHASE}| "END")
     (let ((*p-in-end-phase* t)
           (*p-end-phase-pid* (sb-posix:getpid)))
       (dolist (fn *end-blocks*)
@@ -2323,6 +2328,7 @@
             (catch '%p-end-exit (funcall fn))
           (error (e)
             (%p-diag "Error in END block: ~A~%" e)))))
+    (setf |${^GLOBAL_PHASE}| "DESTRUCT")
     (%p-flush-stdout-at-exit)
     (%p-flush-all-output)
     ;; Only now, with every END run and every handle flushed, does a status
