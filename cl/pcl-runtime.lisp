@@ -5031,7 +5031,12 @@
   ;; the general arms below reduce to p-true-p's own two tests.
   (when (p-box-p val)
     (let ((inner (p-box-value val)))
-      (cond ((numberp inner)
+      ;; A FIXNUM first: one tag test and a compare, no NaN question (task
+      ;; #2772 -- `grep $_, @a' tests the element box itself, and the
+      ;; general number arm's %pcl-nan-p call was 14 % of that row).
+      (cond ((typep inner 'fixnum)
+             (return-from %p-true-p-slow (not (eql inner 0))))
+            ((numberp inner)
              (return-from %p-true-p-slow
                (not (and (not (%pcl-nan-p inner)) (zerop inner)))))
             ((stringp inner)
@@ -26913,18 +26918,54 @@ buffer's fill-pointer; everything else falls back to file-length."
       (or (%p-storable-raw r) (make-p-box (unbox r)))
       r))
 
+(defun %p-grep-cells (src)
+  "The element CELLS of the raw @array SRC as a fresh SIMPLE-VECTOR -- what
+   %p-collect-list makes for a one-array argument list, without its adjustable
+   result and per-element vector-push-extend (task #2772, s510p).  A RAW slot
+   is promoted IN PLACE (%p-elem-cell's rule, so `grep { $_++ } @a' writes
+   through); a HOLE gets a defelem alias.  It is a SNAPSHOT, as perl's stack
+   is: a block that pushes onto or shifts SRC does not change what grep walks."
+  (let* ((n (length src))
+         (out (make-array n))
+         (data (%p-vec-data src)))
+    (declare (type fixnum n))
+    (if data
+        (dotimes (j n)
+          (let ((x (svref data j)))
+            (setf (svref out j)
+                  (cond ((null x) (%p-defelem-box src j))
+                        ((p-box-p x) x)
+                        (t (setf (svref data j) (make-p-box x)))))))
+        (dotimes (j n)
+          (setf (svref out j)
+                (if (null (aref src j))
+                    (%p-defelem-box src j)
+                    (%p-elem-cell src j)))))
+    out))
+
 (defun p-grep (fn &rest items)
   "Perl grep - fn receives item as $_ parameter.
-   Accepts (fn @array) or (fn elem1 elem2 ...) or mixed."
-  (let* ((arr (apply #'%p-collect-list items))
+   Accepts (fn @array) or (fn elem1 elem2 ...) or mixed.
+   ONE untied @array -- the common `grep {...} @a' -- is walked through a
+   simple-vector snapshot of its cells (%p-grep-cells); everything else goes
+   through %p-collect-list.  The result is preallocated at the input length,
+   so the push never grows it (task #2772)."
+  (let* ((one (car items))
+         (arr (if (and one (null (cdr items)) (%p-spread-vector-p one)
+                       (not (%p-tied one)))
+                  (%p-grep-cells one)
+                  (apply #'%p-collect-list items)))
          (result (make-array (length arr) :adjustable t :fill-pointer 0)))
     ;; $_ must be a stable box so \$_ aliases consistently within an iteration
     ;; ([perl #78194]). Array/ref elements are already boxes; a literal-scalar
     ;; element (from the (fn a b c) form) is raw — box it once per iteration.
-    (loop for item across arr
-          for slot = (if (p-box-p item) item (make-p-box item))
-          when (p-true-p (let ((*wantarray* nil)) (funcall fn slot)))
-          do (vector-push-extend slot result))
+    (macrolet ((walk (ref)
+                 `(dotimes (i (length arr))
+                    (let* ((item (,ref arr i))
+                           (slot (if (p-box-p item) item (make-p-box item))))
+                      (when (p-true-p (let ((*wantarray* nil)) (funcall fn slot)))
+                        (vector-push slot result))))))
+      (if (simple-vector-p arr) (walk svref) (walk aref)))
     result))
 
 ;;; map and grep ALIAS $_ to each element (that is why `map { $_ .= "!" } @a`

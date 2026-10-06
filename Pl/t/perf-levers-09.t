@@ -73,6 +73,7 @@ sub lisp_out {
 
 # ─────────────────────────────────────────────────────────────────────────────
 like(lisp_out(q{(progn (print (not (null (fboundp '%p-concat-2)))) (let ((d (make-string 6 :initial-element #\-))) (%pcl-str-blit d 0 (coerce "ab" 'simple-base-string) 2) (%pcl-str-blit d 2 (make-array 2 :element-type 'character :initial-contents "cd" :adjustable t) 2) (%pcl-str-blit d 4 (copy-seq "ef") 2) (print d)))}), qr/\Q\E\n\Qt \E\n\Q"abcdef" \E/, '#2770: %p-concat-2 exists; %pcl-str-blit copies a base, a non-simple and a character string');
+like(lisp_out(q{(let ((a (make-array 3 :adjustable t :fill-pointer 3 :initial-contents (list 1 nil 3)))) (let ((v (%p-grep-cells a))) (print (list (simple-vector-p v) (p-box-p (aref a 0)) (eq (aref v 0) (aref a 0)) (aref a 1)))))}), qr/\Q\E\n\Q(t t t nil) \E/, '#2772: %p-grep-cells snapshots cells, promotes a raw slot in place, leaves a hole a hole');
 answers(<<'END_SRC', <<'END_EXP', '#2770 answers: .=, ., join, interpolation, lc.uc.ucfirst, :strbuf appends, overloaded .');
 use utf8; binmode STDOUT, ':utf8';
 my $s = ''; $s .= 'xy' for 1..5; $s .= "é" x 20; $s .= substr("abcdefghijklmnopqrstuvwxyz0123", 3, 20);
@@ -107,6 +108,48 @@ AB
 abababababababababababababababababababababababababababababababab
 [a |o] b
 [o|x]
+END_EXP
+answers(<<'END_SRC', <<'END_EXP', '#2772 answers: grep in scalar/boolean/list context, writes through $_, snapshots, holes, tied');
+my @p = map { $_ % 3 ? 1 : 0 } 1 .. 20;
+my $n = grep $_, @p; print "n=$n\n";
+if (grep { $_ > 0 } @p) { print "some\n" }
+print "s=", scalar(grep { !$_ } @p), "\n";
+my @a = (1, 2, 3); my $k = grep { $_ *= 10; 1 } @a; print "k=$k @a\n";
+my @m = (5, 6, 7); my @r = grep { $_ > 5 } @m; $_++ for @r; print "@m | @r\n";
+my @s = (1 .. 5); my @g = grep { push @s, 99 if $_ == 1; 1 } @s; print scalar(@g), " ", scalar(@s), "\n";
+my @x = (1, 2); my %hh = (a => 1); my @y = (3, 0);
+print scalar(grep { $_ } @x, @y, %hh), "\n";
+my @e = (); print "e=", scalar(grep { 1 } @e), "\n";
+print "nest=", scalar(grep { my $v = $_; grep { $_ == $v } (2, 3) } (1 .. 4)), "\n";
+sub wa { my @l = grep { defined(wantarray) ? 1 : 0 } (1, 2); scalar @l } print "wa=", wa(), "\n";
+my @hole; $hole[3] = 1; my $c = grep { !defined } @hole; print "holes=$c exists1=", (exists $hole[1] ? 1 : 0), "\n";
+my @u = ('0', '', '0.0', 'a', 0, 1, -1, 2**40, 0.0); print "u=", scalar(grep { $_ } @u), "\n";
+for my $i (1 .. 3) { my @q = grep { $_ == $i } @p, 3; print "i$i=", scalar(@q) } print "\n";
+my @z = (1 .. 6); my $cnt = 0; for my $e (1..2) { $cnt += grep { $_ & 1 } @z } print "cnt=$cnt\n";
+my $f = eval { grep { die "boom\n" if $_ == 2; 1 } (1, 2, 3) }; print "err=$@";
+sub g { for (1) { my $w = grep { return 7 if $_ == 2; 1 } (1, 2, 3) } 0 } print "ret=", g(), "\n";
+package T; sub TIEARRAY { bless { a => [1, 0, 2] } } sub FETCH { $_[0]{a}[$_[1]] } sub FETCHSIZE { scalar @{$_[0]{a}} } sub STORE { $_[0]{a}[$_[1]] = $_[2] }
+package main; tie my @ta, 'T'; print "tied=", scalar(grep { $_ } @ta), "\n";
+my @refs = ([1], [], undef); print "refs=", scalar(grep { $_ } @refs), "\n";
+END_SRC
+n=14
+some
+s=6
+k=3 10 20 30
+5 6 7 | 7 8
+5 6
+5
+e=0
+nest=2
+wa=2
+holes=3 exists1=0
+u=5
+i1=14i2=0i3=1
+cnt=6
+err=boom
+ret=7
+tied=2
+refs=2
 END_EXP
 
 done_testing();
