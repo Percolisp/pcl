@@ -171,3 +171,31 @@ gate; the sweep and the companion's `run/` and `io/` directories (a runtime chan
 line); `Pl/t/script-cache-01.t` read row by row for assertions about the building run; the
 first-run cost table above re-measured on a quiet box.  `docs/ir-spec.md`'s load model and
 `docs/not-supported.md` change in the same batch.
+
+## 6. AS BUILT (s510f)
+
+Built as designed, with three differences, each from a probe:
+
+* **The build is not an exit hook of its own; it is the END phase's tail.**
+  `sb-ext:*exit-hooks*` run in list order, and a nested `sb-ext:exit` inside
+  one skips every later hook (probed: the hook after it never ran).  The END
+  phase (`%p-run-end-phase`) leaves through exactly such a nested exit when an
+  END block changed `$?`, so `END { $? = 7 }` would never have been cached.
+  `%p-run-exit-build` is called after the END blocks and the flushes, before
+  that exit.  The saved-core question is moot for the same reason: nothing is
+  added to the hook list; `*p-exit-build*` is set at run time (and the hook
+  list itself IS saved in a core — `(pcl::%p-run-end-phase)` printed from one).
+* **An `exit` during the build is caught by the END phase's own rule**: the
+  build runs with `*p-in-end-phase*` bound, so `p-exit` throws to
+  `%p-end-exit` (what it does for an END block) instead of exiting; the build
+  is inside `(catch '%p-end-exit …)` and a `serious-condition` handler.
+* **The script's text and pcl's own text runs share one loader**:
+  `%p-load-text-stream` (a module's text arm, #2764) under
+  `%p-load-script-text`, which `pcl` now names for `--no-cache`, `-e`, a script
+  from STDIN and `-n`/`-p` too — so `pcl -e 'die'` lost the SBCL herald as well.
+
+The heap guard is half the dynamic space after a full GC (taken only when the
+heap LOOKS more than half full).  It is a belt: no program could be made to
+reach it — a program whose live data passes half of SBCL's 1 GB dies by itself
+first (1000-character strings: 170 000 survive and build, 200 000 exhaust the
+heap in the program).  Guards and their rows: `Pl/t/first-run-01.t`.

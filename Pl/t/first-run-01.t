@@ -81,7 +81,7 @@ sub run_pcl {
     return 'out:[' . slurp("$d/.o") . '] err:[' . slurp("$d/.e") . "] rc:$rc";
 }
 
-sub fasls { my ($d) = @_; my @f = glob("$d/.cache/scripts/*.fasl"); return scalar @f }
+sub fasls { my ($d) = @_; my @f = grep { !/-tmp\d+\.fasl$/ } glob("$d/.cache/scripts/*.fasl"); return scalar @f }
 
 # CASE: first run = WANT and the fasl is (or is not) built; a built case's
 # second run = WANT as well (from the fasl).
@@ -170,15 +170,17 @@ case('import dies during the build', "out:[ok\n] err:[] rc:0", 0,
      'Dx.pm' => qq{package Dx; my \$n = 0; sub import { die "build\\n" if ++\$n == 2 } 1;\n});
 
 # STDOUT AND STDERR ARE CLOSED BEFORE THE BUILD: a reader on a pipe sees
-# end-of-file when the PROGRAM is done.  A 300-line program takes far longer
-# to compile than the reader takes to look, so at end-of-file there is no
-# fasl yet; before the change the build came first and the fasl was always
-# there.
+# end-of-file when the PROGRAM is done.  Deterministic, not timed: the build
+# calls Pw->import a second time, and that call WAITS until the file "go"
+# exists -- which the reader creates only AFTER it has seen end-of-file and
+# looked for a fasl.  So with the fds closed first the reader sees EOF and no
+# fasl; with them open (the inverse) EOF cannot come before the build, which
+# waits for "go" until its 20-second limit and then finishes -- "fasl at EOF".
 {
-    my $prog = join('', map { qq{sub f$_ { my (\$x) = \@_; return \$x * $_ + length("s$_") }\n} } 1 .. 300)
-             . qq{print "done\\n";\n};
-    my $d = setup('p.pl' => $prog);
-    my $seen = `cd '$d' && PCL_CACHE_DIR='$d/.cache' '$pcl' p.pl 2>/dev/null </dev/null | perl -e 'my \@l = <STDIN>; my \@f = glob(".cache/scripts/*.fasl"); print scalar(\@l), " line(s), ", (\@f ? "fasl" : "no fasl"), " at EOF\\n"'`;
+    my $d = setup('p.pl' => qq{use lib '.'; use Pw; print "done\\n";\n},
+                  'Pw.pm' => qq{package Pw; my \$n = 0;\n}
+                           . qq{sub import { if (++\$n == 2) { for (1 .. 200) { last if -e "go"; select(undef, undef, undef, 0.1) } } }\n1;\n});
+    my $seen = `cd '$d' && PCL_CACHE_DIR='$d/.cache' '$pcl' p.pl 2>/dev/null </dev/null | perl -e 'my \@l = <STDIN>; my \@f = grep { !/-tmp\\d+\\.fasl\$/ } glob(".cache/scripts/*.fasl"); open(my \$g, ">", "go") or die; close \$g; print scalar(\@l), " line(s), ", (\@f ? "fasl" : "no fasl"), " at EOF\\n"'`;
     is($seen, "1 line(s), no fasl at EOF\n", 'pipe reader: end-of-file before the build');
     is(fasls($d) ? 'built' : 'not built', 'built', 'pipe reader: the fasl is built after');
 }
@@ -188,6 +190,14 @@ for my $c (["\$! = 3; \$? = 0; die \"x\\n\";\n", 'die'],
            ["use List::Util; \$! = 3; die \"x\\n\";\n", 'die after a use']) {
     my $d = setup('p.pl' => $c->[0]);
     is(run_pcl($d, '--no-cache'), "out:[] err:[x\n] rc:3", "--no-cache, $c->[1]: perl's stderr, no herald");
+}
+
+# ... and `pcl -e', which runs its temporary text through the same loader
+# (task #2492: main printed the herald before perl's one line).
+{
+    my $err = `cd '$base' && '$pcl' -e 'die "x"' 2>&1 >/dev/null </dev/null`;
+    my $rc = $? >> 8;
+    is("$err rc:$rc", "x at -e line 1.\n rc:255", "pcl -e, die: perl's one line (#2492)");
 }
 
 done_testing();
