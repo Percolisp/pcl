@@ -1,0 +1,28 @@
+# RESUME s510b (s512) -- binmode in place (#2777) + `$,` / `$\` used when DEFINED (#2778) are BUILT, committed and REVIEWED (no finding); the bars after the sweep and the records are owed.  Be economical: read only what this page names.
+
+You are an EXECUTION agent (Opus 5.5) on the PCL project (Perl -> Common Lisp transpiler), a FRESH agent resuming a batch checkpointed at the end of s510.  FIRST ACTION: write your exact model id into `$W/scratch/s510b/MODEL.txt` (the USER requires `claude-opus-5-5`; anything else: write it, stop, report only that).
+
+`W=/home/bernt/pcl/.claude/worktrees/agent-acb992c6718ea4a5d`, HEAD `3ae84709` = 2 commits (`86c5bf48` #2778, `3ae84709` #2777) on main's code commit `3ea47a41`; runtime-only, NO generation string; task IDs 2850-2859 (used to 2853).  You were launched WITHOUT isolation: your launch directory is main's checkout `/home/bernt/pcl`, where you run NOTHING; every command is `env -C "$W" CMD`, `git -C "$W" ...` or an absolute path under `$W`.  Rules: `s512/SHARED-BOX.md` (the lock script `~/pcl-agent-scratch/s512/heavy.sh s510b leg|bench <log> CMD`, started in the BACKGROUND; the rules at its end) and `s473/COMMON.md`.  The batch's definition is `s510/s510b-prompt.md` -- read its standing rulings and its final-report section only.  `$W/scratch/s510b/STOP.md` has the previous agent's DONE list and its OWED list; this page is the OWED list as RULED by the reviewing session.
+
+## What changed since the checkpoint
+- Main moved only by records commits (`e5a7ad37` + this session's briefs): `git -C "$W" rebase main` FIRST; no code crosses, so no conflict is expected and EVERY bar on disk against `3ea47a41` STANDS (probes, corpus-diff IDENTICAL, targeted gate, the sweep TOTAL 18735 +0, the companion, board BEFORE).  After the rebase `git -C "$W" status --short` shows only `scratch/`.
+- `~/pcl-agent-scratch/s510/heavy.sh` is retired; your `scratch/s510b/board.sh` / `bench-ab.sh` and any leg script that names the s510 path must be edited to `~/pcl-agent-scratch/s512/heavy.sh` before use (`grep -l 's510/heavy' "$W"/scratch/s510b/*.sh`).
+- RULED (the reviewer's decision the checkpoint asked for): the four companion movers (`re/regex_sets_compat.t` 63 NEW = #2646, `op/aassign.t` 1 NEW, `io/argv.t` shortfall 0 -> 2, `io/nargv.t` fixed 1 -> 0) are PRE-EXISTING ON MAIN by your `movers.log` and are NOT spliced: cite them in your session-log section with both results ("pre-existing on main: base X / tree X").  `op/aassign.t`'s one row was seen by s510f's companion on the same main too.  Nothing to file unless a row names a defect no task has (grep `~/.claude/tasks/pcl/*.json` for the test name before filing).
+- RULED: the macOS leg is NOT available (CI has no macOS job) -- say so in the report, do not look for one.  `podman` IS on the box: `prove tools/t/install-container.t` runs (minutes; through heavy.sh as a leg).
+
+## Owed, in order (every heavy leg through `~/pcl-agent-scratch/s512/heavy.sh s510b leg|bench <log> CMD`, in the background; light work while it runs)
+1. **Board AFTER**: delete the PARTIAL `scratch/s510b/board-tree.*` first, then `board.sh tree` through heavy.sh; diff against `board-base.*` (338 rows): 0 NEW / 0 LOST expected.  A mover is re-run alone and explained.
+2. `tools/everyday-smoke.pl --jobs 2` (BEFORE = main 114 of 122): NEW 0 / UNEXPLAINED 0 / STALE 0 expected.
+3. **Bench** (`bench-ab.sh <W>/cl/pcl-runtime.lisp fhprint fhread fprint textproc`, control pass built in) as `heavy.sh s510b bench`: a row slower than its control spread is real -- say which and why.
+4. `tools/ir-conform --jobs 2` (a leg).
+5. `prove tools/t/install-container.t` (a leg; report the row count, or the plan-skip and why).
+6. `tools/tag-license --check`; `git -C "$W" status --short` shows only `scratch/`.
+7. **Records**: `docs/DECIDED.md` `## s510b` directly BELOW `## s510p` (draft `scratch/s510b/decided.txt`; ONE line per ruling); `docs/session-log.md` `## Session s510b` directly BELOW `## Session s510p` (one paragraph per member, the bars line, the companion movers cited as ruled above); tasks 2777 / 2778 DONE sections + status `completed`, #2777's DONE carrying the residue line (an in-memory handle carries CHARACTERS, so `binmode(:utf8)` + `print "\x{e9}"` leaves 1 char where perl leaves 2 bytes -- pre-existing, documented in `%p-binmode-impl`; review `r.pl` row 10).  Commit (named files).
+8. **Full gate** on the final tree: `env -C "$W" PCLXS_DIR="$HOME/pclxs" ~/pcl-agent-scratch/s512/heavy.sh s510b leg "$W/scratch/s510b/gate.log" tools/prove-core` -- `Result: PASS`; say files / rows (main 282 / 9,840 + your 8 new rows = 9,848 expected; count by RUNNING your guard files).  `Pl/t/glob-01.t` rows 29-30 are the #2384 flake: re-run that file alone.  Never edit while it runs.
+9. `tools/everyday-smoke.pl --record` LAST (a leg, on the clean committed tree); commit the appended `baselines/everyday-history.tsv` row; add the final bars line to `## Session s510b`.
+10. `MERGE-READY: <sha>` as the FIRST line of `$W/scratch/s510b/STOP.md`, every bar's log path under it (each log's mtime after the last CODE commit).  If you have a SendMessage tool, send one line to `main`: `s510b MERGE-READY <sha>`.
+
+Keep STOP.md current after every step (a resume recipe at its TOP, including THIS list with what is done).
+
+## Final report (SHORT)
+STOP.md's first line; your model id; the board diff; the everyday line BEFORE -> AFTER; the bench rows with their control spread and your verdict; ir-conform's counts; install-container's result; the gate's count; anything FLAGGED; anything you could NOT do, said plainly.
