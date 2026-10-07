@@ -1,4 +1,4 @@
-# s512 shared box (2026-10-07 evening, Fable) -- the three batches checkpointed at the end of s510 are RESUMED, TWO at a time (the default cap; the USER said only "Please continue"), all on Opus 5.5: s510b (binmode in place + `$, = 0`) and s510f (the first run from text, #2702) now; s510c (the list-context fallback bind goes) when s510b is merged.  MERGE ORDER: s510b -> s510f -> s510c.
+# s512 shared box (2026-10-07 evening, Fable) -- the three batches checkpointed at the end of s510 are RESUMED, TWO at a time (the default cap; the USER said only "Please continue") -- UPDATED ~23:50: THE CAP IS THREE (USER: "Please run three parallel jobs"): s510c RUNS NOW beside the other two, all on Opus 5.5: s510b (binmode in place + `$, = 0`) and s510f (the first run from text, #2702) now; s510c (the list-context fallback bind goes) when s510b is merged.  MERGE ORDER: s510b -> s510f -> s510c.
 
 FIRST ACTION, before anything else: write the EXACT model id you are running as (from your own system
 prompt, e.g. `claude-opus-5-5`) into `$W/scratch/<label>/MODEL.txt` (overwrite the old one: you are a
@@ -44,7 +44,7 @@ Read through MAIN's checkout, never through your worktree's copy:
   2830-2849; runtime-only, no generation string).  RUNS NOW, merges SECOND.
 - **s510c** (worktree `/home/bernt/pcl/.claude/worktrees/agent-a0324b48405eea0b6`, HEAD `23fb812b`, code `b702dccf`;
   task IDs 2860-2869; generations v2-4780..4783 -- ABOVE main's, and main cannot pass them this session, so no renumber).
-  NOT running yet: it takes the slot s510b frees; it has an OPEN REGRESSION to fix first (its brief); merges LAST.
+  RUNNING since ~23:50 (cap three); it has an OPEN REGRESSION to fix first (its brief); merges LAST.
 When a batch is merged Fable writes `~/pcl-agent-scratch/s512/MAIN-READY-<N>` (sha + main's numbers) and tells the
 running agents; each rebases across it KEEPING BOTH sides (`cl/pcl-runtime.lisp`, the baselines, `docs/DECIDED.md`,
 `docs/session-log.md`, `docs/ir-spec.md`, `docs/not-supported.md`) and re-takes ONLY the full gate, the sweep,
