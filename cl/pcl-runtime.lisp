@@ -34897,6 +34897,124 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (%pcl-install-bmh-matcher)
 
+;;; ── END-ANCHORED SCAN STARTS AT THE TAIL (#2723, s512p) ─────────────────────
+;;; cl-ppcre tries every start position from START, so /9\n\z/ on a growing
+;;; string was a scan of the whole string per match (98 s for 90 000 matches
+;;; on a 320 KB string; perl 0.01 s).  No match of an end-anchored pattern
+;;; whose length is bounded by L can start before END - L - (0 or 1), so the
+;;; scanner is wrapped to start there; the leftmost match is unchanged.
+
+(defun %pcl-regex-max-length-node (tree)
+  "The compound-node arms of %pcl-regex-max-length."
+  (flet ((sum (nodes)
+           (loop for n in nodes
+                 for l = (%pcl-regex-max-length n)
+                 unless l return nil
+                 sum l))
+         (most (nodes)
+           (loop for n in nodes
+                 for l = (%pcl-regex-max-length n)
+                 unless l return nil
+                 maximize l)))
+    (case (first tree)
+      ((:sequence :group) (sum (rest tree)))
+      (:alternation (most (rest tree)))
+      (:branch (%pcl-regex-max-length (third tree)))
+      ((:positive-lookahead :negative-lookahead
+                            :positive-lookbehind :negative-lookbehind :flags)
+       0)
+      ((:greedy-repetition :non-greedy-repetition)
+       (let ((max (third tree))
+             (inner (%pcl-regex-max-length (fourth tree))))
+         (and max inner (* max inner))))
+      ((:register :standalone) (%pcl-regex-max-length (second tree)))
+      (:named-register (%pcl-regex-max-length (third tree)))
+      (:back-reference nil)
+      (:filter (third tree))
+      (:regex (%pcl-regex-max-length (cl-ppcre:parse-string (second tree))))
+      ((:char-class :inverted-char-class :property :inverted-property) 1)
+      (t (error "PCL: %pcl-regex-max-length has no case for the cl-ppcre ~
+                 parse-tree node ~S" (first tree))))))
+
+(defun %pcl-regex-max-length (tree)
+  "The most characters a match of the cl-ppcre parse tree TREE can consume,
+   or NIL when that is unbounded (task #2723).  Every node kind cl-ppcre's
+   convert.lisp accepts has an arm; anything else DIES (rule 12)."
+  (cond
+    ((stringp tree) (length tree))
+    ((characterp tree) 1)
+    ((member tree '(:everything :digit-class :non-digit-class
+                    :word-char-class :non-word-char-class
+                    :whitespace-char-class :non-whitespace-char-class))
+     1)
+    ((member tree '(:void :word-boundary :non-word-boundary
+                    :start-anchor :end-anchor :modeless-start-anchor
+                    :modeless-end-anchor :modeless-end-anchor-no-newline
+                    :case-insensitive-p :case-sensitive-p
+                    :multi-line-mode-p :not-multi-line-mode-p
+                    :single-line-mode-p :not-single-line-mode-p))
+     0)
+    ((consp tree) (%pcl-regex-max-length-node tree))
+    (t (error "PCL: %pcl-regex-max-length has no case for the cl-ppcre ~
+               parse-tree node ~S" tree))))
+
+(defun %pcl-regex-tail-allowance (tree multi-line)
+  "When every match of TREE ENDS at an end anchor, the most characters the
+   anchor can sit before the string's end: 0 for \\z, 1 for \\Z and for $
+   (perl's `before a final newline').  NIL otherwise -- including $ when
+   MULTI-LINE, where it matches before any newline (task #2723)."
+  (cond
+    ((eq tree :modeless-end-anchor-no-newline) 0)
+    ((eq tree :modeless-end-anchor) 1)
+    ((eq tree :end-anchor) (if multi-line nil 1))
+    ((atom tree) nil)
+    (t
+     (case (first tree)
+       ((:sequence :group)
+        (let ((last (find-if-not (lambda (n)
+                                   (or (eq n :void)
+                                       (and (consp n) (eq (first n) :flags))))
+                                 (rest tree) :from-end t)))
+          (and last (%pcl-regex-tail-allowance last multi-line))))
+       ((:register :standalone)
+        (%pcl-regex-tail-allowance (second tree) multi-line))
+       (:named-register (%pcl-regex-tail-allowance (third tree) multi-line))
+       (:alternation
+        (loop for n in (rest tree)
+              for a = (%pcl-regex-tail-allowance n multi-line)
+              unless a return nil
+              maximize a))
+       (t nil)))))
+
+(defun %pcl-tree-mentions-p (tree symbol)
+  (if (consp tree)
+      (or (%pcl-tree-mentions-p (car tree) symbol)
+          (%pcl-tree-mentions-p (cdr tree) symbol))
+      (eq tree symbol)))
+
+(defun %pcl-tail-reach (pattern options)
+  "How far before the end an END-ANCHORED, bounded PATTERN's match can start
+   (its max length + the anchor's newline allowance), or NIL."
+  (let* ((tree (let ((cl-ppcre::*extended-mode-p* (getf options :extended-mode)))
+                 (cl-ppcre:parse-string pattern)))
+         (multi-line (or (getf options :multi-line-mode)
+                         (%pcl-tree-mentions-p tree :multi-line-mode-p)))
+         (allowance (%pcl-regex-tail-allowance tree multi-line))
+         (len (and allowance (%pcl-regex-max-length tree))))
+    (and len (+ len allowance))))
+
+(defun %pcl-tail-start-scanner (scanner reach)
+  "SCANNER, starting its scan REACH characters before END: no match of an
+   end-anchored pattern can start earlier, so the leftmost match is the same.
+   *real-start-pos* keeps every anchor, \\b and lookbehind reading the start
+   the scanner would have seen (task #2723)."
+  (declare (function scanner) (fixnum reach))
+  (lambda (string start end)
+    (declare (fixnum start end))
+    (let ((cl-ppcre::*real-start-pos* (or cl-ppcre::*real-start-pos* start)))
+      (funcall scanner string (max start (- end reach)) end))))
+
+
 (defun %pcl-build-scanner (pattern options)
   "cl-ppcre:create-scanner wrapper.  Why this exists (yes, it looks stupid):
    cl-ppcre has a bug — after an inline `(?-x:...)`/`(?x:...)` mode group it does
@@ -34929,9 +35047,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                      unless (or (member k '(:pcl-xx-mode :pcl-minend-mode))
                                 (and self-x (eq k :extended-mode)))
                      nconc (list k v))))
-    (if minend
-        (%pcl-build-minend-scanner pat opts)
-        (apply #'cl-ppcre:create-scanner pat opts))))
+    (multiple-value-bind (scanner reg-names)
+        (if minend
+            (%pcl-build-minend-scanner pat opts)
+            (apply #'cl-ppcre:create-scanner pat opts))
+      ;; FOURTH (task #2723): an END-ANCHORED pattern of bounded length
+      ;; starts its scan at the tail -- see %pcl-tail-start-scanner.
+      (let ((reach (%pcl-tail-reach pat opts)))
+        (values (if reach (%pcl-tail-start-scanner scanner reach) scanner)
+                reg-names)))))
 
 (defvar *p-match-end-floor* -1
   "The position a MINEND scan attempt must END PAST (see %p-global-scan).
