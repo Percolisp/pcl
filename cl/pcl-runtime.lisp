@@ -26440,7 +26440,7 @@ buffer's fill-pointer; everything else falls back to file-length."
        Measured: `use Carp` from a cached script wrote entries no `pcl -e`
        run could reach.
      * on a MISS, the transpile itself (pl2cl resolves every `use`), and
-       anything the text load reaches before the preamble's own /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3 /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux /home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3 form.
+       anything the text load reaches before the preamble's own `@INC` form.
 
    So `pcl` hands over the search path its preamble is ABOUT to set, in the
    same order, and it is in force only until the preamble replaces it.  The
