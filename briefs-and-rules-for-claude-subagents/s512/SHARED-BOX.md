@@ -38,6 +38,7 @@ Read through MAIN's checkout, never through your worktree's copy:
   `dot-claude-in-home-dir/` or `briefs-and-rules-for-claude-subagents/` in your branch.
 
 ## The batches and the MERGE ORDER
+STATE 00:45 (2026-10-08): **s510b MERGED** (`MAIN-READY-1`, main `e4331e9a`, code `8480f3f9`, gate 282 / 9,848, sweep 18735, EVERYDAY 114 of 122).  RUNNING: s510f (rebasing across it, re-taking its legs; merges next = `MAIN-READY-2`), s510c (the regression first), and **s512p = PERF ROUND 41** (brief `s512/s512p-prompt.md`; WITH isolation; task IDs 2880-2899; runtime-only, v2-4880 only if it emits) in the slot s510b freed.  A perf round takes its FINAL whole-table bench as late as it can, after the last merge it crosses.
 - **s510b** (worktree `/home/bernt/pcl/.claude/worktrees/agent-acb992c6718ea4a5d`, HEAD `3ae84709`; task IDs
   2850-2859, used to 2853; runtime-only, no generation string).  RUNS NOW and merges FIRST (smallest, fully reviewed).
 - **s510f** (worktree `/home/bernt/pcl/.claude/worktrees/agent-a9518b536c5798126`, HEAD `4440871c`; task IDs
