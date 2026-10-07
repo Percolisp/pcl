@@ -143,11 +143,14 @@ ordinary programs whose output matches perl's:
   on every run, loads its modules, starts `sbcl --version`, and hashes the
   1.5 MB runtime source to find the right saved core. SBCL itself, booting
   PCL's saved core, takes 3 to 7 ms.
-* **The first run after an edit** is dominated by building the program's
-  compiled file, because that build loads every module the program `use`s
-  from source, even when the module's compiled file already exists. A
-  script using Getopt::Long takes 5.3 seconds on its first run; the 101
-  programs' first runs take 85 seconds together.
+* **The first run after an edit** runs the program from its transpiled
+  text, then builds the program's compiled file after the program has
+  ended, in the same process, using the modules it already loaded (their
+  own compiled files when they exist). Measured 2026-10-07 on a quiet box:
+  a script using Getopt::Long takes 0.22 seconds on its first run (3.6
+  before), a 60-line script 0.56 (1.5 before); a 1026-line script
+  using List::Util and POSIX takes 7.1 seconds (6.6 before). Every later
+  run takes about 0.05 seconds.
 * **Code created by string `eval`** is compiled by SBCL's full compiler
   every time it runs. The common case is a Moo class's set-up: one small
   program that defines a Moo class spends 2.7 seconds a run, most of it
@@ -159,8 +162,7 @@ faster start-up**:
 
 * a faster launcher: a native one, or one that remembers the saved core's
   name and hashes the runtime only when the runtime file has changed;
-* a first run that reuses modules' existing compiled files instead of
-  loading their source;
+* a cheaper first compile of a large script;
 * a cheaper compile for code created by string `eval`, and cached compiled
   `eval` strings.
 
