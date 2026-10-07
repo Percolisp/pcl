@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-08",
+   "description" : "FILED s512 (Fable, 2026-10-08) from perf round 41's checkpoint report (s512p, worktree agent-ad4d28a21ff7f772a, scratch/s512p/STOP.md): with the #2723 wrapper loaded, the 30 000-iteration reproducer (`my %h; for my $i (1..30000) { $h{u} .= \"line $i\\n\"; $m++ if $h{u} =~ /9\\n\\z/ }`) drops from 14.0 s to 2.6 s, and the SAME loop WITHOUT the match takes 2.67 s on main (perl 0.01 s) -- so the remaining cost is the append, not the regex.  CONTRADICTS the s509 table (DECIDED `## s509`, docs/faster-codegen-suggestions.md round 39: 30 000 appends to a hash element 1.58 s -> 0.05 s behind the `:strbuf` cell) unless the shape differs.\n\nTHE CHEAP DISCRIMINATING MEASUREMENT (3 minutes, do it before anything else): on a QUIET box (load < 2), time four spellings x 30 000 on main vs perl: (a) `$h{u} .= \"line $i\\n\"` (the report's); (b) `$h{u} .= $s` with a precomputed string; (c) `my $u; $u .= \"line $i\\n\"` (a lexical); (d) the s509 table's exact program (`~/pcl-agent-scratch/s509/review/sb/sb.pl` or its appmatch2.pl section `append`).  If (d) is 0.05 s and (a) is 2.6 s the in-place path is missed by the INTERPOLATED right side (p-string-concat feeding `.=`); if (b) is also slow it is the hash element; if all are ~0.05 s the 2.67 s was load.  Then file the real task or close this one with the numbers.  Perf round 41 (s512p) resumes with this as the first thing it measures when it continues #2723 (its reproducer's remaining time is this).",
+   "id" : 2875,
+   "status" : "pending",
+   "subject" : "SUSPECT (measure first): 30 000 appends `$h{u} .= \"line $i\\n\"` take 2.6-2.7 s on main (s512p, load ~5) where the s509 ratification table measured the in-place `:strbuf` append at 0.05 s -- either the measurement (load) or a shape the in-place path does not take (an interpolated RHS? the hash element? the loop variable?); perl 0.01 s"
+}
