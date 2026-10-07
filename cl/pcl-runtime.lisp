@@ -16352,6 +16352,9 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            (hash-table-p a)
            (%p-hash-marker-p a))))
 
+;; Inline: print reads both separators on every call, and the common case is
+;; undef (fhprint measured +7..12 % with an out-of-line call, s510b).
+(declaim (inline %p-separator-text))
 (defun %p-separator-text (sep)
   "The text the print separator SEP ($, or $\\ — the variable's box, or say's
    newline string) contributes, or NIL for none.  perl uses a separator when
@@ -16365,14 +16368,19 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    overload's text, the unboxed referent would print HASH(0x…).  A tied or
    magic separator is read ONCE (one FETCH) and that value is stringified."
   (let ((v (unbox sep)))
-    (cond ((stringp v) (and (plusp (length v)) v))
-          ((not (%pcl-definedp v)) nil)
-          (t (let ((s (if (and (p-box-p sep)
-                               (let ((raw (p-box-value sep)))
-                                 (or (p-tie-proxy-p raw) (p-magic-cell-p raw))))
-                          (to-string v)
-                          (to-string sep))))
-               (and (plusp (length s)) s))))))
+    (cond ((or (null v) (eq v *p-undef*)) nil)
+          ((stringp v) (and (plusp (length v)) v))
+          (t (%p-separator-text-slow sep v)))))
+
+(defun %p-separator-text-slow (sep v)
+  "%p-separator-text for a defined NON-string separator value V (a number, a
+   reference, an object): stringify the BOX, or V when SEP is tied / magic."
+  (let ((s (if (and (p-box-p sep)
+                    (let ((raw (p-box-value sep)))
+                      (or (p-tie-proxy-p raw) (p-magic-cell-p raw))))
+               (to-string v)
+               (to-string sep))))
+    (and (plusp (length s)) s)))
 
 (defun %p-write-list (fh args ors site)
   "Write ARGS — a print/say LIST — to FH: $, between successive elements, then
