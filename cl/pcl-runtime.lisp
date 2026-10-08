@@ -22713,17 +22713,15 @@ buffer's fill-pointer; everything else falls back to file-length."
    Times are Unix-epoch seconds (same convention as sb-posix:utime).  undef
    ATIME/MTIME means 'now', which sb-posix:utime uses when the times are omitted.
    Both times are optional: `utime 'x'` (op/lex_assign.t) is a plain
-   short list — 0 files touched, returns 0.  A time arriving in a BOX (a
-   variable) is read through it, the LIST is flattened like p-kill's, and a
-   failure sets $! (#2923: `my ($a, $m); utime $a, $m, @files` set the
-   times to 0 on nothing and answered 0)."
-  (let* ((av (unbox atime))
-         (mv (unbox mtime))
-         (a (unless (or (null av) (eq av *p-undef*))
-              (%pcl-to-integer (to-number av))))
-         (m (unless (or (null mv) (eq mv *p-undef*))
-              (%pcl-to-integer (to-number mv))))
-         (count 0))
+   short list — 0 files touched, returns 0.  Only a LITERAL undef means
+   'now': an undef VARIABLE is time 0, as in perl (probed 5.40.3).  The LIST
+   is flattened like p-kill's and a failure sets $! (#2923: `utime $a, $m,
+   @files` touched nothing and answered 0)."
+  (let ((a (unless (or (null atime) (eq atime *p-undef*))
+             (%pcl-to-integer (to-number atime))))
+        (m (unless (or (null mtime) (eq mtime *p-undef*))
+             (%pcl-to-integer (to-number mtime))))
+        (count 0))
     (loop for f across (p-flatten-args files) do
       (handler-case
           (progn

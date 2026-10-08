@@ -1,3 +1,8 @@
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # pcl-shim: autodie without Fatal.pm's code generator (task #2873).
 #
 # perl's autodie (Fatal.pm) builds its replacement subs from STRING EVALS of
@@ -409,8 +414,9 @@ sub kill (@) {
     my ($sig, @pids) = @_;
     my $n = CORE::kill($sig, @pids);
     return $n if $n == @pids;
-    # Signal 0 only ASKS whether the processes exist: never a failure.
-    return $n if $sig =~ /\A-?0\z/;
+    # Signal 0 only ASKS whether the processes exist: perl's autodie lets the
+    # answer through when it is USED (scalar or list context), dies in void.
+    return $n if $sig =~ /\A-?0\z/ && defined wantarray;
     _general('kill', [@_], $n);
 }
 

@@ -3014,8 +3014,10 @@ sub gen_funcall_form {
     return $self->_ctx_wrap_form($call, $ctx);
   }
 
-  # User sub calls: always bind *wantarray*.
-  if (!exists $RUNTIME_NAMES{$func_name}) {
+  # User sub calls: always bind *wantarray*.  A builtin's name called as the
+  # USER's sub -- `&NAME(...)`, or displaced by an import (`use autodie`'s
+  # `kill`, #2873) -- is one too: the sub may ask wantarray.
+  if ($force_user || !exists $RUNTIME_NAMES{$func_name}) {
     # Kind-A `insensitive-call` (Pl::Passes): a KNOWN user sub whose body
     # never observes its context — no `wantarray`, every `return` scalar-
     # rooted (Parser2::_sub_return_facts, the fact rides sub_info) — is
