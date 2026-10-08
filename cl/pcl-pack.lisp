@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-4580
+;;; pcl: pipeline=v2 gen=v2-4784
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -1794,10 +1794,7 @@
                                                         (p-if (p-< $nv 0) "-Inf" "Inf"))
                                                       (p-esc " in pack\\n"))))
                                                 (p-.= (p-cast-$ $result_ref :strict-lv)
-                                                  (pl-_pack_emit_int (p-list-ctx (p-int $nv))
-                                                    $nb
-                                                    $sig
-                                                    $be2))))))
+                                                  (pl-_pack_emit_int (p-int $nv) $nb $sig $be2))))))
                                         (p-next))))
                                   (p-if (p-str-eq $ch "f")
                                     (progn
@@ -1892,8 +1889,7 @@
                                                     (p-. "Cannot pack "
                                                       (p-if (p-< $nv 0) "-Inf" "Inf"))
                                                     (p-esc " in pack\\n"))))
-                                              (pl-_pack_utf8_char (p-list-ctx (p-int $nv))
-                                                $result_ref)))))
+                                              (pl-_pack_utf8_char (p-int $nv) $result_ref)))))
                                       (p-next)))
                                   (p-if (p-str-eq $ch "W")
                                     (progn
@@ -2449,8 +2445,7 @@
                                         :dyn
                                         t
                                         (p-funcall-ref $push_val
-                                          (p-list-ctx
-                                            (p-ord (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1)))))))))
+                                          (p-ord (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1))))))))
                               (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "w"))
                                 (setf --pcl-if-ret--2
                                   (progn

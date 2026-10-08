@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-4580
+;;; pcl: pipeline=v2 gen=v2-4784
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -135,19 +135,18 @@
             (p-if (p-! @parents) (p-return (make-p-box (p-array-init $class))))
             (p-let ((@seqs :array (make-array 0 :adjustable t :fill-pointer 0)))
               (p-array-= @seqs
-                (p-list-ctx
-                  (p-map
-                    (lambda ($_)
-                      (make-p-box
-                        (p-array-init
-                          (p-cast-@ (p-list-ctx (mro::pl-_c3_linearize $_ $seen)) :rvalue))))
-                    @parents)))
+                (p-map
+                  (lambda ($_)
+                    (make-p-box
+                      (p-array-init
+                        (p-cast-@ (p-list-ctx (mro::pl-_c3_linearize $_ $seen)) :rvalue))))
+                  @parents))
               (p-push @seqs (make-p-box (p-array-init @parents)))
               (p-let ((@result :array (make-array 0 :adjustable t :fill-pointer 0)))
                 (p-array-= @result (vector $class))
                 (p-while 1
                   (p-array-= @seqs
-                    (p-list-ctx (p-grep (lambda ($_) (p-scalar (p-cast-@ $_ :rvalue))) @seqs)))
+                    (p-grep (lambda ($_) (p-scalar (p-cast-@ $_ :rvalue))) @seqs))
                   (p-if (p-! @seqs) (p-last))
                   (p-let (($cand :box (make-p-box nil)))
                     (p-foreach ($seq @seqs)
