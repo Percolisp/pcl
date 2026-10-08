@@ -1,5 +1,7 @@
 # s513 shared box (2026-10-08 evening, Fable) -- the three s512 checkpoints are RESUMED and ONE new small batch (s513a, #2860) is added, TWO agents at a time (the default cap; the USER said only "Please continue").  MERGE ORDER: s510f -> s513a -> s510c -> s512p (a perf round takes its FINAL whole-table bench after the last merge it crosses).
 
+**ADDENDUM 2026-10-09 00:10 (Fable): THE CAP IS THREE (USER: "Please start an extra. :-)").  s510f and s513a are MERGED (`MAIN-READY-1`, `MAIN-READY-2`: main `42fafb08`, code `5adcc156`, gen v2-4580, gate 284 files / 9,904 rows, sweep 18736, EVERYDAY 114 of 122).  RUNNING: s510c (merges THIRD = `MAIN-READY-3`), s512p (perf round 41), and NEW **s513b** = the static-parsing batch (#2871 position-aware prototypes, then #2873 `use autodie`; brief `s513/s513b-prompt.md`; task IDs 2920-2939; gen v2-4680, renumbered above main at its final rebase).  MERGE ORDER from here: s510c -> then s513b and s512p in the order they become ready (a perf round re-takes its final bench across whatever merges before it).  Every rule below applies to s513b as to a NEW batch (with isolation).**
+
 FIRST ACTION, before anything else: write the EXACT model id you are running as (from your own system
 prompt, e.g. `claude-opus-5-5`) into `$W/scratch/<label>/MODEL.txt` (overwrite the old one: you are a
 fresh agent).  The USER requires Opus 5.5 -- if your model id is anything else, write it there, STOP,
