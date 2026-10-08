@@ -2311,6 +2311,12 @@ is covered by `Pl/t/transpile-test-02.t`).
 
 ## Context propagation into string eval
 
+> **Update (s510c, #2800): the VOID-context gap below is FIXED** -- `eval STRING` is
+> bound by its own static context exactly as `eval BLOCK` is, so `eval $code;` reports
+> `V` (t/op/wantarray.t 28/0, t/op/eval.t's two void rows, t/op/kvhslice.t's
+> `scalar eval "%h{...}"`).  What still cites this section is the warnings half (#221)
+> and eval.t row 10/99 (#1460).
+
 > **Update (session 250): lexical *variable* capture is now IMPLEMENTED** — the
 > eval'd code reads and writes the enclosing scope's `my` lexicals, and closures
 > built inside the eval close over them (see
