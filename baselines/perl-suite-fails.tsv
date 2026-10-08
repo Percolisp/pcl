@@ -2004,7 +2004,6 @@ io/open.t	135	ok	not ok	bad layer ">:u" warning	NS:Warnings-gated diagnostics ar
 io/open.t	134	ok	not ok	bad open (>>>) failure	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/open.t	133	ok	not ok	bad open (>>>) warning	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221
 io/open.t	183	ok	not ok	buffering delays writing to scalar (simple open)	#1710
-io/open.t	170	ok	not ok	check errno	#1710
 io/open.t	165	ok	not ok	check multiple arguments to unlink	#1710
 io/open.t	155	ok	not ok	chmod fails with \0 in name	#1710
 io/open.t	157	ok	not ok	chmod fails with \0 in name (overload)	#1710
