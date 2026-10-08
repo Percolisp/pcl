@@ -643,7 +643,9 @@ diag "-------- Unique Parameter Names (Issue: duplicate \$ params):";
          'Prototype $$$ does not generate duplicate $ param names');
 
   # Old-style prototypes use &rest %_args (body accesses @_)
-  like($cl, qr/\(p-sub pl-takes_three\s+\(&rest %_args\)\s+\(:prototype "\$\$\$" :needs \(\)\)/,
+  # (`:writes-args nil` since #2860: a prototyped sub carries its proven
+  # writes_args fact -- `my (...) = @_` is a read.)
+  like($cl, qr/\(p-sub pl-takes_three\s+\(&rest %_args\)\s+\(:writes-args nil :prototype "\$\$\$" :needs \(\)\)/,
        'Prototype $$$ uses &rest pattern for @_ access, and says so on the definition');
 
   # The proto_type should preserve original
