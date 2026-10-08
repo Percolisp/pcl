@@ -121,6 +121,7 @@ form (`if (grep { … } @list)`, `my $n = grep …`) is everywhere in ordinary c
 A regex anchored at the END of a string (`/9\n\z/`) scans from the start: appending a line and testing
 the tail, 30 000 times, takes 11 s on main and on the round-39 tree, 0.09 s in perl (#2723, filed by
 s507p).  Programs that accumulate a buffer and test its end do exactly this.
+In the end (s512p, round 41): the scan now starts near the tail for an end-anchored pattern of bounded length -- 60 000 matches on 200 KB 20.9 s -> 0.28 s; the reproducer's remaining time is the append loop itself (#2880, #2881), not the regex.
 
 ## 3. What is NOT cheap
 
