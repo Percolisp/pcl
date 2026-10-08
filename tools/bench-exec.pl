@@ -337,6 +337,8 @@ my @benches = (
   # s513c (perf round 42, #2880): the accumulator spelled `my $u;` -- no
   # initializer -- was a :scalar slot, a fresh concatenation per append.
   ['accum',    "$HN my \$u; for my \$i (1 .. \$n) { \$u .= \"line \$i\\n\" } print length(\$u), \"\\n\";", 30_000, 0],
+  # s513c (#2881): append, then READ the growing string -- each read copied it whole.
+  ['accumread', "$HN my %h; my \$m = 0; for my \$i (1 .. \$n) { \$h{u} .= \"line \$i\\n\"; \$m++ if substr(\$h{u}, -2, 1) eq \"9\" } print \"\$m\\n\";", 30_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------

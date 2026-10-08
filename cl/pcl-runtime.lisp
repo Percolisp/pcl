@@ -6432,7 +6432,10 @@
    4 args: replace in place (if str is a box), return replaced portion.
    Negative start: count from end. Negative length: stop that many chars before end.
    Contract: ctx=insensitive coerce=str,num magic=none dies=yes dynamic=no phase=no host=none"
-  (let* ((s (to-string str))
+  ;; The extraction reads a :strbuf cell LIVE (#2881): it keeps only the
+  ;; fresh subseq of its piece, so no snapshot of the whole string is needed.
+  (let* ((s (or (and (null replacement) (p-box-p str) (%p-live-text str))
+                (to-string str)))
          (slen (length s))
          (raw-st (truncate (to-number start)))
          ;; Adjusted start (without clamping) for bounds checking
@@ -11320,9 +11323,9 @@ per element."
 ;;; a raw lexical slot (`my $t = $g;` lowers to a plain SETF of a let
 ;;; variable) retains a value with no runtime store to put a chokepoint in, so
 ;;; that invariant cannot be closed -- the cell makes the buffer unreachable by
-;;; construction.  COST: the first read after an append copies the string, so
-;;; a loop that reads the scalar after every append stays O(n) per iteration,
-;;; as it was.  Short strings keep the plain concatenate (no buffer at all).
+;;; construction.  COST: the first read after an append copies the string --
+;;; except for the readers that keep nothing (THE LIVE READ below, #2881).
+;;; Short strings keep the plain concatenate (no buffer at all).
 (defconstant +p-strbuf-min+ 200
   "A `.=` whose result is at least this long moves the string into a :strbuf
    buffer; below it the append is the plain concatenate.")
@@ -11374,6 +11377,25 @@ per element."
   (and (p-magic-cell-p v)
        (eq (p-magic-cell-kind v) :strbuf)
        (p-magic-cell-data v)))
+
+;;; THE LIVE READ (#2881, s513c).  A reader that KEEPS NOTHING of the text --
+;;; substr's extraction (it copies only its piece), a single m// (its match
+;;; record keeps a displaced VIEW of the prefix it scanned, see below), length
+;;; -- reads a :strbuf cell's buffer in place instead of the getter's
+;;; snapshot.  That snapshot is a copy of the WHOLE string per read after an
+;;; append, which made `$h{u} .= "line $i\n"; substr($h{u}, -2, 1)' quadratic
+;;; (30 000 iterations: 1.9 s; perl 0.01 s).  Why a view of the prefix is safe
+;;; to keep: the buffer only ever GROWS -- %p-strbuf-push writes past the fill
+;;; pointer, adjust-array copies to a new data vector, and a write of the
+;;; scalar replaces the cell -- so characters [0, fill-pointer) of a data
+;;; vector never change once written.
+(declaim (inline %p-live-text))
+(defun %p-live-text (val)
+  "The live buffer (adjustable, fill-pointer) of a :strbuf cell in box VAL --
+   for a reader that keeps none of it -- else NIL."
+  (and (p-box-p val)
+       (let ((sb (%p-strbuf-of (p-box-value val))))
+         (and sb (p-strbuf-buf sb)))))
 
 (defun %p-concat-assign-value (box value)
   "The NEW value `BOX .= VALUE` stores on the ordinary path: perl's `.`
@@ -12678,46 +12700,69 @@ per element."
         ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
         (t *p-undef*)))))
 
-;;; `length($h{K})` / `length($a[I])` (s507p, #2115): an element whose slot
-;;; box holds a private-buffer cell (:strbuf, :memfh) answers its LIVE length,
-;;; as p-length does for a scalar box -- reading the element would take a
-;;; snapshot per call, so append + length per iteration was quadratic.  The
-;;; two helpers take p-gethash's / p-aref's FAST ARM verbatim (a plain
-;;; element pays one p-box-p test more) and hand every other shape to the
-;;; ordinary read.  Compiler macro for p-refgen-list's reason: p-length is a
-;;; function.
+;;; THE ELEMENT PEEK (s507p #2115 for `length`; #2881, s513c, for substr and
+;;; m//).  `length($h{K})`, `substr($h{K}, …)` and `$h{K} =~ /…/` (and the
+;;; `$a[I]` twins) read an element whose slot box holds a private-buffer cell
+;;; (:strbuf, :memfh) THROUGH THE BOX -- p-length answers the live length,
+;;; p-substr and do-regex-match read a :strbuf live (%p-live-text) -- instead
+;;; of the element's value, which is the getter's snapshot of the whole string
+;;; per read: append + read per iteration was quadratic.  The two helpers take
+;;; p-gethash's / p-aref's FAST ARM verbatim (a plain element pays one p-box-p
+;;; test more) and hand every other shape to the ordinary read.  Compiler
+;;; macros, for p-refgen-list's reason: the consumers are functions.
 (defun %p-slot-live-length (slot)
   "The live length of a slot BOX holding a private-buffer cell; NIL else."
   (and (p-box-p slot)
        (p-magic-cell-p (p-box-value slot))
        (%p-cell-live-length (p-box-value slot))))
 
-(defun %p-length-helem (hash key)
-  "length(p-gethash HASH KEY), without the snapshot of a buffer cell."
+(defun %p-peek-helem (hash key)
+  "p-gethash HASH KEY -- but the slot BOX itself when it holds a private-buffer
+   cell, for a consumer that reads it live and keeps none of it."
   (if (and (hash-table-p hash) (stringp key))
       (multiple-value-bind (val found) (gethash key hash)
-        (if found
-            (or (%p-slot-live-length val) (p-length (%p-hash-unbox-elem val)))
-            (p-length (%p-hash-miss hash key))))
-      (p-length (p-gethash hash key))))
+        (cond ((not found) (%p-hash-miss hash key))
+              ((%p-slot-live-length val) val)
+              (t (%p-hash-unbox-elem val))))
+      (p-gethash hash key)))
 
-(defun %p-length-aelem (arr idx)
-  "length(p-aref ARR IDX), without the snapshot of a buffer cell."
+(defun %p-peek-aelem (arr idx)
+  "p-aref ARR IDX -- but the slot BOX itself when it holds a private-buffer
+   cell, for a consumer that reads it live and keeps none of it."
   (if (and (typep idx 'fixnum) (>= (the fixnum idx) 0)
            (vectorp arr) (not (stringp arr))
            (< (the fixnum idx) (length arr)))
       (let* ((d (%p-vec-data arr))
              (e (if d (svref d idx) (aref arr idx))))
-        (or (%p-slot-live-length e) (p-length (p-aref-unbox-elem e))))
-      (p-length (p-aref arr idx))))
+        (if (%p-slot-live-length e) e (p-aref-unbox-elem e)))
+      (p-aref arr idx)))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-peek-form (val)
+    "The peek spelling of an element-read FORM (p-gethash / p-aref with two
+     arguments), or NIL when VAL is not one."
+    (and (consp val) (= (length val) 3)
+         (case (car val)
+           (p-gethash `(%p-peek-helem ,@(cdr val)))
+           (p-aref `(%p-peek-aelem ,@(cdr val)))
+           (t nil)))))
 
 (define-compiler-macro p-length (&whole form val)
-  (if (and (consp val) (= (length val) 3))
-      (case (car val)
-        (p-gethash `(%p-length-helem ,@(cdr val)))
-        (p-aref `(%p-length-aelem ,@(cdr val)))
-        (t form))
-      form))
+  (let ((peek (%p-peek-form val)))
+    (if peek `(p-length ,peek) form)))
+
+;; substr's EXTRACTION only (2 or 3 arguments): the 4-argument form writes.
+(define-compiler-macro p-substr (&whole form str &rest args)
+  (let ((peek (and (<= (length args) 2) (%p-peek-form str))))
+    (if peek `(p-substr ,peek ,@args) form)))
+
+;; a literal MATCH without /g (s/// and tr/// write; a /g match keeps pos()).
+(define-compiler-macro p-=~ (&whole form str op)
+  (let ((peek (and (consp op) (eq (car op) 'p-regex)
+                   (let ((fl (getf (cdr op) :flags)))
+                     (and (stringp fl) (not (find #\g fl))))
+                   (%p-peek-form str))))
+    (if peek `(p-=~ ,peek ,op) form)))
 
 ;;; Make index I valid in adjustable vector A: push nil HOLES (the deleted-
 ;;; element marker — `exists` stays false, a read gives undef, the first write
@@ -35270,18 +35315,20 @@ buffer's fill-pointer; everything else falls back to file-length."
   (%clear-match-strings))
 
 (declaim (inline %p-ppcre-scan))
-(defun %p-ppcre-scan (scanner str start)
+(defun %p-ppcre-scan (scanner str start &optional end)
   "cl-ppcre:scan for an already-compiled scanner closure, without the CLOS
    generic-function dispatch and keyword parsing (task #680: the emf +
    check-applicable-keywords + &rest consing were ~7% of a m//g loop).
    Mirrors ppcre's (scanner function) method exactly: funcall the closure on
-   a simple string over [START, length).  *real-start-pos* is not rebound —
-   the method binds it to its default NIL, which is its global value; nothing
-   in this runtime binds it.  Callers pass STR already simple (do-regex-match
-   coerces once per call), so the guard here is belt only."
-  (funcall (the function scanner)
-           (if (simple-string-p str) str (coerce str 'simple-string))
-           start (length str)))
+   a simple string over [START, END) -- END defaults to its length; the live
+   read (#2881) passes a buffer's data vector and its fill pointer, and
+   ppcre's end anchors read END as the end of the string.  *real-start-pos*
+   is not rebound — the method binds it to its default NIL, which is its
+   global value; nothing in this runtime binds it.  Callers pass STR already
+   simple (do-regex-match coerces once per call), so the guard here is belt
+   only."
+  (let ((s (if (simple-string-p str) str (coerce str 'simple-string))))
+    (funcall (the function scanner) s start (or end (length s)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; perl's global-match advance rule — ONE reading (task #1719)
@@ -35747,6 +35794,60 @@ buffer's fill-pointer; everything else falls back to file-length."
                         (getf modifiers :g) (getf modifiers :c)
                         (cons pattern options)))))))
 
+(defun %p-single-match (string scan end subject c)
+  "ONE match (no /g) of the compiled regex C over SCAN's characters [0, END):
+   STRING is the operand as the program gave it (pos() is keyed on it),
+   SUBJECT the string the match record keeps for $& / $` / $' / @- (SCAN
+   itself when END is its length; a displaced view of SCAN's prefix on the
+   live read, #2881).  do-regex-match's single-match arm and its live arm are
+   this one body."
+  (declare (type simple-string scan) (type fixnum end))
+  (let ((scanner (svref c 0))
+        (reg-names (svref c 1))
+        (closers (svref c 2))
+        (anchored-g (svref c 3)))
+    (let ((start (if anchored-g (or (%p-match-pos-state string) 0) 0)))
+      (multiple-value-bind (match-start match-end reg-starts reg-ends)
+          (%p-ppcre-scan scanner scan start end)
+        (when (and anchored-g match-start (/= match-start start))
+          (setf match-start nil))
+        (if match-start
+            (progn
+              (%p-match-record subject match-start match-end reg-starts reg-ends closers reg-names)
+              (if (eq *wantarray* t)
+                  (let* ((num-groups (length reg-starts))
+                         (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
+                    (if (zerop num-groups)
+                        ;; No capture groups: Perl returns (1) in list context on success
+                        (setf (aref captures 0) 1)
+                        (dotimes (i num-groups)
+                          ;; An unmatched group is perl UNDEF.  It was
+                          ;; raw nil, which %p-flatten-list drops as
+                          ;; "empty list" — so `my ($d,$f) = $p =~
+                          ;; m{^(.*/)?(.*)}` put the FILENAME in $d and
+                          ;; undef in $f whenever the path had no slash.
+                          ;; That is the shape File::Basename::fileparse
+                          ;; uses, so dirname("c.txt") answered "c.txt".
+                          (setf (aref captures i)
+                                (if (and (aref reg-starts i) (aref reg-ends i))
+                                    (subseq scan (aref reg-starts i) (aref reg-ends i))
+                                    *p-undef*))))
+                    captures)
+                  t))
+            ;; No match: scalar/void context returns Perl's '' (defined
+            ;; false), not undef; list context returns the EMPTY LIST.
+            ;; The empty list is spelled as a zero-length VECTOR, not
+            ;; raw nil (tasks #962/#459).  Raw nil is the runtime's
+            ;; "empty list" only to %p-flatten-list; every OTHER list
+            ;; consumer reads it as one slot — p-array-fill preserves
+            ;; it as an array HOLE, p-flatten-args spreads it as one
+            ;; argument — so `f(/nomatch/, "d")' handed the callee two
+            ;; arguments where perl hands one, and every later
+            ;; argument shifted.  A vector is what the SUCCESS arm and
+            ;; the /g list arm already return, so all four consumers
+            ;; splice it to nothing with no arm of their own.
+            (if (eq *wantarray* t) (%p-empty-list) ""))))))
+
 (defun do-regex-match (string op)
   "Perform regex match.
    In scalar context: return t if matched, nil otherwise.
@@ -35756,6 +35857,21 @@ buffer's fill-pointer; everything else falls back to file-length."
    /g in scalar context: iterates over matches, tracking pos in *p-match-pos*.
    /g in list context: returns all matches at once (no pos tracking).
    /gc: keeps pos on failure instead of resetting it."
+  ;; THE LIVE READ (#2881): a single match (no /g) on a :strbuf cell scans the
+  ;; buffer's data vector in place, and the record keeps a displaced view of
+  ;; the scanned prefix -- safe to keep because that prefix never changes
+  ;; (see %p-live-text).  The general path below copies the whole string.
+  (let ((live (and (p-box-p string) (%p-live-text string))))
+    (when live
+      (let ((c (%p-regex-compiled op))
+            (data (%p-str-data live))
+            (end (fill-pointer live)))
+        (when (and data (not (svref c 4)))
+          (return-from do-regex-match
+            (%p-single-match string data end
+                             (make-array end :element-type 'character
+                                         :displaced-to data)
+                             c))))))
   (let* ((str0 (to-string string))  ; to-string handles unboxing via box-sv (preserves class)
          ;; One simple-string coercion per CALL (task #680): ppcre's scan
          ;; method coerces per SCAN, so a non-simple subject (a str-buffer)
@@ -35865,48 +35981,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                      ;; scalar/void /g no-match → Perl's '' (defined false)
                      ""))))))
         ;; No /g: single match.  With \G, anchor at the current pos.
-        (t
-         (let ((start (if anchored-g (or (%p-match-pos-state string) 0) 0)))
-           (multiple-value-bind (match-start match-end reg-starts reg-ends)
-               (%p-ppcre-scan scanner str start)
-             (when (and anchored-g match-start (/= match-start start))
-               (setf match-start nil))
-             (if match-start
-                 (progn
-                   (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)
-                   (if (eq *wantarray* t)
-                       (let* ((num-groups (length reg-starts))
-                              (captures (make-array (max num-groups 1) :adjustable t :fill-pointer t)))
-                         (if (zerop num-groups)
-                             ;; No capture groups: Perl returns (1) in list context on success
-                             (setf (aref captures 0) 1)
-                             (dotimes (i num-groups)
-                               ;; An unmatched group is perl UNDEF.  It was
-                               ;; raw nil, which %p-flatten-list drops as
-                               ;; "empty list" — so `my ($d,$f) = $p =~
-                               ;; m{^(.*/)?(.*)}` put the FILENAME in $d and
-                               ;; undef in $f whenever the path had no slash.
-                               ;; That is the shape File::Basename::fileparse
-                               ;; uses, so dirname("c.txt") answered "c.txt".
-                               (setf (aref captures i)
-                                     (if (and (aref reg-starts i) (aref reg-ends i))
-                                         (subseq str (aref reg-starts i) (aref reg-ends i))
-                                         *p-undef*))))
-                         captures)
-                       t))
-                 ;; No match: scalar/void context returns Perl's '' (defined
-                 ;; false), not undef; list context returns the EMPTY LIST.
-                 ;; The empty list is spelled as a zero-length VECTOR, not
-                 ;; raw nil (tasks #962/#459).  Raw nil is the runtime's
-                 ;; "empty list" only to %p-flatten-list; every OTHER list
-                 ;; consumer reads it as one slot — p-array-fill preserves
-                 ;; it as an array HOLE, p-flatten-args spreads it as one
-                 ;; argument — so `f(/nomatch/, "d")' handed the callee two
-                 ;; arguments where perl hands one, and every later
-                 ;; argument shifted.  A vector is what the SUCCESS arm and
-                 ;; the /g list arm already return, so all four consumers
-                 ;; splice it to nothing with no arm of their own.
-                 (if (eq *wantarray* t) (%p-empty-list) "")))))))))
+        (t (%p-single-match string str (length str) str c))))))
 
 (defun perl-to-ppcre-replacement (str)
   "Convert Perl-style backreferences ($1, $2, ...) to CL-PPCRE style (\\1, \\2, ...)"

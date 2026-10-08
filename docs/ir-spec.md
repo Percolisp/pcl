@@ -233,6 +233,16 @@ retains the key object) — is an opaque/retaining use that disqualifies
 the verdict, so host code calling PCL-generated CL only ever receives
 ordinary simple strings; and even internally, every standard string
 operation respects the fill pointer.
+An UNDEF start (`my $s;`, or an initialiser that yields undef) is the
+ZERO-CAPACITY buffer (normative, s513c, task #2880): every admitted reader
+reads it as perl reads undef (`""`), `length` answers undef for it, and the
+first append always leaves capacity behind, so `$s .= ""` is a defined `""`.
+The admitted reads are ONE table, `%STRBUF_USE` in `Pl::VarAnnotator`
+(`str`, `bool`, `strlen`, and `undef-decl` = the bare declaration itself);
+`defined`, `//` and every escape stay outside it.  The one observable
+difference from perl is the uninitialized-value warning PCL does not emit
+(#221).  Example: `my $s; $s .= "a" for 1..3; print length($s)` lowers to
+`(p-let (($s :str-buffer (%pcl-str-buffer (p-undef)))) …)`.
 
 `box-set` semantics worth knowing: assigning a whole array to a scalar box
 stores its element **count** (Perl array-in-scalar-context); assigning a
@@ -1296,7 +1306,13 @@ adjustable buffer that grows geometrically, and the box holds a magic cell of
 kind `:strbuf`: reads answer a simple-string snapshot taken once after each
 append, a write of the scalar stores plainly (the cell is gone), `length`
 reads the live buffer of a `:strbuf` or `:memfh` cell without a snapshot — of a
-scalar and of a hash / array element alike.  A
+scalar and of a hash / array element alike.  So do the readers that keep
+nothing (normative, s513c, task #2881): `substr`'s extraction (2 or 3
+arguments) and a single `m//` without `/g` read a `:strbuf` cell's buffer in
+place — the match record keeps a DISPLACED view of the scanned prefix, which
+is immutable because the buffer only grows; an element reaches them as its
+slot box through `%p-peek-helem` / `%p-peek-aelem` (compiler macros on
+`p-length`, `p-substr`, `p-=~`).  Every other reader takes the snapshot.  A
 shorter result is the plain concatenation.  perl's order holds: the place's
 index / key operand is read FIRST (once — a variable as a value snapshot when the
 right side could change it: `$a[$i] .= ++$i` appends to `$a[0]`), then the right
