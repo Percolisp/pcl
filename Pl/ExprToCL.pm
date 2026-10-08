@@ -691,6 +691,10 @@ sub gen_node_form {
     return $form if defined $form;
   }
   if (!@$kids && defined(my $lf = $self->gen_leaf_form($node))) {
+    # `&NAME` with no argument list is a CALL (the caller's @_, #2632): it is
+    # bound by its node's context like any sub call (#2861).
+    return $self->_amp_call_ctx_form($lf, $node_id)
+      if ref $lf eq 'ARRAY' && $lf->[0] eq 'p-amp-call';
     return $lf;
   }
   my $desc = ref($node) ? ref($node) . ':' . (eval { $node->content } // '?')
@@ -3048,6 +3052,16 @@ sub _aggregate_assign_value {
        : $result;
 }
 
+# `&NAME` / `&$code` / `&{EXPR}` with no argument list (p-amp-call) is a sub
+# CALL, so its node's static context binds *wantarray* exactly as a `NAME()`
+# call's does -- it used to inherit whatever bind surrounded it (#2861).
+sub _amp_call_ctx_form {
+  my ($self, $call, $node_id) = @_;
+  my $ctx = defined $node_id
+            ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+  return $self->_wrap_wantarray_ctx_form($call, $ctx);
+}
+
 # Form variants of _wrap_wantarray_ctx / _ctx_wrap for E2-converted
 # emitters: same logic, CLForm output (flat-prints to the same bytes).
 sub _wrap_wantarray_ctx_form {
@@ -3691,7 +3705,8 @@ sub gen_prefix_op_form {
   # @_ (the coderef-mention parents intercept before this, as in the text
   # emitter).
   if ($op eq '&') {
-    return ['p-amp-call', ['p-funcall-ref', $operand, '@_']];   # #2632
+    return $self->_amp_call_ctx_form(
+      ['p-amp-call', ['p-funcall-ref', $operand, '@_']], $node_id);   # #2632, #2861
   }
   # * Cast: *$var — typeglob ref (distinct marker for lvalue detection).
   if ($op eq '*') {

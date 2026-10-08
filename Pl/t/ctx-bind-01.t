@@ -237,4 +237,34 @@ E-wa-list 1
 E-wa-void 2
 PROBED
 
+# A-* (#2861): `&NAME` / `&$code` / `&{EXPR}` with no argument list is a CALL and is
+# bound by its own context.  A-join FAILED on the tree before #2861 (join's
+# call-wide bind was what it read, member 3 removed it: cmd/subval.t 24/26);
+# A-print/-scalar/-hash/-sprintf/-anon FAIL on main.
+rows_agree(<<'PL', <<'PROBED', '#2861 &NAME call context');
+sub a1 { wantarray ? "L" : defined(wantarray) ? "S" : "V" }
+my $r = \&a1;
+print "A-join ", join(":", &a1), " ", join(":", &$r), " ", join(":", &{$r}), "\n";
+print "A-print ", &a1, "\n";
+my @x = &a1; my $s = &a1; print "A-assign @x $s\n";
+print "A-scalar ", scalar(&a1), "\n";
+my @y = (1, &a1); print "A-listlit @y\n";
+my %h = (k => &a1); print "A-hash $h{k}\n";
+print "A-sprintf ", sprintf("%s", &a1), " uc ", uc(&a1), " lc ", lc(join "", &a1), "\n";
+print "A-anon ", [&a1]->[0], "\n";
+sub w { return &a1 } my @z = w(); my $z = w(); print "A-ret @z $z\n";
+sub t { &a1 } my @q = t(); my $p = t(); print "A-tail @q $p\n";
+PL
+A-join L L L
+A-print L
+A-assign L S
+A-scalar S
+A-listlit 1 L
+A-hash L
+A-sprintf L uc S lc l
+A-anon L
+A-ret L S
+A-tail L S
+PROBED
+
 done_testing();

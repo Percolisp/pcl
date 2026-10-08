@@ -179,8 +179,10 @@ like($do, qr/\(p-let \(\(\$a__excl__\d+ :\w[\w-]* 1 :perl "\$a" :why :exception-
 # EXPR — calling the sub — then does do-FILE on the RESULT; verified vs perl).
 # The old pin `(p-do (p-get-coderef $ref))` never called the sub at all.
 # s508a (#2632): the call shares the caller's @_ -- the p-amp-call wrapper.
-like($do, qr/\(p-do \(p-amp-call \(p-funcall-ref \$ref \@_\)\)\)/,
-     'do &$cref → generic tail (p-do (p-amp-call (p-funcall-ref $ref @_)))');
+# s510c (#2861): do FILE's operand is a SCALAR, and here the call is bound so
+# (in a LIST slot the operand still takes the do's context: #2862, pre-existing).
+like($do, qr/\(p-do \(p-scalar-ctx \(p-amp-call \(p-funcall-ref \$ref \@_\)\)\)\)/,
+     'do &$cref → generic tail (p-do (p-scalar-ctx (p-amp-call (p-funcall-ref $ref @_))))');
 like($do, qr/\(p-scalar-ctx\s*\(funcall\s*\(lambda/,
      'do block gets its scalar-context wantarray bind');
 
