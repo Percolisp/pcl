@@ -155,8 +155,13 @@ recorded in #2610 with its costs.
 1. **#2871 — position-aware prototype lookup.**  Silent, common script shape, a contained fix (a position
    on each entry, the parser's current position at the lookup).  The sweep's `sub.t` / `proto.t` rows and
    a guard file are the bar.  Pairs naturally with #2870 (the eval's table must carry the same entries).
+   **DONE s513b** (records carry the introducing statement's site; ir-spec §5.2; guard
+   `Pl/t/proto-position-01.t`).  Remains: the eval's table (#2870); the `WORD /` repair still asks whole-file.
 2. **#2873 — `use autodie`.**  An everyday idiom that is silently a no-op; the shim route rides the
    builtin-override registry PCL already has.  Until built, an announcement (rule 12's effect-only boundary).
+   **DONE s513b** (`lib/autodie.pm` + the registry reading `@EXPORT` / `:tag` / `no M`; ir-spec §7.1a;
+   guard `Pl/t/autodie-01.t`).  Remains: lexical (block) scope, the message location (#233), the socket /
+   IPC / fcntl / ioctl wrappers (announced) -- not-supported "autodie".
 3. **#2870 + the run-time half of family A (#2610)** — the eval's sub table, static first, then the
    detector; brian d foy's question is answered honestly only when both are there.
 4. **#2872, #2874** — low frequency, both silent; each is a one-session item with its guard rows.

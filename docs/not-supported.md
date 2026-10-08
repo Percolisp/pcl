@@ -164,6 +164,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [A single generated top-level form above 64k characters](#a-single-generated-top-level-form-above-64k-characters)
 * [Pathological expression nesting depth (≥ ~10k) — DEFERRED](#pathological-expression-nesting-depth--10k--deferred--revisit-after-release-1)
 * [Lexical compile-time hints (`$^H` / `%^H` scoping)](#lexical-compile-time-hints-h--h-scoping)
+* [`autodie` — file scope, no location, the built-ins it does not wrap](#autodie--file-scope-no-location-the-built-ins-it-does-not-wrap)
 * [`use strict 'refs'` — what is still not enforced (the write path, module imports, code refs)](#use-strict-refs--what-is-still-not-enforced-the-write-path-module-imports-code-refs)
 * [Source filters (`Filter::Util::Call`, `Filter::Simple`, …)](#source-filters-filterutilcall-filtersimple-use-switch-)
 
@@ -3022,6 +3023,47 @@ phase, nothing running beside it) and the sweep is contained in a
    cause (utf8cache dies after 2 tests on ordinary code; re/speed smells
    like cl-ppcre recursion on long strings).  Triage those separately as
    real bugs.
+
+## `autodie` — file scope, no location, the built-ins it does not wrap
+
+**Perl behavior:** `use autodie` (Fatal.pm) replaces the named built-ins in
+the calling package with wrappers that die with an `autodie::exception` on
+failure, LEXICALLY: through `%^H`, the replacements end with the enclosing
+block, and `no autodie` ends them for the rest of that block.
+
+**PCL behavior (s513b, task #2873):** `lib/autodie.pm` (a shim: perl's
+Fatal.pm builds its wrappers from string evals that do not compile here)
+wraps open close opendir closedir unlink rename mkdir rmdir chdir binmode read
+seek truncate chmod chown utime link symlink readlink umask flock sysopen
+sysread syswrite sysseek pipe kill fork — the `:default` list minus the rows
+below — and the builtin-override registry calls them from the `use`.  The
+caveats, each deliberate:
+
+* **Scope is the FILE, not the block.**  The wrappers are in force from the
+  `use autodie` statement to the end of the file or to a `no autodie`
+  statement, whatever block either sits in (`%^H` is file-global here, see
+  the next section).  `eval { use autodie; … }` therefore also covers every
+  call BELOW that eval in the file.
+* **No " at FILE line N" in the message.**  The wrapper would read it from
+  `caller`, which names the compiled file under PCL (task #233, deferred);
+  the message is perl's text without the location.
+* **`$@` is an `autodie::exception` with the data accessors and `matches`**
+  (function, args, file, line, package, errno, return, `matches('open')` /
+  `matches(':io')`), not the rest of that class's interface.
+* **Not wrapped, ANNOUNCED once on stderr** when a `use autodie` requests
+  them (`PCL: autodie is not in effect for: …`): fcntl ioctl, the System V
+  IPC calls (msg*, sem*, shm*) and the socket calls (accept bind connect
+  getsockopt listen recv send setsockopt shutdown socketpair socket); they
+  stay the plain built-ins.  `:system` (system, exec) is not in `:default`
+  and perl itself needs IPC::System::Simple for it; requested, it is
+  announced the same way.  Naming one of these EXPLICITLY in the list
+  (`use autodie qw(socket)`) leaves the call site calling a sub that does
+  not exist — `Undefined subroutine`.
+* **One-argument `open`** under autodie fails (ENOENT) instead of opening the
+  file named by the handle's package scalar.
+
+**Affected tests:** autodie's own `t/open.t` rows 7 and 11 (the location);
+`t/truncate.t` 5/6/9/10 are #2924 (truncate through a glob), not the shim.
 
 ## Lexical compile-time hints (`$^H` / `%^H` scoping)
 

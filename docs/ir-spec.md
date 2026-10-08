@@ -2123,6 +2123,24 @@ fact, and its element arguments are the same argbox accessors, never wrapped in
 `p-scalar`.  Example: `sub g ($) { $_[0] .= "!" } my @a = ("q"); g($a[0])`
 emits `(pl-g (p-aref-argbox @a 0))` and `$a[0]` is `q!`.
 
+**A prototype is POSITIONAL (normative, s513b, task #2871):** a prototype
+shapes only the calls compiled AFTER the statement that introduced it — a
+definition, a forward declaration `sub f ($);`, a `:prototype(…)` attribute,
+a `use constant`, a module's import at its `use`.  A call above it is a plain
+list-operator call: above a sub of the same file it gets the prototype-less
+record (the name is still a sub — existence stays whole-file), above a
+`use constant` / an import the name is not known yet (a bareword is a string,
+#266's `not-yet`), and above an import of a BUILTIN's name the builtin's own
+`*`-slot row answers.  A forward declaration and a later definition with the
+SAME prototype are in force from the first; a different prototype from its
+own statement.  The compiler compares the record's site with the statement
+being lowered (`Pl::Environment` `parse_site` / `reg_site`); sites of two
+documents never compare, so a fragment re-parse sees the record.  A string
+eval's calls are compiled at run time, when every definition exists; today an
+eval is compiled with no sub table at all (#2870).  `prototype()` at run time
+is unaffected (whole program).  Example: `print f(@a); sub f ($) { $_[0] }`
+with `@a = (10, 20, 30)` prints 10, not 3.
+
 **Element targets of `s///` / `tr///`** are the element's BOX:
 `$a[0] =~ s/…/…/` emits `(p-=~ (p-aref-box @a 0) (p-subst …))`, not
 `p-aref`.  A plain match is a read and keeps `p-aref`.
@@ -3091,6 +3109,17 @@ and the decision is made **at compile time, by how the sub got there**:
 | `BEGIN { *Other::time = sub {…} }` | **yes**, in `Other` only |
 | `sub time {…}` alone | **no** — a sub merely DEFINED in its own package does not |
 | `*time = sub {…}` at RUN time | **no** — it is not there when the call is compiled |
+| `use M;` (no list) | the names in M's `@EXPORT` (s513b, #2873) |
+| `use M qw(:tag)` | the names in M's `%EXPORT_TAGS{tag}` (s513b) |
+| `no M …` where M defines `unimport` | ENDS the override at the `no` (s513b; e.g. `no autodie`) |
+
+The `@EXPORT` / `%EXPORT_TAGS` lists are read as LITERAL `qw()` lists at
+transpile time (`Parser::module_import_sets`); a list built from variables is
+not seen.  A call to a displaced builtin is a USER sub call and binds its
+context like one (`my $r = kill(0, $pid)` under `use autodie` is scalar).
+`use autodie` is this mechanism plus `lib/autodie.pm`: from the `use` to the
+end of the FILE (or a `no autodie`) — not lexical, see `docs/not-supported.md`
+"autodie".
 
 The rule behind rows 2 and 5 is one rule: the CV must come from a *different*
 package (perl's `IMPORTED_CV`).  That is why `package P; BEGIN { *P::getppid
