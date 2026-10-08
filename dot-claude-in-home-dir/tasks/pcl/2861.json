@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED and FIXED by s510c (Opus agent, 2026-10-08), found by the s513 companion run: cmd/subval.t 31/4 -> 29/6 (rows 24, 26: `join(\":\", &ary1)` answered 3).\n\n`&NAME` / `&$code` / `&{EXPR}` with no argument list (p-amp-call, #2632) is a sub CALL but was emitted with NO context bind: it inherited whatever bind surrounded it.  Member 3 of s510c (#2775) removed join's call-wide list bind, so the join tail read the enclosing scalar.  Main was already wrong in other slots (probed, perl 5.40.3 vs main 454342e7): print &a1 -> S (perl L), scalar(&a1) -> L (perl S), (k => &a1) -> S, sprintf(\"%s\", &a1) -> S, [&a1] -> S.\n\n=== DONE (s510c) ===\nPl/ExprToCL.pm `_amp_call_ctx_form`: both p-amp-call sites (the &NAME leaf in gen_node_form, the & Cast in gen_prefix_op_form) are bound by the node's static context through `_wrap_wantarray_ctx_form`, exactly as a NAME() call.  Guard Pl/t/ctx-bind-01.t A-* (10 rows, perl-probed; A-print/-scalar/-hash/-sprintf/-anon FAIL on main 454342e7, A-join on the pre-fix tree).  Shape rows codegen-01 #111 and clform-01 #43 now assert the bind.  Generation v2-4784.  Filed #2862 (do FILE's operand context, pre-existing).\n",
+   "id" : "2861",
+   "status" : "completed",
+   "subject" : "&NAME / &$code with no argument list (p-amp-call) carried no context bind: join(\":\", &f) called f in scalar context after #2775, print &f / scalar(&f) wrong on main"
+}

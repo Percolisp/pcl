@@ -1,0 +1,8 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "description" : "FILED by s510c (Opus agent, 2026-10-08), found while probing #2861.  PRE-EXISTING (main 454342e7 answers the same).\n\n`do EXPR` (do FILE) evaluates EXPR in SCALAR context (it is a file name), but PCL gives the operand the context of the do itself: in a LIST slot the operand is list-bound.\n\nReproducer (probed, perl 5.40.3):\n  sub f { print wantarray ? \"L\\n\" : \"S\\n\"; \"/nonexist\" }\n  my @y = do(f()); my $r = \\&f; my @z = do &$r; my @w = do $r->();\nperl: S S S.  PCL (main 454342e7 and s510c): L L L.\nEmission (s510c): `my @x = do &$r;` -> (p-array-= @x (p-list-ctx (p-do (p-list-ctx (p-amp-call (p-funcall-ref $r @_)))))) -- the inner bind should be p-scalar-ctx.\nIn a SCALAR slot it is already right (Pl/t/clform-01.t row 43 asserts `(p-do (p-scalar-ctx (p-amp-call ...)))`).\nFix site: the context annotation of `do`'s operand in Pl/PExpr.pm (do FILE takes a scalar: Config core_arg_context?), not the emitter.  Guard: the reproducer above.\n",
+   "id" : "2862",
+   "status" : "pending",
+   "subject" : "do EXPR (do FILE) evaluates its operand in the do's own context; perl uses SCALAR (my @y = do(f()) calls f in list context)"
+}
