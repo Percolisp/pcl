@@ -1,0 +1,20 @@
+# RESUME s510f (s513) -- the first run of a program from the transpiled TEXT (#2702) is BUILT, REBASED across s510b and REVIEWED (Fable: comment-only diff vs the reviewed tree, the design's probe set 11/13, exits / fork / pidfile / STDIN all = perl -- no finding); what is owed is EXACTLY the four legs on the rebased tree, the bars line, `--record`, MERGE-READY.  Be economical: read only what this page names.
+
+You are an EXECUTION agent (Opus 5.5) on the PCL project (Perl -> Common Lisp transpiler), a FRESH agent resuming a batch checkpointed at the end of s512.  FIRST ACTION: write your exact model id into `$W/scratch/s510f/MODEL.txt` (the USER requires `claude-opus-5-5`; anything else: write it, stop, report only that).
+
+`W=/home/bernt/pcl/.claude/worktrees/agent-a9518b536c5798126`, HEAD `9bc09c51` = main `e4331e9a` (s510b merged) + 6 commits; runtime-only, NO generation string; task IDs 2830-2849.  You were launched WITHOUT isolation: your launch directory is main's checkout `/home/bernt/pcl`, where you run NOTHING; every command is `env -C "$W" CMD`, `git -C "$W" ...` or an absolute path under `$W`.  Rules: `s513/SHARED-BOX.md` (the lock script is now `~/pcl-agent-scratch/s513/heavy.sh s510f leg|bench <log> CMD`, started in the BACKGROUND; the rules at its end) and `s473/COMMON.md`.  `$W/scratch/s510f/STOP.md` has the resume recipe at its top (its 6 numbered steps ARE the owed list); `s512/resume-s510f.md` was the previous ruling page (its rulings on the board's 6 NEW rows and the companion movers STAND).
+
+## What changed since the checkpoint
+- Main moved only by records commits (`416c710a`, no code): `git -C "$W" rebase main` FIRST (no conflict expected; keep both sides of DECIDED / session-log if any).  After it `git -C "$W" status --short` shows only `scratch/`.  Every bar on disk STANDS except the four the recipe lists (they were never taken on the rebased tree).
+- THE LOCK SCRIPT MOVED: `~/pcl-agent-scratch/s512/heavy.sh` is retired.  Before anything runs: `perl -pi -e 's{s512/heavy}{s513/heavy}g' "$W"/scratch/s510f/legs3.sh "$W"/scratch/s510f/ev2.sh "$W"/scratch/s510f/legs.sh` and `grep -n 's51[23]/heavy' "$W"/scratch/s510f/*.sh` shows only s513.
+- The box was rebooted (it is quiet; `~/.pcl-cache` is on disk, so the cores are warm).  s513a (an emission-changing batch, #2860) runs beside you and merges AFTER you; nothing of it crosses your tree.
+
+## Owed, in order (= STOP.md's recipe; every heavy leg through `~/pcl-agent-scratch/s513/heavy.sh s510f leg <log> CMD`, in the background)
+1. `scratch/s510f/legs3.sh` runs the four in sequence (edit nothing in it beyond the lock path): the sweep `--jobs 4` -> `legs/sweep3.log` (TOTAL 18735, GATE clean), the everyday pair `ev2.sh` (114 / 114, 0 fasls rewritten in run B), the full gate `PCLXS_DIR=~/pclxs tools/prove-core` -> `gate3.log` (`Result: PASS`, **283 files / 9,893 rows** expected = 9,848 + `Pl/t/first-run-01.t`'s 45; count the file by running it), then `--record` -> `legs/record3.log`.  Start it ONCE in the background as `bash "$W/scratch/s510f/legs3.sh"` and read its logs' END lines; if a leg exits 75 (no lock in 60 min) re-run THAT leg alone.  `Pl/t/glob-01.t` rows 29-30 are the #2384 flake: re-run alone.
+2. Commit `baselines/everyday-history.tsv` (the `--record` row, after s510b's) and the bars line in `## Session s510f` (docs/session-log.md) with the rebased sha + the new logs; `git -C "$W" status --short` shows only `scratch/`.
+3. `MERGE-READY: <sha>` as the FIRST line of `$W/scratch/s510f/STOP.md` with every bar's log path under it; SendMessage `main`: `s510f MERGE-READY <sha>`.
+
+Keep STOP.md current after every step.  README: do NOT edit it (the two replacement sentences you proposed are for the USER to place; repeat them in your final report).
+
+## Final report (SHORT)
+STOP.md's first line; your model id; the four legs' results (sweep TOTAL, everyday pair, gate files / rows, the history row); the README wording proposal repeated; anything FLAGGED; anything you could NOT do, said plainly.
