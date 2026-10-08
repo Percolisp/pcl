@@ -2101,10 +2101,16 @@ sub parse {
         # context like `($)` → scalar, block-form `(&@)`).  Register it so the
         # fallback PExpr parses call sites correctly; the DEFINITION is lowered
         # by v1 via _fallback_stmt (signature binding + arity checks).  NO
-        # sub_info: the `insensitive-call` rule (once ExprToCL2's direct-call
-        # path) ignores imposed context, so call sites to a prototyped sub
-        # must keep the general funcall path.
-        if (defined(my $proto = $self->_proto_or_sig_str($sub))) {
+        # sub_info record WITH `insensitive => 0` and no `returns`: the
+        # `insensitive-call` rule (once ExprToCL2's direct-call path) ignores
+        # imposed context, so call sites to a prototyped sub must keep the
+        # general funcall path.  The record exists for `writes_args` (#2860):
+        # a `$` slot imposes scalar CONTEXT and nothing else, so `@_` still
+        # aliases the caller's scalar lvalue and the #189 boxing must reach
+        # these call sites too (ir-spec §5, the p-sub calling convention).
+        my $proto     = $self->_proto_or_sig_str($sub);
+        my $has_proto = defined $proto;
+        if ($has_proto) {
           # (s300c) The former whole-file gate for a NAMED sub nested inside a
           # prototyped/signatured sub is gone: the seam lowering now hoists the
           # nested sub correctly — top-level prototyped subs lower with the
@@ -2133,9 +2139,6 @@ sub parse {
           $self->environment->add_prototype($sub->name, $sig_info,
                                             $self->_effective_pkg($sub, $seg->{pkg}))
             if !($prev_attr && $prev_attr->{from_attr});
-          $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
-                                             Pl::PExpr::TokenUtils::decl_site($sub));
-          next;
         }
         $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
                                              Pl::PExpr::TokenUtils::decl_site($sub));
@@ -2145,7 +2148,7 @@ sub parse {
         # :prototype-attribute proto (from_attr) is compile-time in perl —
         # never clobber it with the default.
         my $prev_proto = $self->environment->get_prototype($sub->name);
-        if (!$sig_rec && !($prev_proto && $prev_proto->{from_attr})) {
+        if (!$has_proto && !$sig_rec && !($prev_proto && $prev_proto->{from_attr})) {
           $self->environment->add_prototype($sub->name,
                                             { params => [], min_params => -1, is_proto => 0 },
                                             $self->_effective_pkg($sub, $seg->{pkg}));
@@ -2162,7 +2165,7 @@ sub parse {
         # cl_name stays UNQUALIFIED (pl-foo) for a plain name: the section's
         # in-package makes the reader intern it in the segment's package —
         # exactly v1's per-section convention.
-        my $rf = $self->_sub_return_facts($sub);
+        my $rf = $has_proto ? { insensitive => 0 } : $self->_sub_return_facts($sub);
         $self->sub_info->{ $seg->{pkg} }{ $sub->name } = {
           cl_name     => $self->fallback_parser->_qualified_sub_to_cl($sub->name),
           insensitive => $rf->{insensitive},
@@ -2278,8 +2281,8 @@ sub parse {
         # (rare) goes to @defs.  A PURE prototype (`($;$)`) binds nothing —
         # its definition lowers natively below (task #126; the prototype
         # itself was already registered for call-site parsing in the
-        # pre-pass, and call sites still take the fallback funcall path —
-        # no sub_info).
+        # pre-pass, and call sites still take the general funcall path —
+        # its sub_info record carries writes_args only, #2860).
         if (defined $self->_proto_or_sig_str($child)
             && !$self->_is_pure_prototype($child)) {
           my @raw = $self->_fallback_stmt($child);
