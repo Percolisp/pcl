@@ -1919,7 +1919,7 @@ op/kvaslice.t	38	0	25	13	DIFF	s473t6c #1923: a kv-slice in SCALAR context is its
 op/kvhslice.t	39	0	22	17	DIFF	s473t6c #1923: the hash twin of the kv-slice scalar-context fix.  C 21/18 -> 22/17, 1 FIXED ROW ("correct value"), 0 NEW.  Was: s473t1 #1024 (a lone BAREWORD key in a kv-slice was compiled as a SUB CALL)	0
 op/lc.t	2716	0	2688	28	DIFF	s496a #2060: 2685/31 -> 2688/28 -- the three \p{IsWord} s///e rows pass on properties from perl's own tables (A/B: b6560c21 extraction 2685/31)	0
 op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
-op/length.t	49	0	35	12	DIFF		0
+op/length.t	49	0	36	11	DIFF	s513a #2860/#1482: 35/12 -> 36/11 -- row 34 (line 139, `is($u, undef)` on a tied undef) passes: the TAP layer reads a get-magic box once (test-to-scalar); measured alone on a 454342e7 extraction (35/12) and the tree (36/11)	0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	351	2	DIFF	s508a #2682: 350/3 -> 351/2 (sselect: a handle numifies to its address)	0
 op/lexsub.t	156	0	80	61	DIFF	s500a: #2533 -- rows 97/98 UP (lexical sub prototypes read back), A/B --jobs 1 vs 1bae682b (78/63 -> 80/61) | crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.; aborted-forms:11: Undefined subroutine &main::d called	1

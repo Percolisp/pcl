@@ -762,7 +762,7 @@ target" sentence above had gone stale before this session.
 - **Overloaded `length`** (tests 35, 41, 43): ✅ FIXED (session 214). `p-length` now calls
   `to-string` on the original boxed value (not the unboxed inner), so a blessed object's
   `""` overload fires. `length($obj)` where `""` returns undef → 0; returns "hello" → 5.
-- **`length(undef)` on a tied scalar** (test 34): tie FETCH returns `''` not `undef`
+- **`length(undef)` on a tied scalar** (test 34): ✅ FIXED (s513a, #1482 closed -- the harness now reads a get-magic box once in test-to-scalar).  Old note: tie FETCH returns `''` not `undef`
   (`undef $u` on a `Tie::StdScalar`). Tie semantics, not the plain-undef path (which works).
   -> task **#1482** (s473t3: MEASURED WRONG -- the value path is right in PCL; `cl/pcl-test.lisp`'s `test-undef-p` reads `p-box-value` RAW and never runs the tie FETCH, so the HARNESS calls it defined).
 - **Missing "uninitialized" warnings** (tests 36, 42): when the `""` overload returns undef,
