@@ -6294,13 +6294,20 @@
 (defun %pcl-str-buffer (v)
   "Fresh adjustable fill-pointer buffer holding V's string value — the
    plain-write store discipline for a str-buffer slot (each `$s = V;`
-   REPLACES the buffer, so stale aliases cannot exist)."
-  (let* ((s (to-string v))
-         (n (length s))
-         (buf (make-array (max n 16) :element-type 'character
-                          :adjustable t :fill-pointer n)))
-    (replace buf s)
-    buf))
+   REPLACES the buffer, so stale aliases cannot exist).
+
+   UNDEF is the ZERO-CAPACITY buffer (#2880, s513c): every reader the
+   verdict admits reads it as \"\", and `length' answers undef for it
+   (p-length) -- so `my $s;' and `my $s = f()' returning undef keep perl's
+   `length' answer until the first append, which always leaves capacity."
+  (if (let ((u (unbox v))) (or (eq u *p-undef*) (null u)))
+      (make-array 0 :element-type 'character :adjustable t :fill-pointer 0)
+      (let* ((s (to-string v))
+             (n (length s))
+             (buf (make-array (max n 16) :element-type 'character
+                              :adjustable t :fill-pointer n)))
+        (replace buf s)
+        buf)))
 
 (defun %p-str-data (v)
   "The SIMPLE character STRING holding V's characters, or NIL when V is not
@@ -6379,8 +6386,12 @@
     (let ((n (length s))
           (start (fill-pointer buf)))
       (declare (type fixnum n start))
-      (when (> (+ start n) (array-total-size buf))
-        (adjust-array buf (max (+ start n) (* 2 (array-total-size buf)))))
+      ;; `or zerop': the zero-capacity buffer IS undef (%pcl-str-buffer), so
+      ;; even `$s .= ""' must leave capacity behind -- perl's `$s' is then a
+      ;; DEFINED "".
+      (when (or (> (+ start n) (array-total-size buf))
+                (zerop (array-total-size buf)))
+        (adjust-array buf (max (+ start n) (* 2 (array-total-size buf)) 16)))
       (setf (fill-pointer buf) (+ start n))
       (let ((data (%p-str-data buf)))
         ;; A buffer that is not the plain adjustable-character-string shape
@@ -6405,7 +6416,10 @@
         (let ((n (%p-cell-live-length c)))
           (when n (return-from p-length n))))))
   (let ((v (unbox val)))
-    (if (or (eq v *p-undef*) (null v))
+    (if (or (eq v *p-undef*) (null v)
+            ;; a str-buffer slot's ZERO-CAPACITY buffer is undef (#2880)
+            (and (stringp v) (not (simple-string-p v))
+                 (zerop (array-total-size v))))
         *p-undef*
         ;; The definedness test above IS the operand's read, so stringify what
         ;; it produced (#1813); only a BLESSED box goes on as the box, which is
@@ -24317,7 +24331,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-4884"
+(defparameter *pcl-cache-generation* "v2-4984"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

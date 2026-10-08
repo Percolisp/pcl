@@ -263,9 +263,9 @@ my %VIV_CONTAINER_NODE = map { $_ => 1 } qw(h_acc a_acc h_ref_acc a_ref_acc);
 # second along with the first, and the cost is not marginal: MEASURED, 200,000
 # appends in `my $s=""; $s .= "x"; length($s)` went from 0.19 s to 7.66 s
 # (40x, and QUADRATIC — the bench's 20 M-append `strcat` row did not finish).
-# The residue this leaves is one shape, strictly narrower than what it
-# replaces: a buffer whose `.=` never runs AND whose initialiser is undef
-# answers `length` 0 where perl answers undef.
+# The residue this left (a buffer whose `.=` never runs AND whose initialiser
+# is undef answered `length` 0) is closed since #2880: an undef start is the
+# zero-capacity buffer, and p-length answers undef for it.
 my %USE_FN = (
   print   => 'str-all',  say => 'str-all',  join => 'str-all',
   length  => ['strlen'], lc  => ['str'],    uc   => ['str'],
@@ -846,6 +846,9 @@ sub _analyze_tree {
         join(',', @{ $vi{$name}{reasons} // [] }),
         join(',', map { "$_=$ctx->{use_class}{$name}{$_}" }
                   sort keys %{ $ctx->{use_class}{$name} // {} });
+      warn sprintf "B-DEBUG-STRBUF %s withheld=[%s]\n", $name,
+        join(',', @{ $ctx->{strbuf_why}{$name} })
+        if $ctx->{strbuf_why}{$name};
     }
   }
   return \%vi;
@@ -907,6 +910,21 @@ sub _array_verdicts {
 # instead of O(n) per append).  'strkey' (hash-key) uses are RETAINED by
 # the table → excluded; foreach range vars are bound by the loop macro,
 # not a buffer init → excluded.
+# THE STR-BUFFER USE TABLE (#2880, s513c): the ONE list of use classes a
+# str-buffer slot accepts; any other read withholds the verdict, named in
+# PCL_B_DEBUG's `B-DEBUG-STRBUF ... withheld=[...]`.  Each class must read the
+# buffer exactly as perl reads the scalar, INCLUDING while it is still undef:
+# a bare `my $x;` (`undef-decl`) and an undef initialiser start the slot as the
+# ZERO-CAPACITY buffer (%pcl-str-buffer), which every `str`/`bool` consumer
+# reads as "" -- as perl reads undef (probed: print/join/interpolation, `.`,
+# eq/ne/cmp, truth tests, lc/uc, ord/hex/oct, index/rindex, split, substr,
+# sprintf "%s", `x`; the one difference is the uninitialized-value warning
+# PCL does not emit, #221) -- and `length` (`strlen`) answers undef for
+# (p-length).  `defined`, `//` and every escape of the value (a copy, a call
+# argument, `return`, `\`) are not in the table: those consumers would see a
+# string where perl has undef.
+my %STRBUF_USE = map { $_ => 1 } qw(str bool strlen undef-decl);
+
 sub _mark_strbuf {
   my ($ctx, $vi, $name) = @_;
   return unless Pl::Passes::enabled('str-buffer');   # Kind-A gate (PCL_OPT)
@@ -918,12 +936,31 @@ sub _mark_strbuf {
   # `strlen` (a `length` read, task #1847) IS accepted here and is NOT
   # accepted by the B-str freeze above, and the difference is the whole reason
   # it has a class of its own: the freeze loses an undef INITIALISER, while a
-  # buffer's only write is `.=`, which leaves a defined string behind it — so
+  # buffer's only write is `.=`, which leaves a defined string behind it, and
+  # an undef start is the zero-capacity buffer p-length answers undef for — so
   # `length` on a buffer sees exactly what perl sees.  See %USE_FN's note for
-  # the measurement that made this worth separating (40x on 200k appends) and
-  # for the one shape it still leaves.
-  return if grep { $_ ne 'str' && $_ ne 'bool' && $_ ne 'strlen' } keys %$uc;
+  # the measurement that made this worth separating (40x on 200k appends).
+  my @why = grep { !$STRBUF_USE{$_} } keys %$uc;
+  if (@why) {
+    $ctx->{strbuf_why}{$name} = [sort @why] if $ENV{PCL_B_DEBUG};
+    return;
+  }
   $vi->{$name}{strbuf} = 1;
+}
+
+# Is $root (the parse root of a statement) a bare `my $x` declaration -- the
+# whole statement is the declared scalar, at a native statement root, no
+# initializer?  Returns the name, or undef.
+sub _tw_bare_my_decl {
+  my ($xo, $root, $decls, $native) = @_;
+  return undef if !$native || !defined $root || @{ $decls // [] } != 1;
+  my $d = $decls->[0];
+  return undef if ($d->{type} // '') ne 'my';
+  my $n = $xo->get_a_node($root);
+  return undef if ref($n) ne 'PPI::Token::Symbol'
+    || @{ $xo->get_node_children($root) || [] }
+    || $n->content ne ($d->{var} // '') || $n->content !~ /^\$\w+$/;
+  return $n->content;
 }
 
 # Record one classified USE of a plain $scalar (B-regimes).  undef class =
@@ -1612,7 +1649,13 @@ sub _tw_expr_parse {
       elsif ($d->{type} eq 'local') { _ev($ctx, $var, 'local') }
       # our/state: package/persistent cells — never raw-let candidates here
     }
-    _tw_walk($ctx, $expr_o, $root, $native_root && !$ctx->{seam}, $uctx, 1);
+    # #2880: a bare `my $x;` statement READS nothing -- it declares an undef
+    # slot.  It records the `undef-decl` class (opaque to every verdict but
+    # the str-buffer licence, which reads it through %STRBUF_USE) instead of
+    # the opaque leaf read the generic walk would record.
+    my $bare = _tw_bare_my_decl($expr_o, $root, $decls, $native_root && !$ctx->{seam});
+    if (defined $bare) { _use($ctx, $bare, 'undef-decl') }
+    else { _tw_walk($ctx, $expr_o, $root, $native_root && !$ctx->{seam}, $uctx, 1) }
     1;
   };
 

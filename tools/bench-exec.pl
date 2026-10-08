@@ -334,6 +334,9 @@ my @benches = (
   # append a line and test the tail; cl-ppcre scanned the whole string per match.
   # (The append-then-read residue that remains is #2881.)
   ['endanch',  "$HN my %h; my \$m = 0; for my \$i (1 .. \$n) { \$h{u} .= \"line \$i\\n\"; \$m++ if \$h{u} =~ /9\\n\\z/ } print \"\$m\\n\";", 30_000, 0],
+  # s513c (perf round 42, #2880): the accumulator spelled `my $u;` -- no
+  # initializer -- was a :scalar slot, a fresh concatenation per append.
+  ['accum',    "$HN my \$u; for my \$i (1 .. \$n) { \$u .= \"line \$i\\n\" } print length(\$u), \"\\n\";", 30_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
