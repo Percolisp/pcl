@@ -2158,7 +2158,9 @@ adopts it as its `@_` instead of spreading it; a callee whose leading `my $x
 = shift;` run was coalesced into parameters carries `(:shifts N)` in its
 `p-raw-params` / `p-args-body` and shifts the shared vector N times
 (`%p-shared-shift`); a `goto &g` from a frame whose `@_` is shared hands that
-vector on.  `&foo()` passes an EMPTY list as before;
+vector on.  Like any sub call, a `p-amp-call` is bound by its node's static
+context (s510c / #2861): `join(":", &foo)` → `(p-join ":" (p-list-ctx
+(p-amp-call (pl-foo @_))))`.  `&foo()` passes an EMPTY list as before;
 `p-funcall-ref` accepts a code ref OR a symbolic sub-name string
 (no-strict-refs, `'` = `::`).  The closed set of parents that want the
 coderef *mention* rather than a call — `\`, `defined`, `exists`, `undef`,
