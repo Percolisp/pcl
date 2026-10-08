@@ -2044,6 +2044,26 @@ sub _is_elem_arg {
       && ($an->{type} eq 'a_acc' || $an->{type} eq 'h_acc');
 }
 
+# A SCALAR assignment used as an argument (`f(my $c = $x)`, `f($n .= "x")`):
+# its value is the assigned scalar LVALUE, which a user sub's @_ aliases.  An
+# `=` whose target is a list / array / hash is a list assignment (a COUNT in
+# scalar context) and is not one.  #2860: the `$`-prototype slot asks it.
+sub _is_scalar_assign_arg {
+  my ($self, $kid_id) = @_;
+  my $xo = $self->expr_o;
+  my $an = $xo->get_a_node($kid_id);
+  return 0 unless ref($an) eq 'PPI::Token::Operator';
+  my $op = $an->content // '';
+  return 0 unless $op eq '='
+               || grep { $_ eq $op } Pl::PExpr::TokenUtils::compound_assign_ops();
+  my $lhs_id = ($xo->get_node_children($kid_id) || [])->[0];
+  return 0 unless defined $lhs_id;
+  my $lhs = $xo->get_a_node($lhs_id);
+  return 1 if ref($lhs) eq 'PPI::Token::Symbol' && $lhs->content =~ /^\$/
+           && !@{ $xo->get_node_children($lhs_id) || [] };
+  return $self->_is_elem_arg($lhs_id) ? 1 : 0;
+}
+
 # A SLICE argument of a USER SUB is in perl's LVALUE context: its elements are
 # aliased into @_, and perl CREATES the missing ones AT THE CALL — `sub f {}
 # my %h=(a=>1); f(@h{'a','zz'}); exists $h{zz}` is 1, and the array spelling
@@ -2855,9 +2875,13 @@ sub gen_funcall_form {
                 ? $self->_dup_source_handle($kids->[2], $kids->[3]) : undef;
 
     my $saved_lvalue = $self->lvalue_context;
-    if    ($needs_lvalue)               { $self->lvalue_context(1) }
-    elsif (index($cl_func, 'pl-') >= 0
-           && $self->_is_elem_arg($kids->[$i])) { $self->lvalue_context('argbox') }
+    # An ELEMENT argument of a USER SUB is passed as its lazy argbox -- the
+    # @_ alias, perl's defelem.  Decided ONCE: the imposed-scalar wrap below
+    # asks the same answer (#2860).
+    my $elem_argbox = !$needs_lvalue && index($cl_func, 'pl-') >= 0
+                      && $self->_is_elem_arg($kids->[$i]);
+    if    ($needs_lvalue) { $self->lvalue_context(1) }
+    elsif ($elem_argbox)  { $self->lvalue_context('argbox') }
     my $arg = defined $dup_src ? $dup_src : $self->gen_node_form($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
     # A SLICE argument of a USER SUB vivifies its missing slots (task #1010) —
@@ -2880,8 +2904,16 @@ sub gen_funcall_form {
     if ($impose_scalar) {
       my $an = $self->expr_o->get_a_node($kids->[$i]);
       my $r = ref($an);
+      # A `$` slot imposes scalar CONTEXT and nothing else: an element or a
+      # scalar assignment is already a scalar LVALUE, and wrapping it in
+      # p-scalar passed a COPY, so `\$_[0]` / a write through `$_[0]` in the
+      # callee missed the caller's variable (#2860, Text::Balanced's `(;$$)`
+      # extract_* shape; ir-spec §5).  The argument then lowers exactly as it
+      # does for an unprototyped call.
       my $already_scalar =
-           $r eq 'PPI::Token::Number'
+           $elem_argbox
+        || (index($cl_func, 'pl-') >= 0 && $self->_is_scalar_assign_arg($kids->[$i]))
+        || $r eq 'PPI::Token::Number'
         || $r =~ /^PPI::Token::Quote\b/
         || ($r eq 'PPI::Token::Symbol' && $an->content() =~ /^\$/)
         || ($r eq 'PPI::Token::Magic'  && $an->content() =~ /^\$/);
