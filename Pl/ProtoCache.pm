@@ -447,6 +447,7 @@ sub _env_from_record {
   $env->prototypes($rec->{prototypes});
   $env->pkg_prototypes($rec->{pkg_prototypes} || {});
   $env->export_names({ map { ($_ => 1) } @{ $rec->{export_names} || [] } });
+  $env->import_sets($rec->{import_sets} || {});
   # get_prototype resolves an unqualified name in the CURRENT package when a
   # bare name has competing declarations, so the walk's end state is part of
   # the record.
@@ -493,6 +494,7 @@ sub store {
     prototypes      => $env->prototypes,
     pkg_prototypes  => $env->pkg_prototypes,
     export_names    => [ sort keys %{ $env->export_names // {} } ],
+    import_sets     => $env->import_sets // {},
     deps            => $deps || [],
   };
   my $json = eval { _json()->encode($rec) };

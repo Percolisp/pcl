@@ -78,10 +78,34 @@ has pkg_prototypes => (
     default => sub { {} },
 );
 
+# THE PARSE CLOCK and the REGISTRATION SITE (task #2871).  perl applies a
+# prototype only to calls it parses AFTER the declaration that carries it
+# (perlsub: "called too early to check prototype"); the tables above are
+# filled for the whole file before anything is lowered, so every record
+# carries the SITE of the statement that introduced it (`at`, a
+# TokenUtils::decl_site: { doc, pos => [line, col] }) and the lookup compares
+# it with `parse_site`, the site of the statement being lowered (Parser2
+# publishes it on the same clock as the strict-refs fact).  `reg_site` is the
+# site a registration takes when its caller passes none: a `use` statement's
+# handler sets it (`local`), so a module's imports and a `use constant` are
+# positioned AT that `use`.  Unset = position unknown = the whole-file
+# answer, never "below".  ir-spec §5.
+has parse_site => (is => 'rw');
+has reg_site   => (is => 'rw');
+
 # Names in the module's @EXPORT/@EXPORT_OK (set only on the throwaway env a
 # _extract_module_prototypes parse fills in).  Sub EXISTENCE is parse data:
 # a bareword before a comma is a call only for a KNOWN sub, so the caller's
 # merge imports exported plain subs even when they carry no prototype.
+# What a `use` of this module imports by NAME (Parser::module_import_sets):
+# '' => @EXPORT, ':tag' => %EXPORT_TAGS{tag}.  Read by the builtin-override
+# recorder, so a `use M;` with no list displaces the weak builtins M exports
+# by default, as perl's import does (task #2873).
+has import_sets => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 has export_names => (
     is => 'rw',
     default => sub { {} },
@@ -510,6 +534,15 @@ sub get_prototype {
     return $self->_proto_entry($name);
 }
 
+# The record as REGISTERED, whatever the parse clock says: for the consumers
+# that ask about a DEFINITION (its own `:prototype` record, "was this name
+# already declared?" at registration, a module merge's local-wins check) --
+# never about a call site (task #2871).
+sub raw_prototype {
+    my ($self, $name) = @_;
+    return $self->_proto_entry($name, 1);
+}
+
 # THE one prototype lookup (task #421).  A qualified spelling names its own
 # package; an unqualified one is resolved in the CURRENT package, which is
 # what perl resolves it in.  The per-package table is consulted only when the
@@ -519,6 +552,85 @@ sub get_prototype {
 # IMPORTED sub's prototype reaches a call site (imports are recorded under the
 # exporting module's name, or under no package at all).
 sub _proto_entry {
+    my ($self, $name, $raw) = @_;
+    my $rec = $self->_proto_record($name);
+    return $rec if $raw || ref($rec) ne 'HASH' || !$rec->{at};
+    # Above an IMPORT of a builtin's name the builtin's own seed row answers
+    # (its `*` filehandle slot) -- the import replaced that row in the table.
+    return _proto_at_site($rec, $self->parse_site)
+        // $Pl::Environment::BUILTIN_SEED->{ _bare_sub_name($name) };
+}
+
+# The builtin seed rows, once: what a builtin's name answers where no
+# declaration or import of that name is in force, and what a module merge
+# may replace (an import of `open` is not a local declaration of it).
+our $BUILTIN_SEED = _builtin_prototypes();
+
+sub is_builtin_seed_record {
+    my ($self, $name, $rec) = @_;
+    my $seed = $BUILTIN_SEED->{ _bare_sub_name($name) } or return 0;
+    return (ref($rec) eq 'HASH' && _proto_shape_key($rec) eq _proto_shape_key($seed)) ? 1 : 0;
+}
+
+# A call site ABOVE the record's site (same document) does not see the
+# prototype (task #2871).  A sub of THIS file is still a declared sub there --
+# PCL's existence answer stays whole-file (declared_subs decides the
+# bareword-vs-string half on its own, #266) -- so it answers the
+# prototype-less record a plain `sub NAME` gets; a `use constant` or a module
+# import is simply not known yet (`unknown_before`).  Sites of two documents
+# (a fragment, a module) are not comparable: the record answers.
+sub _proto_at_site {
+    my ($rec, $site) = @_;
+    my $at = $rec->{at};
+    return $rec if !$site || !$site->{pos} || !defined $site->{doc}
+                 || !defined $at->{doc} || $site->{doc} != $at->{doc};
+    return $rec if _site_cmp($site->{pos}, $at->{pos}) >= 0;
+    return undef if $at->{unknown_before};
+    return { params => [], min_params => -1, is_proto => 0 };
+}
+
+sub _site_cmp {
+    my ($p, $q) = @_;
+    return ($p->[0] <=> $q->[0]) || (($p->[1] // 0) <=> ($q->[1] // 0));
+}
+
+# The parse-relevant SHAPE of a record, for "is this re-registration the same
+# prototype?" -- the bookkeeping keys (site, origin tags, attribute text) out.
+sub _proto_shape_key {
+    my ($rec) = @_;
+    require Data::Dumper;
+    my %r = %$rec;
+    delete @r{qw(at from_module from_attr attr_text)};
+    local $Data::Dumper::Sortkeys = 1;
+    local $Data::Dumper::Indent   = 0;
+    local $Data::Dumper::Terse    = 1;
+    return Data::Dumper::Dumper(\%r);
+}
+
+# The record a (re)registration stores: a COPY carrying its site -- the
+# caller's explicit one, else the one the record already carries, else the
+# registering `use` statement's (reg_site).  A re-registration of the SAME
+# prototype keeps the EARLIER site of the two (`sub f ($);` above, the
+# definition below: in force from the forward declaration); a DIFFERENT
+# prototype is in force from its own site (perl: "Prototype mismatch").
+sub _sited_record {
+    my ($self, $sig_info, $existing, $at) = @_;
+    return $sig_info if ref($sig_info) ne 'HASH';   # a bare '$$' (old API)
+    my %r = %$sig_info;
+    $at //= $r{at} // $self->reg_site;
+    if ($at) { $r{at} = $at } else { delete $r{at} }
+    my $old = ref($existing) eq 'HASH' && $existing->{at};
+    if ($old && _proto_shape_key($existing) eq _proto_shape_key(\%r)) {
+        $r{at} = $old
+          if !$r{at}
+             || (defined $old->{doc} && defined $r{at}{doc}
+                 && $old->{doc} == $r{at}{doc}
+                 && _site_cmp($old->{pos}, $r{at}{pos}) < 0);
+    }
+    return \%r;
+}
+
+sub _proto_record {
     my ($self, $name) = @_;
     my $bare = _bare_sub_name($name);
     my $per  = $self->pkg_prototypes->{$bare};
@@ -551,11 +663,12 @@ table.
 =cut
 
 sub add_pkg_prototype {
-    my ($self, $name, $sig_info, $package) = @_;
+    my ($self, $name, $sig_info, $package, $at) = @_;
     my $bare = _bare_sub_name($name);
     my $existing = $self->pkg_prototypes->{$bare}{$package};
     return if $existing && !$existing->{from_module};
-    $self->pkg_prototypes->{$bare}{$package} = $sig_info;
+    $self->pkg_prototypes->{$bare}{$package} =
+      $self->_sited_record($sig_info, $existing, $at);
 }
 
 =head2 has_prototype($name)
@@ -659,13 +772,16 @@ sub add_prototype {
     my $name     = shift;
     my $sig_info = shift;
     my $package  = shift;
+    my $at       = shift;     # the declaring statement's site (task #2871)
 
     my $bare  = _bare_sub_name($name);
     my $owner = (defined $name && $name =~ /\A(.+)::[^:]+\z/) ? $1
               : (defined $package ? $package : ($self->current_package // 'main'));
 
-    $self->prototypes->{$bare} = $sig_info;
-    $self->pkg_prototypes->{$bare}{$owner} = $sig_info;
+    my $rec = $self->_sited_record($sig_info,
+                                   $self->pkg_prototypes->{$bare}{$owner}, $at);
+    $self->prototypes->{$bare} = $rec;
+    $self->pkg_prototypes->{$bare}{$owner} = $rec;
 }
 
 =head2 fh_bareword_shape($name)
@@ -1174,12 +1290,27 @@ sub add_builtin_override {
     $self->overridden_builtins->{$key} = $at;
 }
 
+# A `no MODULE` of a module with an unimport ENDS the override at its own
+# position (task #2873: `no autodie;`).  One interval per name: the end is
+# the first `no` after the start; a `no` with no override in force is a no-op.
+sub end_builtin_override {
+    my ($self, $pkg, $name, $line, $col) = @_;
+    my $at = $self->overridden_builtins->{"${pkg}::${name}"} or return;
+    return if defined $at->[2];
+    return if !_override_in_force($at, $line, $col);
+    @$at[2, 3] = ($line // 0, $col // 0);
+}
+
 sub _override_in_force {
     my ($at, $line, $col) = @_;
     return 0 if !$at;
     return 1 if !defined $line;
     return 0 if $line < $at->[0];
     return 0 if $line == $at->[0] && defined $col && $col < $at->[1];
+    if (defined $at->[2]) {
+        return 0 if $line > $at->[2];
+        return 0 if $line == $at->[2] && (!defined $col || $col >= $at->[3]);
+    }
     return 1;
 }
 

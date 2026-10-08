@@ -1245,7 +1245,8 @@ sub _extract_prototype_attributes {
       my $si = $self->parse_prototype_or_signature($proto, $stmt);
       $si->{from_attr} = 1;
       $si->{attr_text} = $proto;          # raw: perl keeps the whitespace
-      $self->environment->add_prototype($name, $si);
+      $self->environment->add_prototype($name, $si, undef,
+                                        Pl::PExpr::TokenUtils::decl_site($stmt));
       _delete_attribute_and_colon($attr);
       $changed = 1;
     }
@@ -1931,7 +1932,7 @@ sub _glob_alias_sig_info {
   my @infos;
   for my $c (@{ $fact->{candidates} }) {
     if (defined $c->{target}) {
-      my $p = $self->environment->get_prototype($c->{target});
+      my $p = $self->environment->raw_prototype($c->{target});
       return undef unless $p;
       push @infos, $p;
     }
@@ -8610,7 +8611,7 @@ sub sub_proto_text {
   my ($self, $stmt) = @_;
   my $name = $stmt->name;
   if (defined $name && $self->environment) {
-    my $rec = $self->environment->get_prototype($name);
+    my $rec = $self->environment->raw_prototype($name);
     return $rec->{attr_text} if $rec && $rec->{from_attr} && defined $rec->{attr_text};
   }
   my ($tok) = grep { $_->isa('PPI::Token::Prototype') } $stmt->children;
@@ -8662,18 +8663,18 @@ sub _sub_sig_info {
 sub _register_sub_prototype {
   my ($self, $stmt, $name, $sig_info, $prototype, $is_signature_syntax) = @_;
   return unless $name;
-  my $prev = $self->environment->get_prototype($name);
+  my $prev = $self->environment->raw_prototype($name);
   my $pkg  = $self->environment->current_package();
+  my $site = Pl::PExpr::TokenUtils::decl_site($stmt);
   # A `:prototype(…)` attribute IS the prototype, even beside an inline one
   # or a signature (perl: "Prototype '$$' overridden by attribute") — never
   # overwrite its record (s500a, #2533: the signature spelling used to).
   if (!($prev && $prev->{from_attr})) {
     # The declaring package goes with the prototype as it goes with the
     # declaration below (task #421).
-    $self->environment->add_prototype($name, $sig_info, $pkg);
+    $self->environment->add_prototype($name, $sig_info, $pkg, $site);
   }
-  $self->environment->add_declared_sub($name, $pkg,
-                                       Pl::PExpr::TokenUtils::decl_site($stmt));
+  $self->environment->add_declared_sub($name, $pkg, $site);
 }
 
 sub _process_sub_statement {
@@ -9730,6 +9731,10 @@ sub _process_include_statement {
   my $self = shift;
   my $stmt = shift;
 
+  # #2871: whatever this statement registers -- a module's imports, a
+  # `use constant` -- is in force from HERE (see Pl::Environment reg_site).
+  local $self->environment->{reg_site} = Pl::Parser::use_reg_site($stmt);
+
   my $perl_code = $stmt->content;
   $perl_code =~ s/;\s*$//;
   $perl_code =~ s/\n/ /g;   # Collapse newlines (multi-line use statements break CL ;; comments)
@@ -10608,8 +10613,31 @@ sub _walk_module_prototypes {
     }
   }
   $module_env->export_names(\%exported);
+  $module_env->import_sets(module_import_sets($doc));
 
   return $module_env;
+}
+
+# What a `use MODULE` imports by NAME, for the builtin-override registry
+# (task #2873): '' => the literal qw() of @EXPORT (what a `use` with NO list
+# imports), and ':tag' => the literal qw() list of each `tag => [qw(...)]`
+# pair of %EXPORT_TAGS (Exporter's `:tag` spelling).  Literal lists only, the
+# same rule as export_names: that is the shape every shim uses.
+sub module_import_sets {
+  my ($doc) = @_;
+  my %sets;
+  for my $st (@{ $doc->find('PPI::Statement') || [] }) {
+    next if $st->parent && !$st->parent->isa('PPI::Document');
+    my $content = $st->content;
+    if ($content =~ /\@EXPORT\s*=\s*qw\s*[\(\[\{<]\s*([^)\]\}>]*)/) {
+      push @{ $sets{''} }, split ' ', $1;
+    }
+    next if $content !~ /%EXPORT_TAGS\s*=/;
+    while ($content =~ /(\w+)\s*=>\s*\[\s*qw\s*[\(\[\{<]\s*([^)\]\}>]*)/g) {
+      push @{ $sets{":$1"} }, split ' ', $2;
+    }
+  }
+  return \%sets;
 }
 
 sub _dump_proto_oracle {
@@ -10724,6 +10752,17 @@ sub _walk_file_prototypes {
 }
 
 
+# A module's record as it crosses a `use`: tagged from_module, and WITHOUT the
+# site it had in the module's own document -- the import is in force from the
+# importing statement, whose site the caller publishes as reg_site (task
+# #2871; a cached module record may still carry a site from another process).
+sub _imported_record {
+  my ($proto) = @_;
+  my %r = (%$proto, from_module => 1);
+  delete $r{at};
+  return \%r;
+}
+
 # Merge prototypes from another environment (only exported ones)
 sub _merge_module_prototypes {
   my ($self, $module_env, $imports, $module) = @_;
@@ -10737,9 +10776,12 @@ sub _merge_module_prototypes {
   # still idempotent (from_module entries overwrite each other freely).
   my $add = sub {
     my ($name, $proto) = @_;
-    my $existing = $self->environment->get_prototype($name);
-    return if $existing && !$existing->{from_module};
-    $self->environment->add_prototype($name, { %$proto, from_module => 1 });
+    my $existing = $self->environment->raw_prototype($name);
+    # A builtin's seed row is no local declaration: `use autodie` imports a
+    # sub named `open` with its own prototype (task #2873).
+    return if $existing && !$existing->{from_module}
+              && !$self->environment->is_builtin_seed_record($name, $existing);
+    $self->environment->add_prototype($name, _imported_record($proto));
   };
 
   # A module's subs are in its STASH whatever the import list says, so perl
@@ -10767,15 +10809,14 @@ sub _merge_module_prototypes {
     for my $name (keys %{ $module_env->prototypes }) {
       next if exists $builtins->{$name};
       my $proto = $module_env->prototypes->{$name} or next;
-      $self->environment->add_pkg_prototype($name, { %$proto, from_module => 1 },
+      $self->environment->add_pkg_prototype($name, _imported_record($proto),
                                             $module);
     }
     for my $bare (keys %{ $module_env->pkg_prototypes }) {
       my $per = $module_env->pkg_prototypes->{$bare};
       for my $pkg (keys %$per) {
         next if $pkg eq 'main' || !$per->{$pkg};
-        $self->environment->add_pkg_prototype($bare,
-                                              { %{ $per->{$pkg} }, from_module => 1 },
+        $self->environment->add_pkg_prototype($bare, _imported_record($per->{$pkg}),
                                               $pkg);
       }
     }
@@ -11138,6 +11179,16 @@ sub use_constant_names {
   }
   return ($next->content) if $next->isa('PPI::Token::Word');
   return ();
+}
+
+# The registration SITE of a `use`/`require` statement (task #2871): what it
+# imports or declares is in force from the statement on, and a call parsed
+# ABOVE it does not know the name at all (`unknown_before`) -- `print PI * 2;
+# use constant PI => 3;` prints to the filehandle PI in perl.
+sub use_reg_site {
+  my ($stmt) = @_;
+  my $site = Pl::PExpr::TokenUtils::decl_site($stmt) or return undef;
+  return { %$site, unknown_before => 1 };
 }
 
 # THE record a constant's name gets: a zero-arg prototype, so a bareword use

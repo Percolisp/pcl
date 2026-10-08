@@ -206,6 +206,10 @@ sub _publish_strict_refs {
   # #2092: the case-mapping regime, the same way and for the same reason.
   $lh->{_unicode_strings_stmt} =
     Pl::Parser::unicode_strings_at($lh->{_unicode_strings_regions}, $loc);
+  # #2871: the PARSE CLOCK the prototype lookup compares a record's site with
+  # (perl applies a prototype only to calls parsed after its declaration).
+  $self->environment->parse_site(Pl::PExpr::TokenUtils::decl_site($stmt))
+    if $self->environment;
 }
 
 # `text`: the file's program text as the DRIVER's switches and its own #! line
@@ -951,6 +955,7 @@ sub _premerge_use_constant_prototypes {
   my $fp = $self->fallback_parser;
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
     next unless ($inc->type // '') eq 'use' && ($inc->module // '') eq 'constant';
+    local $self->environment->{reg_site} = Pl::Parser::use_reg_site($inc);  # #2871
     $fp->register_constant_prototype($_)
       for Pl::Parser::use_constant_names($inc);
   }
@@ -982,7 +987,8 @@ sub _premerge_glob_const_prototypes {
       }
       next unless $in_begin;
       $self->environment->add_prototype($name,
-        { params => [], min_params => -1, is_proto => 0 });
+        { params => [], min_params => -1, is_proto => 0 }, undef,
+        Pl::PExpr::TokenUtils::decl_site($stmt));
       next;
     }
     next if !($k[2]->isa('PPI::Token::Word') && $k[2]->content eq 'sub');
@@ -993,7 +999,7 @@ sub _premerge_glob_const_prototypes {
       max_params => 0,
       is_proto   => 1,
       proto_string => '',
-    });
+    }, undef, Pl::Parser::use_reg_site($stmt));   # #2871: unknown above it
   }
 }
 
@@ -1053,11 +1059,16 @@ sub _record_use_overrides {
   my $fp  = $self->fallback_parser;
   my $env = $self->environment;
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
-    next if ($inc->type // '') ne 'use';
+    my $type = $inc->type // '';
+    next if $type ne 'use' && $type ne 'no';
     my $mod = $inc->module // '';
     next if $mod eq '';
     my $pkg = _package_of_element($inc);
     my $loc = $inc->location || [0, 0];
+    if ($type eq 'no') {
+      $self->_record_no_override_end($inc, $mod, $pkg, $loc);
+      next;
+    }
     if ($mod eq 'subs') {
       # bare_quote: every argument of `use subs` IS a name, so the
       # unparenthesised `use subs "readpipe";` spelling counts here — which it
@@ -1076,11 +1087,52 @@ sub _record_use_overrides {
     # builtin at all (Environment::builtin_is_overridable, Perl_keyword()'s
     # weak half) are recorded, so `use POSIX qw(floor)` and `use Fcntl qw(:flock)`
     # leave the registry untouched.
-    for my $name ($fp->_parse_use_import_list($inc)) {
+    for my $name ($self->_use_imported_names($inc, $mod)) {
       next if $name !~ /\A\w+\z/;
       next if !$env->builtin_is_overridable($name);
       $env->add_builtin_override($pkg, $name, $loc->[0], $loc->[1]);
     }
+  }
+}
+
+# The names a `use MODULE ...` / `no MODULE ...` statement imports, as perl's
+# Exporter reads them (task #2873): the explicit list, a `:tag` in it expanded
+# through the module's %EXPORT_TAGS, and NO list at all = the module's
+# @EXPORT (an empty `()` imports nothing).  The module's lists are the literal
+# ones Parser::module_import_sets read when its prototypes were extracted.
+sub _use_imported_names {
+  my ($self, $inc, $mod) = @_;
+  my $fp    = $self->fallback_parser;
+  my @names = $fp->_parse_use_import_list($inc);
+  my $has_args = grep {
+      !($_->isa('PPI::Token::Word') && ($_->content eq ($inc->type // '') || $_->content eq $mod))
+      && !$_->isa('PPI::Token::Number') && !($_->isa('PPI::Token::Structure') && $_->content eq ';')
+  } $inc->schildren;
+  my $sets;
+  my $menv_sets = sub {
+    return $sets if $sets;
+    local $!;
+    my $menv = $fp->_extract_module_prototypes($mod);
+    return $sets = ($menv ? $menv->import_sets : {}) || {};
+  };
+  return @{ $menv_sets->()->{''} || [] } if !$has_args;
+  return map { /\A:/ ? @{ $menv_sets->()->{$_} || [] } : $_ } @names;
+}
+
+# `no MODULE LIST`: a module that defines an `unimport` takes its imports
+# back from here (task #2873: `no autodie;`), so the override of each name
+# ENDS at this statement.  A module without one leaves the override alone,
+# which is what perl's `no` does for it.
+sub _record_no_override_end {
+  my ($self, $inc, $mod, $pkg, $loc) = @_;
+  return if $mod =~ $PRAGMA_INCLUDES || $mod eq 'subs';
+  my $env  = $self->environment;
+  local $!;
+  my $menv = $self->fallback_parser->_extract_module_prototypes($mod) or return;
+  return if !$menv->raw_prototype('unimport');
+  for my $name ($self->_use_imported_names($inc, $mod)) {
+    next if $name !~ /\A\w+\z/;
+    $env->end_builtin_override($pkg, $name, $loc->[0], $loc->[1]);
   }
 }
 
@@ -1179,6 +1231,8 @@ sub _premerge_include_prototypes {
   }
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
     my $type = $inc->type // '';
+    # #2871: what this statement imports is in force from HERE.
+    local $self->environment->{reg_site} = Pl::Parser::use_reg_site($inc);
     if ($type eq 'use') {
       my $module = $inc->module or next;
       next if $module =~ $skip;
@@ -2092,9 +2146,10 @@ sub parse {
           # A `:prototype(…)` attribute's record (from_attr) IS the prototype
           # even beside a signature -- never overwritten (the guard the
           # unnormalized branch below carries; s500a #2533).
-          my $prev_attr = $self->environment->get_prototype($sub->name);
+          my $prev_attr = $self->environment->raw_prototype($sub->name);
           $self->environment->add_prototype($sub->name, $sig_rec,
-                                            $self->_effective_pkg($sub, $seg->{pkg}))
+                                            $self->_effective_pkg($sub, $seg->{pkg}),
+                                            Pl::PExpr::TokenUtils::decl_site($sub))
             if !($prev_attr && $prev_attr->{from_attr});
         }
         # A prototype/signature changes how CALL SITES parse (arity, imposed
@@ -2135,23 +2190,34 @@ sub parse {
           # bare name with different prototypes (task #421).  A `:prototype(…)`
           # attribute's record (from_attr) IS the prototype even beside a
           # signature — never overwritten (the v1 twin: _register_sub_prototype).
-          my $prev_attr = $self->environment->get_prototype($sub->name);
+          my $prev_attr = $self->environment->raw_prototype($sub->name);
           $self->environment->add_prototype($sub->name, $sig_info,
-                                            $self->_effective_pkg($sub, $seg->{pkg}))
+                                            $self->_effective_pkg($sub, $seg->{pkg}),
+                                            Pl::PExpr::TokenUtils::decl_site($sub))
             if !($prev_attr && $prev_attr->{from_attr});
         }
         $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
                                              Pl::PExpr::TokenUtils::decl_site($sub));
+        # #2871: a `:prototype(…)` record was registered by the attribute
+        # pre-pass on the document as first BUILT; the token repairs may have
+        # reparsed it since, and a site on another document answers for every
+        # call.  Re-site it on THIS one (the record itself is kept).
+        my $attr_rec = $self->environment->raw_prototype($sub->name);
+        $self->environment->add_prototype($sub->name, $attr_rec,
+                                          $self->_effective_pkg($sub, $seg->{pkg}),
+                                          Pl::PExpr::TokenUtils::decl_site($sub))
+          if $attr_rec && $attr_rec->{from_attr};
         # Same default signature v1's _process_sub_statement registers for a
         # prototype-less sub: PExpr consults get_prototype() to decide that a
         # bareword `foo` is a CALL (pl-foo), not the string "foo".  A
         # :prototype-attribute proto (from_attr) is compile-time in perl —
         # never clobber it with the default.
-        my $prev_proto = $self->environment->get_prototype($sub->name);
+        my $prev_proto = $self->environment->raw_prototype($sub->name);
         if (!$has_proto && !$sig_rec && !($prev_proto && $prev_proto->{from_attr})) {
           $self->environment->add_prototype($sub->name,
                                             { params => [], min_params => -1, is_proto => 0 },
-                                            $self->_effective_pkg($sub, $seg->{pkg}));
+                                            $self->_effective_pkg($sub, $seg->{pkg}),
+                                            Pl::PExpr::TokenUtils::decl_site($sub));
         }
         # Forward declaration `sub foo;` (no block) reserves the name only — v1
         # emits (p-declare-sub) and no definition.  No sub_info: there is
@@ -5501,7 +5567,7 @@ sub _rename_lexical_subs {
     # under the SOURCE name) travels with the rename: sub_proto_text reads it
     # by the definition's name to print the p-sub `:prototype` fact (#2533,
     # s500a — t/op/attrproto.t `my sub lexsub1(bar) : prototype(baz)`).
-    my $attr_rec = $self->environment->get_prototype($d->{name});
+    my $attr_rec = $self->environment->raw_prototype($d->{name});
     $self->environment->add_prototype($d->{new}, $attr_rec)
       if $d->{new} ne $d->{name} && $attr_rec && $attr_rec->{from_attr};
   }

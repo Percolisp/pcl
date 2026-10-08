@@ -520,9 +520,8 @@ END_PERL
   # PERL SEMANTICS: a prototype applies only to calls compiled AFTER its
   # declaration — the forward call must flatten @arr, not pass a ref.  v1
   # matched this by processing statements in order; v2's prototype
-  # pre-scan applies it retroactively to the earlier call (task #256).
-  # TODO until v2's application is position-aware.
-  local $TODO = 'v2 pre-scan applies prototypes retroactively (#256)';
+  # pre-scan applied it retroactively to the earlier call (task #256) until
+  # the lookup became position-aware (task #2871, s513b).
   unlike($cl, qr/early_call \(p-backslash/,
          'Call before prototype definition does not auto-box');
 }

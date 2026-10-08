@@ -21588,16 +21588,18 @@ buffer's fill-pointer; everything else falls back to file-length."
    removed ITSELF, dangling or not; a directory fails with EISDIR in $!
    instead of crashing (perl's behaviour, probed 5.40.3 -- the old
    probe-file/delete-file pair skipped dangling symlinks and DIED on a
-   directory).  Returns count of files deleted."
+   directory).  Returns count of files deleted.  The LIST is flattened like
+   p-kill's: `unlink @files` deleted nothing and answered 0 (#2923)."
   (let ((count 0))
-    (dolist (f files count)
+    (loop for f across (p-flatten-args files) do
       (handler-case
           (progn
             (sb-posix:unlink (to-string (unbox f)))
             (incf count))
         (sb-posix:syscall-error (e)
           (setf *p-stored-errno* (sb-posix:syscall-errno e)))
-        (error () (%pcl-save-errno))))))
+        (error () (%pcl-save-errno))))
+    count))
 
 (defun %p-fileno-impl (fh)
   "Perl fileno - get file descriptor number.  Real fd via the fd-stream
@@ -22638,10 +22640,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl chmod MODE, LIST — change permissions. Returns count changed.
    A filehandle in the LIST is fchmod'd by descriptor; everything else is a path.
    (Only an actual open stream is treated as a handle — a plain string is always
-   a filename, so chmod 0644, 'a' is never mistaken for a handle named 'a'.)"
+   a filename, so chmod 0644, 'a' is never mistaken for a handle named 'a'.)
+   The LIST is flattened like p-kill's (`chmod 0644, @files`, #2923)."
   (let ((m (truncate (to-number mode)))
         (count 0))
-    (dolist (f files count)
+    (loop for f across (p-flatten-args files) do
       (let ((v (if (p-box-p f) (p-box-value f) f)))
         (handler-case
             (progn
@@ -22649,7 +22652,8 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (sb-posix:fchmod (sb-sys:fd-stream-fd v) m)
                   (sb-posix:chmod (to-string v) m))
               (incf count))
-          (error () (%pcl-save-errno) nil))))))
+          (error () (%pcl-save-errno) nil))))
+    count))
 
 (defun p-umask (&optional mode)
   "Perl umask [EXPR] — set the file-creation mask and return the PREVIOUS value.
@@ -22687,12 +22691,13 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-chown (&optional (uid nil uid-p) (gid nil gid-p) &rest files)
   "Perl chown UID, GID, LIST — change owner/group. Returns count changed.
    A UID or GID of -1 leaves that attribute unchanged.  A filehandle in the LIST
-   is fchown'd by descriptor.  An empty argument list (chown +()) is 0 files."
+   is fchown'd by descriptor.  An empty argument list (chown +()) is 0 files.
+   The LIST is flattened like p-kill's (`chown $u, $g, @files`, #2923)."
   (unless (and uid-p gid-p) (return-from p-chown 0))
   (let ((u (%pcl-chown-id uid))
         (g (%pcl-chown-id gid))
         (count 0))
-    (dolist (f files count)
+    (loop for f across (p-flatten-args files) do
       (let ((v (if (p-box-p f) (p-box-value f) f)))
         (handler-case
             (progn
@@ -22700,27 +22705,36 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (sb-posix:fchown (sb-sys:fd-stream-fd v) u g)
                   (sb-posix:chown (to-string v) u g))
               (incf count))
-          (error () (%pcl-save-errno) nil))))))
+          (error () (%pcl-save-errno) nil))))
+    count))
 
 (defun p-utime (&optional atime mtime &rest files)
   "Perl utime ATIME, MTIME, LIST — set access/modification times. Returns count.
    Times are Unix-epoch seconds (same convention as sb-posix:utime).  undef
    ATIME/MTIME means 'now', which sb-posix:utime uses when the times are omitted.
    Both times are optional: `utime 'x'` (op/lex_assign.t) is a plain
-   short list — 0 files touched, returns 0."
-  (let ((a (unless (or (null atime) (eq atime *p-undef*))
-             (%pcl-to-integer (to-number atime))))
-        (m (unless (or (null mtime) (eq mtime *p-undef*))
-             (%pcl-to-integer (to-number mtime))))
-        (count 0))
-    (dolist (f files count)
+   short list — 0 files touched, returns 0.  A time arriving in a BOX (a
+   variable) is read through it, the LIST is flattened like p-kill's, and a
+   failure sets $! (#2923: `my ($a, $m); utime $a, $m, @files` set the
+   times to 0 on nothing and answered 0)."
+  (let* ((av (unbox atime))
+         (mv (unbox mtime))
+         (a (unless (or (null av) (eq av *p-undef*))
+              (%pcl-to-integer (to-number av))))
+         (m (unless (or (null mv) (eq mv *p-undef*))
+              (%pcl-to-integer (to-number mv))))
+         (count 0))
+    (loop for f across (p-flatten-args files) do
       (handler-case
           (progn
             (if (and a m)
-                (sb-posix:utime (to-string f) a m)
-                (sb-posix:utime (to-string f)))
+                (sb-posix:utime (to-string (unbox f)) a m)
+                (sb-posix:utime (to-string (unbox f))))
             (incf count))
-        (error () nil)))))
+        (sb-posix:syscall-error (e)
+          (setf *p-stored-errno* (sb-posix:syscall-errno e)))
+        (error () (%pcl-save-errno))))
+    count))
 
 ;;; ============================================================
 ;;; Time Functions
@@ -24305,7 +24319,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-4784"
+(defparameter *pcl-cache-generation* "v2-4884"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

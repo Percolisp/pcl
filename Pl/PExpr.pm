@@ -5946,6 +5946,9 @@ sub _bareword_callable_here {
   # constant, which perl knows at compile time.  That table cannot answer for a
   # qualified name (it is keyed bare), so a qualified unknown is a string.
   return 'yes' if !defined $pkg && $env->has_prototype($name);
+  # A `use constant` / module import of this FILE, but BELOW this point
+  # (task #2871): positive knowledge, exactly like a sub declared below.
+  return 'not-yet' if !defined $pkg && $env->raw_prototype($name);
   return 'no';
 }
 
