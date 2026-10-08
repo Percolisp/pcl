@@ -17531,8 +17531,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    sb-bsd-sockets socket object — or nil.  Does NOT coerce sockets to streams (so
    the socket builtins can get the object); p-get-stream does the coercion."
   (cond
+    ;; FIRST (task #2771, s512p): a lexical handle is a BOX holding a stream,
+    ;; and every arm below is a type test that box fails -- %p-socket-p is a
+    ;; typep on a CLOS class (a classoid lookup), ~6 % of a print loop while
+    ;; it ran first.  No designator is two of these kinds, so the order only
+    ;; decides how soon the answer comes.
+    ((p-box-p fh)
+     (let ((v (p-box-value fh)))
+       (cond
+         ((streamp v) v)
+         ((%p-socket-p v) v)
+         ;; Scalar holding a handle NAME ('STDOUT', 'FOO'): resolve by name.
+         ((stringp v) (%p-resolve-fh v))
+         ;; Ref-to-glob (\*STDOUT): unwrap to the glob designator.
+         ((p-typeglob-p v) (%p-resolve-fh v))
+         (t nil))))
     ((streamp fh) fh)
-    ((%p-socket-p fh) fh)
     ((symbolp fh)
      (or (gethash fh *p-filehandles*)
          ;; The standard handles STDIN/STDOUT/STDERR are registered under the
@@ -17546,6 +17560,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          ;; A glob alias made before its source opened (#2666).
          (let ((src (gethash fh *p-fh-glob-aliases*)))
            (and src (gethash src *p-filehandles*)))))
+    ((%p-socket-p fh) fh)
     ((stringp fh)
      ;; A string filehandle name — e.g. print {"STDOUT"} ..., or a scalar
      ;; holding a handle name (my $fh = 'STDOUT'; print $fh ...).  Strip an
@@ -17578,16 +17593,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  using (hash-value v)
                  when (and (symbolp k) (string= (symbol-name k) name))
                  return v))))
-    ((p-box-p fh)
-     (let ((v (p-box-value fh)))
-       (cond
-         ((streamp v) v)
-         ((%p-socket-p v) v)
-         ;; Scalar holding a handle NAME ('STDOUT', 'FOO'): resolve by name.
-         ((stringp v) (%p-resolve-fh v))
-         ;; Ref-to-glob (\*STDOUT): unwrap to the glob designator.
-         ((p-typeglob-p v) (%p-resolve-fh v))
-         (t nil))))
     (t nil)))
 
 (defun p-get-stream (fh)

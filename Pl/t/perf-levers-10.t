@@ -13,6 +13,8 @@
 #   #2723 an END-ANCHORED regex of bounded match length starts its scan at
 #         the tail (%pcl-tail-reach / %pcl-tail-start-scanner, wrapped in
 #         %pcl-build-scanner); unbounded or not end-anchored = unchanged.
+#   #2771 (member 2) %p-resolve-fh tests the BOX arm first (a lexical handle
+#         skips the CLOS-class socket typep); semantics rows only.
 use v5.30;
 use strict;
 use warnings;
@@ -185,6 +187,80 @@ b!|xy
 43 /mg list: 1 2 3
 44 list ctx caps: key|val
 45 \Z bounded alt: 0|0
+END_EXP
+
+# #2771 (round 41 member 2): %p-resolve-fh tests the BOX arm first; a lexical
+# handle no longer pays the CLOS-class socket typep.  Not observable in a timed
+# row (about -10 % on fhprint), so: the mechanism (the socket test is not asked
+# for a box holding a stream -- the base asks it once) and every designator.
+like(lisp_out(q{(let ((n 0) (b (make-p-box *standard-output*))) (sb-int:encapsulate (quote %p-socket-p) (quote count) (lambda (f x) (incf n) (funcall f x))) (let ((r (eq (%p-resolve-fh b) *standard-output*))) (sb-int:unencapsulate (quote %p-socket-p) (quote count)) (print (list r n))))}),
+     qr/\Q(t 0) \E/, '#2771: a box holding a stream resolves without the socket test');
+
+answers(<<'END_SRC', <<'END_EXP', '#2771 answers: print/printf/say through every handle designator (lexical, block, bareword, name string, glob, glob ref, dup, IO::Handle, select, socketpair, closed, read-only)');
+use feature 'say'; use Socket; use IO::Handle;
+my $f = ($ENV{TMPDIR} || "/tmp") . "/pcl-fhd.$$";
+open(my $fh, '>', $f) or die; open(FOO, '>>', $f) or die;
+print $fh "lex\n"; print {$fh} "blk\n"; printf $fh "%s\n", "pf-lex"; say $fh "say-lex"; printf {$fh} "%s\n", "pf-blk"; say {$fh} "say-blk"; close $fh;
+print FOO "bare\n"; printf FOO "%s\n", "pf-bare"; say FOO "say-bare";
+my $name = 'FOO'; print $name "name\n"; say $name "say-name"; print {"FOO"} "strblk\n";
+print {*FOO} "glob\n"; my $gr = \*FOO; print $gr "globref\n"; print {$gr} "globref-blk\n"; say $gr "say-globref"; printf $gr "%s\n", "pf-globref";
+open(my $dup, '>&', \*FOO) or die; print $dup "dup\n"; say $dup "say-dup"; close $dup;
+open(DUP2, '>&FOO') or die; print DUP2 "dup2\n"; close DUP2;
+my $io = IO::Handle->new; $io->fdopen(fileno(FOO), "w") or die; print $io "iohandle\n"; $io->print("io-method\n"); $io->flush;
+{ local $, = "-"; local $\ = "!\n"; print FOO "a", "b"; say FOO "c", "d"; }
+my $old = select(FOO); $| = 1; print "selected\n"; printf "%s\n", "pf-selected"; say "say-selected"; select($old);
+close FOO;
+my $g = \*STDOUT; print $g "stdout-globref\n"; say $g "say-stdout-globref"; print {*STDOUT} "stdout-glob\n"; print {\*STDOUT} "stdout-ref\n";
+print STDOUT "stdout\n"; print {"STDOUT"} "stdout-str\n"; my $so = 'STDOUT'; print $so "stdout-name\n"; printf $so "%s\n", "pf-stdout-name";
+socketpair(my $s1, my $s2, AF_UNIX, SOCK_STREAM, PF_UNSPEC) or die "socketpair: $!";
+$s1->autoflush(1); print $s1 "sock\n"; say $s1 "say-sock"; printf {$s1} "%s\n", "pf-sock"; close $s1;
+my @got = <$s2>; print "from socket: ", join("", @got); close $s2;
+my $r = print $fh "closed\n"; print "closed print: ", ($r ? "true" : "false"), "\n";
+my $rs = say $fh "closed"; print "closed say: ", ($rs ? "true" : "false"), "\n";
+open(my $ro, '<', $f) or die; my $w = print $ro "x"; print "ro print: ", ($w ? "true" : "false"), "\n";
+print <$ro>; close $ro; unlink $f;
+END_SRC
+stdout-globref
+say-stdout-globref
+stdout-glob
+stdout-ref
+stdout
+stdout-str
+stdout-name
+pf-stdout-name
+from socket: sock
+say-sock
+pf-sock
+closed print: false
+closed say: false
+ro print: false
+lex
+blk
+pf-lex
+say-lex
+pf-blk
+say-blk
+bare
+pf-bare
+say-bare
+name
+say-name
+strblk
+glob
+globref
+globref-blk
+say-globref
+pf-globref
+dup
+say-dup
+dup2
+iohandle
+io-method
+a-b!
+c-d
+selected
+pf-selected
+say-selected
 END_EXP
 
 done_testing();
