@@ -330,6 +330,10 @@ my @benches = (
   ['passarr',   "sub ps { my (\@d) = \@_; my \$m = \@d / 2; map { \@d[\$_, \$_ + \$m] } 0 .. \$m - 1 } $HN my \@a = (1 .. 40); my \$c = 0; for (1..\$n) { \@a = ps(\@a); \$c += \$a[1] } print \"\$c\\n\";", 50_000, 0],
   ['listdeclcat', "$HN my \$c = 0; for (1..\$n) { my (\$s, \$i) = ('', 0); while (\$i++ < 200) { \$s .= 'ab' } \$c += length \$s } print \"\$c\\n\";", 20_000, 0],
   ['lcbytes',"$HN my \@l = map { \"Ligne \\xC3\\xA9t\\xC3\\xA9 NO \$_ CAF\\xC3\\x89 fin\" } 1 .. 200; my \$c = 0; for (1..\$n) { for my \$s (\@l) { my \$t = lc(\$s) . uc(\$s) . ucfirst(\$s); \$c += ord(substr(\$t, 7, 1)) + length(\$t) } } print \"\$c\\n\";", 2_000, 0],
+  # s512p (perf round 41, #2723): an END-ANCHORED match on a growing string --
+  # append a line and test the tail; cl-ppcre scanned the whole string per match.
+  # (The append-then-read residue that remains is #2881.)
+  ['endanch',  "$HN my %h; my \$m = 0; for my \$i (1 .. \$n) { \$h{u} .= \"line \$i\\n\"; \$m++ if \$h{u} =~ /9\\n\\z/ } print \"\$m\\n\";", 30_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
