@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 sub transpile {
     my ($code) = @_;
@@ -157,3 +157,18 @@ cl("x");
 });
 unlike($elem, qr/\(p-scalar \(p-aref-argbox/,
    'an element argument under a $ slot is passed as its argbox, not a p-scalar copy');
+
+# The TAP layer's `is` is a `$`-prototyped sub too (perl-tests/t/test.pl declares
+# `sub is ($$@)`), so a MISSING element now reaches it as the lazy defelem argbox;
+# cl/pcl-test.lisp's test-to-scalar reads such a cell once, as perl's `$` slot
+# does.  Before that read, assignwarn.t's `is($w[0], undef, ...)` printed
+# got='' (38 rows).  The forward declaration's "redefining" note is stderr.
+my $tap = run_cl(q{use Test::More tests => 3;
+sub is ($$;$);
+my @w; is($w[0], undef, "missing element is undef");
+my %h; is($h{zz}, undef, "missing hash element is undef");
+ok(!exists $h{zz}, "and it was not created");
+});
+$tap =~ s/^warning: redefining .*\n//gm;
+is($tap, "1..3\nok 1 - missing element is undef\nok 2 - missing hash element is undef\nok 3 - and it was not created\n",
+   'a $-prototyped TAP `is` reads a missing element (its defelem argbox) as undef');

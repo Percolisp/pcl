@@ -236,7 +236,6 @@ hashassign.t	220		undef	^Reference found where even-sized list expected	#221 (NS
 hashassign.t	221		undef	^Odd number of elements in hash assignment	#221 (NS:Warnings-gated diagnostics are absent; DECIDED s399: #221's trigger HAS FIRED)
 hashassign.t	222		undef	^Reference found where even-sized list expected	#221 (NS:Warnings-gated diagnostics are absent; DECIDED s399: #221's trigger HAS FIRED)
 hexfp.t	104		undef	^Hexadecimal float: mantissa overflow	NS:Hex floating-point literals (`0x1.8p+1`)
-length.t	34		''	undef	#1482 CATALOG length.t "test 34"
 length.t	42	uninit warning for stringifying as undef	''	uninitialized	#221 (NS:Warnings-gated diagnostics are absent)
 local.t	264		''	Modification of a read-only value attempted	NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars in the box model)
 local.t	306	[perl #52740]	' The function main::|pl-main::| is undefined.'	^ok$	#1459 item 1 (${::}{NAME}, the main-stash shorthand, is emitted as a CALL)

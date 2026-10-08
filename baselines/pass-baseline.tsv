@@ -1,4 +1,8 @@
 # taken-at: 5323d9e 2026-08-15
+# s513a (2026-10-08, Opus, EDITED BY HAND -- one row, TOTAL 18735 -> 18736, #2860): length.t 35 -> 36
+#   (row 34 `is($u, undef)` on a TIED undef: cl/pcl-test.lisp's test-to-scalar now reads a get-magic box once,
+#   closing #1482; the read was needed because a `$`-prototype slot now passes element argboxes).
+#   Sweep scratch/s513a/sweep2.log; 35/3 on a 454342e7 extraction.
 # s507p (2026-10-06, Opus, EDITED BY HAND -- two rows, TOTAL 18731 -> 18733, perf round 39): scalar.t 86 -> 88,
 #   rows 25 "reading from magic scalars" and 30 "FETCH only called once" (#1446): #2111 makes a '<'
 #   in-memory handle read its scalar LIVE through the box, so a tied scalar's FETCH fires once, as in perl.
@@ -476,7 +480,7 @@ join.t	OK	43	0	43
 kvaslice.t	OK	17	0	17
 kvhslice.t	OK	22	2	39
 lc.t	OK	85	0	2662
-length.t	PARTIAL	35	3	49
+length.t	PARTIAL	36	2	49
 lex.t	OK	45	0	53
 local.t	OK	305	8	319
 loopctl.t	OK	64	0	67

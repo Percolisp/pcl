@@ -422,12 +422,20 @@
 ;;; Helper: apply scalar context to a value (matches Test::More's $$ prototype behavior).
 ;;; When Test::More functions like is($$;$) receive an array, Perl forces scalar context,
 ;;; giving the element count. PCL can't enforce prototypes, so we do it here instead.
+;;; A box carrying GET-MAGIC -- a defelem cell (`is($w[0], undef)` with @w
+;;; empty hands the lazy argbox of a missing element, task #2860) or a tie
+;;; proxy -- is READ ONCE here, the one read perl's `$` slot makes; the raw
+;;; slot readers below (test-undef-p) would otherwise see the cell, not undef.
 (defun test-to-scalar (x)
   (handler-case
       (let ((is-vec (and (vectorp x) (not (stringp x)))))
-        (if (and is-vec (adjustable-array-p x))
-            (make-p-box (length x))
-            x))
+        (cond
+          ((and is-vec (adjustable-array-p x)) (make-p-box (length x)))
+          ((and (p-box-p x)
+                (let ((v (p-box-value x)))
+                  (or (p-magic-cell-p v) (p-tie-proxy-p v))))
+           (unbox x))
+          (t x)))
     (error (e)
       (%tap-out "### test-to-scalar ERROR: ~A~%" e)
       (force-output)
