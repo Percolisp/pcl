@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "FOUND s512p (Opus, 2026-10-09), member 2's design note (worktree agent-ad4d28a21ff7f772a scratch/s512p/print2-design.md).  Hand-replaced A/B (scratch/s512p/ab-m2.log, best of 5 interleaved, load 1.8, whole-process wall on the tree core; the preload costs ~7 ms of load):\n    fhprint 2 M    none 0.209  control 0.209  A1 (resolver reorder, SHIPPED) 0.189  A2 (A1 + this) 0.182\n    fhsep   2 M    none 0.322  control 0.321  A1 0.307                               A2 0.299\nA2 = (defun %p-writable-stream (v) (cond ((typep v 'sb-sys:fd-stream) (if (sb-impl::fd-stream-obuf v) v nil)) ((and (streamp v) (not (output-stream-p v))) nil) (t v)))\nRULED s513 (Fable): FILED, not built -- an SBCL-internal slot dependency for ~3 %.  Revisit if SBCL exports a non-generic direction test, or with a per-handle direction flag PCL itself records at open (the cleaner shape: no internals, invalidated by nothing since a stream's direction never changes).\n",
+   "id" : 2882,
+   "status" : "pending",
+   "subject" : "PERF (filed, not built -- ruled s513): print's %p-writable-stream asks output-stream-p, a GRAY GENERIC on SBCL 2.6 (PCL dispatch, ~4-6 % of fhprint); an fd-stream test on sb-impl::fd-stream-obuf saves ~3 % more on top of #2771 A1, at the price of an SBCL internal slot"
+}
