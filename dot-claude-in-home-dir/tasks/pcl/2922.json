@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "`$!` is not set by a failing `opendir` or `seek`: `opendir(my $d, \"/nonexistent/q\") or print \"$!\"` prints an empty string (perl: No such file or directory); `seek($fh, -5, 0) or print \"$!\"` likewise (perl: Invalid argument).  PRE-EXISTING (base 5adcc156).  Found by s513b: lib/autodie.pm reports `$!` in its message, so `use autodie; opendir(...)` dies at the right place with a stale errno text (\"Bad file descriptor\" left by an earlier call).  Fix site: the runtime p-opendir / p-seek failure paths set the errno box like p-open does.  Probe both vs perl, plus closedir / seekdir / tell on a closed handle.",
+   "id" : "2922",
+   "status" : "pending",
+   "subject" : "`$!` not set by a failing opendir / seek (empty or stale errno text)"
+}

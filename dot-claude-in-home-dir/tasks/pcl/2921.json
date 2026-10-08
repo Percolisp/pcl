@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "SILENT WRONG: `read(FH, ${$_[1]}, N)` -- the buffer a dereference of an @_ ELEMENT -- reads (the count is right) but never writes the buffer: the emission is (p-read (p-aref @_ 0) (p-cast-$ (p-aref @_ 1)) 5), and p-read writes back only through a buffer form it recognises.  `my $r = $_[1]; read($_[0], $$r, 5)` works, and so does `read($g, $$r, 3)` at top level.  PRE-EXISTING (base 5adcc156 identical).  Found by s513b while writing lib/autodie.pm (the read wrapper works around it through a copy of the reference).\n\n  sub s2 { my $n = read($_[0], ${$_[1]}, 5); $n } open my $g, \"<\", $0; my $d; s2($g, \\\\$d); print \"d=$d\\n\";\n  perl: d=<5 chars>   PCL: d=\n\nCheck sysread / recv / the 4-arg forms for the same buffer-place gap.",
+   "id" : "2921",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `read($fh, ${$_[1]}, N)` (buffer = a deref of an @_ element) never writes the buffer"
+}

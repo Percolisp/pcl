@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "print to a BAREWORD filehandle whose first argument is a GLOB is a whole-statement DROP: `print FOO * 2, \"\\n\";` (FOO unknown, never opened) -- perl reads FOO as the filehandle and `*2` as the glob *main::2 (prints to the unopened handle: nothing, and the program continues); PCL announces `statement dropped ... Bug. Fell through. Missing case: []` and the statement dies at run time, so a following `print \"end\\n\"` never runs.  PRE-EXISTING (base 5adcc156 identical).  Found by s513b (#2871): the static-parse review probe p16-constlater (`print PI * 2, \"\\n\"; use constant PI => 3;`) printed 6 on main because the constant applied above its `use`; with #2871 the name is unknown there, as in perl, and the statement reaches this gap.  Repro:\n\n  print FOO * 2, \"\\n\"; print \"end\\n\";        perl: end     PCL: (drop, dies)\n\nRealistic shape: rare (an unknown ALL-CAPS word before `*`).  Fix site: the print filehandle-slot decision in PExpr (an unknown bareword followed by a term-starting `*`); probe the multiplication spelling `print FOO * 2` with a DECLARED sub FOO (must stay multiplication).",
+   "id" : "2920",
+   "status" : "pending",
+   "subject" : "`print FOO * 2, ...` (unknown bareword, then a glob) is a whole-statement DROP -- perl prints the glob to filehandle FOO"
+}
