@@ -955,8 +955,9 @@ What still COPIES:
   `STORE` appends the record separator through `$self->_fixrecs($rec)` — under
   PCL `$lines[1] = "x"` writes the record WITHOUT its separator (the file on
   disk is corrupted, silently).
-- deref elements (`f($ref->{k})`) and prototype-`$`-imposed element args
-  (extendable via the same argbox accessors if real code needs them).
+- deref elements (`f($ref->{k})`).  (The prototype-`$`-imposed element
+  args that stood here ALIAS since s513a, task #2860 -- Text::Balanced was
+  the real code that needed them; guard `Pl/t/proto-alias-01.t`.)
   **Probed and quantified s458ak (task #860)**: `sub w { $_[0] .= "!" }
   my $h = {k=>"v"}; w($h->{k})` prints `v` where perl prints `v!`, and the
   array twin `w($a->[0])` likewise — on plain AND blessed refs alike, so it is

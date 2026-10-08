@@ -2105,6 +2105,15 @@ method dispatch, cross-file sub — the runtime's "Cannot modify non-boxed
 value" warning is the backstop there) and deref-element args
 (`f($ref->{k})`).  See `docs/not-supported.md` §`@_` argument aliasing.
 
+**A `$` prototype slot does not copy (normative, s513a, task #2860):** a `$`
+prototype slot imposes scalar context on the argument EXPRESSION; a scalar
+lvalue argument (a scalar variable, an element of a named container, `$_[N]`,
+a scalar assignment) is passed as its box and aliases in the callee exactly as
+it does without a prototype — a prototyped sub carries the same `writes_args`
+fact, and its element arguments are the same argbox accessors, never wrapped in
+`p-scalar`.  Example: `sub g ($) { $_[0] .= "!" } my @a = ("q"); g($a[0])`
+emits `(pl-g (p-aref-argbox @a 0))` and `$a[0]` is `q!`.
+
 **Element targets of `s///` / `tr///`** are the element's BOX:
 `$a[0] =~ s/…/…/` emits `(p-=~ (p-aref-box @a 0) (p-subst …))`, not
 `p-aref`.  A plain match is a read and keeps `p-aref`.
