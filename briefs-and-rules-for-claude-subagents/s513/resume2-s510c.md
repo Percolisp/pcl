@@ -1,0 +1,16 @@
+# RESUME s510c, SECOND TIME (s513, 2026-10-09 00:31, Fable) -- after the 00:21 OOM (`s513/SHARED-BOX.md`, its 00:31 addendum: the PROBE RULE).  Everything in `s513/resume-s510c.md` STANDS; this page is the delta.  Be economical: read only what this page and STOP.md's top block name.
+
+You are an EXECUTION agent (Opus 5.5), a FRESH agent.  FIRST ACTION: overwrite `$W/scratch/s510c/MODEL.txt` with your exact model id (the USER requires `claude-opus-5-5`; anything else: write it, stop, report only that).
+
+`W=/home/bernt/pcl/.claude/worktrees/agent-a0324b48405eea0b6`, HEAD `64081ad7` = main `42fafb08` + 11 (the rebase across MAIN-READY-2 is DONE; the three artifacts are regenerated at v2-4784; staleness PASS).  Launched WITHOUT isolation: your launch directory is main's checkout, where you run NOTHING; every command is `env -C "$W" CMD`, `git -C "$W" ...` or an absolute path under `$W`.  Main is `c94960e6` or a notes commit above it (notes + s512p's task edits above `42fafb08`, no code): `git -C "$W" rebase main` crosses nothing but records -- do it first, it keeps the MERGE a fast-forward.
+
+## State on disk (STOP.md's top block + `$W/scratch/s510c/legs-status.txt`, all on the rebased tree)
+DONE: `sweep-final.log` GATE clean TOTAL 18740 (= 18736 + #2800's 4 rows, +0); `emission-ab-final.log` 29 SAME 9 DIFF 20 RCDIFF 0 + `wrapcheck-lib-final2.txt` FAIL 0; `everyday-final.log` 114 of 122, buckets 0; `corpus-diff-final2.log` 93 of 111 vs `5adcc156`, drops 5 + `wrapcheck-final2.txt` 238/239 (the sort.t HUGE_FORM cap); `board-base-final.*` (base extraction `$S/base-5adc` = `5adcc156`) and `board-tree-final.*` both END rc 0 at 00:17:56.
+NOT DONE (the OOM took the queue): (a) the BOARD COMPARE base vs tree -- 0 NEW / 0 LOST, 05_extmul.t running on BOTH sides (the diff script you used before: `board-diff*.log` in `$S` shows its shape); write the verdict into STOP.md; (b) `ir-conform-final.log` (never started: its heavy.sh died waiting for the lock); (c) `gate-final.log` (never started).  `$S/legs3.sh` holds the exact commands -- run its LAST TWO legs only, one `heavy.sh s510c leg` call each, in the background, light work meanwhile.  Nothing is owed on the companion (`companion2.log` stands, see STOP.md).
+THE LOCK: a s512p companion ORPHANED by the OOM is still running under a stand-in holder (`s512p-orphan` in `HEAVY.holder`); heavy.sh waits for it like for any holder (minutes).
+
+## Then, unchanged from `resume-s510c.md`
+4. `tools/tag-license --check`; `tools/ir-host-leak.pl` (31); `git -C "$W" status --short` shows only `scratch/`.
+5. Records: `## s510c` in `docs/DECIDED.md` directly below `## s513a`; `## Session s510c` in `docs/session-log.md` likewise, its BARS-LINE filled (the board compare, sweep 18740, everyday, gate count); tasks 2775 / 2800 / 2801 / 2803 / 2861 / 2862 checked.  Commit (named files).
+6. `tools/everyday-smoke.pl --record` LAST (a leg, clean committed tree); commit the history row; `MERGE-READY: <sha>` as the FIRST line of STOP.md with every bar's log path under it; SendMessage `main`: `s510c MERGE-READY <sha>`.
+Every probe through `~/pcl-agent-scratch/s513/probe.sh` (the addendum).  Keep STOP.md current after every step.  Final report as `resume-s510c.md` says (SHORT).
