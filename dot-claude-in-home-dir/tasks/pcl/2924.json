@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "`truncate(\\*FH, 0)` -- a GLOB REFERENCE as truncate's handle -- fails (answers false, file unchanged) where perl truncates; the bareword `truncate(FH, 0)` and a lexical handle work.  PRE-EXISTING (base 9d8961d9).  Found by s513b: autodie's own t/truncate.t rows 5/6/9 (`truncate(\\*TRUNCATE_FH, 0)`, `truncate(*TRUNCATE_FH, 0)`) fail under PCL for this reason, not for the shim.\n\n  open(TFH, \"+<\", $f); my $r = truncate(\\*TFH, 0);     perl r=1 size=0   PCL r=0 size=6\n\nFix site: the runtime truncate's handle resolution (route it through the same %p-fh-arg / glob-ref resolution p-close uses).",
+   "id" : "2924",
+   "status" : "pending",
+   "subject" : "`truncate(\\*FH, 0)` / `truncate(*FH, 0)` (a glob or glob ref as the handle) does nothing and answers false"
+}

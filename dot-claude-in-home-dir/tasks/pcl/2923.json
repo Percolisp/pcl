@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "SILENT WRONG: the list built-ins `unlink`, `chmod`, `chown` and `utime` did not FLATTEN an array argument: `unlink @files` deleted nothing and answered 0, `chmod 0644, @files` / `chown $u, $g, @files` likewise (utime answered right only by accident of its emission).  The runtime functions took `&rest files` and treated the array as ONE path.  `kill` was right: it already ran p-flatten-args.  PRE-EXISTING (base 5adcc156 and 9d8961d9).  Found by s513b while building lib/autodie.pm (its unlink/chmod wrappers pass @_ / @files).\n\n  my @l = ($f); print unlink(@l)      perl 1   PCL 0 (file still there)\n\n=== DONE (s513b) ===\np-unlink, p-chmod, p-chown, p-utime iterate (p-flatten-args files), the p-kill idiom (rule 11); p-utime also sets $! on failure (it swallowed the error).  Probed: utime with undef VARIABLES is time 0 in perl (only a literal undef means now) -- kept.  Guard rows: Pl/t/autodie-01.t rows 11-12 (inverse-verified: fail on 9d8961d9).",
+   "id" : "2923",
+   "status" : "completed",
+   "subject" : "SILENT WRONG: `unlink @files` / `chmod MODE, @files` / `chown U, G, @files` did nothing and answered 0 (array not flattened)"
+}
