@@ -218,6 +218,7 @@ sub add    { my ($p, $q) = @_; return $p + $q }
 sub ctx    { return wantarray ? "list" : "scalar" }
 sub writer { $_[0] = 9 }
 sub protod ($$) { my ($m, $n) = @_; $m . $n }
+sub protow ($) { $_[0] .= "w" }
 sub evaler { my $t = shift; return eval $t }
 my $z = 3;
 print add(1,2), ctx(), protod(4,5), evaler("40+2"), "\n";
@@ -231,8 +232,10 @@ PERL
            '#1035: ... and one that READS wantarray does not (true-only key)');
     like($cl, qr/\(p-sub pl-writer\s+\(&rest %_args\)\s+\(:writes-args t :needs \(\)\)/,
          '#1035: :writes-args is printed in BOTH directions -- 0 is a proof too');
-    like($cl, qr/\(p-sub pl-protod\s+\(&rest %_args\)\s+\(:prototype "\$\$" :needs \(\)\)/,
-         '#1035: an old-style prototype prints its text');
+    like($cl, qr/\(p-sub pl-protod\s+\(&rest %_args\)\s+\(:writes-args nil :prototype "\$\$" :needs \(\)\)/,
+         '#1035: an old-style prototype prints its text (and, since #2860, its proven :writes-args)');
+    like($cl, qr/\(p-sub pl-protow\s+\(&rest %_args\)\s+\(:writes-args t :prototype "\$" :needs \(\)\)/,
+         '#2860: a prototyped sub that writes @_ says so -- the fact its call sites box on');
     like($cl, qr/\(p-sub pl-evaler\s+\(&rest %_args\)\s+\(:writes-args nil :string-eval t :needs \(:string_eval\.eval\)\)/,
          '#1035: a body containing a string eval says so');
     # (`ctx()` sits in a print LIST, so wantarray is true there -- probed
