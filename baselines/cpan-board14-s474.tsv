@@ -7,6 +7,7 @@
 # Columns: dist, t-file, status, ok, notok, rc.  Real perl 5.40.3 was run
 # beside every file named below; its verdict is quoted with each cause.
 #
+# s513a (#2860, 2026-10-08): Text-Balanced 05_extmul.t FAIL 0/0 rc 124 -> PARTIAL 94/2 (plan 96, perl 96/0; the `$`-prototype copy made extract_multiple loop until the heap died; rows 87+96 = #2900).  Edited by hand, row by row.
 # ===========================================================================
 # DELTA s467 -> s474: EXACTLY FOUR ROWS MOVED, all Scalar-List-Utils, and all
 # four are s1061's own #1508 (`$ref->{k} =~ tr///` stopped dying) letting the
@@ -305,7 +306,7 @@ Text-Balanced-2.07-0	01_compile.t	PASS	1	0	0
 Text-Balanced-2.07-0	02_extbrk.t	PASS	18	0	0
 Text-Balanced-2.07-0	03_extcbk.t	PASS	103	0	0
 Text-Balanced-2.07-0	04_extdel.t	PASS	90	0	0
-Text-Balanced-2.07-0	05_extmul.t	FAIL	0	0	124
+Text-Balanced-2.07-0	05_extmul.t	PARTIAL	94	2	0
 Text-Balanced-2.07-0	06_extqlk.t	PARTIAL	228	8	0
 Text-Balanced-2.07-0	07_exttag.t	PARTIAL	88	16	0
 Text-Balanced-2.07-0	08_extvar.t	PASS	365	0	0
