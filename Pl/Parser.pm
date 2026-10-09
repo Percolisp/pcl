@@ -10611,6 +10611,7 @@ sub _extract_module_prototypes {
     # it: a module skipped for cost still gets the facts its overlay states.
     my $overlay = $self->_facts_overlay_path($module);
     $overlays->{$module} = $overlay;
+    _note_overlay_dep($module, $overlays);
     return $cache->{$module} =
       $overlay ? $self->_facts_overlay_env($module, $overlay) : undef;
   }
@@ -10730,13 +10731,19 @@ sub _facts_overlay_path {
   return $self->_find_module_file("PCL::Facts::$module");
 }
 
-# The overlay's resolution -- a file, or none -- is a dependency of every
-# walk that consulted it: an overlay that appears, changes or vanishes must
-# invalidate a cached walk (Pl::ProtoCache re-resolves `mod` dependencies).
+# A FOUND overlay is a dependency of every walk that consulted it: an overlay
+# that changes or vanishes invalidates a cached walk and a cached module
+# (Pl::ProtoCache and the script manifest re-resolve `mod` dependencies).  An
+# ABSENT one is NOT recorded: every module would add a `missing:` entry that
+# every cached run re-probes over every root at start-up (measured: the
+# script manifest, Pl/t/script-cache-01.t).  So a NEW overlay for a module
+# already cached takes effect at the next generation bump -- a shipped
+# overlay arrives with one -- or after the cache is cleared.
 sub _note_overlay_dep {
   my ($module, $overlays) = @_;
-  return if !exists $overlays->{$module};
-  Pl::ProtoCache::note_dep('mod', "PCL::Facts::$module", $overlays->{$module});
+  my $path = $overlays->{$module};
+  return if !defined $path;
+  Pl::ProtoCache::note_dep('mod', "PCL::Facts::$module", $path);
   return;
 }
 
@@ -10846,10 +10853,10 @@ sub register_unit_overlay {
   my $beside = substr($unit_file, 0, length($unit_file) - length($rel))
              . "PCL/Facts/$rel";
   my $overlay = -f $beside ? $beside : $self->_facts_overlay_path($package);
-  # A fact this transpile used, found or not: the module cache's sidecar
-  # re-resolves it, so a new or edited overlay re-transpiles the module.
-  Pl::ProtoCache::note_dep('mod', "PCL::Facts::$package", $overlay);
   return if !$overlay;
+  # A fact this transpile used (found only -- _note_overlay_dep says why): the
+  # module cache's sidecar re-checks it, so an edited overlay re-transpiles.
+  Pl::ProtoCache::note_dep('mod', "PCL::Facts::$package", $overlay);
   my $oenv = $self->_facts_overlay_env($package, $overlay);
   my $env  = $self->environment;
   for my $name (sort keys %{ $oenv->prototypes }) {
