@@ -28073,139 +28073,233 @@ buffer's fill-pointer; everything else falls back to file-length."
             (= cp #x205F)                              ; MEDIUM MATHEMATICAL SPACE
             (= cp #x3000)))))                          ; IDEOGRAPHIC SPACE
 
-(defun %p-split-string-pattern (p)
-  "The pattern p-split uses for the non-regex operand P (task #2661).  perl's
-   pp_split compiles ANY expression as a pattern — `split('\\.', $s)' splits on
-   a dot, `split('|', $s)' on every character — except the single-space string,
-   awk mode.  A regex object and \" \" come back unchanged; a string holding a
-   regex METACHARACTER becomes the same memoized match op an interpolated
-   `/$p/' builds (%p-regex-parts: compiled once per string, a bad pattern dies
-   there like perl's); a string without one stays a string, whose SEARCH is
-   the same answer at a fraction of the cost (`split(',', $s)' — the common
-   case keeps its fast path)."
+;;; ---------------------------------------------------------------------------
+;;; split -- ONE dispatch on the pattern's SHAPE (perf round 43, task #2980)
+;;;
+;;; perl's pp_split has three engines and so has this: awk mode (the string
+;;; " "), a FIXED-STRING scan (perl's fbm path, taken for any pattern that is
+;;; nothing but literal characters -- `split ','', `split /,/', `split '\\.'',
+;;; `split /\t/'), and the regex engine for everything else.  The shape is
+;;; decided once per call (and once per regex OP, cached in the op), and every
+;;; shape answers exactly what the regex engine would: a non-empty literal can
+;;; never match empty, so perl's minend rule has nothing to do there.
+;;; ---------------------------------------------------------------------------
+
+(declaim (inline %p-simple-char-string))
+(defun %p-simple-char-string (s)
+  "S as a (simple-array character (*)) -- S itself when it already is one, else
+   a copy (a fill-pointer buffer, a base string).  The typed split scans read
+   it with SCHAR."
+  (if (typep s '(simple-array character (*)))
+      s
+      (coerce s '(simple-array character (*)))))
+
+(declaim (inline %p-regex-meta-char-p))
+(defun %p-regex-meta-char-p (c)
+  "Is C a character that makes a split STRING a regex rather than a literal
+   (task #2661)?  A lone `}' is a literal in perl and in cl-ppcre alike."
+  (find c "\\^$.|?*+()[]{"))
+
+(defun %p-literal-of-regex-text (src)
+  "The string the perl regex text SRC matches when SRC is nothing but literal
+   characters, escaped punctuation (`\\.' `\\|' `\\\\' `\\/') and the escapes
+   \\t \\n \\r \\f \\e \\a -- or NIL for anything else (a metacharacter, a class
+   escape like \\d, \\x.., a backreference, an empty SRC).  NIL only means the
+   regex engine answers, so every doubtful spelling says NIL."
+  (let ((n (length src)) (i 0))
+    (declare (fixnum n i))
+    (when (zerop n) (return-from %p-literal-of-regex-text nil))
+    (with-output-to-string (out)
+      (loop while (< i n)
+            do (let ((c (char src i)))
+                 (cond
+                   ((char= c #\\)
+                    (when (>= (1+ i) n) (return-from %p-literal-of-regex-text nil))
+                    (let ((lit (%p-literal-escape-char (char src (1+ i)))))
+                      (if lit
+                          (write-char lit out)
+                          (return-from %p-literal-of-regex-text nil)))
+                    (incf i 2))
+                   ((%p-regex-meta-char-p c)
+                    (return-from %p-literal-of-regex-text nil))
+                   (t (write-char c out) (incf i))))))))
+
+(defun %p-literal-escape-char (e)
+  "The character the regex escape `\\E' matches when it is a LITERAL escape;
+   otherwise NIL (the regex engine
+   answers).  Escaped ASCII punctuation is itself; a letter, digit or `_'
+   after a backslash is a class, a backreference or a code -- not ours."
+  (case e
+    (#\t #\Tab) (#\n #\Newline) (#\r #\Return) (#\f #\Page)
+    (#\e (code-char 27)) (#\a (code-char 7))
+    (t (if (and (< (char-code e) 128) (not (alphanumericp e)) (char/= e #\_))
+           e
+           nil))))
+
+(defparameter +p-split-literal-safe-flags+
+  '(:g :c :o :s :m :u :a :aa :l :d :n :p)
+  "Regex flags that cannot change what a LITERAL pattern matches (/s /m touch
+   only `.' `^' `$', the charset flags only classes and case rules).  /i /x
+   /xx -- and any flag not named here -- send the pattern to the engine.")
+
+(defun %p-regex-split-literal (op)
+  "The literal string regex OP matches, or NIL; computed once per op and kept
+   in its %SPLIT-LITERAL slot (:unset until the first split asks)."
+  (let ((lit (p-regex-match-%split-literal op)))
+    (if (eq lit :unset)
+        (setf (p-regex-match-%split-literal op)
+              (let ((src (or (p-regex-match-source op) (p-regex-match-pattern op))))
+                (and (stringp src)
+                     (loop for (k) on (p-regex-match-modifiers op) by #'cddr
+                           always (member k +p-split-literal-safe-flags+))
+                     (%p-literal-of-regex-text src))))
+        lit)))
+
+(defun %p-split-shape (p)
+  "split's pattern operand P (unboxed) as (values SHAPE DATUM): :awk for the
+   single-space string; :literal and the string for a pattern that is only
+   literal characters (an empty string included: it splits into characters);
+   :regex and the match op otherwise.  perl's pp_split compiles ANY non-awk
+   expression as a pattern (task #2661): `split('\\.', $s)' splits on a dot,
+   `split('|', $s)' on every character.  A string holding a metacharacter
+   becomes the same memoized op an interpolated `/$p/' builds (%p-regex-parts:
+   a bad pattern dies there, like perl's)."
   (cond
-    ((or (p-regex-match-p p) (and (stringp p) (string= p " "))) p)
+    ((p-regex-match-p p)
+     (let ((lit (%p-regex-split-literal p)))
+       (if lit (values :literal lit) (values :regex p))))
+    ((and (stringp p) (string= p " ")) (values :awk nil))
     (t (let ((s (to-string p)))
-         (if (find-if (lambda (c) (find c "\\^$.|?*+()[]{")) s)
-             (%p-regex-parts s "")
-             s)))))
+         (if (not (find-if #'%p-regex-meta-char-p s))
+             (values :literal s)
+             (let ((lit (%p-literal-of-regex-text s)))
+               (if lit
+                   (values :literal lit)
+                   (values :regex (%p-regex-parts s "")))))))))
+
+(defun %p-split-literal (s pat max-fields result)
+  "Push onto RESULT the fields of S (non-empty) separated by the non-empty
+   literal PAT, at most MAX-FIELDS (the last takes the rest).  Typed scan:
+   the generic SEARCH was half of `split(',', $l)'."
+  (let ((s (%p-simple-char-string s))
+        (pat (%p-simple-char-string pat)))
+    (declare (type (simple-array character (*)) s pat) (optimize speed))
+    (let* ((n (length s)) (m (length pat)) (c0 (schar pat 0))
+           (start 0) (count 0))
+      (declare (fixnum n m start count))
+      (loop
+       (let ((pos (and (or (null max-fields) (< count (1- max-fields)))
+                       (loop for j fixnum from start to (- n m)
+                             when (and (char= (schar s j) c0)
+                                       (loop for k fixnum from 1 below m
+                                             always (char= (schar s (+ j k))
+                                                           (schar pat k))))
+                             return j))))
+         (if pos
+             (progn
+               (vector-push-extend (subseq s start pos) result)
+               (incf count)
+               (setf start (+ (the fixnum pos) m)))
+             (progn
+               (vector-push-extend (subseq s start) result)
+               (return result))))))))
+
+(defun %p-split-awk (s max-fields result)
+  "Perl's awk-mode split ' ' of S onto RESULT: runs of whitespace separate,
+   leading whitespace is skipped.  The full Unicode set (%perl-space-char-p),
+   so \\xA0/\\x85/\\x{2000}.. separate too.  Opening a word only on a non-space
+   skips leading whitespace and collapses runs; trailing whitespace closes the
+   final word with nothing after it."
+  (let ((s (%p-simple-char-string s)) (in-word nil) (word-start 0))
+    (declare (type (simple-array character (*)) s) (fixnum word-start))
+    (loop for i fixnum from 0 below (length s)
+          for c = (schar s i)
+          do (cond
+               ((and (not in-word) (not (%perl-space-char-p c)))
+                (setf in-word t word-start i))
+               ((and in-word (%perl-space-char-p c))
+                (when (or (null max-fields) (< (length result) (1- max-fields)))
+                  (vector-push-extend (subseq s word-start i) result)
+                  (setf in-word nil)))))
+    (when in-word
+      (vector-push-extend (subseq s word-start) result))
+    result))
+
+(defun %p-split-chars (s max-fields result)
+  "split with an EMPTY literal pattern: S's characters onto RESULT, the last
+   of MAX-FIELDS taking the rest."
+  (loop for c across s
+        for i from 0
+        do (if (and max-fields (>= i (1- max-fields)))
+               (progn (vector-push-extend (subseq s i) result) (return))
+               (vector-push-extend (string c) result)))
+  result)
+
+(defun %p-split-empty-regex (s max-fields keep-trailing)
+  "The fields of `split //' on S, as a list.  Perl also matches at the end
+   (giving a trailing \"\"): limit<0 (KEEP-TRAILING) -> every char + \"\";
+   limit>0 and >= the length -> the same; limit>0 and below it -> the first
+   (limit-1) chars and the rest; no limit -> the chars."
+  (let* ((n (length s))
+         (chars (loop for c across s collect (string c))))
+    (cond
+      ((and max-fields (<= max-fields n))
+       (append (subseq chars 0 (1- max-fields))
+               (list (subseq s (1- max-fields)))))
+      (keep-trailing (append chars (list "")))
+      (t chars))))
+
+(defun %p-split-regex (op s max-fields keep-trailing result)
+  "Push onto RESULT the fields of S split by the regex OP (capture groups
+   included, perl's way; an unset group is undef).  `split /^/' is `/^/m'.
+   cl-ppcre's split drives the loop through a scanner wrapped in perl's
+   ALWAYS-minend rule (pp_split, task #1719): a separator may not be an empty
+   match at the field's own start, and where a longer match is available there
+   perl takes it -- `split /|x/, \"xax\"' is (\"\", \"a\").  Its :limit 0 drops
+   trailing empty fields, a large one keeps them."
+  (let* ((raw-pat (p-regex-match-pattern op))
+         (modifiers (p-regex-match-modifiers op))
+         (ppcre-options (build-ppcre-options modifiers))
+         (pat (if (and (string= raw-pat "^") (not (getf modifiers :m)))
+                  "(?m)^"
+                  raw-pat))
+         (ppcre-limit (cond (max-fields max-fields)
+                            (keep-trailing 1000000)
+                            (t 0)))
+         (parts (if (zerop (length pat))
+                    (%p-split-empty-regex s max-fields keep-trailing)
+                    (let ((scanner (%pcl-create-scanner pat ppcre-options)))
+                      (cl-ppcre:split
+                       (%p-global-scanner scanner (cons pat ppcre-options) nil t)
+                       s :limit ppcre-limit :with-registers-p t)))))
+    (dolist (p parts result)
+      (vector-push-extend (or p *p-undef*) result))))
 
 (defun p-split (pattern str &optional limit)
   "Perl split - split string by pattern.
    Note: pattern and str are NOT optional here - PExpr.pm adds defaults
-   (pattern=' ', str=$_) at parse time so codegen always provides both."
-  (let* ((s (to-string str))
-         ;; Unbox pattern (may be stored in a variable as a p-box); a STRING
-         ;; pattern is a regex in perl (#2661), see %p-split-string-pattern.
-         (pattern (%p-split-string-pattern
-                   (if (p-box-p pattern) (p-box-value pattern) pattern)))
-         (limit-num (if limit (truncate (to-number limit)) nil))
-         (keep-trailing (and limit-num (/= limit-num 0)))
-         (max-fields (if (and limit-num (> limit-num 0)) limit-num nil))
-         (result (make-array 0 :adjustable t :fill-pointer 0)))
-    ;; Empty input string always gives empty result (no fields)
-    (unless (zerop (length s))
-      (cond
-        ;; Regex pattern from p-regex or p-qr (possibly stored in variable)
-        ((p-regex-match-p pattern)
-         (let* ((raw-pat (p-regex-match-pattern pattern))
-                (modifiers (p-regex-match-modifiers pattern))
-                (ppcre-options (build-ppcre-options modifiers))
-                ;; Perl special case: split /^/ is treated as split /^/m
-                (pat (if (and (string= raw-pat "^") (not (getf modifiers :m)))
-                         "(?m)^"
-                         raw-pat))
-                ;; CL-PPCRE: 0 removes trailing empty, large number keeps them
-                ;; Perl: limit=0/nil removes, limit<0 keeps, limit>0 is max fields
-                (ppcre-limit (cond (max-fields max-fields)    ; limit > 0
-                                   (keep-trailing 1000000)     ; limit < 0, keep trailing
-                                   (t 0)))                     ; no limit, remove trailing
-                (parts (if (zerop (length pat))
-                           ;; Empty regex: split into characters with limit handling.
-                           ;; Perl also matches at the end (giving trailing ""), so:
-                           ;; - limit<0 (keep-trailing): all chars + ""
-                           ;; - limit>0 and >= str len: all chars + ""
-                           ;; - limit>0 and < str len: first (limit-1) chars + rest
-                           ;; - no limit: just chars
-                           (let* ((n (length s))
-                                  (chars (loop for c across s collect (string c))))
-                             (cond
-                               ((and max-fields (<= max-fields n))
-                                ;; Split at most max-fields: first (max-fields-1) chars
-                                ;; individually, remainder as one final field
-                                (append (subseq chars 0 (1- max-fields))
-                                        (list (subseq s (1- max-fields)))))
-                               (keep-trailing
-                                ;; No binding limit (or limit > n): all chars + trailing ""
-                                (append chars (list "")))
-                               (t
-                                ;; No limit: just individual chars
-                                chars)))
-                           ;; Non-empty pattern: use CL-PPCRE split
-                           ;; Must create scanner first to apply modifiers (m, i, s, x)
-                           ;; since cl-ppcre:split doesn't accept modifier keywords directly.
-                           ;; Use :with-registers-p t so capture groups in pattern
-                           ;; are included in results (Perl behavior).
-                           ;; The scanner is wrapped in perl's ALWAYS-minend rule
-                           ;; (pp_split, task #1719): a separator may not be an
-                           ;; empty match at the field's own start, and where a
-                           ;; longer match is available there perl takes it —
-                           ;; `split /|x/, "xax"` is ("", "a"), not ("x","a","x").
-                           (let ((scanner (%pcl-create-scanner pat ppcre-options)))
-                             (cl-ppcre:split
-                              (%p-global-scanner scanner (cons pat ppcre-options)
-                                                 nil t)
-                              s :limit ppcre-limit :with-registers-p t)))))
-           (dolist (p parts)
-             (vector-push-extend (or p *p-undef*) result))))
-        ;; Special whitespace splitting: " " splits on runs of whitespace and strips
-        ;; leading whitespace (Perl's awk-mode split ' ').  Uses the full Unicode
-        ;; whitespace set via %perl-space-char-p (so \xA0/\x85/\x{2000}.. separate too).
-        ;; Iterating the raw string and only opening a word on a non-space naturally
-        ;; skips leading whitespace and collapses runs; trailing whitespace closes the
-        ;; final word with nothing after it.
-        ((and (stringp pattern) (string= pattern " "))
-         (let ((in-word nil) (word-start 0))
-           (loop for i from 0 below (length s)
-                 for c = (char s i)
-                 do (cond
-                      ((and (not in-word) (not (%perl-space-char-p c)))
-                       (setf in-word t word-start i))
-                      ((and in-word (%perl-space-char-p c))
-                       (when (or (null max-fields) (< (length result) (1- max-fields)))
-                         (vector-push-extend (subseq s word-start i) result)
-                         (setf in-word nil)))))
-           (when in-word
-             (vector-push-extend (subseq s word-start) result))))
-        ;; Literal string pattern
-        (t
-         (let* ((pat (to-string pattern))
-                (pat-len (length pat))
-                (start 0))
-           (if (zerop pat-len)
-               ;; Empty pattern: split into characters
-               (loop for c across s
-                     for i from 0
-                     do (if (and max-fields (>= i (1- max-fields)))
-                            (progn (vector-push-extend (subseq s i) result) (return))
-                            (vector-push-extend (string c) result)))
-               ;; Normal literal pattern
-               (loop
-                (let ((pos (search pat s :start2 start)))
-                  (if (and pos (or (null max-fields) (< (length result) (1- max-fields))))
-                      (progn
-                        (vector-push-extend (subseq s start pos) result)
-                        (setf start (+ pos pat-len)))
-                      (progn
-                        (vector-push-extend (subseq s start) result)
-                        (return))))))))) ; end cond
-      ) ; end unless (zerop (length s))
-    ;; Remove trailing empty fields unless limit specified
-    (unless keep-trailing
-      (loop while (and (> (length result) 0)
-                       (zerop (length (aref result (1- (length result))))))
-            do (vector-pop result)))
-    result))
+   (pattern=' ', str=$_) at parse time so codegen always provides both.
+   The pattern's SHAPE picks the engine (%p-split-shape); an empty subject
+   has no fields; trailing empty fields go unless a non-zero LIMIT keeps them."
+  (let ((s (to-string str)))
+    (multiple-value-bind (shape datum)
+        (%p-split-shape (if (p-box-p pattern) (p-box-value pattern) pattern))
+      (let* ((limit-num (if limit (truncate (to-number limit)) nil))
+             (keep-trailing (and limit-num (/= limit-num 0)))
+             (max-fields (if (and limit-num (> limit-num 0)) limit-num nil))
+             (result (make-array 8 :adjustable t :fill-pointer 0)))
+        (when (plusp (length s))
+          (ecase shape
+            (:regex (%p-split-regex datum s max-fields keep-trailing result))
+            (:awk (%p-split-awk s max-fields result))
+            (:literal (if (zerop (length datum))
+                          (%p-split-chars s max-fields result)
+                          (%p-split-literal s datum max-fields result)))))
+        (unless keep-trailing
+          (loop while (and (> (length result) 0)
+                           (zerop (length (aref result (1- (length result))))))
+                do (vector-pop result)))
+        result))))
 
 (defun %p-tick-package-seps (name)
   "Rewrite the Perl-4 `'` package separator to `::` in a symbolic name:
@@ -33546,7 +33640,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; p-regex-from-parts per ITERATION, and building a fresh derived struct
   ;; each time defeated the %compiled cache.  The variant for "" (or any
   ;; flagless modifier string) is the struct itself.
-  %op-variants)
+  %op-variants
+  ;; %SPLIT-LITERAL (task #2980): the literal string this op matches when its
+  ;; pattern is only literal characters (split then scans for it, perl's
+  ;; fixed-string path), NIL when it is not; :unset until split first asks.
+  (%split-literal :unset))
 
 (defstruct p-subst-op
   "Substitution operation s///"
