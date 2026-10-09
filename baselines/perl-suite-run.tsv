@@ -1652,6 +1652,11 @@
 #       ("[at t/op/gv.t line 105]", "line 106", "line 107").  Its 4 aborted
 #       forms ("Died at gv.t line N") are unchanged and PRE-EXISTING -- the
 #       row already carried them.
+#     op/smartmatch.t   C 55/295 -> 57/293 (s513d, #2870).  The rows "FALSE ~~ $obj dies"
+#       and "FALSE ~~ $str_obj dies": the file's `sub FALSE() { 0 }` is now visible to
+#       the string eval that runs each case, so `FALSE` is a TERM there as in perl;
+#       the two leave baselines/perl-suite-expected-rows.tsv through --bless-rows of
+#       this one file.  parallel and serial runs agree.
 base/cond.t	4	0	4	0	OK		0
 base/if.t	2	0	2	0	OK		0
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1985,7 +1990,7 @@ op/signatures.t	1245	1	916	295	DIFF	s500a: #2533 -- row 1 `is prototype(\&t000),
 op/sigsystem.t	4	0	4	0	OK	s502e #2537: a list-valued `use constant TRUE => ($^X, q(-e), q(exit 0))` returns the whole list, so system(TRUE) is the three-argument system again (was DIFF 2/2 since s501b #2082)	0
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
-op/smartmatch.t	353	0	55	295	XDIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at smartmatch.t line N  | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	0
+op/smartmatch.t	353	0	57	293	XDIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at smartmatch.t line N  | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	0
 op/sort.t	205	0	185	20	DIFF	s501t #155: 183/22 -> 185/20 (overload sort result; EXTEND by pp_sort on a tied array)	0
 op/splice.t	34	0	34	0	OK		0
 op/split.t	219	0	214	5	DIFF	s506f: 213/6 -> 214/5, split.t line 99 (-D: perl's non-debugging message)	0

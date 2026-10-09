@@ -1316,8 +1316,6 @@ op/smartmatch.t	@tied_nums ~~ @nums matches
 op/smartmatch.t	@tied_nums ~~ \@nums matches
 op/smartmatch.t	@tied_nums ~~ undef does not match
 op/smartmatch.t	FALSE ~~ "0" matches
-op/smartmatch.t	FALSE ~~ $obj dies
-op/smartmatch.t	FALSE ~~ $str_obj dies
 op/smartmatch.t	FALSE ~~ sub{not shift} matches
 op/smartmatch.t	NOT_DEF ~~ sub{not shift} matches
 op/smartmatch.t	NOT_DEF ~~ undef matches
