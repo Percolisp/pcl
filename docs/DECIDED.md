@@ -373,6 +373,17 @@ not-supported.md → only then probe.*
 - **lcbytes NOT built** (#2981's record): no runtime lever of comparable size -- its largest frame is the nested `.` chain (an emission matter), the case map is already one pass (#2535).
 - Filed #2982 (pre-existing silent wrong: `^` under /m matches after a trailing newline at the END of the string).
 
+## s513f (2026-10-09, Opus) -- a sub head under the signatures feature is a signature whatever its shape (#2872); `use bigint` / `use bignum` through statically-read constant handlers, bigrat announced (#2874); fillers #2877 #2960 #2982 #2924 #2922 #2921
+
+- **signatures ON => every head is a signature (#2872)**: ONE predicate `Pl::Parser::head_is_signature` for every classifier; the positions PPI cannot see are the pragma's OWN line and a module whose `import` calls `feature->import('signatures')` (an import EFFECT, `module_import_effects` -> `Environment::import_effects`, lexical from the `use`); ir-spec §5; guard `Pl/t/sig-vs-proto-01.t`.  `sub f ($$)` / `($;$)` under the feature are perl SYNTAX ERRORS, not shapes to support.
+- **constant handlers (#2874)**: a module whose `import` calls `overload::constant KIND => \&NAME` turns each literal of KIND in the `use`'s scope into `NAME('TEXT')` (`Parser2::_apply_constant_handlers`, a token pass before every other); `lib/bigint.pm`, `lib/bignum.pm` are written so; `use bigrat` ANNOUNCED (#3000 Math::BigRat); an anonymous handler stays #2610's family; ir-spec §5, not-supported.md; guard `Pl/t/bigint-01.t`.
+- **`use M ()` calls no import** -> no import effect applies (`Pl::Parser::include_calls_import`, found by emission-ab over lib/).
+- **A range numifies its endpoints from the BOX** (an object's `0+` overload), not from the unboxed value (#2874).
+- **'not-yet' outranks the ALL-CAPS call guess**, and a 'not-yet' word before `+`/`-` is a term (#2877; one helper `_all_caps_guess_here`).
+- **An imported sub before `$var` is a call, not indirect object** (#2960: `_is_known_callable` same-package mode reads the import's prototype record).
+- **Perl's MBOL**: `^` under /m never matches after a newline that ends the string -- rewritten in the parse tree in PCL's scanner wrapper, never in cl-ppcre (#2982).
+- **read / sysread / recv write through an element or deref BUFFER place** (`%p-with-buffer-place`, #2921); truncate resolves a glob / glob ref (#2924); opendir / seek set `$!` (#2922).
+
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
 - **A plain signature IS the classic spelling plus its arity check** (#2514, Kind-A `sig-classic`): `Parser2::_normalize_signature_subs` rewrites the TREE (signature removed, `my (PARAMS) = @_;` first) before every rename/scope pass; the arity is `(p-check-arity …)` in `p-args-body` or `(:arity …)` in `p-raw-params`; the call sites keep the signature's prototype record.  Defaults, placeholders, `()`, multi-line, `state`, and any body observing `@_` keep v1.  ir-spec §5.2.
 - **ONE "@_ is observed" predicate `Parser2::_body_observes_args`** (@_, $_[, shift, pop, goto, `&name;`, string eval) for the raw path, the leading-shift run, `args-copy` and the signature rewrite (#2572: the two inline regexes missed `&name;` and `pop` -- silent wrong).
