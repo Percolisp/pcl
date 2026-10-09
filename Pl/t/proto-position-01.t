@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 15;
 
 # A module exporting a `(\@)` sub, for the import-position rows.
 my $libdir = tempdir(CLEANUP => 1);
@@ -136,3 +136,14 @@ both_agree('my @a = (1, 2, 3); print mx(@a), "\n"; use T2871::M; print mx(@a), "
 
 both_agree('my @a = (1, 2, 3); use T2871::M; print mx(@a), "\n";',
            '... and a `use` above every call (unchanged)');
+
+# ---- #2877: a `use constant` / sub BELOW is unknown to perl here --------
+
+both_agree(q{my $v1 = PI * 2; my $v2 = PI + 2; my $v3 = PI; use constant PI => 3; print "$v1 $v2 $v3\n";},
+           "`use constant PI` below: `PI * 2`, `PI + 2`, `PI` are the string (#2877)");
+
+both_agree(q{my $z = Q; use constant { Q => 7 }; print "$z ", Q, "\n";},
+           "a hash-form `use constant` below: the string above, the value after");
+
+both_agree(q{my $q = foo + 2; my $r = foo - 1; my $s = foo(1); sub foo { 10 + ($_[0] // 0) } print "$q $r $s\n";},
+           "a sub below: `foo + 2` is binary, `foo(1)` is a call");

@@ -4169,7 +4169,12 @@ sub handle_subcalls {
       my $next = $e->[$i + 1];
       my $next_op = $self->is_token_operator($next);
       if (defined $next_op) {
-        if ($self->_is_binary_only_op($next)) {
+        # A name this file declares BELOW (`use constant PI` / `sub foo`
+        # further down) is unknown to perl here, so a following `+`/`-` is
+        # BINARY: `PI + 2` is "PI" + 2 (#2877).
+        if ($self->_is_binary_only_op($next)
+            || (($next_op eq '+' || $next_op eq '-')
+                && $self->_bareword_callable_here($sub_name, $now) eq 'not-yet')) {
           # Binary-only operator - treat bareword as zero-arg function.
           # BUT: if the word is not a known function (not in known_no_of_params,
           # not declared in Environment), it's an unknown bareword string literal
@@ -4181,7 +4186,7 @@ sub handle_subcalls {
           # Only mixed-case unknown words (like Bare in !Bare) are string literals.
           # ASCII-ONLY on purpose — see all_caps_call_guess's header for why
           # this one does not share the Unicode widening (#820).
-          my $is_all_caps_bop = Pl::Environment::all_caps_call_guess($sub_name);
+          my $is_all_caps_bop = _all_caps_guess_here($sub_name, $verdict_bop);
           # Under strict-subs an undeclared bareword is a COMPILE ERROR, so by
           # principle 9 anything that compiles here is a CALL, never a string —
           # a sub installed through a dynamic glob in a BEGIN loop is invisible
@@ -4635,7 +4640,7 @@ sub handle_subcalls {
       }
       # ALL-CAPS words are filehandles/constants — leave as funcalls.  ASCII
       # only; all_caps_call_guess's header says why (#820).
-      my $is_all_caps_fb = Pl::Environment::all_caps_call_guess($sub_name);
+      my $is_all_caps_fb = _all_caps_guess_here($sub_name, $callable_fb);
       unless ($callable_fb eq 'yes' || $is_all_caps_fb) {
         my $prev_is_unary     = 0;
         my $prev_is_value_op  = 0;
@@ -5918,6 +5923,17 @@ sub _is_known_callable {
 #   'no'      — nothing this compiler can see.  That is an ABSENCE of
 #               knowledge, not evidence: the name may be a builtin missing from
 #               the table, a `goto` label, or a sub from a `require`d file.
+# The ALL-CAPS call guess (DIR, FILE, MAXSIZE: filehandles or constants are
+# left as calls) for a name whose callable VERDICT is already known.  A GUESS
+# never outranks 'not-yet', which is positive knowledge: a `use constant PI`
+# BELOW this point makes `PI` here the string perl reads (#2877).  The one
+# copy both bareword sites ask.
+sub _all_caps_guess_here {
+  my ($name, $verdict) = @_;
+  return 0 if $verdict eq 'not-yet';
+  return Pl::Environment::all_caps_call_guess($name) ? 1 : 0;
+}
+
 sub _bareword_callable_here {
   my ($self, $name, $tok) = @_;
   return 'yes' if exists $self->known_no_of_params->{$name};
