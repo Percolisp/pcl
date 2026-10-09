@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 21;
 
 sub write_pl {
     my ($code) = @_;
@@ -141,3 +141,65 @@ both_agree('use Scalar::Util qw(dualvar isdual); sub mk { dualvar(0, "abc") }
             sub s1 ($) { $_[0] = "w"; 1 } s1(scalar($d));
             print isdual(dualvar(0, "abc")) ? 1 : 0, idp(mk()), " d=$d\n";',
            'scalar() of a dualvar is the dualvar: isdual through a `($)` slot, and it aliases');
+
+# ---- the WIRE (s513d): both ends of the eval protocol agree, or say so ---
+#
+# The final bench of s513d HUNG for 68 minutes: tools/bench-exec.pl's runtime
+# A/B loaded the tree's program (whose preamble names the TREE's pl2cl) into
+# the BASE runtime, which sent the six-field request of before #2870 to a
+# seven-field server.  The server waited for a line end inside the eval TEXT,
+# the runtime for the answer.  Every request now begins with the wire tag and
+# every status line carries it (*p-eval-wire* / $EVAL_WIRE); a mismatch is an
+# error at once.  The texts below carry a per-run token, so the eval disk
+# cache cannot answer them and each one really crosses the wire.
+
+my $tok = "t$$" . time;
+
+both_agree("package Nope; my \$v = eval q{my \$t = '$tok'; 6 * 7}; print \"\$v\\n\"; print \"err: \$@\\n\" if \$@;",
+           'an eval from a package with NO prototyped subs crosses the wire (an empty pairs line is a line)');
+
+{
+    my $subs = join '', map { sprintf 'sub a_rather_long_prototyped_name_%03d ($) { "p%d:$_[0]" } ', $_, $_ } 1 .. 300;
+    both_agree("$subs print eval(q{my \$t = '$tok'; join '|', a_rather_long_prototyped_name_123 1, 2}), \"\\n\"; print \"err: \$@\\n\" if \$@;",
+               'a pairs line of several KB (300 prototyped subs) crosses the wire');
+}
+
+# The server's end: a request from a runtime of ANOTHER version (main's six
+# fields, untagged) is answered at once with an error naming both -- measured
+# without SBCL, as the old runtime would see it.
+{
+    use IPC::Open2;
+    my $pid = open2(my $out, my $in, $^X, $pl2cl, '--server');
+    binmode $in, ':utf8'; binmode $out, ':utf8';
+    my $code = '1 + 1';
+    print $in join("\n", 'main', '', '', '', length $code), "\n", $code;
+    $in->flush;
+    my ($st, $body) = ('(no answer in 30 s)', '');
+    eval {
+        local $SIG{ALRM} = sub { die "alarm\n" };
+        alarm 30;
+        $st = <$out>; my $n = <$out>; chomp($st, $n); read($out, $body, $n);
+        alarm 0;
+    };
+    kill 'TERM', $pid; waitpid $pid, 0;
+    ok($st =~ /^err PCL-EVAL-WIRE / && $body =~ /different PCL trees/,
+       "the server answers an untagged (other-version) request with an error at once (got '$st')");
+}
+
+# The runtime's end: an eval server that answers WITHOUT the tag (an older
+# pl2cl) makes the eval fail with $@ naming the mismatch -- never a wait.
+{
+    my ($sfh, $fake) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $sfh 'my $l = <STDIN>; $| = 1; print "ok\n1\n1"; sleep 60;', "\n";
+    close $sfh;
+    my $cl = PCLCore::transpile("$pl2cl " . write_pl(
+        "my \$r = eval q{my \$t = '$tok'; 1 + 1}; print defined \$r ? \"r=\$r\\n\" : \"died: \$@\";"));
+    $cl =~ s{\(setf pcl::\*pcl-pl2cl-path\* #P"[^"]*"\)}{(setf pcl::*pcl-pl2cl-path* #P"$fake")}
+        or die "no pl2cl-path line in the preamble";
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl;
+    close $cl_fh;
+    my $output = `timeout 120 sbcl @sbcl_rt --load $cl_file 2>&1`;
+    like($output, qr/died: PCL: the eval server .* answered "ok"/,
+         'the runtime refuses an untagged answer: $@ names the mismatch');
+}

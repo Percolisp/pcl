@@ -744,12 +744,24 @@ sub build_eval_preamble {
   return "(p-defpackage $desig)\n(in-package $desig)";
 }
 
+# THE EVAL WIRE'S VERSION TAG -- cl/pcl-runtime.lisp's *p-eval-wire*, which
+# says why (s513d: a runtime and a pl2cl from two trees desynchronised on the
+# field count and BOTH waited, 68 minutes).  The first line of every request
+# must equal it and every status line carries it; bump BOTH together whenever
+# a field is added, removed or reordered.
+our $EVAL_WIRE = 'PCL-EVAL-WIRE 2';
+
 sub _run_server {
   # Persistent transpiler server: read requests from stdin, write CL to stdout.
   # Character-based protocol (UTF-8 on both sides, lengths = char counts):
-  #   Request:  "<pkg>\n<captures>\n<features>\n<protos>\n<deps-path>\n<char-count>\n<perl-code: exactly char-count chars>"
-  #   Response: "ok\n<char-count>\n<cl-code: exactly char-count chars>"
-  #          or "err\n<char-count>\n<error: exactly char-count chars>"
+  #   Request:  "<wire-tag>\n<pkg>\n<captures>\n<features>\n<protos>\n<deps-path>\n<char-count>\n<perl-code: exactly char-count chars>"
+  #   Response: "ok <wire-tag>\n<char-count>\n<cl-code: exactly char-count chars>"
+  #          or "err <wire-tag>\n<char-count>\n<error: exactly char-count chars>"
+  # Every field is ONE line, an empty one included; <wire-tag> is $EVAL_WIRE.
+  # A request whose first line is not the tag comes from a runtime that speaks
+  # another version: it is answered "err <wire-tag>" naming both, and the
+  # server EXITS -- it cannot know where that client's request ends, so reading
+  # on would wait inside the eval text for a line end (the s513d hang).
   # <deps-path>, when non-empty, is where this transpile's DEPENDENCY MANIFEST
   # goes (task #1200): the runtime's string-eval disk cache keeps the emitted
   # CL beside a `.deps` sidecar and validates it with exactly the reader the
@@ -810,6 +822,17 @@ sub _run_server {
   alarm 1;
 
   while (1) {
+    my $tag = <STDIN>;
+    last unless defined $tag;
+    chomp $tag;
+    if ($tag ne $EVAL_WIRE) {
+      my $msg = "PCL: the eval server $0 speaks '$EVAL_WIRE' but the request "
+              . "began '$tag': the runtime and pl2cl come from different PCL trees\n";
+      print STDOUT "err $EVAL_WIRE\n" . length($msg) . "\n$msg";
+      STDOUT->flush;
+      last;
+    }
+
     my $pkg = <STDIN>;
     last unless defined $pkg;
     chomp $pkg;
@@ -869,7 +892,7 @@ sub _run_server {
       $body   = $cl;
     }
 
-    print STDOUT "$status\n" . length($body) . "\n$body";
+    print STDOUT "$status $EVAL_WIRE\n" . length($body) . "\n$body";
     STDOUT->flush;
   }
 }

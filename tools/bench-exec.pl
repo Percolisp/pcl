@@ -399,6 +399,20 @@ my $SBCL   = sbcl_prefix_str(core => $CORE, runtime => $RT);
 my $SBCL_B = defined $CORE_B
            ? sbcl_prefix_str(core => $CORE_B, runtime => $RT_B) : undef;
 
+# B's EVAL SERVER (s513d).  A program's preamble names the pl2cl that
+# transpiled it (*pcl-pl2cl-path*), and a string eval the program runs is
+# compiled by THAT pl2cl's --server.  The B runtime must talk to its own tree's
+# server: the eval wire is versioned (cl/pcl-runtime.lisp *p-eval-wire*), and a
+# base runtime driving this tree's server hung the s513d bench for 68 minutes
+# before the tag existed (it is an immediate error now).  So when B's runtime
+# sits in a tree (<X>/cl/pcl-runtime.lisp beside <X>/pl2cl), B runs a copy of
+# the program whose preamble names <X>/pl2cl.  The emission stays the shared
+# one; only which compiler answers B's string evals changes.
+my $PL2CL_B;
+if (defined $RT_B && $RT_B =~ m{\A(.*)/cl/pcl-runtime\.lisp\z} && -x "$1/pl2cl") {
+  $PL2CL_B = "$1/pl2cl";
+}
+
 # INTERLEAVED best-of-K over several (command, N) series at once.  Every series
 # gets its round-r sample before any series gets its round-(r+1) sample, so a
 # drift in machine load during the row — a sibling agent starting a sweep — hits
@@ -459,7 +473,17 @@ for my $b (@benches) {
   close $lfh;
   system("$PL2CL $pfile > $lfile 2>/dev/null");
   my $pcl_cmd = "$SBCL --load $lfile";
-  my $pcl_cmd_b = defined $SBCL_B ? "$SBCL_B --load $lfile" : undef;
+  my $lfile_b = $lfile;
+  if (defined $PL2CL_B) {
+    open my $in, '<', $lfile or die "bench-exec: $lfile: $!";
+    my $text = do { local $/; <$in> };
+    close $in;
+    $text =~ s{\(setf pcl::\*pcl-pl2cl-path\* #P"[^"]*"\)}{(setf pcl::*pcl-pl2cl-path* #P"$PL2CL_B")};
+    (my $bfh, $lfile_b) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $bfh $text;
+    close $bfh;
+  }
+  my $pcl_cmd_b = defined $SBCL_B ? "$SBCL_B --load $lfile_b" : undef;
 
   # Verify before timing (#814): both engines must print the same thing at
   # N_big, and PCL must exit 0.  Otherwise the row is BROKEN, not fast.

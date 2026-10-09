@@ -25820,6 +25820,43 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (> (length output) 0)
       output)))
 
+;;; THE EVAL WIRE'S VERSION TAG (s513d, the bench hang).  The request and the
+;;; response of the `pl2cl --server` protocol are newline-separated FIELDS
+;;; followed by a counted body, so the two ends must agree on the NUMBER of
+;;; fields -- and they come from two files (this runtime, pl2cl) that a run can
+;;; take from two different trees: a program's preamble names the pl2cl that
+;;; transpiled it (*PCL-PL2CL-PATH*), and the runtime is whichever core loads
+;;; it.  #2870 added the prototype-pairs field; tools/bench-exec.pl's runtime
+;;; A/B then ran the base runtime (six fields) against the tree's server (seven),
+;;; and the server waited for the end of a line inside the eval TEXT while the
+;;; runtime waited for the answer: 68 minutes at 0 % CPU.  So the first line of
+;;; every request and the status line of every response carry this tag, both
+;;; ends compare it, and a mismatch is an ERROR naming both versions, never a
+;;; wait.  Bump it (here AND in pl2cl's $EVAL_WIRE) whenever a field is added,
+;;; removed or reordered.
+(defparameter *p-eval-wire* "PCL-EVAL-WIRE 2"
+  "The `pl2cl --server` protocol version; pl2cl's $EVAL_WIRE must equal it.")
+
+(defun %p-wire-field (stream what text)
+  "Write TEXT as one request FIELD line on STREAM.  A field is ended by the
+   newline, so a newline INSIDE one would shift every later field by a line --
+   the desync the tag exists to catch -- and is refused naming WHAT."
+  (when (find #\Newline text)
+    (error "PCL: eval request field ~A contains a newline: ~S" what text))
+  (write-string text stream)
+  (write-char #\Newline stream))
+
+(defun %p-transpiler-desync (proc status)
+  "The server answered STATUS, which is not a tagged status line: it speaks
+   another protocol version (or the stream is out of step).  The process can
+   never be resynchronised, so it is killed and forgotten."
+  (ignore-errors (sb-ext:process-kill proc 15))
+  (ignore-errors (sb-ext:process-close proc))
+  (setf *p-transpiler-process* nil)
+  (error "PCL: the eval server ~A answered ~S, not \"ok ~A\" or \"err ~A\": ~
+          the runtime and pl2cl come from different PCL trees"
+         *pcl-pl2cl-path* status *p-eval-wire* *p-eval-wire*))
+
 (defun p-ensure-transpiler ()
   "Return the live transpiler process, starting or restarting it if needed."
   (unless *pcl-pl2cl-path*
@@ -25864,34 +25901,36 @@ buffer's fill-pointer; everything else falls back to file-length."
          (in       (sb-ext:process-input  proc))
          (out      (sb-ext:process-output proc))
          (code-len (length perl-code)))
-    ;; Send request: pkg\n captures\n features\n protos\n deps-path\n char-count\n code
-    (write-string pkg-name in)
-    (write-char #\Newline in)
-    (write-string (format nil "~{~A~^ ~}" capture-names) in)
-    (write-char #\Newline in)
-    (write-string (format nil "~{~A~^ ~}" features) in)
-    (write-char #\Newline in)
-    (write-string (format nil "~{~A~^ ~}" protos) in)
-    (write-char #\Newline in)
-    (write-string (or deps-path "") in)
-    (write-char #\Newline in)
-    (write-string (princ-to-string code-len) in)
-    (write-char #\Newline in)
+    ;; Send request: wire-tag\n pkg\n captures\n features\n protos\n
+    ;; deps-path\n char-count\n code.  Every field is a line, an EMPTY one
+    ;; included, and the tag comes first (*P-EVAL-WIRE*).
+    (%p-wire-field in "tag" *p-eval-wire*)
+    (%p-wire-field in "package" pkg-name)
+    (%p-wire-field in "captures" (format nil "~{~A~^ ~}" capture-names))
+    (%p-wire-field in "features" (format nil "~{~A~^ ~}" features))
+    (%p-wire-field in "prototypes" (format nil "~{~A~^ ~}" protos))
+    (%p-wire-field in "deps-path" (or deps-path ""))
+    (%p-wire-field in "char-count" (princ-to-string code-len))
     (write-string perl-code in)
     (finish-output in)
-    ;; Read response: status\n char-count\n body
-    (let* ((status   (read-line out))
-           (resp-len (parse-integer (read-line out)))
-           (resp-buf (make-string resp-len)))
-      (read-sequence resp-buf out)
-      (if (string= status "ok")
-          resp-buf
-          ;; The transpiler's own message IS the error — do not wrap it in a
-          ;; host-shaped prefix.  For `eval "..."` this text becomes $@, and
-          ;; E4.1 §5a.3 requires that to read as an ordinary Perl error the
-          ;; program can trap ("PCL: unsupported in string eval: …"), not as
-          ;; a note from a subprocess the Perl program never asked about.
-          (error "~A" (string-right-trim '(#\Newline) resp-buf))))))
+    ;; Read response: "ok <tag>" or "err <tag>"\n char-count\n body.
+    (let* ((line     (read-line out nil ""))
+           (sp       (position #\Space line))
+           (status   (if sp (subseq line 0 sp) line)))
+      (unless (and sp (string= (subseq line (1+ sp)) *p-eval-wire*)
+                   (member status '("ok" "err") :test #'string=))
+        (%p-transpiler-desync proc line))
+      (let* ((resp-len (parse-integer (read-line out)))
+             (resp-buf (make-string resp-len)))
+        (read-sequence resp-buf out)
+        (if (string= status "ok")
+            resp-buf
+            ;; The transpiler's own message IS the error — do not wrap it in a
+            ;; host-shaped prefix.  For `eval "..."` this text becomes $@, and
+            ;; E4.1 §5a.3 requires that to read as an ordinary Perl error the
+            ;; program can trap ("PCL: unsupported in string eval: …"), not as
+            ;; a note from a subprocess the Perl program never asked about.
+            (error "~A" (string-right-trim '(#\Newline) resp-buf)))))))
 
 ;;; --- Module Loading ---
 ;;;
@@ -32372,10 +32411,16 @@ buffer's fill-pointer; everything else falls back to file-length."
    prototype, as of *P-SUB-TABLE-EPOCH* = EPOCH.  BY-PACKAGE maps a CL package
    to its (BARE . PROTO) pairs, BY-QUALIFIED-NAME a perl `Pkg::name` to PROTO.")
 
+(declaim (inline %p-wire-space-p))
+(defun %p-wire-space-p (c)
+  "C is a character perl's `split ' '` breaks a request line on."
+  (member c '(#\Space #\Tab #\Newline #\Return #\Page #\Vt)))
+
 (defun %p-proto-text (proto)
   "PROTO as it rides the request: whitespace removed, which is what perl's
-   own `prototype` reports for `sub f ($ $)`."
-  (remove-if (lambda (c) (member c '(#\Space #\Tab #\Newline #\Return))) proto))
+   own `prototype` reports for `sub f ($ $)`.  Every character perl's `split ' '`
+   breaks on goes: the pairs ride one space-separated request line."
+  (remove-if #'%p-wire-space-p proto))
 
 (defun %p-build-proto-index ()
   "Walk *p-declared-subs* once: the prototyped subs, by package and by name."
@@ -32385,7 +32430,13 @@ buffer's fill-pointer; everything else falls back to file-length."
                (when (and (eq status :defined) (symbolp sym) (fboundp sym))
                  (let ((proto (p-prototype (symbol-function sym)))
                        (bare (%p-sub-bare-name sym)))
-                   (when (and (stringp proto) bare (symbol-package sym))
+                   ;; A NAME the request line cannot carry (whitespace, `=`) is a name no
+                   ;; bareword in the eval text can spell, so it is not sent.
+                   (when (and (stringp proto) bare (symbol-package sym)
+                              (not (find-if (lambda (c)
+                                               (or (char= c #\=)
+                                                   (%p-wire-space-p c)))
+                                             bare)))
                      (let ((text (%p-proto-text proto)))
                        (push (cons bare text)
                              (gethash (symbol-package sym) by-pkg))
