@@ -728,7 +728,20 @@ sub _perl_version_number {
   return undef;
 }
 
-# The string arguments of an include, in order: `'try'`, `qw(try say)` and the
+# Does this `use` / `no` call the module's import / unimport?  Not with an
+# EMPTY list (`use M ()`, `use M qw()`): perl then loads the module and calls
+# nothing, so none of its import EFFECTS apply (#2872, #2874).
+sub include_calls_import {
+  my ($inc) = @_;
+  my @args = $inc->arguments;
+  return 1 if @args != 1;
+  my $a = $args[0];
+  return 0 if $a->isa('PPI::Structure::List') && !$a->schildren;
+  return 0 if $a->isa('PPI::Token::QuoteLike::Words') && !(my @w = $a->literal);
+  return 1;
+}
+
+# The string arguments of an include, in order:
 # parenthesised spellings alike.  (PPI has a private _decompose_arguments; this
 # reads the public ->arguments instead, so a PPI internal cannot move under us.)
 sub _include_string_args {
@@ -8554,7 +8567,7 @@ sub _feature_import_sites {
   my (@sites, $partial);
   {
     for my $st (@{ $doc->find('PPI::Statement::Include') || [] }) {
-      next if ($st->type // '') ne 'use';
+      next if ($st->type // '') ne 'use' || !include_calls_import($st);
       my $m = $st->module // '';
       next if $m eq '' || $m =~ /^(?:feature|experimental|lib|strict|warnings|utf8|v?\d)/;
       # A `use lib` the collection has not applied yet (a pre-pass asking

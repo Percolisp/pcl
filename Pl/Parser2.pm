@@ -6414,7 +6414,8 @@ sub _apply_constant_handlers {
   my @sites;
   for my $st (@{ $doc->find('PPI::Statement::Include') || [] }) {
     my $type = $st->type // '';
-    next if $type ne 'use' && $type ne 'no';
+    next if ($type ne 'use' && $type ne 'no')
+         || !Pl::Parser::include_calls_import($st);
     my $m = $st->module // '';
     next if $m eq '' || $m =~ /\A(?:feature|experimental|lib|strict|warnings|utf8|v?\d)/;
     next if !$fp->_find_module_file($m);

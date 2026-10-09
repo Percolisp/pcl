@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -99,6 +99,9 @@ my @r = (2 .. 4); print "@r\n";},
 
 both_agree(q{use bignum; print ref(1), " ", ref(1.5), " ", 1/3, " ", 0.1 + 0.2, " ", 2**100, "\n";},
            '`use bignum`: BigInt literals upgrade to BigFloat');
+
+both_agree(q{use bigint (); print 2**70, "\n"; use bigint; print 2**70, "\n";},
+           '`use bigint ()` (an EMPTY import list) converts nothing');
 
 my $out = run_cl(q{use bigrat; print 1 + 2, "\n";}, 1);
 like($out, qr/\APCL: use bigrat is not supported \(task #2874\)[^\n]*\n3\n\z/,
