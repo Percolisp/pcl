@@ -176,4 +176,103 @@ END_SRC
 40 overlapping: 3 [||ab]
 END_EXP
 
+# ─────────────────────────────────────────────────────────────────────────────
+# #2981 MECHANISM: s///g's own loop -- perl's global rule (an empty match is
+# retried under minend, so `x*` on "aaa" is -a-a-a-), the count, and NIL on
+# no match.  The lever is ~1.5x on a whole s///ge program (1.03 s here, 1.55 s
+# on the base), too small to separate from CI noise, so it has no timed row:
+# the mechanism rows and the answer tables below are its guard.
+like(lisp_out(<<'END_LISP'),
+(let ((*print-pretty* nil)) (dolist (c (list (list "\\s+" "a b  c" "_") (list "x*" "aaa" "-") (list "q" "abc" "z") (list "(?=b)" "abab" "!"))) (format t "~S|" (multiple-value-list (%p-subst-replace-all (%pcl-create-scanner (first c) nil) (cons (first c) nil) (second c) (third c))))))
+END_LISP
+     qr/\Q("a_b_c" 2)|("-a-a-a-" 4)|(nil 0)|("a!ba!b" 2)|\E/i,
+     '#2981: %p-subst-replace-all answers s///g with perl\'s empty-match rule and the count');
+
+answers(<<'END_SRC', <<'END_EXP', '#2981 answers: an overloaded subject, a growing (.=) subject, a wide subject, a template, /e numbers, foreach alias, hash element, no-match count, $_, long subject');
+use strict; use warnings;
+package O; use overload '""' => sub { "a-b-c" }; sub new { bless {}, shift }
+package main;
+my $o = O->new; my $n = ($o =~ s/-/+/g); print "01 $n <$o>\n";
+my $acc = ""; $acc .= "x y " for 1..3; $n = ($acc =~ s/ /_/g); print "02 $n <$acc>\n";
+my $w = "\x{263a} \x{263a}"; $n = ($w =~ s/\x{263a}/S/g); print "03 $n <$w>\n";
+my $d = "b"; $d =~ s/(b)/$1$1/g; print "04 <$d>\n";
+my $e = "aaa"; $n = ($e =~ s/a/1+1/ge); print "05 $n <$e>\n";
+my @a = ("p q", "r s"); s/ /-/g for @a; print "06 @a\n";
+my %h = (k => "1 2 3"); $h{k} =~ s/ //g; print "07 $h{k}\n";
+my $z = "abc"; my $c = ($z =~ s/x//g); print "08 <$c>\n";
+$_ = "t t"; s/t/T/g; print "09 $_\n";
+my $m = "aXbXc"; ($m =~ s/X/\n/g); print "10 ", length($m), "\n";
+my $big = "ab" x 1000; $n = ($big =~ s/b/c/g); print "11 $n ", substr($big, 0, 6), "\n";
+my $q = "a.b"; $q =~ s/\./\$/g; print "12 <$q>\n";
+END_SRC
+01 2 <a+b+c>
+02 6 <x_y_x_y_x_y_>
+03 2 <S S>
+04 <bb>
+05 3 <222>
+06 p-q r-s
+07 123
+08 <>
+09 T T
+10 5
+11 1000 acacac
+12 <a$b>
+END_EXP
+
+answers(<<'END_SRC', <<'END_EXP', '#2981 answers: s///ge with $1, empty matches (x*, //, lookahead), /r, templates (\\1 $& \\u), nested s///e, $` and @- in /e, /i, named captures, $1 after the loop');
+use strict; use warnings;
+my $u;
+$u = "field-1 value"; my $n = ($u =~ s/([aeiou])/uc($1)/ge); print "01 $n <$u>\n";
+$u = "a  b\tc "; $n = ($u =~ s/\s+/_/g); print "02 $n <$u>\n";
+$u = "xyz"; $n = ($u =~ s/q/r/g); print "03 <$n> <$u>\n";
+$u = "aaa"; $n = ($u =~ s/x*/-/g); print "04 $n <$u>\n";
+$u = "abc"; $n = ($u =~ s//-/g); print "05 $n <$u>\n";
+$u = "hello"; my $r = ($u =~ s/l/L/gr); print "06 <$r> <$u>\n";
+$u = "a1b22c"; $u =~ s/(\d+)/<$1>/g; print "07 <$u>\n";
+$u = "a1b2"; $u =~ s/(\d)/$1*2/ge; print "08 <$u>\n";
+$u = "ab"; $u =~ s/(.)/my $c = $1; $c =~ s{(.)}{uc $1}e; "[$c]"/ge; print "09 <$u>\n";
+$u = "abc"; $u =~ s/b/\\/g; print "10 <$u>\n";
+$u = "a.b.c"; $u =~ s/\./\$&/g; print "11 <$u>\n";
+$u = "a-b"; $u =~ s/-/$&$&/g; print "12 <$u>\n";
+$u = "xaxbx"; $u =~ s/x/"pre($`)"/ge; print "13 <$u>\n";
+$u = "a1b2c3"; $u =~ s/\d/$-[0]/ge; print "15 <$u>\n";
+$u = "\x{e9}t\x{e9}"; $u =~ s/\x{e9}/E/g; print "16 <", length($u), ">\n";
+$u = "aaa"; $u =~ s/a/b/; print "17 <$u>\n";
+$u = "ab"; $u =~ s/(?=b)/!/g; print "19 <$u>\n";
+$u = "abab"; $u =~ s/(a)|b/defined $1 ? "A" : "B"/ge; print "20 <$u>\n";
+$u = "foo bar"; $u =~ s/(\w+)/\u$1/g; print "21 <$u>\n";
+my @w = map { "field-$_ value" } 1..3; for my $s (@w) { my $t = $s; $t =~ s/([aeiou])/uc($1)/ge; $t =~ s/\s+/_/g; print "22 $t\n" }
+$u = "aXbXc"; $u =~ s/x/-/gi; print "23 <$u>\n";
+$u = "a b"; $u =~ s/ /\t/g; print "24 <$u>\n";
+$u = "12"; $u =~ s/(\d)/$1+1/eg; print "25 <$u> $1\n";
+$u = "ab"; $u =~ s/(?<n>a)/<$+{n}>/g; print "26 <$u>\n";
+END_SRC
+01 5 <fIEld-1 vAlUE>
+02 3 <a_b_c_>
+03 <> <xyz>
+04 4 <-a-a-a->
+05 4 <-a-b-c->
+06 <heLLo> <hello>
+07 <a<1>b<22>c>
+08 <a2b4>
+09 <[A][B]>
+10 <a\c>
+11 <a$&b$&c>
+12 <a--b>
+13 <pre()apre(xa)bpre(xaxb)>
+15 <a1b3c5>
+16 <3>
+17 <baa>
+19 <a!b>
+20 <ABAB>
+21 <Foo Bar>
+22 fIEld-1_vAlUE
+22 fIEld-2_vAlUE
+22 fIEld-3_vAlUE
+23 <a-b-c>
+24 <a	b>
+25 <23> 2
+26 <<a>b>
+END_EXP
+
 done_testing();

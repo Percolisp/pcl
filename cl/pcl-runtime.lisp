@@ -36487,6 +36487,56 @@ buffer's fill-pointer; everything else falls back to file-length."
                           ;; variant of this pattern.
                           (cons pattern options))))))))
 
+(defun %p-subst-pieces-string (str pieces total)
+  "The string made of PIECES (newest first): a string is itself, a cons
+   (FROM . TO) is that span of STR.  TOTAL is the result's length."
+  (declare (simple-string str) (fixnum total))
+  (let ((out (make-string total)) (pos total))
+    (declare (fixnum pos))
+    (dolist (p pieces out)
+      (if (consp p)
+          (let ((len (- (the fixnum (cdr p)) (the fixnum (car p)))))
+            (decf pos len)
+            (replace out str :start1 pos :start2 (car p) :end2 (cdr p)))
+          (let ((len (length (the string p))))
+            (decf pos len)
+            (replace out (the string p) :start1 pos))))))
+
+(defun %p-subst-replace-all (scanner minend-key str rep)
+  "s///g's loop, driven here instead of by cl-ppcre's regex-replace-all
+   (perf round 43, task #2981): every match of SCANNER in STR, found by
+   perl's global-match rule (%p-global-scan: after an empty match the next
+   attempt is at the same position under minend), replaced by REP -- a
+   string (inserted as is) or a function called like cl-ppcre's
+   (target start end match-start match-end reg-starts reg-ends) returning one.
+   Returns (values RESULT COUNT); RESULT is NIL when nothing matched.
+   No generic SCAN dispatch per match, and the result is assembled in one
+   pre-sized string instead of through a string output stream."
+  (let* ((str (if (simple-string-p str) str (coerce str 'simple-string)))
+         (n (length str)) (pos 0) (copied 0) (count 0) (total 0)
+         (minend nil) (pieces '()))
+    (declare (fixnum n pos copied count total) (simple-string str))
+    (loop
+     (when (> pos n) (return))
+     (multiple-value-bind (ms me rs re)
+         (%p-global-scan scanner minend-key str pos n minend)
+       (when (null ms) (return))
+       (let ((r (if (stringp rep) rep (funcall rep str 0 n ms me rs re))))
+         (when (< copied ms)
+           (push (cons copied ms) pieces)
+           (incf total (- ms copied)))
+         (push r pieces)
+         (incf total (length (the string r)))
+         (incf count)
+         (setf copied me pos me minend (= ms me)))))
+    (if (zerop count)
+        (values nil 0)
+        (progn
+          (when (< copied n)
+            (push (cons copied n) pieces)
+            (incf total (- n copied)))
+          (values (%p-subst-pieces-string str pieces total) count)))))
+
 (defun do-regex-subst (string-box op)
   "Perform substitution on boxed string, return count of replacements.
    Also sets capture groups $1, $2, ... from the match."
@@ -36533,25 +36583,28 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (if global-p
                       ;; /g: cl-ppcre drives the loop, so it gets a scanner
                       ;; that advances the way perl does (task #1719).
-                      (cl-ppcre:regex-replace-all
-                       (%p-global-scanner scanner minend-key) str rep-fn)
+                      (%p-subst-replace-all scanner minend-key str rep-fn)
                       (cl-ppcre:regex-replace scanner str rep-fn))))
           ;; Normal s///: string replacement
           (progn
             ;; First, set capture groups from the match
             (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                (cl-ppcre:scan scanner str)
+                (%p-ppcre-scan scanner str 0)
               (when match-start
                 (%p-match-record str match-start match-end reg-starts reg-ends closers reg-names)))
             ;; Perform the substitution.  /g: perl's advance rule, and the
             ;; count comes back from the scanner that did the loop instead
             ;; of a second whole scan of the subject (task #1719).
             (if global-p
-                (let ((n (list 0)))
-                  (setf result (cl-ppcre:regex-replace-all
-                                (%p-global-scanner scanner minend-key n)
-                                str replacement))
-                  (when (stringp result) (setf count (car n))))
+                (if (find #\\ (the string replacement))
+                      ;; a template (\N, \&): cl-ppcre builds it
+                      (let ((n (list 0)))
+                        (setf result (cl-ppcre:regex-replace-all
+                                      (%p-global-scanner scanner minend-key n)
+                                      str replacement))
+                        (when (stringp result) (setf count (car n))))
+                      (multiple-value-setq (result count)
+                        (%p-subst-replace-all scanner minend-key str replacement)))
                 (progn
                   (setf result (cl-ppcre:regex-replace scanner str replacement))
                   (when (and (stringp result) (cl-ppcre:scan scanner str))
