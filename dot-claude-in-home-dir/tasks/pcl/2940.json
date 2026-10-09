@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "FILED s513c (Opus, 2026-10-09) while writing the #2880 guard rows.  PRE-EXISTING (base 33721af7).  The #221 family (warnings model): a default-OFF diagnostic printed UNCONDITIONALLY at run time.\n\n  my $x; print join(\",\", $x, $x), \"|\\n\";       perl (no `use warnings`): `,|` and NOTHING on stderr\n  my %h; print join(\",\", $h{a}, 1), \"|\\n\";     PCL: `,|` / `,1|` and three lines `Use of uninitialized value in join or string` (no \"at FILE line N\")\n\nSite: cl/pcl-runtime.lisp, the join argument spreader (the `(p-warn (format nil \"Use of uninitialized value in join or string~%\"))` arms, ~27730 and ~27763) warns on every undef SCALAR argument with no warnings check.  Not #2776 (that one is the COMPILER's own warning at transpile time, for a LITERAL undef).  Probe: scratch/s513c/pr/jw.pl in the s513c worktree.  Ruling to apply (DECIDED s338, #221): default-off diagnostics stay ABSENT, never unconditional -- delete the warning or gate it on the warnings state the runtime has for `uninitialized`.  Guard: the `Pl/t/perf-levers-11.t` #2880 answers row passes on the tree only because an undef-declared accumulator is now a str-buffer; the plain :scalar spelling above still prints the warning.",
+   "id" : "2940",
+   "status" : "pending",
+   "subject" : "LOUD, small (pre-existing): `join` prints \"Use of uninitialized value in join or string\" at RUN time for an undef scalar argument with NO `use warnings` -- `my $x; print join(\",\", $x)` (perl silent); the #221 family"
+}
