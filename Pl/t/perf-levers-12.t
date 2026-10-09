@@ -83,12 +83,28 @@ END_LISP
 {
     # 300 000 iterations of a regex-STRING split and a literal-regex split:
     # 2.45 s on the base (cl-ppcre's split loop + generic scan per field),
-    # 0.67 s here.  The bound is generous.
+    # 0.67 s here.  The bound is RELATIVE to perl's own time on the same
+    # program, measured in this run, because an absolute 1.5 s tripped on the
+    # CI runner (1.68 s there against 0.53 s here, s513 2026-10-09): 8x perl
+    # + 0.5 s for the transpile and the SBCL start-up.  Here that is ~3.1 s
+    # against 0.51 s on the tree (perl 0.32 s); on the runner ~3-6 s against
+    # 1.68 s.  This row is the GROSS-regression bound and passes on the base
+    # too; the INVERSE guard of the lever is row 1, the mechanism (a literal
+    # pattern never reaches the engine), which fails on the base.
+    my $src = q{my $l = join(".", 1 .. 20); my $m = join(",", 1 .. 20); my $s = 0; for (1 .. 300000) { my @f = split(q(\.), $l); my @g = split(/,/, $m); $s += @f + @g } print "$s\n";};
+    my ($pfh, $pfile) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $src;
+    close $pfh;
+    my $p0 = time;
+    my $perl_out = `$^X $pfile 2>&1`;
+    my $pdt = time - $p0;
+    die "perl's own answer is wrong: $perl_out" if $perl_out ne "12000000\n";
     my $t0 = time;
-    my $out = run_pl(q{my $l = join(".", 1 .. 20); my $m = join(",", 1 .. 20); my $s = 0; for (1 .. 300000) { my @f = split(q(\.), $l); my @g = split(/,/, $m); $s += @f + @g } print "$s\n";});
+    my $out = run_pl($src);
     my $dt = time - $t0;
+    my $bound = 8 * $pdt + 0.5;
     is($out, "12000000\n", '#2980 timed: the answer');
-    cmp_ok($dt, '<', 1.5, sprintf('#2980 timed: 600 000 literal splits in under 1.5 s (took %.2f s)', $dt));
+    cmp_ok($dt, '<', $bound, sprintf('#2980 timed: 600 000 literal splits within 8x perl + 0.5 s = %.2f s (took %.2f s, perl %.2f s)', $bound, $dt, $pdt));
 }
 
 answers(<<'END_SRC', <<'END_EXP', '#2980 answers: limits, leading/trailing empty fields, captures, awk vs / / vs \\s+, metacharacter strings, escaped literals, $_ default, scalar context, a wide subject, $;, /i and /x stay regexes, qr, overlapping literal');
