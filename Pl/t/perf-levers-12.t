@@ -275,4 +275,43 @@ END_SRC
 26 <<a>b>
 END_EXP
 
+# #2981 ANSWERS: every attempt of the loop starts at the previous match's end,
+# but lookbehind, \b / \B and ^ read the WHOLE subject (cl-ppcre's
+# *real-start-pos*; without it re/subst.t lost 6 rows and
+# re/regex_sets_compat.t 63 in the round's companion run).
+answers(<<'END_SRC', <<'END_EXP', '#2981 s///g: lookbehind, \\b, \\B and ^ see the text before the attempt');
+my $n;
+$_="ccccc"; $n = s/(?<!x)c/x/g; print "1 $_ $n\n";
+$_="foobbarfoobbar"; $n = s/(?<!r)foobbar/foobar/g; print "2 $_ $n\n";
+$_="foobbarfoobbar"; $n = s/(?<!ar)(foobbar)/foobar/g; print "3 $_ $n\n";
+$_='aaaa'; $n = s/\ba/./g; print "4 $_ $n\n";
+$_="Charles Bronson"; $n = s/\B\w//g; print "5 $_ $n\n";
+$_='aaa'; $n = s/^a/x/g; print "6 $_ $n\n";
+$_='ab ab'; $n = s/(?<=a)b/B/g; print "7 $_ $n\n";
+$_='aaa'; $n = s/(?<=a)a/uc($&)/ge; print "8 $_ $n\n";
+$_='x y z'; $n = s/\b(\w)/<$1>/g; print "9 $_ $n\n";
+$_="a\nb\nc"; $n = s/^/> /mg; print "10 $_ $n\n";
+$_='abc'; $n = s/\Ab/X/g; print "11 $_ $n\n";
+$_='aXbXc'; $n = s/(?<!^)X/-/g; print "12 $_ $n\n";
+$_='hello world'; $n = s/(?<=o)\b/!/g; print "13 $_ $n\n";
+$_='ab'; my $r = s/(?<=a)b/[$&]/gr; print "14 $r\n";
+END_SRC
+1 xxxxx 5
+2 foobarfoobbar 1
+3 foobarfoobbar 1
+4 .aaa 1
+5 C B 12
+6 xaa 1
+7 aB aB 2
+8 aAA 2
+9 <x> <y> <z> 3
+10 > a
+> b
+> c 3
+11 abc 
+12 a-b-c 2
+13 hello! world 1
+14 a[b]
+END_EXP
+
 done_testing();

@@ -36519,7 +36519,12 @@ buffer's fill-pointer; everything else falls back to file-length."
     (loop
      (when (> pos n) (return))
      (multiple-value-bind (ms me rs re)
-         (%p-global-scan scanner minend-key str pos n minend)
+         ;; *real-start-pos* 0: every attempt starts at POS, but \b, \B,
+         ;; lookbehind and ^ must read the WHOLE subject, as cl-ppcre's
+         ;; do-scans arranges (bound around the scan only -- the /e
+         ;; replacement runs user code with its own matches).
+         (let ((cl-ppcre::*real-start-pos* 0))
+           (%p-global-scan scanner minend-key str pos n minend))
        (when (null ms) (return))
        (let ((r (if (stringp rep) rep (funcall rep str 0 n ms me rs re))))
          (when (< copied ms)
