@@ -49,6 +49,7 @@
 - **Perl's own t/ as bug finder**: [[project_perl_suite_survey]], [[project_suite_runner_oom_and_cond_t]], [[project_io_subprocess_features]], [[reference_box_magic_hook]]. **sb-posix**: some syms `sb-posix::`; stat-blksize/blocks/futimes ABSENT.
 
 ## User Preferences / Working Style
+- **CLOUD REVIEW: Fable may ASK the USER for a `/code-review ultra` run when a batch warrants it (USER 2026-10-09, money on the account); USER-triggered and billed.** [feedback_cloud_review_ask_user](feedback_cloud_review_ask_user.md)
 - **FABLE NEVER EXECUTES what an Opus agent can do from a written design — Fable = review, rulings, design, merge.** [feedback_fable_never_executes_delegate_to_opus](feedback_fable_never_executes_delegate_to_opus.md), [feedback_hard_parts_first_e2_for_opus](feedback_hard_parts_first_e2_for_opus.md)
 - **TWO SUBJOBS AT A TIME (USER 2026-09-05)** — never a third concurrently unless the USER allows it for the day. [feedback_two_agents_at_a_time](feedback_two_agents_at_a_time.md)
 - **ALWAYS pass an explicit `model` on Agent launches ("opus"; an unpinned subagent INHERITS Fable). USER s501: execution agents are OPUS 5.5 — each writes its model id to `scratch/<label>/MODEL.txt` first, Fable checks it.** [feedback_subagents_must_pin_model](feedback_subagents_must_pin_model.md)
