@@ -20,7 +20,10 @@ our @EXPORT_OK = qw(
 
 our $VERSION = '1.63';
 
-sub blessed {
+# Every sub carries the REAL module's prototype (perl 5.40.3 `prototype`; task
+# #2870): it decides the parse -- `blessed $o && $o->isa("K")` is blessed($o) && ...,
+# not blessed($o && ...) -- in the program and in a string eval alike.
+sub blessed ($) {
     # Must distinguish a *blessed* ref from a plain one: ref() returns the
     # reftype ("ARRAY"/"HASH"/...) for an UNblessed ref, but blessed() must
     # return undef there.  That blessed-vs-not distinction lives in the runtime
@@ -28,7 +31,7 @@ sub blessed {
     return builtin::blessed($_[0]);
 }
 
-sub reftype {
+sub reftype ($) {
     # Underlying reference type regardless of blessing — again a runtime-level
     # fact (a blessed arrayref is still "ARRAY"), so delegate to the builtin
     # rather than re-deriving it from ref()/UNIVERSAL::isa (which keys on @ISA).
@@ -39,9 +42,9 @@ sub reftype {
 # box), a copy is strong, and a store into it clears the mark -- the runtime
 # owns the flag (builtin::weaken / is_weak).  No refcount: the referent's
 # lifetime is unchanged (docs/not-supported.md).
-sub weaken   { builtin::weaken($_[0]); return }
-sub isweak   { return builtin::is_weak($_[0]) ? 1 : !1 }
-sub unweaken { builtin::unweaken($_[0]); return }
+sub weaken ($)   { builtin::weaken($_[0]); return }
+sub isweak ($)   { return builtin::is_weak($_[0]) ? 1 : !1 }
+sub unweaken ($) { builtin::unweaken($_[0]); return }
 
 # Perl's grok_number: what the CORE numeric conversion would accept without a
 # warning.  Three things this must get right that a naive /^\d+$/ does not:
@@ -52,7 +55,7 @@ sub unweaken { builtin::unweaken($_[0]); return }
 # A plain reference is not a number, but an OVERLOADED object answers on its
 # stringification (t/lln.t's Math::BigInt rows) — that is what perl does via
 # SvAMAGIC before it ever looks at the buffer.
-sub looks_like_number {
+sub looks_like_number ($) {
     my ($val) = @_;
     return 0 unless defined $val;
     if (ref $val) {
@@ -65,10 +68,10 @@ sub looks_like_number {
     return 0;
 }
 
-sub readonly { 0 }
-sub tainted  { 0 }
+sub readonly ($) { 0 }
+sub tainted ($)  { 0 }
 
-sub dualvar {
+sub dualvar ($$) {
     my ($num, $str) = @_;
     # A genuine dualvar: numeric value $num, string value $str.  Pure Perl can't
     # construct one, so route to the runtime primitive (p-dualvar) via the
@@ -79,15 +82,15 @@ sub dualvar {
 # Both ask about the SCALAR'S REPRESENTATION, which no plain Perl can inspect —
 # so they route to the runtime through the same builtin:: dispatch namespace
 # blessed/reftype/dualvar already use.
-sub isdual    { return builtin::is_dual($_[0]) }
-sub isvstring { return builtin::is_vstring($_[0]) }
+sub isdual ($)    { return builtin::is_dual($_[0]) }
+sub isvstring ($) { return builtin::is_vstring($_[0]) }
 # Open-stream test (s500a, #1571): $_[0] when it is an OPEN handle (a glob,
 # a glob ref, a lexical handle), else undef -- never a NAME lookup.
-sub openhandle { return builtin::openhandle($_[0]) }
+sub openhandle ($) { return builtin::openhandle($_[0]) }
 # set_prototype(\&code, $proto) (s502e, #2538): Scalar::Util's order is the
 # CODE REF first -- the reverse of Sub::Util's -- and it returns the code ref;
 # an undef $proto clears the prototype.  The one runtime registrar.
-sub set_prototype {
+sub set_prototype (&$) {
     my ($code, $proto) = @_;
     # The XS dies on a bad first argument (s502e review, probed vs perl).
     if (!ref $code) { require Carp; Carp::croak("set_prototype: not a reference") }
@@ -100,7 +103,7 @@ sub set_prototype {
 # overload (File::Temp's own NUMIFY handler IS `refaddr($_[0])`), so it goes
 # through the builtin:: dispatch namespace, the one address reading the
 # runtime shares with numification (task #2682).
-sub refaddr {
+sub refaddr ($) {
     return builtin::refaddr($_[0]);
 }
 

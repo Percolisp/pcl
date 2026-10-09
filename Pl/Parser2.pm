@@ -83,6 +83,12 @@ has eval_captures => (is => 'ro', default => sub { [] });
 # is compiler INPUT and therefore part of the eval CACHE key (s387).
 has eval_features => (is => 'ro', default => sub { [] });
 
+# #2870: the `NAME=PROTO` pairs of the prototyped subs visible at the eval
+# SITE (the runtime's %p-eval-visible-protos): perl parses an eval's text
+# against the live stash, so a `sub un ($)` of the enclosing program makes
+# `un 1, 2` un(1), 2 inside it.  Compiler input, keyed into the eval cache.
+has eval_protos => (is => 'ro', default => sub { [] });
+
 # Pre-pass result, keyed by package: { pkg => { perl sub name →
 # { cl_name, insensitive } } } (read by ExprToCL's `insensitive-call` rule).
 # Bareword sub resolution is package-scoped in Perl, so ExprToCL/VarAnnotator
@@ -229,7 +235,7 @@ sub parse_code {
   return $class->new(
     code => $code,
     map { $_ => $opts{$_} } grep { defined $opts{$_} }
-      qw(eval_mode eval_pkg eval_captures eval_features),
+      qw(eval_mode eval_pkg eval_captures eval_features eval_protos),
   )->parse;
 }
 
@@ -1392,6 +1398,9 @@ sub parse {
                                                    : ()))
     or die "PCL: cannot parse " . ($self->has_filename ? $self->filename : "(inline code)")
            . ": PPI failed to tokenize it\n";
+
+  # #2870: the prototypes visible at the eval SITE, before anything asks.
+  $self->_register_eval_protos if $self->eval_mode;
 
   # B-regime flag (docs/raw-numeric-verdict.md §flag): a `use overload` in
   # THIS file means blessed values with per-use conversion handlers can flow
@@ -8359,6 +8368,40 @@ sub _rename_exception_mys {
     }
   }
   return;
+}
+
+# #2870: register the eval SITE's visible prototypes (eval_protos, sent by the
+# runtime's %p-eval-visible-protos) before any pass asks about a bareword.
+# perl parses a string eval against the live stash, so these are in force from
+# the text's FIRST statement: they carry no site (a site-less record answers at
+# every position, ir-spec §5.2), and they are tagged from_module like a `use`
+# merge's records, so a definition or a `use` inside the eval text replaces
+# them -- the same registration path a module merge takes (rule 11).  An
+# unqualified NAME is the eval package's sub (flat + per-package table); a
+# QUALIFIED one is another package's, reached only by that spelling, so it goes
+# in the per-package table alone (the merge's add_pkg_prototype rule).
+# A built-in's NAME is not registered: displacing a built-in is the override
+# registry's question (#2779, #2873), and a prototype alone would parse the
+# call by the sub's prototype and then call the built-in.
+sub _register_eval_protos {
+  my $self = shift;
+  my $env  = $self->environment;
+  my $builtins = Pl::Environment::_builtin_prototypes();
+  my $pkg  = $self->eval_pkg // 'main';
+  for my $pair (@{ $self->eval_protos // [] }) {
+    my ($name, $text) = $pair =~ /\A([^=]+)=(.*)\z/s
+      or die "PCL: malformed eval prototype pair '$pair'\n";
+    next if Pl::Parser::proto_text_has_named_params($text);
+    my $rec = Pl::Parser::_imported_record(
+      $self->fallback_parser->parse_prototype_or_signature("($text)"));
+    if ($name =~ /\A(.+)::([^:]+)\z/) {
+      my ($owner, $bare) = ($1, $2);
+      $env->add_pkg_prototype($bare, $rec, $owner);
+    } else {
+      next if exists $builtins->{$name};
+      $env->add_prototype($name, $rec, $pkg);
+    }
+  }
 }
 
 # #296-B1, the eval-mode HALF of the same fact.  A string eval compiled inside

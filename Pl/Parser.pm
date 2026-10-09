@@ -10483,7 +10483,10 @@ sub _extract_module_prototypes {
   # both now have real shims whose CONSTANTS are `()`-prototype subs, and a
   # `()` prototype is a PARSE fact — without it `INT_MAX - 1` reads as
   # `INT_MAX(-1)` and swallows the rest of the argument list (probed).
-  if ($module =~ /^(Carp|Scalar::Util|Cwd|
+  # Scalar::Util left in s513d (#2870): its shim carries the real `($)`
+  # prototypes, and `blessed $o && $o->isa("K")` is blessed($o) && ... in perl
+  # -- skipped, it parsed as blessed($o && ...), silently (probed).
+  if ($module =~ /^(Carp|Cwd|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|File::(?!Spec)|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;

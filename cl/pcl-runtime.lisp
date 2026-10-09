@@ -1260,7 +1260,8 @@
                             (*pcl-caller-wantarray* *wantarray*))
                        (p-sub-frame
                         ,@body))))
-             ,@register)))
+             ,@register
+             (%p-note-sub-install local-sym :sub))))
     (if *pcl-fasl-build*
         ;; Building a module fasl: the compile pass reserves the NAME (the
         ;; reader needs it) and nothing else, so the body is compiled once —
@@ -1614,6 +1615,26 @@
    coderef consult this so \\&foo taken before `sub foo {...}` answers by
    the symbol's CURRENT status, exactly like perl's late-bound glob slot.
    Weak keys: an entry lives only as long as the coderef itself.")
+
+;;; THE SUB TABLE'S EPOCH (task #2870).  A string eval's parse must see the
+;;; prototypes of the subs visible at the eval SITE, as perl's does (its parser
+;;; reads the live stash), so the eval request carries them
+;;; (%p-eval-visible-protos).  Collecting them walks *p-declared-subs*; the
+;;; epoch says when the walk's answer can have changed, so one walk serves every
+;;; eval between two installs.  Bumped by %P-NOTE-SUB-INSTALL, which every site
+;;; that gives a sub a NAME calls (p-sub, the glob assignment's CODE arms, the
+;;; glob copy's CODE slot) and by p-__pcl_set_prototype (a prototype changing
+;;; under a name it already has).
+(defvar *p-sub-table-epoch* 0
+  "Incremented whenever a named sub is installed or a prototype registered.")
+
+(declaim (inline %p-note-sub-install))
+(defun %p-note-sub-install (sym kind)
+  "SYM just got a sub, through install KIND (:sub, :glob, :glob-copy): the
+   visible-prototype index is stale."
+  (declare (ignorable sym kind))
+  (incf *p-sub-table-epoch*)
+  nil)
 
 ;;; use overload — Operator Overloading Registry
 ;;; Maps (cons pkg-name op-string) -> handler (CL function or method-name string).
@@ -17309,10 +17330,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; are lexical and a string eval inherits them, so the same text compiles
     ;; differently under `use feature 'try'` than without it — `try {…} catch
     ;; (…) {…}` is one statement there and a swallowing bareword call here.
+    ;; #2870: so do the PROTOTYPES visible at the site (%p-eval-visible-protos)
+    ;; -- `un 1, 2` is un(1), 2 under `sub un ($)` and un(1, 2) without it.
     (let* ((pkg-name  *pcl-current-package*)
            (cap-names (sort (mapcar #'car lex-alist) #'string<))
            (feat-names (sort (copy-list features) #'string<))
-           (cache-key (list* s pkg-name (append feat-names (list :caps) cap-names)))
+           (protos    (%p-eval-visible-protos s pkg-name))
+           (cache-key (list* s pkg-name (append feat-names (list :caps) cap-names
+                                                (list :protos) protos)))
            (cached    (gethash cache-key *p-eval-string-cache*)))
       (handler-case
           (let* ((cl-text  (or cached
@@ -17323,7 +17348,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                                ;; rather than once per run.
                                (let ((r (%p-eval-cl-text s pkg-name
                                                          cap-names
-                                                         feat-names)))
+                                                         feat-names
+                                                         protos)))
                                  (setf (gethash cache-key
                                                 *p-eval-string-cache*) r)
                                  r)))
@@ -24376,7 +24402,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-4984"
+(defparameter *pcl-cache-generation* "v2-5084"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -25676,7 +25702,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   *p-transpiler-process*)
 
 (defun p-transpile-string (perl-code pkg-name &optional capture-names features
-                                                deps-path)
+                                                deps-path protos)
   "Transpile a Perl string to CL code via the persistent pl2cl server.
    CAPTURE-NAMES are the caller's in-scope lexical names (the keys of the
    eval's capture alist).  The compiler needs them for the ONE question whose
@@ -25691,17 +25717,22 @@ buffer's fill-pointer; everything else falls back to file-length."
    beside it is still valid.  The server writes it BEFORE answering, so the
    sidecar is already in place when the .lisp is published; the same rule the
    file path states in P-TRANSPILE-FILE.
+   PROTOS are the `NAME=PROTO` pairs of the prototyped subs visible at the
+   eval site (#2870, %P-EVAL-VISIBLE-PROTOS): perl parses the text against the
+   live stash, so `un 1, 2` under `sub un ($)` is un(1), 2.
    Returns the CL text string, or signals an error on failure."
   (let* ((proc     (p-ensure-transpiler))
          (in       (sb-ext:process-input  proc))
          (out      (sb-ext:process-output proc))
          (code-len (length perl-code)))
-    ;; Send request: pkg\n captures\n features\n deps-path\n char-count\n code
+    ;; Send request: pkg\n captures\n features\n protos\n deps-path\n char-count\n code
     (write-string pkg-name in)
     (write-char #\Newline in)
     (write-string (format nil "~{~A~^ ~}" capture-names) in)
     (write-char #\Newline in)
     (write-string (format nil "~{~A~^ ~}" features) in)
+    (write-char #\Newline in)
+    (write-string (format nil "~{~A~^ ~}" protos) in)
     (write-char #\Newline in)
     (write-string (or deps-path "") in)
     (write-char #\Newline in)
@@ -25831,9 +25862,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    at CALL time for the same reason (task #1303)."
   (%p-ensure-dir-0700 (merge-pathnames "evals/" *pcl-cache-dir*)))
 
-(defun %p-eval-cache-stem (text pkg-name cap-names feat-names)
+(defun %p-eval-cache-stem (text pkg-name cap-names feat-names protos)
   "The cache stem for one string eval: MD5 hex over EXACTLY the inputs
-   p-eval's in-process key carries, plus *PCL-CACHE-GENERATION* and the
+   p-eval's in-process key carries (the visible PROTOTYPE pairs too, #2870), plus *PCL-CACHE-GENERATION* and the
    COMPILER FINGERPRINT (P-COMPILER-STAMP, task #1843).
    The fingerprint for the reason a module's path key carries it: an eval's
    cached CL is this compiler's emission, produced by this pl2cl through this
@@ -25843,10 +25874,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    MD5 and not SXHASH (which P-COMPUTE-CACHE-PATH uses for a module's PATH):
    one run reaches dozens of module paths and can reach thousands of distinct
    eval texts, and a collision here would run one eval's code for another's."
-  (let ((material (format nil "~A~C~A~C~A~C~{~A ~}~C~{~A ~}~C~A"
+  (let ((material (format nil "~A~C~A~C~A~C~{~A ~}~C~{~A ~}~C~{~A ~}~C~A"
                           *pcl-cache-generation* #\Nul (p-compiler-stamp) #\Nul
                           pkg-name #\Nul
-                          feat-names #\Nul cap-names #\Nul text)))
+                          feat-names #\Nul cap-names #\Nul protos #\Nul text)))
     (string-downcase
      (format nil "~{~2,'0X~}"
              (coerce (sb-md5:md5sum-string material :external-format :utf-8)
@@ -25876,21 +25907,21 @@ buffer's fill-pointer; everything else falls back to file-length."
             (%p-utime-now deps-path))))
       text)))
 
-(defun %p-eval-cl-text (text pkg-name cap-names feat-names)
+(defun %p-eval-cl-text (text pkg-name cap-names feat-names protos)
   "The CL text for one string eval — from the disk cache when a valid entry is
    there, else transpiled and written there.  See the section commentary."
   (let ((stem (and (not *pcl-skip-cache*)
                    (ignore-errors
                      (%p-eval-cache-dir)
-                     (%p-eval-cache-stem text pkg-name cap-names feat-names)))))
+                     (%p-eval-cache-stem text pkg-name cap-names feat-names protos)))))
     (if (null stem)
-        (p-transpile-string text pkg-name cap-names feat-names)
+        (p-transpile-string text pkg-name cap-names feat-names nil protos)
         (let* ((dir (%p-eval-cache-dir))
                (lisp-path (merge-pathnames (concatenate 'string stem ".lisp") dir))
                (deps-path (merge-pathnames (concatenate 'string stem ".deps") dir)))
           (or (%p-eval-cache-read lisp-path deps-path)
               (let ((cl (p-transpile-string text pkg-name cap-names feat-names
-                                            (namestring deps-path))))
+                                            (namestring deps-path) protos)))
                 (ignore-errors (%p-write-cache-file lisp-path cl))
                 ;; Same trigger as the module miss: the prune scans at most
                 ;; once a day, and this directory is the one that grows.
@@ -30037,7 +30068,8 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((functionp inner)
        (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
          (setf (fdefinition sym) inner)
-         (setf (gethash sym *p-declared-subs*) :defined)))
+         (setf (gethash sym *p-declared-subs*) :defined)
+         (%p-note-sub-install sym :glob)))
 
       ;; *foo = \$scalar — SCALAR slot (inner is the p-box = the variable itself)
       ((p-box-p inner)
@@ -30076,7 +30108,8 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((functionp rhs)
        (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
          (setf (fdefinition sym) rhs)
-         (setf (gethash sym *p-declared-subs*) :defined))))))
+         (setf (gethash sym *p-declared-subs*) :defined)
+         (%p-note-sub-install sym :glob))))))
 
 (defun p-glob-assign (pkg-str name-str rhs)
   "Assign RHS to the appropriate slot of typeglob *pkg::name (by name strings)."
@@ -30325,7 +30358,8 @@ buffer's fill-pointer; everything else falls back to file-length."
         (let ((dst-sym (intern (%pcl-uname-to-sub dst-uname) dst-pkg)))
           (setf (fdefinition dst-sym) (fdefinition src-sym))
           (setf (gethash dst-sym *p-declared-subs*)
-                (or (gethash src-sym *p-declared-subs*) :defined)))
+                (or (gethash src-sym *p-declared-subs*) :defined))
+          (%p-note-sub-install dst-sym :glob-copy))
         (%p-glob-clear-code-slot dst-pkg dst-uname))))
 
 (defun %p-glob-copy-io-slot (sp sn dst-pkg dst-uname)
@@ -32039,7 +32073,8 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((fn (%p-code-function code)))
     (when fn
       (setf (gethash fn %pcl-sub-prototypes)
-            (if (%pcl-definedp proto) (to-string (unbox proto)) nil))))
+            (if (%pcl-definedp proto) (to-string (unbox proto)) nil))
+      (%p-note-sub-install fn :set-prototype)))
   code)
 
 ;;; BEGIN GENERATED core-prototypes (tools/gen-core-protos.pl)
@@ -32170,6 +32205,89 @@ buffer's fill-pointer; everything else falls back to file-length."
          (proto (and fn (gethash fn %pcl-sub-prototypes))))
     (or proto *p-undef*)))
 
+;;; THE STRING EVAL'S SUB TABLE (task #2870, ir-spec §6).  perl compiles an
+;;; eval's text against the LIVE stash, so a prototype the program has at the
+;;; eval site -- declared in the file, glob-assigned, imported, made by an
+;;; earlier eval or set_prototype -- governs how the text parses: `sub un ($)`
+;;; then `eval q{join "|", un 1, 2}` is u:1|2.  PCL compiles the text in the
+;;; pl2cl server, which sees only what the request carries, so the request
+;;; carries the (NAME . PROTOTYPE) pairs of those subs.  Which ones: every
+;;; prototyped sub of the eval's own package (unqualified NAME), and every
+;;; prototyped sub of another package whose QUALIFIED name appears in the text
+;;; (`Other::f 1, 2` resolves in Other's stash, so it is sent qualified).  A sub
+;;; without a prototype is not sent: an unknown word followed by a term is a
+;;; list call already, which is what perl makes of a known prototype-less sub.
+
+(defvar *p-proto-index* nil
+  "(EPOCH BY-PACKAGE . BY-QUALIFIED-NAME): every named sub that has a
+   prototype, as of *P-SUB-TABLE-EPOCH* = EPOCH.  BY-PACKAGE maps a CL package
+   to its (BARE . PROTO) pairs, BY-QUALIFIED-NAME a perl `Pkg::name` to PROTO.")
+
+(defun %p-proto-text (proto)
+  "PROTO as it rides the request: whitespace removed, which is what perl's
+   own `prototype` reports for `sub f ($ $)`."
+  (remove-if (lambda (c) (member c '(#\Space #\Tab #\Newline #\Return))) proto))
+
+(defun %p-build-proto-index ()
+  "Walk *p-declared-subs* once: the prototyped subs, by package and by name."
+  (let ((by-pkg (make-hash-table :test 'eq))
+        (by-name (make-hash-table :test 'equal)))
+    (maphash (lambda (sym status)
+               (when (and (eq status :defined) (symbolp sym) (fboundp sym))
+                 (let ((proto (p-prototype (symbol-function sym)))
+                       (bare (%p-sub-bare-name sym)))
+                   (when (and (stringp proto) bare (symbol-package sym))
+                     (let ((text (%p-proto-text proto)))
+                       (push (cons bare text)
+                             (gethash (symbol-package sym) by-pkg))
+                       (setf (gethash (%p-sub-perl-name sym) by-name) text))))))
+             *p-declared-subs*)
+    (list* *p-sub-table-epoch* by-pkg by-name)))
+
+(defun %p-proto-index ()
+  "The index for the current epoch, rebuilt only when a sub was installed."
+  (let ((ix *p-proto-index*))
+    (if (and ix (eql (car ix) *p-sub-table-epoch*))
+        ix
+        (setf *p-proto-index* (%p-build-proto-index)))))
+
+(defun %p-qualified-names-in (text)
+  "Every `A::b`-shaped word in TEXT (a word with `::` inside it), `::b` read
+   as `main::b`.  One left-to-right scan; the caller looks each one up."
+  (let ((out '())
+        (n (length text))
+        (start nil))
+    (flet ((word-char-p (c) (or (alphanumericp c) (char= c #\_) (char= c #\:)))
+           (flush (end)
+             (when start
+               (let ((w (subseq text start end)))
+                 (when (search "::" w)
+                   (push (if (and (> (length w) 2) (string= w "::" :end1 2))
+                             (concatenate 'string "main" w)
+                             w)
+                         out))))
+             (setf start nil)))
+      (dotimes (i n)
+        (if (word-char-p (char text i))
+            (unless start (setf start i))
+            (flush i)))
+      (flush n))
+    out))
+
+(defun %p-eval-visible-protos (text pkg-name)
+  "The prototype pairs a string eval of TEXT in perl package PKG-NAME is
+   compiled with, as sorted `NAME=PROTO` strings (sorted: they are part of the
+   eval CACHE key, s387).  See the section commentary."
+  (let* ((ix (%p-proto-index))
+         (pkg (%pcl-find-package pkg-name))
+         (out (loop for (bare . proto) in (and pkg (gethash pkg (cadr ix)))
+                    collect (concatenate 'string bare "=" proto))))
+    (when (search "::" text)
+      (dolist (q (%p-qualified-names-in text))
+        (let ((proto (gethash q (cddr ix))))
+          (when proto
+            (push (concatenate 'string q "=" proto) out)))))
+    (sort (remove-duplicates out :test #'string=) #'string<)))
 ;;; ============================================================
 ;;; OO Support
 ;;; ============================================================
