@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 20;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -279,3 +279,11 @@ both_agree_v(q{use T733::Opt 'quiet'; sub cx { wantarray ? "LIST" : "SCALAR" } o
 
 both_agree_v(q{use T733::Var qw(vfun); print "[", vfun, "]\n";},
              '#733 inverse: the qw() spelling is unchanged');
+
+# #2960: an IMPORTED sub followed by `$var` is a function call, never an
+# indirect-object method call (the import makes the name callable).
+both_agree_v(q{use Scalar::Util qw(reftype blessed); my $o = bless {}, "K"; my @m = (reftype $o, 5); my @n = (blessed $o, 6); print scalar(@m), " $m[0] ", scalar(@n), " $n[0]\n";},
+             "#2960 an imported `(\$)` sub before `\$o`: reftype(\$o), 5");
+
+both_agree(q{use T438::Konst; my $o = bless {}, "K"; my @m = (kname $o, 5); print scalar(@m), " $m[0]\n";},
+           "#2960 an imported prototype-less sub before `\$o`: kname(\$o, 5)");

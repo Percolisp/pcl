@@ -5887,6 +5887,18 @@ sub _is_known_callable {
     return 1 if !defined $cur;
     return 1 if defined $s->{package} && $s->{package} eq $cur;
   }
+  # An IMPORT registers a prototype record (tagged from_module), never a
+  # declared sub, so the same-package question must read that record too --
+  # positionally (get_prototype answers at this parse site, #2871) -- or every
+  # imported name followed by `$var` read as an indirect method call
+  # (`reftype $o, 5` -> $o->reftype(5), #2960).  A record this package
+  # declared itself counts the same way.
+  if (defined $cur) {
+    my $rec = $env->get_prototype($name);
+    return 1 if ref($rec) eq 'HASH'
+      && ($rec->{from_module} || $env->pkg_prototypes->{$name}{$cur})
+      && !$env->is_builtin_seed_record($name, $rec);
+  }
   return 0;
 }
 
