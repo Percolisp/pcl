@@ -383,6 +383,7 @@ not-supported.md → only then probe.*
 - **An imported sub before `$var` is a call, not indirect object** (#2960: `_is_known_callable` same-package mode reads the import's prototype record).
 - **Perl's MBOL**: `^` under /m never matches after a newline that ends the string -- rewritten in the parse tree in PCL's scanner wrapper, never in cl-ppcre (#2982).
 - **read / sysread / recv write through an element or deref BUFFER place** (`%p-with-buffer-place`, #2921); truncate resolves a glob / glob ref (#2924); opendir / seek set `$!` (#2922).
+- **Role::Tiny: a second subclass composing a role after a conflict keeps the inherited method** -- pre-existing, reachable on the board since this batch (#3001).
 
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
 - **A plain signature IS the classic spelling plus its arity check** (#2514, Kind-A `sig-classic`): `Parser2::_normalize_signature_subs` rewrites the TREE (signature removed, `my (PARAMS) = @_;` first) before every rename/scope pass; the arity is `(p-check-arity …)` in `p-args-body` or `(:arity …)` in `p-raw-params`; the call sites keep the signature's prototype record.  Defaults, placeholders, `()`, multi-line, `state`, and any body observing `@_` keep v1.  ir-spec §5.2.
