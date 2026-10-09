@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 17;
 
 sub write_pl {
     my ($code) = @_;
@@ -133,3 +133,11 @@ both_agree('use Scalar::Util qw(blessed); my $o = bless {}, "K";
             my $r = blessed $o && $o->isa("K") ? "yes" : "no"; print "$r\n";
             print prototype(\&blessed), "\n";',
            'blessed is `($)` in the program too (it was skipped by name)');
+
+# ---- found on the way: a `($)` slot keeps a DUALVAR -----------------------
+
+both_agree('use Scalar::Util qw(dualvar isdual); sub mk { dualvar(0, "abc") }
+            sub idp ($) { isdual($_[0]) ? 1 : 0 } my $d = dualvar(1, "a");
+            sub s1 ($) { $_[0] = "w"; 1 } s1(scalar($d));
+            print isdual(dualvar(0, "abc")) ? 1 : 0, idp(mk()), " d=$d\n";',
+           'scalar() of a dualvar is the dualvar: isdual through a `($)` slot, and it aliases');

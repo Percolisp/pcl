@@ -2663,7 +2663,9 @@ sub parse {
   }
   push @out, @body;
   $self->_seam_census_dump if _seam_census();
-  if (my $detect = $self->_detect_table_form) { unshift @out, $detect }   # #2610
+  # #2610: the detector table, right after the leading (in-package :pcl) --
+  # consumers of an emission read that line first.
+  if (my $detect = $self->_detect_table_form) { splice @out, 1, 0, $detect }
   return join("\n", @out);
 }
 
@@ -2699,15 +2701,17 @@ sub _detect_end_form {
 
 # THE DETECTOR TABLE (task #2610, s513d) -- an INSTRUMENT, emitted only under
 # PCL_DETECT_TABLE, never in a string eval's unit.  Two lists, as data handed to
-# ONE runtime registrar (p-detect-table), placed FIRST in the unit so it is in
-# force before any BEGIN block or `use` runs: (inside p-eval-always, like the
-# BEGIN / `use` marks: a module FASL build runs those at COMPILE time, and the
-# table must be on the stack there too)
+# ONE runtime registrar (p-detect-table), placed right after the unit's leading
+# (in-package :pcl) so it is in force before any BEGIN block or `use` runs --
+# inside p-eval-always, like the BEGIN / `use` marks, because a module FASL
+# build runs those at COMPILE time and the table must be on the stack there too:
 #   calls -- how this parse read each bareword call name: (PKG NAME LINE KIND),
 #            Pl::Environment::_detect_note's record of the prototype answers;
-#   defs  -- the unit's own sub declarations (PKG NAME PROTO LINE) with the
-#            prototype the compiler gave them, so the runtime can tell "the compiler saw this install"
-#            from "only running code made it".
+#   defs  -- what the compiler KNEW this unit defines, (PKG NAME PROTO LINE):
+#            its sub declarations and every prototype record of its own (a
+#            `use constant`, a BEGIN glob-installed constant), so the runtime
+#            can tell "the compiler saw this install" from "only running code
+#            made it".
 # The runtime compares the two with every sub installed during the unit's
 # compile phase (cl/pcl-runtime.lisp %p-detect-check) and, under
 # PCL_DETECT_LOG, writes each disagreement as one line.  Nothing dies or
@@ -2723,14 +2727,26 @@ sub _detect_table_form {
     push @c, '(' . join(' ', $q->($pkg), $q->($name), $line, $q->($calls->{$key})) . ')';
   }
   my (@d, %seen);
-  for my $s (@{ $env->get_declared_subs || [] }) {
-    my $pkg  = $s->{package} // 'main';
-    my $name = $s->{name} // next;
-    next if $seen{"$pkg\0$name"}++;
-    my $kind = Pl::Environment::detect_kind($env, $name, $env->raw_prototype($name));
+  my $def = sub {
+    my ($pkg, $name, $rec, $line) = @_;
+    return if $seen{"$pkg\0$name"}++;
+    my $kind = Pl::Environment::detect_kind($env, $name, $rec);
     my $proto = $kind =~ /\Aproto:(.*)\z/s ? $q->($1) : 'nil';
-    my $line  = $s->{pos} ? $s->{pos}[0] : 0;
-    push @d, '(' . join(' ', $q->($pkg), $q->($name), $proto, $line) . ')';
+    push @d, '(' . join(' ', $q->($pkg), $q->($name), $proto, $line // 0) . ')';
+  };
+  for my $s (@{ $env->get_declared_subs || [] }) {
+    my $name = $s->{name} // next;
+    $def->($s->{package} // 'main', $name, $env->raw_prototype($name),
+           $s->{pos} ? $s->{pos}[0] : 0);
+  }
+  my $per = $env->pkg_prototypes;
+  for my $name (sort keys %$per) {
+    for my $pkg (sort keys %{ $per->{$name} }) {
+      my $rec = $per->{$name}{$pkg};
+      next if ref($rec) ne 'HASH' || $rec->{from_module}
+              || $env->is_builtin_seed_record($name, $rec);
+      $def->($pkg, $name, $rec, $rec->{at} && $rec->{at}{pos} ? $rec->{at}{pos}[0] : 0);
+    }
   }
   my $unit = $self->_detect_unit_name;
   return "(pcl::p-eval-always (pcl::p-detect-table " . $q->($unit) . "\n '(" . join("\n   ", @c) . ")\n '("

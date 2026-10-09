@@ -1724,6 +1724,9 @@
          (qual (and pkg bare (concatenate 'string pkg "::" bare)))
          (def (and qual (gethash qual (%p-detect-unit-defs u)))))
     (when (and qual
+               ;; the compiler SAW this definition: its own install is what it
+               ;; parsed against (a registry gap there is not a parse question)
+               (not (and def (eq kind :sub) (not (minusp *p-src-file-id*))))
                (not (and def (equal (if (eq (car def) :none) nil (car def)) proto))))
       (dolist (c (gethash bare (%p-detect-unit-calls u)))
         (destructuring-bind (call-pkg line assumed) c
@@ -32079,8 +32082,11 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; `unbox` peels the ref-wrapper, so `scalar(\5)` used to answer with the
       ;; referent (ref(scalar(\5)) = "" where perl says SCALAR).
       ((and (p-box-p val) (p-box-is-ref val)) val)
-      ;; Strings are scalars, return as-is
-      ((stringp v) v)
+      ;; Strings are scalars, return as-is -- except a DUALVAR (ir-spec 3.2a: a box
+      ;; whose numeric half is :dual), which IS the scalar: its string half
+      ;; alone loses the number (`isdual(dualvar(0, "abc"))` through a `($)`
+      ;; slot read 0, perl 1; s513d).
+      ((stringp v) (if (%pcl-dualvar-p val) val v))
       ;; Arrays (non-string vectors) return length — but a BOX holding a vector
       ;; is an array REFERENCE, not an array: an array VARIABLE is a raw
       ;; adjustable vector and is never boxed.  Unboxing first threw that
