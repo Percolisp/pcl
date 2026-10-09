@@ -1378,6 +1378,9 @@ sub parse {
   # starts empty, so a `--server` process answering many string evals never
   # carries one file's renames into the next.
   _reset_rename_manifest();
+  # #2610 (s513d): the detector table, an instrument -- see _detect_table_form.
+  $self->environment->{detect_calls} = {}
+    if $ENV{PCL_DETECT_TABLE} && !$self->eval_mode;
   # (The PCL_V1_FILES bisect hook lived here — it forced named files through
   # the whole-file v1 fallback to isolate a diverging module, task #80.  Both
   # it and the fallback were removed at E4.1 step 2, #242: with one pipeline
@@ -2366,6 +2369,8 @@ sub parse {
           next;
         }
         push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
+        push @decls, $self->_detect_declare_form($child)   # #2610, an instrument
+          if $ENV{PCL_DETECT_TABLE} && !$child->block;
         # Forward declaration `sub foo;` reserves the name only (no definition).
         if ($child->block) {
           push @defs, $self->_lower_sub($child);
@@ -2575,6 +2580,8 @@ sub parse {
   # runtime code — perl's phase order (v1's _assemble_output emits the same
   # call at the same seam).  A file with no run forms at all still ends with
   # it, exactly as before.
+  # #2610 (s513d): the detector table's end, an instrument (off by default).
+  push @body, $self->_detect_end_form if $self->environment->{detect_calls};
   push @body, "(p-run-compile-phase-blocks)", '';
   for my $g (@run_groups) {
     my ($i, $pkg, $cl_pkg, $run) = @$g;
@@ -2656,7 +2663,78 @@ sub parse {
   }
   push @out, @body;
   $self->_seam_census_dump if _seam_census();
+  if (my $detect = $self->_detect_table_form) { unshift @out, $detect }   # #2610
   return join("\n", @out);
+}
+
+# #2610 (s513d): a FORWARD DECLARATION with a prototype (`sub zany ();`) gives
+# a name its prototype without installing a sub, so no install site sees it;
+# under PCL_DETECT_TABLE (in a string eval too -- merlyn's `BEGIN { eval "sub
+# zany ();" }` is the shape) it tells the detector, as data.  An empty list
+# when the declaration carries no prototype.
+sub _detect_declare_form {
+  my ($self, $sub) = @_;
+  my $proto = $self->_proto_or_sig_str($sub);
+  return () if !defined $proto || !$self->_is_pure_prototype($sub);
+  $proto =~ s/[\s()]//g;
+  $proto =~ s/([\\"])/\\$1/g;
+  return ['pcl::p-detect-declare',
+          "'" . $self->fallback_parser->_qualified_sub_to_cl($sub->name), qq{"$proto"}];
+}
+
+# #2610 (s513d): the unit name the table and its end form both carry, and the
+# end form itself -- emitted just before (p-run-compile-phase-blocks), it
+# retires THIS unit's table (a unit with no table, a checked-in artifact,
+# emits none, so it can never retire another unit's).
+sub _detect_unit_name {
+  my $self = shift;
+  my $unit = $self->has_filename ? $self->filename : '-';
+  return $unit;
+}
+sub _detect_end_form {
+  my $self = shift;
+  (my $u = $self->_detect_unit_name) =~ s/([\\"])/\\$1/g;
+  return qq{(pcl::p-eval-always (pcl::p-detect-end "$u"))};
+}
+
+# THE DETECTOR TABLE (task #2610, s513d) -- an INSTRUMENT, emitted only under
+# PCL_DETECT_TABLE, never in a string eval's unit.  Two lists, as data handed to
+# ONE runtime registrar (p-detect-table), placed FIRST in the unit so it is in
+# force before any BEGIN block or `use` runs: (inside p-eval-always, like the
+# BEGIN / `use` marks: a module FASL build runs those at COMPILE time, and the
+# table must be on the stack there too)
+#   calls -- how this parse read each bareword call name: (PKG NAME LINE KIND),
+#            Pl::Environment::_detect_note's record of the prototype answers;
+#   defs  -- the unit's own sub declarations (PKG NAME PROTO LINE) with the
+#            prototype the compiler gave them, so the runtime can tell "the compiler saw this install"
+#            from "only running code made it".
+# The runtime compares the two with every sub installed during the unit's
+# compile phase (cl/pcl-runtime.lisp %p-detect-check) and, under
+# PCL_DETECT_LOG, writes each disagreement as one line.  Nothing dies or
+# announces: the first measurement is a COUNT and a NAME LIST.
+sub _detect_table_form {
+  my $self = shift;
+  my $env  = $self->environment;
+  my $calls = $env->{detect_calls} or return;
+  my $q = sub { my $s = shift; $s =~ s/([\\"])/\\$1/g; qq{"$s"} };
+  my @c;
+  for my $key (sort keys %$calls) {
+    my ($pkg, $name, $line) = split /\0/, $key;
+    push @c, '(' . join(' ', $q->($pkg), $q->($name), $line, $q->($calls->{$key})) . ')';
+  }
+  my (@d, %seen);
+  for my $s (@{ $env->get_declared_subs || [] }) {
+    my $pkg  = $s->{package} // 'main';
+    my $name = $s->{name} // next;
+    next if $seen{"$pkg\0$name"}++;
+    my $kind = Pl::Environment::detect_kind($env, $name, $env->raw_prototype($name));
+    my $proto = $kind =~ /\Aproto:(.*)\z/s ? $q->($1) : 'nil';
+    my $line  = $s->{pos} ? $s->{pos}[0] : 0;
+    push @d, '(' . join(' ', $q->($pkg), $q->($name), $proto, $line) . ')';
+  }
+  my $unit = $self->_detect_unit_name;
+  return "(pcl::p-eval-always (pcl::p-detect-table " . $q->($unit) . "\n '(" . join("\n   ", @c) . ")\n '("
+       . join("\n   ", @d) . ")))";
 }
 
 # T-A1 (docs/v2-transfer-plan.md): is this top-level statement a bare block

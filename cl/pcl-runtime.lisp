@@ -1238,7 +1238,7 @@
                       collect (pop body)))
          (proto (getf facts :prototype))
          (register (when proto
-                     `((p-__pcl_set_prototype (symbol-function local-sym) ,proto))))
+                     `((%p-register-prototype (symbol-function local-sym) ,proto))))
          (install
           `(let ((local-sym (%p-reserve-sub-name ',name))
                  ;; Per-sub constants, computed ONCE at definition:
@@ -1616,6 +1616,141 @@
    the symbol's CURRENT status, exactly like perl's late-bound glob slot.
    Weak keys: an entry lives only as long as the coderef itself.")
 
+
+;;; THE DETECTOR (task #2610, s513d) -- an INSTRUMENT, and only that.  perl
+;;; parses a statement after the one before it has RUN, so a sub (or a
+;;; prototype) that BEGIN-time code installs changes how the LATER statements
+;;; parse; PCL parsed the whole unit before anything ran.  The runtime can see
+;;; every such install, exactly, before a mis-parsed call runs:
+;;;   * the compiler emits, under PCL_DETECT_TABLE, the unit's TABLE first
+;;;     (p-detect-table: how it read each bareword call name, and the subs it
+;;;     declared itself) and a POSITION mark at each BEGIN block and `use'
+;;;     (p-detect-at: the statement's last line);
+;;;   * every install site already calls %P-NOTE-SUB-INSTALL; while a table
+;;;     is active it compares the installed prototype with the kind the
+;;;     compiler assumed at every call site BELOW the current mark;
+;;;   * under PCL_DETECT_LOG each disagreement appends ONE line (the #472
+;;;     side-channel shape: a file, never stderr, which is a row's output):
+;;;     unit, name, install-line, install-kind, call-line, assumed-kind,
+;;;     installed-prototype.
+;;; Nothing dies and nothing announces: the first measurement is the count and
+;;; the name list (#2610), and they decide die vs announce.  With neither
+;;; variable set no table exists and the check is one NIL test per install.
+
+(defvar *p-detect-active* nil
+  "The detector tables of the units in their compile phase, innermost first.")
+
+(defstruct (%p-detect-unit (:constructor %make-p-detect-unit))
+  unit               ; the unit's source name, for the log
+  (at 0)             ; the last line of the latest BEGIN / `use' that ran
+  calls              ; bare name -> list of (PKG LINE KIND)
+  defs               ; "PKG::NAME" -> (PROTOTYPE-or-:none . DEFINITION-LINE)
+  logged)            ; dedup: "NAME\0CALL-LINE"
+
+(defun %p-detect-kind-known-p (kind)
+  (or (member kind '("builtin" "list-call" "unknown") :test #'string=)
+      (and (>= (length kind) 6) (string= kind "proto:" :end1 6))))
+
+(defun p-detect-table (unit calls defs)
+  "Register UNIT's detector table (see the section commentary).  Inert unless
+   PCL_DETECT_LOG names a file: nothing would read what it found."
+  (when (sb-posix:getenv "PCL_DETECT_LOG")
+    (let ((ch (make-hash-table :test 'equal))
+          (dh (make-hash-table :test 'equal)))
+      (dolist (c calls)
+        (destructuring-bind (pkg name line kind) c
+          (unless (%p-detect-kind-known-p kind)
+            (error "p-detect-table: unknown call kind ~S for ~A::~A" kind pkg name))
+          (push (list pkg line kind) (gethash name ch))))
+      (dolist (d defs)
+        (destructuring-bind (pkg name proto line) d
+          (setf (gethash (concatenate 'string pkg "::" name) dh)
+                (cons (or proto :none) line))))
+      (push (%make-p-detect-unit :unit unit
+                                 :calls ch :defs dh
+                                 :logged (make-hash-table :test 'equal))
+            *p-detect-active*)))
+  nil)
+
+(defun p-detect-at (line)
+  "The unit's compile phase is about to run the BEGIN / `use' ending at LINE."
+  (let ((u (first *p-detect-active*)))
+    (when u (setf (%p-detect-unit-at u) line)))
+  nil)
+
+(defun p-detect-end (unit)
+  "UNIT's compile phase ends: retire ITS table.  Emitted beside the unit's
+   (p-run-compile-phase-blocks) only when the unit has a table, so a unit
+   without one never retires another's."
+  (setf *p-detect-active*
+        (remove unit *p-detect-active* :key #'%p-detect-unit-unit :test #'equal
+                                       :count 1))
+  nil)
+
+(defun %p-detect-mismatch-p (assumed proto install-kind install-pkg call-pkg)
+  "Would the call the compiler parsed as ASSUMED parse differently against an
+   install with prototype PROTO (NIL = none)?"
+  (cond ((string= assumed "builtin")
+         ;; displaced only by CORE::GLOBAL or an IMPORT into the call's package
+         (or (string= install-pkg "CORE::GLOBAL")
+             (and (eq install-kind :glob) (string= install-pkg call-pkg))))
+        ((or (string= assumed "unknown") (string= assumed "list-call"))
+         (and proto t))
+        (t (not (equal proto (subseq assumed 6))))))
+
+(defun %p-detect-log (u name proto install-kind call-line assumed)
+  (let ((path (sb-posix:getenv "PCL_DETECT_LOG"))
+        (key (format nil "~A~C~D" name #\Nul call-line)))
+    (when (and path (not (gethash key (%p-detect-unit-logged u))))
+      (setf (gethash key (%p-detect-unit-logged u)) t)
+      (ignore-errors
+        (with-open-file (o path :direction :output :if-exists :append
+                           :if-does-not-exist :create)
+          (format o "~A~C~A~C~D~C~(~A~)~C~D~C~A~C~A~%"
+                  (%p-detect-unit-unit u) #\Tab name #\Tab (%p-detect-unit-at u)
+                  #\Tab install-kind #\Tab call-line #\Tab assumed
+                  #\Tab (if proto (format nil "(~A)" proto) "none")))))))
+
+(defun %p-detect-compare (u sym kind &optional (declared nil declared-p))
+  "Compare the install of SYM (by KIND) with U's call sites below its mark.
+   DECLARED, when given, is the prototype a forward declaration carries."
+  (let* ((pkg (pcl-pkg-perl-name (symbol-package sym)))
+         (bare (%p-sub-bare-name sym))
+         (proto (if declared-p
+                    declared
+                    (and (fboundp sym)
+                         (let ((p (p-prototype (symbol-function sym))))
+                           (and (stringp p) p)))))
+         (qual (and pkg bare (concatenate 'string pkg "::" bare)))
+         (def (and qual (gethash qual (%p-detect-unit-defs u)))))
+    (when (and qual
+               (not (and def (equal (if (eq (car def) :none) nil (car def)) proto))))
+      (dolist (c (gethash bare (%p-detect-unit-calls u)))
+        (destructuring-bind (call-pkg line assumed) c
+          (when (and (> line (%p-detect-unit-at u))
+                     (not (and def (eql line (cdr def))))   ; the definition itself
+                     (or (string= call-pkg pkg) (string= pkg "CORE::GLOBAL"))
+                     (%p-detect-mismatch-p assumed proto kind pkg call-pkg))
+            (%p-detect-log u qual proto kind line assumed)))))))
+
+(defun p-detect-declare (sym proto)
+  "A forward declaration gave SYM the prototype PROTO (#2610, an instrument)."
+  (let ((u (first *p-detect-active*)))
+    (when u (%p-detect-compare u sym :declare proto)))
+  nil)
+
+(defun %p-detect-check (sym-or-fn kind)
+  "The install hook's detector half: a SYMBOL was given a sub, or (for
+   set_prototype) a FUNCTION a prototype -- every name it is installed under."
+  (let ((u (first *p-detect-active*)))
+    (when u
+      (if (symbolp sym-or-fn)
+          (%p-detect-compare u sym-or-fn kind)
+          (maphash (lambda (sym status)
+                     (when (and (eq status :defined) (symbolp sym) (fboundp sym)
+                                (eq (symbol-function sym) sym-or-fn))
+                       (%p-detect-compare u sym kind)))
+                   *p-declared-subs*)))))
 ;;; THE SUB TABLE'S EPOCH (task #2870).  A string eval's parse must see the
 ;;; prototypes of the subs visible at the eval SITE, as perl's does (its parser
 ;;; reads the live stash), so the eval request carries them
@@ -1630,10 +1765,11 @@
 
 (declaim (inline %p-note-sub-install))
 (defun %p-note-sub-install (sym kind)
-  "SYM just got a sub, through install KIND (:sub, :glob, :glob-copy): the
-   visible-prototype index is stale."
-  (declare (ignorable sym kind))
+  "SYM just got a sub, through install KIND (:sub, :glob, :glob-copy, or
+   :set-prototype with SYM the FUNCTION): the visible-prototype index is stale,
+   and the detector (#2610), when a table is active, compares it."
   (incf *p-sub-table-epoch*)
+  (when *p-detect-active* (%p-detect-check sym kind))   ; #2610, an instrument
   nil)
 
 ;;; use overload — Operator Overloading Registry
@@ -32066,15 +32202,22 @@ buffer's fill-pointer; everything else falls back to file-length."
         (when (or (stringp fn) (numberp fn))
           (p-get-coderef fn)))))
 
+(defun %p-register-prototype (code proto)
+  "Register PROTO as the Perl prototype of the sub CODE refers to; return the
+   function, or NIL.  The registry write alone: p-sub calls it and reports
+   its install itself (as :sub), so the detector (#2610) names the right kind."
+  (let ((fn (%p-code-function code)))
+    (when fn
+      (setf (gethash fn %pcl-sub-prototypes)
+            (if (%pcl-definedp proto) (to-string (unbox proto)) nil)))
+    fn))
+
 (defun p-__pcl_set_prototype (code proto)
   "Register PROTO as the Perl prototype of the sub CODE refers to; returns CODE.
    Perl-side spelling: __pcl_set_prototype($code, $proto) — emitted by the
    :prototype(...) attribute desugar in Pl/Parser.pm."
-  (let ((fn (%p-code-function code)))
-    (when fn
-      (setf (gethash fn %pcl-sub-prototypes)
-            (if (%pcl-definedp proto) (to-string (unbox proto)) nil))
-      (%p-note-sub-install fn :set-prototype)))
+  (let ((fn (%p-register-prototype code proto)))
+    (when fn (%p-note-sub-install fn :set-prototype)))
   code)
 
 ;;; BEGIN GENERATED core-prototypes (tools/gen-core-protos.pl)

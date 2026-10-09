@@ -92,6 +92,9 @@ has pkg_prototypes => (
 # answer, never "below".  ir-spec §5.
 has parse_site => (is => 'rw');
 has reg_site   => (is => 'rw');
+# #2610 (s513d): the detector table -- set only under PCL_DETECT_TABLE (Parser2);
+# _proto_entry records every call-site answer into it (_detect_note).
+has detect_calls => (is => 'rw');
 
 # Names in the module's @EXPORT/@EXPORT_OK (set only on the throwaway env a
 # _extract_module_prototypes parse fills in).  Sub EXISTENCE is parse data:
@@ -554,11 +557,54 @@ sub raw_prototype {
 sub _proto_entry {
     my ($self, $name, $raw) = @_;
     my $rec = $self->_proto_record($name);
-    return $rec if $raw || ref($rec) ne 'HASH' || !$rec->{at};
+    return $rec if $raw;
     # Above an IMPORT of a builtin's name the builtin's own seed row answers
     # (its `*` filehandle slot) -- the import replaced that row in the table.
-    return _proto_at_site($rec, $self->parse_site)
-        // $Pl::Environment::BUILTIN_SEED->{ _bare_sub_name($name) };
+    my $ans = (ref($rec) ne 'HASH' || !$rec->{at}) ? $rec
+            : (_proto_at_site($rec, $self->parse_site)
+               // $Pl::Environment::BUILTIN_SEED->{ _bare_sub_name($name) });
+    $self->_detect_note($name, $ans) if $self->{detect_calls};
+    return $ans;
+}
+
+# THE DETECTOR'S TABLE (task #2610, s513d; an INSTRUMENT, on only under
+# PCL_DETECT_TABLE).  Every call-site question a parse asks of the prototype
+# table goes through _proto_entry, so its answers ARE the compiler's parse
+# decisions about bareword calls: record each one as (package, name, the
+# statement's line) -> the KIND of call the answer makes.  The closed set:
+#   builtin      the name is a perl keyword and nothing displaced it here;
+#   proto:TEXT   a prototype (TEXT may be empty: a `()` term);
+#   list-call    a known sub with no prototype (a plain list operator);
+#   unknown      no record: an unknown word (a string, or a list call by shape).
+# Parser2 emits the table into the unit (p-detect-table); the runtime compares
+# it with what BEGIN-time code installs (cl/pcl-runtime.lisp %p-detect-check).
+# A question asked with no published parse site (a registration-time look)
+# has no position and is not a call site: not recorded.
+sub _detect_note {
+    my ($self, $name, $ans) = @_;
+    my $site = $self->parse_site or return;
+    my $line = $site->{pos} ? $site->{pos}[0] : undef;
+    return if !defined $line;
+    my ($pkg, $bare) = (defined $name && $name =~ /\A(.+)::([^:]+)\z/)
+                     ? ($1, $2) : ($self->current_package // 'main', $name);
+    return if !defined $bare || $bare eq '';
+    my $kind = detect_kind($self, $bare, $ans);
+    $self->detect_calls->{"$pkg\0$bare\0$line"} //= $kind;
+    return;
+}
+
+# The KIND a prototype answer makes of a call (see _detect_note).  A record
+# with neither shape is a missing case and dies naming it (rule 12).
+sub detect_kind {
+    my ($self, $bare, $ans) = @_;
+    if (ref($ans) ne 'HASH') {
+        return Pl::PExpr::Config::is_core_keyword($bare) ? 'builtin' : 'unknown';
+    }
+    return 'builtin' if $self->is_builtin_seed_record($bare, $ans);
+    return 'proto:' . ($ans->{proto_string} // '') if $ans->{is_proto};
+    return 'proto:' if $self->proto_is_zero_arg($ans);
+    return 'list-call' if defined $ans->{min_params};
+    die "PCL: detect table: no call kind for the prototype record of '$bare'\n";
 }
 
 # The builtin seed rows, once: what a builtin's name answers where no

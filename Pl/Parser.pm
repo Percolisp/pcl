@@ -10084,6 +10084,7 @@ sub _process_include_statement {
                ? qq{ :into "$cur_pkg"}
                : '';
       $self->_emit("(p-eval-always");
+      $self->_emit_detect_at($stmt);   # #2610, an instrument (off by default)
       # `use Foo ()` / `use Foo qw()` — an EXPLICIT empty list means "load it,
       # do NOT call import", which is the only reason anyone writes it (both
       # spellings verified against perl).  This must be decided BEFORE the
@@ -10111,6 +10112,22 @@ sub _process_include_statement {
     }
     $self->_emit("");
   });
+}
+
+# #2610 (s513d): the detector's POSITION mark -- an INSTRUMENT, emitted only
+# under PCL_DETECT_TABLE (never in a string eval).  A BEGIN block or a `use` is
+# where a unit's compile phase runs code, and perl parses a statement only
+# after the one before it has RUN, so what such a statement installs can change
+# the parse of the statements BELOW its last line and of nothing above it.  The
+# mark tells the runtime that line (p-detect-at), which is the install position
+# the detector compares every recorded call site against.
+sub _emit_detect_at {
+  my ($self, $stmt) = @_;
+  return if !$ENV{PCL_DETECT_TABLE} || $self->eval_mode;
+  my $last = $stmt->last_token;
+  my $line = $last ? $last->line_number : $stmt->line_number;
+  $self->_emit("  (pcl::p-detect-at $line)") if defined $line;
+  return;
 }
 
 
@@ -10173,6 +10190,7 @@ sub _process_scheduled_block {
       $self->_emit(";; $perl_code");
       $self->_emit("(p-BEGIN");
       $self->indent_level($self->indent_level + 1);
+      $self->_emit_detect_at($stmt);   # #2610, an instrument (off by default)
       # BEGIN blocks run in the definitions bucket, BEFORE this package's runtime
       # `p-set-current-package` (runtime bucket).  Without setting it here,
       # *pcl-current-package* lags during the BEGIN, so caller()/__PACKAGE__ —
