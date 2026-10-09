@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "FOUND s513d (Opus, 2026-10-09) by the #2610 detector's first measurement: every Getopt::Long install was logged as \"compiler assumed proto:@ / proto:, installed none\" -- the compiler parsed with the prototype, the runtime registry (%pcl-sub-prototypes, what prototype() reads) has none.  PRE-EXISTING (s513d did not touch the registry writes for definitions).\n\nREPRODUCER (scratch/s513d/q/gol.pl in the s513d worktree):\n    use Getopt::Long;\n    for my $n (qw(Configure ConfigDefaults GetOptionsFromArray)) {\n      my $p = prototype(\"Getopt::Long::$n\");\n      print \"$n \", (defined $p ? \"[$p]\" : \"undef\"), \"\\n\";\n    }\nperl 5.40.3: Configure [@] / ConfigDefaults [] / GetOptionsFromArray [@].  PCL: undef x 3.\nNOT reproduced by the same SHAPE alone: `sub f(@); sub f (@) {1}` / `sub g(); sub g() {2}` in a file (q/fwdproto.pl) and in a module (q/lib/T2961/M.pm via q/fwdmod.pl) answer perl's text.  So something else in Getopt/Long.pm routes its definitions to a lowering whose p-sub facts lack :prototype -- the first measurement to take: transpile Getopt/Long.pm with `pl2cl --module` and grep the (p-sub pl-Configure ...) facts list.\n\nIMPACT: low (prototype() of these subs is rarely read); it does show that SOME definition path drops :prototype from the facts, which is the registry contract of ir-spec 2b.2a / task #2533.\n",
+   "id" : "2961",
+   "status" : "pending",
+   "subject" : "prototype() of core Getopt::Long's subs answers undef (perl: Configure [@], ConfigDefaults [], GetOptionsFromArray [@]) -- the definitions' prototypes never reach the runtime registry, though a plain file or a small module with the same forward-declaration shape is right"
+}
