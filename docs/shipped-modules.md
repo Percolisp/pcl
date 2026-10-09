@@ -114,6 +114,80 @@ precision with a loop (multiply until inexact, shift until zero) will hang
 under PCL's unlimited-precision integers, and a patched copy in `lib/` is
 the per-module way out.
 
+## Facts overlays: `lib/PCL/Facts/` (task #2878)
+
+**What it is.** Some modules install a sub, or give it a prototype, only by
+RUNNING code at load time: a glob-assign loop over a list of names
+(File::Path's `_IS_VMS`), a string `eval` that builds a sub (Capture::Tiny's
+`capture`, Text::Wrap's `REGEXPS_USE_BYTES`), a computed export list
+(`@EXPORT_OK = keys %api`).  A static parse cannot see any of it, so a later
+bareword call is read wrong: `_IS_VMS + 1` as a list-operator call,
+`capture { ... }` not as a block-form call.  A facts overlay supplies those
+facts in advance, in perl's own syntax for them: FORWARD DECLARATIONS.  It
+replaces nothing -- the real module still runs and installs the real sub, so
+every VALUE stays the module's -- and it defines nothing at run time.
+
+**Where it lives.** The overlay of module `Foo::Bar` is the module
+`PCL::Facts::Foo::Bar`, i.e. the file `PCL/Facts/Foo/Bar.pm` under any root
+of the search list (the program's `-I`, `PERL5LIB`, `use lib` dirs, PCL's own
+`lib/`, perl's directories), found by the same resolver as every module,
+first hit wins.  PCL's shipped overlays are in `lib/PCL/Facts/` (the
+installer copies `lib/`); a test fixture keeps its own under its `-I` root
+(`Pl/t/lib/PCL/Facts/`).  For a module's OWN unit the root the module was
+found in is tried first.  A module without an overlay costs one failed
+lookup.
+
+**What it may contain** (anything else DIES naming the file and line -- an
+overlay is declarations, never code):
+
+    package Foo::Bar;                    # exactly one, the module's own name
+    sub NAME (PROTO);   sub NAME;        # forward declarations, no body
+    our @EXPORT = qw(...);  our @EXPORT_OK = qw(...);
+    our %EXPORT_TAGS = (tag => [qw(...)], ...);
+    1;                                   # plus comments and POD
+
+**The readability rule.** Every declaration group carries a comment saying
+what the real module does and why a static parse cannot see it:
+
+    package File::Path;
+    # File::Path installs these four at BEGIN time in a loop over a name list
+    # (`*{"_IS_\U$_"} = $^O eq $_ ? sub () { 1 } : sub () { 0 }`), which a
+    # static parse cannot see.  The declaration supplies the prototype; the
+    # module supplies the value.
+    sub _IS_VMS ();  sub _IS_MACOS ();  sub _IS_MSWIN32 ();  sub _IS_OS2 ();
+    1;
+
+**The merge rule.** `Pl::Parser::_extract_module_prototypes` reads the
+overlay through the SAME walk that reads the module's source and merges the
+two: an overlay prototype fills an ABSENCE; the export lists and tags are
+UNIONED (an import list's `:tag` / `:DEFAULT` expands through them).  A
+module on the walk's cost skip list (`File::*`, `IO::*`, ...) gets the
+overlay's facts alone.  The facts then reach call sites through the two
+existing paths: a `use` registers them at its own position (#2871, so a call
+ABOVE the `use` does not see them), and the module's own unit registers
+them at its `package` statement.  The overlay's bytes (or "none") are part of
+the prototype cache key, and a FOUND overlay is a dependency of every cached
+walk, script manifest and module sidecar, so editing or deleting one
+re-transpiles what it affects.  An absent overlay is deliberately not
+recorded (it would put a `missing:` entry for every module into every
+manifest, re-probed at every cached start-up), so a NEW overlay for a module
+already in the cache takes effect at the next generation bump -- a shipped
+overlay arrives with one -- or after the cache is cleared.
+
+**The conflict rule.** If the module's source declares the same name with a
+DIFFERENT prototype, the transpile dies naming both files: the overlay is
+wrong (or the module changed under it) and must be fixed, never preferred.
+
+**How to add one.** (1) Find the name: the #2610 detector
+(`PCL_DETECT_TABLE=1 PCL_DETECT_LOG=FILE`, `detector-measurement-s513d.md`)
+logs every call site whose parse a compile-time install contradicted, with
+the installed prototype.  (2) Read the real module to see what installs it
+and with which prototype.  (3) Write `lib/PCL/Facts/<Module/Path>.pm` with
+the declaration and its comment; `tools/tag-license` it.  (4) Re-run the
+detector: the name must be GONE from the log -- if it is still there as a
+disagreement, the overlay's prototype is wrong.  Shipped today: File::Path,
+Sub::Quote, Moo::_Utils, IO::Socket::UNIX, Text::Wrap, Capture::Tiny.
+
 ## Proposed, not built
 
 An earlier version of this page proposed a single provider table

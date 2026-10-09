@@ -94,6 +94,17 @@ built-in, a computed export list) run correctly in their own suites today except
 every event would therefore kill File::Path, Sub::Quote and Moo users in every population; an ANNOUNCE costs nothing and names the
 site.  Hence the flag.
 
+**s513g: what moved.**  Shapes 1 and 3 got FACTS OVERLAYS (#2878, `lib/PCL/Facts/`, `shipped-modules.md` "Facts
+overlays"): File::Path, Sub::Quote, Moo::_Utils (the module that installs `_in_global_destruction`), IO::Socket::UNIX,
+Text::Wrap, Capture::Tiny.  Re-measured the same way (both switches, a fresh cache per population, on gen v2-5284), distinct
+sites BEFORE -> AFTER: **gate 53 -> 7, sweep 107 -> 107, everyday 99 -> 46, board 115 -> 31** -- every overlaid name is GONE
+from every log (none reappears as "installed differs").  Shape 4 also left (gate `LOCK_*`, everyday `O_*`/`LOCK_*`/`SEEK_SET`)
+and the gate's BEGIN-imported `unlink` with it: an import list's `:tag` now expands through the module's `%EXPORT_TAGS`
+(generic, not an overlay).  The residue is exactly the rest of the table: the gate's own detector fixtures (`_T_AAA`,
+`_T_BBB`, `amb`), shape 2 (File::Copy's `stat`/`utime`, `CORE::GLOBAL::caller`), shape 5 (Math::BigInt/BigFloat
+`blessed`/`modify`, Text::Balanced `extract_*`) and Getopt::Long's `GetOptionsFromArray` (PAREN).  Capture::Tiny's five
+#1509 files now compile their `capture { ... }` calls and stop on the next cause, #3023 (SEEK_END on a File::Temp handle).
+
 ## 4. Limits, said plainly
 
 - The call line is the STATEMENT's line as `Pl::Environment::parse_site` publishes it; inside a fragment re-parse it is relative
