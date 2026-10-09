@@ -28238,7 +28238,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-split-empty-regex (s max-fields keep-trailing)
   "The fields of `split //' on S, as a list.  Perl also matches at the end
    (giving a trailing \"\"): limit<0 (KEEP-TRAILING) -> every char + \"\";
-   limit>0 and >= the length -> the same; limit>0 and below it -> the first
+   limit>0 and above the length -> the same; limit>0 and at most it -> the first
    (limit-1) chars and the rest; no limit -> the chars."
   (let* ((n (length s))
          (chars (loop for c across s collect (string c))))
@@ -36500,7 +36500,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             (replace out str :start1 pos :start2 (car p) :end2 (cdr p)))
           (let ((len (length (the string p))))
             (decf pos len)
-            (replace out (the string p) :start1 pos))))))
+            (%pcl-str-blit out pos (the string p) len))))))
 
 (defun %p-subst-replace-all (scanner minend-key str rep)
   "s///g's loop, driven here instead of by cl-ppcre's regex-replace-all
@@ -36602,14 +36602,14 @@ buffer's fill-pointer; everything else falls back to file-length."
             ;; of a second whole scan of the subject (task #1719).
             (if global-p
                 (if (find #\\ (the string replacement))
-                      ;; a template (\N, \&): cl-ppcre builds it
-                      (let ((n (list 0)))
-                        (setf result (cl-ppcre:regex-replace-all
-                                      (%p-global-scanner scanner minend-key n)
-                                      str replacement))
-                        (when (stringp result) (setf count (car n))))
-                      (multiple-value-setq (result count)
-                        (%p-subst-replace-all scanner minend-key str replacement)))
+                  ;; a template (\N, \&): cl-ppcre builds it
+                  (let ((n (list 0)))
+                    (setf result (cl-ppcre:regex-replace-all
+                                  (%p-global-scanner scanner minend-key n)
+                                  str replacement))
+                    (when (stringp result) (setf count (car n))))
+                  (multiple-value-setq (result count)
+                    (%p-subst-replace-all scanner minend-key str replacement)))
                 (progn
                   (setf result (cl-ppcre:regex-replace scanner str replacement))
                   (when (and (stringp result) (cl-ppcre:scan scanner str))
