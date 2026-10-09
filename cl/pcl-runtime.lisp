@@ -19971,6 +19971,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (w (to-number whence)))
     ;; seek FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
     (when stream (setf *p-last-read-handle* stream))
+    ;; A handle that is not open: false with $! = EBADF, as perl (#2922).
+    (unless stream (%p-io-errno-fail 9))
     (when stream
       (let ((new-pos
              (cond
@@ -19979,9 +19981,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                ((= w 2) (+ (%p-stream-length stream) position)); SEEK_END
                (t position))))
         ;; A negative resulting offset is an error in Perl: seek() returns
-        ;; false and leaves the position unchanged (rather than faulting).
+        ;; false and leaves the position unchanged (rather than faulting),
+        ;; with $! = EINVAL (#2922).
         (if (and (integerp new-pos) (minusp new-pos))
-            nil
+            (%p-io-errno-fail 22)
             (and (file-position stream new-pos) 1))))))
 
 (defun %p-stream-length (stream)
@@ -20304,9 +20307,31 @@ buffer's fill-pointer; everything else falls back to file-length."
       (p-exception (e) (error e))
       (error () (%p-read-fail (p-get-stream fh)) *p-undef*))))
 
-(defmacro p-read (fh &rest args)
-  "Perl read — bareword filehandle is auto-quoted."
-  `(%p-read-impl (%p-fh-arg ,fh) ,@args))
+(defmacro %p-with-buffer-place ((var place) call)
+  "The BUFFER of read / sysread / recv (task #2921): CALL writes its result
+   into VAR, which must be a BOX.  A plain scalar is one already; an ELEMENT or
+   a DEREFERENCE place (`$h{k}`, `$a[i]`, `$r->{k}`, `${$_[1]}`) is lowered
+   to an accessor that returns the VALUE, so the read landed nowhere and the
+   buffer stayed empty, silently.  Such a place is read into a box holding its
+   current value (an OFFSET read keeps the head) and written back through the
+   place's SETF when the call answered a count.  A place that evaluates to a
+   box (a hard ref's referent through p-cast-$) is used directly."
+  (if (%p-accessor-place-p place)
+      (let ((cur (gensym "CUR")) (n (gensym "N")))
+        `(let ((,cur ,place))
+           (if (p-box-p ,cur)
+               (let ((,var ,cur)) ,call)
+               (let* ((,var (make-p-box ,cur))
+                      (,n ,call))
+                 (unless (or (null ,n) (eq ,n *p-undef*))
+                   (p-setf ,place (p-box-value ,var)))
+                 ,n))))
+      `(let ((,var ,place)) ,call)))
+
+(defmacro p-read (fh buf &rest args)
+  "Perl read — bareword filehandle is auto-quoted; the buffer is a place."
+  (let ((b (gensym "BUF")))
+    `(%p-with-buffer-place (,b ,buf) (%p-read-impl (%p-fh-arg ,fh) ,b ,@args))))
 
 (defun %p-regular-file-stream-p (stream)
   "True when STREAM reads a regular file (fstat S_ISREG), which is always
@@ -20345,9 +20370,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    outside string) die."
   (%p-read-impl fh buf len offset #'%p-read-available))
 
-(defmacro p-sysread (fh &rest args)
-  "Perl sysread — bareword filehandle is auto-quoted."
-  `(%p-sysread-impl (%p-fh-arg ,fh) ,@args))
+(defmacro p-sysread (fh buf &rest args)
+  "Perl sysread — bareword filehandle is auto-quoted; the buffer is a place."
+  (let ((b (gensym "BUF")))
+    `(%p-with-buffer-place (,b ,buf) (%p-sysread-impl (%p-fh-arg ,fh) ,b ,@args))))
 
 (defun %p-syswrite-impl (fh data &optional len offset)
   "Perl syswrite FH, SCALAR [, LEN [, OFFSET]] - write data to filehandle.
@@ -20405,7 +20431,10 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; lexical keeps its stream in the box now) — ftruncate on a
          ;; reused descriptor would truncate someone else's file.
          (stream (cond ((streamp v) (and (open-stream-p v) v))
-                       ((or (symbolp v) (stringp v)) (%p-live-stream v))
+                       ;; A glob or a glob ref (`*FH`, `\*FH`) resolves through
+                       ;; the ONE handle resolver like a bareword (#2924).
+                       ((or (symbolp v) (stringp v) (p-typeglob-p v))
+                        (%p-live-stream v))
                        (t nil))))
     (handler-case
         (cond
@@ -20629,7 +20658,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defmacro p-recv (fh buf len flags)
   "Perl recv — bareword filehandle is auto-quoted; the buffer is written through."
-  `(%p-recv-impl (%p-fh-arg ,fh) ,buf ,len ,flags))
+  (let ((b (gensym "BUF")))
+    `(%p-with-buffer-place (,b ,buf) (%p-recv-impl (%p-fh-arg ,fh) ,b ,len ,flags))))
 
 (defun %p-getsockname-impl (fh)
   "Perl getsockname(SOCK): packed local address, or '' + $!."
@@ -22363,8 +22393,13 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; directory, and its own name is LITERAL (a `*' in it is a
          ;; character, not a wildcard, #755) — only the merged "*.*" below
          ;; is a wild listing pattern.
-         (dir-path (%p-literal-path dir-str t)))
-    (when (probe-file dir-path)
+         (dir-path (%p-literal-path dir-str t))
+         ;; The system's own answer first (#2922): a failing opendir(3) sets
+         ;; $! as perl's does (ENOENT, ENOTDIR for a plain file, EACCES).
+         (ok (handler-case (progn (sb-posix:closedir (sb-posix:opendir dir-str)) t)
+               (sb-posix:syscall-error (e)
+                 (%p-io-errno-fail (sb-posix:syscall-errno e))))))
+    (when (and ok (probe-file dir-path))
       (let* ((entries (directory (merge-pathnames "*.*" dir-path)
                                  :resolve-symlinks nil))
              (names (list* "." ".." (mapcar #'%p-dirent-name entries)))
