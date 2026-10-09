@@ -733,8 +733,10 @@ sub _perl_version_number {
 # nothing, so none of its import EFFECTS apply (#2872, #2874).
 sub include_calls_import {
   my ($inc) = @_;
-  my @args = $inc->arguments;
-  return 1 if @args != 1;
+  # PPI's ->arguments dies on a malformed include (`use,` inside an
+  # expression -- invalid perl, but it must not crash the compiler).
+  my @args = eval { $inc->arguments };
+  return 1 if $@ || @args != 1;
   my $a = $args[0];
   return 0 if $a->isa('PPI::Structure::List') && !$a->schildren;
   return 0 if $a->isa('PPI::Token::QuoteLike::Words') && !(my @w = $a->literal);
