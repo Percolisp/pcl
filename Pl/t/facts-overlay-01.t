@@ -75,26 +75,16 @@ use FactsFixture qw(ZERO);
 if (ZERO + 1 == 1) { print "one\n" } else { print "not\n" }
 PL
 
-# 2. Above the `use` the name is unknown to perl: the entry is POSITIONAL.
-# Asserted on the EMISSION: the statement above the `use` lowers exactly as
-# it does with no `use` at all, and differently from the same statement
-# below it.  (Not a perl-output row: PCL calls a sub that exists at run time
-# for an unknown bareword in this slot even for a plain module's constant --
-# task #3021, filed s513g.)
-{
-    my $stmt = 'my $s = ONE + 1;';
-    my $emit = sub {
-        my ($code) = @_;
-        my $cl = `$pl2cl @{[ write_pl("use lib '$fixlib';\nno strict;\n$code") ]} 2>/dev/null`;
-        return $cl =~ /(\(p-\+ \(p-scalar-ctx \(pl-ONE\)\) 1\)|\(pl-ONE [^()]*\))/ ? $1 : '';
-    };
-    my $above = $emit->("$stmt\nuse FactsFixture qw(ONE);\n");
-    my $none  = $emit->("$stmt\n");
-    my $below = $emit->("use FactsFixture qw(ONE);\n$stmt\n");
-    ok(length($above) && $above eq $none && $above ne $below,
-       'the constant ABOVE the use lowers as if the use were absent')
-      or diag "above: $above\nnone:  $none\nbelow: $below";
-}
+# 2. Above the `use` the name is unknown to perl: the entry is POSITIONAL,
+# so the bareword is the STRING there and the constant below.
+both_agree(<<'PL', 'the same constant ABOVE the use stays a bareword string');
+no strict;
+no warnings;
+my $s = ONE;
+use FactsFixture qw(ONE);
+my $t = ONE;
+print "$s $t\n";
+PL
 
 # 3. `:all` expands through the overlay's %EXPORT_TAGS; blk is (&;@).
 both_agree(<<'PL', 'a (&;@) block form imported through the overlay tag');
