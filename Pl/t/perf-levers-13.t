@@ -184,12 +184,13 @@ like(lisp_out(<<'END_LISP'),
 (let ((*print-pretty* nil) (*package* (find-package :pcl)))
   (let ((e1 (format nil "~S" (macroexpand-1 '(p-local-cell $g 1 $g))))
         (e2 (format nil "~S" (macroexpand-1 '(p-local-cell-if t $g 1 $g)))))
-    (format t "CELLSET=~A/~A SLOW=~A/~A~%"
+    (format t "CELLSET=~A/~A SLOW=~A/~A FAST=~A~%"
             (search "%P-CELL-SET" e1 :test #'char-equal) (search "%P-CELL-SET" e2 :test #'char-equal)
             (search "(SETF (SB-EXT:SYMBOL-GLOBAL-VALUE" e1 :test #'char-equal)
-            (search "(SETF (SB-EXT:SYMBOL-GLOBAL-VALUE" e2 :test #'char-equal))))
+            (search "(SETF (SB-EXT:SYMBOL-GLOBAL-VALUE" e2 :test #'char-equal)
+            (symbol-name (car (macroexpand-1 (list (intern "%P-CELL-SET" :pcl) (list (quote quote) (quote $g)) 1)))))))
 END_LISP
-     qr/CELLSET=\d+\/\d+ SLOW=NIL\/NIL/i, '#3040: p-local-cell / p-local-cell-if install and restore through %p-cell-set');
+     qr/CELLSET=\d+\/\d+ SLOW=NIL\/NIL FAST=%SET-SYMBOL-GLOBAL-VALUE/i, '#3040: p-local-cell / p-local-cell-if install and restore through %p-cell-set, which expands to the unchecked writer');
 
 {
     # 2 000 000 calls of a sub doing `local $g = $_[0]': the bound is RELATIVE

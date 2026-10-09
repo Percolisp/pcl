@@ -16041,8 +16041,16 @@ carries a continue block.  Every other foreach is emitted exactly as before."
    whether the symbol is a constant or carries a declared type -- ~30 % of a
    loop calling a sub that does `local $g' (task #3040, s513h).  A cell symbol
    is neither (p-defcell declares neither, and the partition never binds it
-   dynamically), so the check cannot fire: write the value cell directly."
-  `(sb-kernel:%set-symbol-global-value ,sym-form ,value))
+   dynamically), so the check cannot fire: write the value cell directly.
+
+   The internal writer is looked up when the macro EXPANDS, never named at
+   READ time: it is exported from SB-KERNEL on the SBCL floor (2.5.2) and on
+   2.6.0, and a future SBCL that drops it costs `local' its 27 %, not the
+   runtime its load (ruled s513, Fable's review of s513h; DECIDED ## s513h)."
+  (let ((fast (find-symbol "%SET-SYMBOL-GLOBAL-VALUE" "SB-KERNEL")))
+    (if (and fast (fboundp fast))
+        `(,fast ,sym-form ,value)
+        `(setf (sb-ext:symbol-global-value ,sym-form) ,value))))
 
 (defun %expand-foreach (rawp var list body-and-keys env)
   "Shared expander for p-foreach / p-foreach-raw.  RAWP selects the loop-var
