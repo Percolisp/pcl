@@ -164,6 +164,17 @@ recorded in #2610 with its costs.
    IPC / fcntl / ioctl wrappers (announced) -- not-supported "autodie".
 3. **#2870 + the run-time half of family A (#2610)** — the eval's sub table, static first, then the
    detector; brian d foy's question is answered honestly only when both are there.
+   **DONE s513d** -- #2870: the eval request carries the `NAME=PROTO` pairs of
+   the prototyped subs visible at the eval site (own package; another package
+   by the qualified name the text spells) and they join the eval cache key
+   (ir-spec §9.1 piece 4; 16 of the 23 s511 probes now = perl, was 7).  #2610:
+   the DETECTOR exists as a LOG-only instrument (`PCL_DETECT_TABLE` +
+   `PCL_DETECT_LOG`, not-supported "A sub or prototype that only BEGIN-time
+   code installs"); its first measurement is in #2610 and DECIDED `## s513d`.
+   Remains: die vs announce (the USER's call, from that measurement); the
+   file-level parse of a BEGIN-time install (by construction); a built-in's
+   name in the eval's table (#2779); the detector's call line is the
+   STATEMENT's and a method name it was asked about is recorded too.
 4. **#2872, #2874** — low frequency, both silent; each is a one-session item with its guard rows.
 5. **Keyword plugins** — per module, only when a target needs one (Object::Pad is the likely first).
    **Source filters** — the filed transpile-time route, only when a target needs it.

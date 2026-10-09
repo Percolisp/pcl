@@ -1367,7 +1367,9 @@ both and prints both as `1e+15`; its pure-integer arithmetic stays exact, so
 
 A **dualvar** is a scalar whose numeric and string halves were set
 INDEPENDENTLY — `Scalar::Util::dualvar(N, S)` and `$!`.  Both halves survive
-every copy: a sub-frame exit (§5.3), an array/hash store, an assignment.
+every copy: a sub-frame exit (§5.3), an array/hash store, an assignment — and
+`scalar()`, which hands the dualvar itself back (s513d: its string half alone
+made `isdual(dualvar(0, "abc"))` through a `($)` slot read 0).
 
 In PCL's box that fact is CARRIED, not derived: `p-box`'s `nv-ok` slot is
 three-valued — `nil` (no cached numeric), `t` (the numeric cache is DERIVED
@@ -4396,6 +4398,27 @@ Consequences an implementer must preserve:
   extent segment, and piece 1 appends them after the let-bound pairs
   (`(cons "$x" MAIN::$x__file__0)`). They are position-static and carry
   no lifetime hazard.
+
+**Piece 4 — the eval site's SUB TABLE (normative, s513d, task #2870).**
+perl compiles an eval's text against the LIVE stash, so every prototype the
+program has at the eval site governs how the text parses.  The request
+therefore carries, besides the text, the package, the capture names and the
+features, the `NAME=PROTO` pairs of the PROTOTYPED subs visible there
+(`%p-eval-visible-protos`): every prototyped sub of the eval's own package by
+its bare name, and a prototyped sub of ANOTHER package by the qualified name
+the text spells (`Other::f 1, 2`).  However the sub got its name — declared in
+the file, glob-assigned, imported, made by an earlier eval or by
+`set_prototype` — the registry `prototype()` reads is the source, so a
+RUN-TIME install before the eval counts (perl: the eval's compile sees the
+table as it is at run time).  The compiler registers the pairs as prototypes
+in force from the text's first statement (site-less `from_module` records:
+a definition or a `use` inside the text replaces them), never under a
+built-in's name (displacing a built-in is the override registry's question).
+A sub WITHOUT a prototype is not sent: an unknown word followed by a term is
+already a list call.  The pairs JOIN THE EVAL CACHE KEY and the disk stem,
+sorted — the same text under two different visible prototypes compiles twice.
+Example: `sub un ($) { "u:$_[0]" }  print eval q{join "|", un 1, 2}` prints
+`u:1|2` (was `u:1`).  Guard `Pl/t/eval-proto-01.t`.
 
 **Deliberate divergences** (all shared with v1, listed in
 `docs/not-supported.md` where user-visible): after the alias executes,

@@ -166,6 +166,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Lexical compile-time hints (`$^H` / `%^H` scoping)](#lexical-compile-time-hints-h--h-scoping)
 * [`autodie` — file scope, no location, the built-ins it does not wrap](#autodie--file-scope-no-location-the-built-ins-it-does-not-wrap)
 * [`use strict 'refs'` — what is still not enforced (the write path, module imports, code refs)](#use-strict-refs--what-is-still-not-enforced-the-write-path-module-imports-code-refs)
+* [A sub or prototype that only BEGIN-time code installs does not change the FILE's parse (the detector reports it)](#a-sub-or-prototype-that-only-begin-time-code-installs-does-not-change-the-files-parse-the-detector-reports-it)
 * [Source filters (`Filter::Util::Call`, `Filter::Simple`, …)](#source-filters-filterutilcall-filtersimple-use-switch-)
 
 ### Errors, warnings and diagnostics
@@ -1479,6 +1480,35 @@ longer in this not-supported bucket.
 
 ---
 
+## A sub or prototype that only BEGIN-time code installs does not change the FILE's parse (the detector reports it)
+
+**Perl behaviour:** perl parses a statement only after the one before it has
+RUN, so a sub or a prototype that a BEGIN block installs by running code --
+`*{$name} = COND ? sub ($) {…} : sub ($$) {…}` (brian d foy), `BEGIN { eval
+"sub zany ();" }` (merlyn), `Scalar::Util::set_prototype(\&f, '$$')`, `BEGIN {
+eval q{ use Time::HiRes qw(stat utime) } }` -- governs every LATER statement:
+`do_it 'a', 'b'` passes one argument under `($)`.
+
+**PCL behaviour:** the whole unit is parsed before anything runs, so such a
+name keeps the parse the TEXT gives it (an unknown word, a plain list call, the
+built-in).  A computed `()` constant used as `if (_IS_VMS)` or `X | Y` is
+harmless (the call has no argument either way); one followed by a term, a
+`($)` sub called with a list, and a displaced built-in are not.  A STRING EVAL
+compiled after the install does see it (task #2870, ir-spec §9.1 piece 4).
+
+**The detector (task #2610, s513d) -- an instrument, off by default.**
+`PCL_DETECT_TABLE=1` at transpile time makes each unit carry a table of how it
+read every bareword call name; `PCL_DETECT_LOG=FILE` at run time appends one
+line per sub installed during a unit's compile phase that disagrees with a call
+site BELOW the install: `unit  name  install-line  install-kind  call-line
+assumed-kind  installed-prototype`.  Nothing dies and nothing announces; use a
+scratch `PCL_CACHE_DIR` (a cached module keeps the table it was transpiled
+with).  The first measurement over the four populations is in task #2610 and
+docs/DECIDED.md `## s513d`; it decides die vs announce.
+
+**Affected tests:** none in the gate or the sweep beyond the detector's own
+guard (`Pl/t/detect-01.t`).
+
 ## Source filters (`Filter::Util::Call`, `Filter::Simple`, `use Switch`, …)
 
 **Perl behaviour:** A source filter is code installed by a module's `import`
@@ -1942,9 +1972,12 @@ file — probed only by construction, no population hit; (2) perl's "Prototype
 mismatch" warning on a redefinition is not emitted (the new definition's
 prototype does apply, as in perl); (3) a prototype set at RUN time
 (`set_prototype` in a BEGIN block) is reported by `prototype()` but does not
-change how LATER calls parse, including calls compiled by a string eval after
-the set -- perl: `BEGIN { set_prototype(\&sp, q($$)) } sp(@l, 5)` passes 2
-arguments, PCL 4 (task #2610).
+change how LATER calls of the FILE parse -- perl: `BEGIN { set_prototype(\&sp,
+q($$)) } sp(@l, 5)` passes 2 arguments, PCL 4 (task #2610; the file was parsed
+before the BEGIN ran -- the detector instrument `PCL_DETECT_TABLE` +
+`PCL_DETECT_LOG` reports each such install, s513d).  A STRING EVAL compiled
+after the set DOES see it since s513d (task #2870: the eval request carries the
+prototypes visible at the eval site, ir-spec §9.1 piece 4).
 
 **`prototype("CORE::NAME")` IS supported (task #1586, s484a)** and is a
 different mechanism: perl's own prototype strings are LANGUAGE data, so they
