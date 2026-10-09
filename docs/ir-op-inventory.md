@@ -276,13 +276,13 @@ ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-ope
 | `p-pipe` | macro | `(read-fh write-fh)` | — | — | — | — | — | — | — |
 | `p-print` | function | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-printf` | function | `(&rest args)` | — | — | — | — | — | — | — |
-| `p-read` | macro | `(fh &rest args)` | — | — | — | — | — | — | — |
+| `p-read` | macro | `(fh buf &rest args)` | — | — | — | — | — | — | — |
 | `p-readline` | macro | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-say` | function | `(&rest args)` | — | — | — | — | — | — | — |
 | `p-seek` | macro | `(fh &rest args)` | — | — | — | — | — | — | — |
 | `p-select` | function | `(&optional (fh nil) (wbits nil) (ebits nil) (timeout nil timeout-p))` | — | — | — | — | — | — | — |
 | `p-sysopen` | macro | `(fh path flags &optional perms)` | — | — | — | — | — | — | — |
-| `p-sysread` | macro | `(fh &rest args)` | — | — | — | — | — | — | — |
+| `p-sysread` | macro | `(fh buf &rest args)` | — | — | — | — | — | — | — |
 | `p-sysseek` | macro | `(fh &rest args)` | — | — | — | — | — | — | — |
 | `p-syswrite` | macro | `(fh &rest args)` | — | — | — | — | — | — | — |
 | `p-tell` | macro | `(&rest args)` | — | — | — | — | — | — | — |
