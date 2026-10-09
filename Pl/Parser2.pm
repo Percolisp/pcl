@@ -1558,6 +1558,12 @@ sub parse {
   # VarAnnotator verdicts above all) sees the per-variable shape (#2114).
   $self->_split_literal_list_decls($doc);
 
+  # A module whose import installs CONSTANT handlers (`use bigint`: perl's
+  # tokenizer hands every numeric literal in the `use`'s scope to the
+  # handler) -- each literal in that scope becomes the handler CALL here,
+  # before any pass sees a number (#2874).
+  $self->_apply_constant_handlers($doc);
+
   # `my sub NAME {…}` / `state sub NAME {…}` are LEXICALS, but every named sub
   # compiles to a PACKAGE sub — so two same-named lexical subs in different
   # scopes clobbered each other and every reference resolved to the LAST one,
@@ -6391,6 +6397,82 @@ sub _signature_normal_plan {
 #   - plain distinct scalars, the same count on both sides (no padding, no
 #     dropped extras, no `undef` placeholder, no array or hash);
 #   - every element a number, a non-interpolating string, or `undef`.
+# COMPILE-TIME CONSTANT HANDLERS (#2874; ir-spec §5).  A `use MODULE` whose
+# import calls `overload::constant KIND => \&NAME` (the module's import
+# effects, Pl::Parser::module_import_effects) makes every numeric literal of
+# that KIND inside the `use`'s lexical scope -- after the statement, within
+# its enclosing node, until a `no MODULE` -- the call `NAME('TEXT')`: perl
+# calls the handler with the literal's SOURCE text, and so does this, so a
+# literal never passes through a double first.  KIND: `integer` (decimal
+# digits), `float` (a point or an exponent), `binary` (0x / 0b / 0o / a
+# leading-zero octal).  A literal inside `use`/`no`/`package`, or a version
+# literal, is not a constant perl hands over.  Rewritten as TOKENS, so every
+# later pass sees an ordinary call and no numeric fast path can claim it.
+sub _apply_constant_handlers {
+  my ($self, $doc) = @_;
+  my $fp = $self->fallback_parser;
+  my @sites;
+  for my $st (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    my $type = $st->type // '';
+    next if $type ne 'use' && $type ne 'no';
+    my $m = $st->module // '';
+    next if $m eq '' || $m =~ /\A(?:feature|experimental|lib|strict|warnings|utf8|v?\d)/;
+    next if !$fp->_find_module_file($m);
+    my $env = eval { $fp->_extract_module_prototypes($m) } or next;
+    my $c = ($env->import_effects || {})->{constant};
+    next if !$c || !%$c;
+    push @sites, [ $st, $type eq 'use' ? $c : undef, $st->location ];
+  }
+  return if !@sites;
+  for my $num (@{ $doc->find('PPI::Token::Number') || [] }) {
+    next if $num->isa('PPI::Token::Number::Version');
+    my $stmt = $num->statement;
+    next if $stmt && ($stmt->isa('PPI::Statement::Include')
+                      || $stmt->isa('PPI::Statement::Package'));
+    my $handlers = _constant_handlers_at($num, \@sites) or next;
+    my $text = $num->content;
+    my $neg  = $text =~ s/\A-// ? '-' : '';
+    my $kind = $num->isa('PPI::Token::Number::Hex')
+            || $num->isa('PPI::Token::Number::Binary')
+            || $num->isa('PPI::Token::Number::Octal') ? 'binary'
+             : $num->isa('PPI::Token::Number::Float')
+            || $num->isa('PPI::Token::Number::Exp')   ? 'float'
+             : $text =~ /[.eE]/                         ? 'float'
+             :                                            'integer';
+    my $name = $handlers->{$kind} or next;
+    my $frag = Pl::Parser::fragment_doc($neg ? "-($name('$text'))" : "$name('$text')")
+      or die "PCL: constant handler call for '$text' did not parse\n";
+    my ($fst) = $frag->schildren;
+    my @els = $fst->children;
+    $_->remove for @els;
+    $num->insert_before($_) for @els;
+    $num->delete;
+  }
+  return;
+}
+
+# The handlers in force at $tok: the LATEST `use`/`no` site before it whose
+# enclosing node also encloses it (a `no` site = none).
+sub _constant_handlers_at {
+  my ($tok, $sites) = @_;
+  my $loc = $tok->location or return undef;
+  my ($best, $best_loc);
+  for my $s (@$sites) {
+    my ($st, $c, $sl) = @$s;
+    next if $sl->[0] > $loc->[0] || ($sl->[0] == $loc->[0] && $sl->[1] >= $loc->[1]);
+    my $scope = $st->parent or next;
+    my $in = 0;
+    for (my $p = $tok->parent; $p; $p = $p->parent) {
+      if ($p == $scope) { $in = 1; last }
+    }
+    next if !$in;
+    next if $best_loc && ($best_loc->[0] > $sl->[0]
+                          || ($best_loc->[0] == $sl->[0] && $best_loc->[1] > $sl->[1]));
+    ($best, $best_loc) = ($s, $sl);
+  }
+  return $best ? $best->[1] : undef;
+}
+
 sub _split_literal_list_decls {
   my ($self, $doc) = @_;
   return unless Pl::Passes::enabled('list-decl-split');

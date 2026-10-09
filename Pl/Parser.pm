@@ -10730,13 +10730,22 @@ sub _walk_module_prototypes {
 # `import` sub (Environment::import_effects): plain perl a user could write,
 # recognised by its shape -- never by a module name (rule 9a).
 #   feature->import(LIST) / experimental->import(LIST)  => features (#2872)
-#   overload::constant KIND => sub { CLASS->new(...) }  => constant (#2874)
-# The quoted words of the LIST count; anything computed is not a fact.
+#   overload::constant KIND => \&NAME, ...             => constant (#2874)
+# The quoted words of the LIST count; anything computed is not a fact.  A
+# constant handler must be a NAMED sub (`\&NAME`, qualified into the package
+# the import sub is in): the transpiler compiles each literal of KIND in the
+# `use`'s scope as a call NAME('TEXT') -- perl calls the handler with the
+# literal's source text first -- so an anonymous handler is not a fact.
 sub module_import_effects {
   my ($doc) = @_;
   my %fx;
   for my $sub (@{ $doc->find('PPI::Statement::Sub') || [] }) {
     next if ($sub->name // '') ne 'import';
+    my $pkg = 'main';
+    for my $p (@{ $doc->find('PPI::Statement::Package') || [] }) {
+      last if $p->line_number > $sub->line_number;
+      $pkg = $p->namespace;
+    }
     my $c = $sub->content;
     while ($c =~ /\b(?:feature|experimental)->import\s*\(([^)]*)\)/g) {
       my $args = $1;
@@ -10745,8 +10754,12 @@ sub module_import_effects {
         push @{ $fx{features} }, split ' ', $1;
       }
     }
-    while ($c =~ /overload::constant\s*\(?\s*['"]?(integer|float|binary)['"]?\s*=>\s*sub\s*\{\s*([\w:]+)->new\b/g) {
-      $fx{constant}{$1} = $2;
+    while ($c =~ /overload::constant\b([^;]*)/g) {
+      my $args = $1;
+      while ($args =~ /['"]?(integer|float|binary)['"]?\s*=>\s*\\&([\w:]+)/g) {
+        my ($kind, $name) = ($1, $2);
+        $fx{constant}{$kind} = $name =~ /::/ ? $name : "${pkg}::$name";
+      }
     }
   }
   return \%fx;

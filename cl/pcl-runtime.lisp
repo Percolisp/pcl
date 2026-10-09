@@ -11968,8 +11968,11 @@ per element."
                    (and s-undef e-undef)))))
     (if use-string-range
         (values :string (if s-undef "" s) (if e-undef "" e))
-        (let ((ns (to-number s))
-              (ne (to-number e)))
+        ;; Numified from the BOX, not the unboxed value: an object with a
+        ;; `0+` (or `""`) overload is numified THROUGH it, as perl does
+        ;; (`Math::BigInt->new(1) .. 10` is 1..10, not an address -- #2874).
+        (let ((ns (to-number start))
+              (ne (to-number end)))
           ;; Inf/NaN endpoints: Perl dies "Range iterator outside integer range"
           (when (or (and (floatp ns) (or (%pcl-nan-p ns) (sb-ext:float-infinity-p ns)))
                     (and (floatp ne) (or (%pcl-nan-p ne) (sb-ext:float-infinity-p ne))))
