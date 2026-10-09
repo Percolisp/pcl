@@ -102,6 +102,8 @@ worth a compile-time arm — but it is NOT five lines: `$,`, `$\`, tied and in-m
 selected handle must keep their one path.  Medium; expected −40 to −50 % on `fhprint` and on any
 output-heavy loop.
 
+**Built in round 44 (s513h, #2771 closed):** the compile-time arm is a COMPILER MACRO on `p-print` / `p-say` that picks a fixed-arity entry for one to three list items -- from the arity alone, because the entry keeps the run-time "does this value spread" test and so needs no knowledge of the argument forms.  The entry builds its list on the stack and runs the same resolver and the same write path; the general entry's argument list is stack-allocated too.  Core A/B: fhprint -19 %, `print $fh "x\n"` -31 %, `print "x\n"` -28 %, an interpolated string -8 %.  The remaining gap to perl is the write itself and the separator reads.
+
 ### Lever C — `grep` in scalar context builds the list it only counts (#2772)
 
 `my $k = grep $_, @p`: a quarter of the row is collecting matches, another 15 % is reading the array
@@ -125,6 +127,8 @@ In the end (s512p, round 41): the scan now starts near the tail for an end-ancho
 In round 42 (s513c): `my $u;` with no initializer now gets the in-place buffer (#2880, 30 000 appends 1.97 s -> 0.006 s), and substr or a single match of the growing string reads it in place instead of copying it whole (#2881, append + substr 1.51 s -> 0.010 s).
 In round 43 (s513e): `split` with a pattern of literal characters (`split ','`, `split /\./`, `split /\t/`) no longer goes through the regex engine but scans for the literal itself, as perl does (#2980, splitstrre 6.3x -> 1.4x perl, splitcomma 3.3x -> 1.3x).
 In round 43 (s513e): `s///g` runs its own match loop and builds the result in one string instead of an output stream (#2981, the subste row 0.183 s -> 0.110 s, 3.4x -> 2.0x perl).  Found on the way, filed: `^` under /m matched after a trailing newline at the very end of the string (#2982, pre-existing).
+In round 44 (s513h): every `print` / `say` with one to three items takes a fixed-arity entry and allocates no argument list (#2771, fhprint 0.183 s -> 0.149 s, `print $fh "x\n"` -31 %).
+In round 44 (s513h), found on the way: `local $g` on a package global, and every iteration of `for $g (...)` over one, wrote the variable's cell through SBCL's checked setter, which consults its info database on every write (#3040, localvar -27 %, `for our $x` -38 %).
 
 ## 3. What is NOT cheap
 
