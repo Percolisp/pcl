@@ -15,6 +15,10 @@
 #         that builds the item list on the stack and runs the SAME resolver
 #         and tail as p-print; the general entry's &rest list is
 #         dynamic-extent.
+#   #3040 `local` on a cell global, `local ... if` and a foreach over a
+#         global loop variable write the value cell directly (%p-cell-set =
+#         sb-kernel:%set-symbol-global-value), not through the info-database
+#         checks of SET-SYMBOL-GLOBAL-VALUE.
 use v5.30;
 use strict;
 use warnings;
@@ -169,6 +173,101 @@ P1
 parens
 t1t2
 qt1t2
+END_EXP
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #3040 MECHANISM: `local' on a cell global (and `local ... if', and a foreach
+# over a global loop variable) writes the value cell directly -- never through
+# SET-SYMBOL-GLOBAL-VALUE, whose info-database checks were ~30 % of a loop
+# calling a sub that does `local $g'.
+like(lisp_out(<<'END_LISP'),
+(let ((*print-pretty* nil) (*package* (find-package :pcl)))
+  (let ((e1 (format nil "~S" (macroexpand-1 '(p-local-cell $g 1 $g))))
+        (e2 (format nil "~S" (macroexpand-1 '(p-local-cell-if t $g 1 $g)))))
+    (format t "CELLSET=~A/~A SLOW=~A/~A~%"
+            (search "%P-CELL-SET" e1 :test #'char-equal) (search "%P-CELL-SET" e2 :test #'char-equal)
+            (search "(SETF (SB-EXT:SYMBOL-GLOBAL-VALUE" e1 :test #'char-equal)
+            (search "(SETF (SB-EXT:SYMBOL-GLOBAL-VALUE" e2 :test #'char-equal))))
+END_LISP
+     qr/CELLSET=\d+\/\d+ SLOW=NIL\/NIL/i, '#3040: p-local-cell / p-local-cell-if install and restore through %p-cell-set');
+
+{
+    # 2 000 000 calls of a sub doing `local $g = $_[0]': the bound is RELATIVE
+    # to perl's own time measured in this run (8x perl + 0.5 s, DECIDED
+    # ## s513), the gross-regression bound; the mechanism row above is the
+    # inverse guard.
+    my $src = q{our $g = 0; sub lv { local $g = $_[0]; $g + 1 } my $s = 0; for my $i (1 .. 2000000) { $s += lv($i) } print "$s $g\n";};
+    my ($pfh, $pfile) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $src;
+    close $pfh;
+    my $p0 = time;
+    my $perl_out = `$^X $pfile 2>&1`;
+    my $pdt = time - $p0;
+    die "perl's own answer is wrong: $perl_out" if $perl_out ne "2000003000000 0\n";
+    my $t0 = time;
+    my $out = run_pl($src);
+    my $dt = time - $t0;
+    my $bound = 8 * $pdt + 0.5;
+    is($out, "2000003000000 0\n", '#3040 timed: the answer');
+    cmp_ok($dt, '<', $bound, sprintf('#3040 timed: 2 000 000 local-ising calls within 8x perl + 0.5 s = %.2f s (took %.2f s, perl %.2f s)', $bound, $dt, $pdt));
+}
+
+answers(<<'END_SRC', <<'END_EXP', '#3040 answers: local restored after die / return from a block / last / recursion, local elem / array / hash elem, a ref to the old box, an unbound global, foreach over a global (restored, seen by a sub, after die), local if, @_ aliasing and copying, &sub, goto &sub, depth 10000, wantarray, 0/1/1000 arguments, passarr');
+use strict; no warnings;
+our $g = "G0"; our @ga = (1, 2); our %gh = (k => "K0"); our $c = 0;
+sub show { print join(" ", map { defined $_ ? $_ : 'U' } @_), "\n" }
+sub lv { local $g = $_[0]; inner() }
+sub inner { "in=$g" }
+show('01', lv("x"), $g);
+sub lvdie { local $g = "D"; die "boom\n" } eval { lvdie() }; show('02 after die', $g, $@ eq "boom\n" ? 'caught' : 'no');
+sub lvret { local $g = "R"; { return "ret=$g" } } show('03 return from block', lvret(), $g);
+for my $i (1 .. 3) { local $g = "L$i"; last if $i == 2 } show('04 after last', $g);
+sub lvh { local $gh{k} = "KL"; "h=$gh{k}" } show('05 local hash elem', lvh(), $gh{k});
+sub lva { local $ga[0] = 9; "a=@ga" } show('06 local array elem', lva(), "@ga");
+sub lvaa { local @ga = (7); "aa=@ga" } show('07 local array', lvaa(), "@ga");
+sub rec { my $n = shift; local $g = "r$n"; return $n ? rec($n - 1) . $g : $g } show('08 nested local recursion', rec(3), $g);
+my $ref = \$g; sub lvref { local $g = "NEW"; "$$ref/$g" } show('09 ref to old box', lvref(), $$ref);
+our $u; undef $u; sub lvu { local $u = 1; $u } show('10 undef global', lvu(), defined $u ? 'def' : 'undef');
+for our $fg (1 .. 3) { $c += $fg } show('11 foreach over global', $c);
+our $fg2 = "keep"; for $fg2 (qw(a b)) { $c .= $fg2 } show('12 foreach global restored', $c, $fg2);
+sub fgs { "fg2=$fg2" } for $fg2 (qw(p q)) { $c .= fgs() } show('13 foreach global seen by sub', $c);
+eval { for $fg2 (qw(z)) { die "x\n" } }; show('14 foreach global after die', $fg2);
+sub lcaller { local $g = 1; (caller(0))[3] } show('16 caller in local sub', lcaller());
+sub al { $_[0] = "W" } my $v = "o"; al($v); show('17 @_ alias', $v);
+sub cp { my ($a) = @_; $a = "Z"; $a } my $w = "o"; cp($w); show('18 copy', $w);
+sub amp { "amp=@_" } sub shr { &amp } show('19 &sub shares @_', shr(1, 2));
+sub tgt { "tgt=@_" } sub gto { goto &tgt } show('20 goto &sub', gto(3, 4));
+sub deep { my $n = shift; $n ? 1 + deep($n - 1) : 0 } show('21 depth 10000', deep(10000));
+sub wa { wantarray ? "list" : defined(wantarray) ? "scalar" : "void" } my @l = wa(); my $s = wa(); show('22 wantarray', $l[0], $s);
+sub nargs { scalar @_ } show('23 nargs', nargs(), nargs(1), nargs(1 .. 1000));
+sub ps { my (@d) = @_; my $m = @d / 2; map { @d[$_, $_ + $m] } 0 .. $m - 1 } show('24 passarr', ps(1 .. 8));
+sub lvif { local $g = "IF" if $_[0]; $g = "w" . $g; $g } $g = "G"; show('25 local if', lvif(0), $g); $g = "G"; show('26 local if true', lvif(1), $g);
+END_SRC
+01 in=x G0
+02 after die G0 caught
+03 return from block ret=R G0
+04 after last G0
+05 local hash elem h=KL K0
+06 local array elem a=9 2 1 2
+07 local array aa=7 1 2
+08 nested local recursion r0r1r2r3 G0
+09 ref to old box G0/NEW G0
+10 undef global 1 undef
+11 foreach over global 6
+12 foreach global restored 6ab keep
+13 foreach global seen by sub 6abfg2=pfg2=q
+14 foreach global after die keep
+16 caller in local sub main::lcaller
+17 @_ alias W
+18 copy o
+19 &sub shares @_ amp=1 2
+20 goto &sub tgt=3 4
+21 depth 10000 10000
+22 wantarray list scalar
+23 nargs 0 1 1000
+24 passarr 1 5 2 6 3 7 4 8
+25 local if wG wG
+26 local if true wIF G
 END_EXP
 
 done_testing();

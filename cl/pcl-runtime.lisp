@@ -16033,6 +16033,17 @@ carries a continue block.  Every other foreach is emitted exactly as before."
                             ,@(cddr list)))
           (t list))))
 
+(defmacro %p-cell-set (sym-form value)
+  "Write the global CELL of the symbol SYM-FORM evaluates to (a quoted cell
+   name in every caller: `local', `local ... if', a foreach over a global loop
+   variable).  `(setf sb-ext:symbol-global-value)' compiles to a full call of
+   SET-SYMBOL-GLOBAL-VALUE, which asks the info database on EVERY write
+   whether the symbol is a constant or carries a declared type -- ~30 % of a
+   loop calling a sub that does `local $g' (task #3040, s513h).  A cell symbol
+   is neither (p-defcell declares neither, and the partition never binds it
+   dynamically), so the check cannot fire: write the value cell directly."
+  `(sb-kernel:%set-symbol-global-value ,sym-form ,value))
+
 (defun %expand-foreach (rawp var list body-and-keys env)
   "Shared expander for p-foreach / p-foreach-raw.  RAWP selects the loop-var
 binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
@@ -16093,8 +16104,8 @@ drift apart the way two copies would."
                                 (return-from ,b "")))
                            (if cellp
                                `(progn
-                                  (setf (sb-ext:symbol-global-value ',var)
-                                        (,elt-fn ,vec ,i))
+                                  (%p-cell-set ',var
+                                    (,elt-fn ,vec ,i))
                                   ,@iter-forms)
                                `(let ((,var (,elt-fn ,vec ,i)))
                                   ,@iter-forms))
@@ -16107,7 +16118,7 @@ drift apart the way two copies would."
                    (wrapped (if label `(catch ',last-tag ,inner) inner)))
               (if cellp
                   `(unwind-protect ,wrapped
-                     (setf (sb-ext:symbol-global-value ',var) ,old))
+                     (%p-cell-set ',var ,old))
                   wrapped)))))))
 
 (defmacro p-foreach ((var list) &rest body-and-keys &environment env)
@@ -16190,7 +16201,7 @@ anything that reaches the global by name."
                              (lambda (b) `(when (> ,i ,hi) (return-from ,b "")))
                              (if cellp
                                  `(progn
-                                    (setf (sb-ext:symbol-global-value ',var) ,val)
+                                    (%p-cell-set ',var ,val)
                                     ,@iter-forms)
                                  `(let ((,var ,val))
                                     ,@iter-forms))
@@ -16199,7 +16210,7 @@ anything that reaches the global by name."
                      (wrapped (if label `(catch ',last-tag ,inner) inner)))
                 (if cellp
                     `(unwind-protect ,wrapped
-                       (setf (sb-ext:symbol-global-value ',var) ,old))
+                       (%p-cell-set ',var ,old))
                     wrapped))))))))
 
 (defmacro p-foreach-range ((var from to) &rest body-and-keys &environment env)
@@ -31051,13 +31062,13 @@ buffer's fill-pointer; everything else falls back to file-length."
     `(let* ((,old (if (boundp ',sym) (sb-ext:symbol-global-value ',sym) '%p-cell-unbound))
             (,new ,init)
             (,tied (%p-local-tied-enter ,old ,new)))
-       (unless ,tied (setf (sb-ext:symbol-global-value ',sym) ,new))
+       (unless ,tied (%p-cell-set ',sym ,new))
        (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
                          (declare (ignorable ,sym))
                          ,@body)
          (cond (,tied (%p-local-tied-exit ,old ,tied))
                ((eq ,old '%p-cell-unbound) (makunbound ',sym))
-               (t (setf (sb-ext:symbol-global-value ',sym) ,old)))))))
+               (t (%p-cell-set ',sym ,old)))))))
 
 ;;; ── `local TARGET if COND` — the SAVE AND RESTORE are conditional ──────────
 ;;; (task #541.)  perl does not execute the statement AT ALL when the modifier's
@@ -31093,14 +31104,14 @@ buffer's fill-pointer; everything else falls back to file-length."
                       nil))
             (,new (when ,c ,init))
             (,tied (when ,c (%p-local-tied-enter ,old ,new))))
-       (when (and ,c (not ,tied)) (setf (sb-ext:symbol-global-value ',sym) ,new))
+       (when (and ,c (not ,tied)) (%p-cell-set ',sym ,new))
        (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
                          (declare (ignorable ,sym))
                          ,@body)
          (when ,c
            (cond (,tied (%p-local-tied-exit ,old ,tied))
                  ((eq ,old '%p-cell-unbound) (makunbound ',sym))
-                 (t (setf (sb-ext:symbol-global-value ',sym) ,old))))))))
+                 (t (%p-cell-set ',sym ,old))))))))
 
 (defmacro p-local-maybe (cond-form localizer &body body)
   "Run BODY inside LOCALIZER when COND-FORM holds, and BARE otherwise — the
