@@ -16631,7 +16631,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (%p-guarded-write site
                     (let ((ofs (%p-separator-text |$,|))
                           (firstp t))
-                      (dolist (arg (if (every #'%p-print-arg-plain-p args)
+                      ;; An inline loop, not `every' (a funcalled predicate
+                      ;; was ~12 % of a print loop, #2771 s513h).
+                      (dolist (arg (if (loop for a in args
+                                             always (%p-print-arg-plain-p a))
                                        args
                                        (coerce (p-flatten-args args) 'list)))
                         (when (and ofs (not firstp)) (%p-out-string ofs fh site))
@@ -16642,8 +16645,12 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                     (%p-maybe-autoflush fh)
                     t))
 
+;; The &rest list of print/say never escapes: %p-write-list walks it, or
+;; flattens it into a FRESH list (task #2771, s513h -- the heap rest list was
+;; ~15 % of a print loop).  Say's terminator is one constant string.
 (defun p-print (&rest args)
   "Perl print - prints args then appends $\\ (output record separator)"
+  (declare (dynamic-extent args))
   (multiple-value-bind (fh rest) (%p-out-target args "print")
     ;; NIL = perl already warned (or died); the write does not happen.
     (unless fh (return-from p-print *p-undef*))
@@ -16651,9 +16658,64 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 (defun p-say (&rest args)
   "Perl say - print with \"\\n\" appended INSTEAD of $\\ (task #500)"
+  (declare (dynamic-extent args))
   (multiple-value-bind (fh rest) (%p-out-target args "say")
     (unless fh (return-from p-say *p-undef*))
-    (%p-write-list fh rest (string #\Newline) "say")))
+    (%p-write-list fh rest (load-time-value (string #\Newline) t) "say")))
+
+;;; FIXED-ARITY ENTRIES (task #2771's compile-time arm, s513h).  A print/say
+;;; call with ONE to THREE list items is compiled -- by the compiler macros
+;;; below, from the form's ARITY alone -- into a call of %p-print-N, which
+;;; builds the item list on the STACK and runs the SAME resolver
+;;; (%p-out-fh-or-fail) and the SAME tail (%p-write-list) as p-print / p-say.
+;;; Nothing is decided from the argument FORMS: an item whose VALUE spreads (a
+;;; raw @array vector, a %hash) is flattened by %p-write-list exactly as the
+;;; general entry flattens it.  What moves to compile time is the `:fh' parse
+;;; and the list's allocation (hand-replaced A/B: fhprint -24 %, `print $fh
+;;; "x\n"' -37 %).  The emitted text is unchanged.
+(defun %p-print-fixed-write (sayp desig items)
+  "The body of every %p-print-N: resolve DESIG (NIL = the selected handle)
+   and write ITEMS as print (SAYP NIL) or say (SAYP true) does."
+  (let* ((site (if sayp "say" "print"))
+         (fh (%p-out-fh-or-fail desig site)))
+    (if fh
+        (%p-write-list fh items
+                       (if sayp (load-time-value (string #\Newline) t) |$\\|)
+                       site)
+        *p-undef*)))
+
+(defun %p-print-1 (sayp desig a)
+  (let ((items (list a)))
+    (declare (dynamic-extent items))
+    (%p-print-fixed-write sayp desig items)))
+
+(defun %p-print-2 (sayp desig a b)
+  (let ((items (list a b)))
+    (declare (dynamic-extent items))
+    (%p-print-fixed-write sayp desig items)))
+
+(defun %p-print-3 (sayp desig a b c)
+  (let ((items (list a b c)))
+    (declare (dynamic-extent items))
+    (%p-print-fixed-write sayp desig items)))
+
+(defun %p-print-compiler-macro (whole sayp args)
+  "Rewrite (p-print [:fh DESIG] ITEM...) / (p-say ...) with one to three
+   ITEMs to the matching %p-print-N; anything else stays WHOLE.  Argument
+   evaluation order is unchanged (DESIG, then the items, left to right)."
+  (let* ((fhp (and (>= (length args) 2) (eq (first args) :fh)))
+         (items (if fhp (cddr args) args))
+         (entry (case (length items)
+                  (1 '%p-print-1) (2 '%p-print-2) (3 '%p-print-3))))
+    (if entry
+        `(,entry ,sayp ,(and fhp (second args)) ,@items)
+        whole)))
+
+(define-compiler-macro p-print (&whole whole &rest args)
+  (%p-print-compiler-macro whole nil args))
+
+(define-compiler-macro p-say (&whole whole &rest args)
+  (%p-print-compiler-macro whole t args))
 
 (defun p-warn-is-reference (val)
   "Check if val is a Perl reference (hash, array ref, blessed object, etc.)"
