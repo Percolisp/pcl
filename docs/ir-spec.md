@@ -2159,6 +2159,37 @@ eval is compiled with no sub table at all (#2870).  `prototype()` at run time
 is unaffected (whole program).  Example: `print f(@a); sub f ($) { $_[0] }`
 with `@a = (10, 20, 30)` prints 10, not 3.
 
+**A sub head under the `signatures` feature is a SIGNATURE, whatever its shape
+(normative, s513f, task #2872):** where the feature is in force at the sub's
+position, every parenthesised list after the sub name — `($)`, `($, $)`,
+`(@)`, `()` included — is a signature (unnamed parameters with an arity
+check); a prototype is spelled only `:prototype(…)`.  PPI answers the feature
+for every line after a `use feature` / `use vN` / `use experimental` pragma
+(a `Structure::Signature`); the two positions it cannot see are the pragma's
+OWN line and a module whose `import` calls `feature->import('signatures')`
+(read off its source as an import effect, `Pl::Parser::module_import_effects`,
+lexical from the `use` to the end of its enclosing block).  ONE predicate,
+`Pl::Parser::head_is_signature`, answers for every classifier.  Elsewhere a
+`Token::Prototype` head keeps the #455 rule (named parameters + an enabling
+pragma = signature).  Example: `use feature 'signatures'; sub f ($) { 42 }
+f(1, 2)` dies "Too many arguments for subroutine 'main::f' (got 2; expected
+1)".
+
+**A module's CONSTANT HANDLERS rewrite numeric literals (normative, s513f,
+task #2874):** a `use MODULE` whose `import` sub calls `overload::constant
+KIND => \&NAME` (KIND `integer` / `float` / `binary`, NAME a named sub) makes
+every numeric literal of that KIND after the statement, inside its enclosing
+node and up to a `no MODULE`, the call `NAME('TEXT')` — the handler called
+with the literal's SOURCE text, as perl calls it, so no literal passes through
+a double first.  The rewrite is a token pass before every other pass
+(`Parser2::_apply_constant_handlers`), so a numeric fast path never sees such
+a literal.  A literal inside `use` / `no` / `package`, a version literal and a
+literal inside a string eval are not rewritten; an anonymous handler is not a
+fact (it is code that would have to run while parsing: #2610's family).  The
+shims `lib/bigint.pm` and `lib/bignum.pm` are written in this shape; `use
+bigrat` is announced (Math::BigRat does not run yet).  Example: `use bigint;
+print 2**100` prints 1267650600228229401496703205376.
+
 **Element targets of `s///` / `tr///`** are the element's BOX:
 `$a[0] =~ s/…/…/` emits `(p-=~ (p-aref-box @a 0) (p-subst …))`, not
 `p-aref`.  A plain match is a read and keeps `p-aref`.

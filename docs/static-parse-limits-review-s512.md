@@ -176,6 +176,7 @@ recorded in #2610 with its costs.
    name in the eval's table (#2779); the detector's call line is the
    STATEMENT's and a method name it was asked about is recorded too.
 4. **#2872, #2874** — low frequency, both silent; each is a one-session item with its guard rows.
+   **DONE s513f**: #2872 (a prototype-shaped head is a signature wherever the feature is on, the pragma's own line and a module's `feature->import` included) and #2874 (`use bigint` / `use bignum` through a module's statically-read constant handlers; `use bigrat` announced).  What remains: `overload::constant` with an ANONYMOUS handler (code run while parsing, #2610), a literal in a string eval, bigrat (#3000).
 5. **Keyword plugins** — per module, only when a target needs one (Object::Pad is the likely first).
    **Source filters** — the filed transpile-time route, only when a target needs it.
 6. The family-C "open" row (`use re`, `indirect`, `bareword_filehandles`) — probe when touched.

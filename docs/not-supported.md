@@ -1996,6 +1996,13 @@ row, `is prototype(\&t000), "\$a"`, would now pass).
 
 ## Signature syntax is read as a signature even with the feature off
 
+(The other direction is NOT a divergence since s513f, task #2872: with the
+feature ON, a prototype-shaped head `($)` / `(@)` / `()` is a signature, also
+on the pragma's own line and through a module's `feature->import` — ir-spec
+§5.  One residue: an ANONYMOUS `sub ($) {…}` whose feature comes from a module
+found only through a `use lib` directory is classified before that `use lib`
+applies, and stays a prototype.)
+
 **Perl behaviour:** a parameter list is a *signature* only where
 `use feature 'signatures'` (or `use v5.36`, `use experimental 'signatures'`) is
 lexically in scope.  Without it, `sub f ($a) { $a }` declares the *prototype*
@@ -3097,6 +3104,25 @@ caveats, each deliberate:
 
 **Affected tests:** autodie's own `t/open.t` rows 7 and 11 (the location);
 `t/truncate.t` 5/6/9/10 are #2924 (truncate through a glob), not the shim.
+
+## `bigint` / `bignum` / `bigrat` and `overload::constant`
+
+**Perl behaviour:** `overload::constant` installs compile-time handlers that
+the TOKENIZER calls for each numeric (or string) literal in the lexical scope;
+`bigint`, `bignum` and `bigrat` are built on it.
+
+**PCL behaviour (task #2874):** a module whose `import` names its handlers as
+`overload::constant KIND => \&NAME` is honoured statically (ir-spec §5:
+each literal in scope becomes `NAME('TEXT')`), and `lib/bigint.pm` /
+`lib/bignum.pm` are written that way.  Not perl's: a literal inside a STRING
+EVAL is not converted; `hex` / `oct` from `use bigint` are exported into the
+importing PACKAGE (perl makes them lexical); bignum's upgrade/downgrade is set
+globally and not undone by `no bignum`; the `q` (string) kind is ignored.
+**`use bigrat` is ANNOUNCED** once on stderr and literals stay plain numbers —
+Math::BigRat itself does not run under PCL yet (task #3000).  A user module
+whose handler is an ANONYMOUS sub (or computed) cannot be honoured: the
+handler is code that would have to run while PCL parses — the static-parse
+family of #2610 — and its literals stay plain numbers, silently.
 
 ## Lexical compile-time hints (`$^H` / `%^H` scoping)
 
