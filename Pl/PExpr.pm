@@ -3340,7 +3340,7 @@ sub handle_subcalls {
         if (ref($t) eq 'PPI::Token::Prototype') {
           $anon_proto = Pl::Parser::prototype_token_text($t)
             if $drop == 0 && $self->has_parser
-            && !$self->parser->_signatures_enabled_at($t->statement // $t);
+            && !$self->parser->head_is_signature($t->content, $t);
           $drop++;
           next;
         }

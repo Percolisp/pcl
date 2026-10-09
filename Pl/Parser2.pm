@@ -2196,7 +2196,7 @@ sub parse {
           # when the class is ported (E5.3).
           my $fp = $self->fallback_parser;
           my $sig_info = $fp->capture_v1(
-            sub { $fp->parse_prototype_or_signature($proto, $sub) })->{result};
+            sub { $fp->head_record($proto, $sub) })->{result};
           # The DECLARING package goes with the prototype, exactly as it goes
           # with the declaration below it: two packages may declare the same
           # bare name with different prototypes (task #421).  A `:prototype(…)`
@@ -3496,7 +3496,10 @@ sub _is_pure_prototype {
   return 0 if grep { $_->isa('PPI::Structure::Signature') } $sub->children;
   my $p = $sub->prototype;
   return 0 unless defined $p;
-  return !Pl::Parser::proto_text_has_named_params($p);
+  # Where the sub's position makes the head a signature (#2872), `($)` is
+  # an unnamed parameter with an arity check, never a pure prototype.
+  return !$self->fallback_parser->head_is_signature($p, $sub)
+    && !Pl::Parser::proto_text_has_named_params($p);
 }
 
 # (The s280 `_check_interp_postderef` gate was removed in s299: postderef_qq
@@ -6349,8 +6352,7 @@ sub _signature_normal_plan {
   # (Pl::Parser::_sub_head, #455): named parameters and an enabling pragma
   # at or before the statement — otherwise it is an old-style prototype.
   return undef if $sig->isa('PPI::Token::Prototype')
-    && !(Pl::Parser::proto_text_has_named_params($text)
-         && $self->fallback_parser->_signatures_enabled_at($sub));
+    && !$self->fallback_parser->head_is_signature($text, $sub);
   return undef if $text =~ /\n/;
   my @parts = _signature_parts($text);
   my (@params, %dup, $slurpy);

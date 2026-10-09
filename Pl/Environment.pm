@@ -109,6 +109,17 @@ has import_sets => (
     default => sub { {} },
 );
 
+# What a `use` of this module DOES to the importing scope beyond names, read
+# off its `import` sub (Parser::module_import_effects): `features` => the
+# feature names it enables (`feature->import(...)`, #2872), `constant` =>
+# { integer|float|binary => CLASS } for an `overload::constant KIND => sub {
+# CLASS->new(...) }` handler (#2874).  Lexical facts: the reader scopes them
+# by the `use` statement's position.
+has import_effects => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 has export_names => (
     is => 'rw',
     default => sub { {} },

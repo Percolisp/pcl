@@ -1381,7 +1381,10 @@ sub _desugar_anon_signatures_once {
     # syntax with the feature genuinely off is read as a signature, where perl
     # reads a prototype — see docs/not-supported.md §Signature syntax.
     my $text = $sig->content;
-    next if !$is_struct && $text !~ /[\$\@\%]\w/;
+    # A position where a pragma PPI cannot see turns the feature on (the
+    # pragma's own line, a module import -- #2872) makes ANY shape a signature.
+    next if !$is_struct && $text !~ /[\$\@\%]\w/
+      && !$self->_signatures_unseen_at($sig);
 
     my $prologue = $self->_anon_signature_prologue($text);
     next unless defined $prologue;
@@ -1937,8 +1940,7 @@ sub _glob_alias_sig_info {
       push @infos, $p;
     }
     elsif (defined $c->{proto}) {
-      if (proto_text_has_named_params($c->{proto})
-          && $self->_signatures_enabled_at($fact->{stmt})) {
+      if ($self->head_is_signature($c->{proto}, $fact->{stmt})) {
         push @infos, { params => [], min_params => -1, is_proto => 0 };
       }
       else {
@@ -8539,6 +8541,87 @@ sub _signatures_enabled_at {
   return 0;
 }
 
+# THE IMPORT SITES that turn a feature on where PPI cannot see it (#2872): a
+# `use MODULE` whose import sub calls `feature->import(…)` /
+# `experimental->import(…)` naming the feature (the module's import EFFECTS,
+# read from its source by module_import_effects).  Lexical like the import
+# itself: it counts only for a statement after it inside the SAME enclosing
+# node, and a `no MODULE` is not an enabling site.
+sub _feature_import_sites {
+  my ($self, $doc, $feature) = @_;
+  my $memo = $self->{_feature_import_sites}{ refaddr $doc } //= {};
+  return $memo->{$feature} if $memo->{$feature};
+  my (@sites, $partial);
+  {
+    for my $st (@{ $doc->find('PPI::Statement::Include') || [] }) {
+      next if ($st->type // '') ne 'use';
+      my $m = $st->module // '';
+      next if $m eq '' || $m =~ /^(?:feature|experimental|lib|strict|warnings|utf8|v?\d)/;
+      # A `use lib` the collection has not applied yet (a pre-pass asking
+      # early) must not make the module "absent": resolving it now would
+      # memoise that answer for the whole process.  Ask again later.
+      if (!$self->_find_module_file($m)) { $partial = 1; next }
+      my $env = eval { $self->_extract_module_prototypes($m) } or next;
+      my $fx = $env->import_effects || {};
+      next unless grep { $_ eq $feature } @{ $fx->{features} || [] };
+      push @sites, [ $st->line_number // 0, $st->column_number // 0, $st->parent ];
+    }
+  }
+  $memo->{$feature} = \@sites if !$partial;
+  return \@sites;
+}
+
+# Does a pragma PPI CANNOT SEE enable `signatures` at $at?  PPI answers every
+# position after a `use feature`/`use vN` line itself (Structure::Signature),
+# so the positions left are (a) the pragma's OWN line, after it, and (b) a
+# module whose import enables the feature (_feature_import_sites).  At such
+# a position EVERY paren list after a sub name is a signature — `($)`, `(@)`,
+# `()` included (#2872): perl reserves the prototype for `:prototype(…)`.
+sub _signatures_unseen_at {
+  my ($self, $at) = @_;
+  my $doc  = eval { $at->top } or return 0;
+  my $line = eval { $at->line_number } // return 0;
+  my $col  = eval { $at->column_number } // 0;
+  $self->_signatures_enabled_at($at);          # fills the pragma site list
+  for my $s (@{ $self->{_sig_feature_sites}{ refaddr $doc } || [] }) {
+    return 1 if $s->[0] == $line && $s->[1] < $col;
+  }
+  for my $s (@{ $self->_feature_import_sites($doc, 'signatures') }) {
+    next unless $s->[0] < $line || ($s->[0] == $line && $s->[1] < $col);
+    for (my $p = $at->parent; $p; $p = $p->parent) {
+      return 1 if $p == $s->[2];
+    }
+  }
+  return 0;
+}
+
+# IS THIS SUB HEAD A SIGNATURE?  THE one answer for a Token::Prototype head
+# (#2872; every classifier asks it -- _sub_head, sub_proto_text,
+# parse_prototype_or_signature, Parser2's _is_pure_prototype and its native
+# signature lowering, PExpr's anonymous sub).  $text is the head's text, $at
+# the element whose POSITION decides.  Where a pragma PPI cannot see is in
+# force, any shape is a signature; elsewhere the #455 rule stands (named
+# parameters and an enabling pragma at or before the statement) — PPI already
+# said "feature off" by handing over a Token::Prototype.
+# The prototype RECORD of a named sub's head (#2872): a signature's when the
+# head is one (a Structure::Signature, or head_is_signature), else the
+# old-style reading.  For callers holding the head's TEXT and its sub.
+sub head_record {
+  my ($self, $text, $sub) = @_;
+  my $sig = (grep { $_->isa('PPI::Structure::Signature') } $sub->children)
+    || $self->head_is_signature($text, $sub);
+  return $sig ? $self->_sub_sig_info($sub, $text, 1)
+              : $self->parse_prototype_or_signature($text, $sub);
+}
+
+sub head_is_signature {
+  my ($self, $text, $at) = @_;
+  return 0 unless ref $at;
+  return 1 if $self->_signatures_unseen_at($at);
+  return proto_text_has_named_params($text) && $self->_signatures_enabled_at($at)
+    ? 1 : 0;
+}
+
 sub proto_text_has_named_params {
   my ($text) = @_;
   return 0 unless defined $text;
@@ -8580,9 +8663,7 @@ sub _sub_head {
       # empty slurpy then interpolated as an uninitialized value where perl is
       # silent.  So the repair is exactly that boundary: named params, and an
       # enabling pragma at or before this statement.
-      $is_signature_syntax = 1
-        if proto_text_has_named_params($prototype)
-        && $self->_signatures_enabled_at($stmt);
+      $is_signature_syntax = $self->head_is_signature($prototype, $stmt);
     }
     elsif ($ref eq 'PPI::Structure::Signature') {
       # Perl 5.20+ signature (when 'use feature "signatures"' is used)
@@ -8616,7 +8697,7 @@ sub sub_proto_text {
   }
   my ($tok) = grep { $_->isa('PPI::Token::Prototype') } $stmt->children;
   return undef unless $tok;
-  return undef if $self->_signatures_enabled_at($stmt);
+  return undef if $self->head_is_signature($tok->content, $stmt);
   return prototype_token_text($tok);
 }
 
@@ -10635,6 +10716,7 @@ sub _walk_module_prototypes {
   }
   $module_env->export_names(\%exported);
   $module_env->import_sets(module_import_sets($doc));
+  $module_env->import_effects(module_import_effects($doc));
 
   return $module_env;
 }
@@ -10644,6 +10726,32 @@ sub _walk_module_prototypes {
 # imports), and ':tag' => the literal qw() list of each `tag => [qw(...)]`
 # pair of %EXPORT_TAGS (Exporter's `:tag` spelling).  Literal lists only, the
 # same rule as export_names: that is the shape every shim uses.
+# What `use MODULE` does to the IMPORTING SCOPE, read off the module's own
+# `import` sub (Environment::import_effects): plain perl a user could write,
+# recognised by its shape -- never by a module name (rule 9a).
+#   feature->import(LIST) / experimental->import(LIST)  => features (#2872)
+#   overload::constant KIND => sub { CLASS->new(...) }  => constant (#2874)
+# The quoted words of the LIST count; anything computed is not a fact.
+sub module_import_effects {
+  my ($doc) = @_;
+  my %fx;
+  for my $sub (@{ $doc->find('PPI::Statement::Sub') || [] }) {
+    next if ($sub->name // '') ne 'import';
+    my $c = $sub->content;
+    while ($c =~ /\b(?:feature|experimental)->import\s*\(([^)]*)\)/g) {
+      my $args = $1;
+      push @{ $fx{features} }, $1 while $args =~ /['"]([\w:.]+)['"]/g;
+      while ($args =~ m{qw\s*[(\[{<]([^)\]}>]*)}g) {
+        push @{ $fx{features} }, split ' ', $1;
+      }
+    }
+    while ($c =~ /overload::constant\s*\(?\s*['"]?(integer|float|binary)['"]?\s*=>\s*sub\s*\{\s*([\w:]+)->new\b/g) {
+      $fx{constant}{$1} = $2;
+    }
+  }
+  return \%fx;
+}
+
 sub module_import_sets {
   my ($doc) = @_;
   my %sets;
