@@ -1263,6 +1263,14 @@ sub _premerge_include_prototypes {
       $fp->_merge_module_prototypes($fenv, undef);
     }
   }
+  # The module's OWN unit reads its facts overlay at its `package` statement
+  # (task #2878, Pl::Parser::register_unit_overlay).
+  return if !$self->has_filename;
+  for my $pkg (@{ $doc->find('PPI::Statement::Package') || [] }) {
+    my $name = $pkg->namespace or next;
+    $fp->register_unit_overlay($name, $self->filename,
+                               Pl::Parser::use_reg_site($pkg));
+  }
 }
 
 sub _source {

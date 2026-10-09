@@ -284,10 +284,14 @@ sub _pm_dirs {
   return @d;
 }
 
+# OVERLAY is the module's facts overlay file, or undef (task #2878): its BYTES
+# join the key, so a changed (or new, or deleted) overlay is a changed module.
 sub _key {
-  my ($path, $mtime, $size) = @_;
+  my ($path, $mtime, $size, $overlay) = @_;
   return join "|", $path, $mtime, $size, generation(), _compiler_stamp(),
-                   ($PPI::VERSION // ''), $];
+                   ($PPI::VERSION // ''), $],
+                   'overlay=' . (defined $overlay ? (file_sha($overlay) // '?')
+                                                  : 'none');
 }
 
 sub _entry_path {
@@ -393,10 +397,10 @@ to now (C<_find_module_file>), used to re-check every recorded dependency.
 =cut
 
 sub load {
-  my ($module, $path, $resolve) = @_;
+  my ($module, $path, $resolve, $overlay) = @_;
   return undef unless enabled();
   my @s = stat $path or return undef;
-  my $key  = _key($path, $s[9], $s[7]);
+  my $key  = _key($path, $s[9], $s[7], $overlay);
   my $file = _entry_path($module, $key);
   open my $fh, '<:raw', $file or do {
     $STATS{miss}++;
@@ -468,7 +472,7 @@ mean the cache does nothing).  Never fatal: a record that does not serialise
 =cut
 
 sub store {
-  my ($module, $path, $env, $frame) = @_;
+  my ($module, $path, $env, $frame, $overlay) = @_;
   return unless enabled();
   # FIVE FIELDS ON DISK.  A live record carries a sixth — how the name was
   # resolved (task #1860) — and that is a fact about THIS process's inc_paths,
@@ -482,7 +486,7 @@ sub store {
     return;
   }
   my @s = stat $path or return;
-  my $key = _key($path, $s[9], $s[7]);
+  my $key = _key($path, $s[9], $s[7], $overlay);
   my $rec = {
     v               => 1,
     module          => $module,

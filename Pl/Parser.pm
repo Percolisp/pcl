@@ -10579,9 +10579,13 @@ sub _extract_module_prototypes {
   # module the skip list answers for is not a dependency of anything.
   state $paths = {};
 
+  # The facts overlay each module resolved to (task #2878); undef = none.
+  state $overlays = {};
+
   # Return cached result if already parsed
   if (exists $cache->{$module}) {
     _note_module_dep($module, $paths, $walk);
+    _note_overlay_dep($module, $overlays);
     return $cache->{$module};
   }
 
@@ -10603,7 +10607,12 @@ sub _extract_module_prototypes {
   if ($module =~ /^(Carp|Cwd|
                     XSLoader|DynaLoader|Exporter|base|parent|strict|warnings|
                     utf8|bytes|overload|mro|B::|File::(?!Spec)|IO::|Data::Dumper)/x) {
-    return $cache->{$module} = undef;
+    # The facts overlay (task #2878) is DATA about the module, not a walk of
+    # it: a module skipped for cost still gets the facts its overlay states.
+    my $overlay = $self->_facts_overlay_path($module);
+    $overlays->{$module} = $overlay;
+    return $cache->{$module} =
+      $overlay ? $self->_facts_overlay_env($module, $overlay) : undef;
   }
   # (There used to be a second skip here, of `Test2::*` and `Test::*` BY NAME —
   # everything but Test::More.  It was a compile-time cost measure and it cost
@@ -10644,12 +10653,16 @@ sub _extract_module_prototypes {
   $paths->{$module} = $module_path;
   Pl::ProtoCache::note_dep('mod', $module, $module_path);
   return $cache->{$module} = undef unless $module_path;
+  my $overlay = $self->_facts_overlay_path($module);
+  $overlays->{$module} = $overlay;
 
   # L2 — the on-disk memo.  A hit prunes the whole branch: the entry already
   # holds what the recursive walk below would have merged, and its recorded
-  # dependencies have just been re-resolved and re-stat'ed.
+  # dependencies have just been re-resolved and re-stat'ed.  The overlay's
+  # bytes are part of the key (task #2878).
   if (my $hit = Pl::ProtoCache::load($module, $module_path,
-                                     sub { $self->_find_module_file($_[0]) })) {
+                                     sub { $self->_find_module_file($_[0]) },
+                                     $overlay)) {
     $walk->{$module} = { deps => $hit->{deps}, taint => 0 };
     Pl::ProtoCache::note_deps($hit->{deps});
     return $cache->{$module} = $hit->{env};
@@ -10661,14 +10674,18 @@ sub _extract_module_prototypes {
   # however the mutation is spelled.
   my $inc_before = join "\0", @{ $self->inc_paths };
   Pl::ProtoCache::begin_walk();
+  # The overlay's resolution -- or its absence -- is a fact this walk used.
+  _note_overlay_dep($module, $overlays);
   my $module_env = $self->_walk_module_prototypes($module, $module_path);
+  $self->_merge_facts_overlay($module, $module_env, $module_path, $overlay)
+    if $module_env && $overlay;
   Pl::ProtoCache::taint() if join("\0", @{ $self->inc_paths }) ne $inc_before;
   my $frame = Pl::ProtoCache::end_walk();
   $walk->{$module} = $frame;
   Pl::ProtoCache::note_deps($frame->{deps});
   # store() is the ONE place that decides whether this walk may be written —
   # a tainted frame leaves no entry, and says so in the stats.
-  Pl::ProtoCache::store($module, $module_path, $module_env, $frame)
+  Pl::ProtoCache::store($module, $module_path, $module_env, $frame, $overlay)
     if $module_env;
 
   return $cache->{$module} = $module_env;
@@ -10683,6 +10700,171 @@ sub _note_module_dep {
   my $w = $walk->{$module} or return;
   Pl::ProtoCache::note_deps($w->{deps});
   Pl::ProtoCache::taint() if $w->{taint};
+  return;
+}
+
+# ---------------------------------------------------------------------------
+# THE FACTS OVERLAY (task #2878; docs/shipped-modules.md "Facts overlays").
+#
+# A sub -- or a prototype -- that only BEGIN-time CODE installs (a glob-assign
+# loop over a name list, an eval-built sub, a computed export list) is
+# invisible to a static parse, so a later bareword call is read wrong.  The
+# fact is supplied in advance, in perl's own syntax for it: a FORWARD
+# DECLARATION (`sub _IS_VMS ();`) in a per-module file of declarations, the
+# module `PCL::Facts::<Module>`, resolved by the ONE resolver above under
+# every root of the search list (PCL's lib/ ships the overlays; a test
+# fixture carries its own under its -I root).  The real module still runs and
+# installs the real sub; the overlay defines nothing at run time.
+#
+# ONE reader: the overlay is walked by _walk_module_prototypes, exactly like a
+# module's source, and MERGED into the module's facts (_merge_facts_overlay):
+# it fills an absence, a disagreement DIES naming both files, export lists
+# are unioned.  Two consumers, both existing registration paths: the `use`
+# merge (#2871 positional) and the module's own unit (register_unit_overlay).
+
+# The overlay file for MODULE, or undef.  The overlay of an overlay is none.
+sub _facts_overlay_path {
+  my ($self, $module) = @_;
+  return undef if $module =~ /\APCL::Facts::/;
+  local $!;
+  return $self->_find_module_file("PCL::Facts::$module");
+}
+
+# The overlay's resolution -- a file, or none -- is a dependency of every
+# walk that consulted it: an overlay that appears, changes or vanishes must
+# invalidate a cached walk (Pl::ProtoCache re-resolves `mod` dependencies).
+sub _note_overlay_dep {
+  my ($module, $overlays) = @_;
+  return if !exists $overlays->{$module};
+  Pl::ProtoCache::note_dep('mod', "PCL::Facts::$module", $overlays->{$module});
+  return;
+}
+
+# The overlay's facts, as an Environment: validated (declarations only), then
+# read by THE module walk.  Memoized per file for the process.
+sub _facts_overlay_env {
+  my ($self, $module, $path) = @_;
+  state $memo = {};
+  return $memo->{$path} if exists $memo->{$path};
+  validate_facts_overlay($path, $module);
+  Pl::ProtoCache::begin_walk();
+  my $env = $self->_walk_module_prototypes($module, $path);
+  Pl::ProtoCache::end_walk();
+  die "PCL: facts overlay $path: could not be read\n" if !$env;
+  return $memo->{$path} = $env;
+}
+
+# An overlay is DECLARATIONS, never code (rule 12): anything else dies naming
+# the file and line.
+sub validate_facts_overlay {
+  my ($path, $module) = @_;
+  require PPI;
+  my $doc = PPI::Document->new($path)
+    or die "PCL: facts overlay $path: PPI cannot parse it\n";
+  for my $st ($doc->schildren) {
+    next if _facts_overlay_stmt_ok($st, $module);
+    (my $show = $st->content) =~ s/\s+/ /g;
+    die sprintf "PCL: facts overlay %s line %d: an overlay holds declarations"
+      . " only (package %s; sub NAME (PROTO); our \@EXPORT/\@EXPORT_OK/"
+      . "%%EXPORT_TAGS = literal list; 1;) -- found: %s\n",
+      $path, $st->line_number, $module, substr($show, 0, 70);
+  }
+  return 1;
+}
+
+my $_QW_LIST = qr{qw\s*(?:\([^()]*\)|\[[^\[\]]*\]|\{[^{}]*\}|<[^<>]*>|/[^/]*/)};
+
+sub _facts_overlay_stmt_ok {
+  my ($st, $module) = @_;
+  return 1 if $st->isa('PPI::Statement::End') || $st->isa('PPI::Statement::Data');
+  if ($st->isa('PPI::Statement::Package')) {
+    return !$st->find_first('PPI::Structure::Block') && $st->namespace eq $module;
+  }
+  if ($st->isa('PPI::Statement::Sub')) {
+    return !$st->isa('PPI::Statement::Scheduled') && $st->forward ? 1 : 0;
+  }
+  my $c = $st->content;
+  return 1 if $c =~ /\A1\s*;\z/;
+  return 0 if !$st->isa('PPI::Statement::Variable');
+  return 1 if $c =~ /\Aour\s*\@EXPORT(?:_OK)?\s*=\s*$_QW_LIST\s*;\z/;
+  return 1
+    if $c =~ /\Aour\s*%EXPORT_TAGS\s*=\s*\(\s*(?:\w+\s*=>\s*\[\s*$_QW_LIST\s*\]\s*,?\s*)*\)\s*;\z/;
+  return 0;
+}
+
+sub _facts_proto_text {
+  my ($rec) = @_;
+  return '(' . ($rec->{proto_string} // '') . ')';
+}
+
+# Merge an overlay's facts into the facts a walk of the module's source
+# produced.  The overlay fills an ABSENCE; a name both declare with different
+# prototypes is a CONFLICT and dies naming both files; exports are unioned.
+sub _merge_facts_overlay {
+  my ($self, $module, $module_env, $module_path, $overlay) = @_;
+  my $oenv = $self->_facts_overlay_env($module, $overlay);
+  for my $name (sort keys %{ $oenv->prototypes }) {
+    my $rec = $oenv->prototypes->{$name} or next;
+    next if $oenv->is_builtin_seed_record($name, $rec);
+    my $src = $module_env->prototypes->{$name};
+    if ($src && !$module_env->is_builtin_seed_record($name, $src)) {
+      next if Pl::Environment::_proto_shape_key($src)
+           eq Pl::Environment::_proto_shape_key($rec);
+      die "PCL: facts overlay conflict for ${module}::$name: $overlay declares "
+        . _facts_proto_text($rec) . " but $module_path declares "
+        . _facts_proto_text($src) . "\n";
+    }
+    $module_env->prototypes->{$name} = $rec;
+    my $per = $oenv->pkg_prototypes->{$name} || {};
+    $module_env->pkg_prototypes->{$name}{$_} //= $per->{$_} for keys %$per;
+  }
+  $module_env->export_names({ %{ $module_env->export_names || {} },
+                              %{ $oenv->export_names || {} } });
+  my %sets = %{ $module_env->import_sets || {} };
+  my $osets = $oenv->import_sets || {};
+  for my $k (keys %$osets) {
+    my %seen;
+    $sets{$k} = [ grep { !$seen{$_}++ } @{ $sets{$k} || [] }, @{ $osets->{$k} } ];
+  }
+  $module_env->import_sets(\%sets);
+  return;
+}
+
+# The module's OWN unit: File/Path.pm calls its own `_IS_VMS`, which its own
+# BEGIN block installs.  When the file being transpiled IS PACKAGE's module
+# file (its name ends in Package/Path.pm), the overlay's declarations are in
+# force from the `package` statement's SITE on, registered like an import; a
+# local declaration of the same name with another prototype dies (conflict).
+sub register_unit_overlay {
+  my ($self, $package, $unit_file, $site) = @_;
+  return if !defined $unit_file || !defined $package;
+  (my $rel = "$package.pm") =~ s{::}{/}g;
+  return if $unit_file !~ m{(?:\A|/)\Q$rel\E\z};
+  # The root the module was found in comes first: a module unit is
+  # transpiled with the RUNTIME's search list, which a shared pl2cl server
+  # does not carry (pl2cl's client block; task #3022).
+  my $beside = substr($unit_file, 0, length($unit_file) - length($rel))
+             . "PCL/Facts/$rel";
+  my $overlay = -f $beside ? $beside : $self->_facts_overlay_path($package);
+  # A fact this transpile used, found or not: the module cache's sidecar
+  # re-resolves it, so a new or edited overlay re-transpiles the module.
+  Pl::ProtoCache::note_dep('mod', "PCL::Facts::$package", $overlay);
+  return if !$overlay;
+  my $oenv = $self->_facts_overlay_env($package, $overlay);
+  my $env  = $self->environment;
+  for my $name (sort keys %{ $oenv->prototypes }) {
+    my $rec = $oenv->prototypes->{$name} or next;
+    next if $oenv->is_builtin_seed_record($name, $rec);
+    my $own = $env->pkg_prototypes->{$name}{$package};
+    if ($own && !$own->{from_module}) {
+      next if Pl::Environment::_proto_shape_key($own)
+           eq Pl::Environment::_proto_shape_key($rec);
+      die "PCL: facts overlay conflict for ${package}::$name: $overlay declares "
+        . _facts_proto_text($rec) . " but $unit_file declares "
+        . _facts_proto_text($own) . "\n";
+    }
+    $env->add_prototype($name, _imported_record($rec), $package, $site);
+  }
   return;
 }
 
@@ -10920,6 +11102,19 @@ sub _imported_record {
   return \%r;
 }
 
+# An import list as Exporter reads it (task #2878): `:tag` names the
+# `%EXPORT_TAGS` list and `:DEFAULT` the `@EXPORT` list -- the module's
+# import_sets, which module_import_sets reads (and a facts overlay can
+# supply: Capture::Tiny's `%EXPORT_TAGS = (all => \@EXPORT_OK)` is computed).
+# A tag the facts do not hold imports nothing, as before.
+sub _expand_import_tags {
+  my ($module_env, $imports) = @_;
+  my $sets = $module_env->import_sets || {};
+  return map {
+    /\A:(\w+)\z/ ? @{ $sets->{ $1 eq 'DEFAULT' ? '' : ":$1" } || [] } : $_
+  } @$imports;
+}
+
 # Merge prototypes from another environment (only exported ones)
 sub _merge_module_prototypes {
   my ($self, $module_env, $imports, $module) = @_;
@@ -10981,7 +11176,7 @@ sub _merge_module_prototypes {
 
   # If specific imports requested, only import those
   if ($imports && @$imports) {
-    for my $name (@$imports) {
+    for my $name (_expand_import_tags($module_env, $imports)) {
       my $proto = $module_env->get_prototype($name);
       if ($proto) {
         $add->($name, $proto);
