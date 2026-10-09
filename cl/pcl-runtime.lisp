@@ -35510,6 +35510,59 @@ buffer's fill-pointer; everything else falls back to file-length."
       (funcall scanner string (max start (- end reach)) end))))
 
 
+;;; PERL'S MBOL (task #2982).  Under /m, perl's `^` matches at the start of the
+;;; string and after a newline -- but NOT after a newline that ENDS the string
+;;; (regexec's MBOL never matches at the very end).  cl-ppcre's multi-line
+;;; start anchor matches after every newline, so `s/^/> /mg` on "x\ny\n" added
+;;; a third "> " and `() = "x\n" =~ /^/mg` counted 2.  The fix is in PCL's
+;;; wrapper, never in the vendored engine: a `^` that runs in multi-line mode
+;;; becomes `(?:\A|^(?!\z))` in the parse tree.  Only a pattern holding a `^`
+;;; that can be in /m is parsed for it; every other pattern is untouched (a
+;;; non-/m `^` keeps cl-ppcre's anchored-scan optimisation).
+(defun %pcl-mbol-flags (flags m)
+  "Multi-line mode after FLAGS (a (:flags ...) or :group flag list) given M."
+  (dolist (f flags m)
+    (case f
+      (:multi-line-mode-p (setf m t))
+      (:not-multi-line-mode-p (setf m nil)))))
+
+(defun %pcl-mbol-node (node m)
+  "NODE with every :start-anchor that runs in multi-line mode M rewritten."
+  (cond
+    ((eq node :start-anchor)
+     (if m
+         '(:alternation :modeless-start-anchor
+           (:sequence :start-anchor
+            (:negative-lookahead :modeless-end-anchor-no-newline)))
+         node))
+    ((atom node) node)
+    ((eq (car node) :sequence)
+     (cons :sequence
+           (loop for x in (cdr node)
+                 when (and (consp x) (eq (car x) :flags))
+                   do (setf m (%pcl-mbol-flags (cdr x) m))
+                 collect (%pcl-mbol-node x m))))
+    ((eq (car node) :group)
+     (let ((flags (butlast (cdr node)))
+           (body (car (last node))))
+       (append (list :group) flags
+               (list (%pcl-mbol-node body (%pcl-mbol-flags flags m))))))
+    ((member (car node) '(:flags :char-class :inverted-char-class :property
+                          :inverted-property :back-reference :filter))
+     node)
+    (t (cons (car node)
+             (mapcar (lambda (x) (%pcl-mbol-node x m)) (cdr node))))))
+
+(defun %pcl-mbol-tree (pattern options)
+  "PATTERN's parse tree with perl's MBOL, or NIL when it holds no `^` that can
+   run in multi-line mode (the pattern is then compiled as it is)."
+  (when (and (find #\^ pattern)
+             (or (getf options :multi-line-mode) (find #\m pattern)))
+    (let* ((tree (let ((cl-ppcre::*extended-mode-p* (getf options :extended-mode)))
+                   (cl-ppcre:parse-string pattern)))
+           (new (%pcl-mbol-node tree (getf options :multi-line-mode))))
+      (unless (equal new tree) new))))
+
 (defun %pcl-build-scanner (pattern options)
   "cl-ppcre:create-scanner wrapper.  Why this exists (yes, it looks stupid):
    cl-ppcre has a bug — after an inline `(?-x:...)`/`(?x:...)` mode group it does
@@ -35543,9 +35596,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                                 (and self-x (eq k :extended-mode)))
                      nconc (list k v))))
     (multiple-value-bind (scanner reg-names)
-        (if minend
-            (%pcl-build-minend-scanner pat opts)
-            (apply #'cl-ppcre:create-scanner pat opts))
+        (let* ((tree (%pcl-mbol-tree pat opts))
+               (src (or tree pat))
+               (copts (if tree
+                          (loop for (k v) on opts by #'cddr
+                                unless (eq k :extended-mode) nconc (list k v))
+                          opts)))
+          (if minend
+              (%pcl-build-minend-scanner src copts)
+              (apply #'cl-ppcre:create-scanner src copts)))
       ;; FOURTH (task #2723): an END-ANCHORED pattern of bounded length
       ;; starts its scan at the tail -- see %pcl-tail-start-scanner.
       (let ((reach (%pcl-tail-reach pat opts)))
@@ -35578,7 +35637,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    special around the (:regex …) conversion."
   (let ((cl-ppcre::*extended-mode-p* (getf options :extended-mode)))
     (apply #'cl-ppcre:create-scanner
-           (list :sequence (list :regex pattern)
+           (list :sequence (if (stringp pattern) (list :regex pattern) pattern)
                  (list :filter #'%p-match-past-floor 0))
            (loop for (k v) on options by #'cddr
                  unless (eq k :extended-mode) nconc (list k v)))))
