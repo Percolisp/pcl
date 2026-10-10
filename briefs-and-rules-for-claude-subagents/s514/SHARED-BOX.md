@@ -1,0 +1,2 @@
+# s514 shared box (2026-10-10 morning, Fable) -- a CONTINUATION of s513's protocol, not a new one.
+The rules, the lock script (`~/pcl-agent-scratch/s513/heavy.sh`), the probe rule (`~/pcl-agent-scratch/s513/probe.sh`), the MAIN-READY files (numbering continues at 10 in `~/pcl-agent-scratch/s513/`) and the briefs all live under `s513/`: read `s513/SHARED-BOX.md` whole, its 2026-10-10 09:52 ADDENDUM is this session's state (cap TWO; s513i NEW + s513h RESUMED; s513g resumes when a slot frees).  Running notes: `s514/PAUSE-s514.md`.
