@@ -24,7 +24,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 7;
 
 sub write_pl {
     my ($code) = @_;
@@ -86,3 +86,18 @@ both_agree(q{open my $g, "<", $0; my %h; my @a; read($g, $h{x}, 3); read($g, $a[
 sub s2 { read($_[0], ${$_[1]}, 3) } my $d; s2($g, \$d); sub s3 { sysread($_[0], ${$_[1]}, 2) } my $e; sysseek($g, 0, 0); s3($g, \$e);
 $h{z} = "XY"; seek($g, 0, 0); read($g, $h{z}, 2, 1); print "$h{x}|$a[2]|$hr->{y}|$d|$e|$h{z}\n";},
            "#2921 read into \$h{k} / \$a[i] / \$r->{k} / \${\$_[1]}, sysread, an offset read");
+
+# ---- #2943: the buffer PLACE's subscript is evaluated ONCE ----------------
+both_agree(q{open my $fh, '<', \"abcdef" or die; my @b; my $i = 0;
+read($fh, $b[$i++], 1); print "i=$i b0=", ($b[0]//'U'), " b1=", ($b[1]//'U'), "\n";
+my %h; my $k = 0; read($fh, $h{$k++ . "x"}, 1); print "k=$k ", join(",", map {"$_=$h{$_}"} sort keys %h), "\n";
+my $n = 0; sub f { $n++; 0 } my $r = []; read($fh, $r->[f()], 1); print "n=$n r0=", ($r->[0]//'U'), " r1=", ($r->[1]//'U'), "\n";
+my $hr = {}; my $j = 0; read($fh, $hr->{$j++}, 2, 1); print "j=$j ", join(",", map {"$_=" . length($hr->{$_})} sort keys %$hr), "\n";
+my $s = "zz"; my $sr = \$s; my $m = 0; sub g { $m++; $sr } read($fh, ${g()}, 1); print "m=$m s=$s\n";
+open my $f2, '<', $0 or die; my @c; my $q = 0; sysread($f2, $c[$q++], 1);
+print "q=$q c0=", (defined $c[0] ? 1 : 0), " c1=", (defined $c[1] ? 1 : 0), "\n";
+my $h2 = {}; read($fh, $h2->{a}{b}, 1); print "viv=", ref($h2->{a}), "\n";},
+           "#2943 read / sysread into \$b[\$i++], \$h{\$k++ . 'x'}, \$r->[f()], \${g()}: the subscript runs once");
+both_agree(q{use Socket; socketpair(my $x, my $y, AF_UNIX, SOCK_STREAM, 0) or die; syswrite($x, "xy");
+my @r; my $i = 0; recv($y, $r[$i++], 1, 0); print "i=$i r0=$r[0]\n";},
+           "#2943 recv into \$r[\$i++]: the subscript runs once");

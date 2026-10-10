@@ -20400,6 +20400,32 @@ buffer's fill-pointer; everything else falls back to file-length."
       (p-exception (e) (error e))
       (error () (%p-read-fail (p-get-stream fh)) *p-undef*))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-once-place-form (place fn)
+    "Call FN with a place equivalent to PLACE whose SUBFORMS are evaluated ONCE,
+     so a read and a write-back through the rebound place run a side-effecting
+     subscript a single time (task #2943: `read($fh, $b[$i++], 1)` left i=2 and
+     wrote element 1).  An ELEMENT place goes through %p-elem-place-form -- the
+     compound-assignment seam, which also vivifies a nested container.  A DEREF
+     accessor (p-aref-deref / p-gethash-deref / p-$ / p-cast-$) has a setf
+     FUNCTION, which receives its arguments as values anyway, so binding each
+     non-constant argument form to a temp is the same answer evaluated once.
+     Anything else is PLACE itself.  The compound family's own deref spellings
+     still evaluate twice (task #1351) and can adopt this helper."
+    (cond
+      ((%p-elem-place-p place) (%p-elem-place-form place fn))
+      ((%p-accessor-place-p place)
+       (let ((binds '()) (args '()))
+         (dolist (a (cdr place))
+           (if (or (constantp a) (keywordp a))
+               (push a args)
+               (let ((g (gensym "ARG")))
+                 (push (list g a) binds)
+                 (push g args))))
+         `(let* ,(nreverse binds)
+            ,(funcall fn (cons (car place) (nreverse args))))))
+      (t (funcall fn place)))))
+
 (defmacro %p-with-buffer-place ((var place) call)
   "The BUFFER of read / sysread / recv (task #2921): CALL writes its result
    into VAR, which must be a BOX.  A plain scalar is one already; an ELEMENT or
@@ -20408,17 +20434,21 @@ buffer's fill-pointer; everything else falls back to file-length."
    buffer stayed empty, silently.  Such a place is read into a box holding its
    current value (an OFFSET read keeps the head) and written back through the
    place's SETF when the call answered a count.  A place that evaluates to a
-   box (a hard ref's referent through p-cast-$) is used directly."
+   box (a hard ref's referent through p-cast-$) is used directly.  The place's
+   subforms are evaluated ONCE for the read and the write (task #2943)."
   (if (%p-accessor-place-p place)
       (let ((cur (gensym "CUR")) (n (gensym "N")))
-        `(let ((,cur ,place))
-           (if (p-box-p ,cur)
-               (let ((,var ,cur)) ,call)
-               (let* ((,var (make-p-box ,cur))
-                      (,n ,call))
-                 (unless (or (null ,n) (eq ,n *p-undef*))
-                   (p-setf ,place (p-box-value ,var)))
-                 ,n))))
+        (%p-once-place-form
+         place
+         (lambda (p)
+           `(let ((,cur ,p))
+              (if (p-box-p ,cur)
+                  (let ((,var ,cur)) ,call)
+                  (let* ((,var (make-p-box ,cur))
+                         (,n ,call))
+                    (unless (or (null ,n) (eq ,n *p-undef*))
+                      (p-setf ,p (p-box-value ,var)))
+                    ,n))))))
       `(let ((,var ,place)) ,call)))
 
 (defmacro p-read (fh buf &rest args)
