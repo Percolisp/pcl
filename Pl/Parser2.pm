@@ -8534,6 +8534,18 @@ sub _is_lexical_decl_name {
 #
 # A blocked site is left untouched — exactly today's (broken) emission, never
 # worse — because a partial rename would split one variable in two.
+# True when an `our` under $root declares $canon (sigil-exact; _declarator_syms
+# is THE reading of which tokens a declaration statement declares).
+sub _scope_has_our {
+  my ($root, $canon) = @_;
+  for my $st (@{ $root->find(q(PPI::Statement::Variable)) || [] }) {
+    my $kw = ($st->schildren)[0];
+    next unless $kw && $kw->isa(q(PPI::Token::Word)) && $kw->content eq q(our);
+    return 1 if grep { $_->symbol eq $canon } _declarator_syms($st);
+  }
+  return 0;
+}
+
 sub _rename_exception_mys {
   my ($self, $seg) = @_;
   for my $top (@{ $seg->{stmts} }) {
@@ -8557,6 +8569,11 @@ sub _rename_exception_mys {
       # — and a promoted cell is not a `let`, so this pass has nothing to fix
       # in the skipped case anyway.
       next if $root->isa('PPI::Document') && $self->{_str_eval_in_named_sub};
+      # #3080: an `our` of the same name inside the scope re-binds the bare name
+      # to the package variable for ITS block, which the rename walk does not
+      # model (it would rename those uses to the lexical) -- such a decl is
+      # left as before rather than renamed unsoundly.
+      next if $qualified && _scope_has_our($root, $s->symbol);
       my $why = $s->content =~ /^\$/
         ? $self->_shadow_rename_blocker($root, $s, 'eval_ok', 'shadow_ok')
         : $self->_state_container_blocker($root, $s, 'eval_ok');

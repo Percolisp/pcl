@@ -359,12 +359,16 @@ for my $case (
 ) {
   my ($what, $src) = @$case;
   my $cl = Pl::Parser2->parse_code($src);
-  like($cl, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\) :perl "\$n" :why :captured\)/,
+  # Since s514b (#3080) a lexical whose name the file spells QUALIFIED is
+  # renamed BEFORE promotion (`$n__excl__N`, :qualified-global) -- its own
+  # cell either way; the `our` case keeps the #470 demotion (an `our` in the
+  # scope blocks the rename).  Both spellings are a cell that is NOT `$n`.
+  like($cl, qr/\(p-defcell \$n__(?:file|excl)__\d+ \(make-p-box nil\) :perl "\$n" :why :(?:captured|qualified-global)\)/,
        "#470: $what demotes the captured lexical to a mangled cell");
   # …and the declaration's own initialisation writes THAT cell, not `$n` —
   # the `our` case still emits a plain `$n` cell, which is the package
   # variable's, so the discriminator is where the LEXICAL's value lands.
-  like($cl, qr/\(p-scalar-= \$n__file__\d+ 1\)/,
+  like($cl, qr/\(p-scalar-= \$n__(?:file|excl)__\d+ 1\)/,
        "#470: $what — the lexical's value lands in its own cell");
 }
 my $capt_q = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print $main::n;});

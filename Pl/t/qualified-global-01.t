@@ -28,7 +28,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 6;
 
 sub write_pl {
     my ($code) = @_;
@@ -107,4 +107,14 @@ perl_oracle("#3080 the same shape in a use'd module", <<"PL");
 use lib '$dir';
 use QgMod;
 print QgMod::get(), " ", QgMod::get(3), "\\n";
+PL
+
+perl_oracle("#3080 an `our` of the name in the lexical's scope keeps the #470 demotion (the rename stands aside)", <<'PL');
+my $y = 7;
+sub nm { $y }
+$main::y = 3;
+{ our $y; $y .= "!"; }
+print "[", (defined $main::y ? $main::y : "undef"), "]\n";
+print "[", nm(), "]\n";
+print "[", (defined $::y ? $::y : "undef"), "]\n";
 PL
