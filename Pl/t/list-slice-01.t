@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -166,3 +166,38 @@ test_cl("#892 inverse: aggregates, multi-term lists and scalar context",
   . "elem:1:SCALAR\nanon:1:ARRAY\n"
   . "m-arr:2:ARRAY,SCALAR\nm-arr2:2:ARRAY,ARRAY\nm-hash:2:HASH,SCALAR\n"
   . "scalar:20,10\n");
+
+# #2953: A LIST SLICE OF AN EMPTY LIST IS AN EMPTY LIST (perlop, Slices) -- not
+# one undef per index.  Only an EMPTY source: an ARRAY slice of an empty array
+# and out-of-range indexes of a NON-empty list keep one undef per index.  The
+# expected text is perl's own output (run here; the oracle needs no feature
+# newer than 5.30).  File::Path's `(lstat $root)[0,1,2] or next ROOT_DIR` is
+# the real-module shape (remove_tree of a missing path warned twice).
+sub test_perl_oracle {
+    my ($name, $code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    my $want = `$^X $pl_file 2>&1`;
+    is(run_cl($code), $want, $name);
+}
+test_perl_oracle("#2953 list slice of an empty list is empty; array slice is not",
+    q{my @e=(); my $r=[]; my @x;
+      @x=(@e)[0,1,2];   print scalar(@x),"\n";
+      @x=()[0,1];       print scalar(@x),"\n";
+      @x=(@$r)[0,1];    print scalar(@x),"\n";
+      @x=(sort @e)[0,1]; print scalar(@x),"\n";
+      @x=@e[0,1,2];     print scalar(@x),"\n";
+      @x=@{$r}[0,1];    print scalar(@x),"\n";
+      @x=(1)[1,0];      print scalar(@x),"\n";});
+test_perl_oracle("#2953 list assignment from an empty list slice is false",
+    q{my @e=();
+      for (1) { my ($a,$b,$c) = (@e)[0,1,2] or do { print "next\n"; next };
+                print "nonext\n" }
+      for (1) { my ($d,$m) = (lstat("/nonexistent-pcl-2953"))[0,1] or next;
+                print "nonext lstat\n" }
+      print "end\n";});
+test_perl_oracle("#2953 scalar(() = empty list slice) is 0",
+    q{my @e=(); print scalar(() = (@e)[0,1,2]), "\n";
+      my @s = (lstat("/nonexistent-pcl-2953"))[0,1,2]; print scalar(@s), "\n";
+      my $v = (@e)[1]; print defined($v) ? "def\n" : "undef\n";});

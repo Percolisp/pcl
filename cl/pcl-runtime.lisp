@@ -13133,8 +13133,18 @@ per element."
          (if (and (vectorp idx) (not (stringp idx)))
              (p-aslice a idx)
              (p-aref a idx))))
+      ;; A LIST SLICE OF AN EMPTY LIST IS AN EMPTY LIST (perlop, Slices;
+      ;; #2953): `(lstat $missing)[0,1,2]` is (), not three undefs, so a list
+      ;; assignment from it is false.  Only an EMPTY source: out-of-range
+      ;; indexes of a non-empty list still yield one undef each.  A vector
+      ;; idx reaches p-aref-deref only from a LIST subscript -- an array slice
+      ;; `@a[…]` / `@$r[…]` is p-aslice and never comes here.  A CL NIL source is
+      ;; a built-in's empty list (a failed `lstat` answers NIL in list context).
       ((and (vectorp idx) (not (stringp idx)))
-       (p-aslice arr idx))
+       (if (or (null arr)
+               (and (vectorp arr) (not (stringp arr)) (zerop (length arr))))
+           (make-array 0 :adjustable t :fill-pointer 0)
+           (p-aslice arr idx)))
       ;; $scalarref->[0] on the READ path: perl's fatal, and the same arm the
       ;; write path gets through p-ensure-arrayref (#163 referent rule).
       ;; p-box-p guard as in p-gethash-deref: an ordinary `$aref->[0]` has a
