@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s514 (Fable, 2026-10-10 17:1x) by the s514a merge-review probe ~/pcl-agent-scratch/s513/review/p514a/sto.pl row `rt ints` (perl 5.40.3 / Storable 3.32 vs the s514a tree e6eeab10; dig/sto .perl.out / .tree.out on disk).  The row freezes and thaws a list holding 2**31 and compares Data::Dumper output before and after: perl prints NDIFF (the thawed value is an IV and Dumper prints it unquoted while the original NV prints quoted), PCL prints same (both quoted).  CAUSE: Data::Dumper decides quoting by the value's flags (an IV prints bare; a PV that looks numeric prints quoted unless it matches the short-integer regex /^(?:0|-?[1-9]\\d{0,8})$/), and PCL carries no IV/PV/NV flag on a raw value -- the same root as #1391 (a literal is not read-only: values are not boxes).  Not a Storable shim defect (the bytes are identical to perl's).  IMPACT: a program that compares Dumper output of values above 999,999,999 across a Storable round trip, or that relies on Dumper quoting to tell a number from a string -- rare.  FIX SHAPE: only with a per-value numeric flag (the #1391 route); until then a not-supported line under Data::Dumper is enough if anyone hits it.  File-only; no batch.",
+   "id" : 2955,
+   "status" : "pending",
+   "subject" : "RESIDUE (representation, #1391 family): Data::Dumper quotes a large integer by the value's IV flag in perl -- 2**31 thawed by Storable prints 2147483648 (perl) vs '2147483648' (PCL) because PCL has no IV/PV flag on a value; found by the s514a Storable review probe (sto.pl row `rt ints`); low impact, file-only"
+}

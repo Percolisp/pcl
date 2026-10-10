@@ -506,13 +506,13 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s514, 2026-10-10, main `ddd8e383` = s513g merged (2026-10-10 13:07), last CODE commit `38b4192a`, gen v2-5284 — measured on
+- **CURRENT NUMBERS (s514, 2026-10-10, main `f312530e` = s514a merged (2026-10-10 17:18), last CODE commit `80b32c13`, gen v2-5284 — measured on
   that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **295 files / 10,091 rows** (224 s wall with
+  stale):** gate `Result: PASS`, **299 files / 10,193 rows** (243 s wall with
   `tools/prove-core`); full `perl-tests/` sweep GATE clean, **TOTAL passing
   18,740**, 638 failing (96.7 %), 60 of 108 files fully passing, 96 run to the
-  end and 12 stop part-way, drops 5 = census; `EVERYDAY: 114 of 122 identical to
-  perl (93.4 %)`; `tools/t/install-container.t` PASS 17 rows (s507, by the switches batch).  The user-facing
+  end and 12 stop part-way, drops 5 = census; `EVERYDAY: 115 of 122 identical to
+  perl (94.3 %)`; `tools/t/install-container.t` PASS 17 rows (s507, by the switches batch).  The user-facing
   copy of these numbers is `docs/STATUS.md` — update both together.
 - **The three xs files are PARKED (USER decision, s485, 2026-09-14): `Pl/t/xs-01/02/03.t`
   `plan skip_all` at the top until the pclxs project (the XS bridge, a separate
