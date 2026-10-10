@@ -2486,39 +2486,30 @@ adversarial code.  No CPAN module in scope uses it.
 **Affected tests:** `perl-tests/eval.t` — the block using `${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 is commented out (6 tests).
 
-## `tie` on a filehandle  [announced, not silent; SCALAR, ARRAY and HASH tie work]
+## `tie` on a filehandle  [IMPLEMENTED s514d (task #2590); what is left]
 
-**Perl behaviour:** `tie *FH, 'T'`, `tie *STDOUT, 'T'`, `tie *$fh, 'T'` call
-`T->TIEHANDLE`, and from then on `print FH ...`, `<FH>`, `printf`, `read`,
-`getc`, `eof`, `close`, `binmode`, `fileno`, `seek`, `tell`, `open` on the
-handle are method calls (`PRINT`, `READLINE`, ...).
-
-**PCL behaviour:** the tie is **ignored** and the handle stays untied, loudly:
-`p-tie` prints one line to stderr, once per (kind, class) per process --
+`tie *FH, 'T'`, `tie *STDOUT, 'T'`, `tie *$fh, 'T'` work: TIEHANDLE, and from
+then on print / say / printf / readline / read / sysread / syswrite / getc /
+eof / close / binmode / fileno / seek / tell / open dispatch to the methods,
+`tied` / `untie` answer, and `warn` reaches a tied STDERR (the table and the
+measurement are [`tie-aggregates.md`](tie-aggregates.md) §7).  `tie` on a
+SCALAR, an ARRAY and a HASH work too (§1-§6 there).  An operand of no tieable
+kind is still announced, named by its type:
 
 ```
-PCL: tie: a filehandle (class T) is not implemented — it is left untied (see docs/not-supported.md "tie on a filehandle")
+PCL: tie: an operand of type <type> (class T) — it is left untied
 ```
 
--- and returns undef.  (The line comes from the shared
-`%p-announce-unsupported` helper; the class rides in the operand, which keeps
-the dedup.)  An operand of no tieable kind is announced the same way, named by
-its type.
+**What is left:**
 
-**What IS implemented:** `tie` on a SCALAR (`p-tie-proxy`, since phase 1) and,
-since s501t (task #155), on an ARRAY and a HASH -- the side-table
-representation, the census of every site and the method-call table against
-perl are in [`tie-aggregates.md`](tie-aggregates.md).  Core `Tie::Array`,
-`Tie::Hash`, `Tie::StdArray`, `Tie::StdHash`, `Env` work as they are.
-
-**Why the handle is different:** a handle is a glob / fd stream, not a
-container, so the "empty shell + side table" trick has no miss branch to ride
-in -- every I/O builtin would need its own entry test, and `print` / `<>` are
-the hottest paths PCL has.  Its own task (filed s501t) carries the method
-inventory `t/op/tiehandle.t` needs (TIEHANDLE PRINT PRINTF WRITE READLINE GETC
-READ EOF CLOSE BINMODE FILENO SEEK TELL OPEN UNTIE) and the measurement: 12/32
-with 23 rows never produced, because the file's assertions live INSIDE the tie
-methods.
+* A builtin with no tie dispatch that reaches the placeholder of an UNOPENED
+  tied glob (format `write`, `truncate`, `flock`, a filetest) dies naming the
+  operation (`PCL: a write on a tied filehandle is not dispatched to its tie
+  object`) instead of writing nowhere (rule 12).  perl calls no method for
+  these either.
+* `local *FH` undoes a tie made inside its scope, but does not otherwise
+  localize a glob's IO slot (pre-existing).
+* `UNTIE` receives no reference-count argument (as for the tied aggregates).
 
 **Also not done, by ruling:**
 

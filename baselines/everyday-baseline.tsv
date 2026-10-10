@@ -27,7 +27,7 @@
 idioms/destroy-scope	DIFF	1	not-supported.md#destroy-called-by-garbage-collector -- DESTROY is never called at scope exit
 index/format	DIFF	1	not-supported.md#format--write-report-formatting -- ruled non-support, announced
 index/formline	DIFF	1	not-supported.md#format--write-report-formatting -- formline + $^A are ruled with format/write; the call dies (s495f, #2093)
-modules/Archive-Tar-Compress	DIFF	1	#155 tie on a FILEHANDLE is announced, not implemented: IO::Zlib->new ties *$fh, so reading the tar back dies "Can't call method "open" on an undefined value" -- re-attributed s500a: #2533 made Archive::Tar::Constant export its constants (run-time prototype()) and the `$entry->$_()` method-by-$_ fix let it write the archive
+modules/Archive-Tar-Compress	DIFF	1	#3141 substr() passed as a sub ARGUMENT is not an lvalue: IO::Zlib READ (external-gzip path; Compress::Zlib needs XS File::Glob) reads into nothing, so Archive::Tar->new($file) dies "Cannot read enough bytes from the tarfile" -- re-attributed s514d: #2590 implemented TIEHANDLE, so IO::Zlib->new now ties *$fh and the read reaches READ
 modules/Scalar-Util	DIFF	1	#1391 readonly("lit") answers 0 -- a literal ARGUMENT is a raw value, indistinguishable at run time from a temp or an unboxed variable (measured s500a; isweak and openhandle now match perl, s500a)
 programs/carp-attribution	DIFF	1	#1361 croak/carp carry no ` at FILE line N.` location
 programs/lc-uc-nonascii	DIFF	1	not-supported.md#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036 -- uc("straße")

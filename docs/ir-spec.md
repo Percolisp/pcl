@@ -591,6 +591,28 @@ Example — `my %h; tie %h, 'Tie::StdHash'; $h{a}++` calls `FETCH(a)` then
 `STORE(a, 1)`, exactly perl's two calls; `%h` stays an empty hash-table
 throughout.
 
+### 2.4b Tied filehandles — the IO stream is the key (normative, s514d, task #2590)
+
+`tie *FH, 'Class', …` (and `tie *STDOUT`, `tie *$fh`) calls
+`Class->TIEHANDLE(…)` and, when it returns an OBJECT, records the tie in a
+weak `EQ` side table keyed by the **stream the glob's IO slot holds**; a glob
+with no IO gets a placeholder stream that is registered as its IO for the
+life of the tie.  Every I/O builtin asks at its entry, behind one fixnum count
+of tied handles (zero in a program that never ties one): a tied handle's
+builtin is a method call — `print`/`say` → `PRINT(LIST)` (say with `$\`
+localized to `"\n"`), `printf` → `PRINTF(FMT, LIST)`, readline → `READLINE`
+in the caller's context, `read`/`sysread` → `READ(BUF, LEN[, OFF])` with
+`$_[1]` aliasing the caller's buffer, `syswrite` → `WRITE(BUF, LEN[, OFF])`,
+`getc` `eof` `close` `binmode` `fileno` `seek` `tell` `open` → `GETC`
+`EOF(n)` `CLOSE` `BINMODE` `FILENO` `SEEK` `TELL` `OPEN`, where EOF's `n` is
+1 for `eof(FH)`, 0 for a bare `eof`, 2 for `eof()`.  The builtin answers the
+method's value.  A port must keep the key: any spelling that reaches the same
+IO (`\*FH`, `*ALIAS = *FH`, `select(FH)`) reaches the same tie.  `DESTROY` is
+never called.  The method table is [`docs/tie-aggregates.md`](tie-aggregates.md) §7.
+
+Example — `tie *FH, 'T'; print FH "a", "b"` calls `T::PRINT($obj, "a", "b")`
+and nothing is written anywhere else.
+
 ### 2.5 References
 
 **`\` applied to a LIST is a LIST of references, one per element** (normative,

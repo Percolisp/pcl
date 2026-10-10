@@ -942,6 +942,33 @@
 (sb-ext:defglobal **p-tie-table** (make-hash-table :test 'eq :weakness :key)
   "Tied container -> its P-TIE-REC.")
 
+;;; TIED FILEHANDLES (task #2590, docs/tie-aggregates.md "Tied handles").  A
+;;; handle has no element fast path with a free MISS branch, so each I/O
+;;; builtin asks at its ENTRY: one fixnum test of the HANDLE count (a count of
+;;; its own, so a tied array costs print nothing), and only while a handle is
+;;; tied, a lookup keyed by the resolved STREAM -- what the glob's IO slot
+;;; holds, so `*ALIAS = *FH`, `\*FH`, `*$fh` and `select(FH)` all reach the
+;;; same record.  An unopened glob gets a P-TIED-HANDLE-STREAM placeholder to
+;;; key on.  Measured s514d (the Step 0 replica, interleaved against a
+;;; byte-identical control core): fhprint / fhread inside the control band.
+(declaim (type fixnum **p-handle-tie-count**))
+(sb-ext:defglobal **p-handle-tie-count** 0
+  "Number of filehandles tied right now.  Zero in a program that never ties one.")
+(sb-ext:defglobal **p-handle-tie-table** (make-hash-table :test 'eq :weakness :key)
+  "Tied handle's STREAM -> its P-TIE-REC (kind :handle).")
+
+(defmacro %p-stream-tie (s)
+  "The tie record of the RESOLVED handle stream S, or NIL.  One fixnum test
+   when no handle is tied."
+  `(and (plusp (the fixnum **p-handle-tie-count**))
+        (gethash ,s **p-handle-tie-table**)))
+
+(defmacro %p-fh-tie (fh)
+  "The tie record of the handle DESIGNATOR FH (a glob, a symbol, a name, a
+   box, a stream), or NIL.  One fixnum test when no handle is tied."
+  `(and (plusp (the fixnum **p-handle-tie-count**))
+        (%p-fh-tie-lookup ,fh)))
+
 (defstruct (p-tie-rec (:constructor %make-p-tie-rec (obj kind saved)))
   "The tie of one container."
   obj          ; what TIEARRAY / TIEHASH returned
@@ -7980,6 +8007,11 @@
   ;; EBADF, prints nothing and returns false.  printf never appends $\.
   (multiple-value-bind (fh list-args) (%p-out-target args "printf")
     (unless fh (return-from p-printf *p-undef*))
+    (let ((r (%p-stream-tie fh)))
+      (when r
+        (return-from p-printf
+          (apply #'%p-tied-call-value r "PRINTF"
+                 (coerce (p-flatten-args list-args) 'list)))))
     ;; printf takes a LIST (FORMAT, LIST): flatten raw @array/%hash args so the
     ;; format comes from the first flattened element, e.g. `printf @a` where
     ;; @a = ("%d\n", 5).  A p-box-wrapped ref stays scalar (printf "%s", $aref).
@@ -16669,6 +16701,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar (so
    `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
    SITE is the operator name the wide-character warning uses (#1115)."
+  (let ((r (%p-stream-tie fh)))
+    (when r (return-from %p-write-list (%p-tied-print r args ors))))
   (%p-guarded-write site
                     (let ((ofs (%p-separator-text |$,|))
                           (firstp t))
@@ -16855,8 +16889,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            ;; comes out as its UTF-8 encoding (perl's answer) rather than the
            ;; byte format's replacement.  SITE nil: this IS the warn, so it
            ;; must not raise another one.
-           (%p-out-string s *error-output* nil)
-           (force-output *error-output*)))))))
+           ;; A TIED STDERR takes the warning through PRINT: perl's warn
+           ;; writes to the STDERR handle (t/op/tiehandle.t, task #2590).
+           (let ((r (%p-stderr-tie)))
+             (if r
+                 (%p-tie-call r "PRINT" s)
+                 (progn
+                   (%p-out-string s *error-output* nil)
+                   (force-output *error-output*))))))))))
 
 ;;; ============================================================
 ;;; THE STATEMENT LOCATION REGISTER (task #1240) — perl's PL_curcop
@@ -17942,6 +17982,73 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    `output-stream-p' and `input-stream-p' are both NIL for a closed stream, so
    print's %p-writable-stream and the readers' own guards fire as they should."
   (%p-as-stream (%p-resolve-fh fh)))
+
+;;; TIED FILEHANDLES: the placeholder and the method dispatch (task #2590).
+;;; The entry test is %p-stream-tie / %p-fh-tie (defined with the tie table);
+;;; what each builtin calls, with which arguments, is perl's (probed 5.40.3,
+;;; docs/tie-aggregates.md "Tied handles").
+(defclass p-tied-handle-stream (sb-gray:fundamental-character-input-stream
+                                sb-gray:fundamental-character-output-stream)
+  ()
+  (:documentation "What an UNOPENED glob's IO slot holds while it is tied: a
+   stream only so that the one resolver (%p-resolve-fh) answers for it and the
+   tie record has a key.  Every builtin that reaches a tied handle dispatches
+   to the tie object at its entry, so a character write or read reaching THIS
+   object is a builtin without that dispatch -- it dies naming the operation
+   (rule 12), never writes nowhere."))
+
+(defun %p-tied-handle-unreached (op)
+  (%p-die-error nil (format nil "PCL: ~A on a tied filehandle is not ~
+                                 dispatched to its tie object" op)))
+
+(defmethod sb-gray:stream-write-char ((s p-tied-handle-stream) c)
+  (declare (ignore c))
+  (%p-tied-handle-unreached "a write"))
+
+(defmethod sb-gray:stream-read-char ((s p-tied-handle-stream))
+  (%p-tied-handle-unreached "a read"))
+
+(defmethod sb-gray:stream-unread-char ((s p-tied-handle-stream) c)
+  (declare (ignore c))
+  (%p-tied-handle-unreached "a read"))
+
+(defmethod sb-gray:stream-line-column ((s p-tied-handle-stream))
+  nil)
+
+(defun %p-fh-tie-lookup (fh)
+  "%p-fh-tie's lookup, reached only while some handle is tied."
+  (let ((s (p-get-stream fh)))
+    (and s (gethash s **p-handle-tie-table**))))
+
+(defun %p-tied-call-value (rec method &rest args)
+  "METHOD on REC's tie object in SCALAR context, as the builtin answers it."
+  (%p-tie-value (apply #'%p-tie-call rec method args)))
+
+(defun %p-tied-print (rec items ors)
+  "print / say on a tied handle: PRINT receives the LIST (perl hands $, and $\\
+   to the method, it does not apply them).  say runs PRINT with $\\ localized
+   to a newline -- ORS is say's newline STRING, print's is the $\\ box."
+  (let ((flat (coerce (p-flatten-args items) 'list)))
+    (if (stringp ors)
+        (let ((|$\\| (make-p-box ors)))
+          (apply #'%p-tied-call-value rec "PRINT" flat))
+        (apply #'%p-tied-call-value rec "PRINT" flat))))
+
+(defun %p-tied-readline (rec)
+  "Scalar readline on a tied handle: READLINE's value, NIL for undef (the
+   readline protocol's end of input)."
+  (let ((v (%p-tied-call-value rec "READLINE")))
+    (if (or (null v) (eq v *p-undef*)) nil v)))
+
+(defun %p-tied-readline-all (rec)
+  "List readline on a tied handle: READLINE in LIST context, as the vector of
+   boxes %p-readline-all answers."
+  (let* ((v (%p-tie-call-list rec "READLINE"))
+         (out (make-array (length v) :adjustable t :fill-pointer 0)))
+    (loop for x across v
+          do (let ((e (%p-tie-value x)))
+               (vector-push-extend (if (p-box-p e) e (make-p-box e)) out)))
+    out))
 
 (defun %p-live-stream (fh)
   "p-get-stream, restricted to a stream that is still OPEN — for the builtins
@@ -19611,6 +19718,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    `'a;echo BOOM'` arrives as that string).  Every other mode takes exactly one
    target and perl is FATAL about a second (`More than one argument to
    open(,':perlio')`), so this says so rather than picking one (rule 12)."
+  (let ((r (%p-fh-tie fh)))
+    ;; open on a tied handle is OPEN(MODE, LIST); a 2-argument open passes
+    ;; its one string.
+    (when r
+      (return-from %p-open-impl
+        (apply #'%p-tied-call-value r "OPEN"
+               (if three-arg-p
+                   (list* mode filename more-args)
+                   (list (concatenate 'string mode (to-string filename))))))))
   ;; perl closes what the handle already holds BEFORE it attempts the new
   ;; open, so a FAILED reopen still flushed and closed the old stream (task
   ;; #2006 (a), probed: `open($r,">",$f); print $r "gone"; open($r,"<",
@@ -19894,6 +20010,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    GLOB (IO::Handle->new / \\*FH), so close() quietly did nothing and the
    buffered output was lost.
    Returns perl's 1 or +P-CLOSE-FALSE+ — never T/NIL, see that constant."
+  (let ((r (%p-fh-tie fh)))
+    (when r (return-from %p-close-impl (%p-tied-call-value r "CLOSE"))))
   (when (%p-argv-handle-p fh) (return-from %p-close-impl (%p-close-argv)))
   (let ((v (%p-resolve-fh fh)))
     (cond
@@ -19929,6 +20047,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "Perl eof implementation — fh must already be a symbol or stream.
    Argument-less `eof` tests the last filehandle read (Perl semantics), so it
    falls back to *p-last-read-handle* (then STDIN) rather than STDIN directly."
+  (let ((r (if fh
+               (%p-fh-tie fh)
+               (and *p-last-read-handle* (%p-stream-tie *p-last-read-handle*)))))
+    ;; EOF's argument is perl's: 1 for eof(FH), 0 for a bare `eof`.
+    (when r
+      (when fh (setf *p-last-read-handle* (p-get-stream fh)))
+      (return-from %p-eof-impl (%p-tied-call-value r "EOF" (if fh 1 0)))))
   (let ((stream (cond ((%p-argv-designator-p fh) *p-argv-stream*)
                       (fh (p-get-stream fh))
                       (t (or *p-last-read-handle* *standard-input*)))))
@@ -20142,6 +20267,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defun %p-tell-impl (&optional fh)
   "Perl tell - return current file position"
+  (let ((r (if fh
+               (%p-fh-tie fh)
+               (and *p-last-read-handle* (%p-stream-tie *p-last-read-handle*)))))
+    (when r (return-from %p-tell-impl (%p-tied-call-value r "TELL"))))
   (let ((stream (if fh (%p-live-stream fh) *standard-input*)))
     ;; tell FH makes FH the current handle for $. (Perl sets PL_last_in_gv).
     (when (and fh stream) (setf *p-last-read-handle* stream))
@@ -20153,6 +20282,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defun %p-seek-impl (fh pos whence)
   "Perl seek - seek to position. Whence: 0=start, 1=current, 2=end"
+  (let ((r (%p-fh-tie fh)))
+    (when r (return-from %p-seek-impl (%p-tied-call-value r "SEEK" pos whence))))
   (let ((stream (%p-live-stream fh))
         (position (to-number pos))
         (w (to-number whence)))
@@ -20386,6 +20517,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    does — undef, $! = ENOENT, and the handle keeps the layers it had, whether
    the name stands alone or beside a good one (`\":utf8:nosuch\"` on a byte
    handle stays bytes; probed 5.40.3)."
+  (let ((r (%p-fh-tie fh)))
+    (when r
+      (return-from %p-binmode-impl
+        (apply #'%p-tied-call-value r "BINMODE" (and layer (list layer))))))
   (let ((stream (%p-live-stream fh)))
     (if (null stream)
         (%p-io-errno-fail 9)                                      ; EBADF (Linux)
@@ -20464,6 +20599,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    of BUF's current length.  An unopened handle fails with errno EBADF.
    READER fills the temp string and returns the count: read-sequence (perl's
    buffered read loops until LEN or EOF) or sysread's %p-read-available."
+  (let ((r (%p-fh-tie fh)))
+    (when r
+      (return-from %p-read-impl
+        (apply #'%p-tied-call-value r "READ" buf len (and offset (list offset))))))
   (let ((stream (%p-live-stream fh)))
     (unless stream
       (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
@@ -20598,6 +20737,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    sees the data.  Writes LEN chars of SCALAR starting at OFFSET (negative
    offset counts from the end).  Returns nil on stream/encode error; perl-
    semantic errors (negative length, offset outside string) die."
+  (let ((r (%p-fh-tie fh)))
+    (when r
+      (return-from %p-syswrite-impl
+        (apply #'%p-tied-call-value r "WRITE" data
+               (or len (length (to-string data))) (and offset (list offset))))))
   (let ((str (to-string data))
         (n (and len (truncate (to-number len))))
         (off (if offset (truncate (to-number offset)) 0)))
@@ -22090,6 +22234,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    A DIRHANDLE keeps answering -1: perl gives the real dirfd there, and PCL
    has none, so -1 preserves the definedness perl's callers test even though
    the value is not perl's."
+  (let ((r (%p-fh-tie fh)))
+    (when r (return-from %p-fileno-impl (%p-tied-call-value r "FILENO"))))
   (let ((stream (p-get-stream fh)))
     (cond
       ((null stream)
@@ -22199,6 +22345,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    report the directory — measured with `$!` cleared after the open, so it is
    getc's own answer and not open's isatty leftover.  It takes its \"handle is
    not open for reading\" exit, whose SETERRNO is EBADF."
+  (let ((r (%p-fh-tie (or fh *standard-input*))))
+    (when r (return-from %p-getc-impl (%p-tied-call-value r "GETC"))))
   (let ((stream (if fh (%p-live-stream fh) *standard-input*)))
     (when stream
       (handler-case
@@ -22327,6 +22475,8 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; Remember the handle so a later argument-less `eof` tests THIS stream and
     ;; $. reports THIS handle's line counter.
     (when stream (setf *p-last-read-handle* stream))
+    (let ((r (and stream (%p-stream-tie stream))))
+      (when r (return-from %p-readline-impl (%p-tied-readline r))))
     (let ((%rl-result (when stream (%p-read-record stream sep))))
       ;; A successful record read bumps THIS handle's line counter ($.).
       (when (and stream %rl-result)
@@ -22336,6 +22486,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-readline-all (fh)
   "Read all remaining records from FH into an adjustable vector of boxed strings.
    %p-readline-impl bumps $. (the per-handle line counter) on each read."
+  (let ((r (%p-fh-tie fh)))
+    (when r
+      (setf *p-last-read-handle* (p-get-stream fh))
+      (return-from %p-readline-all (%p-tied-readline-all r))))
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (loop
      (let ((line (%p-readline-impl fh)))
@@ -22481,6 +22635,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-readline-argv ()
   "Scalar-context <> : read one record across the @ARGV file sequence."
+  (let ((r (%p-fh-tie "ARGV")))
+    (when r (return-from %p-readline-argv (%p-tied-readline r))))
   (loop
    (unless *p-argv-stream*
      (unless (%p-argv-advance) (return nil)))
@@ -22504,6 +22660,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    <> file -- true only at the end of the LAST one.  Like perl's nextargv it
    opens the next file to look (so $ARGV moves), and with an empty @ARGV
    before the first read it tests STDIN.  Bare `eof` is %p-eof-impl."
+  (let ((r (%p-fh-tie "ARGV")))
+    (when r (return-from p-eof-argv (%p-tied-call-value r "EOF" 2))))
   (loop
    (cond ((null *p-argv-stream*)
           (when (null (%p-argv-advance)) (return t)))
@@ -22512,6 +22670,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-readline-argv-all ()
   "List-context <> : read every remaining record across @ARGV into a vector."
+  (let ((r (%p-fh-tie "ARGV")))
+    (when r (return-from %p-readline-argv-all (%p-tied-readline-all r))))
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (loop
      (let ((line (%p-readline-argv)))
@@ -31060,7 +31220,9 @@ buffer's fill-pointer; everything else falls back to file-length."
           (boundp scalar-sym)  (when (boundp scalar-sym)  (symbol-value scalar-sym))
           (boundp array-sym)   (when (boundp array-sym)   (symbol-value array-sym))
           (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))
-          (gethash code-sym *p-declared-subs*)))
+          (gethash code-sym *p-declared-subs*)
+          ;; slot 9: the IO entry, for %p-glob-restore-tied-io (task #2590)
+          (gethash (%p-glob-io-sym scalar-sym) *p-filehandles*)))
 
 (defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym &optional (kind :all))
   "Reset glob slots to fresh empties (Perl: local *foo starts fresh).
@@ -31107,7 +31269,9 @@ buffer's fill-pointer; everything else falls back to file-length."
       (remhash code-sym *p-declared-subs*))
   (if (aref saved 2) (setf (symbol-value scalar-sym) (aref saved 3)) (makunbound scalar-sym))
   (if (aref saved 4) (setf (symbol-value array-sym)  (aref saved 5)) (makunbound array-sym))
-  (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym)))
+  (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym))
+  (when (> (length saved) 9)
+    (%p-glob-restore-tied-io scalar-sym (aref saved 9))))
 
 (defmacro p-defcell (sym init &rest facts)
   "Declare an ORDINARY package global (direction D, task #289): SYM becomes a
@@ -32361,39 +32525,115 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %pcl-truthy-can (obj method)
   "True when OBJ's class (or an ancestor) defines METHOD."
   (p-true-p (p-can obj method)))
+(defun %p-handle-operand-p (x)
+  "True when X is what `tie *FH` / `tie *$fh` / `tied *FH` hand the runtime: a
+   glob, or the stream / socket a lexical handle's `*$fh` resolves to."
+  (or (p-typeglob-p x) (streamp x) (%p-socket-p x)))
+
+(defun %p-tie-handle (desig classname args)
+  "tie *FH: call TIEHANDLE (a missing one dies perl's way) and record the tie
+   against the stream DESIG's IO slot holds -- a placeholder stream for a glob
+   that was never opened.  perl ties only when the constructor returns an
+   OBJECT (IO::Zlib->new's failure path relies on it); a re-tie REPLACES the
+   object."
+  (let ((obj (let ((*wantarray* nil))
+               (apply #'p-method-call classname "TIEHANDLE" args))))
+    (when (eq (%p-builtin-blessed obj) *p-undef*)
+      (return-from %p-tie-handle obj))
+    (let ((s (p-get-stream desig))
+          (sym nil))
+      (unless s
+        (unless (p-typeglob-p desig)
+          (error "%p-tie-handle: no stream and not a glob: ~S" desig))
+        (setf sym (intern (p-typeglob-name desig) (p-typeglob-package desig))
+              s (make-instance 'p-tied-handle-stream))
+        (setf (gethash sym *p-filehandles*) s))
+      (let ((old (gethash s **p-handle-tie-table**)))
+        (if old
+            (setf (p-tie-rec-obj old) obj)
+            (progn
+              (setf (gethash s **p-handle-tie-table**)
+                    (%make-p-tie-rec obj :handle sym))
+              (incf **p-handle-tie-count**))))
+      obj)))
+
+(defun %p-untie-handle (desig)
+  "untie *FH: UNTIE when the class has one, then drop the record -- and the
+   placeholder stream, when the tie made one (the glob is unopened again)."
+  (let* ((s (p-get-stream desig))
+         (rec (and s (%p-stream-tie s))))
+    (when rec
+      (when (%pcl-truthy-can (p-tie-rec-obj rec) "UNTIE")
+        (%p-tie-call rec "UNTIE"))
+      (remhash s **p-handle-tie-table**)
+      (decf **p-handle-tie-count**)
+      (let ((sym (p-tie-rec-saved rec)))
+        (when (and sym (eq (gethash sym *p-filehandles*) s))
+          (remhash sym *p-filehandles*))))
+    (make-p-box 1)))
+
+(defun %p-tied-handle-object (desig)
+  "tied *FH: the tie object, or undef."
+  (let ((rec (%p-fh-tie desig)))
+    (if rec (p-tie-rec-obj rec) *p-undef*)))
+
+(defun %p-glob-io-sym (scalar-sym)
+  "The *p-filehandles* key of the glob whose SCALAR slot symbol is SCALAR-SYM."
+  (intern (subseq (symbol-name scalar-sym) 1) (symbol-package scalar-sym)))
+
+(defun %p-glob-restore-tied-io (scalar-sym saved-io)
+  "local *FH's IO half, for a TIE made inside the scope (t/op/tiehandle.t,
+   change 11639: `{ local *BAZ; tie *BAZ, ... }` leaves *BAZ untied).  Only a
+   tie PLACEHOLDER installed since the save is undone -- the rest of the IO
+   slot keeps its old, unlocalized behaviour."
+  (let* ((sym (%p-glob-io-sym scalar-sym))
+         (cur (gethash sym *p-filehandles*)))
+    (when (and cur (not (eq cur saved-io)) (typep cur 'p-tied-handle-stream))
+      ;; the tie made FOR this glob goes; an alias (`local *STDERR = *$fh`)
+      ;; only leaves the slot -- the tie belongs to the other glob
+      (let ((rec (gethash cur **p-handle-tie-table**)))
+        (when (and rec (eq (p-tie-rec-saved rec) sym))
+          (remhash cur **p-handle-tie-table**)
+          (decf **p-handle-tie-count**)))
+      (if saved-io
+          (setf (gethash sym *p-filehandles*) saved-io)
+          (remhash sym *p-filehandles*)))))
+
+(defun %p-stderr-tie ()
+  "The tie record of the handle `print STDERR` would reach from package main
+   -- main's own STDERR symbol first (where `local *STDERR = *$fh` puts the
+   alias), then the standard one -- or NIL.  warn's default arm asks it."
+  (and (plusp (the fixnum **p-handle-tie-count**))
+       (let* ((pkg (%pcl-find-package "main"))
+              (sym (and pkg (find-symbol (%pcl-invert-case "STDERR") pkg))))
+         (or (and sym (%p-fh-tie-lookup sym))
+             (%p-fh-tie-lookup "STDERR")))))
+
 ;;; ============================================================
 ;;; Tie / Untie / Tied — scalar implementation
 ;;; ============================================================
 ;;; tie() on a SCALAR installs a p-tie-proxy into the box's value slot:
 ;;; unbox() intercepts reads (FETCH), box-set() writes (STORE).  An ARRAY or
 ;;; HASH is tied through the side table (the "Tied ARRAYS and HASHES" section
-;;; above, task #155).  What is left unimplemented is the FILEHANDLE.
+;;; above, task #155), a FILEHANDLE through its own (the "TIED FILEHANDLES"
+;;; blocks, task #2590).
 
 (defun %p-warn-aggregate-tie (value classname)
-  "Announce a tie that PCL is about to DROP: a FILEHANDLE (TIEHANDLE), or an
-   operand of no tieable kind.  Silent-wrong is the failure mode CLAUDE.md
-   rule 12 exists to stop: the program runs on an UNTIED handle and every
-   PRINT/READLINE the test was written to observe simply never happens.  A
-   die was rejected for R1 (it converts mid-file tie users into crashes); see
-   docs/not-supported.md 'tie on a filehandle'.
+  "Announce a tie that PCL is about to DROP: an operand of no tieable kind
+   (a scalar, an ARRAY, a HASH and -- since s514d, task #2590 -- a
+   FILEHANDLE are all tied).  Silent-wrong is the failure mode CLAUDE.md
+   rule 12 exists to stop.
 
    EFFECT-ONLY, so it routes through the shared %p-announce-unsupported helper
    (ruled docs/fable-answers-s337.md §5b) — the CLASS rides in the OPERAND,
    which keeps the old per-(kind, class) dedup with no table of its own."
-  ;; The text is for the USER: the operand names what was tied, and the tail
-  ;; points at the not-supported.md section by NAME (the project's form) --
-  ;; never a task number.  A glob (`tie *FH`) or a lexical handle (`tie *$fh`,
-  ;; which p-dynamic-typeglob hands over as the stream itself) is a
-  ;; FILEHANDLE; it used to fall into a `(t "a non-lvalue")` arm.  Anything
-  ;; else is named by its type rather than swallowed (rule 12).
-  (let ((kind (cond ((or (p-typeglob-p value) (streamp value) (%p-socket-p value))
-                     "a filehandle")
-                    (t (format nil "an operand of type ~(~A~)" (type-of value)))))
+  ;; The text is for the USER: the operand is named by its type rather than
+  ;; swallowed (rule 12), and the line carries no task number.
+  (let ((kind (format nil "an operand of type ~(~A~)" (type-of value)))
         (name (if (stringp classname) classname (format nil "~A" classname))))
     (%p-announce-unsupported
      "tie" (format nil "~A (class ~A)" kind name)
-     (format nil "it is left untied (see docs/not-supported.md ~
-                  \"tie on a filehandle\")"))))
+     "it is left untied")))
 
 (defun p-tie (box classname &rest args)
   "Perl tie - bind a scalar variable to a class implementing TIESCALAR.
@@ -32402,13 +32642,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    Falls back gracefully if the tie class or method is not available."
   (unless (p-box-p box)
     ;; An ARRAY/HASH arrives here RAW — the container itself — and is tied
-    ;; through the side table (task #155).  A filehandle (a glob or stream)
-    ;; still is not: say so out loud.
+    ;; through the side table (task #155); a filehandle (a glob, or the
+    ;; stream `*$fh` resolves to) through the handle table (task #2590).
     (let ((kind (%p-tie-container-kind box)))
       (return-from p-tie
-        (if kind
-            (%p-tie-aggregate box kind classname args)
-            (progn (%p-warn-aggregate-tie box classname) *p-undef*)))))
+        (cond (kind (%p-tie-aggregate box kind classname args))
+              ((%p-handle-operand-p box) (%p-tie-handle box classname args))
+              (t (%p-warn-aggregate-tie box classname) *p-undef*)))))
   (let* ((current (p-box-value box))
          (constructor (cond
                         ((and (vectorp current) (not (stringp current))) "TIEARRAY")
@@ -32435,6 +32675,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-untie (box)
   "Perl untie - remove tie from variable, restoring its pre-tie value.
    Calls UNTIE on the tie object if the method exists."
+  (when (%p-handle-operand-p box)
+    (return-from p-untie (%p-untie-handle box)))
   (let ((rec (%p-tied box)))
     (when rec
       (%p-untie-aggregate box rec)
@@ -32460,6 +32702,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-tied (box)
   "Perl tied() - returns the tie object if box is tied, undef otherwise."
+  (when (%p-handle-operand-p box)
+    (return-from p-tied (%p-tied-handle-object box)))
   (let ((rec (%p-tied box)))
     (when rec (return-from p-tied (p-tie-rec-obj rec))))
   (if (p-box-p box)

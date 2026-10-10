@@ -163,11 +163,66 @@ so `use Env qw(HOME @PATH)` works.
 
 ## 6. What is left
 
-* **TIEHANDLE** (`tie *FH`, `tie *$fh`): announced, not implemented -- a
-  handle is a glob / fd stream, a different representation question (its own
-  task).  `docs/not-supported.md` "tie on a filehandle".
+* **TIEHANDLE** (`tie *FH`, `tie *$fh`): IMPLEMENTED s514d (task #2590), §7.
 * **DESTROY** is never called (USER ruling).  t/op/tiearray.t's three
   "freed" rows fail for that reason.
 * `arysize()--` with `sub arysize :lvalue { $#ary }` -- `:lvalue` subs are
   USER-deferred (#930).
 * The named log differences in §4.
+
+## 7. Tied handles (task #2590, s514d)
+
+`tie *FH, 'Class', ARGS` / `tie *STDOUT, ...` / `tie *$fh, ...` call
+`Class->TIEHANDLE(ARGS)` and record the tie in a SECOND side table,
+`**p-handle-tie-table**` (weak `EQ`), keyed by the STREAM the glob's IO slot
+holds -- so every spelling that reaches the same IO (`\*FH`, `{*FH}`, `*$fh`,
+`*ALIAS = *FH`, `select(FH)`, a handle passed to a sub) reaches the same
+record.  A glob that was never opened gets a `p-tied-handle-stream`
+placeholder (a Gray stream that dies naming the operation if any builtin
+reaches it without dispatching -- rule 12) registered as its IO, and `untie`
+removes it again.  perl ties only when TIEHANDLE returns an OBJECT; a re-tie
+replaces the object.
+
+**The cost (Step 0, measured before the design was chosen).**  A handle has no
+free miss branch, so every I/O builtin asks at its ENTRY.  Two shapes were
+replicated and benched interleaved against a byte-identical control core
+(`scratch/s514d/step0-{A,B}.log`):
+
+| shape | fhprint | fhread | band (rows with no hook) |
+|---|---|---|---|
+| A: a fixnum count `**p-handle-tie-count**` (its own, so a tied ARRAY costs print nothing), then the table | +1.3 % in A's favour | +1.1 % in A's favour | ±2.8 % |
+| B: `typep` on a sentinel stream class | 11.3 % slower | 4.7 % slower | ±0.4 % |
+
+A is free and was built.  The entries: `%p-write-list` (print, say and the
+fixed-arity print arms), `p-printf`, `%p-readline-impl` / `%p-readline-all`
+(and the `<>` pair for a tied ARGV), `%p-eof-impl` / `p-eof-argv`,
+`%p-getc-impl`, `%p-read-impl` (read and sysread), `%p-syswrite-impl`,
+`%p-close-impl`, `%p-binmode-impl`, `%p-fileno-impl`, `%p-seek-impl`,
+`%p-tell-impl`, `%p-open-impl`, and `p-warn`'s default arm (a tied STDERR).
+
+**The method table (perl's answers, probed 5.40.3; guard `Pl/t/tiehandle-01.t`).**
+
+| builtin | method call |
+|---|---|
+| `print FH LIST` | `PRINT(LIST)` -- the list, not a joined string; `$,` and `$\` are the method's business |
+| `say FH LIST` | `PRINT(LIST)` with `$\` localized to `"\n"` |
+| `printf FH FMT, LIST` | `PRINTF(FMT, LIST)` |
+| `<FH>` / `readline` | `READLINE` in the caller's context; undef ends a `while (<FH>)` |
+| `read` / `sysread FH, BUF, LEN [, OFF]` | `READ(BUF, LEN [, OFF])` -- `$_[1]` ALIASES the caller's buffer |
+| `syswrite FH, BUF [, LEN [, OFF]]` | `WRITE(BUF, LEN [, OFF])`, LEN = `length(BUF)` when absent |
+| `getc FH` | `GETC` |
+| `eof(FH)` / bare `eof` / `eof()` | `EOF(1)` / `EOF(0)` (the last-read handle) / `EOF(2)` (ARGV) |
+| `close` `binmode [LAYER]` `fileno` `seek POS, WHENCE` `tell` | `CLOSE` `BINMODE([LAYER])` `FILENO` `SEEK(POS, WHENCE)` `TELL` |
+| `open FH, MODE, LIST` / `open FH, EXPR` | `OPEN(MODE, LIST)` / `OPEN(EXPR)` |
+| `tied *FH` / `untie *FH` | the object / `UNTIE` (when defined), then untied |
+| `warn` with a tied STDERR | `PRINT(MESSAGE)` |
+
+`local *FH` undoes a tie made inside its scope (perl change 11639);
+otherwise `local *FH` still does not localize a glob's IO slot (pre-existing).
+A missing method dies perl's way (`Can't locate object method "PRINTF" via
+package "T"`), trappably.  DESTROY is never called (USER ruling).
+
+t/op/tiehandle.t alone (s514d): base 11 pass / 32 fail / 24 never produced -> 52 pass /
+2 fail / 13 never produced, the rest behind #3140 (a `package X;` switch inside a block with a `local` re-defines
+the class with no parents: the `Bar::Say` block aborts) and #221 (no
+warnings-gated diagnostic: `print undef` under `use warnings`).
