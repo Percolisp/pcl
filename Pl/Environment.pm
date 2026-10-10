@@ -1459,7 +1459,8 @@ my %WEAK_KEYWORDS = map { $_ => 1 } qw(
     getlogin getnetbyaddr getnetbyname getnetent getpeername getpgrp getppid
     getpriority getprotobyname getprotobynumber getprotoent getpwent getpwnam
     getpwuid getservbyname getservbyport getservent getsockname getsockopt
-    gmtime gt hex index int ioctl isa join keys kill lc lcfirst le length link
+    glob gmtime gt hex index int ioctl isa join keys kill lc lcfirst le length
+    link
     listen localtime lock log lstat lt method mkdir msgctl msgget msgrcv
     msgsnd ne not oct open opendir or ord pack pipe pop push quotemeta rand
     read readdir readline readlink readpipe recv ref rename reset reverse

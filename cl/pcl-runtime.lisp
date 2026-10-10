@@ -22987,154 +22987,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; File Glob
 ;;; ============================================================
 
-;; Helper: Expand character ranges in glob bracket expressions.
-;; SBCL's pathname wildcards don't fully support [a-c] ranges,
-;; so we expand them: [a-c] -> [abc], [a-cxz] -> [abcxz]
-;; Also handles negation: [!x] or [^x] (converted to match-all-except logic)
-(defun expand-glob-char-ranges (pattern)
-  "Expand character ranges like [a-c] to [abc] in glob patterns."
-  (let ((result (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
-        (i 0)
-        (len (length pattern)))
-    (loop while (< i len) do
-          (let ((ch (char pattern i)))
-            (if (and (char= ch #\[) (< (1+ i) len))
-                ;; Found bracket - process bracket expression
-                (let ((bracket-start i)
-                      (chars (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
-                      (negated nil)
-                      (j (1+ i)))
-                  (declare (ignore bracket-start))
-                  ;; Check for negation [! or [^
-                  (when (and (< j len) (or (char= (char pattern j) #\!)
-                                           (char= (char pattern j) #\^)))
-                    (setf negated t)
-                    (incf j))
-                  ;; Collect characters until ]
-                  (loop while (and (< j len) (not (char= (char pattern j) #\]))) do
-                        (let ((c (char pattern j)))
-                          (if (and (< (+ j 2) len)
-                                   (char= (char pattern (1+ j)) #\-)
-                                   (not (char= (char pattern (+ j 2)) #\])))
-                              ;; Range like a-c
-                              (let ((start-char c)
-                                    (end-char (char pattern (+ j 2))))
-                                (loop for code from (char-code start-char) to (char-code end-char) do
-                                      (vector-push-extend (code-char code) chars))
-                                (incf j 3))
-                              ;; Single character
-                              (progn
-                                (vector-push-extend c chars)
-                                (incf j)))))
-                  ;; Check if we found closing bracket
-                  (if (and (< j len) (char= (char pattern j) #\]))
-                      ;; Valid bracket expression - output expanded form
-                      (progn
-                        (vector-push-extend #\[ result)
-                        (when negated
-                          (vector-push-extend #\^ result))  ; SBCL uses ^ for negation
-                        (loop for c across chars do
-                              (vector-push-extend c result))
-                        (vector-push-extend #\] result)
-                        (setf i (1+ j)))
-                      ;; No closing bracket - output literal [
-                      (progn
-                        (vector-push-extend ch result)
-                        (incf i))))
-                ;; Not a bracket - copy character as-is
-                (progn
-                  (vector-push-extend ch result)
-                  (incf i)))))
-    (coerce result 'string)))
-
 ;;; Per-pattern iterator state for SCALAR-context glob only.
 ;;; Maps pattern string -> (index . results-vector) or :scalar-done.  List context
 ;;; keeps no state (see p-glob--list-context).
 (defvar *p-glob-iterators* (make-hash-table :test 'equal))
-
-(defun %p-glob-component-regex (glob)
-  "cl-ppcre pattern (whole-string anchored) for one shell-glob filename
-   component: `*` → any run, `?` → any one char, `[..]` char classes kept
-   (ranges already expanded by expand-glob-char-ranges, `!` negation → `^`),
-   every other char escaped literally.  Used to filter a directory listing so
-   `*` matches dotted names too (CL's pathname `*` wrongly requires no
-   extension)."
-  (with-output-to-string (s)
-    (write-char #\^ s)
-    (let ((i 0) (len (length glob)))
-      (loop while (< i len) do
-            (let ((c (char glob i)))
-              (cond
-                ((char= c #\*) (write-string "[^/]*" s) (incf i))
-                ((char= c #\?) (write-string "[^/]" s) (incf i))
-                ((char= c #\[)
-                 (let ((j (1+ i)))
-                   (when (and (< j len) (member (char glob j) '(#\^ #\!))) (incf j))
-                   (when (and (< j len) (char= (char glob j) #\])) (incf j))
-                   (loop while (and (< j len) (not (char= (char glob j) #\]))) do (incf j))
-                   (if (< j len)
-                       (progn (write-string (substitute #\^ #\! (subseq glob i (1+ j))) s)
-                              (setf i (1+ j)))
-                       (progn (write-string "\\[" s) (incf i)))))
-                (t (when (find c ".\\+*?()|{}^$") (write-char #\\ s))
-                   (write-char c s) (incf i))))))
-    (write-char #\$ s)))
-
-;;; A glob RESULT is a filename, so it is rendered by the ONE literal
-;;; leaf-name renderer, %p-dirent-name (#800; the readdir half is #755's).
-;;; %p-glob-leaf-name used to be a second copy built on file-namestring,
-;;; which ESCAPES wild characters — and because that leaf is also what the
-;;; glob→regex filter below scans, a name holding a wild character not only
-;;; came back as gx\*wild.dat but could fail to MATCH at all (glob("gx?q.dat")
-;;; answered nothing, the escaped \ being an extra character).  p-glob still
-;;; parses wildcards in the PATTERN: that is its job (#755), and only the
-;;; PATTERN's.
-
-(defun %p-glob--expand-dir (dir-prefix file-glob)
-  "Match FILE-GLOB against the leaf names in the fixed directory DIR-PREFIX
-   (\"\" = cwd).  Enumerates every entry (files + dirs, any extension) and
-   filters via a glob→regex, so `*` matches dotted names — honouring Perl's
-   rule that a leading dot is matched only if the pattern starts with one."
-  (let* ((relative (or (string= dir-prefix "") (not (char= (char dir-prefix 0) #\/))))
-         (full-dir (cond ((string= dir-prefix "") (concatenate 'string (sb-posix:getcwd) "/"))
-                         (relative (concatenate 'string (sb-posix:getcwd) "/" dir-prefix))
-                         (t dir-prefix)))
-         (dir-path (handler-case (parse-namestring full-dir) (error () nil)))
-         (entries (when dir-path
-                    (handler-case
-                        (directory (make-pathname :directory (pathname-directory dir-path)
-                                                  :name :wild :type :wild)
-                                   :resolve-symlinks nil)
-                      (error () nil))))
-         (scanner (handler-case
-                      (cl-ppcre:create-scanner (%p-glob-component-regex file-glob))
-                    (error () nil)))
-         (match-dot (and (plusp (length file-glob)) (char= (char file-glob 0) #\.)))
-         (result (make-array 0 :adjustable t :fill-pointer 0)))
-    (when scanner
-      (dolist (p entries)
-        (let ((leaf (%p-dirent-name p)))
-          (when (and leaf
-                     (or match-dot
-                         (not (and (plusp (length leaf)) (char= (char leaf 0) #\.))))
-                     (cl-ppcre:scan scanner leaf))
-            (vector-push-extend (concatenate 'string dir-prefix leaf) result)))))
-    (sort result #'string<)))
-
-(defun %p-glob--expand-pathname (expanded-pat orig-pat)
-  "Fallback: expand via CL pathname wildcarding (used when wildcards appear in
-   the DIRECTORY portion).  Imperfect for dotted names but rare."
-  (let* ((relative (not (and (> (length expanded-pat) 0) (char= (char expanded-pat 0) #\/))))
-         (full-pat (if relative
-                       (concatenate 'string (sb-posix:getcwd) "/" expanded-pat)
-                       expanded-pat))
-         (dir-prefix (let ((slash-pos (position #\/ orig-pat :from-end t)))
-                       (if slash-pos (subseq orig-pat 0 (1+ slash-pos)) "")))
-         (all-matches (handler-case (directory (parse-namestring full-pat)) (error () nil)))
-         (matches (remove-if (lambda (p) (null (pathname-name p))) all-matches))
-         (result (make-array (length matches) :fill-pointer 0)))
-    (dolist (path matches result)
-      (vector-push (concatenate 'string dir-prefix (%p-dirent-name path)) result))))
 
 (defun %p-glob-own-home ()
   "This process's home directory from the passwd database — bsd_glob's
@@ -23178,47 +23034,285 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when start (push (subseq pat start n) words))
     (nreverse words)))
 
-(defun %p-glob--wildcard-p (s)
-  "Does S hold a glob METACHARACTER?  `{` counts even though PCL does not
-   implement csh brace expansion yet (task #488): counting it keeps
-   `glob(\"{a,b}\")` OUT of the literal rule below, where it would answer
-   `{a,b}` — further from perl's `a`, `b` than the empty result it gives now."
-  (find-if (lambda (c) (member c '(#\* #\? #\[ #\{))) s))
+;;; THE ONE GLOB ENGINE (task #3160, s514e).  perl's glob IS bsd_glob(3)
+;;; run with the csh flags, and File::Glob's bsd_glob(PATTERN, FLAGS) is the
+;;; same engine with the caller's flags, so both go through %p-bsd-glob: ONE
+;;; pattern (no word splitting) and a list of flag KEYWORDS -- :brace :nocase
+;;; :mark :nocheck :nomagic :quote :tilde :nosort :alphasort :err.  The
+;;; numeric GLOB_* values are File::Glob's data and live in lib/File/Glob.pm,
+;;; which maps them to these keywords.  (The engine it replaces was a CL
+;;; pathname expander with no braces (#488), no backslash quoting, ASCII
+;;; instead of case-insensitive order, and no `.`/`..` entries.)
 
-(defun %p-glob--expand-one (pat)
-  "One whitespace-separated word of a glob pattern."
-  (let ((tilde (%p-glob-expand-tilde pat)))
-    ;; NO METACHARACTER: perl returns the pattern ITSELF, whether or not
-    ;; anything of that name exists — glob(\"/nope-xyz\") is \"/nope-xyz\",
-    ;; glob(\"/home/\") is \"/home/\", glob(\"~/\") is the expanded home
-    ;; (task #450, probed against perl 5.40.3).  PCL went to the filesystem
-    ;; unconditionally, so all three answered EMPTY.  Doing it here, after the
-    ;; tilde expansion, is what makes the trailing-slash and unknown-user cases
-    ;; fall out: `~nosuchuser` stays literal because the tilde pass leaves it
-    ;; alone, and `/home/` needs no directory read at all.
-    (if (not (%p-glob--wildcard-p tilde))
-        (let ((v (make-array 1 :adjustable t :fill-pointer 1)))
-          (setf (aref v 0) tilde)
-          v)
-        (let* ((expanded (expand-glob-char-ranges tilde))
-               (slash (position #\/ expanded :from-end t))
-               (dir-prefix (if slash (subseq expanded 0 (1+ slash)) ""))
-               (file-glob  (if slash (subseq expanded (1+ slash)) expanded)))
-          (if (or (string= file-glob "")
-                  (find-if (lambda (c) (member c '(#\* #\? #\[))) dir-prefix))
-              ;; Wildcard in the directory portion (rare): old pathname behaviour.
-              (%p-glob--expand-pathname expanded pat)
-              ;; Common case: fixed directory, wildcard last component.
-              (%p-glob--expand-dir dir-prefix file-glob))))))
+(defvar *p-csh-glob-flags* '(:brace :nomagic :quote :tilde :alphasort)
+  "perl's GLOB_CSH: the flags CORE::glob and <*.c> run with.")
+
+(defun %p-glob-escaped-at (s i quote)
+  "Under :quote, is the character at I protected by a backslash before it?"
+  (and quote (plusp i) (char= (char s (1- i)) #\\)
+       (not (%p-glob-escaped-at s (1- i) quote))))
+
+(defun %p-glob-unescape (s)
+  "GLOB_QUOTE's output form: every `\\x` is x; a trailing backslash stays
+   (probed: glob(\"a\\\\b\") is ab, glob(\"x\\\\\") is x\\)."
+  (with-output-to-string (o)
+    (let ((i 0) (n (length s)))
+      (loop while (< i n) do
+            (let ((c (char s i)))
+              (if (and (char= c #\\) (< (1+ i) n))
+                  (progn (write-char (char s (1+ i)) o) (incf i 2))
+                  (progn (write-char c o) (incf i))))))))
+
+(defun %p-glob-magic-p (s quote)
+  "Does S hold an unprotected * ? or [ -- bsd_glob's GLOB_MAGCHAR?"
+  (loop for i below (length s)
+        thereis (and (member (char s i) '(#\* #\? #\[))
+                     (not (%p-glob-escaped-at s i quote)))))
+
+(defun %p-glob-brace-close (s open quote)
+  "Index of the `}` balancing the `{` at OPEN, skipping [..] classes; NIL
+   when it is unbalanced."
+  (let ((depth 0) (i (1+ open)) (n (length s)))
+    (loop while (< i n) do
+          (let ((c (char s i)))
+            (cond ((%p-glob-escaped-at s i quote))
+                  ((char= c #\[)
+                   (let ((e (position #\] s :start (1+ i))))
+                     (when e (setf i e))))
+                  ((char= c #\{) (incf depth))
+                  ((char= c #\})
+                   (when (zerop depth) (return-from %p-glob-brace-close i))
+                   (decf depth))))
+          (incf i))
+    nil))
+
+(defun %p-glob-brace-alternatives (s open close quote)
+  "The comma-separated alternatives between OPEN and CLOSE, at depth 0."
+  (let ((alts nil) (depth 0) (start (1+ open)))
+    (loop for i from (1+ open) below close do
+          (let ((c (char s i)))
+            (cond ((%p-glob-escaped-at s i quote))
+                  ((char= c #\{) (incf depth))
+                  ((char= c #\}) (decf depth))
+                  ((and (char= c #\,) (zerop depth))
+                   (push (subseq s start i) alts)
+                   (setf start (1+ i))))))
+    (push (subseq s start close) alts)
+    (nreverse alts)))
+
+(defun %p-glob-brace-expand (s quote)
+  "GLOB_BRACE: the patterns S stands for, in brace order.  The whole pattern
+   `{}` is literal (find(1)'s argument, as csh); an unbalanced `{` globs only
+   the text BEFORE it (bsd_glob's globexp2 -- probed: glob(\"{x\") is the
+   empty string, glob(\"{}x\") is x)."
+  (let ((open (loop for i below (length s)
+                    when (and (char= (char s i) #\{)
+                              (not (%p-glob-escaped-at s i quote)))
+                    return i)))
+    (if (or (null open) (string= s "{}"))
+        (list s)
+        (let ((close (%p-glob-brace-close s open quote)))
+          (if (null close)
+              (list (subseq s 0 open))
+              (loop for alt in (%p-glob-brace-alternatives s open close quote)
+                    nconc (%p-glob-brace-expand
+                           (concatenate 'string (subseq s 0 open) alt
+                                        (subseq s (1+ close)))
+                           quote)))))))
+
+(defun %p-glob-class-regex (glob i s)
+  "Write the class starting at the `[` at I to S; return the index after it.
+   An unclosed `[` is a literal."
+  (let ((j (1+ i)) (len (length glob)))
+    (when (and (< j len) (member (char glob j) '(#\^ #\!))) (incf j))
+    (when (and (< j len) (char= (char glob j) #\])) (incf j))
+    (loop while (and (< j len) (char/= (char glob j) #\])) do (incf j))
+    (if (< j len)
+        (let ((body (subseq glob (1+ i) j)))
+          (write-char #\[ s)
+          (when (and (plusp (length body)) (member (char body 0) '(#\^ #\!)))
+            (write-char #\^ s)
+            (setf body (subseq body 1)))
+          (loop for c across body
+                do (when (member c '(#\\ #\[)) (write-char #\\ s))
+                (write-char c s))
+          (write-char #\] s)
+          (1+ j))
+        (progn (write-string "\\[" s) (1+ i)))))
+
+(defun %p-glob-component-regex (glob quote)
+  "cl-ppcre pattern (whole-string anchored) for one filename component:
+   `*` any run, `?` one char, `[..]` a class (`!`/`^` negates), under :quote
+   `\\x` the literal x, every other char literal."
+  (with-output-to-string (s)
+    (write-char #\^ s)
+    (let ((i 0) (len (length glob)))
+      (loop while (< i len) do
+            (let ((c (char glob i)))
+              (cond
+                ((and quote (char= c #\\) (< (1+ i) len))
+                 (write-string (cl-ppcre:quote-meta-chars (string (char glob (1+ i)))) s)
+                 (incf i 2))
+                ((char= c #\*) (write-string "[^/]*" s) (incf i))
+                ((char= c #\?) (write-string "[^/]" s) (incf i))
+                ((char= c #\[) (setf i (%p-glob-class-regex glob i s)))
+                (t (write-string (cl-ppcre:quote-meta-chars (string c)) s)
+                   (incf i))))))
+    (write-char #\$ s)))
+
+(defun %p-glob-readdir (dir)
+  "Every entry of DIR (\"\" = the cwd), `.` and `..` included as perl's glob
+   sees them; :FAIL when the directory cannot be opened."
+  (let ((d (handler-case (sb-posix:opendir (if (string= dir "") "." dir))
+             (sb-posix:syscall-error () nil))))
+    (if (null d)
+        :fail
+        (unwind-protect
+             (loop for e = (sb-posix:readdir d)
+                   until (sb-alien:null-alien e)
+                   collect (sb-posix:dirent-name e))
+          (sb-posix:closedir d)))))
+
+(defun %p-glob-stat (path follow)
+  "Does PATH exist (lstat, or stat when FOLLOW)?  Second value: a directory?"
+  (let ((st (handler-case (if follow (sb-posix:stat path) (sb-posix:lstat path))
+              (sb-posix:syscall-error () nil))))
+    (values (and st t) (and st (sb-posix:s-isdir (sb-posix:stat-mode st))))))
+
+(defun %p-glob-component-matches (dir comp flags)
+  "The entries of DIR that COMP matches.  A leading dot is matched only by a
+   literal leading dot in COMP.  An unreadable DIR matches nothing -- or,
+   under :err, aborts the whole glob (GLOB_ABEND)."
+  (let ((names (%p-glob-readdir dir)))
+    (when (eq names :fail)
+      (when (member :err flags) (throw '%p-glob-abort :abend))
+      (return-from %p-glob-component-matches nil))
+    (let ((scanner (cl-ppcre:create-scanner
+                    (%p-glob-component-regex comp (member :quote flags))
+                    :case-insensitive-mode (and (member :nocase flags) t)))
+          (dot-ok (and (plusp (length comp)) (char= (char comp 0) #\.))))
+      (loop for n in names
+            when (and (or dot-ok (zerop (length n)) (char/= (char n 0) #\.))
+                      (cl-ppcre:scan scanner n))
+            collect n))))
+
+(defun %p-glob-walk (prefix comps flags acc)
+  "Extend the path PREFIX by the component patterns COMPS; push every
+   existing result onto ACC (a list) and return it.  A component with no
+   magic is appended as it stands (unquoted) -- :nocase too, as bsd_glob
+   does (probed: bsd_glob(\"A.TXT\", GLOB_NOCASE) finds no a.txt)."
+  (if (null comps)
+      (multiple-value-bind (there dirp) (%p-glob-stat prefix nil)
+        (declare (ignore dirp))
+        (if (not there)
+            acc
+            (cons (if (and (member :mark flags)
+                           (plusp (length prefix))
+                           (char/= (char prefix (1- (length prefix))) #\/)
+                           (nth-value 1 (%p-glob-stat prefix t)))
+                      (concatenate 'string prefix "/")
+                      prefix)
+                  acc)))
+      (let* ((comp (car comps))
+             (rest (cdr comps))
+             (sep (if rest "/" ""))
+             (quote (member :quote flags)))
+        (if (or (string= comp "")
+                (not (%p-glob-magic-p comp quote)))
+            (%p-glob-walk (concatenate 'string prefix
+                                       (if quote (%p-glob-unescape comp) comp) sep)
+                          rest flags acc)
+            (dolist (n (%p-glob-component-matches prefix comp flags) acc)
+              (setf acc (%p-glob-walk (concatenate 'string prefix n sep)
+                                      rest flags acc)))))))
+
+(defun %p-glob-ci< (a b)
+  "GLOB_ALPHASORT: case-insensitive, ties broken by the plain order
+   (probed: glob(\"*\") over B a C b.c is a,B,b.c,C)."
+  (let ((ca (string-downcase a)) (cb (string-downcase b)))
+    (if (string= ca cb) (string< a b) (string< ca cb))))
+
+(defun %p-glob-split-components (pat)
+  "PAT split at every `/`: a leading `/` gives a leading empty component,
+   which the walk turns back into the root."
+  (let ((out nil) (start 0))
+    (loop for i = (position #\/ pat :start start)
+          while i do (push (subseq pat start i) out) (setf start (1+ i)))
+    (push (subseq pat start) out)
+    (nreverse out)))
+
+(defun %p-glob-one (pat flags)
+  "One brace alternative: tilde, match, sort, and the no-match rules
+   (GLOB_NOCHECK: the pattern itself; GLOB_NOMAGIC: the pattern itself when
+   it held no * ? [ -- glob(\"/nope\") is \"/nope\", #450)."
+  (let* ((quote (member :quote flags))
+         (p (if (member :tilde flags) (%p-glob-expand-tilde pat) pat))
+         (found (if (string= p "")
+                    nil
+                    (%p-glob-walk "" (%p-glob-split-components p) flags nil))))
+    (cond (found
+           (cond ((member :nosort flags) (nreverse found))
+                 ((member :alphasort flags) (sort found #'%p-glob-ci<))
+                 (t (sort found #'string<))))
+          ((or (member :nocheck flags)
+               (and (member :nomagic flags) (not (%p-glob-magic-p p quote))))
+           (list (if quote (%p-glob-unescape p) p)))
+          (t nil))))
+
+(defun %p-bsd-glob (pattern flags)
+  "bsd_glob(3): the matches of the ONE pattern PATTERN under the flag
+   keywords FLAGS, as a list of strings.  Second value: :abend when :err
+   stopped it at an unreadable directory, else NIL."
+  (let ((result
+         (catch '%p-glob-abort
+           (loop for alt in (if (member :brace flags)
+                                (%p-glob-brace-expand pattern (member :quote flags))
+                                (list pattern))
+                 nconc (%p-glob-one alt flags)))))
+    (if (eq result :abend)
+        (values nil :abend)
+        (values result nil))))
+
+(defparameter +p-glob-flag-names+
+  '(("brace" . :brace) ("nocase" . :nocase) ("mark" . :mark)
+    ("nocheck" . :nocheck) ("nomagic" . :nomagic) ("quote" . :quote)
+    ("tilde" . :tilde) ("nosort" . :nosort) ("alphasort" . :alphasort)
+    ("err" . :err))
+  "The flag NAMES builtin::bsd_glob accepts, and the engine's keywords.")
+
+(defun %p-glob-words (pat flags)
+  "perl's csh_glob: PAT is a whitespace-separated LIST of patterns, each
+   globbed on its own, results concatenated in order.  Second value: :abend
+   when one of them stopped at an unreadable directory under :err."
+  (let ((out nil) (err nil))
+    (dolist (word (%p-glob--split-words pat))
+      (multiple-value-bind (found e) (%p-bsd-glob word flags)
+        (setf out (nconc out found))
+        (when e (setf err e))))
+    (values out err)))
+
+(defun %p-builtin-bsd-glob (pattern &optional flagwords)
+  "builtin::bsd_glob(PATTERN, FLAGWORDS) -> #(STATUS MATCH...).  FLAGWORDS is
+   one string of comma-separated flag names (a builtin's arguments are
+   scalars); the pseudo-flag `words` splits PATTERN as csh_glob does.  A flag
+   name the engine does not know DIES naming it (rule 12)."
+  (let* ((names (if flagwords
+                    (remove "" (cl-ppcre:split "," (to-string flagwords)) :test #'string=)
+                    nil))
+         (words (member "words" names :test #'string=))
+         (flags (loop for s in names
+                      unless (string= s "words")
+                      collect (or (cdr (assoc s +p-glob-flag-names+ :test #'string=))
+                                  (p-die (format nil "builtin::bsd_glob: unknown flag '~A'" s))))))
+    (multiple-value-bind (found err)
+        (if words
+            (%p-glob-words (to-string pattern) flags)
+            (%p-bsd-glob (to-string pattern) flags))
+      (coerce (cons (if err -2 0) found) 'vector))))
 
 (defun p-glob--expand (pat)
-  "Expand glob pattern PAT and return a vector of matching filenames.
-   PAT is perl's whitespace-separated LIST of patterns; each word expands on
-   its own and the results concatenate in order."
-  (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
-    (dolist (word (%p-glob--split-words pat) out)
-      (let ((v (%p-glob--expand-one word)))
-        (loop for x across v do (vector-push-extend x out))))))
+  "CORE::glob's expansion of PAT: csh_glob with the csh flags, as a vector."
+  (coerce (%p-glob-words pat *p-csh-glob-flags*) 'vector))
 
 (defun p-glob (&optional pattern)
   "Perl glob / <*.txt> - expand file glob pattern.
@@ -30702,7 +30796,11 @@ buffer's fill-pointer; everything else falls back to file-length."
     (def "ENCODE_OCTETS" #'%p-encode-octets)
     (def "DECODE_OCTETS" #'%p-decode-octets)
     (def "ENCODING_KNOWN"
-        (lambda (name) (if (%p-codec-keyword name) 1 *p-undef*)))))
+        (lambda (name) (if (%p-codec-keyword name) 1 *p-undef*)))
+    ;; bsd_glob(3), the engine CORE::glob runs with the csh flags (#3160):
+    ;; builtin::bsd_glob(PATTERN, FLAGNAME...) -> (STATUS, MATCH...), STATUS
+    ;; 0 or GLOB_ABEND's -2.  lib/File/Glob.pm owns the GLOB_* numbers.
+    (def "BSD_GLOB" #'%p-builtin-bsd-glob)))
 
 ;;; `use builtin LIST` — THE ONE PRAGMA IN THAT FAMILY THAT IMPORTS (#1999
 ;;; residue).  perl aliases each named builtin into the CALLING package, so an
@@ -38131,8 +38229,14 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun pl-boot_DynaLoader (&rest args) (declare (ignore args)) nil)
 (defun pl-dl_error (&rest args) (declare (ignore args)) nil)
 (defun pl-dl_load_flags (&rest args) (declare (ignore args)) (make-p-box 0))
-(defun pl-bootstrap (&rest args) (declare (ignore args)) nil)
-(defun pl-bootstrap_inherit (&rest args) (declare (ignore args)) nil)
+;; bootstrap(MODULE) is XSLoader::load(MODULE): boot a built artifact, or die
+;; perl's "Can't locate loadable object" through the SAME p-xs-no-artifact
+;; path (#3160).  A silent no-op let Compress::Raw::Zlib's fallback
+;; `bootstrap` succeed, and its AUTOLOAD then recursed through the missing XS
+;; constant() until the binding stack was exhausted.
+(defun pl-bootstrap (&rest args)
+  (apply (find-symbol "PL-LOAD" "XSLoader") args))
+(defun pl-bootstrap_inherit (&rest args) (apply #'pl-bootstrap args))
 (defun pl-dl_load_file (&rest args) (declare (ignore args)) nil)
 (defun pl-dl_find_symbol (&rest args) (declare (ignore args)) nil)
 (defun pl-dl_undef_symbols (&rest args) (declare (ignore args)) nil)

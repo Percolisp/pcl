@@ -950,7 +950,21 @@ sub parse {
       if ($is_glob) {
         # File glob: <*.txt>, </path/*.log>, etc.
         say "parse(): Treating as file glob"         if 1 & DEBUG;
-        my ($node, $node_id) = $self->make_node_insert('glob');
+        # An IMPORTED `glob` overrides `<*.c>` as it does `glob(...)`
+        # (perlop: "<*.c> ... is the internal function glob"; `use File::Glob
+        # ':bsd_glob'` installs one, #3160): the same registry and the same
+        # call shape as the readpipe override of `` `cmd` `` below.
+        my $gpkg = $self->has_environment
+                 ? ($self->environment->current_package // 'main') : 'main';
+        my $gat  = $e1->can('location') ? ($e1->location || undef) : undef;
+        my $govr = $self->has_environment
+                 ? $self->environment->builtin_override_target($gpkg, 'glob',
+                                                               $gat ? @$gat[0,1] : ())
+                 : undef;
+        my ($node, $node_id) = $self->make_node_insert(defined $govr ? 'funcall' : 'glob');
+        $self->add_child_to_node($node_id,
+          $self->make_node(PPI::Token::Word->new("${govr}::glob")))
+          if defined $govr;
 
         # Store the pattern - handle interpolation if contains $var
         if ($inner =~ /[\$\@]/) {
@@ -963,7 +977,12 @@ sub parse {
           # the real document token.
           my $interp_id = $self->str_interpol->parse_interpolated_string($self, $fake_str, $e1);
           # The interpolation returns a string_concat node, add its children
-          $self->add_child_flattening($node_id, $interp_id, 'string_concat');
+          # (the override's call takes it whole: ONE pattern argument)
+          if (defined $govr) {
+            $self->add_child_to_node($node_id, $interp_id);
+          } else {
+            $self->add_child_flattening($node_id, $interp_id, 'string_concat');
+          }
         } else {
           # Static pattern - store as literal string
           my $str_token = PPI::Token::Quote::Double->new(qq{"$inner"});
