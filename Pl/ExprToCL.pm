@@ -2943,6 +2943,14 @@ sub gen_funcall_form {
             $arg = ['p-backslash', $arg];
           }
         }
+        # A DEREFERENCE of the slot's sigil is a matching argument too --
+        # `lock_keys(%$h)` under `(\%)` passes \%$h in perl (task #3163;
+        # it was flattened, so the sub got the hash's first KEY).  Its form
+        # is the one `\%$h` itself is built from.
+        elsif (ref($arg) eq 'ARRAY' && $expected_sigil ne '$'
+               && ($arg->[0] // '') eq "p-cast-$expected_sigil") {
+          $arg = ['p-backslash', $arg];
+        }
       }
     }
     push @args, $arg;

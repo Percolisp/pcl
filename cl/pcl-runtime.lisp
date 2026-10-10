@@ -975,7 +975,9 @@
   obj          ; what TIEARRAY / TIEHASH returned
   kind         ; :array or :hash
   saved        ; the contents it had when tied -- perl hides them, untie restores
-  (iter nil))  ; each(): NIL = start afresh, else the key NEXTKEY continues from
+  (iter nil)   ; each(): NIL = start afresh, else the key NEXTKEY continues from
+  (hidden nil)) ; T: a tie that IMPLEMENTS a core behaviour (a restricted hash,
+                ; lib/Hash/Util.pm, #3163) -- tied() answers undef, as perl does
 
 (defmethod print-object ((r p-tie-rec) stream)
   (print-unreadable-object (r stream :type t :identity t)))
@@ -30816,6 +30818,20 @@ buffer's fill-pointer; everything else falls back to file-length."
         (lambda (code)
           (let ((fn (%p-code-function code)))
             (or (and fn (gethash fn %pcl-sub-stash)) *p-undef*))))
+    ;; A restricted hash (Hash::Util, #3163) is a tie whose class is the
+    ;; shim's own: HIDE_TIE(\%h) makes tied(%h) answer undef for it, as it
+    ;; does in perl, where restriction is not a tie.
+    (def "HIDE_TIE"
+        (lambda (r)
+          (let ((rec (%p-tied (p-cast-% r))))
+            (when rec (setf (p-tie-rec-hidden rec) t))
+            (if rec 1 *p-undef*))))
+    ;; ... and the shim reads its own object back: the tie object of a HIDDEN
+    ;; tie, undef for any other container (a user tie stays tied()'s).
+    (def "HIDDEN_TIE_OBJECT"
+        (lambda (r)
+          (let ((rec (%p-tied (p-cast-% r))))
+            (if (and rec (p-tie-rec-hidden rec)) (p-tie-rec-obj rec) *p-undef*))))
     (def "SET_SUB_ATTRIBUTE"
         (lambda (code name)
           (if (%p-record-sub-attribute code name) 1 *p-undef*)))))
@@ -32916,7 +32932,9 @@ buffer's fill-pointer; everything else falls back to file-length."
   (when (%p-handle-operand-p box)
     (return-from p-tied (%p-tied-handle-object box)))
   (let ((rec (%p-tied box)))
-    (when rec (return-from p-tied (p-tie-rec-obj rec))))
+    (when rec
+      (return-from p-tied
+        (if (p-tie-rec-hidden rec) *p-undef* (p-tie-rec-obj rec)))))
   (if (p-box-p box)
       (let ((v (p-box-value box)))
         (cond
