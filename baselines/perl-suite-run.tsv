@@ -1862,7 +1862,7 @@ op/cproto.t	254	0	254	0	OK		0
 op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).	0
 op/current_sub.t	22	0	10	1	XDIFF	s507c #2691: +2 (__SUB__ in no sub is undef under the feature, `use v5.15` included; the two expected rows left by --bless-rows of this file alone; the 1 left = `+()=__SUB__`, the 11 missing = __SUB__ in a BEGIN block aborts the forms) | aborted-forms:3: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)	0
 op/dbm.t	5	0	0	0	DIFF		0
-op/decl-refs.t	402	0	42	165	DIFF	aborted-forms:2: ParserN TODO: state outside a block-level declaration at (eval N) line N. 	0
+op/decl-refs.t	402	0	55	152	DIFF	aborted-forms:2: ParserN TODO: state outside a block-level declaration at (eval N) line N. 	0
 op/defer.t	28	0	4	8	XDIFF	aborted-forms:13: Undefined subroutine &main::defer called | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	0
 op/defined.t	5	0	5	0	OK		0
 op/defins.t	27	0	27	0	OK		0
