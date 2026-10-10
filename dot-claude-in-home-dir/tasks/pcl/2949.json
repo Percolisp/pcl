@@ -1,0 +1,12 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [
+      2947
+   ],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514 (Fable, 2026-10-10 10:45) from s514a's member-1 report (worktree agent-a758d6e41f15d3c26, scratch/s514a/STOP.md, load ~4.7 at measurement).  The shims (#2947) are CORRECT (byte-identical digests) and are the right layer by rule 9a (a user can write a digest in Perl), so they ship.  The COST: pure Perl under PCL runs the compression function 400-2000x slower than XS -- a 100 MB file = ~50 s for MD5, ~7 min for SHA-512 (perl: 0.1-0.2 s).  OPTIONS, in order of cost: (a) accept, document the ratio in docs/shipped-modules.md (done by s514a) -- fine for the everyday battery and small inputs; (b) a generic runtime primitive `builtin::digest_octets(ALG, OCTETS)` (and an incremental state pair) that the shims call for the compression work while keeping perl's API, aliases, base64 and error shapes in Perl: MD5 via SBCL's `sb-md5` contrib (already in every SBCL), SHA-1/SHA-2 as ~200 lines of typed Lisp (ironclad is not vendored and must not become a dependency); the primitive is generic (an ALG name), no module name in cl/ -- the Time::HiRes / POSIX builtin:: seam pattern; (c) nothing else.  The decision is the USER's (a `cl/` primitive for a non-core module is the rule-9a boundary case: \"only what no Perl can say\" -- here Perl CAN say it, just slowly).  Measure first on a real program (a checksum of a 10 MB file) before deciding; the shim's profile under statprof says where the time goes (expected: the 32-bit masking `& 0xffffffff` and the rotate on every step -- a `use integer` + typed path in the compiler could also narrow the gap WITHOUT a primitive: measure that first, it is the general lever).",
+   "id" : 2949,
+   "status" : "pending",
+   "subject" : "PERF / PRODUCT (filed s514 from s514a's measurement): the pure-Perl Digest shims are 400-2000x slower than perl's XS (1 MB: md5 0.465 s vs 0.001, sha256 1.91 vs 0.003, sha512 4.37 vs 0.002) -- a program hashing files of MBs is unusable; the option is ONE generic runtime digest primitive (sb-md5 contrib for MD5; SHA-2 in Lisp ~200 lines) behind builtin::, the shim keeping the API -- a USER decision after the shim ships"
+}
