@@ -84,7 +84,6 @@ is [`not-supported.md`](not-supported.md). The main items:
 | XS / compiled C extensions | experimental, through the separate [XS bridge](#xs); not part of PCL itself |
 | `@_` argument aliasing | partial: `$_[0] = 42` changes the caller's variable, array element or hash element for a named sub. An element reached through a reference (`f($r->{k})`) gets a copy, and so can an argument passed to a code reference or a method |
 | `DESTROY` | never called: memory is reclaimed by the garbage collector, and there is no scope-exit destructor. For now, close filehandles explicitly |
-| `tie` on filehandles | announced on stderr and ignored; `tie` on scalars, arrays and hashes works (since 2026-10-04) |
 | regex code blocks `(?{…})`, `(??{…})` | removed from the pattern with a warning at compile time (cl-ppcre has no equivalent); the rest of the match runs |
 | `given`/`when`, smart match `~~` | refused with a message (removed in perl 5.42 anyway) |
 | `format`/`write` | refused with a message |

@@ -5,6 +5,46 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-10-10: **`Encode`, `Storable`, `Digest::MD5` and `Digest::SHA` in pure
+  Perl** (#2946, #2947, #2948).  `use Encode` works without XS: encode /
+  decode / the CHECK modes / `:encoding(...)` layers over three runtime codec
+  primitives, with perl's own `Encode::Alias` consulted; `Storable` reads and
+  writes perl's own binary format (files and frozen strings interchange with
+  real perl; hooks not yet); the digests are byte-identical to the XS modules
+  and slow (pure Perl: noted, XS later).  Text::CSV, which loads Encode at
+  compile time, went from 0 to 769 passing rows in its own test suite.
+
+- 2026-10-10: **`tie` on a filehandle** (#2590).  `tie *FH`, `tie *STDOUT`,
+  `tie *$fh` call `TIEHANDLE`, and print / printf / say / readline / getc /
+  read / sysread / eof / close / binmode / fileno / seek / tell / open go to
+  the object's methods; `warn` reaches a tied `STDERR`; `local *FH` undoes a
+  tie made inside it.  perl's own t/op/tiehandle.t went from 11 to 53 passing
+  rows.  Measured free on the hot I/O paths (one counter test).
+
+- 2026-10-10: **the parse-contradiction detector is on by default** (#2610).
+  When a sub installed by code that ran at compile time (a `BEGIN` block, an
+  import the compiler could not see) carries a prototype that contradicts how
+  a call to it was parsed, PCL prints one stderr line naming the site and
+  continues.  `PCL_DETECT=die` stops there; `PCL_DETECT=off` silences it.
+  Most of what it reports today is one compiler gap, imported subs whose
+  prototypes did not reach the parse (#3143, fix in flight).
+
+- 2026-10-10: **Moo objects five times faster** (#3120).  A `package X;`
+  statement inside a sub body, the shape of every Sub::Quote-generated
+  accessor, emitted a bare class definition, so each accessor call redefined
+  its CLOS class.  One word in the compiler; the moo-objs benchmark row went
+  from 25x perl to 5x.
+
+- 2026-10-10: **four silent-wrongs of ordinary module code** (#2953, #2943,
+  #3081, #3080).  A list slice of an empty list is an empty list (so
+  `my ($a, $b) = (lstat $f)[0, 1] or next` takes the `next`, and
+  `File::Path::remove_tree` of a missing path is silent, as in perl);
+  `read` / `sysread` / `recv` into `$b[$i++]` evaluate the subscript once; a
+  sub recursing on `$$v` gets the right argument at every depth; a
+  package-qualified `$Foo::x` is never shadowed by a lexical `my $x` of the
+  same name.  Also `use File::Spec::Functions` imports `canonpath` and the
+  other names it was missing, and export tags work for every module.
+
 - 2026-09-27: **`@INC` in perl's order, and `$0` under `-e` and `-M`**
   (#2462, #2464, #2461, #2460).  `-I` directories now come first, then
   `PERL5LIB`, then PCL's `lib/`, then perl's own — PCL's `lib/` used to sit

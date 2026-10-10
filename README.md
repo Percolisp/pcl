@@ -247,7 +247,12 @@ The [IR manual](docs/ir-spec.md) documents every form.
 
 ## What does not work (yet)
 
-* **XS modules.** Anything with compiled C fails. An experimental XS
+* **XS modules.** Anything with compiled C fails, unless PCL ships a
+  pure-Perl replacement: it does for the common XS core modules
+  (`List::Util`, `Scalar::Util`, `POSIX`, `Time::HiRes`, `Encode`,
+  `Storable`, `Digest::MD5`, `Digest::SHA`; see
+  [`docs/shipped-modules.md`](docs/shipped-modules.md)). `Compress::Zlib`
+  does not load: zlib itself is C. An experimental XS
   bridge is being developed separately; see
   [`docs/STATUS.md`](docs/STATUS.md#xs).
 * **No standalone binary.** Running a program needs SBCL, and perl too
@@ -261,8 +266,6 @@ The [IR manual](docs/ir-spec.md) documents every form.
   scope-exit destructor. Code that relies on one for cleanup (guard
   objects, temporary files) does not get it. The same goes for
   filehandles: for now, close your filehandles explicitly.
-* **`tie` on a filehandle** is announced on stderr and ignored, for now
-  (`tie` on scalars, arrays and hashes works).
 * **Regex code blocks** `(?{ })` are removed from the pattern with a
   warning at compile time. The match runs without them.
 * **`format`/`write`**, **perl 5.38 `class`/`field`/`method`** and
@@ -278,13 +281,19 @@ line where they differ. It runs the program twice, so do not use it on
 a program whose side effects must happen only once. See
 [`docs/pcl-check.md`](docs/pcl-check.md).
 
+PCL also watches, while a program runs, for a parse it made that code run
+at compile time contradicts: a `BEGIN` block or an import that installs a
+sub with a prototype after a call to it was already parsed. It prints one
+stderr line naming the site and continues; `PCL_DETECT=die` stops there
+and `PCL_DETECT=off` silences it.
+
 [`docs/not-supported.md`](docs/not-supported.md) has the complete list.
 
 ### Measured
 
 PCL is tested against its own regression suite, perl 5.40's own test
 suite and a set of pure-Perl CPAN distributions. On the tests extracted
-from perl's suite, 96.6 % of assertions pass (measured 2026-10-01). A
+from perl's suite, 96.7 % of assertions pass (measured 2026-10-10). A
 large part of the remaining failures are deliberate non-support (no XS,
 different error text); the rest are the bug queue. Every number, how it
 was measured and how to reproduce it are in
@@ -300,7 +309,7 @@ was measured and how to reproduce it are in
   a beta version. It will be for verifying that the IR really works, and
   it will also be good for testing when trying to implement XS.
 * **Planned, not rejected:** live symbol-table hashes (`%Foo::`), full
-  `caller()` fidelity, perl 5.38 classes, `tie` on filehandles, `format`,
+  `caller()` fidelity, perl 5.38 classes, `format`,
   indirect object syntax with a scalar invocant, and a `use warnings`
   model. See [`docs/not-supported.md`](docs/not-supported.md).
 
