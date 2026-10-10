@@ -1239,6 +1239,11 @@ sub _premerge_include_prototypes {
     my $type = $inc->type // '';
     # #2871: what this statement imports is in force from HERE.
     local $self->environment->{reg_site} = Pl::Parser::use_reg_site($inc);
+    # ... and in the PACKAGE it compiles in (task #3143): an import lands in
+    # that package's stash, and the in-parse re-merge registers it there --
+    # registered under `main` here, the re-merge of a later `require` became
+    # the package's FIRST record and hid every call above it.
+    local $fp->environment->package_stack->[-1] = _package_of_element($inc);
     if ($type eq 'use') {
       my $module = $inc->module or next;
       next if $module =~ $skip;

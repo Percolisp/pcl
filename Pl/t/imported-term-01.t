@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 24;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -287,3 +287,61 @@ both_agree_v(q{use Scalar::Util qw(reftype blessed); my $o = bless {}, "K"; my @
 
 both_agree(q{use T438::Konst; my $o = bless {}, "K"; my @m = (kname $o, 5); print scalar(@m), " $m[0]\n";},
            "#2960 an imported prototype-less sub before `\$o`: kname(\$o, 5)");
+
+# ---- task #3143: the prototype record is keyed by its DECLARING package -----
+#
+# lib/Encode.pm exports `sub decode($$;$)` and ALSO defines a prototype-less
+# `sub decode` in its encoding-object packages; the module scan keyed records
+# by the BARE name, so the later definition shadowed the exported one and
+# `decode(...)` parsed without the prototype (the detector then announced every
+# call).  Second half: the import pre-pass registered a module unit's
+# `use M qw(f)` under `main`, so a later `require` (re-merging f under the
+# unit's real package) became the package's FIRST record and every call ABOVE
+# that require parsed as an unknown word (Math::BigInt's `blessed`).
+make_path("$libdir/T3143");
+open(my $pfh, '>', "$libdir/T3143/PA.pm") or die "fixture: $!";
+print $pfh <<'PM';
+package T3143::PA;
+use Exporter 'import'; our @EXPORT_OK = qw(f g);
+sub f($$) { return "f(" . scalar(@_) . ")" }
+sub g($;$) { return "g(" . scalar(@_) . ")" }
+package T3143::PA::Obj;
+sub f { return "obj-f" }
+sub g { return "obj-g" }
+1;
+PM
+close $pfh;
+open(my $ufh, '>', "$libdir/T3143/User.pm") or die "fixture: $!";
+print $ufh <<'PM';
+package T3143::User;
+use T3143::PA qw(f);
+sub u { my @l = (1, 2, 3); return f @l, 5 }
+sub w { require T3143::Other; 1 }
+sub v { my @l = (1, 2, 3); return f @l, 5 }
+1;
+PM
+close $ufh;
+open(my $tfh, '>', "$libdir/T3143/Other.pm") or die "fixture: $!";
+print $tfh "package T3143::Other;\nuse T3143::PA qw(f);\n1;\n";
+close $tfh;
+
+both_agree(q{use T3143::PA qw(f g); my @l = (1, 2, 3); print f(@l, 5), " ", (f @l, 5), " ", g(@l), "\n";},
+           '#3143 an exported ($$) sub keeps its prototype past a same-named sub in another package');
+{
+    # The module UNIT is transpiled by a child the runtime spawns as `perl -I
+    # <program @INC> pl2cl --module`; the gate's shared transpile server drops
+    # that -I (task #3180), so this row runs on the spawn-per-call path.
+    local $ENV{PCL_XSERVER} = '';
+    both_agree(q{use T3143::User; T3143::User::w(); print T3143::User::u(), " ", T3143::User::v(), "\n";},
+               '#3143 a module unit\'s imported ($$) sub keeps its prototype around a `require` of a module importing the same name');
+}
+both_agree(q{use Encode qw(decode encode);
+my $x = "caf\xC3\xA9"; my $s = decode "UTF-8", $x; print length($s), " ", length(encode("UTF-8", $s)), "\n";},
+           '#3143 `decode "UTF-8", $x` parses with the shim\'s ($$;$) -- and no detector line');
+# The pre-pass half: Math::BigInt imports `blessed` at line 25 and `require`s
+# Math::BigFloat (which imports it too) inside later subs; registered under
+# `main`, the require's re-merge became Math::BigInt's first record and its
+# `defined(blessed($x))` calls above it announced (14 sites).
+both_agree(q{use Math::BigInt;
+print Math::BigInt->new(5) + 1, "\n";},
+           '#3143 a module unit pre-pass imports into the package the `use` is in (no detector line)');

@@ -1806,7 +1806,22 @@ sub collect_prototypes {
 
 sub _walk_prototype_facts {
   my ($self, $node) = @_;
+  # A `package NAME;` lasts to the end of the enclosing block, so the
+  # package that declares a sub is tracked here and restored on the way out:
+  # the prototype record is keyed by its DECLARING package (task #3143) --
+  # `sub decode($$;$)` in Encode and a prototype-less `sub decode` in
+  # Encode::XS are two subs, and the second must not shadow the first.
+  my $stack = $self->environment->package_stack;
+  my $saved = $stack->[-1];
   for my $child ($node->schildren) {
+    if ($child->isa('PPI::Statement::Package')) {
+      my $ns = $child->namespace;
+      my ($blk) = grep { $_->isa('PPI::Structure::Block') } $child->schildren;
+      $stack->[-1] = $ns if defined $ns;
+      $self->_walk_prototype_facts($blk) if $blk;
+      $stack->[-1] = $saved if $blk;
+      next;
+    }
     # (PPI::Statement::Scheduled — BEGIN/END/… — ISA Statement::Sub; it is a
     # block, not a declaration: recurse only.)
     if ($child->isa('PPI::Statement::Sub') && !$child->isa('PPI::Statement::Scheduled')) {
@@ -1822,6 +1837,7 @@ sub _walk_prototype_facts {
       $self->_walk_prototype_facts($child);
     }
   }
+  $stack->[-1] = $saved;
 }
 
 # --------------------------------------------------------------------------
@@ -11166,13 +11182,24 @@ sub _merge_module_prototypes {
   #       qualified spelling resolves here as it does in perl ('main'-owned
   #       rows are the facts walk's package-blind self-registrations, which
   #       (1) already covers under the module's real name).
+  # A name the module EXPORTS is the sub its OWN package declares (task
+  # #3143): the flat table holds whichever same-named sub the walk met LAST
+  # -- Encode's prototype-less `sub decode` in an encoding-object package
+  # shadowed the exported `sub decode($$;$)`.  The qualified spelling asks
+  # the module's package first and falls back to the flat entry (a name the
+  # module itself imported and re-exports).
+  my $own = sub {
+    my ($name) = @_;
+    return $module_env->get_prototype(defined $module ? "${module}::$name" : $name);
+  };
+
   # $module is undef for a path-required FILE, which has no package name to
   # own its subs — the pass is skipped.
   if (defined $module) {
     my $builtins = Pl::Environment::_builtin_prototypes();
     for my $name (keys %{ $module_env->prototypes }) {
       next if exists $builtins->{$name};
-      my $proto = $module_env->prototypes->{$name} or next;
+      my $proto = $own->($name) or next;
       $self->environment->add_pkg_prototype($name, _imported_record($proto),
                                             $module);
     }
@@ -11189,7 +11216,7 @@ sub _merge_module_prototypes {
   # If specific imports requested, only import those
   if ($imports && @$imports) {
     for my $name (_expand_import_tags($module_env, $imports)) {
-      my $proto = $module_env->get_prototype($name);
+      my $proto = $own->($name);
       if ($proto) {
         $add->($name, $proto);
       }
@@ -11207,7 +11234,7 @@ sub _merge_module_prototypes {
   #   plain ($$) sub propagates too — not just block/ref prototypes.
   # This is a simplification - full implementation would track @EXPORT
   for my $name (keys %{$module_env->prototypes}) {
-    my $proto = $module_env->get_prototype($name);
+    my $proto = $own->($name);
     next unless $proto;
 
     # Check if this prototype affects code generation
