@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514 (Fable, 2026-10-10 13:27).  Source: ~/pcl-agent-scratch/s513/review/ultra-s513g-findings.md (the cloud review's four findings, 1 and 2 probed live by the clone session: `PCL_NO_PROTO_CACHE=1 PCL_PROTO_ORACLE=DIR ./pl2cl prog.pl` with `use Text::Wrap` leaves Text_Wrap.json holding only the overlay's names; `./pl2cl Pl/t/lib/FactsConflict.pm` exits 0 where the doc says it dies).  None changes product behaviour (the batch is merged as ddd8e383); all four are in Pl/Parser.pm's overlay block (+212 lines, s513g).  The fix is one filler commit on a worktree: (1) one line in _facts_overlay_env or the dump site; (2) either register the own-sub conflict where the pre-scan registers named subs (then the unit path dies like the use path -- the stronger choice, matching the doc) or delete the dead branch and narrow docs/shipped-modules.md + the comment to the use path -- EITHER WAY a guard row in Pl/t/facts-overlay-01.t that transpiles Pl/t/lib/FactsConflict.pm as a UNIT and asserts the die (row 6 covers only `use`); (3) + (4) while there.  Bars: the targeted gate (facts-overlay-01.t + proto-cache / script-cache files), corpus-diff IDENTICAL (no emission change expected), no generation bump unless the emission moves.  Do NOT apply in the ultra-s513g clone (no remote; the batch is merged).",
+   "id" : 2954,
+   "status" : "pending",
+   "subject" : "FILLER (from the USER's /code-review ultra run on s513g, 2026-10-10): (1) the overlay walk OVERWRITES the module's proto-oracle dump (PCL_PROTO_ORACLE, #391) -- dump it under the PCL::Facts name or skip; (2) register_unit_overlay's own-declaration conflict check is DEAD (runs before the sub pre-scan) and docs/shipped-modules.md + its comment claim a die that never fires -- move the check or narrow the claim, add a UNIT-conflict guard row; (3) the two conflict loops -> one helper (rule 11); (4) copy overlay records through _imported_record"
+}
