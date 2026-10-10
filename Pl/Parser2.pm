@@ -1386,9 +1386,9 @@ sub parse {
   # starts empty, so a `--server` process answering many string evals never
   # carries one file's renames into the next.
   _reset_rename_manifest();
-  # #2610 (s513d): the detector table, an instrument -- see _detect_table_form.
-  $self->environment->{detect_calls} = {}
-    if $ENV{PCL_DETECT_TABLE} && !$self->eval_mode;
+  # #2610: the detector table, emitted for every program and module unit
+  # (never a string eval's) since s514d -- see _detect_table_form.
+  $self->environment->{detect_calls} = {} if !$self->eval_mode;
   # (The PCL_V1_FILES bisect hook lived here — it forced named files through
   # the whole-file v1 fallback to isolate a diverging module, task #80.  Both
   # it and the fallback were removed at E4.1 step 2, #242: with one pipeline
@@ -2388,8 +2388,8 @@ sub parse {
           next;
         }
         push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
-        push @decls, $self->_detect_declare_form($child)   # #2610, an instrument
-          if $ENV{PCL_DETECT_TABLE} && !$child->block;
+        push @decls, $self->_detect_declare_form($child)   # #2610
+          if !$child->block;
         # Forward declaration `sub foo;` reserves the name only (no definition).
         if ($child->block) {
           push @defs, $self->_lower_sub($child);
@@ -2690,7 +2690,7 @@ sub parse {
 
 # #2610 (s513d): a FORWARD DECLARATION with a prototype (`sub zany ();`) gives
 # a name its prototype without installing a sub, so no install site sees it;
-# under PCL_DETECT_TABLE (in a string eval too -- merlyn's `BEGIN { eval "sub
+# in every unit (in a string eval too -- merlyn's `BEGIN { eval "sub
 # zany ();" }` is the shape) it tells the detector, as data.  An empty list
 # when the declaration carries no prototype.
 sub _detect_declare_form {
@@ -2718,8 +2718,9 @@ sub _detect_end_form {
   return qq{(pcl::p-eval-always (pcl::p-detect-end "$u"))};
 }
 
-# THE DETECTOR TABLE (task #2610, s513d) -- an INSTRUMENT, emitted only under
-# PCL_DETECT_TABLE, never in a string eval's unit.  Two lists, as data handed to
+# THE DETECTOR TABLE (task #2610) -- emitted for every program and module unit
+# since s514d (an instrument under PCL_DETECT_TABLE in s513d), never in a string
+# eval's unit.  Two lists, as data handed to
 # ONE runtime registrar (p-detect-table), placed right after the unit's leading
 # (in-package :pcl) so it is in force before any BEGIN block or `use` runs --
 # inside p-eval-always, like the BEGIN / `use` marks, because a module FASL
@@ -2732,9 +2733,9 @@ sub _detect_end_form {
 #            can tell "the compiler saw this install" from "only running code
 #            made it".
 # The runtime compares the two with every sub installed during the unit's
-# compile phase (cl/pcl-runtime.lisp %p-detect-check) and, under
-# PCL_DETECT_LOG, writes each disagreement as one line.  Nothing dies or
-# announces: the first measurement is a COUNT and a NAME LIST.
+# compile phase (cl/pcl-runtime.lisp %p-detect-check) and reports each
+# disagreement by the run-time mode PCL_DETECT names (announce by default, die,
+# off, log -- ir-spec §9.3c).
 sub _detect_table_form {
   my $self = shift;
   my $env  = $self->environment;

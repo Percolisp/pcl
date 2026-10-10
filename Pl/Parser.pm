@@ -10211,7 +10211,7 @@ sub _process_include_statement {
 }
 
 # #2610 (s513d): the detector's POSITION mark -- an INSTRUMENT, emitted only
-# under PCL_DETECT_TABLE (never in a string eval).  A BEGIN block or a `use` is
+# in every program and module unit (never in a string eval).  A BEGIN block or a `use` is
 # where a unit's compile phase runs code, and perl parses a statement only
 # after the one before it has RUN, so what such a statement installs can change
 # the parse of the statements BELOW its last line and of nothing above it.  The
@@ -10219,7 +10219,7 @@ sub _process_include_statement {
 # the detector compares every recorded call site against.
 sub _emit_detect_at {
   my ($self, $stmt) = @_;
-  return if !$ENV{PCL_DETECT_TABLE} || $self->eval_mode;
+  return if $self->eval_mode;
   my $last = $stmt->last_token;
   my $line = $last ? $last->line_number : $stmt->line_number;
   $self->_emit("  (pcl::p-detect-at $line)") if defined $line;

@@ -4958,6 +4958,42 @@ The three refusals that are *not* statement-level — the `our`-alias region, th
 oversized generated form, and the two string-eval refusals — each say why in
 their `not-supported.md` entry.
 
+### 9.3c The detector table and its FLAG (normative, s514d, task #2610)
+
+Every program and module unit — never a string eval's — carries, right after
+its leading `(in-package :pcl)`, one form `(p-eval-always (pcl::p-detect-table
+UNIT CALLS DEFS))`: CALLS is how the compiler read each bareword call name,
+`(PKG NAME STATEMENT-LINE KIND)` with KIND in `builtin` / `unknown` /
+`list-call` / `proto:<text>`, and DEFS what the unit itself defines, `(PKG NAME
+PROTO LINE)`.  Each BEGIN block and `use` is marked `(pcl::p-detect-at LINE)`
+and the table is retired by `(pcl::p-detect-end UNIT)` before the unit's
+`(p-run-compile-phase-blocks)`.  While a unit's table is active, a sub
+installed under a name (p-sub, a glob assignment's CODE slot, a glob copy,
+`set_prototype`, a forward declaration) whose prototype contradicts the KIND
+the compiler assumed at a call site BELOW the install is a DISAGREEMENT, and
+the run-time mode `PCL_DETECT` decides what it does:
+
+| `PCL_DETECT` | a disagreement |
+|---|---|
+| unset / `announce` | ONE stderr line per call site per process, the run continues: `PCL: FILE line N: 'PKG::NAME' was parsed as <how> but code that ran at line L installed a sub with prototype (P); set PCL_DETECT=die to stop here` |
+| `die` | a perl-shaped, trappable die at the install: `'PKG::NAME' was parsed as <how> but … at FILE line N.` |
+| `off` | nothing; the table is not even registered |
+| `log` (or `PCL_DETECT_LOG` alone) | the s513d measurement line appended to the file `PCL_DETECT_LOG` names |
+
+Any other value dies naming it.  The KNOWN-HARMLESS disagreements are never
+announced nor died on (they are logged): a nullary `()` sub where the
+compiler read an unknown bareword term (the call takes no argument either way;
+docs/detector-measurement-s513d.md shape 1), and a call parsed against the
+unit's OWN definition's prototype where the runtime registry has lost it
+(shape 5).  The table's lists are constant data; the runtime turns them into
+lookup tables on the unit's first comparison.
+
+Example — `BEGIN { *{"do_it"} = sub ($) {…} } print do_it 'a', 'b';` reads
+`do_it 'a', 'b'` as a call of an unknown sub with two arguments (perl: one,
+then `'b'`), and the run prints, once, `PCL: prog.pl line 2: 'main::do_it' was
+parsed as a call of a sub it did not know but code that ran at line 1
+installed a sub with prototype ($); set PCL_DETECT=die to stop here`.
+
 ## 10. Op inventory — family rules
 
 The full inventory is the export list of the runtime namespace (~500

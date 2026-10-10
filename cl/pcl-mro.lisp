@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-5484
+;;; pcl: pipeline=v2 gen=v2-5584
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -7,6 +7,43 @@
 (in-package :pcl)
 (p-defpackage :main)
 (in-package :main)
+(pcl::p-eval-always (pcl::p-detect-table "lib/mro.pm"
+ '(("mro" "%" 73 "unknown")
+   ("mro" "_c3_linearize" 37 "list-call")
+   ("mro" "_c3_linearize" 63 "list-call")
+   ("mro" "_c3_linearize" 83 "list-call")
+   ("mro" "defined" 105 "builtin")
+   ("mro" "defined" 63 "builtin")
+   ("mro" "die" 105 "builtin")
+   ("mro" "die" 63 "builtin")
+   ("mro" "die" 75 "builtin")
+   ("mro" "grep" 63 "builtin")
+   ("mro" "grep" 88 "builtin")
+   ("mro" "if" 63 "builtin")
+   ("mro" "last" 100 "builtin")
+   ("mro" "last" 102 "builtin")
+   ("mro" "last" 89 "builtin")
+   ("mro" "last" 98 "builtin")
+   ("mro" "map" 63 "builtin")
+   ("mro" "map" 83 "builtin")
+   ("mro" "push" 108 "builtin")
+   ("mro" "push" 63 "builtin")
+   ("mro" "push" 84 "builtin")
+   ("mro" "scalar" 63 "builtin")
+   ("mro" "scalar" 88 "builtin")
+   ("mro" "shift" 112 "builtin")
+   ("mro" "shift" 63 "builtin")
+   ("mro" "unless" 63 "builtin"))
+ '(("mro" "import" nil 29)
+   ("mro" "unimport" nil 30)
+   ("mro" "get_linear_isa" nil 35)
+   ("mro" "get_mro" nil 43)
+   ("mro" "set_mro" nil 44)
+   ("mro" "get_isarev" nil 49)
+   ("mro" "is_universal" nil 51)
+   ("mro" "invalidate_all_method_caches" nil 62)
+   ("mro" "method_changed_in" nil 63)
+   ("mro" "_c3_linearize" nil 67))))
 
 (pcl:p-defpackage :mro)
 
@@ -182,6 +219,7 @@
 
 (p-eval-always (p-note-inc "strict"))
 
+(pcl::p-eval-always (pcl::p-detect-end "lib/mro.pm"))
 (p-run-compile-phase-blocks)
 
 (p-set-current-package :mro "mro")

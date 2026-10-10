@@ -92,7 +92,7 @@ has pkg_prototypes => (
 # answer, never "below".  ir-spec §5.
 has parse_site => (is => 'rw');
 has reg_site   => (is => 'rw');
-# #2610 (s513d): the detector table -- set only under PCL_DETECT_TABLE (Parser2);
+# #2610 (s513d; default since s514d): the detector table -- set by Parser2 for every non-eval unit;
 # _proto_entry records every call-site answer into it (_detect_note).
 has detect_calls => (is => 'rw');
 
@@ -578,8 +578,8 @@ sub _proto_entry {
     return $ans;
 }
 
-# THE DETECTOR'S TABLE (task #2610, s513d; an INSTRUMENT, on only under
-# PCL_DETECT_TABLE).  Every call-site question a parse asks of the prototype
+# THE DETECTOR'S TABLE (task #2610: an instrument in s513d, recorded for
+# every program and module unit since s514d).  Every call-site question a parse asks of the prototype
 # table goes through _proto_entry, so its answers ARE the compiler's parse
 # decisions about bareword calls: record each one as (package, name, the
 # statement's line) -> the KIND of call the answer makes.  The closed set:

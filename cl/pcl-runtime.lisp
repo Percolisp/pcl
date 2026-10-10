@@ -1647,60 +1647,97 @@
    Weak keys: an entry lives only as long as the coderef itself.")
 
 
-;;; THE DETECTOR (task #2610, s513d) -- an INSTRUMENT, and only that.  perl
+;;; THE DETECTOR (task #2610; s513d instrument, s514d production FLAG).  perl
 ;;; parses a statement after the one before it has RUN, so a sub (or a
 ;;; prototype) that BEGIN-time code installs changes how the LATER statements
 ;;; parse; PCL parsed the whole unit before anything ran.  The runtime can see
 ;;; every such install, exactly, before a mis-parsed call runs:
-;;;   * the compiler emits, under PCL_DETECT_TABLE, the unit's TABLE first
-;;;     (p-detect-table: how it read each bareword call name, and the subs it
-;;;     declared itself) and a POSITION mark at each BEGIN block and `use'
-;;;     (p-detect-at: the statement's last line);
+;;;   * every program and module unit (never a string eval's) carries its
+;;;     TABLE first (p-detect-table: how the compiler read each bareword call
+;;;     name, and the subs it declared itself) and a POSITION mark at each
+;;;     BEGIN block and `use' (p-detect-at: the statement's last line);
 ;;;   * every install site already calls %P-NOTE-SUB-INSTALL; while a table
 ;;;     is active it compares the installed prototype with the kind the
 ;;;     compiler assumed at every call site BELOW the current mark;
-;;;   * under PCL_DETECT_LOG each disagreement appends ONE line (the #472
-;;;     side-channel shape: a file, never stderr, which is a row's output):
-;;;     unit, name, install-line, install-kind, call-line, assumed-kind,
-;;;     installed-prototype.
-;;; Nothing dies and nothing announces: the first measurement is the count and
-;;; the name list (#2610), and they decide die vs announce.  With neither
-;;; variable set no table exists and the check is one NIL test per install.
+;;;   * a disagreement is REPORTED by the mode PCL_DETECT names at run time
+;;;     (the USER's ruling, DECIDED ## s513: a FLAG): `announce' (the
+;;;     default) writes ONE stderr line per call site per process and the run
+;;;     continues; `die' dies there, perl-shaped and trappable; `off' does not
+;;;     even register a table; `log' appends the s513d measurement line to the
+;;;     file PCL_DETECT_LOG names (PCL_DETECT_LOG alone also means `log').
+;;; The KNOWN-HARMLESS class is never announced nor died on (it is still
+;;; logged): a nullary `()` sub installed where the compiler read a bareword
+;;; TERM (shape 1 of docs/detector-measurement-s513d.md -- File::Path's
+;;; _IS_VMS, Sub::Quote's _CAN_TRACK_*: the term takes no argument either
+;;; way), and a call the compiler parsed against the unit's OWN definition's
+;;; prototype where the registry has lost it (shape 5, a registry gap, not a
+;;; parse question).  ir-spec §9.3c is the contract.
 
 (defvar *p-detect-active* nil
   "The detector tables of the units in their compile phase, innermost first.")
 
+(defvar *p-detect-reported* (make-hash-table :test 'equal)
+  "Sites already announced in this process: \"UNIT\\0NAME\\0LINE\".  A module's
+   FASL build registers its table at compile time and again at load, so the
+   dedup is per PROCESS, not per table.")
+
 (defstruct (%p-detect-unit (:constructor %make-p-detect-unit))
-  unit               ; the unit's source name, for the log
+  unit               ; the unit's source name, for the report
+  mode               ; :announce, :die or :log -- PCL_DETECT at registration
   (at 0)             ; the last line of the latest BEGIN / `use' that ran
-  calls              ; bare name -> list of (PKG LINE KIND)
+  raw-calls          ; the table's CALLS list, until the first comparison
+  raw-defs           ; the table's DEFS list, until the first comparison
+  calls              ; bare name -> list of (PKG LINE KIND), built lazily
   defs               ; "PKG::NAME" -> (PROTOTYPE-or-:none . DEFINITION-LINE)
-  logged)            ; dedup: "NAME\0CALL-LINE"
+  logged)            ; log dedup: "NAME\0CALL-LINE"
 
 (defun %p-detect-kind-known-p (kind)
   (or (member kind '("builtin" "list-call" "unknown") :test #'string=)
       (and (>= (length kind) 6) (string= kind "proto:" :end1 6))))
 
+(defun %p-detect-mode ()
+  "PCL_DETECT's mode, read at each table registration (never frozen into a
+   saved core).  Rule 12: an unknown value dies naming it."
+  (let ((v (sb-posix:getenv "PCL_DETECT")))
+    (cond ((or (null v) (string= v ""))
+           (if (sb-posix:getenv "PCL_DETECT_LOG") :log :announce))
+          ((string= v "announce") :announce)
+          ((string= v "die") :die)
+          ((string= v "off") :off)
+          ((string= v "log") :log)
+          (t (%p-die-error nil (format nil "PCL_DETECT=~A: the modes are announce, die, off and log~%" v))))))
+
 (defun p-detect-table (unit calls defs)
-  "Register UNIT's detector table (see the section commentary).  Inert unless
-   PCL_DETECT_LOG names a file: nothing would read what it found."
-  (when (sb-posix:getenv "PCL_DETECT_LOG")
+  "Register UNIT's detector table (see the section commentary).  The two lists
+   are kept as they came (constant data in the unit) and turned into tables on
+   the unit's first comparison, so a unit whose compile phase installs nothing
+   pays one push."
+  (let ((mode (%p-detect-mode)))
+    (unless (eq mode :off)
+      (push (%make-p-detect-unit :unit unit :mode mode
+                                 :raw-calls calls :raw-defs defs)
+            *p-detect-active*)))
+  nil)
+
+(defun %p-detect-tables (u)
+  "U's call and definition tables, built from the raw lists on first use."
+  (unless (%p-detect-unit-calls u)
     (let ((ch (make-hash-table :test 'equal))
           (dh (make-hash-table :test 'equal)))
-      (dolist (c calls)
+      (dolist (c (%p-detect-unit-raw-calls u))
         (destructuring-bind (pkg name line kind) c
           (unless (%p-detect-kind-known-p kind)
             (error "p-detect-table: unknown call kind ~S for ~A::~A" kind pkg name))
           (push (list pkg line kind) (gethash name ch))))
-      (dolist (d defs)
+      (maphash (lambda (k v) (setf (gethash k ch) (sort v #'< :key #'second))) ch)
+      (dolist (d (%p-detect-unit-raw-defs u))
         (destructuring-bind (pkg name proto line) d
           (setf (gethash (concatenate 'string pkg "::" name) dh)
                 (cons (or proto :none) line))))
-      (push (%make-p-detect-unit :unit unit
-                                 :calls ch :defs dh
-                                 :logged (make-hash-table :test 'equal))
-            *p-detect-active*)))
-  nil)
+      (setf (%p-detect-unit-defs u) dh
+            (%p-detect-unit-logged u) (make-hash-table :test 'equal)
+            (%p-detect-unit-calls u) ch)))
+  u)
 
 (defun p-detect-at (line)
   "The unit's compile phase is about to run the BEGIN / `use' ending at LINE."
@@ -1714,7 +1751,7 @@
    without one never retires another's."
   (setf *p-detect-active*
         (remove unit *p-detect-active* :key #'%p-detect-unit-unit :test #'equal
-                                       :count 1))
+                :count 1))
   nil)
 
 (defun %p-detect-mismatch-p (assumed proto install-kind install-pkg call-pkg)
@@ -1727,6 +1764,14 @@
         ((or (string= assumed "unknown") (string= assumed "list-call"))
          (and proto t))
         (t (not (equal proto (subseq assumed 6))))))
+
+(defun %p-detect-harmless-p (assumed proto def)
+  "The KNOWN-HARMLESS disagreements (see the section commentary): a nullary
+   sub where the compiler read a bareword TERM, or a call parsed against the
+   unit's own definition's prototype that the registry lost (PROTO NIL)."
+  (or (and (string= assumed "unknown") (equal proto ""))
+      (and (null proto) def (not (eq (car def) :none))
+           (string= assumed (concatenate 'string "proto:" (car def))))))
 
 (defun %p-detect-log (u name proto install-kind call-line assumed)
   (let ((path (sb-posix:getenv "PCL_DETECT_LOG"))
@@ -1741,9 +1786,58 @@
                   #\Tab install-kind #\Tab call-line #\Tab assumed
                   #\Tab (if proto (format nil "(~A)" proto) "none")))))))
 
+(defun %p-detect-site-text (u name proto call-line assumed)
+  "The report's words: how the compiler READ the call at CALL-LINE, and what
+   BEGIN-time code installed under NAME before it."
+  (values
+   (format nil "~A line ~D" (%p-detect-unit-unit u) call-line)
+   (format nil "'~A' was parsed as ~A but ~A"
+           name
+           (cond ((string= assumed "builtin") "the built-in")
+                 ((string= assumed "unknown") "a call of a sub it did not know")
+                 ((string= assumed "list-call") "a list-operator call")
+                 (t (format nil "a call with prototype (~A)" (subseq assumed 6))))
+           (format nil "code that ran at line ~D installed a sub with ~A"
+                   (%p-detect-unit-at u)
+                   (if proto (format nil "prototype (~A)" proto) "no prototype")))))
+
+(defun %p-detect-report (u name proto install-kind call-line assumed def)
+  "One disagreement, by U's mode.  announce: ONE stderr line per site per
+   process; die: a perl-shaped, trappable die; log: the s513d line."
+  (ecase (%p-detect-unit-mode u)
+    (:log (%p-detect-log u name proto install-kind call-line assumed))
+    ((:announce :die)
+     (unless (%p-detect-harmless-p assumed proto def)
+       (multiple-value-bind (where what)
+           (%p-detect-site-text u name proto call-line assumed)
+         (if (eq (%p-detect-unit-mode u) :die)
+             (%p-die-error nil (format nil "~A at ~A.~%" what where))
+             (let ((key (format nil "~A~C~A~C~D" (%p-detect-unit-unit u)
+                                #\Nul name #\Nul call-line)))
+               (unless (gethash key *p-detect-reported*)
+                 (setf (gethash key *p-detect-reported*) t)
+                 (%p-detect-announce
+                  (format nil "PCL: ~A: ~A; set PCL_DETECT=die to stop here"
+                          where what))))))))))
+
+(defun %p-detect-announce (line)
+  "Write the announcement LINE to stderr -- and, when PCL_DETECT_LOG names a
+   file (PCL_DETECT=announce set explicitly beside it), append it there too:
+   the side channel the per-population counts are taken from (the #472
+   shape: a run's stderr is its row's output, a file is not)."
+  (format *error-output* "~A~%" line)
+  (force-output *error-output*)
+  (let ((path (sb-posix:getenv "PCL_DETECT_LOG")))
+    (when path
+      (ignore-errors
+        (with-open-file (o path :direction :output :if-exists :append
+                           :if-does-not-exist :create)
+          (format o "~A~%" line))))))
+
 (defun %p-detect-compare (u sym kind &optional (declared nil declared-p))
   "Compare the install of SYM (by KIND) with U's call sites below its mark.
    DECLARED, when given, is the prototype a forward declaration carries."
+  (%p-detect-tables u)
   (let* ((pkg (pcl-pkg-perl-name (symbol-package sym)))
          (bare (%p-sub-bare-name sym))
          (proto (if declared-p
@@ -1764,7 +1858,7 @@
                      (not (and def (eql line (cdr def))))   ; the definition itself
                      (or (string= call-pkg pkg) (string= pkg "CORE::GLOBAL"))
                      (%p-detect-mismatch-p assumed proto kind pkg call-pkg))
-            (%p-detect-log u qual proto kind line assumed)))))))
+            (%p-detect-report u qual proto kind line assumed def)))))))
 
 (defun p-detect-declare (sym proto)
   "A forward declaration gave SYM the prototype PROTO (#2610, an instrument)."
@@ -24956,7 +25050,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-5484"
+(defparameter *pcl-cache-generation* "v2-5584"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

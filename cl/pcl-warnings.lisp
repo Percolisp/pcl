@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-5484
+;;; pcl: pipeline=v2 gen=v2-5584
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -7,6 +7,29 @@
 (in-package :pcl)
 (p-defpackage :main)
 (in-package :main)
+(pcl::p-eval-always (pcl::p-detect-table "lib/warnings.pm"
+ '(("warnings" "defined" 31 "builtin")
+   ("warnings" "defined" 56 "builtin")
+   ("warnings" "if" 31 "builtin")
+   ("warnings" "next" 56 "builtin")
+   ("warnings" "pop" 63 "builtin")
+   ("warnings" "pop" 68 "builtin")
+   ("warnings" "pop" 69 "builtin")
+   ("warnings" "pop" 74 "builtin")
+   ("warnings" "values" 31 "builtin")
+   ("warnings" "values" 58 "builtin")
+   ("warnings" "warn" 63 "list-call")
+   ("warnings" "warn" 69 "list-call")
+   ("warnings" "warn" 75 "list-call"))
+ '(("warnings" "import" nil 24)
+   ("warnings" "unimport" nil 25)
+   ("warnings" "enabled" nil 28)
+   ("warnings" "fatal_enabled" nil 29)
+   ("warnings" "enabled_at_level" nil 30)
+   ("warnings" "fatal_enabled_at_level" nil 31)
+   ("warnings" "register_categories" nil 54)
+   ("warnings" "warn" nil 67)
+   ("warnings" "warnif" nil 73))))
 
 (pcl:p-defpackage :warnings)
 
@@ -114,6 +137,7 @@
           (p-my-= $message (p-pop @_))
           (p-caller-ctx (p-warn :loc "lib/warnings.pm line 75" $message)))))))
 
+(pcl::p-eval-always (pcl::p-detect-end "lib/warnings.pm"))
 (p-run-compile-phase-blocks)
 
 (p-set-current-package :warnings "warnings")

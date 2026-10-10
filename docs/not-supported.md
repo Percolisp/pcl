@@ -1519,18 +1519,27 @@ harmless (the call has no argument either way); one followed by a term, a
 `($)` sub called with a list, and a displaced built-in are not.  A STRING EVAL
 compiled after the install does see it (task #2870, ir-spec §9.1 piece 4).
 
-**The detector (task #2610, s513d) -- an instrument, off by default.**
-`PCL_DETECT_TABLE=1` at transpile time makes each unit carry a table of how it
-read every bareword call name; `PCL_DETECT_LOG=FILE` at run time appends one
-line per sub installed during a unit's compile phase that disagrees with a call
-site BELOW the install: `unit  name  install-line  install-kind  call-line
-assumed-kind  installed-prototype`.  Nothing dies and nothing announces; use a
-scratch `PCL_CACHE_DIR` (a cached module keeps the table it was transpiled
-with).  The first measurement over the four populations is in task #2610 and
-docs/DECIDED.md `## s513d`; it decides die vs announce.
+**The detector (task #2610) -- ON by default since s514d: a FLAG (USER
+ruling, DECIDED ## s513).**  Every program and module unit carries a table of
+how it read each bareword call name; a sub installed during a unit's compile
+phase that contradicts the reading of a call site BELOW the install is
+reported ONCE per site per process on stderr --
+`PCL: FILE line N: 'NAME' was parsed as <how> but code that ran at line L
+installed a sub with prototype (P); set PCL_DETECT=die to stop here` -- and the
+run continues.  `PCL_DETECT=die` dies there instead (perl-shaped, trappable),
+`PCL_DETECT=off` silences it, `PCL_DETECT=log` (or `PCL_DETECT_LOG=FILE`
+alone) keeps the s513d measurement line in a file.  The contract is ir-spec
+§9.3c.  **Never announced (known harmless):** a nullary `()` constant
+installed where the compiler read an unknown bareword term (File::Path's
+`_IS_VMS`, Sub::Quote's `_CAN_TRACK_*`: no argument either way), and a call
+parsed against the unit's own definition's prototype that the runtime
+registry lost (a registry gap, #2961's family).  The measurements per
+population are in `docs/detector-measurement-s513d.md` §3 (s513d) and §6
+(s514d, production mode).
 
 **Affected tests:** none in the gate or the sweep beyond the detector's own
-guard (`Pl/t/detect-01.t`).
+guard (`Pl/t/detect-01.t`); an announcement is a stderr line, so no
+stdout-compared row moves.
 
 ## Source filters (`Filter::Util::Call`, `Filter::Simple`, `use Switch`, …)
 
