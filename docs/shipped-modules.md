@@ -45,7 +45,7 @@ all: they are runtime extensions that load on first call
 
 ## What is in `lib/`
 
-As of 2026-10-10, `lib/` holds 30 modules. Each file's header comment says
+As of 2026-10-10, `lib/` holds 31 modules. Each file's header comment says
 in detail why it exists.
 
 **The real module is XS; this one is plain Perl:**
@@ -58,7 +58,7 @@ in detail why it exists.
 | `Cwd` | `cwd` and `getcwd` use PCL's built-ins; `abs_path` and `realpath` resolve symlinks in Perl |
 | `Time::HiRes` | plain Perl over four small runtime primitives (a clock, a sleep, and their resolution) |
 | `MIME::Base64` | the whole encoding in Perl |
-| `Digest::MD5`, `Digest::SHA` | every digest, HMAC and the OO interface, byte-identical to the XS modules (#2947, s514a); written fresh, every 32-bit step masked, SHA-512 kept in 32-bit halves.  About 400x (MD5) and 600x (SHA-256) slower than XS on 1 MB; `context`, `getstate`/`putstate` and partial-byte `add_bits` die by name (see [`not-supported.md`](not-supported.md)) |
+| `Digest::MD5`, `Digest::SHA` | every digest, HMAC and the OO interface, byte-identical to the XS modules (#2947, s514a); written fresh, every 32-bit step masked, SHA-512 kept in 32-bit halves.  About 400x (MD5), 640x (SHA-256) and 2000x (SHA-512) slower than XS on 1 MB (0.47 s / 1.9 s / 4.4 s against 0.001-0.003 s, s514a); `context`, `getstate`/`putstate` and partial-byte `add_bits` die by name (see [`not-supported.md`](not-supported.md)) |
 | `Storable` | perl's own binary format in both directions (#2948, s514a): `freeze`/`nfreeze`/`thaw`/`dclone`/`store`/`nstore`/`retrieve`/`*_fd`/`lock_*`; sharing, cycles, blessed, regexps, tied containers; byte-identical to perl for canonical structures except booleans and upgraded latin-1 strings.  Hooks (`STORABLE_freeze`), CODE and GLOB items die by name (see [`not-supported.md`](not-supported.md)) |
 | `IO` | the XS half of `IO::Handle`; `sync`, `blocking` and `ungetc` die by name, since they need system features PCL does not have |
 | `mro` | C3 method resolution only, which is what PCL's object system always uses (see "`mro` pragma" in [`not-supported.md`](not-supported.md)) |
