@@ -397,6 +397,7 @@
    #:p-defpackage #:p-defclass #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant #:p-amp-call
+   #:p-detect-table #:p-detect-at #:p-detect-end #:p-detect-declare
    ;; Assignment forms (distinct from p-setf for clarity)
    #:p-scalar-= #:p-array-= #:p-hash-= #:p-list-= #:p-array-fill #:p-hash-fill
    ;; Lexical 'my' variable assignment (no auto-declare side-effect)

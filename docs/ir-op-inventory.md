@@ -13,10 +13,10 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **745**
+* names exported: **749**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 745
-* UNCLASSIFIED (no family rule matches): **12**
+* with a machine-readable `Contract:` tail: **69** of 749
+* UNCLASSIFIED (no family rule matches): **16**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -1157,7 +1157,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 # UNCLASSIFIED
 
-## UNCLASSIFIED (12)
+## UNCLASSIFIED (16)
 
 *No ir-spec §10 row and no note.*
 
@@ -1168,6 +1168,10 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-cast-$-box` | function | `(val &optional site)` | — | — | — | — | — | — | — |
 | `p-default-layers` | macro | `((in-layers out-layers) &body body)` | — | — | — | — | — | — | — |
 | `p-defclass` | macro | `(name supers slots)` | — | — | — | — | — | — | — |
+| `p-detect-at` | function | `(line)` | — | — | — | — | — | — | — |
+| `p-detect-declare` | function | `(sym proto)` | — | — | — | — | — | — | — |
+| `p-detect-end` | function | `(unit)` | — | — | — | — | — | — | — |
+| `p-detect-table` | function | `(unit calls defs)` | — | — | — | — | — | — | — |
 | `p-eof-argv` | function | `nil` | — | — | — | — | — | — | — |
 | `p-import-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
 | `p-scope-close` | macro | `((&rest handles) &body body)` | — | — | — | — | — | — | — |
