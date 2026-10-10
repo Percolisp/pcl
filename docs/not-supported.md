@@ -3978,6 +3978,27 @@ above. Nothing in the shipped shape blocks it: the table becomes dead code.
 `docs/ir-spec.md` §7.2 carries the normative statement; the guard rows are
 `Pl/t/glob-undef-01.t` 6–9 and 11 (`local`).
 
+## Digest::MD5 / Digest::SHA: the partial-byte and state-dump corners
+
+`lib/Digest/MD5.pm` and `lib/Digest/SHA.pm` (task #2947, s514a) are plain Perl
+and byte-identical to perl's XS modules for every digest they compute: MD5,
+SHA-1, SHA-224/256/384/512, SHA-512/224 and SHA-512/256, the `_hex` / `_base64`
+forms, the HMAC family and the OO interface (`Pl/t/digest-shim-01.t`).
+
+**Absent, and loud about it** (each dies naming itself): `Digest::MD5::context`
+(the XS state get/set); `Digest::SHA`'s `getstate` / `putstate` / `dump` /
+`load`; and a bit count that is not a multiple of 8 (`add_bits` with a partial
+byte, `addfile` mode `"0"` of such a file) -- perl's XS hashes partial bytes,
+the shim hashes whole bytes only.
+
+**Slower than XS, as any pure-Perl digest is**: hashing 1 MB takes ~0.5 s for
+MD5 and ~2 s for SHA-256 under PCL, against ~0.002 s for perl's XS (the ratio is
+in `docs/shipped-modules.md`).  Fine for checksums of keys, tokens and small
+files; slow for hashing large downloads.
+
+**A wide character** dies `Wide character in subroutine entry` as in perl, but
+without perl's " at FILE line N." suffix (PCL's `Carp` does not append it).
+
 ## Time::HiRes: the signal-driven timers (`ualarm`, `setitimer`, `getitimer`)
 
 `lib/Time/HiRes.pm` (task #1992, s492c) is plain Perl over four runtime
