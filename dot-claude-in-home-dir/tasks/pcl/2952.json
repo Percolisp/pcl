@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s514 (Fable, 2026-10-10 12:41) by the s513g merge-review probe ~/pcl-agent-scratch/s513/review/p513g/tags3.pl (perl -> base cc3caca6 -> tree 499ffad6).  `use File::Spec::Functions;` imports the default list only (rel2abs is ); perl: `Undefined subroutine &main::rel2abs called`; PCL: the call resolves to File::Spec::Functions::rel2abs and returns a value.  DECIDED s375: \"The package-blind unqualified bareword path is ACCEPTED, unscheduled -- loud not silent, zero cause lines on any population; re-raise on evidence\" -- this IS evidence that the path is NOT always loud: a valid-looking program runs under PCL and dies under perl (the USER's rule: errors must fail in the same places).  Mechanism: the runtime's unqualified-call fallback searches other packages for the name.  Fix shape: resolve an unqualified call in the CALLER's package (+ its imports) only; a miss dies perl-shaped.  Measure first: gate-SET scan over both populations for programs that RELY on the fallback (CPAN code that calls a non-imported name is itself broken under perl, so the expected count is ~0; the s375 ruling's \"zero cause lines\" said the same).  Principle 9 (assume valid Perl) argues for leaving it; the fail-in-the-same-places ruling argues for fixing it -- the USER's call.",
+   "id" : "2952",
+   "status" : "pending",
+   "subject" : "EVIDENCE for the s375 re-raise (package-blind unqualified call): a bareword call of a NON-IMPORTED name that another loaded package defines RUNS in PCL where perl dies -- `use File::Spec::Functions; rel2abs(\"q\")` prints perl's `Undefined subroutine &main::rel2abs` and PCL's answer; silent (runs where perl fails), base = s513g tree"
+}

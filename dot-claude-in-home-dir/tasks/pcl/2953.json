@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s514 (Fable, 2026-10-10 12:41) by the s513g merge-review probe ~/pcl-agent-scratch/s513/review/p513g/fpath.pl (perl -> base cc3caca6 -> tree 499ffad6; make_path / mkpath / remove_tree / wrap / fill rows all = perl).  DISCRIMINATING MEASUREMENT TAKEN (lstat.pl, same dir): `lstat` returns an empty list with  set, `-e/-l/-d` are undef, `-d _ / -f _` after the failed lstat are undef, `unlink` returns 0 with ENOENT, `chmod` returns 0 -- all IDENTICAL to perl.  So the branch File::Path takes is wrong for another reason: in perl, _rmtree does `my (, , ) = (lstat )[0,1,2] or next ROOT_DIR;` -- a LIST SLICE of an EMPTY list in list assignment: perl's `(lstat )[0,1,2]` of an empty list is an EMPTY list, so the assignment yields 0 elements -> `or next` fires.  SUSPECT: PCL's list slice of an empty list yields (undef, undef, undef) (3 elements) so the assignment is true and the walk continues into the unlink branch.  Cheap probe: `my  = (); my (,,) = ()[0,1,2] or print \"next\\n\"; print scalar(() = ()[0,1,2]), \"\\n\"` -- perl prints `next` and 0.  If confirmed, this is a core list-slice rule (perlop: a slice of an empty list is empty) -- a runtime fix with a Pl/t row, and File::Path needs nothing.",
+   "id" : "2953",
+   "status" : "pending",
+   "subject" : "SILENT STDERR DIVERGENCE (File::Path): `rmtree(\"/nonexistent/zz\")` prints two warnings under PCL (`cannot unlink file for /nonexistent/zz: No such file or directory`, `cannot restore permissions to 00 for ...`) where perl prints NOTHING; lstat / -e / -l / -d / `_` on the missing path answer as perl -- the divergence is inside File::Path::_rmtree's branch choice; base = s513g tree"
+}

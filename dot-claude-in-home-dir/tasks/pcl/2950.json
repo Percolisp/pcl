@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s514 (Fable, 2026-10-10 12:41) from s513g's final report: \"The blessed board baseline itself is stale against main (40 NEW / 74 FIXED when the tree is compared to it directly). That is why base vs tree is the comparison I report.\"  Every batch since some point has compared base-extraction vs tree (correct) while the blessed file drifted: 74 rows that now pass were never edited out with their fixing batch, and 40 rows now failing were never added with a cause.  RECIPE (#223, s341): one run on a clean main checkout, then EDIT the file row by row -- each FIXED row leaves citing the batch that fixed it (bisect by `git log -S` on the test name or by the batch reports in docs/session-log.md), each NEW row is added with its cause task (or a new task), never re-blessed from the run; `# taken-at:` stamp.  Owner: an Opus filler (half a session).  Until then every board claim is base-vs-tree only.",
+   "id" : "2950",
+   "status" : "pending",
+   "subject" : "HYGIENE: the blessed CPAN board baseline `baselines/cpan-board14-fails.tsv` is STALE against main -- 40 NEW / 74 FIXED when main's own tree is compared to it (s513g measured, 2026-10-10); rows must leave BY EDIT with their cause, so a row-by-row re-hygiene pass (the #223 recipe) is owed"
+}
