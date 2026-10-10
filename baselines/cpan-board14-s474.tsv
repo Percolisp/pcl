@@ -227,7 +227,7 @@ Mojo-DOM58-3.002-0	00-report-prereqs.t	PASS	1	0	0
 Mojo-DOM58-3.002-0	collection.t	FAIL	0	0	0
 Mojo-DOM58-3.002-0	dom.t	FAIL	0	0	0
 Mojo-DOM58-3.002-0	entities.t	FAIL	0	0	0
-Mojo-DOM58-3.002-0	roles.t	FAIL	0	0	0
+Mojo-DOM58-3.002-0	roles.t	PASS	2	0	0
 Role-Tiny-2.002004-0	concrete-methods.t	FAIL	0	0	0
 Role-Tiny-2.002004-0	create-hook.t	PASS	2	0	0
 Role-Tiny-2.002004-0	does.t	PASS	14	0	0

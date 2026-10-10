@@ -128,7 +128,6 @@ File-Which-1.27-0	file_which.t	15	zero =			#1575 (File::Which: the dist's own co
 Mojo-DOM58-3.002-0	collection.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1576 (Test::More::subtest is not implemented — "Undefined subroutine &main::subtest")
 Mojo-DOM58-3.002-0	dom.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	NS:DynaLoader / XS binary extensions ("Can't locate loadable object for module Storable")
 Mojo-DOM58-3.002-0	entities.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	NS:DynaLoader / XS binary extensions ("Can't locate loadable object for module Encode")
-Mojo-DOM58-3.002-0	roles.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	NS:DynaLoader / XS binary extensions ("Can't locate loadable object for module Storable")
 Role-Tiny-2.002004-0	concrete-methods.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#135 (role composition: a constant-installed sub is not composed — "Undefined subroutine &MyRole1::before_constant_deflate")
 Role-Tiny-2.002004-0	extend-role-tiny.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1570 (READ ERROR: "Package Role::Tiny does not exist" — same)
 Role-Tiny-2.002004-0	load-module.t	2	modules not loaded if symbol table entries exist	'1'	'0'	NS:Error message text and format (require diagnostics: "Compilation failed", "did not return a true value", and a symbol-table-entry check)
