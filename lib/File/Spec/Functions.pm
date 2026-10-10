@@ -7,12 +7,18 @@ package File::Spec::Functions;
 use strict;
 use File::Spec;
 
+# perl's own lists, name for name (File::Spec::Functions 3.91; task #2951):
+# the DEFAULT import is the nine below, the other eight are on request or
+# through :ALL.  The shim used to export thirteen by default and not define
+# canonpath, catpath, abs2rel or case_tolerant at all.
 our @EXPORT = qw(
-    catfile catdir splitdir splitpath rel2abs curdir updir rootdir
-    file_name_is_absolute no_upwards path devnull tmpdir
+    canonpath catdir catfile curdir rootdir updir no_upwards
+    file_name_is_absolute path
 );
-our @EXPORT_OK = @EXPORT;
-our %EXPORT_TAGS = ( DEFAULT => \@EXPORT, ALL => \@EXPORT );
+our @EXPORT_OK = qw(
+    devnull tmpdir splitpath splitdir catpath abs2rel rel2abs case_tolerant
+);
+our %EXPORT_TAGS = ( ALL => [ @EXPORT_OK, @EXPORT ] );
 
 # No custom import: PCL imports @EXPORT / a requested subset (and :DEFAULT/:ALL
 # tags) automatically.  A hand-rolled Exporter here would just duplicate that.
@@ -48,5 +54,9 @@ sub tmpdir               { File::Spec->tmpdir }
 sub file_name_is_absolute { File::Spec->file_name_is_absolute(@_) }
 sub no_upwards           { File::Spec->no_upwards(@_) }
 sub path                 { File::Spec->path }
+sub canonpath            { File::Spec->canonpath(@_) }
+sub catpath              { File::Spec->catpath(@_) }
+sub abs2rel              { File::Spec->abs2rel(@_) }
+sub case_tolerant        { File::Spec->case_tolerant }
 
 1;

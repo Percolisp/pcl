@@ -24,7 +24,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -101,3 +101,19 @@ my $h2 = {}; read($fh, $h2->{a}{b}, 1); print "viv=", ref($h2->{a}), "\n";},
 both_agree(q{use Socket; socketpair(my $x, my $y, AF_UNIX, SOCK_STREAM, 0) or die; syswrite($x, "xy");
 my @r; my $i = 0; recv($y, $r[$i++], 1, 0); print "i=$i r0=$r[0]\n";},
            "#2943 recv into \$r[\$i++]: the subscript runs once");
+
+# ---- #2951: File::Spec::Functions exports perl's lists (the :ALL tag is computed) ----
+both_agree(<<'PL', "#2951 File::Spec::Functions: :ALL imports all 17, the default the 9, canonpath/catpath/abs2rel/case_tolerant defined");
+use File::Spec::Functions qw(:ALL);
+print canonpath("/a//b/"), "|", catfile("a", "b"), "|", catdir("x", "y"), "|", curdir(), updir(), rootdir(), "\n";
+print join(",", no_upwards(".", "..", "z")), "|", (file_name_is_absolute("/q") ? 1 : 0), "|", devnull(), "\n";
+print join(",", splitpath("/x/y/t")), "|", join(",", splitdir("/a/b")), "|", catpath("", "/d", "f"), "\n";
+print abs2rel("/a/b/c", "/a"), "|", (rel2abs("q", "/r")), "|", case_tolerant(), "|", (defined tmpdir() ? 1 : 0), "\n";
+print defined(&File::Spec::Functions::canonpath) ? "def\n" : "undef\n";
+print scalar(@File::Spec::Functions::EXPORT), " ", scalar(@File::Spec::Functions::EXPORT_OK), " ", scalar(@{$File::Spec::Functions::EXPORT_TAGS{ALL}}), "\n";
+package Other;
+use File::Spec::Functions;
+print main::defined_in("Other"), "\n";
+package main;
+sub defined_in { my $p = shift; join ",", map { defined(&{"${p}::$_"}) ? $_ : "-" } qw(canonpath catfile rel2abs tmpdir splitdir path) }
+PL

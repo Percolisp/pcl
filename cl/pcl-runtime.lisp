@@ -27091,33 +27091,39 @@ buffer's fill-pointer; everything else falls back to file-length."
         (when (and val (vectorp val))
           (coerce val 'list))))))
 
+(defun %p-export-tag-list (pkg tag)
+  "The names %EXPORT_TAGS{TAG} of PKG lists, or :NONE when the tag is absent.
+   A tag's value is an array REF (`ALL => [ @EXPORT_OK, @EXPORT ]`), i.e. a box
+   holding the vector, so it is unboxed before it is read (task #2951: the
+   bare `vectorp' test never matched one, and every tag imported nothing)."
+  (let ((tags-sym (find-symbol "%export_tags" pkg)))
+    (if (and tags-sym (boundp tags-sym))
+        (let* ((tags-hash (symbol-value tags-sym))
+               (tag-val (when (hash-table-p tags-hash)
+                          (unbox (or (gethash tag tags-hash)
+                                     (gethash (string-upcase tag) tags-hash))))))
+          (if (and (vectorp tag-val) (not (stringp tag-val)))
+              (map 'list #'unbox tag-val)
+              :none))
+        :none)))
+
 (defun %p-expand-import-tags (imports pkg)
   "Expand export-tag items (starting with ':') in IMPORTS list using %EXPORT_TAGS.
-   ':DEFAULT' expands to @EXPORT; ':ALL' expands to @EXPORT_OK; ':TAG' looks up
-   %EXPORT_TAGS{TAG}.  Plain names are kept as-is."
+   ':DEFAULT' expands to @EXPORT; ':TAG' looks up %EXPORT_TAGS{TAG}; ':ALL'
+   with no such tag falls back to @EXPORT_OK.  Plain names are kept as-is, in
+   order."
   (let ((result '()))
     (dolist (item imports)
       (let ((name (unbox item)))
         (if (and (stringp name) (plusp (length name)) (char= (char name 0) #\:))
-            (let ((tag (subseq name 1)))
-              (cond
-                ((string= tag "DEFAULT")
-                 (let ((lst (%p-get-export-list pkg "@export")))
-                   (when lst (setf result (append result lst)))))
-                ((string= tag "ALL")
-                 (let ((lst (%p-get-export-list pkg "@export_ok")))
-                   (when lst (setf result (append result lst)))))
-                (t
-                 ;; Look up %EXPORT_TAGS{tag}
-                 (let ((tags-sym (find-symbol "%export_tags" pkg)))
-                   (when (and tags-sym (boundp tags-sym))
-                     (let* ((tags-hash (symbol-value tags-sym))
-                            (tag-val (when (hash-table-p tags-hash)
-                                       (or (gethash tag tags-hash)
-                                           (gethash (string-upcase tag) tags-hash)))))
-                       (when (and tag-val (vectorp tag-val))
-                         (setf result (append result (coerce tag-val 'list))))))))))
-            ;; Plain name: keep as-is
+            (let* ((tag (subseq name 1))
+                   (lst (cond
+                          ((string= tag "DEFAULT") (%p-get-export-list pkg "@export"))
+                          (t (let ((l (%p-export-tag-list pkg tag)))
+                               (cond ((not (eq l :none)) l)
+                                     ((string= tag "ALL")
+                                      (%p-get-export-list pkg "@export_ok"))))))))
+              (dolist (n lst) (push n result)))
             (push name result))))
     (nreverse result)))
 
