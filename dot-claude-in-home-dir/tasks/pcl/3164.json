@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514e (Opus, 2026-10-10).  A FORWARD declaration with attributes, `sub NAME :lvalue;` (no body), does not apply its attributes to the sub that already exists under NAME.  perl applies them (an XSUB, or a stub assigned through a glob): t/op/sub_lval.t rows 35-36 (\"sub declaration with :lvalue applies it to XSUBs\" -- `sub utf8::valid :lvalue;` then `attributes::get(\\&utf8::valid)` is 'lvalue'; \"... applies it to assigned stub\").  These rows were SKIP-passes (\"no attributes.pm\") until s514e's attributes shim loaded; they now run and fail honestly (op/sub_lval.t C_ok 33 -> 30, the third is row 34, compile-time diagnostics: \"lvalue attribute ignored after the subroutine has been defined\" + \"Can't modify non-lvalue subroutine call\" -- #221's warnings family and a compile-time die PCL gives at run time).  Fix shape: Parser::sub_attr_names is the ONE reading; a body-less Statement::Sub carrying attributes should emit a run-time %p-apply-sub-attributes on the CURRENT definition of NAME at that point (recording only -- the lowering of an existing sub cannot change, as with the run-time `use attributes` set).  Reproducer: `sub foo { 1 } sub foo :method; use attributes; print attributes::get(\\&foo)` -- perl prints \"method\", PCL prints nothing.\n",
+   "id" : "3164",
+   "status" : "pending",
+   "subject" : "A forward declaration 'sub NAME :lvalue;' does not apply its attributes to the existing sub (t/op/sub_lval.t rows 35-36)"
+}

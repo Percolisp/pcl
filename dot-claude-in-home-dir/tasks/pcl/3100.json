@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514b (Opus, 2026-10-10) from Fable's review probe ~/pcl-agent-scratch/s513/review/p514b/lslice.pl row lslice-neg-empty.  perl 5.40.3: `my @e; my @x = (@e)[-1]; print scalar @x` prints 0; PCL (main and s514b) prints 1.  MECHANISM: a one-index list subscript emits `(p-aref-deref SRC IDX)` with a SCALAR index -- the `$aref->[i]` hot path, which returns the element (undef) -- and at run time it is indistinguishable from `my @x = ($r->[0])`, which perl answers with ONE undef.  So the fix is COMPILE-TIME: in Pl/ExprToCL.pm gen_array_ref_access_form, a `list_ctx_subscript` node in LIST context (not lvalue) emits its index as `(vector IDX)`, which reaches #2953's empty-source arm.  Emission-changing (every one-index list slice in list context): measure corpus-diff and the slices bench row.  Guard: list-slice-01.t, perl-oracle rows for (@e)[0], (@e)[-1], (f())[0] with f returning (), and the unchanged (1)[5] (one undef) / $r->[0] in a list.",
+   "id" : "3100",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a SINGLE-index list slice of an EMPTY list in LIST context yields one undef -- `my @x = (@e)[-1]` has 1 element (perl 0); the multi-index form is right since #2953"
+}

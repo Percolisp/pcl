@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514d (Opus, 2026-10-10) -- what the everyday row modules/Archive-Tar-Compress meets once #2590 ties its handle.\n\n`substr(...)` passed as a SUB ARGUMENT is an LVALUE in perl: `@_` aliases it, so a write through `$_[0]` (or through `\\$_[0]`) lands in the substring of the caller's string.  PCL passes the substring's VALUE, so the write is lost silently.\n\nReproducer (perl 5.40.3 prints `[data1]` `[head:data2]` `[xdirect]`; PCL prints `[]` `[head:]` `[xx]`):\n\n    sub fill { my $r = \\$_[0]; $$r = \"data\" . $_[1]; 4 }\n    my $buf = \"\"; fill(substr($buf, 0), 1); print \"[$buf]\\n\";\n    my $b2 = \"head:\"; fill(substr($b2, 5), 2); print \"[$b2]\\n\";\n    sub fill2 { $_[0] = \"direct\" }\n    my $b3 = \"xx\"; fill2(substr($b3, 1)); print \"[$b3]\\n\";\n\nWhere it bites: core IO::Zlib::READ is `$self->{'file'}->gzread(substr($$bufref,$offset),$nbytes)`, and (Compress::Zlib does not load under PCL: it needs XS File::Glob) the external-gzip gzread_external reads with `read($file, $$bufref, $nbytes)` where $bufref = \\$_[0] -- the substr lvalue.  So Archive::Tar->new($file) reads nothing: \"Cannot read enough bytes from the tarfile\".  The everyday row's baseline cause moves here from #2590/#155.\n\nFix direction: the argument-list lowering gives a `substr` argument an lvalue cell (the 4-arg/lvalue substr machinery already exists for `substr(...) = ...`); the same family as `p-with-buffer-place` for read's buffer.",
+   "id" : "3141",
+   "status" : "pending",
+   "subject" : "substr() passed as a sub ARGUMENT is not an lvalue: a write through $_[0] is lost (IO::Zlib READ, Archive::Tar reads nothing)"
+}

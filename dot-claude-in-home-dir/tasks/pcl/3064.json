@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s513i (Opus 5.5, 2026-10-10, s514 resume).\n\nRUNNER BUG (tools): a t-file that HANGS under tools/cpan-scoreboard.pl (`timeout N tools/run-dist-t.pl --rows ...`) or under ~/pcl-agent-scratch/s513/probe.sh is reported rc=124, but its SBCL grandchild is NOT killed: `timeout` signals run-dist-t.pl (perl), which exits, and the `sbcl ... --load /tmp/run-dist-t_NNN.lisp` it spawned keeps spinning at 100 % CPU, orphaned.  Measured 18:15: seven such SBCLs from my 16:40-16:56 board / probe runs of Text-CSV's 41_null.t / 67_emptrow.t (#3063), 1h20-1h37 old, state Sl, and they IGNORED SIGTERM -- only SIGKILL removed them.  On a shared box they skew every leg that runs after (load 6+), and they hold memory.\n\nREPRO: any t/ file that loops forever under PCL, e.g. Text-CSV-2.04 t/67_emptrow.t:\n    timeout 30 tools/run-dist-t.pl --rows cpan-tests/modules/Text-CSV-2.04 t/67_emptrow.t; pgrep -fa 'run-dist-t_[0-9]*\\.lisp'\n    -> rc=124, and the sbcl is still there.\n\nFIX SHAPE: run-dist-t.pl runs its SBCL in its own process group (setpgrp in the child) and forwards TERM/INT/HUP to the whole group, then KILLs it after a grace period (or scoreboard passes `timeout -k 5` and kills the process group).  SBCL ignoring TERM while hung in Lisp code is why a plain TERM is not enough.  Bar: the repro leaves no sbcl behind.\n",
+   "id" : "3064",
+   "status" : "pending",
+   "subject" : "A timed-out run-dist-t.pl leaves its SBCL child spinning orphaned (scoreboard/probe timeouts kill only the perl wrapper; the SBCL ignores TERM)"
+}

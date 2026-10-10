@@ -1,0 +1,10 @@
+{
+   "activeForm" : "moo-objs: a package switch inside a sub body emitted a bare defclass -- 12 class redefinitions per Moo iteration",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Sat Oct 10 18:28:46 2026",
+   "description" : "moo-objs (perf round 45, s514c member 1): 62-65 % of the row's run was sb-mop:ensure-class.  Cause: Pl/Parser2.pm _lower_block_1's nested `package X;` switch (a package statement inside a sub body or an eval'd sub) emitted a BARE `defclass` -- the eighth class site; the seven others went through p-defclass and its readiness test (#1518, s473s).  Moo's Sub::Quote accessors/constructor are `package X; sub {...}`, so every accessor call re-ran defclass (update-ctors, add/remove-direct-subclass, make-preliminary-layout): 2426 ensure-class calls at N=200, 12 per iteration.  s473s's \"the prize is zero\" measured the seven guarded sites only.\n\n=== DONE (s514c) ===\nFix: the site emits p-defclass (one word).  gen v2-5484; artifacts regenerated (stamp lines only).  Hand-replaced A/B (sb-int:encapsulate ensure-class with %p-class-ready-p): moo-objs 1.70 -> 0.65 s; real fix 1.70 -> 0.57 s (N=1 start-up 0.34 s, so the loop 1.36 -> 0.23 s).  Output identical to perl (133860000).  corpus-diff vs 32b34a5b: 11 of 111 files + 1 shape differ, ONLY the 17 `(defclass` -> `(p-defclass` lines.  Guard Pl/t/defclass-01.t rows 13-14 (row 13 inverse-verified FAILS on a 32b34a5b extraction).  p-defclass docstring corrected (eight sites, the zero claim).  Post-fix profile is flat: gethash/equal 4.4 %, %sxhash-string 4 %, p-method-call 85 % cumulative.\n",
+   "id" : "3120",
+   "status" : "completed",
+   "subject" : "moo-objs: a package switch inside a sub body emitted a bare defclass -- 12 class redefinitions per Moo iteration"
+}

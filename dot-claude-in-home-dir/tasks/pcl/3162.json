@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "=== DONE (s514e) ===\nattributes without XS (commit 519571be).  Sub attributes now reach the runtime: a named sub's non-prototype attributes print as the p-sub `:attributes` fact (Pl::Parser::sub_attr_names, the ONE reading both printers ask); an anonymous sub's as a `__pcl_set_attributes(sub {...}, 'lvalue method')` wrap (PExpr's attribute strip, beside the __pcl_set_prototype wrap).  Runtime: %pcl-sub-attributes + %pcl-sub-stash (weak, beside %pcl-sub-prototypes); %p-apply-sub-attributes records lvalue/method/const and sends any other attribute through `require attributes; attributes->import(PKG, \\&f, LIST)` -- perl's own route -- so MODIFY_CODE_ATTRIBUTES works and an unknown attribute dies \"Invalid CODE attribute: X\" (it was silently dropped).  builtins SUB_ATTRIBUTES / SET_SUB_ATTRIBUTE / SUB_STASH.  lib/attributes.pm = perl's Perl half + the four XS primitives over them; run-time `lvalue` set is recorded and ANNOUNCED (not-supported).  Generation v2-5684.  Guard Pl/t/attributes-shim-01.t 19 rows (19 fail on the base).  Fable's attrs.pl identical to perl.\n",
+   "id" : "3162",
+   "status" : "completed",
+   "subject" : "attributes without XS: sub attributes reach the runtime (p-sub :attributes fact), lib/attributes.pm"
+}

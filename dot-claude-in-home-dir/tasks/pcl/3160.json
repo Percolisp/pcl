@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "=== DONE (s514e) ===\nFile::Glob without XS (commit 65756f5b).  ONE runtime glob engine %p-bsd-glob (flags as keywords) replaces the CL-pathname expander: CORE::glob / <PAT> = csh_glob (word split + BRACE NOMAGIC QUOTE TILDE ALPHASORT) -- so #488 brace expansion is DONE, backslash quoting works, order is perl's case-insensitive ALPHASORT (was ASCII), `.`/`..` are listed for `.*`, a wildcard in a directory component walks properly (readdir per component, no CL pathnames).  builtin::bsd_glob(PAT, \"flag,flag\") returns (STATUS, MATCH...).  lib/File/Glob.pm (constants, tags, GLOB_ERROR, csh_glob, the :bsd_glob override, :globally, :case/:nocase); GLOB_ALTDIRFUNC / GLOB_LIMIT die by name.  lib/PCL/Facts/File/Glob.pm: File:: is skipped by name in prototype extraction, so the constants' () prototypes come from a facts overlay.  `glob` added to Environment's overridable keywords (perl's glob IS weak) and <PAT> routes through an imported override (PExpr, the readpipe precedent).  DynaLoader::bootstrap was a silent no-op; it now dies through XSLoader::load's p-xs-no-artifact path (Fable ruling) -- `use Compress::Zlib` dies in one line instead of a binding-stack crash.  Guard Pl/t/file-glob-shim-01.t 35 rows (34 fail on the base extraction).  Fable's glob.pl probe identical to perl.  NOT met: acceptance (b) gzip round trip -- Compress::Raw::Zlib is XS, filed #3161; everyday modules/Archive-Tar-Compress depends on #3161 + #2590 (baseline row not edited).\n",
+   "id" : "3160",
+   "status" : "completed",
+   "subject" : "File::Glob without XS: one runtime glob engine for CORE::glob and bsd_glob, lib/File/Glob.pm, DynaLoader::bootstrap dies tidily"
+}

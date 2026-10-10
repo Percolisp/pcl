@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514d (Opus, 2026-10-10) from the detector's first production-mode run over the gate (PCL_DETECT=announce): every program that does `use Encode qw(decode encode ...)` (the s513i shim) announces, e.g.\n\n    PCL: prog.pl line 9: 'main::decode' was parsed as a call of a sub it did not know but code that ran at line 7 installed a sub with prototype ($$;$); set PCL_DETECT=die to stop here\n\ni.e. the COMPILER parsed `decode`/`encode`/`decode_utf8`/`from_to` without the prototype lib/Encode.pm declares (`sub encode($$;$)` at its line 264, `sub decode($$;$)` at 275), while the runtime installs it.  Suspect (the cheap discriminating measurement, not yet taken): lib/Encode.pm also defines `sub decode {` / `sub encode {` WITHOUT a prototype in its encoding-object packages (lines 515, 524, 549), and the module prototype scan is keyed by the BARE name (#421's family), so the later prototype-less definitions shadow the exported ones.  Measure: `pl2cl --module lib/Encode.pm` with the prototype scan's debug, or a two-package fixture `package A; sub f($$) {} package A::B; sub f {}` + `use A qw(f)` and see what prototype main's parse gets.\n\nEffect: `encode \"UTF-8\", $s, 1` style calls without parens parse as list calls (same here, since ($$;$) takes the list anyway), so mostly harmless -- the announcement is the visible cost: 30+ distinct sites in the gate's encode-shim programs, and any everyday program using Encode.",
+   "id" : "3143",
+   "status" : "pending",
+   "subject" : "use Encode qw(decode encode): the compiler parses them without the shim's ($$;$) prototype -- the detector announces every call (suspect #421's bare-name key)"
+}

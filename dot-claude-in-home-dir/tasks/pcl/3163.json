@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "=== DONE (s514e) ===\nHash::Util without XS.  A restricted hash is a HIDDEN TIE of the shim's own class Hash::Util::_Restricted (state: data, legal keys, read-only keys, locked flag): PCL's tie already sits only in the miss branch of the element fast paths (a tied hash is an empty shell), so NO lock test was added to any hash path -- a program that never restricts a hash pays nothing.  Runtime: p-tie-rec gains a `hidden` slot; tied() answers undef for a hidden tie (as perl, where restriction is not a tie); builtins HIDE_TIE / HIDDEN_TIE_OBJECT.  lib/Hash/Util.pm: lock_keys/unlock_keys/lock_keys_plus/lock_value/unlock_value/lock_hash/unlock_hash, _ref_/_hashref/_recurse forms, legal_keys/hidden_keys/all_keys, hash_locked/hash_unlocked + ref forms, hv_store; perl's deaths.  Internals (bucket_ratio, num_buckets, used_buckets, bucket_info, bucket_array, bucket_stats, hash_seed, hash_value, hash_traversal_mask) answer placeholders and announce once.  Found and fixed on the way (Pl/ExprToCL.pm): a DEREFERENCE argument did not fill a `\\@`/`\\%` prototype slot by reference -- `f(@$r)` under `sub f (\\@)` flattened the array (pre-existing; `Hash::Util::lock_keys(%$self)`, fields.pm's shape, passed the first KEY).  Guard Pl/t/hash-util-shim-01.t 34 rows (34 fail on the base).  Fable's hutil.pl identical to perl.\n",
+   "id" : "3163",
+   "status" : "completed",
+   "subject" : "Hash::Util without XS: a restricted hash is a hidden tie (zero fast-path cost), lib/Hash/Util.pm; deref args fill \\@/\\% prototype slots"
+}

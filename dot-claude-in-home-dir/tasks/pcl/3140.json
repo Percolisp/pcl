@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514d (Opus, 2026-10-10) while measuring #2590 on t/op/tiehandle.t (its `package Bar::Say; use base qw(Implement)` block aborts: rows 37-44 of the file never run).\n\nA `package X;` switch inside a bare BLOCK that also holds a `local` is lowered by the nested-switch path (Parser2 _lower_block_1, the #3120 site), which emits at RUN TIME `(p-defclass X::plc-x () ())` -- a class with NO parents.  p-defclass compares parents, so it REDEFINES the class that `use base` had already given its parents: perl's `package X;` never changes @ISA.  The `use base` push also emits an unqualified `(p-push @ISA ...)` inside the block.\n\nMinimal reproducer (perl 5.40.3 prints `hi [Implement] []`; PCL dies \"Can't locate object method \"hi\" via package \"Bar\"\"):\n\n    package Implement; sub hi { \"hi\" }\n    package main;\n    { package Bar; use base qw(Implement); local $\\ = \"\"; print Bar->hi, \" [@Bar::ISA] [@main::ISA]\\n\"; }\n\nWithout the `local` the same block works (it takes the section path).  Fix direction: a run-time package switch ensures the class EXISTS and never sets its parents (e.g. a p-defclass form that creates when absent and leaves an existing class alone); probe the `@ISA` push's package too.  Costs t/op/tiehandle.t rows 37-44.",
+   "id" : "3140",
+   "status" : "pending",
+   "subject" : "A package switch inside a block with a `local` re-defines the class with NO parents at run time (use base lost)"
+}

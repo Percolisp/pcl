@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514b (Opus, 2026-10-10) from Fable's review probe ~/pcl-agent-scratch/s513/review/p514b/exptag6.pl (and scratch/s514b/pr/fsf2.pl): after `use File::Spec::Functions qw(:ALL)`, `defined(&main::catfile)` is false on main and on s514b while `catfile(...)` runs.  The symbolic spelling `defined(&{\"Other::canonpath\"})` answers TRUE (s514b/pr/fsf.pl last line = perl), so the two readings of 'is this sub defined' disagree: the literal spelling emits `(p-sub-defined \"main\" \"catfile\")`.  Discriminating probe: compare p-sub-defined's lookup with the symbolic path's for an imported (aliased) symbol -- likely it reads *p-declared-subs* or fboundp of the target-package symbol, which an import does not set.  Rule 11: one reading.",
+   "id" : "3101",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: `defined &main::NAME` is false for an IMPORTED sub (`use File::Spec::Functions; defined &main::canonpath` -- perl true, PCL false) although the call works"
+}

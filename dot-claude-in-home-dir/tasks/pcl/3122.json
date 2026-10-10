@@ -1,0 +1,10 @@
+{
+   "activeForm" : "mapmulti: p-map walks adjustable vectors through aref and grows its result from 0; vec-data + vpush is -9 % (filed, under the bar)",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Sat Oct 10 18:32:34 2026",
+   "description" : "mapmulti (perf round 45, s514c member 2 candidate, FILED -- under the 15 % bar): `map { ($_, $_ * 2) } 1 .. 200`.  Profile (s514c, N=60000): p-map 93 % cum; vector-hairy-data-vector-ref/check-bounds 9.1 % + slow-hairy 5.3 % + optimized-data-vector-ref 4.9 % (the `loop ... across` over ADJUSTABLE vectors: p-map's input from %p-collect-list and each block result from p-flatten-args), prepare-vector-push-extend 8.2 % self / 17.7 % cum with extend-vector 9.5 % (p-map's result starts at size 0), p-flatten-args 13.4 % cum, %make-p-box 10 %, %p-collect-list 30 % cum.\n\nHand-replaced A/B (scratch/s514c/prof/leverB.lisp, worktree agent-ab5b9d32441dad215): p-map and %p-collect-list walk through %p-vec-data (svref on the storage vector, bounded by the fill pointer) and append with %p-vpush; p-map's result preallocated at the input length.  mapmulti 1.37-1.38 -> 1.25-1.26 s (-9 %), output identical.  Adding the %p-collect-list half gained nothing further.  After it: p-map 20 % self, p-flatten-args 11 % self / 22 % cum (the block's `(p-flatten-args (list $_ (p-* $_ 2)))` -- a cons list then an adjustable vector per iteration), %make-p-box 10 %, %set-fill-pointer 5.7 %.\n\nNot shipped: under 15 %.  The remaining lever is the EMISSION of a list-valued map block (build the per-iteration values without the list + adjustable-vector round trip), which would carry the walk/preallocation above it past the bar.\n",
+   "id" : "3122",
+   "status" : "pending",
+   "subject" : "mapmulti: p-map walks adjustable vectors through aref and grows its result from 0; vec-data + vpush is -9 % (filed, under the bar)"
+}

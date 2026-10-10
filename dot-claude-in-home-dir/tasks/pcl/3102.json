@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514b (Opus, 2026-10-10), found by the s514b sweep (perl-tests/local.t row 267 'is($FETCH, 0)' passes on main only BY ACCIDENT: the FETCH counter is never incremented).\n\nReproducer (scratch/s514b/pr/m4b.pl), perl 5.40.3 vs main 134ca17f:\n\n    {\n        my $STORE = my $FETCH = 0;\n        package TieHash;\n        sub TIEHASH { bless $_[1], $_[0] }\n        sub FETCH   { ++$FETCH; 42 }\n        sub STORE   { ++$STORE }\n        package main;\n        tie my %hash, 'TieHash', {};\n        my $x = $hash{a}; $hash{b} = 1;\n        print \"$STORE $FETCH\\n\";      # perl 1 1   PCL 1 0\n    }\n\nEmission: `sub FETCH` reads `TieHash::$FETCH` while the decl is `$FETCH` (the first `my`, $STORE, is correctly promoted to $STORE__file__0).  So _requalify_block_globals_after_pkg_switch (Pl/Parser2.pm, run before the scans) does not see the SECOND declarator of a chained `my $a = my $b` as a declaration.  Rule 11: the 'which tokens does this statement declare' question is _declarator_syms' -- check whether the requalify pass asks it.  Guard: the reproducer + local.t row 267 must then pass for the right reason (FETCH counter really 0 in local.t since the tie there is never read).",
+   "id" : "3102",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: the second `my` of a chained declaration `my $S = my $F = 0` is treated as an undeclared GLOBAL by the block package-switch requalify pass -- `sub FETCH { ++$F }` after `package TieHash;` in the same block writes $TieHash::F (perl 1 1, PCL 1 0)"
+}

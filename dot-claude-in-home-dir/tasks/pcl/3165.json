@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514e (Opus, 2026-10-10).  Attribute::Handlers (core) does not transpile: \"Parser2 TODO: oversized top-level my extent: %global_phases not promotable\".  Attribute/Handlers.pm declares `my %global_phases = (...)` and `my @global_phases = qw(...)` at file level, both captured by named subs; the promotion refuses a FAMILY of one bare name (two containers named global_phases) in one extent.  This is the last blocker of t/op/attrhand.t (4 planned, 0 run, \"Failed to transpile Handlers.pm\") now that `attributes` itself works (s514e, #3162) -- Attribute::Handlers is built on MODIFY_CODE_ATTRIBUTES, which PCL now dispatches.  Reproducer: `my %g = (a => 1); my @g = (1); sub f { $g{a} . $g[0] } print f(), \"\\n\";` in a file large enough to force promotion (or any module that runs the same path) -- perl \"11\".\n\n\nCORRECTION (probed): the two-line family reproducer above WORKS in PCL (prints 11) -- the refusal needs the FORCED (oversized-extent) promotion path; the reproducer is `perl -e 'use Attribute::Handlers; print 1'` -> PCL dies at transpile with the message above.\n",
+   "id" : "3165",
+   "status" : "pending",
+   "subject" : "Attribute::Handlers does not transpile: file-level %global_phases + @global_phases family refused by promotion (t/op/attrhand.t)"
+}
