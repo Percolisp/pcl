@@ -31732,9 +31732,25 @@ buffer's fill-pointer; everything else falls back to file-length."
                  nil
                  `((p-glob-assign ,pkg-str ,name-str ,rv)))
            (unwind-protect
-                ,(let ((io (%p-local-glob-io-bindings pkg-str name-str)))
+                ,(let ((io (%p-local-glob-io-bindings pkg-str name-str))
+                       ;; `local *NAME` as the LAST statement of a block is its
+                       ;; VALUE: the glob (task #3144) -- `\do { local *FH }` is
+                       ;; the self-tied-handle idiom (IO::String, TieLC).
+                       (body (or body
+                                 (and (eq rhs-form :none)
+                                      `((%p-local-glob-value ,pkg-str ,name-str))))))
                    (if io `(let ,io ,@body) `(progn ,@body)))
              (%p-glob-restore ,sv ,cs ,ss ,as ,hs)))))))
+
+(defun %p-local-glob-value (pkg-str name-str)
+  "The value of a bare `local *NAME` (task #3144): perl hands back the glob
+   with its fresh GP, and the restore at scope exit leaves the value holding
+   that GP -- every `\\do { local *FH }` is a DISTINCT handle.  A glob named
+   NAME itself would share NAME's filehandle registry entry with every other
+   such value (%p-install-fh keys a glob handle by its name), so the value is a
+   fresh glob of a unique name, the way an autovivified handle is (#1271)."
+  (p-make-typeglob pkg-str (format nil "~A__PCL_LOCAL_~D" name-str
+                                   (incf *p-anon-fh-seq*))))
 
 (defmacro p-local-glob-if (cond-form pkg-str name-str rhs-form &body body)
   "The deprecated conditional-local idiom `local *foo = RHS if COND`

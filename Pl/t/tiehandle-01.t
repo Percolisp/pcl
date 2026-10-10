@@ -218,4 +218,35 @@ package main;
 { local *ARGV; tie *ARGV, 'P'; while (<>) { print "got $_" } my @a = <>; print "list @a"; }
 PERL
 
+# #3144: `\do { local *HANDLE }` is a GLOB ref -- the value of a bare
+# `local *NAME` is the glob (it was nil, so the ref was a SCALAR ref), and a
+# blessed one keeps its class through open() (%p-install-fh attaches the stream
+# to the glob).  The self-tied-handle-object idiom (Capture-Tiny's TieLC,
+# IO::String).
+test_th('#3144 a blessed \\do{local *H} keeps its class (and dispatch) across open/close', <<'PERL');
+package K; sub new { my $fh = \do { local *HANDLE }; bless $fh, shift } sub hello { "K::hello" }
+package main;
+my $fh = K->new; print ref($fh), " ", $fh->hello, "\n";
+open($fh, '<', $0) or die "open: $!"; print ref($fh), " ", $fh->hello, "\n";
+my $line = <$fh>; print "read ", (defined $line ? "ok" : "undef"), "\n";
+print "isa ", (UNIVERSAL::isa($fh, 'K') ? 1 : 0), " ", ($fh->can('hello') ? 1 : 0), "\n";
+close $fh; print "closed ", ref($fh), " ", $fh->hello, "\n";
+my $g = K->new; print "distinct ", ($g == $fh ? "same" : "diff"), " ", ref(\do { local *X }), "\n";
+eval { $fh->nosuch }; print "nosuch ", ($@ =~ /via package "K"/ ? "K" : "other"), "\n";
+PERL
+
+test_th('#3144 a TieLC-shaped self-tied handle object writes through its own glob', <<'PERL');
+package LC;
+sub TIEHANDLE { my $class = shift; my $fh = \do { local *HANDLE }; bless $fh, $class;
+                $fh->OPEN(@_) if @_; return $fh }
+sub OPEN  { @_ == 2 ? open($_[0], $_[1]) : open($_[0], $_[1], $_[2]) }
+sub CLOSE { close($_[0]) }
+sub WRITE { my $fh = $_[0]; print $fh substr($_[1], 0, $_[2]) }
+sub PRINT { my ($self, @what) = @_; my $buf = lc join('', @what); $self->WRITE($buf, length($buf), 0) }
+package main;
+my $f = "/tmp/pcl-3144-$$.txt";
+tie *OUT, 'LC', '>', $f; print OUT "HeLLo WoRLD\n"; close OUT; untie *OUT;
+open(my $in, '<', $f) or die; print "file: ", <$in>; close $in; unlink $f;
+PERL
+
 done_testing;
