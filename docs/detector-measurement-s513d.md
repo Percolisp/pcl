@@ -122,6 +122,55 @@ s513d agent's scratch (`.claude/worktrees/agent-a32d9284777ba37b9/scratch/s513d/
 per-site tables and the classifier's output are in `~/pcl-agent-scratch/s513/review/detector-report/`.  The appendix below is
 the durable copy: the gate's 53 sites in full, and the per-name tables of the other three populations.
 
+## 6. Production mode (s514d): the FLAG, and what it prints per population
+
+The USER's ruling became the default (ir-spec §9.3c): every program and module
+unit carries the table, and a disagreement is ANNOUNCED once per call site per
+process on stderr (`PCL_DETECT=die` dies trappably, `=off` is silent, `=log`
+keeps §1's line).  The known-harmless shapes are never announced: shape 1 (a
+nullary `()` sub where the compiler read an unknown bareword term) and shape 5
+(a call parsed against the unit's own definition's prototype that the registry
+lost).  Cost of the table: warm one-liners interleaved best-of-10, base vs
+tree, `print 1` -0.6 %, `use Moo` +0.7 %, `use File::Path` +1.1 % (noise; the
+lists stay constant data until a unit's first comparison).
+
+Measured as §2 measured (a fresh `PCL_CACHE_DIR` per population, gen v2-5584 on
+main d8936ef7 + the batch), with `PCL_DETECT=announce` and `PCL_DETECT_LOG`
+naming a file the announcer also copies each line into:
+
+| population | stderr lines (all processes) | distinct sites | names | units | s513d distinct (§2, every shape) |
+|---|---|---|---|---|---|
+| gate (303 files) | 206 | **71** | 8 | 5 | 53 |
+| sweep (108 files) | 17 | **17** | 2 | 2 | 107 |
+| everyday (122 programs) | 32 | **32** | 3 | 2 | 99 |
+| CPAN board (14 dists) | 63 | **63** | 4 | 7 | 115 |
+
+Everyday: **2 of 122 programs gain a stderr line** (modules/File-Compare-Copy,
+modules/Math-BigInt-BigFloat); no stdout or exit status moves (EVERYDAY 115 of
+122 either way).  The sweep's verdicts are unchanged (TOTAL 18,741, GATE clean).
+
+What is announced, by shape:
+
+- **Shape 2, a displaced built-in -- REAL.**  everyday: File::Copy's `stat` (14)
+  and `utime` (3) (`BEGIN { eval q{ use Time::HiRes qw(stat utime) } }`);
+  board: Sub::Uplevel's `CORE::GLOBAL::caller` (18).
+- **A module's own prototype the COMPILER did not import -- the new largest
+  class.**  The import reached the runtime with its prototype, the parse did
+  not: Encode's `decode` / `encode` / `decode_utf8` / `from_to` in the gate's
+  encode-shim programs (43) and Mojo-DOM58 (4) -- filed #3143 (suspect the
+  bare-name prototype key, #421); Text::Balanced's `extract_multiple` in its
+  board t-files (41); `use Scalar::Util qw< blessed >` in core Math::BigInt /
+  Math::BigFloat (15 + 13: the `qw< >` spelling).  Almost all of these sites
+  are written `NAME(...)` (§2's PAREN class: the argument list is the same, at
+  most a slot's context differs), so they are noise to a user -- the fix is in
+  the compiler's import of the prototype, not in the detector.
+- Shapes 1 and 5 are gone from the output by construction; shape 3 left with
+  s513g's facts overlays.
+
+For the USER's default (announce vs off): with announce on, a user of core
+File::Copy, Math::BigInt/BigFloat or Encode sees up to ~30 lines on stderr per
+run until #3143-family imports carry their prototypes.
+
 ## Appendix A -- the gate's 53 distinct call sites
 
 `unit  name  install:line/kind  call:line  assumed  installed`  (CORE: = perl's own lib; /tmp/*.pl = a gate test's program)
