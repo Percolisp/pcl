@@ -4002,12 +4002,18 @@ sub _scan_pkg_global_spellings {
   # A canonical symbol carrying a package qualification: `$main::y`, `$::y`
   # (PPI and InterpScan both spell that with the empty package), `@main::a`
   # (from `$main::a[0]`), `%Foo::h`, `*main::gl`.
+  my %qual;      # the QUALIFIED spellings alone (no `our`), for #3080
   my $QUAL = qr/^([\$\@\%\*\&])(?:\w+(?:::\w+)*)?::(\w+)$/;
   my $mark = sub {
     my ($sigil, $bare) = @_;
+    my $q = @_ > 2;
     return if $sigil eq '&';                 # the CODE slot is not a variable
-    if ($sigil eq '*') { $pg{$_ . $bare} = 1 for ('$', '@', '%'); return }
+    if ($sigil eq q(*)) {
+      for my $s (q($), q(@), q(%)) { $pg{$s . $bare} = 1; $qual{$s . $bare} = 1 if $q }
+      return;
+    }
     $pg{$sigil . $bare} = 1;
+    $qual{$sigil . $bare} = 1 if $q;
   };
   for my $seg (@$segments) {
     for my $stmt (@{ $seg->{stmts} }) {
@@ -4025,11 +4031,11 @@ sub _scan_pkg_global_spellings {
       # ONE token walk for the three token-level spellings.
       for my $t (@{ $stmt->find('PPI::Token') || [] }) {
         if ($t->isa('PPI::Token::Symbol')) {
-          $mark->($1, $2) if $t->symbol =~ $QUAL;
+          $mark->($1, $2, 1) if $t->symbol =~ $QUAL;
           next;
         }
         if ($t->isa('PPI::Token::ArrayIndex')) {     # `$#main::a`
-          $mark->('@', $1)
+          $mark->(q(@), $1, 1)
             if $t->content =~ /^\$\#(?:\w+(?:::\w+)*)?::(\w+)$/;
           next;
         }
@@ -4041,11 +4047,12 @@ sub _scan_pkg_global_spellings {
         next unless defined $txt && index($txt, '::') >= 0;
         for my $e (@{ Pl::InterpScan::scan($txt) }) {
           my $c = $e->{canon};
-          $mark->($1, $2) if defined $c && $c =~ $QUAL;
+          $mark->($1, $2, 1) if defined $c && $c =~ $QUAL;
         }
       }
     }
   }
+  $self->{_file_qual_global} = \%qual;
   return \%pg;
 }
 
@@ -8528,7 +8535,9 @@ sub _rename_exception_mys {
     next unless ref $top && $top->isa('PPI::Node');
     for my $d (_decl_syms_under($top, nested => 1, plain => 1)) {
       my ($w, $s) = @$d;
-      next unless Pl::GlobalPartition::is_exception_global($s->content);
+      my $qualified = $self->{_file_qual_global}{$s->content};
+      next unless $qualified
+               || Pl::GlobalPartition::is_exception_global($s->content);
       my ($root, $decl) = _lexical_decl_scope($w, $s);
       next unless $root;
       # A FILE-level decl in a file whose string eval sits inside a NAMED SUB
@@ -8550,7 +8559,7 @@ sub _rename_exception_mys {
       $self->_rename_decl_within($root, $s,
         _reg_rename($s->content,
                     $s->content . '__excl__' . $self->{_excl_rename_counter}++,
-                    ':exception-global'),
+                    $qualified ? q(:qualified-global) : q(:exception-global)),
         $decl);
     }
   }
@@ -13795,11 +13804,17 @@ sub _multi_decl {
 #   :exception-global  a `my` of an EXCEPTION-SET name ($a/$b/$_/...), which CL
 #                      cannot lexically bind while the symbol is proclaimed
 #                      special (_rename_exception_mys, `$a__excl__N`)
+#   :qualified-global  a `my` of a name the file ALSO spells package-qualified
+#                      (`$Foo::x`, `$main::a[0]`, `$#Foo::a`, interpolated too):
+#                      in package Foo `$x` and `Foo::$x` are ONE CL symbol, so
+#                      the lexical's `let` would shadow the qualified read (task
+#                      #3080; the same pass, the same `$x__excl__N` spelling)
 #   :seam-shadow       a `my` inside a block that lowers through the v1
 #                      expression seam while an outer lexical of the same name
 #                      is live (_gate_seam_my_shadow, `$x__shadow__N`)
 my %RENAME_WHY = map { $_ => 1 }
-  qw(:spanning :captured :state-cell :exception-global :seam-shadow);
+  qw(:spanning :captured :state-cell :exception-global :qualified-global
+     :seam-shadow);
 
 # original perl spelling + reason, keyed by the NEW name.  File-scoped and
 # reset per parse: one Pl::Parser2 object parses one source, `parse` is not
