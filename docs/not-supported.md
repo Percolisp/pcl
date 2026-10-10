@@ -3999,6 +3999,42 @@ files; slow for hashing large downloads.
 **A wide character** dies `Wide character in subroutine entry` as in perl, but
 without perl's " at FILE line N." suffix (PCL's `Carp` does not append it).
 
+## Storable: what is not byte-identical, and what dies
+
+`lib/Storable.pm` (task #2948, s514a) is plain Perl and writes and reads
+**perl's own binary format** (Storable 2.x streams: `freeze`, `nfreeze`,
+`store`, `nstore`, `*_fd`, `lock_*`, `dclone`), so a frozen string or a
+Storable file moves between PCL and perl in both directions.  For numbers,
+byte strings, wide strings, arrays, hashes (incl. wide keys), references,
+blessed objects, shared substructures, cycles, regexps and tied containers the
+bytes `freeze` / `nfreeze` write are perl's own under `$Storable::canonical`
+(`Pl/t/storable-shim-01.t`).
+
+**Not byte-identical, because PCL has no box slot for the fact perl writes**:
+- a boolean (`!!1`, `!!0`) is written as the integer 1 / the empty string --
+  perl 5.36+ writes `SX_BOOLEAN_TRUE` / `_FALSE` (PCL has no boolean SV,
+  #1050); perl's booleans are READ correctly;
+- an upgraded string whose characters are all below 0x100 is written as bytes
+  (perl writes `SX_UTF8STR`; PCL has no per-scalar UTF-8 flag -- "The
+  per-scalar UTF-8 flag" above); the value round-trips either way;
+- a weak reference is written as a plain reference (it is read back as a plain
+  reference too);
+- a reference to an array element or hash value stored elsewhere in the same
+  structure is thawed as a COPY of that element, not an alias of it (shared
+  arrays, hashes and scalars referenced by `\` are shared, as in perl);
+- without `$Storable::canonical`, hash keys come out in PCL's order (perl's
+  is its own; neither promises one).
+
+**Dies, naming the item**: CODE (`Can't store CODE items`; with
+`$Storable::forgive_me` it warns and stores perl's `You lost CODE(0x...)`
+placeholder), GLOB / IO / FORMAT / LVALUE items, `$Storable::Deparse` /
+`$Storable::Eval` (no `B::Deparse`), a class with `STORABLE_freeze` /
+`STORABLE_thaw` / `STORABLE_attach` hooks (`SX_HOOK`, in both directions),
+`file_magic` / `read_magic`, and an object above 2 GB (`SX_LOBJECT`).  A
+restricted (locked) hash perl wrote is read as an ordinary hash.  A stream with a newer
+major version dies as perl does; a truncated stream thaws to `undef`, as perl
+does.
+
 ## Time::HiRes: the signal-driven timers (`ualarm`, `setitimer`, `getitimer`)
 
 `lib/Time/HiRes.pm` (task #1992, s492c) is plain Perl over four runtime
