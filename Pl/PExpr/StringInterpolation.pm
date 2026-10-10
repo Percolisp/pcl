@@ -130,7 +130,7 @@ sub parse_interpolated_string {
     # Find next variable, case escape, or end of string.
     # Use \z (absolute end) not $ (which stops before a final \n) so that
     # a literal newline at the end of the string is captured as a literal part.
-    if ($content =~ /\G((?:[^\$\@\\]|\\(?:c.?|[^ULulQFEc]))*?)(?:([\$\@])|\\([ULulQFE])|\z)/gc) {
+    if ($content =~ /\G((?:[^\$\@\\]|\\(?:c.?|[^ULulQFEc]|\z))*?)(?:([\$\@])|\\([ULulQFE])|\z)/gc) {
       my $literal = $1;
       my $sigil = $2;
       my $case_cmd = $3;
@@ -216,6 +216,13 @@ sub parse_interpolated_string {
       } else {
         push @$cur_parts, $self->make_string_literal_node($parser, $sigil);
       }
+    }
+    else {
+      # The pattern above ends at a sigil, a case escape or the END, so every
+      # position matches -- a miss is a scanner bug, and a miss used to SPIN
+      # here forever (task #3142: a lone `\` left after `"$\\"`).  Rule 12.
+      die "PCL: string interpolation scan stuck at offset " . pos($content)
+        . " of \"$content\"\n";
     }
   }
 
