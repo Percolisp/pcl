@@ -18,3 +18,5 @@
 
 > **11:14 -- USER: "Good. After the next one finishes, please do two agents at a time. We are going to look at XS after we get PCL less buggy, so just note the speed problem and see if we can get XS to work."** ⇒ (1) cap THREE until the FIRST of s513i / s513g / s514a merges, then TWO -- no replacement launched at that merge; (2) **#2949 PARKED** (digest speed noted; the route is XS after the bug phase; no builtin:: primitive, no typing lever scheduled); (3) the XS revisit (pclxs, parked since s485) is the USER's planned next big item AFTER the bug phase -- noted in memory, not scheduled.  DECIDED gained its `## s514` section (pcl --check = the oracle item; Storable = perl's format; digest speed parked; shim order by measured value).  SHARED-BOX 11:14 addendum.
 
+> **11:46 -- USER: "Number of subjobs varies, don't make a hard rule about it. Default is still 2. Don't stop any, just keep 2 going as default after one close."** ⇒ the 11:14 wording softened (SHARED-BOX 11:46 addendum; memory): no hard rule; default two; never stop a running batch; when the three become two, no replacement; when two become one, launch the next.
+
