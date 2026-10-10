@@ -4015,8 +4015,12 @@ bytes `freeze` / `nfreeze` write are perl's own under `$Storable::canonical`
   perl 5.36+ writes `SX_BOOLEAN_TRUE` / `_FALSE` (PCL has no boolean SV,
   #1050); perl's booleans are READ correctly;
 - an upgraded string whose characters are all below 0x100 is written as bytes
-  (perl writes `SX_UTF8STR`; PCL has no per-scalar UTF-8 flag -- "The
-  per-scalar UTF-8 flag" above); the value round-trips either way;
+  (perl writes `SX_UTF8STR`).  PCL's `utf8::is_utf8` cannot tell the two apart:
+  `my $s = "caf\x{E9}"; utf8::upgrade($s)` answers 1, but so do `"caf\x{E9}"` and
+  `"abc"` never upgraded (perl: 1 0 0; PCL: 1 1 1, s514a probe `pr/upg.pl`; the
+  #1389 ruling, "The per-scalar UTF-8 flag" above), so writing `SX_UTF8STR` for
+  a flagged string would mis-write EVERY byte string; the value round-trips
+  either way;
 - a weak reference is written as a plain reference (it is read back as a plain
   reference too);
 - a reference to an array element or hash value stored elsewhere in the same
