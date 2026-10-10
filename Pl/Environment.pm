@@ -657,11 +657,24 @@ sub _proto_shape_key {
     my ($rec) = @_;
     require Data::Dumper;
     my %r = %$rec;
-    delete @r{qw(at from_module from_attr attr_text)};
+    delete @r{qw(at from_module from_attr attr_text from_overlay overlay_unit)};
     local $Data::Dumper::Sortkeys = 1;
     local $Data::Dumper::Indent   = 0;
     local $Data::Dumper::Terse    = 1;
     return Data::Dumper::Dumper(\%r);
+}
+
+# THE facts-overlay conflict rule (task #2878; one helper, #2954): the overlay
+# OREC from file OVERLAY and the source's REC from file FILE agree on the
+# prototype's shape, or the transpile dies naming both files.  Both consumers
+# ask it -- the module walk's merge (Pl::Parser::_merge_facts_overlay, the
+# `use` path) and a unit's own declaration (add_prototype, the unit path).
+sub overlay_conflict_check {
+    my ($qname, $orec, $overlay, $rec, $file) = @_;
+    return if _proto_shape_key($orec) eq _proto_shape_key($rec);
+    my $text = sub { '(' . ($_[0]{proto_string} // '') . ')' };
+    die "PCL: facts overlay conflict for $qname: $overlay declares "
+      . $text->($orec) . " but $file declares " . $text->($rec) . "\n";
 }
 
 # The record a (re)registration stores: a COPY carrying its site -- the
@@ -835,6 +848,14 @@ sub add_prototype {
     my $owner = (defined $name && $name =~ /\A(.+)::[^:]+\z/) ? $1
               : (defined $package ? $package : ($self->current_package // 'main'));
 
+    # A UNIT's own declaration against its facts overlay (#2954): the record
+    # register_unit_overlay put here carries from_overlay, and the unit's own
+    # (not imported) record replacing it must agree with it.
+    my $prev = $self->pkg_prototypes->{$bare}{$owner};
+    overlay_conflict_check("${owner}::$bare", $prev, $prev->{from_overlay},
+                           $sig_info, $prev->{overlay_unit})
+      if ref($prev) eq q(HASH) && $prev->{from_overlay}
+         && ref($sig_info) eq q(HASH) && !$sig_info->{from_module};
     my $rec = $self->_sited_record($sig_info,
                                    $self->pkg_prototypes->{$bare}{$owner}, $at);
     $self->prototypes->{$bare} = $rec;

@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -113,6 +113,18 @@ PL
                && $err =~ m{PCL/Facts/FactsConflict\.pm}
                && $err =~ m{lib/FactsConflict\.pm declares \(\)},
        'a conflicting overlay dies naming both files')
+      or diag $err;
+}
+
+# 6b. The same conflict on the UNIT path (#2954): transpiling the module file
+# ITSELF dies too.  Its check used to run before the unit's own subs were
+# registered and never fired (the cloud review's finding 2).
+{
+    my $err = `PCL_NO_PROTO_CACHE=1 $pl2cl $fixlib/FactsConflict.pm 2>&1 >/dev/null`;
+    ok($? != 0 && $err =~ m{conflict for FactsConflict::CONST}
+               && $err =~ m{PCL/Facts/FactsConflict\.pm declares \(\$\)}
+               && $err =~ m{lib/FactsConflict\.pm declares \(\)},
+       'a conflicting overlay dies on the UNIT path too, naming both files')
       or diag $err;
 }
 

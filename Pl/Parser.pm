@@ -10755,7 +10755,9 @@ sub _facts_overlay_env {
   return $memo->{$path} if exists $memo->{$path};
   validate_facts_overlay($path, $module);
   Pl::ProtoCache::begin_walk();
-  my $env = $self->_walk_module_prototypes($module, $path);
+  # Walked under the OVERLAY's name: the walk's proto-oracle dump (#391) is
+  # keyed on it, and the real module's own dump must not be overwritten (#2954).
+  my $env = $self->_walk_module_prototypes("PCL::Facts::$module", $path);
   Pl::ProtoCache::end_walk();
   die "PCL: facts overlay $path: could not be read\n" if !$env;
   return $memo->{$path} = $env;
@@ -10799,11 +10801,6 @@ sub _facts_overlay_stmt_ok {
   return 0;
 }
 
-sub _facts_proto_text {
-  my ($rec) = @_;
-  return '(' . ($rec->{proto_string} // '') . ')';
-}
-
 # Merge an overlay's facts into the facts a walk of the module's source
 # produced.  The overlay fills an ABSENCE; a name both declare with different
 # prototypes is a CONFLICT and dies naming both files; exports are unioned.
@@ -10815,15 +10812,14 @@ sub _merge_facts_overlay {
     next if $oenv->is_builtin_seed_record($name, $rec);
     my $src = $module_env->prototypes->{$name};
     if ($src && !$module_env->is_builtin_seed_record($name, $src)) {
-      next if Pl::Environment::_proto_shape_key($src)
-           eq Pl::Environment::_proto_shape_key($rec);
-      die "PCL: facts overlay conflict for ${module}::$name: $overlay declares "
-        . _facts_proto_text($rec) . " but $module_path declares "
-        . _facts_proto_text($src) . "\n";
+      Pl::Environment::overlay_conflict_check("${module}::$name", $rec, $overlay,
+                                              $src, $module_path);
+      next;
     }
-    $module_env->prototypes->{$name} = $rec;
+    $module_env->prototypes->{$name} = _imported_record($rec);
     my $per = $oenv->pkg_prototypes->{$name} || {};
-    $module_env->pkg_prototypes->{$name}{$_} //= $per->{$_} for keys %$per;
+    $module_env->pkg_prototypes->{$name}{$_} //= _imported_record($per->{$_})
+      for keys %$per;
   }
   $module_env->export_names({ %{ $module_env->export_names || {} },
                               %{ $oenv->export_names || {} } });
@@ -10842,6 +10838,10 @@ sub _merge_facts_overlay {
 # file (its name ends in Package/Path.pm), the overlay's declarations are in
 # force from the `package` statement's SITE on, registered like an import; a
 # local declaration of the same name with another prototype dies (conflict).
+# The check is not here: this runs BEFORE the unit's sub pre-scan registers
+# its own subs (#2954 -- a check here never fired), so the record carries
+# from_overlay + overlay_unit and add_prototype asks the ONE conflict rule
+# when the unit's own declaration replaces it.
 sub register_unit_overlay {
   my ($self, $package, $unit_file, $site) = @_;
   return if !defined $unit_file || !defined $package;
@@ -10862,15 +10862,9 @@ sub register_unit_overlay {
   for my $name (sort keys %{ $oenv->prototypes }) {
     my $rec = $oenv->prototypes->{$name} or next;
     next if $oenv->is_builtin_seed_record($name, $rec);
-    my $own = $env->pkg_prototypes->{$name}{$package};
-    if ($own && !$own->{from_module}) {
-      next if Pl::Environment::_proto_shape_key($own)
-           eq Pl::Environment::_proto_shape_key($rec);
-      die "PCL: facts overlay conflict for ${package}::$name: $overlay declares "
-        . _facts_proto_text($rec) . " but $unit_file declares "
-        . _facts_proto_text($own) . "\n";
-    }
-    $env->add_prototype($name, _imported_record($rec), $package, $site);
+    my $r = _imported_record($rec);
+    @$r{qw(from_overlay overlay_unit)} = ($overlay, $unit_file);
+    $env->add_prototype($name, $r, $package, $site);
   }
   return;
 }

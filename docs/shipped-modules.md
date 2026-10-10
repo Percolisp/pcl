@@ -177,7 +177,9 @@ already in the cache takes effect at the next generation bump -- a shipped
 overlay arrives with one -- or after the cache is cleared.
 
 **The conflict rule.** If the module's source declares the same name with a
-DIFFERENT prototype, the transpile dies naming both files: the overlay is
+DIFFERENT prototype, the transpile dies naming both files -- on the `use`
+path and when the module file itself is transpiled (its own unit; #2954
+made that path fire, Pl/t/facts-overlay-01.t row 7): the overlay is
 wrong (or the module changed under it) and must be fixed, never preferred.
 
 **How to add one.** (1) Find the name: the #2610 detector
