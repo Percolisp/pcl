@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s514 (Fable, 2026-10-10 18:2x) by the perf-round review probe ~/pcl-agent-scratch/s513/review/p514c/moo.pl (a Moo class with `has`, `extends`, `+legs`, BUILD, 20k constructions; perl 5.40.3 vs main 9df45a41 = code 32b34a5b through probe.sh; moo.perl.out / moo.base.out on disk).  STDOUT: 5 lines, identical.  STDERR on main: two fragments, each an SBCL `While evaluating the form starting at line N, column 0 of #P\"/tmp/pcl-nocache-XXXX.lisp\":` header, the second continuing `; in: p-eval-thunk (list \"$meta\")` -- and then NOTHING: no condition text follows either header.  So something inside a string-eval compile of Moo-generated code (a `p-eval-thunk` with a `$meta` capture -- Moo's Sub::Quote / Method::Generate path) signals a condition whose printing is cut off, or a handler prints the SBCL context header and swallows the body.  Probably pre-existing for a long time (the Moo board dists pass); USER rule: diagnostics must be TIDY (one line, perl-shaped) -- a half-printed Lisp context line is neither.  MEASURE FIRST: run moo.pl with PCL_NO_CORE=1 and with the module cache cleared (PCL_NO_FASL_CACHE=1) to see whether the fragment comes from the compile of the cached module or the eval; then find the handler that prints `While evaluating the form` (grep cl/pcl-runtime.lisp for that text and for the eval compile's handler-bind) and make it either print the whole condition perl-shaped or print nothing.  Guard: a Pl/t row with a Moo fixture asserting EMPTY stderr (the s355 stderr-aware helper).  Filler-sized; stderr only.",
+   "id" : 2956,
+   "status" : "pending",
+   "subject" : "STDERR NOISE (Moo, main 9df45a41): a plain Moo program prints two truncated SBCL diagnostic headers to stderr -- `While evaluating the form starting at line 116, column 0 of #P\"/tmp/pcl-nocache-â¦.lisp\":` and `â¦ line 277 â¦: ; in: p-eval-thunk (list \"$meta\")` -- with NO message body; STDOUT is identical to perl; found by the s514c review probe moo.pl"
+}
