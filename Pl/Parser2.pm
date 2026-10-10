@@ -1681,6 +1681,11 @@ sub parse {
   # here that only survives because the calls sit under eval).
   $self->_rewrite_unreachable_gotos($doc);
 
+  # #3080: the QUALIFIED spellings the SOURCE wrote, read before the two
+  # requalify passes below write qualified tokens of their own (those are this
+  # compiler's spelling of a bare name, not a package global the source named).
+  $self->_scan_pkg_global_spellings([{ stmts => [ $doc->schildren ] }]);
+
   # #63/t183: `our @a` declared inside a block AFTER an in-block `package`
   # statement stays aliased to the DECLARING package's variable until the
   # block ends — including across a later `package` switch in the same
@@ -4052,7 +4057,7 @@ sub _scan_pkg_global_spellings {
       }
     }
   }
-  $self->{_file_qual_global} = \%qual;
+  $self->{_file_qual_global} //= \%qual;     # the FIRST call's: the source
   return \%pg;
 }
 
