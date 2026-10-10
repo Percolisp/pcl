@@ -1171,6 +1171,7 @@ rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
 | `$x__cond__N` | v2 poisoned-condition rename (W8.5) | `if (my $x = …)` / `for (my $x…)` where the *same bare name* is also used outside the construct as a package global. The construct's lexical takes the fresh name so the global keeps `$x` and gets its forward defvar |
 | `$x__emb__N` | v2 embedded-`my` rename (W8.5, #265) | an *expression-embedded* `my` **inside a named sub** (`++my $x->{k}`, `open my $fh, …`, `… if my $x = …`) whose bare name is also mentioned by another named sub in the segment. Unrenamed, the let-hoist refuses the decl (it cannot tell that other sub apart from one sharing a file-level cell) and the `my` writes the package GLOBAL — persisting across calls. Renamed, the sub gets its per-call `let` AND the global keeps `$x` and its forward defvar |
 | `$x__file__N` from an embedded `my` | v2 file-cell promotion (s501b, #2534) | an *expression-embedded* `my` at file or block level (`open(my $h, …)`, `read($fh, my $buf, N)`, `pipe(my $r, my $w)`) **captured by a named sub** is promoted exactly like a statement-level captured `my`: renamed `$h__file__N`, published as a package cell before its statement, and only its declarator is renamed inside that statement (perl introduces the name after the statement).  Every same-name embedded `my` in another block then keeps its own `p-let`.  Before this, the captured decl fell to the embedded-`my` veto — ONE forward-defvar'd global for the name — and every sibling `open(my $h …)` re-opened the sub's handle (perl `1 5 5`, PCL `1 0 5`).  The identity case and a decl with a later string eval naming it decline (they keep the veto path's single cell) |
+| `$x__excl__N` | v2 exception / qualified-global rename (#296, #3080) | a `my`/`state` of an EXCEPTION-set name (`$a`/`$b`/…, a proclaimed special a `let` would rebind dynamically) -- or, since s514b, of a name the file ALSO spells package-QUALIFIED (`$Foo::x`, `@main::a`, `$#Foo::a`, interpolated too): in CL package Foo `$x` and `Foo::$x` are ONE symbol, and a `let` of it would shadow the global the qualified spelling must always reach (normative: **a package-qualified variable is never a lexical**).  `:why :exception-global` / `:qualified-global`. |
 | `$x__lex__N` | v1 closure-capture rename | v1's fix for defvar-poisoned closures: a block `my` captured by a nested sub becomes a fresh, never-defvar'd name so its `let` stays truly lexical. Appears in v2 output too, inside seam-lowered map/grep bodies |
 | `$x__state__N` (+ `…__init`) | v2 state cells (s277c) | a named sub's `state` variable promoted to a per-sub package cell + raw once-flag (see the declarations table above); same blockers as the other renames |
 | `$state__<sub>__<name>__N` (+ `…__init`) | v1 state cells | same idea, v1's spelling — seen in v1-dialect files |
@@ -1569,6 +1570,10 @@ element, `delete @arr[2,3]` the last one.  The count reading is not merely a
 wrong number: a count is always true, so `delete %j{'q'}` on a ZERO value read
 as TRUE.  The ELEMENT deletes (`delete $h{k}`, `delete $a[i]`) return ONE
 value and are not wrapped.
+
+### 3.2e2 A list slice of an EMPTY list is an EMPTY list (normative, s514b, task #2953)
+
+perlop: "A slice of an empty list is still an empty list."  `(@e)[0,1,2]`, `()[0,1]` and `(lstat $missing)[0,1,2]` are (), so `my ($a,$b) = (@e)[0,1] or next` takes the `next`; only a NON-empty list yields one undef per out-of-range index (`(1)[1,0]` has 2 elements), and an ARRAY slice is not a list slice (`@e[0,1,2]` is three undefs).  The IR: a list slice is `(p-aref-deref SRC (vector I …))` -- a vector index arrives only from a LIST subscript -- and an empty SRC (an empty vector, or a built-in's NIL) answers ().  A ONE-index list slice in list context still emits a scalar index (task #3100).
 
 ### 3.2f `strict refs` is a LEXICAL fact the dereference SITE carries (normative, s497b, task #2103)
 
@@ -2038,6 +2043,8 @@ class of §2b.2a, carried for a reader and ignored at run time — except
 (`%pcl-str-buffer`, the declaration's own store discipline; #2571).  The two
 body shapes are call-compatible — every call site just applies the function
 to the flattened values.
+
+**A raw slot holds a raw value or a CONTAINER box (normative, s514b, #3081).**  A box found in a raw slot is read as a VARIABLE (`p-cast-$` unboxes it once), so a reference VALUE (an is-ref wrapper from `p-backslash`) whose referent is itself a box binds in a fresh container, never bare: `sub t { my ($v) = @_; ref $$v } t(\\$x)` is `SCALAR`, and `d($$v)` recursing down `\\\\[2]` sees every level.
 
 **A parameter is a COPY taken at the call (normative, s501q, #2570).**
 `p-raw-params` binds each parameter to the argument's VALUE: a plain number
