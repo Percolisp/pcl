@@ -66,6 +66,7 @@ sub detect_run {
     local $ENV{PCL_CACHE_DIR}    = $cache;
     local $ENV{PCL_DETECT_TABLE} = 1;
     local $ENV{PCL_DETECT_LOG}   = $log;
+    local $ENV{PCL_DETECT}       = 'log';   # robust to a PCL_DETECT in the caller's environment
     my $cl = PCLCore::transpile("$pl2cl $pl");
     my ($cfh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cfh $cl;

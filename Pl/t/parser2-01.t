@@ -852,13 +852,21 @@ EOF
 # bytes, and that the rule stays position-local: a bareword in ordinary
 # expression position is still a CALL (`Foo::init`), and a bareword method
 # invocant still resolves at runtime (`Count::DATA->getline`).
+# The detector table (#2610, every unit since s514d) records the parser's
+# prototype QUESTIONS, and the two spellings ask different ones; the claim is
+# about the PROGRAM's form, so both sides are compared without it.
+sub no_detect_table {
+  my ($cl) = @_;
+  $cl =~ s/\(pcl::p-eval-always \(pcl::p-detect-table(?<b>(?:[^()"]++|"(?:[^"\\]|\\.)*+"|\((?&b)\))*)\)\)\n?//s;
+  return $cl;
+}
 {
   for my $sig ('$s', '@a', '%h') {
     my $bare = Pl::Parser2->parse_code("my $sig; tie $sig, Tie::StdThing;");
     my $quot = Pl::Parser2->parse_code("my $sig; tie $sig, 'Tie::StdThing';");
     like($bare, qr/\(p-tie \Q$sig\E "Tie::StdThing"\)/,
          "tie $sig, BAREWORD: class name is a string");
-    is($bare, $quot, "tie $sig: bareword and quoted class emit identical CL");
+    is(no_detect_table($bare), no_detect_table($quot), "tie $sig: bareword and quoted class emit identical CL");
   }
   my $lst = Pl::Parser2->parse_code(q[my $s; tie $s, Tie::StdThing, 7, 8;]);
   like($lst, qr/\(p-tie \$s "Tie::StdThing" 7 8\)/, 'tie LIST args pass through');
@@ -876,7 +884,7 @@ EOF
   my $bb = Pl::Parser2->parse_code(q[my $r = {}; bless $r, Tie::StdThing;]);
   like($bb, qr/\(p-bless \$r "Tie::StdThing"\)/,
        'bless CLASSNAME bareword is a string, not a runtime lookup');
-  is($bb, Pl::Parser2->parse_code(q[my $r = {}; bless $r, 'Tie::StdThing';]),
+  is(no_detect_table($bb), no_detect_table(Pl::Parser2->parse_code(q[my $r = {}; bless $r, 'Tie::StdThing';])),
      'bless: bareword and quoted class emit identical CL');
 }
 

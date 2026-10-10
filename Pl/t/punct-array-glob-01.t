@@ -237,6 +237,10 @@ like(emitted(q{while (<<>>) { print }}), qr/\(p-readline\)/,
 sub emitted_no_argv0 {
     my $cl = emitted($_[0]);
     $cl =~ s/^\(pcl::box-set pcl::\$0 "[^"]*"\)\n//m;
+    # ... and the detector table (#2610, every unit since s514d): it records the
+    # parser's prototype questions, which the two spellings ask differently.
+    $cl =~ s/\(pcl::p-eval-always \(pcl::p-detect-table(?<b>(?:[^()"]++|"(?:[^"\\]|\\.)*+"|\((?&b)\))*)\)\)\n?//s;
+    $cl =~ s/^\(pcl::p-eval-always \(pcl::p-detect-end "[^"]*"\)\)\n//m;   # it names the temp file
     return $cl;
 }
 is(emitted_no_argv0(q{while (<<>>) { print }}),
