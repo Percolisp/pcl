@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s513 (Fable, 2026-10-10) reviewing s513f: probe ~/pcl-agent-scratch/s513/review/p513f/p13-read-place.pl last row -- after reads consumed 11 of 16 bytes, `sysread($r, $h{y}, 2)` leaves $h{y} EMPTY under perl 5.40.3 (sysread is not supported on an in-memory handle: undef + $!) and reads `lm` under PCL (base and tree alike; the base could not write into an element at all, #2921, so it read as empty for the wrong reason).  Probe first what perl answers (return value, $!, warning) for sysread / syswrite on an in-memory handle in 5.38 and 5.40 (CI is 5.38.2), then make %p-sysread-impl / %p-syswrite-impl answer the same.  Low priority: a program that sysreads an in-memory handle is rare; file-and-forget until a suite row or a program meets it.",
+   "id" : "2942",
+   "status" : "pending",
+   "subject" : "sysread on an IN-MEMORY handle (open $fh, '<', \\$str) returns data; perl's sysread fails there (returns undef, $! EBADF -- a PerlIO::scalar handle has no fd) -- pre-existing, found by the s513f review probe"
+}

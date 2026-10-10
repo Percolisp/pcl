@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "FILED s513g (Opus, 2026-10-09), found while writing the #2878 fixture; NOT fixed (outside the batch).\n\nREPRODUCER (perl 5.40.3 prints `hi`; PCL drops the second statement, then dies at run time \"statement not supported\"):\n\n    BEGIN {\n      for my $n (qw(ONE)) {\n        *{\"main::$n\"} = sub () { 1 };\n      }\n      *{\"main::greet\"} = sub { \"hi\" };\n    }\n    print greet(), \"\\n\";\n\nPCL: `PCL: statement dropped at f7.pl line 5: *{\"main::greet\"} = sub { \"hi\" }; -- Handle single node of unknown type.`\n\nWhat does NOT reproduce (each probed): the same glob-assign at file top level after an empty `for` (f4); inside BEGIN after an empty `for` (f6); inside BEGIN alone (f5).  So the trigger is the PREVIOUS loop body's `sub () { 1 }` (an anonymous sub with an empty prototype) followed, after the loop's `}`, by `*{...} = sub {...}` in the same block.  PPI's own tree for the statement is correct (Cast `*`, Block, `=`, `sub`, Block -- dumped), so the suspect is a PCL token repair or the anon-sub `:prototype`/`()` pre-pass that re-classes tokens across the loop's closing brace.  DISCRIMINATING MEASUREMENT (not taken): dump the token stream PCL lowers for line 5 after `_ppi_parse`'s repairs and compare with PPI's raw dump.\n\nProbe files: s513g worktree scratch/s513g/pr/f2.pl, f4.pl..f7.pl.  The #2878 fixture `Pl/t/lib/FactsFixture.pm` orders its BEGIN block around it (comment there).",
+   "id" : "3020",
+   "status" : "pending",
+   "subject" : "A glob-assign of a code ref inside a block, after a loop whose body glob-assigns a `sub () {...}`, is DROPPED (\"Handle single node of unknown type\") -- `BEGIN { for my $n (qw(ONE)) { *{\"main::$n\"} = sub () { 1 }; } *{\"main::greet\"} = sub { \"hi\" }; }`"
+}

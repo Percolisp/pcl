@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s513 (Fable, 2026-10-10) reviewing s513f (#2922 made $! right for a failing opendir and a negative seek): probe ~/pcl-agent-scratch/s513/review/p513f/p12-errno.pl row 2 -- `seek($r, 0, 7) or print ...` prints `seek: set Invalid argument` under perl; base AND tree print nothing (the call answered true).  %p-seek-impl's whence dispatch (cl/pcl-runtime.lisp ~19975) has `(t position)` as its fall-through arm: an illegal WHENCE is read as SEEK_SET.  Rule 12: a closed set (0 1 2) with a silent default.  FIX: an arm for anything else = `(%p-io-errno-fail 22)` (EINVAL), as perl; probe whence 3, 7, -1, \"2\" (a numeric string is legal), undef (= 0 with a warning in perl).  Guard row in Pl/t/misc-fixes-03.t.  Small; a filler.",
+   "id" : "2941",
+   "status" : "pending",
+   "subject" : "seek(FH, POS, WHENCE) with an INVALID whence (3, 7, -1) returns TRUE and moves nothing; perl returns false with $! = EINVAL (pre-existing; found by the s513f review probe)"
+}

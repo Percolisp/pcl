@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s513 (Fable, 2026-10-10) reviewing s513f, which FLAGGED it in its report but did not file it.  Probe ~/pcl-agent-scratch/s513/review/p513f/p13-read-place.pl row 3: perl `i=1 b=i`; base `i=1 b=` (#2921: nothing written at all); tree `i=2 b=` (written into $b[1]).  MECHANISM: `%p-with-buffer-place` (cl/pcl-runtime.lisp, the macro p-read / p-sysread / p-recv expand through) does `(let ((cur PLACE)) ... (p-setf PLACE (p-box-value box)))` -- PLACE's forms appear twice in the expansion.  FIX (rule 11, the standard CL shape): evaluate the place's SUBFORMS once -- for a p-helem / p-aelem / deref place bind the container form and the key form to temporaries (the equivalent of get-setf-expansion over PCL's accessor shapes; look for an existing helper that does this for `.=`-into-element (#2115 in-place append) or for `local $h{k}` and reuse it), then read from and write back through the temporaries.  Before this fix the shape was worse (the read landed nowhere); after it the common no-side-effect spelling is right and only a subscript with a side effect is wrong -- that is why s513f was merged with the flag.  Guard rows: `$b[$i++]`, `$h{$k++ . \"x\"}`, `$r->[f()]` with f counting its calls -- the counter must read 1 and the data land in the first element; inverse-verified.  A filler for the next correctness batch (s513f left #2920 and #2961 too).",
+   "id" : "2943",
+   "status" : "pending",
+   "subject" : "SILENT WRONG (new with s513f, #2921): read / sysread / recv into an ELEMENT or DEREF buffer place evaluates the place TWICE (once to read the current value, once to write back), so a side-effecting subscript runs twice -- `read($fh, $b[$i++], 1)` leaves i=2 and writes element 1 (perl: i=1, element 0)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-09",
+   "description" : "FOUND s513f (Opus, 2026-10-09) while building #2874 (`use bigrat` is ANNOUNCED instead of built because of this). Probe scratch/s513f/pr/bf1.pl in the s513f worktree:\n    use Math::BigRat; my $r = Math::BigRat->new(\"1/3\"); print $r + Math::BigRat->new(\"1/6\"), \"\\n\"; print Math::BigRat->new(\"3/4\") * 2, \"\\n\";\nperl 5.40.3: 1/2 / 3/2.  PCL (s513f tree): 2 / dies \"Unhandled sb-int:simple-program-error\" (an arity error inside a transpiled core-module sub -- not tidy, not perl's).  Math::BigInt and Math::BigFloat answer the same shapes correctly (bigint/bignum shims work).  When it runs, lib/bigrat.pm becomes the same three lines as lib/bignum.pm (overload::constant integer/float/binary => \\&NAME with Math::BigRat->new).",
+   "id" : "3000",
+   "status" : "pending",
+   "subject" : "Math::BigRat does not run under PCL: Math::BigRat->new(\"1/3\") + Math::BigRat->new(\"1/6\") gives 2 (perl 1/2), Math::BigRat->new(\"3/4\") * 2 dies with a raw sb-int:simple-program-error"
+}
