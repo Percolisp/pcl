@@ -184,4 +184,17 @@ row('Encode::Alias', trap(sub { find_encoding('mine')->name }), trap(sub { find_
     trap(sub { resolve_alias('myl1') }), trap(sub { cp(decode(mine => "\xC3\xA9")) }));
 P
 
+# 4. utf8::'s five core subs are DEFINED subs (perl: XS), so the
+# Text::CSV_PP BEGIN shape -- alias `*utf8::is_utf8 = *Encode::is_utf8` when
+# `defined &utf8::is_utf8` is false -- leaves utf8::is_utf8 alone; with the
+# old answer (false) the alias made the shim's is_utf8 call itself forever.
+compare_lines(<<'P', 'utf8 core subs');
+BEGIN {
+    if (!defined &utf8::is_utf8) { require Encode; no warnings; *utf8::is_utf8 = *Encode::is_utf8; }
+}
+row('defined &utf8::X', join ',', map { no strict 'refs'; defined &{"utf8::$_"} ? 1 : 0 } qw(encode decode upgrade downgrade is_utf8));
+row('utf8::is_utf8 after the alias shape', (utf8::is_utf8("\x{100}") ? 1 : 0));
+P
+
+
 done_testing();

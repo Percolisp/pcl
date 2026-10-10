@@ -37365,6 +37365,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    The predicate is total — every value is or is not a string — so rule 12
    does not apply."
   (pcl::p-bool (stringp (pcl::unbox str))))
+;; These five are perl CORE subs, so `defined &utf8::is_utf8` is TRUE, as in
+;; perl (the DynaLoader stubs below use the same mark).  Text::CSV_PP tests it
+;; in a BEGIN and, when false, aliases `*utf8::is_utf8 = *Encode::is_utf8` --
+;; with lib/Encode.pm loadable that alias made is_utf8 call itself forever.
+(dolist (s '(pl-encode pl-decode pl-upgrade pl-downgrade pl-is_utf8))
+  (setf (gethash s pcl::*p-declared-subs*) :defined))
 (in-package :pcl)
 
 ;;; ---------------------------------------------------------------------------
