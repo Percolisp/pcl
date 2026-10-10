@@ -1,0 +1,10 @@
+{
+   "activeForm" : "",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FOUND s514 (Fable, 2026-10-10 20:2x) by the s513i merge-review probe ~/pcl-agent-scratch/s513/review/p513i/enc6.pl (16 CHECK-mode rows with VARIABLE sources -- the enc1-5 oracle had literal sources, which perl refuses to modify, so perl's real answer for these rows was unknown; perl 5.40.3 / Encode 3.21 vs the s513i tree 9fd46648; enc6.perl.out / enc6.tree.out).  13 of 16 rows identical; two differ by #3060 (FB_QUIET leaves the consumed prefix in the caller's variable: perl leaves \"b\" / \"\\xC3\", PCL leaves the whole source -- the in-place write through a raw-slot `my` never reaches the caller, filed by s513i); ONE is the shim's: `my $odd = \"a\\0b\"; decode(\"UTF-16LE\", $odd, Encode::FB_CROAK)` -> perl dies `UTF-16LE:Partial character`, PCL returns \"a\".  The default CHECK (row 2) agrees with perl (both give \"a\" + the replacement policy), so only the croak/strict modes miss the partial-unit test.  FIX: in lib/Encode.pm's UTF-16/UTF-32 decode path (or the runtime primitive's failure index for a trailing partial unit -- probe which layer reports the stop: `builtin::decode_octets` returns the index of the first failure; a partial trailing unit must count as a failure at its offset, as the UTF-8 codec already does), croak with perl's text under FB_CROAK / FB_STRICT; guard rows in Pl/t/encode-shim-01.t for UTF-16LE / BE / UTF-32 odd lengths under croak, default and quiet.  Filler-sized.",
+   "id" : 2957,
+   "status" : "pending",
+   "subject" : "Encode shim edge (s513i, FOUND at its merge review): decode(\"UTF-16LE\", \"a\\0b\", FB_CROAK) returns \"a\" where perl dies \"UTF-16LE:Partial character\" -- a trailing PARTIAL code unit under a croaking CHECK is not detected for the UTF-16/32 codecs (the UTF-8 partial case croaks correctly: \"caf\\xC3\" dies as in perl)"
+}
