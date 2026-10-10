@@ -804,9 +804,10 @@ still answers perl's canonical name, `find_encoding` answers undef, and
 adds later is reached by adding its name to the shim's `%INFO`.
 
 Not shipped: **Encode::Guess**, the **MIME-Header / MIME-B / MIME-Q**
-encodings (Encode::MIME::Header), **Encode::Encoder**, and `encoding.pm` (the
-deprecated source-encoding pragma).  `use` of one fails at load ("Can't
-locate" or the XS message).  The answers `Encode` itself gives differently
+encodings (Encode::MIME::Header), **Encode::Encoder**.  `use` of one fails at
+load or answers `Unknown encoding`.  (Perl's own pure-Perl `Encode::Alias` and
+`encoding.pm` do load, and `Encode` consults `Encode::Alias` when a program
+has loaded it.)  The answers `Encode` itself gives differently
 from perl are listed in [`shipped-modules.md`](shipped-modules.md) (`Encode`
 row): the UTF-8 flag (#1389), a read-only source, the croak location (#233),
 the in-place remainder through a raw slot (#3060), and code points above

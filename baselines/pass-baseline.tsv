@@ -579,7 +579,7 @@ study.t	OK	43	0	43
 sub.t	OK	56	2	65
 substr.t	PARTIAL	351	0	397
 time.t	OK	72	0	72
-tr.t	PARTIAL	240	3	317
+tr.t	PARTIAL	241	3	317
 translate.t	OK	257	0	257
 undef.t	OK	31	0	35
 unshift.t	OK	19	0	19
