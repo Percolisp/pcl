@@ -129,6 +129,7 @@ In round 43 (s513e): `split` with a pattern of literal characters (`split ','`, 
 In round 43 (s513e): `s///g` runs its own match loop and builds the result in one string instead of an output stream (#2981, the subste row 0.183 s -> 0.110 s, 3.4x -> 2.0x perl).  Found on the way, filed: `^` under /m matched after a trailing newline at the very end of the string (#2982, pre-existing).
 In round 44 (s513h): every `print` / `say` with one to three items takes a fixed-arity entry and allocates no argument list (#2771, fhprint 0.183 s -> 0.149 s, `print $fh "x\n"` -31 %).
 In round 44 (s513h), found on the way: `local $g` on a package global, and every iteration of `for $g (...)` over one, wrote the variable's cell through SBCL's checked setter, which consults its info database on every write (#3040, localvar -27 %, `for our $x` -38 %).
+In round 45 (s514c): a `package X;` statement inside a sub body redefined its CLOS class every time the sub ran -- the one class site without the readiness guard, and Moo's generated accessors are exactly that shape -- so it now takes the guarded form (#3120, moo-objs 1.70 s -> 0.57 s whole run, its loop -83 %).  Measured under the bar and filed: a char class as one 256-bit table (#3121, json-rt -10 %) and p-map over the storage vector (#3122, mapmulti -9 %).
 
 ## 3. What is NOT cheap
 
