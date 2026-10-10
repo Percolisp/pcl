@@ -804,8 +804,11 @@
    It is kept for what it does deliver: the emitted file no longer writes a
    bare host `defclass` (ir-spec §11b — the IR stays in its own vocabulary),
    and a class re-opened by any future emission path is free instead of
-   expensive.  Do not re-derive the speed claim; it was measured and it is
-   zero.
+   expensive.  CORRECTION (s514c, #3120): the zero was measured on the seven
+   p-defclass sites only; the EIGHTH, Parser2's nested `package X;` switch
+   inside a sub body, still wrote a bare `defclass`, and Moo's Sub::Quote
+   accessors run it on every call -- 12 redefinitions per moo-objs
+   iteration, 77 % of its run.  Routed here, moo-objs 1.70 -> 0.65 s.
 
    WHY THE PARENTS ARE PART OF THE TEST.  A program can name one package twice
    with a DIFFERENT @ISA, so a guard keyed on mere existence would freeze the
@@ -817,7 +820,7 @@
    IDENTITY and its parents; it says nothing about slot definitions, so a
    form carrying them would be silently skipped when only its slots changed
    (rule 12 — a case this cannot answer says so instead of guessing).  pl2cl
-   emits `()` at all seven of its class sites."
+   emits `()` at all eight of its class sites."
   (when slots
     (error "p-defclass: slots are not part of the readiness test: ~S" slots))
   `(eval-when (:compile-toplevel :load-toplevel :execute)
@@ -24711,7 +24714,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-5384"
+(defparameter *pcl-cache-generation* "v2-5484"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

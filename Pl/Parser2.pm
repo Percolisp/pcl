@@ -10767,8 +10767,12 @@ sub _lower_block_1 {
     push @{ $self->{_captured_decls} },
       "(defvar ${sym}::\$a (make-p-box nil))",
       "(defvar ${sym}::\$b (make-p-box nil))";
+    # p-defclass, never a bare defclass: this switch runs EVERY time its sub
+    # does (a Sub::Quote accessor is `package X; sub {...}` -- 12 class
+    # redefinitions per moo-objs iteration, 77 % of its run, s514c #3120);
+    # the readiness test makes a re-opened class free.
     my @enter = (['p-defpackage', $cl_pkg],
-                 ['defclass', "${sym}::" . $fp->_pkg_to_clos_class($pkg),
+                 ['p-defclass', "${sym}::" . $fp->_pkg_to_clos_class($pkg),
                   ['list'], ['list']],
                  ['p-set-current-package', $cl_pkg, "\"$pkg\""]);
     my $restore = ['p-set-current-package', $cl_prev, "\"$prev\""];

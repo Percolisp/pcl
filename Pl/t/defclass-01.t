@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" if ! -x $pl2cl;
 plan skip_all => "sbcl not found"  if ! `which sbcl 2>/dev/null`;
-plan tests => 12;
+plan tests => 14;
 
 # -- A. the macro and its readiness test, in raw CL (one SBCL spawn) --------
 my $LISP = <<'LISP';
@@ -181,4 +181,29 @@ EOF
     my $bare    = () = $cl =~ /\(defclass /g;
     ok($guarded >= 2 && $bare == 0,
        "every emitted class form is a p-defclass (guarded $guarded, bare $bare)");
+}
+
+# -- D. the EIGHTH site (s514c, #3120): a `package X;` switch INSIDE a sub
+# body.  It runs every time the sub does -- Moo's Sub::Quote accessors are
+# exactly `package X; sub {...}`, and the bare `defclass` this site wrote was
+# 12 class redefinitions per moo-objs iteration, 77 % of that row's run.
+# Inverse guard: on the base this emission carries one bare `(defclass`.
+{
+    my $src = <<'EOF';
+package Base1; sub new { bless {}, shift } sub who { "Base1" }
+package main;
+sub f { package Foo; our @ISA = ('Base1'); return __PACKAGE__ . Foo->new->who }
+print f(), "\n" for 1 .. 3;
+my $g = eval 'sub { package Bar; return __PACKAGE__ }' or die $@;
+print $g->(), $g->(), "\n";
+EOF
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $src;
+    close $fh;
+    my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
+    my $bare = () = $cl =~ /\(defclass /g;
+    is($bare, 0, 'a package switch inside a sub body emits p-defclass, never a bare defclass');
+    # perl 5.40.3's output for $src (probed s514c)
+    is(run_pl($src), "FooBase1\nFooBase1\nFooBase1\nBarBar\n",
+       'a sub that re-enters its package every call keeps its class and parents');
 }
