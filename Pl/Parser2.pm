@@ -9564,7 +9564,7 @@ sub _sub_form {
 #                             than a proof-if-present.
 my %SUB_FACT = map { $_ => 1 }
   qw(:returns :wantarray-insensitive :writes-args :string-eval :captures
-     :prototype :needs);
+     :prototype :needs :attributes);
 
 sub _sub_facts {
   my ($self, $sub, $body) = @_;
@@ -9585,6 +9585,10 @@ sub _sub_facts {
   my $ptext = $self->fallback_parser->sub_proto_text($sub);
   push @f, ':prototype', Pl::ExprToCL::cl_string_datum($ptext)
     if defined $ptext;
+  # The attributes it carries (task #3162) -- the same ONE reading.
+  my @attrs = $self->fallback_parser->sub_attr_names($sub);
+  push @f, ':attributes', ['list', map { Pl::ExprToCL::cl_string_datum($_) } @attrs]
+    if @attrs;
   # The obligation classes, from Pl::Manifest's ONE walk applied to the body
   # the caller has just built (no second table, no second scan — rule 11).
   push @f, ':needs', ['list', Pl::Manifest::needs_of_form($body)]

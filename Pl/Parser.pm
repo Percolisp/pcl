@@ -8703,6 +8703,17 @@ sub _sub_head {
 #     whitespace KEPT as perl does, `()` → ''), unless it is a SIGNATURE: with the feature
 #     in force at this statement (#455's boundary) EVERY paren list is one;
 #   * a Structure::Signature, or no parens at all, is no prototype: undef.
+# The ATTRIBUTES a named sub definition carries at run time (task #3162):
+# every `:NAME` / `:NAME(ARGS)` on the statement except a prototype (that one
+# is sub_proto_text's).  The ONE reading both p-sub printers ask for the
+# `:attributes` fact; empty list = no fact.
+sub sub_attr_names {
+  my ($self, $stmt) = @_;
+  return map { $_->content }
+         grep { $_->isa('PPI::Token::Attribute') && $_->content !~ /\Aprototype\(/ }
+         $stmt->schildren;
+}
+
 sub sub_proto_text {
   my ($self, $stmt) = @_;
   my $name = $stmt->name;
@@ -9034,7 +9045,7 @@ sub _process_sub_statement {
   # #1035 step 3, ir-spec 2b.2a): v1 proves none of those facts, so it prints
   # the empty plist -- a consumer reads the slot by position, never by shape --
   # plus the DECLARED `:prototype` text, which the macro registers (#2533).
-  $self->_emit("(p-sub $cl_sub_name ($params_cl)" . _sub_facts_slot($self->sub_proto_text($stmt)));
+  $self->_emit("(p-sub $cl_sub_name ($params_cl)" . _sub_facts_slot($self->sub_proto_text($stmt), [$self->sub_attr_names($stmt)]));
   $self->indent_level($self->indent_level + 1);
 
   # Number of wrapper forms ((let ...)/(let* ...)) opened for a signature sub,
@@ -11717,10 +11728,14 @@ sub _emit_constant {
 # under the IR verification switch, whose ONE reading is Pl::CLForm::ir_plain.
 # $proto: the text from sub_proto_text ('' for a `use constant` sub), or undef.
 sub _sub_facts_slot {
-  my ($proto) = @_;
+  my ($proto, $attrs) = @_;
   return '' if Pl::CLForm::ir_plain();
-  return ' ()' if !defined $proto;
-  return ' (:prototype ' . Pl::ExprToCL::cl_string_datum($proto) . ')';
+  my @f;
+  push @f, ':prototype ' . Pl::ExprToCL::cl_string_datum($proto) if defined $proto;
+  push @f, ':attributes ('
+          . join(' ', map { Pl::ExprToCL::cl_string_datum($_) } @$attrs) . ')'
+    if $attrs && @$attrs;
+  return ' (' . join(' ', @f) . ')';
 }
 
 sub _compile_constant_value {

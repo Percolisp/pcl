@@ -178,7 +178,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   unlink unpack unshift untie until use values vec version-string wantarray warn weaken isweak
   while write formline xor ||
   overloaded overload-strval
-  __pcl_set_prototype
+  __pcl_set_prototype __pcl_set_attributes
 );
 
 # Does `cl_name` map this perl name to a RUNTIME BUILTIN (`p-…`) rather than a

@@ -3352,6 +3352,7 @@ sub handle_subcalls {
     # anonymous `:prototype(…)` attribute's pre-pass wrap calls (task #2533).
     # A paren list where signatures are in force is a signature, not this.
     my $anon_proto;
+    my @anon_attrs;          # :lvalue :method ... (task #3162)
     if ($now->content() eq 'sub') {
       my $drop = 0;
       while ($i + 1 + $drop < scalar(@$e)) {
@@ -3376,6 +3377,8 @@ sub handle_subcalls {
         warn "PCL: attribute `:" . $attr->content . "` on an anonymous sub "
            . "is dropped (see docs/not-supported.md)\n"
           if $attr->content =~ /^prototype\(/;
+        push @anon_attrs, $attr->content
+          if $attr->content !~ /\Aprototype\(/;
         $drop += 2;
       }
       if ($drop) {
@@ -3782,6 +3785,18 @@ sub handle_subcalls {
           # the parser answers with the whole lambda form.
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
           $ref_node->{lambda_form} = $self->_embedded_block($next, 'sub');
+          # Its attributes: recorded where perl records them, at creation
+          # (task #3162) -- the same wrap shape as the prototype below.
+          if (@anon_attrs) {
+            my ($fc_node, $fc_id) = $self->make_node_insert('funcall');
+            $self->add_child_to_node($fc_id,
+              $self->make_node(PPI::Token::Word->new('__pcl_set_attributes')));
+            $self->add_child_to_node($fc_id, $ref_id);
+            (my $q = join(' ', @anon_attrs)) =~ s/([\\'])/\\$1/g;
+            $self->add_child_to_node($fc_id,
+              $self->make_node(PPI::Token::Quote::Single->new("'$q'")));
+            ($ref_node, $ref_id) = ($fc_node, $fc_id);
+          }
           if (defined $anon_proto) {
             my ($fc_node, $fc_id) = $self->make_node_insert('funcall');
             $self->add_child_to_node($fc_id,
@@ -3792,6 +3807,7 @@ sub handle_subcalls {
               $self->make_node(PPI::Token::Quote::Single->new("'$q'")));
             $ref_node = $fc_node;
           }
+
 
           # Replace sub { } with the function reference (4-arg splice preserves comma)
           splice @$e, $i, 2, $ref_node;

@@ -295,7 +295,7 @@
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
    #:p-alias-code-target #:p-alias-hash-slot #:p-alias-array-slot
    #:p-alias-array-elements
-   #:p-backslash #:p-backslash-cast-$ #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-arylen-lvalue-cell #:p-refgen-list #:p-vector-append #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
+   #:p-backslash #:p-backslash-cast-$ #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-arylen-lvalue-cell #:p-refgen-list #:p-vector-append #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype #:p-__pcl_set_attributes
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -1130,7 +1130,7 @@
   ;;                             stack (plan-speed-and-ir-s470 SSB.3)
   (defparameter *p-sub-fact-keys*
     '(:returns :wantarray-insensitive :writes-args :string-eval :captures :prototype
-      :needs))
+      :needs :attributes))
 
   (defun %p-check-facts (what name facts keys)
     "Validate a FACTS plist against its closed KEYS set.  Returns NIL.  ONE
@@ -1268,6 +1268,8 @@
                                  (eq (first (first body)) 'declare))
                       collect (pop body)))
          (proto (getf facts :prototype))
+         (attrs (let ((a (getf facts :attributes)))
+                  (if (and (consp a) (eq (first a) 'list)) (rest a) a)))
          (register (when proto
                      `((%p-register-prototype (symbol-function local-sym) ,proto))))
          (install
@@ -1292,6 +1294,9 @@
                        (p-sub-frame
                         ,@body))))
              ,@register
+             ,@(when attrs
+                 `((%p-apply-sub-attributes (symbol-function local-sym) %%home-pkg
+                                            ',attrs)))
              (%p-note-sub-install local-sym :sub))))
     (if *pcl-fasl-build*
         ;; Building a module fasl: the compile pass reserves the NAME (the
@@ -25145,7 +25150,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-5584"
+(defparameter *pcl-cache-generation* "v2-5684"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -30800,7 +30805,20 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; bsd_glob(3), the engine CORE::glob runs with the csh flags (#3160):
     ;; builtin::bsd_glob(PATTERN, FLAGNAME...) -> (STATUS, MATCH...), STATUS
     ;; 0 or GLOB_ABEND's -2.  lib/File/Glob.pm owns the GLOB_* numbers.
-    (def "BSD_GLOB" #'%p-builtin-bsd-glob)))
+    (def "BSD_GLOB" #'%p-builtin-bsd-glob)
+    ;; Sub attributes (#3162): the BUILT-IN CODE attributes a sub carries,
+    ;; and recording one (a leading - removes it); lib/attributes.pm owns
+    ;; the rest of the protocol.  SET_SUB_ATTRIBUTE answers false for a name
+    ;; that is not a built-in CODE attribute.
+    (def "SUB_ATTRIBUTES"
+        (lambda (code) (coerce (%p-sub-attribute-list code) 'vector)))
+    (def "SUB_STASH"
+        (lambda (code)
+          (let ((fn (%p-code-function code)))
+            (or (and fn (gethash fn %pcl-sub-stash)) *p-undef*))))
+    (def "SET_SUB_ATTRIBUTE"
+        (lambda (code name)
+          (if (%p-record-sub-attribute code name) 1 *p-undef*)))))
 
 ;;; `use builtin LIST` — THE ONE PRAGMA IN THAT FAMILY THAT IMPORTS (#1999
 ;;; residue).  perl aliases each named builtin into the CALLING package, so an
@@ -33063,6 +33081,94 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((fn (%p-register-prototype code proto)))
     (when fn (%p-note-sub-install fn :set-prototype)))
   code)
+
+;;; SUB ATTRIBUTES (task #3162, s514e).  perl answers `attributes::get(\&f)`
+;;; with the BUILT-IN attributes the sub carries (lvalue, method, const) --
+;;; never its prototype -- so the runtime keeps them beside the prototype
+;;; registry, keyed the same way.  A named sub's `:lvalue :method` arrive as
+;;; the p-sub `:attributes` fact; an anonymous sub's as a
+;;; `__pcl_set_attributes(sub {...}, 'lvalue method')` wrap.  An attribute
+;;; that is not built in goes, as in perl, through attributes->import
+;;; (lib/attributes.pm): the home package's MODIFY_CODE_ATTRIBUTES (the
+;;; protocol Attribute::Handlers is built on), or "Invalid CODE attribute".
+;;; Recording `lvalue` does NOT change how the sub was
+;;; compiled: perl makes it an lvalue sub, PCL reads `:lvalue` only at
+;;; compile time (docs/not-supported.md).
+
+(defvar %pcl-sub-attributes (make-hash-table :test #'eq :weakness :key)
+  "Function -> the list of its built-in attribute names, in perl's order.")
+
+(defvar %pcl-sub-stash (make-hash-table :test #'eq :weakness :key)
+  "Function -> the package a sub WITH ATTRIBUTES was defined in: what
+   attributes::_guess_stash answers (perl's CvSTASH), so get() asks THAT
+   package's FETCH_CODE_ATTRIBUTES.  Kept only for attributed subs.")
+
+(defparameter +p-builtin-code-attributes+ '("lvalue" "method" "const")
+  "The CODE attributes perl itself implements, in the order _fetch_attrs
+   reports them.")
+
+(defun %p-sub-attribute-list (code)
+  "The built-in attributes recorded for the sub CODE refers to."
+  (let ((fn (%p-code-function code)))
+    (and fn (gethash fn %pcl-sub-attributes))))
+
+(defun %p-record-sub-attribute (code name)
+  "Record (or with a leading `-` remove) the built-in attribute NAME on CODE.
+   T when NAME is a built-in CODE attribute, NIL otherwise (the caller's
+   `bad` list)."
+  (let* ((name (to-string name))
+         (off (and (plusp (length name)) (char= (char name 0) #\-)))
+         (base (if off (subseq name 1) name))
+         (fn (%p-code-function code)))
+    (when (and fn (member base +p-builtin-code-attributes+ :test #'string=))
+      (let ((have (remove base (gethash fn %pcl-sub-attributes) :test #'string=)))
+        (setf (gethash fn %pcl-sub-attributes)
+              (if off
+                  have
+                  (remove-if-not (lambda (a) (or (string= a base)
+                                                 (member a have :test #'string=)))
+                                 +p-builtin-code-attributes+))))
+      t)))
+
+(defun %p-apply-sub-attributes (fn pkg attrs)
+  "Apply the attribute list ATTRS (strings) of a sub being defined in PKG, as
+   perl does at the definition: the built-in ones are recorded here; when any
+   other remains, perl loads attributes.pm and calls
+   attributes->import(PKG, \\&code, LIST) -- that is where PKG's
+   MODIFY_CODE_ATTRIBUTES is asked and \"Invalid CODE attribute\" dies, and so
+   it is here too (lib/attributes.pm).  Returns FN."
+  (setf (gethash fn %pcl-sub-stash) pkg)
+  (let ((rest (loop for a in attrs
+                    unless (%p-record-sub-attribute fn a) collect a)))
+    (when rest
+      (p-require "attributes")
+      (apply #'p-method-call "attributes" "import" pkg fn rest))
+    fn))
+
+(defun p-__pcl_set_attributes (code attrs)
+  "Perl-side spelling __pcl_set_attributes($code, 'lvalue method'): an
+   ANONYMOUS sub's attributes, applied as perl does when the sub is created
+   (the wrap the anon-sub parse emits).  Returns CODE."
+  (let ((fn (%p-code-function code)))
+    (when fn
+      (%p-apply-sub-attributes
+       fn *pcl-current-package*
+       (%p-split-attribute-list (to-string attrs)))))
+  code)
+
+(defun %p-split-attribute-list (s)
+  "Whitespace-separated attributes, a parenthesised argument kept whole
+   (`Foo(a b) lvalue` is two)."
+  (let ((out nil) (start nil) (depth 0))
+    (loop for i below (length s)
+          for c = (char s i)
+          do (cond ((char= c #\() (incf depth) (unless start (setf start i)))
+                   ((char= c #\)) (decf depth))
+                   ((and (zerop depth) (member c '(#\Space #\Tab #\Newline)))
+                    (when start (push (subseq s start i) out) (setf start nil)))
+                   ((null start) (setf start i))))
+    (when start (push (subseq s start) out))
+    (nreverse out)))
 
 ;;; BEGIN GENERATED core-prototypes (tools/gen-core-protos.pl)
 ;;;
