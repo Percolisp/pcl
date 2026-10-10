@@ -18478,6 +18478,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    VALUE-PRODUCING — every character read through it would be wrong — so it dies
    naming itself (rule 12) rather than quietly decoding as something else, which
    is what PCL did for every encoding before #1115."
+(or (%p-encoding-ef-lookup name)
+    (%p-unsupported-value "open layer"
+                          (format nil ":encoding(~A)" (string-trim " " name))
+                          "SBCL has no codec for it")))
+
+(defun %p-encoding-ef-lookup (name)
+  "THE codec table (rule 11): the external format for perl encoding NAME, or
+   NIL when SBCL has no codec for it.  `:encoding(NAME)` layers ask through
+   %p-encoding-ef (which dies on NIL); Encode's primitives ask here and the
+   shim answers perl's `Unknown encoding` itself (task #2946)."
   (let* ((trimmed (string-trim " " name))
          (key (intern (string-upcase trimmed) :keyword)))
     ;; The two disciplines PCL itself asks about are canonicalised to ONE
@@ -18488,9 +18498,81 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           ((member key '(:latin-1 :latin1 :iso-8859-1 :iso8859-1))
            +p-byte-external-format+)
           ((sb-int:get-external-format key) key)
-          (t (%p-unsupported-value "open layer"
-                                   (format nil ":encoding(~A)" trimmed)
-                                   "SBCL has no codec for it")))))
+          (t nil))))
+
+;;; ---------------------------------------------------------------------------
+;;; ENCODE'S CODEC PRIMITIVES (task #2946, docs/ir-spec.md "string <-> octets")
+;;; ---------------------------------------------------------------------------
+;;; String <-> octets under a named codec, STOPPING at the first failure and
+;;; reporting where it is.  That is all the runtime says: every CHECK mode --
+;;; substitution, PERLQQ, croak, the in-place remainder, strict-vs-lax UTF-8
+;;; -- is perl's Encode POLICY and lives in plain Perl in lib/Encode.pm.  The
+;;; codec is the one %p-encoding-ef-lookup names, so whatever `:encoding(NAME)`
+;;; accepts, Encode accepts.  A REPLACEMENT in the table's format is dropped
+;;; (the CAR is the codec): a codec that substitutes could not report.
+
+(defun %p-codec-keyword (name)
+  "The bare SBCL codec for perl encoding NAME, or NIL."
+  (let ((ef (%p-encoding-ef-lookup (to-string name))))
+    (if (consp ef) (car ef) ef)))
+
+(defun %p-codec-start (start)
+  "A START argument as a non-negative index (undef / absent: 0)."
+  (if (or (null start) (not (%pcl-definedp start)))
+      0
+      (max 0 (truncate (to-number start)))))
+
+(defun %p-octet-vector (s)
+  "S's characters as a byte vector; a character above 255 is perl's fatal
+   `Wide character` (decoding is defined on OCTETS only)."
+  (let ((v (make-array (length s) :element-type '(unsigned-byte 8))))
+    (dotimes (i (length s) v)
+      (let ((c (char-code (char s i))))
+        (when (> c 255) (p-die "Wide character"))
+        (setf (aref v i) c)))))
+
+(defun %p-octets-string (v)
+  "Octet vector V as a string of characters 0-255 (perl's byte form)."
+  (map 'string #'code-char v))
+
+(defun %p-decode-octets (name octets &optional start)
+  "builtin::decode_octets(NAME, OCTETS, START) -> (CHARS, FAIL): OCTETS from
+   byte START decoded up to the first malformed sequence, and the byte index
+   where that sequence starts (undef: none).  Unknown NAME: the empty list."
+  (let ((ef (%p-codec-keyword name)))
+    (if (null ef)
+        nil
+        (let* ((v (%p-octet-vector (to-string octets)))
+               (from (min (%p-codec-start start) (length v))))
+          (handler-case
+              (vector (sb-ext:octets-to-string v :external-format ef :start from)
+                      *p-undef*)
+            (sb-impl::octet-decoding-error (e)
+              (let ((at (slot-value e 'sb-impl::start)))
+                (vector (sb-ext:octets-to-string v :external-format ef
+                                                 :start from :end at)
+                        at))))))))
+
+(defun %p-encode-octets (name string &optional start)
+  "builtin::encode_octets(NAME, STRING, START) -> (OCTETS, FAIL): STRING from
+   character START encoded up to the first character the codec cannot map (as
+   a string of characters 0-255), and that character's index (undef: none).
+   Unknown NAME: the empty list."
+  (let ((ef (%p-codec-keyword name)))
+    (if (null ef)
+        nil
+        (let* ((s (to-string string))
+               (from (min (%p-codec-start start) (length s))))
+          (handler-case
+              (vector (%p-octets-string
+                       (sb-ext:string-to-octets s :external-format ef :start from))
+                      *p-undef*)
+            (sb-int:character-encoding-error (e)
+              (let ((at (slot-value e 'position)))
+                (vector (%p-octets-string
+                         (sb-ext:string-to-octets s :external-format ef
+                                                  :start from :end at))
+                        at))))))))
 
 (defun %p-one-layer-ef (layer)
   "The external format ONE PerlIO layer names, or NIL when it does not decide
@@ -30358,7 +30440,14 @@ buffer's fill-pointer; everything else falls back to file-length."
     (def "HIRES_TIME"  (lambda () (%p-epoch-seconds)))
     (def "HIRES_SLEEP" (lambda (s) (%p-sleep-seconds (max 0 (to-number s)))))
     (def "HIRES_CLOCK" (lambda (id) (%p-clock-seconds (to-number id))))
-    (def "HIRES_CLOCK_RES" (lambda (id) (%p-clock-resolution (to-number id))))))
+    (def "HIRES_CLOCK_RES" (lambda (id) (%p-clock-resolution (to-number id))))
+    ;; Encode's codec primitives (task #2946): string <-> octets through the
+    ;; ONE codec table, stopping at the first failure; lib/Encode.pm owns the
+    ;; rest.  ENCODING_KNOWN is that table's membership question.
+    (def "ENCODE_OCTETS" #'%p-encode-octets)
+    (def "DECODE_OCTETS" #'%p-decode-octets)
+    (def "ENCODING_KNOWN"
+        (lambda (name) (if (%p-codec-keyword name) 1 *p-undef*)))))
 
 ;;; `use builtin LIST` — THE ONE PRAGMA IN THAT FAMILY THAT IMPORTS (#1999
 ;;; residue).  perl aliases each named builtin into the CALLING package, so an

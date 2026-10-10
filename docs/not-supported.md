@@ -103,6 +103,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [NUL bytes (and other control characters) in identifiers](#nul-bytes-and-other-control-characters-in-identifiers)
 * [Unicode case folding and case mapping — DEFERRED, owner #1036](#unicode-case-folding-and-case-mapping--deferred-ruled-s465-owner-1036) — the ~370,000-row class ruled out of scope for v0.2 (regex PROPERTIES left it in s496a)
 * [Unicode properties PCL does not generate](#unicode-properties-pcl-does-not-generate-s496a-task-2060) — `\p{ea=W}` `\p{lb=AL}` `\p{nv=1}` … die with perl's own "Can't find" text
+* [Encode: encodings with no codec, and the out-of-scope sub-modules](#encode-encodings-with-no-codec-and-the-out-of-scope-sub-modules-task-2946) — big5, euc-kr, iso-2022-* … die `Unknown encoding`; Encode::Guess, MIME-Header, Encode::Encoder are absent
 
 ### Regexes
 
@@ -789,6 +790,27 @@ lists again for no program we have seen.  Adding one is a one-line change to
 **Also:** perl rejects a lowercase `is` before a `name=value` form
 (`\p{isgc=punct}`, while `\p{Isgc=Punct}` and `\p{isword}` work); PCL's loose
 matching lowercases first and so ACCEPTS it — valid-input only (principle 9).
+
+## Encode: encodings with no codec, and the out-of-scope sub-modules (task #2946)
+
+`lib/Encode.pm` (s513i) converts through the runtime's codec table — the one
+`:encoding(NAME)` layers use, which is SBCL's set of external formats.  An
+encoding perl's Encode knows and SBCL has no codec for — **big5 (big5-eten,
+big5-hkscs), euc-kr, cp949, cp950, euc-cn / gb2312, hz, johab, iso-2022-jp /
+-kr, cp932, 7bit-jis**, and perl's `*-raw` / Mac* sets beyond MacRoman /
+MacCyrillic — is not decoded as something else (rule 12): `resolve_alias`
+still answers perl's canonical name, `find_encoding` answers undef, and
+`encode` / `decode` die perl's own `Unknown encoding 'big5'`.  A codec SBCL
+adds later is reached by adding its name to the shim's `%INFO`.
+
+Not shipped: **Encode::Guess**, the **MIME-Header / MIME-B / MIME-Q**
+encodings (Encode::MIME::Header), **Encode::Encoder**, and `encoding.pm` (the
+deprecated source-encoding pragma).  `use` of one fails at load ("Can't
+locate" or the XS message).  The answers `Encode` itself gives differently
+from perl are listed in [`shipped-modules.md`](shipped-modules.md) (`Encode`
+row): the UTF-8 flag (#1389), a read-only source, the croak location (#233),
+the in-place remainder through a raw slot (#3060), and code points above
+U+10FFFF (the host's `char-code-limit`).
 
 ## `$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 

@@ -45,7 +45,7 @@ all: they are runtime extensions that load on first call
 
 ## What is in `lib/`
 
-As of 2026-10-10, `lib/` holds 31 modules. Each file's header comment says
+As of 2026-10-10, `lib/` holds 33 modules. Each file's header comment says
 in detail why it exists.
 
 **The real module is XS; this one is plain Perl:**
@@ -60,6 +60,7 @@ in detail why it exists.
 | `MIME::Base64` | the whole encoding in Perl |
 | `Digest::MD5`, `Digest::SHA` | every digest, HMAC and the OO interface, byte-identical to the XS modules (#2947, s514a); written fresh, every 32-bit step masked, SHA-512 kept in 32-bit halves.  About 400x (MD5), 640x (SHA-256) and 2000x (SHA-512) slower than XS on 1 MB (0.47 s / 1.9 s / 4.4 s against 0.001-0.003 s, s514a); `context`, `getstate`/`putstate` and partial-byte `add_bits` die by name (see [`not-supported.md`](not-supported.md)) |
 | `Storable` | perl's own binary format in both directions (#2948, s514a): `freeze`/`nfreeze`/`thaw`/`dclone`/`store`/`nstore`/`retrieve`/`*_fd`/`lock_*`; sharing, cycles, blessed, regexps, tied containers; byte-identical to perl for canonical structures except booleans and upgraded latin-1 strings.  Hooks (`STORABLE_freeze`), CODE and GLOB items die by name (see [`not-supported.md`](not-supported.md)) |
+| `Encode`, `PerlIO::encoding` | `Encode` (task #2946): plain Perl over three runtime primitives -- `builtin::encode_octets` / `decode_octets` (string <-> octets through the codec table `:encoding(NAME)` layers use, stopping at the first failure and returning its position) and `builtin::encoding_known`.  Covered: `encode` `decode` `encode_utf8` `decode_utf8` `from_to` `is_utf8` `_utf8_on` `_utf8_off` `find_encoding` `find_mime_encoding` `clone_encoding` `define_encoding` `resolve_alias` `encodings` `perlio_ok`, the constants and tags, and every CHECK mode (FB_DEFAULT, FB_CROAK, FB_QUIET, FB_WARN, FB_PERLQQ, FB_HTMLCREF, FB_XMLCREF, LEAVE_SRC, STOP_AT_PARTIAL, a CODE ref) with perl's substitution and message rules; strict `UTF-8` (no surrogates, no noncharacters) vs lax `utf8`.  Encodings: whatever SBCL has a codec for -- UTF-8, UTF-16/32 (LE, BE, and the BOM forms, written in the shim), UCS-2, ASCII, ISO-8859-1..16, cp125x, the DOS code pages, KOI8-R/U, MacRoman, Shift_JIS, EUC-JP, GBK.  Perl's own pure-Perl `Encode::Encoding` and `Encode::MIME::Name` are reused.  DIES `Unknown encoding 'NAME'`: big5, euc-kr, cp949, iso-2022-*, the MIME-* encodings (see [`not-supported.md`](not-supported.md)).  NOT perl's: `is_utf8` is 1 for every string (no UTF-8 flag, #1389); a CHECK on a read-only literal does not die; a croak carries no location (#233); the in-place remainder is lost when the caller's variable is a raw slot (#3060); `utf8_upgrade` / `utf8_downgrade` / `is_8bit` / `is_16bit` are listed in `@EXPORT_OK` and, as in perl's Encode 3.x, not defined.  `PerlIO::encoding`: a stub with perl's `$fallback`; the layer itself is the runtime's |
 | `IO` | the XS half of `IO::Handle`; `sync`, `blocking` and `ungetc` die by name, since they need system features PCL does not have |
 | `mro` | C3 method resolution only, which is what PCL's object system always uses (see "`mro` pragma" in [`not-supported.md`](not-supported.md)) |
 | `version` | version parsing in Perl |

@@ -919,6 +919,27 @@ unconditional `1` encodes every number as a JSON string.
 (utf8::pl-is_utf8 "abc")   ; => 1
 ```
 
+**String <-> octets under a named encoding: Encode's codec primitives
+(normative, s513i, task #2946).**  `builtin::decode_octets(NAME, OCTETS,
+START)` and `builtin::encode_octets(NAME, STRING, START)` convert from index
+START through the codec `%p-encoding-ef-lookup` names (the ONE table the
+`:encoding(NAME)` layers use) and STOP at the first failure: each returns the
+list `(RESULT, FAIL)` -- RESULT the converted part, FAIL the index of the first
+malformed byte sequence's START (decode) or of the first character the codec
+cannot map (encode), undef when the end was reached.  Decode's RESULT is
+characters; encode's is the byte form (one character 0-255 per octet); a
+character above 255 in OCTETS dies `Wide character`.  An unknown NAME answers
+the empty list; `builtin::encoding_known(NAME)` is that table's membership
+test.  Every CHECK policy -- substitution, escapes, croak, the in-place
+remainder, strict-vs-lax UTF-8, byte-order marks -- is the Encode shim's.
+SBCL's UTF-8 codec rejects surrogates, overlongs and > U+10FFFF and accepts
+noncharacters; the shim adds strict `UTF-8`'s noncharacter rule and lax
+`utf8`'s surrogates.
+
+```perl
+my ($s, $at) = builtin::decode_octets('UTF-8', "ab\xE9cd", 0);   # ("ab", 2)
+```
+
 **The numeric model (normative, s473a).**  A number in the IR is either a
 host **integer of arbitrary precision** or an IEEE **double**;
 `*read-default-float-format*` is double-float, i.e. every float literal in
