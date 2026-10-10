@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Filing",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514a (Opus, 2026-10-10), found by the lib/Storable.pm probe matrix (pr/st2.pl row \"rx subclass\").\n\nReproducer (scratch/s514a/pr/rxb4.pl), perl 5.40.3 vs PCL main 4d2fc9f0:\n\n    my $sub = bless qr/zz/, \"MyRx\";\n    my @a = ($sub); my $c = $sub; my $r = [$sub]; sub f { ref($_[0]) }\n    print ref($a[0]), \" \", ref($c), \" \", ref($r->[0]), \" \", f($sub), \"\\n\";\n    # perl: MyRx MyRx MyRx MyRx        PCL: Regexp MyRx Regexp Regexp\n\nSo the class rides on the scalar's BOX (`my $c = $sub` keeps it, as the box copy does) and not on the regexp object, and every copy that stores the raw value (array element, argument) drops it.  perl blesses the REGEXP referent; every reference to it sees the class.  Consequence seen: Storable's writer (and any `ref`/`blessed` dispatch on a qr subclass passed as an argument) sees `Regexp`.",
+   "id" : "3082",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a qr// object REBLESSED into another class loses the class when copied into an array or passed to a sub -- `my $s = bless qr/zz/, \"MyRx\"; ref([$s]->[0])` is Regexp in PCL, MyRx in perl (a plain scalar copy keeps it)"
+}

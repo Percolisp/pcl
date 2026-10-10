@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s513i (Opus 5.5, 2026-10-10), pre-existing (identical on main e0b61a99), stderr only.\n\nA `require` of an XS module that PCL cannot load, TRAPPED by an eval, still prints SBCL's load-context lines on stderr:\n\n    eval { require I18N::Langinfo; 1 } or print \"no\\n\";\n    print \"x\\n\";\n    perl: no / x (stderr empty)\n    PCL:  no / x, and on stderr:\n          While evaluating the form starting at line 160, column 0\n            of #P\"/tmp/pcl-nocache-XXXX.lisp\":\n\nThe die is caught (the program goes on correctly); the two lines are SBCL's \"While evaluating the form\" context, written when the module's load is unwound.  Every program that probes an optional XS module this way shows them (ExtUtils::MakeMaker::Locale's _init probes I18N::Langinfo, so `use ExtUtils::MakeMaker` does, and with the Encode shim it now loads -- s513i).  Probe: scratch/s513i/m/u4.pl (worktree agent-abee999f28ae9ef84).\n",
+   "id" : "3062",
+   "status" : "pending",
+   "subject" : "A TRAPPED require of an unloadable XS module (`eval { require I18N::Langinfo }`) still prints SBCL \"While evaluating the form\" context lines on stderr"
+}
