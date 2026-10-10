@@ -3,6 +3,9 @@
 # answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
 # files were blessed as COUNTS only, so #964's failing row sat inside op/sub.t's
 # "12 not ok" for months with nothing naming it.
+# s514e (2026-10-10, Opus) -- op/attrs.t uni/attrs.t op/attrproto.t op/sub_lval.t op/each.t re/subst.t re-spelled with --bless-fails FOR THOSE FILES ONLY
+#   (attributes #3162 and Hash::Util #3163 now load; each file A/B --jobs 1 on a 0d7c7ded extraction vs the tree, scratch/s514e/comp.log);
+#   every row that ENTERED got its cause by hand (scratch/s514e/causes.pl, causes2.pl); 75 rows left, every one passing on the tree.
 # s514b (2026-10-10, Opus) -- 13 rows removed BY EDIT: op/decl-refs.t 151-152 156 163 172-173 177 184 193-194 196 198 205, every one a `my (\...)` retval "is not $::g / pkg var" row (cause #3080: a package-QUALIFIED variable read the same-named lexical);
 #   pass since s514b 116555c4 (op/decl-refs.t run ALONE on a 134ca17f extraction 42/165 and on the tree 55/152, scratch/s514b/movers.log).
 # s507p (2026-10-05, Opus) -- TWO rows removed BY EDIT: io/scalar.t 30 "FETCH only called once" and 25 "reading from magic scalars" (cause #1710);
@@ -325,6 +328,7 @@
 # taken-at: 00577107 2026-09-21 (1 file(s) re-measured)
 # taken-at: s504 2026-10-02 (26 file(s) re-measured)
 # taken-at: 590109b5 2026-10-04 (15 file(s) re-measured)
+# taken-at: b1ce06af 2026-10-10 (6 file(s) re-measured)
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -2160,8 +2164,6 @@ op/attrproto.t	42	ok	not ok	(anon) overridden warning triggered in anonymous sub
 op/attrproto.t	45	ok	not ok	(lexical) bar triggers illegal proto warnings	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	46	ok	not ok	(lexical) baz triggers illegal proto warnings	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	47	ok	not ok	(lexical) overridden warning triggered in anonymous sub	NS:Warnings-gated diagnostics are absent (#221)
-op/attrproto.t	33	ok	not ok	A malformed prototype doesn't reset it	NS:Warnings-gated diagnostics are absent (#221)
-op/attrproto.t	36	ok	not ok	A malformed prototype doesn't reset it	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	14	ok	not ok	Attempting to redeclare triggers Illegal character warning	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	21	ok	not ok	Attempting to redeclare triggers Illegal character warning	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	22	ok	not ok	Attempting to redeclare triggers Illegal character warning	NS:Warnings-gated diagnostics are absent (#221)
@@ -2169,10 +2171,7 @@ op/attrproto.t	24	ok	not ok	Attempting to redeclare triggers prototype mismatch 
 op/attrproto.t	16	ok	not ok	Attempting to redeclare triggers prototype mismatch warning against first prototype	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	9	ok	not ok	First warning is Prototype overridden	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	3	ok	not ok	First warning is bad prototype - bar	NS:Warnings-gated diagnostics are absent (#221)
-op/attrproto.t	2	ok	not ok	MODIFY_CODE_ATTRIBUTES called, but not for prototype(..)	NS:Warnings-gated diagnostics are absent (#221)
-op/attrproto.t	8	ok	not ok	MODIFY_CODE_ATTRIBUTES called, but not for prototype(..)	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	12	ok	not ok	MODIFY_CODE_ATTRIBUTES called, but not for prototype(..)	NS:Warnings-gated diagnostics are absent (#221)
-op/attrproto.t	19	ok	not ok	MODIFY_CODE_ATTRIBUTES called, but not for prototype(..)	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	34	ok	not ok	Malformed prototype croaked	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	37	ok	not ok	Malformed prototype croaked	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	28	ok	not ok	Multiple prototype declarations warns	NS:Warnings-gated diagnostics are absent (#221)
@@ -2183,48 +2182,9 @@ op/attrproto.t	15	ok	not ok	Shifting off Prototype overridden warning	NS:Warning
 op/attrproto.t	23	ok	not ok	Shifting off Prototype overridden warning	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	13	ok	not ok	Shifting off warning for the 'ignored' prototype	NS:Warnings-gated diagnostics are absent (#221)
 op/attrproto.t	5	ok	not ok	Third warning is Prototype overridden	NS:Warnings-gated diagnostics are absent (#221)
-op/attrproto.t	30	ok	not ok	use attributes also sets the prototype	NS:Warnings-gated diagnostics are absent (#221)
 op/attrs.t	0	(none)	renumbered	*summary*	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	134	ok	(missing)	-lvalue attr warning on def sub	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	132	ok	(missing)	:lvalue applied anyway	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	69	ok	not ok [PCL #68]	ARRAY attribute shared	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	76	ok	not ok [PCL #75]	Bogus ARRAY attribute -locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	72	ok	not ok [PCL #71]	Bogus ARRAY attribute -lvalue should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	73	ok	not ok [PCL #72]	Bogus ARRAY attribute -method should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	75	ok	not ok [PCL #74]	Bogus ARRAY attribute -unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	71	ok	not ok [PCL #70]	Bogus ARRAY attribute locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	67	ok	not ok [PCL #66]	Bogus ARRAY attribute lvalue should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	68	ok	not ok [PCL #67]	Bogus ARRAY attribute method should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	70	ok	not ok [PCL #69]	Bogus ARRAY attribute unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	56	ok	not ok [PCL #55]	Bogus CODE attribute -locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	54	ok	not ok [PCL #53]	Bogus CODE attribute -shared should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	55	ok	not ok [PCL #54]	Bogus CODE attribute -unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	51	ok	not ok [PCL #50]	Bogus CODE attribute locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	49	ok	not ok [PCL #48]	Bogus CODE attribute shared should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	50	ok	not ok [PCL #49]	Bogus CODE attribute unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	86	ok	not ok [PCL #85]	Bogus HASH attribute -locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	82	ok	not ok [PCL #81]	Bogus HASH attribute -lvalue should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	83	ok	not ok [PCL #82]	Bogus HASH attribute -method should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	85	ok	not ok [PCL #84]	Bogus HASH attribute -unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	81	ok	not ok [PCL #80]	Bogus HASH attribute locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	77	ok	not ok [PCL #76]	Bogus HASH attribute lvalue should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	78	ok	not ok [PCL #77]	Bogus HASH attribute method should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	80	ok	not ok [PCL #79]	Bogus HASH attribute unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	66	ok	not ok [PCL #65]	Bogus SCALAR attribute -locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	62	ok	not ok [PCL #61]	Bogus SCALAR attribute -lvalue should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	63	ok	not ok [PCL #62]	Bogus SCALAR attribute -method should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	65	ok	not ok [PCL #64]	Bogus SCALAR attribute -unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	61	ok	not ok [PCL #60]	Bogus SCALAR attribute locked should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	57	ok	not ok [PCL #56]	Bogus SCALAR attribute lvalue should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	58	ok	not ok [PCL #57]	Bogus SCALAR attribute method should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	60	ok	not ok [PCL #59]	Bogus SCALAR attribute unique should fail	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	52	ok	not ok [PCL #51]	CODE attribute -lvalue	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	53	ok	not ok [PCL #52]	CODE attribute -method	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	47	ok	not ok [PCL #46]	CODE attribute lvalue	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	48	ok	not ok [PCL #47]	CODE attribute method	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	125	ok	not ok [PCL #124]	Calling closure proto with (no) args	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	126	ok	not ok [PCL #125]	Calling closure proto with no @_ that returns a lexical	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	79	ok	not ok [PCL #78]	HASH attribute shared	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	37	ok	not ok	Multiple builtin attributes can be set at once	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	106	ok	not ok [PCL #105]	Parse error for q{my $eee_yow := [];}	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	96	ok	not ok [PCL #95]	Parse error for q{my $krunch := 4;}	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
@@ -2247,27 +2207,20 @@ op/attrs.t	111	ok	not ok [PCL #110]	Parse error for q{our @PLAK_DAK_THUK_FRIT :=
 op/attrs.t	118	ok	not ok [PCL #117]	Parse error for q{state $crunch := 'Laa Laa';}	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	108	ok	not ok [PCL #107]	Parse error for q{state $octothorn := 'Tinky Winky';}	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	98	ok	not ok [PCL #97]	Parse error for q{state $thump := 'Trumpets';}	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	153	ok	not ok [PCL #139]	RT \#129086 attr(00000	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	155	not ok	ok [PCL #141]	RT \#3605: $a ? my $var : my $othervar is perfectly valid syntax # TODO RT #3605: Attribute syntax causes parsing errors near my $var :	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	154	not ok	ok [PCL #140]	RT \#3605: Errors near attribute colon need a better error message # TODO RT #3605: Attribute syntax causes parsing errors near my $var :	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	59	ok	not ok [PCL #58]	SCALAR attribute shared	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	141	ok	(missing)	Warning for useless const via attributes.pm	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	41	ok	not ok	[]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	42	ok	not ok	[]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	33	ok	not ok	[at t/op/attrs.t line 100]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	35	ok	not ok	[at t/op/attrs.t line 108]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	36	ok	not ok	[at t/op/attrs.t line 113]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	38	ok	not ok	[at t/op/attrs.t line 123]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	39	ok	not ok	[at t/op/attrs.t line 128]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	40	ok	not ok	[at t/op/attrs.t line 134]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	45	ok	not ok	[at t/op/attrs.t line 161]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	46	ok	(missing)	[at t/op/attrs.t line 163]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	46	ok	(missing)	[at t/op/attrs.t line 163]	s514e (#3162): attributes now loads; the row is `eval 'my $$foo : bar = 1'` expecting perl's compile error "Can't declare scalar dereference in \"my\"" -- invalid Perl, principle 9 (PCL does not reject invalid input)
 op/attrs.t	64	ok	not ok [PCL #63]	[at t/op/attrs.t line 189]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	74	ok	not ok [PCL #73]	[at t/op/attrs.t line 189]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	84	ok	not ok [PCL #83]	[at t/op/attrs.t line 189]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	44	ok	not ok	[at t/op/attrs.t line 18]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	89	ok	not ok [PCL #88]	[at t/op/attrs.t line 227]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	90	ok	not ok [PCL #89]	[at t/op/attrs.t line 229]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	91	ok	not ok [PCL #90]	[at t/op/attrs.t line 233]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	92	ok	not ok [PCL #91]	[at t/op/attrs.t line 237]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	93	ok	not ok [PCL #92]	[at t/op/attrs.t line 242]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
@@ -2290,25 +2243,19 @@ op/attrs.t	26	ok	not ok	[at t/op/attrs.t line 73]	NS:Attributes on a variable de
 op/attrs.t	27	ok	not ok	[at t/op/attrs.t line 77]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	28	ok	not ok	[at t/op/attrs.t line 80]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	32	ok	not ok	[at t/op/attrs.t line 97]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	146	ok	(missing)	applying const attr via attributes.pm	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	157	ok	not ok [PCL #143]	attribute on our array with sub of same name	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	158	ok	not ok [PCL #144]	attribute on our hash with sub of same name	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	156	ok	not ok [PCL #142]	attribute on our scalar with sub of same name	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	159	ok	not ok [PCL #145]	attributes in sub-parse	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	1	ok	not ok	attributes.pm can load without warnings.pm already loaded	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	131	ok	not ok [PCL #130]	lvalue attr warning on def sub	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	135	ok	(missing)	lvalue attribute removed anyway	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	136	ok	(missing)	no -lvalue warning on def non-lvalue sub	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	138	ok	(missing)	no -lvalue warnings under no warnings misc	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	133	ok	(missing)	no lvalue warning on def lvalue sub	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	137	ok	(missing)	no lvalue warnings under no warnings misc	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	143	ok	(missing)	no warning for -const with attr already applied	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	144	ok	(missing)	no warning for -const with attr not already applied	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	145	ok	(missing)	no warning for :const applied to closure protosub via attributes.pm	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	142	ok	(missing)	no warning for const if already applied	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	88	ok	not ok [PCL #87]	perl \#49472	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-op/attrs.t	140	ok	not ok [PCL #132]	prototypes are visible in attr handlers	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/attrs.t	127	ok	not ok [PCL #126]	referencing closure prototype	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	134	ok	not ok [PCL #133]	-lvalue attr warning on def sub	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	153	ok	not ok [PCL #152]	RT \#129086 attr(00000	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	155	not ok	ok [PCL #154]	RT \#3605: $a ? my $var : my $othervar is perfectly valid syntax # TODO RT #3605: Attribute syntax causes parsing errors near my $var :	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	154	not ok	ok [PCL #153]	RT \#3605: Errors near attribute colon need a better error message # TODO RT #3605: Attribute syntax causes parsing errors near my $var :	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	141	ok	not ok [PCL #140]	Warning for useless const via attributes.pm	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	146	ok	not ok [PCL #145]	applying const attr via attributes.pm	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	157	ok	not ok [PCL #156]	attribute on our array with sub of same name	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	158	ok	not ok [PCL #157]	attribute on our hash with sub of same name	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	156	ok	not ok [PCL #155]	attribute on our scalar with sub of same name	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
+op/attrs.t	159	ok	not ok [PCL #158]	attributes in sub-parse	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 op/avhv.t	39	ok	not ok	[at t/op/avhv.t line 29]	NS:Error message text and format -- `Not a HASH reference`
 op/bless.t	118	not ok	(missing)	RT \#3306: DESTROY should be called on CODE ref # TODO RT #3306	NS:`DESTROY` called by garbage collector
 op/bless.t	117	ok	not ok	RT \#3306: DESTROY should be called on CODE ref (works on closures)	NS:`DESTROY` called by garbage collector
@@ -3838,37 +3785,24 @@ op/die_unwind.t	4	ok	not ok	true value assigned to $@ before 'end' block inside 
 op/dor.t	23	ok	not ok	-f // ... compiles	NS:Error compatibility for invalid Perl input -- the rows eval text that perl rejects at compile time ("Search pattern not terminated"), and `-f // ...` is the filetest-vs-empty-pattern ambiguity perl resolves in the lexer
 op/dor.t	26	ok	not ok	Caught unterminated search pattern error message: empty subroutine	NS:Error compatibility for invalid Perl input -- the rows eval text that perl rejects at compile time ("Search pattern not terminated"), and `-f // ...` is the filetest-vs-empty-pattern ambiguity perl resolves in the lexer
 op/dor.t	28	ok	not ok	Caught unterminated search pattern error message: sub with built-in function	NS:Error compatibility for invalid Perl input -- the rows eval text that perl rejects at compile time ("Search pattern not terminated"), and `-f // ...` is the filetest-vs-empty-pattern ambiguity perl resolves in the lexer
-op/each.t	22	ok	(missing)	#22	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	24	ok	(missing)	#24	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
 op/each.t	0	(none)	renumbered	*summary*
-op/each.t	28	ok	(missing)	Check length of "\022"	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	26	ok	(missing)	Check length of "\x{10fffd}"	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	29	ok	(missing)	Check length of "\x{12345}"	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	27	ok	(missing)	Check length of "\x{1234}"	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	25	ok	(missing)	Check length of "\x{123}"	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	23	ok	(missing)	DESTROY called	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	58	ok	not ok [PCL #38]	Hash iterator reset warnings fires when expected	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row needs the `Use of each() on hash after insertion` warning
-op/each.t	36	ok	not ok [PCL #16]	U+00B6        -> 1	NS:Unicode semantics differences -- measured s473t6d: the U+00B6 key collides with its byte twin
-op/each.t	38	ok	not ok [PCL #18]	U+0100        -> 3	NS:Unicode semantics differences -- measured s473t6d: the U+0100 key collides with its byte twin
-op/each.t	18	ok	(missing)	assign to keys does not shrink hash bucket array	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	20	ok	(missing)	assign to keys will grow hash bucket array	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	21	ok	(missing)	but still 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	40	ok	not ok [PCL #20]	each demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
-op/each.t	64	ok	not ok [PCL #44]	each in list assignment	#1964 -- measured s473t6d (probes/p9.pl): the row REPRODUCES PERL IN ISOLATION (`\$h2{f} = \$a; ($a,$b) = each %h2` gives `f 7` in PCL as in perl), so this is DOWNSTREAM STATE of the file and is NOT isolated further (the s473t6a rule)
-op/each.t	35	ok	not ok [PCL #15]	four different Unicode keys	NS:Unicode semantics differences -- measured s473t6d: four keys that differ only above Latin-1 collapse to two -- hash keys are compared as CHARACTERS where perl compares the utf8 BYTES
-op/each.t	13	ok	(missing)	keys (%hash)	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	41	ok	not ok [PCL #21]	keys demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
-op/each.t	16	ok	(missing)	now 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	14	ok	(missing)	sanity check - more buckets than keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	56	ok	not ok [PCL #36]	single key now freed	NS:`DESTROY` called by garbage collector -- measured s473t6d: the row asserts the freed key's value was finalized
-op/each.t	15	ok	(missing)	size doesn't change when hash is emptied	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	17	ok	(missing)	size doesn't change with 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	19	ok	(missing)	still 3 keys	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	11	ok	(missing)	test iterator of each is being maintained	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	10	ok	(missing)	test scalar keys resets iterator	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	12	ok	(missing)	test values keys resets iterator	NS:DynaLoader / XS binary extensions -- measured s473t6b: the file aborts ONE top-level form with "Can't locate loadable object for module this module in @INC" (its Hash::Util bucket block), and these rows are inside it; see also NS:`Hash::Util` bucket statistics
-op/each.t	42	ok	not ok [PCL #22]	values demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
-op/each.t	65	ok	not ok [PCL #45]	values in list assignment	#1964 -- measured s473t6d (probes/p9.pl): the `values` twin also reproduces perl in isolation; downstream state, NOT isolated further
+op/each.t	29	ok	(missing)	Check length of "\x{10fffd}"	s514e (#3163): no longer behind the `use Hash::Util` abort (the shim loads); NOT isolated -- the description is built from a hash KEY (_qq of U+10FFFD), and that one key's row does not pair
+op/each.t	58	ok	not ok	Hash iterator reset warnings fires when expected	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row needs the `Use of each() on hash after insertion` warning
+op/each.t	36	ok	not ok	U+00B6        -> 1	NS:Unicode semantics differences -- measured s473t6d: the U+00B6 key collides with its byte twin
+op/each.t	38	ok	not ok	U+0100        -> 3	NS:Unicode semantics differences -- measured s473t6d: the U+0100 key collides with its byte twin
+op/each.t	18	ok	not ok	assign to keys does not shrink hash bucket array	NS:Hash::Util: perl's hash internals -- s514e (#3163): the file now runs past `use Hash::Util`; the row asserts perl's bucket-array size, which PCL's SBCL hash tables do not have (num_buckets / bucket_ratio answer placeholders)
+op/each.t	20	ok	not ok	assign to keys will grow hash bucket array	NS:Hash::Util: perl's hash internals -- s514e (#3163): the file now runs past `use Hash::Util`; the row asserts perl's bucket-array size, which PCL's SBCL hash tables do not have (num_buckets / bucket_ratio answer placeholders)
+op/each.t	40	ok	not ok	each demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
+op/each.t	64	ok	not ok	each in list assignment	#1964 -- measured s473t6d (probes/p9.pl): the row REPRODUCES PERL IN ISOLATION (`\$h2{f} = \$a; ($a,$b) = each %h2` gives `f 7` in PCL as in perl), so this is DOWNSTREAM STATE of the file and is NOT isolated further (the s473t6a rule)
+op/each.t	35	ok	not ok	four different Unicode keys	NS:Unicode semantics differences -- measured s473t6d: four keys that differ only above Latin-1 collapse to two -- hash keys are compared as CHARACTERS where perl compares the utf8 BYTES
+op/each.t	41	ok	not ok	keys demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
+op/each.t	5	ok	not ok	resize	NS:Hash::Util: perl's hash internals -- s514e (#3163): the file now runs past `use Hash::Util`; the row asserts perl's bucket-array size, which PCL's SBCL hash tables do not have (num_buckets / bucket_ratio answer placeholders)
+op/each.t	56	ok	not ok	single key now freed	NS:`DESTROY` called by garbage collector -- measured s473t6d: the row asserts the freed key's value was finalized
+op/each.t	15	ok	not ok	size doesn't change when hash is emptied	NS:Hash::Util: perl's hash internals -- s514e (#3163): the file now runs past `use Hash::Util`; the row asserts perl's bucket-array size, which PCL's SBCL hash tables do not have (num_buckets / bucket_ratio answer placeholders)
+op/each.t	17	ok	not ok	size doesn't change with 3 keys	NS:Hash::Util: perl's hash internals -- s514e (#3163): the file now runs past `use Hash::Util`; the row asserts perl's bucket-array size, which PCL's SBCL hash tables do not have (num_buckets / bucket_ratio answer placeholders)
+op/each.t	7	ok	not ok	still same size	NS:Hash::Util: perl's hash internals -- s514e (#3163): the file now runs past `use Hash::Util`; the row asserts perl's bucket-array size, which PCL's SBCL hash tables do not have (num_buckets / bucket_ratio answer placeholders)
+op/each.t	42	ok	not ok	values demands argument	NS:Error message text and format -- perl says "Not enough arguments for each" at compile time; probed s473t6b: PCL raises its own "invalid number of arguments: 0" at RUN time, so the text does not match
+op/each.t	65	ok	not ok	values in list assignment	#1964 -- measured s473t6d (probes/p9.pl): the `values` twin also reproduces perl in isolation; downstream state, NOT isolated further
 op/eval.t	143	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 0 blocks BEGIN blocks entirely	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	146	ok	not ok	${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 2 blocked three nested BEGIN blocks	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
 op/eval.t	145	ok	not ok	BEGIN really did nothing	NS:`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`
@@ -5571,7 +5505,6 @@ op/sub_lval.t	8	ok	not ok	[at t/op/sub_lval.t line 61]	NS:Lvalue subroutines -- 
 op/sub_lval.t	91	ok	not ok	[at t/op/sub_lval.t line 659]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
 op/sub_lval.t	9	ok	not ok	[at t/op/sub_lval.t line 65]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
 op/sub_lval.t	95	ok	not ok	[at t/op/sub_lval.t line 673]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
-op/sub_lval.t	97	ok	(missing)	[at t/op/sub_lval.t line 679]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
 op/sub_lval.t	98	ok	(missing)	[at t/op/sub_lval.t line 682]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
 op/sub_lval.t	99	ok	(missing)	[at t/op/sub_lval.t line 685]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
 op/sub_lval.t	100	ok	(missing)	[at t/op/sub_lval.t line 688]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
@@ -5681,6 +5614,10 @@ op/sub_lval.t	205	ok	(missing)	writing to array returned by if	NS:Lvalue subrout
 op/sub_lval.t	203	ok	(missing)	writing to array returned by if (with else)	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
 op/sub_lval.t	207	ok	(missing)	writing to array returned by unless	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
 op/sub_lval.t	93	ok	not ok	yada	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
+op/sub_lval.t	35	ok	not ok	[at t/op/sub_lval.t line 266]	#3164 -- s514e: perl rows 34-36 were PAIRED BY NUMBER with PCL's three `ok N # skip no attributes.pm` rows (sub_lval.t 830-866; PCL's numbering runs behind perl's after 9 aborted forms); with the attributes shim those rows RUN and fail (compile-time lvalue warnings #221; `sub NAME :lvalue;` on an existing sub #3164), so the accidental pairing is gone
+op/sub_lval.t	97	ok	not ok	[at t/op/sub_lval.t line 679]	NS:Lvalue subroutines -- user-defined `: lvalue` subs are not implemented (#930, DEFERRED by the USER s464)
+op/sub_lval.t	36	ok	not ok	explicitly returning undef in scalar context	#3164 -- s514e: perl rows 34-36 were PAIRED BY NUMBER with PCL's three `ok N # skip no attributes.pm` rows (sub_lval.t 830-866; PCL's numbering runs behind perl's after 9 aborted forms); with the attributes shim those rows RUN and fail (compile-time lvalue warnings #221; `sub NAME :lvalue;` on an existing sub #3164), so the accidental pairing is gone
+op/sub_lval.t	34	ok	not ok	list assignment to empty lvalue sub	#3164 -- s514e: perl rows 34-36 were PAIRED BY NUMBER with PCL's three `ok N # skip no attributes.pm` rows (sub_lval.t 830-866; PCL's numbering runs behind perl's after 9 aborted forms); with the attributes shim those rows RUN and fail (compile-time lvalue warnings #221; `sub NAME :lvalue;` on an existing sub #3164), so the accidental pairing is gone
 op/substr.t	390	ok	(missing)	(perl \#129340) substr() with source in target	NS:Lvalue subroutines [DEFERRED] (task #930) -- measured s473t6b, the file aborts TWO top-level forms: `bar = "XXX"` at substr.t:697 and `ta_tindex() = 23` at :899, both "Can't modify non-lvalue subroutine call in assignment".  Rows 355-400 are inside them and are never produced; the rows just above (`scalar does not affect lvalueness of substr` and its neighbours) are the same lvalue family asserted from outside the aborted form
 op/substr.t	383	ok	(missing)	4-arg substr calls overloading once on the target	NS:Lvalue subroutines [DEFERRED] (task #930) -- measured s473t6b, the file aborts TWO top-level forms: `bar = "XXX"` at substr.t:697 and `ta_tindex() = 23` at :899, both "Can't modify non-lvalue subroutine call in assignment".  Rows 355-400 are inside them and are never produced; the rows just above (`scalar does not affect lvalueness of substr` and its neighbours) are the same lvalue family asserted from outside the aborted form
 op/substr.t	382	ok	(missing)	4-arg substr with target UTF8ness turning off when stringified	NS:Lvalue subroutines [DEFERRED] (task #930) -- measured s473t6b, the file aborts TWO top-level forms: `bar = "XXX"` at substr.t:697 and `ta_tindex() = 23` at :899, both "Can't modify non-lvalue subroutine call in assignment".  Rows 355-400 are inside them and are never produced; the rows just above (`scalar does not affect lvalueness of substr` and its neighbours) are the same lvalue family asserted from outside the aborted form
@@ -9033,12 +8970,11 @@ re/subst.t	227	ok	not ok [PCL #222]	logop in s/// repl does not result in "const
 re/subst.t	228	ok	not ok [PCL #223]	s/pat/$alias_to_match_var/	#1719
 re/subst.t	229	ok	not ok [PCL #224]	s/pat/foo$alias_to_match_var/	#1719
 re/subst.t	230	ok	not ok [PCL #225]	last-used pattern disables constant repl optimisation	#1719
-re/subst.t	234	ok	(missing)	locking target in $hash{key} =~ s//.../e	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
-re/subst.t	235	ok	(missing)	err msg: Modification of a read-only value attempted at t/re/subst.t line 993.	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
-re/subst.t	236	ok	not ok [PCL #229]	vivifying stash elem in $that::{elem} =~ s//.../e	#1719
-re/subst.t	237	ok	not ok [PCL #230]	read-only COW =~ s/does not match// should croak	#1719
-re/subst.t	245	ok	not ok [PCL #238]	\b matches Latin1 before string, mid, and end, /d	#1719
-re/subst.t	270	ok	not ok [PCL #263]	\#RT 126260 gofs	#1719
+re/subst.t	270	ok	not ok [PCL #265]	\#RT 126260 gofs	#1719
+re/subst.t	245	ok	not ok [PCL #240]	\b matches Latin1 before string, mid, and end, /d	#1719
+re/subst.t	235	ok	not ok [PCL #230]	err msg: Modification of a read-only value attempted at t/re/subst.t line 993.	#1664 (perl's constant.pm stash-slot constant sub `_CAN_PCS`)
+re/subst.t	237	ok	not ok [PCL #232]	read-only COW =~ s/does not match// should croak	#1719
+re/subst.t	236	ok	not ok [PCL #231]	vivifying stash elem in $that::{elem} =~ s//.../e	#1719
 re/subst_amp.t	2	ok	not ok	[at t/re/subst_amp.t line 22]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
 re/subst_amp.t	3	ok	not ok	[at t/re/subst_amp.t line 28]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
 re/subst_amp.t	4	ok	not ok	[at t/re/subst_amp.t line 34]	#1664 (via re/subst.t: `constant::_CAN_PCS`)
@@ -9131,7 +9067,6 @@ uni/attrs.t	23	ok	not ok	PVBMs don't segfault attributes::get	NS:Attributes on a
 uni/attrs.t	17	ok	not ok	[]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	18	ok	not ok	[]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	21	ok	not ok	[at t/uni/attrs.t line 101]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-uni/attrs.t	25	ok	not ok	[at t/uni/attrs.t line 132]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	26	ok	not ok	[at t/uni/attrs.t line 134]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	27	ok	not ok	[at t/uni/attrs.t line 138]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	28	ok	not ok	[at t/uni/attrs.t line 142]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
@@ -9150,7 +9085,6 @@ uni/attrs.t	10	ok	not ok	[at t/uni/attrs.t line 50]	NS:Attributes on a variable 
 uni/attrs.t	11	ok	not ok	[at t/uni/attrs.t line 54]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	12	ok	not ok	[at t/uni/attrs.t line 57]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	16	ok	not ok	[at t/uni/attrs.t line 74]	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
-uni/attrs.t	1	ok	not ok	attributes.pm can load without warnings.pm already loaded	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/attrs.t	24	ok	not ok	perl \#49472	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322)
 uni/bless.t	81	ok	not ok	[at t/uni/bless.t line 86]	#1748
 uni/caller.t	0	(none)	extra [PCL #3]	*extra* anonymous subroutine name	#1742

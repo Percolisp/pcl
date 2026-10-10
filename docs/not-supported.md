@@ -4257,3 +4257,38 @@ things stay different from perl:
   `POSIX::_exit`, a program that always leaves inside BEGIN, or one that holds
   more than half the heap at exit starts from its text every time — correct,
   only slower to start.  Owner: #2702.
+
+## attributes: lvalue set at run time, and variable attributes (task #3162)
+
+`use attributes __PACKAGE__, \&f, "lvalue"` (and `"-lvalue"`) at RUN time is
+recorded, so `attributes::get(\&f)` answers it, but the sub keeps the shape it
+was compiled with: PCL decides lvalue-ness when it COMPILES a sub (`:lvalue` on
+the definition), perl flips a flag on the live sub.  The shim says so on
+stderr each time (`PCL: attribute `lvalue' set at run time ...`).
+`attributes::_guess_stash` knows the defining package only of a sub that
+carries an attribute; for any other, `get` asks the CALLER's
+`FETCH_CODE_ATTRIBUTES` where perl asks the defining package's.
+Attributes on a variable declaration are the older entry above
+("Attributes on a variable declaration").  Owner: #3162.
+
+## Hash::Util: perl's hash internals (task #3163)
+
+`bucket_ratio`, `num_buckets`, `used_buckets`, `bucket_info`, `bucket_array`,
+`bucket_stats`, `bucket_stats_formatted`, `hash_seed`, `hash_value` and
+`hash_traversal_mask` describe perl's own hash implementation (bucket array,
+seed, traversal randomisation).  PCL's hashes are SBCL hash tables with none of
+these, so each answers a placeholder (`bucket_ratio` a plausible "used/total",
+the rest empty or zero) and announces itself on stderr once.  t/op/hash.t's
+bucket rows measure exactly this and stay red (XDIFF class).  A restricted
+hash is a hidden tie (docs/shipped-modules.md), so a program that `tie`s or
+`untie`s a hash it also restricted sees the shim's class underneath.
+Owner: #3163.
+
+## Compress::Raw::Zlib (zlib) has no PCL build (task #3161)
+
+Compress::Raw::Zlib is XS -- zlib itself -- so `Compress::Zlib`,
+`IO::Compress::Gzip`, `IO::Uncompress::Gunzip`, `IO::Zlib` and Archive::Tar's
+compressed archives cannot load; `use Compress::Zlib` dies in one line,
+"Can't locate Compress/Raw/Zlib.pm in @INC (the module is XS and has no PCL
+build ...)".  The routes (a pure-Perl inflate/deflate shim, libz through
+sb-alien, pclxs) are weighed in #3161.

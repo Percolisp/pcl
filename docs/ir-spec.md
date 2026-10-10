@@ -941,6 +941,36 @@ unconditional `1` encodes every number as a JSON string.
 (utf8::pl-is_utf8 "abc")   ; => 1
 ```
 
+**The glob engine (normative, s514e, task #3160).**  CORE::glob and `<PAT>`
+are perl's csh_glob: the pattern is a whitespace-separated LIST, each word
+expanded by bsd_glob(3) with the flags BRACE NOMAGIC QUOTE TILDE ALPHASORT --
+`{a,b}` expands in brace order (a lone `{}` is literal; an unbalanced `{`
+globs only the text before it), `\x` is the literal x, a leading `~`/`~user`
+is a home directory, a word with no unprotected `* ? [` that matches nothing
+is returned as itself, a name starting with `.` (including `.` and `..`) is
+matched only by a literal leading dot, and each word's matches sort
+case-insensitively (ties in plain order).  `builtin::bsd_glob(PATTERN,
+"flag,flag")` is the same engine with explicit flags (brace nocase mark
+nocheck nomagic quote tilde nosort alphasort err, plus `words` for the csh
+word split) and returns `(STATUS, MATCH...)`, STATUS 0 or -2 (GLOB_ABEND,
+`err` stopped at an unreadable directory); an unknown flag name dies.  NOCASE
+applies only to a component holding a wildcard.  An IMPORTED `glob` overrides
+both `glob(...)` and `<PAT>`.  Example: `glob("{b,a}.txt")` with both files
+present → `("b.txt" "a.txt")`.
+
+**A restricted hash is a hidden tie (normative, s514e, task #3163).**  A tie
+record carries a HIDDEN flag (`builtin::hide_tie(\%h)`); `tied` answers undef
+for a hidden tie and `builtin::hidden_tie_object(\%h)` answers its object (undef
+for every other container).  Hash::Util's restriction is such a tie of its own
+class, so the element fast paths need no lock test: a tied hash is an empty
+shell, and the tie is consulted only in their miss branch.  Example: after
+`lock_keys(%h)`, `tied %h` is undef and `$h{nope} = 1` dies
+`Attempt to access disallowed key 'nope' in a restricted hash`.
+
+**A dereference fills a reference prototype slot (normative, s514e).**  Under a
+`\@` / `\%` prototype slot, `f(@$r)` / `f(%{EXPR})` pass the reference
+`\@$r` / `\%{EXPR}`, exactly as a named `@a` / `%h` passes `\@a` / `\%h`.
+
 **String <-> octets under a named encoding: Encode's codec primitives
 (normative, s513i, task #2946).**  `builtin::decode_octets(NAME, OCTETS,
 START)` and `builtin::encode_octets(NAME, STRING, START)` convert from index
@@ -1957,6 +1987,7 @@ Three sites read that same rule, and each was a silent wrong before it:
 ```
 
 registers the function (visible to compile-time `BEGIN` code — the whole
+| `:attributes` | a list of strings (`("lvalue" "method")`) | every attribute on a named sub's definition except a prototype (normative, s514e / #3162).  **Run-time meaning:** the `p-sub` expansion calls `(%p-apply-sub-attributes FN PKG ATTRS)` after installing the function: the built-in ones (`lvalue` `method` `const`) are recorded in the sub-attribute registry beside the prototype registry (what `attributes::get` reads, never the prototype); any other is handed, as perl does, to `attributes->import(PKG, \&f, LIST)` -- PKG's `MODIFY_CODE_ATTRIBUTES`, else `Invalid CODE attribute: NAME`.  An anonymous `sub :lvalue {…}` reaches the same function through a `__pcl_set_attributes(sub {…}, 'lvalue')` call around its lambda.  Recording `lvalue` changes nothing about the lowering: lvalue-ness is a compile-time fact.  Example: `sub lv :lvalue { $x }` → `(p-sub pl-lv (&rest %_args) (… :attributes ("lvalue") …) …)` |
 form is inside `eval-when`) and wraps the body so that at **every call**:
 1. the caller's package and sub-name are pushed on stacks (for
    `caller()`),

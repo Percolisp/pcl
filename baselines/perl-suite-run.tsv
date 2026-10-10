@@ -1836,8 +1836,8 @@ op/arith2.t	9	0	9	0	OK		0
 op/array.t	195	0	171	24	DIFF	s471a: 170/25 -> 171/24 = #1273 -- `eval '$a[-1] = 0'` now dies perl's `Modification of non-creatable array value attempted, subscript -1` (%p-non-creatable-index), so test 82's `like $@` matches.  ONE row, measured --jobs 1 and re-run ALONE by the #366 serial pass (both 171/24); the row left baselines/perl-suite-fails.tsv by EDIT.  s457ai boxed-aggregates phase 3: p-exists-array stopped reading "is a box" as "exists" -- test 127 (&PL_sv_undef elem) passes honestly and left the skip registry	0
 op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.	0
 op/attrhand.t	4	0	0	0	DIFF	aborted-forms:1: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle	0
-op/attrproto.t	48	0	18	30	DIFF	s500a: #2533 -- row 27 "Last prototype declared wins" UP, A/B --jobs 1 vs 1bae682b (17/31 -> 18/30)	0
-op/attrs.t	157	2	37	108	DIFF	aborted-forms:2: The function attributes::pl-_guess_stash is undefined.	0
+op/attrproto.t	48	0	24	24	DIFF	s514e #3162: 18/30 -> 24/24 (attributes->import sets the prototype; MODIFY_CODE_ATTRIBUTES dispatch) | s500a: #2533 -- row 27 "Last prototype declared wins" UP, A/B --jobs 1 vs 1bae682b (17/31 -> 18/30)	0
+op/attrs.t	157	2	88	70	DIFF	s514e #3162: 37/108 -> 88/70 (attributes loads; the _guess_stash abort is gone)	0
 op/auto.t	47	0	47	0	OK		0
 op/avhv.t	40	0	39	1	DIFF		0
 op/bless.t	116	2	111	6	DIFF		0
@@ -1875,7 +1875,7 @@ op/die_unwind.t	13	0	8	5	DIFF		0
 op/do.t	71	0	66	7	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §DESTROY called by garbage collector — ALL 7 failing rows (66/7 vs perl 71/0) are two blessed categories, established row-by-row s321 after the TAP re-alignment (task #177) showed the old number-join had blamed two rows that PASS. (a) perl t63-t66 + PCL's 2 EXTRA rows: one `foreach my $mode (qw(subname("arg") subname() $subref("arg") $subref()))` loop asserting `$@ =~ /\Asyntax error/`. `do SUBNAME(LIST)` was VALID Perl before 5.20 and meant call-the-sub; PCL keeps that historical semantics, so the assertions fail AND each test's `fail()` guard fires (those are the 2 PCL-only rows — the same divergence, not a second defect). Ruled no-fix in fable-answers-s318.md §4, task #158 :principle9. (b) perl t68 "RT 124248": `f(do { 1; !!(my $x = bless []) })` requires the blessed temp to be DESTROYed at do-block exit (FREETMPS) before f() runs — refcount-deterministic destruction, which PCL does not have; same family as op/args.t t23. NB t67 (delete-helem copied) and t70 ($@ false on do dir) PASS — probed s321 — and t71 ($! is EISDIR on do dir) was FIXED s321 (p-do now carries the OS errno into $!).	0
 op/dor.t	34	0	31	3	DIFF		0
 op/dump.t	0	0	0	0	NOTAP		0
-op/each.t	65	0	37	10	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: Can't locate loadable object for module this module in @INC	0
+op/each.t	65	0	48	16	DIFF	s514e #3163: 37/10 -> 48/16 (use Hash::Util loads; the bucket-size rows fail on hash internals) | s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 op/each_array.t	65	0	65	0	OK		0
 op/eval.t	169	0	136	32	DIFF	s510c #2800 (eval STRING binds its own context: the two VOID rows): 134/34 -> 136/32 | s501t #155: 133/35 -> 134/34 (eval and last: the row's TAP no longer carries the ARRAY-tie announcement) | s473h: 131/37 -> 133/35, the two rows are t/op/eval.t:75-76 (`my @b = eval @a; is("@b",'4'); is($@,'')`) -- `eval EXPR` imposes SCALAR context on its operand (task #1249(4)); the old undef-fn:main::pl-ARRAY signature WAS this bug, PCL stringifying the raw vector as ARRAY(0x..)	0
 op/evalbytes.t	9	0	7	2	DIFF	s473f: 5/4 -> 7/2 -- #1074 gives a handle its class, and this file's two utf8-in-evalbytes rows depend on it (serial re-run; io/open.t, op/method.t, op/readdir.t, op/universal.t moved in the same run and are spliced with it)	0
@@ -1904,7 +1904,7 @@ op/groups.t	4	0	4	0	OK		0
 op/gv.t	304	0	91	94	TIMEOUT	s507: 90/95 -> 91/94 at 618db500 = s501t #155 (row 90 "tied elem assignment preserves globs" passes); each tree run ALONE: e5d72352 90/95, 618db500 91/94, main 2e71d4aa 91/94 (~/pcl-agent-scratch/s507/attrib/run3.out).  The hang is still #1651 | #1651 -- THE HANG IS ATTRIBUTED: 135/56 DIFF -> TIMEOUT 67/24 at 0ea8d7e1 (s473h member 7, #1249(7)), measured 135/56 at e66761f4 and TIMEOUT 67/24 at 0ea8d7e1 with the two commits between them DOCS ONLY; TIMEOUT again at --timeout 400 (669 s wall), so it is a hang, not the clock.  Emission byte-identical across the commit, so the move is at RUN time.  The last FLUSHED TAP row is 93 (gv.t:312) and the `runperl` child at gv.t:321 is NOT it (0 s standalone under ./runpcl and 1 s through a backtick + pclperl-for-tests), but #1850 -- PCL ignores `$|`, which perl's t/test.pl sets at its line 22 -- means a killed run loses up to one buffer, so the hang is at or AFTER gv.t:312 | timeout; s490 review of s473t6b (#1850): the harness's TAP is on disk row by row, so a file the runner KILLS keeps every row that ran, not only the rows that had flushed -- TIMEOUT 67/24 -> TIMEOUT 90/95, parallel and serial agreeing; the hang itself is still #1651's, and the 71 newly VISIBLE failing rows always failed	0
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
-op/hash.t	494	0	10	5	DIFF	s501t #155: 8/7 -> 10/5 (rows 3-4: a tied hash FETCH sees ref / undef keys AS GIVEN) | aborted-forms:1: Can't locate loadable object for module this module in @INC	0
+op/hash.t	494	0	467	27	DIFF	s514e #3163: 10/5 -> 467/27 (require Hash::Util loads; the torture_hash form runs; the 27 are bucket internals, XDIFF-class) | s501t #155: 8/7 -> 10/5 (rows 3-4: a tied hash FETCH sees ref / undef keys AS GIVEN)	0
 op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).	0
 op/hashwarn.t	20	0	5	15	DIFF		0
 op/heredoc.t	138	0	52	86	DIFF		0
@@ -2007,7 +2007,7 @@ op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') 
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	57	8	DIFF	s501t #155: 55/10 -> 57/8 (RT124156 plain / depth) | s484b (#1117): 54/11 -> 55/10, ONE row FIXED ("goto &xsub when @_ does not exist") -- `undef *_` now leaves the ARRAY slot ABSENT, so *_{ARRAY} is undef as perl says; `--jobs 1` before/after on an a217cb49 extraction, and the #366 serial re-run agrees (parallel 55/10, serial 55/10)	0
-op/sub_lval.t	211	0	33	64	DIFF	aborted-forms:9: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
+op/sub_lval.t	211	0	30	67	DIFF	s514e #3162: 33/64 -> 30/67 -- three `skip no attributes.pm` rows that paired with perl 34-36 BY NUMBER now run and fail honestly (#3164, #221) | aborted-forms:9: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	351	3	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
@@ -2116,7 +2116,7 @@ re/script_run.t	185	0	104	69	XDIFF	s504 #2389: 0/185 -> 104/69 at 577a09a4 (s496
 re/speed.t	59	0	25	12	TIMEOUT	s507: the 1/0 reading was STALE -- 25 rows pass on e5d72352, 618db500 and main 2e71d4aa alike (each run alone); C_notok is LOAD-DEPENDENT (12 alone = recorded, 16 and 25 in the two passes of the s507 full run): rows 26+ "/.*X/ anchors implicitly" need an anchoring optimisation PCL's regex engine does not have, each runs out its own time, and the file runs out its allowance (#326 family).  Which commit moved 1 -> 25 was NOT bisected | timeout	0
 re/speed_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/stclass_threads.t	0	0	5	1	NOTAP		0
-re/subst.t	281	0	211	63	DIFF	s501t #155: 208/64 -> 211/63 (RT #23624: `tie my %pre`, and the two Issue #20690 rows behind it) | s494u #2092: 206/66 -> 208/64 -- the two `\b ... /a` rows (A/B: 209e7533 extraction 206/66); aborted-forms:3: Undefined subroutine &constant::_CAN_PCS called	2
+re/subst.t	281	0	212	64	DIFF	s514e #3163: 211/63 -> 212/64 (require Hash::Util loads; lock_hash rows run) | s501t #155: 208/64 -> 211/63 (RT #23624: `tie my %pre`, and the two Issue #20690 rows behind it) | s494u #2092: 206/66 -> 208/64 -- the two `\b ... /a` rows (A/B: 209e7533 extraction 206/66); aborted-forms:3: Undefined subroutine &constant::_CAN_PCS called	2
 re/substT.t	0	0	0	0	NOTAP		0
 re/subst_amp.t	13	0	1	12	DIFF		0
 re/subst_wamp.t	281	0	0	0	DIFF		0
@@ -2157,7 +2157,7 @@ run/switchn.t	3	0	3	0	OK	s507c PART TWO #2666 (the #! -n loop reads DATA): 1/0 -
 run/switchp.t	3	0	3	0	OK	s507c PART TWO #2666 (-p reads the aliased DATA): 1/0 -> 3/0	0
 run/switcht.t	0	0	9	4	NOTAP		0
 run/switchx.t	8	0	7	1	DIFF	s506f: 0/2 -> 7/1, -x and the #! -l are honoured | s486c merge review (Fable, 2026-09-17): 0/3 -> 0/2 -- #1652's progfile plumbing makes the -x child RUN; its output is #1702's (the shebang's -l is not honoured, so `1..8` arrives without a newline and glues `not ok 6` to the plan); the child is byte-identical on main 2ac855aa, only the harness changed	0
-uni/attrs.t	35	0	8	26	DIFF		0
+uni/attrs.t	35	0	10	24	DIFF	s514e #3162: 8/26 -> 10/24 (attributes loads)	0
 uni/bless.t	84	0	83	1	DIFF		0
 uni/caller.t	18	0	7	12	DIFF		0
 uni/chomp.t	446	0	446	0	OK		0
