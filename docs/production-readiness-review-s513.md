@@ -146,7 +146,7 @@ MD5/SHA (XS, parked), `readonly("lit")` (#1391), Carp's ` at FILE line N` (#1361
 
 | loads | does not load |
 |---|---|
-| Data::Dumper, Digest::SHA (pure-Perl fallback), Time::HiRes (shim), IO::Socket::INET, JSON::PP, HTTP::Tiny, Getopt::Long, File::Temp, File::Path, File::Find, Term::ANSIColor, Time::Local, Text::Wrap, Text::ParseWords, List::Util, Scalar::Util, POSIX, Math::BigInt, Tie::File, Moo | **Encode**, **Storable**, Digest::MD5, Sys::Hostname, **File::Glob** (and therefore Compress::Zlib), Hash::Util, Unicode::Normalize, DB_File — every one XS with no shim; `threads` (by design) |
+| Data::Dumper, Digest::SHA (pure-Perl fallback), Time::HiRes (shim), IO::Socket::INET, JSON::PP, HTTP::Tiny, Getopt::Long, File::Temp, File::Path, File::Find, Term::ANSIColor, Time::Local, Text::Wrap, Text::ParseWords, List::Util, Scalar::Util, POSIX, Math::BigInt, Tie::File, Moo | **Encode**, **Storable**, Digest::MD5, Sys::Hostname, **File::Glob** (Compress::Zlib fails at it first, then at Compress::Raw::Zlib = zlib, XS -- corrected s514e), Hash::Util, Unicode::Normalize, DB_File — every one XS with no shim; `threads` (by design) |
 
 ## 4. What production needs that the test populations do not measure
 
@@ -159,7 +159,7 @@ close for the modules that matter:
 |---|---|---|---|
 | **Encode** | any program decoding or encoding text; `use Encode` is in most non-ASCII programs | 1–2 sessions for UTF-8 / Latin-1 / ASCII (`encode`, `decode`, `encode_utf8`, `decode_utf8`, `is_utf8`, `:encoding(...)` layers already exist in the runtime) | PCL's string box already carries the byte/character distinction, so the shim is a flag flip plus a byte↔character conversion the runtime has; the long tail (CJK encodings) is a separate table set |
 | **Storable** | caches, session files, `dclone` | 1–2 sessions for `freeze`/`thaw`/`dclone`/`store`/`retrieve` in pure Perl (PCL's own format; perl-file compatibility is a bigger, separate question) | `dclone` alone is a few hours |
-| File::Glob | `use File::Glob ':bsd_glob'` is common; Compress::Zlib fails only because of it | hours: the builtin `glob` under the module's names | |
+| File::Glob | `use File::Glob ':bsd_glob'` is common; Compress::Zlib fails at it FIRST -- CORRECTED s514e (2026-10-10): with File::Glob shimmed it then dies at Compress::Raw::Zlib, which is zlib itself (XS); the compression family needs a zlib shim or pclxs, its own batch | hours: the builtin `glob` under the module's names (shipped s514e) | the zlib task is filed by s514e |
 | Digest::MD5 | checksums | 1 session (a pure-Perl MD5 exists on CPAN; slow but correct) or un-park pclxs, whose Digest::MD5 passed 256/256 | |
 | Sys::Hostname | logging | hours | |
 | Hash::Util | `lock_keys` in defensive code | 1 session; needs a lock bit on the hash | |
