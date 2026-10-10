@@ -8580,15 +8580,24 @@ per element."
 ;;; too, so writes THROUGH the reference were never the issue.
 (declaim (inline %p-param-copy))
 (defun %p-param-copy (v)
-  "The value a copying parameter binds for the argument V."
+  "The value a copying parameter binds for the argument V.
+   A raw slot holds a raw value or a CONTAINER box -- the deref operators read
+   a box in it as a variable and unbox it once (p-cast-$).  A REF VALUE whose
+   referent is itself a ref value (`\\\\$x`, or `$$v` of a ref-to-ref: the
+   anonymous referent is an is-ref wrapper) therefore gets a fresh container:
+   bound bare, `$$v` read one level too deep (task #3081).  Every other kind
+   is unchanged, so the hot paths ($self, a plain ref) take no new branch."
   (cond ((not (p-box-p v)) v)
         ((%p-storable-raw v))
+        ((and (p-box-is-ref v)
+              (let ((x (p-box-value v)))
+                (p-box-p x)))
+         (make-p-box v))
         ((or (p-box-class v) (p-box-is-ref v)
              (let ((x (p-box-value v)))
                (or (hash-table-p x) (and (vectorp x) (not (stringp x))) (functionp x))))
          v)
         (t (p-copy-scalar-arg v))))
-
 ;;; ...and so the ARGUMENT LIST need not alias either (task #2515 (i)).  The
 ;;; general @_ builder, p-flatten-args, hands a callee the caller's element
 ;;; CELLS so `$_[0] = …' writes through -- promoting every raw slot of an
