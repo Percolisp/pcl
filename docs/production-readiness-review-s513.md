@@ -245,7 +245,7 @@ deferred rulings stand unless revisited.
 1. **Encode shim** (4a) — one to two sessions, the largest single production unblocker.
 2. **Triage pass** (5) — two Fable sessions; output: `docs/supported-subset.md` and every open task
    marked IN/OUT.
-3. **`pcl --oracle`** — the diff-test on-ramp as a shipped command (hours).
+3. **`pcl --oracle`** — the diff-test on-ramp as a shipped command: **ALREADY SHIPPED as `pcl --check` (task #2194, s494k; `docs/pcl-check.md`) -- this item was stale when written (corrected s514).**
 4. **Revisit #2370** (scope-owned DESTROY) with the staged design — the USER's call; at-exit (#2371)
    first either way.
 5. **Storable, File::Glob, Sys::Hostname, Digest::MD5 shims** — three to four sessions, in that order.
