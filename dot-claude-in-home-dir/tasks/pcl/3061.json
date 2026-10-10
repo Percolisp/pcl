@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s513i (Opus 5.5, 2026-10-10) while running the Text-CSV-2.04 acceptance for the Encode shim (#2946).\n\nLOUD, pre-existing (identical on main e0b61a99): a named sub that reads a file-lexical SCALAR and the same-named file-lexical ARRAY's element refuses the WHOLE file -- \"Parser2 TODO: file lexical 'e' captured by sub rf\" -- a sigil-blind capture check (MEMORY: \"A SIGIL- or SCOPE-blind capture refusal is a BUG -- delete/rename, never narrow\").\n\n    my $e = 1;\n    my @e = (5, 6);\n    sub rf { return $e ? $e[1] : 0 }\n    print rf(), \"\\n\";\n    perl: 6     PCL: Transpile failed: Parser2 TODO: file lexical 'e' captured by sub rf\n    (`sub rf { return $e[1] }` alone works; it is the PAIR $e + $e[...] in one sub.)\n\nVICTIM: Text-CSV-2.04's t/util.pl (`my $ebcdic = ord(\"A\") == 0xc1; my @ebcdic = (...); sub _readable { ... $ebcdic and $cp = $ebcdic[$cp] ... }`), `require`d by 15 of the dist's 38 t/ files -- t/47_comment.t (61 rows) and t/85_util.t (1448 rows) among them, the two `use Encode` files the Encode shim's acceptance needed.  Probes: scratch/s513i/m/r5.pl (worktree agent-abee999f28ae9ef84).\nRelated: #2014 (the braced-interpolation spelling of the same refusal), #314.\n",
+   "id" : "3061",
+   "status" : "pending",
+   "subject" : "A sub reading a file-lexical SCALAR and the same-named file-lexical ARRAY (`$e ? $e[1] : 0`) refuses the WHOLE file (\"file lexical captured by sub\") -- sigil-blind; blocks Text-CSV t/util.pl (15 t/ files)"
+}
