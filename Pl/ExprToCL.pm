@@ -2079,6 +2079,22 @@ sub _is_scalar_assign_arg {
 # an interpolation create nothing in perl, probed).  Task #1010.
 sub _alias_slice_arg {
   my ($self, $kid_id, $form) = @_;
+  # A MAGIC-LVALUE builtin argument -- substr / pos / vec / $#a -- is an lvalue
+  # too: @_ aliases perl's LV, so `f(substr($b, 0))` with `$_[0] = "x"` (or
+  # `${\$_[0]} = ...`) writes into $b (task #3141, IO::Zlib's READ).  The
+  # argument becomes the same write-through cell `\substr(...)` and
+  # `foreach (substr(...))` already use (_write_through_form, one rewriter);
+  # its getter is lazy, so a read-only use reads the window as before.  A
+  # 4-argument substr is NOT one: it returns the replaced text as a value
+  # (`f(substr($s,0,1,"Y"))` writing $_[0] leaves $s as the call left it).
+  my $inner = $form;
+  $inner = $inner->[1]
+    while ref($inner) eq 'ARRAY' && @$inner == 2 && $CTX_WRAP{ _form_head($inner) };
+  if ($MAGIC_LVALUE_BASE{ _place_head($form) }
+      && !(_form_head($inner) eq 'p-substr' && @$inner > 4)) {
+    my $cell = _write_through_form($form);
+    return $cell if defined $cell;
+  }
   my $an = $self->expr_o->get_a_node($kid_id);
   return $form unless $self->expr_o->is_internal_node_type($an);
   my $t = $an->{type} // '';
@@ -2918,7 +2934,9 @@ sub gen_funcall_form {
         || $r eq 'PPI::Token::Number'
         || $r =~ /^PPI::Token::Quote\b/
         || ($r eq 'PPI::Token::Symbol' && $an->content() =~ /^\$/)
-        || ($r eq 'PPI::Token::Magic'  && $an->content() =~ /^\$/);
+        || ($r eq 'PPI::Token::Magic'  && $an->content() =~ /^\$/)
+        # a substr/vec write-through cell (#3141) is a scalar LVALUE too
+        || (index($cl_func, 'pl-') >= 0 && _form_head($arg) =~ /-lvalue-cell\z/);
       $arg = ['p-scalar', $arg] unless $already_scalar;
     }
 

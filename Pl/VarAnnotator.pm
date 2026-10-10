@@ -1760,6 +1760,13 @@ sub _tw_walk {
         _tw_mark_lvalue($ctx, $xo, $_, 'arg-to-writer')         # #995
           for @$kids[1 .. $#$kids];
       }
+      # #3141: a substr/vec argument of a sub this walk cannot see (an
+      # imported or not-yet-known name) is passed as a write-through CELL
+      # over its target -- which needs a box to write into.
+      elsif ($fname && !Pl::PExpr::Config::is_core_keyword($fname)
+             && !ref $ctx->{known_subs}{$fname}) {
+        _tw_mark_magic_lvalue_args($ctx, $xo, @$kids[1 .. $#$kids]);
+      }
       _tw_walk_funcall_args($ctx, $xo, $fname, $kids, $aread, $root_native);
       return;
     }
@@ -1916,6 +1923,9 @@ sub _tw_walk {
         && !@{ $xo->get_node_children($kids->[0]) || [] };
     }
     my $kid_aread = $ARR_TRANSPARENT{$t} ? $aread : $ARR_COPYING{$t} ? 1 : 0;
+    # #3141: a method / code-ref call's @_ aliases a substr/vec argument.
+    _tw_mark_magic_lvalue_args($ctx, $xo, @$kids)
+      if $t eq 'methodcall' || $t eq 'ref_funcall';
     _tw_walk($ctx, $xo, $_, 0, undef, $kid_aread) for @$kids;
     return;
   }
@@ -2192,6 +2202,24 @@ sub _has_block_arg {
     return 1 if $ARRAY_BLOCK_NODE{ $n->{type} // '' };
   }
   return 0;
+}
+
+# Task #3141: an argument of a user / method / code-ref call that IS a
+# 3-argument-or-fewer substr, or a vec, is emitted as a write-through cell
+# (ExprToCL::_alias_slice_arg) -- @_ aliases perl's LV -- so its TARGET is
+# written when the callee writes $_[N], and a raw slot has no place for that.
+# pos() needs nothing here: 'pos-arg' already boxes its target.
+sub _tw_mark_magic_lvalue_args {
+  my ($ctx, $xo, @args) = @_;
+  for my $a (@args) {
+    my $n = $xo->get_a_node($a);
+    next unless $xo->is_internal_node_type($n) && ($n->{type} // '') eq 'funcall';
+    my $ak = $xo->get_node_children($a) || [];
+    my $w  = @$ak ? $xo->get_a_node($ak->[0]) : undef;
+    my $nm = ref($w) eq 'PPI::Token::Word' ? $w->content : '';
+    next unless ($nm eq 'substr' && @$ak <= 4) || $nm eq 'vec';
+    _tw_mark_lvalue($ctx, $xo, $ak->[1], 'magic-lvalue-arg') if @$ak > 1;
+  }
 }
 
 # THE lvalue-root marker (#995) — the ONE place that decides which scalar a
