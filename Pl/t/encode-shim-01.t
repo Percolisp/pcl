@@ -174,6 +174,14 @@ open my $i, '<:encoding(UTF-8)', $fn or die; my $line = <$i>; close $i; chomp $l
 row('read :encoding(UTF-8)', cp($line), (is_utf8($line) ? 1 : 0));
 open my $r, '<:raw', $fn or die; my $rl = <$r>; close $r; chomp $rl; row('read :raw', cp($rl));
 unlink $fn;
+# perl's own Encode::Alias is consulted when a program loaded it: a string
+# alias and a CODE alias (ExtUtils::MakeMaker::Locale's "locale" shape).
+require Encode::Alias;
+our $ENCODING_MINE = 'UTF-8';
+Encode::Alias::define_alias(sub { no strict 'refs'; ${"ENCODING_" . uc(shift)} }, 'mine');
+Encode::Alias::define_alias(myl1 => 'iso-8859-1');
+row('Encode::Alias', trap(sub { find_encoding('mine')->name }), trap(sub { find_encoding('myl1')->name }),
+    trap(sub { resolve_alias('myl1') }), trap(sub { cp(decode(mine => "\xC3\xA9")) }));
 P
 
 done_testing();

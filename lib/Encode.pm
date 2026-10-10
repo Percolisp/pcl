@@ -134,6 +134,10 @@ sub resolve_alias {
     return undef if !defined $name || ref $name;
     my $canon = _canonical($name);
     return $canon if defined $canon;
+    if (defined &Encode::Alias::find_alias) {
+        my $e = Encode::Alias->find_alias($name);
+        return $e->name if ref $e;
+    }
     # perl knows these names; this host has no codec for them, so
     # find_encoding answers undef (docs/not-supported.md, Encode).
     return $NOCODEC{ lc $name };
@@ -169,7 +173,16 @@ sub find_encoding {
     return undef if !defined $name;
     return $name if ref $name && eval { $name->isa('Encode::Encoding') };
     my $canon = _canonical("$name");
-    return undef if !defined $canon;
+    if (!defined $canon) {
+        # A program that loaded perl's own Encode::Alias may have defined
+        # aliases there (a string, a regex or a CODE ref -- ExtUtils::MakeMaker::
+        # Locale's "locale"); real Encode asks it last, and so does this.
+        if (defined &Encode::Alias::find_alias) {
+            my $e = Encode::Alias->find_alias("$name");
+            return $e if ref $e;
+        }
+        return undef;
+    }
     return $Encoding{$canon} if $Encoding{$canon};
     my ($codec, $kind, $class) = @{ $INFO{$canon} };
     my $obj = bless { Name => $canon, codec => $codec, kind => $kind }, $class;
