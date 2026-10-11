@@ -4897,6 +4897,33 @@
                   (p-box-nv-ok box) t))
           n))))
 
+(declaim (inline %p-put-digits))
+(defun %p-put-digits (s end d)
+  "Write the decimal digits of the non-negative fixnum D into the string S,
+   right-aligned so its last digit lands at END - 1 (zero writes one `0');
+   answers the index of the first digit written.  The ONE digit loop of the
+   number-to-text paths: %p-fixnum-string-digits, %p-float-g15-string and
+   sprintf's %f (task #3220)."
+  (declare (type (simple-array character (*)) s) (type fixnum end)
+           (type (and fixnum unsigned-byte) d))
+  (let ((i end) (v d))
+    (declare (type fixnum i) (type (and fixnum unsigned-byte) v))
+    (loop
+     (multiple-value-bind (q r) (truncate v 10)
+       (declare (type (and fixnum unsigned-byte) q) (type (integer 0 9) r))
+       (decf i)
+       (setf (schar s i) (code-char (+ 48 r)))
+       (setf v q)
+       (when (zerop v) (return i))))))
+
+(declaim (inline %p-digit-count))
+(defun %p-digit-count (m)
+  "How many decimal digits the non-negative fixnum M has (1 for zero)."
+  (declare (type (and fixnum unsigned-byte) m))
+  (let ((d 1) (x m))
+    (declare (type (integer 1 20) d) (type (and fixnum unsigned-byte) x))
+    (loop (setf x (truncate x 10)) (when (zerop x) (return d)) (incf d))))
+
 (defun %p-fixnum-string-digits (n)
   "Decimal text of the FIXNUM N, as a fresh (simple-array character (*)) —
    the same string WRITE-TO-STRING returns, built by a digit loop instead of
@@ -4916,33 +4943,19 @@
    4e6 conversions, 0.198 s -> 0.112 s on a 7-digit number and 0.081 s ->
    0.057 s on a 2-digit one (1.8x / 1.4x).  A comparison-table digit count was
    also measured and is NOT taken: faster on long numbers (0.096 s) and slower
-   on the short ones that dominate real programs (0.066 s)."
-  (declare (type fixnum n))
+   on the short ones that dominate real programs (0.066 s)."  (declare (type fixnum n))
   (cond
     ((zerop n) "0")
     ((eql n most-negative-fixnum) (write-to-string n))
     (t
      (let* ((neg (minusp n))
-            (m (if neg (- n) n)))
-       (declare (type (and fixnum unsigned-byte) m))
-       (let ((d 0) (x m))
-         (declare (type (integer 0 20) d) (type (and fixnum unsigned-byte) x))
-         (loop while (> x 0) do (setf x (truncate x 10)) (incf d))
-         (let* ((len (+ d (if neg 1 0)))
-                (s (make-string len)))
-           (declare (type (integer 1 21) len))
-           (when neg (setf (schar s 0) #\-))
-           (let ((i (1- len)) (v m))
-             (declare (type fixnum i) (type (and fixnum unsigned-byte) v))
-             (loop
-              (multiple-value-bind (q r) (truncate v 10)
-                (declare (type (and fixnum unsigned-byte) q)
-                         (type (integer 0 9) r))
-                (setf (schar s i) (code-char (+ 48 r)))
-                (setf v q)
-                (decf i)
-                (when (zerop v) (return)))))
-           s))))))
+            (m (if neg (- n) n))
+            (len (+ (%p-digit-count m) (if neg 1 0)))
+            (s (make-string len)))
+       (declare (type (and fixnum unsigned-byte) m) (type (integer 1 21) len))
+       (when neg (setf (schar s 0) #\-))
+       (%p-put-digits s len m)
+       s))))
 
 ;;; SMALL NON-NEGATIVE FIXNUMS ARE PRE-BUILT (task #982, s464ax).  Since the
 ;;; boxed-aggregates flip an array ELEMENT holds a RAW value until something
@@ -5029,10 +5042,16 @@
      only the first guess, corrected against the digit count, at most one step;
    * the rounding carry is load-bearing: 999999999999999.9 rounds up to 1e15
      and perl prints `1e+15', 9.999999999999999e-5 prints `0.0001'."
-  (multiple-value-bind (m e) (integer-decode-float a)
-    (let ((lo (%p-pow10 (1- prec)))
-          (hi (%p-pow10 prec))
-          (p (floor (log a 10.0d0))))
+  ;; The first guess of the exponent is the natural log on a DECLARED double
+  ;; times log10(e): an inline call, where the two-argument (log a 10.0d0) went
+  ;; through the generic dispatch (6.5 % of a float-printing loop, #3220).  It
+  ;; is only a guess -- the loop below corrects it against the digit count.
+  (let ((a (if (typep a 'double-float) a (coerce a 'double-float))))
+    (declare (type double-float a))
+    (multiple-value-bind (m e) (integer-decode-float a)
+      (let ((lo (%p-pow10 (1- prec)))
+            (hi (%p-pow10 prec))
+            (p (floor (* (log a) 0.4342944819032518d0))))
       (loop
        (let ((d (%p-scaled-round m e (- (1- prec) p))))
          (cond ((< d lo) (decf p))
@@ -5045,7 +5064,7 @@
                ((= d lo)
                 (let ((d2 (%p-scaled-round m e (- prec p))))
                   (return (if (>= d2 hi) (values lo p) (values d2 (1- p))))))
-               (t (return (values d p)))))))))
+               (t (return (values d p))))))))))
 
 (defun %p-decimal-exponent (a prec)
   "The decimal exponent C's `%.<PREC>g' — and therefore perl's `%.15g'
@@ -5057,22 +5076,60 @@
 (defun %p-float-g15-string (v)
   "perl's `%.15g' text of the non-zero finite double V: 15 significant digits,
    trailing zeros stripped; FIXED notation when the rounded exponent is in
-   [-4, 15), else `D.DDDe+NN' with at least two exponent digits."
+   [-4, 15), else `D.DDDe+NN' with at least two exponent digits.
+   The text is built IN PLACE in one fresh string by %p-put-digits, the
+   trailing zeros stripped from the digit INTEGER first (task #3220): the
+   generic POSITION, the SUBSEQs and the CONCATENATE that built it before
+   were a third of its cost."
   (multiple-value-bind (d p) (%p-float-digits (abs v) 15)
-    (let* ((s (%p-fixnum-string-digits d))          ; 15 digits, fresh
-           (n (1+ (or (position #\0 s :test #'char/= :from-end t) 0)))
-           (neg (minusp v)))
-      (cond
-        ((and (>= p 0) (< p 15))
-         (if (<= n (1+ p))
-             (if neg (concatenate 'string "-" (subseq s 0 (1+ p))) (subseq s 0 (1+ p)))
-             (concatenate 'string (if neg "-" "") (subseq s 0 (1+ p)) "." (subseq s (1+ p) n))))
-        ((and (< p 0) (>= p -4))
-         (concatenate 'string (if neg "-0." "0.")
-                      (make-string (- (1+ p)) :initial-element #\0) (subseq s 0 n)))
-        (t
-         (format nil "~:[~;-~]~A~:[~;.~]~Ae~:[+~;-~]~2,'0D"
-                 neg (char s 0) (> n 1) (subseq s 1 n) (minusp p) (abs p)))))))
+    (declare (type (integer 0 999999999999999) d) (type fixnum p))
+    (let ((n 15) (neg (if (minusp v) 1 0)))
+      (declare (type (integer 1 15) n) (type bit neg))
+      ;; N = the significant digits left once the trailing zeros are stripped.
+      (loop (multiple-value-bind (q r) (truncate d 10)
+              (if (and (zerop r) (> n 1)) (setf d q n (1- n)) (return))))
+      (flet ((fresh (len)
+               (let ((s (make-string len)))
+                 (when (= neg 1) (setf (schar s 0) #\-))
+                 s)))
+        (cond
+          ((and (>= p 0) (< p 15))
+           (if (<= n (1+ p))
+               ;; An integer: the N digits, then P+1-N zeros.
+               (let ((s (fresh (+ neg p 1))))
+                 (fill s #\0 :start (+ neg n))
+                 (%p-put-digits s (+ neg n) d)
+                 s)
+               ;; INT.FRAC: the last N-P-1 digits after the point.
+               (let* ((len (+ neg n 1)) (s (fresh len)))
+                 (multiple-value-bind (ip fp) (truncate d (the fixnum (%p-pow10 (- n p 1))))
+                   (fill s #\0 :start (+ neg p 2) :end (%p-put-digits s len fp))
+                   (setf (schar s (+ neg p 1)) #\.)
+                   (%p-put-digits s (+ neg p 1) ip))
+                 s)))
+          ((and (< p 0) (>= p -4))
+           ;; 0.000DDD
+           (let* ((z (- (1+ p))) (len (+ neg 2 z n)) (s (fresh len)))
+             (setf (schar s neg) #\0 (schar s (+ neg 1)) #\.)
+             (fill s #\0 :start (+ neg 2) :end (+ neg 2 z))
+             (%p-put-digits s len d)
+             s))
+          (t
+           ;; D[.DDD]e+XX -- at least two exponent digits.
+           (let* ((ap (abs p))
+                  (mant (if (> n 1) (1+ n) 1))
+                  (len (+ neg mant 2 (if (< ap 100) 2 3)))
+                  (s (fresh len)))
+             (multiple-value-bind (ip fp) (truncate d (the fixnum (%p-pow10 (1- n))))
+               (setf (schar s neg) (code-char (+ 48 ip)))
+               (when (> n 1)
+                 (setf (schar s (+ neg 1)) #\.)
+                 (fill s #\0 :start (+ neg 2) :end (%p-put-digits s (+ neg mant) fp))))
+             (setf (schar s (+ neg mant)) #\e
+                   (schar s (+ neg mant 1)) (if (minusp p) #\- #\+))
+             (fill s #\0 :start (+ neg mant 2))
+             (%p-put-digits s len ap)
+             s)))))))
 
 (defun stringify-value (v)
   "Convert a raw value to string"
@@ -7437,15 +7494,28 @@
    round-half-to-even — produces the C result without float-multiply error."
   ;; The exact scale-and-round is %p-scaled-round on the decoded double: the
   ;; same value as (round (* (rational num) 10^prec)) without the ratio's GCD
-  ;; normalisation (task #2510).
+  ;; normalisation (task #2510).  A FIXNUM result -- every %f whose digits fit
+  ;; 62 bits -- is written in place by %p-put-digits (task #3220): FORMAT's
+  ;; ~D went through the printer and a string stream.
   (let* ((prec    (or precision 6))
-         (scale   (%p-pow10 prec))
          (rounded (multiple-value-bind (m e) (integer-decode-float (abs num))
                     (%p-scaled-round m e prec))))
-    (if (zerop prec)
-        (format nil "~D" rounded)
-        (multiple-value-bind (int frac) (floor rounded scale)
-          (format nil "~D.~V,'0D" int prec frac)))))
+    (cond
+      ((not (typep rounded '(and fixnum unsigned-byte)))
+       (if (zerop prec)
+           (format nil "~D" rounded)
+           (multiple-value-bind (int frac) (floor rounded (%p-pow10 prec))
+             (format nil "~D.~V,'0D" int prec frac))))
+      ((zerop prec) (%p-fixnum-string-digits rounded))
+      (t
+       (multiple-value-bind (int frac) (floor rounded (%p-pow10 prec))
+         (let* ((il (%p-digit-count int))
+                (len (+ il 1 prec))
+                (s (make-string len :initial-element #\0)))
+           (%p-put-digits s len frac)
+           (setf (schar s il) #\.)
+           (%p-put-digits s il int)
+           s))))))
 
 (defun sprintf-format-float-e (num precision upper-case-p)
   "Format float as exponential notation with given precision (default 6)."
@@ -7552,11 +7622,15 @@
 (defun sprintf-one (type-char flags width precision args arg-idx)
   "Format one value for a sprintf specifier.
    Returns (values result-string new-arg-idx)."
-  (let* ((left-justify (find #\- flags))
-         (force-sign (find #\+ flags))
-         (space-sign (find #\Space flags))
-         (zero-pad (and (find #\0 flags) (not left-justify)))
-         (alt-form (find #\# flags))
+  ;; FLAGS is almost always EMPTY (`%.0f', `%s'): five generic FIND calls on
+  ;; it were 7 % of a sprintf-bound loop (task #3220), so an empty string is
+  ;; answered without one.
+  (let* ((no-flags (zerop (length flags)))
+         (left-justify (and (not no-flags) (find #\- flags)))
+         (force-sign (and (not no-flags) (find #\+ flags)))
+         (space-sign (and (not no-flags) (find #\Space flags)))
+         (zero-pad (and (not no-flags) (find #\0 flags) (not left-justify)))
+         (alt-form (and (not no-flags) (find #\# flags)))
          (upper-case-p (upper-case-p type-char))
          (type-lower (char-downcase type-char)))
     (case type-lower
