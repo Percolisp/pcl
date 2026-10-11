@@ -6085,8 +6085,6 @@ op/utf8decode.t	305	ok	not ok	Only expected warning for 4.3.5	NS:Warnings-gated 
 op/utf8magic.t	3	ok	not ok	is_utf8(bytes)	#1813 family -- `utf8::is_utf8` on a value whose UTF8 flag magic was just changed; PCL has no SV-level UTF8 flag (see also NS:Unicode semantics differences)
 op/utf8magic.t	4	ok	not ok	is_utf8(bytes)	#1813 family -- `utf8::is_utf8` on a value whose UTF8 flag magic was just changed; PCL has no SV-level UTF8 flag (see also NS:Unicode semantics differences)
 op/utfhash.t	0	(none)	rows-unstable	*rows-unstable* (s468be, task #1082): both sides interpolate their own keys/each order into the description ("\w on keys with 3 keys, key of length 4"), so the description PAIRING is a different draw every run — the number of diverging rows itself was 51 (blessed), 43 (s466 validate2) and 19 (s468be serial) on one tree.  The COUNTS are stable (91 ok / 0 not ok against perl's 99), so the snapshot and the shortfall still gate it.	NS:Unicode semantics differences -- a hash key whose UTF8 flag differs from its bytes; the missing rows are the \w-on-keys loop
-op/vec.t	75	ok	not ok	RT131083 lval -1	#960 -- `vec` as an LVALUE with a negative or ~0 offset
-op/vec.t	77	ok	not ok	RT131083 lval ~0	#960 -- `vec` as an LVALUE with a negative or ~0 offset
 op/vec.t	31	ok	not ok	Timely scalar destruction with lvalue vec	NS:`DESTROY` called by garbage collector
 op/vec.t	32	ok	not ok	err msg when modifying read-only refs	NS:Error compatibility for invalid Perl input
 op/warn.t	26	ok	not ok	!SvOK tied $@ that returns ref is used	NS:Warnings-gated diagnostics are absent (#221) -- the rows count and match the text of a `warn` that reaches $SIG{__WARN__}; see also NS:`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation

@@ -2038,7 +2038,7 @@ op/utf8decode.t	710	0	620	90	DIFF		0
 op/utf8magic.t	6	0	4	2	DIFF	s470bv: #1221 (b25afbc; 2/4 at a3d6d8e)	0
 op/utfhash.t	99	0	97	0	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 op/utftaint.t	0	0	80	9	NOTAP	s470bv: #1221 (b25afbc; 72/17 at a3d6d8e).  NOTAP: perl itself produces no TAP here	0
-op/vec.t	78	0	74	4	DIFF		0
+op/vec.t	78	0	76	2	DIFF	s514f #3141: 74/4 -> 76/2 (RT131083 lval -1 / ~0: a vec() ARGUMENT of a user sub is now its write-through cell)	0
 op/ver.t	54	0	47	7	XDIFF	undef-fn:main::pl-gethostbyaddr | not-supported.md §use bytes / §use vN default warnings / §Control-character glob names — tests 21/23/25 (bytes view), 52 (Mordor), 54 (vN warnings); test 51 is the OPEN defelem arg-aliasing gap (task #131), a fix target	0
 op/waitpid.t	1	0	1	0	OK		0
 op/wantarray.t	28	0	28	0	OK	s510c #2800 (eval STRING binds its own context: `eval $qcontext` in void is V): 27/1 -> 28/0	0

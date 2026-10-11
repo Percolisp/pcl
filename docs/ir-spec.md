@@ -791,7 +791,9 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   that is right for an UNQUALIFIED name the compiler does not know.  It is not
   right for a qualified one: no compile-time table crosses a `use`
   (`declared_subs` is this file's subs; the prototype table is keyed by the
-  BARE name and carries only what the export scan could read), so "unknown"
+  BARE name and carries only what the export scan could read -- though the
+  record an IMPORT brings is the one the MODULE's own package declares,
+  never a same-named sub of another package in that file, s514f #3143), so "unknown"
   there means "cannot see into that package", and reading the string made
   `my %h = (b => JSON::PP::true)` store the text.  Under `use strict` the call
   reading already wins, so this is the `no strict` regime only.  A word the
@@ -2120,6 +2122,18 @@ to the flattened values.
 
 **A raw slot holds a raw value or a CONTAINER box (normative, s514b, #3081).**  A box found in a raw slot is read as a VARIABLE (`p-cast-$` unboxes it once), so a reference VALUE (an is-ref wrapper from `p-backslash`) whose referent is itself a box binds in a fresh container, never bare: `sub t { my ($v) = @_; ref $$v } t(\\$x)` is `SCALAR`, and `d($$v)` recursing down `\\\\[2]` sees every level.
 
+**An lvalue BUILT-IN in an argument slot passes its write-through cell
+(normative, s514f, #3141).**  `@_` aliases what the caller wrote, and for
+`substr(EXPR, OFF[, LEN])`, `vec`, `pos` and `$#array` that is an lvalue: the
+argument is the same cell `\substr(...)` builds (`p-substr-lvalue-cell`,
+`p-vec-lvalue-cell`, `p-pos-lvalue-cell`, `p-arylen-lvalue-cell`), so a write
+through `$_[0]` lands in the caller's string.  A `$`-prototype slot keeps the
+cell; reading it gives the value.
+
+```perl
+sub w { $_[0] = "XY" } my $s = "abcdef"; w(substr($s, 1, 2)); # $s is "aXYdef"
+```
+
 **A parameter is a COPY taken at the call (normative, s501q, #2570).**
 `p-raw-params` binds each parameter to the argument's VALUE: a plain number
 or string raw; undef, a dualvar or a magic scalar (`$1`) as a fresh box
@@ -3411,6 +3425,18 @@ var ⇒ plain lexical binding, no localization at all).
   ```lisp
   (p-defclass plc-dog (plc-animal) ())   ; a no-op when plc-dog already has
                                          ; exactly (plc-animal) as parents
+  ```
+- **A RUN-TIME `package X;` switch never sets parents (normative, s514f,
+  task #3140).**  A switch the compiler cannot give its own section (inside a
+  block that also holds a `local`, inside a sub body) emits
+  `(p-ensure-class X::plc-x)`: the class is created when absent and an
+  existing class is left exactly as it is, because perl's `package X;` never
+  changes `@ISA` -- the parents belong to the forms that set `@ISA`.  A `use
+  base` / `use parent` after such a switch names X's class and X's `@ISA`
+  QUALIFIED (its forms are read in the enclosing section's package).
+
+  ```perl
+  { package Bar; use base 'Implement'; local $\ = ""; Bar->hi }   # Implement::hi; @main::ISA stays empty
   ```
 - `SUPER::name` dispatches starting *after* the current sub's home
   package in the linearization, and **finishes the lookup exactly like an

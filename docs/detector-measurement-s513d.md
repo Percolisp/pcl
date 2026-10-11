@@ -171,6 +171,33 @@ For the USER's default (announce vs off): with announce on, a user of core
 File::Copy, Math::BigInt/BigFloat or Encode sees up to ~30 lines on stderr per
 run until #3143-family imports carry their prototypes.
 
+## 7. After #3143 (s514f): the import-prototype noise, re-counted
+
+Measured exactly as §6 (`PCL_DETECT=announce`, `PCL_DETECT_LOG` naming a file
+per population; distinct = unique announced lines), on the s514f tree
+(gen v2-5787: #3143's package-keyed import records + the bare-quote `use M
+'name'` arm):
+
+| population | §6 distinct sites | after #3143 | what is left |
+|---|---|---|---|
+| gate (305 files) | 71 | **32** | all #3184: `use Encode qw(:all)` in encode-shim-01.t's two programs (decode 18, encode 11, decode_utf8 2, from_to 1) |
+| sweep (108 files) | 17 | **0** | -- (the Math::BigInt `qw< blessed >` sites were the pre-pass registering into `main`) |
+| everyday (122 programs) | 32 | **17** | shape 2, REAL: File::Copy's `stat` (14) and `utime` (3) displaced by Time::HiRes |
+| CPAN board (14 dists) | 63 | **59** | shape 2, REAL: Sub::Uplevel's `CORE::GLOBAL::caller` (18); #3184: Text::Balanced 05_extmul.t's `use Text::Balanced qw(:ALL)` (41) |
+
+What moved: Encode's exported `decode`/`encode` were shadowed under the bare
+key by prototype-less same-named subs of Encode's encoding-object packages;
+Math::BigInt / Math::BigFloat's `blessed` sites were the include pre-pass
+registering a module unit's imports under `main`; Mojo-DOM58's 4 were the
+`use Encode 'decode'` bare-quote spelling, a second import arm that still asked
+the bare key.  What is left that is NOISE is one cause, #3184: an export TAG's
+list is read statically, and both remaining tags are built in a way the read
+does not follow (Encode's `[ @EXPORT, @EXPORT_OK ]`; Text::Balanced's `&name`
+entries).  With #3184 the gate would announce 0 and the board 18 -- every
+remaining line a real displaced built-in.  Everyday: the only unit still announcing is
+core File/Copy.pm (§6 named two programs with a line: File-Compare-Copy and
+Math-BigInt-BigFloat; the Math::BigInt ones are gone).
+
 ## Appendix A -- the gate's 53 distinct call sites
 
 `unit  name  install:line/kind  call:line  assumed  installed`  (CORE: = perl's own lib; /tmp/*.pl = a gate test's program)
