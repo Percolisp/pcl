@@ -1,3 +1,4 @@
+# s515a (2026-10-11, Opus): pos.t 15 16 18 19 (the defelem //g rows) LEAVE by edit -- #3063 / #1567, a //g element target is its cell.
 # s507p (2026-10-06, Opus, EDITED BY HAND -- two rows LEAVE): scalar.t 25 "reading from magic scalars" and 30
 #   "FETCH only called once" (#1446): #2111 makes a '<' in-memory handle read its tied scalar live (one FETCH).
 # s506f (2026-10-04, Opus, EDITED BY HAND -- one row JOINS, one LEAVES): reset.t 42 "check $^W has
@@ -356,13 +357,9 @@ pack.t	14656	utf8 offset is relative to inner group	'2'	'6'	PARKED: pack/unpack 
 pack.t	14661	utf8 star offset is relative to start	'5'	'15'	PARKED: pack/unpack (USER 2026-09-06)
 parent.t	8	  still failing on 2nd load	''	/^Can't locate reallyReAlLyNotexists.pm in \@INC \(you may need to install the reallyReAlLyNotexists module\) \(\@INC[\w ]+:/	NS:Error message text and format
 parent.t	7	baseclass that does not exist	''	/^Can't locate reallyReAlLyNotexists.pm in \@INC \(you may need to install the reallyReAlLyNotexists module\) \(\@INC[\w ]+:/	NS:Error message text and format
-pos.t	18	//g can read pos through a defelem	'h'	'o'	#396 / #966 / #261 (pos on an aggregate element)
-pos.t	19	//gc in list cx can set pos through a defelem	undef	'4'	#396 / #966 / #261 (pos on an aggregate element)
 pos.t	29	Got expected length in bytes	'4'	'7'	NS:`use bytes` - byte view of upgraded strings
 pos.t	30	Got expected pos in bytes	'2'	'5'	NS:`use bytes` - byte view of upgraded strings
 pos.t	9	Timely scalar destruction with lvalue pos	'0'	'1'	NS:`DESTROY` called by garbage collector
-pos.t	15	defelems can propagate implicit pos (via //g)	'3'	'4'	#396 / #966 / #261 (pos on an aggregate element)
-pos.t	16	failed //g sets pos through defelem	'3'	undef	#396 / #966 / #261 (pos on an aggregate element)
 pos.t	26	no assertion failure when getting pos clobbers ref with undef	'SCALAR(0x1)'	undef	#1457 (c) (two foreach aliases to pos $x are not the same place)
 pos.t	12	pos *glob works	undef	'1'	#1457 (b) (pos on a glob is undef)
 pos.t	13	pos is not confused about changing UTF8-ness	undef	'2'	NS:`use bytes` - byte view of upgraded strings

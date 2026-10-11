@@ -1,4 +1,7 @@
 # taken-at: 5323d9e 2026-08-15
+# s515a (2026-10-11, Opus, EDITED BY HAND -- one row, TOTAL 18741 -> 18745, #3063 / #1567): pos.t 15 -> 19 -- a //g
+#   match on an ELEMENT now keeps pos on the element (the target is its cell): rows 15 16 18 19 (the defelem rows).
+#   Rows 20 + 21 (s///g and \G through a defelem) still fail.  Sweep scratch/s515a/sweep.log.
 # s513a (2026-10-08, Opus, EDITED BY HAND -- one row, TOTAL 18735 -> 18736, #2860): length.t 35 -> 36
 #   (row 34 `is($u, undef)` on a TIED undef: cl/pcl-test.lisp's test-to-scalar now reads a get-magic box once,
 #   closing #1482; the read was needed because a `$`-prototype slot now passes element argboxes).
@@ -537,7 +540,7 @@ or.t	OK	11	2	14
 ord.t	OK	38	0	38
 pack.t	OK	5637	88	14722
 parent.t	OK	7	2	9
-pos.t	OK	15	15	30
+pos.t	OK	19	11	30
 # s446j (#517): postfixderef.t 95 -> 96 EDITED BY HAND — the same `ref(\&{""})` row as ref.t's
 #   ([perl #94476]); it left fail-baseline.tsv by EDIT in the same commit.
 postfixderef.t	PARTIAL	103	18	128
