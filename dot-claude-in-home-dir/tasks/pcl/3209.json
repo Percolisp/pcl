@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515a (Opus, 2026-10-11) from Fable's review probe ~/pcl-agent-scratch/s513/review/p515a/iso-dup2.pl.  PRE-EXISTING (base and tree alike), LOW.\n`my $buf = \"\"; open(my $s, \">\", \\$buf); open(my $t, \">&\", $s); print $t \"mem\"; print $s \"+s\"; close $t; close $s; print \"buf=[$buf]\\n\";` -- perl `buf=[+s]` (a dup of an in-memory handle does not write into the scalar), PCL `buf=[mem+s]`.  The fd-less branch of %p-open-dup shares (now aliases) the in-memory stream for `>&` as well as `>&=`; its comment already calls the `>&` case an approximation.  Related: a `>&=` of an in-memory handle -- perl's writes through it vanish too (\"one three\"), PCL writes them.\n",
+   "id" : "3209",
+   "status" : "pending",
+   "subject" : "a dup (>&) of an in-memory handle writes into the scalar -- perl's does not (buf=[+s] vs PCL buf=[mem+s])"
+}

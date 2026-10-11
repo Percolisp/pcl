@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FOUND s515 (Fable review of s515a, probes ~/pcl-agent-scratch/s513/review/p515a/iso-pos2.pl, iso-pos.pl, elpos.pl).  perl clears pos() on a write that CHANGES the string -- a successful s///, s///g, a tr/// that changed something, assignment, .= -- and keeps it on a no-match s/// or an unchanging tr///.  PCL kept it after s/// and tr/// (pre-existing for a scalar: `my $s=\"qq\"; $s=~/q/g; $s=~s/q/Q/; pos($s)` perl undef, PCL 1), and M3 (#3063) made the element shapes reach the same miss.\n=== DONE (s515a, 2026-10-11, commit 9998e57b) === %p-write-match-target (the ONE writer for s/// and tr///) clears pos on the plain-box arm when the write changed the string (tr passes `(string/= result str)`; s/// is called only on a match); the magic/tied arm goes through box-set, which already cleared it.  All three probe files = perl.  Guard Pl/t/elem-pos-01.t rows 12-18 (rows 12 + 18 fail on 8c683ae6).\n\n\n",
+   "id" : "3207",
+   "status" : "completed",
+   "subject" : "pos() survives a successful s/// or a changing tr/// (scalar and element) -- perl clears it on a write that changes the string"
+}
