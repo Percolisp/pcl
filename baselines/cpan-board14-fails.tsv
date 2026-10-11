@@ -45,6 +45,43 @@
 # (measured on File-Which: 13/6 as the board runs it, 15/4 with CWD = the dist,
 # 19/0 under perl).  Task #1575; not fixed here because it is a RUNNER change
 # and would move verdicts under the snapshot this file is blessed against.
+#
+# THE POPULATION IS baselines/cpan-board-dists.tsv (s515c, #2950) and the
+# command is `tools/cpan-board.sh TREE OUTPREFIX` (it reads that list; the
+# `--no-dist-lib` dists are passed last).  The file keeps its board14 NAME
+# because the tooling and the docs point at it.
+#
+# RE-HYGIENE s515c (#2950, the #223 recipe; 2026-10-11): main's code 973bdb1d
+# measured (the shared base result base/973bdb1d for 13 dists + Scalar-List-
+# Utils alone with --no-dist-lib) read 5 NEW / 46 FIXED against this file.
+# The scratch board.sh had been running Scalar-List-Utils WITHOUT
+# --no-dist-lib since s513 (38 files, 0 rows: the XS lib/ shadows the shim) --
+# that alone was 36 NEW / 15 FIXED of the s513g "40 NEW / 74 FIXED".
+# LEFT BY EDIT (46 keys) -- each with the window the shared base results or
+# the session log place it in (not bisected further):
+#   Capture-Tiny 13/14/15/20/21/22/23/24 "* is tied" (10 keys): s514d, tie on a
+#     FILEHANDLE (#2590) -- absent between base d8936ef7 and 8f2fa11c.
+#   Class-Inspector class_inspector.t "->subclasses ... evil ->isa": s514f
+#     (#3140) -- absent between 52a8e706 and 973bdb1d.
+#   Class-Inspector inc_to_local.t "Found ourself"; Data-Dump dd.t *FILE*,
+#     dump.t/ref.t/regexp.t/scalar-obj.t/scalar.t/tied.t (unnamed); Sub-Uplevel
+#     04/05 caller-override rows (4 keys); Scalar-List-Utils head-tail.t,
+#     lln.t Tied, openhan.t (5), prototype.t @, reduce.t, refaddr.t (6),
+#     reftype.t REF ref, scalarutil-proto.t (6), weak.t "$y is weak": fixed
+#     between this file's s474 bless and s514 (absent from every s514 base);
+#     the session log names the families: openhandle s500a/s510f, set_prototype
+#     s502e, refaddr s508a, weaken/looks_like_number on a tie s492a, reftype
+#     s495f, Data::Dump s495f/s499j/s514a.
+# ENTERED BY HAND (5 rows): Data-Dump quote.t #12 (#2066), Role-Tiny
+# role-basic-composition.t "role method applied" (#3001), Try-Tiny finally.t
+# 10-12 (the dist's own Try::Tiny since s499j: DESTROY at scope exit, #2370).
+# PASSING ROWS LOST against cpan-board14-s474.tsv (the per-file table; not a
+# row of this file): Try-Tiny context.t 25 -> 13 and finally.t 29 -> 11 (the
+# same s499j cause: the finally rows never run), Role-Tiny load-module.t
+# 1 -> 0 (row 1 passes, but SBCL's "While evaluating the form" note -- #1970 --
+# has no trailing newline and run-dist-t.pl merges stderr into the TAP, so
+# "ok 1" lands mid-line and is not counted).
+# taken-at: 973bdb1d 2026-10-11
 Algorithm-Diff-1.201-0	base.t	6			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	10			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	15			"$VAR1 = [[['-',0,'a']],[['+',2,'d']],[['-',4,'h'],['+',4,'f']],[['+',6,'k']],[['-',8,'n'],['+',9,'r'],['-',9,'p'],['+',10,'s'],['+',11,'t']]];"	#1511 A (same hunk-iteration family)
@@ -72,25 +109,11 @@ Capture-Tiny-0.50-0	02-capture.t	0	*FILE*	1..0 # SKIP  (rc=0)	0 row(s)	#3023 (s5
 Capture-Tiny-0.50-0	06-stdout-closed.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#201 (Capture::Tiny reopens fd 1/2; PCL dies "fd-stream for descriptor 1 is closed")
 Capture-Tiny-0.50-0	09-preserve-exit-code.t	0	*FILE*	no TAP rows (rc=0)	2 row(s)	#3023 (s513g: the #1509 drop is gone -- the facts overlay declares `capture` (&;@) so the block compiles; the file now stops on `seek FH, 0, 2` on a sysopen/File::Temp handle, a raw SBCL type error)
 Capture-Tiny-0.50-0	10-stdout-string.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#201 (same closed-descriptor path)
-Capture-Tiny-0.50-0	13-stdout-tied.t	1	STDOUT is tied			#155 (NS:tie — Capture::Tiny refuses to capture a TIED STDOUT; the row is its own skip check)
-Capture-Tiny-0.50-0	14-stderr-tied.t	1	STDERR is tied			#155 (NS:tie — tied STDERR)
-Capture-Tiny-0.50-0	15-stdin-tied.t	1	STDIN is tied			#155 (NS:tie — tied STDIN)
 Capture-Tiny-0.50-0	16-catch-errors.t	0	*FILE*	no TAP rows (rc=0)	5 row(s)	#201 ("Cannot dereference non-reference: #<fd-stream …>" — a handle where a ref is expected)
 Capture-Tiny-0.50-0	17-pass-results.t	0	*FILE*	no TAP rows (rc=0)	12 row(s)	#3023 (s513g: the #1509 drop is gone -- the facts overlay declares `capture` (&;@) so the block compiles; the file now stops on `seek FH, 0, 2` on a sysopen/File::Temp handle, a raw SBCL type error)
 Capture-Tiny-0.50-0	19-relayering.t	0	*FILE*	1..0 # SKIP  (rc=0)	0 row(s)	#3023 (s513g: the #1509 drop is gone -- the facts overlay declares `capture` (&;@) so the block compiles; the file now stops on `seek FH, 0, 2` on a sysopen/File::Temp handle, a raw SBCL type error)
-Capture-Tiny-0.50-0	20-stdout-badtie.t	1	STDOUT is tied			#155 (NS:tie — tied STDOUT)
-Capture-Tiny-0.50-0	21-stderr-badtie.t	1	STDERR is tied			#155 (NS:tie — tied STDERR)
-Capture-Tiny-0.50-0	22-stdin-badtie.t	1	STDIN is tied			#155 (NS:tie — tied STDIN)
-Capture-Tiny-0.50-0	23-all-tied.t	1	STDOUT is tied			#155 (NS:tie — all three handles tied)
-Capture-Tiny-0.50-0	23-all-tied.t	2	STDERR is tied			#155 (NS:tie — all three handles tied)
-Capture-Tiny-0.50-0	23-all-tied.t	3	STDIN is tied			#155 (NS:tie — all three handles tied)
-Capture-Tiny-0.50-0	24-all-badtied.t	1	STDIN is tied			#155 (NS:tie — all three handles tied)
-Capture-Tiny-0.50-0	24-all-badtied.t	2	STDIN is tied			#155 (NS:tie — all three handles tied)
-Capture-Tiny-0.50-0	24-all-badtied.t	3	STDIN is tied			#155 (NS:tie — all three handles tied)
 Capture-Tiny-0.50-0	25-cap-fork.t	0	*FILE*	1..0 # SKIP  (rc=0)	0 row(s)	#3023 (s513g: the #1509 drop is gone -- the facts overlay declares `capture` (&;@) so the block compiles; the file now stops on `seek FH, 0, 2` on a sysopen/File::Temp handle, a raw SBCL type error)
-Class-Inspector-1.36-0	class_inspector.t	54	->subclasses in the presence of an evil ->isa does not crash	''	'ARRAY(0x1)'	#1571 (a symbol-table walk sees PCL's stash: ->subclasses in the presence of an "evil" package)
 Class-Inspector-1.36-0	class_inspector__devel_hide.t	0	*FILE*	1..0 # SKIP test requires Devel::Hide (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "test requires Devel::Hide")
-Class-Inspector-1.36-0	class_inspector__inc_to_local.t	2	Found ourself			#1571 (%INC-to-path mapping: "Found ourself" — the generated .lisp is not the .pm path)
 Class-Method-Modifiers-2.15-0	002-cache.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1572 (CLOS: "FINALIZE-INHERITANCE was called on a forward referenced class" — a modifier installed before the parent class exists)
 Class-Method-Modifiers-2.15-0	003-basic.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1572 (same forward-referenced-class death)
 Class-Method-Modifiers-2.15-0	060-caller.t	2	parent with modifiers sees 'main' as caller # TODO caller magic not implemented yet			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — a modifier must not appear as the caller)
@@ -106,19 +129,9 @@ Class-Method-Modifiers-2.15-0	140-lvalue.t	4	before maintains lvalue attribute	u
 Class-Method-Modifiers-2.15-0	140-lvalue.t	5	after maintains lvalue attribute	undef	'4'	#930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
 Class-Method-Modifiers-2.15-0	140-lvalue.t	7	after array lvalue attribute sets values # TODO can't apply after to array lvalue method			#930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
 Class-Method-Modifiers-2.15-0	140-lvalue.t	9	after with lvalue and prototype correctly assigns	undef	'4'	#930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
-Data-Dump-1.25-0	dd.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#1573 (Data::Dump rendering)
-Data-Dump-1.25-0	dump.t	35			"bless(do{\\(my $o = \x5B)}, \"foo\")"	#1511 B (`bless \$sv` marks the REFERENT blessed, not the reference — ref model)
-Data-Dump-1.25-0	dump.t	36			"bless({\n  a   => 1,\n  aa  => \"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\",\n  aaa => bless(do{\\(my $o = \x5B)}, \"foo\"),\n}, \"foo\")\n"	#1511 B (`bless \$sv` marks the REFERENT blessed, not the reference — ref model)
 Data-Dump-1.25-0	glob.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1574 ("Undefined subroutine &IO::Socket::UNIX::AF_UNIX" — a Socket constant the shim does not export)
 Data-Dump-1.25-0	quote-unicode.t	5			"(\"\\x{FFF}\\x{100FF}\" x 30)"	#1573 (Data::Dump rendering: the "x 30" repeat form of a wide string)
-Data-Dump-1.25-0	ref.t	2			"do {\n  my $a = { C1 => \\\\do{my $fix}, C2 => 'fix' };\n  ${${$a->{C1}}} = $a->{C1};\n  $a->{C2} = ${$a->{C1}};\n  $a;\n}\n"	#1573 (Data::Dump rendering: the \do{my $fix} cycle-fixup form)
-Data-Dump-1.25-0	regexp.t	1			"{\n  a => qr/Foo/,\n  b => qr|abc/|si,\n  c => qr/ foo /x,\n  d => qr/foo/msix,\n  e => qr//,\n  f => qr/\n            # hi there\n            how do this look\n          /x,\n  g => qr|///////|,\n  h => qr#/|,:#,\n  i => qr/\\/|,:#/,\n}\n"	#1573 (Data::Dump rendering: qr// literals)
-Data-Dump-1.25-0	scalar-obj.t	1				#1573 (Data::Dump rendering: a blessed scalar)
-Data-Dump-1.25-0	scalar.t	1				#1573 (Data::Dump rendering: scalars)
-Data-Dump-1.25-0	scalar.t	2				#1573 (Data::Dump rendering: scalars)
-Data-Dump-1.25-0	scalar.t	3				#1573 (Data::Dump rendering: scalars)
-Data-Dump-1.25-0	tied.t	1			"{\n  # tied MyTie\n  a => \"va\",\n  b => \"vb\",\n  c => \"vc\",\n  d => \"vd\",\n}\n"	#1573 (Data::Dump rendering: tied containers)
-Data-Dump-1.25-0	tied.t	2			"[\n  # tied MyTie\n  \"v0\" .. \"v3\",\\x6E\n"	#1573 (Data::Dump rendering: tied containers)
+Data-Dump-1.25-0	quote.t	12			"do {\n  require MIME::Base64;\n  MIME::Base64::decode(\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\");\n}"	#2066 (Data::Dump's TRY_BASE64 branch is reachable now that MIME::Base64 loads, and PCL still emits the pack("H*") form)
 File-Which-1.27-0	file_which.t	3	Found test-bin			#1575 (File::Which: the dist's own corpus/ probes — which() misses test-bin entries perl finds)
 File-Which-1.27-0	file_which.t	7	Check test3 for Unix	undef	'corpus/test-bin-unix/test3'	#1575 (File::Which: the dist's own corpus/ probes — which() misses test-bin entries perl finds)
 File-Which-1.27-0	file_which.t	11	Found test-bin			#1575 (File::Which: the dist's own corpus/ probes — which() misses test-bin entries perl finds)
@@ -156,6 +169,7 @@ Role-Tiny-2.002004-0	role-long-package-name.t	0	*FILE*	no TAP rows (rc=0)	TAP ro
 Role-Tiny-2.002004-0	role-tiny-with.t	5	stub exists in consuming class			#135 (role composition: a STUB in the consuming class)
 Role-Tiny-2.002004-0	stub.t	2	stub sub prevents composing matching sub			#135 (role composition: stub subs)
 Role-Tiny-2.002004-0	stub.t	4	composing role includes stub subs			#135 (role composition: stub subs)
+Role-Tiny-2.002004-0	role-basic-composition.t	34	role method applied	'My::Class::Base method'	'My::Does::Basic1 method'	#3001 (a role conflict resolved by a superclass method in one class leaves the inherited method in place when the same role is composed into a SECOND subclass)
 Scalar-List-Utils-1.70-0	dualvar.t	0	*FILE*	no TAP rows (rc=0)	41 row(s)	#1506 (`import constant HAVE_THREADS => 0` in a BEGIN — "Undefined subroutine &main::constant")
 Scalar-List-Utils-1.70-0	exotic_names.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	NS:DynaLoader / XS binary extensions ("Can't locate loadable object for module this module" — XSLoader::load() with no args)
 Scalar-List-Utils-1.70-0	first.t	12	undef active sub	''	to match: ^Can't undef active subroutine	NS:Error message text and format ("Can't undef active subroutine")
@@ -163,20 +177,11 @@ Scalar-List-Utils-1.70-0	getmagic-once.t	1				#1571 (get-magic is fetched more t
 Scalar-List-Utils-1.70-0	getmagic-once.t	3				#1571 (get-magic is fetched more than once per read — the file counts FETCH calls)
 Scalar-List-Utils-1.70-0	getmagic-once.t	4	reftype	'2'	'1'	#1571 (get-magic is fetched more than once per read — the file counts FETCH calls)
 Scalar-List-Utils-1.70-0	getmagic-once.t	5				#1571 (get-magic is fetched more than once per read — the file counts FETCH calls)
-Scalar-List-Utils-1.70-0	head-tail.t	22		''	to match: ^Not enough arguments for List::Util::head	NS:Error message text and format ("Not enough arguments for List::Util::head")
-Scalar-List-Utils-1.70-0	head-tail.t	42		''	to match: ^Not enough arguments for List::Util::tail	NS:Error message text and format ("Not enough arguments for List::Util::head")
-Scalar-List-Utils-1.70-0	lln.t	18	Tied	''	'1'	#155 (NS:tie — looks_like_number on a tied scalar)
-Scalar-List-Utils-1.70-0	openhan.t	4	closed	'*main::CLOSED'	undef	#1571 (openhandle(): a closed bareword handle, an unopened IO::Handle/IO::File and a plain string are misjudged)
-Scalar-List-Utils-1.70-0	openhan.t	13	unopened IO::Handle			#1571 (openhandle(): a closed bareword handle, an unopened IO::Handle/IO::File and a plain string are misjudged)
-Scalar-List-Utils-1.70-0	openhan.t	15	works for IO::File objects			#1571 (openhandle(): a closed bareword handle, an unopened IO::Handle/IO::File and a plain string are misjudged)
-Scalar-List-Utils-1.70-0	openhan.t	16	unopened IO::File			#1571 (openhandle(): a closed bareword handle, an unopened IO::Handle/IO::File and a plain string are misjudged)
-Scalar-List-Utils-1.70-0	openhan.t	20	strings are not filehandles			#1571 (openhandle(): a closed bareword handle, an unopened IO::Handle/IO::File and a plain string are misjudged)
 Scalar-List-Utils-1.70-0	pair.t	5	odd-sized list yields warning from pairgrep	''	to match: ^Odd number of elements in pairgrep at	NS:Warnings-gated diagnostics are absent (#221) + @_ ALIASING in pairgrep/pairmap (NS:`@_` argument aliasing)
 Scalar-List-Utils-1.70-0	pair.t	6	pairgrep aliases elements	'ARRAY(0x1)'	'ARRAY(0x2)'	NS:Warnings-gated diagnostics are absent (#221) + @_ ALIASING in pairgrep/pairmap (NS:`@_` argument aliasing)
 Scalar-List-Utils-1.70-0	pair.t	13	pairmap list returning >2 items	'ARRAY(0x3)'	'ARRAY(0x4)'	NS:Warnings-gated diagnostics are absent (#221) + @_ ALIASING in pairgrep/pairmap (NS:`@_` argument aliasing)
 Scalar-List-Utils-1.70-0	pair.t	15	pairmap aliases elements	'ARRAY(0x5)'	'ARRAY(0x6)'	NS:Warnings-gated diagnostics are absent (#221) + @_ ALIASING in pairgrep/pairmap (NS:`@_` argument aliasing)
 Scalar-List-Utils-1.70-0	pair.t	17	pairmap result has more elements than input	'ARRAY(0x7)'	'ARRAY(0x8)'	NS:Warnings-gated diagnostics are absent (#221) + @_ ALIASING in pairgrep/pairmap (NS:`@_` argument aliasing)
-Scalar-List-Utils-1.70-0	prototype.t	8	@ prototype	undef	'@'	NS:prototype() — returns only registered prototypes (set_prototype/forward declarations)
 Scalar-List-Utils-1.70-0	prototype.t	11	change non existing sub	undef	'$$$'	NS:prototype() — returns only registered prototypes (set_prototype/forward declarations)
 Scalar-List-Utils-1.70-0	prototype.t	12	forward declaration	undef	'$$$$'	NS:prototype() — returns only registered prototypes (set_prototype/forward declarations)
 Scalar-List-Utils-1.70-0	prototype.t	13	change forward declaration	undef	'\%'	NS:prototype() — returns only registered prototypes (set_prototype/forward declarations)
@@ -185,15 +190,8 @@ Scalar-List-Utils-1.70-0	readonly.t	4	string constant			NS:Internals::* C-level 
 Scalar-List-Utils-1.70-0	readonly.t	8	de-reference to constant			NS:Internals::* C-level introspection (Internals::SvREADONLY on constants)
 Scalar-List-Utils-1.70-0	readonly.t	10	reference a constant in a sub			NS:Internals::* C-level introspection (Internals::SvREADONLY on constants)
 Scalar-List-Utils-1.70-0	reduce.t	18	undef active sub	''	to match: ^Can't undef active subroutine	NS:Error message text and format ("Can't undef active subroutine" / "Not a subroutine reference")
-Scalar-List-Utils-1.70-0	reduce.t	22	Not a subroutine reference	'failed'	''	NS:Error message text and format ("Can't undef active subroutine" / "Not a subroutine reference")
-Scalar-List-Utils-1.70-0	reduce.t	23	Not a subroutine reference	'failed'	''	NS:Error message text and format ("Can't undef active subroutine" / "Not a subroutine reference")
 Scalar-List-Utils-1.70-0	reductions.t	5	all the items were destroyed	undef	'5'	#1571 (DESTROY timing: intermediate temporaries are not destroyed when perl destroys them)
 Scalar-List-Utils-1.70-0	reductions.t	7	intermediate temporaries are destroyed after exception	undef	'2'	#1571 (DESTROY timing: intermediate temporaries are not destroyed when perl destroys them)
-Scalar-List-Utils-1.70-0	refaddr.t	6	blessed with overload HASH(0x1)	'10'	'1'	#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
-Scalar-List-Utils-1.70-0	refaddr.t	10	blessed with overload SCALAR(0x2)	'10'	'2'	#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
-Scalar-List-Utils-1.70-0	refaddr.t	14	blessed with overload ARRAY(0x3)	'10'	'3'	#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
-Scalar-List-Utils-1.70-0	refaddr.t	18	blessed with overload GLOB(0x4)	'10'	'4'	#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
-Scalar-List-Utils-1.70-0	refaddr.t	22	blessed with overload CODE(0x5)	'10'	'5'	#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
 Scalar-List-Utils-1.70-0	refaddr.t	24				#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
 Scalar-List-Utils-1.70-0	refaddr.t	25				#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
 Scalar-List-Utils-1.70-0	refaddr.t	26				#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
@@ -202,22 +200,12 @@ Scalar-List-Utils-1.70-0	refaddr.t	28				#1571 (rows 6-22: refaddr must IGNORE a
 Scalar-List-Utils-1.70-0	refaddr.t	29				#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
 Scalar-List-Utils-1.70-0	refaddr.t	30				#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
 Scalar-List-Utils-1.70-0	refaddr.t	31				#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
-Scalar-List-Utils-1.70-0	refaddr.t	32	foo	undef	'8'	#1571 (rows 6-22: refaddr must IGNORE a `0+` overload, PCL numifies through it — 5 rows exposed by s473w #1507; rows 24-32: refaddr identity over the box model)
-Scalar-List-Utils-1.70-0	reftype.t	15	REF ref	'SCALAR'	'REF'	#1571 (reftype: a REF-to-REF answers SCALAR, an IO handle answers undef)
-Scalar-List-Utils-1.70-0	reftype.t	16	REF ref	'SCALAR'	'REF'	#1571 (reftype: a REF-to-REF answers SCALAR, an IO handle answers undef)
-Scalar-List-Utils-1.70-0	reftype.t	17	REF ref	'SCALAR'	'REF'	#1571 (reftype: a REF-to-REF answers SCALAR, an IO handle answers undef)
 Scalar-List-Utils-1.70-0	reftype.t	27	IO ref	undef	'IO'	#1571 (reftype: a REF-to-REF answers SCALAR, an IO handle answers undef)
 Scalar-List-Utils-1.70-0	sample.t	7	the 7 unselected items were destroyed	''	'7'	#1571 (DESTROY timing: unselected items are not destroyed)
 Scalar-List-Utils-1.70-0	sample.t	8	all the items were destroyed	''	'10'	#1571 (DESTROY timing: unselected items are not destroyed)
-Scalar-List-Utils-1.70-0	scalarutil-proto.t	2	set prototype	undef	'$'	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
-Scalar-List-Utils-1.70-0	scalarutil-proto.t	3	return value	''	'CODE(0x1)'	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
-Scalar-List-Utils-1.70-0	scalarutil-proto.t	5	empty prototype	undef	''	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
-Scalar-List-Utils-1.70-0	scalarutil-proto.t	6	@ prototype	undef	'@'	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
 Scalar-List-Utils-1.70-0	scalarutil-proto.t	9	change non existing sub	undef	'$$$'	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
 Scalar-List-Utils-1.70-0	scalarutil-proto.t	10	forward declaration	undef	'$$$$'	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
 Scalar-List-Utils-1.70-0	scalarutil-proto.t	11	change forward declaration	undef	'\%'	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
-Scalar-List-Utils-1.70-0	scalarutil-proto.t	12	not a reference			NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
-Scalar-List-Utils-1.70-0	scalarutil-proto.t	14	set_prototype() on tied CV ref	undef	'$$'	NS:prototype() — returns only registered prototypes (Sub::Util::set_prototype)
 Scalar-List-Utils-1.70-0	subname.t	0	*FILE*	no TAP rows (rc=0)	21 row(s)	NS:DynaLoader / XS binary extensions (Sub::Util::subname needs the XS half)
 Scalar-List-Utils-1.70-0	tainted.t	3	interpreter variable			#1571 (taint is not modelled: Scalar::Util::tainted always answers false)
 Scalar-List-Utils-1.70-0	tainted.t	4	copy of interpreter variable			#1571 (taint is not modelled: Scalar::Util::tainted always answers false)
@@ -236,7 +224,6 @@ Scalar-List-Utils-1.70-0	weak.t	8				#1571 (weaken/isweak: the box model has no 
 Scalar-List-Utils-1.70-0	weak.t	9				#1571 (weaken/isweak: the box model has no weak references)
 Scalar-List-Utils-1.70-0	weak.t	14				#1571 (weaken/isweak: the box model has no weak references)
 Scalar-List-Utils-1.70-0	weak.t	16				#1571 (weaken/isweak: the box model has no weak references)
-Scalar-List-Utils-1.70-0	weak.t	18	$y is weak after weaken()			#1571 (weaken/isweak: the box model has no weak references)
 Sub-Uplevel-0.2800-0	01_die_check.t	1		'Died at /home/bernt/.cpan/build/Sub-Uplevel-0.2800-0/t/01_die_check.t line 16.	'Died at /home/bernt/.cpan/build/Sub-Uplevel-0.2800-0/t/01_die_check.t line 12.	#233 (caller() fidelity; NS:caller() filename and line number)
 Sub-Uplevel-0.2800-0	02_uplevel.t	5	die() not screwed up	'Died at /home/bernt/.cpan/build/Sub-Uplevel-0.2800-0/t/02_uplevel.t line 15.	'Died at /home/bernt/.cpan/build/Sub-Uplevel-0.2800-0/t/02_uplevel.t line 13.	#233 (caller() fidelity; NS:caller() filename and line number)
 Sub-Uplevel-0.2800-0	02_uplevel.t	6	uplevel()	'Sub::Uplevel - /tmp/pcl-nocache-dOGo8b.lisp - 57 - main::foo'	'main - /home/bernt/.cpan/build/Sub-Uplevel-0.2800-0/t/02_uplevel.t - 25'	#233 (caller() fidelity; NS:caller() filename and line number)
@@ -355,12 +342,6 @@ Sub-Uplevel-0.2800-0	03_nested_uplevels.t	101	Case: Call, Wrap(Call) x 3, Wrap(C
 Sub-Uplevel-0.2800-0	03_nested_uplevels.t	102	Case: Call, Wrap(Call) x 3, Wrap(Call) x 3, Wrap(Call) x 3, Wrap(Call)	'main, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Sub::Uplevel'	'main, Call, Call, Call, Call'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — CORE::GLOBAL::caller override + frame hiding)
 Sub-Uplevel-0.2800-0	03_nested_uplevels.t	103	Case: Call, Wrap(Call) x 3, Wrap(Call) x 3, Wrap(Call) x 3, Wrap(Call) x 2	'main, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Sub::Uplevel'	'main, Call, Call, Call, Call'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — CORE::GLOBAL::caller override + frame hiding)
 Sub-Uplevel-0.2800-0	03_nested_uplevels.t	104	Case: Call, Wrap(Call) x 3, Wrap(Call) x 3, Wrap(Call) x 3, Wrap(Call) x 3	'main, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Wrap, Sub::Uplevel, Call, Wrap, Wrap, Wrap, Sub::Uplevel'	'main, Call, Call, Call, Call'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — CORE::GLOBAL::caller override + frame hiding)
-Sub-Uplevel-0.2800-0	04_honor_later_override.t	6	caller from subroutine calls custom routine	'main'	'niam'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — a LATER CORE::GLOBAL::caller override must win)
-Sub-Uplevel-0.2800-0	04_honor_later_override.t	7	caller from uplevel subroutine calls custom routine	'Sub::Uplevel'	'niam'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — a LATER CORE::GLOBAL::caller override must win)
-Sub-Uplevel-0.2800-0	05_honor_prior_override.t	6	custom caller() was used			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — CORE::GLOBAL::caller override)
-Sub-Uplevel-0.2800-0	05_honor_prior_override.t	8	custom caller() was used			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — CORE::GLOBAL::caller override)
-Sub-Uplevel-0.2800-0	05_honor_prior_override.t	9	caller from uplevel subroutine is main	'Sub::Uplevel'	'main'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — CORE::GLOBAL::caller override)
-Sub-Uplevel-0.2800-0	05_honor_prior_override.t	10	custom caller() was used			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — CORE::GLOBAL::caller override)
 Sub-Uplevel-0.2800-0	06_db_args.t	3	wrapper returned args correct	'ARRAY(0x3)'	'ARRAY(0x4)'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — @DB::args from an uplevel frame)
 Sub-Uplevel-0.2800-0	07_uplevel_too_high.t	2	wrapper returned correct caller	'Sub::Uplevel'	'main'	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — an uplevel above the stack top must report main/undef)
 Sub-Uplevel-0.2800-0	07_uplevel_too_high.t	4	wrapper returned correct caller	'Sub::Uplevel'	undef	NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — an uplevel above the stack top must report main/undef)
@@ -415,6 +396,9 @@ Text-Balanced-2.07-0	97_pod.t	0	*FILE*	1..0 # SKIP Author testing only (rc=0)	0 
 Text-Balanced-2.07-0	98_pod_coverage.t	0	*FILE*	1..0 # SKIP Author testing only (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Author testing only")
 Try-Tiny-0.32-0	erroneous_usage.t	6	Unterminated try detected	'try() encountered an unexpected argument (2) - perhaps a missing semi-colon before or	to match: try\(\)\ encountered\ an\ unexpected\ argument\ \(2\)\ \-\ perhaps\ a\ missing\ semi\-colon\ before\ or\ at	NS:Error message text and format (the "Unterminated try" message differs)
 Try-Tiny-0.32-0	finally.t	30	finally ran			#1571 (a `finally` block ordering row)
+Try-Tiny-0.32-0	finally.t	10	warnings from both fatal finally blocks	'0'	'2'	NS:`DESTROY` called by garbage collector + #2370 (PARKED, USER s495) -- since s499j a `-I` copy wins over a non-must-win shim, so the board runs the dist's OWN Try::Tiny, whose finally blocks run from a ScopeGuard DESTROY that PCL does not call at scope exit (probed s515c: under --no-dist-lib the shim gives 29/1, as at s474)
+Try-Tiny-0.32-0	finally.t	11	First warning contains original exception	undef	to match: fin 1 at	NS:`DESTROY` called by garbage collector + #2370 (PARKED, USER s495) -- since s499j a `-I` copy wins over a non-must-win shim, so the board runs the dist's OWN Try::Tiny, whose finally blocks run from a ScopeGuard DESTROY that PCL does not call at scope exit (probed s515c: under --no-dist-lib the shim gives 29/1, as at s474)
+Try-Tiny-0.32-0	finally.t	12	Second warning contains original exception	undef	to match: fin 3 at	NS:`DESTROY` called by garbage collector + #2370 (PARKED, USER s495) -- since s499j a `-I` copy wins over a non-must-win shim, so the board runs the dist's OWN Try::Tiny, whose finally blocks run from a ScopeGuard DESTROY that PCL does not call at scope exit (probed s515c: under --no-dist-lib the shim gives 29/1, as at s474)
 Try-Tiny-0.32-0	given_when.t	0	*FILE*	no TAP rows (rc=0)	2 row(s)	NS:`given`/`when` / smart match (the whole file body is inside a `given` block; the refusal is ruled)
 Try-Tiny-0.32-0	global_destruction_load.t	0	*FILE*	1..0 # SKIP Capture::Tiny 0.12 required (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "Capture::Tiny 0.12 required")
 Try-Tiny-0.32-0	named.t	1	try name	'Try::Tiny::try'	'main::try {...} '	#1571 (a sub name from Sub::Util::subname is the shim's, not "main::try {...}")

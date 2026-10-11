@@ -1,0 +1,36 @@
+# THE CPAN BOARD'S POPULATION -- versioned (s515c, task #2950).  Read by
+# tools/cpan-board.sh TREE OUTPREFIX, which every board run uses (the agents'
+# legs, Fable's merge legs and the shared base result alike), so the list can
+# never drift between two copies of a shell loop again.  The blessed row
+# baseline is baselines/cpan-board14-fails.tsv (its NAME is kept: the tooling
+# and the docs point at it; its population is THIS file's).
+#
+# Columns (TAB-separated):
+#   dist   <TAB> flags <TAB> joined <TAB> why
+# dist  = a directory name under ~/.cpan/build, or a repo-relative path (it
+#         contains a `/`) resolved against the TREE being measured.
+# flags = `-` or `--no-dist-lib` (the dist's lib/ is NOT put on @INC: an
+#         XS-stubbed dist whose lib/ would shadow PCL's must-win shim).
+# joined = the session the dist joined the board.
+# why   = one line: what the dist exercises.
+#
+# HOW A DIST JOINS (docs/cpan-release-plan.md "Widening the board"): run it
+# ALONE through tools/cpan-scoreboard.pl --jobs 2 --timeout 120 --rows; read
+# EVERY failing row's got/expected; probe the cause vs perl; cite a task or
+# file one; add the rows BY HAND with their causes to cpan-board14-fails.tsv;
+# a TIMEOUT gets its hang filed and a `*FILE*` row; then add the line here and
+# re-run the whole board once (0 NEW / 0 FIXED against the blessed rows).
+Algorithm-Diff-1.201-0	-	s343	the LCS algorithm, OO + closures
+Capture-Tiny-0.50-0	-	s343	fd dup/redirect, tied handles, fork-free capture
+Class-Inspector-1.36-0	-	s343	symbol-table introspection, %INC
+Class-Method-Modifiers-2.15-0	-	s343	glob assignment, around/before/after wrappers
+Data-Dump-1.25-0	-	s343	the dumper: quoting, numbers, refs
+File-Which-1.27-0	-	s343	PATH search, File::Spec
+Mojo-DOM58-3.002-0	-	s343	a large regex-driven HTML parser
+Role-Tiny-2.002004-0	-	s343	role composition, stash manipulation
+Safe-Isa-1.000010-0	-	s343	method calls on non-objects
+Sort-Versions-1.62-0	-	s343	sort blocks, version compare
+Sub-Uplevel-0.2800-0	-	s343	CORE::GLOBAL::caller override
+Text-Balanced-2.07-0	-	s343	pos/regex extraction
+Try-Tiny-0.32-0	-	s343	exceptions, local $@ (the dist's own Try::Tiny: -I wins, s499j)
+Scalar-List-Utils-1.70-0	--no-dist-lib	s343	PCL's List::Util / Scalar::Util / Sub::Util shims (the dist's lib/ is the XS module)
