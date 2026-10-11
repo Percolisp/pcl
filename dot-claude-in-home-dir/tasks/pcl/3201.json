@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515a (Opus 5.5, 2026-10-11) from the #3184 oracle (review/p515a/tagimport.pl).\n\n    use FindBin; use lib \"$FindBin::Bin/lib\";\n    use TagMod qw(:all);            # lib/TagMod.pm: sub f0 ($)\n    print f0 \"a\", \"\\n\";\nperl: f0(a).  PCL: f0(a,\\n) and a detector line -- Parser2::_premerge_include_prototypes seeds inc_paths only from LITERAL `use lib` strings (an interpolated path is run-time computed, #235), so TagMod is never found at parse time; with PERL5LIB=<that dir> the program = perl.  $FindBin::Bin IS a static fact (the script's own directory), but naming FindBin in Pl/ is the rule-9a smell: the fix needs a generic mechanism (e.g. a facts entry that says a variable is the script's directory) or a ruling.  The idiom is everywhere in CPAN t/ files and scripts.",
+   "id" : "3201",
+   "status" : "pending",
+   "subject" : "`use lib \"$FindBin::Bin/lib\"` is not on the TRANSPILE-time search list: a module in the script's own lib/ is never read at parse time, so its prototypes / tags / overrides are unknown"
+}

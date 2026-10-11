@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515a (Opus 5.5, 2026-10-11) from the #3184 guard negatives.\n\n    BEGIN { my $m = \"TagMod\"; eval \"use $m qw(f0)\" }   # f0 has prototype ($)\n    my @x = (\"a\", \"b\"); print f0(@x), \"\\n\";\nperl 5.40.3: f0(2) (the import ran at BEGIN, before the call was parsed).  PCL: f0(a,b) -- the body is computed, so the static read (Pl::Parser::use_statements_of, literal shape only) cannot see it, and PCL_DETECT=announce prints NOTHING for this site (the detector does not see an install made by a string eval?).  Fixture: Pl/t/lib/TagMod.pm.  Two halves: (a) why the detector is silent here; (b) whether anything static is possible (no -- a computed name; the detector is the route).",
+   "id" : "3200",
+   "status" : "pending",
+   "subject" : "a sub imported by a COMPUTED BEGIN-time string eval (BEGIN { my $m = 'M'; eval \"use $m qw(f)\" }) is parsed without its prototype, and the #2610 detector does not name the site"
+}

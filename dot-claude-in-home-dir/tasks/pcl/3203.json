@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515a (Opus, 2026-10-11) from #3185's edge probes.  PRE-EXISTING (same output on s514f's tip 8c683ae6).\n\n`local *STDOUT` does not localize the glob's IO slot (tie-aggregates.md section 7: only a tie PLACEHOLDER made inside the scope is undone), so a tie of an OPENED handle inside `local *STDOUT` keys on the real STDOUT stream and SURVIVES the scope: every later print goes to the tie object.\n\n    package Obj; sub TIEHANDLE { bless {}, shift } sub PRINT { 1 }\n    package main;\n    { local *STDOUT; tie *STDOUT, 'Obj'; print \"hidden\\n\"; }\n    print \"end\\n\";\n\nperl 5.40.3: `end`.   PCL: nothing (silent wrong; rc 0).\n\nFix direction: %p-glob-restore-tied-io (the local *FH undo) should also drop a tie record made inside the scope on a stream that was the glob's IO at the save (record the tie's owner glob + a scope serial), or `local *FH` should localize the IO slot for real (perl does: inside the scope *STDOUT has no IO at all, so the tie gets a placeholder).  Probe the Capture::Tiny `local *STDOUT` shapes before choosing.\n",
+   "id" : "3203",
+   "status" : "pending",
+   "subject" : "a tie made inside { local *STDOUT; ... } on an OPENED handle survives the scope -- later prints go to the tie object (silent)"
+}

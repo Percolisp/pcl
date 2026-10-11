@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515a (Opus 5.5, 2026-10-11) from the #3063 acceptance (the 6 rows of t/67_emptrow.t left after the hang fix; PRE-EXISTING on the base 8c683ae6).\n\n    use Text::CSV qw(csv);   # PERL5LIB=cpan-tests/modules/Text-CSV-2.04/lib\n    # FILE = \"a,b,c,d\\n1,2,0,4\\n\"\n    my $r = csv(auto_diag => 0, in => FILE, bom => 1);\n    print join(\",\", sort keys %{$r->[0]}), \"\\n\";\nperl: a,b,c,d.  PCL: SCALAR(0x1) (one key).  Without bom => 1 the keys are right.  Probe: scratch/s515a/pr/m3h0.pl in the s515a worktree.  Next step: Text::CSV_PP::header with bom (the BOM-sniff path reads the first line through a scalar ref / in-memory handle).",
+   "id" : "3202",
+   "status" : "pending",
+   "subject" : "Text::CSV csv(in => FILE, bom => 1) builds its header keys as 'SCALAR(0x..)' -- every row's hash is keyed by a stringified scalar ref (Text-CSV 67_emptrow.t H rows)"
+}
