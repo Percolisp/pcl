@@ -1173,6 +1173,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-detect-declare` | function | `(sym proto)` | — | — | — | — | — | — | — |
 | `p-detect-end` | function | `(unit)` | — | — | — | — | — | — | — |
 | `p-detect-table` | function | `(unit calls defs)` | — | — | — | — | — | — | — |
+| `p-ensure-class` | macro | `(name)` | — | — | — | — | — | — | — |
 | `p-eof-argv` | function | `nil` | — | — | — | — | — | — | — |
 | `p-import-builtins` | function | `(&rest names)` | — | — | — | — | — | — | — |
 | `p-scope-close` | macro | `((&rest handles) &body body)` | — | — | — | — | — | — | — |
