@@ -130,6 +130,8 @@ In round 43 (s513e): `s///g` runs its own match loop and builds the result in on
 In round 44 (s513h): every `print` / `say` with one to three items takes a fixed-arity entry and allocates no argument list (#2771, fhprint 0.183 s -> 0.149 s, `print $fh "x\n"` -31 %).
 In round 44 (s513h), found on the way: `local $g` on a package global, and every iteration of `for $g (...)` over one, wrote the variable's cell through SBCL's checked setter, which consults its info database on every write (#3040, localvar -27 %, `for our $x` -38 %).
 In round 45 (s514c): a `package X;` statement inside a sub body redefined its CLOS class every time the sub ran -- the one class site without the readiness guard, and Moo's generated accessors are exactly that shape -- so it now takes the guarded form (#3120, moo-objs 1.70 s -> 0.57 s whole run, its loop -83 %).  Measured under the bar and filed: a char class as one 256-bit table (#3121, json-rt -10 %) and p-map over the storage vector (#3122, mapmulti -9 %).
+In round 46 (s515b): a map block whose value is a literal list (`map { ($_, $_ * 2) } ...`) hands the list over to p-map-flat instead of building a vector per iteration (#3122, mapmulti -28 % whole run).
+In round 46 (s515b): a double's `%.15g` text and sprintf's `%.Nf` text are written in place in one string, the exponent guess is a typed `log`, and sprintf skips its flag scans on empty flags (#3220, fprint -27 % whole run).  Measured and filed: a direction memo for print is unsound (close changes the answer, #2882); `print` keeps `$_` boxed in a range loop (#3221, fhprint -27 % if ruled); emptysub's prologue levers (#3041, -4.6 %).
 
 ## 3. What is NOT cheap
 
