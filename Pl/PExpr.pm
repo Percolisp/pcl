@@ -4568,6 +4568,27 @@ sub handle_subcalls {
         # Nothing follows → it's an argument, not a filehandle
       }
 
+      # #2920: after a bareword HANDLE a TERM is expected, so `*` there starts
+      # a GLOB, never a multiplication -- `print STDERR * 2, "\n"` prints
+      # *main::2 to STDERR, and an unknown `FOO` is the never-opened handle
+      # (perl prints nothing and goes on).  PPI lexes the digit / bareword
+      # name apart from its `*` (Operator + Number/Word), which the list below
+      # had no case for, so the whole statement was DROPPED.  The pair becomes
+      # the one glob Symbol `*NAME` (the spelling PPI gives `*FOO` with no
+      # space, which already lowers).  NOT for a word this file declares as a
+      # sub: perl CALLS it there (`sub FOO {3} print FOO *2` is FOO(*2)), and
+      # the handle reading would turn a loud drop into a silent wrong (#3182).
+      if ($is_fh && $self->is_word($maybe_fh) && $fh_end + 2 <= $end_pars
+          && $self->_bareword_callable_here($maybe_fh->content, $maybe_fh) ne 'yes') {
+        my ($star, $nm) = @$e[$fh_end + 1, $fh_end + 2];
+        if (ref($star) eq 'PPI::Token::Operator' && $star->content eq '*'
+            && ((ref($nm) eq 'PPI::Token::Number' && $nm->content =~ /\A[0-9]+\z/)
+                || (ref($nm) eq 'PPI::Token::Word' && $nm->content =~ /\A\w+(?:::\w+)*\z/))) {
+          splice @$e, $fh_end + 1, 2, PPI::Token::Symbol->new('*' . $nm->content);
+          $end_pars--;
+        }
+      }
+
       if ($is_fh) {
         my($fh_node, $fh_id) = $self->make_node_insert('filehandle');
 

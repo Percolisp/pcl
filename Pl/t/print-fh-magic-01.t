@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 38;
+plan tests => 39;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -658,3 +658,18 @@ PL
    "[0A0B]\nC0|I0J\n[0A0B]\nC0|I0J\n[1A1B]\nC1|I1J\n[0.5A0.5B]\nC0.5|I0.5J\n"
  . "[0A0B]\nC0|I0J\n[AB]\nC|IJ\n[AB]\nC|IJ\nx<ov>y<ov>\nref ok\nL-MN0O\nPQ0\nR|S\n",
    '$, and $\\ are used when DEFINED: the number 0 separates and terminates (#2778)';
+
+# #2920 (s514f): after a bareword HANDLE a term is expected, so `*` there
+# starts a GLOB (`*2` / `* 2` / `* Foo::bar`), and an unknown ALL-CAPS word is
+# the never-opened handle -- perl prints nothing to it and goes on.  The
+# statement used to be DROPPED (Fell through) and die at run time.  A constant
+# keeps the multiplication.  Expected = perl 5.40.3 (probed s514f).  Inverse:
+# rows die on the base 8f2fa11c.
+is(run_cl(<<'PL'), "*main::2\n*main::2\n*Foo::bar\nend\n6\n",
+print STDOUT *2, "\n";
+open(FH, ">&STDOUT"); print FH * 2, "\n"; close FH;
+print STDOUT * Foo::bar, "\n";
+print FOO * 2, "\n"; print "end\n";
+use constant K => 3; print K * 2, "\n";
+PL
+   '#2920 print HANDLE *NAME is a glob; an unknown bareword handle prints nothing; a constant still multiplies');
