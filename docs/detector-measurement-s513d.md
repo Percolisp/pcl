@@ -127,7 +127,8 @@ the durable copy: the gate's 53 sites in full, and the per-name tables of the ot
 The USER's ruling became the default (ir-spec §9.3c): every program and module
 unit carries the table, and a disagreement is ANNOUNCED once per call site per
 process on stderr (`PCL_DETECT=die` dies trappably, `=off` is silent, `=log`
-keeps §1's line).  The known-harmless shapes are never announced: shape 1 (a
+keeps §1's line) -- the default from s514d until the USER ruling of 2026-10-11
+(§7: the default is now `off`).  The known-harmless shapes are never announced: shape 1 (a
 nullary `()` sub where the compiler read an unknown bareword term) and shape 5
 (a call parsed against the unit's own definition's prototype that the registry
 lost).  Cost of the table: warm one-liners interleaved best-of-10, base vs
@@ -194,7 +195,13 @@ the bare key.  What is left that is NOISE is one cause, #3184: an export TAG's
 list is read statically, and both remaining tags are built in a way the read
 does not follow (Encode's `[ @EXPORT, @EXPORT_OK ]`; Text::Balanced's `&name`
 entries).  With #3184 the gate would announce 0 and the board 18 -- every
-remaining line a real displaced built-in.  Everyday: the only unit still announcing is
+remaining line a real displaced built-in.
+
+**THE DEFAULT FLIPPED TO `off` on these numbers (USER ruling 2026-10-11,
+s515):** with PCL_DETECT unset no table registers; `PCL_DETECT=announce|die|log`
+opts in.  The condition for returning to `announce` is #3184 closing (the gate's
+32 and 41 of the board's 59 sites are that one gap; the rest -- everyday 17,
+board 18 -- are real displaced built-ins).  Everyday: the only unit still announcing is
 core File/Copy.pm (§6 named two programs with a line: File-Compare-Copy and
 Math-BigInt-BigFloat; the Math::BigInt ones are gone).
 

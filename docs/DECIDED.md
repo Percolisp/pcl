@@ -478,6 +478,7 @@ not-supported.md → only then probe.*
 - **a lone `\` left at the end of a string after `$\` is literal text; an interpolation scan step that consumes nothing DIES** (#3142, was a hang).
 - **a run-time `package X;` switch never sets parents** (#3140): the nested-switch path emits `p-ensure-class` (create when absent); `use base`/`use parent` after it qualifies class + @ISA through ONE predicate `Parser::_reader_pkg_differs` (shared with the `use` :into target).  ir-spec.
 - **after a bareword print HANDLE a `*` starts a glob** (#2920); not for a declared sub (perl calls it: #3182).  #2961 already right on main (guard row only).
+- **the detector's DEFAULT is `off`** (USER ruling 2026-10-11, s515): unset PCL_DETECT registers no table; `announce|die|log` opt in; back to `announce` when #3184 closes.  ir-spec §9.3c.
 - fillers #2950 #2646 NOT done (budget).  Filed #3180 #3181 #3182 #3183 #3184 (#3184 = all 32 detector sites the gate still announces: an export TAG import); #3185 (a tied handle whose object fdopens the tied handle recurses -- Capture-Tiny 13/14).
 
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)

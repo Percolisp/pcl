@@ -5032,9 +5032,9 @@ the run-time mode `PCL_DETECT` decides what it does:
 
 | `PCL_DETECT` | a disagreement |
 |---|---|
-| unset / `announce` | ONE stderr line per call site per process, the run continues: `PCL: FILE line N: 'PKG::NAME' was parsed as <how> but code that ran at line L installed a sub with prototype (P); set PCL_DETECT=die to stop here` |
+| `announce` | ONE stderr line per call site per process, the run continues: `PCL: FILE line N: 'PKG::NAME' was parsed as <how> but code that ran at line L installed a sub with prototype (P); set PCL_DETECT=die to stop here` |
 | `die` | a perl-shaped, trappable die at the install: `'PKG::NAME' was parsed as <how> but … at FILE line N.` |
-| `off` | nothing; the table is not even registered |
+| unset / `off` | nothing; the table is not even registered.  THE DEFAULT since the USER ruling of 2026-10-11 (s515): off until #3184 (an export-TAG import does not carry its subs' prototypes) closes, because after #3143 the gate's 32 announced sites and 41 of the board's 59 are that one gap; then the default returns to `announce` |
 | `log` (or `PCL_DETECT_LOG` alone) | the s513d measurement line appended to the file `PCL_DETECT_LOG` names |
 
 Any other value dies naming it.  The KNOWN-HARMLESS disagreements are never

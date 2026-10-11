@@ -16,7 +16,8 @@
 # That LOG mode (PCL_DETECT_LOG, or PCL_DETECT=log) is the measurement: the
 # rows below check that the programs' own output is untouched.  The s514d rows
 # at the end are the production FLAG (USER ruling, DECIDED ## s513): one stderr
-# line per site per process by default, PCL_DETECT=die dies trappably,
+# line per site per process under PCL_DETECT=announce (the default until
+# 2026-10-11; now OFF until #3184 closes), PCL_DETECT=die dies trappably,
 # PCL_DETECT=off is silent, the harmless nullary-constant shape is never
 # announced, and a string eval carries no table.
 #
@@ -42,7 +43,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 19;
 
 # The instrument's emission must never reach the shared module cache.
 my $cache = tempdir(CLEANUP => 1);
@@ -142,8 +143,8 @@ is_deeply($log, [], '... and logs nothing: every install is one the compiler saw
 }
 
 # ---- production mode: the FLAG (USER ruling, DECIDED ## s513) -----------
-# Run with PCL_DETECT set (or unset = announce) and NO log; return
-# (stdout, [the PCL: detector lines of stderr]).
+# Run with PCL_DETECT set (or unset = off, USER 2026-10-11) and NO log; return
+# (stdout, [the PCL: detector lines of stderr], the whole stderr text).
 sub flag_run {
     my ($code, $mode) = @_;
     my $pl = write_pl($code);
@@ -161,10 +162,10 @@ sub flag_run {
     my $out = `sbcl @sbcl_rt --load $cl_file 2>$err`;
     $out =~ s/^;.*\n//gm;
     $out =~ s/^PCL Runtime loaded\n//gm;
-    my @lines;
-    if (open my $eh, '<', $err) { @lines = grep { /^PCL: / } <$eh>; chomp @lines }
+    my (@lines, $all);
+    if (open my $eh, '<', $err) { local $/; $all = <$eh>; @lines = grep { /^PCL: / } split /^/m, $all; s/\n\z// for @lines }
     s/^PCL: \S+ line/PCL: FILE line/ for @lines;    # the unit is a temp file name
-    return ($out, \@lines);
+    return ($out, \@lines, $all // '');
 }
 
 # Two call sites below the install, one of them in a loop; a nullary constant
@@ -186,14 +187,21 @@ PL
 
 my $SITE = "was parsed as a call of a sub it did not know but code that ran at line 5 "
          . "installed a sub with prototype (\$); set PCL_DETECT=die to stop here";
-($out, $log) = flag_run($FLAG);
-is($out, "A:a\nA:c\nA:c\nk\neval [y]\n", 'announce (the default): the run continues, output untouched');
+($out, $log) = flag_run($FLAG, 'announce');
+is($out, "A:a\nA:c\nA:c\nk\neval [y]\n", 'PCL_DETECT=announce: the run continues, output untouched');
 is_deeply($log, ["PCL: FILE line 6: 'main::do_it' $SITE", "PCL: FILE line 8: 'main::do_it' $SITE"],
           'announce: two call sites are two lines, the loop is one; the harmless constant and the eval are silent');
 
 my ($out_off, $log_off) = flag_run($FLAG, 'off');
 is($out_off, $out, 'PCL_DETECT=off: the same output ...');
 is_deeply($log_off, [], '... and not one line');
+
+# THE DEFAULT IS OFF (USER ruling 2026-10-11, s515: off until #3184, the
+# export-tag import gap, closes).  Inverse: on main 403009eb the unset default
+# announces, so the stderr row fails there.
+my ($out_def, undef, $err_def) = flag_run($FLAG);
+is($out_def, $out, 'PCL_DETECT unset (the default, off): the same output ...');
+is($err_def, '', '... and stderr EMPTY');
 
 my $DIE = <<'PL';
 BEGIN {

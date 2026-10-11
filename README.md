@@ -283,9 +283,10 @@ a program whose side effects must happen only once. See
 
 PCL also watches, while a program runs, for a parse it made that code run
 at compile time contradicts: a `BEGIN` block or an import that installs a
-sub with a prototype after a call to it was already parsed. It prints one
-stderr line naming the site and continues; `PCL_DETECT=die` stops there
-and `PCL_DETECT=off` silences it.
+sub with a prototype after a call to it was already parsed. It is OFF by
+default for now (until one compiler gap, task #3184, is closed, most of what
+it reports is noise): `PCL_DETECT=announce` prints one stderr line naming
+the site and continues, and `PCL_DETECT=die` stops there.
 
 [`docs/not-supported.md`](docs/not-supported.md) has the complete list.
 

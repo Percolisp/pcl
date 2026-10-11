@@ -381,7 +381,7 @@ survives an uninstall; `pcl --clear-cache` empties it.
 | `PCL_CORE=path` | use this saved core |
 | `PCL_NO_CORE=1` | never build or use a cached core (an installed one still counts) |
 | `PCL_OPT` | switch named optimizations off: `PCL_OPT=none` is the fully generic compiler, `PCL_OPT=-raw-numeric,-str-buffer` names individual ones; a misspelled name dies, listing the known ones |
-| `PCL_DETECT` | what to do when a parse the compiler made is contradicted by a sub that code run at compile time installed (a `BEGIN`-time prototype, an import the compiler could not see): `announce` (the default: one stderr line per call site per process, then continue), `die` (stop there, perl-shaped and trappable), `off`, `log` (the measurement format) |
+| `PCL_DETECT` | what to do when a parse the compiler made is contradicted by a sub that code run at compile time installed (a `BEGIN`-time prototype, an import the compiler could not see): `off` (the DEFAULT, USER ruling 2026-10-11: off until task #3184 closes), `announce` (one stderr line per call site per process, then continue), `die` (stop there, perl-shaped and trappable), `log` (the measurement format) |
 | `PCL_ROOT` | where an installed command looks for its runtime tree (an escape hatch for packagers; normally every command finds its tree beside its own real path) |
 | `PCL_MEM_CAP_MB` | address-space cap for a `pl2cl` process (default 4096) |
 | `PCL_SHOW_SBCL=1` | print the exact `sbcl` command each run starts |
