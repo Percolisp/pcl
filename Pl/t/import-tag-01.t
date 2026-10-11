@@ -39,7 +39,7 @@ my $libdir  = "$RealBin/lib";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 sub write_pl {
     my ($code) = @_;
@@ -120,3 +120,9 @@ both_agree('BEGIN { eval q{ use TagMod qw(f0) } } my @x = ("a", "b"); print f0(@
 # not depend on the prototype still agrees.
 both_agree('BEGIN { my $m = "TagMod"; eval "use $m qw(f0)" } print f0("a"), "\n";',
            'NEGATIVE: a computed eval body is unread; a paren call still runs');
+
+# ---- a module the prototype scan SKIPS for cost (#3205) ---------------------
+# Every IO:: module is skipped by name; a facts overlay states its prototypes.
+# `isaFilename($)`: perl passes ONE argument, so the list has 2 elements.
+both_agree('use IO::Compress::Base::Common 2.212; my @r = (isaFilename "x", "y"); print scalar(@r), " ", STATUS_ERROR + 1, "\n";',
+           'a skipped module\'s prototypes come from its facts overlay');

@@ -194,7 +194,9 @@ and with which prototype.  (3) Write `lib/PCL/Facts/<Module/Path>.pm` with
 the declaration and its comment; `tools/tag-license` it.  (4) Re-run the
 detector: the name must be GONE from the log -- if it is still there as a
 disagreement, the overlay's prototype is wrong.  Shipped today: File::Path,
-Sub::Quote, Moo::_Utils, IO::Socket::UNIX, Text::Wrap, Capture::Tiny.
+Sub::Quote, Moo::_Utils, IO::Socket::UNIX, Text::Wrap, Capture::Tiny, File::Glob,
+IO::Compress::Base::Common (s515a, #3205: the prototype scan skips every `IO::`
+module by name, so its `($)` subs reached callers unprototyped).
 
 ## Proposed, not built
 
