@@ -26,6 +26,10 @@
 #   0 FIXED); re/regex_sets_compat.t 414 rows all still failing + 63 NEW that are #2646 (pre-dates #2633: byte-identical
 #   fail set at fca715fb), left reported, never blessed; the five TIMEOUT wrappers are not row-comparable (load-dependent
 #   cut-off, #326); _nonull skips itself (XS::APItest).
+#   s515a (#2646 CLOSED): the 63 re/regex_sets_compat.t rows ADDED by edit, cause NS `(?[ ])` -- bisected (one-file
+#   runs on extractions 97190ddc..fca715fb) to 894d4d79 (s496a, #2372: a regex that cannot compile DIES at the match
+#   instead of warn + no-match).  The wrapper rewrites a bracketed `n` (no-match) re_tests line into `(?[ ... ])`; the old
+#   warn-and-return-false counted as a no-match PASS -- the 63 passed on nothing.  Honest failures now.
 # s504 (2026-10-02, Fable) -- the OWED bookkeeping of task #2389, from ONE quiet FULL companion run on main
 #   b7ec0093 (~/pcl-agent-scratch/s504/companion/run.log: ROW DIFF 492 NEW / 1878 FIXED / 16 LOST) and an
 #   attribution of every mover over 22 `git archive` extractions of main's merge points (s504/attrib/table.txt).
@@ -7807,12 +7811,15 @@ re/reg_pmod.t	81	ok	(missing)	s/345/: ^POSTMATCH is undef	#2635
 re/reg_pmod.t	84	ok	(missing)	s/345/: ^POSTMATCH length	#2635
 re/reg_pmod.t	79	ok	(missing)	s/345/: ^PREMATCH is undef	#2635
 re/reg_pmod.t	82	ok	(missing)	s/345/: ^PREMATCH length	#2635
+re/regex_sets_compat.t	99	ok	not ok	#99	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	100	ok	not ok	#100	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	101	ok	not ok	#101	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	102	ok	not ok	#102	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	103	ok	not ok	#103	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	104	ok	not ok	#104	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	105	ok	not ok	#105	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	106	ok	not ok	#106	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	107	ok	not ok	#107	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	108	ok	not ok	#108	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	109	ok	not ok	#109	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	110	ok	not ok	#110	NS:Regex extended character classes `(?[ ... ])`
@@ -7820,13 +7827,22 @@ re/regex_sets_compat.t	111	ok	not ok	#111	NS:Regex extended character classes `(
 re/regex_sets_compat.t	112	ok	not ok	#112	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	116	ok	not ok	#116	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	117	ok	not ok	#117	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	118	ok	not ok	#118	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	119	ok	not ok	#119	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	120	ok	not ok	#120	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	121	ok	not ok	#121	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	122	ok	not ok	#122	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	168	ok	not ok	#168	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	169	ok	not ok	#169	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	170	ok	not ok	#170	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	171	ok	not ok	#171	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	172	ok	not ok	#172	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	173	ok	not ok	#173	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	174	ok	not ok	#174	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	175	ok	not ok	#175	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	176	ok	not ok	#176	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	177	ok	not ok	#177	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	178	ok	not ok	#178	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	179	ok	not ok	#179	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	222	ok	not ok	#222	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	225	ok	not ok	#225	NS:Regex extended character classes `(?[ ... ])`
@@ -7849,14 +7865,19 @@ re/regex_sets_compat.t	255	ok	not ok	#255	NS:Regex extended character classes `(
 re/regex_sets_compat.t	256	ok	not ok	#256	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	257	ok	not ok	#257	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	258	ok	not ok	#258	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	259	ok	not ok	#259	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	276	ok	not ok	#276	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	277	ok	not ok	This could match on EBCDIC if A-Z not excluding things in middle	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	278	ok	not ok	#278	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	293	ok	not ok	#293	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	298	ok	not ok	#298	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	301	ok	not ok	#301	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	303	ok	not ok	#303	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	322	ok	not ok	#322	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	323	ok	not ok	#323	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	373	ok	not ok	#373	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	374	ok	not ok	#374	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	375	ok	not ok	#375	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	376	ok	not ok	#376	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	377	ok	not ok	#377	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	378	ok	not ok	#378	NS:Regex extended character classes `(?[ ... ])`
@@ -7864,7 +7885,10 @@ re/regex_sets_compat.t	379	ok	not ok	#379	NS:Regex extended character classes `(
 re/regex_sets_compat.t	380	ok	not ok	#380	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	384	ok	not ok	#384	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	385	ok	not ok	#385	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	386	ok	not ok	#386	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	387	ok	not ok	#387	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	388	ok	not ok	#388	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	389	ok	not ok	#389	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	390	ok	not ok	#390	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	421	ok	not ok	#421	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	424	ok	not ok	#424	NS:Regex extended character classes `(?[ ... ])`
@@ -7875,19 +7899,25 @@ re/regex_sets_compat.t	438	ok	not ok	#438	NS:Regex extended character classes `(
 re/regex_sets_compat.t	439	ok	not ok	#439	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	440	ok	not ok	#440	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	441	ok	not ok	#441	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	442	ok	not ok	#442	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	445	ok	not ok	#445	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	446	ok	not ok	#446	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	463	ok	not ok	#463	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	466	ok	not ok	#466	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	468	ok	not ok	#468	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	491	ok	not ok	#491	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	492	ok	not ok	#492	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	584	ok	not ok	#584	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	585	ok	not ok	#585	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	586	ok	not ok	#586	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	587	ok	not ok	#587	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	590	ok	not ok	#590	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	591	ok	not ok	#591	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	643	ok	not ok	#643	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	644	ok	not ok	#644	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	645	ok	not ok	#645	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	646	ok	not ok	#646	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	648	ok	not ok	#648	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	649	ok	not ok	#649	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	650	ok	not ok	#650	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	651	ok	not ok	#651	NS:Regex extended character classes `(?[ ... ])`
@@ -7931,15 +7961,22 @@ re/regex_sets_compat.t	905	ok	not ok	#905	NS:Regex extended character classes `(
 re/regex_sets_compat.t	912	ok	not ok	#912	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	913	ok	not ok	#913	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	914	ok	not ok	#914	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	915	ok	not ok	#915	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	916	ok	not ok	#916	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	917	ok	not ok	#917	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	918	ok	not ok	#918	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	919	ok	not ok	#919	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	920	ok	not ok	#920	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	921	ok	not ok	#921	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	922	ok	not ok	#922	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	923	ok	not ok	#923	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	926	ok	not ok	#926	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	928	ok	not ok	#928	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	930	ok	not ok	#930	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	932	ok	not ok	#932	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	934	ok	not ok	#934	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	936	ok	not ok	#936	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	943	ok	not ok	#943	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	946	ok	not ok	#946	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	950	ok	not ok	#950	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	951	ok	not ok	#951	NS:Regex extended character classes `(?[ ... ])`
@@ -8002,10 +8039,14 @@ re/regex_sets_compat.t	1274	ok	not ok	#1274	NS:Regex extended character classes 
 re/regex_sets_compat.t	1276	ok	not ok	#1276	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1277	ok	not ok	#1277	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1278	ok	not ok	#1278	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1279	ok	not ok	#1279	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1280	ok	not ok	#1280	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1282	ok	not ok	#1282	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1284	ok	not ok	#1284	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1285	ok	not ok	#1285	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1286	ok	not ok	#1286	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1287	ok	not ok	#1287	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1288	ok	not ok	#1288	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1290	ok	not ok	#1290	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1291	ok	not ok	#1291	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1292	ok	not ok	#1292	NS:Regex extended character classes `(?[ ... ])`
@@ -8018,6 +8059,7 @@ re/regex_sets_compat.t	1479	ok	not ok	#1479	NS:Regex extended character classes 
 re/regex_sets_compat.t	1480	ok	not ok	#1480	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1485	ok	not ok	#1485	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1486	ok	not ok	#1486	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1489	ok	not ok	#1489	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1492	ok	not ok	#1492	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1499	ok	not ok	#1499	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1508	ok	not ok	#1508	NS:Regex extended character classes `(?[ ... ])`
@@ -8032,6 +8074,7 @@ re/regex_sets_compat.t	1567	ok	not ok	#1567	NS:Regex extended character classes 
 re/regex_sets_compat.t	1568	ok	not ok	#1568	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1619	ok	not ok	#1619	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1630	ok	not ok	#1630	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1631	ok	not ok	#1631	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1632	ok	not ok	#1632	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1633	ok	not ok	#1633	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1634	ok	not ok	#1634	NS:Regex extended character classes `(?[ ... ])`
@@ -8045,14 +8088,28 @@ re/regex_sets_compat.t	1707	ok	not ok	#1707	NS:Regex extended character classes 
 re/regex_sets_compat.t	1708	ok	not ok	#1708	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1719	ok	not ok	#1719	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1720	ok	not ok	#1720	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1729	ok	not ok	#1729	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1733	ok	not ok	#1733	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1734	ok	not ok	#1734	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1737	ok	not ok	#1737	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1740	ok	not ok	#1740	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1741	ok	not ok	#1741	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1742	ok	not ok	#1742	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1743	ok	not ok	#1743	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1744	ok	not ok	#1744	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1745	ok	not ok	#1745	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1746	ok	not ok	#1746	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1747	ok	not ok	#1747	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1748	ok	not ok	#1748	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1749	ok	not ok	#1749	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1750	ok	not ok	#1750	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1751	ok	not ok	#1751	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1752	ok	not ok	#1752	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1753	ok	not ok	#1753	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1754	ok	not ok	#1754	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1755	ok	not ok	#1755	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1756	ok	not ok	#1756	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1757	ok	not ok	#1757	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1780	ok	not ok	#1780	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1782	ok	not ok	#1782	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1784	ok	not ok	#1784	NS:Regex extended character classes `(?[ ... ])`
@@ -8062,6 +8119,7 @@ re/regex_sets_compat.t	1790	ok	not ok	#1790	NS:Regex extended character classes 
 re/regex_sets_compat.t	1830	ok	not ok	#1830	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1833	ok	not ok	#1833	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1834	ok	not ok	#1834	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1835	ok	not ok	#1835	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1836	ok	not ok	#1836	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1838	ok	not ok	#1838	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1839	ok	not ok	#1839	NS:Regex extended character classes `(?[ ... ])`
@@ -8073,14 +8131,23 @@ re/regex_sets_compat.t	1908	ok	not ok	#1908	NS:Regex extended character classes 
 re/regex_sets_compat.t	1910	ok	not ok	#1910	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1914	ok	not ok	#1914	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1937	ok	not ok	#1937	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1945	ok	not ok	#1945	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1969	ok	not ok	#1969	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1970	ok	not ok	#1970	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1976	ok	not ok	#1976	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1977	ok	not ok	#1977	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1978	ok	not ok	#1978	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	1979	ok	not ok	#1979	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	1996	ok	not ok	#1996	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	2011	ok	not ok	[perl 128420] recursive match with backreferences	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	2016	ok	not ok	#2016	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	2019	ok	not ok	#2019	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	2020	ok	not ok	Note a space char here	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	2021	ok	not ok	#2021	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	2022	ok	not ok	#2022	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	2023	ok	not ok	#2023	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	2025	ok	not ok	#2025	NS:Regex extended character classes `(?[ ... ])`
+re/regex_sets_compat.t	2027	ok	not ok	#2027	NS:Regex extended character classes `(?[ ... ])`
 re/regex_sets_compat.t	2030	ok	(missing)	skipped.  Pattern doesn't contain [brackets]	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regex_sets_compat.t	2031	ok	(missing)	#2031	NS:Code points above U+10FFFF (perl's extended UTF-8)
 re/regex_sets_compat.t	2032	ok	(missing)	#2032	NS:Code points above U+10FFFF (perl's extended UTF-8)
