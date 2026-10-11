@@ -81,6 +81,8 @@
 # 1 -> 0 (row 1 passes, but SBCL's "While evaluating the form" note -- #1970 --
 # has no trailing newline and run-dist-t.pl merges stderr into the TAP, so
 # "ok 1" lands mid-line and is not counted).
+# LEFT BY EDIT (s515c filler, #3246 FIXED): Path-Tiny basic.t 113-118 -- File::Glob::bsd_glob
+# in scalar context now answers the last element, not the count.
 # taken-at: 973bdb1d 2026-10-11
 Algorithm-Diff-1.201-0	base.t	6			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	10			"a h n p"	#1511 A (same hunk-iteration family)
@@ -564,12 +566,6 @@ HTTP-Tiny-0.090-0	190_find_CA.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	PERL-SKIP (
 HTTP-Tiny-0.090-0	200_live.t	0	*FILE*	1..0 # SKIP Only run for $ENV{AUTOMATED_TESTING} (rc=0)	0 row(s)	PERL-SKIP (network test: "Only run for $ENV{AUTOMATED_TESTING}", the dist skips it itself)
 HTTP-Tiny-0.090-0	200_live_local_ip.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	PERL-SKIP (network test: "Only run for $ENV{AUTOMATED_TESTING}", the dist skips it itself)
 HTTP-Tiny-0.090-0	210_live_ssl.t	0	*FILE*	1..0 # SKIP Only run for $ENV{AUTOMATED_TESTING} (rc=0)	0 row(s)	PERL-SKIP (network test: "Only run for $ENV{AUTOMATED_TESTING}", the dist skips it itself)
-Path-Tiny-0.150-0	basic.t	113	double-check of mock_bsd_glob dequoting	'1'	'root'	#3246 (File::Glob::bsd_glob answers the COUNT in scalar context; Test::More's is() is ($$;$))
-Path-Tiny-0.150-0	basic.t	114	double-check of mock_bsd_glob fallback	'1'	'/root'	#3246 (bsd_glob in scalar context answers the count)
-Path-Tiny-0.150-0	basic.t	115	tilde expansion with glob metacharacters in account name: ~i?dont*think*so?	'./~i?dont*think*so?'	'/home/i?dont*think*so?'	#3246 (Path::Tiny's tilde expansion calls bsd_glob in scalar context)
-Path-Tiny-0.150-0	basic.t	116	tilde expansion with glob metacharacters in account name: ~i[dont]{think}so	'./~i[dont]{think}so'	'/home/i[dont]{think}so'	#3246 (bsd_glob in scalar context)
-Path-Tiny-0.150-0	basic.t	117	tilde expansion with glob metacharacters in account name: ~idont{think}so	'./~idont{think}so'	'/home/idont{think}so'	#3246 (bsd_glob in scalar context)
-Path-Tiny-0.150-0	basic.t	118	tilde expansion with glob metacharacters in account name: ~i{dont,think}so	'./~i{dont,think}so'	'/home/i{dont,think}so'	#3246 (bsd_glob in scalar context)
 Path-Tiny-0.150-0	basic.t	122	no exception if assertion succeeds	'Error assert on 't': failed assertion	''	#1575 (path("t")->assert(sub { -d }) is relative and the board does not chdir; passes from the dist root)
 Path-Tiny-0.150-0	basic.t	123	assertion return value			#1575 (relative path; passes from the dist root)
 Path-Tiny-0.150-0	children.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #300 (Path::Tiny builds openr/openw/opena/openrw as closures in `while (my ($k, $v) = each %opens)`; the loop-head `my` is bound once, so every one opens with mode undef -> "<": spew/touch fail "Error open (<)"; probed whilemy.pl)

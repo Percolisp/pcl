@@ -21,7 +21,7 @@ the blessed baselines of the other populations. The speed numbers are in
 | PCL's own regression suite (`Pl/t/`) | **311 files, 10,492 assertions, all passing** (2026-10-12). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
 | perl's own tests, extracted (`perl-tests/`: 108 files from perl 5.40's `t/op`, `t/base` and others) | **18,745 assertions pass, 635 fail (96.7 %)** (2026-10-12). 60 files pass completely; 96 run to the end, 12 stop part-way, and all 108 compile. | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **107 files identical to perl** (2026-09-18). 105 differ for a registered, explained reason (probes of perl's internals, threads, taint and so on; listed in `baselines/perl-suite-expected.tsv`); 258 differ and are the bug queue; 9 do not compile; 3 time out; 31 produce no test output; 12 are too slow for the `--quick` form and are listed as not run; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| pure-Perl CPAN distributions: 14 of them, 183 test files | **85 files pass, 48 partly pass, 50 fail; 2,274 assertions ok, 338 not ok** (2026-09-18; the four Moo-family distributions re-run on 2026-09-19). A partial file ran most of its suite; a failing file has zero passing assertions, and that count includes seven files perl itself skips. Every failing assertion, with its cause, is in [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv). The last blessed snapshot, [`../baselines/cpan-board14-s473w.tsv`](../baselines/cpan-board14-s473w.tsv) of 2026-09-09 (84 / 50 / 49), differs from this run in six files and has not been re-blessed yet | the [board command](#the-cpan-board-command) below |
+| pure-Perl CPAN distributions: 19 of them, 356 test files (five joined 2026-10-11: Text-CSV, Getopt-Long, JSON-PP, HTTP-Tiny, Path-Tiny) | **190 files pass, 67 partly pass, 99 fail; 4,555 assertions ok, 405 not ok** (2026-10-11; the 14-distribution board read 85 / 48 / 50 and 2,274 / 338 on 2026-09-18).  Most of the new distributions' rows are lost to two harness gaps, not to PCL: the board does not run a test from its distribution's directory, and it counts a file that stops early as passing; both are filed. A partial file ran most of its suite; a failing file has zero passing assertions, and that count includes seven files perl itself skips. Every failing assertion, with its cause, is in [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv). The per-file snapshot is [`../baselines/cpan-board-s515c.tsv`](../baselines/cpan-board-s515c.tsv) | the [board command](#the-cpan-board-command) below |
 | statements the compiler cannot translate, counted over six populations (the two perl test sets above, the CPAN board, PCL's shipped `lib/`, the examples and the regression-suite fixtures) | **62 statements in 19 files** (2026-09-18), each classified with its cause; none in PCL's own shipped modules | `tools/drop-census.pl`, compared against [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
 | XS bridge conformance corpus (real perl as the oracle) | 398 pass, 0 fail at its last run (2026-08-03), and `Digest::MD5`'s own `md5-aaa.t` passed 256 of 256 under PCL. Not re-run since: the bridge is being reworked separately | `tools/pcl-conform` |
 
@@ -177,11 +177,14 @@ needs compiled C fails to load.
 
 ## The CPAN board command
 
-The `--no-dist-lib` flag applies to every distribution after it:
-Scalar-List-Utils must not put its own unbuilt XS `lib/` on `@INC`.
+The board's distributions are listed in
+[`../baselines/cpan-board-dists.tsv`](../baselines/cpan-board-dists.tsv)
+(19 since 2026-10-11; how a distribution joins is in
+[`cpan-release-plan.md`](cpan-release-plan.md)).  One command runs them all,
+passing Scalar-List-Utils with `--no-dist-lib` (its own unbuilt XS `lib/` must
+not shadow PCL's shim):
 
 ```
-perl tools/cpan-scoreboard.pl --jobs 8 --timeout 120 --tsv baselines/cpan-board14-NAME.tsv \
-  ~/.cpan/build/{Algorithm-Diff-1.201-0,Capture-Tiny-0.50-0,Class-Inspector-1.36-0,Class-Method-Modifiers-2.15-0,Data-Dump-1.25-0,File-Which-1.27-0,Mojo-DOM58-3.002-0,Role-Tiny-2.002004-0,Safe-Isa-1.000010-0,Sort-Versions-1.62-0,Sub-Uplevel-0.2800-0,Text-Balanced-2.07-0,Try-Tiny-0.32-0} \
-  --no-dist-lib ~/.cpan/build/Scalar-List-Utils-1.70-0
+tools/cpan-board.sh . /tmp/board      # writes /tmp/board.tsv and /tmp/board.rows.tsv
+tools/cpan-scoreboard.pl --diff baselines/cpan-board14-fails.tsv /tmp/board.rows.tsv
 ```

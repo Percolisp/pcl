@@ -106,6 +106,41 @@ fuzzer run a release gate. See `docs/difftest-fuzzer.md`.
 - **ASK before installing** any CPAN module.
 - Keep `not-supported.md` + `cl/skip-registry.lisp` honest; never weaken a test.
 
+## The CPAN board: its population and how a dist joins (s515c)
+
+The board is a BUG FINDER and a GATE, never a scoreboard.  Its population is
+`baselines/cpan-board-dists.tsv` (one line per dist: directory under
+`~/.cpan/build` or a repo-relative path, flags, the session it joined, why);
+every board run is `tools/cpan-board.sh TREE OUTPREFIX`, which reads that list
+(from its own checkout, so a base extraction is measured over the same list) and
+passes the `--no-dist-lib` dists last.  The blessed failing rows are
+`baselines/cpan-board14-fails.tsv` (the name is kept; the population is the
+list file's); compare with `tools/cpan-scoreboard.pl --diff
+baselines/cpan-board14-fails.tsv OUT.rows.tsv`.  Rows enter and leave BY EDIT
+with a cause, never by re-blessing a run.
+
+HOW A DIST JOINS (the s515c recipe):
+1. Run it ALONE: `tools/cpan-scoreboard.pl --jobs 2 --timeout 120 --tsv
+   OUT.tsv --rows OUT.rows.tsv DIST` (a light run).
+2. Compare the PER-FILE counts with real perl's, not only the failing rows: the
+   scoreboard calls a file PASS when its program dies after row 1 (#3241), and
+   the runner does not chdir to the dist root (#1575) -- run each `*FILE*` and
+   short file once FROM THE DIST ROOT (`PERL5LIB=lib pcl t/X.t`) to separate
+   the harness from PCL.
+3. Read every failing row's got/expected; probe the cause vs perl (a minimal
+   program, perl -> base); cite the task or file one with the reproducer.  A
+   cheap discriminator for a suspected primitive: run the file under REAL perl
+   with the primitive forced to PCL's answer (s515c: `*utf8::is_utf8 = sub {1}`
+   reproduced the #1389 rows of Text-CSV and JSON-PP exactly).
+4. Add the rows BY HAND with their causes; a TIMEOUT gets its hang filed and a
+   `*FILE*` row.
+5. Add the line to the list file and re-run the whole board once: 0 NEW / 0
+   FIXED against the blessed rows.
+
+The s515c widening (14 -> 19 dists: Text-CSV, Getopt-Long, JSON-PP, HTTP-Tiny,
+Path-Tiny) is recorded in `docs/session-log.md` (Session s515c) with its
+per-dist cause tables.
+
 ## Release gate (exit criteria)
 - [ ] Every corpus module loads + passes 100% of non-not-supported `t/` tests, 0 crashes.
 - [ ] `prove -j8 Pl/t/` 100% green; sweep fully-passing not regressed.
