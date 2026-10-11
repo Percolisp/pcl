@@ -38,3 +38,4 @@ cpan-tests/modules/Text-CSV-2.04	-	s515c	CSV parsing/writing in pure Perl (Text:
 Getopt-Long-2.58-0	-	s515c	command-line option parsing, in nearly every CLI script
 JSON-PP-4.18-0	-	s515c	JSON encode/decode in pure Perl: numbers vs strings, UTF-8 flags, pack U, booleans
 HTTP-Tiny-0.090-0	-	s515c	the core HTTP client: socket mocks, sprintf, regexes (the live-network files skip themselves)
+Path-Tiny-0.150-0	-	s515c	file paths: File::Spec / File::Temp / Cwd / flock / symlinks / atomic writes
