@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515a (Opus, 2026-10-11) from #2646's bisect.  Implement perl's extended bracketed character classes `(?[ ... ])` (set algebra: + | & - ^ !, nesting, \\p{} operands, whitespace ignored) in the pattern translator -- today a not-supported entry (\"Regex extended character classes\") and a compile DIE at the match (since #2372).\nRows behind it (perl 5.40.3 suite): t/re/regex_sets.t 84 not-ok of 96; t/re/regex_sets_compat.t 2167 perl rows, PCL 1692/337 + 140 missing -- every one of its 477 baseline fail rows carries the NS cause (the wrapper rewrites each re_tests bracketed class into `(?[ ])`).\nProbe: `\"aBd\" =~ /.(?[ [ b ] ])./` -- perl no match; PCL dies \"Character '[' may not follow '(?'\".\n",
+   "id" : "3204",
+   "status" : "pending",
+   "subject" : "implement (?[ ... ]) extended bracketed character classes -- 84 rows of re/regex_sets.t + the 477 NS rows of re/regex_sets_compat.t"
+}

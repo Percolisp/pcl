@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515c (Opus 5.5, 2026-10-11) from the Type-Tiny load probe the s515c brief asked for (`use Type::Tiny; use Types::Standard -all;`).\n\nREPRODUCER (probed vs perl 5.40.3, main code 973bdb1d):\n\n    package Foo::Bar;\n    our $X = 5;\n    sub f { local our $Avoid = 1; return g() }\n    sub g { return defined $Foo::Bar::Avoid ? \"A=$Foo::Bar::Avoid\" : \"undef\" }\n    package main;\n    print Foo::Bar::f(), \" \", Foo::Bar::g(), \"\\n\";\n\nperl: `A=1 undef`.  PCL: `read error during load: too many colons in \"Bar\"` (an SBCL backtrace, nothing runs).\n\nCAUSE: Pl/Parser.pm, the `local our` branch of the local-statement lowering (~line 5040, \"Detect 'local our $var'\") builds the declaration name as \"${pkg}::${var}\" with the RAW package name; the sibling `our` branch ~20 lines above it (~line 3449) already routes through `_cl_pkg_designator($pkg)` with the comment \"Multi-segment package names (Foo::Bar) must be pipe-quoted\".  A second copy that missed the fix (rule 11): the fix is to use the same designator (and the hash init spells `#'equal` where its siblings spell `'equal` -- harmless, but the same copy).  Single-segment packages are unaffected (the name has one `::`).\n\nREACH: Type-Tiny-2.010001 (lib/Type/Tiny.pm:617 and :937 `local our $AvoidCallbacks`), so Type::Tiny does not load at all under PCL; none of the 19 board dists, none of PCL's lib/, the perl-tests uses are all in package main.  The Type-Tiny board batch (the round after s515c) needs it first.",
+   "id" : "3240",
+   "status" : "pending",
+   "subject" : "`local our $X` inside a sub of a MULTI-SEGMENT package (`package Foo::Bar;`) emits an UNQUOTED `(p-defcell Foo::Bar::$X ...)` -- an SBCL read error \"too many colons\" at LOAD, the whole file lost; Type::Tiny.pm cannot load (lines 617, 937)"
+}

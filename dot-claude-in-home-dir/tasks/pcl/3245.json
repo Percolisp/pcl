@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515c (Opus 5.5, 2026-10-11) from the HTTP-Tiny-0.090-0 board census (t/001_api.t row 1, `can_ok('HTTP::Tiny', @methods, @accessors)`).\n\nREPRODUCER (scratch/s515c/pr/canok.pl):\n    use Test::More tests => 2;\n    my @m = qw(new get); my @a = qw(agent timeout);\n    sub new {} sub get {} sub agent {} sub timeout {}\n    can_ok(\"main\", @m, @a);          # perl ok   PCL: not ok -- main->can('ARRAY(0x1)') failed, main->can('ARRAY(0x2)') failed\nThe emission is `(pl-can_ok \"main\" @m @a)`: the TAP layer's functions are CL defuns, so the generic sub-call flattening never runs.  FIX at the harness: pl-can_ok (and any other list-taking TAP function -- check isa_ok's, use_ok's import lists) flattens its &rest through the runtime's one list flattener.  A cl/pcl-test.lisp change is a HARNESS change (WHAT-TO-RUN-WHEN: full sweep + companion --all --quick).\nSecond, smaller: `can_ok('Test::More', 'ok')` fails because PCL's Test::More functions are not in the Test::More stash (perl: ok).",
+   "id" : "3245",
+   "status" : "pending",
+   "subject" : "Test::More can_ok(CLASS, @list, @list2) passes the ARRAYS unflattened (pl-can_ok is a CL defun called with the raw arrays): \"main->can('ARRAY(0x1)') failed\"; and can_ok on Test::More's own functions fails (they are CL, not subs in the stash)"
+}

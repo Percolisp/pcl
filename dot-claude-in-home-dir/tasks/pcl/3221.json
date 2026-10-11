@@ -1,0 +1,10 @@
+{
+   "activeForm" : "PERF (s515b, FILED for a ruling): print/say/printf are not in TOPIC_RAW_WORD, so `print {$fh} ... for 1..$n` boxes $_ per iteration -- the raw loop var is fhprint -27 %",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Sun Oct 11 16:31:19 2026",
+   "description" : "fhprint's fresh profile (s515b, main 973bdb1d): %make-p-box 16.6 % self / 18.9 cum -- ALL from\np-foreach-range's per-iteration (make-p-box i) for $_, because Parser2::_topic_raw_ok (#761) refuses any\nWord not in %TOPIC_RAW_WORD and `print' is deliberately left out (\"stringifying an operand can enter a `\"\"'\noverload handler, which is user code\").  Hand-replaced (fhprint.lisp with p-foreach-range-raw): 0.271 ->\n0.199 s whole process (-27 %), output identical.\nThe written reason is inconsistent with the list as it stands: `join' and `sprintf' ARE on it and\nstringify their operands exactly as print does, and the RESIDUE note above _topic_raw_ok already accepts\nan overload / tie handler reaching the global $_ as a documented residue (PCL_OPT=-raw-topic).  print adds\none route those two do not have: a TIED handle's PRINT method (user code) -- the same residue class as a\ntied FETCH.  Ruling needed (Fable): add print/say/printf (not warn: $SIG{__WARN__}) to %TOPIC_RAW_WORD with\nthe residue note widened, or keep the exclusion.  An emission change (Parser2): generation bump +\ncorpus-diff + the three artifacts.  Probe a body that prints to a tied handle whose PRINT does `$_ = 9'\nunder perl first.\n",
+   "id" : "3221",
+   "status" : "pending",
+   "subject" : "PERF (s515b, FILED for a ruling): print/say/printf are not in TOPIC_RAW_WORD, so `print {$fh} ... for 1..$n` boxes $_ per iteration -- the raw loop var is fhprint -27 %"
+}

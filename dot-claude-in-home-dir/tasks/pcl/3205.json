@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FOUND + FIXED s515a (Opus, 2026-10-11) by the #3184 detector recount (everyday, 10 announced sites in core Compress/Zlib.pm + IO/Uncompress/Base.pm).\n`_extract_module_prototypes` skips every `IO::` module BY NAME (a cost measure), so `use IO::Compress::Base::Common;` never carried its prototypes: `use IO::Compress::Base::Common 2.212; my @r = (isaFilename \"x\", \"y\"); print scalar(@r)` -- perl 2, PCL 1 (silent wrong: both arguments passed to a ($) sub).\n=== DONE (s515a) === a facts overlay lib/PCL/Facts/IO/Compress/Base/Common.pm (the nine prototyped subs + the seven use-constant names) -- the data layer, no Pl/ change.  Probe = perl; guard Pl/t/import-tag-01.t row 14 (fails on 973bdb1d).  The wider question (other IO:: modules with prototypes behind the same skip) is not measured here: the detector names them when a population reaches one.\n\n\n",
+   "id" : "3205",
+   "status" : "completed",
+   "subject" : "the prototype scan skips every IO:: module by name -- IO::Compress::Base::Common's ($) subs reach callers unprototyped (isaFilename \"x\", \"y\" passes both)"
+}

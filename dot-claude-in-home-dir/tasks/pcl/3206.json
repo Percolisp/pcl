@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515a (Opus, 2026-10-11) from the #3184 detector recount (gate: 4 sites in file-glob-shim-01.t's program).\n`use File::Glob qw(:bsd_glob); glob(\"dir/a b.txt\")` -- the VALUE is perl's (1 result, the space kept: the runtime reaches the caller's glob override), but under PCL_DETECT=announce the call site is announced: \"'main::glob' was parsed as the built-in but code that ran at line 1 installed a sub with no prototype\".  The File::Glob facts overlay lists `glob` in the :bsd_glob tag, and builtin_is_overridable('glob') is true, so the builtin-override recorder should have recorded it -- either the `glob(...)` call parse does not consult the override registry (glob has its own parse path for `<*.c>`), or the overlay's tag does not reach _use_imported_names.  Effect today: noise only (one stderr line per site under announce; nothing under the default `off`).  Probe: scratch/s515a/pr/bsdg.pl in the s515a worktree.\n",
+   "id" : "3206",
+   "status" : "pending",
+   "subject" : "use File::Glob qw(:bsd_glob): the detector announces every glob() call as a displaced built-in (value is perl's; the parse ignores the recorded override) -- the gate's last 4 detector sites"
+}

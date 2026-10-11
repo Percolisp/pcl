@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515c (Opus 5.5, 2026-10-11) from the Path-Tiny-0.150-0 board census (t/basic.t rows 113-118).\n\nREPRODUCER (scratch/s515c/pr/glob2.pl):\n    use File::Glob ();\n    my $x = File::Glob::bsd_glob(\"{root}\");\n    my $y = File::Glob::bsd_glob(\"/etc/pass*\");\n    print \"[$x] [$y]\\n\";          # perl: [root] [/etc/passwd-]   PCL: [1] [2]\nperl's XS bsd_glob returns its LIST, so in scalar context the caller gets the LAST element; the shim (lib/File/Glob.pm, s514e #3160) ends `return _run(...)` and _run ends `return @r`, so scalar context gets the COUNT.\n\nFIX (shim, one line): `my @r = _run(...); return wantarray ? @r : $r[-1];` (perl: an empty result is undef).  A lib/ change runs the full sweep.\n\nREACH: Path-Tiny t/basic.t 113-118 (Test::More's `is` has a ($$;$) prototype, so its first argument is scalar context: the mock_bsd_glob rows and the four tilde-expansion rows Path::Tiny computes through bsd_glob in scalar context).\n\n=== DONE (s515c) ===\nFixed in lib/File/Glob.pm (commit 2319080e): bsd_glob keeps its result list and returns `wantarray ? @r : $r[-1]` (perl XS: the last element; undef for none).  Guard: 3 perl-compared rows in Pl/t/file-glob-shim-01.t (bsd_glob scalar: one / many / none), inverse-verified FAILING on a 973bdb1d extraction.  Board: Path-Tiny basic.t 113-118 FIXED (the six rows left the blessed file by edit); companion op/glob.t 14/4 and lib/commonsense.t 0/0 identical on base and tree.",
+   "id" : "3246",
+   "status" : "completed",
+   "subject" : "File::Glob::bsd_glob (the s514e shim) answers the COUNT in scalar context; perl XS answers the LAST element -- `my $x = bsd_glob(\"{root}\")` is 1, perl root (Path-Tiny basic.t 6 rows)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515c (Opus 5.5, 2026-10-11) from the HTTP-Tiny-0.090-0 board census.\n\nREPRODUCER (scratch/s515c/pr/pblock.pl):\n    my $fh = \\*STDOUT;\n    print({$fh} \"a\", \"b\", \"\\n\") || die \"x\";      # perl: ab   PCL: PCL: statement dropped ... Missing case: ['Statement::Compound<{$fh}>','Statement::Expression<\"a\", \"b\", \"\\n\">']\n    print {$fh} \"c\\n\";                            # both: c\n    my @l = (\"d\", \"\\n\"); print({$fh} @l);         # perl: d    PCL: dropped\nPPI builds the `{$fh}` inside the call parens as a Statement::Compound followed by a Statement::Expression; the print-filehandle machinery (`_is_print_term_start` family) handles the paren-less spelling only.  Likely a PPI repair or a `print(` arm that re-reads `( {BLOCK} LIST )` as the block-filehandle form (rule 11: route into the existing block-filehandle path; printf/say share it).\n\nREACH: HTTP-Tiny t/Util.pm line 46 (`print({$fh} @_) || die ...` in tmpfile) -- 020_headers.t (perl 5 rows) and 030_response.t (6) produce no rows.",
+   "id" : "3244",
+   "status" : "pending",
+   "subject" : "DROP: `print({$fh} LIST)` -- the PARENTHESISED print with a BLOCK filehandle -- is a statement drop (\"Fell through. Missing case: Statement::Compound<{$fh}>\"); `print {$fh} LIST` works.  HTTP-Tiny t/Util.pm:46 (tmpfile) -- 020_headers.t and 030_response.t run 0 rows"
+}

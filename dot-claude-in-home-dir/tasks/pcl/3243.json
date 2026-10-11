@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s515c (Opus 5.5, 2026-10-11) from the HTTP-Tiny-0.090-0 board census.\n\nREPRODUCER (perl 5.40.3 vs main 973bdb1d; scratch/s515c/pr/iodir5.pl):\n    use Symbol;\n    sub op { my ($dh, $n) = @_; return opendir($dh, $n) }\n    my $g = gensym; op($g, \"/etc\") or die;\n    my @a = readdir($g); print scalar(@a), \"\\n\";      # perl: the entry count   PCL: 0\n`opendir($_[0], ...)` works (it aliases the caller's box) and `open` on the same copy works; only opendir.\n\nCAUSE: cl/pcl-runtime.lisp %p-opendir-impl stores the `(index . names)` cons with `(setf (p-box-value dh) handle)` when DH is a box -- for a box holding a TYPEGLOB (a glob ref: gensym, \\*FH) that overwrites the lexical copy and leaves the glob, which the caller holds, without a dirhandle; %p-resolve-dh has no typeglob arm either.  FIX (one mechanism): a typeglob (bare, or the value of the box) keys *p-dirhandles* by the glob object (the table is EQ) in both %p-opendir-impl and %p-resolve-dh (closedir/rewinddir already go through the resolver).\n\nREACH: core IO::Dir (`new` gensyms and calls IO::Dir::open($dh, ...)) -- every `IO::Dir->new(...)->read` is empty.  HTTP-Tiny-0.090-0: t/Util.pm dir_list feeds 100_get (186 rows), 102_put, 103_delete, 104_post, 110_mirror, 130_redirect, 140_proxy, 150_post_form, 160_cookies, 161_basic_auth, 162_proxy_auth, 170_keepalive, 101_head -- each runs 0 rows (\"1..0\") from the dist root.",
+   "id" : "3243",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: opendir on a COPY of a glob ref (`my ($dh) = @_; opendir($dh, ...)` on a gensym) stores the dirhandle in the copy's box, not the glob -- core IO::Dir->new(DIR)->read returns NOTHING (HTTP-Tiny t/Util.pm dir_list: 100_get.t 186 rows and most of the dist)"
+}
