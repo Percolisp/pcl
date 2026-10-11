@@ -18659,9 +18659,32 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    why `open(STDOUT,'|-',CMD); print …; close(STDOUT)` HUNG — the child read a
    pipe whose write end the parent still held (task #535)."
   (let ((s v))
-    (loop while (typep s 'synonym-stream)
+    ;; A CLOSED synonym stands for nothing: an fdopen alias (%p-fdopen-alias)
+    ;; that was closed must not answer for the stream it pointed at.
+    (loop while (and (typep s 'synonym-stream) (open-stream-p s))
           do (setf s (symbol-value (synonym-stream-symbol s))))
     s))
+
+(defun %p-fdopen-alias (src)
+  "A NEW stream object over stream SRC, for an fdopen (`>&=FH`) or an fd-less
+   dup of an existing handle (task #3185).  perl gives such an open its OWN IO
+   that shares the descriptor: a tie on one handle is not a tie on the other
+   (TieLC's `open $self, '>&=STDOUT'` prints through to the real STDOUT from
+   inside PRINT), and closing it leaves the source open (probed 5.40.3:
+   `open $d, '>&=STDOUT'; close $d; print \"x\"` prints x).  Sharing SRC itself
+   made both false -- the tie side table is keyed by the stream, and a close
+   closed STDOUT.  A synonym stream is the cheapest distinct object that
+   forwards every operation to SRC's own buffer (one buffer, so program order
+   holds); %p-stream-target peels it for every fd question, and
+   %p-close-maybe-pipe closes the alias alone."
+  (let ((sym (make-symbol "FDOPEN-ALIAS")))
+    (setf (symbol-value sym) src
+          (get sym '%p-fdopen-alias) t)
+    (make-synonym-stream sym)))
+
+(defun %p-fdopen-alias-p (v)
+  (and (typep v 'synonym-stream)
+       (get (synonym-stream-symbol v) '%p-fdopen-alias)))
 
 (defun %p-fd-of-stream (v)
   "Underlying file descriptor of stream V, following synonym streams; nil when
@@ -19585,6 +19608,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; lands HERE for a write the OS refused several statements ago — which is
     ;; how a close used to abort the whole program (task #590).  :abort t on the
     ;; retry discards the unwritable buffer so the descriptor still goes.
+    ;; An fdopen alias closes ITSELF: the source handle keeps the stream.
+    (when (%p-fdopen-alias-p v)
+      (ignore-errors (finish-output v))
+      (close v)
+      (return-from %p-close-maybe-pipe t))
     (handler-case (close (%p-stream-target v))
       (stream-error ()
         (%pcl-save-errno)
@@ -19822,7 +19850,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       ;; alias form, an approximation for ">&" which would get its own
       ;; position in Perl).  scalar.t [perl #113764] \">&=FILE\" lands here.
       (when (streamp src)
-        (%p-install-fh fh src)
+        (%p-install-fh fh (%p-fdopen-alias src))
         (return-from %p-open-dup t))
       ;; A NAMED source that names no open handle is FATAL in perl, not a false
       ;; return (task #513) — see %p-dup-src-name for the discriminator and the
@@ -19882,7 +19910,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               ;; source had (task #592).  A `&` dup does create one, and gets
               ;; the flag like every other open.
               (if (and eq-form (streamp src))
-                  (progn (%p-install-fh fh src nil) t)
+                  (progn (%p-install-fh fh (%p-fdopen-alias src) nil) t)
                   (let* ((new-fd (if eq-form src-fd (sb-posix:dup src-fd)))
                          (stream (%p-dup-make-stream new-fd mode-str)))
                     (%p-install-fh fh stream (not eq-form))

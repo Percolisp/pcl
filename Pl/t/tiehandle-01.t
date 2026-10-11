@@ -249,4 +249,49 @@ tie *OUT, 'LC', '>', $f; print OUT "HeLLo WoRLD\n"; close OUT; untie *OUT;
 open(my $in, '<', $f) or die; print "file: ", <$in>; close $in; unlink $f;
 PERL
 
+# #3185 (s515a): an fdopen (`>&=STDOUT`) or a dup (`>&STDOUT`) is its OWN IO in
+# perl -- a tie on STDOUT is not a tie on it, and closing it leaves STDOUT open.
+# PCL shared STDOUT's stream object, which is the tie table's key: PRINT's
+# `print {$self}` found STDOUT's tie again and recursed (Capture-Tiny 13/14).
+# The depth guard turns the old unbounded recursion into a short failure.
+test_th('#3185 a tie object fdopened on the tied handle (>&=STDOUT) prints through', <<'PERL');
+package TieLC; my $depth = 0;
+sub TIEHANDLE { my $c = shift; my $fh = \do { local *HANDLE }; bless $fh, $c; open($fh, $_[0]) or die "open: $!"; $fh }
+sub PRINT  { my $self = shift; die "RECURSION\n" if ++$depth > 20; my $r = print {$self} map { lc } @_; $depth--; $r }
+sub PRINTF { my $self = shift; die "RECURSION\n" if ++$depth > 20; my $f = shift; my $r = printf {$self} $f, @_; $depth--; $r }
+sub CLOSE  { my $self = shift; close $self }
+package main;
+tie *STDOUT, 'TieLC', ">&=STDOUT";
+print "Hello WORLD\n"; printf "%s-%d\n", "ABC", 7;
+close STDOUT; untie *STDOUT;
+print "after untie\n";
+PERL
+
+test_th('#3185 a tie object duped from the tied handle (>&STDOUT) prints through', <<'PERL');
+package TieUC; my $depth = 0;
+sub TIEHANDLE { my $c = shift; my $fh = \do { local *HANDLE }; bless $fh, $c; open($fh, $_[0]) or die "open: $!"; $fh }
+sub PRINT  { my $self = shift; die "RECURSION\n" if ++$depth > 20; my $r = print {$self} map { uc } @_; $depth--; $r }
+sub CLOSE  { my $self = shift; close $self }
+package main;
+tie *STDOUT, 'TieUC', ">&STDOUT";
+print "dup obj\n"; close STDOUT; untie *STDOUT;
+print "after untie\n";
+PERL
+
+test_th('#3185 closing an fdopen of STDOUT leaves STDOUT open', <<'PERL');
+open my $d, ">&=STDOUT" or die; print $d "via d\n"; close $d;
+my $r1 = close $d; my $r2 = print $d "lost\n";
+print "x ", ($r1 ? 1 : 0), ($r2 ? 1 : 0), "\n";
+open my $e, ">&=", \*STDOUT or die; close $e; print "y\n";
+PERL
+
+test_th('#3185 two handles tied to the same object; untie of one leaves the other', <<'PERL');
+package Obj; my $o = bless { log => [] }, 'Obj';
+sub TIEHANDLE { $o } sub PRINT { my $s = shift; push @{$s->{log}}, join "", @_; 1 }
+package main;
+my $t1 = tie *FA, 'Obj'; my $t2 = tie *FB, 'Obj';
+print FA "a1"; print FB "b1"; untie *FA; print FB "b2";
+print "same ", ($t1 == $t2 ? 1 : 0), " log ", join(",", @{$t2->{log}}), " fa ", (defined tied(*FA) ? 1 : 0), "\n";
+PERL
+
 done_testing;

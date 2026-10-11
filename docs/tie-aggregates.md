@@ -226,3 +226,13 @@ t/op/tiehandle.t alone (s514d): base 11 pass / 32 fail / 24 never produced -> 52
 2 fail / 13 never produced, the rest behind #3140 (a `package X;` switch inside a block with a `local` re-defines
 the class with no parents: the `Bar::Say` block aborts) and #221 (no
 warnings-gated diagnostic: `print undef` under `use warnings`).
+
+**An fdopen or dup is its own IO (#3185, s515a).**  `open $self, ">&=STDOUT"`
+used to share STDOUT's stream OBJECT -- the table's key -- so a TieLC-shaped
+object (Capture::Tiny's `t/lib/TieLC.pm`) found STDOUT's tie again inside
+PRINT and recursed, and `close $d` closed STDOUT.  The fdopen now installs a
+synonym stream over the source (`%p-fdopen-alias`): one buffer, so program
+order holds; a distinct key; `%p-stream-target` peels it for every fd question
+(and stops at a CLOSED synonym); `%p-close-maybe-pipe` closes the alias alone.
+The entry test and the key are unchanged, so no builtin pays for it.  Left:
+`local *STDOUT` + a tie of the OPENED handle survives the scope (#3203).

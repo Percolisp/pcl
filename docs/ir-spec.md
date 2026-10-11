@@ -607,7 +607,10 @@ in the caller's context, `read`/`sysread` → `READ(BUF, LEN[, OFF])` with
 `EOF(n)` `CLOSE` `BINMODE` `FILENO` `SEEK` `TELL` `OPEN`, where EOF's `n` is
 1 for `eof(FH)`, 0 for a bare `eof`, 2 for `eof()`.  The builtin answers the
 method's value.  A port must keep the key: any spelling that reaches the same
-IO (`\*FH`, `*ALIAS = *FH`, `select(FH)`) reaches the same tie.  `DESTROY` is
+IO (`\*FH`, `*ALIAS = *FH`, `select(FH)`) reaches the same tie.  An fdopen (`>&=FH`) or a dup (`>&FH`) of a handle is a DISTINCT IO (s515a, #3185): it
+shares the descriptor (and, for `>&=`, the buffer) but never the key -- a tie
+on `*STDOUT` is not a tie on `open $self, ">&=STDOUT"`, and closing the
+fdopen closes only itself (PCL: a synonym stream over the source, `%p-fdopen-alias`).  `DESTROY` is
 never called.  The method table is [`docs/tie-aggregates.md`](tie-aggregates.md) §7.
 
 Example — `tie *FH, 'T'; print FH "a", "b"` calls `T::PRINT($obj, "a", "b")`
