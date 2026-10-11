@@ -3260,9 +3260,15 @@ and the decision is made **at compile time, by how the sub got there**:
 | `use M qw(:tag)` | the names in M's `%EXPORT_TAGS{tag}` (s513b) |
 | `no M …` where M defines `unimport` | ENDS the override at the `no` (s513b; e.g. `no autodie`) |
 
-The `@EXPORT` / `%EXPORT_TAGS` lists are read as LITERAL `qw()` lists at
-transpile time (`Parser::module_import_sets`); a list built from variables is
-not seen.  A call to a displaced builtin is a USER sub call and binds its
+The `@EXPORT` / `%EXPORT_TAGS` lists are read as LITERAL lists at
+transpile time (`Parser::module_import_sets`).  A tag member that is one of
+the module's own literal arrays (`all => [ @EXPORT, @EXPORT_OK ]`, `\@ARRAY`,
+`@{$EXPORT_TAGS{T}}`) resolves to that array's names, recursively and bounded;
+a tag set inside a `BEGIN` block counts; a leading `&` sigil is stripped from
+every name (s515a, #3184).  A literal `use M LIST` that is the whole body of
+`BEGIN { eval q{...} }` (q{} q() '...' "...") IS an import at the BEGIN's package
+and site -- the eval only guards a missing module (s515a).  A list computed at
+run time, and any other eval body, is not seen (#3200).  A call to a displaced builtin is a USER sub call and binds its
 context like one (`my $r = kill(0, $pid)` under `use autodie` is scalar).
 `use autodie` is this mechanism plus `lib/autodie.pm`: from the `use` to the
 end of the FILE (or a `no autodie`) — not lexical, see `docs/not-supported.md`
@@ -5194,6 +5200,19 @@ not an error), so leaving it alone IS perl's answer — probed, `[\R]` matches
 "R" and not "\r" in both. Their `:tier` stays `:pcre` (§10-tier): the tier
 describes the CONSTRUCT a target may meet in the source pattern, and a
 target that cannot expand them locally still needs the bigger engine.
+
+### 10-pos-elem. A //g match on an ELEMENT keeps `pos` on the element (normative, s515a, tasks #3063 #1567)
+
+perl keeps `pos` on the SV a match targets, and an array or hash ELEMENT is
+its own SV: `$h{k} =~ /\Gx/gc` advances `pos($h{k})`, and `pos($r->{k}) = N`
+positions the next `\G` match on that element.  The target of an `m//g` (in
+any context) or `\G` match that is an element is therefore passed as its CELL
+(`lvalue_context 'matchcell'`: the `-argbox` accessors, `p-gethash-deref-argbox`
+/ `p-aref-deref-argbox` for a deref) -- never a copy of its value, which would
+keep `pos` on a temporary and spin a `while ($h{k} =~ /\G.../gc)` loop forever.
+A MISSING element is a lazy alias: the match does not vivify it.
+
+Example -- `my %h = (k => "aab"); $h{k} =~ /a/g; print pos($h{k})` prints `1`.
 
 ### 10-esc2. `\N` and `\X` are the same family, and an UNTRANSLATED escape must not silently never match (normative, s492c, task #2050)
 

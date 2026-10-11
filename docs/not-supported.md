@@ -1509,7 +1509,10 @@ longer in this not-supported bucket.
 RUN, so a sub or a prototype that a BEGIN block installs by running code --
 `*{$name} = COND ? sub ($) {…} : sub ($$) {…}` (brian d foy), `BEGIN { eval
 "sub zany ();" }` (merlyn), `Scalar::Util::set_prototype(\&f, '$$')`, `BEGIN {
-eval q{ use Time::HiRes qw(stat utime) } }` -- governs every LATER statement:
+my $m = "Time::HiRes"; eval "use $m qw(stat utime)" }` (#3200 -- the LITERAL
+`BEGIN { eval q{ use M LIST } }` is read as an import since s515a, #3184), a
+module found only through `use lib "$FindBin::Bin/lib"` (#3201: that path is
+not on the transpile-time search list) -- governs every LATER statement:
 `do_it 'a', 'b'` passes one argument under `($)`.
 
 **PCL behaviour:** the whole unit is parsed before anything runs, so such a
