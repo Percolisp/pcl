@@ -407,3 +407,20 @@ CORE:Text/Wrap.pm	Text::Wrap::REGEXPS_USE_BYTES	install:15/sub	call:97	assumed:u
   8	proto-glob	PAREN	Math::BigInt::blessed
   7	proto-glob	UNREAD	Math::BigInt::blessed
 ```
+
+## 8. The five dists the board gained in s515c (`PCL_DETECT=log`)
+
+Measured on the s515c tree (main code 973bdb1d + a File::Glob shim fix) with
+`PCL_DETECT=log PCL_DETECT_LOG=FILE` over the five dists alone (the same
+scoreboard run as the board, `tools/cpan-board.sh` with a five-line list): 24
+logged lines, **7 distinct sites in 2 dists**; Text-CSV, JSON-PP and Path-Tiny
+log nothing.
+
+| dist | distinct sites | what |
+|---|---|---|
+| Getopt-Long-2.58-0 | 5 | `t/gol-basic.t`: `GetOptions` called at lines 23-64, installed at line 12 with prototype `(@)` while the call sites assumed `unknown` -- harmless: `(@)` parses exactly like a list call |
+| HTTP-Tiny-0.090-0 | 2 | `lib/HTTP/Tiny.pm`: `SOCK_STREAM` from `use IO::Socket qw[SOCK_STREAM]` (line 1053), prototype `()`, called at 1099 / 1110 as `unknown` -- the #3143 import-prototype family (IO::Socket re-exports Socket's constants; the prototype is not carried across the import); harmless at these sites (`Type => SOCK_STREAM,`) |
+
+Neither shape is a real displaced built-in.  #3184 (an export TAG's list read
+statically) does not show here: none of the five imports through a tag the
+read cannot follow.
