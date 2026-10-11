@@ -1546,6 +1546,16 @@ sub gen_binary_op_form {
               && _rhs_writes_match_target($self, $kids->[1]);
     my $saved_lv = $self->lvalue_context;
     $self->lvalue_context(1) if $writes && $self->_is_elem_lvalue_target($kids->[0]);
+    # A //g MATCH writes the target's pos() (task #3063): perl keeps it on
+    # the element's own SV, so an ELEMENT target is passed as its CELL --
+    # the live slot box when it exists, a lazy alias when it does not (a
+    # failed match never vivifies, probed 5.40.3).  Passed as a VALUE, the
+    # pos was keyed by the string object and `pos($h{k})` (which reads the
+    # cell) never saw it: Text::CSV_PP's `__get` loop read undef and spun.
+    $self->lvalue_context('matchcell')
+      if !$writes && ($op eq '=~' || $op eq '!~')
+         && _rhs_is_global_match($self, $kids->[1])
+         && $self->_is_elem_lvalue_target($kids->[0]);
     my $l = $self->gen_node_form($kids->[0]);
     $self->lvalue_context($saved_lv);
     if ($writes && $MAGIC_LVALUE_BASE{ _place_head($l) }) {
@@ -1911,6 +1921,15 @@ sub _rhs_writes_match_target {
   return 1;
 }
 
+# True when the RHS of a `=~` / `!~` is a literal m//g (it records pos()).
+sub _rhs_is_global_match {
+  my ($self, $rhs_id) = @_;
+  my $n = $self->expr_o->get_a_node($rhs_id);
+  return 0 if ref $n ne 'PPI::Token::Regexp::Match';
+  my $mods = eval { $n->get_modifiers } || {};
+  return $mods->{g} ? 1 : 0;
+}
+
 # The call head of a generated form, or '' when FORM is not a call.
 sub _form_head {
   my ($form) = @_;
@@ -1997,7 +2016,19 @@ sub _elem_accessor {
   my ($self, $base) = @_;
   my $lv = $self->lvalue_context;
   return $base unless $lv;
-  return "$base-argbox" if $lv eq 'argbox';
+  return "$base-argbox" if $lv eq 'argbox' || $lv eq 'matchcell';
+  return "$base-box";
+}
+
+# The DEREF pair's head (`$r->[i]` / `$r->{k}`).  Under 'argbox' a deref
+# element stays the EAGER `-box` (user-sub argument aliasing vivifies, see
+# above); under 'matchcell' -- the target of a //g match (task #3063) -- it is
+# the element's CELL without vivifying: `-deref-argbox`.
+sub _deref_elem_accessor {
+  my ($self, $base) = @_;
+  my $lv = $self->lvalue_context;
+  return $base if !$lv;
+  return "$base-argbox" if $lv eq 'matchcell';
   return "$base-box";
 }
 
@@ -4446,7 +4477,7 @@ sub gen_array_ref_access_form {
   $ref = $self->_viv_container_form($kids->[0], $ref, q(@))
     if !$paren_scalar_base;
   my $idx = $self->gen_node_form($kids->[1]);
-  my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
+  my $func = $self->_deref_elem_accessor('p-aref-deref');
   my $form = [$func, $ref, $idx, $self->_strict_elem_marker($func, $kids)];
   # A LIST SLICE IN SCALAR CONTEXT YIELDS ITS LAST SELECTED ELEMENT (perl's
   # comma-operator rule): `$foo = ('a'..'f')[0,2,4]` is 'e', not the count.
@@ -4478,7 +4509,7 @@ sub gen_hash_ref_access_form {
   $ref = $self->_viv_container_form($kids->[0], $ref, q(%))
     if !$paren_scalar_base;
   my $key = $self->_hash_key_form($kids->[1]);
-  my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
+  my $func = $self->_deref_elem_accessor('p-gethash-deref');
   return [$func, $ref, $key, $self->_strict_elem_marker($func, $kids)];
 }
 

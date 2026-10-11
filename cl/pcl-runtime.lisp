@@ -213,6 +213,7 @@
    #:p-to-s64 #:p-<<-int #:p->>-int
    ;; Data structures
    #:p-aref #:p-aref-box #:p-aref-argbox #:p-gethash-argbox #:p-aref-deref #:p-aref-deref-box #:p-gethash #:p-gethash-box #:p-gethash-deref #:p-gethash-deref-box
+   #:p-gethash-deref-argbox #:p-aref-deref-argbox
    #:p-ensure-hashref #:p-ensure-arrayref
    ;; the intermediate-level markers of a subscript chain (task #1241) — emitted
    #:p-viv-container #:p-viv-array-container
@@ -13681,6 +13682,25 @@ create the key on a read-only call, which perl does not."
             (make-p-box (p-gethash hash key)))
         (or (%p-when-tied-hash (r h) (%p-tie-elem-box r k))
             (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))))
+
+(defun p-gethash-deref-argbox (ref key &optional site)
+  "$ref->{KEY} as the TARGET of a //g match (task #3063): the element's CELL,
+   so pos() lands on the element as perl keeps it on the element's SV -- the
+   live slot box when the key exists, a lazy alias when it does not (a failed
+   match never vivifies the key, probed 5.40.3).  A ref that is not a hash
+   yet reads as p-gethash-deref does, in a detached box."
+  (let ((h (unbox ref)))
+    (if (hash-table-p h)
+        (p-gethash-argbox h key)
+        (make-p-box (p-gethash-deref ref key site)))))
+
+(defun p-aref-deref-argbox (ref idx &optional site)
+  "$ref->[IDX] as the TARGET of a //g match: see p-gethash-deref-argbox."
+  (let ((a (unbox ref)))
+    (if (and (vectorp a) (not (stringp a)))
+        (p-aref-argbox a idx)
+        (make-p-box (p-aref-deref ref idx site)))))
+
 
 ;; MEASURED AND REJECTED (s460ao, task #883): pre-sizing RESULT from the
 ;; element count instead of `(length args)` — the count of ARGUMENTS, which
