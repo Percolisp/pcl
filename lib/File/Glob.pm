@@ -106,7 +106,10 @@ sub _run {
 sub bsd_glob {
     my ($pat, $flags) = @_;
     $flags = $DEFAULT_FLAGS if @_ < 2;
-    return _run($pat, _flag_names($flags));
+    my @r = _run($pat, _flag_names($flags));
+    # perl's XS returns its LIST: scalar context sees the LAST element
+    # (undef for none), never the count (#3246).
+    return wantarray ? @r : $r[-1];
 }
 
 # csh_glob: perl's CORE::glob -- the pattern is a whitespace-separated LIST.

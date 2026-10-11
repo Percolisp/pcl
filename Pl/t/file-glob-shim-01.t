@@ -146,6 +146,18 @@ my $ok = eval { require NoXsPcl; 1 };
 row('no artifact', $ok ? 'loaded' : ($@ =~ /\ACan't locate/ ? 'dies-locate' : "other: $@"));
 P
 
+# 4. bsd_glob in SCALAR context answers the LAST element, never the count
+# (#3246, s515c: Path-Tiny basic.t computes tilde expansion this way).
+compare_lines(<<'P', 'bsd_glob scalar');
+use File::Glob ();
+my $one = File::Glob::bsd_glob("{root}");
+row('scalar one', $one);
+my $last = File::Glob::bsd_glob("$D/*.txt");
+row('scalar many', rel($last));
+my $none = File::Glob::bsd_glob("$D/nope*");
+row('scalar none', defined $none ? "[$none]" : 'undef');
+P
+
 {
     # perl has a built Compress::Raw::Zlib, PCL has none (zlib is XS; the
     # shim is a separate task): the use must die in ONE perl-shaped line.
