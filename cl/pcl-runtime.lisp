@@ -9380,10 +9380,45 @@ per element."
      slice read by the copying read, or NIL when FN is anything else."
     (and (consp fn) (eq (car fn) 'lambda) (consp (cddr fn))
          (let ((tail (%p-copying-tail-form (car (last fn)))))
+           (and tail (append (butlast fn) (list tail))))))
+
+  ;; A MAP BLOCK WHOSE VALUE IS A LITERAL LIST (task #3122, s515b).  The
+  ;; block `{ ($_, $_ * 2) }' lowers to `(p-flatten-args (list E1 E2))': an
+  ;; adjustable vector per ITERATION, built only for p-map to walk it and
+  ;; copy its elements into the result (mapmulti: p-flatten-args 17 %, the
+  ;; vector-push-extend growth path 16 %).  When the block's TAIL form is that
+  ;; call with two or more items, the block returns the item LIST instead and
+  ;; p-map-flat spreads each item straight into the result by the same
+  ;; per-argument rule (%p-flatten-arg-into) and copies it by the same copy
+  ;; (%p-map-copy-scalar) -- the identical elements in the identical order.
+  ;; A one-item list is left alone: p-flatten-args's `&name;' adoption of the
+  ;; caller's @_ is a property of a ONE-argument list.  The descent is the
+  ;; closed set progn / let / let*, whose value is their last form (no
+  ;; `block': a return-from inside could deliver a non-list value).
+  (defun %p-map-list-tail (form)
+    "FORM with its value-position `(p-flatten-args (list A B …))' replaced by
+     `(list A B …)', or NIL when its value is not (syntactically) that call."
+    (cond ((and (consp form) (eq (car form) 'p-flatten-args)
+                (consp (cdr form)) (null (cddr form))
+                (consp (second form)) (eq (car (second form)) 'list)
+                (consp (cdr (second form))) (consp (cddr (second form))))
+           (second form))
+          ((and (consp form) (member (car form) '(progn let let*))
+                (consp (cdr form)))
+           (let ((tail (%p-map-list-tail (car (last form)))))
+             (and tail (append (butlast form) (list tail)))))
+          (t nil)))
+
+  (defun %p-map-list-block (fn)
+    "The map block FN -- a literal `(lambda (ARG) BODY…)' -- returning its
+     value list as a CL list, or NIL when FN is anything else (p-map-flat)."
+    (and (consp fn) (eq (car fn) 'lambda) (consp (cddr fn))
+         (let ((tail (%p-map-list-tail (car (last fn)))))
            (and tail (append (butlast fn) (list tail)))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun %p-self-reverse-form-p (place value)
+  (defun %p-self-reverse-form-p
+ (place value)
     "True when VALUE is `reverse PLACE` -- `(p-reverse PLACE)`, possibly under
      p-list-ctx -- for a symbol PLACE: perl's in-place reverse (task #155)."
     (let ((v (if (and (consp value) (eq (first value) 'p-list-ctx)
@@ -13696,6 +13731,40 @@ create the key on a read-only call, which perl does not."
    and never changes @_'s shape either."
   `(let ((*p-shared-args* @_)) ,call))
 
+(declaim (inline %p-flatten-arg-into))
+(defun %p-flatten-arg-into (arg result)
+  "Push ARG onto RESULT the way an argument list spreads it: a raw @array's
+   elements, a %hash's key/value pairs, anything else as one element.  The
+   per-argument rule of p-flatten-args, shared with p-map-flat (rule 11) --
+   only the `&name;' adoption of the caller's @_ stays in p-flatten-args,
+   because it is a property of the WHOLE argument list."
+  (cond
+    ((and (vectorp arg) (not (stringp arg)))
+     ;; Raw vector = array passed in list context: spread its elements
+     ;; (a tied one's lazy element boxes -- perl's PVLVs, task #155).
+     (%p-flatten-vector-into (%p-tie-view-of arg) result))
+    ((and (hash-table-p arg) (%p-tied arg))
+     (%p-flatten-vector-into (%p-tie-view (%p-tied arg)) result))
+    ((and (hash-table-p arg) (not (gethash :__class__ arg)))
+     ;; Hash in argument context: spread to alternating key-value pairs.
+     ;; But NOT blessed objects (which have :__class__) — those stay as-is.
+     ;; The KEY half is a copy (perl's keys are read-only), the VALUE half
+     ;; an alias, exactly as for `values %h`.
+     (maphash (lambda (k v)
+                (vector-push-extend (make-p-box k) result)
+                (vector-push-extend
+                 (if (p-box-p v) v (%p-hash-elem-cell arg k))
+                 result))
+              arg))
+    ;; %ENV / %INC in argument context: the marker IS the hash, so it
+    ;; spreads to pairs like any other (see %p-marker-pairs, task #736).
+    ((%p-hash-marker-p arg)
+     (loop for x across (%p-marker-pairs arg)
+           do (vector-push-extend x result)))
+    (t
+     ;; Scalar (p-box, string, number, etc.): keep as-is
+     (vector-push-extend arg result))))
+
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
    This implements Perl's argument flattening: foo(@arr) and foo(%hash) spread their
@@ -13711,39 +13780,15 @@ create the key on a read-only call, which perl does not."
    gets worse, while an array that is never flattened into a call stays raw."
   (let ((result (make-array (length args) :adjustable t :fill-pointer 0)))
     (dolist (arg args)
-      (cond
-        ((and (vectorp arg) (not (stringp arg)))
-         ;; `&name;' (p-amp-call): the callee's @_ IS the caller's -- the
-         ;; very vector, so a `shift'/`push @_' there is seen here (#2632).
-         ;; Asked only on this ARRAY arm, so a scalar-argument call never
-         ;; reads the special.
-         (when (and (null (cdr args)) (eq arg *p-shared-args*))
-           (setf *p-shared-args* nil)
-           (return-from p-flatten-args arg))
-         ;; Raw vector = array passed in list context: spread its elements
-         ;; (a tied one's lazy element boxes -- perl's PVLVs, task #155).
-         (%p-flatten-vector-into (%p-tie-view-of arg) result))
-        ((and (hash-table-p arg) (%p-tied arg))
-         (%p-flatten-vector-into (%p-tie-view (%p-tied arg)) result))
-        ((and (hash-table-p arg) (not (gethash :__class__ arg)))
-         ;; Hash in argument context: spread to alternating key-value pairs.
-         ;; But NOT blessed objects (which have :__class__) — those stay as-is.
-         ;; The KEY half is a copy (perl's keys are read-only), the VALUE half
-         ;; an alias, exactly as for `values %h`.
-         (maphash (lambda (k v)
-                    (vector-push-extend (make-p-box k) result)
-                    (vector-push-extend
-                     (if (p-box-p v) v (%p-hash-elem-cell arg k))
-                     result))
-                  arg))
-        ;; %ENV / %INC in argument context: the marker IS the hash, so it
-        ;; spreads to pairs like any other (see %p-marker-pairs, task #736).
-        ((%p-hash-marker-p arg)
-         (loop for x across (%p-marker-pairs arg)
-               do (vector-push-extend x result)))
-        (t
-         ;; Scalar (p-box, string, number, etc.): keep as-is
-         (vector-push-extend arg result))))
+      ;; `&name;' (p-amp-call): the callee's @_ IS the caller's -- the very
+      ;; vector, so a `shift'/`push @_' there is seen here (#2632).  Asked
+      ;; only for an ARRAY argument, so a scalar-argument call never reads
+      ;; the special.
+      (when (and (vectorp arg) (not (stringp arg)) (null (cdr args))
+                 (eq arg *p-shared-args*))
+        (setf *p-shared-args* nil)
+        (return-from p-flatten-args arg))
+      (%p-flatten-arg-into arg result))
     result))
 
 ;;; ============================================================
@@ -28172,16 +28217,40 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (t (vector-push-extend (%p-map-copy-scalar r) result)))))
     result))
 
+(defun p-map-flat (fn &rest items)
+  "p-map for a block that returns its value LIST as a CL list (the compiler
+   macro below, %p-map-list-block, task #3122): each item is spread into the
+   result by the argument-list rule (%p-flatten-arg-into) and each element
+   copied (%p-map-copy-scalar) -- what p-map does with the block's
+   p-flatten-args vector, without building that vector per iteration."
+  (let* ((arr (apply #'%p-collect-list items))
+         (result (make-array (max 1 (* 2 (length arr)))
+                             :adjustable t :fill-pointer 0)))
+    (loop for item across arr
+          for slot = (if (p-box-p item) item (make-p-box item))  ; stable $_ box, [perl #78194]
+          do (dolist (v (let ((*wantarray* t)) (funcall fn slot)))
+               (if (or (and (vectorp v) (not (stringp v)))
+                       (hash-table-p v) (%p-hash-marker-p v))
+                   (let ((start (fill-pointer result)))
+                     (%p-flatten-arg-into v result)
+                     (loop for j from start below (fill-pointer result)
+                           do (setf (aref result j)
+                                    (%p-map-copy-scalar (aref result j)))))
+                   (%p-vpush (%p-map-copy-scalar v) result))))
+    result))
+
 (define-compiler-macro p-map (&whole form fn &rest items)
-  ;; Two rewrites, one per side of the map (both are p-map's own consumer
-  ;; knowledge): a slice among the ITEMS is aliased by $_ and vivifies
-  ;; (#1010); a slice that is the BLOCK'S VALUE is copied and reads values
-  ;; (#2515 (ii), %p-map-copying-block).
-  (let ((new (%p-aliasing-slice-args items))
-        (blk (%p-map-copying-block fn)))
-    (if (or new blk)
-        `(p-map ,(or blk fn) ,@(or new items))
-        form)))
+  ;; Three rewrites, each p-map's own consumer knowledge: a slice among the
+  ;; ITEMS is aliased by $_ and vivifies (#1010); a slice that is the BLOCK'S
+  ;; VALUE is copied and reads values (#2515 (ii), %p-map-copying-block); a
+  ;; block whose value is a literal list hands it over as a CL list to
+  ;; p-map-flat (#3122, %p-map-list-block).
+  (let* ((new (%p-aliasing-slice-args items))
+         (blk (%p-map-copying-block fn))
+         (lst (%p-map-list-block (or blk fn))))
+    (cond (lst `(p-map-flat ,lst ,@(or new items)))
+          ((or new blk) `(p-map ,(or blk fn) ,@(or new items)))
+          (t form))))
 
 (defun %p-glob-code (glob)
   "The CODE slot of typeglob GLOB, unboxed, or NIL."
