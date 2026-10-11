@@ -10965,11 +10965,6 @@ sub _walk_module_prototypes {
   return $module_env;
 }
 
-# What a `use MODULE` imports by NAME, for the builtin-override registry
-# (task #2873): '' => the literal qw() of @EXPORT (what a `use` with NO list
-# imports), and ':tag' => the literal qw() list of each `tag => [qw(...)]`
-# pair of %EXPORT_TAGS (Exporter's `:tag` spelling).  Literal lists only, the
-# same rule as export_names: that is the shape every shim uses.
 # What `use MODULE` does to the IMPORTING SCOPE, read off the module's own
 # `import` sub (Environment::import_effects): plain perl a user could write,
 # recognised by its shape -- never by a module name (rule 9a).
@@ -11009,21 +11004,93 @@ sub module_import_effects {
   return \%fx;
 }
 
+# What a `use MODULE` imports by NAME (task #2873; widened by #3184):
+# '' => @EXPORT (what a `use` with NO list imports) and ':tag' => each
+# %EXPORT_TAGS list (Exporter's `:tag` spelling).  The lists are read the way
+# the module BUILDS them, statically: a list is qw() words, quoted names,
+# `@ARRAY` members (the module's own earlier literal arrays -- Encode's
+# `all => [ @EXPORT, @EXPORT_OK ]`), `\@ARRAY` and `@{ $EXPORT_TAGS{NAME} }`
+# (a tag built from another tag); anything computed contributes nothing.  A
+# leading `&` is stripped from every name (Exporter accepts `&name` for the
+# sub -- Text::Balanced's tags).  Statements are read in the order perl runs
+# them before the import: the module's top-level BEGIN blocks first, then its
+# main line (an assignment reads the arrays as they stand at that point).
 sub module_import_sets {
   my ($doc) = @_;
-  my %sets;
+  my (@begin, @main);
   for my $st (@{ $doc->find('PPI::Statement') || [] }) {
-    next if $st->parent && !$st->parent->isa('PPI::Document');
-    my $content = $st->content;
-    if ($content =~ /\@EXPORT\s*=\s*qw\s*[\(\[\{<]\s*([^)\]\}>]*)/) {
-      push @{ $sets{''} }, split ' ', $1;
-    }
-    next if $content !~ /%EXPORT_TAGS\s*=/;
-    while ($content =~ /(\w+)\s*=>\s*\[\s*qw\s*[\(\[\{<]\s*([^)\]\}>]*)/g) {
-      push @{ $sets{":$1"} }, split ' ', $2;
+    my $par = $st->parent or next;
+    if ($par->isa('PPI::Document')) { push @main, $st; next; }
+    next if !$par->isa('PPI::Structure::Block');
+    my $sch = $par->parent;
+    push @begin, $st
+      if $sch && $sch->isa('PPI::Statement::Scheduled')
+         && ($sch->type // '') eq 'BEGIN'
+         && $sch->parent && $sch->parent->isa('PPI::Document');
+  }
+  my (%arrays, %tags);
+  my $resolve = sub {
+    my ($items) = @_;
+    return [ map {;
+      $_->[0] eq 'w' ? $_->[1]
+      : $_->[0] eq '@' ? @{ $arrays{ $_->[1] } || [] }
+      : @{ $tags{ $_->[1] } || [] }
+    } @$items ];
+  };
+  for my $st (@begin, @main) {
+    my $c = $st->content;
+    if ($c =~ /\A(?:our\s+|my\s+)?\@(\w+)\s*=\s*(.*?)\s*;?\s*\z/s) {
+      $arrays{$1} = $resolve->(_literal_list_items($2));
+    } elsif ($c =~ /\A(?:our\s+|my\s+)?%EXPORT_TAGS\s*=\s*\((.*)\)\s*;?\s*\z/s) {
+      my $body = $1;
+      while ($body =~ /(\w+)\s*=>\s*(?:\[([^\]]*)\]|\\\@(\w+))/g) {
+        my ($tag, $list, $arr) = ($1, $2, $3);
+        $tags{$tag} = $resolve->(defined $list ? _literal_list_items($list)
+                                                : [['@', $arr]]);
+      }
+    } elsif ($c =~ /\A\$EXPORT_TAGS\{\s*['"]?(\w+)['"]?\s*\}\s*=\s*\[([^\]]*)\]\s*;?\s*\z/s) {
+      $tags{$1} = $resolve->(_literal_list_items($2));
     }
   }
+  my %sets;
+  $sets{''} = $arrays{EXPORT} if $arrays{EXPORT};
+  $sets{":$_"} = $tags{$_} for keys %tags;
+  for my $list (values %sets) {
+    s/\A&// for @$list;
+  }
   return \%sets;
+}
+
+# The members of a literal list's TEXT (module_import_sets): ['w', NAME] for
+# a qw() word or a quoted name, ['@', ARRAY] for `@ARRAY` / `\@ARRAY`,
+# ['t', TAG] for `@{ $EXPORT_TAGS{TAG} }`.  An element of any other shape
+# (a call, an interpolation, a map) is computed and contributes nothing.
+my %_QW_CLOSE = ('(' => ')', '[' => ']', '{' => '}', '<' => '>');
+sub _literal_list_items {
+  my ($text) = @_;
+  my @items;
+  $text =~ s/\A\s*\(\s*(.*?)\s*\)\s*\z/$1/s;
+  while (length $text) {
+    $text =~ s/\A[\s,]+//;
+    last if !length $text;
+    if ($text =~ s/\Aqw\s*([^\w\s])//) {
+      my $close = $_QW_CLOSE{$1} // $1;
+      my $end = index($text, $close);
+      last if $end < 0;
+      push @items, map { ['w', $_] } split ' ', substr($text, 0, $end);
+      substr($text, 0, $end + 1) = '';
+    } elsif ($text =~ s/\A\\?\@(\w+)//) {
+      push @items, ['@', $1];
+    } elsif ($text =~ s/\A\@\{\s*\$EXPORT_TAGS\{\s*['"]?(\w+)['"]?\s*\}\s*\}//) {
+      push @items, ['t', $1];
+    } elsif ($text =~ s/\A(['"])(&?[\w:]+)\1//) {
+      push @items, ['w', $2];
+    } else {
+      # A computed element: skip it to the next top-level comma.
+      $text =~ s/\A[^,]*//;
+    }
+  }
+  return \@items;
 }
 
 sub _dump_proto_oracle {
@@ -11604,6 +11671,44 @@ sub use_reg_site {
   my ($stmt) = @_;
   my $site = Pl::PExpr::TokenUtils::decl_site($stmt) or return undef;
   return { %$site, unknown_before => 1 };
+}
+
+# The `use` statements of a document as perl IMPORTS them at compile time
+# (task #3184): every Include, plus the one a top-level-or-nested
+# `BEGIN { eval q{ use MODULE LIST } }` compiles at BEGIN time -- perl runs
+# that `use` (the eval only guards a missing module), so its imports are in
+# force from the BEGIN statement on (File::Copy: `use Time::HiRes qw(stat
+# utime)`).  LITERAL shape only: the block holds exactly one statement,
+# `eval STRING`, whose string is a non-interpolating literal (q{} / '' / a
+# "" without `$`/`@`) holding exactly one `use` statement; anything else is
+# computed and stays unread.  Returns [INCLUDE, ANCHOR, KEEP] triples: ANCHOR
+# is the statement that gives the import its package and site (the Include
+# itself, or the BEGIN), KEEP holds the fragment document alive (PPI empties
+# a destroyed document's tokens, #414).
+sub use_statements_of {
+  my ($doc) = @_;
+  my @out = map { [$_, $_, undef] }
+            @{ $doc->find('PPI::Statement::Include') || [] };
+  for my $sch (@{ $doc->find('PPI::Statement::Scheduled') || [] }) {
+    next if ($sch->type // '') ne 'BEGIN';
+    my ($blk) = grep { $_->isa('PPI::Structure::Block') } $sch->schildren;
+    next if !$blk;
+    my @st = $blk->schildren;
+    next if @st != 1 || ref $st[0] ne 'PPI::Statement';
+    my @t = $st[0]->schildren;
+    pop @t if @t && $t[-1]->isa('PPI::Token::Structure') && $t[-1]->content eq ';';
+    next if @t != 2 || !$t[0]->isa('PPI::Token::Word') || $t[0]->content ne 'eval';
+    my $q = $t[1];
+    next if !$q->isa('PPI::Token::Quote');
+    next if !($q->isa('PPI::Token::Quote::Single') || $q->isa('PPI::Token::Quote::Literal'))
+            && $q->string =~ /[\$\@\\]/;
+    my $frag = fragment_doc($q->string) or next;
+    my @fs = $frag->schildren;
+    next if @fs != 1 || !$fs[0]->isa('PPI::Statement::Include')
+            || ($fs[0]->type // '') ne 'use';
+    push @out, [$fs[0], $sch, $frag];
+  }
+  return @out;
 }
 
 # THE record a constant's name gets: a zero-arg prototype, so a bareword use

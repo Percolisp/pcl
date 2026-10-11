@@ -1064,13 +1064,16 @@ sub _record_use_overrides {
   my ($self, $doc) = @_;
   my $fp  = $self->fallback_parser;
   my $env = $self->environment;
-  for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
+  # #3184: a literal `BEGIN { eval q{ use M LIST } }` imports too, at the
+  # BEGIN statement's package and site (Pl::Parser::use_statements_of).
+  for my $u (Pl::Parser::use_statements_of($doc)) {
+    my ($inc, $at) = @$u;
     my $type = $inc->type // '';
     next if $type ne 'use' && $type ne 'no';
     my $mod = $inc->module // '';
     next if $mod eq '';
-    my $pkg = _package_of_element($inc);
-    my $loc = $inc->location || [0, 0];
+    my $pkg = _package_of_element($at);
+    my $loc = $at->location || [0, 0];
     if ($type eq 'no') {
       $self->_record_no_override_end($inc, $mod, $pkg, $loc);
       next;
@@ -1235,15 +1238,17 @@ sub _premerge_include_prototypes {
       }
     }
   }
-  for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
+  for my $u (Pl::Parser::use_statements_of($doc)) {
+    my ($inc, $at) = @$u;
     my $type = $inc->type // '';
-    # #2871: what this statement imports is in force from HERE.
-    local $self->environment->{reg_site} = Pl::Parser::use_reg_site($inc);
+    # #2871: what this statement imports is in force from HERE (#3184: a
+    # BEGIN-eval'd `use` from its BEGIN statement).
+    local $self->environment->{reg_site} = Pl::Parser::use_reg_site($at);
     # ... and in the PACKAGE it compiles in (task #3143): an import lands in
     # that package's stash, and the in-parse re-merge registers it there --
     # registered under `main` here, the re-merge of a later `require` became
     # the package's FIRST record and hid every call above it.
-    local $fp->environment->package_stack->[-1] = _package_of_element($inc);
+    local $fp->environment->package_stack->[-1] = _package_of_element($at);
     if ($type eq 'use') {
       my $module = $inc->module or next;
       next if $module =~ $skip;
