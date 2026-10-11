@@ -1956,7 +1956,7 @@ op/overload_integer.t	2	0	2	0	OK		0
 op/override.t	36	0	9	13	DIFF	s492c #1870: the import and CORE::GLOBAL override spellings; 6 fail rows fixed, shortfall 16 -> 14	0
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
 op/packagev.t	307	0	228	79	DIFF		0
-op/pos.t	33	0	14	15	DIFF	s504 #2389: 15/15 -> 14/15 DOWN at 577a09a4 (s496a, #2372/member 7): one more form aborts at an eager qr holding a (?{...}) code block (NS) | aborted-forms:1: Character '{' may not follow '(?' in regex; marked by <-- HERE in m/.(? <-- HERE { bless ?	0
+op/pos.t	33	0	18	11	DIFF	s515a (#3063 / #1567, edited by hand): 14/15 -> 18/11 -- a //g match on an ELEMENT keeps pos on the element (its cell is the target): rows 15 16 18 19 (the defelem rows; #1922 part); serial on a 973bdb1d extraction 14/15 | s504 #2389: 15/15 -> 14/15 DOWN at 577a09a4 (s496a, #2372/member 7): one more form aborts at an eager qr holding a (?{...}) code block (NS) | aborted-forms:1: Character '{' may not follow '(?' in regex; marked by <-- HERE in m/.(? <-- HERE { bless ?	0
 op/postfixderef.t	128	0	103	18	DIFF	s497b: 102/19 -> 103/18, "PVBM is not a SCALAR ref": strict refs enforced (#2103) | s470bv: #1221 (b25afbc; 100/21 at a3d6d8e) | aborted-forms:3: Undefined subroutine &main::foo called	0
 op/pow.t	268	0	268	0	OK		0
 op/print.t	3	0	3	0	OK	s470bv: #1115 (3/0 at a3d6d8e, 2/1 at 614c6af); its XDIFF registration DROPPED -- the divergence is gone	0
