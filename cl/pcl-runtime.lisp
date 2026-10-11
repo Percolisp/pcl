@@ -37535,7 +37535,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (write-char c out)
                   (incf i)))))))
 
-(defun %p-write-match-target (string-box result)
+(defun %p-write-match-target (string-box result &optional (changed t))
   "Store RESULT into the s/// or tr/// target box.  The ONE write both sites
    make (rule 11): they used to `setf` the value slot directly, which is right
    for an ordinary scalar and WRONG for a box whose value is magic — a
@@ -37543,13 +37543,21 @@ buffer's fill-pointer; everything else falls back to file-length."
    would REPLACE the magic with the string, so the substitution would land
    nowhere the program can see it.  box-set is the one place that knows the
    whole dispatch, so a magic box goes through it and a plain one keeps the
-   direct slot write (which also invalidates the two caches)."
+   direct slot write (which also invalidates the two caches).
+
+   A write that CHANGES the string resets pos() (s515a, ir-spec 10-pos-elem):
+   perl clears it after a successful s/// and after a tr/// that changed
+   something, never after a tr/// that changed nothing -- CHANGED, which tr
+   passes and s/// (called only on a match) leaves true.  box-set clears it
+   on its own arm."
   (let ((cur (p-box-value string-box)))
     (if (or (p-magic-cell-p cur) (p-tie-proxy-p cur))
         (box-set string-box result)
-        (setf (p-box-value string-box) result
-              (p-box-sv-ok string-box) nil
-              (p-box-nv-ok string-box) nil))))
+        (progn
+          (setf (p-box-value string-box) result
+                (p-box-sv-ok string-box) nil
+                (p-box-nv-ok string-box) nil)
+          (when changed (%p-clear-match-pos string-box))))))
 
 (defun %p-subst-compiled (op)
   "The compiled form of substitution op OP: the simple-vector
@@ -37846,7 +37854,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (return-p result)
         (t
          (if (p-box-p string-box)
-             (%p-write-match-target string-box result)
+             (%p-write-match-target string-box result (string/= result str))
              ;; A count-only tr (empty replacement, no /d) leaves the target
              ;; untouched, and perl accepts that on a read-only value:
              ;; `"\x8c" =~ y o…oo` just counts.  Die only when the result

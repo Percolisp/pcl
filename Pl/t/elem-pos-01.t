@@ -33,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 18;
 
 sub write_pl {
     my ($code) = @_;
@@ -95,3 +95,21 @@ my $bound = 8 * $perl_t + 0.5;
 ok(defined $pcl_t && $pcl_t <= $bound,
    sprintf('#3063 timed: the scan within 8x perl + 0.5 s = %.2f s (took %s s, perl %.3f s)',
            $bound, $pcl_t // 'NEVER', $perl_t));
+
+# A write that CHANGES the string resets pos (s515a review, ~/pcl-agent-scratch/s513/review/p515a/iso-pos2.pl):
+# a successful s///, s///g, a changing tr///; a no-match s/// and a tr that
+# changes nothing keep it.  Scalar, array element, hash element, foreach alias.
+both_agree('my $s = "qq"; $s =~ /q/g; $s =~ s/q/Q/; print pos($s) // "undef", "\n";',
+           'a successful s/// resets a scalar\'s pos');
+both_agree('my $t = "qq"; $t =~ /q/g; $t =~ s/x/y/; print pos($t) // "undef", "\n";',
+           '... a no-match s/// keeps it');
+both_agree('my @a = ("qq"); $a[0] =~ /q/g; $a[0] =~ s/q/Q/; print pos($a[0]) // "undef", "\n";',
+           'a successful s/// resets an array element\'s pos');
+both_agree('my @b = ("qq"); $b[0] =~ /q/g; $b[0] =~ s/q/Q/g; my @c = ("qq"); $c[0] =~ /q/g; $c[0] =~ tr/q/Q/; print pos($b[0]) // "undef", " ", pos($c[0]) // "undef", "\n";',
+           '... s///g and a changing tr/// reset it too');
+both_agree('my $u = "qq"; $u =~ /q/g; $u =~ tr/q/q/; print pos($u) // "undef", "\n";',
+           '... a tr/// that changes nothing keeps it');
+both_agree('my %h = (k => "qq"); $h{k} =~ /q/g; $h{k} =~ s/q/Q/; print pos($h{k}) // "undef", "\n";',
+           'a successful s/// resets a hash element\'s pos');
+both_agree('my @f = ("qq"); $f[0] =~ /q/g; for ($f[0]) { s/q/Q/ } my @g = ("qq"); for ($g[0]) { /q/g } $g[0] =~ s/q/Q/; print pos($f[0]) // "undef", " ", pos($g[0]) // "undef", "\n";',
+           '... through a foreach alias, in both directions');

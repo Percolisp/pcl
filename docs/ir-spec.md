@@ -5211,6 +5211,9 @@ any context) or `\G` match that is an element is therefore passed as its CELL
 / `p-aref-deref-argbox` for a deref) -- never a copy of its value, which would
 keep `pos` on a temporary and spin a `while ($h{k} =~ /\G.../gc)` loop forever.
 A MISSING element is a lazy alias: the match does not vivify it.
+A write that CHANGES the string resets `pos` -- a successful `s///` (also `/g`), a `tr///`
+that changed something, an assignment, `.=` -- on a scalar and an element alike;
+a no-match `s///` and a `tr///` that changed nothing keep it (`%p-write-match-target`).
 
 Example -- `my %h = (k => "aab"); $h{k} =~ /a/g; print pos($h{k})` prints `1`.
 
