@@ -40,7 +40,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -186,3 +186,13 @@ test_cl('#2533 the Archive::Tar::Constant filter: defined and empty = a constant
     'no strict "refs"; use constant SC => 5; use constant LI => (1, 2); sub e0 () { 1 } sub pl { 1 } sub p2 ($$) { 1 }'
   . ' print join(",", grep { defined prototype(\&{"main::$_"}) && !length prototype(\&{"main::$_"}) } qw(SC LI e0 pl p2)), "\n";',
     "SC,LI,e0\n");
+
+# #2961 (s514f): a MODULE's definitions carry their prototypes into the
+# registry prototype() reads -- core Getopt::Long forward-declares and then
+# defines `sub Configure (@)` / `sub ConfigDefaults()`.  Expected = perl
+# 5.40.3's output (probed s514f); already right on main 8f2fa11c, this row
+# keeps it so.
+test_cl('#2961 prototype() of core Getopt::Long subs reaches the runtime registry',
+    'use Getopt::Long; print join(" ", map { my $p = prototype("Getopt::Long::$_"); defined $p ? "[$p]" : "undef" }'
+  . ' qw(Configure ConfigDefaults GetOptionsFromArray)), "\n";',
+    "[\@] [] [\@]\n");
