@@ -205,6 +205,33 @@ board 18 -- are real displaced built-ins).  Everyday: the only unit still announ
 core File/Copy.pm (§6 named two programs with a line: File-Compare-Copy and
 Math-BigInt-BigFloat; the Math::BigInt ones are gone).
 
+## 8. After #3184 (s515a): the tag imports, re-counted
+
+Measured as §6 / §7 (`PCL_DETECT=announce` + `PCL_DETECT_LOG` naming a file per
+population; distinct = unique announced lines), on the s515a tree (gen v2-5884,
+rebased onto main 973bdb1d): #3184 (an export tag resolves through the module's
+own arrays, `&` stripped; a literal `BEGIN { eval q{ use M LIST } }` is an import)
+plus the IO::Compress::Base::Common facts overlay (#3205) that this recount found.
+
+| population | §7 | after #3184 | what is left |
+|---|---|---|---|
+| gate (310 files) | 32 | **4** | #3206: `use File::Glob qw(:bsd_glob)` -- every `glob(...)` in file-glob-shim-01.t's program is announced as a displaced built-in; the VALUE is perl's (noise).  Before the overlay: +4 in core Compress/Zlib.pm = #3205 |
+| sweep (108 files) | 0 | **0** | -- (log mode: not even a harmless line) |
+| everyday (122 programs) | 17 | **0** | -- (File::Copy's 17 gone; the 10 Compress::Zlib / IO::Uncompress::Base sites a first run on this tree showed are #3205, closed by its overlay) |
+| CPAN board (14 dists) | 59 | **18** | shape 2, REAL: Sub::Uplevel's `CORE::GLOBAL::caller` (18, t/02 07 04 05 06) -- nothing else |
+
+What moved: the gate's 32 (Encode `:all` = `[ @EXPORT, @EXPORT_OK ]`) and the
+board's 41 (Text::Balanced `:ALL` = BEGIN-block `&name` lists) are gone; File::Copy's
+17 `stat` / `utime` sites (Time::HiRes through `BEGIN { eval q{ use ... } }`) are
+gone.  NEW, found by the recount and fixed in the batch: core Compress::Zlib and
+IO::Uncompress::Base call `isaFilehandle` / `isaFilename` / `whatIsInput` /
+`setBinModeInput` from IO::Compress::Base::Common, which the prototype scan never
+read (every `IO::` module is skipped by name for cost) -- a SILENT wrong
+(`isaFilename "x", "y"` passed both arguments; perl passes one), closed by a facts
+overlay (#3205).  The default stays the USER's call (DECIDED ## s515): what an
+`announce` default would print now is the 18 real Sub::Uplevel sites and #3206's
+glob noise.
+
 ## Appendix A -- the gate's 53 distinct call sites
 
 `unit  name  install:line/kind  call:line  assumed  installed`  (CORE: = perl's own lib; /tmp/*.pl = a gate test's program)
