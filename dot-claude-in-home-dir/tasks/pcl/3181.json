@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-10",
+   "description" : "FILED s514f (Opus, 2026-10-11) from the #3144 review probe (blessglob.pl): PRE-EXISTING on main 8f2fa11c, unchanged by #3144.\n\n`->can('print')` on an UNBLESSED open filehandle answers TRUE in PCL; perl answers FALSE.\n\nReproducer (scratch/s514f/pr/can1.pl):\n    open my $fh, \"<\", $0 or die;\n    print ref($fh), \" \", ($fh->can(\"print\") ? \"can\" : \"cannot\"), \"\\n\";\n    my $g = \\do { local *H }; open $g, \"<\", $0 or die;\n    print ref($g), \" \", ($g->can(\"print\") ? \"can\" : \"cannot\"), \"\\n\";\n\nperl 5.40.3:  GLOB cannot / GLOB cannot\nPCL:          GLOB can    / GLOB can\n\nPerl: UNIVERSAL::can on an unblessed reference returns undef (the handle's IO::File method autoload applies to method CALLS, not to `can`, unless IO::File is loaded -- probe with `use IO::Handle` before fixing: then perl answers can).  PCL's `can` resolves the invocant through the same filehandle -> IO::Handle path as a method call.  Fix site: the `can` builtin's invocant-to-class step (UNIVERSAL::can); an unblessed ref answers undef unless the class is a loaded package.  Low value; filed per rule.\n",
+   "id" : "3181",
+   "status" : "pending",
+   "subject" : "->can('print') on an unblessed open filehandle answers true (perl: false)"
+}

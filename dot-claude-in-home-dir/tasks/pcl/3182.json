@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-11",
+   "description" : "FILED s514f (Opus, 2026-10-11) while fixing #2920.  PRE-EXISTING on main 8f2fa11c.\n\nA word this file DECLARES as a sub (no prototype), written in print's handle slot, is a CALL in perl and a FILEHANDLE in PCL -- SILENT WRONG:\n\n    sub FOO {3} print FOO \"x\\n\"; print \"end\\n\";\nperl 5.40.3: 3end   (FOO(\"x\\n\") is called; its value 3 is printed)\nPCL:         end    (prints \"x\\n\" to the never-opened handle FOO)\n\nThe `*` spelling `sub FOO {3} print FOO * 2, \"\\n\"` (perl: FOO(*2, \"\\n\") -> prints 3) is still a LOUD drop on purpose: #2920's glob repair is skipped for a declared sub so as not to turn it silent.  Fix site: PExpr's print filehandle decision (the bareword arm near `fh_bareword_shape`): a word `_bareword_callable_here` answers 'yes' for (declared above, no `()` prototype) is a call, not a handle, unless it is a registered filehandle (`open(FOO, ...)` wins).  Probe the lowercase spelling and a sub declared BELOW the print ('not-yet': perl reads the handle).\n",
+   "id" : "3182",
+   "status" : "pending",
+   "subject" : "a declared sub in print's handle slot is a CALL in perl, a filehandle in PCL (print FOO \"x\" with sub FOO) -- silent wrong"
+}
