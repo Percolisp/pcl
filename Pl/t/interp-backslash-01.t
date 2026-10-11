@@ -14,7 +14,7 @@
 # (rule 12), and the literal alternative takes `\` + end.
 #
 # The TIMED row's bound is RELATIVE to perl's own time on the same program
-# (8 x perl + 0.5 s, DECIDED ## s513); the transpile runs under `timeout` so a
+# (8 x perl + 4 x a control transpile + 0.5 s, DECIDED ## s513); the transpile runs under `timeout` so a
 # regression is a failed row, never a hung gate.
 
 use strict;
@@ -45,7 +45,19 @@ my $p0   = time;
 my $perl = `perl $pl 2>&1`;
 my $pdt  = time - $p0;
 
-my $bound = 8 * $pdt + 0.5;
+# The bound also scales with a CONTROL transpile measured in this run (the
+# same program with every backslash removed): the timed thing is the
+# TRANSPILE, the part that hung, and its fixed cost (perl + PPI start-up) is
+# not perl's run time -- on a loaded box or CI's ~3x slower runner the
+# transpile+run of a correct tree read 0.55 s against a 0.54 s bound (s514f).
+(my $ctl = $prog) =~ tr{\\}{}d;
+my ($kfh, $kpl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+print $kfh $ctl;
+close $kfh;
+my $k0 = time;
+`timeout 60 $pl2cl $kpl 2>/dev/null`;
+my $kdt = time - $k0;
+my $bound = 8 * $pdt + 4 * $kdt + 0.5;
 my $t0 = time;
 my $cl = `timeout 60 $pl2cl $pl 2>/dev/null`;
 my $rc = $? >> 8;
@@ -54,9 +66,7 @@ isnt($rc, 124, '#3142 the transpile terminates (no spin on a lone trailing backs
 my ($cfh, $clf) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
 print $cfh $cl;
 close $cfh;
-my $t1  = time;
 my $pcl = `sbcl @sbcl_rt --load $clf 2>&1`;
-$dt += time - $t1;
 $pcl =~ s/^(?:;|PCL Runtime loaded).*\n//gm;
 
 my @pl  = split /\n/, $perl, -1;
@@ -65,6 +75,6 @@ is($pc[0], $pl[0], "#3142 \"ors=\$\\\\\" is \$\\ then a backslash (perl: $pl[0])
 is($pc[1], $pl[1], "#3142 the \$\\ family of interpolations (perl: $pl[1])");
 is($pcl, $perl, '#3142 the whole program, byte for byte');
 cmp_ok($dt, '<', $bound,
-       sprintf('#3142 timed: transpile + run within 8x perl + 0.5 s = %.2f s (took %.2f s, perl %.2f s)',
-               $bound, $dt, $pdt));
+       sprintf('#3142 timed: the transpile within 8x perl + 4x a control transpile + 0.5 s = %.2f s (took %.2f s, perl %.2f s, control %.2f s)',
+               $bound, $dt, $pdt, $kdt));
 done_testing();
