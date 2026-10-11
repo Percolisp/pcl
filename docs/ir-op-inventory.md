@@ -13,10 +13,10 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **750**
+* names exported: **751**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 750
-* UNCLASSIFIED (no family rule matches): **17**
+* with a machine-readable `Contract:` tail: **69** of 751
+* UNCLASSIFIED (no family rule matches): **18**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -1157,7 +1157,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 
 # UNCLASSIFIED
 
-## UNCLASSIFIED (17)
+## UNCLASSIFIED (18)
 
 *No ir-spec §10 row and no note.*
 

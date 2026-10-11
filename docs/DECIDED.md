@@ -471,6 +471,7 @@ not-supported.md → only then probe.*
 - **lib/attributes.pm REPLACES perl's** (its Perl half kept, the four XS primitives over builtin::sub_attributes / set_sub_attribute / sub_stash) -- smaller than shimming four XS names into perl's file, and it is must-win.  A run-time `lvalue` set is recorded and ANNOUNCED (lowering is compile-time).  #3162.
 - **A restricted hash is a HIDDEN TIE of Hash::Util's own class** -- NO lock bit and NO test on any hash fast path (the tie test already lives in the miss branch); `tied` answers undef for a hidden tie (`builtin::hide_tie` / `hidden_tie_object`).  Hash internals (bucket_*, hash_seed, hash_value, traversal mask) answer placeholders and announce.  ir-spec "A restricted hash is a hidden tie", #3163.
 - **A dereference argument fills a `\@` / `\%` prototype slot by reference** (`f(@$r)`, `lock_keys(%$self)`) -- it was flattened (pre-existing; found by fields.pm's shape).  ir-spec, #3163.
+
 ## s514f (2026-10-11, Opus) -- the five s514d findings (#3143 #3141 #3144 #3142 #3140) + fillers #2961 #2920
 - **a prototype record is keyed by its DECLARING package** (#3143): the module walk tracks `package` statements, an import asks `MODULE::name` first (the qw list AND the `use M 'name'` bare-quote arm), the include pre-pass registers into the package the `use` is in.  ir-spec §2b.2a.
 - **a substr / vec / pos / `$#a` ARGUMENT of a user sub passes its write-through cell** (#3141; the `\substr` rewriter, one form); a `$` slot keeps the cell.  FLAG: one cell per such call (perl allocates an LV too).  ir-spec.
