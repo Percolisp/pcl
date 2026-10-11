@@ -39,6 +39,8 @@ use Cwd qw(abs_path);
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use PCLTap ();   # the ONE TAP reader shared with tools/cpan-scoreboard.pl
+use PCLProc ();  # the ONE child-isolation helper: a run killed by `timeout`
+                 # takes its pl2cl / SBCL with it (task #3064)
 
 my $root = abs_path(dirname(abs_path($0)) . "/..");
 
@@ -66,7 +68,12 @@ my $iflags = join " ", map { "-I$_" } @inc;
 my $lisp = "/tmp/run-dist-t_$$.lisp";
 my $err  = "/tmp/run-dist-t_$$.err";
 
-my $rc = system(
+my $out  = "/tmp/run-dist-t_$$.out";
+
+# Both children run in their OWN session (PCLProc::run_isolated): a hung SBCL
+# ignores TERM, and before #3064 a `timeout N run-dist-t.pl` killed only this
+# script and left the SBCL spinning, orphaned, for hours.
+my ($rc) = PCLProc::run_isolated(
   "perl -I$root $iflags $root/pl2cl --no-cache --lenient-ppi $tfile >$lisp 2>$err");
 if ($rc != 0) {
   my $e = do { local $/; open(my $f, '<', $err) or die; <$f> };
@@ -75,7 +82,10 @@ if ($rc != 0) {
   exit 2;
 }
 
-my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval "(setf pcl::*pcl-skip-cache* t)" --load $lisp 2>&1`;
+my ($sbcl_status) = PCLProc::run_isolated(
+  "sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $lisp >$out 2>&1");
+my $raw = '';
+if (open(my $f, '<', $out)) { local $/; $raw = <$f> // ''; }
 # The child's WAIT STATUS, which this script used to throw away.  A SIGNAL
 # there (the OOM killer on a loaded box) produces an empty TAP stream that is
 # indistinguishable from "the file ran and printed nothing" — and the board's
@@ -83,8 +93,7 @@ my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $ro
 # Reported in --rows mode so the scoreboard can retry it instead of believing
 # it (measured s473w: two Algorithm-Diff files read FAIL 0/0 in a loaded board
 # run and 32/3 + 102/20 alone).
-my $sbcl_status = $?;
-unlink $lisp, $err;
+unlink $lisp, $err, $out;
 
 # Filter SBCL noise.
 $raw =~ s/^;[^\n]*\n//gm;

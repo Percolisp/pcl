@@ -54,9 +54,22 @@ sub run_isolated {
   die "$runner: fork failed: $!\n" if !defined $pid;
   if (!$pid) {
     POSIX::setsid();                       # our PID becomes the session id
-    exec('/bin/sh', '-c', $cmd);
+    { exec('/bin/sh', '-c', $cmd) };   # the block: no 'unlikely to be reached'
     POSIX::_exit(127);
   }
+  # A runner killed WHILE it waits (`timeout N runner`, task #3064) must take
+  # the session with it: the session is out of reach of the group signal that
+  # killed the runner, and a hung SBCL ignores TERM -- reap_session ends in
+  # KILL.  The runner then dies of the same signal, as it would have.
+  local @SIG{qw(TERM INT HUP)} = map {
+    my $sig = $_;
+    sub {
+      reap_session($pid);
+      $SIG{$sig} = 'DEFAULT';
+      kill $sig, $$;
+      POSIX::_exit(128 + 15);
+    };
+  } qw(TERM INT HUP);
   waitpid($pid, 0);
   my $rc = $?;
   return ($rc, reap_session($pid));

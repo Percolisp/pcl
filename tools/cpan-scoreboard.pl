@@ -228,7 +228,7 @@ my @rows;
 
 sub run_one {
   my ($w) = @_;
-  my @cmd = ("timeout", $w->{to}, "$root/tools/run-dist-t.pl", "--rows");
+  my @cmd = ("timeout", "-k", 5, $w->{to}, "$root/tools/run-dist-t.pl", "--rows");
   push @cmd, "--no-dist-lib" if $w->{ndl};
   push @cmd, $w->{dist}, $w->{t};
   my $out = do {
