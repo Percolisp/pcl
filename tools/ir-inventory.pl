@@ -210,7 +210,7 @@ my %FAMILY;
                                p-str-bit-and= p-str-bit-or= p-str-bit-xor=
                                p-and-assign p-or-assign p-//=)],
   'increment' => [qw(p-pre++ p-post++ p-pre-- p-post--)],
-  'elements' => [qw(p-aref p-aref-box p-aref-argbox p-gethash-argbox
+  'elements' => [qw(p-aref p-aref-box p-aref-argbox p-gethash-argbox p-aref-deref-argbox p-gethash-deref-argbox
                     p-aref-deref p-aref-deref-box p-gethash p-gethash-box
                     p-gethash-deref p-gethash-deref-box p-aslice p-hslice
                     p-kv-hslice p-kv-aslice p-exists p-exists-array p-delete

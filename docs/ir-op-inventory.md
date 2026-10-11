@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **751**
+* names exported: **753**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 751
+* with a machine-readable `Contract:` tail: **69** of 753
 * UNCLASSIFIED (no family rule matches): **18**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -190,7 +190,7 @@ ir-spec §10 row **declarations** — names carrying the compiler's own VERDICTS
 | `p-raw-params` | macro | `((&rest params) &body body)` | — | — | — | — | — | — | — |
 | `p-sub` | macro | `(name params facts &body body)` | — | — | — | — | — | — | — |
 
-## elements (25)
+## elements (27)
 
 ir-spec §10 row **elements** — reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value
 
@@ -200,6 +200,7 @@ ir-spec §10 row **elements** — reads unbox scalars, keep reference boxes (§2
 | `p-aref-argbox` | function | `(arr idx)` | — | — | — | — | — | — | — |
 | `p-aref-box` | function | `(arr idx)` | insensitive | num | none | yes | no | no | none |
 | `p-aref-deref` | function | `(ref idx &optional site)` | — | — | — | — | — | — | — |
+| `p-aref-deref-argbox` | function | `(ref idx &optional site)` | — | — | — | — | — | — | — |
 | `p-aref-deref-box` | function | `(ref idx &optional site)` | — | — | — | — | — | — | — |
 | `p-aslice` | function | `(arr &rest indices)` | insensitive | num | none | yes | no | no | none |
 | `p-delete` | function | `(hash key)` | insensitive | str | none | yes | no | no | none |
@@ -212,6 +213,7 @@ ir-spec §10 row **elements** — reads unbox scalars, keep reference boxes (§2
 | `p-gethash-argbox` | function | `(hash key)` | — | — | — | — | — | — | — |
 | `p-gethash-box` | function | `(hash key)` | insensitive | str | none | yes | no | no | none |
 | `p-gethash-deref` | function | `(ref key &optional site)` | — | — | — | — | — | — | — |
+| `p-gethash-deref-argbox` | function | `(ref key &optional site)` | — | — | — | — | — | — | — |
 | `p-gethash-deref-box` | function | `(ref key &optional site)` | — | — | — | — | — | — | — |
 | `p-hslice` | function | `(hash &rest keys)` | insensitive | str | none | yes | no | no | none |
 | `p-kv-aslice` | function | `(arr &rest indices)` | insensitive | num | none | yes | no | no | none |
