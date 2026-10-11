@@ -10202,7 +10202,7 @@ sub _process_include_statement {
       if ($module_env) {
         $self->_merge_module_prototypes($module_env, \@imports, $module);
         # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
-        $self->_merge_bare_quote_imports($stmt, $module_env, scalar @imports);
+        $self->_merge_bare_quote_imports($stmt, $module_env, scalar @imports, $module);
       }
 
       # Perl: `use Module LIST` makes LIST a normal list that is evaluated and
@@ -11435,11 +11435,16 @@ sub _use_import_arg_tokens {
 #     it — a name the module does not declare adds nothing, and a name it
 #     does adds one prototype and takes none away.
 sub _merge_bare_quote_imports {
-  my ($self, $stmt, $module_env, $had_imports) = @_;
+  my ($self, $stmt, $module_env, $had_imports, $module) = @_;
   return if $had_imports || !$module_env;
-  my @bare = grep { $module_env->get_prototype($_) }
+  # The record is the MODULE's own package's first (task #3143, the same
+  # lookup _merge_module_prototypes makes): Encode's exported `decode($$;$)`
+  # is hidden under the bare key by a prototype-less same-named sub of an
+  # encoding-object package, so `use Encode 'decode'` imported nothing.
+  my @bare = grep { (defined $module && $module_env->get_prototype("${module}::$_"))
+                    || $module_env->get_prototype($_) }
              $self->_parse_use_import_list($stmt, bare_quote => 1);
-  $self->_merge_module_prototypes($module_env, \@bare) if @bare;
+  $self->_merge_module_prototypes($module_env, \@bare, $module) if @bare;
 }
 
 sub _parse_use_import_list {

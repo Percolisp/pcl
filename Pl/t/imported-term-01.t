@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 25;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -345,3 +345,9 @@ my $x = "caf\xC3\xA9"; my $s = decode "UTF-8", $x; print length($s), " ", length
 both_agree(q{use Math::BigInt;
 print Math::BigInt->new(5) + 1, "\n";},
            '#3143 a module unit pre-pass imports into the package the `use` is in (no detector line)');
+# The `use M 'name';` spelling (no parens, a quote: #733's bare-quote arm) is
+# the same lookup -- it asked the bare key and so imported nothing for Encode's
+# shadowed `decode` (Mojo-DOM58 t/entities.t, 4 detector sites; s514f).
+both_agree(q{use Encode 'decode';
+my $x = "caf\xC3\xA9"; my $s = decode 'UTF-8', $x; print length($s), "\n";},
+           '#3143 `use Encode \'decode\'` (bare quote) carries the shim\'s ($$;$) -- no detector line');
