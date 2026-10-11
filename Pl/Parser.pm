@@ -4030,7 +4030,9 @@ sub _process_use_base {
   my $pkg = $self->environment->current_package;
 
   # Redefine CLOS class with parents for MRO
-  my $cl_class = $self->_pkg_to_clos_class($pkg);
+  my $qualify  = $self->_reader_pkg_differs;
+  my $cl_class = $qualify ? $self->_qualified_clos_class($pkg)
+                          : $self->_pkg_to_clos_class($pkg);
   my $parents_cl = join(' ', map {
     my $cls = $self->_pkg_to_clos_class($_);
     my $pkg_prefix = cl_pkg($_);
@@ -4062,12 +4064,17 @@ sub _process_use_base {
     $self->_emit("(p-defclass $cl_class ($parents_cl) ())");
   });
 
-  # Declare @ISA in declarations bucket, push parents at load time
+  # Declare @ISA in declarations bucket, push parents at load time.  Both the
+  # class above and @ISA here are QUALIFIED when this `use` sits after a
+  # run-time `package X;` switch in a block (#3140): the forms are READ in the
+  # enclosing section's package, so a bare `@ISA` was that package's and X
+  # kept no parents.
+  my $isa_sym = $qualify ? $self->_qualified_isa_symbol($pkg) : "\@ISA";
   $self->_with_bucket('declarations', sub {
-    $self->_emit(global_decl_form("\@ISA", "(make-array 0 :adjustable t :fill-pointer 0)"));
+    $self->_emit(global_decl_form($isa_sym, "(make-array 0 :adjustable t :fill-pointer 0)"));
   });
   for my $parent (@parents) {
-    $self->_emit("(p-push \@ISA \"$parent\")");
+    $self->_emit("(p-push $isa_sym \"$parent\")");
   }
   $self->_emit("");
 }
@@ -9396,6 +9403,20 @@ sub _cl_pkg_designator {
 # Dog::@ISA for single-segment, |Foo::Bar|::@ISA for multi-segment.  Built from
 # the package designator so it reads into the SAME package the runtime resolves
 # via perl-pkg-to-cl-pkg-name (and that %pcl-isa-ancestry searches).
+# True when the statement being lowered sits after a RUN-TIME `package X;`
+# switch inside a block: its emitted text is READ in the enclosing section's
+# CL package (_seam_outer_pkg), not in X's, so a hoisted form naming X's
+# globals or class must qualify them.  ONE predicate for every such site:
+# the `use` import target (:into) and `use base`/`use parent`'s class + @ISA
+# (#3140).
+sub _reader_pkg_differs {
+  my ($self) = @_;
+  my $cur_pkg = $self->environment->current_package // 'main';
+  return ($self->_block_depth > 0
+          && defined $self->{_seam_outer_pkg}
+          && $self->{_seam_outer_pkg} ne $cur_pkg) ? 1 : 0;
+}
+
 sub _qualified_isa_symbol {
   my ($self, $pkg_name) = @_;
   (my $prefix = $self->_cl_pkg_designator($pkg_name)) =~ s/^://;
@@ -10201,9 +10222,7 @@ sub _process_include_statement {
       # so name it explicitly.  _block_depth is bumped exactly for blocks that
       # carry a package statement, so nothing else changes emission.
       my $cur_pkg = $self->environment->current_package // 'main';
-      my $into = ($self->_block_depth > 0
-                  && defined $self->{_seam_outer_pkg}
-                  && $self->{_seam_outer_pkg} ne $cur_pkg)
+      my $into = $self->_reader_pkg_differs
                ? qq{ :into "$cur_pkg"}
                : '';
       $self->_emit("(p-eval-always");

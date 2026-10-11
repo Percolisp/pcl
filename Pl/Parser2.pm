@@ -10782,8 +10782,7 @@ sub _lower_block_1 {
     # redefinitions per moo-objs iteration, 77 % of its run, s514c #3120);
     # the readiness test makes a re-opened class free.
     my @enter = (['p-defpackage', $cl_pkg],
-                 ['p-defclass', "${sym}::" . $fp->_pkg_to_clos_class($pkg),
-                  ['list'], ['list']],
+                 ['p-ensure-class', "${sym}::" . $fp->_pkg_to_clos_class($pkg)],
                  ['p-set-current-package', $cl_pkg, "\"$pkg\""]);
     my $restore = ['p-set-current-package', $cl_prev, "\"$prev\""];
     if ($blk) {

@@ -394,7 +394,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; __SUB__ the parse did not resolve: dies
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-defclass #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
+   #:p-defpackage #:p-defclass #:p-ensure-class #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant #:p-amp-call
    #:p-detect-table #:p-detect-at #:p-detect-end #:p-detect-declare
@@ -827,6 +827,17 @@
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (unless (%p-class-ready-p ',name ',supers)
        (defclass ,name ,supers ()))))
+
+(defmacro p-ensure-class (name)
+  "The CLOS class of a package a RUN-TIME `package X;` switch enters: created
+   when absent, and an existing class is left EXACTLY as it is.  perl's
+   `package X;` never changes @ISA, so the switch must never write parents --
+   a `p-defclass` with an empty parent list here re-defined the class `use
+   base` / `use parent` had already given its parents, and method dispatch
+   lost them (task #3140; t/op/tiehandle.t's Bar::Say block).  The parents
+   are owned by the forms that set @ISA, never by the switch."
+  `(unless (find-class ',name nil)
+     (defclass ,name () ())))
 
 ;;; perl-pkg-to-cl-pkg-name: map a Perl package name to the CL package-name
 ;;; string PCL's codegen uses.  Codegen pipe-quotes multi-segment names
@@ -25152,7 +25163,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-5784"
+(defparameter *pcl-cache-generation* "v2-5785"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

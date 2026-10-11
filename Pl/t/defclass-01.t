@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" if ! -x $pl2cl;
 plan skip_all => "sbcl not found"  if ! `which sbcl 2>/dev/null`;
-plan tests => 14;
+plan tests => 17;
 
 # -- A. the macro and its readiness test, in raw CL (one SBCL spawn) --------
 my $LISP = <<'LISP';
@@ -206,4 +206,41 @@ EOF
     # perl 5.40.3's output for $src (probed s514c)
     is(run_pl($src), "FooBase1\nFooBase1\nFooBase1\nBarBar\n",
        'a sub that re-enters its package every call keeps its class and parents');
+}
+
+# #3140 (s514f): a RUN-TIME `package X;` switch inside a bare block that also
+# holds a `local` takes the nested-switch path, which used to emit
+# `(p-defclass X::plc-x () ())` -- re-defining the class `use base` had just
+# given its parents -- and `use base`'s @ISA push was read in the enclosing
+# section's package (main's @ISA).  perl's `package X;` never changes @ISA.
+# Expected lines are perl 5.40.3's output (probed s514f).  Inverse: on the
+# base 8f2fa11c rows 1-2 die "Can't locate object method "hi" via package".
+{
+    my $src = <<'EOF2';
+package Implement; sub hi { "hi" }
+package main;
+{ package Bar; use base qw(Implement); local $\ = ""; print Bar->hi, " [@Bar::ISA] [@main::ISA]\n"; }
+EOF2
+    is(run_pl($src), "hi [Implement] []\n",
+       '#3140: use base inside a block with a local keeps its parents; main::@ISA untouched');
+    $src = <<'EOF2';
+package Implement; sub hi { "hi" } sub new { bless {}, shift }
+package Other; sub yo { "yo" }
+package main;
+{ package Baz; use parent -norequire, qw(Implement); local $, = ""; print Baz->hi, " [@Baz::ISA]\n"; }
+{ package P1; use parent -norequire, 'Implement'; local $x = 1; package P2; use parent -norequire, 'Other'; local $y = 2;
+  print P1->hi, P2->yo, " [@P1::ISA] [@P2::ISA] [@main::ISA]\n"; }
+print UNIVERSAL::isa('Baz','Implement') ? "isa\n" : "not\n";
+{ package Baz; local $z = 3; print Baz->hi, " again [@Baz::ISA]\n"; }
+print __PACKAGE__, "\n";
+EOF2
+    is(run_pl($src), "hi [Implement]\nhiyo [Implement] [Other] []\nisa\nhi again [Implement]\nmain\n",
+       '#3140: use parent, two switches in one block, and re-entering the package keep every class its parents');
+    $src = <<'EOF2';
+package Implement; sub hi { "hi" }
+package main;
+{ package Bar; use base qw(Implement); print Bar->hi, " [@Bar::ISA] [@main::ISA]\n"; }
+EOF2
+    is(run_pl($src), "hi [Implement] []\n",
+       '#3140 control: the same block without a local (the section path) is unchanged');
 }
