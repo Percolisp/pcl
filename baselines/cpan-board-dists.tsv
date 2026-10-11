@@ -34,3 +34,5 @@ Sub-Uplevel-0.2800-0	-	s343	CORE::GLOBAL::caller override
 Text-Balanced-2.07-0	-	s343	pos/regex extraction
 Try-Tiny-0.32-0	-	s343	exceptions, local $@ (the dist's own Try::Tiny: -I wins, s499j)
 Scalar-List-Utils-1.70-0	--no-dist-lib	s343	PCL's List::Util / Scalar::Util / Sub::Util shims (the dist's lib/ is the XS module)
+cpan-tests/modules/Text-CSV-2.04	-	s515c	CSV parsing/writing in pure Perl (Text::CSV_PP): regexes with \G and pos(), goto, IO layers
+Getopt-Long-2.58-0	-	s515c	command-line option parsing, in nearly every CLI script
