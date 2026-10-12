@@ -36,7 +36,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 12;
 
 # The fixture directory: a space in a file name, and two plain files.
 my $d = tempdir(CLEANUP => 1);
@@ -113,3 +113,13 @@ both_agree("use File::Glob qw(bsd_glob);\n$shapes"
 my $cl = transpile("use File::Glob qw(bsd_glob);\nmy \@l = glob(\"\$d/*\");\n");
 ok($cl =~ /\(p-glob / && $cl =~ /"glob" \d+ "builtin"/,
    'SHAPE NEGATIVE: without the tag the site is the builtin p-glob, registered "builtin"');
+
+# ---- #3260 (half 2): `&NAME(...)` IGNORES the prototype ------------------
+# So it asks none: no reference slot (main passed `&f(@a)` as \@a) and no
+# detector-table entry (core IO::Dir's `&lstat(...)` under `use File::stat`
+# was announced as a displaced built-in by the announce default).
+both_agree('sub f (\@) { ref($_[0]) || scalar(@_) } my @a = (1, 2, 3);' . "\n"
+           . 'print f(@a), " ", &f(@a), "\n";',
+           '#3260: &f(@a) ignores the (\@) prototype, f(@a) does not');
+both_agree("use IO::Dir;\nmy \$io = IO::Dir->new(\$d) or die; my \@a = sort \$io->read; print scalar(\@a), \"\\n\";",
+           '... core IO::Dir (`&lstat` under `use File::stat`) runs with no detector line');

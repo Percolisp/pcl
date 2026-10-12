@@ -2877,7 +2877,11 @@ sub gen_funcall_form {
 
   # ---- from here on: the text emitter's generic tail, form-shaped ----
 
-  my $proto = $self->environment ? $self->environment->get_prototype($func_name) : undef;
+  # `&NAME(...)` IGNORES the prototype (perlsub), so it asks no prototype: no
+  # slot context, no reference slot -- and no detector-table entry, since
+  # nothing installed later can change how it parses (#3260).
+  my $proto = ($self->environment && !$node->{force_user_sub})
+            ? $self->environment->get_prototype($func_name) : undef;
   my @ref_params;
   if ($proto && $proto->{is_proto} && $proto->{params}) {
     @ref_params = map { $_->{proto_type} // $_->{name} } @{$proto->{params}};
