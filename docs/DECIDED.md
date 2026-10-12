@@ -12116,3 +12116,50 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   Missing case — `is_list` should accept the Condition mislabel, one
   predicate); #336 `(qw(a b), "c")[2]` — a qw inside a SLICED list is not
   flattened.
+
+## s516 (2026-10-12, Fable) — the two queued USER rulings; s515a sent back once; two glob findings
+
+- **The shared base result is KEPT and taken LAZILY (USER, 2026-10-12).**
+  After an FF, `~/pcl-agent-scratch/s513/base-result.sh` runs only when a
+  running agent is still BEFORE its board leg, or on an agent's request —
+  never automatically after every FF.  The two-round trial: round one about
+  even; round two Fable paid 42.2 lock-minutes for three bases, three
+  consumers saved ~39 and the base half left their critical path, but one
+  base (s515b's, 14.3 min) had no consumer.  The directory is now named by
+  MAIN's code sha (the s515b rename: the merge worktree can sit one
+  notes-only rebase behind main).
+- **The detector default stays `off` until #3206 is fixed; the NEXT
+  correctness brief fixes #3206 and flips the default back to `announce` in
+  the SAME batch (USER, 2026-10-12).**  The recount after #3184 (lands with
+  s515a): gate 4 = #3206, one noise cause / sweep 0 / everyday 0 / board 18
+  real (Sub::Uplevel's `CORE::GLOBAL::caller`).  The s515 condition — back to
+  announce when the recount is quiet — is met literally once #3206 is gone.
+- **#3206 LOCATED (review probe `review/p516c/ovr.pl`): under
+  `use File::Glob qw(:bsd_glob)` the parse DOES consult the override — every
+  `glob(...)` site is emitted as `pl-glob`, the override-aware call, and the
+  value is perl's in list / scalar / `<>` / iterator shapes — yet the
+  detector table registers each site as `("main" "glob" N "builtin")`.  The
+  TABLE is wrong, not the parse.**
+- **#2879 FILED (pre-existing on main): the quoted-string spelling
+  `use File::Glob ':bsd_glob'` takes the OTHER branch — `p-glob`, the
+  builtin, with `:import-args ":bsd_glob"` a bare string where the qw
+  spelling passes `(vector ":bsd_glob")` — so csh word-splitting stays
+  (`glob("$d/a b.txt")` 2 files, perl 1; two words 2, perl 1).  The
+  builtin-override recorder reads a qw() import list only.  One brief with
+  #3206.**
+- **s515a's #3207 (the one commit no Fable eye had read) SENT BACK for one
+  fix: perl clears pos() after ANY `tr///` that WRITES its target, matched or
+  not** (`tr/W/V/` with no match → undef; `tr/a/a/` → undef; the same on a
+  hash element); only a count-only tr (`tr/X//`: empty replacement, no /d)
+  and `/r` keep it (probe `review/p516a/pos3.pl`, 24 shapes).  The tree's
+  predicate `(string/= result str)` encoded "the text changed" — wrong rule;
+  the ir-spec sentence "never after a tr/// that changed nothing" is false.
+  Also owed: the full sweep (a `cl/` change had none) + the op/tr.t op/pos.t
+  re/subst.t re/pos.t companion.  Pre-existing, filed as #3210: `$s = $s`
+  keeps pos in perl (sv_setsv on the same SV is a no-op), PCL clears it.
+- **A probe trap, recorded: `./runpcl FILE` passes NO program arguments** —
+  a `shift` read undef and `"$d/*"` globbed `/*`, which listed the ROOT and
+  looked like a glob bug on every worktree back to s510c.  `./pcl FILE ARGS`
+  takes them.  s515c's `bsd_glob` scalar-context fix (#3246) is perl on its
+  tree with the directory inlined (`glob1i.pl`: list / scalar / none /
+  space-literal / iterator / two-words all identical).

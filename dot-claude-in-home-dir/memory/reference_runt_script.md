@@ -50,3 +50,5 @@ EOF
 ```
 
 Use `runpcl` for quick Perl snippet testing instead of the brittle `./pl2cl | sbcl --load /dev/stdin` pattern.
+
+**`./runpcl FILE.pl` passes NO program arguments** (s516, 2026-10-12: `./runpcl x.pl a b` gives an empty `@ARGV`).  A probe that read its directory from `shift` globbed `"/*"` and listed the ROOT -- twenty minutes chasing a glob bug that was not there.  For a program that reads `@ARGV` use `./pcl FILE.pl ARGS`, or inline the values into the probe.
