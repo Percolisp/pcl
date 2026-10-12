@@ -1,7 +1,3 @@
-# Copyright (c) 2025-2026 the PCL authors
-# This is free software; you can redistribute it and/or modify it under the
-# same terms as the Perl 5 programming language system itself.
-# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 # Stable booleans (perl 5.36+) in PCL -- design (s516, Fable, 2026-10-12; task #3242)
 

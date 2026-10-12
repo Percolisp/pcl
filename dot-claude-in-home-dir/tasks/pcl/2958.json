@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-12",
+   "description" : "FILED s516 (Fable, 2026-10-12).  `tools/tag-license docs/stable-booleans-design-s516.md` printed `tagged: docs/...md` and wrote the four `# Copyright ...` lines at the top of a Markdown file (removed by hand in the same session).  CLAUDE.md's rule lists .pm/.pl/.t/.lisp/.sh and shebang scripts; docs/*.md are prose and none of the other 172 carries a tag, and `tools/tag-license --check` (Pl/t/license-tag-01.t) does not ask for one -- so the explicit-file path and the --check path disagree about what a taggable file is (rule 11: ONE predicate in tools/lib/PCLLicense.pm).  Fix: the explicit path refuses (exit non-zero, says why) a file --check would not require a tag on; a row in the tool's own test.  LOW; tools only.",
+   "id" : 2958,
+   "status" : "pending",
+   "subject" : "tools/tag-license FILE stamps an explicitly named .md file with a #-comment license header (0 of 172 docs carry one; --check never asks for it) -- refuse a file whose kind the rules do not list"
+}
