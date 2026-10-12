@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-12",
+   "description" : "FILED s516a (Opus 5.5, 2026-10-12): the next HTTP-Tiny blocker once #3243 (opendir on a glob copy) made t/Util.pm's dir_list list the corpus.  PRE-EXISTING on main b4b36c5b (same death).\n\nREPRODUCER (scratch/s516a/tmpf.pl):\n    use IO::File; use Fcntl qw(SEEK_SET SEEK_END);\n    my $fh = IO::File->new_tmpfile or die; binmode $fh; print {$fh} \"hello\";\n    seek($fh, 0, SEEK_SET) or die; my $l = <$fh>; print \"[$l]\\n\";\n    seek($fh, 0, SEEK_END); print tell($fh), \"\\n\";      # perl: [hello] 5   PCL: [hello] then an unhandled simple-type-error\nBacktrace: (FILE-LENGTH #<FD-STREAM for \"/tmp/...\">) from %p-seek-impl -- SBCL's file-length refuses that fd-stream ('not a stream associated with a file'; the temp file is unlinked or the stream was made from an fd).  SEEK_SET works; SEEK_END needs the size: take it from fstat on the fd (sb-posix:fstat) when file-length refuses.  Also a raw Lisp error escaping a builtin (should be perl-shaped).\n\nREACH: HTTP-Tiny t/Util.pm tmpfile/rewind -- 100_get 101_head 102_put 103_delete 104_post 110_mirror 130_redirect 150_post_form 160_cookies 161_basic_auth 162_proxy_auth: each FAIL with 0 rows; blessed rows re-caused to #3262 by s516a.",
+   "id" : "3262",
+   "status" : "pending",
+   "subject" : "seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies 'not a stream associated with a file' (file-length on the unlinked temp stream) -- blocks HTTP-Tiny's 13 dir_list files (100_get 186 rows ...)"
+}
