@@ -2029,7 +2029,7 @@ op/tr.t	317	0	271	44	DIFF	s497b: 270/45 -> 271/44, the literal "" of `for ("", n
 op/tr_latin1.t	2	0	1	1	DIFF		0
 op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	33	4	DIFF	aborted-forms:1: Undefined subroutine &main::z called	0
-op/universal.t	142	2	127	17	DIFF	s504 #2389: 122/22 -> 127/17 UP at 8d41b6b6 (s492c): the five ->VERSION rows of lines 125-138 pass (#1818)	0
+op/universal.t	142	2	132	12	DIFF	s516b #3280 (= #1820): 127/17 -> 132/12 -- `$self->SUPER::isa(@_)` from a package with no @ISA reaches UNIVERSAL::isa with the list FLATTENED, the five RT66112 rows pass (serial, tree vs a main extraction 127/17)	0
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
