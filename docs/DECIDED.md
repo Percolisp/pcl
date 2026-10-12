@@ -12199,3 +12199,12 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
 - **A tool finding: `tools/tag-license FILE` stamps an explicitly named `.md`
   with a `#` header that `--check` never asks for (#2958, LOW).**
 - **Perf round 47's brief is WRITTEN (`briefs-and-rules-for-claude-subagents/s516/perf-round-47-prompt.md`, launched in s517 or s518 per the cadence): #3221 → #3121 → the joinarr slice path → the lcbytes case map + UTF-8 scan.  Its bar, refined: the 15 % line holds for the two NEW levers; #3221 and #3121 ship when the build REPRODUCES their hand-replaced gain (−27 % fhprint; −7.5 % json-rt) with the control band held — the USER named both worthwhile, so the question is whether the build delivers what the A/B promised, not whether it clears a line it was already measured under.**
+- **#3161 zlib: ROUTE (b), libz through sb-alien, "for now" — TEMPORARY until
+  pclxs (USER, 2026-10-12: "Do 1 for now, note it as temporary. We do pclxs
+  later (if it works :-) )").**  The shim `lib/Compress/Raw/Zlib.pm` carries
+  the module's API; only the calls into zlib are runtime primitives
+  (`define-alien-routine` over `libz.so.1` / `libz.dylib`, loaded at first use,
+  a one-line perl-shaped die when absent); the TEMPORARY status is written at
+  the top of the shim and in shipped-modules.md + not-supported.md; it ships
+  only with the install matrix + a macOS leg green (the portability rule).
+  Goes into the next correctness brief as a member (s517).
