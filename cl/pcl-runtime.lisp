@@ -37545,10 +37545,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    whole dispatch, so a magic box goes through it and a plain one keeps the
    direct slot write (which also invalidates the two caches).
 
-   A write that CHANGES the string resets pos() (s515a, ir-spec 10-pos-elem):
-   perl clears it after a successful s/// and after a tr/// that changed
-   something, never after a tr/// that changed nothing -- CHANGED, which tr
-   passes and s/// (called only on a match) leaves true.  box-set clears it
+   A WRITE resets pos() (s515a, ir-spec 10-pos-elem): perl clears it after a
+   successful s/// and after EVERY tr/// that writes its target, matched or
+   not; it keeps it only for an IDENTICAL tr (no /d, no /s, and an empty
+   replacement or -- without /c -- one equal to the search list: perl's
+   OPpTRANS_IDENTICAL, a count) and for /r, which never reaches here.
+   CHANGED is that "writes" verdict, which tr passes and s/// (called only
+   on a match) leaves true -- never "the text differs".  box-set clears it
    on its own arm."
   (let ((cur (p-box-value string-box)))
     (if (or (p-magic-cell-p cur) (p-tie-proxy-p cur))
@@ -37802,6 +37805,17 @@ buffer's fill-pointer; everything else falls back to file-length."
             (- code less)))
       (gethash code from-set)))
 
+(defun %tr-identical-p (delete-p squash-p complement-p from-chars to-chars)
+  "True when a tr/// is perl's OPpTRANS_IDENTICAL: a count that does not
+   write its target, so pos() survives it (ir-spec 10-pos-elem).  No /d, no
+   /s, and the replacement is empty or -- without /c -- the expanded search
+   list itself.  Probed: tr/a-c/abc/ and tr/X// keep pos; tr/W/V/ with no
+   match, tr/a//s, tr/a-z//d and tr/a-z/a-z/c clear it."
+  (and (not delete-p)
+       (not squash-p)
+       (or (zerop (length to-chars))
+           (and (not complement-p) (string= from-chars to-chars)))))
+
 (defun do-tr (string-box op)
   "Perform transliteration on boxed string.  Returns the count of matched chars,
    or (with /r) the transliterated copy without modifying STRING-BOX."
@@ -37854,7 +37868,10 @@ buffer's fill-pointer; everything else falls back to file-length."
         (return-p result)
         (t
          (if (p-box-p string-box)
-             (%p-write-match-target string-box result (string/= result str))
+             (%p-write-match-target string-box result
+                                    (not (%tr-identical-p delete-p squash-p
+                                                          complement-p
+                                                          from-chars to-chars)))
              ;; A count-only tr (empty replacement, no /d) leaves the target
              ;; untouched, and perl accepts that on a read-only value:
              ;; `"\x8c" =~ y o…oo` just counts.  Die only when the result
