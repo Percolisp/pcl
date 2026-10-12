@@ -511,6 +511,17 @@ not-supported.md → only then probe.*
 - **#3246 FIXED (shim)**: File::Glob::bsd_glob in scalar context answers the LAST element (undef for none), never the count.
 - Filed from the census (each with a perl-probed reproducer): #3240 (`local our` in `package Foo::Bar` -> unquoted defcell, Type::Tiny cannot load), #3242 (perl 5.36 stable booleans absent), #3243 (opendir on a COPY of a glob ref: IO::Dir reads nothing), #3244 (`print({$fh} LIST)` dropped), #3245 (can_ok's list args unflattened).
 
+## s516b (2026-10-12/13, Opus) -- the board runner's two measurement holes (#1575 chdir, #3241 PASS = plan met) and the re-bless they force; `local our` in a multi-segment package (#3240); open on a ref held in a variable (#3202); fillers #3245 (half) #3280
+- **A board t-file runs with CWD = its dist root** (`tools/run-dist-t.pl` chdirs; paths it passes on are absolute) -- #1575, docs/cpan-release-plan.md "the runner's contract".
+- **Board PASS = ≥1 ok + 0 not-ok + the PLAN met + SBCL exit 0; a short file is PARTIAL with ONE `*PLAN*` row "ran M of N, rc R"** (`*FILE*` stays for no rows) -- #3241, same section.
+- **The board reads TAP from STDOUT alone, as prove does** (a newline-less stderr line glued a plan line away) -- #3241, `tools/run-dist-t.pl`.
+- **Re-bless by edit: 71 rows out / 56 in, 0 NEW / 0 FIXED on the tree** -- header of `baselines/cpan-board14-fails.tsv`; per-file snapshot `baselines/cpan-board-s516b.tsv`.
+- **Text-CSV 15_flags.t's 28 "FIXED" rows on main are UNRUN, not passing**: the file dies at row 9 on #1747's `goto EOLX` since s515a's pos fix (64 passing rows LOST on main); the two "#1389" rows there were mis-attributed -- session-log s516b.
+- **`our` / `local our` in a sub declare the cell through ONE helper `Parser::_our_cell_decl`** (_cl_pkg_designator + cl_sym) -- #3240.
+- **open on a scalar ref asks `%p-ref-referent`** (the wrapper and a variable holding it are different depths) -- #3202.
+- **A CL function standing for a perl sub flattens its argument list** (UNIVERSAL isa/can/DOES, SUPER:: built-ins, the TAP layer) -- ir-spec "UNIVERSAL" bullets, #3280 / #3245.
+- Filed: #3281 (core B shim: Type::Tiny's next blocker), #3282 (JSON-PP 099_binary runs 48/8/0 of 1536 and exits 0), #3283 (Capture-Tiny badtie), #3284 (the queue of *PLAN* rows not yet read).
+
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
 - **A plain signature IS the classic spelling plus its arity check** (#2514, Kind-A `sig-classic`): `Parser2::_normalize_signature_subs` rewrites the TREE (signature removed, `my (PARAMS) = @_;` first) before every rename/scope pass; the arity is `(p-check-arity …)` in `p-args-body` or `(:arity …)` in `p-raw-params`; the call sites keep the signature's prototype record.  Defaults, placeholders, `()`, multi-line, `state`, and any body observing `@_` keep v1.  ir-spec §5.2.
 - **ONE "@_ is observed" predicate `Parser2::_body_observes_args`** (@_, $_[, shift, pop, goto, `&name;`, string eval) for the raw path, the leading-shift run, `args-copy` and the signature rewrite (#2572: the two inline regexes missed `&name;` and `pop` -- silent wrong).
