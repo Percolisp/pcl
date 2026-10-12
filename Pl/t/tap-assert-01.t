@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 24;
 
 sub run_cl {
     my ($code) = @_;
@@ -174,6 +174,28 @@ not ok 2 - Foo->can(...)
 #     Foo->can('nope2') failed
 not ok 3 - Foo->can(...)
 #     can_ok() called with no methods
+TAP
+
+# #3245: a Test::More function is a perl SUB, so an ARRAY argument flattens --
+# `can_ok($class, @methods, @accessors)` (HTTP-Tiny t/001_api.t) read
+# `main->can('ARRAY(0x1)') failed`, and diag/note joined their flattened list
+# (perl's `join '', @_`) only after it printed `# ARRAY(0x..)`.  The expected
+# text is perl's (probed 5.40.3) less its `Failed test` / `at` lines, which
+# this layer does not print (the rows above show the same).
+is(run_cl(q{use Test::More tests => 2;
+sub new {} sub get {} sub agent {} sub timeout {}
+my @m = qw(new get); my @a = qw(agent timeout);
+can_ok("main", @m, @a);
+can_ok("main", @m, "nope");
+my @d = ("d1", "d2\nd3");
+note(@d);
+}), <<'TAP', 'can_ok flattens its method list; note/diag join theirs (#3245)');
+1..2
+ok 1 - main->can(...)
+not ok 2 - main->can(...)
+#     main->can('nope') failed
+# d1d2
+# d3
 TAP
 
 # ------------------------------------------- 5. skip_without_dynamic_extension

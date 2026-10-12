@@ -208,6 +208,15 @@
       (%tap-out "1..0~%"))
   (sb-ext:exit :code 0))
 
+;;; A Test::More function is a perl SUB, so its argument LIST flattens: `f(@a)`
+;;; hands it @a's elements.  These are CL functions, and the call site passes an
+;;; array argument as the raw vector (the callee flattens, as a p-sub's body
+;;; builds @_), so every list-taking one asks this -- the same spreading
+;;; p-flatten-args does for a p-sub, never a second rule (rule 11).  Answers
+;;; the unboxed values, as a list.
+(defun %test-flat-values (args)
+  (mapcar #'unbox (coerce (p-flatten-args args) 'list)))
+
 ;;; plan(N) or plan(tests => N) or plan(skip_all => REASON) or plan('no_plan')
 (defun pl-plan (&rest args)
   (setf *test-plan-pid* (sb-posix:getpid))
@@ -217,9 +226,9 @@
   ;; `(p-reverse 9)` — a one-element vector — straight through, and the form
   ;; dispatch below (which knows a bare count, `tests => N` and `skip_all =>
   ;; …`) had no case for it and DIED, so t/op/select.t produced no TAP at all
-  ;; (task #317).  p-flatten-args is the same spreading a p-sub does to build
-  ;; @_, so there is no second flattening rule here (rule 11).
-  (let ((args (mapcar #'unbox (coerce (p-flatten-args args) 'list))))
+  ;; (task #317).  %test-flat-values is the same spreading a p-sub does to
+  ;; build @_, so there is no second flattening rule here (rule 11).
+  (let ((args (%test-flat-values args)))
     (cond
       ;; plan(N)
       ((and (= (length args) 1) (numberp (first args)))
@@ -752,7 +761,9 @@
     (if (plusp (length r)) r (to-string (unbox object)))))
 
 (defun pl-can_ok (object &rest methods)
-  (let ((names (mapcar (lambda (m) (to-string (unbox m))) methods))
+  ;; `can_ok($class, @methods, @accessors)`: the METHOD list flattens (#3245;
+  ;; it read `main->can('ARRAY(0x1)')`).  The object is can_ok's `$` slot.
+  (let ((names (mapcar #'to-string (%test-flat-values methods)))
         (cls   (%test-can-ok-class object)))
     (cond
       ((zerop (length cls))
@@ -922,17 +933,21 @@
 
 ;;; diag(msg)
 (defun pl-diag (&rest args)
+  ;; Test::More joins the flattened message list with '' and comments each
+  ;; LINE of the result (#3245's sibling: `diag(@lines)` printed ARRAY(0x..)).
   (when args
-    (dolist (msg args)
-      (dolist (line (split-string (to-string msg) '(#\Newline)))
-        (%tap-out "# ~A~%" line)))))
+    (dolist (line (split-string (format nil "~{~A~}" (mapcar #'to-string (%test-flat-values args)))
+                                '(#\Newline)))
+      (%tap-out "# ~A~%" line))))
 
 ;;; note(msg)
 (defun pl-note (&rest args)
+  ;; Test::More joins the flattened message list with '' and comments each
+  ;; LINE of the result (#3245's sibling: `note(@lines)` printed ARRAY(0x..)).
   (when args
-    (dolist (msg args)
-      (dolist (line (split-string (to-string msg) '(#\Newline)))
-        (%tap-out "# ~A~%" line)))))
+    (dolist (line (split-string (format nil "~{~A~}" (mapcar #'to-string (%test-flat-values args)))
+                                '(#\Newline)))
+      (%tap-out "# ~A~%" line))))
 
 ;;; END hook: check test count.  Skipped entirely in a fork child (pid
 ;;; differs from plan time) — the parent owns the plan.
