@@ -21,7 +21,7 @@ use FindBin qw($RealBin);
 
 my $root = "$RealBin/../..";
 plan skip_all => 'sbcl not found' if !`which sbcl 2>/dev/null`;
-plan tests => 3;
+plan tests => 4;
 
 my $dist = tempdir(CLEANUP => 1);
 mkdir "$dist/t" or die "$dist/t: $!";
@@ -54,6 +54,19 @@ ok($saw_sbcl, 'its SBCL was running before the timeout')
 my @left = procs_matching("run-dist-t_" . ($wrapper // 'none') . ".lisp");
 is(scalar(@left), 0, 'and nothing that ran it is left alive');
 kill 'KILL', @left;   # never leave an orphan behind, even on failure
+
+# CWD = the dist root (#1575): a t-file that reads a RELATIVE fixture passes
+# however the operator's shell stands, as it does under `prove` in the dist.
+my $rdist = tempdir(CLEANUP => 1);
+mkdir "$rdist/t" or die "$rdist/t: $!";
+open my $fx, '>', "$rdist/t/fixture.txt" or die; print $fx "hello\n"; close $fx;
+open my $rt, '>', "$rdist/t/rel.t" or die;
+print $rt 'open my $f, "<", "t/fixture.txt" or die "no fixture: $!\n"; my $l = <$f>;'
+        . ' print "1..1\n"; print $l eq "hello\n" ? "ok 1\n" : "not ok 1\n";' . "\n";
+close $rt;
+my $rout = `cd / && "$root/tools/run-dist-t.pl" --rows "$rdist" t/rel.t 2>&1`;
+like($rout, qr/^pass=1 fail=0 /m, 'a relative fixture path resolves from the dist root')
+  or diag($rout);
 
 sub child_pids {
   my ($ppid) = @_;

@@ -65,6 +65,12 @@ push @inc, "$dist/lib" unless $no_dist_lib;
 @inc = grep { -d } @inc;
 my $iflags = join " ", map { "-I$_" } @inc;
 
+# CWD = THE DIST ROOT for both children (#1575), as `prove` / `make test` and
+# the board's perl oracle run a t-file: a test that reads a RELATIVE path
+# (`do "./t/util.pl"`, a `corpus/` fixture) otherwise fails for a reason that
+# is not PCL's.  Every path this script passes on is absolute.
+chdir $dist or die "cannot chdir to $dist: $!\n";
+
 my $lisp = "/tmp/run-dist-t_$$.lisp";
 my $err  = "/tmp/run-dist-t_$$.err";
 
