@@ -97,6 +97,10 @@
 #   JSON-PP 099_binary00-02, Path-Tiny); one each #3202 #3245 #3280.  ENTERED 56: #3061 18, #3023 7,
 #   #3282 7, #3281 6, #3283 4, #3284 11 (the queue of *PLAN* rows whose cause is not yet read),
 #   #1747 1, #1576 1, NS:given/when 1.
+# LEFT BY EDIT (s516a, window s516a, HTTP-Tiny + Path-Tiny run alone on the s516a tree rebased onto MAIN-READY-22):
+#   HTTP-Tiny 020_headers.t / 030_response.t *FILE* (#3244 print({$fh} @_) in t/Util.pm) and 170_keepalive.t *FILE*
+#   (#3243 dir_list).  ADDED: 020_headers.t #3 (exposed: the file now runs), cause #3263.  RE-CAUSED: the HTTP-Tiny
+#   rows that read "#1575 + then #3243" -> #3262 (the next blocker, pre-existing on main).
 Algorithm-Diff-1.201-0	base.t	6			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	10			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	15			"$VAR1 = [[['-',0,'a']],[['+',2,'d']],[['-',4,'h'],['+',4,'f']],[['+',6,'k']],[['-',8,'n'],['+',9,'r'],['-',9,'p'],['+',10,'s'],['+',11,'t']]];"	#1511 A (same hunk-iteration family)
@@ -491,20 +495,17 @@ JSON-PP-4.18-0	core_bools.t	21	decoded true is a boolean			#3242 (builtin::is_bo
 JSON-PP-4.18-0	core_bools.t	22	decoded false is a boolean			#3242 (builtin::is_bool(!!1) is false: no stable booleans)
 JSON-PP-4.18-0	core_bools.t	23	decoded true is a core boolean			#3242 (builtin::is_bool(!!1) is false: no stable booleans)
 JSON-PP-4.18-0	core_bools.t	24	decoded false is a core boolean			#3242 (builtin::is_bool(!!1) is false: no stable booleans)
-HTTP-Tiny-0.090-0	020_headers.t	0	*FILE*	1..0 # SKIP  (rc=0)	0 row(s)	#1575 + then #3244 (t/Util.pm:46 `print({$fh} @_)` is a statement drop; from the dist root 0 rows)
-HTTP-Tiny-0.090-0	030_response.t	0	*FILE*	1..0 # SKIP  (rc=0)	0 row(s)	#1575 + then #3244 (t/Util.pm:46 `print({$fh} @_)` is a statement drop; from the dist root 0 rows)
 HTTP-Tiny-0.090-0	100_get.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (t/Util.pm dir_list: IO::Dir->new(...)->read is empty under PCL; from the dist root "1..0")
-HTTP-Tiny-0.090-0	101_head.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	102_put.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	103_delete.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	104_post.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	110_mirror.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	130_redirect.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	150_post_form.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	160_cookies.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	161_basic_auth.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	162_proxy_auth.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
-HTTP-Tiny-0.090-0	170_keepalive.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3243 (dir_list empty)
+HTTP-Tiny-0.090-0	101_head.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	102_put.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	103_delete.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	104_post.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	110_mirror.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	130_redirect.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	150_post_form.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	160_cookies.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	161_basic_auth.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
+HTTP-Tiny-0.090-0	162_proxy_auth.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3262 (s516a: #1575 + #3243 fixed, dir_list lists; now t/Util.pm's seek($fh, 0, SEEK_END) on an IO::File->new_tmpfile handle dies "not a stream associated with a file")
 HTTP-Tiny-0.090-0	190_find_CA.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	PERL-SKIP (perl: "Only run if HTTP::Tiny->can_ssl()" -- no IO::Socket::SSL / Net::SSLeay here)
 HTTP-Tiny-0.090-0	200_live.t	0	*FILE*	1..0 # SKIP Only run for $ENV{AUTOMATED_TESTING} (rc=0)	0 row(s)	PERL-SKIP (network test: "Only run for $ENV{AUTOMATED_TESTING}", the dist skips it itself)
 HTTP-Tiny-0.090-0	200_live_local_ip.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	PERL-SKIP (network test: "Only run for $ENV{AUTOMATED_TESTING}", the dist skips it itself)
@@ -512,7 +513,7 @@ HTTP-Tiny-0.090-0	210_live_ssl.t	0	*FILE*	1..0 # SKIP Only run for $ENV{AUTOMATE
 Path-Tiny-0.150-0	children.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #300 (Path::Tiny builds openr/openw/opena/openrw as closures in `while (my ($k, $v) = each %opens)`; the loop-head `my` is bound once, so every one opens with mode undef -> "<": spew/touch fail "Error open (<)"; probed whilemy.pl)
 Path-Tiny-0.150-0	digest.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #139 (spew_raw's atomic write calls PerlIO::get_layers: "Undefined subroutine &PerlIO::get_layers")
 Path-Tiny-0.150-0	exception.t	1	exception reported at caller's package	'Error open (<) on 'aljfakdlfadks': No such file or directory	to match: at \/home\/bernt\/\.cpan\/build\/Path\-Tiny\-0\.150\-0\/t\/exception\.t	NS:Error messages: no "at FILE line N" location info (#1361: Path::Tiny's croak location)
-Path-Tiny-0.150-0	has_same_bytes.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #3244 (Path/Tiny.pm:2181 `print( {$fh} map {...} @data)` in spew is a statement drop)
+Path-Tiny-0.150-0	has_same_bytes.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1576 (s516a: #3244 fixed, spew runs; now Test::More::subtest is not implemented)
 Path-Tiny-0.150-0	input_output.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #1576 (Test::More::subtest is not implemented)
 Path-Tiny-0.150-0	input_output_no_PU_UU.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #1576 (subtest)
 Path-Tiny-0.150-0	input_output_no_UU.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #1576 (subtest)
@@ -581,3 +582,4 @@ Try-Tiny-0.32-0	00-report-prereqs.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#3281 (
 Try-Tiny-0.32-0	context.t	0	*PLAN*	ran 13 of 25, rc 0	25 row(s)	#3284 (a *PLAN* row the #3241 verdict surfaced: the file stops short or exits non-zero; its cause not yet read -- the list is in the task)
 Try-Tiny-0.32-0	finally.t	0	*PLAN*	ran 15 of 30, rc 0	30 row(s)	#3284 (a *PLAN* row the #3241 verdict surfaced: the file stops short or exits non-zero; its cause not yet read -- the list is in the task)
 Try-Tiny-0.32-0	when.t	0	*PLAN*	ran 1 of 5, rc 255	5 row(s)	NS:given/when (PCL: given/when (feature 'switch') is not supported)
+HTTP-Tiny-0.090-0	020_headers.t	3	->read_header_lines() insane continuations	'HASH(0x2)'	'HASH(0x3)'	#3263 (exposed by s516a's #3244: header continuation lines folded differently -- not minimized)
