@@ -63,7 +63,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 30;
+plan tests => 36;
 
 say "# -------- 'our' Transpilation Tests:";
 
@@ -387,6 +387,51 @@ PERL
          'v1-routed block: the same five shapes, second copy of the mechanism');
     like($output, qr/^rec 1$/m,
          '`our $ok++, return if COND` returns — the tail is not dropped');
+}
+
+# #3240: `local our $X` inside a sub declares the package cell through the ONE
+# spelling `our $X` uses (Parser::_our_cell_decl).  The `local our` copy built
+# the cell's name from the RAW package, so in a MULTI-segment package it read
+# `Foo::Bar::$Avoid` -- "too many colons" at LOAD, the whole file lost
+# (Type::Tiny.pm:617/937).  One program, every shape: a multi-segment package
+# with a scalar, an array and a hash; a one-segment package; a non-ASCII
+# package name (#418); main.  Each line is compared with perl's.
+{
+    my $code = <<'PERL';
+use utf8;
+binmode STDOUT, ':utf8';
+package Foo::Bar;
+sub f { local our $Avoid = 1; return g() }
+sub g { return defined $Foo::Bar::Avoid ? "A=$Foo::Bar::Avoid" : "undef" }
+sub fa { local our @L = (1, 2, 3); return ga() }
+sub ga { return scalar(@Foo::Bar::L) . ":@Foo::Bar::L" }
+sub fh { local our %H = (k => 'v'); return gh() }
+sub gh { return join ',', map { "$_=$Foo::Bar::H{$_}" } sort keys %Foo::Bar::H }
+package One;
+sub f { local our $S = 'one'; return $One::S }
+package Ünï::Cödé;
+sub f { local our $U = 'u'; return $Ünï::Cödé::U }
+package main;
+sub m1 { local our $M = 'm'; return $main::M }
+print join(' ', Foo::Bar::f(), Foo::Bar::g()), "\n";
+print join(' ', Foo::Bar::fa(), Foo::Bar::ga()), "\n";
+print join(' ', Foo::Bar::fh(), '[' . Foo::Bar::gh() . ']'), "\n";
+print join(' ', One::f(), defined $One::S ? 'def' : 'undef'), "\n";
+print join(' ', Ünï::Cödé::f(), defined $Ünï::Cödé::U ? 'def' : 'undef'), "\n";
+print join(' ', m1(), defined $main::M ? 'def' : 'undef'), "\n";
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl');
+    print $pfh $code;
+    close $pfh;
+    my @want = split /\n/, `perl "$pl_file"`;
+    unlink $pl_file;
+    my @got = split /\n/, run_pl($code);
+    my @what = ('scalar in Foo::Bar', 'array in Foo::Bar', 'hash in Foo::Bar',
+                'scalar in a one-segment package', 'scalar in a non-ASCII package',
+                'scalar in main');
+    for my $i (0 .. $#what) {
+        is($got[$i], $want[$i], "local our: $what[$i] (#3240)");
+    }
 }
 
 done_testing();

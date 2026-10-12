@@ -3449,19 +3449,7 @@ sub _process_our_declaration {
   $self->_with_bucket('declarations', sub {
     $self->_emit(";; $perl_code");
     if ($self->environment->in_subroutine > 0) {
-      # Multi-segment package names (Foo::Bar) must be pipe-quoted in the CL
-      # symbol prefix, else the reader sees "Foo::Bar::$var" as too many colons.
-      # _cl_pkg_designator is the single source of truth (':|Foo::Bar|' / ':main');
-      # strip the leading ':' to get the symbol-package prefix (cf. line ~5458).
-      (my $cl_pkg_sym = $self->_cl_pkg_designator($pkg)) =~ s/^://;
-      for my $var (@vars) {
-        my $sigil = substr($var, 0, 1);
-        my $init = $sigil eq '$' ? '(make-p-box nil)'
-                 : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
-                 :                 '(make-hash-table :test #\'equal)';
-        my $cl_var = "${cl_pkg_sym}::${var}";
-        $self->_emit(global_decl_form("$cl_var", "$init"));
-      }
+      $self->_emit($self->_our_cell_decl($pkg, $_)) for @vars;
     }
   });
 
@@ -5043,12 +5031,7 @@ sub _process_local_declaration {
         next if ref($p) ne 'PPI::Token::Symbol';
         my $var = $p->content;
         last if $var =~ /^=/; # stop at '=' (won't happen but be safe)
-        my $sigil = substr($var, 0, 1);
-        my $init  = $sigil eq '$' ? '(make-p-box nil)'
-                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
-                  :                 "(make-hash-table :test #'equal)";
-        my $cl_var = "${pkg}::${var}";
-        $self->_emit(global_decl_form("$cl_var", "$init"));
+        $self->_emit($self->_our_cell_decl($pkg, $var));
         $self->environment->add_our_variable($pkg, $var) if $self->environment;
       }
     });
@@ -9382,6 +9365,22 @@ sub _process_package_statement {
 # case; plain single-segment names are emitted bare and the reader upcases them.
 # Single source of truth — used wherever a (p-defpackage ...) / in-package form
 # or a runtime package reference is emitted.
+# The declaration of an `our` variable's package cell from inside a sub: ONE
+# spelling for `our $x` and `local our $x` (#3240 -- the `local our` copy built
+# "Foo::Bar::$x" from the RAW package name, which the reader rejects as too
+# many colons, so a whole file failed to LOAD).  The package prefix comes from
+# _cl_pkg_designator, the variable through cl_sym (#418's non-ASCII rule).
+sub _our_cell_decl {
+  my ($self, $pkg, $var) = @_;
+  (my $prefix = $self->_cl_pkg_designator($pkg)) =~ s/^://;
+  my $sigil = substr($var, 0, 1);
+  my $init = $sigil eq '$' ? '(make-p-box nil)'
+           : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
+           : $sigil eq '%' ? "(make-hash-table :test 'equal)"
+           : die "PCL: _our_cell_decl: no cell for sigil '$sigil' of $var\n";
+  return global_decl_form("${prefix}::" . cl_sym($var), $init);
+}
+
 sub _cl_pkg_designator {
   my ($self, $pkg_name) = @_;
   # Only MULTI-segment names need pipe-quoting (to preserve the '::' and case).
