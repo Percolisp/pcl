@@ -3507,6 +3507,13 @@ var ⇒ plain lexical binding, no localization at all).
   (`%p-isa-mro`); only `$x isa C` (perl's `sv_isa_sv`) and `->DOES`
   (`sv_does_sv`) delegate to the class's own-or-INHERITED `isa` method
   (`%p-isa-override`).  Delegating from the base recursed forever.
+- **A CL function that stands for a perl sub flattens its argument LIST**
+  (normative, s516b, task #3280).  The call site passes an array argument as
+  the raw vector (the CALLEE spreads, as a p-sub's body builds `@_`), so
+  `UNIVERSAL::isa/can/DOES`, the SUPER:: built-in arms and the TAP layer's
+  list-taking functions read `%p-builtin-arg-list` / `%test-flat-values`:
+  `$self->SUPER::isa(@_)` is `isa($self, 'Foo')`, and fewer than two
+  arguments is perl's `Usage: UNIVERSAL::isa(reference, kind)` die.
 - PCL always linearizes with C3 (stock Perl defaults to DFS; documented
   divergence — `docs/not-supported.md` §mro).
 
