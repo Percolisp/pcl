@@ -11503,14 +11503,30 @@ sub _use_import_arg_tokens {
 sub _merge_bare_quote_imports {
   my ($self, $stmt, $module_env, $had_imports, $module) = @_;
   return if $had_imports || !$module_env;
-  # The record is the MODULE's own package's first (task #3143, the same
-  # lookup _merge_module_prototypes makes): Encode's exported `decode($$;$)`
-  # is hidden under the bare key by a prototype-less same-named sub of an
-  # encoding-object package, so `use Encode 'decode'` imported nothing.
-  my @bare = grep { (defined $module && $module_env->get_prototype("${module}::$_"))
-                    || $module_env->get_prototype($_) }
-             $self->_parse_use_import_list($stmt, bare_quote => 1);
+  my @bare = $self->bare_quote_import_names($stmt, $module_env, $module);
   $self->_merge_module_prototypes($module_env, \@bare, $module) if @bare;
+}
+
+# THE ONE READING of an unparenthesised quoted import list (#733, widened by
+# #2879): a quoted string is an IMPORT NAME exactly when the MODULE knows it --
+# a sub it declares (its own package's record first, task #3143: Encode's
+# exported `decode($$;$)` is hidden under the bare key by a prototype-less
+# same-named sub of an encoding-object package), a name in its
+# @EXPORT/@EXPORT_OK, or a `:tag` its %EXPORT_TAGS holds (#3184's sets).  So
+# `use File::Glob ':bsd_glob'` is the same import as its qw() spelling and
+# `use Test::More 'no_plan'` stays an argument.  Read by the prototype merge
+# above AND by Parser2's builtin-override recorder (_use_imported_names).
+sub bare_quote_import_names {
+  my ($self, $stmt, $module_env, $module) = @_;
+  return () if !$module_env;
+  my $sets    = $module_env->import_sets  || {};
+  my $exports = $module_env->export_names || {};
+  return grep {
+       (/\A:(\w+)\z/ && exists $sets->{ $1 eq 'DEFAULT' ? '' : ":$1" })
+    || (defined $module && $module_env->get_prototype("${module}::$_"))
+    || $module_env->get_prototype($_)
+    || $exports->{$_}
+  } $self->_parse_use_import_list($stmt, bare_quote => 1);
 }
 
 sub _parse_use_import_list {

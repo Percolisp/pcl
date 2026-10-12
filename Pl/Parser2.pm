@@ -1117,15 +1117,22 @@ sub _use_imported_names {
       !($_->isa('PPI::Token::Word') && ($_->content eq ($inc->type // '') || $_->content eq $mod))
       && !$_->isa('PPI::Token::Number') && !($_->isa('PPI::Token::Structure') && $_->content eq ';')
   } $inc->schildren;
-  my $sets;
-  my $menv_sets = sub {
-    return $sets if $sets;
+  my ($menv, $looked);
+  my $module_env = sub {
+    return $menv if $looked++;
     local $!;
-    my $menv = $fp->_extract_module_prototypes($mod);
-    return $sets = ($menv ? $menv->import_sets : {}) || {};
+    return $menv = $fp->_extract_module_prototypes($mod);
   };
-  return @{ $menv_sets->()->{''} || [] } if !$has_args;
-  return map { /\A:/ ? @{ $menv_sets->()->{$_} || [] } : $_ } @names;
+  if (!$has_args) {
+    my $m = $module_env->();
+    return @{ ($m ? $m->import_sets->{''} : undef) || [] };
+  }
+  # An unparenthesised quoted list (`use File::Glob ':bsd_glob'`) is read the
+  # way the prototype merge reads it (#2879): ONE reading, Parser's.
+  @names = $fp->bare_quote_import_names($inc, $module_env->(), $mod) if !@names;
+  return @names if !grep { /\A:/ } @names;
+  my $m = $module_env->() or return grep { !/\A:/ } @names;
+  return Pl::Parser::_expand_import_tags($m, \@names);
 }
 
 # `no MODULE LIST`: a module that defines an `unimport` takes its imports

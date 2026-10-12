@@ -600,6 +600,15 @@ sub _detect_note {
                      ? ($1, $2) : ($self->current_package // 'main', $name);
     return if !defined $bare || $bare eq '';
     my $kind = detect_kind($self, $bare, $ans);
+    # #3206: where an import / `use subs` / CORE::GLOBAL override of the
+    # builtin is in force, the emission calls the override (ExprToCL's
+    # funcall arm and PExpr's `<*.c>` term ask builtin_override_target, the
+    # same registry asked here), so the site is a call of a sub the compiler
+    # holds no prototype for -- never "builtin".  A module's declared
+    # prototype answers before this (its record replaces the seed row).
+    $kind = 'list-call'
+      if $kind eq 'builtin'
+      && defined $self->builtin_override_target($pkg, $bare, @{ $site->{pos} }[0, 1]);
     $self->detect_calls->{"$pkg\0$bare\0$line"} //= $kind;
     return;
 }
