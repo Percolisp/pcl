@@ -16,8 +16,8 @@
 # That LOG mode (PCL_DETECT_LOG, or PCL_DETECT=log) is the measurement: the
 # rows below check that the programs' own output is untouched.  The s514d rows
 # at the end are the production FLAG (USER ruling, DECIDED ## s513): one stderr
-# line per site per process under PCL_DETECT=announce (the default until
-# 2026-10-11; now OFF until #3184 closes), PCL_DETECT=die dies trappably,
+# line per site per process under PCL_DETECT=announce (the default; OFF from
+# 2026-10-11 until #3184 + #3206 closed, announce again since s516a), PCL_DETECT=die dies trappably,
 # PCL_DETECT=off is silent, the harmless nullary-constant shape is never
 # announced, and a string eval carries no table.
 #
@@ -143,7 +143,7 @@ is_deeply($log, [], '... and logs nothing: every install is one the compiler saw
 }
 
 # ---- production mode: the FLAG (USER ruling, DECIDED ## s513) -----------
-# Run with PCL_DETECT set (or unset = off, USER 2026-10-11) and NO log; return
+# Run with PCL_DETECT set (or unset = announce, the default again since s516a) and NO log; return
 # (stdout, [the PCL: detector lines of stderr], the whole stderr text).
 sub flag_run {
     my ($code, $mode) = @_;
@@ -196,12 +196,12 @@ my ($out_off, $log_off) = flag_run($FLAG, 'off');
 is($out_off, $out, 'PCL_DETECT=off: the same output ...');
 is_deeply($log_off, [], '... and not one line');
 
-# THE DEFAULT IS OFF (USER ruling 2026-10-11, s515: off until #3184, the
-# export-tag import gap, closes).  Inverse: on main 403009eb the unset default
-# announces, so the stderr row fails there.
-my ($out_def, undef, $err_def) = flag_run($FLAG);
-is($out_def, $out, 'PCL_DETECT unset (the default, off): the same output ...');
-is($err_def, '', '... and stderr EMPTY');
+# THE DEFAULT IS ANNOUNCE again (USER ruling s516, s516a: it was off from
+# s515 until #3184 and #3206 / #2879 closed).  Inverse: on main 709b3f60 the
+# unset default is off, so the lines row fails there.
+my ($out_def, $log_def) = flag_run($FLAG);
+is($out_def, $out, 'PCL_DETECT unset (the default, announce): the same output ...');
+is_deeply($log_def, $log, '... and the same two announced lines');
 
 my $DIE = <<'PL';
 BEGIN {

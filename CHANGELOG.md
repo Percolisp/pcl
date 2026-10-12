@@ -21,6 +21,10 @@ sessions); dates are development-time, not release-time.
   tie made inside it.  perl's own t/op/tiehandle.t went from 11 to 53 passing
   rows.  Measured free on the hot I/O paths (one counter test).
 
+- 2026-10-12: **the parse-contradiction detector announces by default again**
+  (USER ruling s516): with the export-tag imports (#3184) and the glob
+  override's table entries (#3206, #2879) fixed, what it still reports is a
+  real displaced built-in.  `PCL_DETECT=off` silences it.
 - 2026-10-11: **the parse-contradiction detector is OFF by default again**
   (USER ruling): after #3143 almost everything it still reports is one gap,
   an import through an export tag (#3184); it returns to `announce` when that

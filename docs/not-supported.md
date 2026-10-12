@@ -1522,17 +1522,17 @@ harmless (the call has no argument either way); one followed by a term, a
 `($)` sub called with a list, and a displaced built-in are not.  A STRING EVAL
 compiled after the install does see it (task #2870, ir-spec §9.1 piece 4).
 
-**The detector (task #2610) -- a FLAG (USER ruling, DECIDED ## s513); ON by
-default from s514d, OFF by default since the USER ruling of 2026-10-11 (s515)
-until #3184 (an export-TAG import does not carry its subs' prototypes) closes:
-`PCL_DETECT=announce|die|log` opts in.**  What follows describes `announce`.  Every program and module unit carries a table of
+**The detector (task #2610) -- a FLAG (USER ruling, DECIDED ## s513); ON
+(`announce`) by default -- from s514d, and again since s516a after an OFF
+interval (USER ruling 2026-10-11, s515) that lasted until #3184 and #3206 /
+#2879 closed.**  What follows describes `announce`.  Every program and module unit carries a table of
 how it read each bareword call name; a sub installed during a unit's compile
 phase that contradicts the reading of a call site BELOW the install is
 reported ONCE per site per process on stderr --
 `PCL: FILE line N: 'NAME' was parsed as <how> but code that ran at line L
 installed a sub with prototype (P); set PCL_DETECT=die to stop here` -- and the
 run continues.  `PCL_DETECT=die` dies there instead (perl-shaped, trappable),
-`PCL_DETECT=off` (the default) silences it, `PCL_DETECT=log` (or `PCL_DETECT_LOG=FILE`
+`PCL_DETECT=off` silences it, `PCL_DETECT=log` (or `PCL_DETECT_LOG=FILE`
 alone) keeps the s513d measurement line in a file.  The contract is ir-spec
 §9.3c.  **Never announced (known harmless):** a nullary `()` constant
 installed where the compiler read an unknown bareword term (File::Path's

@@ -1685,12 +1685,11 @@
 ;;;     continues; `die' dies there, perl-shaped and trappable; `off' does not
 ;;;     even register a table; `log' appends the s513d measurement line to the
 ;;;     file PCL_DETECT_LOG names (PCL_DETECT_LOG alone also means `log').
-;;;   THE DEFAULT IS `off' (USER ruling 2026-10-11, s515): with PCL_DETECT
-;;;   unset no table registers.  After #3143 the announced sites were gate 32
-;;;   / sweep 0 / everyday 17 / board 59, and the gate's 32 plus 41 of the
-;;;   board's are ONE compiler gap, #3184 (an export-TAG import does not carry
-;;;   the subs' prototypes) -- noise to a user.  The default returns to
-;;;   `announce' when #3184 closes; until then announce / die / log opt in.
+;;;   THE DEFAULT IS `announce' (again since s516a, USER ruling s516): it was
+;;;   `off' from s515 until the export-tag gap #3184 and the override-table
+;;;   noise #3206 / #2879 closed; after them the announced sites are gate 0 /
+;;;   sweep 0 / everyday 0 / board 18 (Sub::Uplevel's CORE::GLOBAL::caller,
+;;;   a real displaced built-in).  `off' stays available by name.
 ;;; The KNOWN-HARMLESS class is never announced nor died on (it is still
 ;;; logged): a nullary `()` sub installed where the compiler read a bareword
 ;;; TERM (shape 1 of docs/detector-measurement-s513d.md -- File::Path's
@@ -1723,13 +1722,12 @@
 
 (defun %p-detect-mode ()
   "PCL_DETECT's mode, read at each table registration (never frozen into a
-   saved core).  Unset or empty is :OFF (USER 2026-10-11: off until #3184's
-   export-tag import gap closes; see the block comment above) unless
-   PCL_DETECT_LOG names a file, which means :LOG.  Rule 12: an unknown value
-   dies naming it."
+   saved core).  Unset or empty is :ANNOUNCE (the default again since s516a;
+   see the block comment above) unless PCL_DETECT_LOG names a file, which
+   means :LOG.  Rule 12: an unknown value dies naming it."
   (let ((v (sb-posix:getenv "PCL_DETECT")))
     (cond ((or (null v) (string= v ""))
-           (if (sb-posix:getenv "PCL_DETECT_LOG") :log :off))
+           (if (sb-posix:getenv "PCL_DETECT_LOG") :log :announce))
           ((string= v "announce") :announce)
           ((string= v "die") :die)
           ((string= v "off") :off)
