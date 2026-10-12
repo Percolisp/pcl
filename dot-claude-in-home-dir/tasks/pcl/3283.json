@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-12",
+   "description" : "FILED s516b (Opus 5.5, 2026-10-12) from the #3241 re-bless (these files used to read PASS 1/0).\n\nREPRODUCE:  tools/run-dist-t.pl ~/.cpan/build/Capture-Tiny-0.50-0 t/20-stdout-badtie.t   (ok 1, then \"unimplemented\" from a top-level form, rc 2)\nperl:       cd ~/.cpan/build/Capture-Tiny-0.50-0 && perl -Ilib t/20-stdout-badtie.t    (583 rows)\nSame in 21-stderr-badtie.t, 22-stdin-badtie.t, 24-all-badtied.t.\n\nThe file: `tie *STDOUT, 'TieEvil'; ok(tied *STDOUT, ...); my $fd = next_fd; run_test(...)` -- t/lib/TieEvil.pm's methods die \"unimplemented\".  NOT the TAP layer writing through the tie: a minimal `tie *STDOUT, 'Evil'; ok(1); ok(1)` with a dying PRINT passes under PCL (scratch/s516b/pr/tie1.pl).  So some later step (t/lib/Utils.pm next_fd's open/dup of STDOUT, or Capture::Tiny's own save/restore) calls a tied method -- OPEN / FILENO / BINMODE -- that perl's real handle operation does not.  Next step: bisect the file's statements after row 1 with a print before each.",
+   "id" : "3283",
+   "status" : "pending",
+   "subject" : "Capture-Tiny's four *badtie* files: after `tie *STDOUT, 'TieEvil'` (a class whose methods die \"unimplemented\") the program dies after row 1 (SBCL rc 2) where perl runs 583 rows -- PCL calls a tied-handle method perl never reaches"
+}

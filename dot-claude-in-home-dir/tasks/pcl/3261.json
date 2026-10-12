@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-12",
+   "description" : "FILED s516a (Opus 5.5, 2026-10-12) from the s516a board recount (detector-measurement-s513d.md section 9).\n\nGetopt-Long-2.58-0 t/gol-basic.t: `use Getopt::Long; ... GetOptions(...)` -- 5 sites announced under the (now default) announce mode: \"'main::GetOptions' was parsed as a call of a sub it did not know but code that ran at line 12 installed a sub with prototype (@)\".  The VALUE is perl's (the file's rows are unaffected): a sub with prototype (@) is a plain list operator, the same parse as an unknown NAME(...) list call.\n\nTwo readings, pick by measurement: (a) %p-detect-harmless-p classes an unknown / list-call site against an installed (@) or (;@) as harmless (no parse difference exists); (b) the static import misses GetOptions because Getopt::Long's export runs through its own import sub (check what _extract_module_prototypes / module_import_sets read for Getopt::Long).  (a) is the general fix; (b) would also give PCL the prototype (nothing changes for (@)).\n\nGuard when fixed: `use Getopt::Long; GetOptions('x=s' => \\my $x)` on a separate line prints no PCL: line on stderr.",
+   "id" : "3261",
+   "status" : "pending",
+   "subject" : "detector: Getopt::Long's GetOptions -- parsed as an unknown list call, installed by Getopt::Long's own import with prototype (@) -- announced although the parse is the same (5 board sites, gol-basic.t)"
+}
