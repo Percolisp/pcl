@@ -119,14 +119,34 @@ list file's); compare with `tools/cpan-scoreboard.pl --diff
 baselines/cpan-board14-fails.tsv OUT.rows.tsv`.  Rows enter and leave BY EDIT
 with a cause, never by re-blessing a run.
 
+THE RUNNER'S CONTRACT (s516b, #1575 + #3241):
+- A t-file runs with CWD = ITS DIST ROOT, for the transpile and the run alike
+  (`tools/run-dist-t.pl` chdirs; every path it hands on is absolute) -- as
+  `prove` / `make test` and the board's perl oracle run it.  Before #1575 a
+  test reading a relative path (`do "./t/util.pl"`, a `corpus/` fixture)
+  failed for a reason that was not PCL's.
+- PASS means: at least one ok, zero not-ok, the PLAN MET (the rows that ran =
+  `1..N`, up front or `done_testing`'s trailer) and SBCL's exit 0.  A file that
+  ran rows and misses the plan or exits non-zero is PARTIAL (FAIL at zero ok)
+  and carries ONE synthetic row the blessed file can hold with a cause:
+
+      dist <TAB> t-file <TAB> 0 <TAB> *PLAN* <TAB> ran M of N, rc R <TAB> N row(s)
+
+  (`ran M of no plan` / `a plan` when no plan line was printed; R = SBCL's
+  exit, 124 for a timeout).  A file that produced NO rows keeps its `*FILE*`
+  row.  Before #3241 the verdict read run-dist-t.pl's own exit and never the
+  plan, so a file that died after row 1 of 25,119 read PASS 1/0.
+- A file that legitimately needs more than the 120 s cap is registered in
+  `baselines/cpan-board-timeouts.tsv` with the measurement it was sized from;
+  the allowances in effect are printed per run.
+
 HOW A DIST JOINS (the s515c recipe):
 1. Run it ALONE: `tools/cpan-scoreboard.pl --jobs 2 --timeout 120 --tsv
    OUT.tsv --rows OUT.rows.tsv DIST` (a light run).
 2. Compare the PER-FILE counts with real perl's, not only the failing rows: the
-   scoreboard calls a file PASS when its program dies after row 1 (#3241), and
-   the runner does not chdir to the dist root (#1575) -- run each `*FILE*` and
-   short file once FROM THE DIST ROOT (`PERL5LIB=lib pcl t/X.t`) to separate
-   the harness from PCL.
+   board's verdict says PASS only when the plan is met (#3241) and the runner
+   runs from the dist root (#1575) -- still read every `*FILE*` / `*PLAN*`
+   row's file against perl's count.
 3. Read every failing row's got/expected; probe the cause vs perl (a minimal
    program, perl -> base); cite the task or file one with the reproducer.  A
    cheap discriminator for a suspected primitive: run the file under REAL perl

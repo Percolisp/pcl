@@ -21,7 +21,7 @@ use FindBin qw($RealBin);
 
 my $root = "$RealBin/../..";
 plan skip_all => 'sbcl not found' if !`which sbcl 2>/dev/null`;
-plan tests => 4;
+plan tests => 5;
 
 my $dist = tempdir(CLEANUP => 1);
 mkdir "$dist/t" or die "$dist/t: $!";
@@ -92,3 +92,12 @@ sub procs_matching {
   }
   return @n;
 }
+
+# TAP is read from STDOUT alone (#3241): a stderr line written without its
+# newline must not swallow the plan line that follows it on stdout.
+open my $gt, '>', "$rdist/t/glue.t" or die;
+print $gt '$| = 1; print STDERR "noise without a newline"; print "ok 1\n"; print STDERR "more noise"; print "1..1\n";' . "\n";
+close $gt;
+my $gout = `cd / && "$root/tools/run-dist-t.pl" --rows "$rdist" t/glue.t 2>/dev/null`;
+like($gout, qr/^PLAN\t1\t/m, 'a newline-less stderr line does not hide the plan')
+  or diag($gout);

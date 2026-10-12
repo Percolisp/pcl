@@ -89,9 +89,18 @@ if ($rc != 0) {
 }
 
 my ($sbcl_status) = PCLProc::run_isolated(
-  "sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $lisp >$out 2>&1");
+  "sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $lisp >$out 2>$err");
+# TAP is read from STDOUT ALONE, as `prove` reads it (#3241).  The two streams
+# used to share one file, and a stderr line written without its newline (the
+# runtime's "While evaluating the form ... of #P\"x.lisp\":" context, ahead of
+# a caught error) glued the next TAP line onto its end -- HTTP-Tiny's
+# done_testing `1..1` became `...lisp":1..1`, and the file read "no plan".
+# Every TAP line, diagnostics included, is on stdout (cl/pcl-test.lisp's
+# %tap-out); stderr is shown, never parsed.
 my $raw = '';
 if (open(my $f, '<', $out)) { local $/; $raw = <$f> // ''; }
+my $stderr = '';
+if (open(my $f, '<', $err)) { local $/; $stderr = <$f> // ''; }
 # The child's WAIT STATUS, which this script used to throw away.  A SIGNAL
 # there (the OOM killer on a loaded box) produces an empty TAP stream that is
 # indistinguishable from "the file ran and printed nothing" — and the board's
@@ -122,7 +131,8 @@ if ($summary_only) {
                        $r->{expected}, $r->{directive}), "\n";
     }
   }
-  print STDERR $raw if $tap->{notok};   # show detail on failures
+  print STDERR $raw, $stderr if $tap->{notok};   # show detail on failures
 } else {
   print $raw;
+  print STDERR $stderr;
 }
