@@ -12183,3 +12183,18 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   takes them.  s515c's `bsd_glob` scalar-context fix (#3246) is perl on its
   tree with the directory inlined (`glob1i.pl`: list / scalar / none /
   space-literal / iterator / two-words all identical).
+- **#3221 RULED: print / say / printf JOIN `%TOPIC_RAW_WORD` (perf round 47,
+  s517 or s518).**  The reason for leaving them out — a `""` overload handler
+  is user code — already applies to `join` and `sprintf`, which are on the
+  list; the one route print adds (a TIED handle's PRINT method reading the
+  global `$_`) is the same residue class as a tied FETCH, accepted by the
+  RESIDUE note above `_topic_raw_ok` with `PCL_OPT=-raw-topic` as the escape.
+  Conditions in the task: the residue named in the docstring and in
+  not-supported.md; a guard row that shows the residue under the default and
+  its absence under `-raw-topic`; fhprint base / tree / base (−27 % expected);
+  corpus-diff explained file by file.
+- **#3242 stable booleans DESIGNED, un-parked** — `docs/stable-booleans-design-s516.md`
+  (two interned strings through the one `p-bool` helper, `is_bool` = `eq`, two
+  `eq` fast arms; §6 is the bar).  A later correctness brief's member.
+- **A tool finding: `tools/tag-license FILE` stamps an explicitly named `.md`
+  with a `#` header that `--check` never asks for (#2958, LOW).**
