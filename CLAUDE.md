@@ -506,9 +506,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s516, 2026-10-12, main `709b3f60` = s515a merged (2026-10-12 22:07, correctness: #3184 #3185 #3063 #3064 #3207), last CODE commit `5de67310`, gen v2-5884 — measured on
+- **CURRENT NUMBERS (s516, 2026-10-12, main `c406f613` = s515c merged (2026-10-12, the CPAN board widened to 19 dists; s515a merged 22:07), last CODE commit `f9455ea9`, gen v2-5884 — measured on
   that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **311 files / 10,492 rows** (250 s wall with
+  stale):** gate `Result: PASS`, **311 files / 10,495 rows** (250 s wall with
   `tools/prove-core` at load ~4); full `perl-tests/` sweep GATE clean, **TOTAL passing
   18,745**, 635 failing (96.7 %), 60 of 108 files fully passing, 96 run to the
   end and 12 stop part-way, drops 5 = census; `EVERYDAY: 116 of 122 identical to
