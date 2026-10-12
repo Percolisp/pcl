@@ -20030,11 +20030,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (let ((base (%p-split-open-mode (to-string mode))))
       (unless (or (string= base "|-") (string= base "-|"))
         (p-die (format nil "More than one argument to open(,'~A')" base)))))
-  ;; In-memory filehandle: the target is a SCALAR ref (a box whose value is a box),
-  ;; e.g. open my $fh, '>', \$s.  Dispatch before the filename is stringified.
-  (when (and (p-box-p filename) (p-box-p (p-box-value filename)))
+  ;; In-memory filehandle: the target is a SCALAR ref, e.g. open my $fh, '>',
+  ;; \$s.  Dispatch before the filename is stringified.  The ref arrives as the
+  ;; wrapper itself (`\$s` written in place) OR as a variable holding it (`my
+  ;; $r = \$s; open $fh, '<', $r` -- Text::CSV_PP::header), and the referent
+  ;; is a different depth in each: %p-ref-referent is the ONE reading of both.
+  ;; Reading one level down for both opened the WRAPPER, whose text is
+  ;; "SCALAR(0x..)" (#3202).
+  (when (%p-scalar-referent-p filename)
     (return-from %p-open-impl
-      (%p-open-memory fh mode (p-box-value filename))))
+      (%p-open-memory fh mode (%p-ref-referent filename))))
   (let* ((mode-ef  (multiple-value-list (%p-split-open-mode (to-string mode))))
          ;; Dispatch on the BASE mode; a :layer suffix must not make the open
          ;; fail (task #171).  EF honours :raw/:bytes as byte-exact.

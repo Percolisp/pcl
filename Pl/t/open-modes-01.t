@@ -50,7 +50,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 my $dir = tempdir(CLEANUP => 1);
 
@@ -181,3 +181,39 @@ print "still-running=1\\n";
 chmod 0700, "\$d/ro"; chmod 0700, \$np;
 PL
    'every refused open answers FALSE with perl\'s errno in $! and the program runs on');
+
+# 5. An in-memory open whose SCALAR REF arrives in a VARIABLE (#3202): `my $r =
+#    \$s; open $fh, '<', $r` opened the ref's WRAPPER, so the handle read the
+#    text "SCALAR(0x..)" and a write never reached $s -- the written-in-place
+#    `\$s` was right, an array element holding the ref was right.  Text::CSV_PP
+#    ::header reads its header line this way, so `csv(..., bom => 1)` keyed
+#    every row by "scalar(0x1)".  The expectation is perl's own output.
+{
+    my $code = <<'PERL';
+my $hdr = "a,b,c\n";
+my $hr = \$hdr;
+open my $h, "<", $hr or die "open: $!";
+print "var-read: ", scalar <$h>;
+close $h;
+open my $h2, "<", \$hdr or die;
+print "literal-read: ", scalar <$h2>;
+sub f { my ($x) = @_; my $r = \$x; open my $g, "<", $r or die; return scalar <$g> }
+print "sub-read: ", f("x,y\n");
+my $out = "";
+my $or = \$out;
+open my $o, ">", $or or die; print $o "w1\n"; close $o;
+print "var-write: $out";
+open my $ap, ">>", $or or die; print $ap "w2\n"; close $ap;
+print "var-append: $out";
+my @refs = (\$hdr);
+open my $p, "<", $refs[0] or die; print "elem-read: ", scalar <$p>;
+my $rr = \$hr;
+open my $q, "<", $rr or die; my $t = <$q>; print "ref-to-ref: ", ($t =~ /^SCALAR\(0x[0-9a-f]+\)$/ ? "the ref's text" : "[$t]"), "\n";
+PERL
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $pfh $code;
+    close $pfh;
+    my $want = `perl "$pl_file"`;
+    is(run_cl($code), $want,
+       'open on a scalar ref held in a VARIABLE reads and writes the referent (#3202)');
+}
