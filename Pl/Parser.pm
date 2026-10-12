@@ -943,6 +943,7 @@ sub _ppi_parse {
   _merge_unicode_symbols($doc) if $doc;
   _merge_punct_array_symbols($doc) if $doc;
   _repair_indented_heredocs($doc) if $doc;
+  _repair_paren_block_filehandle($doc) if $doc;
   # A DIAGNOSTIC, not a repair — deliberately NOT one of the three in-place
   # passes above, so `fragment_doc`'s re-parses do not announce a construct
   # twice (#435 routes those three and only those three).
@@ -961,11 +962,13 @@ sub _ppi_parse {
 # into Cast + Word (ppi-upstream-bugs.md §23) and only `_merge_unicode_symbols`
 # puts it back together.
 #
-# The four passes below are exactly the ones `_ppi_parse` runs AFTER any
+# The five passes below are exactly the ones `_ppi_parse` runs AFTER any
 # serialize+reparse: the first three swap token CLASSES in place and leave the
 # text untouched, and the fourth moves whitespace between a here-doc's
 # `_indentation` and its body lines in a way `serialize` puts back byte for
-# byte — which is what makes them safe on a fragment.  A fragment is not a
+# byte, and the fifth (#3244) moves a Block between two statements of a
+# print/say/printf paren list without changing the text — which is what makes
+# them safe on a fragment.  A fragment is not a
 # program, so the passes that rewrite structure (signature desugaring,
 # prototype attributes, `__SUB__`) must NOT run here, and do not.
 #
@@ -984,6 +987,7 @@ sub fragment_doc {
   _merge_unicode_symbols($doc);
   _merge_punct_array_symbols($doc);
   _repair_indented_heredocs($doc);
+  _repair_paren_block_filehandle($doc);
   return $doc;
 }
 
@@ -1612,6 +1616,55 @@ sub _merge_punct_array_symbols {
     push @repaired, $sym;
   }
   _reclass_subscripts_after($_) for @repaired;
+  return 1;
+}
+
+# THE PARENTHESISED BLOCK FILEHANDLE (task #3244): `print({$fh} LIST)` --
+# also say / printf -- is ONE expression in perl, the block-filehandle form
+# with parens around it, but PPI 1.291 (docs/ppi-upstream-bugs.md §37) builds
+# the parens' content two wrong ways:
+#   (A) `{$fh}` as a Statement::Compound holding the Block, and LIST as a
+#       SECOND statement after it (print, say);
+#   (B) `{$fh}` as a Structure::Constructor at the head of the one statement
+#       (printf, CORE::say), a hash constructor directly followed by a term,
+#       which perl never parses -- `print({a=>1})` is the constructor and
+#       stays one (a comma or the closing paren follows it).
+# Both become the shape the paren-form filehandle path
+# (Pl::PExpr::_extract_paren_filehandle) already consumes: ONE statement
+# whose first element is the Block.  The text is unchanged (the whitespace
+# between the two statements moves with the Block), so the pass is safe in
+# the in-place slot.  Before it the statement was DROPPED ("Fell through").
+sub _repair_paren_block_filehandle {
+  my ($doc) = @_;
+  for my $list (@{ $doc->find('PPI::Structure::List') || [] }) {
+    my $w = $list->sprevious_sibling;
+    next unless $w && $w->isa('PPI::Token::Word')
+             && $w->content =~ /\A(?:CORE::)?(?:print|say|printf)\z/;
+    my @st = $list->schildren or next;
+    my $head = $st[0];
+    if ($head->isa('PPI::Statement::Compound')) {
+      my @ck = $head->schildren;
+      next unless @ck == 1 && $ck[0]->isa('PPI::Structure::Block')
+               && $st[1] && $st[1]->isa('PPI::Statement');
+      my ($block, $expr) = ($ck[0], $st[1]);
+      my @ws;
+      for (my $n = $head->next_sibling; $n && refaddr($n) != refaddr($expr); $n = $n->next_sibling) {
+        push @ws, $n;
+      }
+      my $first = $expr->first_element or next;
+      $block->remove;
+      $first->insert_before($block);
+      for my $t (@ws) { $t->remove; $first->insert_before($t) }
+      $head->delete;
+    }
+    elsif ($head->isa('PPI::Statement')) {
+      my ($ctor, $next) = $head->schildren;
+      next unless $ctor && $ctor->isa('PPI::Structure::Constructor')
+               && $ctor->start && $ctor->start->content eq '{'
+               && $next && !$next->isa('PPI::Token::Operator');
+      bless $ctor, 'PPI::Structure::Block';
+    }
+  }
   return 1;
 }
 

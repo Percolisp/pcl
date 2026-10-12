@@ -2136,6 +2136,37 @@ read the package `@x`.  The emitter already read the shape right.  Upstream row:
 
 ---
 
+## 37. `print({$fh} LIST)` -- the parenthesised block filehandle -- is split into two statements, or its block is a CONSTRUCTOR  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `ab` then `c`):
+
+```perl
+my $fh = \*STDOUT; print({$fh} "a", "b"); printf({$fh} "%s\n", "c");
+```
+
+**PPI 1.291 structure**: for `print(` / `say(`: `Structure::List[ Statement::Compound[
+Structure::Block[{$fh}] ] Statement::Expression["a", "b"] ]` -- the block is a
+compound statement of its own and the list a second statement.  For `printf(` /
+`CORE::say(`: `Structure::List[ Statement[ Structure::Constructor[{$fh}]
+Quote["%s\n"] … ] ]` -- one statement, but the braces are an anonymous-hash
+constructor directly followed by a term (no comma), which perl never parses.
+**Expected**: one statement whose first element is `Structure::Block[{$fh}]`,
+the shape PPI already builds for the paren-less `print {$fh} "a"` and for
+`print(STDERR {$fh} "x")`.  (`print({a=>1})` -- a constructor followed by the
+closing paren -- is a hash, in perl and in PPI.)
+
+**PCL's workaround** (s516a, task #3244): `Pl::Parser::_repair_paren_block_filehandle`,
+an in-place pass in `_ppi_parse` and `fragment_doc`, moves the Block into the
+following statement (with the whitespace between, so the text is unchanged) or
+reblesses the Constructor as a Block when a term follows it; the existing
+paren-form filehandle path (`Pl::PExpr::_extract_paren_filehandle`) then reads
+it.  Before, the whole statement was DROPPED ("Fell through. Missing case").
+Unblocks HTTP-Tiny t/Util.pm:46 (`print({$fh} @_) || die`) and Path-Tiny's
+`spew` (`print( {$fh} map {...} @data)`).  Guard `Pl/t/print-block-fh-01.t`;
+canary `Pl/t/misc-fixes-02.t`; upstream rows: `docs/ppi-bug-report.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

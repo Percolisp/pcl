@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 139;
+plan tests => 140;
 
 sub run_cl {
     my ($code) = @_;
@@ -1388,6 +1388,20 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
     isnt( ref($tok), 'PPI::Token::Magic',
           'CANARY: PPI still mis-lexes `$)` under the signatures feature '
         . '(when this FAILS, drop Pl::Parser::_signature_gid_offsets)' );
+}
+
+# ── CANARY for PPI bug 37 (ppi-upstream-bugs.md; task #3244) ────────────────
+# PPI 1.291 builds `print({$fh} "a")` as TWO statements in the parens (a
+# compound holding the block, then the list), and PCL repairs the structure
+# (Pl::Parser::_repair_paren_block_filehandle).  THIS ROW ASSERTS THE BUG IS
+# STILL THERE: when a PPI upgrade fixes it, this row FAILS -- drop the repair.
+{
+    my $doc = PPI::Document->new(\'print({$fh} "a");');
+    my ($list) = @{ $doc->find('PPI::Structure::List') || [] };
+    my @st = $list->schildren;
+    ok( @st == 2 && $st[0]->isa('PPI::Statement::Compound'),
+        'CANARY: PPI still splits print({$fh} LIST) into two statements '
+      . '(when this FAILS, drop Pl::Parser::_repair_paren_block_filehandle)' );
 }
 
 # ── #2005: map COPIES what its block returns, on EVERY result arity ─────────

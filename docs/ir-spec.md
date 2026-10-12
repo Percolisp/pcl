@@ -3863,6 +3863,14 @@ most likely to sit under.  The host wrapper must therefore distinguish *its
 own* error from a perl-level exception raised inside it (PCL: one macro,
 `%p-child-host-error`, over the one predicate `%p-perl-die-p`).
 
+**`print({BLOCK} LIST)` is the block-filehandle form** (normative, s516a,
+task #3244): with parens around it, `print`/`say`/`printf` read a leading
+`{BLOCK}` followed by a term as the filehandle, exactly as `print {BLOCK}
+LIST` does; it lowers to the same `(p-print :fh EXPR …)` call.  A leading
+`{…}` followed by a comma or the closing paren is an argument (`print({a=>1})`
+prints the HASH reference).  Example: `print({$fh} "a", "b") || die` writes
+`ab` to `$fh`; the `||` is outside the call.
+
 ### 7.6 stdio buffering (normative, s451)
 
 Buffering is not an implementation detail once a program can observe it, and

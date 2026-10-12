@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 87;
+use Test::More tests => 89;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1015,4 +1015,20 @@ for my $c (
                @{ $doc->find(q{PPI::Structure}) || [] };
     is( ref($st), q{PPI::Structure::Subscript},
         q{the `[1]` after `${a}` is a Structure::Subscript} );
+}
+
+# §37 -- `print({$fh} LIST)`: PPI splits the parens' content into a compound
+# statement holding the block plus a second statement (print, say), or makes the
+# block an anonymous-hash Constructor followed directly by a term (printf).
+# perl: `my $fh = \*STDOUT; print({$fh} "a", "b")` prints ab.
+{
+    my $doc = PPI::Document->new(\q{print({$fh} "a", "b");});
+    my ($list) = @{ $doc->find(q{PPI::Structure::List}) || [] };
+    my @st = $list->schildren;
+    is( scalar @st, 1, q{the content of print({$fh} "a", "b") is ONE statement} );
+    my $doc2 = PPI::Document->new(\q{printf({$fh} "%s", 1);});
+    my ($br) = grep { $_->start && $_->start->content eq q[{] }
+               @{ $doc2->find(q{PPI::Structure}) || [] };
+    is( ref($br), q{PPI::Structure::Block},
+        q{the {$fh} of printf({$fh} "%s", 1) is a Structure::Block} );
 }
