@@ -18,6 +18,8 @@
 #     UNNAMED failure (the #1041 key: empty description), and the synthetic
 #     `*FILE*` row that is the only way a file producing no TAP at all can
 #     appear in a file of failing assertions;
+#   * a file that DIES after row 1, short of its plan, reads PARTIAL and gets
+#     the synthetic `*PLAN*` row (#3241: it used to read PASS 1/0);
 #   * a registered TIMEOUT ALLOWANCE is read and announced (the board had none,
 #     which is why a merely slow file read as FAIL 0/0 — #1512);
 #   * --diff prints NEW / FIXED / LOST and the CAUSES line, and says
@@ -26,7 +28,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 29;
+use Test::More tests => 31;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -103,19 +105,24 @@ like($stderr, qr/timeout allowance: \s*fixture-dist\/rows\.t\s+200s\s+\(fixture:
 my @table = do { open my $f, '<', $tsv or die; grep { /\S/ } <$f> };
 chomp @table;
 is_deeply(\@table,
-          ["fixture-dist\trows.t\tPARTIAL\t2\t2\t0",
+          ["fixture-dist\tdies.t\tPARTIAL\t1\t0\t0",
+           "fixture-dist\trows.t\tPARTIAL\t2\t2\t0",
            "fixture-dist\tskipped.t\tFAIL\t0\t0\t0"],
           'the per-FILE table keeps its six columns and its verdicts');
 
 my @rowlines = do { open my $f, '<', $rows or die; grep { /\S/ && !/^#/ } <$f> };
 chomp @rowlines;
-is(scalar(@rowlines), 3, 'three rows: the named failure, the unnamed failure, the *FILE* row');
-is($rowlines[0], "fixture-dist\trows.t\t2\tfixture named fail\t'2'\t'3'",
+is(scalar(@rowlines), 4, 'four rows: the *PLAN* row, the named failure, the unnamed failure, the *FILE* row');
+is($rowlines[0], "fixture-dist\tdies.t\t0\t*PLAN*\tran 1 of 3, rc 255\t3 row(s)",
+   'a file that dies after row 1 gets a *PLAN* row: ran M of N, rc R (#3241)');
+is($rowlines[1], "fixture-dist\trows.t\t2\tfixture named fail\t'2'\t'3'",
    'a named failing assertion carries its got and expected');
-is($rowlines[1], "fixture-dist\trows.t\t3\t\t\t",
+is($rowlines[2], "fixture-dist\trows.t\t3\t\t\t",
    'an unnamed failing assertion keys on the empty description');
-like($rowlines[2], qr/^fixture-dist\tskipped\.t\t0\t\*FILE\*\t1\.\.0 # SKIP fixture: nothing to run here \(rc=0\)\t/,
+like($rowlines[3], qr/^fixture-dist\tskipped\.t\t0\t\*FILE\*\t1\.\.0 # SKIP fixture: nothing to run here \(rc=0\)\t/,
      'a file that produced NO TAP gets a *FILE* row naming why');
+unlike(join("\n", @rowlines), qr/\trows\.t\t0\t\*PLAN\*/,
+       'a file that met its plan and exited 0 gets no *PLAN* row, failing rows or not');
 
 # The SBCL child's WAIT STATUS is reported, so a run KILLED by a signal (the
 # OOM killer on a loaded box) can be told apart from a run that finished and
@@ -147,11 +154,12 @@ like($rows_out, qr/^SBCL\t0\t0$/m, 'run-dist-t --rows reports the SBCL exit code
   # passing rows without adding failing ones.
   my $board_base = "$tmp/board-base.tsv";
   open my $bf, '>', $board_base or die;
+  print $bf "fixture-dist\tdies.t\tPASS\t1\t0\t0\n";
   print $bf "fixture-dist\trows.t\tPARTIAL\t5\t2\t0\n";
   print $bf "fixture-dist\tskipped.t\tFAIL\t0\t0\t0\n";
   close $bf;
   my $out2 = `perl \Q$root/tools/cpan-scoreboard.pl\E --diff \Q$base\E \Q$rows\E --board-baseline \Q$board_base\E --board-current \Q$tsv\E 2>&1`;
   like($out2, qr/^LOST\s+fixture-dist rows\.t — 3 passing row\(s\) \(5 -> 2\)$/m,
        'a file whose ok count fell reports its lost passing rows');
-  like($out2, qr/^TOTAL passing: baseline 5, current 2$/m, 'the run prints the passing TOTAL both ways');
+  like($out2, qr/^TOTAL passing: baseline 6, current 3$/m, 'the run prints the passing TOTAL both ways');
 }

@@ -61,9 +61,23 @@
 # exactly what Text-Balanced 05_extmul.t did (#1512).
 #
 # Classification per t-file (TAP counted by run-dist-t.pl --rows):
-#   PASS    = at least one ok, zero not-ok, clean exit
-#   PARTIAL = at least one ok, but not-ok rows or a non-zero exit (late crash)
+#   PASS    = at least one ok, zero not-ok, the PLAN MET and SBCL's exit 0
+#   PARTIAL = at least one ok, but not-ok rows, a SHORTFALL, or a non-zero exit
 #   FAIL    = zero ok (transpile failure, load crash, timeout, no TAP)
+#
+# THE SHORTFALL (#3241): a file whose program stops before its plan is met is
+# not a PASS, whatever rows it printed first.  Before #3241 the verdict read
+# run-dist-t.pl's OWN exit (0 whenever it ran) and never compared the plan, so
+# a file that died after row 1 of 25,119 read PASS 1/0.  The rule is prove's:
+# the rows that ran (ok + not ok) must equal the plan (`1..N` up front or
+# `done_testing`'s trailer) and SBCL must exit 0.  A file that ran rows and
+# misses either condition gets ONE synthetic row, so the row gate can hold it
+# with a cause:
+#
+#   dist <TAB> t-file <TAB> 0 <TAB> *PLAN* <TAB> ran M of N, rc R <TAB> N row(s)
+#
+# (`of no plan` / `a plan` when no plan line was printed; R = SBCL's exit, or
+# 124 for a timeout).  A file that ran NO rows keeps its `*FILE*` row instead.
 
 use strict;
 use warnings;
@@ -237,21 +251,35 @@ sub run_one {
   };
   my $rc = $? >> 8;
   my ($ok, $notok) = $out =~ /pass=(\d+) fail=(\d+)/ ? ($1, $2) : (0, 0);
-  my $class = $ok == 0             ? 'FAIL'
-            : ($notok || $rc != 0) ? 'PARTIAL'
-            :                        'PASS';
-  $class = 'FAIL' if $rc == 124;   # timeout
   my ($plan, $skip) = ('', '');
   ($plan, $skip) = ($1, $2) if $out =~ /^PLAN\t([^\t]*)\t([^\n]*)$/m;
-  # The SBCL child's wait status, reported by run-dist-t.pl --rows.  A nonzero
-  # SIGNAL means the run was KILLED (the OOM killer on a loaded box), and a
-  # killed run's empty TAP must never be published as a verdict.
-  my $sig = ($out =~ /^SBCL\t\d+\t(\d+)$/m) ? $1 : 0;
+  # The SBCL child's exit and wait status, reported by run-dist-t.pl --rows.
+  # A nonzero SIGNAL means the run was KILLED (the OOM killer on a loaded box),
+  # and a killed run's empty TAP must never be published as a verdict.
+  my ($sbcl_rc, $sig) = ($out =~ /^SBCL\t(\d+)\t(\d+)$/m) ? ($1, $2) : (undef, 0);
+  my $short = shortfall($ok + $notok, $plan, $skip,
+                        $rc == 124 ? 124 : ($sbcl_rc // $rc));
+  my $class = $ok == 0                         ? 'FAIL'
+            : ($notok || $rc != 0 || length $short) ? 'PARTIAL'
+            :                                    'PASS';
+  $class = 'FAIL' if $rc == 124;   # timeout
   open my $rf, '>', "$tmp/$w->{idx}.rows" or return undef;
   print $rf "$_\n" for ($out =~ /^ROW\t([^\n]*)$/mg);
   close $rf;
   return [$w->{dist}, basename($w->{t}), $class, $ok, $notok, $rc,
-          $w->{idx}, $plan, $skip, $sig];
+          $w->{idx}, $plan, $skip, $sig, $short];
+}
+
+# The shortfall text for a file that RAN rows (see the header, #3241): '' when
+# the plan is met and the exit is clean, else "ran M of N, rc R".
+sub shortfall {
+  my ($ran, $plan, $skip, $exit) = @_;
+  return '' if $ran == 0;                       # the *FILE* row's case
+  my $planned = (defined $plan && length $plan) ? $plan : undef;
+  return '' if defined $planned && $ran == $planned && !$exit;
+  return '' if length($skip // '');             # 1..0 # SKIP after rows: not a plan
+  return sprintf 'ran %d of %s, rc %d', $ran,
+                 defined $planned ? $planned : 'no plan', $exit // 0;
 }
 
 sub spawn_one {
@@ -276,7 +304,7 @@ while (@rows < $expected) {
   my $line = <$rd>;
   defined $line or last;
   chomp $line;
-  push @rows, [split /\t/, $line, 10];
+  push @rows, [split /\t/, $line, 11];
   my $done = wait();
   delete $kids{$done} if $done > 0;
   spawn_one(shift @queue) if @queue;
@@ -346,7 +374,8 @@ if (defined $rows_file) {
   my @t = localtime;
   open my $fh, '>', $rows_file or die "open $rows_file: $!\n";
   printf $fh "# cpan-board ROW-level failures — one line per FAILING assertion, plus one\n"
-           . "#   `*FILE*` row per t-file that produced no TAP rows at all.\n"
+           . "#   `*FILE*` row per t-file that produced no TAP rows at all, and one\n"
+           . "#   `*PLAN*` row per t-file that ran rows but missed its plan or exited non-zero.\n"
            . "# Columns: dist, t-file, num, description, got, expected [, cause]\n"
            . "# Join key: (dist, t-file, description) — never the number (#1041).\n"
            . "# Written by tools/cpan-scoreboard.pl --rows, tree %s, %04d-%02d-%02d, perl %vd\n"
@@ -355,7 +384,7 @@ if (defined $rows_file) {
            join(' ', $0, @argv_copy);
   my $nrows = 0;
   for my $r (sort { $a->[0] cmp $b->[0] || $a->[1] cmp $b->[1] } @rows) {
-    my ($dist, $file, $class, $ok, $notok, $rc, $idx, $plan, $skip) = @$r;
+    my ($dist, $file, $class, $ok, $notok, $rc, $idx, $plan, $skip, undef, $short) = @$r;
     my @out;
     if (open my $rf, '<', "$tmp/$idx.rows") {
       while (my $l = <$rf>) { chomp $l; push @out, $l }
@@ -367,6 +396,10 @@ if (defined $rows_file) {
       my $what = length($skip // '') ? "1..0 $skip (rc=$rc)" : "no TAP rows (rc=$rc)";
       unshift @out, join("\t", 0, '*FILE*', $what,
                          (defined $plan && length $plan) ? "$plan row(s)" : 'TAP rows');
+    } elsif (length($short // '')) {
+      # It ran rows and stopped short of its plan, or exited non-zero (#3241).
+      unshift @out, join("\t", 0, '*PLAN*', $short,
+                         (defined $plan && length $plan) ? "$plan row(s)" : 'a plan');
     }
     for my $l (@out) {
       my ($num, $desc, $got, $exp, $dir) = split /\t/, $l, 5;
