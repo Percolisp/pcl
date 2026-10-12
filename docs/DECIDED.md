@@ -12198,3 +12198,4 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   `eq` fast arms; §6 is the bar).  A later correctness brief's member.
 - **A tool finding: `tools/tag-license FILE` stamps an explicitly named `.md`
   with a `#` header that `--check` never asks for (#2958, LOW).**
+- **Perf round 47's brief is WRITTEN (`briefs-and-rules-for-claude-subagents/s516/perf-round-47-prompt.md`, launched in s517 or s518 per the cadence): #3221 → #3121 → the joinarr slice path → the lcbytes case map + UTF-8 scan.  Its bar, refined: the 15 % line holds for the two NEW levers; #3221 and #3121 ship when the build REPRODUCES their hand-replaced gain (−27 % fhprint; −7.5 % json-rt) with the control band held — the USER named both worthwhile, so the question is whether the build delivers what the A/B promised, not whether it clears a line it was already measured under.**
