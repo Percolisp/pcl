@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-12",
+   "description" : "FILED s515a (Opus, 2026-10-12) from Fable's review probe ~/pcl-agent-scratch/s513/review/p516a/pos3.pl, row \"self assign\".  PRE-EXISTING on main, LOW.\n`my $s = \"aXbXc\"; $s =~ /X/g; $s = $s; print pos($s) // \"undef\", \"\\n\";` -- perl 2, PCL undef.  perl's sv_setsv(dsv, ssv) returns at once when dsv == ssv, so no magic is touched and pos survives; PCL's assignment path (box-set) clears pos on every store.  Fix shape: box-set (or the scalar-assign emission) skips the store and the pos clear when the source IS the destination box.  Guard row: Pl/t/elem-pos-01.t (perl-compared).",
+   "id" : "3210",
+   "status" : "pending",
+   "subject" : "Self-assignment `$s = $s` clears pos() in PCL; perl keeps it (sv_setsv on the same SV is a no-op)"
+}

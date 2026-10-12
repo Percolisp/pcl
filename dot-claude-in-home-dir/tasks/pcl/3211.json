@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-12",
+   "description" : "FILED s515a (Opus, 2026-10-12) while probing the #3207 review.  PRE-EXISTING on main (same error at b91b8867), MEDIUM (a die where perl writes).\n`my $t = \"abc\"; my $d = sub { ${$_[0]} =~ s/a/b/ }; $d->(\\$t); print \"$t\\n\";` -- perl `bbc`, PCL dies 'Modification of a read-only value attempted'.  Same with tr/a/b/, and with `my @a = (\\$s); ${$a[0]} =~ tr/a/b/;`.  Through a plain scalar it works: `my $r = $_[0]; $$r =~ tr/a/b/` prints bbc.  So the deref-of-an-element target reaches do-regex-subst / do-tr as a non-box (a value), not the referent box.  Probes: scratch/s515a/pr/ro4.pl, ro5.pl in the s515a worktree.",
+   "id" : "3211",
+   "status" : "pending",
+   "subject" : "`${$_[0]} =~ s///` / `tr///` (an s/// or tr/// target that is a deref of an ELEMENT expression) dies 'Modification of a read-only value attempted'"
+}

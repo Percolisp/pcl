@@ -508,9 +508,9 @@ func => -12         # 1 param before list
 
 - **CURRENT NUMBERS (s515, 2026-10-11, main `44907cde` = s515b merged (2026-10-11 20:2x, perf round 46), last CODE commit `edc64d62`, gen v2-5787 — measured on
   that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **309 files / 10,451 rows** (371 s wall with
-  `tools/prove-core` at load 9-11); full `perl-tests/` sweep GATE clean, **TOTAL passing
-  18,741**, 637 failing (96.7 %), 60 of 108 files fully passing, 96 run to the
+  stale):** gate `Result: PASS`, **311 files / 10,492 rows** (250 s wall with
+  `tools/prove-core` at load ~4); full `perl-tests/` sweep GATE clean, **TOTAL passing
+  18,745**, 635 failing (96.7 %), 60 of 108 files fully passing, 96 run to the
   end and 12 stop part-way, drops 5 = census; `EVERYDAY: 116 of 122 identical to
   perl (95.1 %)`; `tools/t/install-container.t` PASS 17 rows (s507, by the switches batch).  The user-facing
   copy of these numbers is `docs/STATUS.md` — update both together.
