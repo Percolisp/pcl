@@ -5,6 +5,8 @@
 # after row 1 (#3241), and the runner does not chdir to the dist root (#1575) -- Text-CSV / JSON-PP /
 # HTTP-Tiny / Path-Tiny lose most of their rows to those two.  The ROW baseline with causes is
 # cpan-board14-fails.tsv.
+# EDITED BY HAND (s515c, s516 rebase onto MAIN-READY-20): Text-CSV 41_null.t / 71_pp.t / 67_emptrow.t re-measured
+# alone after s515a fixed the #3063 hang (were FAIL 0/0 rc 124); the file totals above predate this edit.
 Algorithm-Diff-1.201-0	base.t	PARTIAL	32	3	0
 Algorithm-Diff-1.201-0	oo.t	PARTIAL	102	20	0
 Capture-Tiny-0.50-0	00-report-prereqs.t	PASS	1	0	0
@@ -334,7 +336,7 @@ Text-CSV-2.04	21_lexicalio.t	PASS	1	0	0
 Text-CSV-2.04	22_scalario.t	PASS	1	0	0
 Text-CSV-2.04	30_types.t	PARTIAL	24	1	0
 Text-CSV-2.04	40_misc.t	PASS	1	0	0
-Text-CSV-2.04	41_null.t	FAIL	0	0	124
+Text-CSV-2.04	41_null.t	PASS	128	0	0
 Text-CSV-2.04	45_eol.t	PASS	1	0	0
 Text-CSV-2.04	46_eol_si.t	PASS	1	0	0
 Text-CSV-2.04	47_comment.t	FAIL	0	0	0
@@ -344,10 +346,10 @@ Text-CSV-2.04	55_combi.t	PASS	1	0	0
 Text-CSV-2.04	60_samples.t	PARTIAL	4	4	0
 Text-CSV-2.04	65_allow.t	PASS	1	0	0
 Text-CSV-2.04	66_formula.t	PARTIAL	109	10	0
-Text-CSV-2.04	67_emptrow.t	FAIL	0	0	124
+Text-CSV-2.04	67_emptrow.t	PARTIAL	50	6	0
 Text-CSV-2.04	68_header.t	PASS	1	0	0
 Text-CSV-2.04	70_rt.t	PASS	1	0	0
-Text-CSV-2.04	71_pp.t	FAIL	0	0	124
+Text-CSV-2.04	71_pp.t	PASS	104	0	0
 Text-CSV-2.04	75_hashref.t	PARTIAL	100	2	0
 Text-CSV-2.04	76_magic.t	PARTIAL	43	1	0
 Text-CSV-2.04	77_getall.t	PASS	1	0	0
