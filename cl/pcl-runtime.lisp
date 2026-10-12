@@ -8840,6 +8840,15 @@ per element."
 ;;; order, same hole and hash-pair answers as p-flatten-args (a hole reads
 ;;; undef, a hash spreads key/value pairs, a blessed hash is one argument, a
 ;;; %ENV/%INC marker spreads its pairs).
+(defun %p-builtin-arg-list (args)
+  "The flattened argument LIST of a CL function that stands for a perl sub
+   (UNIVERSAL::isa/can/DOES, the SUPER:: built-in arms): an array argument
+   arrives as the raw vector and must spread like @_ (#3280).  Values, no
+   element-cell promotion: these callees only read their arguments."
+  (if (some (lambda (a) (or (and (vectorp a) (not (stringp a))) (hash-table-p a))) args)
+      (coerce (%p-flatten-arg-values args) 'list)
+      args))
+
 (defun %p-flatten-arg-values (args)
   "The flattened argument vector of ARGS as VALUES: p-flatten-args without the
    element-cell promotion, for a callee that only copies it (p-raw-params, and
@@ -34457,6 +34466,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    `No SUPER::isa found from Solo`, which no eval could recognise)."
   (let ((fn (%pcl-find-method-in-chain "UNIVERSAL" sub-name)))
     (when fn (return-from %pcl-super-fallback (apply fn obj args))))
+  ;; The built-in arms below are CL callees: an array argument arrives as the
+  ;; raw vector (`$self->SUPER::isa(@_)`, Type::Tiny::isa), so they read the
+  ;; FLATTENED list, as a perl sub's @_ would (#3280).
+  (setf args (%p-builtin-arg-list args))
   (cond
     ((string-equal method-name "isa")  (apply #'%p-isa-mro obj args))
     ((string-equal method-name "DOES") (apply #'p-isa obj args))
@@ -38785,10 +38798,26 @@ buffer's fill-pointer; everything else falls back to file-length."
 (in-package :UNIVERSAL)
 ;; The FUNCTION spelling is a perl-visible boundary like the method arms, so
 ;; it answers through %p-can-answer: undef for a miss, never CL NIL (#1912).
-(defun pl-can  (obj method &rest args) (declare (ignore args))
-       (pcl::%p-can-answer obj method))
-(defun pl-isa  (obj class  &rest args)
-  (declare (ignore args))
+;; Each takes its arguments as a LIST and flattens it (#3280): the call site
+;; passes an array argument as the raw vector, so `UNIVERSAL::isa($x, @a)` read
+;; the VECTOR as the class (false) and `UNIVERSAL::isa(@two)` was a CL arity
+;; error.  Fewer than two arguments is perl's usage die, USAGE its text.
+(defmacro %with-builtin-args ((&rest vars) args usage &body body)
+  (let ((flat (gensym "FLAT")))
+    `(let ((,flat (pcl::%p-builtin-arg-list ,args)))
+       (when (< (length ,flat) ,(length vars))
+         (pcl::p-die (concatenate 'string "Usage: " ,usage)))
+       (let ,(loop for v in vars
+                   for i from 0
+                   collect `(,v (nth ,i ,flat)))
+         ,@body))))
+(defun pl-can (&rest args)
+  (%with-builtin-args (obj method) args "UNIVERSAL::can(object-ref, method)"
+    (pcl::%p-can-answer obj method)))
+(defun pl-isa (&rest args)
+  (%with-builtin-args (obj class) args "UNIVERSAL::isa(reference, kind)"
+    (%universal-isa obj class)))
+(defun %universal-isa (obj class)
   ;; Perl's UNIVERSAL::isa(REF, TYPE) carries interpreter-baked behaviour beyond
   ;; @ISA: when TYPE names a builtin reference type (ARRAY/HASH/SCALAR/CODE/GLOB/
   ;; LVALUE/…) it is true iff reftype(REF) eq TYPE — regardless of blessing.
@@ -38815,13 +38844,13 @@ buffer's fill-pointer; everything else falls back to file-length."
                nil))))))
 ;; DOES is `$obj->isa($role)` in perl (sv_does_sv calls the isa METHOD), so an
 ;; overriding isa answers it; without one it is UNIVERSAL::isa (#2083).
-(defun pl-DOES (obj class &rest args)
-  (declare (ignore args))
-  (let* ((cls (pcl::%pcl-invocant-class obj))
-         (fn  (and cls (pcl::%p-isa-override cls))))
-    (if fn
-        (funcall fn obj (pcl::to-string class))
-        (pl-isa obj class))))
+(defun pl-DOES (&rest args)
+  (%with-builtin-args (obj class) args "invocant->DOES(kind)"
+    (let* ((cls (pcl::%pcl-invocant-class obj))
+           (fn  (and cls (pcl::%p-isa-override cls))))
+      (if fn
+          (funcall fn obj (pcl::to-string class))
+          (%universal-isa obj class)))))
 
 ;;; UNIVERSAL::VERSION — the method every class inherits (tasks #1743/#1818).
 ;;; It was a stub that always answered undef and never performed the check, so

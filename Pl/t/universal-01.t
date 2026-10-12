@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -267,4 +267,31 @@ print(($o isa Base) ? 1 : 0, " ", ($o isa Nope) ? 1 : 0, " ", $o->DOES("Base") ?
 PL
     is(run_cl($prog), run_perl($prog),
        '#2083: infix isa and DOES delegate to the override, ->SUPER::isa and ->UNIVERSAL::isa do not (perl oracle)');
+}
+{
+    # #3280: an ARRAY argument to the UNIVERSAL built-ins flattens, like any
+    # perl sub's @_.  Type::Tiny's isa override is `$self->SUPER::isa(@_)` with
+    # no @ISA, so SUPER:: ends at UNIVERSAL::isa -- which read the raw vector
+    # as the class and answered FALSE (every Type::Tiny object "was not" one),
+    # and `UNIVERSAL::isa(@two)` was a CL arity error.
+    my $prog = <<'PL';
+package Foo;
+sub new { bless {}, shift }
+sub hello { 1 }
+sub i2 { my $self = shift; $self->SUPER::isa(@_) ? 1 : 0 }
+sub c2 { my $self = shift; $self->SUPER::can(@_) ? 1 : 0 }
+sub d2 { my $self = shift; $self->SUPER::DOES(@_) ? 1 : 0 }
+package Kid; our @ISA = ('Foo');
+sub isa { my $s = shift; $s->SUPER::isa(@_) }
+package main;
+my $f = Foo->new;
+my @a = ('Foo'); my @m = ('hello'); my @two = ($f, 'Foo'); my @none = ();
+print join(' ', $f->i2('Foo'), $f->i2('Nope'), $f->c2('hello'), $f->c2('nope'), $f->d2('Foo'),
+  (UNIVERSAL::isa($f, @a) ? 1 : 0), (UNIVERSAL::can($f, @m) ? 1 : 0),
+  (UNIVERSAL::isa(@two) ? 1 : 0), (UNIVERSAL::DOES(@two) ? 1 : 0),
+  (Kid->new->isa(@a) ? 1 : 0), (Kid->new->isa('Nope') ? 1 : 0),
+  (eval { UNIVERSAL::isa(@none); 1 } ? "lived" : "died: " . ($@ =~ /^(Usage: \S+)/)[0])), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3280: SUPER::isa/can/DOES(@_) and UNIVERSAL::isa/can/DOES(@list) flatten their arguments (perl oracle)');
 }
