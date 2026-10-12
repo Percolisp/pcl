@@ -19343,6 +19343,14 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               (setf (gethash new *p-pipe-pids*) pid)))))
     t))
 
+(defun %p-typeglob-handle-key (glob)
+  "THE handle slot a typeglob denotes: the symbol its package and name intern
+   to -- the key *p-filehandles* (open) and *p-dirhandles* (opendir) hold a
+   glob's handle under, the same key a bareword `FH' / `DIR' of that name is.
+   A COPY of a glob ref (`my ($dh) = @_' on a gensym, `\\*FH') is another box
+   holding the SAME glob, so it reaches the same slot (task #3243)."
+  (intern (p-typeglob-name glob) (p-typeglob-package glob)))
+
 (defun %p-install-fh (fh stream &optional (cloexec t))
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
    Symbolic filehandle: when FH is a box already holding a non-empty handle-NAME
@@ -19384,11 +19392,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; later method call on it went elsewhere (task #197).  Key it by the
     ;; glob's own name, which is how %p-resolve-fh reaches a glob handle.
     ((and (p-box-p fh) (p-typeglob-p (p-box-value fh)))
-     (let ((glob (p-box-value fh)))
-       (setf (gethash (intern (p-typeglob-name glob)
-                              (p-typeglob-package glob))
-                      *p-filehandles*)
-             stream)))
+     (setf (gethash (%p-typeglob-handle-key (p-box-value fh)) *p-filehandles*)
+           stream))
     ((and (p-box-p fh)
           (stringp (p-box-value fh))
           (plusp (length (p-box-value fh))))
@@ -20265,9 +20270,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "Undo %p-install-fh: drop FH's binding to its stream.  Mirrors that function's
    cases exactly, so every handle shape it can open, this can close."
   (cond ((and (p-box-p fh) (p-typeglob-p (p-box-value fh)))
-         (let ((glob (p-box-value fh)))
-           (remhash (intern (p-typeglob-name glob) (p-typeglob-package glob))
-                    *p-filehandles*)))
+         (remhash (%p-typeglob-handle-key (p-box-value fh)) *p-filehandles*))
         ;; Symbolic handle: the box holds a NAME string ($fh = 'FOO').  The
         ;; install side registered by name and left the box alone; close must
         ;; mirror that — drop the by-name entry, keep the string ($fh still
@@ -21990,9 +21993,20 @@ buffer's fill-pointer; everything else falls back to file-length."
    the same reason: readdir/closedir/rewinddir each carried their own
    two-armed copy, so an element dirhandle opened fine and then read NOTHING
    (rule 11 — three copies of one question, disagreeing)."
-  (cond ((consp dh) dh)
-        ((symbolp dh) (gethash dh *p-dirhandles*))
-        ((p-box-p dh) (let ((x (p-box-value dh))) (and (consp x) x)))))
+  (let ((key (%p-dh-key dh)))
+    (cond ((consp dh) dh)
+          (key (gethash key *p-dirhandles*))
+          ((p-box-p dh) (let ((x (p-box-value dh))) (and (consp x) x))))))
+
+(defun %p-dh-key (dh)
+  "The *p-dirhandles* key DH denotes, or nil when its handle lives in a box:
+   a bareword SYMBOL is its own key, and a GLOB -- bare, or the value of a box
+   (a gensym, `\\*DIR', a copy of either) -- is its handle slot's symbol, so
+   `opendir' on a COPY of a glob ref opens the GLOB the caller holds, as
+   `open' does (task #3243: core IO::Dir->new(DIR)->read returned nothing)."
+  (let ((v (if (p-box-p dh) (p-box-value dh) dh)))
+    (cond ((symbolp dh) dh)
+          ((p-typeglob-p v) (%p-typeglob-handle-key v)))))
 
 (defun %p-dirhandle-path (v)
   "The directory an open DIRHANDLE operand was opened on, or nil when V is not
@@ -23086,10 +23100,11 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; fstat the dirfd in perl, and the one stat operand resolver answers
         ;; from this path instead (task #1048).
         (setf (gethash handle *p-dirhandle-paths*) dir-str)
-        (if (symbolp dh)
-            (setf (gethash dh *p-dirhandles*) handle)
-            (when (p-box-p dh)
-              (setf (p-box-value dh) handle)))
+        (let ((key (%p-dh-key dh)))
+          (if key
+              (setf (gethash key *p-dirhandles*) handle)
+              (when (p-box-p dh)
+                (setf (p-box-value dh) handle))))
         t))))
 
 (defmacro p-opendir (dh &rest args)
@@ -23134,7 +23149,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (open-p (and (consp handle)
                       (nth-value 1 (gethash handle *p-dirhandle-paths*)))))
     (when (consp handle) (remhash handle *p-dirhandle-paths*))
-    (when (symbolp dh) (remhash dh *p-dirhandles*))
+    (let ((key (%p-dh-key dh))) (when key (remhash key *p-dirhandles*)))
     (if open-p
         1
         (progn (%p-io-errno-fail 9) *p-undef*))))          ; EBADF, as perl
