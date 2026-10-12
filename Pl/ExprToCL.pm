@@ -1558,7 +1558,7 @@ sub gen_binary_op_form {
          && $self->_is_elem_lvalue_target($kids->[0]);
     my $l = $self->gen_node_form($kids->[0]);
     $self->lvalue_context($saved_lv);
-    if ($writes && $MAGIC_LVALUE_BASE{ _place_head($l) }) {
+    if ($writes && ($MAGIC_LVALUE_BASE{ _place_head($l) } || _place_head($l) eq 'p-cast-$')) {
       $l = _write_through_form($l) // $l;
     }
     # `substr($a[0],0,2) = "AB"` / `vec($a[0],0,8) = 65` / `pos($a[0]) = 1` —
@@ -1980,6 +1980,11 @@ sub _write_through_form {
     return ["$base-lvalue-cell", @{$tgt}[1 .. $#$tgt]];
   }
   return ["$head-box", @rest] if $head =~ /^p-(?:aref|gethash)(?:-deref)?\z/;
+  # `${EXPR}` written through (an s/// or tr/// target, a 4-argument substr):
+  # the REFERENT BOX, never p-cast-$'s value -- `${$_[0]} =~ s/a/b/` died
+  # read-only when EXPR was an element (task #3211).  p-cast-$-box is the
+  # same resolver tie/untie/tied use (a symbolic name: the package scalar).
+  return ['p-cast-$-box', @rest] if $head eq 'p-cast-$';
   return undef;
 }
 

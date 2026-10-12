@@ -5235,6 +5235,14 @@ list: perl's OPpTRANS_IDENTICAL, a count) and `tr///r` keep it (`%p-write-match-
 
 Example -- `my %h = (k => "aab"); $h{k} =~ /a/g; print pos($h{k})` prints `1`.
 
+**The written-through target `${EXPR}` is the REFERENT BOX** (normative, s516a,
+task #3211): an `s///` / `tr///` target (and a 4-argument `substr`'s) that is a
+scalar dereference is passed as `p-cast-$-box` -- the referent's box for a hard
+reference, the package scalar's box for a symbolic name -- never `p-cast-$`'s
+value, whatever EXPR is (`${$_[0]}`, `${$a[0]}`, `${$h{k}}`).  The pos rule
+above applies to that box.  Example -- `my $t = "abc"; sub { ${$_[0]} =~
+s/a/b/ }->(\$t); print $t` prints `bbc`.
+
 ### 10-esc2. `\N` and `\X` are the same family, and an UNTRANSLATED escape must not silently never match (normative, s492c, task #2050)
 
 Two more escapes ride the same forward scan, with the same position rule

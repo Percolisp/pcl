@@ -33,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 29;
 
 sub write_pl {
     my ($code) = @_;
@@ -129,3 +129,18 @@ both_agree(q{my $s = "abc"; $s =~ /../g; $s =~ tr/X//; my $t = "abc"; $t =~ /../
            'a count-only tr/// keeps pos, matched or not, and an expanded identity too');
 both_agree(q{my $s = "abc"; $s =~ /../g; my $c = $s =~ tr/a/b/r; print pos($s) // "undef", " $c\n";},
            'a tr///r keeps pos');
+
+# ---- #3211 (s516a): an s/// or tr/// target `${ELEMENT}` writes the REFERENT
+# BOX (p-cast-$-box through _write_through_form); it died read-only before.
+both_agree(q{my $t = "abc"; my $d = sub { ${$_[0]} =~ s/a/b/ }; $d->(\$t); my $u = "abc"; my $e = sub { ${$_[0]} =~ tr/a/b/ }; $e->(\$u); print "$t $u\n";},
+           '#3211: ${$_[0]} =~ s/// and tr/// write the caller\'s scalar');
+both_agree(q{my $s = "abc"; my @a = (\$s); ${$a[0]} =~ tr/a/b/; my $v = "aXa"; my %h = (k => \$v); my $n = ${$h{k}} =~ s/a/b/g; print "$s $v $n\n";},
+           '... ${$a[0]} =~ tr/// and ${$h{k}} =~ s///g');
+both_agree(q{my @a = ("q"); my $ar = \@a; @{$ar}[0] =~ s/q/Z/; my $w = "abc"; my $r = [\$w]; ${$r->[0]} =~ s/b/Q/; print "@a $w\n";},
+           '... @{$r}[0] =~ s/// (the element) and ${$r->[0]} =~ s///');
+both_agree(q{my $x = "abc"; $x =~ /b/g; my @b = (\$x); ${$b[0]} =~ tr/c/z/; my $z = "abc"; $z =~ /b/g; my @f = (\$z); ${$f[0]} =~ s/c/C/; print pos($x) // "undef", " ", pos($z) // "undef", " $x $z\n";},
+           '... a writing tr and a matching s/// through ${ELEM} clear pos');
+both_agree(q{my $y = "abc"; $y =~ /b/g; my @c = (\$y); my $cnt = ${$c[0]} =~ tr/a-c//; print pos($y) // "undef", " $cnt\n";},
+           '... a count-only tr through ${ELEM} keeps pos');
+both_agree(q{my $s = "hello"; my @a = (\$s); substr(${$a[0]}, 0, 1, "J"); our $pk = "abc"; my $nm = "pk"; no strict "refs"; $$nm =~ tr/a/z/; print "$s $pk\n";},
+           '... 4-argument substr on ${ELEM}; a symbolic ${"name"} target');
