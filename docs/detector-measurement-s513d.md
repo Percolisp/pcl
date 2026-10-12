@@ -128,7 +128,7 @@ The USER's ruling became the default (ir-spec §9.3c): every program and module
 unit carries the table, and a disagreement is ANNOUNCED once per call site per
 process on stderr (`PCL_DETECT=die` dies trappably, `=off` is silent, `=log`
 keeps §1's line) -- the default from s514d until the USER ruling of 2026-10-11
-(§7: the default is now `off`).  The known-harmless shapes are never announced: shape 1 (a
+(§7: the default was `off` from s515; §9: `announce` again since s516a).  The known-harmless shapes are never announced: shape 1 (a
 nullary `()` sub where the compiler read an unknown bareword term) and shape 5
 (a call parsed against the unit's own definition's prototype that the registry
 lost).  Cost of the table: warm one-liners interleaved best-of-10, base vs
@@ -197,7 +197,7 @@ does not follow (Encode's `[ @EXPORT, @EXPORT_OK ]`; Text::Balanced's `&name`
 entries).  With #3184 the gate would announce 0 and the board 18 -- every
 remaining line a real displaced built-in.
 
-**THE DEFAULT FLIPPED TO `off` on these numbers (USER ruling 2026-10-11,
+**THE DEFAULT FLIPPED TO `off` on these numbers (superseded by §9: `announce` again since s516a) (USER ruling 2026-10-11,
 s515):** with PCL_DETECT unset no table registers; `PCL_DETECT=announce|die|log`
 opts in.  The condition for returning to `announce` is #3184 closing (the gate's
 32 and 41 of the board's 59 sites are that one gap; the rest -- everyday 17,
@@ -231,6 +231,30 @@ read (every `IO::` module is skipped by name for cost) -- a SILENT wrong
 overlay (#3205).  The default stays the USER's call (DECIDED ## s515): what an
 `announce` default would print now is the 18 real Sub::Uplevel sites and #3206's
 glob noise.
+
+## 9. After #3206 / #2879 (s516a): the default is `announce` again
+
+Measured as §6-§8 (`PCL_DETECT=announce` + `PCL_DETECT_LOG` naming a file per
+population; a fresh private `PCL_CACHE_DIR` for the gate and the sweep), on the
+s516a tree (gen v2-5984, rebased onto main c406f613 = MAIN-READY-21): #3206 (a site
+where an override of the builtin is in force is a `list-call` entry, never
+`builtin`), #2879 (`use M ':tag'` is the same import as `qw(:tag)`), and #3260's
+second half, which the first gate recount found: an `&NAME(...)` call asks no
+prototype (perl ignores it there), so it is no table entry -- core IO::Dir's
+`&lstat(...)` under `use File::stat` had been announced as a displaced built-in.
+
+| population | §8 | after s516a | what is left |
+|---|---|---|---|
+| gate (314 files) | 4 | **0** | -- (file-glob-shim-01.t's 4 glob sites gone; the IO::Dir `&lstat` site the new opendir guard brought in, gone with #3260 half 2) |
+| sweep (108 files) | 0 | **0** | -- |
+| everyday (122 programs) | 0 | **0** | -- |
+| CPAN board (now 19 dists) | 18 | **23** | shape 2, REAL: Sub::Uplevel's `CORE::GLOBAL::caller` (18, the same sites -- 4 of them in 04/05_honor_*_override.t now read "a list-operator call", the kind a recorded override gives); NEW DIST Getopt-Long (5, gol-basic.t): `GetOptions` parsed as an unknown list call where Getopt::Long's own `import` installs it with prototype `(@)` -- the same parse either way (a `(@)` sub is a list operator), so noise of the harmless kind (#3261) |
+
+**THE DEFAULT FLIPPED BACK TO `announce` (USER ruling s516, s516a):** what it
+prints on these populations is the real Sub::Uplevel sites and Getopt::Long's 5
+harmless `(@)` sites.  `PCL_DETECT=off` silences it.  Still open: #3260 half 1
+(`use File::stat;` displaces nothing at the parse -- `lstat($f)` stays the
+built-in; the detector announces it, correctly).
 
 ## Appendix A -- the gate's 53 distinct call sites
 

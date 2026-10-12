@@ -521,6 +521,16 @@ not-supported.md → only then probe.*
 - **open on a scalar ref asks `%p-ref-referent`** (the wrapper and a variable holding it are different depths) -- #3202.
 - **A CL function standing for a perl sub flattens its argument list** (UNIVERSAL isa/can/DOES, SUPER:: built-ins, the TAP layer) -- ir-spec "UNIVERSAL" bullets, #3280 / #3245.
 - Filed: #3281 (core B shim: Type::Tiny's next blocker), #3282 (JSON-PP 099_binary runs 48/8/0 of 1536 and exits 0), #3283 (Capture-Tiny badtie), #3284 (the queue of *PLAN* rows not yet read).
+## s516a (2026-10-12, Opus) -- correctness: the glob override's two spellings (#2879) and its detector entries (#3206), the detector default back to announce, `print({$fh} LIST)` (#3244), opendir on a glob-ref copy (#3243), the `${ELEM}` s///-tr target (#3211)
+- **An unparenthesised quoted import list is read ONCE, by the module** (`Pl::Parser::bare_quote_import_names`: a declared sub, an @EXPORT/@EXPORT_OK name, or a `:tag` in its sets) -- the prototype merge and the builtin-override recorder share it; `use File::Glob ':bsd_glob'` = qw(:bsd_glob) (#2879); ir-spec §9.3c area / Parser comment.
+- **A detector-table site where an override of the builtin is in force is `list-call`, never `builtin`** (`Environment::_detect_note` asks `builtin_override_target`, the registry the emission asks) -- #3206.
+- **THE DETECTOR DEFAULT IS `announce` again (USER ruling s516)**; `off` by name; recount in docs/detector-measurement-s513d.md §9.
+- **`print({BLOCK} LIST)` (say, printf) is the block-filehandle form** -- PPI bug §37 repaired in place by `_repair_paren_block_filehandle`; ir-spec §7.5 (#3244).
+- **opendir on a COPY of a glob ref opens the GLOB**: one key `%p-typeglob-handle-key` (open's) through `%p-dh-key` -- #3243.
+- **An s///-tr (and 4-arg substr) target `${EXPR}` is the referent box** (`_write_through_form` -> `p-cast-$-box`) -- ir-spec 10-pos-elem, #3211.
+- **`&NAME(...)` asks no prototype** (perlsub: the & form ignores it) -- no slot context, no reference slot, no detector entry (#3260 half 2; `&f(@a)`-style silent wrong + IO::Dir false alarm).
+- Recount after the flip (detector-measurement-s513d.md §9): gate 0, sweep 0, everyday 0, board 18 Sub::Uplevel (real) + 5 Getopt-Long `(@)` (harmless, #3261).
+- Filed #3260 (half 1 open: `use File::stat;` displaces nothing at the parse) and #3261.
 
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
 - **A plain signature IS the classic spelling plus its arity check** (#2514, Kind-A `sig-classic`): `Parser2::_normalize_signature_subs` rewrites the TREE (signature removed, `my (PARAMS) = @_;` first) before every rename/scope pass; the arity is `(p-check-arity …)` in `p-args-body` or `(:arity …)` in `p-raw-params`; the call sites keep the signature's prototype record.  Defaults, placeholders, `()`, multi-line, `state`, and any body observing `@_` keep v1.  ir-spec §5.2.
