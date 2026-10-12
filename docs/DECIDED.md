@@ -12229,3 +12229,15 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   the top of the shim and in shipped-modules.md + not-supported.md; it ships
   only with the install matrix + a macOS leg green (the portability rule).
   Goes into the next correctness brief as a member (s517).
+- **The agent worktrees are CLEANED OUT at the end of s516 (USER, 2026-10-13:
+  "clean out any extra worktrees and do a `git gc`").**  Each worktree's SMALL
+  state — `STOP.md`, `MODEL.txt`, every `*.md`, the `pr/` probes, the `prof/`
+  levers, `*.tsv` under 2 MB — is archived under
+  `~/pcl-agent-scratch/wt-archive/<worktree-name>/` before the worktree goes;
+  the logs and extractions are not.  A task or brief that says
+  "`scratch/<label>/pr/X.pl` in worktree `agent-NNN`" now reads
+  `~/pcl-agent-scratch/wt-archive/agent-NNN/<label>/pr/X.pl`.  A worktree's
+  branch is deleted only when `git cherry main <branch>` lists no commit
+  without a patch-equivalent on main; a branch with such commits is KEPT and
+  named in the end block.  The detached review worktrees (`review/wt-*`) go
+  too; the base results (`base/<code-sha>/`) and the MAIN-READY files stay.
