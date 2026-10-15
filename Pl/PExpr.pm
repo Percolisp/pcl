@@ -338,6 +338,21 @@ sub _cast_run_start {
 # non-'$' cast is not a deref level (there is no slice-of-a-slice), so a run
 # that fails this keeps the pre-#305 single-cast handling rather than being
 # folded into the base.
+# The ARROW twin of _all_scalar_casts (#3340): a glob cast is a deref level
+# too before a real arrow -- `*$g->{k}` is `(*$g)->{k}`, the glob's hash
+# (probed; IO::Compress::Base::Common writes `*$obj->{Closed}`).  The METHOD
+# arms keep _all_scalar_casts: `*$o->m` dies in perl ("without a package
+# or object reference"), there is nothing to fold.
+sub _all_arrow_deref_casts {
+  my ($self, $e, $from, $to) = @_;
+  return 0 if $from > $to;
+  for my $k ($from .. $to) {
+    return 0 if ref($e->[$k]) ne 'PPI::Token::Cast'
+             || ($e->[$k]->content ne '$' && $e->[$k]->content ne '*');
+  }
+  return 1;
+}
+
 sub _all_scalar_casts {
   my ($self, $e, $from, $to) = @_;
   return 0 if $from > $to;
@@ -1557,7 +1572,7 @@ sub parse {
       if ($base_ok && $n_casts) {
         if ($is_reference) {
           $base_casts = $n_casts
-            if $self->_all_scalar_casts($e, $cast_s, $i-2);
+            if $self->_all_arrow_deref_casts($e, $cast_s, $i-2);
         } elsif ($n_casts >= 2) {
           $base_casts = $n_casts - 1
             if $self->_all_scalar_casts($e, $cast_s+1, $i-2);

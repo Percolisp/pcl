@@ -7707,8 +7707,16 @@
             (sb-alien:slot z 'adler)
             (if (zerop (sb-sys:sap-int msg))
                 *p-undef*
-                (sb-alien:sap-alien msg sb-alien:c-string))
+                (%p-zlib-c-string msg))
             (sb-alien:slot z 'data-type))))
+
+(defun %p-zlib-c-string (sap)
+  "The NUL-terminated byte string at SAP, one character per byte."
+  (with-output-to-string (out)
+    (loop for i from 0
+          for b = (sb-sys:sap-ref-8 sap i)
+          until (zerop b)
+          do (write-char (code-char b) out))))
 
 (defun p-pos (var &optional new-pos)
   "Perl pos - get/set match position for /g regex.
@@ -25700,7 +25708,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6384"
+(defparameter *pcl-cache-generation* "v2-6484"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

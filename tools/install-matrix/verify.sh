@@ -57,6 +57,15 @@ print $str, "\n";
 EOF
 runpcl /tmp/utf8.pl | grep -q 'rde'
 
+echo "== the system zlib is reachable: a gzip round trip (#3161, libz via sb-alien) =="
+cat > /tmp/gz.pl <<'EOF'
+use Compress::Zlib;
+my $in = "pcl gzip " x 1000;
+my $gz = Compress::Zlib::memGzip($in);
+print((Compress::Zlib::memGunzip($gz) eq $in && length($gz) < length($in)) ? "GZIP OK\n" : "GZIP BROKEN\n");
+EOF
+runpcl /tmp/gz.pl | grep -qx 'GZIP OK'
+
 echo "== installer end-to-end test =="
 prove tools/t/install-pcl.t
 
