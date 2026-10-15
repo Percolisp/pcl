@@ -36737,47 +36737,58 @@ size comes from fstat on the descriptor, after the buffered output is written
     (t (cons (car node)
              (mapcar (lambda (x) (%pcl-mbol-node x m)) (cdr node))))))
 
-;;; #3121 (s517c): a bracket class of plain characters below 256 is ONE
-;;; 256-bit table.  cl-ppcre's convert-char-class-to-test-function makes a
+;;; #3121 (s517c): a bracket class of plain characters is ONE 256-bit
+;;; table (plus its few high ranges).  cl-ppcre's convert-char-class-to-test-function makes a
 ;;; class a LOOP over one closure per item (and *optimize-char-classes* is
 ;;; NIL), so `[\x22\x5c\n\r\t\f\b]` costs seven funcalls per character
 ;;; scanned.  The rewrite lives in PCL's wrapper, never in the vendored
 ;;; engine (DECIDED ## s514c): in the parse tree a (:char-class ...) /
 ;;; (:inverted-char-class ...) whose items are all characters or :range
-;;; pairs below 256 becomes (:property FN) -- cl-ppcre turns both into the
+;;; pairs becomes (:property FN) -- a table below 256, the class's high ranges
+;;; walked above; cl-ppcre turns both into the
 ;;; same char-class object, so the engine's behaviour is unchanged.  A class
-;;; holding a symbol class (\d \s \w), a \p property or a code >= 256 keeps
+;;; holding a symbol class (\d \s \w) or a \p property keeps
 ;;; cl-ppcre's loop, and so does every class of a pattern with /i or an
 ;;; inline (?i) anywhere (case folding is per character, not a table).
 (defun %pcl-cc-table-item-p (it)
-  "True when char-class item IT is a character or a range below 256."
-  (if (characterp it)
-      (< (char-code it) 256)
+  "True when char-class item IT is a character or a well-ordered range."
+  (or (characterp it)
       (and (consp it) (eq (first it) :range)
            (characterp (second it)) (characterp (third it))
-           (< (char-code (third it)) 256)
            (char<= (second it) (third it)))))
+
+(defun %pcl-cc-high-ranges (items)
+  "The parts of ITEMS at or above code 256, as a simple-vector of fixnum
+   bounds LO0 HI0 LO1 HI1 ... (inclusive); usually empty."
+  (coerce (loop for it in items
+                for lo = (char-code (if (characterp it) it (second it)))
+                for hi = (char-code (if (characterp it) it (third it)))
+                when (>= hi 256)
+                nconc (list (max lo 256) hi))
+          'simple-vector))
 
 (defun %pcl-cc-table-test (items invertedp)
   "A unary character test for a class of ITEMS (all %pcl-cc-table-item-p):
-   one SBIT lookup; a code >= 256 is never listed, so it answers INVERTEDP."
-  (let ((bits (make-array 256 :element-type 'bit :initial-element 0)))
+   one SBIT lookup below 256; at or above, a walk of the class's high ranges
+   (none for most classes, so the answer is INVERTEDP's)."
+  (let ((bits (make-array 256 :element-type 'bit :initial-element 0))
+        (high (%pcl-cc-high-ranges items)))
     (dolist (it items)
-      (if (characterp it)
-          (setf (sbit bits (char-code it)) 1)
-          (loop for c from (char-code (second it)) to (char-code (third it))
-                do (setf (sbit bits c) 1))))
-    (if invertedp
-        (lambda (char)
-          (declare (optimize (speed 3) (safety 0)) (character char)
-                   (type (simple-bit-vector 256) bits))
-          (let ((c (char-code char)))
-            (or (>= c 256) (zerop (sbit bits c)))))
-        (lambda (char)
-          (declare (optimize (speed 3) (safety 0)) (character char)
-                   (type (simple-bit-vector 256) bits))
-          (let ((c (char-code char)))
-            (and (< c 256) (= 1 (sbit bits c))))))))
+      (loop for c from (char-code (if (characterp it) it (second it)))
+            to (min 255 (char-code (if (characterp it) it (third it))))
+            do (setf (sbit bits c) 1)))
+    (flet ((member-p (char)
+             (declare (optimize (speed 3) (safety 0)) (character char)
+                      (type (simple-bit-vector 256) bits) (simple-vector high))
+             (let ((c (char-code char)))
+               (if (< c 256)
+                   (= 1 (sbit bits c))
+                   (loop for i of-type fixnum from 0 below (length high) by 2
+                         thereis (<= (the fixnum (svref high i)) c
+                                     (the fixnum (svref high (1+ i)))))))))
+      (if invertedp
+          (lambda (char) (not (member-p char)))
+          (lambda (char) (member-p char))))))
 
 (defun %pcl-cc-table-node (node)
   "NODE with every eligible bracket class rewritten to (:property TABLE-TEST)."

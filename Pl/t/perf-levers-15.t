@@ -14,8 +14,8 @@
 #         counter (p-foreach-range-raw); the residue -- a TIED handle's
 #         PRINT that WRITES the global $_ -- is shown, and PCL_OPT=-raw-topic
 #         restores perl's answer.
-#   #3121 a bracket class of plain characters / ranges below 256 is ONE
-#         256-bit table test (%pcl-scanner-tree rewrites it to (:property FN)
+#   #3121 a bracket class of plain characters / ranges is ONE 256-bit
+#         table test plus its high ranges (%pcl-scanner-tree rewrites it to (:property FN)
 #         in the parse tree; cl-ppcre itself is untouched).
 use v5.30;
 use strict;
@@ -159,8 +159,8 @@ END_PL
 
 # ─────────────────────────────────────────────────────────────────────────────
 # #3121 MECHANISM: %pcl-scanner-tree rewrites a bracket class of plain
-# characters / ranges below 256 to ONE table test, (:property FN); a class
-# with a symbol class, a code >= 256, or any /i (option or inline) keeps
+# characters / ranges to ONE table test, (:property FN) (a table below 256,
+# its high ranges walked above); a class with a symbol class or any /i (option or inline) keeps
 # cl-ppcre's own class (NIL = compile the text as it is).
 like(lisp_out(<<'END_LISP'),
 (defun shape (p &rest o)
@@ -178,8 +178,13 @@ like(lisp_out(<<'END_LISP'),
   (format t "T:~{~A~^,~}~%"
           (mapcar (lambda (c) (if (funcall fn c) 1 0))
                   (list #\a #\c #\d (code-char 255) (code-char 256) (code-char 9786)))))
+(let* ((tr (%pcl-scanner-tree (format nil "[a~A-~A]" (code-char 9786) (code-char 9787)) nil))
+       (fn (second (second tr))))
+  (format t "H:~{~A~^,~}~%"
+          (mapcar (lambda (c) (if (funcall fn c) 1 0))
+                  (list #\a #\b (code-char 9785) (code-char 9786) (code-char 9787) (code-char 9788)))))
 END_LISP
-    qr/R:TABLE,TABLE,TABLE,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT\nT:0,0,1,1,1,1/,
+    qr/R:TABLE,TABLE,TABLE,TEXT,TABLE,TEXT,TEXT,TEXT,TEXT\nT:0,0,1,1,1,1\nH:1,0,0,1,1,0/,
     '#3121 the class table: which classes are rewritten, and the inverted test above 255');
 
 # #3121 ANSWERS (perl 5.40.3's output): classes on and off the table path,
