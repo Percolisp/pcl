@@ -132,6 +132,9 @@ In round 44 (s513h), found on the way: `local $g` on a package global, and every
 In round 45 (s514c): a `package X;` statement inside a sub body redefined its CLOS class every time the sub ran -- the one class site without the readiness guard, and Moo's generated accessors are exactly that shape -- so it now takes the guarded form (#3120, moo-objs 1.70 s -> 0.57 s whole run, its loop -83 %).  Measured under the bar and filed: a char class as one 256-bit table (#3121, json-rt -10 %) and p-map over the storage vector (#3122, mapmulti -9 %).
 In round 46 (s515b): a map block whose value is a literal list (`map { ($_, $_ * 2) } ...`) hands the list over to p-map-flat instead of building a vector per iteration (#3122, mapmulti -28 % whole run).
 In round 46 (s515b): a double's `%.15g` text and sprintf's `%.Nf` text are written in place in one string, the exponent guess is a typed `log`, and sprintf skips its flag scans on empty flags (#3220, fprint -27 % whole run).  Measured and filed: a direction memo for print is unsound (close changes the answer, #2882); `print` keeps `$_` boxed in a range loop (#3221, fhprint -27 % if ruled); emptysub's prologue levers (#3041, -4.6 %).
+In round 47 (s517c): `print` / `say` / `printf` no longer keep `$_` boxed in a range loop (#3221, fhprint -28 %).
+In round 47 (s517c): a bracket character class is one 256-bit table (plus its few high ranges) instead of a loop over one closure per item (#3121, json-rt -7.4 % whole run).
+In round 47 (s517c): `join` reads a slice argument as values, so `"@a[0..3]"` stops promoting the array's elements to boxes (joinarr -17.8 % whole run).  Measured and filed: lcbytes' 3-way `.` chain + ucfirst arm (#3301, -7.9 %); join's one-vector path (#3302, -4.9 %).
 
 ## 3. What is NOT cheap
 
