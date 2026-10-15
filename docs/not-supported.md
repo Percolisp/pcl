@@ -82,7 +82,7 @@ The handful most likely to matter to a program that is otherwise portable:
 
 ### Values, scalars and the data model
 
-* [Interned boolean constants (`!0` / `!1` identity)](#interned-boolean-constants-0--1-identity)
+* [Boolean REFERENCE identity and read-only booleans (`\!0`)](#boolean-reference-identity-and-read-only-booleans-0)
 * [A LITERAL reached through `sort` / `reverse` / `grep` in a `foreach` list is writable](#a-literal-reached-through-sort--reverse--grep-in-a-foreach-list-is-writable)
 * [Read-only constants via `\undef` stash tricks](#read-only-constants-via-undef-stash-tricks)
 * [Scalar copy does not preserve reference/SV identity](#scalar-copy-does-not-preserve-referencesv-identity)
@@ -217,16 +217,24 @@ The handful most likely to matter to a program that is otherwise portable:
 
 ---
 
-## Interned boolean constants (`!0` / `!1` identity)
+## Boolean REFERENCE identity and read-only booleans (`\!0`)
+
+**The VALUE identity half is IMPLEMENTED (s517a, #3242):** every boolean
+producer returns one of two interned strings (`+p-yes+` / `+p-no+`), so
+`builtin::is_bool` answers as perl 5.36+ does and JSON::PP encodes
+`true` / `false` (ir-spec "Comparison operators").  What stays absent is
+below: a REFERENCE to a boolean is to a fresh temp box, and the value is
+writable.
 
 **Perl behaviour:** `!0` and `!1` return a single globally-shared, read-only
 scalar each time.  Because the same scalar is returned on every call, taking a
 reference (`\!0`) gives the same address, and trying to modify the value
 through `for (!0) { $_ = 43 }` throws "Modification of a read-only value".
 
-**PCL behaviour:** `pl-!` and `pl-not` return a fresh CL value (`1` or `""`)
-on every call.  References to successive calls are distinct, and the values are
-mutable.
+**PCL behaviour:** `p-!` returns the interned boolean, but `\!0` takes a
+reference to a fresh temp BOX holding it, so references to successive
+calls are distinct, and a write lands on the alias box, never on the
+interned object -- `for (!0) { $_ = 43 }` does not die.
 
 **Rationale:** This is a CPython-style implementation detail of the Perl
 interpreter.  Real application code never relies on the reference identity of

@@ -115,20 +115,20 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
 ;; SCALAR still has nowhere to carry the flag, and interning would need a global
 ;; constant table besides.)  These four were COMMENTED OUT of perl-tests/not.t
 ;; until s337 (#150 part 2) — the file is now byte-identical to t/op/not.t and the
-;; assertions run.  not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.
+;; assertions run.  not-supported.md: 'Boolean REFERENCE identity and read-only booleans (\!0)'.
 (register-skips "not.t"
                 ("^not 0 is read-only"
                  :read-only
-                 "for (!0) { $_ = 43 } must die 'Modification of a read-only value attempted' -- PCL's ! returns a fresh mutable value, not the shared read-only scalar. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.")
+                 "for (!0) { $_ = 43 } must die 'Modification of a read-only value attempted' -- PCL's ! returns the interned boolean, but a write lands on the alias box, never read-only. not-supported.md: 'Boolean REFERENCE identity and read-only booleans (\!0)'.")
                 ("^not 1 is read-only"
                  :read-only
-                 "for (!1) { $_ = 43 } must die 'Modification of a read-only value attempted' -- PCL's ! returns a fresh mutable value. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.")
+                 "for (!1) { $_ = 43 } must die 'Modification of a read-only value attempted' -- PCL's ! value is writable through its alias box. not-supported.md: 'Boolean REFERENCE identity and read-only booleans (\!0)'.")
                 ("^!0 returns the same value each time"
                  :read-only
-                 "\\!0 must be the same address every call [perl #114838] -- PCL allocates a fresh value per negation. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'.")
+                 "\\!0 must be the same address every call [perl #114838] -- PCL allocates a fresh value per negation. not-supported.md: 'Boolean REFERENCE identity and read-only booleans (\!0)'.")
                 ("^!1 returns the same value each time"
                  :read-only
-                 "\\!1 must be the same address every call [perl #114838] -- PCL allocates a fresh value per negation. not-supported.md: 'Interned boolean constants (!0 / !1 identity)'."))
+                 "\\!1 must be the same address every call [perl #114838] -- PCL allocates a fresh value per negation. not-supported.md: 'Boolean REFERENCE identity and read-only booleans (\!0)'."))
 
 ;; dor.t 26/28 — `f $x /2` and `print $fh /2` must be COMPILE ERRORS in perl
 ;; ("Search pattern not terminated": the `/` starts a match that never closes).

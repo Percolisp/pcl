@@ -1,7 +1,7 @@
 
 # Stable booleans (perl 5.36+) in PCL -- design (s516, Fable, 2026-10-12; task #3242)
 
-**Status: DESIGN, nothing built.**  Written so that #3242 can be an Opus brief
+**Status: BUILT (s517a, task #3242); §4 carries the measurements.**  Written so that #3242 can be an Opus brief
 member instead of a parked question.  The measurements below are static reads
 of the runtime; the two dynamic measurements the design needs are named in §6
 and belong to the agent that builds it.
@@ -110,6 +110,18 @@ number:
    today (`""` is not a number either, so the verdict must already coerce or
    decline there); confirm with `PCL_OPT=none` A/B that the emission is
    identical and the run is identical.
+
+**MEASURED (s517a, the build).**  The raw-numeric verdict does not classify a
+comparison result as a number: `my $n = 0; $n += ($i % 3 == 0)` emits
+`(p-incf-raw $n (p-== (p-% $i 3) 0))` -- the slot `$n` is raw, the DELTA is
+coerced by `p-incf-raw`'s `(to-number d)`, which reaches `%to-number-raw`'s
+new `+p-yes+` / `+p-no+` arms; the stored shape `my $ok = $i % 2 == 0; ... if
+($ok)` emits a raw `:scalar` slot holding the boolean and `(p-if $ok …)`, i.e.
+`p-true-p`'s new arm.  The emission of both is identical under `PCL_OPT=none`
+apart from the slot kinds, and both runs print the same (333333 / 500000).
+The `p-true-p` arms sit at the head of the STRING arm, not before `numberp`
+(a number pays nothing; a boolean pays one type test and one `eq`).  The two
+bench rows `boolsum` / `boolif` are in tools/bench-exec.pl.
 
 Everything else is identity-neutral: `join`, `print`, `sprintf("%s")` take
 the string; `sprintf("%d")` numifies through arm 2.

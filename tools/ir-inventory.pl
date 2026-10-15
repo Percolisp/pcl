@@ -190,7 +190,7 @@ my %FAMILY;
                   p-join p-reverse p-literal-string)],
   'string-compare' => [qw(p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge
                           p-str-cmp)],
-  'numeric-compare' => [qw(p-== p-!= p-< p-> p-<= p->= p-<=> p-chain-cmp)],
+  'numeric-compare' => [qw(p-== p-!= p-< p-> p-<= p->= p-<=> p-chain-cmp +p-yes+ +p-no+)],
   'range' => [qw(p-.. p-... p-flipflop p-flipflop-3 p-flipflop-num
                  p-flipflop-num-3 p-flipflop-dyn p-flipflop-dyn-3)],
   # `p-` IS Perl's `||`.  The runtime writes the export and the defmacro as

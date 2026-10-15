@@ -1346,6 +1346,7 @@ Every op coerces its operands itself. The three canonical functions:
 | box | its value, numified (cached) |
 | `undef`, `nil` | 0 |
 | host boolean true | 1 |
+| `+p-yes+` / `+p-no+` (a Perl boolean, #3242) | 1 / 0 (no parse) |
 | string | leading-numeric-prefix parse, below |
 | array | length |
 | hash | key count |
@@ -1754,9 +1755,16 @@ never is.
 
 - **Numeric/string operators** (`p-+`, `p-.`, …) return **raw** host
   numbers/strings — never boxes. This is what makes raw slots sound.
-- **Comparison operators** return Perl booleans: `1` (number) for true,
-  `""` (empty string) for false — *not* host booleans. `p-<=>`/`p-cmp`
-  return -1/0/1.
+- **Comparison operators** return Perl booleans — *not* host booleans:
+  the interned `+p-yes+` / `+p-no+` (#3242, perl 5.36's stable booleans),
+  whose string value is `"1"` / `""` and whose number value is 1 / 0.
+  IDENTITY is the boolean flag: `builtin::is_bool` is `eq` against the two
+  (after one unboxing), every copy that stores the object keeps it, and any
+  new value (`+0`, `. ""`, `.=`, `++`, `sprintf`, interpolation) drops it.
+  The ONE producer is `p-bool`: `!`/`not`, the comparisons, `defined`,
+  `exists`, `isa`, `xor`, `!~`, `builtin::true`/`false`/`is_bool`/
+  `is_weak`, `re::is_regexp`, scalar `stat`.  Example: `is_bool(1 == 1)`
+  is true, `is_bool((1 == 1) + 0)` false.  `p-<=>`/`p-cmp` return -1/0/1.
 - **Logical operators** `p-&&`, `p-||`, `p-//` return the deciding
   *operand's value* (Perl's `$a || $default` idiom): `p-&&` returns the
   first operand if false, else the second; `p-||` symmetrically; `p-//`

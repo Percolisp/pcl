@@ -9613,6 +9613,10 @@ sub _never_loaded_pragma { defined $_[0] && $_[0] =~ $NEVER_LOADED_PRAGMA }
 # aliased anyway.  A `:bundle` is passed through as the literal `:5.NN` and
 # the runtime expands it; that keeps the bundle's membership in ONE place
 # (the runtime, which knows what it has) instead of a second table here.
+# The builtin:: functions with an EMPTY prototype (perl: prototype
+# "builtin::true" is ""): a bareword import of one is a term (#3242).
+our %BUILTIN_TERM_PROTO = (true => '()', false => '()', inf => '()', nan => '()');
+
 sub _builtin_import_names {
   my ($self, $stmt) = @_;
   my @names;
@@ -10198,6 +10202,16 @@ sub _process_include_statement {
         $self->_with_bucket('definitions', sub {
           $self->_emit("(p-eval-always ($fn $args))");
         });
+        # The import also brings the builtin's PROTOTYPE into the parse, as
+        # perl's aliasing does: `true` / `false` / `inf` / `nan` are `()`
+        # TERMS, so `(1, true, false)` holds two booleans, not two barewords
+        # (#3242, s517a: they were read as the strings "true" / "false").
+        if ($type ne 'no') {
+          for my $n (grep { exists $BUILTIN_TERM_PROTO{$_} } @names) {
+            $self->environment->add_prototype($n, _imported_record(
+              $self->parse_prototype_or_signature($BUILTIN_TERM_PROTO{$n})));
+          }
+        }
       }
     }
     $self->_emit(";; $perl_code (pragma)");
