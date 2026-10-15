@@ -20644,10 +20644,19 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defun %p-stream-length (stream)
   "Total length of STREAM for SEEK_END.  In-memory output streams expose their
-buffer's fill-pointer; everything else falls back to file-length."
-  (if (typep stream 'p-string-stream-mixin)
-      (length (%psos-text stream))
-      (file-length stream)))
+buffer's fill-pointer; a file stream answers file-length.  An fd-stream made
+from a bare DESCRIPTOR -- perl's anonymous temp file (open $fh, '+>', undef,
+IO::File->new_tmpfile) is created, unlinked and wrapped by fd -- has no file
+for file-length (SBCL signals 'not a stream associated with a file'), so its
+size comes from fstat on the descriptor, after the buffered output is written
+(#3262)."
+  (cond ((typep stream 'p-string-stream-mixin)
+         (length (%psos-text stream)))
+        ((and (typep stream 'sb-sys:fd-stream)
+              (null (sb-impl::fd-stream-file stream)))
+         (when (output-stream-p stream) (finish-output stream))
+         (sb-posix:stat-size (sb-posix:fstat (sb-sys:fd-stream-fd stream))))
+        (t (file-length stream))))
 
 (defmacro p-seek (fh &rest args)
   "Perl seek — bareword filehandle is auto-quoted."

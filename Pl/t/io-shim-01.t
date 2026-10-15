@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 23;
 
 sub run_cl {
     my ($code) = @_;
@@ -262,4 +262,17 @@ test_cl('INVERSE: require Foo if COND does run when COND is true',
                    . qq{print "tmpfile=", (\$back eq "scratch\\n" ? "ok" : "bad"), "\\n";\n});
     is($out, "tmpfile=ok\n",
        '... and IO::File->new_tmpfile is a real anonymous read/write handle');
+}
+
+# #3262 (s517a): SEEK_END on an anonymous temp file needs its SIZE, and the
+# stream is made from a bare descriptor (created, unlinked, wrapped by fd), so
+# SBCL's file-length refused it -- "not a stream associated with a file", a raw
+# Lisp error out of a builtin.  The size comes from fstat now (perl: 5 / [o!!] / 4).
+{
+    my $out = run_cl(qq{use IO::File; use Fcntl qw(SEEK_SET SEEK_END);\n}
+                   . qq{my \$t = IO::File->new_tmpfile or die; print {\$t} "hello";\n}
+                   . qq{seek(\$t, 0, SEEK_END); print tell(\$t), "\\n"; print {\$t} "!!";\n}
+                   . qq{seek(\$t, -3, SEEK_END); read(\$t, my \$b, 10); print "[\$b]\\n";\n}
+                   . qq{open(my \$g, "+>", undef) or die; print \$g "abcd"; seek(\$g, 0, SEEK_END); print tell(\$g), "\\n";\n});
+    is($out, "5\n[o!!]\n4\n", '#3262 SEEK_END on an anonymous temp file (new_tmpfile, open +> undef) takes its size from fstat');
 }
