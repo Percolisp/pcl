@@ -954,6 +954,35 @@ unconditional `1` encodes every number as a JSON string.
 (utf8::pl-is_utf8 "abc")   ; => 1
 ```
 
+**Host libraries -- zlib (normative, s517b, task #3161; TEMPORARY until
+pclxs provides Compress::Raw::Zlib, USER s516).**  The runtime calls a system
+shared object through sb-alien in exactly two places, crypt(3) (libcrypt) and
+zlib (libz), and both go through ONE loader, `%p-host-library-p KEY NAMES`:
+the library is loaded at its FIRST USE, once per process, trying NAMES in
+order (`libz.so.1`, `libz.dylib`, `libz.so`), with `:dont-save`, so a saved
+core never records it -- a core saved where the library exists starts where
+it does not, and only a program that calls into it notices.  An init hook
+clears the decision in every new process.  The alien routines are defined at
+load time and linked lazily (SBCL's linkage table); none is called before the
+loader answered.  zlib absent: `use Compress::Raw::Zlib` dies in one line at
+load, "Compress::Raw::Zlib: the system zlib (libz.so.1) is not available".
+The zlib symbols used: `zlibVersion deflateInit2_ deflate deflateEnd
+deflateReset deflateParams deflateTune deflateSetDictionary inflateInit2_
+inflate inflateEnd inflateReset inflateSync inflateSetDictionary crc32
+adler32 crc32_combine adler32_combine`, one `builtin::zlib_*` primitive per
+function (`zlib_deflate(H, IN, FLUSH, OUTMAX) -> (STATUS, OUT, CONSUMED)`
+and the like; statuses are zlib's ints).  A stream is a `z_stream` in FOREIGN
+memory, zeroed (zalloc/zfree/opaque Z_NULL), with the platform's word sizes;
+Perl holds its address as an integer HANDLE and a registry makes a stale or
+foreign handle die.  Buffers are PINNED (`with-pinned-objects`) for ONE zlib
+call: next_in/next_out are set before it and cleared after it, so no Lisp
+address outlives the call (zlib copies what it keeps into its own window).
+A character above 255 in an input dies "Wide character".  The `*End`
+primitive frees the z_stream; lib/Compress/Raw/Zlib.pm calls it when a
+stream ENDS (inflate's Z_STREAM_END, deflate's finishing flush) and in
+DESTROY, and a reset of an ended stream initialises a fresh one.
+
+
 **The glob engine (normative, s514e, task #3160).**  CORE::glob and `<PAT>`
 are perl's csh_glob: the pattern is a whitespace-separated LIST, each word
 expanded by bsd_glob(3) with the flags BRACE NOMAGIC QUOTE TILDE ALPHASORT --
@@ -2348,6 +2377,37 @@ coderef *mention* rather than a call — `\`, `defined`, `exists`, `undef`,
 `goto` — lower it themselves (`(p-backslash (p-get-coderef EXPR))`,
 `(p-coderef-defined-p EXPR)`, …), so `(p-get-coderef EXPR)` in emitted
 code always means "the coderef itself", never a suppressed call.
+
+**Copy-in / copy-out for an UNSEEN callee (normative, s517b, task #2636).**
+A raw-slot `my` scalar (VarAnnotator's `unboxable` verdict) handed as a
+whole argument to a callee the compiler cannot see -- a METHOD call, a
+CODEREF call (`$c->(...)`), a qualified or imported or not-yet-declared sub
+with no same-file record -- rides a fresh box the CALLER makes, and the
+caller stores that box's value back when the call returns, so a write
+through `$_[N]` reaches the variable as perl's aliasing does.  The variable
+itself stays raw (#189: no boxing of call arguments).  A callee WITH a
+same-file record is #189's `writes_args` fact (the variable is boxed at
+VarAnnotator), never this.  The boxes are compiler temporaries named
+`--pcl-cb--N` (never a sigiled name), held by name, not by vector index:
+
+    my $out; $z->deflate($in, $out);
+    → (p-copy-back ((--pcl-cb--0 $out))
+        (p-method-call $z "deflate" $in --pcl-cb--0))
+
+`p-copy-back` binds each box with `%p-copy-in` (a store into a fresh box, so
+a reference argument stays a reference of the same kind) and reads it back
+with `%p-copy-back-value` (perl's one-scalar copy: a plain value, or a fresh
+box for a ref / blessed value); FORM's values pass through.  Licensed by
+construction: a call argument is an OPAQUE use, so the variable can carry
+neither a B-regime `coerce` verdict nor a str-buffer -- a value written back
+lands in an untyped slot; either fact present at a copy-back site is a
+compile-time die.  `PCL_OPT=none` has no raw slots and emits no copy-back.
+What it does not give (docs/not-supported.md "@_ argument aliasing"): a
+callee that keeps `\$_[N]` and writes after returning, the same variable
+passed twice (two boxes; the later read-back wins), a closure reading the
+caller's variable while the callee writes, and a die after a partial write
+(the read-back is skipped; the caller keeps the pre-call value).
+
 
 ### 5.3 Return
 

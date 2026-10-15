@@ -993,7 +993,22 @@ The scan is deliberately conservative: an `@_`/`$_[N]` occurrence it cannot
 prove is a read (including the escapes `\$_[N]`, `\@_`, `&callee;`,
 `goto &sub`, handing `@_` to an unknown callee) sets the flag.
 
-What still COPIES:
+**COPY-IN / COPY-OUT for an UNSEEN callee (task #2636, s517b; ir-spec §5.2).**
+A raw-slot `my` scalar passed whole to a METHOD, a CODEREF, or a qualified /
+imported / not-yet-declared sub now rides a box the caller makes and stores
+back after the call, so `my $out; $z->deflate($in, $out)`, Tie::File's
+`_fixrecs($rec)` and a cross-file `WA::app($s)` (#3060's symptom) write the
+caller's variable.  What copy-back does NOT give (probed vs perl 5.40.3):
+- a callee that KEEPS `\$_[N]` and writes through it after returning (the
+  write lands in the caller's discarded box);
+- the same variable passed TWICE to one call (two boxes; the later read-back
+  wins, where perl's two aliases are one variable);
+- a closure reading the caller's variable WHILE the callee writes `$_[N]`
+  (it sees the pre-call value until the call returns);
+- a callee that writes `$_[N]` and then DIES (the read-back is skipped: the
+  caller keeps the pre-call value; perl keeps the write).
+
+What still COPIES (beyond the copy-back's reach):
 
 - calls the scan cannot see the callee of — **coderef calls (`$c->(…)`),
   method dispatch, and cross-file callees** (the fact is same-file today).
@@ -4329,11 +4344,32 @@ hash is a hidden tie (docs/shipped-modules.md), so a program that `tie`s or
 `untie`s a hash it also restricted sees the shim's class underneath.
 Owner: #3163.
 
-## Compress::Raw::Zlib (zlib) has no PCL build (task #3161)
+## Compress::Raw::Zlib (zlib) -- libz via sb-alien, TEMPORARY (task #3161)
 
-Compress::Raw::Zlib is XS -- zlib itself -- so `Compress::Zlib`,
-`IO::Compress::Gzip`, `IO::Uncompress::Gunzip`, `IO::Zlib` and Archive::Tar's
-compressed archives cannot load; `use Compress::Zlib` dies in one line,
-"Can't locate Compress/Raw/Zlib.pm in @INC (the module is XS and has no PCL
-build ...)".  The routes (a pure-Perl inflate/deflate shim, libz through
-sb-alien, pclxs) are weighed in #3161.
+Compress::Raw::Zlib is XS -- zlib itself.  Since s517b PCL ships
+`lib/Compress/Raw/Zlib.pm`, a shim over the SYSTEM zlib called through
+sb-alien (docs/ir-spec.md "Host libraries"; USER s516: temporary, until
+pclxs runs the real XS module), so Compress::Zlib, IO::Compress::Gzip /
+IO::Uncompress::Gunzip and IO::Zlib work and produce zlib's own bytes.
+What is NOT covered:
+- **A box without libz** (`libz.so.1` / `libz.dylib`): `use
+  Compress::Raw::Zlib` dies at load in one line, "Compress::Raw::Zlib: the
+  system zlib (libz.so.1) is not available" -- as a perl without the XS
+  object dies at `use`.  Pl/t/zlib-01.t skips and says so.
+- **InflateScan / inflateScanStream** (IO::Compress::Zip's append-to-an-
+  existing-archive path) die naming themselves.
+- **Output chunk sizes under `-LimitOutput`** follow `-Bufsize` exactly;
+  the XS module fills whatever its SV buffer has room for, which perl rounds
+  up -- a loop over `inflate` takes more iterations than perl's, with the same
+  total output.
+- **`$stream->status` numerics**: the XS module returns the status through
+  an unsigned type (`Z_DATA_ERROR` reads 18446744073709551613); the shim
+  returns the signed code with the same message.
+- **What leaks**: a stream's z_stream (about 270 KB for deflate at the
+  default memLevel, about 44 KB for inflate) lives in foreign memory and is
+  freed when the stream ENDS (inflate's Z_STREAM_END, deflate's finishing
+  flush) or when its DESTROY runs.  PCL has no scope-exit DESTROY (#2370), so
+  a stream ABANDONED mid-way -- an inflate that never reaches the end of its
+  data, a deflate never flushed with Z_FINISH -- keeps its z_stream until the
+  process exits.
+

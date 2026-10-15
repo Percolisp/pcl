@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 89;
+use Test::More tests => 90;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1031,4 +1031,14 @@ for my $c (
                @{ $doc2->find(q{PPI::Structure}) || [] };
     is( ref($br), q{PPI::Structure::Block},
         q{the {$fh} of printf({$fh} "%s", 1) is a Structure::Block} );
+}
+
+# §38 -- a statement that begins with `*$name` after a bare block whose first
+# token is a scalar: the `*` is lexed as the multiplication Operator.
+# perl: `{ my $c = 1; $c++ } *$o->{A} = 7;` stores into the glob's hash.
+{
+    my $doc = PPI::Document->new(\qq{{ \$c = \$b; }\n*\$o->{A} = 1;\n});
+    my ($star) = grep { $_->content eq q{*} } $doc->tokens;
+    is( ref($star), q{PPI::Token::Cast},
+        q{the statement-initial `*` of `*$o->{A} = 1` after a block is a Cast} );
 }

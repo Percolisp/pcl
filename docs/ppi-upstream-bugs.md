@@ -2167,6 +2167,39 @@ canary `Pl/t/misc-fixes-02.t`; upstream rows: `docs/ppi-bug-report.t`.
 
 ---
 
+## 38. A statement that begins with `*$name` after a bare block is lexed with a multiplication OPERATOR  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `7`):
+
+```perl
+use Symbol; my $o = Symbol::gensym();
+{ my $c = 1; $c++ }
+*$o->{A} = 7; print *$o->{A}, "\n";
+```
+
+**PPI 1.291 structure**: `Statement::Compound[ Block ]` then `Statement[
+Token::Operator['*'] Symbol['$o'] Operator['->'] Subscript ... ]` -- the
+statement STRUCTURE is right (the braces are a Block, the `*` starts a new
+statement), but the tokenizer has already classed the `*` as the binary
+operator, apparently reading the `}` that closes a block whose first token is
+a scalar as the end of an anonymous hash.  After `{ my $b = 1; }` (first token
+a Word) the same `*` is a Cast.  **Expected**: `Token::Cast['*']`, as PPI
+gives after a `;` or a block whose first token is a word.
+
+**PCL's workaround** (s517b, task #3342): `Pl::Parser::_repair_statement_start_glob_cast`,
+an in-place pass in `_ppi_parse` and `fragment_doc`: a `*` Operator that is
+the FIRST significant token of its statement and is followed by a `$name`
+symbol becomes a Cast (a statement cannot begin with a binary operator; the
+text is unchanged).  Real victim: core IO::Uncompress::Base, whose
+`*$obj->{InputLength} = ...` (after an `if` block ending in
+`*$obj->{Buffer} = \$buff ;`) became `undef * $obj->{InputLength}`, and every
+gunzip died "Not a HASH reference".  Guard `Pl/t/zlib-01.t` ("-NAME and
+statement-start glob"); canary `Pl/t/misc-fixes-02.t`; upstream rows:
+`docs/ppi-bug-report.t`.
+
+---
+
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

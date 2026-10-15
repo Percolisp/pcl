@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 140;
+plan tests => 141;
 
 sub run_cl {
     my ($code) = @_;
@@ -1402,6 +1402,19 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
     ok( @st == 2 && $st[0]->isa('PPI::Statement::Compound'),
         'CANARY: PPI still splits print({$fh} LIST) into two statements '
       . '(when this FAILS, drop Pl::Parser::_repair_paren_block_filehandle)' );
+}
+
+# ── CANARY for PPI bug 38 (ppi-upstream-bugs.md; task #3342) ────────────────
+# PPI 1.291 lexes the `*` that begins `*$o->{A} = 1;` after `{ $c = $b; }` as
+# the multiplication Operator, and PCL repairs it to a Cast
+# (Pl::Parser::_repair_statement_start_glob_cast).  THIS ROW ASSERTS THE BUG IS
+# STILL THERE: when a PPI upgrade fixes it, this row FAILS -- drop the repair.
+{
+    my $doc = PPI::Document->new(\qq{{ \$c = \$b; }\n*\$o->{A} = 1;\n});
+    my ($star) = grep { $_->content eq '*' } $doc->tokens;
+    ok( ref($star) eq 'PPI::Token::Operator',
+        'CANARY: PPI still lexes a statement-initial *$o after a block as an Operator '
+      . '(when this FAILS, drop Pl::Parser::_repair_statement_start_glob_cast)' );
 }
 
 # ── #2005: map COPIES what its block returns, on EVERY result arity ─────────

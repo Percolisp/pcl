@@ -90,6 +90,46 @@ sub c9 { my ($self, $rec) = @_; $self->m2($rec) if 1; chomp(my $c = $rec); $c } 
 print "$_\n" for @r;
 P
 
+# 1b. What the copy-back must NOT disturb (#2636): a reference stays a
+# reference of the same kind on the way in and on the way out, an object
+# stays blessed, a number stays a number; a qualified call into another
+# file's sub writes back (#3060's symptom); Tie::File's record separator
+# reaches the file (the task's victim: `$l[1] = "x"` wrote "l1|xl3").
+compare_lines(<<'P', 'copy-back keeps values');
+package T; sub isa_s { (defined($_[0]) and ref($_[0]) eq 'SCALAR' and defined ${ $_[0] }) ? 1 : 0 }
+sub kind { ref($_[1]) . "/" . ref(\$_[1]) } sub new { bless {}, shift } sub setref { $_[1] = [1, 2] }
+package main;
+sub f { my $in = shift; my $o = T->new; my $h = {a => 1};
+  print "isa_s ", T::isa_s($in), " kind ", $o->kind($in), " ", $o->kind($h), "\n";
+  my $r; $o->setref($r); print "setref ", ref($r), " @$r\n";
+  print "after ", ref($in), " $$in ", ref($o), "\n"; my $b = T->new; $o->kind($b); print "obj ", ref($b), "\n";
+  my $n = 5; $o->kind($n); print "num ", $n + 1, "\n";
+  my $s = "a" x 300; $o->kind($s); print "long ", length($s), "\n";
+}
+my $s = "x"; f(\$s);
+use File::Temp qw(tempdir); my $D = tempdir(CLEANUP => 1);
+open my $m, '>', "$D/WA.pm" or die; print $m 'package WA; sub app { $_[0] .= "x"; 1 } 1;'; close $m;
+unshift @INC, $D; require WA;
+sub w { my $p = "q"; WA::app($p); $p } print "cross-file ", w(), "\n";
+use Tie::File;
+open my $tf, '>', "$D/t.txt" or die; print $tf "l1|l2|l3|"; close $tf;
+tie my @l, 'Tie::File', "$D/t.txt", recsep => '|' or die; $l[1] = "CHANGED"; untie @l;
+open my $ti, '<', "$D/t.txt" or die; my $c = do { local $/; <$ti> }; print "tie-file $c\n";
+P
+
+# 1c. `-NAME` of a known sub is the negated call (#3344, the #476 family),
+# and a statement that begins with `*$obj->{k}` after a bare block is a
+# glob cast, not a multiplication (#3342, PPI's mis-lex).
+compare_lines(<<'P', '-NAME and statement-start glob');
+use Symbol ();
+sub K () { 5 } my @a = (-K, -K(), 2); my %h = (-K => 1);
+print "neg @a ", join(",", %h), "\n";
+my $o = bless Symbol::gensym(), 'Foo';
+{ my $c = 1; $c++ }
+*$o->{A} = 7;
+print "glob ", *$o->{A}, "\n";
+P
+
 # 2. A glob's hash through the arrow (#3340).
 compare_lines(<<'P', 'glob arrow');
 use Symbol ();
