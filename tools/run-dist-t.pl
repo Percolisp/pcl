@@ -39,6 +39,7 @@ use Cwd qw(abs_path);
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use PCLTap ();   # the ONE TAP reader shared with tools/cpan-scoreboard.pl
+use PCLSbcl ();  # the ONE sbcl command-line builder (task #344; #2959: this runner drifted)
 use PCLProc ();  # the ONE child-isolation helper: a run killed by `timeout`
                  # takes its pl2cl / SBCL with it (task #3064)
 
@@ -88,8 +89,16 @@ if ($rc != 0) {
   exit 2;
 }
 
-my ($sbcl_status) = PCLProc::run_isolated(
-  "sbcl --control-stack-size 512 --noinform --non-interactive --load $root/cl/pcl-runtime.lisp --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $lisp >$out 2>$err");
+# The SBCL command line comes from the ONE builder every runner shares (#2959:
+# this runner spelled it by hand, in SOURCE mode, so every board file recompiled
+# the whole runtime -- ~25 s a file).  PCLSbcl picks the cached core; PCL_NO_CORE=1
+# gives the source-mode line back.  `*pcl-skip-cache*` is about the MODULE fasl
+# cache (a dist test transpiles its modules fresh), not the runtime: the core
+# changes nothing there.
+my $sbcl_cmd = PCLSbcl::sbcl_prefix_str(runtime => "$root/cl/pcl-runtime.lisp", quote => 0)
+  . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $lisp";
+print STDERR "SBCL[run-dist-t]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
+my ($sbcl_status) = PCLProc::run_isolated("$sbcl_cmd >$out 2>$err");
 # TAP is read from STDOUT ALONE, as `prove` reads it (#3241).  The two streams
 # used to share one file, and a stderr line written without its newline (the
 # runtime's "While evaluating the form ... of #P\"x.lisp\":" context, ahead of
