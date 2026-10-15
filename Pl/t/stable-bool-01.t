@@ -27,7 +27,7 @@ my $pl2cl   = "$root/pl2cl";
 my @sbcl_rt = PCLCore::sbcl_prefix("$root/cl/pcl-runtime.lisp");
 plan skip_all => "perl $] has no builtin::is_bool" if $] < 5.036;
 
-plan tests => 10;
+plan tests => 11;
 
 sub run_both {
     my ($code) = @_;
@@ -114,3 +114,13 @@ same('a comparison in a condition: plain, string, NaN, an overload handler retur
    push @r, ($z == 1 ? "y" : "n"), ($p == 1 ? "y" : "n"), ($z lt "x" ? "y" : "n"), ($p lt "x" ? "y" : "n"), scalar($p == 1);
    my $i = 0; $i++ while $i < 5; push @r, $i;
    print "@r\n";');
+
+# Review s517a (bool1.pl): a FILETEST is a boolean (true, and the DEFINED false
+# of a successful stat -- #403's split: a failed stat stays undef), -s is a
+# SIZE, -T/-B are booleans, and eof is a boolean both ways.
+same('filetests and eof are perl booleans; -s is a size; a missing file is undef',
+  $B . 'my $f = "/etc/passwd"; my $d = "/tmp";
+   print join(",", b(-e $f), b(-f $f), b(-d $f), b(-r $f), b(-e "/nope/x"), (defined(-e "/nope/x") ? "D" : "U"),
+     b(-s $f), b(-T $f), b(-d $d), b(-f $d));
+   open my $z, "<", "/dev/null" or die; print ",", b(eof($z)), "[", eof($z), "]";
+   open my $p, "<", $f or die; print ",", b(eof($p)), "[", eof($p), "]\n";');

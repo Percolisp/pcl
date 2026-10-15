@@ -20442,6 +20442,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; *p-last-read-handle* may still point at a stream that was since closed
     ;; (`close TRY; ...; eof()`), so guard peek-char against a closed stream to
     ;; avoid an sb-int:closed-stream-error abort.
+    ;; perl's eof is a BOOLEAN (#3242): the answer goes through p-bool.
+    (p-bool
     (if (and stream (open-stream-p stream))
         (handler-case
             (let ((ch (peek-char nil stream nil :eof)))
@@ -20458,7 +20460,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
           ;; report the directory (probed 5.40.3 with $! cleared after the
           ;; open — errno 0), which is why this is not a %p-read-fail call.
           (error () t))
-        t)))
+        t))))
 
 (defmacro p-eof (&rest args)
   "Perl eof - check end of file. Bareword filehandle is auto-quoted."
@@ -22302,20 +22304,25 @@ size comes from fstat on the descriptor, after the buffered output is written
    And it conflated the two falses, which is the silent wrong #403 filed.
    `%p-stat-answer` has answered scalar `stat` with perl's `\"\"` since
    #1043 — same rule, same region."
-  (if *pcl-stat-cache-ok* "" *p-undef*))
+  ;; The defined false IS perl's boolean false (#3242): PL_sv_no.
+  (if *pcl-stat-cache-ok* (p-bool nil) *p-undef*))
 
-(defun %p--stat-test (file op pred &key lstat)
+(defun %p--stat-test (file op pred &key lstat (flag t))
   "Shared body for every stat-based filetest: resolve FILE for OP through the
    one operand resolver, stat (or lstat) it, and answer (funcall PRED struct).
    A `-X' overload answers instead of the stat; a false PRED and a failed stat
    both answer through %p--false, which keeps them apart.  A pred's own 0 (the
-   size `-s` reports for an empty file) is a VALUE and passes through."
+   size `-s` reports for an empty file) is a VALUE and passes through.
+   FLAG (the default): the test is a perl BOOLEAN, so a true PRED answers
+   +p-yes+ (#3242: `is_bool(-e $f)` is true in perl 5.40); -s passes NIL."
   (multiple-value-bind (kind val) (%p-stat-operand file op)
     (if (eq kind :over)
         val
         (let ((v (let ((st (%p-stat-buf kind val lstat)))
                    (and st (funcall pred st)))))
-          (if v v (%p--false))))))
+          (cond ((null v) (%p--false))
+                (flag (p-bool t))
+                (t v))))))
 
 (defun %p--access-test (file op mode)
   "Shared body for -r/-w/-x: resolve FILE, STAT it, then access(2) with MODE.
@@ -22330,7 +22337,7 @@ size comes from fstat on the descriptor, after the buffered output is written
         (let ((v (and (%p-stat-buf kind val nil)
                       (multiple-value-bind (path err) (%p--path kind val)
                         (if path
-                            (%p-stat-try (progn (sb-posix:access path mode) 1))
+                            (%p-stat-try (progn (sb-posix:access path mode) (p-bool t)))
                             (%p-stat-fail err))))))
           ;; The stat ran first, so %p--false separates "the file is there and
           ;; the permission is not" (perl: DEFINED "") from "no such file"
@@ -22371,7 +22378,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    where perl prints 0).  undef only when the stat FAILS — that is perl's own
    split, and it is what keeps `-s $missing` distinguishable from `-s $empty`.
    0 is false to p-true-p, so every boolean use is unchanged."
-  (%p--stat-test file "s" #'sb-posix:stat-size))
+  (%p--stat-test file "s" #'sb-posix:stat-size :flag nil))
 
 (defun %p--z-impl (file)
   "Perl -z: test if file has zero size"
@@ -22506,12 +22513,12 @@ size comes from fstat on the descriptor, after the buffered output is written
 (defun %p--T-impl (file)
   "Perl -T: heuristic text-file test (empty files are text)"
   (multiple-value-bind (scan ov) (%p--text-scan file "T")
-    (if ov ov (case scan ((:empty :text) 1) (t (%p--false))))))
+    (if ov ov (case scan ((:empty :text) (p-bool t)) (t (%p--false))))))
 
 (defun %p--B-impl (file)
   "Perl -B: heuristic binary-file test (empty files are binary too, as in perl)"
   (multiple-value-bind (scan ov) (%p--text-scan file "B")
-    (if ov ov (case scan ((:empty :binary) 1) (t (%p--false))))))
+    (if ov ov (case scan ((:empty :binary) (p-bool t)) (t (%p--false))))))
 
 ;;; A BAREWORD FILEHANDLE IS A NAME IN A stat / FILETEST SLOT TOO (task #1032).
 ;;; `stat FH` and `-e FH` emitted the bare CL symbol FH, which is an UNBOUND
@@ -23064,7 +23071,7 @@ size comes from fstat on the descriptor, after the buffered output is written
   (loop
    (cond ((null *p-argv-stream*)
           (when (null (%p-argv-advance)) (return t)))
-         ((%p-eof-impl *p-argv-stream*) (%p-argv-drop-current))
+         ((p-true-p (%p-eof-impl *p-argv-stream*)) (%p-argv-drop-current))
          (t (return nil)))))
 
 (defun %p-readline-argv-all ()
