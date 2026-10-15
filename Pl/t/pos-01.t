@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 10;
+plan tests => 11;
 
 # Basic /g pos tracking
 is run_cl(<<'END'), "2\n", '/g match sets pos';
@@ -112,4 +112,14 @@ sub f { my ($a, $b, $c) = @_;
                defined($a)?$a:"U", defined($b)?$b:"U", defined($c)?$c:"U"; }
 my $x = "bird"; $x =~ /i/g; $x =~ /nomatchhere/g;
 f(pos($x), undef, "tail");
+END
+
+# #3210 (s517a): `$s = $s` is perl's sv_setsv(sv, sv), a NO-OP: pos() survives, and a
+# TIED scalar is neither FETCHed nor STOREd (probed 5.40.3).  A copy through
+# another variable still resets pos.
+is run_cl(<<'END'), "1\nundef\nok\n", '#3210 self-assignment keeps pos() and never touches a tie';
+my $s = "aaa"; $s =~ /a/g; $s = $s; print pos($s) // "undef", "\n";
+my $t = "bb"; $t =~ /b/g; my $u = $t; $t = $u; print pos($t) // "undef", "\n";
+package T; sub TIESCALAR { bless {v=>1} } sub FETCH { print "F\n"; $_[0]{v} } sub STORE { print "S\n" }
+package main; tie my $x, "T"; $x = $x; print "ok\n";
 END

@@ -4069,6 +4069,10 @@
             (setf (p-box-sv box) value (p-box-sv-ok box) t (p-box-nv-ok box) nil))
         (%p-clear-match-pos box)
         (return-from box-set box))))
+  ;; `$s = $s` is perl's sv_setsv(sv, sv): a NO-OP before any magic -- pos()
+  ;; and the caches survive, and a TIED variable is neither FETCHed nor STOREd
+  ;; (probed 5.40.3, #3210).
+  (when (eq value box) (return-from box-set box))
   ;; Tied variable: delegate to STORE.  Magic lvalue: delegate to its setter.
   (let ((current (p-box-value box)))
     (when (p-tie-proxy-p current)
