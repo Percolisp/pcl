@@ -643,6 +643,14 @@ Names with no ordinary cell (the read-only capture family, the computed
 VALUE.  Every rvalue `${EXPR}` stays `(p-cast-$ …)`; only the backslash site
 changes.
 
+**`\($h{k} = V)` is a reference to the ELEMENT** (#3263, s517a): perl's
+assignment returns its left side as an lvalue.  For an element place
+(`p-gethash` / `p-gethash-deref` / `p-aref` / `p-aref-deref`) whose arguments
+are all atoms, the emitter writes `(progn (setf PLACE V) (p-backslash
+PLACE-box))` with the same `-box` twin `\$h{k}` uses; a non-atom key keeps the
+reference to the value (it would be evaluated twice).  Example: `my $v =
+\($h{a} = "x"); $$v .= "y"` leaves `$h{a}` = `xy`.
+
 `(p-backslash X)` — Perl `\X` — returns a **box with `is-ref` = t** whose
 `value` is:
 - for a scalar: the scalar's *box* (so writes through `$$r` hit the

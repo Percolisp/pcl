@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 47;
+plan tests => 48;
 
 sub run_cl {
     my ($code) = @_;
@@ -412,3 +412,13 @@ test_cl('an exported SCALAR is an alias, through Exporter (#2008)',
   . 'print "$Scale ", (\$Scale == \$EV::Scale ? "aliased" : "COPY"), " ";'
   . '{ local $Scale = 50; print get_scale(), " "; } print get_scale(), " ", eval(q{ $Scale + 1 }), "\n";',
     "2 7 aliased 7 7 8\n");
+
+# #3263 (s517a): `\($h{k} = V)` is a reference to the ELEMENT the assignment
+# wrote (perl's assignment returns its left side as an lvalue) -- HTTP::Tiny's
+# read_header_lines keeps one to append continuation lines.  It was a ref to a
+# fresh copy, so the appends were lost.  All four element spellings (perl 5.40.3).
+test_cl('#3263 a reference to an element assignment is a reference to the element',
+    'my %h; my $v = \\($h{foo} = "Bar"); $$v .= " Baz"; my @a; my $w = \\($a[1] = 2); $$w++;'
+  . 'my $hd = {}; my $f = "x"; my $u = \\($hd->{$f} = "B"); $$u .= "C"; my $ar = []; my $z = \\($ar->[0] = 7); $$z *= 2;'
+  . 'print "$h{foo}|$a[1]|$hd->{x}|$ar->[0]\\n";',
+    "Bar Baz|3|BC|14\n");

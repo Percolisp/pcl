@@ -3597,10 +3597,27 @@ sub gen_ternary {
 # p-cast-$ answers the VALUE, and every rvalue read stays on it; only the
 # backslash site changes, to p-backslash-cast-$, which resolves a name to its
 # cell and falls back to (p-backslash (p-cast-$ ...)) for anything else.
+#
+# `\($h{k} = V)` / `\($a[i] = V)` (and the `->` spellings) is a reference to
+# the ELEMENT the assignment wrote -- perl's assignment returns its left side
+# as an lvalue.  The setf form answers the VALUE, so `\` of it made a fresh box
+# and a later `$$ref .= …` never reached the element (HTTP::Tiny's
+# read_header_lines continuation lines, #3263).  Assign, then take the
+# element's box through the same `-box` twin `\$h{k}` uses -- only when every
+# place argument is an ATOM (a variable or a literal), so evaluating it again
+# cannot repeat a side effect.
+my %ELEM_BOX_TWIN = map { $_ => "$_-box" } qw(p-gethash p-gethash-deref p-aref p-aref-deref);
 sub _backslash_of {
   my ($form) = @_;
   return ['p-backslash-cast-$', @$form[1 .. $#$form]]
     if ref($form) eq 'ARRAY' && !ref($form->[0]) && $form->[0] eq 'p-cast-$';
+  if (ref($form) eq 'ARRAY' && @$form == 3 && !ref($form->[0])
+      && ($form->[0] eq 'setf' || $form->[0] eq 'p-setf')
+      && ref($form->[1]) eq 'ARRAY' && !ref($form->[1][0])
+      && (my $twin = $ELEM_BOX_TWIN{ $form->[1][0] })
+      && !grep { ref $_ } @{ $form->[1] }[1 .. $#{ $form->[1] }]) {
+    return ['progn', $form, ['p-backslash', [$twin, @{ $form->[1] }[1 .. $#{ $form->[1] }]]]];
+  }
   return ['p-backslash', $form];
 }
 
