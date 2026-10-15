@@ -107,6 +107,7 @@ sub f { my $in = shift; my $o = T->new; my $h = {a => 1};
   my $s = "a" x 300; $o->kind($s); print "long ", length($s), "\n";
 }
 my $s = "x"; f(\$s);
+sub g2 { my $r = shift; my $k = T::isa_s($r); ref($r) . "/" . ref($$r) . "/" . ref($$$r) } print "ref-to-ref ", g2(\\[1]), "\n";
 use File::Temp qw(tempdir); my $D = tempdir(CLEANUP => 1);
 open my $m, '>', "$D/WA.pm" or die; print $m 'package WA; sub app { $_[0] .= "x"; 1 } 1;'; close $m;
 unshift @INC, $D; require WA;

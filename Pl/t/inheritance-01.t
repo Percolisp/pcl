@@ -561,7 +561,9 @@ sub pass_through {
 END_PERL
 
   like($cl, qr/p-super-call .* "no_args" "Child"\)/, 'SUPER:: with no args');
-  like($cl, qr/p-super-call .* "with_scalar" "Child" \$x/, 'SUPER:: with scalar arg');
+  # a raw-slot `my` argument of SUPER:: (an unseen callee) rides a copy-back
+  # box the caller reads back -- #2636, s517b; perl aliases it
+  like($cl, qr/p-copy-back \(\(--pcl-cb--0 \$x\)\)\s+\(p-super-call .* "with_scalar" "Child" --pcl-cb--0/s, 'SUPER:: with scalar arg');
   like($cl, qr/p-super-call .* "with_list" "Child" \@items/, 'SUPER:: with list arg');
   like($cl, qr/p-super-call .* "with_hash" "Child" %opts/, 'SUPER:: with hash arg');
   like($cl, qr/p-super-call .* "pass_through" "Child" \@_/, 'SUPER:: with @_ pass-through');

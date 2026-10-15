@@ -159,16 +159,19 @@ row('scalar none', defined $none ? "[$none]" : 'undef');
 P
 
 {
-    # perl has a built Compress::Raw::Zlib, PCL has none (zlib is XS; the
-    # shim is a separate task): the use must die in ONE perl-shaped line.
+    # `use Compress::Zlib` gets past File::GlobMapper (this file's shim) and
+    # LOADS, as in perl, since s517b's Compress::Raw::Zlib shim over libz
+    # (#3161; it used to die in one line at Compress::Raw::Zlib, which this
+    # row asserted).  On a box WITHOUT libz the shim dies at load in ONE
+    # perl-shaped line, which is the other answer this row accepts.
     my $file = write_pl(<<'P');
 my $ok = eval "use Compress::Zlib; 1";
 my @l = split /\n/, $@;
-print "zlib: ", ($ok ? 'loaded' : scalar(@l) . ' ' . ($@ =~ /\ACan't locate Compress\/Raw\/Zlib\.pm/ ? 'locate' : 'other')), "\n";
+print "zlib: ", ($ok ? 'loaded' : scalar(@l) . ' ' . ($@ =~ /the system zlib \(libz\.so\.1\) is not available/ ? 'nolibz' : 'other')), "\n";
 P
     my ($got) = run_cl($file) =~ /^(zlib: .*)$/m;
-    is($got // '(no line)', 'zlib: 1 locate',
-       'use Compress::Zlib without an artifact dies in one line at Compress::Raw::Zlib');
+    like($got // '(no line)', qr/\Azlib: (?:loaded|1 nolibz)\z/,
+         'use Compress::Zlib loads (or, without libz, dies in one line at Compress::Raw::Zlib)');
 }
 
 done_testing;

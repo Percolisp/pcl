@@ -34459,21 +34459,28 @@ size comes from fstat on the descriptor, after the buffered output is written
       nil))
 
 (declaim (notinline %p-copy-back-value))
-(defun %p-copy-back-value (box)
-  "The value a copy-back BOX holds after the call, as a raw slot holds it:
-   perl's copy of one scalar (%p-leavesub-scalar) -- a plain box yields its
-   value (a :strbuf cell read through unbox), a ref / blessed box a fresh box
-   with the same value and flags.  Out of line: an inlined unbox in every
-   call site exhausted SBCL's heap compiling one big top-level form."
-  (%p-leavesub-scalar box))
+(defun %p-copy-back-value (box original)
+  "The value the raw slot takes back after the call.  When the slot already
+   held a BOX (a reference, a blessed or dualvar value) %p-copy-in passed it
+   through as itself, and the slot keeps ORIGINAL.  Otherwise perl's copy of
+   one scalar (%p-leavesub-scalar): a plain box yields its value (a :strbuf
+   cell read through unbox), a ref / blessed box a fresh box with the same
+   value and flags.  Out of line: an inlined unbox in every call site
+   exhausted SBCL's heap compiling one big top-level form."
+  (if (eq box original)
+      original
+      (%p-leavesub-scalar box)))
 
 (declaim (notinline %p-copy-in))
 (defun %p-copy-in (value)
-  "A fresh box holding VALUE as a store into a `my` scalar would: a ref value
-   keeps its ref-ness (box-set), never nested one level deeper."
-  (let ((b (make-p-box nil)))
-    (box-set b value)
-    b))
+  "The argument for a raw-slot VALUE: a fresh box holding a plain value (the
+   one the callee may write through $_[N]); a value that IS already a box --
+   a reference, a blessed or dualvar value, the slot's whole representation
+   of it -- goes as itself, exactly as it did before the copy-back (wrapping
+   it nested a reference one level deeper: \\\\[1] read back as \\\\1)."
+  (if (p-box-p value)
+      value
+      (make-p-box value)))
 
 ;;; COPY-IN / COPY-OUT around a call to an UNSEEN callee (#2636; ir-spec §5).
 ;;; BINDINGS is ((BOX VAR) ...) -- BOX a compiler temporary --pcl-cb--N, never a
@@ -34487,7 +34494,7 @@ size comes from fstat on the descriptor, after the buffered output is written
 (defmacro p-copy-back (bindings form)
   `(let ,(mapcar (lambda (b) `(,(first b) (%p-copy-in ,(second b)))) bindings)
      (multiple-value-prog1 ,form
-       (setq ,@(mapcan (lambda (b) (list (second b) `(%p-copy-back-value ,(first b))))
+       (setq ,@(mapcan (lambda (b) (list (second b) `(%p-copy-back-value ,(first b) ,(second b))))
                        bindings)))))
 
 (defun p-method-call (obj method &rest args)
