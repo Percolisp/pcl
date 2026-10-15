@@ -2750,19 +2750,23 @@ sub _precollapse_dyn_glob_slots {
                  || ref($term) eq 'PPI::Structure::Subscript')
              && $term->start() eq '{'
              && $self->_block_is_glob_slot($term);
-    my $cast = $e->[$i-2];
     my $name = $e->[$i-1];
-    next unless ref($cast) eq 'PPI::Token::Cast' && $cast->content() eq '*';
     my $name_ok = (ref($name) eq 'PPI::Structure::Block' && $name->start() eq '{')
                || (ref($name) eq 'PPI::Token::Symbol'    && $name->content() =~ /^\$/);
     next unless $name_ok;
-    my $glob_id = $self->parse([$cast, $name]);
+    # `*$$r{SLOT}` (Data::Dump's `*$$rval{$k}`, #3324): a run of `$` casts may
+    # sit between the `*` and the name -- the glob is `*$$r`, the slot follows.
+    my $k = $i - 2;
+    $k-- while $k > 0 && ref($e->[$k]) eq 'PPI::Token::Cast' && $e->[$k]->content() eq '$';
+    my $cast = $e->[$k];
+    next unless ref($cast) eq 'PPI::Token::Cast' && $cast->content() eq '*';
+    my $glob_id = $self->parse([@$e[$k .. $i-1]]);
     my ($node, $id) = $self->make_node_insert('glob_slot');
     $self->add_child_to_node($id, $glob_id);
     $self->_attach_glob_slot($id, $node, $term);
-    $e->[$i-2] = $node;     # replace Cast '*' position with the glob_slot node
-    splice @$e, $i-1, 2;    # remove glob-name and SLOT tokens
-    $i -= 2;
+    $e->[$k] = $node;       # replace Cast '*' position with the glob_slot node
+    splice @$e, $k + 1, $i - $k;   # remove the casts, glob-name and SLOT tokens
+    $i = $k;
   }
 }
 

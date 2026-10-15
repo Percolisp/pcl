@@ -59,7 +59,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 sub write_pl {
     my ($code) = @_;
@@ -169,4 +169,17 @@ my $x = "gslot_pn9";
 *$x = \10;
 print "mix=", ${*$x{SCALAR}} * $h{k}, "\n";
 print "mix2=", $h{k} * ${*$x{SCALAR}}, "\n";
+PL
+
+# ---- #3324 (s517a): a run of `$` casts between the `*` and the name ---------
+# Data::Dump's `*$$rval{$k}` read `${*$$rval}{$k}`, a hash element of a
+# glob (an unhandled TYPE error).  The negative: after a term it multiplies.
+
+both_agree(<<'PL', '#3324 *$$r{SLOT} is the slot of the glob $$r names; EXPR *$$r{k} multiplies');
+our @gs_foo = (1, 2); our $gs_foo = 3;
+my $g = \*gs_foo; my $r = \$g;
+for my $k (qw(SCALAR ARRAY HASH)) { my $v = *$$r{$k}; print "$k ", (defined $v ? ref($v) : "undef"), "\n" }
+my $a2 = *$$r{ARRAY}; print "@$a2\n";
+my %h = (k => 4); my $hr = \%h; my $rr = \$hr; my $n = 7;
+print "mul=", $n *$$rr->{k}, " ", $n * ${$hr}{k}, "\n";
 PL
