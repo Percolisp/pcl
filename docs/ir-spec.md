@@ -2394,8 +2394,9 @@ VarAnnotator), never this.  The boxes are compiler temporaries named
     → (p-copy-back ((--pcl-cb--0 $out))
         (p-method-call $z "deflate" $in --pcl-cb--0))
 
-`p-copy-back` binds each box with `%p-copy-in` (a store into a fresh box, so
-a reference argument stays a reference of the same kind) and reads it back
+`p-copy-back` binds each box with `%p-copy-in` (a fresh box for a plain
+value; a value that is ALREADY a box -- a reference, a blessed or dualvar
+value -- goes as itself, as before the copy-back, and the slot keeps it) and reads it back
 with `%p-copy-back-value` (perl's one-scalar copy: a plain value, or a fresh
 box for a ref / blessed value); FORM's values pass through.  Licensed by
 construction: a call argument is an OPAQUE use, so the variable can carry
