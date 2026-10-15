@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Thu Oct 15 23:20:21 2026",
+   "description" : "FILED s517a (Opus, 2026-10-15) -- the producers #3242 did NOT route through p-bool.\n\n#3242 (stable booleans) made p-bool return the interned +p-yes+ / +p-no+ and\nrouted: ! / not, the 12 comparisons, defined, exists (hash / array / sub),\nisa, xor, !~, builtin::true / false / is_bool / is_weak, re::is_regexp,\nInternals::SvREADONLY, scalar stat, created_as_* (excludes booleans).\n\nperl 5.40.3 ALSO returns a boolean (is_bool true; probed scratch/s517a/pr/b1.pl)\nfrom these, which PCL still answers with a plain 1 / \"\" (is_bool false):\n  - filetests whose stat SUCCEEDED: -e -f -d -r -z ... (false = \"\" BOOL; a\n    failed stat is undef, not a boolean -- matches PCL already, #403);\n    -s is a SIZE (not a boolean);\n  - eof($fh)   (PCL answers undef at \"not eof\" -- a second difference);\n  - m// in scalar context, true and false;\n  - s/// that does NOT match (\"\" BOOL; a match returns the count, not bool);\n  - utf8::is_utf8 / utf8::valid;\n  - wantarray (true and false);\n  - defined &name (p-sub-defined: true is (make-p-box 1), FALSE is undef where\n    perl gives \"\" -- a second difference).\nEach is one p-bool call at its return; probe each with is_bool vs perl and\nadd rows to Pl/t/stable-bool-01.t's producer row.\n",
+   "id" : "3322",
+   "status" : "pending",
+   "subject" : "stable booleans residue: filetests, eof, scalar m//, failed s///, utf8::is_utf8/valid, wantarray, defined &name still return a plain 1/\"\" where perl returns a boolean (#3242 follow-up)"
+}

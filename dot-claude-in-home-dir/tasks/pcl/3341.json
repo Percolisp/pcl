@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-15",
+   "description" : "FOUND + FIXED s517b (Opus 5.5, 2026-10-15).\n\nREPRO: use IO::Compress::Gzip; my $gz; my $z = IO::Compress::Gzip->new(\\$gz); $z->print(\"x\"); $z->close; print length $gz  # perl 30; PCL 0, and files named SCALAR(0x1) appear in the cwd.\n\nCAUSE: lib/PCL/Facts/IO/Compress/Base/Common.pm (#3205, s515a) listed `sub whatIs ($;$);`.  whatIs is not exported; its only callers are whatIsInput/whatIsOutput in the same module, ABOVE its definition, where perl applies no prototype.  The overlay is consumed at the module unit's package statement, so the prototype applied there.\n\nFIX: the line removed from the overlay, with a why-comment.  The generic question (should a module's own unit apply its overlay positionally?) is NOT changed here: every other entry in that overlay is an exported sub whose in-module call sites follow its definition.\n\n=== DONE (s517b) ===",
+   "id" : "3341",
+   "status" : "completed",
+   "subject" : "The IO::Compress::Base::Common facts overlay declared `whatIs ($;$)` -- not exported, and the module's OWN unit reads the overlay, so `whatIs(@_)` inside whatIsOutput passed @_'s COUNT and every output buffer `\\$buf` became a FILENAME \"SCALAR(0x1)\""
+}

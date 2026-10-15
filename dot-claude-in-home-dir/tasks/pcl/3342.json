@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-15",
+   "description" : "FOUND + FIXED s517b (Opus 5.5, 2026-10-15).  docs/ppi-upstream-bugs.md Â§38.\n\nREPRO: { $c = $b; }\\n*$o->{A} = 1;  -- PPI: Token::Operator['*'] at the start of the second statement (structure correct, token wrong); after `{ my $b = 1; }` the same `*` is a Cast.\n\nFIX: Pl::Parser::_repair_statement_start_glob_cast, an in-place class swap in _ppi_parse and fragment_doc: a `*` Operator that is the first significant token of its statement and is followed by a `$name` symbol becomes a Cast.  Guard Pl/t/zlib-01.t (\"-NAME and statement-start glob\"); canary Pl/t/misc-fixes-02.t; docs/ppi-bug-report.t row 90.\n\n=== DONE (s517b) ===",
+   "id" : "3342",
+   "status" : "completed",
+   "subject" : "PPI 1.291 lexes the `*` that begins a statement `*$o->{A} = 1;` after a bare block whose first token is a scalar as the multiplication Operator -- core IO::Uncompress::Base's `*$obj->{InputLength} = ...` became `undef * ...` and every gunzip died"
+}

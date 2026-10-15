@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Fri Oct 16 01:18:15 2026",
+   "description" : "FILED s517a (Opus, 2026-10-16) -- newly REACHED by #3262 (148 board rows:\nCapture-Tiny capture_merged / tee_merged in 02 03 08 12).\n\n    use Capture::Tiny qw(capture_merged);\n    my $m = capture_merged { print \"STDOUT:First line\\nSecond line\\n\";\n                             print STDERR \"STDERR:First line\\nSecond line\\n\" };\n    perl 5.40.3: STDOUT lines first, then STDERR   (program order)\n    PCL:         STDERR lines first, then STDOUT\n\nscratch/s517a/pr/ct.pl.  Both handles are dup'ed onto ONE tmpfile; perl's\nSTDOUT reaches the file at its own flush, which Capture::Tiny forces before\nSTDERR is written (it turns autoflush on the captured handles); PCL's STDOUT\nbuffer is flushed only at the end.  Check $| / IO::Handle::autoflush on a\ndup'ed STDOUT and the order of the two flushes in _open_std / the block run.\n",
+   "id" : "3327",
+   "status" : "pending",
+   "subject" : "Capture::Tiny capture_merged / tee_merged: STDERR lands before STDOUT; perl keeps program order (148 board rows newly reached by #3262)"
+}

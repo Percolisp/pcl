@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Fri Oct 16 00:38:46 2026",
+   "description" : "FILED s517a (Opus, 2026-10-16), found probing -M (scratch/s517a/pr/age.pl);\nPRE-EXISTING on dc87c403 (same death there).\n\n    my $f = \"/etc/passwd\";\n    print join(\",\", map { $_ < 0 ? \"neg\" : \"nn\" } -M $f, -A $f), \"\\n\";\n\nperl 5.40.3: prints two words.  PCL: dies \"Undefined subroutine &main::M\ncalled\" -- after a map BLOCK, a `-M` filetest is read as unary minus applied to\na call of a sub named M.  (`my @b = (-M _, -A _)` and `-M $f` alone are fine.)\nProbably the map-block argument position misses the filetest-operator check\n(_is_print_term_start's `-X` rule, #372) -- grep the sibling.\n",
+   "id" : "3325",
+   "status" : "pending",
+   "subject" : "map BLOCK -M $f, ... : the filetest after a map block is read as minus a call to sub M (Undefined subroutine &main::M)"
+}

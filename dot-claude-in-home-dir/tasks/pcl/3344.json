@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-15",
+   "description" : "FOUND + FIXED s517b (Opus 5.5, 2026-10-15), the refinement of #476 that the zlib modules need.\n\nREPRO: sub K () {5} my @a = (-K, -K(), 2); my %h = (-K => 1); print \"@a \", %h  # perl: -5 -5 2 -K1; PCL: -K -K 2 -K1.\n\nCAUSE: PPI lexes `-K` as ONE Word; Pl/ExprToCL.pm turned every `-word` Word into the string \"-word\", at two sites (funcall head, list leaf).\n\nFIX: ExprToCL::_negated_call_form, asked by both sites: a `-NAME` Word that is not followed by `=>`, whose NAME is a same-file sub, has a prototype in scope, or is followed by `(`, lowers to (p-- (p-scalar-ctx (pl-NAME))).  A bare `-word` of an unknown name stays the string.  Guard Pl/t/zlib-01.t (\"-NAME and statement-start glob\").  #476 (a declared sub WITHOUT a prototype, defined later in the file) stays open for the rest of its family.\n\n=== DONE (s517b) ===",
+   "id" : "3344",
+   "status" : "completed",
+   "subject" : "`-NAME` where NAME is a known sub (an imported `()` constant, a same-file sub, or NAME followed by parens) emitted the string \"-NAME\" -- the #476 family; core Compress::Zlib::memGzip's `-MAX_WBITS()` made every memGzip return undef"
+}

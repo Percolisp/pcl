@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-16",
+   "description" : "FOUND + FIXED s517b (Opus 5.5, 2026-10-16) -- PRE-EXISTING on main dc87c403, exposed by the zlib shim (#3161): once Compress::Zlib loads, Archive::Tar reads every archive through IO::Zlib, and the everyday program modules/Archive-Tar-Compress (identical to perl on main because Archive::Tar fell back to plain IO) died \"Can't use string (...) as a SCALAR ref\".\n\nREPRO (perl 5.40.3):\n  sub fill { my $r = shift; $$r .= \"a\" x 150 for 1 .. 3 } my $ob = \"\"; fill(\\$ob); my $y = \"Y\"; $ob = \\$y; print ref($ob)   # perl SCALAR; main \"\" (and length 1)\n  same with $z = {k=>1}: perl HASH, main \"\".\n\nCAUSE: box-set's magic-cell branch hands the setter (unbox value) for any unblessed box value -- right for a real lvalue magic (substr, pos, vec), wrong for the :strbuf cell, which is REPRESENTATION (the setter resets and box-sets the unboxed target).\n\nFIX: box-set treats a :strbuf cell as replaceable: it drops the cell and takes the ordinary store path with the original value.  Guard Pl/t/zlib-01.t \"strbuf store and lvalue args\" (fails on main).  Everyday modules/Archive-Tar-Compress identical again.\n\n=== DONE (s517b) ===",
+   "id" : "3345",
+   "status" : "completed",
+   "subject" : "Assigning a REFERENCE to a scalar whose box holds a long `.=` buffer (:strbuf cell, #2115) stored the ref's TARGET through the cell setter -- the ref was lost; IO::Uncompress::Base::read's `$out_buffer = \\*$self->{Pending}` made every IO::Zlib read die"
+}

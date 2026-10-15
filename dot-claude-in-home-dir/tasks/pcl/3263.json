@@ -2,8 +2,8 @@
    "blockedBy" : [],
    "blocks" : [],
    "created" : "2026-10-12",
-   "description" : "FILED s516a (Opus 5.5, 2026-10-12): exposed when #3244 let t/020_headers.t run (it was 0 rows behind the print({$fh}) drop).\n\nt/020_headers.t lines 34-41: header \"Foo: $CRLF\\x09Bar$CRLF\\x09$CRLF\\x09Baz$CRLF$CRLF\" through HTTP::Tiny::Handle->read_header_lines must give { foo => 'Bar Baz' }; PCL's is_deeply diag reads 'HASH(0x2)' vs 'HASH(0x3)' (key counts).  Rows 1, 2, 4, 5 pass.  NOT MINIMIZED: the next step is to run read_header_lines's continuation regexes on that string under perl vs PCL (HTTP/Tiny.pm read_header_lines: the \\x09/\\x20 continuation branch).\n\nBlessed row added by s516a in baselines/cpan-board14-fails.tsv with this cause.",
+   "description" : "FILED s516a (Opus 5.5, 2026-10-12): exposed when #3244 let t/020_headers.t run (it was 0 rows behind the print({$fh}) drop).\n\nt/020_headers.t lines 34-41: header \"Foo: $CRLF\\x09Bar$CRLF\\x09$CRLF\\x09Baz$CRLF$CRLF\" through HTTP::Tiny::Handle->read_header_lines must give { foo => 'Bar Baz' }; PCL's is_deeply diag reads 'HASH(0x2)' vs 'HASH(0x3)' (key counts).  Rows 1, 2, 4, 5 pass.  NOT MINIMIZED: the next step is to run read_header_lines's continuation regexes on that string under perl vs PCL (HTTP/Tiny.pm read_header_lines: the \\x09/\\x20 continuation branch).\n\nBlessed row added by s516a in baselines/cpan-board14-fails.tsv with this cause.\n\n=== DONE (s517a, commit 4355a492) ===\nCause: `$val = \\($headers->{$field_name} = $2)` -- \\ of an element ASSIGNMENT\nmade a ref to a fresh copy.  ExprToCL _backslash_of now emits (progn (setf\nPLACE V) (p-backslash PLACE-box)) for the four element places with atom args.\n020_headers.t 5/0.  Guard ref-to-ref-01.t 47 -> 48 (fails on dc87c403).\nResidue: a NON-atom key/index still refs the value (it would evaluate twice).\n",
    "id" : "3263",
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "HTTP-Tiny 020_headers.t #3 '->read_header_lines() insane continuations': folded continuation lines differ (got a 2-key hash, perl 3) -- exposed by #3244, not minimized"
 }

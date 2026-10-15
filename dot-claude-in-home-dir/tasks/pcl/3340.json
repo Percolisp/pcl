@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-15",
+   "description" : "FOUND + FIXED s517b (Opus 5.5, 2026-10-15) while bringing up the zlib shim (#3161).\n\nREPRO (perl 5.40.3): use Symbol; my $g = Symbol::gensym(); *$g->{A} = 1; print *$g->{A}  # perl 1; PCL died \"Not a HASH reference\" (emission: (p-dynamic-typeglob (p-gethash-deref $g \"A\"))).  Same for *{$g}->{A}.\n\nCAUSE: Pl/PExpr.pm's subscript arm folds a leading cast run into the base only when every cast is `$` (#211/#305, _all_scalar_casts).  With a real arrow a glob cast is a deref level too.\n\nFIX: _all_arrow_deref_casts (accepts `$` and `*`), used by the arrow branch of the subscript arm only; the METHOD arms keep _all_scalar_casts (`*$o->m` dies in perl, nothing to fold).  Guard Pl/t/zlib-01.t section 2 (fails on main dc87c403).\n\n=== DONE (s517b) ===",
+   "id" : "3340",
+   "status" : "completed",
+   "subject" : "`*$g->{k}` parsed as `*{ $g->{k} }` (a glob of a hash element) instead of `(*$g)->{k}`, the glob's hash -- IO::Compress::Base::Common's createSelfTiedObject died \"Not a HASH reference\""
+}

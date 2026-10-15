@@ -2,8 +2,8 @@
    "blockedBy" : [],
    "blocks" : [],
    "created" : "2026-10-12",
-   "description" : "FILED s515a (Opus, 2026-10-12) from Fable's review probe ~/pcl-agent-scratch/s513/review/p516a/pos3.pl, row \"self assign\".  PRE-EXISTING on main, LOW.\n`my $s = \"aXbXc\"; $s =~ /X/g; $s = $s; print pos($s) // \"undef\", \"\\n\";` -- perl 2, PCL undef.  perl's sv_setsv(dsv, ssv) returns at once when dsv == ssv, so no magic is touched and pos survives; PCL's assignment path (box-set) clears pos on every store.  Fix shape: box-set (or the scalar-assign emission) skips the store and the pos clear when the source IS the destination box.  Guard row: Pl/t/elem-pos-01.t (perl-compared).",
+   "description" : "FILED s515a (Opus, 2026-10-12) from Fable's review probe ~/pcl-agent-scratch/s513/review/p516a/pos3.pl, row \"self assign\".  PRE-EXISTING on main, LOW.\n`my $s = \"aXbXc\"; $s =~ /X/g; $s = $s; print pos($s) // \"undef\", \"\\n\";` -- perl 2, PCL undef.  perl's sv_setsv(dsv, ssv) returns at once when dsv == ssv, so no magic is touched and pos survives; PCL's assignment path (box-set) clears pos on every store.  Fix shape: box-set (or the scalar-assign emission) skips the store and the pos clear when the source IS the destination box.  Guard row: Pl/t/elem-pos-01.t (perl-compared).\n\n=== DONE (s517a, commit ed936132) ===\nbox-set returns at once when VALUE is the box itself (before the tie / magic arms).  pos() survives $s = $s; a TIED scalar is neither FETCHed nor STOREd on self-assignment (probed perl 5.40.3 -- PCL used to do both).  Guard Pl/t/pos-01.t 10 -> 11.\n",
    "id" : "3210",
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "Self-assignment `$s = $s` clears pos() in PCL; perl keeps it (sv_setsv on the same SV is a no-op)"
 }

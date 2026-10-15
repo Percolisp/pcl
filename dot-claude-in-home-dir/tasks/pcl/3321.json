@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Thu Oct 15 23:19:03 2026",
+   "description" : "FILED s517a (Opus, 2026-10-15), found re-causing the JSON-PP board rows after #3242.\n\nA STASH ALIAS -- `*A:: = *B::;` -- makes package A the SAME symbol table as B\nin perl: every sub, @ISA and isa() answer of B is A's.  PCL ignores it:\n\n    package B0; sub hi { \"hi\" } package A0; *A0:: = *B0::;\n    package main; my $o = bless {}, \"A0\";\n    print $o->isa(\"B0\") ? 1 : 0, \" \", (eval { $o->hi } // \"none\"), \"\\n\";\n\n    perl 5.40.3: 1 hi        PCL: 0 none\n\n(scratch/s517a/pr/stash.pl.)  Cost: JSON-PP-4.18 t/118_boolean_values.t rows\n6, 7, 10, 11 (`*Dummy::True:: = *JSON::PP::Boolean::;`) -- blessed as \"#3242\nprobable\" until s517a; #3242 (stable booleans) shipped and they still fail,\nthis is their cause.  A stash is a CL package in PCL, so the alias needs a\npackage-name redirection at bless / method resolution / isa (or a\npackage-nickname), not a symbol copy.\n",
+   "id" : "3321",
+   "status" : "pending",
+   "subject" : "a stash alias *A:: = *B:: is ignored: A objects do not see B methods or isa (JSON-PP 118_boolean_values.t rows 6/7/10/11)"
+}

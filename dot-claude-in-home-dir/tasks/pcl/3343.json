@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-15",
+   "description" : "FOUND + FIXED s517b (Opus 5.5, 2026-10-15).\n\nREPRO: use IO::Compress::Gzip qw(gzip); use IO::Uncompress::Gunzip qw(gunzip $GunzipError); gzip(\\$in => \\$gz); gunzip(\\$gz => \\$out) or die $GunzipError  -- PCL: \"Inflation Error: data error\" (smartRead asked for 10 header bytes).\n\nFIX (data layer, rule 9a): three facts overlays lib/PCL/Facts/IO/Compress/{Gzip,Zlib,Zip}/Constants.pm, generated from each module's own `use constant` list and literal @EXPORT (scratch/s517b/gen-overlay.pl).  Guard: Pl/t/zlib-01.t section 4 (gzip/gunzip round trip).\n\n=== DONE (s517b) ===",
+   "id" : "3343",
+   "status" : "completed",
+   "subject" : "IO::Compress::{Gzip,Zlib,Zip}::Constants are IO:: modules the prototype scan skips by name, so `GZIP_MIN_HEADER_SIZE - GZIP_ID_SIZE` in core IO::Uncompress::Gunzip parsed as a call with argument -GZIP_ID_SIZE (10, not 8) and gunzip read two deflate bytes as header"
+}

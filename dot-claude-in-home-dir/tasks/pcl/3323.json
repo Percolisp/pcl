@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Thu Oct 15 23:29:33 2026",
+   "description" : "FILED s517a (Opus, 2026-10-15) -- a REAL CPAN cause line for the s331 ruling\n\"like/unlike with a plain STRING pattern follows test.pl (interpolate), both\ncallers -- accepted divergence; revisit on a real CPAN cause line\"\n(DECIDED, fable-answers-s331.md §3).  This is that line.\n\nHTTP-Tiny-0.090 t/100_get.t:91 (and the other corpus-driven files):\n    like( $text, \"/\".$case->{expected_like}[0].\"/\", $msg );\nTest::More (Test::Builder::maybe_regex) reads a string of the form '/re/' (or\n'm{re}flags') AS A REGEX.  PCL's TAP layer interpolates the whole string as a\npattern, so the slashes must match literally and the row fails:\n\n    100_get.t (after #3262, s517a): PLAN 186, 4 rows fail -- 64 get-08.txt,\n    128 get-16.txt, 136 get-17.txt, 177 get-22.txt -- each `got 'Size of\n    response body exceeds ...' to match: /Size of response body exceeds .../`\n\nFix belongs in cl/pcl-test.lisp's like/unlike for the Test::More caller\n(test.pl's own `like` keeps its interpolation -- the two callers differ in\nperl too); it needs the ruling revisited first (a harness change: the\ncompanion --all --quick and the sweep both reach it).\n",
+   "id" : "3323",
+   "status" : "pending",
+   "subject" : "like with a /re/ STRING pattern: Test::More reads it as a regex, the PCL TAP layer interpolates it (the s331 ruling real CPAN cause line: HTTP-Tiny corpus files)"
+}

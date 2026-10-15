@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Fri Oct 16 00:22:44 2026",
+   "description" : "PERF (s517c, perf round 47 member 3's second half, FILED -- under the bar).  joinarr (bench row 317).  After the shipped half (p-join's compiler macro reads a slice argument as values, -17.8 % whole run), the join itself: p-join builds %p-tie-views + an item-count loop + %p-join-args (coerce vector -> list) + mapcar to-string + %p-join-strings over a list.\n\nLever J (s517c worktree scratch/s517c/prof/leverJ.lisp): when the only item is a spreading vector and the separator is defined and not tied, a one-vector path: to-string each element into a dynamic-extent simple-vector, %p-join-strings over the vector (one pre-sized result, %pcl-str-blit).  Hand-replaced (scratch/s517c/hr-jl2.log, whole process, median of 7): ja 1.186 -> ja+J 1.172 (-1.2 %); on top of the shipped half 0.975 -> 0.927 (-4.9 %).  Not shipped: under 15 %, and it is a second copy of the join path (rule 11) for 5 %.\n",
+   "id" : "3302",
+   "status" : "pending",
+   "subject" : "joinarr: a one-vector fast path in p-join is -4.9 % on top of the shipped slice half (FILED, under the bar)"
+}

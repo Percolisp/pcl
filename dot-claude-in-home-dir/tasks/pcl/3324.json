@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Thu Oct 15 23:33:04 2026",
+   "description" : "FILED AND FIXED s517a (Opus, 2026-10-15), split off #3284's queue (Data-Dump\ndump.t \"ran 36 of 38, rc 1\", an unhandled TYPE error \"Value of pcl::h in\n(gethash3 k h nil) is #S(p-typeglob ...)\").\n\nCause: `*$$rval{$k}` (Data::Dump GLOB branch) -- PExpr's\n_precollapse_dyn_glob_slots accepted only `* $name {SLOT}` / `* {EXPR}\n{SLOT}`; with a `$` cast between, the subscript became a hash element of the\nglob.  Repro (scratch/s517a/pr/gs.pl): `my $g = \\*foo; my $r = \\$g; *$$r{ARRAY}`\nperl ARRAY ref; PCL died.\n\n=== DONE (s517a, commit 8831c7fd) ===\nThe precollapse walks back over `$` casts to the `*`.  dump.t 38/0.  Guard\nPl/t/glob-slot-operand-01.t 6 -> 7 (incl. the multiplication negative).\n",
+   "id" : "3324",
+   "status" : "completed",
+   "subject" : "*$$r{SLOT} (a $ cast run between * and the name) parsed as a hash element of the glob -- Data-Dump dump.t raw TYPE error (#3284 queue)"
+}

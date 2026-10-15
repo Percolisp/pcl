@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Fri Oct 16 01:18:15 2026",
+   "description" : "FILED s517a (Opus, 2026-10-16) -- newly REACHED by #3262 (Capture::Tiny's\ntmpfile seek now works, so 02-capture 03-tee 08-stdin-closed 12-stdin-string\nrun past row 1; 236 board rows carry this cause).\n\n    use Capture::Tiny qw(capture);\n    my ($o, $e) = capture { binmode(STDOUT, q{:utf8}); binmode(STDERR, q{:utf8});\n                            print \"STDOUT:Hi! \\x{263a}\\n\"; print STDERR \"STDERR:Hi! \\x{263a}\\n\" };\n    # ords of $o\n    perl 5.40.3: 53 54 44 4f 55 54 3a 48 69 21 20 263a a   (CHARACTERS: the\n                 captured STDOUT is read back through the handle's :utf8 layer)\n    PCL:         ... 20 e2 98 ba a                          (UTF-8 BYTES)\n    ($e is bytes in both: perl reads STDERR's capture without the layer.)\n\nscratch/s517a/pr/ct.pl.  Capture::Tiny reads PerlIO::get_layers(*STDOUT) and\nre-applies them to the capture file (_relayer / _copy_std); PCL's answer to\nget_layers or its binmode on the reopened tmpfile handle loses the :utf8.\nProbe get_layers on a :utf8 STDOUT first.\n",
+   "id" : "3326",
+   "status" : "pending",
+   "subject" : "Capture::Tiny: a captured STDOUT under a :utf8 layer comes back as UTF-8 bytes; perl decodes it (236 board rows newly reached by #3262)"
+}

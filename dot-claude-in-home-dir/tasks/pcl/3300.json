@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Thu Oct 15 22:52:42 2026",
+   "description" : "Found by s517c's #3121 probe table (pre-existing: base dc87c403 answers the same).  In a //g loop a multi-line `^` matches again at the END of the previous match, so a /m anchored pattern walks on character by character:\n\n  my $s = \"ab\\ncd\\n\";\n  while ($s =~ /^[^a]/mg)  { print pos($s), \" \" }   # perl: 4      PCL: 4 5 6\n  while ($s =~ /^[b-z]/mg) { print pos($s), \" \" }   # perl: 4      PCL: 4 5\n  while ($s =~ /^(?!a)./mg){ print pos($s), \" \" }   # perl: 4      PCL: 4 5\n  while ($s =~ /^[^a]/g)   { print pos($s), \" \" }   # perl: (none) PCL: (none)\n  my @m = $s =~ /^[^a]/mg;                           # perl 1 element, PCL 3\n\nWithout /m it is right; it is the class-free `(?!a).` too, so it is not the char class.  Suspect: the MBOL rewrite `(?:\\A|^(?!\\z))` (%pcl-mbol-node) -- cl-ppcre's :start-anchor in multi-line mode answers true at `*start-pos*` (the scan's start, i.e. the previous match end) as well as after a newline; the //g scan loop would have to bind cl-ppcre::*real-start-pos* to 0 as the s///g loop does (#2981, DECIDED line \"s///g's loop is PCL's\").  Cheap discriminating measurement: `\"ab\\ncd\\n\" =~ s/^[^a]/X/mgr` -- if s///g gives perl's \"ab\\nXd\\n\" while m//g walks, it is the m//g loop's missing *real-start-pos* binding.  Probe file: scratch/s517c/pr/m2c.pl in the s517c worktree.\n",
+   "id" : "3300",
+   "status" : "pending",
+   "subject" : "m//g with a multi-line ^ re-matches at the previous match end: \"ab\\ncd\\n\" =~ /^[^a]/mg gives 3 matches, perl 1 (pre-existing)"
+}
