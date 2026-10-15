@@ -275,6 +275,142 @@ sub _rewrite_unreachable_gotos {
   }
 }
 
+# Pre-pass (#1747): `goto LABEL` whose label sits in a NESTED block -- below
+# the lowest block that holds both the goto and the label, inside an
+# if/elsif/else/unless branch or a bare block.  perl finds such a label
+# dynamically and takes the jump (it refuses only a construct that needs
+# initialisation); the expression machinery alone would lower the goto to a
+# lexical `(go :LABEL)` with no tag in scope -- an SBCL compile-time error
+# that loses the whole top-level form.  Classify every such goto ONCE, here:
+#   - supported: record it under the common block (refaddr), consumed by
+#     _lower_block_1's _goto_nested_fire / _goto_dispatch_hook and the
+#     if-clause steering in _lower_compound;
+#   - a jump into a foreach (or a C-style for / while / until body, a
+#     do/eval/map block, or past a declaration on the way) is REWRITTEN to the
+#     equivalent run-time die: perl's own text for foreach, a `PCL:` text for
+#     what PCL does not lower (rule 12: never a CL compile error).
+# Normative: docs/ir-spec.md "goto into a nested block".
+sub _classify_nested_gotos {
+  my ($self, $doc) = @_;
+  $self->{_nested_goto} = {};
+  for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
+                                 && $_[1]->content eq 'goto' }) || [] }) {
+    my $nx = $w->snext_sibling or next;
+    next unless $nx->isa('PPI::Token::Word')
+      && $nx->content =~ /^\w+$/ && $nx->content ne 'sub';
+    my $lbl = $nx->content;
+    my ($A, $lab);
+    for (my $p = $w->parent; $p; $p = $p->parent) {
+      if ($p->isa('PPI::Structure::Block') || $p->isa('PPI::Document')) {
+        $lab = _find_own_label($p, $lbl);
+        if ($lab) { $A = $p; last }
+      }
+      last if $p->isa('PPI::Statement::Sub');
+      if ($p->isa('PPI::Structure::Block')) {
+        my $prev = $p->sprevious_sibling;
+        last if $prev && $prev->isa('PPI::Token::Word')
+          && $prev->content =~ /^(?:sub|sort)$/;
+      }
+    }
+    next unless $A;
+    my $T = $lab->parent;
+    next if $T->parent == $A;    # a statement of the common list: the classic
+                                 # tagbody / #63 / #252 machinery owns it
+    my (@branches, @skips);
+    my $why = $self->_goto_nested_path($A, $T, \@branches, \@skips);
+    my @kids = $A->schildren;
+    my $kid = _child_of($A, $w);
+    my $k   = _child_of($A, $T);
+    my ($gi) = grep { $kid && $kids[$_] == $kid } 0 .. $#kids;
+    my ($ki) = grep { $kids[$_] == $k } 0 .. $#kids;
+    my $forward = defined $gi && $gi < $ki;
+    $why //= 'PCL: unsupported goto into a nested block past a declaration'
+      if $forward
+      && grep { $_->isa('PPI::Statement::Variable') || $self->_is_local_stmt($_) }
+         @kids[$gi .. $ki - 1];   # the goto statement itself too
+    if ($why) {
+      (my $q = $why) =~ s/(["\\\$\@])/\\$1/g;
+      $w->set_content('die');
+      $nx->insert_before(PPI::Token::Quote::Double->new(qq{"$q"}));
+      $nx->delete;
+      next;
+    }
+    my $e = $self->{_nested_goto}{ refaddr $A }{ refaddr $T } //= {
+      label => $lbl, k => $k, T => $T, branches => \@branches,
+      skips => \@skips, forward => 0, inner => 0 };
+    $e->{ $forward ? 'forward' : 'inner' } = 1;
+  }
+}
+
+# The label token NAME inside NODE and not inside a nested sub (a goto cannot
+# enter one), or undef.
+sub _find_own_label {
+  my ($node, $lbl) = @_;
+  my $hit = $node->find_first(sub {
+    return 0 unless $_[1]->isa('PPI::Token::Label')
+      && $_[1]->content =~ /^\Q$lbl\E\s*:/;
+    for (my $p = $_[1]->parent; $p && $p != $node; $p = $p->parent) {
+      return 0 if $p->isa('PPI::Statement::Sub');
+      if ($p->isa('PPI::Structure::Block')) {
+        my $prev = $p->sprevious_sibling;
+        return 0 if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+      }
+    }
+    return 1;
+  });
+  return $hit || undef;
+}
+
+# The significant child of LIST that contains NODE (or is NODE), or undef.
+sub _child_of {
+  my ($list, $node) = @_;
+  for (my $p = $node; $p; $p = $p->parent) {
+    return $p if $p->parent && $p->parent == $list;
+  }
+  return undef;
+}
+
+# Walk from the label's statement T up to the child of A, collecting what the
+# entry dispatch steers: the if/unless clause BLOCKS on the path (@$br) and
+# the path statements that are not first in their list (@$sk -- their earlier
+# siblings are skipped on entry).  Returns the run-time die text for a shape
+# the jump cannot take, else undef.
+sub _goto_nested_path {
+  my ($self, $A, $T, $br, $sk) = @_;
+  for (my $n = $T; $n->parent != $A; ) {
+    my $blk = $n->parent;
+    return 'PCL: unsupported goto into a nested block'
+      unless $blk && $blk->isa('PPI::Structure::Block');
+    my @sib = $blk->schildren;
+    my ($i) = grep { $sib[$_] == $n } 0 .. $#sib;
+    if ($i) {
+      return 'PCL: unsupported goto into a nested block past a declaration'
+        if grep { $_->isa('PPI::Statement::Variable') || $self->_is_local_stmt($_) }
+           @sib[0 .. $i - 1];
+      push @$sk, $n;
+    }
+    my $own = $blk->parent;
+    return 'PCL: unsupported goto into a nested block'
+      unless $own && $own->isa('PPI::Statement::Compound');
+    my ($head) = grep { !$_->isa('PPI::Token::Label') } $own->schildren;
+    my $type = $own->type // '';
+    if ($head && $head->isa('PPI::Structure::Block')) {
+      # a bare block: entered as it stands
+    }
+    elsif ($type eq 'if') {
+      push @$br, $blk;
+    }
+    elsif ($type eq 'foreach') {
+      return q{Can't "goto" into the middle of a foreach loop};
+    }
+    else {
+      return "PCL: unsupported goto into a $type loop";
+    }
+    $n = $own;
+  }
+  return undef;
+}
+
 # Pre-pass (#63/t183): Perl's `our @a` binds the bare name to the variable of
 # the package CURRENT AT THE DECLARATION, for the rest of the enclosing
 # lexical scope — a later `package` statement in the same block does NOT
@@ -1697,6 +1833,7 @@ sub parse {
   # a genuine forward goto (sort.t lines 809/813; v1 emits a naked (go :tag)
   # here that only survives because the calls sit under eval).
   $self->_rewrite_unreachable_gotos($doc);
+  $self->_classify_nested_gotos($doc);       # #1747
 
   # #3080: the QUALIFIED spellings the SOURCE wrote, read before the two
   # requalify passes below write qualified tokens of their own (those are this
@@ -9898,6 +10035,80 @@ sub _p_file_form {
   return (['p-file', "\"$file\""]);
 }
 
+# #1747 goto into a nested block, the COMMON level: @$s is (the remainder of)
+# the lowest statement list holding both a goto and its nested label (the
+# _classify_nested_gotos record).  Lowering, with F a fresh entry flag and T
+# the label's catch tag:
+#   (let ((F nil))
+#     (setf F (catch T PREFIX… nil))           ; forward gotos: a throw ends
+#                                              ; the prefix with F = 1
+#     (p-goto-region (F T) S_k REST…))         ; gotos inside S_k or after it:
+#                                              ; a throw re-runs S_k with F = 1
+# and the label's path inside S_k is lowered under _goto_disp, so with F set
+# each if-chain on the path takes the branch that holds the label (earlier
+# tests skipped), each earlier sibling on the path is skipped, and F is
+# cleared at the label.  Fires where the prefix holds no declaration (a
+# leading `my` nests the remainder and the recursion comes back here), for
+# inner-only gotos where S_k is first.  Normative: ir-spec "goto into a
+# nested block".
+sub _goto_nested_fire {
+  no warnings 'recursion';
+  my ($self, $s, $vi, $tail_ctx) = @_;
+  my $tab = $self->{_nested_goto} or return;
+  my $par = $s->[0]->parent or return;
+  my $ents = $tab->{ refaddr $par } or return;
+  for my $e (sort { $a->{T}->line_number <=> $b->{T}->line_number } values %$ents) {
+    next if $self->{_goto_live}{ refaddr $e->{T} };
+    my ($k) = grep { $s->[$_] == $e->{k} } 0 .. $#$s;
+    next unless defined $k;
+    my @prefix = @$s[0 .. $k - 1];
+    if ($e->{forward}) {
+      next if grep { $_->isa('PPI::Statement::Variable') || $self->_is_local_stmt($_) }
+              @prefix;
+    }
+    else {
+      next if $k;
+    }
+    my $F   = '--pcl-goto-flag-' . $self->{_goto_flag_counter}++ . '--';
+    my $tag = ':' . cl_sym('pcl-goto-' . $e->{label});
+    local $self->{_goto_live}{ refaddr $e->{T} } = 1;
+    local $self->{_catch_labels}{ $e->{label} } = [$tag];
+    my $d = $self->{_goto_disp} //= {};
+    local @{ $d->{branch} }{ map { refaddr $_ } @{ $e->{branches} } } = ($F) x @{ $e->{branches} };
+    local @{ $d->{skip} }{ map { refaddr $_ } @{ $e->{skips} } } = ($F) x @{ $e->{skips} };
+    local $d->{target}{ refaddr $e->{T} } = $F;
+    my @out;
+    push @out, ['setf', $F, ['catch', $tag, $self->_lower_block(\@prefix, $vi, undef), 'nil']]
+      if @prefix;
+    my @rest = $self->_lower_block([@$s[$k .. $#$s]], $vi, $tail_ctx);
+    @rest = (['p-goto-region', ['list', $F, $tag], @rest]) if $e->{inner};
+    return (['let', ['list', ['list', $F, 'nil']], @out, @rest]);
+  }
+  return;
+}
+
+# #1747, a statement list ON the label's path (see _goto_nested_fire): the
+# siblings before the path statement run only when F is clear, and the label
+# statement clears F.
+sub _goto_dispatch_hook {
+  no warnings 'recursion';
+  my ($self, $s, $vi, $tail_ctx) = @_;
+  my $d = $self->{_goto_disp} or return;
+  if ($d->{skip}) {
+    for my $i (1 .. $#$s) {
+      my $F = $d->{skip}{ refaddr $s->[$i] } or next;
+      return (['p-if', $F, 'nil',
+               ['progn', $self->_lower_block([@$s[0 .. $i - 1]], $vi, undef)]],
+              $self->_lower_block([@$s[$i .. $#$s]], $vi, $tail_ctx));
+    }
+  }
+  if ($d->{target} && (my $F = $d->{target}{ refaddr $s->[0] })) {
+    local $d->{target}{ refaddr $s->[0] } = undef;
+    return (['setf', $F, 'nil'], $self->_lower_block($s, $vi, $tail_ctx));
+  }
+  return;
+}
+
 sub _lower_block_1 {
   # One recursion level PER STATEMENT (each `my` nests the block remainder):
   # a few hundred top-level statements is normal, not runaway recursion.
@@ -9905,6 +10116,10 @@ sub _lower_block_1 {
   my ($self, $stmts, $vi, $tail_ctx) = @_;
   my @s = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
   return () unless @s;
+
+  # -- #1747 goto into a nested block: the common level, then the path.
+  if (my @f = $self->_goto_nested_fire(\@s, $vi, $tail_ctx))  { return @f }
+  if (my @f = $self->_goto_dispatch_hook(\@s, $vi, $tail_ctx)) { return @f }
 
   # -- #63 forward `goto LABEL` to a standalone label among these statements:
   # a lexical `(go)` cannot reach a tag whose tagbody opens LATER, and Perl
@@ -11714,6 +11929,20 @@ sub _lower_compound {
         $cur_cond = undef;
       }
     }
+    # #1747: a clause block on a nested goto's path (_goto_nested_fire) --
+    # with the entry flag F set, every earlier test is skipped and this
+    # clause's test is taken: `(p-if F nil TEST)` / `(p-if F 1 TEST)`.
+    if (my $br = $self->{_goto_disp} && $self->{_goto_disp}{branch}) {
+      my ($t) = grep { $br->{ refaddr $clauses[$_]{block} } } 0 .. $#clauses;
+      if (defined $t) {
+        my $F = $br->{ refaddr $clauses[$t]{block} };
+        $clauses[$_]{steer} = [$F, $_ == $t ? '1' : 'nil'] for 0 .. $t;
+      }
+    }
+    my $steer = sub {
+      my ($c, $test) = @_;
+      return $c->{steer} ? ['p-if', @{ $c->{steer} }, $test] : $test;
+    };
     # A `my` declared in any condition head scopes to the whole construct —
     # register the names as let-bound around cond+body lowering, then wrap the
     # result in a fresh boxed let (lexical shadow of any outer same-named var).
@@ -11739,6 +11968,7 @@ sub _lower_compound {
       for my $c (reverse @clauses) {
         my $test = ['setf', $ret, $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1)];
         $test = ['p-!', $test] if $c->{kw} eq 'unless';
+        $test = $steer->($c, $test);
         $chain = ['p-if', $test,
                   ['setf', $ret, ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)]],
                   $chain];
@@ -11757,6 +11987,7 @@ sub _lower_compound {
       while (my $c = pop @clauses) {
         my $cond = $self->_lower_expr([_cond_parts($c->{cond})], $stmt, undef, 1);
         $cond = ['p-!', $cond] if $c->{kw} eq 'unless';
+        $cond = $steer->($c, $cond);
         $form = ['p-if', $cond,
                  ['progn', $self->_lower_scope([$c->{block}->schildren], $vi, $tail_ctx)],
                  (defined $form ? ($form) : ())];

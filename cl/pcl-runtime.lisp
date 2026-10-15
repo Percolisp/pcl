@@ -229,7 +229,7 @@
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
    #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach #:p-foreach-raw #:p-foreach-range #:p-foreach-range-raw
-   #:p-return #:p-return-empty #:p-tail-value #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
+   #:p-return #:p-return-empty #:p-tail-value #:p-goto-sub #:p-goto-region #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
    ;; the DYNAMIC loop exit (task #1022 half (b)) — both names are emitted
    #:p-dyn-once #:%p-dyn-loop-exit
    #:p-continue #:p-break
@@ -16751,6 +16751,17 @@ what changes is that the element is the raw counter rather than a fresh box."
                (let ((*p-shared-args* @_)) (funcall ,target @_))
                (apply ,target (coerce @_ 'list))))))))
 
+(defmacro p-goto-region ((flag tag) &body body)
+  "#1747 `goto LABEL` into a NESTED block: run BODY and yield its values; a
+   (throw TAG 1) from inside it (a goto lowered under this region) unwinds
+   here, sets FLAG and runs BODY again from the top, where the entry dispatch
+   the compiler wove into BODY reads FLAG to steer straight to the label and
+   clears it there.  Normative: docs/ir-spec.md, goto into a nested block."
+  (let ((blk (gensym "GOTO-REGION")))
+    `(block ,blk
+       (loop
+        (setf ,flag (catch ,tag (return-from ,blk (progn ,@body))))))))
+
 (defmacro p-goto-computed (expr)
   "Perl `goto EXPR` — the shape codegen emits when the operand is neither
    `&NAME` nor a bare label: `goto \\&NAME`, `goto $coderef`, `goto $h->{cb}`.
@@ -25366,7 +25377,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6184"
+(defparameter *pcl-cache-generation* "v2-6284"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

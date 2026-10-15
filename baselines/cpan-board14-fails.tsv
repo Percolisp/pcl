@@ -101,6 +101,10 @@
 #   HTTP-Tiny 020_headers.t / 030_response.t *FILE* (#3244 print({$fh} @_) in t/Util.pm) and 170_keepalive.t *FILE*
 #   (#3243 dir_list).  ADDED: 020_headers.t #3 (exposed: the file now runs), cause #3263.  RE-CAUSED: the HTTP-Tiny
 #   rows that read "#1575 + then #3243" -> #3262 (the next blocker, pre-existing on main).
+# LEFT BY EDIT (s517a member 0, #1747 FIXED, window s517a, 15_flags.t run alone on the s517a tree): Text-CSV 15_flags.t
+#   *PLAN* ("ran 9 of 229" -- the goto EOLX compile error); the file now runs 223 / 6.  RE-CAUSED: 15_flags.t 46 CR
+#   (#966 + #1747 -> #1389).  ADDED: 15_flags.t 6 CR, 28, 29, 81, 137 -- #1389, the six rows real perl also fails
+#   with is_utf8 forced to 1 (they were not reached on main).
 Algorithm-Diff-1.201-0	base.t	6			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	10			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	15			"$VAR1 = [[['-',0,'a']],[['+',2,'d']],[['-',4,'h'],['+',4,'f']],[['+',6,'k']],[['-',8,'n'],['+',9,'r'],['-',9,'p'],['+',10,'s'],['+',11,'t']]];"	#1511 A (same hunk-iteration family)
@@ -423,7 +427,12 @@ Text-CSV-2.04	10_base.t	14	Error_input ()	undef	'def	#1389 (is_utf8 always 1: th
 Text-CSV-2.04	12_acc.t	126	record_number	'1'	'2'	#966 + #1747 (Text::CSV_PP ____parse: pos($ctx->{tmp}) reads undef after its /g match, so a parse stops after a quoted field -- `"a",b,c` gives [a] -- and its `goto EOLX` into a sibling elsif branch is an SBCL "GO to nonexistent tag", the CR/EOL rows; probed s515c csv3.pl/csv4.pl/csv5.pl)
 Text-CSV-2.04	12_acc.t	127	parse (foo)			#1389 (is_utf8 always 1 -- reproduced under real perl with is_utf8 forced to 1)
 Text-CSV-2.04	12_acc.t	128	parse (foo)			#1389 (is_utf8 always 1 -- reproduced under real perl with is_utf8 forced to 1)
-Text-CSV-2.04	15_flags.t	46	CR			#966 + #1747 (Text::CSV_PP ____parse: pos($ctx->{tmp}) reads undef after its /g match, so a parse stops after a quoted field -- `"a",b,c` gives [a] -- and its `goto EOLX` into a sibling elsif branch is an SBCL "GO to nonexistent tag", the CR/EOL rows; probed s515c csv3.pl/csv4.pl/csv5.pl)
+Text-CSV-2.04	15_flags.t	6	CR			#1389 (is_utf8 always 1: $ctx->{utf8} = utf8::is_utf8($src) makes ____parse accept a lone CR and a binary character; the same six rows fail under real perl with *utf8::is_utf8 = sub { 1 } -- s517a, 15_flags.t runs whole since #1747)
+Text-CSV-2.04	15_flags.t	28	Binary character			#1389 (is_utf8 always 1: $ctx->{utf8} = utf8::is_utf8($src) makes ____parse accept a lone CR and a binary character; the same six rows fail under real perl with *utf8::is_utf8 = sub { 1 } -- s517a, 15_flags.t runs whole since #1747)
+Text-CSV-2.04	15_flags.t	29	Binary character in quotes			#1389 (is_utf8 always 1: $ctx->{utf8} = utf8::is_utf8($src) makes ____parse accept a lone CR and a binary character; the same six rows fail under real perl with *utf8::is_utf8 = sub { 1 } -- s517a, 15_flags.t runs whole since #1747)
+Text-CSV-2.04	15_flags.t	46	CR			#1389 (is_utf8 always 1: $ctx->{utf8} = utf8::is_utf8($src) makes ____parse accept a lone CR and a binary character; the same six rows fail under real perl with *utf8::is_utf8 = sub { 1 } -- s517a, 15_flags.t runs whole since #1747)
+Text-CSV-2.04	15_flags.t	81	Hi! - meta_info () - field 2	'3'	'1'	#1389 (is_utf8 always 1: $ctx->{utf8} = utf8::is_utf8($src) makes ____parse accept a lone CR and a binary character; the same six rows fail under real perl with *utf8::is_utf8 = sub { 1 } -- s517a, 15_flags.t runs whole since #1747)
+Text-CSV-2.04	15_flags.t	137	Hi! - meta_info () - field 2	'3'	'1'	#1389 (is_utf8 always 1: $ctx->{utf8} = utf8::is_utf8($src) makes ____parse accept a lone CR and a binary character; the same six rows fail under real perl with *utf8::is_utf8 = sub { 1 } -- s517a, 15_flags.t runs whole since #1747)
 Text-CSV-2.04	30_types.t	20	numeric warning	''	to match: numeric	NS:Warnings-gated diagnostics are absent (#221)
 Text-CSV-2.04	47_comment.t	0	*FILE*	no TAP rows (rc=0)	61 row(s)	#1575 (the board does not chdir: `require "./t/util.pl"` is not found) + then #3061 (`require "./t/util.pl"` refuses the whole file: "file lexical 'ebcdic' captured by sub _readable" -- the same refusal stops 18 more files after row 1, which the scoreboard reads as PASS: #3241)
 Text-CSV-2.04	66_formula.t	68	Warnings	'ARRAY(0x6)'	'ARRAY(0x7)'	#966 (Text::CSV_PP's __get keeps its place in `$ctx->{used} = pos($ctx->{tmp})`; pos() of a hash element reads undef after a /g match, so fields after the first are lost -- probed csv5.pl/csv6.pl: formula => 'diag' gives `3|4` for `=1+2,3,4`)
@@ -559,7 +568,6 @@ Path-Tiny-0.150-0	rel-abs.t	0	*PLAN*	ran 32 of no plan, rc 2	a plan	#1576 (Test:
 Path-Tiny-0.150-0	sig_die.t	0	*PLAN*	ran 1 of no plan, rc 2	a plan	#3284 (a *PLAN* row the #3241 verdict surfaced: the file stops short or exits non-zero; its cause not yet read -- the list is in the task)
 Role-Tiny-2.002004-0	subclass.t	0	*PLAN*	ran 5 of no plan, rc 2	a plan	#3284 (a *PLAN* row the #3241 verdict surfaced: the file stops short or exits non-zero; its cause not yet read -- the list is in the task)
 Scalar-List-Utils-1.70-0	uniqnum.t	0	*PLAN*	ran 20 of 23, rc 255	23 row(s)	#3284 (a *PLAN* row the #3241 verdict surfaced: the file stops short or exits non-zero; its cause not yet read -- the list is in the task)
-Text-CSV-2.04	15_flags.t	0	*PLAN*	ran 9 of 229, rc 1	229 row(s)	#1747 (the file dies at row 9: `goto EOLX` in Text::CSV_PP::____parse is "attempt to GO to nonexistent tag: :EOLX", a compile error -- reached since s515a #3063 lets the parse go on; pre-existing on main, which LOST 64 of s515c's 72 passing rows)
 Text-CSV-2.04	20_file.t	0	*PLAN*	ran 1 of 109, rc 1	109 row(s)	#3061 (from the dist root `require "./t/util.pl"` is found and refuses to transpile: "file lexical 'ebcdic' captured by sub _readable")
 Text-CSV-2.04	21_lexicalio.t	0	*PLAN*	ran 1 of 109, rc 1	109 row(s)	#3061 (from the dist root `require "./t/util.pl"` is found and refuses to transpile: "file lexical 'ebcdic' captured by sub _readable")
 Text-CSV-2.04	22_scalario.t	0	*PLAN*	ran 1 of 136, rc 1	136 row(s)	#3061 (from the dist root `require "./t/util.pl"` is found and refuses to transpile: "file lexical 'ebcdic' captured by sub _readable")

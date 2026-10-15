@@ -3044,6 +3044,24 @@ Four source forms, four fates:
   and RET read after the tagbody (the §6.2 bare-block tail regime), since a
   `tagbody` yields nil.  The label's own loop-control `block`/`catch` tags
   are a separate namespace — `last LBL` inside is unaffected.
+- **goto into a nested block** (#1747, s517a) — a `goto LABEL` whose label
+  sits BELOW the lowest block holding both, inside an `if`/`elsif`/`else`/
+  `unless` branch or a bare block (perl finds it dynamically).  At that common
+  list the compiler binds a fresh entry flag F and the label's catch tag T:
+  forward gotos end the prefix through `(setf F (catch T PREFIX… nil))`;
+  gotos inside the label's statement or after it re-run that statement under
+  `(p-goto-region (F T) S_k REST…)`, which on `(throw T 1)` sets F and runs
+  the body again.  With F set, each `if` chain on the path takes the branch
+  holding the label (`(p-if F 1 TEST)`, earlier tests `(p-if F nil TEST)`),
+  each earlier sibling on the path is skipped (`(p-if F nil (progn …))`),
+  and F is cleared at the label statement.  Lexicals of the common list keep
+  their values.  Example: `{ goto HERE; if (undef) { HERE: { print "x" } } }`
+  prints `x`.  **What dies instead, at the goto, at run time:** a target in
+  a `foreach` body — perl's own `Can't "goto" into the middle of a foreach
+  loop`; a target in a `while`/`until`/C-style `for` body, a `do`/`eval`/
+  `map` block, or reached past a declaration (`my`/`local`, the goto's own
+  statement included) — `PCL: unsupported goto into …` (`not-supported.md`
+  §goto into a nested block).  Never a CL compile error.
 - **Computed** `goto EXPR` where EXPR is a **label name string** — a CL
   tagbody tag is not a first-class value, so this cannot be expressed.
   `%p-goto-target` ANNOUNCES the operand on stderr and execution falls

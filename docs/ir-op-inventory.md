@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **753**
+* names exported: **754**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 753
+* with a machine-readable `Contract:` tail: **69** of 754
 * UNCLASSIFIED (no family rule matches): **18**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -469,7 +469,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-capture-write` | function | `(value)` | — | — | — | — | — | — | — |
 | `p-high-capture` | function | `(n)` | — | — | — | — | — | — | — |
 
-## control-flow (26)
+## control-flow (27)
 
 *No ir-spec §10 row.*  conditionals, loops, loop control, sub return — ir-spec §6
 
@@ -489,6 +489,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-foreach-range-raw` | macro | `((var from to) &rest body-and-keys)` | — | — | — | — | — | — | — |
 | `p-foreach-raw` | macro | `((var list) &rest body-and-keys)` | — | — | — | — | — | — | — |
 | `p-goto-computed` | macro | `(expr)` | — | — | — | — | — | — | — |
+| `p-goto-region` | macro | `((flag tag) &body body)` | — | — | — | — | — | — | — |
 | `p-goto-sub` | macro | `(fn)` | — | — | — | — | — | — | — |
 | `p-if` | macro | `(condition then-form &optional else-form)` | — | — | — | — | — | — | — |
 | `p-last` | macro | `(&optional label)` | — | — | — | — | — | — | — |

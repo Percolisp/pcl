@@ -230,7 +230,7 @@ my %FAMILY;
   'control-flow' => [qw(p-if p-unless p-while p-until p-do-while p-do-until
                         p-for p-foreach p-foreach-raw p-foreach-range
                         p-foreach-range-raw p-return p-return-empty p-tail-value
-                        p-goto-sub p-goto-computed p-last p-last-dynamic p-next
+                        p-goto-sub p-goto-region p-goto-computed p-last p-last-dynamic p-next
                         p-redo p-continue p-break p-do %pcl-loop-tag
                         p-dyn-once %p-dyn-loop-exit)],
   'exception' => [qw(p-eval p-eval-block p-eval-thunk p-eval-lex-lookup p-try

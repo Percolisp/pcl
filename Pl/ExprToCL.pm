@@ -2588,7 +2588,9 @@ sub gen_funcall_form {
                         && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
           my $catch = $parser && $parser->lex_home->{_catch_labels};
           if ($catch && $catch->{$label}) {
-            return ['throw', $catch->{$label}, 'nil'];
+            # [TAG] = a #1747 nested-label entry: the thrown 1 sets its flag.
+            my $c = $catch->{$label};
+            return ref $c ? ['throw', $c->[0], '1'] : ['throw', $c, 'nil'];
           }
           return ['go', ':' . cl_sym($label)];
         }

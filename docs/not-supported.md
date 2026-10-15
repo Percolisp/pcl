@@ -1876,6 +1876,19 @@ site.
 **Rationale:** Runtime-computed `goto LABEL` has no clean CL target (tags are lexical,
 not first-class).  It is rare and discouraged in modern Perl.
 
+### goto into a nested block: the shapes PCL does not lower (#1747, s517a)
+
+A literal `goto LABEL` into an `if`/`elsif`/`else`/`unless` branch or a bare
+block is lowered (`ir-spec.md` §6.4).  Three neighbouring shapes DIE at the
+goto, at run time, with a trappable `PCL: unsupported goto into …` message
+where perl takes the jump: a target inside a `while`/`until`/C-style `for`
+body (perl enters it and skips the first test), inside a `do`/`eval`/`map`
+block, or reached past a `my`/`local` declaration on the way (the goto's own
+statement included -- `my $x = f() or goto L;` with L nested).  A target in a
+`foreach` body dies with perl's own text, as perl does.  perl 5.40 itself
+deprecates the whole construct ("will become fatal in Perl 5.42"); PCL does
+not print that warning.  Owner of the residue: task #3320.
+
 **Depth note (s329):** `goto &sub` replaces the frame in perl, so an unbounded
 goto CHAIN (a goto-based trampoline) runs at constant stack.  PCL's frame
 replacement is throw-based and still nests dynamic bindings, so a chain is

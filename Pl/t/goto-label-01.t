@@ -62,7 +62,7 @@ sub test_transpile {
     is(run_cl($cl), run_perl($code), $name);
 }
 
-plan tests => 13;
+plan tests => 20;
 
 # Forward error-goto inside a sub, jumped to from inside an if branch.
 test_transpile('forward goto to error label inside sub',
@@ -143,3 +143,27 @@ test_transpile('#2287 hoist never shadows an earlier outer read',
 test_transpile('#2287 renamed my $a read after an embedded my',
     'my $a = "/tmp/pcl-goto-label-01-$$"; open(my $o, ">", $a) or die; print $o "x"; close $o;'
   . ' print -e $a ? "exists" : "missing", "\n"; unlink $a;');
+
+# #1747: `goto LABEL` whose label sits in a NESTED block (an if/elsif/else/
+# unless branch or a bare block below the lowest block holding both) -- perl
+# finds it dynamically; PCL used to emit a `(go :LABEL)` with no tag in
+# scope, an SBCL compile-time error that lost the whole top-level form.
+# (`no warnings`: perl 5.40 warns "deprecated" on stderr, which run_perl reads.)
+test_transpile('#1747 goto into a labelled bare block inside a false if',
+    'no warnings; { goto HERE; if (undef) { HERE: { print "works\n"; } } } print "done\n";');
+test_transpile('#1747 goto between sibling elsif branches inside a loop (Text::CSV_PP EOLX)',
+    'no warnings; my @in = (1, 2, 3, 4); my $i = 0; LOOP: while ($i < @in) { my $c = $in[$i++];'
+  . ' if ($c == 1) { print "one\n"; goto EOLX if $i == 1; print "no\n"; }'
+  . ' elsif ($c == 2) { EOLX: print "eolx $c\n"; next LOOP if $c == 2; print "fell $c\n"; }'
+  . ' elsif ($c == 3) { goto EOLX; } else { print "else $c\n"; } print "after $c\n"; } print "end\n";');
+test_transpile('#1747 two levels deep into an else branch, the jump returns a value',
+    'no warnings; sub f { my $n = shift; goto M if $n; if (!$n) { return "a" } else { { M: return "m$n" } } }'
+  . ' print f(0), f(3), "\n";');
+test_transpile('#1747 backward goto into an earlier branch, outer lexicals kept',
+    'no warnings; my $k = 0; my $x = 5; { my $y = 7; if ($k) { N: print "N $k $x $y\n"; } $k++; goto N if $k < 3; } print "k=$k\n";');
+test_transpile('#1747 forward goto past skipped statements into an unless whose test is true',
+    'no warnings; my $t = 1; { goto U; print "skip\n"; unless ($t) { print "u0\n"; U: print "in unless\n"; print "more\n" } print "after\n" }');
+test_transpile('#1747 goto into the middle of a foreach dies with perl text',
+    'no warnings; eval { goto F; foreach my $q (1) { F: print "in\n" } }; (my $e = $@) =~ s/ at .*//s; print "E: $e\n";');
+test_transpile('#1747 goto into a nested block from a map block (a pseudo-block it may leave)',
+    'no warnings; my $z = 0; { my @r; @r = map { goto L if $_ == 2; $_ } 1 .. 3; print "r=@r\n"; if ($z) { L: print "landed\n" } } print "end\n";');
