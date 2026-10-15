@@ -297,7 +297,11 @@ sub _classify_nested_gotos {
                                  && $_[1]->content eq 'goto' }) || [] }) {
     my $nx = $w->snext_sibling or next;
     next unless $nx->isa('PPI::Token::Word')
-      && $nx->content =~ /^\w+$/ && $nx->content ne 'sub';
+      && $nx->content =~ /^\w+$/ && $nx->content !~ /^(?:sub|do|state|my|our|local)$/;
+    # A word followed by a block or a list is an EXPRESSION, not a label:
+    # `goto state $f = …` reaches here rewritten as `goto do { … }` (state.t).
+    my $after = $nx->snext_sibling;
+    next if $after && $after->isa('PPI::Structure');
     my $lbl = $nx->content;
     my ($A, $lab, $at_doc);
     for (my $p = $w->parent; $p; $p = $p->parent) {

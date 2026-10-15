@@ -22460,7 +22460,8 @@ size comes from fstat on the descriptor, after the buffered output is written
                  (lambda (st)
                    (/ (- (to-number (unbox (symbol-value '|$^T|)))
                          (funcall accessor st))
-                      86400.0d0))))
+                      86400.0d0))
+                 :flag nil))   ; an AGE, not a flag (#3242)
 
 (defun %p--M-impl (file)
   "Perl -M: script start time minus file modification time, in days"
@@ -25457,7 +25458,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6288"
+(defparameter *pcl-cache-generation* "v2-6289"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

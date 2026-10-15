@@ -121,6 +121,6 @@ same('a comparison in a condition: plain, string, NaN, an overload handler retur
 same('filetests and eof are perl booleans; -s is a size; a missing file is undef',
   $B . 'my $f = "/etc/passwd"; my $d = "/tmp";
    print join(",", b(-e $f), b(-f $f), b(-d $f), b(-r $f), b(-e "/nope/x"), (defined(-e "/nope/x") ? "D" : "U"),
-     b(-s $f), b(-T $f), b(-d $d), b(-f $d));
+     b(-s $f), b(-T $f), b(-d $d), b(-f $d), b(-M $f), ((-M $f) > 0 ? "age" : "noage"));
    open my $z, "<", "/dev/null" or die; print ",", b(eof($z)), "[", eof($z), "]";
    open my $p, "<", $f or die; print ",", b(eof($p)), "[", eof($p), "]\n";');
