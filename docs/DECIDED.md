@@ -511,6 +511,19 @@ not-supported.md → only then probe.*
 - **#3246 FIXED (shim)**: File::Glob::bsd_glob in scalar context answers the LAST element (undef for none), never the count.
 - Filed from the census (each with a perl-probed reproducer): #3240 (`local our` in `package Foo::Bar` -> unquoted defcell, Type::Tiny cannot load), #3242 (perl 5.36 stable booleans absent), #3243 (opendir on a COPY of a glob ref: IO::Dir reads nothing), #3244 (`print({$fh} LIST)` dropped), #3245 (can_ok's list args unflattened).
 
+## s517b (2026-10-15/16, Opus) -- Compress::Raw::Zlib over libz (#3161, TEMPORARY), copy-in/copy-out for unseen callees (#2636), and the five findings on the way (#3340-#3345)
+- **Compress::Raw::Zlib = `lib/Compress/Raw/Zlib.pm` over one `builtin::zlib_*` primitive per zlib function, libz via sb-alien, TEMPORARY until pclxs (USER s516)** -- ir-spec "Host libraries", shipped-modules, not-supported "Compress::Raw::Zlib".  #3161.
+- **ONE host-library loader `%p-host-library-p`**: first use, once per process, `:dont-save` (a saved core never records the library; an init hook clears the decision); crypt moved onto it.  ir-spec "Host libraries".
+- **A z_stream lives in foreign memory, pinned buffers live for ONE zlib call; freed at stream END (Z_STREAM_END / finishing flush) and in DESTROY; a stream abandoned mid-way leaks until exit** (#2370).  not-supported "Compress::Raw::Zlib".
+- **COPY-IN / COPY-OUT (#2636, Fable design s517, SHIPPED)**: a raw-slot `my` scalar passed whole to a method / coderef / qualified-imported-undeclared sub rides a caller-held box (`p-copy-back`, temporaries `--pcl-cb--N`), read back after the call; the variable stays raw (#189 kept).  ir-spec §5.2; residue (twice, retained ref, closure, die, invocant) not-supported "@_ argument aliasing".
+- **#2636's counter and bench**: 240 sites / 76 files / 128 variables over 651 files; no bench row emits a copy-back; methret +10 % / emptysub +5 % on byte-identical emission = the saved-core layout artefact (Fable re-benches at merge).  session-log ## Session s517b.
+- **`*$g->{k}` is `(*$g)->{k}`, the glob's hash** (#3340): a glob cast folds into the arrow's base like `$` (#211); not for methods.
+- **A facts overlay entry for a NON-exported sub is wrong: the module's own unit applies it above the definition** (#3341: Base::Common's `whatIs`).
+- **PPI §38: a statement-initial `*$name` after a scalar-first bare block is lexed as multiplication** -- repaired in `_repair_statement_start_glob_cast` (#3342).
+- **IO::Compress::{Gzip,Zlib,Zip}::Constants get facts overlays (nullary constants + literal @EXPORT)** (#3343).
+- **`-NAME` of a known sub (same-file, prototype in scope, or `(` follows) is the negated CALL; a fat comma keeps the string** (#3344, the #476 family; `_negated_call_form`, both Word sites).
+- **A store REPLACES a `:strbuf` cell whole** (#3345): the cell is representation, not magic; a ref assigned over a long `.=` buffer was lost (every IO::Zlib read).
+
 ## s516b (2026-10-12/13, Opus) -- the board runner's two measurement holes (#1575 chdir, #3241 PASS = plan met) and the re-bless they force; `local our` in a multi-segment package (#3240); open on a ref held in a variable (#3202); fillers #3245 (half) #3280
 - **A board t-file runs with CWD = its dist root** (`tools/run-dist-t.pl` chdirs; paths it passes on are absolute) -- #1575, docs/cpan-release-plan.md "the runner's contract".
 - **Board PASS = ≥1 ok + 0 not-ok + the PLAN met + SBCL exit 0; a short file is PARTIAL with ONE `*PLAN*` row "ran M of N, rc R"** (`*FILE*` stays for no rows) -- #3241, same section.
