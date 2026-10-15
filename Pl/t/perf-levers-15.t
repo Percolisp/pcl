@@ -17,6 +17,9 @@
 #   #3121 a bracket class of plain characters / ranges is ONE 256-bit
 #         table test plus its high ranges (%pcl-scanner-tree rewrites it to (:property FN)
 #         in the parse tree; cl-ppcre itself is untouched).
+#   joinarr: join COPIES, so a slice argument reads VALUES (p-join's compiler
+#         macro -> %p-aslice-copy / %p-hslice-copy, the #1205 rule): no
+#         element cell is promoted for `"@a[0..3]"`.
 use v5.30;
 use strict;
 use warnings;
@@ -239,6 +242,55 @@ ctl: x<01>y<1f>z
 inv: 3
 split: a,b,c
 subst: he___ w_r_d
+END_OUT
+
+# ─────────────────────────────────────────────────────────────────────────────
+# joinarr MECHANISM: join copies, so p-join's compiler macro reads a slice
+# argument as VALUES (%p-aslice-copy / %p-hslice-copy, the #1205 rule); a
+# non-slice argument is left alone.
+like(lisp_out(<<'END_LISP'),
+(let ((cm (compiler-macro-function 'p-join)))
+  (format t "J:~A|~A~%"
+          (string-downcase (prin1-to-string
+                            (funcall cm '(p-join "," (p-aslice @a (p-.. 0 3)) (p-hslice %h "k")) nil)))
+          (string-downcase (prin1-to-string (funcall cm '(p-join "," @a $x) nil)))))
+END_LISP
+    qr/J:\(p-join "," \(%p-aslice-copy \@a \(p-\.\. 0 3\)\) \(%p-hslice-copy %h "k"\)\)\|\(p-join "," \@a \$x\)/,
+    'joinarr: a slice argument of join reads values (copying slice)');
+
+# joinarr ANSWERS (perl 5.40.3's output): join / interpolation over slices --
+# past the end, negative, reversed, empty, a tied array (one FETCH per
+# element), a hash slice that must not vivify, the array keeps its length.
+answers(<<'END_PL', <<'END_OUT', 'joinarr: join over slices = perl');
+package TA; sub TIEARRAY { bless [10,20,30] } sub FETCH { $main::f++; $_[0][$_[1]] } sub FETCHSIZE { 3 }
+package main;
+our $f = 0; tie my @t, 'TA';
+my @a = (1 .. 8);
+print "11[@a[0..3]]\n";
+print "12[@a[6..10]|\n";
+print "13[@a[-3..-1]]\n";
+print "14[@a[reverse 0..3]]\n";
+my @z = (); print "15[@z[0..2]|\n";
+{ local $" = ":"; print "16[@a[1..2]]\n"; }
+print "17[", join(",", @a[2..4]), "]\n";
+my @h = (1..3); my $x = join(",", @h[0..5]); print "19[$x] ", scalar(@h), "\n";
+$f = 0; print "20[@t[0..1]] fetches=$f\n";
+my %h = (a => 1, b => 2); my $hx = join(",", @h{qw(a zz b)}); print "24[$hx] ", (exists $h{zz} ? "viv" : "noviv"), "\n";
+my @v = (1, 2); my $vx = "@v[0..4]"; print "25[$vx] ", scalar(@v), "\n";
+print "26[@h{'a','b'}]\n";
+END_PL
+11[1 2 3 4]
+12[7 8   |
+13[6 7 8]
+14[4 3 2 1]
+15[  |
+16[2:3]
+17[3,4,5]
+19[1,2,3,,,] 3
+20[10 20] fetches=2
+24[1,,2] noviv
+25[1 2   ] 2
+26[1 2]
 END_OUT
 
 done_testing();

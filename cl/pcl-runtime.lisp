@@ -28999,6 +28999,19 @@ size comes from fstat on the descriptor, after the buffered output is written
         (%p-join-strings s (mapcar #'to-string elements))
         (if elements (to-string (car elements)) ""))))
 
+;;; join COPIES its operands, so a slice argument reads VALUES (s517c, perf
+;;; round 47 -- the #1205 rule for one more copying consumer): `"@a[0..3]"`
+;;; lowers to (p-join |$"| (p-aslice @a ...)), and p-aslice builds the
+;;; container's element CELLS, PROMOTING each raw slot to a box (monotone:
+;;; the array pays box indirection from then on).  join stringifies each
+;;; element once and keeps nothing, so %p-aslice-copy / %p-hslice-copy (the
+;;; slot values, no cell, no vivification) give the same string -- tie
+;;; FETCHes once per element either way.  joinarr -17.8 % whole run.
+(define-compiler-macro p-join (&whole form sep &rest items)
+  (if (some #'%p-copying-slice-form items)
+      `(p-join ,sep ,@(mapcar (lambda (i) (or (%p-copying-slice-form i) i)) items))
+      form))
+
 (defun %perl-space-char-p (c)
   "T if C is whitespace under Perl's Unicode \\p{White_Space} property — the set that
    `\\s` and `split ' '` match under /u.  PCL strings are always Unicode (no per-scalar
