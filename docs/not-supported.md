@@ -1007,6 +1007,8 @@ caller's variable.  What copy-back does NOT give (probed vs perl 5.40.3):
   (it sees the pre-call value until the call returns);
 - a callee that writes `$_[N]` and then DIES (the read-back is skipped: the
   caller keeps the pre-call value; perl keeps the write).
+- the INVOCANT: a raw-slot invocant is not copied back -- `my $c = "Obj"; sub Obj::inv { $_[0] = "replaced" } $c->inv; print $c` prints `replaced` in perl and `Obj` in PCL (ACCEPTED, Fable s517: a raw-slot invocant is a class-name string; a reference invocant is already a box and its rewrite reaches the caller).
+Probes for the four: ~/pcl-agent-scratch/s513/review/p517b/cb1.pl rows t7 (same var twice: perl `aab`, PCL `ab`), t8 (retained ref, late write: `aL` / `a`), t9 (die after a partial write: `ap` / `a`), t10 (closure reads mid-call: `seen=aw` / `seen=a`).
 
 What still COPIES (beyond the copy-back's reach):
 
