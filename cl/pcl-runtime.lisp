@@ -7435,18 +7435,40 @@
                  (when escapep (write-char #\\ out))
                  (write-char c out))))))
 
+;;; HOST LIBRARIES — the ONE loader for a system shared object the runtime
+;;; calls through sb-alien (crypt(3)'s libcrypt, zlib's libz; docs/ir-spec.md
+;;; "Host libraries").  A library is loaded at FIRST USE, once per PROCESS,
+;;; with :dont-save, so a saved core never records it: a core saved on a box
+;;; that has the library starts on a box that lacks it, and a program that
+;;; never calls into it never notices.  The alien routines below are linked
+;;; lazily by SBCL's linkage table, so defining them before the library is
+;;; loaded is legal; calling one before %p-host-library-p answered T is not.
+(defvar *p-host-libraries* (make-hash-table :test #'eq)
+  "KEY -> :loaded or :absent, decided at the first %p-host-library-p call of
+   this process.")
+
+(push (lambda () (clrhash *p-host-libraries*)) sb-ext:*init-hooks*)
+
+(defun %p-host-library-p (key names)
+  "T when one of the shared objects NAMES (tried in order) is loaded into this
+   process under KEY; NIL when none of them can be.  Decided once per process."
+  (let ((state (gethash key *p-host-libraries*)))
+    (unless state
+      (setf state (if (some (lambda (name)
+                              (ignore-errors
+                                (sb-alien:load-shared-object name :dont-save t)
+                                t))
+                            names)
+                      :loaded
+                      :absent))
+      (setf (gethash key *p-host-libraries*) state))
+    (eq state :loaded)))
+
 ;;; crypt(3) — one-way password hashing via the system C library.
 ;;; Perl's crypt() is a thin wrapper over the C crypt(3); we call the same
 ;;; function, so output is byte-identical to Perl on the same platform
 ;;; (DES with a 2-char salt, or glibc $1$/$5$/$6$ etc. by salt prefix).
-(defvar *p-crypt-available* nil
-  "T if the system crypt(3) could be resolved at load time.")
-
-(eval-when (:load-toplevel :execute)
-  ;; glibc 2.39+ split crypt(3) out of libc into libcrypt; load it if present.
-  (when (ignore-errors (sb-alien:load-shared-object "libcrypt.so.1") t)
-    (setf *p-crypt-available* t)))
-
+;;; glibc 2.39+ split crypt(3) out of libc into libcrypt.
 (sb-alien:define-alien-routine ("crypt" %c-crypt)
     (sb-alien:c-string :external-format :latin-1)
   ;; crypt(3) operates on bytes; pass latin-1 so codepoints 0-255 map 1:1.
@@ -7463,10 +7485,230 @@
     (when (or (find-if (lambda (c) (> (char-code c) 255)) pt)
               (find-if (lambda (c) (> (char-code c) 255)) sl))
       (p-die "Wide character in crypt"))
-    (unless *p-crypt-available*
+    (unless (%p-host-library-p :crypt '("libcrypt.so.1" "libcrypt.so"))
       (p-die "The crypt() function is unimplemented due to excessive paranoia."))
     (let ((result (%c-crypt pt sl)))
       (if result result *p-undef*))))
+
+;;; zlib — the system libz, called through sb-alien (task #3161; USER s516:
+;;; TEMPORARY, until pclxs provides the XS Compress::Raw::Zlib).  The runtime
+;;; holds ONLY the calls into zlib, as builtin::zlib_* primitives named for
+;;; zlib's own functions; lib/Compress/Raw/Zlib.pm owns the module's API.  A
+;;; stream is a z_stream in FOREIGN memory (malloc'd here, freed by the
+;;; *End primitive); Perl holds its address as an integer HANDLE, and the
+;;; registry below makes a stale or foreign handle die instead of reaching
+;;; zlib.  Buffers are passed PINNED for the length of ONE zlib call: zlib
+;;; copies what it keeps into its own window, so no Lisp address outlives
+;;; the call.  docs/ir-spec.md "Host libraries".
+(sb-alien:define-alien-type nil
+    (sb-alien:struct p-z-stream
+                     (next-in sb-sys:system-area-pointer)
+                     (avail-in sb-alien:unsigned-int)
+                     (total-in sb-alien:unsigned-long)
+                     (next-out sb-sys:system-area-pointer)
+                     (avail-out sb-alien:unsigned-int)
+                     (total-out sb-alien:unsigned-long)
+                     (msg sb-sys:system-area-pointer)
+                     (state sb-sys:system-area-pointer)
+                     (zalloc sb-sys:system-area-pointer)
+                     (zfree sb-sys:system-area-pointer)
+                     (opaque sb-sys:system-area-pointer)
+                     (data-type sb-alien:int)
+                     (adler sb-alien:unsigned-long)
+                     (reserved sb-alien:unsigned-long)))
+
+(defmacro %p-zlib-routine (c-name lisp-name &rest args)
+  "One zlib entry point that takes a z_stream pointer first and answers an int."
+  `(sb-alien:define-alien-routine (,c-name ,lisp-name) sb-alien:int
+     (strm sb-sys:system-area-pointer)
+     ,@args))
+
+(%p-zlib-routine "deflateInit2_" %zlib-deflate-init2
+                 (level sb-alien:int) (method sb-alien:int) (wbits sb-alien:int)
+                 (memlevel sb-alien:int) (strategy sb-alien:int)
+                 (version sb-alien:c-string) (size sb-alien:int))
+(%p-zlib-routine "inflateInit2_" %zlib-inflate-init2
+                 (wbits sb-alien:int) (version sb-alien:c-string) (size sb-alien:int))
+(%p-zlib-routine "deflate" %zlib-deflate (flush sb-alien:int))
+(%p-zlib-routine "inflate" %zlib-inflate (flush sb-alien:int))
+(%p-zlib-routine "deflateEnd" %zlib-deflate-end)
+(%p-zlib-routine "inflateEnd" %zlib-inflate-end)
+(%p-zlib-routine "deflateReset" %zlib-deflate-reset)
+(%p-zlib-routine "inflateReset" %zlib-inflate-reset)
+(%p-zlib-routine "inflateSync" %zlib-inflate-sync)
+(%p-zlib-routine "deflateParams" %zlib-deflate-params
+                 (level sb-alien:int) (strategy sb-alien:int))
+(%p-zlib-routine "deflateTune" %zlib-deflate-tune
+                 (good sb-alien:int) (lazy sb-alien:int)
+                 (nice sb-alien:int) (chain sb-alien:int))
+(%p-zlib-routine "deflateSetDictionary" %zlib-deflate-set-dictionary
+                 (dict sb-sys:system-area-pointer) (len sb-alien:unsigned-int))
+(%p-zlib-routine "inflateSetDictionary" %zlib-inflate-set-dictionary
+                 (dict sb-sys:system-area-pointer) (len sb-alien:unsigned-int))
+
+(sb-alien:define-alien-routine ("zlibVersion" %zlib-version) sb-alien:c-string)
+(sb-alien:define-alien-routine ("crc32" %zlib-crc32) sb-alien:unsigned-long
+  (crc sb-alien:unsigned-long) (buf sb-sys:system-area-pointer) (len sb-alien:unsigned-int))
+(sb-alien:define-alien-routine ("adler32" %zlib-adler32) sb-alien:unsigned-long
+  (adler sb-alien:unsigned-long) (buf sb-sys:system-area-pointer) (len sb-alien:unsigned-int))
+(sb-alien:define-alien-routine ("crc32_combine" %zlib-crc32-combine) sb-alien:unsigned-long
+  (crc1 sb-alien:unsigned-long) (crc2 sb-alien:unsigned-long) (len2 sb-alien:long))
+(sb-alien:define-alien-routine ("adler32_combine" %zlib-adler32-combine) sb-alien:unsigned-long
+  (adler1 sb-alien:unsigned-long) (adler2 sb-alien:unsigned-long) (len2 sb-alien:long))
+
+(defvar *p-zlib-streams* (make-hash-table)
+  "Live z_stream HANDLE (its foreign address) -> :deflate or :inflate.")
+
+(defun %p-zlib-ensure ()
+  "Load the system zlib at first use, or die in one perl-shaped line."
+  (unless (%p-host-library-p :zlib '("libz.so.1" "libz.dylib" "libz.so"))
+    (p-die "Compress::Raw::Zlib: the system zlib (libz.so.1) is not available")))
+
+(defun %p-zlib-sap (handle kind)
+  "The z_stream at HANDLE, which must be a live stream of KIND."
+  (let ((h (if (integerp handle) handle (truncate (to-number handle)))))
+    (unless (eq (gethash h *p-zlib-streams*) kind)
+      (p-die (format nil "builtin::zlib: ~A is not a live ~(~A~) stream" h kind)))
+    (sb-sys:int-sap h)))
+
+(defmacro %p-zstream (sap)
+  `(sb-alien:sap-alien ,sap (* (sb-alien:struct p-z-stream))))
+
+(defun %p-zlib-new-stream ()
+  "A zeroed z_stream in foreign memory (zalloc/zfree/opaque Z_NULL)."
+  (let* ((p (sb-alien:make-alien (sb-alien:struct p-z-stream)))
+         (sap (sb-alien:alien-sap p)))
+    (dotimes (i (sb-alien:alien-size (sb-alien:struct p-z-stream) :bytes))
+      (setf (sb-sys:sap-ref-8 sap i) 0))
+    sap))
+
+(defun %p-zlib-bytes (x)
+  "X (a Perl string of characters 0-255) as a byte vector; wider dies."
+  (if (or (null x) (not (%pcl-definedp x)))
+      (make-array 0 :element-type '(unsigned-byte 8))
+      (%p-octet-vector (to-string x))))
+
+(defun %p-zlib-init (kind thunk)
+  "Allocate a stream, run the init THUNK on it; #(STATUS HANDLE-or-undef)."
+  (%p-zlib-ensure)
+  (let* ((sap (%p-zlib-new-stream))
+         (status (funcall thunk sap)))
+    (if (zerop status)
+        (let ((h (sb-sys:sap-int sap)))
+          (setf (gethash h *p-zlib-streams*) kind)
+          (vector status h))
+        (progn (sb-alien:free-alien (%p-zstream sap))
+               (vector status *p-undef*)))))
+
+(defun %p-zlib-deflate-init2 (level method wbits memlevel strategy)
+  "builtin::zlib_deflateInit2 -> (STATUS, HANDLE)."
+  (%p-zlib-init :deflate
+                (lambda (sap)
+                  (%zlib-deflate-init2 sap (truncate (to-number level))
+                                       (truncate (to-number method))
+                                       (truncate (to-number wbits))
+                                       (truncate (to-number memlevel))
+                                       (truncate (to-number strategy))
+                                       (%zlib-version)
+                                       (sb-alien:alien-size (sb-alien:struct p-z-stream) :bytes)))))
+
+(defun %p-zlib-inflate-init2 (wbits)
+  "builtin::zlib_inflateInit2 -> (STATUS, HANDLE)."
+  (%p-zlib-init :inflate
+                (lambda (sap)
+                  (%zlib-inflate-init2 sap (truncate (to-number wbits))
+                                       (%zlib-version)
+                                       (sb-alien:alien-size (sb-alien:struct p-z-stream) :bytes)))))
+
+(defun %p-zlib-run (kind fn handle input flush outmax)
+  "ONE call of zlib's deflate/inflate FN on HANDLE: INPUT as next_in, FLUSH,
+   at most OUTMAX output bytes.  #(STATUS OUTPUT CONSUMED)."
+  (let* ((sap (%p-zlib-sap handle kind))
+         (z (%p-zstream sap))
+         (in (%p-zlib-bytes input))
+         (n (max 0 (truncate (to-number outmax))))
+         (out (make-array n :element-type '(unsigned-byte 8)))
+         status)
+    (sb-sys:with-pinned-objects (in out)
+      (setf (sb-alien:slot z 'next-in) (sb-sys:vector-sap in)
+            (sb-alien:slot z 'avail-in) (length in)
+            (sb-alien:slot z 'next-out) (sb-sys:vector-sap out)
+            (sb-alien:slot z 'avail-out) n)
+      (setf status (funcall fn sap (truncate (to-number flush))))
+      (let ((left-in (sb-alien:slot z 'avail-in))
+            (left-out (sb-alien:slot z 'avail-out)))
+        (setf (sb-alien:slot z 'next-in) (sb-sys:int-sap 0)
+              (sb-alien:slot z 'next-out) (sb-sys:int-sap 0)
+              (sb-alien:slot z 'avail-in) 0
+              (sb-alien:slot z 'avail-out) 0)
+        (vector status
+                (%p-octets-string (subseq out 0 (- n left-out)))
+                (- (length in) left-in))))))
+
+(defun %p-zlib-end (handle kind fn)
+  "deflateEnd/inflateEnd on HANDLE and free its z_stream; STATUS."
+  (let* ((sap (%p-zlib-sap handle kind))
+         (status (funcall fn sap)))
+    (remhash (sb-sys:sap-int sap) *p-zlib-streams*)
+    (sb-alien:free-alien (%p-zstream sap))
+    status))
+
+(defun %p-zlib-set-dictionary (handle kind fn dict)
+  "deflateSetDictionary/inflateSetDictionary; STATUS."
+  (let ((sap (%p-zlib-sap handle kind))
+        (d (%p-zlib-bytes dict)))
+    (sb-sys:with-pinned-objects (d)
+      (funcall fn sap (sb-sys:vector-sap d) (length d)))))
+
+(defun %p-zlib-checksum (fn buf init offset)
+  "crc32/adler32 of BUF from byte OFFSET, continuing INIT."
+  (%p-zlib-ensure)
+  (let* ((v (%p-zlib-bytes buf))
+         (from (min (length v) (max 0 (truncate (to-number offset))))))
+    (sb-sys:with-pinned-objects (v)
+      (funcall fn (truncate (to-number init))
+               (sb-sys:sap+ (sb-sys:vector-sap v) from)
+               (- (length v) from)))))
+
+(defun %p-zlib-inflate-sync (handle input)
+  "builtin::zlib_inflateSync -> (STATUS, CONSUMED)."
+  (let* ((sap (%p-zlib-sap handle :inflate))
+         (z (%p-zstream sap))
+         (in (%p-zlib-bytes input)))
+    (sb-sys:with-pinned-objects (in)
+      (setf (sb-alien:slot z 'next-in) (sb-sys:vector-sap in)
+            (sb-alien:slot z 'avail-in) (length in)
+            (sb-alien:slot z 'next-out) (sb-sys:int-sap 0)
+            (sb-alien:slot z 'avail-out) 0)
+      (let* ((status (%zlib-inflate-sync sap))
+             (left (sb-alien:slot z 'avail-in)))
+        (setf (sb-alien:slot z 'next-in) (sb-sys:int-sap 0)
+              (sb-alien:slot z 'avail-in) 0)
+        (vector status (- (length in) left))))))
+
+(defun %p-zlib-deflate-params (handle level strategy outmax)
+  "deflateParams with no new input -> (STATUS, OUTPUT): the block zlib
+   flushes when the parameters change mid-stream."
+  (%p-zlib-run :deflate
+               (lambda (sap flush)
+                 (declare (ignore flush))
+                 (%zlib-deflate-params sap (truncate (to-number level))
+                                       (truncate (to-number strategy))))
+               handle "" 0 outmax))
+
+(defun %p-zlib-stream-info (handle)
+  "builtin::zlib_stream -> (TOTAL_IN, TOTAL_OUT, ADLER, MSG-or-undef, DATA_TYPE)."
+  (let* ((h (truncate (to-number handle)))
+         (kind (or (gethash h *p-zlib-streams*)
+                   (p-die (format nil "builtin::zlib: ~A is not a live stream" h))))
+         (z (%p-zstream (%p-zlib-sap h kind)))
+         (msg (sb-alien:slot z 'msg)))
+    (vector (sb-alien:slot z 'total-in) (sb-alien:slot z 'total-out)
+            (sb-alien:slot z 'adler)
+            (if (zerop (sb-sys:sap-int msg))
+                *p-undef*
+                (sb-alien:sap-alien msg sb-alien:c-string))
+            (sb-alien:slot z 'data-type))))
 
 (defun p-pos (var &optional new-pos)
   "Perl pos - get/set match position for /g regex.
@@ -31159,6 +31401,57 @@ size comes from fstat on the descriptor, after the buffered output is written
     ;; builtin::bsd_glob(PATTERN, FLAGNAME...) -> (STATUS, MATCH...), STATUS
     ;; 0 or GLOB_ABEND's -2.  lib/File/Glob.pm owns the GLOB_* numbers.
     (def "BSD_GLOB" #'%p-builtin-bsd-glob)
+    ;; zlib (#3161; TEMPORARY until pclxs, USER s516): the calls into the
+    ;; system libz, one primitive per zlib function, a stream as an integer
+    ;; HANDLE; lib/Compress/Raw/Zlib.pm owns the module (loops, buffers,
+    ;; flags, the status dualvars).  Status codes come back as zlib's ints.
+    (def "ZLIB_VERSION" (lambda () (%p-zlib-ensure) (%zlib-version)))
+    (def "ZLIB_CRC32"
+        (lambda (buf crc &optional (off 0))
+          (%p-zlib-checksum #'%zlib-crc32 buf crc off)))
+    (def "ZLIB_ADLER32"
+        (lambda (buf adler &optional (off 0))
+          (%p-zlib-checksum #'%zlib-adler32 buf adler off)))
+    (def "ZLIB_CRC32_COMBINE"
+        (lambda (a b len)
+          (%p-zlib-ensure)
+          (%zlib-crc32-combine (truncate (to-number a)) (truncate (to-number b))
+                               (truncate (to-number len)))))
+    (def "ZLIB_ADLER32_COMBINE"
+        (lambda (a b len)
+          (%p-zlib-ensure)
+          (%zlib-adler32-combine (truncate (to-number a)) (truncate (to-number b))
+                                 (truncate (to-number len)))))
+    (def "ZLIB_DEFLATE_INIT2" #'%p-zlib-deflate-init2)
+    (def "ZLIB_INFLATE_INIT2" #'%p-zlib-inflate-init2)
+    (def "ZLIB_DEFLATE"
+        (lambda (h in flush outmax)
+          (%p-zlib-run :deflate #'%zlib-deflate h in flush outmax)))
+    (def "ZLIB_INFLATE"
+        (lambda (h in flush outmax)
+          (%p-zlib-run :inflate #'%zlib-inflate h in flush outmax)))
+    (def "ZLIB_DEFLATE_END"
+        (lambda (h) (%p-zlib-end h :deflate #'%zlib-deflate-end)))
+    (def "ZLIB_INFLATE_END"
+        (lambda (h) (%p-zlib-end h :inflate #'%zlib-inflate-end)))
+    (def "ZLIB_DEFLATE_RESET"
+        (lambda (h) (%zlib-deflate-reset (%p-zlib-sap h :deflate))))
+    (def "ZLIB_INFLATE_RESET"
+        (lambda (h) (%zlib-inflate-reset (%p-zlib-sap h :inflate))))
+    (def "ZLIB_INFLATE_SYNC" #'%p-zlib-inflate-sync)
+    (def "ZLIB_DEFLATE_PARAMS" #'%p-zlib-deflate-params)
+    (def "ZLIB_DEFLATE_TUNE"
+        (lambda (h good lazy nice chain)
+          (%zlib-deflate-tune (%p-zlib-sap h :deflate)
+                              (truncate (to-number good)) (truncate (to-number lazy))
+                              (truncate (to-number nice)) (truncate (to-number chain)))))
+    (def "ZLIB_DEFLATE_SET_DICTIONARY"
+        (lambda (h dict)
+          (%p-zlib-set-dictionary h :deflate #'%zlib-deflate-set-dictionary dict)))
+    (def "ZLIB_INFLATE_SET_DICTIONARY"
+        (lambda (h dict)
+          (%p-zlib-set-dictionary h :inflate #'%zlib-inflate-set-dictionary dict)))
+    (def "ZLIB_STREAM" #'%p-zlib-stream-info)
     ;; Sub attributes (#3162): the BUILT-IN CODE attributes a sub carries,
     ;; and recording one (a leading - removes it); lib/attributes.pm owns
     ;; the rest of the protocol.  SET_SUB_ATTRIBUTE answers false for a name
