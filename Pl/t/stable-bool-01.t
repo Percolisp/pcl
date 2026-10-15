@@ -27,7 +27,7 @@ my $pl2cl   = "$root/pl2cl";
 my @sbcl_rt = PCLCore::sbcl_prefix("$root/cl/pcl-runtime.lisp");
 plan skip_all => "perl $] has no builtin::is_bool" if $] < 5.036;
 
-plan tests => 9;
+plan tests => 10;
 
 sub run_both {
     my ($code) = @_;
@@ -101,3 +101,16 @@ same('a boolean was created as neither a number nor a string (builtin::created_a
   'use builtin qw(created_as_number created_as_string);
    print join(",", map { $_ ? 1 : 0 } created_as_number(!!1), created_as_string(!!1), created_as_number(1 == 0),
      created_as_string(1 == 0), created_as_string("1"), created_as_number(1)), "\n";');
+
+# The truth twins (p-true-p's compiler macro on a comparison, s517a): a test
+# of a comparison in a condition answers the CL truth directly -- an overload
+# handler's OWN value still decides (perl returns it verbatim), and a NaN
+# compares false.
+same('a comparison in a condition: plain, string, NaN, an overload handler returning "0" / "PQR"',
+  'package O; use overload "==" => sub { $_[0][0] }, "lt" => sub { $_[0][0] }, q("") => sub { "o" };
+   package main; my @r; my $nan = "nan" + 0; my ($a, $b) = (3, 4);
+   push @r, ($a < $b ? "y" : "n"), ($a == $b ? "y" : "n"), ("a" lt "b" ? "y" : "n"), ($nan == $nan ? "y" : "n");
+   my $z = bless ["0"], "O"; my $p = bless ["PQR"], "O";
+   push @r, ($z == 1 ? "y" : "n"), ($p == 1 ? "y" : "n"), ($z lt "x" ? "y" : "n"), ($p lt "x" ? "y" : "n"), scalar($p == 1);
+   my $i = 0; $i++ while $i < 5; push @r, $i;
+   print "@r\n";');

@@ -5494,6 +5494,24 @@
     (t (%p-true-p-slow val))))
 (declaim (notinline p-true-p))
 
+;;; THE TRUTH OF A COMPARISON (#3242, s517a).  A comparison returns the interned
+;;; boolean +p-yes+ / +p-no+, a global SBCL cannot fold through p-true-p the way
+;;; it folded the old literal 1 / "" -- measured: fib(27)x 6-7 % slower in two
+;;; bench runs.  So `(p-true-p (p-< A B))' -- what p-if / p-while / p-&& expand
+;;; to -- is rewritten to the comparison's TRUTH twin, which answers the CL
+;;; boolean directly (the slow path's own value, an overload handler's included,
+;;; still goes through p-true-p).  The twins are made by %def-overloaded-cmp /
+;;; %def-overloaded-str-cmp and registered here.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *%p-cmp-truth* (make-hash-table :test 'eq)
+    "comparison operator symbol -> its truth twin (a CL boolean answer)."))
+(define-compiler-macro p-true-p (&whole form val)
+  (let ((twin (and (consp val) (symbolp (car val))
+                   (gethash (car val) *%p-cmp-truth*))))
+    (if (and twin (= (length val) 3))
+        `(,twin ,@(cdr val))
+        form)))
+
 ;;; ============================================================
 ;;; Arithmetic Operators
 ;;; ============================================================
@@ -12147,7 +12165,8 @@ per element."
 ;;; the native CL test directly (with the IEEE NaN rule); anything else goes
 ;;; through the out-of-line overload/coercion slow path.
 (defmacro %def-overloaded-cmp (name op-str fallback-op cl-test nan-result)
-  (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl)))
+  (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl))
+        (truth (intern (concatenate 'string "%" (symbol-name name) "-TRUTH") :pcl)))
     `(progn
        (defun ,slow (a b)
          ,(format nil "Perl ~A slow path: use overload dispatch (returns 1 / \"\")" op-str)
@@ -12214,7 +12233,16 @@ per element."
                          (,cl-test a b)))
              (,slow a b)))
        ;; expansion stored; plain calls inside the runtime (see file top/end)
-       (declaim (notinline ,name)))))
+       (declaim (notinline ,name))
+       ;; its TRUTH twin (#3242): the CL boolean, for p-true-p's compiler macro
+       (declaim (inline ,truth))
+       (defun ,truth (a b)
+         (if (and (numberp a) (numberp b))
+             (if (or (%pcl-nan-p a) (%pcl-nan-p b)) ,nan-result (,cl-test a b))
+             (p-true-p (,slow a b))))
+       (declaim (notinline ,truth))
+       (eval-when (:compile-toplevel :load-toplevel :execute)
+         (setf (gethash ',name *%p-cmp-truth*) ',truth)))))
 
 (%def-overloaded-cmp p-==  "=="  "<=>"  =   nil)   ; NaN==NaN → false
 (%def-overloaded-cmp p-!=  "!="  "<=>"  /=  t)     ; NaN!=NaN → true
@@ -12536,7 +12564,8 @@ per element."
 ;;; take the native CL test directly; anything else (boxes, numbers, undef,
 ;;; overloaded objects) goes through the out-of-line slow path.
 (defmacro %def-overloaded-str-cmp (name op-str str-test cmp-test)
-  (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl)))
+  (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl))
+        (truth (intern (concatenate 'string "%" (symbol-name name) "-TRUTH") :pcl)))
     `(progn
        (defun ,slow (a b)
          ,(format nil "Perl ~A slow path: use overload dispatch (returns 1 / \"\")" op-str)
@@ -12581,7 +12610,16 @@ per element."
              (p-bool (,str-test a b))
              (,slow a b)))
        ;; expansion stored; plain calls inside the runtime (see file top/end)
-       (declaim (notinline ,name)))))
+       (declaim (notinline ,name))
+       ;; its TRUTH twin (#3242): the CL boolean, for p-true-p's compiler macro
+       (declaim (inline ,truth))
+       (defun ,truth (a b)
+         (if (and (stringp a) (stringp b))
+             (,str-test a b)
+             (p-true-p (,slow a b))))
+       (declaim (notinline ,truth))
+       (eval-when (:compile-toplevel :load-toplevel :execute)
+         (setf (gethash ',name *%p-cmp-truth*) ',truth)))))
 
 (%def-overloaded-str-cmp p-str-eq  "eq"  string=   =)
 (%def-overloaded-str-cmp p-str-ne  "ne"  string/=  /=)
@@ -39133,7 +39171,11 @@ size comes from fstat on the descriptor, after the buffered output is written
                  p-== p-!= p-< p-> p-<= p->= p-<=>
                  p-. p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge
                  p-str-cmp
-                 unbox to-number to-string p-true-p p-bool %pcl-nan-p))
+                 unbox to-number to-string p-true-p p-bool %pcl-nan-p
+                 ;; the comparison truth twins (#3242), p-true-p's compiler macro
+                 %p-==-truth %p-!=-truth %p-<-truth %p->-truth %p-<=-truth %p->=-truth
+                 %p-str-eq-truth %p-str-ne-truth %p-str-lt-truth %p-str-gt-truth
+                 %p-str-le-truth %p-str-ge-truth))
 (declaim (optimize (speed 2) (safety 1) (debug 0)))
 
 ;; Diagnostic banner on *error-output*, not *standard-output*, so it never
