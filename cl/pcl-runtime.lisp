@@ -36737,15 +36737,86 @@ size comes from fstat on the descriptor, after the buffered output is written
     (t (cons (car node)
              (mapcar (lambda (x) (%pcl-mbol-node x m)) (cdr node))))))
 
-(defun %pcl-mbol-tree (pattern options)
-  "PATTERN's parse tree with perl's MBOL, or NIL when it holds no `^` that can
-   run in multi-line mode (the pattern is then compiled as it is)."
-  (when (and (find #\^ pattern)
-             (or (getf options :multi-line-mode) (find #\m pattern)))
-    (let* ((tree (let ((cl-ppcre::*extended-mode-p* (getf options :extended-mode)))
-                   (cl-ppcre:parse-string pattern)))
-           (new (%pcl-mbol-node tree (getf options :multi-line-mode))))
-      (unless (equal new tree) new))))
+;;; #3121 (s517c): a bracket class of plain characters below 256 is ONE
+;;; 256-bit table.  cl-ppcre's convert-char-class-to-test-function makes a
+;;; class a LOOP over one closure per item (and *optimize-char-classes* is
+;;; NIL), so `[\x22\x5c\n\r\t\f\b]` costs seven funcalls per character
+;;; scanned.  The rewrite lives in PCL's wrapper, never in the vendored
+;;; engine (DECIDED ## s514c): in the parse tree a (:char-class ...) /
+;;; (:inverted-char-class ...) whose items are all characters or :range
+;;; pairs below 256 becomes (:property FN) -- cl-ppcre turns both into the
+;;; same char-class object, so the engine's behaviour is unchanged.  A class
+;;; holding a symbol class (\d \s \w), a \p property or a code >= 256 keeps
+;;; cl-ppcre's loop, and so does every class of a pattern with /i or an
+;;; inline (?i) anywhere (case folding is per character, not a table).
+(defun %pcl-cc-table-item-p (it)
+  "True when char-class item IT is a character or a range below 256."
+  (if (characterp it)
+      (< (char-code it) 256)
+      (and (consp it) (eq (first it) :range)
+           (characterp (second it)) (characterp (third it))
+           (< (char-code (third it)) 256)
+           (char<= (second it) (third it)))))
+
+(defun %pcl-cc-table-test (items invertedp)
+  "A unary character test for a class of ITEMS (all %pcl-cc-table-item-p):
+   one SBIT lookup; a code >= 256 is never listed, so it answers INVERTEDP."
+  (let ((bits (make-array 256 :element-type 'bit :initial-element 0)))
+    (dolist (it items)
+      (if (characterp it)
+          (setf (sbit bits (char-code it)) 1)
+          (loop for c from (char-code (second it)) to (char-code (third it))
+                do (setf (sbit bits c) 1))))
+    (if invertedp
+        (lambda (char)
+          (declare (optimize (speed 3) (safety 0)) (character char)
+                   (type (simple-bit-vector 256) bits))
+          (let ((c (char-code char)))
+            (or (>= c 256) (zerop (sbit bits c)))))
+        (lambda (char)
+          (declare (optimize (speed 3) (safety 0)) (character char)
+                   (type (simple-bit-vector 256) bits))
+          (let ((c (char-code char)))
+            (and (< c 256) (= 1 (sbit bits c))))))))
+
+(defun %pcl-cc-table-node (node)
+  "NODE with every eligible bracket class rewritten to (:property TABLE-TEST)."
+  (cond
+    ((atom node) node)
+    ((member (car node) '(:char-class :inverted-char-class))
+     (if (and (cdr node) (every #'%pcl-cc-table-item-p (cdr node)))
+         (list :property
+               (%pcl-cc-table-test (cdr node) (eq (car node) :inverted-char-class)))
+         node))
+    ((member (car node) '(:property :inverted-property :back-reference :filter))
+     node)
+    (t (mapcar #'%pcl-cc-table-node node))))
+
+(defun %pcl-tree-has-p (tree sym)
+  "True when SYM occurs anywhere in parse TREE."
+  (if (atom tree)
+      (eq tree sym)
+      (or (%pcl-tree-has-p (car tree) sym) (%pcl-tree-has-p (cdr tree) sym))))
+
+(defun %pcl-scanner-tree (pattern options)
+  "PATTERN's rewritten parse tree for create-scanner, or NIL when no rewrite
+   applies (the pattern is then compiled from its text): perl's MBOL
+   (%pcl-mbol-tree's rule) and the 256-bit class table (#3121).  Parsed
+   ONCE, the way create-scanner's own string method parses it."
+  (let ((mbol (and (find #\^ pattern)
+                   (or (getf options :multi-line-mode) (find #\m pattern))))
+        (cc (and (find #\[ pattern)
+                 (not (getf options :case-insensitive-mode))
+                 (not cl-ppcre:*allow-quoting*))))
+    (when (or mbol cc)
+      (let* ((tree (let ((cl-ppcre::*extended-mode-p* (getf options :extended-mode))
+                         (cl-ppcre::*syntax-error-string* (copy-seq pattern)))
+                     (cl-ppcre:parse-string pattern)))
+             (new (if mbol (%pcl-mbol-node tree (getf options :multi-line-mode)) tree)))
+        (when (and cc (not (%pcl-tree-has-p new :case-insensitive-p)))
+          (setf new (%pcl-cc-table-node new)))
+        (unless (equal new tree)
+          (list :group new))))))
 
 (defun %pcl-build-scanner (pattern options)
   "cl-ppcre:create-scanner wrapper.  Why this exists (yes, it looks stupid):
@@ -36780,7 +36851,7 @@ size comes from fstat on the descriptor, after the buffered output is written
                                 (and self-x (eq k :extended-mode)))
                      nconc (list k v))))
     (multiple-value-bind (scanner reg-names)
-        (let* ((tree (%pcl-mbol-tree pat opts))
+        (let* ((tree (%pcl-scanner-tree pat opts))
                (src (or tree pat))
                (copts (if tree
                           (loop for (k v) on opts by #'cddr

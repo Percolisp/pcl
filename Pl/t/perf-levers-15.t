@@ -14,6 +14,9 @@
 #         counter (p-foreach-range-raw); the residue -- a TIED handle's
 #         PRINT that WRITES the global $_ -- is shown, and PCL_OPT=-raw-topic
 #         restores perl's answer.
+#   #3121 a bracket class of plain characters / ranges below 256 is ONE
+#         256-bit table test (%pcl-scanner-tree rewrites it to (:property FN)
+#         in the parse tree; cl-ppcre itself is untouched).
 use v5.30;
 use strict;
 use warnings;
@@ -153,5 +156,84 @@ END_PL
     is(run_pl($src), "<9><9><9>\n",
        '#3221 residue: PCL_OPT=-raw-topic restores perl\'s <9><9><9>');
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #3121 MECHANISM: %pcl-scanner-tree rewrites a bracket class of plain
+# characters / ranges below 256 to ONE table test, (:property FN); a class
+# with a symbol class, a code >= 256, or any /i (option or inline) keeps
+# cl-ppcre's own class (NIL = compile the text as it is).
+like(lisp_out(<<'END_LISP'),
+(defun shape (p &rest o)
+  (let ((tr (%pcl-scanner-tree p o)))
+    (cond ((null tr) "TEXT")
+          ((search "property" (string-downcase (prin1-to-string tr))) "TABLE")
+          (t "TREE"))))
+(format t "R:~{~A~^,~}~%"
+        (list (shape "[abc]") (shape "[^a-z0-9]") (shape "x[\\x22\\x5c\\n]y")
+              (shape "[\\d\\s]") (shape (format nil "[~Aa]" (code-char 256)))
+              (shape "[abc]" :case-insensitive-mode t) (shape "(?i)[abc]")
+              (shape "(?i:x)[abc]") (shape "abc")))
+(let* ((tr (%pcl-scanner-tree "[^a-c]" nil))
+       (fn (second (second tr))))
+  (format t "T:~{~A~^,~}~%"
+          (mapcar (lambda (c) (if (funcall fn c) 1 0))
+                  (list #\a #\c #\d (code-char 255) (code-char 256) (code-char 9786)))))
+END_LISP
+    qr/R:TABLE,TABLE,TABLE,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT\nT:0,0,1,1,1,1/,
+    '#3121 the class table: which classes are rewritten, and the inverted test above 255');
+
+# #3121 ANSWERS (perl 5.40.3's output): classes on and off the table path,
+# s///g / split / tr-free substitution over them, JSON::PP's escape class.
+answers(<<'END_PL', <<'END_OUT', '#3121 bracket classes on and off the table path = perl');
+binmode STDOUT, ':utf8';
+my $s = "abc XYZ 012 \t\n\x01\x1f \x{e9}\x{ff}\x{100}\x{263a}-_]^\\\"";
+my @p = (
+  qr/[abc]/, qr/[^abc]/, qr/[a-z]/, qr/[\x00-\x1f]/, qr/[\d\s]/,
+  qr/[\x{100}a]/, qr/[a-c]/i, qr/[^a-c]/i, qr/[^\x00-\x{10FFFF}]/, qr/[\x80-\xff]/,
+  qr/[^\x80-\xff]/, qr/[-_\]^]/, qr/[\\"]/, qr/[\x22\x5c\n\r\t\f\b]/, qr/(?i)[x-z]/,
+  qr/(?i:[x-z])[0-2]/, qr/[\w]/, qr/[^\W\d]/, qr/[\x{263a}]/, qr/[\x{ff}]/,
+  qr/[a][b][c]/, qr/[^\n]+/, qr/(?x) [ a b ] /,
+);
+for my $i (0 .. $#p) {
+  my @m = $s =~ /$p[$i]/g;
+  print "$i: ", scalar(@m), " [", join("|", map { sprintf "%vx", $_ } @m), "]\n";
+}
+(my $t = "a\"b\\c\nd\te") =~ s/([\x22\x5c\n\r\t\f\b])/sprintf("\\u%04x", ord $1)/ge;
+print "esc: $t\n";
+(my $u = "x\x01y\x1fz") =~ s/([\x00-\x08\x0b\x0e-\x1f])/sprintf("<%02x>", ord $1)/eg;
+print "ctl: $u\n";
+my $n = () = "aXbYc" =~ /[^A-Z]/g; print "inv: $n\n";
+print "split: ", join(",", split /[,;]/, "a,b;c"), "\n";
+print "subst: ", ("hello world" =~ s/[lo]/_/gr), "\n";
+END_PL
+0: 3 [61|62|63]
+1: 24 [20|58|59|5a|20|30|31|32|20|9|a|1|1f|20|e9|ff|100|263a|2d|5f|5d|5e|5c|22]
+2: 3 [61|62|63]
+3: 4 [9|a|1|1f]
+4: 9 [20|20|30|31|32|20|9|a|20]
+5: 2 [61|100]
+6: 3 [61|62|63]
+7: 24 [20|58|59|5a|20|30|31|32|20|9|a|1|1f|20|e9|ff|100|263a|2d|5f|5d|5e|5c|22]
+8: 0 []
+9: 2 [e9|ff]
+10: 25 [61|62|63|20|58|59|5a|20|30|31|32|20|9|a|1|1f|20|100|263a|2d|5f|5d|5e|5c|22]
+11: 4 [2d|5f|5d|5e]
+12: 2 [5c|22]
+13: 4 [9|a|5c|22]
+14: 3 [58|59|5a]
+15: 0 []
+16: 13 [61|62|63|58|59|5a|30|31|32|e9|ff|100|5f]
+17: 10 [61|62|63|58|59|5a|e9|ff|100|5f]
+18: 1 [263a]
+19: 1 [ff]
+20: 1 [61.62.63]
+21: 2 [61.62.63.20.58.59.5a.20.30.31.32.20.9|1.1f.20.e9.ff.100.263a.2d.5f.5d.5e.5c.22]
+22: 6 [61|62|20|20|20|20]
+esc: a\u0022b\u005cc\u000ad\u0009e
+ctl: x<01>y<1f>z
+inv: 3
+split: a,b,c
+subst: he___ w_r_d
+END_OUT
 
 done_testing();
