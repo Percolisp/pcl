@@ -21,7 +21,11 @@ sub isaFilehandle ($);
 sub isaFilename ($);
 sub whatIsInput ($;$);
 sub whatIsOutput ($;$);
-sub whatIs ($;$);
+# NOT whatIs ($;$): it is not exported, and the module's OWN unit reads this
+# overlay at its package statement -- so the prototype applied to
+# `whatIs(@_)` inside whatIsOutput, ABOVE whatIs's definition, where perl
+# applies none: @_ became its COUNT and every output buffer `\$buf` was
+# taken for a FILENAME "SCALAR(0x1)" (#3341, s517b).
 
 # `use constant` in the module: nullary, exported (STATUS_* also through :Status).
 sub STATUS_OK ();

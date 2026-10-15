@@ -942,6 +942,7 @@ sub _ppi_parse {
   _reclassify_bare_vwords($doc) if $doc;
   _merge_unicode_symbols($doc) if $doc;
   _merge_punct_array_symbols($doc) if $doc;
+  _repair_statement_start_glob_cast($doc) if $doc;
   _repair_indented_heredocs($doc) if $doc;
   _repair_paren_block_filehandle($doc) if $doc;
   # A DIAGNOSTIC, not a repair — deliberately NOT one of the three in-place
@@ -986,6 +987,7 @@ sub fragment_doc {
   _reclassify_bare_vwords($doc);
   _merge_unicode_symbols($doc);
   _merge_punct_array_symbols($doc);
+  _repair_statement_start_glob_cast($doc);
   _repair_indented_heredocs($doc);
   _repair_paren_block_filehandle($doc);
   return $doc;
@@ -1616,6 +1618,35 @@ sub _merge_punct_array_symbols {
     push @repaired, $sym;
   }
   _reclass_subscripts_after($_) for @repaired;
+  return 1;
+}
+
+# A STATEMENT THAT BEGINS WITH `*$name` (task #3342): PPI 1.291 lexes that
+# `*` as the multiplication OPERATOR when the statement follows a bare block
+# whose first token is a scalar -- `{ $c = $b; }  *$o->{A} = 1;` -- having
+# taken the block for an anonymous hash (docs/ppi-upstream-bugs.md §38).  A
+# statement cannot begin with a binary operator, so a `*` that is the FIRST
+# significant token of its statement and is followed by a `$name` symbol is
+# the glob CAST perl reads.  Real victim: core IO::Uncompress::Base, whose
+# `*$obj->{InputLength} = ...` became `undef * $obj->{InputLength}` and made
+# every gunzip die "Not a HASH reference".  Class swap only; the text is
+# unchanged, so it runs on fragments too.
+sub _repair_statement_start_glob_cast {
+  my ($doc) = @_;
+  for my $op (@{ $doc->find(sub {
+                   $_[1]->isa('PPI::Token::Operator') && $_[1]->content eq '*'
+                 }) || [] }) {
+    my $st = $op->parent;
+    next unless $st && $st->isa('PPI::Statement');
+    my $first = $st->schild(0);
+    next unless $first && $first == $op;
+    my $next = $op->snext_sibling;
+    next unless $next && $next->isa('PPI::Token::Symbol')
+             && $next->content =~ /\A\$/;
+    my $cast = PPI::Token::Cast->new('*');
+    $op->insert_before($cast);
+    $op->delete;
+  }
   return 1;
 }
 

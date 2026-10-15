@@ -324,7 +324,7 @@ sub Compress::Raw::Zlib::InflateScan::new {
 sub _new_state {
     my ($kind, $flags, $bufsize, %more) = @_;
     return { kind => $kind, flags => $flags, bufsize => $bufsize,
-             crc32 => 0, adler32 => 1, dict_adler => 0, last_error => 0,
+             crc32 => 0, adler32 => ($flags & FLAG_ADLER ? 1 : 0), dict_adler => 0, last_error => 0,
              compressed => 0, uncompressed => 0, inflated => 0,
              pending => "", %more };
 }
@@ -391,7 +391,8 @@ sub _info { my $s = shift; defined $s->{h} ? [builtin::zlib_stream($s->{h})] : (
 
 sub _reset_counters {
     my $s = shift;
-    @$s{qw(crc32 adler32 compressed uncompressed inflated pending)} = (0, 1, 0, 0, 0, "");
+    @$s{qw(crc32 adler32 compressed uncompressed inflated pending)} =
+        (0, ($s->{flags} & FLAG_ADLER ? 1 : 0), 0, 0, 0, "");
     delete $s->{ended};
     delete $s->{info};
 }
@@ -477,7 +478,8 @@ sub deflateReset {
     }
     else {
         my $h;
-        ($st, $h) = builtin::zlib_deflate_init2(@$s{qw(level method wbits memlevel strategy)});
+        ($st, $h) = builtin::zlib_deflate_init2($s->{level}, $s->{method}, $s->{wbits},
+                                                 $s->{memlevel}, $s->{strategy});
         $s->{h} = $h if $st == 0;
     }
     Compress::Raw::Zlib::_reset_counters($s) if $st == 0;
@@ -513,7 +515,7 @@ sub _deflateParams {
     $s->{level} = $level       if $flags & 1;
     $s->{strategy} = $strategy if $flags & 2;
     $s->{bufsize} = $bufsize   if $flags & 4;
-    my $st = 0;
+    my $st = -2;    # zlib answers Z_STREAM_ERROR on a FINISHED stream
     if (!$s->{ended}) {
         for (;;) {
             my ($r, $o) = builtin::zlib_deflate_params($s->{h}, $s->{level},

@@ -711,6 +711,29 @@ sub gen_node_form {
 # gen_transliteration_form; the /e-lambda body stays a raw atom until the
 # inline_lambda step).  Declines (→ text path): Symbol/Magic compounds
 # (stash/typeglob/&sub/errno).  Byte-for-byte gen_leaf's shapes.
+# `-NAME` where NAME is a SUB perl knows at this point is the NEGATED CALL,
+# not the string "-NAME" (#476; probed 5.40.3: `sub K () {5} print -K, -K()`
+# prints -5-5).  PPI lexes `-K` as ONE Word either way, and the Word reaches
+# the emitter two ways -- a funcall head and a list leaf -- so both ask this.
+# Known = a same-file sub, a prototype in scope (an imported constant), or a
+# `(` right after it.  A fat comma after it keeps the string (`-K => 1`).
+# Real victim: core Compress::Zlib::memGzip's `-MAX_WBITS()` was the string
+# "-MAX_WBITS" and every memGzip returned undef (#3344, s517b).
+sub _negated_call_form {
+  my ($self, $word) = @_;
+  return undef unless ref($word) eq 'PPI::Token::Word';
+  return undef unless ($word->content // '') =~ /\A-([A-Za-z_]\w*)\z/;
+  my $name = $1;
+  return undef if exists $RUNTIME_NAMES{$name};
+  my $nx = $word->snext_sibling;
+  return undef if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+  my $known = ($nx && $nx->isa('PPI::Structure::List'))
+    || $self->sub_info->{$name}
+    || ($self->environment && $self->environment->has_prototype($name));
+  return undef unless $known;
+  return ['p--', ['p-scalar-ctx', [$self->cl_name($name, 1)]]];
+}
+
 sub gen_leaf_form {
   my ($self, $node) = @_;
   my $ref = ref($node);
@@ -750,6 +773,10 @@ sub gen_leaf_form {
   # bareword the classifier could not place, which asks the image at run time
   # (PExpr::_mark_unplaceable_bareword, #1996).  It has to be read here rather
   # than through gen_leaf, whose Word arm declines anything starting with "(".
+  if ($ref eq 'PPI::Token::Word') {
+    my $neg = $self->_negated_call_form($node);
+    return $neg if $neg;
+  }
   if ($ref eq 'PPI::Token::Word' && $node->{_bareword_runtime}) {
     return ['p-bareword-value', _cl_string_literal_form($node->content() // '')];
   }
@@ -2311,6 +2338,14 @@ sub gen_funcall_form {
         $pkg //= 'main';
         return qq{"$pkg"};
       }
+      # `-NAME` where NAME is a SUB perl knows here is the NEGATED CALL, not
+      # the string "-NAME" (#476; probed 5.40.3: `sub K () {5} print -K` is
+      # -5, and so is `-K()`).  PPI lexes `-K` as ONE Word either way.  A
+      # fat comma after it keeps the string (`-K => 1` autoquotes).  Real
+      # victim: core Compress::Zlib::memGzip's `-MAX_WBITS()` was the string
+      # "-MAX_WBITS" and every memGzip returned undef (#3344, s517b).
+      my $neg = $self->_negated_call_form($func_node);
+      return $neg if $neg;
       # Perl: -bareword produces string "-bareword"
       if ($content =~ /^-[A-Za-z_]\w*$/) {
         return qq{"$content"};
@@ -3063,6 +3098,20 @@ sub gen_funcall_form {
 
   my $ctx = $self->expr_o->get_node_context($node_id);
 
+  # #2636: a user sub this file has no record of (qualified, imported, not
+  # yet seen) is an UNSEEN callee -- copy-in / copy-out its raw-slot scalars.
+  # A sub WITH a record is the #189 writes_args fact's, at VarAnnotator.
+  my $cb = [];
+  if (($force_user || !exists $RUNTIME_NAMES{$func_name})
+      && !$self->sub_info->{$func_name}
+      && ref $call eq 'ARRAY' && ($call->[0] // '') eq $cl_func) {
+    my $first = (($call->[1] // '') eq ':loc') ? 3 : 1;
+    $cb = $self->_copy_back_args($call, $first, [@$kids[1 .. $#$kids]],
+                                 ($func_name =~ /::/ ? 'qualified' : 'bare'));
+    return _copy_back_wrap($self->_gen_funcall_tail($call, $ctx, $func_name, $force_user), $cb)
+      if @$cb;
+  }
+
   # split: p-split always returns a vector; scalar context takes its length.
   if ($func_name eq 'split') {
     return $ctx == 0 ? ['length', $call] : $call;
@@ -3092,16 +3141,25 @@ sub gen_funcall_form {
     # called WITHOUT the *wantarray* bind: the callee cannot tell, and the
     # bind is a special-variable rebinding per call.  ExprToCL2's native
     # funcall rule, folded here (Phase A); the general form is the bind.
-    my $info = $self->sub_info->{$func_name};
-    my $insens = ($info && $info->{insensitive}) ? 1 : 0;
-    return Pl::Passes::fact('insensitive-call', $insens, $call)
-      if $insens && Pl::Passes::enabled('insensitive-call');
-    return Pl::Passes::fact('insensitive-call', $insens,
-                            $self->_ctx_wrap_form($call, $ctx));
+    return $self->_gen_funcall_tail($call, $ctx, $func_name, $force_user);
   }
   # A built-in outside %WANTARRAY_SENSITIVE never observes its context: it
   # is emitted bare in every slot (#2775).
   return $call;
+}
+
+# The user-sub tail of gen_funcall_form (its ctx/insensitive wrap), shared
+# with the #2636 copy-back site so that both spell it once.
+sub _gen_funcall_tail {
+  my ($self, $call, $ctx, $func_name, $force_user) = @_;
+  return $call if $ctx == INHERIT_CTX;
+  return $call if $self->environment && $self->environment->tail_position;
+  my $info = $self->sub_info->{$func_name};
+  my $insens = ($info && $info->{insensitive}) ? 1 : 0;
+  return Pl::Passes::fact('insensitive-call', $insens, $call)
+    if $insens && Pl::Passes::enabled('insensitive-call');
+  return Pl::Passes::fact('insensitive-call', $insens,
+                          $self->_ctx_wrap_form($call, $ctx));
 }
 
 
@@ -3415,6 +3473,63 @@ sub _eval_lexical_alist {
 }
 
 
+# COPY-IN / COPY-OUT for an UNSEEN callee (#2636; ir-spec §5 "@_ aliasing").
+# A raw-slot `my` scalar (VarAnnotator's unboxable verdict) is a value, not a
+# box, so a callee the compiler cannot see -- a method, a coderef, a
+# qualified or imported sub -- got a COPY and its write through $_[N] was
+# lost silently (`my $out; $z->deflate($in, $out)`, Tie::File's _fixrecs).
+# #189 rules out boxing the VARIABLE; instead the CALLER makes the box, hands
+# it to the call and stores its value back when the call returns:
+#   (p-copy-back ((--pcl-cb--0 $out)) (p-method-call $z "deflate" $in --pcl-cb--0))
+# The boxes are held by NAME, never by vector index (the callee's shift moves
+# elements; a box's identity does not).  CALL is the call form; $first is the
+# index of its first argument, $kid_ids the parse nodes of those arguments in
+# order.  Returns the binding list (empty: nothing to copy back) after
+# replacing each such argument in CALL by its box name.
+#
+# Licensed BY CONSTRUCTION, never by a run-time check: a callee's argument is
+# an opaque use, so the variable can carry neither the B-regime coerce verdict
+# (raw-numeric / raw-string freeze) nor a str-buffer -- a value written back
+# can only land in an untyped slot.  If either fact is ever present here the
+# verdicts have drifted, and that dies at compile time (rule 12).
+sub _copy_back_args {
+  my ($self, $call, $first, $kid_ids, $shape) = @_;
+  my @bind;
+  for my $k (0 .. $#$kid_ids) {
+    my $pos = $first + $k;
+    last if $pos > $#$call;
+    my $an = $self->expr_o->get_a_node($kid_ids->[$k]);
+    next unless ref($an) eq 'PPI::Token::Symbol';
+    my $name = $an->content;
+    next unless $name =~ /\A\$\w+\z/;
+    my $vf = $self->var_facts->{$name};
+    next unless $vf && $vf->{unboxable} && $self->lexicals->{$name};
+    my $form = $call->[$pos];
+    next if ref $form;
+    die "PCL: copy-back of $name: the variable carries a "
+      . ($vf->{coerce} ? "coerce=$vf->{coerce}" : "str-buffer")
+      . " verdict, which an unseen callee's argument rules out (#2636)\n"
+      if $vf->{coerce} || $vf->{strbuf};
+    my $box = '--pcl-cb--' . scalar(@bind);
+    push @bind, [$box, $form];
+    $call->[$pos] = $box;
+  }
+  if (@bind && defined $ENV{PCL_COPYBACK_LOG}) {
+    if (open my $log, '>>', $ENV{PCL_COPYBACK_LOG}) {
+      my $file = ($self->environment && $self->environment->source_file) || '-';
+      print $log join("\t", $shape, $file, $_->[1]), "\n" for @bind;
+      close $log;
+    }
+  }
+  return \@bind;
+}
+
+sub _copy_back_wrap {
+  my ($form, $bind) = @_;
+  return $form if !@$bind;
+  return ['p-copy-back', ['list', map { ['list', @$_] } @$bind], $form];
+}
+
 # E2 form variant of gen_methodcall.  Same invocant disambiguation, dynamic /
 # SUPER:: detection (all AST-level — is_package/has_prototype lookups and node
 # ref-type checks, no generated-text inspection except the SUPER:: prefix on a
@@ -3513,10 +3628,13 @@ sub gen_methodcall_form {
     $call = ['p-method-call', $obj, "\"$method_str\"", @args];
   }
 
+  my $cb = $self->_copy_back_args($call, ($call->[0] eq 'p-super-call' ? 4 : 3),
+                                  [@$kids[2 .. $#$kids]], 'method');
   my $ctx = $self->expr_o->get_node_context($node_id);
-  return $call if $ctx == INHERIT_CTX;
-  return $call if $self->environment && $self->environment->tail_position;
-  return $self->_ctx_wrap_form($call, $ctx);
+  return _copy_back_wrap($call, $cb) if $ctx == INHERIT_CTX;
+  return _copy_back_wrap($call, $cb)
+    if $self->environment && $self->environment->tail_position;
+  return _copy_back_wrap($self->_ctx_wrap_form($call, $ctx), $cb);
 }
 
 
@@ -3548,11 +3666,13 @@ sub gen_ref_funcall_form {
   } 1 .. $#$kids;
   $self->lvalue_context($saved_lvalue);
   my $call = ['p-funcall-ref', $ref, @args];
+  my $cb = $self->_copy_back_args($call, 2, [@$kids[1 .. $#$kids]], 'coderef');
 
   my $ctx = $self->expr_o->get_node_context($node_id);
-  return $call if $ctx == INHERIT_CTX;
-  return $call if $self->environment && $self->environment->tail_position;
-  return $self->_ctx_wrap_form($call, $ctx);
+  return _copy_back_wrap($call, $cb) if $ctx == INHERIT_CTX;
+  return _copy_back_wrap($call, $cb)
+    if $self->environment && $self->environment->tail_position;
+  return _copy_back_wrap($self->_ctx_wrap_form($call, $ctx), $cb);
 }
 
 

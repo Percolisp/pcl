@@ -325,6 +325,7 @@
    #:p-hash-deref-= #:p-array-deref-=
    ;; OO
    #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant
+   #:p-copy-back
    #:p-super-call #:perl-pkg-to-clos-class
    #:p-can #:p-isa
    ;; use overload — operator overloading registry
@@ -34450,6 +34451,38 @@ size comes from fstat on the descriptor, after the buffered output is written
   (if (eq *wantarray* t)
       (%p-empty-list)
       nil))
+
+(declaim (notinline %p-copy-back-value))
+(defun %p-copy-back-value (box)
+  "The value a copy-back BOX holds after the call, as a raw slot holds it:
+   perl's copy of one scalar (%p-leavesub-scalar) -- a plain box yields its
+   value (a :strbuf cell read through unbox), a ref / blessed box a fresh box
+   with the same value and flags.  Out of line: an inlined unbox in every
+   call site exhausted SBCL's heap compiling one big top-level form."
+  (%p-leavesub-scalar box))
+
+(declaim (notinline %p-copy-in))
+(defun %p-copy-in (value)
+  "A fresh box holding VALUE as a store into a `my` scalar would: a ref value
+   keeps its ref-ness (box-set), never nested one level deeper."
+  (let ((b (make-p-box nil)))
+    (box-set b value)
+    b))
+
+;;; COPY-IN / COPY-OUT around a call to an UNSEEN callee (#2636; ir-spec §5).
+;;; BINDINGS is ((BOX VAR) ...) -- BOX a compiler temporary --pcl-cb--N, never a
+;;; sigiled name (a `%name` symbol reads as a perl HASH to the cell scan) --: each VAR is a raw-slot `my` scalar of the
+;;; caller, handed to the callee inside a fresh BOX the caller holds; when
+;;; the call returns, each VAR takes its box's value back, so a write through
+;;; $_[N] reaches the caller as perl's aliasing does (read with UNBOX: a long
+;;; `.=` leaves a :strbuf magic cell in the box, #2115).  FORM's values are
+;;; returned unchanged.  A non-local exit skips the read-back (the caller
+;;; keeps the pre-call value) -- docs/not-supported.md "@_ argument aliasing".
+(defmacro p-copy-back (bindings form)
+  `(let ,(mapcar (lambda (b) `(,(first b) (%p-copy-in ,(second b)))) bindings)
+     (multiple-value-prog1 ,form
+       (setq ,@(mapcan (lambda (b) (list (second b) `(%p-copy-back-value ,(first b))))
+                       bindings)))))
 
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
