@@ -35,7 +35,7 @@ for my $rel (@$files) {
   push @{ $by{$grp} }, $rel;
 }
 
-plan tests => scalar(keys %by) + 4;
+plan tests => scalar(keys %by) + 7;
 
 for my $grp (sort keys %by) {
   my @missing = grep { !PCLLicense::has_tag("$root/$_") } @{ $by{$grp} };
@@ -63,3 +63,20 @@ ok(!@gone_trees, sprintf("all %d pruned trees still exist", scalar keys %PCLLice
 # Sanity: the scan saw a plausible number of files (a broken walker that finds
 # 3 files would pass every row above vacuously).
 cmp_ok(scalar @$files, '>=', 200, "the scan reached a plausible number of code files (" . scalar(@$files) . ")");
+
+# #2958: tools/tag-license FILE asks the SAME predicate the scan does
+# (PCLLicense::is_code_path).  An explicitly named Markdown file used to be
+# stamped with a `#` header no --check ever asks for; now it is refused, exit 1,
+# the file untouched.
+{
+  require File::Temp;
+  my $tmp = File::Temp::tempdir(CLEANUP => 1);
+  open my $fh, '>', "$tmp/note.md" or die $!; print $fh "# x\n"; close $fh;
+  my $out = `"$root/tools/tag-license" "$tmp/note.md" 2>&1`;
+  my $rc = $? >> 8;
+  open $fh, '<', "$tmp/note.md" or die $!; my $body = do { local $/; <$fh> }; close $fh;
+  is($rc, 1, '#2958 tag-license refuses an explicitly named .md (exit 1)');
+  is($body, "# x\n", '#2958 ... and leaves it untouched');
+  ok(PCLLicense::is_code_path("$root/tools/tag-license") && !PCLLicense::is_code_path("$tmp/note.md"),
+     '#2958 is_code_path: a shebang script yes, a .md no');
+}

@@ -85,6 +85,16 @@ sub _has_shebang {
   return $l =~ /^#!/ ? 1 : 0;
 }
 
+# THE ONE "is this a code file the license rule covers" predicate (#2958):
+# a .pm/.pl/.t/.lisp/.sh, or an extensionless file with a shebang.  Both
+# code_files (what --check requires) and tools/tag-license's explicit-FILE
+# path ask it, so the two cannot disagree (a .md was stamped, s516).
+sub is_code_path {
+  my ($path) = @_;
+  return 1 if $path =~ /\.(?:pm|pl|t|lisp|sh)$/;
+  return ($path !~ m{[^/]*\.[^/]*$} && _has_shebang($path)) ? 1 : 0;
+}
+
 # Returns (\@code_files, \%excluded_seen) with paths relative to $root.
 sub code_files {
   my ($root) = @_;
@@ -105,9 +115,7 @@ sub code_files {
       my $rel = substr($_, length($root) + 1);
       return if $rel =~ /~$/;
       return if in_excluded_tree($rel);
-      my $is_code = $rel =~ /\.(?:pm|pl|t|lisp|sh)$/
-                 || ($rel !~ m{[^/]*\.[^/]*$} && _has_shebang($_));
-      return unless $is_code;
+      return unless is_code_path($_);
       if ($EXCLUDE{$rel}) { $seen_excl{$rel} = 1; return }
       push @files, $rel;
     } }, "$root/$r");

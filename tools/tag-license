@@ -48,10 +48,17 @@ for my $f (@files) {
     print "MISSING: $rel\n";
     next;
   }
+  # #2958: an explicitly named file the rule does not cover (a .md, a .tsv)
+  # is REFUSED, by the same predicate --check uses (PCLLicense::is_code_path).
+  if (!PCLLicense::is_code_path($f)) {
+    print STDERR "tag-license: $f: not a code file the license rule covers "
+               . "(.pm .pl .t .lisp .sh or a shebang script); not tagged\n";
+    $missing++;
+    next;
+  }
   tag_file($f);
 }
-exit($missing ? 1 : 0) if $check;
-exit 0;
+exit($missing ? 1 : 0);
 
 sub tag_file {
   my ($path) = @_;
