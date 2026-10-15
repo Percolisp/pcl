@@ -767,7 +767,9 @@ EOF
   my $sum = Pl::Parser2->parse_code(q[my $s=0; for my $i (1..9) { $s += $i }]);
   like($sum, qr/\(p-foreach-range-raw \(\$i 1 9\)/,
        'clean my-var range foreach goes raw counting loop');
-  my $us = Pl::Parser2->parse_code(q[for (1..3) { print $_ }]);
+  # The body was `print $_` until s517c: print joined %TOPIC_RAW_WORD (#3221),
+  # so the stays-boxed row uses `warn` (it can enter $SIG{__WARN__}).
+  my $us = Pl::Parser2->parse_code(q[for (1..3) { warn $_ }]);
   like($us, qr/\(p-foreach-range \(\$_ 1 3\)/,
        '$_ range foreach counting-loops but stays boxed');
   # Until #760 (s456af) a closure CAPTURING the loop var forced the boxed

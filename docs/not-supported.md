@@ -84,6 +84,7 @@ The handful most likely to matter to a program that is otherwise portable:
 
 * [Boolean REFERENCE identity and read-only booleans (`\!0`)](#boolean-reference-identity-and-read-only-booleans-0)
 * [A LITERAL reached through `sort` / `reverse` / `grep` in a `foreach` list is writable](#a-literal-reached-through-sort--reverse--grep-in-a-foreach-list-is-writable)
+* [A raw-topic `for (A..B)` loop: user code that WRITES the global `$_` is not seen by the body](#a-raw-topic-for-ab-loop-user-code-that-writes-the-global-_-is-not-seen-by-the-body)
 * [Read-only constants via `\undef` stash tricks](#read-only-constants-via-undef-stash-tricks)
 * [Scalar copy does not preserve reference/SV identity](#scalar-copy-does-not-preserve-referencesv-identity)
 * [Sparse arrays (holes), element aliasing, and SV identity](#sparse-arrays-holes-element-aliasing-and-sv-identity)
@@ -275,6 +276,24 @@ a literal argument of a user-sub call passed as a read-only box (a
 `load-time-value` constant box per site, so no allocation per call), which is
 also perl's `sub { $_[0] .= "!" }->("a")` die — a call-convention change for
 every call with a literal argument, sized in #1391, not a Scalar::Util fix.
+
+---
+
+## A raw-topic `for (A..B)` loop: user code that WRITES the global `$_` is not seen by the body
+
+When the body of `for (A..B) BLOCK` (or the statement-modifier form) cannot
+reach code the compiler cannot see, `$_` is bound to the RAW counter instead
+of a fresh box per iteration (task #761, `Pl/Parser2.pm` `_topic_raw_ok`; the
+allowlist is `%TOPIC_RAW_WORD`).  `$_` keeps its name and dynamic binding, so
+any callee that READS it sees the current element.  The residue is a handler
+reached with no token to see -- an `overload` handler, a tied variable's
+FETCH, a DESTROY -- that ASSIGNS to the global `$_`: perl's loop body then
+sees the new value, PCL's does not.  **Since s517c (#3221) `print` / `say` /
+`printf` are on the allowlist, which adds one route: a TIED handle's PRINT /
+PRINTF method** (`for (1..3) { print {$fh} $_; print "<$_>" }` with a PRINT
+that does `$_ = 9`: perl `<9><9><9>`, PCL `<1><2><3>`; guard
+`Pl/t/perf-levers-15.t`).  `PCL_OPT=-raw-topic` turns the optimization off
+and restores perl's answer.
 
 ---
 

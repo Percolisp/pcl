@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-6289
+;;; pcl: pipeline=v2 gen=v2-6384
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.

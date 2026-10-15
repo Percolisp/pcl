@@ -12546,18 +12546,24 @@ my %TOPIC_RAW_WORD = map { $_ => 1 } qw(
   abs int sqrt hex oct ord chr length uc lc ucfirst lcfirst
   scalar defined exists delete keys values ref reverse push unshift
   sprintf join index rindex sin cos atan2 exp log
+  print say printf
 );
 # `unshift` joined `push` in s510p (task #2773): it COPIES each operand into a
 # new slot exactly as push does (the one %p-array-store-scalar rule), so a raw
 # $_ is invisible to it -- and without it `unshift @a, $_ for 1..$n` boxed $_
 # on every iteration (14 % of the unshiftq row).
+# `print`/`say`/`printf` joined in s517c (task #3221, RULED s516): they
+# stringify their operands exactly as `join`/`sprintf` do (a `""` overload
+# handler runs either way, and sees its operand, not the global $_), and
+# without them `print {$fh} $_ for 1..$n` boxed $_ per iteration (fhprint
+# -27 %).  The one route they add is a TIED handle's PRINT/PRINTF method --
+# see the RESIDUE note below.
 # NOT on the list, and each for a reason worth keeping written down:
 #   substr  — 4-arg substr($_,0,1,"x") writes THROUGH its first argument, and
 #             the lvalue spelling only sometimes trips the write-list gate
 #   shift/pop — harmless to $_, but they read @_ / an array the body may also
 #             be iterating; left out until something measures a need
-#   print/say/warn/printf — stringifying an operand can enter a
-#             `""` overload handler, which is user code
+#   warn    — it can enter $SIG{__WARN__}, a handler that is user code
 #   sort/map/grep/sub — they run a BLOCK (and sort rebinds $a/$b)
 #   do — `do BLOCK` would be fine, `do FILE` runs a file
 
@@ -12566,9 +12572,12 @@ my %TOPIC_RAW_WORD = map { $_ => 1 } qw(
 # RESIDUE, written down rather than guessed at: user code can still be reached
 # from a body this returns 1 for, by a route with no token to see — an
 # operator that finds an `overload` handler on a blessed operand, a tied
-# variable's FETCH, a DESTROY at collection.  Such a handler would have to
-# reach the GLOBAL $_ and write through its box to notice the difference,
-# since every read coerces.  Nothing in the four corpora does; if something
+# variable's FETCH, a TIED handle's PRINT/PRINTF method (reached by
+# print/say/printf, #3221), a DESTROY at collection.  Such a handler that
+# READS the global $_ still sees the current element ($_ keeps its dynamic
+# binding); one that WRITES it (`$_ = 9` in a tied PRINT, probed s517c: perl
+# <9><9><9>, raw <1><2><3>) is not seen by the rest of the loop body, since
+# there is no box to write through.  Nothing in the four corpora does; if something
 # ever does, `PCL_OPT=-raw-topic` is the switch and the fix is to demand a
 # `use overload`-free file the way the B-regime freeze already does.
 sub _topic_raw_ok {
