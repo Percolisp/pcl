@@ -1,4 +1,6 @@
 # taken-at: 5323d9e 2026-08-15
+# s517a (2026-10-15, Opus, EDITED BY HAND -- one row, TOTAL 18745 -> 18746, #1747): eval.t 134 -> 135 -- row 45
+#   "eval catches bad goto calls": a goto into a foreach dies with perl's text.  Sweep scratch/s517a/sweep.log.
 # s515a (2026-10-11, Opus, EDITED BY HAND -- one row, TOTAL 18741 -> 18745, #3063 / #1567): pos.t 15 -> 19 -- a //g
 #   match on an ELEMENT now keeps pos on the element (the target is its cell): rows 15 16 18 19 (the defelem rows).
 #   Rows 20 + 21 (s///g and \G through a defelem) still fail.  Sweep scratch/s515a/sweep.log.
@@ -469,7 +471,7 @@ dor.t	OK	31	1	34
 each.t	OK	49	2	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	134	26	169
+eval.t	PARTIAL	135	25	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14

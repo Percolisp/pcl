@@ -1,3 +1,4 @@
+# s517a (2026-10-15, Opus): eval.t 45 "eval catches bad goto calls" LEAVES by edit -- #1747, a goto into a foreach dies with perl's text (it was a (go :foo) compile error).
 # s515a (2026-10-11, Opus): pos.t 15 16 18 19 (the defelem //g rows) LEAVE by edit -- #3063 / #1567, a //g element target is its cell.
 # s507p (2026-10-06, Opus, EDITED BY HAND -- two rows LEAVE): scalar.t 25 "reading from magic scalars" and 30
 #   "FETCH only called once" (#1446): #2111 makes a '<' in-memory handle read its tied scalar live (one FETCH).
@@ -212,7 +213,6 @@ eval.t	143	No segfault: eval "UNITCHECK { eval q(UNITCHECK { die; }); print q(A-
 eval.t	132	Right line number for eval "{"	''	'Missing right curly or square bracket at (eval 1) line 1, at end of line syntax error at (eval 1) line 1, at EOF Execution of (eval 1) aborted due to compilation errors. '	NS:Error message text and format
 eval.t	131	Right line number for eval "{;"	''	'Missing right curly or square bracket at (eval 1) line 1, at end of line syntax error at (eval 1) line 1, at EOF Execution of (eval 1) aborted due to compilation errors. '	NS:Error message text and format
 eval.t	107	eval and last	' The function main::pl-A is undefined.'	'ok '	#155 (NS:tie on an ARRAY or HASH -- the child does `tie @a, A`)
-eval.t	45	eval catches bad goto calls	'Execution of a form compiled with errors. Form:   (go :foo) Compile-time error:   attempt to GO to nonexistent tag: :foo at (eval 0) line 0. '	Can't "goto" into the middle of a foreach loop	#1459 item 3 (goto LABEL into a foreach leaks an SBCL "attempt to GO to nonexistent tag")
 eval.t	127	eval clears %^H	'ok ok nokay'	'ok ok ok'	NS:Lexical compile-time hints (`$^H` / `%^H` scoping)
 eval.t	128	eval does not localise %^H at run time			NS:Lexical compile-time hints (`$^H` / `%^H` scoping)
 eval.t	133	eval qq{\${\nfoo\n}; warn} updates the line number correctly	'should be line 3 at - line 3. '	'should be line 3 at (eval 1) line 3. '	NS:Error message text and format
