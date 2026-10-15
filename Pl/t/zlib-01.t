@@ -117,6 +117,38 @@ tie my @l, 'Tie::File', "$D/t.txt", recsep => '|' or die; $l[1] = "CHANGED"; unt
 open my $ti, '<', "$D/t.txt" or die; my $c = do { local $/; <$ti> }; print "tie-file $c\n";
 P
 
+# 1d. A store REPLACES a long `.=` buffer whole (#3345): `$ob = \$y` after
+# `$$r .= ...` grew $ob's :strbuf cell kept the TEXT and dropped the ref --
+# IO::Uncompress::Base::read's `$out_buffer = \*$self->{Pending}`, so every
+# IO::Zlib read died.  And a substr argument / `\$_[1]` of a raw arg reach
+# the caller through a method and a coderef.
+compare_lines(<<'P', 'strbuf store and lvalue args');
+sub fill { my $r = shift; $$r .= "a" x 150 for 1 .. 3; 1 }
+my $ob = ""; fill(\$ob); my $y = "Y"; $ob = \$y; print "ref ", ref($ob), " ", $$ob, "\n";
+my $z = ""; fill(\$z); $z = {k => 1}; print "href ", ref($z), " ", $z->{k}, "\n";
+package O; sub new { bless {}, shift } sub w { $_[1] = "XY"; 1 } sub rr { my $r = \$_[1]; $$r = "R"; ref($r) }
+package main; my $o = O->new;
+my $s = "abcdef"; $o->w(substr($s, 2)); print "substr-method $s\n";
+my $c = sub { $_[0] = "Q" }; my $t = "abcdef"; $c->(substr($t, 1, 2)); print "substr-coderef $t\n";
+sub f { my $v = "raw"; my $k = $o->rr($v); print "ref-of-arg $k $v\n" } f();
+P
+
+# 5. Archive::Tar's compressed path over IO::Zlib (the everyday program
+# modules/Archive-Tar-Compress reads through it once zlib loads) and
+# IO::Zlib's tied-handle round trip.
+compare_lines(<<'P', 'Archive::Tar and IO::Zlib');
+use strict; use warnings; use Archive::Tar; use IO::Zlib; use File::Temp qw(tempdir);
+my $d = tempdir(CLEANUP => 1);
+my $tar = Archive::Tar->new; $tar->add_data("a.txt", "alpha\n"); $tar->add_data("b.txt", "beta\n");
+$tar->write("$d/t.tgz", COMPRESS_GZIP) or die $tar->error;
+open my $raw, '<:raw', "$d/t.tgz" or die; my $magic; read($raw, $magic, 2); close $raw;
+printf "tgz magic %02x%02x\n", map { ord } split //, $magic;
+my $rd = Archive::Tar->new("$d/t.tgz") or die; print "tgz list ", join(",", sort $rd->list_files), " ", $rd->get_content("b.txt");
+$tar->write("$d/t.tar") or die; my $pl = Archive::Tar->new("$d/t.tar") or die; print "tar list ", join(",", sort $pl->list_files), "\n";
+my $fh = IO::Zlib->new("$d/z.gz", "wb") or die; print $fh "line1\nline2\n"; $fh->close;
+my $in = IO::Zlib->new("$d/z.gz", "rb") or die; my @l = <$in>; $in->close; print "io-zlib ", scalar(@l), " [", join("|", map { s/\n//r } @l), "]\n";
+P
+
 # 1c. `-NAME` of a known sub is the negated call (#3344, the #476 family),
 # and a statement that begins with `*$obj->{k}` after a bare block is a
 # glob cast, not a multiplication (#3342, PPI's mis-lex).

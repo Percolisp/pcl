@@ -4087,14 +4087,20 @@
       ;; read-only check — `for my $x (7) { $x = $x }` lives (probed; closure.t
       ;; row 267 relies on it) while `$x = 7` there dies.
       (when (eq value box) (return-from box-set value))
-      (return-from box-set
-        (funcall (p-magic-cell-setter current)
-                 ;; keep a BLESSED box intact so the setter's stringification
-                 ;; sees its "" overload (substr.t: assigning an overloaded
-                 ;; object to a substr lvalue must call the overload)
-                 (if (and (p-box-p value) (not (p-box-class value)))
-                     (unbox value)
-                     value)))))
+      ;; A :strbuf cell (#2115) is REPRESENTATION, not magic: a store REPLACES
+      ;; it whole and takes the ordinary path below, so a reference stays a
+      ;; reference (#3345 -- the generic setter path unboxes a ref to its target;
+      ;; IO::Uncompress::Base::read lost `$out_buffer = \*$self->{Pending}`).
+      (if (eq (p-magic-cell-kind current) :strbuf)
+          (setf (p-box-value box) *p-undef*)
+          (return-from box-set
+            (funcall (p-magic-cell-setter current)
+                     ;; keep a BLESSED box intact so the setter's stringification
+                     ;; sees its "" overload (substr.t: assigning an overloaded
+                     ;; object to a substr lvalue must call the overload)
+                     (if (and (p-box-p value) (not (p-box-class value)))
+                         (unbox value)
+                         value))))))
   (let ((old-val (p-box-value box))  ; pre-assignment value, for the class-clear rule below
         (v (if (p-box-p value)
                (let ((inner (p-box-value value)))
