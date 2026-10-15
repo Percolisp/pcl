@@ -62,7 +62,7 @@ sub test_transpile {
     is(run_cl($cl), run_perl($code), $name);
 }
 
-plan tests => 20;
+plan tests => 21;
 
 # Forward error-goto inside a sub, jumped to from inside an if branch.
 test_transpile('forward goto to error label inside sub',
@@ -167,3 +167,8 @@ test_transpile('#1747 goto into the middle of a foreach dies with perl text',
     'no warnings; eval { goto F; foreach my $q (1) { F: print "in\n" } }; (my $e = $@) =~ s/ at .*//s; print "E: $e\n";');
 test_transpile('#1747 goto into a nested block from a map block (a pseudo-block it may leave)',
     'no warnings; my $z = 0; { my @r; @r = map { goto L if $_ == 2; $_ } 1 .. 3; print "r=@r\n"; if ($z) { L: print "landed\n" } } print "end\n";');
+# Review s517a (g6.pl): a goto at file level whose label exists only inside a
+# SUB body cannot find it -- perl's run-time "Can't find label", never the raw
+# CL compile error that lost the whole form.
+test_transpile("#1747 goto into a named sub body dies: Can't find label",
+    'no warnings; my $r = eval { goto H6; sub s6 { H6: print "insub\n" } 1 }; (my $e = $@) =~ s/ at .*//s; print defined $r ? "ok\n" : "die: $e\n";');

@@ -299,11 +299,12 @@ sub _classify_nested_gotos {
     next unless $nx->isa('PPI::Token::Word')
       && $nx->content =~ /^\w+$/ && $nx->content ne 'sub';
     my $lbl = $nx->content;
-    my ($A, $lab);
+    my ($A, $lab, $at_doc);
     for (my $p = $w->parent; $p; $p = $p->parent) {
       if ($p->isa('PPI::Structure::Block') || $p->isa('PPI::Document')) {
         $lab = _find_own_label($p, $lbl);
         if ($lab) { $A = $p; last }
+        $at_doc = 1 if $p->isa('PPI::Document');
       }
       last if $p->isa('PPI::Statement::Sub');
       if ($p->isa('PPI::Structure::Block')) {
@@ -311,6 +312,17 @@ sub _classify_nested_gotos {
         last if $prev && $prev->isa('PPI::Token::Word')
           && $prev->content =~ /^(?:sub|sort)$/;
       }
+    }
+    # A goto at FILE level whose label exists only inside a sub body (or
+    # nowhere): no enclosing scope can find it -- perl dies "Can't find label
+    # L" at run time (review s517a, g6.pl: `goto H6; sub s6 { H6: … }`).  The
+    # sub-barrier half is _rewrite_unreachable_gotos'; a string eval's own
+    # file level may still reach a label of its caller, so it is left alone.
+    if (!$A && $at_doc && !$self->eval_mode) {
+      $w->set_content('die');
+      $nx->insert_before(PPI::Token::Quote::Double->new(qq{"Can't find label $lbl"}));
+      $nx->delete;
+      next;
     }
     next unless $A;
     my $T = $lab->parent;

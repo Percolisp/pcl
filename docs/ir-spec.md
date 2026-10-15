@@ -3072,8 +3072,8 @@ Four source forms, four fates:
   each earlier sibling on the path is skipped (`(p-if F nil (progn …))`),
   and F is cleared at the label statement.  Lexicals of the common list keep
   their values.  Example: `{ goto HERE; if (undef) { HERE: { print "x" } } }`
-  prints `x`.  **What dies instead, at the goto, at run time:** a target in
-  a `foreach` body — perl's own `Can't "goto" into the middle of a foreach
+  prints `x`.  **What dies instead, at the goto, at run time:** a label only inside
+  a SUB body -- perl's `Can't find label L`; a target in a `foreach` body — perl's own `Can't "goto" into the middle of a foreach
   loop`; a target in a `while`/`until`/C-style `for` body, a `do`/`eval`/
   `map` block, or reached past a declaration (`my`/`local`, the goto's own
   statement included) — `PCL: unsupported goto into …` (`not-supported.md`
