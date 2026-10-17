@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-16",
+   "description" : "FILED s517b (Opus 5.5, 2026-10-16) from the IO-Compress census (#3161).  `tools/run-dist-t.pl ~/.cpan/build/IO-Compress-2.214-0 t/cz-03zlib-v1.t` -> TRANSPILE-FAIL with that refusal (the oversized-top-level-my family, F6).  Not minimised.  The file also uses Test::NoWarnings (#3346).",
+   "id" : "3347",
+   "status" : "pending",
+   "subject" : "IO-Compress-2.214 t/cz-03zlib-v1.t: TRANSPILE-FAIL \"Parser2 TODO: oversized top-level my extent: $Answer not promotable\""
+}

@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Working",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-16",
+   "description" : "FILED s517b (Opus 5.5, 2026-10-16) from the IO-Compress census (#3161).  PRE-EXISTING: main dc87c403 crashes the same probe.\n\nREPRO (perl 5.40.3 prints ok 1 - a / ok 2 - no warnings):\n  use Test::More; BEGIN { require Test::NoWarnings; Test::NoWarnings->import; plan tests => 2; } ok(1, \"a\");\nPCL: ok 1 - no warnings / no plan / SBCL backtrace (unhandled condition).\n\nLIKELY CAUSE (not probed further): PCL's Test::More is supplied by the runtime (CLAUDE.md, shipped-modules step 3) while Test::NoWarnings loads the real Test::Builder and calls its methods on the shared singleton, so `plan` receives the wrong invocant / argument shape.  The fix layer is the Test::Builder bridge, not zlib.\n\nIMPACT: IO-Compress-2.214-0 cannot be measured at all (0 PASS / 0 PARTIAL / 93 FAIL, every file 0 rows): scratch/s517b/io-compress-rows.tsv in the s517b worktree.",
+   "id" : "3346",
+   "status" : "pending",
+   "subject" : "Test::NoWarnings (installed, site_perl) under PCL: `require Test::NoWarnings; Test::NoWarnings->import; plan tests => N` dies before any row -- \"Can't use string (\\\"tests\\\") as a HASH ref\", then END-block \"Can't locate object method ok via Test::Builder\"; blocks 92 of IO-Compress-2.214's 93 test files"
+}
