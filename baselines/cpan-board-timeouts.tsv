@@ -20,3 +20,4 @@
 # from; size it from a measured run and round up ~1.5x for machine load; when a
 # file gets faster, DELETE its row.
 #
+Capture-Tiny-0.50-0/00-report-prereqs.t	300	s519 round-1 (2026-10-18): 70 s ALONE on the dev box at load 4 (the prereqs report requires every prereq module through PCL), rc=124 (no rows) under the 4-job board at load 5-10 with Fable's sweep beside it; 1/0 whenever it finishes (s518e one-file run, s519 re-run)
