@@ -335,6 +335,8 @@
 # taken-at: s504 2026-10-02 (26 file(s) re-measured)
 # taken-at: 590109b5 2026-10-04 (15 file(s) re-measured)
 # taken-at: b1ce06af 2026-10-10 (6 file(s) re-measured)
+# taken-at: 44961995 2026-10-17 (2 file(s) re-measured)
+# s518 (2026-10-17, Fable) -- op/aassign.t + op/each.t re-spelled with --bless-fails FOR THOSE FILES ONLY at the s517c merge (main 6aecf210): the two NEW rows the s517b / s517c companions reported were measured PRE-EXISTING on the dc87c403 extraction; op/aassign.t 26 is perl's TODO that PCL passes (row below); op/each.t's two `Check length of ...` rows ("\022" / "\x{10fffd}") are HASH-ORDER dependent -- which of the two fails flips between runs, so the re-bless kept the file's rows as they were and a swap of those two is NOT a regression.
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -2124,6 +2126,7 @@ op/aassign.t	183	ok	not ok	RT \#130132 scalar undef 2	NS:Error compatibility for
 op/aassign.t	19	ok	not ok	lvalue sub on RHS returns array	NS:Lvalue subroutines [DEFERRED] (#930)
 op/aassign.t	20	ok	not ok	lvalue sub on RHS returns scalars	NS:Lvalue subroutines [DEFERRED] (#930)
 op/aassign.t	176	ok	not ok	undef as lvalue	NS:Error compatibility for invalid Perl input -- `($$x) = ...` and `undef = ...` are rejected by perl; the rows read the message
+op/aassign.t	26	not ok	ok	my (....) = @_ # TODO cheat and optimise my (....) = @_	PRE-EXISTING P!=C row where PCL PASSES perl's own TODO (perl 5.40.3 fails its optimisation check `# TODO cheat and optimise`; PCL has no such optimisation to miss) -- measured identical on the dc87c403 extraction (s517b, s517c), blessed s518 (Fable) with --bless-fails FOR op/aassign.t + op/each.t ONLY
 op/anonconst.t	3	ok	not ok	:const capturing expression	NS:Attributes on a variable declaration (`my $x : shared`, `my @a : Foo(1)`) -- `sub :const {...}`: the `:const` attribute on an anonymous sub freezes its captured values at construction.  PCL has no attribute protocol, so the sub stays a normal closure and every row of the file reads the live value
 op/anonconst.t	1	ok	not ok	:const capturing global $_	NS:Attributes on a variable declaration (`my $x : shared`, `my @a : Foo(1)`) -- `sub :const {...}`: the `:const` attribute on an anonymous sub freezes its captured values at construction.  PCL has no attribute protocol, so the sub stays a normal closure and every row of the file reads the live value
 op/anonconst.t	2	ok	not ok	:const capturing lexical	NS:Attributes on a variable declaration (`my $x : shared`, `my @a : Foo(1)`) -- `sub :const {...}`: the `:const` attribute on an anonymous sub freezes its captured values at construction.  PCL has no attribute protocol, so the sub stays a normal closure and every row of the file reads the live value
