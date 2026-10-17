@@ -3465,6 +3465,23 @@ neither when the condition fails. *Porter mapping:* any host can spell this
 as "if COND then (save; install; unwind-protect BODY (restore)) else BODY",
 with BODY emitted once.
 
+**A `local` TERM that is not the first term of its statement** (normative,
+s519a task #3370) is lowered by a source-level rewrite before every other
+pass: a VOID comma list holding a `local` term becomes one statement per term,
+each guarded by the statement modifier's condition evaluated ONCE, first, into
+a fresh lexical (the local may change what the condition reads); a `local`
+that is the FIRST thing its statement evaluates (only an assignment target,
+call heads, a method invocant, a deref or an if/unless/while/until condition
+precede it, and its operand is not named before it) becomes `local OPERAND;`
+before the statement.  Either way the localisation opens the enclosing block's
+restore, exactly as a leading `local` does.  Every other `local` term is a
+ruled refusal at its statement (perl-shaped, trappable).  Example:
+`$l{o}++, local(*STDOUT), open(STDOUT, ">&=1") if tied *STDOUT;` lowers as
+`my $c = !!(tied *STDOUT); $l{o}++ if $c; local(*STDOUT) if $c;
+open(STDOUT, ">&=1") if $c;`.  An unqualified standard handle (`STDIN`,
+`STDOUT`, `STDERR`, `ARGV`, …) in `local *NAME` is `main::`'s from every
+package (#3411).
+
 **An aggregate slot cleared by `undef *G`, by `*A = *B`, or by `local *G`
 reads as ABSENT from `*G{ARRAY}` / `*G{HASH}` until a write makes it
 non-empty; reads do not re-vivify it** (normative, s484b task #1117, extended

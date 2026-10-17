@@ -1315,6 +1315,7 @@ row now pass and are no longer in the skip registry.
 - `local $scalar`, `local @array`, `local %hash` — supported.
 - `local $hash{key}`, `local @arr[N]`, `local @hash{@keys}` — supported (sessions 85–86, via `p-local-hash-elem` / `p-local-array-elem` macros).
 - `local *GLOB` — supported (sessions 75–79, via `p-local-glob`).
+- `local` as a TERM that is not the first term of its statement — supported in a void comma list and where it is the first thing its statement evaluates (#3370, ir-spec §7.2); any other position (`f($y, local $x = 1)`, `@{1, local $x}`, `local +(EXPR)->[0]`, a signature default) is a ruled REFUSAL at that statement, never a silent read (signature defaults: still silent, #3410).
 
 **Affected tests:** `perl-tests/local.t` still fails due to `Tie::Array` dependency which causes a hang — not a `local` issue.
 

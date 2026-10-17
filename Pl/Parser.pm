@@ -4688,6 +4688,9 @@ sub _process_local_declaration {
       $name = $1;
       $pkg  = $self->environment ? $self->environment->current_package : 'main';
       $pkg //= 'main';
+      # perl resolves the standard handles in main:: from every package (gv.c's
+      # forced-main list): `local *STDOUT` in package Foo localizes main's (#3411).
+      $pkg = 'main' if Pl::Environment::fh_forced_main_name($name);
     }
     $self->_emit(";; $perl_code");
     # Find initializer (after '=')

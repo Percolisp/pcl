@@ -1,4 +1,6 @@
 # taken-at: 5323d9e 2026-08-15
+# s519a (2026-10-18, Opus, EDITED BY HAND -- one row, TOTAL 18748 -> 18756, #3370): multideref.t 53 -> 61 --
+#   a `local` TERM now localizes (local const/pkg/lexical/general indices 3, delete: const indices, RT #134045 + the 2 shortfall rows).
 # s518e (2026-10-18, Opus, EDITED BY HAND -- one row, TOTAL 18746 -> 18747, #3281): anonsub.t 6 -> 7 -- row 9
 #   "undef &anon giving it a freed GV": `require B` now loads (the core B shim) and svref_2object($_)->GV->NAME is __ANON__.
 #   Sweep scratch/s518e/sweep.log.
@@ -535,7 +537,7 @@ min_local.t	OK	10	0	10
 # s470 (Fable): multideref.t 43 -> 41 EDITED BY HAND — rows 47/49 (RT #130727 array not autovivified) were
 #   ACCIDENTAL passes (PCL never died there, nothing vivified); s470bk's #1058 write-vivification makes them
 #   honest; the corner is an accepted perl quirk registered in cl/skip-registry.lisp (not-supported.md, `local` section).
-multideref.t	OK	53	10	65
+multideref.t	OK	61	4	65
 my.t	OK	52	0	52
 negate.t	OK	47	0	47
 not.t	OK	20	0	24

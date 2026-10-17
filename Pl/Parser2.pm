@@ -1735,6 +1735,10 @@ sub parse {
   # VarAnnotator verdicts above all) sees the per-variable shape (#2114).
   $self->_split_literal_list_decls($doc);
 
+  # A `local` TERM that is not the first term of its statement (#3370): the
+  # void comma list splits, a first-evaluated term hoists, the rest refuse.
+  $self->_lower_local_terms($doc);
+
   # A module whose import installs CONSTANT handlers (`use bigint`: perl's
   # tokenizer hands every numeric literal in the `use`'s scope to the
   # handler) -- each literal in that scope becomes the handler CALL here,
@@ -6686,6 +6690,303 @@ sub _split_literal_list_decls {
   return;
 }
 
+# A `local` TERM that is not the first term of its statement (#3370, RULED
+# s518; docs/ir-spec.md "local").  The local machinery (_lower_local -> v1's
+# _process_local_declaration) only sees a statement that STARTS with `local`;
+# a `local` anywhere else used to be stripped by the expression compiler as a
+# plain read -- the localisation silently never happened.  This pass rewrites
+# the two shapes whose meaning is a sequence of statements the machinery
+# already lowers, BEFORE any other pass sees them:
+#   (a) a VOID comma list with a `local` term --
+#       `$l{o}++, local(*STDOUT), _open(...) if C;`  (Capture::Tiny 344)
+#       becomes one statement per term, each guarded by the condition
+#       evaluated ONCE into a temporary (the local itself may change it:
+#       Capture::Tiny's is `tied *STDOUT`);
+#   (b) a `local` that is the FIRST thing its statement evaluates (only an
+#       assignment target, call heads or a method invocant precede it, and
+#       its operand is not named before it) -- `is(local $h{k} = 19, ...)`,
+#       `my $a = local $/ = 7;` -- becomes `local OPERAND;` before the
+#       statement, which then runs without the word: observably the same.
+# Every other `local` term is a refusal at its statement (rule 12: the
+# silence was the bug), recorded here and emitted by _lower_block /
+# _lower_stmt.  Signature defaults are left alone (#3410).
+sub _lower_local_terms {
+  my ($self, $doc) = @_;
+  for my $round (1 .. 8) {
+    my $changed = 0;
+    for my $l (@{ $doc->find(\&_is_local_term_word) || [] }) {
+      next unless $l->parent;              # deleted by an earlier rewrite
+      my $s = _real_statement_of($l) or next;
+      next if _local_term_reached($l, $s);
+      if ($self->_split_void_local_list($s) || $self->_hoist_local_term($l, $s)) {
+        $changed = 1;
+        last;                              # the tree moved: find again
+      }
+      $self->{_local_term_refusal}{ refaddr $s } //=     # holds $s: no address reuse
+        [$s, "local in this expression position is not supported (#3370)"];
+    }
+    return if !$changed;
+  }
+  return;
+}
+
+# A `local` WORD that is the keyword (not a hash key, method or sub name).
+sub _is_local_term_word {
+  my $t = $_[1];
+  return 0 unless $t->isa('PPI::Token::Word') && $t->content eq 'local';
+  my ($n, $p) = ($t->snext_sibling, $t->sprevious_sibling);
+  return 0 if $n && $n->isa('PPI::Token::Operator') && $n->content eq '=>';
+  return 0 if $p && $p->isa('PPI::Token::Operator') && $p->content eq '->';
+  return 0 if $p && $p->isa('PPI::Token::Word') && $p->content eq 'sub';
+  my $par = $t->parent;
+  return 0 if !$n && $par->isa('PPI::Statement::Expression')
+    && $par->parent && $par->parent->isa('PPI::Structure::Subscript');
+  return 1;
+}
+
+# The statement a block lowers that holds $el: the innermost statement whose
+# parent is the document or a statement block (a DEREF block `@{...}` is part
+# of an expression, not a statement sequence).
+sub _real_statement_of {
+  my ($el) = @_;
+  for (my $s = $el->statement; $s; $s = $s->parent && $s->parent->statement) {
+    my $p = $s->parent or return undef;
+    return $s if $p->isa('PPI::Document');
+    next unless $p->isa('PPI::Structure::Block');
+    my $pv = $p->sprevious_sibling;
+    return $s unless $pv && $pv->isa('PPI::Token::Cast');
+  }
+  return undef;
+}
+
+# The `local`s the statement machinery already owns: the statement's own
+# leading `local`, `delete local`, a signature default (left alone, #3410),
+# and an inner `local` of the SAME operand under a leading one
+# (`local @b = local(@b) = LIST`: both restore at the same block end, LIFO,
+# so the inner one changes nothing observable).
+sub _local_term_reached {
+  my ($l, $s) = @_;
+  return 1 if $s->schild(0) == $l;
+  my $p = $l->sprevious_sibling;
+  return 1 if $p && $p->isa('PPI::Token::Word') && $p->content eq 'delete';
+  for (my $a = $l->parent; $a && $a != $s; $a = $a->parent) {
+    return 1 if $a->isa('PPI::Structure::Signature');
+  }
+  my $lead = $s->schild(0);
+  if ($lead->isa('PPI::Token::Word') && $lead->content eq 'local') {
+    my $mine = _local_operand_text($l);
+    my $its  = _local_operand_text($lead);
+    return 1 if defined $mine && defined $its && $mine eq $its;
+  }
+  return 0;
+}
+
+# The operand of a `local` word as source text (parens stripped, spaces
+# squeezed) -- the elements _local_operand collects -- or undef.
+sub _local_operand_text {
+  my ($l) = @_;
+  my @op = _local_operand($l) or return undef;
+  (my $t = join '', map { $_->content } @op) =~ s/\s+//g;
+  $t =~ s/^\((.*)\)$/$1/;
+  return $t;
+}
+
+# The elements after a `local` word that form its operand: a variable / glob /
+# deref / parenthesised list, then any chain of subscripts and `->`.  () when the shape is anything else, or when the
+# operand would do work if evaluated twice (a call, ++/--, an assignment).
+sub _local_operand {
+  my ($l) = @_;
+  my @op;
+  my $e = $l->snext_sibling or return ();
+  # `local +(EXPR)->[...]`: an element reached through an expression base.
+  my $plus;
+  if ($e->isa('PPI::Token::Operator') && $e->content eq '+') {
+    $plus = $e; $e = $e->snext_sibling or return ();
+    return () unless $e->isa('PPI::Structure::List');
+  }
+  if ($e->isa('PPI::Token::Cast')) {
+    push @op, $e; $e = $e->snext_sibling or return ();
+    return () unless $e->isa('PPI::Structure::Block') || $e->isa('PPI::Token::Symbol');
+  } elsif (!$e->isa('PPI::Token::Symbol') && !$e->isa('PPI::Structure::List')) {
+    return ();
+  }
+  push @op, $e;
+  while (my $n = $op[-1]->snext_sibling) {
+    if ($n->isa('PPI::Structure::Subscript')
+        || ($n->isa('PPI::Token::Operator') && $n->content eq '->')) {
+      push @op, $n;
+      next;
+    }
+    last;
+  }
+  return () if $op[-1]->isa('PPI::Token::Operator');
+  return () if $plus && (@op < 3 || $op[1]->content ne '->');
+  for my $el (@op) {
+    for my $t ($el->isa('PPI::Node') ? $el->tokens : ($el)) {
+      return () if $t->isa('PPI::Token::HereDoc');
+      return () if $t->isa('PPI::Token::Operator')
+        && $t->content =~ /^(?:\+\+|--|[-+*\/.x%&|^]?=|\*\*=|\/\/=|\|\|=|&&=|<<=|>>=)$/;
+      return () if $t->isa('PPI::Token::Word')
+        && !($t->parent->isa('PPI::Statement::Expression') && $t->parent->schildren == 1
+             && $t->parent->parent && $t->parent->parent->isa('PPI::Structure::Subscript'));
+    }
+  }
+  unshift @op, $plus if $plus;
+  return @op;
+}
+
+# (statement-children-before-the-modifier, modifier-word, condition-elements)
+# of a statement; the modifier is the first top-level if/unless/while/until/
+# for/foreach word.  The trailing `;` is dropped.
+sub _stmt_modifier_split {
+  my ($s) = @_;
+  my @k = $s->schildren;
+  pop @k if @k && $k[-1]->isa('PPI::Token::Structure') && $k[-1]->content eq ';';
+  for my $i (1 .. $#k) {
+    next unless $k[$i]->isa('PPI::Token::Word')
+             && $k[$i]->content =~ /^(?:if|unless|while|until|for|foreach)$/;
+    return ([@k[0 .. $i - 1]], $k[$i]->content, [@k[$i + 1 .. $#k]]);
+  }
+  return (\@k, undef, []);
+}
+
+# The source text of an element run, or undef when it holds a here-doc (its
+# body is not in the token text).
+sub _elements_text {
+  my (@el) = @_;
+  my $from = $el[0];
+  my $text = '';
+  for (my $e = $from; $e; $e = $e->next_sibling) {
+    for my $t ($e->isa('PPI::Node') ? $e->tokens : ($e)) {
+      return undef if $t->isa('PPI::Token::HereDoc');
+    }
+    $text .= $e->content;
+    last if $e == $el[-1];
+  }
+  return $text;
+}
+
+# Replace statement $s by the statements in $src (padded so their line numbers
+# are $s's).  Returns 1, or 0 when the fragment does not parse back into
+# exactly $want statements.
+sub _replace_statement_by {
+  my ($self, $s, $src, $want) = @_;
+  my $line = $s->line_number || 1;
+  my $frag = Pl::Parser::fragment_doc(("\n" x ($line - 1)) . $src) or return 0;
+  my @new = $frag->schildren;
+  return 0 unless @new == $want && !grep { !$_->isa('PPI::Statement') } @new;
+  push @{ $self->{_local_term_frags} }, $frag;    # keep the tokens alive
+  $_->remove for @new;
+  for my $n (@new) {
+    $s->insert_before($n)
+      or die "PCL: internal -- could not split the local statement at line $line\n";
+    $s->insert_before(PPI::Token::Whitespace->new(' '));
+  }
+  $s->delete;
+  return 1;
+}
+
+# The condition prologue for a modifier: (decl-text, guard-text) -- the
+# condition evaluated ONCE into a fresh lexical -- or ('', '') with none.
+sub _local_cond_prologue {
+  my ($self, $mod, $cond) = @_;
+  return ('', '') if !defined $mod;
+  my $ct = _elements_text(@$cond);
+  return () if !defined $ct;
+  my $tmp = '$__pcl_lcond_' . ++$self->{_local_term_n};
+  my $neg = $mod eq 'unless' ? '!' : '!!';
+  return ("my $tmp = $neg($ct);", " if $tmp");
+}
+
+# Shape (a): a void comma list with a top-level `local` term.
+sub _split_void_local_list {
+  my ($self, $s) = @_;
+  return 0 unless ref($s) eq 'PPI::Statement' || ref($s) eq 'PPI::Statement::Expression';
+  my $p = $s->parent;
+  return 0 if !$p->isa('PPI::Document') && $p->schild(-1) == $s;   # a value position
+  my ($pre, $mod, $cond) = _stmt_modifier_split($s);
+  return 0 if defined $mod && $mod !~ /^(?:if|unless)$/;
+  my (@terms, @cur);
+  for my $k (@$pre) {
+    if ($k->isa('PPI::Token::Operator') && $k->content =~ /^(?:,|=>)$/) {
+      push @terms, [@cur] if @cur; @cur = ();
+      next;
+    }
+    push @cur, $k;
+  }
+  push @terms, [@cur] if @cur;
+  return 0 unless @terms > 1;
+  return 0 unless grep { $_->[0]->isa('PPI::Token::Word') && $_->[0]->content eq 'local' } @terms;
+  my ($decl, $guard) = $self->_local_cond_prologue($mod, $cond) or return 0;
+  my @stmts = length $decl ? ($decl) : ();
+  for my $t (@terms) {
+    my $tt = _elements_text(@$t);
+    return 0 if !defined $tt;
+    push @stmts, "$tt$guard;";
+  }
+  return $self->_replace_statement_by($s, join(' ', @stmts), scalar @stmts);
+}
+
+# Shape (b): the statement's first evaluation is the `local` term.
+sub _hoist_local_term {
+  my ($self, $l, $s) = @_;
+  return 0 if $s->isa('PPI::Statement::Sub')
+           || $s->isa('PPI::Statement::Include') || $s->isa('PPI::Statement::Package');
+  my $compound = $s->isa('PPI::Statement::Compound');
+  for (my $a = $l->parent; $a && $a != $s; $a = $a->parent) {
+    # a DEREF block `@{local X}` is part of the expression ...
+    next if $a->isa('PPI::Structure::Block') && $a->sprevious_sibling
+         && $a->sprevious_sibling->isa('PPI::Token::Cast');
+    # ... and so is the FIRST condition of if/unless/while/until, which the
+    # statement evaluates first (perl's local there lasts to the block end).
+    next if $compound && $a->isa('PPI::Structure::Condition') && $a->parent == $s
+         && $s->schild(0)->content =~ /^(?:if|unless|while|until)$/
+         && $s->find_first('PPI::Structure::Condition') == $a;
+    return 0 if $a->isa('PPI::Structure::Condition') || $a->isa('PPI::Structure::Block');
+  }
+  my @op = _local_operand($l) or return 0;
+  my %names = map { $_->symbol => 1 }
+              grep { $_->isa('PPI::Token::Symbol') } map { $_->isa('PPI::Node') ? $_->tokens : ($_) } @op;
+  for my $t ($s->tokens) {
+    last if $t == $l;
+    next if $t->isa('PPI::Token::Whitespace') || $t->isa('PPI::Token::Comment');
+    next if $t->isa('PPI::Token::Structure');
+    next if $t->isa('PPI::Token::Word');
+    next if $t->isa('PPI::Token::Cast');
+    return 0 if $t->isa('PPI::Token::Symbol') && $names{ $t->symbol };
+    next if $t->isa('PPI::Token::Symbol');
+    next if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:=|->|\\)$/;
+    return 0;
+  }
+  my ($pre, $mod, $cond) = $compound ? ([$s->schildren], undef, []) : _stmt_modifier_split($s);
+  return 0 if defined $mod && $mod !~ /^(?:if|unless)$/;
+  my ($decl, $guard) = $self->_local_cond_prologue($mod, $cond) or return 0;
+  my $optext = _elements_text(@op);
+  return 0 if !defined $optext;
+  my @decls = length $decl ? ($decl) : ();
+  if ($op[0]->isa('PPI::Token::Operator')) {   # +(EXPR)->...: name the base once
+    my $b = '$__pcl_lbase_' . ++$self->{_local_term_n};
+    push @decls, "my $b = " . $op[1]->content . ";";
+    $optext = $b . _elements_text(@op[2 .. $#op]);
+  }
+  # The statement without the word (and the whitespace after it).
+  return 0 if grep { $_->isa(q{PPI::Token::HereDoc}) } $s->tokens;
+  my $ws = $l->next_sibling;
+  $ws = undef unless $ws && $ws->isa(q{PPI::Token::Whitespace});
+  my $body = q{};
+  my $stop = !defined $mod ? undef
+            : $pre->[-1]->isa(q{PPI::Node}) ? ($pre->[-1]->tokens)[-1] : $pre->[-1];
+  for my $t ($s->tokens) {
+    last if !defined $stop && $t->isa(q{PPI::Token::Structure}) && $t->content eq q{;}
+         && $t->parent == $s;
+    $body .= $t->content unless $t == $l || ($ws && $t == $ws);
+    last if defined $stop && $t == $stop;
+  }
+  $body .= "$guard;" if !$compound;
+  my @stmts = (@decls, "local $optext$guard;", $body);
+  return $self->_replace_statement_by($s, join(' ', @stmts), scalar @stmts);
+}
+
 # [[NAME, LITERAL-TEXT] …] for a statement _split_literal_list_decls may
 # rewrite, else undef.
 sub _literal_list_decl_pairs {
@@ -10316,6 +10617,12 @@ sub _lower_block_1 {
   # verdicts when it returns.
   local $self->{_cur_vi} = $vi;
 
+  # #3370: a statement holding a `local` term no lowering reaches.
+  if (my $r = $self->{_local_term_refusal}{ refaddr $first }) {
+    return (raw($self->fallback_parser->refused_statement_form($first, $r->[1])),
+            $self->_lower_block(\@rest, $vi, $tail_ctx));
+  }
+
   # -- local …;  → v1's local machinery via the fallback seam; the opened
   # save/restore scope wraps the lowered block remainder (see _lower_local).
   # Standalone `delete local $h{k};` is a plain PPI::Statement with the same
@@ -11452,6 +11759,9 @@ sub _lower_stmt {
   # eval-string transpile die, #363).
   if (my $refusal = $self->fallback_parser->class_statement_refusal($stmt)) {
     return raw($self->fallback_parser->refused_statement_form($stmt, $refusal));
+  }
+  if (my $r = $self->{_local_term_refusal}{ refaddr $stmt }) {      # #3370
+    return raw($self->fallback_parser->refused_statement_form($stmt, $r->[1]));
   }
 
   if ($stmt->isa('PPI::Statement::Compound')) {
