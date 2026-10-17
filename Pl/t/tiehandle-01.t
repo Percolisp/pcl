@@ -376,5 +376,49 @@ unlink "/tmp/pcl-tiehandle-01d-$$.txt";
 print "bad=$bad\n";
 PERL
 
+test_th('#3376 `local *STDOUT` in a package localizes main::STDOUT: the tie is gone in the scope, a reopen onto fd 1 reaches a child', <<'PERL');
+package L; our @L;
+sub TIEHANDLE { my ($c, $m) = @_; open my $fh, $m or die "t: $!"; bless { fh => $fh }, $c }
+sub PRINT { my $s = shift; push @L, join "", @_; 1 }
+package Cap;
+use File::Temp qw(tempfile);
+sub grab {
+  my ($tmp, $fn) = tempfile(UNLINK => 1);
+  local *STDOUT;
+  open STDOUT, ">&=1" or die "a: $!";
+  my $in = tied(*STDOUT) ? "tied" : "untied";
+  open STDOUT, ">&" . fileno($tmp) or die "b: $!";
+  print STDOUT "in-proc\n";
+  system($^X, "-e", "print qq{child\\n}");
+  close STDOUT;
+  open my $r, "<", $fn or die; local $/; my $got = <$r>;
+  return "$in:$got";
+}
+package main;
+open my $save, ">&STDOUT" or die;
+tie *STDOUT, 'L', ">&=STDOUT";
+my $g = Cap::grab();
+my $after = tied(*STDOUT) ? "tied" : "untied";
+untie *STDOUT; open STDOUT, ">&", $save or die;
+$g =~ s/\n/|/g;
+print "grab=$g after=$after logged=", scalar(@L::L), "\n";
+PERL
+
+test_th('#3376 `*ALIAS = *STDOUT` / `local *ALIAS = *STDOUT` alias the standard handle: print ALIAS writes (and reaches its tie)', <<'PERL');
+package T; our @L;
+sub TIEHANDLE { bless {}, shift } sub PRINT { my $s = shift; push @L, "T:" . join "", @_; 1 }
+package Foo;
+*G = *STDOUT; print G "global\n";
+sub f { local *O = *STDOUT; print O "local\n"; }
+f();
+*E = *STDERR; my $r = print E "";
+package main;
+tie *STDOUT, 'T';
+sub g { local *O2 = *STDOUT; print O2 "tied-alias"; }
+g();
+untie *STDOUT;
+print "stderr-alias=", ($r ? 1 : 0), " log=@T::L\n";
+PERL
+
 
 done_testing;

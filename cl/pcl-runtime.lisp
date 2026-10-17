@@ -25797,7 +25797,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6790"
+(defparameter *pcl-cache-generation* "v2-6884"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -32083,13 +32083,26 @@ size comes from fstat on the descriptor, after the buffered output is written
           (%p-note-sub-install dst-sym :glob-copy))
         (%p-glob-clear-code-slot dst-pkg dst-uname))))
 
+(defun %p-glob-io-key (sn sp)
+  "The *p-filehandles* key of glob *SP::SN's IO slot.  A standard handle is
+   registered under its :pcl symbol (%p-resolve-fh's by-name fallback), not
+   under the user package's same-named one, so `*O = *STDOUT` must alias THAT
+   key -- an alias of main::stdout found no stream and `print O` wrote
+   nothing (#3376)."
+  (let ((own (intern sn sp))
+        (canon (find-symbol sn :pcl)))
+    (if (and canon (not (gethash own *p-filehandles*))
+             (nth-value 1 (gethash canon *p-filehandles*)))
+        canon
+        own)))
+
 (defun %p-glob-copy-io-slot (sp sn dst-pkg dst-uname)
   "The IO slot of a glob-to-glob assignment: the open-stream registration, so
    `*DST = *SRC` aliases the filehandle (`*FH = shift` in a sub that then
    reads <FH>).  Keyed in *p-filehandles* by the bareword symbol, the same
    naming convention the variable slots use.  A source with no handle
    DEREGISTERS the destination's, the #602 rule for this slot."
-  (let ((src-sym (intern sn sp)))
+  (let ((src-sym (%p-glob-io-key sn sp)))
     (multiple-value-bind (stream present) (gethash src-sym *p-filehandles*)
       (%p-glob-clear-io-slot dst-pkg dst-uname)
       (when present
