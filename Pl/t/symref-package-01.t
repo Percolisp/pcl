@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 19;
 
 sub write_pl {
     my ($code) = @_;
@@ -399,4 +399,24 @@ both_agree('#1249(2) $#{"never::declared"} is -1', <<'PL');
 no strict 'refs';
 print "1=", $#{'main::never_declared_gz'}, "\n";
 print "2=", scalar(@{'main::never_declared_gz'}), "\n";
+PL
+
+# ---- my $v = ${"name"} holding a REFERENCE (task #3394, s518e) -----------
+# The symbolic read handed back the cell's bare VALUE; a hash table / array
+# vector there was then copied as %h / @a in scalar context (a count) and a
+# blessed one lost its class -- Type::Library's
+# `${"$class\::META"} ||= bless {}, $class` answered '' on every later call.
+
+both_agree('#3394 my $v = ${"P::x"} keeps a reference, blessed or not', <<'PL');
+no strict 'refs';
+${"L::A"} = bless {}, "L"; my $a1 = ${"L::A"}; print "1=", ref($a1), "\n";
+${"L::C"} = {a => 1}; my $c1 = ${"L::C"}; print "2=", ref($c1), " $c1->{a}\n";
+${"L::D"} = [1, 2]; my $d1 = ${"L::D"}; print "3=", ref($d1), " @$d1\n";
+${"L::F"} = sub { 9 }; my $f1 = ${"L::F"}; print "4=", ref($f1), " ", $f1->(), "\n";
+${"L::E"} = \"s"; my $e1 = ${"L::E"}; print "5=", ref($e1), " $$e1\n";
+${"L::S"} = "plain"; my $s1 = ${"L::S"}; print "6=", $s1, "\n";
+sub meta { ${"$_[0]\::META"} ||= bless {}, $_[0] }
+my $m1 = meta("K"); $m1->{k} = 1; my $m2 = meta("K");
+print "7=", ref($m2), " ", ($m2->{k} // "u"), " ", ($m1 == $m2 ? "same" : "differ"), "\n";
+my $copy = ${"L::C"}; $copy = 5; print "8=", ref(${"L::C"}), "\n";
 PL

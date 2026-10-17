@@ -30612,7 +30612,18 @@ size comes from fstat on the descriptor, after the buffered output is written
        ;; scalar-value for why a NUMBER is not one here (task #505/#551).
        ;; At a strict-refs site it is perl's fatal instead (#2103).
        (%p-deref-strict-string "SCALAR" inner site)
-       (%p-symref-scalar-value inner site))
+       ;; A REFERENCE held in the cell is a ref-shaped VALUE (a hash table, an
+       ;; array vector, a code object, a box) whose class lives on the CELL, and
+       ;; the consumer reads `${...}` as a VARIABLE: handed the bare value,
+       ;; box-set took a hash table for `%h` in scalar context (its count) and
+       ;; the bless was lost -- `my $v = ${"P::x"}` was not a reference (#3394,
+       ;; Type::Library's `${"$class\::META"} ||= bless {}, $class`).  So a
+       ;; ref-shaped value answers the CELL, as the static `$P::x` read does.
+       (let ((v (%p-symref-scalar-value inner site)))
+         (if (or (p-box-p v) (hash-table-p v) (functionp v)
+                 (and (vectorp v) (not (stringp v))))
+             (or (%p-symref-box inner site) v)
+             v)))
       ;; undef: an rvalue `$$u` under strict refs dies (#2103); unmarked, it
       ;; reads the symbolic `${""}`, i.e. undef, and vivifies nothing.
       ((or (null inner) (eq inner *p-undef*))
