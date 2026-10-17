@@ -1,3 +1,4 @@
+# s518d (2026-10-17, Opus, EDITED BY HAND): scalar.t 34/36 descriptions change (they ARE $!): #3371 makes close($dup) after close($fh) on an in-memory dup succeed without EBADF as perl does, so $! is empty at the open; the rows still fail for their NS reason.  yadayada.t goes PARTIAL -> OK (#3203: local *STDOUT detaches, the row-32 verdict line is no longer eaten), which COUNTS two rows that were already there: 33 (the drop) and 34 (its $@ text, perl-shaped since); both identical on an ff4c1500 extraction run alone.
 # s517a (2026-10-15, Opus): eval.t 45 "eval catches bad goto calls" LEAVES by edit -- #1747, a goto into a foreach dies with perl's text (it was a (go :foo) compile error).
 # s515a (2026-10-11, Opus): pos.t 15 16 18 19 (the defelem //g rows) LEAVE by edit -- #3063 / #1567, a //g element target is its cell.
 # s507p (2026-10-06, Opus, EDITED BY HAND -- two rows LEAVE): scalar.t 25 "reading from magic scalars" and 30
@@ -398,8 +399,8 @@ ref.t	130	freeing self-referential typeglob	'The value                          
 ref.t	67	stringify for ref to vstring	'SCALAR(0xf)'	^VSTRING\(0x[0-9a-f]+\)$	#1495 CATALOG ref.t "vstring refs"
 ref.t	130	UNIVERSAL::AUTOLOAD called when freeing qr//	'65280'	'0'	#2101 made $? real (s492c): the runperl child dies "Can't locate object method p via package a" (a package UNIVERSAL::AUTOLOAD is not consulted on a method miss, #2061) and exits 255; the row passed on a stale 0 before.
 scalar.t	40		undef	'43'	NS:A LITERAL in a foreach list is writable, not read-only (consequence of 36: the accepted '>' open truncated \43)
-scalar.t	36	Bad file descriptor			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \43 must fail EACCES).  s473f: the DESCRIPTION is $! itself, so it changed with #1307's EBADF for the same reason as row 34.
-scalar.t	34	[perl #40267] - Bad file descriptor			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \undef must fail).  s473f: the DESCRIPTION now carries "Bad file descriptor" because the test interpolates $! and #1307 made a close with no open handle set EBADF as perl does -- perl's own run never sees it, because there the open FAILS and overwrites $!.
+scalar.t	36				NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \43 must fail EACCES).  s473f: the DESCRIPTION is $! itself, so it changed with #1307's EBADF for the same reason as row 34.
+scalar.t	34	[perl #40267] - 			NS:A LITERAL in a foreach list is writable, not read-only (no read-only scalars: open '>' on \undef must fail).  s473f: the DESCRIPTION now carries "Bad file descriptor" because the test interpolates $! and #1307 made a close with no open handle set EBADF as perl does -- perl's own run never sees it, because there the open FAILS and overwrites $!.
 scalar.t	89	check $! is updated	'0'	'22'	#1447 (a >0xFF target must fail the open with EINVAL)
 scalar.t	92	check $! is updated even when we warn	'0'	'22'	#1447 (a >0xFF target must fail the open with EINVAL)
 scalar.t	112	check errno set	'0'	'22'	#1447 (print to a non-downgradable target must set EINVAL)
@@ -501,7 +502,8 @@ tr.t	307	RT #133880 illegal \N{}	''	Unknown charname	NS:Error compatibility for 
 tr.t	223	non-modifying tr/// on a scalar ref	'0'	'2'	#1493 CATALOG tr.t "tests 223-224"
 tr.t	257	tr// of \N{name} works for upper-Latin1	'á'	'A'	#1494 CATALOG tr.t "test 257" + NS:Error compatibility for invalid Perl input
 yadayada.t	30		''	\Asyntax error 	NS:Error compatibility for invalid Perl input (principle 9) + the #138 drop family (the drop announcement is what $@ holds)
-yadayada.t	34	{Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator} (The function main::pl-A is undefined. at (eval 1) line 1.)			NS:Error compatibility for invalid Perl input (principle 9) + the #138 drop family (the drop announcement is what $@ holds)
+yadayada.t	33	Parsing '...' in "print  D  ...  A ;" as a range operator (PCL: statement dropped at (eval) line 2: print D ... A ; -- Bug. Fell through. Missing case: [] at (eval 14) line 1.)			NS:Error compatibility for invalid Perl input (principle 9) + the #138 drop family (the drop announcement is what $@ holds)
+yadayada.t	34	Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator (Undefined subroutine &main::A called at (eval 15) line 1.)			NS:Error compatibility for invalid Perl input (principle 9) + the #138 drop family (the drop announcement is what $@ holds)
 quotemeta.t	30	quotemeta Latin1 no unicode_strings quoted	'ß'	'\ß'	#146
 quotemeta.t	31	quotemeta Latin1 no unicode_strings quoted length	'1'	'2'	#146
 bop.t	509	[perl #17844] access beyond end of block	'PCL: statement not supported at - line 1: formline X000n^\\0,\\0^\\0for\0,0..10 -- Bug. Fell through. Missing case: []'	''	NS:`format` / `write` report formatting + #138 drop family

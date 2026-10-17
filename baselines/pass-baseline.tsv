@@ -592,4 +592,4 @@ vec.t	OK	76	0	78
 wantarray.t	OK	28	0	28
 warn.t	OK	11	0	11
 while.t	OK	4	0	4
-yadayada.t	PARTIAL	20	13	34
+yadayada.t	OK	21	13	34
