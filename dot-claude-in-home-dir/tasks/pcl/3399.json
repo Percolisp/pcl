@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED + FIXED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census: chunk 1's 93 FAIL files all printed NO TAP (`*FILE* no TAP rows`); reproduced on t/20-modules/Error-TypeTiny/basic.t -- `'Error::TypeTiny'->throw()` died \"The value -1 is not of type UNSIGNED-BYTE at (eval 0) line 0.\" and the test's `$e->message` then died on a string.\n\nREPRODUCER (perl 5.40.3 vs main ff4c1500):\n\n    sub f { my @c = caller(-1); my $s = caller(-1); print scalar(@c), \" \", (defined $s ? \"def\" : \"undef\"), \"\\n\" }\n    f();\n\nperl: `0 undef`.  PCL: an unhandled CL type error (`nth -1`).\n\nCAUSE: `p-caller` (cl/pcl-runtime.lisp) guarded only the TOP of the caller stack (`>= lvl (length ...)`), never a negative level; `nth` of -1 signalled.  Error::TypeTiny::throw_cb line 52 reads `(caller($level - 1))[1]` with $level 0.\n\nFIX: one guard -- a negative level returns nil (empty list / undef), exactly like a level above the stack.  Not #233 (caller fidelity): this is a crash on a value, not a field's fidelity.\n\nGUARD: Pl/t/universal-01.t row 11 (perl oracle), inverse-verified on a main extraction (FAILS there).\n",
+   "id" : "3399",
+   "status" : "pending",
+   "subject" : "caller() with a NEGATIVE level died with a raw CL type error (\"The value -1 is not of type UNSIGNED-BYTE\") where perl answers the empty list / undef -- every Error::TypeTiny exception (throw_cb reads caller($level - 1) at level 0) died that way"
+}
