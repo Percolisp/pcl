@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518e (Opus 5.5, 2026-10-18) from the Type-Tiny census sample: t/21-types/Any.t (perl 72/0) dies at transpile:\n\n    Parser2 TODO: self-referential init: my @none_tests =\n    ...\n    \tpass => 'filehandle' => do { open my $x, '<', $0 or die; $x },\n\nREPRODUCER (perl 5.40.3 vs main ff4c1500):\n\n    my @n = my @t = (1, do { my $x = 2; $x });\n    print \"@n|@t\\n\";\n\nperl: `1 2|1 2`.  PCL: the whole file refuses.  Pl/Parser2.pm ~10809: the chained-`my` path dies when the final initializer TEXT matches /(?<![-\\w])(?:my|our|local|state)\\b/ -- a textual test that cannot tell a `my` scoped inside a nested block (harmless) from a self-referential one.  NOT fixed (the declaration/rename family -- the sweep is the gate for a change there).  One file in the census (the other 67 21-types files declare `my @tests` alone).\n",
+   "id" : "3404",
+   "status" : "pending",
+   "subject" : "`my @a = my @b = (LIST)` is refused (\"Parser2 TODO: self-referential init\") when LIST contains ANY `my` -- even inside a do-block element (`do { open my $x, ... }`); Type-Tiny t/21-types/Any.t does not compile"
+}

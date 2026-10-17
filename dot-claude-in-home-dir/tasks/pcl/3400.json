@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED + FIXED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census cause run (chunk 1, scratch/s518e/causes1.tsv): 20 of the 92 FAIL files died \"Undefined subroutine &Test::Builder::Module::builder called\" -- 18 of them are files real perl SKIPS (`use Test::Requires 'Moose'` etc.: the optional module is absent), 2 (03-leak.t, Test::LeakTrace is XS) run in perl.\n\nREPRODUCER (perl 5.40.3 vs main ff4c1500):\n\n    package Req; our @ISA = ('Test::Builder::Module');\n    package main; use Test::More;\n    my $b = Req->builder;\n    $b->skip_all(\"needs Frob\") if !defined $b->has_plan;\n\nperl: `1..0 # SKIP needs Frob`.  PCL: dies, no TAP.\n\nFIX (cl/pcl-test.lisp, the harness's Test::Builder section): Test::Builder::Module->builder = the singleton; ->has_plan (undef / \"no_plan\" / the count), ->skip(REASON) (one skip row, no `last SKIP`), ->skip_all(REASON) (= plan skip_all), ->is_passing.  skip / skip_all are SHADOWED in Test::Builder first: the package uses :pcl and pl-skip / pl-skip_all are the TAP layer's own functions -- a plain defun redefined them (caught on the first probe).\n\nGUARD: Pl/t/universal-01.t rows 12-13, inverse-verified on a main extraction.\n",
+   "id" : "3400",
+   "status" : "completed",
+   "subject" : "Test::Builder::Module->builder / ->has_plan / ->skip / ->skip_all / ->is_passing were unanswered by the PCL TAP layer -- Test::Requires (and any module on Test::Builder::Module) died with no TAP where perl skips the file"
+}

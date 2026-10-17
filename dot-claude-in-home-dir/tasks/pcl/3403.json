@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518e (Opus 5.5, 2026-10-17), found while probing the Type-Tiny census (Type::Library idiom `sort $lib->meta->type_names` family).\n\nREPRODUCER (perl 5.40.3 vs main ff4c1500 and s518e):\n\n    package K; sub new { bless {}, shift } sub names { (\"b\", \"a\") }\n    package main;\n    print join(\",\", sort K->new->names), \"\\n\";\n\nperl: `a,b`.  PCL: \"PCL: statement not supported ... -- WTF? :-) Expr starts with ->/brace??\" (statement dropped / dies in eval).  perl reads `sort WORD->...` as sort LIST where the bareword is a class (the `->` rules out SUBNAME).  NOT FIXED (PExpr sort-operand parse, the #153 region -- needs a design look).\n",
+   "id" : "3403",
+   "status" : "pending",
+   "subject" : "`sort Class->m->n` (sort over a method-chain LIST) is refused as \"statement not supported\" (dropped) -- perl sorts the chain's list"
+}
