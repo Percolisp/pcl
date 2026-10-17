@@ -2459,6 +2459,24 @@ matching Perl.  On the way out `p-return-value` adjusts the value:
 A sub body falling off the end returns its last evaluated form (the `catch`'s
 value), so the tail expression and `return` arrive at the frame the same way.
 
+**A bare tail COMMA LIST is the FLATTENED list (normative, s518e, task
+#3402).**  A body whose last statement is `LIST` with no `return` yields, in
+list context, exactly what `return (LIST)` yields: when any element is not
+provably one scalar (an array, `@_`, a call, a nested expression) the value is
+`(p-flatten-args (list list …))`, never a vector holding that element as ONE
+element -- a vector element that is itself a list stays one element when the
+value is passed on as arguments (`sub as (@) { parent => @_ }`, then
+`f(as "S", …)`, read ARRAY(0x..)):
+
+```lisp
+(if *wantarray* (p-flatten-args (list list "parent" @_)) (progn "parent" @_))
+```
+
+**A CORE BUILTIN before `->` is a CALL (normative, s518e, task #3401).**
+`caller->isa("X")`, `time->m`: perl's keyword wins over a class name, so the
+invocant is the builtin's SCALAR value, `(p-scalar-ctx (p-caller))`; a
+declared package of that name still wins (checked first).
+
 **A `return` in TAIL POSITION does not throw (normative, s465bb, task #994).**
 When a `return EXPR` (no statement modifier, single expression) IS a sub
 body's LAST statement, nothing stands between it and the frame's catch, so the

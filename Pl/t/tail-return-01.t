@@ -56,7 +56,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 sub run_cl {
     my ($code, %opt) = @_;
@@ -250,3 +250,30 @@ ok($none_multi =~ /\(p-return \(p-\+ \$x \$y\)\)/
      && $none_sort  =~ /\(p-return \(p-<=>/,
    'shape: PCL_OPT=none restores p-return; a sort comparator keeps it either way')
   or diag("none:\n$none_multi\nsort:\n$none_sort");
+
+# #3402 (s518e, the Type-Tiny census): a sub whose LAST statement is a bare
+# comma list (no `return`) yields the FLATTENED list.  An array kid (`@_` is a
+# Magic token, `@G` a Symbol) or a call kid used to stay ONE element of the
+# returned vector; passed on as ARGUMENTS it read ARRAY(0x..) (Type::Utils
+# `sub as (@) { parent => @_ }` + `sub where (&;@) { constraint => @_ }`:
+# `as "S", where {...}` gave parent => [..]).  The perl oracle is live.
+{
+    my $prog = <<'PL';
+our @G = (7, 8);
+sub h   { ("b", "c") }
+sub g   { "a", h() }
+sub mm  { "a", @_ }
+sub k   { "a", @G }
+sub id  { @_ }
+sub cnt { scalar(@_) }
+sub as1 { parent => @_; }
+sub wh1 { constraint => @_; }
+my %o = (as1 "S", wh1(sub { 1 }));
+print join(" ", id(mm(1, 2)), "|", id(g()), "|", id(k()), "|", cnt(mm(1, 2)), cnt(g()), cnt(k()),
+  "|", map { "$_=" . (ref $o{$_} || $o{$_}) } sort keys %o), "\n";
+my $s = mm(5, 6); print "scalar:$s\n";
+PL
+    my $perl = do { my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $prog; close $fh; scalar `perl $f 2>&1` };
+    is(run_cl($prog), $perl,
+       '#3402: a bare tail list spreads @_ / arrays / call values into the sub\'s list value, also when passed on as arguments (perl oracle)');
+}

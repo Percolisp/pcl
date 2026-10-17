@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 14;
 
 sub write_pl {
     my ($code) = @_;
@@ -378,4 +378,21 @@ print "not reached\n";
 PL
     like(run_cl($prog2), qr/\A1\.\.0 # skip needs Frob\n\z/i,
          '#3400: ->skip_all before a plan prints 1..0 # SKIP and exits (as perl)');
+}
+
+{
+    # #3401 (s518e, the Type-Tiny census): a CORE BUILTIN before `->` is a
+    # CALL -- perl's keyword wins over a class name.  `caller->isa("X")`
+    # (Type::Utils::extends's "Not a type library" guard) read the CLASS
+    # "caller"; 19 census files died there.  A real package still wins.
+    my $prog = <<'PL';
+package Base0; sub hi { "hi:" . (ref($_[0]) || $_[0]) }
+package MyL; BEGIN { our @ISA = ("Base0") }
+package main;
+sub ext { print join(" ", (caller->isa("Base0") ? 1 : 0), caller->hi, (caller(0))[0]), "\n" }
+package MyL; main::ext();
+package main; print((time->can("nope") ? 1 : 0), " ", Base0->hi, "\n");
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3401: caller->isa / caller->m call caller() (scalar: the package), as perl; a package name stays a class (perl oracle)');
 }

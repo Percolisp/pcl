@@ -3558,6 +3558,12 @@ sub gen_methodcall_form {
           $obj = '"' . $name . '"';
         } elsif ($self->environment && $self->environment->has_prototype($name)) {
           $obj = $self->gen_node_form($kids->[0]);
+        } elsif (exists $self->expr_o->known_no_of_params->{$name}) {
+          # A CORE BUILTIN before `->` is a CALL, as in perl (a keyword wins
+          # over a class name): `caller->isa(...)` is Type::Utils::extends's
+          # guard (#3401); it read the class "caller".  Its value is the
+          # invocant, so it is taken in SCALAR context (caller -> package).
+          $obj = ['p-scalar-ctx', [$self->cl_name($name, 1)]];
         } else {
           $obj = ['p-resolve-invocant', '"' . $name . '"'];
         }
@@ -4862,13 +4868,22 @@ sub gen_progn_form {
                        : ['p-flatten-args', ['list', 'list', @forms]];
   }
   if (@forms > 1 && ($ctx == VOID_CTX || $ctx == INHERIT_CTX)) {
-    my @flat;
-    for my $i (0 .. $#$kids) {
-      my $kid_node = $self->expr_o->get_a_node($kids->[$i]);
-      push @flat, $self->_is_array_expr_node($kid_node, $kids->[$i])
-                  ? ['p-flatten', $forms[$i]] : $forms[$i];
+    # A sub's LIST value is the FLATTENED list (#3402), built exactly as the
+    # LIST_CTX branch above builds one: a kid that is not provably one scalar
+    # (an array -- `@_` is a Magic token, not a Symbol --, a call, a nested
+    # expression) spreads the whole value through p-flatten-args.  The old
+    # shape put a p-flatten MARKER (or a call's vector) in as ONE element, and
+    # once the value was passed on as ARGUMENTS it stayed one element: an
+    # ARRAY(0x..), or a marker printed into eval'd code (Type::Utils
+    # `as "S", where {...}` gave parent => [..]).
+    my $all_scalar = 1;
+    for my $kid_id (@$kids) {
+      unless ($self->_node_is_definitely_scalar($kid_id)) { $all_scalar = 0; last }
     }
-    return ['if', '*wantarray*', ['vector', @flat], ['progn', @forms]];
+    return ['if', '*wantarray*',
+            $all_scalar ? ['vector', @forms]
+                        : ['p-flatten-args', ['list', 'list', @forms]],
+            ['progn', @forms]];
   }
   return ['progn', @forms];
 }

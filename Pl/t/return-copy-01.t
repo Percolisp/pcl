@@ -140,7 +140,10 @@ OUT
 # walk aliases the callee storage and `for (nest_a()) { $_ = 1 }` writes into @a.
 # The copy is SAME-SHAPE, so the element stays ONE element and the consumer still
 # flattens it — that is what keeps Role::Tiny (`qw(x), $_[0]->SUPER::steps`)
-# working, and Pl/t/moo-01.t is its guard.
+# working, and Pl/t/moo-01.t is its guard.  (s518e, #3402: a BARE tail list --
+# no `return` -- now spreads through p-flatten-args at the tail instead, so its
+# array kids arrive as cells the per-element copy copies; the marker rows below
+# still guard the producers that keep the marker.)
 # ─────────────────────────────────────────────────────────────────────────────
 test_cl('list family: every element of a returned list is a copy', <<'PL', <<'OUT');
 my $x = 1; my $s = "abc"; my @a = (1,2,3); my %h = (a=>1); my @big = (1,2,3,4); my @b = (4,5);
