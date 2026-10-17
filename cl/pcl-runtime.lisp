@@ -9248,9 +9248,7 @@ per element."
           ;; turns `\*foo` into a bare glob (#423) — the one raw-object kind
           ;; whose ref type is NOT decided by the object alone.
           ((p-typeglob-p inner)
-           (let ((nb (make-p-box inner)))
-             (setf (p-box-is-ref nb) (p-box-is-ref item))
-             (%p-vpush nb arr)))
+           (%p-vpush (%p-glob-container-copy item) arr))
           ((or (and (vectorp inner) (not (stringp inner)))
                (hash-table-p inner)
                (functionp inner)
@@ -9262,6 +9260,19 @@ per element."
           ;; Plain scalar box: copy into new box
           (t (%p-vpush (make-p-box inner) arr))))
       (%p-vpush (make-p-box item) arr)))
+
+(defun %p-glob-container-copy (item)
+  "A fresh container for the typeglob in box ITEM, CARRYING its is-ref flag.
+   For a glob the REF-ness lives on the container, not on the object, so a
+   copy that drops the flag turns `\*foo` into a bare glob (#423), and one
+   that wraps ITEM whole nests the ref a level deeper than every reader of a
+   slot expects (#3372: `%h = (k => \*STDIN)` then `close $_[0]` on
+   `f($h{k})` found no handle).  The ONE copy rule for both construction
+   arms: the array's (%p-flatten-list's element walk) and the hash's
+   (%p-make-hash-entry)."
+  (let ((nb (make-p-box (p-box-value item))))
+    (setf (p-box-is-ref nb) (p-box-is-ref item))
+    nb))
 
 (defun %p-make-hash-entry (v)
   "Create a fresh entry box from V for storage in a hash, preserving bless class
@@ -9288,6 +9299,9 @@ per element."
   (let ((raw (%p-storable-raw v)))
     (when raw (return-from %p-make-hash-entry raw)))
   (cond
+    ;; a glob ref: the flag travels on a flat copy, as in the array arm (#3372)
+    ((and (p-box-p v) (p-typeglob-p (p-box-value v)))
+     (%p-glob-container-copy v))
     ((and (p-box-p v) (p-box-is-ref v))
      (make-p-box v))
     ;; Dualvar ($!/Scalar::Util::dualvar): keep both numeric and string halves.
@@ -19666,12 +19680,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             (0)
             (1 (ignore-errors (finish-output *standard-output*)))
             (2 (ignore-errors (finish-output *error-output*))))
-          (unless (= fd slot)
-            (sb-posix:dup2 fd slot)
-            ;; Releases FD; SLOT holds the copy.  Buffered output would flush
-            ;; to the same file, and the open is fresh, so nothing is lost.
-            (ignore-errors (close stream))
-            (remhash stream *p-open-output-streams*))
+          ;; The opened STREAM is replaced by the rebuilt one either way.
+          ;; On another descriptor it is dup2'd onto SLOT and CLOSED.  When the
+          ;; open already landed ON slot (the standard handle was closed, so
+          ;; the kernel handed out its number) it must NOT be closed -- that
+          ;; would close SLOT -- but it must not be merely DROPPED either: a
+          ;; CL `open' stream carries an auto-close finalizer, and a GC later
+          ;; closed descriptor SLOT out from under whatever held it by then
+          ;; (#3372, strace-measured: Capture::Tiny's proxy STDIN on fd 0, the
+          ;; finalizer thread's close(0) took a File::Temp handle's fd).
+          (if (= fd slot)
+              (sb-ext:cancel-finalization stream)
+              (progn
+                (sb-posix:dup2 fd slot)
+                ;; Releases FD; SLOT holds the copy.  Buffered output would flush
+                ;; to the same file, and the open is fresh, so nothing is lost.
+                (ignore-errors (close stream))))
+          (remhash stream *p-open-output-streams*)
           (let ((new (%p-std-rebuild slot)))
             (when pid
               (remhash stream *p-pipe-pids*)

@@ -347,4 +347,34 @@ close STDOUT; my $f = defined fileno(STDOUT) ? "d" : "u"; open STDOUT, ">&", $s;
 print "a=", ($a?1:0), " b=", ($b?1:0), " c=$c stdout-after-close=$f\n";
 PERL
 
+test_th('#3372 a glob ref built into a hash by a list assignment is the same handle through $_[0] (close / print)', <<'PERL');
+open my $sv, ">&STDOUT" or die;
+sub cl { close $_[0] ? "ok" : "FAIL $!" }
+sub pr { print {$_[0]} "via arg\n" }
+my %q = (s => \*STDIN, o => \*STDOUT);
+pr($q{o});
+my $r = cl($q{s});
+my %c = %q;
+print "close=$r ref=", ref($c{o}), " name=", *{$c{o}}{NAME}, "\n";
+PERL
+
+test_th('#3372 a standard handle reopened ONTO its own descriptor drops no stream with a finalizer (a GC closed fd 0 under a later file)', <<'PERL');
+my $bad = 0;
+for my $i (1..25) {
+  close STDIN;
+  open STDIN, "<", "/dev/null" or die "o: $!";
+  close STDIN;
+  open my $fh, "+>", "/tmp/pcl-tiehandle-01d-$$.txt" or die "t: $!";
+  my @junk = map { "x" x 1000 } 1..20000;
+  select(undef, undef, undef, 0.01);
+  print $fh "abc" or $bad++;
+  seek($fh, 0, 0) or $bad++;
+  my $l = <$fh>; $bad++ if !defined $l || $l ne "abc";
+  close $fh;
+}
+unlink "/tmp/pcl-tiehandle-01d-$$.txt";
+print "bad=$bad\n";
+PERL
+
+
 done_testing;
