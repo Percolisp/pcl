@@ -294,4 +294,35 @@ print FA "a1"; print FB "b1"; untie *FA; print FB "b2";
 print "same ", ($t1 == $t2 ? 1 : 0), " log ", join(",", @{$t2->{log}}), " fa ", (defined tied(*FA) ? 1 : 0), "\n";
 PERL
 
+test_th('#3203 a tie made inside local *STDOUT ends with the scope; print in the scope reaches PRINT', <<'PERL');
+package Obj; our @L; sub TIEHANDLE { bless {}, shift } sub PRINT { shift; push @L, join "", @_; 1 }
+package main;
+my @r;
+{ local *STDOUT; tie *STDOUT, 'Obj'; print "hidden"; print STDOUT "h2"; push @r, (tied(*STDOUT) ? 1 : 0); }
+push @r, (tied(*STDOUT) ? 1 : 0);
+{ local *STDOUT; my $p = print "x"; push @r, ($p ? 1 : 0), (tied(*STDOUT) ? 1 : 0); }
+print "end r=@r L=@Obj::L\n";
+PERL
+
+test_th('#3203 open of STDOUT inside local *STDOUT (static, conditional, run-time named) is undone', <<'PERL');
+my $t = "/tmp/pcl-tiehandle-01-$$.txt"; my $n = "STDOUT";
+{ local *STDOUT; open STDOUT, ">", $t or die; print "in1\n"; close STDOUT; }
+print "out1\n";
+{ local *STDOUT if 1; open STDOUT, ">>", $t or die; print "in2\n"; close STDOUT; }
+{ no strict 'refs'; local *{"main::$n"}; open STDOUT, ">>", $t or die; print "in3\n"; }
+print "out2\n";
+open my $f, "<", $t or die; my @l = <$f>; close $f; unlink $t; print "file: @l";
+PERL
+
+test_th('#3283 an outer tie whose OPEN dies is not reached by an open inside local *STDOUT', <<'PERL');
+package Evil; sub TIEHANDLE { my $s; bless \$s, shift } sub OPEN { die "unimplemented\n" }
+sub PRINT { my $s = shift; $$s .= join "", @_; 1 }
+package main;
+tie *STDOUT, 'Evil'; my $o = tied *STDOUT; my $t = "/tmp/pcl-tiehandle-01b-$$.txt";
+{ local *STDOUT; open STDOUT, ">", $t or die "open: $!"; print "inner\n"; close STDOUT; }
+my $same = (tied(*STDOUT) == $o) ? 1 : 0; print "outer\n"; untie *STDOUT;
+open my $f, "<", $t or die; my $l = <$f>; close $f; unlink $t;
+print "same=$same file=$l", "buf=${$o}";
+PERL
+
 done_testing;

@@ -17222,7 +17222,10 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; `:fh nil` is the EMPTY filehandle node (bare `print`), not an undef
     ;; scalar — it means the currently-selected handle.
     ((null desig) (%p-default-out))
-    ((%p-writable-stream (p-get-stream desig)))
+    ;; a tied handle answers through its object even when the stream it is
+    ;; keyed on cannot be written (a tie inside `local *STDOUT`, #3203)
+    ((let ((s (p-get-stream desig)))
+       (if (%p-stream-tie s) s (%p-writable-stream s))))
     (t
      (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
      (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
@@ -32380,7 +32383,8 @@ size comes from fstat on the descriptor, after the buffered output is written
    that with a wrapping `let`; it is the macro's job because the macro is what
    knows the order."
   (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
-        (sv (gensym "SAVED")) (rv (gensym "RHS")) (kd (gensym "KIND")))
+        (sv (gensym "SAVED")) (rv (gensym "RHS")) (kd (gensym "KIND"))
+        (st (gensym "STD")))
     `(let ((,rv ,(if (eq rhs-form :none) nil rhs-form)))
        (declare (ignorable ,rv))
        (multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
@@ -32390,16 +32394,20 @@ size comes from fstat on the descriptor, after the buffered output is written
            ,@(if (eq rhs-form :none)
                  nil
                  `((p-glob-assign ,pkg-str ,name-str ,rv)))
-           (unwind-protect
-                ,(let ((io (%p-local-glob-io-bindings pkg-str name-str))
-                       ;; `local *NAME` as the LAST statement of a block is its
-                       ;; VALUE: the glob (task #3144) -- `\do { local *FH }` is
-                       ;; the self-tied-handle idiom (IO::String, TieLC).
-                       (body (or body
-                                 (and (eq rhs-form :none)
-                                      `((%p-local-glob-value ,pkg-str ,name-str))))))
-                   (if io `(let ,io ,@body) `(progn ,@body)))
-             (%p-glob-restore ,sv ,cs ,ss ,as ,hs)))))))
+           (let ((,st ,(if (eq rhs-form :none)
+                         `(%p-std-local-enter ,pkg-str ,name-str)
+                         nil)))
+             (unwind-protect
+                  ,(let ((io (%p-local-glob-io-bindings pkg-str name-str))
+                         ;; `local *NAME` as the LAST statement of a block is its
+                         ;; VALUE: the glob (task #3144) -- `\do { local *FH }` is
+                         ;; the self-tied-handle idiom (IO::String, TieLC).
+                         (body (or body
+                                   (and (eq rhs-form :none)
+                                        `((%p-local-glob-value ,pkg-str ,name-str))))))
+                     (if io `(let ,io ,@body) `(progn ,@body)))
+               (%p-std-local-leave ,st)
+               (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))))
 
 (defun %p-local-glob-value (pkg-str name-str)
   "The value of a bare `local *NAME` (task #3144): perl hands back the glob
@@ -32427,16 +32435,19 @@ size comes from fstat on the descriptor, after the buffered output is written
    rather than a second macro — the save/restore and the conditional clear are
    the same mechanism, and only the value half differs."
   (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
-        (sv (gensym "SAVED")) (rv (gensym "RHS")))
+        (sv (gensym "SAVED")) (rv (gensym "RHS")) (st (gensym "STD")))
     `(multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
-       (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
+       (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs))
+             (,st nil))
          (when ,cond-form
            ,(if (eq rhs-form :none)
-                `(%p-glob-clear ,cs ,ss ,as ,hs :all)
+                `(progn (%p-glob-clear ,cs ,ss ,as ,hs :all)
+                        (setf ,st (%p-std-local-enter ,pkg-str ,name-str)))
                 `(let ((,rv ,rhs-form))
                    (%p-glob-clear ,cs ,ss ,as ,hs (%p-glob-rhs-slot-kind ,rv))
                    (p-glob-assign ,pkg-str ,name-str ,rv))))
          (unwind-protect (progn ,@body)
+           (%p-std-local-leave ,st)
            (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
 
 (defmacro p-local-glob-dynamic (name-form cond-form rhs-form &body body)
@@ -32457,21 +32468,25 @@ size comes from fstat on the descriptor, after the buffered output is written
    see the old one."
   (let ((pk (gensym "PKG")) (un (gensym "UNAME"))
         (cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
-        (sv (gensym "SAVED")) (rv (gensym "RHS")))
+        (sv (gensym "SAVED")) (rv (gensym "RHS")) (st (gensym "STD")))
     `(multiple-value-bind (,pk ,un) (%p-glob-dynamic-target ,name-form)
        (let ((,rv ,(if (eq rhs-form :none) nil rhs-form)))
          (declare (ignorable ,rv))
          (multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms-in ,pk ,un)
-           (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
+           (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs))
+                 (,st nil))
              (when ,cond-form
                (%p-glob-clear ,cs ,ss ,as ,hs
                               ,(if (eq rhs-form :none)
                                    :all
                                    `(%p-glob-rhs-slot-kind ,rv)))
                ,@(if (eq rhs-form :none)
-                     nil
+                     `((setf ,st (%p-std-local-enter
+                                  (%pcl-cl-pkg-to-perl-name ,pk)
+                                  (%pcl-invert-case ,un))))
                      `((%p-glob-assign-slots ,pk ,un ,rv))))
              (unwind-protect (progn ,@body)
+               (%p-std-local-leave ,st)
                (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))))
 
 ;;; Helper functions for p-local-hash-elem macros.
@@ -33500,6 +33515,67 @@ size comes from fstat on the descriptor, after the buffered output is written
       (if saved-io
           (setf (gethash sym *p-filehandles*) saved-io)
           (remhash sym *p-filehandles*)))))
+
+;;; `local *STDIN` / `local *STDOUT` / `local *STDERR` (bare, no value) give the
+;;; scope a glob with NO IO, and the scope's end puts the old IO back (#3203,
+;;; #3283; docs/ir-spec.md "local *FH").  A standard handle's IO in PCL is a
+;;; DESCRIPTOR plus the CL streams standing for it (%p-rebind-std), so the
+;;; localization saves all of it: the streams, the handle-table entry and a dup
+;;; of the descriptor.  In the scope the handle-table entry -- and, for STDIN /
+;;; STDOUT, the default stream print and <> read -- is a CLOSED stream: a
+;;; print there is perl's print on an unopened handle (false, nothing written),
+;;; `tied *STDOUT` is false, and a tie made in the scope keys on that stream
+;;; and is dropped at the end.  STDERR's CL stream is left alone: perl's warn
+;;; and die write to the real stderr when *STDERR has no IO.  An open of the
+;;; handle in the scope moves onto the descriptor as every open of a standard
+;;; handle does; the end then dup2s the saved descriptor back (perl's opened
+;;; a NEW descriptor and left the old one alone -- the same output, a
+;;; different fileno inside the scope).
+(defun %p-std-local-enter (pkg-str name-str)
+  "Localize the standard handle *PKG-STR::NAME-STR names, or answer NIL when
+   it names none.  The state is %p-std-local-leave's argument."
+  (let ((slot (and (stringp pkg-str) (string= pkg-str "main")
+                   (%p-std-slot name-str))))
+    (when slot
+      (let* ((key (ecase slot (0 'STDIN) (1 'STDOUT) (2 'STDERR)))
+             (cl (ecase slot (0 *standard-input*) (1 *standard-output*)
+                        (2 *error-output*)))
+             (marker (if (= slot 0)
+                         (make-string-input-stream "")
+                         (make-string-output-stream))))
+        (close marker)
+        (prog1 (vector slot key cl
+                       (ecase slot (0 sb-sys:*stdin*) (1 sb-sys:*stdout*)
+                              (2 sb-sys:*stderr*))
+                       (gethash key *p-filehandles*)
+                       marker
+                       (handler-case (sb-posix:dup slot) (error () nil)))
+          (setf (gethash key *p-filehandles*) marker)
+          (case slot
+            (0 (setf *standard-input* marker))
+            (1 (setf *standard-output* marker))))))))
+
+(defun %p-std-local-leave (state)
+  "Undo %p-std-local-enter (a NIL STATE is a glob that was not standard)."
+  (when state
+    (let* ((slot (svref state 0)) (key (svref state 1))
+           (marker (svref state 5)) (fd (svref state 6))
+           (cur (gethash key *p-filehandles*)))
+      (when (gethash marker **p-handle-tie-table**)
+        (remhash marker **p-handle-tie-table**)
+        (decf **p-handle-tie-count**))
+      (when (and fd (not (eq cur marker)))
+        ;; reopened in the scope: its stream sits on the descriptor now
+        (when (and cur (streamp cur) (not (= slot 0)))
+          (ignore-errors (finish-output cur)))
+        (sb-posix:dup2 fd slot))
+      (when fd (sb-posix:close fd))
+      (setf (gethash key *p-filehandles*) (svref state 4))
+      (ecase slot
+        (0 (setf sb-sys:*stdin* (svref state 3) *standard-input* (svref state 2)))
+        (1 (setf sb-sys:*stdout* (svref state 3) *standard-output* (svref state 2)))
+        (2 (setf sb-sys:*stderr* (svref state 3) *error-output* (svref state 2)))))
+    (values)))
 
 (defun %p-stderr-tie ()
   "The tie record of the handle `print STDERR` would reach from package main

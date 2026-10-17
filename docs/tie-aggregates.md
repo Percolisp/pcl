@@ -218,6 +218,7 @@ fixed-arity print arms), `p-printf`, `%p-readline-impl` / `%p-readline-all`
 | `warn` with a tied STDERR | `PRINT(MESSAGE)` |
 
 `local *FH` undoes a tie made inside its scope (perl change 11639);
+**A bare `local *STDIN` / `*STDOUT` / `*STDERR` localizes the IO for real (s518d, #3203; ir-spec §2.4b).**
 otherwise `local *FH` still does not localize a glob's IO slot (pre-existing).
 A missing method dies perl's way (`Can't locate object method "PRINTF" via
 package "T"`), trappably.  DESTROY is never called (USER ruling).

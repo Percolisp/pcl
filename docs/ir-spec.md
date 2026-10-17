@@ -613,6 +613,20 @@ on `*STDOUT` is not a tie on `open $self, ">&=STDOUT"`, and closing the
 fdopen closes only itself (PCL: a synonym stream over the source, `%p-fdopen-alias`).  `DESTROY` is
 never called.  The method table is [`docs/tie-aggregates.md`](tie-aggregates.md) §7.
 
+**A bare `local *STDIN` / `*STDOUT` / `*STDERR` gives the scope a handle with
+NO IO** (normative, s518d #3203): in the scope a print to it is perl's print
+on an unopened handle (false, nothing written), `tied` is false, a tie made
+there is dropped at the scope's end, and an outer tie is not reached (an
+`open` there does not call its `OPEN`); the scope's end restores the IO the
+glob held -- its streams, its tie and its descriptor.  `warn`/`die` still
+reach the real stderr.  PCL keys a standard handle on its descriptor
+(`%p-std-local-enter` / `-leave`): an `open` in the scope moves onto
+descriptor 0/1/2 and the end `dup2`s the saved descriptor back, so a
+`fileno` inside the scope reads 1 where perl's fresh open reads 3.
+
+Example — `{ local *STDOUT; open STDOUT, ">", $f; print "in" } print "out"`
+writes `in` to `$f` and `out` to the original stdout.
+
 Example — `tie *FH, 'T'; print FH "a", "b"` calls `T::PRINT($obj, "a", "b")`
 and nothing is written anywhere else.
 
