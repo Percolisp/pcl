@@ -199,6 +199,7 @@ my $jobs = 8;
 my $timeout = 120;
 my @dists;           # [dir, no_dist_lib, [extra @INC dirs]]
 my @pending_inc;     # --dist-inc=DIR,DIR: extra @INC for the NEXT dist only
+my $only_rx;         # --only=REGEX: run only the t-files whose DIST/NAME matches
 my $no_dist_lib = 0;
 my ($tsv, $rows_file);
 my $timeouts_tsv = "$root/baselines/cpan-board-timeouts.tsv";
@@ -212,6 +213,7 @@ while (@ARGV) {
   elsif ($a eq '--timeouts')    { $timeouts_tsv = shift @ARGV }
   elsif ($a eq '--no-dist-lib') { $no_dist_lib = 1 }
   elsif ($a =~ /^--dist-inc=(.+)$/) { @pending_inc = split /,/, $1 }
+  elsif ($a =~ /^--only=(.+)$/)     { $only_rx = qr/$1/ }   # a census in CHUNKS (s518e)
   else { push @dists, [abs_path($a), $no_dist_lib, [@pending_inc]]; @pending_inc = () }
 }
 @dists or die "usage: $0 [--jobs N] [--timeout S] [--no-dist-lib] [--tsv F] [--rows F] <dist-dir>...\n";
@@ -225,6 +227,7 @@ for my $d (@dists) {
   -d "$dir/t" or die "no t/ in $dir\n";
   for my $t (t_files("$dir/t")) {
     my $rel = basename($dir) . "/" . t_name($t);
+    next if $only_rx && $rel !~ $only_rx;
     push @work, { dist => $dir, ndl => $ndl, inc => $inc, t => $t, rel => $rel,
                   to => PCLTimeouts::timeout_for(\%file_timeout, $rel, $timeout) };
   }
