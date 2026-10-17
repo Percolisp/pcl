@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518 (Fable, 2026-10-17) from the USER question \"is zlib standard on Linux / BSD / macOS?\".  PORTABILITY GAP in the zlib host-library loader (cl/pcl-runtime.lisp ~7571, %p-host-library-p :zlib): it tries \"libz.so.1\", \"libz.dylib\", \"libz.so\".  Covered: every Linux distro (zlib1g is Priority: required on Debian/Ubuntu; in the minimal set on Fedora/RHEL/Alpine/Arch -- libz.so.1), macOS (libz.dylib lives in the dyld shared cache; dlopen resolves it), NetBSD (libz.so.1), FreeBSD (its soname is libz.so.6, but base ships the unversioned /usr/lib/libz.so symlink, which the third name reaches).  NOT covered: OpenBSD -- base ships only the versioned libz.so.N.M (e.g. libz.so.7.1) and no unversioned symlink, so all three names miss and Compress::Raw::Zlib dies \"the system zlib (libz.so.1) is not available\" on a box that has zlib.  FIX SHAPE (generic, rule 9a: the loader is shared with crypt): after the fixed names, probe the platform library directories for the newest \"libz.so.*\" (and \"libcrypt.so.*\") -- or ask the dynamic linker via sb-alien dlopen with the highest version found; keep the one-line perl-shaped die when nothing answers.  BAR: a FreeBSD / OpenBSD leg is not in the install matrix (Ubuntu + macOS) -- this ships only with a measured run on one BSD (a VM or a container with the BSD image), per the USER portability rule (feedback_portability_os_matrix); until then the not-supported \"Compress::Raw::Zlib\" entry names OpenBSD as the known miss.  Also name the three names tried in the die message, not only libz.so.1.",
+   "id" : "3360",
+   "status" : "pending",
+   "subject" : "zlib host-library loader misses OpenBSD (only libz.so.N.M in base; the three names libz.so.1 / libz.dylib / libz.so all miss) -- probe the versioned name; ships only with a BSD leg"
+}
