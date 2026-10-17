@@ -27788,8 +27788,9 @@ size comes from fstat on the descriptor, after the buffered output is written
    delete it.  Before task #1300 this path skipped the cache for READING and
    wrote the .lisp and its manifest anyway — so `--no-cache`, the one flag for
    \"is it the cache?\", repopulated the very thing the question is about.
-   The load still comes from a real FILE, deliberately: a stream load would
-   leave *LOAD-PATHNAME* nil, which is a second difference nobody asked for.
+   The text is written to a real file and loaded through %p-load-text-stream,
+   the loader the cached path uses (#3391): a stream load prints no SBCL
+   herald for a module that dies, and *LOAD-PATHNAME* is nil on both paths.
    TMPDIR is honoured, as everywhere else in this runtime.
 
    *PCL-CURRENT-PACKAGE* IS REBOUND HERE FOR THE SAME REASON P-LOAD-MODULE-
@@ -27816,7 +27817,11 @@ size comes from fstat on the descriptor, after the buffered output is written
                     (with-open-file (out lisp :direction :output
                                          :if-exists :supersede)
                       (write-string code out))
-                    (handler-bind ((warning #'muffle-warning)) (load lisp))
+                    ;; THE one text loader (#3391): a stream load, so a
+                    ;; module's die -- caught by `eval { require M }' or
+                    ;; not -- prints no SBCL herald naming this temp file.
+                    (handler-bind ((warning #'muffle-warning))
+                      (%p-load-text-stream lisp))
                     t)
           (ignore-errors (delete-file lisp))
           (ignore-errors (delete-file path)))))))

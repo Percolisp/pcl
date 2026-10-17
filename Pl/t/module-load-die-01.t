@@ -51,4 +51,17 @@ for my $run (1, 2) {
     is($err, '', "run $run: nothing on STDERR for the caught die of a module's load");
 }
 
+# #3391 (s519b): the UNCACHED path (`pcl --no-cache`, the sweep's and
+# runpcl's *pcl-skip-cache*) loaded the module from a temp file through LOAD
+# on a pathname, so the same herald named /tmp/pcl-nocache-*.lisp on every
+# run.  It goes through the same stream loader now.  INVERSE: fca3593b printed
+# the herald.
+{
+    my $out = `cd '$dir' && PCL_CACHE_DIR='$cache' '$pcl' --no-cache p.pl 2>'$dir/err' < /dev/null`;
+    is($out, "run1\nD body\ncaught: yes\nrun2\n", "--no-cache: the program's output");
+    open my $e, '<', "$dir/err" or die;
+    my $err = do { local $/; <$e> };
+    is($err, '', "--no-cache: nothing on STDERR for the caught die of a module's load (#3391)");
+}
+
 done_testing();
