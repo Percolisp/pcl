@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 46;
+plan tests => 47;
 
 sub run_cl {
     my ($code) = @_;
@@ -870,4 +870,39 @@ PL
     my $want = `perl $pl_file 2>&1`;
     is(run_cl($prog), $want,
        '#1914: overload::Method and Overloaded — own / inherited / by-name resolved through the MRO / absent / class-name string / nomethod / fallback (perl oracle)');
+}
+
+{
+    # #3395 + #3396 (s518e, Type-Tiny): a `&{}` overload makes an OBJECT
+    # callable (`$obj->(...)`, `&$obj(...)`), and an overload installed by
+    # writing perl's own stash entries -- `*{"P::(OP"} = sub {...}`, the
+    # `((` / `()` markers and the fallback in `${"P::()"}`, which is what
+    # overload.pm's import does and what Type::Tiny's _install_overloads does
+    # by hand -- overloads exactly like `use overload`.
+    my $prog = <<'PL';
+package C; use overload q(&{}) => sub { my $s = shift; sub { "called $s->{n} @_" } },
+  q("") => sub { "C(" . $_[0]{n} . ")" }, fallback => 1;
+sub new { bless { n => $_[1] }, $_[0] }
+package G;
+sub new { bless { n => $_[1] }, $_[0] }
+BEGIN {
+  no strict 'refs';
+  *{'G::(('} = sub { };
+  *{'G::()'} = sub { };
+  *{'G::()'} = do { my $x = 1; \$x };
+  *{'G::(""'} = sub { "G<" . $_[0]{n} . ">" };
+  *{'G::(&{}'} = sub { my $s = shift; sub { "G-called $s->{n} @_" } };
+  *{'G::(=='} = sub { $_[0]{n} == (ref $_[1] ? $_[1]{n} : $_[1]) };
+}
+package main;
+my $c = C->new(5); my $g = G->new(7);
+print "$c | ", $c->(1, 2), " | ", &$c(3), "\n";
+print "$g | ", $g->(4), " | ", &$g(5), " | ", ($g == 7 ? "eq" : "ne"), " | ", ($g eq "G<7>" ? "streq" : "strne"), "\n";
+my $h = {}; print eval { $h->(); 1 } ? "lived\n" : "died: " . ($@ =~ /^(Not a CODE reference)/)[0] . "\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    binmode($fh, ':raw'); print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want,
+       '#3395 #3396: a &{} overload makes an object callable; overloads written as stash entries (overload.pm\'s own form) work like use overload (perl oracle)');
 }

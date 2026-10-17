@@ -29696,6 +29696,14 @@ size comes from fstat on the descriptor, after the buffered output is written
         ;; stringification read back as a sub name.  Off the fast path: a real
         ;; coderef call never evaluates this.
         (progn
+          ;; An OBJECT with a `&{}` overload is called through the code ref
+          ;; its handler answers (perl's deref overloading, #3395 -- Type::
+          ;; Tiny's types are called as `Int->($x)`; Types::Standard's
+          ;; LazyLoad stubs).  Off the fast path, like everything here.
+          (let ((h (and (p-get-class ref) (p-find-overload ref "&{}"))))
+            (when h
+              (return-from p-funcall-ref
+                (apply #'p-funcall-ref (p-call-overload h ref nil nil) args))))
           (when (%p-wrong-referent-p "CODE" fn) (%p-not-a-ref "CODE"))
           ;; Otherwise: treat as symbolic sub name (string/number).
           ;; Resolution is %p-resolve-sub-symbol's job — the ONE resolver all
@@ -31757,10 +31765,12 @@ size comes from fstat on the descriptor, after the buffered output is written
        (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
          (setf (fdefinition sym) inner)
          (setf (gethash sym *p-declared-subs*) :defined)
-         (%p-note-sub-install sym :glob)))
+         (%p-note-sub-install sym :glob)
+         (%p-glob-overload-entry pkg uname inner)))
 
       ;; *foo = \$scalar — SCALAR slot (inner is the p-box = the variable itself)
       ((p-box-p inner)
+       (%p-glob-overload-entry pkg uname inner)
        (setf (symbol-value (intern (%p-slot-name "$" uname) pkg))
              inner))
 
@@ -31798,6 +31808,28 @@ size comes from fstat on the descriptor, after the buffered output is written
          (setf (fdefinition sym) rhs)
          (setf (gethash sym *p-declared-subs*) :defined)
          (%p-note-sub-install sym :glob))))))
+
+;;; OVERLOADS INSTALLED AS STASH ENTRIES (#3396).  perl keeps a class's
+;;; overload table IN ITS STASH: overload.pm's import writes `*{"P::(OP"} =
+;;; \&handler`, `*{"P::(("}` / `*{"P::()"}` as the "has overloading" markers
+;;; and the fallback value in the SCALAR `${"P::()"}` -- and code that writes
+;;; those entries itself (Type::Tiny's _install_overloads) overloads exactly as
+;;; `use overload` would.  PCL's table is *p-overload-table*, so a glob install
+;;; under such a name registers there through the ONE registrar.  Every other
+;;; name returns at the first character test.
+(defun %p-glob-overload-entry (pkg uname value)
+  "Register a glob install into PKG (a CL package) under UNAME (the inverted
+   sub name) as perl's overload stash entry when the name is one: `(OP` with a
+   CODE value is a handler, a SCALAR `()` is the fallback setting."
+  (when (and (plusp (length uname)) (char= (char uname 0) #\())
+    (let ((op (%pcl-invert-case (subseq uname 1)))
+          (perl-pkg (pcl-pkg-perl-name pkg)))
+      (cond
+        ((and (string= op ")") (p-box-p value))
+         (p-register-overloads perl-pkg (vector "fallback" value)))
+        ((or (string= op "(") (string= op ")")) nil)
+        ((functionp value)
+         (p-register-overloads perl-pkg (vector op value)))))))
 
 (defun p-glob-assign (pkg-str name-str rhs)
   "Assign RHS to the appropriate slot of typeglob *pkg::name (by name strings)."
