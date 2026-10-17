@@ -2061,6 +2061,20 @@ form is inside `eval-when`) and wraps the body so that at **every call**:
    a `(catch :p-return …)` whose value then goes through perl's LEAVE
    rule, `%p-leavesub` (§5.3).
 
+**A sub's name is its OWN package's symbol (normative, s519b, task #3405).**
+The runtime's built-ins and the TAP layer's functions (`pl-ok`, `pl-is`,
+`pl-explain`, `pl-plan` ...) are exported from `:pcl` and inherited by every
+user package, so `(p-sub pl-explain ...)` in package `E` READS as that
+inherited symbol; the install reserves the name in `E` instead (a shadow in
+the package in effect), defines `E::pl-explain`, and leaves the inherited
+function untouched -- perl's `sub explain` in package `E` is `E::explain`,
+a method of `E`, and never redefines another package's sub.
+
+```perl
+use Test::More; package E; sub explain { "ex" } package main;
+print E->explain;   # ex -- and Test::More's explain still works
+```
+
 `(p-declare-sub pl-NAME)` is a forward stub so earlier code can reference
 the name; it is normally overwritten by the real `p-sub` before anything
 calls it.
@@ -3604,6 +3618,17 @@ var ⇒ plain lexical binding, no localization at all).
   (p-defclass plc-dog (plc-animal) ())   ; a no-op when plc-dog already has
                                          ; exactly (plc-animal) as parents
   ```
+- **A parent named in `@ISA` before it has a class gets one (normative, s519b,
+  task #3373).**  `p-defclass` first gives every parent with no class (or a
+  host-side forward reference only) a class with no parents of its own, so a
+  method call on that parent itself dispatches instead of failing to
+  finalize; its own parents arrive later through the forms that set its
+  `@ISA`.
+
+  ```perl
+  do { package P; sub foo { "P" } package C; our @ISA = "P" };
+  print P->can("foo") ? "can" : "cannot";   # can
+  ```
 - **A RUN-TIME `package X;` switch never sets parents (normative, s514f,
   task #3140).**  A switch the compiler cannot give its own section (inside a
   block that also holds a `local`, inside a sub body) emits
@@ -4013,7 +4038,14 @@ WITHOUT `FD_CLOEXEC` are handed to the program (`:preserve-fds`).  `pipe` instal
 ends through the one installer, so they are `FD_CLOEXEC` above `$^F` as in perl.
 `open FH, MODE, LIST` flattens its LIST (`open $_[0], $_[1], @_[2..$#_]`), and
 `\*STDIN`/`*STDOUT`/`*STDERR` (perl's forced-main names) are `*main::…` in
-every package.
+every package.  So is a bare `local *STDOUT` (s519b, #3376): in package P
+it localizes `*main::STDOUT`, never `*P::STDOUT`.  `*A = *STDOUT` and
+`local *A = *STDOUT` alias the standard handle itself -- `print A` writes
+to it and reaches its tie.
+
+```perl
+package Cap; sub grab { local *STDOUT; open STDOUT, ">&=1"; tied(*STDOUT) }  # false
+```
 
 ```perl
 package Foo; exec { "/bin/echo" } "ignored-argv0", "a b";   # prints: a b
@@ -4418,7 +4450,7 @@ that was opened; programs read both (`require Foo unless $INC{"Foo.pm"}`,
 `if.pm`'s string require, `IO/Handle.pm`'s `!$INC{"IO/File.pm"}`). PCL
 deliberately loads no `.pm` for three classes — a lexical pragma (there is no
 `$^H` bitmask to set), an XS-only module, and one whose interface PCL
-supplies itself (`Test::More` → the TAP layer) — and each still gets its
+supplies itself (`Test::More` → the TAP layer; `Test::Builder` → the TAP layer's builder object, whose `ok` / `diag` / `note` / `plan` / `done_testing` / `current_test` methods are the same counter and plan, s519b #3346 -- the plan-count check runs as an END block registered when the layer loads, so a later module's END assertion runs before it) — and each still gets its
 `%INC` entry, whose value is the file that *would* have been loaded,
 resolved through `@INC` (falling back to the relative path when `@INC` does
 not hold it). Codegen emits `(p-note-inc "strict")` for a pragma `use`/`no`
