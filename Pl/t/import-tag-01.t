@@ -124,5 +124,8 @@ both_agree('BEGIN { my $m = "TagMod"; eval "use $m qw(f0)" } print f0("a"), "\n"
 # ---- a module the prototype scan SKIPS for cost (#3205) ---------------------
 # Every IO:: module is skipped by name; a facts overlay states its prototypes.
 # `isaFilename($)`: perl passes ONE argument, so the list has 2 elements.
-both_agree('use IO::Compress::Base::Common 2.212; my @r = (isaFilename "x", "y"); print scalar(@r), " ", STATUS_ERROR + 1, "\n";',
+# No version on the use: CI's perl 5.38.2 ships IO::Compress::Base::Common 2.204 and a
+# pinned 2.212 made the perl ORACLE die there (CI red from 2026-10-12 to s519; the s509 rule --
+# a row's oracle must not depend on the dev box's perl).
+both_agree('use IO::Compress::Base::Common; my @r = (isaFilename "x", "y"); print scalar(@r), " ", STATUS_ERROR + 1, "\n";',
            'a skipped module\'s prototypes come from its facts overlay');
