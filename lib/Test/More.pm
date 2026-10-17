@@ -38,6 +38,9 @@ sub like    ($$;$);
 sub unlike  ($$;$);
 sub cmp_ok  ($$$;$);
 sub isa_ok  ($$;$);
+sub can_ok  ($@);    # #3245: the CLASS slot is `$` -- can_ok(@a) reads the COUNT
+sub use_ok  ($;@);
+sub require_ok ($);
 sub BAIL_OUT ($);
 
 1;

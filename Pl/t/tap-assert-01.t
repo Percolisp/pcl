@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 25;
 
 sub run_cl {
     my ($code) = @_;
@@ -196,6 +196,28 @@ not ok 2 - main->can(...)
 #     main->can('nope') failed
 # d1d2
 # d3
+TAP
+
+# #3245, second half: Test::More's functions are subs IN the Test::More stash
+# (perl: `Test::More->can('ok')`, `defined &Test::More::is`), can_ok's class
+# slot is `$` (an array there is its COUNT: `2->can(...)`), and use_ok's
+# import list flattens.  Expected = perl 5.40.3 less the `Failed test` lines.
+is(run_cl(q{use Test::More tests => 4;
+my @imp; BEGIN { @imp = qw(max min) }
+BEGIN { use_ok('List::Util', @imp) }
+print "# ", max(1,5,3), min(4,2), "\n";
+can_ok('Test::More', 'ok', 'is');
+my @args = ('main', 'new');
+can_ok(@args);
+ok(defined &Test::More::is && !Test::More->can('nope'), 'stash');
+}), <<'TAP', 'Test::More functions are in its stash; can_ok($@); use_ok flattens (#3245)');
+1..4
+ok 1 - use List::Util;
+# 52
+ok 2 - Test::More->can(...)
+not ok 3 - 2->can(...)
+#     can_ok() called with no methods
+ok 4 - stash
 TAP
 
 # ------------------------------------------- 5. skip_without_dynamic_extension

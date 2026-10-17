@@ -668,7 +668,7 @@
 
 (defun pl-use_ok (module &rest args)
   (let* ((name (to-string (unbox module)))
-         (vals (mapcar #'unbox args))
+         (vals (%test-flat-values args))
          ;; Test::More: a lone numeric argument is a VERSION, not an import
          ;; list — `use_ok('Foo', 1.23)` means `use Foo 1.23;`, which imports
          ;; the defaults.  PCL does not verify module versions anywhere, so
@@ -1337,3 +1337,30 @@
        (declare (ignore self args))
        (make-p-box "STDOUT"))
 
+
+;;; Test::More's functions ARE subs in the Test::More stash (#3245): perl's
+;;; `Test::More->can('ok')`, `defined &Test::More::ok` and `\&Test::More::is`
+;;; answer the sub.  Here they are pcl: functions the Test::More package
+;;; INHERITS, and p-can counts only a package's OWN symbols (an inherited pcl:
+;;; built-in is not a method), so each exported name gets its own symbol in
+;;; |Test::More| -- shadowed, as a p-sub's name is (%p-reserve-sub-name) --
+;;; bound to the same function.  The list is perl's @Test::More::EXPORT; a name
+;;; the TAP layer does not implement is left absent (can answers false, as for
+;;; any undefined sub), never stubbed.
+(defun %test-more-stash-install ()
+  (let ((pkg (%pcl-find-package "Test::More")))
+    (dolist (name '("ok" "use_ok" "require_ok" "is" "isnt" "like" "unlike"
+                    "is_deeply" "cmp_ok" "skip" "todo" "todo_skip" "pass" "fail"
+                    "eq_array" "eq_hash" "eq_set" "plan" "done_testing" "can_ok"
+                    "isa_ok" "new_ok" "diag" "note" "explain" "subtest"
+                    "BAIL_OUT"))
+      (let* ((cl-name (%pcl-cl-sub-name name))
+             (src (find-symbol cl-name :pcl)))
+        (when (and src (fboundp src))
+          (handler-bind ((warning #'muffle-warning))
+            (shadow cl-name pkg))
+          (let ((own (intern cl-name pkg)))
+            (setf (fdefinition own) (fdefinition src)
+                  (gethash own *p-declared-subs*) :defined)))))))
+
+(%test-more-stash-install)
