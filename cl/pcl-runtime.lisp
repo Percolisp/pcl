@@ -1233,6 +1233,22 @@
         `(%pcl-str-buffer ,value-form)
         value-form)))
 
+;;; THE SUB-NAME RECORD (task #3281, s518e).  perl's CV knows the glob it was
+;;; DEFINED under (CvGV): `sub Foo::bar {}` is Foo::bar whatever globs later
+;;; alias it, and a `sub {...}` is __ANON__.  PCL's sub is an anonymous lambda
+;;; installed under a symbol, and an alias (Exporter's `*main::bar = \&bar`)
+;;; installs the SAME function under a second symbol -- so the defining name
+;;; cannot be recovered from the symbols afterwards.  p-sub records it at the
+;;; install, the only moment it is known; builtin::sub_name reads it (the B
+;;; shim's `svref_2object(\&f)->GV->NAME`, lib/B.pm).  Weak by key, like the
+;;; prototype registry.  A function with no entry was not defined by `sub NAME`.
+(defvar %pcl-sub-names (make-hash-table :test #'eq :weakness :key)
+  "Function -> the fully-qualified Perl name it was defined under.")
+
+(defun %p-record-sub-name (fn perl-name)
+  "Record PERL-NAME ('Pkg::name') as the name FN was defined under."
+  (setf (gethash fn %pcl-sub-names) perl-name))
+
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
@@ -1310,6 +1326,7 @@
                             (*pcl-caller-wantarray* *wantarray*))
                        (p-sub-frame
                         ,@body))))
+             (%p-record-sub-name (symbol-function local-sym) %%perl-name)
              ,@register
              ,@(when attrs
                  `((%p-apply-sub-attributes (symbol-function local-sym) %%home-pkg
@@ -31443,6 +31460,10 @@ size comes from fstat on the descriptor, after the buffered output is written
     ;; A perl BOOLEAN was created as neither (perl 5.36+: both answer false for
     ;; !!1 / !!0) -- PCL's is one of the two interned strings (#3242).
     (def "CREATED_AS_NUMBER" (lambda (x) (p-bool (numberp (unbox x)))))
+    ;; PCL's own (perl has no builtin for it): of a value created as a number,
+    ;; whether it is held as an INTEGER (perl's IOK) rather than a float (NOK)
+    ;; -- the representation fact lib/B.pm's FLAGS reads (#3281).
+    (def "CREATED_AS_INTEGER" (lambda (x) (p-bool (integerp (unbox x)))))
     (def "CREATED_AS_STRING" (lambda (x) (let ((v (unbox x)))
                                            (p-bool (and (stringp v)
                                                         (not (eq v +p-yes+))
@@ -31541,6 +31562,12 @@ size comes from fstat on the descriptor, after the buffered output is written
         (lambda (code)
           (let ((fn (%p-code-function code)))
             (or (and fn (gethash fn %pcl-sub-stash)) *p-undef*))))
+    ;; The name a sub was DEFINED under, 'Pkg::name' (perl's CvGV), or undef
+    ;; for a sub no `sub NAME` defined (#3281: lib/B.pm's GV->NAME / STASH).
+    (def "SUB_NAME"
+        (lambda (code)
+          (let ((fn (%p-code-function code)))
+            (or (and fn (gethash fn %pcl-sub-names)) *p-undef*))))
     ;; A restricted hash (Hash::Util, #3163) is a tie whose class is the
     ;; shim's own: HIDE_TIE(\%h) makes tied(%h) answer undef for it, as it
     ;; does in perl, where restriction is not a tie.

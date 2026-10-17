@@ -2182,6 +2182,8 @@ class of §2b.2a, carried for a reader and ignored at run time — except
 body shapes are call-compatible — every call site just applies the function
 to the flattened values.
 
+**A sub's DEFINING name is a run-time fact (normative, s518e, #3281).**  `p-sub` records at install the function -> 'Pkg::name' it was defined under (`%pcl-sub-names`, read by `builtin::sub_name`); an alias (`*a = \&f`, an Exporter import) installs the same function and does not change it; a function with no record was not defined by `sub NAME` and is anonymous (`__ANON__`).  Example: `package Foo; sub bar {} package main; BEGIN { *al = \&Foo::bar } use B; B::svref_2object(\&al)->GV->NAME` is `bar`, `->GV->STASH->NAME` is `Foo`.
+
 **A raw slot holds a raw value or a CONTAINER box (normative, s514b, #3081).**  A box found in a raw slot is read as a VARIABLE (`p-cast-$` unboxes it once), so a reference VALUE (an is-ref wrapper from `p-backslash`) whose referent is itself a box binds in a fresh container, never bare: `sub t { my ($v) = @_; ref $$v } t(\\$x)` is `SCALAR`, and `d($$v)` recursing down `\\\\[2]` sees every level.
 
 **An lvalue BUILT-IN in an argument slot passes its write-through cell
