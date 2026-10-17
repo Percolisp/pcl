@@ -169,11 +169,11 @@ t/comp/our.t	7	#1583 -- `our $y = $y;` inside a block where a `my $y` is in scop
 t/comp/parser.t	93	#1694 -- FIVE #138 drops in the file's `#line`-tracking section (a `=pod` inside "${...}", a quoted sub NAME, three bare `<<HEREDOC;` statements) take the interpolated `check_line` calls with them and the recovery load abandons the rest of the form
 t/comp/proto.t	121	#1682 -- was 155; s473t5c's #1681 (`\(&NAME)` is the sub slot) removed the `&main::1` abort and the file went 47/14 -> 78/38, 61 -> 116 of 216 rows.  The residue is a SECOND abort at `sub star (*&)`: `star FOO` with nothing declaring FOO is CALLED where perl reads the bareword; s504 #2389: 100 -> 121, the #2543 loss (measured 63/32 on 558cc5a0, 75/20 since s500a) finally recorded
 t/comp/require.t	3	NS:Error message text and format -- perl plans 1750 rows and PCL 1747. Two of the three are `RT #24404` and `[perl #24482] require CORE::foo`, where `require $scalar` / `require CORE::lc "..."` must die "Can't locate threads in @INC"; PCL's message differs, the file takes its `else` branch, and THAT branch prints a TAP line with no test number (the test file's own bug), so the row is never produced
+t/io/argv.t	2	#660 (slurp mode on the EMPTY tmpIo_argv2.tmp answers undef where perl answers a defined "": the in-place loop never takes its second turn, so its `ok 12` line is never printed and next_test runs one behind; probed s518d scratch/pr/inpl.pl; pre-existing: identical 28/23 on an ff4c1500 extraction, compbase.log -- the row was never blessed)
 t/io/crlf.t	3	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 t/io/dup.t	1	was 19 (#1703: closing a `>&=` handle closed the shared descriptor and lost every row after dup.t:68); s518d #3208 fixed that, the file runs to its end.  The ONE left is dup.t:140, an UNNAMED `is` (description = its caller line): the third UTFDUP line is read and equal under PCL (probed alone, s518d), so this is the row PAIRING, not a lost assertion -- UNEXPLAINED line attribution
 t/io/layers.t	55	#139 -- the whole file is `PerlIO::get_layers`.  Its ABORT is one layer in front: `PerlIO::get_layers(STDIN)` emits a BARE CL symbol and dies "The variable STDIN is unbound" (the #266/#452 bareword-in-an-argument-slot family); see #1710
 t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
-t/io/nargv.t	1	#2669 (nested in-place edit: `local $^I` is real since s506f)
 t/io/scalar_ungetc.t	17	#1704 -- IO::Handle::ungetc is an explicit croak in lib/IO.pm and the file needs a pushback STACK (eleven ungetc calls in a row)
 t/io/sem.t	22	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
 t/io/semctl.t	2	NS:DynaLoader / XS binary extensions -- IPC::SysV is XS
@@ -310,12 +310,8 @@ t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by
 t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
 t/run/locale.t	44	#1705 -- the file skip_alls because `require POSIX; POSIX->import("locale_h")` fails; lib/POSIX.pm exists but has no `locale_h` export tag
 t/run/runenv.t	106	#1582 -- a comma-sequenced `my %h = (…), my (…) = f({%h});` dies "self-referential init"; perl reads the empty PACKAGE hash there (probed, the file has no `use strict`)
-t/run/switchF.t	2	#2666 (`*ARGV = *DATA` in a BEGIN block does not alias, so the -F loop reads nothing; was 1 under #1702 until s506f made the #! line take effect)
-t/run/switcha.t	2	#2666 (as t/run/switchF.t; was 1 under #1702)
 t/run/switchd-78586.t	2	not-supported.md#perls-command-line-switches-what-pcl-does-not-do-s506f (its #! line carries -d:Mod, which pcl refuses: the file does not transpile)
 t/run/switches.t	0	s488a BOOKKEEPING, not a move (was 11): the s473t5d splice wrote 11 beside its own verdict row of 28/112 = 140 rows produced of perl's 140, i.e. zero short.  Re-measured 0 on this tree AND on a `git archive f6b56feb` extraction; #1700 + #1699 had already removed both of the file's aborts, and the 11 skip rows it names are rows PCL does produce
-t/run/switchn.t	2	#2666 (as t/run/switchF.t; was 1 under #1702)
-t/run/switchp.t	2	#1702
 t/uni/attrs.t	1	NS:Attributes on a variable declaration -- the attribute protocol (MODIFY_*_ATTRIBUTES / attributes::get) is absent (#322) -- the 1 missing row sits behind the file's last attribute block
 t/uni/fold.t	18074	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class); s514a #2948: 18072 -> 18074, the abort moved from Storable to Unicode::Normalize (rows 1159-1160 now missing)
 t/uni/gv.t	118	#1664 -- the typeglob model: the file aborts in the PROXY CONSTANT SUBROUTINE block (a stash slot holding a string or a SCALAR ref IS a sub in perl), and every row after it is behind that abort
