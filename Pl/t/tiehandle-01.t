@@ -338,4 +338,13 @@ open(my $rd, "<", $t) or die; my @l = <$rd>; close $rd; unlink $t;
 print "r=", ($r ? 1 : 0), " file=", join("", @l);
 PERL
 
+test_th('#3371 fileno of a closed STDOUT is undef; an fdopen of STDERR still closes after STDERR', <<'PERL');
+open my $s, ">&", \*STDERR or die;
+open my $d, ">&=STDERR" or die;
+my $a = close STDERR; my $b = close $d;
+open STDERR, ">&", $s; my $c = defined fileno(STDERR) ? 1 : 0;
+close STDOUT; my $f = defined fileno(STDOUT) ? "d" : "u"; open STDOUT, ">&", $s;
+print "a=", ($a?1:0), " b=", ($b?1:0), " c=$c stdout-after-close=$f\n";
+PERL
+
 done_testing;

@@ -20692,7 +20692,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
        ;; A handle that is ALREADY CLOSED is one of perl's false answers, and
        ;; CL `close' does not distinguish it — it returns T for a stream it
        ;; closed and for one that was closed already.
-       (if (open-stream-p (%p-stream-target v))
+       ;; An fdopen alias is open while IT is: its source may be closed first
+       ;; (perl refcounts the descriptor, so the alias still closes fine).
+       (if (if (%p-fdopen-alias-p v) (open-stream-p v) (open-stream-p (%p-stream-target v)))
            (let ((ok (and (%p-close-maybe-pipe v)
                           (not (remhash (%p-stream-target v) *p-write-failed*)))))
              (%p-forget-fh fh)
@@ -22940,7 +22942,8 @@ size comes from fstat on the descriptor, after the buffered output is written
     (cond
       ((null stream)
        (if (ignore-errors (gethash fh *p-dirhandles*)) -1 *p-undef*))
-      ((not (open-stream-p stream)) *p-undef*)
+      ;; a closed STDOUT/STDERR is a synonym stream over a CLOSED fd-stream (#3371)
+      ((not (open-stream-p (%p-stream-target stream))) *p-undef*)
       ((%p-fd-of-stream stream))
       ((eq stream *standard-input*) 0)
       ((eq stream *standard-output*) 1)
