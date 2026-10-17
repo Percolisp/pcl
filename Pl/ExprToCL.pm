@@ -3104,6 +3104,7 @@ sub gen_funcall_form {
   my $cb = [];
   if (($force_user || !exists $RUNTIME_NAMES{$func_name})
       && !$self->sub_info->{$func_name}
+      && !_core_namespace_callee($func_name)
       && ref $call eq 'ARRAY' && ($call->[0] // '') eq $cl_func) {
     my $first = (($call->[1] // '') eq ':loc') ? 3 : 1;
     $cb = $self->_copy_back_args($call, $first, [@$kids[1 .. $#$kids]],
@@ -3492,6 +3493,19 @@ sub _eval_lexical_alist {
 # (raw-numeric / raw-string freeze) nor a str-buffer -- a value written back
 # can only land in an untyped slot.  If either fact is ever present here the
 # verdicts have drifted, and that dies at compile time (rule 12).
+# #3348: a callee in one of perl's CORE namespaces (`builtin::`, `utf8::`,
+# `Internals::`, `CORE::`) is the runtime's, never a user sub that could write
+# through @_ -- not an UNSEEN callee for #2636's copy-back -- unless it is one of
+# the builtins that DO write their argument (`utf8::encode` & co., the ONE
+# table: Pl::VarAnnotator::arg_writing_builtin).  A module namespace is not one
+# of these (rule 9a): `B::` / `Scalar::Util::` stay unseen callees.
+sub _core_namespace_callee {
+  my ($name) = @_;
+  return 0 unless $name =~ /\A(?:builtin|utf8|Internals|CORE)::/;
+  require Pl::VarAnnotator;
+  return Pl::VarAnnotator::arg_writing_builtin($name) ? 0 : 1;
+}
+
 sub _copy_back_args {
   my ($self, $call, $first, $kid_ids, $shape) = @_;
   my @bind;
