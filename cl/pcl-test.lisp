@@ -1299,12 +1299,20 @@
 ;;; which p-get-stream/%p-resolve-fh accept everywhere a handle is taken), so
 ;;; `binmode`, `print {…}` and `fileno` on them all work for real.
 ;;;
-;;; Every OTHER Test::Builder method is deliberately absent: method dispatch
+;;; Besides those, has_plan / skip_all / skip / is_passing and the
+;;; Test::Builder::Module->builder class method are answered (#3400, the
+;;; Test::Requires skip path).  Every OTHER Test::Builder method is deliberately absent: method dispatch
 ;;; then dies "Can't locate object method \"X\" via package \"Test::Builder\"",
 ;;; naming the gap, instead of a stub returning a plausible wrong value that
 ;;; would silently corrupt a file's counts (CLAUDE.md rule 12).
 (p-defpackage |Test::Builder|)
 (p-defpackage |Test::More|)
+;; The skip / skip_all METHODS share their names with the TAP layer's own
+;; pl-skip / pl-skip_all, which Test::Builder inherits from :pcl -- shadow them
+;; so the method defuns below define Test::Builder's symbols, never the
+;; runtime's (the %p-reserve-sub-name rule).
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (shadow '("PL-SKIP" "PL-SKIP_ALL") (find-package "Test::Builder")))
 
 (defvar *test-builder-singleton* nil
   "The one Test::Builder object.  Test::Builder->new is a singleton in real
@@ -1364,3 +1372,39 @@
                   (gethash own *p-declared-subs*) :defined)))))))
 
 (%test-more-stash-install)
+;; Test::Builder::Module->builder (#3400): Test::Requires and every module
+;; written on Test::Builder::Module (`use base 'Test::Builder::Module'`)
+;; ask its CLASS for the builder; it is the same singleton.
+(p-defpackage |Test::Builder::Module|)
+
+(defun |Test::Builder::Module|::pl-builder (&rest args)
+       (declare (ignore args))
+       (%test-builder))
+
+;; The plan as Test::Builder answers it: undef before any plan, "no_plan",
+;; or the planned count -- what Test::Requires branches on before it skips.
+(defun |Test::Builder|::pl-has_plan (self &rest args)
+       (declare (ignore self args))
+       (cond (*test-no-plan* "no_plan")
+             (*test-planned* (truncate (to-number *test-planned*)))
+             (t (p-undef))))
+
+;; ->skip_all(REASON) is plan(skip_all => REASON): prints 1..0 and exits.
+(defun |Test::Builder|::pl-skip_all (self &optional reason &rest args)
+       (declare (ignore self args))
+       (pl-skip_all (and reason (to-string (unbox reason)))))
+
+;; ->skip(REASON) writes ONE skip row and returns; unlike Test::More's skip()
+;; it does not leave a SKIP block.
+(defun |Test::Builder|::pl-skip (self &optional reason &rest args)
+       (declare (ignore self args))
+       (incf *test-count*)
+       (%tap-out "ok ~A # skip~@[ ~A~]~%" *test-count*
+                 (and reason (to-string (unbox reason))))
+       1)
+
+;; ->is_passing: 1 while no assertion has failed, else 0.
+(defun |Test::Builder|::pl-is_passing (self &rest args)
+       (declare (ignore self args))
+       (if (zerop *test-failures*) 1 0))
+

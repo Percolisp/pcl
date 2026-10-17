@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 13;
 
 sub write_pl {
     my ($code) = @_;
@@ -346,4 +346,36 @@ my @t = caller(-1); print "top ", scalar(@t), "\n";
 PL
     is(run_cl($prog), run_perl($prog),
        '#3399: caller(-1) inside a sub is the empty list / undef, not a CL type error (perl oracle)');
+}
+
+{
+    # #3400 (s518e, the Type-Tiny census): a module written on
+    # Test::Builder::Module asks its CLASS for the builder, then branches on
+    # has_plan and calls skip / skip_all / is_passing -- Test::Requires's skip
+    # path.  PCL answered none of them, so every file whose optional module is
+    # absent DIED with no TAP instead of skipping.
+    my $prog = <<'PL';
+package Req; use Test::More (); our @ISA = ('Test::Builder::Module');
+package main;
+use Test::More;
+my $b = Req->builder;
+print "pre:", (defined $b->has_plan ? $b->has_plan : "undef"), "\n";
+plan tests => 2;
+print "has:", $b->has_plan, " same:", ($b == Test::More->builder ? 1 : 0), "\n";
+$b->skip("no frob");
+ok(1, "one");
+print "passing:", $b->is_passing, "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3400: Test::Builder::Module->builder, has_plan, skip and is_passing answer as Test::Builder (perl oracle)');
+    my $prog2 = <<'PL';
+package Req; our @ISA = ('Test::Builder::Module');
+package main;
+use Test::More;
+my $b = Req->builder;
+$b->skip_all("needs Frob") if !defined $b->has_plan;
+print "not reached\n";
+PL
+    like(run_cl($prog2), qr/\A1\.\.0 # skip needs Frob\n\z/i,
+         '#3400: ->skip_all before a plan prints 1..0 # SKIP and exits (as perl)');
 }

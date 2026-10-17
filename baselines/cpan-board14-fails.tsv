@@ -115,6 +115,9 @@
 #   Capture-Tiny 02 08 09 12 16 17 19 25 (#3262: Capture::Tiny seeks its tmpfiles to SEEK_END), Data-Dump dump.t (#3324)
 #   and glob.t.  ADDED 390 newly REACHED rows (each file stopped before them on dc87c403, measured
 #   alone there): Capture-Tiny #3326 (utf8 capture) / #3327 (merged order) / #3283; HTTP-Tiny 100_get #3323, 150_post_form #1389.
+# LEFT BY EDIT (s518e, #3281 FIXED -- the core B shim, window s518e, each file run alone on the s518e tree 775f31fd):
+#   the six 00-report-prereqs.t *FILE* rows (Capture-Tiny, Class-Method-Modifiers, HTTP-Tiny, Mojo-DOM58, Path-Tiny,
+#   Try-Tiny) -- each now 1 / 0, plan 1.
 Algorithm-Diff-1.201-0	base.t	6			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	10			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	15			"$VAR1 = [[['-',0,'a']],[['+',2,'d']],[['-',4,'h'],['+',4,'f']],[['+',6,'k']],[['-',8,'n'],['+',9,'r'],['-',9,'p'],['+',10,'s'],['+',11,'t']]];"	#1511 A (same hunk-iteration family)
@@ -518,7 +521,6 @@ Path-Tiny-0.150-0	symlinks.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #
 Path-Tiny-0.150-0	temp.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 + then #1576 (subtest)
 Path-Tiny-0.150-0	zz-atomic.t	0	*FILE*	1..0 # SKIP Test::MockRandom required for atomicity tests (rc=0)	0 row(s)	PERL-SKIP (Test::MockRandom required for atomicity tests)
 Algorithm-Diff-1.201-0	oo.t	0	*PLAN*	ran 122 of 969, rc 2	969 row(s)	#1511 A (s518d #3284 read: the hunk iterator croak "Get: Invalid request (min1)" escapes an eval {} at top level; the rows after it never run)
-Capture-Tiny-0.50-0	00-report-prereqs.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#3281 (#1575 exposed it: from the dist root t/00-report-prereqs.t finds its .dd and loads a module that `require B`s -- "Can't locate B.pm"; probed Class-Method-Modifiers, the five others are the same dzil-generated file)
 Capture-Tiny-0.50-0	11-stderr-string.t	0	*PLAN*	ran 2 of 2, rc 1	2 row(s)	#3023 (all rows run, then `seek` on the File::Temp handle dies "is not a stream associated with a file" -- read on 08 12 13 23; 11 14 15 the same shape)
 Capture-Tiny-0.50-0	13-stdout-tied.t	0	*PLAN*	ran 1 of 1, rc 1	1 row(s)	#3376 (s518d: the file now runs to its end; a child's output that escaped the capture glues onto the next TAP line, so ~34 rows are not parsed)
 Capture-Tiny-0.50-0	20-stdout-badtie.t	0	*PLAN*	ran 1 of 1, rc 2	1 row(s)	#3370 (s518d #3283 read: Capture::Tiny.pm:344 `$localize{stdout}++, local(*STDOUT), _open(\*STDOUT, ">&=1") if ...` -- the non-leading local is dropped by the compiler, so the open reaches TieEvil::OPEN "unimplemented"; the runtime halves #3203/#3208 are fixed)
@@ -526,9 +528,7 @@ Capture-Tiny-0.50-0	21-stderr-badtie.t	0	*PLAN*	ran 1 of 1, rc 2	1 row(s)	#3370 
 Capture-Tiny-0.50-0	22-stdin-badtie.t	0	*PLAN*	ran 1 of 1, rc 2	1 row(s)	#3370 (s518d #3283 read: Capture::Tiny.pm:344 `$localize{stdout}++, local(*STDOUT), _open(\*STDOUT, ">&=1") if ...` -- the non-leading local is dropped by the compiler, so the open reaches TieEvil::OPEN "unimplemented"; the runtime halves #3203/#3208 are fixed)
 Capture-Tiny-0.50-0	23-all-tied.t	0	*PLAN*	ran 3 of 3, rc 1	3 row(s)	#3376 (s518d: the file now runs to its end; a child's output that escaped the capture glues onto the next TAP line, so ~34 rows are not parsed)
 Capture-Tiny-0.50-0	24-all-badtied.t	0	*PLAN*	ran 3 of 3, rc 2	3 row(s)	#3370 (s518d #3283 read: Capture::Tiny.pm:344 `$localize{stdout}++, local(*STDOUT), _open(\*STDOUT, ">&=1") if ...` -- the non-leading local is dropped by the compiler, so the open reaches TieEvil::OPEN "unimplemented"; the runtime halves #3203/#3208 are fixed)
-Class-Method-Modifiers-2.15-0	00-report-prereqs.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#3281 (#1575 exposed it: from the dist root t/00-report-prereqs.t finds its .dd and loads a module that `require B`s -- "Can't locate B.pm"; probed Class-Method-Modifiers, the five others are the same dzil-generated file)
 Class-Method-Modifiers-2.15-0	041-modify-parent.t	0	*PLAN*	ran 1 of no plan, rc 1	a plan	#3373 (s518d #3284 read: a second around() on the PARENT dies with a raw SBCL FINALIZE-INHERITANCE on a forward-referenced class)
-HTTP-Tiny-0.090-0	00-report-prereqs.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#3281 (#1575 exposed it: from the dist root t/00-report-prereqs.t finds its .dd and loads a module that `require B`s -- "Can't locate B.pm"; probed Class-Method-Modifiers, the five others are the same dzil-generated file)
 JSON-PP-4.18-0	019_incr.t	0	*PLAN*	ran 384 of 745, rc 255	745 row(s)	NS:Lvalue subroutines (#930; s518d #3284 read: `$coder->incr_text =~ s/^\s*,//` modifies the lvalue sub incr_text -- "Modification of a read-only value attempted" after row 384)
 JSON-PP-4.18-0	099_binary00.t	0	*PLAN*	ran 48 of 1536, rc 0	1536 row(s)	#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
 JSON-PP-4.18-0	099_binary00.t	41	- 0			#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
@@ -537,8 +537,6 @@ JSON-PP-4.18-0	099_binary00.t	45	- 4			#3282 (from the dist root the chunk runs 
 JSON-PP-4.18-0	099_binary00.t	46	- 5			#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
 JSON-PP-4.18-0	099_binary01.t	0	*PLAN*	ran 8 of 1536, rc 0	1536 row(s)	#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
 JSON-PP-4.18-0	099_binary02.t	0	*PLAN*	ran 8 of 1536, rc 0	1536 row(s)	#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
-Mojo-DOM58-3.002-0	00-report-prereqs.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#3281 (#1575 exposed it: from the dist root t/00-report-prereqs.t finds its .dd and loads a module that `require B`s -- "Can't locate B.pm"; probed Class-Method-Modifiers, the five others are the same dzil-generated file)
-Path-Tiny-0.150-0	00-report-prereqs.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#3281 (#1575 exposed it: from the dist root t/00-report-prereqs.t finds its .dd and loads a module that `require B`s -- "Can't locate B.pm"; probed Class-Method-Modifiers, the five others are the same dzil-generated file)
 Path-Tiny-0.150-0	filesystem.t	0	*PLAN*	ran 1 of no plan, rc 2	a plan	#3374 (s518d #3284 read: Path::Tiny builds openw & co. in `while (my ($k, $v) = each %opens) { *{$k} = sub { ... $v ... } }`; a while-condition my is ONE variable in PCL, so ->openw opens with mode "<")
 Path-Tiny-0.150-0	rel-abs.t	0	*PLAN*	ran 32 of no plan, rc 2	a plan	#1576 (Test::More::subtest: "Undefined subroutine &main::subtest")
 Path-Tiny-0.150-0	sig_die.t	0	*PLAN*	ran 1 of no plan, rc 2	a plan	#3374 (s518d #3284 read: ->openw opens with mode "<" -- the while-condition my closure capture)
@@ -562,7 +560,6 @@ Text-CSV-2.04	80_diag.t	0	*PLAN*	ran 1 of 345, rc 1	345 row(s)	#3061 (from the d
 Text-CSV-2.04	85_util.t	0	*PLAN*	ran 1 of 1448, rc 1	1448 row(s)	#3061 (from the dist root `require "./t/util.pl"` is found and refuses to transpile: "file lexical 'ebcdic' captured by sub _readable")
 Text-CSV-2.04	91_csv_cb.t	0	*PLAN*	ran 1 of 79, rc 1	79 row(s)	#3061 (from the dist root `require "./t/util.pl"` is found and refuses to transpile: "file lexical 'ebcdic' captured by sub _readable")
 Text-CSV-2.04	rt99774.t	0	*PLAN*	ran 1 of 8, rc 1	8 row(s)	#3061 (from the dist root `require "./t/util.pl"` is found and refuses to transpile: "file lexical 'ebcdic' captured by sub _readable")
-Try-Tiny-0.32-0	00-report-prereqs.t	0	*FILE*	no TAP rows (rc=0)	1 row(s)	#3281 (#1575 exposed it: from the dist root t/00-report-prereqs.t finds its .dd and loads a module that `require B`s -- "Can't locate B.pm"; probed Class-Method-Modifiers, the five others are the same dzil-generated file)
 Try-Tiny-0.32-0	context.t	0	*PLAN*	ran 13 of 25, rc 0	25 row(s)	NS:`DESTROY` called by garbage collector + #2370 (PARKED, USER s495; s518d #3284 read: the dist's own DESTROY-guard Try/Tiny.pm runs, so no finally block runs and its 12 counted rows never print)
 Try-Tiny-0.32-0	finally.t	0	*PLAN*	ran 15 of 30, rc 0	30 row(s)	NS:`DESTROY` called by garbage collector + #2370 (PARKED, USER s495; s518d #3284 read: the dist's own DESTROY-guard Try/Tiny.pm runs, so no finally block runs and its rows never print)
 Try-Tiny-0.32-0	when.t	0	*PLAN*	ran 1 of 5, rc 255	5 row(s)	NS:given/when (PCL: given/when (feature 'switch') is not supported)
