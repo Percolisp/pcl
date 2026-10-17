@@ -20005,6 +20005,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((v (%p-resolve-fh fh)))
     (cond
       ((%p-socket-p v) (%p-close-socket v) (%p-forget-fh fh))
+      ;; A STANDARD handle still on its own descriptor is not closed: perl
+      ;; keeps descriptors 0/1/2 across a reopen (the new open is dup2'd onto
+      ;; it, %p-rebind-std) -- so `open(STDOUT, ">&=1")` finds fd 1 open, and a
+      ;; FAILED reopen leaves STDOUT printing (probed 5.40.3: ok=0, print true,
+      ;; fileno 1; #3208).  Its buffer is flushed, as the close would have.
+      ((let ((slot (%p-std-slot fh)))
+         (and slot (streamp v) (open-stream-p (%p-stream-target v))
+              (eql (%p-fd-of-stream v) slot)))
+       (unless (input-stream-p v) (ignore-errors (finish-output v))))
       ((and (streamp v) (open-stream-p (%p-stream-target v)))
        (let ((saved (%p-status)))
          (%p-close-maybe-pipe v)
@@ -20152,6 +20161,27 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                                                     *p-default-out-ef*
                                                     *p-default-in-ef*))))))
 
+(defun %p-stream-on-fd (fd mode-str)
+  "The open stream of a live handle that sits on descriptor FD, in MODE-STR's
+   direction, or NIL (#3208).  perl's PerlIO refcounts a descriptor, so an
+   fdopen `open($f, '>&=', 1)` shares fd 1 with STDOUT and `close $f` leaves
+   it open (probed 5.40.3); PCL gets that by aliasing the owner's stream
+   (%p-fdopen-alias), whose close closes only the alias.  The standard handles,
+   then the handle table, then every open output stream (a lexical handle)."
+  (let ((out (not (char= (char mode-str 0) #\<))))
+    (flet ((owner-p (v)
+             (and (streamp v)
+                  (open-stream-p (%p-stream-target v))
+                  (if out (output-stream-p v) (input-stream-p v))
+                  (eql (%p-fd-of-stream v) fd))))
+      (or (find-if #'owner-p (list *standard-input* *standard-output*
+                                   *error-output*))
+          (loop for v being the hash-values of *p-filehandles*
+                when (owner-p v) return v)
+          (and out
+               (loop for v being the hash-keys of *p-open-output-streams*
+                     when (owner-p v) return v))))))
+
 (defun %p-open-dup (fh mode-str src-name three-arg-p
                     &optional (src-val nil src-val-p))
   "Dup-open (#70): open FH, \">&SRC\" / \"<&SRC\" — FH becomes a duplicate of
@@ -20186,9 +20216,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (fd-num  (and (plusp (length src-name))
                        (every #'digit-char-p src-name)
                        (parse-integer src-name)))
-         (src     (and (not fd-num)
-                       (or (and src-val-p src-val (%p-resolve-fh src-val))
-                           (%p-resolve-fh src-name))))
+         (src     (if fd-num
+                      ;; `>&=N` of a descriptor a live handle holds shares that
+                      ;; handle's stream, as the handle spellings do (#3208)
+                      (and eq-form (%p-stream-on-fd fd-num mode-str))
+                      (or (and src-val-p src-val (%p-resolve-fh src-val))
+                          (%p-resolve-fh src-name))))
          (src-fd  (or fd-num (and src (%p-fd-of-stream src)))))
     (unless src-fd
       ;; No OS fd behind SRC.  An in-memory (PerlIO :scalar-alike) handle has

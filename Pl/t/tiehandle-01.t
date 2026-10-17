@@ -325,4 +325,17 @@ open my $f, "<", $t or die; my $l = <$f>; close $f; unlink $t;
 print "same=$same file=$l", "buf=${$o}";
 PERL
 
+test_th('#3208 a numeric fdopen shares the descriptor: closing it leaves STDOUT / a lexical open; reopening STDOUT keeps fd 1', <<'PERL');
+$| = 1;
+open(STDOUT, ">&=1") or die "f1: $!"; print "a\n";
+my $ok = open(STDOUT, ">", "/nope/pcl-x"); print "after failed reopen ok=", ($ok ? 1 : 0), " fileno=", fileno(STDOUT), "\n";
+open(my $f, ">&=", 1) or die "f3: $!"; print $f "c\n"; close $f; print "d\n";
+my $t = "/tmp/pcl-tiehandle-01c-$$.txt";
+open(my $w, ">", $t) or die; my $n = fileno($w);
+open(my $g, ">&=", $n) or die "f5: $!"; print $g "via g\n"; close $g;
+my $r = print $w "via w\n"; close $w;
+open(my $rd, "<", $t) or die; my @l = <$rd>; close $rd; unlink $t;
+print "r=", ($r ? 1 : 0), " file=", join("", @l);
+PERL
+
 done_testing;
