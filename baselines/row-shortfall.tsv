@@ -100,6 +100,7 @@
 # taken-at: 3ac9394f 2026-09-18 (6 companion file(s) re-measured)
 # taken-at: s504 2026-10-02 (29 companion file(s) re-measured)
 # taken-at: b1ce06af 2026-10-10 (7 companion file(s) re-measured)
+# taken-at: 79102151 2026-10-17 (3 companion file(s) re-measured)
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
 perl-tests/bop.t	1	s473t1: STALE PLAN, not a lost row -- `plan tests => 510` but session 245 commented out the `pack "P"` block and left the count, so the file holds 509 assertions.  REAL PERL 5.40.3 runs 509 too ("Looks like you planned 510 tests but ran 509").  PCL produces all 509.  Task #1438.
@@ -169,7 +170,7 @@ t/comp/parser.t	93	#1694 -- FIVE #138 drops in the file's `#line`-tracking secti
 t/comp/proto.t	121	#1682 -- was 155; s473t5c's #1681 (`\(&NAME)` is the sub slot) removed the `&main::1` abort and the file went 47/14 -> 78/38, 61 -> 116 of 216 rows.  The residue is a SECOND abort at `sub star (*&)`: `star FOO` with nothing declaring FOO is CALLED where perl reads the bareword; s504 #2389: 100 -> 121, the #2543 loss (measured 63/32 on 558cc5a0, 75/20 since s500a) finally recorded
 t/comp/require.t	3	NS:Error message text and format -- perl plans 1750 rows and PCL 1747. Two of the three are `RT #24404` and `[perl #24482] require CORE::foo`, where `require $scalar` / `require CORE::lc "..."` must die "Can't locate threads in @INC"; PCL's message differs, the file takes its `else` branch, and THAT branch prints a TAP line with no test number (the test file's own bug), so the row is never produced
 t/io/crlf.t	3	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
-t/io/dup.t	19	#1703 -- closing a `>&=` (fdopen) handle closes the shared descriptor, so dup.t:65 takes STDOUT out and dup.t:68 fails EBADF, losing every row after it
+t/io/dup.t	1	was 19 (#1703: closing a `>&=` handle closed the shared descriptor and lost every row after dup.t:68); s518d #3208 fixed that, the file runs to its end.  The ONE left is dup.t:140, an UNNAMED `is` (description = its caller line): the third UTFDUP line is read and equal under PCL (probed alone, s518d), so this is the row PAIRING, not a lost assertion -- UNEXPLAINED line attribution
 t/io/layers.t	55	#139 -- the whole file is `PerlIO::get_layers`.  Its ABORT is one layer in front: `PerlIO::get_layers(STDIN)` emits a BARE CL symbol and dies "The variable STDIN is unbound" (the #266/#452 bareword-in-an-argument-slot family); see #1710
 t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
 t/io/nargv.t	1	#2669 (nested in-place edit: `local $^I` is real since s506f)
@@ -259,7 +260,6 @@ t/op/try.t	2	#1942 + NS:Lvalue subroutines [DEFERRED] (#930) -- the two never-pr
 t/op/undef.t	51	NS:DESTROY called by garbage collector (50 rows) + NS:Read-only constants via `\undef` stash tricks (1).  NOT an early stopper: the file runs to its LAST row.  50 of the 51 are `X::DESTROY`'s five assertions x 10 keys, reached in perl only because `undef %hash` frees the blessed values; the remaining row is `undef constants preserve identity`, behind the `BEGIN { $::{z} = \undef }` stash-constant trick whose bareword `z` dies as an undefined sub
 t/op/utfhash.t	2	NS:Unicode semantics differences -- a hash key whose UTF8 flag differs from its bytes; the never-produced rows are the \w-on-keys loop.  The file is also *rows-unstable* (#1082): its descriptions interpolate the hash order
 t/op/write.t	505	not-supported.md §`format` / `write` report formatting — the file aborts at `Undefined subroutine &main::formline`.  Was 595 rows; #1032 (`p-write` takes a bareword handle) moved the abort later and produced 90 more (s468be).
-t/op/yadayada.t	1	NS:Error compatibility for invalid Perl input -- the never-produced row evals a `...` spelling perl rejects at COMPILE time and matches $@ against /\Asyntax error/
 t/opbasic/magic_phase.t	2	UNEXPLAINED
 t/re/alpha_assertions.t	250	NS:Code points above U+10FFFF -- the driver stops at t/re/re_tests line 2030 (`\x{400000}`), #1711 moved it there from line 1859
 t/re/anyof.t	1187	NS:DynaLoader / XS binary extensions -- Storable

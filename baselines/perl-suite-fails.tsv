@@ -337,6 +337,7 @@
 # taken-at: b1ce06af 2026-10-10 (6 file(s) re-measured)
 # taken-at: 44961995 2026-10-17 (2 file(s) re-measured)
 # s518 (2026-10-17, Fable) -- op/aassign.t + op/each.t re-spelled with --bless-fails FOR THOSE FILES ONLY at the s517c merge (main 6aecf210): the two NEW rows the s517b / s517c companions reported were measured PRE-EXISTING on the dc87c403 extraction; op/aassign.t 26 is perl's TODO that PCL passes (row below); op/each.t's two `Check length of ...` rows ("\022" / "\x{10fffd}") are HASH-ORDER dependent -- which of the two fails flips between runs, so the re-bless kept the file's rows as they were and a swap of those two is NOT a regression.
+# taken-at: 79102151 2026-10-17 (3 file(s) re-measured)
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -1972,26 +1973,8 @@ io/crlf.t	16421	ok	(missing)	check :utf8 removed	#139 -- NS:PerlIO layer stacks 
 io/crlf.t	16419	ok	(missing)	check :utf8 set	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 io/crlf.t	16420	ok	(missing)	remove :utf8	#139 -- NS:PerlIO layer stacks and `PerlIO::get_layers`
 io/data.t	3	ok	not ok	[at t/io/data.t line 18]	#1767
-io/dup.t	11	ok	(missing)	#11	#1703
-io/dup.t	12	ok	(missing)	#12	#1703
 io/dup.t	0	(none)	renumbered	*summary*	#1703
-io/dup.t	21	ok	(missing)	[at t/io/dup.t line 104]	#1703
-io/dup.t	22	ok	(missing)	[at t/io/dup.t line 105]	#1703
-io/dup.t	23	ok	(missing)	[at t/io/dup.t line 108]	#1703
-io/dup.t	24	ok	(missing)	[at t/io/dup.t line 109]	#1703
-io/dup.t	25	ok	(missing)	[at t/io/dup.t line 120]	#1703
-io/dup.t	26	ok	(missing)	[at t/io/dup.t line 121]	#1703
-io/dup.t	27	ok	(missing)	[at t/io/dup.t line 138]	#1703
-io/dup.t	28	ok	(missing)	[at t/io/dup.t line 139]	#1703
 io/dup.t	29	ok	(missing)	[at t/io/dup.t line 140]	#1703
-io/dup.t	13	ok	(missing)	[at t/io/dup.t line 85]	#1703
-io/dup.t	14	ok	(missing)	[at t/io/dup.t line 86]	#1703
-io/dup.t	15	ok	(missing)	[at t/io/dup.t line 89]	#1703
-io/dup.t	16	ok	(missing)	[at t/io/dup.t line 90]	#1703
-io/dup.t	17	ok	(missing)	[at t/io/dup.t line 93]	#1703
-io/dup.t	18	ok	(missing)	[at t/io/dup.t line 94]	#1703
-io/dup.t	19	ok	(missing)	[at t/io/dup.t line 97]	#1703
-io/dup.t	20	ok	(missing)	[at t/io/dup.t line 98]	#1703
 io/errnosig.t	1	ok	not ok	Signal does not modify $!	#1710
 io/inplace.t	7	ok	not ok	die shouldn't touch file	#1710
 io/inplace.t	8	ok	not ok	last should update file	#1710
@@ -5152,7 +5135,6 @@ op/repeat.t	48	ok	not ok	(1) x ~1	NS:Integers are unbounded: PCL has no 64-bit b
 op/repeat.t	46	ok	not ok	[perl \#78194] \$_[0] == \$_[1] when @_ aliases elems repeated by x	NS:`@_` argument aliasing -- PARTIAL (plain `my` lexicals only)
 op/repeat.t	47	ok	not ok	list repetition propagates lvalue cx to its lhs	NS:Lvalue subroutines [DEFERRED] (#930)
 op/require_37033.t	0	(none)	renumbered	*summary*	#1935 -- the file closes STDIN and then `require`s a module, asserting the module's handle does not reuse fd 0.  PCL cannot find the fixture (`Can't locate test_use_14937.pm in @INC`) because the child's @INC does not carry the test directory
-op/require_37033.t	6	ok	not ok [PCL #4]	STDIN is closed	#1935 -- the file closes STDIN and then `require`s a module, asserting the module's handle does not reuse fd 0.  PCL cannot find the fixture (`Can't locate test_use_14937.pm in @INC`) because the child's @INC does not carry the test directory
 op/require_37033.t	10	ok	(missing)	file handle has the same numeric file descriptor (STDIN closed)	#1935 -- the file closes STDIN and then `require`s a module, asserting the module's handle does not reuse fd 0.  PCL cannot find the fixture (`Can't locate test_use_14937.pm in @INC`) because the child's @INC does not carry the test directory
 op/require_37033.t	5	ok	(missing)	file handle has the same numeric file descriptor (STDIN open)	#1935 -- the file closes STDIN and then `require`s a module, asserting the module's handle does not reuse fd 0.  PCL cannot find the fixture (`Can't locate test_use_14937.pm in @INC`) because the child's @INC does not carry the test directory
 op/require_37033.t	9	ok	(missing)	test_use_14937 is loaded (STDIN closed)	#1935 -- the file closes STDIN and then `require`s a module, asserting the module's handle does not reuse fd 0.  PCL cannot find the fixture (`Can't locate test_use_14937.pm in @INC`) because the child's @INC does not carry the test directory
@@ -6604,10 +6586,6 @@ op/write.t	397	ok	(missing)	value read exactly once	NS:`format` / `write` report
 op/write.t	476	ok	(missing)	write to duplicated format	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	470	ok	(missing)	~ and realloc	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
 op/write.t	129	ok	not ok [PCL #131]	swrite("1^*2 3^*4", "N", "N") class="Count"	NS:`format` / `write` report formatting -- the file aborts at `Undefined subroutine &main::formline`
-op/yadayada.t	0	(none)	renumbered	*summary*	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
-op/yadayada.t	33	ok	not ok [PCL #34]	Parsing '...' in "print  D  ...  A ;" as a range operator	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
-op/yadayada.t	34	ok	(missing)	Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
-op/yadayada.t	32	ok	not ok [PCL #33]	Parsing '...' in "print 'D' ... 'A';" as a range operator	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
 op/yadayada.t	10	ok	not ok	[at t/op/yadayada.t line 61]	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
 op/yadayada.t	12	ok	not ok	[at t/op/yadayada.t line 61]	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
 op/yadayada.t	14	ok	not ok	[at t/op/yadayada.t line 61]	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
@@ -6619,6 +6597,8 @@ op/yadayada.t	24	ok	not ok	[at t/op/yadayada.t line 61]	NS:Error compatibility f
 op/yadayada.t	26	ok	not ok	[at t/op/yadayada.t line 61]	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
 op/yadayada.t	28	ok	not ok	[at t/op/yadayada.t line 61]	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
 op/yadayada.t	30	ok	not ok	[at t/op/yadayada.t line 61]	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
+op/yadayada.t	33	ok	not ok	Parsing '...' in "print  D  ...  A ;" as a range operator	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
+op/yadayada.t	34	ok	not ok	Parsing '...' in "print ${\"D"}  ...  A ;" as a range operator	NS:Error compatibility for invalid Perl input -- every row evals a `...` spelling perl rejects at COMPILE time (`$x = ...;`, `... if ...`, a `...` with a following statement) and matches $@ against /\Asyntax error/.  The working `...` statement itself is right in PCL (probed s473t6c: both die "Unimplemented")
 opbasic/concat.t	239	ok	not ok	*Bar =  (*Bar  . *Bar . "Baz")
 opbasic/concat.t	253	ok	not ok	RT #132595
 opbasic/concat.t	23	ok	not ok	perl #26905, left ne unicode

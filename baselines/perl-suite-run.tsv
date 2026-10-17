@@ -1714,7 +1714,7 @@ io/crlf.t	16421	0	16413	5	DIFF	s492b: 16412/6 -> 16413/5, #2006(a) -- an opener 
 io/crlf_through.t	942	0	942	0	OK		0
 io/data.t	4	0	3	1	DIFF		0
 io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented	0
-io/dup.t	29	0	10	0	DIFF	aborted-forms:1: Cannot dup to string 'N': Bad file descriptor at dup.t line N. 	0
+io/dup.t	29	0	28	0	DIFF	s518d #3208 (a numeric fdopen of a held descriptor aliases its stream, its close leaves the fd): 10/0 -> 28/0, runs to the end	0
 io/eintr.t	0	0	0	0	NOTAP		0
 io/eintr_print.t	0	0	0	0	NOTAP	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC	0
 io/errno.t	16	0	16	0	OK		0
@@ -1974,7 +1974,7 @@ op/recurse.t	28	0	26	2	DIFF	s504 #2389: 27/1 -> 26/2 DOWN at 8d41b6b6 (s492c): t
 op/ref.t	257	0	210	32	DIFF	s506f member 6: 207/35 -> 210/32, rows at ref.t 697-699 (fresh_perl prog named -e) | s497b: 202/40 -> 207/35 = +6 mine (PVBM SCALAR/ARRAY: strict refs #2103; four "aliased to literal": read-only literal #1391/#2103) and -1 PRE-EXISTING "UNIVERSAL::AUTOLOAD called when freeing qr//" (201/41 on a 24422497 extraction, #2407) | s470bv: TWO steps, both measured: #1221 (b25afbc) 199/43 -> 201/41, then s470bs #1048 (row "IO slot of the temporary glob is set correctly") -> 202/40 at 424cabc | aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
-op/require_37033.t	10	0	5	1	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linu	0
+op/require_37033.t	10	0	6	0	DIFF	s518d (#3203/#3371: the closed-STDIN row passes): 5/1 -> 6/0; aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linu	0
 op/require_errors.t	73	0	6	67	DIFF	s507b: base 08de9e4f vs tree, each run ALONE (scratch/s507b/movers-base.log): 5/68 -> 6/67, `correct error message for require ./no_such_file.pm` passes: #2687 (an explicit ./ path is a file, not a module name)	0
 op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
@@ -2045,7 +2045,7 @@ op/wantarray.t	28	0	28	0	OK	s510c #2800 (eval STRING binds its own context: `eva
 op/warn.t	32	1	20	13	DIFF	s470bv: #1115 (already 20/13 at a3d6d8e)	0
 op/while.t	26	0	20	6	DIFF		0
 op/write.t	636	0	98	33	DIFF	aborted-forms:13: PCL: formline (format/write report formatting) is not supported (s495f #2093: formline now DIES with the ruled message -- the fresh_perl row "#130722 - assertion failure" reads it on stderr and fails honestly; every other row identical to 3d9b3712 by full TAP diff)	1
-op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A	0
+op/yadayada.t	34	0	21	13	DIFF	s518d #3203 (local *STDOUT detaches; the row-32 verdict is no longer eaten): 20/13 -> 21/13	0
 opbasic/arith.t	183	0	183	0	OK		0
 opbasic/cmp.t	13280	0	13280	0	OK	s470bv: #1221 (b25afbc; 12078/0 at a3d6d8e): 1202 rows that were never produced now run and PASS -- the file is OK	0
 opbasic/concat.t	254	0	250	4	DIFF	s504 #2389: 249/5 -> 250/4 UP at bd0c38e3 (s497b): `$$re = $a . $b` passes	0
