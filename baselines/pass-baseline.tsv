@@ -1,4 +1,7 @@
 # taken-at: 5323d9e 2026-08-15
+# s518e (2026-10-18, Opus, EDITED BY HAND -- one row, TOTAL 18746 -> 18747, #3281): anonsub.t 6 -> 7 -- row 9
+#   "undef &anon giving it a freed GV": `require B` now loads (the core B shim) and svref_2object($_)->GV->NAME is __ANON__.
+#   Sweep scratch/s518e/sweep.log.
 # s517a (2026-10-15, Opus, EDITED BY HAND -- one row, TOTAL 18745 -> 18746, #1747): eval.t 134 -> 135 -- row 45
 #   "eval catches bad goto calls": a goto into a foreach dies with perl's text.  Sweep scratch/s517a/sweep.log.
 # s515a (2026-10-11, Opus, EDITED BY HAND -- one row, TOTAL 18741 -> 18745, #3063 / #1567): pos.t 15 -> 19 -- a //g
@@ -431,7 +434,7 @@
 #   REBASED over main 5eb87b01: the sweep TOTAL is 18681 -> 18686 there (this
 #   +5 on top of s484d's anonsub.t +5 (merged as s486c)), re-measured GATE clean, +0.
 aassign.t	OK	182	7	189
-anonsub.t	OK	6	4	10
+anonsub.t	OK	7	3	10
 append.t	OK	13	0	13
 args.t	OK	22	1	23
 arith.t	OK	183	0	183

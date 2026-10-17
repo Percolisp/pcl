@@ -73,6 +73,8 @@
 #   no-op, so this file asserted one row, and implementing the helper makes it
 #   produce perl's ten (6 passing -- baselines/pass-baseline.tsv carries the
 #   +5).  Neither row is a regression: nothing that used to pass fails.
+# s518e (2026-10-18, #3281 FIXED, window s518e): anonsub.t row 9 "undef &anon giving it a freed GV" LEFT BY EDIT --
+#   the record's `require B` now loads (the core B shim) and B::svref_2object($_)->GV->NAME prints __ANON__ (sweep scratch/s518e/sweep.log).
 aassign.t	180	RT #130132 scalar derefffed 1	'3'	'2'	#1452 (a) (LHS lvalues must be resolved before the assignment)
 aassign.t	181	RT #130132 scalar derefffed 2	'1'	'3'	#1452 (a) (LHS lvalues must be resolved before the assignment)
 aassign.t	182	RT #130132 scalar undef 1	undef	'2'	#1452 (a) (LHS lvalues must be resolved before the assignment)
@@ -81,7 +83,6 @@ aassign.t	19	lvalue sub on RHS returns array	''	'1 2 3'	NS:Lvalue subroutines + 
 aassign.t	20	lvalue sub on RHS returns scalars	':'	'1:2'	NS:Lvalue subroutines + #930
 aassign.t	176	undef as lvalue	'21:10:20'	'21:11:20'	#1452 (b) (`undef` on the LHS must make the RHS element the lvalue)
 anonsub.t	4				#1771 (the collapsed unnamed key: rows 4, 6 and 7, the three failing run_multiple_progs records -- 4 fails only on the child's SBCL compiler noise (#1773), 6 and 7 on absent warnings-gated diagnostics (owner #221))
-anonsub.t	9	undef &anon giving it a freed GV			#1771 (perl renders the freed GV's name; the record runs)
 args.t	23	delete $_[0] : outside block			NS:`DESTROY` called by garbage collector CATALOG args.t "test 23"
 array.t	127				#1456 (the collapsed unnamed key: Bug #37350, a symbolic array named by a NUMBER)
 array.t	83	$a: $# on freed array is undef	'-1'	undef	#1478 CATALOG array.t "freed-array length (GC-hard)"
