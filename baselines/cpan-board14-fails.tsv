@@ -100,6 +100,8 @@
 #   #1747 1, #1576 1, NS:given/when 1.
 # EDITED (s519a, 2026-10-18, #3370 / #3283): the four Capture-Tiny badtie *PLAN* rows (#3370) LEFT -- the files run to their plan
 #   (one-file runs: 20/21/22 559 of 583, 24 563 of 587); the 96 rows they now reach and fail ADDED with their cause #3327 (merged order).
+# EDITED (s519a, 2026-10-18, #3374): the two Path-Tiny *PLAN* rows (#3374) LEFT -- filesystem.t now runs 38 rows to the subtest stop (#1576),
+#   sig_die.t 3 of 4; the rows they now reach and fail ADDED with their causes (#2006 PART 2, #3412, #3413 filed).
 # LEFT BY EDIT (s516a, window s516a, HTTP-Tiny + Path-Tiny run alone on the s516a tree rebased onto MAIN-READY-22):
 #   HTTP-Tiny 020_headers.t / 030_response.t *FILE* (#3244 print({$fh} @_) in t/Util.pm) and 170_keepalive.t *FILE*
 #   (#3243 dir_list).  ADDED: 020_headers.t #3 (exposed: the file now runs), cause #3263.  RE-CAUSED: the HTTP-Tiny
@@ -627,9 +629,13 @@ JSON-PP-4.18-0	099_binary00.t	45	- 4			#3282 (from the dist root the chunk runs 
 JSON-PP-4.18-0	099_binary00.t	46	- 5			#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
 JSON-PP-4.18-0	099_binary01.t	0	*PLAN*	ran 8 of 1536, rc 0	1536 row(s)	#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
 JSON-PP-4.18-0	099_binary02.t	0	*PLAN*	ran 8 of 1536, rc 0	1536 row(s)	#3282 (from the dist root the chunk runs 48 (00) / 8 (01, 02) of 1536 rows and exits 0 with no error; chunk 00's ascii-encode rows - 0/1/4/5 fail for the chars above 0xFFFF)
-Path-Tiny-0.150-0	filesystem.t	0	*PLAN*	ran 1 of no plan, rc 2	a plan	#3374 (s518d #3284 read: Path::Tiny builds openw & co. in `while (my ($k, $v) = each %opens) { *{$k} = sub { ... $v ... } }`; a while-condition my is ONE variable in PCL, so ->openw opens with mode "<")
+Path-Tiny-0.150-0	filesystem.t	0	*PLAN*	ran 38 of no plan, rc 2	a plan	#1576 (Test::More::subtest: "Undefined subroutine &main::subtest"; s519a, newly reached since #3374)
+Path-Tiny-0.150-0	filesystem.t	11	Read contents of /tmp/XXXX correctly	undef	'Foo	#2006 PART 2 (the handle ->openw returned escapes its block, so it is not closed/flushed at the block's exit -- docs/not-supported.md; s519a, newly reached since #3374)
+Path-Tiny-0.150-0	filesystem.t	15				#3412 (a failed CORE::stat in a call argument passes one element: File::stat::stat on a missing path returns an object, ->stat never throws; s519a, newly reached since #3374)
+Path-Tiny-0.150-0	filesystem.t	16				#3412 (->lstat, the same; s519a, newly reached since #3374)
+Path-Tiny-0.150-0	filesystem.t	17				#3413 (unlink of a ""-overloaded Path::Tiny object deletes nothing; s519a, newly reached since #3374)
+Path-Tiny-0.150-0	sig_die.t	0	*PLAN*	ran 3 of no plan, rc 2	a plan	#2006 PART 2 (the ->openw handle is not flushed at its block's exit, so ->slurp_utf8 dies "Error read"; s519a, newly reached since #3374)
 Path-Tiny-0.150-0	rel-abs.t	0	*PLAN*	ran 32 of no plan, rc 2	a plan	#1576 (Test::More::subtest: "Undefined subroutine &main::subtest")
-Path-Tiny-0.150-0	sig_die.t	0	*PLAN*	ran 1 of no plan, rc 2	a plan	#3374 (s518d #3284 read: ->openw opens with mode "<" -- the while-condition my closure capture)
 Role-Tiny-2.002004-0	subclass.t	0	*PLAN*	ran 5 of no plan, rc 2	a plan	NS:Live symbol-table hashes (s518d #3284 read: Role::Tiny::_load_module asks `grep !/::\z/, keys %{"CreateMITest::Bottom::"}`; PCL's stash snapshot holds subs only, the @ISA-only package reads as unloaded and is required: "Can't locate CreateMITest/Bottom.pm")
 Scalar-List-Utils-1.70-0	uniqnum.t	0	*PLAN*	ran 20 of 23, rc 255	23 row(s)	#3375 (s518d #3284 read: line 301 `my $dummy = sprintf "%d", $_ for @nums;` dies "statement not supported -- Bug. Fell through"; rows 21-23 sit behind it)
 Text-CSV-2.04	20_file.t	0	*PLAN*	ran 1 of 109, rc 1	109 row(s)	#3061 (from the dist root `require "./t/util.pl"` is found and refuses to transpile: "file lexical 'ebcdic' captured by sub _readable")

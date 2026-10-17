@@ -12362,9 +12362,21 @@ sub _lower_compound {
     # v1 skips the rewrite for `until`, matching perl.
     $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
     $cond = ['p-!', $cond] if $kw eq 'until';
+    # #3374: a condition `my` a closure in the loop captures is a FRESH
+    # variable each iteration in perl -- each test starts a new box, and the
+    # body rebinds the name to it, so a closure keeps its own iteration's.
+    my @fresh = $self->_cond_mys_closure_captured(\@cond_mys, \@k);
+    $cond = ['progn', (map { ['setf', cl_sym($_), ['make-p-box', 'nil']] } @fresh), $cond]
+      if @fresh;
+    my @body = $self->_lower_scope([$block->schildren], $vi);
+    @body = (_decl_let([map { _decl_entry($_, ':box', cl_sym($_), $vi) } @fresh], @body))
+      if @fresh;
+    my @cont = $self->_continue_keys(\@k, $vi);
+    $cont[1] = _decl_let([map { _decl_entry($_, ':box', cl_sym($_), $vi) } @fresh], $cont[1])
+      if @fresh && @cont;
     my $result = ['p-while', $cond, _label_keys($label), @dyn,
-                  $self->_lower_scope([$block->schildren], $vi),
-                  $self->_continue_keys(\@k, $vi)];
+                  @body,
+                  @cont];
     if (@cond_mys) {
       $self->{_live_lex} = \%sv_live;
       $self->{_let_bound_vars} = \%sv_lb;
@@ -15015,6 +15027,28 @@ sub _strip_decl_decorations {
 # Returns a deduped list of $names.  A `my` nested inside a block/anon-sub in the
 # condition is NOT hoisted.  Dies (→ v1) on an array/hash my (needs a container
 # init, not a boxed scalar cell).
+# The SCALAR condition `my`s of a while/until (#3374) that an anonymous sub in
+# the loop's body or continue block captures -- those need perl's fresh
+# variable per iteration; every other loop keeps one binding (its emission is
+# unchanged).  The capture test is the one the declaration paths use.
+sub _cond_mys_closure_captured {
+  my ($self, $names, $kids) = @_;
+  my @sc = grep { /^\$/ } @$names or return ();
+  my @subs;
+  for my $b (grep { $_->isa('PPI::Structure::Block') } @$kids) {
+    for my $w (@{ $b->find(sub { $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }) || [] }) {
+      my $n = $w->snext_sibling;
+      push @subs, $n if $n && $n->isa('PPI::Structure::Block');
+    }
+  }
+  return () unless @subs;
+  return grep {
+    my $name = $_;
+    (my $bare = $name) =~ s/^\$//;
+    grep { $self->_block_captures_name($_, $bare, { $name => 1 }) } @subs;
+  } @sc;
+}
+
 sub _cond_my_names {
   my ($self, @conds) = @_;
   my (@names, %seen);

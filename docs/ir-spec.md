@@ -2858,10 +2858,16 @@ The C-for INIT counter is the one exception in *spelling* only — it gets its o
 `let` one level in, because it may also take an unboxed raw slot.  There is no
 "declare it in the enclosing scope" fallback: a head `my` that reached the
 package cell would stay defined after the loop and collide with a same-named
-global (#297).  Known divergence: the wrap is ONE binding for the whole loop,
-where perl gives the declaration a fresh instance per iteration — observable
-only by closing over it in the body (`while (my $x = shift @l) { push @c, sub
-{ $x } }` yields perl's 1,2,3 vs PCL's last value); tracked as #300.
+global (#297).  **A SCALAR `my` in a `while`/`until` condition that an
+anonymous sub in the body or continue block captures is a fresh variable each
+iteration** (normative, s519a #3374, perl's own rule): each test first stores a
+new box into the construct's binding, and the body and the continue block
+rebind the name to that box, so a closure keeps its own iteration's value --
+`while (my $x = shift @l) { push @c, sub { $x } }` lowers its test as
+`(progn (setf $x (make-p-box nil)) (p-my-= $x (p-shift @l)))` and its body as
+`(p-let (($x :box $x)) …)`.  A loop no closure captures keeps the one binding
+(same observable behaviour, unchanged emission); a C-style `for`'s head `my` is
+ONE variable across iterations in perl too, and stays so.
 
 **Counting-loop range foreach** (s286b): a foreach whose list is a **sole
 range** `A..B` lowers to `(p-foreach-range ((VAR A B)) body…)` or its
