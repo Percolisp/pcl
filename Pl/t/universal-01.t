@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 10;
 
 sub write_pl {
     my ($code) = @_;
@@ -294,4 +294,39 @@ print join(' ', $f->i2('Foo'), $f->i2('Nope'), $f->c2('hello'), $f->c2('nope'), 
 PL
     is(run_cl($prog), run_perl($prog),
        '#3280: SUPER::isa/can/DOES(@_) and UNIVERSAL::isa/can/DOES(@list) flatten their arguments (perl oracle)');
+}
+
+{
+    # #3392 (s518e): ->VERSION is a UNIVERSAL method like can/isa/DOES, valid on
+    # ANY class name -- a package never declared answers undef.  Type-Tiny's
+    # t/00-begin.t asks it of every optional module after a failed `use`, and
+    # PCL died "Can't locate object method VERSION via package ...".
+    my $prog = <<'PL';
+package Exists; sub x { 1 }
+package main;
+my $m = "Return::Type";
+eval "use $m ()";
+my $v = $m->VERSION;
+print join(' ', (defined $v ? "def" : "undef"), (defined(Exists->VERSION) ? 1 : 0),
+  (defined(Nope::Deeper->VERSION) ? 1 : 0), (Nope->can("x") ? 1 : 0),
+  (Nope->isa("UNIVERSAL") ? 1 : 0)), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3392: Class->VERSION on a package never declared is undef, not a method-not-found die (perl oracle)');
+}
+
+{
+    # #3393 (s518e): `Pkg::f()->m` whose sub is installed at RUN time (Type::
+    # Library's exports) is a CALL; the invocant resolver looked the name up
+    # unqualified in the current package and used "Pkg::f" as a CLASS.  A
+    # known package still wins, as in perl.
+    my $prog = <<'PL';
+package Q; sub m { "m:" . (ref($_[0]) || $_[0]) }
+package Known::Cls; sub m { "class:" . $_[0] }
+package main;
+eval q{ *P::f = sub { bless {}, "Q" }; *Known::Cls = sub { die "called" }; 1 } or die;
+print join(' ', P::f()->m, Known::Cls->m, (eval { No::Such()->m; 1 } ? "lived" : "died")), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3393: a qualified Pkg::f()->m whose sub exists at run time calls it; a known package stays a class (perl oracle)');
 }

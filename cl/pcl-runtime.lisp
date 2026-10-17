@@ -34446,11 +34446,19 @@ size comes from fstat on the descriptor, after the buffered output is written
   (let* ((func-name (%pcl-cl-sub-name name))
          ;; Look in current package for user-defined sub, NOT in :pcl (which has built-ins)
          (func-sym (find-symbol func-name *package*)))
-    (if (and func-sym (eq (symbol-package func-sym) *package*) (fboundp func-sym))
-        ;; User sub exists - call it to get the object
-        (funcall func-sym)
-        ;; No user sub - return string as class name
-        name)))
+    (cond
+      ((and func-sym (eq (symbol-package func-sym) *package*) (fboundp func-sym))
+       ;; User sub exists - call it to get the object
+       (funcall func-sym))
+      ;; A QUALIFIED name (`Types::Standard::Str()->m`, the sub installed at
+      ;; run time) is a call when the sub exists and no package of that name
+      ;; does -- perl's order: a known stash is a class (#3393).  The name ->
+      ;; symbol step is the ONE resolver's (p-get-coderef).
+      ((and (search "::" name) (not (%pcl-find-package name)))
+       (let ((fn (p-get-coderef name)))
+         (if fn (funcall fn) name)))
+      ;; No user sub - return string as class name
+      (t name))))
 
 (defun %pcl-normalize-pkg (pkg-str)
   "Strip Perl's root-stash `main::` prefix: `main::Foo` and `Foo` name the same
@@ -34962,14 +34970,15 @@ size comes from fstat on the descriptor, after the buffered output is written
                   ((or (string-equal method-name "import") (string-equal method-name "unimport"))
                    (return-from p-method-call
                      (%pcl-no-op-import-result)))
-                  ;; UNIVERSAL methods (can/isa/DOES) are valid on ANY class name,
+                  ;; UNIVERSAL methods (can/isa/DOES/VERSION) are valid on ANY class name,
                   ;; even one never declared: `Foo->can("x")` is undef, `Foo->isa(...)`
                   ;; is false — NOT a "can't locate" error.  Fall through to the
                   ;; universal-fallback cond below (find-in-class with a nil pkg is a
                   ;; harmless no-op) rather than dying here.
                   ((or (string-equal method-name "can")
                        (string-equal method-name "isa")
-                       (string-equal method-name "DOES")))
+                       (string-equal method-name "DOES")
+                       (string-equal method-name "VERSION")))
                   ;; Package unknown (never blessed into, never declared): add "perhaps" hint
                   (t (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" (perhaps you forgot to load \"~A\"?) at - line 1.~%"
                                     method-name class-name class-name))))))
