@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518d (Opus 5.5, 2026-10-17) from #3284 (Path-Tiny t/filesystem.t and t/sig_die.t: \"Error open (<) on '/tmp/XXXX'\" after row 1).  SILENT WRONG, everyday shape, pre-existing (main 5c5a5679 alike).\n\nA `my` declared in a `while` CONDITION is ONE variable across all iterations, so closures made in the body all see its LAST value (undef after the loop ends); perl gives each iteration its own.\n\nREPRODUCER (scratch/s518d/pr/wh.pl):\n    my %h = (a => 1, b => 2); my %s;\n    while (my ($k, $v) = each %h) { $s{$k} = sub { $v } }\n    my @l = (3, 4); my @t;\n    while (my $x = shift @l) { push @t, sub { $x } }\n    print join(\",\", map { \"$_=\" . $s{$_}->() } sort keys %s), \" \", join(\",\", map { $_->() } @t), \"\\n\";\nperl 5.40.3: `a=1,b=2 3,4`.  PCL: `a=,b= ,`.\n\nWHERE IT BITES: Path::Tiny builds openr/openw/opena/openrw (and their _raw/_utf8 variants) in `while ( my ( $k, $v ) = each %opens ) { *{$k} = sub { ... $v ... } }`, so every `->openw` opens with mode undef -> \"<\" and dies \"Error open (<)\" -- Path-Tiny filesystem.t (perl 108 rows) and sig_die.t (perl 4) stop after row 1.\nFix area: the loop-HEAD `my` (#297 gave it its own `let`); the let must be re-entered per iteration when a closure in the body captures it -- the foreach per-iteration binding is the sibling to reuse (rule 11).  For a scoping change the full sweep IS the gate.\n",
+   "id" : "3374",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: a my declared in a while CONDITION is one variable across iterations -- closures made in the body all see its last value (Path::Tiny openw opens with mode <)"
+}

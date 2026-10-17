@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518d (Opus 5.5, 2026-10-17) from #3284 (Scalar-List-Utils t/uniqnum.t ran 20 of 23, rc 255).  LOUD, pre-existing.\n\n`my $x = EXPR for LIST;` -- a declaration with a `for` statement modifier -- dies at run time \"PCL: statement not supported ... -- Bug. Fell through. Missing case: ['Token::Magic<$_>', ... funcall]\".\n\nREPRODUCER (scratch/s518d/pr/myfor.pl):\n    my @n = (1, 2);\n    my $dummy = sprintf \"%d\", $_ for @n;\n    print \"ok \", (defined $dummy ? \"d\" : \"u\"), \"\\n\";\nperl 5.40.3: `ok u` (the `my` is scoped to the modifier's statement; the outer $dummy is a fresh undef).  PCL: the die above.\nuniqnum.t line 301 (`my $dummy = sprintf \"%d\", $_ for @nums;`) is that statement; rows 21-23 sit behind it.\n",
+   "id" : "3375",
+   "status" : "pending",
+   "subject" : "my $x = EXPR for LIST; dies \"statement not supported -- Bug. Fell through\" (Scalar-List-Utils uniqnum.t line 301)"
+}

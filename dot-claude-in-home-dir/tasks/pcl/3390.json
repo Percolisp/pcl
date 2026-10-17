@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518e (Opus 5.5, 2026-10-17) while writing lib/B.pm (#3281): `my $v = ${ $_[0]{ref} }` in the shim lost the inner reference.\n\nREPRODUCER (perl 5.40.3 vs main 5c5a5679):\n\n    my $r = [1];\n    my $x = \\$r;\n    my %h = (ref => $x);\n    my $w = ${$h{ref}}; print ref($w), \"\\n\";          # perl ARRAY, PCL ''\n    my $hr = \\%h; my $w2 = ${$hr->{ref}}; print ref($w2), \"\\n\";   # perl ARRAY, PCL ''\n    print ref(${$hr->{ref}}), \"\\n\";                   # both ARRAY\n    my @a = ($x); my $z = ${ $a[0] }; print ref($z), \"\\n\";        # perl ARRAY, PCL ''\n    my $v = $$x; print ref($v), \"\\n\";                 # both ARRAY (a plain scalar holding the ref is right)\n\nEmission: `(p-my-= $w (p-cast-$ (p-gethash %h \"ref\") :rvalue))`.  The element is a RAW slot holding the is-ref value `\\$r` whose referent is a box; the assignment path reads one level too deep (the array itself), so the target gets no reference.  The bare `ref(${...})` reads right.\n\nSAME FAMILY as #3081 (ir-spec \"A raw slot holds a raw value or a CONTAINER box\", s514b): that ruling made a PARAMETER raw slot bind a reference-to-a-box in a fresh container; a hash value / array element raw slot read by `${ }` into an assignment is the element-side sibling.  Check the s514b fix's predicate and route the element read through it (rule 11), not a new arm.\n\nWORKAROUND in lib/B.pm (B::SV::_value): read the ref into a plain scalar first (`my $r = $_[0]{ref}; my $v = $$r;`).\n",
+   "id" : "3390",
+   "status" : "pending",
+   "subject" : "`my $v = ${ EXPR }` where EXPR is a hash VALUE or array ELEMENT holding a reference to a reference (`$h{k} = \\$r`, `$r = []`) assigns the array, not the ref: `ref $v` is '' (perl ARRAY) -- silent wrong; `ref ${ $h{k} }` without the assignment is right"
+}

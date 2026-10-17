@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED + FIXED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census.\n\nREPRODUCER (perl 5.40.3 vs main 5c5a5679):\n\n    package Q; sub m { \"m:\" . ref(shift) } package main;\n    eval q{ *P::f = sub { bless {}, \"Q\" }; 1 } or die;\n    print P::f()->m, \"\\n\";\n\nperl `m:Q`; PCL dies `Can't locate object method \"m\" via package \"P::f\"`.  Emission `(p-method-call (p-resolve-invocant \"P::f\") \"m\")`: the funcall node does not keep its parens, and p-resolve-invocant looked the name up UNQUALIFIED in the current package only.\n\n=== DONE (s518e) ===\ncl/pcl-runtime.lisp p-resolve-invocant: a QUALIFIED name with no package of that name is a call when the sub exists, through the ONE resolver (p-get-coderef); a known package stays a class (perl's order).  Guard Pl/t/universal-01.t row 10 (perl oracle: also `Known::Cls->m` with a sub of that name, and `No::Such()->m` dies), fails on main.  NOT done: the parser still drops the `()` that makes perl call even when a package of that name exists (no case seen).\n",
+   "id" : "3393",
+   "status" : "completed",
+   "subject" : "`Pkg::f()->m` whose sub Pkg::f is installed at RUN time is resolved as the CLASS \"Pkg::f\" -- Can't locate object method; perl calls the sub (Type-Tiny t/00-begin.t: `Types::Standard::Str()->_has_xsub`)"
+}

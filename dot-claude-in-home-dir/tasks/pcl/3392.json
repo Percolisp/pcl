@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED + FIXED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census (t/00-begin.t: `eval \"use $module ()\"; $version = $module->VERSION;` for every optional module).\n\nREPRODUCER (perl 5.40.3 vs main 5c5a5679):\n\n    my $m = \"Return::Type\"; my $v = $m->VERSION; print defined $v ? \"def\" : \"undef\", \"\\n\";\n\nperl: undef.  PCL: dies `Can't locate object method \"VERSION\" via package \"Return::Type\" (perhaps you forgot to load ...)`.\n\nCAUSE: p-method-call's unknown-package branch let can / isa / DOES fall through to the UNIVERSAL fallback and died for every other method; VERSION is the fourth UNIVERSAL method.\n\n=== DONE (s518e) ===\ncl/pcl-runtime.lisp: VERSION joins can/isa/DOES in that list.  Guard Pl/t/universal-01.t row 9 (perl oracle), fails on main.  Type-Tiny t/00-begin.t: 0 rows -> 1/0 = perl.\n",
+   "id" : "3392",
+   "status" : "completed",
+   "subject" : "Class->VERSION on a package that was never declared dies \"Can't locate object method VERSION via package\" -- perl answers undef (UNIVERSAL::VERSION is valid on any class name, like can/isa/DOES); Type-Tiny t/00-begin.t dies on its optional-module report"
+}

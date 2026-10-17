@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "Measured on s517b (emission-ab vs ef48da1b, 657 files, eab4): #2636 treats a QUALIFIED callee with no same-file record as unseen and wraps a raw-slot scalar argument in p-copy-back (--pcl-cb--N temporaries + %p-copy-in / %p-copy-back-value), but the core namespaces never write through @_: builtin::pl-reftype in lib/Scalar/Util.pm (2 sites), lib/Sub/Util.pm (1) and lib/attributes.pm (2); the shim primitives builtin::pl-zlib_crc32 / zlib_adler32 in lib/Compress/Raw/Zlib.pm (and Scalar::Util::dualvar there); utf8::pl-native_to_unicode / unicode_to_native in perl-tests/translate.t (2); B::svref_2object in perl-tests/scalar.t is the same kind.  Fix shape: exempt callees in the runtime-owned core namespaces (builtin::, utf8::, and any name the runtime defines as a builtin) at the _copy_back_args decision in Pl/ExprToCL.pm -- one predicate; the bar is the wraps disappearing from those files in emission-ab with RCDIFF 0 and the cb1/zlib guards unchanged.  No code yet (Fable s518).",
+   "id" : "3348",
+   "status" : "pending",
+   "subject" : "copy-back (#2636) wraps calls to core-namespace callees (builtin:: / utf8::) that never write their arguments -- exempt them"
+}

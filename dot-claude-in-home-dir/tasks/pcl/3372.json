@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518d (Opus 5.5, 2026-10-17) from #3284 (Capture-Tiny t/07-stderr-closed.t: ran 1 of no plan, \"A nested error within --disable-debugger error handling\" -- the program dies while STDERR is closed, so its own message cannot print).  Not minimized.\n\ns518d fixed the first cause (#3371: `defined fileno STDERR` read true on a closed STDERR, so Capture::Tiny never proxied it).  The next stop, seen with scratch/s518d/pr/ct7.pl (Capture::Tiny capture with STDERR closed, inside an eval): `$@` = \"Error from close(GLOB(0x1)): Bad file descriptor\" -- a `_close` of a glob (GLOB(0x1) is \\*STDERR or \\*STDOUT, the `$proxies{...}` of _unproxy, lib/Capture/Tiny.pm:172, or the `_close` of `$stash->{old}` at :392) answers false EBADF where perl's succeeds.  perl: `o=[out] e=[err] err=[]`.  Next step: instrument Capture::Tiny's _close to name which handle and its fileno, then probe that close sequence alone vs perl.\n",
+   "id" : "3372",
+   "status" : "pending",
+   "subject" : "Capture-Tiny 07-stderr-closed.t: with STDERR closed, a Capture::Tiny _close of a standard glob answers EBADF (perl succeeds) -- the next stop after #3371"
+}

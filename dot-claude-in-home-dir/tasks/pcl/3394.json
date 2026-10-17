@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED + FIXED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census (t/21-types/*.t row \"Types::Standard knows it has type X\").\n\nREPRODUCER (perl 5.40.3 vs main 5c5a5679):\n\n    no strict 'refs';\n    ${\"L::C\"} = {a => 1}; my $c1 = ${\"L::C\"}; print ref($c1), \"\\n\";            # perl HASH, PCL ''\n    ${\"L::A\"} = bless {}, \"L\"; my $a1 = ${\"L::A\"}; print ref($a1), \"\\n\";   # perl L, PCL ''\n    print ref(${\"L::C\"}), \"\\n\";                                                # both HASH (no assignment)\n\nCAUSE: p-cast-$'s symbolic arm answered the cell's VALUE.  A reference in a PCL scalar is a ref-shaped value (hash table / array vector / function / box) whose bless lives on the CELL; the consumer reads `${...}` as a VARIABLE, so box-set took a bare hash table for `%h` in scalar context (its count) and the class was lost.  The static read `$L::C` passes the cell itself.\n\n=== DONE (s518e) ===\ncl/pcl-runtime.lisp p-cast-$: a ref-shaped value answers the CELL (%p-symref-box), as the static read does; a plain value is unchanged.  Guard Pl/t/symref-package-01.t row 19 (perl oracle: blessed / hash / array / code / scalar refs, a plain value, the META ||= idiom, a copy that does not alias), fails on main.  Related, NOT fixed: #3390 (the element-held ref-to-ref read, the write-side sibling).\n",
+   "id" : "3394",
+   "status" : "completed",
+   "subject" : "`my $v = ${\"Pkg::name\"}` when the package scalar holds a REFERENCE is not a reference: a hash/array ref arrives as its COUNT, a blessed one loses its class -- silent wrong; Type::Library's `${\"$class\\::META\"} ||= bless {}, $class` answers '' on every call after the first (has_type, type_names)"
+}
