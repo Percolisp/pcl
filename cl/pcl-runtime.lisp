@@ -33902,7 +33902,10 @@ size comes from fstat on the descriptor, after the buffered output is written
   ;; Package of the frame's caller comes from the dynamic caller stack pushed at
   ;; each p-sub entry (the only source that preserves Perl package case).
   (let ((lvl (if (p-box-p level) (truncate (to-number level)) level)))
-    (when (>= lvl (length *pcl-caller-pkg-stack*))
+    ;; A NEGATIVE level names no frame: perl answers the empty list / undef
+    ;; (Error::TypeTiny::throw_cb reads `caller($level - 1)` at level 0, #3399);
+    ;; `nth` of a negative index was a raw CL type error.
+    (when (or (minusp lvl) (>= lvl (length *pcl-caller-pkg-stack*)))
       (return-from p-caller nil))
     (setf level lvl))
   (let* ((caller-package (nth level *pcl-caller-pkg-stack*))

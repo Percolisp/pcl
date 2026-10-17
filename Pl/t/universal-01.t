@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -329,4 +329,21 @@ print join(' ', P::f()->m, Known::Cls->m, (eval { No::Such()->m; 1 } ? "lived" :
 PL
     is(run_cl($prog), run_perl($prog),
        '#3393: a qualified Pkg::f()->m whose sub exists at run time calls it; a known package stays a class (perl oracle)');
+}
+
+{
+    # #3399 (s518e, the Type-Tiny census): caller() with a NEGATIVE level names
+    # no frame -- perl answers the empty list / undef.  PCL took `nth` of the
+    # negative index and died with a raw CL type error ("The value -1 is not of
+    # type UNSIGNED-BYTE"); Error::TypeTiny::throw_cb reads `caller($level - 1)`
+    # at level 0, so every Type::Tiny exception died that way and 90 census
+    # files printed no TAP at all.
+    my $prog = <<'PL';
+sub f { my @c = caller(-1); my $s = caller(-1); my @d = caller(-2);
+        print scalar(@c), " ", (defined $s ? "def" : "undef"), " ", scalar(@d), "\n" }
+f();
+my @t = caller(-1); print "top ", scalar(@t), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3399: caller(-1) inside a sub is the empty list / undef, not a CL type error (perl oracle)');
 }
