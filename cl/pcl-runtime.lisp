@@ -831,7 +831,21 @@
     (error "p-defclass: slots are not part of the readiness test: ~S" slots))
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (unless (%p-class-ready-p ',name ',supers)
+       (%p-ensure-parent-classes ',supers)
        (defclass ,name ,supers ()))))
+
+(defun %p-ensure-parent-classes (supers)
+  "Give every parent in SUPERS that has no class yet one with no parents of its
+   own.  perl's @ISA may name a package that has not been compiled as a class
+   -- a `package P;` switch inside a block or a sub creates none -- and CLOS
+   then holds P as a FORWARD-REFERENCED class: a method call on P itself
+   finalized it and died with a raw SBCL FINALIZE-INHERITANCE error
+   (Class::Method::Modifiers' `$into->can` on the parent, #3373).  The parents
+   P gets later are written by the forms that set P's @ISA (p-defclass)."
+  (dolist (s supers)
+    (let ((c (find-class s nil)))
+      (when (or (null c) (typep c 'sb-mop:forward-referenced-class))
+        (sb-mop:ensure-class s :direct-superclasses '())))))
 
 (defmacro p-ensure-class (name)
   "The CLOS class of a package a RUN-TIME `package X;` switch enters: created

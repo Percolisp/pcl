@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 16;
 
 sub write_pl {
     my ($code) = @_;
@@ -400,6 +400,21 @@ note "current=" . Test::Builder->new->current_test;
 PL
     is(run_cl($prog), run_perl($prog),
        '#3346: Test::Builder->new->ok / current_test and a module END assertion before the plan check (perl oracle)');
+}
+
+{
+    # #3373 (s519b): `package P;` switches inside a block give P no class, and
+    # Child's @ISA = 'P' left P FORWARD-REFERENCED in CLOS -- a method call on
+    # P itself (Class::Method::Modifiers' `$into->can`) died with a raw SBCL
+    # FINALIZE-INHERITANCE backtrace.
+    my $prog = <<'PL';
+do { package MyParent; sub foo { "P" } package Child; our @ISA = "MyParent"; };
+print Child->foo, "\n";
+my $c = "MyParent";
+print $c->can("foo") ? "can" : "cannot", " ", MyParent->foo, " ", (Child->isa("MyParent") ? 1 : 0), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3373: a parent named by @ISA before it has a class answers its own methods (perl oracle)');
 }
 
 {
