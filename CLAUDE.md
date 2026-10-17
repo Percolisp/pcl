@@ -506,14 +506,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s516, 2026-10-12, main `b5ac54f3` = s516a merged (2026-10-13 01:2x, the detector pair + the announce FLIP, print({$fh} LIST), opendir on a glob-ref copy; s516b, s515c, s515a merged before it), last CODE commit `dc87c403`, gen v2-6184 — measured on
-  that sha; everything further down this section is HISTORY and its counts are
-  stale):** gate `Result: PASS`, **314 files / 10,541 rows** (250 s wall with
-  `tools/prove-core` at load ~4); full `perl-tests/` sweep GATE clean, **TOTAL passing
-  18,745**, 635 failing (96.7 %), 60 of 108 files fully passing, 96 run to the
-  end and 12 stop part-way, drops 5 = census; `EVERYDAY: 116 of 122 identical to
-  perl (95.1 %)`; `tools/t/install-container.t` PASS 17 rows (s507, by the switches batch).  The user-facing
-  copy of these numbers is `docs/STATUS.md` — update both together.
+- **CURRENT NUMBERS (s518, 2026-10-17, main `9452c5db` = s517b merged (zlib over the system libz + #2636 copy-back; s517c perf round 47 and s517a goto / stable booleans / #2959 merged before it the same morning), last CODE commit `ff4c1500`, gen v2-6484 -- measured on that sha; everything further down this section is HISTORY and its counts are stale):** gate `Result: PASS`, **317 files / 10,643 rows** (265 s wall with `tools/prove-core` at load 2-6); full `perl-tests/` sweep GATE clean, **TOTAL passing 18,746**, 634 failing (96.7 %), 60 of 108 files fully passing, 96 run to the end and 12 stop part-way, drops 5 = census; the CPAN board (19 dists, on the NEW runner over the cached core, #2959) **180 PASS / 104 PARTIAL / 72 FAIL of 356, TOTAL passing 8,909** against the blessed rows EDITED by s517a (0 NEW / 0 FIXED / 0 LOST); `EVERYDAY: 116 of 122 identical to perl (95.1 %)`; `tools/t/install-container.t` PASS 17 rows (s517b, with the gzip round trip in verify.sh).  The user-facing copy of these numbers is `docs/STATUS.md` -- update both together.
 - **The three xs files are PARKED (USER decision, s485, 2026-09-14): `Pl/t/xs-01/02/03.t`
   `plan skip_all` at the top until the pclxs project (the XS bridge, a separate
   repo, sibling checkout `~/pclxs`) is working again — their 13 failing rows were

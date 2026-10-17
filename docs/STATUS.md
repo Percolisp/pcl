@@ -4,9 +4,9 @@ This page gives the measured state of PCL's compatibility with perl. Every
 number on it comes from a command you can run yourself (the last column of
 each table), and nothing is estimated.
 
-**Each number carries its own date.** The regression suite and the
-extracted perl tests were measured on 2026-10-04; the run of perl's full
-`t/` tree, the CPAN board and the untranslatable-statement count are from
+**Each number carries its own date.** The regression suite, the extracted
+perl tests, the CPAN board and the untranslatable-statement count were
+measured on 2026-10-17; the run of perl's full `t/` tree is from
 2026-09-18 (the full `t/` figures are refreshed at each release); the
 failure causes were re-counted on 2026-10-01 against that day's sweep and
 the blessed baselines of the other populations. The speed numbers are in
@@ -18,11 +18,11 @@ the blessed baselines of the other populations. The speed numbers are in
 
 | measurement | result | how to reproduce |
 |---|---|---|
-| PCL's own regression suite (`Pl/t/`) | **314 files, 10,541 assertions, all passing** (2026-10-12). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
-| perl's own tests, extracted (`perl-tests/`: 108 files from perl 5.40's `t/op`, `t/base` and others) | **18,745 assertions pass, 635 fail (96.7 %)** (2026-10-12). 60 files pass completely; 96 run to the end, 12 stop part-way, and all 108 compile. | `perl tools/sweep-perl-tests.pl --jobs 8` |
+| PCL's own regression suite (`Pl/t/`) | **317 files, 10,643 assertions, all passing** (2026-10-17). Three of the files test the [XS bridge](#xs) and are parked (`plan skip_all`) while that project is being reworked; `PCL_XS_TESTS=1` runs them | `tools/prove-core` (or `prove -j8 Pl/t/`) |
+| perl's own tests, extracted (`perl-tests/`: 108 files from perl 5.40's `t/op`, `t/base` and others) | **18,746 assertions pass, 634 fail (96.7 %)** (2026-10-17). 60 files pass completely; 96 run to the end, 12 stop part-way, and all 108 compile. | `perl tools/sweep-perl-tests.pl --jobs 8` |
 | perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **107 files identical to perl** (2026-09-18). 105 differ for a registered, explained reason (probes of perl's internals, threads, taint and so on; listed in `baselines/perl-suite-expected.tsv`); 258 differ and are the bug queue; 9 do not compile; 3 time out; 31 produce no test output; 12 are too slow for the `--quick` form and are listed as not run; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| pure-Perl CPAN distributions: 19 of them, 356 test files (five joined 2026-10-11: Text-CSV, Getopt-Long, JSON-PP, HTTP-Tiny, Path-Tiny) | **162 files pass, 102 partly pass, 92 fail; 6,082 assertions ok, 352 not ok** (2026-10-13, under the runner's contract of that day: a test file runs from its distribution's directory, as `prove` runs it, and counts as passing only when its whole plan ran -- 32 files that stop short now read "partly" instead of "pass", and 1,287 more assertions run; on 2026-10-12 the old contract read 194 / 66 / 96 and 4,795 / 362; the 14-distribution board read 85 / 48 / 50 and 2,274 / 338 on 2026-09-18).  Most of the new distributions' rows are lost to two harness gaps, not to PCL: the board does not run a test from its distribution's directory, and it counts a file that stops early as passing; both are filed. A partial file ran most of its suite; a failing file has zero passing assertions, and that count includes seven files perl itself skips. Every failing assertion, with its cause, is in [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv). The per-file snapshot is [`../baselines/cpan-board-s515c.tsv`](../baselines/cpan-board-s515c.tsv) | the [board command](#the-cpan-board-command) below |
-| statements the compiler cannot translate, counted over six populations (the two perl test sets above, the CPAN board, PCL's shipped `lib/`, the examples and the regression-suite fixtures) | **62 statements in 19 files** (2026-09-18), each classified with its cause; none in PCL's own shipped modules | `tools/drop-census.pl`, compared against [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
+| pure-Perl CPAN distributions: 19 of them, 356 test files (five joined 2026-10-11: Text-CSV, Getopt-Long, JSON-PP, HTTP-Tiny, Path-Tiny) | **180 files pass, 104 partly pass, 72 fail; 8,909 assertions ok, 736 not ok** (2026-10-17; the jump from 6,082 ok on 2026-10-13 is nineteen HTTP-Tiny and Capture-Tiny test files that failed on a temporary-file seek before and run now; counted, as on 2026-10-13, under the runner's contract of that day: a test file runs from its distribution's directory, as `prove` runs it, and counts as passing only when its whole plan ran -- 32 files that stop short now read "partly" instead of "pass", and 1,287 more assertions run; on 2026-10-12 the old contract read 194 / 66 / 96 and 4,795 / 362; the 14-distribution board read 85 / 48 / 50 and 2,274 / 338 on 2026-09-18).  Most of the new distributions' rows are lost to two harness gaps, not to PCL: the board does not run a test from its distribution's directory, and it counts a file that stops early as passing; both are filed. A partial file ran most of its suite; a failing file has zero passing assertions, and that count includes seven files perl itself skips. Every failing assertion, with its cause, is in [`../baselines/cpan-board14-fails.tsv`](../baselines/cpan-board14-fails.tsv). The per-file snapshot is [`../baselines/cpan-board-s515c.tsv`](../baselines/cpan-board-s515c.tsv) | the [board command](#the-cpan-board-command) below |
+| statements the compiler cannot translate, counted over six populations (the two perl test sets above, the CPAN board, PCL's shipped `lib/`, the examples and the regression-suite fixtures) | **61 statements in 19 files** (2026-10-16), each classified with its cause; none in PCL's own shipped modules | `tools/drop-census.pl`, compared against [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
 | XS bridge conformance corpus (real perl as the oracle) | 398 pass, 0 fail at its last run (2026-08-03), and `Digest::MD5`'s own `md5-aaa.t` passed 256 of 256 under PCL. Not re-run since: the bridge is being reworked separately | `tools/pcl-conform` |
 
 **The numbers can only move honestly.** Failures are tracked assertion by
@@ -81,8 +81,8 @@ is [`not-supported.md`](not-supported.md). The main items:
 
 | feature | status |
 |---|---|
-| XS / compiled C extensions | experimental, through the separate [XS bridge](#xs); not part of PCL itself |
-| `@_` argument aliasing | partial: `$_[0] = 42` changes the caller's variable, array element or hash element for a named sub. An element reached through a reference (`f($r->{k})`) gets a copy, and so can an argument passed to a code reference or a method |
+| XS / compiled C extensions | experimental, through the separate [XS bridge](#xs); not part of PCL itself. One exception: `Compress::Raw::Zlib` is provided over the system zlib library, as a temporary route until the bridge supplies the module (see [XS](#xs)) |
+| `@_` argument aliasing | `$_[0] = 42` changes the caller's variable, array element or hash element when PCL sees the sub as it compiles the call; for a method, a code reference or a sub in another file, a plain scalar argument is copied in and written back after the call. An element reached through a reference (`f($r->{k})`) still gets a copy. Also not covered: the same variable passed twice, a kept reference to `$_[0]` written later, a write followed by `die`, a closure reading the variable mid-call, and a plain-string invocant (see "`@_` argument aliasing" in [`not-supported.md`](not-supported.md)) |
 | `DESTROY` | never called: memory is reclaimed by the garbage collector, and there is no scope-exit destructor. For now, close filehandles explicitly |
 | regex code blocks `(?{…})`, `(??{…})` | removed from the pattern with a warning at compile time (cl-ppcre has no equivalent); the rest of the match runs |
 | `given`/`when`, smart match `~~` | refused with a message (removed in perl 5.42 anyway) |
@@ -173,7 +173,16 @@ module (`Digest::MD5`) has been validated end to end, and the 398-case
 conformance corpus passed at its last run (2026-08-03). pclxs is **not
 bundled**, and it is being reworked: PCL's three bridge test files are
 parked until it works again. PCL itself is pure Perl only, so a module that
-needs compiled C fails to load.
+needs compiled C fails to load, with one exception: since 2026-10-17
+`Compress::Raw::Zlib` is a Perl shim over the **system zlib library**, called
+through SBCL's foreign-function interface (`libz.so.1` on Linux, `libz.dylib`
+on macOS). `Compress::Zlib`, `IO::Compress::Gzip`, `IO::Uncompress::Gunzip`,
+`IO::Zlib` and `Archive::Tar`'s compressed archives work and produce zlib's
+own bytes; a machine without libz gets a one-line error at load. The route
+is a stopgap until pclxs runs the real module; what it does not cover (zip
+append scanning, `-LimitOutput` chunk sizes, the memory of a stream that is
+abandoned before it ends) is listed under "Compress::Raw::Zlib" in
+[`not-supported.md`](not-supported.md).
 
 ## The CPAN board command
 

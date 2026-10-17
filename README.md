@@ -250,17 +250,28 @@ The [IR manual](docs/ir-spec.md) documents every form.
 * **XS modules.** Anything with compiled C fails, unless PCL ships a
   pure-Perl replacement: it does for the common XS core modules
   (`List::Util`, `Scalar::Util`, `POSIX`, `Time::HiRes`, `Encode`,
-  `Storable`, `Digest::MD5`, `Digest::SHA`; see
-  [`docs/shipped-modules.md`](docs/shipped-modules.md)). `Compress::Zlib`
-  does not load: zlib itself is C. An experimental XS
-  bridge is being developed separately; see
-  [`docs/STATUS.md`](docs/STATUS.md#xs).
+  `Storable`, `Digest::MD5`, `Digest::SHA`, `File::Glob`; see
+  [`docs/shipped-modules.md`](docs/shipped-modules.md)). `Compress::Raw::Zlib`
+  is the one exception to "pure Perl": PCL calls the system zlib library
+  (`libz.so.1`, or `libz.dylib` on macOS) directly, so `Compress::Zlib`,
+  `IO::Compress::Gzip`, `IO::Uncompress::Gunzip`, `IO::Zlib` and
+  `Archive::Tar`'s compressed archives work and produce zlib's own bytes;
+  a machine without libz gets a one-line error at load. This is a stopgap
+  until the experimental XS bridge, developed separately, provides the
+  module; see [`docs/STATUS.md`](docs/STATUS.md#xs).
 * **No standalone binary.** Running a program needs SBCL, and perl too
   if it uses string `eval`.
-* **`@_` aliasing is partial.** `$_[0] = 42` changes the caller's
-  variable, array element or hash element, as in perl. It doesn't for an
-  element reached through a reference (`f($r->{k})`), a call through a
-  code reference (`$f->($x)`) or a method call: those get copies.
+* **`@_` aliasing has gaps.** `$_[0] = 42` changes the caller's
+  variable, array element or hash element, as in perl, when PCL can see
+  the sub as it compiles the call. When it cannot (a method, a call
+  through a code reference, a sub in another file), a plain scalar
+  argument is copied in and written back after the call, which covers
+  the common idioms (`$z->deflate($in, $out)`). An element reached
+  through a reference (`f($r->{k})`, `f($a->[0])`) still gets a copy.
+  Also not covered: the same variable passed twice in one call, a callee
+  that keeps a reference to `$_[0]` and writes through it later, a write
+  followed by `die`, and a closure reading the variable while the callee
+  is still writing it.
 * **`DESTROY` is never called.** Memory is reclaimed by the Lisp
   garbage collector, not by reference counting, so there is no
   scope-exit destructor. Code that relies on one for cleanup (guard
@@ -293,7 +304,7 @@ there and `PCL_DETECT=off` silences it.
 
 PCL is tested against its own regression suite, perl 5.40's own test
 suite and a set of pure-Perl CPAN distributions. On the tests extracted
-from perl's suite, 96.7 % of assertions pass (measured 2026-10-10). A
+from perl's suite, 96.7 % of assertions pass (measured 2026-10-17). A
 large part of the remaining failures are deliberate non-support (no XS,
 different error text); the rest are the bug queue. Every number, how it
 was measured and how to reproduce it are in
@@ -316,21 +327,21 @@ was measured and how to reproduce it are in
 ## Speed
 
 These are microbenchmarks for different Perl features, measured
-2026-10-01 on a quiet machine (best of five runs, startup time
+2026-10-17 on a quiet machine (best of five runs, startup time
 subtracted for both). A
 ratio below 1.00× means PCL is faster.
 
 | benchmark | what it measures | PCL / perl |
 |---|---|---:|
-| collatz | `while` loop with integer arithmetic | 0.18× |
-| fib(27) | recursion | 0.31× |
-| feread | read-only `foreach` over a 1000-element array | 0.31× |
-| strcat | `$s .= 'x'`, twenty million times | 0.95× |
-| methret | a method call on a blessed hash, `$o->bump` | 1.12× |
-| regexg | `while ($x =~ /./g)` over a 200 kB string | 1.21× |
-| ovlsub | `use overload` arithmetic and stringification on objects | 2.52× |
-| moo-objs | Moo objects: constructor, accessors, a method building another object | 26× |
-| pack | `pack` with two templates | 140× |
+| collatz | `while` loop with integer arithmetic | 0.16× |
+| fib(27) | recursion | 0.30× |
+| feread | read-only `foreach` over a 1000-element array | 0.25× |
+| strcat | `$s .= 'x'`, twenty million times | 0.98× |
+| methret | a method call on a blessed hash, `$o->bump` | 1.15× |
+| regexg | `while ($x =~ /./g)` over a 200 kB string | 1.19× |
+| ovlsub | `use overload` arithmetic and stringification on objects | 2.54× |
+| moo-objs | Moo objects: constructor, accessors, a method building another object | 4.8× |
+| pack | `pack` with two templates | 146× |
 
 Plain loops, arithmetic and array work are several times faster than
 perl, because the compiler proves when a variable is always an integer
@@ -339,8 +350,9 @@ calls are level with perl. Overloading, regex matching and Moo object
 construction are slower: nothing about them can be proved at compile
 time, the regex engine is [cl-ppcre](https://edicl.github.io/cl-ppcre/)
 rather than perl's C one, and Moo generates code with string `eval` at
-run time. `pack`/`unpack` is written in Perl and is about 140
-times slower; it will be redone. The full table over time is in
+run time (the Moo row also swings by about a quarter between builds of
+the runtime, with the layout of the saved core). `pack`/`unpack` is
+written in Perl and is about 145 times slower; it will be redone. The full table over time is in
 [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).
 
 **Start-up is slow, and not optimized yet.** The table above leaves
