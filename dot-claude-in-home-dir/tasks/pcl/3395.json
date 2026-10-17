@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED + FIXED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census (`ArrayRef[Int]` died \"Not a CODE reference at (eval 0)\").\n\nREPRODUCER (perl 5.40.3 vs main 5c5a5679):\n\n    package C; use overload q(&{}) => sub { my $s = shift; sub { \"called $s->{n} @_\" } }, fallback => 1;\n    sub new { bless { n => $_[1] }, $_[0] }\n    package main; my $c = C->new(5); print $c->(1, 2), \"\\n\";\n\nperl `called 5 1 2`; PCL dies `Not a CODE reference`.\n\n=== DONE (s518e) ===\ncl/pcl-runtime.lisp p-funcall-ref: in the not-a-function branch (off the fast path), a blessed value whose class has a `&{}` handler is called through the code ref the handler answers.  Guard Pl/t/overload-01.t row 47 (perl oracle), fails on main.  NOT done: the other dereference overloads `@{}` `%{}` `${}` `*{}` (not measured on the board yet; same shape at each cast's non-container arm).\n",
+   "id" : "3395",
+   "status" : "completed",
+   "subject" : "A `&{}` overload is ignored: calling an object (`$obj->(...)`, `&$obj(...)`) whose class overloads `&{}` dies \"Not a CODE reference\" -- perl calls the code ref the handler answers (Type::Tiny types are called as `Int->($x)`; Types::Standard's LazyLoad parameterizers)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census (`ArrayRef[Int]->check` after #3395/#3396).\n\nSHAPE: Types::Standard installs the sub Types::Standard::ArrayRef at run time (Type::Library), then lazily requires lib/Types/Standard/ArrayRef.pm, which is `package Types::Standard::ArrayRef;` and calls `Types::Standard::ArrayRef->inline_check($v)`.  perl compiles that file after the sub exists, so the bareword is a CALL (perlobj: a sub of the class's name wins).  PCL's gen_methodcall_form emits the class string `\"Types::Standard::ArrayRef\"` because Environment->is_package says the package exists (it is the file's own package), and the sub is a run-time install PCL's static parse cannot see.\n\nREPRODUCER (perl 5.40.3; two files): Lib.pm `package Lib; BEGIN { *Lib::Thing = sub { bless {}, 'Obj' } } package Obj; sub hi { 'obj' } 1;`, Lib/Thing.pm `package Lib::Thing; sub hi { 'class' } sub go { Lib::Thing->hi } 1;`, main: `use Lib; require Lib::Thing; print Lib::Thing::go()` -> perl `obj`, PCL `class` (probe before fixing; the exact reproducer was not run -- the Type-Tiny file is the measured case).\n\nFIX DIRECTION: when the name is qualified and the compiler knows it only as a PACKAGE (not as a sub), emit p-resolve-invocant (the runtime asks for a sub first, #3393's resolver) -- an emission change: corpus-diff + gen bump; measure how many class-method sites change.\n",
+   "id" : "3397",
+   "status" : "pending",
+   "subject" : "`Pkg::Name->m` where Pkg::Name is BOTH a package and a sub perl knew at compile time: perl CALLS the sub (a known sub wins over a class name), PCL emits the class string when the compiler knows the package -- Type-Tiny's lib/Types/Standard/ArrayRef.pm:134 `Types::Standard::ArrayRef->inline_check($v)` dies \"Can't locate object method inline_check via package Types::Standard::ArrayRef\""
+}

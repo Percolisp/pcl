@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-17",
+   "description" : "FILED + FIXED s518e (Opus 5.5, 2026-10-17) from the Type-Tiny census (t/20-modules/Type-Tiny/basic.t row 49: display name 'Type::Tiny=HASH(0xdc)[5]' where perl says 'Below[5]').\n\nREPRODUCER (perl 5.40.3 vs main 5c5a5679):\n\n    package G; sub new { bless { n => $_[1] }, $_[0] }\n    BEGIN { no strict 'refs'; *{'G::(('} = sub { }; *{'G::()'} = sub { }; *{'G::()'} = do { my $x = 1; \\$x };\n            *{'G::(\"\"'} = sub { \"G<\" . $_[0]{n} . \">\" }; }\n    package main; print G->new(7), \"\\n\";\n\nperl `G<7>`; PCL `G=HASH(0x..)`.\n\nCAUSE: perl's overload table IS the stash (overload.pm's import writes exactly these entries); PCL's is *p-overload-table*, fed only by p-register-overloads.\n\n=== DONE (s518e) ===\ncl/pcl-runtime.lisp: %p-glob-overload-entry, called from %p-glob-assign-slots' CODE and SCALAR arms: a name `(OP` with a CODE value registers OP's handler, the SCALAR `()` the fallback, through the ONE registrar p-register-overloads; every other name returns at the first character.  Guard Pl/t/overload-01.t row 47 (G: \"\" / &{} / == / eq through fallback), fails on main.  NOT done: `delete $P::{'(OP'}` / glob undef does not unregister (not seen).\n",
+   "id" : "3396",
+   "status" : "completed",
+   "subject" : "Overloads installed as perl's own STASH ENTRIES (`*{\"P::(OP\"} = \\&h`, the `((` / `()` markers, fallback in `${\"P::()\"}`) are ignored -- only `use overload` / overload::import register; Type::Tiny's _install_overloads writes them by hand, so every type object stringified as Type::Tiny=HASH(..) and none of its operators worked"
+}
