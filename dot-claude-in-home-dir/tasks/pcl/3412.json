@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s519a (Opus 5.5, 2026-10-18), found reading Path-Tiny t/filesystem.t rows 15-16 after #3374 let the file run.  SILENT WRONG.\n\nREPRODUCER (scratch/s519a/pr/pt5.pl):\n    my @s = CORE::stat(\"i/do/not/exist\"); print scalar(@s), \"\\n\";      # 0 both\n    sub pop_ { return undef unless @_; \"obj\" }\n    print defined(pop_(CORE::stat(\"i/do/not/exist\"))) ? \"def\\n\" : \"undef\\n\";\nperl 5.40.3: `0` `undef`.  PCL: `0` `def` -- the empty list a failed stat returns becomes ONE argument when it is a call argument (the list-assignment slot is right).\nWHERE IT BITES: core File::stat 1.14 `stat` is `my $st = populate(CORE::stat $arg); return $st if defined $st;` and populate starts `return undef unless @_` -- so File::stat::stat on a missing path returns a File::stat object, and Path::Tiny `->stat` / `->lstat` (`File::stat::stat(...) || $self->_throw(...)`) never throw: Path-Tiny t/filesystem.t rows 15-16 (`ok exception { path($file)->stat }`).\nProbe also plain `stat` / `lstat` in an argument slot, and a failed `localtime`-like list builtin, before fixing (the shared builtin-in-a-list-slot path, rule 11).",
+   "id" : "3412",
+   "status" : "pending",
+   "subject" : "A failed `stat` / `CORE::stat` in a CALL ARGUMENT passes one element instead of none: `sub p { return undef unless @_; 1 } p(CORE::stat \"nope\")` is defined in PCL (File::stat::stat on a missing file returns an object; Path::Tiny ->stat never throws)"
+}

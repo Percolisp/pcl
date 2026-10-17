@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s519a (Opus 5.5, 2026-10-18) as the residue of #3370.\n\nperl-tests/signatures.t:358  `sub t124 ($b = (local $a = $a + 1)) { \"$a/$b\" }` -- the `local` sits in a signature default.  #3370's pass (Parser2 _lower_local_terms) leaves it alone on purpose: its unit is the STATEMENT, and a refusal at that statement would remove the whole sub definition (every later row of the file that calls it).  So the expression compiler still strips the word and the default reads/writes $a without the localization perl does (scoped to the sub body).\n\nFIX SHAPE: the signature default lowers inside the sub body (p-check-arity / the default binding); the local can open the body's restore there -- `local $a; $b = ($a = $a + 1) if @_ < 1;` at the head of the body is the same thing.  Probe vs perl first (perl 5.40.3: is t124() eq \"124/124\" with $a restored after the call).",
+   "id" : "3410",
+   "status" : "pending",
+   "subject" : "A `local` in a SIGNATURE DEFAULT (`sub t ($b = (local $a = $a + 1)) {...}`) is still lowered as a plain read: the localization never happens (silent wrong; the #3370 residue s519a left)"
+}

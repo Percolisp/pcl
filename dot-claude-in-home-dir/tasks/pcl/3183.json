@@ -2,8 +2,8 @@
    "blockedBy" : [],
    "blocks" : [],
    "created" : "2026-10-11",
-   "description" : "FILED s514f (Opus, 2026-10-11) while probing #2920.  PRE-EXISTING on main 8f2fa11c.\n\n`print STDOUT (LIST)` -- a parenthesised list after a bareword handle -- dies in PCL:\n\n    print STDOUT (*2, \"\\n\");\nperl 5.40.3: *main::2\nPCL:         Undefined subroutine &main::STDOUT called\n\nPCL reads `STDOUT (...)` as a call to sub STDOUT.  perl reads the handle (the parens are the list).  Probe also `print STDERR (\"a\", \"b\")`, `print FH (\"x\")` after open(FH,...), and `printf STDOUT (\"%s\\n\", 1)`.  Fix site: PExpr's print filehandle decision -- a Structure::List after a bareword handle shape is the list, unless the word is a declared sub (then perl calls it; see #3182).\n",
+   "description" : "FILED s514f (Opus, 2026-10-11) while probing #2920.  PRE-EXISTING on main 8f2fa11c.\n\n`print STDOUT (LIST)` -- a parenthesised list after a bareword handle -- dies in PCL:\n\n    print STDOUT (*2, \"\\n\");\nperl 5.40.3: *main::2\nPCL:         Undefined subroutine &main::STDOUT called\n\nPCL reads `STDOUT (...)` as a call to sub STDOUT.  perl reads the handle (the parens are the list).  Probe also `print STDERR (\"a\", \"b\")`, `print FH (\"x\")` after open(FH,...), and `printf STDOUT (\"%s\\n\", 1)`.  Fix site: PExpr's print filehandle decision -- a Structure::List after a bareword handle shape is the list, unless the word is a declared sub (then perl calls it; see #3182).\n\n\n=== FOLDED into #2193 (s519a) ===\nThe duplicate of #2193: fixed by commit 6435a5f1, see #2193s DONE section.",
    "id" : "3183",
-   "status" : "pending",
+   "status" : "completed",
    "subject" : "print STDOUT (LIST) dies 'Undefined subroutine &main::STDOUT' -- the bareword handle before a parenthesised list is read as a call"
 }

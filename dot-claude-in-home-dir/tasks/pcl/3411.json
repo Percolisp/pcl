@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED AND FIXED s519a (Opus 5.5, 2026-10-18) -- found by member 0 (#3370): Capture::Tiny's `local(*STDOUT)` lives in package Capture::Tiny, so even after the #3370 rewrite the badtie files reached the outer tie's OPEN.\n\nREPRODUCER: package TE; sub TIEHANDLE { bless \\my $x } sub PRINT {1}  package Foo; tie *STDOUT, \"TE\"; { local *STDOUT; print STDERR tied(*STDOUT) ? 1 : 0 }\nperl 5.40.3: 0.  PCL before: 1 (the emission named \"Foo\" \"STDOUT\").\n\nFIX: Pl/Parser.pm _process_local_declaration (the unqualified glob branch) asks Pl::Environment::fh_forced_main_name -- the ONE table of forced-main handle names (STDIN STDOUT STDERR ARGV ARGVOUT ENV INC _).  Guard: Pl/t/local-term-01.t rows 4-5.\n\n=== DONE (s519a) ===\nCommit 92235804 (with #3370).  Bar: Pl/t/local-term-01.t rows 4-5 (fail on a074452f); Capture-Tiny badtie files run to their plan.",
+   "id" : "3411",
+   "status" : "completed",
+   "subject" : "`local *STDOUT` / `local(*STDERR)` in a package other than main localized `Foo::STDOUT`, not main's -- the standard handles are forced into main:: (gv.c); a tie on STDOUT stayed visible inside the local scope"
+}
