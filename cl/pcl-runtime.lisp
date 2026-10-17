@@ -1272,6 +1272,20 @@
 ;;; would clobber the runtime's own builtin (Tie::Array's sub PUSH / SHIFT).
 ;;; ONE spelling, called from both the compile pass and the install.
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-sub-name-home (name sym-name)
+    "The package a sub named by the symbol NAME belongs to: the symbol's own
+     -- except a :pcl symbol *package* only INHERITS.  The reader reads
+     `(p-sub pl-explain ...)` in package E as pcl's exported TAP function
+     pl-explain, and defining THAT redefined Test::More's explain program-wide
+     while E got no method (#3405); E's own sub is E's symbol, as perl's
+     `sub explain` in package E is E::explain."
+    (let ((home (symbol-package name)))
+      (cond ((null home) *package*)
+            ((and (eq home (load-time-value (find-package :pcl)))
+                  (not (eq *package* home))
+                  (eq (nth-value 1 (find-symbol sym-name *package*)) :inherited))
+             *package*)
+            (t home))))
   (defun %p-reserve-sub-name (name)
     "Shadow and intern NAME's sub name in its home package; return the symbol.
      The home package is the symbol's own (e.g. P1 for P1::pl-tmc) so a
@@ -1279,8 +1293,8 @@
      is; an uninterned name falls back to *package*.  The handler-bind muffles
      SBCL's \"package at variance\" warning, which fires when a defpackage is
      later re-evaluated and sees the extra shadow."
-    (let* ((target-pkg (or (symbol-package name) *package*))
-           (sym-name   (symbol-name name)))
+    (let* ((sym-name   (symbol-name name))
+           (target-pkg (%p-sub-name-home name sym-name)))
       (handler-bind ((warning #'muffle-warning))
         (shadow sym-name target-pkg))
       (intern sym-name target-pkg))))
@@ -1307,13 +1321,13 @@
          (register (when proto
                      `((%p-register-prototype (symbol-function local-sym) ,proto))))
          (install
-          `(let ((local-sym (%p-reserve-sub-name ',name))
+          `(let* ((local-sym (%p-reserve-sub-name ',name))
                  ;; Per-sub constants, computed ONCE at definition:
                  ;; recomputing them per call (case-inversion + concatenate /
                  ;; gethash) was measured at ~150ns per call — the single
                  ;; largest sub-call cost.
-                 (%%perl-name (%p-sub-perl-name ',name))
-                 (%%home-pkg  (pcl-pkg-perl-name (symbol-package ',name))))
+                 (%%perl-name (%p-sub-perl-name local-sym))
+                 (%%home-pkg  (pcl-pkg-perl-name (symbol-package local-sym))))
              (setf (gethash local-sym *p-declared-subs*) :defined)
              (setf (symbol-function local-sym)
                    (lambda ,params
