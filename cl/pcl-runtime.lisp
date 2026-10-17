@@ -28322,9 +28322,10 @@ size comes from fstat on the descriptor, after the buffered output is written
                  rel-path (map 'list #'to-string @INC))))
 
 (defparameter *p-pcl-provided-modules*
-  '("Test::More" "Test::Simple" "Test2::Bundle::More")
+  '("Test::More" "Test::Simple" "Test2::Bundle::More" "Test::Builder")
   "Modules whose interface PCL supplies INTERNALLY (here: the Test::More TAP API
-  lives in cl/pcl-test.lisp).  `use`-ing them must NOT load the real .pm — the
+  lives in cl/pcl-test.lisp; Test::Builder is the bridge object it answers
+  as, #3346).  `use`-ing them must NOT load the real .pm — the
   real Test::More is the Test2 stack, which depends on XS internals
   (Test2::API::Instance) PCL cannot run.  Instead, `use Test::More` loads the
   TAP layer ON DEMAND (p-ensure-test-lib), so a non-test program never pulls in

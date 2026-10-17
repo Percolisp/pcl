@@ -15,7 +15,7 @@ Checked in this order (`p-use` in `cl/pcl-runtime.lisp`):
    and a few more): nothing is loaded. PCL handles them in the compiler.
 2. **`XSLoader`, `DynaLoader` and `Carp::Heavy`**: recorded in `%INC` as
    loaded, and nothing is run (`*p-xs-only-modules*`).
-3. **`Test::More`, `Test::Simple` and `Test2::Bundle::More`**: PCL supplies
+3. **`Test::More`, `Test::Simple`, `Test2::Bundle::More` and `Test::Builder`**: PCL supplies
    these itself. The real Test::More is built on Test2, which needs XS
    internals, so `use Test::More` loads PCL's own TAP implementation,
    `cl/pcl-test.lisp`, the first time a program asks for it

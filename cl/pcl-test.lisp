@@ -950,7 +950,10 @@
       (%tap-out "# ~A~%" line))))
 
 ;;; END hook: check test count.  Skipped entirely in a fork child (pid
-;;; differs from plan time) — the parent owns the plan.
+;;; differs from plan time) — the parent owns the plan.  It is an END BLOCK,
+;;; registered when the TAP layer loads (at `use Test::More`), so the END
+;;; blocks defined after it run FIRST, as perl runs Test::Builder's _ending
+;;; after a later module's END (Test::NoWarnings' own assertion, #3346).
 (push (lambda ()
         (unless (and *test-plan-pid*
                      (/= *test-plan-pid* (sb-posix:getpid)))
@@ -969,7 +972,7 @@
             (force-output))
           (when *test-no-plan*
             (%tap-out "1..~A~%" *test-count*))))
-      sb-ext:*exit-hooks*)
+      *end-blocks*)
 
 ;;; Stubs for common test-infrastructure functions that may not be loaded yet.
 ;;; These are typically provided by loc_tools.pl or similar helpers.
@@ -1312,7 +1315,9 @@
 ;; so the method defuns below define Test::Builder's symbols, never the
 ;; runtime's (the %p-reserve-sub-name rule).
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (shadow '("PL-SKIP" "PL-SKIP_ALL") (find-package "Test::Builder")))
+  (shadow '("PL-SKIP" "PL-SKIP_ALL" "PL-OK" "PL-DIAG" "PL-NOTE" "PL-PLAN"
+            "PL-DONE_TESTING")
+          (find-package "Test::Builder")))
 
 (defvar *test-builder-singleton* nil
   "The one Test::Builder object.  Test::Builder->new is a singleton in real
@@ -1407,4 +1412,39 @@
 (defun |Test::Builder|::pl-is_passing (self &rest args)
        (declare (ignore self args))
        (if (zerop *test-failures*) 1 0))
+
+;; The assertion / output / plan METHODS (#3346): a module written on the
+;; builder object -- Test::NoWarnings' END block runs `$TEST->ok($ok, $name)
+;; || $TEST->diag(...)` -- reaches the SAME TAP layer the functions do, so the
+;; counter, the plan and the failure count stay one.  Each drops the invocant.
+(defun |Test::Builder|::pl-ok (self test &optional name &rest args)
+       (declare (ignore self args))
+       (pl-ok test name))
+
+(defun |Test::Builder|::pl-diag (self &rest args)
+       (declare (ignore self))
+       (apply #'pl-diag args)
+       0)
+
+(defun |Test::Builder|::pl-note (self &rest args)
+       (declare (ignore self))
+       (apply #'pl-note args)
+       0)
+
+(defun |Test::Builder|::pl-plan (self &rest args)
+       (declare (ignore self))
+       (apply #'pl-plan args))
+
+(defun |Test::Builder|::pl-done_testing (self &rest args)
+       (declare (ignore self))
+       (apply #'pl-done_testing args))
+
+;; ->current_test: the number of the last test run (a setter is not answered:
+;; renumbering would desynchronise the TAP layer's own counter -- it dies
+;; naming the gap, rule 12).
+(defun |Test::Builder|::pl-current_test (self &rest args)
+       (declare (ignore self))
+       (when args
+         (p-die "PCL: Test::Builder->current_test(N) (setting the counter) is not supported"))
+       *test-count*)
 

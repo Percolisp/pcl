@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 15;
 
 sub write_pl {
     my ($code) = @_;
@@ -378,6 +378,28 @@ print "not reached\n";
 PL
     like(run_cl($prog2), qr/\A1\.\.0 # skip needs Frob\n\z/i,
          '#3400: ->skip_all before a plan prints 1..0 # SKIP and exits (as perl)');
+}
+
+{
+    # #3346 (s519b): Test::NoWarnings' shape in plain Perl -- `use
+    # Test::Builder ()` loads PCL's bridge (never the Test2 stack), the
+    # builder's ok / diag / current_test are the TAP layer's, and a module's
+    # END block runs its assertion BEFORE the plan-count check, as perl's
+    # Test::Builder END runs after a later module's END.
+    my $prog = <<'PL';
+package NW;
+use Test::Builder ();
+my $T = Test::Builder->new;
+END { $T->ok(1, "no warnings") || $T->diag("there were warnings"); }
+package main;
+use Test::More;
+BEGIN { plan tests => 3; }
+ok(1, "a");
+Test::Builder->new->ok(1, "b via builder");
+note "current=" . Test::Builder->new->current_test;
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3346: Test::Builder->new->ok / current_test and a module END assertion before the plan check (perl oracle)');
 }
 
 {
