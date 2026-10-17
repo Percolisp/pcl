@@ -48,6 +48,14 @@ ARGS=$(perl -e '
     die "cpan-board.sh: no dist directory $path\n" if !-d $path;
     if ($flags eq "--no-dist-lib") { push @nolib, $path }
     elsif ($flags eq "-") { push @plain, $path }
+    elsif ($flags =~ /^--inc=(.+)$/) {
+      # extra @INC dirs for THIS dist only (a dependency fetched under
+      # ~/.cpan/build, never installed; the dist own inc/ that its make
+      # test adds): relative paths resolve against ~/.cpan/build (s518e)
+      my @d = map { m{^/} ? $_ : "$home/.cpan/build/$_" } split /,/, $1;
+      -d $_ or die "cpan-board.sh: no --inc directory $_ for $dist\n" for @d;
+      push @plain, "--dist-inc=" . join(",", @d), $path;
+    }
     else { die "cpan-board.sh: unknown flags \"$flags\" for $dist\n" }
   }
   print join("\n", @plain, (@nolib ? ("--no-dist-lib", @nolib) : ())), "\n";

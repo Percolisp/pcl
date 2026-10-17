@@ -10,7 +10,10 @@
 # dist  = a directory name under ~/.cpan/build, or a repo-relative path (it
 #         contains a `/`) resolved against the TREE being measured.
 # flags = `-` or `--no-dist-lib` (the dist's lib/ is NOT put on @INC: an
-#         XS-stubbed dist whose lib/ would shadow PCL's must-win shim).
+#         XS-stubbed dist whose lib/ would shadow PCL's must-win shim), or
+#         `--inc=DIR,DIR` (extra @INC dirs for this dist only, relative to
+#         ~/.cpan/build: a dependency's lib/ fetched there and never
+#         installed, the dist's own inc/ that its `make test` adds; s518e).
 # joined = the session the dist joined the board.
 # why   = one line: what the dist exercises.
 #

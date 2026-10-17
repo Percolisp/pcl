@@ -9,6 +9,7 @@
 # Usage:
 #   tools/run-dist-t.pl <dist-dir> <t-file>            # run one t-file
 #   tools/run-dist-t.pl --no-dist-lib <dist-dir> <t>   # don't add <dist>/lib to @INC
+#   tools/run-dist-t.pl --inc DIR <dist-dir> <t>       # also put DIR on @INC (repeatable)
 #   tools/run-dist-t.pl --summary <dist-dir> <t-file>  # print only the TAP summary
 #   tools/run-dist-t.pl --rows <dist-dir> <t-file>     # summary + one ROW line
 #                                                      # per FAILING assertion
@@ -46,9 +47,11 @@ use PCLProc ();  # the ONE child-isolation helper: a run killed by `timeout`
 my $root = abs_path(dirname(abs_path($0)) . "/..");
 
 my ($no_dist_lib, $summary_only, $rows_out) = (0, 0, 0);
-my @args;
-for (@ARGV) {
+my (@args, @extra_inc);
+while (@ARGV) {
+  $_ = shift @ARGV;
   if    ($_ eq '--no-dist-lib') { $no_dist_lib = 1 }
+  elsif ($_ eq '--inc')         { push @extra_inc, shift(@ARGV) // die "--inc needs a directory\n" }
   elsif ($_ eq '--summary')     { $summary_only = 1 }
   elsif ($_ eq '--rows')        { $rows_out = 1; $summary_only = 1 }
   else                          { push @args, $_ }
@@ -63,6 +66,9 @@ $tfile = "$dist/$tfile" unless $tfile =~ m{^/};
 # @INC additions for the transpile (-I dirs are baked into the generated @INC).
 my @inc = ("$dist/t/lib");
 push @inc, "$dist/lib" unless $no_dist_lib;
+# --inc: a DEPENDENCY's lib/, fetched under ~/.cpan/build and never installed
+# (Type-Tiny needs Exporter-Tiny, s518e).
+for my $d (@extra_inc) { -d $d or die "--inc: no directory $d\n"; push @inc, abs_path($d) }
 @inc = grep { -d } @inc;
 my $iflags = join " ", map { "-I$_" } @inc;
 

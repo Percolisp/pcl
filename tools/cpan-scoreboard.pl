@@ -53,6 +53,12 @@
 # caveat: XS-stubbed dists like Scalar-List-Utils must NOT put their lib/ on
 # pl2cl's @INC or the dist copy shadows PCL's shim).
 #
+# --dist-inc=DIR,DIR puts extra directories on @INC for the NEXT dist only
+# (tools/run-dist-t.pl --inc): a dependency's lib/ fetched under ~/.cpan/build
+# and never installed, or the dist's own inc/ its `make test` adds (s518e,
+# Type-Tiny + Exporter-Tiny).  t-files are found RECURSIVELY; a row's file name
+# is its path under t/.
+#
 # TIMEOUT ALLOWANCES: baselines/cpan-board-timeouts.tsv, read through the
 # shared tools/lib/PCLTimeouts.pm (the perl-suite runner's registry, second
 # population).  The effective per-file timeout is max(registry, --timeout) and
@@ -191,7 +197,8 @@ if (@ARGV && $ARGV[0] eq '--diff') {
 # ────────────────────────────────────────────────────────────────── the run ──
 my $jobs = 8;
 my $timeout = 120;
-my @dists;           # [dir, no_dist_lib]
+my @dists;           # [dir, no_dist_lib, [extra @INC dirs]]
+my @pending_inc;     # --dist-inc=DIR,DIR: extra @INC for the NEXT dist only
 my $no_dist_lib = 0;
 my ($tsv, $rows_file);
 my $timeouts_tsv = "$root/baselines/cpan-board-timeouts.tsv";
@@ -204,7 +211,8 @@ while (@ARGV) {
   elsif ($a eq '--rows')        { $rows_file = shift @ARGV }
   elsif ($a eq '--timeouts')    { $timeouts_tsv = shift @ARGV }
   elsif ($a eq '--no-dist-lib') { $no_dist_lib = 1 }
-  else                          { push @dists, [abs_path($a), $no_dist_lib] }
+  elsif ($a =~ /^--dist-inc=(.+)$/) { @pending_inc = split /,/, $1 }
+  else { push @dists, [abs_path($a), $no_dist_lib, [@pending_inc]]; @pending_inc = () }
 }
 @dists or die "usage: $0 [--jobs N] [--timeout S] [--no-dist-lib] [--tsv F] [--rows F] <dist-dir>...\n";
 
@@ -213,11 +221,11 @@ my %file_timeout = %{ PCLTimeouts::read_timeouts($timeouts_tsv) };
 # Work list: one entry per t-file.
 my @work;
 for my $d (@dists) {
-  my ($dir, $ndl) = @$d;
+  my ($dir, $ndl, $inc) = @$d;
   -d "$dir/t" or die "no t/ in $dir\n";
-  for my $t (sort glob "$dir/t/*.t") {
-    my $rel = basename($dir) . "/" . basename($t);
-    push @work, { dist => $dir, ndl => $ndl, t => $t, rel => $rel,
+  for my $t (t_files("$dir/t")) {
+    my $rel = basename($dir) . "/" . t_name($t);
+    push @work, { dist => $dir, ndl => $ndl, inc => $inc, t => $t, rel => $rel,
                   to => PCLTimeouts::timeout_for(\%file_timeout, $rel, $timeout) };
   }
 }
@@ -244,6 +252,7 @@ sub run_one {
   my ($w) = @_;
   my @cmd = ("timeout", "-k", 5, $w->{to}, "$root/tools/run-dist-t.pl", "--rows");
   push @cmd, "--no-dist-lib" if $w->{ndl};
+  push @cmd, map { ("--inc", $_) } @{ $w->{inc} || [] };
   push @cmd, $w->{dist}, $w->{t};
   my $out = do {
     open(my $p, '-|', @cmd) or return undef;
@@ -266,9 +275,29 @@ sub run_one {
   open my $rf, '>', "$tmp/$w->{idx}.rows" or return undef;
   print $rf "$_\n" for ($out =~ /^ROW\t([^\n]*)$/mg);
   close $rf;
-  return [$w->{dist}, basename($w->{t}), $class, $ok, $notok, $rc,
+  return [$w->{dist}, t_name($w->{t}), $class, $ok, $notok, $rc,
           $w->{idx}, $plan, $skip, $sig, $short];
 }
+
+# A dist's t-files, RECURSIVELY and sorted (Type-Tiny keeps 371 of its 375
+# in subdirectories, s518e), and the NAME a row carries: the path under t/
+# (`20-modules/Type-Tiny/basic.t`), so two `basic.t` in different directories
+# are two keys.  For a flat t/ both are what they always were.
+sub t_files {
+  my ($tdir) = @_;
+  my @out;
+  my @todo = ($tdir);
+  while (defined(my $d = shift @todo)) {
+    opendir(my $dh, $d) or next;
+    for my $e (sort grep { !/^\./ } readdir $dh) {
+      my $p = "$d/$e";
+      if (-d $p) { push @todo, $p }
+      elsif ($e =~ /\.t\z/ && -f $p) { push @out, $p }
+    }
+  }
+  return sort @out;
+}
+sub t_name { my ($t) = @_; $t =~ s{^.*?/t/}{}; return $t }
 
 # The shortfall text for a file that RAN rows (see the header, #3241): '' when
 # the plan is met and the exit is clean, else "ran M of N, rc R".
