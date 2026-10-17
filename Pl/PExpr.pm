@@ -3353,6 +3353,11 @@ sub handle_subcalls {
     next
         if !$self->is_word($now); # Only want function calls.
 
+    # #2193: after print / printf / say, a bareword HANDLE before a
+    # parenthesised list is the handle, not a call (`print STDERR ("x")`) --
+    # the print branch of the scan below takes it.
+    next if $self->_print_handle_before_list($e, $i);
+
     # Strip the PROTOTYPE and/or ATTRIBUTES that may sit between the `sub`
     # keyword and an anonymous sub's block:
     #     sub (&) { … }        sub :lvalue { … }        sub :lvalue :method { … }
@@ -6019,6 +6024,22 @@ sub _all_caps_guess_here {
   my ($name, $verdict) = @_;
   return 0 if $verdict eq 'not-yet';
   return Pl::Environment::all_caps_call_guess($name) ? 1 : 0;
+}
+
+# perl's rule for `print WORD (LIST)` (#2193): the WORD is a FILEHANDLE unless
+# a sub of that name is already known -- a registered handle, or a handle-shaped
+# bareword the #266 callable classifier does not call `yes` (`sub FOO {…}
+# print FOO ("x")` is a call; any builtin name is a call).
+sub _print_handle_before_list {
+  my ($self, $e, $i) = @_;
+  return 0 unless $i > 0 && $self->is_list($e->[$i + 1]);
+  my $prev = $e->[$i - 1];
+  return 0 unless $self->is_word($prev) && $prev->content =~ /^(?:print|printf|say)$/;
+  my $name = $e->[$i]->content;
+  my $registered = $self->has_environment && $self->environment->is_filehandle($name);
+  return 0 unless $registered || Pl::Environment::fh_bareword_shape($name);
+  return 0 if ($self->_bareword_callable_here($name, $e->[$i]) // '') eq 'yes';
+  return 1;
 }
 
 sub _bareword_callable_here {
