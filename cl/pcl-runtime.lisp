@@ -21187,14 +21187,19 @@ from a bare DESCRIPTOR -- perl's anonymous temp file (open $fh, '+>', undef,
 IO::File->new_tmpfile) is created, unlinked and wrapped by fd -- has no file
 for file-length (SBCL signals 'not a stream associated with a file'), so its
 size comes from fstat on the descriptor, after the buffered output is written
-(#3262)."
+(#3262).  EVERY descriptor stream takes that path (task #3023): FILE-LENGTH
+reads the size the file has ON DISK, so after `open $o, '+>', $f; print $o
+"xyz12"` it answered 0 with the five octets still in the buffer and `seek $o,
+0, 2` landed at 0 where perl lands at 5.  A stream that is neither (a Gray
+stream of another kind) has no length PCL can know: that is a value seek
+would consume, so it dies naming the stream (rule 12)."
   (cond ((typep stream 'p-string-stream-mixin)
          (length (%psos-text stream)))
-        ((and (typep stream 'sb-sys:fd-stream)
-              (null (sb-impl::fd-stream-file stream)))
+        ((typep stream 'sb-sys:fd-stream)
          (when (output-stream-p stream) (finish-output stream))
          (sb-posix:stat-size (sb-posix:fstat (sb-sys:fd-stream-fd stream))))
-        (t (file-length stream))))
+        (t (%p-unsupported-value "seek" (format nil "SEEK_END on a ~(~A~)" (type-of stream))
+                                 "no length for this kind of handle"))))
 
 (defmacro p-seek (fh &rest args)
   "Perl seek — bareword filehandle is auto-quoted."

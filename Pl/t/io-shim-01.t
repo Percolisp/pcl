@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 24;
 
 sub run_cl {
     my ($code) = @_;
@@ -275,4 +275,21 @@ test_cl('INVERSE: require Foo if COND does run when COND is true',
                    . qq{seek(\$t, -3, SEEK_END); read(\$t, my \$b, 10); print "[\$b]\\n";\n}
                    . qq{open(my \$g, "+>", undef) or die; print \$g "abcd"; seek(\$g, 0, SEEK_END); print tell(\$g), "\\n";\n});
     is($out, "5\n[o!!]\n4\n", '#3262 SEEK_END on an anonymous temp file (new_tmpfile, open +> undef) takes its size from fstat');
+}
+
+# #3023 (s521b): SEEK_END takes EVERY descriptor handle's size from fstat after
+# the buffered output is written.  FILE-LENGTH read the size ON DISK, so a
+# NAMED file opened `+>` with its five octets still buffered sought to 0 (perl
+# 5); the sysopen / File::Temp / `>&`-dup handles of the task are the same path.
+# perl 5.40.3: 3 2 / 5 / 3 / 5.
+{
+    my $out = run_cl(qq{use Fcntl; use File::Temp;\n}
+                   . qq{my \$p = "/tmp/pcl-3023-\$\$"; unlink \$p;\n}
+                   . qq{sysopen(my \$fh, \$p, O_RDWR|O_CREAT|O_EXCL, 0600) or die; print {\$fh} "abc";\n}
+                   . qq{seek(\$fh, 0, 2); print tell(\$fh), " "; seek(\$fh, -1, 2); print tell(\$fh), "\\n";\n}
+                   . qq{open(my \$o, "+>", "\$p.o") or die; print {\$o} "xyz12"; seek(\$o, 0, 2); print tell(\$o), "\\n";\n}
+                   . qq{open(my \$d, ">&", \$fh) or die; seek(\$d, 0, 2); print tell(\$d), "\\n";\n}
+                   . qq{my \$t = File::Temp->new; print {\$t} "hello"; seek(\$t, 0, 2); print tell(\$t), "\\n";\n}
+                   . qq{close \$fh; close \$o; close \$d; unlink \$p, "\$p.o";\n});
+    is($out, "3 2\n5\n3\n5\n", '#3023 SEEK_END on sysopen / named +> / dup / File::Temp handles takes the size from fstat after the flush');
 }

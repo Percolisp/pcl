@@ -4302,6 +4302,12 @@ mode, so the handle reads and writes as before; `:perlio` puts the base back.
 `binmode $fh, ':utf8'` then `get_layers($fh)` is `unix perlio utf8`; one
 `:pop` later it is `unix` and the handle writes octets.
 
+**`seek FH, N, 2` (SEEK_END) measures the handle as it stands** (s521b, task
+#3023): a descriptor handle's buffered output is written first and its size is
+the descriptor's `fstat`, never the size the file had on disk before the
+flush; an in-memory handle's size is its text.  Example: `open $o, "+>", $f;
+print $o "xyz12"; seek $o, 0, 2; tell $o` is 5.
+
 ## 8. Magic globals
 
 All are dynamically-scoped boxes exported from the runtime namespace:
