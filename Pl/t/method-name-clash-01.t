@@ -100,4 +100,17 @@ my $e = Err->new(value => "x");
 print "$e\n";
 PERL
 
+test_mc('#3405 a call written ABOVE the definition reads the package\'s own sub (the section-head reservation)', <<'PERL');
+package E; sub a { explain(1) . note() } sub explain { "E-ex" } sub note { "E-no" }
+package main;
+sub r { diag("m") } sub diag { "main-diag:$_[0]" }
+print E::a(), " ", r(), "\n";
+PERL
+
+test_mc('#3405 the same inside a package BLOCK: the forward call and the method both find the block\'s sub', <<'PERL');
+{ package E; sub a { explain(1) } sub explain { "E" } }
+print E::a(), " ", E->explain, "\n";
+PERL
+
+
 done_testing;

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-6884
+;;; pcl: pipeline=v2 gen=v2-6885
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -44,15 +44,15 @@
 (p-defclass plc-warnings () ())
 (p-register-pkg-name :warnings "warnings")
 
-(p-declare-sub pl-import)
-(p-declare-sub pl-unimport)
-(p-declare-sub pl-enabled)
-(p-declare-sub pl-fatal_enabled)
-(p-declare-sub pl-enabled_at_level)
-(p-declare-sub pl-fatal_enabled_at_level)
-(p-declare-sub pl-register_categories)
-(p-declare-sub pl-warn)
-(p-declare-sub pl-warnif)
+(p-declare-sub pl-import :body)
+(p-declare-sub pl-unimport :body)
+(p-declare-sub pl-enabled :body)
+(p-declare-sub pl-fatal_enabled :body)
+(p-declare-sub pl-enabled_at_level :body)
+(p-declare-sub pl-fatal_enabled_at_level :body)
+(p-declare-sub pl-register_categories :body)
+(p-declare-sub pl-warn :body)
+(p-declare-sub pl-warnif :body)
 (defvar $a (make-p-box nil))
 (defvar $b (make-p-box nil))
 

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-6884
+;;; pcl: pipeline=v2 gen=v2-6885
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -58,16 +58,16 @@
 (p-defclass plc-mro () ())
 (p-register-pkg-name :mro "mro")
 
-(p-declare-sub pl-import)
-(p-declare-sub pl-unimport)
-(p-declare-sub pl-get_linear_isa)
-(p-declare-sub pl-get_mro)
-(p-declare-sub pl-set_mro)
-(p-declare-sub pl-get_isarev)
-(p-declare-sub pl-is_universal)
-(p-declare-sub pl-invalidate_all_method_caches)
-(p-declare-sub pl-method_changed_in)
-(p-declare-sub pl-_c3_linearize)
+(p-declare-sub pl-import :body)
+(p-declare-sub pl-unimport :body)
+(p-declare-sub pl-get_linear_isa :body)
+(p-declare-sub pl-get_mro :body)
+(p-declare-sub pl-set_mro :body)
+(p-declare-sub pl-get_isarev :body)
+(p-declare-sub pl-is_universal :body)
+(p-declare-sub pl-invalidate_all_method_caches :body)
+(p-declare-sub pl-method_changed_in :body)
+(p-declare-sub pl-_c3_linearize :body)
 (defvar $a (make-p-box nil))
 (defvar $b (make-p-box nil))
 

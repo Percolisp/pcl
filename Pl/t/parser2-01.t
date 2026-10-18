@@ -602,7 +602,7 @@ like($lf, qr/\(p-foreach-range(?:-raw)? \(\$i 1 3\) :label LOOP/, 'labeled forea
 my $nest = Pl::Parser2->parse_code(
   q[{ sub geta { return getb() + 0; } sub getb { return 7; } my $x = geta(); print "$x\n"; }]);
 like($nest, qr/\(p-sub pl-geta/, 'nested named sub hoisted to definitions');
-like($nest, qr/\(p-declare-sub pl-geta\)/, 'hoisted sub gets p-declare-sub');
+like($nest, qr/\(p-declare-sub pl-geta :body\)/, 'hoisted sub gets p-declare-sub');
 
 # W5: the static-variable idiom (block lexical captured by a nested sub) is
 # rewritten to a shared package cell — no gate.

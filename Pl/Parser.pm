@@ -9167,7 +9167,7 @@ sub _process_sub_statement {
   # definition hasn't loaded yet.
   if ($name) {
     unshift @{$self->_sections->[$self->_cur_section]{declarations}},
-            "(p-declare-sub $cl_sub_name)";
+            "(" . join(" ", @{ declare_sub_form($cl_sub_name, $block) }) . ")";
   }
 
   # Forward declaration: sub name; or sub name ($); or sub name : attrs;
@@ -13428,5 +13428,19 @@ sub _compile_default_expr {
   return $result;
 }
 
+
+# The section-head declaration of a named sub (`(p-declare-sub NAME)`), as a
+# CLForm list.  A sub the file DEFINES carries :body, which makes the runtime
+# RESERVE the name there, before any form that calls it is read -- a call
+# written above the definition then reads the package's own symbol, not an
+# inherited :pcl function of the same name (#3405: `package E; sub a {
+# explain() } sub explain {...}`).  A qualified NAME is reserved by its
+# install only: the reservation reads *package*, which is the section's, not
+# the qualifier's.  ONE spelling for the three emitters (rule 11): this v1
+# path and Pl::Parser2's two.
+sub declare_sub_form {
+  my ($name, $has_body) = @_;
+  return ['p-declare-sub', $name, ($has_body && $name !~ /::/ ? (':body') : ())];
+}
 
 1;

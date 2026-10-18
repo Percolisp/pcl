@@ -263,14 +263,14 @@ note "-------- Phase 1: nested sub stubs";
         }
         print outer();
     });
-    like($cl, qr/\(p-declare-sub pl-inner\)/,
+    like($cl, qr/\(p-declare-sub pl-inner :body\)/,
          'nested sub gets p-declare-sub stub');
     # The stub is emitted inline within the enclosing sub's body (same bucket),
     # so it appears after the opening of p-sub pl-outer but before the call.
     # The call form is (p-tail-value (pl-inner)) since task #994: `return
     # inner();` is outer's LAST statement, so it lowers as the tail
     # expression instead of throwing to the frame (ir-spec 5.3).
-    is(relative_order($cl, qr/\(p-declare-sub pl-inner\)/, qr/p-tail-value \(pl-inner\)/), -1,
+    is(relative_order($cl, qr/\(p-declare-sub pl-inner :body\)/, qr/p-tail-value \(pl-inner\)/), -1,
        'inner stub declared before call to inner inside outer body');
 }
 
@@ -280,9 +280,9 @@ note "-------- Phase 1: nested sub stubs";
         sub foo { return 1; }
         print foo();
     });
-    like($cl, qr/\(p-declare-sub pl-foo\)/,
+    like($cl, qr/\(p-declare-sub pl-foo :body\)/,
          'top-level sub gets p-declare-sub stub');
-    is(relative_order($cl, qr/\(p-declare-sub pl-foo\)/, qr/\(p-sub pl-foo\b/), -1,
+    is(relative_order($cl, qr/\(p-declare-sub pl-foo :body\)/, qr/\(p-sub pl-foo\b/), -1,
        'p-declare-sub before p-sub for top-level sub');
 }
 

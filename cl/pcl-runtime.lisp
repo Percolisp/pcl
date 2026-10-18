@@ -1288,16 +1288,21 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-sub-name-home (name sym-name)
     "The package a sub named by the symbol NAME belongs to: the symbol's own
-     -- except a :pcl symbol *package* only INHERITS.  The reader reads
-     `(p-sub pl-explain ...)` in package E as pcl's exported TAP function
-     pl-explain, and defining THAT redefined Test::More's explain program-wide
-     while E got no method (#3405); E's own sub is E's symbol, as perl's
-     `sub explain` in package E is E::explain."
+     -- except a :pcl symbol *package* only INHERITS, or has already shadowed
+     with its own.  The reader reads `(p-sub pl-explain ...)` in package E as
+     pcl's exported TAP function pl-explain, and defining THAT redefined
+     Test::More's explain program-wide while E got no method (#3405); E's own
+     sub is E's symbol, as perl's `sub explain` in package E is E::explain.
+     The second case is a form read BEFORE the section-head reservation
+     (p-declare-sub NAME :body) shadowed the name: it still names E's sub."
     (let ((home (symbol-package name)))
       (cond ((null home) *package*)
             ((and (eq home (load-time-value (find-package :pcl)))
                   (not (eq *package* home))
-                  (eq (nth-value 1 (find-symbol sym-name *package*)) :inherited))
+                  (multiple-value-bind (found status)
+                      (find-symbol sym-name *package*)
+                    (or (eq status :inherited)
+                        (and found (not (eq found name))))))
              *package*)
             (t home))))
   (defun %p-reserve-sub-name (name)
@@ -1487,13 +1492,39 @@
         (p-die (format nil "Undefined subroutine &~A called"
                        (%p-sub-perl-name sym))))))
 
-(defmacro p-declare-sub (name)
-  `(progn
-     (unless (gethash ',name *p-declared-subs*)
-       (setf (gethash ',name *p-declared-subs*) :stub))
-     (unless (fboundp ',name)
-       (defun ,name (&rest args)
-         (%p-call-of-undefined-sub ',name args)))))
+(defmacro p-declare-sub (name &optional body)
+  "A sub NAME the file declares: a stub until the definition loads.  BODY is
+   :body when the file DEFINES the sub (not only `sub foo;`): the name is then
+   RESERVED here, at the head of its section, so every form read after this
+   one -- a call written ABOVE the definition among them -- reads the
+   package's own symbol (#3405).  The install's own reservation comes after
+   those reads, and a name the package only inherits from :pcl (a TAP or
+   runtime function: explain, run_perl ...) would read as pcl's there.  A
+   bodyless `sub foo ($@);` reserves nothing: perl-tests/t/test.pl declares
+   the TAP layer's ok / is that way and must keep reading them."
+  (case body
+    ((nil)
+     `(progn
+        (unless (gethash ',name *p-declared-subs*)
+          (setf (gethash ',name *p-declared-subs*) :stub))
+        (unless (fboundp ',name)
+          (defun ,name (&rest args)
+            (%p-call-of-undefined-sub ',name args)))))
+    (:body
+     `(progn
+        (eval-when (:compile-toplevel :load-toplevel :execute)
+          (%p-reserve-sub-name ',name))
+        (%p-declare-sub-stub (%p-reserve-sub-name ',name))))
+    (t (error "p-declare-sub: BODY must be NIL or :BODY, not ~S" body))))
+
+(defun %p-declare-sub-stub (sym)
+  "p-declare-sub's stub on the RESERVED symbol SYM (the :body arm)."
+  (unless (gethash sym *p-declared-subs*)
+    (setf (gethash sym *p-declared-subs*) :stub))
+  (unless (fboundp sym)
+    (setf (symbol-function sym)
+          (lambda (&rest args)
+            (%p-call-of-undefined-sub sym args)))))
 
 ;;; ── A call to a NEVER-declared sub (task #468) ──────────────────────────
 ;;; The stub above only exists for a name the FILE declared or defined.  A
@@ -25825,7 +25856,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6884"
+(defparameter *pcl-cache-generation* "v2-6885"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

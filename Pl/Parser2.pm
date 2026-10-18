@@ -2561,7 +2561,8 @@ sub parse {
           push @def_lines, (_src_pos($child)) x @raw;
           next;
         }
-        push @decls, ['p-declare-sub', $self->fallback_parser->_qualified_sub_to_cl($child->name)];
+        push @decls, Pl::Parser::declare_sub_form($self->fallback_parser->_qualified_sub_to_cl($child->name),
+                                       $child->block);
         push @decls, $self->_detect_declare_form($child)   # #2610
           if !$child->block;
         # Forward declaration `sub foo;` reserves the name only (no definition).
@@ -2838,7 +2839,7 @@ sub parse {
       my $earlier = join "\n", @earlier;
       (my $prefix = $self->fallback_parser->_cl_pkg_designator($sec->{pkg})) =~ s/^://;
       for my $line (@{ $sec->{decls} }, @{ $sec->{captured} }) {
-        next unless $i > 0 && $line =~ /^\(p-declare-sub\s+(\S+?)\)\s*$/;
+        next unless $i > 0 && $line =~ /^\(p-declare-sub\s+(\S+?)(?:\s+:body)?\)\s*$/;
         my $name = $1;
         (my $bare = $name) =~ s/^.*:://;
         next unless index($earlier, $bare) >= 0;
@@ -10353,7 +10354,7 @@ sub _hoist_nested_sub {
       if $self->_sub_captures_name($sub, $bare, $by_bare{$bare});
   }
   push @{ $self->{_hoisted_decls} },
-    ['p-declare-sub', $self->_sub_name_for_emission($sub->name)];
+    Pl::Parser::declare_sub_form($self->_sub_name_for_emission($sub->name), 1);
   push @{ $self->{_hoisted_defs} }, $self->_lower_sub($sub);
   push @{ $self->{_hoisted_def_lines} }, _src_pos($sub);
   return;
