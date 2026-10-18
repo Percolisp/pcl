@@ -76,7 +76,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Warnings-gated diagnostics](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled) — `use warnings` is not modelled yet.
 * [Error message text](#error-message-text-and-format) — die/`$@` *behaviour* matches; the wording is not a goal.
 * [`format` / `write`](#format--write-report-formatting) and [source filters](#source-filters-filterutilcall-filtersimple-use-switch-).
-* [Live symbol-table hashes `%Foo::`](#live-symbol-table-hashes-main-foo--deferred--see-roadmap) — reads of subs work, writes are lost.
+* [Live symbol-table hashes `%Foo::`](#live-symbol-table-hashes-main-foo--deferred--see-roadmap) — keys/exists, sub deletes and `*A:: = *B::` work; values of non-subs and other writes do not.
 
 ## Index
 
@@ -351,17 +351,36 @@ to it (`$main::{foo} = \&bar`) installs into the package.  Code that walks or
 mutates the stash (`Exporter`, plugin loaders, `*{...}` glob tricks) relies on
 this being live.
 
-**PCL behaviour:** The syntax (`$Pkg::`, `%Pkg::`, `$::`, `%::`, `*Pkg::`) parses
-and routes to `(p-stash "Pkg")`, but `p-stash` returns a **snapshot containing
-only subs** (a fresh hash of `name → code-ref` built from the CL package on
-each call).  Reads of existing subs (`exists`/lookup) work.  **`delete` now
-writes through** (session 247): each snapshot is registered in a weak
-side-table (`*p-stash-pkg-table*`), and `p-delete` on a stash also
-`fmakunbound`s the sub in the CL package, so `*{Pkg::name}{CODE}` and method
-dispatch stop seeing it (Moo's Method::Generate::Constructor bootstrap relies
-on this).  Other writes (`$Pkg::{foo} = \&bar`) are still lost;
-scalar/array/hash/IO glob slots are absent; `local` on a stash element is
-skipped.
+**PCL behaviour:** The syntax (`$Pkg::`, `%Pkg::`, `@Pkg::{…}`, `$::`, `%::`,
+`*Pkg::`, `%{"Pkg::"}`) parses and routes to `(p-stash "Pkg")`, which returns a
+**snapshot** built from the CL package on each call.  WHAT WORKS (bounded by
+the s522 ruling, task #1510 / #3511 / #3321):
+
+* **Keys.**  The snapshot lists every symbol PCL records: subs, package
+  variables with a cell (`our` / qualified scalars, arrays, hashes; `@ISA`
+  when non-empty, `$a`/`$b` when they hold a value) and filehandles — so
+  `keys`, `exists`, `scalar %{"Pkg::"}` answer as perl does.
+* **Sub values.**  A sub's element is its code ref.
+* **Deleting a sub** writes through, in every spelling — `delete $Pkg::{n}`,
+  `delete @Pkg::{LIST}`, `delete @{"Pkg::"}{LIST}`, through a `\%{"Pkg::"}`
+  ref: each snapshot is registered in `*p-stash-pkg-table*` and `p-delete` (the
+  one path; a slice goes through it per key) unbinds the sub, so a RUN-TIME
+  lookup (`defined &{"Pkg::n"}`, `*{"Pkg::n"}{CODE}`, method dispatch) misses
+  it while a COMPILED `defined &Pkg::n` keeps seeing it — perl's op pins the
+  glob.
+* **A stash alias** `*A:: = *B::` is recorded once and redirects RUN-TIME name
+  resolution (bless — `ref` names B —, method calls, `isa`, `can`, symbolic
+  refs, `%A::`) to B's stash.  Names bound at COMPILE time stay with A's own
+  package, as they stay with A's original stash in perl.
+
+WHAT DOES NOT (still DEFERRED): the element VALUE of a non-sub symbol — perl's
+typeglob — **dies** `PCL: stash element value for a non-CODE symbol is not
+supported (docs/not-supported.md "Live symbol-table hashes")` (so `values
+%Pkg::` and `each` over a stash holding variables die rather than answer
+wrong); deleting a non-sub symbol dies the same way (the variable would stay
+live); other writes (`$Pkg::{foo} = \&bar`, hash assignment into a stash)
+are lost; `local` on a stash element is skipped; iteration order is not
+perl's; any other `*A:: = VALUE` is announced on stderr and ignored.
 
 **Why deferred, not permanent:** PCL package vars and subs already *are* CL
 symbols in a CL package, so the stash is introspectable via `do-symbols`.  The

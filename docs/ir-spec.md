@@ -3704,6 +3704,42 @@ var ⇒ plain lexical binding, no localization at all).
   (p-defclass plc-dog (plc-animal) ())   ; a no-op when plc-dog already has
                                          ; exactly (plc-animal) as parents
   ```
+- **A parent is written as its perl package NAME, a string (normative, s522b,
+  task #1570):** `(p-defclass Cfg::plc-cfg ("Exporter") ())`; the class symbol
+  is made from the name when the form RUNS, creating the package if the
+  program has not named it.  A qualified parent symbol could be READ only once
+  its package existed, and an `@ISA` set inside a BEGIN that requires its
+  parent is one top-level form read whole before the require runs.  A symbol
+  parent is still accepted (the class itself).
+
+  ```perl
+  BEGIN { package Cfg; our @ISA = ("Exporter"); require Exporter; }   # reads, runs
+  ```
+- **The stash as a hash and the stash alias (normative, s522b, tasks #1510
+  #3511 #3321).**  `(p-stash "P")` is a snapshot whose KEYS are every symbol
+  PCL records for P (subs, variables with a cell, filehandles); a sub's value
+  is its code ref and a non-sub's value DIES naming the deferral
+  (docs/not-supported.md "Live symbol-table hashes").  Every delete spelling
+  reaches `p-delete`, which unbinds the sub for RUN-TIME lookups while a
+  compiled `defined &P::n` keeps it.  `*A:: = *B::` lowers to
+  `(p-stash-assign "A" (p-stash "B"))`, which records A as an alias of B's
+  stash once: run-time name resolution (bless, method calls, `isa`, `can`,
+  symbolic refs) answers B for A, `ref` of an object blessed into A is B, and
+  names bound at compile time stay with A.
+
+  ```perl
+  package B0; sub hi {"hi"} package main; *A0:: = *B0::;
+  print ref(bless {}, "A0"), " ", A0->hi;   # B0 hi
+  ```
+- **A named sub inside a BEGIN is defined before the BEGIN's body runs
+  (normative, s522b, task #1572):** perl compiles the whole block first, so
+  each sub moves up past ordinary statements -- never above a `package`, a
+  `use`/`no`, a `my`/`our`/`state`/`local` declaration or another scheduled
+  block.
+
+  ```perl
+  BEGIN { package P; print P->can("orig") ? "can" : "cannot"; sub orig {1} }   # can
+  ```
 - **A parent named in `@ISA` before it has a class gets one (normative, s519b,
   task #3373).**  `p-defclass` first gives every parent with no class (or a
   host-side forward reference only) a class with no parents of its own, so a
