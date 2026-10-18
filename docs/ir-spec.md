@@ -4286,6 +4286,22 @@ any character exceed 255"**, which agrees with perl on every probed shape.
 `syswrite` is the exception: perl makes it FATAL (`Wide character in syswrite`,
 trappable) because an unbuffered write has nowhere to put the upgrade.
 
+**`PerlIO::get_layers FH` answers the layers PCL APPLIES, and nothing it does
+not** (s521b, task #3326 = #139 part (b), ruled s521): bottom first, the base
+`unix perlio` of every open descriptor handle, plus `utf8` when its discipline
+is UTF-8, or `encoding(NAME) utf8` for another codec; `scalar` for an
+in-memory handle; the empty list for a closed or unopened handle and for a
+value that is not a handle; in scalar context the top entry.  The list is
+DERIVED from the handle's one external format (the same record `binmode`
+sets), so `:utf8` and `:encoding(UTF-8)` both report `utf8`.  `:pop` takes
+off the TOP layer: a UTF-8 discipline goes WITH the perlio layer it is a flag
+on (the handle becomes octets, the list `unix`), an `:encoding(...)` leaves
+the base, and a base layer comes off the list only -- PCL has no unbuffered
+mode, so the handle reads and writes as before; `:perlio` puts the base back.
+`crlf` is never reported (PCL does not apply it, #139 part (a)).  Example:
+`binmode $fh, ':utf8'` then `get_layers($fh)` is `unix perlio utf8`; one
+`:pop` later it is `unix` and the handle writes octets.
+
 ## 8. Magic globals
 
 All are dynamically-scoped boxes exported from the runtime namespace:

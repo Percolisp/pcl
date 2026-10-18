@@ -449,4 +449,55 @@ utf8::upgrade($up);
 print "upgraded=", bytes::length($up), "\n";
 PL
 
+# ── #3326 (#139 part b) — PerlIO::get_layers answers the layers PCL APPLIES
+# (RULED s521): the base `unix perlio`, plus `utf8` for a UTF-8 discipline;
+# `:pop` takes off the top layer (`:utf8` is a flag ON perlio, so it goes with
+# it), `:perlio` puts the base back; a closed or unopened handle and a
+# non-handle answer the empty list; an in-memory handle is `scalar`; scalar
+# context is the top layer.  Every value is perl 5.40.3's (probed); `crlf` is
+# deliberately absent (PCL does not apply it, not-supported.md).
+is(run_cl(<<"PL"), "fresh=unix perlio|utf8=unix perlio utf8|raw=unix perlio|f=unix perlio utf8|pop=unix|pop2=|n=0|mem=scalar|sc=perlio|re=unix perlio utf8|closed=0|nope=0|num=0|def=1\n", q{#3326 PerlIO::get_layers: the applied list, :pop and :perlio});
+sub L { join " ", PerlIO::get_layers(\$_[0]) }
+my \@r;
+push \@r, "fresh=" . L(*STDOUT);
+binmode STDOUT, ':utf8'; push \@r, "utf8=" . L(*STDOUT);
+binmode STDOUT, ':raw';  push \@r, "raw=" . L(*STDOUT);
+open my \$f, '>', '$dir/gl.txt' or die;
+binmode \$f, ':utf8'; push \@r, "f=" . L(\$f);
+binmode \$f, ':pop'; push \@r, "pop=" . L(\$f);
+binmode \$f, ':pop'; push \@r, "pop2=" . L(\$f);
+push \@r, "n=" . scalar(() = PerlIO::get_layers(\$f));
+my \$str = "abc"; open my \$m, '<', \\\$str; push \@r, "mem=" . L(\$m);
+push \@r, "sc=" . scalar(PerlIO::get_layers(*STDIN));
+open my \$g, '>', '$dir/gl2.txt' or die; binmode \$g, ':utf8';
+binmode \$g, ':raw';
+binmode \$g, ':pop' while 1 < (() = PerlIO::get_layers(\$g, output => 1));
+binmode \$g, ':perlio:utf8'; push \@r, "re=" . L(\$g);
+close \$g; push \@r, "closed=" . scalar(() = PerlIO::get_layers(\$g));
+push \@r, "nope=" . scalar(() = PerlIO::get_layers(*NOPE));
+push \@r, "num=" . scalar(() = PerlIO::get_layers(42));
+push \@r, "def=" . (defined(&PerlIO::get_layers) ? 1 : 0);
+print join("|", \@r), "\\n";
+PL
+
+# ... and the reason it matters: Capture::Tiny's `_relayer` copies the
+# captured handle's list onto its capture file (`:raw`, pop down to `unix`,
+# re-apply the rest), and reads the capture back through it -- a `:utf8`
+# STDOUT's capture is CHARACTERS (perl: len=2 ord=9786).  Before #3326 the
+# list was missing, the file stayed bytes and the capture read back 4 octets.
+is(run_cl(<<"PL"), "len=2 ord=9786\n", q{#3326 a re-layered capture file reads back through the copied :utf8 layer});
+binmode STDOUT, ':utf8';
+my \@want = PerlIO::get_layers(*STDOUT, output => 1);
+open my \$c, '+>', '$dir/cap.txt' or die;
+binmode \$c, ':raw';
+binmode \$c, ':pop' while 1 < (() = PerlIO::get_layers(\$c, output => 1));
+shift \@want;
+binmode \$c, ':' . join(':', \@want);
+print {\$c} "\\x{263a}\\n";
+seek \$c, 0, 0;
+my \$got = <\$c>;
+binmode STDOUT, ':raw';
+printf "len=%d ord=%d\\n", length(\$got), ord(\$got);
+PL
+
 done_testing();

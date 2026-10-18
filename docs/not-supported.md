@@ -1470,11 +1470,16 @@ spelling that decides bytes-vs-characters (`:raw`, `:bytes`, `:utf8`,
   #2852;
 * stacking as HISTORY — `binmode(, ':raw')` after `:encoding(UTF-8)` gives
   bytes, which is perl's answer, but there is no stack to pop TO;
-* `PerlIO::get_layers` introspection (task #139, which needs a design call).
-  **Costed s473t1: `perl-tests/readline.t`'s last 4 rows.**  Its final `SKIP:`
-  block calls `PerlIO::get_layers($fh)` before its four assertions, and the
-  undefined sub aborts the whole top-level form — the file stops at 32 of 36
-  and its shortfall was UNEXPLAINED for that reason;
+* `PerlIO::get_layers` reports the layers PCL APPLIES (s521b, task #3326;
+  ir-spec §7.7), derived from the one discipline, so it differs from perl
+  wherever that does: `crlf` is never listed (not applied, above);
+  `:encoding(UTF-8)` lists as `utf8` (perl `encoding(utf-8-strict) utf8`) and
+  `:encoding(latin1)` as nothing past the base (it IS PCL's byte format); a
+  repeated push (`:utf8:perlio`) is not a second entry; `details => 1` dies
+  (rule 12);
+* `binmode FH, ':pop'` of a BASE layer (`perlio`, then `unix`) changes the
+  LIST only: perl's handle becomes unbuffered (and, with `unix` gone,
+  unusable); PCL's keeps its buffering and keeps working;
 * an `:encoding(NAME)` SBCL has no codec for DIES naming the encoding (rule 12)
   rather than decoding as something else.  Measured over perl's `t/`,
   `perl-tests/`, `lib/` and the CPAN board, the only such name is `cp1047`

@@ -19503,7 +19503,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                         (t (incf i)))))
        (push (subseq layers start i) out)))))
 
-(defun %p-layer-ef (layers default)
+(defun %p-layer-ef (layers default &optional current popped)
   "The external format LAYERS asks for, or DEFAULT when none of them decides.
    perl applies layers left to right and the LAST one that names a discipline
    wins — `<:raw:encoding(UTF-8)` decodes, `<:encoding(UTF-8):raw` does not — so
@@ -19514,12 +19514,72 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    call and leaves the handle alone — `binmode($fh,\":utf8:nosuch\")` on a byte
    handle stays bytes, and `\":nosuch:utf8\"` does not decode either (probed
    5.40.3).  The callers that can give perl's answer do (%p-binmode-impl,
-   %p-open-impl); the two that cannot go through %p-layer-ef-or-announce."
-  (let ((ef default) (bad nil))
-    (dolist (l (%p-split-layers layers) (values ef bad))
-      (multiple-value-bind (this known) (%p-one-layer-ef l)
-        (cond ((not known) (unless bad (setf bad l)))
-              (this (setf ef this)))))))
+   %p-open-impl); the two that cannot go through %p-layer-ef-or-announce.
+
+   THIRD value is the handle's POPPED count after the list (task #3326; ir-spec
+   §7.7 `PerlIO::get_layers`): how many of the two BASE layers `unix perlio`
+   a `:pop` has taken off the list, starting from POPPED.  A `:pop` removes the
+   TOP layer: a UTF-8 discipline (`:utf8` is a flag ON the perlio layer, so it
+   goes with it), an `:encoding(...)` (the base stays), or a base layer.
+   CURRENT is the handle's format before the list, which is what the first
+   `:pop` takes off; every `:pop` leaves OCTETS.  `:perlio` puts the base back
+   and `:unix` the bottom one.  The count changes only the LIST: PCL has no
+   unbuffered mode (docs/not-supported.md)."
+  (let ((ef default) (bad nil) (cur (or current default)) (popped (or popped 0)))
+    (dolist (l (%p-split-layers layers) (values ef bad popped))
+      (let ((name (string-trim " " l)))
+        (cond
+          ((string-equal name "pop")
+           (unless (eq (%p-ef-kind cur) :encoding)
+             (setf popped (min 2 (1+ popped))))
+           (setf ef +p-byte-external-format+ cur ef))
+          ((string-equal name "perlio") (setf popped 0))
+          ((string-equal name "unix") (when (= popped 2) (setf popped 1)))
+          (t (multiple-value-bind (this known) (%p-one-layer-ef l)
+               (cond ((not known) (unless bad (setf bad l)))
+                     (this (setf ef this cur this))))))))))
+
+(defun %p-ef-kind (ef)
+  "Which of the three disciplines PerlIO::get_layers reports external format EF
+   is: :bytes (latin-1, PCL's octet format), :utf8 (UTF-8 -- `:utf8` and
+   `:encoding(UTF-8)` both arrive here, the handle keeps no spelling), or
+   :encoding (any other codec).  The format is a keyword or a list headed by
+   one (+p-byte-external-format+)."
+  (let ((k (if (consp ef) (car ef) ef)))
+    (cond ((eq k :latin-1) :bytes)
+          ((eq k :utf-8) :utf8)
+          ((keywordp k) :encoding)
+          (t (error "PCL: get_layers: unknown external format ~S" ef)))))
+
+(defvar *p-layer-pops* (make-hash-table :test 'eq :weakness :key)
+  "Stream -> how many base layers `binmode FH, ':pop'` took off its LIST
+   (0 absent).  Keyed on %p-stream-target, so a fresh open starts at 0.")
+
+(defun %p-layer-pops (stream)
+  (gethash (%p-stream-target stream) *p-layer-pops* 0))
+
+(defun %p-layer-list (stream)
+  "PerlIO::get_layers' answer for the OPEN stream STREAM, bottom first (task
+   #3326, RULED s521: the layers PCL APPLIES and nothing it does not): an
+   in-memory handle is `scalar`; a descriptor handle is the base `unix perlio`
+   (less what `:pop` removed) plus `utf8` for a UTF-8 discipline, or
+   `encoding(NAME) utf8` for another codec.  `crlf` is never reported -- PCL
+   does not apply it (#139 part (a))."
+  (let ((target (%p-stream-target stream)))
+    (cond
+      ;; a standard handle whose DESCRIPTOR was closed: the synonym is open,
+      ;; what it stands for is not -- no layers, as for any closed handle.
+      ((not (open-stream-p target)) nil)
+      ((not (sb-sys:fd-stream-p target)) (list "scalar"))
+      (t
+        (let* ((ef (stream-external-format target))
+               (k (if (consp ef) (car ef) ef))
+               (base (subseq (list "unix" "perlio") 0 (- 2 (%p-layer-pops target)))))
+          (append base
+                  (ecase (%p-ef-kind ef)
+                    (:bytes nil)
+                    (:utf8 (list "utf8"))
+                    (:encoding (list (format nil "encoding(~(~A~))" k) "utf8")))))))))
 
 (defun %p-layer-ef-or-announce (layers default site)
   "%p-layer-ef for the two callers with no perl-visible failure to give: the
@@ -21350,31 +21410,42 @@ size comes from fstat on the descriptor, after the buffered output is written
         (%p-io-errno-fail 9)                                      ; EBADF (Linux)
         (let ((text (if (or (null layer) (eq layer *p-undef*))
                         ":raw"
-                        (to-string (unbox layer)))))
-          (multiple-value-bind (ef bad)
-              (%p-layer-ef text +p-byte-external-format+)
+                        (to-string (unbox layer))))
+              (target0 (%p-stream-target stream)))
+          (multiple-value-bind (ef bad popped)
+              (%p-layer-ef text +p-byte-external-format+
+                           (and (sb-sys:fd-stream-p target0) (open-stream-p target0)
+                                (stream-external-format target0))
+                           (%p-layer-pops target0))
             (if bad
                 (%p-io-errno-fail 2)                              ; ENOENT
-                (let ((target (%p-stream-target stream)))
-                  (cond
-                    ((not (sb-sys:fd-stream-p target)) t)
-                    ;; ALREADY IN THAT DISCIPLINE: nothing to do.  EQUAL, not
-                    ;; EQ — the byte format is a LIST, `(:latin-1 :replacement
-                    ;; #\?)`, and SBCL hands back an EQUAL copy, never the same
-                    ;; object (measured).  So this test never fired and
-                    ;; `binmode($fh)` on a handle that was ALREADY bytes went
-                    ;; down the rebuild path, which DUPS THE DESCRIPTOR AND
-                    ;; CLOSES THE ORIGINAL: every other name for that handle
-                    ;; (`my $g = $fh; binmode($g)`) was left holding a closed
-                    ;; stream and its next print silently wrote nothing.
-                    ((equal (stream-external-format target) ef) t)
-                    (t (let ((std (%p-std-descriptor target)))
-                         (cond
-                           (std (ignore-errors (finish-output target))
-                                (setf (svref *p-std-efs* std) ef)
-                                (%p-std-rebuild std))
-                           (t (%p-rebuild-fd-stream fh target ef))))
-                       t)))))))))
+                (let ((target target0))
+                  (prog1
+                    (cond
+                      ((not (sb-sys:fd-stream-p target)) t)
+                      ;; ALREADY IN THAT DISCIPLINE: nothing to do.  EQUAL, not
+                      ;; EQ — the byte format is a LIST, `(:latin-1 :replacement
+                      ;; #\?)`, and SBCL hands back an EQUAL copy, never the same
+                      ;; object (measured).  So this test never fired and
+                      ;; `binmode($fh)` on a handle that was ALREADY bytes went
+                      ;; down the rebuild path, which DUPS THE DESCRIPTOR AND
+                      ;; CLOSES THE ORIGINAL: every other name for that handle
+                      ;; (`my $g = $fh; binmode($g)`) was left holding a closed
+                      ;; stream and its next print silently wrote nothing.
+                      ((equal (stream-external-format target) ef) t)
+                      (t (let ((std (%p-std-descriptor target)))
+                           (cond
+                             (std (ignore-errors (finish-output target))
+                                  (setf (svref *p-std-efs* std) ef)
+                                  (%p-std-rebuild std))
+                             (t (%p-rebuild-fd-stream fh target ef))))
+                         t))
+                    ;; the pop count follows the HANDLE: a standard handle's
+                    ;; stream was just rebuilt, so it is read back from FH.
+                    (let ((now (%p-live-stream fh)))
+                      (when now
+                        (setf (gethash (%p-stream-target now) *p-layer-pops*)
+                              popped)))))))))))
 
 (defmacro p-binmode (fh &rest args)
   "Perl binmode — bareword filehandle is auto-quoted."
@@ -39352,6 +39423,31 @@ size comes from fstat on the descriptor, after the buffered output is written
 (defun pl-cluck (&rest args)
   (%p-diag "~a~%" (if args (to-string (car args)) "")))
 (defun pl-import (&rest args) (declare (ignore args)) nil)
+(in-package :pcl)
+
+;; PerlIO::get_layers -- a perl CORE sub (universal.c), defined without any
+;; `use` (task #3326; ir-spec §7.7).  The list is %p-layer-list's: the layers
+;; PCL applies.  Marked defined like the utf8:: subs, so `defined
+;; &PerlIO::get_layers` and `PerlIO->can('get_layers')` are true as in perl
+;; (Capture::Tiny installs `sub { () }` when they are not).
+(defpackage :|PerlIO| (:use :cl :pcl))
+(in-package :|PerlIO|)
+(defun pl-get_layers (&optional fh &rest opts)
+  "perl's PerlIO::get_layers FH [, output => 1] [, details => 1]: the handle's
+   layer names, bottom first; empty for a closed or unopened handle and for
+   something that is not a handle.  `output` names the write side, which PCL
+   does not keep apart.  `details` asks for (name, args, flags) triples, which
+   PCL does not model -- that is a VALUE, so it dies (rule 12)."
+  (loop for (k v) on opts by #'cddr
+        when (and (string= (pcl::to-string k) "details") (pcl::p-true-p v))
+          do (pcl::%p-unsupported-value "PerlIO::get_layers" "details => 1"
+                                        "layer details are not modelled"))
+  (let* ((s (and fh (ignore-errors (pcl::%p-live-stream fh))))
+         (l (and s (pcl::%p-layer-list s))))
+    (if (eq pcl::*wantarray* t)
+        (make-array (length l) :initial-contents l :adjustable t :fill-pointer t)
+        (if l (car (last l)) pcl::*p-undef*))))
+(setf (gethash 'pl-get_layers pcl::*p-declared-subs*) :defined)
 (in-package :pcl)
 
 ;; POSIX module stubs
