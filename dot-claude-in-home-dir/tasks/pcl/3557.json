@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #1576 one-file acceptance run of Path-Tiny t/filesystem.t (subtests 'iterator' rows 39 + 47 -- `while ( my $file = $iter->() ) { push @contents, $file }` collects empties) and the 'visit' rows 40 + 48 (same file, probably the same mechanism through `$_[0]` -- confirm when fixed).\n\nSILENT WRONG: a REFERENCE assigned to a loop-head `my` and pushed onto an array is lost -- the array ends up holding the loop variable's LAST value (the false one that ended the loop); a plain string survives.\n\nREPRO (probed, perl 5.40.3 vs PCL on 68aeebf5 + s521c, scratch/s521c/pr/whilemy.pl):\n    package P; use overload '\"\"' => sub { $_[0][0] }, bool => sub { 1 }, fallback => 1;\n    package main;\n    my @o = map { bless [$_], 'P' } qw(x y);\n    my $j = 0; my $it2 = sub { return if $j > $#o; return $o[$j++] };\n    my @d; while (my $x = $it2->()) { push @d, $x }\n    print \"obj=@d n=\", scalar(@d), \"\\n\";\nperl: obj=x y n=2      PCL: obj=  n=2      (with plain strings 'a','b','c' PCL is right)\nArea: #297 / #300 (loop-head `my`), the push of a ref-holding box -- is the BOX pushed (an alias) instead of its value?  Shrink further (unblessed [1] refs) when taking it.\nREACH: Path-Tiny filesystem.t rows 39, 40, 47, 48; any iterator idiom over objects.\n",
+   "id" : "3557",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: while (my $x = $it->()) { push @d, $x } over REFERENCES leaves @d holding empties (the loop var's last, false value); strings survive -- Path-Tiny filesystem.t iterator/visit"
+}

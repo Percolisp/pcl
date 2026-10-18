@@ -5139,8 +5139,6 @@ op/readline.t	32	ok	not ok	[perl \#123790] *x=<y> used to fail an assertion	#166
 op/readline.t	1	ok	not ok	[perl \#19566]	#1664 -- the TYPEGLOB MODEL: a glob VALUE in a stash slot IS `*{name}`, `*x{IO}` / `*x{FORMAT}` / `*$io_ref` are missing, a slot holding a string is a PROTOTYPE and one holding a scalar ref is a CONSTANT SUB.  Every row here reads or writes a glob through the symbol table -- `readline` records the last handle READ FROM in a glob slot (PL_last_in_gv), which `tell`/`eof` with no argument then use
 op/readline.t	36	ok	(missing)	closing the file should fail	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's tail reads `PerlIO::get_layers` (the runner's own abort: "The function PerlIO::pl-get_layers is undefined")
 op/readline.t	35	ok	(missing)	error after trying to readline file opened for write	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's tail reads `PerlIO::get_layers` (the runner's own abort: "The function PerlIO::pl-get_layers is undefined")
-op/readline.t	34	ok	(missing)	fail to readline file opened for write	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's tail reads `PerlIO::get_layers` (the runner's own abort: "The function PerlIO::pl-get_layers is undefined")
-op/readline.t	33	ok	(missing)	no error before we try to read	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's tail reads `PerlIO::get_layers` (the runner's own abort: "The function PerlIO::pl-get_layers is undefined")
 op/readline.t	30	ok	not ok	readline *$glob_copy sets PL_last_in_gv	#1664 -- the TYPEGLOB MODEL: a glob VALUE in a stash slot IS `*{name}`, `*x{IO}` / `*x{FORMAT}` / `*$io_ref` are missing, a slot holding a string is a PROTOTYPE and one holding a scalar ref is a CONSTANT SUB.  Every row here reads or writes a glob through the symbol table -- `readline` records the last handle READ FROM in a glob slot (PL_last_in_gv), which `tell`/`eof` with no argument then use
 op/readline.t	27	ok	not ok	readline does not autovivify	#1664 -- the TYPEGLOB MODEL: a glob VALUE in a stash slot IS `*{name}`, `*x{IO}` / `*x{FORMAT}` / `*$io_ref` are missing, a slot holding a string is a PROTOTYPE and one holding a scalar ref is a CONSTANT SUB.  Every row here reads or writes a glob through the symbol table -- `readline` records the last handle READ FROM in a glob slot (PL_last_in_gv), which `tell`/`eof` with no argument then use
 op/readline.t	18	not ok	ok	readline returned undef when interrupted # TODO bad readline returns '', not undef	NS:PerlIO layer stacks and `PerlIO::get_layers` -- the file's tail reads `PerlIO::get_layers` (the runner's own abort: "The function PerlIO::pl-get_layers is undefined")
@@ -7636,14 +7634,6 @@ re/pat_rt_report.t	214	ok	not ok [PCL #210]	Match is linear, not quadratic; Bug 
 re/pat_rt_report.t	215	ok	not ok [PCL #211]	Match is linear, not quadratic; Bug 22395.	#1721
 re/pat_rt_report.t	216	ok	not ok [PCL #212]	Optimistic eval does not disable optimisations	#1721
 re/pat_rt_report.t	217	ok	not ok [PCL #213]	@-/@+ should not have undefined values; Bug 22614	#1721
-re/pat_rt_report.t	494	ok	not ok [PCL #490]	$c =~ /$c/i : chr (10) : u_str = 0 u_pat = 0; Bug 36207	#1721
-re/pat_rt_report.t	495	ok	not ok [PCL #491]	$c=~/$c|xyz/i : chr(10) : u_str = 0 u_pat = 0; Bug 36207	#1721
-re/pat_rt_report.t	496	ok	not ok [PCL #492]	$c =~ /$c/i : chr (10) : u_str = 0 u_pat = 1; Bug 36207	#1721
-re/pat_rt_report.t	497	ok	not ok [PCL #493]	$c=~/$c|xyz/i : chr(10) : u_str = 0 u_pat = 1; Bug 36207	#1721
-re/pat_rt_report.t	498	ok	not ok [PCL #494]	$c =~ /$c/i : chr (10) : u_str = 1 u_pat = 0; Bug 36207	#1721
-re/pat_rt_report.t	499	ok	not ok [PCL #495]	$c=~/$c|xyz/i : chr(10) : u_str = 1 u_pat = 0; Bug 36207	#1721
-re/pat_rt_report.t	500	ok	not ok [PCL #496]	$c =~ /$c/i : chr (10) : u_str = 1 u_pat = 1; Bug 36207	#1721
-re/pat_rt_report.t	501	ok	not ok [PCL #497]	$c=~/$c|xyz/i : chr(10) : u_str = 1 u_pat = 1; Bug 36207	#1721
 re/pat_rt_report.t	2492	ok	(missing)	"${s1}A" =~ m/$s1\N{LATIN CAPITAL LETTER A}/	#1721
 re/pat_rt_report.t	2494	ok	(missing)	"abbbbc" =~ m'\N{1}' && $& eq "a"	#1721
 re/pat_rt_report.t	2496	ok	(missing)	"abbbbc" =~ m'\N{3,4}' && $& eq "abbb"	#1721

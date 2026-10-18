@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #1576 one-file acceptance run of Mojo-DOM58 t/collection.t (subtest 'first', its row 6 \"right result\").\n\nA List::Util block function's BLOCK sees the ENCLOSING sub's @_ in perl (the XS calls the block with MULTICALL, no new @_); PCL's block is a lambda with an empty @_.\n\nREPRO (probed, perl 5.40.3 vs PCL on 0b836815 + s521c):\n    use List::Util;\n    sub f { my $x = shift; return List::Util::first { print \"args=@_\\n\"; 1 } (1,2); }\n    f('x', 'A', 'B');\nperl: args=A B      PCL: args=\n\nREACH: Mojo::DOM58::_Collection::first is `return List::Util::first { $_->$cb(@_) } @$self;` -- `$collection->first(first => sub {...})` passes the trailing code ref through @_; PCL calls ->first with no args.  Board: Mojo-DOM58 collection.t row 6 \"first\" (child row 6).\nLayer: the block-call mechanism of the List::Util shim / the runtime's block-arg call (the #1286 family: perl sets $_ and passes NOTHING -- and the enclosing @_ stays visible).\n",
+   "id" : "3550",
+   "status" : "pending",
+   "subject" : "a List::Util block function's BLOCK must see the enclosing sub's @_ (perl's MULTICALL); PCL's block gets an empty @_ -- Mojo-DOM58 collection.t 'first'"
+}

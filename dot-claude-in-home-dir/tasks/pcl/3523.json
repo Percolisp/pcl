@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521 (Fable, 2026-10-18 19:2x) from the s521c merge probes (review/p521c/d4-stdout-reopen.pl died in PERL at that line), re-probed (scratchpad rv/stdoutstr.pl): `open my $save, '>&', \\*STDOUT; my $r = open(STDOUT, '>', \\my $buf)` -- perl 5.40.3: `$r` false, `$!` \"Bad file descriptor\"; PCL (68aeebf5 base and the s521c tip): true, and prints land in `$buf`.  After `close STDOUT` first, both succeed (Capture-Tiny's 10-stdout-string shape).  PRE-EXISTING, PCL more permissive.\n\nperl's reason (PerlIO::scalar): re-opening a handle that owns fd 1 onto a scalar must first close the fd; `open` on an OPEN std handle does an implicit close only for ordinary files -- the scalar layer's open fails with EBADF when the handle still holds its descriptor (doio.c: the dup check).  FIX SHAPE: `%p-open-impl`'s in-memory arm fails with EBADF when the target handle is OPEN and holds a real descriptor (STDOUT / STDERR / STDIN or any fd-backed handle), as perl; after `close` it works.  Probe vs perl: the two shapes; a lexical fd-backed handle re-opened onto a scalar without close (perl: also EBADF? probe); `open STDOUT, '>', $file` without close (perl: fine -- the implicit close); `$!` text.  Guard row in Pl/t/io-shim-01.t.  LOW: no board or suite row depends on it.\n",
+   "id" : 3523,
+   "status" : "pending",
+   "subject" : "`open STDOUT, '>', \\$buf` WITHOUT closing STDOUT first SUCCEEDS in PCL (writes land in the string) where perl FAILS with EBADF (\"Bad file descriptor\": an open std handle cannot be re-opened onto an in-memory scalar); after a close both agree -- pre-existing, LOW"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #1576 one-file acceptance run of Path-Tiny t/locking.t (both subtests: \"subprocess failed to get lock\" got 2 expected 0; \"subprocess managed to get lock\" got 2 expected 1).\n\n`system LIST` does not run the '\"\"' overload of an OBJECT argument: it passes the referent's plain stringification.\n\nREPRO (probed, perl 5.40.3 vs PCL on 68aeebf5 + s521c, scratch/s521c/pr/sysx.pl):\n    use Path::Tiny; my $t = Path::Tiny->tempfile; $t->spew(\"exit 3;\\n\");\n    print system($^X, $t) >> 8, \"\\n\";       # perl 3;  PCL 2 + stderr: Can't open perl script \"ARRAY(0x2)\"\n    print system($^X, \"$t\") >> 8, \"\\n\";     # 3 in both\nLayer: the runtime's system / exec argument stringification (the overload-aware to-string, as print/join use).  Check exec, the pipe opens' LIST form and `qx` interpolation for the same miss.\nREACH: Path-Tiny locking.t rows 1-2; any `system($^X, $path_obj)`.\n",
+   "id" : "3556",
+   "status" : "pending",
+   "subject" : "system LIST does not run the '\"\"' overload of an object argument (passes ARRAY(0x2)) -- Path-Tiny locking.t: system($^X, $path_tiny_obj) runs a script named 'ARRAY(0x2)'"
+}

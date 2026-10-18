@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521d (Opus 5.5, 2026-10-18) from the #3516 probes (scratch/s521d/pr/g2.pl in the s521d worktree).\n    sub via_arg { my $rval = \\$_[0]; return \"\" . $$rval }\n    my $l = bless \\do { local *FH }, 'W'; print via_arg($$l), \"\\n\";\nperl 5.40.3: `*main::FH`.  PCL (68aeebf5 and the s521d tree alike): `*main::FH__PCL_LOCAL_1` -- the glob a `local *FH` makes is named by the lowering's internal rename, and that name leaks into the glob's stringification (and so into Data::Dump of an `\\do { local *FH }` handle).  PRE-EXISTING; LOW.  Fix shape: the localized glob keeps the Perl name it localizes (`*main::FH`) as its display name; the internal symbol stays internal.",
+   "id" : "3570",
+   "status" : "pending",
+   "subject" : "a `local *FH` glob's NAME shows PCL's internal rename: `\\do { local *FH }` stringifies as *main::FH__PCL_LOCAL_1 where perl prints *main::FH"
+}

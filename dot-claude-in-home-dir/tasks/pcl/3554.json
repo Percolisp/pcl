@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #1576 one-file acceptance runs of Path-Tiny t/rel-abs.t (stops in subtest \"relative on absolute paths with symlinks\" ... remove_tree) and t/filesystem.t.\n\nSILENT WRONG: after `lstat(SYMLINK)` the `_` stat buffer answers `-d _` TRUE for a symlink to a directory (it followed the link); perl's `_` holds the lstat result, so `-d _` is false.  File::Path's remove_tree uses exactly that (`lstat $root; -d _`) to decide whether to descend, so PCL chdirs INTO the symlinked directory and File::Path's own safety check aborts: \"directory .../A/B changed before chdir, expected dev=.. ino=N, actual ino=M, aborting\".\n\nREPRO (probed, perl 5.40.3 vs PCL on 68aeebf5 + s521c, scratch/s521c/pr/lst.pl):\n    use File::Temp qw(tempdir); my $d = tempdir(CLEANUP => 1);\n    mkdir \"$d/real\"; symlink \"$d/real\", \"$d/ln\" or die;\n    lstat(\"$d/ln\"); print \"lstat-then-_d=\", (-d _ ? 1 : 0), \"\\n\";      # perl 0, PCL 1\n    use File::Path qw(remove_tree); mkdir \"$d/A\"; symlink \"$d/real\", \"$d/A/B\";\n    remove_tree(\"$d/A\");      # perl: removed, target kept; PCL: dies (changed before chdir)\n(`(lstat)[1]` vs `(stat)[1]` differ correctly and `-l` is right: the bug is the `_` buffer a VOID / list lstat leaves.)  Family #1047 (the `_` cache records which stat filled it).\nREACH: Path-Tiny rel-abs.t (stops after 33 of its rows), every remove_tree over a tree holding a symlink to a directory.\n",
+   "id" : "3554",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: after lstat(SYMLINK) the _ buffer answers -d _ true (followed the link); File::Path remove_tree then chdirs into a symlinked dir and aborts 'changed before chdir' (Path-Tiny rel-abs.t)"
+}

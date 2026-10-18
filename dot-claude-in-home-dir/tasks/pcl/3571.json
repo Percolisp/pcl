@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521d (Opus 5.5, 2026-10-18) from the #3518 probes (scratch/s521d/pr/dot.pl):\n    open my $fh, '<', $0; my $l = <$fh>; $. = 20;\n    { local $. = 30; } print \"$.\\n\";   # perl 30   PCL 20\n    close $fh; print \"$.\\n\";           # perl 0    PCL 20\nperl's `local $.` localizes only the CURRENT-HANDLE pointer (PL_last_in_gv) -- the bare `local $.;` spelling already lowers to p-local-dot, which does that, but `local $. = N` lowers to a whole-box `(let (($. (p-box-for-local N))) ...)` that saves and restores the VALUE.  And close of the current handle resets its IoLINES to 0 while the handle stays the one $. reads.  PRE-EXISTING (68aeebf5 the same); LOW.  Fix shape: route `local $. = N` through p-local-dot + the assignment; close zeroes the handle's counter in *p-fh-lines*.",
+   "id" : "3571",
+   "status" : "pending",
+   "subject" : "`local $. = N` with a handle current restores the OLD line count where perl keeps the handle's new count, and `close` of the last-read handle leaves $. at its count where perl reads 0"
+}

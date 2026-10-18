@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #1576 one-file acceptance run of Path-Tiny t/mutable_tree_while_iterating.t + t/filesystem.t (\"remaining files\": `is_deeply([sort @files], ['base/...', ...])` where @files holds Path::Tiny OBJECTS).\n\nTest::More's is_deeply STRINGIFIES an object with a '\"\"' overload before it compares (`_unoverload_str(\\$e1, \\$e2)` in _deep_check), so a Path::Tiny object equals its path string.  PCL's test-deeply-equal (cl/pcl-test.lisp) compares the object's referent (an array) with the string and answers false; its diagnostic then prints the two OUTER arrays (got 'ARRAY(0x1)' expected 'ARRAY(0x2)'), not Test::More's `$got->[0] = ...` path.\n\nREPRO: package P; use overload '\"\"' => sub { \"x\" }, fallback => 1; package main; use Test::More; is_deeply([bless [], 'P'], ['x'], 'u'); done_testing;\nperl: ok 1 - u.   PCL: not ok.\nLayer: the TAP layer (cl/pcl-test.lisp test-deeply-equal), Test::More semantics.\n",
+   "id" : "3553",
+   "status" : "pending",
+   "subject" : "TAP layer: is_deeply does not stringify a '\"\"'-overloaded object before comparing (Test::More's _unoverload_str) -- Path-Tiny 'remaining files' x4"
+}

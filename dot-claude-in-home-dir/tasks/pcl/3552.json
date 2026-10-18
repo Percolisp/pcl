@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #1576 one-file acceptance run of Path-Tiny t/temp.t (subtest \"tempfile\", row \"cached_temp\": isa_ok sees \"The class (or class-like) 'GLOB(0x1)'\").\n\nA blessed GLOB returned from a sub loses its class: `ref` answers \"\".\n\nREPRO (probed, perl 5.40.3 vs PCL on 0b836815 + s521c):\n    use File::Temp;\n    my $t = File::Temp->new; my $h = { t => $t };\n    sub ct { $_[0]->{t} }\n    print ref($t), \"|\", ref($h->{t}), \"|\", ref(ct($h)), \"\\n\";\nperl: File::Temp|File::Temp|File::Temp      PCL: File::Temp|File::Temp|\nREACH: Path-Tiny temp.t \"cached_temp\" (Path::Tiny->tempfile->cached_temp), and any accessor that returns a File::Temp / IO::Handle object.  Area: #3433 (s521a: a glob ref carries its bless class on the glob through the handle table) -- the sub-return copy path does not.\n",
+   "id" : "3552",
+   "status" : "pending",
+   "subject" : "a blessed GLOB returned from a sub loses its class: ref(ct($h)) is '' where perl says File::Temp (Path-Tiny temp.t cached_temp)"
+}

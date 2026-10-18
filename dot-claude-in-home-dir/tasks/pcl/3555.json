@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #3432 one-file acceptance run of IO-Compress t/004gziphdr.t: past eq_set (row 450) the file now runs to row 463 and stops at line 343, a DROPPED statement:\n    PCL: statement not supported at t/004gziphdr.t line 343: my @tests = ( [ sub{ \"abc\" } => ...], ..., [ [ { 'abc', 1 } ] => ...], ... ) -- Bug. Fell through. Missing case: ['Statement::Compound< { 'abc', 1 }>', ...]\n\nCAUSE: PPI bug §5 (docs/ppi-upstream-bugs.md: `{ LITERAL , ... }` -- an anon hash -- is lexed as a Block).  PCL's workaround (`_bare_block_is_anon_hash`, Pl/Parser.pm) covers a STATEMENT-level Compound; inside a constructor (`[ [ { 'abc', 1 } ] ]`) the Block reaches the expression compiler unrepaired.\n\nREPRO (probed, perl 5.40.3 vs PCL on 68aeebf5 + s521c, scratch/s521c/pr/anonh.pl):\n    my @t = ( [ [ { 'abc', 1 } ] => \"x\" ], [ 2 => \"y\" ] );\n    print ref($t[0][0][0]), \" $t[0][0][0]{abc} $t[1][1]\\n\";\nperl: HASH 1 y      PCL: \"  y\" -- a SILENT WRONG in this spelling (the hash is lost), a statement drop in 004gziphdr.t's.\nFix at the PPI-repair layer (one predicate with the statement-level workaround, rule 11).\nREACH: IO-Compress 004gziphdr.t rows 464-919 (456 rows never produced).\n",
+   "id" : "3555",
+   "status" : "pending",
+   "subject" : "SILENT WRONG / drop: PPI Â§5 ({ LITERAL, ... } lexed as a Block) is repaired only at statement level -- [ [ { 'abc', 1 } ] ] loses its hash (IO-Compress 004gziphdr.t stops at line 343, 456 rows)"
+}

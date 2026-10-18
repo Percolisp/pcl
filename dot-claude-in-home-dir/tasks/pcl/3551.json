@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521c (Opus 5.5, 2026-10-18) from the #1576 one-file acceptance run of Mojo-DOM58 t/dom.t: now that subtest runs, the file's FIRST assertion dies.\n\nREPRO (dist-specific; probed, perl 5.40.3 vs PCL on 0b836815 + s521c):\n    use lib '/home/bernt/.cpan/build/Mojo-DOM58-3.002-0/lib';\n    use Test::More; use Mojo::DOM58;\n    is(Mojo::DOM58->new, '', 'is');     # PCL dies: Can't use string (\"0\") as a HASH ref while \"strict refs\" in use\n    done_testing;\nperl: ok 1 - is.  The SAME object through a variable passes on PCL (`my $d = Mojo::DOM58->new; is($d, '', 'is')` -> ok), and `f(Mojo::DOM58->new)` into a plain sub, `scalar(Mojo::DOM58->new)` and `\"$d\"` all work.  The emitted call is `(pl-is (p-scalar (p-scalar-ctx (p-method-call ... \"new\"))) \"\" \"is\")`.  Mojo::DOM58 overloads '@{}', '%{}', bool and '\"\"'; a dist-free class with the same overloads and the same `new` did NOT reproduce (scratch/s521c/pr/mojo3.pl) -- the next step is to shrink Mojo::DOM58 itself.\nREACH: Mojo-DOM58 t/dom.t stops at its first row (perl: 126 top-level rows).\n",
+   "id" : "3551",
+   "status" : "pending",
+   "subject" : "is(Mojo::DOM58->new, '') dies 'Can't use string (\"0\") as a HASH ref' on PCL (the same object through a variable passes) -- Mojo-DOM58 dom.t stops at its first row"
+}
