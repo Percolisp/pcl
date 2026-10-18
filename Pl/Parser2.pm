@@ -4329,9 +4329,9 @@ sub _blk_extent {
 sub _hard_decl_count {
   my ($self, $stmts, $bare, $sig) = @_;
   # $sig: count declarations of ONE canonical variable (e.g. '%' → only
-  # `my %x`).  Default counts every sigil of the bare name — the conflated
-  # mode the scalar-promotion ambiguity gate relies on.
-  my $sigpat = defined $sig ? quotemeta($sig) : '[\$\@\%]';
+  # `my %x`).  Required: a sigil-blind count conflated `$x` with `@x` (#3061).
+  die "_hard_decl_count: no sigil for '$bare'\n" unless defined $sig;
+  my $sigpat = quotemeta($sig);
   my $hard = 0;
   for my $stmt (@$stmts) {
     next unless ref $stmt && $stmt->isa('PPI::Node');
@@ -5426,15 +5426,15 @@ sub _promote_captured {
   }
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
-  # Compound head like `foreach my $x`), blocks the rename.  For a SCALAR
-  # canon, count ALL sigils — that also refuses the ambiguous case where the
-  # one name denotes >1 variable at the same level ($x beside @x), where the
-  # interp rewrite for `$x` text cannot be trusted.  A CONTAINER canon counts
-  # only its own sigil: its rewrite shapes (`%x`, `$x{`, `@x{` resp. `@x`,
-  # `$x[`, `$#x`) are syntactically disjoint from a sibling scalar/other-
-  # family variable (token rewrites key on ->symbol), so `my $x` beside
-  # `my %x` does not block promoting %x (array.t bug-70171 block).
-  my $hard = $self->_hard_decl_count($estmts, $bare, $sig eq '$' ? undef : $sig);
+  # Compound head like `foreach my $x`), blocks the rename.  Every canon
+  # counts only its OWN sigil (#3061): `$x`, `@x` and `%x` are three
+  # variables, and every rewrite this promotion performs keys on the canonical
+  # symbol -- token rewrites on ->symbol (PPI answers `@x` for `$x[0]`), the
+  # interp fixer's scalar arm carries `(?![\[\{])` -- so a sibling of another
+  # sigil can neither be renamed by nor block this one (array.t bug-70171 for
+  # the container side; `my $e; my @e; sub rf { $e ? $e[1] : 0 }` for the
+  # scalar side, which the old all-sigils count refused, killing the file).
+  my $hard = $self->_hard_decl_count($estmts, $bare, $sig);
   return $refuse->("hard-decls=$hard in extent") if $hard != 1;
   # (#254 A-iv, s365: the blanket "family use (@x/%x/$#x) in extent" refusal
   # for a SCALAR promotion is GONE.  It predated the sigil-exact rewriter and
