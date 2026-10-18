@@ -1492,7 +1492,7 @@
         (p-die (format nil "Undefined subroutine &~A called"
                        (%p-sub-perl-name sym))))))
 
-(defmacro p-declare-sub (name &optional body)
+(defmacro p-declare-sub (name &optional body pkg)
   "A sub NAME the file declares: a stub until the definition loads.  BODY is
    :body when the file DEFINES the sub (not only `sub foo;`): the name is then
    RESERVED here, at the head of its section, so every form read after this
@@ -1501,7 +1501,10 @@
    those reads, and a name the package only inherits from :pcl (a TAP or
    runtime function: explain, run_perl ...) would read as pcl's there.  A
    bodyless `sub foo ($@);` reserves nothing: perl-tests/t/test.pl declares
-   the TAP layer's ok / is that way and must keep reading them."
+   the TAP layer's ok / is that way and must keep reading them.  PKG (a
+   package designator) names the package of a QUALIFIED name written in
+   another package's section (`sub E::explain` in main): the reservation
+   happens there, as the name's own prefix says."
   (case body
     ((nil)
      `(progn
@@ -1511,11 +1514,22 @@
           (defun ,name (&rest args)
             (%p-call-of-undefined-sub ',name args)))))
     (:body
-     `(progn
-        (eval-when (:compile-toplevel :load-toplevel :execute)
-          (%p-reserve-sub-name ',name))
-        (%p-declare-sub-stub (%p-reserve-sub-name ',name))))
+     (let ((reserve (if pkg
+                        `(let ((*package* (%p-declare-sub-package ,pkg)))
+                           (%p-reserve-sub-name ',name))
+                        `(%p-reserve-sub-name ',name))))
+       `(progn
+          (eval-when (:compile-toplevel :load-toplevel :execute)
+            ,reserve)
+          (%p-declare-sub-stub ,reserve))))
     (t (error "p-declare-sub: BODY must be NIL or :BODY, not ~S" body))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-declare-sub-package (designator)
+    "The package a qualified p-declare-sub reserves in; the emitter defines
+     every such package at the file top, so a missing one is a bug."
+    (or (find-package designator)
+        (error "p-declare-sub: no package ~S" designator))))
 
 (defun %p-declare-sub-stub (sym)
   "p-declare-sub's stub on the RESERVED symbol SYM (the :body arm)."
@@ -25856,7 +25870,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6885"
+(defparameter *pcl-cache-generation* "v2-6886"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

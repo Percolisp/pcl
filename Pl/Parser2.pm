@@ -2839,7 +2839,7 @@ sub parse {
       my $earlier = join "\n", @earlier;
       (my $prefix = $self->fallback_parser->_cl_pkg_designator($sec->{pkg})) =~ s/^://;
       for my $line (@{ $sec->{decls} }, @{ $sec->{captured} }) {
-        next unless $i > 0 && $line =~ /^\(p-declare-sub\s+(\S+?)(?:\s+:body)?\)\s*$/;
+        next unless $i > 0 && $line =~ /^\(p-declare-sub\s+(\S+?)(?:\s+:body(?:\s+\S+)?)?\)\s*$/;
         my $name = $1;
         (my $bare = $name) =~ s/^.*:://;
         next unless index($earlier, $bare) >= 0;

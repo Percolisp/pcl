@@ -112,5 +112,10 @@ test_mc('#3405 the same inside a package BLOCK: the forward call and the method 
 print E::a(), " ", E->explain, "\n";
 PERL
 
+test_mc('#3405 a QUALIFIED definition written in another package (`sub E::explain` in main): forward call, call and method', <<'PERL');
+sub r { E::explain() } sub E::explain { "E-ex" }
+print r(), " ", E::explain(), " ", E->explain, "\n";
+PERL
+
 
 done_testing;

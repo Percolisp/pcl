@@ -13434,13 +13434,17 @@ sub _compile_default_expr {
 # RESERVE the name there, before any form that calls it is read -- a call
 # written above the definition then reads the package's own symbol, not an
 # inherited :pcl function of the same name (#3405: `package E; sub a {
-# explain() } sub explain {...}`).  A qualified NAME is reserved by its
-# install only: the reservation reads *package*, which is the section's, not
-# the qualifier's.  ONE spelling for the three emitters (rule 11): this v1
-# path and Pl::Parser2's two.
+# explain() } sub explain {...}`).  A QUALIFIED name (`sub E::explain` written
+# in another package) also carries its qualifier as a keyword, read with the
+# same readtable as the name's own prefix, because the reservation happens in
+# that package, not the section's.  ONE spelling for the three emitters (rule
+# 11): this v1 path and Pl::Parser2's two.
 sub declare_sub_form {
   my ($name, $has_body) = @_;
-  return ['p-declare-sub', $name, ($has_body && $name !~ /::/ ? (':body') : ())];
+  return ['p-declare-sub', $name] unless $has_body;
+  return ['p-declare-sub', $name, ':body', ":$1"]
+    if $name =~ /^(.+)::([^:|]+|\|[^|]*\|)\z/s;
+  return ['p-declare-sub', $name, ':body'];
 }
 
 1;
