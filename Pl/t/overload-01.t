@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 47;
+plan tests => 48;
 
 sub run_cl {
     my ($code) = @_;
@@ -905,4 +905,38 @@ PL
     my $want = `perl $pl_file 2>&1`;
     is(run_cl($prog), $want,
        '#3395 #3396: a &{} overload makes an object callable; overloads written as stash entries (overload.pm\'s own form) work like use overload (perl oracle)');
+}
+
+{
+    # #3413 (s520a): a filename builtin takes its operand's `""` overload, as
+    # the filetests do (#1031) -- unlink, chmod, chown, utime, truncate,
+    # stat and a 3-arg open used the payload's raw text
+    # ("P=SCALAR(0x...)"); Path::Tiny's `1 while unlink $file` deleted
+    # nothing.  A BLESSED scalar ref is a PATH to open, never a memory
+    # target; a plain \$s still is one.
+    my $prog = <<'PL';
+package P; use overload '""' => sub { ${$_[0]} }, fallback => 1;
+sub new { my ($c, $s) = @_; bless \$s, $c }
+package main;
+my $d = "/tmp/pcl-overload01-3413-$$"; mkdir P->new($d) or die "mkdir: $!";
+sub o { P->new("$d/$_[0]") }
+my @r;
+open my $fh, '>', o("f1") or die "open: $!"; print $fh "xyz"; close $fh;
+push @r, "open:" . (-e "$d/f1" ? 1 : 0);
+push @r, "chmod:" . chmod(0600, o("f1")) . sprintf("%o", (stat "$d/f1")[2] & 07777);
+push @r, "utime:" . utime(1000, 2000, o("f1")) . (stat "$d/f1")[9];
+push @r, "chown:" . chown($<, $(+0, o("f1"));
+push @r, "stat:" . scalar(my @s = stat(o("f1")));
+push @r, "truncate:" . (truncate(o("f1"), 1) ? 1 : 0) . (-s "$d/f1");
+push @r, "rename:" . rename(o("f1"), o("f2")) . " link:" . link(o("f2"), o("f3"));
+my $n = 0; $n++ while unlink o("f3"); push @r, "unlink:$n" . (-e "$d/f3" ? 1 : 0);
+my $buf = ""; open my $m, '>', \$buf or die; print $m "mem"; close $m; push @r, "mem:$buf";
+push @r, "unlink2:" . unlink(o("f2")) . " rmdir:" . (rmdir(P->new($d)) ? 1 : 0);
+print join(" ", @r), "\n";
+PL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    binmode($fh, ':raw'); print $fh $prog; close $fh;
+    my $want = `perl $pl_file 2>&1`;
+    is(run_cl($prog), $want,
+       '#3413: unlink / chmod / chown / utime / truncate / stat / rename / link / open take a path object\'s "" overload (perl oracle)');
 }

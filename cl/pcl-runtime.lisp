@@ -20549,7 +20549,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;; is a different depth in each: %p-ref-referent is the ONE reading of both.
   ;; Reading one level down for both opened the WRAPPER, whose text is
   ;; "SCALAR(0x..)" (#3202).
-  (when (%p-scalar-referent-p filename)
+  ;; A BLESSED scalar ref is a PATH, as in perl (its `""' overload, or the
+  ;; "Class=SCALAR(0x...)" text): only a plain \$s is a memory target (#3413).
+  (when (and (%p-scalar-referent-p filename) (not (p-get-class filename)))
     (return-from %p-open-impl
       (%p-open-memory fh mode (%p-ref-referent filename))))
   (let* ((mode-ef  (multiple-value-list (%p-split-open-mode (to-string mode))))
@@ -20558,7 +20560,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (mode-str (first mode-ef))
          (ef       (third mode-ef))
          (bad-layer (fourth mode-ef))
-         (file-str (to-string filename))
+         (file-str (%p-path-string filename))
          ;; An UNDEF filename in the three-argument form is perl's anonymous
          ;; temporary file; NIL means "not that shape", and the mode's own
          ;; clause below answers instead.
@@ -21630,7 +21632,7 @@ size comes from fstat on the descriptor, after the buffered output is written
           ((or (and (symbolp v) v (not (eq v *p-undef*)))
                (streamp v) (%p-socket-p v) (p-typeglob-p v))
            (%p-io-errno-fail 9))
-          (t (sb-posix:truncate (to-string v) len) 1))
+          (t (sb-posix:truncate (%p-path-string fh-or-file) len) 1))
       ;; perl's truncate is TRUE on success and UNDEF on error (probed 5.40.3
       ;; over five failing shapes) — never the empty string this handed back.
       (error () (%pcl-save-errno) *p-undef*))))
@@ -22558,7 +22560,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    exactly how the handler never ran (task #1031)."
   (if (and (%p-stat-handle-shaped-p v) (not (string= op "l")))
       (%p-stat-descriptor arg)
-      (values :path (to-string arg))))
+      (values :path (%p-path-string arg))))
 
 (defun %p-stat-resolve (arg op)
   "Classify a stat/filetest operand ARG for operator OP into (:path STRING) or
@@ -23034,6 +23036,15 @@ size comes from fstat on the descriptor, after the buffered output is written
    this is — 'This Perl not built to support threads')."
   x)
 
+(defun %p-path-string (x)
+  "THE PATH a filename operand names (#3413): the operand stringified AS IT
+   ARRIVED -- a BOX stays a box, so a `\"\"' overload and a tie's FETCH run.
+   Peeling the box first (`(to-string (unbox f))') handed unlink(2) the text
+   \"Path::Tiny=ARRAY(0x...)\"; the filetests learned the same rule in #1031.
+   The one spelling for stat/lstat, open, unlink, chmod, chown, utime, rename,
+   link, symlink, readlink, mkdir, rmdir and truncate."
+  (to-string x))
+
 (defun p-unlink (&rest files)
   "Perl unlink - delete files via unlink(2), the path string passed to the
    C layer untouched (wildcard characters are literal, #755).  A symlink is
@@ -23046,7 +23057,7 @@ size comes from fstat on the descriptor, after the buffered output is written
     (loop for f across (p-flatten-args files) do
       (handler-case
           (progn
-            (sb-posix:unlink (to-string (unbox f)))
+            (sb-posix:unlink (%p-path-string f))
             (incf count))
         (sb-posix:syscall-error (e)
           (setf *p-stored-errno* (sb-posix:syscall-errno e)))
@@ -24167,7 +24178,7 @@ size comes from fstat on the descriptor, after the buffered output is written
 
 (defun p-mkdir (dir &optional mode)
   "Perl mkdir - create directory. Returns true on success, sets $! on failure."
-  (let ((path (to-string dir))
+  (let ((path (%p-path-string dir))
         (m (if mode (truncate (to-number mode)) #o755)))
     (handler-case
         (progn (sb-posix:mkdir path m) t)
@@ -24179,7 +24190,7 @@ size comes from fstat on the descriptor, after the buffered output is written
 (defun p-rmdir (dir)
   "Perl rmdir - remove empty directory. Returns true on success, sets $! on failure."
   (handler-case
-      (progn (sb-posix:rmdir (to-string dir)) t)
+      (progn (sb-posix:rmdir (%p-path-string dir)) t)
     (sb-posix:syscall-error (e)
       (setf *p-stored-errno* (sb-posix:syscall-errno e))
       nil)
@@ -24199,7 +24210,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    cwd-relative (CL rename-file merges it against OLD's directory), an
    existing NEW is replaced, and $! reports a failure."
   (handler-case
-      (progn (sb-posix:rename (to-string old) (to-string new)) 1)
+      (progn (sb-posix:rename (%p-path-string old) (%p-path-string new)) 1)
     (sb-posix:syscall-error (e)
       (setf *p-stored-errno* (sb-posix:syscall-errno e))
       nil)
@@ -24219,7 +24230,7 @@ size comes from fstat on the descriptor, after the buffered output is written
             (progn
               (if (streamp v)
                   (sb-posix:fchmod (sb-sys:fd-stream-fd v) m)
-                  (sb-posix:chmod (to-string v) m))
+                  (sb-posix:chmod (%p-path-string f) m))
               (incf count))
           (error () (%pcl-save-errno) nil))))
     count))
@@ -24236,18 +24247,18 @@ size comes from fstat on the descriptor, after the buffered output is written
 
 (defun p-link (old new)
   "Perl link OLD, NEW — create a hard link. Returns 1 on success, '' on failure."
-  (handler-case (progn (sb-posix:link (to-string old) (to-string new)) 1)
+  (handler-case (progn (sb-posix:link (%p-path-string old) (%p-path-string new)) 1)
     (error () (%pcl-save-errno) "")))
 
 (defun p-symlink (old new)
   "Perl symlink OLD, NEW — create a symbolic link. Returns 1 on success, 0 on failure."
-  (handler-case (progn (sb-posix:symlink (to-string old) (to-string new)) 1)
+  (handler-case (progn (sb-posix:symlink (%p-path-string old) (%p-path-string new)) 1)
     (error () (%pcl-save-errno) 0)))
 
 (defun p-readlink (path)
   "Perl readlink EXPR — return the target of a symbolic link (undef on failure).
    EXPR defaults to $_ (the codegen supplies it for the no-arg form)."
-  (handler-case (sb-posix:readlink (to-string path))
+  (handler-case (sb-posix:readlink (%p-path-string path))
     (error () (%pcl-save-errno) *p-undef*)))
 
 (defun %pcl-chown-id (x)
@@ -24272,7 +24283,7 @@ size comes from fstat on the descriptor, after the buffered output is written
             (progn
               (if (streamp v)
                   (sb-posix:fchown (sb-sys:fd-stream-fd v) u g)
-                  (sb-posix:chown (to-string v) u g))
+                  (sb-posix:chown (%p-path-string f) u g))
               (incf count))
           (error () (%pcl-save-errno) nil))))
     count))
@@ -24295,8 +24306,8 @@ size comes from fstat on the descriptor, after the buffered output is written
       (handler-case
           (progn
             (if (and a m)
-                (sb-posix:utime (to-string (unbox f)) a m)
-                (sb-posix:utime (to-string (unbox f))))
+                (sb-posix:utime (%p-path-string f) a m)
+                (sb-posix:utime (%p-path-string f)))
             (incf count))
         (sb-posix:syscall-error (e)
           (setf *p-stored-errno* (sb-posix:syscall-errno e)))
