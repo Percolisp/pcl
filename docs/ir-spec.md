@@ -1171,6 +1171,7 @@ still drop, because PPI lexes `%?` as two operators (task #550).
 | `my $x = INIT;` (raw slot, §2.2) | `(let (($x INIT)) …rest…)` |
 | `my $i = $i + 1;` (self-ref init) | `(let (($i (p-box-init $i))) …)` — CL `let` inits evaluate in the *outer* environment, matching Perl's "RHS sees the outer variable" rule |
 | `my @a; my %h;` | `let` binding to a fresh vector / hash table |
+| an expression-embedded `my` (`open(my $fh, …)`, `f(my $t)`) — in a plain statement OR in a declaration's initializer (`my $l = X->n(my $t)`, #3431) | `(p-let (($t :box (make-p-box nil))) <the statement> …rest…)` — let-bound around the statement and the block remainder, so it is FRESH each time the block runs (each loop iteration).  A name the declaration mentions a second time keeps the older path (#3490) |
 | `our $g = V;` | `(p-defcell $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place (`defvar` instead for an exception-set name). `our` shadowing a `my` gates to v1 |
 | `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(p-defcell $n__state__K (make-p-box nil))` + raw once-flag `(p-defcell $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. `state` *outside* named subs, in anon subs / map-grep-sort blocks (per-closure instances), list/non-scalar `state`, and blocked renames still gate → v1, which uses its own `$state__<sub>__<name>__N` cells |
 | undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced name gets `(p-defcell NAME <fresh container>)` — `(defvar …)` for the exception set — under "Forward declarations"; package-qualified refs get the declaration in *their* package |
@@ -2046,6 +2047,12 @@ Three sites read that same rule, and each was a silent wrong before it:
   context the match sits in — `` print "[", `cmd` =~ s/\n//r, "]" `` binds the
   captured string, not an array.  The pattern / replacement child keeps the
   match's own context, so a list-context `m//g` still collects every match.
+* **The REFERENCE operand of a deref is SCALAR context** (task #3435) — the
+  base of `->{…}` / `->[…]` (and `$$r[i]`, `${ E }{k}`), and the operand of a
+  sigil cast `@{ E }` `%{ E }` `${ E }` `$#{ E }` `&{ E }` — whatever context
+  the deref sits in: `print f()->{k}` calls `f` in scalar context
+  (`(p-gethash-deref (p-scalar-ctx (pl-f)) "k")`).  A LIST SLICE base
+  (`(f())[0]->{k}`) is the exception above and stays LIST.
 
 ## 5. Calling convention
 
@@ -3933,6 +3940,7 @@ follows from that one sentence, and a translator must make all of it agree:
 | `ref(\$fh)` | `REF` (a ref to a scalar that holds a ref) |
 | `my $b = $fh` | the SAME handle — a copy of the box's value |
 | `bless $fh, "C"` (normative, s502e / #2056) | marks the HANDLE (the stream), not the variable: every copy — `my $b = $fh`, `return $fh` — answers `ref` C, `blessed` C, `reftype` GLOB |
+| `bless $g, "C"` on a GLOB ref (`Symbol::gensym`, `\do { local *FH }`; normative, #3433) | marks the GLOB (the p-typeglob struct), the same table as a handle: a re-bless through a COPY (`my $p = $o; bless $p, "C"`) is seen by `ref($o)` and dispatch.  A second mention of a NAMED glob (`\*FOO`) is a different struct today (#3491) |
 | `${*$fh}{K}`, `@{*$fh}`, `${*$fh}` (s502e / #2056) | the slots of ONE anonymous glob made for that stream on its first `*` dereference — the glob-as-object idiom of core File::Temp / IO::Socket; print and readline never reach it |
 | `$$globref` vs `${*glob}` (normative, s507b / #2688) | `$` on a REFERENCE to a glob (`$gr = \*foo`) yields the GLOB itself; only a glob VALUE (`${*foo}`, `${*$gr}`, `my $g = *foo; $$g`) reads its SCALAR slot.  Example: `our $foo = "sv"; my $gr = \*foo; print $$gr, ${*$gr}` prints `*main::foosv` |
 
