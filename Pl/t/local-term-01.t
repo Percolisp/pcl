@@ -258,4 +258,66 @@ PERL
          '... and the transpile announces the refusal');
 }
 
+# 9. #3363 (R1): a `local` term in an argument list a paren-less list operator
+#    OWNS is not a void comma list -- never split; the hoist owns it (the
+#    operator runs AFTER its arguments).  print / return / push / die / a
+#    declared `foo LIST`.
+test_lt('local term in a list operator\'s arguments: print / return / push / die / foo', <<'PERL');
+our $x = 0; our @l;
+sub foo { print "foo @_ x=$x\n" }
+sub r { return 1, local $x = 2 }
+{ print "a", local $x = 5; print "\n"; print "in x=$x\n"; }
+print "x=$x\n";
+my @r = r(); print "r=@r x=$x\n";
+{ push @l, local $x = 3; print "l=@l x=$x\n"; }
+print "x=$x\n";
+{ foo 1, local $x = 4; print "x=$x\n"; }
+print "x=$x\n";
+{ eval { die "d", local $x = 6, "\n" }; print "err=$@x=$x\n"; }
+print "x=$x\n";
+PERL
+
+# 10. #3363 (R1, f1b): `COND or LIST` -- the loose `or` OWNS the comma list
+#     (`COND or (h(), local $x = 9)`), so the local happens only when COND is
+#     false, and lasts to the enclosing block's end.
+test_lt('COND or h(), local LIST: guarded by COND, not split unconditionally', <<'PERL');
+our $x = 0; my $ok = 1; sub h { print "h x=$x\n"; 2 }
+{ $ok or h(), local $x = 9; print "x=$x\n"; }
+{ !$ok or h(), local $x = 8; print "x=$x\n"; }
+{ $ok and h(), local $x = 7, h(); print "x=$x\n"; }
+print "x=$x\n";
+PERL
+
+# 11. #3363 (R8, f8): a CALL that runs before the local term (a method
+#     invocant `cfg()`, `$o->get`) must still see the OLD value: the invocant
+#     is evaluated first, then the local, then the owning method.
+test_lt('INVOCANT->m(local X): the invocant runs before the local', <<'PERL');
+our $X = 'outer';
+sub cfg { print "cfg sees $X\n"; bless {}, 'C' }
+sub C::apply { print "apply sees $X arg=$_[1]\n" }
+sub C::get { print "get sees $X\n"; $_[0] }
+{ cfg()->apply(local $X = 'new'); print "in: $X\n"; }
+print "after: $X\n";
+my $o = bless {}, 'C';
+{ $o->get->apply(local $X = 'n2'); print "in: $X\n"; }
+print "after: $X\n";
+PERL
+
+# 12. #3363 (R8): the LEFT side of an assignment runs after its right side,
+#     so `(local $g) = ($g + 1)` reads the OLD $g in perl ("in g=2" then
+#     "g=1") -- the hoist must not move the local above the right side
+#     (fd04c048 printed "in g=1": the right side read the localized undef).
+#     Not lowered: a void-position miss, announced (ruling 4), unlocalized.
+{
+    my $code = <<'PERL';
+our $g = 1;
+{ (local $g) = ($g + 1); print "in g=$g\n"; }
+print "g=$g\n";
+PERL
+    my $err;
+    is(run_cl($code, \$err), "in g=2\ng=2\n", 'local on an assignment\'s left side is not hoisted above its right side');
+    like($err, qr/^PCL: local in an unsupported expression position at \S+ line 2 -- not localized$/m,
+         '... and the transpile announces it');
+}
+
 done_testing();

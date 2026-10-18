@@ -7030,6 +7030,16 @@ sub _split_void_local_list {
   @terms = map { _unwrap_paren_term($_) } @terms if $logical;
   return 0 unless @terms > 1 || $logical;
   return 0 unless grep { $_->[0]->isa('PPI::Token::Word') && $_->[0]->content eq 'local' } @terms;
+  # The list must be the statement's OWN (#3363): a loose and/or/xor/not at
+  # its top level owns the commas (`$ok or h(), local $x` is `$ok or (h(),
+  # local $x)` -- _logical_local_list lowers the shapes it recognises), and so
+  # does a paren-less list operator in any term but the last (`print "a",
+  # local $x = 5` is ONE call; the hoist lowers it).
+  return 0 if !$logical && grep { $_->isa('PPI::Token::Operator')
+                                  && $_->content =~ /^(?:and|or|xor|not)$/ } @$pre;
+  for my $t (@terms[0 .. $#terms - 1]) {
+    return 0 if grep { $_->isa('PPI::Token::Word') && $self->_word_takes_list($_) } @$t;
+  }
   my ($decl, $guard) = $self->_local_cond_prologue($mod, $cond) or return 0;
   my @stmts = length $decl ? ($decl) : ();
   for my $t (@terms) {
@@ -7041,7 +7051,7 @@ sub _split_void_local_list {
 }
 
 # The logical spelling of shape (a): the statement's children are
-# `COND OP (LIST)` with OP and/&&/or/||, or `COND OP local …` with OP the
+# `COND OP (LIST)` with OP and/&&/or/||, or `COND OP … local …` with OP the
 # low-precedence and/or, whose right operand is then the whole comma list
 # after it (B::Deparse 6279 `$cv and local($self->{curcv}) = $cv, local(…);`,
 # YAML::PP::Emitter 508 `DEBUG and local $Data::Dumper::Useqq = 1;`).
@@ -7053,10 +7063,12 @@ sub _logical_local_list {
   my ($pre) = @_;
   my @k = @$pre;
   for my $i (1 .. $#k - 1) {
-    next unless $k[$i]->isa('PPI::Token::Operator') && $k[$i]->content =~ /^(?:and|or)$/
-             && $k[$i + 1]->isa('PPI::Token::Word') && $k[$i + 1]->content eq 'local';
+    next unless $k[$i]->isa('PPI::Token::Operator') && $k[$i]->content =~ /^(?:and|or)$/;
     my @c = @k[0 .. $i - 1];
     my @r = @k[$i + 1 .. $#k];
+    # the right operand is a comma list with a top-level `local` term (#3363:
+    # `$ok or h(), local $x = 9` -- not only a list that STARTS with it)
+    next unless grep { $_->isa('PPI::Token::Word') && $_->content eq 'local' } @r;
     my $loose = qr/^(?:and|or|xor)$/;
     return () if grep { $_->isa('PPI::Token::Operator') && $_->content =~ $loose } @r;
     return () if $k[$i]->content eq 'and'
@@ -7122,23 +7134,51 @@ sub _hoist_local_term {
   my @op = _local_operand($l) or return 0;
   my %names = map { $_->symbol => 1 }
               grep { $_->isa('PPI::Token::Symbol') } map { $_->isa('PPI::Node') ? $_->tokens : ($_) } @op;
-  for my $t ($s->tokens) {
-    last if $t == $l;
-    next if $t->isa('PPI::Token::Whitespace') || $t->isa('PPI::Token::Comment');
-    next if $t->isa('PPI::Token::Structure');
-    next if $t->isa('PPI::Token::Word');
-    next if $t->isa('PPI::Token::Cast');
-    return 0 if $t->isa('PPI::Token::Symbol') && $names{ $t->symbol };
-    next if $t->isa('PPI::Token::Symbol');
-    next if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:=|->|\\)$/;
-    return 0;
+  # The left operand of an assignment runs AFTER its right side, so the right
+  # side is checked like the tokens before the term: `(local $g) = ($g + 1)`
+  # reads the OLD $g (#3363); `@{local $x[0][0]} = 1` may hoist.
+  for (my $a = $l->parent; $a && $a != $s; $a = $a->parent) {
+    my $n = $a->snext_sibling;
+    next unless $n && $n->isa('PPI::Token::Operator')
+             && $n->content =~ /^(?:[-+*\/.x%&|^]?=|\*\*=|\/\/=|\|\|=|&&=|<<=|>>=)$/;
+    for (my $r = $n->next_sibling; $r; $r = $r->next_sibling) {
+      for my $t ($r->isa('PPI::Node') ? $r->tokens : ($r)) {
+        return 0 if $t->isa('PPI::Token::Word') ? $self->_word_before_local($t, $l) ne 'inert'
+                  : !_token_inert_before_local($t, \%names);
+      }
+    }
   }
   my ($pre, $mod, $cond) = $compound ? ([$s->schildren], undef, []) : _stmt_modifier_split($s);
   return 0 if defined $mod && $mod !~ /^(?:if|unless)$/;
+  # A method invocant that runs calls (`cfg()->m(local …)`, `$o->get->m(…)`)
+  # is evaluated ONCE into a temporary BEFORE the local, as perl does (#3363).
+  my @inv = $compound ? () : $self->_local_invocant($l, $pre);
+  my %inv = map { refaddr($_) => 1 } map { $_->isa('PPI::Node') ? $_->tokens : ($_) } @inv;
+  my $owner;      # a comma separates ARGUMENTS only after the call owning them
+  for my $t ($s->tokens) {
+    last if $t == $l;
+    next if $inv{ refaddr $t };
+    if ($t->isa('PPI::Token::Word')) {
+      my $k = $self->_word_before_local($t, $l);
+      return 0 if $k eq 'first';
+      $owner = 1 if $k eq 'owner';
+      next;
+    }
+    return 0 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:,|=>)$/ && !$owner;
+    return 0 if !_token_inert_before_local($t, \%names);
+  }
   my ($decl, $guard) = $self->_local_cond_prologue($mod, $cond) or return 0;
   my $optext = _elements_text(@op);
   return 0 if !defined $optext;
   my @decls = length $decl ? ($decl) : ();
+  my $invtmp;
+  if (@inv) {
+    my $it = _elements_text(@inv);
+    return 0 if !defined $it;
+    $invtmp = '$__pcl_linv_' . ++$self->{_local_term_n};
+    my ($cv) = $guard =~ /(\$\w+)$/;
+    push @decls, defined $cv ? "my $invtmp = $cv ? scalar($it) : undef;" : "my $invtmp = $it;";
+  }
   if ($op[0]->isa('PPI::Token::Operator')) {   # +(EXPR)->...: name the base once
     my $b = '$__pcl_lbase_' . ++$self->{_local_term_n};
     push @decls, "my $b = " . $op[1]->content . ";";
@@ -7154,12 +7194,108 @@ sub _hoist_local_term {
   for my $t ($s->tokens) {
     last if !defined $stop && $t->isa(q{PPI::Token::Structure}) && $t->content eq q{;}
          && $t->parent == $s;
-    $body .= $t->content unless $t == $l || ($ws && $t == $ws);
+    if ($inv{ refaddr $t }) {
+      $body .= $invtmp if !length $body || $body !~ /\Q$invtmp\E\z/;
+    } elsif (!($t == $l || ($ws && $t == $ws))) {
+      $body .= $t->content;
+    }
     last if defined $stop && $t == $stop;
   }
   $body .= "$guard;" if !$compound;
   my @stmts = (@decls, "local $optext$guard;", $body);
   return $self->_replace_statement_by($s, join(' ', @stmts), scalar @stmts);
+}
+
+# A token before the `local` term that the hoist may move the local above
+# without changing what it observes: layout, structure, casts, a literal that
+# reads no variable, a variable other than the operand's, and the operators
+# that do no work of their own (`=` `->` `\` `,` `=>`).  WORDS are asked
+# separately (_word_before_local).
+sub _token_inert_before_local {
+  my ($t, $names) = @_;
+  return 1 if $t->isa('PPI::Token::Whitespace') || $t->isa('PPI::Token::Comment');
+  return 1 if $t->isa('PPI::Token::Structure') || $t->isa('PPI::Token::Cast');
+  return 1 if $t->isa('PPI::Token::Number') || $t->isa('PPI::Token::Quote::Single')
+           || $t->isa('PPI::Token::Quote::Literal') || $t->isa('PPI::Token::QuoteLike::Words');
+  return 1 if ($t->isa('PPI::Token::Quote::Double') || $t->isa('PPI::Token::Quote::Interpolate'))
+           && $t->content !~ /[\$\@]/;
+  return !$names->{ $t->symbol } if $t->isa('PPI::Token::Symbol');
+  return 1 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:=|->|\\|,|=>)$/;
+  return 0;
+}
+
+# THE ONE QUESTION of #3363 (rule 11): what does a WORD that precedes the
+# `local` term $l in its statement do?  'inert' -- not a call: a declarator,
+# a compound keyword, a hash key, a class name before `->`; 'owner' -- a call
+# whose ARGUMENTS hold $l, which perl runs AFTER the term (`f(local …)`,
+# `print "a", local …`, `->m(local …)`); 'first' -- a call that runs BEFORE
+# the term (`cfg()` in `cfg()->m(local …)`, `get` in `$o->get->m(…)`, a term
+# word).  The hoist asks it of every word before the term; the void comma-list
+# split asks its paren-less half, _word_takes_list (such an operator owns
+# every comma after it).
+sub _word_before_local {
+  my ($self, $w, $l) = @_;
+  return 'inert' if $w->content =~ /^(?:my|our|state|local|if|unless|elsif|while|until)$/;
+  my ($p, $n) = ($w->sprevious_sibling, $w->snext_sibling);
+  return 'inert' if $n && $n->isa('PPI::Token::Operator') && $n->content eq '=>';
+  my $par = $w->parent;
+  return 'inert' if !$p && !$n && $par->isa('PPI::Statement::Expression')
+    && $par->parent && $par->parent->isa('PPI::Structure::Subscript');
+  my $holds = sub { my $box = shift;
+    for (my $a = $l->parent; $a; $a = $a->parent) { return 1 if $a == $box } 0 };
+  if ($p && $p->isa('PPI::Token::Operator') && $p->content eq '->') {     # a method name
+    return $n && $n->isa('PPI::Structure::List') && $holds->($n) ? 'owner' : 'first';
+  }
+  return 'inert' if $n && $n->isa('PPI::Token::Operator') && $n->content eq '->';  # a class
+  return $holds->($n) ? 'owner' : 'first' if $n && $n->isa('PPI::Structure::List');
+  return $holds->($par) ? 'owner' : 'first' if $self->_word_takes_list($w);
+  return 'owner' if $n && $n == $l;                      # a named unary of the term
+  return 'first';
+}
+
+# Is the word $w a call taking a PAREN-LESS argument list -- `print "a", …`,
+# `return 1, …`, `push @l, …`, a declared `foo 1, …` -- which then owns every
+# comma after it in its expression?  A named unary (one operand) and a term
+# word (a constant, a zero-arity builtin) do not.
+sub _word_takes_list {
+  my ($self, $w) = @_;
+  my $n = $w->snext_sibling or return 0;
+  my $p = $w->sprevious_sibling;
+  return 0 if $p && $p->isa('PPI::Token::Operator') && $p->content eq '->';
+  return 0 if $w->content =~ /^(?:my|our|state|local|if|unless|elsif|while|until|for|foreach|sub|do|eval)$/;
+  return 0 if $n->isa('PPI::Structure::List') || $n->isa('PPI::Token::Structure');
+  return 0 if $n->isa('PPI::Token::Operator') && $n->content !~ /^(?:\\|!)$/;
+  my $pe = $self->{_local_term_pexpr} ||= Pl::PExpr->new(
+    environment => $self->environment, parser => $self->fallback_parser, analysis_only => 1);
+  return 0 if $pe->is_named_unary($w->content);
+  return 0 if $self->_word_is_term($w->content, $w->top);
+  return 1;
+}
+
+# The method INVOCANT before the call that owns the `local` term's argument
+# list, when it runs calls: the statement's leading elements `INV -> NAME
+# (… local …)` with NAME the last thing before any modifier, INV made of
+# variables, words, lists, subscripts and `->` only (no assignment, no
+# declarator) and holding at least one 'first' word.  () otherwise.
+sub _local_invocant {
+  my ($self, $l, $pre) = @_;
+  my @k = @$pre;
+  return () unless @k >= 4 && $k[-1]->isa('PPI::Structure::List')
+                && $k[-2]->isa('PPI::Token::Word')
+                && $k[-3]->isa('PPI::Token::Operator') && $k[-3]->content eq '->';
+  return () unless $self->_word_before_local($k[-2], $l) eq 'owner';
+  my @inv = @k[0 .. $#k - 3];
+  for my $e (@inv) {
+    return () if $e->isa('PPI::Token::Operator') && $e->content ne '->';
+    return () if $e->isa('PPI::Token::Word') && $self->_word_before_local($e, $l) eq 'inert'
+              && !($e->snext_sibling && $e->snext_sibling->content eq '->');
+    return () unless $e->isa('PPI::Token::Symbol') || $e->isa('PPI::Token::Word')
+                  || $e->isa('PPI::Token::Operator') || $e->isa('PPI::Structure::List')
+                  || $e->isa('PPI::Structure::Subscript') || $e->isa('PPI::Token::Cast');
+  }
+  return () unless grep { $_->isa('PPI::Token::Word') && $self->_word_before_local($_, $l) eq 'first' }
+                   map { $_->isa('PPI::Node') ? $_->tokens : ($_) } @inv;
+  return @inv;
 }
 
 # [[NAME, LITERAL-TEXT] …] for a statement _split_literal_list_decls may
