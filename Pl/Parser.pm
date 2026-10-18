@@ -4787,13 +4787,17 @@ sub _process_local_declaration {
   # arrow-deref form local $ref->{key} / $ref->[N] (Symbol -> Subscript), whose
   # container is the unboxed referent.  Without the arrow branch the `local` was
   # silently dropped and `$ref` itself was mis-bound to the RHS (a crash).
-  my ($ld_sub, $ld_cl_var, $ld_sub_idx);
+  # $ld_slice: an `@`-sigil target is a SLICE (`local @h{@k}`, `local
+  # @{$r}{@k}`) whose subscript may name many keys at run time -- it takes the
+  # slice macros, never the one-key `-init` fast path (s520).
+  my ($ld_sub, $ld_cl_var, $ld_sub_idx, $ld_slice);
   if (@non_ws >= 2
       && ref($non_ws[0]) eq 'PPI::Token::Symbol'
       && ref($non_ws[1]) eq 'PPI::Structure::Subscript') {
     my $sym       = $non_ws[0]->content;           # e.g. "$hash", "@arr"
     $ld_sub       = $non_ws[1];
     $ld_sub_idx   = 1;
+    $ld_slice     = $sym =~ /^\@/;
     my $open      = $ld_sub->start()->content();    # '{' or '['
     my $base      = substr($sym, 1);               # "hash" or "arr"
     my $new_sigil = ($open eq '{') ? '%' : '@';
@@ -4815,6 +4819,28 @@ sub _process_local_declaration {
     $ld_sub_idx = 2;
     my $base_cl = $self->_parse_expression([$non_ws[0]], $stmt);
     $ld_cl_var  = "(unbox $base_cl)";
+  }
+  # An element or slice THROUGH a reference in the cast spelling --
+  # `local ${$r}{k}`, `local @{$r}{@k}`, `local @$r[1,2]` (Role::Tiny 307,
+  # ruling 3 of s519) -- is the arrow spelling's target: the container is the
+  # referent, reached through the cast form a plain read uses (so a symbolic
+  # name `${'main::h'}{k}` resolves as it does there, #1341).  It used to reach
+  # the whole-deref branch below and localize `@{$r}` itself.
+  elsif (@non_ws >= 3
+      && ref($non_ws[0]) eq 'PPI::Token::Cast'
+      && $non_ws[0]->content =~ /^[\$\@]$/
+      && (ref($non_ws[1]) eq 'PPI::Structure::Block'
+          || ref($non_ws[1]) eq 'PPI::Token::Symbol')
+      && ref($non_ws[2]) eq 'PPI::Structure::Subscript') {
+    $ld_sub     = $non_ws[2];
+    $ld_sub_idx = 2;
+    $ld_slice   = $non_ws[0]->content eq '@';
+    my $base_cl = ref($non_ws[1]) eq 'PPI::Token::Symbol'
+      ? ($self->_parse_expression([$non_ws[1]], $stmt) // 'nil')
+      : ($self->_parse_expression([$self->_deref_block_inner($non_ws[1])], $stmt) // 'nil');
+    my $cast = $ld_sub->start()->content() eq '{' ? 'p-cast-%' : 'p-cast-@';
+    ($ld_cl_var = Pl::CLForm::to_flat(Pl::ExprToCL::_cast_form($cast, $base_cl)))
+      =~ s/^\s+|\s+$//gs;
   }
   if ($ld_sub) {
     my $sub   = $ld_sub;
@@ -4841,7 +4867,7 @@ sub _process_local_declaration {
       # (The old runtime (if *wantarray* …) shape hid this; gen_progn now
       # honours the static annotation.)  Single element keeps scalar context.
       my $init_cl = $has_init
-        ? ($self->_parse_expression(\@rhs_parts, $stmt, (@key_groups > 1 ? 1 : 0)) // 'nil')
+        ? ($self->_parse_expression(\@rhs_parts, $stmt, ((@key_groups > 1 || $ld_slice) ? 1 : 0)) // 'nil')
         : undef;
 
       $self->_emit(";; $perl_code");
@@ -4855,6 +4881,16 @@ sub _process_local_declaration {
       # Choose the macro based on subscript type.
       # p-local-array-slice handles both scalar and vector (range) indices.
       my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-slice';
+      # A hash SLICE's key group that is not one literal key may name many
+      # keys at run time (`@{$r}{@k}`, `@h{@k}`): it takes p-local-hash-slice,
+      # which localizes each; a literal key keeps the one-key macro.
+      my @macros = map {
+        ($ld_slice && $open eq '{'
+         && !(@$_ == 1 && $_->[0]->isa('PPI::Token::Quote')
+              || @$_ == 1 && $_->[0]->isa('PPI::Token::Number')
+              || @$_ == 1 && $_->[0]->isa('PPI::Token::Word')))
+          ? 'p-local-hash-slice' : $macro
+      } @key_groups;
       my $macro_init = ($open eq '{') ? 'p-local-hash-elem-init'  : 'p-local-array-elem-init';
 
       # A statement modifier makes the SAVE AND RESTORE conditional, never the
@@ -4880,7 +4916,7 @@ sub _process_local_declaration {
         }
       }
 
-      if (defined $init_cl && @key_cls == 1) {
+      if (defined $init_cl && @key_cls == 1 && !$ld_slice) {
         # Single element with initializer: use the *-init macro which evaluates
         # init-form BEFORE installing the fresh box, preventing stale-read bugs
         # like local($a[2]) = $a[2] reading the fresh undef box.
@@ -4906,8 +4942,9 @@ sub _process_local_declaration {
         $self->_emit("(let (($tmp $tmp_init))");
         $self->indent_level($self->indent_level + 1);
         $self->{_local_let_depth}++;
-        for my $key_cl (@key_cls) {
-          $self->_emit($self->_local_open_form("$macro $cl_var $key_cl", $etest));
+        for my $ki (0 .. $#key_cls) {
+          my $key_cl = $key_cls[$ki];
+          $self->_emit($self->_local_open_form("$macros[$ki] $cl_var $key_cl", $etest));
           $self->indent_level($self->indent_level + 1);
           $self->{_local_let_depth}++;
         }
@@ -4917,8 +4954,9 @@ sub _process_local_declaration {
         $self->_emit(defined $etest ? "(when $etest $assign)" : $assign);
       } else {
         # No initializer: emit one macro call per key (nested open forms)
-        for my $key_cl (@key_cls) {
-          $self->_emit($self->_local_open_form("$macro $cl_var $key_cl", $etest));
+        for my $ki (0 .. $#key_cls) {
+          my $key_cl = $key_cls[$ki];
+          $self->_emit($self->_local_open_form("$macros[$ki] $cl_var $key_cl", $etest));
           $self->indent_level($self->indent_level + 1);
           $self->{_local_let_depth} //= 0;
           $self->{_local_let_depth}++;

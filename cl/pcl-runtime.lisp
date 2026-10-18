@@ -311,6 +311,7 @@
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
    #:p-local-array-slice
+   #:p-local-hash-slice
    #:p-local-deref-scalar #:p-local-deref-array #:p-local-deref-hash
    #:p-copy-array #:p-copy-hash
    #:p-pack #:p-unpack #:p-load-extension #:p-high-capture
@@ -25796,7 +25797,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6786"
+(defparameter *pcl-cache-generation* "v2-6787"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -32941,6 +32942,31 @@ size comes from fstat on the descriptor, after the buffered output is written
                 (not (stringp ,g-idx)))
            (%p-local-array-slice-nested ,arr-var ,g-idx 0 (lambda () ,@body))
            (p-local-array-elem ,arr-var ,g-idx ,@body)))))
+
+(defun %p-local-hash-slice-nested (hv keys pos thunk)
+  "Helper for p-local-hash-slice: save/restore HV{key} for each key in
+   KEYS[pos..end] -- the %p-lhe-save / %p-lhe-restore pair p-local-hash-elem
+   uses, so %ENV and %SIG slots behave the same -- then call THUNK.  The
+   restores run innermost first, the reverse of the saves, as perl's do."
+  (if (>= pos (length keys))
+      (funcall thunk)
+      (let* ((kv (to-string (aref keys pos)))
+             (sv (%p-lhe-save hv kv)))
+        (unwind-protect (%p-local-hash-slice-nested hv keys (1+ pos) thunk)
+          (%p-lhe-restore hv kv sv)))))
+
+(defmacro p-local-hash-slice (hash-var key-form &body body)
+  "local @h{LIST} (s520, ruling 3 of s519): one save/restore per key.  KEY-FORM
+   is the subscript in list context -- a non-string vector when it names an
+   array or several keys, else one key, which is exactly p-local-hash-elem.
+   (The slice spelling used to take p-local-hash-elem whole and localize the
+   one key the STRINGIFIED vector made, `ARRAY(0x...)`.)"
+  (let ((hv (gensym "H")) (kf (gensym "K")))
+    `(let ((,hv (unbox ,hash-var))
+           (,kf ,key-form))
+       (if (and (vectorp ,kf) (not (stringp ,kf)))
+           (%p-local-hash-slice-nested ,hv ,kf 0 (lambda () ,@body))
+           (p-local-hash-elem ,hv ,kf ,@body)))))
 
 (defun p-copy-array (src)
   "Create a fresh flat copy of SRC for 'local @arr = expr' bindings.

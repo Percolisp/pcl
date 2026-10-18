@@ -154,6 +154,49 @@ our @bee = (1);
 print "@bee\n";
 PERL
 
+# 7b. RULED s519 #3: `COND and (LIST);` is `(LIST) if COND;` -- Role::Tiny
+#     307's exact spelling (a hash slice through a reference, localized then
+#     deleted): the slots are back at the ENCLOSING block's end (the loop
+#     body), and a later call inside the block sees them deleted.
+test_lt('COND and (LIST): Role::Tiny 307, restored at the block end', <<'PERL');
+our %role_methods = (R => { a => 1, b => 2, c => 3 }, S => { a => 4 });
+my @have_conflicts = qw(a b);
+sub step { my ($r) = @_; my $h = $role_methods{$r};
+  print "$r: ", join(",", map { "$_=" . ($h->{$_} // "u") } sort keys %$h), "\n" }
+my $role_methods;
+foreach my $role (qw(R S T)) {
+  $role_methods = $role_methods{$role} and (
+    (local @{$role_methods}{@have_conflicts}),
+    (delete @{$role_methods}{@have_conflicts}),
+  );
+  step($role);
+}
+step($_) for qw(R S);
+PERL
+
+# 7c. the other three spellings: `or` / `||` guard with unless, `&&` with if;
+#     the condition is evaluated once, and the local lasts to the block end.
+test_lt('COND or/||/&& (LIST): unless / if, condition once', <<'PERL');
+our $g = 1; my $c = 0;
+sub cnd { $c++; $_[0] }
+{ cnd(0) or ((local $g = 2), print("in g=$g\n")); print "g=$g c=$c\n"; }
+{ cnd(1) || ((local $g = 3)); print "g=$g c=$c\n"; }
+{ cnd(1) && (local $g = 4, print("in g=$g\n")); print "g=$g c=$c\n"; }
+print "g=$g\n";
+PERL
+
+# 7d. a hash slice through a reference, and an array-named key list, as a
+#     LEADING local (the machinery the split hands the terms to).
+test_lt('local @{$r}{@k} / local @h{@k} = LIST', <<'PERL');
+our %h = (a => 1, b => 2, c => 3); my $r = \%h; my @k = qw(a b);
+sub show { print join(",", map { "$_=" . ($h{$_} // "u") } sort keys %h), "\n" }
+{ local @{$r}{@k}; show(); }
+{ local @$r{@k} = (7, 8); show(); }
+{ local @h{@k} = (5, 6); show(); }
+{ local ${$r}{c} = 9; show(); }
+show();
+PERL
+
 # 8. a local no lowering reaches is a REFUSAL at its statement, not a silent
 #    read (perl: "1 9 1"; PCL refuses perl-shaped, trappable).
 {

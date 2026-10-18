@@ -6898,7 +6898,13 @@ sub _local_cond_prologue {
   return ("my $tmp = $neg($ct);", " if $tmp");
 }
 
-# Shape (a): a void comma list with a top-level `local` term.
+# Shape (a): a void comma list with a top-level `local` term -- and (RULED
+# s519 #3, DECIDED ## s519) its logical spelling `COND and (LIST);` /
+# `COND && (LIST);` (`or` / `||`: unless), which IS the statement-modifier
+# shape `(LIST) if COND;` and takes the same split: COND evaluated once into a
+# temporary, each term guarded by it, a `local` term then a leading local
+# under a modifier, restored at the ENCLOSING block's end exactly as perl's is
+# (Role::Tiny 307: `$x = $h{$k} and ((local @{$x}{@c}), (delete @{$x}{@c}),);`).
 sub _split_void_local_list {
   my ($self, $s) = @_;
   return 0 unless ref($s) eq 'PPI::Statement' || ref($s) eq 'PPI::Statement::Expression';
@@ -6906,6 +6912,11 @@ sub _split_void_local_list {
   return 0 if !$p->isa('PPI::Document') && $p->schild(-1) == $s;   # a value position
   my ($pre, $mod, $cond) = _stmt_modifier_split($s);
   return 0 if defined $mod && $mod !~ /^(?:if|unless)$/;
+  my $logical = 0;
+  if (!defined $mod) {
+    my ($m, $c, $items) = _logical_local_list($pre);
+    ($pre, $mod, $cond, $logical) = ($items, $m, $c, 1) if $m;
+  }
   my (@terms, @cur);
   for my $k (@$pre) {
     if ($k->isa('PPI::Token::Operator') && $k->content =~ /^(?:,|=>)$/) {
@@ -6915,7 +6926,9 @@ sub _split_void_local_list {
     push @cur, $k;
   }
   push @terms, [@cur] if @cur;
-  return 0 unless @terms > 1;
+  # `(local X)` as a term of the logical shape is the term `local X`.
+  @terms = map { _unwrap_paren_term($_) } @terms if $logical;
+  return 0 unless @terms > 1 || $logical;
   return 0 unless grep { $_->[0]->isa('PPI::Token::Word') && $_->[0]->content eq 'local' } @terms;
   my ($decl, $guard) = $self->_local_cond_prologue($mod, $cond) or return 0;
   my @stmts = length $decl ? ($decl) : ();
@@ -6925,6 +6938,43 @@ sub _split_void_local_list {
     push @stmts, "$tt$guard;";
   }
   return $self->_replace_statement_by($s, join(' ', @stmts), scalar @stmts);
+}
+
+# The logical spelling of shape (a): the statement's children are
+# `COND OP (LIST)` with OP and/&&/or/||.  Returns (modifier, COND-elements,
+# LIST-items) -- 'if' for and/&&, 'unless' for or/|| -- or () when the shape is
+# anything else, or when COND holds an operator binding LOOSER than OP (then
+# OP's left operand is not COND: `$x = A && (L)` assigns the `&&`).
+sub _logical_local_list {
+  my ($pre) = @_;
+  my @k = @$pre;
+  return () unless @k >= 3 && $k[-1]->isa('PPI::Structure::List')
+                && $k[-2]->isa('PPI::Token::Operator');
+  my $op = $k[-2]->content;
+  return () unless $op =~ /^(?:and|&&|or|\|\|)$/;
+  my @c = @k[0 .. $#k - 2];
+  my $looser = $op eq 'or' ? qr/^$/
+             : $op eq 'and' ? qr/^(?:or|xor)$/
+             : qr/^(?:[-+*\/.x%&|^]?=|\*\*=|\/\/=|\|\|=|&&=|<<=|>>=|\?|:|,|=>|\.\.\.?|not|and|or|xor|\|\||\/\/)$/;
+  for my $t (@c) {
+    return () if $t->isa('PPI::Token::Operator') && $t->content =~ $looser;
+  }
+  my $list = $k[-1];
+  return () unless $list->find_first(\&_is_local_term_word);
+  my @in = $list->schildren;
+  return () unless @in == 1 && $in[0]->isa('PPI::Statement');
+  return ($op =~ /^(?:and|&&)$/ ? 'if' : 'unless', \@c, [$in[0]->schildren]);
+}
+
+# A term that is exactly one parenthesised single-statement list, as that
+# statement's children; any other term unchanged.
+sub _unwrap_paren_term {
+  my ($t) = @_;
+  return $t unless @$t == 1 && $t->[0]->isa('PPI::Structure::List');
+  my @in = $t->[0]->schildren;
+  return $t unless @in == 1 && $in[0]->isa('PPI::Statement');
+  my @k = $in[0]->schildren;
+  return @k ? [@k] : $t;
 }
 
 # Shape (b): the statement's first evaluation is the `local` term.
