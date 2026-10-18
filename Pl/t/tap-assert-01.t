@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 34;
+plan tests => 35;
 
 sub run_cl {
     my ($code) = @_;
@@ -171,6 +171,19 @@ ok(!eq_hash({a=>1}, {a=>2}), 'eq_hash different value');
 ok(!eq_hash({a=>1}, {a=>1,b=>2}), 'eq_hash different size');
 }), "1..3\nok 1 - eq_hash equal\nok 2 - eq_hash different value\nok 3 - eq_hash different size\n",
    'eq_hash runs at all (it type-errored on every hashref) and both verdicts are reachable');
+
+# --------------------------------------------------- 3b. eq_set (task #3432)
+# Test::More's eq_set: same elements in any order, DUPLICATES COUNT, the
+# references kept in their own order and compared deeply (probed vs perl
+# 5.40.3).  It was absent: "Undefined subroutine &main::eq_set".
+is(run_cl(q{use Test::More tests => 5;
+ok(eq_set([1,2,3],[3,1,2]), 'eq_set order-free');
+ok(!eq_set([1,1,2],[1,2,2]), 'eq_set duplicates count');
+ok(!eq_set([[1],[2]],[[2],[1]]), 'eq_set refs keep their order');
+ok(eq_set([[1],[2]],[[1],[2]]), 'eq_set refs compare deeply');
+ok(!eq_set([1],[1,1]), 'eq_set length');
+}), "1..5\nok 1 - eq_set order-free\nok 2 - eq_set duplicates count\nok 3 - eq_set refs keep their order\nok 4 - eq_set refs compare deeply\nok 5 - eq_set length\n",
+   'eq_set exists and both of its verdicts are reachable');
 
 # ---------------------------------------------------- 4. Test::More's wording
 

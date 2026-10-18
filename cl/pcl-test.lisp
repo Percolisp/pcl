@@ -39,8 +39,8 @@
    whole file with it.  perl's own answer is to warn `Wide character in print`
    once and write the string's UTF-8 encoding, which is what %p-out-string
    does, and SILENTLY: a warning would run the PROGRAM's $SIG{__WARN__}, and
-   perl-tests/magic.t dies on any warning at all (`sub { die "Dying on
-  warning", @_ }` at BEGIN), so one wide TAP description ended that whole
+   perl-tests/magic.t dies on any warning at all (`sub { die \"Dying on
+   warning\", @_ }` at BEGIN), so one wide TAP description ended that whole
    file.  The handler is the backstop for the format directives' own output.
    It replaced 25 direct `format t` calls: one writer, not twenty-five.
 
@@ -176,7 +176,7 @@
   '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
     pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
     pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
-    pl-eq_array pl-curr_test pl-subtest
+    pl-eq_array pl-eq_set pl-curr_test pl-subtest
     pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
 (export *tap-api*)
 (dolist (s *tap-api*)
@@ -688,6 +688,33 @@
         (every (lambda (x y)
                  (equal (to-string x) (to-string y)))
                av bv)))))
+
+
+;;; eq_set(\@a, \@b) (#3432) -- Test::More's, which IS eq_array over two
+;;; normalised copies: each array's REFERENCES first, in their own order, then
+;;; its non-references sorted as strings (`[grep(ref, @$a), sort(grep(!ref,
+;;; @$a))]`), compared by Test::More's eq_array -- a DEEP compare
+;;; (test-deeply-equal, is_deeply's), so [[1],[2]] vs [[2],[1]] is false and
+;;; [[1],[2]] vs a fresh [[1],[2]] is true.  Duplicates count; a length
+;;; mismatch is 0.  The operands are dereferenced as perl's strict
+;;; `@$a1' does (p-cast-@ :strict): a non-reference dies with perl's message.
+(defun %test-set-normal (arr)
+  (let ((refs '()) (plain '()))
+    (loop for e across arr
+          do (if (and (p-box-p e) (p-box-is-ref e))
+                 (push e refs)
+                 (push e plain)))
+    (concatenate 'vector (nreverse refs)
+                 (sort (coerce plain 'vector) #'string<
+                       :key (lambda (x) (if (test-undef-p x) "" (to-string x)))))))
+
+(defun pl-eq_set (a b)
+  (let ((av (p-cast-@ a :strict))
+        (bv (p-cast-@ b :strict)))
+    (if (and (= (length av) (length bv))
+             (test-deeply-equal (%test-set-normal av) (%test-set-normal bv)))
+        1
+        0)))
 
 ;;; ----- Test::More structural / module asserts (for CPAN module test suites) -----
 
