@@ -950,7 +950,7 @@ use parent 'Parent';
 END_PERL
   like($cl, qr/\(p-eval-always \(p-require-parent "Parent"\)\)/,
        'use parent emits the implicit require of the parent');
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/,
+  like($cl, qr/defclass plc-child \("Parent"\)/,
        'use parent still sets up the CLOS parent class');
   # require must come before the defclass (package must exist at read time)
   like($cl, qr/p-require-parent "Parent".*defclass plc-child/s,
@@ -965,7 +965,7 @@ use parent -norequire, 'Parent';
 END_PERL
   unlike($cl, qr/p-require-parent/,
          'use parent -norequire does NOT emit a require');
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/,
+  like($cl, qr/defclass plc-child \("Parent"\)/,
        'use parent -norequire still sets up the CLOS parent class');
 }
 
@@ -983,7 +983,7 @@ END_PERL
   my $code_only = join "\n", grep { !/^\s*;;/ } split /\n/, $cl;
   unlike($code_only, qr/norequire/,
          'qw(-norequire ...) leaves no -norequire name in the emission');
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)\s*\(\)/,
+  like($cl, qr/defclass plc-child \("Parent"\)\s*\(\)/,
        'qw(-norequire ...) makes Parent the ONLY superclass');
   unlike($cl, qr/p-require-parent/,
          'qw(-norequire ...) suppresses the implicit require, like the comma form');
@@ -1009,8 +1009,8 @@ use parent 'My::Parent';
 END_PERL
   like($cl, qr/\(p-require-parent "My::Parent"\)/,
        'nested parent required by its full Perl name');
-  like($cl, qr/defclass plc-child \(\|My::Parent\|::plc-my-parent\)/,
-       'nested parent class is pipe-qualified in the defclass');
+  like($cl, qr/defclass plc-child \("My::Parent"\)/,
+       'nested parent class is named by its perl package name in the defclass (#1570)');
 }
 
 

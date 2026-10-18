@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" if ! -x $pl2cl;
 plan skip_all => "sbcl not found"  if ! `which sbcl 2>/dev/null`;
-plan tests => 17;
+plan tests => 19;
 
 # -- A. the macro and its readiness test, in raw CL (one SBCL spawn) --------
 my $LISP = <<'LISP';
@@ -243,4 +243,31 @@ package main;
 EOF2
     is(run_pl($src), "hi [Implement] []\n",
        '#3140 control: the same block without a local (the section path) is unchanged');
+}
+
+# -- E. #1570 (s522b): a parent the READER has not seen.  `our @ISA` inside a
+# BEGIN that `require`s its parent is ONE top-level form, read whole before the
+# require runs; the parent was written as the qualified symbol
+# `Exporter::plc-exporter` and the file died at READ time ("Package Exporter
+# does not exist").  Parents are now package NAMES resolved when the form runs.
+# Expected lines are perl 5.40.3's output (probed s522b).  Inverse: on the
+# aff112d7 base the first program dies at read time; the second is a
+# must-stay (multi-segment parents and a never-defined parent).
+{
+    my $src = <<'EOF2';
+BEGIN { package Cfg; our @ISA = ("Exporter"); require Exporter; }
+print Cfg->can("import") ? "can\n" : "no\n";
+package Cfg2; BEGIN { our @ISA = ("Exporter") } package main; print "ok\n";
+EOF2
+    is(run_pl($src), "can\nok\n",
+       '#1570: an @ISA parent whose package the reader has not seen does not kill the read');
+    $src = <<'EOF2';
+BEGIN { package Role::X; sub rx { "rx" } }
+BEGIN { package My::K; our @ISA = ("Role::X"); }
+package A; our @ISA = ("Nope");
+package main;
+print My::K->rx, " ", (My::K->isa("Role::X") ? 1 : 0), " ", (defined(A->can("x")) ? "def" : "undef"), "\n";
+EOF2
+    is(run_pl($src), "rx 1 undef\n",
+       '#1570: a multi-segment parent dispatches; a never-defined parent answers can() quietly');
 }

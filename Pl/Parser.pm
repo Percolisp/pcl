@@ -3975,15 +3975,7 @@ sub _process_isa_declaration {
   if (@$parents) {
     # Emit CLOS class with parent classes for MRO tracking
     my $cl_class = $self->_pkg_to_clos_class($pkg);
-    # Package-qualify parent class symbols so they resolve correctly regardless
-    # of which CL package the defclass is emitted in.
-    # Animal -> Animal::animal (reads as ANIMAL::ANIMAL)
-    # Foo::Bar -> |Foo::Bar|::foo--bar (pipe-quoting preserves :: in pkg name)
-    my $parents_cl = join(' ', map {
-      my $cls = $self->_pkg_to_clos_class($_);
-      my $pkg_prefix = cl_pkg($_);
-      "$pkg_prefix\:\:$cls"
-    } @$parents);
+    my $parents_cl = $self->_clos_parent_names($parents);
 
     # Store parent list in environment for later use
     $self->environment->set_isa($pkg, $parents);
@@ -4110,11 +4102,7 @@ sub _process_use_base {
   my $qualify  = $self->_reader_pkg_differs;
   my $cl_class = $qualify ? $self->_qualified_clos_class($pkg)
                           : $self->_pkg_to_clos_class($pkg);
-  my $parents_cl = join(' ', map {
-    my $cls = $self->_pkg_to_clos_class($_);
-    my $pkg_prefix = cl_pkg($_);
-    "$pkg_prefix\:\:$cls"
-  } @parents);
+  my $parents_cl = $self->_clos_parent_names(\@parents);
   $self->environment->set_isa($pkg, \@parents);
   $self->_with_bucket('preamble', sub {
     $self->_emit(";; $perl_code");
@@ -9700,6 +9688,20 @@ sub _emit_package_preamble {
 # Convert Perl package name to CLOS class name
 # Foo::Bar -> foo-bar
 # Pipe-quote names that might conflict with CL symbols (e.g., class, method)
+# The parents of a `p-defclass` form, written as perl package NAMES (strings)
+# that the runtime turns into class symbols when the form RUNS (task #1570).
+# A qualified symbol `Exporter::plc-exporter` can be read only once its CL
+# package exists, and an `@ISA` set inside a BEGIN that `require`s its parent
+# is ONE top-level form, read whole before the require runs: the file died at
+# READ time ("Package Exporter does not exist").
+sub _clos_parent_names {
+  my ($self, $parents) = @_;
+  return join(' ', map {
+    (my $n = $_) =~ s/(["\\])/\\$1/g;
+    "\"$n\""
+  } @$parents);
+}
+
 sub _pkg_to_clos_class {
   my ($self, $pkg) = @_;
   my $class = lc($pkg);

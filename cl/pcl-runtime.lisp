@@ -830,9 +830,37 @@
   (when slots
     (error "p-defclass: slots are not part of the readiness test: ~S" slots))
   `(eval-when (:compile-toplevel :load-toplevel :execute)
-     (unless (%p-class-ready-p ',name ',supers)
-       (%p-ensure-parent-classes ',supers)
-       (defclass ,name ,supers ()))))
+     (%p-defclass-1 ',name (list ,@(mapcar #'%p-defclass-super-form supers)))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-defclass-super-form (s)
+    "One parent of a p-defclass form, as the form that yields its class
+     symbol.  pl2cl writes a parent as the perl package NAME, a string (task
+     #1570): a QUALIFIED symbol `Exporter::plc-exporter` can be READ only once
+     its package exists, and an `@ISA` set inside a BEGIN that `require`s the
+     parent is ONE top-level form, read whole before the require runs -- the
+     file died at read time.  A symbol is the class itself (the runtime's and
+     the tests' own spelling).  Anything else is an emitter bug (rule 12)."
+    (cond ((stringp s) `(%p-clos-class-for-package ,s))
+          ((symbolp s) `',s)
+          (t (error "p-defclass: a parent is a package name or a class symbol: ~S"
+                    s)))))
+
+(defun %p-clos-class-for-package (name)
+  "The CLOS class SYMBOL of perl package NAME -- the one the reader makes of
+   the qualified `Pkg::plc-pkg` pl2cl writes for a class -- creating the CL
+   package when the program has not named it yet (perl's @ISA may name a
+   package that is compiled later, or never)."
+  (let ((pkg (or (%pcl-find-package name)
+                 (make-package (perl-pkg-to-cl-pkg-name name) :use '(:cl :pcl)))))
+    (intern (%pcl-invert-case (perl-pkg-to-clos-class name)) pkg)))
+
+(defun %p-defclass-1 (name supers)
+  "p-defclass's body: define class NAME with direct superclasses SUPERS unless
+   it already has exactly those (the readiness test above)."
+  (unless (%p-class-ready-p name supers)
+    (%p-ensure-parent-classes supers)
+    (sb-mop:ensure-class name :direct-superclasses supers)))
 
 (defun %p-ensure-parent-classes (supers)
   "Give every parent in SUPERS that has no class yet one with no parents of its
@@ -26159,7 +26187,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-7984"
+(defparameter *pcl-cache-generation* "v2-7884"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -35623,8 +35651,25 @@ would consume, so it dies naming the stream (rule 12)."
    The two CALLERS intern this name through %pcl-invert-case, not
    string-upcase: for the all-lowercase ASCII name this builds those are the
    same transform, and for a package whose name carries a non-ASCII character
-   (#418) only the former matches the pipe-quoted `|plc-ｆｏｏ|` codegen emits."
-  (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
+   (#418) only the former matches the pipe-quoted `|plc-ｆｏｏ|` codegen emits.
+   A `::` separator is ONE dash, as the emitter's `s/::/-/g` makes it: a
+   per-colon substitute gave `plc-role--tiny` for the class pl2cl names
+   `plc-role-tiny`, and every multi-segment lookup missed (found s522b, #1570).
+   A name without a colon (the method-dispatch case) keeps the one-concatenate
+   path."
+  (if (find #\: name)
+      (let ((out (make-string-output-stream)) (i 0) (n (length name)))
+        (write-string "plc-" out)
+        (loop while (< i n)
+              do (let ((c (char name i)))
+                   (cond ((and (char= c #\:) (< (1+ i) n)
+                               (char= (char name (1+ i)) #\:))
+                          (write-char #\- out)
+                          (incf i 2))
+                         (t (write-char (char-downcase c) out)
+                            (incf i)))))
+        (get-output-stream-string out))
+      (concatenate 'string "plc-" (string-downcase name))))
 
 (defun %pcl-find-method-in-chain (cls-str sub-name &optional visited)
   "The function SUB-NAME names in CLS-STR's own package or, failing that,
