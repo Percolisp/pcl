@@ -1,4 +1,11 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s519b (2026-10-18, Opus, s520 resume) -- SEVEN rows spliced by hand from s519b's harness-exception companion
+#   (--all --quick, scratch/s519b/comp.log) after attributing each mover ALONE (--jobs 1) on a fd04c048 (= main's code)
+#   extraction and on the tree (scratch/s519b/attrib2.log): MAIN's -- op/stash.t + uni/stash.t (#3362, Fable's ruling),
+#   op/svflags.t + op/anonsub.t (s518e #3281), op/multideref.t (s519a #3370); s519b's -- comp/fold.t (#3405 exposes #2952),
+#   uni/fold.t (#3391).  NOT spliced: op/sub_lval.t 30/67 -> 32/65 (main's, identical on fd04c048, NOT attributed to a
+#   merge), op/gv.t / uni/gv.t (TIMEOUT, +2 each on the tree), op/each.t (same counts; row 29's description is random),
+#   op/fork.t (contention; serial = the snapshot).
 # s507 (2026-10-04, Fable) -- FOUR rows spliced by hand from the FULL run of main 2e71d4aa (~/pcl-agent-scratch/s507/companion-full.log),
 #   each attributed by running the file ALONE on e5d72352 / 618db500 / main (s507/attrib/run3.out): op/gv.t + uni/gv.t gain one row
 #   from s501t (#155); re/speed.t and uni/variables.t carried STALE TIMEOUT readings.  NOT spliced, on purpose: mro/method_caching_utf8.t
@@ -1687,7 +1694,7 @@ comp/colon.t	25	0	15	10	DIFF		0
 comp/decl.t	9	0	6	0	DIFF		0
 comp/filter_exception.t	4	0	2	2	DIFF		0
 comp/final_line_num.t	1	0	0	0	DIFF		1
-comp/fold.t	35	0	26	9	DIFF	s504 #2389: 25/10 -> 26/9 UP at bd0c38e3 (s497b): `missing die hook` passes | aborted-forms:2: Undefined subroutine &main::INSTALL called	0
+comp/fold.t	35	0	26	5	DIFF	s519b #3405: 26/9 -> 26/5 -- `package other { print 0 ? not_ok : ok }` is the package-blind CALL #2952; main's `sub ok` no longer clobbers pcl:pl-ok, so the form aborts and rows 20-23 (failing) are never produced; fd04c048 26/9 | was: s504 #2389: 25/10 -> 26/9 UP at bd0c38e3 (s497b): `missing die hook` passes | aborted-forms:2: Undefined subroutine &main::INSTALL called	0
 comp/form_scope.t	14	0	0	2	DIFF		0
 comp/hints.t	31	0	17	12	XDIFF	s507c #2690: +1 (the CHECK block now runs after the whole compile phase, so "$^H{foo} doesn't exist when compilation complete" passes; its expected row left by --bless-rows of this file alone) | s473t5c: the XDIFF row set was STALE IN BOTH DIRECTIONS (3 rows diverged unregistered, 2 registered rows no longer diverged) and is now the measured 15; all five were READ and every one is %^H scoping.  Counts UNCHANGED -- a REGISTRATION, not a behaviour move | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
 comp/line_debug.t	25	0	1	24	DIFF		0
@@ -1829,7 +1836,7 @@ op/64bitint.t	425	0	425	0	OK		0
 op/aassign.t	188	1	182	7	DIFF	s501t #155: 175/14 -> 181/8 (the six tied-fixture rows); s508a #2632: 181/8 -> 182/7 (&name; shares @_)	0
 op/alarm.t	5	0	5	0	OK	reaped 12 orphan(s)	0
 op/anonconst.t	7	0	1	6	DIFF		0
-op/anonsub.t	14	1	6	9	DIFF		0
+op/anonsub.t	14	1	7	8	DIFF	MAIN's since s518e #3281: 6/9 -> 7/8 ("undef &anon giving it a freed GV" reads B::svref_2object); identical on fd04c048 and the tree, spliced s519b | was: 	0
 op/append.t	13	0	13	0	OK		0
 op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.	0
 op/arith2.t	9	0	9	0	OK		0
@@ -1940,7 +1947,7 @@ op/magic-27839.t	2	0	2	0	OK		0
 op/magic.t	207	1	179	29	DIFF	s501t #155: 176/29 -> 179/29 (`tie my @tn` numbers the child rows; #66 is #2594) | s494g #1029 (via #2107's %SIG store seam): 174/31 -> 176/29 -- 'Can assign to INT' / 'Can delete from INT' read back 'main::int'; A/B dc20a721 174/31 | s473t6d: 176/31 -> 174/31 by #1954 in this round -- magic.t:591 `foreach (['powie::!','Errno'])` ran TWICE with $_ bound to each ELEMENT, so PCL printed FOUR rows `Referencing %{""} doesn't load ` where perl prints TWO; the two surplus rows padded C_ok and appeared at the tail as `*extra*`.  It now runs ONCE with perl's own descriptions, the numbering offset drops from 82 rows to 7, and the file produces 205 rows to perl's 208 (shortfall 1 -> 3).  Measured --jobs 1 + serial re-run, and 176/31 on a `git archive 268d7e00` extraction	0
 op/method.t	163	0	104	22	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b; s473f: 103/22 -> 103/23 with aborted-forms 3 -> 2 and shortfall 38 -> 37 -- #1074/#1434: `*glob->method` RUNS instead of dying (a raw typeglob invocant is auto-referenced), which un-drops one statement; `SUPER->method` and `method{}@array` now pass, `[line 386]` and `method{@array}$more_args` now fail on the SUPER:: edge shapes; s508a #2682: 103/23 -> 104/22 (line 367: \*NAME is one glob)	1
 op/mkdir.t	17	0	17	0	OK		0
-op/multideref.t	65	0	53	12	DIFF	s473t1 #1431: `exists +(EXPR)->[..]{..}` lowered to a ONE-argument (p-exists VALUE) and the raw CL arity error aborted the file's whole top-level form at test 52, so 13 rows never ran (exists: general, the six delete:*, the six !exists:*).  12 of the 13 now PASS; `delete: const indices` fails on the pre-existing `local`-not-restored rows above it (not-supported.md '`local` on hash/array elements and typeglobs').  Was: s470bv: BISECTED over 19d42836..614c6af (8 steps) to 0d1b5c18 = s470bk #1058.  The two rows are "RT #130727 array not autovivified" and its part 2 -- an ACCEPTED DIVERGENCE (DECIDED s470, not-supported.md "local on hash/array elements and typeglobs", cl/skip-registry.lisp) that used to pass by ACCIDENT.  No task | aborted-forms:1: invalid number of arguments: N	0
+op/multideref.t	65	0	61	4	DIFF	MAIN's since s519a #3370: 53/12 -> 61/4 (the local term); identical on fd04c048 and the tree, spliced s519b | was: s473t1 #1431: `exists +(EXPR)->[..]{..}` lowered to a ONE-argument (p-exists VALUE) and the raw CL arity error aborted the file's whole top-level form at test 52, so 13 rows never ran (exists: general, the six delete:*, the six !exists:*).  12 of the 13 now PASS; `delete: const indices` fails on the pre-existing `local`-not-restored rows above it (not-supported.md '`local` on hash/array elements and typeglobs').  Was: s470bv: BISECTED over 19d42836..614c6af (8 steps) to 0d1b5c18 = s470bk #1058.  The two rows are "RT #130727 array not autovivified" and its part 2 -- an ACCEPTED DIVERGENCE (DECIDED s470, not-supported.md "local on hash/array elements and typeglobs", cl/skip-registry.lisp) that used to pass by ACCIDENT.  No task | aborted-forms:1: invalid number of arguments: N	0
 op/my.t	59	0	52	7	DIFF		0
 op/my_stash.t	9	0	4	3	DIFF	aborted-forms:2: The function Foo::pl-runperl is undefined.	0
 op/mydef.t	2	0	0	2	DIFF		0
@@ -1999,7 +2006,7 @@ op/sprintf.t	559	0	534	25	DIFF		0
 op/sprintf2.t	1704	0	1679	25	DIFF		0
 op/srand.t	10	0	8	2	DIFF		0
 op/sselect.t	23	0	20	3	DIFF	s502e #2559: the mask bytes are checked as octets and a wide character dies (rows 21-23 pass); the RT120102 timeout is FETCHed once; rows 10-12 (a literal mask is read-only) stay #1934	0
-op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
+op/stash.t	54	1	20	7	DIFF	s519b splice (Fable ruling s520): 48/7 -> 20/7 = MAIN's since s518e #3281 (the B shim: B::CV::CvFLAGS dies by design and aborts the file) -- #3362; identical on fd04c048 and the tree | was: undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	95	16	DIFF	s492b: 94/17 -> 95/16, #2090 -- `() = <FOO>` is a LIST assignment and its RHS is LIST context, so the handle is drained and `ok(eof FOO, "at EOF")` passes; the deleted *p-in-list-assign-rhs* flag had made it read ONE line.  Measured --jobs 1 on a 5ce155cb extraction: 94/17 there	0
 op/stat_errors.t	638	0	636	2	DIFF		0
@@ -2010,7 +2017,7 @@ op/sub.t	64	1	57	8	DIFF	s501t #155: 55/10 -> 57/8 (RT124156 plain / depth) | s48
 op/sub_lval.t	211	0	30	67	DIFF	s514e #3162: 33/64 -> 30/67 -- three `skip no attributes.pm` rows that paired with perl 34-36 BY NUMBER now run and fail honestly (#3164, #221) | aborted-forms:9: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	351	3	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
+op/svflags.t	16	0	15	1	DIFF	MAIN's since s518e #3281: 0/0 -> 15/1 (`use B` loads; the 1 = SVf_POK readout, NS internals); identical on fd04c048 and the tree, spliced s519b | was: aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/switch.t	197	0	2	0	XDIFF	aborted-forms:55: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at switch.t li | not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL refuses the file as perl does (task #371, Option B phase 2 Track A)	0
 op/symbolcache.t	8	0	6	1	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276 | aborted-forms:1: Undefined subroutine &main::removed called	0
@@ -2163,7 +2170,7 @@ uni/caller.t	18	0	7	12	DIFF		0
 uni/chomp.t	446	0	446	0	OK		0
 uni/class.t	12	0	12	0	OK	s496a #2060: 0/12 -> OK 12/0 -- user-defined and perl properties in character classes (A/B: b6560c21 0/12)	0
 uni/eval.t	5	0	5	0	OK		0
-uni/fold.t	19128	104	928	230	DIFF	aborted-forms:4: Can't locate Unicode/Normalize.pm (XS); s514a #2948: 928/232 -> 928/230, Storable now loads (was aborted-forms:3 at Storable)	0
+uni/fold.t	19128	104	928	232	DIFF	s519b #3391: 928/230 -> 928/232 -- no SBCL herald from the uncached Unicode::Normalize load, two more TAP rows parse (both fail, #1036); fd04c048 928/230 | was: aborted-forms:4: Can't locate Unicode/Normalize.pm (XS); s514a #2948: 928/232 -> 928/230, Storable now loads (was aborted-forms:3 at Storable)	0
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
 uni/greek.t	0	0	0	0	NOTAP		0
 uni/gv.t	206	0	76	83	TIMEOUT	s507: 75/84 -> 76/83 at 618db500 = s501t #155 (row 74 "tied elem assignment preserves globs" passes), op/gv.t's twin; e5d72352 75/84, 618db500 76/83, main 2e71d4aa 76/83, each run alone | #1651 -- 59/29 DIFF -> TIMEOUT 0/0 at 0ea8d7e1 (s473h member 7, #1249(7)), measured 59/29 at e66761f4 and TIMEOUT 0/0 at 0ea8d7e1: op/gv.t's twin, and this one produces NO rows at all.  See op/gv.t's row for the measurement | timeout; s490 review of s473t6b (#1850): the harness's TAP is on disk row by row, so a file the runner KILLS keeps every row that ran, not only the rows that had flushed -- TIMEOUT 0/0 -> TIMEOUT 75/84, parallel and serial agreeing; the hang is #1651's	0
@@ -2179,7 +2186,7 @@ uni/parser.t	58	0	32	26	DIFF	s470bv: #1221 (b25afbc; 28/30 at a3d6d8e)	0
 uni/readline.t	7	0	6	1	DIFF		0
 uni/select.t	3	2	2	3	DIFF	s508a #2683: 1/4 -> 2/3 (select returns the full glob name)	0
 uni/sprintf.t	52	0	49	3	DIFF		0
-uni/stash.t	48	1	43	6	DIFF	s473t6b (#1850): same glue as op/tiehandle.t -- the TAP is on disk row by row, and this file ends a recovery diagnostic without a newline, so the next row (`ok 9 # skip no B`) is no longer parseable.  A/B --jobs 1: f26282db extraction 44/6, this tree 43/6	0
+uni/stash.t	48	1	17	6	DIFF	s519b splice (Fable ruling s520): 43/6 -> 17/6 = MAIN's since s518e #3281 (B::CV::CvFLAGS dies by design and aborts the file) -- #3362; identical on fd04c048 and the tree | was: s473t6b (#1850): same glue as op/tiehandle.t -- the TAP is on disk row by row, and this file ends a recovery diagnostic without a newline, so the next row (`ok 9 # skip no B`) is no longer parseable.  A/B --jobs 1: f26282db extraction 44/6, this tree 43/6	0
 uni/tie.t	9	1	9	1	OK		0
 uni/title.t	5936	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/tr_utf8.t	8	0	8	0	OK		0
