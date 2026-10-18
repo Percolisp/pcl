@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-7484
+;;; pcl: pipeline=v2 gen=v2-7584
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -1781,27 +1781,29 @@
                                                               $b2))
                                                           (p-let (($uu :box (make-p-box nil)))
                                                             (p-my-= $uu
-                                                              (lambda (&rest %_args)
-                                                                (let
-                                                                  ((@_
-                                                                      (p-flatten-args %_args))
-                                                                    (*pcl-current-package*
-                                                                      "main")
-                                                                    (*pcl-caller-wantarray*
-                                                                      *wantarray*))
-                                                                  (p-sub-frame
-                                                                    (block nil
-                                                                      (p-void-ctx
-                                                                        (p-let
-                                                                          (($c :scalar
-                                                                              (p-+ 32
-                                                                                (p-bit-and
-                                                                                  (p-aref @_ 0)
-                                                                                  63))))
-                                                                          (p-caller-ctx
-                                                                            (p-if (p-== $c 32)
-                                                                              96
-                                                                              $c)))))))))
+                                                              (p-anon-sub "main"
+                                                                (lambda (&rest %_args)
+                                                                  (let
+                                                                    ((@_
+                                                                        (p-flatten-args %_args))
+                                                                      (*pcl-current-package*
+                                                                        "main")
+                                                                      (*pcl-caller-wantarray*
+                                                                        *wantarray*))
+                                                                    (p-sub-frame
+                                                                      (block nil
+                                                                        (p-void-ctx
+                                                                          (p-let
+                                                                            (($c :scalar
+                                                                                (p-+ 32
+                                                                                  (p-bit-and
+                                                                                    (p-aref @_
+                                                                                      0)
+                                                                                    63))))
+                                                                            (p-caller-ctx
+                                                                              (p-if (p-== $c 32)
+                                                                                96
+                                                                                $c))))))))))
                                                             (p-.=
                                                               (p-cast-$ $result_ref :strict-lv)
                                                               (p-.
@@ -3191,26 +3193,28 @@
                                             t
                                             (p-let (($get :box (make-p-box nil)))
                                               (p-my-= $get
-                                                (lambda (&rest %_args)
-                                                  (let
-                                                    ((@_ (p-flatten-args %_args))
-                                                      (*pcl-current-package* "main")
-                                                      (*pcl-caller-wantarray* *wantarray*))
-                                                    (p-sub-frame
-                                                      (block nil
-                                                        (p-void-ctx
-                                                          (p-let
-                                                            (($i :scalar
-                                                                (p-+ (p-cast-$ $si_ref :strict)
-                                                                  (p-aref @_ 0))))
-                                                            (p-caller-ctx
-                                                              (p-if (p-< $i $slen)
-                                                                (p-bit-and
-                                                                  (p--
-                                                                    (p-ord (p-substr $s $i 1))
-                                                                    32)
-                                                                  63)
-                                                                0)))))))))
+                                                (p-anon-sub "main"
+                                                  (lambda (&rest %_args)
+                                                    (let
+                                                      ((@_ (p-flatten-args %_args))
+                                                        (*pcl-current-package* "main")
+                                                        (*pcl-caller-wantarray* *wantarray*))
+                                                      (p-sub-frame
+                                                        (block nil
+                                                          (p-void-ctx
+                                                            (p-let
+                                                              (($i :scalar
+                                                                  (p-+
+                                                                    (p-cast-$ $si_ref :strict)
+                                                                    (p-aref @_ 0))))
+                                                              (p-caller-ctx
+                                                                (p-if (p-< $i $slen)
+                                                                  (p-bit-and
+                                                                    (p--
+                                                                      (p-ord (p-substr $s $i 1))
+                                                                      32)
+                                                                    63)
+                                                                  0))))))))))
                                               (p-let (($cm :box (make-p-box nil)))
                                                 (p-my-= $cm
                                                   (p-bit-or
@@ -4119,12 +4123,13 @@
                               (pl-_unpack_tmpl $cs_tmpl
                                 $s
                                 (p-backslash $si)
-                                (lambda (&rest %_args)
-                                  (let
-                                    ((@_ (p-flatten-args %_args))
-                                      (*pcl-current-package* "main")
-                                      (*pcl-caller-wantarray* *wantarray*))
-                                    (p-sub-frame (block nil (p-incf $checksum (p-aref @_ 0))))))
+                                (p-anon-sub "main"
+                                  (lambda (&rest %_args)
+                                    (let
+                                      ((@_ (p-flatten-args %_args))
+                                        (*pcl-current-package* "main")
+                                        (*pcl-caller-wantarray* *wantarray*))
+                                      (p-sub-frame (block nil (p-incf $checksum (p-aref @_ 0)))))))
                                 0
                                 0
                                 1)))
@@ -4140,12 +4145,14 @@
                                   (pl-_unpack_tmpl $rest_tmpl
                                     $s
                                     (p-backslash $si)
-                                    (lambda (&rest %_args)
-                                      (let
-                                        ((@_ (p-flatten-args %_args))
-                                          (*pcl-current-package* "main")
-                                          (*pcl-caller-wantarray* *wantarray*))
-                                        (p-sub-frame (block nil (p-push @result (p-aref @_ 0))))))
+                                    (p-anon-sub "main"
+                                      (lambda (&rest %_args)
+                                        (let
+                                          ((@_ (p-flatten-args %_args))
+                                            (*pcl-current-package* "main")
+                                            (*pcl-caller-wantarray* *wantarray*))
+                                          (p-sub-frame
+                                            (block nil (p-push @result (p-aref @_ 0)))))))
                                     0
                                     0
                                     0))))))))
@@ -4153,12 +4160,13 @@
                       (pl-_unpack_tmpl $tmpl
                         $s
                         (p-backslash $si)
-                        (lambda (&rest %_args)
-                          (let
-                            ((@_ (p-flatten-args %_args))
-                              (*pcl-current-package* "main")
-                              (*pcl-caller-wantarray* *wantarray*))
-                            (p-sub-frame (block nil (p-push @result (p-aref @_ 0))))))
+                        (p-anon-sub "main"
+                          (lambda (&rest %_args)
+                            (let
+                              ((@_ (p-flatten-args %_args))
+                                (*pcl-current-package* "main")
+                                (*pcl-caller-wantarray* *wantarray*))
+                              (p-sub-frame (block nil (p-push @result (p-aref @_ 0)))))))
                         0
                         0
                         0)))
