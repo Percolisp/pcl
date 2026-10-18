@@ -4801,7 +4801,9 @@ sub _process_local_declaration {
   # $ld_slice: an `@`-sigil target is a SLICE (`local @h{@k}`, `local
   # @{$r}{@k}`) whose subscript may name many keys at run time -- it takes the
   # slice macros, never the one-key `-init` fast path (s520).
-  my ($ld_sub, $ld_cl_var, $ld_sub_idx, $ld_slice);
+  # $ld_base_expr: the container is reached through an EXPRESSION base
+  # (`local @{ f() }{qw(a b)}`), which perl evaluates ONCE (#3366).
+  my ($ld_sub, $ld_cl_var, $ld_sub_idx, $ld_slice, $ld_base_expr);
   if (@non_ws >= 2
       && ref($non_ws[0]) eq 'PPI::Token::Symbol'
       && ref($non_ws[1]) eq 'PPI::Structure::Subscript') {
@@ -4846,6 +4848,7 @@ sub _process_local_declaration {
     $ld_sub     = $non_ws[2];
     $ld_sub_idx = 2;
     $ld_slice   = $non_ws[0]->content eq '@';
+    $ld_base_expr = ref($non_ws[1]) eq 'PPI::Structure::Block';   # @{ f() }{…}
     my $base_cl = ref($non_ws[1]) eq 'PPI::Token::Symbol'
       ? ($self->_parse_expression([$non_ws[1]], $stmt) // 'nil')
       : ($self->_parse_expression([$self->_deref_block_inner($non_ws[1])], $stmt) // 'nil');
@@ -4914,11 +4917,12 @@ sub _process_local_declaration {
       # install a FRESH box and the restore puts the old one back.  An element
       # needs no lexical rebinding, so p-local-maybe carries every shape here.
       # The condition is evaluated exactly ONCE: inline when one open reads it,
-      # in a temporary when several do.
+      # in a temporary when several do -- every multi-key open, and the slice
+      # path (its init, its open and its assignment each read it, #3366).
       my ($etest, $ectmp);
       if ($ld_mod ne '') {
         $etest = $self->_local_cond_test($ld_mod, $ld_cond, $stmt);
-        if (@key_cls > 1) {
+        if (@key_cls > 1 || $ld_slice) {
           $self->{_local_counter} //= 0;
           $ectmp = "pcl-local-cond-" . $self->{_local_counter}++;
           $self->_emit("(let (($ectmp $etest))");
@@ -4928,6 +4932,20 @@ sub _process_local_declaration {
           $etest = $ectmp;
         }
       }
+
+      # An expression base read by more than one form (the per-key opens, the
+      # slice assignment) is bound ONCE to a temporary, after the right side
+      # and under the condition, as perl evaluates it (#3366).
+      my $bind_base = sub {
+        return unless $ld_base_expr;
+        $self->{_local_counter} //= 0;
+        my $btmp = "pcl-local-base-" . $self->{_local_counter}++;
+        $self->_emit("(let (($btmp " . (defined $etest ? "(if $etest $cl_var nil)" : $cl_var) . "))");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth}++;
+        $cl_var = $btmp;
+      };
 
       if (defined $init_cl && @key_cls == 1 && !$ld_slice) {
         # Single element with initializer: use the *-init macro which evaluates
@@ -4955,6 +4973,7 @@ sub _process_local_declaration {
         $self->_emit("(let (($tmp $tmp_init))");
         $self->indent_level($self->indent_level + 1);
         $self->{_local_let_depth}++;
+        $bind_base->();
         for my $ki (0 .. $#key_cls) {
           my $key_cl = $key_cls[$ki];
           $self->_emit($self->_local_open_form("$macros[$ki] $cl_var $key_cl", $etest));
@@ -4967,6 +4986,7 @@ sub _process_local_declaration {
         $self->_emit(defined $etest ? "(when $etest $assign)" : $assign);
       } else {
         # No initializer: emit one macro call per key (nested open forms)
+        $bind_base->() if @key_cls > 1;
         for my $ki (0 .. $#key_cls) {
           my $key_cl = $key_cls[$ki];
           $self->_emit($self->_local_open_form("$macros[$ki] $cl_var $key_cl", $etest));

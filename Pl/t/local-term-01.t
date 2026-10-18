@@ -358,4 +358,19 @@ sub t { local(${"main::g"}) = @_; print "in t g=$g\n" } t(3, 4); print "g=$g\n";
 print "g=$g\n";
 PERL
 
+# 15. #3366 (R2 + R5, f2 + f5): a side-effecting statement-modifier
+#     CONDITION and a side-effecting slice BASE of a localized slice run
+#     ONCE (n=1), and the right elements are localized.
+test_lt('local slice: the modifier condition and the base run once', <<'PERL');
+our @a = (0, 0, 0); our %h = (a => 1, b => 2); my $n = 0; my $m = 0;
+sub f { $n++; 1 }
+sub hb { $m++; \%h }
+{ local @a[0..1] = (1, 2) if f(); print "n=$n a=@a\n"; }
+print "a=@a\n";
+{ local @{ hb() }{qw(a b)} = (10, 20); print "in m=$m a=$h{a} b=$h{b}\n"; }
+print "out m=$m a=$h{a} b=$h{b}\n";
+{ local @{ hb() }{qw(a b)} = (30, 40) if f(); print "in n=$n m=$m a=$h{a} b=$h{b}\n"; }
+print "out n=$n m=$m a=$h{a} b=$h{b}\n";
+PERL
+
 done_testing();
