@@ -7,12 +7,14 @@
 # stash-hash-01.t - a package stash read and written AS A HASH, inside the
 # bounded design s522 ruled (docs/not-supported.md "Live symbol-table hashes"):
 # every delete spelling that removes a sub goes through the one write-through
-# path (#3511), the snapshot lists variables and filehandles too (#1510), and
-# an element VALUE that is not a sub dies naming the deferral (rule 12).
-# Expected lines are perl 5.40.3's output (probed s522b) except the rule-12
-# row, which asserts PCL's refusal.  Inverse: on the aff112d7 base all 8 rows
-# fail (a,b,keep / the reader death on `@Pkg::{...}` / empty / the subs-only
-# view / a-def / the value read answers).
+# path (#3511), the snapshot lists variables and filehandles too (#1510), a
+# non-sub element's VALUE is its typeglob (perl's value; core Exporter reads
+# `${$pkg . '::'}{EXPORT_FAIL}`), and DELETING a non-sub symbol dies naming
+# the deferral (rule 12: the variable would stay reachable).  Expected lines
+# are perl 5.40.3's output (probed s522b) except the rule-12 row, which
+# asserts PCL's refusal.  Inverse: on the aff112d7 base every row fails
+# (a,b,keep / the reader death on `@Pkg::{...}` / empty / the subs-only view
+# / a-def / no glob value / the delete answers).
 
 use v5.30;
 use strict;
@@ -31,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 10;
 
 sub run_cl {
     my ($code) = @_;
@@ -91,9 +93,14 @@ test_cl('a stash slice READ of subs still answers',
     'package Q; sub b {2} sub keep {3} package main; my @x = @Q::{qw(b keep)}; print scalar(@x), "\n";',
     "2\n");
 
-test_cl('rule 12: the VALUE of a non-CODE stash element dies naming the deferral',
-    'package Foo; our $x = 1; package main; print eval { my $v = $Foo::{x}; 1 } ? "read\n" : "died: $@";',
-    qr/\Adied: PCL: stash element value for a non-CODE symbol is not supported \(docs\/not-supported\.md "Live symbol-table hashes"\)/);
+test_cl('the VALUE of a non-CODE stash element is its typeglob',
+    'package Foo; our $x = 7; our @y = (1,2); package main; my $g = $Foo::{x};'
+    . ' print "$g|", ref(\$Foo::{x}), "|", (defined $Foo::{y} ? 1 : 0), "|", scalar(@{*{$Foo::{y}}{ARRAY}}), "\n";',
+    "*Foo::x|GLOB|1|2\n");
+
+test_cl('rule 12: DELETING a non-CODE symbol from a stash dies naming the deferral',
+    'package Foo; our $x = 1; package main; print eval { delete $Foo::{x}; 1 } ? "deleted\n" : "died: $@";',
+    qr/\Adied: PCL: deleting a non-CODE symbol from a stash is not supported \(docs\/not-supported\.md "Live symbol-table hashes"\)/);
 
 # #3321: a stash ALIAS `*A:: = *B::` redirects RUN-TIME name resolution (bless,
 # method calls, isa, can) to B's stash; names bound at COMPILE time (r4's `sub

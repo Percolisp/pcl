@@ -3009,12 +3009,13 @@ sub _process_expression_statement {
   # Special case: "import PACKAGE" is syntactic sugar for "PACKAGE->import()"
   # PPI parses this as two barewords, so we detect and convert it
   # Use funcall+intern to avoid read-time package dependency
-  # It ASKS whether `import` is callable here (the #266 classifier, task
-  # #1506): a file's own `sub import` makes `import Foo;` that sub's call.
+  # It ASKS whether `import` is callable in THIS package (task #1506, the
+  # question the indirect-object pre-pass asks): this package's own `sub
+  # import` makes `import Foo;` that sub's call; another package's does not.
   if (@parts == 2
       && ref($parts[0]) eq 'PPI::Token::Word' && $parts[0]->content eq 'import'
       && ref($parts[1]) eq 'PPI::Token::Word'
-      && $self->_expr_parser([])->_bareword_callable_here('import', $parts[0]) ne 'yes') {
+      && !$self->_expr_parser([])->_is_known_callable('import', 1)) {
     my $pkg = $parts[1]->content;
     # The package designator goes through the ONE spelling rule
     # (_cl_pkg_designator / Pl::CLForm::cl_pkg), like every other emitted

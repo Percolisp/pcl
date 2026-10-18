@@ -16048,6 +16048,13 @@ which is one of #1140's escape spellings (probed)."
        ;; Stash write-through: deleting a sub entry from a package stash
        ;; (delete $Pkg::{name}) must really remove the sub from the package.
        (let ((stash-pkg (gethash h *p-stash-pkg-table*)))
+         ;; A non-CODE symbol (its snapshot value is a glob): removing the
+         ;; variable from the package is the deferred live model, and leaving
+         ;; it reachable would answer wrong -- rule 12 (s522b).
+         (when (and stash-pkg
+                    (let ((v (gethash k h)))
+                      (and (p-box-p v) (p-typeglob-p (p-box-value v)))))
+           (%p-die-error nil "PCL: deleting a non-CODE symbol from a stash is not supported (docs/not-supported.md \"Live symbol-table hashes\")"))
          (when stash-pkg
            (let ((sym (%p-resolve-sub-symbol
                        (concatenate 'string stash-pkg "::" k))))
@@ -16318,16 +16325,15 @@ which is one of #1140's escape spellings (probed)."
        (%pcl-invert-case name))
       (t nil))))
 
-(defun %p-stash-variable-value ()
-  "The element VALUE a stash snapshot holds for a non-CODE symbol: a box whose
-   READ dies (rule 12).  perl's value is the typeglob, and stash values as
-   globs are the deferred full model (docs/not-supported.md \"Live
-   symbol-table hashes\"), so `keys` / `exists` / `scalar %Pkg::` answer and a
-   read of the value says it is not there instead of answering wrong."
-  (flet ((refuse (&rest _)
-           (declare (ignore _))
-           (%p-die-error nil "PCL: stash element value for a non-CODE symbol is not supported (docs/not-supported.md \"Live symbol-table hashes\")")))
-    (make-p-box (make-p-magic-cell :getter #'refuse :setter #'refuse))))
+(defun %p-stash-variable-value (pkg perl-name)
+  "The element VALUE a stash snapshot holds for a non-CODE symbol: the
+   symbol's TYPEGLOB, perl's own value -- true, `*Pkg::name` as a string,
+   `*{$Pkg::{name}}{ARRAY}` its slot.  NOT the s522 ruling's die: core
+   Exporter reads `${$pkg . '::'}{EXPORT_FAIL}` on every import, and a die
+   there failed ten gate files (measured s522b); the glob is perl's answer,
+   not a guess.  A WRITE through the value is the deferred model; a stash
+   DELETE of such a symbol dies (p-delete)."
+  (make-p-box (make-p-typeglob pkg (%pcl-invert-case perl-name))))
 
 (defun %p-stash-add-variable-names (pkg h)
   "Add a key to stash snapshot H for every variable / filehandle of PKG that
@@ -16336,7 +16342,7 @@ which is one of #1140's escape spellings (probed)."
     (when (eq (symbol-package sym) pkg)
       (let ((perl-name (%p-stash-variable-name sym)))
         (when (and perl-name (not (nth-value 1 (gethash perl-name h))))
-          (setf (gethash perl-name h) (%p-stash-variable-value)))))))
+          (setf (gethash perl-name h) (%p-stash-variable-value pkg perl-name)))))))
 
 (defun p-stash (pkg-name)
   "Return the package stash as a hash mapping Perl symbol names to code-ref boxes.
