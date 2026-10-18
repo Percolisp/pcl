@@ -3565,7 +3565,13 @@ sub gen_methodcall_form {
       if (ref($class_node) eq 'PPI::Token::Word') {
         my $name = $class_node->content();
         my $nx = $class_node->can('snext_sibling') && $class_node->snext_sibling;
-        if ($nx && $nx->isa('PPI::Structure::List') && $name ne '__PACKAGE__') {
+        # Indirect object (`new Foo(ARGS)`): the METHOD token is the word
+        # just before the class, and the List is the method's arguments.
+        my $meth_tok = $self->expr_o->get_a_node($kids->[1]);
+        my $pv = $class_node->can('sprevious_sibling') && $class_node->sprevious_sibling;
+        my $indirect = ref($meth_tok) && ref($pv) && $pv == $meth_tok;
+        if ($nx && $nx->isa('PPI::Structure::List') && $name ne '__PACKAGE__'
+            && !$indirect) {
           # `NAME()->m`: the parentheses make it a CALL in perl whatever
           # packages exist -- Type-Tiny's `Types::Standard::Tuple()->of(...)`
           # read the class once Types/Standard/Tuple.pm had loaded (#3397).
