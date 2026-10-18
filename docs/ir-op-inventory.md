@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **757**
+* names exported: **758**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 757
+* with a machine-readable `Contract:` tail: **69** of 758
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -518,7 +518,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-seekdir` | macro | `(dh pos)` | — | — | — | — | — | — | — |
 | `p-telldir` | macro | `(dh)` | — | — | — | — | — | — | — |
 
-## dynamic-scope (18)
+## dynamic-scope (19)
 
 *No ir-spec §10 row.*  `local` in each of its place shapes — ir-spec §7.2
 
@@ -540,6 +540,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-local-glob-if` | macro | `(cond-form pkg-str name-str rhs-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-hash-elem` | macro | `(hash-var key-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-hash-elem-init` | macro | `(hash-var key-form init-form &body body)` | — | — | — | — | — | — | — |
+| `p-local-hash-slice` | macro | `(hash-var key-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-maybe` | macro | `(cond-form localizer &body body)` | — | — | — | — | — | — | — |
 | `p-local-pipe` | macro | `(&body body)` | — | — | — | — | — | — | — |
 

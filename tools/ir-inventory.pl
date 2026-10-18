@@ -290,7 +290,7 @@ my %FAMILY;
                          p-local-dot p-defcell p-local-cell p-local-cell-if
                          p-local-maybe p-local-pipe p-local-hash-elem
                          p-local-array-elem p-local-hash-elem-init
-                         p-local-array-elem-init p-local-array-slice
+                         p-local-array-elem-init p-local-array-slice p-local-hash-slice
                          p-local-deref-scalar p-local-deref-array
                          p-local-deref-hash %pcl-local-errno-init)],
   'pack' => [qw(p-pack p-unpack)],
