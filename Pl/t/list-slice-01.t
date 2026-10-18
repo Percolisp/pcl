@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 17;
 
 sub run_cl {
     my ($code) = @_;
@@ -201,3 +201,14 @@ test_perl_oracle("#2953 scalar(() = empty list slice) is 0",
     q{my @e=(); print scalar(() = (@e)[0,1,2]), "\n";
       my @s = (lstat("/nonexistent-pcl-2953"))[0,1,2]; print scalar(@s), "\n";
       my $v = (@e)[1]; print defined($v) ? "def\n" : "undef\n";});
+# #3412 (s520a): a list builtin that finds nothing is the EMPTY LIST in an
+# argument slot -- a failed stat / lstat, caller beyond the stack, a missed
+# getpw* / getgr* lookup each passed ONE argument (core File::stat::stat on a
+# missing path built an object, so Path::Tiny ->stat never threw).
+test_perl_oracle("#3412 a failed stat / lstat / caller / getpwnam passes no argument",
+    q{sub n { scalar(@_) } my $f = "/nonexistent-pcl-3412";
+      sub pop_ { return undef unless @_; "obj" }
+      print join(" ", n(stat($f)), n(lstat $f), n(CORE::stat $f), n(1, stat($f), 2),
+        n(caller(5)), n(getpwnam("nosuchuser-pcl-3412")), n(getgrnam("nosuchgrp-pcl-3412")),
+        (defined(pop_(CORE::stat $f)) ? "def" : "undef"), scalar(my @e = (stat($f), "x"))), "\n";
+      sub m2 { n(caller(9)) } print m2(), " ", n(stat("/")), "\n";});

@@ -1774,6 +1774,15 @@
 (defvar *p-declared-subs* (make-hash-table :test 'eq)
   "Perl sub existence tracking for exists &sub and defined &sub")
 
+(defun %p-no-answer (&optional (wantarray (eq *wantarray* t)))
+  "What a LIST builtin that found nothing answers (#3412): perl's EMPTY LIST in
+   list context -- (%p-empty-list), the shape an argument list splices to
+   nothing -- and undef in scalar context.  Raw NIL or *p-undef* in list
+   context is ONE element: `f(stat $missing)` passed one argument where perl
+   passes none, so File::stat::stat on a missing path built an object.  The
+   one spelling for stat/lstat, caller and the getpw*/getgr* lookups."
+  (if wantarray (%p-empty-list) *p-undef*))
+
 (defvar *p-lazy-coderef-target* (make-hash-table :test 'eq :weakness :key)
   "Maps a LAZY code ref (p-backslash-sub's stub trampoline or AUTOLOAD
    fallback lambda) to the sub symbol it stands for.  defined/exists on a
@@ -22682,7 +22691,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    `lstat` are in ExprToCL's %WANTARRAY_SENSITIVE, so every call site binds
    *wantarray* to its own static context and the enclosing sub's cannot leak."
   (if (eq *wantarray* t)
-      (and st (%p-stat-vector st))
+      (if st (%p-stat-vector st) (%p-no-answer t))
       (p-bool st)))
 
 (defun %p-stat-impl (file-or-fh)
@@ -34023,7 +34032,7 @@ size comes from fstat on the descriptor, after the buffered output is written
   ;; At top level (depth 0), caller() always returns undef/nil in Perl.
   ;; This is the common case: 'run_tests() unless caller' at top level.
   (when (zerop *pcl-sub-call-depth*)
-    (return-from p-caller nil))
+    (return-from p-caller (%p-no-answer)))
   ;; Package of the frame's caller comes from the dynamic caller stack pushed at
   ;; each p-sub entry (the only source that preserves Perl package case).
   (let ((lvl (if (p-box-p level) (truncate (to-number level)) level)))
@@ -34031,7 +34040,7 @@ size comes from fstat on the descriptor, after the buffered output is written
     ;; (Error::TypeTiny::throw_cb reads `caller($level - 1)` at level 0, #3399);
     ;; `nth` of a negative index was a raw CL type error.
     (when (or (minusp lvl) (>= lvl (length *pcl-caller-pkg-stack*)))
-      (return-from p-caller nil))
+      (return-from p-caller (%p-no-answer)))
     (setf level lvl))
   (let* ((caller-package (nth level *pcl-caller-pkg-stack*))
          ;; Subroutine name (caller(N))[3] comes from the dedicated subname stack;
@@ -39423,7 +39432,7 @@ size comes from fstat on the descriptor, after the buffered output is written
   (when (null *p-group-list*)
     (p-setgrent))
   (if (>= *p-group-pos* (length *p-group-list*))
-      *p-undef*
+      (%p-no-answer wantarray)
       (let ((entry (nth *p-group-pos* *p-group-list*)))
         (incf *p-group-pos*)
         (if wantarray
@@ -39445,8 +39454,8 @@ size comes from fstat on the descriptor, after the buffered output is written
             (if wantarray
                 (p-group-struct-to-vec g)
                 (make-p-box (sb-posix:group-name g)))
-            *p-undef*))
-    (sb-posix:syscall-error () *p-undef*)))
+            (%p-no-answer wantarray)))
+    (sb-posix:syscall-error () (%p-no-answer wantarray))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Passwd database functions (getpwent, setpwent, endpwent, getpwuid, getpwnam)
@@ -39488,7 +39497,7 @@ size comes from fstat on the descriptor, after the buffered output is written
   (when (null *p-passwd-list*)
     (p-setpwent))
   (if (>= *p-passwd-pos* (length *p-passwd-list*))
-      *p-undef*
+      (%p-no-answer wantarray)
       (let ((entry (nth *p-passwd-pos* *p-passwd-list*)))
         (incf *p-passwd-pos*)
         (if wantarray
@@ -39510,8 +39519,8 @@ size comes from fstat on the descriptor, after the buffered output is written
             (if wantarray
                 (p-passwd-struct-to-vec pw)
                 (make-p-box (sb-posix:passwd-name pw)))
-            *p-undef*))
-    (sb-posix:syscall-error () *p-undef*)))
+            (%p-no-answer wantarray)))
+    (sb-posix:syscall-error () (%p-no-answer wantarray))))
 
 (defun p-getpwnam (name &key (wantarray (eq *wantarray* t)))
   "Perl getpwnam(NAME) — look up passwd entry by user name."
@@ -39521,8 +39530,8 @@ size comes from fstat on the descriptor, after the buffered output is written
             (if wantarray
                 (p-passwd-struct-to-vec pw)
                 (make-p-box (sb-posix:passwd-uid pw)))
-            *p-undef*))
-    (sb-posix:syscall-error () *p-undef*)))
+            (%p-no-answer wantarray)))
+    (sb-posix:syscall-error () (%p-no-answer wantarray))))
 
 (defun p-getgrnam (name &key (wantarray (eq *wantarray* t)))
   "Perl getgrnam(NAME) — look up group entry by name."
@@ -39533,8 +39542,8 @@ size comes from fstat on the descriptor, after the buffered output is written
                 (p-group-struct-to-vec g)
                 ;; scalar getgrnam = the GID (the name is what you passed in)
                 (make-p-box (sb-posix:group-gid g)))
-            *p-undef*))
-    (sb-posix:syscall-error () *p-undef*)))
+            (%p-no-answer wantarray)))
+    (sb-posix:syscall-error () (%p-no-answer wantarray))))
 
 (defun p-getlogin ()
   "Perl getlogin — the login name of the controlling terminal's user.  perl
