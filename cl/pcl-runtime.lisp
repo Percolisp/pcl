@@ -5353,9 +5353,8 @@
     ;; A glob stringifies to its PERL spelling, so both halves must undo the
     ;; case inversion they are stored under — `*plain` printed `*MAIN::PLAIN`
     ;; (#316).  Same restoration `*STDOUT{NAME}` / `{PACKAGE}` already do.
-    ((p-typeglob-p v) (format nil "*~A::~A"
-                              (%pcl-cl-pkg-to-perl-name (p-typeglob-package v))
-                              (%pcl-invert-case (p-typeglob-name v))))
+    ((p-typeglob-p v) (format nil "*~A::~A" (%p-glob-perl-package v)
+                              (%p-glob-perl-name v)))
     ;; A raw I/O stream is a lexical filehandle (`open my $fh, …`), which in
     ;; Perl is a GLOB ref — stringify as GLOB(0xADDR), not SBCL's #<fd-stream …>.
     ;; (Named handles reach here as typeglobs, handled above.)
@@ -20035,7 +20034,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             (name (if sep (subseq nm (+ sep 2)) nm)))
        (setf (gethash (intern (%pcl-invert-case name) :pcl) *p-filehandles*)
              stream)))
-    ((p-box-p fh) (box-set fh stream))
+    ((p-box-p fh) (%p-note-handle-name fh stream) (box-set fh stream))
     (t            (setf (gethash fh *p-filehandles*) stream))))
 
 ;;; THE LEXICAL IS AUTOVIVIFIED BEFORE THE OPEN IS ATTEMPTED (task #1271).
@@ -21182,8 +21181,48 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 
 (defmacro %p-fh-install-arg (fh-form)
   "THE handle argument of an OPENER (open, sysopen, opendir, pipe, socket,
-   socketpair, accept's new handle): %p-fh-arg's :INSTALL slot, checked."
-  `(%p-fh-place-check (%p-fh-arg ,fh-form :install)))
+   socketpair, accept's new handle): %p-fh-arg's :INSTALL slot, checked.
+   A SCALAR VARIABLE there names the handle it vivifies: perl's glob for
+   `open(my $fh, ...)` is `*main::$fh` (task #3517), so the box is noted with
+   the variable's source name for %p-note-handle-name."
+  (let ((form `(%p-fh-place-check (%p-fh-arg ,fh-form :install))))
+    (if (and (symbolp fh-form)
+             (let ((n (symbol-name fh-form)))
+               (and (> (length n) 1) (char= (char n 0) #\$))))
+        `(%p-note-handle-var ,form ,(%p-handle-var-display-name fh-form))
+        form)))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-handle-var-display-name (sym)
+    "The SOURCE spelling of the scalar variable SYM: the case inversion undone
+     and a compiler renaming suffix (`__lex__3`, `__file__0`, ...) dropped."
+    (let* ((n (%pcl-invert-case (symbol-name sym)))
+           (d (position-if-not #'digit-char-p n :from-end t))
+           (u2 (and d (< d (1- (length n))) (>= d 1)
+                    (string= "__" n :start2 (1- d) :end2 (1+ d))
+                    (search "__" n :from-end t :end2 (1- d)))))
+      (if (and u2 (> u2 1)
+               (every #'alpha-char-p (subseq n (+ u2 2) (1- d))))
+          (subseq n 0 u2)
+          n))))
+
+(defvar *p-handle-var-names* (make-hash-table :test 'eq :weakness :key)
+  "BOX -> the source name of the scalar variable an opener was handed (#3517).")
+
+(defvar *p-handle-names* (make-hash-table :test 'eq :weakness :key)
+  "HANDLE (stream, socket, dirhandle) -> (PERL-PACKAGE . \"$name\"): the name
+   perl gives the glob it vivifies for `open my $name` (task #3517).")
+
+(defun %p-note-handle-var (box name)
+  (when (p-box-p box) (setf (gethash box *p-handle-var-names*) name))
+  box)
+
+(defun %p-note-handle-name (box handle)
+  "HANDLE was just installed into BOX: give it the noted variable's name, in
+   the package in effect, as perl names the vivified glob."
+  (let ((nm (and (p-box-p box) (gethash box *p-handle-var-names*))))
+    (when nm
+      (setf (gethash handle *p-handle-names*) (cons *pcl-current-package* nm)))))
 
 (defmacro %p-fh-arg (fh-form &optional (call-form-is-a-handle t))
   ;; A CONTEXT WRAP around the argument is peeled first (%p-strip-ctx): a
@@ -23831,6 +23870,7 @@ would consume, so it dies naming the stream (rule 12)."
           (if key
               (setf (gethash key *p-dirhandles*) handle)
               (when (p-box-p dh)
+                (%p-note-handle-name dh handle)
                 (setf (p-box-value dh) handle))))
         t))))
 
@@ -30959,6 +30999,10 @@ would consume, so it dies naming the stream (rule 12)."
       ;; glob itself, the `t` arm: `$$gr` is *main::foo (#2688).
       ((%p-glob-value-operand-p val inner)
        (p-box-value (%p-glob-scalar-box inner)))
+      ;; `$$fh` on a LEXICAL handle: perl's $fh is a ref to the vivified glob,
+      ;; so `$$fh` IS that glob, `*main::$fh` (task #3517) -- not the handle
+      ;; object, which stringified as a (blessed) GLOB(0x...) reference.
+      ((or (streamp inner) (%p-socket-p inner)) (%p-stream-glob inner))
       (t inner))))
 
 (defun (setf p-cast-$) (new-value val &optional site)
@@ -32244,9 +32288,32 @@ would consume, so it dies naming the stream (rule 12)."
       (let* ((pkg (or (find-package "PCL-ANONIO")
                       (make-package "PCL-ANONIO" :use '(:cl :pcl))))
              (name (format nil "__ANONIO__~D" (incf *p-stream-glob-seq*)))
-             (glob (make-p-typeglob pkg name)))
-        (setf (gethash (intern name pkg) *p-filehandles*) stream)
+             (glob (make-p-typeglob pkg name))
+             (shown (gethash stream *p-handle-names*)))
+        (when shown (setf (gethash glob *p-glob-display-names*) shown))
+        (if (%p-dirhandle-record-p stream)
+            (setf (gethash (intern name pkg) *p-dirhandles*) stream)
+            (setf (gethash (intern name pkg) *p-filehandles*) stream))
         (setf (gethash stream *p-stream-globs*) glob))))
+
+(defun %p-dirhandle-record-p (v)
+  "True for an OPEN dirhandle's (index . names) record (%p-dirhandle-path)."
+  (and (consp v) (nth-value 1 (gethash v *p-dirhandle-paths*))))
+
+(defvar *p-glob-display-names* (make-hash-table :test 'eq :weakness :key)
+  "GLOB -> (PERL-PACKAGE . NAME) when the glob's perl-visible name is not its
+   internal one: a lexical handle's `*main::$fh` (task #3517), whose internal
+   name stays unique because %p-resolve-fh finds a glob's handle by NAME.")
+
+(defun %p-glob-perl-package (glob)
+  "The PERL package name of GLOB, as `*{...}`, `*g{PACKAGE}` show it."
+  (let ((d (gethash glob *p-glob-display-names*)))
+    (if d (car d) (%pcl-cl-pkg-to-perl-name (p-typeglob-package glob)))))
+
+(defun %p-glob-perl-name (glob)
+  "The PERL name of GLOB, as `*{...}`, `*g{NAME}` show it."
+  (let ((d (gethash glob *p-glob-display-names*)))
+    (if d (cdr d) (%pcl-invert-case (p-typeglob-name glob)))))
 
 (defun p-dynamic-typeglob (name-box)
   "Rvalue *{EXPR} — return a typeglob object.  EXPR is a NAME string (\"Pkg::name\")
@@ -32262,6 +32329,9 @@ would consume, so it dies naming the stream (rule 12)."
       ;; GLOB slots from it (task #1047).  Stringifying it into a glob NAME
       ;; (which is what this used to do) made `*$fh{IO}` undef.
       ((or (streamp inner) (%p-socket-p inner)) (%p-stream-glob inner))
+      ;; A DIRHANDLE too (task #3517): its value is PCL's (index . entries)
+      ;; record, which the name arm below stringified into `*main::0 . ..`.
+      ((%p-dirhandle-record-p inner) (%p-stream-glob inner))
       (t
        ;; Unqualified → the package in effect: %p-glob-dynamic-name, the one
        ;; reading every dynamic-glob path shares.
@@ -32540,9 +32610,9 @@ would consume, so it dies naming the stream (rule 12)."
         ;; branch — all-upper flips, all-lower flips, mixed is identity — so
         ;; one call restores the source spelling.
         ((string= slot-s "NAME")
-         (make-p-box (%pcl-invert-case (p-typeglob-name glob))))
+         (make-p-box (%p-glob-perl-name glob)))
         ((string= slot-s "PACKAGE")
-         (make-p-box (%pcl-cl-pkg-to-perl-name (p-typeglob-package glob))))
+         (make-p-box (%p-glob-perl-package glob)))
         ((string= slot-s "GLOB")    glob)
         ;; Every other slot name (FORMAT, or a bareword that is no slot at all)
         ;; is undef in perl too — `*STDOUT{XYZZY}` yields undef, it does not

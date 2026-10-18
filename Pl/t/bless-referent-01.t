@@ -48,7 +48,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 14;
+plan tests => 15;
 
 # One SBCL launch for the whole family: each line prints one answer.
 my $prog = <<'EOF';
@@ -101,6 +101,15 @@ sub set0 { $_[0] = \$sv } my $z3 = Symbol::gensym(); set0($z3);
 my $e3 = Symbol::gensym(); $$e3 = \$sv;
 print "t14:", ref($c3), " ", ($c3 == \$sv ? "same" : "other"), " ", ref($u3), " ",
       ref($h3{g}), " ", ref($z3), " ", ref($e3), " ", ${*$e3}, "\n";
+# #3517: the glob a scalar-variable opener vivifies is named after the
+# variable in the package in effect (`*main::$fh`), for `*$fh`, `$$fh`,
+# *$fh{NAME}/{PACKAGE}, through @_, and for a dirhandle (whose glob used to
+# stringify its ENTRY LIST); readdir through that glob still reads.
+sub two_deep { via_arg($_[0]) }
+open(my $fh5, '<', $0) or die; bless $fh5, 'Z';
+opendir(my $dh5, '.') or die; my $n5 = 0; $n5++ while defined(readdir *$dh5);
+print "t15:", via_arg($$fh5), " ", "" . *$fh5, " ", *$fh5{NAME}, " ", *$fh5{PACKAGE},
+      " ", two_deep($$fh5), " ", "" . *$dh5, " ", ($n5 > 2 ? "read" : "none"), "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -137,3 +146,5 @@ like $out, qr/^t13:\*Symbol::GEN\d+ \[\] refstr$/m,
     'a blessed glob\'s VALUE through @_ stringifies as the glob, not with its class (#3516)';
 like $out, qr/^t14:SCALAR same SCALAR SCALAR SCALAR GLOB 1$/m,
     'a plain store replaces a glob ref; $$g = \\$s is the glob assignment (#3519)';
+like $out, qr/^t15:\*main::\$fh5 \*main::\$fh5 \$fh5 main \*main::\$fh5 \*main::\$dh5 read$/m,
+    'a lexical handle\'s glob is named after its variable: *main::$fh (#3517)';
