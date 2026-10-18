@@ -485,7 +485,7 @@ errno_test.t	OK	2	0	2
 eval.t	PARTIAL	135	25	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
-flip.t	OK	12	2	14
+flip.t	OK	13	1	14
 for.t	OK	130	0	132
 grent.t	OK	3	0	3
 grep.t	OK	71	0	77
@@ -579,6 +579,7 @@ recurse.t	OK	26	2	28
 #   here) and by the sweep serially ("Still losing rows after a serial re-run: magic.t").  The
 #   file's 31 failing rows are the SAME 31 (their numbers shift by 2), so fail-baseline.tsv is
 #   unchanged; baselines/row-shortfall.tsv perl-tests/magic.t 19 -> 21 in the same commit.
+# s521d (2026-10-18, Opus): flip.t 12 -> 13 passing by EDIT -- `$. = 15; ok(scalar(15..0))` passes now that `$.` keeps an assigned value with no current handle (#3518; the flip-flop compares with $.); one-file runs base 68aeebf5 12/2, tree 13/1.
 ref.t	PARTIAL	204	11	245
 reset.t	OK	21	1	45
 reverse.t	OK	25	0	25
