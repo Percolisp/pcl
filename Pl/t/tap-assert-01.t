@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 35;
+plan tests => 36;
 
 sub run_cl {
     my ($code) = @_;
@@ -508,6 +508,28 @@ subtest 'skipper' => sub { plan skip_all => 'why'; ok(1) };
 subtest 'dies' => sub { ok(1,'x'); die "boom\n"; };
 ok(1, 'never');
 });
-  ok($die =~ /^    ok 1 - x\n    1\.\.1\nok 1 - dies$/m && $die =~ /boom/ && $die !~ /never/,
+  ok($die =~ /^    ok 1 - x$/m && $die =~ /^    1\.\.1\nok 1 - dies$/m && $die =~ /boom/ && $die !~ /never/,
      'subtest: a die inside closes the child, reports the parent row, then propagates');
 }
+
+# ── task #3530 (= #3434 part 2): the TAP stream is Test::More's OWN dup ─────
+# Test::Builder dups STDOUT at load and prints through the dup, so a program
+# that closes STDOUT, re-opens it from a saved dup or points it at a string
+# never loses a TAP line -- nor the no_plan trailer the END block prints
+# (probed vs perl 5.40.3, byte-identical).  Before: `ok 2` died with SBCL's
+# raw closed-stream error and the trailer went into the re-opened handle.
+is(run_cl(q{use Test::More 'no_plan';
+ok 1, 'one';
+open my $save, '>&', \*STDOUT or die;
+close STDOUT;
+ok 2, 'after close';
+open STDOUT, '>&', $save or die;
+print "program line\n";
+my $buf = '';
+close STDOUT; open STDOUT, '>', \$buf;
+ok 3, 'stdout is a string';
+print "into buf\n";
+close STDOUT; open STDOUT, '>&', $save;
+print "buf=[$buf]\n";
+}), "ok 1 - one\nok 2 - after close\nprogram line\nok 3 - stdout is a string\nbuf=[into buf\n]\n1..3\n",
+   'TAP reaches the original stdout through a close / re-open / in-memory STDOUT; the no_plan trailer too');

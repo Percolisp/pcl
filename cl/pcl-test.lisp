@@ -30,6 +30,30 @@
                      (write-string text o :start start :end (if nl (1+ nl) len))
                      (setf start (if nl (1+ nl) len))))))))
 
+(defvar *tap-stream* nil
+  "Test::More's OWN output stream (#3530): a dup of descriptor 1 taken when a
+   package first `use's Test::More / Test::Simple, as Test::Builder dups
+   STDOUT at load (`open $Testout, \">&STDOUT\"').  NIL until then -- perl's
+   t/test.pl prints to the CURRENT STDOUT (t/io/dup.t re-opens STDOUT and
+   expects its `ok' through the re-open), so a file that never imports
+   Test::More keeps writing to *standard-output*.")
+
+(defun %tap-open-stream ()
+  "Take the TAP layer's dup of descriptor 1, once per process (#3530).  It
+   carries the STDOUT layers in force NOW (perl's dup inherits the layers of
+   the moment it is taken, not a later binmode) and is AUTOFLUSHED, as
+   Test::Builder autoflushes its handles AND the program's STDOUT -- which is
+   also set here, so a program line and a TAP line keep their order on one
+   descriptor through two streams."
+  (unless *tap-stream*
+    (finish-output *standard-output*)
+    (setf *tap-stream*
+          (sb-sys:make-fd-stream (sb-posix:dup 1) :output t :buffering :full
+                                 :external-format (stream-external-format
+                                                   sb-sys:*stdout*)))
+    (setf (gethash *tap-stream* *p-autoflush-handles*) t
+          (gethash *standard-output* *p-autoflush-handles*) t)))
+
 (defun %tap-out (control &rest args)
   "Every TAP line this layer emits, through ONE writer (task #1115).
 
@@ -52,11 +76,20 @@
    only the rows that happened to have flushed.  Routed through the ONE
    autoflush mechanism rather than an unconditional force-output: with $| off
    the check is a single fixnum read (the table is empty), and with it on the
-   behaviour is perl's, not a second policy of our own."
-  (%p-with-wide-upgrade
-   (%p-out-string (%tap-indent-lines (apply #'format nil control args))
-                  *standard-output* nil))
-  (%p-maybe-autoflush *standard-output*))
+   behaviour is perl's, not a second policy of our own.
+
+   THE STREAM (#3530): Test::More's own dup of descriptor 1 once a package has
+   `use'd Test::More (*tap-stream*), so a program that closes or re-opens
+   STDOUT never loses a TAP line; otherwise the current STDOUT, which is what
+   perl's t/test.pl prints to.  The diagnostics stay on this stream, NOT on a
+   dup of descriptor 2 as Test::Builder writes them: the board runner reads
+   the TAP from stdout alone (#3241) and takes each failing row's got /
+   expected from the diagnostic lines after it."
+  (let ((stream (or *tap-stream* *standard-output*)))
+    (%p-with-wide-upgrade
+     (%p-out-string (%tap-indent-lines (apply #'format nil control args))
+                    stream nil))
+    (%p-maybe-autoflush stream)))
 
 ;;; Test state
 (defvar *test-count* 0)
@@ -529,6 +562,7 @@
    package.  Test::More and Test::Simple make PKG a Test::More caller (#3436)."
   (when (and pkg (member module-name '("Test::More" "Test::Simple")
                          :test #'string=))
+    (%tap-open-stream)
     (setf (gethash pkg *test-more-importers*) t)))
 
 (defun %test-more-caller-p ()

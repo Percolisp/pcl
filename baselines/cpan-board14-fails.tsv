@@ -150,6 +150,8 @@
 #   ROUND 2 (s521, 2026-10-18 18:4x, main 81afe6b0 = MAIN-READY-34; table baselines/cpan-board-s521r2.tsv): 232 PASS / 128 PARTIAL / 89 FAIL of 449, TOTAL passing 28,489 (round 1: 14,105);
 #   row diff 11 NEW (ALL the 105oneshot flap family + temp-file names in two row keys: NOT re-blessed) / 24 FIXED (out by edit: CMM 002 + 003 = #3373 s519b, Path-Tiny children.t = #3374 s519a, HTTP-Tiny 100_get.t 64 128 136 177 = #3436 s521a,
 #   IO-Compress 100generic-* 544 + 546 = s521b's window (blessed from s521a's pre-rebase one-file run; pass on -34), Role-Tiny role-basic-composition.t 34 = round 2 (s521a..s521b window, not probed to a member)) / 1 LOST (Data-Dump glob.t 5 -> #3516, s521a #3433 regression, a row IN).
+# EDITED (s521c, #3530 the TAP stream through its own dup of fd 1): Capture-Tiny 06-stdout-closed.t + 10-stdout-string.t *FILE* rows LEFT
+#   (872 / 0 and 873 / 0 in one-file runs); 13 / 14 / 23 now print their no_plan trailer (873 / 873 / 877), their "still tied" rows stay (#3434 part 1).
 # EDITED (s521c, 2026-10-18, #1576 subtest + #3432 eq_set, one-file runs on the s521c tree over 68aeebf5): 17 *FILE* / *PLAN* rows LEFT
 #   (Mojo-DOM58 collection dom entities; HTTP-Tiny 160_cookies; Path-Tiny has_same_bytes input_output* locking mutable_tree parent
 #   recurse size subsumes symlinks temp, filesystem + rel-abs *PLAN*; IO-Compress 004gziphdr *PLAN*).  PASS now: entities 13/0, 160_cookies
@@ -178,8 +180,6 @@ Algorithm-Diff-1.201-0	oo.t	110			"a b c e h j l m n p"	#1511 A (the hunk iterat
 Algorithm-Diff-1.201-0	oo.t	111			"b c d e f j k l m r s t"	#1511 A (the hunk iterator answers the wrong items after ->Next, and the croak escapes an eval {})
 Algorithm-Diff-1.201-0	oo.t	121			"a"	#1511 A (the hunk iterator answers the wrong items after ->Next, and the croak escapes an eval {})
 Algorithm-Diff-1.201-0	oo.t	122			"b"	#1511 A (the hunk iterator answers the wrong items after ->Next, and the croak escapes an eval {})
-Capture-Tiny-0.50-0	06-stdout-closed.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3530 (the TAP layer writes through the PROGRAM's STDOUT, which the test closed; perl's Test::Builder holds its own dup -- RE-CAUSED s521b from #201, measured: print/reopen on a closed std handle already match perl)
-Capture-Tiny-0.50-0	10-stdout-string.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#3530 (same: the TAP writes go to the closed / re-pointed STDOUT -- RE-CAUSED s521b from #201)
 Class-Inspector-1.36-0	class_inspector__devel_hide.t	0	*FILE*	1..0 # SKIP test requires Devel::Hide (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "test requires Devel::Hide")
 Class-Method-Modifiers-2.15-0	060-caller.t	2	parent with modifiers sees 'main' as caller # TODO caller magic not implemented yet			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — a modifier must not appear as the caller)
 Class-Method-Modifiers-2.15-0	081-sub-and-modifier.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1572 ("The method 'orig' is not found in the inheritance hierarchy for class MyParent2")
