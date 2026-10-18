@@ -320,4 +320,26 @@ PERL
          '... and the transpile announces it');
 }
 
+# 13. #3364 (R4, f4): a rewritten statement keeps its NUMBER OF LINES, so
+#     every later `at FILE line N` (die / warn / __LINE__; caller()'s line is
+#     the deferred #233) is perl's
+#     -- after a hoist spanning two lines, after TWO rewrites (the drift was a
+#     running total) and after a split spanning three lines.
+test_lt('line numbers after a hoist / two rewrites / a three-line split', <<'PERL');
+our %h; our $g = 1; my $c = 1; sub foo { }
+sub at { my ($m) = $_[0] =~ /line (\d+)/; print "$_[1] line $m\n" }
+foo(local $h{k} = 19)
+  if $c;
+eval { die "x" }; at($@, "die");
+print "LINE ", __LINE__, "\n";
+foo(local $h{j} = 20)
+  if $c;
+{ my %l; $l{o}++,
+    local($g),
+    $g = 2 if $c;
+  print "g=$g ", __LINE__, "\n"; }
+eval { die "y" }; at($@, "die2");
+print "LINE ", __LINE__, "\n";
+PERL
+
 done_testing();

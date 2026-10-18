@@ -6978,10 +6978,15 @@ sub _replace_statement_by {
   return 0 unless @new == $want && !grep { !$_->isa('PPI::Statement') } @new;
   push @{ $self->{_local_term_frags} }, $frag;    # keep the tokens alive
   $_->remove for @new;
-  for my $n (@new) {
-    $s->insert_before($n)
+  # The replacement keeps $s's NUMBER OF LINES (#3364): PPI numbers every
+  # later token by counting newlines in the content, so a shorter text shifts
+  # every `at FILE line N` below it (a running total over the file).
+  my $lost = ($s->content =~ tr/\n//) - ($src =~ tr/\n//);
+  for my $i (0 .. $#new) {
+    $s->insert_before($new[$i])
       or die "PCL: internal -- could not split the local statement at line $line\n";
-    $s->insert_before(PPI::Token::Whitespace->new(' '));
+    $s->insert_before(PPI::Token::Whitespace->new(
+      $i == $#new && $lost > 0 ? "\n" x $lost : ' '));
   }
   $s->delete;
   return 1;
