@@ -534,3 +534,5 @@ sort.t	174	Match vars do not leak from one plain sort sub to the next	'WinLeakag
 sort.t	175	Match vars do not leak from one $$ sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 bop.t	465	|= doesn't break string overload	'0'	'z'	#972 (DECIDED s463f: the three prerequisites of #960(a))
 reset.t	42	check $^W has been zeroed	'1'	'0'	NS:`reset()` for one-match `?pattern?` and named captures (s506f: exposed when $^W became assignable)
+readline.t	35	error after trying to readline file opened for write			#3531 (a failed readline does not set the handle error flag; reached since s521b #3326)
+readline.t	36	closing the file should fail			#3531 (same: close stays true; reached since s521b #3326)
