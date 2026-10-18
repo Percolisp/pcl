@@ -679,6 +679,17 @@ not-supported.md → only then probe.*
 - **After `sort`, a WORD followed by `->` starts the LIST, never SUBNAME** (#3403; ONE predicate `_sort_word_is_subname` for the bare and parenthesised forms; ir-spec §5.4).
 - #3410 does not reproduce (perl = PCL on the merged main incl. s519a's #3370); closed.  #3060 not reached.  Filed #3452 (a chained `my` with a declarator at the initializer's own level still refuses; perl runs it).
 
+## s520b (2026-10-18, Opus) -- the ultra-review fix batch on s519a's local-term lowering: what may precede the term (#3363), line numbers (#3364), `local($$r) = LIST` (#3365), slice temporaries (#3366), the round cap (#3367), loop-condition locals + prototyped closures (#3368)
+- **"What may precede a `local` term" is ONE question, `Parser2::_word_before_local` (inert / owner / first)**: the void split refuses a list a loose and/or/xor/not or a non-last paren-less list operator owns; the hoist refuses a call that runs first (#3363; ir-spec "A `local` TERM").
+- **A method INVOCANT that runs calls is bound to a temporary before the hoisted local** (`cfg()->apply(local $X = 1)`; #3363).
+- **A term in an assignment's LEFT operand checks the right side like the tokens before it** -- `(local $g) = ($g + 1)` is now an announced #3414 residue (fd04c048 hoisted it: silent wrong).
+- **A local-term rewrite keeps the statement's number of lines** (`_replace_statement_by`; #3364) -- Capture::Tiny's line 415 die reports 415.
+- **`local($$r) = LIST` / `local(${"name"}) = LIST` is a LIST assignment** (`$deref_paren`, `p-list-=`; #3365); `local($$r, $y)` stays the loud Parser2 TODO -> #3470.
+- **A localized slice's condition and expression base are bound once** (`pcl-local-cond-N` when `@key_cls > 1 || $ld_slice`; `pcl-local-base-N`; #3366).
+- **`_lower_local_terms` runs until a round rewrites nothing; misses are recorded in that round only; a guard cap DIES** (#3367).
+- **A `while` / `until` condition's local lasts the LOOP (a bare block wraps it); not lowered when the condition reads the variable again** (#3368 R7; if / unless keep RT #7615's block-end reading).
+- **A while-condition closure behind a prototype / signature / attribute is found** (`sub (&) {…}`, `sub :lvalue {…}`; #3368 R9).
+
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
 - **A plain signature IS the classic spelling plus its arity check** (#2514, Kind-A `sig-classic`): `Parser2::_normalize_signature_subs` rewrites the TREE (signature removed, `my (PARAMS) = @_;` first) before every rename/scope pass; the arity is `(p-check-arity …)` in `p-args-body` or `(:arity …)` in `p-raw-params`; the call sites keep the signature's prototype record.  Defaults, placeholders, `()`, multi-line, `state`, and any body observing `@_` keep v1.  ir-spec §5.2.
 - **ONE "@_ is observed" predicate `Parser2::_body_observes_args`** (@_, $_[, shift, pop, goto, `&name;`, string eval) for the raw path, the leading-shift run, `args-copy` and the signature rewrite (#2572: the two inline regexes missed `&name;` and `pop` -- silent wrong).

@@ -3514,16 +3514,29 @@ with BODY emitted once.
 s519a task #3370) is lowered by a source-level rewrite before every other
 pass: a VOID comma list holding a `local` term becomes one statement per term,
 each guarded by the statement modifier's condition evaluated ONCE, first, into
-a fresh lexical (the local may change what the condition reads); a `local`
-that is the FIRST thing its statement evaluates (only an assignment target,
-call heads, a method invocant, a deref or an if/unless/while/until condition
-precede it, and its operand is not named before it) becomes `local OPERAND;`
-before the statement -- behaviour-preserving by construction (RULED s519 #1):
-nothing evaluated before the term can observe the pre-`local` value, the
-restore point is the enclosing block's end in both readings, and the term's
-value is the localized variable's new value in both (`f(local $x = 1)` passes
-1; in `(local $x = 2) + g()` g reads 2).  The logical spellings `COND and
-(LIST);` / `COND && (LIST);` and `COND and local …;` ARE the modifier shape
+a fresh lexical (the local may change what the condition reads) -- only when
+the list is the statement's OWN: no loose `and` / `or` / `xor` / `not` at its
+top level and no paren-less list operator (`print`, `return`, `push`, a
+declared `foo LIST`) in any term but the last (#3363; `print "a", local $x =
+5` is one call, and hoists); a `local` that is the FIRST thing its statement
+evaluates becomes `local OPERAND;` before the statement -- behaviour-preserving
+(RULED s519 #1) because the precondition is CHECKED (#3363): every word before
+the term is a declarator / keyword / hash key / class name, or a call whose
+ARGUMENTS hold the term (it runs after it); a comma there separates such a
+call's arguments; every other token before it is a literal, a variable other
+than the operand, a cast, `=` `->` `\` `!`; a method INVOCANT that runs calls
+is first bound to a temporary (`cfg()->apply(local $X = 1)` is `my $t =
+cfg(); local $X; $t->apply($X = 1);`); and when the term is in an
+assignment's LEFT operand the right side (which perl runs first) passes the
+same test.  The restore point is the enclosing block's end in both readings
+-- for an `if` / `unless` condition (RT #7615); a `while` / `until`
+condition's local is restored when the LOOP ends, so the loop is wrapped in a
+bare block (`{ local $_; while ($_ = shift @a) {…} }`), unless the condition
+reads the variable again (#3368) -- and the term's value is the localized
+variable's new value in both (`f(local $x = 1)` passes 1; in `(local $x = 2)
++ g()` g reads 2).  A rewrite keeps the statement's number of lines, so every
+later `at FILE line N` is perl's (#3364).  The logical spellings `COND and
+(LIST);` / `COND && (LIST);` and `COND and/or … local …;` ARE the modifier shape
 `(LIST) if COND;` (`or` / `||`: `unless`; RULED s519 #3, Role::Tiny 307) and
 take the same split.  Either way the localisation opens the enclosing block's
 restore, exactly as a leading `local` does.  A `local` term no lowering
