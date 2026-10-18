@@ -399,7 +399,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; __SUB__ the parse did not resolve: dies
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-defclass #:p-ensure-class #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
+   #:p-defpackage #:p-defclass #:p-ensure-class #:p-sub #:p-sub-frame #:p-cloned-sub #:p-anon-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK #:p-use-constant #:p-amp-call
    #:p-detect-table #:p-detect-at #:p-detect-end #:p-detect-declare
@@ -1263,6 +1263,32 @@
 (defun %p-record-sub-name (fn perl-name)
   "Record PERL-NAME ('Pkg::name') as the name FN was defined under."
   (setf (gethash fn %pcl-sub-names) perl-name))
+
+;;; AN ANONYMOUS SUB'S HOME PACKAGE (task #3492, ruled (a) s521).  perl's
+;;; `sub {...}` records the package it was COMPILED in (CvSTASH; B's
+;;; GV->STASH->NAME answers it, the GV itself being PKG::__ANON__).  The
+;;; emitter knows that package statically at every `sub {...}` site and wraps
+;;; the lambda in p-anon-sub, which names the function "PKG::__ANON__" --
+;;; the record is the function's own name, so creating a closure costs
+;;; nothing more than before (a closure shares its code object's name).
+;;; builtin::sub_stash reads it (%p-sub-stash-of, lib/B.pm).
+(defmacro p-anon-sub (pkg lambda-form)
+  "`sub {...}` compiled in package PKG (a string): LAMBDA-FORM, named
+   \"PKG::__ANON__\" so the function carries its home package."
+  (destructuring-bind (head lambda-list &body body) lambda-form
+    (unless (and (eq head 'lambda) (stringp pkg))
+      (error "p-anon-sub: expected a package string and a LAMBDA form, not ~S ~S"
+             pkg lambda-form))
+    `(sb-int:named-lambda ,(concatenate 'string pkg "::__ANON__") ,lambda-list
+       ,@body)))
+
+(defun %p-anon-sub-package (fn)
+  "The package the anonymous sub FN was compiled in (p-anon-sub's name), or NIL."
+  (let ((name (ignore-errors (sb-kernel:%fun-name fn))))
+    (and (stringp name)
+         (> (length name) 10)
+         (string= "::__ANON__" name :start2 (- (length name) 10))
+         (subseq name 0 (- (length name) 10)))))
 
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
@@ -25978,7 +26004,7 @@ would consume, so it dies naming the stream (rule 12)."
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-7484"
+(defparameter *pcl-cache-generation* "v2-7584"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -31776,7 +31802,13 @@ would consume, so it dies naming the stream (rule 12)."
     (def "SUB_STASH"
         (lambda (code)
           (let ((fn (%p-code-function code)))
-            (or (and fn (gethash fn %pcl-sub-stash)) *p-undef*))))
+            (or (and fn (%p-sub-stash-of fn)) *p-undef*))))
+    ;; The package of the glob a lazy stub stands for (#3492: B's GV->STASH
+    ;; of `\&{"name"}`), or undef.
+    (def "SUB_STUB_PACKAGE"
+        (lambda (code)
+          (let ((fn (%p-code-function code)))
+            (or (and fn (%p-stub-glob-package fn)) *p-undef*))))
     ;; The name a sub was DEFINED under, 'Pkg::name' (perl's CvGV), or undef
     ;; for a sub no `sub NAME` defined (#3281: lib/B.pm's GV->NAME / STASH).
     (def "SUB_NAME"
@@ -34239,6 +34271,22 @@ would consume, so it dies naming the stream (rule 12)."
   "Function -> the package a sub WITH ATTRIBUTES was defined in: what
    attributes::_guess_stash answers (perl's CvSTASH), so get() asks THAT
    package's FETCH_CODE_ATTRIBUTES.  Kept only for attributed subs.")
+
+(defun %p-sub-stash-of (fn)
+  "perl's CvSTASH for FN, the package it was compiled in, or NIL when not
+   recorded: an attributed sub's definition package, an anonymous sub's
+   (p-anon-sub, #3492)."
+  (or (gethash fn %pcl-sub-stash)
+      (%p-anon-sub-package fn)))
+
+(defun %p-stub-glob-package (fn)
+  "The package of the glob a lazy `\\&NAME` / `\\&{\"NAME\"}` stub FN stands
+   for (perl creates the stub under that glob, so its GV->STASH is it), or
+   NIL.  Not its CvSTASH: perl's is the package current when the stub was
+   made, which PCL does not record."
+  (let ((sym (gethash fn *p-lazy-coderef-target*)))
+    (and sym (symbol-package sym)
+         (pcl-pkg-perl-name (symbol-package sym)))))
 
 (defparameter +p-builtin-code-attributes+ '("lvalue" "method" "const")
   "The CODE attributes perl itself implements, in the order _fetch_attrs

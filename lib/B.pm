@@ -21,7 +21,7 @@
 #     defined under (->GV->NAME, ->GV->STASH->NAME, ->STASH->NAME), whether it
 #     is XS (->XSUB), whether it is defined (->START / ->ROOT isa B::NULL), and
 #     a scalar's representation (->FLAGS, the number-vs-string idiom).  Each
-#     is answered from a runtime fact (builtin::sub_name,
+#     is answered from a runtime fact (builtin::sub_name, builtin::sub_stash,
 #     builtin::created_as_*), never guessed.
 #
 # Everything else DIES naming itself (rule 12): an unknown B:: function or
@@ -32,8 +32,9 @@
 # NOT perl's (documented, not guessed): XSUB is 0 for every sub -- PCL runs
 # no XS (the XS bridge is parked); a string holding only characters below 256
 # is quoted as a BYTE string (octal escapes), because PCL strings carry no
-# UTF-8 flag (#1389) -- perl quotes an upgraded one as \x{..}; the package an
-# ANONYMOUS sub was compiled in is not recorded, so its ->STASH dies.
+# UTF-8 flag (#1389) -- perl quotes an upgraded one as \x{..}; a stash that
+# was deleted or undefined is not tracked, so a sub perl has re-homed to
+# __ANON__ still answers the package it was compiled in (#3492).
 
 package B;
 
@@ -269,11 +270,15 @@ sub PVX { $_[0]->PV }
 
 package B::CV;
 
-# The name the sub was defined under, as (STASH, NAME); STASH undef = not
-# recorded (an anonymous sub).
+# The name the sub was defined under, as (STASH, NAME).  An anonymous sub's
+# GV is PKG::__ANON__, PKG the package it was compiled in (builtin::sub_stash,
+# #3492); a `\&{"name"}` stub's GV is in its name's package (its NAME stays
+# __ANON__ here, the CVf_ANON reading); STASH undef = not recorded.
 sub _name_parts {
     my $full = builtin::sub_name($_[0]{ref});
-    return (undef, '__ANON__') if !defined $full;
+    return (builtin::sub_stash($_[0]{ref}) // builtin::sub_stub_package($_[0]{ref}),
+            '__ANON__')
+        if !defined $full;
     my ($stash, $name) = $full =~ /^(.*)::([^:]*)\z/s;
     return ($stash, $name);
 }
@@ -282,11 +287,15 @@ sub GV {
     my ($stash, $name) = $_[0]->_name_parts;
     return bless { name => $name, stash => $stash, cv => $_[0] }, 'B::GV';
 }
+# CvSTASH: a named sub's defining package; an anonymous sub's compiling
+# package (#3492).  A stub's is the package current when perl made it -- not
+# recorded, so it dies (rule 12).
 sub STASH {
-    my ($stash) = $_[0]->_name_parts;
+    my $stash = defined builtin::sub_name($_[0]{ref})
+        ? ($_[0]->_name_parts)[0] : builtin::sub_stash($_[0]{ref});
     defined $stash
-        or B::_die_unsupported('B::CV::STASH of an anonymous sub',
-                               'the package an anonymous sub was compiled in is not recorded');
+        or B::_die_unsupported('B::CV::STASH of a sub with no recorded package',
+                               'this sub was not created by a `sub` PCL compiled');
     return bless { name => $stash }, 'B::HV';
 }
 sub XSUB    { 0 }
@@ -321,8 +330,8 @@ sub NAME     { $_[0]{name} }
 sub SAFENAME { B::safename($_[0]{name}) }
 sub STASH {
     defined $_[0]{stash}
-        or B::_die_unsupported('B::GV::STASH of an anonymous sub',
-                               'the package an anonymous sub was compiled in is not recorded');
+        or B::_die_unsupported('B::GV::STASH of a sub with no recorded package',
+                               'this sub was not created by a `sub` PCL compiled');
     return bless { name => $_[0]{stash} }, 'B::HV';
 }
 sub LINE { B::_die_unsupported('B::GV::LINE', 'the line a glob was created on is not recorded') }

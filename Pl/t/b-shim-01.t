@@ -120,6 +120,19 @@ for my $p (['flags named', \&named], ['flags anon', $anon], ['flags lvalue', \&l
     my $f = B::svref_2object($p->[1])->CvFLAGS;
     row($p->[0], $f & B::CVf_ANON, $f & B::CVf_LVALUE, $f & B::CVf_METHOD);
 }
+# #3492: an anonymous sub's GV is PKG::__ANON__, PKG the package the `sub {}`
+# was COMPILED in (a closure made in Foo and called from main is Foo's); a
+# `\&{"name"}` stub lives in its name's package.
+package Foo { our $fa = sub { 4 }; sub mk { my $x = shift; sub { $x } } }
+package Foo::Bar; our $fb = sub { 5 };
+package main;
+my $stub = do { package Six; \&{"six"} };
+for my $p (['anon main', $anon], ['anon Foo', $Foo::fa], ['anon Foo::Bar', $Foo::Bar::fb],
+           ['closure Foo', Foo::mk(6)], ['eval Bar', do { package Bar; eval 'sub { 7 }' }]) {
+    my $cv = B::svref_2object($p->[1]);
+    row($p->[0], $cv->GV->STASH->NAME, $cv->STASH->NAME);
+}
+row('stub ref', B::svref_2object($stub)->GV->STASH->NAME);
 P
 
 # 3. svref_2object on scalars: the class and the OK flags of perl's SV.
@@ -145,7 +158,7 @@ use B ();
 row('deparse', trap(sub { require B::Deparse }));
 row('unknown function', trap(sub { B::main_cv() }));
 my $cv = B::svref_2object(sub { 1 });
-row('anon stash', trap(sub { $cv->STASH->NAME }));
+row('unrecorded stash', trap(sub { B::svref_2object(\&builtin::true)->STASH->NAME }));
 row('unknown method', trap(sub { $cv->PADLIST }));
 row('op accessor', trap(sub { B::svref_2object(\&B::perlstring)->START->line }));
 row('after', 'still running');
@@ -153,7 +166,7 @@ P
     my $out = run_cl($file);
     like($out, qr/^deparse: died:B::Deparse is not supported by PCL/m, 'require B::Deparse dies, trappable');
     like($out, qr/^unknown function: died:B::main_cv is not supported by PCL/m, 'an unimplemented B function dies naming itself');
-    like($out, qr/^anon stash: died:B::CV::STASH of an anonymous sub is not supported by PCL/m, 'the stash of an anonymous sub dies');
+    like($out, qr/^unrecorded stash: died:B::CV::STASH of a sub with no recorded package is not supported by PCL/m, 'the stash of a sub no PCL `sub` created dies (an anonymous sub answers, #3492)');
     like($out, qr/^unknown method: died:B::CV::PADLIST is not supported by PCL/m, 'an unimplemented method dies naming itself');
     like($out, qr/^op accessor: died:B::COP::line is not supported by PCL/m, 'an op accessor dies');
     like($out, qr/^after: still running/m, 'every die was trappable');

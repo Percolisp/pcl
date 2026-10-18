@@ -317,7 +317,7 @@ my %FAMILY;
                  p-run-compile-phase-blocks p-eval-always p-BEGIN p-CHECK)],
   'tie' => [qw(p-tie-proxy make-p-tie-proxy p-tie-proxy-p p-tie-proxy-tie-obj
                p-tie-proxy-saved-value p-tie p-untie p-tied)],
-  'sub-definition' => [qw(p-defpackage p-sub-frame p-cloned-sub p-args-body
+  'sub-definition' => [qw(p-defpackage p-sub-frame p-cloned-sub p-anon-sub p-args-body
                           p-declare-sub)],
   'declaration' => [qw(p-let p-raw-params p-sub)],
   'ir-literal' => [qw(p-esc p-fact)],

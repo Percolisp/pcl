@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **760**
+* names exported: **761**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 760
+* with a machine-readable `Contract:` tail: **69** of 761
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -1052,12 +1052,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-line` | macro | `(n)` | — | — | — | — | — | — | — |
 | `p-loc-save` | macro | `(&body body)` | — | — | — | — | — | — | — |
 
-## sub-definition (5)
+## sub-definition (6)
 
 *No ir-spec §10 row.*  the sub-definition and frame forms — ir-spec §5.1
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `p-anon-sub` | macro | `(pkg lambda-form)` | — | — | — | — | — | — | — |
 | `p-args-body` | macro | `(&body body)` | — | — | — | — | — | — | — |
 | `p-cloned-sub` | function | `(f)` | — | — | — | — | — | — | — |
 | `p-declare-sub` | macro | `(name &optional body pkg)` | — | — | — | — | — | — | — |

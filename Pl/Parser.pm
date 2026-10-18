@@ -6779,7 +6779,14 @@ sub parse_block_as_function {
   # with @_ bound inside the body via p-flatten-args.
   my $params_cl = $is_anon_sub ? '&rest %_args' : join(' ', @$params);
 
-  # Emit the function definition
+  # Emit the function definition.  An anonymous sub is NAMED by its home
+  # package (task #3492) -- the twin of Pl::Parser2::_anon_sub_named.
+  my $anon_named = $is_anon_sub && $return_lambda;
+  if ($anon_named) {
+    my $home = ($self->environment && $self->environment->current_package)
+               ? $self->environment->current_package : 'main';
+    $self->_emit("(p-anon-sub \"$home\"");
+  }
   if ($return_lambda) {
     $self->_emit("(lambda ($params_cl)");
   } else {
@@ -6908,6 +6915,7 @@ sub parse_block_as_function {
 
   $self->indent_level($self->indent_level - 1);
   $self->_emit(")");  # close defun/lambda
+  $self->_emit(")") if $anon_named;  # close p-anon-sub
 
   # Close outer state let if we opened one
   if (%state_renames) {

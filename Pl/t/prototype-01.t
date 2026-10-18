@@ -852,7 +852,10 @@ my @s = (f { 3 } 4, 5);
 END_PERL
   like($cl, qr/\(vector \(p-list-ctx \(A::pl-f 1\)\) 2\)/,
        '#421: the ($) declaration in A ends the argument list after one term');
-  like($cl, qr/B::pl-f\s*\(lambda/,
+  # s521d (#3492): a block argument is an anonymous sub, wrapped in
+  # (p-anon-sub "PKG" (lambda ...)) -- PKG its compiling package, perl's
+  # CvSTASH (perl-probed in Pl/t/b-shim-01.t's 'anon Foo' rows).
+  like($cl, qr/B::pl-f\s*\(p-anon-sub "B"\s*\(lambda/,
        '#421: the (&@) declaration in B still takes its block form');
 }
 
@@ -866,7 +869,7 @@ my $r = C::h { 7 } 8, 9;
 END_PERL
   unlike($cl, qr/PARSE ERROR/,
          '#421: the qualified block call is not dropped by the other package\'s ($)');
-  like($cl, qr/C::pl-h\s*\(lambda/,
+  like($cl, qr/C::pl-h\s*\(p-anon-sub "main"\s*\(lambda/,
        '#421: and its block became a lambda');
 }
 
@@ -882,7 +885,7 @@ my $s = w { 2 };
 END_PERL
   unlike($cl, qr/PARSE ERROR/,
          '#421 inverse: a single-package prototype still reaches an outside call site');
-  my @lambdas = $cl =~ /pl-w\s*\(lambda/g;
+  my @lambdas = $cl =~ /pl-w\s*\(p-anon-sub "main"\s*\(lambda/g;
   is(scalar(@lambdas), 2,
      '#421 inverse: BOTH the qualified and the unqualified call take the block form');
 }

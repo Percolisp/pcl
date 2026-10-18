@@ -3387,7 +3387,12 @@ makes and not a second mechanism (task #515). A closure built in `X` and
 invoked from `main` therefore resolves in `X`, and one built in `main` and
 invoked from inside `X` resolves in `main` — perl's rule is the *defining*
 package in both directions, so inheriting the caller's binding was wrong
-both ways. A `package Y;` statement inside the body still switches for the
+both ways. The same package also NAMES the function (task #3492): every
+`sub {…}` lambda is wrapped `(p-anon-sub "X" (lambda …))`, a macro that
+makes it an `sb-int:named-lambda` named `"X::__ANON__"` — so the function
+carries perl's CvSTASH at no run-time cost (a closure shares its code
+object's name), and `builtin::sub_stash` / B's `GV->STASH->NAME` answer `X`.
+Example: `package Foo; my $f = sub { 1 };` → `(p-anon-sub "Foo" (lambda (&rest %_args) …))`. A `package Y;` statement inside the body still switches for the
 rest of that body (it emits its own binding). A `map`/`grep`/`sort` **block**
 is not a sub in perl and gets no such wrapper: it keeps resolving in the
 package current where it runs.

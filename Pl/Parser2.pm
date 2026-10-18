@@ -13766,13 +13766,14 @@ sub _lower_embedded_anon {
     # Empty sub {}: v1's wrapper, whose body's value is the empty list (#2680
     # — _lower_body_regime's empty-body answer; it used to be an empty :void
     # let, i.e. raw NIL, one undef element in a list).
-    return ['lambda', ['list', '&rest', '%_args'],
+    return $self->_anon_sub_named(
+           ['lambda', ['list', '&rest', '%_args'],
             ['let', ['list',
                      ['list', '@_', ['p-flatten-args', '%_args']],
                      $self->_anon_home_pkg_binding,
                      ['list', '*pcl-caller-wantarray*', '*wantarray*']],
              ['p-sub-frame',
-              ['block', 'nil', ['p-return-empty']]]]];
+              ['block', 'nil', ['p-return-empty']]]]]);
   }
 
   # Same conservative declines as the block form: package switches need v1's
@@ -13832,6 +13833,7 @@ sub _lower_embedded_anon {
                          ['list', '*pcl-caller-wantarray*', '*wantarray*']],
                  ['p-sub-frame',
                   ['block', 'nil', @$forms]]]];
+  $lambda = $self->_anon_sub_named($lambda);
   return _anon_compiles_at_runtime($block) ? ['p-cloned-sub', $lambda] : $lambda;
 }
 
@@ -13951,11 +13953,23 @@ sub _re_eval_in_scope {
 # was already right).  The v1 text twin of this wrapper is
 # Pl::Parser::parse_block_as_function's $is_anon_sub arm, which emits the same
 # binding — the two spellings of one wrapper must not drift.
+sub _anon_home_pkg {
+  my ($self) = @_;
+  return ($self->environment && $self->environment->current_package)
+         ? $self->environment->current_package : 'main';
+}
 sub _anon_home_pkg_binding {
   my ($self) = @_;
-  my $pkg = ($self->environment && $self->environment->current_package)
-            ? $self->environment->current_package : 'main';
-  return ['list', '*pcl-current-package*', '"' . $pkg . '"'];
+  return ['list', '*pcl-current-package*', '"' . $self->_anon_home_pkg . '"'];
+}
+
+# The same home package NAMES the sub (task #3492): `(p-anon-sub "PKG" LAMBDA)`
+# makes the function "PKG::__ANON__", which is how B's GV->STASH->NAME and
+# builtin::sub_stash learn perl's CvSTASH (cl/pcl-runtime.lisp p-anon-sub).
+# The v1 text twin is Pl::Parser::parse_block_as_function's $is_anon_sub arm.
+sub _anon_sub_named {
+  my ($self, $lambda) = @_;
+  return ['p-anon-sub', '"' . $self->_anon_home_pkg . '"', $lambda];
 }
 
 # Embed-safety scan — shared implementation lives in Pl::CLForm (PExpr's

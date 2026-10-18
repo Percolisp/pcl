@@ -4398,9 +4398,10 @@ constant (`main_cv`, `walkoptree`, `ppname`, ...), every op accessor (`->line`,
 `->file`, `->next`, `->name` of the object `->START` returns), `->FILE`,
 `->PADLIST`, `->REFCNT`, `->MAGIC`, the `->FLAGS` of a dualvar.
 NOT perl's, by representation: `->XSUB` is 0 for every sub (PCL runs no XS; the
-bridge is parked); the package an ANONYMOUS sub was compiled in is not
-recorded, so its `->STASH` / `->GV->STASH` dies (perl answers the compiling
-package); a sub renamed by `Sub::Util::set_subname` keeps its defining name
+bridge is parked); an anonymous sub answers the package it was compiled in
+(#3492), but a stash perl has DETACHED or undefined is not tracked, so a sub
+perl re-homes to `__ANON__` still answers that package, and a `\&{"name"}`
+stub's `->STASH` (the package current when perl made it) dies; a sub renamed by `Sub::Util::set_subname` keeps its defining name
 (set_subname is a no-op); a string whose characters are all below 256 is quoted
 as a byte string (octal escapes) -- PCL strings have no UTF-8 flag (#1389), and
 perl quotes an UPGRADED one as `\x{..}`.  `->CvFLAGS` (#3362) answers the bits PCL
