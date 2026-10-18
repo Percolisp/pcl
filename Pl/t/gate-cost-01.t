@@ -88,7 +88,7 @@ my $root  = "$FindBin::Bin/../..";
 my $pl2cl = "$root/pl2cl";
 
 SKIP: {
-    skip "pl2cl not executable", 27 unless -x $pl2cl;
+    skip "pl2cl not executable", 28 unless -x $pl2cl;
     my $dir = tempdir(CLEANUP => 1);
 
     # PCLCore has named a socket for this test process — unless the run was
@@ -229,14 +229,21 @@ PL
 
     # (2) the server cannot be reached AT ALL.  A missing socket directory is
     # the shape that can neither start a server nor record that it failed, so
-    # it must decline AT ONCE and LOUDLY -- the alternative measured before
-    # this row existed was a 10 s start timeout on every one of ~3200 calls.
+    # it must decline AT ONCE -- the alternative measured before this row
+    # existed was a 10 s start timeout on every one of ~3200 calls.  It
+    # declines SILENTLY (task #3513, ruled s521): the directory is gone when
+    # the server's owner exited and cleaned up while a forked child of the
+    # program still runs, and that child's stderr is the PROGRAM's (the sweep
+    # compares 2>&1).  PCL_SHOW_SBCL=1 announces it.
     my ($no, $ne, $nc) = $run->(args => $plain,
                                 env => 'PCL_XSERVER=/pcl-no-such-dir-xyz/s ');
     is($no, $po, 'an unreachable socket directory still transpiles correctly');
     is($nc, $pc, '... with the spawn path\'s exit status');
-    like($ne, qr/^pl2cl: PCL_XSERVER=\S+ names no existing directory/m,
-         '... and says so on stderr rather than degrading in silence');
+    is($ne, '', '... and says nothing on the program\'s stderr (#3513)');
+    my (undef, $sne) = $run->(args => $plain,
+        env => 'PCL_SHOW_SBCL=1 PCL_XSERVER=/pcl-no-such-dir-xyz/s ');
+    like($sne, qr/^pl2cl: PCL_XSERVER=\S+ names no existing directory/m,
+         '... while PCL_SHOW_SBCL=1 announces it');
 
     # (3) the .down marker: once a start has failed, later calls in the same
     # test process decline immediately instead of paying the wait again.  The

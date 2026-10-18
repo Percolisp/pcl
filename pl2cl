@@ -208,9 +208,14 @@ BEGIN {
     my $bdir = $base;
     $bdir =~ s{/[^/]*$}{};
     $bdir = '.' if !length $bdir;
+    # SILENTLY (task #3513, ruled s521): the directory is gone when the
+    # server's OWNER has exited and cleaned up -- a forked child of the program
+    # outliving it (t/op/fork.t case 9) -- and a harness detail must never
+    # reach the program's stderr (the sweep compares 2>&1).  PCL_SHOW_SBCL=1
+    # announces it.
     if (!-d $bdir) {
       warn "pl2cl: PCL_XSERVER=$base names no existing directory -- "
-         . "transpiling without the server\n";
+         . "transpiling without the server\n" if $ENV{PCL_SHOW_SBCL};
       $ENV{PCL_XSERVER_TRIED} = 1;
       last XCLIENT;
     }
@@ -253,23 +258,39 @@ BEGIN {
       my @field = (Cwd::getcwd(), scalar(@ARGV), @ARGV,
                    scalar(keys %ENV), map { ($_, $ENV{$_}) } sort keys %ENV);
       my $blob = join '', map { length($_) . ':' . $_ . ',' } @field;
-      print {$fh} "PCLXS2 " . length($blob) . "\n" . $blob or die "write\n";
+      print {$fh} "PCLXS2 " . length($blob) . "\n" . $blob or die "gone: write\n";
       my $hdr = _xc_readline($fh);
-      die "no reply\n" if !defined $hdr;
+      die "gone: no reply\n" if !defined $hdr;
+      # The server could not deliver a result it can vouch for (its capture
+      # files vanished with its owner's cleanup): no server, never a failure.
+      die "gone: server down\n" if $hdr eq 'PCLXS2 DOWN';
       die "bad reply\n" if $hdr !~ /^PCLXS2 (\d+) (\d+) (\d+)$/;
       my ($st, $ol, $el) = ($1, $2, $3);
       $out = $ol ? _xc_readn($fh, $ol) : '';
       $err = $el ? _xc_readn($fh, $el) : '';
       close $fh;
-      die "short reply\n" if !defined $out || !defined $err;
+      die "gone: short reply\n" if !defined $out || !defined $err;
       $status = $st;
       1;
     };
     # ANY failure — no server, a short read, a protocol mismatch — falls through
     # to the ordinary path.  A slow transpile beats a missing one; a SILENT slow
     # transpile is what _xc_down is for.
+    # A reply CUT OFF by the server's own exit (`gone: ...` -- EOF, a closed
+    # connection, the server's DOWN reply) is "no server": the same SILENT
+    # fallback as a missing socket (task #3513, ruled s521).  The owner exits
+    # while a forked child of the program still transpiles; that child's run is
+    # correct on the spawn path and must not say anything about the harness.
+    # Only what can be a broken server -- a protocol mismatch, a start that
+    # failed -- is announced (_xc_down's #324 rule).
     if (!$ok) {
-      _xc_down($path, ($@ || 'unknown'), 0) if $reached;
+      my $why = $@ || 'unknown';
+      if ($why =~ /^gone: /) {
+        warn "pl2cl: transpile server went away ($why) -- transpiling without it\n"
+          if $ENV{PCL_SHOW_SBCL};
+      } elsif ($reached) {
+        _xc_down($path, $why, 0);
+      }
       $ENV{PCL_XSERVER_TRIED} = 1;   # read and deleted by the re-exec'd copy
       last XCLIENT;
     }
@@ -1344,15 +1365,25 @@ sub _xserve {
   # signal death as a signal death, so the caller's $? is what a spawn's would
   # have been in both halves of its word.
   my $st = $?;
+  # Both capture files must still BE there: the owner's cleanup removes the
+  # directory (and anything in it) when the owner exits, and a worker that
+  # could not open its capture, or whose capture was unlinked under it, has no
+  # result this server can vouch for -- `PCLXS2 DOWN` sends the client to the
+  # spawn path instead of handing it an empty "transpile" (task #3513: a
+  # forked child's `require` read as "Failed to transpile Exporter.pm").
   my ($o, $e) = (_xslurp($out), _xslurp($err));
   unlink $out, $err;
+  if (!defined $o || !defined $e) {
+    print {$conn} "PCLXS2 DOWN\n";
+    return;
+  }
   print {$conn} "PCLXS2 $st " . length($o) . " " . length($e) . "\n" . $o . $e;
   return;
 }
 
 sub _xslurp {
   my ($p) = @_;
-  open my $fh, '<:raw', $p or return '';
+  open my $fh, '<:raw', $p or return undef;   # a vanished capture: #3513
   local $/;
   my $s = <$fh>;
   close $fh;
