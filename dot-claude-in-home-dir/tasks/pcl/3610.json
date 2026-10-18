@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522a (Opus 5.5, 2026-10-19) while probing #3061.  SILENT WRONG, pre-existing (identical on the aff112d7 base extraction).\n\nA named sub whose STRING says `\"${e}[1]\"` (or `\"${e}{k}\"`) -- in a string that is the SCALAR $e followed by the literal text \"[1]\" -- is not seen as capturing the file lexical $e, so the lexical is never promoted and the sub reads the empty package cell:\n\n    my $e = 1;\n    sub rf { return \"${e}[1]\" }\n    print rf(), \"\\n\";\n    perl 5.40.3: 1[1]      PCL: [1]\n\n`\"${e}x\"` is right (1x); `\"${e}[1]\"` at file level (no sub) is right; inside a sub with its own `my $e` it is right.  So the miss is the capture question only.\n\nCAUSE (read, not yet fixed): `_canon_text_patterns` (Pl/Parser2.pm) attributes the TEXT `${e}[` to the ARRAY canon `@e` and `${e}{` to the HASH canon `%e` -- right in CODE (`${e}[1]` there IS `$e[1]`), wrong inside an interpolating string, where the braced name ends the variable.  A text regex cannot tell code from string; the standing rule is that interpolation scanning happens in Pl/InterpScan.pm, so the fix routes the string half of the capture question through InterpScan's variable events (the same route #2014 names for the braced refusal).  Related: #2014, #2645.\n\nBAR: name resolution => the full sweep is the gate; gate-SET scan over both populations; a guard row inverse-verified.  Probe: scratch/s522a/pr/p9f.pl in the s522a worktree.\n",
+   "id" : "3610",
+   "status" : "pending",
+   "subject" : "A sub interpolating \"${e}[1]\" (scalar $e + literal [1]) does not capture the file lexical $e -- the capture text patterns read ${e}[ as the ARRAY in a string; the sub reads an empty cell (silent wrong)"
+}

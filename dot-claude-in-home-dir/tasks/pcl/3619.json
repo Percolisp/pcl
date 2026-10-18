@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522a (Opus 5.5, 2026-10-19) from the #3347 acceptance run (cz-03zlib-v1.t transpiles since #3061's sigil-exact count).\n\nIO-Compress-2.214 t/cz-03zlib-v1.t now runs and ENDS CLEANLY (rc 0, no die, Test::NoWarnings' \"no warnings\" row is the last) after 400 of its 472 planned rows: 72 assertions are never emitted.  The file has no code after its last block (line 1280), so the missing rows are iterations of the test loops that run fewer times under PCL -- the candidates are the header-index loops at lines 1003-1117 (`for my $index (GZIP_MIN_HEADER_SIZE + 1 .. GZIP_MIN_HEADER_SIZE + GZIP_FEXTRA_HEADER_SIZE + 1)`, `... + length($Name) - 1`, `... + length($Comment) - 1`, `foreach my $trim (-8 .. -1)`), whose bounds come from IO::Compress::Gzip::Constants and from strings built earlier.\n\nNO PERL ORACLE ON THIS BOX: real perl cannot run the file here (`Compress::Raw::Zlib version 2.214 required--this is only version 2.212`), so the per-section count must be read from the source.  NEXT STEP: print a counter before each of those loops under PCL and compare with the counts the source implies.  Output: scratch/s522a/cz03full.out in the s522a worktree.\n",
+   "id" : "3619",
+   "status" : "pending",
+   "subject" : "IO-Compress t/cz-03zlib-v1.t ends cleanly after 400 of 472 planned rows (rc 0): 72 loop assertions never emitted -- no perl oracle on this box"
+}

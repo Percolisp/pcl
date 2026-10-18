@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522b (Opus, 2026-10-19) from member 0's (#1570) probes.  PRE-EXISTING (identical on the aff112d7 base).\n\n    BEGIN { package P2; sub hi {\"P2hi\"} } BEGIN { package C2; use parent -norequire, \"P2\"; } print C2->hi, \"\\n\";\n\nperl 5.40.3: P2hi.  PCL: Can't locate object method \"hi\" via package \"C2\".\n\nThe emission (`./pl2cl`): the use-parent PREAMBLE is hoisted to top level with UNQUALIFIED names -- `(p-defclass plc-c2 (\"P2\") ())` and `(p-defcell @ISA ...)` in main -- and the BEGIN body's `(p-push @ISA \"P2\")` is READ while the reader is in main (the whole BEGIN is ONE top-level form; `reference_in_package_is_read_time`), so main's @ISA gets P2.  `_process_use_base` qualifies only when `_reader_pkg_differs`, which needs `_seam_outer_pkg` -- not set on the BEGIN (v1 sched) route.  The `our @ISA` spelling in the same place qualifies on `_block_depth > 0` and works.  Fix direction: the use-parent path asks the same block-depth question the @ISA path asks (one predicate).  Probe: scratch/s522b/p/r8.pl in the s522b worktree.",
+   "id" : 3630,
+   "status" : "pending",
+   "subject" : "`BEGIN { package C2; use parent -norequire, \"P2\" }` loses C2's parents: the use-parent preamble inside a BEGIN is read in the enclosing package (unqualified plc-c2 / @ISA)"
+}

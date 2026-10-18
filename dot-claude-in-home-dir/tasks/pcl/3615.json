@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522a (Opus 5.5, 2026-10-19) from the #3061 acceptance runs: Text-CSV-2.04's t/util.pl transpiles now, and 15 t/ files run rows they never ran.  Every row below was checked against TWO emulations under real perl 5.40.3 (scratch/s522a/fu/run.sh: utf8::is_utf8 forced to 1 = #1389; fu/run2.sh: that PLUS Text::CSV_PP's `%{$self->{_CACHE}} = %$ctx` stores removed = #3611) and is NOT reproduced by either -- so it is a different mechanism.  Outputs: scratch/s522a/csv/<file>.out in the s522a worktree.\n\nLOUD stop, cause NOT isolated.  t/91_csv_cb.t line 68: `csv (in => $tfn, filter => { foo => sub { $_ > 1 }})` (a filter keyed by COLUMN NAME) dies \"Not a HASH reference\" in PCL; real perl with both emulations runs all 79 rows.  NEXT STEP: minimise the filter-by-name path in Text::CSV_PP::csv (it builds a header map and calls the filter with %_ set to the row hash -- `local %_`-style shapes are the first suspects).\n",
+   "id" : "3615",
+   "status" : "pending",
+   "subject" : "Text-CSV 91_csv_cb.t: csv(in => FILE, filter => { foo => sub {...} }) dies \"Not a HASH reference\" (ran 19 of 79) -- not #1389, not #3611"
+}

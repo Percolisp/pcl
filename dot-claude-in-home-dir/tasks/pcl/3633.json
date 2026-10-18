@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522b (Opus, 2026-10-19) from Fable's s522 merge probe b4-method-replace.pl r5.  PRE-EXISTING; NOT the method-install path (member 3 of s522b), so filed, not folded.\n\n    package P3; sub m { \"old\" } package main; undef &P3::m;\n    print \"r5 \", (P3->can(\"m\") ? \"can\" : \"cannot\"), \" \", (eval { P3->m; \"ran\" } // \"died\"), \"\\n\";\n\nperl 5.40.3: `r5 can died`.  PCL: `r5 cannot died`.  p-undef-sub fmakunbound's the symbol and records :was-defined in *p-declared-subs* (so `exists &P3::m` stays true); `can` asks fboundp and misses.  Fix direction: `can` returns a code ref for a :was-defined sub that dies \"Undefined subroutine &P3::m called\" when called -- check what perl's message is for calling the can() result first.",
+   "id" : 3633,
+   "status" : "pending",
+   "subject" : "`undef &P::m; P->can(\"m\")` answers FALSE; perl answers TRUE (the glob keeps a defined-less CV, so can returns it and calling dies)"
+}

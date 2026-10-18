@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522a (Opus 5.5, 2026-10-19) from the #3061 acceptance runs: Text-CSV-2.04's t/util.pl transpiles now, and 15 t/ files run rows they never ran.  Every row below was checked against TWO emulations under real perl 5.40.3 (scratch/s522a/fu/run.sh: utf8::is_utf8 forced to 1 = #1389; fu/run2.sh: that PLUS Text::CSV_PP's `%{$self->{_CACHE}} = %$ctx` stores removed = #3611) and is NOT reproduced by either -- so it is a different mechanism.  Outputs: scratch/s522a/csv/<file>.out in the s522a worktree.\n\nLOUD stop, cause NOT isolated.  t/45_eol.t lines 203-215: `open my $fh, \"<\", \"files/macosx.csv\"; $csv = Text::CSV->new({auto_diag=>1, binary=>1}); $csv->getline($fh)` x N -- row 1021 \"getline 2\" fails and `scalar @$row` dies.  Under real perl with BOTH emulations the file runs to its plan, so the cause is a third mechanism (candidates: $/ handling of a lone CR inside CSV_PP's _AHEAD look-ahead, #966 pos(), #1747 goto EOLX).  NEXT STEP: minimise with the macosx.csv file and two getline calls, perl vs PCL.\n",
+   "id" : "3614",
+   "status" : "pending",
+   "subject" : "Text-CSV 45_eol.t: getline on the CR-terminated files/macosx.csv returns undef at the second record (\"Can't use an undefined value as an ARRAY reference\", ran 1021 of 1094) -- not #1389, not #3611"
+}

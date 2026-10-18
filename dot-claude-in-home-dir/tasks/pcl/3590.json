@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Mon Oct 19 00:32:02 2026",
+   "description" : "FILED s521e (2026-10-19) beside #3517 (LOW, a filler).  An opener handed an ELEMENT target names the vivified glob after the element spelling in perl:\n    my %h; open($h{x}, '<', $0); print \"\" . *{$h{x}}, \"\\n\";     # perl 5.40.3: *main::$h{...}\nPCL (after s521e's #3517): `*pcl-anonio::__anonio__N` -- #3517 names the glob only for a SCALAR VARIABLE target (the %p-fh-install-arg macro sees a `$name` symbol).  An array element is `*main::$a[...]` in perl (probe it).  FIX SHAPE: the same macro, for a p-gethash / p-aref place whose container is a plain variable: note the box with `$h{...}` / `$a[...]` (perl's spelling, the sigil of the ELEMENT).  Probe vs perl first; a guard row beside #3517's t15 in Pl/t/bless-referent-01.t.\n",
+   "id" : "3590",
+   "status" : "pending",
+   "subject" : "An opener's ELEMENT target (open($h{x},...)) leaves the glob anonymous: perl names it *main::$h{...} (LOW, #3517 residue)"
+}

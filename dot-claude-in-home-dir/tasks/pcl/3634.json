@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522b (Opus, 2026-10-19) from member 4 (#1506)'s probes (Fable's b5 r3).  The static-parse limit (docs/static-parse-limits-review-s512.md family 1/2): perl learns the `()` prototype by RUNNING the BEGIN; PCL's parser never sees it.\n\n    BEGIN { require constant; constant->import({ H1 => 3, H2 => 4 }) } print \"r3 \", H1 + H2, \"\\n\";\n\nperl: r3 7.  PCL (with s522b's lib/constant.pm): `r3 3` and no newline -- H1 is a list operator swallowing `+H2, \"\\n\"`.  `H1() + H2()` is right (the guard row uses that spelling).  The #2610 detector (PCL_DETECT, default announce) says nothing: worth checking why the run-time install does not reach the override recorder -- a silent wrong where the detector should speak.  Not the shim's fault; any BEGIN-time `*{...} = sub () {...}` has it.",
+   "id" : 3634,
+   "status" : "pending",
+   "subject" : "A constant installed at BEGIN time by a RUN-TIME import (`constant->import({ H1 => 3, H2 => 4 })`, any `*{\"P::N\"} = sub () {...}` in a BEGIN) is not a TERM to the parser: `H1 + H2` parses as H1(+H2) -- prints 3 where perl prints 7; the #2610 detector does not announce it"
+}

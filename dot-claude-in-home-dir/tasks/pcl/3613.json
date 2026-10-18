@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522a (Opus 5.5, 2026-10-19) from the #3061 acceptance runs: Text-CSV-2.04's t/util.pl transpiles now, and 15 t/ files run rows they never ran.  Every row below was checked against TWO emulations under real perl 5.40.3 (scratch/s522a/fu/run.sh: utf8::is_utf8 forced to 1 = #1389; fu/run2.sh: that PLUS Text::CSV_PP's `%{$self->{_CACHE}} = %$ctx` stores removed = #3611) and is NOT reproduced by either -- so it is a different mechanism.  Outputs: scratch/s522a/csv/<file>.out in the s522a worktree.\n\nLOUD (pre-existing).  `print utf8::valid(\"abc\") ? 1 : 0` -> perl 1, PCL dies \"Undefined subroutine &UTF8::valid called\" (probe scratch/s522a/pr/uv.pl).  PCL strings are always well-formed character strings, so `utf8::valid` answers 1 for every defined string (perl: false only for a malformed internal UTF-8 buffer, which PCL cannot hold).  Belongs beside utf8::is_utf8 / decode in the runtime (the utf8:: core subs, DECIDED: `defined &utf8::...` is TRUE).  Text-CSV t/50_utf8.t stops at row 65 and t/70_rt.t at row 443 (19,997 rows behind it) with this die; their *PLAN* rows are blessed with this cause.  Related: #3322 (its boolean answer).\n",
+   "id" : "3613",
+   "status" : "pending",
+   "subject" : "utf8::valid is not implemented: \"Undefined subroutine &UTF8::valid called\" -- stops Text-CSV 50_utf8.t (at 65 of 93) and 70_rt.t (at 443 of 20469)"
+}

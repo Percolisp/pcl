@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522b (Opus, 2026-10-19) from member 1 (#3511): Role-Tiny t/namespace-clean.t rows 2 and 3.  PRE-EXISTING.\n\n    BEGIN { print \"outer-start\\n\"; BEGIN { print \"inner\\n\" } print \"outer-end\\n\"; } print \"main\\n\";\n\nperl 5.40.3: inner / outer-start / outer-end / main.  PCL (base and tree): outer-start / inner / outer-end / main.\n\nWhere it costs: namespace-clean.t's `BEGIN { package Local::Class; use Role::Tiny::With; with qw(Local::Role); BEGIN { ... delete @Local::Class::{@imports} } }` -- in perl the inner BEGIN cleans BEFORE `with` composes foo/does; in PCL after, so it deletes the composed methods and `can_ok foo` / `can_ok does` fail (blessed in cpan-board14-fails.tsv as #3632).  Fix direction: v1's scheduled-block lowering (Pl/Parser.pm, the `p-BEGIN` arm) should hoist an inner scheduled block out to run before its enclosing BEGIN's body, as the top-level phase model does (#456(b)).",
+   "id" : 3632,
+   "status" : "pending",
+   "subject" : "A BEGIN nested inside a BEGIN runs IN PLACE, after the outer body's earlier statements; perl runs the inner one FIRST (it executes as soon as it is compiled, before the outer block runs)"
+}

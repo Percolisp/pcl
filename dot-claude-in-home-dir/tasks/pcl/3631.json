@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522b (Opus, 2026-10-19) from member 0's (#1570) probes.  PRE-EXISTING (identical on aff112d7).\n\n    package A1; sub w { \"A1\" } package B1; our @ISA = (\"A1\"); package C1; our @ISA=(\"A1\"); sub w { \"C1\" }\n    package D; use mro \"c3\"; our @ISA = (\"B1\",\"C1\"); package main; print D->w, \"\\n\";\n\nperl 5.40.3: C1 (C3: D B1 C1 A1).  PCL: A1.  `mro::get_linear_isa(\"D\")` answers the C3 list D,B1,C1,A1 but dispatch disagrees: %pcl-dispatch-method takes the CLOS class-precedence-list only when @ISA is EMPTY and otherwise walks @ISA depth-first.  Without the pragma perl's default is DFS (A1) and PCL agrees by accident.  docs/not-supported.md \"mro pragma\" says PCL ALWAYS uses C3 -- not true for this path; fix the doc or the dispatch (the walk should honour the class's mro, and the CLOS CPL is C3).  Probes: scratch/s522b/p/r9b.pl r9c.pl.",
+   "id" : 3631,
+   "status" : "pending",
+   "subject" : "With a NON-EMPTY @ISA, method dispatch walks @ISA DEPTH-FIRST even under `use mro 'c3'` / mro::set_mro -- a diamond dispatches to A where C3 says C; docs/not-supported.md's 'PCL always uses C3' is stale"
+}

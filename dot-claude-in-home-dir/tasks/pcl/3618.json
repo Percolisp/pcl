@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-19",
+   "description" : "FILED s522a (Opus 5.5, 2026-10-19) from the #3061 acceptance runs: Text-CSV-2.04's t/util.pl transpiles now, and 15 t/ files run rows they never ran.  Every row below was checked against TWO emulations under real perl 5.40.3 (scratch/s522a/fu/run.sh: utf8::is_utf8 forced to 1 = #1389; fu/run2.sh: that PLUS Text::CSV_PP's `%{$self->{_CACHE}} = %$ctx` stores removed = #3611) and is NOT reproduced by either -- so it is a different mechanism.  Outputs: scratch/s522a/csv/<file>.out in the s522a worktree.\n\nLOUD (pre-existing mechanism, newly reached).  t/90_csv.t lines 292-296: `my $x = sub { 42 }; eval { csv (in => $tfn, out => \\$x) }` -- perl: \"Not a GLOB reference\", PCL: \"Can't use string (\\\"_90test.csv\\\") as an ARRAY ref while \\\"strict refs\\\" in use\" -- so a DIFFERENT path is taken (not just message text: the error names the INPUT file name), and the file later stops at row 117 of 128 with rc 2.  NEXT STEP: minimise Text::CSV_PP::csv's `out` dispatch on a reference to a CODE-holding scalar (ref(\\$x) is REF in perl).\n",
+   "id" : "3618",
+   "status" : "pending",
+   "subject" : "Text-CSV 90_csv.t: csv(out => \\$coderef_scalar) dies with a strict-refs ARRAY message where perl dies \"Not a GLOB reference\"; the file then stops (ran 117 of 128, rc 2)"
+}
