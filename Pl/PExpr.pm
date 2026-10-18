@@ -5457,6 +5457,15 @@ sub child_context {
       if $type eq 'a_ref_acc'
       && $self->node_tree->get_metadata($parent_id, 'list_ctx_subscript');
 
+    # The REFERENCE operand of an arrow / element deref -- `f()->{k}`,
+    # `$o->m->[0]`, `${ f() }[1]` -- is ONE scalar, evaluated in SCALAR
+    # context whatever context the element itself sits in (#3435: a
+    # wantarray-aware accessor in a print / list-assignment slot returned its
+    # LIST and the deref died "Not a HASH reference").  The list slice above
+    # is the one exception, and it has already answered.
+    return SCALAR_CTX
+      if ($type eq 'a_ref_acc' || $type eq 'h_ref_acc') && $child_index == 0;
+
     # Assignment: RHS context depends on LHS, LHS ctxt depends on lvalue type
     if ($type eq '=') {
       my $children  = $self->get_node_children($parent_id);
@@ -5636,7 +5645,10 @@ sub child_context {
       my $children  = $self->get_node_children($parent_id);
       my $op_node   = $self->get_a_node($children->[0]);
       my $op        = $op_node->can('content') ? $op_node->content() : '';
-      if ($op =~ /^(!|not|~|\\|[+\-])$/) {
+      # A sigil CAST's operand (`@{ f() }`, `%{ f() }`, `${ f() }`,
+      # `$#{ f() }`, `&{ f() }`) is the one reference it dereferences --
+      # SCALAR context, like the arrow deref's operand (#3435).
+      if ($op =~ /^(!|not|~|\\|[+\-]|[\$\@%&]|\$#)$/) {
         return SCALAR_CTX;
       }
     }

@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -133,4 +133,28 @@ P
 both_agree(<<'P', 'negative: a match inside grep, and a list-slice of a match');
 my @l = ("a".."c"); my $n = grep { $_ =~ /b/ } @l; print "$n\n";
 my @arr = ("aa bb", "zz");     print +($arr[0] =~ /(\w+)/)[0], "\n";
+P
+
+# #3435: the REFERENCE operand of an arrow deref and of a sigil cast is SCALAR
+# context too (the same family, a different operator): a wantarray-aware
+# accessor in a print / list-assignment / return slot handed the deref its
+# LIST and died "Not a HASH reference".
+both_agree(<<'P', 'a deref operand is scalar: ->{} ->[] ${ } @{ } %{ } $#{ } in list slots');
+package U; sub new { bless {Info => {efs => 1}, L => [{efs=>1},{efs=>2}]}, shift }
+sub gh { my $self = shift; wantarray ? @{ $self->{L} } : $self->{Info} }
+sub a { $_[0] }
+package main; my $u = U->new;
+sub f { wantarray ? ({efs=>7},{efs=>8}) : {efs=>9} }
+sub fa { wantarray ? ([7],[8]) : [9, 10] }
+my @a = ($u->gh->{efs}); print "@a|", $u->gh()->{efs}, "|", f()->{efs}, "\n";
+print fa()->[0], "|", join(",", @{ fa() }), "|", join(",", keys %{ f() }), "\n";
+print ${ fa() }[1], "|", $#{ fa() }, "|", $u->a->a->gh->{efs}, "\n";
+sub r { return f()->{efs}, 1 } print join(",", r()), "\n";
+P
+
+both_agree(<<'P', 'negative: a list slice of a call stays LIST; & calls keep their context');
+sub f { wantarray ? ({efs=>7},{efs=>8}) : {efs=>9} }
+print +(f())[0]->{efs}, "|", scalar(f())->{efs}, "\n";
+sub w { wantarray ? "L" : "S" } my @x = &w(1); my $c = \&w; my @y = &$c(); my @z = (&{$c});
+print "@x @y @z\n";
 P
