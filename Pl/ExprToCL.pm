@@ -163,7 +163,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
   alarm mkdir my my-= next not oct open sysopen opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
-  rename require require-file reset resolve-invocant return reverse rewinddir rindex rmdir say
+  rename require require-file reset resolve-invocant class-invocant return reverse rewinddir rindex rmdir say
   evalbytes scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split
   sprintf sqrt srand stat str-cmp str-eq str-ge str-gt str-le str-lt str-ne str-x str-x=
   string-concat study sub sub-defined sub-exists subst substr super-call sysread sysseek system syswrite
@@ -3569,7 +3569,20 @@ sub gen_methodcall_form {
                       ? $self->environment->current_package : 'main';
           $obj = '"' . $pkg . '"';
         } elsif ($self->environment && $self->environment->is_package($name)) {
-          $obj = '"' . $name . '"';
+          # A QUALIFIED name the unit knows as a package may ALSO name a sub
+          # installed before this unit loads (Type::Library's
+          # `Types::Standard::ArrayRef`, #3397): perl's compile-time rule,
+          # taken at the unit's load by p-class-invocant.  A plain name keeps
+          # the class string.
+          if ($name =~ /::/) {
+            # the unit's boundary snapshot names it (Parser2)
+            my $env = $self->environment;
+            push @{ $env->{class_invocants} }, $name
+              if !$env->{class_invocant_seen}{$name}++;
+            $obj = ['p-class-invocant', '"' . $name . '"'];
+          } else {
+            $obj = '"' . $name . '"';
+          }
         } elsif ($self->environment && $self->environment->has_prototype($name)) {
           $obj = $self->gen_node_form($kids->[0]);
         } elsif (exists $self->expr_o->known_no_of_params->{$name}) {

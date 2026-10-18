@@ -325,7 +325,7 @@
    #:p-symref-site           ; the `symref-const' emission's per-site cache
    #:p-hash-deref-= #:p-array-deref-=
    ;; OO
-   #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant
+   #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant #:p-class-invocant #:p-class-invocant-snapshot
    #:p-copy-back
    #:p-super-call #:perl-pkg-to-clos-class
    #:p-can #:p-isa
@@ -2690,6 +2690,12 @@
 ;;; UNITCHECKs only; however the load is left its CHECK/INIT blocks are spliced on
 ;;; top of the caller's (newest first, like a push) or dropped when the main
 ;;; program's boundary has already passed.
+(defvar *p-class-snapshot* nil
+  "The unit's class-vs-sub decisions taken at ITS compile->run boundary
+   (#3397): an alist (NAME . sub-known-p) set by p-class-invocant-snapshot.
+   Bound to NIL per required unit (%p-load-unit) and per string eval, so a
+   unit's run-phase call sites read their OWN boundary's answer.")
+
 (defvar *p-unit-load* nil
   "True while a required file (a module, an extension) is being loaded:
    its (p-run-compile-phase-blocks) is a UNIT boundary, not the program's.")
@@ -2702,7 +2708,7 @@
   ;; compiled) still leaves those blocks queued, as perl does.
   (let (check init)
     (unwind-protect
-         (let ((*p-unit-load* t) (*unitcheck-blocks* nil)
+         (let ((*p-unit-load* t) (*unitcheck-blocks* nil) (*p-class-snapshot* nil)
                (*check-blocks* nil) (*init-blocks* nil))
            (unwind-protect (funcall thunk)
              (setf check *check-blocks* init *init-blocks*)))
@@ -18284,6 +18290,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (defun %p-eval-1 (string lex-alist features)
   "p-eval's body; see it for the contract."
   (let ((*pcl-caller-wantarray* *wantarray*)
+        (*p-class-snapshot* nil)
         (*p-eval-lex-alist* lex-alist)
         (|$^S| 1)
         ;; eval's operand is an EXPR in SCALAR context (task #1249(4)): perl's
@@ -25870,7 +25877,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-6886"
+(defparameter *pcl-cache-generation* "v2-7084"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -34601,6 +34608,37 @@ size comes from fstat on the descriptor, after the buffered output is written
                   (%pcl-invocant-class uv))))
          (%p-value-invocant-class invocant)))
     (t (%p-value-invocant-class invocant))))
+
+(defun p-class-invocant-snapshot (&rest names)
+  "Record, at the unit's compile->run boundary, whether each qualified class
+   NAME its run-phase code uses as an invocant is ALSO a sub (#3397): perl
+   compiled those call sites before any run-phase code ran, so a sub installed
+   at run time in this unit must not turn them into calls."
+  (setf *p-class-snapshot*
+        (mapcar (lambda (n) (cons n (and (p-get-coderef n) t))) names))
+  nil)
+
+(defun %p-class-sub-known-p (name)
+  "The decision for one p-class-invocant site, taken when its form LOADS: the
+   unit's boundary snapshot when the site is in the run phase, else the state
+   now -- a compile-phase site (a sub body, a BEGIN) loads in source order,
+   which is when perl compiled it."
+  (let ((e (assoc name *p-class-snapshot* :test #'string=)))
+    (if e (cdr e) (and (p-get-coderef name) t))))
+
+(defmacro p-class-invocant (name)
+  "A QUALIFIED bareword invocant the compiler knows as a PACKAGE (#3397).
+   perl decides class-vs-call when it COMPILES the call site: a sub of that
+   name known then wins over the class (perlobj) -- Type::Library installs
+   `Types::Standard::ArrayRef` as a sub, then requires the file that is
+   `package Types::Standard::ArrayRef;` and says
+   `Types::Standard::ArrayRef->inline_check(...)`.  The decision is taken ONCE
+   per site, at its load (load-time-value; see %p-class-sub-known-p), so the
+   class case costs a constant test per call.  The name -> sub step is
+   p-get-coderef's, the ONE resolver."
+  `(if (load-time-value (%p-class-sub-known-p ,name))
+       (funcall (p-get-coderef ,name))
+       ,name))
 
 (defun p-resolve-invocant (name)
   "Resolve a bareword invocant for method calls.

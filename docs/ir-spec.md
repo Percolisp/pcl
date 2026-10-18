@@ -3642,6 +3642,23 @@ var ⇒ plain lexical binding, no localization at all).
   do { package P; sub foo { "P" } package C; our @ISA = "P" };
   print P->can("foo") ? "can" : "cannot";   # can
   ```
+- **A QUALIFIED bareword invocant that names a package the unit knows is a
+  CALL when a sub of that name existed when perl compiled the call site
+  (normative, s520a, task #3397).**  `Pkg::Name->m` emits
+  `(p-class-invocant "Pkg::Name")`: a run-phase site takes the answer the
+  unit recorded at its compile->run boundary
+  (`(p-class-invocant-snapshot "Pkg::Name" ...)`, emitted just before
+  `(p-run-compile-phase-blocks)`), a compile-phase site (a sub body, a BEGIN)
+  takes the state when its form loads; the decision is made once per site
+  (load time), so the class case costs a constant test.  A sub installed at
+  RUN time in the same unit does not turn the site into a call; `Pkg::Name::`
+  and a single-segment name stay classes.
+
+  ```lisp
+  ;; package Lib::Thing; sub go { Lib::Thing->hi }  -- with sub Lib::Thing
+  ;; installed by an earlier unit, go() calls it and dispatches on its value
+  (p-method-call (p-class-invocant "Lib::Thing") "hi")
+  ```
 - **A RUN-TIME `package X;` switch never sets parents (normative, s514f,
   task #3140).**  A switch the compiler cannot give its own section (inside a
   block that also holds a `local`, inside a sub body) emits

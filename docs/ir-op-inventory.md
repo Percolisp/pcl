@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **758**
+* names exported: **760**
 * families: **19** with an ir-spec §10 rule, **36** without one
-* with a machine-readable `Contract:` tail: **69** of 758
+* with a machine-readable `Contract:` tail: **69** of 760
 * UNCLASSIFIED (no family rule matches): **19**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -837,13 +837,15 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-unimport` | function | `(module-name args)` | — | — | — | — | — | — | — |
 | `p-use` | function | `(module-name &key (import-args :default) (do-import t) into)` | — | — | — | — | — | — | — |
 
-## oo (6)
+## oo (8)
 
 *No ir-spec §10 row.*  method dispatch and C3 — ir-spec §7.3
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
 | `%pcl-super-indirect` | function | `(method cur-pkg &rest inv-args)` | — | — | — | — | — | — | — |
+| `p-class-invocant` | macro | `(name)` | — | — | — | — | — | — | — |
+| `p-class-invocant-snapshot` | function | `(&rest names)` | — | — | — | — | — | — | — |
 | `p-get-class` | function | `(obj)` | — | — | — | — | — | — | — |
 | `p-method-call` | function | `(obj method &rest args)` | — | — | — | — | — | — | — |
 | `p-resolve-invocant` | function | `(name)` | — | — | — | — | — | — | — |

@@ -2776,6 +2776,12 @@ sub parse {
   # it, exactly as before.
   # #2610 (s513d): the detector table's end, an instrument (off by default).
   push @body, $self->_detect_end_form if $self->environment->{detect_calls};
+  # #3397: whether each qualified class invocant the unit uses is ALSO a
+  # sub, as perl saw it when it compiled the run-phase call sites -- before
+  # any run-phase code ran (p-class-invocant-snapshot).
+  my $ci = $self->environment->{class_invocants};
+  push @body, '(p-class-invocant-snapshot '
+              . join(' ', map { qq{"$_"} } @$ci) . ')' if $ci && @$ci;
   push @body, "(p-run-compile-phase-blocks)", '';
   for my $g (@run_groups) {
     my ($i, $pkg, $cl_pkg, $run) = @$g;

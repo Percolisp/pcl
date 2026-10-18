@@ -433,3 +433,35 @@ PL
     is(run_cl($prog), run_perl($prog),
        '#3401: caller->isa / caller->m call caller() (scalar: the package), as perl; a package name stays a class (perl oracle)');
 }
+
+{
+    # #3397 (s520a, the Type-Tiny census's largest family, 50 files / 1,531
+    # rows): a QUALIFIED bareword before `->` that the unit knows as a PACKAGE
+    # is a CALL when a sub of that name exists at the unit's compile (load) --
+    # perl's rule (perlobj: a known sub wins over the class).  Types::Standard
+    # installs `Types::Standard::ArrayRef` as a sub, then requires the file
+    # that is `package Types::Standard::ArrayRef;` and says
+    # `Types::Standard::ArrayRef->inline_check(...)`; PCL read the class.
+    my $dir = File::Temp::tempdir(CLEANUP => 1);
+    mkdir "$dir/Lib";
+    open my $l, '>', "$dir/Lib.pm" or die;
+    print $l 'package Lib; BEGIN { *Lib::Thing = sub { bless {}, "Obj" } } package Obj; sub hi { "obj" } 1;' . "\n";
+    close $l;
+    open my $t, '>', "$dir/Lib/Thing.pm" or die;
+    print $t 'package Lib::Thing; sub hi { "class" } sub go { Lib::Thing->hi } 1;' . "\n";
+    close $t;
+    my $prog = qq{use lib "$dir"; use Lib; require Lib::Thing; print Lib::Thing::go(), "\\n";\n};
+    is(run_cl($prog), "obj\n",
+       '#3397: Pkg::Name->m in a unit loaded after a sub Pkg::Name was installed calls the sub (perl: obj)');
+    my $prog2 = <<'PL';
+package Foo::Bar; sub hi { "class" } sub new { bless {n => $_[1]}, $_[0] }
+package Obj; sub hi { "obj" }
+package Plain::K; sub hi { "plain" }
+package main;
+BEGIN { *Foo::Bar = sub { bless {}, "Obj" } }
+my $o = Plain::K->hi;
+print Foo::Bar->hi, " ", Foo::Bar::->hi, " ", $o, " ", Plain::K::->hi, "\n";
+PL
+    is(run_cl($prog2), run_perl($prog2),
+       '#3397: a BEGIN-installed sub of a package name wins at the call site; Foo::Bar:: and a plain class stay classes (perl oracle)');
+}

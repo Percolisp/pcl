@@ -297,7 +297,8 @@ my %FAMILY;
   'extension' => [qw(p-load-extension)],
   'capture-io' => [qw(p-high-capture p-capture-write p-capture-fh)],
   'call' => [qw(p-funcall-ref)],
-  'oo' => [qw(p-get-class p-method-call p-resolve-invocant p-super-call
+  'oo' => [qw(p-get-class p-method-call p-resolve-invocant p-class-invocant
+              p-class-invocant-snapshot p-super-call
               perl-pkg-to-clos-class %pcl-super-indirect)],
   'overload' => [qw(*p-overload-table* p-register-overloads p-find-overload
                     p-call-overload p-overload-strval p-overloaded)],
