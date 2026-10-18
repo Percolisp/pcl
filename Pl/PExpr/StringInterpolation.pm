@@ -15,6 +15,7 @@ use PPI;
 use PPI::Document;
 use Scalar::Util qw(refaddr);
 
+use Pl::CaseMods ();     # THE case-escape machine (#3510), shared with the regex consumer
 use Pl::InterpScan ();   # THE variable-reference scanner (#237/#388); see
                          # docs/interp-scan.md — this file is consumer 3.
 
@@ -94,36 +95,19 @@ sub parse_interpolated_string {
   # other backslash pair stays as written for the escape processing below.
   $content = _undelimit($content, $delims) if length $delims;
 
-  my @parts;
   my $pos = 0;
 
-  # Stack for case-changing escapes: each entry is { mode => 'U'|'L'|'Q'|'F', parts => [...] }
-  my @case_stack;
-  # Target list: either the top of the case stack or @parts
-  my $cur_parts = \@parts;
-  # Pending single-char transform: 'u' or 'l' (applies to next part only)
-  my $pending_char_transform;
-  # Close the innermost case group: wrap its parts and hand the result to the
-  # enclosing list.  A \u/\l that opened before the group (\u\L...\E) applies
-  # to the group's output; so does one still pending here, which appeared with
-  # no following content inside the group -- unless KEEP_PENDING: a group
-  # closed because a new \U/\L/\F opens leaves a pending \u/\l to that one.
-  my $close_group = sub {
-    my ($keep_pending) = @_;
-    my $group = pop @case_stack;
-    $cur_parts = @case_stack ? $case_stack[-1]{parts} : \@parts;
-    my $wrapped = $self->_wrap_case_group($parser, $group);
-    my $oc = $group->{outer_char};
-    if (!$oc && !$keep_pending && $pending_char_transform) {
-      $oc = $pending_char_transform;
-      $pending_char_transform = undef;
-    }
-    if ($oc) {
-      $wrapped = $self->_wrap_case_func($parser,
-        $oc eq 'u' ? 'ucfirst' : 'lcfirst', $wrapped);
-    }
-    push @$cur_parts, $wrapped;
-  };
+  # The case escapes (\U \L \F \Q \E \u \l) go through THE case-modifier
+  # machine every interpolating construct shares (Pl::CaseMods, #3510; the
+  # regex consumer drives the same one) -- this file supplies the node
+  # builders: a closed group is wrapped in uc/lc/fc/quotemeta, a \u/\l in
+  # ucfirst/lcfirst.
+  my $cm = Pl::CaseMods->new(
+    group => sub { $self->_wrap_case_group($parser,
+                                           { mode => $_[0], parts => $_[1] }) },
+    char  => sub { $self->_wrap_case_func($parser,
+                                          $_[0] eq 'u' ? 'ucfirst' : 'lcfirst', $_[1]) },
+  );
 
   # Process the string, looking for variables and case-changing escapes
   while ($pos < length($content)) {
@@ -138,52 +122,12 @@ sub parse_interpolated_string {
       # Add literal part if not empty
       if (length($literal) > 0) {
         $literal = $self->unescape_string($literal);
-        my $lit_id = $self->make_string_literal_node($parser, $literal);
-        if ($pending_char_transform) {
-          $lit_id = $self->_wrap_case_func($parser,
-            $pending_char_transform eq 'u' ? 'ucfirst' : 'lcfirst', $lit_id);
-          $pending_char_transform = undef;
-        }
-        push @$cur_parts, $lit_id;
+        $cm->add($self->make_string_literal_node($parser, $literal));
       }
 
       # Handle case-changing escape
       if (defined $case_cmd) {
-        if ($case_cmd eq 'E') {
-          # Close the current case group
-          $close_group->() if @case_stack;
-          # \E also cancels any pending \u or \l with no content
-          $pending_char_transform = undef;
-        } elsif ($case_cmd eq 'u' || $case_cmd eq 'l') {
-          # A \u/\l at the very START of an open \U/\L group ("\L\u$x") modifies
-          # the first character of the group's OUTPUT — ucfirst(lc($x)), not
-          # lc(ucfirst($x)) (the group's lc would otherwise override the inner
-          # ucfirst).  Record it on the group like the \u\L case above.
-          # (A mid-group \u still applies to the next character locally.)
-          if (@case_stack && @{$case_stack[-1]{parts}} == 0
-              && !$case_stack[-1]{outer_char}) {
-            $case_stack[-1]{outer_char} = $case_cmd;
-          } else {
-            $pending_char_transform = $case_cmd;
-          }
-        } else {
-          # \U, \L, \Q, \F — push a new group.  A pending \u/\l (e.g. the common
-          # \u\L idiom) applies to the FIRST CHARACTER OF THE GROUP'S OUTPUT, not
-          # to the first element inside it: "\u\L$a" is ucfirst(lc($a)), not
-          # lc(ucfirst($a)).  Stash it on the group so it wraps the result when
-          # the group closes, and clear it so it doesn't leak onto the contents.
-          # perl's toke.c: a \U \L \F while a U/L/F group is open first closes
-          # groups from the top until none is left (a \Q above it goes too) --
-          # "\LAB\LCD\EEF" is abcdEF (ir-spec §3.2g, #2441).
-          if ($case_cmd ne 'Q') {
-            $close_group->(1) while grep { $_->{mode} ne 'Q' } @case_stack;
-          }
-          my $new_parts = [];
-          push @case_stack, { mode => $case_cmd, parts => $new_parts,
-                              outer_char => $pending_char_transform };
-          $pending_char_transform = undef;
-          $cur_parts = $new_parts;
-        }
+        $cm->escape($case_cmd);
         next;
       }
 
@@ -206,15 +150,10 @@ sub parse_interpolated_string {
               $parser, \$content, $var_start - 1, $new_pos);
           ($var_node_id, $new_pos) = ($pd_id, $pd_pos) if defined $pd_id;
         }
-        if ($pending_char_transform) {
-          $var_node_id = $self->_wrap_case_func($parser,
-            $pending_char_transform eq 'u' ? 'ucfirst' : 'lcfirst', $var_node_id);
-          $pending_char_transform = undef;
-        }
-        push @$cur_parts, $var_node_id;
+        $cm->add($var_node_id);
         pos($content) = $new_pos;
       } else {
-        push @$cur_parts, $self->make_string_literal_node($parser, $sigil);
+        $cm->add($self->make_string_literal_node($parser, $sigil));
       }
     }
     else {
@@ -228,7 +167,7 @@ sub parse_interpolated_string {
 
   # Close any unclosed case groups (implicit \E at end of string)
   # (a \u/\l that opened before a group still applies: \u\L$a with no \E)
-  $close_group->(1) while @case_stack;
+  my @parts = $cm->finish;
   
   # If no parts, return empty string
   if (@parts == 0) {

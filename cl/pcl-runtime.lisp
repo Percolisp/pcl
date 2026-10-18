@@ -25902,7 +25902,7 @@ size comes from fstat on the descriptor, after the buffered output is written
    derived from it AT CALL TIME, never resolved at load time.")
 (push (lambda () (setf *pcl-cache-dir* (%p-default-cache-dir)))
       sb-ext:*init-hooks*)
-(defparameter *pcl-cache-generation* "v2-7284"
+(defparameter *pcl-cache-generation* "v2-7384"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -36549,8 +36549,8 @@ size comes from fstat on the descriptor, after the buffered output is written
    reads (%pcl-rx-escape-text), and a POSSESSIVE quantifier becomes the
    atomic group perl defines it as (%pcl-rx-scan-quantifier), and a counted
    quantifier is written blank-free with `{,n}' as `{0,n}' (task #2444).
-   Everything else is copied verbatim, so a `\\h' or `a++' that the \\Q pass
-   already quoted stays literal.  Only a pattern that passes one of the four
+   Everything else is copied verbatim, so a `\\h' or `a++' that the compiler's
+   \\Q already quoted stays literal (task #3510).  Only a pattern that passes one of the four
    cheap pre-tests is scanned at all; `(*FAIL)' `(*F)' become `(?!)' (#2386).
    X true = the pattern is /x: blanks and `#…' comments are no atoms,
    and inline (?x) scopes are tracked (task #2443).
@@ -36603,8 +36603,8 @@ size comes from fstat on the descriptor, after the buffered output is written
    Convert \\x{HHHH} to the literal Unicode character.
    Also strips (?{...}) and (??{...}) code blocks (not supported by cl-ppcre
    and cause infinite loops).
-   Also converts \\Q...\\E metachar-quoting blocks (not supported by cl-ppcre)
-   by applying ppcre:quote-meta-chars to the content.
+   \\Q...\\E is NOT handled here: the compiler applies it at the literal
+   (task #3510).
    EXTENDED true = the pattern is compiled under /x (or /xx): the rewrite
    scan must know it (task #2443).
    ASCII true = the pattern is compiled under /a (or /aa): so must the
@@ -36632,15 +36632,11 @@ size comes from fstat on the descriptor, after the buffered output is written
                  (declare (ignore match))
                  (concatenate 'string "\\k<" (substitute #\- #\_ name) ">"))
                :simple-calls t))
-         ;; Convert \Q...\E: quote all regex metacharacters in the enclosed text.
-         ;; \E is optional — \Q extends to end of pattern if \E is absent.
-         (pat (cl-ppcre:regex-replace-all
-               "\\\\Q(.*?)(?:\\\\E|$)"
-               pat
-               (lambda (match content)
-                 (declare (ignore match))
-                 (cl-ppcre:quote-meta-chars content))
-               :simple-calls t))
+         ;; NO \Q...\E pass (task #3510, #2501): \Q is a double-quoted-string
+         ;; operator, applied by the COMPILER where the pattern literal is
+         ;; interpolated (ExprToCL's _regex_case_mod_pattern); in pattern
+         ;; text that reaches this point at run time a backslash-Q is the
+         ;; letter Q, as in perl.
          ;; Translate POSIX character classes to equivalent ranges.
          ;; CL-PPCRE 2.1.2 does not support [:class:] syntax — in either
          ;; spelling.  See +p-posix-class-ranges+ for the table and for why
@@ -36653,8 +36649,8 @@ size comes from fstat on the descriptor, after the buffered output is written
                      match))
                :simple-calls t))
          ;; \h \H \v \V \R — six escapes are all cl-ppcre knows, so these
-         ;; matched the LETTER.  AFTER the \Q pass (so a quoted `\h` stays
-         ;; literal) and AFTER the POSIX pass (so no `[:name:]` brackets are
+         ;; matched the LETTER.  A `\h` the compiler's \Q quoted arrives as
+         ;; `\\h` and stays literal; AFTER the POSIX pass (so no `[:name:]` brackets are
          ;; left to confuse the in-class scan).  The same scan turns a POSSESSIVE
          ;; quantifier into the atomic group perl defines it as (task #2380).
          ;; See %pcl-rewrite-scan.

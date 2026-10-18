@@ -1773,6 +1773,15 @@ without the backslash, and backslash-NEWLINE is one of them: `"a\<newline>b"`
 is `a<newline>b` (s499k, task #2470; a single-quoted string keeps the
 backslash).
 
+A REGEX literal runs the same modifier machine (Pl::CaseMods, s521b, task
+#3510) where the literal is compiled, never at run time: a group covers the
+pattern's RAW text (`\n` `\.` stay escapes, which `\Q` then quotes) with an
+escaped non-bracketing delimiter undone, plus the run-time VALUE of each
+interpolated reference; a `'` delimiter turns the modifiers off, and a
+backslash-Q in pattern TEXT built at run time is the letter Q.  Example:
+`/\Q$e\E/` with `$e = "a.b\n"` is `(p-quotemeta $e)`, and `/\Qa.b/` is the native
+literal `a\.b`.
+
 ### 3.2h Case mapping of chars 128-255 follows the SITE's REGIME (normative, s494u, task #2092)
 
 `p-lc` `p-uc` `p-fc` `p-lcfirst` `p-ucfirst` — and the `\L \U \F \l \u`

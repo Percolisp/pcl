@@ -52,8 +52,12 @@ my @KEYS = (
   'array', 'derefsnail', 'lastidx', 'braced', 'bracedlit',
   'cap', 'caret', 'qualified', 'exprderef', 'emptyarr',
   'subst', 'dq',
+  # the case escapes \Q \U \L \E are applied AT THE LITERAL (#3510, #2501)
+  'Q_nl', 'Q_nl_tail', 'Q_noE', 'Q_var_noE', 'Q_subst', 'Q_split', 'Q_class',
+  'Q_runtime_text', 'Q_val_E', 'L_Q', 'qr_Q', 'Q_delim', 'Q_raw_n', 'U_lit',
+  'stray_E', 'Q_squote', 'dq_Q',
 );
-plan tests => scalar(@KEYS) + 5;
+plan tests => scalar(@KEYS) + 6;
 
 my $PROG = <<'PERL';
 use strict; use warnings;
@@ -107,6 +111,31 @@ t('cap',       ("b" =~ /^$1$/) ? 'M' : 'N');
 { my $tt = "zero-tail"; $tt =~ s/^$x[0]/HIT/; t('subst', $tt) }
 # ... and dq text must NOT move
 t('dq', "a$x[0]-$h{k}-@arr-$#x");
+
+# \Q...\E is a dq-string operator: the COMPILER applies it where the pattern
+# literal is interpolated; the run-time pattern text never carries it (#3510)
+{ my $e = "A:b\nC d\n";
+  t('Q_nl',      ("xx A:b\nC d\n yy" =~ qr/\Q$e\E/) ? 'M' : 'N');
+  my $e3 = "Hi!\n";
+  t('Q_nl_tail', ("Hi!\n" =~ /\Q$e3\E/) ? 'M' : 'N');
+  my $v = "a.b"; my $q = "|"; my $p = q(^\Qa.b\E$); my $y = 'a\E.b'; my $z = "A.B";
+  my $qr = qr/x+/; my $w = "+";
+  t('Q_noE',     join ',', map { /\Qa.b/ ? 'M' : 'N' } "a.b", "axb");
+  t('Q_var_noE', ("za.bz" =~ /\Q$v/) ? 'M' : 'N');
+  (my $tt = "1a.b2axb") =~ s/\Q$v\E/B/g; t('Q_subst', $tt);
+  t('Q_split',   join '|', split /\Q$q\E/, "a|b|c");
+  t('Q_class',   (".]" =~ /^[\Q.]\E]+$/) ? 'M' : 'N');
+  t('Q_runtime_text', ("a.b" =~ /$p/ ? 1 : 0) . ("Qa.bE" =~ /$p/ ? 1 : 0));
+  t('Q_val_E',   ('a\E.b' =~ /^\Q$y\E$/) ? 'M' : 'N');
+  t('L_Q',       ("a.b" =~ /^\L\Q$z\E$/) ? 'M' : 'N');
+  t('qr_Q',      ("xxx+" =~ /^$qr\Q$w\E$/) ? 'M' : 'N');
+  t('Q_delim',   ("a!b" =~ m!^\Qa\!b\E$!) ? 'M' : 'N');
+  t('Q_raw_n',   join ',', map { /^\Qa\nb\E$/ ? 'M' : 'N' } "a\nb", "a\\nb");
+  t('U_lit',     ("ABC" =~ /^\Uabc$/) ? 'M' : 'N');
+  t('stray_E',   join ',', map { /^a\E$/ ? 'M' : 'N' } "a", "aE");
+  { no warnings; t('Q_squote', join ',', map { m'^\Qa.b\E$' ? 'M' : 'N' } "a.b", "Qa.bE"); }
+  t('dq_Q',      "\Q$v\E");
+}
 PERL
 
 sub outputs_of {
@@ -158,4 +187,11 @@ like($cl, qr/\(p-gethash \%h "k"\)/,     'direct $h{k} in a pattern reads %h');
 like($cl, qr/\(p-join \|\$"\| \@arr\)/,  '@arr in a pattern joins with $"');
 like($cl, qr/\Q"[abc]"\E/,               '$s[abc] keeps the charclass literal');
 unlike($cl, qr/p-aref \@s /,             '$s[abc] does NOT read @s');
+# a \Q over literal text folds at compile time: the literal stays native
+my $clq = Pl::Parser2->parse_code(<<'EOT');
+my $m = "a.b" =~ /\Qa.b/;
+print $m;
+EOT
+like($clq, qr/\(p-regex :pat "a\\\\\.b" :flags "" :tier :native\)/,
+     '/\Qa.b/ is the native literal a\.b -- no \Q reaches the runtime (#3510)');
 

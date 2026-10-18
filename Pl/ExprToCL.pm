@@ -14,6 +14,7 @@ use Moo;
 use Scalar::Util qw/looks_like_number/;
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm qw(cl_sym cl_pkg);
+use Pl::CaseMods ();
 use Pl::InterpScan ();
 use Pl::Passes ();
 use Pl::RegexTier ();     # the regex-literal TIER fact — ir-spec §10 regex row
@@ -889,7 +890,21 @@ sub gen_leaf_form {
 sub _regex_literal_form {
   my ($self, $node, $is_qr) = @_;
   my ($pattern, $flags, $delim) = _parse_regex_content($node->content(), $is_qr);
-  if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
+  # A case escape (\Q \U \L \F \E \u \l) is applied HERE, where the literal is
+  # compiled -- never by the runtime (#3510, #2501): a pattern whose escapes
+  # fold away entirely stays a literal; one that quotes a run-time value is an
+  # interpolated pattern like any other.
+  if (my $cm = $self->_regex_case_mod_pattern($pattern, $delim, $node)) {
+    if (!ref $cm->[0]) {
+      $pattern = $cm->[0];
+    } else {
+      return ['pcl::p-regex-from-parts',
+              ':pat',   $cm->[0],
+              ':flags', _cl_string_literal_form($flags),
+              ':tier',  ':dynamic'];
+    }
+  }
+  elsif (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
     # An interpolated pattern is not known until run time, so the TIER is a
     # run-time question for a target: `:dynamic` is a declared absence, never
     # a guess (Pl::RegexTier's header).
@@ -1045,6 +1060,168 @@ sub _replacement_case_shifts {
     $i++;
   }
   return 0;
+}
+
+# THE CASE ESCAPES OF A REGEX LITERAL (task #3510, closing #2501).  `\U \L \F
+# \Q \E \u \l` are DOUBLE-QUOTED-STRING operators (toke.c): perl applies them
+# where the pattern literal is interpolated, and the regex compiler never sees
+# them -- so a pattern TEXT that reaches the matcher at run time holding a
+# backslash-Q means the letter Q (`my $p = q(\Qa.b); /$p/`), and a `'`
+# delimiter, which turns interpolation off, turns them off too.  The groups go
+# through THE case-escape machine the dq decoder drives (Pl::CaseMods, rule
+# 11); what is regex-specific is the TEXT a group covers: the literal pieces
+# are the pattern's RAW source (`\.` `\n` `\x{..}` stay two-or-more
+# characters, which quotemeta then quotes: perl `/\Qa\nb/` matches a
+# backslash and an n), with only an escaped non-bracketing DELIMITER undone
+# first (`m!\Qa\!b!` quotes `a!b`), and an interpolated reference is its
+# run-time value.  A group over ASCII literal text folds here, so `/\Qa.b/`
+# stays a native literal `a\.b`; anything else is a run-time p-quotemeta /
+# p-uc / ... over the parts.
+# Returns undef when the pattern holds no case escape (or the delimiter is
+# `'`), else [RESULT] where RESULT is a plain perl string (the folded literal
+# pattern) or a CLForm (an interpolated pattern).
+sub _regex_case_mod_pattern {
+  my ($self, $pattern, $delim, $tok) = @_;
+  return undef if !_delim_interpolates($delim) || !_regex_has_case_escape($pattern);
+  # the case-mapping REGIME of a run-time \U \L \F \u \l (ir-spec §3.2h)
+  my $u = $self->_unicode_strings_here($tok) ? 1 : 0;
+  my %pairs = ('{' => 1, '(' => 1, '[' => 1, '<' => 1);
+  my $undelim = (defined $delim && length $delim && !$pairs{$delim}) ? $delim : undef;
+  my $cm = Pl::CaseMods->new(
+    group => sub { _rx_case_group($_[0], $_[1], $undelim, $u) },
+    char  => sub { _rx_case_char($_[0], $_[1], $u) },
+  );
+  my $events = _has_regex_interpolation($pattern)
+             ? Pl::InterpScan::scan($pattern, in_regex => 1) : [];
+  my $pos = 0;
+  for my $ev (@$events) {
+    my ($s, $e) = @{ $ev->{span} };
+    _rx_case_literal($cm, substr($pattern, $pos, $s - $pos));
+    $pos = $e;
+    $cm->add({ form => $self->_interp_ref_form(substr($pattern, $s, $e - $s), $ev) });
+  }
+  _rx_case_literal($cm, substr($pattern, $pos));
+  my @parts = _rx_merge_lits($cm->finish);
+  return [''] if !@parts;
+  return [$parts[0]{lit}] if @parts == 1 && exists $parts[0]{lit};
+  return [_rx_parts_form(@parts)];
+}
+
+# Does PATTERN hold a case escape?  Walks backslash PAIRS, so `\\Q` (an
+# escaped backslash, then the letter) is not one.
+sub _regex_has_case_escape {
+  my ($pattern) = @_;
+  return 0 if index($pattern, '\\') < 0;
+  my $n = length $pattern;
+  for (my $i = 0; $i < $n; $i++) {
+    next if substr($pattern, $i, 1) ne '\\';
+    return 1 if Pl::CaseMods::is_escape(substr($pattern, $i + 1, 1));
+    $i++;
+  }
+  return 0;
+}
+
+# Feed one stretch of RAW pattern text to the machine: literal runs as
+# {lit, raw} parts, each case escape as an escape.  `\cX` is one unit (so
+# `\c\` cannot pair with what follows), every other backslash pair is copied.
+sub _rx_case_literal {
+  my ($cm, $text) = @_;
+  my ($buf, $i, $n) = ('', 0, length $text);
+  while ($i < $n) {
+    my $c = substr($text, $i, 1);
+    if ($c eq '\\' && $i + 1 < $n) {
+      my $d = substr($text, $i + 1, 1);
+      if (Pl::CaseMods::is_escape($d)) {
+        $cm->add({ lit => $buf, raw => 1 }) if length $buf;
+        $buf = '';
+        $cm->escape($d);
+        $i += 2;
+        next;
+      }
+      my $k = ($d eq 'c' && $i + 2 < $n) ? 3 : 2;
+      $buf .= substr($text, $i, $k);
+      $i += $k;
+      next;
+    }
+    $buf .= $c;
+    $i++;
+  }
+  $cm->add({ lit => $buf, raw => 1 }) if length $buf;
+  return;
+}
+
+# Adjacent literal parts merge (a merged part is raw only if both were).
+sub _rx_merge_lits {
+  my @out;
+  for my $p (@_) {
+    if (exists $p->{lit} && @out && exists $out[-1]{lit}) {
+      $out[-1] = { lit => $out[-1]{lit} . $p->{lit},
+                   raw => ($out[-1]{raw} && $p->{raw}) ? 1 : 0 };
+    } else {
+      push @out, $p;
+    }
+  }
+  return @out;
+}
+
+# Parts -> the CLForm producing their concatenated text.
+sub _rx_parts_form {
+  my @forms = map { exists $_->{lit} ? _cl_string_literal_form($_->{lit}) : $_->{form} } @_;
+  return @forms == 1 ? $forms[0] : ['p-string-concat', @forms];
+}
+
+my %RX_CASE_FN = (Q => 'quotemeta', U => 'uc', L => 'lc', F => 'fc',
+                  u => 'ucfirst', l => 'lcfirst');
+
+# Apply one case function to ASCII text at compile time (fc = lc on ASCII).
+sub _rx_fold_text {
+  my ($mode, $text) = @_;
+  return $mode eq 'Q' ? quotemeta($text)
+       : $mode eq 'U' ? uc($text)
+       : $mode eq 'u' ? ucfirst($text)
+       : $mode eq 'l' ? lcfirst($text)
+       : ($mode eq 'L' || $mode eq 'F') ? lc($text)
+       : die "PCL: unknown case escape mode '$mode'\n";   # rule 12
+}
+
+sub _rx_case_group {
+  my ($mode, $parts, $undelim, $u) = @_;
+  my @parts = map {
+    ($mode eq 'Q' && defined $undelim && exists $_->{lit} && $_->{raw})
+      ? { lit => _rx_undelimit($_->{lit}, $undelim) } : $_
+  } @$parts;
+  @parts = _rx_merge_lits(@parts);
+  return { lit => '' } if !@parts;
+  if (@parts == 1 && exists $parts[0]{lit} && $parts[0]{lit} !~ /[^\x00-\x7f]/) {
+    return { lit => _rx_fold_text($mode, $parts[0]{lit}) };
+  }
+  return { form => _rx_case_call($mode, $u, _rx_parts_form(@parts)) };
+}
+
+sub _rx_case_char {
+  my ($c, $part, $u) = @_;
+  if (exists $part->{lit} && $part->{lit} !~ /[^\x00-\x7f]/) {
+    return { lit => _rx_fold_text($c, $part->{lit}), raw => $part->{raw} };
+  }
+  return { form => _rx_case_call($c, $u, _rx_parts_form($part)) };
+}
+
+# The run-time call for one case mode: a case MAP takes the site's regime
+# (:u under unicode_strings, as gen_funcall_form passes it); quotemeta has none.
+sub _rx_case_call {
+  my ($mode, $u, $form) = @_;
+  my @call = ("p-$RX_CASE_FN{$mode}", $form);
+  push @call, ":u" if $u && $mode ne "Q";
+  return \@call;
+}
+
+# Undo an escaped non-bracketing delimiter in raw pattern text (pairs-aware:
+# `\\` stays a pair).
+sub _rx_undelimit {
+  my ($text, $d) = @_;
+  my $q = quotemeta $d;
+  $text =~ s/\\(\\|$q)/$1 eq $d ? $d : "\\\\"/ge;
+  return $text;
 }
 
 # Build a CLForm that evaluates to the interpolated pattern string: a "…"
@@ -5675,7 +5852,13 @@ sub gen_substitution_form {
   # (p-string-concat …)) evaluated to the pattern string at runtime.  The
   # TIER goes with it: a run-time pattern is `:dynamic`.
   my ($match_form, $tier);
-  if (_delim_interpolates($mdelim) && _has_regex_interpolation($match)) {
+  # Case escapes are applied where the literal is compiled (#3510) -- see
+  # _regex_case_mod_pattern; the delimiter is the PATTERN half's opener.
+  my $cm = $self->_regex_case_mod_pattern($match, $mdelim, $node);
+  $match = $cm->[0] if $cm && !ref $cm->[0];
+  if ($cm && ref $cm->[0]) {
+    ($match_form, $tier) = ($cm->[0], ':dynamic');
+  } elsif (_delim_interpolates($mdelim) && _has_regex_interpolation($match)) {
     $match_form = $self->_gen_interp_regex_pattern($match);
     $tier = ':dynamic';
   } else {
