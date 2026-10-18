@@ -28505,6 +28505,12 @@ size comes from fstat on the descriptor, after the buffered output is written
   ;; .pm; load PCL's TAP layer on demand instead (no-op if already loaded).
   (when (member module-name *p-pcl-provided-modules* :test #'string=)
     (p-ensure-test-lib)
+    ;; Which package imported WHICH TAP flavour: the TAP layer decides what a
+    ;; module's import changes for its caller (#3436: Test::More's like reads
+    ;; a string pattern as maybe_regex does).
+    (when do-import
+      (funcall (intern "%TEST-MODULE-IMPORTED" :pcl) module-name
+               (or (and into (%pcl-find-package into)) *package*)))
     ;; `use Test::More tests => N` / 'no_plan' / skip_all => REASON: the import
     ;; list IS the plan for these modules, so it must reach the TAP layer.
     ;; Dropping it published a plan-less TAP stream (task #275).  The handler

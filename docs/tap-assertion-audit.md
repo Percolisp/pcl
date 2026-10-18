@@ -135,11 +135,18 @@ harness was reporting on a number that used to be a reference.
 
 ## Not changed, deliberately
 
-- **A plain STRING as a `like`/`unlike` pattern is treated as a pattern.**
-  Test::More FAILS it ("doesn't look much like a regex to me"); perl's
-  t/test.pl interpolates it (`$got =~ /$expected/`).  One entry point serves
-  both callers, and test.pl's reading is the one `perl-tests/` needs.
-  Divergence recorded here rather than fixed.
+- **A plain STRING as a `like`/`unlike` pattern** (the like-string-patterns
+  rule).  SUPERSEDED for Test::More by #3436 (s521a; ruling s520 (2), on the
+  first real CPAN cause line -- IO-Compress spells `like $@, "/^$T: .../"`):
+  a package that `use`d Test::More (or Test::Simple) gets Test::Builder's
+  `maybe_regex` -- `"/RE/flags"` and `"m<d>RE<d>flags"` (the same delimiter
+  twice; `m{RE}` is NOT one) are that regex, any other string fails the row
+  with "'X' doesn't look much like a regex to me."  Every OTHER caller --
+  perl's t/test.pl, `require`d, whose own `like` is `$got =~ /$expected/` --
+  keeps the interpolating reading `perl-tests/` needs.  The two are told
+  apart by the IMPORT (`%test-module-imported`, called from p-use), as perl
+  tells them apart by which `like` the caller's stash holds; never by a
+  global flag.  Guard: `Pl/t/tap-assert-01.t` §1b.
 - **`pl-which_perl` returns a hard-coded perlbrew path and `pl-run_perl`
   always returns undef.**  Both are stubs whose claims are unverified; neither
   is an assertion, and making them real means running a child interpreter.

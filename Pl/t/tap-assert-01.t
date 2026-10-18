@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 25;
+plan tests => 28;
 
 sub run_cl {
     my ($code) = @_;
@@ -73,10 +73,10 @@ sub run_cl {
 # ------------------------------------------------- 1. unusable regex ≠ verdict
 
 my $bad_re = run_cl(q{use Test::More tests => 3;
-my $bad = "(unclosed";
+my $bad = "/(unclosed/";   # Test::More reads a "/RE/" string as RE (#3436)
 unlike("abc", $bad, 'unlike unusable');
 like("abc", $bad, 'like unusable');
-unlike("abc", "b", 'unlike a USABLE pattern that matches');
+unlike("abc", "/b/", 'unlike a USABLE pattern that matches');
 });
 like($bad_re, qr/^not ok 1 - unlike unusable/m,
    'unlike() with an uncompilable pattern is NOT a pass (it used to be)');
@@ -87,6 +87,42 @@ like($bad_re, qr/Unusable regex:/,
 # INVERSE: a usable pattern still produces a real verdict in both directions.
 like($bad_re, qr/^not ok 3 - unlike a USABLE pattern that matches/m,
    'unlike() still fails on a pattern that matches');
+
+# ------------------- 1b. Test::More's like reads a "/RE/flags" STRING (#3436)
+# Test::Builder::maybe_regex: "/RE/flags" and "m<d>RE<d>flags" (the SAME
+# delimiter twice) are that regex; any other string is not a pattern and the
+# row fails "doesn't look much like a regex to me" (perl 5.40.3, probed).
+# IO-Compress's own tests spell `like $@, "/^$TopType: expected .../"`.
+my $tm_str = run_cl(q{use Test::More tests => 6;
+like("Header Error: CRC mismatch.", "/Header Error: CRC mismatch/", "slash string");
+like("abc", "/A/i", "slash flag");
+like("abc", "m!^A!i", "m-bang flag");
+unlike("abc", "/z/", "unlike slash");
+like("abc", "abc", "plain string");
+like("abc", "m{^a}", "m-braces");
+});
+is(join("", map { /^(ok|not ok) \d/ ? ($1 eq 'ok' ? 1 : 0) : () } split /\n/, $tm_str),
+   "111100", 'Test::More like/unlike: "/RE/" strings are regexes, a plain string is not (#3436)');
+like($tm_str, qr/^#\s+'abc' doesn't look much like a regex to me\.$/m,
+     '...and the non-regex row says why, as Test::Builder does');
+# INVERSE: perl-tests/t/test.pl's like() INTERPOLATES a string pattern (its
+# `$got =~ /$expected/`), so the slashes are literal there -- a caller that
+# did not `use Test::More` keeps that reading (the sweep's rows depend on it).
+{
+  my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+  print $fh qq{BEGIN { require "$project_root/perl-tests/t/test.pl"; }\n}
+          . q{plan(tests => 2);
+like("x/foo/y", "/foo/", "slashes literal");
+unlike("foo", "/foo/", "no slashes, no match");
+};
+  close $fh;
+  my $cl = `$pl2cl $pl 2>/dev/null`;
+  my ($cfh, $clf) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+  print $cfh $cl; close $cfh;
+  my $out = `sbcl @sbcl_rt --load $project_root/cl/pcl-test.lisp --load $clf 2>&1`;
+  is(join("", $out =~ /^(ok \d|not ok \d)/mg), "ok 1ok 2",
+     "test.pl's like keeps interpolating a '/RE/' string (#3436 leaves it alone)");
+}
 
 # ------------------------------------------------------- 2. cmp_ok's operators
 

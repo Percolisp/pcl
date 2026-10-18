@@ -488,27 +488,67 @@
 ;;;
 ;;; A pattern may also arrive as a plain STRING: perl's t/test.pl passes
 ;;; strings and interpolates them as patterns (`$got =~ /$expected/`), so the
-;;; harness must too.  (Test::More instead FAILS a non-qr pattern with
-;;; "doesn't look much like a regex to me"; PCL serves both callers from one
-;;; entry point and follows test.pl, which is the stricter requirement — see
-;;; docs/tap-assertion-audit.md §like-string-patterns.)
+;;; harness must too.  Test::More reads a string pattern DIFFERENTLY
+;;; (Test::Builder::maybe_regex, #3436, which supersedes the s331 one-reading
+;;; ruling for Test::More): `"/RE/flags"` and `"m<d>RE<d>flags"` are that
+;;; regex, anything else is "doesn't look much like a regex to me" -- a
+;;; failed row.  The two callers are told apart by the IMPORT, as perl tells
+;;; them apart by which `like' the caller's stash holds: a package that `use'd
+;;; Test::More (%test-module-imported) gets Test::More's reading, every
+;;; other caller (perl-tests/t/test.pl's `require'rs) keeps test.pl's.  See
+;;; docs/tap-assertion-audit.md §like-string-patterns.
+(defvar *test-more-importers* (make-hash-table :test 'eq :weakness :key)
+  "The CL packages a `use Test::More' / `use Test::Simple' imported into
+   (#3436): their `like'/`unlike' calls read a string pattern as Test::More
+   does.  Keyed by package object; written only by %test-module-imported.")
+
+(defun %test-module-imported (module-name pkg)
+  "p-use's hook: MODULE-NAME (one PCL provides) was imported into PKG, a CL
+   package.  Test::More and Test::Simple make PKG a Test::More caller (#3436)."
+  (when (and pkg (member module-name '("Test::More" "Test::Simple")
+                         :test #'string=))
+    (setf (gethash pkg *test-more-importers*) t)))
+
+(defun %test-more-caller-p ()
+  "Is the calling Perl package one that imported Test::More (#3436)?"
+  (and (plusp (hash-table-count *test-more-importers*))
+       (let ((p (%pcl-find-package (to-string *pcl-current-package*))))
+         (and p (gethash p *test-more-importers*)))))
+
+(defun %test-more-maybe-regex (text)
+  "Test::Builder::maybe_regex on a STRING pattern: (values PATTERN MODS) for
+   `/RE/flags' or `m<d>RE<d>flags' (the same delimiter twice -- `m{RE}' is
+   NOT a regex there, probed), else NIL."
+  (multiple-value-bind (m regs)
+      (ppcre:scan-to-strings "(?s)\\A/(.*)/(\\w*)\\z" text)
+    (when m (return-from %test-more-maybe-regex (values (aref regs 0) (aref regs 1)))))
+  (multiple-value-bind (m regs)
+      (ppcre:scan-to-strings "(?s)\\Am([^\\w\\s])(.+)\\1(\\w*)\\z" text)
+    (when m (values (aref regs 1) (aref regs 2)))))
 (defun %test-regex-pattern-text (regex)
   "The pattern text of REGEX (a qr// match object or a plain pattern string)."
   (let ((rx (unbox regex)))
     (if (p-regex-match-p rx) (p-regex-match-pattern rx) (to-string regex))))
 
-(defun %test-regex-match-p (got-str regex)
+(defun %test-regex-match-p (got-str regex &optional tm-pattern tm-mods)
   "T/NIL: does GOT-STR match REGEX?  SIGNALS whatever the scanner signals —
    the CALLER must decide what an unusable pattern means, because silently
    turning a scanner error into a verdict is how `unlike` became an assertion
-   that could not fail (task #202)."
+   that could not fail (task #202).  TM-PATTERN / TM-MODS: a Test::More
+   string pattern already read by %test-more-maybe-regex (#3436)."
   (let ((rx (unbox regex)))
-    (if (p-regex-match-p rx)
-        (let ((scanner (%pcl-create-scanner
-                        (p-regex-match-pattern rx)
-                        (build-ppcre-options (p-regex-match-modifiers rx)))))
-          (if (ppcre:scan scanner got-str) t nil))
-        (if (ppcre:scan (to-string regex) got-str) t nil))))
+    (cond
+      ((p-regex-match-p rx)
+       (let ((scanner (%pcl-create-scanner
+                       (p-regex-match-pattern rx)
+                       (build-ppcre-options (p-regex-match-modifiers rx)))))
+         (if (ppcre:scan scanner got-str) t nil)))
+      (tm-pattern
+       (let ((scanner (%pcl-create-scanner
+                       tm-pattern
+                       (build-ppcre-options (parse-regex-modifiers tm-mods)))))
+         (if (ppcre:scan scanner got-str) t nil)))
+      (t (if (ppcre:scan (to-string regex) got-str) t nil)))))
 
 (defun %test-like (got regex name negated)
   "Body of like (NEGATED nil) and unlike (NEGATED t) — one matcher, one
@@ -516,25 +556,41 @@
   (let* ((got (test-to-scalar got))
          (got-str (if got (to-string got) ""))
          (pattern (%test-regex-pattern-text regex))
-         (err nil)
-         (matched (handler-case (%test-regex-match-p got-str regex)
-                    (error (e) (setf err e) nil))))
-    (cond
-      ;; The claim could not be CHECKED.  Report `not ok` naming the reason:
-      ;; never a pass (`unlike`'s old (error () t) arm made every typo'd
-      ;; pattern an unfalsifiable assertion), and never a die (which would
-      ;; cost the file every row after this one).
-      (err (test-ok nil name
-                    (format nil "     got: ~A" (test-quote-value got))
-                    (format nil "expected: usable regex ~A" (test-quote-value pattern))
-                    (format nil "    Unusable regex: ~A" err)))
-      ((if negated (not matched) matched) (test-ok t name))
-      (negated (test-ok nil name
-                        (format nil "                      got: ~A" (test-quote-value got))
-                        (format nil "expected NOT to match: ~A" pattern)))
-      (t (test-ok nil name
-                  (format nil "                  got: ~A" (test-quote-value got))
-                  (format nil "expected to match: ~A" pattern))))))
+         (tm (and (not (p-regex-match-p (unbox regex))) (%test-more-caller-p)))
+         (err nil))
+    (multiple-value-bind (tm-pattern tm-mods)
+        (if tm (%test-more-maybe-regex pattern) (values nil nil))
+      ;; Test::More: a string that is not `/RE/' or `m<d>RE<d>' is not a
+      ;; pattern at all -- a failed row naming why, in either direction.
+      (when (and tm (null tm-pattern))
+        (return-from %test-like
+          (test-ok nil name
+                   (format nil "    ~A doesn't look much like a regex to me."
+                           (test-quote-value pattern)))))
+      (%test-like-verdict got pattern name negated
+                          (handler-case (%test-regex-match-p got-str regex
+                                                             tm-pattern tm-mods)
+                            (error (e) (setf err e) nil))
+                          err))))
+
+(defun %test-like-verdict (got pattern name negated matched err)
+  "The row %test-like reports, once the match is known (or ERR says why not)."
+  (cond
+    ;; The claim could not be CHECKED.  Report `not ok` naming the reason:
+    ;; never a pass (`unlike`'s old (error () t) arm made every typo'd
+    ;; pattern an unfalsifiable assertion), and never a die (which would
+    ;; cost the file every row after this one).
+    (err (test-ok nil name
+                  (format nil "     got: ~A" (test-quote-value got))
+                  (format nil "expected: usable regex ~A" (test-quote-value pattern))
+                  (format nil "    Unusable regex: ~A" err)))
+    ((if negated (not matched) matched) (test-ok t name))
+    (negated (test-ok nil name
+                      (format nil "                      got: ~A" (test-quote-value got))
+                      (format nil "expected NOT to match: ~A" pattern)))
+    (t (test-ok nil name
+                (format nil "                  got: ~A" (test-quote-value got))
+                (format nil "expected to match: ~A" pattern)))))
 
 ;;; like(got, regex, name)
 (defun pl-like (got regex &optional name)
