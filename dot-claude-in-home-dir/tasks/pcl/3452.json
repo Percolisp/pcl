@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "Filed s520a (Opus 5.5, 2026-10-18), the residue of #3404.  A chained `my` whose final initializer holds a declarator at its OWN level still refuses the whole file (\"Parser2 TODO: self-referential init\"), though perl runs it:\n    my @a = (my @b = (1,2)); print \"@a|@b\\n\"; my @c = my @d = (3, my $q = 4); print \"@c|@d|$q\\n\";\nperl 5.40.3: `1 2|1 2` / `3 4|3 4|4`.  PCL (s520a tree): Transpile failed at the second statement (Parser2 `_elems_declare_at_level` answers true for `my $q` at the initializer's level, by design of #3404 -- the refusal was kept, not widened).  LOUD, not silent.  Fix shape: the chained path could lower the inner declaration first (its own `p-let`) and then the chain, as perl's left-to-right evaluation does; the self-reference that actually needs the refusal is a READ of a name the same chain declares (`my @a = my @b = (@a)`).  Low: no census row known; Type-Tiny's shape was the nested one.\n",
+   "id" : "3452",
+   "status" : "pending",
+   "subject" : "a chained my whose initializer declares at its OWN level (my @c = my @d = (3, my $q = 4)) still refuses the file; perl runs it (#3404 residue, loud)"
+}
