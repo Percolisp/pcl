@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 17;
 
 sub write_pl {
     my ($code) = @_;
@@ -464,4 +464,24 @@ print Foo::Bar->hi, " ", Foo::Bar::->hi, " ", $o, " ", Plain::K::->hi, "\n";
 PL
     is(run_cl($prog2), run_perl($prog2),
        '#3397: a BEGIN-installed sub of a package name wins at the call site; Foo::Bar:: and a plain class stay classes (perl oracle)');
+}
+
+{
+    # #3397 (s520a, review of its own Type-Tiny runs): `NAME()->m` with
+    # PARENTHESES is a CALL in perl whatever packages exist -- the run-time
+    # resolver's "a known stash is a class" rule read
+    # `Types::Standard::Tuple()->of(...)` as the class once Tuple.pm had
+    # loaded (CycleTuple.t 69 -> 8 rows).  Undefined, it dies as perl does.
+    my $prog = <<'PL';
+package Foo::Bar; sub m { "class:" . (ref($_[0]) || $_[0]) }
+package Obj; sub m { "obj" }
+package main;
+print Foo::Bar->m, "\n";
+print eval { Foo::Bar()->m; 1 } ? "lived\n" : "died: " . ($@ =~ /^(Undefined subroutine &Foo::Bar called)/)[0] . "\n";
+*Foo::Bar = sub { bless {}, "Obj" };
+print Foo::Bar()->m, " ", Foo::Bar->m, "\n";
+sub mk { bless {}, "Obj" } print mk()->m, " ", main::mk()->m, "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3397: NAME()->m with parentheses calls NAME even when a package NAME exists; NAME->m keeps the compile-time answer (perl oracle)');
 }

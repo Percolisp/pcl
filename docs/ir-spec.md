@@ -3652,7 +3652,8 @@ var ⇒ plain lexical binding, no localization at all).
   takes the state when its form loads; the decision is made once per site
   (load time), so the class case costs a constant test.  A sub installed at
   RUN time in the same unit does not turn the site into a call; `Pkg::Name::`
-  and a single-segment name stay classes.
+  and a single-segment name stay classes; `Pkg::Name()->m` with PARENTHESES is always a call
+  (scalar context), whatever packages exist.
 
   ```lisp
   ;; package Lib::Thing; sub go { Lib::Thing->hi }  -- with sub Lib::Thing

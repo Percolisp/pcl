@@ -3564,7 +3564,16 @@ sub gen_methodcall_form {
       my $class_node = $self->expr_o->get_a_node($obj_kids->[0]);
       if (ref($class_node) eq 'PPI::Token::Word') {
         my $name = $class_node->content();
-        if ($name eq '__PACKAGE__') {
+        my $nx = $class_node->can('snext_sibling') && $class_node->snext_sibling;
+        if ($nx && $nx->isa('PPI::Structure::List') && $name ne '__PACKAGE__') {
+          # `NAME()->m`: the parentheses make it a CALL in perl whatever
+          # packages exist -- Type-Tiny's `Types::Standard::Tuple()->of(...)`
+          # read the class once Types/Standard/Tuple.pm had loaded (#3397).
+          # Its value is the invocant: SCALAR context, whatever the statement.
+          my $f = $self->gen_node_form($kids->[0]);
+          $f = $f->[1] while ref($f) eq 'ARRAY' && @$f == 2 && $CTX_WRAP{$f->[0]};
+          $obj = Pl::CLForm::ctx_bind('nil', $f);
+        } elsif ($name eq '__PACKAGE__') {
           my $pkg = ($self->environment && $self->environment->current_package)
                       ? $self->environment->current_package : 'main';
           $obj = '"' . $pkg . '"';
