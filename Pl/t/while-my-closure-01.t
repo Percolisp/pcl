@@ -117,4 +117,18 @@ while (my $v = shift @w) { $last = $v }
 print "last=$last\n";
 PERL
 
+# 5. #3431: an expression-embedded `my` in the RIGHT side of a `my`
+#    declaration (`my $l = X->n(my $t)`, IO-Compress's LexFile->new(my $name))
+#    is a fresh variable each iteration, as in a plain statement -- in a for,
+#    in a sub, in a while, in a list declaration, and captured by a closure.
+test_wm('embedded my in a declaration RHS is per-iteration (#3431)', <<'PERL');
+sub X::n { shift; foreach (@_) { print defined $_ ? "D " : "U "; $_ = "y" } 1 }
+for my $k (1..2) { my $l = X->n(my $t); print "a $k $t\n" }
+for my $k (1..2) { my ($l, $m) = (X->n(my $t), 1); print "d $k $t\n" }
+sub g { for my $k (1..2) { my $l = X->n(my $t); print "g $k $t\n" } } g();
+my $c = 0; while ($c++ < 2) { my $l = X->n(my $t); print "h $c $t\n" }
+my @t; for my $k (1..2) { my $l = X->n(my $u); $u .= $k; push @t, sub { $u } }
+print join(",", map { $_->() } @t), "\n";
+PERL
+
 done_testing();

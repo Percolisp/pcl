@@ -10981,6 +10981,21 @@ sub _lower_block_1 {
     return $self->_lower_local($first, \@rest, $vi, $tail_ctx);
   }
 
+  # -- #3431: an expression-embedded `my` in a DECLARATION's initializer
+  # (`my $l = X->n(my $t)` in a loop body) declares for the rest of the
+  # enclosing block exactly as it does in a plain statement — the SAME let
+  # (_embedded_my_let), opened around the whole declaration + remainder; the
+  # declaration's own arm below then binds `$l` inside it.  Re-entry is
+  # bounded: _reg_lex marks the names let-bound, so the filter drops them.
+  if ($first->isa('PPI::Statement::Variable')) {
+    my @emb = $self->_decl_init_embedded_my_names($first);
+    if (@emb) {
+      my @f = $self->_embedded_my_let($first, $vi, \@emb, sub {
+                $self->_lower_block([$first, @rest], $vi, $tail_ctx) });
+      return @f if @f;
+    }
+  }
+
   # -- my $x [= INIT];  → (let (($x …)) rest...)
   if ($first->isa('PPI::Statement::Variable')) {
     # A declaration in TAIL position (last statement of a value-position
@@ -11758,25 +11773,10 @@ sub _lower_block_1 {
                   && !$self->{_let_bound_vars}{$_} }
               $self->_embedded_my_names($first);
     if (@emb) {
-      # INSIDE A SUB BODY the veto's premise is false and the question is not
-      # even asked (#265/#272, re-shaped by #291): another sub cannot possibly
-      # share a lexical declared inside THIS sub's body, so there is nothing to
-      # strand — and the package global of that name keeps its own cell either
-      # way, since the forward-decl pass no longer excludes let-bound names.
-      # (Until #291 this was reached by RENAMING the decl to `$x__emb__N`, a
-      # name no sub mentions, so that the veto below would not fire.  Same
-      # outcome, one mechanism fewer.)  At FILE level the premise holds and the
-      # veto stands: Capture-Tiny's Utils.pm really does share the cell (#199).
-      my $vetoed = !_enclosing_sub_body($first)
-                && $self->_embedded_my_veto_names(
-                     $self->{_seg_named_subs} // [], $first, \@emb) ? 1 : 0;
-      if (!$vetoed) {
-        $self->_reg_lex(@emb);
-        return (_decl_let([map { _decl_fresh($_, $vi) } @emb],
-                 $self->_fh_scope_close($first, $vi, \@emb,
-                   $self->_lower_stmt($first, $vi, $first_tail),
-                   $self->_lower_block(\@rest, $vi, $tail_ctx))));
-      }
+      my @f = $self->_embedded_my_let($first, $vi, \@emb, sub {
+                ($self->_lower_stmt($first, $vi, $first_tail),
+                 $self->_lower_block(\@rest, $vi, $tail_ctx)) });
+      return @f if @f;
     }
   }
 
@@ -11946,6 +11946,52 @@ sub _lower_block_1 {
 sub _embedded_my_syms {
   my ($self, $stmt) = @_;
   return map { $_->[1] } _decl_syms_under($stmt, words => 'my', plain => 1);
+}
+
+# THE lowering of an expression-embedded `my` (M2; #3431 routes declarations
+# here too): fresh containers let-bound around BODY->() — the statement AND
+# the block remainder — registered via _reg_lex so both the native and seam
+# assignment paths emit p-my-= (box-set), never p-scalar-= (whose box-in-box
+# ref storage broke weak-ref identity — hashassign.t 217/218).  Returns ()
+# when VETOED: a named sub elsewhere in the segment references the name.
+# INSIDE A SUB BODY the veto's premise is false and the question is not even
+# asked (#265/#272, re-shaped by #291): another sub cannot possibly share a
+# lexical declared inside THIS sub's body, so there is nothing to strand — and
+# the package global of that name keeps its own cell either way, since the
+# forward-decl pass no longer excludes let-bound names.  At FILE level the
+# premise holds and the veto stands: Capture-Tiny's Utils.pm really does share
+# the cell (#199).
+sub _embedded_my_let {
+  my ($self, $first, $vi, $emb, $body) = @_;
+  return if !_enclosing_sub_body($first)
+         && $self->_embedded_my_veto_names(
+              $self->{_seg_named_subs} // [], $first, $emb);
+  $self->_reg_lex(@$emb);
+  return (_decl_let([map { _decl_fresh($_, $vi) } @$emb],
+           $self->_fh_scope_close($first, $vi, $emb, $body->())));
+}
+
+# The embedded `my` names in a DECLARATION's initializer (#3431): the plain
+# declarators _embedded_my_syms finds, minus those at the statement's OWN
+# level (the leading declarator, and a chained `my @c = my @d = …`, which is
+# #3404 / #3452's shape), minus names already bound here.  A name the
+# statement mentions again (`my $l = (my $x = $x + 1)`: perl reads the OUTER
+# `$x` in the initializer) is left to the old path — the let would shadow it.
+sub _decl_init_embedded_my_names {
+  my ($self, $stmt) = @_;
+  my %own = map { refaddr($_) => 1 } $stmt->schildren;
+  my $text = $stmt->content;
+  my %seen;
+  my @n = grep { !$seen{$_}++ }
+          map  { $_->[1]->content }
+          grep { !$own{ refaddr $_->[0] } }
+          _decl_syms_under($stmt, words => 'my', plain => 1);
+  return grep {
+    my $nm = $_;
+    my $uses = () = $text =~ /\Q$nm\E\b/g;
+    $uses == 1 && !$self->{_file_lex_renamed}{$nm}
+      && !$self->{_let_bound_vars}{$nm}
+  } @n;
 }
 
 # The same declarations, as a de-duplicated list of NAMES.
