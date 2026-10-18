@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 44;
+plan tests => 45;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -563,6 +563,18 @@ print "restored=$.\n";                # 42
 tell $A;                              # make A current again without reading
 print "A_again=$.\n";                 # 2
 close $A; close $B; unlink $f;
+PERL
+}
+
+# --- Test 30b (#3518, s521d): with NO handle current, $. is its own SV --
+# an assignment is kept and read back (IO::Uncompress::Base sets $. after a
+# read() that makes no handle current); `local $.` restores it.
+{
+    test_io('$. keeps an assigned value while no handle is current (#3518)', <<'PERL');
+package F; sub g { $. = ++$main::n } package main; F->g for 1..3;
+print "$.\n"; $. = 7; print "$.\n";
+{ local $. = 9; print "$.\n"; } print "$.\n";
+{ local $.; $. = 11; print "$.\n"; } print "$.\n";
 PERL
 }
 

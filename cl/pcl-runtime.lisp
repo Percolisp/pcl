@@ -3633,16 +3633,24 @@
 (declaim (special *p-last-read-handle*))
 (defvar *p-fh-lines* (make-hash-table :test 'eq)
   "Per-filehandle input line counter (Perl IoLINES): stream -> line count.")
+(defvar *p-dot-value* nil
+  "$.'s OWN value while no handle is current (task #3518): perl's `$.` is an
+   SV, and with no last-read handle `$. = N` stores N there and a read
+   returns it -- IO::Uncompress::Base sets `$.` after a read() that makes no
+   handle current.  NIL = undef (never assigned).")
 (defun %p-dot-get ()
-  "Getter for $.: the last-accessed handle's line counter, or undef if none."
+  "Getter for $.: the last-accessed handle's line counter, or -- with no
+   current handle -- the value last assigned (undef if none, #3518)."
   (if *p-last-read-handle*
       (gethash *p-last-read-handle* *p-fh-lines* 0)
-      nil))
+      *p-dot-value*))
 (defun %p-dot-set (new-val)
-  "Setter for $.: store NEW-VAL as the last-accessed handle's line counter."
+  "Setter for $.: store NEW-VAL as the last-accessed handle's line counter,
+   or as $.'s own value when no handle is current (#3518)."
   (let ((n (truncate (to-number new-val))))
-    (when *p-last-read-handle*
-      (setf (gethash *p-last-read-handle* *p-fh-lines*) n))
+    (if *p-last-read-handle*
+        (setf (gethash *p-last-read-handle* *p-fh-lines*) n)
+        (setf *p-dot-value* n))
     n))
 (defvar |$.| (make-p-box (make-p-magic-cell :getter #'%p-dot-get
                                             :setter #'%p-dot-set))
@@ -3654,7 +3662,8 @@
    to a handle inside BODY persist.  Modelled as a dynamic rebinding of
    *p-last-read-handle* (reads/writes inside reach the current handle's counter;
    the pointer reverts on exit)."
-  `(let ((*p-last-read-handle* *p-last-read-handle*))
+  `(let ((*p-last-read-handle* *p-last-read-handle*)
+         (*p-dot-value* *p-dot-value*))
      ,@body))
 
 ;;; ------------------------------------------------------------
