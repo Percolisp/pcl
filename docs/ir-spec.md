@@ -3507,7 +3507,13 @@ the element accessor, and a magic name can have a storage cell that is not
 its place (`$!` is stored in `*p-stored-errno*` and written through
 `(p-errno-string)`). Building the assignment out of the STORAGE names is
 what made `local($p,$h{a}) = (5,6)` write a phantom scalar `$h`. The RHS is
-evaluated BEFORE any target is localized, so it reads the old values.
+evaluated BEFORE any target is localized, so it reads the old values. A
+SCALAR DEREF target in the list (`$$r`, `${EXPR}`) is a third storage kind
+(task #3470): its storage is `(p-local-deref-scalar VALUE)` over the deref's
+value -- symbolic or hard decided at run time, a hard ref dying "Can't
+localize through a reference" as perl does -- and its place is the deref
+expression itself. Example: `local($$r, $y) = (7, 8)` with `$r = "g"` gives
+`$g` = 7 and `$y` = 8 inside the block, both restored after.
 
 **`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task
 #541). Perl does not execute the statement at all when the condition is

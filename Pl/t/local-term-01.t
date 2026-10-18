@@ -458,4 +458,22 @@ first
 A
 PERL
 
+# 21. #3470 (s521d): a SCALAR deref in a parenthesised `local` list
+#     (`local($$r, $y) = LIST`, `${"main::g"}`, one in the middle) localizes
+#     it with the rest -- it dropped the statement ("unsupported `local`
+#     target") where perl localizes both.
+test_lt('local($$r, $y) = LIST / ${"name"} / a deref in the middle', <<'PERL');
+our ($g, $y, $z) = (1, 0, 5); our @a = (1); my $r = "g";
+{ local($$r, $y) = (7, 8); print "A g=$g y=$y\n"; }
+print "B g=$g y=$y\n";
+{ local($$r, @a) = (7, 8, 9); print "C g=$g a=@a\n"; }
+print "D g=$g a=@a\n";
+{ local(${"main::g"}, $y) = (3, 4); print "E g=$g y=$y\n"; }
+print "F g=$g y=$y\n";
+{ local($y, $$r, $z) = (10, 11, 12); print "G g=$g y=$y z=$z\n"; }
+print "H g=$g y=$y z=$z\n";
+{ local($$r) = (21, 22); print "I g=$g\n"; }
+print "J g=$g\n";
+PERL
+
 done_testing();

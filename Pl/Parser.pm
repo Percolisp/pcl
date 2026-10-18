@@ -4530,8 +4530,39 @@ sub _local_target_item {
       place => _elem_place_cl($open, $cl_var, \@keys),
     };
   }
+  # A SCALAR deref in the list (`local($$r, $y) = …`, `local(${"main::g"},
+  # $y)`, task #3470): the same `deref` item the foreign-global arm above
+  # makes -- the p-local-deref-scalar open over the deref's VALUE (symbolic or
+  # hard, decided at run time, as the single-element branch does), and the
+  # deref expression itself as the list assignment's place.
+  if (@$g == 2 && ref($g->[0]) eq 'PPI::Token::Cast' && $g->[0]->content eq '$'
+      && (ref($g->[1]) eq 'PPI::Token::Symbol'
+          || ref($g->[1]) eq 'PPI::Structure::Block')) {
+    my $place = $self->_parse_expression([@$g], $stmt);
+    if (defined $place) { $place =~ s/^\s+|\s+$//g }
+    return {
+      kind  => 'deref',
+      cl    => $self->_local_deref_ref_cl($g->[1], $stmt),
+      macro => 'p-local-deref-scalar',
+      place => $place,
+    } if defined $place && length $place;
+  }
   die "Parser2 TODO: unsupported `local` target: "
     . join('', map { $_->content // '' } @$g) . "\n";
+}
+
+# The VALUE a `local` deref target dereferences -- `$$x` / `@$x` / `%$x` the
+# named scalar's, `${EXPR}` the block's inner expression, `${aa}` (a bareword)
+# the package variable's NAME (a symbolic ref).  ONE reading for the
+# single-element branch and the list item (task #3470).
+sub _local_deref_ref_cl {
+  my ($self, $node, $stmt) = @_;
+  return $self->_parse_expression([$node], $stmt) // 'nil'
+    if ref($node) eq 'PPI::Token::Symbol';
+  my @inner = $self->_deref_block_inner($node);
+  return '"' . $inner[0]->content . '"'
+    if @inner == 1 && ref($inner[0]) eq 'PPI::Token::Word';
+  return $self->_parse_expression(\@inner, $stmt) // 'nil';
 }
 
 # The CL boolean of a `local`'s trailing `if`/`unless` modifier — ONE reading of
@@ -5060,21 +5091,7 @@ sub _process_local_declaration {
       && (ref($non_ws[1]) eq 'PPI::Structure::Block'
           || ref($non_ws[1]) eq 'PPI::Token::Symbol')) {
     my $sigil = $non_ws[0]->content;
-    my $ref_cl;
-    if (ref($non_ws[1]) eq 'PPI::Token::Symbol') {
-      # $$x / @$x / %$x — deref the named scalar
-      $ref_cl = $self->_parse_expression([$non_ws[1]], $stmt) // 'nil';
-    } else {
-      # ${EXPR} — extract the block's inner expression
-      my @inner = $self->_deref_block_inner($non_ws[1]);
-      if (@inner == 1 && ref($inner[0]) eq 'PPI::Token::Word') {
-        # ${aa} — a bareword names the package variable; route as a symbolic ref.
-        my $name = $inner[0]->content;
-        $ref_cl = "\"$name\"";
-      } else {
-        $ref_cl = $self->_parse_expression(\@inner, $stmt) // 'nil';
-      }
-    }
+    my $ref_cl = $self->_local_deref_ref_cl($non_ws[1], $stmt);
     my $macro = $sigil eq '@' ? 'p-local-deref-array'
               : $sigil eq '%' ? 'p-local-deref-hash'
               :                 'p-local-deref-scalar';
