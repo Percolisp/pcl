@@ -442,8 +442,11 @@ my $f = ($r // 0)->foo(7);
 print $b;
 EOT
 
-like($mc, qr/\(p-method-call "B" "new"\)/,
-     'class name invocant → "B" string literal');
+# s521d (#3369): a known package's single-segment name asks, at the site's
+# load, whether a sub main::B exists (perl's compile-time class-vs-call rule;
+# perl-probed in Pl/t/universal-01.t's #3369 row) -- the class string when not.
+like($mc, qr/\(p-method-call \(p-class-invocant "B" "main::B"\) "new"\)/,
+     'class name invocant → the class "B" unless a sub main::B exists at load');
 like($mc, qr/\(p-method-call \$o "g"\)/,
      'static method name → quoted string arg');
 like($mc, qr/\(p-method-call \$o \$m\)/,

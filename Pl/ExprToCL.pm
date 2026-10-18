@@ -3764,16 +3764,28 @@ sub gen_methodcall_form {
           # A QUALIFIED name the unit knows as a package may ALSO name a sub
           # installed before this unit loads (Type::Library's
           # `Types::Standard::ArrayRef`, #3397): perl's compile-time rule,
-          # taken at the unit's load by p-class-invocant.  A plain name keeps
-          # the class string.
-          if ($name =~ /::/) {
-            # the unit's boundary snapshot names it (Parser2)
-            my $env = $self->environment;
-            push @{ $env->{class_invocants} }, $name
-              if !$env->{class_invocant_seen}{$name}++;
-            $obj = ['p-class-invocant', '"' . $name . '"'];
-          } else {
+          # taken at the unit's load by p-class-invocant.  A SINGLE-segment
+          # name asks the same of a sub of that name in the CURRENT package
+          # (#3369): this file's own `sub NAME` decides by position (above
+          # the site: a call; only below it: the class, as perl compiled it);
+          # with none, the load-time snapshot (a BEGIN-installed glob, an
+          # import).  `NAME::->m` and `'NAME'->m` never reach here.
+          my $env = $self->environment;
+          my $pkg = $env->current_package // 'main';
+          my $sub = $name =~ /::/ ? $name : "${pkg}::$name";
+          my $static = $name =~ /::/ ? undef : $env->declared_sub_at_site($name, $pkg);
+          if (defined $static && $static eq 'before') {
+            my $f = $self->gen_node_form($kids->[0]);
+            $f = $f->[1] while ref($f) eq 'ARRAY' && @$f == 2 && $CTX_WRAP{$f->[0]};
+            $obj = Pl::CLForm::ctx_bind('nil', $f);
+          } elsif (defined $static) {
             $obj = '"' . $name . '"';
+          } else {
+            # the unit's boundary snapshot names it (Parser2)
+            push @{ $env->{class_invocants} }, $sub
+              if !$env->{class_invocant_seen}{$sub}++;
+            $obj = ['p-class-invocant', '"' . $name . '"',
+                    ($sub eq $name ? () : '"' . $sub . '"')];
           }
         } elsif ($self->environment && $self->environment->has_prototype($name)) {
           $obj = $self->gen_node_form($kids->[0]);

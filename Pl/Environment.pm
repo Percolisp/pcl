@@ -1529,6 +1529,32 @@ sub add_declared_sub {
                                     ($at ? %$at : ()) };
 }
 
+=head2 declared_sub_at_site($name, $package)
+
+Where THIS file's own `sub NAME` (in PACKAGE) stands relative to the statement
+being lowered (`parse_site`, task #2871's clock): C<'before'> when a
+declaration of it precedes the site (or is the site), C<'after'> when every
+declaration of it comes later in the same document, undef when the file
+declares no such sub or the positions are not comparable (another document,
+no published site).  perl decides a bareword invocant's class-vs-call at the
+site's COMPILE time (perlobj), so a sub defined BELOW does not count (#3369).
+
+=cut
+
+sub declared_sub_at_site {
+    my ($self, $name, $package) = @_;
+    my $site = $self->parse_site;
+    my $ans;
+    for my $d (@{ $self->declared_subs }) {
+        next if $d->{name} ne $name || ($d->{package} // 'main') ne $package;
+        return undef if !$site || !$site->{pos} || !defined $site->{doc}
+                     || !$d->{pos} || !defined $d->{doc} || $d->{doc} != $site->{doc};
+        return 'before' if _site_cmp($site->{pos}, $d->{pos}) >= 0;
+        $ans = 'after';
+    }
+    return $ans;
+}
+
 =head2 get_declared_subs()
 
 Returns arrayref of all declared subs with their packages.

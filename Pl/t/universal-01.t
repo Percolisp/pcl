@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 20;
 
 sub write_pl {
     my ($code) = @_;
@@ -484,4 +484,32 @@ sub mk { bless {}, "Obj" } print mk()->m, " ", main::mk()->m, "\n";
 PL
     is(run_cl($prog), run_perl($prog),
        '#3397: NAME()->m with parentheses calls NAME even when a package NAME exists; NAME->m keeps the compile-time answer (perl oracle)');
+}
+
+{
+    # #3369 (s521d): the SINGLE-segment half -- a sub NAME in the CURRENT
+    # package makes `NAME->m` a call, as perl compiled the site: one defined
+    # ABOVE it (or BEGIN-installed) wins, one defined only BELOW it does not,
+    # one installed at RUN time does not; `K::->m`, `'K'->m` and a sub of the
+    # name in ANOTHER package keep the class.
+    my $prog = <<'PL';
+package Obj; sub m { 'obj' }
+package K; sub m { 'class' }
+package L; sub m { 'L' }
+package J; sub m { 'J' }
+package M2; sub m { 'M2' }
+package M3; sub m { 'M3' }
+package main;
+sub K { bless {}, 'Obj' }
+print join(' ', K->m, K::->m, 'K'->m, L->m, J->m), "\n";
+package Other; sub J { 'x' }
+package main;
+sub L { bless {}, 'Obj' }
+BEGIN { *main::M2 = sub { bless {}, 'Obj' } }
+*main::M3 = sub { bless {}, 'Obj' };
+print join(' ', L->m, M2->m, M3->m), "\n";
+package Foo; sub K { bless {}, 'Obj' } print K->m, "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#3369: a same-named sub in the CURRENT package makes NAME->m a call when perl compiled the site after it (perl oracle)');
 }

@@ -34785,7 +34785,7 @@ would consume, so it dies naming the stream (rule 12)."
   (let ((e (assoc name *p-class-snapshot* :test #'string=)))
     (if e (cdr e) (and (p-get-coderef name) t))))
 
-(defmacro p-class-invocant (name)
+(defmacro p-class-invocant (name &optional (sub name))
   "A QUALIFIED bareword invocant the compiler knows as a PACKAGE (#3397).
    perl decides class-vs-call when it COMPILES the call site: a sub of that
    name known then wins over the class (perlobj) -- Type::Library installs
@@ -34794,9 +34794,11 @@ would consume, so it dies naming the stream (rule 12)."
    `Types::Standard::ArrayRef->inline_check(...)`.  The decision is taken ONCE
    per site, at its load (load-time-value; see %p-class-sub-known-p), so the
    class case costs a constant test per call.  The name -> sub step is
-   p-get-coderef's, the ONE resolver."
-  `(if (load-time-value (%p-class-sub-known-p ,name))
-       (funcall (p-get-coderef ,name))
+   p-get-coderef's, the ONE resolver.  SUB is the sub to look for when it is
+   not NAME itself: a SINGLE-segment invocant asks for CURRENT-PKG::NAME
+   (#3369, `sub K {...} K->m` is K()->m)."
+  `(if (load-time-value (%p-class-sub-known-p ,sub))
+       (funcall (p-get-coderef ,sub))
        ,name))
 
 (defun p-resolve-invocant (name)

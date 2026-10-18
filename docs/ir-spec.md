@@ -3698,8 +3698,16 @@ var ⇒ plain lexical binding, no localization at all).
   takes the state when its form loads; the decision is made once per site
   (load time), so the class case costs a constant test.  A sub installed at
   RUN time in the same unit does not turn the site into a call; `Pkg::Name::`
-  and a single-segment name stay classes; `Pkg::Name()->m` with PARENTHESES is always a call
-  (scalar context), whatever packages exist.
+  stays a class; `Pkg::Name()->m` with PARENTHESES is always a call
+  (scalar context), whatever packages exist.  A SINGLE-segment name `K`
+  asks the same of the sub `CUR::K` in the site's package (s521d, task
+  #3369): this file's own `sub K` decides by POSITION (defined above the
+  site: a direct call `(p-scalar-ctx (pl-K))`; only below it: the class
+  string), and with none the two-argument `(p-class-invocant "K" "CUR::K")`
+  takes the load-time answer (a BEGIN-installed glob, an import) -- the same
+  one constant test per call.  `K::->m` and `'K'->m` are always the class.
+  Example: `sub K { bless {}, 'Obj' } print K->m` → `(p-method-call
+  (p-scalar-ctx (pl-K)) "m")`.
 
   ```lisp
   ;; package Lib::Thing; sub go { Lib::Thing->hi }  -- with sub Lib::Thing
