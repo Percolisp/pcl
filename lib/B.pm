@@ -295,7 +295,22 @@ sub START   { defined(&{ $_[0]{ref} }) ? bless({}, 'B::COP')  : bless({}, 'B::NU
 sub ROOT    { defined(&{ $_[0]{ref} }) ? bless({}, 'B::UNOP') : bless({}, 'B::NULL') }
 sub object_2svref { $_[0]{ref} }
 sub FILE     { B::_die_unsupported('B::CV::FILE', 'the file a sub was defined in is not recorded') }
-sub CvFLAGS  { B::_die_unsupported('B::CV::CvFLAGS', 'a sub carries no CV flags') }
+# The CV flag bits PCL KNOWS (#3362, ruled s520 (1)): CVf_ANON (the sub has
+# no recorded name), CVf_LVALUE / CVf_METHOD (its :lvalue / :method
+# attributes).  Every OTHER bit reads 0 -- not perl's raw value (a constant
+# sub's CVf_CONST|CVf_ISXSUB, CVf_NAMED, ... are not recorded); perl's own
+# t/op/stash.t masks with CVf_ANON.  docs/not-supported.md "B".
+sub CvFLAGS {
+    my $ref = $_[0]{ref};
+    my $f = 0;
+    $f |= B::CVf_ANON() if !defined builtin::sub_name($ref);
+    require attributes;
+    for my $attr (attributes::get($ref)) {
+        $f |= B::CVf_LVALUE() if $attr eq 'lvalue';
+        $f |= B::CVf_METHOD() if $attr eq 'method';
+    }
+    return $f;
+}
 sub const_sv { B::_die_unsupported('B::CV::const_sv') }
 sub PADLIST  { B::_die_unsupported('B::CV::PADLIST') }
 sub DEPTH    { B::_die_unsupported('B::CV::DEPTH') }

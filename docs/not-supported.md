@@ -4391,14 +4391,19 @@ IOK / NOK / POK / ROK, `->IV` `->NV` `->PV` `->RV`).  Everything else DIES
 naming itself, perl-shaped and trappable: every other `B::` function and
 constant (`main_cv`, `walkoptree`, `ppname`, ...), every op accessor (`->line`,
 `->file`, `->next`, `->name` of the object `->START` returns), `->FILE`,
-`->CvFLAGS`, `->PADLIST`, `->REFCNT`, `->MAGIC`, the `->FLAGS` of a dualvar.
+`->PADLIST`, `->REFCNT`, `->MAGIC`, the `->FLAGS` of a dualvar.
 NOT perl's, by representation: `->XSUB` is 0 for every sub (PCL runs no XS; the
 bridge is parked); the package an ANONYMOUS sub was compiled in is not
 recorded, so its `->STASH` / `->GV->STASH` dies (perl answers the compiling
 package); a sub renamed by `Sub::Util::set_subname` keeps its defining name
 (set_subname is a no-op); a string whose characters are all below 256 is quoted
 as a byte string (octal escapes) -- PCL strings have no UTF-8 flag (#1389), and
-perl quotes an UPGRADED one as `\x{..}`.
+perl quotes an UPGRADED one as `\x{..}`.  `->CvFLAGS` (#3362) answers the bits PCL
+knows -- CVf_ANON (no recorded name), CVf_LVALUE and CVf_METHOD (the `:lvalue` /
+`:method` attributes) -- and the UNKNOWN CV flag bits read 0: a value that is
+consumed, so a claim (perl's own t/op/stash.t masks with CVf_ANON only); a
+constant sub's CVf_CONST / CVf_ISXSUB and CVf_NAMED, CVf_LEXICAL, ... are not
+recorded, so the RAW value differs from perl's.
 
 **B::Deparse** dies at `require B::Deparse` (`lib/B/Deparse.pm`): it decompiles
 perl's op tree, which PCL does not have, and no source is kept per sub.

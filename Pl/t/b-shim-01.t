@@ -113,6 +113,13 @@ row('stub', B::svref_2object(\&Foo::stub)->START->isa('B::NULL') ? 1 : 0);
 my $bl = B::svref_2object(\&Scalar::Util::blessed);
 row('shim sub', $bl->GV->NAME, $bl->GV->STASH->NAME);
 row('not a ref', trap(sub { B::svref_2object(1) }));
+# #3362: the CV flag bits PCL knows, MASKED as perl's own op/stash.t reads them
+# (the unknown bits read 0 -- docs/not-supported.md "B").
+sub lv :lvalue { my $x } sub meth :method { 1 }
+for my $p (['flags named', \&named], ['flags anon', $anon], ['flags lvalue', \&lv], ['flags method', \&meth]) {
+    my $f = B::svref_2object($p->[1])->CvFLAGS;
+    row($p->[0], $f & B::CVf_ANON, $f & B::CVf_LVALUE, $f & B::CVf_METHOD);
+}
 P
 
 # 3. svref_2object on scalars: the class and the OK flags of perl's SV.
