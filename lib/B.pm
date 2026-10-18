@@ -243,9 +243,8 @@ sub FLAGS {
                         'which numeric slot a dualvar caches is not recorded');
 }
 
-# The referenced VALUE, read through a plain scalar: `${ $obj->{ref} }` loses
-# a reference held in the referent (#3390).
-sub _value { my $r = $_[0]{ref}; my $v = $$r; return $v }
+# The referenced VALUE.
+sub _value { my $v = ${ $_[0]{ref} }; return $v }
 sub object_2svref { $_[0]{ref} }
 sub REFCNT { B::_die_unsupported('B::SV::REFCNT', 'PCL has no reference counts') }
 

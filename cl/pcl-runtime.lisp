@@ -13496,9 +13496,13 @@ per element."
 (defun %p-hash-unbox-elem (elem)
   "Unbox a hash slot value for reading.
    Keeps the slot-box only for values that box-set would corrupt in scalar context:
-   blessed objects, unblessed hash-refs (hash-table), and array-refs (non-string vector).
-   Code-refs (raw functions) and scalar-refs (inner p-box) are returned unboxed,
-   matching the old (unbox slot) behaviour for those types.
+   blessed objects, unblessed hash-refs (hash-table), array-refs (non-string
+   vector) and SCALAR / REF refs (an inner p-box) -- the array twin's rule.  A
+   slot holding a reference VALUE whose referent is itself a box is a CONTAINER
+   (ir-spec, #3081), and handing out the inner ref value instead made `${ }`
+   read one level too deep: `my $w = ${ $h{ref} }` with `$h{ref} = \$r`,
+   `$r = [1]` assigned the array's COUNT (#3390).  Code-refs (raw functions)
+   are returned unboxed.
    Also handles raw (non-box) slot values stored directly in hashes (e.g. %+ captures).
    A slot holding a p-magic-cell is read through its GETTER, exactly as
    p-aref-unbox-elem reads one — the arm %! needs (task #561), and the one
@@ -13523,6 +13527,7 @@ per element."
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
                 (and (vectorp v) (not (stringp v)))       ; array-ref
+                (p-box-p v)                               ; scalar ref (box-in-box, #3390)
                 ;; glob REF: the array twin\x27s #423 arm, which this twin never
                 ;; got (s480 review of s473f): a typeglob\x27s ref-ness is the
                 ;; BOX\x27s is-ref flag, so unboxing handed back the bare glob and

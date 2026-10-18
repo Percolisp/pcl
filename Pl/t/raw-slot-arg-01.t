@@ -29,7 +29,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -102,4 +102,19 @@ sub two { my ($a, $b) = @_; $$a . $$$b } print two(\"p", \\"q"), "\n";
 sub cpy { my ($r) = @_; my $c = $r; $$c = 99 } cpy(\$x); print "x=$x\n";
 my @l = (1,2); sub ar { my ($r) = @_; push @$r, 3; scalar @$r } print ar(\@l), " @l\n";
 sub gl { my ($r) = @_; ref $r } print gl(\*STDOUT), "\n";
+PL
+
+# #3390 (s520a): the ELEMENT side of the same rule -- a hash value holding a
+# reference to a reference is a container, so `${ $h{k} }` into an assignment
+# reads one level, not two (it assigned the array's COUNT).  Array elements
+# were already right; the hash read twin now keeps the box as they do.
+both_ways("#3390 \${ \$h{k} } / \${ \$hr->{k} } of a ref-to-ref into an assignment", <<'PL');
+my $r = [1]; my $x = \$r; my %h = (ref => $x); my $hr = \%h; my @a = ($x);
+my $w = ${ $h{ref} }; my $w2 = ${ $hr->{ref} }; my $z = ${ $a[0] };
+my %h2; $h2{ref} = $x; my $w3 = ${ $h2{ref} };
+my %h4 = (rr => \$x); my $q = ${ ${ $h4{rr} } };
+sub f { my $e = ${ $_[0]{ref} }; ref $e }
+print join(" ", ref($w), ref($w2), ref($z), ref($w3), ref($q), f(\%h), ref(${ $hr->{ref} })), "\n";
+${ $h{ref} } = [2]; print ref($r), " ", $r->[0], "\n";
+my $n = 5; my %h6 = (n => \$n); my $nv = ${ $h6{n} }; ${ $h6{n} } = 6; print "$nv $n ", ref($h6{n}), "\n";
 PL
