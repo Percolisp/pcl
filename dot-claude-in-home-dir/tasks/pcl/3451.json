@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s520a (Opus 5.5, 2026-10-18) while probing #3413's filename builtins with a handle.  SILENT WRONG (pre-existing: the fca3593b base answers the same).\n\nREPRODUCER (perl 5.40.3):\n    my $d = \"/tmp/u-$$\"; mkdir $d; open my $fh, '>', \"$d/a\" or die;\n    print utime(10, 20, $fh), \" \", (stat \"$d/a\")[9], \"\\n\";\nperl: `1 20` (utime on a FILEHANDLE is futimes(2) on its descriptor).  PCL: `0 <now>` -- p-utime passes every LIST element to utime(2) as a PATH, so the handle stringifies to a nonexistent name and nothing is touched.\nFIX DIRECTION: p-utime's loop takes a handle-shaped element (the p-chmod / p-chown `streamp` arm) through futimes on the fd; sb-posix has no futimes (MEMORY: \"stat-blksize/blocks/futimes ABSENT\"), so it is an sb-alien call to futimens / futimes, or utimensat with the fd.  A platform-touching change: the install matrix + the macOS leg.\n",
+   "id" : "3451",
+   "status" : "pending",
+   "subject" : "`utime ATIME, MTIME, $fh` on a FILEHANDLE touches nothing and answers 0 (perl: futimes on the descriptor, 1): p-utime treats every element as a path"
+}

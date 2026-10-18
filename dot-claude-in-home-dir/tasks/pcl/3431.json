@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s519b (Opus 5.5, s520, 2026-10-18) from the IO-Compress board census: an EMBEDDED `my` in the RIGHT side of a `my` declaration, inside a loop body, is not let-bound per iteration -- it is the file-level cell, so it keeps the value an earlier iteration (or an aliasing callee) wrote.  SILENT WRONG (PRE-EXISTING: same on fca3593b).\n\nREPRO:\n  sub X::n { shift; foreach (@_) { print defined $_ ? \"D \" : \"U \"; $_ = \"y\" } }\n  for my $k (1..2) { my $l = X->n(my $t); print \"$k $t\\n\" }\nperl: U 1 y / U 2 y.   PCL: U 1 y / D 2 y.\nWithout the outer `my $l =` (`X->n(my $u);` as a statement) PCL agrees with perl: the statement-level lowering binds `$u` with (p-let (($u :box ...))), but `(p-my-= $l (... (p-method-call ... $t)))` reads `$t` as the file cell (p-defcell $t) -- no per-iteration binding.\n\nREACH: IO-Compress t/compress/CompTestUtils.pm `my $lex = LexFile->new( my $name );` in loops -- LexFile::new croaks \"NO!!!!\" when its argument is defined, which kills the file: 002any-transparent, 005defhdr, 006zip, 010examples-zlib, 011-streamzip, 01misc, 050interop-gzip, 100generic-*, 102tied-*, 103newtied-*, ... (the s519b board join rows citing #3431).  Probe file: scratch/s519b/pr2/lex3.pl in the s519b worktree.\n",
+   "id" : "3431",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an embedded `my` in the RHS of a `my` declaration inside a loop (`my $l = X->n(my $t)`) is the file cell, not a per-iteration lexical -- IO-Compress LexFile->new(my $name) croaks NO!!!!"
+}

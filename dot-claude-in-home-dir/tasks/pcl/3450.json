@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s520a (Opus 5.5, 2026-10-18) while probing #3412's argument-slot family.  SILENT WRONG.\n\nREPRODUCER (perl 5.40.3 vs the s520a tree):\n    my $f = \"/nope\"; sub n { scalar @_ } sub g { return }\n    print n((stat $f)[7]), n((g())[7]), n((stat $f)[7,8]), n((g())[0,1]), \"\\n\";\n    my @x = (stat $f)[7]; print scalar(@x), \"\\n\";\nperl: `0000` `0`.  PCL: `1100` `1`.\nA ONE-index list slice of an EMPTY list is the empty list in perl (perlop: \"a slice of an empty list is still an empty list\"); PCL lowers `(LIST)[N]` as a scalar element read (`(p-aref-deref (p-list-ctx LIST) N)`), which is one undef.  #2953 (s514b) fixed the MULTI-index form; this is the single-index residue.  A non-empty list with N out of range IS one undef in perl (`n((1)[5])` is 1) -- the distinction is the list's emptiness, at run time.\nFIX DIRECTION: in a LIST context the one-index slice goes through the same runtime the multi-index slice uses (the #2953 helper), or a list-context arm that answers (%p-empty-list) for an empty source; scalar context stays the element read.  Guard rows beside #2953's in Pl/t/list-slice-01.t.\n",
+   "id" : "3450",
+   "status" : "pending",
+   "subject" : "A one-index LIST SLICE of an empty list is one undef in PCL, the empty list in perl: `n((stat $missing)[7])` passes 1 argument (perl 0), `my @x = (g())[7]` has 1 element -- the single-index residue of #2953"
+}

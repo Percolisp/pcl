@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s519b (Opus 5.5, s520, 2026-10-18) from the IO-Compress board census: Test::More's `eq_set` is not implemented by PCL's TAP layer (cl/pcl-test.lisp has eq_array / eq_hash; %test-more-stash-install lists eq_set and leaves it absent).\n\nREPRO: use Test::More; ok(eq_set([1,2],[2,1]), \"s\"); done_testing;\nperl: ok 1 - s / 1..1.   PCL: \"Undefined subroutine &main::eq_set called\" (the file dies).\nperl's eq_set: true when the two array refs hold the same elements regardless of order (it sorts both and compares with eq_array; duplicates count).  A missing value-producing function: implement it beside pl-eq_array (rule 12: never a stub).\nREACH: IO-Compress t/004gziphdr.t:333 (444 ok then the die; 919 planned).\n",
+   "id" : "3432",
+   "status" : "pending",
+   "subject" : "Test::More eq_set is not implemented by the TAP layer -- \"Undefined subroutine &main::eq_set\" (IO-Compress 004gziphdr.t dies at row 450 of 919)"
+}

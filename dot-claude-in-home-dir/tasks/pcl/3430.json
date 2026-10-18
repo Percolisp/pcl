@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s519b (Opus 5.5, s520, 2026-10-18) -- residue of #3405 (a sub named like a :pcl-exported function is its own package's symbol).\n\nA sub DEFINED IN A STRING EVAL whose name the package inherits from :pcl (ok, is, explain, note, diag, run_perl ...) is reserved in the package only when the eval runs; code read BEFORE that (a sub compiled earlier in the file) already holds the inherited pcl symbol and calls the TAP layer's / runtime's function, or dies when that is undefined.\n\nREPRO (scratch/s519b/pr2/a2.pl in the s519b worktree):\n  sub ok ($@);\n  unless (defined &main::ok) { eval q{ sub ok ($@) { print \"myok @_\\n\" } 1 } or die $@; }\n  ok(1);\n  sub run { ok(2) } run();\nperl: myok 1 / myok 2.  PCL (s519b a08e001e): myok 1, then \"Undefined subroutine &PCL::ok called\".  fca3593b printed perl's output only because the install REDEFINED pcl's function program-wide (the #3405 bug).\n\nA file-level definition is reserved at its section head since s519b (`(p-declare-sub NAME :body)`), so only a run-time definition (string eval; a glob assignment `*ok = sub {...}` is a different path, probe it) has the split.  REACH: perl-tests/t/test.pl's REAL_PERL_TAP block has the shape but runs under real perl only (the harness defines &main::is).  No corpus row moves.\n\nFIX DIRECTION (not designed): the earlier reads cannot be re-read; either the call site resolves an inherited :pcl name through the caller's package at run time (cost on every call of such a name -- measure), or a run-time install of an inherited name ALSO answers through the inherited symbol for callers in that package only.\n",
+   "id" : "3430",
+   "status" : "pending",
+   "subject" : "#3405 residue: a STRING-EVAL sub named like a :pcl function (ok / explain / run_perl ...) is not seen by code compiled before the eval -- \"Undefined subroutine &PCL::ok\""
+}
