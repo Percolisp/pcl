@@ -373,4 +373,25 @@ print "out m=$m a=$h{a} b=$h{b}\n";
 print "out n=$n m=$m a=$h{a} b=$h{b}\n";
 PERL
 
+# 16. #3367 (R6): NINE void comma-list locals in one file -- every one is
+#     lowered (the pass used to stop after eight rewrites and leave the ninth
+#     a silent plain write: out g9=9).
+test_lt('nine comma-list locals in one document are all lowered', <<'PERL');
+our ($g1, $g2, $g3, $g4, $g5, $g6, $g7, $g8, $g9) = (0) x 9; my $n = 0;
+sub show { print "$_[0] n=$n ", join(" ", $g1, $g2, $g3, $g4, $g5, $g6, $g7, $g8, $g9), "\n" }
+{
+  $n++, local($g1), $g1 = 1 if 1;
+  $n++, local($g2), $g2 = 2 if 1;
+  $n++, local($g3), $g3 = 3 if 1;
+  $n++, local($g4), $g4 = 4 if 1;
+  $n++, local($g5), $g5 = 5 if 1;
+  $n++, local($g6), $g6 = 6 if 1;
+  $n++, local($g7), $g7 = 7 if 1;
+  $n++, local($g8), $g8 = 8 if 1;
+  $n++, local($g9), $g9 = 9 if 1;
+  show("in");
+}
+show("out");
+PERL
+
 done_testing();

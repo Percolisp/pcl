@@ -6740,7 +6740,14 @@ sub _split_literal_list_decls {
 # Signature defaults are left alone (#3410).
 sub _lower_local_terms {
   my ($self, $doc) = @_;
-  for my $round (1 .. 8) {
+  # One rewrite per round, then the tree is searched again; a round that
+  # rewrites nothing is the last, and only it records the misses (an earlier
+  # round would announce the same term again).  Every rewrite leaves a LEADING
+  # `local` (reached), so the rounds end; the cap is a guard that DIES (#3367,
+  # rule 12) -- the old cap of 8 silently left the ninth term unlowered.
+  my $cap = 100_000;
+  for my $round (1 .. $cap) {
+    my @miss;
     my $changed = 0;
     for my $l (@{ $doc->find(\&_is_local_term_word) || [] }) {
       next unless $l->parent;              # deleted by an earlier rewrite
@@ -6750,6 +6757,11 @@ sub _lower_local_terms {
         $changed = 1;
         last;                              # the tree moved: find again
       }
+      push @miss, [$l, $s];
+    }
+    next if $changed;
+    for my $m (@miss) {
+      my ($l, $s) = @$m;
       if (_local_value_consumed($l, $s)) {
         $self->{_local_term_refusal}{ refaddr $s } //=     # holds $s: no address reuse
           [$s, "local in this expression position is not supported (#3370)"];
@@ -6757,9 +6769,9 @@ sub _lower_local_terms {
         $self->fallback_parser->announce_unlocalized_local($s, $l->line_number // 0);
       }
     }
-    return if !$changed;
+    return;
   }
-  return;
+  die "PCL: internal -- the local-term lowering did not settle after $cap rewrites\n";
 }
 
 # Is the VALUE of the `local` term $l consumed by its statement $s?  No (0)
@@ -15334,15 +15346,6 @@ sub _strip_decl_decorations {
   return;
 }
 
-# Scalar names declared by `my` in a condition head (`if (my $x = …)`,
-# `while (my $i = …)`, chained `my $x = my $y`, list `my ($p,$q) = …`).  Perl
-# scopes such a declaration to the whole construct (condition + branches/body),
-# NOT to the enclosing block — so we wrap the lowered construct in a fresh
-# `(let ((name (make-p-box nil)) …) …)` that lexically shadows any outer
-# same-named var (v2 uses real lexical lets, so shadowing needs no renaming).
-# Returns a deduped list of $names.  A `my` nested inside a block/anon-sub in the
-# condition is NOT hoisted.  Dies (→ v1) on an array/hash my (needs a container
-# init, not a boxed scalar cell).
 # The SCALAR condition `my`s of a while/until (#3374) that an anonymous sub in
 # the loop's body or continue block captures -- those need perl's fresh
 # variable per iteration; every other loop keeps one binding (its emission is
@@ -15365,6 +15368,15 @@ sub _cond_mys_closure_captured {
   } @sc;
 }
 
+# Scalar names declared by `my` in a condition head (`if (my $x = …)`,
+# `while (my $i = …)`, chained `my $x = my $y`, list `my ($p,$q) = …`).  Perl
+# scopes such a declaration to the whole construct (condition + branches/body),
+# NOT to the enclosing block — so we wrap the lowered construct in a fresh
+# `(let ((name (make-p-box nil)) …) …)` that lexically shadows any outer
+# same-named var (v2 uses real lexical lets, so shadowing needs no renaming).
+# Returns a deduped list of $names.  A `my` nested inside a block/anon-sub in the
+# condition is NOT hoisted.  Dies (→ v1) on an array/hash my (needs a container
+# init, not a boxed scalar cell).
 sub _cond_my_names {
   my ($self, @conds) = @_;
   my (@names, %seen);
