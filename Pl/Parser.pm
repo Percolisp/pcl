@@ -4886,12 +4886,13 @@ sub _process_local_declaration {
       my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-slice';
       # A hash SLICE's key group that is not one literal key may name many
       # keys at run time (`@{$r}{@k}`, `@h{@k}`): it takes p-local-hash-slice,
-      # which localizes each; a literal key keeps the one-key macro.
+      # which localizes each; a literal key or one scalar keeps the one-key macro.
       my @macros = map {
         ($ld_slice && $open eq '{'
          && !(@$_ == 1 && $_->[0]->isa('PPI::Token::Quote')
               || @$_ == 1 && $_->[0]->isa('PPI::Token::Number')
-              || @$_ == 1 && $_->[0]->isa('PPI::Token::Word')))
+              || @$_ == 1 && $_->[0]->isa('PPI::Token::Word')
+              || @$_ == 1 && $_->[0]->isa('PPI::Token::Symbol') && $_->[0]->content =~ /^\$/))
           ? 'p-local-hash-slice' : $macro
       } @key_groups;
       my $macro_init = ($open eq '{') ? 'p-local-hash-elem-init'  : 'p-local-array-elem-init';
