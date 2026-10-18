@@ -436,4 +436,26 @@ show("out5");
 package Foo; sub new { print "new x=$main::x\n"; bless {} } sub set { print "set x=$main::x\n" }
 PERL
 
+# 20. #3512: a HEREDOC among the arguments of a statement holding a `local`
+#     term -- perl's t/io/open.t:199 `ok( open(local $f, '-|', <<EOC), ...)`
+#     was REFUSED (#3370's value-position check), aborting the file's form.
+#     The hoist keeps the here-doc's body after the rebuilt statement, and the
+#     line numbers after it stay perl's; a non-interpolating here-doc BEFORE
+#     the local is inert like a quote.
+test_lt('a here-doc argument beside a local term (t/io/open.t:199)', <<'PERL');
+our ($f, $x);
+sub ok { print(($_[0] ? "ok" : "not ok"), " - $_[1]\n"); }
+ok( open(local $f, '-|', <<EOC),  'open local $f, "-|", ...' );
+echo hi
+EOC
+print "r=", scalar(<$f>), "line ", __LINE__, "\n";
+sub g { return "g:$_[0]" }
+print g(local $x = <<EOC);
+val
+EOC
+print g(<<A, local $x = 5), " x=$x line ", __LINE__, "\n";
+first
+A
+PERL
+
 done_testing();

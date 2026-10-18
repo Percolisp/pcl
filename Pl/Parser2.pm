@@ -6993,7 +6993,7 @@ sub _replace_statement_by {
   # The replacement keeps $s's NUMBER OF LINES (#3364): PPI numbers every
   # later token by counting newlines in the content, so a shorter text shifts
   # every `at FILE line N` below it (a running total over the file).
-  my $lost = ($s->content =~ tr/\n//) - ($src =~ tr/\n//);
+  my $lost = ($s->content =~ tr/\n//) - (join(q{}, map { $_->content } @new) =~ tr/\n//);
   for my $i (0 .. $#new) {
     $s->insert_before($new[$i])
       or die "PCL: internal -- could not split the local statement at line $line\n";
@@ -7208,8 +7208,14 @@ sub _hoist_local_term {
     push @decls, "my $b = " . $op[1]->content . ";";
     $optext = $b . _elements_text(@op[2 .. $#op]);
   }
-  # The statement without the word (and the whitespace after it).
-  return 0 if grep { $_->isa(q{PPI::Token::HereDoc}) } $s->tokens;
+  # The statement without the word (and the whitespace after it).  A HEREDOC
+  # keeps its `<<TAG` token in the text; its BODY is not token text, so it is
+  # appended after the rebuilt statement (#3512) -- perl reads a here-doc body
+  # from the lines after its `<<TAG` line.  The operand / invocant / condition
+  # copies decline on a here-doc before this point; one outside the rebuilt
+  # text (after a modifier) declines here.
+  my @heredocs;
+  my $hd_line_ends;     # a newline after a here-doc: its body would land mid-statement
   my $ws = $l->next_sibling;
   $ws = undef unless $ws && $ws->isa(q{PPI::Token::Whitespace});
   my $body = q{};
@@ -7221,11 +7227,16 @@ sub _hoist_local_term {
     if ($inv{ refaddr $t }) {
       $body .= $invtmp if !length $body || $body !~ /\Q$invtmp\E\z/;
     } elsif (!($t == $l || ($ws && $t == $ws))) {
+      $hd_line_ends = 1 if @heredocs && $t->content =~ /\n/;
       $body .= $t->content;
+      push @heredocs, $t if $t->isa(q{PPI::Token::HereDoc});
     }
     last if defined $stop && $t == $stop;
   }
   $body .= "$guard;" if !$compound;
+  return 0 if @heredocs != grep { $_->isa(q{PPI::Token::HereDoc}) } $s->tokens;
+  return 0 if @heredocs && ($compound || $hd_line_ends);
+  my $hdtext = @heredocs ? "\n" . join(q{}, map { join(q{}, $_->heredoc) . $_->terminator . "\n" } @heredocs) : q{};
   if ($kw =~ /^(?:while|until)$/) {
     # perl restores a LOOP condition's local per iteration and when the loop
     # ends (RT #7615's to-the-block-end reading is if / unless only).  Wrapped
@@ -7236,10 +7247,10 @@ sub _hoist_local_term {
     my $c = $s->find_first('PPI::Structure::Condition') or return 0;
     return 0 if grep { !$own{ refaddr $_ } && $_->isa('PPI::Token::Symbol') && $names{ $_->symbol } }
                 $c->tokens;
-    return $self->_replace_statement_by($s, join(' ', '{', @decls, "local $optext;", $body, '}'), 1);
+    return $self->_replace_statement_by($s, join(' ', '{', @decls, "local $optext;", $body, '}') . $hdtext, 1);
   }
   my @stmts = (@decls, "local $optext$guard;", $body);
-  return $self->_replace_statement_by($s, join(' ', @stmts), scalar @stmts);
+  return $self->_replace_statement_by($s, join(' ', @stmts) . $hdtext, scalar @stmts);
 }
 
 # A token before the `local` term that the hoist may move the local above
@@ -7256,6 +7267,8 @@ sub _token_inert_before_local {
            || $t->isa('PPI::Token::Quote::Literal') || $t->isa('PPI::Token::QuoteLike::Words');
   return 1 if ($t->isa('PPI::Token::Quote::Double') || $t->isa('PPI::Token::Quote::Interpolate'))
            && $t->content !~ /[\$\@]/;
+  # a here-doc is a quote whose text is its BODY (#3512): the same rule
+  return 1 if $t->isa('PPI::Token::HereDoc') && join('', $t->heredoc) !~ /[\$\@]/;
   return !$names->{ $t->symbol } if $t->isa('PPI::Token::Symbol');
   return 1 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:=|->|\\|,|=>)$/;
   # a logical NOT applies to the value after the term is evaluated
