@@ -43,6 +43,7 @@ use PCLTap ();   # the ONE TAP reader shared with tools/cpan-scoreboard.pl
 use PCLSbcl ();  # the ONE sbcl command-line builder (task #344; #2959: this runner drifted)
 use PCLProc ();  # the ONE child-isolation helper: a run killed by `timeout`
                  # takes its pl2cl / SBCL with it (task #3064)
+use PCLDistPrereq ();  # the dist's BUILT prerequisites' blibs (task #3520)
 
 my $root = abs_path(dirname(abs_path($0)) . "/..");
 
@@ -104,6 +105,22 @@ if ($rc != 0) {
 my $sbcl_cmd = PCLSbcl::sbcl_prefix_str(runtime => "$root/cl/pcl-runtime.lisp", quote => 0)
   . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $lisp";
 print STDERR "SBCL[run-dist-t]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
+# The environment `make test` has under the CPAN shell (task #3520): a
+# requirement the box perl does not satisfy, satisfied by a BUILT copy under
+# ~/.cpan/build, goes on PERL5LIB -- for the RUN only (the transpile above
+# bakes PERL5LIB into the program's @INC; this is for the `$^X` children a
+# test spawns, which run the box perl).  The header says what was added, and
+# what is built nowhere (never fetched or built here).
+my ($prereq, $prereq_notes) = PCLDistPrereq::built_prereq_blibs(dist => $dist);
+my @prereq_dirs = PCLDistPrereq::perl5lib_dirs($prereq);
+{
+  my $hdr = $summary_only ? \*STDOUT : \*STDERR;
+  printf $hdr "PREREQ\tadded\t%s %s (box perl %s) from %s\n", $_->{module}, $_->{built},
+    $_->{installed} // 'none', $_->{dir} for @$prereq;
+  print $hdr "PREREQ\tmissing\t$_\n" for @$prereq_notes;
+}
+local $ENV{PERL5LIB} = join ':', @prereq_dirs, grep { defined && length } $ENV{PERL5LIB}
+  if @prereq_dirs;
 my ($sbcl_status) = PCLProc::run_isolated("$sbcl_cmd >$out 2>$err");
 # TAP is read from STDOUT ALONE, as `prove` reads it (#3241).  The two streams
 # used to share one file, and a stderr line written without its newline (the
