@@ -1315,7 +1315,7 @@ row now pass and are no longer in the skip registry.
 - `local $scalar`, `local @array`, `local %hash` — supported.
 - `local $hash{key}`, `local @arr[N]`, `local @hash{@keys}` — supported (sessions 85–86, via `p-local-hash-elem` / `p-local-array-elem` macros).
 - `local *GLOB` — supported (sessions 75–79, via `p-local-glob`).
-- `local` as a TERM that is not the first term of its statement — supported in a void comma list and where it is the first thing its statement evaluates (#3370, ir-spec §7.2); any other position (`f($y, local $x = 1)`, `@{1, local $x}`, `local +(EXPR)->[0]`, a signature default) is a ruled REFUSAL at that statement, never a silent read (signature defaults: still silent, #3410).
+- `local` as a TERM that is not the first term of its statement — supported in a void comma list, in `COND and/or/&&/|| (LIST)` / `COND and/or local …`, and where it is the first thing its statement evaluates (#3370, ir-spec §7.2); in any other VALUE position (`f($y, local $x = 1)`, `@{1, local $x}`) it is a ruled REFUSAL at that statement; in a VOID position no lowering reaches (`(my $x, local $_) = @_;` — ExtUtils::CBuilder's Windows.pm, dumpvar.pl) it is read without being localized and the transpile ANNOUNCES it (`PCL: local in an unsupported expression position … -- not localized`; RULED s519 #4, the shapes listed in #3414); signature defaults: still silent, #3410.
 
 **Affected tests:** `perl-tests/local.t` still fails due to `Tie::Array` dependency which causes a hang — not a `local` issue.
 

@@ -6707,9 +6707,12 @@ sub _split_literal_list_decls {
 #       its operand is not named before it) -- `is(local $h{k} = 19, ...)`,
 #       `my $a = local $/ = 7;` -- becomes `local OPERAND;` before the
 #       statement, which then runs without the word: observably the same.
-# Every other `local` term is a refusal at its statement (rule 12: the
-# silence was the bug), recorded here and emitted by _lower_block /
-# _lower_stmt.  Signature defaults are left alone (#3410).
+# Every other `local` term is a missing case (RULED s519 #4, s520): one
+# whose VALUE the statement consumes is a refusal at its statement (recorded
+# here, emitted by _lower_block / _lower_stmt); one in a VOID position is
+# effect-only -- it keeps the old read, never localized, and is ANNOUNCED
+# (rule 12's s329 boundary; Pl::Parser::announce_unlocalized_local).
+# Signature defaults are left alone (#3410).
 sub _lower_local_terms {
   my ($self, $doc) = @_;
   for my $round (1 .. 8) {
@@ -6722,12 +6725,85 @@ sub _lower_local_terms {
         $changed = 1;
         last;                              # the tree moved: find again
       }
-      $self->{_local_term_refusal}{ refaddr $s } //=     # holds $s: no address reuse
-        [$s, "local in this expression position is not supported (#3370)"];
+      if (_local_value_consumed($l, $s)) {
+        $self->{_local_term_refusal}{ refaddr $s } //=     # holds $s: no address reuse
+          [$s, "local in this expression position is not supported (#3370)"];
+      } else {
+        $self->fallback_parser->announce_unlocalized_local($s, $l->line_number // 0);
+      }
     }
     return if !$changed;
   }
   return;
+}
+
+# Is the VALUE of the `local` term $l consumed by its statement $s?  No (0)
+# only when the term is a whole item of a VOID comma list -- at $s's top
+# level, or inside parentheses that are themselves such an item -- in a
+# statement that is not a value position (the last statement of a block) and
+# whose only top-level operators are commas (a trailing statement modifier
+# allowed).  Anything else -- an argument, an operand, an assignment's right
+# side, a subscript -- consumes it (ruling 4: those still refuse).
+sub _local_value_consumed {
+  my ($l, $s) = @_;
+  my @item = ($l, _local_operand($l)) or return 1;
+  return 1 if @item == 1;
+  my $box = $l->parent;
+  while (1) {
+    my @k = $box->schildren;
+    my ($i) = grep { $k[$_] == $item[0] } 0 .. $#k;
+    return 1 if !defined $i;
+    my $j = $i + @item - 1;
+    return 1 if $j > $#k || $k[$j] != $item[-1];
+    my $sep = sub { my $e = shift; !defined $e
+      || ($e->isa('PPI::Token::Operator') && $e->content =~ /^(?:,|=>)$/)
+      || ($e->isa('PPI::Token::Structure') && $e->content eq ';')
+      || ($e->isa('PPI::Token::Word') && $e->content =~ /^(?:if|unless|while|until|for|foreach)$/) };
+    my $lhs = $box == $s && $i == 0 && $item[0]->isa('PPI::Structure::List')
+           && $k[$j + 1] && $k[$j + 1]->content eq '=';
+    return 1 unless ($i == 0 || $sep->($k[$i - 1])) && ($lhs || $sep->($k[$j + 1]));
+    if ($box == $s) {
+      # `(my $x, local $_) = @_;`: an lvalue of a top-level list assignment
+      # receives a value, it does not hand one on (ExtUtils::CBuilder's
+      # Windows.pm 70, dumpvar.pl 70) -- an effect-only miss.
+      return 0 if $i == 0 && $item[0]->isa('PPI::Structure::List')
+               && $k[$j + 1] && $k[$j + 1]->isa('PPI::Token::Operator')
+               && $k[$j + 1]->content eq '=';
+      return 1 if _stmt_in_value_position($s);
+      my ($pre) = _stmt_modifier_split($s);
+      return 1 if grep { $_->isa('PPI::Token::Operator') && $_->content !~ /^(?:,|=>)$/ } @$pre;
+      return 0;
+    }
+    # up one level: the box must be the only statement of a paren list
+    my $list = $box->parent;
+    return 1 unless $list && $list->isa('PPI::Structure::List') && $list->schildren == 1;
+    @item = ($list);
+    $box = $list->parent or return 1;
+  }
+}
+
+# Is statement $s's VALUE used?  Only the LAST statement of a block can be,
+# and only when the block's own value is: a sub body (named or anonymous), a
+# `do` / `eval` block, or the block of an if / unless / else / bare block that
+# is itself in a value position.  A loop body's last statement is void, and
+# so is any statement of the file itself.
+sub _stmt_in_value_position {
+  my ($s) = @_;
+  my $p = $s->parent or return 1;
+  return 0 if $p->isa('PPI::Document');
+  return 1 unless $p->isa('PPI::Structure::Block');
+  return 0 unless $p->schild(-1) == $s;
+  my $owner = $p->parent or return 1;
+  return 1 if $owner->isa('PPI::Statement::Sub');
+  my $pv = $p->sprevious_sibling;
+  return 1 if $pv && $pv->isa('PPI::Token::Word') && $pv->content =~ /^(?:sub|do|eval)$/;
+  return 1 if $pv && ($pv->isa('PPI::Structure::Signature') || $pv->isa('PPI::Token::Prototype'));
+  return 1 unless $owner->isa('PPI::Statement::Compound');
+  my $kw = $owner->schild(0);
+  $kw = $kw->snext_sibling if $kw && $kw->isa('PPI::Token::Label');
+  return 0 if $kw && $kw->isa('PPI::Token::Word')
+           && $kw->content =~ /^(?:while|until|for|foreach)$/;
+  return _stmt_in_value_position($owner);
 }
 
 # A `local` WORD that is the keyword (not a hash key, method or sub name).
@@ -6908,8 +6984,7 @@ sub _local_cond_prologue {
 sub _split_void_local_list {
   my ($self, $s) = @_;
   return 0 unless ref($s) eq 'PPI::Statement' || ref($s) eq 'PPI::Statement::Expression';
-  my $p = $s->parent;
-  return 0 if !$p->isa('PPI::Document') && $p->schild(-1) == $s;   # a value position
+  return 0 if _stmt_in_value_position($s);
   my ($pre, $mod, $cond) = _stmt_modifier_split($s);
   return 0 if defined $mod && $mod !~ /^(?:if|unless)$/;
   my $logical = 0;
@@ -6941,13 +7016,28 @@ sub _split_void_local_list {
 }
 
 # The logical spelling of shape (a): the statement's children are
-# `COND OP (LIST)` with OP and/&&/or/||.  Returns (modifier, COND-elements,
-# LIST-items) -- 'if' for and/&&, 'unless' for or/|| -- or () when the shape is
-# anything else, or when COND holds an operator binding LOOSER than OP (then
-# OP's left operand is not COND: `$x = A && (L)` assigns the `&&`).
+# `COND OP (LIST)` with OP and/&&/or/||, or `COND OP local …` with OP the
+# low-precedence and/or, whose right operand is then the whole comma list
+# after it (B::Deparse 6279 `$cv and local($self->{curcv}) = $cv, local(…);`,
+# YAML::PP::Emitter 508 `DEBUG and local $Data::Dumper::Useqq = 1;`).
+# Returns (modifier, COND-elements, LIST-items) -- 'if' for and/&&, 'unless'
+# for or/|| -- or () when the shape is anything else, or when COND holds an
+# operator binding LOOSER than OP (then OP's left operand is not COND:
+# `$x = A && (L)` assigns the `&&`).
 sub _logical_local_list {
   my ($pre) = @_;
   my @k = @$pre;
+  for my $i (1 .. $#k - 1) {
+    next unless $k[$i]->isa('PPI::Token::Operator') && $k[$i]->content =~ /^(?:and|or)$/
+             && $k[$i + 1]->isa('PPI::Token::Word') && $k[$i + 1]->content eq 'local';
+    my @c = @k[0 .. $i - 1];
+    my @r = @k[$i + 1 .. $#k];
+    my $loose = qr/^(?:and|or|xor)$/;
+    return () if grep { $_->isa('PPI::Token::Operator') && $_->content =~ $loose } @r;
+    return () if $k[$i]->content eq 'and'
+              && grep { $_->isa('PPI::Token::Operator') && $_->content =~ /^(?:or|xor)$/ } @c;
+    return ($k[$i]->content eq 'and' ? 'if' : 'unless', \@c, \@r);
+  }
   return () unless @k >= 3 && $k[-1]->isa('PPI::Structure::List')
                 && $k[-2]->isa('PPI::Token::Operator');
   my $op = $k[-2]->content;
@@ -6978,6 +7068,16 @@ sub _unwrap_paren_term {
 }
 
 # Shape (b): the statement's first evaluation is the `local` term.
+# THE HOIST INVARIANT (RULED s519 #1; docs/ir-spec.md "A `local` TERM"):
+# `local OPERAND;` moved to just before the statement is the same program,
+# because (1) nothing the statement evaluates before the term can observe the
+# pre-local value -- only an assignment target, call heads, a method
+# invocant, casts or a first condition precede it, and its operand is not
+# named before it (the token loop below enforces exactly that), (2) the
+# restore point is the enclosing block's end in both readings, and (3) the
+# term's VALUE is the localized variable's new value in both.  Guards:
+# Pl/t/local-term-01.t rows 6 and 12 (`f(local $x = 1)` passes 1; in
+# `(local $x = 2) + g()` g reads 2).
 sub _hoist_local_term {
   my ($self, $l, $s) = @_;
   return 0 if $s->isa('PPI::Statement::Sub')

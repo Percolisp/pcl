@@ -3479,9 +3479,21 @@ a fresh lexical (the local may change what the condition reads); a `local`
 that is the FIRST thing its statement evaluates (only an assignment target,
 call heads, a method invocant, a deref or an if/unless/while/until condition
 precede it, and its operand is not named before it) becomes `local OPERAND;`
-before the statement.  Either way the localisation opens the enclosing block's
-restore, exactly as a leading `local` does.  Every other `local` term is a
-ruled refusal at its statement (perl-shaped, trappable).  Example:
+before the statement -- behaviour-preserving by construction (RULED s519 #1):
+nothing evaluated before the term can observe the pre-`local` value, the
+restore point is the enclosing block's end in both readings, and the term's
+value is the localized variable's new value in both (`f(local $x = 1)` passes
+1; in `(local $x = 2) + g()` g reads 2).  The logical spellings `COND and
+(LIST);` / `COND && (LIST);` and `COND and local …;` ARE the modifier shape
+`(LIST) if COND;` (`or` / `||`: `unless`; RULED s519 #3, Role::Tiny 307) and
+take the same split.  Either way the localisation opens the enclosing block's
+restore, exactly as a leading `local` does.  A `local` term no lowering
+reaches is a missing case on rule 12's s329 boundary (RULED s519 #4): in a
+VALUE position the statement consumes it is a ruled refusal at its statement
+(perl-shaped, trappable); in a VOID position (a whole item of a void comma
+list, or a list-assignment lvalue `(my $x, local $_) = @_;`) it keeps the
+plain read, NOT localized, and the transpile announces `PCL: local in an
+unsupported expression position at F line N -- not localized`.  Example:
 `$l{o}++, local(*STDOUT), open(STDOUT, ">&=1") if tied *STDOUT;` lowers as
 `my $c = !!(tied *STDOUT); $l{o}++ if $c; local(*STDOUT) if $c;
 open(STDOUT, ">&=1") if $c;`.  An unqualified standard handle (`STDIN`,

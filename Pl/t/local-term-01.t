@@ -6,9 +6,10 @@
 
 # A `local` TERM that is not the first term of its statement (task #3370,
 # RULED s518; docs/ir-spec.md "local"): a void comma list splits into one
-# statement per term under the condition evaluated once, a local that is the
-# first thing its statement evaluates hoists before it, anything else REFUSES
-# at its statement.  Plus #3411: `local *STDOUT` in another package is main's.
+# statement per term under the condition evaluated once (so does `COND and
+# (LIST)`, ruling 3 of s519), a local that is the first thing its statement
+# evaluates hoists before it; anything else in a VALUE position REFUSES at its
+# statement, in a VOID position it is announced and not localized (ruling 4).  Plus #3411: `local *STDOUT` in another package is main's.
 # Every row but the last compares against perl (5.38-safe: core only).
 
 use v5.30;
@@ -197,8 +198,53 @@ sub show { print join(",", map { "$_=" . ($h{$_} // "u") } sort keys %h), "\n" }
 show();
 PERL
 
-# 8. a local no lowering reaches is a REFUSAL at its statement, not a silent
-#    read (perl: "1 9 1"; PCL refuses perl-shaped, trappable).
+# 7e. the non-paren logical spelling `COND and local …, local(…);` (B::Deparse
+#     6279, YAML::PP::Emitter 508), `or` = unless, and a void comma list under
+#     a `while` modifier (a loop body's last statement is void).
+test_lt('COND and local LIST / or local / comma list under while', <<'PERL');
+our ($g, $h, %s) = (1, 2, (a => 1, b => 2, c => 3));
+sub DEBUG () { 1 }
+sub f { print "g=$g h=$h s=", join(",", map { $s{$_} // "u" } qw(a b c)), "\n" }
+my $self = \%s; my $cv = 7;
+{ $cv and local($g) = $cv, local($h), local(@$self{qw'a b'}); f(); }
+f();
+{ DEBUG and local $g = 3; f(); 0 or local $g = 4; f(); 1 or local $g = 5; f(); }
+f();
+{ my $n = 0; $n++, local $g = 5 while $n < 2; print "n=$n\n"; f(); }
+f();
+PERL
+
+# 7f. RULED s519 #1 -- the hoist: a local that is the FIRST thing its
+#     statement evaluates has nothing before it that could observe the old
+#     value, so `local X;` before the statement is the same program: the
+#     argument is the new value, and a call AFTER it in the statement sees it.
+test_lt('hoisted local: f(local $x = 1) / (local $x = 2) + g()', <<'PERL');
+our $x = 0;
+sub f { print "f arg=$_[0] x=$x\n"; $_[0] }
+sub g { print "g x=$x\n"; 10 }
+{ f(local $x = 1); print "in x=$x\n"; }
+print "out x=$x\n";
+{ my $v = (local $x = 2) + g(); print "v=$v x=$x\n"; }
+print "out x=$x\n";
+PERL
+
+# 7g. RULED s519 #4: a local in a VOID position no lowering reaches is
+#     effect-only -- it keeps the old read (NOT localized: here the caller's
+#     $_ is clobbered, where perl restores it) and the transpile ANNOUNCES it;
+#     the program runs on.  (ExtUtils::CBuilder's Windows.pm 74, dumpvar.pl 71.)
+{
+    my $code = <<'PERL';
+sub sls { (my $x, local $_) = @_; print "in x=$x _=$_\n"; }
+$_ = "out"; sls(1, 2); print "ran\n";
+PERL
+    my $err;
+    is(run_cl($code, \$err), "in x=1 _=2\nran\n", 'void unreached local runs on, unlocalized');
+    like($err, qr/^PCL: local in an unsupported expression position at \S+ line 1 -- not localized$/m,
+         '... and the transpile announces it');
+}
+
+# 8. a local in a VALUE position no lowering reaches is a REFUSAL at its
+#    statement, not a silent read (perl: "1 9 1"; PCL refuses perl-shaped, trappable).
 {
     my $code = <<'PERL';
 our @x = ([1]);

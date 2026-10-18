@@ -4667,12 +4667,14 @@ sub _process_local_declaration {
       splice(@non_ws, 0, 1, @flat);
     }
     elsif (@flat >= 2 && !$has_comma
-           && ref($flat[0]) eq 'PPI::Token::Symbol') {
+           && (ref($flat[0]) eq 'PPI::Token::Symbol'
+               || ref($flat[0]) eq 'PPI::Token::Cast')) {
       # local($h{k}) / local($a[i]) / local($ref->{k}) / local($ref->[i]) —
       # a single subscripted lvalue in parens.  Unwrap so the subscript-aware
       # handlers below (Symbol+Subscript / Symbol+'->'+Subscript) fire; without
       # this it falls through to the generic list-local path which clobbers the
-      # base scalar (e.g. `local($s->{apad}) = ...` overwrote $s).
+      # base scalar (e.g. `local($s->{apad}) = ...` overwrote $s).  The cast
+      # spelling `local(@$r{qw(a b)})` too (B::Deparse 6279, s520).
       splice(@non_ws, 0, 1, @flat);
     }
   }
@@ -4875,7 +4877,8 @@ sub _process_local_declaration {
       # Parse all key CL expressions up front (need them for both macro open and init)
       # Array subscripts use LIST_CTX so that 1..2 generates a range vector instead
       # of a flip-flop (which would trigger $SIG{__WARN__} via uninitialized $..).
-      my $sub_ctx = ($open eq '[') ? 1 : 0;
+      # A slice's key list is in LIST context (`@h{qw(a b)}` is two keys).
+      my $sub_ctx = ($open eq '[' || $ld_slice) ? 1 : 0;
       my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) } @key_groups;
 
       # Choose the macro based on subscript type.
@@ -12768,6 +12771,26 @@ sub announce_refusal {
   return if !($ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all');
   return if $announced_drop{"$file:$line:$text"}++;
   print STDERR "PCL: refused statement at $file line $line: $text -- $refusal\n";
+  return;
+}
+
+# THE UNLOCALIZED-LOCAL ANNOUNCEMENT (RULED s519 #4, s520; task #3370): a
+# `local` term in a VOID expression position that no lowering reaches
+# (Parser2 _lower_local_terms) keeps the old reading -- the operand is read or
+# assigned, never localized -- and says so here, once, on stderr.  Rule 12's
+# s329 boundary: what is missing is an EFFECT (the restore), in code that
+# otherwise runs, so it ANNOUNCES; a `local` whose VALUE the program consumes
+# still refuses at its statement.  Gated and deduplicated like the drop
+# announcement, so `pl2cl --module` stays silent (ruled s403).  Its own verb:
+# it is neither a drop nor a refusal.
+sub announce_unlocalized_local {
+  my ($self, $stmt, $line) = @_;
+  return if $self->collect_prototypes_only;
+  return if !($ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all');
+  my ($file) = $self->_drop_site([$stmt], $stmt);
+  return if $announced_drop{"$file:$line:unlocalized"}++;
+  print STDERR "PCL: local in an unsupported expression position at $file line $line"
+             . " -- not localized\n";
   return;
 }
 
