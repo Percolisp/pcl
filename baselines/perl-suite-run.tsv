@@ -1717,7 +1717,7 @@ io/argv.t	52	1	28	23	DIFF	s507c PART TWO #2703/#2666 (eof(), ARGV aliasing): 27/
 io/binmode.t	9	0	9	0	OK		0
 io/bom.t	3	0	1	2	DIFF		0
 io/closepid.t	3	0	3	0	OK		0
-io/crlf.t	16421	0	16413	5	DIFF	s492b: 16412/6 -> 16413/5, #2006(a) -- an opener CLOSES (and flushes) a stream the handle already holds, so t/io/crlf.t:29's `open(FOO,">:crlf")` + print + `open(FOO,"<:crlf")` reads back what was written.  Measured --jobs 1 on a 5ce155cb extraction: 16412/6 there, 16413/5 here  |  aborted-forms:1: Undefined subroutine &PerlIO::get_layers called	0
+io/crlf.t	16421	0	16416	5	DIFF	s521b: 16413/5 -> 16416/5, #3326 -- PerlIO::get_layers exists, the three :utf8 set/removed rows run and pass
 io/crlf_through.t	942	0	942	0	OK		0
 io/data.t	4	0	3	1	DIFF		0
 io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented	0
@@ -1732,7 +1732,7 @@ io/getcwd.t	0	0	0	0	NOTAP		0
 io/inplace.t	8	0	6	2	DIFF		0
 io/iofile.t	3	0	2	1	DIFF	s488a: 1/2 -> 2/1 at a31369fc (s473f member 5, #1074: a FILEHANDLE is an object of its handle class, with no `use`) -- "STDOUT->autoflush(1) lives" passes; the residue is "IO::File now loaded" (#1710)	0
 io/iprefix.t	2	0	0	2	DIFF		0
-io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
+io/layers.t	55	0	4	4	DIFF	s521b: 0/0 -> 4/4 (#3326: get_layers exists; 4 crlf rows fail by the s521 ruling; aborts at :encoding(cp1047), the NS rule-12 die)
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/nargv.t	7	0	6	1	DIFF	s507c PART TWO #2669 (local *ARGV / *ARGVOUT keep the outer in-place edit): 5/1 -> 6/1	0
 io/open.t	188	0	107	23	DIFF	s521 (Fable, 2026-10-18) REGRESSION 153/35 -> 107/23 (58 rows never produced) since MAIN-READY-29 = #3512 (s519a's #3370 refusal at io/open.t:199 + :210, a heredoc among `open(local $f, ...)`'s arguments; 107/23 on the 5e6e241d, a5885afc and ed8a4504 extractions alike); back to 153/35 when #3512 closes | s513b: 152/36 -> 153/35 (#2923: p-utime sets $! on failure -- row 170 "check errno" after `utime(time, time, $fn, $fn)` passes; probed alone on base 9d8961d9 152/36 vs tree 153/35).  s488a: 154/34 -> 152/36 at 4bdde171 (s473w member 4, #1507: `use overload` is a compile-phase member -- perl's `use` is a BEGIN).  io/open.t builds its NUL-path object at line 443 and declares `use overload '""'` at line 523, so before the fix the object stringified as `OverloadTest=SCALAR(0x..)` and open/chmod failed on a path that did not exist -- the two rows passed for the wrong reason.  They now really stringify to "$temp\0.overload" and join #1710's NUL-in-a-pathname family (PCL accepts a NUL where perl 5.18+ refuses it); their `glob` twin was already failing	0
