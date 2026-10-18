@@ -1338,6 +1338,7 @@ gone, so a refusal is now terminal):
 - **Array/hash family sharing the bare name** — `@x`, `%x`, `$#x`,
   `$x[i]`, `$x{k}` are *different variables* whose element-access tokens
   share the `$x…` spelling.
+- **A self-referential chained `my`** -- `my @a = my @b = (... my ...)` refuses only when a declarator (`my` / `our` / `local` / `state`) sits at the initializer's OWN level; one inside a nested block of it (`do { }`, `map { }` / `grep { }` / `sort { }`, `eval { }`, `sub { }`) is scoped there and does not refuse (s520a, #3404, `_elems_declare_at_level`).  Example: `my @n = my @t = (1, do { my $x = 2; $x })` gives `@n` = `@t` = `(1, 2)`.
 - **String `eval` in scope** — *narrowed (s294/295)*: a renamed cell is
   made reachable by its original source name (the alias rule + span
   pairs, §9.1), so string eval alone no longer refuses a rename. What
@@ -1493,6 +1494,8 @@ is `1000000000000000` and `1e15` is `1e+15`.  PCL has one representation for
 both and prints both as `1e+15`; its pure-integer arithmetic stays exact, so
 `1000000*1000000000` still prints its digits.  Task #1369,
 `not-supported.md` §"Integers are unbounded".
+
+**A filename operand is stringified AS IT ARRIVED (normative, s520a, task #3413).**  The filename builtins (`stat` / `lstat`, `open`'s path, `unlink`, `chmod`, `chown`, `utime`, `rename`, `link`, `symlink`, `readlink`, `mkdir`, `rmdir`, `truncate`) take their path through ONE coercion, `%p-path-string` = `to-string` of the operand WITHOUT unboxing it first, so a `""` overload and a tie's FETCH run, exactly as the filetests do (#1031); a blessed SCALAR reference is a path to open, never an in-memory target.  Example: with `$p` a Path::Tiny object, `1 while unlink $p` removes the file `"$p"` names.
 
 ### 3.2a A dualvar is a FACT of the representation, never an inference (normative, s473d)
 
@@ -1704,6 +1707,8 @@ value and are not wrapped.
 ### 3.2e2 A list slice of an EMPTY list is an EMPTY list (normative, s514b, task #2953)
 
 perlop: "A slice of an empty list is still an empty list."  `(@e)[0,1,2]`, `()[0,1]` and `(lstat $missing)[0,1,2]` are (), so `my ($a,$b) = (@e)[0,1] or next` takes the `next`; only a NON-empty list yields one undef per out-of-range index (`(1)[1,0]` has 2 elements), and an ARRAY slice is not a list slice (`@e[0,1,2]` is three undefs).  The IR: a list slice is `(p-aref-deref SRC (vector I …))` -- a vector index arrives only from a LIST subscript -- and an empty SRC (an empty vector, or a built-in's NIL) answers ().  A ONE-index list slice in list context still emits a scalar index (task #3100).
+
+**A LIST builtin that finds nothing is the EMPTY LIST in list context (normative, s520a, task #3412).**  `stat` / `lstat` on a missing path, `caller` past the outermost frame and a `getpw*` / `getgr*` lookup that misses answer the zero-length vector in list context (undef in scalar context), never raw NIL or `*p-undef*` -- those are ONE element in an argument list.  Example: `sub n { scalar @_ } n(stat "/no/such")` is `0`, so core `File::stat::stat($missing)` (`populate(CORE::stat $arg)`) returns undef.
 
 ### 3.2f `strict refs` is a LEXICAL fact the dereference SITE carries (normative, s497b, task #2103)
 
@@ -2673,6 +2678,8 @@ the pair passed as arguments as well when NAME has a `($$)` prototype — and
 that still wraps the lambda in a `let` capturing `*package*` at creation
 time, so a *string* comparator name resolves in the user's package rather
 than in `:pcl`).
+
+**After `sort`, a WORD followed by `->` starts the LIST (normative, s520a, task #3403).**  It is a class name (`sort K->new->names` sorts what `K->new->names` returns), never `SUBNAME`; one predicate (`_sort_word_is_subname`) answers for the bare and the parenthesised form.  Example: `sort(K->new->names)` with `names` returning `("b", "a")` is `("a", "b")`.
 
 **`sort NAME LIST` has no comparator-specific undefined-sub handling, and a
 translator must not add any** (s442d, task #501). Until then the named form
