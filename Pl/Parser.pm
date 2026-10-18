@@ -11014,11 +11014,13 @@ sub validate_facts_overlay {
   require PPI;
   my $doc = PPI::Document->new($path)
     or die "PCL: facts overlay $path: PPI cannot parse it\n";
+  my $seen_package;
   for my $st ($doc->schildren) {
-    next if _facts_overlay_stmt_ok($st, $module);
+    next if _facts_overlay_stmt_ok($st, $module, \$seen_package);
     (my $show = $st->content) =~ s/\s+/ /g;
     die sprintf "PCL: facts overlay %s line %d: an overlay holds declarations"
-      . " only (package %s; sub NAME (PROTO); our \@EXPORT/\@EXPORT_OK/"
+      . " only (package %s first, then any other package its file declares;"
+      . " sub NAME (PROTO); our \@EXPORT/\@EXPORT_OK/"
       . "%%EXPORT_TAGS = literal list; 1;) -- found: %s\n",
       $path, $st->line_number, $module, substr($show, 0, 70);
   }
@@ -11028,10 +11030,16 @@ sub validate_facts_overlay {
 my $_QW_LIST = qr{qw\s*(?:\([^()]*\)|\[[^\[\]]*\]|\{[^{}]*\}|<[^<>]*>|/[^/]*/)};
 
 sub _facts_overlay_stmt_ok {
-  my ($st, $module) = @_;
+  my ($st, $module, $seen_package) = @_;
   return 1 if $st->isa('PPI::Statement::End') || $st->isa('PPI::Statement::Data');
+  # The FIRST package statement is the module's own; a later one names another
+  # package the module's FILE declares (IO::Compress::Base::Common's `package
+  # U64;`, task #3521) -- its declarations are recorded under that package.
   if ($st->isa('PPI::Statement::Package')) {
-    return !$st->find_first('PPI::Structure::Block') && $st->namespace eq $module;
+    return 0 if $st->find_first('PPI::Structure::Block');
+    my $first = !$$seen_package;
+    $$seen_package = 1;
+    return $first ? $st->namespace eq $module : 1;
   }
   if ($st->isa('PPI::Statement::Sub')) {
     return !$st->isa('PPI::Statement::Scheduled') && $st->forward ? 1 : 0;
@@ -11106,6 +11114,14 @@ sub register_unit_overlay {
   for my $name (sort keys %{ $oenv->prototypes }) {
     my $rec = $oenv->prototypes->{$name} or next;
     next if $oenv->is_builtin_seed_record($name, $rec);
+    # Only the facts the overlay states for THIS package: a second package's
+    # declarations (task #3521) are the unit's own `package OTHER;` section's,
+    # which declares them itself -- registered here they would answer in the
+    # module's package, above any definition.
+    my $per = $oenv->pkg_prototypes->{$name};
+    if ($per && %$per) {
+      $rec = $per->{$package} or next;
+    }
     my $r = _imported_record($rec);
     @$r{qw(from_overlay overlay_unit)} = ($overlay, $unit_file);
     $env->add_prototype($name, $r, $package, $site);

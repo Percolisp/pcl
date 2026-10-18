@@ -35,5 +35,31 @@ sub STATUS_ERROR ();
 sub MAX16 ();
 sub MAX32 ();
 sub MAX32cmp ();
+sub WANT_CODE ();
+sub WANT_EXT ();
+sub WANT_UNDEF ();
+sub WANT_HASH ();
+
+# The module's export lists (2.212), so an import LIST resolves: `qw(:Status)`
+# (IO::Uncompress::Unzip's spelling) expanded to nothing and `STATUS_OK + 7`
+# after it was read as `print STATUS_OK ...`'s FILEHANDLE (task #3521).
+our @EXPORT = qw(isaFilehandle isaFilename isaScalar whatIsInput whatIsOutput
+                 isaFileGlobString cleanFileGlobString oneTarget
+                 setBinModeInput setBinModeOutput ckInOutParams
+                 createSelfTiedObject isGeMax32 MAX32
+                 WANT_CODE WANT_EXT WANT_UNDEF WANT_HASH
+                 STATUS_OK STATUS_ENDSTREAM STATUS_EOF STATUS_ERROR);
+our %EXPORT_TAGS = (Status => [qw(STATUS_OK STATUS_ENDSTREAM STATUS_EOF STATUS_ERROR)]);
+
+# The module's file also holds `package U64;` with its own `use constant`s
+# (task #3521): a caller's `U64::MAX32 + $lo` is a TERM in perl.  Without this
+# an import LIST (`use IO::Compress::Base::Common qw(isaFilename)`) left the
+# qualified name unknown -- a list-operator call that swallowed `+ $lo`, and
+# every Zip64 read in IO::Uncompress::Unzip computed 0.
+package U64;
+sub MAX32 ();
+sub HI_1 ();
+sub LOW ();
+sub HIGH ();
 
 1;

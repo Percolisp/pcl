@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 25;
+plan tests => 27;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -351,3 +351,13 @@ print Math::BigInt->new(5) + 1, "\n";},
 both_agree(q{use Encode 'decode';
 my $x = "caf\xC3\xA9"; my $s = decode 'UTF-8', $x; print length($s), "\n";},
            '#3143 `use Encode \'decode\'` (bare quote) carries the shim\'s ($$;$) -- no detector line');
+# #3521: a SECOND package of a module whose facts come from its OVERLAY (the
+# scan skips IO:: by name) -- `package U64;` in IO::Compress::Base::Common.
+# Under an import list the qualified constant was unknown: `U64::MAX32 + $lo`
+# was a call swallowing `+ $lo` (every Zip64 read computed 0), and `:Status`
+# expanded to nothing, so `print STATUS_OK + 7` printed to a FILEHANDLE.
+both_agree(q{use IO::Compress::Base::Common qw(isaFilename); my ($lo, $hi) = (44, 0);
+print $hi * U64::MAX32 + $lo, " ", U64::HI_1 - 1, "\n";},
+           q{#3521 an overlay's second-package `()` constant is a TERM under an import list});
+both_agree(q{use IO::Compress::Base::Common qw(:Status); print STATUS_OK + 7, "\n";},
+           q{#3521 an overlay's %EXPORT_TAGS expands `:Status`});

@@ -148,7 +148,9 @@ lookup.
 **What it may contain** (anything else DIES naming the file and line -- an
 overlay is declarations, never code):
 
-    package Foo::Bar;                    # exactly one, the module's own name
+    package Foo::Bar;                    # FIRST, the module's own name
+    package Foo::Bar::Other;             # then any package its FILE declares (#3521);
+                                         #   the declarations after it are recorded there
     sub NAME (PROTO);   sub NAME;        # forward declarations, no body
     our @EXPORT = qw(...);  our @EXPORT_OK = qw(...);
     our %EXPORT_TAGS = (tag => [qw(...)], ...);
