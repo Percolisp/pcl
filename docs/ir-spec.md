@@ -2419,6 +2419,11 @@ construction: a call argument is an OPAQUE use, so the variable can carry
 neither a B-regime `coerce` verdict nor a str-buffer -- a value written back
 lands in an untyped slot; either fact present at a copy-back site is a
 compile-time die.  `PCL_OPT=none` has no raw slots and emits no copy-back.
+A callee in perl's runtime-owned core namespaces -- `builtin::`, `utf8::`,
+`Internals::`, `CORE::` -- is SEEN (the runtime defines it and a program
+cannot) and takes no copy-back, unless it is one of the builtins that write
+their argument (normative, s519a task #3348); a MODULE namespace
+(`Scalar::Util::`, `B::`) stays unseen, since a program may redefine it.
 What it does not give (docs/not-supported.md "@_ argument aliasing"): a
 callee that keeps `\$_[N]` and writes after returning, the same variable
 passed twice (two boxes; the later read-back wins), a closure reading the
@@ -3738,6 +3743,12 @@ and quotes the designator so the reader's namespace choice survives
 `|Foo::STDOUT|` symbol instead, so it cannot be found by the runtime's
 resolve-by-short-name fallback. Perl's stash autovivifies, so `Foo::H1` is a
 usable handle whether or not the program contains `package Foo`.
+
+**After `print` / `printf` / `say`, `WORD (LIST)` -- whitespace before the
+paren -- names the HANDLE `WORD` unless a sub of that name is already known
+at that point; `WORD(LIST)` with no gap is always a CALL** (normative, s519a
+task #2193, perl's lexer rule): `print STDERR ("x")` writes to STDERR,
+`print STDOUT("x")` dies "Undefined subroutine &main::STDOUT".
 
 **In an argument slot, a bareword handle is its NAME as a plain string.**
 A `*`-prototype slot of a *user* sub receives `"FOO"` — and `"G"` even when
