@@ -48,7 +48,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 11;
+plan tests => 12;
 
 # One SBCL launch for the whole family: each line prints one answer.
 my $prog = <<'EOF';
@@ -78,6 +78,13 @@ my $plainstash = "v";
 bless \$plainstash, "PS";
 print "t11:", (ref($plainstash) eq "" ? "notref" : ref($plainstash)),
       ":", "$plainstash", "\n";
+# #3433: a re-bless of a COPY of a glob ref reaches the glob (perl: C C C W).
+use Symbol ();
+my $o = bless Symbol::gensym(), 'A'; my $p = $o; bless $p, 'C';
+my $s = bless \do { local *FH }, 'A'; my $t = $s; bless $t, 'C';
+sub C::m { "C" }
+my $z; { $z = bless \do { local *FH }, 'Z'; } my $z2 = $z; bless $z2, 'W';
+print "t12:", ref($o), " ", ref($s), " ", $o->m, " ", ref($z), "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -108,3 +115,5 @@ like $out, qr/^t10:A2$/m,
     're-bless through the variable restamps the target (visible via an alias)';
 like $out, qr/^t11:notref:v$/m,
     'a blessed plain scalar is not a ref and stringifies as its plain value';
+like $out, qr/^t12:C C C W$/m,
+    're-blessing a copy of a glob ref (gensym, \\do { local *FH }) re-classes the glob (#3433)';

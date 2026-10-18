@@ -31182,12 +31182,14 @@ size comes from fstat on the descriptor, after the buffered output is written
 
 (declaim (inline %p-handle-stash-class))
 (defun %p-handle-stash-class (v)
-  "The class `bless' gave the filehandle payload V, or NIL (#2056).  The
+  "The class `bless' gave the filehandle payload V -- or the GLOB V, which is
+   what a glob ref (`Symbol::gensym', `\\do { local *FH }', `\\*FH') holds
+   (#3433) -- or NIL (#2056).  The
    count test first: ref()/dispatch reach here for every unblessed handle
    (readline asks), and a weak-table lookup is not free -- with no blessed
    handle in the image it costs one fixnum compare."
   (and (plusp (hash-table-count *p-handle-stash*))
-       (%p-handle-payload-p v)
+       (or (%p-handle-payload-p v) (p-typeglob-p v))
        (gethash v *p-handle-stash*)))
 
 (defvar *p-sv-stash* (make-hash-table :test 'eq :weakness :key)
@@ -34522,9 +34524,11 @@ size comes from fstat on the descriptor, after the buffered output is written
       ((or (null inner) (eq inner *p-undef*) (stringp inner) (numberp inner))
        (%p-die-error nil "Can't bless non-reference value"))
       (t
-       ;; A filehandle: the class goes on the payload, which is the glob
-       ;; perl blesses (#2056) -- and on the box below, as for any ref.
-       (when (%p-handle-payload-p inner)
+       ;; A filehandle or a GLOB: the class goes on the payload, which is
+       ;; the glob perl blesses (#2056, #3433: a copy of a gensym / `\do {
+       ;; local *FH }' ref is re-blessed through the glob, not through the
+       ;; variable) -- and on the box below, as for any ref.
+       (when (or (%p-handle-payload-p inner) (p-typeglob-p inner))
          (setf (gethash inner *p-handle-stash*) class-name))
        ;; Array, code, or other ref type - store class on the box
        (if (p-box-p ref)
