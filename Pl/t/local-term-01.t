@@ -419,4 +419,21 @@ while (my $y = shift @r) { push @lv, sub :lvalue { $y } }
 print join(",", map { $_->() } @lv), "\n";
 PERL
 
+# 19. #3363: more owners and invocants -- a named unary is a term (the split
+#     stays), `push @l, local …, 6` keeps its trailing argument, and a CLASS
+#     invocant chain `Foo->new->set(local …)` runs `new` before the local.
+test_lt('named unary term / push LIST tail / Class->new->m(local …)', <<'PERL');
+our ($x, $y, $g) = (0, 1, 0); our @l;
+sub show { print "$_[0] x=$x g=$g\n" }
+{ my $d = 0; $d = defined $y, local $x = 3; show("defined"); }
+show("out1");
+{ @l = map { $_ * 2 } 1, 2; push @l, local $g = 5, 6; print "l=@l\n"; show("push"); }
+show("out3");
+{ local $g = 1; $g++, local $x = $g if $g; show("cond-reads"); }
+show("out4");
+{ Foo->new->set(local $x = 7); show("class"); }
+show("out5");
+package Foo; sub new { print "new x=$main::x\n"; bless {} } sub set { print "set x=$main::x\n" }
+PERL
+
 done_testing();
