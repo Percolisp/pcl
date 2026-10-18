@@ -2006,7 +2006,7 @@ op/sprintf.t	559	0	534	25	DIFF		0
 op/sprintf2.t	1704	0	1679	25	DIFF		0
 op/srand.t	10	0	8	2	DIFF		0
 op/sselect.t	23	0	20	3	DIFF	s502e #2559: the mask bytes are checked as octets and a wide character dies (rows 21-23 pass); the RT120102 timeout is FETCHed once; rows 10-12 (a literal mask is read-only) stay #1934	0
-op/stash.t	54	1	20	7	DIFF	s519b splice (Fable ruling s520): 48/7 -> 20/7 = MAIN's since s518e #3281 (the B shim: B::CV::CvFLAGS dies by design and aborts the file) -- #3362; identical on fd04c048 and the tree | was: undef-fn:main::pl-SUPER	0
+op/stash.t	54	1	31	12	DIFF	s521a edit (one-file run scratch/s521a/comp2.log on the rebased tree): 20/7 -> 31/12 -- #3362 (CvFLAGS answers, the B block runs) then aborts at :143 on B::GV::STASH of an anonymised sub = #3492 (RULING WANTED); was the s519b splice 48/7 -> 20/7
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	96	15	DIFF	s521 (Fable, 2026-10-18) 95/16 -> 96/15 at MAIN-READY-31 = s520a's #3412 (`%p-no-answer`: "stat inside stat gets scalar context" passes; 95/16 on 5e6e241d, 96/15 on a5885afc and ed8a4504, serial agrees) | s492b: 94/17 -> 95/16, #2090 -- `() = <FOO>` is a LIST assignment and its RHS is LIST context, so the handle is drained and `ok(eof FOO, "at EOF")` passes; the deleted *p-in-list-assign-rhs* flag had made it read ONE line.  Measured --jobs 1 on a 5ce155cb extraction: 94/17 there	0
 op/stat_errors.t	638	0	636	2	DIFF		0
@@ -2186,7 +2186,7 @@ uni/parser.t	58	0	32	26	DIFF	s470bv: #1221 (b25afbc; 28/30 at a3d6d8e)	0
 uni/readline.t	7	0	6	1	DIFF		0
 uni/select.t	3	2	2	3	DIFF	s508a #2683: 1/4 -> 2/3 (select returns the full glob name)	0
 uni/sprintf.t	52	0	49	3	DIFF		0
-uni/stash.t	48	1	17	6	DIFF	s519b splice (Fable ruling s520): 43/6 -> 17/6 = MAIN's since s518e #3281 (B::CV::CvFLAGS dies by design and aborts the file) -- #3362; identical on fd04c048 and the tree | was: s473t6b (#1850): same glue as op/tiehandle.t -- the TAP is on disk row by row, and this file ends a recovery diagnostic without a newline, so the next row (`ok 9 # skip no B`) is no longer parseable.  A/B --jobs 1: f26282db extraction 44/6, this tree 43/6	0
+uni/stash.t	48	1	28	11	DIFF	s521a edit (one-file run scratch/s521a/comp2.log on the rebased tree): 17/6 -> 28/11 -- #3362 then the same B::GV::STASH abort = #3492 (RULING WANTED); was the s519b splice 43/6 -> 17/6
 uni/tie.t	9	1	9	1	OK		0
 uni/title.t	5936	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/tr_utf8.t	8	0	8	0	OK		0

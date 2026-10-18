@@ -698,7 +698,7 @@ not-supported.md → only then probe.*
 - **A bless of a GLOB ref (`Symbol::gensym`, `\do { local *FH }`) marks the glob, the handle-stash table** (#3433; ir-spec bless table); a named glob's second mention `\*FOO` is a different struct today (#3491).
 - **The REFERENCE operand of an arrow deref and of a sigil cast is SCALAR context** (#3435; `child_context` in Pl/PExpr.pm; ir-spec §4.1) -- `print f()->{k}`, `@{ f() }`; a list-slice base stays LIST.
 - **Test::More's like/unlike read a STRING pattern as Test::Builder::maybe_regex does; the s331 "like-string pattern = accepted divergence" ruling is SUPERSEDED for Test::More** (#3436, ruling s520 (2)); perl-tests/t/test.pl's interpolating like is unchanged; the callers are told apart by the IMPORT (`%test-module-imported`), never a global flag (docs/tap-assertion-audit.md).
-- **`B::CV::CvFLAGS` answers CVf_ANON / CVf_LVALUE / CVf_METHOD; the unknown bits read 0** (#3362, ruling s520 (1) = (a); docs/not-supported.md "B").
+- **`B::CV::CvFLAGS` answers CVf_ANON / CVf_LVALUE / CVf_METHOD; the unknown bits read 0** (#3362, ruling s520 (1) = (a); docs/not-supported.md "B").  op/stash.t then aborts at an unguarded `B::GV::STASH` of an anonymised sub: RULING WANTED, #3492.
 - #3452 and #3470 not started (budget).
 
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
