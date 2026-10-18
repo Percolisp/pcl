@@ -19548,7 +19548,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                         (t (incf i)))))
        (push (subseq layers start i) out)))))
 
-(defun %p-layer-ef (layers default &optional current popped)
+(defun %p-layer-ef (layers default &optional current popped
+                                     (spelling nil spelling-p))
   "The external format LAYERS asks for, or DEFAULT when none of them decides.
    perl applies layers left to right and the LAST one that names a discipline
    wins — `<:raw:encoding(UTF-8)` decodes, `<:encoding(UTF-8):raw` does not — so
@@ -19569,20 +19570,61 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    CURRENT is the handle's format before the list, which is what the first
    `:pop` takes off; every `:pop` leaves OCTETS.  `:perlio` puts the base back
    and `:unix` the bottom one.  The count changes only the LIST: PCL has no
-   unbuffered mode (docs/not-supported.md)."
-  (let ((ef default) (bad nil) (cur (or current default)) (popped (or popped 0)))
-    (dolist (l (%p-split-layers layers) (values ef bad popped))
+   unbuffered mode (docs/not-supported.md).
+
+   FOURTH value is the handle's layer SPELLING after the list (task #3515):
+   the names get_layers reports above the base, starting from SPELLING (by
+   default the one CURRENT implies, %p-ef-spelling).  A `:pop` takes the top
+   ENCODING layer when there is one (its utf8 flag with it) and a base layer
+   otherwise."
+  (let* ((ef default) (bad nil) (cur (or current default)) (popped (or popped 0))
+         (sp (cond (spelling-p spelling) (cur (%p-ef-spelling cur)) (t nil))))
+    (dolist (l (%p-split-layers layers) (values ef bad popped sp))
       (let ((name (string-trim " " l)))
         (cond
           ((string-equal name "pop")
-           (unless (eq (%p-ef-kind cur) :encoding)
-             (setf popped (min 2 (1+ popped))))
+           (let ((s (if (equal (car (last sp)) "utf8") (butlast sp) sp)))
+             (if (and s (%p-encoding-layer-name-p (car (last s))))
+                 (setf sp (butlast s))
+                 (setf sp nil popped (min 2 (1+ popped)))))
            (setf ef +p-byte-external-format+ cur ef))
           ((string-equal name "perlio") (setf popped 0))
           ((string-equal name "unix") (when (= popped 2) (setf popped 1)))
           (t (multiple-value-bind (this known) (%p-one-layer-ef l)
                (cond ((not known) (unless bad (setf bad l)))
-                     (this (setf ef this cur this))))))))))
+                     (t (setf sp (%p-spelling-after sp name this))
+                        (when this (setf ef this cur this)))))))))))
+
+(defun %p-encoding-layer-name-p (s)
+  (and (> (length s) 9) (string= "encoding(" s :end2 9)))
+
+(defun %p-encoding-display-name (arg ef)
+  "The name perl's get_layers shows inside `encoding(...)` for a `:encoding(ARG)`
+   layer -- Encode's canonical name (probed 5.40.3): `UTF-8` / `utf-8` are
+   `utf-8-strict`, `utf8` stays `utf8`, `latin1` / `iso-8859-1` are
+   `iso-8859-1`; another codec shows SBCL's name for it, down-cased."
+  (let ((a (string-trim " " arg)))
+    (cond ((string-equal a "utf8") "utf8")
+          ((eq ef :utf-8) "utf-8-strict")
+          ((eq (%p-ef-kind ef) :bytes) "iso-8859-1")
+          (t (string-downcase (string (if (consp ef) (car ef) ef)))))))
+
+(defun %p-spelling-after (sp name ef)
+  "Layer spelling SP after the KNOWN layer NAME (external format EF, or NIL)
+   is applied (task #3515): `:utf8` flags the top layer, `:bytes` clears the
+   flag, `:raw` takes every encoding layer and the flag off, `:encoding(X)`
+   pushes `encoding(X) utf8`; a transport layer changes nothing here."
+  (cond ((or (string-equal name "utf8") (string-equal name "utf-8-strict"))
+         (if (equal (car (last sp)) "utf8") sp (append sp (list "utf8"))))
+        ((string-equal name "bytes")
+         (if (equal (car (last sp)) "utf8") (butlast sp) sp))
+        ((string-equal name "raw") nil)
+        ((and (> (length name) 9) (string-equal "encoding(" name :end2 9))
+         (append sp (list (format nil "encoding(~A)"
+                                  (%p-encoding-display-name
+                                   (subseq name 9 (1- (length name))) ef))
+                          "utf8")))
+        (t sp)))
 
 (defun %p-ef-kind (ef)
   "Which of the three disciplines PerlIO::get_layers reports external format EF
@@ -19603,6 +19645,26 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 (defun %p-layer-pops (stream)
   (gethash (%p-stream-target stream) *p-layer-pops* 0))
 
+(defvar *p-layer-spelling* (make-hash-table :test 'eq :weakness :key)
+  "Stream -> the layer names PerlIO::get_layers reports ABOVE the base `unix
+   perlio`, as binmode / an open's layer suffix applied them (task #3515).
+   Absent = what the external format implies (%p-ef-spelling).  Keyed on
+   %p-stream-target like *p-layer-pops*.")
+
+(defun %p-ef-spelling (ef)
+  "The layer names an external format implies when no spelling was recorded:
+   none for octets, `utf8` for UTF-8, `encoding(NAME) utf8` for another codec."
+  (ecase (%p-ef-kind ef)
+    (:bytes nil)
+    (:utf8 (list "utf8"))
+    (:encoding (list (format nil "encoding(~(~A~))" (if (consp ef) (car ef) ef))
+                     "utf8"))))
+
+(defun %p-layer-spelling (target)
+  "TARGET's recorded layer spelling, else the one its format implies."
+  (multiple-value-bind (sp found) (gethash target *p-layer-spelling*)
+    (if found sp (%p-ef-spelling (stream-external-format target)))))
+
 (defun %p-layer-list (stream)
   "PerlIO::get_layers' answer for the OPEN stream STREAM, bottom first (task
    #3326, RULED s521: the layers PCL APPLIES and nothing it does not): an
@@ -19617,14 +19679,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       ((not (open-stream-p target)) nil)
       ((not (sb-sys:fd-stream-p target)) (list "scalar"))
       (t
-        (let* ((ef (stream-external-format target))
-               (k (if (consp ef) (car ef) ef))
-               (base (subseq (list "unix" "perlio") 0 (- 2 (%p-layer-pops target)))))
-          (append base
-                  (ecase (%p-ef-kind ef)
-                    (:bytes nil)
-                    (:utf8 (list "utf8"))
-                    (:encoding (list (format nil "encoding(~(~A~))" k) "utf8")))))))))
+        (append (subseq (list "unix" "perlio") 0 (- 2 (%p-layer-pops target)))
+                (%p-layer-spelling target))))))
 
 (defun %p-layer-ef-or-announce (layers default site)
   "%p-layer-ef for the two callers with no perl-visible failure to give: the
@@ -20068,12 +20124,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                      (string-trim '(#\Space #\Tab) (subseq mode-str 0 end))
                      mode-str))
          (layers (if sigil-p (subseq mode-str end) "")))
-    (multiple-value-bind (ef bad)
+    (multiple-value-bind (ef bad popped spelling)
         (%p-layer-ef layers
                      (if (%p-input-mode-p base)
                          *p-default-in-ef*
                          *p-default-out-ef*))
-      (values base layers ef bad))))
+      (declare (ignore popped))
+      (values base layers ef bad spelling))))
 
 (defun %p-open-memory (fh mode target-box)
   "Open an in-memory string filehandle over TARGET-BOX (the scalar behind \\$s).
@@ -20756,6 +20813,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             (t
              (warn "Unknown open mode: ~A" mode-str)
              nil))))
+    ;; The layer SPELLING of a fresh descriptor handle (task #3515): what its
+    ;; suffix applied, never a standard stream's (the "-" spellings).
+    (when (and stream (sb-sys:fd-stream-p (%p-stream-target stream))
+               (plusp (length (second mode-ef)))
+               (not (eq stream *standard-input*))
+               (not (eq stream *standard-output*)))
+      (setf (gethash (%p-stream-target stream) *p-layer-spelling*) (fifth mode-ef)))
     (if stream
         ;; Install under the box/bareword/symbolic-name rules — %p-install-fh
         ;; also handles the symbolic-filehandle case (box already holding a
@@ -21462,11 +21526,15 @@ would consume, so it dies naming the stream (rule 12)."
                         ":raw"
                         (to-string (unbox layer))))
               (target0 (%p-stream-target stream)))
-          (multiple-value-bind (ef bad popped)
-              (%p-layer-ef text +p-byte-external-format+
-                           (and (sb-sys:fd-stream-p target0) (open-stream-p target0)
-                                (stream-external-format target0))
-                           (%p-layer-pops target0))
+          (multiple-value-bind (ef bad popped spelling)
+              (let ((fd (and (sb-sys:fd-stream-p target0) (open-stream-p target0))))
+                (if fd
+                    (%p-layer-ef text +p-byte-external-format+
+                                 (stream-external-format target0)
+                                 (%p-layer-pops target0)
+                                 (%p-layer-spelling target0))
+                    (%p-layer-ef text +p-byte-external-format+ nil
+                                 (%p-layer-pops target0))))
             (if bad
                 (%p-io-errno-fail 2)                              ; ENOENT
                 (let ((target target0))
@@ -21495,7 +21563,9 @@ would consume, so it dies naming the stream (rule 12)."
                     (let ((now (%p-live-stream fh)))
                       (when now
                         (setf (gethash (%p-stream-target now) *p-layer-pops*)
-                              popped)))))))))))
+                              popped
+                              (gethash (%p-stream-target now) *p-layer-spelling*)
+                              spelling)))))))))))
 
 (defmacro p-binmode (fh &rest args)
   "Perl binmode — bareword filehandle is auto-quoted."

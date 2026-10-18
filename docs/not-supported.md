@@ -1471,12 +1471,11 @@ spelling that decides bytes-vs-characters (`:raw`, `:bytes`, `:utf8`,
 * stacking as HISTORY — `binmode(, ':raw')` after `:encoding(UTF-8)` gives
   bytes, which is perl's answer, but there is no stack to pop TO;
 * `PerlIO::get_layers` reports the layers PCL APPLIES (s521b, task #3326;
-  ir-spec §7.7), derived from the one discipline, so it differs from perl
-  wherever that does: `crlf` is never listed (not applied, above);
-  `:encoding(UTF-8)` lists as `utf8` (perl `encoding(utf-8-strict) utf8`) and
-  `:encoding(latin1)` as nothing past the base (it IS PCL's byte format); a
-  repeated push (`:utf8:perlio`) is not a second entry; `details => 1` dies
-  (rule 12);
+  ir-spec §7.7) in the SPELLING binmode / an open suffix applied them (s521e,
+  #3515: `encoding(utf-8-strict) utf8`, `encoding(iso-8859-1) utf8`, as
+  perl), so it differs from perl only where the stack does: `crlf` is never
+  listed (not applied, above); a repeated push (`:utf8:perlio`) is not a second
+  entry; `details => 1` dies (rule 12);
 * `binmode FH, ':pop'` of a BASE layer (`perlio`, then `unix`) changes the
   LIST only: perl's handle becomes unbuffered (and, with `unix` gone,
   unusable); PCL's keeps its buffering and keeps working;

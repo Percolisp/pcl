@@ -4316,12 +4316,17 @@ not** (s521b, task #3326 = #139 part (b), ruled s521): bottom first, the base
 `unix perlio` of every open descriptor handle, plus `utf8` when its discipline
 is UTF-8, or `encoding(NAME) utf8` for another codec; `scalar` for an
 in-memory handle; the empty list for a closed or unopened handle and for a
-value that is not a handle; in scalar context the top entry.  The list is
-DERIVED from the handle's one external format (the same record `binmode`
-sets), so `:utf8` and `:encoding(UTF-8)` both report `utf8`.  `:pop` takes
-off the TOP layer: a UTF-8 discipline goes WITH the perlio layer it is a flag
-on (the handle becomes octets, the list `unix`), an `:encoding(...)` leaves
-the base, and a base layer comes off the list only -- PCL has no unbuffered
+value that is not a handle; in scalar context the top entry.  Above the base
+the list is the layer SPELLING binmode / an open's suffix applied (normative,
+s521e #3515), never one derived from the discipline alone: `:utf8` is `utf8`
+(a flag on the top layer), `:encoding(NAME)` is `encoding(CANON) utf8` with
+Encode's canonical name (`UTF-8` -> `utf-8-strict`, `utf8` -> `utf8`,
+`latin1` -> `iso-8859-1`), `:bytes` drops the top `utf8` flag, `:raw` every
+encoding layer and the flag; a handle with no recorded spelling reports what
+its format implies.  `:pop` takes
+off the TOP layer: an `:encoding(...)` (its flag with it) when there is one,
+else the perlio layer (a `:utf8` flag goes WITH it: the handle becomes octets,
+the list `unix`), and a base layer comes off the list only -- PCL has no unbuffered
 mode, so the handle reads and writes as before; `:perlio` puts the base back.
 `crlf` is never reported (PCL does not apply it, #139 part (a)).  Example:
 `binmode $fh, ':utf8'` then `get_layers($fh)` is `unix perlio utf8`; one

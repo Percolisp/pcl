@@ -500,4 +500,21 @@ binmode STDOUT, ':raw';
 printf "len=%d ord=%d\\n", length(\$got), ord(\$got);
 PL
 
+# ── #3515 — get_layers reports the layer SPELLING binmode / open applied
+# (perl 5.40.3's exact texts, probed): Encode's canonical name inside
+# encoding(...), latin1 reported at all, `:pop` taking the encoding layer.
+is(run_cl(<<"PL"), "u=unix perlio utf8|U=unix perlio encoding(utf-8-strict) utf8|u8=unix perlio encoding(utf8) utf8|l1=unix perlio encoding(iso-8859-1) utf8|ib=unix perlio encoding(utf-8-strict)|lp=unix perlio|two=unix perlio utf8 encoding(iso-8859-1) utf8|or=unix perlio encoding(iso-8859-1) utf8\n", q{#3515 get_layers: the layer spelling, :bytes on an encoding, :pop of an encoding, two binmodes, an open suffix});
+my \@r;
+for my \$p (['u', ':utf8'], ['U', ':encoding(UTF-8)'], ['u8', ':encoding(utf8)'], ['l1', ':encoding(latin1)'],
+           ['ib', ':encoding(UTF-8):bytes'], ['lp', ':encoding(latin1):pop']) {
+  open my \$fh, '>', '$dir/sp.txt' or die; binmode \$fh, \$p->[1];
+  push \@r, "\$p->[0]=" . join(' ', PerlIO::get_layers(\$fh)); close \$fh;
+}
+open my \$h, '>', '$dir/sp.txt' or die; binmode \$h, ':utf8'; binmode \$h, ':encoding(latin1)';
+push \@r, "two=" . join(' ', PerlIO::get_layers(\$h)); close \$h;
+open \$h, '<:encoding(latin1)', '$dir/sp.txt' or die;
+push \@r, "or=" . join(' ', PerlIO::get_layers(\$h)); close \$h;
+print join('|', \@r), "\\n";
+PL
+
 done_testing();
