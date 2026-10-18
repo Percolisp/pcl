@@ -31395,8 +31395,12 @@ would consume, so it dies naming the stream (rule 12)."
       ;; made ref(\\$obj) answer the object's class instead of REF).
       ((p-box-p v) (or (%p-referent-class box)
                        (and (not (p-box-is-ref box)) (p-box-class v))))
-      ;; A filehandle payload IS the glob perl blesses (#2056).
-      ((%p-handle-stash-class v))
+      ;; A filehandle payload IS the glob perl blesses (#2056).  A bare
+      ;; GLOB VALUE held in a scalar (`my $v = *$g`, an @_ slot, `$$rval`)
+      ;; is not a reference: it stringifies as `*PKG::NAME` whatever class
+      ;; its glob carries -- only the REF (is-ref set) reads it (#3516).
+      ((and (or (p-box-is-ref box) (not (p-typeglob-p v)))
+            (%p-handle-stash-class v)))
       (t nil))))
 
 (defun p-ref (val)

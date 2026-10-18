@@ -48,7 +48,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 12;
+plan tests => 13;
 
 # One SBCL launch for the whole family: each line prints one answer.
 my $prog = <<'EOF';
@@ -85,6 +85,11 @@ my $s = bless \do { local *FH }, 'A'; my $t = $s; bless $t, 'C';
 sub C::m { "C" }
 my $z; { $z = bless \do { local *FH }, 'Z'; } my $z2 = $z; bless $z2, 'W';
 print "t12:", ref($o), " ", ref($s), " ", $o->m, " ", ref($z), "\n";
+# #3516: a glob VALUE is never a reference -- through an @_ slot read back
+# via \$_[0] (Data::Dump's _dump) it is *PKG::NAME, its class unshown.
+sub via_arg { my $rval = \$_[0]; return "" . $$rval }
+my $gv = *$o;
+print "t13:", via_arg($$o), " [", ref($gv), "] ", ("$o" =~ /^C=GLOB\(0x/ ? "refstr" : "BAD"), "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -117,3 +122,5 @@ like $out, qr/^t11:notref:v$/m,
     'a blessed plain scalar is not a ref and stringifies as its plain value';
 like $out, qr/^t12:C C C W$/m,
     're-blessing a copy of a glob ref (gensym, \\do { local *FH }) re-classes the glob (#3433)';
+like $out, qr/^t13:\*Symbol::GEN\d+ \[\] refstr$/m,
+    'a blessed glob\'s VALUE through @_ stringifies as the glob, not with its class (#3516)';

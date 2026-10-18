@@ -844,7 +844,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
 | `%pcl-super-indirect` | function | `(method cur-pkg &rest inv-args)` | — | — | — | — | — | — | — |
-| `p-class-invocant` | macro | `(name)` | — | — | — | — | — | — | — |
+| `p-class-invocant` | macro | `(name &optional (sub name))` | — | — | — | — | — | — | — |
 | `p-class-invocant-snapshot` | function | `(&rest names)` | — | — | — | — | — | — | — |
 | `p-get-class` | function | `(obj)` | — | — | — | — | — | — | — |
 | `p-method-call` | function | `(obj method &rest args)` | — | — | — | — | — | — | — |
