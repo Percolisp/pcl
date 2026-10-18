@@ -619,6 +619,18 @@ not-supported.md → only then probe.*
 - **The six board `00-report-prereqs.t` *FILE* rows (#3281) left by EDIT on one-file runs** (USER s519: the board is a round-level leg).
 - Filed: #3390, #3391, #3397 (Pkg->m where Pkg is also a compile-time sub), #3398, #3403 (`sort Class->m->n` refused), #3404 (`my @a = my @b = (... my ...)` refused), #3405 (a method named like a Test::More function is not found -- p-sub clobbers pcl::pl-NAME).
 
+## s519a (2026-10-17/18, Opus; resumed s520) -- the compiler correctness batch: a non-leading `local` term (#3370, rulings 1-4 of s519), the while-condition `my` (#3374), the Capture-Tiny badtie files (#3283), `print WORD (LIST)` (#2193), copy-back's core namespaces (#3348)
+- **A void comma list with a `local` term splits into one statement per term under the condition evaluated once; a first-evaluated `local` hoists before its statement** (#3370; Parser2 `_lower_local_terms`; ir-spec "A `local` TERM") -- the hoist is behaviour-preserving by construction (ruling 1).
+- **`COND and/&& (LIST);`, `COND or/|| (LIST);` and `COND and/or local ...;` ARE the modifier shape** and take the same split (ruling 3; Role::Tiny 307, B::Deparse 6279, YAML::PP 508); Pl/t/moo-01.t 15/15.
+- **An unreached `local` dies only in a VALUE position; in a VOID position it reads unlocalized and announces `PCL: local in an unsupported expression position at F line N -- not localized`** (ruling 4, rule 12's s329 boundary); site scan = #3414 (2 announce, 1 refuse, all populations).
+- **`local @{$r}{@k}` / `local ${$r}{k}` localize the slot through the reference; `local @h{@k}` localizes every key** (p-local-hash-slice) -- they localized `@{$r}` whole / one stringified key.
+- **`local *STDOUT` in a non-main package is main's** (#3411).
+- **A while/until condition `my` a closure captures is a fresh variable per iteration** (#3374, folds #300; ir-spec loop-head `my`).
+- **`print/printf/say WORD (LIST)` -- whitespace before the paren -- is the handle unless a sub is known; `WORD(LIST)` is a call** (#2193, folds #3183; ir-spec §7.5).
+- **Copy-back exempts `builtin::` / `utf8::` / `Internals::` / `CORE::` callees except the argument-writing builtins** (#3348; module namespaces keep it, rule 9a).
+- **The board row writer writes a random `/tmp/<name>` in a description as `/tmp/XXXX`** (ruling 2; tools/cpan-scoreboard.pl).
+- #3209 measured and left filed (a dup of an in-memory handle is a second layer with its own position); #3060 not reached.  Filed #3410 #3412 #3413 #3414 #3415.
+
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
 - **A plain signature IS the classic spelling plus its arity check** (#2514, Kind-A `sig-classic`): `Parser2::_normalize_signature_subs` rewrites the TREE (signature removed, `my (PARAMS) = @_;` first) before every rename/scope pass; the arity is `(p-check-arity …)` in `p-args-body` or `(:arity …)` in `p-raw-params`; the call sites keep the signature's prototype record.  Defaults, placeholders, `()`, multi-line, `state`, and any body observing `@_` keep v1.  ir-spec §5.2.
 - **ONE "@_ is observed" predicate `Parser2::_body_observes_args`** (@_, $_[, shift, pop, goto, `&name;`, string eval) for the raw path, the leading-shift run, `args-copy` and the signature rewrite (#2572: the two inline regexes missed `&name;` and `pop` -- silent wrong).
