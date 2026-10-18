@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521a (Opus 5.5, 2026-10-18) from the IO-Compress one-file runs after #3431/#3433/#3435 un-stuck the files: two Test::More / Test::Builder entry points the TAP layer (cl/pcl-test.lisp) does not implement now ABORT files.\n  t/004gziphdr.t: ran 450 of 919 -- \"Undefined subroutine &main::eq_set called\" (Test::More's eq_set; the TAP layer lists it in %test-more-stash-install's export list but has no pl-eq_set).\n  t/112utf8-zip.t: ran 20 of 29 (was 7 before #3435) -- `Can't locate object method \"details\" via package \"Test::Builder\"` (Test::Builder->details, the per-row results list).\nFIX SHAPE: implement eq_set (perl: order-insensitive eq_array over sorted copies; Test::More's exact rules) and Test::Builder::details (the list of {ok, actual_ok, name, type, reason} hashes for the rows run so far) in the TAP layer -- a harness change: the companion --all --quick per batch.\n\n=== NOTE (s521a, same session) ===\nThe eq_set half DUPLICATES #3432 (already filed, already cited by the 004gziphdr.t *PLAN* row): this task owns only Test::Builder->details (112utf8-zip.t).",
+   "id" : "3495",
+   "status" : "pending",
+   "subject" : "TAP layer gaps that now ABORT IO-Compress files: Test::More eq_set is undefined (004gziphdr.t ran 450 of 919) and Test::Builder->details is missing (112utf8-zip.t ran 20 of 29)"
+}

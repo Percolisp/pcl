@@ -1,0 +1,10 @@
+{
+   "activeForm" : "Setting the handle error flag on a failed readline",
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521b (Opus, 2026-10-18).  Pre-existing; newly REACHED: perl-tests/readline.t's last SKIP block calls PerlIO::get_layers\nbefore its four assertions, and until #3326 (s521b) the missing sub aborted the block.  Rows 33-34 now pass; 35-36 fail on this:\n\n    use IO::Handle;\n    open my $fh, \">\", \"/tmp/x\" or die;\n    my $l = <$fh>;\n    print \"read=\", (defined $l ? 1 : 0), \" error=\", ($fh->error ? 1 : 0), \" close=\", (close($fh) ? 1 : 0), \"\\n\";\n    perl 5.40.3: read=0 error=1 close=0        PCL: read=0 error=0 close=1\n\nThe handle error flag already exists for a failed WRITE (DECIDED: perl_destruct's STDOUT rule -- a failed write sets the handle\nerror flag, close then false); a failed READ (EBADF on a write-only handle) must set the same flag.  Rows blessed in\nbaselines/fail-baseline.tsv with this cause (s521b).\n",
+   "id" : "3531",
+   "status" : "pending",
+   "subject" : "A readline on a handle opened for WRITE leaves $fh->error false and close() true; perl sets the handle's error flag, so error is 1 and close FAILS (perl-tests/readline.t rows 35-36, reached since s521b)"
+}

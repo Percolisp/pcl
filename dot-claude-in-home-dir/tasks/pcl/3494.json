@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521a (Opus 5.5, 2026-10-18).  UMBRELLA: the IO-Compress failing rows that #3431 (embedded `my` in a declaration's initializer) and #3433 (re-bless of a glob ref copy) EXPOSED -- files that used to stop at LexFile's \"NO!!!!\" or at readHeader now run to their plan (or much further), and the rows behind the old stop are measured for the first time.  Before the fix they were inside one `*PLAN*` row each; s521a entered them into baselines/cpan-board14-fails.tsv citing THIS task (one-file runs on the final tree, scratch/s521a/dist-fin.log + dist-fin.rows in the s521a worktree).  NOT attributed row by row (budget); the next IO-Compress brief splits them by cause.\n\nLargest groups by description (dist-fin.rows): \"no stderr\" / \"exit status is 0\" (011-streamzip.t, 28 + 28: the streamzip script's child runs), \"error - not a scalar reference\" (24, 100generic-*), \"content ok\", \"write outside string\", \"unzip ok\", \"got prefix\", \"Trailer Error\", \"Got uncompressed data\", \"Trap odd number of params\", \"wanted unsigned, got undef\", \"Output is read-only\", \"Input filename undef\".  Files: 011-streamzip 84, 01misc 12, 100generic-{deflate,gzip,rawdeflate,zip} 42 each (incl. the 19 each already blessed), 102tied-* 6 each, 103newtied-* 5 each, 105oneshot-zip-only 11, 107multi-* 121 each (stop at the probe's 120 s cap -- see the *PLAN* rows), cz-14gzopen 10, 004gziphdr 5.",
+   "id" : "3494",
+   "status" : "pending",
+   "subject" : "UMBRELLA: IO-Compress failing rows exposed by #3431 / #3433 (files that now run past the old LexFile / readHeader stop) -- entered into the board baseline citing this task, not yet attributed row by row"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521a (Opus 5.5, 2026-10-18) from #3431's acceptance runs: IO-Compress t/105oneshot-*.t still stop at LexFile's \"NO!!!!\" after #3431 (oneshot.pl:85 `my $lex1 = LexFile->new( my $in );` inside a block of a sub that declared `$in` earlier).  PRE-EXISTING (both routes, also the plain-statement arm).\n\n  sub X::n { shift; print defined $_[0] ? \"D \" : \"U \"; $_[0] = \"y\"; 1 }\n  sub t { my $in; $in = \"outer\"; { my $l = X->n(my $in); print \"inner=$in\\n\"; } print \"outer=$in\\n\"; { X->n(my $in); print \"s=$in\\n\" } }\n  t();\nperl: `U inner=y` / `outer=outer` / `U s=y`.   PCL: `D inner=y` / `outer=y` / `D s=y`.\n\nCAUSE: Pl/Parser2.pm -- both the plain-statement embedded-`my` arm and #3431's declaration route (`_decl_init_embedded_my_names`) FILTER OUT a name already in `_let_bound_vars`, so an embedded `my` that shadows an enclosing block's lexical binds nothing and the statement writes the OUTER variable.  perl: every `my` is a new variable (in the same scope too, with a \"masks earlier declaration\" warning).\nFIX SHAPE: drop the `_let_bound_vars` filter (keep `_file_lex_renamed` / promoted); the declaration route then needs a re-entry guard keyed on the statement (refaddr), since it re-lowers [$first, @rest].  Check the VarAnnotator verdict a shadowing decl gets (_decl_fresh reads $vi by NAME).  Bar: the probe = perl; IO-Compress 105oneshot-gzip.t / -zip.t / -deflate.t / -rawdeflate.t one-file runs past row 8; corpus-diff explained; the sweep (declaration family).",
+   "id" : "3493",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an expression-embedded `my $x` whose NAME is already a lexical of an ENCLOSING block reuses the outer variable instead of declaring a new one -- IO-Compress oneshot.pl `{ my $lex1 = LexFile->new( my $in ) }` croaks NO!!!!"
+}
