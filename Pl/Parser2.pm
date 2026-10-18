@@ -7125,18 +7125,25 @@ sub _unwrap_paren_term {
 # THE HOIST INVARIANT (RULED s519 #1; docs/ir-spec.md "A `local` TERM"):
 # `local OPERAND;` moved to just before the statement is the same program,
 # because (1) nothing the statement evaluates before the term can observe the
-# pre-local value -- only an assignment target, call heads, a method
-# invocant, casts or a first condition precede it, and its operand is not
-# named before it (the token loop below enforces exactly that), (2) the
-# restore point is the enclosing block's end in both readings, and (3) the
-# term's VALUE is the localized variable's new value in both.  Guards:
-# Pl/t/local-term-01.t rows 6 and 12 (`f(local $x = 1)` passes 1; in
-# `(local $x = 2) + g()` g reads 2).
+# pre-local value -- CHECKED, not assumed (#3363): every word before the term
+# is asked _word_before_local and a call that runs FIRST refuses (a method
+# INVOCANT is bound to a temporary before the local instead), a comma only
+# separates the arguments of a call owning the term, the other tokens must be
+# _token_inert_before_local, the operand is not named before it, and an
+# assignment's right side is checked too when the term is in its left
+# operand -- (2) the restore point is the enclosing block's end in both
+# readings (a `while` / `until` condition's: the LOOP's end, so the loop is
+# wrapped in a bare block, #3368), and (3) the term's VALUE is the localized
+# variable's new value in both.  Guards: Pl/t/local-term-01.t rows 6 and 12
+# (`f(local $x = 1)` passes 1; in `(local $x = 2) + g()` g reads 2), 17-21, 26.
 sub _hoist_local_term {
   my ($self, $l, $s) = @_;
   return 0 if $s->isa('PPI::Statement::Sub')
            || $s->isa('PPI::Statement::Include') || $s->isa('PPI::Statement::Package');
   my $compound = $s->isa('PPI::Statement::Compound');
+  my $kw = $compound ? $s->schild(0) : undef;
+  $kw = $kw->snext_sibling if $kw && $kw->isa('PPI::Token::Label');
+  $kw = $kw ? $kw->content : '';
   for (my $a = $l->parent; $a && $a != $s; $a = $a->parent) {
     # a DEREF block `@{local X}` is part of the expression ...
     next if $a->isa('PPI::Structure::Block') && $a->sprevious_sibling
@@ -7144,7 +7151,7 @@ sub _hoist_local_term {
     # ... and so is the FIRST condition of if/unless/while/until, which the
     # statement evaluates first (perl's local there lasts to the block end).
     next if $compound && $a->isa('PPI::Structure::Condition') && $a->parent == $s
-         && $s->schild(0)->content =~ /^(?:if|unless|while|until)$/
+         && $kw =~ /^(?:if|unless|while|until)$/
          && $s->find_first('PPI::Structure::Condition') == $a;
     return 0 if $a->isa('PPI::Structure::Condition') || $a->isa('PPI::Structure::Block');
   }
@@ -7219,6 +7226,18 @@ sub _hoist_local_term {
     last if defined $stop && $t == $stop;
   }
   $body .= "$guard;" if !$compound;
+  if ($kw =~ /^(?:while|until)$/) {
+    # perl restores a LOOP condition's local per iteration and when the loop
+    # ends (RT #7615's to-the-block-end reading is if / unless only).  Wrapped
+    # in a bare block, the local lasts exactly the loop; the per-iteration
+    # restore is unobservable unless the condition itself reads the variable
+    # again -- that shape is not lowered (#3368).
+    my %own = map { refaddr($_) => 1 } map { $_->isa('PPI::Node') ? $_->tokens : ($_) } @op;
+    my $c = $s->find_first('PPI::Structure::Condition') or return 0;
+    return 0 if grep { !$own{ refaddr $_ } && $_->isa('PPI::Token::Symbol') && $names{ $_->symbol } }
+                $c->tokens;
+    return $self->_replace_statement_by($s, join(' ', '{', @decls, "local $optext;", $body, '}'), 1);
+  }
   my @stmts = (@decls, "local $optext$guard;", $body);
   return $self->_replace_statement_by($s, join(' ', @stmts), scalar @stmts);
 }
@@ -7231,13 +7250,16 @@ sub _hoist_local_term {
 sub _token_inert_before_local {
   my ($t, $names) = @_;
   return 1 if $t->isa('PPI::Token::Whitespace') || $t->isa('PPI::Token::Comment');
-  return 1 if $t->isa('PPI::Token::Structure') || $t->isa('PPI::Token::Cast');
+  return 1 if $t->isa('PPI::Token::Structure') || $t->isa('PPI::Token::Cast')
+           || $t->isa('PPI::Token::Label');
   return 1 if $t->isa('PPI::Token::Number') || $t->isa('PPI::Token::Quote::Single')
            || $t->isa('PPI::Token::Quote::Literal') || $t->isa('PPI::Token::QuoteLike::Words');
   return 1 if ($t->isa('PPI::Token::Quote::Double') || $t->isa('PPI::Token::Quote::Interpolate'))
            && $t->content !~ /[\$\@]/;
   return !$names->{ $t->symbol } if $t->isa('PPI::Token::Symbol');
   return 1 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:=|->|\\|,|=>)$/;
+  # a logical NOT applies to the value after the term is evaluated
+  return 1 if $t->isa('PPI::Token::Operator') && $t->content =~ /^(?:!|not)$/;
   return 0;
 }
 
@@ -15356,7 +15378,13 @@ sub _cond_mys_closure_captured {
   my @subs;
   for my $b (grep { $_->isa('PPI::Structure::Block') } @$kids) {
     for my $w (@{ $b->find(sub { $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'sub' }) || [] }) {
+      # past a prototype, a signature or attributes to the body (#3368 R9:
+      # `sub (&) {…}` and `sub :lvalue {…}` were skipped as not-a-sub)
       my $n = $w->snext_sibling;
+      $n = $n->snext_sibling
+        while $n && ($n->isa('PPI::Token::Prototype') || $n->isa('PPI::Structure::Signature')
+                     || $n->isa('PPI::Token::Attribute')
+                     || ($n->isa('PPI::Token::Operator') && $n->content eq ':'));
       push @subs, $n if $n && $n->isa('PPI::Structure::Block');
     }
   }

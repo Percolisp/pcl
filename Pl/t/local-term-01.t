@@ -394,4 +394,29 @@ sub show { print "$_[0] n=$n ", join(" ", $g1, $g2, $g3, $g4, $g5, $g6, $g7, $g8
 show("out");
 PERL
 
+# 17. #3368 (R7, f7): a `while` / `until` condition's local is restored when
+#     the LOOP ends (perl restores it per iteration and at leaveloop), not at
+#     the enclosing block's end -- `while (local $_ = shift @a)`, the idiom.
+test_lt('while (local X = …): restored at the loop end', <<'PERL');
+our $x = 'orig'; our @a = (1, 2);
+{ while (local $x = shift @a) { } print "in-block x=[", defined $x ? $x : 'undef', "]\n"; }
+print "x=$x\n";
+our @b = (1, 2, 3); $_ = 'top';
+sub seen { print "seen $_\n" }
+{ while (local $_ = shift @b) { seen(); } print "after loop [", defined $_ ? $_ : 'undef', "]\n"; }
+our @c = (4, 5); our $y = 'y0';
+{ L: until (!defined(local $y = shift @c)) { print "y=$y\n"; last L if $y == 5 } print "y=$y\n"; }
+PERL
+
+# 18. #3368 (R9): an anonymous sub with a PROTOTYPE or an ATTRIBUTE in a
+#     while-condition `my` loop captures that iteration's variable (#3374).
+test_lt('while (my $x …) { sub (&) {…} / sub :lvalue {…} } captures per iteration', <<'PERL');
+my @q = (1, 2, 3); my @cbs;
+while (my $x = shift @q) { push @cbs, sub (&) { "$x:" . $_[0]->() } }
+print join(",", map { $_->(sub { "z" }) } @cbs), "\n";
+my @r = (4, 5); my @lv;
+while (my $y = shift @r) { push @lv, sub :lvalue { $y } }
+print join(",", map { $_->() } @lv), "\n";
+PERL
+
 done_testing();
