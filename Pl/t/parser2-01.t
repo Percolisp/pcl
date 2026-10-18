@@ -913,4 +913,19 @@ sub paren_balance {
   return $d;
 }
 
+
+# #3347 (s522a, fixed by #3061's sigil-exact count): an OVERSIZED top-level
+# `my $A` (F6: its extent is past $RUN_NEST_MAX, so it MUST be promoted) beside
+# a same-name `my @A` was refused promotion -- the scalar's "sole hard
+# declaration" was counted over every sigil -- and the file died "oversized
+# top-level my extent: $Answer not promotable" (IO-Compress t/cz-03zlib-v1.t).
+{
+  local $Pl::Parser2::RUN_NEST_MAX = 50;
+  my $f6 = eval { Pl::Parser2->parse_code(
+    qq{my \$A = '';\n\$A .= \$_ for qw(x y z);\nmy \@A = split('', \$A);\n}
+    . ("print scalar(\@A), \$A, \"\\n\";\n" x 4)) };
+  is($@, '', '#3347: an oversized my $A beside my @A is promoted, not refused');
+  like($f6 // '', qr/\$A__file__\d+|p-defcell \$A /, '#3347: ...and the scalar takes a cell');
+}
+
 done_testing();
