@@ -75,6 +75,7 @@ in detail why it exists.
 | module | why |
 |---|---|
 | `Carp` | the real one needs call-stack introspection PCL does not fully model. `croak` and `carp` keep the message but do not append " at FILE line N" |
+| `constant` | reached only by an explicit `require constant` + a run-time `constant->import(...)` / `import constant LIST` (`use constant` is lowered by the compiler and never loads it, #1506): the real one installs its helper constants by storing a scalar ref into its own stash (perl's proto-constant-sub rule), which PCL does not model.  Installs `sub NAME () { VALUE }` into the caller -- `NAME => VALUE`, a list constant, the hash form; the 1.21+ name refinements are not there |
 | `Config` | a fixed set of values for 64-bit Linux with SBCL |
 | `Errno` | the real one installs its constants through a symbol-table loop; these are the same constants, generated from perl |
 | `English` | the real one aliases names with glob assignments PCL cannot compile |

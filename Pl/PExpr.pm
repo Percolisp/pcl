@@ -3125,9 +3125,23 @@ sub handle_subcalls {
       # or a Symbol ($var) as object reference
       my $invocant = $next;
       my $invocant_is_class = 0;
+      # `import PACKAGE LIST` (task #1506): perl's own spelling of
+      # PACKAGE->import(LIST), and pragma packages are LOWER-case (`import
+      # constant HAVE_THREADS => 0`, `import threads`), which the class shape
+      # below refuses.  For the method `import` only, any package-shaped word
+      # that is not itself callable here is the invocant -- `import` being
+      # callable was already asked above (a file's own `sub import` keeps
+      # `import "foo", 1` its call, settlement 2 of the task).
+      my $import_invocant = $method_name eq 'import'
+          && ref($invocant) eq 'PPI::Token::Word'
+          && $invocant->content =~ /\A[^\W\d]\w*(?:::\w+)*\z/
+          && !exists $self->known_no_of_params->{$invocant->content}
+          && !$_indirect_skip{$invocant->content}
+          && !$self->_is_known_callable($invocant->content, 1);
       if (ref($invocant) eq 'PPI::Token::Word'
           && !$self->is_token_operator($invocant)
-          && Pl::Environment::class_bareword_shape($invocant->content)) {
+          && ($import_invocant
+              || Pl::Environment::class_bareword_shape($invocant->content))) {
         # A qualified name (Foo::bar) immediately followed by parens is a
         # function call — `is UNIVERSAL::isa($x,$y)` is `is(UNIVERSAL::isa(...))`,
         # NOT the indirect-object `UNIVERSAL::isa->is(...)`.  (The `new Foo::Bar(...)`
