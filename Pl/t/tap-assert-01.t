@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 28;
+plan tests => 34;
 
 sub run_cl {
     my ($code) = @_;
@@ -460,4 +460,41 @@ EXPECT
   ok($is_perls && $asserts >= 40,
      "perl-tests/t/op/caller.pl is perl's shared helper, not a stub"
      . " (perls=" . ($is_perls ? 1 : 0) . " asserts=$asserts)");
+}
+
+# ── task #1576: Test::More's `subtest` -- a NESTED stream, one parent row ────
+# Probed against perl 5.40.3's Test::More (stdout): the child stream is the
+# same TAP indented four spaces per level, opened by `# Subtest: NAME`; its
+# plan is its own (declared inside, or `1..N` printed at the END); a child
+# with no assertions fails the parent as `No tests run for subtest "NAME"`;
+# `plan skip_all` inside makes the parent `ok N # skip REASON`; subtest
+# returns 1 / 0; a die inside closes the child, reports the parent row, and
+# PROPAGATES (perl 5.40 does not trap it).  Before #1576 every one of these
+# died "Undefined subroutine &main::subtest" with no TAP at all.
+{
+  my $st = run_cl(q{use Test::More tests => 5;
+subtest 'inner' => sub { plan tests => 1; ok(1, 'a') };
+my $r = subtest 'failing' => sub { ok(0, 'bad'); ok(1, 'good'); };
+print "# r=$r\n";
+subtest 'empty' => sub { 1 };
+$r = subtest 'nested' => sub { ok(1,'n1'); subtest 'deep' => sub { ok(1,'d1'); done_testing; }; };
+print "# r=$r\n";
+subtest 'skipper' => sub { plan skip_all => 'why'; ok(1) };
+});
+  like($st, qr/^# Subtest: inner\n    1\.\.1\n    ok 1 - a\nok 1 - inner$/m,
+     'subtest: the child stream is indented, with its own plan and numbering');
+  like($st, qr/^    not ok 1 - bad\n    ok 2 - good\n    1\.\.2\n(?:.*\n)*?not ok 2 - failing\n(?:#.*\n)*?# r=0$/m,
+     'subtest: a failing child fails the parent row; the implicit plan is printed at the end; answers 0');
+  like($st, qr/^    1\.\.0\n(?:.*\n)*?not ok 3 - No tests run for subtest "empty"$/m,
+     'subtest: a child with no assertions fails the parent (No tests run)');
+  like($st, qr/^    # Subtest: deep\n        ok 1 - d1\n        1\.\.1\n    ok 2 - deep\n    1\.\.2\nok 4 - nested\n# r=1$/m,
+     'subtest: nested subtests indent further; a passing one answers 1');
+  like($st, qr/^    1\.\.0 # SKIP why\nok 5 # skip why$/m,
+     'subtest: plan skip_all inside a child is a skip row in the parent, not an exit');
+  my $die = run_cl(q{use Test::More tests => 2;
+subtest 'dies' => sub { ok(1,'x'); die "boom\n"; };
+ok(1, 'never');
+});
+  ok($die =~ /^    ok 1 - x\n    1\.\.1\nok 1 - dies$/m && $die =~ /boom/ && $die !~ /never/,
+     'subtest: a die inside closes the child, reports the parent row, then propagates');
 }

@@ -13,6 +13,23 @@
 
 (in-package :pcl)
 
+(defvar *tap-indent* ""
+  "The subtest indentation of every TAP line (#1576): four spaces per nested
+   subtest, put before each line %tap-out writes -- a child's stream is the
+   SAME stream, indented, as Test::Builder writes it.")
+
+(defun %tap-indent-lines (text)
+  "TEXT with *tap-indent* before every line (a no-op at the top level)."
+  (if (or (zerop (length *tap-indent*)) (zerop (length text)))
+      text
+      (with-output-to-string (o)
+        (let ((start 0) (len (length text)))
+          (loop while (< start len)
+                do (let ((nl (position #\Newline text :start start)))
+                     (write-string *tap-indent* o)
+                     (write-string text o :start start :end (if nl (1+ nl) len))
+                     (setf start (if nl (1+ nl) len))))))))
+
 (defun %tap-out (control &rest args)
   "Every TAP line this layer emits, through ONE writer (task #1115).
 
@@ -37,7 +54,8 @@
    the check is a single fixnum read (the table is empty), and with it on the
    behaviour is perl's, not a second policy of our own."
   (%p-with-wide-upgrade
-   (%p-out-string (apply #'format nil control args) *standard-output* nil))
+   (%p-out-string (%tap-indent-lines (apply #'format nil control args))
+                  *standard-output* nil))
   (%p-maybe-autoflush *standard-output*))
 
 ;;; Test state
@@ -50,6 +68,9 @@
 (defvar *test-plan-pid* nil)
 (defvar *test-failures* 0)
 (defvar *test-skipped* 0)
+(defvar *test-subtest-depth* 0
+  "How many `subtest' bodies are running (#1576).  Inside one, skip_all ends
+   the CHILD (throws to pl-subtest), never the program.")
 (defvar *test-todo* 0
   "Count of TODO tests (Test::More `local $TODO = ...`).  A failing TODO test is
    an *expected* failure (it does not count toward *test-failures*); an
@@ -144,22 +165,21 @@
    exact test-number integer (for unnamed tests)."
   `(%register-skips ,basename ',entries))
 
-;;; Export test functions
-(export '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
-          pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
-          pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
-          pl-eq_array pl-curr_test
-          pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
-
-;;; Register the TAP functions as DEFINED subs so Perl-level `defined &is`
-;;; introspection reports them — test.pl's real-perl fallback (used when a
-;;; test fork+execs a real perl child that requires './test.pl') keys on
-;;; `unless (defined &main::is)` to decide whether to eval its own bodies.
-(dolist (s '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
-             pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
-             pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
-             pl-eq_array pl-curr_test
-             pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
+;;; THE TAP API: one list, exported AND registered as DEFINED subs (these were
+;;; two copies of one list that had to agree; #1576 routed them through one).
+;;; Registered so Perl-level `defined &is' introspection reports them —
+;;; test.pl's real-perl fallback (used when a test fork+execs a real perl
+;;; child that requires './test.pl') keys on `unless (defined &main::is)' to
+;;; decide whether to eval its own bodies.  (%test-more-stash-install's list
+;;; is a different thing: perl's @Test::More::EXPORT, by perl name.)
+(defparameter *tap-api*
+  '(pl-plan pl-done_testing pl-ok pl-is pl-isnt
+    pl-like pl-unlike pl-cmp_ok pl-pass pl-fail
+    pl-skip pl-skip_all pl-diag pl-note pl-BAIL_OUT
+    pl-eq_array pl-curr_test pl-subtest
+    pl-is_deeply pl-use_ok pl-require_ok pl-isa_ok pl-can_ok pl-explain))
+(export *tap-api*)
+(dolist (s *tap-api*)
   (setf (gethash s *p-declared-subs*) :defined))
 
 ;;; curr_test() - provided here (not as a stub in test.pl) so it reads the
@@ -203,6 +223,8 @@
 ;;; Defined BEFORE pl-plan: `plan(skip_all => …)` calls it (perl's t/test.pl
 ;;; does the same), and a forward reference would be a load-time style-warning.
 (defun pl-skip_all (&optional reason)
+  (when (plusp *test-subtest-depth*)
+    (throw '%subtest-skip-all (if reason (to-string (unbox reason)) "")))
   (if reason
       (%tap-out "1..0 # Skip ~A~%" reason)
       (%tap-out "1..0~%"))
@@ -975,6 +997,72 @@
       (incf *test-count*)
       (%tap-out "ok ~A # skip ~A~%" *test-count* r)))
   (p-last-dynamic "SKIP"))
+
+;;; subtest NAME => CODE, ARGS (#1576).  Test::Builder's nested stream: the
+;;; child has its OWN plan and numbering, written through the SAME %tap-out
+;;; four spaces deeper (*tap-indent*), and is reported to the parent as ONE
+;;; row.  The child's state is the parent's counters REBOUND, not a second
+;;; plan machine (rule 11).  Probed against perl 5.40's Test::More:
+;;;   - `# Subtest: NAME' first, at the parent's indentation;
+;;;   - no plan by the end: `1..N' printed at the END (done_testing too);
+;;;   - no assertions: `1..0', `# No tests run!', and the parent row FAILS as
+;;;     `No tests run for subtest "NAME"';
+;;;   - skip_all inside: `1..0 # SKIP R', parent `ok N # skip R';
+;;;   - a die inside: the child is closed (its plan, the parent row as the
+;;;     rows so far say) and the die PROPAGATES -- perl 5.40 does not trap it;
+;;;   - the answer is 1 when the child passed, else 0.
+(defun %subtest-close (name skip)
+  "Close a child stream in the CHILD's state: its plan line and diagnostics.
+   Answers (values PASS PARENT-ROW-NAME SKIP-REASON)."
+  (cond
+    (skip
+     (%tap-out "1..0 # SKIP ~A~%" skip)
+     (values t nil skip))
+    ((zerop *test-count*)
+     (%tap-out "1..0~%")
+     (%tap-out "# No tests run!~%")
+     (values nil (format nil "No tests run for subtest \"~A\"" name) nil))
+    (t
+     (when (or *test-no-plan* (null *test-planned*))
+       (%tap-out "1..~A~%" *test-count*))
+     (let ((planned (and *test-planned* (not *test-no-plan*)
+                         (truncate (to-number *test-planned*)))))
+       (when (and planned (/= planned *test-count*))
+         (%tap-out "# Looks like you planned ~A test~:P but ran ~A.~%"
+                   planned *test-count*))
+       (when (plusp *test-failures*)
+         (%tap-out "# Looks like you failed ~A test~:P of ~A~:[~; run~].~%"
+                   *test-failures* *test-count*
+                   (and planned (/= planned *test-count*))))
+       (values (and (zerop *test-failures*)
+                    (or (null planned) (= planned *test-count*)))
+               nil nil)))))
+
+(defun %subtest-report (name pass row-name skip)
+  "The child's ONE row in the PARENT's stream."
+  (cond
+    (skip
+     (incf *test-count*)
+     (%tap-out "ok ~A # skip ~A~%" *test-count* skip))
+    (t (test-ok pass (or row-name name)))))
+
+(defun pl-subtest (name code &rest args)
+  (let ((name (to-string (unbox name)))
+        (pass nil) (row-name nil) (skip nil))
+    (%tap-out "# Subtest: ~A~%" name)
+    (unwind-protect
+         (let ((*tap-indent* (concatenate 'string *tap-indent* "    "))
+               (*test-subtest-depth* (1+ *test-subtest-depth*))
+               (*test-count* 0) (*test-planned* nil) (*test-no-plan* nil)
+               (*test-failures* 0) (*test-skipped* 0) (*test-todo* 0))
+           (unwind-protect
+                (setf skip (catch '%subtest-skip-all
+                             (apply #'p-funcall-ref code args)
+                             nil))
+             (multiple-value-setq (pass row-name skip)
+               (%subtest-close name skip))))
+      (%subtest-report name pass row-name skip))
+    (if pass 1 0)))
 
 ;;; Helper: split string (must be before pl-diag/pl-note which use it)
 (defun split-string (str delims)

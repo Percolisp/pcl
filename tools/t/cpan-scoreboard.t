@@ -28,7 +28,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 31;
+use Test::More tests => 34;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -83,6 +83,27 @@ TAP
   is($tap->{rows}[0]{got} . '/' . $tap->{rows}[0]{expected}, "'2'/'3'", 'got/expected are captured');
   is($tap->{rows}[1]{desc}, '', 'an unnamed row keys on the empty description (#1041)');
   is($tap->{rows}[2]{directive}, 'TODO later', 'a directive is recorded on the row, not folded into the count');
+}
+
+# ── a subtest's INDENTED stream is the child's: counted nowhere (#1576) ────
+# perl's TAP::Parser counts only top-level rows; the child's rows, its plan and
+# its diagnostics are indented and belong to the parent's ONE row.
+{
+  my $tap = PCLTap::parse_tap(<<'TAP');
+1..2
+# Subtest: inner
+    1..2
+    not ok 1 - inner bad
+    #      got: '1'
+    ok 2 - inner good
+not ok 1 - inner
+# Subtest: skipper
+    1..0 # SKIP why
+ok 2 # skip why
+TAP
+  is("$tap->{ok}/$tap->{notok}/$tap->{plan}", '1/1/2', 'subtest: only top-level rows and the top-level plan count');
+  is($tap->{rows}[0]{desc} . '|' . $tap->{rows}[0]{got}, 'inner|', 'subtest: the parent row is the failing row; a child diagnostic is not attached to it');
+  ok(!defined $tap->{skip_all}, 'subtest: a child skip_all is not the file\'s skip_all');
 }
 
 # ── the run: per-file table, row file, allowance announcement ──────────────
