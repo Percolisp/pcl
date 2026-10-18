@@ -3430,6 +3430,24 @@ sub _decl_syms_under {
   return @out;
 }
 
+# Does a my / our / local / state among ELEMS (a statement's significant
+# children, or a slice of them) declare AT THEIR LEVEL -- i.e. not inside a
+# nested block (a `do {}`, an anon sub, a map / grep / sort / eval block),
+# where it is scoped to that block and cannot be a self-reference of the
+# enclosing initializer (#3404: `my @n = my @t = (1, do { my $x = 2; $x })`
+# refused the whole file on a TEXT match)?  The nested-block climb is
+# _decl_syms_under's; a top-level declarator word is answered here.
+sub _elems_declare_at_level {
+  my @elems = @_;
+  for my $e (@elems) {
+    return 1 if $e->isa('PPI::Token::Word')
+             && $e->content =~ /^(?:my|our|local|state)$/;
+    next if !$e->isa('PPI::Node') || $e->isa('PPI::Structure::Block');
+    return 1 if _decl_syms_under($e, words => 'my|our|local|state');
+  }
+  return 0;
+}
+
 # Does $stmt declare canonical $canon (sigil-qualified) via my/state?
 # THE PARAMETER NAMES A SIGNATURE DECLARES (task #454).  perl desugars
 # `sub f ($x, $y = 5) {…}` to declarations INSIDE the sub — `my $x = $_[0]`
@@ -11271,7 +11289,7 @@ sub _lower_block_1 {
           my %seen;
           my @all = grep { !$seen{$_}++ } (@$vars, @chain_names);
           die "Parser2 TODO: self-referential init: " . $first->content
-            if $final_txt =~ /(?<![-\w])(?:my|our|local|state)\b/
+            if _elems_declare_at_level(@r)
             || (grep { $final_txt =~ _reads_name_rx($_) } @all)
             || (grep { $self->{_file_lex_renamed}{$_} } @all);
           $self->_reg_lex(@all);
@@ -11286,7 +11304,7 @@ sub _lower_block_1 {
         # A nested declarator in the RHS (`my @a = my @a = …`) or a var already
         # promoted to a renamed package cell still needs v1's fuller machinery.
         die "Parser2 TODO: self-referential init: " . $first->content
-          if $rhs_txt =~ /(?<![-\w])(?:my|our|local|state)\b/
+          if _elems_declare_at_level(@rhs)
           || grep { $self->{_file_lex_renamed}{$_} } @$vars;
         if (@$vars == 1
             && $k[1]->isa('PPI::Token::Symbol') && $k[1]->content =~ /^[\@\%]\w+$/) {

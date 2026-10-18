@@ -947,4 +947,17 @@ like($@, qr/^PCL: unsupported in string eval: trailing declaration has no value/
   like($ev, qr/\(p-foreach-range-raw|\(p-map \(lambda/, 'the eval body with a local is lowered STRUCTURALLY (map goes through the structural route)');
 }
 
+# #3404 (s520a): a chained `my` whose final initializer holds a declarator
+# INSIDE a nested block (`do { my $x ... }`, map/grep/eval blocks, an anon
+# sub) is not self-referential -- the test is structural, not textual.
+# Type-Tiny t/21-types/Any.t refused at `pass => 'filehandle' => do { open my
+# $x, ... }`.  A declarator at the initializer's own level still refuses.
+my $ch = eval { Pl::Parser2->parse_code(
+  q{my @n = my @t = (1, do { my $x = 2; $x }, map { my $y = $_; $y } 3); print "@n|@t\n";}) };
+is($@, '', '#3404: a chained my whose init declares only inside nested blocks lowers');
+like($ch // '', qr/p-let/, '#3404: the chained my is actually emitted');
+eval { Pl::Parser2->parse_code(q{my @c = my @d = (3, my $q = 4); print "@c|@d|$q\n";}) };
+like($@, qr/Parser2 TODO: self-referential init/,
+     '#3404 INVERSE: a declarator at the initializer\'s own level is still refused');
+
 done_testing();
