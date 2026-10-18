@@ -342,4 +342,20 @@ eval { die "y" }; at($@, "die2");
 print "LINE ", __LINE__, "\n";
 PERL
 
+# 14. #3365 (R3, f3b): a PARENTHESISED deref lvalue is a list assignment --
+#     `local($$r) = (7, 8)` stores 7, `local(${"main::g"}) = @_` the FIRST
+#     argument; unparenthesised `local $$r = (7, 8)` is scalar (8); the plain
+#     `local($g) = (5, 6)` beside them.  (`local($$r, $y) = …` is the older
+#     loud Parser2 TODO, #3470.)
+test_lt('local($$r) / local(${"name"}) = LIST: list assignment', <<'PERL');
+our $g = 1; my $r = 'g';
+{ local($$r) = (7, 8); print "g=$g\n"; }
+print "g=$g\n";
+sub t { local(${"main::g"}) = @_; print "in t g=$g\n" } t(3, 4); print "g=$g\n";
+{ local $$r = (7, 8); print "g=$g\n"; }
+{ local($g) = (5, 6); print "g=$g\n"; }
+{ local(${"main::g"}) = 5; print "g=$g\n"; }
+print "g=$g\n";
+PERL
+
 done_testing();

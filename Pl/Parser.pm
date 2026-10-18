@@ -4644,6 +4644,7 @@ sub _process_local_declaration {
   # `local($h{k}) = $v` loop, and 1.27 s through `p-list-=`).  The
   # UNSUBSCRIPTED spelling is fixed, from $paren_lhs further down, off @$parts,
   # which this unwrap does not touch (#1243 (a)).
+  my $deref_paren = 0;
   if (@non_ws >= 1 && ref($non_ws[0]) eq 'PPI::Structure::List') {
     my @flat;
     for my $child ($non_ws[0]->children) {
@@ -4675,6 +4676,13 @@ sub _process_local_declaration {
       # this it falls through to the generic list-local path which clobbers the
       # base scalar (e.g. `local($s->{apad}) = ...` overwrote $s).  The cast
       # spelling `local(@$r{qw(a b)})` too (B::Deparse 6279, s520).
+      # An UNSUBSCRIPTED cast -- `local($$r)`, `local(${"main::g"})` -- is
+      # unwrapped for the deref branch below, which must still read the
+      # parens: they make the assignment a LIST one (#3365: `local($$r) =
+      # (7, 8)` stores 7, `= @_` the first argument).
+      $deref_paren = 1 if ref($flat[0]) eq 'PPI::Token::Cast'
+        && !grep { ref($_) eq 'PPI::Structure::Subscript'
+                   || (ref($_) eq 'PPI::Token::Operator' && $_->content eq '->') } @flat;
       splice(@non_ws, 0, 1, @flat);
     }
   }
@@ -5077,7 +5085,7 @@ sub _process_local_declaration {
         && $non_ws[2]->content eq '=') {
       # perl evaluates the RHS BEFORE localizing (`local ${'g'} = ${'g'} + 1`
       # reads the OLD value), so it is bound OUTSIDE the open below.
-      my $rhs_ctx = ($sigil eq '$') ? 0 : 1;
+      my $rhs_ctx = ($sigil eq '$' && !$deref_paren) ? 0 : 1;
       $init_cl = $self->_parse_expression([@non_ws[3 .. $#non_ws]], $stmt,
                                           $rhs_ctx) // 'nil';
       $init_cl = "(let ((*wantarray* t)) $init_cl)" if $rhs_ctx;
@@ -5137,7 +5145,9 @@ sub _process_local_declaration {
       my $fn = $sigil eq '@' ? 'p-array-deref-='
              : $sigil eq '%' ? 'p-hash-deref-='
              :                 'p-setf';
-      my $assign = "($fn $place_cl $tmp)";
+      my $assign = $sigil eq '$' && $deref_paren
+                 ? "(p-list-= (vector $place_cl) $tmp)"    # local($$r) = LIST
+                 : "($fn $place_cl $tmp)";
       $self->_emit(defined $dtest ? "(when $dtest $assign)" : $assign);
     }
     else {
