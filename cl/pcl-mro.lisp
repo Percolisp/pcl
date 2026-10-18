@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-7184
+;;; pcl: pipeline=v2 gen=v2-7284
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -176,7 +176,7 @@
                   (lambda ($_)
                     (make-p-box
                       (p-array-init
-                        (p-cast-@ (p-list-ctx (mro::pl-_c3_linearize $_ $seen)) :rvalue))))
+                        (p-cast-@ (p-scalar-ctx (mro::pl-_c3_linearize $_ $seen)) :rvalue))))
                   @parents))
               (p-push @seqs (make-p-box (p-array-init @parents)))
               (p-let ((@result :array (make-array 0 :adjustable t :fill-pointer 0)))
