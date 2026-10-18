@@ -3485,13 +3485,10 @@ sub handle_subcalls {
             && @inner_ch
             && $inner_ch[0]->isa('PPI::Token::Word')) {
           my $comp_name = $inner_ch[0]->content();
-          my $is_builtin = exists $self->known_no_of_params->{$comp_name};
           # If NAME is followed immediately by (...), it's a function call: sort(func(args))
           # not a comparator: sort(NAME LIST).
           my $is_funcall = (@inner_ch >= 2 && ref($inner_ch[1]) eq 'PPI::Structure::List');
-          unless ($is_builtin || $is_funcall
-                  || $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/
-                  || $comp_name =~ /^CORE::/) {
+          if (!$is_funcall && $self->_sort_word_is_subname($comp_name, $inner_ch[1])) {
             my($top_node, $top_id) = $self->make_node_insert('funcall');
             my $node_id = $self->make_node($now);
             $self->add_child_to_node($top_id, $node_id);
@@ -3861,8 +3858,7 @@ sub handle_subcalls {
       my $comp_name = $next->content();
       # Only treat as comparator if NOT a known built-in (reverse, etc.)
       # and NOT a keyword (my, if, etc.)
-      my $is_builtin = exists $self->known_no_of_params->{$comp_name};
-      unless ($is_builtin || $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/ || $comp_name =~ /^CORE::/) {
+      if ($self->_sort_word_is_subname($comp_name, $e->[$i+2])) {
         my($top_node, $top_id) = $self->make_node_insert('funcall');
         my $sort_id = $self->make_node($now);
         $self->add_child_to_node($top_id, $sort_id);
@@ -6534,6 +6530,18 @@ sub _reduce_pre {
 # LIST — parsed as a comma list, each item attached to $top_id, and the whole
 # run from $i replaced by $top_node; with nothing after the head the two
 # elements are replaced in place.  Once per block-form call.
+# Is WORD, the first thing after `sort` (bare or inside its parentheses), the
+# SUBNAME comparator?  Not a builtin, not a keyword, not CORE::, and -- perl's
+# rule -- not when the next token is `->`: then WORD is a CLASS that starts
+# the LIST (`sort K->new->names`, #3403).  ONE predicate for both forms.
+sub _sort_word_is_subname {
+  my ($self, $comp_name, $after) = @_;
+  return 0 if exists $self->known_no_of_params->{$comp_name};
+  return 0 if $comp_name =~ /^(?:CORE|my|our|local|sub|if|else|elsif|unless|while|until|for|foreach|do|return|use|package|BEGIN|END|not|and|or|eq|ne|lt|gt|le|ge|cmp|x)$/ || $comp_name =~ /^CORE::/;
+  return 0 if $after && $after->isa('PPI::Token::Operator') && $after->content() eq '->';
+  return 1;
+}
+
 sub _take_rest_as_args {
   my ($self, $e, $i, $top_id, $top_node) = @_;
   if ($i + 2 < scalar(@$e)) {

@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 24;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -273,3 +273,13 @@ test_cl('sort NAME: the LIST runs before the entry die',
      my $ok = eval { my @s = sort nope_ord (side()); 1 };
      print "died:", ($ok ? 0 : 1), "\n";',
     "LIST\ndied:1\n");
+
+# #3403 (s520a): after `sort`, a WORD followed by `->` is a CLASS starting the
+# LIST, never SUBNAME -- bare and parenthesised (the statement was DROPPED,
+# "Expr starts with ->").  A declared sub is still SUBNAME.  Probed perl 5.40.3.
+test_cl('sort K->new->names: a WORD before -> is the list, not the comparator',
+    'package K; sub new { bless {}, shift } sub names { ("b", "a", "c") }
+     package main; sub foo { $a cmp $b } my @l = qw(z x y);
+     print join(",", sort K->new->names), "|", join(",", sort(K->new->names)), "|",
+           join(",", sort { $b cmp $a } K->new->names), "|", join(",", sort foo @l), "\n";',
+    "a,b,c|a,b,c|c,b,a|x,y,z\n");
