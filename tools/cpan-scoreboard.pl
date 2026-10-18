@@ -437,6 +437,12 @@ if (defined $rows_file) {
       my ($num, $desc, $got, $exp, $dir) = split /\t/, $l, 5;
       $desc = '' unless defined $desc;
       $desc .= " # $dir" if defined $dir && length $dir;   # TODO/SKIP directive
+      # A temp-file name in a description changes every run, and the
+      # description is the JOIN KEY: a random `/tmp/<name>` component is
+      # written as `/tmp/XXXX`, so the blessed row and every run's row carry
+      # the same key (RULED s519 #2, DECIDED ## s519; Path-Tiny filesystem.t
+      # `Read contents of /tmp/MuB2nxVyim correctly`).
+      $desc =~ s{/tmp/[A-Za-z0-9_]{6,}(?![A-Za-z0-9_.-])}{/tmp/XXXX}g;
       print $fh join("\t", basename($dist), $file, $num, $desc,
                            $got // '', $exp // ''), "\n";
       $nrows++;

@@ -21,7 +21,7 @@ use FindBin qw($RealBin);
 
 my $root = "$RealBin/../..";
 plan skip_all => 'sbcl not found' if !`which sbcl 2>/dev/null`;
-plan tests => 5;
+plan tests => 6;
 
 my $dist = tempdir(CLEANUP => 1);
 mkdir "$dist/t" or die "$dist/t: $!";
@@ -101,3 +101,17 @@ close $gt;
 my $gout = `cd / && "$root/tools/run-dist-t.pl" --rows "$rdist" t/glue.t 2>/dev/null`;
 like($gout, qr/^PLAN\t1\t/m, 'a newline-less stderr line does not hide the plan')
   or diag($gout);
+
+# A random /tmp/<name> in a row DESCRIPTION is written as /tmp/XXXX by the
+# board's row writer (RULED s519 #2): the description is the join key.
+open my $tt, '>', "$rdist/t/tmpname.t" or die;
+print $tt 'print "1..2\n"; print "not ok 1 - Read contents of /tmp/MuB2nxVyim correctly\n";'
+        . ' print "not ok 2 - kept /tmp/cpan-board.log\n";' . "\n";
+close $tt;
+unlink "$rdist/t/glue.t", "$rdist/t/rel.t", "$rdist/t/fixture.txt";
+my $rowsf = "$rdist/rows.tsv";
+system("cd / && \"$root/tools/cpan-scoreboard.pl\" --rows \"$rowsf\" \"$rdist\" >/dev/null 2>&1");
+my $rows = do { open my $rf, '<', $rowsf or die "no rows file: $!"; local $/; <$rf> } // '';
+like($rows, qr{\tRead contents of /tmp/XXXX correctly\t.*\n(?s:.*)\tkept /tmp/cpan-board\.log\t}m,
+     'a random /tmp component is /tmp/XXXX in the row file, a named one is kept')
+  or diag($rows);
