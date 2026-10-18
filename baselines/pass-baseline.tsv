@@ -1,4 +1,9 @@
 # taken-at: 5323d9e 2026-08-15
+# s519b (2026-10-18, Opus, EDITED BY HAND -- NO count change, Fable ruling s520): multideref.t stays 61 -- its two rows
+#   "RT #130727 array not autovivified" (row 47) and "... part 2" (row 49) left cl/skip-registry.lisp (STALE since s519a m0); the
+#   sweep already counted them as passing (61 before and after, REGISTRY-STALE 2 -> 0).  Row 47 passes HONESTLY (the hoisted
+#   `local` restores the element, #3370); row 49 passes ACCIDENTALLY (the multideref.t:220 refusal dies before the assignment
+#   runs, #3414 -- re-examine when :220 is lowered).
 # s519a (2026-10-18, Opus, EDITED BY HAND -- one row, TOTAL 18748 -> 18756, #3370): multideref.t 53 -> 61 --
 #   a `local` TERM now localizes (local const/pkg/lexical/general indices 3, delete: const indices, RT #134045 + the 2 shortfall rows).
 # s518e (2026-10-18, Opus, EDITED BY HAND -- one row, TOTAL 18746 -> 18747, #3281): anonsub.t 6 -> 7 -- row 9

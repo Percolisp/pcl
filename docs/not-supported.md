@@ -1330,6 +1330,9 @@ row now pass and are no longer in the skip registry.
   `perl-tests/multideref.t` rows 47 and 49 ("RT #130727 array not autovivified"), in
   `cl/skip-registry.lisp`; they passed BY ACCIDENT before s470bk (#1058) — PCL never
   died there either, but nothing was vivified, so `!defined` happened to hold.
+  **Since s519a (#3370) both rows PASS and left the registry (s519b, Fable ruling s520)**: row 47
+  honestly (the hoisted `local` restores the element), row 49 by ACCIDENT (the
+  multideref.t:220 refusal dies before its assignment runs, #3414 -- re-examine when :220 is lowered).
 - **`local` on a nested element whose intermediate is undef — BUG, task #1190 (not a
   limitation).**  `local $y[0][0] = 5` must vivify `$y[0]` and read 5 inside the scope;
   PCL reads empty and never vivifies.  `my $q = local $w[0][0]` likewise leaves `$w[0]`
