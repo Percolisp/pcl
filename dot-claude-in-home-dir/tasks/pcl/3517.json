@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521 (Fable, 2026-10-18 18:5x) beside #3516, from the same probe (scratchpad rv/globstr3.pl): identical on the ed8a4504 base and on main, so PRE-EXISTING (not s521a's).\n    sub via_arg { my $rval = \\$_[0]; return \"\" . $$rval }\n    open(my $fh, '<', $0) or die; bless $fh, 'Z';\n    print via_arg($$fh), \"\\n\";     # perl *main::$fh      PCL Z=GLOB(0x...)\nperl names an anonymous lexical handle's glob `*main::$fh` (the variable's name); PCL's glob value for an `open my $fh` handle has no glob name, so its stringification falls through to the blessed-reference form.  Low: Data::Dump of a blessed lexical filehandle is the only known consumer (it would print `bless(\\Z=GLOB(...), \"Z\")` instead of `bless(\\*main::$fh, \"Z\")`).  FIX SHAPE: when #3516 is fixed, the glob VALUE's string for a nameless lexical handle should be `*main::$NAME` (perl's `$fh`-named glob) -- the emitter knows the variable name at the `open my $fh` site; record it on the handle's glob as perl does.  Probe `\"\" . *$fh` directly too.  A filler.\n",
+   "id" : 3517,
+   "status" : "pending",
+   "subject" : "PRE-EXISTING: a blessed OPEN handle's glob value (`open my $fh, ...; bless $fh, 'Z'`) passed through @_ stringifies as `Z=GLOB` where perl prints `*main::$fh` -- the lexical-handle glob has no name string in PCL (its to-string falls to the reference form); LOW"
+}
