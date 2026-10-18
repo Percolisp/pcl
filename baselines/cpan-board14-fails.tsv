@@ -157,6 +157,7 @@
 #   recurse size subsumes symlinks temp, filesystem + rel-abs *PLAN*; IO-Compress 004gziphdr *PLAN*).  PASS now: entities 13/0, 160_cookies
 #   2/0, parent 11/0, recurse 2/0, size 5/0, subsumes 5/0, symlinks 2/0, has_same_bytes 3/0.  ENTERED 22 rows with their causes:
 #   #3550 #3551 #3552 #3553 #3554 #3555 #3556 #3557 filed by s521c; #564 #660 #1815 #2370 #2853 existing.
+#   s521d (2026-10-18): #3516 -- Data-Dump glob.t 5 LEFT by edit (one-file run 6/0).
 Algorithm-Diff-1.201-0	base.t	6			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	10			"a h n p"	#1511 A (same hunk-iteration family)
 Algorithm-Diff-1.201-0	base.t	15			"$VAR1 = [[['-',0,'a']],[['+',2,'d']],[['-',4,'h'],['+',4,'f']],[['+',6,'k']],[['-',8,'n'],['+',9,'r'],['-',9,'p'],['+',10,'s'],['+',11,'t']]];"	#1511 A (same hunk-iteration family)
@@ -193,7 +194,6 @@ Class-Method-Modifiers-2.15-0	140-lvalue.t	7	after array lvalue attribute sets v
 Class-Method-Modifiers-2.15-0	140-lvalue.t	9	after with lvalue and prototype correctly assigns	undef	'4'	#930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
 Data-Dump-1.25-0	quote-unicode.t	5			"(\"\\x{FFF}\\x{100FF}\" x 30)"	#1573 (Data::Dump rendering: the "x 30" repeat form of a wide string)
 Data-Dump-1.25-0	quote.t	12			"do {\n  require MIME::Base64;\n  MIME::Base64::decode(\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==\");\n}"	#2066 (Data::Dump's TRY_BASE64 branch is reachable now that MIME::Base64 loads, and PCL still emits the pack("H*") form)
-Data-Dump-1.25-0	glob.t	5		'bless(\IO::Socket::INET=*Symbol::GEN1, "IO::Socket::INET")...'	'bless(Symbol::gensym(), "IO::Socket::INET")'	#3516 (REGRESSION s521a #3433: a glob VALUE through @_ stringifies with its class; LOST at the round-2 board on MAIN-READY-34, 6/0 on the ed8a4504 extraction)
 Role-Tiny-2.002004-0	concrete-methods.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#135 (role composition: a constant-installed sub is not composed — "Undefined subroutine &MyRole1::before_constant_deflate")
 Role-Tiny-2.002004-0	extend-role-tiny.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1570 (READ ERROR: "Package Role::Tiny does not exist" — same)
 Role-Tiny-2.002004-0	load-module.t	2	modules not loaded if symbol table entries exist	'1'	'0'	NS:Error message text and format (require diagnostics: "Compilation failed", "did not return a true value", and a symbol-table-entry check)
