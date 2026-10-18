@@ -1163,6 +1163,16 @@ still open: `$$ {EXPR}` — PID magic, a SPACE, then braces — is an element of
 adjacency rule), and the WHOLE-container spellings (`keys %$`, `%? = (…)`)
 still drop, because PPI lexes `%?` as two operators (task #550).
 
+**A capture promotion is SIGIL-EXACT (normative, s522a, task #3061).**
+`$x`, `@x` and `%x` are three variables, and each is promoted to its own
+`__file__` cell on its own facts: the "sole declaration in its extent" test
+counts declarations of the ONE canonical symbol, never every sigil of the bare
+name, because every rewrite the promotion performs keys on the canonical
+symbol (`$x[0]` is `@x`'s element).  Example: `my $e = 1; my @e = (5, 6);
+sub rf { $e ? $e[1] : 0 }` emits `p-defcell $e__file__0` and
+`p-defcell @e__file__1`, and `rf()` is 6 -- it was a whole-file refusal.  The
+forced promotion of an oversized extent (F6) takes the same test.
+
 ### 2b.2 The declaration forms
 
 | Perl | v2 emission |
@@ -2796,6 +2806,17 @@ body…)`), `p-foreach ((VAR LIST) body…)` and its read-only twin
 `:label NAME` (must be first key) and `:continue (progn …)`.  The foreach
 family additionally accepts `:my t` (after `:label`, before the body) —
 see "Loop variable: lexical or localized" below.
+
+**A `my` declaration with a LOOP modifier (normative, s522a, task #3375).**
+`my DECL = EXPR for LIST;` (and `foreach` / `while` / `until`, any
+declaration shape) is the block loop `for (LIST) { my DECL = EXPR }` followed
+by the declaration WITHOUT its init: EXPR runs once per iteration and names
+the binding OUTSIDE the statement (a `my` is visible only after it), and the
+declared variable is fresh afterwards -- perl clears the pad entry at each
+iteration's scope exit.  Example: `my $n = 0; my $w = $n++ while $n < 3;`
+leaves `$n` 3 and `$w` undef; `my @a = ($_) for 1..2;` leaves `@a` empty.  The
+compiler re-parses the statement's own text as that loop, line-aligned, so a
+heredoc inside such a statement is refused.
 
 **A loop statement MODIFIER is its block loop (normative, s494p, task
 #2098).**  `EXPR for LIST;` / `EXPR foreach LIST;` compile exactly as
