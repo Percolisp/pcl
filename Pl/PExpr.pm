@@ -6035,6 +6035,12 @@ sub _print_handle_before_list {
   return 0 unless $i > 0 && $self->is_list($e->[$i + 1]);
   my $prev = $e->[$i - 1];
   return 0 unless $self->is_word($prev) && $prev->content =~ /^(?:print|printf|say)$/;
+  # Only `WORD (LIST)` with WHITESPACE before the paren: perl's lexer reads
+  # `print WORD(LIST)` as a CALL whatever WORD is (`print STDOUT("x")` dies
+  # "Undefined subroutine &main::STDOUT"; probed 5.40.3) -- and
+  # `*{"main::SEEK_SET"} = sub { 7 }; print SEEK_SET(), "\n"` prints 7.
+  my $gap = $e->[$i]->next_sibling;
+  return 0 unless $gap && $gap->isa('PPI::Token::Whitespace');
   my $name = $e->[$i]->content;
   my $registered = $self->has_environment && $self->environment->is_filehandle($name);
   return 0 unless $registered || Pl::Environment::fh_bareword_shape($name);

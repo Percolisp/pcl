@@ -97,4 +97,15 @@ sub QUUX { "quux(@_)" } print QUUX ("N"), "\n";
 print STDOUT ("O", "o"), "\n";
 PERL
 
+# 3. `print WORD(LIST)` -- NO whitespace before the paren -- is a CALL in perl
+#    whatever WORD is (the rule above needs the gap): a sub installed at run
+#    time through the glob (Pl/t/case-invert-01.t row 12's shape).
+test_ph(q{print WORD(LIST) without a gap is a call}, <<'PERL');
+no strict "refs";
+*{"main::SEEK_SET"} = sub { 7 };
+*{"main::LOGFH"} = sub { "w:@_" };
+print SEEK_SET(), "\n";
+print LOGFH("x"), "\n";
+PERL
+
 done_testing();
