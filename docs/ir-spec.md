@@ -2077,7 +2077,20 @@ print E->explain;   # ex -- and Test::More's explain still works
 
 `(p-declare-sub pl-NAME)` is a forward stub so earlier code can reference
 the name; it is normally overwritten by the real `p-sub` before anything
-calls it.
+calls it.  **A sub the file DEFINES is declared `(p-declare-sub pl-NAME
+:body)`, which RESERVES the name at the head of its section (normative,
+s519b, #3405)**: every form read after it -- a call written ABOVE the
+definition among them -- reads the package's own symbol, never the inherited
+`:pcl` one.  A qualified definition written in another package's section
+carries its qualifier, `(p-declare-sub E::pl-explain :body :E)`, and is
+reserved in `E`.  A bodyless `sub ok ($@);` reserves nothing (a declaration
+of an inherited name keeps reading it).  A definition made by a STRING EVAL
+is reserved only when the eval runs, so code read before it keeps the
+inherited symbol (#3430).
+
+```perl
+package E; sub a { explain() } sub explain { "E" }   # E::a() is "E"
+```
 
 **FACTS (normative, s469bg, task #1035 step 3)** is a plist at a FIXED
 position after the lambda list — **always present, possibly `()`** — holding

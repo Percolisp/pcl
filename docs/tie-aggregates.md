@@ -219,6 +219,7 @@ fixed-arity print arms), `p-printf`, `%p-readline-impl` / `%p-readline-all`
 
 `local *FH` undoes a tie made inside its scope (perl change 11639);
 **A bare `local *STDIN` / `*STDOUT` / `*STDERR` localizes the IO for real (s518d, #3203; ir-spec §2.4b).**
+**In ANY package, too (s519b, #3376): the name is forced to main, so `local *STDOUT` in package P localizes `*main::STDOUT` and a tie on STDOUT is out of force inside the scope; `*A = *STDOUT` aliases the standard handle, so `print A` reaches its tie.**
 otherwise `local *FH` still does not localize a glob's IO slot (pre-existing).
 A missing method dies perl's way (`Can't locate object method "PRINTF" via
 package "T"`), trappably.  DESTROY is never called (USER ruling).
