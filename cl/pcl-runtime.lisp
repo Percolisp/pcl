@@ -16028,6 +16028,10 @@ which is one of #1140's escape spellings (probed)."
          (when stash-pkg
            (let ((sym (%p-resolve-sub-symbol
                        (concatenate 'string stash-pkg "::" k))))
+             ;; The *p-declared-subs* entry STAYS: a COMPILED `defined
+             ;; &Pkg::name` keeps seeing the sub (perl's op pins the glob),
+             ;; while every RUN-TIME name lookup misses -- the symbolic
+             ;; predicates treat :defined-but-unbound as gone (#3511).
              (when (and sym (fboundp sym))
                (fmakunbound sym)))))
        (multiple-value-bind (v found) (gethash k h)
@@ -16118,6 +16122,14 @@ which is one of #1140's escape spellings (probed)."
       ;; below calls GETHASH directly rather than going through p-gethash, so it
       ;; needs its own guard (task #154; t/op/avhv.t t30).
       (when (%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
+      ;; A STASH slice (`delete @{"Pkg::"}{LIST}`, namespace::clean's idiom):
+      ;; every key goes through p-delete, the ONE path that writes a stash
+      ;; delete through to the package (task #3511).
+      (when (gethash h *p-stash-pkg-table*)
+        (return-from p-delete-hash-slice
+          (let ((result (make-array n :adjustable t :fill-pointer 0)))
+            (dotimes (i n result)
+              (vector-push-extend (p-delete h (svref flat i)) result)))))
       (let ((result (make-array n :adjustable t :fill-pointer 0)))
         (dotimes (i n result)
           (let ((k (to-string (svref flat i))))
@@ -16257,6 +16269,52 @@ which is one of #1140's escape spellings (probed)."
                  (setf (gethash (concatenate 'string child "::") h)
                        (make-p-box 1)))))))
 
+(defun %p-stash-variable-name (sym)
+  "The perl NAME a package symbol gives the stash when it is a VARIABLE or a
+   FILEHANDLE PCL records (task #1510, the bounded view of s522's ruling), or
+   NIL.  A variable counts when its cell is bound -- except two cells PCL makes
+   for EVERY package that perl's stash holds only once the program touches
+   them: `@ISA` (p-defpackage's empty vector) counts when it is non-empty, and
+   the sort specials `$a` / `$b` when they hold a value.  A filehandle counts
+   when *p-filehandles* has it."
+  (let* ((name (symbol-name sym))
+         (n (length name)))
+    (cond
+      ((and (> n 1) (find (char name 0) "$@%") (boundp sym))
+       (let ((perl-name (%pcl-invert-case (subseq name 1)))
+             (v (symbol-value sym)))
+         (cond
+           ((and (string= name "@isa")
+                 (not (and (vectorp v) (> (length v) 0))))
+            nil)
+           ((and (member name '("$a" "$b") :test #'string-equal)
+                 (or (not (p-box-p v)) (null (unbox v)) (eq (unbox v) *p-undef*)))
+            nil)
+           (t perl-name))))
+      ((nth-value 1 (gethash sym *p-filehandles*))
+       (%pcl-invert-case name))
+      (t nil))))
+
+(defun %p-stash-variable-value ()
+  "The element VALUE a stash snapshot holds for a non-CODE symbol: a box whose
+   READ dies (rule 12).  perl's value is the typeglob, and stash values as
+   globs are the deferred full model (docs/not-supported.md \"Live
+   symbol-table hashes\"), so `keys` / `exists` / `scalar %Pkg::` answer and a
+   read of the value says it is not there instead of answering wrong."
+  (flet ((refuse (&rest _)
+           (declare (ignore _))
+           (%p-die-error nil "PCL: stash element value for a non-CODE symbol is not supported (docs/not-supported.md \"Live symbol-table hashes\")")))
+    (make-p-box (make-p-magic-cell :getter #'refuse :setter #'refuse))))
+
+(defun %p-stash-add-variable-names (pkg h)
+  "Add a key to stash snapshot H for every variable / filehandle of PKG that
+   %p-stash-variable-name names and no sub already keys."
+  (do-symbols (sym pkg)
+    (when (eq (symbol-package sym) pkg)
+      (let ((perl-name (%p-stash-variable-name sym)))
+        (when (and perl-name (not (nth-value 1 (gethash perl-name h))))
+          (setf (gethash perl-name h) (%p-stash-variable-value)))))))
+
 (defun p-stash (pkg-name)
   "Return the package stash as a hash mapping Perl symbol names to code-ref boxes.
    Keys are lowercase Perl sub names; values are (make-p-box function).  Child
@@ -16289,7 +16347,8 @@ which is one of #1140's escape spellings (probed)."
             (when (and (>= n 4) (string-equal (subseq name 0 3) "PL-"))
               (let ((perl-name (subseq (%pcl-invert-case name) 3)))
                 (setf (gethash perl-name h)
-                      (make-p-box (symbol-function sym)))))))))
+                      (make-p-box (symbol-function sym))))))))
+      (%p-stash-add-variable-names pkg h))
     (%p-stash-add-child-namespaces pkg-name h)
     (setf (gethash h *p-stash-pkg-table*) pkg-name)
     h))
@@ -33553,7 +33612,13 @@ would consume, so it dies naming the stream (rule 12)."
         ;; Symbolic name: exists iff it resolves to a known sub (stub or defined).
         ((or (stringp v) (numberp v))
          (let ((sym (%p-resolve-sub-symbol v)))
-           (and sym (or (gethash sym *p-declared-subs*) (fboundp sym)) t)))
+           (and sym
+                (or (fboundp sym)
+                    (let ((st (gethash sym *p-declared-subs*)))
+                      ;; :defined with no function = deleted from its stash
+                      ;; (p-delete): gone for a run-time lookup (#3511)
+                      (and st (not (eq st :defined)))))
+                t)))
         (t nil))))))
 
 (defun p-coderef-defined-p (coderef)
@@ -33585,9 +33650,12 @@ would consume, so it dies naming the stream (rule 12)."
       ((or (stringp v) (numberp v))
        (let* ((sym (%p-resolve-sub-symbol v))
               (status (and sym (gethash sym *p-declared-subs*))))
+         ;; fboundp in both arms: a stash delete (p-delete) leaves the
+         ;; :defined status for a COMPILED `defined &name` and unbinds the
+         ;; function, which is what a run-time lookup must see (#3511).
          (if (and sym
-                  (or (eq status :defined)
-                      (and (null status) (fboundp sym))))
+                  (fboundp sym)
+                  (or (eq status :defined) (null status)))
              (make-p-box 1)
              (make-p-box nil))))
       (t (make-p-box nil)))))

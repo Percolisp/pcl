@@ -4695,8 +4695,12 @@ sub _bare_container_sym {
   my $content = (ref($node) && Scalar::Util::blessed($node)
                  && $node->can('content')) ? ($node->content() // '') : '';
   (my $agg = $content) =~ s/^\Q$from\E/$to/;
+  # A STASH (`@Pkg::{LIST}` names `%Pkg::`, task #3511) goes through the
+  # symbol form too: its `%Pkg::` arm is the stash lowering, and a bare
+  # `%Pkg::` symbol cannot even be READ ("too many colons").
   if ($agg ne $content
-      && (ref $SPECIAL_VARS{$content} || _foreign_runtime_global_form($agg))) {
+      && (ref $SPECIAL_VARS{$content} || _foreign_runtime_global_form($agg)
+          || $agg =~ /^%.*::\z/)) {
     return Pl::CLForm::to_flat($self->gen_symbol_form($node, $agg));
   }
   return _swap_elem_sigil($rendered, $to, $from);
