@@ -57,6 +57,19 @@ my %CONST = (
     CVf_IsMETHOD => 1048576,
     SVt_PVGV => 9, SVt_PVHV => 12,
 );
+# The constants' () prototype is DECLARED (#3514): a constant imported by
+# name is then a TERM at the importing site, as perl's XS constants are
+# (`$f & CVf_ANON`, `SVf_POK + 0`).  The bodies are installed below.
+sub CVf_ANON (); sub CVf_AUTOLOAD (); sub CVf_CLONE (); sub CVf_CLONED ();
+sub CVf_CONST (); sub CVf_DYNFILE (); sub CVf_ISXSUB (); sub CVf_IsMETHOD ();
+sub CVf_LEXICAL (); sub CVf_LVALUE (); sub CVf_METHOD (); sub CVf_NAMED ();
+sub CVf_NODEBUG (); sub CVf_UNIQUE (); sub CVf_WEAKOUTSIDE ();
+sub SVf_FAKE (); sub SVf_IOK (); sub SVf_IVisUV (); sub SVf_NOK ();
+sub SVf_OOK (); sub SVf_POK (); sub SVf_PROTECT (); sub SVf_READONLY ();
+sub SVf_ROK (); sub SVf_UTF8 (); sub SVp_IOK (); sub SVp_NOK ();
+sub SVp_POK (); sub SVs_GMG (); sub SVs_OBJECT (); sub SVs_PADTMP ();
+sub SVs_RMG (); sub SVs_SMG (); sub SVs_TEMP (); sub SVt_PVGV ();
+sub SVt_PVHV ();
 {
     no strict 'refs';
     for my $name (keys %CONST) {
@@ -71,9 +84,18 @@ our @specialsv_name = ('Nullsv', '&PL_sv_undef', '&PL_sv_yes', '&PL_sv_no',
 
 require Exporter;
 our @ISA = ('Exporter');
-our @EXPORT_OK = (sort(keys %CONST),
-                  qw(svref_2object perlstring cstring class safename
-                     @specialsv_name));
+# The export list is spelled LITERALLY (#3514): PCL's static export scan reads
+# a literal list, and a constant it cannot see is not a TERM at the importing
+# site (`use B qw(CVf_ANON); $f & CVf_ANON` read the bareword string).  Kept
+# equal to the %CONST keys by Pl/t/b-shim-01.t.
+our @EXPORT_OK = qw(
+    CVf_ANON CVf_AUTOLOAD CVf_CLONE CVf_CLONED CVf_CONST CVf_DYNFILE
+    CVf_ISXSUB CVf_IsMETHOD CVf_LEXICAL CVf_LVALUE CVf_METHOD CVf_NAMED
+    CVf_NODEBUG CVf_UNIQUE CVf_WEAKOUTSIDE SVf_FAKE SVf_IOK SVf_IVisUV
+    SVf_NOK SVf_OOK SVf_POK SVf_PROTECT SVf_READONLY SVf_ROK SVf_UTF8
+    SVp_IOK SVp_NOK SVp_POK SVs_GMG SVs_OBJECT SVs_PADTMP SVs_RMG SVs_SMG
+    SVs_TEMP SVt_PVGV SVt_PVHV
+    svref_2object perlstring cstring class safename @specialsv_name);
 
 # ---- the string quoters (B.xs cstring(), perlstyle on / off) -------------
 

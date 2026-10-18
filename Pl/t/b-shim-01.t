@@ -151,6 +151,31 @@ row('number vs string', (svref_2object(\"7")->FLAGS & SVf_POK) ? 1 : 0,
 row('safename', B::safename("\x14MP"), B::safename("x"));
 P
 
+# 3b. #3514: an imported constant is a TERM under every spelling -- the bare
+#     one read the bareword string when lib/B.pm's export list was computed.
+compare_lines(<<'P', 'bare constant');
+no strict;   # the issue spelling: without strict a bareword is a string
+use B qw(svref_2object CVf_ANON SVf_POK);
+row('three spellings', B::CVf_ANON(), CVf_ANON(), CVf_ANON);
+row('masked', (svref_2object(sub { 1 })->CvFLAGS & CVf_ANON) ? 'anon' : 'named');
+row('operand', SVf_POK + 0, (svref_2object(\"x")->FLAGS & SVf_POK) ? 1 : 0);
+P
+
+# ... and the shim's three spellings of its constant list agree: the %CONST
+# values, the literal @EXPORT_OK, the () declarations (lib/B.pm, #3514).
+{
+    open my $bh, '<', "$project_root/lib/B.pm" or die "lib/B.pm: $!";
+    my $src = do { local $/; <$bh> };
+    my ($const) = $src =~ /^my %CONST = \((.*?)^\);/ms;
+    my ($export) = $src =~ /^our \@EXPORT_OK = qw\((.*?)\);/ms;
+    my @c = sort $const =~ /(\w+)\s*=>/g;
+    my @e = sort grep { /^(?:CVf|SV[fpst])_/ } split ' ', $export // '';
+    my @d = sort $src =~ /sub ((?:CVf|SV[fpst])_\w+) \(\);/g;
+    ok(@c > 30, 'B constants: the %CONST table was found');
+    is("@e", "@c", 'B constants: the literal @EXPORT_OK names every %CONST key');
+    is("@d", "@c", 'B constants: every %CONST key is declared with its () prototype');
+}
+
 # 4. PCL-only: what PCL cannot answer dies, perl-shaped and trappable.
 {
     my $file = write_pl(<<'P');
