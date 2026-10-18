@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521a (Opus 5.5, 2026-10-18) from the #3433 probes.  PRE-EXISTING (same on a5885afc).\n\n  my $r1 = \\*FOO; my $r2 = \\*FOO; bless $r1, \"Y\"; print ref($r2), \" \", ref(\\*FOO), \"\\n\";\n  open FH, \"<\", \"/dev/null\"; my $h = \\*FH; bless $h, \"Q\"; print ref(\\*FH), \"\\n\";\nperl: `Y Y` / `Q`.  PCL: `GLOB GLOB` / `GLOB`.\n\nCAUSE: `*FOO` emits `(p-make-typeglob \"main\" \"FOO\")`, which builds a NEW p-typeglob struct each time; #3433 records a glob's bless class on the struct (EQ, *p-handle-stash*), which is right for gensym and `\\do { local *FH }` (each a distinct glob in perl too) but cannot see a second mention of the same NAMED glob.  The fix is glob IDENTITY (one struct per stash entry, or a key that is the stash entry's symbol for a named, non-localized glob) -- the #423 glob-representation family; do NOT key by name alone: `\\do { local *FH }` twice must stay two objects (probed: perl GLOB|X).",
+   "id" : "3491",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: blessing one `\\*FOO` does not reach another `\\*FOO` -- each mention of a NAMED glob makes a fresh p-typeglob struct, so `my $r = \\*FOO; bless $r, \"Y\"; ref(\\*FOO)` is GLOB (perl Y)"
+}

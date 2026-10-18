@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "FILED s521a (Opus 5.5, 2026-10-18) from the #3431 path count.  PRE-EXISTING (same on a5885afc).\n\nperl: a `my` declaration takes effect from the NEXT statement (perlsub: \"the declared variable is not introduced (is not visible) until after the current statement\").  PCL's expression-embedded `my` let opens around the WHOLE statement, so a later mention of the same name in that statement reads the NEW variable:\n\n  sub X::n { shift; $_ = \"y\" for @_; 1 }\n  for my $k (1..2) { print \"f \", X->n(my $t), \" $k $t\\n\" }\nperl: `f 1 1 ` / `f 1 2 ` (the `$t` in the string is the OUTER, undef, $main::t).  PCL: `f 1 1 y` / `f 1 2 y`.\n\n  my $x = 1; for (1..2) { my $l = (my $x = $x + 1); print \"$l $x\\n\" }\nperl: `2 2` / `2 2` (the initializer reads the OUTER $x every iteration).  PCL: `2 2` / `3 3`.  (#3431's declaration-RHS route deliberately DECLINES a name the statement mentions twice, so this keeps the old file-cell path; a plain statement `(my $x = $x + 1);` takes the let and reads the fresh undef.)\n\nFIX SHAPE: the let's binding INIT is evaluated in the outer scope -- bind the fresh container, but lower the statement's OTHER mentions of the name (those not at the declarator) against the OUTER binding (a rename of the declarator for the statement's extent, like the self-init p-box-init route the plain `my $x = $x` declaration uses).  Rare in real code; found by the probe, no corpus row known.",
+   "id" : "3490",
+   "status" : "pending",
+   "subject" : "SILENT WRONG: an expression-embedded `my $t` is visible LATER IN ITS OWN STATEMENT (perl: the name is masked only from the NEXT statement) -- `print f(my $t), \" $t\"` reads the new variable, `my $l = (my $x = $x + 1)` in a loop keeps one cell"
+}
