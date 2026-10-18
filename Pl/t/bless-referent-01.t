@@ -48,7 +48,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 13;
+plan tests => 14;
 
 # One SBCL launch for the whole family: each line prints one answer.
 my $prog = <<'EOF';
@@ -90,6 +90,17 @@ print "t12:", ref($o), " ", ref($s), " ", $o->m, " ", ref($z), "\n";
 sub via_arg { my $rval = \$_[0]; return "" . $$rval }
 my $gv = *$o;
 print "t13:", via_arg($$o), " [", ref($gv), "] ", ("$o" =~ /^C=GLOB\(0x/ ? "refstr" : "BAD"), "\n";
+# #3519: a plain store REPLACES a glob ref (blessed or not, in a scalar, a
+# hash value, an array element, an @_ alias); `$$g = \$s` is the GLOB
+# assignment and leaves $g the glob.
+my $sv = 1;
+my $c3 = bless Symbol::gensym(), 'Foo'; $c3 = \$sv;
+my $u3 = Symbol::gensym(); $u3 = \$sv;
+my %h3; $h3{g} = Symbol::gensym(); $h3{g} = \$sv;
+sub set0 { $_[0] = \$sv } my $z3 = Symbol::gensym(); set0($z3);
+my $e3 = Symbol::gensym(); $$e3 = \$sv;
+print "t14:", ref($c3), " ", ($c3 == \$sv ? "same" : "other"), " ", ref($u3), " ",
+      ref($h3{g}), " ", ref($z3), " ", ref($e3), " ", ${*$e3}, "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -124,3 +135,5 @@ like $out, qr/^t12:C C C W$/m,
     're-blessing a copy of a glob ref (gensym, \\do { local *FH }) re-classes the glob (#3433)';
 like $out, qr/^t13:\*Symbol::GEN\d+ \[\] refstr$/m,
     'a blessed glob\'s VALUE through @_ stringifies as the glob, not with its class (#3516)';
+like $out, qr/^t14:SCALAR same SCALAR SCALAR SCALAR GLOB 1$/m,
+    'a plain store replaces a glob ref; $$g = \\$s is the glob assignment (#3519)';

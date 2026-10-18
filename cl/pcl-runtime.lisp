@@ -4312,14 +4312,24 @@
                    (or (and (vectorp old-val) (not (stringp old-val)))
                        (hash-table-p old-val)
                        (functionp old-val)
-                       (p-box-p old-val)))
+                       (p-box-p old-val)
+                       ;; a blessed GLOB ref (gensym, IO::File) is a reference
+                       ;; holder too (#3519)
+                       (p-typeglob-p old-val)))
           (setf (p-box-class box) nil)))
     ;; Glob ref vs bare glob: a typeglob arriving through a ref-wrapper (\\*foo,
     ;; is-ref t) keeps is-ref so it numifies to its address (GLOB(0x..)); a bare
     ;; glob (my $g = *foo) clears it so it numifies to 0.  The typeglob is stored
     ;; raw as the value either way, so the flag is the only discriminator.
-    (when (p-typeglob-p v)
-      (setf (p-box-is-ref box) (and (p-box-p value) (p-box-is-ref value))))
+    ;; The flag belongs to the glob VALUE: a plain store that replaces a glob
+    ;; (`$c = \$s` where $c held a gensym) clears it, else the box keeps
+    ;; answering as a glob ref -- ref() reads REF, `==` the box's own address
+    ;; (#3519, docs/ir-spec.md "glob value vs glob ref").
+    (cond
+      ((p-typeglob-p v)
+       (setf (p-box-is-ref box) (and (p-box-p value) (p-box-is-ref value))))
+      ((p-typeglob-p old-val)
+       (setf (p-box-is-ref box) nil)))
     (typecase v
       (number (setf (p-box-nv box) v (p-box-nv-ok box) t))
       (string (setf (p-box-sv box) v (p-box-sv-ok box) t)))
@@ -30927,6 +30937,13 @@ would consume, so it dies naming the stream (rule 12)."
          (box-set val (p-backslash target))
          (p-bless val class)
          new-value))
+      ;; `$$g = X` through a glob REF (gensym, IO::File, \*FH) is perl's GLOB
+      ;; assignment `*$g = X` (rv2sv of a GV yields the GV itself): `$$g = \$s`
+      ;; aliases the glob's SCALAR slot and $g still holds the glob (#3519).
+      ;; The variable must never take the value -- that was the arm below.
+      ((and (p-box-p val) (p-typeglob-p inner) (p-box-is-ref val))
+       (p-glob-assign-dynamic val new-value)
+       new-value)
       ;; val itself is the scalar container (blessed scalar in tie methods)
       ((p-box-p val)
        (box-set val new-value))
