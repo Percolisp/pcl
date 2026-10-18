@@ -18,6 +18,76 @@ changed, and no board, gate or sweep leg was run.  Inputs, all on main `2a27700c
 Every count below comes from one of those files.  "Verified s521" means a probe in this review reproduced
 the row; "unverified" means the count is the baseline's and was not re-run.
 
+## 0. Update, 2026-10-18 evening (s521): what the review set in motion, and where the board stands
+
+The review was written at 15:4x; by 20:4x the same day its batches 0, 1 and 2 were merged, plus a filler batch,
+and the board was re-measured.  This section is the news; sections 1-5 below are the record as written and are
+NOT rewritten (their numbers are the 15:4x measurement).
+
+**Merged (all six MAIN-READYs of the day):**
+
+| batch | merged as | what it carried for the board |
+|---|---|---|
+| 0 (s521a) | MAIN-READY-33 `73d65d6f` | #3431 the embedded `my` per iteration, #3433 the glob-ref re-bless, #3435 the deref operand's scalar context, #3436 `like` with a `'/RE/'` string, #3362 CvFLAGS -- **33 IO-Compress files run to their plan** (002any-*, 005defhdr 115/115, 100generic-* 800/800, 102tied-* 250/250, 108anyunc-*, 110encode-*, 011-streamzip); 107multi-* 15 -> 1227 of 1829; 33 `*PLAN*` / `*FILE*` lines out, 713 newly exposed failing rows in under the umbrella #3494 (sorted later, below) |
+| 1 (s521b) | MAIN-READY-34 `81afe6b0` | the `\Q`-newline bug **#3510** fixed in #2501's shape (`Pl/CaseMods.pm`; the runtime pass deleted), **`PerlIO::get_layers` exists** (#3326 = #139(b), the applied layers only, `:pop` as perl), SEEK_END by fstat (#3023); #201 item 3 measured -> #3530 -- **1,121 Capture-Tiny rows out** (682 #3326, 438 #3327, the 11-stderr-string plan row) + Path-Tiny digest.t |
+| 2 (s521c) | MAIN-READY-35 `cfed8a78` | `subtest` (#1576), `eq_set` (#3432), the TAP stream through the layer's own fd-1 dup (#3530 = #3434 part 2), the io/open.t heredoc refusal (#3512); #3434 part 1 measured and PARKED (a tie-by-handle design) -- Mojo-DOM58 entities, HTTP-Tiny 160_cookies, Path-Tiny parent / recurse / size / subsumes / symlinks / has_same_bytes now PASS in full; Capture-Tiny 06 + 10 run 872/0 + 873/0; 19 `*FILE*` / `*PLAN*` lines out, 22 in with causes |
+| fillers (s521d) | MAIN-READY-36 `fb1c369f` | **#3518** `$.` keeps an assigned value with no handle current (480 board rows out), **#3516** the round-2 regression (below), #3492 (a) the anon-sub home package, #3514 #3369 #3452 #3470; #3513 identified |
+
+**The round-2 board** (on MAIN-READY-34, i.e. after batches 0 and 1, before 2 and the fillers;
+`baselines/cpan-board-s521r2.tsv`): **232 PASS / 128 PARTIAL / 89 FAIL of 449, TOTAL passing 28,489** --
+against round 1's 198 / 156 / 95 and 14,106 in section 1.  The movers: Capture-Tiny 8 / 14 / 2 -> 19 / 3 / 2
+(5,648 -> 10,256 ok), IO-Compress 10 / 53 / 30 -> 28 / 37 / 28 (1,855 -> 11,568), Class-Method-Modifiers 22 -> 24
+PASS, HTTP-Tiny 25 -> 26, Path-Tiny 11 -> 13, Role-Tiny 11 -> 12.  The row diff: 24 FIXED (left by edit with
+causes -- the stale rows of 2d among them: CMM 002 / 003 = #3373, Path-Tiny children.t = #3374; HTTP-Tiny
+100_get.t x4 = #3436), 11 NEW (ALL the documented 105oneshot flap plus temp-file names inside two row keys -- not
+re-blessed), **1 LOST = a REGRESSION no gate, sweep or probe had seen**: Data-Dump glob.t -- a glob VALUE passed
+through `@_` stringified with its class after #3433 (**#3516**; fixed in s521d).  The round cadence's board half
+earned its place.
+
+**The blessed rows: 1,803 -> 857.**  Section 4's projection ("the failing lines roughly halve after batch 1,
+to ~660") held in direction and was beaten in size because batch 0's one-file runs retired 33 whole-file lines
+and the census below re-caused what they exposed.  Of the 857, about 360 are still the ruled remainder of
+"NOT IN THE PLAN" (the `NS:Error messages` family GREW from 112 to 188 rows now that IO-Compress's rows run --
+every one of them #1361 behind the #233 deferral), 47 are perl-skips.
+
+**The #3494 umbrella sorted** (`docs/ioc-row-census-s521.md`, a second read-only census in this review's shape):
+480 of the 710 rows = **#3518** (`$. = N` lost when no handle has been read -- fixed in s521d), 84 = **#3520**
+(the BOARD RUNNER: a dist test's `$^X` child is the oracle perl with its older core Compress::Raw::Zlib -- not
+PCL), 76 = #1361, 45 = #330 (5 direct + 40 knock-on), 11 = **#3521** (a second-package `use constant` loses its
+`()` prototype under an import list -- every Zip64 unzip silently undef), 8 (+ 2,408 never-run) = **#3519** (a
+scalar holding a glob ref keeps the glob when assigned a scalar ref -- pre-existing; what still stops 107multi-*
+at 1227 of 1829), 5 = #3530, 1 = NS.  Round 2 fixed none of those rows (703 of 710 identical got / expected).
+
+**Found and filed along the way** (each with a perl-vs-PCL reproducer): #3369, #3510, #3511 (the stash
+hash-slice delete through a symbolic name is a silent NO-OP, worse than the read error 2c reports), #3512,
+#3513 (op/fork.t's flap = a forked child outliving the harness's transpile server; RULED), #3514, #3515,
+#3516, #3517, #3518-#3521, #3522 (the TAP layer exits 0 after failures), #3523, #3530, #3531, #3550-#3557
+(s521c's board probes: a List::Util block without the enclosing `@_`, `is_deeply` and `system LIST` ignoring
+a `""` overload, `lstat` then `-d _` following the link, PPI §5's nested anon-hash repair, ...), #3570, #3571.
+
+**Resolved notes from section 5:** the IO-Compress oracle question -- `tools/run-dist-t.pl` has NO perl oracle
+(its `PLAN N` is the TAP plan line, its rows are PCL's), so the "Compress::Raw::Zlib 2.214 required" death is a
+HAND-RUN artifact (perl from the dist root with `-Ilib` loads the dist's IO::Compress 2.214 against the system
+2.212); the board's numbers are unaffected.  The same mismatch IS what kills the `$^X` children of 011-streamzip
+(#3520).  The stale not-supported sentence about `die` locations is still to edit (#1361's text).
+
+**The plan's state and what is left (the rough count asked for at 20:4x):**
+
+| batch | state |
+|---|---|
+| 0, 1, 2 | DONE (s521a, s521b, s521c); residues: #3327 re-scoped to the merged-capture order, #3434 part 1 parked behind a tie-by-handle design |
+| the census residues | **`s521/s521e-prompt.md`, WRITTEN, NOT LAUNCHED** (the USER's 20:0x hold): #3519 (2,408 never-run rows), #3521 (Zip64), #3520 (the runner's `$^X` child environment), #3515, #3517, #3513 (ruled option 3) |
+| 3 | #3431 DONE (s521a); #3061 (the Parser2 refusal hiding ~51,000 Text-CSV rows), #3375, #3347 remain -- ONE subjob, the sweep its gate, then a census of what Text-CSV exposes |
+| 4 | #3511 filed; #1570 #1572 #3321 #1506 remain -- one subjob |
+| 5 | measure-first: #1568, #1511, #3282 (24,500 rows behind a silent exit), #2900, #966 -- two subjobs, then a census of the JSON-PP rows |
+| 6 | module surface -- one subjob |
+| fillers | the ~16 small tasks filed today -- two subjobs |
+
+About **ten execution subjobs plus two read-only censuses, four to five half-day sessions at two concurrent**
+(DECIDED ## s521's end line), for everything the standing rulings do not hold.  The count is a frontier: each
+newly reached population (Text-CSV's 51,000, JSON-PP's 24,500, 107multi's 2,400) exposes honest new failures
+that the next census sorts.  The ruled remainder is the USER's call, with its cost in the table of §4.
+
 ## 1. The board today
 
 From `cpan-board-s519r1.tsv` (header: 187 / 103 / 66 of 356, TOTAL passing 12,250; summing its rows gives
@@ -216,9 +286,9 @@ running for the first time (and can fail honestly).
 
 Ordered by rows unlocked per unit of effort, the certain-and-cheap first.  **Batch 0 already exists**:
 Fable's next correctness brief `s521/s521a-prompt.md` (SHARED-BOX) carries #3436, #3433, #3434, #3435 (and
-non-board members), so those are not repeated below.
+non-board members), so those are not repeated below.  **Batch 0 = s521a, DONE = MAIN-READY-33 (see §0).**
 
-### Batch 1 -- Capture-Tiny's two mechanisms + the I/O tail (layer: cl)
+### Batch 1 -- Capture-Tiny's two mechanisms + the I/O tail (layer: cl) -- **DONE s521b = MAIN-READY-34 (members 1-3; #201 item 3 measured -> #3530, done in batch 2)**
 Members: (1) the `\Q`-newline bug -- FILE it first (Fable's free ID), then fix; prefer #2501's shape if the
 member can carry it (one mechanism, and #2501 is a silent-wrong in the same pass), else the one-line regex fix;
 (2) #3326 = `PerlIO::get_layers` (#139 part b) with `:pop` consistent with the list; (3) #3023 SEEK_END on a
@@ -232,7 +302,7 @@ non-shrinking list = a hang, so a timed row).  WHAT-TO-RUN-WHEN: `cl/` => full s
 Fable rulings needed BEFORE: #139's design call (a synthesized list from the one discipline is acceptable;
 what `:pop` does to it); #2501-shape or narrow fix for member 1.
 
-### Batch 2 -- the TAP layer (layer: tap)
+### Batch 2 -- the TAP layer (layer: tap) -- **DONE s521c = MAIN-READY-35 (+ #3530, #3512; #3434 part 1 parked)**
 Members: (1) #1576 `subtest` (nested plan, indentation, one parent row, child failure fails the parent);
 (2) #3432 `eq_set`.  (#3436 / #3323 are in batch 0.)
 Acceptance: Mojo-DOM58 collection / dom / entities, Path-Tiny parent, input_output, temp, size,
@@ -242,7 +312,7 @@ the companion `--all --quick` IS a per-batch leg here, plus the sweep; `Pl/t/tap
 `tools/lib/PCLTap.pm` must count a subtest as one top-level row (perl's own TAP shape).
 Fable rulings needed: none on semantics (Test::More defines them); confirm the board counts top-level rows only.
 
-### Batch 3 -- Parser2 scoping: the refusal and the silent-wrong that hide 58,000 rows (layer: Pl)
+### Batch 3 -- Parser2 scoping: the refusal and the silent-wrong that hide 58,000 rows (layer: Pl) -- **#3431 DONE (s521a); #3061 #3375 #3347 OPEN**
 Members: (1) #3061 sigil-blind capture refusal (delete/rename, never narrow); (2) #3431 embedded `my` in a `my`
 RHS in a loop; (3) #3375 `my $x = EXPR for LIST`; (4) #3347 the F6 extent in cz-03zlib-v1 (measure; may be its
 own family).  Acceptance: Text-CSV 20_file, 47_comment, 85_util, IO-Compress 01misc, 100generic-gzip,
@@ -252,20 +322,20 @@ leave by edit.  **Expect honest new failures**: Text-CSV runs ~51,000 rows it ne
 chase them.  Risks: name resolution -> the full sweep IS the gate, the gate-SET scan over both populations
 (the refusal stops firing), `Pl/t` grep for the refusal's message text (stale-guard rule).
 
-### Batch 4 -- OO emission and the stash (layer: Pl, cl)
+### Batch 4 -- OO emission and the stash (layer: Pl, cl) -- **OPEN (the hash-slice read error is filed: #3511, a silent no-op in its other spelling)**
 Members: (1) #1570 a parent package must exist at READ time; (2) the new `%Local::Class::` hash-slice read
 error (file first); (3) #1572's remaining 081 (`orig`); (4) #3321 stash alias; (5) #1506 `import PKG LIST`.
 Acceptance: Role-Tiny extend-role-tiny, proto, namespace-clean; CMM 081; JSON-PP 118; SLU dualvar.
 Risks: `p-defclass` emission -> corpus-diff + emission-ab over `lib/**`; mro companion files.
 Ruling needed: whether #1510 / #135's stash parts may touch the deferred "Live symbol-table hashes".
 
-### Batch 5 -- diagnosis batch: regex/pos and the silent exits (layer: cl, measured first)
+### Batch 5 -- diagnosis batch: regex/pos and the silent exits (layer: cl, measured first) -- **OPEN**
 Members, each "measure, then fix if one mechanism": #1568 Text::Balanced (40), #2900 `\G\b` (2), #966
 `pos(ELEM)` (4 + Text-CSV parse), #1511 Algorithm-Diff (24 + 847), #3282 the JSON-PP 099 silent exit (+24,512).
 Acceptance per member as in its task.  Risks: the regex engine is ONE (portability ruling) -- the sweep's `re/`
 files and the companion's `re/` leg.
 
-### Batch 6 -- small module-surface items
+### Batch 6 -- small module-surface items -- **OPEN**
 #1573 / #2066 Data::Dump, #2016 JSON integers (also an everyday row), #3001 Role::Tiny, the #1571 lines
 that are not ruled (reftype REF/IO, get-magic count), #3161's InflateScan if the shim stays.
 
@@ -320,6 +390,7 @@ What would remain is about 360 ruled lines, the 47 skips, plus whatever the newl
   from the dist root with `-Ilib -It -It/compress`, perl 5.40.3 dies "Compress::Raw::Zlib version 2.214
   required--this is only version 2.212" in its adapters (e.g. 105oneshot-deflate.t, 050interop-gzip.t); the
   join's perl counts were taken some other way, which this review did not trace.
+  **RESOLVED (s521 evening): `tools/run-dist-t.pl` has no perl oracle -- its `PLAN N` is the TAP plan line and its rows are PCL's; the death is a hand-run artifact (the dist's IO::Compress 2.214 against the system Compress::Raw::Zlib 2.212).  The same mismatch kills the `$^X` children of 011-streamzip: #3520.**
 * **Untidy deaths**: three of the confirmed whole-file losses end in a raw SBCL "Unhandled ... in thread"
   banner (the #3061 transpile refusal, the two #1570 READER errors and namespace-clean's) -- the USER's
   "fail tidily" rule applies to them independently of the fix.
