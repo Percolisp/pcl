@@ -794,9 +794,7 @@ comp/redef.t	6	ok	not ok	#6	NS:Warnings-gated diagnostics are absent (use warnin
 comp/redef.t	7	ok	not ok	#7	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221 -- every row asserts a "Subroutine NAME redefined" or "Prototype mismatch: sub main::NAME ..." warning under `perl -w`
 comp/redef.t	8	ok	not ok	#8	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221 -- every row asserts a "Subroutine NAME redefined" or "Prototype mismatch: sub main::NAME ..." warning under `perl -w`
 comp/redef.t	9	ok	not ok	#9	NS:Warnings-gated diagnostics are absent (use warnings is not modelled) -- owner #221 -- every row asserts a "Subroutine NAME redefined" or "Prototype mismatch: sub main::NAME ..." warning under `perl -w`
-comp/require.t	0	ok	not ok	(AA) `use feature ":5.38"` with `sub foo {}; (0, return 0);` via `$^P = 10; require mtt...	#2407 -- PRE-EXISTING, identical on a 24422497 extraction (s497b)
 comp/require.t	20	ok	not ok	%INC not updated	#1688
-comp/require.t	1097	ok	not ok	(AA) `use feature ":5.38"` with `sub foo {}; (0, return 0);` via `$^P = 10; use mttest630;` did not blow up	#1688
 comp/require.t	264	ok	not ok	(AA) `use feature ":5.38"` with `sub foo {}; (0, return 0);` via `$return_val = require "mttest131.pm";` did not blow up	#1688
 comp/require.t	259	ok	not ok	(AA) `use feature ":5.38"` with `sub foo {}; (0, return 0);` via `$return_val = require mttest128;` did not blow up	#1688
 comp/require.t	266	ok	not ok	(AA) `use feature ":5.38"` with `sub foo {}; (0, return 0);` via `@return_val = require "mttest132.pm";` did not blow up	#1688
@@ -949,7 +947,6 @@ comp/require.t	1074	ok	not ok	(AB) list return value is simple true value <1>	#1
 comp/require.t	1080	ok	not ok	(AB) list return value is simple true value <1>	#1688
 comp/require.t	1085	ok	not ok	(AB) list return value is simple true value <1>	#1688
 comp/require.t	1091	ok	not ok	(AB) list return value is simple true value <1>	#1688
-comp/require.t	1096	ok	not ok	(AB) list return value is simple true value <1>	#1688
 comp/require.t	92	ok	not ok	(AB) scalar return value is simple true value <1>	#1688
 comp/require.t	97	ok	not ok	(AB) scalar return value is simple true value <1>	#1688
 comp/require.t	103	ok	not ok	(AB) scalar return value is simple true value <1>	#1688
@@ -1288,12 +1285,12 @@ comp/require.t	22	ok	not ok	exp 1; require bleah.pm with flag file	#1688
 comp/require.t	45	ok	not ok	require ::bleah is banned	#1688
 comp/require.t	55	ok	not ok	require does not localise %^H at run time	#1688
 comp/require.t	19	ok	not ok	require returning 0	#1688
-comp/require.t	38	ok	not ok	require() context	#1688
-comp/require.t	42	ok	not ok	require() context	#1688
-comp/require.t	43	ok	not ok	require() context	#1688
-comp/require.t	44	ok	not ok	require() context	#1688
 comp/require.t	6	ok	not ok	require(v5.5.630) with parens [perl #124153]	#1688
 comp/require.t	29	ok	not ok	syntax error	#1688
+comp/require.t	38	ok	not ok	require() context	#3524 (wantarray at a required file's top level is '' in perl: scalar context forced for require; re-numbered from 38 42 43 44 at the s521 full run)
+comp/require.t	39	ok	not ok	require() context	#3524 (wantarray at a required file's top level is '' in perl: scalar context forced for require; re-numbered from 38 42 43 44 at the s521 full run)
+comp/require.t	40	ok	not ok	require() context	#3524 (wantarray at a required file's top level is '' in perl: scalar context forced for require; re-numbered from 38 42 43 44 at the s521 full run)
+comp/require.t	41	ok	not ok	require() context	#3524 (wantarray at a required file's top level is '' in perl: scalar context forced for require; re-numbered from 38 42 43 44 at the s521 full run)
 comp/retainedlines.t	109	ok	not ok	#line 42 "foo" in a str eval is not confused by ${"_<foo"} changing	#1684
 comp/retainedlines.t	107	ok	not ok	#line 42 "foo" in a string eval updates @{"_<foo"}	#1684
 comp/retainedlines.t	2	ok	not ok	1 new eval	#1684
