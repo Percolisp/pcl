@@ -3551,7 +3551,12 @@ bare block (`{ local $_; while ($_ = shift @a) {…} }`), unless the condition
 reads the variable again (#3368) -- and the term's value is the localized
 variable's new value in both (`f(local $x = 1)` passes 1; in `(local $x = 2)
 + g()` g reads 2).  A rewrite keeps the statement's number of lines, so every
-later `at FILE line N` is perl's (#3364).  The logical spellings `COND and
+later `at FILE line N` is perl's (#3364).  A HERE-DOC in the statement keeps its
+`<<TAG` in the rewritten text and its body follows it (#3512, s521c: perl's
+t/io/open.t `ok(open(local $f, '-|', <<EOC), …)`); a here-doc whose body
+names no variable is a literal before the term.  Not lowered (the refusal
+stays): a here-doc in a compound statement, or one followed by a newline inside
+the statement.  The logical spellings `COND and
 (LIST);` / `COND && (LIST);` and `COND and/or … local …;` ARE the modifier shape
 `(LIST) if COND;` (`or` / `||`: `unless`; RULED s519 #3, Role::Tiny 307) and
 take the same split.  Either way the localisation opens the enclosing block's

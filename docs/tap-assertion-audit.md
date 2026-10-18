@@ -62,6 +62,9 @@ checkable and there is no row to attach a diagnostic to.
 | `plan` / `done_testing` | count claim | unrecognized form was silent (F9) |
 | `eq_array` (feeds `ok`) | length + element compare | reachable |
 | `eq_hash` (feeds `ok`) | **type-errored on every call** (F2) | fixed |
+| `eq_set` (feeds `ok`) | refs in order + string-sorted rest, deep compare | reachable (#3432, s521c: was absent -- "Undefined subroutine") |
+| `subtest` | the child's own verdict (failures, plan mismatch, no tests run) | reachable (#1576, s521c: was absent); `plan skip_all` inside is a parent SKIP row, never an exit; a die inside closes the child, reports the parent row and propagates (perl 5.40) |
+| the STREAM (every row above) | -- | since #3530 (s521c): Test::More's OWN dup of descriptor 1, taken at the first `use Test::More` (`*tap-stream*`), so closing or re-opening STDOUT loses no row; diagnostics stay on it (the board reads stdout alone, #3241); test.pl callers keep the current STDOUT |
 
 ## Findings
 
@@ -132,6 +135,29 @@ mechanism, one of them incomplete" shape again.  This is not a harness bug at
 all: `scalar($ref)` is wrong everywhere in the language.  It surfaced here
 because `isa_ok([1,2], 'Bar')` lowers its argument through `p-scalar`, so the
 harness was reporting on a number that used to be a reference.
+
+**F11 (s521c, #1576) -- `subtest` was absent**, so a file in the modern CPAN
+style died at its first call with NO TAP at all (16 board files).  It is one
+function over the existing machinery: the child stream is the SAME `%tap-out`
+indented four spaces per level (`*tap-indent*`), and the child state is the
+parent's counters REBOUND -- no second plan machine.  What it can claim:
+the child passed (no failure, the plan met, at least one assertion).  What it
+cannot: a child whose plan is unmet or empty FAILS the parent row naming the
+reason (`No tests run for subtest "NAME"`), never a pass.  Guard
+`Pl/t/tap-assert-01.t` rows 30-35.
+
+**F12 (s521c, #3432) -- `eq_set` was absent** (IO-Compress 004gziphdr.t died at
+row 450).  Test::More's rule: each side's references in their own order, then
+the rest string-sorted, compared DEEPLY (is_deeply's comparison).
+
+**F13 (s521c, #3530) -- the TAP stream was the program's CURRENT STDOUT**, so a
+program that closed STDOUT died with SBCL's raw closed-stream error at its
+next `ok`, and one that re-opened it lost the no_plan trailer.  Test::Builder
+prints through its own dup of STDOUT taken at load; so does this layer now.
+**Deviation, for a ruling:** Test::Builder writes failure diagnostics to a dup
+of STDERR; here they stay on the TAP stream, because the board runner reads
+the TAP from stdout alone and takes each failing row's got / expected from the
+lines after it (#3241) -- moving them would blank those columns.
 
 ## Not changed, deliberately
 
