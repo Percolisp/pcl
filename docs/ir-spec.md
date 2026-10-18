@@ -1339,7 +1339,7 @@ gone, so a refusal is now terminal):
 - **Array/hash family sharing the bare name** — `@x`, `%x`, `$#x`,
   `$x[i]`, `$x{k}` are *different variables* whose element-access tokens
   share the `$x…` spelling.
-- **A self-referential chained `my`** -- `my @a = my @b = (... my ...)` refuses only when a declarator (`my` / `our` / `local` / `state`) sits at the initializer's OWN level; one inside a nested block of it (`do { }`, `map { }` / `grep { }` / `sort { }`, `eval { }`, `sub { }`) is scoped there and does not refuse (s520a, #3404, `_elems_declare_at_level`).  Example: `my @n = my @t = (1, do { my $x = 2; $x })` gives `@n` = `@t` = `(1, 2)`.
+- **A self-referential chained `my`** -- `my @a = my @b = (... my ...)` refuses only when a declarator (`my` / `our` / `local` / `state`) sits at the initializer's OWN level; one inside a nested block of it (`do { }`, `map { }` / `grep { }` / `sort { }`, `eval { }`, `sub { }`) is scoped there and does not refuse (s520a, #3404, `_elems_declare_at_level`).  A `my` at the initializer's own level (`my @c = my @d = (3, my $q = 4)`) is an expression-embedded `my`: the #3431 let binds it around the declaration and the chain lowers inside it (s521d, #3452); what still refuses is a name the initializer READS (`my @a = my @b = (@a, 3)`: perl reads the OUTER @a), a vetoed name, and `our` / `local` / `state` there.  Example: `my @n = my @t = (1, do { my $x = 2; $x })` gives `@n` = `@t` = `(1, 2)`.
 - **String `eval` in scope** — *narrowed (s294/295)*: a renamed cell is
   made reachable by its original source name (the alias rule + span
   pairs, §9.1), so string eval alone no longer refuses a rename. What

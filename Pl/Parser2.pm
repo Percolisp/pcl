@@ -3437,15 +3437,39 @@ sub _decl_syms_under {
 # enclosing initializer (#3404: `my @n = my @t = (1, do { my $x = 2; $x })`
 # refused the whole file on a TEXT match)?  The nested-block climb is
 # _decl_syms_under's; a top-level declarator word is answered here.
-sub _elems_declare_at_level {
-  my @elems = @_;
+sub _elems_declare_at_level { return _elems_decl_at_level('my|our|local|state', @_) }
+
+# The same question for the declarator words WORDS ('my', 'our|local|state').
+sub _elems_decl_at_level {
+  my ($words, @elems) = @_;
   for my $e (@elems) {
     return 1 if $e->isa('PPI::Token::Word')
-             && $e->content =~ /^(?:my|our|local|state)$/;
+             && $e->content =~ /^(?:$words)$/;
     next if !$e->isa('PPI::Node') || $e->isa('PPI::Structure::Block');
-    return 1 if _decl_syms_under($e, words => 'my|our|local|state');
+    return 1 if _decl_syms_under($e, words => $words);
   }
   return 0;
+}
+
+# The NAMES a `my` among ELEMS declares at their level (#3452), in document
+# order -- the symbol after a top-level `my` word, else _decl_syms_under's
+# non-nested answers.  A non-plain spelling (`my ${...}`) is returned as is,
+# so a caller can refuse it.
+sub _elems_my_names_at_level {
+  my @out;
+  for my $e (@_) {
+    if ($e->isa('PPI::Token::Word') && $e->content eq 'my') {
+      my $nx = $e->snext_sibling or next;
+      push @out, map { $_->content }
+                 $nx->isa('PPI::Token::Symbol')   ? ($nx)
+               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+               : ();
+      next;
+    }
+    next if !$e->isa('PPI::Node') || $e->isa('PPI::Structure::Block');
+    push @out, map { $_->[1]->content } _decl_syms_under($e, words => 'my');
+  }
+  return @out;
 }
 
 # Does $stmt declare canonical $canon (sigil-qualified) via my/state?
@@ -11491,8 +11515,18 @@ sub _lower_block_1 {
           my $final_txt = join ' ', map { $_->content } @r;
           my %seen;
           my @all = grep { !$seen{$_}++ } (@$vars, @chain_names);
+          # #3452: a `my` at the FINAL initializer's own level (`my @c = my @d
+          # = (3, my $q = 4)`) is an expression-embedded `my`: #3431's let
+          # (_decl_init_embedded_my_names / _embedded_my_let, above this arm)
+          # already binds it around the whole declaration, and the one
+          # assignment evaluates left to right, as perl does.  The refusal
+          # stays for what that let did not take -- a name the statement
+          # mentions again (a real self-reference: perl reads the OUTER one),
+          # a vetoed or promoted name -- and for `our` / `local` / `state`.
+          my @inner = _elems_my_names_at_level(@r);
           die "Parser2 TODO: self-referential init: " . $first->content
-            if _elems_declare_at_level(@r)
+            if _elems_decl_at_level('our|local|state', @r)
+            || (grep { !$self->{_let_bound_vars}{$_} || $seen{$_} } @inner)
             || (grep { $final_txt =~ _reads_name_rx($_) } @all)
             || (grep { $self->{_file_lex_renamed}{$_} } @all);
           $self->_reg_lex(@all);

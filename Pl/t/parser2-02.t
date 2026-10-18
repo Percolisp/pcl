@@ -956,8 +956,16 @@ my $ch = eval { Pl::Parser2->parse_code(
   q{my @n = my @t = (1, do { my $x = 2; $x }, map { my $y = $_; $y } 3); print "@n|@t\n";}) };
 is($@, '', '#3404: a chained my whose init declares only inside nested blocks lowers');
 like($ch // '', qr/p-let/, '#3404: the chained my is actually emitted');
-eval { Pl::Parser2->parse_code(q{my @c = my @d = (3, my $q = 4); print "@c|@d|$q\n";}) };
+# #3452 (s521d): a `my` at the initializer's OWN level declares in the same
+# scope as the chain's heads and lowers with them (perl 5.40.3: `3 4|3 4|4`);
+# the refusal stays for a real self-reference -- the initializer READS a name
+# the chain declares (perl: `my @a = my @b = (@a, 3)` reads the OUTER @a).
+my $cq = eval { Pl::Parser2->parse_code(q{my @c = my @d = (3, my $q = 4); print "@c|@d|$q\n";}) };
+is($@, '', '#3452: a my at the chain initializer\'s own level lowers');
+like($cq // '', qr/\(p-let \(\(\$q :box [^\n]*\n\s*\(p-let\s+\(\(\@c /,
+     '#3452: its name is bound by the embedded-my let (#3431) around the chain\'s own let');
+eval { Pl::Parser2->parse_code(q{our @a = (1, 2); { my @a = my @b = (@a, 3); print "@a|@b\n"; }}) };
 like($@, qr/Parser2 TODO: self-referential init/,
-     '#3404 INVERSE: a declarator at the initializer\'s own level is still refused');
+     '#3404/#3452 INVERSE: a chain whose initializer READS a name it declares is still refused');
 
 done_testing();
