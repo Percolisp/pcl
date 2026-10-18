@@ -2724,8 +2724,10 @@ sub _subscript_key_expr {
 sub _process_children {
   my $self     = shift;
   my $parent   = shift;
+  my %opt      = @_;
 
   my @children = $parent->children;
+  @children = _named_subs_first(@children) if $opt{subs_first};
   my %skip;
 
   for my $i (0 .. $#children) {
@@ -2757,6 +2759,34 @@ sub _process_children {
       $self->{_pending_hoisted_defs} = [];
     }
   }
+}
+
+# A BEGIN block's named subs, moved to where perl DEFINES them (task #1572).
+# perl compiles the whole block before running it, so `BEGIN { package P; use
+# M; around 'orig' => sub {...}; sub orig {...} }` has `orig` defined when
+# `around` runs (Class::Method::Modifiers' 081: "The method 'orig' is not
+# found").  Each named sub moves UP past ordinary statements but never above
+# a BARRIER -- a `package` switch (its home), a `use`/`no` (the parse facts it
+# was read under), a `my`/`our`/`state`/`local` declaration (a lexical it may
+# capture; the sub stays inside that declaration's scope) or another
+# scheduled block -- so what it sees is unchanged and only its time moves.
+sub _named_subs_first {
+  my @in = @_;
+  my @out;
+  my $floor = 0;      # index in @out just after the last barrier
+  for my $c (@in) {
+    if ($c->isa('PPI::Statement::Sub') && !$c->isa('PPI::Statement::Scheduled')
+        && $c->name && $c->block) {
+      splice @out, $floor, 0, $c;
+      $floor++;
+      next;
+    }
+    push @out, $c;
+    $floor = scalar @out
+      if $c->isa('PPI::Statement::Package') || $c->isa('PPI::Statement::Include')
+      || $c->isa('PPI::Statement::Variable') || $c->isa('PPI::Statement::Scheduled');
+  }
+  return @out;
 }
 
 # Look ahead for a continue { } statement after a bare block compound statement.
@@ -10513,7 +10543,7 @@ sub _process_scheduled_block {
     # top-level form, so the module died at load with "too many elements in
     # (push …)" — and with it every consumer (Capture::Tiny, task #199).
     my $start_depth = $self->{_local_let_depth} // 0;
-    $self->_process_children($block);
+    $self->_process_children($block, subs_first => ($type eq 'BEGIN'));
     if ($self->environment->current_package() ne $prev_pkg) {
       my $cl_prev = $self->_cl_pkg_designator($prev_pkg);
       $self->_emit("(in-package $cl_prev)");

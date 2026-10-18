@@ -163,7 +163,6 @@
 #   s521e (2026-10-19): #3520 (tools/run-dist-t.pl puts the dist's BUILT prerequisites' blibs on PERL5LIB for the run, as `make test` under the CPAN shell: IO-Compress gets Compress-Raw-Zlib / -Bzip2 2.214) -- the 84 #3520 rows of IO-Compress 011-streamzip.t LEFT by edit (one-file run 135 pass / 2 fail of 137); rows 28 and 32 ENTERED: the in-process bzip2 unzip, NS:DynaLoader like 107multi-bzip2.
 Class-Inspector-1.36-0	class_inspector__devel_hide.t	0	*FILE*	1..0 # SKIP test requires Devel::Hide (rc=0)	0 row(s)	PERL-SKIP (perl also 1..0 # SKIP "test requires Devel::Hide")
 Class-Method-Modifiers-2.15-0	060-caller.t	2	parent with modifiers sees 'main' as caller # TODO caller magic not implemented yet			NS:caller() fidelity [DEFERRED, USER s488] + #233 (caller() fidelity — a modifier must not appear as the caller)
-Class-Method-Modifiers-2.15-0	081-sub-and-modifier.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1572 ("The method 'orig' is not found in the inheritance hierarchy for class MyParent2")
 Class-Method-Modifiers-2.15-0	140-lvalue.t	1	around on an lvalue attribute is maintained	undef	'1'	#930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
 Class-Method-Modifiers-2.15-0	140-lvalue.t	2	around adding an lvalue attribute works	undef	'2'	#930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)
 Class-Method-Modifiers-2.15-0	140-lvalue.t	3	around on array lvalue attribute works	'ARRAY(0x1)'	'ARRAY(0x2)'	#930 (NS:Lvalue subroutines — USER-DEFERRED; perl itself TODO-fails 2 of these rows)

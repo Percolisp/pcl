@@ -39,7 +39,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix("$FindBin::Bin/../../cl/pcl-runtime.lisp");
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 31;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -462,6 +462,17 @@ sub mf { return "main::mf" }
 sub yf { return "main::yf" }
 print "blocks:", M::blocks(), "\n";
 print "switch:", $Z::switch->(), "\n";
+PL
+
+# ---- #1572 (s522b): a sub defined INSIDE a BEGIN exists when the BEGIN's
+# body runs (perl compiles the whole block first) -- Class::Method::Modifiers'
+# 081 installs `around 'orig'` above `sub orig`.  The sub never moves above a
+# `my` it may capture or its `package`.  Inverse: aff112d7 prints `cannot`.
+both_agree('#1572 BEGIN body sees a sub defined later in the same BEGIN', <<'PL');
+BEGIN { package P; print P->can("orig") ? "can\n" : "cannot\n"; sub orig { "o" } }
+BEGIN { my $x = 5; package Q; print Q->can("qf") ? "qcan\n" : "qcannot\n"; sub qf { $x } }
+print P->orig, " ", Q->qf, "\n";
+BEGIN { print main->can("later") ? "can2\n" : "cannot2\n"; } sub later { 1 }
 PL
 
 done_testing();
