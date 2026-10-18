@@ -1058,7 +1058,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 |---|---|---|---|---|---|---|---|---|---|
 | `p-args-body` | macro | `(&body body)` | — | — | — | — | — | — | — |
 | `p-cloned-sub` | function | `(f)` | — | — | — | — | — | — | — |
-| `p-declare-sub` | macro | `(name)` | — | — | — | — | — | — | — |
+| `p-declare-sub` | macro | `(name &optional body pkg)` | — | — | — | — | — | — | — |
 | `p-defpackage` | macro | `(name &rest options)` | — | — | — | — | — | — | — |
 | `p-sub-frame` | macro | `(&body body)` | — | — | — | — | — | — | — |
 
