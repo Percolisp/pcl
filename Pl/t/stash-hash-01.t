@@ -31,7 +31,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub run_cl {
     my ($code) = @_;
@@ -94,3 +94,20 @@ test_cl('a stash slice READ of subs still answers',
 test_cl('rule 12: the VALUE of a non-CODE stash element dies naming the deferral',
     'package Foo; our $x = 1; package main; print eval { my $v = $Foo::{x}; 1 } ? "read\n" : "died: $@";',
     qr/\Adied: PCL: stash element value for a non-CODE symbol is not supported \(docs\/not-supported\.md "Live symbol-table hashes"\)/);
+
+# #3321: a stash ALIAS `*A:: = *B::` redirects RUN-TIME name resolution (bless,
+# method calls, isa, can) to B's stash; names bound at COMPILE time (r4's `sub
+# later`, r6's `$A0::v`) stay with A's own stash, as in perl.  Program = Fable's
+# s522 merge probe b3-stash-alias.pl; expected = perl 5.40.3.  Inverse: the
+# aff112d7 base prints r1 `0 none`, r2 A0, r3 cannot, r5 none, r7 none.
+test_cl('#3321: a stash alias redirects bless / methods / isa / can; compile-time names stay', <<'EOF',
+package B0; sub hi { "hi" } package A0; *A0:: = *B0::; package main; my $o = bless {}, "A0";
+print "r1 ", ($o->isa("B0") ? 1 : 0), " ", (eval { $o->hi } // "none"), "\n";
+print "r2 ", ref($o), "\n";
+print "r3 ", (A0->can("hi") ? "can" : "cannot"), " ", (A0->isa("A0") ? 1 : 0), "\n";
+package A0; sub later { "later" } package main; print "r4 ", (eval { B0->later } // "none"), "\n";
+package B0; our @ISA = ("Base0"); package Base0; sub bz { "bz" } package main; print "r5 ", (eval { A0->bz } // "none"), "\n";
+$A0::v = 1; print "r6 ", ($B0::v // "undef"), "\n";
+package JSON::PP::Boolean; sub new { bless {}, shift } sub val { "v" } package main; *Dummy::True:: = *JSON::PP::Boolean::; print "r7 ", (eval { Dummy::True->new->val } // "none"), "\n";
+EOF
+    "r1 1 hi\nr2 B0\nr3 can 1\nr4 none\nr5 bz\nr6 undef\nr7 v\n");

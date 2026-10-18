@@ -11353,6 +11353,9 @@ per element."
     ;; substr as lvalue: (p-setf (p-substr str start [len]) val) -> (p-substr str start len val)
     ;; 2-arg form needs nil inserted for len so value lands in replacement slot.
     ;; 4-arg form (4-arg substr used as lvalue) is a Perl error.
+    ;; `*A:: = *B::` -- a stash ALIAS (task #3321): recorded, never copied.
+    ((and (listp place) (eq (car place) 'p-stash))
+     `(p-stash-assign ,(cadr place) ,value))
     ((and (listp place) (eq (car place) 'p-substr))
      (let ((args (cdr place)))
        (cond
@@ -15991,6 +15994,26 @@ which is one of #1140's escape spellings (probed)."
       ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
       (t nil))))
 
+;;; STASH ALIASES (task #3321, the s522 ruling (c)).  `*A:: = *B::` makes A's
+;;; NAME resolve to B's stash at RUN time: the alias is recorded ONCE (by
+;;; p-stash-assign) and written into the stash memo *pcl-stash-table*, so
+;;; %pcl-find-package -- the resolver method dispatch, isa, can, SUPER::,
+;;; symbolic refs and p-stash share -- answers B's CL package for A with no
+;;; per-call test; p-bless reads the table so `ref` names B.  Never a symbol
+;;; copy: names bound at COMPILE time (`package A; sub later {...}`, `$A::v`)
+;;; stay with A's own CL package, as they stay with A's original stash in perl.
+(defvar *p-stash-aliases* (make-hash-table :test 'equal)
+  "Perl package name -> the perl name of the stash `*NAME:: = *TARGET::` made
+   it, chains resolved at record time.")
+
+(defun %p-stash-canonical-name (name)
+  "The perl name of the stash NAME resolves to: NAME, or the target of the
+   stash alias that names it (#3321)."
+  (let ((n (if (and (> (length name) 6) (string= name "main::" :end1 6))
+               (subseq name 6)
+               name)))
+    (gethash n *p-stash-aliases* name)))
+
 (defvar *p-stash-pkg-table* (make-hash-table :test 'eq :weakness :key)
   "Weak side-table mapping a stash snapshot hash (as returned by p-stash) to its
    Perl package name.  Lets mutation primitives recognize a stash and write
@@ -16326,7 +16349,12 @@ which is one of #1140's escape spellings (probed)."
                           (string= pkg-name ""))
                       "MAIN"
                       (%pcl-invert-case pkg-name)))
-         (pkg (or (find-package pkg-str) (find-package pkg-name)))
+         ;; A non-main name goes through %pcl-find-package, the resolver a
+         ;; stash alias writes (#3321): `keys %A::` after `*A:: = *B::` is B's.
+         (pkg (if (string= pkg-str "MAIN")
+                  (find-package pkg-str)
+                  (or (%pcl-find-package pkg-name)
+                      (find-package pkg-str) (find-package pkg-name))))
          (h (make-hash-table :test 'equal)))
     (when pkg
       (do-symbols (sym pkg)
@@ -34899,6 +34927,12 @@ would consume, so it dies naming the stream (rule 12)."
                            ;; CL main package is "MAIN", Perl uses "main"
                            (if (string= pkg "MAIN") "main" pkg))
                          raw-class))
+         ;; perl blesses into the STASH, whose name is the aliased one's
+         ;; (`*A:: = *B::; ref bless {}, "A"` is B, #3321) -- one count test
+         ;; while no alias exists.
+         (class-name (if (zerop (hash-table-count *p-stash-aliases*))
+                         class-name
+                         (%p-stash-canonical-name class-name)))
          (inner (unbox ref)))
     ;; Ensure CL package exists for this class name (mirrors Perl stash creation on bless).
     ;; Lets p-method-call distinguish "blessed into" from "never mentioned" packages,
@@ -35117,11 +35151,17 @@ would consume, so it dies naming the stream (rule 12)."
 
 (defun %pcl-normalize-pkg (pkg-str)
   "Strip Perl's root-stash `main::` prefix: `main::Foo` and `Foo` name the same
-   package.  Used so class-name comparisons (isa) agree regardless of prefix."
-  (let ((s (to-string pkg-str)))
-    (if (and (> (length s) 6) (string= (subseq s 0 6) "main::"))
-        (subseq s 6)
-        s)))
+   package.  Used so class-name comparisons (isa) agree regardless of prefix.
+   A stash ALIAS (`*A:: = *B::`, #3321) is the same rule one step further: A
+   and B name the same stash, so A compares as B (one count test while no
+   alias exists)."
+  (let* ((s (to-string pkg-str))
+         (n (if (and (> (length s) 6) (string= (subseq s 0 6) "main::"))
+                (subseq s 6)
+                s)))
+    (if (zerop (hash-table-count *p-stash-aliases*))
+        n
+        (%p-stash-canonical-name n))))
 
 ;;; THE STASH TABLE (#73, s446m).  A Perl class's stash is, in PCL, its CL
 ;;; package, and resolving one from the NAME costs up to three FIND-PACKAGE
@@ -35136,6 +35176,26 @@ would consume, so it dies naming the stream (rule 12)."
 ;;; does not exist yet (one `package`, `require` or `bless` away) records
 ;;; nothing and is resolved again on the next call.
 (defvar *pcl-stash-table* (make-hash-table :test 'equal))
+
+(defun p-stash-assign (name value)
+  "`*NAME:: = VALUE`.  A stash VALUE (`*B::`, a p-stash snapshot) records NAME
+   as an alias of B's stash (#3321, see *p-stash-aliases*); anything else is
+   not implemented and says so on stderr (an effect-only miss, rule 12's
+   boundary)."
+  (let ((target (and (hash-table-p value) (gethash value *p-stash-pkg-table*))))
+    (cond
+      (target
+       (let* ((canon (%p-stash-canonical-name target))
+              (pkg (or (%pcl-find-package canon)
+                       (make-package (perl-pkg-to-cl-pkg-name canon)
+                                     :use '(:cl :pcl)))))
+         (unless (string= canon name)
+           (setf (gethash (%pcl-memo-key name) *p-stash-aliases*) canon
+                 (gethash (%pcl-memo-key name) *pcl-stash-table*) pkg))
+         value))
+      (t (%p-announce-unsupported "stash assignment"
+                                  (format nil "*~A:: = a non-stash value" name))
+         value))))
 
 (defun %pcl-find-package-1 (pkg-str)
   (or (find-package (perl-pkg-to-cl-pkg-name pkg-str))
