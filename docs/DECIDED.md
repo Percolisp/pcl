@@ -642,6 +642,21 @@ not-supported.md → only then probe.*
 - **The board row writer writes a random `/tmp/<name>` in a description as `/tmp/XXXX`** (ruling 2; tools/cpan-scoreboard.pl).
 - #3209 measured and left filed (a dup of an in-memory handle is a second layer with its own position); #3060 not reached.  Filed #3410 #3412 #3413 #3414 #3415.
 
+## s519b (2026-10-17/18, Opus; resumed twice in s520) -- runtime side: the tied-handle capture's PCL halves (#3376), a sub named like a TAP function is its own package's (#3405), Test::Builder as the TAP layer's bridge (#3346), a parent without a class (#3373), the uncached loader's herald (#3391); IO-Compress JOINS the board
+- **A bare `local *STDOUT` (any forced-main name) in package P localizes `*main::STDOUT`** (#3376) -- the rebase kept s519a's #3411 Parser.pm rule (ONE mechanism); s519b's runtime half stays.
+- **`*A = *STDOUT` / `local *A = *STDOUT` alias the standard handle's :pcl key** (`%p-glob-io-key`, #3376) -- `print A` wrote nothing before.
+- **A sub's name is its OWN package's symbol: a :pcl symbol the package only INHERITS is reserved in `*package*`** (`%p-sub-name-home`, #3405) -- ir-spec §5.1.
+- **A sub the file DEFINES is RESERVED at its section head: `(p-declare-sub NAME :body)`; a qualified one carries its qualifier `(p-declare-sub E::pl-x :body :E)`; a bodyless `sub ok ($@);` reserves nothing** (#3405 follow-up, found by the sweep: anonsub.t 7 -> 1) -- ir-spec §5.1; string-eval residue #3430.
+- **`Test::Builder` is PCL-provided (never the Test2 stack); its ok / diag / note / plan / done_testing / current_test methods are the TAP layer's; setting current_test dies** (#3346) -- docs/shipped-modules.md step 3.
+- **The TAP plan-count check is an END BLOCK registered when the layer loads** (a later module's END runs first, as perl's Test::Builder `_ending`) (#3346).
+- **`p-defclass` gives a parent with no class (or a forward reference) one with no parents** (`%p-ensure-parent-classes`, #3373) -- ir-spec §7.3.
+- **The uncached module load goes through `%p-load-text-stream`** (no SBCL herald for a dying module; rule 11 with #2764) (#3391).
+- **IO-Compress-2.214 JOINS the board** (baselines/cpan-board-dists.tsv; 235 rows blessed row by row with causes; the 105oneshot-* files trade 0-row and 8-row runs -- header note) -- session-log ## Session s519b.
+- **Companion movers of a batch are attributed ALONE on main's code vs the tree before any splice; identical on both = main's, spliced only with a named cause** (s520: stash x2 #3362, svflags + anonsub #3281, multideref #3370; op/sub_lval.t left unspliced, not attributed).
+- **#3405 turns the package-blind bareword CALL (#2952) from "runs main's sub" into an abort when the name is a :pcl-exported one** (perl's comp/fold.t rows 20-23: failing -> never produced) -- accepted with the splice; the fix is #2952's.
+- **#3362 (the B shim's CvFLAGS die) NOT fixed in s519b: its (a)/(b) ruling is Fable's** -- the two stash files spliced citing it.
+- **The s331 like-string-pattern ruling has its "real CPAN cause line"**: IO-Compress uses Test::More's `like $x, '/RE/'` (#3436) -- Fable decides the reopen.
+
 ## s501q (2026-09-30, Opus) -- perf round 38: signature subs take the classic lowering (#2514), a copying callee's @_ is built from values and a map block's value slice reads values (#2515), a literal list declaration is split (#2114), lc/uc in one pass (#2535); four pre-existing copy/alias bugs fixed on the way (#2536 #2570 #2571 #2572)
 - **A plain signature IS the classic spelling plus its arity check** (#2514, Kind-A `sig-classic`): `Parser2::_normalize_signature_subs` rewrites the TREE (signature removed, `my (PARAMS) = @_;` first) before every rename/scope pass; the arity is `(p-check-arity …)` in `p-args-body` or `(:arity …)` in `p-raw-params`; the call sites keep the signature's prototype record.  Defaults, placeholders, `()`, multi-line, `state`, and any body observing `@_` keep v1.  ir-spec §5.2.
 - **ONE "@_ is observed" predicate `Parser2::_body_observes_args`** (@_, $_[, shift, pop, goto, `&name;`, string eval) for the raw path, the leading-shift run, `args-copy` and the signature rewrite (#2572: the two inline regexes missed `&name;` and `pop` -- silent wrong).
