@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-18",
+   "description" : "Filed s520 by s519a while probing ruling 3 (found, not caused: identical on an fca3593b extraction).  Pl::Parser's leading-local machinery reads only the FIRST subscript of a chain:\n  our %rm = (R => { a => 1, c => 3 });\n  { local $rm{R}{c} = 9; print \"$rm{R}{c}\\n\"; }    # perl 9, PCL \"\" (it localizes $rm{R} itself and sets it to 9)\n  print \"$rm{R}{c}\\n\";                              # perl 3, PCL 3\n  my $x = { a => 1, b => 2, c => 3 }; my @hc = qw(a b);\n  { local $x->@{@hc}; print join(\",\", map { $_ // \"u\" } @$x{qw(a b c)}), \"\\n\"; }   # perl u,u,3, PCL u,u,u\n`local $rm{R}->{c} = 9` is the same miss.  SILENT WRONG.  The fix belongs in _process_local_declaration's subscript arms (Symbol + Subscript, Symbol + -> + Subscript, and the s520 Cast + Subscript arm): the container is everything up to the LAST subscript, evaluated as an ordinary expression (the `(unbox BASE)` the arrow arm uses), and the postfix `->@{...}` / `->@[...]` spellings are a slice of the referent (p-local-hash-slice / p-local-array-slice).",
+   "id" : "3415",
+   "status" : "pending",
+   "subject" : "`local $h{a}{b} = V` and `local $r->@{...}` localize the wrong slot (pre-existing on fca3593b): a multi-level subscript chain and the postfix slice"
+}
