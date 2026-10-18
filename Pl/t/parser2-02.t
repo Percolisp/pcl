@@ -968,4 +968,48 @@ eval { Pl::Parser2->parse_code(q{our @a = (1, 2); { my @a = my @b = (@a, 3); pri
 like($@, qr/Parser2 TODO: self-referential init/,
      '#3404/#3452 INVERSE: a chain whose initializer READS a name it declares is still refused');
 
+
+# #3375 (s522a): a `my` declaration with a LOOP modifier (`my $x = EXPR for
+# LIST`, `... while` / `until` / `foreach`, the scalar and the list / container
+# spellings) runs as `for (LIST) { my $x = EXPR }` followed by a fresh `my $x`:
+# EXPR runs every iteration and still names the OUTER binding, and after the
+# loop the declared variable is undef / empty (perl 5.40.3, pad clearing since
+# 5.10, so stable on the CI perl).  The base dropped the statement ("Bug. Fell
+# through") and died when it was reached.
+SKIP: {
+  skip 'sbcl not available', 2 unless grep { -x "$_/sbcl" } split /:/, $ENV{PATH};
+  my $lm = eval { Pl::Parser2->parse_code(<<'EOF') };
+my @n = (1, 2);
+my $dummy = sprintf "%d", $_ for @n;
+print "a:", (defined $dummy ? "d" : "u"), "\n";
+my ($a1, $b1) = ($_, $_ * 2) for 1..2;
+print "b:", defined $a1 ? $a1 : "u", defined $b1 ? $b1 : "u", "\n";
+my @a = ($_) for 1..2; my %h = (k => $_) for 1..2;
+print "c:", scalar(@a), scalar(keys %h), "\n";
+my $n = 0; my $w = $n++ while $n < 3;
+my $m = 5; my $v = $m-- until $m < 2;
+print "d:$n ", defined $w ? $w : "u", " $m ", defined $v ? $v : "u", "\n";
+my $calls = 0; sub f { $calls++; $_[0] * 10 }
+my $y = f($_) for 1..4; print "e:$calls ", defined $y ? $y : "u", "\n";
+sub g { my $gv = $_ for @_; return defined $gv ? $gv : "u" }
+print "f:", g(1, 2), g(3), "\n";
+my $z = $_ foreach (7, 8); print "g:", defined $z ? $z : "u", "\n";
+my $acc2 = do { print "in:", ($acc2 // "u"), " "; $_ } for 1..3;
+print "h:", defined $acc2 ? $acc2 : "u", "\n";
+my @l = (1, 2, 3);
+my $t = $_ *= 2 for @l; print "i:@l ", defined $t ? $t : "u", "\n";
+my $q = 5; { my $q = $q + $_ for 1..2; print "j:", defined $q ? $q : "u", "\n"; } print "k:$q\n";
+EOF
+  is($@, '', '#3375: my-declarations with for / foreach / while / until modifiers lower');
+  my $tmp = "/tmp/parser2-02-lm-$$.lisp";
+  open my $fh, '>', $tmp or die $!;
+  (my $out = $lm // '') =~ s/\(in-package :pcl\)/(in-package :pcl)\n(p-defpackage :main)\n(in-package :main)/;
+  print $fh $out;
+  close $fh;
+  my $got = `sbcl @sbcl_rt --load "$tmp" 2>/dev/null`;
+  unlink $tmp;
+  is($got, "a:u\nb:uu\nc:00\nd:3 u 1 u\ne:4 u\nf:uu\ng:u\nin:u in:u in:u h:u\ni:2 4 6 u\nj:u\nk:5\n",
+     '#3375: the loop runs, EXPR sees the outer binding, the declared variable is fresh after (perl 5.40.3)');
+}
+
 done_testing();

@@ -11145,6 +11145,13 @@ sub _lower_block_1 {
     # side effects, in void, BEFORE the let (the outer $x is what it sees).
     my @declmod_eval = $declmod_cond
       ? ($self->_lower_expr($declmod_cond, $first, ':void')) : ();
+    # A LOOP modifier on the init (#3375): the loop first, in the OUTER scope,
+    # then the declaration as if it had no init (see _decl_loop_modifier).
+    if ($name && defined $init
+        && _modifier_needs_fallback((_split_modifier($init))[1])) {
+      push @declmod_eval, $self->_decl_loop_modifier($first, $vi);
+      $init = undef;
+    }
     # -- `my $x = A, B;` / `my $x = A or B;` (task #138).  Assignment binds
     # TIGHTER than `,`/`=>`/`or`/`and`/`xor`, so the tail is NOT part of the
     # init — perl runs `(my $x = A), B`, leaving $x = A.  Splitting the tokens
@@ -11400,16 +11407,20 @@ sub _lower_block_1 {
     # evaluate the RHS at all, which is exactly what a fresh container plus a
     # `p-if` around the assignment gives.
     my @k = _strip_semi($first->schildren);
-    my ($kmod, $kcond);
+    my ($kmod, $kcond, @loopmod);
     {
       my $kexpr;
       ($kexpr, $kmod, $kcond) = _split_modifier(\@k);
-      # while/until/for/foreach on a declaration go to v1's whole-statement
-      # path, exactly as the single-scalar branch sends them.
-      return ($self->_fallback_stmt($first),
-              $self->_lower_block(\@rest, $vi, $tail_ctx))
-        if _modifier_needs_fallback($kmod);
-      @k = @$kexpr if defined $kmod;
+      # while/until/for/foreach on a declaration (#3375): the loop first, as
+      # the scalar branch does, then the declaration without its init.
+      if (_modifier_needs_fallback($kmod)) {
+        push @loopmod, $self->_decl_loop_modifier($first, $vi);
+        my ($eq) = grep { $kexpr->[$_]->isa('PPI::Token::Operator')
+                          && $kexpr->[$_]->content eq '=' } 0 .. $#$kexpr;
+        $kexpr = [ @$kexpr[0 .. $eq - 1] ] if defined $eq;
+        ($kmod, $kcond) = (undef, undef);
+      }
+      @k = @$kexpr if defined $kmod || @loopmod;
     }
     my ($vars, $has_init) = $self->_multi_decl($first, \@k);
     die "Parser2 TODO: unsupported declaration: " . $first->content unless $vars;
@@ -11418,8 +11429,8 @@ sub _lower_block_1 {
     # OUTER variable is what it sees: `my`-visibility starts after the
     # statement).  Same rule and same shape as the scalar branch's
     # @declmod_eval.
-    my @kmod_eval = ($kmod && !$has_init)
-      ? ($self->_lower_expr($kcond, $first, ':void')) : ();
+    my @kmod_eval = (@loopmod, ($kmod && !$has_init)
+      ? ($self->_lower_expr($kcond, $first, ':void')) : ());
     # A single container promoted to a package cell by a rename pass
     # (spanning OR captured-by-named-sub) lowers as `our` does: a defvar'd
     # container hoisted to the section top (so a hoisted named sub that captures
@@ -14651,6 +14662,44 @@ sub _split_modifier {
 sub _modifier_needs_fallback {
   my ($mod) = @_;
   return $mod && $mod !~ /^(?:if|unless)$/;
+}
+
+# A `my` DECLARATION WITH A LOOP MODIFIER (#3375): `my $x = EXPR for LIST;`,
+# `my ($a, $b) = EXPR while COND;`, `my @a = EXPR until COND;`.  Perl runs it
+# as `for (LIST) { my $x = EXPR }` followed by a fresh `my $x;`: the
+# declaration's pad entry is cleared at every iteration's scope exit, so EXPR
+# (which still names the OUTER binding -- a `my` is visible only after its
+# statement) never sees an earlier iteration's value, and after the loop the
+# declared variable is a fresh undef / empty container (perl 5.40.3, every
+# spelling, scratch/s522a/pr/m1*.pl; the behaviour since 5.10).  So the loop
+# is lowered as exactly that BLOCK-form loop -- the ordinary foreach / while /
+# until lowering, one mechanism, $_ aliasing and the while-readline defined
+# test included -- re-parsed from the statement's own (post-rename) token
+# text, line-aligned; the caller then lowers the declaration WITHOUT its init.
+# A heredoc's body is not in its token's content, so that shape DIES (rule 12).
+sub _decl_loop_modifier {
+  my ($self, $stmt, $vi) = @_;
+  my @ch = $stmt->children;
+  pop @ch while @ch && ($ch[-1]->isa('PPI::Token::Whitespace')
+    || ($ch[-1]->isa('PPI::Token::Structure') && $ch[-1]->content eq ';'));
+  my ($mi) = grep { $ch[$_]->isa('PPI::Token::Word')
+                    && Pl::PExpr::Config::is_statement_modifier($ch[$_]->content) } 1 .. $#ch;
+  die "Parser2 TODO: no loop modifier in: " . $stmt->content . "\n" unless defined $mi;
+  die "Parser2 TODO: heredoc in a my-declaration with a loop modifier: "
+    . $stmt->content . "\n" if $stmt->find_first('PPI::Token::HereDoc');
+  my $mod  = $ch[$mi]->content;
+  my $kw   = $mod eq 'while' || $mod eq 'until' ? $mod : 'foreach';
+  my $decl = join '', map { $_->content } @ch[0 .. $mi - 1];
+  my $cond = join '', map { $_->content } @ch[$mi + 1 .. $#ch];
+  my $line = $stmt->line_number || 1;
+  my $doc  = Pl::Parser::fragment_doc(("\n" x ($line - 1)) . "$kw ($cond) { $decl; }")
+    or die "Parser2 TODO: my-declaration loop modifier did not re-parse: "
+         . $stmt->content . "\n";
+  my @st = grep { $_->isa('PPI::Statement') } $doc->schildren;
+  die "Parser2 TODO: my-declaration loop modifier re-parsed as "
+    . scalar(@st) . " statements: " . $stmt->content . "\n"
+    unless @st == 1 && $st[0]->isa('PPI::Statement::Compound');
+  return $self->_lower_block(\@st, $vi, undef);
 }
 
 # THE VALUE OF AN UNTAKEN `if`/`unless` STATEMENT MODIFIER IS THE CONDITION'S
