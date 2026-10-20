@@ -1976,11 +1976,12 @@ once `**` became faithful).
 
 perl's tokenizer holds a decimal integer literal as an IV / UV when it fits and
 as an NV otherwise -- at compile time, before any arithmetic.  So a decimal
-literal above 18446744073709551615 (or, with the minus PPI folds into the token,
-below -9223372036854775808), and a hex / octal / binary literal above 64 bits,
-IS the double perl would hold, and prints through `%.15g`.  ARITHMETIC that
+literal whose MAGNITUDE is above 18446744073709551615, and a hex / octal / binary
+literal above 64 bits, IS the double perl would hold, and prints through `%.15g`.  ARITHMETIC that
 crosses the 64-bit range stays exact (§3.6, `not-supported.md` "Integers are
-unbounded"), and an `overload::constant` handler (`use bigint`) still receives
+unbounded") -- and a NEGATIVE literal is perl's negation of a UV, i.e.
+arithmetic: `-9223372036854775809` stays exact (op/64bitint.t compares such
+results exactly) -- and an `overload::constant` handler (`use bigint`) still receives
 the literal's source text before this rule applies.
 
 ```perl
