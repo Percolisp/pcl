@@ -28840,6 +28840,13 @@ would consume, so it dies naming the stream (rule 12)."
   "T once cl/pcl-test.lisp has been loaded — by the harness preloading it, or
   on demand from `use Test::More`.  Guards against re-loading.")
 
+(defvar *p-test-builder-used* nil
+  "T once a Test::Builder module (Test::More, Test::Simple, Test::Builder,
+  Test2::Bundle::More) has been use'd or require'd.  The TAP layer's END hook
+  then ENDS THE RUN AS Test::Builder DOES -- its exit status and its closing
+  diagnostics (#3651, cl/pcl-test.lisp) -- where a file driven by perl's
+  t/test.pl keeps that harness's ending, which sets no status.")
+
 (defun p-ensure-test-lib ()
   "Load the Test::More TAP layer (cl/pcl-test.lisp) on demand, exactly once.
   This is what lets the runner stop preloading the test infrastructure for every
@@ -28850,7 +28857,8 @@ would consume, so it dies naming the stream (rule 12)."
                      (merge-pathnames "pcl-test.lisp" *pcl-runtime-directory*))))
       (when (and path (probe-file path))
         (load path))))
-  (setf *pcl-test-lib-loaded* t))
+  (setf *pcl-test-lib-loaded* t
+        *p-test-builder-used* t))
 
 ;;; --- %INC for a module perl loads and PCL does not (task #511) ------------
 ;;; Perl populates %INC on EVERY successful use/require, and programs read it:

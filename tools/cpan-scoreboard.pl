@@ -76,7 +76,9 @@
 # run-dist-t.pl's OWN exit (0 whenever it ran) and never compared the plan, so
 # a file that died after row 1 of 25,119 read PASS 1/0.  The rule is prove's:
 # the rows that ran (ok + not ok) must equal the plan (`1..N` up front or
-# `done_testing`'s trailer) and SBCL must exit 0.  A file that ran rows and
+# `done_testing`'s trailer) and SBCL must exit 0.  (#3651: or exit with the TAP layer's own
+# VERDICT, Test::Builder's status for the rows -- the failures; run-dist-t.pl
+# --rows says which in the SBCL line's fourth field.)  A file that ran rows and
 # misses either condition gets ONE synthetic row, so the row gate can hold it
 # with a cause:
 #
@@ -268,9 +270,14 @@ sub run_one {
   # The SBCL child's exit and wait status, reported by run-dist-t.pl --rows.
   # A nonzero SIGNAL means the run was KILLED (the OOM killer on a loaded box),
   # and a killed run's empty TAP must never be published as a verdict.
-  my ($sbcl_rc, $sig) = ($out =~ /^SBCL\t(\d+)\t(\d+)$/m) ? ($1, $2) : (undef, 0);
+  # The fourth field (#3651) says whether that exit is the TAP layer's VERDICT
+  # (Test::Builder's status: the failures, or 255 for a missed plan) -- a file
+  # that runs its whole plan with failures exits F and is PARTIAL by its rows,
+  # not short.
+  my ($sbcl_rc, $sig, $verdict) =
+    ($out =~ /^SBCL\t(\d+)\t(\d+)(?:\t(\d))?$/m) ? ($1, $2, $3 // 0) : (undef, 0, 0);
   my $short = shortfall($ok + $notok, $plan, $skip,
-                        $rc == 124 ? 124 : ($sbcl_rc // $rc));
+                        $rc == 124 ? 124 : ($sbcl_rc // $rc), $rc != 124 && $verdict);
   my $class = $ok == 0                         ? 'FAIL'
             : ($notok || $rc != 0 || length $short) ? 'PARTIAL'
             :                                    'PASS';
@@ -305,10 +312,10 @@ sub t_name { my ($t) = @_; $t =~ s{^.*?/t/}{}; return $t }
 # The shortfall text for a file that RAN rows (see the header, #3241): '' when
 # the plan is met and the exit is clean, else "ran M of N, rc R".
 sub shortfall {
-  my ($ran, $plan, $skip, $exit) = @_;
+  my ($ran, $plan, $skip, $exit, $verdict) = @_;
   return '' if $ran == 0;                       # the *FILE* row's case
   my $planned = (defined $plan && length $plan) ? $plan : undef;
-  return '' if defined $planned && $ran == $planned && !$exit;
+  return '' if defined $planned && $ran == $planned && (!$exit || $verdict);
   return '' if length($skip // '');             # 1..0 # SKIP after rows: not a plan
   return sprintf 'ran %d of %s, rc %d', $ran,
                  defined $planned ? $planned : 'no plan', $exit // 0;

@@ -147,6 +147,7 @@ ok 5 - bind matches
 not ok 6 - negated bind matches
 #      got: 'abc'
 # expected: !~ '(?^:b)'
+# Looks like you failed 3 tests of 6.
 TAP
 
 # An operator the dispatch does not implement must NAME itself, not become a
@@ -207,6 +208,7 @@ not ok 3 - The class (or class-like) 'Plain' isa 'Bar'
 #     The class (or class-like) 'Plain' isn't a 'Bar'
 not ok 4 - undef isa 'Bar'
 #     undef isn't defined
+# Looks like you failed 4 tests of 4.
 TAP
 
 is(run_cl(q{use Test::More tests => 3;
@@ -223,6 +225,7 @@ not ok 2 - Foo->can(...)
 #     Foo->can('nope2') failed
 not ok 3 - Foo->can(...)
 #     can_ok() called with no methods
+# Looks like you failed 3 tests of 3.
 TAP
 
 # #3245: a Test::More function is a perl SUB, so an ARRAY argument flattens --
@@ -245,6 +248,7 @@ not ok 2 - main->can(...)
 #     main->can('nope') failed
 # d1d2
 # d3
+# Looks like you failed 1 test of 2.
 TAP
 
 # #3245, second half: Test::More's functions are subs IN the Test::More stash
@@ -267,6 +271,7 @@ ok 2 - Test::More->can(...)
 not ok 3 - 2->can(...)
 #     can_ok() called with no methods
 ok 4 - stash
+# Looks like you failed 1 test of 4.
 TAP
 
 # ------------------------------------------- 5. skip_without_dynamic_extension
@@ -306,7 +311,8 @@ ok(1, 'a'); ok(1, 'b');
 ok(1, 'never runs');
 }) . "--\n" . run_cl(q{use Test::More 0.88;
 ok(1, 'a');
-}), "ok 1 - a\nok 2 - b\n1..2\n--\n1..0 # Skip why not\n--\nok 1 - a\n",
+}), "ok 1 - a\nok 2 - b\n1..2\n--\n1..0 # SKIP why not\n--\nok 1 - a\n"
+   . "# Tests were run but no plan was declared and done_testing() was not seen.\n",
    'no_plan / skip_all / a bare VERSION each reach the TAP layer as perl reads them');
 
 # ---------------- 6c. plan()'s argument list FLATTENS, like any perl sub (#317)

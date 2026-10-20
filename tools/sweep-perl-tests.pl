@@ -33,6 +33,7 @@ use FindBin;
 use lib "$FindBin::RealBin/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
 use PCLPaths ();  # the ONE root resolver (task #1302)
+use PCLTap ();    # exit_is_verdict: is a non-zero exit the TAP verdict? (#3651)
 use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + reaping (#367)
 
 my $JOBS    = 8;
@@ -249,8 +250,16 @@ sub run_one_test {
         # stale entries it reached.
         $registry_stale = () = $out =~ /^#\s*REGISTRY-STALE:/gm;
 
-        # Detect abnormal termination
-        if ($sbcl_exit != 0) {
+        # Detect abnormal termination.  A non-zero exit is a CRASH only when it
+        # is NOT the TAP layer's own verdict (#3651): a Test::More file exits
+        # as Test::Builder sets it -- the failures, or 255 for a missed plan --
+        # and that status is explained by its rows.  A crash, a die or an
+        # explicit `exit N` enters the TAP layer's END with a non-zero status,
+        # which it ANNOUNCES ("# Looks like your test exited with N" / "#
+        # PCL-EXIT status=N"), so it stays a CRASH whatever the rows say.
+        if ($sbcl_exit != 0
+            && !PCLTap::exit_is_verdict($out, $sbcl_exit, $pass + $fail + $skip,
+                                        $planned >= 0 ? $planned : undef, $fail)) {
             $status = 'CRASH';
         } elsif ($planned >= 0 && ($pass + $fail + $skip) < $planned) {
             # SBCL exited cleanly but fewer tests ran than planned — crashed mid-file

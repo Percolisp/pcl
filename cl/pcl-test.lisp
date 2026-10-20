@@ -100,6 +100,9 @@
 ;; keeps $$ at plan time and skips _ending in children the same way).
 (defvar *test-plan-pid* nil)
 (defvar *test-failures* 0)
+(defvar *test-ended-early* nil
+  "T once skip_all or BAIL_OUT has ended the run: Test::Builder's ending
+   says nothing after either (its plan is SKIP; a bail-out is its own end).")
 (defvar *test-skipped* 0)
 (defvar *test-subtest-depth* 0
   "How many `subtest' bodies are running (#1576).  Inside one, skip_all ends
@@ -258,8 +261,10 @@
 (defun pl-skip_all (&optional reason)
   (when (plusp *test-subtest-depth*)
     (throw '%subtest-skip-all (if reason (to-string (unbox reason)) "")))
+  (setf *test-ended-early* t)
+  ;; Test::More writes the directive `# SKIP', perl's t/test.pl `# Skip'.
   (if reason
-      (%tap-out "1..0 # Skip ~A~%" reason)
+      (%tap-out "1..0 # ~:[Skip~;SKIP~] ~A~%" *p-test-builder-used* reason)
       (%tap-out "1..0~%"))
   (sb-ext:exit :code 0))
 
@@ -367,6 +372,7 @@
 ;;; BAIL_OUT(reason)
 (defun pl-BAIL_OUT (reason)
   (%tap-out "Bail out!  ~A~%" reason)
+  (setf *test-ended-early* t)
   (sb-ext:exit :code 255))
 
 ;;; Core: _ok(pass, name, @diag)
@@ -1159,12 +1165,93 @@
 ;;; registered when the TAP layer loads (at `use Test::More`), so the END
 ;;; blocks defined after it run FIRST, as perl runs Test::Builder's _ending
 ;;; after a later module's END (Test::NoWarnings' own assertion, #3346).
+;;;
+;;; THE ENDING (#3651, docs/tap-assertion-audit.md "The exit status").  A run
+;;; that use'd a Test::Builder module ends as Test::Builder::_ending does: its
+;;; closing diagnostics AND its exit status.  A run driven by perl's t/test.pl
+;;; keeps that harness's ending, which sets no status: the planned-but-ran
+;;; line (always `tests', as t/test.pl writes it) and, for no_plan, the plan.
+;;; Either way a run that ENTERS this hook with a non-zero status (a die, an
+;;; unhandled host error, `exit N', an earlier END's $?) is announced -- in
+;;; Test::Builder's words, or in t/test.pl mode by a PCL fact line the runners
+;;; read (tools/lib/PCLTap.pm's exit_is_verdict), so they can tell a crash
+;;; from a status the TAP verdict chose.
+(defun %test-entry-status ()
+  "The status the program is leaving with as the TAP layer's END runs: $?,
+   or when that is 0 the code an unhandled HOST error is exiting with (SBCL's
+   own exit-in-progress code, which no $? write records)."
+  (let ((s (logand (%p-status) 255)))
+    (if (plusp s)
+        s
+        (let* ((sym (find-symbol "*EXIT-IN-PROGRESS*" "SB-IMPL"))
+               (e (and sym (boundp sym) (symbol-value sym))))
+          (if (and (integerp e) (plusp e)) (logand e 255) 0)))))
+
+(defun %test-builder-exited (real count)
+  "Test::Builder's announcement of a status REAL the run was already leaving
+   with; answers REAL, which the ending keeps."
+  (if (zerop count)
+      (%tap-out "# Looks like your test exited with ~A before it could output anything.~%"
+                real)
+      (%tap-out "# Looks like your test exited with ~A just after ~A.~%" real count))
+  real)
+
+(defun %test-builder-plan-verdict (plan count failed)
+  "The closing lines and status for a run that met no real exit: PLAN is
+   the plan's count (a no_plan run's plan is printed now, from COUNT)."
+  (let ((extra (- count plan)))
+    (unless (zerop extra)
+      (%tap-out "# Looks like you planned ~A test~:P but ran ~A.~%" plan count))
+    (when (plusp failed)
+      (%tap-out "# Looks like you failed ~A test~:P of ~A~:[~; run~].~%"
+                failed count (/= extra 0)))
+    (cond ((plusp failed) (min failed 254))
+          ((/= extra 0) 255)
+          (t 0))))
+
+(defun %test-builder-ending (real)
+  "Test::Builder::_ending: print its closing diagnostics and answer the exit
+   status (NIL = leave the status alone).  REAL = %test-entry-status."
+  (let ((count *test-count*)
+        (failed *test-failures*)
+        (plan (cond (*test-no-plan* :no-plan)
+                    (*test-planned* (truncate (to-number *test-planned*))))))
+    (cond
+      ((or *test-ended-early* (not (or plan (plusp count) (plusp failed)))) nil)
+      ((and (null plan) (plusp count))
+       (%tap-out "# Tests were run but no plan was declared and done_testing() was not seen.~%")
+       (cond ((plusp real) (%test-builder-exited real count))
+             ((plusp failed) (min failed 254))
+             (t 254)))
+      ((plusp real) (%test-builder-exited real count))
+      ((zerop count) (%tap-out "# No tests run!~%") 255)
+      (t
+       (when (eq plan :no-plan)
+         (%tap-out "1..~A~%" count)
+         (setf plan count))
+       (%test-builder-plan-verdict plan count failed)))))
+
+(defun %test-harness-ending (real)
+  "perl's t/test.pl END: the planned-but-ran line and a no_plan run's plan;
+   no status of its own.  REAL, when non-zero, gets PCL's fact line."
+  (when (and *test-planned* (/= *test-count* *test-planned*))
+    (%tap-out "# Looks like you planned ~A tests but ran ~A.~%"
+              *test-planned* *test-count*))
+  (when (plusp real)
+    (%tap-out "# PCL-EXIT status=~A after=~A~%" real *test-count*))
+  (when *test-no-plan*
+    (%tap-out "1..~A~%" *test-count*))
+  nil)
+
 (push (lambda ()
         (unless (and *test-plan-pid*
                      (/= *test-plan-pid* (sb-posix:getpid)))
-          (when (and *test-planned* (/= *test-count* *test-planned*))
-            (%tap-out "# Looks like you planned ~A tests but ran ~A.~%"
-                      *test-planned* *test-count*))
+          (let* ((real (%test-entry-status))
+                 (new (if *p-test-builder-used*
+                          (%test-builder-ending real)
+                          (%test-harness-ending real))))
+            (when (and new (/= new real))
+              (%p-set-status new)))
           ;; Crash localization: running FEWER tests than planned means the run is
           ;; INCOMPLETE.  Emit a neutral, machine-parseable fact (the exit hook
           ;; fires both on a clean EOF and on an unhandled condition under
@@ -1174,9 +1261,7 @@
           (when (and *test-planned* (< *test-count* *test-planned*))
             (%tap-out "# PCL-INCOMPLETE last=~A planned=~A desc=~A~%"
                       *test-count* *test-planned* (or *last-test-name* "?"))
-            (force-output))
-          (when *test-no-plan*
-            (%tap-out "1..~A~%" *test-count*))))
+            (force-output))))
       *end-blocks*)
 
 ;;; Stubs for common test-infrastructure functions that may not be loaded yet.

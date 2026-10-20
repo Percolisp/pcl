@@ -28,7 +28,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 34;
+use Test::More tests => 43;
 use File::Temp qw(tempdir);
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
@@ -106,6 +106,22 @@ TAP
   ok(!defined $tap->{skip_all}, 'subtest: a child skip_all is not the file\'s skip_all');
 }
 
+# ── the exit status a TAP run ends with (#3651) ─────────────────────────────
+# Test::Builder's END: the failures (at most 254), else 255 for a missed plan,
+# else 254 for rows with no plan; a status announced as the run's OWN (a die,
+# an `exit N') is never the verdict.
+is(PCLTap::test_builder_exit(3, 3, 2), 2,     'TB exit: a met plan with 2 failures exits 2');
+is(PCLTap::test_builder_exit(300, 300, 300), 254, 'TB exit: failures are capped at 254');
+is(PCLTap::test_builder_exit(1, 3, 0), 255,   'TB exit: a missed plan exits 255');
+is(PCLTap::test_builder_exit(1, undef, 0), 254, 'TB exit: rows with no plan exit 254');
+is(PCLTap::test_builder_exit(2, 2, 0), 0,     'TB exit: a clean run exits 0');
+ok(PCLTap::exit_is_verdict("1..3\nok 1\n", 255, 1, 3, 0), 'verdict: 255 for a short plan is the TAP verdict');
+ok(!PCLTap::exit_is_verdict("ok 1\n# Looks like your test exited with 255 just after 1.\n", 255, 1, 3, 0),
+   'verdict: an announced entry status is not (Test::Builder\'s words)');
+ok(!PCLTap::exit_is_verdict("ok 1\n# PCL-EXIT status=255 after=1\n", 255, 1, 3, 0),
+   'verdict: an announced entry status is not (the t/test.pl fact line)');
+is(PCLTap::parse_tap("1..2\nnot ok 1 # TODO x\nnot ok 2\n")->{failed}, 1, 'parse_tap: failed counts the not-ok rows without a TODO');
+
 # ── the run: per-file table, row file, allowance announcement ──────────────
 my $reg_file = "$tmp/board-timeouts.tsv";
 {
@@ -143,7 +159,7 @@ is($rowlines[2], "fixture-dist\trows.t\t3\t\t\t",
 like($rowlines[3], qr/^fixture-dist\tskipped\.t\t0\t\*FILE\*\t1\.\.0 # SKIP fixture: nothing to run here \(rc=0\)\t/,
      'a file that produced NO TAP gets a *FILE* row naming why');
 unlike(join("\n", @rowlines), qr/\trows\.t\t0\t\*PLAN\*/,
-       'a file that met its plan and exited 0 gets no *PLAN* row, failing rows or not');
+       'a file that met its plan gets no *PLAN* row, failing rows or not (it exits with the TAP verdict, #3651)');
 
 # The SBCL child's WAIT STATUS is reported, so a run KILLED by a signal (the
 # OOM killer on a loaded box) can be told apart from a run that finished and
@@ -151,7 +167,7 @@ unlike(join("\n", @rowlines), qr/\trows\.t\t0\t\*PLAN\*/,
 # is not reproducible in a fixture; the retry it feeds is a serial re-run of
 # exactly the rows whose signal is nonzero.
 my $rows_out = `perl \Q$root/tools/run-dist-t.pl\E --rows \Q$dist\E t/rows.t 2>/dev/null`;
-like($rows_out, qr/^SBCL\t0\t0$/m, 'run-dist-t --rows reports the SBCL exit code and signal');
+like($rows_out, qr/^SBCL\t2\t0\t1$/m, 'run-dist-t --rows reports the SBCL exit code (rows.t: 2 failures = Test::Builder\'s 2, #3651), signal and verdict');
 
 # ── --diff: NEW / FIXED / LOST / CAUSES ────────────────────────────────────
 {

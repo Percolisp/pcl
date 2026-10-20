@@ -159,6 +159,44 @@ of STDERR; here they stay on the TAP stream, because the board runner reads
 the TAP from stdout alone and takes each failing row's got / expected from the
 lines after it (#3241) -- moving them would blank those columns.
 
+## The exit status (#3651, s523c; RULED s523)
+
+A run that `use`d or `require`d a Test::Builder module ends AS Test::Builder
+ENDS IT -- `Test::Builder::_ending`, probed on 5.40.3 shape by shape
+(`Pl/t/tap-exit-01.t`, perl as the oracle):
+
+| the run | the closing line(s) | exit |
+|---|---|---|
+| entered the END with a non-zero status (a die, `exit N`, an earlier END's `$?`, an unhandled host error) | `# Looks like your test exited with N just after M.` (`before it could output anything.` when M = 0) | N, kept |
+| rows, no plan, no `done_testing` | `# Tests were run but no plan was declared and done_testing() was not seen.` | the failures, else 254 |
+| a plan, no rows | `# No tests run!` | 255 |
+| planned != ran | `# Looks like you planned N test(s) but ran M.` | the failures, else 255 |
+| failures | `# Looks like you failed F test(s) of N[ run].` | min(F, 254) |
+| `skip_all`, `BAIL_OUT` | nothing more | 0 / 255 |
+
+A TODO row is not a failure.  The flag is PROCESS-wide
+(`*p-test-builder-used*`, set by p-use's provided-module branch), unlike the
+`like` rule below: Test::Builder's END runs once Test::Builder is loaded
+anywhere, whichever package imported it.  A run driven by perl's t/test.pl
+keeps THAT harness's ending, which sets no status (the planned-but-ran line,
+always `tests`); a non-zero entry status there is announced by a PCL fact line
+`# PCL-EXIT status=N after=M`, beside the existing `# PCL-INCOMPLETE`.
+`skip_all` writes Test::More's `1..0 # SKIP why` in the first mode and
+t/test.pl's `1..0 # Skip why` in the second.
+
+**The runners ask two questions of a non-zero exit, never one**
+(`tools/lib/PCLTap.pm`'s `exit_is_verdict`, the ONE answer): was an entry
+status ANNOUNCED (either line above -- a crash or an explicit exit), and if
+not, is the status the one the rows produce (`test_builder_exit`)?  Only an
+unexplained status is a crash: the sweep's CRASH, the board's `*PLAN*` row
+(`run-dist-t.pl --rows` reports the answer as the SBCL line's fourth field).
+A file that runs its whole plan with failures exits F and is PARTIAL by its
+rows, never short.  The sweep's recovery load (`p-load-with-recovery`)
+catches a die, so a die mid-file reaches the END with status 0 there and
+reads PARTIAL, as it did before.  Known edge: a t/test.pl run that ran MORE
+rows than its plan and then died without reaching the exit hooks (a host
+abort) reads as the verdict 255.
+
 ## Not changed, deliberately
 
 - **A plain STRING as a `like`/`unlike` pattern** (the like-string-patterns

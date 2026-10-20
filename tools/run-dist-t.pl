@@ -154,7 +154,13 @@ if ($summary_only) {
   my $tap = PCLTap::parse_tap($raw);
   print "pass=$tap->{ok} fail=$tap->{notok}  ($tfile)\n";
   if ($rows_out) {
-    printf "SBCL\t%d\t%d\n", $sbcl_status >> 8, $sbcl_status & 127;
+    # The fourth field (#3651): 1 when the exit status is the one the TAP
+    # layer's END chose from the rows (Test::Builder's: the failures, or 255
+    # for a missed plan), 0 when it is unexplained -- a crash, or an exit the
+    # run was already leaving with (PCLTap::exit_is_verdict).
+    printf "SBCL\t%d\t%d\t%d\n", $sbcl_status >> 8, $sbcl_status & 127,
+           PCLTap::exit_is_verdict($raw, $sbcl_status >> 8, $tap->{ok} + $tap->{notok},
+                                   $tap->{plan}, $tap->{failed}) ? 1 : 0;
     printf "PLAN\t%s\t%s\n", $tap->{plan} // '',
            defined $tap->{skip_all}
              ? '# SKIP ' . PCLTap::tsv_clean($tap->{skip_all}) : '';

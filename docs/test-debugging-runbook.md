@@ -71,6 +71,11 @@ The registry hooks per-assertion (`test-ok`); a crash/abort never reaches it. So
   `# PCL-INCOMPLETE last=N planned=M desc=…`; the sweep refines it by exit code into
   `<faillog>/_status.tsv` col 7 (`grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,2,7`;
   the columns are name, status, pass, fail, planned, **drops** (s402, task #343), note):
+  - A non-zero SBCL exit is a CRASH only when it is NOT the TAP layer's own verdict (#3651,
+    s523c): a Test::More file exits as Test::Builder sets it (the failures, 255 for a missed
+    plan), and the sweep asks `PCLTap::exit_is_verdict` -- an entry status the TAP layer
+    ANNOUNCED (`# Looks like your test exited with N`, `# PCL-EXIT status=N`) stays a CRASH;
+    the rows' own status does not (`docs/tap-assertion-audit.md` "The exit status").
   - **CRASH** → `CRASH after test N (<desc>) -- crash site ~test N+1 | <SBCL error>`. Open the
     source at test N+1, fix the PCL defect so the rest of the file runs; the registry can then
     reach the later assertions.

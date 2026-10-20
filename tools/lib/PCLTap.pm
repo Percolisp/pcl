@@ -23,6 +23,7 @@ package PCLTap;
 # parse_tap($text) -> {
 #     ok       => N,               # rows matching /^ok \d+/
 #     notok    => N,               # rows matching /^not ok \d+/
+#     failed   => N,               # the not-ok rows WITHOUT a TODO/SKIP directive (#3651)
 #     plan     => N | undef,       # from `1..N`
 #     skip_all => TEXT | undef,    # from `1..0 # SKIP reason` (reason may be '')
 #     rows     => [ { num, desc, got, expected, directive } ],   # FAILING rows only
@@ -40,7 +41,35 @@ package PCLTap;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(parse_tap tsv_clean);
+our @EXPORT_OK = qw(parse_tap tsv_clean test_builder_exit exit_is_verdict);
+
+# THE EXIT STATUS A TAP RUN ENDS WITH (#3651, docs/tap-assertion-audit.md
+# "The exit status").  A Test::More program exits as Test::Builder's END sets
+# it: the failures (at most 254), else 255 for a plan that was not met (none
+# ran, too few, too many), else 254 for rows run with no plan and no
+# done_testing, else 0 -- and a non-zero status the program was ALREADY
+# leaving with (a die, `exit N`, an END that set $?) is kept and ANNOUNCED
+# ("# Looks like your test exited with N ...").  A t/test.pl run sets no status
+# of its own; PCL's TAP layer announces a non-zero entry status there with its
+# own fact line ("# PCL-EXIT status=N after=M").  So a runner asks two
+# questions of a non-zero exit, never one: was an entry status announced (a
+# crash, or an explicit exit), and if not, is the status the one the TAP
+# verdict produces?  Only a status that is neither is unexplained.
+sub test_builder_exit {
+    my ($ran, $plan, $failed) = @_;
+    return $failed > 254 ? 254 : $failed if $failed;
+    if (!defined $plan || !length $plan) { return $ran ? 254 : 0 }
+    return $ran == $plan ? 0 : 255;
+}
+
+# exit_is_verdict($text, $exit, $ran, $plan, $failed): true when EXIT is 0, or
+# is the status the TAP layer's END chose from the rows -- i.e. not a crash.
+sub exit_is_verdict {
+    my ($text, $exit, $ran, $plan, $failed) = @_;
+    return 1 if !$exit;
+    return 0 if ($text // '') =~ /^#\s*(?:Looks like your test exited with \d+|PCL-EXIT status=\d+)/m;
+    return $exit == test_builder_exit($ran, $plan, $failed);
+}
 
 # A TSV field may not carry a tab or a newline, and a row that did would
 # silently shift every column to its right.
@@ -54,7 +83,7 @@ sub tsv_clean {
 
 sub parse_tap {
     my ($text) = @_;
-    my %r = (ok => 0, notok => 0, plan => undef, skip_all => undef, rows => []);
+    my %r = (ok => 0, notok => 0, failed => 0, plan => undef, skip_all => undef, rows => []);
     return \%r unless defined $text;
     my $cur;    # the failing row currently collecting diagnostics
     for my $line (split /\n/, $text, -1) {
@@ -70,6 +99,7 @@ sub parse_tap {
             $r{notok}++;
             my $directive = '';
             $directive = $1 if $rest =~ s/\s*#\s*((?i:todo|skip)\b.*)$//;
+            $r{failed}++ unless length $directive;   # Test::Builder's count: a TODO row is not a failure
             $rest =~ s/^\s*-?\s*//;
             $cur = { num => $num, desc => tsv_clean($rest),
                      got => '', expected => '', directive => tsv_clean($directive) };
