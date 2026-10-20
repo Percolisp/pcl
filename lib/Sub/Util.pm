@@ -50,17 +50,40 @@ sub set_prototype {
     return __pcl_set_prototype($code, $proto);
 }
 
-# Renaming a CL closure is not supported; the name is cosmetic (it only
-# affects how the sub reports itself to caller()/debuggers).  Return the
-# code ref unchanged so chaining works.
+# subname / set_subname (#3529): the sub's NAME is ONE runtime record -- the
+# one `sub NAME` writes and B's GV reads (builtin::sub_name); set_subname
+# rewrites it (builtin::set_sub_name), as perl gives the CV a new GV.  It does
+# NOT install the sub anywhere.  subname reads it through B's own reader, so
+# the two cannot disagree: a named sub's 'Pkg::name', an anonymous sub's
+# 'Pkg::__ANON__' (its compiling package).  caller(0)[3] INSIDE an anonymous
+# sub is a different thing -- the call frame -- and is #233's deferral.
 sub subname {
     my ($code) = @_;
-    return '__ANON__';
+    if (!ref $code || builtin::reftype($code) ne 'CODE') {
+        require Carp; Carp::croak("Not a subroutine reference");
+    }
+    require B;
+    my ($stash, $name) = B::svref_2object($code)->_name_parts;
+    defined $stash
+        or die "PCL: Sub::Util::subname: this sub has no recorded name or package\n";
+    # perl 5.40.3's subname formats the name as a C string: it ENDS at a
+    # NUL (set_subname("main::x\0y", ...) answers main::x; B's GV keeps it).
+    (my $full = "${stash}::$name") =~ s/\0.*//s;
+    return $full;
 }
 
 sub set_subname {
     my ($name, $code) = @_;
-    return $code;
+    if (!ref $code || builtin::reftype($code) ne 'CODE') {
+        require Carp; Carp::croak("set_subname: not a subroutine reference");
+    }
+    # perl's qualification: a name with no package is in main; a leading
+    # `::` is main's; the old `'` package separator is `::` (5.38 / 5.40).
+    $name = "$name";
+    $name =~ s/'/::/g;
+    $name = "main$name" if $name =~ /\A::/;
+    $name = "main::$name" if $name !~ /::/;
+    return builtin::set_sub_name($code, $name);
 }
 
 1;

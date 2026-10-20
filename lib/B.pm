@@ -301,7 +301,7 @@ sub _name_parts {
     return (builtin::sub_stash($_[0]{ref}) // builtin::sub_stub_package($_[0]{ref}),
             '__ANON__')
         if !defined $full;
-    my ($stash, $name) = $full =~ /^(.*)::([^:]*)\z/s;
+    my ($stash, $name) = $full =~ /^(.*)::(.*)\z/s;   # the LAST `::` (a lone `:` is a name byte)
     return ($stash, $name);
 }
 

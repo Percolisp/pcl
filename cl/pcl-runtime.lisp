@@ -32116,6 +32116,18 @@ would consume, so it dies naming the stream (rule 12)."
         (lambda (code)
           (let ((fn (%p-code-function code)))
             (or (and fn (gethash fn %pcl-sub-names)) *p-undef*))))
+    ;; RENAME a sub (Sub::Util::set_subname, #3529): perl gives the CV a new
+    ;; GV, so the name SUB_NAME / B's GV / subname read is the new one, and
+    ;; the sub is no longer CVf_ANON -- the same record a `sub NAME` writes.
+    ;; NAME arrives fully qualified (the shim qualifies it).  Not a call
+    ;; frame: caller(0)[3] inside an anonymous sub is #233's deferral.
+    (def "SET_SUB_NAME"
+        (lambda (code name)
+          (let ((fn (%p-code-function code)))
+            (unless fn
+              (p-die (format nil "set_subname: not a subroutine reference~%")))
+            (%p-record-sub-name fn (to-string name))
+            code)))
     ;; A restricted hash (Hash::Util, #3163) is a tie whose class is the
     ;; shim's own: HIDE_TIE(\%h) makes tied(%h) answer undef for it, as it
     ;; does in perl, where restriction is not a tie.
