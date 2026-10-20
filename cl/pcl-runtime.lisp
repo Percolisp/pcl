@@ -4253,7 +4253,18 @@
       ;; Perl's sv_setsv writes the raw slot FIRST, then calls mg_set with the
       ;; SV's magic off — so untie() after `$tied = "A"` leaves "A" behind, and
       ;; a read of the tied variable inside STORE sees "A" (probed s342).
-      (let ((plain (if (p-box-p value) (unbox value) value)))
+      ;; STORE receives the VALUE being stored: a plain atom as itself, but a
+      ;; REFERENCE (a box holding an aggregate, a box, a code ref, a glob --
+      ;; anything that is not a plain atom) as a fresh scalar COPY of it.
+      ;; Unboxing a reference handed STORE the bare referent, so
+      ;; `$tied = [1]` stored a non-reference and every later FETCH read
+      ;; ref() = '' (#3672, s523b; Scalar-List-Utils getmagic-once.t).
+      (let* ((raw (if (p-box-p value) (unbox value) value))
+             (plain (if (and (p-box-p value)
+                             (not (or (null raw) (numberp raw) (stringp raw)
+                                      (eq raw *p-undef*))))
+                        (let ((c (make-p-box nil))) (box-set c value) c)
+                        raw)))
         (return-from box-set (%p-tie-store box current value plain))))
     (when (p-magic-cell-p current)
       ;; `$x = $x` is perl's sv_setsv(sv, sv): a no-op before any magic or the
@@ -31700,6 +31711,20 @@ would consume, so it dies naming the stream (rule 12)."
             (%p-handle-stash-class v)))
       (t nil))))
 
+(defun %p-fetch-once (x)
+  "X itself, or -- when X is a TIED scalar box -- a fresh box holding the value
+   of ONE FETCH.  perl's introspection primitives (ref, reftype, refaddr,
+   blessed) run get-magic ONCE per call (SvGETMAGIC); a primitive that reads
+   its argument twice calls this first (#3672: reftype unboxed, then asked
+   p-ref, which unboxed again; refaddr read the raw slot, i.e. the proxy)."
+  (if (and (p-box-p x)
+           (p-tie-proxy-p (p-box-value x))
+           (not (%p-suppressed-proxy x)))
+      (let ((c (make-p-box nil)))
+        (box-set c x)
+        c)
+      x))
+
 (defun p-ref (val)
   "Perl ref() function - get reference type or class name if blessed.
    Returns empty string for non-references."
@@ -31814,7 +31839,8 @@ would consume, so it dies naming the stream (rule 12)."
 ;; Differs from ref(): ref(blessed_hashref) = class, reftype(blessed_hashref) = "HASH".
 ;; For qr// it returns "REGEXP" (uppercase) vs ref()'s "Regexp".
 (defun p-reftype (val)
-  (let ((inner (unbox val)))
+  (let* ((val (%p-fetch-once val))
+         (inner (unbox val)))
     (cond
       ((p-regex-match-p inner) "REGEXP")
       ;; For all other types, reftype and ref agree (modulo blessing)
@@ -31923,6 +31949,7 @@ would consume, so it dies naming the stream (rule 12)."
    answers (box-nv's address arms, the same address the string form prints)
    but NEVER through a `0+' overload -- File::Temp's NUMIFY handler is
    itself `refaddr($_[0])' (task #2682)."
+  (setf x (%p-fetch-once x))
   (cond
     ((string= (p-ref x) "") *p-undef*)
     ((p-box-p x) (%p-ref-address x (p-box-value x)))

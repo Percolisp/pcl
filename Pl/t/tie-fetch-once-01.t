@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 25;
 
 sub run_pcl {
     my ($code) = @_;
@@ -122,3 +122,38 @@ like($keep, qr/^ov-len=3$/m,     'length of an overloaded object measures its ""
 like($keep, qr/^ov-and=7$/m,     '& on an overloaded object numifies through 0+');
 like($keep, qr/^dual-and=2$/m,   '& on a dualvar uses its cached numeric half');
 like($keep, qr/^ref-not=diff$/m, '~ of two distinct refs gives two distinct addresses');
+
+# ---------------------------------------------------------------- program 3
+# #3672 (s523b): a REFERENCE stored into a tied scalar reaches STORE as a
+# reference (it used to arrive as the bare referent, so every FETCH read
+# ref() = ''), and the introspection primitives fetch ONCE (reftype unboxed and
+# then asked ref(); refaddr read the raw slot).  Probed vs perl 5.40.3; the
+# counts are Scalar-List-Utils t/getmagic-once.t's.
+my $REFS = <<'PERL';
+use Scalar::Util qw(blessed reftype refaddr);
+my $n;
+{ package H; sub TIESCALAR { bless {}, shift } sub FETCH { $n++; $_[0]{v} } sub STORE { $_[0]{v} = $_[1] } }
+tie my $v, 'H';
+$v = [1]; print "r-aref=", ref($v), "\n";
+$v = \"x"; print "r-sref=", ref($v), ${$v}, "\n";
+$v = \*STDOUT; print "r-glob=", ref($v), "\n";
+my @l = (1, 2); $v = \@l; push @$v, 3; print "r-alias=@l\n";
+$v = bless {}, 'K';
+$n = 0; my $b = blessed($v); print "c-blessed=$n $b\n";
+$n = 0; my $t = reftype($v); print "c-reftype=$n $t\n";
+$n = 0; my $a = refaddr($v); print "c-refaddr=$n ", ($a ? "addr" : "undef"), "\n";
+$n = 0; my $r = ref($v); print "c-ref=$n $r\n";
+$n = 0; my $y = $v; print "c-copy=$n\n";
+PERL
+
+my $refs = run_pcl($REFS);
+like($refs, qr/^r-aref=ARRAY$/m,     'an array ref stored into a tied scalar is a ref');
+like($refs, qr/^r-sref=SCALARx$/m,   '... a scalar ref, dereferenceable');
+like($refs, qr/^r-glob=GLOB$/m,      '... a glob ref');
+like($refs, qr/^r-alias=1 2 3$/m,    '... and it refers to the SAME array');
+like($refs, qr/^c-blessed=1 K$/m,    'blessed of a tied scalar: FETCH once');
+like($refs, qr/^c-reftype=1 HASH$/m, 'reftype of a tied scalar: FETCH once');
+like($refs, qr/^c-refaddr=1 addr$/m, 'refaddr of a tied scalar: FETCH once, an address');
+like($refs, qr/^c-ref=1 K$/m,        'ref of a tied scalar: FETCH once');
+like($refs, qr/^c-copy=1$/m,         'a copy of a tied scalar: FETCH once');
+unlike($refs, qr/error|PCL:/i,       'program 3 runs clean') or diag($refs);
