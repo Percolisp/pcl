@@ -79,6 +79,36 @@ list-caret: []
 after-G: pos=4 -=3 3 +=4 4 pre=xy  m=z post=y
 single-G-b: no
 EXP
+  [ 'pos(ELEM) after ELEM =~ //g (#966, fixed by #3063)', <<'PL', <<'EXP' ],
+my $r = { m => "abcabc" }; $r->{m} =~ /c/g; print "href: ", pos($r->{m}) // "undef", "\n";
+my @a = ("zzz");           $a[0] =~ /z/g;    print "aelem: ", pos($a[0]) // "undef", "\n";
+my %h = (p => "abc");      $h{p} =~ /b/g;    print "helem: ", pos($h{p}) // "undef", "\n";
+my $ar = ["qqq"];          $ar->[0] =~ /q/g; print "aref: ", pos($ar->[0]) // "undef", "\n";
+my $s = "abc"; $s =~ /b/g; print "scalar: ", pos($s) // "undef", "\n";
+my $sr = \$s; $$sr =~ /c/g; print "deref: ", pos($$sr) // "undef", " same=", pos($s) // "undef", "\n";
+$_ = "xyz"; /y/g; print "topic: ", pos() // "undef", "\n";
+$h{p} =~ /z/g;  print "helem-fail-reset: ", pos($h{p}) // "undef", "\n";
+$h{p} = "abc"; $h{p} =~ /b/g; $h{p} =~ /z/gc; print "helem-fail-keep: ", pos($h{p}) // "undef", "\n";
+my %k = (k => "axbxcx"); my $n = 0; while ($k{k} =~ /x/g) { $n++; print "loop-pos: ", pos($k{k}), "\n" } print "loop: $n\n";
+pos($h{p}) = 1; print "write-then-read: ", pos($h{p}), "\n";
+my @m = ($h{p} =~ /./g); print "list: ", scalar(@m), " pos=", pos($h{p}) // "undef", "\n";
+PL
+href: 3
+aelem: 1
+helem: 2
+aref: 1
+scalar: 2
+deref: 3 same=3
+topic: 2
+helem-fail-reset: undef
+helem-fail-keep: 2
+loop-pos: 2
+loop-pos: 4
+loop-pos: 6
+loop: 3
+write-then-read: 1
+list: 2 pos=undef
+EXP
 );
 
 my $rows = 0;
