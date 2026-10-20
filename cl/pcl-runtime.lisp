@@ -39765,11 +39765,20 @@ would consume, so it dies naming the stream (rule 12)."
    The predicate is total — every value is or is not a string — so rule 12
    does not apply."
   (pcl::p-bool (stringp (pcl::unbox str))))
-;; These five are perl CORE subs, so `defined &utf8::is_utf8` is TRUE, as in
+
+(defun pl-valid (&optional str)
+  "perl's utf8::valid: is the scalar's INTERNAL UTF-8 buffer well formed?
+   perl answers false only for a malformed upgraded buffer, which a PCL string
+   (an SBCL character vector) cannot be, so every value answers 1 -- probed
+   5.40.3: a string, \"\", a wide string, latin-1, a number, undef, a ref and
+   a code ref all answer true (#3613)."
+  (declare (ignore str))
+  1)
+;; These six are perl CORE subs, so `defined &utf8::is_utf8` is TRUE, as in
 ;; perl (the DynaLoader stubs below use the same mark).  Text::CSV_PP tests it
 ;; in a BEGIN and, when false, aliases `*utf8::is_utf8 = *Encode::is_utf8` --
 ;; with lib/Encode.pm loadable that alias made is_utf8 call itself forever.
-(dolist (s '(pl-encode pl-decode pl-upgrade pl-downgrade pl-is_utf8))
+(dolist (s '(pl-encode pl-decode pl-upgrade pl-downgrade pl-is_utf8 pl-valid))
   (setf (gethash s pcl::*p-declared-subs*) :defined))
 (in-package :pcl)
 

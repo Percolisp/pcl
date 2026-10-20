@@ -35,7 +35,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" if !-x $pl2cl;
 plan skip_all => "sbcl not found"  if !`which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 7;
 
 sub run_cl {
     my ($code) = @_;
@@ -85,6 +85,17 @@ test_cl('is_utf8: stringifying a number does not make it a string',
     'my $n = 5; my $x = "$n"; my $s = "7"; my $y = $s + 0;
      print utf8::is_utf8($n) ? 1 : 0, utf8::is_utf8($s) ? 1 : 0, "\n";',
     "01\n");
+
+# utf8::valid (#3613): a PCL string cannot hold a malformed internal buffer,
+# so every value answers 1 -- perl 5.40.3 answers 1 for each shape below too.
+# It is a CORE sub: `defined &utf8::valid` is true.  It used to die
+# "Undefined subroutine &UTF8::valid", which stopped Text-CSV 50_utf8.t and
+# 70_rt.t.
+test_cl('utf8::valid answers 1 for every value and is defined',
+    'my @v = ("abc", "", "\x{263a}", "\xff", 5, 1.5, undef, [], sub {1});
+     print join(",", map { utf8::valid($_) ? 1 : 0 } @v),
+           (defined &utf8::valid ? " def" : " undef"), "\n";',
+    "1,1,1,1,1,1,1,1,1 def\n");
 
 # ---------------------------------------------------------------------------
 # Acceptance: core JSON::PP.  Expectations are perl 5.40.3's own output.
