@@ -12,6 +12,14 @@
 # matched inside "my" (Text::Balanced's quotelike parser), and
 # `$n++ while "aaa" =~ /^a/g` counted three.  The expected text of every row
 # was PROBED on perl 5.40.3 (and holds on 5.38: nothing here is new syntax).
+#
+# #1568: the lvalue builtins pos, vec, substr and $#array under ++, --, +=,
+# -=, .=, x= stored NOTHING (the compound macros BOX-SET the new value onto a
+# number): Text::Balanced's `pos($$textref)--` before the second block of
+# `s{a}{b}`, so extract_quotelike and extract_tagged failed.
+#
+# #966's shapes (pos of an element after a //g match) are kept here as rows;
+# they were fixed by #3063 (Pl/t/elem-pos-01.t is that fix's own guard).
 
 use v5.30;
 use strict;
@@ -108,6 +116,43 @@ loop-pos: 6
 loop: 3
 write-then-read: 1
 list: 2 pos=undef
+EXP
+  [ 'compound and ++/-- on an lvalue builtin (#1568)', <<'PL', <<'EXP' ],
+my $s = "abcdef"; pos($s) = 3; pos($s)--; print "pos-postdec: ", pos($s), "\n";
+my $r = \$s; pos($s) = 3; pos($$r)--; print "pos-deref-postdec: ", pos($s), "\n";
+pos($s) = 3; my $v = pos($$r)--; print "pos-postdec-value: $v ", pos($s), "\n";
+pos($s) = 3; pos($$r) -= 1; print "pos-minus: ", pos($s), "\n";
+pos($s) = 3; pos($$r)++; print "pos-postinc: ", pos($s), "\n";
+pos($s) = 3; --pos($$r); print "pos-predec: ", pos($s), "\n";
+pos($s) = 3; pos($s) += 9; print "pos-plus-clamps: ", pos($s), "\n";
+sub f { my $t = \$_[0]; pos($$t) = 4; pos($$t)--; return pos($$t) } my $u = "xyzxyz"; print "pos-through-ref-arg: ", f($u), " ", pos($u), "\n";
+my %h = (k => "abcd"); pos($h{k}) = 1; pos($h{k})++; print "pos-elem-inc: ", pos($h{k}), "\n";
+my $w = "\x05"; vec($w, 0, 8) += 2; print "vec-plus: ", ord($w), "\n";
+$w = "\x05"; vec($w, 0, 8)++; print "vec-postinc: ", ord($w), "\n";
+my $t = "abc"; substr($t, 0, 1) .= "X"; print "substr-cat: $t\n";
+$t = "5bc"; substr($t, 0, 1)++; print "substr-postinc: $t\n";
+$t = "5bc"; substr($t, 0, 1) += 3; print "substr-plus: $t\n";
+$t = "abc"; substr($t, 1) x= 2; print "substr-2arg-x: $t\n";
+my @a = (1,2,3); $#a -= 2; print "arylen-minus: ", scalar(@a), "\n";
+@a = (1,2,3); $#a += 2; print "arylen-plus: ", scalar(@a), "\n";
+PL
+pos-postdec: 2
+pos-deref-postdec: 2
+pos-postdec-value: 3 2
+pos-minus: 2
+pos-postinc: 4
+pos-predec: 2
+pos-plus-clamps: 6
+pos-through-ref-arg: 3 3
+pos-elem-inc: 2
+vec-plus: 7
+vec-postinc: 6
+substr-cat: aXbc
+substr-postinc: 6bc
+substr-plus: 8bc
+substr-2arg-x: abcbc
+arylen-minus: 1
+arylen-plus: 5
 EXP
 );
 

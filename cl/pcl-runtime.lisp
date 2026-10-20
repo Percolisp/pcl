@@ -11527,11 +11527,30 @@ per element."
      VALUE, then BOX-SET a number and no-opped, so the statement did nothing
      at all — while `$$r += 2` happened to work, because p-cast-$ hands back
      the referent BOX for a hard ref.  SETF is right for both (its p-cast-$
-     writer resolves ref-vs-symbolic itself)."
+     writer resolves ref-vs-symbolic itself).
+
+     The LVALUE BUILTINS -- pos, vec, substr, $#array -- are places of the
+     same kind (they return a value and have a writer: the setf expanders
+     below), and leaving them out was the same silent no-op one level up:
+     `pos($s)--`, `pos($$r) += 2`, `vec($v,0,8)++`, `substr($s,0,1) .= \"X\"`
+     and `$#a -= 2` computed the new value and BOX-SET it onto a number,
+     storing nothing (#1568: Text::Balanced's `pos($$textref)--` before its
+     second bracketed block, so `extract_quotelike(\"s{a}{b};\")` failed).
+     The ++/-- macros ask this predicate too, so the families cannot drift."
     (and (consp place)
          (member (car place)
                  '(p-gethash p-aref p-gethash-deref p-aref-deref
-                   p-$ p-cast-$))))
+                   p-$ p-cast-$
+                   p-pos p-vec p-substr p-array-last-index))))
+
+  ;; The writers of the lvalue builtins, as CL places, for the compound and
+  ;; ++/-- macros (p-setf has its own arms for a plain `=`; these are the same
+  ;; writers).  A 2-arg substr place writes with LEN nil, as p-setf's arm.
+  (defsetf p-pos (var) (new) `(p-pos ,var ,new))
+  (defsetf p-vec (str offset bits) (new) `(p-vec-set ,str ,offset ,bits ,new))
+  (defsetf p-substr (str start &optional len) (new)
+    `(p-substr ,str ,start ,len ,new))
+  (defsetf p-array-last-index (arr) (new) `(p-set-array-length ,arr ,new))
 
   (defun %p-elem-place-p (place)
     "True for an ELEMENT place — (p-gethash C K) / (p-aref C I) — whatever its
@@ -12050,7 +12069,7 @@ per element."
             (box-set ,box (perl-increment ,box)))))
       ;; Traditional setf-able places (p-aref, p-gethash, etc)
       ((and (listp real-place)
-            (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
+            (%p-accessor-place-p real-place))
        (let ((tmp (gensym "TMP")))
          `(let ((,tmp (perl-increment ,real-place)))
             (setf ,real-place ,tmp)
@@ -12086,7 +12105,7 @@ per element."
           ,old))
       ;; Traditional setf-able places (p-aref, p-gethash, etc)
       ((and (listp real-place)
-            (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
+            (%p-accessor-place-p real-place))
        `(let ((,old ,real-place))
           (setf ,real-place (perl-increment ,real-place))
           ,old))
@@ -12127,7 +12146,7 @@ per element."
       ;; #463 item 2 let `--$$r` / `--${"name"}` parse at all: it died
       ;; "#S(p-box …) is not of type number".)
       ((and (listp real-place)
-            (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
+            (%p-accessor-place-p real-place))
        (let ((tmp (gensym "TMP")))
          `(let ((,tmp (perl-decrement ,real-place)))
             (setf ,real-place ,tmp)
@@ -12161,7 +12180,7 @@ per element."
           ,old))
       ;; Traditional setf-able places (p-aref, p-gethash, etc)
       ((and (listp real-place)
-            (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
+            (%p-accessor-place-p real-place))
        `(let ((,old ,real-place))
           (setf ,real-place (perl-decrement ,real-place))
           ,old))
