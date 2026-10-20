@@ -50,6 +50,7 @@
 - **Perl's own t/ as bug finder**: [[project_perl_suite_survey]], [[project_suite_runner_oom_and_cond_t]], [[project_io_subprocess_features]], [[reference_box_magic_hook]]. **sb-posix**: some syms `sb-posix::`; stat-blksize/blocks/futimes ABSENT.
 
 ## User Preferences / Working Style
+- **KEEP THE REVIEW DOC'S BATCH STATUS CURRENT at session end (USER s523)** [feedback_review_doc_batch_status](feedback_review_doc_batch_status.md)
 - **PARAPHRASE the USER's decisions in published records; quote only technical wording** [feedback_paraphrase_user_in_records](feedback_paraphrase_user_in_records.md)
 - **CLOUD REVIEW: Fable may ASK the USER for a `/code-review ultra` run when a batch warrants it (USER 2026-10-09, money on the account); USER-triggered and billed.** [feedback_cloud_review_ask_user](feedback_cloud_review_ask_user.md)
 - **FABLE NEVER EXECUTES what an Opus agent can do from a written design — Fable = review, rulings, design, merge.** [feedback_fable_never_executes_delegate_to_opus](feedback_fable_never_executes_delegate_to_opus.md), [feedback_hard_parts_first_e2_for_opus](feedback_hard_parts_first_e2_for_opus.md)

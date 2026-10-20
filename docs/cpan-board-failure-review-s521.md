@@ -88,6 +88,10 @@ About **ten execution subjobs plus two read-only censuses, four to five half-day
 newly reached population (Text-CSV's 51,000, JSON-PP's 24,500, 107multi's 2,400) exposes honest new failures
 that the next census sorts.  The ruled remainder is the USER's call, with its cost in the table of §4.
 
+## 0b. Update, 2026-10-20 (s523): round 3
+
+Batches 3-6 are merged or in flight (the headings in §4 say which).  The ROUND-3 board on MAIN-READY-38 (s522a merged): **254 PASS / 125 PARTIAL / 70 FAIL of 449, TOTAL passing 65,073** (round 2: 232 / 128 / 89 and 28,489) -- Text-CSV's 20 files run for the first time after #3061 (55_combi.t alone 25,119 rows), Path-Tiny / Mojo-DOM58 / IO-Compress gained files; 50 files improved, 2 lost = the 105oneshot flap (#3493, both states blessed).  Row diff against the blessed file after the round's edits: 0 NEW; the 908 new not-ok rows of SLU exotic_names.t (a file that now LOADS) are one shim gap, **#3529** set_subname, batch 6's.  `baselines/cpan-board-s523r3.tsv` is the record.  Found beside the round: **#3526 / #3528** -- the weekly install-matrix CI has been red since 2026-10-17 because the SBCL 2.5.2 floor is broken for `pack` (a compiler VOP error on an emitted shape; a 45-line reproducer in the task), and **#3527** -- main's CI is red on one gate row, PCL's synthesized readdir order (s523a's filler).
+
 ## 1. The board today
 
 From `cpan-board-s519r1.tsv` (header: 187 / 103 / 66 of 356, TOTAL passing 12,250; summing its rows gives
@@ -312,7 +316,7 @@ the companion `--all --quick` IS a per-batch leg here, plus the sweep; `Pl/t/tap
 `tools/lib/PCLTap.pm` must count a subtest as one top-level row (perl's own TAP shape).
 Fable rulings needed: none on semantics (Test::More defines them); confirm the board counts top-level rows only.
 
-### Batch 3 -- Parser2 scoping: the refusal and the silent-wrong that hide 58,000 rows (layer: Pl) -- **#3431 DONE (s521a); #3061 #3375 #3347 OPEN**
+### Batch 3 -- Parser2 scoping: the refusal and the silent-wrong that hide 58,000 rows (layer: Pl) -- **#3431 DONE (s521a); #3061 #3375 #3347 DONE s522a = MAIN-READY-38 (2026-10-20): Text-CSV's 20 files run for the first time (55_combi.t 25,119 rows); #3347 measured = #3061**
 Members: (1) #3061 sigil-blind capture refusal (delete/rename, never narrow); (2) #3431 embedded `my` in a `my`
 RHS in a loop; (3) #3375 `my $x = EXPR for LIST`; (4) #3347 the F6 extent in cz-03zlib-v1 (measure; may be its
 own family).  Acceptance: Text-CSV 20_file, 47_comment, 85_util, IO-Compress 01misc, 100generic-gzip,
@@ -322,20 +326,20 @@ leave by edit.  **Expect honest new failures**: Text-CSV runs ~51,000 rows it ne
 chase them.  Risks: name resolution -> the full sweep IS the gate, the gate-SET scan over both populations
 (the refusal stops firing), `Pl/t` grep for the refusal's message text (stale-guard rule).
 
-### Batch 4 -- OO emission and the stash (layer: Pl, cl) -- **OPEN (the hash-slice read error is filed: #3511, a silent no-op in its other spelling)**
+### Batch 4 -- OO emission and the stash (layer: Pl, cl) -- **IN FLIGHT s522b (all five members shipped under the s522 bounded ruling for the stash; legs owed at s523 22:4x; the hash-slice read error = #3511)**
 Members: (1) #1570 a parent package must exist at READ time; (2) the new `%Local::Class::` hash-slice read
 error (file first); (3) #1572's remaining 081 (`orig`); (4) #3321 stash alias; (5) #1506 `import PKG LIST`.
 Acceptance: Role-Tiny extend-role-tiny, proto, namespace-clean; CMM 081; JSON-PP 118; SLU dualvar.
 Risks: `p-defclass` emission -> corpus-diff + emission-ab over `lib/**`; mro companion files.
 Ruling needed: whether #1510 / #135's stash parts may touch the deferred "Live symbol-table hashes".
 
-### Batch 5 -- diagnosis batch: regex/pos and the silent exits (layer: cl, measured first) -- **OPEN**
+### Batch 5 -- diagnosis batch: regex/pos and the silent exits (layer: cl, measured first) -- **IN FLIGHT s523a (launched s523; #966 found ALREADY FIXED on main by Fable's probe; #3527 readdir-order filler added for the CI red)**
 Members, each "measure, then fix if one mechanism": #1568 Text::Balanced (40), #2900 `\G\b` (2), #966
 `pos(ELEM)` (4 + Text-CSV parse), #1511 Algorithm-Diff (24 + 847), #3282 the JSON-PP 099 silent exit (+24,512).
 Acceptance per member as in its task.  Risks: the regex engine is ONE (portability ruling) -- the sweep's `re/`
 files and the companion's `re/` leg.
 
-### Batch 6 -- small module-surface items -- **OPEN**
+### Batch 6 -- small module-surface items -- **IN FLIGHT s523b (launched s523 22:4x: #2016 #3529 #1573+#2066 #3001 #1571's unruled lines)**
 #1573 / #2066 Data::Dump, #2016 JSON integers (also an everyday row), #3001 Role::Tiny, the #1571 lines
 that are not ruled (reftype REF/IO, get-magic count), #3161's InflateScan if the shim stays.
 
