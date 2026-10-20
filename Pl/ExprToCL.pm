@@ -735,6 +735,83 @@ sub _negated_call_form {
   return ['p--', ['p-scalar-ctx', [$self->cl_name($name, 1)]]];
 }
 
+# THE ONE NUMERIC-LITERAL WRITER (gen_leaf_form and gen_leaf both call it;
+# they were two copies).  An integer LITERAL perl's tokenizer cannot hold as
+# an IV/UV is an NV in perl -- at compile time, before any arithmetic (#2016,
+# ir-spec §3.6a): a decimal literal above 18446744073709551615 (or, with the
+# minus folded into the token, below -9223372036854775808), and a hex / octal
+# / binary literal above 64 bits.  Such a literal is written as the DOUBLE
+# perl holds (perl's own numification computes it, here, at transpile time).
+# ARITHMETIC that crosses the boundary stays exact (#1513, not-supported).
+sub _number_literal_form {
+  my ($self, $node) = @_;
+  my $ref = ref($node);
+  my $num = $node->content();
+
+  # Version strings: v1.20.300 / 256.65.258 → (p-version-string N N N).
+  if ($ref =~ /::Version$/ || $num =~ /^v(\d[\d._]*)$/) {
+    my $vpart = $num;
+    $vpart =~ s/^v//;
+    $vpart =~ s/_//g;   # v1.2_3 == v1.23: underscores are digit separators
+    return ['p-version-string', split /\./, $vpart];
+  }
+  # Radix literals → CL #x / #b / #o (optional leading - → (- …)).
+  for my $rx ([qr/^(-?)0[xX]([0-9a-fA-F_]+)$/, 'x', 16, 4],
+              [qr/^(-?)0[bB]([01_]+)$/,       'b', 64, 1],
+              [qr/^(-?)0[oO]([0-7_]+)$/,      'o', 22, 3],
+              [qr/^(-?)0([0-7_]+)$/,          'o', 22, 3]) {
+    my ($re, $letter, $maxd, $bits) = @$rx;
+    next if $num !~ $re || $num eq '0';
+    my ($sign, $d) = ($1, $2); $d =~ s/_//g;
+    no warnings;   # perl's own "Integer overflow" note is not the transpiler's
+    return _wide_literal_double($sign, oct($letter eq "o" ? "0$d" : "0$letter$d"))
+      if _radix_beyond_64($d, $letter);
+    return $sign ? ['-', "#$letter$d"] : "#$letter$d";
+  }
+  $num =~ s/_//g;
+  if ($num =~ /\A(-?)0*(\d+)\z/ && _decimal_beyond_iv_uv($1, $2)) {
+    return _wide_literal_double('', 0 + $num);
+  }
+  if ($num =~ /[eE.]/) {
+    my $val = eval($num);
+    if (defined $val) {
+      return ['p-double-inf']      if $val == 9**9**9;
+      return ['p-double-inf', 't'] if $val == -(9**9**9);
+    }
+  }
+  return $num;
+}
+
+# A decimal integer literal's digits (no sign, no leading zeros) beyond
+# perl's UV_MAX -- or, negative, beyond -IV_MIN's magnitude.
+sub _decimal_beyond_iv_uv {
+  my ($sign, $d) = @_;
+  my $lim = $sign ? '9223372036854775808' : '18446744073709551615';
+  return length($d) > length($lim)
+      || (length($d) == length($lim) && $d gt $lim) ? 1 : 0;
+}
+
+# A hex / binary / octal literal's digits beyond 64 bits.
+sub _radix_beyond_64 {
+  my ($d, $letter) = @_;
+  $d =~ s/^0+(?=.)//;
+  return length($d) > 16 ? 1 : 0 if $letter eq 'x';
+  return length($d) > 64 ? 1 : 0 if $letter eq 'b';
+  return length($d) > 22 || (length($d) == 22 && $d gt '1777777777777777777777') ? 1 : 0
+    if $letter eq 'o';
+  die "PCL: _radix_beyond_64: unknown radix '$letter'\n";
+}
+
+# The double a too-wide integer literal is in perl, as a CL float literal.
+sub _wide_literal_double {
+  my ($sign, $v) = @_;
+  no warnings;
+  return $sign ? ['p-double-inf', 't'] : ['p-double-inf'] if $v == 9**9**9;
+  my $t = sprintf '%.17g', $v;
+  $t .= 'd0' if $t !~ /[eE.]/;
+  return $sign ? "-$t" : $t;
+}
+
 sub gen_leaf_form {
   my ($self, $node) = @_;
   my $ref = ref($node);
@@ -802,43 +879,7 @@ sub gen_leaf_form {
     return ['p-array-last-index', $self->_array_index_container($node->content())];
   }
 
-  if ($ref =~ /^PPI::Token::Number/) {
-    my $num = $node->content();
-
-    # Version strings: v1.20.300 / 256.65.258 → (p-version-string N N N).
-    if ($ref =~ /::Version$/ || $num =~ /^v(\d[\d._]*)$/) {
-      my $vpart = $num;
-      $vpart =~ s/^v//;
-      $vpart =~ s/_//g;   # v1.2_3 == v1.23: underscores are digit separators
-      return ['p-version-string', split /\./, $vpart];
-    }
-    # Radix literals → CL #x / #b / #o (optional leading - → (- …)).
-    if ($num =~ /^(-?)0[xX]([0-9a-fA-F_]+)$/) {
-      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
-      return $sign ? ['-', "#x$d"] : "#x$d";
-    }
-    if ($num =~ /^(-?)0[bB]([01_]+)$/) {
-      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
-      return $sign ? ['-', "#b$d"] : "#b$d";
-    }
-    if ($num =~ /^(-?)0[oO]([0-7_]+)$/) {
-      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
-      return $sign ? ['-', "#o$d"] : "#o$d";
-    }
-    if ($num =~ /^(-?)0([0-7_]+)$/ && $num ne '0') {
-      my ($sign, $d) = ($1, $2); $d =~ s/_//g;
-      return $sign ? ['-', "#o$d"] : "#o$d";
-    }
-    $num =~ s/_//g;
-    if ($num =~ /[eE.]/) {
-      my $val = eval($num);
-      if (defined $val) {
-        return ['p-double-inf']      if $val == 9**9**9;
-        return ['p-double-inf', 't'] if $val == -(9**9**9);
-      }
-    }
-    return $num;
-  }
+  return $self->_number_literal_form($node) if $ref =~ /^PPI::Token::Number/;
 
   # Match m// and qr// regex leaves convert, both non-interpolated and
   # interpolated.  Non-interp → a single-level (p-regex "…") / (pcl::p-qr "…")
@@ -1474,56 +1515,9 @@ sub gen_leaf {
     return "(p-array-last-index " . $self->_array_index_container($node->content()) . ")";
   }
 
-  # Number literal - convert Perl format to CL format
-  # (includes subclasses: ::Hex, ::Binary, ::Octal, ::Float, ::Exp, ::Version)
-  if ($ref =~ /^PPI::Token::Number/) {
-    my $num = $node->content();
-
-    # Version strings: v1.20.300 or 256.65.258 -> string of chr values
-    if ($ref =~ /::Version$/ || $num =~ /^v(\d[\d.]*)$/) {
-      my $vpart = $num;
-      $vpart =~ s/^v//;   # strip leading 'v' if present
-      my @parts = split /\./, $vpart;
-      my $args = join(' ', @parts);
-      return "(p-version-string $args)";
-    }
-
-    # Hex: 0x1234 or 0X1234 -> #x1234 (with optional leading -)
-    if ($num =~ /^(-?)0[xX]([0-9a-fA-F_]+)$/) {
-      my ($sign, $hex) = ($1, $2);
-      $hex =~ s/_//g;  # Remove underscores
-      return $sign ? "(- #x$hex)" : "#x$hex";
-    }
-    # Binary: 0b1010 or 0B1010 -> #b1010 (with optional leading -)
-    if ($num =~ /^(-?)0[bB]([01_]+)$/) {
-      my ($sign, $bin) = ($1, $2);
-      $bin =~ s/_//g;
-      return $sign ? "(- #b$bin)" : "#b$bin";
-    }
-    # Octal: 0o777 or 0O777 -> #o777 (Perl 5.34+ syntax, with optional leading -)
-    if ($num =~ /^(-?)0[oO]([0-7_]+)$/) {
-      my ($sign, $oct) = ($1, $2);
-      $oct =~ s/_//g;
-      return $sign ? "(- #o$oct)" : "#o$oct";
-    }
-    # Legacy octal: 0777 (but not 0 alone) -> #o777 (with optional leading -)
-    if ($num =~ /^(-?)0([0-7_]+)$/ && $num ne '0') {
-      my ($sign, $oct) = ($1, $2);
-      $oct =~ s/_//g;
-      return $sign ? "(- #o$oct)" : "#o$oct";
-    }
-    # Remove underscores from regular numbers (Perl allows 1_000_000)
-    $num =~ s/_//g;
-    # Check if float literal overflows double range (e.g. 1e9999 -> +Inf in Perl)
-    if ($num =~ /[eE.]/) {
-      my $val = eval($num);
-      if (defined $val) {
-        if ($val == 9**9**9)  { return '(p-double-inf)'; }
-        if ($val == -(9**9**9)) { return '(p-double-inf t)'; }
-      }
-    }
-    return $num;
-  }
+  # Number literal -- the ONE literal writer, flattened for text.
+  return Pl::CLForm::to_flat($self->_number_literal_form($node))
+    if $ref =~ /^PPI::Token::Number/;
 
   # Compiled regex qr// (check before Quote to avoid catching QuoteLike::Regexp)
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {

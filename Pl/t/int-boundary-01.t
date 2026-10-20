@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 32;
 
 # ── the documented contract ──────────────────────────────────────────────────
 
@@ -181,3 +181,52 @@ line_is('UNMASKED',
 
 ok(length($got{'UNMASKED'} // '') == 60,
    'the unmasked accumulator really is a 60-digit bignum after 40 iterations');
+
+# ── #2016 (s523b): a too-wide integer LITERAL is an NV, as perl's tokenizer
+# makes it -- arithmetic that crosses the boundary stays exact (D5 above).
+# JSON::PP's $max_intsize probe (row W8) is the everyday program behind it.
+# Every expected string probed against perl 5.40.3.
+
+my $wide = <<'PL';
+no warnings;
+print "W1 ", 18446744073709551615, "\n";
+print "W2 ", 18446744073709551616, "\n";
+print "W3 ", 111111111111111111111, "\n";
+print "W4 ", 11111111111111111111, "\n";
+print "W5 ", -9223372036854775809, "\n";
+print "W6 ", -9223372036854775808, "\n";
+print "W7 ", 1_000_000_000_000_000_000_000, "\n";
+my $c = "1" x 21; my $i = eval qq| $c |;
+print "W8 ", ($i =~ /[eE]/ ? "has-exponent" : "no-exponent"), "\n";
+print "W9 ", 0x1_0000_0000_0000_0000, "\n";
+print "W10 ", 0xffff_ffff_ffff_ffff, "\n";
+print "W11 ", (99999999999999999999999 == 1e23 ? "eq" : "ne"), "\n";
+print "W12 ", eval("222222222222222222222"), "\n";
+print "W13 ", 0b11111111111111111111111111111111111111111111111111111111111111111, "\n";
+PL
+my ($wfh, $wpl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+print $wfh $wide;
+close $wfh;
+my $wcl = `$pl2cl $wpl 2>/dev/null`;
+my ($wcfh, $wclf) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+print $wcfh $wcl;
+close $wcfh;
+my $wout = `sbcl @sbcl_rt --load $wclf 2>&1`;
+%got = ();
+$got{$1} = $2 while $wout =~ /^(\w+) (.*)$/mg;
+$out = $wout;
+
+line_is('W1', '18446744073709551615', 'UV_MAX as a literal is still an integer');
+line_is('W2', '1.84467440737096e+19', 'UV_MAX+1 as a LITERAL is an NV (#2016)');
+line_is('W3', '1.11111111111111e+20', 'a 21-digit literal prints with an exponent (#2016)');
+line_is('W4', '11111111111111111111', 'a 20-digit literal that fits a UV stays an integer');
+line_is('W5', '-9.22337203685478e+18', 'a negative literal below IV_MIN is an NV');
+line_is('W6', '-9223372036854775808', 'IV_MIN as a literal is still an integer');
+line_is('W7', '1e+21', 'underscores: 1_000_..._000 (22 digits) is an NV');
+line_is('W8', 'has-exponent',
+        "JSON::PP's \$max_intsize probe: eval of a 21-digit literal has an exponent");
+line_is('W9', '1.84467440737096e+19', 'a hex literal above 64 bits is an NV');
+line_is('W10', '18446744073709551615', '0xffff_ffff_ffff_ffff stays an integer');
+line_is('W11', 'eq', 'a wide literal is the SAME double as the float literal');
+line_is('W12', '2.22222222222222e+20', 'a wide literal inside a string eval is an NV');
+line_is('W13', '3.68934881474191e+19', 'a binary literal above 64 bits is an NV');

@@ -888,7 +888,6 @@ JSON-PP-4.18-0	109_encode.t	4		'"\u00b6"'	'"\u00c2\u00b6"'	#1749 (ascii/latin1 e
 JSON-PP-4.18-0	109_encode.t	5		'"\u3042"'	'"\u00e3\u0081\u0082"'	#1749 (ascii/latin1 encoders: unpack('U*'))
 JSON-PP-4.18-0	109_encode.t	6		'""'	'"\u3042"'	#1749 (ascii/latin1 encoders: unpack('U*'))
 JSON-PP-4.18-0	109_encode.t	7		'""'	'"\ud808\udf45"'	#1749 (ascii/latin1 encoders: unpack('U*'))
-JSON-PP-4.18-0	110_bignum.t	4	small integer is not a BigInt			#2016 (JSON::PP's $max_intsize probe answers undef under PCL, so allow_bignum wraps even a small integer in Math::BigInt; probed json3.pl)
 JSON-PP-4.18-0	112_upgrade.t	1		'Â¶'	'¶'	#1749 probable (the same unpack/pack 'U' family; not isolated)
 JSON-PP-4.18-0	119_incr_parse_utf8.t	3				#1389 (utf8::downgrade never fails, so no "Wide character in subroutine entry") + #1749 (the incremental parser's \u / utf8 rows; not isolated row by row)
 JSON-PP-4.18-0	119_incr_parse_utf8.t	4				#1389 (utf8::downgrade never fails, so no "Wide character in subroutine entry") + #1749 (the incremental parser's \u / utf8 rows; not isolated row by row)
