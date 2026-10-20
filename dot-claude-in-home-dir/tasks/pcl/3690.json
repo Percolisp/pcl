@@ -1,0 +1,13 @@
+{
+   "created" : "2026-10-20",
+   "description" : "FILED s523 (Fable, 2026-10-20 22:5x) from the s523a merge probe c6 (`review/p523a/c6-range-ctx.pl`, perl / base-a6b2a574 / s523a tree a779433a): STDOUT identical to perl on all three (the run-time range / flip-flop choice is right: list `1 2 3`, scalar `[]`, bool f, args `2 3 4` -- the base said `1E0`), but the TREE's stderr has three lines `Use of uninitialized value $. in numeric eq (==) at unknown line 0.` for `sub r { return 1..3 } my $s = r(); my $t = l(); r() ? ...` -- the flip-flop with constant operands compares them to `$.`, undef because nothing was read.  The base (a6b2a574) prints the same three lines (so it is pre-existing: the flip-flop path, not s523a's choice), perl prints NOTHING: the probe has no `use warnings`, and even with it perl says `Use of uninitialized value $. in range (or flip) at FILE line N.`  Two small things: (1) the diagnostic fires without `use warnings` (not-supported says warnings-gated diagnostics are ABSENT -- this one is present and UNGATED, the opposite failure), (2) `at unknown line 0` -- the flip-flop's comparison carries no source location.  Not an everyday mover (stderr is not compared) but the USER's tidy-diagnostics rule applies.  Owner: a filler; the flip-flop's `$.` read should be a plain (possibly-undef) numeric compare with no warning, or the warning gated + located like the other warn sites.",
+   "id" : 3690,
+   "priority" : "low",
+   "session" : "s523",
+   "status" : "pending",
+   "subject" : "LOW: a scalar-context `1..3` (the flip-flop against ``) prints `Use of uninitialized value  in numeric eq (==) at unknown line 0.` on stderr WITHOUT `use warnings` -- perl prints nothing (and with warnings says `in range (or flip)` with the file + line)",
+   "tags" : [
+      "diagnostics",
+      "flip-flop"
+   ]
+}
