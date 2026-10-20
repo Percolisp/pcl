@@ -33,7 +33,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 11;
 
 sub run_cl {
     my ($code) = @_;
@@ -118,3 +118,16 @@ $A0::v = 1; print "r6 ", ($B0::v // "undef"), "\n";
 package JSON::PP::Boolean; sub new { bless {}, shift } sub val { "v" } package main; *Dummy::True:: = *JSON::PP::Boolean::; print "r7 ", (eval { Dummy::True->new->val } // "none"), "\n";
 EOF
     "r1 1 hi\nr2 B0\nr3 can 1\nr4 none\nr5 bz\nr6 undef\nr7 v\n");
+
+# #3321 + perl t/op/method.t "SUPER inside moved package": SUPER is relative to
+# the package the code was COMPILED in, so code compiled under `package Mover`
+# after `*Mover:: = *Mover2::` keeps its own @ISA for SUPER, while bless still
+# names the alias target.  Expected = perl 5.40.3.  Inverse: the 8038fac6 base
+# prints r2 Mover (the alias ignored); the pre-fix s522b tree printed r1 undef.
+test_cl('#3321: SUPER inside an aliased package walks the @ISA its own code wrote', <<'EOF',
+BEGIN { *Mover:: = *Mover2:: }
+package Mover; no strict; @ISA = 'door'; sub door::dohtem { 'dohtem' }
+print "r1 ", (eval { Mover->SUPER::dohtem } // "undef"), "\n";
+package main; print "r2 ", ref(bless {}, "Mover"), "\n";
+EOF
+    "r1 dohtem\nr2 Mover2\n");

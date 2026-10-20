@@ -371,7 +371,8 @@ the s522 ruling, task #1510 / #3511 / #3321):
 * **A stash alias** `*A:: = *B::` is recorded once and redirects RUN-TIME name
   resolution (bless — `ref` names B —, method calls, `isa`, `can`, symbolic
   refs, `%A::`) to B's stash.  Names bound at COMPILE time stay with A's own
-  package, as they stay with A's original stash in perl.
+  package, as they stay with A's original stash in perl -- `SUPER::` too: it
+  walks the @ISA of the package the code was compiled in.
 * **The element VALUE of a non-sub symbol** reads as its TYPEGLOB `*Pkg::name`
   — perl's own value (core Exporter reads `${$pkg."::"}{EXPORT_FAIL}` on every
   import), so `values %Pkg::` and `each` over a stash holding variables answer

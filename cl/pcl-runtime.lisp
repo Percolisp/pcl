@@ -35199,8 +35199,12 @@ would consume, so it dies naming the stream (rule 12)."
            (setf (gethash (%pcl-memo-key name) *p-stash-aliases*) canon
                  (gethash (%pcl-memo-key name) *pcl-stash-table*) pkg))
          value))
+      ;; `%A:: = LIST` lowers to the same place as `*A:: = VALUE`; a glob
+      ;; value is the glob spelling, anything else the hash assignment.
       (t (%p-announce-unsupported "stash assignment"
-                                  (format nil "*~A:: = a non-stash value" name))
+                                  (if (p-typeglob-p (unbox value))
+                                      (format nil "*~A:: = a non-stash value" name)
+                                      (format nil "%~A:: = LIST (a hash assignment into a stash)" name)))
          value))))
 
 (defun %pcl-find-package-1 (pkg-str)
@@ -35898,7 +35902,14 @@ would consume, so it dies naming the stream (rule 12)."
          ;; multi-segment packages are case-preserved (|Moo::Object|), so the
          ;; raw upcase lookup silently misses them and the SUPER walk dead-ends
          ;; (Moo: Animal's SUPER::new -> Moo::Object::new was "not found").
-         (pkg (%pcl-find-package current-class))
+         ;; SUPER is relative to the package the code was COMPILED in, a
+         ;; compile-time name, so a stash alias `*A:: = *B::` does not move
+         ;; it: A's code (and the @ISA it wrote) lives in A's own package
+         ;; (#3321, ir-spec 7.3; perl t/op/method.t "SUPER inside moved
+         ;; package").  One count test while no alias exists.
+         (pkg (if (zerop (hash-table-count *p-stash-aliases*))
+                  (%pcl-find-package current-class)
+                  (%pcl-find-package-1 current-class)))
          (isa-sym (when pkg (find-symbol "@isa" pkg)))
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
          (isa-non-empty (and isa-val (vectorp isa-val) (> (length isa-val) 0)))

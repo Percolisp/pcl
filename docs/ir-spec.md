@@ -3726,7 +3726,10 @@ var ⇒ plain lexical binding, no localization at all).
   `(p-stash-assign "A" (p-stash "B"))`, which records A as an alias of B's
   stash once: run-time name resolution (bless, method calls, `isa`, `can`,
   symbolic refs) answers B for A, `ref` of an object blessed into A is B, and
-  names bound at compile time stay with A.
+  names bound at compile time stay with A -- `SUPER::` among them: it walks
+  the @ISA of the package the code was COMPILED in, A's own, never B's
+  (`p-super-call` resolves its current package past the alias).  Any other
+  `*A:: = VALUE` or `%A:: = LIST` announces on stderr and is ignored.
 
   ```perl
   package B0; sub hi {"hi"} package main; *A0:: = *B0::;
