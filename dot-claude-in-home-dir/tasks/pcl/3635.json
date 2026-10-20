@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-20",
+   "description" : "FILED s522b (Opus, 2026-10-20) from the stash-view work (#1510 / #3511, Fable ruling 01:1x: a non-CODE stash element READS as its typeglob).  PRE-EXISTING (the base 8038fac6 answers \"\" for every row; the tree fixes the plain-expression rows but not the interpolated ones).\n\nReproducer (scratch/s522b/interp-stash.pl in the s522b worktree):\n  package Foo; our $x = 1; sub f {2}\n  package main;\n  print \"[$Foo::{x}]\\n\";          # perl [*Foo::x]   PCL []\n  print \"[\", $Foo::{x}, \"]\\n\";    # perl [*Foo::x]   PCL (s522b) [*Foo::x], base []\n  print \"[$Foo::{f}]\\n\";          # perl [*Foo::f]   PCL []\n  my $k = \"x\"; print \"[${'Foo::'}{$k}]\\n\";   # perl [*Foo::x]  PCL (s522b) [*Foo::x], base []\n\nSILENT WRONG: the interpolated stash element `\"$Foo::{x}\"` reads as an empty string -- the interpolation scanner (Pl/InterpScan.pm, standing rule: interpolation scanning happens there or not at all) does not route `$PKG::{KEY}` to the stash-element lowering the code path uses (the `%Pkg::` stash arm in Pl/ExprToCL.pm); it probably reads the scalar $Foo:: then a hash subscript on an unrelated %Foo:: hash.  Fix direction: the scanner names the stash element as the code path does (ONE lowering, rule 11).  Bar: the four rows == perl; a guard row in Pl/t/stash-hash-01.t, inverse-verified.\n",
+   "id" : 3635,
+   "status" : "pending",
+   "subject" : "An interpolated stash element \"$Foo::{x}\" reads \"\" (perl: the glob *Foo::x) -- the interpolation scanner does not reach the stash-element lowering the code path uses"
+}
