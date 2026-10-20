@@ -85,4 +85,27 @@ T
     ok(!grep({ length($_) > 3200 } @$err), 'every annotation stays under the cap');
 }
 
+# 11-13: an error MESSAGE above a backtrace longer than the tail (#3526: the
+# install-matrix annotation kept frames 72-95 and dropped the condition text).
+{
+    my $crash = write_file('crash.sh', "echo 'step output'\n"
+        . "echo 'Unhandled simple-error in thread main:'\n"
+        . "echo '  sb-vm::move-double-float-arg is not the name of a defined VOP.'\n"
+        . "for i in \$(seq 0 95); do echo \"\$i: (FRAME-\$i ARG)\"; done\nexit 1\n");
+    my ($st, $out, $err) = run_step('bash', $crash);
+    isnt($st, 0, 'the crashing step keeps its exit status');
+    my ($head) = grep { /: the error::/ } @$err;
+    like($head // '', qr/Unhandled simple-error.*%0A.*is not the name of a defined VOP/,
+         'the error annotation carries the condition text above the backtrace') or diag($out);
+    my ($tail) = grep { /failed \(exit 1\)::/ } @$err;
+    unlike($tail // '', qr/Unhandled simple-error/, 'and the tail alone would not have');
+}
+
+# 14: a short failing step whose error IS in the tail gets no duplicate.
+{
+    my $short = write_file('short.sh', "echo 'Error: boom'\nexit 2\n");
+    my ($st, $out, $err) = run_step('bash', $short);
+    ok(!grep({ /: the error::/ } @$err), 'an error inside the tail window is not repeated');
+}
+
 done_testing();

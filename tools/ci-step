@@ -19,6 +19,10 @@
 #     the test's own diag).  A gate step prints those minutes before its end,
 #     so the tail alone showed only the summary ("Failed tests: 9-11") and not
 #     WHY (CI run 36192024430).  Split over at most four annotations.
+#   * "the error" — the first error-shaped line ABOVE the tail window and the
+#     dozen lines after it (#3526, s523c): an unhandled condition prints its
+#     text above a backtrace that can be longer than the tail, so the tail of
+#     the install-matrix runs kept frames 72-95 and dropped the message.
 #   * "tail" — the last ~40 lines, as before (a non-TAP step's error is there).
 # Each message is capped near GitHub's limit (~3000 bytes after encoding).
 #
@@ -71,6 +75,19 @@ if [ "$status" -ne 0 ]; then
             print "::error title=$name: failed rows ($k of $n)::$m\n";
         }
         my $start = @lines > 40 ? @lines - 40 : 0;
+        # The error MESSAGE (#3526): an unhandled condition prints its text
+        # ABOVE a backtrace that can be longer than the tail, so the tail kept
+        # frames 72-95 and dropped the one line that names the error.  The
+        # first error-shaped line before the tail window, with the dozen lines
+        # after it, is its own annotation.
+        for my $i (0 .. $start - 1) {
+            next if $lines[$i] !~ /^\s*(?:Unhandled |debugger invoked|fatal error|Error\b|ERROR\b|Can.t |Died\b)|\berror:|is not the name of|is undefined|is unbound/;
+            my $to = $i + 12 < $start ? $i + 12 : $start - 1;
+            my $head = enc(join("\n", @lines[$i .. $to]) . "\n");
+            $head = substr($head, 0, $cap - 20) . "%0A[... cut]%0A" if length($head) > $cap;
+            print "::error title=$name: the error::$head\n";
+            last;
+        }
         my $tail = enc(join("\n", @lines[$start .. $#lines]) . "\n");
         if (length($tail) > $cap) {
             $tail = substr($tail, length($tail) - $cap);
