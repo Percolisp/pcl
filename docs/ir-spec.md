@@ -5525,6 +5525,18 @@ before the floor, which is what PCL does; what it may NOT do is bump the
 position by a character instead, because that loses every non-empty
 alternative available at that position.
 
+**A match that starts at a position past 0 still sees the WHOLE subject**
+(normative, s523a, task #2900): every attempt from `pos` — a `//g` step in
+either context, a `\G` anchor, an `s///g` step — evaluates `^` and `\A` as
+offset 0 and `\b`, `\B` and lookbehind against the characters BEFORE the
+position.  An engine whose scan treats its start argument as the string's
+beginning must be told the real start (cl-ppcre: `*real-start-pos*` 0, bound
+by `%p-with-real-start` around every PCL scan whose start is past 0):
+
+    my $t = "my \$p";  pos($t) = 1;
+    $t =~ /\G\b(y)/gc;               # false: "m" before pos is a word char
+    my $n = 0; $n++ while "aaa" =~ /^a/g;   # 1, not 3
+
 The iterator's state is therefore `pos` PLUS one bit ("the match that set it
 was empty"), perl's `MGf_MINMATCH`. `pos($x) = N` normalises the way perl's
 `magic_setpos` does: undef REMOVES the position, a negative counts back from

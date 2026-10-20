@@ -38121,6 +38121,21 @@ would consume, so it dies naming the stream (rule 12)."
   (%clear-match-strings))
 
 (declaim (inline %p-ppcre-scan))
+(defmacro %p-with-real-start ((pos) &body body)
+  "Run BODY -- one cl-ppcre scan from POS -- with the subject's REAL start at 0.
+   cl-ppcre reads its START argument as the start of the string for ^, \\A,
+   \\b, \\B and lookbehind unless *real-start-pos* says otherwise; every PCL
+   scan from a POS past 0 is a pos() into the WHOLE subject (a /g step, a \\G
+   anchor), where perl's assertions read the characters before POS and ^ / \\A
+   mean offset 0 (#2900: `pos($t)=1; $t =~ /\\G\\b(y)/gc` matched on \"my\",
+   and `$n++ while \"aaa\" =~ /^a/g` counted 3).  A binding already in force
+   (cl-ppcre's own do-scans, %pcl-tail-start-scanner) is kept.  POS = 0 binds
+   nothing: the hot path of a first attempt is unchanged."
+  `(if (eql ,pos 0)
+       (progn ,@body)
+       (let ((cl-ppcre::*real-start-pos* (or cl-ppcre::*real-start-pos* 0)))
+         ,@body)))
+
 (defun %p-ppcre-scan (scanner str start &optional end)
   "cl-ppcre:scan for an already-compiled scanner closure, without the CLOS
    generic-function dispatch and keyword parsing (task #680: the emf +
@@ -38128,13 +38143,14 @@ would consume, so it dies naming the stream (rule 12)."
    Mirrors ppcre's (scanner function) method exactly: funcall the closure on
    a simple string over [START, END) -- END defaults to its length; the live
    read (#2881) passes a buffer's data vector and its fill pointer, and
-   ppcre's end anchors read END as the end of the string.  *real-start-pos*
-   is not rebound — the method binds it to its default NIL, which is its
-   global value; nothing in this runtime binds it.  Callers pass STR already
-   simple (do-regex-match coerces once per call), so the guard here is belt
-   only."
+   ppcre's end anchors read END as the end of the string.  A START past 0 is
+   a pos(), never the start of the subject: %p-with-real-start keeps \\b, \\B,
+   lookbehind, ^ and \\A reading the whole string (#2900).  Callers pass STR
+   already simple (do-regex-match coerces once per call), so the guard here is
+   belt only."
   (let ((s (if (simple-string-p str) str (coerce str 'simple-string))))
-    (funcall (the function scanner) s start (or end (length s)))))
+    (%p-with-real-start (start)
+      (funcall (the function scanner) s start (or end (length s))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; perl's global-match advance rule — ONE reading (task #1719)
@@ -38185,9 +38201,10 @@ would consume, so it dies naming the stream (rule 12)."
    stands on the match hot path: with MINEND false — every attempt of every
    pattern that cannot match empty — the whole rule costs one test and the
    scan is still a direct tail call, as it was before the rule existed."
-  (if minend
-      (%p-minend-scan scanner minend-key str pos end)
-      (funcall (the function scanner) str pos end)))
+  (%p-with-real-start (pos)
+    (if minend
+        (%p-minend-scan scanner minend-key str pos end)
+        (funcall (the function scanner) str pos end))))
 
 (defun %p-global-scanner (scanner minend-key &optional counter always)
   "A cl-ppcre scanner closure that iterates the way perl's global match does,
