@@ -13,7 +13,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 90;
+use Test::More tests => 91;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1041,4 +1041,11 @@ for my $c (
     my ($star) = grep { $_->content eq q{*} } $doc->tokens;
     is( ref($star), q{PPI::Token::Cast},
         q{the statement-initial `*` of `*$o->{A} = 1` after a block is a Cast} );
+}
+# §38, the code-sigil twin: `{ 1 while $x; } &$cb(7);` -- perl calls $cb.
+{
+    my $doc = PPI::Document->new(\qq{{ 1 while \$x; }\n&\$cb(7);\n});
+    my ($amp) = grep { $_->content eq q{&} } $doc->tokens;
+    is( ref($amp), q{PPI::Token::Cast},
+        q{the statement-initial `&` of `&$cb(7)` after a block is a Cast} );
 }

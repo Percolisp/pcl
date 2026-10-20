@@ -1633,8 +1633,13 @@ sub _merge_punct_array_symbols {
 # unchanged, so it runs on fragments too.
 sub _repair_statement_start_glob_cast {
   my ($doc) = @_;
+  # `&` is the same bug with the code sigil (#1511, s523a): after
+  # `{ 1 while $x; }` the `&` of `&$cb($x);` is the bitwise-AND operator, and
+  # the call became `(p-bit-and ARGS $cb)` -- Algorithm::Diff's
+  # traverse_sequences lost every trailing DISCARD_A callback.
   for my $op (@{ $doc->find(sub {
-                   $_[1]->isa('PPI::Token::Operator') && $_[1]->content eq '*'
+                   $_[1]->isa('PPI::Token::Operator')
+                   && ($_[1]->content eq '*' || $_[1]->content eq '&')
                  }) || [] }) {
     my $st = $op->parent;
     next unless $st && $st->isa('PPI::Statement');
@@ -1643,7 +1648,7 @@ sub _repair_statement_start_glob_cast {
     my $next = $op->snext_sibling;
     next unless $next && $next->isa('PPI::Token::Symbol')
              && $next->content =~ /\A\$/;
-    my $cast = PPI::Token::Cast->new('*');
+    my $cast = PPI::Token::Cast->new($op->content);
     $op->insert_before($cast);
     $op->delete;
   }

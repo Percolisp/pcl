@@ -18,6 +18,11 @@
 # number): Text::Balanced's `pos($$textref)--` before the second block of
 # `s{a}{b}`, so extract_quotelike and extract_tagged failed.
 #
+# #1511 (Algorithm::Diff): a `..` in a sub's return / tail position is a RANGE
+# when the caller wants a list (it was always the flip-flop for non-literal
+# operands); `X || not $v = E` reduced `not $v` alone; and PPI lexes the `&`
+# of a statement-initial `&$cb(...)` after `{ 1 while $x; }` as bitwise AND.
+#
 # #966's shapes (pos of an element after a //g match) are kept here as rows;
 # they were fixed by #3063 (Pl/t/elem-pos-01.t is that fix's own guard).
 
@@ -153,6 +158,121 @@ substr-plus: 8bc
 substr-2arg-x: abcbc
 arylen-minus: 1
 arylen-plus: 5
+EXP
+  [ 'range or flip-flop decided by the caller\'s context (#1511)', <<'PL', <<'EXP' ],
+sub r1 { my ($x, $y) = @_; return ($x) .. ($y - 1); }
+my @a = r1(2, 5); print "ret-paren: [@a]\n";
+sub r2 { my ($x, $y) = @_; return $x .. $y; }
+@a = r2(3, 4); print "ret-plain: [@a]\n";
+sub r3 { my ($x, $y) = @_; $x .. $y }
+@a = r3(1, 3); print "implicit: [@a]\n";
+my @b = (10, 20, 30, 40); print "slice: [@b[r2(1, 2)]]\n";
+sub r4 { my ($x, $y) = @_; return wantarray ? ($x .. $y) : -1 }
+@a = r4(0, 2); print "ternary: [@a]\n";
+my $n = 0 + (() = r2(1, 4)); print "count: $n\n";
+sub r5 { my ($x, $y) = @_; my @r = ($x .. $y); return @r }
+@a = r5(5, 6); print "via-array: [@a]\n";
+PL
+ret-paren: [2 3 4]
+ret-plain: [3 4]
+implicit: [1 2 3]
+slice: [20 30]
+ternary: [0 1 2]
+count: 4
+via-array: [5 6]
+EXP
+  [ 'flip-flop positions stay flip-flops (#1511 inverse)', <<'PL', <<'EXP' ],
+my @x = grep { /b/ .. /d/ } qw(a b c d e); print "grep: @x\n";
+my @y = grep { $_ eq "b" .. $_ eq "c" } qw(a b c d); print "grep2: @y\n";
+my @m = map { scalar(/b/ .. /c/) } qw(a b c d); print "map: [@m]\n";
+my @r; for (qw(a b c d e)) { push @r, $_ if /b/ .. /d/ } print "if: @r\n";
+sub inner { my $s = shift; return ($s =~ /b/) .. ($s =~ /c/) } my @l = inner("b"); print "sub-list: [@l]\n";
+my $sc = inner("b"); print "sub-scalar: [$sc]\n";
+sub tailff { $_[0] =~ /b/ .. $_[0] =~ /d/ } my @t = map { scalar tailff($_) } qw(a b c d e); print "tail-scalar: [@t]\n";
+my @u = (sub { 2 .. 4 })->(); print "anon: [@u]\n";
+my @v = do { 1 .. 3 }; print "do: [@v]\n";
+sub ctx { my $n = shift; return 1 .. $n } my $cnt = () = ctx(3); print "cnt: $cnt\n";
+print "list-print: ", join(",", ctx(4)), "\n";
+PL
+grep: b c d
+grep2: b c
+map: [ 1 2E0 ]
+if: b c d
+sub-list: []
+sub-scalar: [1]
+tail-scalar: [ 1 2 3E0 ]
+anon: [2 3 4]
+do: [1 2 3]
+cnt: 3
+list-print: 1,2,3,4
+EXP
+  [ '`X || not $v = E` is `X || not($v = E)` (#1511)', <<'PL', <<'EXP' ],
+my %h = (min => 5);
+my $k; my $r = (0 || not $k = $h{min}); print "or-not-assign: r=[$r] k=", $k // "u", "\n";
+my $x = not 5; print "assign-not: [$x]\n";
+my @a = not 0; print "list-not: [@a]\n";
+my ($p, $q) = (1, 2); print "not-eq: [", (not $p == $q), "]\n";
+my $y; my $s = (1 && not $y = 0); print "and-not-assign: s=[$s] y=$y\n";
+my $t = (0 || not 1 ? "A" : "B"); print "or-not-ternary: [$t]\n";
+my $u = (0 || not $p and 0); print "or-not-and: [", $u // "u", "]\n";
+my $w; $w = 0 || not $p + $q; print "or-not-plus: [$w]\n";
+my $v = 0 || not 0; print "or-not-const: [$v]\n";
+my @l = (1, 0 || not 0, 2); print "in-list: [@l]\n";
+PL
+or-not-assign: r=[] k=5
+assign-not: []
+list-not: [1]
+not-eq: [1]
+and-not-assign: s=[1] y=0
+or-not-ternary: []
+or-not-and: []
+or-not-plus: []
+or-not-const: [1]
+in-list: [1 ]
+EXP
+  [ 'a statement-initial &$cb after a block is a call (#1511, PPI §38)', <<'PL', <<'EXP' ],
+sub tr2 {
+    my @ev;
+    my $discardACallback = sub { push @ev, "A$_[0]" };
+    my $discardBCallback = sub { push @ev, "B$_[1]" };
+    my $finishedACallback; my $finishedBCallback;
+    my ($ai, $bi, $lastA, $lastB) = (8, 9, 9, 11);
+    while ( $ai <= $lastA or $bi <= $lastB )
+    {
+        if ( $ai == $lastA + 1 and $bi <= $lastB )
+        {
+            if ( defined($finishedACallback) ) { $finishedACallback = undef; }
+            else { &$discardBCallback( $ai, $bi++, @_ ) while $bi <= $lastB; }
+        }
+        if ( $bi == $lastB + 1 and $ai <= $lastA )
+        {
+            if ( defined($finishedBCallback) ) { $finishedBCallback = undef; }
+            else { &$discardACallback( $ai++, $bi, @_ ) while $ai <= $lastA; }
+        }
+        &$discardACallback( $ai++, $bi, @_ ) if $ai <= $lastA;
+        &$discardBCallback( $ai, $bi++, @_ ) if $bi <= $lastB;
+    }
+    return "@ev";
+}
+print "full: ", tr2(), "\n";
+sub tr3 {
+    my @ev; my $cb = sub { push @ev, "A$_[0]" };
+    my ($ai, $lastA) = (8, 9);
+    &$cb( $ai++, 0, @_ ) if $ai <= $lastA;
+    return "@ev";
+}
+print "with-args: ", tr3(), "\n";
+sub tr4 {
+    my @ev; my $cb = sub { push @ev, "A$_[0]" };
+    my ($ai, $lastA) = (8, 9);
+    &$cb( $ai++, 0 ) if $ai <= $lastA;
+    return "@ev";
+}
+print "no-args: ", tr4(), "\n";
+PL
+full: A8 B9 A9 B10 B11
+with-args: A8
+no-args: A8
 EXP
 );
 

@@ -1671,26 +1671,30 @@ sub gen_binary_op_form {
     my $both_int  = _is_integer_literal_node($left_node) && _is_integer_literal_node($right_node);
     my $both_literal = ($both_int
                         || (_is_string_literal_node($left_node) && _is_string_literal_node($right_node)));
-    my $effective_ctx = $ctx;
-    $effective_ctx = SCALAR_CTX if $ctx == INHERIT_CTX && !$both_literal;
-    if ($effective_ctx != LIST_CTX && $effective_ctx != INHERIT_CTX) {
+    # The flip-flop flavour follows the operands: integer literals compare
+    # with $., string literals compare numerically with $., anything else is
+    # a boolean.
+    my $ff_macro = $both_int
+                 ? (($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num')
+                 : $both_literal
+                 ? (($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn')
+                 : (($op eq '...') ? 'p-flipflop-3' : 'p-flipflop');
+    if ($ctx != LIST_CTX && $ctx != INHERIT_CTX) {
       my $ff_id = $g_flipflop_count++;
       my $left  = $self->gen_node_form($kids->[0]);
       my $right = $self->gen_node_form($kids->[1]);
-      my $macro = $both_int
-                ? (($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num')
-                : $both_literal
-                ? (($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn')
-                : (($op eq '...') ? 'p-flipflop-3' : 'p-flipflop');
-      return [$macro, $ff_id, $left, $right];
+      return [$ff_macro, $ff_id, $left, $right];
     }
-    if ($effective_ctx == INHERIT_CTX) {
+    # An INHERITED context (a sub's return value / tail, a ternary arm under
+    # it) is decided at RUN time, as perl's pp_flip asks GIMME: a range when
+    # the caller wants a list, a flip-flop otherwise.  This used to be forced
+    # to the flip-flop for non-literal operands (#1511: `return ($b + $lo)
+    # .. ($b + $hi - 1)` -- Algorithm::Diff's Range -- answered "1E0" in list
+    # context instead of the index list).
+    if ($ctx == INHERIT_CTX) {
       my $ff_id = $g_flipflop_count++;
       my $left  = $self->gen_node_form($kids->[0]);
       my $right = $self->gen_node_form($kids->[1]);
-      my $ff_macro = $both_int
-                   ? (($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num')
-                   : (($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn');
       my $range_fn = ($op eq '...') ? 'p-...' : 'p-..';
       return ['if', ['eq', '*wantarray*', 't'],
                     [$range_fn, $left, $right],

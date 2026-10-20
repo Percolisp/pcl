@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 141;
+plan tests => 142;
 
 sub run_cl {
     my ($code) = @_;
@@ -1415,6 +1415,14 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
     ok( ref($star) eq 'PPI::Token::Operator',
         'CANARY: PPI still lexes a statement-initial *$o after a block as an Operator '
       . '(when this FAILS, drop Pl::Parser::_repair_statement_start_glob_cast)' );
+}
+# ... and its code-sigil twin (#1511, s523a): `{ 1 while $x; } &$cb(7);`.
+{
+    my $doc = PPI::Document->new(\qq{{ 1 while \$x; }\n&\$cb(7);\n});
+    my ($amp) = grep { $_->content eq '&' } $doc->tokens;
+    ok( ref($amp) eq 'PPI::Token::Operator',
+        'CANARY: PPI still lexes a statement-initial &$cb after a block as an Operator '
+      . '(when this FAILS, drop the & arm of Pl::Parser::_repair_statement_start_glob_cast)' );
 }
 
 # ── #2005: map COPIES what its block returns, on EVERY result arity ─────────

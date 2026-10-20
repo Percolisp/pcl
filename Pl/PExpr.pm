@@ -1876,6 +1876,25 @@ sub parse {
       my $rn_str  = $self->is_token_operator($rn) // '';
       my $rn_info = $self->op_info($rn);
       if ($rn_str eq 'not' && defined $rn_info && $rn_info->{prec} < $hi_prio) {
+        # The premise above holds only for operators TIGHTER than the binary
+        # op: `0 || not $k = 5` is `0 || not($k = 5)` in perl, and `=` (like
+        # `?:`, `..`) is looser than `||`, so `$k = 5` is NOT reduced yet and
+        # `not` grabbed `$k` alone -- the statement became `(0 || not $k) = 5`
+        # (#1511, Algorithm::Diff's `... || not $meth = $getName{...}`).
+        # `not`'s operand is everything up to the next operator at least as
+        # loose as `not` itself (and/or/xor); collapse that run into ONE term
+        # first, so `not` reduces over it.
+        my $s   = $hi_ix + 2;
+        my $end = $s;
+        while ($end + 1 < scalar(@$e)) {
+          my $nx_info = $self->op_info($e->[$end + 1]);
+          last if defined $nx_info && $nx_info->{no} && $nx_info->{prec} <= $rn_info->{prec};
+          $end++;
+        }
+        if ($end > $s) {
+          my $id_operand = $self->parse([ @$e[$s .. $end] ]);
+          splice @$e, $s, $end - $s + 1, $self->make_subtree_item($id_operand);
+        }
         $hi_ix++;
         $op       = $rn;
         $op_info  = $rn_info;

@@ -2197,6 +2197,28 @@ gunzip died "Not a HASH reference".  Guard `Pl/t/zlib-01.t` ("-NAME and
 statement-start glob"); canary `Pl/t/misc-fixes-02.t`; upstream rows:
 `docs/ppi-bug-report.t`.
 
+**The CODE-sigil twin** (s523a, task #1511; PPI 1.291): after a bare block
+whose first token is a NUMBER (or whose statement carries a loop modifier),
+the `&` that begins `&$cb(...)` is the bitwise-AND Operator:
+
+```perl
+my $cb = sub { print "called $_[0]\n" }; my $x = 0;
+{ 1 while $x; }
+&$cb(7);            # perl prints `called 7`
+```
+
+PPI: `Statement[ Token::Operator['&'] Symbol['$cb'] List ]`; expected
+`Token::Cast['&']`.  PCL emitted `(p-bit-and ARGS $cb)` -- the call never
+happened.  Real victim: Algorithm::Diff's `traverse_sequences`, whose
+`&$discardACallback( $ai++, $bi, @_ ) if $ai <= $lastA;` follows an `if`
+block ending in `... while $ai <= $lastA;` -- base.t lost the trailing
+DISCARD_A callbacks (`a h` for `a h n p`).  **Workaround**: the same pass,
+widened to `&` (`_repair_statement_start_glob_cast`: a `*` or `&` Operator
+that is the first significant token of its statement and is followed by a
+`$name` symbol becomes a Cast).  Guard `Pl/t/regex-pos-01.t` (the
+traverse_sequences tail shape); canary `Pl/t/misc-fixes-02.t`; upstream row
+`docs/ppi-bug-report.t`.
+
 ---
 
 
