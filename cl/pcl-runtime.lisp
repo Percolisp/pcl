@@ -6255,15 +6255,36 @@
             (truncate n))
         (truncate n))))
 
+(defun %p-int-wide (val)
+  "int() of a finite DOUBLE-FLOAT beyond +-4.5e18: the exact integer (a
+   bignum).  One call away from p-int, and that is load-bearing (#3528): its
+   argument is a boxed T, so no caller ever passes a double in a float
+   register to a named call."
+  (values (truncate val)))
+
+;;; THE DOUBLE-FLOAT ARM IS RANGED (#3528, s523c).  `(truncate val)' on a
+;;; double whose magnitude the compiler cannot bound is a NAMED CALL that
+;;; takes the double unboxed (sb-bignum:unary-truncate-double-float-to-bignum,
+;;; a fixed-call-named VOP), and SBCL 2.5.2 -- the supported floor -- dies
+;;; compiling it when VAL arrives boxed (`sb-vm::move-double-float-arg is not
+;;; the name of a defined VOP', reproduced without PCL: an inline division
+;;; that answers integer-or-double, a typecase, a truncate, the result passed
+;;; on).  Inside +-4.5e18 the result is a fixnum and SBCL open-codes the
+;;; truncation (cvttsd2si) on every version, so the common case is a compare
+;;; and an instruction instead of a call; NaN fails both compares and falls
+;;; to its own test; the rare wide finite double takes %p-int-wide.
+;;; The bound sits below 2^62: at exactly 2^62 SBCL 2.5.2 no longer proves a
+;;; fixnum result and the call comes back (measured).  Guard:
+;;; tools/t/sbcl-floor.t under PCL_SBCL_FLOOR; Pl/t/int-wide-01.t (the values).
 (declaim (inline p-int))
 (defun p-int (val)
   "Perl int - truncate toward zero. NaN and Inf return unchanged (Perl 5.36+).
    Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (typecase val
     (integer val)
-    (double-float (if (or (%pcl-nan-p val) (sb-ext:float-infinity-p val))
-                      val
-                      (truncate val)))
+    (double-float (cond ((< -4.5d18 val 4.5d18) (truncate val))
+                        ((or (%pcl-nan-p val) (sb-ext:float-infinity-p val)) val)
+                        (t (%p-int-wide val))))
     (t (%p-int-slow val))))
 (declaim (notinline p-int))
 
