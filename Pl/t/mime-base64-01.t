@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub write_pl {
     my ($code) = @_;
@@ -105,3 +105,9 @@ both_agree($HDR . 'my $bin = join("", map { chr($_) } 0 .. 255);'
 both_agree($HDR . 'my $r = eval { encode_base64("\x{263A}"); 1 };'
                 . ' print +($r ? "silent" : "loud"), "\n";',
            'a character above 255 is LOUD, as perl is');
+
+# #2066 (s523b): perl's module aliases encode / decode (documented, and
+# Data::Dump's TRY_BASE64 branch calls MIME::Base64::encode).
+both_agree('use MIME::Base64; print MIME::Base64::encode("Hi!", ""), " ",'
+         . ' MIME::Base64::decode("SGkh"), "\n";',
+           'MIME::Base64::encode / ::decode are the encode_base64 / decode_base64 aliases');

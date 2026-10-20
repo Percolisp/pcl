@@ -108,6 +108,11 @@ sub decoded_base64_length ($) {
 }
 
 # RFC 4648 §5: the URL/filename-safe alphabet, and NO padding.
+# perl's MIME::Base64 aliases (`MIME::Base64::encode($s)` is documented; #2066,
+# Data::Dump's base64 branch calls it).
+*encode = \&encode_base64;
+*decode = \&decode_base64;
+
 sub encode_base64url {
     my $e = encode_base64($_[0], '');
     $e =~ tr{+/}{-_};
