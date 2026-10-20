@@ -11,6 +11,12 @@
 # one key is cl/pcl-runtime.lisp %p-typeglob-handle-key (open's) through
 # %p-dh-key (opendir / readdir / rewinddir / closedir).  Every row compares
 # stdout with perl itself over a real directory.
+#
+# #3527 (s523a): readdir's ORDER is the kernel's readdir(3) order, `.` and
+# `..` wherever the filesystem puts them -- PCL synthesized "." ".." + a
+# SORTED listing, which agrees with perl on tmpfs (File::Temp's /tmp on the
+# dev box) and not on ext4 (CI's runner).  The last row lists a directory
+# created UNDER the checkout, so it reaches the checkout's own filesystem.
 
 use v5.30;
 use strict;
@@ -29,7 +35,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 my $d = tempdir(CLEANUP => 1);
 for my $n ('a b.txt', 'c.txt', 'e.txt') {
@@ -80,3 +86,15 @@ both_agree('use IO::Dir; my $io = IO::Dir->new($d) or die; my @a = sort $io->rea
            'core IO::Dir->new(DIR)->read lists the entries');
 both_agree('my $g = gensym; my $c = $g; op($c, $d); opendir(my $o, "/") or die; my @a = sort readdir($g); print "@a\n";',
            'a SECOND copy: opening another handle leaves the glob\'s');
+
+# #3527: the FULL raw order, unsorted, on the checkout's filesystem (never
+# /tmp: on tmpfs the kernel's order and a sorted one can coincide).
+my $od = tempdir('readdir-order-XXXX', DIR => $RealBin, CLEANUP => 1);
+for my $n ((map { "n$_" } 1 .. 50), 'x.y', 'zz', 'b1') {
+    open my $fh, '>', "$od/$n" or die "$od/$n: $!";
+    close $fh;
+}
+mkdir "$od/sub" or die "$od/sub: $!";
+both_agree("opendir(my \$o, '$od') or die; my \@a = readdir \$o; print join('|', \@a), \"\\n\";"
+           . " rewinddir \$o; my \$x = readdir \$o; my \@r = readdir \$o; print \"\$x \", scalar(\@r), \"\\n\";",
+           'readdir answers the kernel\'s order, unsorted, . and .. where the filesystem puts them (#3527)');

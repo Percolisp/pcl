@@ -23858,29 +23858,36 @@ would consume, so it dies naming the stream (rule 12)."
          (slash (position #\/ n :from-end t :end end)))
     (subseq n (if slash (1+ slash) 0) end)))
 
+(defun %p-dir-stream-names (stream)
+  "Every entry name of the open opendir(3) STREAM, in the order readdir(3)
+   hands them out, `.' and `..' wherever the filesystem puts them -- perl's
+   readdir is that call, so its order IS the kernel's (ext4's hash order, not
+   a sorted one).  Closes STREAM."
+  (unwind-protect
+       (loop for ent = (sb-posix:readdir stream)
+             until (sb-alien:null-alien ent)
+             collect (sb-posix:dirent-name ent))
+    (sb-posix:closedir stream)))
+
 (defun %p-opendir-impl (dh dir)
   "Perl opendir - open directory for reading.
-   DIR is always treated as a DIRECTORY even without a trailing slash:
-   merging \"*.*\" onto \"/a/b/rd\" parses rd as a file NAME, so the wild
-   card replaced it and the listing was of /a/b/ — the PARENT, silently.
-   Symlinks are not resolved (readdir reports the link's own name), and
-   the entry list starts with \".\" and \"..\" as perl's does."
+   The listing is readdir(3)'s, read once at open: the names in the KERNEL's
+   order with `.' and `..' as the filesystem includes them -- nothing is
+   synthesized or sorted (#3527: PCL listed \".\" \"..\" + CL's sorted
+   DIRECTORY, which agrees with perl on tmpfs and not on ext4, and the gate
+   row comparing the first entry went red when CI's runner image changed).
+   DIR is the directory's own name, literally (opendir(3) takes it as is, a
+   `*' in it is a character, #755); a symlink entry is its own name."
   (let* ((dir-str (to-string dir))
-         ;; %p-literal-path AS-DIRECTORY: trailing slash or not, DIR is a
-         ;; directory, and its own name is LITERAL (a `*' in it is a
-         ;; character, not a wildcard, #755) — only the merged "*.*" below
-         ;; is a wild listing pattern.
-         (dir-path (%p-literal-path dir-str t))
-         ;; The system's own answer first (#2922): a failing opendir(3) sets
-         ;; $! as perl's does (ENOENT, ENOTDIR for a plain file, EACCES).
-         (ok (handler-case (progn (sb-posix:closedir (sb-posix:opendir dir-str)) t)
-               (sb-posix:syscall-error (e)
-                 (%p-io-errno-fail (sb-posix:syscall-errno e))))))
-    (when (and ok (probe-file dir-path))
-      (let* ((entries (directory (merge-pathnames "*.*" dir-path)
-                                 :resolve-symlinks nil))
-             (names (list* "." ".." (mapcar #'%p-dirent-name entries)))
-             (handle (cons 0 names)))
+         ;; The system's own answer (#2922): a failing opendir(3) sets $! as
+         ;; perl's does (ENOENT, ENOTDIR for a plain file, EACCES) -- and the
+         ;; stream it opens on success is the one the listing reads.
+         (names (handler-case (%p-dir-stream-names (sb-posix:opendir dir-str))
+                  (sb-posix:syscall-error (e)
+                    (%p-io-errno-fail (sb-posix:syscall-errno e))
+                    :fail))))
+    (unless (eq names :fail)
+      (let ((handle (cons 0 names)))
         ;; Remember the DIRECTORY beside the handle: `-d DIR` / `stat DIR`
         ;; fstat the dirfd in perl, and the one stat operand resolver answers
         ;; from this path instead (task #1048).
