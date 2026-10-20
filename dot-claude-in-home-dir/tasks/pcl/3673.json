@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Tue Oct 20 22:58:14 2026",
+   "description" : "FILED s523b (Opus 5.5, 2026-10-20) from #3672's measurement.  PRE-EXISTING (base 6cf75804).  A tied scalar whose FETCH returns a REFERENCE, passed to a sub, is FETCHed twice where perl fetches once (and a `($)` sub returning `$_[0]` in void context fetches twice where perl fetches 0 times).  A string-valued tied scalar is right.\nPROBE scratch/s523b/p4/gm6.pl (perl / base / tree):\n  sub two { my $x = $_[0]; $x }   two($v)    perl 1   PCL 2\n  sub one ($) { $_[0] }           one($v)    perl 0   PCL 2\n  sub none { 1 }                  none($v)   perl 0   PCL 0\n  (string FETCH)                  two($w)    perl 1   PCL 1\n  my $y = $v                                 perl 1   PCL 1\nSo the extra read is in the `$_[0]` read / call-return path when the fetched value is a reference (a ref test before the copy?).  Measure where: count FETCH around `my $x = $_[0]` alone vs the call.  Rows: none blessed today (getmagic-once.t passes 6/0 after #3672); perl-tests op/tie_fetch_count.t is the population.\n",
+   "id" : "3673",
+   "status" : "pending",
+   "subject" : "A tied scalar whose FETCH returns a REFERENCE, passed to a sub, is FETCHed twice (perl once; a ($) sub returning $_[0] in void: perl 0)"
+}

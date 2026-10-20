@@ -326,14 +326,14 @@ leave by edit.  **Expect honest new failures**: Text-CSV runs ~51,000 rows it ne
 chase them.  Risks: name resolution -> the full sweep IS the gate, the gate-SET scan over both populations
 (the refusal stops firing), `Pl/t` grep for the refusal's message text (stale-guard rule).
 
-### Batch 4 -- OO emission and the stash (layer: Pl, cl) -- **IN FLIGHT s522b (all five members shipped under the s522 bounded ruling for the stash; legs owed at s523 22:4x; the hash-slice read error = #3511)**
+### Batch 4 -- OO emission and the stash (layer: Pl, cl) -- **DONE s522b = MAIN-READY-40 (2026-10-20): all five members under the s522 bounded stash ruling (+ #135 measured); the delete of a non-sub symbol announces (#3691 = the view removal, open)**
 Members: (1) #1570 a parent package must exist at READ time; (2) the new `%Local::Class::` hash-slice read
 error (file first); (3) #1572's remaining 081 (`orig`); (4) #3321 stash alias; (5) #1506 `import PKG LIST`.
 Acceptance: Role-Tiny extend-role-tiny, proto, namespace-clean; CMM 081; JSON-PP 118; SLU dualvar.
 Risks: `p-defclass` emission -> corpus-diff + emission-ab over `lib/**`; mro companion files.
 Ruling needed: whether #1510 / #135's stash parts may touch the deferred "Live symbol-table hashes".
 
-### Batch 5 -- diagnosis batch: regex/pos and the silent exits (layer: cl, measured first) -- **IN FLIGHT s523a (launched s523; #966 found ALREADY FIXED on main by Fable's probe; #3527 readdir-order filler added for the CI red)**
+### Batch 5 -- diagnosis batch: regex/pos and the silent exits (layer: cl, measured first) -- **DONE s523a = MAIN-READY-39 (2026-10-20): #2900 #1568 #1511-A #3527 fixed (every Text-Balanced and Algorithm-Diff file passes), #966 already fixed, #3282 measured -> #3650 (pack U0 mode, a USER decision) + #3651 (TAP exit status, ruled -> s523c)**
 Members, each "measure, then fix if one mechanism": #1568 Text::Balanced (40), #2900 `\G\b` (2), #966
 `pos(ELEM)` (4 + Text-CSV parse), #1511 Algorithm-Diff (24 + 847), #3282 the JSON-PP 099 silent exit (+24,512).
 Acceptance per member as in its task.  Risks: the regex engine is ONE (portability ruling) -- the sweep's `re/`

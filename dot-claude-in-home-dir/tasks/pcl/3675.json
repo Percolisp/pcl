@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Tue Oct 20 22:58:14 2026",
+   "description" : "FILED s523b (Opus 5.5, 2026-10-20) from #3672's measurement.  PRE-EXISTING (base 6cf75804).  SILENT WRONG: once a scalar has been blessed AS A REFERENT (`bless \\$x, 'T'`), a reference assigned INTO it reports the referent's class: ref($x) = 'T' where perl answers the new value's type.\nPROBE scratch/s523b/p4/gm5.pl (perl / base / tree):\n  my $x; my $o = bless \\$x, 'T'; my $s = $o; $$s = [1]; ref($$s), ref($x)     perl ARRAY ARRAY   PCL T T\n(inside a sub with `my $s = $_[0]` it is right -- Y2 / Y3 -- so some paths clear it).  perl blesses the referent SV ($x itself; ref(\\$x) stays T), and $x's VALUE is a new unblessed array ref; PCL keeps the class on the box that is both the referent and the holder of the value, so the box class answers for the value.  This is the #1511 B family (the box model of a blessed scalar ref) in its assignment face.  Hit by Tie::StdScalar: its object is `bless \\my $x`, so `tie my $v, 'Tie::StdScalar'; $v = \\\"x\"; ref($v)` = 'Tie::StdScalar' (perl SCALAR) -- after #3672 that is the remaining wrong answer for a ref stored into a StdScalar-tied variable.\n",
+   "id" : "3675",
+   "status" : "pending",
+   "subject" : "After bless \\$x, a reference assigned INTO $x reports the referent's class (ref($x) = T, perl ARRAY) -- hits Tie::StdScalar holding a ref"
+}

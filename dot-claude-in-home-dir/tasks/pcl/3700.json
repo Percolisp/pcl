@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Tue Oct 20 23:12:13 2026",
+   "description" : "FILED s523c (Opus 5.5) while guarding #3528.  Probed 5.40.3 vs PCL (6cf75804 AND the s523c tree identical -- PRE-EXISTING, not #3528's change):\n  perl -e 'print int(-1e19), \" \", int(1.5e300), \" \", int(1e19), \"\\n\"'\n  perl:  -1e+19 1.5e+300 10000000000000000000\n  PCL:   -10000000000000000000 1500000000000000078757...(301 digits) 10000000000000000000\nperl's pp_int keeps an NV that does not fit IV/UV (it returns the NV truncated with Perl_floor/ceil), so the value stringifies as a float; PCL's p-int truncates to an exact bignum (%p-int-wide since #3528, the plain `truncate` before).  Fix shape: in %p-int-wide, a finite double outside [IV_MIN, UV_MAX] answers (ftruncate val) as a DOUBLE (perl's NV), inside it the integer.  Guard: extend Pl/t/int-wide-01.t row 1 with -1e19 and 1.5e300 (left out there with a pointer to this task).",
+   "id" : "3700",
+   "status" : "pending",
+   "subject" : "int() of a double beyond the IV/UV range answers the exact INTEGER where perl answers an NV (-1e19 prints -10000000000000000000, perl -1e+19; 1.5e300 prints 301 digits, perl 1.5e+300)"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Tue Oct 20 22:58:14 2026",
+   "description" : "FILED + FIXED s523b (Opus 5.5, 2026-10-20) from #1571's get-magic line (Scalar-List-Utils t/getmagic-once.t, 2/4 -> 6/0).\nTWO mechanisms in one read path, both in cl/pcl-runtime.lisp:\n(1) SILENT WRONG: a REFERENCE assigned to a tied scalar reached STORE as the BARE REFERENT -- box-set's tie branch handed STORE `(unbox value)`, so `tie my $v, ...; $v = [1]; ref($v)` was '' (perl ARRAY), and so was every later FETCH; a blessed object stored into a tied scalar lost its class.  Probe scratch/s523b/p4/gm4.pl (perl `S ref=ARRAY`, base `S ref=`).  FIX: STORE receives a plain atom as itself and a reference (anything not an atom) as a fresh scalar COPY of it.\n(2) GET-MAGIC MORE THAN ONCE: p-reftype unboxed its argument and then called p-ref, which unboxed again (FETCH x2); builtin::refaddr read the raw slot = the tie proxy (refaddr of a tied scalar holding a ref was undef).  FIX: one helper `%p-fetch-once` (a tied box -> a fresh box holding ONE FETCH's value), called by p-reftype and builtin refaddr.  blessed / ref / a copy were already once.\nGUARD: Pl/t/tie-fetch-once-01.t program 3 (15 -> 25 rows), 8 FAIL on the 6cf75804 extraction.  Probes gm.pl / gm2.pl / gm7.pl (tied scalar / hash / array, every ref kind) = perl on the tree.\nNOT FIXED, filed: #3673 (a ref-holding tied scalar passed to a sub fetches twice), #3675 (assigning a ref into a blessed scalar REFERENT reports the referent's class -- why Tie::StdScalar is not the guard's tie class).\n\n\n",
+   "id" : "3672",
+   "status" : "completed",
+   "subject" : "A REFERENCE assigned to a tied scalar reached STORE as the bare referent (ref() = '' on every FETCH), and reftype / refaddr ran get-magic twice / not at all -- FIXED s523b"
+}

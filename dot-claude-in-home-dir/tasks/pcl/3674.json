@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Tue Oct 20 22:58:14 2026",
+   "description" : "FILED s523b (Opus 5.5, 2026-10-20) from #1571's reftype line.  `*FH{IO}` (and `*{$fh}{IO}`) is a box holding the STREAM -- the same representation as a lexical handle -- so the introspection primitives cannot tell an IO object from a glob: perl `ref(*STDIN{IO})` IO::File, `reftype` IO, `blessed` IO::File, `\"$io\"` IO::File=IO(0x...); PCL GLOB / GLOB / undef / GLOB(0x1).\nPROBE scratch/s523b/p4/io.pl (perl / base 6cf75804 / tree identical): I1-I4, I7 differ; fileno / reading through the IO ref agree.\nRows: Scalar-List-Utils t/reftype.t 27-29 ('IO ref', the blessed / unblessed / \"0\"-blessed variants; the board file keys one).  The REF-to-REF half of #1571's reftype line PASSES (fixed by #1619).\nSHAPE: a representation decision -- an IO ref needs a marker the box does not have (p-box has value / nv / sv / class / is-ref; a lexical handle must keep answering GLOB).  A wrapper type breaks every print/read path that accepts a stream box; a box flag (like the weak mark) is the cheap candidate.  More than an afternoon: needs a Fable design call.  p-glob-slot's IO arm (`(make-p-box h)`) and %p-glob-slot-of-handle are the two producers.\n",
+   "id" : "3674",
+   "status" : "pending",
+   "subject" : "*FH{IO} is a box holding the stream, so ref / reftype / blessed / stringify answer GLOB where perl answers the IO::File object (IO) -- SLU reftype.t 27-29"
+}
