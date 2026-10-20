@@ -338,6 +338,20 @@ $h{k} = 5;                 # one STORE
 print defined tied $h{k};  # the tie object, not undef
 ```
 
+**7. STORE RECEIVES THE VALUE, A REFERENCE AS A REFERENCE; INTROSPECTION
+FETCHES ONCE** (task #3672, s523b).  Assigning to a tied scalar calls STORE
+with the value being stored: a plain atom as itself, and a reference as a
+scalar holding that reference -- never the bare referent.  `ref`, `reftype`,
+`refaddr` and `blessed` of a tied scalar run FETCH exactly once and answer for
+the fetched value (`%p-fetch-once`).
+
+```perl
+tie my $v, 'H';           # H stores into $_[0]{v}
+$v = [1];                 # STORE gets an ARRAY ref
+print ref $v;             # ARRAY
+print reftype $v;         # one FETCH
+```
+
 ### 2.3 Arrays
 
 A Perl array is an **adjustable vector with a fill pointer** (growable,
@@ -1957,6 +1971,23 @@ base keeps C's answers — `(-Inf)**2.5` is `Inf`, not NaN.
 PCL's own `pack` implementation depended on the exact value and had to build
 it by repeated multiplication instead (`unpack("q", pack("q", -1))` answered 0
 once `**` became faithful).
+
+### 3.6a A too-wide integer LITERAL is a double (normative, s523b, task #2016)
+
+perl's tokenizer holds a decimal integer literal as an IV / UV when it fits and
+as an NV otherwise -- at compile time, before any arithmetic.  So a decimal
+literal above 18446744073709551615 (or, with the minus PPI folds into the token,
+below -9223372036854775808), and a hex / octal / binary literal above 64 bits,
+IS the double perl would hold, and prints through `%.15g`.  ARITHMETIC that
+crosses the 64-bit range stays exact (§3.6, `not-supported.md` "Integers are
+unbounded"), and an `overload::constant` handler (`use bigint`) still receives
+the literal's source text before this rule applies.
+
+```perl
+print 18446744073709551615;    # 18446744073709551615 (a UV)
+print 111111111111111111111;   # 1.11111111111111e+20
+print 18446744073709551615 + 1;  # 18446744073709551616 under PCL (#1513)
+```
 
 ## 4. Context (scalar / list / void)
 

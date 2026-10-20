@@ -2871,6 +2871,10 @@ was pp_pow's own branch rule, and it is now implemented (`docs/ir-spec.md`
 §3.6, task #1248(b)).  Nothing else in this section moved: the three faces
 below are unchanged.
 
+**A LITERAL is not arithmetic (s523b, #2016):** a decimal integer LITERAL
+beyond the 64-bit range is an NV, as in perl (`111111111111111111111` prints
+`1.11111111111111e+20`); ARITHMETIC that crosses it stays exact.
+
 **Perl behaviour:** a perl scalar's numeric slots are an IV (signed 64-bit), a
 UV (unsigned 64-bit) and an NV (a C double).  Every integer operation that
 leaves the 64-bit range **promotes to NV**, and from there prints through
