@@ -372,13 +372,17 @@ the s522 ruling, task #1510 / #3511 / #3321):
   resolution (bless — `ref` names B —, method calls, `isa`, `can`, symbolic
   refs, `%A::`) to B's stash.  Names bound at COMPILE time stay with A's own
   package, as they stay with A's original stash in perl.
+* **The element VALUE of a non-sub symbol** reads as its TYPEGLOB `*Pkg::name`
+  — perl's own value (core Exporter reads `${$pkg."::"}{EXPORT_FAIL}` on every
+  import), so `values %Pkg::` and `each` over a stash holding variables answer
+  as perl.  (Fable ruling s522, 01:1x: accepted in place of the brief's
+  "value dies".)
 
-WHAT DOES NOT (still DEFERRED): the element VALUE of a non-sub symbol — perl's
-typeglob — **dies** `PCL: stash element value for a non-CODE symbol is not
-supported (docs/not-supported.md "Live symbol-table hashes")` (so `values
-%Pkg::` and `each` over a stash holding variables die rather than answer
-wrong); deleting a non-sub symbol dies the same way (the variable would stay
-live); other writes (`$Pkg::{foo} = \&bar`, hash assignment into a stash)
+WHAT DOES NOT (still DEFERRED): DELETING a non-sub symbol **dies**
+`PCL: deleting a non-CODE symbol from a stash is not supported
+(docs/not-supported.md "Live symbol-table hashes")` (the variable would stay
+live); an interpolated element `"$Pkg::{name}"` reads "" (#3635); other
+writes (`$Pkg::{foo} = \&bar`, hash assignment into a stash)
 are lost; `local` on a stash element is skipped; iteration order is not
 perl's; any other `*A:: = VALUE` is announced on stderr and ignored.
 
