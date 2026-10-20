@@ -21,7 +21,7 @@ use FindBin qw($RealBin);
 
 my $root = "$RealBin/../..";
 plan skip_all => 'sbcl not found' if !`which sbcl 2>/dev/null`;
-plan tests => 6;
+plan tests => 7;
 
 my $dist = tempdir(CLEANUP => 1);
 mkdir "$dist/t" or die "$dist/t: $!";
@@ -67,6 +67,15 @@ close $rt;
 my $rout = `cd / && "$root/tools/run-dist-t.pl" --rows "$rdist" t/rel.t 2>&1`;
 like($rout, qr/^pass=1 fail=0 /m, 'a relative fixture path resolves from the dist root')
   or diag($rout);
+
+# A run that stops short of its plan is not silent (#3282): the TAP layer's
+# planned-vs-ran diagnostic reaches the operator although no row failed.
+open my $st, '>', "$rdist/t/short.t" or die;
+print $st 'print "1..3\n"; print "ok 1\n"; print "# Looks like you planned 3 tests but ran 1.\n";' . "\n";
+close $st;
+my $sout = `cd / && "$root/tools/run-dist-t.pl" --rows "$rdist" t/short.t 2>&1`;
+like($sout, qr/^# Looks like you planned 3 tests but ran 1\./m,
+     'a run short of its plan shows its diagnostics') or diag($sout);
 
 sub child_pids {
   my ($ppid) = @_;

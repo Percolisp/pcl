@@ -163,7 +163,13 @@ if ($summary_only) {
                        $r->{expected}, $r->{directive}), "\n";
     }
   }
-  print STDERR $raw, $stderr if $tap->{notok};   # show detail on failures
+  # Show the detail on a failure AND on a run that stops short of its plan
+  # (#3282: JSON-PP's 099_binaryNN.t printed `1..1536`, ran 0 rows and its
+  # only words -- the TAP layer's `# Looks like you planned 1536 tests but ran
+  # 0.` -- were thrown away with the rest of the stream, so the run read as
+  # silent).
+  my $short = defined $tap->{plan} && $tap->{ok} + $tap->{notok} < $tap->{plan};
+  print STDERR $raw, $stderr if $tap->{notok} || $short;
 } else {
   print $raw;
   print STDERR $stderr;
