@@ -105,6 +105,11 @@ for my $c (@cases) {
     ($rc, $out) = run_pcl('h-exit', "plan(2); ok(1, 'a'); exit 3;\n", $testlib);
     is($rc, 3, 't/test.pl mode: an explicit exit keeps its status');
     like($out, qr/^# PCL-EXIT status=3 after=1$/m, 't/test.pl mode: the entry status is announced by the PCL fact line');
+    # A fresh_perl CHILD has the layer preloaded and never plans: its output
+    # is perl's, fact line or not (perl-tests/blocks.t's `BEGIN{exit 1}').
+    ($rc, $out) = run_pcl('h-child', "print \"begin\\n\"; BEGIN { print \"b\\n\" } exit 1;\n", $testlib);
+    is($rc, 1, 't/test.pl mode: a child that never used the layer keeps its exit status');
+    unlike($out, qr/PCL-EXIT/, 't/test.pl mode: and prints no fact line (it ran no row and set no plan)');
 }
 
 done_testing;

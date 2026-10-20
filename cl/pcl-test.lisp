@@ -1233,11 +1233,15 @@
 
 (defun %test-harness-ending (real)
   "perl's t/test.pl END: the planned-but-ran line and a no_plan run's plan;
-   no status of its own.  REAL, when non-zero, gets PCL's fact line."
+   no status of its own.  REAL, when non-zero, gets PCL's fact line -- only
+   in a run that USED the layer (a plan or a row), as Test::Builder's own
+   ending says nothing then: the harness preloads this layer into every
+   fresh_perl / runperl CHILD too, and a child that exits 1 from a BEGIN
+   prints exactly what perl's does (perl-tests/blocks.t's `BEGIN{exit 1}')."
   (when (and *test-planned* (/= *test-count* *test-planned*))
     (%tap-out "# Looks like you planned ~A tests but ran ~A.~%"
               *test-planned* *test-count*))
-  (when (plusp real)
+  (when (and (plusp real) (or *test-planned* *test-no-plan* (plusp *test-count*)))
     (%tap-out "# PCL-EXIT status=~A after=~A~%" real *test-count*))
   (when *test-no-plan*
     (%tap-out "1..~A~%" *test-count*))
