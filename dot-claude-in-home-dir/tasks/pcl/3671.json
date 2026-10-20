@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Tue Oct 20 22:46:38 2026",
+   "description" : "FILED s523b (Opus 5.5, 2026-10-20) from #3529's measurement.  A package that is first named in a QUALIFIED sub definition (never by a `package NAME` statement) reports its name in UPPER case wherever the runtime spells the Perl package name (caller's sub name, B's GV STASH, subname): pcl-pkg-perl-name falls back to the CL package name, which the reader upcased, because nothing registered the original spelling in *pcl-pkg-name-map*.\nPROBE scratch/s523b/p1/stash.pl (perl 5.40.3 / base 6cf75804 / tree):\n  sub palatable::f { (caller(0))[3] }  print palatable::f()                 perl palatable::f        PCL PALATABLE::f\n  my $s = eval 'sub palatable::g { (caller(0))[3] } \\&palatable::g'; $s->()  perl palatable::g        PCL PALATABLE::g\n  B::svref_2object($s)->GV->STASH->NAME                                       perl palatable            PCL PALATABLE\nSilent wrong in ordinary code (`sub helper::run {...}` and a caller / Carp / B reader).  Probably one mechanism: wherever the emitter or p-sub creates a package for a qualified sub name, register its Perl spelling as `package NAME` does -- measure first (which form creates the package; a multi-segment name `A::b` is likely right because only a single-segment name is upcased).  Part of the exotic_names.t natively-compiled rows with #3670.\n",
+   "id" : "3671",
+   "status" : "pending",
+   "subject" : "A package first named in a QUALIFIED sub definition (sub palatable::f) reports its name UPPER-cased (caller, B GV STASH, subname): no Perl spelling registered"
+}

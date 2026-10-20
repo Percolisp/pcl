@@ -1,0 +1,14 @@
+{
+   "created" : "2026-10-20",
+   "description" : "FILED s523 (Fable, 2026-10-20 23:0x) at s522b's MERGE-READY question.  s522b shipped, under the s522 ruling (b), a rule-12 DEATH for deleting a non-sub stash symbol; it cost 7 perl rows that passed only because the operation was a silent no-op (perl-tests/ref.t 200 `freeing freed glob in global destruction`; t/mro/basic.t 51 63 64 66 -- `delete *main::x` / `delete *Foo::ISA`; t/op/stash.t #128086 and `%A::=\"\"` -- the announcement rows).  RULED s523 (DECIDED ## s523): the death is WITHDRAWN -- an effect-only miss ANNOUNCES and continues (the s329 boundary); perl's own pinned-glob rule makes \"compiled accesses keep working\" RIGHT.  THIS TASK is the real answer: the delete records the symbol as GONE in the one side table the sub-removal path already uses (s522b's `p-delete`-on-a-stash write-through + the stash memo), so `keys %Pkg::`, `exists *Pkg::x`, `scalar %Pkg::` and a SYMBOLIC lookup `` / `` / `defined &{\"Pkg::x\"}` answer as perl (gone; a symbolic lookup after the delete autovivifies a NEW cell distinct from the compiled one -- probe perl: `our  = 1; delete *main::x; print  // \"undef\"` = undef, then ` = 2; print ` = 1 -- the compiled `` is the OLD cell), while compiled `` / `` keep their cell.  `delete` RETURNS the glob (perl: the deleted typeglob value; `my  = delete *main::x; *` still reaches the old cell) -- the view's glob answer from s522b's \"a non-CODE element reads as its typeglob\" is the thing to return.  Shapes to probe vs perl first (10 min): the three above; `delete *Foo::ISA` then `` (compiled, keeps) vs `` (gone) vs method resolution (perl: the MRO sees the pinned array? -- PROBE: mro/basic.t 51-66 are exactly this, read them); a filehandle symbol; `local *main::x` (out of scope: the deferral); global destruction order (ref.t 200).  Layer: cl/ (`p-delete`'s stash arm + the stash view + the symbolic-lookup resolver; ONE side table, rule 11).  Acceptance: the 7 rows back to passing WITHOUT the announcement, the stash-hash-01 guard rows, not-supported.md's \"Live symbol-table hashes\" edited again.  Parent: #3511 / #1510 (DONE under the bounded ruling).",
+   "id" : 3691,
+   "priority" : "medium",
+   "session" : "s523",
+   "status" : "pending",
+   "subject" : "`delete ` of a NON-SUB symbol: remove it from the stash VIEW (keys / exists / symbolic `` lookups answer as perl) while compiled references keep their cell (perl's pinned glob) -- replaces s522b's announce-and-continue; acceptance = the 7 rows it costs today",
+   "tags" : [
+      "stash",
+      "runtime",
+      "mro"
+   ]
+}

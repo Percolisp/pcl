@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Tue Oct 20 22:46:38 2026",
+   "description" : "FILED s523b (Opus 5.5, 2026-10-20) from #3529's measurement.  A STASH ALIAS made by glob assignment is not honoured: after `*palatable2:: = *{\"aliased::X::\"}`, a sub compiled as `sub palatable2::sub {...}` lives in (and reports) PALATABLE2, where perl compiles it into the ALIASED stash.\nPROBE scratch/s523b/p1/stash.pl (perl 5.40.3 / base 6cf75804 / tree):\n  { no strict 'refs'; *palatable2:: = *{\"aliased::X::\"}; ${\"palatable2::foo\"} = 1; ${\"palatable2::\"}{\"sub\"} = ${\"palatable2::\"}{\"foo\"}; }\n  my $t = eval 'sub palatable2::sub { (caller(0))[3] } \\&palatable2::sub';\n  $t->()                                  perl aliased::X::foo   PCL PALATABLE2::sub\n  B::svref_2object($t)->GV STASH::NAME    perl aliased::X::foo   PCL PALATABLE2::sub\n(Two facts: the stash alias `*a:: = *b::`, and the GV alias `$stash{sub} = $stash{foo}` that makes `sub palatable::sub` define the glob named foo.)  The upper case is #3671.\nROWS: Scalar-List-Utils t/exotic_names.t -- 388 rows (194 \"stash name for natively compiled sub\" + 194 \"caller() in natively compiled sub\", the ordinals that are NOT legal identifier characters; the 33 legal ones compile directly and pass).  Layer: the runtime's stash view (s522b's `p-stash` / stash-assign area) -- measure there first.\n",
+   "id" : "3670",
+   "status" : "pending",
+   "subject" : "A stash ALIAS (*a:: = *{\"b::\"}) plus a GV alias in it is not honoured: sub a::sub compiles into A, not the aliased stash -- SLU exotic_names.t 388 natively-compiled rows"
+}
