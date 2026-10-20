@@ -92,6 +92,8 @@ that the next census sorts.  The ruled remainder is the USER's call, with its co
 
 Batches 3-6 are merged or in flight (the headings in §4 say which).  The ROUND-3 board on MAIN-READY-38 (s522a merged): **254 PASS / 125 PARTIAL / 70 FAIL of 449, TOTAL passing 65,073** (round 2: 232 / 128 / 89 and 28,489) -- Text-CSV's 20 files run for the first time after #3061 (55_combi.t alone 25,119 rows), Path-Tiny / Mojo-DOM58 / IO-Compress gained files; 50 files improved, 2 lost = the 105oneshot flap (#3493, both states blessed).  Row diff against the blessed file after the round's edits: 0 NEW; the 908 new not-ok rows of SLU exotic_names.t (a file that now LOADS) are one shim gap, **#3529** set_subname, batch 6's.  `baselines/cpan-board-s523r3.tsv` is the record.  Found beside the round: **#3526 / #3528** -- the weekly install-matrix CI has been red since 2026-10-17 because the SBCL 2.5.2 floor is broken for `pack` (a compiler VOP error on an emitted shape; a 45-line reproducer in the task), and **#3527** -- main's CI is red on one gate row, PCL's synthesized readdir order (s523a's filler).
 
+**2026-10-21 (between s523 and s524): #3650 DECIDED** -- the USER lifts the pack park for the ONE U0 rule (a template beginning with `U` is in character mode), on two conditions: the change is small, and it costs no execution speed (bench `pack` / `packunpk`).  Queued for s524; it unlocks JSON-PP's sixteen 099_binary files (24,512 rows) and the ascii / latin1 encoders.  The "NOT IN THE PLAN" table's pack-park row narrows to everything BUT that rule.
+
 ## 1. The board today
 
 From `cpan-board-s519r1.tsv` (header: 187 / 103 / 66 of 356, TOTAL passing 12,250; summing its rows gives
