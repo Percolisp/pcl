@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 33;
 
 # ── the documented contract ──────────────────────────────────────────────────
 
@@ -203,6 +203,7 @@ print "W10 ", 0xffff_ffff_ffff_ffff, "\n";
 print "W11 ", (99999999999999999999999 == 1e23 ? "eq" : "ne"), "\n";
 print "W12 ", eval("222222222222222222222"), "\n";
 print "W13 ", 0b11111111111111111111111111111111111111111111111111111111111111111, "\n";
+print "W14 ", -18446744073709551616, "\n";
 PL
 my ($wfh, $wpl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
 print $wfh $wide;
@@ -220,7 +221,9 @@ line_is('W1', '18446744073709551615', 'UV_MAX as a literal is still an integer')
 line_is('W2', '1.84467440737096e+19', 'UV_MAX+1 as a LITERAL is an NV (#2016)');
 line_is('W3', '1.11111111111111e+20', 'a 21-digit literal prints with an exponent (#2016)');
 line_is('W4', '11111111111111111111', 'a 20-digit literal that fits a UV stays an integer');
-line_is('W5', '-9.22337203685478e+18', 'a negative literal below IV_MIN is an NV');
+line_is('W5', '-9223372036854775809',
+        '-9223372036854775809 is a UV NEGATED -- arithmetic, exact under #1513 [perl: -9.22337203685478e+18]');
+line_is('W14', '-1.84467440737096e+19', 'a negative literal whose MAGNITUDE is beyond UV_MAX is an NV');
 line_is('W6', '-9223372036854775808', 'IV_MIN as a literal is still an integer');
 line_is('W7', '1e+21', 'underscores: 1_000_..._000 (22 digits) is an NV');
 line_is('W8', 'has-exponent',

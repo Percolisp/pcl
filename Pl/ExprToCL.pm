@@ -739,8 +739,9 @@ sub _negated_call_form {
 # they were two copies).  An integer LITERAL perl's tokenizer cannot hold as
 # an IV/UV is an NV in perl -- at compile time, before any arithmetic (#2016,
 # ir-spec §3.6a): a decimal literal above 18446744073709551615 (or, with the
-# minus folded into the token, below -9223372036854775808), and a hex / octal
-# / binary literal above 64 bits.  Such a literal is written as the DOUBLE
+# minus folded into the token, below -18446744073709551615 -- the minus is
+# perl's negation, arithmetic), and a hex / octal / binary literal above 64
+# bits.  Such a literal is written as the DOUBLE
 # perl holds (perl's own numification computes it, here, at transpile time).
 # ARITHMETIC that crosses the boundary stays exact (#1513, not-supported).
 sub _number_literal_form {
@@ -769,7 +770,7 @@ sub _number_literal_form {
     return $sign ? ['-', "#$letter$d"] : "#$letter$d";
   }
   $num =~ s/_//g;
-  if ($num =~ /\A(-?)0*(\d+)\z/ && _decimal_beyond_iv_uv($1, $2)) {
+  if ($num =~ /\A-?0*(\d+)\z/ && _decimal_beyond_uv($1)) {
     return _wide_literal_double('', 0 + $num);
   }
   if ($num =~ /[eE.]/) {
@@ -782,11 +783,14 @@ sub _number_literal_form {
   return $num;
 }
 
-# A decimal integer literal's digits (no sign, no leading zeros) beyond
-# perl's UV_MAX -- or, negative, beyond -IV_MIN's magnitude.
-sub _decimal_beyond_iv_uv {
-  my ($sign, $d) = @_;
-  my $lim = $sign ? '9223372036854775808' : '18446744073709551615';
+# A decimal integer literal's MAGNITUDE (no sign, no leading zeros) beyond
+# perl's UV_MAX.  The sign does not count: perl's tokenizer never sees a
+# negative literal -- `-9223372036854775809` is a UV NEGATED, i.e.
+# arithmetic, which stays exact under #1513 (op/64bitint.t compares exactly
+# such values; measured s523b).
+sub _decimal_beyond_uv {
+  my ($d) = @_;
+  my $lim = '18446744073709551615';
   return length($d) > length($lim)
       || (length($d) == length($lim) && $d gt $lim) ? 1 : 0;
 }
