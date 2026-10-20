@@ -10,6 +10,56 @@ Status legend: ✅ works · 🟡 partial · ❌ blocked · 🔧 fixed-this-sessi
 
 ---
 
+## CPAN board round 3, 2026-10-20 (s523) -- 254 PASS / 125 PARTIAL / 70 FAIL of 449 files, 65,073 assertions passing (round 2: 232 / 128 / 89 and 28,489)
+
+The board is 20 pure-Perl distributions, 449 test files (`baselines/cpan-board-dists.tsv`), run once per
+round on the merged main by `tools/cpan-board.sh`; the per-file record of this round is
+`baselines/cpan-board-s523r3.tsv`, the blessed row baseline `baselines/cpan-board14-fails.tsv` (2,065 rows
+after the round's edits; every row carries its cause).  Round 3 was measured on MAIN-READY-38, after the
+day's first two merges; two more landed the same evening.
+
+**What moved, and why (the day's four batches):**
+
+* **Text-CSV (in-repo, 2.04): its 20 test files RUN for the first time** -- `t/util.pl` is required by 15
+  of them and a sigil-blind capture refusal (#3061, s522a) had refused the whole file.  55_combi.t alone
+  contributes 25,119 passing rows, 65_allow.t 1,119, 45_eol.t 1,006, 85_util.t 1,192 of 1,448.  The newly
+  reached failures are blessed with their causes: #3611 (244 rows, `%{$h->{k}} = LIST` does not
+  autovivify -- Text::CSV_PP loses its parse state), #3616 (32, encoding-layer rows), #3612 (24, `for $\`
+  sets the output separator), #3617 (10, header() rows), #3613 (utf8::valid missing -- stopped 50_utf8.t
+  and 70_rt.t; fixed in the checkpointed s523d).
+* **Text-Balanced (2.07): every file passes fully** (s523a: `\b` / `\B` / lookbehind / `^` after `\G`
+  saw a string that began at pos(); `pos($$ref)--` stored nothing).  06_extqlk 236/0, 07_exttag 104/0,
+  09_gentag 81/0, 05_extmul 96/0.
+* **Algorithm-Diff (1.201): oo.t 102/20 -> 969/0, base.t 35/0** (s523a: a `..` in a sub's return
+  chooses range vs flip-flop at run time from the caller's context; `not` takes its whole operand; a
+  `&$cb(...)` after a block was lexed as bitwise AND -- PPI §38's twin).
+* **IO-Compress (2.214): 107multi-* 1829/0 each, 105oneshot-zip-only 231/0, 011-streamzip 135/2,
+  cz-05examples 27/0** (s521e: a plain store replaces a glob ref; a facts overlay declares a module
+  file's other packages; the board runner puts a dist's built prerequisites on PERL5LIB).  The
+  105oneshot deflate / gzip / zip / rawdeflate quartet FLAPS between two states (#3493); both are blessed.
+* **Role-Tiny, Class-Method-Modifiers, JSON-PP 118, SLU dualvar** (s522b: a `p-defclass` parent is a
+  package name resolved at run time; every stash-delete spelling reaches the one delete path; the stash
+  alias `*A:: = *B::` is a package redirection; a named sub inside a BEGIN exists before the BEGIN's
+  body runs; `import PACKAGE LIST` + a `lib/constant.pm` shim for run-time `constant->import`).
+* **Path-Tiny, Mojo-DOM58**: parent / size / subsumes / symlinks / recurse / has_same_bytes PASS,
+  filesystem 86/7, temp 13/2; Mojo-DOM58 entities 13/0, collection 14/1 (the TAP `subtest` of s521c).
+* **Scalar-List-Utils exotic_names.t now LOADS** (652/908 of 1,560): the 908 failures are ONE shim gap,
+  `Sub::Util::set_subname` is a no-op and an anon sub's `(caller(0))[3]` is empty -- #3529, in the
+  checkpointed s523b.
+
+**Still open on the board, by size:** JSON-PP's sixteen 099_binary files (24,512 rows) behind ONE pack
+rule -- a template beginning with `U` is character mode (#3650; the pack oracle is USER-parked, the lift
+is asked); the #233 / #1361 caller-fidelity deferral (237 rows); exotic_names (#3529); Text-CSV's
+#3611 family; Data-Dump's value-model mirror rows (#1573, s523b); Role-Tiny's second composition
+(#3001, s523b).  The plan with its batch status is `docs/cpan-board-failure-review-s521.md` §4
+(batches 0-5 DONE, 6 and the residues in flight at the end of s523).
+
+**Found beside the round:** the weekly `install-matrix` CI workflow has been red since 2026-10-17 --
+the SBCL 2.5.2 floor is broken for every `pack` call (a compiler VOP error on the pack artifact, #3528,
+reproduced in a 22.04 container; the fix is in the checkpointed s523c); main's `CI` workflow went red
+for one push on a readdir-order row and is green again (#3527).
+
+
 ## CPAN board14 2026-09-07 (s1061, gen v2-1010) — the nine down-movers attributed, two compiler bugs fixed
 
 Task **#1061**: between the s378 and s467 board snapshots nine files moved

@@ -339,7 +339,7 @@ Members, each "measure, then fix if one mechanism": #1568 Text::Balanced (40), #
 Acceptance per member as in its task.  Risks: the regex engine is ONE (portability ruling) -- the sweep's `re/`
 files and the companion's `re/` leg.
 
-### Batch 6 -- small module-surface items -- **IN FLIGHT s523b (launched s523 22:4x: #2016 #3529 #1573+#2066 #3001 #1571's unruled lines)**
+### Batch 6 -- small module-surface items -- **IN FLIGHT s523b (launched s523 22:4x: #2016 #3529 #1573+#2066 #3001 #1571's unruled lines; CHECKPOINTED at the s523 end -- resume in its worktree).  A RESIDUES batch s523d (#3613 done; #3611 #3612 #3691 #3632 #3610 #3616 #3617 owed) and the HARNESS batch s523c (#3651 #3528 #3526) were checkpointed with it**
 #1573 / #2066 Data::Dump, #2016 JSON integers (also an everyday row), #3001 Role::Tiny, the #1571 lines
 that are not ruled (reftype REF/IO, get-magic count), #3161's InflateScan if the shim stays.
 
