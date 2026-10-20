@@ -3719,8 +3719,9 @@ var ⇒ plain lexical binding, no localization at all).
   #3511 #3321).**  `(p-stash "P")` is a snapshot whose KEYS are every symbol
   PCL records for P (subs, variables with a cell, filehandles); a sub's value
   is its code ref and a non-sub's value is its typeglob `*P::name` (perl's
-  value); DELETING a non-sub symbol DIES naming the deferral
-  (docs/not-supported.md "Live symbol-table hashes").  Every delete spelling
+  value); DELETING a non-sub symbol announces on stderr and continues,
+  returning the glob, the variable left in place for compiled accesses
+  (docs/not-supported.md "Live symbol-table hashes"; the view half #3691).  Every delete spelling
   reaches `p-delete`, which unbinds the sub for RUN-TIME lookups while a
   compiled `defined &P::n` keeps it.  `*A:: = *B::` lowers to
   `(p-stash-assign "A" (p-stash "B"))`, which records A as an alias of B's

@@ -9,10 +9,10 @@
 # every delete spelling that removes a sub goes through the one write-through
 # path (#3511), the snapshot lists variables and filehandles too (#1510), a
 # non-sub element's VALUE is its typeglob (perl's value; core Exporter reads
-# `${$pkg . '::'}{EXPORT_FAIL}`), and DELETING a non-sub symbol dies naming
-# the deferral (rule 12: the variable would stay reachable).  Expected lines
-# are perl 5.40.3's output (probed s522b) except the rule-12 row, which
-# asserts PCL's refusal.  Inverse: on the aff112d7 base every row fails
+# `${$pkg . "::"}{EXPORT_FAIL}`), and DELETING a non-sub symbol ANNOUNCES on stderr and continues
+# (Fable s523: an effect-only miss, rule 12 s329 boundary; the stash VIEW
+# change is #3691).  Expected lines are perl 5.40.3's output (probed s522b)
+# except row 9, which asserts PCL's announcement.  Inverse: on the aff112d7 base every row fails
 # (a,b,keep / the reader death on `@Pkg::{...}` / empty / the subs-only view
 # / a-def / no glob value / the delete answers).
 
@@ -98,9 +98,13 @@ test_cl('the VALUE of a non-CODE stash element is its typeglob',
     . ' print "$g|", ref(\$Foo::{x}), "|", (defined $Foo::{y} ? 1 : 0), "|", scalar(@{*{$Foo::{y}}{ARRAY}}), "\n";',
     "*Foo::x|GLOB|1|2\n");
 
-test_cl('rule 12: DELETING a non-CODE symbol from a stash dies naming the deferral',
-    'package Foo; our $x = 1; package main; print eval { delete $Foo::{x}; 1 } ? "deleted\n" : "died: $@";',
-    qr/\Adied: PCL: deleting a non-CODE symbol from a stash is not supported \(docs\/not-supported\.md "Live symbol-table hashes"\)/);
+# Fable s523: an EFFECT-ONLY miss (rule 12's s329 boundary) -- it announces on
+# stderr and continues, returning the deleted glob; the compiled $Foo::x keeps
+# its cell (perl's pinned glob).  Inverse: the base is silent and returns undef.
+test_cl('DELETING a non-CODE symbol from a stash announces, continues and returns the glob',
+    'package Foo; our $x = 1; package main; my $g = delete $Foo::{x};'
+    . ' print "continued ", (defined $g ? "$g" : "undef"), " $Foo::x\n";',
+    qr/\APCL: stash delete: delete \$Foo::\{x\} of a non-CODE symbol is not implemented \S+ ignored \(docs\/not-supported\.md "Live symbol-table hashes"\)\ncontinued \*Foo::x 1\n\z/);
 
 # #3321: a stash ALIAS `*A:: = *B::` redirects RUN-TIME name resolution (bless,
 # method calls, isa, can) to B's stash; names bound at COMPILE time (r4's `sub

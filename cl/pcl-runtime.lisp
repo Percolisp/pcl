@@ -3517,6 +3517,10 @@
   "Dedup set for %p-announce-unsupported: one line per (SITE, OPERAND) per
    process, so an unimplemented case inside a loop stays one line.")
 
+(defparameter +p-stash-unsupported-tail+
+  "ignored (docs/not-supported.md \"Live symbol-table hashes\")"
+  "The announcement tail every unimplemented stash write shares (s522b).")
+
 (defun %p-announce-unsupported (site operand &optional detail)
   "Say on stderr that SITE cannot honour OPERAND, once per pair per process.
    For EFFECT-ONLY cases only — the caller carries on afterwards.  Returns NIL
@@ -16048,13 +16052,19 @@ which is one of #1140's escape spellings (probed)."
        ;; Stash write-through: deleting a sub entry from a package stash
        ;; (delete $Pkg::{name}) must really remove the sub from the package.
        (let ((stash-pkg (gethash h *p-stash-pkg-table*)))
-         ;; A non-CODE symbol (its snapshot value is a glob): removing the
-         ;; variable from the package is the deferred live model, and leaving
-         ;; it reachable would answer wrong -- rule 12 (s522b).
-         (when (and stash-pkg
-                    (let ((v (gethash k h)))
-                      (and (p-box-p v) (p-typeglob-p (p-box-value v)))))
-           (%p-die-error nil "PCL: deleting a non-CODE symbol from a stash is not supported (docs/not-supported.md \"Live symbol-table hashes\")"))
+         ;; A non-CODE symbol (its snapshot value is a glob): an EFFECT-ONLY
+         ;; miss (rule 12's s329 boundary, Fable s523) -- perl's compiled
+         ;; accesses keep the pinned glob, so leaving the variable in place
+         ;; is right for them; only the stash VIEW / symbolic lookups would
+         ;; differ (#3691).  Announce, continue, return the deleted glob.
+         (when stash-pkg
+           (let ((v (gethash k h)))
+             (when (and (p-box-p v) (p-typeglob-p (p-box-value v)))
+               (%p-announce-unsupported
+                "stash delete"
+                (format nil "delete $~A::{~A} of a non-CODE symbol" stash-pkg k)
+                +p-stash-unsupported-tail+)
+               (return-from p-delete (p-box-value v)))))
          (when stash-pkg
            (let ((sym (%p-resolve-sub-symbol
                        (concatenate 'string stash-pkg "::" k))))
@@ -35204,7 +35214,8 @@ would consume, so it dies naming the stream (rule 12)."
       (t (%p-announce-unsupported "stash assignment"
                                   (if (p-typeglob-p (unbox value))
                                       (format nil "*~A:: = a non-stash value" name)
-                                      (format nil "%~A:: = LIST (a hash assignment into a stash)" name)))
+                                      (format nil "%~A:: = LIST (a hash assignment into a stash)" name))
+                                  +p-stash-unsupported-tail+)
          value))))
 
 (defun %pcl-find-package-1 (pkg-str)

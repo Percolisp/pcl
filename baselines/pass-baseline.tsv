@@ -1,5 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
-# s522b (2026-10-20, Opus, EDITED BY HAND): ref.t 204 -> 203 -- row 200 "freeing freed glob in global destruction" now fails by the RULED delete death (a non-CODE stash delete in its runperl child; Fable s522 01:1x); added to fail-baseline.tsv with that cause.
+# s522b (2026-10-20, Opus, EDITED BY HAND): ref.t 204 -> 203 -- row 200 "freeing freed glob in global destruction" now fails by the stash-delete ANNOUNCEMENT its runperl child compares (stderr => 1; Fable s523 withdrew the death -- the row still fails on the stderr text alone); added to fail-baseline.tsv with that cause.
 # s521b (2026-10-18, Opus, EDITED BY HAND): readline.t 25 -> 27 -- its last SKIP block runs since PerlIO::get_layers exists (#3326); rows 33-34 pass, rows 35-36 fail (#3531, added to fail-baseline.tsv by edit).
 # s519b (2026-10-18, Opus, EDITED BY HAND -- NO count change, Fable ruling s520): multideref.t stays 61 -- its two rows
 #   "RT #130727 array not autovivified" (row 47) and "... part 2" (row 49) left cl/skip-registry.lisp (STALE since s519a m0); the
