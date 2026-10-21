@@ -27,6 +27,8 @@ on:
     paths:
       - ".github/workflows/install-matrix.yml"
       - "tools/install-matrix/**"
+  # (s524, 2026-10-22: this comment line was the push that re-ran the matrix after the SBCL 2.5.2
+  #  floor fix #3528 merged as MAIN-READY-42 -- the fix lives in cl/, outside the path filter above.)
 
 jobs:
   install:
