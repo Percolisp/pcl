@@ -940,7 +940,15 @@ Not relevant now:
 - SBCL 2.5.2+ (the full suite has passed on 2.5.2 — the prior dev env until
   2026-05-31 — and on 2.6.0, the current one; the runtime uses some
   SBCL-internal symbols, so the supported floor is whatever the suite is
-  actually validated against, not a guessed range)
+  actually validated against, not a guessed range).  **The floor is TESTED, not
+  assumed (s523c, #3528):** `tools/t/sbcl-floor.t` runs the pack rows under a
+  second SBCL named by `PCL_SBCL_FLOOR` (skips without; its header says how to
+  install 2.5.2 beside 2.6.0), and the container leg
+  `PCL_CONTAINER_BASE=ubuntu:22.04 SBCL_VERSION=2.5.2 prove tools/t/install-container.t`
+  is the install-matrix shape.  2.5.2 has no `move-double-float-arg` VOP, so an
+  unbounded inline `truncate` of a double (the old `p-int` double arm) does not
+  compile there -- `p-int` open-codes the fixnum range and sends a wider double
+  to the notinline `%p-int-wide`.
 - PPI >= 1.291 (Perl parser; the token repairs are keyed on 1.291's stream and
   the gate is validated on it -- `tools/install-pcl` enforces the floor; Ubuntu
   24.04's package is 1.277, so CI installs it with `cpanm PPI`)
