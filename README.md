@@ -304,7 +304,7 @@ there and `PCL_DETECT=off` silences it.
 
 PCL is tested against its own regression suite, perl 5.40's own test
 suite and a set of pure-Perl CPAN distributions. On the tests extracted
-from perl's suite, 96.7 % of assertions pass (measured 2026-10-20). On
+from perl's suite, 96.8 % of assertions pass (measured 2026-10-22). On
 the CPAN board (20 pure-Perl distributions, 449 test files) 254 files pass
 completely, 125 partly and 70 fail, with 65,073 assertions passing (round 3,
 2026-10-20; the day's batches let Text-CSV's test files run for the first
