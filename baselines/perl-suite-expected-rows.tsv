@@ -117,7 +117,6 @@ mro/basic.t	[at t/mro/basic.t line 52]
 mro/basic.t	[at t/mro/basic.t line 55]
 mro/basic.t	[at t/mro/basic.t line 63]
 mro/basic.t	[at t/mro/basic.t line 71]
-mro/basic.t	delete $package::{ISA}
 mro/basic.t	local *ISA
 mro/basic.t	local *ISA = []
 mro/basic.t	undef %package:: updates subclasses
@@ -183,7 +182,6 @@ mro/basic_utf8.t	[at t/mro/basic_utf8.t line 48]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 53]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 62]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 99]
-mro/basic_utf8.t	delete $package::{ISA}
 mro/basic_utf8.t	undef %package:: updates subclasses
 mro/complex_c3.t	next::method working ok
 mro/complex_c3_utf8.t	next::method working ok
