@@ -2839,6 +2839,15 @@ body…)`), `p-foreach ((VAR LIST) body…)` and its read-only twin
 family additionally accepts `:my t` (after `:label`, before the body) —
 see "Loop variable: lexical or localized" below.
 
+**A foreach over `$\` or `$/` (normative, s523d, task #3612).**  The loop
+variable aliases each element as for any package variable, but `print`,
+`readline` and `chomp` keep using the separator value from BEFORE the loop
+for the loop's whole dynamic extent -- an assignment or `local` to the
+variable inside the body changes only the element (perl's separators are
+internal copies that only set-magic updates).  A nested loop keeps the
+outermost value.  `my @e = ("A"); $\ = "Q"; for $\ (@e) { $\ = "!"; print "z" }`
+prints `zQ`.
+
 **A `my` declaration with a LOOP modifier (normative, s522a, task #3375).**
 `my DECL = EXPR for LIST;` (and `foreach` / `while` / `until`, any
 declaration shape) is the block loop `for (LIST) { my DECL = EXPR }` followed
