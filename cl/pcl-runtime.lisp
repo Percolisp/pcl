@@ -4656,6 +4656,22 @@
 ;;; p-find-overload is called from every overloadable operator — it must be fast.
 ;;; The common case (non-blessed value) short-circuits at p-box-p with no allocation.
 
+(defvar *p-stash-deleted* (make-hash-table :test 'eq :weakness :key)
+  "Package-variable symbols whose glob a stash delete removed (#3691): symbol
+   -> T.  The run-time lookups BY NAME treat a marked symbol as absent (the
+   stash view, %p-symref-sym); compiled code -- and every top-level form read
+   after the delete -- keeps reading the same symbol, so nothing is ever
+   unbound.  A symbolic WRITE un-marks the name.")
+
+(declaim (inline %p-isa-symbol))
+(defun %p-isa-symbol (pkg)
+  "PKG's @ISA symbol for an inheritance reader, or NIL -- NIL as well when a
+   stash delete removed it (#3691): the MRO then sees no parents, while code
+   that names @ISA keeps the old array, as perl's pinned glob does.  Every
+   reader that walks @ISA asks this, never find-symbol directly."
+  (let ((sym (find-symbol "@isa" pkg)))
+    (and sym (not (gethash sym *p-stash-deleted*)) sym)))
+
 (defun %p-isa-parent-names (cls)
   "CLS's direct @ISA parents, as class-name strings, or NIL.  ONE reading of
    `whom does this class inherit from' for the overload walks: the package
@@ -4663,7 +4679,7 @@
    %p-class-overloaded-p, %p-overload-fallback-of) and the three must not
    drift — they answer three halves of the same dispatch question."
   (let* ((pkg     (find-package (%pcl-invert-case cls)))
-         (isa-sym (when pkg (find-symbol "@isa" pkg)))
+         (isa-sym (when pkg (%p-isa-symbol pkg)))
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym))))
     (when (and isa-val (vectorp isa-val))
       (map 'list #'to-string isa-val))))
@@ -16070,23 +16086,22 @@ which is one of #1140's escape spellings (probed)."
 
 (defun %p-stash-delete-glob (glob)
   "delete $Pkg::{name} of a NON-CODE symbol (#3691): perl removes the GLOB from
-   the stash, and code compiled BEFORE the delete keeps its pinned glob (its
-   `$x` / `@ISA` still read the old cells) while every RUN-TIME name lookup --
-   `keys %Pkg::`, `exists $Pkg::{name}`, `${\"Pkg::name\"}`, method resolution
-   reading @ISA -- misses, and a symbolic write vivifies a NEW variable.  CL
-   has that model exactly: UNINTERN the package's own `$name` / `@name` /
-   `%name` symbols.  Compiled code holds the symbol OBJECTS and keeps them;
-   find-symbol (the stash view, the symbolic resolver, every @ISA reader)
-   answers NIL, and a later intern makes a fresh symbol.  The symbolic memo is
-   dropped (a site cache re-checks its symbol's home, %p-symref-sym).  A
-   FILEHANDLE of the same name is not removed: announced (effect-only)."
+   the stash; code compiled before the delete keeps its pinned glob, while every
+   RUN-TIME lookup by name -- `keys %Pkg::`, `exists $Pkg::{name}`,
+   `${\"Pkg::name\"}`, method resolution reading @ISA -- misses it.  PCL MARKS
+   the package's own `$name` / `@name` / `%name` symbols in *p-stash-deleted*
+   (the view, the symbolic resolver and the @ISA readers -- %p-isa-symbol --
+   skip a marked symbol), so the MRO of a deleted @ISA sees no parents while
+   code naming @ISA keeps the old array.  NOT unintern: under form-at-a-time loading (runpcl, the script
+   cache) a top-level form read after the delete would intern a fresh,
+   UNBOUND symbol and die with a raw CL error.  A FILEHANDLE of the same name
+   is not removed: announced (effect-only)."
   (let ((pkg (p-typeglob-package glob))
         (uname (p-typeglob-name glob)))
     (dolist (sigil '("$" "@" "%"))
       (let ((sym (find-symbol (%p-slot-name sigil uname) pkg)))
         (when (and sym (eq (symbol-package sym) pkg))
-          (unintern sym pkg))))
-    (clrhash *p-symref-symbol-memo*)
+          (setf (gethash sym *p-stash-deleted*) t))))
     (let ((fh (find-symbol uname pkg)))
       (when (and fh (nth-value 1 (gethash fh *p-filehandles*)))
         (%p-announce-unsupported
@@ -16385,6 +16400,7 @@ which is one of #1140's escape spellings (probed)."
   (let* ((name (symbol-name sym))
          (n (length name)))
     (cond
+      ((gethash sym *p-stash-deleted*) nil)      ; a stash delete removed it (#3691)
       ((and (> n 1) (find (char name 0) "$@%") (boundp sym))
        (let ((perl-name (%pcl-invert-case (subseq name 1)))
              (v (symbol-value sym)))
@@ -30990,8 +31006,8 @@ would consume, so it dies naming the stream (rule 12)."
                                (%pcl-memo-key *pcl-current-package*))))
     sym))
 
-(declaim (inline %p-symref-sym))
-(defun %p-symref-sym (name-str sigil create site)
+(declaim (inline %p-symref-sym-1))
+(defun %p-symref-sym-1 (name-str sigil create site)
   "The symbol NAME-STR/SIGIL denotes.  With a SITE (the `symref-const`
    emission's per-call-site cache) the answer comes from the site; without one
    it goes through #812's name memo.  ONE entry point for both, so the cached
@@ -31005,9 +31021,7 @@ would consume, so it dies naming the stream (rule 12)."
            (let ((p (svref site 0)))
              (and p (or (eq p t)
                         (eq p *pcl-current-package*)
-                        (string= p *pcl-current-package*))))
-           ;; an UNINTERNED symbol (a stash delete, #3691) is stale
-           (symbol-package (svref site 1)))
+                        (string= p *pcl-current-package*)))))
       (let ((sym (svref site 1)))
         (when (and create (not (svref site 2)))
           (%p-ensure-storage sym)
@@ -31016,6 +31030,27 @@ would consume, so it dies naming the stream (rule 12)."
       (if site
           (%p-symref-site-resolve site name-str sigil create)
           (%p-symref-symbol name-str sigil create))))
+
+(declaim (inline %p-stash-live-sym))
+(defun %p-stash-live-sym (sym create)
+  "SYM, unless a stash delete marked it (#3691): then NIL for a read, and for
+   a CREATE the mark is dropped and SYM answers again (the vivified variable
+   shares the old cell -- perl's is a NEW one; docs/not-supported.md)."
+  (if (and sym
+           (plusp (hash-table-count *p-stash-deleted*))
+           (gethash sym *p-stash-deleted*))
+      (when create
+        (remhash sym *p-stash-deleted*)
+        sym)
+      sym))
+
+(declaim (inline %p-symref-sym))
+(defun %p-symref-sym (name-str sigil create site)
+  "The symbol NAME-STR/SIGIL denotes for a symbolic reference: the cached /
+   memoized resolution (%p-symref-sym-1), minus a symbol a stash delete
+   removed (%p-stash-live-sym, #3691)."
+  (%p-stash-live-sym (%p-symref-sym-1 name-str sigil create site) create))
+
 
 ;;; The NUL guard each reader/writer runs first is a per-access O(n) scan of a
 ;;; name that, at a `symref-const` site, is a constant the EMITTER already
@@ -35725,7 +35760,7 @@ would consume, so it dies naming the stream (rule 12)."
     ;; and runtime push/assignment, which CLOS cannot see).  CLOS is a fallback for
     ;; classes that have never had @ISA set (e.g. leaf classes with no parents).
     (let* ((pkg (%pcl-find-package class-name))
-           (isa-sym (when pkg (find-symbol "@isa" pkg)))
+           (isa-sym (when pkg (%p-isa-symbol pkg)))
            (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
            (isa-non-empty (and isa-val
                                (vectorp isa-val) (not (stringp isa-val))
@@ -35776,7 +35811,7 @@ would consume, so it dies naming the stream (rule 12)."
                                                     pkg2))))
                            (if (and fn2 (eq (symbol-package fn2) pkg2) (fboundp fn2))
                                (return-from p-method-call (apply fn2 resolved-obj args))
-                               (let* ((isa2 (when pkg2 (find-symbol "@isa" pkg2)))
+                               (let* ((isa2 (when pkg2 (%p-isa-symbol pkg2)))
                                       (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
                                  (when (and isa2v (vectorp isa2v))
                                    (loop for p across isa2v
@@ -35814,7 +35849,7 @@ would consume, so it dies naming the stream (rule 12)."
                        (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                            (return-from p-method-call (apply fn resolved-obj args))
                            ;; Recurse through @ISA
-                           (let* ((isa-sym (when pkg (find-symbol "@isa" pkg)))
+                           (let* ((isa-sym (when pkg (%p-isa-symbol pkg)))
                                   (isa-val (when (and isa-sym (boundp isa-sym))
                                              (symbol-value isa-sym))))
                              (when (and isa-val (vectorp isa-val))
@@ -35882,7 +35917,7 @@ would consume, so it dies naming the stream (rule 12)."
                     (al (when pkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") pkg))))
                (if (and al (eq (symbol-package al) pkg) (fboundp al))
                    (cons cls al)
-                   (let* ((isa-sym (when pkg (find-symbol "@isa" pkg)))
+                   (let* ((isa-sym (when pkg (%p-isa-symbol pkg)))
                           (isa-val (when (and isa-sym (boundp isa-sym))
                                      (symbol-value isa-sym))))
                      (when (and isa-val (vectorp isa-val))
@@ -35953,7 +35988,7 @@ would consume, so it dies naming the stream (rule 12)."
            (fn  (and pkg (find-symbol sub-name pkg))))
       (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
           (symbol-function fn)
-          (let* ((isa-sym (and pkg (find-symbol "@isa" pkg)))
+          (let* ((isa-sym (and pkg (%p-isa-symbol pkg)))
                  (isa-val (and isa-sym (boundp isa-sym) (symbol-value isa-sym))))
             (when (and isa-val (vectorp isa-val) (not (stringp isa-val)))
               (loop for parent across isa-val
@@ -36043,7 +36078,7 @@ would consume, so it dies naming the stream (rule 12)."
          (pkg (if (zerop (hash-table-count *p-stash-aliases*))
                   (%pcl-find-package current-class)
                   (%pcl-find-package-1 current-class)))
-         (isa-sym (when pkg (find-symbol "@isa" pkg)))
+         (isa-sym (when pkg (%p-isa-symbol pkg)))
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
          (isa-non-empty (and isa-val (vectorp isa-val) (> (length isa-val) 0)))
          (clos-class (when (and pkg (not isa-non-empty))
@@ -36077,7 +36112,7 @@ would consume, so it dies naming the stream (rule 12)."
                                               cpkg))))
                       (if (and fn (eq (symbol-package fn) cpkg) (fboundp fn))
                           (return-from p-super-call (apply fn obj args))
-                          (let* ((isa2 (when cpkg (find-symbol "@isa" cpkg)))
+                          (let* ((isa2 (when cpkg (%p-isa-symbol cpkg)))
                                  (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
                             (when (and isa2v (vectorp isa2v))
                               (loop for p across isa2v
@@ -36110,7 +36145,7 @@ would consume, so it dies naming the stream (rule 12)."
                            (member cls out :test #'equal))
                  (setf out (nconc out (list cls)))
                  (let* ((pkg (%pcl-find-package cls))
-                        (isa-sym (when pkg (find-symbol "@isa" pkg)))
+                        (isa-sym (when pkg (%p-isa-symbol pkg)))
                         (isa-val (when (and isa-sym (boundp isa-sym))
                                    (symbol-value isa-sym))))
                    (when (and isa-val (vectorp isa-val) (not (stringp isa-val)))

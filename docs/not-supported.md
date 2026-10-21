@@ -380,13 +380,19 @@ the s522 ruling, task #1510 / #3511 / #3321):
   "value dies".)
 
 * **Deleting a non-sub symbol** (`delete $Pkg::{x}`, #3691, s523d) removes the
-  GLOB from the package: the runtime UNINTERNS the package's own `$x` / `@x` /
-  `%x` symbols, so code compiled BEFORE the delete keeps its cells (perl's
-  pinned glob) while the stash view, `exists`, a symbolic `${"Pkg::x"}` and
-  every `@ISA` reader (`isa`, method resolution) miss it, a symbolic write
-  vivifies a NEW variable, and `delete` returns the glob.
+  GLOB from the package: the runtime MARKS the package's own `$x` / `@x` / `%x`
+  symbols deleted, so code that names them keeps its cells (perl's pinned
+  glob) while the stash view, `exists`, a symbolic read `${"Pkg::x"}` and
+  every `@ISA` reader (`isa`, method resolution) miss them, and `delete`
+  returns the glob.
 
-WHAT DOES NOT (still DEFERRED): a FILEHANDLE of a deleted name stays open
+WHAT DOES NOT (still DEFERRED): a SYMBOLIC write or vivifying access after the
+delete (`${"Pkg::x"} = 2`, `push @{"Pkg::a"}, 9`, `scalar @{"Pkg::a"}`) makes
+a NEW variable in perl; PCL un-marks the name and SHARES the old cell, so the
+compiled `$x` sees the write (#3691's residue; one cell per symbol is the
+model -- uninterning to get a second one crashed every top-level statement
+loaded after the delete); code compiled AFTER the delete (a later string
+eval, a later file) also reads the old cell where perl's gets the new glob; a FILEHANDLE of a deleted name stays open
 under its name (announced on stderr); deleting a name that is BOTH a sub and a
 variable removes only the sub (the element's value is the code ref); an interpolated element `"$Pkg::{name}"` reads "" (#3635); other
 writes (`$Pkg::{foo} = \&bar`, hash assignment into a stash)
