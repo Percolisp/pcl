@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-22",
+   "description" : "FILED s523d (Opus 5.5, 2026-10-22) while fixing #3611.  SILENT WRONG, pre-existing (base 2534d7d0 identical).\n\n`keys` / `values` / `each` on a deref of a MISSING element vivify the element in perl; PCL does not:\n\n    my $m = {}; my @k = keys %{$m->{x}};  print exists $m->{x} ? 1 : 0;   # perl 1  PCL 0\n    my $o = {}; for (keys %{$o->{x}}) {}  print exists $o->{x} ? 1 : 0;   # perl 1  PCL 0\n    my $n = {}; my $c = %{$n->{x}};       print exists $n->{x} ? 1 : 0;   # perl 0  PCL 0 (right: plain rvalue)\n\n(probed perl 5.40.3 s523d.)  The comment at Pl/ExprToCL.pm's `%` cast arm (task #753) said perl does NOT vivify under keys -- that was wrong and is corrected in the #3611 commit.  Fix direction: keys/values/each are the `@`-twin-style lvalue-ish consumers (perl's rv2hv under keys carries OPpDEREF-like vivify); the `%` cast operand of those three builtins takes the -box accessor.  Measure first with emission-ab: s452ab measured 15 real read sites in Test2/Text::CSV that would start vivifying when EVERY % cast went lvalue -- those under keys are exactly the ones perl vivifies, the others must not move.\n",
+   "id" : "3720",
+   "status" : "pending",
+   "subject" : "keys/values/each %{$h->{missing}} vivifies the element in perl, not in PCL (silent; #753 comment said the opposite)"
+}
