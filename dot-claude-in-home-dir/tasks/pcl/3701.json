@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "Thu Oct 22 00:16:30 2026",
+   "description" : "FILED s523c (Opus 5.5, s524 resume) while running tools/t/sbcl-floor.t.\ntools/lib/PCLSbcl.pm _build_cached_core prunes EVERY older core of the same pathkey (`glob pcl-<pathkey>-*.core`, unlink all but the new one).  The core NAME carries the SBCL identity (`sbcl --version` + ~/.sbclrc), the pathkey does not -- so two SBCL versions running against ONE tree at the same time delete each other's core: each build prunes the other version's core, and a spawn that resolved the core path just before the prune execs sbcl on a vanished --core and exits 1 with no output.\nMeasured: `PCL_SBCL_FLOOR=.../sbcl-2.5.2/bin/sbcl prove tools/t/sbcl-floor.t` run beside a 2.6.0 sweep of the SAME worktree: row 4 (Pl/t/tap-exit-01.t) failed 20 rows, every case rc 1 with empty stdout; the same file alone under 2.5.2 passes; the core directory showed the 2.5.2 core (aa88d45a7308) and the 2.6.0 core (c0bbb15c86b1) replacing each other within the minute.\nFix shape: prune only cores of the same pathkey AND the same SBCL identity (put the sbcl stamp in the prune glob, e.g. pcl-<pathkey>-<sbclkey>-<runtimehash>.core, or read the sidecar); a different SBCL's core is pruned only by the orphan rule.  Until then: never run the floor test concurrently with another leg on the same tree (say so in sbcl-floor.t's header).\n",
+   "id" : "3701",
+   "status" : "pending",
+   "subject" : "PCLSbcl's core prune deletes the OTHER SBCL version's core for the same tree: a floor run (PCL_SBCL_FLOOR) beside a 2.6.0 run on one worktree thrashes, spawns exit 1 with no output"
+}
