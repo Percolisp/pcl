@@ -135,6 +135,13 @@ sub r39 { my $u; my $v = ${$u}{k}; print "r39 ", ref($u), "\n" }
 sub r40 { my $u; my @s = $u->@*; print "r40 ", scalar(@s), "\n" }
 sub r41 { my $w; my $r = \$w; print "r41 [", ref($w), "]\n" }
 sub r42 { my @e = @{ undef() }; my %h = %{ undef() }; print "r42 ", scalar(@e), scalar(keys %h), "\n" }
+sub r43 { my $s = {}; %{$s->{C}} = (b => 2); print "r43 ", join(",", %{$s->{C}}), "\n" }
+sub r44 { my %h; %{$h{C}} = (e => 5); print "r44 ", join(",", %{$h{C}}), "\n" }
+sub r45 { my $u = {}; %{$u->{C}} = (); print "r45 ", ref($u->{C}), "\n" }
+sub r46 { my $r = []; %{$r->[0]} = (x => 1); print "r46 ", join(",", %{$r->[0]}), "\n" }
+sub r47 { my $n = {}; %{$n->{a}{b}} = (y => 2); print "r47 ", join(",", %{$n->{a}{b}}), "\n" }
+sub r48 { my $q = {}; my $c = %{$q->{z}}; print "r48 ", (exists $q->{z} ? "viv" : "noviv"), "\n" }
+sub r49 { my $o = {}; my $x = {n => 1}; for (1 .. 3) { %$x = %{$o->{K}} if $o->{K}; $x->{n}++; %{$o->{K}} = %$x } print "r49 $o->{K}{n}\n" }
 sub b01 { my $n = 0; $n++ for 1 .. 10; print "b01 $n\n" }
 sub b02f { my $s = shift; $s->{x} }
 sub b02 { print "b02 ", b02f({x => 5}), "\n" }
@@ -142,7 +149,8 @@ sub b03 { my $x; print "b03 ", (defined $x ? 1 : 0), "\n" }
 sub b04 { my @l = qw(a b c); my $acc = ""; $acc .= $_ for @l; print "b04 $acc\n" }
 for my $r (qw(r01 r02 r03 r04 r05 r06 r07 r08 r09 r10 r11 r12 r13 r14 r15 r16
               r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r30 r33 r34
-              r35 r36 r37 r38 r39 r40 r41 r42 b01 b02 b03 b04)) {
+              r35 r36 r37 r38 r39 r40 r41 r42
+              r43 r44 r45 r46 r47 r48 r49 b01 b02 b03 b04)) {
   eval { no strict 'refs'; &$r(); 1 } or print "$r DIED\n";
 }
 PERL
@@ -189,6 +197,13 @@ r39 HASH
 r40 0
 r41 []
 r42 00
+r43 b,2
+r44 e,5
+r45 HASH
+r46 x,1
+r47 y,2
+r48 noviv
+r49 4
 b01 10
 b02 5
 b03 0

@@ -1762,6 +1762,9 @@ sub gen_binary_op_form {
       if !$writes && ($op eq '=~' || $op eq '!~')
          && _rhs_is_global_match($self, $kids->[1])
          && $self->_is_elem_lvalue_target($kids->[0]);
+    # #3611: the hash-cast LHS of `=` is a WRITE, so its operand takes the
+    # vivifying accessor (the `@` twin always does; see the cast arm).
+    local $self->{_hash_assign_lhs} = ($op eq '=') ? $kids->[0] : undef;
     my $l = $self->gen_node_form($kids->[0]);
     $self->lvalue_context($saved_lv);
     if ($writes && ($MAGIC_LVALUE_BASE{ _place_head($l) } || _place_head($l) eq 'p-cast-$')) {
@@ -4116,14 +4119,17 @@ sub gen_prefix_op_form {
   # @ needs lvalue context so subscripts return boxes → p-cast-@ can autoviv.
   # (++/--/\ already declined above.)
   #
-  # `%` is deliberately NOT here, and that asymmetry is measured, not an
-  # oversight (task #753): adding it fixes `%{ $h{k} } = (a=>1)`, which is a
-  # silent no-op today, but an lvalue accessor VIVIFIES, and a BARE rvalue
-  # deref must not — `keys %{ $h{k} }` would start creating the key, which
-  # perl does not do (probed).  The `@` twin has always carried that cost;
-  # extending it turned 15 real read sites in Test2/Text::CSV into
-  # vivifications (emission A/B, s452ab), so it waits for its own sweep leg.
-  my $needs_lvalue = ($op eq '@');
+  # `%` takes the lvalue accessor ONLY as the direct LHS of `=` (#3611:
+  # `%{ $h{k} } = (a=>1)` vivifies the element, perl's answer); an rvalue
+  # `%{ $h{k} }` must not vivify (`my $n = %{$h->{x}}` leaves no key, probed
+  # 5.40.3).  NB `keys %{ $h{k} }` DOES vivify in perl (probed s523d) and
+  # does not in PCL (task #3720; #753's note said the opposite).  Making
+  # EVERY `%` cast an lvalue turned 15 real read sites in Test2/Text::CSV into
+  # vivifications (emission A/B, s452ab) -- hence the node-id test below.
+  my $needs_lvalue = ($op eq '@')
+    || ($op eq '%' && defined $node_id
+        && defined $self->{_hash_assign_lhs}
+        && $self->{_hash_assign_lhs} eq $node_id);
   my $saved_lvalue = $self->lvalue_context;
   $self->lvalue_context(1) if $needs_lvalue;
   # #612: a PARENTHESISED deref operand — `@{ (1,2,$r) }`, and the postfix
