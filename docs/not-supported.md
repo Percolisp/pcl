@@ -76,7 +76,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Warnings-gated diagnostics](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled) — `use warnings` is not modelled yet.
 * [Error message text](#error-message-text-and-format) — die/`$@` *behaviour* matches; the wording is not a goal.
 * [`format` / `write`](#format--write-report-formatting) and [source filters](#source-filters-filterutilcall-filtersimple-use-switch-).
-* [Live symbol-table hashes `%Foo::`](#live-symbol-table-hashes-main-foo--deferred--see-roadmap) — keys/exists, sub deletes and `*A:: = *B::` work; values of non-subs and other writes do not.
+* [Live symbol-table hashes `%Foo::`](#live-symbol-table-hashes-main-foo--deferred--see-roadmap) — keys/exists, sub and variable deletes and `*A:: = *B::` work; other writes do not.
 
 ## Index
 
@@ -379,12 +379,16 @@ the s522 ruling, task #1510 / #3511 / #3321):
   as perl.  (Fable ruling s522, 01:1x: accepted in place of the brief's
   "value dies".)
 
-WHAT DOES NOT (still DEFERRED): DELETING a non-sub symbol **announces**
-`PCL: stash delete: delete $Pkg::{name} of a non-CODE symbol is not
-implemented — ignored (docs/not-supported.md "Live symbol-table hashes")`
-and continues, returning the glob: the variable stays in place, which is
-perl's answer for COMPILED accesses (they keep the pinned glob) but not for
-the stash view or a symbolic `${"Pkg::x"}` lookup (#3691, Fable s523); an interpolated element `"$Pkg::{name}"` reads "" (#3635); other
+* **Deleting a non-sub symbol** (`delete $Pkg::{x}`, #3691, s523d) removes the
+  GLOB from the package: the runtime UNINTERNS the package's own `$x` / `@x` /
+  `%x` symbols, so code compiled BEFORE the delete keeps its cells (perl's
+  pinned glob) while the stash view, `exists`, a symbolic `${"Pkg::x"}` and
+  every `@ISA` reader (`isa`, method resolution) miss it, a symbolic write
+  vivifies a NEW variable, and `delete` returns the glob.
+
+WHAT DOES NOT (still DEFERRED): a FILEHANDLE of a deleted name stays open
+under its name (announced on stderr); deleting a name that is BOTH a sub and a
+variable removes only the sub (the element's value is the code ref); an interpolated element `"$Pkg::{name}"` reads "" (#3635); other
 writes (`$Pkg::{foo} = \&bar`, hash assignment into a stash)
 are lost; `local` on a stash element is skipped; iteration order is not
 perl's; any other `*A:: = VALUE` is announced on stderr and ignored.

@@ -9,10 +9,9 @@
 # every delete spelling that removes a sub goes through the one write-through
 # path (#3511), the snapshot lists variables and filehandles too (#1510), a
 # non-sub element's VALUE is its typeglob (perl's value; core Exporter reads
-# `${$pkg . "::"}{EXPORT_FAIL}`), and DELETING a non-sub symbol ANNOUNCES on stderr and continues
-# (Fable s523: an effect-only miss, rule 12 s329 boundary; the stash VIEW
-# change is #3691).  Expected lines are perl 5.40.3's output (probed s522b)
-# except row 9, which asserts PCL's announcement.  Inverse: on the aff112d7 base every row fails
+# `${$pkg . "::"}{EXPORT_FAIL}`), and DELETING a non-sub symbol removes its glob from the package
+# (#3691, s523d: compiled names keep the old cells, run-time lookups miss).  Expected lines are perl 5.40.3's output (probed s522b)
+# (rows 9-10 probed s523d).  Inverse: on the aff112d7 base every row fails
 # (a,b,keep / the reader death on `@Pkg::{...}` / empty / the subs-only view
 # / a-def / no glob value / the delete answers).
 
@@ -33,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 12;
 
 sub run_cl {
     my ($code) = @_;
@@ -98,13 +97,39 @@ test_cl('the VALUE of a non-CODE stash element is its typeglob',
     . ' print "$g|", ref(\$Foo::{x}), "|", (defined $Foo::{y} ? 1 : 0), "|", scalar(@{*{$Foo::{y}}{ARRAY}}), "\n";',
     "*Foo::x|GLOB|1|2\n");
 
-# Fable s523: an EFFECT-ONLY miss (rule 12's s329 boundary) -- it announces on
-# stderr and continues, returning the deleted glob; the compiled $Foo::x keeps
-# its cell (perl's pinned glob).  Inverse: the base is silent and returns undef.
-test_cl('DELETING a non-CODE symbol from a stash announces, continues and returns the glob',
-    'package Foo; our $x = 1; package main; my $g = delete $Foo::{x};'
-    . ' print "continued ", (defined $g ? "$g" : "undef"), " $Foo::x\n";',
-    qr/\APCL: stash delete: delete \$Foo::\{x\} of a non-CODE symbol is not implemented \S+ ignored \(docs\/not-supported\.md "Live symbol-table hashes"\)\ncontinued \*Foo::x 1\n\z/);
+# #3691 (s523d): the glob LEAVES the package -- the stash view, exists and every
+# run-time lookup (symbolic, @ISA for isa) miss it, a symbolic write makes a NEW
+# variable, compiled $x / \$x keep the old cell (perl's pinned glob), and delete
+# returns the glob; nothing on stderr.  Expected = perl 5.40.3.  Inverse: the
+# 2534d7d0 base prints e / k / 1 / '2 2 2' / isa 1 and announces.
+test_cl('#3691: DELETING a non-CODE symbol removes the glob from the stash; compiled names keep the old cell', <<'EOF',
+no strict 'refs';
+our $x = 1; my $r = \$x;
+print exists $::{x} ? "e\n" : "ne\n";
+my $g = delete $::{x};
+print exists $::{x} ? "e\n" : "ne\n";
+print((grep { $_ eq "x" } keys %main::) ? "k\n" : "nk\n");
+print ${"main::x"} // "undef", "\n";
+${"main::x"} = 2;
+print "$x $$r ${'main::x'}\n";
+print "g=", (defined $g ? "$g" : "undef"), "\n";
+@Blength::ISA = 'Bladd'; @Bladd::ISA = ();
+print Blength->isa("Bladd") ? 1 : 0, "\n";
+delete $Blength::{ISA};
+print Blength->isa("Bladd") ? 1 : 0, "\n";
+our @y = (1, 2); my $gy = delete $Foo2::{nope}; print defined $gy ? "d\n" : "u\n";
+print "ok\n";
+EOF
+    "e\nne\nnk\nundef\n1 1 2\ng=*main::x\n1\n0\nu\nok\n");
+
+test_cl('#3691: deleted @a / %h -- the symbolic name is a fresh variable, compiled @a and its reference keep theirs', <<'EOF',
+our @a = (1,2); our %h = (k => 1); my $ra = \@a;
+delete $::{a}; delete $::{h};
+print scalar(@a), " ", scalar(@{"main::a"}), " ", (exists $::{h} ? 1 : 0), " ", join(",", keys %h), "\n";
+push @{"main::a"}, 9; print "@a | @{'main::a'} | @$ra\n";
+print eval q{ scalar(@a) }, "\n";
+EOF
+    "2 0 0 k\n1 2 | 9 | 1 2\n1\n");
 
 # #3321: a stash ALIAS `*A:: = *B::` redirects RUN-TIME name resolution (bless,
 # method calls, isa, can) to B's stash; names bound at COMPILE time (r4's `sub

@@ -16068,6 +16068,33 @@ which is one of #1140's escape spellings (probed)."
    Method::Generate::Constructor bootstrap `delete _getstash(...)->{new}`
    depends on this).  Weak keys so abandoned snapshots are collected.")
 
+(defun %p-stash-delete-glob (glob)
+  "delete $Pkg::{name} of a NON-CODE symbol (#3691): perl removes the GLOB from
+   the stash, and code compiled BEFORE the delete keeps its pinned glob (its
+   `$x` / `@ISA` still read the old cells) while every RUN-TIME name lookup --
+   `keys %Pkg::`, `exists $Pkg::{name}`, `${\"Pkg::name\"}`, method resolution
+   reading @ISA -- misses, and a symbolic write vivifies a NEW variable.  CL
+   has that model exactly: UNINTERN the package's own `$name` / `@name` /
+   `%name` symbols.  Compiled code holds the symbol OBJECTS and keeps them;
+   find-symbol (the stash view, the symbolic resolver, every @ISA reader)
+   answers NIL, and a later intern makes a fresh symbol.  The symbolic memo is
+   dropped (a site cache re-checks its symbol's home, %p-symref-sym).  A
+   FILEHANDLE of the same name is not removed: announced (effect-only)."
+  (let ((pkg (p-typeglob-package glob))
+        (uname (p-typeglob-name glob)))
+    (dolist (sigil '("$" "@" "%"))
+      (let ((sym (find-symbol (%p-slot-name sigil uname) pkg)))
+        (when (and sym (eq (symbol-package sym) pkg))
+          (unintern sym pkg))))
+    (clrhash *p-symref-symbol-memo*)
+    (let ((fh (find-symbol uname pkg)))
+      (when (and fh (nth-value 1 (gethash fh *p-filehandles*)))
+        (%p-announce-unsupported
+         "stash delete"
+         (format nil "the filehandle of *~A::~A" (package-name pkg) uname)
+         +p-stash-unsupported-tail+)))
+    nil))
+
 (defun p-delete (hash key)
   "Perl delete function for hashes - returns unboxed value
    Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
@@ -16094,18 +16121,14 @@ which is one of #1140's escape spellings (probed)."
        ;; Stash write-through: deleting a sub entry from a package stash
        ;; (delete $Pkg::{name}) must really remove the sub from the package.
        (let ((stash-pkg (gethash h *p-stash-pkg-table*)))
-         ;; A non-CODE symbol (its snapshot value is a glob): an EFFECT-ONLY
-         ;; miss (rule 12's s329 boundary, Fable s523) -- perl's compiled
-         ;; accesses keep the pinned glob, so leaving the variable in place
-         ;; is right for them; only the stash VIEW / symbolic lookups would
-         ;; differ (#3691).  Announce, continue, return the deleted glob.
+         ;; A non-CODE symbol (its snapshot value is a glob): the glob leaves
+         ;; the package (#3691, %p-stash-delete-glob) and comes back as
+         ;; delete's value.
          (when stash-pkg
            (let ((v (gethash k h)))
              (when (and (p-box-p v) (p-typeglob-p (p-box-value v)))
-               (%p-announce-unsupported
-                "stash delete"
-                (format nil "delete $~A::{~A} of a non-CODE symbol" stash-pkg k)
-                +p-stash-unsupported-tail+)
+               (%p-stash-delete-glob (p-box-value v))
+               (remhash k h)
                (return-from p-delete (p-box-value v)))))
          (when stash-pkg
            (let ((sym (%p-resolve-sub-symbol
@@ -30982,7 +31005,9 @@ would consume, so it dies naming the stream (rule 12)."
            (let ((p (svref site 0)))
              (and p (or (eq p t)
                         (eq p *pcl-current-package*)
-                        (string= p *pcl-current-package*)))))
+                        (string= p *pcl-current-package*))))
+           ;; an UNINTERNED symbol (a stash delete, #3691) is stale
+           (symbol-package (svref site 1)))
       (let ((sym (svref site 1)))
         (when (and create (not (svref site 2)))
           (%p-ensure-storage sym)
