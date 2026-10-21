@@ -3864,6 +3864,16 @@
 ;;; branch perl skips.  p-print's reader tests `stringp` + non-empty, so undef
 ;;; flows through it unchanged.
 (defvar |$\\| (make-p-box *p-undef*) "Output record separator (perl: undef until set)")
+(defvar *p-loop-frozen-ors* nil
+  "NIL, or the box print reads INSTEAD of $\\ inside `foreach $\\ (LIST)` (#3612).
+   perl keeps the output record separator in an internal copy (PL_ors_sv)
+   that only $\\'s SET-MAGIC updates; a foreach ALIASES the variable to each
+   element without that magic, so for the loop's dynamic extent print uses
+   the value from BEFORE the loop -- whatever the body reads or assigns as
+   $\\, and whatever a `local $\\` inside it does (probed 5.40.3).
+   See %p-magic-loop-var-wrap.")
+(defvar *p-loop-frozen-rs* nil
+  "The same for $/ (PL_rs): readline and chomp read this box when non-NIL.")
 ;;; List separator ($")
 (defvar |$"| (make-p-box " ") "List separator for array interpolation")
 ;;; Output autoflush ($|) — magic: every write clamps to 1/0 by truthiness
@@ -4154,7 +4164,7 @@
    Returns nil for undef (slurp mode), a positive INTEGER record length for
    $/ = \\N (fixed-length record mode), or the separator STRING otherwise.
    A non-positive record length behaves like slurp (nil), matching Perl."
-  (let ((val (unbox |$/|)))
+  (let ((val (unbox (or *p-loop-frozen-rs* |$/|))))
     (cond
       ((eq val *p-undef*) nil)
       ;; $/ = \N (reference to a number) → fixed-length record mode.
@@ -17046,6 +17056,24 @@ carries a continue block.  Every other foreach is emitted exactly as before."
         `(,fast ,sym-form ,value)
         `(setf (sb-ext:symbol-global-value ,sym-form) ,value))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-magic-loop-var-wrap (var form)
+    "FORM, wrapped for a foreach over a SPECIAL variable whose perl meaning
+     lives in an internal copy only set-magic updates: $\\ and $/ (#3612).
+     The copy is frozen at its pre-loop value for the loop's dynamic extent;
+     a nested loop keeps the outermost one (perl's copy never changed).  Any
+     other variable is returned unchanged."
+    (cond
+      ((eq var '|$\\|)
+       `(let ((*p-loop-frozen-ors*
+                (or *p-loop-frozen-ors* (make-p-box (unbox |$\\|)))))
+          ,form))
+      ((eq var '|$/|)
+       `(let ((*p-loop-frozen-rs*
+                (or *p-loop-frozen-rs* (make-p-box (unbox |$/|)))))
+          ,form))
+      (t form))))
+
 (defun %expand-foreach (rawp var list body-and-keys env)
   "Shared expander for p-foreach / p-foreach-raw.  RAWP selects the loop-var
 binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
@@ -17131,7 +17159,7 @@ A package-global loop var is localized over its cell (%p-cell-loop-var-p);
 The loop variable ALIASES each element (%p-foreach-elt), which promotes a raw
 slot to a box so writes through the variable reach the container; the
 read-only twin p-foreach-raw skips that."
-  (%expand-foreach nil var list body-and-keys env))
+  (%p-magic-loop-var-wrap var (%expand-foreach nil var list body-and-keys env)))
 
 (defmacro p-foreach-raw ((var list) &rest body-and-keys &environment env)
   "p-foreach for a loop variable the compiler PROVED read-only (task #862
@@ -17148,7 +17176,7 @@ error here rather than a silently different loop (rule 12)."
     (declare (ignore label continue-form body))
     (unless myp
       (error "p-foreach-raw without :my for ~S — the read-only verdict is my-only" var)))
-  (%expand-foreach t var list body-and-keys env))
+  (%p-magic-loop-var-wrap var (%expand-foreach t var list body-and-keys env)))
 
 (defun %expand-foreach-range (rawp var from to body-and-keys env)
   "Shared expander for p-foreach-range / p-foreach-range-raw.  RAWP selects the
@@ -17224,7 +17252,7 @@ p-..), made at RUNTIME, so string ranges ('a'..'e') fall back to iterating the
 materialized vector.  Same :label/:continue protocol and lexical skeleton as
 p-foreach (unlabeled p-next/p-last are a lexical (go :next)/(return nil)); the
 body appears ONCE — only the per-iteration value source branches on the vec."
-  (%expand-foreach-range nil var from to body-and-keys env))
+  (%p-magic-loop-var-wrap var (%expand-foreach-range nil var from to body-and-keys env)))
 
 (defmacro p-foreach-range-raw ((var from to) &rest body-and-keys &environment env)
   "p-foreach-range with a RAW loop-var binding (no per-iteration box).  Emitted
@@ -17235,7 +17263,7 @@ write through the box (no s///, no chomp, no `$_ =`, no call into code the
 compiler cannot see — task #761).  $_ keeps its NAME and its dynamic binding
 either way, so a callee that reaches the global still sees the current element;
 what changes is that the element is the raw counter rather than a fresh box."
-  (%expand-foreach-range t var from to body-and-keys env))
+  (%p-magic-loop-var-wrap var (%expand-foreach-range t var from to body-and-keys env)))
 
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
@@ -17683,7 +17711,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (multiple-value-bind (fh rest) (%p-out-target args "print")
     ;; NIL = perl already warned (or died); the write does not happen.
     (unless fh (return-from p-print *p-undef*))
-    (%p-write-list fh rest |$\\| "print")))
+    (%p-write-list fh rest (or *p-loop-frozen-ors* |$\\|) "print")))
 
 (defun p-say (&rest args)
   "Perl say - print with \"\\n\" appended INSTEAD of $\\ (task #500)"
@@ -17709,7 +17737,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
          (fh (%p-out-fh-or-fail desig site)))
     (if fh
         (%p-write-list fh items
-                       (if sayp (load-time-value (string #\Newline) t) |$\\|)
+                       (if sayp (load-time-value (string #\Newline) t)
+                           (or *p-loop-frozen-ors* |$\\|))
                        site)
         *p-undef*)))
 
