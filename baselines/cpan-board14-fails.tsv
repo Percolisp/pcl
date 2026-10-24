@@ -165,8 +165,8 @@
 #   277 PASS / 107 PARTIAL / 65 FAIL of 449, TOTAL passing 66,729 (round 3: 65,073); row diff 4 NEW / 16 FIXED / 1 LOST, every mover attributed by
 #   one-file runs on worktrees at -38 -39 -40 -41 -42 -43 (review/attrib-r4/).  NEW, IN with causes: HTTP-Tiny 001_api.t 2 = #3695 (s522b/-40, the stash
 #   view lists lexical names; = the 1 LOST), Role-Tiny namespace-clean.t 1 + 4 = #3696 (the file RUNS since -40; rows 2/3 stay #3632), Text-CSV 51_utf8.t
-#   *PLAN* = #1494 (pre-existing, surfaced by s523c's PCL-INCOMPLETE marker).  FIXED, OUT by edit (8): JSON-PP 003_types 22 / 008_pc_base 13 /
-#   017_relaxed 6 / 018_json_checker 34 = s523b/-41 (fail on -40, 80/0 20/0 8/0 38/0 from -41); Text-CSV 66_formula 68 = s523d/-43 (fail on -42);
+#   *PLAN* = #1494 (pre-existing, surfaced by s523c's PCL-INCOMPLETE marker).  FIXED, OUT by edit (14): JSON-PP 003_types 18 21 22 / 008_pc_base 10 13 /
+#   017_relaxed 1 2 5 6 / 018_json_checker 34 = s523b/-41 (fail on -40, 80/0 20/0 8/0 38/0 from -41; the empty-description rows of these files pair by COUNT in the diff, so the first diff named one per file); Text-CSV 66_formula 68 = s523d/-43 (fail on -42);
 #   Role-Tiny load-module 2 + subclass.t *PLAN* = s522b/-40 (-39: 1/5 and 5 rows rc 2 no plan; -40: row 2 passes, 6/0 with the plan); SLU pair 17 =
 #   s523a/-39 (-38 fails 5 6 15 17, -39 fails 5 6 15; run with --no-dist-lib as the board does).  FIXED, KEPT (8): 105oneshot-gzip/zip 3 5 6 7 = the
 #   UNSTABLE flap family above (round 4 and the one-file runs on -43 read the 1-row face + *PLAN*; -41 read the 8-row face with 3 5 6 7 failing).
@@ -634,15 +634,9 @@ JSON-PP-4.18-0	001_utf8.t	3		'" "'	'"\u8000"'	#1749 (pack/unpack "U" works in UT
 JSON-PP-4.18-0	001_utf8.t	4		'""	'"\ud801\udc02"	#1749 (pack/unpack "U" works in UTF-8 octets: JSON::PP's ascii/latin1 encoders map `unpack('U*', ...)` and its \u decoder `pack('U', ...)`; probed s515c json2.pl: unpack 'U*' of "a\x{b6}\x{3042}\x{10346}" is 97,1410,6)
 JSON-PP-4.18-0	001_utf8.t	7		'¶'	'�'	#1749 (pack/unpack "U" works in UTF-8 octets: JSON::PP's ascii/latin1 encoders map `unpack('U*', ...)` and its \u decoder `pack('U', ...)`; probed s515c json2.pl: unpack 'U*' of "a\x{b6}\x{3042}\x{10346}" is 97,1410,6)
 JSON-PP-4.18-0	001_utf8.t	8		'ð𐈄'	'𐐂𐈄'	#1749 (pack/unpack "U" works in UTF-8 octets: JSON::PP's ascii/latin1 encoders map `unpack('U*', ...)` and its \u decoder `pack('U', ...)`; probed s515c json2.pl: unpack 'U*' of "a\x{b6}\x{3042}\x{10346}" is 97,1410,6)
-JSON-PP-4.18-0	003_types.t	18				#1389 (rows 18-22: is_utf8 always 1, reproduced under real perl with is_utf8 forced to 1) + #3242 (rows 30-31: `encode_json [!!1]` is [1], perl 5.36+ [true])
-JSON-PP-4.18-0	003_types.t	21				#1389 (rows 18-22: is_utf8 always 1, reproduced under real perl with is_utf8 forced to 1) + #3242 (rows 30-31: `encode_json [!!1]` is [1], perl 5.36+ [true])
-JSON-PP-4.18-0	008_pc_base.t	10		'["1","2","3"]'	'[1,2,3]'	#1389 (reproduced under real perl with is_utf8 forced to 1: numbers encoded as strings)
 JSON-PP-4.18-0	014_latin1.t	1				#1749 (latin1 encoder: unpack('U*'))
 JSON-PP-4.18-0	014_latin1.t	2				#1749 (latin1 encoder: unpack('U*'))
 JSON-PP-4.18-0	014_latin1.t	4				#1749 (latin1 encoder: unpack('U*'))
-JSON-PP-4.18-0	017_relaxed.t	1				#1389 (rows 1,2,5,6 reproduced under real perl with is_utf8 forced to 1) + #966 (the relaxed `#` comment skip reads pos($self->{text}))
-JSON-PP-4.18-0	017_relaxed.t	2				#1389 (rows 1,2,5,6 reproduced under real perl with is_utf8 forced to 1) + #966 (the relaxed `#` comment skip reads pos($self->{text}))
-JSON-PP-4.18-0	017_relaxed.t	5				#1389 (rows 1,2,5,6 reproduced under real perl with is_utf8 forced to 1) + #966 (the relaxed `#` comment skip reads pos($self->{text}))
 JSON-PP-4.18-0	020_faihu.t	0	*FILE*	no TAP rows (rc=0)	3 row(s)	#1749 (ascii encode of "\x{10346}" yields "" so the decode dies "invalid character 0x6 ... while parsing JSON string" before row 1)
 JSON-PP-4.18-0	099_binary03.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 (the board does not chdir: `do "./t/099_binary.pl"` finds nothing; from the dist root PCL runs the rows -- probed s515c: 099_binary00.t prints its 1..1536 and ok rows)
 JSON-PP-4.18-0	099_binary04.t	0	*FILE*	no TAP rows (rc=0)	TAP rows	#1575 (the board does not chdir: `do "./t/099_binary.pl"` finds nothing; from the dist root PCL runs the rows -- probed s515c: 099_binary00.t prints its 1..1536 and ok rows)
