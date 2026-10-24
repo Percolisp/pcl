@@ -380,7 +380,7 @@ print "after\\n";
    title => 'A `$` scalar with a NON-ASCII name is split into Cast + Word — but `@`/`%`/`*`/`&` are not',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XCAST', class => 'Word', content => '', pred => 'adj_nonascii', check => 'cast-then-word' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_merge_unicode_symbols', commit => 'c6b17b5e', group => 'G', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser::_merge_unicode_symbols (s527a: PPI fixed on the branch)', commit => 'c6b17b5e', group => 'G', pr => undef },
    repro => 'use utf8; binmode STDOUT, \':utf8\';
 $Ｘ = 1; print "$Ｘ\\n";
 ',

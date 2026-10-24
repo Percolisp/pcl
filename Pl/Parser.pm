@@ -940,7 +940,6 @@ sub _ppi_parse {
   # AFTER any serialize+reparse: this pass swaps token classes in place with
   # the text unchanged, so a reparse would just re-create the Version tokens.
   _reclassify_bare_vwords($doc) if $doc;
-  _merge_unicode_symbols($doc) if $doc;
   _merge_punct_array_symbols($doc) if $doc;
   _repair_statement_start_glob_cast($doc) if $doc;
   _repair_indented_heredocs($doc) if $doc;
@@ -961,9 +960,11 @@ sub _ppi_parse {
 # the symbolic reference ${"ｉ"} (undef → index 0, a SILENT WRONG) and
 # `"$Ｘ[$ｉ+1]"` died calling an undefined sub `ｉ`, because PPI splits `$ｉ`
 # into Cast + Word (ppi-upstream-bugs.md §23) and only `_merge_unicode_symbols`
-# puts it back together.
+# put it back together.  (Since s527a PCL's own PPI lexes `$ｉ` as one Symbol
+# -- vendor/PPI, group G -- and that pass is gone; the fragment's document
+# comes from the same tokenizer, so it needs nothing here.)
 #
-# The five passes below are exactly the ones `_ppi_parse` runs AFTER any
+# The passes below are exactly the ones `_ppi_parse` runs AFTER any
 # serialize+reparse: the first three swap token CLASSES in place and leave the
 # text untouched, and the fourth moves whitespace between a here-doc's
 # `_indentation` and its body lines in a way `serialize` puts back byte for
@@ -985,7 +986,6 @@ sub fragment_doc {
   my $doc = _ppi_new($src, %opt);
   return undef unless $doc;
   _reclassify_bare_vwords($doc);
-  _merge_unicode_symbols($doc);
   _merge_punct_array_symbols($doc);
   _repair_statement_start_glob_cast($doc);
   _repair_indented_heredocs($doc);
@@ -1512,45 +1512,6 @@ sub _anon_signature_prologue {
   return join($sep, @stmts) . $sep;
 }
 
-# PPI's Symbol regex is ASCII-bounded: a unicode variable name splits into
-# Cast + Word ($ᕘ → `$` + `ᕘ`) or Symbol + Word ($main::ᕘ → `$main::` + `ᕘ`).
-# The stray Word then parses as a bareword — worst case a CALL of a
-# same-named sub ($ᕘ inside `sub ᕘ` = infinite recursion, uni/gv.t).  Merge
-# the abutting fragments back into one Symbol.  Runs on the FINAL document
-# (a serialize+reparse would just re-split); mutation is token-local.
-# Adjacency is required — an intervening whitespace token blocks the merge —
-# and in valid perl a bareword never directly abuts a variable name.
-sub _merge_unicode_symbols {
-  my ($doc) = @_;
-  my @repaired;
-  for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
-    next unless $cast->content =~ /^(?:[\$\@\%\&\*]|\$\#)$/;
-    my $next = $cast->next_sibling;
-    next unless $next && $next->isa('PPI::Token::Word');
-    my $sym = PPI::Token::Symbol->new($cast->content . $next->content);
-    $cast->insert_before($sym);
-    $next->delete;
-    $cast->delete;
-    push @repaired, $sym;
-  }
-  for my $sym (@{ $doc->find('PPI::Token::Symbol') || [] }) {
-    my $merged = 0;
-    while (1) {
-      my $next = $sym->next_sibling;
-      last unless $next && $next->isa('PPI::Token::Word');
-      last unless $sym->content =~ /::$/
-               || $next->content =~ /^::/
-               || $next->content =~ /^[^\x00-\x7F]/;
-      $sym->add_content($next->content);
-      $next->delete;
-      $merged = 1;
-    }
-    push @repaired, $sym if $merged;
-  }
-  _reclass_subscripts_after($_) for @repaired;
-  return 1;
-}
-
 # PUNCTUATION-NAMED ARRAYS (`@?`, `@!`, `@.`, …).  perl lets any punctuation
 # character name a global, and `@?` is legal perl that real code writes
 # (`ok( ! @?, … )`, t/re/subst.t:346 — one of the #415 census drops).  PPI
@@ -1560,8 +1521,7 @@ sub _merge_unicode_symbols {
 #
 # The merge is unambiguous: in valid perl a `@` CAST must be followed by `$`,
 # `{` or an identifier, so a Cast immediately abutting an OPERATOR can only
-# ever be a mis-lexed punctuation name.  Adjacency is still required, as in
-# _merge_unicode_symbols.
+# ever be a mis-lexed punctuation name.  Adjacency is still required.
 #
 # %PUNCT_CONTAINER_CHARS is the set this repair covers.  Its OLD boundary was
 # the CL SYMBOL SPELLING — the characters that are CL constituents and so read
