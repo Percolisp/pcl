@@ -49,3 +49,4 @@ URI-5.34-0	-	s526w1	the string / regex / escape workhorse of everything HTTP: ov
 HTTP-Message-7.01-0	-	s526w1	HTTP::Headers / Request / Response / Message: blessed-hash headers, URI, HTTP::Date, Encode, content decoding (gzip / deflate / quoted-printable); needs the Clone shim (#3826)
 cpan-tests/modules/YAML-Tiny-1.74	-	s526w1	the small YAML reader/writer: line-by-line regexes, Unicode decoding layers, refaddr seen-tables, TestML data files, subtests
 Data-Dumper-2.183-0	--inc=Data-Dumper-2.183-0/blib/lib	s526w1	the dumper everyone uses, its PURE-PERL half (Useperl; Dumpxs is XS): quoting, Purity / seen tables, globs, Unicode escapes, v-strings -- the dist copy 2.183 from blib/lib (identical rows to the core 2.189)
+YAML-PP-v0.39.0-0	-	s526w2	YAML 1.2 parser/emitter in pure Perl: grammar tables, pos() scanning, folding, tied preserve containers, B FLAGS (36 PASS / 5 PARTIAL / 3 FAIL after the batch fillers #3850 #3853 #3857=#3832 #3858)
