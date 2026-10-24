@@ -13,6 +13,9 @@
 - Written: the review doc; DECIDED ## s527; session-log ## Session 527; CLAUDE.md pointer; task #3697 (umbrella) + #3694 note; **brief `s527/s527a-prompt.md`** (IDs 3920-3939) = the next launch in the parser slot -- s526a is SUPERSEDED for token rows (not launched; its structure-row half deferred).
 - The end-to-end A/B (PCL emission, installed PPI vs proto, perl-tests + everyday; the `@INC` lines excepted) -- result filled into the review doc §3 when it ended.  RESULT: 233 of 233 files byte-identical, 0 real diffs (review doc §3).  Committed `12e17e21`+amend, pushed.
 
+## 19:4x -- THE PLAN ACCEPTED (USER: "Seems like a good plan. Accepted.")
+- Order: board merges (w1, w2) -> s527a ALONE in the parser slot (+ a filler in the other: the §39-§54 registry rows) -> s527b (tokenizer rows) PARALLEL with s527c (Lexer rows) -> s527d (the 16 new) -> the parser program resumes (1c, 1b, C1).  ~two weeks of PPI in the development slots.  Recorded: DECIDED ## s527 (the plan line), review doc §8, session-log, memory STATE.  Fable writes the s527b / s527c / s527d briefs when s527a is MERGE-READY (their row lists = review doc §6 + §8).
+
 ## RESUME RECIPE for s528 (draft; the last block supersedes)
 1. `cat ~/pcl-agent-scratch/s513/HEAVY.holder`; clear dead pids.
 2. The two board agents: read `scratch/<label>/STOP.md` in `.claude/worktrees/agent-a8804ba6e7379e0f6` (s526w1) and `agent-a3ad79b740a76bd47` (s526w2); MERGE-READY -> merge (w1 FIRST; then tell w2, which drops its copy of the `local $/` line and regenerates the artifacts); checkpointed -> resume as fresh opus agents from an `s528/resume-<label>.md` written like `s527/resume-s526w1.md`.

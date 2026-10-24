@@ -90,3 +90,15 @@ Results: our report **14 -> 33 ok** (19 rows); PPI's suite **PASS** (one plan bu
 - `s526/s526a-prompt.md` (the expect-state REPAIR ENGINE, not launched): its token-row half is replaced by the branch; its bars (corpus-diff IDENTICAL per row, the three test files, the gate-SET scan, emission-ab, timings not slower) carry over to s527a; its structure-row half (handlers called from the checker walk) is deferred until the Lexer route is sized.
 - `docs/parser-review-s525.md` §5 box step (1) "1a ONE expect-state repair pass": the pass is now PPI's own tokenizer, fixed; the checker remains.  `docs/expect-state-checker-s525.md` §5 (the relex/retag sketch) is historical.
 - Task #3694's 1a session plan (`=== 1a ===`) is re-pointed to s527a.
+
+## 8. The plan, accepted (USER 2026-10-24 evening: "Seems like a good plan. Accepted.")
+
+| step | slot use | content | size |
+|---|---|---|---|
+| 0 | both (running) | the two board agents finish and merge, w1 first, then w2 | -- |
+| 1 | parser slot ALONE; the other slot a filler (the §39-§54 registry rows first, now written to be fixed on the branch) | **s527a** (`s527/s527a-prompt.md`): the branch, the test file first, the 12 fixes as PR groups A-I, `vendor/PPI`, the registry's `fixed_in => 'pcl'` mode, the repairs deleted one per commit, the upstream package | 1 agent-day |
+| 2 | BOTH slots | **s527b** the remaining tokenizer rows (§1 §7 §8 §9 §20 §22 §26 §27 §30 §32 §33 §38; `Token/*.pm`) in parallel with **s527c** the Lexer rows (§5 §6 §10 §13 §17 §18 §29 §36 §37; `Lexer.pm`) -- different files, different PR groups | 1 + 1-2 agent-days |
+| 3 | both | **s527d** the 16 new bugs (#3740-#3755), `format` bodies and 5.38 `class` syntax the two features | 2 agent-days |
+| 4 | parser slot | the parser program RESUMES on the fixed stream: 1c the binder ports, 1b the keyword-class table, C1 the statement classifier | as planned in #3694 |
+
+Permanent exceptions: the word-is-a-term family (§11 §14 §19, half of §25) stays PCL's at the lowering; new PPI bugs keep arriving (16 in the last three sessions) and go onto the branch in whichever phase is running -- the expect-state checker is the instrument that finds them.  Not on this timeline: upstream acceptance; each merged PR only shrinks the branch.  Unchanged: Fable's round-level duties (the round-5 board, the full companion), the CPAN board merges, a one-day correctness filler when a slot is free.  s526a (the repair engine) is dropped, not postponed.
