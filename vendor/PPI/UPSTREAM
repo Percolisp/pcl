@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: e309445bf2822207c3bcd3f79a909c8166fc5304
-lib-tree: 6d75234d79ca15143f55a65e82baa1d7536f1a21
+branch-sha: 8955ba306e507be53d1696e4cf7881a694d9f5b8
+lib-tree: cf199f962994f589ba4a462fbc328f0415cbe42b
 date: 2026-10-24
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -19,6 +19,7 @@ fix: G §23 c6b17b5e Unknown: a $ scalar name may start with any letter
 fix: H §31 8cefefce Word: the _ after sub names the sub
 fix: I §2 d93bd718 Number::Hex: a hexadecimal float is one Number::Float
 fix: E §21 e309445b Operator: ~~ after a builtin that takes an operand is two complements
+fix: F §28 8955ba30 Tokenizer: one scalar-filehandle test; .digit after print $fh is a number
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -40,3 +41,5 @@ commit: 5be090db TODO tests: a hexadecimal float is one Number::Float
 commit: d93bd718 Number::Hex: a hexadecimal float is one Number::Float
 commit: d387ad54 TODO tests: ~~ after a builtin list operator is two complements
 commit: e309445b Operator: ~~ after a builtin that takes an operand is two complements
+commit: d26d7ce4 TODO test: .digit after a print filehandle is a number
+commit: 8955ba30 Tokenizer: one scalar-filehandle test; .digit after print $fh is a number

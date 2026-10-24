@@ -1166,7 +1166,7 @@ running perl, so a perl that changes them fails a row).
 
 ## 21. A term-initial `~~` is lexed as the smart-match operator  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527a: group E, commit `e309445b` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-E.md`).
+**FIXED on PCL's PPI branch** (s527a: group E, commits `5caa125f` + `e309445b` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-E.md`).
 
 **Perl:** `~~` is the smart match only where an OPERATOR may stand.  Where a
 TERM is expected it is two complements, `~(~$x)` — the classic "numify /
@@ -1685,7 +1685,7 @@ call, a subscript, a hash element, a string, a number and a paren.
 
 ## 28. `$x.2` — a `.` followed by a digit after a term is lexed as a Number::Float, so the concatenation OPERATOR disappears  [CONFIRMED 1.291]
 
-**FIXED on PCL's PPI branch** (s527a: group F, commit `a39e723d` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-F.md`).
+**FIXED on PCL's PPI branch** (s527a: group F, commits `a39e723d` + `8955ba30` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-F.md`).
 
 The fourth sibling of §12 (`)*name`), §15 (`)-1`) and §25 (`)-name`): the same
 operator-vs-term decision, in the one position PPI still gets wrong.

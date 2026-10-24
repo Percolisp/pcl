@@ -447,7 +447,7 @@ $Ｘ = 1; print "$Ｘ\\n";
    title => '`$x.2` — a `.` followed by a digit after a term is lexed as a Number::Float, so the concatenation OPERATOR disappears',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Number::Float', content => qr/^\.\d/, pred => '', check => 'dot-in-number' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_dot_number', commit => 'a39e723d', group => 'F', pr => undef },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_dot_number', commit => '8955ba30', group => 'F', pr => undef },
    repro => '$_ = 1; my $x = $_.2; print "$x\\n";',
    perl => "12\n",
    tokens => {
