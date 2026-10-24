@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED s526w2 (Opus, 2026-10-24), YAML-PP census.  LOUD (the file dies), PRE-EXISTING.  NOT REDUCED: the reproducer is the dist file cut to lines 1-11 + 193-257 (create-preserve + tie-array; scratch/s526w2/p52c.pl, run with tools/run-dist-t.pl ~/.cpan/build/YAML-PP-v0.39.0-0 p52c.pl).  perl: both subtests ok.  PCL: create-preserve prints `ok 1` (no child rows shown) then \"Not a SCALAR reference\" at top level.  Lines 1-11 + 238-257 alone (tie-array + tie-scalar) pass, and the first subtest alone passes.  Suspects (untested): the preserved_mapping / preserved_sequence tied containers created in create-preserve (YAML::PP::Preserve::Hash/Array, Tie::StdHash base) leave state that the next `tie @$x` / `@$x = (...)` trips on.  Rows: perl 9, PCL 5 (*PLAN*).",
+   "id" : "3852",
+   "status" : "pending",
+   "subject" : "YAML-PP 52.preserve.t dies \"Not a SCALAR reference\" in the tie-array subtest when the create-preserve subtest ran before it (each subtest alone passes) -- reduction OWED"
+}

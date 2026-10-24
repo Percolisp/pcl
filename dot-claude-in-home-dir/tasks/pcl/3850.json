@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED s526w2 (Opus, 2026-10-24) from the YAML-PP-v0.39.0 board census.  LOUD (a drop), PRE-EXISTING (base 706cfde8).\n\n    my $v = 1; my $f = \"/etc/passwd\";\n    my @r = grep { $v ? not -f \"$f$_\" : -f \"$f$_\" } (\"\", \"x\"); print scalar(@r), \"\\n\";\n    my $x = $v ? not 0 : 5; print \"[$x]\\n\";\nperl: 1 / [1].  PCL: \"statement dropped ... Bug. Fell through. Missing case: [0, :, 5]\".\n\nMechanism: Pl/PExpr.pm main operator loop, the #1511 low-precedence-not arm: `not`'s operand is collapsed up to the next operator at least as loose as `not`; `:` is a marker with no operator number (Config.pm `no => 0`), so the scan swallows `0 : 5`.\nFix (s526w2 filler): the scan also stops at a `:` with no `?` opened inside the operand (nesting counted).\nRows: YAML-PP 10.parse-valid 644, 11.parse-invalid 101, 12.load-json 284, 20.dump 326, 21.emit 598, 42.tokens 326, 55.flow 18, 56.force-flow 326 (*FILE* rows), 43.indent *PLAN* (3 of 5 rows missing).\n\n=== DONE (s526w2) ===\nFixed in d9ece05e (Pl/PExpr.pm, the #1511 not-operand scan counts ?/: nesting and stops at an unmatched :); gen v2-8684, artifacts 9b7c45b7.  Guard Pl/t/misc-fixes-01.t \"not in a ternary middle operand (#3850)\" (5 shapes incl. nested ?: inside the not operand and `0 || not $v ? 3 : 4`), inverse-verified (the shapes drop on 706cfde8).  corpus-diff IDENTICAL over 111 files; emission-ab lib/**/*.pm 56 SAME, only YAML::PP t/lib Test.pm differs.  YAML-PP after the fix: the eight files run (10.parse-valid 568/38 before #3857 ...).",
+   "id" : "3850",
+   "status" : "completed",
+   "subject" : "A low-precedence `not` in the MIDDLE operand of ?: drops the statement -- `$c ? not 0 : 5` (\"Fell through. Missing case: [0, :, 5]\"): not's operand scan does not stop at the ternary's `:` (YAML::PP t/lib Test.pm:66; 8 board files / 2623 perl rows)"
+}

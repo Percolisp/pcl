@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED + FIXED s526w2 (Opus, 2026-10-24) from the YAML-PP board census (after #3850 let its suite run: ~220 rows read the yaml-test-suite files with `local $/; <$fh>` and lost everything after a blank line).  SILENT WRONG, PRE-EXISTING (reproduced at MAIN-READY-44 95c4fe37 and at 706cfde8).\n\n    open my $w, \">\", \"/tmp/x\"; print $w \"a\\n\\nb\\n\"; close $w;\n    open my $g, \"<\", \"/tmp/x\"; my $z = do { local $/; <$g> }; print length($z), \"\\n\";   # perl 5   PCL 3\n`local $/ = undef;` and `$/ = undef;` were right.\n\nMechanism: `local $/;` lowers to (let (($/ (make-p-box nil))) ...); get-input-record-separator (cl/pcl-runtime.lisp ~4162) tested only (eq val *p-undef*), so NIL fell to (to-string val) = \"\" = paragraph mode in %p-read-record.  Fix: ((or (null val) (eq val *p-undef*)) nil).  Guard: Pl/t/misc-fixes-01.t \"local $/; slurps past a blank line (#3857)\" (fails on 706cfde8).",
+   "id" : "3857",
+   "status" : "completed",
+   "subject" : "SILENT WRONG (everyday): a bare `local $/;` is PARAGRAPH mode, not slurp -- `my $c = do { local $/; <$fh> }` stops at the first blank line (the localized box holds NIL and get-input-record-separator stringified NIL to \"\")"
+}

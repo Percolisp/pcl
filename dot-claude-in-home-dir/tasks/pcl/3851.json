@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED s526w2 (Opus, 2026-10-24), YAML-PP census.  LOUD (drop + the #2610 detector announces it), PRE-EXISTING.\n\n    package TW; use Exporter \"import\"; our @EXPORT = qw(wl);\n    sub wls (&$;$) { my ($c,$re,$d)=@_; $c->(); print \"wls $re $d\\n\" }\n    *wl = *wls;  1;\n    # main: use TW; wl { 1 } qr{x}i, \"desc\"; print \"end\\n\";\nperl: \"wls (?^i:x) desc\" / end.  PCL: \"statement dropped ... Missing case: [Structure::Block<{ 1 }>, Regexp]\" + detector line \"installed a sub with prototype (&$;$)\".\nReproducer: scratch/s526w2/tw/ in the s526w2 worktree.  Test::Warn defines warning_is / warning_like exactly this way (lines 308-309), so every Test::Warn user hits it.  Static shape: a file-level `*NAME = *OTHER;` / `*NAME = \\&OTHER;` whose OTHER has a declared prototype could carry the prototype over (docs/static-parse-limits-review-s512.md family; #2610 detector sees it at run time).\nRows: YAML-PP 32.cyclic-refs.t (perl 8, PCL 1).",
+   "id" : "3851",
+   "status" : "pending",
+   "subject" : "A prototype installed by a GLOB ALIAS (`*warning_like = *warnings_like;`, Test::Warn) is not seen at parse time: `warning_like { ... } qr{..}, \"d\";` drops (\"Missing case: [Block, Regexp]\") -- YAML-PP 32.cyclic-refs.t *PLAN*"
+}

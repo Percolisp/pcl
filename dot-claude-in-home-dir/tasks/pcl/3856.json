@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED s526w2 (Opus, 2026-10-24), TT census.  LOUD for `${ ... }` (whole module refused: Template/Parser.pm:546 `(?: \\{ ([^\\}]*) \\} )   # ${ ... }`); a plain `$x` in a comment is probably SILENT (interpolated into the pattern; not probed separately).\n\n    print \"2\\n\" if \"q\" =~ / q  # a comment naming ${ ... }\n                       /x;\nperl: 2.  PCL: Transpile failed: \"PCL: cannot compile interpolated regex reference '${ ... }'\".\ntoke.c scan_const skips a `#` comment to end of line when the pattern has /x and the `#` is outside a character class; the interpolation scanner (Pl/InterpScan.pm -- the only place, standing rule) must know the pattern's /x and do the same.  Reproducer scratch/s526w2/p4.pl.\nRows: every TT file that loads Template::Parser (counted when the TT census runs).",
+   "id" : "3856",
+   "status" : "pending",
+   "subject" : "A `${ ... }` (or any variable) inside a /x regex COMMENT is interpolated by PCL -- perl skips # comments under /x before interpolation -- so Template::Parser refuses (\"cannot compile interpolated regex reference ${ ... }\")"
+}
