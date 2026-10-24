@@ -31486,8 +31486,10 @@ would consume, so it dies naming the stream (rule 12)."
     (%p-when-tied-hash (r h)                    ; %$tied = (…) (task #155)
                        (%p-th-fill r value)
                        (return-from p-hash-deref-= h))
-    (clrhash h)
+    ;; The RHS list is read BEFORE the hash is cleared: `%$r = (%$r, k => v)`
+    ;; names the target on the right (perl copies the list first; task #3853).
     (let ((flat (%p-flatten-list value)))
+      (clrhash h)
       (loop for i from 0 below (length flat) by 2
             when (< (1+ i) (length flat))
             do (setf (gethash (%p-hash-key (aref flat i)) h)
@@ -31517,8 +31519,10 @@ would consume, so it dies naming the stream (rule 12)."
                   (%p-ta-fill r value)
                   (return-from p-array-deref-= arr))
     (%p-check-array-writable arr)          ; @$ref = (…) on a read-only array, task #159
-    (setf (fill-pointer arr) 0)
+    ;; The RHS list is read BEFORE the array is emptied: `@$r = (@$r, x)`
+    ;; (task #3853, as p-hash-deref-=).
     (let ((flat (%p-flatten-list value)))
+      (setf (fill-pointer arr) 0)
       (loop for item across flat
             do (%p-array-store-scalar arr item)))
     arr))

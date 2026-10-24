@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 137;
+plan tests => 138;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -225,6 +225,16 @@ test_cl('strict element read through an undef variable lives (#3858)',
      my $r = eval { u1()->{c} };
      print g(1), h(), k(), " ", s1("str"), " ", ($@ ? "died" : "lived"), "\n";',
     "uue died died\n");
+
+# #3853: an aggregate assignment through a reference reads its RHS list
+# BEFORE it empties the target -- `%$r = (%$r, k => v)` kept only `k`, and
+# `@$r = (@$r, x)` only `x` (SILENT WRONG).  Outputs probed under perl 5.40.3.
+test_cl('%$r = (%$r, ...) and @$r = (@$r, ...) keep the old contents (#3853)',
+    'my $r = {a=>1}; %$r = (%$r, b=>2);
+     my $ar = [1]; my $ad = \$ar; @$$ad = (@$$ad, 2);
+     my $y = [1,2,3]; @$y = (@$y[1,2], @$y);
+     print join(",", map {"$_=$r->{$_}"} sort keys %$r), " @$ar @$y\n";',
+    "a=1,b=2 1 2 2 3 1 2 3\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,
