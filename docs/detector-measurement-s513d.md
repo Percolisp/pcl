@@ -256,6 +256,24 @@ harmless `(@)` sites.  `PCL_DETECT=off` silences it.  Still open: #3260 half 1
 (`use File::stat;` displaces nothing at the parse -- `lstat($f)` stays the
 built-in; the detector announces it, correctly).
 
+## 10. The six dists the board gained in s526w1 (`PCL_DETECT=log`)
+
+Measured as §8 (`tools/cpan-board.sh` with a six-line list, `PCL_DETECT=log
+PCL_DETECT_LOG=FILE`) on the s526w1 tree (gen v2-8585, rebased onto main
+27e30d07): 155 logged lines, **109 distinct sites (unit, name, call line) in 3
+dists**; TimeDate, HTTP-Date and Data-Dumper log nothing.  Every site is the
+harmless kind -- a call site the parse took as `unknown` where the sub that arrives
+at run time has prototype `()` or `($)`, and every one of them is a bare constant
+or a parenthesised call, so the parse is the same either way.  No displaced built-in.
+
+| dist | distinct sites | what |
+|---|---|---|
+| URI-5.34-0 | 26 | `t/heuristic.t`: `uf_urlstr`, imported from URI::Heuristic, where it is a run-time GLOB alias (`*uf_urlstr = \*uf_uristr;`, line 250) of a `($)` sub -- no static read can see the prototype; every call is `uf_urlstr(...)` |
+| HTTP-Message-7.01-0 | 33 + 46 | `t/status.t` / `t/status-old.t`: the `HTTP_*` / `RC_*` constants, which HTTP::Status builds in a STRING EVAL and pushes onto `@EXPORT` / `@EXPORT_OK` at load (statically unknowable, `docs/static-parse-limits-review-s512.md`'s eval family); and 46 sites in core IO::Compress::Gzip / Adapter::Deflate / IO::Uncompress::Base (the content-decoding path): Compress::Raw::Zlib's `Z_*` / `MAX_WBITS` and IO::Seekable's `SEEK_*` constants re-exported through an import the prototype does not cross (the #3143 family) |
+| YAML-Tiny-1.74 | 4 | core IO::Dir: `O_CREAT` / `O_RDWR` from Fcntl, the same import family |
+
+The default stays `announce` (§9): on these dists it prints only the harmless kind.
+
 ## Appendix A -- the gate's 53 distinct call sites
 
 `unit  name  install:line/kind  call:line  assumed  installed`  (CORE: = perl's own lib; /tmp/*.pl = a gate test's program)

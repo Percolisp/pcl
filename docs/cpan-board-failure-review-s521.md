@@ -94,6 +94,11 @@ Batches 3-6 are merged or in flight (the headings in §4 say which).  The ROUND-
 
 **2026-10-21 (between s523 and s524): #3650 DECIDED** -- the USER lifts the pack park for the ONE U0 rule (a template beginning with `U` is in character mode), on two conditions: the change is small, and it costs no execution speed (bench `pack` / `packunpk`).  Queued for s524; it unlocks JSON-PP's sixteen 099_binary files (24,512 rows) and the ascii / latin1 encoders.  The "NOT IN THE PLAN" table's pack-park row narrows to everything BUT that rule.
 
+## 0c. Update (s526): the board widens
+
+The USER asked for new CPAN modules (2026-10-24); Fable installed ten dists into the oracle perl and two census briefs joined them.  **Half 1 (s526w1): TimeDate, HTTP-Date, URI, HTTP-Message, YAML-Tiny (the repo copy), Data-Dumper (its own 2.183 from `blib/lib`) -- 133 test files**, each joining with a row census by cause; the population goes from 20 dists / 449 files to 26 / 582 (half 2, s526w2, adds Pod-Simple, Log-Log4perl, YAML-PP and Template-Toolkit).  Blessed rows per dist: TimeDate 0, HTTP-Date 0, URI 60, HTTP-Message 15, YAML-Tiny 23, Data-Dumper 54 (152; the cause tables are in the session log, ## Session s526w1).  The widened board on the s526w1 tree: 362 PASS / 136 PARTIAL / 84 FAIL of 582, TOTAL passing 69,476 -- the old 20 dists are round 4's 277 / 107 / 65 and 66,729 exactly.  Four fillers rode along (#1025 + #1026 `s///e`, #3825 a sub named like a runtime operator lost its context bind, #3826 `lib/Clone.pm`, #3832 `local $/;` is slurp); the biggest open causes in the new rows are #1389 (29 rows, 28 of them URI's), #3831 (YAML-Tiny, 16), #3837 (Data-Dumper, 14) and the `use bytes` not-supported rows (Data-Dumper, 26).
+
+
 ## 1. The board today
 
 From `cpan-board-s519r1.tsv` (header: 187 / 103 / 66 of 356, TOTAL passing 12,250; summing its rows gives
