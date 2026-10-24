@@ -14,6 +14,7 @@
 #   tools/binder-check.pl FILE...
 #   tools/binder-check.pl --population perl-tests|perl-t|everyday|cpan|all
 #   options: --out FILE (default stdout)  --jobs N (default 2)  --summary
+#            --summary-of LOG   (print the D3 numbers of an existing merged log)
 #            --timeout S (default 120)
 #   tools/binder-check.pl --dump FILE   every reference -> its binding, one
 #            line each, from a PCL_BINDER_CHECK=die PCL_BINDER_TRACE=1
@@ -33,10 +34,11 @@ use Getopt::Long;
 use PCLPopulations;
 
 my %o = (jobs => 2, timeout => 120);
-GetOptions(\%o, 'population=s', 'out=s', 'jobs=i', 'summary', 'dump=s', 'timeout=i') or exit 2;
+GetOptions(\%o, 'population=s', 'out=s', 'jobs=i', 'summary', 'summary-of=s', 'dump=s', 'timeout=i') or exit 2;
 my $root = "$RealBin/..";
 
 if (defined $o{dump}) { exit dump_file($o{dump}) }
+if (defined $o{'summary-of'}) { summary($o{'summary-of'}); exit 0 }
 
 my @files = @ARGV;
 push @files, PCLPopulations::files($o{population}, $root) if $o{population};
@@ -84,9 +86,10 @@ sub reap {
   my $pid = waitpid(-1, 0);
   return unless $pid > 0 && $kid{$pid};
   my ($f, $log) = @{ delete $kid{$pid} };
-  $status{ ($? >> 8) == 124 ? 'timeout' : $? ? 'transpile-failed' : 'ok' }++;
-  if (open my $h, '<:utf8', $log) { print $out $_ while <$h>; close $h }
-  print $out join("\t", 'X', rel($f), 'timeout'), "\n" if ($? >> 8) == 124;
+  my ($st, $rc) = ($?, $? >> 8);
+  $status{ $rc == 124 ? q{timeout} : $st ? q{transpile-failed} : q{ok} }++;
+  if (open my $h, q{<:utf8}, $log) { print $out $_ while <$h>; close $h }
+  print $out join("\t", q{X}, rel($f), $rc == 124 ? q{timeout} : "failed rc=$rc"), "\n" if $st;
   unlink $log;
 }
 for my $f (@files) {

@@ -317,6 +317,9 @@ sub _sym_canon {
   return undef if $sig eq '&' || $sig eq '*';
   return undef if $c eq q{_};                      # the stat filehandle `-f _`
   return undef if $c =~ /^[\$\@\%]\z/;          # an unnamed signature placeholder `($, $y)`
+  # `$#+` / `$#-`: PPI lexes the last index of @+ / @- as ONE Symbol (an
+  # ArrayIndex everywhere else) -- the array @+ / @- (perlvar).
+  return "\@$1" if $c =~ /^\$#([+-])\z/;
   my $prev = $t->sprevious_sibling;
   my $canon = ($prev && $prev->isa(q{PPI::Token::Cast}) && $prev->content ne q{\\}) ? $c : $t->symbol;
   return $canon if $canon =~ /^[\$\@\%](?:[^\W\d][\w]*(?:(?:::|')\w+)*(?:::)?|::\w*(?:::\w+)*|\d+|\^\w+|\{\^\w+\}|[^\w\s{])\z/;
