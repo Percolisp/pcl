@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, Data-Dumper census): Data::Dumper's PP _dump writes a main-package glob as `*::foo` and reads its slots through `*{\"::foo\"}{$k}`.\nProbe (scratch p-gl3.pl / p-gl4.pl):\n  no strict; print \\*{\"::xy\"} == \\*{\"xy\"} ? \"same\" : \"diff\";                       # perl same, PCL diff\n  our $foo = 5; print refaddr(*{\"::foo\"}{SCALAR}) == refaddr(\\$foo), ${*{\"::foo\"}{SCALAR}};   # perl same 5, PCL diff undef\n  eval(q{\\*{\"::\\400\"}}) == \\*{chr 256}                                                # perl same, PCL diff\nRows: Data-Dumper dumper.t 31, 33, 34, 36, 37, 39, 40, 42 and 178, 180, 181, 183 (Purity: the glob's SCALAR slot is not the variable, so `b => \\$foo` is not \"seen\" and prints \\5 for do{my $o}) and bugs.t 12, 13 (the eval of the dumped glob is another glob).  Layer: runtime symbolic-name resolution (perl: a leading \"::\" is \"main::\").",
+   "id" : "3837",
+   "status" : "pending",
+   "subject" : "A symbolic glob / stash name with a LEADING \"::\" is not main:: -- `\\*{\"::foo\"} == \\*{\"foo\"}` is false in PCL, `*{\"::foo\"}{SCALAR}` is a fresh empty scalar (perl: the same glob, $main::foo); Data::Dumper names every main glob *{\"::foo\"}"
+}

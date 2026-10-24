@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, Data-Dumper t/dumper.t row 250 \"names that are not simple strings\": got `$(?^:) = [];`, expected `$bang = [];`).\nProbe (scratch p-qrov3.pl):\n  { package fish; use overload '\"\"' => sub { \"bang\" }; sub new { bless qr// } }\n  my $a = [4.5/1.5, fish->new()]; print \"1 $a->[1]\\n\"; my $c = [@$a]; print \"2 $c->[1]\\n\";\nperl: \"1 bang\" / \"2 bang\".  PCL: \"1 (?^:)\" / \"2 (?^:)\".  `my $f = fish->new; \"$f\"` is \"bang\" in both (scratch p-qrov.pl).\nRows: Data-Dumper dumper.t 250 (+ its Dump twin if any).  Layer: runtime (the element read path of a blessed regex skips the overload table; cf. #2051).",
+   "id" : "3836",
+   "status" : "pending",
+   "subject" : "An overloaded-\"\" object that is a blessed qr// stringifies as the REGEX \"(?^:)\" when it is read from an ARRAY ELEMENT (`\"$a->[1]\"`) -- from a scalar variable it is right (\"bang\")"
+}

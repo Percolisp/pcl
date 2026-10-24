@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, HTTP-Message t/headers-util.t row 17: `is_deeply(split_header_words(\"foo; =;bar=baz\"), [...])` got 'ARRAY(0x1)' expected 'ARRAY(0x2)').\nProbe (scratch p-shw4.pl):\n  use Test::More;\n  sub m2 { my @r = ([\"foo\", 1]); return @r }\n  is_deeply(m2(), [\"foo\", 1], \"no undef\");          # perl ok, PCL not ok\n  sub k { return ([\"foo\", undef]) } is_deeply(k(), [\"foo\", undef], \"x\");   # ok in both (a literal list return)\n  my @x = m2(); is_deeply($x[0], [\"foo\", 1]);        # ok in both\nEmission: `(pl-is_deeply (p-list-ctx (pl-m2)) (make-p-box ...) \"x\")` -- pl-is_deeply is a CL defun `(got expected &optional name)`, so the returned array object is ONE argument.  A user sub flattens its &rest through p-flatten-args; the TAP functions do not.  #3245 fixed the same shape for can_ok/use_ok through %test-flat-values (the one TAP-layer spreading); the assertions need the same spread when an argument is a list-context CALL (perl: `is(f(), 1)` with f returning (a, b) compares a with b and names the test 1).  Rows: 1 (headers-util.t 17).  Layer: harness (cl/pcl-test.lisp) -- the companion --all --quick is PER BATCH for it.",
+   "id" : "3829",
+   "status" : "pending",
+   "subject" : "The TAP layer (cl/pcl-test.lisp) takes is / is_deeply / ok / like ... arguments POSITIONALLY: a list-returning call as an argument is not spread -- `is_deeply(f(), [...])` with `sub f { my @r = ([1]); return @r }` compares the RETURNED ARRAY with the ref"
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, YAML-Tiny t/11_read_string.t subtest \"invalid UTF-8\": \"open(t/data/latin1.yml) failed: No such file or directory at t/lib/TestUtils.pm line 45\" -- the line is `open( FILE, \" $file\" )`).\nProbe (scratch p-open2.pl): `open(FILE, \" /etc/hostname\") or die \"fail: $!\"` and `open(G, \"/etc/hostname \")` -- perl opens both (2-arg open trims leading and trailing whitespace of the name, perlfunc open); PCL dies \"fail: No such file or directory\".\nRows: YAML-Tiny 11_read_string.t *PLAN* + row 4.  Layer: cl/ runtime, the 2-arg open mode/name parser.",
+   "id" : "3834",
+   "status" : "pending",
+   "subject" : "Two-argument open does not strip WHITESPACE around the filename: `open(FILE, \" $file\")` fails ENOENT where perl opens $file (YAML-Tiny t/lib/TestUtils.pm slurp)"
+}

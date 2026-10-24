@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, HTTP-Message t/message-decode-zipbomb.t: no TAP, \"Heap exhausted during allocation\").\nProbe (scratch p-zb.pl): build \"\\0\" x 16M, gzip it three times (Level 9, -Minimal) -- PCL OK but 20 s / 245 MB (perl 0.15 s / 44 MB); then gunzip three times: rounds 1-2 OK, round 3 (16 MB output) dies \"Heap exhausted ... 52199440 requested\" at 55 % of the 1 GB heap.\nBacktrace: SB-KERNEL:VECTOR-SUBSEQ <- (LAMBDA NIL :IN PCL::%P-STRBUF-INSTALL) <- %PCL-DEFINEDP <- P-DEFINED <- IO::Uncompress's read loop.  `defined $$out` between appends installs (copies) the whole growing :str-buffer each time: quadratic copying, and two 50 MB copies alive at once.  FIX SHAPE (to measure first): `defined` (and other reads that do not need the characters: length?) answer from the buffer without materializing; or install without copying when the buffer is not shared.  Rows: message-decode-zipbomb.t 9 (a *FILE* row on the board).  Layer: cl/ runtime -- bench KIND (exclusive), full sweep.",
+   "id" : "3830",
+   "status" : "pending",
+   "subject" : "PERF / HEAP: a string built by repeated appends is MATERIALIZED (vector-subseq of the whole buffer) by every `defined` read -- IO::Uncompress::Gunzip inflating a 16 MB output exhausts the 1 GB SBCL heap (HTTP-Message message-decode-zipbomb.t, perl 0.15 s / 44 MB)"
+}

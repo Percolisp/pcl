@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, Data-Dumper t/dumper.t rows 199/201 \"vstrings\": got `$a = bless( do{\\(my $o = v65.66.67)}, 'VSTRING' );`, expected `$a = \\v65.66.67;`).\nProbe (scratch p-ddmisc.pl): my $v = \\v65.66.67; print ref($v), reftype($v), defined blessed($v), overload::StrVal($v)\nperl 5.40.3: VSTRING VSTRING unblessed VSTRING(0x..).   PCL: VSTRING SCALAR blessed VSTRING(0x..).\nData::Dumper's PP _dump asks Scalar::Util::blessed first, so the ref is dumped as an object.  Related: #1495 (ref.t \"stringify for ref to vstring\").  Rows: Data-Dumper dumper.t 199, 201.  Layer: runtime (the VSTRING referent kind: blessed / reftype).",
+   "id" : "3833",
+   "status" : "pending",
+   "subject" : "A reference to a V-STRING is BLESSED into \"VSTRING\" with reftype SCALAR in PCL -- perl: unblessed, ref and reftype both VSTRING; Data::Dumper dumps \\v65.66.67 as bless( do{\\(my $o = v65.66.67)}, 'VSTRING' )"
+}

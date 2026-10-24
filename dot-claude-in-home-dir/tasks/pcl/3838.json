@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, Data-Dumper t/dumper.t row 190 \"$obj->Dump in list context set $@\": got `PCL: statement dropped at (eval) line 1: join \" \", new Data::Dumper [[]],[] =>->Dump -- WTF? :-) Expr starts with ->/brace??`).\nperl parses `new Data::Dumper [[]],[] =>->Dump` as `Data::Dumper->new([[]], [])->Dump`?? -- to verify: the fat comma before `->` ends the indirect-object argument list.  A LOUD drop (announce + die in eval), not silent.  Related: not-supported.md \"Indirect object syntax with a SCALAR invocant\" (MAYBE LATER, USER s425) -- this one is a CLASS invocant, which works in the plain spelling.\nRows: Data-Dumper dumper.t 190.  Layer: PExpr (indirect-object argument extent).",
+   "id" : "3838",
+   "status" : "pending",
+   "subject" : "The indirect-object call `new Data::Dumper [[]],[] =>->Dump` (a method call chained after a fat comma) is DROPPED in a string eval: \"Expr starts with ->/brace??\""
+}

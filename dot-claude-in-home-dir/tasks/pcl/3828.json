@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, HTTP-Message t/message.t row 101: decoded_content of a \"Content-Encoding: quoted-printable\" body is undef, perl \"foo\").\nProbe (scratch p-qp.pl): `use MIME::QuotedPrint; print decode_qp(\"fo=6F\")` -- perl \"foo\", PCL dies \"Undefined subroutine &MIME::QuotedPrint::decode_qp called\".\nIn perl, encode_qp / decode_qp are XS functions in Base64.xs; core MIME/QuotedPrint.pm is only `*encode = \\&encode_qp` etc. over them.  FIX SHAPE: add encode_qp($str [, $eol [, $binmode]]) and decode_qp($str) to lib/MIME/Base64.pm in Perl (RFC 2045 rules as Base64.xs implements them: soft line breaks at 76, trailing whitespace before a newline encoded, `=XX` hex, \"=\\n\" removal in decode; MIME::QuotedPrint's own t/quoted-print.t is the oracle), plus a must-win lib/MIME/QuotedPrint.pm if the core copy does not load.  Rows: 1 on the board today (message.t 101).  Layer: lib/ shim.",
+   "id" : "3828",
+   "status" : "pending",
+   "subject" : "MIME::QuotedPrint is not usable: perl core MIME/QuotedPrint.pm imports encode_qp / decode_qp from MIME::Base64 XS, and lib/MIME/Base64.pm (the shim) does not define them -- \"Undefined subroutine &MIME::QuotedPrint::decode_qp\""
+}

@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND (s526w1, HTTP-Message census): 18 of 23 t files FAIL with 0 rows: \"Can't locate Clone.pm in @INC (the module is XS and has no PCL build -- see tools/pcl-xs-install)\"; HTTP/Headers.pm line 8 is `use Clone qw(clone);` and every HTTP::Request / Response / Message loads it.\n\nFIX (s526w1 filler, the lib/ layer per CLAUDE.md 9a): lib/Clone.pm, `pcl-shim: must-win`, a pure-Perl clone() following Clone.xs rv_clone: deep copy of ARRAY / HASH / SCALAR / REF, re-bless into the same class, CODE / GLOB / IO / FORMAT / Regexp SHARED, a `seen` table keyed by refaddr so a cycle stays a cycle and a referent reached twice is copied once, clone($ref, $depth) copies $depth levels and shares below.  @EXPORT_OK = qw(clone), $VERSION 0.47.\nProbe (scratch p-clone.pl, now Pl/t/clone-shim-01.t): perl with the real XS Clone 0.47 and PCL with the shim print byte-identical text (and perl -Ilib with the shim too).  headers.t one-file 0/189 -> 187/189.\nNot covered (Clone.xs does them; nothing on the board asks): weak references stay strong in the copy; tied containers copy their values, not the tie; magic.\n\nDONE (s526w1): lib/Clone.pm + Pl/t/clone-shim-01.t + docs/shipped-modules.md row; bars (full sweep, the HTTP-Message census) in the s526w1 report.",
+   "id" : "3826",
+   "status" : "completed",
+   "subject" : "Clone is XS-only: `use Clone qw(clone)` dies at load under PCL, taking HTTP::Headers and 18 of HTTP-Message 23 test files (0 rows each) -- a pure-Perl lib/Clone.pm shim"
+}
