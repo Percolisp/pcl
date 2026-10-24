@@ -2332,8 +2332,6 @@ op/bop.t	499	ok	(missing)	[perl \#129995] access to freed memory	NS:`pack`/`unpa
 op/bop.t	510	ok	(missing)	[perl \#17844] access beyond end of block	NS:`pack`/`unpack` -- pointer types (`p`/`P`) and 80-bit long double (`D`) -- measured s473t6b: the file aborts ONE top-level form with "Invalid type 'P' in pack", and these rows are inside it
 op/bop.t	160	ok	not ok	and turns off the UTF-8 flag	NS:Unicode semantics differences -- measured s473t6d: the row asserts a bit-string op turns the UTF-8 flag OFF; PCL has no per-SV flag
 op/bop.t	465	ok	not ok	correct error	#1915 -- measured s473t6d: the row matches that `no method found` text
-op/bop.t	483	ok	not ok	neg UV (sic) left shift  = 0xFF..E	NS:Integers are unbounded: PCL has no 64-bit boundary -- measured s473t6d: the row asserts a NEGATIVE value shifts as an unsigned 64-bit quantity (18446744073709551614); PCL keeps -2
-op/bop.t	484	ok	not ok	neg UV (sic) right shift = 0x7F..F	NS:Integers are unbounded: PCL has no 64-bit boundary -- measured s473t6d: the row asserts an unsigned 64-bit right shift (9223372036854775807); PCL keeps -1
 op/bop.t	216	ok	not ok	no duplicate warnings	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts 10 `Use of uninitialized value` warnings
 op/bop.t	229	ok	not ok	no duplicate warnings	NS:Warnings-gated diagnostics are absent -- measured s473t6d: the row counts 10 warnings from the string-bitwise ops
 op/bop.t	27	ok	not ok	str var & const str	#1040 -- measured s473t6d: `"waf" & "+0"` takes the NUMERIC op because `"+0"` LOOKS like a number; perl decides from the SV's flags, so a pure string takes the bit-string op whatever its characters (`"10" & "12"` is "10" in perl, 8 here)
