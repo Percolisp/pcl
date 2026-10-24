@@ -418,7 +418,8 @@ sub check_source {
     my $err = PPI::Document->errstr // 'unknown';
     return ({ file => $opt{file} // '-', line => 0, col => 0, text => '',
               class => '', state => '', expect => 'a document',
-              kind => 'lexer-dies', sec => '',
+              kind => 'lexer-dies',
+              sec => ($err =~ /Illegal state in 'for'/ ? '6/29' : ''),   # the two catalogued lexer deaths
               cascade => 0, note => $err });
   }
   return check_document($doc, %opt);
@@ -446,6 +447,7 @@ sub check_document {
     next if $w->{skip}{$i};
     my $t = $toks[$i];
     last if $t->isa('PPI::Token::Separator');
+    last if $w->{stop};
     my $c = _ctx($w, $i);
     _pending_statement_end($w, $c) if $w->{ended};
     _step($w, $c);
@@ -909,6 +911,7 @@ sub _pending_statement_end {
   my $is_cont = grep { $t->isa('PPI::Token::Word') && $t->content eq $_ } @{ $CONTINUES{$kw} // [] };
   if ($is_cont) {
     return if $ts == $bs;
+    $w->{cont_split} = 1;
     return _flag($w, $c, 'continuation-split', "`" . $t->content . "` continuing `$kw`",
                  ($t->content eq 'finally' ? 18 : ''), 'PPI: the continuation starts a new statement');
   }
@@ -922,6 +925,7 @@ sub _pending_statement_end {
     $w->{flagged_in_stmt} = 1;
   }
   $w->{flagged_in_stmt} = 1 if $kw eq 'sub' && $e->{owner_name_magic};
+  $w->{flagged_in_stmt} = 1 if $kw eq 'continue' && delete $w->{cont_split};   # the split continuation's after-effect
   _flag($w, $c, 'statement-not-ended', "a new statement after `$kw` BLOCK", $sec,
         'PPI: the next statement is inside the previous one');
 }
@@ -1084,7 +1088,11 @@ sub _word_in_term_position {
     _flag($w, $c, 'quote-letter-as-word', 'a quote-like operator', '');
     _set($w, 'XOPERATOR');
   },
-  DATA     => sub { _set($_[0], 'XSTATE') },
+  DATA     => sub {   # __END__ / __DATA__ as a WORD: PPI did not end the code (a Separator would have)
+    my ($w, $c) = @_;
+    _flag($w, $c, 'data-marker-as-word', 'Separator (yyl_data_handle 6996: the code ends)', '');
+    $w->{stop} = 1;
+  },
 );
 
 # FORMAT: perl reads the body as PICTURE TEXT (scan_formline), never as code;

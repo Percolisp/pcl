@@ -80,7 +80,7 @@ sub run_files {
     my @rows;
     my $doc = eval { doc_of($src) };
     if (!$doc) {
-      @rows = check_source($src, file => $name, stats => $stats);
+      @rows = check_source($src, file => $name, stats => $stats);   # PPI could not build it: the lexer-dies row
       @rows = ({ file => $name, line => 0, col => 0, text => '', class => '', state => '',
                  expect => 'a document', kind => 'lexer-dies', sec => '', cascade => 0,
                  note => ($@ || 'no document') =~ s/\s+/ /gr }) if !@rows;
