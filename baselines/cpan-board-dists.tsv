@@ -43,3 +43,6 @@ JSON-PP-4.18-0	-	s515c	JSON encode/decode in pure Perl: numbers vs strings, UTF-
 HTTP-Tiny-0.090-0	-	s515c	the core HTTP client: socket mocks, sprintf, regexes (the live-network files skip themselves)
 Path-Tiny-0.150-0	-	s515c	file paths: File::Spec / File::Temp / Cwd / flock / symlinks / atomic writes
 IO-Compress-2.214-0	-	s519b	the core compression stack in pure Perl over PCL's Compress::Raw::Zlib shim (libz via sb-alien, #3161): IO::Compress::* / IO::Uncompress::*, glob-ref objects, tied handles
+TimeDate-2.33-0	-	s526w1	Date::Parse / Date::Format / Time::Zone: locale strings, big regexes, sprintf, localtime / gmtime / timegm
+HTTP-Date-6.06-0	-	s526w1	HTTP date parsing and formatting over Time::Local / Time::Zone
+URI-5.34-0	-	s526w1	the string / regex / escape workhorse of everything HTTP: overload "" and eq, URI::Escape, IRIs, punycode
