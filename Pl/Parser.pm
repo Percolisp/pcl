@@ -10075,6 +10075,19 @@ sub _process_include_statement {
   my $type = $stmt->type // 'use';    # 'use', 'require', 'no'
   my $module = $stmt->module // '';
 
+  # `require Class->method(...)` is a require of the method call's VALUE (a
+  # file name): perl reads the bareword as a CLASS name once `->` follows it.
+  # PPI's ->module answers the bareword, and the method call was dropped
+  # without a word (#3861; Pod-Simple t/search*.t's `require
+  # File::Spec->catfile($t_dir, 'ascii_order.pl')`).  The expression path
+  # below lowers the whole argument.
+  if ($type eq 'require' && $module ne '') {
+    my ($w) = grep { $_->isa('PPI::Token::Word') && $_->content eq $module }
+              $stmt->schildren;
+    my $nx = $w ? $w->snext_sibling : undef;
+    $module = '' if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '->';
+  }
+
   # `require Foo if COND;` / `require Foo unless COND;` — the statement
   # modifier is part of the statement, and require is a RUNTIME op, so the
   # condition must gate it.  PCL used to hoist every require into the

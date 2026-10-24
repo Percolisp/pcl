@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 138;
+plan tests => 139;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -235,6 +235,17 @@ test_cl('%$r = (%$r, ...) and @$r = (@$r, ...) keep the old contents (#3853)',
      my $y = [1,2,3]; @$y = (@$y[1,2], @$y);
      print join(",", map {"$_=$r->{$_}"} sort keys %$r), " @$ar @$y\n";',
     "a=1,b=2 1 2 2 3 1 2 3\n");
+
+# #3861: `require Class->method(...)` requires the method call's VALUE -- the
+# method call was silently dropped and the statement read as `require Class`.
+# Outputs probed under perl 5.40.3.
+test_cl('require File::Spec->catfile(...) loads the file it names (#3861)',
+    'use File::Spec; my $d = "/tmp"; my $n = "pcl-3861-$$.pl";
+     open my $w, ">", "$d/$n" or die; print $w "sub o3861 { \$a cmp \$b } 1;\n"; close $w;
+     require File::Spec->catfile($d, $n);
+     my $p = File::Spec->catfile($d, $n); unlink $p;
+     print join("|", sort o3861 qw(b a c)), " ", (exists $INC{$p} ? "inc" : "noinc"), "\n";',
+    "a|b|c inc\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,
