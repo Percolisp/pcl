@@ -6254,6 +6254,7 @@ sub _try_compile_subst_e {
         (($outer && $outer->has_parser) ? (parser => $outer->parser) : ()),
       );
       my $node_id = $expr_o->parse_expr_to_tree(\@parts);
+      $expr_o->annotate_contexts($node_id);
       my $gen = Pl::ExprToCL->new(
         expr_o       => $expr_o,
         environment  => $self->environment,

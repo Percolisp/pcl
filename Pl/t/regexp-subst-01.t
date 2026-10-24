@@ -659,4 +659,24 @@ EOP
     is($got, $want, 'an s///e replacement compiles its anon sub / map / sort / grep / do blocks (#1026)');
 }
 
+# #1025: the replacement expression gets the ordinary CONTEXT annotation -- a
+# list operator's arguments are in list context there too.  Unannotated, `..`
+# was the scalar flip-flop and split returned its COUNT (URI::Escape's
+# `split //, "$1"` escaped every character as "1").
+{
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'EOP';
+my $x = 'a-e'; $x =~ s/(\w)-(\w)/join ':', $1 .. $2/e;
+my %e = (b => "%62", c => "%63"); my $t = "abcd";
+$t =~ s{([bc])}{ join('', map +($e{$_} || "?"), split //, "$1") }ge;
+my $u = "xy"; $u =~ s/(x)/join ",", reverse 1, 2, 3/e;
+print "$x $t $u\n";
+EOP
+    close $fh;
+    chomp(my $want = `$^X $file 2>&1`);
+    chomp(my $got = `$RealBin/../../runpcl $file 2>&1`);
+    is($want, 'a:b:c:d:e a%62%63d 3,2,1y', 'perl oracle for the s///e context rows (#1025)');
+    is($got, $want, 'an s///e replacement puts a list operator\'s arguments in list context (#1025)');
+}
+
 done_testing();
