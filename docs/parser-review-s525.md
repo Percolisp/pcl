@@ -371,35 +371,68 @@ time becomes linear in ops on top of perl's 10 ms compile.
    load.  Harmless for state (two processes), visible for side effects (a
    BEGIN that prints or writes).  **A USER decision** -- and a measurable one
    (§5 S3 counts the hazards in the four populations).
-2. **Perl version coupling.**  The optree differs by version (`multiconcat`
-   5.28, `padsv_store` 5.38, class ops 5.38, `cmpchain` 5.32 ...).  The install
-   matrix runs stock Ubuntu perls (22.04 = 5.34, 24.04 = 5.38) against the
-   5.40.3 oracle; the emitter must either cover 5.34-5.42 (B::Deparse does,
-   with version conditionals) or PCL requires a specific perl at transpile
-   time.  **A USER decision** under the portability rule.
-3. **Modules load in the compiling perl.**  `use POSIX` loads the REAL POSIX
+2. **The compiled-code CACHE freezes the compile-time environment** (the
+   USER's question, s525).  Today a cached unit is valid by CONTENT alone:
+   source bytes + generation + the dependency manifest of the modules whose
+   prototypes and exports it read (#1261), and BEGIN and `use constant` bodies
+   run at every LOAD, so no unit depends on the environment of the run that
+   built it.  Under Option 3 the compiling perl evaluates them once and FOLDS
+   on the result -- probed with `B::Concise`: `use constant D => $ENV{D};
+   print "x" if D;` arrives as an unconditional `print` when D was set and
+   with the `print` ABSENT when it was not; `$^P`'s NOOPT flag does not
+   prevent it.  A cached translation would therefore bake %ENV, @ARGV, `$^O`,
+   files probed by `-e` or `eval { require }`, and the clock into the unit,
+   where perl re-evaluates them on every run.  Mitigations, each with a cost:
+   record the compile-time INPUTS into the manifest (a tied %ENV, %INC and
+   @INC hooks, @ARGV, the stat/open calls) and key on them -- the build-system
+   "depfile" model, covering the common idioms; mark a unit whose compile read
+   an unrecordable input (time, rand, pid, a socket) UNCACHEABLE and run it
+   from text (the #2702 path, slower every run); or accept the perlcc / B::C
+   precedent (BEGIN effects frozen in the binary, a documented limitation).
+   The idiom is rare in PCL's populations (0 `use constant`-from-environment
+   in `lib/` and `perl-tests/`, 7 BEGIN blocks reading %ENV/@ARGV in everyday
+   + the board) and classic in the wild (`use constant DEBUG => $ENV{...}`).
+   **This is the strongest argument against Option 3**, and the spike's S3 is
+   widened to a census of compile-time INPUTS, not only side effects.
+3. **Perl version coupling** (the USER's question, s525; measured on the local
+   sources).  The op set went 396 (5.26.3) → 400 (5.32.1) → 422 (5.40.3): +4
+   (`multiconcat`, `isa`, `cmpchain_and`, `cmpchain_dup`) then +22 (`padsv_store`,
+   `aelemfastlex_store`, `helemexistsor`, `emptyavhv`, the try/catch/defer ops,
+   the class ops, the `builtin::` ops) and NONE removed -- about two new ops a
+   year, each needing one emitter arm.  The optree is an internal format with
+   no stability promise, and core `B::Deparse` now supports only ITS OWN perl
+   (zero `$]` conditionals in 5.40's 7,282 lines), so the maintenance model is
+   a per-version op table where an unknown op DIES by rule 12 -- a perl newer
+   than the emitter is refused loudly, never mis-translated; a perl older than
+   the oracle (the install matrix runs 22.04 = 5.34, 24.04 = 5.38) needs its
+   missing ops expressed in older shapes (`padsv` + `sassign` for
+   `padsv_store`), as Devel::Cover and Devel::NYTProf do.  Today's design pays
+   a comparable tax in a different place: a new perl syntax waits for a PPI
+   release, then a repair, then a lowering.  **A USER decision** under the
+   portability rule.
+4. **Modules load in the compiling perl.**  `use POSIX` loads the REAL POSIX
    there (only the parse facts matter); the runtime still loads the shim.  A
    shim whose prototypes differ from the real module's would mis-parse call
    sites -- the inverse of #2610, and checkable mechanically (shim vs
    `prototype(\&Real::f)`).
-4. **The emitted CL changes shape** (flat, op-shaped, constants folded:
+5. **The emitted CL changes shape** (flat, op-shaped, constants folded:
    `pi / 2 + pi / 4` arrives as a number).  Speed wins over readability by
    ruling; Target B (#75, clear IR) would be restated as "clear optree-to-CL".
    The 70 `Pl/t` files that assert emitted SHAPES need re-expression; the 230
    behaviour files, the sweep, everyday and the board do not.
-5. **The trough.**  Parity with today's 18,759 sweep rows is reached by
+6. **The trough.**  Parity with today's 18,759 sweep rows is reached by
    rebuilding the emission half from zero against the same oracles.  The s316t
    argument against a greenfield v3 (it re-derives parse knowledge) does NOT
    apply to the front half -- perl supplies it -- but applies to the emission
    half.  Estimate 40-60 sessions to parity, ±50 %.
-6. **What stays wrong.**  Every RUN-time divergence (numeric semantics such as
+7. **What stays wrong.**  Every RUN-time divergence (numeric semantics such as
    #3692, string ops, the regex engine, I/O) is untouched: the optree fixes
    the parse, not the runtime.
 
 What it ends with: a compiler about a fifth of today's size, zero parse
 divergence from perl by construction, the seven static-parse families gone,
-transpiles in milliseconds, and a front end that tracks perl releases
-instead of PPI's.
+transpiles in milliseconds, and a front end that tracks perl releases (about
+two new ops a year) instead of PPI's -- at the price of risk 2, the cache.
 
 ## 5. Recommendation and the decisions it needs
 
@@ -416,9 +449,12 @@ So:
 - **S2 version delta**: the same census under the local 5.32.1 (and 5.26.3)
   perlbrew builds -- which ops differ, how many conditionals an emitter
   carries per supported floor.
-- **S3 BEGIN-hazard census**: BEGIN bodies and import-time code in the four
-  populations that do anything but `use`, `@INC`, `$|`, `plan`, `chdir 't'`
-  -- the count and the kinds, so decision 1 below is taken on numbers.
+- **S3 compile-time INPUT and side-effect census**: BEGIN bodies, `use
+  constant` values and import-time code in the four populations that READ the
+  environment (%ENV, @ARGV, `$^O`, files, `eval { require }` probes, the clock)
+  or do anything but `use`, `@INC`, `$|`, `plan`, `chdir 't'` -- the count and
+  the kinds, so decision 1 below and the cache design (§4 Option 3, risk 2)
+  are taken on numbers.
 - **S4 vertical slice**: emit CLForm for the ~40 commonest ops onto the
   existing runtime and run the everyday programs that fit end to end; this
   proves the op-to-runtime-vocabulary fit and calibrates lines per op.
@@ -434,7 +470,10 @@ Parser.pm renaming and the §1c seam closure as fillers), 12-18 sessions.
 
 **Decisions this review puts to the USER**
 1. Is user code (BEGIN, `use` imports) running at TRANSPILE time acceptable,
-   given S3's count?  (Option 3's precondition.)
+   given S3's count -- and with it the cache consequence (§4 Option 3, risk
+   2): a cached unit that froze its compile-time environment, unless the
+   compile's inputs are recorded into the manifest?  (Option 3's
+   precondition.)
 2. The perl floor at transpile time: support 5.34+ in the emitter, or require
    the oracle perl?  (Portability rule.)
 3. Spike first (recommended) or Option 1 now?
