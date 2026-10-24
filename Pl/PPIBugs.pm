@@ -31,13 +31,20 @@ package Pl::PPIBugs;
 #             "Class=content" convention without the `PPI::Token::` prefix)
 #   title     the catalogue heading
 #   ppi       { confirmed => the PPI version the bug was last seen on,
-#               fixed_in  => undef while it reproduces, else the version }
+#               fixed_in  => undef while it reproduces;
+#                            'pcl' when PCL's PPI branch fixes it (s527a:
+#                            vendor/PPI, docs/ppi-fix-at-source-s527.md);
+#                            else the upstream PPI version that fixed it }
 #   when      token rows: the checker's contradiction-table row that flags it
 #             (Pl::PPIExpect: expect state, PPI class, content, predicate,
 #             check = the contradiction kind); other rows: { check => the
 #             checker kind that sees it or undef, shape => one line }
 #   fix       { kind => relex | retag | handler, handler => today's repair
-#               sub (undef = no workaround shipped) } -- a NAME, no engine yet
+#               sub (undef = no workaround shipped) } -- a NAME, no engine yet;
+#               a row fixed on the branch adds commit => the fix commit on
+#               branch `pcl`, group => its PR group letter
+#               (s527/upstream/PR-<letter>.md), pr => the upstream PR number
+#               once there is one (undef until then)
 #   repro     a minimal, RUNNABLE, valid perl program
 #   perl      perl 5.40.3's output for `repro` (PROBED, s525p)
 #   tokens    { got => PPI's dump of `repro` in the `dump` form (the bug),
@@ -53,6 +60,18 @@ package Pl::PPIBugs;
 # repair named in `fix` can be deleted (the 1a engine skips a row whose
 # fixed_in is <= the installed PPI).  A row is never deleted: a fixed bug
 # stays as the guard that it stays fixed.
+#
+# FIXED ON PCL'S BRANCH (fixed_in => 'pcl', s527a).  PCL parses with the
+# vendored PPI (Pl::VendorPPI), so the canary runs in two modes:
+#   * on the VENDORED lib (the gate) a 'pcl' row asserts `want` -- the
+#     branch keeps it fixed;
+#   * on a SYSTEM PPI (PCL_SYSTEM_PPI=1 prove Pl/t/ppi-bugs-registry-01.t)
+#     a 'pcl' row asserts `got`, and fails with
+#         upstream PPI <version> fixed §<id>: set fixed_in
+#     when the installed PPI gives `want`: upstream has released the fix, so
+#     set fixed_in to that version (and the branch commit can be dropped at
+#     the next rebase).  This is the "did upstream catch up" check; run it at
+#     every vendor refresh (tools/vendor-ppi).
 
 use strict;
 use warnings;
@@ -74,9 +93,9 @@ our @BUGS = (
    tasks => [305, 463] },
  { id => 2, kind => 'token', dump => 'tokens',
    title => 'C99 hex-float literal `0x1.8p+1` split into 5 tokens',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Number::Float', content => qr/^\.\d/, pred => 'prev_adj_number', check => 'hexfloat-split' },
-   fix => { kind => 'relex', handler => undef },
+   fix => { kind => 'relex', handler => undef, commit => 'd93bd718', group => 'I', pr => undef },
    repro => 'print 0x1.8p+1, "\\n";',
    perl => "3\n",
    tokens => {
@@ -100,9 +119,9 @@ our @BUGS = (
    tasks => [] },
  { id => 4, kind => 'token', dump => 'tokens',
    title => '`7%-3` tokenized as the magic hash `%-` (modulo lost)',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Magic', content => qr/^%[-+]$/, pred => '', check => 'magic-hash-for-modulo' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_fix_modulo_magic' },
+   fix => { kind => 'relex', handler => 'Pl::Parser::_fix_modulo_magic', commit => '1cff9293', group => 'B', pr => undef },
    repro => 'print 7%-3, "\\n";',
    perl => "-2\n",
    tokens => {
@@ -204,9 +223,9 @@ our @BUGS = (
    tasks => [351, 872, 931, 940] },
  { id => 12, kind => 'token', dump => 'tokens',
    title => '`)*name` — a `*` after a term is lexed as a GLOB, not multiplication',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Symbol', content => qr/^\*/, pred => '', check => 'glob-for-multiply' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_glob_multiply' },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_glob_multiply', commit => '1cff9293', group => 'B', pr => undef },
    repro => 'my ($s, $k) = (0, "abc"); $s += length($k)*length($k); print "$s\\n";',
    perl => "9\n",
    tokens => {
@@ -249,9 +268,9 @@ a
    tasks => [138, 472, 479, 563] },
  { id => 15, kind => 'token', dump => 'tokens',
    title => '`)` followed by `-1` — the operator is swallowed into a negative NUMBER',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Number', content => qr/^-/, pred => '', check => 'minus-in-number' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug' },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug', commit => 'a737c524', group => 'A', pr => undef },
    repro => 'my $x = (1+2)-1; print "$x\\n";',
    perl => "2\n",
    tokens => {
@@ -262,9 +281,9 @@ a
    tasks => [] },
  { id => 16, kind => 'token', dump => 'tokens',
    title => 'perl 5.40\'s `^^` (logical XOR) is tokenized as two `^` operators',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => '^', pred => 'prev_adj_caret', check => 'logical-xor-split' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_logical_xor_bug' },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_logical_xor_bug', commit => '21394cc3', group => 'C', pr => undef },
    repro => 'my ($p, $q) = (1, 0); my $r = $p ^^ $q; print "$r\\n";',
    perl => "1\n",
    tokens => {
@@ -333,9 +352,9 @@ print "after\\n";
    tasks => [] },
  { id => 21, kind => 'token', dump => 'tokens',
    title => 'A term-initial `~~` is lexed as the smart-match operator',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XTERM', class => 'Operator', content => '~~', pred => '', check => 'smartmatch-for-complements' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_term_initial_complement' },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_term_initial_complement', commit => 'e309445b', group => 'E', pr => undef },
    repro => 'my $y = 3; print ~~$y, "\\n";',
    perl => "3\n",
    tokens => {
@@ -359,9 +378,9 @@ print "after\\n";
    tasks => [372] },
  { id => 23, kind => 'token', dump => 'tokens',
    title => 'A `$` scalar with a NON-ASCII name is split into Cast + Word — but `@`/`%`/`*`/`&` are not',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XCAST', class => 'Word', content => '', pred => 'adj_nonascii', check => 'cast-then-word' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_merge_unicode_symbols' },
+   fix => { kind => 'relex', handler => 'Pl::Parser::_merge_unicode_symbols', commit => 'c6b17b5e', group => 'G', pr => undef },
    repro => 'use utf8; binmode STDOUT, \':utf8\';
 $Ｘ = 1; print "$Ｘ\\n";
 ',
@@ -374,22 +393,22 @@ $Ｘ = 1; print "$Ｘ\\n";
    tasks => [410, 422] },
  { id => 24, kind => 'token', dump => 'tokens',
    title => 'A PUNCTUATION-named array `@?` is split into Cast + Operator',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XCAST', class => 'Operator', content => '', pred => '', check => 'cast-then-punct' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_merge_punct_array_symbols' },
+   fix => { kind => 'relex', handler => 'Pl::Parser::_merge_punct_array_symbols', commit => '6876d6eb', group => 'D', pr => undef },
    repro => '@? = (1, 2); print join(" ", @?), "\\n";',
    perl => "1 2\n",
    tokens => {
      got  => ['Cast=@', 'Operator=?', 'Operator==', 'Structure=(', 'Number=1', 'Operator=,', 'Number=2', 'Structure=)', 'Structure=;', 'Word=print', 'Word=join', 'Structure=(', 'Quote::Double=" "', 'Operator=,', 'Cast=@', 'Operator=?', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
-     want => ['Symbol=@?', 'Operator==', 'Structure=(', 'Number=1', 'Operator=,', 'Number=2', 'Structure=)', 'Structure=;', 'Word=print', 'Word=join', 'Structure=(', 'Quote::Double=" "', 'Operator=,', 'Symbol=@?', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
+     want => ['Magic=@?', 'Operator==', 'Structure=(', 'Number=1', 'Operator=,', 'Number=2', 'Structure=)', 'Structure=;', 'Word=print', 'Word=join', 'Structure=(', 'Quote::Double=" "', 'Operator=,', 'Magic=@?', 'Structure=)', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;'],
    },
    unblocks => ['Pl/t/punct-array-glob-01.t', 't/re/subst.t'],
    tasks => [415, 418, 449, 550, 653] },
  { id => 25, kind => 'token', dump => 'tokens',
    title => '`-name` after a token that ENDS A TERM is lexed as one negative-bareword Word',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Word', content => qr/^-/, pred => '', check => 'minus-in-word' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_minus_word' },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_minus_word', commit => 'a737c524', group => 'A', pr => undef },
    repro => 'my $z = length("abc")-length("a"); print "$z\\n";',
    perl => "2\n",
    tokens => {
@@ -426,9 +445,9 @@ $Ｘ = 1; print "$Ｘ\\n";
    tasks => [663] },
  { id => 28, kind => 'token', dump => 'tokens',
    title => '`$x.2` — a `.` followed by a digit after a term is lexed as a Number::Float, so the concatenation OPERATOR disappears',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Number::Float', content => qr/^\.\d/, pred => '', check => 'dot-in-number' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_dot_number' },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_dot_number', commit => 'a39e723d', group => 'F', pr => undef },
    repro => '$_ = 1; my $x = $_.2; print "$x\\n";',
    perl => "12\n",
    tokens => {
@@ -468,9 +487,9 @@ $Ｘ = 1; print "$Ｘ\\n";
    tasks => [435, 1501] },
  { id => 31, kind => 'token', dump => 'statements',
    title => '`sub _ { … }` — the NAME `_` after `sub` is lexed as `Token::Magic`, so no `Statement::Sub` is built and the FOLLOWING statement is swallowed',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XSUBNAME', class => 'Magic', content => '_', pred => '', check => 'sub-name-as-magic' },
-   fix => { kind => 'retag', handler => undef },
+   fix => { kind => 'retag', handler => undef, commit => '8cefefce', group => 'H', pr => undef },
    repro => 'sub _ { "x" } print "y\\n";',
    perl => "y\n",
    tokens => {
@@ -513,9 +532,9 @@ print g(), "\\n";
    tasks => [2098] },
  { id => 34, kind => 'token', dump => 'tokens',
    title => 'After a FLOAT / EXP / HEX / OCTAL / BINARY number, `-N` is lexed as a NEGATIVE NUMBER — the subtraction operator disappears',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Number::Float', content => qr/^-/, pred => 'prev_nonint_number', check => 'minus-in-number' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug' },
+   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_negative_number_bug', commit => 'a737c524', group => 'A', pr => undef },
    repro => 'print 1.5-0.5, " ", 1e3-1, " ", 0x10-1, "\\n";',
    perl => "1 999 15\n",
    tokens => {

@@ -88,9 +88,27 @@ my $v = $PPI::VERSION;
 }
 
 # ── the canary: each bug still reproduces, or its fix is recorded ────────────
+my $vendored = Pl::VendorPPI::is_vendored();
 for my $b (@bugs) {
   my ($id, $fixed) = ($b->{id}, $b->{ppi}{fixed_in});
   my $dump = [ $FORM{ $b->{dump} }->($b->{repro}) ];
+  # Fixed on PCL's PPI branch (Pl::PPIBugs header): `want` on the vendored
+  # lib; on a system PPI the bug must still reproduce, and a dump that is
+  # `want` there is upstream catching up.
+  if (defined $fixed && $fixed eq 'pcl') {
+    if ($vendored) {
+      is_deeply($dump, $b->{tokens}{want}, "§$id stays fixed on PCL's PPI branch ($v, vendored)")
+        or diag join("\n", 'dump:', @$dump);
+      next;
+    }
+    my $same = join("\0", @$dump) eq join("\0", @{ $b->{tokens}{got} });
+    my $want = join("\0", @$dump) eq join("\0", @{ $b->{tokens}{want} });
+    ok($same, $same ? "§$id reproduces on system PPI $v (fixed on PCL's branch)"
+                    : $want ? "upstream PPI $v fixed §$id: set fixed_in"
+                            : "system PPI $v changed §$id (neither got nor want)")
+      or diag join("\n", "the dump of the §${id} repro is now:", @$dump);
+    next;
+  }
   if (defined $fixed && vcmp($fixed, $v) <= 0) {
     is_deeply($dump, $b->{tokens}{want}, "§$id stays fixed on PPI $v (fixed in $fixed)")
       or diag join("\n", 'dump:', @$dump);

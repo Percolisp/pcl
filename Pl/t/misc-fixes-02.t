@@ -975,21 +975,24 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
 }
 {
     my $doc = PPI::Document->new(\'$s += length($k)*length($k);');
-    ok( $doc && grep { $_->isa('PPI::Token::Symbol') && $_->content =~ /^\*/ } $doc->tokens,
-        'CANARY: PPI still lexes `)*name` as a GLOB instead of multiplication — '
-      . 'if this FAILS, drop _repair_glob_multiply (ppi-upstream-bugs.md §12)' );
+    ok( $doc && !(grep { $_->isa('PPI::Token::Symbol') && $_->content =~ /^\*/ } $doc->tokens)
+             && (grep { $_->isa('PPI::Token::Operator') && $_->content eq '*' } $doc->tokens),
+        'FIXED ON PCL\'S PPI BRANCH (s527a, group B): `)*name` lexes as Operator(*) + Word, '
+      . 'not a glob (ppi-upstream-bugs.md §12; PCL\'s _repair_glob_multiply is redundant)' );
 }
 {
     my $doc = PPI::Document->new(\'my $x = (1+2)-1;');
-    ok( $doc && grep { $_->isa('PPI::Token::Number') && $_->content eq '-1' } $doc->tokens,
-        'CANARY: PPI still swallows `)-1` into a negative Number — if this '
-      . 'FAILS, drop _fix_ppi_negative_number_bug (ppi-upstream-bugs.md §15)' );
+    ok( $doc && !(grep { $_->isa('PPI::Token::Number') && $_->content eq '-1' } $doc->tokens)
+             && (grep { $_->isa('PPI::Token::Operator') && $_->content eq '-' } $doc->tokens),
+        'FIXED ON PCL\'S PPI BRANCH (s527a, group A): `)-1` lexes as Operator(-) + Number(1) '
+      . '(ppi-upstream-bugs.md §15; PCL\'s _fix_ppi_negative_number_bug is redundant)' );
 }
 {
     my $doc = PPI::Document->new(\'my $x = 1.5-0.5;');
-    ok( $doc && grep { $_->isa('PPI::Token::Number::Float') && $_->content eq '-0.5' } $doc->tokens,
-        'CANARY: PPI still swallows `FLOAT-N` into a negative Number — if this '
-      . 'FAILS, _fix_ppi_negative_number_bug\'s Number-subclass half may go (ppi-upstream-bugs.md §34)' );
+    ok( $doc && !(grep { $_->isa('PPI::Token::Number') && $_->content eq '-0.5' } $doc->tokens)
+             && (grep { $_->isa('PPI::Token::Operator') && $_->content eq '-' } $doc->tokens),
+        'FIXED ON PCL\'S PPI BRANCH (s527a, group A): `FLOAT-N` lexes as Operator(-) + Number '
+      . '(ppi-upstream-bugs.md §34)' );
 }
 {
     my $doc = PPI::Document->new(\'print $fh -e $f;');
@@ -1019,9 +1022,9 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
 }
 {
     my $doc = PPI::Document->new(\'my $r = $a ^^ $b;');
-    ok( $doc && !grep { $_->isa('PPI::Token::Operator') && $_->content eq '^^' } $doc->tokens,
-        'CANARY: PPI still splits perl 5.40 `^^` into two operators — if this '
-      . 'FAILS, drop _fix_ppi_logical_xor_bug (ppi-upstream-bugs.md §16)' );
+    ok( $doc && (grep { $_->isa('PPI::Token::Operator') && $_->content eq '^^' } $doc->tokens),
+        'FIXED ON PCL\'S PPI BRANCH (s527a, group C): perl 5.40 `^^` lexes as ONE operator '
+      . '(ppi-upstream-bugs.md §16; PCL\'s _fix_ppi_logical_xor_bug is redundant)' );
 }
 {
     my $doc = PPI::Document->new(\'my $v = ${$r}[0];');
@@ -1220,10 +1223,10 @@ test_cl('term-initial ~~ as a call argument',
         'sub f { $_[0] } my $x = 7; print f(~~$x), "\n";', "7\n");
 {
     my $doc = PPI::Document->new(\'is(~~$y, 3);');
-    ok( (grep { $_->isa('PPI::Token::Operator') && $_->content eq '~~' } $doc->tokens),
-        'CANARY: PPI still lexes a term-initial `~~` as the smart-match '
-      . 'operator — if this FAILS, PPI is fixed: drop '
-      . '_repair_term_initial_complement (ppi-upstream-bugs.md §21)' );
+    ok( !(grep { $_->isa('PPI::Token::Operator') && $_->content eq '~~' } $doc->tokens)
+          && 2 == (grep { $_->isa('PPI::Token::Operator') && $_->content eq '~' } $doc->tokens),
+        'FIXED ON PCL\'S PPI BRANCH (s527a, group E): a term-initial `~~` lexes as two `~` '
+      . 'complements (ppi-upstream-bugs.md §21; PCL\'s _repair_term_initial_complement is redundant)' );
 }
 
 # ── #922: integer stringification across the FIXNUM boundary ────────────────

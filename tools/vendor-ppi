@@ -66,7 +66,7 @@ my $tree = git("rev-parse", "$branch:lib");
 # sections it fixes (§N); the fix commits are lettered A, B, C ... in branch
 # order -- the
 # PR groups of docs/ppi-fix-at-source-s527.md and s527/upstream/PR-<letter>.md.
-my (@commit, @fix);
+my (@commit, @fix, %group);
 {
   my $raw = `git -C '$clone' log --reverse --format='%h%x09%s%x09%b%x1e' $base..$branch`;
   die "git log failed\n" if $?;
@@ -78,8 +78,12 @@ my (@commit, @fix);
     next if $subj =~ /^TODO tests?:/;       # the failing-tests half of a PR
     my @sec = ($body // '') =~ /§(\d+)/g;
     next if !@sec || $subj =~ m{t/ppi_bugs_pcl\.t};
-    push @fix, "$letter " . join(' ', map { "§$_" } @sec) . " $h $subj";
-    $letter++;
+    # A later fix to sections one group already fixed belongs to that group
+    # (a PR that grew a second fix commit keeps its letter).
+    my %g = map { $group{$_} ? ($group{$_} => 1) : () } @sec;
+    my $l = (keys(%g) == 1 && !grep { !$group{$_} } @sec) ? (keys %g)[0] : $letter++;
+    $group{$_} //= $l for @sec;
+    push @fix, "$l " . join(' ', map { "§$_" } @sec) . " $h $subj";
   }
 }
 

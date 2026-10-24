@@ -144,6 +144,8 @@ dropped statements.
 
 ## 2. C99 hex-float literal `0x1.8p+1` split into 5 tokens  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527a: group I, commit `d93bd718` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-I.md`).
+
 **Perl 5.22+:** `0x1.8p+1` is a single numeric literal (== 3.0).
 
 **PPI:** tokenizes it as five separate tokens:
@@ -185,6 +187,8 @@ glob/readline") so we notice if either PPI or PCL regresses.
 ---
 
 ## 4. `7%-3` tokenized as the magic hash `%-` (modulo lost)  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527a: group B, commit `1cff9293` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-B.md`).
 
 **Perl:** `7%-3` is `7 % -3` → `-2`. `%+`/`%-` are the named-capture magic
 *hashes*; they only appear in term position, never right after a term.
@@ -698,6 +702,8 @@ modifier "/b"`), i.e. perl reads that `/` as a match as well.
 
 ## 12. `)*name` — a `*` after a term is lexed as a GLOB, not multiplication  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527a: group B, commit `1cff9293` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-B.md`).
+
 **Perl:** a `*` where a term has just ENDED is multiplication; a glob can only
 start where a TERM can.
 
@@ -912,6 +918,8 @@ emission-ab over 921 files was SAME 921 — so the rows are the only guard).
 
 ## 15. `)` followed by `-1` — the operator is swallowed into a negative NUMBER  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527a: group A, commit `a737c524` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-A.md`).
+
 **Perl:** `(1+2)-1` is subtraction; a `-` where a term has just ended cannot
 start a literal.
 
@@ -935,6 +943,8 @@ previous token ends a term.  Logged s404 (the workaround predates the log).
 ---
 
 ## 16. perl 5.40's `^^` (logical XOR) is tokenized as two `^` operators  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527a: group C, commit `21394cc3` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-C.md`).
 
 **Perl 5.40:** `$a ^^ $b` is the low-precedence-style logical XOR operator.
 
@@ -1156,6 +1166,8 @@ running perl, so a perl that changes them fails a row).
 
 ## 21. A term-initial `~~` is lexed as the smart-match operator  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527a: group E, commit `e309445b` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-E.md`).
+
 **Perl:** `~~` is the smart match only where an OPERATOR may stand.  Where a
 TERM is expected it is two complements, `~(~$x)` — the classic "numify /
 truncate to integer" idiom, which perl-tests/bop.t and t/op/bop.t both assert:
@@ -1253,6 +1265,8 @@ the spaced form keeps its correct reading.  Guard rows:
 
 ## 23. A `$` scalar with a NON-ASCII name is split into Cast + Word — but `@`/`%`/`*`/`&` are not  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527a: group G, commit `c6b17b5e` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-G.md`).
+
 Perl has allowed unicode identifiers since 5.8 (`use utf8`), and PPI reads them
 correctly for every sigil except `$`:
 
@@ -1329,6 +1343,8 @@ row in `docs/ppi-bug-report.t`.
 ---
 
 ## 24. A PUNCTUATION-named array `@?` is split into Cast + Operator  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527a: group D, commit `6876d6eb` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-D.md`).
 
 perl lets any punctuation character name a global, and real code uses it —
 `t/re/subst.t:346` is `ok( ! @?, 'parsing of split subst with comment' );`.
@@ -1430,6 +1446,8 @@ and fail there.  All of it is task #653.
 ---
 
 ## 25. `-name` after a token that ENDS A TERM is lexed as one negative-bareword Word  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527a: group A, commit `a737c524` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-A.md`).
 
 The third sibling of §12 (`)*name` read as a glob) and §15 (`)-1`), and the one
 that was still unrepaired when the s435 announce→DIE flip made it fatal.
@@ -1667,6 +1685,8 @@ call, a subscript, a hash element, a string, a number and a paren.
 
 ## 28. `$x.2` — a `.` followed by a digit after a term is lexed as a Number::Float, so the concatenation OPERATOR disappears  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527a: group F, commit `a39e723d` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-F.md`).
+
 The fourth sibling of §12 (`)*name`), §15 (`)-1`) and §25 (`)-name`): the same
 operator-vs-term decision, in the one position PPI still gets wrong.
 
@@ -1879,6 +1899,8 @@ recoverable half (every `$script_end = ""` twin), which is why the file moves
 
 ## 31. `sub _ { … }` — the NAME `_` after `sub` is lexed as `Token::Magic`, so no `Statement::Sub` is built and the FOLLOWING statement is swallowed  [CONFIRMED 1.291]
 
+**FIXED on PCL's PPI branch** (s527a: group H, commit `8cefefce` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-H.md`).
+
 **Perl:** `_` is an ordinary subroutine name.  `sub _ { "x" }` defines
 `&main::_`, and the bareword `_` keeps its magic meaning (the stat buffer)
 only in filetest operand position — `perldoc -f -X` says so explicitly, and
@@ -2046,6 +2068,8 @@ population yet).  Upstream row: `docs/ppi-bug-report.t`.
 ---
 
 ## 34. After a FLOAT / EXP / HEX / OCTAL / BINARY number, `-N` is lexed as a NEGATIVE NUMBER — the subtraction operator disappears  [CONFIRMED 1.291]
+
+**FIXED on PCL's PPI branch** (s527a: group A, commit `a737c524` on branch `pcl`, vendored as vendor/PPI -- docs/ppi-fix-at-source-s527.md); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-A.md`).
 
 The sibling of §15 (`)` then `-1`), from the other side: here the term that
 ends before the minus is itself a number.  PPI's plain-integer tokenizer
