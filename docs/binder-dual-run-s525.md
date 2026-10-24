@@ -110,8 +110,9 @@ perl -> base `81ef05e5` -> tree; the tree is inert so it equals the base):**
 | **#3800** | local.t:615 | binding_at lex->undef | `_head_binding` takes every EARLIER sibling of an anon sub's list as its head, so a `my $x` inside an earlier anon sub makes `$x` "lex" in a later one; in a sub body (not flattened) the requalifier leaves it unqualified -> written to `main::` | A7.pl: `main=u P=5` -> `main=5 P=u` **SILENT WRONG** |
 | **#3801** | local.t:652, :660; write.t:1562, :1564 | binding_at undef->lex | chained `my $S = my $F = 0;`: `_declarator_syms` reads only the first declarator, so `$F` is requalified to the package global after a `package` switch | B4.pl: `F=2 S=2 T::F=u` -> `F= S=2 T::F=2` **SILENT WRONG** |
 | **#3804** | universal.t:186; taint.t:1763 | binding_at undef->lex (the declarator) | `tie my($x), CLASS` after an in-block `package` switch in a sub: the `my` is lost, `$CLASS::x` is tied and read | F1.pl: `global untied` -> `global tied` **SILENT WRONG** |
-| **#3802** | Text-CSV t/66_formula.t:74, :170 | block_captures 1->0 | a `my` nested in a call's argument list (`ok(my $csv = …)`) is invisible to the capture scan, so the FILE lexical `$csv` is reported captured and promoted | C1.pl: identical output -- BENIGN (wrong `:captures`, an unneeded cell) |
+| **#3802** | Text-CSV t/66_formula.t:74, :170; gate: first-run-01.t's Side.pm (x2) | block_captures 1->0 | a `my` nested in a call's argument list (`ok(my $csv = …)`, `open(my $l, …)`) is invisible to the capture scan, so the FILE lexical of that name is reported captured and promoted | C1.pl: identical output -- BENIGN (wrong `:captures`, an unneeded cell) |
 | **#3803** | write.t:2224 | ref_shadowed 0->1 | `_ref_shadowed`'s sibling walk does not see a compound HEAD `foreach my $e` (no twin of `_head_binding`) | E4.pl: identical output -- BENIGN; in write.t the loop var becomes a `:dyn` cell, unreachable (formline dies first) |
+| **#3806** | gate: sig-param-shadow-01.t, row "a DIFFERENT-sigil use of the same bare name is still a capture" | block_captures 1->0 | `sub g ($x) { "g($x)[@x]" }` written BEFORE `my @x`: perl reads the GLOBAL `@x` (intro_my); the signature path counts the later `my @x` and refuses -- and the row ASSERTS that refusal | H1.pl: `g(1)[]` -> `Transpile failed` -- a LOUD refusal of valid perl |
 
 **(b) BINDER ERROR -- fixed in this batch (rule in §1):** `\$b[0]` read as
 `$b` (aassign.t:183; the cast rule excludes `\`); a bare `$` signature
@@ -120,9 +121,11 @@ shape (re/pat.t, re/pat_rt_report.t; they are `Token::Magic`; #3805 asks the
 PPI-registry filler whether that is a PPI quirk -- probably not).  Earlier
 (before the resume): the current-names layer, for every rename-mid-pass row.
 
-**(c) DESIGN GAP -- recorded for 1c:** **5 sites**, one shape: a name that
-occurs only inside the TEXT of a string `eval` (`sub { eval '$x' }` --
-closure.t:548, lexsub.t:653, eval.t:279 `$zzz`, eval.t:328 `$zzz` / `$yyy`).
+**(c) DESIGN GAP -- recorded for 1c:** **5 sites in the suites + 4 in the
+gate's own programs**, one shape: a name that occurs only inside the TEXT of a
+string `eval` (`sub { eval '$x' }` -- closure.t:548, lexsub.t:653, eval.t:279
+`$zzz`, eval.t:328 `$zzz` / `$yyy`; gate: `eval '$n = $o'`,
+`eval 'sub { package Other; … }'`, `return eval '…'`).
 The legacy capture scan counts it (conservatively: a string eval compiled at
 run time may read any visible lexical, ir-spec §2b); the binder models the
 compile-time pad, where a closure does not capture a name only an eval string
@@ -161,8 +164,8 @@ tree).
    string-eval CV fact of §4(c).  Retires `_block_captures_name_0`'s two
    scope loops (:4025, :4055) and its `%canon_pat` text sets,
    `_enclosing_lex_decl` (:5654); rename reason `__file__` (:captured).
-   Under it: **#3802** and the 5 design-gap sites (which need the eval fact
-   first, or the port changes those five files' emission).
+   Under it: **#3802**, **#3806** and the 9 design-gap sites (which need the
+   eval fact first, or the port changes those files' emission).
 3. **Span** (`_check_my_spanning` :3128 and `_rename_spanning_lexicals` :4505
    / :4671-:4740 -> `_canon_refs_in` -> `_ref_shadowed`; `_lex_referenced_after`
    :3075 from `_pkgblock_shadows_file_lexical` :3044).  Query: "does binding B
