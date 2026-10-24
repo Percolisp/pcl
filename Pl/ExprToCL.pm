@@ -6242,10 +6242,16 @@ sub _try_compile_subst_e {
         shift @parts;
       }
 
+      # The replacement's embedded blocks (a `sub { … }`, a map/grep/sort
+      # block) are compiled by the PARSER that is lowering the enclosing
+      # statement -- the one route every other expression takes (#1026).
+      # Without it an anon sub stays an `anon_sub` node no emitter takes.
+      my $outer = $self->expr_o;
       my $expr_o = Pl::PExpr->new(
         e        => \@parts,
         full_PPI => $doc,
         ($self->environment ? (environment => $self->environment) : ()),
+        (($outer && $outer->has_parser) ? (parser => $outer->parser) : ()),
       );
       my $node_id = $expr_o->parse_expr_to_tree(\@parts);
       my $gen = Pl::ExprToCL->new(

@@ -632,4 +632,31 @@ PL
     is($got, 'died died died died ', 'the untranslated control verbs still die trappably (#2386, #2372)');
 }
 
+# #1026: an embedded BLOCK in an s///e replacement -- an anon sub (TimeDate's
+# Date/Format.pm:65 `($_[0]->can("format_$1") || sub { $1 })->($_[0])`), a
+# map / grep / sort block, a do block, a closure over a lexical -- is compiled
+# by the parser like any other expression's block.  It failed the whole
+# TRANSPILE ("no form emitter for expression node type 'anon_sub'").
+{
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'EOP';
+sub f_Y { "y" }
+my $z = "aXbY";
+$z =~ s/([XY])/(main->can("f_$1") || sub { "<$1>" })->()/ge;
+my @a = (1, 2); my $m = "M";
+$m =~ s/M/join ":", map { $_ * 2 } @a/e;
+my @w = ("b", "a", ""); my $s = "Q";
+$s =~ s/Q/join "", sort { $a cmp $b } grep { length } @w/e;
+my $lex = 7; my $t = "a1b2";
+$t =~ s/(\d)/my $c = sub { $1 + $lex }; $c->()/ge;
+my $n = "x"; $n =~ s/x/do { my $q = 3; $q + 1 }/e;
+print "$z $m $s $t $n\n";
+EOP
+    close $fh;
+    chomp(my $want = `$^X $file 2>&1`);
+    chomp(my $got = `$RealBin/../../runpcl $file 2>&1`);
+    is($want, 'a<X>by 2:4 ab a8b9 4', 'perl oracle for the s///e block rows (#1026)');
+    is($got, $want, 'an s///e replacement compiles its anon sub / map / sort / grep / do blocks (#1026)');
+}
+
 done_testing();
