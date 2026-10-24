@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "Found by s527a (2026-10-24): since PCL parses with the VENDORED PPI (vendor/PPI/lib, loaded through Pl::VendorPPI on the compiler's @INC only -- PCLPaths::program_inc drops the dir from the PROGRAM's @INC, as perl would), the runtime's compiler stamp `%p-compute-compiler-stamp` (cl/pcl-runtime.lisp, `%p-ppi-files`) still locates PPI through the PROGRAM's @INC (`p-find-module-in-inc \"PPI.pm\"`) -- i.e. it now stamps the SYSTEM PPI (or none, on a machine without one), not the PPI that produced the emission.  Pl::ProtoCache's perl-side twin (`_ppi_files`) reads %INC and does stamp the vendored files.  The Pl::ProtoCache header says the two stamps \"need the same INPUTS\".\n\nConsequence: after a `tools/vendor-ppi` refresh that changes tokenization, a cached SCRIPT transpile (the runtime's cache) is not invalidated by the stamp; only the generation bump or a Pl/ change would.  No wrong answer today (the vendored lib only changes by commit, and s527a's emission is byte-identical to main), but the input is the wrong one.\n\nFix (cl/, so not in s527a's scope): `%p-ppi-files` should take PPI from <root>/vendor/PPI/lib when it exists (the root is known to the runtime through *pcl-pl2cl-path*), falling back to the program @INC for an installation without it.  Discriminating check: touch vendor/PPI/lib/PPI/Tokenizer.pm (mtime) and see whether `pcl SCRIPT` re-transpiles a cached script.\n",
+   "id" : "3921",
+   "status" : "pending",
+   "subject" : "The runtime compiler stamp (%p-ppi-files) stamps the SYSTEM PPI found via the program @INC, not the vendored PPI that produced the emission (s527a)"
+}

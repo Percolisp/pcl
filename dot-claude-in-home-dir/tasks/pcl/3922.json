@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "Found by s527a's §31 probe (2026-10-24).  With the vendored PPI `sub _ { ... }` is now a Statement::Sub named `_` (group H; t/op/filetest.t:161-162 moved DROP -> OK in the gate-SET scan and both rows print 1 as perl does).  But a CALL of that sub is still dropped:\n\n    sub _ { \"x\" } print _(), \"y\\n\";      # perl: xy\n    PCL: statement dropped ... print _(), \"\\n\"; -- Bug. Fell through. Missing case: ['Token::Magic<_>', ...]\n\nPPI (master and branch alike) lexes the `_` of `_()` as Token::Magic, the stat filehandle -- it is the stat filehandle everywhere but after `sub`, and a `_` followed directly by `(` is a call in perl (`-f _` never takes parens).  Two possible fixes: (a) on the PPI branch, `_` followed by `(` is a Word (Token/Word.pm __underscore_class, the helper group H added: one more condition); (b) at PCL's lowering, a Magic `_` followed by a List is a call to `main::_`.  (a) is the right layer (a token class) and is a new row for s527b's tokenizer batch.  Reproducer: scratch/s527a/residual/filetest-sub_.pl in the s527a worktree.\n",
+   "id" : "3922",
+   "status" : "pending",
+   "subject" : "A call of a sub named _ (`_()`) is still dropped: PPI lexes the _ before ( as the stat filehandle (s527a Â§31 probe; fix on the PPI branch)"
+}

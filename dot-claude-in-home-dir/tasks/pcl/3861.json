@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FOUND + FIXED s526w2 (Opus, 2026-10-24), Pod-Simple-3.47 board census.  PRE-EXISTING on main b89b6add.  SILENT (the statement's real argument vanished; the failure surfaced later).\n\n    use File::Spec; require File::Spec->catfile($dir, \"ao.pl\");   # ao.pl: sub ascii_order { $a cmp $b } 1;\n    print join(\"|\", sort ascii_order qw(b a c)), \"\\n\";\n  perl: a|b|c     PCL (main): dies \"Undefined sort subroutine \"main::ascii_order\" called\"; emission was (p-require \"File::Spec\")\n\nCAUSE: Pl/Parser.pm _process_include_statement takes PPI's Statement::Include->module (the first bareword) as the module name; perl reads a bareword followed by `->` as a CLASS name in a method-call expression.  Not a PPI bug (the token stream is right; ->module is a convenience accessor).\nFIX: when the module word's next significant sibling is `->`, $module = '' so the existing EXPRESSION path lowers the whole argument: (p-require-file (p-method-call (p-resolve-invocant \"File::Spec\") \"catfile\" ...)).  Probes (scratch/s526w2/preq.pl) perl = tree for: plain require, require-with-modifier, the method form, %INC, a missing file dying in eval.  Guard Pl/t/misc-fixes-01.t row 139, inverse-verified on a main extraction.\nNOT covered: the EXPRESSION-context spelling (`my $v = require Foo->bar(...)`, Pl/ExprToCL.pm ~2671) -- not probed.\nROWS: Pod-Simple search10/12/20/22/26/28.t (*PLAN* rows; counted in the census).\n",
+   "id" : "3861",
+   "status" : "completed",
+   "subject" : "`require Class->method(...)` was lowered as `require Class` and the method call DROPPED without a word -- perl requires the file the call returns (Pod-Simple t/search*.t: `require File::Spec->catfile($t_dir, 'ascii_order.pl')`, then `sort ascii_order ...` died \"Undefined sort subroutine\")\n"
+}
