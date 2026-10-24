@@ -161,6 +161,17 @@ The s515c widening (14 -> 19 dists: Text-CSV, Getopt-Long, JSON-PP, HTTP-Tiny,
 Path-Tiny) is recorded in `docs/session-log.md` (Session s515c) with its
 per-dist cause tables.
 
+The s526 widening (the USER asked on 2026-10-24 for the new CPAN modules to be installed)
+adds ten dists chosen by USE, in two census briefs.  Half 1 (s526w1):
+TimeDate, HTTP-Date, URI, HTTP-Message, YAML-Tiny (the repo copy) and
+Data-Dumper (its pure-Perl half, run from the dist's own `blib/lib` with
+`--inc=`: the dist has no `lib/`); half 2 (s526w2): YAML-PP, Pod-Simple,
+Log-Log4perl, Template-Toolkit (its PP-stash build note is w2's).  The
+INSTALL step came first (Fable, `cpanm` into the oracle perl from the
+fetched copies under `~/.cpan/build`, every missing prerequisite with
+them), so `prove -b` in each dist is the oracle side.  Census and filler
+detail: `docs/session-log.md` (Session s526w1).
+
 ## Release gate (exit criteria)
 - [ ] Every corpus module loads + passes 100% of non-not-supported `t/` tests, 0 crashes.
 - [ ] `prove -j8 Pl/t/` 100% green; sweep fully-passing not regressed.
