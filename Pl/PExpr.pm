@@ -14,7 +14,7 @@ use Moo;
 
 use Scalar::Util qw/looks_like_number/;
 
-use PPI;
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use PPI::Dumper;
 use Pl::CLForm ();
 # For fh_bareword_shape — THE shape test for a bareword filehandle name, asked
@@ -7290,7 +7290,7 @@ Pl::PExpr - Expression parser that extends PPI with operator precedence
 =head1 SYNOPSIS
 
     use Pl::PExpr;
-    use PPI;
+    use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 
     # Example 1: Parse a simple expression
     my $doc    = PPI::Document->new(\'$x + $y * 2');

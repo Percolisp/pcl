@@ -7,7 +7,8 @@
 # deps.sh — the DEPENDENCY half of the fresh-machine recipe (tasks #876, #1304).
 #
 # Everything a stock Ubuntu/Debian image needs before PCL can be installed:
-# apt packages, PPI from CPAN (apt's is under the 1.291 floor) and the pinned
+# apt packages (PPI itself is vendored in the tree -- vendor/PPI, s527a -- so
+# only its dependencies are installed here) and the pinned
 # SBCL binary from sbcl.org.  There is NO Lisp-library step: PCL vendors
 # cl-ppcre (cl/vendor/cl-ppcre/, task #1597), so SBCL itself is the whole Lisp
 # side and the Quicklisp install this file used to do is gone.
@@ -25,7 +26,7 @@
 # every user in the image can use it.
 #
 # Rationale for each choice lives in .github/workflows/ci.yml's header comment:
-# PPI comes from CPAN because apt's 1.277 is under the 1.291 floor; SBCL is
+# PPI is vendored, so apt brings only its dependencies; SBCL is
 # sbcl.org's pinned binary because the distro's is under the 2.5.2 floor;
 # Data::Dump + Try::Tiny are gate-row FIXTURES, not deps.  SBCL_VERSION is
 # caller-chosen because the 2.6.0 binary needs glibc >= 2.38 (first-run fact):
@@ -43,10 +44,6 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
 SBCL_VERSION="${SBCL_VERSION:-2.6.0}"
-# EXPORTED because the floor check below is a child perl reading $ENV{PPI_MIN}:
-# unexported, that comparison was against undef and could not fail (the CI
-# workflow exports it as a job env, which is why it worked there).
-export PPI_MIN="${PPI_MIN:-1.291}"
 
 echo "== distro =="
 . /etc/os-release && echo "$PRETTY_NAME"
@@ -55,13 +52,10 @@ echo "== apt packages =="
 apt-get update -q
 apt-get install -qy --no-install-recommends \
     perl cpanminus make gcc curl ca-certificates bzip2 git \
-    libppi-perl libmoo-perl libdata-dump-perl libtry-tiny-perl
+    libclone-perl libparams-util-perl libtask-weaken-perl libsafe-isa-perl \
+    libmoo-perl libdata-dump-perl libtry-tiny-perl
 
-echo "== PPI >= $PPI_MIN from CPAN (apt's is under the floor) =="
-# apt's PPI brings the dependency chain as packages; cpanm then puts the
-# current PPI in /usr/local, which precedes /usr/share in @INC.
-cpanm --notest --quiet PPI
-perl -MPPI -e 'print "PPI $PPI::VERSION\n"; exit($PPI::VERSION >= $ENV{PPI_MIN} ? 0 : 1)'
+echo "== PPI is vendored (vendor/PPI); tools/install-pcl checks that it loads =="
 perl -MMoo -e 'print "Moo $Moo::VERSION\n"'
 
 echo "== SBCL $SBCL_VERSION (pinned binary from sbcl.org) =="

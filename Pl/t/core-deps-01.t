@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 # core-deps-01.t — PCL depends on exactly PPI and Moo; nothing else that is
-# not core perl (s440).
+# not core perl (s440).  Since s527a PPI is VENDORED (vendor/PPI/lib, loaded
+# through Pl::VendorPPI), so its own files are in this repository and only
+# ITS non-core dependencies (Clone, Params::Util, Task::Weaken, Safe::Isa)
+# are installed; they are in the closure below because the vendored PPI
+# loads them.
 #
 # The first CI run (s439) failed because three Pl/*.pm files imported
 # Data::Dump for their debug dumps: present on every dev machine via a distro
@@ -75,7 +79,7 @@ sub module_of {
 
 # ---- 1. the closure of the two declared dependencies, exercised
 my %closure = map { $_ => 1 } child_inc('PPI+Moo closure',
-    'require PPI; require PPI::Dumper; require PPI::Document;'
+    'require Pl::VendorPPI; require PPI::Dumper; require PPI::Document;'
   . 'package CoreDeps::R; use Moo::Role; requires "x";'
   . 'package CoreDeps::T; use Moo; has x => (is => "rw"); has y => (is => "lazy", builder => sub { 1 });'
   . 'package CoreDeps::U; use Moo; extends "CoreDeps::T"; with "CoreDeps::R"; around x => sub { my $o = shift; $o->(@_) };'

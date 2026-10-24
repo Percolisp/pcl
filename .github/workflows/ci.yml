@@ -5,10 +5,10 @@
 # so a green run here IS the #282 fresh-machine property for the ubuntu
 # image.  The Pl/t xs rows plan-skip (no pclxs sibling in CI).
 #
-# Perl modules: PPI comes from CPAN because PCL's token repairs are keyed on
-# PPI 1.291's stream (README "Requirements"; the installer checks the floor)
-# and ubuntu-latest's libppi-perl is 1.277.  Moo is version-insensitive, so
-# apt's is fine.  Data::Dump and Try::Tiny are NOT PCL dependencies -- they are
+# Perl modules: PPI is VENDORED (vendor/PPI, s527a: PCL's branch of upstream
+# PPI with its fix commits; the installer checks that it loads), so only PPI's
+# own non-core dependencies come from apt (Clone, Params::Util, Task::Weaken,
+# Safe::Isa).  Moo is version-insensitive, so apt's is fine.  Data::Dump and Try::Tiny are NOT PCL dependencies -- they are
 # the FIXTURES of a few gate rows (a transpile subject, a perl-oracle module),
 # which skip without them; CI installs both so those rows run.  The gate's own
 # guard for this is Pl/t/core-deps-01.t.
@@ -31,7 +31,6 @@ on:
 
 env:
   SBCL_VERSION: "2.6.0"
-  PPI_MIN: "1.291"
 
 jobs:
   gate:
@@ -43,14 +42,12 @@ jobs:
           # corpus-diff transpiles the PR base for comparison
           fetch-depth: 0
 
-      - name: Install Perl dependencies (PPI from CPAN, Moo; Data::Dump + Try::Tiny as test fixtures)
+      - name: Install Perl dependencies (the vendored PPI's deps, Moo; Data::Dump + Try::Tiny as test fixtures)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -qy cpanminus libppi-perl libmoo-perl libdata-dump-perl libtry-tiny-perl
-          # apt's PPI brings the dependencies; cpanm then puts the current
-          # PPI (>= PPI_MIN) in /usr/local, which precedes /usr/share in @INC.
-          sudo cpanm --notest --quiet PPI
-          perl -MPPI -e 'print "PPI $PPI::VERSION\n"; exit($PPI::VERSION >= $ENV{PPI_MIN} ? 0 : 1)'
+          sudo apt-get install -qy cpanminus libclone-perl libparams-util-perl libtask-weaken-perl libsafe-isa-perl libmoo-perl libdata-dump-perl libtry-tiny-perl
+          # PPI itself is vendor/PPI/lib, loaded through Pl::VendorPPI.
+          perl -I. -MPl::VendorPPI -e 'print "PPI $PPI::VERSION (vendored)\n"; exit(Pl::VendorPPI::is_vendored() ? 0 : 1)'
           perl -MMoo -e 'print "Moo $Moo::VERSION\n"'
           perl -MData::Dump -e 'print "Data::Dump $Data::Dump::VERSION (test fixture)\n"'
           perl -MTry::Tiny -e 'print "Try::Tiny $Try::Tiny::VERSION (test fixture)\n"'

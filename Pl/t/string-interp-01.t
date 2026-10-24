@@ -16,7 +16,9 @@ use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLDump qw(dump);   # core-only dump(); Data::Dump is not core
 
-use PPI;
+use FindBin ();
+use lib "$FindBin::RealBin/../..";
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use PPI::Dumper;
 
 use Test::More tests => 130;

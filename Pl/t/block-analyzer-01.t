@@ -14,7 +14,9 @@ use Test::More;
 # Add project root (CWD when tests are run) so Pl::BlockAnalyzer can be found.
 use lib '.';
 
-use PPI;
+use FindBin ();
+use lib "$FindBin::RealBin/../..";
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 require Pl::BlockAnalyzer;
 
 # ── Helper: parse a sub body block from Perl source ──────────────────────────

@@ -1,0 +1,39 @@
+# vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
+# carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
+# tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> pcl
+upstream: https://github.com/Perl-Critic/PPI
+upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
+fork: https://github.com/Percolisp/PPI
+branch: pcl
+branch-sha: d93bd718bdb10a2b7c8a9174228b8fe9960cd3b8
+lib-tree: f135cb7d6c6d39393818ca06e0ad62136335400a
+date: 2026-10-24
+fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
+fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
+fix: C §16 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
+fix: D §24 6876d6eb Singletons: @? is a magic variable
+fix: E §21 5caa125f Operator: ~~ where a term is expected is two complements
+fix: F §28 a39e723d Operator: .digit after a term is concatenation
+fix: G §23 c6b17b5e Unknown: a $ scalar name may start with any letter
+fix: H §31 8cefefce Word: the _ after sub names the sub
+fix: I §2 d93bd718 Number::Hex: a hexadecimal float is one Number::Float
+commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
+commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
+commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
+commit: fe5aeb64 TODO tests: % and * right after a term are operators
+commit: 1cff9293 Unknown: % and * right after a term are operators
+commit: 5060abc9 TODO test: ^^ is one operator
+commit: 21394cc3 Singletons: add ^^, perl 5.40's logical exclusive or
+commit: 176ab5fe TODO test: @? is one Magic token
+commit: 6876d6eb Singletons: @? is a magic variable
+commit: af5345e9 TODO tests: ~~ where a term is expected is two complements
+commit: 5caa125f Operator: ~~ where a term is expected is two complements
+commit: a268a29b TODO tests: .digit after a term is concatenation
+commit: a39e723d Operator: .digit after a term is concatenation
+commit: ba8fd795 TODO tests: a $ scalar with a non-ASCII name is one Symbol
+commit: c6b17b5e Unknown: a $ scalar name may start with any letter
+commit: a4597353 TODO tests: sub _ is a Statement::Sub named _
+commit: 8cefefce Word: the _ after sub names the sub
+commit: 5be090db TODO tests: a hexadecimal float is one Number::Float
+commit: d93bd718 Number::Hex: a hexadecimal float is one Number::Float

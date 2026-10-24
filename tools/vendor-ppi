@@ -1,0 +1,112 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# vendor-ppi -- refresh vendor/PPI/ from a clone of PCL's PPI branch (s527a).
+#
+#   tools/vendor-ppi CLONE [BRANCH]         BRANCH defaults to `pcl`
+#   tools/vendor-ppi --check                say whether vendor/PPI/lib is what
+#                                           vendor/PPI/UPSTREAM says (exit 1 if not)
+#
+# CLONE is a git clone of github.com/Percolisp/PPI (or of upstream PPI with
+# the `pcl` branch in it).  The branch is upstream PPI master plus PCL's fix
+# commits, each an ordinary commit in PPI's two-commit PR shape
+# (docs/ppi-fix-at-source-s527.md §5).  What this writes:
+#
+#   vendor/PPI/lib/       a byte copy of the branch's lib/ (from git, so an
+#                         uncommitted edit in the clone cannot leak in)
+#   vendor/PPI/Changes, README.pod   from the branch
+#   vendor/PPI/LICENSE    kept (the repository has none -- Dist::Zilla
+#                         writes it at release; ours is the 1.284 dist's,
+#                         the same terms as Perl 5)
+#   vendor/PPI/UPSTREAM   the stamp: upstream sha (the merge base with
+#                         origin/master), branch sha, the lib tree id, one
+#                         `fix:` line per fix commit, the date, this command
+#
+# After a refresh: run the canary both ways (prove Pl/t/ppi-bugs-registry-01.t,
+# and with PCL_SYSTEM_PPI=1 -- it says which rows upstream has caught up on),
+# then tools/corpus-diff.pl.  vendor/ is never license-tagged (PCLLicense.pm).
+use strict;
+use warnings;
+use File::Basename qw(dirname);
+use Cwd qw(abs_path);
+use File::Path qw(remove_tree make_path);
+use POSIX qw(strftime);
+use lib dirname(abs_path($0)) . '/lib';
+use PCLVendor;
+
+my $root = dirname(dirname(abs_path($0)));
+my $vend = "$root/vendor/PPI";
+
+if (@ARGV && $ARGV[0] eq '--check') {
+  my $s = PCLVendor::read_stamp("$vend/UPSTREAM");
+  my $have = PCLVendor::tree_sha("$vend/lib");
+  if ($have ne ($s->{'lib-tree'} // '')) {
+    print "vendor/PPI/lib is tree $have, the stamp says $s->{'lib-tree'}\n";
+    exit 1;
+  }
+  print "vendor/PPI/lib = branch $s->{branch} ($s->{'branch-sha'}), tree $have\n";
+  exit 0;
+}
+
+my ($clone, $branch) = @ARGV;
+die "usage: tools/vendor-ppi CLONE [BRANCH] | --check\n" if !$clone;
+$branch //= 'pcl';
+$clone = abs_path($clone) // die "no clone at $ARGV[0]\n";
+
+sub git { my $out = `git -C '$clone' @_`; die "git @_ failed\n" if $?; chomp $out; $out }
+
+my $bsha = git("rev-parse", "refs/heads/$branch");
+my $base = git("merge-base", "refs/heads/$branch", "refs/remotes/origin/master");
+my $tree = git("rev-parse", "$branch:lib");
+# Every commit of the series, oldest first.  A FIX commit is one that is not
+# a "TODO test(s):" commit and whose message names the PCL catalogue
+# sections it fixes (§N); the fix commits are lettered A, B, C ... in branch
+# order -- the
+# PR groups of docs/ppi-fix-at-source-s527.md and s527/upstream/PR-<letter>.md.
+my (@commit, @fix);
+{
+  my $raw = `git -C '$clone' log --reverse --format='%h%x09%s%x09%b%x1e' $base..$branch`;
+  die "git log failed\n" if $?;
+  my $letter = 'A';
+  for my $rec (split /\x1e\n?/, $raw) {
+    my ($h, $subj, $body) = split /\t/, $rec, 3;
+    next if !defined $subj;
+    push @commit, "$h $subj";
+    next if $subj =~ /^TODO tests?:/;       # the failing-tests half of a PR
+    my @sec = ($body // '') =~ /§(\d+)/g;
+    next if !@sec || $subj =~ m{t/ppi_bugs_pcl\.t};
+    push @fix, "$letter " . join(' ', map { "§$_" } @sec) . " $h $subj";
+    $letter++;
+  }
+}
+
+# the copy, from git
+remove_tree("$vend/lib");
+make_path($vend);
+system("git -C '$clone' archive --format=tar $branch lib Changes README.pod | tar -x -C '$vend'") == 0
+  or die "git archive failed\n";
+my $copied = PCLVendor::tree_sha("$vend/lib");
+die "vendor/PPI/lib is tree $copied, the branch is $tree\n" if $copied ne $tree;
+
+open my $st, '>', "$vend/UPSTREAM" or die $!;
+print $st <<"EOT";
+# vendor/PPI -- PCL's PPI: the lib/ of a branch of upstream PPI master that
+# carries PCL's fix commits (docs/ppi-fix-at-source-s527.md).  Written by
+# tools/vendor-ppi; checked by Pl/t/vendor-ppi-01.t.  Refresh with
+#   tools/vendor-ppi <clone of github.com/Percolisp/PPI> $branch
+upstream: https://github.com/Perl-Critic/PPI
+upstream-sha: $base
+fork: https://github.com/Percolisp/PPI
+branch: $branch
+branch-sha: $bsha
+lib-tree: $tree
+date: @{[ strftime('%Y-%m-%d', localtime) ]}
+EOT
+print $st "fix: $_\n" for @fix;
+print $st "commit: $_\n" for @commit;
+close $st;
+print "vendor/PPI refreshed: branch $branch $bsha over $base, tree $tree, ",
+  scalar(@commit), " commits, ", scalar(@fix), " fix groups\n";

@@ -11,7 +11,7 @@ use warnings;
 
 use Moo;
 
-use PPI;
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use PPI::Document;
 use Scalar::Util qw(refaddr);
 

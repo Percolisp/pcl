@@ -57,20 +57,22 @@ is($?, 0, 'dry run exits 0');
 like($dry, qr/checking dependencies/, 'dry run reports the dependency check');
 ok(!-e "$prefix/bin", 'dry run created nothing');
 
-# --- the dependency FLOOR refuses, loudly, before copying anything ----------
-# A fake PPI that claims 1.277 (Ubuntu 24.04's package) shadows the real one
-# through PERL5LIB; the installer must name the floor and the remedy and
-# install nothing (the first CI run had no floor check: s440).
+# --- a missing dependency refuses, loudly, before copying anything ----------
+# PPI is vendored (s527a), so what can be missing is one of ITS dependencies:
+# a fake Clone that fails to load shadows the real one through PERL5LIB; the
+# installer must say the vendored PPI does not load, name the remedy and
+# install nothing (the first CI run had no dependency check: s440).
 {
     my $fake = tempdir(CLEANUP => 1);
-    open my $fh, '>', "$fake/PPI.pm" or die $!;
-    print $fh "package PPI; our \$VERSION = '1.277'; 1;\n";
+    open my $fh, '>', "$fake/Clone.pm" or die $!;
+    print $fh "package Clone; die qq{Can't locate Clone.pm (a fake: not installed)\\n};\n";
     close $fh;
     local $ENV{PERL5LIB} = $fake . (defined $ENV{PERL5LIB} ? ":$ENV{PERL5LIB}" : '');
     my $old = `$inst --prefix $prefix 2>&1`;
-    isnt($?, 0, 'an old PPI is refused') or diag($old);
+    isnt($?, 0, 'a vendored PPI that cannot load is refused') or diag($old);
     like($old, qr/missing dependencies/, 'the refusal is the dependency report');
-    like($old, qr/PPI >= 1\.291 \(this is 1\.277; `cpanm PPI`/, 'the refusal names the floor and the remedy');
+    like($old, qr/the vendored PPI does not load .*`cpanm Clone Params::Util Task::Weaken Safe::Isa`/s,
+         'the refusal names the vendored PPI and the remedy');
     ok(!-e "$prefix/bin" && !-e "$prefix/lib", 'the refusal installed nothing');
 }
 
@@ -80,7 +82,8 @@ is($?, 0, 'install exits 0') or diag($out);
 
 ok(-x "$prefix/bin/pl2cl" && -x "$prefix/bin/runpcl", 'both wrappers are executable');
 ok(-f "$prefix/lib/pcl/cl/pcl-runtime.lisp" && -f "$prefix/lib/pcl/Pl/Parser2.pm"
-   && -f "$prefix/lib/pcl/tools/lib/PCLSbcl.pm" && -d "$prefix/lib/pcl/lib",
+   && -f "$prefix/lib/pcl/tools/lib/PCLSbcl.pm" && -d "$prefix/lib/pcl/lib"
+   && -f "$prefix/lib/pcl/vendor/PPI/lib/PPI.pm" && -f "$prefix/lib/pcl/vendor/PPI/UPSTREAM",
    'the tree is installed in its repo-relative shape');
 ok(!-e "$prefix/lib/pcl/Pl/t", 'the gate is NOT part of an installation');
 

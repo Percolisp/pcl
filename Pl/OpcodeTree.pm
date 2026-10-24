@@ -16,7 +16,7 @@ use Moo;
 # there is no garbage collection.
 
 
-use PPI;
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use PPI::Dumper;
 
 

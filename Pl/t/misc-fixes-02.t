@@ -11,7 +11,9 @@ use v5.30;
 use strict;
 use warnings;
 use Test::More;
-use PPI;
+use FindBin ();
+use lib "$FindBin::RealBin/../..";
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;

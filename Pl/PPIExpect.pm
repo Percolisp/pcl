@@ -40,7 +40,7 @@ package Pl::PPIExpect;
 
 use strict;
 use warnings;
-use PPI;
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use Scalar::Util qw(refaddr);
 use Exporter 'import';
 

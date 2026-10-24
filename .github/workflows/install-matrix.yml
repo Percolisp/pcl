@@ -52,7 +52,6 @@ jobs:
       image: ${{ matrix.image }}
     env:
       SBCL_VERSION: ${{ matrix.sbcl }}
-      PPI_MIN: "1.291"
     steps:
       # The bare images have no git; checkout@v4 falls back to the REST API
       # tarball download, which is fine here (nothing below needs .git).

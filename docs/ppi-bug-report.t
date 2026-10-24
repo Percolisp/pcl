@@ -11,6 +11,13 @@
 #
 #   perl ppi-bug-report.t
 #
+# THE UPSTREAM COPY (s527a) is t/ppi_bugs_pcl.t on PCL's PPI branch `pcl`
+# (vendor/PPI/UPSTREAM names its sha): the same 91 rows and descriptions in
+# PPI's test style, every row PPI still gets wrong inside a TODO block that
+# names its catalogue section.  This file stays as the catalogue's companion,
+# run against whatever PPI is loaded; the rows the branch fixes pass here
+# when run with vendor/PPI/lib.
+#
 use strict;
 use warnings;
 use Test::More tests => 91;

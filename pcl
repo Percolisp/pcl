@@ -440,8 +440,12 @@ sub sbcl_version {
 }
 
 sub ppi_version {
-  my $v = eval { require PPI; $PPI::VERSION };
-  return defined $v ? $v : "(not installed)";
+  # The PPI pl2cl parses with: the vendored one (s527a), through the same
+  # loader pl2cl uses.
+  require lib; lib->import("$ROOT");
+  my $v = eval { require Pl::VendorPPI; $PPI::VERSION
+                 . (Pl::VendorPPI::is_vendored() ? ' (vendored)' : ' (system, PCL_SYSTEM_PPI)') };
+  return defined $v ? $v : "(does not load: $@)";
 }
 
 # ---- pcl --cache-info ----------------------------------------------------

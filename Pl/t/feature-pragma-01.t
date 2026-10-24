@@ -37,7 +37,9 @@ use FindBin qw($RealBin);
 use lib $RealBin;
 use lib "$RealBin/../..";
 use PCLCore;
-use PPI;
+use FindBin ();
+use lib "$FindBin::RealBin/../..";
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use Pl::Parser;
 
 my $project_root = "$RealBin/../..";

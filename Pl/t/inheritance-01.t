@@ -12,7 +12,9 @@ use warnings;
 
 use lib ".";
 
-use PPI;
+use FindBin ();
+use lib "$FindBin::RealBin/../..";
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use Test::More;
 
 BEGIN { use_ok('Pl::Parser2') };

@@ -149,18 +149,25 @@ sub check_deps {
     if ($] < $perl_min) { push @missing, "perl >= 5.20 (this is $])" }
     else                { push @found,   sprintf("perl %vd", $^V) }
 
-    # PPI has a FLOOR: PCL's token repairs are keyed on the stream PPI 1.291
-    # produces (docs/ppi-upstream-bugs.md -- `-` glued to an identifier, the
-    # glob disambiguation, `~~`, ...), and the gate is validated on it.  Distro
-    # packages lag (Ubuntu 24.04 ships 1.277), so the floor is checked, with
-    # the same remedy the README gives: `cpanm PPI`.
-    my %min = (PPI => 1.291);
-    for my $m (qw(PPI Moo Test::More File::Temp)) {
+    # PPI is VENDORED (s527a, docs/ppi-fix-at-source-s527.md): vendor/PPI/lib
+    # is PCL's own PPI -- upstream master plus PCL's fix commits, named by
+    # vendor/PPI/UPSTREAM -- and Pl::VendorPPI loads it ahead of any installed
+    # one.  So the check is that the stamp is there and the vendored lib
+    # LOADS, which needs PPI's own non-core dependencies installed.
+    my $stamp = "$root/vendor/PPI/UPSTREAM";
+    if (!-f $stamp) { push @missing, "the vendored PPI (no $stamp)" }
+    else {
+        my $out = qx{"$^X" -I"$root" -MPl::VendorPPI -e 'print "\$PPI::VERSION ", Pl::VendorPPI::is_vendored()' 2>&1};
+        if ($? || $out !~ /^(\S+) 1$/) {
+            $out =~ s/\s+\z//;
+            push @missing, "the vendored PPI does not load ($out) -- it needs Clone, Params::Util, "
+                         . "Task::Weaken and Safe::Isa (`cpanm Clone Params::Util Task::Weaken Safe::Isa`)";
+        }
+        else { push @found, "PPI $1 (vendored, vendor/PPI/UPSTREAM)" }
+    }
+    for my $m (qw(Moo Test::More File::Temp)) {
         my $v = module_version($m);
         if (!defined $v)            { push @missing, "$m (perl module)" }
-        elsif ($min{$m} && $v < $min{$m}) {
-            push @missing, "$m >= $min{$m} (this is $v; `cpanm $m` installs the current one)";
-        }
         else                        { push @found, "$m $v" }
     }
 
@@ -193,7 +200,7 @@ sub module_version {
 # (Pl/t, perl-tests, docs, the other tools) is development material.
 # README.md travels because `pcl --check` reads the project's issues URL from it
 # (tools/lib/PCLCheck.pm issues_url: the URL is written in ONE place, #2194).
-my @TREE = (@COMMANDS, qw(Pl lib cl tools/lib README.md));
+my @TREE = (@COMMANDS, qw(Pl lib cl tools/lib vendor README.md));
 
 sub copy_tree {
     my ($src, $dst) = @_;

@@ -21,7 +21,9 @@ use strict;
 use warnings;
 use utf8;
 use Test::More;
-use PPI;
+use FindBin ();
+use lib "$FindBin::RealBin/../..";
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use FindBin qw($RealBin);
 use lib "$RealBin/../..";
 use Pl::PPIBugs;

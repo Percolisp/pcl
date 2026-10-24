@@ -32,7 +32,7 @@ use strict;
 use warnings;
 use Scalar::Util qw(refaddr weaken);
 use Moo;
-use PPI;
+use Pl::VendorPPI;   # PPI, from vendor/PPI/lib (s527a)
 use Pl::Parser;
 use Pl::Environment;
 use Pl::PExpr;

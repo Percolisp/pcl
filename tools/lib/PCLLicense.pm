@@ -65,8 +65,9 @@ our %EXCLUDE = (
   'lib/Math/BigInt/Calc.pm' => 'CPAN Math::BigInt::Calc 2.003002 carried verbatim; its authors\' notice, same terms',
 );
 # Whole trees never scanned (not ours): perl-tests/ (perl\'s own t/ files and
-# test.pl), cpan-tests/ (CPAN distributions), docs/ (prose; the one .t is an
-# EXTRA), .suitelog*/.  (An empty untracked memory/ used to sit at the root
+# test.pl), cpan-tests/ (CPAN distributions), vendor/ (PCL's PPI, s527a:
+# upstream PPI's files under its own notice, same terms as Perl -- its
+# LICENSE sits beside it), docs/ (prose; the one .t is an EXTRA), .suitelog*/.  (An empty untracked memory/ used to sit at the root
 # and was named here too; it was removed in s481a.)
 
 # A path (relative to the checkout) inside one of the pruned trees.

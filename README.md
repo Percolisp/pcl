@@ -60,11 +60,12 @@ variable directly, since there is no risk of references or overloads.
 
 ## Quick start
 
-You need **perl 5.20 or later** with **PPI 1.291 or later** and **Moo**
-from CPAN, and **SBCL 2.5.2 or later**. Nothing else beyond core
-modules. Linux distributions ship an older SBCL and an older PPI
-(Ubuntu 24.04 has PPI 1.277, which the installer refuses), so install
-both as below. PCL implements perl 5.40 semantics and is tested on
+You need **perl 5.20 or later** with **Moo** and PPI's dependencies
+(**Clone**, **Params::Util**, **Task::Weaken**, **Safe::Isa**) from
+CPAN, and **SBCL 2.5.2 or later**. Nothing else beyond core modules.
+PPI itself comes with PCL: `vendor/PPI` is upstream PPI with PCL's
+fixes to its tokenizer, each one also offered upstream. Linux
+distributions ship an older SBCL, so install it as below. PCL implements perl 5.40 semantics and is tested on
 Linux. Other Unix systems should work but are not tested.
 
 These commands set up PCL on a fresh Ubuntu 24.04 machine (in a
@@ -74,7 +75,7 @@ container where you are already root, leave out `sudo`):
 ```bash
 sudo apt-get update
 sudo apt-get install -qy perl cpanminus make gcc curl ca-certificates bzip2 git
-sudo cpanm --notest PPI Moo
+sudo cpanm --notest Moo Clone Params::Util Task::Weaken Safe::Isa
 
 curl -fsSL -o /tmp/sbcl.tar.bz2 \
   https://downloads.sourceforge.net/project/sbcl/sbcl/2.6.0/sbcl-2.6.0-x86-64-linux-binary.tar.bz2
