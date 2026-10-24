@@ -756,7 +756,15 @@ sub _requalify_region {
 # the span gates and deliberately stops at the segment parent) this one must
 # climb all the way to the Document, because a FILE lexical declared outside
 # the block is in scope inside it.
+# The dual-run hook (s525q): the legacy verdict is returned unchanged.
 sub _binding_at {
+  my $self = shift;
+  my $v = $self->_binding_at_0(@_);
+  Pl::Binder::check($self, 'binding_at', $v, @_) if $self->{_binder};
+  return $v;
+}
+
+sub _binding_at_0 {
   my ($self, $node, $canon) = @_;
   # The token IS a signature parameter — the leading symbol of a top-level
   # part of a `PPI::Structure::Signature` (`sub f ($x = 1, @r) {…}` when the
@@ -1854,6 +1862,13 @@ sub parse {
   # here that only survives because the calls sit under eval).
   $self->_rewrite_unreachable_gotos($doc);
   $self->_classify_nested_gotos($doc);       # #1747
+  # s525q: the BINDER in DUAL-RUN -- built ONCE here, before any requalify /
+  # rename pass, so it sees the names the source wrote.  Inert: only under
+  # PCL_BINDER_CHECK, and nothing reads it (docs/binder-dual-run-s525.md).
+  if ($ENV{PCL_BINDER_CHECK}) {
+    require Pl::Binder;
+    $self->{_binder} = Pl::Binder::build_for($self, $doc);
+  }
 
   # #3080: the QUALIFIED spellings the SOURCE wrote, read before the two
   # requalify passes below write qualified tokens of their own (those are this
@@ -3354,7 +3369,15 @@ sub _symbol_is_declarator {
 # its own (`my $y = 7; sub nm {$y} { our $y; $y = 3 }` wrote the LEXICAL),
 # which is the same one-cell-for-two-variables confusion #470 is about,
 # spelled with a declaration instead of a qualified name.
+# The dual-run hook (s525q): the legacy verdict is returned unchanged.
 sub _ref_shadowed {
+  my $self = shift;
+  my $v = $self->_ref_shadowed_0(@_);
+  Pl::Binder::check($self, 'ref_shadowed', $v, @_) if $self->{_binder};
+  return $v;
+}
+
+sub _ref_shadowed_0 {
   my ($self, $sym, $canon, $stmts, $seg_parent) = @_;
   # The token IS a signature parameter: a declaration, its own shadow (#497,
   # the same predicate `_binding_at` uses).  The sibling walk below cannot
@@ -3910,7 +3933,15 @@ sub _canon_text_patterns {
   return \%canon_pat;
 }
 
+# The dual-run hook (s525q): the legacy verdict is returned unchanged.
 sub _block_captures_name {
+  my $self = shift;
+  my $v = $self->_block_captures_name_0(@_);
+  Pl::Binder::check($self, 'block_captures', $v, @_) if $self->{_binder};
+  return $v;
+}
+
+sub _block_captures_name_0 {
   my ($self, $block, $bare, $canons) = @_;
   # `(?:\{\s*)?`: the braced spelling `${x}` / `@{x}` / `$#{x}`, in code or in a
   # string, is a mention too -- without it the early-out answered "no capture"
