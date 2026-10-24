@@ -47,3 +47,4 @@ TimeDate-2.33-0	-	s526w1	Date::Parse / Date::Format / Time::Zone: locale strings
 HTTP-Date-6.06-0	-	s526w1	HTTP date parsing and formatting over Time::Local / Time::Zone
 URI-5.34-0	-	s526w1	the string / regex / escape workhorse of everything HTTP: overload "" and eq, URI::Escape, IRIs, punycode
 HTTP-Message-7.01-0	-	s526w1	HTTP::Headers / Request / Response / Message: blessed-hash headers, URI, HTTP::Date, Encode, content decoding (gzip / deflate / quoted-printable); needs the Clone shim (#3826)
+cpan-tests/modules/YAML-Tiny-1.74	-	s526w1	the small YAML reader/writer: line-by-line regexes, Unicode decoding layers, refaddr seen-tables, TestML data files, subtests
