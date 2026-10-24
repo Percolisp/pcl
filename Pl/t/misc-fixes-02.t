@@ -1024,7 +1024,7 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
     my $doc = PPI::Document->new(\'my $r = $a ^^ $b;');
     ok( $doc && (grep { $_->isa('PPI::Token::Operator') && $_->content eq '^^' } $doc->tokens),
         'FIXED ON PCL\'S PPI BRANCH (s527a, group C): perl 5.40 `^^` lexes as ONE operator '
-      . '(ppi-upstream-bugs.md §16; PCL\'s _fix_ppi_logical_xor_bug is redundant)' );
+      . '(ppi-upstream-bugs.md §16; PCL\'s _fix_ppi_logical_xor_bug was deleted)' );
 }
 {
     my $doc = PPI::Document->new(\'my $v = ${$r}[0];');

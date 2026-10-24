@@ -283,7 +283,7 @@ a
    title => 'perl 5.40\'s `^^` (logical XOR) is tokenized as two `^` operators',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => '^', pred => 'prev_adj_caret', check => 'logical-xor-split' },
-   fix => { kind => 'relex', handler => 'Pl::PExpr::_fix_ppi_logical_xor_bug', commit => '21394cc3', group => 'C', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::PExpr::_fix_ppi_logical_xor_bug (s527a: PPI fixed on the branch)', commit => '21394cc3', group => 'C', pr => undef },
    repro => 'my ($p, $q) = (1, 0); my $r = $p ^^ $q; print "$r\\n";',
    perl => "1\n",
    tokens => {

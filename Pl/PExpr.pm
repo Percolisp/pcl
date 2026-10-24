@@ -6731,10 +6731,6 @@ sub cleanup_for_parsing {
   # Word + Operator. Split labels back into their components when preceded by "?".
   @no_ws = $self->_fix_ppi_ternary_label_bug(\@no_ws);
 
-  # PPI BUG WORKAROUND: Perl 5.40+ '^^' (logical XOR) is tokenized by PPI as
-  # two consecutive '^' operators.  Merge them into a single '^^' token.
-  @no_ws = $self->_fix_ppi_logical_xor_bug(\@no_ws);
-
   # PPI BUG WORKAROUND: After blocks, PPI parses <*.txt> as separate tokens
   # instead of a glob. Reconstruct glob tokens from < PATTERN > sequences.
   @no_ws = $self->_fix_ppi_glob_after_block(\@no_ws);
@@ -6818,29 +6814,6 @@ sub cleanup_for_parsing {
 # when they follow expression-ending tokens. PPI incorrectly parses "foo()-1" as
 # the number -1 rather than subtraction. Perl's actual parser treats this as "- 1".
 # See cleanup_for_parsing() for context.
-sub _fix_ppi_logical_xor_bug {
-  my $self   = shift;
-  my $tokens = shift;
-
-  # PPI tokenizes Perl 5.40's '^^' (logical XOR) as two separate '^' operators.
-  # Merge consecutive '^' '^' into a single '^^' operator token so the
-  # precedence loop sees it at the same level as '||' (not bitwise '^').
-  my @result;
-  for (my $i = 0; $i < @$tokens; $i++) {
-    if (ref($tokens->[$i]) eq 'PPI::Token::Operator'
-        && $tokens->[$i]->content eq '^'
-        && $i + 1 < @$tokens
-        && ref($tokens->[$i+1]) eq 'PPI::Token::Operator'
-        && $tokens->[$i+1]->content eq '^') {
-      push @result, PPI::Token::Operator->new('^^');
-      $i++;  # consume the second '^'
-    } else {
-      push @result, $tokens->[$i];
-    }
-  }
-  return @result;
-}
-
 # A PPI number token of ANY subclass (Number, ::Float, ::Exp, ::Hex, ::Octal,
 # ::Binary, ::Version) — the one predicate the negative-number split asks,
 # for the token itself and for the term it follows.
