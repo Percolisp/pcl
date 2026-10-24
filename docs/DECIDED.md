@@ -52,6 +52,16 @@ not-supported.md → only then probe.*
 - **R6: the 66 default arms = 60 at line start + 6 inline; verdicts 62 KEEP / 4 DIE / 0 ANNOUNCE; the 4 (sprintf's two alt-form prefix dispatches, p-vec's read, p-wantarray) are unreachable from Perl and converted for the invariant** -> docs/rule12-arm-audit-s525.md.
 - **The twelve shape-dispatching macros are the IR's ASSEMBLER, documented with their arms** -> ir-spec §10d.
 
+## s525q (2026-10-24, Opus) -- parser step 0 c2: the BINDER in dual-run (inert); emission-neutral
+
+- **The binder = `Pl/Binder.pm`**: one walk, perl's pad model; binding record `id kind canon sigil name perl_package decl_node decl_ord scope_node from to`, kinds my | state | our | param | lexsub | outer (declared) and global | special (lazy); every rule cites pad.c / op.c / perly.y / toke.c -> `docs/binder-dual-run-s525.md` §1.
+- **Where it runs**: built once in `Parser2::parse` right after `_classify_nested_gotos` (document pass 36 of 40), before the requalifiers and every rename pass; answers mid-rename questions by each token's CURRENT name -> doc §2.
+- **Dual-run modes**: `PCL_BINDER_CHECK=die` (dies with both verdicts) | `log` (TSV rows to `$PCL_BINDER_LOG`); `PCL_BINDER_TRACE=1`; `PCL_BINDER_INJECT=<resolver>` inverts for the inverse guard; unset = the module is not loaded -> `Pl/Binder.pm` header, `Pl/t/binder-01.t`.
+- **Verdict split over four populations + sweep + gate**: legacy bugs #3800 #3801 #3804 (silent wrong), #3806 (loud refusal of valid perl), #3802 #3803 (benign wrong facts); 3 binder errors fixed; design gap = names only in a string eval's text -> doc §4.
+- **Rebuilds after re-parse: 0** -- no resolver call of today lands on a re-parsed document -> doc §2.
+- **Cost: the table is 2-3 % of a transpile** (Calc.pm 2.6 %, pack.t 2.3 %, everyday 0.6 %); with the hooks Calc.pm +6.0 % wall -> doc §5.
+- **The 1c port order**: requalifier (fixes #3800 #3801 #3804 by construction) -> capture gate + promoter (needs the string-eval CV fact first) -> span -> state/cond/shadow/emb (needs a dual-run hook on `_rename_decl_within` first) -> doc §6.
+
 ## s524 (2026-10-21 23:5x to 2026-10-22 02:4x, Fable; the USER: "short session, run 3 subtasks in parallel", then 02:0x "Don't start more subtasks for this session") -- the three s523 checkpoints resumed after a box reboot and ALL THREE MERGED (MAIN-READY-41 s523b, -42 s523c, -43 s523d); #3650 assigned to s523c as a post-merge member; the install-matrix GREEN (#3526 closed); the round-4 board + companion; the USER's "more CPAN modules after a session or two" reminder set
 
 - **THE CAP IS THREE (the USER's word for this session); every agent RESUMED in its existing worktree without isolation (fresh agents, model opus)**; after 02:0x no new agent is launched ("Don't start more subtasks") -- running ones finish (the standing rule: never stop a running one).

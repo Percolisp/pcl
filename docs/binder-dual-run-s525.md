@@ -93,7 +93,17 @@ table holds (declarations included).
 Bindings by kind (perl's `t/`): my 9,604, our 496, param 124, lexsub 116,
 state 26; global 1,641, special 1,743.  perl-tests overlaps perl's `t/`
 (same programs, PCL's copies), so its 7 D sites are 7 of the 13.
-GATE_LOG_ROW
+
+The two GATE-SIDE runs, every file transpiled with the binder built and the
+hooks asserting: **the full sweep** under `PCL_BINDER_CHECK=log` (2,681 builds
+over 399 files -- run-time string evals included, hence 10,695 `outer`
+bindings; calls 507 / 6,218 / 10,290; the same 6 perl-tests D sites as above,
+0 E, 0 R) and **the gate** (`tools/prove-core`, 7,208 builds over 5,039
+transpiled files; refs 139,493; calls 670 / 3,666 / 14,001; 9 D rows in 6
+programs, 0 E, 0 R -- verdicts in §4).  The gate's first log-mode run FAILED
+`Pl/t/parser-leak-01.t` row 2 (300 transpiles grew 32 MB): the binder held
+its parser strongly and the parser held the binder, a cycle; the back
+reference is now weak, and the rerun is PASS.
 
 Transpiles that fail with the binder on fail identically without it (11
 files: 1 cpan, 10 perl `t/`; the same message, checked on the base): a die's
@@ -121,7 +131,7 @@ shape (re/pat.t, re/pat_rt_report.t; they are `Token::Magic`; #3805 asks the
 PPI-registry filler whether that is a PPI quirk -- probably not).  Earlier
 (before the resume): the current-names layer, for every rename-mid-pass row.
 
-**(c) DESIGN GAP -- recorded for 1c:** **5 sites in the suites + 4 in the
+**(c) DESIGN GAP -- recorded for 1c:** **5 sites in the suites + 6 rows in 3 of the
 gate's own programs**, one shape: a name that occurs only inside the TEXT of a
 string `eval` (`sub { eval '$x' }` -- closure.t:548, lexsub.t:653, eval.t:279
 `$zzz`, eval.t:328 `$zzz` / `$yyy`; gate: `eval '$n = $o'`,
@@ -136,7 +146,23 @@ point is exactly that an anon sub has only what it captured).
 
 ## 5. The cost
 
-COST_TABLE
+Wall time of `./pl2cl` (min of 3; everyday one run per file) with the
+variable unset vs `PCL_BINDER_CHECK=log`, measured in an exclusive bench
+slot (load 1.96 -> 1.64).  `build_ms` = the walk + resolve alone (the `S`
+row); the rest of the difference is the hooks' queries.
+
+| input | unset | log | wall delta | binder build | build share |
+|---|---:|---:|---:|---:|---:|
+| `lib/Math/BigInt/Calc.pm` (2,566 lines, `--module`) | 5,769 ms | 6,112 ms | +6.0 % | 152 ms | 2.6 % |
+| `perl-tests/pack.t` (the sweep's largest, 72 kB) | 4,880 ms | 4,965 ms | +1.7 % | 114 ms | 2.3 % |
+| `everyday/*/*.pl` (122 files, total) | 24,946 ms | 25,589 ms | +2.6 % | 158 ms | 0.6 % |
+
+**The table itself costs 2-3 % of a transpile** -- under the ~5 % line that 1c's
+Calc.pm bar (3.7 s -> under 1.5 s) allows.  Calc.pm's +6 % wall is the
+dual-run's QUERIES on top (not profiled further), a cost the port removes
+with the hooks.  The review's 3.7 s was a different command (`./pl2cl <
+Calc.pm`); 5.8 s here is `--module` on this tree, so compare the deltas, not
+the absolutes.
 
 ## 6. The 1c port plan (D4)
 
