@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [weak-keyword override](#71a-a-weak-keyword-is-displaced-by-a-sub-the-package-has-at-compile-time-normative-s492c-task-18701992) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the cache entry](#92b-a-cached-module-entry-and-what-makes-it-valid-normative-s470bw) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [`(*FAIL)` is `(?!)`, other control verbs die](#10-verb-fail-and-f-are--every-other-control-verb-dies-normative-s499k-task-2386) · [counted quantifiers, `{,n}`](#10-count-a-counted-quantifier-is-perl-534s-grammar-0n-is-00n-blanks-allowed-normative-s499h-task-2444) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [`map` copies, `grep`/`sort` alias](#10-map-map-copies-what-its-block-returns-grep-and-sort-alias-normative-s492b-task-2005) · [the `p-` vocabulary is unreachable from Perl](#10-name-the-p--vocabulary-is-not-reachable-from-a-perl-identifier-normative-s492b-task-2100) · [the global-match advance rule](#10-gmatch-what-a-global-match-attempts-after-a-zero-length-match-normative-s484c-task-1719) · [`\h \H \v \V \R`](#10-esc-h-h-v-v-r-are-character-classes-expanded-before-the-engine-sees-them-normative-s484c-task-1713) · [possessive quantifiers](#10-poss-a-possessive-quantifier-is-perls-own-atomic-group-normative-s499e-task-2380) · [`(*FAIL)` is `(?!)`, other control verbs die](#10-verb-fail-and-f-are--every-other-control-verb-dies-normative-s499k-task-2386) · [counted quantifiers, `{,n}`](#10-count-a-counted-quantifier-is-perl-534s-grammar-0n-is-00n-blanks-allowed-normative-s499h-task-2444) · [Unicode properties from perl's own tables](#10-prop-unicode-properties-are-answered-from-perls-own-tables-an-unknown-one-dies-at-compile-normative-s496a-tasks-2060-2372) · [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049) · [the shape macros are the IR's assembler](#10d-the-shape-dispatching-macros-are-the-irs-assembler-normative-s525u-r4-of-docsruntime-review-s525md)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
@@ -161,6 +161,17 @@ A Perl scalar is by default a **box** (`p-box`, defined at
 The nv/sv caches are **pure optimization** — every write
 (`box-set`) invalidates them; a translator may omit caching entirely.
 `class` and `is-ref` are semantic.
+
+**One bit of the numeric cache is semantic: `nv-ok` on a box holding a
+STRING is perl's pNOK, "this scalar has been used as a number"** (normative,
+s525u, task #1040).  `box-nv` sets it on every numification, a copy carries
+it, a store clears it, a dualvar is born with it (§3.2a), and the bitwise mode
+decision reads it: `$x = "abc"; $x + 0; $x | "  "` is the NUMERIC op (`0`), as
+in perl.  A translator that drops the caches must keep this bit.  A RAW value
+(an element, a raw slot, a foreach alias of one) has no such bit -- the
+residue is task #3780 -- and a string with no numification history still
+takes the textual `looks-like-number` guess until `use feature 'bitwise'` is
+an emitted fact (#1040, §10 bitwise row).
 
 When the compiler (VarAnnotator) proves a `my` scalar is only ever written
 raw-value shapes, it emits a **raw slot** instead: a plain host variable
@@ -5521,8 +5532,8 @@ function's docstring states its Perl contract. The families:
 
 | family | members (representative) | rule |
 |---|---|---|
-| numeric ops | `p-+ p-- p-* p-/ p-% p-** p-<< p->>` | numify operands (§3.1), return raw number; overload hook first; `/` yields a double when inexact; `%` follows Perl sign rules and the two regimes of §3.5; the shifts truncate to integer (Inf→0) and clamp a shift count ≥ the word size to 0 |
-| bitwise (**mode-dispatched**) | `p-bit-and p-bit-or p-bit-xor p-bit-not` (perl's `& \| ^ ~`; the runtime has no `p-&`-style names — verified emitted, s470bm) · always-string twins `p-str-bit-and p-str-bit-or p-str-bit-xor p-str-bit-not` (`&. \|. ^. ~.`) | overload hook first; then ONE mode decision (`%p-bitwise-operand-kind`): the op is NUMERIC iff an operand carries a number, else it STRINGIFIES both operands and operates byte by byte (`&` truncates to the shorter, `\|`/`^` pad with NUL). A reference, glob, `qr//`, blessed object or undef carries neither a number nor a string body and therefore goes to the STRING side — `undef \| "abc"` is `"abc"`, `[1] \| ("\0" x 13)` is `"ARRAY(0x…)"`. **Unary `~` differs on one state and only one**: a REFERENCE goes to its numeric side (the complemented address), because perl's `pp_complement` takes the string branch only for an SV that has a PV. A bit-STRING op whose operands hold a code point above 0xFF is FATAL, with perl's wording. PCL's stand-in for perl's per-SV "used as a number" flag is `looks-like-number`, so a numeric-LOOKING string still takes the numeric side (`"12" & "10"`; task #1040) |
+| numeric ops | `p-+ p-- p-* p-/ p-% p-** p-<< p->>` | numify operands (§3.1), return raw number; overload hook first; `/` yields a double when inexact; `%` follows Perl sign rules and the two regimes of §3.5; the shifts read the LEFT operand as a UV (perl's `SvUV`, s525u, #3760: a negative operand is its 64-bit two's complement, NaN 0, +Inf and anything ≥ 2**64 UV_MAX, -Inf and anything below IV_MIN IV_MIN; `-1 >> 1` is 9223372036854775807), keep a left shift to 64 bits (`3 << 63` is 2**63), answer 0 for a count ≥ 64 either way and reverse direction for a negative count; `use integer` emits `p-<<-int` / `p->>-int` (signed IVs) for a BINARY shift, while the compound `<<=` / `>>=` keep the signed shift in and out of the pragma because the compiler emits the same macro for both (#3781) |
+| bitwise (**mode-dispatched**) | `p-bit-and p-bit-or p-bit-xor p-bit-not` (perl's `& \| ^ ~`; the runtime has no `p-&`-style names — verified emitted, s470bm) · always-string twins `p-str-bit-and p-str-bit-or p-str-bit-xor p-str-bit-not` (`&. \|. ^. ~.`) | overload hook first; then ONE mode decision (`%p-bitwise-operand-kind`): the op is NUMERIC iff an operand carries a number, else it STRINGIFIES both operands and operates byte by byte (`&` truncates to the shorter, `\|`/`^` pad with NUL). A reference, glob, `qr//`, blessed object or undef carries neither a number nor a string body and therefore goes to the STRING side — `undef \| "abc"` is `"abc"`, `[1] \| ("\0" x 13)` is `"ARRAY(0x…)"`. **Unary `~` differs on one state and only one**: a REFERENCE goes to its numeric side (the complemented address), because perl's `pp_complement` takes the string branch only for an SV that has a PV. A bit-STRING op whose operands hold a code point above 0xFF is FATAL, with perl's wording. The "carries a number" test is perl's SvNIOKp: a number, or a BOX holding a string whose `nv-ok` is set (§2.2 — it was numified; s525u).  A string with no numification history still falls back to `looks-like-number`, so a numeric-LOOKING literal still takes the numeric side (`"12" & "10"` is `"10"` in perl, `8` here) until `use feature 'bitwise'` is an emitted fact (task #1040) |
 | numeric compare | `p-== p-!= p-< p-> p-<= p->= p-<=>` | numify; return `1`/`""` (`<=>` −1/0/1; NaN comparisons → `""`/undef) |
 | string ops | `p-. p-string-concat p-str-x p-lc p-uc p-lcfirst p-ucfirst p-length p-substr p-index p-rindex p-reverse p-sprintf p-join` | stringify operands (§3.2), return raw string; Perl's `$_`-default forms arrive with `$_` already explicit in the tree (§8).  Perl's `x` is TWO ops, by what it repeats: `p-str-x` for a string, `p-list-x` for a parenthesised list (which belongs to the array/hash builtins) |
 | string compare | `p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge p-str-cmp` (perl's `eq ne lt gt le ge cmp`; the `str-` prefix is what tells them from the numeric row — there are no `p-eq`-style names) | stringify; return `1`/`""` |
@@ -6045,6 +6056,56 @@ test keeps its own logic (access(2) for `-r`/`-w`/`-x`, `lstat` for `-l`, the
 first-block scan for `-T`/`-B`).  A backend may cache the buffer instead —
 what it may not do is drop the flavour and the success flag, which are
 observable.
+
+### 10d. The shape-dispatching macros are the IR's ASSEMBLER (normative, s525u, R4 of `docs/runtime-review-s525.md`)
+
+Twelve runtime macros inspect the CODE SHAPE of their place argument at
+macro-expansion time and pick the store form the compiler already knew:
+`p-setf`, `p-list-=`, `p-.=`, `p-pre++`, `p-post++`, `p-pre--`, `p-post--`,
+`p-scalar-=`, `%p-viv-root` (behind `p-viv-ensure-hashref` /
+`p-viv-ensure-arrayref`), `p-viv-ensure-arrayref`, `p-sort-cmp` and
+`%define-compound-pair` (through `%store-back-form`).  The compiler emits ONE
+generic spelling (`(p-setf PLACE V)` for every `=`); the macro is the second
+lowering step that turns it into a specific store.  **That layer is the IR's
+assembler**: a backend that implements these twelve by the arms below
+implements every store the emitter can produce.  It shrinks when the parser
+program rebuilds lowering (`docs/parser-review-s525.md` §8): the compiler
+then names the store op, as perl's optree names `sassign` / `aassign` /
+`helem` / `aelem`, and `p-setf` ends with one arm.
+
+`p-setf PLACE V` -- the arms, in dispatch order:
+
+| place shape | expands to | the store op the compiler could name |
+|---|---|---|
+| a `\`-cast (refaliasing) | `%p-alias-expansion` | alias-store |
+| `@sym` / `%sym` | `p-array-=` / `p-hash-=` | aassign to an aggregate |
+| `$sym` | `p-scalar-=` | sassign |
+| `(p-gethash SYM K)` / `(p-aref SYM I)` | declare SYM if unbound, then the CL `setf` writer | helem / aelem store |
+| `(p-gethash (p-gethash\|p-aref …) K)`, `(p-gethash (p-gethash-deref\|p-aref-deref …) K)` | `p-autoviv-set` | vivifying helem store |
+| `(p-aref (p-gethash\|p-gethash-deref\|p-aref-deref\|p-aref …) I)` | `p-autoviv-aref-set` | vivifying aelem store |
+| `(p-aref-deref …)` `(p-gethash-deref …)` `(p-$ …)` `(p-cast-$ …)`, any other `(p-aref …)` / `(p-gethash …)` | the CL `setf` writer | deref store |
+| `(vector …)` | `p-list-=` | aassign |
+| `(p-aslice A I…)` / `(p-hslice H K…)` | the slice loop (constant subscripts unrolled) | slice store |
+| `(p-errno-string)` | `(setf (p-errno-string) V)` | `$!` store |
+| `(p-pos V)` / `(p-vec S O B)` / `(p-substr S P [L])` | `p-pos` / `p-vec-set` / 4-arg `p-substr` | lvalue builtins |
+| `(p-stash …)` | `p-stash-assign` | stash alias |
+| anything else | `box-set` | sassign through a box |
+
+The other eleven:
+
+| macro | dispatches on | arms |
+|---|---|---|
+| `p-list-=` | the LHS list | all plain `$` scalars, at most 8 (the #910 fast path); undef skip placeholders (context wraps peeled); a greedy array / hash; `(p-list-x (vector …) N)` (static or dynamic count); slices and element lvalues; `(p-backslash-list …)` / `(p-backslash-sub …)` refaliasing |
+| `p-.=` | the place | element `(p-gethash\|p-aref …)` -> append in place through the vivified temps; deref element -> append; `(p-cast-$ …)` -> `%p-deref-append`; other element / accessor place -> store-back; scalar box or raw slot |
+| `p-pre++` `p-post++` `p-pre--` `p-post--` | the place | a one-element `(vector X)` unwrapped; box-returning `(p-aref-box\|p-gethash-box …)`; `(p-cast-$ …)` (the old value captured first); element / accessor places -> store-back; a variable |
+| `p-scalar-=` | the VALUE form | `(p-backslash …)` -> store the reference box itself (box-in-box, through STORE when tied); anything else -> a value store |
+| `%p-viv-root` | the place | a variable -> vivify a fresh aggregate INTO it; an expression -> the ensure function |
+| `p-viv-ensure-arrayref` | (via `%p-viv-root`) | as above, with an array |
+| `p-sort-cmp` | the body | leading `declare` forms hoisted above the `return` catch |
+| `%define-compound-pair` / `%store-back-form` | the place | element place -> container and key bound once, container vivified; accessor place (`p-pos p-vec p-substr p-array-last-index`, their `defsetf` writers) -> read-modify-write; a raw slot (the `-raw` twin) -> plain `setf`; else the generic store |
+
+A place shape not in these tables is not emitted; the macros that end in a
+fallback arm (`p-setf`'s `box-set`) treat it as a scalar store.
 
 ## 11. What a translator may ignore
 
