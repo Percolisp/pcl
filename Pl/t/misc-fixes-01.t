@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 135;
+plan tests => 136;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -198,6 +198,16 @@ test_cl('$x = not 5 (no my) gives empty-string false',
 test_cl('not binds looser than == (semantics preserved)',
     'my $a = 3; my $b = 3; my $r = not $a == $b; print $r ? "T\n" : "F\n";',
     "F\n");
+
+# #3850: `not` in the MIDDLE operand of ?: stops at the ternary's `:` (it used
+# to swallow `0 : 5` and the statement dropped) -- YAML::PP t/lib Test.pm:66.
+# Outputs probed under perl 5.40.3.
+test_cl('not in a ternary middle operand (#3850)',
+    'my $v = 1; my $x = $v ? not 0 : 5; my $y = 0 ? not 0 : 5;
+     my $z = $v ? not $v ? 1 : 0 : 7; my $w = 0 || not $v ? 3 : 4;
+     my @r = grep { $v ? not -f "/etc/passwd$_" : 1 } ("", "x");
+     print "[$x][$y][$z][$w][", scalar(@r), "]\n";',
+    "[1][5][][][1]\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,

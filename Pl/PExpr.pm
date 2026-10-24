@@ -1886,7 +1886,18 @@ sub parse {
         # first, so `not` reduces over it.
         my $s   = $hi_ix + 2;
         my $end = $s;
+        # A ternary's `:` ends the operand too, unless a `?` opened inside
+        # it: `$c ? not 0 : 5` is `$c ? (not 0) : 5` (#3850, YAML::PP's
+        # t/lib Test.pm) -- `:` is a marker with no operator number, so the
+        # loose-operator test below never stops at it.
+        my $q_nest = 0;
         while ($end + 1 < scalar(@$e)) {
+          my $nx_str = $self->is_token_operator($e->[$end + 1]) // '';
+          $q_nest++ if $nx_str eq '?';
+          if ($nx_str eq ':') {
+            last if $q_nest == 0;
+            $q_nest--;
+          }
           my $nx_info = $self->op_info($e->[$end + 1]);
           last if defined $nx_info && $nx_info->{no} && $nx_info->{prec} <= $rn_info->{prec};
           $end++;
