@@ -1,0 +1,91 @@
+From 5caa125f6ff52ec2c8610830b22c1983416e7641 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:41:48 +0300
+Subject: [PATCH 11/23] Operator: ~~ where a term is expected is two
+ complements
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In term position perl reads ~~ as two bitwise complements, so
+is(~~$y, 3) passes $y numified.  The ~ now ends before a second ~ when
+_opcontext knows a term is expected (after an operator, an opening
+bracket or a ;) or at the start of the document.  Where it cannot tell
+-- after a match, a method name -- ~~ stays the smart match, as before.
+
+Fixes PCL §21 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Operator.pm |  9 +++++++++
+ t/ppi_bugs_pcl.t          |  3 +--
+ t/ppi_token_operator.t    | 19 ++++++++-----------
+ 3 files changed, 18 insertions(+), 13 deletions(-)
+
+diff --git a/lib/PPI/Token/Operator.pm b/lib/PPI/Token/Operator.pm
+index e5e22bd3..9e93e72b 100644
+--- a/lib/PPI/Token/Operator.pm
++++ b/lib/PPI/Token/Operator.pm
+@@ -65,6 +65,15 @@ sub __TOKENIZER__on_char {
+ 		$content . substr( $t->{line}, $t->{line_cursor}, 4 - length($content) ) eq '<<>>') {
+ 		return 1;
+ 	}
++	# Where a term is expected, ~~ is two bitwise complements (~~$y), not
++	# the smart match.  Only a known operand position counts (or the start
++	# of the document): after a match or a method name _opcontext cannot
++	# say, and those take ~~.
++	if ( $content eq '~' and $char eq '~'
++		and ( $t->_opcontext eq 'operand' or !$t->_last_significant_token )
++	) {
++		return $t->_finalize_token->__TOKENIZER__on_char( $t );
++	}
+ 	return 1 if $OPERATOR{ $content . $char };
+ 
+ 	# Handle the special case of a .1234 decimal number
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 02b3fea1..3e67c83c 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -557,8 +557,7 @@ TODO: {
+ # position, so a statement that starts an argument with it has a binary
+ # operator with no left operand.  (PPI already makes exactly this
+ # term-or-not decision correctly for `x` and for `/PATTERN/`.)
+-TODO: {
+-    local $TODO = 'PCL §21: A term-initial ~~ is lexed as the smart-match operator';
++{
+     my $doc = PPI::Document->new(\'is(~~$y, 3);');
+     my @ops = grep { $_->isa('PPI::Token::Operator') } $doc->tokens;
+     ok( !(grep { $_->content eq '~~' } @ops),
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index 1cc56046..0401fba8 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -735,17 +735,14 @@ TERM_INITIAL_COMPLEMENTS: {
+         'my $r = (/X/ ~~ @a);'       => '=,~~',
+         'my $r = $o->name ~~ @a;'    => '=,->,~~',
+     );
+-    TODO: {
+-        local $TODO = '~~ where a term is expected is lexed as a smart match';
+-        my @complements = (
+-            'is(~~$y, 3);'           => '~,~,,',
+-            'my $v = $a[~~2];'       => '=,~,~',
+-        );
+-        for ( my $i = 0; $i < @complements; $i += 2 ) {
+-            my $doc = safe_new \$complements[$i];
+-            my $ops = $doc->find('Token::Operator') || [];
+-            is( join( ',', map { $_->content } @$ops ), $complements[$i + 1], "operators of $complements[$i]" );
+-        }
++    my @complements = (
++        'is(~~$y, 3);'           => '~,~,,',
++        'my $v = $a[~~2];'       => '=,~,~',
++    );
++    for ( my $i = 0; $i < @complements; $i += 2 ) {
++        my $doc = safe_new \$complements[$i];
++        my $ops = $doc->find('Token::Operator') || [];
++        is( join( ',', map { $_->content } @$ops ), $complements[$i + 1], "operators of $complements[$i]" );
+     }
+     for ( my $i = 0; $i < @operators; $i += 2 ) {
+         my $doc = safe_new \$operators[$i];
+-- 
+2.53.0
+

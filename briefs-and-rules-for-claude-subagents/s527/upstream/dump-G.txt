@@ -1,0 +1,9 @@
+BEFORE (master 455bfa73)
+use utf8; $Ｘ{a} = 1
+    Word(use) Word(utf8) Structure(;) Cast($) Word(Ｘ) Structure({) Word(a) Structure(}) Operator(=) Number(1)
+    statements: Statement::Include Statement
+
+AFTER (branch pcl)
+use utf8; $Ｘ{a} = 1
+    Word(use) Word(utf8) Structure(;) Symbol($Ｘ) Structure({) Word(a) Structure(}) Operator(=) Number(1)
+    statements: Statement::Include Statement

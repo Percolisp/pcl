@@ -1,0 +1,114 @@
+From 8cefefce083749fe9a2bd3e9745366c0e08c64f3 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:46:24 +0300
+Subject: [PATCH 17/23] Word: the _ after sub names the sub
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A lone _ is the stat filehandle everywhere but right after sub, where
+perl reads it as the sub's name.  Both paths that class a lone _ now
+ask one helper, so sub _ { ... } and sub _; build a Statement::Sub.
+
+Fixes PCL §31 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Word.pm | 16 +++++++++++++---
+ t/ppi_bugs_pcl.t      |  6 ++----
+ t/ppi_statement_sub.t | 13 +++++--------
+ 3 files changed, 20 insertions(+), 15 deletions(-)
+
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 38ed04d3..ecfc3e12 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -177,9 +177,10 @@ sub __TOKENIZER__on_char {
+ 		$t->{line_cursor}++;
+ 		$t->{class} = $t->{token}->set_class( 'Label' );
+ 
+-	# If not a label, '_' on its own is the magic filehandle
++	# If not a label, '_' on its own is the magic filehandle, unless it
++	# names a sub
+ 	} elsif ( $word eq '_' ) {
+-		$t->{class} = $t->{token}->set_class( 'Magic' );
++		$t->{class} = $t->{token}->set_class( __underscore_class($t) );
+ 
+ 	}
+ 
+@@ -313,7 +314,7 @@ sub __TOKENIZER__commit {
+ 				$token_class = 'Word';
+ 			}
+ 		} elsif ( $word eq '_' ) {
+-			$token_class = 'Magic';
++			$token_class = __underscore_class($t);
+ 		} else {
+ 			$token_class = 'Word';
+ 		}
+@@ -346,6 +347,15 @@ sub __current_token_is_attribute {
+ 	);
+ }
+ 
++# The class of a lone `_`: right after `sub` it names the sub
++# (sub _ { ... }); anywhere else it is the stat filehandle.
++sub __underscore_class {
++	my ( $t ) = @_;
++	my ( $prev ) = $t->_previous_significant_tokens(1);
++	return 'Word' if $prev and $prev->isa('PPI::Token::Word') and $prev->content eq 'sub';
++	return 'Magic';
++}
++
+ 1;
+ 
+ =pod
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index e1c79b9a..5c855b99 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -981,8 +981,7 @@ TODO: {
+ # Token::Magic everywhere, and PPI::Lexer's Statement::Sub rule needs a
+ # Token::Word there, so `sub _ { "x" } print 1;` becomes ONE plain
+ # PPI::Statement spanning both halves.
+-TODO: {
+-    local $TODO = 'PCL §31: sub _ { … } — the NAME _ after sub is lexed as Token::Magic, so no Statement::Sub is built and the FOLLOWING statement is swallowed';
++{
+     my $doc = PPI::Document->new(\q{sub _ { "x" } print 1;});
+     my @st  = $doc->schildren;
+     is( scalar @st, 2,
+@@ -994,8 +993,7 @@ TODO: {
+         'the `_` naming the sub is a Token::Word, not Token::Magic' );
+ }
+ # The forward declaration is the same shape.
+-TODO: {
+-    local $TODO = 'PCL §31: sub _ { … } — the NAME _ after sub is lexed as Token::Magic, so no Statement::Sub is built and the FOLLOWING statement is swallowed';
++{
+     my $doc = PPI::Document->new(\q{sub _; print 1;});
+     my @st  = $doc->schildren;
+     is( ref($st[0]), 'PPI::Statement::Sub',
+diff --git a/t/ppi_statement_sub.t b/t/ppi_statement_sub.t
+index 8eacdb95..9f379a03 100644
+--- a/t/ppi_statement_sub.t
++++ b/t/ppi_statement_sub.t
+@@ -289,14 +289,11 @@ sub test_subs {
+ SUB_NAMED_UNDERSCORE: {
+ 	# `_` after `sub` is the sub's name: perl -e 'sub _ { "x" } print _()'
+ 	# prints x.  Anywhere else a lone `_` is the stat filehandle.
+-	TODO: {
+-		local $TODO = 'the _ naming a sub is lexed as the magic filehandle';
+-		for my $code ( 'sub _ { "x" } print 1;', 'sub _; print 1;', 'sub _ { "x" }' ) {
+-			my $doc = safe_new \$code;
+-			my ($sub) = $doc->schildren;
+-			ok( $sub && $sub->isa('PPI::Statement::Sub'), "$code: a Statement::Sub" );
+-			is( ( $sub && $sub->isa('PPI::Statement::Sub') ? $sub->name : '' ), '_', "$code: named _" );
+-		}
++	for my $code ( 'sub _ { "x" } print 1;', 'sub _; print 1;', 'sub _ { "x" }' ) {
++		my $doc = safe_new \$code;
++		my ($sub) = $doc->schildren;
++		ok( $sub && $sub->isa('PPI::Statement::Sub'), "$code: a Statement::Sub" );
++		is( ( $sub && $sub->isa('PPI::Statement::Sub') ? $sub->name : '' ), '_', "$code: named _" );
+ 	}
+ 	my $doc = safe_new \'print -f _;';
+ 	my ($u) = grep { $_->content eq '_' } $doc->tokens;
+-- 
+2.53.0
+

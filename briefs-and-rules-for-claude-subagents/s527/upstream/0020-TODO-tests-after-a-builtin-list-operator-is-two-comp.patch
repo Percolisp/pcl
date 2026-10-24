@@ -1,0 +1,63 @@
+From d387ad54237a3005eebe356f750c932f175b86cb Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:58:05 +0300
+Subject: [PATCH 20/23] TODO tests: ~~ after a builtin list operator is two
+ complements
+
+After print or return perl expects a term, so print ~~$y numifies $y.
+After a builtin that takes no operand (time, wantarray) it expects an
+operator, and time ~~ @a is the smart match; two controls keep that.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_token_operator.t | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index b6cc0f5f..5c5b7b6d 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 3185 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 3197 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Singletons qw( %KEYWORDS %OPERATOR );
+@@ -749,6 +749,31 @@ TERM_INITIAL_COMPLEMENTS: {
+         my $ops = $doc->find('Token::Operator') || [];
+         is( join( ',', map { $_->content } @$ops ), $operators[$i + 1], "operators of $operators[$i]" );
+     }
++
++    # After a builtin that takes an operand, a term is expected too
++    # (print ~~$y numifies $y); after one that takes none (time,
++    # wantarray) the ~~ is the smart match.
++    TODO: {
++        local $TODO = '~~ after a builtin list operator is lexed as a smart match';
++        my @after_listop = (
++            'print ~~$y;'            => '~,~',
++            'return ~~@a;'           => '~,~',
++        );
++        for ( my $i = 0; $i < @after_listop; $i += 2 ) {
++            my $doc = safe_new \$after_listop[$i];
++            my $ops = $doc->find('Token::Operator') || [];
++            is( join( ',', map { $_->content } @$ops ), $after_listop[$i + 1], "operators of $after_listop[$i]" );
++        }
++    }
++    my @no_operand = (
++        'my $r = time ~~ @a;'        => '=,~~',
++        'my $r = wantarray ~~ @a;'   => '=,~~',
++    );
++    for ( my $i = 0; $i < @no_operand; $i += 2 ) {
++        my $doc = safe_new \$no_operand[$i];
++        my $ops = $doc->find('Token::Operator') || [];
++        is( join( ',', map { $_->content } @$ops ), $no_operand[$i + 1], "operators of $no_operand[$i]" );
++    }
+ }
+ 
+ DOT_DIGIT_AFTER_A_TERM: {
+-- 
+2.53.0
+

@@ -1,0 +1,96 @@
+From c6b17b5e1160b7af1fa66221389401253a45b241 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:44:51 +0300
+Subject: [PATCH 15/23] Unknown: a $ scalar name may start with any letter
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The $ arm took a Symbol only for an ASCII letter or _; the @ % * & arms
+take any word character.  It now takes any letter or _ (digits keep
+their own paths: $1 and friends).
+
+Fixes PCL §23 in t/ppi_bugs_pcl.t (the Symbol, the subscript after it,
+and a foreach that names such a variable).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm |  4 ++--
+ t/ppi_bugs_pcl.t         |  9 +++------
+ t/ppi_token_symbol.t     | 11 ++++-------
+ 3 files changed, 9 insertions(+), 15 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 73c4fe69..50fa397f 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -109,8 +109,8 @@ sub __TOKENIZER__on_char {
+ 			}
+ 		}
+ 
+-		if ( $char =~ /[a-z_]/i ) {
+-			# Symbol
++		if ( $char =~ /[^\W\d]/ ) {
++			# Symbol -- any letter or _, not only ASCII, as the @ % * & arms allow
+ 			$t->{class} = $t->{token}->set_class( 'Symbol' );
+ 			return 1;
+ 		}
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index caca44b4..e1c79b9a 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -610,8 +610,7 @@ TODO: {
+ # `*`, `%`, `&` and `@` siblings test /[\w:]/.  The name itself is fine — once
+ # the token is classed Symbol, PPI::Token::Symbol consumes it with
+ # m/\G([\w:\']+)/gc.
+-TODO: {
+-    local $TODO = 'PCL §23: A $ scalar with a NON-ASCII name is split into Cast + Word';
++{
+     my $doc = PPI::Document->new(\"use utf8;\n\$\x{ff38} = 1;\n");
+     my @sym = grep { $_->isa('PPI::Token::Symbol') } $doc->tokens;
+     ok( (grep { $_->content eq "\$\x{ff38}" } @sym),
+@@ -632,8 +631,7 @@ TODO: {
+ # Second-order: because the lexer sees a bareword, the subscript that follows
+ # is built as a BLOCK (and `[…]` as an anonymous-array constructor), so the
+ # statement is not a subscripted variable at all.
+-TODO: {
+-    local $TODO = 'PCL §23: A $ scalar with a NON-ASCII name is split into Cast + Word';
++{
+     my $doc = PPI::Document->new(\"use utf8;\n\$\x{ff38}{a} = 1;\n");
+     ok( scalar @{ $doc->find('PPI::Structure::Subscript') || [] },
+         'the `{…}` after a non-ASCII scalar should be a Subscript' )
+@@ -644,8 +642,7 @@ TODO: {
+ # because the foreach-slot state machine sees the Cast the `$` split produced
+ # where it expects a Symbol.  `for (my $X=0;...)` and `while (my $X = ...)`
+ # lex fine.  PPI::Document->new returns undef, so no repair is possible.
+-TODO: {
+-    local $TODO = 'PCL §23: A $ scalar with a NON-ASCII name is split into Cast + Word';
++{
+     my $doc = PPI::Document->new(\"use utf8;\nfor my \$\x{ff29} (1,2) { 1 }\n");
+     ok( defined $doc,
+         'a foreach with a non-ASCII loop variable should lex at all' )
+diff --git a/t/ppi_token_symbol.t b/t/ppi_token_symbol.t
+index 0c26308e..557eee65 100644
+--- a/t/ppi_token_symbol.t
++++ b/t/ppi_token_symbol.t
+@@ -62,13 +62,10 @@ NON_ASCII_NAMES: {
+ 	# @ % * & sigils already take them.  The $ sigil must too: with
+ 	# use utf8, perl -e '$X = 1; print $X' (a fullwidth X) prints 1.
+ 	my $x = "\x{ff38}";
+-	TODO: {
+-		local $TODO = 'a $ scalar with a non-ASCII name is lexed as a Cast and a Word';
+-		for my $code ( "\$$x = 1;", "\$$x\{a} = 1;", "\$$x\[0] = 1;" ) {
+-			my $doc = safe_new \$code;
+-			my ($tok) = grep { $_->significant } $doc->tokens;
+-			ok( $tok && ref($tok) eq 'PPI::Token::Symbol' && $tok->content eq "\$$x", 'the scalar is one Symbol' );
+-		}
++	for my $code ( "\$$x = 1;", "\$$x\{a} = 1;", "\$$x\[0] = 1;" ) {
++		my $doc = safe_new \$code;
++		my ($tok) = grep { $_->significant } $doc->tokens;
++		ok( $tok && ref($tok) eq 'PPI::Token::Symbol' && $tok->content eq "\$$x", 'the scalar is one Symbol' );
+ 	}
+ 	my $doc = safe_new \"\%$x = ();";
+ 	my ($tok) = grep { $_->significant } $doc->tokens;
+-- 
+2.53.0
+

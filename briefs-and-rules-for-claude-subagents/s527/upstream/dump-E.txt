@@ -1,0 +1,17 @@
+BEFORE (master 455bfa73)
+is(~~$y, 3)
+    Word(is) Structure(() Operator(~~) Symbol($y) Operator(,) Number(3) Structure())
+print ~~$y
+    Word(print) Operator(~~) Symbol($y)
+my $r = (/X/ ~~ @a)
+    Word(my) Symbol($r) Operator(=) Structure(() Regexp::Match(/X/) Operator(~~) Symbol(@a) Structure())
+    statements: Statement::Variable
+
+AFTER (branch pcl)
+is(~~$y, 3)
+    Word(is) Structure(() Operator(~) Operator(~) Symbol($y) Operator(,) Number(3) Structure())
+print ~~$y
+    Word(print) Operator(~) Operator(~) Symbol($y)
+my $r = (/X/ ~~ @a)
+    Word(my) Symbol($r) Operator(=) Structure(() Regexp::Match(/X/) Operator(~~) Symbol(@a) Structure())
+    statements: Statement::Variable

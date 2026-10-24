@@ -1,0 +1,45 @@
+From d26d7ce4eff8f8ecf8937731e4d3fd1a171848b6 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 21:16:21 +0300
+Subject: [PATCH 22/23] TODO test: .digit after a print filehandle is a number
+
+perl -e 'print $fh .5' writes 0.5 to $fh: the scalar after print is a
+filehandle, not a term, when whitespace comes before the . and none
+after it -- the rule perl applies to print $fh %h too.  The previous
+commit's term test reads the $fh as a term and lexes a concatenation.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_token_operator.t | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index 7e12e3ff..8c98d487 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 3197 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 3200 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Singletons qw( %KEYWORDS %OPERATOR );
+@@ -792,4 +792,13 @@ DOT_DIGIT_AFTER_A_TERM: {
+     my $doc = safe_new \'my $x = .5;';
+     my ($num) = grep { $_->isa('PPI::Token::Number') } $doc->tokens;
+     is( ( $num ? ref($num) . '=' . $num->content : '' ), 'PPI::Token::Number::Float=.5', '= .5 is the number 0.5' );
++
++    # A scalar filehandle is not a term: perl -e 'print $fh .5' writes 0.5
++    # to $fh (space before the ., none after it), as print $fh %h does.
++    TODO: {
++        local $TODO = '.digit after a print filehandle is lexed as concatenation';
++        my $doc = safe_new \'print $fh .5;';
++        my ($num) = grep { $_->isa('PPI::Token::Number') } $doc->tokens;
++        is( ( $num ? ref($num) . '=' . $num->content : '' ), 'PPI::Token::Number::Float=.5', 'print $fh .5 prints the number 0.5' );
++    }
+ }
+-- 
+2.53.0
+

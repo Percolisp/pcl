@@ -1,0 +1,115 @@
+From fe5aeb64b09fcd8081aaf8dc9814d85bffd565b5 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:34:26 +0300
+Subject: [PATCH 04/23] TODO tests: % and * right after a term are operators
+
+perl -e 'print 7%-3, "\n"' prints -2: after a term the % is modulo, but
+PPI reads %- as the magic hash %-.  Likewise length($k)*length($k)
+multiplies, where PPI makes *length a glob Symbol (it already gets the
+case with a Number before the * right).
+
+Three controls pin what must not change: after a scalar filehandle
+(print $fh %h, print $fh *STDOUT) the % and * start the first list
+element, and %- in term position stays the magic hash.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_token_unknown.t | 75 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_token_unknown.t b/t/ppi_token_unknown.t
+index 35c52b10..3098179f 100644
+--- a/t/ppi_token_unknown.t
++++ b/t/ppi_token_unknown.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 2328 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 2346 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use B qw( perlstring );
+@@ -640,6 +640,79 @@ OPERATOR_CAST: {
+ }
+ }
+ 
++AFTER_A_TERM: {
++	# After a term, % is the modulo operator and * the multiplication
++	# operator, whatever character follows them.
++	TODO: {
++		local $TODO = '% or * right after a term, before a - or a word, is read as a variable';
++		test_statement(
++			'7%-3',
++			[
++				'PPI::Token::Number' => '7',
++				'PPI::Token::Operator' => '%',
++				'PPI::Token::Number' => '-3',
++			]
++		);
++		test_statement(
++			'$x[0]%-1',
++			[
++				'PPI::Token::Symbol' => '$x',
++				'PPI::Structure::Subscript' => '[0]',
++				'PPI::Token::Structure' => '[',
++				'PPI::Statement::Expression' => '0',
++				'PPI::Token::Number' => '0',
++				'PPI::Token::Structure' => ']',
++				'PPI::Token::Operator' => '%',
++				'PPI::Token::Number' => '-1',
++			]
++		);
++		test_statement(
++			'length($k)*length($k)',
++			[
++				'PPI::Token::Word' => 'length',
++				'PPI::Structure::List' => '($k)',
++				'PPI::Token::Structure' => '(',
++				'PPI::Statement::Expression' => '$k',
++				'PPI::Token::Symbol' => '$k',
++				'PPI::Token::Structure' => ')',
++				'PPI::Token::Operator' => '*',
++				'PPI::Token::Word' => 'length',
++				'PPI::Structure::List' => '($k)',
++				'PPI::Token::Structure' => '(',
++				'PPI::Statement::Expression' => '$k',
++				'PPI::Token::Symbol' => '$k',
++				'PPI::Token::Structure' => ')',
++			]
++		);
++	}
++
++	# A scalar filehandle is not a term: what follows it is the first
++	# element of the list (perl -e 'print $fh %h' prints the hash).
++	test_statement(
++		'print $fh %h',
++		[
++			'PPI::Token::Word' => 'print',
++			'PPI::Token::Symbol' => '$fh',
++			'PPI::Token::Symbol' => '%h',
++		]
++	);
++	test_statement(
++		'print $fh *STDOUT',
++		[
++			'PPI::Token::Word' => 'print',
++			'PPI::Token::Symbol' => '$fh',
++			'PPI::Token::Symbol' => '*STDOUT',
++		]
++	);
++	test_statement(
++		'keys %-',
++		[
++			'PPI::Token::Word' => 'keys',
++			'PPI::Token::Magic' => '%-',
++		]
++	);
++}
++
+ sub one_line_explain {
+ 	my ($data) = @_;
+ 	my @explain = explain $data;
+-- 
+2.53.0
+

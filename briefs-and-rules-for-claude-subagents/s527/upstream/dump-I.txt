@@ -1,0 +1,11 @@
+BEFORE (master 455bfa73)
+0x1.8p+1
+    Number::Hex(0x1) Number::Float(.8) Word(p) Operator(+) Number(1)
+0x1.8
+    Number::Hex(0x1) Number::Float(.8)
+
+AFTER (branch pcl)
+0x1.8p+1
+    Number::Float(0x1.8p+1)
+0x1.8
+    Number::Hex(0x1) Operator(.) Number(8)

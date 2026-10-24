@@ -1,0 +1,117 @@
+From 8955ba306e507be53d1696e4cf7881a694d9f5b8 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 21:17:43 +0300
+Subject: [PATCH 23/23] Tokenizer: one scalar-filehandle test; .digit after
+ print $fh is a number
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The test for "the $scalar right after print, printf, say, exec or
+system, followed by whitespace" moves from PPI::Token::Unknown to the
+Tokenizer as _after_scalar_filehandle, so the . arm can ask it too: in
+print $fh .5 the . starts the number 0.5, as perl reads it.  print $fh.5
+and $x .5 outside a print stay concatenations.
+
+Completes PCL §28 (the print-filehandle exception the catalogue names).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Operator.pm |  4 +++-
+ lib/PPI/Token/Unknown.pm  | 17 +----------------
+ lib/PPI/Tokenizer.pm      | 18 ++++++++++++++++++
+ t/ppi_token_operator.t    |  3 +--
+ 4 files changed, 23 insertions(+), 19 deletions(-)
+
+diff --git a/lib/PPI/Token/Operator.pm b/lib/PPI/Token/Operator.pm
+index c29e181c..f19d2919 100644
+--- a/lib/PPI/Token/Operator.pm
++++ b/lib/PPI/Token/Operator.pm
+@@ -76,7 +76,9 @@ sub __TOKENIZER__on_char {
+ 	if ( $content eq '.' ) {
+ 		# .5 is a number only in TERM position; after a term ($x.2) it is
+ 		# the concatenation operator
+-		if ( $char =~ /^[0-9]$/ and $t->_opcontext ne 'operator' ) {
++		if ( $char =~ /^[0-9]$/
++			and ( $t->_opcontext ne 'operator' or $t->_after_scalar_filehandle )
++		) {
+ 			# This is a decimal number
+ 			$t->{class} = $t->{token}->set_class('Number::Float');
+ 			return $t->{class}->__TOKENIZER__on_char( $t );
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 50fa397f..674796f8 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -348,25 +348,10 @@ sub _after_term {
+ 	my ( $t, $prev ) = @_;
+ 	return '' if !$prev;
+ 	return '' if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
+-	return '' if _is_scalar_filehandle( $t, $prev );
++	return '' if $t->_after_scalar_filehandle;
+ 	return $t->_opcontext eq 'operator';
+ }
+ 
+-# In `print $fh %h` the $fh is a filehandle, not a term, and %h is the
+-# first element of the list.  perl tells the two apart by the whitespace:
+-# there is some before the % or * and none after it (`print $fh % 2` is
+-# a modulo, and so is `print $fh%2`).
+-my %FILEHANDLE_LISTOP = map { $_ => 1 } qw( print printf say exec system );
+-
+-sub _is_scalar_filehandle {
+-	my ( $t, $prev ) = @_;
+-	return '' if !$prev->isa('PPI::Token::Symbol') or $prev->content !~ /^\$/;
+-	my $last = $t->_last_token;
+-	return '' if !$last or !$last->isa('PPI::Token::Whitespace');
+-	my ( undef, $op ) = $t->_previous_significant_tokens(2);
+-	return $op && $op->isa('PPI::Token::Word') && $FILEHANDLE_LISTOP{ $op->content };
+-}
+-
+ sub _is_cast_or_op {
+ 	my ( $self, $char ) = @_;
+ 	return 1 if $char eq '$';
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 6f5d164c..07dccfe6 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -787,6 +787,24 @@ sub _opcontext {
+ 	return ''
+ }
+ 
++# In `print $fh %h` (or *STDOUT, or .5) the $fh is a filehandle, not a
++# term, and what follows starts the list.  perl tells the two apart by the
++# whitespace: there is some before the next character and none after it
++# (`print $fh % 2` and `print $fh%2` are a modulo).  True when the tokenizer
++# stands in that slot: the previous significant token is a $scalar right
++# after print, printf, say, exec or system, and whitespace separates it from
++# the current token.
++my %FILEHANDLE_LISTOP = map { $_ => 1 } qw( print printf say exec system );
++
++sub _after_scalar_filehandle {
++	my $self = shift;
++	my ( $prev, $op ) = $self->_previous_significant_tokens(2);
++	return '' if !$prev or !$prev->isa('PPI::Token::Symbol') or $prev->content !~ /^\$/;
++	my $last = $self->_last_token;
++	return '' if !$last or !$last->isa('PPI::Token::Whitespace');
++	return $op && $op->isa('PPI::Token::Word') && $FILEHANDLE_LISTOP{ $op->content };
++}
++
+ # Assuming we are currently parsing the word 'x', return true
+ # if previous tokens imply the x is an operator, false otherwise.
+ sub _current_x_is_operator {
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index 8c98d487..d880cc51 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -795,8 +795,7 @@ DOT_DIGIT_AFTER_A_TERM: {
+ 
+     # A scalar filehandle is not a term: perl -e 'print $fh .5' writes 0.5
+     # to $fh (space before the ., none after it), as print $fh %h does.
+-    TODO: {
+-        local $TODO = '.digit after a print filehandle is lexed as concatenation';
++    {
+         my $doc = safe_new \'print $fh .5;';
+         my ($num) = grep { $_->isa('PPI::Token::Number') } $doc->tokens;
+         is( ( $num ? ref($num) . '=' . $num->content : '' ), 'PPI::Token::Number::Float=.5', 'print $fh .5 prints the number 0.5' );
+-- 
+2.53.0
+

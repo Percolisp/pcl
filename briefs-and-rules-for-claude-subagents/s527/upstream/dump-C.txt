@@ -1,0 +1,7 @@
+BEFORE (master 455bfa73)
+$a ^^ $b
+    Symbol($a) Operator(^) Operator(^) Symbol($b)
+
+AFTER (branch pcl)
+$a ^^ $b
+    Symbol($a) Operator(^^) Symbol($b)

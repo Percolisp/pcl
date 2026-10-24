@@ -1,0 +1,8 @@
+BEFORE (master 455bfa73)
+sub _ { "x" } print 1;
+    Word(sub) Magic(_) Structure({) Quote::Double("x") Structure(}) Word(print) Number(1) Structure(;)
+
+AFTER (branch pcl)
+sub _ { "x" } print 1;
+    Word(sub) Word(_) Structure({) Quote::Double("x") Structure(}) Word(print) Number(1) Structure(;)
+    statements: Statement::Sub Statement

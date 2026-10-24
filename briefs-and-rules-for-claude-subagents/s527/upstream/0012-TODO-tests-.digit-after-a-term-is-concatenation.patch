@@ -1,0 +1,59 @@
+From a268a29b711befebbea1a6535dbd29ea45f1b7cb Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:42:28 +0300
+Subject: [PATCH 12/23] TODO tests: .digit after a term is concatenation
+
+perl -e '$_ = 1; print $_.2' prints 12: after a term the . is the
+concatenation operator and 2 a number, but PPI lexes .2 as one
+Number::Float and the operator disappears.  A control keeps = .5 the
+number 0.5.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_token_operator.t | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index 0401fba8..109d9c12 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 3173 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 3185 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Singletons qw( %KEYWORDS %OPERATOR );
+@@ -750,3 +750,27 @@ TERM_INITIAL_COMPLEMENTS: {
+         is( join( ',', map { $_->content } @$ops ), $operators[$i + 1], "operators of $operators[$i]" );
+     }
+ }
++
++DOT_DIGIT_AFTER_A_TERM: {
++    # After a term, .2 is the concatenation operator and the number 2:
++    # perl -e '$_ = 1; print $_.2' prints 12.  Where a term is expected
++    # .5 is the number 0.5.
++    TODO: {
++        local $TODO = '.digit after a term is lexed as a Number::Float';
++        my @concat = (
++            'my $x = $_.2;'      => 'Operator=.,Number=2',
++            'my $z = $y[$i].3;'  => 'Operator=.,Number=3',
++            'my $s = "a".5;'     => 'Operator=.,Number=5',
++        );
++        for ( my $i = 0; $i < @concat; $i += 2 ) {
++            my $doc = safe_new \$concat[$i];
++            my @t = grep { $_->isa('PPI::Token::Operator') && $_->content eq '.' or $_->isa('PPI::Token::Number') }
++                $doc->tokens;
++            my $got = join ',', map { my $c = ref $_; $c =~ s/^PPI::Token:://; "$c=" . $_->content } @t;
++            is( $got, $concat[$i + 1], "tokens of $concat[$i]" );
++        }
++    }
++    my $doc = safe_new \'my $x = .5;';
++    my ($num) = grep { $_->isa('PPI::Token::Number') } $doc->tokens;
++    is( ( $num ? ref($num) . '=' . $num->content : '' ), 'PPI::Token::Number::Float=.5', '= .5 is the number 0.5' );
++}
+-- 
+2.53.0
+

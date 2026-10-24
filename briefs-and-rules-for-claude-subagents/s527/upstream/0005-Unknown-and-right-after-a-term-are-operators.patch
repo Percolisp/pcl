@@ -1,0 +1,210 @@
+From 1cff9293741c6a2a0772b04119f34eacf3ef9f69 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:36:52 +0300
+Subject: [PATCH 05/23] Unknown: % and * right after a term are operators
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A % or * right after a term is the modulo or multiplication operator,
+whatever follows it: perl -e 'print 7%-3' prints -2 and
+length($k)*length($k) multiplies.  The * arm already said so for a
+Number on the left; both arms now ask one helper, _after_term, which
+reads the term-ness from _opcontext.
+
+Two cases are kept as they are: a } on the left (a block's end or a
+subscript's, which the tokenizer cannot tell apart here), and a scalar
+filehandle -- in `print $fh %h` the % starts the first list element,
+which perl decides from whitespace before the % and none after it.
+
+Fixes PCL §4 and §12 in t/ppi_bugs_pcl.t.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Token/Unknown.pm | 37 +++++++++++++++++-
+ t/ppi_bugs_pcl.t         |  6 +--
+ t/ppi_token_unknown.t    | 81 +++++++++++++++++++---------------------
+ 3 files changed, 76 insertions(+), 48 deletions(-)
+
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 354ba90b..73c4fe69 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -59,9 +59,9 @@ sub __TOKENIZER__on_char {
+ 		}
+ 
+ 		if ( $char =~ /[\w:]/ ) {
+-			# Symbol (unless the thing before it is a number
++			# Symbol, unless the thing before it ends a term: length($k)*length($k)
+ 			my ( $prev ) = $t->_previous_significant_tokens(1);
+-			if ( not $prev or not $prev->isa('PPI::Token::Number') ) {
++			if ( not _after_term( $t, $prev ) ) {
+ 				$t->{class} = $t->{token}->set_class( 'Symbol' );
+ 				return 1;
+ 			}
+@@ -217,6 +217,12 @@ sub __TOKENIZER__on_char {
+ 			return $t->_finalize_token->__TOKENIZER__on_char($t);
+ 		}
+ 
++		# After a term, % is the modulo operator whatever follows it (7%-3)
++		if ( _after_term( $t, ($t->_previous_significant_tokens(1))[0] ) ) {
++			$t->{class} = $t->{token}->set_class( 'Operator' );
++			return $t->{class}->__TOKENIZER__on_char( $t );
++		}
++
+ 		# Is it a magic variable?
+ 		if ( $char eq '^' || $MAGIC{ $c . $char } ) {
+ 			$t->{class} = $t->{token}->set_class( 'Magic' );
+@@ -334,6 +340,33 @@ sub __TOKENIZER__on_char {
+ 	PPI::Exception->throw('Unknown value in PPI::Token::Unknown token');
+ }
+ 
++# True when the previous significant token ENDS A TERM, so the % or * now
++# being classified is an operator (7%-3, length($k)*length($k)).  A } is
++# excluded: here the tokenizer cannot tell a block's end from a subscript's
++# (_cast_or_op scans back for that).  So is a scalar filehandle.
++sub _after_term {
++	my ( $t, $prev ) = @_;
++	return '' if !$prev;
++	return '' if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
++	return '' if _is_scalar_filehandle( $t, $prev );
++	return $t->_opcontext eq 'operator';
++}
++
++# In `print $fh %h` the $fh is a filehandle, not a term, and %h is the
++# first element of the list.  perl tells the two apart by the whitespace:
++# there is some before the % or * and none after it (`print $fh % 2` is
++# a modulo, and so is `print $fh%2`).
++my %FILEHANDLE_LISTOP = map { $_ => 1 } qw( print printf say exec system );
++
++sub _is_scalar_filehandle {
++	my ( $t, $prev ) = @_;
++	return '' if !$prev->isa('PPI::Token::Symbol') or $prev->content !~ /^\$/;
++	my $last = $t->_last_token;
++	return '' if !$last or !$last->isa('PPI::Token::Whitespace');
++	my ( undef, $op ) = $t->_previous_significant_tokens(2);
++	return $op && $op->isa('PPI::Token::Word') && $FILEHANDLE_LISTOP{ $op->content };
++}
++
+ sub _is_cast_or_op {
+ 	my ( $self, $char ) = @_;
+ 	return 1 if $char eq '$';
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 472c790c..964ea616 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -96,8 +96,7 @@ TODO: {
+ # position.  In `7%-3` the `%` follows a term (7) so it is the modulo operator
+ # and `-3` is its operand — exactly what PPI gives for the spaced form `7 % -3`.
+ # PPI instead emits Magic `%-`, losing the `%` operator.
+-TODO: {
+-    local $TODO = 'PCL §4: 7%-3 tokenized as the magic hash %- (modulo lost)';
++{
+     my @t = toks('7%-3');
+     ok( !grep(/^PPI::Token::Magic=\%-$/, @t),
+         '7%-3 should tokenize as 7 % -3, not as the magic hash %-' )
+@@ -312,8 +311,7 @@ TODO: {
+ # left (`2*length($k)`) or a single space (`) * length`) it is correct, which is
+ # what makes this easy to miss.  A consumer sees `Word List Symbol List` and has
+ # no way back: the multiplication is gone.
+-TODO: {
+-    local $TODO = 'PCL §12: )*name — a * after a term is lexed as a GLOB, not multiplication';
++{
+     my @t = toks('$s += length($k)*length($k);');
+     ok( !grep(/^PPI::Token::Symbol=\*/, @t),
+         ')*name after a term should be Operator(*) + Word, not a glob Symbol' )
+diff --git a/t/ppi_token_unknown.t b/t/ppi_token_unknown.t
+index 3098179f..ade15a72 100644
+--- a/t/ppi_token_unknown.t
++++ b/t/ppi_token_unknown.t
+@@ -643,48 +643,45 @@ OPERATOR_CAST: {
+ AFTER_A_TERM: {
+ 	# After a term, % is the modulo operator and * the multiplication
+ 	# operator, whatever character follows them.
+-	TODO: {
+-		local $TODO = '% or * right after a term, before a - or a word, is read as a variable';
+-		test_statement(
+-			'7%-3',
+-			[
+-				'PPI::Token::Number' => '7',
+-				'PPI::Token::Operator' => '%',
+-				'PPI::Token::Number' => '-3',
+-			]
+-		);
+-		test_statement(
+-			'$x[0]%-1',
+-			[
+-				'PPI::Token::Symbol' => '$x',
+-				'PPI::Structure::Subscript' => '[0]',
+-				'PPI::Token::Structure' => '[',
+-				'PPI::Statement::Expression' => '0',
+-				'PPI::Token::Number' => '0',
+-				'PPI::Token::Structure' => ']',
+-				'PPI::Token::Operator' => '%',
+-				'PPI::Token::Number' => '-1',
+-			]
+-		);
+-		test_statement(
+-			'length($k)*length($k)',
+-			[
+-				'PPI::Token::Word' => 'length',
+-				'PPI::Structure::List' => '($k)',
+-				'PPI::Token::Structure' => '(',
+-				'PPI::Statement::Expression' => '$k',
+-				'PPI::Token::Symbol' => '$k',
+-				'PPI::Token::Structure' => ')',
+-				'PPI::Token::Operator' => '*',
+-				'PPI::Token::Word' => 'length',
+-				'PPI::Structure::List' => '($k)',
+-				'PPI::Token::Structure' => '(',
+-				'PPI::Statement::Expression' => '$k',
+-				'PPI::Token::Symbol' => '$k',
+-				'PPI::Token::Structure' => ')',
+-			]
+-		);
+-	}
++	test_statement(
++		'7%-3',
++		[
++			'PPI::Token::Number' => '7',
++			'PPI::Token::Operator' => '%',
++			'PPI::Token::Number' => '-3',
++		]
++	);
++	test_statement(
++		'$x[0]%-1',
++		[
++			'PPI::Token::Symbol' => '$x',
++			'PPI::Structure::Subscript' => '[0]',
++			'PPI::Token::Structure' => '[',
++			'PPI::Statement::Expression' => '0',
++			'PPI::Token::Number' => '0',
++			'PPI::Token::Structure' => ']',
++			'PPI::Token::Operator' => '%',
++			'PPI::Token::Number' => '-1',
++		]
++	);
++	test_statement(
++		'length($k)*length($k)',
++		[
++			'PPI::Token::Word' => 'length',
++			'PPI::Structure::List' => '($k)',
++			'PPI::Token::Structure' => '(',
++			'PPI::Statement::Expression' => '$k',
++			'PPI::Token::Symbol' => '$k',
++			'PPI::Token::Structure' => ')',
++			'PPI::Token::Operator' => '*',
++			'PPI::Token::Word' => 'length',
++			'PPI::Structure::List' => '($k)',
++			'PPI::Token::Structure' => '(',
++			'PPI::Statement::Expression' => '$k',
++			'PPI::Token::Symbol' => '$k',
++			'PPI::Token::Structure' => ')',
++		]
++	);
+ 
+ 	# A scalar filehandle is not a term: what follows it is the first
+ 	# element of the list (perl -e 'print $fh %h' prints the hash).
+-- 
+2.53.0
+

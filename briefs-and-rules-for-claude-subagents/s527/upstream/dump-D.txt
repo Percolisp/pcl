@@ -1,0 +1,7 @@
+BEFORE (master 455bfa73)
+@? = (1,2)
+    Cast(@) Operator(?) Operator(=) Structure(() Number(1) Operator(,) Number(2) Structure())
+
+AFTER (branch pcl)
+@? = (1,2)
+    Magic(@?) Operator(=) Structure(() Number(1) Operator(,) Number(2) Structure())

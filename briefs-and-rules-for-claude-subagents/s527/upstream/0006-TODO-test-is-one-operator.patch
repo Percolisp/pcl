@@ -1,0 +1,43 @@
+From 5060abc96be033fda8512e1fe8ffc2b71b6959e9 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:37:33 +0300
+Subject: [PATCH 06/23] TODO test: ^^ is one operator
+
+perl 5.40 added ^^, the logical exclusive or (perl -e 'print 1 ^^ 0'
+prints 1); PPI lexes it as two ^ operators.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ t/ppi_token_operator.t | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index c9eee979..bb2b4f98 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 3147 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 3150 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Singletons qw( %KEYWORDS %OPERATOR );
+@@ -718,3 +718,13 @@ OPERATORS_PLUS_MINUS: {
+         }
+     }
+ }
++
++LOGICAL_XOR: {
++    # perl 5.40: $a ^^ $b is the logical exclusive or (there is no ^^=)
++    TODO: {
++        local $TODO = "^^ is lexed as two ^ operators";
++        my $doc = safe_new \'my $r = $a ^^ $b;';
++        my $ops = $doc->find('Token::Operator') || [];
++        is( join( ',', map { $_->content } @$ops ), '=,^^', '^^ is one operator' );
++    }
++}
+-- 
+2.53.0
+

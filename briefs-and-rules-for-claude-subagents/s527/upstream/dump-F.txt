@@ -1,0 +1,15 @@
+BEFORE (master 455bfa73)
+$_.2
+    Magic($_) Number::Float(.2)
+print $fh .5
+    Word(print) Symbol($fh) Number::Float(.5)
+print $fh.5
+    Word(print) Symbol($fh) Number::Float(.5)
+
+AFTER (branch pcl)
+$_.2
+    Magic($_) Operator(.) Number(2)
+print $fh .5
+    Word(print) Symbol($fh) Number::Float(.5)
+print $fh.5
+    Word(print) Symbol($fh) Operator(.) Number(5)

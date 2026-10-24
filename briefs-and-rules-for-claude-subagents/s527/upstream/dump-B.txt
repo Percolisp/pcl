@@ -1,0 +1,15 @@
+BEFORE (master 455bfa73)
+7%-3
+    Number(7) Magic(%-) Number(3)
+length($k)*length($k)
+    Word(length) Structure(() Symbol($k) Structure()) Symbol(*length) Structure(() Symbol($k) Structure())
+print $fh %h
+    Word(print) Symbol($fh) Symbol(%h)
+
+AFTER (branch pcl)
+7%-3
+    Number(7) Operator(%) Number(-3)
+length($k)*length($k)
+    Word(length) Structure(() Symbol($k) Structure()) Operator(*) Word(length) Structure(() Symbol($k) Structure())
+print $fh %h
+    Word(print) Symbol($fh) Symbol(%h)

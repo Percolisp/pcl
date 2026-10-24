@@ -1,0 +1,67 @@
+From 6876d6eb5a39bc1a58cdcbb33b52034ec5abc749 Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:39:14 +0300
+Subject: [PATCH 09/23] Singletons: @? is a magic variable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+@? is the array named like $?, and perl accepts it like any other
+punctuation array.  Fixes the @? row of PCL §24 in t/ppi_bugs_pcl.t;
+its @! and %? rows stay TODO.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Singletons.pm | 2 +-
+ t/ppi_bugs_pcl.t      | 3 +--
+ t/ppi_token_magic.t   | 9 +++------
+ 3 files changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/lib/PPI/Singletons.pm b/lib/PPI/Singletons.pm
+index a2d74bcd..b64da134 100644
+--- a/lib/PPI/Singletons.pm
++++ b/lib/PPI/Singletons.pm
+@@ -36,7 +36,7 @@ our %MAGIC = map { $_ => 1 } qw{
+ 	$1 $2 $3 $4 $5 $6 $7 $8 $9
+ 	$_ $& $` $' $+ @+ %+ $* $. $/ $|
+ 	$\\ $" $; $% $= $- @- %- $)
+-	$~ $^ $: $? $! %! $@ $$ $< $>
++	$~ $^ $: $? @? $! %! $@ $$ $< $>
+ 	$( $0 $[ $] @_ @*
+ 
+ 	$^L $^A $^E $^C $^D $^F $^H
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 812c72e1..02b3fea1 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -664,8 +664,7 @@ TODO: {
+ # It is not a missing feature: in valid perl a `@` Cast is only ever followed by
+ # `$`, `{` or an identifier, so `Cast + Operator` is a parse of no legal program
+ # at all.  perl accepts @? @! @. @/ @~ @^ @& @% @= @< @> (probed, 5.40.3).
+-TODO: {
+-    local $TODO = 'PCL §24: A PUNCTUATION-named array @? is split into Cast + Operator';
++{
+     my $doc = PPI::Document->new(\'@? = (1,2);');
+     my @sym = grep { $_->isa('PPI::Token::Symbol') } $doc->tokens;
+     ok( (grep { $_->content eq '@?' } @sym),
+diff --git a/t/ppi_token_magic.t b/t/ppi_token_magic.t
+index 64512c7f..eaface90 100644
+--- a/t/ppi_token_magic.t
++++ b/t/ppi_token_magic.t
+@@ -50,10 +50,7 @@ END_PERL
+ PUNCTUATION_ARRAY: {
+ 	# Every punctuation variable name is an array name too: perl -e
+ 	# '@? = (1,2); print scalar(@?)' prints 2.
+-	TODO: {
+-		local $TODO = '@? is lexed as a Cast and an Operator';
+-		my $doc = safe_new \'@? = (1,2);';
+-		my ($tok) = grep { $_->significant } $doc->tokens;
+-		is( ($tok ? ref($tok) . '=' . $tok->content : ''), 'PPI::Token::Magic=@?', '@? is one Magic token' );
+-	}
++	my $doc = safe_new \'@? = (1,2);';
++	my ($tok) = grep { $_->significant } $doc->tokens;
++	is( ($tok ? ref($tok) . '=' . $tok->content : ''), 'PPI::Token::Magic=@?', '@? is one Magic token' );
+ }
+-- 
+2.53.0
+

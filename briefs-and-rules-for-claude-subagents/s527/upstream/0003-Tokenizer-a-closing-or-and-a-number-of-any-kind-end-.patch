@@ -1,0 +1,179 @@
+From a737c524f094aa0aa154bdfcaf50607c352102ca Mon Sep 17 00:00:00 2001
+From: Bernt Budde <bernt.budde@gmail.com>
+Date: Sat, 24 Oct 2026 20:32:24 +0300
+Subject: [PATCH 03/23] Tokenizer: a closing ) or ], and a number of any kind,
+ end a term
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+_opcontext decides whether a - starts a negative number or is the
+subtraction operator.  It knew that a } and a plain Number end a term,
+but not a ) or a ] (so (1)-2, $x[1]-2 and f(1)-length lost their
+operator), nor the Number subclasses (so 1.5-0.5, 1e3-1, 0x10-1 lexed
+the - into the second number).  perl expects an operator after each of
+them.
+
+This resolves the "(1)-2 not parsed correctly" TODO in
+t/ppi_token_operator.t, whose comment asked for '(1)', '2' to join the
+operand table once it passed; it has, with the new cases.  In
+t/ppi_bugs_pcl.t it fixes PCL §15, §25 (the )-length half) and §34.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/PPI/Tokenizer.pm   |  3 +++
+ t/ppi_bugs_pcl.t       | 19 +++++---------
+ t/ppi_token_operator.t | 59 ++++++++++--------------------------------
+ 3 files changed, 24 insertions(+), 57 deletions(-)
+
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 6c688a9f..6f5d164c 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -756,6 +756,8 @@ my %OBVIOUS_CONTENT = (
+ 	'[' => 'operand',
+ 	';' => 'operand',
+ 	'}' => 'operator',
++	')' => 'operator',
++	']' => 'operator',
+ );
+ 
+ 
+@@ -772,6 +774,7 @@ sub _opcontext {
+ 
+ 	# Map the obvious cases
+ 	return $OBVIOUS_CLASS{$c0}   if defined $OBVIOUS_CLASS{$c0};
++	return 'operator' if $p0->isa('PPI::Token::Number');   # Float, Exp, Hex, Octal, Binary too
+ 	return $OBVIOUS_CONTENT{$p0} if defined $OBVIOUS_CONTENT{$p0};
+ 
+ 	# Most of the time after an operator, we are an operand
+diff --git a/t/ppi_bugs_pcl.t b/t/ppi_bugs_pcl.t
+index 18d35aa2..472c790c 100644
+--- a/t/ppi_bugs_pcl.t
++++ b/t/ppi_bugs_pcl.t
+@@ -410,8 +410,7 @@ TODO: {
+ # After `)` a term has ENDED, so `-` is an operator.  PPI emits Number('-1'),
+ # and the subtraction is gone: the consumer sees two adjacent terms.  With a
+ # space (`(1+2) - 1`) it is correct, which is what makes it easy to miss.
+-TODO: {
+-    local $TODO = 'PCL §15: ) followed by -1 — the operator is swallowed into a negative NUMBER';
++{
+     my @t = toks('my $x = (1+2)-1;');
+     ok( !grep(/^PPI::Token::Number=-1$/, @t),
+         ')-1 should be Operator(-) + Number(1), not a negative literal' )
+@@ -714,8 +713,7 @@ TODO: {
+ # start where a TERM can.  perl -MO=Deparse gives `length('abc') - length('a')`.
+ # A space fixes the lexing, and PPI already makes exactly this operator-vs-term
+ # decision correctly for `x` and for `/PATTERN/`.
+-TODO: {
+-    local $TODO = 'PCL §25: -name after a token that ENDS A TERM is lexed as one negative-bareword Word';
++{
+     my $doc = PPI::Document->new(\'my $z = length("abc")-length("a");');
+     ok( !(grep { $_->isa('PPI::Token::Word') && $_->content eq '-length' } $doc->tokens),
+         '`)-length` should lex as Operator(-) + Word(length), not one Word' )
+@@ -1076,14 +1074,11 @@ TODO: {
+ # §34 -- after a Float / Exp / Hex number, `-N` is taken as a negative NUMBER
+ # although the previous token ends a term (the integer tokenizer gets it right:
+ # `2-0.5` has its Operator).  perl: `1.5-0.5` is 1, `1e3-1` is 999.
+-TODO: {
+-    local $TODO = 'PCL §34: After a FLOAT / EXP / HEX / OCTAL / BINARY number, -N is lexed as a NEGATIVE NUMBER';
+-    for my $src ('1.5-0.5;', '1e3-1;') {
+-        my $doc = PPI::Document->new(\$src);
+-        my @ops = grep { $_->isa('PPI::Token::Operator') && $_->content eq '-' }
+-                  $doc->tokens;
+-        is( scalar @ops, 1, "`$src` has a subtraction Operator token" );
+-    }
++for my $src ('1.5-0.5;', '1e3-1;') {
++    my $doc = PPI::Document->new(\$src);
++    my @ops = grep { $_->isa('PPI::Token::Operator') && $_->content eq '-' }
++              $doc->tokens;
++    is( scalar @ops, 1, "`$src` has a subtraction Operator token" );
+ }
+ 
+ # §35 -- a filetest right after a `BEGIN { … }` block is split into Operator(-)
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index ef1edc1a..c9eee979 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 3094 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 3147 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Singletons qw( %KEYWORDS %OPERATOR );
+@@ -690,10 +690,20 @@ OPERATOR_FAT_COMMA: {
+ }
+ 
+ OPERATORS_PLUS_MINUS: {
++    # A closing ) or ] ends a term, and so does a number of any kind, so
++    # the - after it is the subtraction operator, not part of a number.
+     my @operands = (
+-         '1',   '2',
+-         '1',  '(2)',
+-        '(1)', '(2)'
++         '1',     '2',
++         '1',    '(2)',
++        '(1)',   '(2)',
++        '(1)',    '2',
++        '(1)',   'length',
++        '$x[1]', '2',
++        '1.5',   '2',
++        '1e3',   '2',
++        '0x10',  '2',
++        '010',   '2',
++        '0b1',   '2',
+     );
+ 
+     for my $op (qw/- +/) {
+@@ -707,45 +717,4 @@ OPERATORS_PLUS_MINUS: {
+             is( $ops->[0]->content(), $op, "operator $op text matches" );
+         }
+     }
+-
+-    # Add "'(1)', '2'" into operands once TODO is resolved.
+-    {
+-        my ( $a, $b ) = ( '(1)', '2' );
+-        my $op = '+';
+-        my $code = "${a}${op}${b}";
+-        my $doc  = safe_new \$code;
+-        my $ops = $doc->find('Token::Operator');
+-        is( ref $ops, 'ARRAY', "found operator $op" );
+-    }
+-
+-    TODO: {
+-        my ( $a, $b ) = ( '(1)', '2' );
+-        my $op = '-';
+-        my $code = "${a}${op}${b}";
+-        my $doc  = safe_new \$code;
+-        my $ops = $doc->find('Token::Operator');
+-        local $TODO = "(1)-2 not parsed correctly";
+-        is( ref $ops, 'ARRAY', "found operator $op" );
+-    }
+-
+-    # A closing ] ends a term as a closing ) does, and so does a number of
+-    # any kind, so the - after it is the subtraction operator.
+-    TODO: {
+-        local $TODO = "a - after ], a float or a non-decimal number is lexed as a negative number";
+-        my @more = (
+-            '$x[1]', '2',
+-            '1.5',   '2',
+-            '1e3',   '2',
+-            '0x10',  '2',
+-            '010',   '2',
+-            '0b1',   '2',
+-            '(1)',   'length',
+-        );
+-        for ( my $i = 0; $i < @more; $i += 2 ) {
+-            my $code = "$more[$i]-$more[$i + 1]";
+-            my $doc  = safe_new \$code;
+-            my $ops  = $doc->find('Token::Operator') || [];
+-            is( join( ',', map { $_->content } @$ops ), '-', "$code has one - operator" );
+-        }
+-    }
+ }
+-- 
+2.53.0
+
