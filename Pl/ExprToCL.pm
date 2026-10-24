@@ -4024,10 +4024,22 @@ sub gen_prefix_op_form {
           # the `&`-mention, which is why the intercept is a shared helper.
           my $one_amp = $self->_backslash_amp_ref_form($tv_kids->[0]);
           return $one_amp if defined $one_amp;
+          # In LVALUE context, exactly as the unparenthesised `\ELEM` below:
+          # `\($a[0])` / `\($_[0])` is a ref to the element's own box, and
+          # without it the element was read as a VALUE and the ref pointed
+          # at a copy (#3862; Pod::Simple::TiedOutFH's `(\($_[0]))[0]`).
           my $saved_ctx = $self->expr_o->get_node_context($operand_id);
           $self->expr_o->set_node_context($operand_id, 0);
+          my $saved_lv = $self->lvalue_context;
+          $self->lvalue_context(1);
           my $scalar_form = $self->gen_node_form($operand_id);
+          $self->lvalue_context($saved_lv);
           $self->expr_o->set_node_context($operand_id, $saved_ctx);
+          my $sh = (ref($scalar_form) eq 'ARRAY' && !ref($scalar_form->[0]))
+                 ? $scalar_form->[0] : '';
+          return [$MAGIC_LVALUE_BASE{$sh} . '-ref',
+                  @$scalar_form[1 .. $#$scalar_form]]
+            if $MAGIC_LVALUE_BASE{$sh};
           return _backslash_of($scalar_form);
         }
         if (@$tv_kids > 1) {

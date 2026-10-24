@@ -14284,6 +14284,16 @@ sub _args_elem_written {
     return 1 if $prev->isa('PPI::Token::Operator')
              && ($prev->content eq '++' || $prev->content eq '--');
   }
+  # `\( $_[0] )` -- the parenthesised refgen is a ref to the element too
+  # (#3862; Pod::Simple::TiedOutFH writes its caller's scalar through it).
+  if (!$prev) {
+    my $st = $sym->parent;
+    my $li = $st && $st->parent;
+    if ($li && $li->isa('PPI::Structure::List')) {
+      my $c = $li->sprevious_sibling;
+      return 1 if $c && $c->isa('PPI::Token::Cast') && $c->content eq '\\';
+    }
+  }
   my $w = _arg_owner_word($sym) or return 0;
   my $n = $w->content;
   return 1 if Pl::VarAnnotator::arg_writing_builtin($n);

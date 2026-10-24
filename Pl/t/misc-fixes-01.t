@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 139;
+plan tests => 140;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -246,6 +246,17 @@ test_cl('require File::Spec->catfile(...) loads the file it names (#3861)',
      my $p = File::Spec->catfile($d, $n); unlink $p;
      print join("|", sort o3861 qw(b a c)), " ", (exists $INC{$p} ? "inc" : "noinc"), "\n";',
     "a|b|c inc\n");
+
+# #3862: a PARENTHESISED refgen of an element, `\($a[0])` / `\($_[0])` /
+# `(\($_[0]))[0]`, is a ref to the element itself -- it pointed at a COPY, and
+# the sub's writes-args fact missed the `\( $_[0] )` spelling, so a raw-slot
+# caller passed its variable by value.  Outputs probed under perl 5.40.3.
+test_cl('\\(ELEM) is a ref to the element, not a copy (#3862)',
+    'my @a = (1,2); my $r = \($a[0]); $$r = 9;
+     sub f { my $x = \($_[0]); $$x = 7 } my $v = 1; f($v);
+     sub h { my $x = ( \( $_[0] ) )[0]; $$x .= "h" } my $w = "w"; h($w);
+     print "@a $v $w\n";',
+    "9 2 7 wh\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,
