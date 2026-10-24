@@ -28,3 +28,6 @@
 - `perl-tests/range.t`: the three s214 `ok(1, 'SKIP: ...')` rows restored to their original assertions (`is ("@a", $a)`, `is ("@b", $b)` were stale on main too -- string-eval range context has worked for a long time; `is ($x, 'a:b:c:d:e')` passes since #1025) -- one-file sweep 158 passing / 0 failing / 4 skipped, fully passing.  Four-conjunct rule: perl-probed text (`prange2.pl`), the diff is exactly the three rows, the edit STRENGTHENS, the rows themselves are the guard.
 - Filed #3698 (PRE-EXISTING, found by the probe): an escaped delimiter `\/` inside an s///e REPLACEMENT is not unescaped before the code compiles (`split(\/\/, $1)` dies); #2704 is the string-side sibling.
 - DONE 20:3x: s526w2 told (message queued); **s527a LAUNCHED** (opus, worktree isolation from `b89b6add`) -- the plan's step 1 is under way; the other slot stays with s526w2 until its MERGE-READY.
+
+## 20:4x -- USER: "Don't start more subtaskss."
+- No further launches this session: s526w2 and s527a run to their reports (never stop a running one); when one reports, Fable merges or folds its checkpoint and does NOT fill the slot.  The plan's later steps (s527b / s527c / s527d, the §39-§54 filler) wait for the next session's word.  Fable's own duties continue (merge gates, records, the round-5 board read from w2's base-half run).
