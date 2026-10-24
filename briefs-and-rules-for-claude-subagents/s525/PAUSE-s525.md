@@ -1,0 +1,21 @@
+# PAUSE notes, s525 (2026-10-24, Fable) -- the parser review, its rulings, and the start of the parser-structure program
+
+## The session so far (all docs, no code; every commit on main and pushed)
+- `1a3cc7bf` the parser review `docs/parser-review-s525.md` (asked by the USER; 54k lines, 69 passes / 18 re-parse sites / 18 scope walks / 34 predicates / ~35 PPI repairs / 46 % of compile time in `PPI::Node::find`; three single states in perl's front end; Options 0-3).
+- `26a0575f` the USER's three follow-ups folded in (the 38 PPI bugs: answered OUTSIDE git at `~/pcl-agent-scratch/s525/ppi-bugs-where.md`; Option 3 vs new perls: ops 396 -> 400 -> 422; the cache would freeze the compile-time environment because perl FOLDS -- review §4 Option 3 risks 2-3).
+- `33db16ce` **USER RULING: Option 3 is OFF** (exact perl at transpile time unrealistic).  Live recommendation = Option 1 now, one slot per round, CHECKERS FIRST (review §5 box); #3694 re-pointed.
+- `4e7c6902` A/B/C: the PPI-bug REGISTRY design (§7; USER requirement "easy to add to and remove from"), the ENDGAME (§8), the runtime review = YES (§9).
+- USER: "OK, it looks good. Please start.  Do the review of the runtime in a subtask (Opus or Fable, your decision) and write a document for later presentation -- and start updating the parser in another."  (The USER corrected "two review" to "the review": ONE runtime review.)
+
+## Launched (this block is updated as they report)
+- **s525p** -- parser step 0, member c1 (expect-state checker + the PPI-bug registry as data), Opus 5.5, worktree isolation from main `4e7c6902`; brief `s525/s525p-prompt.md`; emission-neutral by design (corpus-diff IDENTICAL is a bar); IDs 3740-3759.  Fable's merge recipe when MERGE-READY: `git -C <wt> log --oneline main..HEAD`; read `scratch/s525p/STOP.md` + `docs/expect-state-checker-s525.md`; merge gate (`PCLXS_DIR=~/pclxs tools/prove-core` on a review worktree at the sha) + `tools/corpus-diff.pl` IDENTICAL + run `Pl/t/ppi-bugs-registry-01.t` alone with `prove --timer` + the inverse check (edit one `got`, see the stale message); probes: the checker on five snippets (§4 §11 §12 §25 §28 and their correct spellings); then `--ff-only` merge, MAIN-READY-44, push.  Then the next brief = c2 (the binder in dual-run, s379 Direction A step 1 with pad.c's rule) -- write it from review §4 Option 1c + §5 box.
+- **s525r** -- the runtime review, a Fable FORK in the main checkout, read-only on code, writes `docs/runtime-review-s525.md` only, does not commit; brief `s525/s525r-prompt.md`; IDs 3760-3779 for bugs its probes find.  Fable's recipe when it reports: read the doc whole; check the tasks it filed (reproducers probed vs perl); commit the doc (docs-only) with a session-log line; present the ten-line answer to the USER; the review's recommendation is NOT executed unasked (no new correctness batch unasked -- s494/s498).
+
+## Not done today (the s524 RESUME RECIPE, still owed to a later session)
+Round-4 board unread (`~/pcl-agent-scratch/s513/review/round-4-board.log`, `board-main43*.tsv`); #3650 at s523c's checkpoint `ff7a05d9` (worktree `.claude/worktrees/agent-a2e094e8f372e5f03`); the full companion `--all --jobs 4 --bless-stamps`; the s526 reminder (more CPAN modules, NEW dists by use).  `HEAVY.holder` was cleared at 09:5x (two dead s524 pids).
+
+## RESUME RECIPE if this session is cut
+1. Read this file's "Launched" block, then `.claude/worktrees/<s525p's worktree>/scratch/s525p/STOP.md` (find the worktree with `git worktree list`; it is the newest `agent-*`) and the fork's scratchpad `STATE.md` (its path is in the fork's last report, else `/tmp/claude-1000/-home-bernt-pcl/*/scratchpad/`).
+2. If s525p is MERGE-READY: the merge recipe above.  If it was cut mid-way: resume it (fresh agent, opus, no isolation, in its worktree) from STOP.md + `s525/s525p-prompt.md`.
+3. If `docs/runtime-review-s525.md` exists and is uncommitted: read it, commit it (docs-only), tell the USER.  If it is partial: a fresh FORK is not possible across sessions -- launch an Opus agent with `s525/s525r-prompt.md` + the partial doc + STATE.md to finish it.
+4. Then the c2 brief; then the s524 items above.
