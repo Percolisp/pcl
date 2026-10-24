@@ -42,7 +42,7 @@ use Exporter 'import';
 our @EXPORT_OK = qw(check_document check_source);
 
 # The dispatch tables, filled further down (declared here for `use strict`).
-our (%PRED, %HANDLER, %PSEUDO_STEP, %KEYWORD_STEP, %RECOVER);
+our (%PRED, %HANDLER, %PSEUDO_STEP, %KEYWORD_STEP, %RECOVER, %FEATURE_KW);
 
 my $TRACE = $ENV{PPI_EXPECT_TRACE} ? 1 : 0;
 
@@ -236,6 +236,7 @@ our @TRANSITIONS = (
  [ 'Operator',         qr/^(?:\+\+|--)$/,         'TERM', 'XTERM!',         'yyl_plus 6006 / yyl_hyphen 5951 OPERATOR(PREINC)' ],
  [ 'Operator',         qr/^-[A-Za-z]$/,           '*',    'XTERMORDORDOR',  'yyl_hyphen 5878-5936 FTST(f) (toke 244), before any expect test' ],
  [ 'Operator',         '->',                      'OP',   'XMETHOD',        'yyl_hyphen 5956-5978 ARROW' ],
+ [ 'Operator',         '->',                      'TERM', 'XMETHOD',        'yyl_hyphen 5956: `shift->[0]` -- the named unary took no term, ARROW applies to its value' ],
  [ 'Operator',         qr/^(?:,|=>)$/,            '*',    'XTERM',          '9336-9340 OPERATOR(PERLY_COMMA); 9397-9404 `=>`' ],
  [ 'Operator',         '...',                     'XSTATE', 'XOPERATOR',    '9522-9524 OPERATOR(YADAYADA)' ],
  [ 'Operator',         ':',                       'XATTRTERM', '=',         'yyl_colon 6124: attribute list of an anon sub' ],
@@ -308,6 +309,7 @@ our @CONTRADICTIONS = (
  [ 'Structure', qr/^[;,)\]}]$/,      'TERM!', '',                     'missing-operand',            'a term',                    '', 'perly: an operator needs its right term' ],
  [ 'Label',     qr/^sub\s*:$/,       'TERM',  '',                     'label-not-at-statement-start','Word(sub) Operator(:) Attribute', 7, 'a label only under XSTATE; `sub` is never a label' ],
  [ 'Label',     '',                  '*',     'not_xstate',           'label-not-at-statement-start','an expression',            '', 'a label only under XSTATE' ],
+ [ 'Word',      '',                  'XATTRBLOCK', '',                'word-after-sub-name',        'one sub NAME',              '', 'yyl_sub 5535 scan_word6: the sub name is ONE word (`main::::x`)' ],
  [ 'Prototype', '',                  '*',     'not_xattr',            'prototype-out-of-place',     'a list',                    '', 'yyl_sub 5535' ],
  # ── operator position: the terms PPI built where an operator stands ──
  [ 'Symbol',    qr/^\*/,             'OP',    '',                     'glob-for-multiply',          'Operator(*) Word',          12, 'yyl_star 6044-6062: XOPERATOR => Mop(OP_MULTIPLY)' ],
@@ -318,6 +320,7 @@ our @CONTRADICTIONS = (
  [ 'Number',    qr/^-/,              'OP',    '',                     'minus-in-number',            'Operator(-) Number',        15, 'yyl_hyphen 5979-5987: XOPERATOR => Aop(OP_SUBTRACT)' ],
  [ 'Number',    qr/^\.\d/,           'OP',    'prev_adj_number',      'hexfloat-split',             'one Number (0x1.8p+1)',     2,  'scan_num: a hex float is one literal' ],
  [ 'Number',    qr/^\.\d/,           'OP',    '',                     'dot-in-number',              'Operator(.) Number',        28, '9526: XOPERATOR => Aop(OP_CONCAT)' ],
+ [ 'Word',      qr/^[pP]\d*$/,       'OP',    'prev_adj_radix_number','hexfloat-split',             'one Number (0x1p0)',        2,  'scan_num: a hex float is one literal (the exponent needs no dot)' ],
  [ 'Word',      qr/^-/,              'OP',    '',                     'minus-in-word',              'Operator(-) Word',          25, 'yyl_hyphen 5979: XOPERATOR => Aop(OP_SUBTRACT)' ],
  [ 'Word',      '',                  'OP',    'word_not_infix',       'word-after-term',            'an operator',               '', 'yyl_just_a_word 7704: a bareword under XOPERATOR is no_op' ],
  [ 'Regexp::Match', '',              'OP',    '',                     'match-for-division',         'Operator(/)',               '', 'yyl_slash 6727-6738: XOPERATOR => Mop(OP_DIVIDE) / DORDOR' ],
@@ -391,6 +394,7 @@ my %FILETEST = map { $_ => 1 } split //, 'rwxoRWXOezsfdlpSugkbctTBMAC';
   next_is_scalar => sub { my ($c) = @_; my $n = $c->{next}; ($n && ($n->isa('PPI::Token::Symbol') || $n->isa('PPI::Token::Magic')) && $n->content =~ /^\$/) ? 1 : 0 },
   prev_adj_caret => sub { my ($c) = @_; my $p = $c->{prev}; ($p && $p->isa('PPI::Token::Operator') && $p->content eq '^' && _adjacent($p, $c->{t})) ? 1 : 0 },
   prev_nonint_number => sub { my ($c) = @_; my $p = $c->{prev}; ($p && $p->isa('PPI::Token::Number') && ref($p) ne 'PPI::Token::Number') ? 1 : 0 },
+  prev_adj_radix_number => sub { my ($c) = @_; my $p = $c->{prev}; ($p && $p->isa('PPI::Token::Number') && $p->content =~ /^-?0/ && _adjacent($p, $c->{t})) ? 1 : 0 },
   prev_adj_number => sub { my ($c) = @_; my $p = $c->{prev}; ($p && $p->isa('PPI::Token::Number') && _adjacent($p, $c->{t})) ? 1 : 0 },
   word_not_infix => sub {
     my ($c) = @_; my $w = _core($c->{t}->content);
@@ -432,7 +436,7 @@ sub check_document {
     toks   => \@toks,
     rows   => [],
     decl   => _declared_words($doc),
-    try_on => _try_feature($doc),
+    features => _features($doc),
     st     => { x => 'XSTATE', req => 0 },
     stack  => [],
     skip   => {},
@@ -491,6 +495,7 @@ sub _step {
 sub _contradictions {
   my ($w, $c) = @_;
   my $t = $c->{t};
+  $c->{st} = $w->{st};             # a pseudo step may have moved the state
   for my $r (@CONTRADICTIONS) {
     my ($class, $content, $in, $pred, $kind, $reads, $sec, $cite) = @$r;
     next unless _class_match($t, $class);
@@ -591,9 +596,12 @@ sub _flag {
     text => $t->content, class => ref($t) =~ s/^PPI::Token:://r,
     state => $w->{st}{x} . ($w->{st}{req} ? '!' : ''),
     expect => $reads, kind => $kind, sec => $sec // '',
-    cascade => $w->{flagged_in_stmt} ? 1 : 0, note => $note // '',
+    cascade => ($w->{flagged_in_stmt} || ($w->{last_row_line} // -1) == $loc->[0]
+                || _in_cascade_region($w, $t)) ? 1 : 0,
+    note => $note // '',
   };
   $w->{flagged_in_stmt} = 1;
+  $w->{last_row_line} = $loc->[0];
 }
 
 sub _trace {
@@ -618,7 +626,9 @@ $HANDLER{symbol} = sub {
   my ($w, $c) = @_;
   my $t = $c->{t};
   my $callable = $t->content =~ /^&/ || ($w->{st}{cast} // '') eq '&';
-  if (_print_fh_slot($w, $c)) {
+  my $slot = _print_fh_slot($w, $c);
+  return _set($w, 'XOPERATOR', callable => 1) if $slot && $slot eq 'CALL';
+  if ($slot) {
     return _set($w, 'XTERM', fh_slot => 1);
   }
   _set($w, 'XOPERATOR', callable => $callable ? 1 : 0, subscriptable => 1);
@@ -628,10 +638,13 @@ sub _print_fh_slot {
   my ($w, $c) = @_;
   my $t = $c->{t};
   my $lop = $w->{st}{lop} or return 0;
-  return 0 unless $c->{prev} && $c->{prev} == $lop;
+  my $p = $c->{prev} or return 0;
+  return 0 unless $p == $lop || ($w->{st}{in_paren_of} && $w->{st}{in_paren_of} == $lop
+                                && $p->content eq '(');
   return 0 if ($w->{st}{lopname} // '') =~ /^(?:grep|return)$/;
   return 0 unless $t->content =~ /^\$\w/;
   my $n = $c->{next} or return 0;
+  return 'CALL' if $w->{st}{indirob} && $n->isa('PPI::Token::Structure') && $n->content eq '(';   # METHCALL 4802
   return 0 if _adjacent($t, $n);                 # isSPACE(tmp), toke 5486
   return 1 if $n->isa('PPI::Token::Symbol') || $n->isa('PPI::Token::Magic')
            || $n->isa('PPI::Token::Quote') || $n->isa('PPI::Token::QuoteLike::Words')
@@ -664,7 +677,8 @@ $HANDLER{open_paren} = sub {
   my $st = $w->{st};
   my $inner = 'XTERM';
   my $kind = 'list';
-  if ($st->{x} eq 'XOPERATOR') {
+  if ($st->{x} eq 'XMETHOD') { $kind = 'call' }                       # `->(`: yyl_hyphen 5972
+  elsif ($st->{x} eq 'XOPERATOR') {
     if ($st->{callable}) { $kind = 'call' }
     else { _flag($w, $c, 'paren-after-term', 'an operator', '') }
   }
@@ -912,6 +926,23 @@ sub _pending_statement_end {
         'PPI: the next statement is inside the previous one');
 }
 
+# The outermost statement holding T (a child of the document).
+sub _top_stmt {
+  my ($t) = @_;
+  my $p = $t->parent; my $top;
+  while ($p && !$p->isa('PPI::Document')) { $top = $p if $p->isa('PPI::Statement'); $p = $p->parent }
+  return $top;
+}
+
+# Is T inside a PPI statement already known to be wrecked (a format PPI
+# lexed as code swallows what follows it): its rows are the damage.
+sub _in_cascade_region {
+  my ($w, $t) = @_;
+  my $r = $w->{cascade_region} or return 0;
+  my $top = _top_stmt($t) or return 0;
+  return $r->{refaddr $top} ? 1 : 0;
+}
+
 sub _stmt_of {
   my ($t) = @_;
   my $p = $t->parent;
@@ -958,6 +989,7 @@ sub _word_in_term_position {
     my $ln = $st->{lopname} // '';
     return _set($w, 'XTERM') if $FH_LOP{$ln} || $ln eq 'sort';
   }
+  $k = undef if $k && $FEATURE_KW{$core} && !$w->{features}{ $FEATURE_KW{$core} };   # keyword() 0 when the feature is off
   if ($k) {
     my $cls = $k->[0];
     my $h = $KEYWORD_STEP{$cls} or die "Pl::PPIExpect: no keyword handler for class $cls\n";
@@ -967,7 +999,7 @@ sub _word_in_term_position {
   # ── a user word (yyl_just_a_word) ──
   return _set($w, 'XOPERATOR') if $word =~ /::$/;                          # 7741 `Foo::`
   return _set($w, 'XOPERATOR') if $n && $n->isa('PPI::Token::Operator') && $nc eq '->';   # class name
-  my $d = $w->{decl}{_bare($core)};
+  my $d = _decl_before($w, $t, $core);
   if ($next_paren) {                                                        # 7824 `(` = a sub call
     return _set($w, 'XTERM', lop => $t, lopname => $core);
   }
@@ -983,9 +1015,15 @@ sub _word_in_term_position {
   }
   # declared nowhere in this document
   if ($next_curly || ($n && $n->content =~ /^\$/ && ($n->isa('PPI::Token::Symbol') || $n->isa('PPI::Token::Magic') || $n->isa('PPI::Token::Cast')))) {
-    return _set($w, 'XBLOCKTERM', lop => $t, lopname => $core);             # 7858-7866 METHCALL0
+    return _set($w, 'XBLOCKTERM', lop => $t, lopname => $core,             # 7858-7866 METHCALL0
+                indirob => ($core =~ /^[A-Z]/ ? 0 : 1));                    # intuit_method 4793 isUPPER
   }
-  return _set($w, 'XOPERATOR') if $core =~ /^[A-Z_][A-Z0-9_]*$/;           # 7836 a bareword
+  if ($st->{lop} && $c->{prev} && $c->{prev} == $st->{lop} && !$KEYWORD{_core($st->{lop}->content)}
+      && $n && _starts_term($n)) {
+    return _set($w, 'XTERM');                                             # intuit_method 4832 bare_package
+  }
+  return _set($w, 'XOPERATOR') if $core =~ /^[A-Z_][A-Z0-9_]*$/           # 7836 a bareword ...
+    && !($n && !_adjacent($t, $n) && _starts_term($n));                  # ... unless a term follows (an imported sub: BAIL_OUT 'x')
   return _set($w, 'XTERM', lop => $t, lopname => $core);                   # POLICY (header)
 }
 
@@ -995,7 +1033,7 @@ sub _word_in_term_position {
   OLDLOP   => sub { my ($w, $c, $k) = @_; _set($w, 'XTERM', lopname => $k) },                       # OLDLOP 8569
   UNI      => sub { my ($w, $c, $k) = @_; _set($w, 'XTERM', lop => $c->{t}, lopname => $k) },        # UNI3 268-279
   UNIDOR   => sub { my ($w, $c, $k) = @_; _set($w, 'XTERMORDORDOR', lop => $c->{t}, lopname => $k) },# UNIDOR 280
-  FUN0     => sub { _set($_[0], 'XOPERATOR') },                                                     # FUN0 245
+  FUN0     => sub { _set($_[0], 'XOPERATOR', callable => 1) },                                     # FUN0 245; perly.y 1481 FUNC0 '(' ')'
   FUN1     => sub { _set($_[0], 'XTERM') },                                                         # FUN1 247 (not)
   INFIX    => sub {   # a word operator in term position
     my ($w, $c, $k) = @_;
@@ -1021,7 +1059,6 @@ sub _word_in_term_position {
   },
   PREBLOCK => sub {   # else continue default defer finally try catch
     my ($w, $c, $k) = @_;
-    return 'USERWORD' if $k =~ /^(?:try|catch|finally|defer)$/ && !$w->{try_on};
     _set($w, 'XBLOCK', owner => $c->{t}, stmt_block => 1);
   },
   PHASER   => sub {   # BEGIN END ... AUTOLOAD DESTROY: yyl_sub with a name
@@ -1070,6 +1107,8 @@ sub _skip_format {
   $w->{skip}{$_} = 1 for $c->{i} + 1 .. $end;
   _flag($w, $c, 'format-body-lexed-as-code', 'format picture text (scan_formline)', '',
         'PPI tokenizes the format body as code');
+  my $top = _top_stmt($c->{t});
+  $w->{cascade_region}{refaddr $top} = 1 if $top;
   _set($w, 'XSTATE');
 }
 
@@ -1087,6 +1126,11 @@ sub _skip_format {
     if ($t->isa('PPI::Token::Magic') && $t->content eq '_') {
       _flag($w, $c, 'sub-name-as-magic', 'Word(_) (the sub name)', 31);
       _set($w, 'XATTRBLOCK', owner => $w->{st}{subkw}, stmt_block => 1, name_magic => 1);
+      return 1;
+    }
+    if ($t->isa('PPI::Token::Operator') && $t->content =~ /^x=?$/) {   # `sub x {` / `method x {`
+      _flag($w, $c, 'x-as-repetition', 'Word(x) (the sub name)', 19);
+      _set($w, 'XATTRBLOCK', owner => $w->{st}{subkw}, stmt_block => 1);
       return 1;
     }
     _set($w, 'XATTRTERM');      # anon sub: reprocess this token there
@@ -1138,7 +1182,7 @@ sub _skip_format {
   XFORVAR => sub {    # yyl_foreach 7128
     my ($w, $c) = @_; my $t = $c->{t}; my $own = $w->{st}{owner};
     my $seq = \$w->{forseq}{refaddr $own};
-    if ($t->isa('PPI::Token::Word') && $t->content =~ /^(?:my|our|state)$/) { $$seq .= 'my '; return 1 }
+    if ($t->isa('PPI::Token::Word') && _core($t->content) =~ /^(?:my|our|state)$/) { $$seq .= 'my '; return 1 }
     if ($t->isa('PPI::Token::Cast') && $t->content eq '\\') { $$seq .= '\\ '; return 1 }
     if ($t->isa('PPI::Token::Symbol') || $t->isa('PPI::Token::Magic')) { _set($w, 'XFORLIST', owner => $own); return 1 }
     if ($t->isa('PPI::Token::Structure') && $t->content eq '(') {
@@ -1247,9 +1291,12 @@ $PSEUDO_STEP{XTERM} = sub {   # use MODULE VERSION LIST: the version needs no co
 sub _declared_words {
   my ($doc) = @_;
   my %d;
+  my @pkgs = sort { _loc_cmp($a->[0], $b->[0]) }
+    map { [$_->location, $_->namespace] } @{ $doc->find('PPI::Statement::Package') || [] };
+  $d{"\0pkgs"} = \@pkgs;
   for my $s (@{ $doc->find('PPI::Statement::Sub') || [] }) {
     my $name = $s->name // next;
-    $name = _bare($name);
+    my $at = $s->location;
     my $proto;
     for my $tk ($s->children) {
       last if $tk->isa('PPI::Structure::Block');
@@ -1261,7 +1308,8 @@ sub _declared_words {
         ($proto = $1) =~ s/\s+//g;
       }
     }
-    $d{$name} = defined $proto ? $proto : 'SUB';
+    my $v = defined $proto ? $proto : 'SUB';
+    push @{ $d{_qualify(\@pkgs, $at, $name)} }, [$at, $v];
   }
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
     next unless ($inc->module // '') eq 'constant' && $inc->type eq 'use';
@@ -1274,34 +1322,99 @@ sub _declared_words {
         next unless $in[$j]->isa('PPI::Token::Operator') && $in[$j]->content eq '=>';
         my $key = $in[$j - 1];
         my $v = $key->isa('PPI::Token::Quote') ? $key->string : $key->content;
-        $d{$v} = 'CONST';
+        push @{ $d{_qualify(\@pkgs, $inc->location, $v)} }, [$inc->location, 'CONST'];
       }
     }
     else {
       my $v = $first->isa('PPI::Token::Quote') ? $first->string
             : $first->isa('PPI::Token::QuoteLike::Words') ? undef : $first->content;
-      $d{$v} = 'CONST' if defined $v;
+      push @{ $d{_qualify(\@pkgs, $inc->location, $v)} }, [$inc->location, 'CONST'] if defined $v;
     }
   }
   return \%d;
 }
 
-# Is the `try` feature on anywhere in the document?  (`use feature 'try'`,
-# `use experimental 'try'`, a version bundle >= 5.39.)  File-wide, not
-# lexical -- a documented simplification.
-sub _try_feature {
+# The FEATURE-GATED keywords: toke.c's keyword() answers 0 for these unless
+# the feature is in force (FEATURE_*_IS_ENABLED in yyl_word_or_keyword), so
+# with the feature off the word is an ordinary user word.  A keyword-plugin
+# module that installs the same words (Syntax::Keyword::Try, Object::Pad, ...)
+# counts as the feature: the static-parse family of
+# docs/static-parse-limits-review-s512.md, answered from the `use` line.
+%FEATURE_KW = (
+  try => 'try', catch => 'try', finally => 'try', defer => 'defer',
+  class => 'class', method => 'class', field => 'class', ADJUST => 'class',
+  given => 'switch', when => 'switch', default => 'switch', break => 'switch',
+);
+my %PLUGIN_FEATURES = (
+  'Syntax::Keyword::Try' => ['try'], 'Feature::Compat::Try' => ['try'],
+  'Syntax::Keyword::Defer' => ['defer'], 'Feature::Compat::Defer' => ['defer'],
+  'Object::Pad' => ['class'], 'Feature::Compat::Class' => ['class'],
+);
+
+# The features in force anywhere in the document (`use feature`, `use
+# experimental`, a version bundle, a keyword-plugin module).  File-wide, not
+# lexical -- a documented simplification.  Bundles (feature.pm): switch in
+# :5.10 .. :5.34, try from :5.40; class and defer are in no bundle.
+sub _features {
   my ($doc) = @_;
+  my %f;
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
     next unless $inc->type eq 'use';
     my $m = $inc->module // '';
-    return 1 if ($m eq 'feature' || $m eq 'experimental') && $inc->content =~ /\btry\b/;
+    if ($m eq 'feature' || $m eq 'experimental') {
+      my $txt = $inc->content;
+      $f{$_} = 1 for grep { $txt =~ /\b$_\b/ } qw(try defer class switch);
+      %f = map { $_ => 1 } qw(try defer class switch) if $txt =~ /\ball\b/;
+    }
+    $f{$_} = 1 for @{ $PLUGIN_FEATURES{$m} || [] };
     my $v = $inc->version;
     next unless defined $v && length $v;
     my $num = 0;
-    if    ($v =~ /^v(\d+)\.(\d+)/)   { $num = $1 + $2 / 1000 }   # v5.40
+    if    ($v =~ /^v(\d+)\.(\d+)/ || $v =~ /^(\d+)\.(\d+)\./) { $num = $1 + $2 / 1000 }   # v5.40, 5.10.1
     elsif ($v =~ /^(\d+\.\d+)/)      { $num = $1 }                # 5.040
-    return 1 if $num >= 5.039;
+    $f{try} = 1 if $num >= 5.039;
+    $f{switch} = 1 if $num >= 5.009 && $num < 5.035;
   }
+  return \%f;
+}
+
+# A sub / constant declared in this document BEFORE the token (toke.c asks
+# the symbol table at the point of use: a definition further down is not yet
+# known, ppi review §1d / #2871).  A qualified word looks up its full name; an
+# unqualified one also matches `sub Pkg::name` (package-blind).
+sub _decl_before {
+  my ($w, $t, $core) = @_;
+  my $at = $t->location or return undef;
+  my $hit;
+  for my $e (@{ $w->{decl}{ _qualify($w->{decl}{"\0pkgs"}, $at, $core) } || [] }) {
+    my $l = $e->[0] or next;
+    next if _loc_cmp($l, $at) > 0;
+    $hit = $e->[1];
+  }
+  return $hit;
+}
+
+# The fully qualified name of NAME as perl's symbol-table lookup sees it at
+# location AT: the innermost preceding `package` statement (block scope is
+# not tracked -- a documented simplification); `::x` and `main::x` are one.
+sub _qualify {
+  my ($pkgs, $at, $name) = @_;
+  $name =~ s/^(?:main)?::/main::/;
+  $name =~ s/'/::/g;
+  return $name if $name =~ /::/;
+  my $pkg = 'main';
+  for my $p (@$pkgs) { last if _loc_cmp($p->[0], $at) > 0; $pkg = $p->[1] }
+  return "${pkg}::$name";
+}
+
+sub _loc_cmp { my ($a, $b) = @_; $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] }
+
+# Can this token START a term (the intuit_method lookahead after a bareword)?
+sub _starts_term {
+  my ($n) = @_;
+  return 1 if $n->isa('PPI::Token::Quote') || $n->isa('PPI::Token::QuoteLike')
+           || $n->isa('PPI::Token::Symbol') || $n->isa('PPI::Token::Magic')
+           || $n->isa('PPI::Token::Number') || $n->isa('PPI::Token::HereDoc');
   return 0;
 }
 

@@ -72,6 +72,9 @@ sub run_files {
   my ($list, $fh, $stats) = @_;
   for my $f (@$list) {
     my $src = do { open my $h, '<:raw', $f or do { warn "$f: $!\n"; next }; local $/; <$h> };
+    # `use utf8`: the source is UTF-8, decoded exactly as PCL decodes it before PPI
+    # (Pl::Parser::_maybe_decode_utf8) -- PPI lexes raw bytes >127 as errors.
+    if ($src =~ /\buse\s+utf8\b/) { require Pl::Parser; $src = Pl::Parser::_maybe_decode_utf8($src) }
     $stats->{files}++;
     (my $name = $f) =~ s{^\Q$root\E/}{};
     my @rows;
