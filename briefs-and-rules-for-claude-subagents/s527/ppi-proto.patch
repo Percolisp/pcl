@@ -1,0 +1,186 @@
+diff --git a/lib/PPI/Singletons.pm b/lib/PPI/Singletons.pm
+index 1190214e..8c8ba4fd 100644
+--- a/lib/PPI/Singletons.pm
++++ b/lib/PPI/Singletons.pm
+@@ -29,6 +29,7 @@ our %OPERATOR = map { $_ => 1 } (
+ 	and or xor not
+ 	}, ',' 	# Avoids "comma in qw{}" warning
+ );
++$OPERATOR{'^^'} = 1;   # perl 5.40 logical xor (there is no ^^= )
+ 
+ # Magic variables taken from perlvar.
+ # Several things added separately to avoid warnings.
+@@ -48,6 +49,8 @@ our %MAGIC = map { $_ => 1 } qw{
+ 
+ our %LAYER = ( 1 => [], 2 => [] );    # Registered function store
+ 
++$MAGIC{'@?'} = 1;      # perlvar: a punctuation scalar name is an array name too
++
+ our $CURLY_SYMBOL = qr{\G\^[[:upper:]_]\w+\}};
+ 
+ our %QUOTELIKE = (
+diff --git a/lib/PPI/Token/Number/Hex.pm b/lib/PPI/Token/Number/Hex.pm
+index ab300ad6..252d88f4 100644
+--- a/lib/PPI/Token/Number/Hex.pm
++++ b/lib/PPI/Token/Number/Hex.pm
+@@ -78,6 +78,19 @@ sub __TOKENIZER__on_char {
+ 		return 1;
+ 	}
+ 
++	# C99 hexadecimal floating point: 0x1.8p+1, 0x1p-3, 0x.8p1 (perl 5.22+)
++	if ( $char eq '.' or $char eq 'p' or $char eq 'P' ) {
++		pos $t->{line} = $t->{line_cursor};
++		if ( $t->{line} =~ m/\G((?:\.[[:xdigit:]_]*)?[pP][+-]?\d+)/gc ) {
++			$t->{token}->{content} .= $1;
++			$t->{line_cursor} += length $1;
++			$t->{class} = $t->{token}->set_class( 'Number::Float' );
++			$t->_finalize_token;
++			return ( $t->{line_cursor} >= $t->{line_length} ) ? 0
++				: $t->{class}->__TOKENIZER__on_char( $t );
++		}
++	}
++
+ 	# Doesn't fit a special case, or is after the end of the token
+ 	# End of token.
+ 	$t->_finalize_token->__TOKENIZER__on_char( $t );
+diff --git a/lib/PPI/Token/Operator.pm b/lib/PPI/Token/Operator.pm
+index e5e22bd3..7c693f89 100644
+--- a/lib/PPI/Token/Operator.pm
++++ b/lib/PPI/Token/Operator.pm
+@@ -65,11 +65,16 @@ sub __TOKENIZER__on_char {
+ 		$content . substr( $t->{line}, $t->{line_cursor}, 4 - length($content) ) eq '<<>>') {
+ 		return 1;
+ 	}
++	# ~~ in TERM position is two bitwise complements (~~$y), not a smartmatch
++	if ( $content eq '~' and $char eq '~' and $t->_opcontext ne 'operator' ) {
++		return $t->_finalize_token->__TOKENIZER__on_char( $t );
++	}
+ 	return 1 if $OPERATOR{ $content . $char };
+ 
+ 	# Handle the special case of a .1234 decimal number
+ 	if ( $content eq '.' ) {
+-		if ( $char =~ /^[0-9]$/ ) {
++		# .5 is a number only in TERM position; after a term ($x.2) it is a concat
++		if ( $char =~ /^[0-9]$/ and $t->_opcontext ne 'operator' ) {
+ 			# This is a decimal number
+ 			$t->{class} = $t->{token}->set_class('Number::Float');
+ 			return $t->{class}->__TOKENIZER__on_char( $t );
+diff --git a/lib/PPI/Token/Unknown.pm b/lib/PPI/Token/Unknown.pm
+index 354ba90b..12bd4f0b 100644
+--- a/lib/PPI/Token/Unknown.pm
++++ b/lib/PPI/Token/Unknown.pm
+@@ -59,9 +59,9 @@ sub __TOKENIZER__on_char {
+ 		}
+ 
+ 		if ( $char =~ /[\w:]/ ) {
+-			# Symbol (unless the thing before it is a number
++			# Symbol, unless the thing before it ends a term: length($k)*length($k)
+ 			my ( $prev ) = $t->_previous_significant_tokens(1);
+-			if ( not $prev or not $prev->isa('PPI::Token::Number') ) {
++			if ( not _after_term( $t, $prev ) ) {
+ 				$t->{class} = $t->{token}->set_class( 'Symbol' );
+ 				return 1;
+ 			}
+@@ -109,8 +109,8 @@ sub __TOKENIZER__on_char {
+ 			}
+ 		}
+ 
+-		if ( $char =~ /[a-z_]/i ) {
+-			# Symbol
++		if ( $char =~ /[^\W\d]/ ) {
++			# Symbol -- any letter or _, not only ASCII, as the @ % * & arms already allow
+ 			$t->{class} = $t->{token}->set_class( 'Symbol' );
+ 			return 1;
+ 		}
+@@ -217,6 +217,12 @@ sub __TOKENIZER__on_char {
+ 			return $t->_finalize_token->__TOKENIZER__on_char($t);
+ 		}
+ 
++		# After a term, % is the modulo operator whatever follows it (7%-3)
++		if ( _after_term( $t, ($t->_previous_significant_tokens(1))[0] ) ) {
++			$t->{class} = $t->{token}->set_class( 'Operator' );
++			return $t->{class}->__TOKENIZER__on_char( $t );
++		}
++
+ 		# Is it a magic variable?
+ 		if ( $char eq '^' || $MAGIC{ $c . $char } ) {
+ 			$t->{class} = $t->{token}->set_class( 'Magic' );
+@@ -334,6 +340,17 @@ sub __TOKENIZER__on_char {
+ 	PPI::Exception->throw('Unknown value in PPI::Token::Unknown token');
+ }
+ 
++# True when the previous significant token ENDS A TERM, so the character now
++# being classified is an operator (7%-3, length($k)*length($k)).  A `}` is
++# excluded: here the tokenizer cannot tell a block's end from a subscript's
++# (_cast_or_op scans back for that).
++sub _after_term {
++	my ( $t, $prev ) = @_;
++	return '' if !$prev;
++	return '' if $prev->isa('PPI::Token::Structure') and $prev->content eq '}';
++	return $t->_opcontext eq 'operator';
++}
++
+ sub _is_cast_or_op {
+ 	my ( $self, $char ) = @_;
+ 	return 1 if $char eq '$';
+diff --git a/lib/PPI/Token/Word.pm b/lib/PPI/Token/Word.pm
+index 38ed04d3..b871a211 100644
+--- a/lib/PPI/Token/Word.pm
++++ b/lib/PPI/Token/Word.pm
+@@ -179,7 +179,10 @@ sub __TOKENIZER__on_char {
+ 
+ 	# If not a label, '_' on its own is the magic filehandle
+ 	} elsif ( $word eq '_' ) {
+-		$t->{class} = $t->{token}->set_class( 'Magic' );
++		# `sub _ { ... }` NAMES a sub; anywhere else `_` is the stat filehandle
++		my ( $prev ) = $t->_previous_significant_tokens(1);
++		$t->{class} = $t->{token}->set_class( 'Magic' )
++			unless $prev and $prev->isa('PPI::Token::Word') and $prev->content eq 'sub';
+ 
+ 	}
+ 
+@@ -313,7 +316,9 @@ sub __TOKENIZER__commit {
+ 				$token_class = 'Word';
+ 			}
+ 		} elsif ( $word eq '_' ) {
+-			$token_class = 'Magic';
++			# `sub _ { ... }` NAMES a sub; anywhere else `_` is the stat filehandle
++			my ( $prev ) = $t->_previous_significant_tokens(1);
++			$token_class = ( $prev and $prev->isa('PPI::Token::Word') and $prev->content eq 'sub' ) ? 'Word' : 'Magic';
+ 		} else {
+ 			$token_class = 'Word';
+ 		}
+diff --git a/lib/PPI/Tokenizer.pm b/lib/PPI/Tokenizer.pm
+index 6c688a9f..6f5d164c 100644
+--- a/lib/PPI/Tokenizer.pm
++++ b/lib/PPI/Tokenizer.pm
+@@ -756,6 +756,8 @@ my %OBVIOUS_CONTENT = (
+ 	'[' => 'operand',
+ 	';' => 'operand',
+ 	'}' => 'operator',
++	')' => 'operator',
++	']' => 'operator',
+ );
+ 
+ 
+@@ -772,6 +774,7 @@ sub _opcontext {
+ 
+ 	# Map the obvious cases
+ 	return $OBVIOUS_CLASS{$c0}   if defined $OBVIOUS_CLASS{$c0};
++	return 'operator' if $p0->isa('PPI::Token::Number');   # Float, Exp, Hex, Octal, Binary too
+ 	return $OBVIOUS_CONTENT{$p0} if defined $OBVIOUS_CONTENT{$p0};
+ 
+ 	# Most of the time after an operator, we are an operand
+diff --git a/t/ppi_token_operator.t b/t/ppi_token_operator.t
+index 45839322..110e73ec 100644
+--- a/t/ppi_token_operator.t
++++ b/t/ppi_token_operator.t
+@@ -4,7 +4,7 @@
+ 
+ use lib 't/lib';
+ use PPI::Test::pragmas;
+-use Test::More tests => 3073 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
++use Test::More tests => 3081 + ($ENV{AUTHOR_TESTING} ? 1 : 0);
+ 
+ use PPI ();
+ use PPI::Singletons qw( %KEYWORDS %OPERATOR );
