@@ -436,6 +436,47 @@ two new ops a year) instead of PPI's -- at the price of risk 2, the cache.
 
 ## 5. Recommendation and the decisions it needs
 
+**RULED (USER, 2026-10-24, the same session): Option 3 is OFF.**  Requiring
+an exact perl version at transpile time, or carrying one parser per perl
+version, is unrealistic; together with risk 2 (the cache) that closes the
+optree route.  The spike is cancelled and #3694 is re-pointed at Option 1.
+The paragraphs below this box are kept as the record of what was weighed; the
+live recommendation is this box.
+
+**Recommendation after the ruling: start now, in ONE slot per round, checkers
+first -- do not push it to "later".**
+- *Why not later.*  The code Option 1 replaces is the fastest-growing part of
+  the tree (Parser2 +12,012 lines in 90 days, Parser.pm +7,367); every corner
+  case landed in the present shape is a line the migration must carry; a PPI
+  bug costs a pass, probes and a guard today and one table row after 1a; the
+  3.7 s module transpile is paid on every cold board run.  Deferral compounds.
+- *Why not a pause of everything else.*  The correctness-first ruling and the
+  two-subjob rule stand.  The structural work takes ONE of the two slots per
+  round (the shape the perf slot has), 12-18 sessions over as many rounds; the
+  board and residue batches keep the other slot.
+- *Order, revised from §4's 1c-first.*  **(0) Two INERT checkers, one session
+  each, zero emission change**: the expect-state walk as a CHECKER that
+  reports every token where its verdict differs from PPI-plus-repairs over the
+  four populations (does one state really cover the ~35 repairs?); the binder
+  in DUAL-RUN asserting agreement with `_binding_at`, `_ref_shadowed` and
+  `_block_captures_name` at every call (s379 step 1).  Every disagreement is a
+  live bug or a design error, found before any port.  **(1) 1a** -- the token
+  stream must be stable before anything binds on it; the smallest blast radius
+  (the pre-pass layer); the 38 canaries + corpus-diff as the bar; it stops the
+  PPI-bug bleeding.  **(2) 1c** ports, newest consumer first (s379's recipe),
+  the sweep as the gate.  **(3) 1b.**  The two fillers (rename Parser.pm's
+  live halves; close the four-kind text seam) ride where they fit.
+- *Standing rule, effective now* (s379 §8 restated): no new scope walk, no
+  new rename suffix family; once the expect-state checker exists, no new repair
+  pass -- a PPI mis-lex becomes a row in its table, and until then a new bug
+  still gets its catalogue section, report row and canary in the same commit.
+- *Bars in numbers* (unchanged): passes 69 → 30 or fewer, re-parse sites 18 →
+  0, repair passes ~35 → 1, scope-walk implementations 18 → 1,
+  `handle_subcalls` 1,811 → under 600 lines, Calc.pm 3.7 s → under 1.5 s,
+  corpus-diff IDENTICAL at every step, sweep TOTAL +0.
+
+---
+
 **Do not start Option 1c before Option 3 is decided**: the binding table is
 the one piece the optree makes free, and the s411 rule says a fix in code a
 phase deletes is wasted.  **Do not decide Option 3 without its measurement**:
