@@ -225,7 +225,9 @@ sub ensure_cache_root {
 # PCL's shim lib/ (it plays the part of perl's own library for the modules it
 # replaces), then perl's own directories.  The PCL TREE itself is not a
 # library: its root (which pl2cl puts on its own @INC to find Pl/) and
-# tools/lib are removed, so `require Pl::Parser` from a user program dies as
+# tools/lib are removed, and so is vendor/PPI/lib (PCL's own PPI, which
+# Pl::VendorPPI puts on the COMPILER's @INC only, s527a), so `require
+# Pl::Parser` from a user program dies as
 # it does under perl.  ONE derivation for its three readers: pl2cl's program
 # preamble, the transpiler's module resolver (Pl::Parser inc_paths), and
 # `pcl`'s script-cache seed -- they must agree or a module is parsed from one
@@ -252,7 +254,7 @@ sub perl_builtin_inc_dirs {
 sub program_inc {
     my ($root, @inc) = @_;
     my $shim = "$root/lib";
-    my %tree = map { (_canon_dir($_) => 1) } ($root, $shim, "$root/tools/lib");
+    my %tree = map { (_canon_dir($_) => 1) } ($root, $shim, "$root/tools/lib", "$root/vendor/PPI/lib");
     my %builtin = map { (_canon_dir($_) => 1) } perl_builtin_inc_dirs();
     my (@out, $placed);
     for my $d (@inc) {
