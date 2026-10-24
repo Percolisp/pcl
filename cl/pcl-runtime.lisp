@@ -12624,13 +12624,16 @@ per element."
 ;;; clamp, so `my $z = 5; $z <<= 70' answered 5902958103587056517120 where
 ;;; both perl and `5 << 70' answer 0.  One reading also gets them the overload
 ;;; dispatch p-<< now carries, which is what perl does for `$obj <<= 3'.
+;;; They call p-<<'s body %p-shift with SIGNED = T: the compiler emits the
+;;; same `p-<<=' in and out of `use integer', and keeping the pre-#3760
+;;; signed shift here is right under the pragma (task #3781 owns the rest).
 (%define-compound-pair p-<<= p-<<=-raw (value)
                        "Perl <<= (left-shift-assign)"
-                       `(p-<< ,cur ,value t))
+                       `(%p-shift ,cur ,value 1 "<<" t))
 
 (%define-compound-pair p->>= p->>=-raw (value)
                        "Perl >>= (right-shift-assign)"
-                       `(p->> ,cur ,value t))
+                       `(%p-shift ,cur ,value -1 ">>" t))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -12981,109 +12984,79 @@ per element."
           0)
         (truncate (to-number v)))))
 
+;;; ONE STATE MACHINE, SIX ENTRY POINTS (s525u, docs/runtime-review-s525.md
+;;; §5).  The compiler emits six names; they differ in exactly two flags:
+;;;   THREE-DOT-P -- `...' does not test the right operand on the evaluation
+;;;                  that turns the operator on, `..' does (perlop "Range
+;;;                  Operators");
+;;;   TEST        -- how an operand counts as true: :BOOL (its truth), :NUM
+;;;                  (an integer literal == $.), :DYN (a string literal
+;;;                  numerically == $., with perl's "isn't numeric" warning).
+;;; The state is NIL (off) or the sequence number N >= 1 of the last true
+;;; answer; the value is "" off, "N" on, "NE0" on the evaluation that turns it
+;;; off.  %p-flipflop-on / %p-flipflop-continue hold the state transitions so
+;;; each expansion is only the lazy operand tests.
+(defun %p-flipflop-on (id)
+  "The operator turns ON at ID and stays on: state 1, value \"1\"."
+  (setf (gethash id *pcl-flipflop-states*) 1)
+  "1")
+
+(defun %p-flipflop-continue (id state endp)
+  "The operator is on at ID with sequence number STATE: the next number, with
+   the \"E0\" suffix and the state cleared when ENDP (the right operand held)."
+  (let ((n (1+ state)))
+    (if endp
+        (progn (remhash id *pcl-flipflop-states*) (format nil "~AE0" n))
+        (progn (setf (gethash id *pcl-flipflop-states*) n) (format nil "~A" n)))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %flipflop-expansion (id left right three-dot-p test)
+    "The expansion every flip-flop macro shares: ID's state machine over the
+     LEFT and RIGHT operand forms, each evaluated only when perl evaluates it.
+     TEST is :BOOL, :NUM or :DYN (see above); any other value DIES (rule 12)."
+    (let ((sv (gensym "FF")) (ln (gensym "LN")))
+      (flet ((holds (form)
+               (ecase test
+                 (:bool `(p-true-p ,form))
+                 (:num `(= ,ln ,form))
+                 (:dyn `(p-true-p (p-== ,ln ,form))))))
+        `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
+                ,@(if (eq test :bool) nil `((,ln (%p-flipflop-lineno)))))
+           (if ,sv
+               (%p-flipflop-continue ,id ,sv ,(holds right))
+               (if ,(holds left)
+                   ,(if three-dot-p
+                        `(%p-flipflop-on ,id)
+                        `(if ,(holds right) "1E0" (%p-flipflop-on ,id)))
+                   "")))))))
+
 (defmacro p-flipflop (id left-form right-form)
   "Perl .. flip-flop in scalar context (boolean operands).
    id: compile-time integer literal, unique per .. usage in source.
    left-form/right-form: lazily evaluated Perl expressions."
-  (let ((sv (gensym "FF")) (nc (gensym "NC")))
-    `(let ((,sv (gethash ,id *pcl-flipflop-states*)))
-       (if ,sv
-           (let ((,nc (1+ ,sv)))
-             (if (p-true-p ,right-form)
-                 (progn (remhash ,id *pcl-flipflop-states*)
-                        (format nil "~AE0" ,nc))
-                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
-                        (format nil "~A" ,nc))))
-           (if (p-true-p ,left-form)
-               (if (p-true-p ,right-form)
-                   "1E0"
-                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
-               "")))))
+  (%flipflop-expansion id left-form right-form nil :bool))
 
 (defmacro p-flipflop-3 (id left-form right-form)
   "Perl ... flip-flop in scalar context (boolean operands, no immediate right-check)."
-  (let ((sv (gensym "FF")) (nc (gensym "NC")))
-    `(let ((,sv (gethash ,id *pcl-flipflop-states*)))
-       (if ,sv
-           (let ((,nc (1+ ,sv)))
-             (if (p-true-p ,right-form)
-                 (progn (remhash ,id *pcl-flipflop-states*)
-                        (format nil "~AE0" ,nc))
-                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
-                        (format nil "~A" ,nc))))
-           (if (p-true-p ,left-form)
-               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
-               "")))))
+  (%flipflop-expansion id left-form right-form t :bool))
 
 (defmacro p-flipflop-num (id left-num right-num)
   "Perl .. numeric flip-flop in scalar context.
    Compares current $. (line number) against integer literal operands."
-  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
-    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
-            (,ln (%p-flipflop-lineno)))
-       (if ,sv
-           (let ((,nc (1+ ,sv)))
-             (if (= ,ln ,right-num)
-                 (progn (remhash ,id *pcl-flipflop-states*)
-                        (format nil "~AE0" ,nc))
-                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
-                        (format nil "~A" ,nc))))
-           (if (= ,ln ,left-num)
-               (if (= ,ln ,right-num)
-                   "1E0"
-                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
-               "")))))
+  (%flipflop-expansion id left-num right-num nil :num))
 
 (defmacro p-flipflop-num-3 (id left-num right-num)
   "Perl ... numeric flip-flop (no immediate right-check on first fire)."
-  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
-    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
-            (,ln (%p-flipflop-lineno)))
-       (if ,sv
-           (let ((,nc (1+ ,sv)))
-             (if (= ,ln ,right-num)
-                 (progn (remhash ,id *pcl-flipflop-states*)
-                        (format nil "~AE0" ,nc))
-                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
-                        (format nil "~A" ,nc))))
-           (if (= ,ln ,left-num)
-               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
-               "")))))
+  (%flipflop-expansion id left-num right-num t :num))
 
 (defmacro p-flipflop-dyn (id left-form right-form)
   "Flip-flop for non-regex, non-integer operands: compare them numerically with $.
    Generates 'isn't numeric' warnings when operands are non-numeric strings."
-  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
-    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
-            (,ln (%p-flipflop-lineno)))
-       (if ,sv
-           (let ((,nc (1+ ,sv)))
-             (if (p-true-p (p-== ,ln ,right-form))
-                 (progn (remhash ,id *pcl-flipflop-states*)
-                        (format nil "~AE0" ,nc))
-                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
-                        (format nil "~A" ,nc))))
-           (if (p-true-p (p-== ,ln ,left-form))
-               (if (p-true-p (p-== ,ln ,right-form))
-                   "1E0"
-                   (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1"))
-               "")))))
+  (%flipflop-expansion id left-form right-form nil :dyn))
 
 (defmacro p-flipflop-dyn-3 (id left-form right-form)
   "Three-dot variant of p-flipflop-dyn (no immediate right-check on first fire)."
-  (let ((sv (gensym "FF")) (nc (gensym "NC")) (ln (gensym "LN")))
-    `(let* ((,sv (gethash ,id *pcl-flipflop-states*))
-            (,ln (%p-flipflop-lineno)))
-       (if ,sv
-           (let ((,nc (1+ ,sv)))
-             (if (p-true-p (p-== ,ln ,right-form))
-                 (progn (remhash ,id *pcl-flipflop-states*)
-                        (format nil "~AE0" ,nc))
-                 (progn (setf (gethash ,id *pcl-flipflop-states*) ,nc)
-                        (format nil "~A" ,nc))))
-           (if (p-true-p (p-== ,ln ,left-form))
-               (progn (setf (gethash ,id *pcl-flipflop-states*) 1) "1")
-               "")))))
+  (%flipflop-expansion id left-form right-form t :dyn))
 
 ;;; ============================================================
 ;;; String Comparison
@@ -13584,7 +13557,11 @@ per element."
   "The body p-<< and p->> share: A shifted by B (B's sign flipped when
    COUNT-SIGN is -1, i.e. a right shift).  A plain NON-NEGATIVE FIXNUM and a
    plain fixnum count skip the overload test and both coercions, which are
-   identities on them (task #2513).  SIGNED: see p-<<."
+   identities on them (task #2513).  SIGNED is passed only by `<<=' / `>>=':
+   the compiler emits `p-<<-int' for a BINARY shift under `use integer' but
+   the same `p-<<=' for the compound one in and out of the pragma, so the
+   compound keeps the pre-#3760 signed shift rather than turn
+   `use integer; $x <<= 1' (perl -2 for -1) into a UV (task #3781)."
   (let ((na (%p-plain-num a)) (nb (%p-plain-num b)))
     (if (and (typep na '(and fixnum unsigned-byte)) (typep nb 'fixnum))
         (%p-uv-shift na (* count-sign nb))
@@ -13595,17 +13572,13 @@ per element."
                                      (%p-shift-signed n c)
                                      (%p-uv-shift (%pcl-uv-coerce n) c)))))))
 
-(defun p-<< (a b &optional signed)
-  "Perl left shift (task #3760: the left operand is a UV).  SIGNED is passed
-   only by `<<=' / `>>=': the compiler emits `p-<<-int' for a BINARY shift
-   under `use integer' but the same `p-<<=' for the compound one in and out of
-   the pragma, so the compound keeps the pre-#3760 signed shift rather than
-   turn `use integer; $x <<= 1' (perl -2 for -1) into a UV (task #3781)."
-  (%p-shift a b 1 "<<" signed))
+(defun p-<< (a b)
+  "Perl left shift: the left operand is read as a UV (task #3760)."
+  (%p-shift a b 1 "<<" nil))
 
-(defun p->> (a b &optional signed)
-  "Perl right shift (task #3760: the left operand is a UV); SIGNED as p-<<."
-  (%p-shift a b -1 ">>" signed))
+(defun p->> (a b)
+  "Perl right shift: the left operand is read as a UV (task #3760)."
+  (%p-shift a b -1 ">>" nil))
 
 (defun p-to-s64 (n)
   "Convert integer to signed 64-bit range (-2^63 to 2^63-1)."
