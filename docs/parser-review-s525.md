@@ -1,0 +1,462 @@
+# The parser, reviewed against perl's own front end (s525, Fable, 2026-10-24)
+
+The USER's question: "There has been addition after addition with special
+cases, I wonder if it is sane anymore.  The Perl implementation has lots of
+those weird corner cases, coming from the exact implementation.  Maybe we can
+get simpler and clearer code from looking at that original implementation?
+If that works, we will look at the runtime after."
+
+Everything below is measured on main `c3706d71` (= MAIN-READY-43 + notes) and
+on perl 5.40.3's source (`~/perl5/perlbrew/build/perl-5.40.3/`).  No code was
+changed.  The two inventories this review rests on (every pass of
+`Parser2::parse` in call order; every term/operator predicate of PExpr) were
+taken by two read-only agents and are condensed in §1; the profile, the
+perl-side measurements and the optree probes are Fable's.
+
+## 0. The answer in ten lines
+
+1. **It is sane as an ARTIFACT and not as a STRUCTURE.**  Every special case
+   is documented, probed against perl and loud when it misses (gate 331 /
+   11,286, sweep 18,759, everyday 116 of 122).  But the compiler side is 54,155
+   lines growing by about +15,000 net lines per quarter, `Parser2::parse` runs
+   **69 passes** of which **18 may re-serialize and re-parse the whole
+   document** (two of them up to 20 rounds), the variable-scoping question is
+   answered by **18 separate scope-walk implementations**, and the
+   term-vs-operator question by **34 predicates plus two 1,800-line loops**.
+2. **Yes: perl's corner cases come from three small mechanisms, and PCL
+   re-derives each one as many unrelated special cases.**  toke.c decides every
+   ambiguous character from ONE state variable (`PL_expect`, 11 states); it
+   gives every builtin ONE of about ten argument-shape classes, and perly.y has
+   ONE grammar rule per class; pad.c answers "which declaration is this" from
+   ONE table (name, visible-from, visible-to, captured-from).  PCL has no single
+   expect state (PPI's heuristic plus ~35 repair passes), no class table (174
+   arity entries in 25 shapes plus the predicates), and no binding table (the
+   18 walks).  Perl's code is not simple -- toke.c is 14,025 lines -- but each
+   corner case is a `case` in one switch, not a new pass.
+3. **Three ways to use the original implementation**, from cheap to radical:
+   as a MODEL (copy its three states into the present shape, deleting passes:
+   §4 Option 1, ~12-18 sessions, every step byte-diff gated); as a SOURCE to
+   port (an own toke.c-shaped lexer replacing PPI: §4 Option 2, 25-40 sessions,
+   not recommended first); as a COMPONENT (let perl compile the program and
+   translate its optree: §4 Option 3 -- exact by construction, replaces about
+   43k of the 54k lines, 40-60 sessions, and raises two USER decisions).
+4. **Recommendation (§5): a 2-3 session SPIKE that sizes Option 3 before any
+   Option 1 investment**, because Option 1's biggest piece (the binding table)
+   is exactly what the optree hands over for free, and a fix in code a phase
+   deletes is wasted (the s411 rule).  The runtime is untouched by every
+   option, so "the runtime after" can start whenever the USER wants.
+
+## 1. What the parser is today (measured)
+
+### 1a. Size and growth
+
+| file | lines | subs | subs > 80 lines | > 200 | largest |
+|---|---|---|---|---|---|
+| `Pl/Parser2.pm` (v2 statement lowering) | 15,728 | 355 | 30 | 6 | `parse` 1,329, `_lower_block_1` 1,188, `_lower_compound` 630, `_rename_spanning_lexicals` 491 |
+| `Pl/Parser.pm` ("v1", see 1c) | 13,562 | 265 | 37 | 8 | `_process_local_declaration` 1,068, `_process_sub_statement` 438, `_process_include_statement` 404 |
+| `Pl/PExpr.pm` (expressions) | 7,790 | 137 | 11 | 4 | `handle_subcalls` 1,815, `parse` 1,459 |
+| `Pl/ExprToCL.pm` (expression emission) | 6,704 | 176 | 15 | 2 | `gen_funcall_form` 853 |
+| `Pl/VarAnnotator.pm` | 2,537 | 55 | 7 | 2 | `_tw_walk` 367 |
+| `Pl/Environment.pm` | 1,694 | 59 | 2 | 1 | |
+| the other 14 files | 5,140 | | | | InterpScan 794, StringInterpolation 736, ProtoCache 736, Config 707, Manifest 528, CLForm 505, TokenUtils 454 |
+| **total `Pl/`** | **54,155** | | | | |
+
+Churn over the last 90 days (`git log --numstat`):
+
+| file | commits | added | removed |
+|---|---|---|---|
+| Parser2.pm | 268 | +12,012 | -2,552 |
+| Parser.pm | 174 | +7,367 | -2,106 |
+| PExpr.pm | 109 | +3,595 | -1,561 |
+| ExprToCL.pm | 162 | +4,965 | -4,289 |
+| VarAnnotator.pm | 42 | +1,804 | -540 |
+| (`cl/pcl-runtime.lisp`, for scale) | 730 | +36,292 | -9,852 |
+
+The compiler side gains about 15,000 net lines a quarter.  The 38 confirmed
+PPI bugs in `docs/ppi-upstream-bugs.md` each carry a repair pass; the sub
+names alone count 20 `_repair_*`, 8 `_fix_*`, 6 `_merge_*`, 9 `_rename_*`,
+7 `_rewrite_*`, 8 `_split_*`, 5 `_normalize_*`, 40 `_is_*` predicates.
+The one smell test that matters passed: no CPAN module name and no non-core
+function name appears in `Pl/` (the layer rule holds).
+
+### 1b. The pipeline as it actually runs
+
+**`Pl::Parser::_ppi_parse` (18 passes).**  A regex pre-process of the SOURCE
+TEXT (hex/binary floats to decimal, `sub a'b`, `for my Type $x`, `CORE::my`,
+`format` blocks), the PPI tokenizer with a signature-aware `$)` repair at the
+tokenizer level, then 14 whole-document token walks (modulo-vs-`%-`, spaced
+sigils, glob slots, prototype attributes, anon-sub signatures desugared to
+`my (...) = @_`, `__SUB__`, loop modifiers desugared to blocks, bare `vNN`
+words, non-ASCII symbols, punctuation arrays, `*$o` after a block, indented
+heredocs, `print({$fh} LIST)`), and **a serialize-and-reparse if any of seven
+of them changed anything**.
+
+**`Pl::Parser2::parse` (passes 19-69, 1,329 lines).**  A PPI repair block
+(passes 19-39: decorations, `tie my`, null statements, anon-sub attributes,
+n-ary and alias `foreach`, the glob-pattern and `WORD /PAT/` cascades looping
+to a fixpoint, `)*name`, punctuation globs and hashes, `)-name`, `$x.2`, a sub
+named `x`, term-initial `~~`, `<FH>` followed by `/`, orphan `finally`);
+semantic normalisation (signatures, literal-list declarations split,
+non-initial `local` terms hoisted, `use bigint` literal handlers, lexical subs
+renamed); early registration (prototypes twice, strict, glob constants, `use
+constant`, `use subs`, three pragma-region tables); `goto` rewrites; two
+package-switch requalifiers; segmentation; the eval-mode collapse; nine
+identity passes (spanning, state, exception `my`, eval captures, lex facts,
+capture promotion); the sub prepass; per-segment lowering; phase-order
+assembly.  Of the 51 Parser2 passes, **19 exist to correct a PPI mis-lex,
+about 18 to make a perl semantic explicit, about 20 to serve the compiler's own
+representation** (the inventory's classification).  **18 of the 51 may
+re-serialize the document to text and re-parse it; each re-parse re-runs the
+14 `_ppi_parse` walks.**  Three repair comments cite the wrong
+`ppi-upstream-bugs.md` section (`_restore_signature_gid` says §24, is §32;
+`_brace_glob_slot_symbol` §24 vs §27; `_repair_term_initial_complement` §20 vs
+§21) -- a residue to fix.
+
+**`Pl::PExpr::parse` (1,459 lines).**  A 12-pass token pre-scan
+(`cleanup_for_parsing`, split qualified words, pid magic cast runs, braced
+punctuation magic, `$#` retagging, `print $fh -e` fusion, the filetest `$_`
+default, braced deref subscripts, list-slice subscripts, elided call arrows,
+dynamic glob slots) and then **`handle_subcalls` (1,811 lines) BEFORE term
+reduction**: a `CORE::` strip, two indirect-object pre-passes, a left-to-right
+loop over `name(...)` / `name BLOCK LIST` / `sort SUBNAME` / `open` / `split` /
+`print FH (...)`, a right-to-left loop over paren-less calls deciding zero-arg
+words, named-unary extent (`_term_extent`, with a legacy fallback), the
+list-operator argument ceiling, the print filehandle slot, `split`'s first
+argument, the bareword verdict.  Then single-term reduction by PPI class (420
+lines), comma lists, the #153 term fold, postfix chains (490 lines, five method
+call cases, cast runs), slices and glob slots, and the operator-precedence loop
+with chained comparisons and the ternary.
+
+**34 term-vs-operator / argument-extent predicates** (PExpr + TokenUtils +
+two in Parser2): 11 consult the Environment (prototypes, declared subs,
+filehandles), 4 read Config tables only, about 19 read token shape only.
+`handle_subcalls` also bypasses the predicates with 14 inline table lookups.
+`Config.pm`'s builtin arity table has **174 entries in 25 distinct value
+shapes** built from 11 atomic codes; `-11` and `-12` both mean "one argument
+before a list" and no consumer tells them apart.  `core_arg_context` already
+asks the RUNNING PERL `prototype("CORE::name")` for argument contexts -- PCL
+already uses perl as a parse oracle in one place.
+
+**`ExprToCL::gen_funcall_form` (853 lines)** dispatches on the function NAME
+STRING with 27 arms for 25 builtins plus three pattern arms.
+`_lower_stmt` has 15 arms, `_lower_compound` 6 kinds plus two in-line PPI
+fixups.  51 `Parser2 TODO:` refusal sites, 128 `die` sites: the rule-12
+discipline is real.
+
+### 1c. "v1 is gone" is true of the file level only
+
+`Pl/Parser.pm` is reached through `become_seam`, `capture_v1` and
+`embed_block_v1`.  Statically, 262 of its 265 subs are reachable (11,000 of
+13,562 lines; the three dead ones total 75 lines).  Dynamically, transpiling
+`lib/Math/BigInt/Calc.pm` (2,566 lines) ran 139 of its 299 subs and sent **39
+statements through the v1 TEXT path** (`_fallback_stmt` → `capture_v1` →
+`Pl::CLForm::raw`): every `use`/`require`, every statement with a
+`for`/`while`/`until` modifier, the BEGIN block, `use constant`.  So the
+structured-emission invariant has a text hole exactly where perl's phase model
+lives (`use`, BEGIN).  And Parser.pm is not a residue: about 190 `sub` definitions
+appeared in its diffs in the last 90 days (additions and moves) -- it is the home of the shared pre-pass and
+facts layer (`feature_regions_of`, `strict_refs_regions_of`,
+`use_statements_of`, `_extract_module_prototypes`, `fragment_doc`), named as
+if it were the old pipeline.  A reader cannot tell from the file name what is
+load-bearing.
+
+### 1d. Where the compile time goes
+
+`Devel::NYTProf` on `./pl2cl < lib/Math/BigInt/Calc.pm` (3.74 s real, 17.0 s
+under the profiler; perl's own `perl -c` of the same file: 0.01 s; PPI alone:
+0.23 s):
+
+| where | share of profiled time |
+|---|---|
+| `PPI::Node::find` -- 9,779 calls | 46 % |
+| `_rename_captured_file_lexicals` → `_promote_captured` (432 calls) → `_block_captures_name` (782 calls) | 25 % |
+| the whole PExpr expression parse (2,602 trees) | 10 % |
+| VarAnnotator | 9 % |
+| PPI's lexing -- **9 `PPI::Document` builds** for one file (the file, its re-parse, the used modules read for prototypes, interpolation fragments) | 7 % |
+| `UNIVERSAL::isa` -- 7.73 million calls; `_elem_within` 214,804 calls | 7 % |
+
+The transpile is 16x PPI's own parse and about 370x perl's compile, and the
+cost is not parsing: it is **asking the tree the same scope questions over and
+over**, one whole-document search per name per question.  This is the
+measured form of the s379 finding ("51 % of Parser2 is variable identity").
+
+### 1e. What is right and must survive any change
+
+The verification harness (corpus-diff, the sweep with its five buckets, the
+everyday battery, the CPAN board, 230 behaviour-asserting `Pl/t` files out of
+331) is parser-independent.  `Pl::InterpScan` is ONE scanner modelled on
+toke.c's `intuit_more` -- the one family already done perl's way.  The #153
+FOLD (`_term_extent`) unified the postfix-chain walk.  CLForm makes
+parentheses balance by construction (except the raw seam of 1c).  The layer
+rule (no module names in `Pl/`) holds.  The "a missing case dies" discipline
+holds.  The runtime (40,771 lines, 174 exported symbols = the IR vocabulary)
+is a separate concern and is not touched by anything below.
+
+## 2. Verdict
+
+Sane to USE: it is tested, probed, documented and loud.  Not sane to EXTEND:
+the parser has no single notion of "what comes next" (the expect state), of
+"what shape does this call take" (the keyword class), or of "which declaration
+is this" (the binding).  Each new corner case therefore becomes a new pass or
+a new predicate beside the old ones, every pass re-walks the document, and the
+re-parse loop means the token stream is not even stable within one transpile.
+The growth rate (§1a) and the pass count (§1b) are the symptoms; the profile
+(§1d) is the bill.  Earlier reviews saw the same shape (`v2-code-review.md`
+2026-07: "hand-rolled precedence knowledge, N copies"; `var-handling-review-s379`
+2026-08: "bind once"; `pexpr-term-parsing-review`: "no single notion of a
+term") and the one that was executed -- the FOLD -- worked.  The binder
+(Direction A) was designed in s379 and never built; its deletion potential has
+grown since.
+
+## 3. What perl's front end does, component by component
+
+perl 5.40.3: `toke.c` 14,025 lines, `perly.y` 1,693, `pad.c` 3,002, `op.c`
+15,993, `regen/keywords.pl` 384, 422 ops.  Four mechanisms carry the corner
+cases:
+
+| perl mechanism | its single state or table | what PCL has instead |
+|---|---|---|
+| **`PL_expect`** (toke.c): 11 states (`XOPERATOR XTERM XREF XSTATE XBLOCK XATTRBLOCK XATTRTERM XTERMBLOCK XBLOCKTERM XPOSTDEREF XTERMORDORDOR`), assigned at 80 sites, read by 48 `yyl_*` character handlers.  After a term expect an operator; after an operator expect a term; `/ { < % & * ? << -X` are lexed by that state alone. | one variable | PPI's previous-significant-token heuristic, which is the same idea without the state (hence the 38 logged deviations), plus ~35 PCL repair passes, 18 of which re-parse the document |
+| **keyword classes** (toke.c's keyword switch, `regen/keywords.pl`): each builtin is `UNI` (72 uses; named unary), `LOP` (89; list operator), `FUN0` (25), `FUN1`, `UNIDOR`, `UNIBRACK`, `PREBLOCK` (12), ..., and `perly.y` has ONE rule per class: `UNIOP term`, `LSTOP optlistexpr`, `FUNC '(' optexpr ')'`, `LSTOPSUB startanonsub block optlistexpr`.  A user sub's prototype maps it to the same classes (`UNIOPSUB`, `LSTOPSUB`). | about ten classes, 38 `%token` lines | `Config.pm`: 174 entries / 25 value shapes; 34 predicates; `handle_subcalls`' two loops; `is_named_unary` reads the prototype (s438b) -- the perl rule, for one class |
+| **precedence** (`perly.y` lines 123-155): 31 `%left/%right/%nonassoc` lines; `UNIOP` sits between relational and shift, `LSTOP` below the comma. | one table | `Config::%precedences` 98 operators / 21 levels -- **matches perl; keep** |
+| **the term grammar** (`perly.y`): `termbinop`, `termunop`, `subscripted`, `listop`, `anonymous`: 248 alternatives for the whole language, LALR(1). | one grammar | PExpr's precedence climber -- fine for operators; the OPERAND side was the maze, half-fixed by the FOLD |
+| **pads** (`pad.c`): a lexical is `(name, COP_SEQ_RANGE_LOW exclusive, COP_SEQ_RANGE_HIGH inclusive)`; `intro_my` makes a `my` visible from the NEXT statement (so `my $x = $x + 1` reads the outer `$x`); `pad_findmy` walks the current pad then outward through `CvOUTSIDE`, and a hit outside creates an OUTER entry in the inner pad -- that entry IS the closure capture; `pad_leavemy` closes the ranges at block end.  Eight functions. | one table | 18 scope-walk implementations, six rename reasons (`:spanning :captured :state-cell :exception-global :qualified-global :seam-shadow`), 39 references to `_file_lex_renamed`, VarAnnotator keyed on token TEXT (so every rename must precede it) |
+| **context and lvalue propagation** (`op.c`): `scalar()`/`list()`/`op_contextualize` set `OPf_WANT` on every op at compile time; `op_lvalue` sets `OPf_MOD`/`OPpLVAL_INTRO`; `OPpTARGET_MY`; constant folding. | flags on the tree | the three-valued wantarray protocol + VarAnnotator's facts + the Kind-A verdicts -- correct, but derived from text |
+
+Two honest caveats.  First, toke.c is itself the source of the "weird corner
+cases": `intuit_more`'s scoring of `[` inside a string, `XTERMORDORDOR` (the
+file calls it an evil hack), `S_lop`'s "if we have a next token", `checkcomma`,
+`yyl_leftcurly`'s block-vs-hash lookahead.  Porting it does not make the cases
+fewer; it puts them in one switch.  Second, perl parses by RUNNING (`BEGIN`,
+`use`, prototypes installed by code) -- `docs/static-parse-limits-review-s512.md`
+has the seven families a static parse cannot know.  Any design that keeps a
+static front end keeps those families; only Option 3 below removes them.
+
+The three probes behind §4 are reproducible in seconds:
+
+```
+# perl resolves every ambiguity PCL repairs, incl. positional prototypes:
+printf 'sub e {7} my $f="x"; my $fh=\*STDOUT; print $fh -e $f; print $fh - e $f;' | perl -MO=Deparse,-p
+#   print($fh (-e $f));  print(($fh - e($f)));
+# the pad IS the binding table (scratch padprobe.pl, main_cv->PADLIST):
+#   main  pad[2] $x  seq 708..732      main  pad[3] $x  seq 710..711
+#   inner pad[2] $x  OUTER(captured from pad[2])
+# an eval string compiles WITHOUT running, outer lexicals supplied as a pad:
+#   pad of the inner sub: $x(outer) @list(outer)
+```
+
+## 4. The options
+
+### Option 0 -- status quo plus the standing consolidations
+
+Keep adding one-predicate campaigns (s438's `is_named_unary`, InterpScan).
+Each PPI bug costs a pass; the pass count and the 46 % `find` share stay.
+Not recommended as a plan, but it is what happens by default.
+
+### Option 1 -- perl as the MODEL: three states copied into the present shape
+
+Three independent, byte-diff-gated moves.  Each deletes code; none changes
+the emission, the runtime, PPI or the tests.
+
+**1a. ONE expect-state repair pass.**  Walk PPI's significant tokens once,
+left to right, carrying `expect` exactly as toke.c does (XSTATE at a statement
+start, XTERM after an operator, XOPERATOR after a term, XBLOCK after `{` in
+statement position, XREF after a list-operator keyword that takes a
+filehandle).  A token whose PPI class contradicts the state is re-lexed from
+its own text (PPI::Tokenizer on the span -- the `fragment_doc` pattern already
+in use) and re-tagged; `{` in XSTATE/XBLOCK takes `yyl_leftcurly`'s lookahead
+(word or string followed by `,`/`=>` is an anon hash).  Deletes the ~35 repair
+passes and **all 18 re-serialize-and-reparse sites**; the 38 canary rows
+(`misc-fixes-02.t`, `ppi-bug-report.t`) stay as the bar.  Size: one design
+session (the table of "PPI class × expect state → correct class" is read off
+`yyl_*`) and 2-3 execution sessions.
+
+**1b. ONE keyword-class table and ONE argument-extent rule per class.**  The
+class of a builtin is derivable: `prototype("CORE::name")` (which PCL already
+calls) gives `_`/`$` = UNI, a slurpy = LOP, `()` = FUN0; the ~30 syntax keywords
+with no prototype (`print sort map grep eval do require defined exists delete
+split system exec return goto my ...`) are a hand table, as in toke.c.  A user
+sub gets the class of its prototype's shape (the s438b rule, generalised).
+Then the extent rule is perly.y's: FUNC takes its parentheses; UNIOP takes one
+term up to the comparison level; LSTOP takes a list up to the next same-level
+`or`/`and`/`xor`, `)` or statement end; FUN0 takes nothing.  The filehandle
+slot (XREF) and the indirect object stay special, as they are in perl.
+Deletes most of `handle_subcalls`' right-to-left loop, `_listop_arg_ceiling`,
+the 25 value shapes, the inline bypasses.  Bar: `handle_subcalls` 1,811 →
+under 600 lines, corpus-diff identical.  2-3 sessions.
+
+**1c. ONE binding table = pad.c in Perl** (s379's Direction A with pad.c's
+exact rule).  One early walk assigns every `my`/`our`/`state`/signature
+parameter a binding `(canon, scope node, visible-from = the statement AFTER
+the declaration, visible-to = scope end)` and resolves every use (code and
+interpolated, via InterpScan) to the innermost binding whose range holds its
+statement; a use inside a sub body whose binding lies outside is a capture
+(OUTER).  The 18 walks become queries; `_block_captures_name`,
+`_rename_decl_within` and the rename families become metadata read at
+emission; VarAnnotator keys on binding ids; the 46 % goes away.  The s379
+estimate was one session for the table in dual-run mode plus 3-5 for the ports
+plus the emission step; the machinery has grown since, so 5-7 sessions.  Bar:
+scope-walk implementations 18 → 1, Calc.pm transpile 3.7 s → under 1.5 s,
+corpus-diff identical at every port.
+
+**Also, independently of the three**: rename `Pl/Parser.pm`'s live halves to
+what they are (a `Pl/PrePass.pm` and a `Pl/Facts.pm`), and give the four
+statement kinds of §1c a structured lowering so the text seam closes.
+
+Option 1 total: 12-18 sessions.  Bars in numbers: passes 69 → 30 or fewer,
+re-parse sites 18 → 0, repair passes ~35 → 1, scope walks 18 → 1, Calc.pm
+under 1.5 s.  The three states are also the three places a future corner case
+goes, so growth changes kind: a new `case`, not a new pass.
+
+### Option 2 -- perl as the SOURCE: an own toke.c-shaped lexer replacing PPI
+
+A Perl port of toke.c's essentials (expect state, keyword switch, quote and
+heredoc scanning, numeric literals) at 6-8k lines plus a Pratt or LALR term
+parser from perly.y's 248 alternatives (~2k lines).  It deletes PPI, its 38
+bugs, every repair, PExpr's pre-scan and `handle_subcalls`.  But Parser2's
+15,728 lines consume a PPI tree; a new tree re-targets the lowering, which is
+the rewrite the s316t architecture doc priced at 60+ sessions with a
+correctness trough.  Realistic: 25-40 sessions.  Options 1a+1b get most of the
+benefit inside the existing shape; Option 3 gets all of it for a similar
+price.  Not recommended as the first move.
+
+### Option 3 -- perl as the COMPONENT: translate the optree
+
+Let the oracle perl compile the program (`-c` style: BEGIN and `use` run,
+the main program does not) and translate its optree to CLForm through `B`.
+This is the literal "exact implementation" route, and the probes show what it
+settles by construction:
+
+- term-vs-operator for every character, prototypes including `()`,
+  POSITIONAL prototypes (#2871's whole family), the indirect object, stacked
+  filetests, block filehandles, `sort`'s comparator kinds -- the §1b repair
+  block and `handle_subcalls` have nothing left to decide;
+- string interpolation arrives as `concat`/`multiconcat` with the constant
+  parts separated -- InterpScan's job is done by the oracle;
+- lexical identity arrives as the pad (name, ranges, OUTER captures) -- Option
+  1c for free, with perl's own shadowing and closure rules;
+- every op carries its context (`v`/`s`/`l`), `LVINTRO` (`my`/`local`),
+  `TARGMY`, `OPpDEREF` autovivification flags; every statement carries its
+  line, package, and `strict`/`feature`/`warnings` hints (`nextstate`
+  `v:*,&,{,x*,x&,x$,$`) -- the facts the wantarray protocol, VarAnnotator and
+  #221 derive from text;
+- BEGIN and `use` have RUN in the compiling perl, so subs installed by code,
+  imported names, `*CORE::GLOBAL::` overrides, source filters, `use bigint`
+  constants (families A-F of `static-parse-limits-review-s512.md`) are
+  resolved; the #2610 detector becomes a RUN-time question only, as in perl;
+  `B::save_BEGINs` keeps the BEGIN bodies for emission (probed: present);
+- a string eval compiles without running, its outer lexicals supplied as a
+  synthetic pad whose OUTER entries map onto today's capture alist (probed);
+  the runtime already talks to a perl process (`pl2cl --server`), so no new
+  run-time dependency.
+
+**Size.**  5.40 has 422 ops; `B::Deparse` -- optree to TEXT, the harder
+direction -- is 7,282 lines.  An optree-to-CLForm emitter onto the existing
+runtime vocabulary is of that order, 8-12k lines including the pad-to-`let`/
+cell mapping, the phase assembly (BEGIN/END/`use` into eval-when), the module
+boundary, the eval seam, regex pass-through, formats, the wantarray protocol,
+and the four Kind-A optimisations restated on op facts.  It replaces
+Parser.pm, Parser2, PExpr (+Config, TokenUtils, StringInterpolation),
+VarAnnotator, InterpScan, ProtoCache, BlockAnalyzer, GlobalPartition: about
+43k of the 54k lines.  ExprToCL's emission vocabulary survives in part; CLForm,
+Passes, Manifest, DataForm and the whole runtime survive whole.  Transpile
+time becomes linear in ops on top of perl's 10 ms compile.
+
+**Costs and risks, honestly.**
+
+1. **BEGIN and `use` execute at transpile time.**  Today PCL does NOT run user
+   code while transpiling; BEGIN is emitted as `eval-when`.  Under Option 3
+   the compiling perl runs them (as `perl -c`, `B::Deparse`, `Devel::Cover`
+   and every CPAN smoker do) and the generated program runs them again at
+   load.  Harmless for state (two processes), visible for side effects (a
+   BEGIN that prints or writes).  **A USER decision** -- and a measurable one
+   (§5 S3 counts the hazards in the four populations).
+2. **Perl version coupling.**  The optree differs by version (`multiconcat`
+   5.28, `padsv_store` 5.38, class ops 5.38, `cmpchain` 5.32 ...).  The install
+   matrix runs stock Ubuntu perls (22.04 = 5.34, 24.04 = 5.38) against the
+   5.40.3 oracle; the emitter must either cover 5.34-5.42 (B::Deparse does,
+   with version conditionals) or PCL requires a specific perl at transpile
+   time.  **A USER decision** under the portability rule.
+3. **Modules load in the compiling perl.**  `use POSIX` loads the REAL POSIX
+   there (only the parse facts matter); the runtime still loads the shim.  A
+   shim whose prototypes differ from the real module's would mis-parse call
+   sites -- the inverse of #2610, and checkable mechanically (shim vs
+   `prototype(\&Real::f)`).
+4. **The emitted CL changes shape** (flat, op-shaped, constants folded:
+   `pi / 2 + pi / 4` arrives as a number).  Speed wins over readability by
+   ruling; Target B (#75, clear IR) would be restated as "clear optree-to-CL".
+   The 70 `Pl/t` files that assert emitted SHAPES need re-expression; the 230
+   behaviour files, the sweep, everyday and the board do not.
+5. **The trough.**  Parity with today's 18,759 sweep rows is reached by
+   rebuilding the emission half from zero against the same oracles.  The s316t
+   argument against a greenfield v3 (it re-derives parse knowledge) does NOT
+   apply to the front half -- perl supplies it -- but applies to the emission
+   half.  Estimate 40-60 sessions to parity, ±50 %.
+6. **What stays wrong.**  Every RUN-time divergence (numeric semantics such as
+   #3692, string ops, the regex engine, I/O) is untouched: the optree fixes
+   the parse, not the runtime.
+
+What it ends with: a compiler about a fifth of today's size, zero parse
+divergence from perl by construction, the seven static-parse families gone,
+transpiles in milliseconds, and a front end that tracks perl releases
+instead of PPI's.
+
+## 5. Recommendation and the decisions it needs
+
+**Do not start Option 1c before Option 3 is decided**: the binding table is
+the one piece the optree makes free, and the s411 rule says a fix in code a
+phase deletes is wasted.  **Do not decide Option 3 without its measurement**:
+the s335 rule says a "suspect X" carries the cheap discriminating measurement.
+So:
+
+**Step 1 -- the Option 3 spike, 2-3 Opus sessions, no production code.**
+- **S1 op census**: a `B` walker over the four populations (sweep, companion,
+  everyday, board) under 5.40.3 -- distinct ops, frequency, cumulative
+  coverage ("N ops cover 95 % of occurrences"), the long tail by name.
+- **S2 version delta**: the same census under the local 5.32.1 (and 5.26.3)
+  perlbrew builds -- which ops differ, how many conditionals an emitter
+  carries per supported floor.
+- **S3 BEGIN-hazard census**: BEGIN bodies and import-time code in the four
+  populations that do anything but `use`, `@INC`, `$|`, `plan`, `chdir 't'`
+  -- the count and the kinds, so decision 1 below is taken on numbers.
+- **S4 vertical slice**: emit CLForm for the ~40 commonest ops onto the
+  existing runtime and run the everyday programs that fit end to end; this
+  proves the op-to-runtime-vocabulary fit and calibrates lines per op.
+- **S5 eval seam**: compile one eval string with a synthetic pad and map its
+  OUTER entries to the capture alist; one probe file, five shapes.
+- Bar: a table the USER can decide from, plus the recalibrated session
+  estimate for Option 3.
+
+**Step 2 -- decide.**  If Option 3 is taken: it becomes the next structural
+program (the runtime review runs beside it, untouched).  If not: Option 1 in
+the order **1c → 1a → 1b** (biggest win first; each byte-diff gated; the
+Parser.pm renaming and the §1c seam closure as fillers), 12-18 sessions.
+
+**Decisions this review puts to the USER**
+1. Is user code (BEGIN, `use` imports) running at TRANSPILE time acceptable,
+   given S3's count?  (Option 3's precondition.)
+2. The perl floor at transpile time: support 5.34+ in the emitter, or require
+   the oracle perl?  (Portability rule.)
+3. Spike first (recommended) or Option 1 now?
+4. The runtime review: independent of this choice; start it when convenient.
+
+## 6. Residues filed from this review (no code changed)
+
+- Three stale `ppi-upstream-bugs.md` section citations in repair comments
+  (§1b) -- comment-only edits, one filler.
+- `Config.pm`'s `-11`/`-12` codes mean the same thing and no consumer
+  distinguishes them -- fold on the next touch of the table (dies under 1b).
+- `Pl/Parser.pm` is the shared pre-pass/facts layer under the name of the
+  deleted pipeline; 39 statements per module still lower through its text
+  seam (`use`/`require`, loop-modifier statements, BEGIN, `use constant`).
+- `_ppi_parse` builds nine PPI documents for one 2,566-line module; the
+  re-serialize-and-reparse loop (18 sites, two bounded at 20 rounds) is the
+  single largest source of compile-time instability.
+
+Reading list for whoever executes: `docs/var-handling-review-s379.md` §3 (the
+binder), `docs/pexpr-term-parsing-review.md` (the operand grammar),
+`docs/static-parse-limits-review-s512.md` (what only running code knows),
+`docs/v2-target-architecture.md` §1 and §5 (the incremental-path argument this
+review re-weighs), perl's `perly.y` lines 123-155 and 1095-1400, `toke.c`
+`yyl_leftcurly` / `yyl_slash` / `S_lop` / `S_intuit_more`, `pad.c`'s header
+comment and `pad_findlex`.
