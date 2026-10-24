@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED s526w1 (Opus, 2026-10-24) from the URI-5.34 board census (t/escape.t's *PLAN* row: ran 28 of no plan, rc 255).\n\nPCL's Test::Builder has no `parent` method and no `expected_tests` method.  Test::Warnings (CPAN, used by URI's escape.t, and by many modern dists) calls `$builder->parent` in its warning handler / had_no_warnings and `Test::Builder->new->expected_tests` in its END block:\n    Can't locate object method \"parent\" via package \"Test::Builder\"\n    Error in END block: Can't locate object method \"expected_tests\" via package \"Test::Builder\"\nso the file dies before done_testing and the END block cannot add its \"no (unexpected) warnings\" row.\n\nREPRO:\n    use Test::More; use Test::Warnings; ok(1); done_testing;\n  perl 5.40.3: ok 1 / ok 2 - no (unexpected) warnings (via done_testing) / 1..2\n  PCL: dies at the first Test::Builder method Test::Warnings needs.\n\nLayer: the TAP layer (cl/pcl-test.lisp / its Test::Builder face): `parent` answers undef outside a subtest (the builder of the enclosing subtest inside one), `expected_tests` the declared plan (0 = none).  docs/tap-assertion-audit.md first.",
+   "id" : "3823",
+   "status" : "pending",
+   "subject" : "PCL's Test::Builder has no parent / expected_tests methods -- Test::Warnings dies in its handler and its END block (URI escape.t *PLAN*)"
+}

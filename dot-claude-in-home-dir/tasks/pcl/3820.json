@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED s526w1 (Opus, 2026-10-24) from the URI-5.34 board census (t/heuristic.t rows 7 and 9).  PRE-EXISTING (main 761d92f4 gives the same).\n\nA `BEGIN { *CORE::GLOBAL::NAME = sub {...} }` in the MAIN program does not reach a built-in call inside a MODULE `use`d after it.  perl decides the override when it compiles the call, so a module compiled after the BEGIN calls the override; PCL decides it statically per compilation unit (the module's own transpile -- and its cached copy -- cannot know what the program installed).\n\nREPRO (scratch/s526w1/pr/gh.pl + pr/lib/GhMod.pm):\n    # lib/GhMod.pm\n    package GhMod; sub look { gethostbyname($_[0]) ? \"yes\" : \"no\" } 1;\n    # gh.pl\n    BEGIN { *CORE::GLOBAL::gethostbyname = sub { $_[0] eq \"mocked.invalid.\" ? 1 : 0 } }\n    use lib \"scratch/s526w1/pr/lib\"; use GhMod;\n    print GhMod::look(\"mocked.invalid.\"), \" \", GhMod::look(\"localhost\"), \"\\n\";\n  perl 5.40.3: yes no\n  PCL (base and tree): no yes\n\ndocs/not-supported.md \"Builtin override: only the COMPILE-TIME spellings\" lists the BEGIN spelling as WORKING -- true within one unit, not across a module boundary, so the entry needs this case either way.  Consumer: URI t/heuristic.t mocks gethostbyname to test URI::Heuristic's guessing (2 rows); any test that mocks a built-in for the module under test (time, sleep, gethostbyname, ...) has this shape.  A fix needs the override to be a RUNTIME dispatch for the built-ins a CORE::GLOBAL can replace (the cached module emission cannot carry it) -- size it against the per-call cost first.",
+   "id" : "3820",
+   "status" : "pending",
+   "subject" : "A BEGIN-time *CORE::GLOBAL::NAME override in the main program does not reach a built-in call inside a module used after it (URI heuristic.t mocks gethostbyname: 2 rows)"
+}

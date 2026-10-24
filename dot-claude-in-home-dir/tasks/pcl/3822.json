@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "FILED s526w1 (Opus, 2026-10-24) from the URI-5.34 board census (t/cwd.t, its only row).  PRE-EXISTING.\n\nA program that sets `$ENV{PATH}` before a module is first needed loses every later RUN-TIME transpile: `p-transpile-file` (cl/pcl-runtime.lisp, ~27675) spawns pl2cl as `(sb-ext:run-program \"perl\" ... :search t)`, i.e. the first `perl` on the PROGRAM's PATH.  With PATH=/bin:/usr/bin that is the system perl (5.40.1 here) loading the perlbrew perl's Config.pm -- \"Perl lib version (5.40.3) doesn't match executable\" -- and the require dies \"Failed to transpile .../lib/Cwd.pm\".\n\nREPRO (URI t/cwd.t, minimal):\n    $ENV{PATH} = \"/bin:/usr/bin\";\n    my $cwd = eval { require Cwd; Cwd::getcwd() };\n    print defined $cwd ? \"ok\\n\" : \"died: $@\";\n  perl 5.40.3: ok\n  PCL: died: Failed to transpile .../lib/Cwd.pm   (when Cwd is not yet cached)\n\nTaint-style tests set PATH exactly like this, and so do daemons and setuid-ish scripts.  The fix is to spawn the perl PCL itself was started with (the absolute path the launcher resolved, as `$^X` is), never a PATH search; tools/install-pcl's wrappers already know it.",
+   "id" : "3822",
+   "status" : "pending",
+   "subject" : "A program that sets $ENV{PATH} loses every later run-time module transpile: p-transpile-file spawns pl2cl as the first `perl` on the PROGRAM PATH (URI cwd.t)"
+}
