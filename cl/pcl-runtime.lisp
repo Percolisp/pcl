@@ -8028,7 +8028,8 @@
                        (16 (if upper-case-p "0X" "0x"))
                        (8 (if (string= digits "0") "" "0"))
                        (2 (if upper-case-p "0B" "0b"))
-                       (t ""))
+                       (10 "")
+                       (t (error "PCL internal: sprintf-format-int: unhandled base ~S" base)))
                      "")))
     (concatenate 'string prefix digits)))
 
@@ -8261,7 +8262,9 @@
                               ((= base 8)  (if (or (zerop (length digits))
                                                    (char/= (char digits 0) #\0))
                                                "0" ""))
-                              (t "")))
+                              ((= base 10) "")
+                              (t (error "PCL internal: sprintf %~A: unhandled base ~S"
+                                        type-char base))))
                     ;; Sign handling
                     (sign (cond
                             ((minusp int-val) "-")
@@ -25507,8 +25510,10 @@ would consume, so it dies naming the stream (rule 12)."
          (let* ((byte-val (char-code (char s byte-offset)))
                 (mask (1- (ash 1 bits))))
            (logand (ash byte-val (- bit-offset)) mask)))
-        ;; Default
-        (t 0)))))
+        ;; Every legal width is an arm above (an illegal one died at entry),
+        ;; so this is a dispatch hole -- the 64 that used to fall here read 0.
+        (t (error "PCL internal: vec read of ~D bits at offset ~D fell through every width arm"
+                  bits offset))))))
 
 (defun p-vec-set (str-box offset bits value)
   "Perl vec lvalue - set element in string-as-bit-vector.
@@ -34660,7 +34665,9 @@ would consume, so it dies naming the stream (rule 12)."
    context even when gen_funcall has overridden *wantarray* for a nested call."
   (cond ((eq *pcl-caller-wantarray* t)     1)
         ((eq *pcl-caller-wantarray* :void) (p-undef))
-        (t                                 "")))
+        ((null *pcl-caller-wantarray*)     "")
+        (t (error "PCL internal: wantarray: the caller's context is ~S, not T / NIL / :VOID"
+                  *pcl-caller-wantarray*))))
 
 (defun p-caller (&optional (level 0))
   "Perl caller - return information about the calling subroutine.
