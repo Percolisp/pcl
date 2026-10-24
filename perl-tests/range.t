@@ -83,10 +83,9 @@ else {
   $b = "-2147483647 -2147483646";
 }
 
-# PCL: eval "RANGE" gets scalar (flip-flop) context -- string eval context not propagated
-ok(1, 'SKIP: eval "range" list context not supported in PCL');
+is ("@a", $a);
 
-ok(1, 'SKIP: eval "range" list context not supported in PCL');
+is ("@b", $b);
 
 # check magic
 {
@@ -94,8 +93,7 @@ ok(1, 'SKIP: eval "range" list context not supported in PCL');
     local $SIG{'__WARN__'} = sub { $bad = 1 };
     my $x = 'a-e';
     $x =~ s/(\w)-(\w)/join ':', $1 .. $2/e;
-    # PCL: s///e eval does not propagate list context to ..
-    ok(1, 'SKIP: s///e range context not propagated in PCL');
+    is ($x, 'a:b:c:d:e');
 }
 
 # Should use magical autoinc only when both are strings

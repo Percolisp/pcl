@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "Found by Fable's s526w1 merge probe (2026-10-24 evening), NOT a regression of #1025/#1026 (base fails identically).  perl: `my $t = \"abc\"; $t =~ s/(\\w+)/join(\":\", split(\\/\\/, $1))/e; print $t` -> a:b:c.  PCL: dies at run time with the regex error above -- the replacement code reaches the compiler with the backslashes still in front of the two `/` (perlop: \"the backslash is removed before the replacement is evaluated as code\" -- for the DELIMITER character only).  The sibling for STRINGS is DONE: #2704 (`$\\\"` in a double-quoted string).  Fix at the one place the s///e replacement text is extracted for compilation (Pl/ExprToCL.pm / the regexp-subst path that #1025/#1026 touched): strip `\\<delim>` -> `<delim>` for the closing delimiter character (and the opening one for bracketing pairs) BEFORE handing the text to the parser; guard rows in Pl/t/regexp-subst-01.t for `/`, `{}` and `!` delimiters; probe perl -> tree.  Reuse: #2704's string-side rule is the sibling (rule 11) -- look for its helper before writing a second copy.",
+   "id" : 3698,
+   "status" : "pending",
+   "subject" : "s///e REPLACEMENT: an ESCAPED DELIMITER (`\\/`) inside the replacement code is not unescaped before the code is compiled -- `$t =~ s/(\\w+)/join(\":\", split(\\/\\/, $1))/e` DIES (\"Opening paren has no matching closing paren in regex ... m/ <-- HERE (?:\\)/\"); perl strips the backslash before the delimiter and runs `split(//, $1)` -> a:b:c.  PRE-EXISTING (main e2ce5b2e and the s526w1 tree alike)"
+}
