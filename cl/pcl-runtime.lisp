@@ -13556,24 +13556,36 @@ per element."
                n)))
     (if (>= (abs count) 64) 0 (ash i count))))
 
+(defun %p-shift-slow (a b count-sign op-str signed)
+  "%p-shift's general path: the overload test, both coercions, and the UV
+   reading of the left operand (or the SIGNED shift `<<=' / `>>=' keep)."
+  (%with-binary-overload (op-str a b)
+                         (let ((n (to-number a))
+                               (c (* count-sign (%pcl-to-integer (to-number b)))))
+                           (if signed
+                               (%p-shift-signed n c)
+                               (%p-uv-shift (%pcl-uv-coerce n) c)))))
+
+(declaim (inline %p-shift))
 (defun %p-shift (a b count-sign op-str signed)
   "The body p-<< and p->> share: A shifted by B (B's sign flipped when
    COUNT-SIGN is -1, i.e. a right shift).  A plain NON-NEGATIVE FIXNUM and a
    plain fixnum count skip the overload test and both coercions, which are
-   identities on them (task #2513).  SIGNED is passed only by `<<=' / `>>=':
-   the compiler emits `p-<<-int' for a BINARY shift under `use integer' but
-   the same `p-<<=' for the compound one in and out of the pragma, so the
-   compound keeps the pre-#3760 signed shift rather than turn
+   identities on them (task #2513); that arm is INLINE and typed, so a right
+   shift of a fixnum is one machine shift (the s525u bench: boxarith's
+   `$i >>= 1' must not pay a call and a generic ldb).  SIGNED is passed only
+   by `<<=' / `>>=': the compiler emits `p-<<-int' for a BINARY shift under
+   `use integer' but the same `p-<<=' for the compound one in and out of the
+   pragma, so the compound keeps the pre-#3760 signed shift rather than turn
    `use integer; $x <<= 1' (perl -2 for -1) into a UV (task #3781)."
   (let ((na (%p-plain-num a)) (nb (%p-plain-num b)))
     (if (and (typep na '(and fixnum unsigned-byte)) (typep nb 'fixnum))
-        (%p-uv-shift na (* count-sign nb))
-        (%with-binary-overload (op-str a b)
-                               (let ((n (to-number a))
-                                     (c (* count-sign (%pcl-to-integer (to-number b)))))
-                                 (if signed
-                                     (%p-shift-signed n c)
-                                     (%p-uv-shift (%pcl-uv-coerce n) c)))))))
+        (let ((c (* count-sign nb)))
+          (cond ((<= c -64) 0)
+                ((minusp c) (ash na c))
+                ((>= c 64) 0)
+                (t (ldb (byte 64 0) (ash na c)))))
+        (%p-shift-slow a b count-sign op-str signed))))
 
 (defun p-<< (a b)
   "Perl left shift: the left operand is read as a UV (task #3760)."
