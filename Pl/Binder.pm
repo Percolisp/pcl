@@ -317,7 +317,7 @@ sub _sym_canon {
   return undef if $sig eq '&' || $sig eq '*';
   return undef if $c eq q{_};                      # the stat filehandle `-f _`
   return undef if $c =~ /^[\$\@\%]\z/;          # an unnamed signature placeholder `($, $y)`
-  # `$#+` / `$#-`: PPI lexes the last index of @+ / @- as ONE Symbol (an
+  # `$#+` / `$#-`: PPI lexes the last index of @+ / @- as ONE Token::Magic (an
   # ArrayIndex everywhere else) -- the array @+ / @- (perlvar).
   return "\@$1" if $c =~ /^\$#([+-])\z/;
   my $prev = $t->sprevious_sibling;
@@ -747,6 +747,7 @@ sub _log_fh {
 
 sub _row {
   my (@f) = @_;
+  local $!;
   my $fh = _log_fh();
   print {$fh} join("\t", map { my $v = $_ // ''; $v =~ s/[\t\n\r]/ /g; $v } @f), "\n";
   close $fh unless $fh == \*STDERR;
@@ -762,6 +763,7 @@ sub _file_of {
 # Build the main binder (Parser2 calls this at its build point).
 sub build_for {
   my ($parser, $doc) = @_;
+  local ($!, $@);
   my $mode = $ENV{PCL_BINDER_CHECK} // '';
   my $b = eval {
     Pl::Binder->new($doc, parser => $parser,
@@ -827,6 +829,7 @@ sub _rec_str {
 # THE COMPARISON.  $which: binding_at | ref_shadowed | block_captures.
 sub check {
   my ($parser, $which, $legacy, @args) = @_;
+  local ($!, $@);                           # inert: never leak errno / $@ to the parser
   my $mode = $ENV{PCL_BINDER_CHECK} // '';
   my ($node) = @args;
   my $pass = _pass_name();                   # the pass that asked the resolver
@@ -948,6 +951,7 @@ sub _q_block_captures {
 # The calls summary of one transpile, when the parser lets the binder go.
 sub DESTROY {
   my ($self) = @_;
+  local ($!, $@, $?);                    # a destructor runs during die unwinding
   return unless $self->{mode} && $self->{mode} eq 'log' && $self->{calls};
   _row('C', $self->{file}, map({ "$_=$self->{calls}{$_}" } sort keys %{ $self->{calls} }),
        'rebuilds=' . ($self->{rebuilds} // 0));
