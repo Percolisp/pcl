@@ -315,8 +315,10 @@ sub _sym_canon {
   my $c = $t->content;
   my $sig = substr($c, 0, 1);
   return undef if $sig eq '&' || $sig eq '*';
+  return undef if $c eq q{_};                      # the stat filehandle `-f _`
+  return undef if $c =~ /^[\$\@\%]\z/;          # an unnamed signature placeholder `($, $y)`
   my $prev = $t->sprevious_sibling;
-  my $canon = ($prev && $prev->isa('PPI::Token::Cast')) ? $c : $t->symbol;
+  my $canon = ($prev && $prev->isa(q{PPI::Token::Cast}) && $prev->content ne q{\\}) ? $c : $t->symbol;
   return $canon if $canon =~ /^[\$\@\%](?:[^\W\d][\w]*(?:(?:::|')\w+)*(?:::)?|::\w*(?:::\w+)*|\d+|\^\w+|\{\^\w+\}|[^\w\s{])\z/;
   die "PCL binder: unknown variable token shape `$c` (canon `$canon`)\n";
 }
@@ -703,10 +705,10 @@ sub captures {
 # The refs whose ordinal lies in [$a, $z], in order (a binary search over the
 # ord-sorted ref list, built once).
 sub _refs_in {
-  my ($self, $a, $z) = @_;
+  my ($self, $lo0, $z) = @_;
   my $s = $self->{sorted} //= [ sort { $a->{ord} <=> $b->{ord} } map { @$_ } values %{ $self->{refs} } ];
   my ($lo, $hi) = (0, scalar @$s);
-  while ($lo < $hi) { my $m = ($lo + $hi) >> 1; if ($s->[$m]{ord} < $a) { $lo = $m + 1 } else { $hi = $m } }
+  while ($lo < $hi) { my $m = ($lo + $hi) >> 1; if ($s->[$m]{ord} < $lo0) { $lo = $m + 1 } else { $hi = $m } }
   my @out;
   for (my $i = $lo; $i < @$s && $s->[$i]{ord} <= $z; $i++) { push @out, $s->[$i] }
   return @out;
@@ -851,7 +853,7 @@ sub check {
   my $key = join "\0", $b->{file}, $which, refaddr($node), $extra, _verdict_str($legacy), _verdict_str($mine);
   return if $SEEN{$key}++;
   my @row = ('D', $b->{file}, _line($node), _col($node), _short($node->content), $which,
-             _verdict_str($legacy), _verdict_str($mine), $kind, $note, $pass // q{?});
+             _verdict_str($legacy), _verdict_str($mine), $kind, "asked=$extra $note", $pass // q{?});
   if ($mode eq 'die') {
     die sprintf("PCL binder: %s disagrees at %s line %s col %s `%s` (%s): legacy=%s binder=%s [%s] %s\n",
                 $which, $b->{file}, $row[2], $row[3], $row[4], $extra,

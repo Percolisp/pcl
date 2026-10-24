@@ -42,26 +42,8 @@ push @files, population($o{population}) if $o{population};
 
 sub population {
   my ($name) = @_;
-  return map { population($_) } qw(perl-tests perl-t everyday cpan) if $name eq 'all';
-  if ($name eq 'perl-tests') { return sort glob "$root/perl-tests/*.t" }
-  if ($name eq 'everyday')   { return sort glob "$root/everyday/*/*.pl" }
-  if ($name eq 'perl-t') {
-    require PCLPaths;
-    my $t = PCLPaths::perl_suite_t();
-    # tools/run-perl-suite.pl's @DEFAULT_DIRS, the --all scan
-    return map { sort glob "$t/$_/*.t" } qw(base cmd comp opbasic op mro class run uni re io);
-  }
-  if ($name eq 'cpan') {
-    my @f;
-    for my $dist (sort grep { -d } glob "$root/cpan-tests/modules/*") {
-      for my $sub (qw(lib t)) {
-        next unless -d "$dist/$sub";
-        find({ no_chdir => 1, wanted => sub { push @f, $_ if -f && /\.(?:pm|t)$/ } }, "$dist/$sub");
-      }
-    }
-    return sort @f;
-  }
-  die "ppi-expect-check: unknown population '$name' (perl-tests perl-t everyday cpan all)\n";
+  require PCLPopulations;            # the ONE population list (s525q)
+  return PCLPopulations::files($name, $root);
 }
 
 my $parser;
