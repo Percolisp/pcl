@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-8585
+;;; pcl: pipeline=v2 gen=v2-8685
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -2020,7 +2020,7 @@
                                                               $nargs)
                                                             (p-aref-deref $args_ref
                                                               (p-post++ (p-cast-$ $ai_ref))
-                                                              :strict)
+                                                              :strict-lv)
                                                             ""))
                                                         (p-if (p-! (p-defined $darg))
                                                           (p-my-= $darg ""))
@@ -2266,7 +2266,7 @@
                                                                       (p-aref-deref $args_ref
                                                                         (p-post++
                                                                           (p-cast-$ $ai_ref))
-                                                                        :strict))
+                                                                        :strict-lv))
                                                                     (p-.=
                                                                       (p-cast-$ $result_ref
                                                                         :strict-lv)
@@ -2375,7 +2375,7 @@
                                                                         (p-aref-deref $args_ref
                                                                           (p-post++
                                                                             (p-cast-$ $ai_ref))
-                                                                          :strict)
+                                                                          :strict-lv)
                                                                         0))
                                                                     (p-if (p-== $v 0)
                                                                       (progn
@@ -2556,7 +2556,7 @@
                                               (p-//
                                                 (p-aref-deref $args_ref
                                                   (p-post++ (p-cast-$ $ai_ref))
-                                                  :strict)
+                                                  :strict-lv)
                                                 0)
                                               0))
                                           0))
@@ -2611,7 +2611,7 @@
                                                   (p-//
                                                     (p-aref-deref $args_ref
                                                       (p-post++ (p-cast-$ $ai_ref))
-                                                      :strict)
+                                                      :strict-lv)
                                                     0)
                                                   0))
                                               (p-let (($nv :box (make-p-box nil)))
@@ -2644,7 +2644,7 @@
                                                   (p-//
                                                     (p-aref-deref $args_ref
                                                       (p-post++ (p-cast-$ $ai_ref))
-                                                      :strict)
+                                                      :strict-lv)
                                                     0)
                                                   0))
                                               (p-.= (p-cast-$ $result_ref :strict-lv)
@@ -2664,7 +2664,7 @@
                                                   (p-//
                                                     (p-aref-deref $args_ref
                                                       (p-post++ (p-cast-$ $ai_ref))
-                                                      :strict)
+                                                      :strict-lv)
                                                     0)
                                                   0))
                                               (p-.= (p-cast-$ $result_ref :strict-lv)
@@ -2690,7 +2690,7 @@
                                             (p-//
                                               (p-aref-deref $args_ref
                                                 (p-post++ (p-cast-$ $ai_ref))
-                                                :strict)
+                                                :strict-lv)
                                               "")
                                             ""))
                                         (pl-_pack_str_one $ch $arg $nrep $star $result_ref)
@@ -2707,7 +2707,7 @@
                                                 (p-//
                                                   (p-aref-deref $args_ref
                                                     (p-post++ (p-cast-$ $ai_ref))
-                                                    :strict)
+                                                    :strict-lv)
                                                   0)
                                                 0))
                                             (p-let (($nv :box (make-p-box nil)))
@@ -2737,7 +2737,7 @@
                                                 (p-//
                                                   (p-aref-deref $args_ref
                                                     (p-post++ (p-cast-$ $ai_ref))
-                                                    :strict)
+                                                    :strict-lv)
                                                   0)
                                                 0))
                                             (p-let (($nv :box (make-p-box nil)))
@@ -2768,7 +2768,7 @@
                                                 (p-//
                                                   (p-aref-deref $args_ref
                                                     (p-post++ (p-cast-$ $ai_ref))
-                                                    :strict)
+                                                    :strict-lv)
                                                   0)
                                                 0))
                                             (p-let (($orig_s :box (make-p-box nil)))
