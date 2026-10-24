@@ -17,7 +17,7 @@ For each dist report: files PASS / PARTIAL / FAIL / TIMEOUT, rows pass / fail, p
 
 ## Fillers (each: read the task, probe perl -> base -> tree, fix at the RIGHT LAYER (CLAUDE.md 9a: a module's behaviour goes in its `lib/` shim, never in Pl/ or cl/ by name), guard rows, its own commit; stop where the budget stops)
 1. The one-mechanism fix the census exposed with the MOST rows behind it, if it fits the filler rule above (one mechanism, small, bench-neutral, the layer's bars).
-2. Nothing else unasked: the second half of this widening (Pod-Simple, Log-Log4perl, YAML-PP, Template-Toolkit) is `s526w2`, another agent's.
+2. Nothing else unasked: the first half of this widening (TimeDate, HTTP-Date, URI, HTTP-Message, YAML-Tiny, Data-Dumper) is `s526w1`, another agent's -- if it merged before you, its lines and rows are on main; rebase and keep both.
 
 ## Bars (every heavy leg through `~/pcl-agent-scratch/s513/heavy.sh s526w2 leg <log> ...`, in the background; light work meanwhile; another agent shares the box -- the board runs are YOUR heavy legs, one dist alone is light)
 Always: `tools/tag-license --check`; `tools/everyday-smoke.pl --jobs 2` AFTER + `--record` LAST (BEFORE = main's `EVERYDAY: 116 of 122`; expected unchanged); the FULL gate ONCE at the end (`PCLXS_DIR=~/pclxs tools/prove-core`, `Result: PASS`, files / rows = main's at your launch + any new files -- quote main's number from `git -C /home/bernt/pcl log` / CLAUDE.md CURRENT NUMBERS).  If a filler changes `lib/`, `cl/` or `Pl/`: the WHAT-TO-RUN-WHEN table row for that layer, named by log path.  Member 2's two board runs.  A board run killed by the 4G fence (rc 137 / "Killed") is re-queued once and reported.
