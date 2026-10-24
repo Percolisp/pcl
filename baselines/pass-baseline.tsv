@@ -1,4 +1,5 @@
 # taken-at: 5323d9e 2026-08-15
+# s525u (2026-10-24, Opus, EDITED BY HAND): bop.t 485/24 -> 487/22 -- rows "neg UV (sic) left shift" / "right shift" pass: a shift reads its left operand as a UV (#3760); both rows left fail-baseline.tsv by edit.
 # s523d (2026-10-22, Opus, EDITED BY HAND): ref.t 203 -> 204 -- row 200 "freeing freed glob in global destruction" passes again: #3691 (the stash delete of a non-sub symbol removes the glob; no announcement on the child's stderr).
 # s522b (2026-10-20, Opus, EDITED BY HAND): ref.t 204 -> 203 -- row 200 "freeing freed glob in global destruction" now fails by the stash-delete ANNOUNCEMENT its runperl child compares (stderr => 1; Fable s523 withdrew the death -- the row still fails on the stderr text alone); added to fail-baseline.tsv with that cause.
 # s521b (2026-10-18, Opus, EDITED BY HAND): readline.t 25 -> 27 -- its last SKIP block runs since PerlIO::get_layers exists (#3326); rows 33-34 pass, rows 35-36 fail (#3531, added to fail-baseline.tsv by edit).
@@ -455,7 +456,7 @@ auto.t	OK	47	0	47
 bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
-bop.t	PARTIAL	485	24	510
+bop.t	PARTIAL	487	22	510
 caller.t	OK	27	84	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44

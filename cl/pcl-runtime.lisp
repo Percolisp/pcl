@@ -12626,11 +12626,11 @@ per element."
 ;;; dispatch p-<< now carries, which is what perl does for `$obj <<= 3'.
 (%define-compound-pair p-<<= p-<<=-raw (value)
                        "Perl <<= (left-shift-assign)"
-                       `(p-<< ,cur ,value))
+                       `(p-<< ,cur ,value t))
 
 (%define-compound-pair p->>= p->>=-raw (value)
                        "Perl >>= (right-shift-assign)"
-                       `(p->> ,cur ,value))
+                       `(p->> ,cur ,value t))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -13350,6 +13350,17 @@ per element."
      ((eq val t) :number)
      ((null val) :string)
      ((eq val *p-undef*) :string)       ; do_vop stringifies undef to ""
+     ;; A STRING in a box that has been USED AS A NUMBER: the box's `nv-ok'
+     ;; IS perl's pNOK (box-nv sets it on every numification, a copy carries
+     ;; it, a store clears it, a dualvar is born with it), so this arm is
+     ;; perl's SvNIOKp exactly -- `$x = "abc"; $x + 0; $x | "  "' is 0 in
+     ;; perl, and `$! | "x"' is numeric (#1040, s525u).
+     ((and boxp (stringp val) (p-box-nv-ok v)) :number)
+     ;; A string with NO numification history: perl's answer is :STRING (the
+     ;; bit-string op, `"12" | "3"' = "32").  The text guess below stays
+     ;; because under `use feature "bitwise"' (default from `use v5.28') `|'
+     ;; is ALWAYS numeric and the compiler does not yet tell the runtime the
+     ;; pragma is in force -- the exact rule needs that emission (#1040).
      ((stringp val) (if (looks-like-number val) :number :string))
      ((p-vstring-p val) :string)        ; a vstring is PV-only
      ((p-superchar-p val) :string)
@@ -13536,36 +13547,65 @@ per element."
   `(setf ,var (p-str-bit-xor ,var ,value)))
 
 (defun %pcl-uv-coerce (n)
-  "Coerce float to integer using UV (unsigned) semantics: +Inf=UV_MAX, -Inf=IV_MIN, NaN=0."
-  (if (floatp n)
-      (cond ((%pcl-nan-p n) 0)
-            ((sb-ext:float-infinity-p n)
-             (if (minusp n) #x8000000000000000 #xFFFFFFFFFFFFFFFF))
-            (t (truncate n)))
-      n))
+  "perl's SvUV of the number N: NaN 0, +Inf and anything >= 2**64 UV_MAX, a
+   negative value its IV (clamped at IV_MIN, as perl's NV->IV cast is, so
+   -Inf is IV_MIN) reinterpreted as an unsigned 64-bit integer."
+  (let ((i (if (floatp n)
+               (cond ((%pcl-nan-p n) 0)
+                     ((sb-ext:float-infinity-p n)
+                      (if (minusp n) #x-8000000000000000 #xFFFFFFFFFFFFFFFF))
+                     ((>= n 18446744073709551615d0) #xFFFFFFFFFFFFFFFF)
+                     ((< n -9223372036854775808d0) #x-8000000000000000)
+                     (t (truncate n)))
+               n)))
+    (cond ((minusp i) (ldb (byte 64 0) (max i #x-8000000000000000)))
+          ((> i #xFFFFFFFFFFFFFFFF) #xFFFFFFFFFFFFFFFF)
+          (t i))))
 
-(defun p-<< (a b)
-  "Perl left shift — clamp shift count to prevent SBCL bignum explosion.
-   Two plain FIXNUMS skip the overload test and both coercions, which are
-   identities on them (task #2513)."
-  (let ((na (%p-plain-num a)) (nb (%p-plain-num b)))
-    (if (and (typep na 'fixnum) (typep nb 'fixnum))
-        (if (>= (abs nb) 64) 0 (ash na nb))
-        (%with-binary-overload ("<<" a b)
-                               (let ((av (%pcl-uv-coerce (to-number a)))
-                                     (bv (%pcl-to-integer (to-number b))))
-                                 (if (>= (abs bv) 64) 0 (ash av bv)))))))
+(declaim (inline %p-uv-shift))
+(defun %p-uv-shift (uv count)
+  "UV shifted left by COUNT (right when negative), as perl's UV_LEFT_SHIFT /
+   UV_RIGHT_SHIFT: |COUNT| >= 64 is 0 and the result is kept to 64 bits."
+  (if (>= (abs count) 64) 0 (ldb (byte 64 0) (ash uv count))))
 
-(defun p->> (a b)
-  "Perl right shift — clamp shift count to prevent SBCL bignum explosion.
-   Two plain FIXNUMS skip the overload test and both coercions (task #2513)."
+(defun %p-shift-signed (n count)
+  "The SIGNED shift `<<=' / `>>=' keep (see p-<<): N shifted by COUNT with no
+   UV reading and no 64-bit mask -- what every shift did before #3760, which
+   is right under `use integer' for the common in-range operand."
+  (let ((i (if (floatp n)
+               (cond ((%pcl-nan-p n) 0)
+                     ((sb-ext:float-infinity-p n)
+                      (if (minusp n) #x8000000000000000 #xFFFFFFFFFFFFFFFF))
+                     (t (truncate n)))
+               n)))
+    (if (>= (abs count) 64) 0 (ash i count))))
+
+(defun %p-shift (a b count-sign op-str signed)
+  "The body p-<< and p->> share: A shifted by B (B's sign flipped when
+   COUNT-SIGN is -1, i.e. a right shift).  A plain NON-NEGATIVE FIXNUM and a
+   plain fixnum count skip the overload test and both coercions, which are
+   identities on them (task #2513).  SIGNED: see p-<<."
   (let ((na (%p-plain-num a)) (nb (%p-plain-num b)))
-    (if (and (typep na 'fixnum) (typep nb 'fixnum))
-        (if (>= (abs nb) 64) 0 (ash na (- nb)))
-        (%with-binary-overload (">>" a b)
-                               (let ((av (%pcl-uv-coerce (to-number a)))
-                                     (bv (%pcl-to-integer (to-number b))))
-                                 (if (>= (abs bv) 64) 0 (ash av (- bv))))))))
+    (if (and (typep na '(and fixnum unsigned-byte)) (typep nb 'fixnum))
+        (%p-uv-shift na (* count-sign nb))
+        (%with-binary-overload (op-str a b)
+                               (let ((n (to-number a))
+                                     (c (* count-sign (%pcl-to-integer (to-number b)))))
+                                 (if signed
+                                     (%p-shift-signed n c)
+                                     (%p-uv-shift (%pcl-uv-coerce n) c)))))))
+
+(defun p-<< (a b &optional signed)
+  "Perl left shift (task #3760: the left operand is a UV).  SIGNED is passed
+   only by `<<=' / `>>=': the compiler emits `p-<<-int' for a BINARY shift
+   under `use integer' but the same `p-<<=' for the compound one in and out of
+   the pragma, so the compound keeps the pre-#3760 signed shift rather than
+   turn `use integer; $x <<= 1' (perl -2 for -1) into a UV (task #3781)."
+  (%p-shift a b 1 "<<" signed))
+
+(defun p->> (a b &optional signed)
+  "Perl right shift (task #3760: the left operand is a UV); SIGNED as p-<<."
+  (%p-shift a b -1 ">>" signed))
 
 (defun p-to-s64 (n)
   "Convert integer to signed 64-bit range (-2^63 to 2^63-1)."
