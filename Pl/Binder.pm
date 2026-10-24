@@ -81,7 +81,7 @@ package Pl::Binder;
 
 use strict;
 use warnings;
-use Scalar::Util qw(refaddr blessed);
+use Scalar::Util qw(refaddr blessed weaken);
 use Time::HiRes ();
 use Pl::InterpScan ();
 use Pl::PExpr::TokenUtils ();
@@ -91,8 +91,13 @@ my $RENAME_SUFFIX = qr/__(?:file|state|shadow|excl|lex|evalcap|lexsub|cond|famil
 
 sub new {
   my ($class, $doc, %opt) = @_;
-  return bless { doc => $doc, opt => \%opt, bindings => [], by_canon => {},
+  my $self = bless { doc => $doc, opt => \%opt, bindings => [], by_canon => {},
                  refs => {}, ord => {}, globals => {}, stats => {} }, $class;
+  # The parser holds the binder ($p2->{_binder}); a strong back-reference
+  # would be a cycle that leaks the parser, the binder and the document per
+  # transpile (Pl/t/parser-leak-01.t row 2 caught it under PCL_BINDER_CHECK).
+  weaken($self->{opt}{parser}) if ref $self->{opt}{parser};
+  return $self;
 }
 
 sub _first_ord { my ($s, $n) = @_; my $t = $n->isa('PPI::Token') ? $n : $n->first_token; return $t ? $s->{ord}{refaddr $t} : undef }

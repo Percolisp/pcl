@@ -22,10 +22,11 @@ use File::Temp qw(tempdir);
 
 my $root = "$RealBin/../..";
 my $dir  = tempdir(CLEANUP => 1);
+my $n    = 0;
 
 sub dump_of {
   my ($src) = @_;
-  my $f = "$dir/p" . (++$main::n) . '.pl';
+  my $f = "$dir/p" . (++$n) . '.pl';
   open my $fh, '>', $f or die "$f: $!"; print $fh $src; close $fh;
   my $out = `$^X $root/tools/binder-check.pl --dump $f 2>&1`;
   return ($out, $? >> 8);
