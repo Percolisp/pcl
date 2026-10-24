@@ -533,6 +533,128 @@ Parser.pm renaming and the §1c seam closure as fillers), 12-18 sessions.
   re-serialize-and-reparse loop (18 sites, two bounded at 20 rounds) is the
   single largest source of compile-time instability.
 
+## 7. The PPI-bug REGISTRY (USER requirement, 2026-10-24: "easy to add to, and remove from if some would get fixed")
+
+Today one PPI bug is written in FOUR hand-synchronised places: its catalogue
+section, its repair pass, its canary row, its report row -- and they have
+drifted (the report's "Bug N" is not the catalogue's §N; §5 and §32-§38 have no
+report row; three repair comments cite the wrong §).  The registry makes it ONE
+place, on the pattern this project already trusts for the same problem shape:
+`cl/skip-registry.lisp` (`docs/test-skip-registry.md`) -- declarative rows,
+keyed, with a STALE DETECTOR that fires when reality changes.
+
+**One row per bug** (Perl data, e.g. `Pl/PPIBugs.pm`):
+
+```perl
+{ id    => 28,                       # = the catalogue's §; never renumbered
+  title => '`$x.2` -- a `.` before a digit after a term is lexed as a Float',
+  kind  => 'token',                  # token | structure | source | lexer-dies
+  ppi   => { confirmed => '1.291', fixed_in => undef },
+  when  => { expect => 'XOPERATOR', class => 'PPI::Token::Number::Float',
+             content => qr/^\.\d/ },
+  fix   => 'relex',                  # relex the span | retag => CLASS | handler => \&sub
+  repro => 'my $x = 1; print $x.2;', perl => '12',
+  tokens => { got => [...], want => [...] },      # the report's and the canary's data
+  unblocks => ['perl-tests/op/concat.t'], tasks => ['#480'] }
+```
+
+**Four consumers, all mechanical, none hand-written per bug:**
+1. **The engine** -- the ONE expect-state pass of §4 Option 1a.  A `token` row
+   matches on (expect state, PPI class, content) and applies its `fix`; a
+   `structure` row matches a PPI tree shape and re-structures (block-vs-hash,
+   `finally`, `sub _`); a `source` row is a pre-tokenizer text fix (hex floats,
+   `$)` under `signatures`, the `$/`-dependent `__END__`); a `lexer-dies` row
+   is a source rewrite tried only when `PPI::Document->new` fails (the three
+   `for`-loop-variable shapes), so it costs nothing on a healthy file.  Rough
+   split of the 38 by the catalogue's titles: token ≈ 21, structure ≈ 7,
+   source ≈ 6, lexer-dies ≈ 3, fixed 1 -- the checker session verifies it.
+2. **The canary test** iterates the rows and asserts PPI's `got` on `repro`.
+   The day a PPI upgrade fixes a bug, that row FAILS with "PPI N fixed §id:
+   set fixed_in" -- the stale detector.  Nobody has to remember.
+3. **The upstream report** iterates the same rows (`want` vs `got`, the
+   control from `perl`): one file, always complete, numbered by `id`.
+4. **The catalogue** keeps the WHY (dumps, history, the perl probe) and links
+   by `id`; its list table can be generated from `title` and `ppi`.
+
+**Add** = one row plus its prose.  **Remove** = set `fixed_in`: the engine
+skips the row for PPI ≥ `fixed_in`, the canary expects the fixed behaviour
+there, the report marks it fixed; when the installer's PPI floor passes
+`fixed_in`, the row is deleted.  **Report upstream** = run the report file.
+
+## 8. The endgame -- what the parser is when Option 1 is done
+
+The `docs/v2-target-architecture.md` §1 pipeline, with the three states named
+and each the ONE place its kind of corner case goes:
+
+```
+ Perl source text
+        │  source-kind registry rows (pre-tokenizer fixes; lexer-dies fallbacks)
+        ▼
+ PPI tokens + structure        PPI KEPT: quotes, heredocs, regex bodies, numbers, the tree
+        │  ONE expect-state pass, driven by the registry      <- a LEXER corner case = a row
+        ▼
+ a token stream toke.c would agree with
+        │  ONE binding pass (the pad model: name, visible-from, visible-to, OUTER)
+        ▼                                                     <- a SCOPING corner case = the one rule
+ tokens + binding table
+        │  classify (Stmt records); expression parse = ONE keyword-class table
+        │  + ONE extent rule per class + the precedence table  <- a CALL-SHAPE corner case = a class
+        ▼
+ expression trees + Facts (keyed on binding ids, not on text)
+        │  lower; names chosen at emission from the binding table
+        ▼
+ CLForm  →  registered passes  →  print
+```
+
+**What exists at the end:** three small tables (the registry; the class table,
+about ten classes plus some thirty syntax keywords; the precedence table,
+unchanged), one binder, one expression parser whose operand side is
+`_term_extent` plus the class rule, the lowering, the emitter, the runtime.
+
+**What is gone:** the ~35 repair passes and the 18 re-parse sites; the 18
+scope walks, the six rename families and every source-mutating rename
+(`_rename_*`, `_rewrite_var_uses`, `_interp_fixer`); `handle_subcalls`' two
+loops; Config's 25 arity shapes; the v1 text seam (the four statement kinds
+lowered structurally); Parser.pm as a name (its live halves become PrePass and
+Facts, its v1 statement processors are deleted).  Estimated deletion 15-20k of
+the 54k lines (v1 statement processors ~6k, identity machinery ~4-5k, repairs
+~3k, `handle_subcalls` ~1.2k, the rest in shapes and seams) -- an estimate the
+two checker sessions calibrate.
+
+**What stays as it is, by design:** PPI as the tokenizer (good at the
+quote-like constructs; its bugs isolated in one registry with a stale
+detector); the static-parse limits of `static-parse-limits-review-s512.md`
+(BEGIN-time facts remain approximations, the #2610 run-time detector remains
+the safety net -- the ruling against Option 3 is the ruling to live with this);
+the emission vocabulary; the runtime; every test.
+
+**What "done" means day to day:** a new PPI mis-lex is a registry row (report
+row and canary by construction, same data); a new perl syntax is a PPI release
+or a registry row plus one lowering arm; a scoping question is answered by the
+binder's one rule; a call-shape question by a class.  Transpile time ≈ PPI's
+0.23 s plus linear passes, sub-second per module.  The parser becomes boring,
+which is the goal; the remaining parse divergences are the s512 families, and
+they are tracked by the detector, not by the parser.  Bars: passes ≤ 30,
+re-parse sites 0, scope walks 1, repairs = 1 engine + N rows, `handle_subcalls`
+< 600 lines, Calc.pm < 1.5 s, corpus-diff identical per step, sweep +0.
+
+## 9. Next review: the runtime (the USER's question B, measured in passing)
+
+`cl/pcl-runtime.lisp` is 40,771 lines: 1,618 `defun`, 208 `defmacro`, 322
+`defvar`; **41 functions over 80 lines and 7 over 200** against rule 10's
+~80-line limit (`p-list-=` 446, `p-method-call` 346, `p-setf` 340,
+`sprintf-one` 305, `p-array-fill` 235, `p-sprintf` 227, `%p-clock-resolution`
+210); 90-day churn +36,292 / -9,852 in 730 commits -- MORE growth than the
+whole compiler side.  A review of the same kind is warranted, with perl's own
+implementation as the reference again: `sv.c` (the SV model: IOK/NOK/POK and
+the UTF8 flag, upgrade rules, `sv_2nv`/`grok_number` stringify-numify) against
+PCL's box / raw-slot / undef / string-number model -- the "is it one mechanism"
+question that the pad was for the parser; `pp.c` / `pp_hot.c` (one `pp_`
+function per op) against the `p-*` family for per-op divergence (#3692's
+int-vs-double compare is the archetype); `mg.c` against tie and the special
+variables; the duplication census (`tools/dup-census.pl`, s411 scope) re-run;
+the rule-10 / rule-12 audit (#152).  One Fable session, no agent slot.
+
 Reading list for whoever executes: `docs/var-handling-review-s379.md` §3 (the
 binder), `docs/pexpr-term-parsing-review.md` (the operand grammar),
 `docs/static-parse-limits-review-s512.md` (what only running code knows),
