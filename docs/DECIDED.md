@@ -22,6 +22,16 @@ not-supported.md → only then probe.*
 - Residues (review §6, carried in #3694, none a silent-wrong): three stale `ppi-upstream-bugs.md` § citations in repair comments (`_restore_signature_gid` §24 -> §32, `_brace_glob_slot_symbol` §24 -> §27, `_repair_term_initial_complement` §20 -> §21); Config's `-11`/`-12` arity codes mean the same and no consumer distinguishes them; nine PPI documents built per transpile.
 - The s524 RESUME RECIPE (round-4 board unread, #3650 from s523c's checkpoint, the full companion, the s526 CPAN-modules reminder) was NOT executed this session -- the USER's request was the review.
 
+## s525p (2026-10-24, Opus) -- parser step 0 c1: the expect-state CHECKER (inert) + the PPI-bug REGISTRY as data; emission-neutral
+
+- **The expect-state checker = `Pl/PPIExpect.pm` + `tools/ppi-expect-check.pl`**: carries toke.c's `PL_expect` over PPI's tokens, one row per contradicting token; its two tables (`@TRANSITIONS`, `@CONTRADICTIONS`, each row citing toke.c) ARE 1a's design -> `docs/expect-state-checker-s525.md`.  No compiler file loads it.
+- **The checker PREDICTS 34 of the 38 catalogue §§** (§3 correctly clean: fixed in 1.291); NOT predicted by construction: §13 (source), §27 (an accessor), §30 (heredoc content) -> `docs/expect-state-checker-s525.md` §2.
+- **The kind split of the 38: token 28 / structure 7 / source 1 (§13) / lexer-dies 2 (§6, §29)** -> `Pl/PPIBugs.pm`.
+- **The registry schema as built** (review §7): `id kind dump title ppi{confirmed,fixed_in} when fix{kind,handler} repro perl tokens{got,want} unblocks tasks`; `dump` names the comparison form (tokens | structure | statements | lexer | heredoc | symbol | slurp, defined once in the canary test); DATA + one accessor `bugs()`; a row is never deleted -> `Pl/PPIBugs.pm` header.
+- **The stale detector**: `Pl/t/ppi-bugs-registry-01.t` fails a row whose repro stops reproducing with `PPI <version> fixed §<id>: set fixed_in`; a row with `fixed_in` <= the installed PPI asserts `want` -> the test header.
+- **Over four populations (891k tokens, 1,180 primary rows): 640 rows in 23 catalogued §§, 540 in 16 NEW shapes, filed #3740-#3755** (live PCL failures among them: #3749 dies, #3750 silent wrong, #3751 dies, #3752/#3754 loud drops) -> `docs/expect-state-checker-s525.md` §3.
+- **The catalogue's §38 prose repro does not reproduce on PPI 1.291; the report file's row does** (the registry uses the reproducing spelling; catalogue not edited) -> `docs/expect-state-checker-s525.md` §4.
+
 ## s524 (2026-10-21 23:5x to 2026-10-22 02:4x, Fable; the USER: "short session, run 3 subtasks in parallel", then 02:0x "Don't start more subtasks for this session") -- the three s523 checkpoints resumed after a box reboot and ALL THREE MERGED (MAIN-READY-41 s523b, -42 s523c, -43 s523d); #3650 assigned to s523c as a post-merge member; the install-matrix GREEN (#3526 closed); the round-4 board + companion; the USER's "more CPAN modules after a session or two" reminder set
 
 - **THE CAP IS THREE (the USER's word for this session); every agent RESUMED in its existing worktree without isolation (fresh agents, model opus)**; after 02:0x no new agent is launched ("Don't start more subtasks") -- running ones finish (the standing rule: never stop a running one).
