@@ -1765,7 +1765,7 @@ their optional site slot.
 
 The element READS `p-aref-deref` / `p-gethash-deref` take `:strict` too: a
 string or a number dies, an undef BOX vivifies (an element read vivifies its
-container in perl, strict or not), a RAW undef dies.  `exists` / `delete` of an element
+container in perl, strict or not), a RAW undef dies -- EXCEPT when the base is a plain VARIABLE (`$t->{k}`, `$$t[0]`): perl never dies there, and a written lexical may be a raw slot, so that site is marked `:strict-lv` (undef reads undef, a string dies; task #3858).  `exists` / `delete` of an element
 through a reference take the strict CAST as their container under strict refs
 (`(p-exists (p-cast-% $r :strict-lv) "k")`), `p-ensure-hashref` / `-arrayref`
 outside it — both vivify an undef box.  **The PLACE is

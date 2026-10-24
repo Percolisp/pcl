@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 136;
+plan tests => 137;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -208,6 +208,23 @@ test_cl('not in a ternary middle operand (#3850)',
      my @r = grep { $v ? not -f "/etc/passwd$_" : 1 } ("", "x");
      print "[$x][$y][$z][$w][", scalar(@r), "]\n";',
     "[1][5][][][1]\n");
+
+# #3858: under strict refs an element read through a plain VARIABLE whose
+# value is undef (`my $t = shift; $t->{k}`, no argument passed) reads undef --
+# perl vivifies the variable and never dies; a written lexical is a RAW slot
+# and the :strict raw-undef arm died "Can't use an undefined value as a HASH
+# reference".  A string still dies, and so does a sub's undef RESULT.
+# Outputs probed under perl 5.40.3.
+test_cl('strict element read through an undef variable lives (#3858)',
+    'use strict;
+     sub g { my ($s, $t) = @_; my $o = $t->{c}; defined $o ? "d" : "u" }
+     sub h { my $t = shift; my $o = $t->[2]; my $q = $$t[1]; defined $o ? "d" : "u" }
+     sub k { my $t = shift; my $i = { a => "", o => $t->{column} }; exists $i->{o} ? "e" : "n" }
+     sub s1 { my $t = shift; my $o = eval { $t->{c} }; $@ ? "died" : "lived" }
+     sub u1 { return undef }
+     my $r = eval { u1()->{c} };
+     print g(1), h(), k(), " ", s1("str"), " ", ($@ ? "died" : "lived"), "\n";',
+    "uue died died\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,

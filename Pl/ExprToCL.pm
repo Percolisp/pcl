@@ -4462,6 +4462,15 @@ sub _strict_elem_marker {
   elsif (!(ref($n) eq 'PPI::Token::Symbol' && $n->content =~ /^\$/)) {
     return ();
   }
+  else {
+    # A plain VARIABLE base (`$t->{k}`, `$$t[0]`): perl never dies on undef
+    # here -- the read vivifies the variable -- so the undef arm is the
+    # vivifying one (:strict-lv) and only a string / a number dies.  A
+    # written lexical may be a RAW slot with no place to vivify into, and the
+    # :strict raw-undef death killed `my ($self, $opt) = @_; $opt->{k}` with
+    # no $opt passed (task #3858; YAML::PP Parser.pm cb_end_flowmap_empty).
+    return $self->_strict_refs_here($n) ? (':strict-lv') : ();
+  }
   while ($xo->is_internal_node_type($n)) {          # the base's first token
     my $k = $xo->get_node_children($id) || [];
     last unless @$k;
