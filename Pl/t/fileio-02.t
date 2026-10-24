@@ -66,7 +66,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 45;
+plan tests => 46;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -406,6 +406,26 @@ while (my $r = <$in>) {
 }
 close $in;
 unlink "/tmp/pcl_para_$$.dat";
+PERL
+}
+
+# --- Test 21b (#3832): `local $/;` is SLURP mode, never paragraph mode ---
+# Regression: `local $/;` binds a fresh EMPTY box, and get-input-record-
+# separator read its NIL value as "" -- PARAGRAPH mode -- so the slurp idiom
+# split a file at its blank lines (TestML::Tiny read 185 of 397 characters;
+# YAML-Tiny's tml tests ran no rows).  `local $/ = undef` was right.
+{
+    test_io('local $/ with no value slurps a file that has blank lines (#3832)', <<'PERL');
+open(my $w, '>', "/tmp/pcl_slurp_$$.dat") or die;
+print $w "a\n\nb\n\nc\n";
+close $w;
+sub slurp { open my $fh, "<", $_[0] or die; local $/; <$fh> }
+my @l = slurp("/tmp/pcl_slurp_$$.dat");
+my $s = slurp("/tmp/pcl_slurp_$$.dat");
+open(my $in, '<', "/tmp/pcl_slurp_$$.dat") or die;
+my @d = do { local $/; <$in> };
+print scalar(@l), " ", length($s), " ", scalar(@d), " ", (defined $/ ? "rs-restored" : "rs-LEAKED"), "\n";
+unlink "/tmp/pcl_slurp_$$.dat";
 PERL
 }
 

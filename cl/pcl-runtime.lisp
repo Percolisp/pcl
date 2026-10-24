@@ -4166,7 +4166,10 @@
    A non-positive record length behaves like slurp (nil), matching Perl."
   (let ((val (unbox (or *p-loop-frozen-rs* |$/|))))
     (cond
-      ((eq val *p-undef*) nil)
+      ;; A box holding NIL is undef too (`local $/;` binds a fresh empty box):
+      ;; read as "" it was PARAGRAPH mode, so the slurp idiom split a file at
+      ;; its blank lines (#3832).
+      ((or (null val) (eq val *p-undef*)) nil)
       ;; $/ = \N (reference to a number) → fixed-length record mode.
       ((p-box-p val)
        (let ((n (truncate (to-number (unbox val)))))
