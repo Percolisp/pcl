@@ -355,6 +355,13 @@ passes grew; the growth here is coverage.
 | **R5 -- rule-10 splits** | `p-method-call` → resolve + cache + call; `sprintf-one` by conversion class; `p-list-=` by regime; `%p-hash-user-count`; the flipflop six → one; the local-array-elem pair → one | fillers, 2-3 sessions total | corpus-diff IDENTICAL (macros) / bench unchanged (functions); 7 functions over 200 → 0 |
 | R6 -- the 66 default arms | re-audit, one line each, DIE where a value flows on | half a session | the count with a verdict per arm |
 
+**Status (s525u, 2026-10-24, Opus; batch branch `worktree-agent-a743894b9a4075f84`, merge sha in the `## Session s525u` section of `docs/session-log.md`):**
+
+- R1 -- DONE s525u for the BOX face (a numified string box takes the numeric bitwise op; #1040 PARTIAL: the literal face needs the `feature bitwise` emission, the raw-value face is #3780); #3760 DONE beside it (a shift reads its left operand as a UV).
+- R4 (documentation half) -- DONE s525u: `docs/ir-spec.md` §10d names the twelve shape-dispatching macros as the IR's assembler; the code half rides on the parser program.
+- R5 (first family) -- DONE s525u: the six flip-flop macros fold into one expansion builder; the six names stay.  The other families are open fillers.
+- R6 -- DONE s525u: `docs/rule12-arm-audit-s525.md`, 66 of 66 arms, 62 KEEP / 4 DIE / 0 ANNOUNCE.
+
 **Recommendation.**  No restructuring program for the runtime; the USER's
 "look at the runtime after" is answered by three named repairs and one
 measured refactor.  Order: **R1 + R6 + the flipflop fold in one Opus filler
