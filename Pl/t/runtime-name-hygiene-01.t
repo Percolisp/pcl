@@ -55,7 +55,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 5;
 
 # ---- the names, derived from the TABLE THAT DECIDES ------------------------
 # `%RUNTIME_NAMES` in Pl/ExprToCL.pm is what routes a plain call to `p-NAME`,
@@ -145,4 +145,20 @@ print "2 ", (abs_path(".") =~ m{/} ? "ok" : "BAD"), "\n";
 my $r = [1,2];
 print "3 ", reftype($r), " ", (blessed($r) // "undef"), "\n";
 print "4 ", looks_like_number("3.5") ? 1 : 0, "\n";
+P
+
+# #3825: the call's TAIL (the *wantarray* bind, the #2636 copy-back) asked the
+# name table while its HEAD asked cl_name, so a declared or imported sub named
+# like a runtime operator was called as `pl-NAME` with NO context bind: as a
+# call argument it ran in the statement's VOID context.  Test::Fatal's
+# `exception { ... }` returned undef there (Try::Tiny returns nothing in void),
+# so every `like exception { ... }, qr/.../` in a CPAN test failed.
+both_agree(<<'P', 'a declared sub named like a runtime operator gets its caller\'s context (#3825)');
+sub exception (&) { my $c = shift; $c->(); wantarray ? "list" : defined(wantarray) ? "scalar" : "void" }
+sub hash { wantarray ? "L" : defined(wantarray) ? "S" : "V" }
+sub show { print join(",", @_), "\n" }
+show(exception { 1 });
+show(exception { 1 }, "x");
+show(hash(1), hash());
+my $s = hash(); my @l = (hash()); print "$s @l\n";
 P

@@ -2618,6 +2618,15 @@ sub gen_funcall_form {
   my $cl_func = defined $override_pkg
                   ? $self->cl_name("${override_pkg}::${func_name}", 1, 1, $core_qualified)
                   : $self->cl_name($func_name, 1, $force_user, $core_qualified);
+  # The call IS the user's sub whenever cl_name lowered it to `pl-NAME' --
+  # including a DECLARED or imported sub whose name is also a runtime
+  # operator (#2100: Test::Fatal's `exception').  Both tail decisions below
+  # (the #2636 copy-back and the *wantarray* bind) ask THIS, not the name
+  # table, so they cannot disagree with the head they wrap: `exception {..}'
+  # as a call argument ran in the statement's VOID context and Try::Tiny
+  # returned nothing (#3825).
+  my $user_call = ($force_user || !exists $RUNTIME_NAMES{$func_name}
+                   || $cl_func =~ /(?:\A|::)\|?pl-/) ? 1 : 0;
 
   # `readpipe EXPR` — the NAMED spelling of `` `CMD` ``/`qx`/`` <<`TAG` ``, and
   # the SAME runtime function they lower to (task #734): one command capture,
@@ -3284,7 +3293,7 @@ sub gen_funcall_form {
   # yet seen) is an UNSEEN callee -- copy-in / copy-out its raw-slot scalars.
   # A sub WITH a record is the #189 writes_args fact's, at VarAnnotator.
   my $cb = [];
-  if (($force_user || !exists $RUNTIME_NAMES{$func_name})
+  if ($user_call
       && !$self->sub_info->{$func_name}
       && !_core_namespace_callee($func_name)
       && ref $call eq 'ARRAY' && ($call->[0] // '') eq $cl_func) {
@@ -3317,7 +3326,7 @@ sub gen_funcall_form {
   # User sub calls: always bind *wantarray*.  A builtin's name called as the
   # USER's sub -- `&NAME(...)`, or displaced by an import (`use autodie`'s
   # `kill`, #2873) -- is one too: the sub may ask wantarray.
-  if ($force_user || !exists $RUNTIME_NAMES{$func_name}) {
+  if ($user_call) {
     # Kind-A `insensitive-call` (Pl::Passes): a KNOWN user sub whose body
     # never observes its context — no `wantarray`, every `return` scalar-
     # rooted (Parser2::_sub_return_facts, the fact rides sub_info) — is
