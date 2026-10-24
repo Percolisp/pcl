@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "Found by the s525q binder dual-run, perl-tests/local.t:652/660: _binding_at answers undef (not lexical) for `$FETCH`, the binder answers `my $FETCH` declared at 649:20.\n\nCause (read, Pl/Parser2.pm): `_stmt_binding` -> `_stmt_declares_canon` / `_declared_names` -> `_declarator_syms($stmt)` returns only the symbol(s) right after the statement's FIRST keyword (`$k[1]`); a second `my` later in the same statement's initializer is a declaration too (perl: pad_add_name_pvn for each `my` op; both are introduced at the next statement by intro_my).\n\nProbe (scratch/s525q/probes/B4.pl in the s525q worktree):\n\n    sub run {\n        my $S = my $F = 0;\n        package T;\n        sub g { ++$F; ++$S }\n        package main;\n        T::g(); T::g();\n        print \"F=$F S=$S T::F=\", $T::F // 'u', \"\\n\";\n    }\n    run();\n\nperl 5.40.3:  F=2 S=2 T::F=u\nbase (main 81ef05e5) ./runpcl:  F= S=2 T::F=2   -- SILENT WRONG (the named sub's ++$F writes $T::F; the lexical $F stays undef and prints empty)\ns525q tree: identical to base.  The same shape in a file-level bare block (B3.pl) gives the same wrong answer.\n$S (the first declarator) is right; only the chained one is lost.\n\nFix belongs to 1c (requalifier port: the binder already records every `my` of the statement).  A legacy fix would make _declarator_syms (or a new caller-side walk) collect every `my/our/state` declarator Symbol of the statement -- check the other _declarator_syms callers (_declared_names is used by the forward-declaration and our-alias paths) before widening it.  NOT fixed in s525q (inert batch).\n",
+   "id" : "3801",
+   "status" : "pending",
+   "subject" : "Chained declaration `my $S = my $F = 0;` -- the second `my` is invisible to _stmt_binding (_declarator_syms reads only the first declarator), so a later package switch requalifies $F to the package global -- silent wrong"
+}

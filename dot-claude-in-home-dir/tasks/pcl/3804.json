@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "Found by the s525q binder dual-run, perl t/op/universal.t:186 (`package HumanTie; ... tie my($x), \"HumanTie\"; ::ok $x->isa(\"Human\")`) and t/op/taint.t:1763 (`tie my ($foo), Tie => $bar;`): `_binding_at` (via _requalify_region < _requalify_switched_regions < _requalify_block_globals_after_pkg_switch) answers undef for the DECLARATOR token `$x`; the binder answers `my $x` (the token is its own declaration).\n\nProbe (scratch/s525q/probes/F1.pl in the s525q worktree):\n\n    sub run {\n        my $pre = 1;\n        package HumanTie;\n        sub TIESCALAR { bless {} }\n        sub FETCH { \"Human\" }\n        tie my($x), \"HumanTie\";\n        print \"x=$x pre=$pre\\n\";\n        print defined(tied $HumanTie::x) ? \"global tied\\n\" : \"global untied\\n\";\n    }\n    run();\n\nperl 5.40.3:  x=Human pre=1 / global untied\nbase (main 81ef05e5) ./runpcl:  x=Human pre=1 / global tied   -- SILENT WRONG: the emission is `(p-tie HumanTie::$x \"HumanTie\")` and every use reads HumanTie::$x; the `my` is gone and the package global is tied instead.\ns525q tree: identical to base (inert).\nControl F2.pl (`print f(my ($x) = (5))` in the same shape) is right, so the shape is the `tie my(...)` spelling (pass `_normalize_tie_my` runs early -- check what it leaves for the requalifier's `_stmt_binding` / `_symbol_is_declarator`).\n\nFix belongs to 1c (requalifier port).  NOT fixed in s525q (inert batch).\n",
+   "id" : "3804",
+   "status" : "pending",
+   "subject" : "`tie my($x), CLASS` after an in-block `package` switch inside a sub: the declarator is requalified to the package global ($CLASS::x) -- the lexical is lost, silent wrong"
+}

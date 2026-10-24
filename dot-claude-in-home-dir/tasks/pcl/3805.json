@@ -1,0 +1,9 @@
+{
+   "blockedBy" : [],
+   "blocks" : [],
+   "created" : "2026-10-24",
+   "description" : "Found by the s525q binder (Pl/Binder.pm _sym_canon died on the shape under PCL_BINDER_CHECK, perl t/re/pat.t and t/re/pat_rt_report.t).  `print $#+, $#-` -> PPI 1.291 gives PPI::Token::Magic (a Token::Symbol subclass) content `$#+` / `$#-` (->symbol returns the same text), while `$#a` is Token::ArrayIndex and `$#{a}` is Cast + Block.  perl: `$#+` is the last index of @+ (perlvar).\n\nThe binder now maps the two contents to the arrays @+ / @- (Pl/Binder.pm, s525q).  Whether this is a PPI MIS-lex (it should be an ArrayIndex) or a deliberate punctuation-variable reading is for the PPI-registry filler (#3740-#3755 batch, rows Â§39+) to decide with a minimal repro and the token dump; the compiler itself is unaffected (it reads the text).  s525q did NOT touch docs/ppi-upstream-bugs.md / Pl/PPIBugs.pm (nobody's today, s526 SHARED-BOX).\n\nCORRECTION (same session): the class is PPI::Token::Magic -- PPI lists `$#+` and `$#-` among its magic variables on purpose, so this is most likely a deliberate reading, not a mis-lex.  The filler decides; the likely verdict is \"not a PPI bug\" and this task closes with no row.\n",
+   "id" : "3805",
+   "status" : "pending",
+   "subject" : "PPI lexes `$#+` / `$#-` as PPI::Token::Magic (ISA Symbol, content `$#+`), not Token::ArrayIndex like `$#a` -- DELIBERATE in PPI (its Magic list), so probably NOT a registry row; recorded for the PPI-registry filler to confirm"
+}
