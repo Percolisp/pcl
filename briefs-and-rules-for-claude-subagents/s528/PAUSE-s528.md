@@ -51,6 +51,9 @@
 ## 21:4x -- USER: "Don't start new subtasks."
 - No further launches this session: s526w2 and s527b run to their reports (never stop a running one); a freed slot stays EMPTY; **s527c is NOT launched** (its brief `s528/s527c-prompt.md` stays final, for the next session's word), nor the §39-§54 filler, nor a correctness batch.  Fable's own duties continue: the #3921 push + CI, the merge gates when the agents report, the records.
 
+## 21:5x -- CI GREEN on main `4f11ffdc` (the gate workflow; the install matrix green on `6ddab77d`, the container test 17/17 on the pushed tree with the #3921 runtime change) -- the MAIN-READY-48 incident is CLOSED: three holes, three fix-forwards, each found by CI and proved on the stock image
+- Still running: s526w2 (board half 2), s527b (tokenizer rows; told to rebase).  s527a's worktree `agent-a4a4e19ab7b7a3ad0` is KEPT until s527b merges (its `scratch/s527a/bin/` helpers and logs are cited); remove it then.
+
 ## RESUME RECIPE for s529 (draft; the last block supersedes)
 1. `cat ~/pcl-agent-scratch/s513/HEAVY.holder`; clear dead pids; CI check.
 2. The two agents: `scratch/<label>/STOP.md` in `agent-a3ad79b740a76bd47` (s526w2) and `agent-a4a4e19ab7b7a3ad0` (s527a); MERGE-READY -> merge (either order; the other rebases); checkpointed -> resume from an `s529/resume-<label>.md` written like these.
