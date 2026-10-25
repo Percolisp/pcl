@@ -432,38 +432,6 @@ sub _strip_format_blocks {
   return join '', @lines;
 }
 
-# PPI tokenizes `%-` / `%+` (the named-capture magic hashes) greedily, so `7%-3`
-# becomes [Number 7][Magic %-][Number 3] — losing the modulo operator and giving
-# a PARSE ERROR. But the magic hashes can never legally be *followed* by an
-# operand and only ever *follow* a non-term (operator, comma, `(`, list-op word,
-# or start-of-expression). So when a `%-`/`%+` Magic token directly follows a
-# TERM (number, variable, string, `$#a`, or a closing `(...)`/`[...]`/`{...}`),
-# it is really the modulo operator applied to a signed operand. We re-split it
-# by inserting a space (`%-` -> `% -`) and re-parse. Working on the PPI tree
-# (not the raw source) means strings and regex bodies — already their own token
-# types — are never touched.
-sub _fix_modulo_magic {
-  my ($doc) = @_;
-  my $changed = 0;
-  for my $tok (@{ $doc->find('PPI::Token::Magic') || [] }) {
-    my $c = $tok->content;
-    next unless $c eq '%-' || $c eq '%+';
-    my $prev = $tok->sprevious_sibling;
-    next unless $prev;
-    my $is_term =
-         $prev->isa('PPI::Token::Number')
-      || $prev->isa('PPI::Token::Symbol')
-      || $prev->isa('PPI::Token::Magic')
-      || $prev->isa('PPI::Token::Quote')
-      || $prev->isa('PPI::Token::ArrayIndex')
-      || $prev->isa('PPI::Structure');   # closing (...) / [...] / {...}
-    next unless $is_term;
-    $tok->set_content('% ' . substr($c, 1));
-    $changed = 1;
-  }
-  return $changed;
-}
-
 # Perl allows whitespace between a sigil and its identifier (`my $ bits = …`
 # is the variable $bits — perl's own caller.t line 279 uses this).  PPI
 # tokenizes that as a Cast token followed by a bare Word, and PCL then emits
@@ -924,7 +892,7 @@ sub _ppi_parse {
   # so a `__SUB__` in a parameter DEFAULT (`sub ($k, $r = __SUB__->($k-1))`)
   # is not a Word — and therefore invisible — before that pass.  A NAMED sub's
   # signature is already a Structure, so it never depended on the order.
-  if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc)
+  if ($doc && (_fix_spaced_sigils($doc)
                | _brace_glob_slot_symbol($doc)
                | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc)

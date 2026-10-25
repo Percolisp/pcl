@@ -121,7 +121,7 @@ our @BUGS = (
    title => '`7%-3` tokenized as the magic hash `%-` (modulo lost)',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Magic', content => qr/^%[-+]$/, pred => '', check => 'magic-hash-for-modulo' },
-   fix => { kind => 'relex', handler => 'Pl::Parser::_fix_modulo_magic', commit => '1cff9293', group => 'B', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser::_fix_modulo_magic (s527b: PPI fixed on the branch)', commit => '1cff9293', group => 'B', pr => undef },
    repro => 'print 7%-3, "\\n";',
    perl => "-2\n",
    tokens => {

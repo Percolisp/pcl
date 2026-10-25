@@ -915,8 +915,9 @@ test_cl('@ISA = qw/.../ (slash/non-bracket delimiter) sets inheritance',
 
 # ── PPI bug workaround: 7%-3 mis-tokenized as the magic hash %- ───────────────
 # PPI 1.291 reads `%-`/`%+` glued to a preceding term as the named-capture magic
-# hash, dropping the modulo operator (PARSE ERROR).  _fix_modulo_magic re-splits
-# `%-`/`%+` after a term into `% -`/`% +`.  See docs/ppi-bug-modulo-magic.md.
+# hash, dropping the modulo operator (PARSE ERROR).  PCL's PPI branch lexes it
+# as modulo (group B, s527a; the term ends of §55, s527b); PCL's re-split
+# _fix_modulo_magic was deleted in s527b.  See docs/ppi-bug-modulo-magic.md.
 test_cl('modulo with glued negative/positive operand (PPI %-/%+ workaround)',
     'my $y = 3; my @a = (7, 8);'
   . ' print join(",", 7%-3, 7 %-3, 7%+3, $a[0]%-2, (5+5)%-3, 8%-$y), "\n";',

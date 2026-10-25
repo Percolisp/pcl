@@ -1572,9 +1572,8 @@ sub parse {
   # there is nothing to bisect against.)
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
   $self->{_unit_cell_base} = $self->_unit_cell_base($src);   # #2633
-  # Route through v1's _ppi_parse so the shared PPI-bug workarounds apply — most
-  # importantly _fix_modulo_magic (`7%-3` mis-tokenized as the magic hash %-,
-  # dropping the modulo → PARSE ERROR).  A bare PPI::Document->new skipped it.
+  # Route through v1's _ppi_parse so the shared PPI-bug workarounds apply (a
+  # bare PPI::Document->new skipped them).
   # NAME THE FILE (§5a.4, E4.1 step 2).  Before the flip a PPI failure landed
   # in v1, where `--lenient-ppi` truncated the source at the unparseable line
   # and the run continued on a silently-shortened program.  There is no
