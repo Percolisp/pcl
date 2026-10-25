@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 140;
+plan tests => 141;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -257,6 +257,17 @@ test_cl('\\(ELEM) is a ref to the element, not a copy (#3862)',
      sub h { my $x = ( \( $_[0] ) )[0]; $$x .= "h" } my $w = "w"; h($w);
      print "@a $v $w\n";',
     "9 2 7 wh\n");
+
+# #3855: an s///e replacement is a BLOCK -- a compound statement in it
+# (`if (...) { ... } else { ...; "B" }`, Template::Filters' shape) failed the
+# whole transpile.  Outputs probed under perl 5.40.3.
+test_cl('s///e replacement with an if/else statement compiles (#3855)',
+    'my $t = "aXbXc"; my $n = 0;
+     $t =~ s{X}{ if ($n) { "A" } else { $n = 5; "B" } }eg;
+     my $u = "aXb"; my $pe = -1;
+     $u =~ s{X}{ my $s = $-[0]; my $e = $+[0]; if ($s == $e && $s == $pe) { "" } else { $pe = $e; "R" } }eg;
+     print "$t $n $u $pe\n";',
+    "aBbAc 5 aRb 2\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,

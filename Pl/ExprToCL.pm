@@ -6147,6 +6147,17 @@ sub _compile_subst_e_expr {
     my $flat = _splice_interp_heredocs($expr);
     ($result) = $self->_try_compile_subst_e($flat) if defined $flat;
   }
+  if (!defined $result) {
+    # RETRY as `do { REPLACEMENT }` (task #3855).  perl compiles an /e
+    # replacement as a BLOCK, so it may hold compound statements
+    # (`if (...) { ... } else { ...; "x" }`) that the statement-by-statement
+    # expression loop above cannot lower.  A `do` block is an ordinary
+    # expression whose block the enclosing PARSER lowers -- the one route
+    # every embedded block takes (#1026).  Only on a replacement that already
+    # failed, so every shape that compiles today keeps its emission.
+    my ($do_result) = $self->_try_compile_subst_e("do {$expr\n}");
+    $result = $do_result if defined $do_result;
+  }
   # RULE 12 (task #342 piece 1): a replacement we could not compile must DIE,
   # not become nil.  `s/…/EXPR/e` REPLACES matched text with EXPR's value, so a
   # nil body is a value the program then consumes — it substituted the empty
