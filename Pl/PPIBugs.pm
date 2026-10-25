@@ -516,9 +516,9 @@ print length($e) ? "gid\\n" : "none\\n";
    tasks => [] },
  { id => 33, kind => 'token', dump => 'tokens',
    title => 'A `*` right after a BLOCK\'s `}` is lexed as MULTIPLICATION when the block\'s last statement ends in a hash subscript',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => qr/^\*\*?=?$/, pred => 'next_is_open_curly', check => 'star-as-multiply' },
-   fix => { kind => 'retag', handler => 'Pl::Parser::_desugar_loop_modifiers' },
+   fix => { kind => 'retag', handler => 'Pl::Parser::_desugar_loop_modifiers', commit => 'd8bcdfa1', group => 'J', pr => undef },
    repro => 'my %h; for (1) { $h{$_}; }
 *{"main::g"} = sub { 7 };
 print g(), "\\n";
@@ -584,9 +584,9 @@ print g(), "\\n";
    tasks => [3244] },
  { id => 38, kind => 'token', dump => 'tokens',
    title => 'A statement that begins with `*$name` after a bare block is lexed with a multiplication OPERATOR',
-   ppi => { confirmed => '1.291', fixed_in => undef },
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'TERM', class => 'Operator', content => qr/^\*\*?=?$/, pred => 'next_is_scalar', check => 'star-as-multiply' },
-   fix => { kind => 'retag', handler => 'Pl::Parser::_repair_statement_start_glob_cast' },
+   fix => { kind => 'retag', handler => 'Pl::Parser::_repair_statement_start_glob_cast', commit => '0a536af5', group => 'K', pr => undef },
    repro => 'use Symbol; my $o = Symbol::gensym(); my ($c, $b) = (0, 1);
 { $c = $b; }
 *$o->{A} = 7; print *$o->{A}, "\\n";
@@ -598,6 +598,21 @@ print g(), "\\n";
    },
    unblocks => ['Pl/t/misc-fixes-02.t', 'Pl/t/regex-pos-01.t', 'Pl/t/zlib-01.t'],
    tasks => [1511, 3342] },
+ { id => 55, kind => 'token', dump => 'tokens',
+   title => 'A method name after `->`, a postfix `++`/`--` and the `}` of a subscript or a dereference block END A TERM, and PPI lexes what follows as a term (`$o->w*w()` a glob, `$i++ / 2` a match, `$h{a}%-1` the magic hash)',
+   ppi => { confirmed => '1.291', fixed_in => 'pcl' },
+   when => { expect => 'OP', class => 'Symbol', content => qr/^\*/, pred => '', check => 'glob-for-multiply' },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_ends_term', commit => 'd8bcdfa1', group => 'J', pr => undef },
+   repro => 'package O; sub w { 10 } package main; my $o = bless {}, "O"; sub w { 2 } my %h = (a => 5); my $i = 5; print $o->w*w(), " ", $i++*w(), " ", $h{a}%-1, "\\n";',
+   perl => "20 10 0\n",
+   tokens => {
+     got  => ['Word=package', 'Word=O', 'Structure=;', 'Word=sub', 'Word=w', 'Structure={', 'Number=10', 'Structure=}', 'Word=package', 'Word=main', 'Structure=;', 'Word=my', 'Symbol=$o', 'Operator==', 'Word=bless', 'Structure={', 'Structure=}', 'Operator=,', 'Quote::Double="O"', 'Structure=;', 'Word=sub', 'Word=w', 'Structure={', 'Number=2', 'Structure=}', 'Word=my', 'Symbol=%h', 'Operator==', 'Structure=(', 'Word=a', 'Operator==>', 'Number=5', 'Structure=)', 'Structure=;', 'Word=my', 'Symbol=$i', 'Operator==', 'Number=5', 'Structure=;', 'Word=print', 'Symbol=$o', 'Operator=->', 'Word=w', 'Symbol=*w', 'Structure=(', 'Structure=)', 'Operator=,', 'Quote::Double=" "', 'Operator=,', 'Symbol=$i', 'Operator=++', 'Symbol=*w', 'Structure=(', 'Structure=)', 'Operator=,', 'Quote::Double=" "', 'Operator=,', 'Symbol=$h', 'Structure={', 'Word=a', 'Structure=}', 'Magic=%-', 'Number=1', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;']
+,
+     want => ['Word=package', 'Word=O', 'Structure=;', 'Word=sub', 'Word=w', 'Structure={', 'Number=10', 'Structure=}', 'Word=package', 'Word=main', 'Structure=;', 'Word=my', 'Symbol=$o', 'Operator==', 'Word=bless', 'Structure={', 'Structure=}', 'Operator=,', 'Quote::Double="O"', 'Structure=;', 'Word=sub', 'Word=w', 'Structure={', 'Number=2', 'Structure=}', 'Word=my', 'Symbol=%h', 'Operator==', 'Structure=(', 'Word=a', 'Operator==>', 'Number=5', 'Structure=)', 'Structure=;', 'Word=my', 'Symbol=$i', 'Operator==', 'Number=5', 'Structure=;', 'Word=print', 'Symbol=$o', 'Operator=->', 'Word=w', 'Operator=*', 'Word=w', 'Structure=(', 'Structure=)', 'Operator=,', 'Quote::Double=" "', 'Operator=,', 'Symbol=$i', 'Operator=++', 'Operator=*', 'Word=w', 'Structure=(', 'Structure=)', 'Operator=,', 'Quote::Double=" "', 'Operator=,', 'Symbol=$h', 'Structure={', 'Word=a', 'Structure=}', 'Operator=%', 'Number=-1', 'Operator=,', 'Quote::Double="\\n"', 'Structure=;']
+,
+   },
+   unblocks => [],
+   tasks => [3940] },
 );
 
 # The one accessor.

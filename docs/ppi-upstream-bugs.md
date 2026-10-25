@@ -2065,6 +2065,8 @@ followed by `*{_getglob("${target}::meta")} = …`) made every Moo test die.
 Source that is WRITTEN with this shape still mis-lexes (not seen in any
 population yet).  Upstream row: `docs/ppi-bug-report.t`.
 
+**FIXED on PCL's PPI branch** (s527b: group J, commit `d8bcdfa1` on branch `pcl` -- the `}` back-scan of `_cast_or_op` stopped at the first `;` or `(` inside the block and took the subscript's `}` for the block's opener; the shared `Tokenizer::_curly_kind` counts braces only); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-J.md`).
+
 ---
 
 ## 34. After a FLOAT / EXP / HEX / OCTAL / BINARY number, `-N` is lexed as a NEGATIVE NUMBER — the subtraction operator disappears  [CONFIRMED 1.291]
@@ -2242,6 +2244,45 @@ that is the first significant token of its statement and is followed by a
 `$name` symbol becomes a Cast).  Guard `Pl/t/regex-pos-01.t` (the
 traverse_sequences tail shape); canary `Pl/t/misc-fixes-02.t`; upstream row
 `docs/ppi-bug-report.t`.
+
+**FIXED on PCL's PPI branch** (s527b: the mid-document spelling by group J's brace-only scan, commit `d8bcdfa1`; a block that opens the document by group K, commit `0a536af5` -- `_curly_kind` called that `{` a hash constructor); upstream PR: pending (`briefs-and-rules-for-claude-subagents/s527/upstream/PR-K.md`).
+
+---
+
+
+## 55. A method name after `->`, a postfix `++`/`--` and the `}` of a subscript or a dereference block END A TERM, but PPI lexes what follows as a term  [CONFIRMED 1.291]
+
+**Minimal repro** (valid perl; perl 5.40.3 prints `20 10 0`):
+
+```perl
+package O; sub w { 10 } package main; my $o = bless {}, "O";
+sub w { 2 } my %h = (a => 5); my $i = 5;
+print $o->w*w(), " ", $i++*w(), " ", $h{a}%-1, "\n";
+```
+
+**PPI 1.291 tokens**: `… Operator[->] Word[w] Symbol[*w] …`, `… Operator[++] Symbol[*w] …`,
+`… Structure[}] Magic[%-] Number[1] …` -- a glob and the magic hash where perl has
+a multiplication and a modulo.  The same three term ends mis-lex every other
+character that is an operator after a term and a term before one: `$i++ / 2`
+starts a MATCH, `$i++.2` / `$o->name.2` are a Number::Float, `$o->w-1` /
+`$i++-1` a negative Number, `@{$h}*$x` / `${$x}%$y` a Cast; a match, a
+substitution, a transliteration and a here-doc were missing from the same table
+(`/a/*f()` a glob, `<<E.2` a Number).
+**Expected**: the operator, as after a Symbol or a `)`.  This is toke.c's one
+rule -- after a TERM perl expects an operator (`PL_expect == XOPERATOR`) -- and
+PPI's `_opcontext` knew the term ends by class and content only: a Word is "unknown"
+(a method name is a Word), `++` is an Operator (so "an operand follows"), and a
+`}` is ambiguous (a block's end or a subscript's), so `_after_term` (s527a group
+B) excluded it.  Found by s527a's deletion yield (`docs/ppi-fix-at-source-s527.md`
+§9): PCL's repairs for §4 §12 §15/§34 §21 §24 §25 §28 lean on `Pl::Parser2::_ends_term`,
+which has all of these, so they stayed alive.  Main dropped `print @{$h}*$y`,
+`print ${$x}%$y` and `print $i++ / 2` whole ("Fell through", probed s527b).
+
+**FIXED on PCL's PPI branch** (s527b: group J, commit `d8bcdfa1` on branch `pcl`:
+`Tokenizer::_ends_term_at` + `_curly_kind`, used by `_opcontext`, the `%`/`*`
+arms, the `.digit` test and the `/` arm); upstream PR: pending
+(`briefs-and-rules-for-claude-subagents/s527/upstream/PR-J.md`).  Upstream row:
+`docs/ppi-bug-report.t` (21 rows, 6 of them controls); registry row §55.
 
 ---
 

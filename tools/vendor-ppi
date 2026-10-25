@@ -76,7 +76,10 @@ my (@commit, @fix, %group);
     next if !defined $subj;
     push @commit, "$h $subj";
     next if $subj =~ /^TODO tests?:/;       # the failing-tests half of a PR
-    my @sec = ($body // '') =~ /§(\d+)/g;
+    # The sections are the ones its "Fixes PCL ..." (or "Completes ...")
+    # sentence names -- a message may mention a section it does NOT fix.
+    my ($says) = ($body // '') =~ m{\b(?:Fixes|Completes|fixes)\b[^.;]*?\bPCL\b(.*?)(?:\bin\s+t/ppi_bugs_pcl\.t|;|\.\s|\.\z)}s;
+    my @sec = (defined $says ? $says : $body // '') =~ /§(\d+)/g;
     next if !@sec || $subj =~ m{t/ppi_bugs_pcl\.t};
     # A later fix to sections one group already fixed belongs to that group
     # (a PR that grew a second fix commit keeps its letter).

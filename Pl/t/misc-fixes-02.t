@@ -1411,23 +1411,22 @@ test_cl('#1508 the widened gate leaves matches, /r and index subexpressions alon
 
 # ── CANARY for PPI bug 38 (ppi-upstream-bugs.md; task #3342) ────────────────
 # PPI 1.291 lexes the `*` that begins `*$o->{A} = 1;` after `{ $c = $b; }` as
-# the multiplication Operator, and PCL repairs it to a Cast
-# (Pl::Parser::_repair_statement_start_glob_cast).  THIS ROW ASSERTS THE BUG IS
-# STILL THERE: when a PPI upgrade fixes it, this row FAILS -- drop the repair.
+# the multiplication Operator.  PCL's PPI branch lexes it as a Cast (s527b,
+# group K); these rows now GUARD that fix on the vendored lib.
 {
     my $doc = PPI::Document->new(\qq{{ \$c = \$b; }\n*\$o->{A} = 1;\n});
     my ($star) = grep { $_->content eq '*' } $doc->tokens;
-    ok( ref($star) eq 'PPI::Token::Operator',
-        'CANARY: PPI still lexes a statement-initial *$o after a block as an Operator '
-      . '(when this FAILS, drop Pl::Parser::_repair_statement_start_glob_cast)' );
+    ok( ref($star) eq 'PPI::Token::Cast',
+        'FIXED ON PCL\'S PPI BRANCH (s527b, group K): a statement-initial *$o after a block lexes as a Cast '
+      . '(ppi-upstream-bugs.md §38; PCL\'s _repair_statement_start_glob_cast is redundant)' );
 }
 # ... and its code-sigil twin (#1511, s523a): `{ 1 while $x; } &$cb(7);`.
 {
     my $doc = PPI::Document->new(\qq{{ 1 while \$x; }\n&\$cb(7);\n});
     my ($amp) = grep { $_->content eq '&' } $doc->tokens;
-    ok( ref($amp) eq 'PPI::Token::Operator',
-        'CANARY: PPI still lexes a statement-initial &$cb after a block as an Operator '
-      . '(when this FAILS, drop the & arm of Pl::Parser::_repair_statement_start_glob_cast)' );
+    ok( ref($amp) eq 'PPI::Token::Cast',
+        'FIXED ON PCL\'S PPI BRANCH (s527b, group K): a statement-initial &$cb after a block lexes as a Cast '
+      . '(ppi-upstream-bugs.md §38, the & twin)' );
 }
 
 # ── #2005: map COPIES what its block returns, on EVERY result arity ─────────

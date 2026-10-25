@@ -147,4 +147,16 @@ row('hash', g(%$hr), g(%{$hr}));
 h(@$r); row('writes through', "@$r");
 P
 
+# 5. CLEAR of a restricted hash (s527b, PPI §55): the shim's CLEAR ends in
+# `%{ $s->{d} } = ();` right after a `for` block, and PPI lexed that `%` as
+# modulo (its back-scan took the block's last subscript `}` for the term end)
+# -- the statement was dropped and `%h = ()` on a locked hash DIED.
+compare_lines(<<'P', 'clear');
+use Hash::Util qw(lock_keys);
+my %h = (a => 1, b => 2); lock_keys(%h);
+%h = (); row('cleared', scalar(keys %h));
+$h{a} = 3; row('legal key after clear', $h{a});
+row('illegal key after clear', trap(sub { $h{zz} = 1 }));
+P
+
 done_testing;
