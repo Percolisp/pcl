@@ -463,7 +463,9 @@ first -- do not push it to "later".**
   live bug or a design error, found before any port.  **(1) 1a** -- the token
   stream must be stable before anything binds on it; the smallest blast radius
   (the pre-pass layer); the 38 canaries + corpus-diff as the bar; it stops the
-  PPI-bug bleeding.  **(2) 1c** ports, newest consumer first (s379's recipe),
+  PPI-bug bleeding.  *(s527a, 2026-10-25: for the TOKEN rows (1) is now PPI's own fixed
+  tokenizer -- PCL's `pcl` branch, vendored as `vendor/PPI` (`docs/ppi-fix-at-source-s527.md`
+  §8); the expect-state checker remains as the detector of new PPI bugs.)*  **(2) 1c** ports, newest consumer first (s379's recipe),
   the sweep as the gate.  **(3) 1b.**  The two fillers (rename Parser.pm's
   live halves; close the four-kind text seam) ride where they fit.
 - *Standing rule, effective now* (s379 §8 restated): no new scope walk, no
