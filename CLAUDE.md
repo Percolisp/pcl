@@ -167,6 +167,18 @@ retargeted the task at filing).
     structures wrongly. A correct token stream that PCL's PExpr then interprets
     wrongly is PCL's bug, not PPI's, and belongs in a task instead.
 
+    **Since s527a (DECIDED ## s527) the WORKAROUND IS THE FIX ITSELF**: PPI is
+    vendored (`vendor/PPI`, the `pcl` branch), so a confirmed PPI bug is fixed on
+    that branch in PPI's two-commit PR shape (its rows go into the branch's
+    `t/ppi_bugs_pcl.t`, the twin of `docs/ppi-bug-report.t`), the registry row in
+    `Pl/PPIBugs.pm` gets `fixed_in => 'pcl'`, and the catalogue section records
+    the group and commit.  A repair pass in `Pl/` is written only when the fix
+    cannot go on the branch yet, and it is deleted (one commit, corpus-diff
+    identical) when the fix lands.  Lesson from the merge probes (s527a, s528): a
+    PCL repair and the PPI fix can each cover shapes the other does not
+    (`print $v.2` printed NOTHING on main), so a deletion is probed beyond the
+    corpus -- the `print` argument slot, after `->`, statement start.
+
 ## Quick Reference
 
 ```bash
@@ -292,6 +304,12 @@ tools/tag-license FILE           # idempotent; rules in tools/lib/PCLLicense.pm
 tools/tag-license --check        # what Pl/t/license-tag-01.t (in the gate) checks
 # Never tag files from the Perl distribution or CPAN (perl-tests/, cpan-tests/,
 # the two lib/ carry-overs are excluded by name in PCLLicense.pm).
+
+# PPI IS VENDORED (s527a, DECIDED ## s527): vendor/PPI/lib = PCL's `pcl` branch of
+# upstream PPI master + its fix commits, loaded only through Pl::VendorPPI.
+tools/vendor-ppi <clone> pcl                            # refresh vendor/PPI + UPSTREAM from a clone's branch
+PCL_SYSTEM_PPI=1 prove Pl/t/ppi-bugs-registry-01.t     # the canary on the INSTALLED PPI ("did upstream catch up")
+perl -I vendor/PPI/lib docs/ppi-bug-report.t            # the 91-row report on the vendored lib (33 ok at s527a; 14 on PPI 1.291)
 ```
 
 ### WHAT TO RUN WHEN (RULED s401, `docs/fable-answers-s400.md` §8 — replaces "every 3rd–5th change")
@@ -508,7 +526,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **CURRENT NUMBERS (s527, 2026-10-24 20:2x, main `584c1ca6`+ = MAIN-READY-47 = s526w1 merged (the CPAN board widens by six dists -- TimeDate, HTTP-Date, URI, HTTP-Message, YAML-Tiny, Data-Dumper; fillers #1025 #1026 the s///e replacement compile, #3825 the context bind of a sub named like a runtime operator, #3826 the pure-Perl Clone shim, #3832 a bare `local $/;` is slurp mode; last CODE commit `31cd8c02`, generation v2-8585; Fable restored the three s214 `ok(1, SKIP)` rows of perl-tests/range.t to their original assertions, 158/0); -46 = `e2ce5b2e` = s525q merged (parser step 0 c2: the BINDER in dual-run, INERT -- `Pl/Binder.pm` + 31 hook lines, emission identical); -45 = `761d92f4` s525u merged (the runtime review's named repairs: #3760 shift UV, #1040 box face PARTIAL, the flip-flop fold, the 66 default arms audited; `cl/`-only, emission identical); -44 = s525p merged (the expect-state checker + the PPI-bug registry, INERT); -43 = s523d; last CODE commit `cd76a6f1` (s525u's shift fast path), newest generation stamp v2-8585 (s526w1; before it v2-8284 from s523d, unchanged by a `cl/`-only batch; the artifacts carry it -- generations are per batch, never renumbered) -- measured on that sha; everything further down this section is HISTORY and its counts are stale):** gate `Result: PASS`, **336 files / 11,462 rows** (335 / 11,454 at -46); **the CPAN board after s526w1 (26 dists / 582 files, measured on its tree): 362 PASS / 136 PARTIAL / 84 FAIL, TOTAL passing 69,476** -- the 20 older dists read round 4 exactly (`docs/STATUS.md` has the row); full `perl-tests/` sweep GATE clean, **TOTAL passing 18761**, 626 failing (s525u's two bop.t negative-shift rows left `fail-baseline` by edit), 60 of 108 files fully passing, 98 run to the end and 10 stop part-way, drops 5 = census; the CPAN board ROUND 3 (20 dists, 449 files; `baselines/cpan-board-s523r3.tsv`, measured on MAIN-READY-38) **254 PASS / 125 PARTIAL / 70 FAIL, TOTAL passing 65,073** (round 2: 28,489 -- Text-CSV's 20 files run for the first time after #3061; the 908 new not-ok rows of SLU exotic_names.t = #3529) against 2,065 blessed rows (1,512 blessed rows left after the s524 merges; the ROUND-4 board on MAIN-READY-43 (re-run s525 11:21 -- the s524 run was cut by the 02:43 shutdown; `review/board-main43.tsv` + `.rows.tsv`): **277 PASS / 107 PARTIAL / 65 FAIL, TOTAL passing 66,729**, `cpan-scoreboard.pl --diff` 4 NEW / 16 FIXED / 1 LOST against the blessed rows -- attribution in progress, `s525/PAUSE-s525.md` 11:3x + 12:0x); `EVERYDAY: 116 of 122 identical to perl (95.1 %)`; **CI on main GREEN; the install-matrix workflow GREEN again since the -42 push (2026-10-22: #3528 fixed the SBCL 2.5.2 floor, #3526 closed) -- "CI green" means BOTH workflows.**  The user-facing copy of these numbers is `docs/STATUS.md` -- update both together.
+- **CURRENT NUMBERS (s528, 2026-10-25 20:3x, main = MAIN-READY-48 = s527a merged (PPI VENDORED: `vendor/PPI` = branch `pcl` 8955ba30 over upstream 455bfa73, the 12 token bugs fixed AT THE SOURCE in PPI's two-commit PR shape, PPI's own suite green at every commit, the report 14 -> 33 ok, 2 of 10 repairs deleted (§16 §23; the 8 left wait for s527b's term-end rule), emission byte-identical so generation v2-8585 is UNCHANGED, last CODE commit `48fd2e21`; the round-5 FULL companion read and every mover attributed, `c47f0f28`: op/range.t 158/4 = #1025, op/utfhash.t 97/2 = #3832 + #1389, comp/require.t's 3 "NEW" = a count difference on one repeated description, not a mover, rows 42-44 blessed under #3524); -47 = `584c1ca6` = s526w1 merged (the CPAN board widens by six dists -- TimeDate, HTTP-Date, URI, HTTP-Message, YAML-Tiny, Data-Dumper; fillers #1025 #1026 the s///e replacement compile, #3825 the context bind of a sub named like a runtime operator, #3826 the pure-Perl Clone shim, #3832 a bare `local $/;` is slurp mode; last CODE commit `31cd8c02`, generation v2-8585; Fable restored the three s214 `ok(1, SKIP)` rows of perl-tests/range.t to their original assertions, 158/0); -46 = `e2ce5b2e` = s525q merged (parser step 0 c2: the BINDER in dual-run, INERT -- `Pl/Binder.pm` + 31 hook lines, emission identical); -45 = `761d92f4` s525u merged (the runtime review's named repairs: #3760 shift UV, #1040 box face PARTIAL, the flip-flop fold, the 66 default arms audited; `cl/`-only, emission identical); -44 = s525p merged (the expect-state checker + the PPI-bug registry, INERT); -43 = s523d; last CODE commit `cd76a6f1` (s525u's shift fast path), newest generation stamp v2-8585 (s526w1; before it v2-8284 from s523d, unchanged by a `cl/`-only batch; the artifacts carry it -- generations are per batch, never renumbered) -- measured on that sha; everything further down this section is HISTORY and its counts are stale):** gate `Result: PASS`, **337 files / 11,466 rows** (336 / 11,462 at -47; 335 / 11,454 at -46); **the CPAN board after s526w1 (26 dists / 582 files, measured on its tree): 362 PASS / 136 PARTIAL / 84 FAIL, TOTAL passing 69,476** -- the 20 older dists read round 4 exactly (`docs/STATUS.md` has the row); full `perl-tests/` sweep GATE clean, **TOTAL passing 18761**, 626 failing (s525u's two bop.t negative-shift rows left `fail-baseline` by edit), 60 of 108 files fully passing, 98 run to the end and 10 stop part-way, drops 5 = census; the CPAN board ROUND 3 (20 dists, 449 files; `baselines/cpan-board-s523r3.tsv`, measured on MAIN-READY-38) **254 PASS / 125 PARTIAL / 70 FAIL, TOTAL passing 65,073** (round 2: 28,489 -- Text-CSV's 20 files run for the first time after #3061; the 908 new not-ok rows of SLU exotic_names.t = #3529) against 2,065 blessed rows (1,512 blessed rows left after the s524 merges; the ROUND-4 board on MAIN-READY-43 (re-run s525 11:21 -- the s524 run was cut by the 02:43 shutdown; `review/board-main43.tsv` + `.rows.tsv`): **277 PASS / 107 PARTIAL / 65 FAIL, TOTAL passing 66,729**, `cpan-scoreboard.pl --diff` 4 NEW / 16 FIXED / 1 LOST against the blessed rows -- attribution in progress, `s525/PAUSE-s525.md` 11:3x + 12:0x); `EVERYDAY: 116 of 122 identical to perl (95.1 %)`; **CI on main GREEN; the install-matrix workflow GREEN again since the -42 push (2026-10-22: #3528 fixed the SBCL 2.5.2 floor, #3526 closed) -- "CI green" means BOTH workflows.**  The user-facing copy of these numbers is `docs/STATUS.md` -- update both together.
 - **The three xs files are PARKED (USER decision, s485, 2026-09-14): `Pl/t/xs-01/02/03.t`
   `plan skip_all` at the top until the pclxs project (the XS bridge, a separate
   repo, sibling checkout `~/pclxs`) is working again — their 13 failing rows were
@@ -953,9 +971,24 @@ Not relevant now:
   unbounded inline `truncate` of a double (the old `p-int` double arm) does not
   compile there -- `p-int` open-codes the fixnum range and sends a wider double
   to the notinline `%p-int-wide`.
-- PPI >= 1.291 (Perl parser; the token repairs are keyed on 1.291's stream and
-  the gate is validated on it -- `tools/install-pcl` enforces the floor; Ubuntu
-  24.04's package is 1.277, so CI installs it with `cpanm PPI`)
+- PPI: VENDORED since s527a (MAIN-READY-48, 2026-10-25; USER decision 2026-10-24,
+  DECIDED ## s527, `docs/ppi-fix-at-source-s527.md`): `vendor/PPI/lib` is PCL's
+  `pcl` branch of upstream PPI master plus its fix commits (`vendor/PPI/UPSTREAM`
+  names the upstream sha, the branch sha and every carried fix), loaded ONLY
+  through the one loader `Pl::VendorPPI` (`use Pl::VendorPPI;`, never `use PPI;`
+  -- a PPI loaded from elsewhere first is a die, not a silent mix).
+  `PCL_SYSTEM_PPI=1` uses the installed PPI on purpose (the registry canary's
+  "did upstream catch up" run, A/Bs).  PPI's non-core deps must be installed:
+  Clone, Params::Util, Task::Weaken, Safe::Isa.  Never edit `vendor/PPI/lib` by
+  hand: `tools/vendor-ppi <clone> pcl` refreshes it and the stamp
+  (`Pl/t/vendor-ppi-01.t` checks the tree id; run the canary at every refresh);
+  the branch's home on this box is the bare repo `~/pcl-agent-scratch/ppi/PPI.git`
+  (branches `master` = upstream, `pcl`) until the fork `Percolisp/PPI` exists.
+  A PPI bug is FIXED on that branch in PPI's two-commit PR shape (the failing
+  rows first as TODO, then the fix; PPI's own suite green after every commit;
+  perl 5.8 code), the registry row gets `fixed_in => 'pcl'`, and PCL's repair
+  for it is DELETED -- a repair in `Pl/` is only for a bug whose fix is not on
+  the branch yet.
 - Moo (OO framework)
 - Test::More (core)
 - **Nothing else that is not core perl** (s440): `Data::Dump` was a non-core
@@ -964,7 +997,9 @@ Not relevant now:
   core `Data::Dumper` (`Pl::PExpr::_dd`, `Pl/t/PCLDump.pm`); the two gate rows
   whose transpile SUBJECT is the CPAN module skip when it is not installed.
   Before adding a `use`, check `Module::CoreList::is_core` -- CI is a stock
-  machine with exactly PPI, Moo, Data::Dump (fixture).
+  machine with exactly PPI's four deps (Clone Params::Util Task::Weaken
+  Safe::Isa), Moo, Data::Dump + Try::Tiny (fixtures); PPI itself is vendored and
+  CI checks that the vendored lib loads.
 
 ## Common Tasks
 
