@@ -161,7 +161,7 @@ sub check_deps {
         if ($? || $out !~ /^(\S+) 1$/) {
             $out =~ s/\s+\z//;
             push @missing, "the vendored PPI does not load ($out) -- it needs Clone, Params::Util, "
-                         . "Task::Weaken and Safe::Isa (`cpanm Clone Params::Util Task::Weaken Safe::Isa`)";
+                         . "Task::Weaken, Safe::Isa and YAML::PP (`cpanm Clone Params::Util Task::Weaken Safe::Isa YAML::PP`)";
         }
         else { push @found, "PPI $1 (vendored, vendor/PPI/UPSTREAM)" }
     }

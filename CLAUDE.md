@@ -979,7 +979,10 @@ Not relevant now:
   -- a PPI loaded from elsewhere first is a die, not a silent mix).
   `PCL_SYSTEM_PPI=1` uses the installed PPI on purpose (the registry canary's
   "did upstream catch up" run, A/Bs).  PPI's non-core deps must be installed:
-  Clone, Params::Util, Task::Weaken, Safe::Isa.  Never edit `vendor/PPI/lib` by
+  Clone, Params::Util, Task::Weaken, Safe::Isa, YAML::PP (upstream master's
+  `PPI::Document` has a hard `use YAML::PP` -- found by the first red CI run of
+  MAIN-READY-48, s528: this box had it from the CPAN board, a stock runner has
+  not).  Never edit `vendor/PPI/lib` by
   hand: `tools/vendor-ppi <clone> pcl` refreshes it and the stamp
   (`Pl/t/vendor-ppi-01.t` checks the tree id; run the canary at every refresh);
   the branch's home on this box is the bare repo `~/pcl-agent-scratch/ppi/PPI.git`
@@ -997,7 +1000,7 @@ Not relevant now:
   core `Data::Dumper` (`Pl::PExpr::_dd`, `Pl/t/PCLDump.pm`); the two gate rows
   whose transpile SUBJECT is the CPAN module skip when it is not installed.
   Before adding a `use`, check `Module::CoreList::is_core` -- CI is a stock
-  machine with exactly PPI's four deps (Clone Params::Util Task::Weaken
+  machine with exactly PPI's five deps (Clone Params::Util Task::Weaken YAML::PP
   Safe::Isa), Moo, Data::Dump + Try::Tiny (fixtures); PPI itself is vendored and
   CI checks that the vendored lib loads.
 

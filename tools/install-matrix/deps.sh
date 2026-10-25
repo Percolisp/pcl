@@ -52,7 +52,7 @@ echo "== apt packages =="
 apt-get update -q
 apt-get install -qy --no-install-recommends \
     perl cpanminus make gcc curl ca-certificates bzip2 git \
-    libclone-perl libparams-util-perl libtask-weaken-perl libsafe-isa-perl \
+    libclone-perl libparams-util-perl libtask-weaken-perl libsafe-isa-perl libyaml-pp-perl \
     libmoo-perl libdata-dump-perl libtry-tiny-perl
 
 echo "== PPI is vendored (vendor/PPI); tools/install-pcl checks that it loads =="

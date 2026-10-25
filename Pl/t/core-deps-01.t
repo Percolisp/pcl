@@ -6,7 +6,7 @@
 # core-deps-01.t — PCL depends on exactly PPI and Moo; nothing else that is
 # not core perl (s440).  Since s527a PPI is VENDORED (vendor/PPI/lib, loaded
 # through Pl::VendorPPI), so its own files are in this repository and only
-# ITS non-core dependencies (Clone, Params::Util, Task::Weaken, Safe::Isa)
+# ITS non-core dependencies (Clone, Params::Util, Task::Weaken, Safe::Isa, YAML::PP)
 # are installed; they are in the closure below because the vendored PPI
 # loads them.
 #
