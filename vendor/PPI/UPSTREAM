@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: 29cb43ae54e8e84feb2bc53ba90503bc05bf72a8
-lib-tree: bcc80e608f6b8a23e2f0d0c7598bbb68c50e2e64
+branch-sha: 4affc7def58b81ed2cedf88b2817f1da1c5ce493
+lib-tree: b54705b3600366b6f5b3efab92c944c013df1267
 date: 2026-10-25
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -23,6 +23,7 @@ fix: F §28 8955ba30 Tokenizer: one scalar-filehandle test; .digit after print $
 fix: J §55 §33 d8bcdfa1 Tokenizer: a method name, a postfix ++/-- and a subscript's } end a term
 fix: K §38 0a536af5 Tokenizer: a { that opens the document is a block
 fix: J §55 29cb43ae Tokenizer: a { after a block's } opens the next block
+fix: E §21 4affc7de Operator: ~~ after a block's } is two complements
 commit: e9d5cf6a Add t/ppi_bugs_pcl.t: 91 tokenizer/lexer cases from PCL, failures as TODO
 commit: 62f45f31 TODO tests: a - after ], a float or a non-decimal number is subtraction
 commit: a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
@@ -51,3 +52,5 @@ commit: d8bcdfa1 Tokenizer: a method name, a postfix ++/-- and a subscript's } e
 commit: 0a536af5 Tokenizer: a { that opens the document is a block
 commit: 555ef6af TODO test: a { after a block's } opens the next block
 commit: 29cb43ae Tokenizer: a { after a block's } opens the next block
+commit: 23ec7b86 TODO tests: ~~ after a block's } is two complements
+commit: 4affc7de Operator: ~~ after a block's } is two complements

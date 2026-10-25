@@ -354,7 +354,7 @@ print "after\\n";
    title => 'A term-initial `~~` is lexed as the smart-match operator',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'XTERM', class => 'Operator', content => '~~', pred => '', check => 'smartmatch-for-complements' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_term_initial_complement', commit => 'e309445b', group => 'E', pr => undef },
+   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_term_initial_complement', commit => '4affc7de', group => 'E', pr => undef },
    repro => 'my $y = 3; print ~~$y, "\\n";',
    perl => "3\n",
    tokens => {

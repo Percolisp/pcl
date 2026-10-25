@@ -8451,30 +8451,25 @@ sub _manufactured_quote_close {
 }
 
 
-# PPI LEXER BUG (task #370, docs/ppi-upstream-bugs.md §20).  `~~` is ONE token
-# to PPI and always the smart-match operator, but perl reads it that way only
-# where an OPERATOR may stand.  Where a TERM is expected it is two complements:
-#
-#     is(~~$y, 3);   perl: ~(~$y) — the classic "numify" idiom, bop.t asserts it
-#                    PPI:  Structure( … Operator(~~) Symbol($y) … )
-#
-# and the main loop then sees a binary operator with no left operand, so the
-# whole statement is DROPPED ("Fell through").  perl-tests/bop.t and t/op/bop.t
-# each carry two of them.
-#
-# THE CONDITION IS THE SAME NEGATIVE the other repairs use, and it is exact:
-# `~~` is the operator only after something that ENDS A TERM.  Nothing else can
-# follow a term-ending token here, and nothing else can precede a prefix
-# complement — perl has no third reading.  So an occurrence that is not after a
-# term becomes two `~` tokens and the ordinary prefix path handles it; an infix
-# one is left alone, and Track A (task #371) refuses it perl-shaped, because
-# smart match was removed in perl 5.42.
+# A term-initial `~~` after a SUB NAME (task #370, docs/ppi-upstream-bugs.md
+# §21).  `~~` is ONE token to PPI and the smart-match operator only where an
+# OPERATOR may stand; where a TERM is expected it is two complements (`~~$y`,
+# the "numify" idiom).  PCL's PPI decides that itself (s527a group E, s527b
+# group J) everywhere it can know the position -- after an operator, a bracket,
+# a core list operator, and not after any term end.  The one place it cannot is
+# after a bare word naming a USER sub: `sub f {…} print f ~~$y` calls f(~~$y)
+# in perl (probed 5.40.3: `f(3)`), and only PCL's prototype table knows f is a
+# list operator rather than a term (the word-is-a-term family, which stays
+# PCL's -- docs/ppi-fix-at-source-s527.md §5.6).  So this repair fires after a
+# Word that is not a method name; everything else is PPI's.
 sub _repair_term_initial_complement {
   my ($self, $doc) = @_;
   my $repaired = 0;
   for my $op (@{ $doc->find('PPI::Token::Operator') || [] }) {
     next unless $op->content eq '~~';
-    next if _ends_term(_prev_sig_token($op));
+    my $prev = _prev_sig_token($op);
+    next unless $prev && $prev->isa('PPI::Token::Word');
+    next if _ends_term($prev);                  # a method name: smart match
     $op->set_content('~ ~');
     $repaired = 1;
   }

@@ -20,7 +20,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 114;
+use Test::More tests => 119;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -1123,4 +1123,25 @@ for my $c (
     ok( grep( $_ eq 'Operator=*', @t ),
         "a subscript after a dereference block ends a term: * multiplies (control)" )
         or diag "got: @t";
+}
+
+# §21, after a BLOCK: the } of a block does not end a term, so a ~~ after it
+# is two complements.  perl -e 'my $y = 3; my @a = map { $_ } ~~$y; print "@a"'
+# prints 3, and so does print {$fh} ~~$y.  After a SCALAR filehandle perl reads
+# the smart match (print $fh ~~$y prints the empty string), and after a
+# subscript's } too.
+{
+    my @rows = (
+        [ 'my @a = map { $_ } ~~$y;', 1, "after map's block ~~ is two complements" ],
+        [ 'print {$fh} ~~$y;',        1, 'after a block filehandle ~~ is two complements' ],
+        [ 'if ($x) { 1 } ~~$y;',      1, "after a compound statement's block ~~ is two complements" ],
+        [ 'print $fh ~~$y;',          0, 'after a scalar filehandle ~~ is the smart match, as perl reads it (control)' ],
+        [ '$h{a} ~~ @a',              0, "after a subscript's } ~~ is the smart match (control)" ],
+    );
+    for my $r (@rows) {
+        my ( $code, $split, $desc ) = @$r;
+        my @t = map { s{^PPI::(?:Token::)?}{}r } toks($code);
+        my $smart = grep( $_ eq 'Operator=~~', @t );
+        ok( $split ? !$smart : $smart, "$code: $desc" ) or diag "got: @t";
+    }
 }
