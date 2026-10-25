@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 141;
+plan tests => 142;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -268,6 +268,18 @@ test_cl('s///e replacement with an if/else statement compiles (#3855)',
      $u =~ s{X}{ my $s = $-[0]; my $e = $+[0]; if ($s == $e && $s == $pe) { "" } else { $pe = $e; "R" } }eg;
      print "$t $n $u $pe\n";',
     "aBbAc 5 aRb 2\n");
+
+# #3863: the SUBSCRIPT of a single-element access is SCALAR context -- a
+# one-element slice as the key (`$f{@$path[0]}++`, Log::Log4perl::Config's
+# filter table) keyed on "ARRAY(0x...)" in an lvalue or a list slot, and a
+# wantarray-aware key call ran in LIST context.  Outputs probed under perl 5.40.3.
+test_cl('an element subscript is scalar context (#3863)',
+    'my @a = ("p","q"); my %g = (q => 5, p => 4); my $path = ["F", "x"];
+     my %f; $f{@$path[0]}++; my %h; $h{@a[1]} = 1; $h{@a[0]}++;
+     my $r = \%h; $r->{@a[1]} .= "x"; my @l = ($g{@a[0]}, $g{@a[1]});
+     sub ctx { wantarray ? "L" : "S" } my %c = (S => "s", L => "l");
+     print join(",", keys %f), " ", join(",", sort keys %h), " $h{q} @l ", $c{ctx()}, "\n";',
+    "F p,q 1x 4 5 s\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,

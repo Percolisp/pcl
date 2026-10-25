@@ -5510,6 +5510,19 @@ sub child_context {
     return SCALAR_CTX
       if ($type eq 'a_ref_acc' || $type eq 'h_ref_acc') && $child_index == 0;
 
+    # The SUBSCRIPT of a single-element access -- `$h{K}`, `$a[K]`, `$r->{K}`,
+    # `$r->[K]` -- is ONE scalar, evaluated in SCALAR context whatever context
+    # the element sits in (perl: `$h{@a[1]}` keys on the slice's LAST element,
+    # `$h{@a}` on the COUNT).  Left to inherit, a slice key in a list slot or
+    # in an lvalue (`$h{@$path[0]}++`, Log::Log4perl::Config) stayed a LIST
+    # and the key became "ARRAY(0x...)" (#3863).  The list slice answered
+    # above; slices (slice_*_acc) are other node types.  A multi-key
+    # `$h{$x,$y}` is already a `join $;` node, which sets its own children.
+    return SCALAR_CTX
+      if $child_index == 1
+      && ($type eq 'a_acc' || $type eq 'h_acc'
+          || $type eq 'a_ref_acc' || $type eq 'h_ref_acc');
+
     # Assignment: RHS context depends on LHS, LHS ctxt depends on lvalue type
     if ($type eq '=') {
       my $children  = $self->get_node_children($parent_id);
