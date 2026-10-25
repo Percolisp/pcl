@@ -71,7 +71,7 @@ ok(!-e "$prefix/bin", 'dry run created nothing');
     my $old = `$inst --prefix $prefix 2>&1`;
     isnt($?, 0, 'a vendored PPI that cannot load is refused') or diag($old);
     like($old, qr/missing dependencies/, 'the refusal is the dependency report');
-    like($old, qr/the vendored PPI does not load .*`cpanm Clone Params::Util Task::Weaken Safe::Isa`/s,
+    like($old, qr/the vendored PPI does not load .*`cpanm Clone Params::Util Task::Weaken Safe::Isa YAML::PP`/s,
          'the refusal names the vendored PPI and the remedy');
     ok(!-e "$prefix/bin" && !-e "$prefix/lib", 'the refusal installed nothing');
 }
