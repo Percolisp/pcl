@@ -408,7 +408,7 @@ $Ｘ = 1; print "$Ｘ\\n";
    title => '`-name` after a token that ENDS A TERM is lexed as one negative-bareword Word',
    ppi => { confirmed => '1.291', fixed_in => 'pcl' },
    when => { expect => 'OP', class => 'Word', content => qr/^-/, pred => '', check => 'minus-in-word' },
-   fix => { kind => 'relex', handler => 'Pl::Parser2::_repair_minus_word', commit => 'a737c524', group => 'A', pr => undef },
+   fix => { kind => 'relex', handler => undef, deleted => 'Pl::Parser2::_repair_minus_word (s527b: PPI fixed on the branch)', commit => 'a737c524', group => 'A', pr => undef },
    repro => 'my $z = length("abc")-length("a"); print "$z\\n";',
    perl => "2\n",
    tokens => {

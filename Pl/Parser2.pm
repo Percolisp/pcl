@@ -1660,8 +1660,8 @@ sub parse {
   # (#351), and a call to a sub named `x` after a list operator lexed as the
   # repetition operator (#361).  All four are repaired on the raw token stream
   # with perl's own rule — the token before must not END A TERM — see
-  # _repair_minus_word, _repair_word_match,
-  # _repair_word_x_call.
+  # _repair_word_match, _repair_word_x_call (the `)-name` repair, §25, was
+  # deleted in s527b: PCL's PPI ends the term itself).
   # FIRST of the block, because it is the one whose damage is UNBOUNDED: a glob
   # pattern in term position derails into a Regexp that can swallow the rest of
   # the FILE, so every repair below would otherwise be reading garbage tokens —
@@ -1687,7 +1687,6 @@ sub parse {
   # the two share ONE character set).
   $doc = $self->_repair_punct_hash_cast($doc);
   $doc = $self->_repair_punct_hash_name($doc);
-  $doc = $self->_repair_minus_word($doc);
   # …and the CONCATENATION spelling of the same family: `$x.2` is lexed as one
   # Number::Float and the operator disappears — see _repair_dot_number (#480).
   $doc = $self->_repair_dot_number($doc);
@@ -8240,42 +8239,6 @@ sub _glob_name_position {
   return 0;
 }
 
-# PPI LEXER BUG (task #457, docs/ppi-upstream-bugs.md §25) — the THIRD sibling
-# of §12 (`)*name` → glob) and §15 (`)-1`), and the one that was still
-# unrepaired.  After a token that ENDS A TERM, `-name` written with no space is
-# lexed as ONE Word — the negative-bareword string — instead of the subtraction
-# it can only be:
-#
-#     my $z = length("abc")-length("a");  =>  … ) Word(-length) ( … )
-#     my $z = length("abc") - length("a");  =>  … ) Operator(-) Word(length) …
-#
-# PExpr has no case for that shape, so the WHOLE STATEMENT is dropped.
-#
-# WHY IT MATTERS OUT OF PROPORTION (measured s436): the shape occurs in ZERO
-# files of all four in-repo populations and TWICE in ONE board dist —
-# Text-Balanced-2.07-0, at lines 118 and 397.  Line 118 is inside
-# `gen_delimited_pat`, which the module's own top level CALLS at line 308, so
-# after the s435 announce→DIE flip `use Text::Balanced` DIED and the dist went
-# from 958 passing rows to zero.  Silent-wrong before the flip, unloadable
-# after it — the same one-token bug either way.
-#
-# The predicate is perl's own and it is a NEGATIVE: `-bareword` (the string
-# form) can only start where a TERM can, so a previous token that ends a term
-# rules it out.  Every spelling that legitimately writes `-word` — `(-f => 4)`,
-# `foo(-bar)`, `$h{-key}`, `1, -bar` — has a previous token (`(`, `{`, `,`)
-# that does NOT end a term, so none of them is touched (all probed vs perl).
-sub _repair_minus_word {
-  my ($self, $doc) = @_;
-  my $repaired = 0;
-  for my $w (@{ $doc->find('PPI::Token::Word') || [] }) {
-    my ($name) = $w->content =~ /^-(\w+(?:::\w+)*)\z/ or next;
-    next unless _ends_term(_prev_sig_token($w));
-    $w->set_content("- $name");
-    $repaired = 1;
-  }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
-}
-
 # PPI LEXER BUG, task #480 (docs/ppi-upstream-bugs.md §28) — the FOURTH sibling
 # of §12 (`)*name`), §15 (`)-1`) and §25 (`)-name`), and one rule decides all
 # four.
@@ -8945,7 +8908,7 @@ sub _ends_term {
 # "a `$` Symbol whose own previous significant token is print/printf/say".
 #
 # TODAY IT HAS ONE CONSUMER, deliberately: the sibling repairs
-# (`_repair_minus_word`, `_repair_glob_multiply`, `_repair_word_x_call`, …) can
+# (`_repair_word_x_call`, …; the `-name` and `*name` ones are PPI's since s527b) can
 # reach the same position — `print $fh -3` is task #405, already filed and
 # measured as its own bug — but narrowing THEIR oracle is a wider change than
 # this one, and none of the four populations has a site (A/B measured, s456ag).
