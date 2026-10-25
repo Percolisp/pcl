@@ -8,7 +8,10 @@
 #
 # Everything a stock Ubuntu/Debian image needs before PCL can be installed:
 # apt packages (PPI itself is vendored in the tree -- vendor/PPI, s527a -- so
-# only its dependencies are installed here) and the pinned
+# only its five non-core dependencies are installed here: Clone, Params::Util,
+# Task::Weaken, Safe::Isa and YAML::PP -- the last is upstream master's hard
+# `use YAML::PP` in PPI::Document, found by the first red run of MAIN-READY-48)
+# and the pinned
 # SBCL binary from sbcl.org.  There is NO Lisp-library step: PCL vendors
 # cl-ppcre (cl/vendor/cl-ppcre/, task #1597), so SBCL itself is the whole Lisp
 # side and the Quicklisp install this file used to do is gone.
