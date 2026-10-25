@@ -80,4 +80,21 @@ SKIP: {
     or diag join "\n", grep { /^not ok/ } split /\n/, $out;
 }
 
+# ── the compiler's PPI library never reaches a PROGRAM's @INC ─────────────
+# (s527a OWED 1, gate-cost-01 row 29): Pl::VendorPPI names its lib from its
+# own REAL path, so a pl2cl whose Pl/ is a symlink into another tree carries
+# that other tree's vendor dir -- program_inc drops $Pl::VendorPPI::LIB by
+# its own spelling, not only the one derived from the program's root.
+{
+  require PCLPaths;
+  my $foreign = "/nonexistent/other-pcl-tree";
+  local $Pl::VendorPPI::LIB = "$vend/lib";
+  my @got = PCLPaths::program_inc($foreign, "/x/user-lib", "$vend/lib", "/y/perl5lib");
+  ok(!grep({ $_ eq "$vend/lib" } @got),
+     "program_inc drops the loader's own vendor/PPI/lib even when the program root is another tree")
+    or diag "@got";
+  is_deeply([ grep { m{^/[xy]/} } @got ], ["/x/user-lib", "/y/perl5lib"],
+            "... and keeps the user's entries in order");
+}
+
 done_testing();

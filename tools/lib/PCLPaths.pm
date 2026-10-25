@@ -226,7 +226,7 @@ sub ensure_cache_root {
 # replaces), then perl's own directories.  The PCL TREE itself is not a
 # library: its root (which pl2cl puts on its own @INC to find Pl/) and
 # tools/lib are removed, and so is vendor/PPI/lib (PCL's own PPI, which
-# Pl::VendorPPI puts on the COMPILER's @INC only, s527a), so `require
+# Pl::VendorPPI puts on the COMPILER's @INC only, s527a -- by the root's spelling AND by the loader's own $Pl::VendorPPI::LIB), so `require
 # Pl::Parser` from a user program dies as
 # it does under perl.  ONE derivation for its three readers: pl2cl's program
 # preamble, the transpiler's module resolver (Pl::Parser inc_paths), and
@@ -254,7 +254,16 @@ sub perl_builtin_inc_dirs {
 sub program_inc {
     my ($root, @inc) = @_;
     my $shim = "$root/lib";
-    my %tree = map { (_canon_dir($_) => 1) } ($root, $shim, "$root/tools/lib", "$root/vendor/PPI/lib");
+    # The compiler's PPI library is ONE source: whatever Pl::VendorPPI put on
+    # @INC ($Pl::VendorPPI::LIB, read as a package variable so this module
+    # never loads the loader).  It is dropped by that spelling as well as by
+    # the root-derived one, because the loader finds its root through its OWN
+    # real path: reached through a symlinked Pl/ (or an -I of another tree),
+    # it names a vendor dir that is not "$root/vendor/PPI/lib".
+    no warnings 'once';
+    my @ppi = ("$root/vendor/PPI/lib",
+               defined $Pl::VendorPPI::LIB ? ($Pl::VendorPPI::LIB) : ());
+    my %tree = map { (_canon_dir($_) => 1) } ($root, $shim, "$root/tools/lib", @ppi);
     my %builtin = map { (_canon_dir($_) => 1) } perl_builtin_inc_dirs();
     my (@out, $placed);
     for my $d (@inc) {
