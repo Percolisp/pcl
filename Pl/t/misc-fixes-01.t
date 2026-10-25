@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 143;
+plan tests => 144;
 
 # Run transpiled code capturing stdout and stderr SEPARATELY (the normal
 # run_cl merges them with 2>&1).  Returns ($stdout, $stderr) with SBCL/PCL
@@ -290,6 +290,17 @@ test_cl('warn after close STDERR is dropped, not a die (#3866)',
      my $ok = eval { warn "after close\n"; 1 }; unlink $f;
      print "ok=", ($ok ? 1 : 0), " err=[", ($@ // ""), "]\n";',
     "ok=1 err=[]\n");
+
+# #3867: Carp passes a REFERENCE exception through -- `croak { foo => "bar" }`
+# dies with the hash itself (Log::Log4perl's logcroak / logconfess); the shim
+# stringified it.  Output probed under perl 5.40.3.
+test_cl('croak / confess with a reference die with the reference (#3867)',
+    'use Carp;
+     eval { croak { foo => "bar" } }; my $a = ref($@) . ":" . $@->{foo};
+     eval { confess [7] }; my $b = ref($@) . ":" . $@->[0];
+     sub f { croak(@_) } eval { f("plain") }; my $c = ref($@) ? "ref" : "str";
+     print "$a $b $c\n";',
+    "HASH:bar ARRAY:7 str\n");
 
 # ── slurpy (@) prototype tail forces LIST context on those args ──────────
 # A sub declared (&;@) runs its trailing @-slurped arguments in list context,

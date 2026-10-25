@@ -25,8 +25,11 @@ our @EXPORT_OK = qw(cluck longmess shortmess verbose);
 
 our $VERSION = '1.50';
 
-sub longmess  { return join('', @_); }
-sub shortmess { return join('', @_); }
+# A REFERENCE as the first argument is an exception OBJECT and is passed
+# through untouched (Carp's longmess_heavy: "don't break references as
+# exceptions"), so `croak { code => 1 }` dies with the hash itself (#3867).
+sub longmess  { return wantarray ? @_ : $_[0] if ref $_[0]; return join('', @_); }
+sub shortmess { return wantarray ? @_ : $_[0] if ref $_[0]; return join('', @_); }
 
 # Internal helper used by some callers (e.g. Method::Generate::Constructor)
 # to find the caller depth at which to report an error.  The real Carp walks
@@ -37,10 +40,10 @@ sub shortmess { return join('', @_); }
 sub short_error_loc { return 1; }
 sub long_error_loc  { return 1; }
 
-sub croak   { die join('', @_), "\n"; }
-sub confess { die join('', @_), "\n"; }
+sub croak   { die @_ if ref $_[0]; die join('', @_), "\n"; }
+sub confess { die @_ if ref $_[0]; die join('', @_), "\n"; }
 
-sub carp  { warn join('', @_), "\n"; }
-sub cluck { warn join('', @_), "\n"; }
+sub carp  { return warn @_ if ref $_[0]; warn join('', @_), "\n"; }
+sub cluck { return warn @_ if ref $_[0]; warn join('', @_), "\n"; }
 
 1;
