@@ -8,9 +8,9 @@
 #
 # Everything a stock Ubuntu/Debian image needs before PCL can be installed:
 # apt packages (PPI itself is vendored in the tree -- vendor/PPI, s527a -- so
-# only its five non-core dependencies are installed here: Clone, Params::Util,
-# Task::Weaken, Safe::Isa and YAML::PP -- the last is upstream master's hard
-# `use YAML::PP` in PPI::Document, found by the first red run of MAIN-READY-48)
+# only its four non-core dependencies are installed here: Clone, Params::Util,
+# Safe::Isa and Task::Weaken -- tools/lib/PCLVendor.pm ppi_deps(), checked by
+# Pl/t/core-deps-01.t)
 # and the pinned
 # SBCL binary from sbcl.org.  There is NO Lisp-library step: PCL vendors
 # cl-ppcre (cl/vendor/cl-ppcre/, task #1597), so SBCL itself is the whole Lisp
@@ -55,7 +55,7 @@ echo "== apt packages =="
 apt-get update -q
 apt-get install -qy --no-install-recommends \
     perl cpanminus make gcc curl ca-certificates bzip2 git \
-    libclone-perl libparams-util-perl libtask-weaken-perl libsafe-isa-perl libyaml-pp-perl \
+    libclone-perl libparams-util-perl libsafe-isa-perl libtask-weaken-perl \
     libmoo-perl libdata-dump-perl libtry-tiny-perl
 
 echo "== PPI is vendored (vendor/PPI); tools/install-pcl checks that it loads =="

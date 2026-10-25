@@ -18,9 +18,15 @@ package PCLVendor;
 #                    installed PCL) and on an uncommitted copy alike.
 #   read_stamp(FILE) the stamp's `key: value` lines as a hash (repeated
 #                    keys -- `fix:` -- as an array under the key).
+#   ppi_deps()       THE ONE LIST of the vendored PPI's non-core dependencies
+#                    (task #3924), as [module, Debian/Ubuntu package] pairs.
 #
 # Used by tools/vendor-ppi (writes the stamp) and Pl/t/vendor-ppi-01.t
-# (checks it).
+# (checks it).  ppi_deps() is read by tools/install-pcl (its remedy
+# text) and checked by Pl/t/core-deps-01.t: the vendored PPI's MEASURED non-core
+# closure must be in it (a new upstream dependency fails that gate row, not a
+# CI run), and the README, .github/workflows/ci.yml and
+# tools/install-matrix/deps.sh lines that install them must name exactly it.
 
 use strict;
 use warnings;
@@ -69,5 +75,19 @@ sub read_stamp {
   close $fh;
   return \%s;
 }
+
+# THE VENDORED PPI'S NON-CORE DEPENDENCIES (task #3924).  Clone, Params::Util
+# and Safe::Isa are loaded by PPI at run time (measured: the closure the gate
+# row computes); Task::Weaken is PPI's dist.ini prerequisite that only forces
+# Scalar::Util's weaken to exist, so it is installed and never loaded.
+# YAML::PP is NOT here: PPI reads it only for $ENV{PPI_CUSTOM_FEATURE_INCLUDES}
+# and, on PCL's branch, loads it only then (s527b, group L).
+my @PPI_DEPS = (
+  [ 'Clone',        'libclone-perl' ],
+  [ 'Params::Util', 'libparams-util-perl' ],
+  [ 'Safe::Isa',    'libsafe-isa-perl' ],
+  [ 'Task::Weaken', 'libtask-weaken-perl' ],
+);
+sub ppi_deps { return map { [@$_] } @PPI_DEPS }
 
 1;

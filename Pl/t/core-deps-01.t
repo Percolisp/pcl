@@ -6,7 +6,8 @@
 # core-deps-01.t — PCL depends on exactly PPI and Moo; nothing else that is
 # not core perl (s440).  Since s527a PPI is VENDORED (vendor/PPI/lib, loaded
 # through Pl::VendorPPI), so its own files are in this repository and only
-# ITS non-core dependencies (Clone, Params::Util, Task::Weaken, Safe::Isa, YAML::PP)
+# ITS non-core dependencies (tools/lib/PCLVendor.pm ppi_deps(): Clone,
+# Params::Util, Safe::Isa, Task::Weaken -- section 3 below checks the list)
 # are installed; they are in the closure below because the vendored PPI
 # loads them.
 #
@@ -139,5 +140,45 @@ for my $t (sort(glob("$root/Pl/t/*.t"), glob("$root/Pl/t/*.pm"))) {
 }
 is_deeply(\%flag, {}, "no test file imports an installed-but-non-core module without a fixture guard")
     or diag(join("\n", map { "$_: @{$flag{$_}}" } sort keys %flag));
+
+# ---- 3. THE ONE LIST of the vendored PPI's dependencies (task #3924)
+# tools/lib/PCLVendor.pm ppi_deps() is the list; the installer's remedy reads
+# it.  (a) Every non-core module the vendored PPI loads must be on it (or be a
+# sub-module of one, Params::Util::PP), so a new upstream `use` fails HERE,
+# not on a stock CI runner -- the s528 incident was PPI master's hard
+# `use YAML::PP`.  (b) The three places that cannot read a Perl table must
+# name exactly it: the README's cpanm line, ci.yml's apt line and the install
+# matrix's apt line.
+{
+    require "$root/tools/lib/PCLVendor.pm";
+    my @deps = PCLVendor::ppi_deps();
+    my %mod  = map { $_->[0] => 1 } @deps;
+    my @ppi  = child_inc('vendored PPI alone',
+        'require Pl::VendorPPI; require PPI; require PPI::Dumper; require PPI::Document;'
+      . 'my $d = PPI::Document->new(\q{my $x = 1; sub f { 2 } print f();}); $d->index_locations;'
+      . '$d->find(q{PPI::Token})');
+    my @extra;
+    for my $path (@ppi) {
+        next if index($path, "$root/") == 0;                    # PCL's own, and vendor/PPI
+        my $m = module_of($path) // next;
+        next if Module::CoreList::is_core($m, undef, $]);
+        next if $mod{$m} || grep { index($m, "${_}::") == 0 } keys %mod;
+        push @extra, $m;
+    }
+    is_deeply(\@extra, [], 'the vendored PPI loads no non-core module that ppi_deps() does not list')
+        or diag("add it to tools/lib/PCLVendor.pm ppi_deps() and to the install lines: @extra");
+
+    my $slurp = sub { open my $fh, '<', "$root/$_[0]" or die "$_[0]: $!"; local $/; <$fh> };
+    my ($cpanm) = $slurp->('README.md') =~ /^sudo cpanm --notest Moo (.*)$/m;
+    is(join(' ', sort split ' ', $cpanm // ''), join(' ', sort keys %mod),
+       "README's cpanm line installs exactly ppi_deps()");
+    for my $f ('.github/workflows/ci.yml', 'tools/install-matrix/deps.sh') {
+        my $text = $slurp->($f);
+        my @missing = grep { $text !~ /\b\Q$_->[1]\E\b/ } @deps;
+        is_deeply(\@missing, [], "$f installs every ppi_deps() package")
+            or diag(join(' ', map { $_->[1] } @missing));
+        unlike($text, qr/\blibyaml-pp-perl\b/, "$f does not install YAML::PP (PPI loads it only on demand)");
+    }
+}
 
 done_testing();

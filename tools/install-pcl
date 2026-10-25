@@ -59,6 +59,7 @@ use Cwd qw(abs_path);
 use Getopt::Long;
 use lib dirname(abs_path($0)) . '/lib';
 use PCLPaths ();   # the ONE root resolver (task #1302)
+use PCLVendor ();  # ppi_deps(): the ONE list of the vendored PPI's dependencies (#3924)
 
 # The tree this installer is PART OF is what it installs, so the derivation is
 # root_of (the tree that owns this script) and never root() — an installer
@@ -160,8 +161,9 @@ sub check_deps {
         my $out = qx{"$^X" -I"$root" -MPl::VendorPPI -e 'print "\$PPI::VERSION ", Pl::VendorPPI::is_vendored()' 2>&1};
         if ($? || $out !~ /^(\S+) 1$/) {
             $out =~ s/\s+\z//;
-            push @missing, "the vendored PPI does not load ($out) -- it needs Clone, Params::Util, "
-                         . "Task::Weaken, Safe::Isa and YAML::PP (`cpanm Clone Params::Util Task::Weaken Safe::Isa YAML::PP`)";
+            my @deps = map { $_->[0] } PCLVendor::ppi_deps();
+            push @missing, "the vendored PPI does not load ($out) -- it needs "
+                         . join(', ', @deps) . " (`cpanm @deps`)";
         }
         else { push @found, "PPI $1 (vendored, vendor/PPI/UPSTREAM)" }
     }

@@ -7,8 +7,8 @@
 #
 # Perl modules: PPI is VENDORED (vendor/PPI, s527a: PCL's branch of upstream
 # PPI with its fix commits; the installer checks that it loads), so only PPI's
-# own non-core dependencies come from apt (Clone, Params::Util, Task::Weaken, YAML::PP,
-# Safe::Isa).  Moo is version-insensitive, so apt's is fine.  Data::Dump and Try::Tiny are NOT PCL dependencies -- they are
+# own non-core dependencies come from apt (Clone, Params::Util, Safe::Isa,
+# Task::Weaken: tools/lib/PCLVendor.pm ppi_deps(), checked by Pl/t/core-deps-01.t).  Moo is version-insensitive, so apt's is fine.  Data::Dump and Try::Tiny are NOT PCL dependencies -- they are
 # the FIXTURES of a few gate rows (a transpile subject, a perl-oracle module),
 # which skip without them; CI installs both so those rows run.  The gate's own
 # guard for this is Pl/t/core-deps-01.t.
@@ -45,7 +45,7 @@ jobs:
       - name: Install Perl dependencies (the vendored PPI's deps, Moo; Data::Dump + Try::Tiny as test fixtures)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -qy cpanminus libclone-perl libparams-util-perl libtask-weaken-perl libsafe-isa-perl libyaml-pp-perl libmoo-perl libdata-dump-perl libtry-tiny-perl
+          sudo apt-get install -qy cpanminus libclone-perl libparams-util-perl libsafe-isa-perl libtask-weaken-perl libmoo-perl libdata-dump-perl libtry-tiny-perl
           # PPI itself is vendor/PPI/lib, loaded through Pl::VendorPPI.
           perl -I. -MPl::VendorPPI -e 'print "PPI $PPI::VERSION (vendored)\n"; exit(Pl::VendorPPI::is_vendored() ? 0 : 1)'
           perl -MMoo -e 'print "Moo $Moo::VERSION\n"'

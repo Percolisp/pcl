@@ -6,8 +6,8 @@ upstream: https://github.com/Perl-Critic/PPI
 upstream-sha: 455bfa73fc5de4511913e8e7808e8a95c28b8b4d
 fork: https://github.com/Percolisp/PPI
 branch: pcl
-branch-sha: ecd870598ea3ced88397a11db5f6c6a7d0315642
-lib-tree: 25b08a115fce7815bcbdc94fffd7a296f88ecc20
+branch-sha: 46ba7e81b56fb4d18a222d166b8ec7aae0e7f5cc
+lib-tree: a236ebe29046f60c2f0c2b9e5054ae30aa888403
 date: 2026-10-25
 fix: A §15 §25 §34 a737c524 Tokenizer: a closing ) or ], and a number of any kind, end a term
 fix: B §4 §12 1cff9293 Unknown: % and * right after a term are operators
@@ -63,3 +63,5 @@ commit: df9e06cb TODO tests: a builtin that takes no operand ends a term
 commit: 487563de Tokenizer: a builtin that takes no operand ends a term
 commit: 76dce24a TODO test: @^ is one Magic token
 commit: ecd87059 Singletons: @^ is a magic variable
+commit: 6613fff5 TODO tests: PPI loads and parses without YAML::PP
+commit: 46ba7e81 Document: load YAML::PP only to read PPI_CUSTOM_FEATURE_INCLUDES
